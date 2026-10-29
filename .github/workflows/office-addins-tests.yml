@@ -131,6 +131,9 @@ on:
       # imports it. It is a leaf module with no imports of its own, so the exact
       # file is the precise filter — nothing else in that package reaches here.
       - 'src/client/shared/Spaarke.Communication.Components/src/logic/connections/provenance.ts'
+      # Task 133: the Outlook Invoice view renders ebilling's shared InvoiceAttachmentMarking through an exact
+      # alias (jest.config.js, webpack.config.js) to this folder's index; `InvoiceView.test.tsx` renders it.
+      - 'src/client/shared/Spaarke.Communication.Components/src/components/InvoiceAttachmentMarking/**'
       # (ci-gated-suites.txt needs no entry — 'src/client/office-addins/**' covers it.)
       - '.github/workflows/office-addins-tests.yml'
       # ── SERVER PATHS, added by task 070 ────────────────────────────────────
@@ -177,6 +180,7 @@ on:
       - 'src/solutions/webresources/sprk_bff_auth.js'
       - 'src/dataverse/solutions/SpaarkeMaster/WebResources/sprk_/scripts/bff_auth.js'
       - 'src/client/shared/Spaarke.Communication.Components/src/logic/connections/provenance.ts'
+      - 'src/client/shared/Spaarke.Communication.Components/src/components/InvoiceAttachmentMarking/**'
       - '.github/workflows/office-addins-tests.yml'
       # Mirrors the pull_request server paths above (task 070) so a direct push to
       # master over the same surface is covered identically. Keep the two lists in
@@ -632,12 +636,12 @@ jobs:
   #
   # WHY IT LIVES HERE AND NOT IN TIER 1
   # -----------------------------------
-  # Tier 1 is the natural home and is FROZEN under the shadow-comparison window -
-  # confirmed still open 2026-09-28 by `scripts/ci/shadow-window-status.ps1`:
-  # "Do NOT edit ci-router.yml / ci-tier1-blocking.yml / ci-tier2-advisory.yml".
-  # This workflow is the only writable surface that runs on a PR.
+  # Tier 1 was the natural home but was frozen under the shadow-comparison window (the
+  # no-edit rule on the tier files, confirmed open 2026-09-28). That window has closed and the
+  # rule was lifted 2026-10-15, so the migration below is now possible; it has NOT been done
+  # here, because Tier 1 carries a p95 <= 3 min budget this job must be measured against first.
   #
-  # WHEN THE WINDOW CLOSES, MIGRATE THIS JOB INTO TIER 1 AND DELETE IT HERE.
+  # MIGRATE THIS JOB INTO TIER 1 (or a Tier 2 shard) AND DELETE IT HERE.
   # Leaving it in both places is duplication, not defence in depth.
   #
   # SELECTION MECHANISM: an explicit namespace-prefix filter (in the step below)
@@ -662,7 +666,8 @@ jobs:
   # Office add-ins reach: the `/api/office/*` routes, the `/api/documents/*` identity
   # and open-links routes, `GET|PUT /api/v1/documents/{id}`, `/api/ai/search/records`,
   # `/api/ai/visualization/related`, `/api/ai/rag/send-to-index`, `/api/communications/send`,
-  # the file-access broker, and the share-link authorization they depend on.
+  # the file-access broker, and the save authorization they depend on (the share-link
+  # route and its suites were retired 2026-10-16, #1350).
   # Everything dropped still runs in Tier 2 (`ci-tier2-advisory.yml`: the four shards
   # `Api.Office.`, `Api.Insights.|Integration.`, `Api.|Seam.`, and everything else
   # partition the whole of `Sprk.Bff.Api.Tests`). Selection at #1748: 1,239 tests
@@ -719,13 +724,13 @@ jobs:
             #   /api/ai/rag/send-to-index Api.Ai.RagSendToIndex, Api.Ai.SendToIndex
             #   /api/communications/send Api.Communication.CommunicationRecordAuthorizationContractTests
             #   file access              AccessControl.FileAccessBroker
-            #   share-link / save auth   AccessControl.ShareLink, AccessControl.OfficeSaveContainerProvenance,
+            #   save auth                AccessControl.OfficeSaveContainerProvenance,
             #                            Infrastructure.Graph, Infrastructure.Authentication
             #   problem+json regression  Integration.Regression
             # DO NOT widen to `Api.Ai`, `Domain.Ai` or `AccessControl` wholesale - they are
             # ~3,500 tests the add-ins do not exercise (the cause of #1748); Tier 2 runs them.
             # `Api.Office` is deliberately ABSENT here: it is the other leg.
-            filter: 'FullyQualifiedName~Sprk.Bff.Api.Tests.Api.Ai.RecordSearch|FullyQualifiedName~Sprk.Bff.Api.Tests.Api.Ai.Visualization|FullyQualifiedName~Sprk.Bff.Api.Tests.Api.Documents|FullyQualifiedName~Sprk.Bff.Api.Tests.Integration.DataMutation.OfficeVersionSave|FullyQualifiedName~Sprk.Bff.Api.Tests.Integration.DataMutation.RecordOwnership.OfficeRecordOwnership|FullyQualifiedName~Sprk.Bff.Api.Tests.Integration.DataMutation.RecordOwnership.SecureChildOwnershipDocumentRefile|FullyQualifiedName~Sprk.Bff.Api.Tests.Integration.DataMutation.SpeUploadPaths|FullyQualifiedName~Sprk.Bff.Api.Tests.Integration.Regression|FullyQualifiedName~Sprk.Bff.Api.Tests.Services.Office|FullyQualifiedName~Sprk.Bff.Api.Tests.Services.Documents|FullyQualifiedName~Sprk.Bff.Api.Tests.Domain.Office|FullyQualifiedName~Sprk.Bff.Api.Tests.Domain.Dataverse|FullyQualifiedName~Sprk.Bff.Api.Tests.Seam.Office|FullyQualifiedName~Sprk.Bff.Api.Tests.Filters|FullyQualifiedName~Sprk.Bff.Api.Tests.Infrastructure.Graph|FullyQualifiedName~Sprk.Bff.Api.Tests.Infrastructure.Authentication|FullyQualifiedName~Sprk.Bff.Api.Tests.AccessControl.OfficeSaveContainerProvenance|FullyQualifiedName~Sprk.Bff.Api.Tests.AccessControl.ShareLink|FullyQualifiedName~Sprk.Bff.Api.Tests.Auth.Office|FullyQualifiedName~Sprk.Bff.Api.Tests.Regression.Issue1084_Office|FullyQualifiedName~Sprk.Bff.Api.Tests.Regression.Issue1086_Office|FullyQualifiedName~Sprk.Bff.Api.Tests.OpenLinksEndpointTests|FullyQualifiedName~Sprk.Bff.Api.Tests.Api.Ai.RagSendToIndex|FullyQualifiedName~Sprk.Bff.Api.Tests.Api.Ai.SendToIndex|FullyQualifiedName~Sprk.Bff.Api.Tests.AccessControl.FileAccessBroker|FullyQualifiedName~Sprk.Bff.Api.Tests.Api.Communication.CommunicationRecordAuthorizationContractTests'
+            filter: 'FullyQualifiedName~Sprk.Bff.Api.Tests.Api.Ai.RecordSearch|FullyQualifiedName~Sprk.Bff.Api.Tests.Api.Ai.Visualization|FullyQualifiedName~Sprk.Bff.Api.Tests.Api.Documents|FullyQualifiedName~Sprk.Bff.Api.Tests.Integration.DataMutation.OfficeVersionSave|FullyQualifiedName~Sprk.Bff.Api.Tests.Integration.DataMutation.RecordOwnership.OfficeRecordOwnership|FullyQualifiedName~Sprk.Bff.Api.Tests.Integration.DataMutation.RecordOwnership.SecureChildOwnershipDocumentRefile|FullyQualifiedName~Sprk.Bff.Api.Tests.Integration.DataMutation.SpeUploadPaths|FullyQualifiedName~Sprk.Bff.Api.Tests.Integration.Regression|FullyQualifiedName~Sprk.Bff.Api.Tests.Services.Office|FullyQualifiedName~Sprk.Bff.Api.Tests.Services.Documents|FullyQualifiedName~Sprk.Bff.Api.Tests.Domain.Office|FullyQualifiedName~Sprk.Bff.Api.Tests.Domain.Dataverse|FullyQualifiedName~Sprk.Bff.Api.Tests.Seam.Office|FullyQualifiedName~Sprk.Bff.Api.Tests.Filters|FullyQualifiedName~Sprk.Bff.Api.Tests.Infrastructure.Graph|FullyQualifiedName~Sprk.Bff.Api.Tests.Infrastructure.Authentication|FullyQualifiedName~Sprk.Bff.Api.Tests.AccessControl.OfficeSaveContainerProvenance|FullyQualifiedName~Sprk.Bff.Api.Tests.Auth.Office|FullyQualifiedName~Sprk.Bff.Api.Tests.Regression.Issue1084_Office|FullyQualifiedName~Sprk.Bff.Api.Tests.Regression.Issue1086_Office|FullyQualifiedName~Sprk.Bff.Api.Tests.OpenLinksEndpointTests|FullyQualifiedName~Sprk.Bff.Api.Tests.Api.Ai.RagSendToIndex|FullyQualifiedName~Sprk.Bff.Api.Tests.Api.Ai.SendToIndex|FullyQualifiedName~Sprk.Bff.Api.Tests.AccessControl.FileAccessBroker|FullyQualifiedName~Sprk.Bff.Api.Tests.Api.Communication.CommunicationRecordAuthorizationContractTests'
     # Per leg, on CI (4 vCPUs): the un-split 1,239-test selection was ~13 min of tests
     # (old 5,151-test selection: 17 m 24 s). By testhost CPU time `api-office` is
     # ~590 of ~1,110 CPU-s, so expect ~7 min of tests for `api-office` and ~6 min for

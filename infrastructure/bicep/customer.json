@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.46.1.21595",
-      "templateHash": "9428926323124642200"
+      "templateHash": "10990713878426831437"
     }
   },
   "parameters": {
@@ -102,7 +102,10 @@
         "sdap-jobs",
         "document-indexing",
         "ai-indexing",
-        "sdap-communication"
+        "sdap-communication",
+        "office-upload-finalization",
+        "office-profile",
+        "office-indexing"
       ],
       "metadata": {
         "description": "Service Bus queue names to create"
@@ -3259,7 +3262,8 @@
               "DOC_INTELLIGENCE_ENDPOINT": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('docIntelligence-{0}', variables('baseName'))), '2025-04-01').outputs.docIntelligenceEndpoint.value]",
               "AiSafety__ContentSafety__Endpoint": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('contentSafety-{0}', variables('baseName'))), '2025-04-01').outputs.contentSafetyEndpoint.value]",
               "APPLICATIONINSIGHTS_CONNECTION_STRING": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('monitoring-{0}', variables('baseName'))), '2025-04-01').outputs.connectionString.value]",
-              "ApplicationInsightsAgent_EXTENSION_VERSION": "~3"
+              "ApplicationInsightsAgent_EXTENSION_VERSION": "~3",
+              "WEBSITES_CONTAINER_START_TIME_LIMIT": "600"
             }
           },
           "tags": {
@@ -3273,7 +3277,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.46.1.21595",
-              "templateHash": "7592742079279306541"
+              "templateHash": "35904168131660294"
             }
           },
           "parameters": {
@@ -3355,6 +3359,7 @@
               "properties": {
                 "serverFarmId": "[parameters('appServicePlanId')]",
                 "httpsOnly": true,
+                "keyVaultReferenceIdentity": "[parameters('userAssignedIdentityResourceId')]",
                 "virtualNetworkSubnetId": "[if(not(empty(parameters('vnetIntegrationSubnetId'))), parameters('vnetIntegrationSubnetId'), null())]",
                 "vnetRouteAllEnabled": "[not(empty(parameters('vnetIntegrationSubnetId')))]",
                 "siteConfig": {
@@ -3447,7 +3452,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.46.1.21595",
-              "templateHash": "603088285904044342"
+              "templateHash": "434425010265106412"
             }
           },
           "parameters": {
@@ -3514,6 +3519,7 @@
               "properties": {
                 "serverFarmId": "[parameters('appServicePlanId')]",
                 "httpsOnly": true,
+                "keyVaultReferenceIdentity": "[parameters('userAssignedIdentityResourceId')]",
                 "siteConfig": {
                   "linuxFxVersion": "DOTNETCORE|10.0",
                   "alwaysOn": true,

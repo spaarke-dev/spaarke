@@ -43,14 +43,17 @@ import {
   getAuthProvider,
   buildBffApiUrl,
 } from "@spaarke/auth";
-import { setRuntimeConfig } from "./config/runtimeConfig";
+import { getBffBaseUrl, setRuntimeConfig } from "./config/runtimeConfig";
 // customer-provisioning-orchestration-r1 task 087 (FR-36 close-pattern): fetch the
 // per-env public config bundle (bffUrl / msalClientId / tenantId / featureFlags) from
 // the BFF at bootstrap BEFORE MSAL init. The endpoint is short-cached (60s + ETag)
 // and anonymous, so it does NOT block the auth path — its purpose is to make feature
 // flags flow at runtime instead of being baked at build time (one build, N envs).
 import { fetchPublicConfig } from "./config/publicConfig";
-import { ensureAuthInitialized } from "./services/authInit";
+import { authenticatedFetch, ensureAuthInitialized } from "./services/authInit";
+// spaarke-ontology-platform-r1 task 104 (D-22): the Ontology admin tab is registered only when the BFF
+// capability probe (asked as the caller) says yes; see step 2b below.
+import { startOntologyAdminGate } from "@spaarke/ai-widgets";
 import { initNotificationsClient } from "./services/notificationsBootstrap";
 import { App } from "./App";
 import type { IRuntimeConfig } from "@spaarke/auth";
@@ -487,6 +490,17 @@ async function bootstrap(): Promise<void> {
   //     See src/services/notificationsBootstrap.ts.
   // -------------------------------------------------------------------------
   void initNotificationsClient();
+
+  // -------------------------------------------------------------------------
+  // 2b. Ontology admin gate (spaarke-ontology-platform-r1 task 104, D-22). One
+  //     probe per page load, AS THE CALLER: GET /api/v1/ontology/admin/capabilities.
+  //     Only a `canAuthorPolicies: true` answer registers the 'ontology-admin'
+  //     workspace tab; anything else (a Console User, a fault) leaves it
+  //     unregistered. Fire-and-forget and non-fatal like the line above; the
+  //     workspace pane waits for it (bounded) before restoring persisted tabs.
+  //     Display only: every admin write route authorizes itself as the caller.
+  // -------------------------------------------------------------------------
+  void startOntologyAdminGate({ fetch: authenticatedFetch, baseUrl: getBffBaseUrl() });
 
   // -------------------------------------------------------------------------
   // 3. Parse URL parameters for entity context.

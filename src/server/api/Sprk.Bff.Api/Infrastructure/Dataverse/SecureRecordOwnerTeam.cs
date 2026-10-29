@@ -1,4 +1,5 @@
 using System.Text.Json.Serialization;
+using Microsoft.Xrm.Sdk.Query;
 using Spaarke.Dataverse;
 
 namespace Sprk.Bff.Api.Infrastructure.Dataverse;
@@ -72,6 +73,27 @@ public static class SecureRecordOwnerTeam
     internal const int NamedPrincipalLimit = 5;
 
     private const string BusinessUnitEntitySet = "businessunits";
+
+    /// <summary>
+    /// The <c>team</c> table. <c>internal</c> (#2253 fix round 2): <c>InheritedAccessPermission.AccessColumns</c> names the
+    /// team columns the owner-team resolution reads (<see cref="NamedOwnerTeamFilter"/>).
+    /// </summary>
+    internal const string TeamEntity = "team";
+
+    /// <summary><c>team.businessunitid</c> / <c>systemuser.businessunitid</c>: the unit a team or user belongs to. <c>internal</c> (#2253 fix round 2): <c>InheritedAccessPermission.AccessColumns</c> refuses it to app-only generic writers.</summary>
+    internal const string BusinessUnitColumn = "businessunitid";
+
+    /// <summary>
+    /// <c>name</c>: the Secure Record business unit and its owner team are found by name (<see cref="BusinessUnitFilter"/>,
+    /// <see cref="NamedOwnerTeamFilter"/>). <c>internal</c> (#2253 fix round 2): <c>InheritedAccessPermission.AccessColumns</c> refuses it to app-only generic writers.
+    /// </summary>
+    internal const string NameColumn = "name";
+
+    /// <summary><c>team.teamtype</c>: only an owner team is the secure owner team. <c>internal</c> (#2253 fix round 2): <c>InheritedAccessPermission.AccessColumns</c> refuses it to app-only generic writers.</summary>
+    internal const string TeamTypeColumn = "teamtype";
+
+    /// <summary><c>team.isdefault</c>: the default team is never the secure owner team. <c>internal</c> (#2253 fix round 2): <c>InheritedAccessPermission.AccessColumns</c> refuses it to app-only generic writers.</summary>
+    internal const string IsDefaultColumn = "isdefault";
     private const string TeamEntitySet = "teams";
     private const string TeamMembershipEntitySet = "teammemberships";
     private const string SystemUserEntitySet = "systemusers";
@@ -96,7 +118,7 @@ public static class SecureRecordOwnerTeam
 
     /// <summary>The business unit, by name. Queried with <c>$top=2</c> so ambiguity is visible.</summary>
     internal static string BusinessUnitFilter(string businessUnitName) =>
-        $"name eq '{EscapeODataStringLiteral(businessUnitName)}'";
+        $"{NameColumn} eq '{EscapeODataStringLiteral(businessUnitName)}'";
 
     /// <summary>
     /// The named owner team: same BU, the configured name, an OWNER team, and NOT the default team. Every predicate
@@ -104,8 +126,8 @@ public static class SecureRecordOwnerTeam
     /// selected even if someone renamed it to the configured name.
     /// </summary>
     internal static string NamedOwnerTeamFilter(Guid businessUnitId, string ownerTeamName) =>
-        $"_businessunitid_value eq {businessUnitId} and name eq '{EscapeODataStringLiteral(ownerTeamName)}' " +
-        $"and teamtype eq {OwnerTeamType} and isdefault eq false";
+        $"_{BusinessUnitColumn}_value eq {businessUnitId} and {NameColumn} eq '{EscapeODataStringLiteral(ownerTeamName)}' " +
+        $"and {TeamTypeColumn} eq {OwnerTeamType} and {IsDefaultColumn} eq false";
 
     /// <summary>Every membership row of the team, of ANY principal kind (human or application user).</summary>
     internal static string TeamMembershipFilter(Guid teamId) => $"teamid eq {teamId}";
@@ -265,6 +287,48 @@ public static class SecureRecordOwnerTeam
     /// </summary>
     internal static bool? IsInSecureBusinessUnit(Guid? owningBusinessUnitId, Guid secureBusinessUnitId) =>
         owningBusinessUnitId is { } bu && bu != Guid.Empty ? bu == secureBusinessUnitId : null;
+
+    /// <summary>
+    /// WHICH business unit is the Secure Record BU, by id: the one named by <c>SecureRecord:BusinessUnitName</c> (default
+    /// <c>Secure Record</c>), read with TOP 2. Two matches are <c>Ambiguous</c> (the caller refuses); none means this
+    /// environment has no Secure Record BU, so no business unit is it. A Dataverse fault propagates. The ONE lookup behind
+    /// <see cref="IsInSecureBusinessUnit"/>'s second argument for every SDK-seam caller: the ownership resolver, the share
+    /// synchronizer (step 1 of its owner-team resolution), the reconciler's ordinary-reown guard (UAC task 183), the
+    /// container relocator and the To Do owner job (task 194b R5, round-130 rule 3: the resolver's private copy is gone).
+    /// </summary>
+    /// <remarks>
+    /// <para>No Secure Record BU is the right answer for an environment without secure records, and for a misconfigured
+    /// name it is still not silent: provisioning refuses with <c>secure_bu_not_found</c>, the census job reports the BU
+    /// missing, and once the setup-guide cutover has removed the role from the default team, Dataverse refuses any
+    /// assignment to it. (A root FLAGGED secure in such an environment refuses as not isolated — task 146.)</para>
+    /// <para><b>Documented fail-open edge — until the live cutover.</b> With a misconfigured
+    /// <c>SecureRecord:BusinessUnitName</c>, a child filed to a secure record resolves to the Secure Record BU's DEFAULT
+    /// team. Of the mitigations above, only the last makes Dataverse refuse that assignment, and it exists only after guide
+    /// §4.3 step 4 (the <c>Secure Record Owner</c> role removed from the default team). Before that step, the assignment
+    /// succeeds and is visible only through the provisioning refusal and the census job's inert warning. Accepted by the
+    /// task-144 verifier (round 2) on that condition; the PR names it.</para>
+    /// <para>A <paramref name="logger"/>, when given, records the ambiguity as an error (the ownership resolver's
+    /// refusal log, task 144).</para>
+    /// </remarks>
+    internal static async Task<(Guid? Id, bool Ambiguous)> ResolveSecureBusinessUnitAsync(
+        IGenericEntityService dataverse, IConfiguration configuration, CancellationToken ct, ILogger? logger = null)
+    {
+        var secureBuName = BusinessUnitName(configuration);
+        var buQuery = new QueryExpression("businessunit") { ColumnSet = new ColumnSet("businessunitid"), TopCount = 2, NoLock = true };
+        buQuery.Criteria.AddCondition("name", ConditionOperator.Equal, secureBuName);
+        var businessUnits = (await dataverse.RetrieveMultipleAsync(buQuery, ct).ConfigureAwait(false)).Entities;
+        if (businessUnits.Count > 1)
+        {
+            logger?.LogError(
+                "Cannot resolve an owning team: more than one business unit is named '{SecureBuName}' "
+                + "(SecureRecord:BusinessUnitName), so whether a business unit is the Secure Record business unit "
+                + "cannot be decided. Refusing rather than guessing (task 144).",
+                secureBuName);
+            return (null, true);
+        }
+
+        return businessUnits.Count == 0 || businessUnits[0].Id == Guid.Empty ? (null, false) : (businessUnits[0].Id, false);
+    }
 
     /// <summary>Escapes a string for an OData single-quoted literal.</summary>
     internal static string EscapeODataStringLiteral(string value) => value.Replace("'", "''");

@@ -55,7 +55,7 @@ public class GrantSendsInviteTests
     private Task<IResult> Grant(Guid contactId, ExternalAccessLevel level = ExternalAccessLevel.Collaborate) =>
         GrantExternalAccessEndpoint.GrantAccessAsync(
             new GrantAccessRequest(contactId, Guid.Empty, level, null, null, "matter", _matter),
-            _h.Grants, _h.Participations, _h.AccessibleRecords, new EverythingProbe(),
+            _h.Grants, _h.Participations, _h.AccessibleRecords, new TestInfrastructure.RecordOwnershipResolverDouble(), new TestInfrastructure.TeamPrivilegeCheckerDouble(), new EverythingProbe(),
             _h.Materializer, _h.Notifier, _h.Invites, Context(), NullLogger<Program>.Instance, _h.Time, CancellationToken.None);
 
     private static GrantAccessResponse OkBody(IResult result) =>
@@ -196,6 +196,7 @@ public class GrantSendsInviteTests
         var invitedOn = _h.Time.GetUtcNow().AddDays(-29);
         _h.Identities.Contacts[contact].InvitedOn = invitedOn;
         _h.Identities.Contacts[contact].InviteCodeHash = "v1.pending-hash-of-the-earlier-invite";
+        _h.Identities.Contacts[contact].InvitedEmailHash = "v1:pending-stamp-of-the-earlier-invite";
 
         var body = OkBody(await Grant(contact));
 
@@ -205,6 +206,83 @@ public class GrantSendsInviteTests
         _h.Identities.Contacts[contact].InvitedOn.Should().Be(invitedOn);
         _h.Ciam.Attempts.Should().BeEmpty();
         _h.Emails.InviteUrls.Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// Slice B2, MUST FIRE: a current work-account invite (it names its organisation's tenant and carries no code) is
+    /// pending too. A grant keeps it: no portal-account invite replaces it, no CIAM account, no code, the tenant stays.
+    /// MUTATION: requiring a code hash alone in <c>AssessAsync</c> sends a portal-account invite here.
+    /// </summary>
+    [Fact]
+    public async Task Grant_ToAContactWithACurrentWorkAccountInvite_IsAlreadyPending_AndKeepsIt()
+    {
+        var contact = UnboundContact();
+        var invitedOn = _h.Time.GetUtcNow().AddDays(-2);
+        var row = _h.Identities.Contacts[contact];
+        row.InvitedOn = invitedOn;
+        row.InvitedEmailHash = InviteEmailStamp.Create("partner@outside.test");
+        row.InvitedTenantId = IdentityBindingTestKit.CustomerTenant.ToString("D");
+
+        var body = OkBody(await Grant(contact));
+
+        body.Invite.Should().Be(new GrantInviteResult(GrantInviteStatus.AlreadyPending));
+        (row.InviteCodeHash, row.InvitedTenantId, row.InvitedOn)
+            .Should().Be(((string?)null, IdentityBindingTestKit.CustomerTenant.ToString("D"), (DateTimeOffset?)invitedOn));
+        _h.Ciam.Attempts.Should().BeEmpty();
+        _h.Emails.InviteUrls.Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// #2005 F2: every bind consumes the code hash and leaves the marker, so a contact an operator unbinds after a bind holds a
+    /// current marker with no code anyone can use. That is not a pending invite: the grant sends a new code, and the first
+    /// CIAM sign-in with it binds. MUTATION: dropping the hash check from <c>AssessAsync</c> answers AlreadyPending, sends no
+    /// code, and the person is denied <c>contact_not_invited</c> for up to 30 days.
+    /// </summary>
+    [Fact]
+    public async Task Grant_ToAContactWithACurrentMarkerWhoseCodeWasConsumed_InvitesAgain_WithANewCode()
+    {
+        var contact = UnboundContact();
+        var invitedOn = _h.Time.GetUtcNow().AddDays(-2);
+        _h.Identities.Contacts[contact].InvitedOn = invitedOn;
+        _h.Identities.Contacts[contact].InviteCodeHash = null;
+        _h.Ciam.Failure = ObjectConflictOnProxyAddresses();
+
+        var body = OkBody(await Grant(contact));
+
+        body.Invite.Should().Be(new GrantInviteResult(GrantInviteStatus.Sent));
+        var code = TheOneInviteCode();
+        var stored = _h.Identities.Contacts[contact].InviteCodeHash;
+        stored.Should().NotBeNull("a new code's hash is stored");
+        InviteCode.Matches(stored, code, contact).Should().BeTrue("the emailed code is the one whose hash was stored");
+        _h.Identities.Contacts[contact].InvitedOn.Should().NotBe(invitedOn, "the re-invite restarts the marker");
+
+        var oid = Guid.NewGuid();
+        var signIn = await IdentityBindingTestKit.Binder(_h.Identities)
+            .ResolveCiamCallerAsync(oid.ToString(), Email, code, CancellationToken.None);
+        signIn.ContactId.Should().Be(contact, "the new code binds at the first sign-in");
+    }
+
+    /// <summary>
+    /// A current invite written before the invite stamp existed (marker and code, no email hash) binds nobody, so it is not
+    /// a pending invite: the grant sends a new invite, which writes the stamp, and its code then binds.
+    /// </summary>
+    [Fact]
+    public async Task Grant_ToAContactWithACurrentInviteButNoStamp_InvitesAgain_AndStampsIt()
+    {
+        var contact = UnboundContact();
+        _h.Identities.Contacts[contact].InvitedOn = _h.Time.GetUtcNow().AddDays(-2);
+        _h.Identities.Contacts[contact].InviteCodeHash = "v1.pending-hash-of-an-invite-before-the-stamp";
+        _h.Identities.Contacts[contact].InvitedEmailHash = null;
+        _h.Ciam.Failure = ObjectConflictOnProxyAddresses();
+
+        var body = OkBody(await Grant(contact));
+
+        body.Invite.Should().Be(new GrantInviteResult(GrantInviteStatus.Sent));
+        InviteEmailStamp.Matches(_h.Identities.Contacts[contact].InvitedEmailHash, Email).Should().BeTrue();
+        var code = TheOneInviteCode();
+        var signIn = await IdentityBindingTestKit.Binder(_h.Identities)
+            .ResolveCiamCallerAsync(Guid.NewGuid().ToString(), Email, code, CancellationToken.None);
+        signIn.ContactId.Should().Be(contact);
     }
 
     [Fact]
@@ -235,6 +313,147 @@ public class GrantSendsInviteTests
         _h.Emails.Sent.Should().BeEmpty();
     }
 
+    /// <summary>
+    /// The modal's Retry for a <c>/grant</c> whose invite did not complete: the grant already exists, so Retry calls
+    /// <c>/invite</c> for the person, which sends the invite and writes no grant. MUST FIRE for each way the invite fails
+    /// and leaves the contact unbound: the organisation check, the CIAM call, and the existing-account email.
+    /// </summary>
+    [Theory]
+    [InlineData("organisation-lookup")]
+    [InlineData("ciam-outage")]
+    [InlineData("existing-account-email-not-sent")]
+    public async Task Invite_AfterAGrantWhoseInviteFailed_SendsTheInvite_AndWritesNoGrant(string failure)
+    {
+        var contact = UnboundContact();
+        var discovery = FailTheInvite(failure);
+
+        OkBody(await Grant(contact)).Invite!.Status.Should().Be(GrantInviteStatus.Failed);
+        var grantWrites = _h.Grants.WriteCount;
+        _h.Emails.InviteUrls.Should().BeEmpty();
+
+        // The cause clears; staff press Retry.
+        ClearTheFailure(discovery, failure);
+        var retried = await InviteRoute();
+
+        retried.Should().BeOfType<Ok<InviteExternalUserResponse>>().Subject.Value!.EmailSent.Should().BeTrue(
+            "Retry is what sends the invite");
+        _h.Grants.WriteCount.Should().Be(grantWrites, "the grant already exists, and /invite writes none");
+        _h.Grants.ActiveRowsOf(_matter, contact).Should().ContainSingle()
+            .Which.AccessLevel.Should().Be((int)ExternalAccessLevel.Collaborate);
+        TheOneInviteCode();
+    }
+
+    /// <summary>
+    /// C2d F2: the same Retry on the WORK-ACCOUNT branch. The person's domain is the customer tenant, so the grant's invite is
+    /// a work-account stamp and notice; the notice did not send (email_not_sent, the stamp cleared). Retry through
+    /// <c>/invite</c> stamps and sends the notice, writes no grant, and creates no portal account.
+    /// </summary>
+    [Fact]
+    public async Task Invite_AfterAGrantWhoseWorkAccountNoticeFailed_SendsTheNotice_AndWritesNoGrant()
+    {
+        var customerTenant = Guid.NewGuid();
+        var discovery = new InviteOrganizationTestKit.DiscoveryHandler();
+        _h.Organizations = InviteOrganizationTestKit.Resolver(
+            discovery, new InviteOrganizationTestKit.RecordingTenantCache(), new[] { customerTenant });
+        discovery.Answer(System.Net.HttpStatusCode.OK, InviteOrganizationTestKit.DiscoveryBody(customerTenant));
+        var contact = UnboundContact();
+        _h.Emails.Failure = new InvalidOperationException("Simulated mailbox refusal.");
+
+        OkBody(await Grant(contact)).Invite.Should().Be(
+            new GrantInviteResult(GrantInviteStatus.Failed, GrantInviteStatus.EmailNotSentReasonCode));
+        var grantWrites = _h.Grants.WriteCount;
+        _h.Identities.Contacts[contact].InvitedTenantId.Should().BeNull("control: the stamp of a notice that did not send is cleared");
+
+        // The cause clears; staff press Retry. The domain is still the customer tenant.
+        _h.Emails.Failure = null;
+        discovery.Answer(System.Net.HttpStatusCode.OK, InviteOrganizationTestKit.DiscoveryBody(customerTenant));
+        var retried = await InviteRoute();
+
+        var body = retried.Should().BeOfType<Ok<InviteExternalUserResponse>>().Subject.Value!;
+        body.EmailSent.Should().BeTrue("Retry is what sends the work-account notice");
+        _h.Emails.Sent.Should().ContainSingle(e => e.To == Email);
+        _h.Identities.Contacts[contact].InvitedTenantId.Should().Be(customerTenant.ToString("D"));
+        _h.Grants.WriteCount.Should().Be(grantWrites, "the grant already exists, and /invite writes none");
+        _h.Grants.ActiveRowsOf(_matter, contact).Should().ContainSingle();
+        _h.Ciam.Attempts.Should().BeEmpty("a work-account invite creates no portal account");
+        _h.Emails.InviteUrls.Should().BeEmpty("and sends no portal-account invite");
+    }
+
+    /// <summary>
+    /// The same Retry as a second <c>/grant</c> at the same level: it writes no grant, and it sends the invite only when the
+    /// failure wrote nothing (the organisation check). That is why the modal's Retry calls <c>/invite</c> instead.
+    /// </summary>
+    [Fact]
+    public async Task Grant_Again_AfterItsOrganisationCheckFailed_WritesNoGrant_AndSendsTheInvite()
+    {
+        var contact = UnboundContact();
+        var discovery = FailTheInvite("organisation-lookup");
+
+        OkBody(await Grant(contact)).Invite!.Status.Should().Be(GrantInviteStatus.Failed);
+        var grantWrites = _h.Grants.WriteCount;
+
+        ClearTheFailure(discovery, "organisation-lookup");
+        OkBody(await Grant(contact)).Invite.Should().Be(new GrantInviteResult(GrantInviteStatus.Sent));
+
+        _h.Grants.WriteCount.Should().Be(grantWrites, "a same-level re-grant on an existing grant writes nothing");
+        TheOneInviteCode();
+    }
+
+    private InviteOrganizationTestKit.DiscoveryHandler FailTheInvite(string failure)
+    {
+        // The organisation decision a customer-tenant deployment makes; a scripted discovery endpoint answers each lookup.
+        var discovery = new InviteOrganizationTestKit.DiscoveryHandler();
+        _h.Organizations = InviteOrganizationTestKit.Resolver(
+            discovery, new InviteOrganizationTestKit.RecordingTenantCache(), new[] { Guid.NewGuid() });
+        switch (failure)
+        {
+            case "organisation-lookup":
+                discovery.Answer(System.Net.HttpStatusCode.InternalServerError, "{}");
+                break;
+            case "ciam-outage":
+                discovery.Answer(System.Net.HttpStatusCode.BadRequest, InviteOrganizationTestKit.TenantNotFoundBody);
+                _h.Ciam.Failure = new HttpRequestException("Simulated Graph outage.");
+                break;
+            default:
+                discovery.Answer(System.Net.HttpStatusCode.BadRequest, InviteOrganizationTestKit.TenantNotFoundBody);
+                _h.Ciam.Failure = ObjectConflictOnProxyAddresses();
+                _h.Emails.InviteEmailFailure = new HttpRequestException(
+                    "Simulated mailbox throttling.", null, System.Net.HttpStatusCode.TooManyRequests);
+                break;
+        }
+
+        return discovery;
+    }
+
+    /// <summary>The cause clears. A person who already has a CIAM account still has it.</summary>
+    private void ClearTheFailure(InviteOrganizationTestKit.DiscoveryHandler discovery, string failure)
+    {
+        discovery.Answer(System.Net.HttpStatusCode.BadRequest, InviteOrganizationTestKit.TenantNotFoundBody);
+        if (failure == "ciam-outage")
+            _h.Ciam.Failure = null;
+        _h.Emails.InviteEmailFailure = null;
+    }
+
+    /// <summary>The /invite ROUTE handler (private; reached by reflection, as ExistingCiamAccountInviteTests does).</summary>
+    private async Task<IResult> InviteRoute()
+    {
+        var handler = typeof(InviteExternalUserEndpoint).GetMethod(
+                          "InviteExternalUserAsync", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)
+                      ?? throw new InvalidOperationException("The /invite handler was not found.");
+        var portal = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?> { ["ExternalAccess:PortalUrl"] = PortalUrl })
+            .Build();
+        var task = (Task<IResult>)handler.Invoke(null, new object[]
+        {
+            new InviteExternalUserRequest(
+                Email, Guid.Empty, (int)ExternalAccessLevel.Collaborate, null, null, null, null, "matter", _matter),
+            _h.Grants, _h.Participations, _h.Ciam, _h.Emails, IdentityBindingTestKit.Binder(_h.Identities), _h.Organizations,
+            portal, Sprk.Bff.Api.Tests.TestInfrastructure.TestSpeOwnership.Customer(CustomerKey), Context(),
+            NullLogger<Program>.Instance, CancellationToken.None,
+        })!;
+        return await task;
+    }
+
     // ── A failed invite never undoes the grant ──────────────────────────────────────────────────────────────
 
     [Fact]
@@ -245,6 +464,10 @@ public class GrantSendsInviteTests
         _h.InviteLogger = log;
         _h.Ciam.Failure = new HttpRequestException("Simulated Graph outage.");
 
+        // C5: the throw after the marker retracts the invite this call wrote; the hash it wrote is captured as it is cleared.
+        string? stored = null;
+        _h.Identities.BeforePendingInviteClear = c => stored = c.InviteCodeHash;
+
         var body = OkBody(await Grant(contact));
 
         body.Invite.Should().Be(new GrantInviteResult(GrantInviteStatus.Failed, GrantInviteStatus.InviteFailedReasonCode));
@@ -253,8 +476,9 @@ public class GrantSendsInviteTests
         _h.Emails.InviteUrls.Should().BeEmpty();
         log.Entries.Should().Contain(e => e.Level == LogLevel.Warning);
 
-        var stored = _h.Identities.Contacts[contact].InviteCodeHash!;
-        foreach (var part in new[] { stored }.Concat(stored.Split(':', '.').Where(p => p.Length >= 16)))
+        stored.Should().NotBeNull("the invite wrote a code hash, then retracted it");
+        _h.Identities.Contacts[contact].InviteCodeHash.Should().BeNull("a pending invite exists only if its email went out");
+        foreach (var part in new[] { stored! }.Concat(stored!.Split(':', '.').Where(p => p.Length >= 16)))
             log.Messages.Should().NotContain(m => m.Contains(part, StringComparison.Ordinal), "never log a hash");
     }
 
@@ -308,7 +532,7 @@ public class GrantSendsInviteTests
 
         var result = await GrantExternalAccessEndpoint.GrantAccessAsync(
             new GrantAccessRequest(contact, Guid.Empty, ExternalAccessLevel.Collaborate, null, null, "matter", _matter),
-            _h.Grants, _h.Participations, _h.AccessibleRecords, new EverythingProbe(),
+            _h.Grants, _h.Participations, _h.AccessibleRecords, new TestInfrastructure.RecordOwnershipResolverDouble(), new TestInfrastructure.TeamPrivilegeCheckerDouble(), new EverythingProbe(),
             _h.Materializer, _h.Notifier, invites, Context(), NullLogger<Program>.Instance, _h.Time, CancellationToken.None);
 
         OkBody(result).Invite.Should().Be(
@@ -326,7 +550,7 @@ public class GrantSendsInviteTests
 
         var result = await GrantExternalAccessEndpoint.GrantAccessAsync(
             new GrantAccessRequest(Guid.Empty, Guid.Empty, ExternalAccessLevel.Collaborate, null, organization, "matter", _matter),
-            _h.Grants, _h.Participations, _h.AccessibleRecords, new EverythingProbe(),
+            _h.Grants, _h.Participations, _h.AccessibleRecords, new TestInfrastructure.RecordOwnershipResolverDouble(), new TestInfrastructure.TeamPrivilegeCheckerDouble(), new EverythingProbe(),
             _h.Materializer, _h.Notifier, _h.Invites, Context(), NullLogger<Program>.Instance, _h.Time, CancellationToken.None);
 
         OkBody(result).Invite.Should().BeNull();
@@ -343,8 +567,8 @@ public class GrantSendsInviteTests
         var result = await InviteAndGrantExternalUserEndpoint.InviteAndGrantAsync(
             new InviteExternalUserRequest(Email, Guid.Empty, (int)ExternalAccessLevel.Collaborate, "Pat", "Partner", null, null,
                 "matter", _matter),
-            _h.Grants, _h.Participations, _h.AccessibleRecords, new EverythingProbe(),
-            _h.Ciam, _h.Emails, IdentityBindingTestKit.Binder(_h.Identities),
+            _h.Grants, _h.Participations, _h.AccessibleRecords, new TestInfrastructure.RecordOwnershipResolverDouble(), new TestInfrastructure.TeamPrivilegeCheckerDouble(), new EverythingProbe(),
+            _h.Ciam, _h.Emails, IdentityBindingTestKit.Binder(_h.Identities), InviteOrganizationTestKit.PortalOnly(),
             new ConfigurationBuilder()
                 .AddInMemoryCollection(new Dictionary<string, string?> { ["ExternalAccess:PortalUrl"] = PortalUrl })
                 .Build(),

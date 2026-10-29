@@ -56,7 +56,8 @@ public sealed class ContactIdentityBindingSchemaPackagedTests
         IsSecured(contact, MirrorColumn).Should().BeFalse("Dataverse cannot key a field-secured column; the key lives on the mirror");
         foreach (var column in PlaneAndCollisionColumns)
         {
-            IsSecured(contact, column).Should().NotBeNull($"the BFF selects contact.{column} (binding_column_missing without it)");
+            IsSecured(contact, column).Should().BeTrue(
+                $"the BFF selects contact.{column} (binding_column_missing without it), and only the BFF writes it");
         }
         IsSecured(systemUser, "sprk_primarycontact").Should().BeTrue("the licensed-user link is BFF-written too");
 
@@ -79,12 +80,30 @@ public sealed class ContactIdentityBindingSchemaPackagedTests
         {
             ("contact", BindingColumn, Read: true, Create: false, Update: false),
             ("systemuser", "sprk_primarycontact", Read: true, Create: false, Update: false),
-        }, "every user reads both fields through the reader profile (a secured column is hidden without Read)");
+            ("contact", "sprk_externaltenantid", Read: true, Create: false, Update: false),
+            ("systemuser", "sprk_hometenantid", Read: true, Create: false, Update: false),
+            ("systemuser", "sprk_homeobjectid", Read: true, Create: false, Update: false),
+            ("contact", "sprk_identityplane", Read: true, Create: false, Update: false),
+            ("contact", "sprk_identitycollisionon", Read: true, Create: false, Update: false),
+            ("contact", "sprk_identitycollisionoid", Read: true, Create: false, Update: false),
+            ("contact", "sprk_identitycollisionplane", Read: true, Create: false, Update: false),
+            ("contact", "sprk_identitycollisionreason", Read: true, Create: false, Update: false),
+            ("contact", "sprk_identitycollisionparties", Read: true, Create: false, Update: false),
+        }, "every user reads the identity-link fields through the reader profile (a secured column is hidden without Read)");
         Permissions(profiles, WriterProfile).Should().BeEquivalentTo(new[]
         {
             ("contact", BindingColumn, Read: true, Create: true, Update: true),
             ("systemuser", "sprk_primarycontact", Read: true, Create: true, Update: true),
-        }, "the BFF's application users write both fields through the writer profile");
+            ("contact", "sprk_externaltenantid", Read: true, Create: true, Update: true),
+            ("systemuser", "sprk_hometenantid", Read: true, Create: true, Update: true),
+            ("systemuser", "sprk_homeobjectid", Read: true, Create: true, Update: true),
+            ("contact", "sprk_identityplane", Read: true, Create: true, Update: true),
+            ("contact", "sprk_identitycollisionon", Read: true, Create: true, Update: true),
+            ("contact", "sprk_identitycollisionoid", Read: true, Create: true, Update: true),
+            ("contact", "sprk_identitycollisionplane", Read: true, Create: true, Update: true),
+            ("contact", "sprk_identitycollisionreason", Read: true, Create: true, Update: true),
+            ("contact", "sprk_identitycollisionparties", Read: true, Create: true, Update: true),
+        }, "the BFF's application users write the identity-link fields through the writer profile");
     }
 
     [Fact]

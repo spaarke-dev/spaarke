@@ -27,3 +27,16 @@ export function resolveThreadId(
   // Any other placement — the caller renders an "unavailable" notice.
   return undefined;
 }
+
+/** `sprk_communicationthread.sprk_privacystate` choice int for Private (Open = 100000000). */
+export const THREAD_PRIVACY_PRIVATE = 100000001;
+
+/**
+ * Is the rendered thread KNOWN to be Private (task 068; owner 2026-10-14)? Only the `sprk_communicationthread`
+ * placement can know it without a Dataverse read: the thread form's own `sprk_privacystate` value (already
+ * loaded on the form; `undefined` when the form does not carry it). On the `sprk_communication` placement the
+ * thread's privacy is not known here, so the compose box stays unlocked and the BFF floor (task 065) covers it.
+ */
+export function resolveThreadIsPrivate(hostEntityName: string | undefined, threadPrivacyState: unknown): boolean {
+  return hostEntityName === 'sprk_communicationthread' && threadPrivacyState === THREAD_PRIVACY_PRIVATE;
+}

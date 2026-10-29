@@ -30,8 +30,10 @@ namespace Sprk.Bff.Api.Services.Communication;
 /// is filed to (<see cref="ThreadResolver.IsFiledTo"/>, the reconcile's own test) is a candidate; a row whose thread is
 /// INACTIVE is not — a deactivated thread is a user's delete (the thread delete leaves its emails filed) and the backfill
 /// must not undo it, so it is only counted (<c>skippedInactiveThread</c>); each candidate is handed to
-/// <see cref="IThreadResolver.ReconcileThreadForFilingAsync"/>, which owns every rule (whole-thread move, secure guards,
-/// default thread) and is a no-op when nothing is to be done. A private thread is skipped (the reconcile leaves it).
+/// <see cref="IThreadResolver.ReconcileThreadForFilingAsync(Guid, FilingReconcileHost, CancellationToken)"/>, which owns every rule (whole-thread move, secure guards,
+/// default thread) and is a no-op when nothing is to be done — as a standalone reconcile (<see cref="FilingReconcileHost.Standalone"/>,
+/// #2110): a threadless email that joins the thread its conversation key finds, anchored to a record it is not filed to, has
+/// the step after a re-file run once for that join. A private thread is skipped (the reconcile leaves it).
 /// Candidates are selected in the job, not by one query: the test compares columns of two tables (the email's lookups
 /// against the thread's), which a filter cannot express, so the slice is the coarser "filed emails" and the thread rows are
 /// read with it.</item>
@@ -312,7 +314,9 @@ public sealed class CommunicationThreadFilingSweepJob : IScheduledJob
 
                 try
                 {
-                    await resolver.ReconcileThreadForFilingAsync(email.Id, ct).ConfigureAwait(false);
+                    // #2110: on its own, not inside the step after a re-file — a join it makes under a record the email is
+                    // not filed to runs that step for the join (FilingReconcileHost.Standalone).
+                    await resolver.ReconcileThreadForFilingAsync(email.Id, FilingReconcileHost.Standalone, ct).ConfigureAwait(false);
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
                 {

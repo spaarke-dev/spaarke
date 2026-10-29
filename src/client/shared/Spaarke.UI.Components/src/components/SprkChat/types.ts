@@ -110,6 +110,12 @@ export interface IChatMessageMetadata {
   plan?: IChatMessagePlanStep[];
 
   /**
+   * Citations of a streamed Assistant reply, stored on the message when the `citations`
+   * SSE event arrives so its [N] markers stay clickable after later turns are added.
+   */
+  citations?: ICitation[];
+
+  /**
    * spaarkeai-compose-r2 DEF-12 — marks this Assistant message as the CONFIRMATION for an
    * applied Compose AI edit (a pending redline in the document). When present, the message
    * renders the per-message Accept / Reject / Try-another controls (in place of the removed
@@ -1415,11 +1421,11 @@ export interface ISprkChatProps {
    * send. The host cannot abort the message via this hook; that decision
    * remains owned by SprkChat (the user clicked Send).
    *
-   * The callback fires synchronously before `addMessage` runs, so any
-   * `injectLocalMessage` set during the callback is processed in the SAME
-   * render pass and appears in the thread BEFORE the user's message + the
-   * assistant streaming placeholder. This guarantees the FR-03 "interjection
-   * appears before the model response begins" semantics.
+   * An `injectLocalMessage` set during the callback reaches SprkChat on the
+   * next render, after the user's message and the assistant streaming
+   * placeholder were added. SprkChat inserts it immediately BEFORE the
+   * placeholder, so the interjection appears after the user's message and
+   * before the model response (FR-03).
    *
    * ADR-012 invariant: the callback receives the generic message text only —
    * NO host-specific context. The host owns its own state (uploadedFileCount,
@@ -2382,6 +2388,12 @@ export interface IUseChatSessionResult {
   addMessage: (message: IChatMessage) => void;
   /** Update the last message content (used during streaming) */
   updateLastMessage: (content: string) => void;
+  /**
+   * Insert a message immediately before the last one. SprkChat uses this for messages the
+   * host injects while a streaming reply occupies the last position, so the stream keeps
+   * writing to its own bubble instead of overwriting the injected message.
+   */
+  insertMessageBeforeLast: (message: IChatMessage) => void;
   /**
    * Update the metadata of the last message in history.
    * Used by Phase 2F (task 072) to set plan_preview metadata after a plan_preview SSE event

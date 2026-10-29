@@ -1,0 +1,141 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="033" project="field-mapping-server-write-path-r1">
+  <metadata>
+    <title>System creators (To Do generation, TaskActionCore, SignalWriter, DecisionRecordWriter) create through the system principal (FR-21 part a)</title>
+    <phase>3 W3 Product creators onto the service</phase>
+    <gate>019 complete</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies .cs in Sprk.Bff.Api; tags include bff-api, jobs, ai-nodes, ownership; touches ontology-owned writers with a restricted writer identity (security); adds tests at KEEP paths (TEST-MODIFYING override).</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Four creators with different identities, owner contexts and existing documented exceptions; the system principal skips as-caller checks, so each conversion needs judgment about what authorization is already established upstream.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>W3-server</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>019</deps>
+    <tags>bff-api, jobs, ai-nodes, ownership, testing</tags>
+    <estimated-effort>10-14 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Route four system creators through `RecordCreationService` using the SYSTEM principal (`RequestedBy` when known): To Do generation (`Services/Workspace/TodoGenerationService.cs` create ~:1082), playbook create-task (`Services/Ai/Nodes/ActionCore/TaskActionCore.cs` create ~:315), `Services/Signals/SignalWriter.cs` (create ~:583) and `Services/Signals/DecisionRecordWriter.cs` (create ~:1223). Existing accepted ownership exceptions become NAMED registry rules with a rationale. Do NOT decide the `DecisionRecordWriter` communication-owner case (~:1479); record it for task 060.</prompt>
+  <role>SPAARKE platform developer, .NET 10 BFF, background/AI-node writers and the ontology Signal/Decision write path. Follow ADRs strictly.</role>
+  <goal>Each of the four creators makes its row create through the service with the system principal and gets the same owner, stamp and mapping a caller create under the same parent would get; every existing exception is a named registry rule; the census test lists each creator as routed.</goal>
+
+  <context>
+    <background>spec.md FR-21 (part a), FR-07 (system principal skips the as-caller checks, steps 2 and 5, and applies every other step identically), FR-11 (registry exceptions). Today: `TodoGenerationService` resolves the owner itself (`ResolveOwnerAsync` over the parents, `RecordOwnerUnresolvedException`) and calls `_dataverse.CreateAsync` (~:1082); `TaskActionCore.CreateAsync` (~:155) resolves the owner (~:285-300), applies Assigned To defaults and calls `_entityService.CreateAsync` (~:315); `SignalWriter` builds the entity and calls `_writerClient.CreateAsync` (~:583); `DecisionRecordWriter` calls its private `CreateAsync` (~:1205) over `_writerClient.CreateAsync` (~:1223) and documents that the ONLY identity holding Create on the Decision Record table is the ontology writer identity (no human role, no Write or Delete). That writer identity is a deliberate least-privilege design owned by ontology-r1; whether the unified service can create under it is an open point (see escalation). Existing exceptions to preserve: unfiled communications keep the creator (`UnfiledOwnership.KeepCreator`), direct threads, notifications, and the Decision Record's D-144/D-169 communication-owner principal (not decided here).</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Workspace/TodoGenerationService.cs (owner ~:1050-1075; create ~:1082)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/ActionCore/TaskActionCore.cs (CreateAsync ~:155; owner ~:285; create ~:315)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Signals/SignalWriter.cs (BuildEntity / owner ~:540-583; create ~:583)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Signals/DecisionRecordWriter.cs (owner resolution ~:1440-1480; CreateAsync ~:1205-1223)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/RecordCreation/RecordTableRules.cs (named exception rules with rationale)</file>
+      <file role="modify">tests/Spaarke.ArchTests/RecordOwnerAssignmentCensusTests.cs (list each of the four as routed; UAC-r2 also edits census tests, run /conflict-check)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Signals/OntologyWriterDataverseClient.cs (the writer identity)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/RecordCreation/RecordCreationService.cs (system principal, tasks 013-016)</file>
+      <file role="canonical-reference">tests/integration/seam/Signals/SignalWriterSeamTests.cs</file>
+      <file role="canonical-reference">tests/integration/seam/Signals/DecisionRecordWriterSeamTests.cs</file>
+      <file role="canonical-reference">tests/integration/seam/Communication/CreateTaskApplySeamTests.cs</file>
+      <file role="canonical-reference">tests/Spaarke.ArchTests/OntologyWriterAppendToGuardTests.cs (must keep passing)</file>
+      <file role="new">tests/integration/data-mutation/Signals/SystemCreatorsThroughServiceTests.cs (each creator uses the system principal and gets caller-equivalent owner, stamp and mapping)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="019" status="required">W2 service deployed and reviewed.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-008 (path A, spec ADR Tensions)">Scope: authorization. These are non-HTTP callers, which is exactly why payload-dependent checks live in `CallerWriteAuthorization` and not in filters. The system principal skips only the as-caller checks; authorization already established upstream (the job's scope, the playbook run's user, the review's decider) stays where it is. Add no inline authorization to the writers.</constraint>
+    <constraint source="ADR-019">Scope: refusals. Writers keep their existing failure types (`RecordOwnerUnresolvedException`, `DecisionRecordRefusedException`, `OntologyWriterFailureReason.OwnerRefused`, TaskActionCore's `Guid.Empty` return); a service refusal maps to them; no raw upstream text in any returned value.</constraint>
+    <constraint source="ADR-028">Scope: identity. System principal = app-only under the managed identity, `RequestedBy` recorded when the originating user is known (playbook run user, review decider). The system principal must never be reachable from an HTTP caller-controlled flag. The Signal and Decision writers' restricted writer identity must not gain wider privileges.</constraint>
+    <constraint source="ADR-010">Scope: DI. Writers obtain the scoped service per job/message scope as they already obtain other scoped services (TodoGenerationService and SignalWriter already create scopes); no new registration; no static service locator.</constraint>
+    <constraint source="ADR-052 / ADR-036">Scope: jobs. Job handlers keep their idempotency and lease semantics; a redelivered job must not create a duplicate row; the service create is not retried blindly after an ambiguous failure (NFR-03).</constraint>
+    <constraint source="NFR-01 (spec)">Scope: all four creators. Fail closed: an unresolved owner refuses and writes nothing (today TodoGenerationService throws, TaskActionCore returns Guid.Empty, writers refuse); never fall back to an app-owned row. The only non-team owners are the registry-named exceptions.</constraint>
+    <constraint source="NFR-08 / CLAUDE.md §8.5">Scope: coordination. ontology-r1 owns SignalWriter, DecisionRecordWriter and the decision cores; UAC-r2 PR #2110 also edits census tests. Run /conflict-check FIRST; sequence with the owning projects; do not rewrite writer internals beyond the create and owner call sites.</constraint>
+    <constraint source="project">Scope: communication-owner case. The `DecisionRecordWriter` communication-owner principal (D-144/D-169, ~:1479) is preserved exactly as today and recorded in the task notes as an open assessment item for task 060. Do not decide whether it is an exception or must change.</constraint>
+    <constraint source="CLAUDE.md §10">Scope: BFF publish. Placement Justification in the PR; fresh-master publish-size delta per §10.4; `dotnet list package --vulnerable --include-transitive`; no package.</constraint>
+    <constraint source="ADR-038">Scope: tests added or modified. KEEP paths; no Mock&lt;HttpMessageHandler&gt;; no DI-registration tests. Existing seam and guard tests change only to follow a moved dependency, never by weakening an assertion. Cover the stated contract plus the named edge cases only.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>System principal creates; ontology writers; ownership exceptions</topic>
+    <files>
+      <file>.claude/adr/ADR-002-thin-plugins.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-019-problemdetails.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-036-background-job-infrastructure.md</file>
+      <file>.claude/adr/ADR-052-workload-placement.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/jobs.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md</file>
+    </files>
+    <patterns>
+      <pattern name="entity-operations" location=".claude/patterns/dataverse/entity-operations.md">Create payload shapes.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare FULL rigor; read spec FR-21 and FR-07; read the four create sites and their owner contexts; re-grep each creator's existing tests.</step>
+    <step order="1">Run /conflict-check (ontology-r1, UAC-r2 PR #2110 census tests). Record the result and sequencing. Escalate if a PR rewrites the writers' create methods.</step>
+    <step order="2">Inventory, in the task notes, each creator's current exception behaviour (owner context, KeepCreator, assignee rules, Assigned To defaults) and the registry rule that will carry it, with rationale.</step>
+    <step order="3">Write failing tests first: for each creator, a system create under a Matter yields the same owner, I-1 stamp and mapping (if profiled) as a caller create under the same Matter (FR-07 acceptance); an unresolved owner writes nothing; a redelivered job creates no duplicate; census lists each as routed.</step>
+    <step order="4">Convert To Do generation and TaskActionCore (plain app-only creators): pass the originating user as `RequestedBy`; delete their private owner resolution and creator stamping where the service supplies it; keep AssignedToDefaults semantics via the registry "for"-person rule.</step>
+    <step order="5">Convert SignalWriter and DecisionRecordWriter only at their create and owner call sites; keep the restricted writer identity question open if the service cannot use it (escalation). Preserve D-123 secure-if-any, D-134 personal To Do assignee and the communication-owner principal exactly.</step>
+    <step order="6">Add the named exception rules to the registry; extend RecordOwnerAssignmentCensusTests so each of the four is listed as routed (add a negative control only if the census harness already supports them; otherwise leave negative controls to task 061).</step>
+    <step order="7">Build; run Signals seam tests, CreateTaskApplySeamTests, TodoGeneration tests, OntologyWriterAppendToGuardTests, SecureChildOwnershipAiToolTests*, DecisionCommit tests, RecordOwnerAssignmentCensusTests; publish-size delta; CVE check.</step>
+    <step order="8">Update TASK-INDEX.md: set this task's status to ✅.</step>
+    <step order="9">Document any deviation in projects/field-mapping-server-write-path-r1/notes/ (including the communication-owner item for task 060).</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the unified service cannot create the Signal or Decision Record under the restricted ontology writer identity without granting the managed identity Create on those tables or widening the writer identity, STOP and escalate per CLAUDE.md §6 (security-sensitive: auth/identity) and §6.5 with options; do not change role privileges.</trigger>
+    <trigger>DecisionRecordWriter communication-owner case: do not decide. Preserve current behaviour, record the finding for task 060, and continue.</trigger>
+    <trigger>If /conflict-check shows ontology-r1 or UAC-r2 is rewriting any of the four create methods, STOP and ask the human to sequence the work.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>Grep `_dataverse!.CreateAsync` (TodoGenerationService.cs ~:1082), `_entityService.CreateAsync` (TaskActionCore.cs ~:315), `_writerClient.CreateAsync` (SignalWriter.cs ~:583, DecisionRecordWriter.cs ~:1223): four private create paths, each with its own owner resolution. Existing tests: tests/integration/seam/Signals/SignalWriterSeamTests.cs and DecisionRecordWriterSeamTests.cs, tests/integration/seam/Communication/CreateTaskApplySeamTests.cs; none compares system-principal and caller-principal results under one parent.</existing>
+    <extension>Yes for production code: callers convert to the existing service, no new production file (exceptions are registry rows). The only new file is a test class, because the existing writer seam suites must pass unchanged and none asserts caller/system equivalence (FR-07 acceptance).</extension>
+    <cost-of-doing-nothing>System-created To Dos, tasks, Signals and Decision Records keep four private owner paths and skip field mapping and the standard stamp/search-index steps, so they drift from the standard and are invisible to the census guard (spec FR-21, section 11 table).</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="dotnet">Build/test .NET</tool>
+    <tool name="skill:conflict-check">Detect overlap with ontology-r1 and UAC-r2</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Workspace/TodoGenerationService.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/ActionCore/TaskActionCore.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Signals/SignalWriter.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Signals/DecisionRecordWriter.cs</output>
+    <output type="test">tests/integration/data-mutation/Signals/SystemCreatorsThroughServiceTests.cs</output>
+    <output type="test">tests/Spaarke.ArchTests/RecordOwnerAssignmentCensusTests.cs (four creators listed as routed)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">To Do generation, `TaskActionCore`, `SignalWriter` and `DecisionRecordWriter` each create through `RecordCreationService` with the system principal, and the census test lists each as routed.</criterion>
+    <criterion testable="true">For each creator, a system create under a Matter yields the same owner, I-1 stamp and (where a profile exists) mapping as a caller create under the same Matter.</criterion>
+    <criterion testable="true">Each existing ownership exception (unfiled communications keep the creator, direct threads, notifications, and any exception these four creators relied on) is a NAMED registry rule with a written rationale.</criterion>
+    <criterion testable="true">The `DecisionRecordWriter` communication-owner principal (D-144/D-169) behaves exactly as before and the open assessment is recorded in the task notes for task 060.</criterion>
+    <criterion testable="true">Negative: an unresolved owner writes nothing for each creator and surfaces the creator's existing failure type (exception, `Guid.Empty`, or writer refusal); no app-owned fallback row is created.</criterion>
+    <criterion testable="true">Negative: a redelivered job or playbook run does not create a duplicate row, and the system principal is not reachable from any HTTP request field (asserted by a test or a grep recorded in the notes).</criterion>
+    <criterion testable="true">BFF build 0 errors; Signals seam tests, CreateTaskApplySeamTests, OntologyWriterAppendToGuardTests, SecureChildOwnershipAiToolTests*, DecisionCommit tests and RecordOwnerAssignmentCensusTests pass; publish-size delta, CVE result and /conflict-check result recorded in the task notes.</criterion>
+    <criterion testable="true">From task 014 (decision 4) and task 016 (review pass 1 F1-d), 2026-10-21: add the APP-ONLY column-metadata reader (type, IsValidForCreate, IsValidForUpdate, MaxLength, date behaviour, money columns) for the system principal. Reuse the shape of the caller-side reader that `RecordCreationService.Mapping.cs` `MapFieldsAsync` uses; extending the existing app-only `MetadataService` is preferred over a new reader (root CLAUDE.md §11). Wire it into BOTH the system-principal create path (so a system principal with a mapping stops being an argument error) AND Repair (`RecordCreationService.Repair.cs`, which today writes mapped values unchecked: one bad rule fails the whole update every pass, K-1 in notes/task-016-notes.md). Repair drops a value whose column is unknown, not ValidForUpdate, the wrong type (`Fits`), over MaxLength, or of an unknown date behaviour, with a reason, and still writes the other fields. Tests: an int literal into a Decimal column, an unknown column, an over-length string.</criterion>
+    <criterion testable="true">Owner decision 2026-10-21 (Repair field security, option 1; UAC-r2 concurs). Using the app-only metadata reader above, Repair (`RecordCreationService.Repair.cs`, the `TODO(task 033)` seam) skips every source column that is field-secured (`IsSecured`), under UAC-r2's conditions:
+      (1) fail closed: if the metadata read faults or a source column's IsSecured is unknown, map NOTHING for that row, with reason `record_repair.mapping_source_metadata_unavailable`; never fall back to "not secured"; read metadata per pass or cache briefly, so a column that becomes secured is honoured on the next pass;
+      (2) the document access and D7 link columns stay refused through RefuseAppOnlyWrite (already in 016);
+      (3) the #2188 guard keeps its per-occurrence allow-list entry for Repair's single ApplyFillOnly call (added in 016); update its reason if the wording changes;
+      (4) tests: must-fire, a field-secured source column is not copied; must-fire, a metadata fault maps nothing; must-not-fire, an unsecured column is still filled.
+      (5) Task 052 stays blocked until this criterion is met.
+    </criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-21 part a, FR-07, FR-11, NFR-01, NFR-08. Inbound communication and document ingestion are task 034. The ownership matrix and exception assessment (notification outbox, Decision Record communication owner) are task 060.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

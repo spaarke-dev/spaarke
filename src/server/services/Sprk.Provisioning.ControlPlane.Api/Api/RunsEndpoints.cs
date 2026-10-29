@@ -69,17 +69,33 @@
 //   - Reader:   read-only endpoints (GET). Reader alone cannot invoke mutating.
 //
 // ENQUEUE PATH (POST endpoints, FR-22 / R20):
-//   All handler-invoking POST endpoints:
-//     (a) validate the request shape (400 on bad body/missing required field)
-//     (b) verify the run exists in the caller-supplied customerId partition
-//         (404 on miss; §4D I3 enforced by construction)
-//     (c) enqueue a HandlerEnvelope via IHandlerEnqueuer — MessageId is
-//         deterministic per (HandlerId, RunId, CustomerId, paramHash), so
-//         duplicate submissions are dedup'd at the Service Bus wire (FR-22
-//         level-1 idempotency).
-//     (d) return 202 Accepted with Location header pointing at GET /api/runs/{id}.
+//   POST /api/runs and /preflight validate the request shape (400), verify the
+//   run exists in the caller-supplied customerId partition (404 on miss; §4D I3
+//   enforced by construction), enqueue the H0 HandlerEnvelope via
+//   IHandlerEnqueuer — MessageId is deterministic per (HandlerId, RunId,
+//   CustomerId, paramHash, Attempt), so duplicate submissions are dedup'd at the
+//   Service Bus wire (FR-22 level-1 idempotency) — and return 202 Accepted with
+//   a Location header pointing at GET /api/runs/{id}.
 //   Latency target: <100ms end-to-end (excluding first-hit Cosmos client
 //   handshake). Measured in tests via 202-latency spot-check.
+//
+//   RULE: the Api enqueues ONLY envelopes whose HandlerId is in
+//   HandlerIds.Dispatchable. The Worker dead-letters anything else as NoHandler
+//   (guarded by RunsEndpointsTests.EveryEnvelopeTheApiEnqueues_IsADispatchableHandler).
+//
+// OPERATOR RUN CONTROL (resume / cancel / gate-advance):
+//   These three make their state transition in Cosmos through IRunControlService
+//   (Core/Rollback) and, where a handler must run again, enqueue that REAL handler
+//   with a bumped attempt (fresh MessageId):
+//     - resume   Failed -> Running, re-dispatches run.CurrentPhase (409 when the run
+//                is not Failed, the customer guard is held by another run, or the
+//                ETag raced; 503 + run reverted to Failed when the enqueue fails).
+//     - cancel   non-final -> Cancelled, releases the customer guard (409 when the
+//                run is Completed / Cancelled / Quarantined).
+//     - gate     re-dispatches the Pending gate's verifier handler now (404 unknown
+//                gate; 409 when the run is not WaitingOnGate/Running or the gate is not Pending).
+//   clear-quarantine already worked this way (IQuarantineClearService) and enqueues
+//   nothing.
 //
 // AUDIT-LOG (POST /api/runs/{id}/clear-quarantine, spec FR-24):
 //   The clear-quarantine endpoint REQUIRES a `reason` query parameter (400
@@ -92,19 +108,17 @@
 //   the QuarantineCleared record is IN ADDITION per spec FR-24's explicit
 //   requirement for a purpose-built event (Kusto queries can pivot on either).
 //
-// STATE-TRANSITION SCOPE (this task):
-//   This task's endpoints WRITE new runs (POST /api/runs) and READ existing
-//   runs (GET /api/runs/{id}). Everything else ENQUEUES a handler — actual
-//   state transitions (Running -> Failed, Quarantined -> Cleared, etc.) are
-//   owned by:
+// STATE-TRANSITION SCOPE:
+//   POST /api/runs WRITES a new run; GET /api/runs/{id} READS one; resume / cancel /
+//   gate-advance / clear-quarantine make their (operator-requested) transition via
+//   Core services (see OPERATOR RUN CONTROL above). Handler-driven transitions
+//   (Running -> Failed, Running -> Completed, etc.) stay asynchronous and are owned by:
 //     - Task 058 (state-reconciler) — DAG advancement, retry dispatch.
 //     - Task 059 (I5 concurrency guard) — same-customer serialization.
 //     - Task 060 (I6 crash recovery) — orphaned-run scan.
 //     - Task 061 (§4C rollback semantics) — Quarantined transitions, clear-
 //                                            quarantine state mutation.
-//   The endpoints here are the intake surface; the state machine advances
-//   asynchronously. This separation is deliberate per the Fable M-9
-//   resolution (design.md §4.2 v3.2).
+//   This separation is deliberate per the Fable M-9 resolution (design.md §4.2 v3.2).
 // -----------------------------------------------------------------------------
 
 using System.Diagnostics;
@@ -209,19 +223,6 @@ public static class RunsEndpoints
     private const string InitialHandlerId = "H0";
 
     /// <summary>
-    /// Handler identifier the resume + cancel + advance + clear-quarantine
-    /// endpoints use as their <c>HandlerId</c> tag on the enqueued envelope.
-    /// The state-reconciler (task 058) inspects the envelope's ApplicationProperties
-    /// to route to the correct in-flight handler; a stable per-action tag keeps
-    /// the dispatch loop readable.
-    /// </summary>
-    private const string ResumeActionId = "Resume";
-
-    private const string CancelActionId = "Cancel";
-    private const string GateAdvanceActionId = "GateAdvance";
-    private const string ClearQuarantineActionId = "ClearQuarantine";
-
-    /// <summary>
     /// Serializer for the opaque <see cref="HandlerEnvelope.ParametersJson"/>
     /// payload. camelCase parity with ServiceBusHandlerEnqueuer + Cosmos wire.
     /// </summary>
@@ -263,12 +264,14 @@ public static class RunsEndpoints
             .WithDescription(
                 "Re-dispatches H0 preflight quota-probe against the existing " +
                 "ProvisioningRun. Idempotent — repeat calls are wire-level dedup'd " +
-                "on the deterministic Service Bus MessageId.")
+                "on the deterministic Service Bus MessageId. 409 run-not-preflightable on a " +
+                "terminal run (Completed/Failed/Cancelled/Quarantined): use /resume for a Failed run.")
             .Produces(StatusCodes.Status202Accepted)
             .ProducesProblem(StatusCodes.Status400BadRequest)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
             .ProducesProblem(StatusCodes.Status403Forbidden)
-            .ProducesProblem(StatusCodes.Status404NotFound);
+            .ProducesProblem(StatusCodes.Status404NotFound)
+            .ProducesProblem(StatusCodes.Status409Conflict);
 
         // (3) GET /api/runs/{id} — read current run state.
         group.MapGet("/{id}", GetRun)
@@ -288,16 +291,21 @@ public static class RunsEndpoints
         group.MapPost("/{id}/gates/{gateId}/advance", AdvanceGate)
             .RequireAuthorization(AuthModule.Policies.Operator)
             .WithName("AdvanceGate")
-            .WithSummary("Mark a manual gate as cleared (operator override)")
+            .WithSummary("Ask a Pending gate's verifier handler to re-check the gate now")
             .WithDescription(
-                "Enqueues a gate-advance dispatch for the specified gate. The " +
-                "reconciler (task 058) picks up the envelope and applies the " +
-                "Verified transition to the ProvisioningRun's gateStates map.")
+                "Re-dispatches the Pending gate's verifier handler immediately (with a " +
+                "bumped attempt so Service Bus duplicate detection does not drop it); the " +
+                "verifier itself re-checks the gate and transitions the run. It does NOT " +
+                "force the gate open. 404 if the run or the gate does not exist; 409 if the " +
+                "run is not WaitingOnGate or Running, the gate is not Pending / has no dispatchable " +
+                "verifier, or a concurrent write raced; 503 if the handler could not be enqueued.")
             .Produces(StatusCodes.Status202Accepted)
             .ProducesProblem(StatusCodes.Status400BadRequest)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
             .ProducesProblem(StatusCodes.Status403Forbidden)
-            .ProducesProblem(StatusCodes.Status404NotFound);
+            .ProducesProblem(StatusCodes.Status404NotFound)
+            .ProducesProblem(StatusCodes.Status409Conflict)
+            .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
 
         // (5) POST /api/runs/{id}/resume — resume a failed run from failure point.
         group.MapPost("/{id}/resume", ResumeRun)
@@ -305,14 +313,21 @@ public static class RunsEndpoints
             .WithName("ResumeRun")
             .WithSummary("Resume a Failed run from its current failure point")
             .WithDescription(
-                "Enqueues a resume-dispatch envelope; the reconciler picks up " +
-                "and re-runs the current phase. Idempotency handles duplicate " +
-                "resumes (3-level per ADR-004).")
+                "Transitions a Failed run back to Running (clearing errorDetail) after " +
+                "re-claiming the customer's concurrency guard, then re-dispatches the " +
+                "run's current phase handler with a bumped attempt. 404 if the run does " +
+                "not exist; 409 if the run is not Failed (clear a Quarantined run first), " +
+                "another run holds the customer guard, or a concurrent write raced; 502 if " +
+                "the guard could not be evaluated; 503 (run reverted to Failed) if the " +
+                "handler could not be enqueued.")
             .Produces(StatusCodes.Status202Accepted)
             .ProducesProblem(StatusCodes.Status400BadRequest)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
             .ProducesProblem(StatusCodes.Status403Forbidden)
-            .ProducesProblem(StatusCodes.Status404NotFound);
+            .ProducesProblem(StatusCodes.Status404NotFound)
+            .ProducesProblem(StatusCodes.Status409Conflict)
+            .ProducesProblem(StatusCodes.Status502BadGateway)
+            .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
 
         // (6) POST /api/runs/{id}/cancel — operator explicitly cancels a run.
         group.MapPost("/{id}/cancel", CancelRun)
@@ -320,14 +335,18 @@ public static class RunsEndpoints
             .WithName("CancelRun")
             .WithSummary("Cancel an in-progress run")
             .WithDescription(
-                "Enqueues a cancel-dispatch envelope; the reconciler transitions " +
-                "the run to Cancelled and clears sprk_currentrunid on the " +
-                "registry row (task 059 concurrency guard).")
+                "Transitions the run to Cancelled (completedOn set) and releases the " +
+                "customer's concurrency guard (sprk_currentrunid, task 059). 404 if the " +
+                "run does not exist; 409 if the run is already Completed or Cancelled, is " +
+                "Quarantined (clear-quarantine first), or a concurrent write raced. A " +
+                "handler already in flight is not interrupted; its later write loses the " +
+                "ETag race and is discarded.")
             .Produces(StatusCodes.Status202Accepted)
             .ProducesProblem(StatusCodes.Status400BadRequest)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
             .ProducesProblem(StatusCodes.Status403Forbidden)
-            .ProducesProblem(StatusCodes.Status404NotFound);
+            .ProducesProblem(StatusCodes.Status404NotFound)
+            .ProducesProblem(StatusCodes.Status409Conflict);
 
         // (7) POST /api/runs/{id}/clear-quarantine — v3.2 §4C reversible clear.
         // Task 061 wired the QuarantineClearService — endpoint returns 409 when
@@ -837,6 +856,19 @@ public static class RunsEndpoints
             return NotFound(httpContext, id, customerId!);
         }
 
+        // T186 L18: the Worker drops every envelope for a terminal run (stale dispatch), so a 202 here would be a
+        // silent no-op. Re-running a failed H0 is POST /resume, which reopens the run and dispatches a fresh attempt.
+        if (read.Run.Status is RunStatus.Completed or RunStatus.Failed or RunStatus.Cancelled or RunStatus.Quarantined)
+        {
+            return Conflict(
+                httpContext,
+                ControlPlaneErrorCodes.RunNotPreflightable,
+                $"Run '{id}' is {read.Run.Status}; preflight only runs on an open run. " +
+                (read.Run.Status == RunStatus.Failed
+                    ? "To re-run the failed phase, POST /api/runs/{id}/resume."
+                    : "Start a new run with POST /api/runs."));
+        }
+
         await enqueuer.EnqueueAsync(
             new HandlerEnvelope
             {
@@ -881,15 +913,16 @@ public static class RunsEndpoints
     }
 
     /// <summary>
-    /// POST /api/runs/{id}/gates/{gateId}/advance.
+    /// POST /api/runs/{id}/gates/{gateId}/advance. Re-dispatches the Pending gate's verifier handler via
+    /// <see cref="IRunControlService"/> (bumped attempt = fresh MessageId); 202 on success.
     /// </summary>
     private static async Task<IResult> AdvanceGate(
         string id,
         string gateId,
         string? customerId,
-        IProvisioningRunRepository repository,
-        IHandlerEnqueuer enqueuer,
+        IRunControlService runControl,
         HttpContext httpContext,
+        ILogger<RunsMarker> logger,
         CancellationToken cancellationToken)
     {
         if (!TryValidateRouteAndPartition(id, customerId, httpContext, out var validationResult))
@@ -901,139 +934,213 @@ public static class RunsEndpoints
             return BadRequest(httpContext, ControlPlaneErrorCodes.GateIdRequired, "gateId is required.");
         }
 
-        var read = await repository.ReadRunAsync(customerId!, id, cancellationToken).ConfigureAwait(false);
-        if (read is null)
+        var result = await runControl
+            .AdvanceGateAsync(customerId!, id, gateId, cancellationToken)
+            .ConfigureAwait(false);
+
+        switch (result)
         {
-            return NotFound(httpContext, id, customerId!);
+            case GateAdvanceResult.NotFound:
+                return NotFound(httpContext, id, customerId!);
+
+            case GateAdvanceResult.GateNotFound:
+                return ControlPlaneProblems.NotFound(
+                    httpContext,
+                    ControlPlaneErrorCodes.GateNotFound,
+                    $"Run '{id}' has no gate '{gateId}'.");
+
+            case GateAdvanceResult.Conflict conflict:
+                return Conflict(
+                    httpContext,
+                    conflict.CurrentStatus is not (RunStatus.WaitingOnGate or RunStatus.Running)
+                        ? ControlPlaneErrorCodes.RunNotWaitingOnGate
+                        : ControlPlaneErrorCodes.GateNotAdvanceable,
+                    $"Cannot advance gate '{gateId}' of run '{id}' (run status: {conflict.CurrentStatus}): {conflict.Detail}.");
+
+            case GateAdvanceResult.ConcurrencyConflict concurrent:
+                return Conflict(
+                    httpContext,
+                    ControlPlaneErrorCodes.RunConcurrentlyModified,
+                    $"Run '{id}' was modified by a concurrent writer (current status: {concurrent.Current.Status}). " +
+                    "Retry the gate advance after re-reading the run state.");
+
+            case GateAdvanceResult.EnqueueFailed enqueueFailed:
+                logger.LogWarning(
+                    "AdvanceGate: 503 — verifier enqueue failed. CustomerId={CustomerId} RunId={RunId} GateId={GateId} Diagnostic={Diagnostic}",
+                    customerId, id, gateId, enqueueFailed.Diagnostic);
+                return ControlPlaneProblems.Create(
+                    httpContext,
+                    StatusCodes.Status503ServiceUnavailable,
+                    ControlPlaneErrorCodes.HandlerEnqueueFailed,
+                    $"The verifier handler for gate '{gateId}' could not be enqueued: {enqueueFailed.Diagnostic}. Retry the request.");
+
+            case GateAdvanceResult.Success success:
+                logger.LogInformation(
+                    "GateAdvance: RunId={RunId} CustomerId={CustomerId} GateId={GateId} HandlerId={HandlerId} Attempt={Attempt} " +
+                    "ActorTid={ActorTid} ActorOid={ActorOid} RequestId={RequestId}",
+                    id, customerId, gateId, success.VerifierHandler, success.Attempt,
+                    ExtractTenantId(httpContext.User) ?? string.Empty,
+                    ExtractObjectId(httpContext.User) ?? string.Empty,
+                    httpContext.TraceIdentifier);
+                return Results.Accepted($"/api/runs/{id}?customerId={Uri.EscapeDataString(customerId!)}");
+
+            default:
+                throw new UnreachableException(
+                    $"GateAdvanceResult exhaustive union changed: {result.GetType().FullName}");
         }
-
-        await enqueuer.EnqueueAsync(
-            new HandlerEnvelope
-            {
-                HandlerId = GateAdvanceActionId,
-                RunId = id,
-                CustomerId = customerId!,
-                ParametersJson = SerializeEnqueueParameters(new EnqueuePayload
-                {
-                    CustomerId = customerId!,
-                    RunId = id,
-                    Action = "gate-advance",
-                    GateId = gateId,
-                }),
-                EnqueuedAt = DateTimeOffset.UtcNow,
-            },
-            cancellationToken).ConfigureAwait(false);
-
-        return Results.Accepted($"/api/runs/{id}?customerId={Uri.EscapeDataString(customerId!)}");
     }
 
     /// <summary>
-    /// POST /api/runs/{id}/resume.
+    /// POST /api/runs/{id}/resume. Failed -> Running + re-dispatch of the run's current phase via
+    /// <see cref="IRunControlService"/>; 202 on success.
     /// </summary>
     private static async Task<IResult> ResumeRun(
         string id,
         string? customerId,
-        IProvisioningRunRepository repository,
-        IHandlerEnqueuer enqueuer,
-        HttpContext httpContext,
-        CancellationToken cancellationToken)
-    {
-        if (!TryValidateRouteAndPartition(id, customerId, httpContext, out var validationResult))
-        {
-            return validationResult;
-        }
-
-        var read = await repository.ReadRunAsync(customerId!, id, cancellationToken).ConfigureAwait(false);
-        if (read is null)
-        {
-            return NotFound(httpContext, id, customerId!);
-        }
-
-        await enqueuer.EnqueueAsync(
-            new HandlerEnvelope
-            {
-                HandlerId = ResumeActionId,
-                RunId = id,
-                CustomerId = customerId!,
-                ParametersJson = SerializeEnqueueParameters(new EnqueuePayload
-                {
-                    CustomerId = customerId!,
-                    RunId = id,
-                    Action = "resume",
-                    CurrentPhase = read.Run.CurrentPhase,
-                }),
-                EnqueuedAt = DateTimeOffset.UtcNow,
-            },
-            cancellationToken).ConfigureAwait(false);
-
-        return Results.Accepted($"/api/runs/{id}?customerId={Uri.EscapeDataString(customerId!)}");
-    }
-
-    /// <summary>
-    /// POST /api/runs/{id}/cancel.
-    /// </summary>
-    private static async Task<IResult> CancelRun(
-        string id,
-        string? customerId,
-        IProvisioningRunRepository repository,
-        IHandlerEnqueuer enqueuer,
-        ICustomerRunGuard runGuard,
+        IRunControlService runControl,
         HttpContext httpContext,
         ILogger<RunsMarker> logger,
         CancellationToken cancellationToken)
     {
-        ArgumentNullException.ThrowIfNull(runGuard);
-
         if (!TryValidateRouteAndPartition(id, customerId, httpContext, out var validationResult))
         {
             return validationResult;
         }
 
-        var read = await repository.ReadRunAsync(customerId!, id, cancellationToken).ConfigureAwait(false);
-        if (read is null)
+        var actorOid = ExtractObjectId(httpContext.User);
+        var result = await runControl
+            .ResumeAsync(customerId!, id, actorOid, cancellationToken)
+            .ConfigureAwait(false);
+
+        switch (result)
         {
-            return NotFound(httpContext, id, customerId!);
+            case RunResumeResult.NotFound:
+                return NotFound(httpContext, id, customerId!);
+
+            case RunResumeResult.Conflict conflict:
+                return Conflict(
+                    httpContext,
+                    ControlPlaneErrorCodes.RunNotResumable,
+                    $"Run '{id}' cannot be resumed (current status: {conflict.CurrentStatus}): {conflict.Detail}.");
+
+            case RunResumeResult.GuardConflict guardConflict:
+                logger.LogInformation(
+                    "ResumeRun: 409 — same-customer serialization (I5). CustomerId={CustomerId} RunId={RunId} " +
+                    "WinningRunId={WinningRunId} ReasonCode={ReasonCode}",
+                    customerId, id, guardConflict.WinningRunId, guardConflict.ReasonCode);
+                return ControlPlaneProblems.Create(
+                    httpContext,
+                    StatusCodes.Status409Conflict,
+                    ControlPlaneErrorCodes.CustomerRunInFlight,
+                    $"Run '{id}' cannot be resumed: another provisioning run for customer '{customerId}' is in flight " +
+                    $"(winning runId '{guardConflict.WinningRunId}', reason '{guardConflict.ReasonCode}'). " +
+                    "Cancel or finish that run first (spec.md §4D I5 / FR-23).",
+                    new Dictionary<string, object?>
+                    {
+                        ["winningRunId"] = guardConflict.WinningRunId,
+                        ["reasonCode"] = guardConflict.ReasonCode,
+                    });
+
+            case RunResumeResult.GuardUnavailable guardUnavailable:
+                logger.LogWarning(
+                    "ResumeRun: 502 — CustomerRunGuard transient failure. CustomerId={CustomerId} RunId={RunId} Diagnostic={Diagnostic}",
+                    customerId, id, guardUnavailable.Diagnostic);
+                return ControlPlaneProblems.Create(
+                    httpContext,
+                    StatusCodes.Status502BadGateway,
+                    ControlPlaneErrorCodes.RunGuardUnavailable,
+                    $"Concurrency guard could not be evaluated for customer '{customerId}': {guardUnavailable.Diagnostic}");
+
+            case RunResumeResult.ConcurrencyConflict concurrent:
+                return Conflict(
+                    httpContext,
+                    ControlPlaneErrorCodes.RunConcurrentlyModified,
+                    $"Run '{id}' was modified by a concurrent writer (current status: {concurrent.Current.Status}). " +
+                    "Retry the resume after re-reading the run state.");
+
+            case RunResumeResult.EnqueueFailed enqueueFailed:
+                logger.LogWarning(
+                    "ResumeRun: 503 — handler enqueue failed; run reverted to Failed. CustomerId={CustomerId} RunId={RunId} Diagnostic={Diagnostic}",
+                    customerId, id, enqueueFailed.Diagnostic);
+                return ControlPlaneProblems.Create(
+                    httpContext,
+                    StatusCodes.Status503ServiceUnavailable,
+                    ControlPlaneErrorCodes.HandlerEnqueueFailed,
+                    $"Run '{id}' could not be resumed: the handler could not be enqueued ({enqueueFailed.Diagnostic}). " +
+                    "The run was left Failed; retry the resume.");
+
+            case RunResumeResult.Success success:
+                logger.LogInformation(
+                    "ResumeRun: RunId={RunId} CustomerId={CustomerId} HandlerId={HandlerId} Attempt={Attempt} " +
+                    "ActorTid={ActorTid} ActorOid={ActorOid} RequestId={RequestId}",
+                    id, customerId, success.HandlerId, success.Attempt,
+                    ExtractTenantId(httpContext.User) ?? string.Empty,
+                    actorOid ?? string.Empty,
+                    httpContext.TraceIdentifier);
+                return Results.Accepted($"/api/runs/{id}?customerId={Uri.EscapeDataString(customerId!)}");
+
+            default:
+                throw new UnreachableException(
+                    $"RunResumeResult exhaustive union changed: {result.GetType().FullName}");
+        }
+    }
+
+    /// <summary>
+    /// POST /api/runs/{id}/cancel. Non-final run -> Cancelled + customer-guard release via
+    /// <see cref="IRunControlService"/>; 202 on success. A Quarantined run keeps its guard until clear-quarantine
+    /// (design.md §4C), so it is a 409 here.
+    /// </summary>
+    private static async Task<IResult> CancelRun(
+        string id,
+        string? customerId,
+        IRunControlService runControl,
+        HttpContext httpContext,
+        ILogger<RunsMarker> logger,
+        CancellationToken cancellationToken)
+    {
+        if (!TryValidateRouteAndPartition(id, customerId, httpContext, out var validationResult))
+        {
+            return validationResult;
         }
 
-        await enqueuer.EnqueueAsync(
-            new HandlerEnvelope
-            {
-                HandlerId = CancelActionId,
-                RunId = id,
-                CustomerId = customerId!,
-                ParametersJson = SerializeEnqueueParameters(new EnqueuePayload
-                {
-                    CustomerId = customerId!,
-                    RunId = id,
-                    Action = "cancel",
-                }),
-                EnqueuedAt = DateTimeOffset.UtcNow,
-            },
-            cancellationToken).ConfigureAwait(false);
+        var actorOid = ExtractObjectId(httpContext.User);
+        var result = await runControl
+            .CancelAsync(customerId!, id, actorOid, cancellationToken)
+            .ConfigureAwait(false);
 
-        // Task 059 §4C: on operator-initiated cancel, best-effort release the
-        // I5 guard so a fresh run can start immediately. ReleaseAsync is a
-        // no-op if the guard's current value doesn't match (safe against
-        // races with an already-completed cancel handler). Task 061 explicitly
-        // owns the Quarantined path — see design.md §4C ("cross-customer
-        // serialization on quarantine" note): a Quarantined run's guard stays
-        // set until clear-quarantine, NOT released here. Our release is a
-        // mismatch no-op in that case because the run's Status is Quarantined,
-        // not the Cancel target.
-        var release = await runGuard.ReleaseAsync(customerId!, id, cancellationToken).ConfigureAwait(false);
-        if (release is ReleaseResult.TransientFailure txf)
+        switch (result)
         {
-            // Not fatal to the request — the cancel envelope is already
-            // enqueued. Log for observability; the operator sees 202 either
-            // way and the reconciler (task 058) or a task 061-owned handler
-            // will eventually converge.
-            logger.LogWarning(
-                "CancelRun: CustomerRunGuard release transient failure — " +
-                "CustomerId={CustomerId} RunId={RunId} Diagnostic={Diagnostic}",
-                customerId, id, txf.Diagnostic);
-        }
+            case RunCancelResult.NotFound:
+                return NotFound(httpContext, id, customerId!);
 
-        return Results.Accepted($"/api/runs/{id}?customerId={Uri.EscapeDataString(customerId!)}");
+            case RunCancelResult.Conflict conflict:
+                return Conflict(
+                    httpContext,
+                    ControlPlaneErrorCodes.RunNotCancellable,
+                    conflict.CurrentStatus == RunStatus.Quarantined
+                        ? $"Run '{id}' is Quarantined; clear the quarantine (clear-quarantine) before cancelling it."
+                        : $"Run '{id}' is already {conflict.CurrentStatus} and cannot be cancelled.");
+
+            case RunCancelResult.ConcurrencyConflict concurrent:
+                return Conflict(
+                    httpContext,
+                    ControlPlaneErrorCodes.RunConcurrentlyModified,
+                    $"Run '{id}' was modified by a concurrent writer (current status: {concurrent.Current.Status}). " +
+                    "Retry the cancel after re-reading the run state.");
+
+            case RunCancelResult.Success:
+                logger.LogInformation(
+                    "CancelRun: RunId={RunId} CustomerId={CustomerId} ActorTid={ActorTid} ActorOid={ActorOid} RequestId={RequestId}",
+                    id, customerId,
+                    ExtractTenantId(httpContext.User) ?? string.Empty,
+                    actorOid ?? string.Empty,
+                    httpContext.TraceIdentifier);
+                return Results.Accepted($"/api/runs/{id}?customerId={Uri.EscapeDataString(customerId!)}");
+
+            default:
+                throw new UnreachableException(
+                    $"RunCancelResult exhaustive union changed: {result.GetType().FullName}");
+        }
     }
 
     /// <summary>
@@ -1044,14 +1151,14 @@ public static class RunsEndpoints
     /// QuarantineInfo.State = Cleared + populates ClearedBy/ClearedAt (ETag-
     /// safe). The audit-log fires ONLY on a successful transition — 400 (no
     /// reason), 404 (not found), 409 (wrong-state OR concurrent-write) paths
-    /// do NOT emit the QuarantineCleared record (spec FR-24 acceptance).
+    /// do NOT emit the QuarantineCleared record (spec FR-24 acceptance). Nothing is
+    /// enqueued: the Cosmos transition is the whole action.
     /// </summary>
     private static async Task<IResult> ClearQuarantine(
         string id,
         string? customerId,
         string? reason,
         IQuarantineClearService clearService,
-        IHandlerEnqueuer enqueuer,
         ICustomerRunGuard runGuard,
         HttpContext httpContext,
         ILogger<RunsMarker> logger,
@@ -1063,7 +1170,7 @@ public static class RunsEndpoints
             return validationResult;
         }
         // FR-24 acceptance: reason MUST be present + non-empty; audit-log MUST
-        // NOT emit on the 400 path (only on the enqueue-successful path).
+        // NOT emit on the 400 path (only on the successful-transition path).
         if (string.IsNullOrWhiteSpace(reason))
         {
             return BadRequest(httpContext, ControlPlaneErrorCodes.ReasonRequired, "reason is required (spec FR-24).");
@@ -1102,7 +1209,7 @@ public static class RunsEndpoints
                     "Retry the clear-quarantine after re-reading the run state.");
 
             case QuarantineClearResult.Success:
-                break; // Fall through to enqueue + audit-log below.
+                break; // Fall through to guard release + audit-log below.
 
             default:
                 throw new UnreachableException(
@@ -1125,35 +1232,14 @@ public static class RunsEndpoints
         {
             // Not fatal to the request — the Quarantined→Failed transition
             // has already landed via clearService above; the FR-24 audit-log
-            // + envelope enqueue must still fire so operators see the
-            // clear-quarantine action. Log for observability so a repeated
+            // must still fire so operators see the clear-quarantine action.
+            // Log for observability so a repeated
             // failure to release surfaces before the next-run 409 loop.
             logger.LogWarning(
                 "ClearQuarantine: CustomerRunGuard release transient failure (REG-03) — " +
                 "CustomerId={CustomerId} RunId={RunId} Diagnostic={Diagnostic}",
                 customerId, id, txf.Diagnostic);
         }
-
-        // Fire-and-forget dispatch envelope so downstream consumers (log
-        // subscribers, potential future audit-cleanup workers) see the action
-        // on the wire. The Cosmos state transition already landed via
-        // clearService.ClearAsync above; the envelope is observability-only.
-        await enqueuer.EnqueueAsync(
-            new HandlerEnvelope
-            {
-                HandlerId = ClearQuarantineActionId,
-                RunId = id,
-                CustomerId = customerId!,
-                ParametersJson = SerializeEnqueueParameters(new EnqueuePayload
-                {
-                    CustomerId = customerId!,
-                    RunId = id,
-                    Action = "clear-quarantine",
-                    Reason = reason,
-                }),
-                EnqueuedAt = DateTimeOffset.UtcNow,
-            },
-            cancellationToken).ConfigureAwait(false);
 
         // FR-24 audit-log — structured record with stable prefix so a Kusto
         // query can pivot on 'QuarantineCleared' independently of the general
@@ -1423,15 +1509,6 @@ public static class RunsEndpoints
 
         [JsonPropertyName("action")]
         public string Action { get; init; } = string.Empty;
-
-        [JsonPropertyName("gateId")]
-        public string? GateId { get; init; }
-
-        [JsonPropertyName("currentPhase")]
-        public string? CurrentPhase { get; init; }
-
-        [JsonPropertyName("reason")]
-        public string? Reason { get; init; }
     }
 }
 

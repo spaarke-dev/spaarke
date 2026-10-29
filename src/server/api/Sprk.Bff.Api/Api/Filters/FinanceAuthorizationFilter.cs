@@ -244,7 +244,7 @@ public class FinanceAuthorizationFilter : IEndpointFilter
     public const string InsufficientRightsReasonCode = "sdap.access.deny.insufficient_rights";
 
     /// <summary>The check itself faulted — denied, never allowed (ADR-003).</summary>
-    public const string SystemFailureReasonCode = "sdap.access.error.system_failure";
+    public const string SystemFailureReasonCode = AuthorizationResult.SystemFailureReasonCode;
 
     /// <summary>The caller lacks a TABLE privilege the operation needs (e.g. Create on sprk_invoice).</summary>
     public const string InsufficientPrivilegeReasonCode = "sdap.access.deny.insufficient_privilege";
@@ -336,7 +336,7 @@ public class FinanceAuthorizationFilter : IEndpointFilter
             string? denyReason;
             try
             {
-                denyReason = await EvaluateAsync(check, userId, callerToken, httpContext.TraceIdentifier, ct);
+                denyReason = await EvaluateAsync(check, userId, callerToken, httpContext, logger, ct);
             }
             catch (Exception ex)
             {
@@ -362,7 +362,8 @@ public class FinanceAuthorizationFilter : IEndpointFilter
 
     /// <summary>Returns <c>null</c> when allowed, otherwise the deny reason code.</summary>
     private async Task<string?> EvaluateAsync(
-        FinanceAuthorizationCheck check, string userId, string? callerToken, string correlationId, CancellationToken ct)
+        FinanceAuthorizationCheck check, string userId, string? callerToken, HttpContext httpContext, ILogger? logger,
+        CancellationToken ct)
     {
         if (check.Path == FinanceCheckPath.Privilege)
         {
@@ -387,14 +388,13 @@ public class FinanceAuthorizationFilter : IEndpointFilter
         {
             case FinanceCheckPath.Document:
             {
-                var result = await _authorizationService.AuthorizeAsync(new AuthorizationContext
-                {
-                    UserId = userId,
-                    ResourceId = check.RecordId.ToString(),
-                    Operation = check.Operation,
-                    CorrelationId = correlationId,
-                    UserAccessToken = callerToken,
-                }, ct);
+                // Task 188 round 4b (F1-2): the caller's own rights on the document, then THE external document
+                // narrowing (InternalPlaneDocumentNarrowing.AuthorizeDocumentsAsync). A document it hides from a caller who
+                // is not an internal systemuser denies with the reason an unreadable one gets; an internal caller (the
+                // ebilling confirm and reject writes) makes no narrowing call.
+                var result = await InternalPlaneDocumentNarrowing.AuthorizeDocumentsAsync(
+                    httpContext, _authorizationService, userId, new[] { check.RecordId }, check.Operation, callerToken,
+                    "finance-document-check", logger, ct);
 
                 return result.IsAllowed ? null : result.ReasonCode;
             }

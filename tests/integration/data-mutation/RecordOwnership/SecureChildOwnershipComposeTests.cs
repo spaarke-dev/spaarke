@@ -79,6 +79,29 @@ public sealed class SecureChildOwnershipComposeTests
             .Should().Be(new EntityReference("team", Directory.GeneralTeam));
     }
 
+    [Fact(DisplayName = "194b R (B2) parity must fire: a copy inheriting sprk_relatedmatter (one unit) and sprk_project (another) is owned by sprk_document's primary — the project — the parent the reconciler asks first about the written copy, never the copy map's first column")]
+    public async Task Promote_ACopyFiledUnderTwoOrdinaryRecords_IsOwnedByTheDocumentTablesPrimary()
+    {
+        var (matter, project) = (Guid.NewGuid(), Guid.NewGuid());
+        _world.WithRecord("sprk_matter", matter, Directory.ChildBu, owningTeam: Directory.ChildTeam)
+            .WithRecord("sprk_project", project, Directory.GeneralBu, owningTeam: Directory.GeneralTeam);
+        _dataverse
+            .Setup(d => d.RetrieveAsync("sprk_document", SourcePdf, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Entity("sprk_document", SourcePdf)
+            {
+                ["sprk_relatedmatter"] = new EntityReference("sprk_matter", matter),
+                ["sprk_project"] = new EntityReference("sprk_project", project),
+            });
+
+        await Promoter().PromoteIfEphemeralAsync(Request(SourcePdf), SavingUser(), CancellationToken.None);
+
+        var row = _upserts.Should().ContainSingle().Subject;
+        RecordOwnershipContext.OrderedParentsOf(row)[0].Should().Be(new RecordOwnershipParent("sprk_project", project),
+            "the reconciler asks the written copy about its project first");
+        row.GetAttributeValue<EntityReference>("ownerid").Should().Be(new EntityReference("team", Directory.GeneralTeam),
+            "the copy is owned by the primary's team, as the reconciler would own it");
+    }
+
     private ComposeCreateOnSavePromoter Promoter()
     {
         var sessions = new Mock<ChatSessionManager>(

@@ -80,7 +80,7 @@ public static class HandlerRunInputs
             [HandlerIds.H0] =
             [
                 Tenant, Subscription,
-                RunInput.Intake("region"),
+                // No "region": it was read only by the removed Compute vCPU probe (T186 L17); the OpenAI probes use openAiLocation.
                 RunInput.Intake(CostEnvelopeIntake.TierParameterKey),                    // T229: required (CostEnvelopeIntake)
                 RunInput.Intake(CostEnvelopeIntake.EstimatedMonthlyUsdParameterKey),
                 RunInput.Intake("openaiPinFreshnessMinDays", required: false),
@@ -142,6 +142,7 @@ public static class HandlerRunInputs
                 RunInput.Intake(IntakeParameterCatalog.ContainerTypeId),
                 RunInput.Intake(IntakeParameterCatalog.OpenAiMonthlyLimitUsd, required: false),   // T254: optional spend limit (G37)
                 RunInput.Intake(IntakeParameterCatalog.CustomerWorkforceTenantIds),   // T255: WorkforceIdentity__CustomerTenantIds__N
+                RunInput.Intake("provisionedOn", required: false),   // T186 L28: upgrade runs poll /healthz; a fresh stamp has no code yet
                 RunInput.Output(nameof(InterStepState.KeyVaultName)),
                 RunInput.Output(nameof(InterStepState.ResourceGroupName)),
                 RunInput.Output(nameof(InterStepState.AppServiceName)),   // also the bff_url source (T258: PublicConfig__BffUrl)
@@ -152,9 +153,11 @@ public static class HandlerRunInputs
                 RunInput.Output(nameof(InterStepState.ServiceBusFullyQualifiedNamespace)),
                 RunInput.Output(nameof(InterStepState.RedisEndpoint)),     // T242: Redis__Endpoint
                 RunInput.Output(nameof(InterStepState.ContentSafetyEndpoint)),   // T246: AiSafety__ContentSafety__Endpoint
+                RunInput.Output(nameof(InterStepState.StorageBlobEndpoint)),   // T186 follow-up: SessionFileStore__BlobEndpoint
                 RunInput.Output(nameof(InterStepState.BffAppRegId)),
                 RunInput.Output(nameof(InterStepState.DataverseEnvUrl)),   // T245b: Dataverse__ServiceUrl / __EnvironmentUrl
                 RunInput.Output(nameof(InterStepState.SpeContainerId)),    // T227c: EmailProcessing__DefaultContainerId / Communication__ArchiveContainerId
+                RunInput.Output(nameof(InterStepState.CustomerBusinessUnitId)),   // R3 073 / A9: ExternalAccess__CustomerBusinessUnitId
                 // (+ intake tenantId / containerTypeId above; customer_id reads run.CustomerId — run
                 //  identity, which RunInputSource has no kind for and needs no declaration.)
             ],
@@ -283,6 +286,9 @@ public static class HandlerRunInputs
                 // T255: T7 checks both slots carry exactly this list (absent → T7 Failed: the stamp denies every
                 // first sign-in of a customer employee).
                 RunInput.Intake(IntakeParameterCatalog.CustomerWorkforceTenantIds, required: false),
+                // T265 (#2265): T7 checks both slots carry ExternalAccess__CustomerBusinessUnitId == H10's customer unit
+                // (absent → T7 Failed, not an H13 rejection).
+                RunInput.Output(nameof(InterStepState.CustomerBusinessUnitId), required: false),
             ],
             [HandlerIds.H14] =
             [

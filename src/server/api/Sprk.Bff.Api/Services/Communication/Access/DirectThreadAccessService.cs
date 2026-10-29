@@ -38,6 +38,7 @@ public sealed class DirectThreadAccessService : IDirectThreadAccessService
     private readonly Lazy<IThreadMembershipDerivationService> _membershipDerivation;
     private readonly IConfiguration _configuration;
     private readonly ILogger<DirectThreadAccessService> _logger;
+    private readonly Sprk.Bff.Api.Services.Signals.GateDecisionRecordSharing _gateDecisionRecords;
 
     /// <param name="membershipDerivation">
     /// Lazily-resolved (task 052 / FR-11): <see cref="IThreadMembershipDerivationService"/>'s default
@@ -51,18 +52,21 @@ public sealed class DirectThreadAccessService : IDirectThreadAccessService
     /// </param>
     /// <param name="configuration">The Secure Record business-unit and owner-team names (task 149 r1): a message owned by
     /// that team is a secure child, and its shares are <see cref="SecureChildShareSynchronizer"/>'s alone.</param>
+    /// <param name="gateDecisionRecords">Ontology task 042b (D-169): an unfiled communication's gate Decision Records follow its shares.</param>
     public DirectThreadAccessService(
         IGenericEntityService entityService,
         IDataverseRecordShareService accessGrant,
         Lazy<IThreadMembershipDerivationService> membershipDerivation,
         IConfiguration configuration,
-        ILogger<DirectThreadAccessService> logger)
+        ILogger<DirectThreadAccessService> logger,
+        Sprk.Bff.Api.Services.Signals.GateDecisionRecordSharing gateDecisionRecords)
     {
         _entityService = entityService ?? throw new ArgumentNullException(nameof(entityService));
         _accessGrant = accessGrant ?? throw new ArgumentNullException(nameof(accessGrant));
         _membershipDerivation = membershipDerivation ?? throw new ArgumentNullException(nameof(membershipDerivation));
         _configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _gateDecisionRecords = gateDecisionRecords ?? throw new ArgumentNullException(nameof(gateDecisionRecords));
     }
 
     /// <inheritdoc />
@@ -209,7 +213,12 @@ public sealed class DirectThreadAccessService : IDirectThreadAccessService
             };
 
             if (principals.Count > 0)
+            {
                 await GrantReadAccessToPrincipalsAsync(communicationId, threadId, principals, ct);
+                // Ontology 042b (D-169): a user-owned message's gate Decision Records follow its shares; a revoke path added here must mirror the revoke.
+                if (messageOwningTeam is null)
+                    await _gateDecisionRecords.MirrorCommunicationSharesAsync(communicationId, ct);
+            }
         }
         catch (Exception ex)
         {

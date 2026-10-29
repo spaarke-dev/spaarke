@@ -4,7 +4,7 @@
     <title>Per-container storage quota ceiling, distinct from consumption</title>
     <phase>5 Workstream E — New capabilities</phase>
     <gate>023 complete, 024 complete</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>New capability adding .cs endpoints + .tsx controls; tags include bff-api and frontend.</rigor-reason>
     <model-tier>sonnet</model-tier>

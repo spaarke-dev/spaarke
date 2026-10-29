@@ -1,0 +1,69 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="155" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>Worklist: D-111 disposition picker; pass the rule sentence through; flip the Not filed fixture</title>
+    <phase>5 The worklist surface</phase>
+    <gate>059 and 154 merged into docs/ontology-platform-design</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Frontend code calling a write route (disposition) from the Console's primary surface.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Single-component UI against two fixed BFF contracts (154's GET, 071's POST).</model-tier-reason>
+    <effort>high</effort>
+    <deps>059, 154</deps>
+    <tags>frontend,fluent-ui,react,widget</tags>
+    <estimated-effort>3-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Finish the parts of the Worklist that waited on task 154: the D-111 disposition picker on the inquiry-outcome To Do, the rule sentence in the decision wizard, and the Not filed order fixture.</prompt>
+  <role>SPAARKE front-end developer.</role>
+  <goal>The "Record the outcome of the budget inquiry" To Do in the Worklist offers the four-way disposition and records it; the wizard shows the rule's sentence.</goal>
+
+  <context>
+    <background>059 notes: `notes/059-worklist-widget.md`. Contracts: 154's `GET /api/v1/inquiries/for-todo/{todoId}` and route fields (`subjectRecordType`, `subjectRecordId`, `sentence`), and 071's `POST /api/v1/inquiries/{serviceRequestId}/disposition` (`notes/071-disposition-accrual.md` L34: body, 200/404/403/409 reason codes). Issues #1958, #1959.</background>
+    <relevant-files>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/Worklist/worklistService.ts</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/Worklist/worklistWizardItem.ts</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/Worklist/WorklistWidget.tsx</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="D-15">Scope: no Dataverse read from the widget; the inquiry and replies come only from 154's GET. The v5 derivation stays on the server.</constraint>
+    <constraint source="D-111">Scope: the picker shows only on a Do-lane To Do whose `subjectRecordType` is the To Do table and whose lookup returns a service request; four options with their option values (Write-off 100000000, Budget Revised 100000001, Scope Approved 100000002, No Action 100000003); the reply to record against is chosen from the returned replies (newest preselected). On 200 reload the lanes; on 403/404/409 show the reason in plain words and keep the To Do open.</constraint>
+    <constraint source="D-23">Scope: `buildWizardItem` passes `sentence` through; when null the wizard keeps its existing Missing statement.</constraint>
+    <constraint source="project">Scope: flip the `lanesBody` test fixture so Not filed is last (the widget still never reorders; keep the test that proves it).</constraint>
+    <constraint source="ADR-021">Fluent v9 tokens only; light and dark; keyboard reachable. Use the existing dialog/menu components the Worklist already uses; no new shared component.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ontology-platform-r1/notes/059-worklist-widget.md</file>
+      <file>projects/spaarke-ontology-platform-r1/notes/071-disposition-accrual.md</file>
+      <file>docs/standards/MODAL-DECISION-CRITERIA.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare FULL rigor; load the knowledge files.</step>
+    <step order="1">Service calls for the GET and POST; picker; sentence pass-through; fixture flip; tests.</step>
+    <step order="2">PR into docs/ontology-platform-design.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If 154's merged contract differs from this POML, STOP and report rather than adapting the server.</trigger>
+  </escalation>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given an inquiry-outcome To Do with replies, when opened, then the picker lists the four dispositions and the replies (newest preselected), and confirming posts `{replyCommunicationId, disposition}` and reloads the lanes.</criterion>
+    <criterion testable="true">Given a 403, 404 or 409 (each reason code), then a plain-words message shows and the item stays open.</criterion>
+    <criterion testable="true">Given any other To Do or a non-To Do subject, then no picker shows and no lookup call is made.</criterion>
+    <criterion testable="true">Given a row with a sentence, then the wizard shows it; given null, then the existing Missing statement shows.</criterion>
+    <criterion testable="true">Negative: no Dataverse or Xrm call from the widget.</criterion>
+    <criterion testable="true">Tests cover the criteria above; anything beyond needs a one-line justification in task notes. The packages build.</criterion>
+  </acceptance-criteria>
+
+  <notes>From task 059's escalation (#1958, #1959 items 1 and 3).</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

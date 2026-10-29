@@ -16,6 +16,10 @@
          (BootedBff.cs), in Development and in Production. Same package and version the three BFF test
          projects already use; test-only, so nothing reaches the BFF publish. -->
     <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" Version="10.0.11" />
+    <!-- #2191 (UAC-r2): MappingSourceCallerMaskGuardTests reads the server sources as C# syntax trees, so comments, string
+         literals (regular, verbatim, interpolated, raw) and char literals cannot hide or fake a call. Same package and version
+         as Sprk.Provisioning.ControlPlane.Tests (RunContextContractTests); test-only, nothing reaches the BFF publish. -->
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="5.9.0" />
     <PackageReference Include="xunit" Version="2.6.2" />
     <PackageReference Include="xunit.runner.visualstudio" Version="2.5.4">
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>

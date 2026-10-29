@@ -35,8 +35,10 @@ namespace Sprk.Bff.Api.Services.Office;
 /// Per ADR-001, heavy processing (SPE upload, AI processing) is delegated to background workers.
 /// This service focuses on fast job creation (target: &lt;3 seconds response time).
 /// </para>
+/// <para>Internal (task 018b): its constructor takes the internal <c>RecordCreationService</c>; the DI container builds it
+/// through <see cref="IOfficeService"/>, and every test reaches it through InternalsVisibleTo.</para>
 /// </remarks>
-public class OfficeService : IOfficeService
+internal class OfficeService : IOfficeService
 {
     // Task 060 (#1084): the save's job record (create, transitions, the idempotency lookup, the status read and the SSE
     // stream), stored on the Dataverse row instead of a static in-memory dictionary.
@@ -72,9 +74,17 @@ public class OfficeService : IOfficeService
     // Slice 3 (#10): generic Dataverse create for the add-in inline "New record" (Invoice) and the To Do writer.
     // Required (task 059): registered unconditionally as a singleton (→ IDataverseService, GraphModule.cs).
     private readonly IGenericEntityService _genericEntityService;
-    // FR-13 (spaarkeai-word-add-in-r1 task 030): the Matter quick-create path. Required (ADR-032): its registration
-    // is unconditional, so an absent one is a startup fault, never a per-request 403.
-    private readonly RecordCreationService _recordCreation;
+    // Field mapping task 018b (FR-13 part 2, FR-12): the Matter and Project quick-create legs create through the ONE server
+    // create, as the CALLER (ADR-028: WhoAmI and every payload check under their own token; the create app-only). Required
+    // (ADR-032): every registration below is unconditional (OfficeModule, SpaarkeCore, ExternalAccessModule).
+    private readonly Sprk.Bff.Api.Services.RecordCreation.RecordCreationService _recordCreation;
+
+    // The caller's Dataverse (OBO, a typed HttpClient registered by SpaarkeCore): the principal the create is checked as.
+    private readonly IDataverseUserClient _callerDataverse;
+
+    // The caller's Read probe on the field-mapping source (FR-04), asked under the request's bearer token.
+    private readonly Sprk.Bff.Api.Infrastructure.ExternalAccess.CallerRecordAccessProbe _callerAccess;
+    private readonly Microsoft.AspNetCore.Http.IHttpContextAccessor _http;
     // Task 067 (finding F5): resolves the calling user's Dataverse systemuserid so the job row can record
     // WHO asked for it (sprk_initiatedby). Reused, not reinvented (CLAUDE.md §11) — this is the same
     // ICallerSystemUserResolver the Communication read path and task 062's picker already depend on,
@@ -104,7 +114,10 @@ public class OfficeService : IOfficeService
         IMembershipEventPublisher membershipEventPublisher,
         RecordContainerResolver containerResolver,
         Sprk.Bff.Api.Services.Dataverse.CoreAncestorResolver coreAncestors,
-        RecordCreationService recordCreation,
+        Sprk.Bff.Api.Services.RecordCreation.RecordCreationService recordCreation,
+        IDataverseUserClient callerDataverse,
+        Sprk.Bff.Api.Infrastructure.ExternalAccess.CallerRecordAccessProbe callerAccess,
+        Microsoft.AspNetCore.Http.IHttpContextAccessor http,
         Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver ownershipResolver,
         OfficeSearchService search,
         EmailUploadCaptureService emailUploadCapture,
@@ -121,6 +134,12 @@ public class OfficeService : IOfficeService
         // "permission" message on every Matter quick-create.
         _recordCreation = recordCreation
             ?? throw new ArgumentNullException(nameof(recordCreation));
+        _callerDataverse = callerDataverse
+            ?? throw new ArgumentNullException(nameof(callerDataverse));
+        _callerAccess = callerAccess
+            ?? throw new ArgumentNullException(nameof(callerAccess));
+        _http = http
+            ?? throw new ArgumentNullException(nameof(http));
         _coreAncestors = coreAncestors
             ?? throw new ArgumentNullException(nameof(coreAncestors));
         _ownershipResolver = ownershipResolver
@@ -377,8 +396,8 @@ public class OfficeService : IOfficeService
         if (request.ContentType == SaveContentType.Email && request.Email != null)
         {
             _logger.LogInformation(
-                "[EMAIL BODY DEBUG] Subject={Subject}, HasBody={HasBody}, BodyLength={BodyLength}",
-                request.Email.Subject,
+                // Task 130: no subject — email content stays out of the logs (ids and sizes only).
+                "[EMAIL BODY DEBUG] HasBody={HasBody}, BodyLength={BodyLength}",
                 !string.IsNullOrEmpty(request.Email.Body),
                 request.Email.Body?.Length ?? 0);
         }
@@ -389,10 +408,13 @@ public class OfficeService : IOfficeService
             request = await _emailEnricher.EnrichEmailFromGraphAsync(request, httpContext, cancellationToken);
         }
 
-        // Fetch attachment content from Graph API if missing (single attachment save)
+        // Fetch attachment content from Graph API if missing (single attachment save). Task 130: the same read also yields
+        // the PARENT email, whose communication the attachment's document is created linked to (captured below).
+        EmailMetadata? attachmentParentEmail = null;
         if (request.ContentType == SaveContentType.Attachment && request.Attachment != null)
         {
-            request = await _emailEnricher.EnrichAttachmentFromGraphAsync(request, httpContext, cancellationToken);
+            (request, attachmentParentEmail) =
+                await _emailEnricher.EnrichAttachmentFromGraphAsync(request, httpContext, cancellationToken);
         }
 
         // Declared outside the try (task 039, finding 2) so the outer catch can mark THIS save's ProcessingJob
@@ -446,27 +468,117 @@ public class OfficeService : IOfficeService
                 };
             }
 
+            // FR-B3 (task 043): route a user-saved EMAIL through the SAME capture engine as mailbox intake —
+            // create/reconcile the canonical sprk_communication and run association + triage + provenance — so a
+            // hand-filed email is intelligence-bearing, not merely a sprk_document archive. Runs AFTER the
+            // idempotency early-return (a genuine replay already captured) and BEFORE document creation so
+            // OfficeDocumentPersistence's cross-path link (FR-C4) resolves the canonical this produces. Message-
+            // level dedup is structural (FR-C1 alternate key) inside CaptureAsync — no second dedup mechanism.
+            // CaptureAsync is internally best-effort/non-fatal (NFR-04): it never throws out of the save.
+            //
+            // Task 130 (#2126): the capture's communication id is KEPT and handed to the document create, which links
+            // the document to it in the create itself — no re-resolve by Message-ID unless the capture produced none.
+            Guid? emailCommunicationId = null;
+            // Task 131 (#2171): what the filing below did, reported on the success response. Null = nothing to report.
+            EmailFilingOutcome? emailFiling = null;
+            if (request.ContentType == SaveContentType.Email)
+            {
+                var capture = await _emailUploadCapture.CaptureWithOutcomeAsync(request, userId, cancellationToken);
+                emailCommunicationId = capture?.CommunicationId;
+
+                // Task 121 (owner 2026-10-09, "file it if unfiled"): the email may already have been captured — from a
+                // mailbox, or saved by someone else — and so reconciled to an existing communication, which the capture
+                // leaves as it is. When that communication is filed to nothing and the caller may change it, it is filed
+                // to the record picked for THIS save. Never moved when already filed; nothing filed by an unfiled save.
+                // Best-effort: it never fails the save; a refusal or failure is reported in SaveResponse.EmailFiling (task 131).
+                emailFiling = ToEmailFilingOutcome(await _reconciledEmailFiling.FileIfUnfiledAsync(
+                    request, capture, TokenHelper.ExtractBearerTokenOrNull(httpContext), cancellationToken));
+            }
+            else if (request.ContentType == SaveContentType.Attachment
+                     && attachmentParentEmail is { } parentEmail
+                     && !string.IsNullOrWhiteSpace(parentEmail.InternetMessageId))
+            {
+                // Task 130: a single attachment saved on its own belongs to its parent email's communication. The SAME
+                // capture an email save runs, over the SAME request shape — the canonical when the email was already
+                // captured (race-proof on the Message-ID alternate key, so a second save reuses the row), else the one
+                // it creates now. A parent without a Message-ID is not captured (it would have no dedup key); the
+                // document create then looks the communication up by the parent's RFC Message-ID (ParentEmailId only
+                // when it has that shape — an Exchange item id is never a lookup key), else is Restricted.
+                // Owner decision 2026-10-20 (task 130): saving one attachment files its parent email to the record
+                // exactly as saving the email itself would — a new capture is filed through rung 0 (TargetEntity), and
+                // an already-captured, unfiled email is filed by ReconciledEmailFiling (task 121's rule), never moved
+                // when already filed.
+                var parentSave = new SaveRequest
+                {
+                    ContentType = SaveContentType.Email,
+                    Email = parentEmail,
+                    TargetEntity = request.TargetEntity,
+                };
+                var parentCapture = await _emailUploadCapture.CaptureWithOutcomeAsync(parentSave, userId, cancellationToken);
+                emailCommunicationId = parentCapture?.CommunicationId;
+
+                emailFiling = ToEmailFilingOutcome(await _reconciledEmailFiling.FileIfUnfiledAsync(
+                    parentSave, parentCapture, TokenHelper.ExtractBearerTokenOrNull(httpContext), cancellationToken));
+            }
+
+            // Task 130: an attachment's parent RFC Message-ID, as the parent itself reported it — the lookup key when the
+            // capture produced nothing (ParentEmailId is an Exchange item id whenever Graph read it).
+            var emailMessageIdFallback = attachmentParentEmail is { } parentForLookup
+                ? OfficeEmailEnricher.ResolveRfcMessageId(parentForLookup)
+                : null;
+
             // ══ RECORD OWNERSHIP (task 080, write-path invariant I-6) ═════════════════════════════════
             // The sprk_document this save creates is owned by a business unit's DEFAULT OWNER TEAM — the team of
             // the record it is filed against, or the acting user's when it is filed against nothing (owner
             // decisions 2026-09-22 / 2026-09-25). Left unset, Dataverse makes the app user the owner, which sits
             // in the ROOT business unit, so no child-BU user could ever read their own saved document.
             //
-            // Resolved HERE — before the email capture, the job row, the upload and the document row — so a
-            // refusal writes nothing at all. A version save is skipped: it creates no document, and its row keeps
-            // the owner it already has. `IsVersionSave` is the cheap intent predicate; the target is read below.
+            // UAC task 194b R4-2: resolved AFTER the email capture and BEFORE the job row, the upload and the document
+            // row. An email-derived document is created linked to its email's communication, and the owner question
+            // is asked over BOTH lookups the document is written with (the association and sprk_relatedcommunication,
+            // in sprk_document's order — the reconciler's question), so a secure communication next to an ordinary
+            // association is seen here, not at the next sweep. The capture's id is reused; only a save the capture
+            // produced no id for reads the communication by Message-ID (ResolveEmailCommunicationAsync), and that id
+            // is handed to the create as final. A read that fails refuses the save — never a question about the
+            // association alone. A refusal writes no job row, upload or document (the capture, best-effort and
+            // idempotent on the Message-ID, has run, as mailbox intake would run it). A version save is skipped: it
+            // creates no document, and its row keeps the owner it already has.
             Guid? owningTeamId = null;
             Guid? createdByPersonId = null;
+            var emailCommunicationResolved = false;
             if (!IsVersionSave(request))
             {
-                var documentOwner = await _ownershipResolver.ResolveOwnerAsync(
-                    new Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext
+                var (communicationResolved, relatedCommunicationId) = await _documentPersistence
+                    .ResolveEmailCommunicationAsync(request, emailCommunicationId, emailMessageIdFallback, cancellationToken);
+                if (!communicationResolved)
+                {
+                    // 194b V-fix (verifier B F1/F2): a read that FAILED is transient, not a refusal: the retryable
+                    // OFFICE_014 (502), which the add-in offers to retry. OFFICE_022 stays for an owner the rule refuses.
+                    return new SaveResponse
                     {
-                        TargetEntityLogicalName = request.TargetEntity?.EntityType,
-                        TargetRecordId = request.TargetEntity?.EntityId,
+                        Success = false,
+                        Error = new SaveError
+                        {
+                            Code = OfficeErrorCodes.DataverseError,
+                            Message = "This email's record could not be read to assign the item an owner, so it was not "
+                                      + "saved. Try again.",
+                            Retryable = true
+                        }
+                    };
+                }
+
+                emailCommunicationId = relatedCommunicationId;
+                emailCommunicationResolved = true;
+
+                var documentOwner = await _ownershipResolver.ResolveOwnerAsync(
+                    OfficeDocumentPersistence.DocumentOwnershipOf(
+                        request.TargetEntity?.EntityType,
+                        request.TargetEntity?.EntityId,
+                        relatedCommunicationId,
                         // The oid is enough: the resolver keys systemuser on azureactivedirectoryobjectid, the same
                         // key OfficeAuthFilter resolved and RecordContainerResolver uses for this save's container.
-                        CallerObjectId = Guid.TryParse(userId, out var callerObjectId) ? callerObjectId : null,
+                        Guid.TryParse(userId, out var callerObjectId) ? callerObjectId : null) with
+                    {
                         // Task 146 c1-r1 (owner round 13 item 9): the saving user asked for every document this save
                         // creates app-only — recorded as their creator person (carried to the worker with the team).
                         RequestedBy = Sprk.Bff.Api.Services.Dataverse.RecordRequester.OfObjectId(userId),
@@ -494,26 +606,6 @@ public class OfficeService : IOfficeService
                         }
                     };
                 }
-            }
-
-            // FR-B3 (task 043): route a user-saved EMAIL through the SAME capture engine as mailbox intake —
-            // create/reconcile the canonical sprk_communication and run association + triage + provenance — so a
-            // hand-filed email is intelligence-bearing, not merely a sprk_document archive. Runs AFTER the
-            // idempotency early-return (a genuine replay already captured) and BEFORE document creation so
-            // OfficeDocumentPersistence's cross-path link (FR-C4) resolves the canonical this produces. Message-
-            // level dedup is structural (FR-C1 alternate key) inside CaptureAsync — no second dedup mechanism.
-            // CaptureAsync is internally best-effort/non-fatal (NFR-04): it never throws out of the save.
-            if (request.ContentType == SaveContentType.Email)
-            {
-                var capture = await _emailUploadCapture.CaptureWithOutcomeAsync(request, userId, cancellationToken);
-
-                // Task 121 (owner 2026-10-09, "file it if unfiled"): the email may already have been captured — from a
-                // mailbox, or saved by someone else — and so reconciled to an existing communication, which the capture
-                // leaves as it is. When that communication is filed to nothing and the caller may change it, it is filed
-                // to the record picked for THIS save. Never moved when already filed; nothing filed by an unfiled save.
-                // Best-effort: it never fails the save.
-                await _reconciledEmailFiling.FileIfUnfiledAsync(
-                    request, capture, TokenHelper.ExtractBearerTokenOrNull(httpContext), cancellationToken);
             }
 
             // Step 3: Determine job type based on content type
@@ -962,8 +1054,66 @@ public class OfficeService : IOfficeService
                 };
                 await _jobs.RecordAsync(jobRecord, null, cancellationToken);
 
+                // ══ UAC task 194b V-fix 3 (coordinator ruling, option a) — AN EDITABLE COPY'S CANONICAL IS IN ITS OWNER QUESTION ══
+                // An editable save byte-identical to an existing canonical is created LINKED to it (sprk_canonicaldocument), and
+                // that link is a Secure-only parent (RecordOwnershipResolver.IsSecureOnlyParent): a copy of Secure content is
+                // Secure. The identity can only be read from the uploaded item, so it is read here, after the upload and before
+                // the create, and the owner question is asked again WITH the canonical (the one asked above, before anything
+                // was written, did not have it). The create then links exactly that canonical, owned as this answer says — never
+                // re-owned afterwards. An ordinary canonical never moves the copy: it is not the primary. A refusal writes no
+                // document and removes the upload this save made.
+                EditableContentIdentity? editableIdentity = null;
+                if (OfficeDocumentPersistence.IsEditableContent(request.ContentType))
+                {
+                    editableIdentity = await _documentPersistence.ResolveEditableContentIdentityAsync(driveId, itemId, cancellationToken);
+                    if (editableIdentity.CanonicalDocumentId is { } canonicalId)
+                    {
+                        var copyOwner = await _ownershipResolver.ResolveOwnerAsync(
+                            OfficeDocumentPersistence.DocumentOwnershipOf(
+                                request.TargetEntity?.EntityType,
+                                request.TargetEntity?.EntityId,
+                                emailCommunicationId,
+                                Guid.TryParse(userId, out var copyCallerObjectId) ? copyCallerObjectId : null,
+                                canonicalDocumentId: canonicalId) with
+                            {
+                                RequestedBy = Sprk.Bff.Api.Services.Dataverse.RecordRequester.OfObjectId(userId),
+                            },
+                            cancellationToken);
+                        if (!copyOwner.IsOwned)
+                        {
+                            if (await _documentPersistence.IsUploadUnreferencedAsync(itemId, canonicalId, cancellationToken))
+                            {
+                                await _storageUploader.DeleteFromSpeAsync(driveId, itemId, cancellationToken);
+                            }
+
+                            jobRecord = jobRecord with
+                            {
+                                Status = JobStatus.Failed,
+                                CurrentPhase = "OwnerUnresolved",
+                                CompletedAt = DateTimeOffset.UtcNow
+                            };
+                            await _jobs.RecordAsync(jobRecord, copyOwner.Reason, cancellationToken);
+
+                            return new SaveResponse
+                            {
+                                Success = false,
+                                Error = new SaveError
+                                {
+                                    Code = OfficeErrorCodes.RecordOwnerUnresolved,
+                                    Message = "This document is identical to an existing document, and an owner could not be "
+                                              + "assigned with that document taken into account, so it was not saved.",
+                                    Retryable = false
+                                }
+                            };
+                        }
+
+                        owningTeamId = copyOwner.OwningTeamId;
+                        createdByPersonId = copyOwner.CreatedByPerson;
+                    }
+                }
+
                 // Create Document record with SPE pointers
-                var (documentId, wasContentDuplicate) = await _documentPersistence.CreateDocumentWithSpePointersAsync(
+                var (documentId, wasContentDuplicate, relatedCommunicationId) = await _documentPersistence.CreateDocumentWithSpePointersAsync(
                     request,
                     driveId,
                     itemId,
@@ -978,7 +1128,15 @@ public class OfficeService : IOfficeService
                     preAssignedDocumentId,
                     // Task 080: resolved (or refused) before anything was written — see RECORD OWNERSHIP above.
                     owningTeamId,
-                    createdByPersonId);
+                    createdByPersonId,
+                    // Task 130: the email's communication — the document is created linked to it (or Restricted). 194b
+                    // R4-2: resolved above for the owner question, so final (no second lookup).
+                    emailCommunicationId: emailCommunicationId,
+                    jobId: jobId,
+                    emailMessageIdFallback: emailMessageIdFallback,
+                    emailCommunicationResolved: emailCommunicationResolved,
+                    // V-fix 3: the identity the owner question above was asked with, so the create links exactly that canonical.
+                    editableContentIdentity: editableIdentity);
 
                 // FR-C3 (email-communication-intelligence-r2, R-3): the content is byte-identical to an existing
                 // canonical document (returned as `documentId`). No second document was created — and there is
@@ -1026,7 +1184,8 @@ public class OfficeService : IOfficeService
                         Duplicate = false, // NOT an idempotent job replay — this is a content dedup (user notified via the canonical notification)
                         JobId = jobId,
                         StatusUrl = $"/api/office/jobs/{jobId}",
-                        StreamUrl = $"/api/office/jobs/{jobId}/stream"
+                        StreamUrl = $"/api/office/jobs/{jobId}/stream",
+                        EmailFiling = emailFiling
                     };
                 }
 
@@ -1070,7 +1229,10 @@ public class OfficeService : IOfficeService
                     isVersionSave: false,
                     owningTeamId,
                     cancellationToken,
-                    createdByPersonId);
+                    createdByPersonId,
+                    // Task 130: the email's communication, so the worker creates the attachment children linked to it —
+                    // null for an email-derived save whose document was created Restricted (its children are too).
+                    relatedCommunicationId: relatedCommunicationId);
 
                 // Mark job as complete - background workers will process asynchronously
                 // User sees immediate success while AI processing continues in background. The save's view (task 060)
@@ -1102,7 +1264,8 @@ public class OfficeService : IOfficeService
                 Duplicate = false,
                 JobId = jobId,
                 StatusUrl = $"/api/office/jobs/{jobId}",
-                StreamUrl = $"/api/office/jobs/{jobId}/stream"
+                StreamUrl = $"/api/office/jobs/{jobId}/stream",
+                EmailFiling = emailFiling
             };
         }
         catch (SdapProblemException refusal)
@@ -1188,6 +1351,20 @@ public class OfficeService : IOfficeService
     }
 
     /// <summary>
+    /// Task 131 (#2171): the wire form of what <see cref="ReconciledEmailFiling"/> did.
+    /// <see cref="ReconciledFilingResult.NotApplicable"/> is no outcome at all (<c>null</c>, omitted from the response),
+    /// so a save that filed nothing never claims it did.
+    /// </summary>
+    internal static EmailFilingOutcome? ToEmailFilingOutcome(ReconciledFilingResult result) => result switch
+    {
+        ReconciledFilingResult.Filed => EmailFilingOutcome.Filed,
+        ReconciledFilingResult.AlreadyFiled => EmailFilingOutcome.AlreadyFiled,
+        ReconciledFilingResult.NotPermitted => EmailFilingOutcome.NotPermitted,
+        ReconciledFilingResult.Failed => EmailFilingOutcome.Failed,
+        _ => null,
+    };
+
+    /// <summary>
     /// Generates an idempotency key based on the request content.
     /// Uses SHA256 hash of the canonical payload.
     /// </summary>
@@ -1198,7 +1375,9 @@ public class OfficeService : IOfficeService
                        $"{request.TargetEntity?.EntityType}|" +
                        $"{request.TargetEntity?.EntityId}|" +
                        // Task 121: the stored message id (the RFC id, or an older pane's / a draft's item id).
-                       $"{(request.Email is null ? null : OfficeEmailEnricher.ResolveStoredMessageId(request.Email)) ?? request.Email?.Subject}|" +
+                       // #2416: with no id, the subject plus any typed name, which before #2416 travelled as the subject.
+                       // With no typed name the key is unchanged.
+                       $"{(request.Email is null ? null : OfficeEmailEnricher.ResolveStoredMessageId(request.Email) ?? (request.Email.DocumentName is null ? request.Email.Subject : $"{request.Email.Subject}/{request.Email.DocumentName}"))}|" +
                        $"{request.Attachment?.AttachmentId}|" +
                        $"{request.Document?.FileName}|" +
                        $"{request.Document?.ExistingDocumentId}";
@@ -1850,13 +2029,13 @@ public class OfficeService : IOfficeService
     /// <para>Slice 3 (#10, email-communication-intelligence-r2 2026-09-02): implements the inline
     /// "New record" for the add-in "Related to" picker. Scope = <b>Matter, Project, Invoice</b>; other types
     /// return null (endpoint 403s) until built out.</para>
-    /// <para><b>Matter</b> (task 030, FR-13) and <b>Project</b> (task 031, FR-13) are created complete by
-    /// <see cref="RecordCreationService"/>: the caller as a <b>load-bearing</b> owner, business-unit defaults, the
-    /// Field Mapping Framework, the matter-type and practice-area lookups (Matter) or the project-type lookup
-    /// (Project) when supplied, and the Assigned To contact (task 100). Neither writes its entity's number — the
-    /// platform's autonumber assigns <c>sprk_matternumber</c> / <c>sprk_projectnumber</c> (task 076, interim).
-    /// A refusal surfaces as <see cref="Sprk.Bff.Api.Infrastructure.Exceptions.SdapProblemException"/> (no row
-    /// written); see <see cref="QuickCreateViaCreationServiceAsync"/>.</para>
+    /// <para><b>Matter</b> (task 030, FR-13) and <b>Project</b> (task 031, FR-13) are created by the ONE server create,
+    /// <see cref="Sprk.Bff.Api.Services.RecordCreation.RecordCreationService"/>, as the caller (field mapping task 018b):
+    /// this method is a thin adapter that maps the request to that service's payload and its refusal to the Office codes
+    /// (<see cref="MapQuickCreateRefusal"/>). Neither writes its entity's number — the platform's autonumber assigns
+    /// <c>sprk_matternumber</c> / <c>sprk_projectnumber</c> (task 076, interim). A refusal surfaces as
+    /// <see cref="Sprk.Bff.Api.Infrastructure.Exceptions.SdapProblemException"/> (no row written); see
+    /// <see cref="QuickCreateViaCreationServiceAsync"/>.</para>
     /// <para><b>Invoice</b> keeps the minimal path: the generic Dataverse create
     /// (<see cref="IGenericEntityService.CreateAsync"/>) with the name, the description and the Assigned To contact
     /// (task 100). It is owned by the caller's business-unit
@@ -1905,6 +2084,7 @@ public class OfficeService : IOfficeService
                 .ConfigureAwait(false);
         }
 
+        // removed by ebilling-r1 task 096
         // Invoice only: name, description and Assigned To (task 100, owner UAT round 5 item 3).
         var logicalName = QuickCreateFieldRequirements.GetLogicalName(entityType);
 
@@ -1984,19 +2164,28 @@ public class OfficeService : IOfficeService
     }
 
     /// <summary>
-    /// The Matter (task 030) and Project (task 031) leg of <see cref="QuickCreateAsync"/>, FR-13: delegates to
-    /// <see cref="RecordCreationService"/> and adapts its outcome to this method's contract.
+    /// The Matter (task 030) and Project (task 031) leg of <see cref="QuickCreateAsync"/>: a thin adapter over the ONE
+    /// server create (field mapping task 018b, FR-13 part 2, FR-12). It maps the request to
+    /// <see cref="Sprk.Bff.Api.Services.RecordCreation.RecordCreationService"/>'s payload, creates as the CALLER, and maps the
+    /// outcome back to <see cref="QuickCreateResponse"/> and the Office codes (<see cref="MapQuickCreateRefusal"/>).
     /// </summary>
     /// <remarks>
-    /// <para>A structured <see cref="RecordCreationFailure"/> is surfaced as the codebase's typed-problem exception
-    /// (<see cref="Sprk.Bff.Api.Infrastructure.Exceptions.SdapProblemException"/>) because
-    /// <see cref="IOfficeService.QuickCreateAsync"/> returns <c>QuickCreateResponse?</c> and its signature cannot
-    /// change here: the shared <c>Phase2EndToEndFixture</c> mocks it. The endpoint renders that exception in the
-    /// Office ProblemDetails shape. <see cref="RecordCreationService"/> itself returns the failure as data — that is
-    /// the contract the wizard-migration evaluation consumes.</para>
-    /// <para>Owner attribution is LOAD-BEARING for both (an unresolved caller is refused, 403), unlike the
-    /// best-effort posture the Invoice leg keeps. Every optional field is passed through for both; each path reads
-    /// only its own (<c>MatterTypeId</c> / <c>PracticeAreaId</c> on a Matter, <c>ProjectTypeId</c> on a Project).</para>
+    /// <para><b>What the adapter supplies</b> (task 018 notes, 018b-1 inventory): the trimmed name and description; the
+    /// optional references the request names, declared by the registry (<see cref="Sprk.Bff.Api.Services.RecordCreation.RecordTableRule.OptionalReferenceLookups"/>:
+    /// one the caller may not use is dropped with a warning, never refused — 018a K-3); the Assigned To contact the
+    /// request names, in the caller's payload (so it is checked, and refused, as the caller — UAC-r2 condition (b) item 1),
+    /// else the maker's linked contact as a post-mapping default on the registry's for-person column (fill-only after
+    /// mapping; dropped with a warning when the caller may not use it — 018a K-7); and, for a Project created from a matter
+    /// or project, the regarding pair naming that record, derived here BEFORE the create (#2191 K2), so isolation never
+    /// depends on field mapping. Every check, the owner, the search-index default, the number and the post-create steps
+    /// are the service's; no check is duplicated here (ADR-008 path A).</para>
+    /// <para><b>A client regarding pair</b> (G4, UAC-r2 condition 1, 2026-10-22): <see cref="QuickCreateRequest"/> carries
+    /// no regarding member and System.Text.Json skips unknown members, so the only pair this adapter ever writes is the
+    /// derived one; the old <c>secure_source_filing_mismatch</c> refusal is unreachable by construction.</para>
+    /// <para>A refusal surfaces as <see cref="Sprk.Bff.Api.Infrastructure.Exceptions.SdapProblemException"/> because
+    /// <see cref="IOfficeService.QuickCreateAsync"/> returns <c>QuickCreateResponse?</c> and its signature cannot change
+    /// here (the shared <c>Phase2EndToEndFixture</c> mocks it); the endpoint renders it in the Office ProblemDetails shape.
+    /// A fault in the create propagates to the endpoint's generic 500 (<c>OFFICE_INTERNAL</c>).</para>
     /// </remarks>
     private async Task<QuickCreateResponse?> QuickCreateViaCreationServiceAsync(
         QuickCreateEntityType entityType,
@@ -2006,43 +2195,354 @@ public class OfficeService : IOfficeService
         string? ownerSystemUserId,
         CancellationToken cancellationToken)
     {
-        var result = await _recordCreation.CreateAsync(
-            new RecordCreationRequest
-            {
-                EntityType = entityType,
-                Name = name,
-                Description = request.Description,
-                CallerUserId = userId,
-                OwnerSystemUserId = ownerSystemUserId,
-                MatterTypeId = request.MatterTypeId,
-                PracticeAreaId = request.PracticeAreaId,
-                ProjectTypeId = request.ProjectTypeId,
-                AssignedToContactId = request.AssignedToContactId,
-                SourceEntityLogicalName = request.SourceEntityType,
-                SourceRecordId = request.SourceRecordId,
-            },
-            cancellationToken).ConfigureAwait(false);
+        var table = QuickCreateFieldRequirements.GetLogicalName(entityType);
+        var rule = Sprk.Bff.Api.Services.RecordCreation.RecordTableRules.Find(table)
+            ?? throw new InvalidOperationException($"'{table}' has no record-creation rule.");
+        var forPerson = rule.ForPerson
+            ?? throw new InvalidOperationException($"'{table}' declares no for-person column.");
+        var noun = Sprk.Bff.Api.Services.RecordCreation.RecordCreationService.NounOf(table);
+        var title = $"{QuickCreateFieldRequirements.GetDisplayName(entityType)} Not Created";
 
-        if (result.Failure is { } failure)
+        // G3 (decided 2026-10-22): the endpoint-resolved systemuser is an INPUT precondition, not an authorization check —
+        // the maker's-contact default below needs it before the create. The identity check is the service's WhoAmI under the
+        // caller's own token (ADR-028).
+        if (!Guid.TryParse(ownerSystemUserId, out var makerSystemUserId) || makerSystemUserId == Guid.Empty)
         {
-            throw new Sprk.Bff.Api.Infrastructure.Exceptions.SdapProblemException(
-                failure.Code,
-                $"{QuickCreateFieldRequirements.GetDisplayName(entityType)} Not Created",
-                failure.Detail,
-                MapCreationFailureStatus(failure.Kind));
+            _logger.LogWarning(
+                "[RECORD-CREATE] Refusing {Entity} quick-create for caller {CallerUserId}: no resolved Dataverse systemuser.",
+                table, userId);
+            throw new SdapProblemException(QuickCreateOwnerUnresolvedCode, title, OwnerUnresolvedDetail(noun),
+                StatusCodes.Status403Forbidden);
+        }
+
+        var payload = new Dictionary<string, object?>(StringComparer.Ordinal)
+        {
+            [entityType == QuickCreateEntityType.Matter ? MatterNameColumn : ProjectNameColumn] = name,
+        };
+        if (!string.IsNullOrWhiteSpace(request.Description))
+        {
+            payload[entityType == QuickCreateEntityType.Matter ? MatterDescriptionColumn : ProjectDescriptionColumn] =
+                request.Description.Trim();
+        }
+
+        // The optional references (Guid.Empty is how some clients say "unset": treated as absent, never rejected).
+        foreach (var (column, target, id) in QuickCreateReferences(entityType, request))
+        {
+            if (id is { } chosen && chosen != Guid.Empty)
+                payload[column] = LookupValue(target, chosen);
+        }
+
+        // Assigned To: the contact the request names wins, in the caller's payload — checked as the caller at step 5 and
+        // REFUSED when they may not use it (UAC-r2 condition (b) item 1). Else a mapped value; else the maker's own linked
+        // contact, as a post-mapping default (fill-only after mapping; dropped with a warning when it cannot be used).
+        Dictionary<string, object?>? defaults = null;
+        var makerHasNoContact = false;
+        if (request.AssignedToContactId is { } assignee && assignee != Guid.Empty)
+        {
+            payload[forPerson.Column] = LookupValue(forPerson.RelatedTable, assignee);
+        }
+        else if (await ResolveMakerContactIdAsync(makerSystemUserId, cancellationToken).ConfigureAwait(false) is { } makerContact)
+        {
+            defaults = new Dictionary<string, object?>(StringComparer.Ordinal)
+            {
+                [forPerson.Column] = new Microsoft.Xrm.Sdk.EntityReference(forPerson.RelatedTable, makerContact),
+            };
+        }
+        else
+        {
+            makerHasNoContact = true;
+        }
+
+        // A Project created FROM a matter or project is filed under it (#2191 K2): the pair is derived here, before the
+        // create, from the request's own source — never left to field mapping, which never writes a pair (fill-only).
+        var parentTable = string.Empty;
+        var parentId = Guid.Empty;
+        var filedUnderParent = entityType == QuickCreateEntityType.Project
+            && IsFiledUnderItsSource(request, out parentTable, out parentId);
+        if (filedUnderParent)
+        {
+            var (typeId, retryable) = await DeriveFiledUnderTypeAsync(parentTable, cancellationToken).ConfigureAwait(false);
+            if (typeId is not { } recordType)
+            {
+                throw new SdapProblemException(Sprk.Bff.Api.Services.Dataverse.RecordOwnerRefusal.ParentUndetermined, title,
+                    FiledUnderUndeterminedDetail(retryable), StatusCodes.Status403Forbidden);
+            }
+
+            // The canonical spelling (lower-case "D"), so a text-equality reader of the pair's id matches it.
+            payload[Sprk.Bff.Api.Services.Access.SecureRootInheritance.PairIdColumn] = parentId.ToString("D").ToLowerInvariant();
+            payload[Sprk.Bff.Api.Services.Access.SecureRootInheritance.PairTypeColumn] = LookupValue(RecordTypeEntity, recordType);
+        }
+
+        // Field mapping only when the request names a source (as before); read as the caller (FR-04).
+        Sprk.Bff.Api.Services.RecordCreation.RecordCreationMapping? mapping = null;
+        if (!string.IsNullOrWhiteSpace(request.SourceEntityType) && request.SourceRecordId is { } sourceId && sourceId != Guid.Empty)
+        {
+            var token = _http.HttpContext is { } context ? TokenHelper.ExtractBearerTokenOrNull(context) : null;
+            mapping = Sprk.Bff.Api.Services.RecordCreation.RecordCreationMapping.ForCaller(
+                _callerAccess, token, request.SourceEntityType.Trim().ToLowerInvariant(), sourceId);
+        }
+
+        var outcome = await _recordCreation.CreateAsync(
+                new Sprk.Bff.Api.Services.RecordCreation.RecordCreationRequest(
+                    table,
+                    new Sprk.Bff.Api.Services.RecordCreation.RecordCreationPayload.WebApi(
+                        System.Text.Json.JsonSerializer.SerializeToElement(payload)))
+                {
+                    Mapping = mapping,
+                    ReferenceLookupColumns = rule.OptionalReferenceLookups,
+                    PostMappingDefaults = defaults,
+                },
+                Sprk.Bff.Api.Services.RecordCreation.RecordCreationPrincipal.ForCaller(
+                    _callerDataverse, Guid.TryParse(userId, out var callerObjectId) ? callerObjectId : null),
+                cancellationToken)
+            .ConfigureAwait(false);
+
+        if (outcome.Refusal is { } refusal)
+        {
+            var mapped = MapQuickCreateRefusal(refusal, noun, forPerson.Column, filedUnderParent);
+            _logger.LogWarning(
+                "[RECORD-CREATE] {Entity} quick-create refused: {Kind} {ServiceCode} → {OfficeCode} ({Status}), correlationId={CorrelationId}",
+                table, refusal.Kind, refusal.Code, mapped.Code, mapped.Status, outcome.CorrelationId);
+            // The Assigned To refusal is the route filter's shape (OFFICE_009 + reasonCode, title "Forbidden"): carry its reasonCode
+            // so the endpoint renders ONE body whether the contact was unreadable (the filter) or readable but not appendable (here).
+            if (mapped.ReasonCode is { } reasonCode)
+            {
+                throw new SdapProblemException(mapped.Code, "Forbidden", mapped.Detail, mapped.Status,
+                    new Dictionary<string, object> { [AssigneeReasonCodeExtension] = reasonCode });
+            }
+
+            throw new SdapProblemException(mapped.Code, title, mapped.Detail, mapped.Status);
+        }
+
+        if (outcome.CreatedId is not { } createdId)
+        {
+            // Neither a row nor a refusal: never a 200 (fail closed).
+            throw new SdapProblemException(OfficeErrorCodes.InternalError, title, InternalErrorDetail(noun),
+                StatusCodes.Status500InternalServerError);
+        }
+
+        if (makerHasNoContact && !Wrote(outcome, forPerson.Column))
+        {
+            _logger.LogWarning(
+                "assigned_internal_unset: entity={Entity} maker={MakerId} reason={Reason} — the maker has no linked contact, so "
+                + "{Column} is left blank (never an email match); the record is still owned by its team",
+                table, makerSystemUserId, "maker_has_no_linked_contact", forPerson.Column);
+        }
+
+        var warnings = outcome.Warnings.ToList();
+
+        // G1 (decided 2026-10-22): the type is required in the pane, but a missing one is NOT a rejection — the user is told,
+        // unless a type they chose was already dropped with its own warning.
+        if (entityType == QuickCreateEntityType.Matter
+            && !Wrote(outcome, MatterTypeColumn)
+            && !outcome.MappingWarnings.Any(w =>
+                w.Code == Sprk.Bff.Api.Services.RecordCreation.RecordCreationWarning.ReferenceValueDroppedCode
+                && string.Equals(w.Column, MatterTypeColumn, StringComparison.OrdinalIgnoreCase)))
+        {
+            warnings.Add(NoMatterTypeWarning);
         }
 
         return new QuickCreateResponse
         {
-            Id = result.RecordId,
+            Id = createdId,
             EntityType = entityType,
-            LogicalName = result.LogicalName,
-            Name = result.Name,
-            Warnings = result.Warnings.Count > 0 ? result.Warnings : null,
+            LogicalName = table,
+            Name = name,
+            Warnings = warnings.Count > 0 ? warnings : null,
             // Org URL isn't known server-side (the add-in must not be org-pinned).
             Url = null
         };
     }
+
+    /// <summary>G1: the warning a created matter with no type carries (owner decision 2026-09-11).</summary>
+    internal const string NoMatterTypeWarning = "No matter type was supplied. Open the matter and set its type.";
+
+    /// <summary>The matter's and project's own columns the adapter writes (live metadata; was the Office core's).</summary>
+    internal const string MatterNameColumn = "sprk_mattername";
+    internal const string MatterDescriptionColumn = "sprk_matterdescription";
+    internal const string MatterTypeColumn = "sprk_mattertype";
+    internal const string ProjectNameColumn = "sprk_projectname";
+    internal const string ProjectDescriptionColumn = "sprk_projectdescription";
+
+    /// <summary>The contact row the quick-create defaults prefill reads (<see cref="ResolveDefaultAssigneeAsync"/>; was the Office core's).</summary>
+    private const string ContactEntity = "contact";
+    private const string ContactNameAttribute = "fullname";
+    private const string ContactEmailAttribute = "emailaddress1";
+
+    /// <summary>The ADR-024 record-type catalog: the pair's type names one of its rows.</summary>
+    internal const string RecordTypeEntity = "sprk_recordtype_ref";
+
+    /// <summary>The Office refusal codes of the quick-create Matter/Project leg (NFR-07: unchanged).</summary>
+    internal const string QuickCreateOwnerUnresolvedCode = "owner_unresolved";
+    internal const string CallerCannotCreateCode = "caller_cannot_create";
+    internal const string CallerCannotFileUnderParentCode = "caller_cannot_file_under_parent";
+    internal const string CallerRightsUnverifiableCode = "caller_rights_unverifiable";
+
+    /// <summary>The request's optional references: (column, target table, chosen id). Their columns are the registry's.</summary>
+    private static IEnumerable<(string Column, string Target, Guid? Id)> QuickCreateReferences(
+        QuickCreateEntityType entityType, QuickCreateRequest request) => entityType switch
+    {
+        QuickCreateEntityType.Matter =>
+        [
+            (MatterTypeColumn, "sprk_mattertype_ref", request.MatterTypeId),
+            ("sprk_practicearea", "sprk_practicearea_ref", request.PracticeAreaId),
+        ],
+        QuickCreateEntityType.Project => [("sprk_projecttype_ref", "sprk_projecttype_ref", request.ProjectTypeId)],
+        _ => [],
+    };
+
+    /// <summary>A lookup in the service's Web API payload: the target table and the record (no entity set to guess).</summary>
+    private static Dictionary<string, object?> LookupValue(string relatedTable, Guid recordId) => new(StringComparer.Ordinal)
+    {
+        ["relatedTable"] = relatedTable,
+        ["recordId"] = recordId.ToString("D"),
+    };
+
+    /// <summary>
+    /// Whether the create wrote <paramref name="column"/>: <see cref="Sprk.Bff.Api.Services.RecordCreation.RecordCreationOutcome.WrittenColumns"/>
+    /// names a lookup by its bind key in the metadata's casing, so compare case-insensitively with and without the suffix.
+    /// </summary>
+    private static bool Wrote(Sprk.Bff.Api.Services.RecordCreation.RecordCreationOutcome outcome, string column) =>
+        outcome.WrittenColumns.Any(written =>
+            string.Equals(written, column, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(written, column + "@odata.bind", StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>
+    /// The maker's linked contact id (task 141's link), or <see langword="null"/> when there is none or it could not be
+    /// resolved. The ONE place the default assignee is decided: both the create (the <c>PostMappingDefaults</c> Assigned To
+    /// entry in <see cref="QuickCreateViaCreationServiceAsync"/>) and the pane's prefill (<see cref="ResolveDefaultAssigneeAsync"/>)
+    /// read it, so the prefill can never name someone the server would not (task 100). Never throws but a cancellation.
+    /// </summary>
+    private async Task<Guid?> ResolveMakerContactIdAsync(Guid makerSystemUserId, CancellationToken ct)
+    {
+        try
+        {
+            var contactId = (await _identity.ResolveAsync(makerSystemUserId, ct).ConfigureAwait(false)).ContactId;
+            return contactId is { } id && id != Guid.Empty ? id : null;
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "[RECORD-CREATE] The maker's linked contact could not be resolved for {MakerId}", makerSystemUserId);
+            return null;
+        }
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// Moved intact from the deleted Office creation core (field mapping task 018c). The contact row is read app-only. That
+    /// discloses nothing: it is the caller's OWN identity link, resolved from their own <c>systemuserid</c>; the route takes no
+    /// id. Never throws for a Dataverse fault — no prefill is the worst case, and the user can still pick someone.
+    /// </remarks>
+    public async Task<QuickCreateContactOption?> ResolveDefaultAssigneeAsync(Guid callerSystemUserId, CancellationToken cancellationToken)
+    {
+        if (callerSystemUserId == Guid.Empty
+            || await ResolveMakerContactIdAsync(callerSystemUserId, cancellationToken).ConfigureAwait(false) is not { } contactId)
+        {
+            return null;
+        }
+
+        Microsoft.Xrm.Sdk.Entity? contact;
+        try
+        {
+            contact = await _genericEntityService
+                .RetrieveAsync(ContactEntity, contactId, [ContactNameAttribute, ContactEmailAttribute], cancellationToken)
+                .ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "[RECORD-CREATE] The default assignee contact {ContactId} could not be read; no prefill.", contactId);
+            return null;
+        }
+
+        var name = contact?.GetAttributeValue<string>(ContactNameAttribute)?.Trim();
+        var email = contact?.GetAttributeValue<string>(ContactEmailAttribute)?.Trim();
+        if (string.IsNullOrEmpty(email))
+        {
+            email = null;
+        }
+
+        // A contact with neither a name nor an email gives the user nothing to recognise — no prefill.
+        var display = string.IsNullOrEmpty(name) ? email : name;
+        if (display is null)
+        {
+            return null;
+        }
+
+        return new QuickCreateContactOption { Id = contactId, Name = display, Email = email };
+    }
+
+    /// <summary>
+    /// True when the request creates the project FROM a matter or project (the tables that pass security on,
+    /// <see cref="Sprk.Bff.Api.Services.Access.SecureRootInheritance.IsParent"/>) — the record it is then filed under.
+    /// </summary>
+    private static bool IsFiledUnderItsSource(QuickCreateRequest request, out string table, out Guid id)
+    {
+        table = request.SourceEntityType?.Trim().ToLowerInvariant() ?? string.Empty;
+        id = request.SourceRecordId ?? Guid.Empty;
+        return id != Guid.Empty && Sprk.Bff.Api.Services.Access.SecureRootInheritance.IsParent(table);
+    }
+
+    /// <summary>
+    /// The active <see cref="RecordTypeEntity"/> row for <paramref name="table"/> — the pair's type (ported from the Office
+    /// core's <c>DeriveFiledUnderPairAsync</c>; <c>OfficeSearchService.ResolveRegardingRecordTypeIdAsync</c> is not reused
+    /// because it folds a fault and a missing row into one answer). One app-only catalog read; no type when there is no
+    /// such row (configuration — a retry will not help) or it cannot be read (<c>Retryable</c>) — never a guess.
+    /// </summary>
+    private async Task<(Guid? TypeId, bool Retryable)> DeriveFiledUnderTypeAsync(string table, CancellationToken ct)
+    {
+        try
+        {
+            var query = new Microsoft.Xrm.Sdk.Query.QueryExpression(RecordTypeEntity)
+            {
+                ColumnSet = new Microsoft.Xrm.Sdk.Query.ColumnSet(RecordTypeEntity + "id"),
+                TopCount = 1,
+            };
+            query.Criteria.AddCondition("sprk_recordlogicalname", Microsoft.Xrm.Sdk.Query.ConditionOperator.Equal, table);
+            query.Criteria.AddCondition("statecode", Microsoft.Xrm.Sdk.Query.ConditionOperator.Equal, 0);
+
+            var rows = await _genericEntityService.RetrieveMultipleAsync(query, ct).ConfigureAwait(false);
+            if (rows?.Entities.FirstOrDefault() is { } row && row.Id != Guid.Empty)
+                return (row.Id, false);
+
+            _logger.LogError(
+                "[RECORD-CREATE] No active {Catalog} row names {Table}, so a project created from it cannot be filed under it. "
+                + "Refused (fail closed).", RecordTypeEntity, table);
+            return (null, false);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex,
+                "[RECORD-CREATE] The {Catalog} row for {Table} could not be read, so a project created from it cannot be filed "
+                + "under it. Refused (fail closed).", RecordTypeEntity, table);
+            return (null, true);
+        }
+    }
+
+    /// <summary>The old core's two wordings of <c>record_owner_parent_undetermined</c>: a read that failed, or no catalog row.</summary>
+    internal static string FiledUnderUndeterminedDetail(bool retryable) =>
+        "The project was not created: whether the record it is created from is secure could not be determined, and a "
+        + "project filed under a secure record must be created secure. "
+        + (retryable ? "Try again." : "Ask an administrator to check the record types configured in this environment.");
+
+    private static string OwnerUnresolvedDetail(string noun) =>
+        $"Your account could not be matched to a Dataverse user, so the new {noun} could not be assigned to you and was not "
+        + "created. Ask an administrator to check that your user is provisioned in this environment.";
+
+    private static string InternalErrorDetail(string noun) =>
+        $"The new {noun} could not be created because of an unexpected server condition. Nothing was created.";
 
     /// <summary><c>sprk_invoice</c> description column (Memo, "Description"; live metadata 2026-10-05, task 100).</summary>
     internal const string InvoiceDescriptionAttribute = "sprk_description";
@@ -2050,19 +2550,148 @@ public class OfficeService : IOfficeService
     /// <summary><c>sprk_invoice</c> "Assigned To 1" contact lookup — the invoice's Assigned To (live metadata 2026-10-05, task 100).</summary>
     internal const string InvoiceAssignedToAttribute = "sprk_assignedto1";
 
-    /// <summary>HTTP status for each creation refusal. Every refusal means no row was written.</summary>
-    internal static int MapCreationFailureStatus(RecordCreationFailureKind kind) => kind switch
+    /// <summary>The <see cref="SdapProblemException.Extensions"/> key that carries the Assigned To refusal's <c>reasonCode</c>.</summary>
+    internal const string AssigneeReasonCodeExtension = "reasonCode";
+
+    /// <summary>An Office quick-create refusal: the ProblemDetails <c>errorCode</c>, its status and its detail.</summary>
+    internal sealed record QuickCreateRefusal(string Code, int Status, string Detail)
     {
-        RecordCreationFailureKind.InvalidInput => StatusCodes.Status400BadRequest,
-        RecordCreationFailureKind.OwnerUnresolved => StatusCodes.Status403Forbidden,
-        // Task 076: the platform's next numbers were all held by rows; a retry later (or a re-seed) succeeds.
-        RecordCreationFailureKind.NumberUnavailable => StatusCodes.Status409Conflict,
-        // Task 158 r1: a caller walled off (or without the rights to create under) a secure record — 403; a secure create that
-        // could not be checked or completed (and was removed again) — 500.
-        RecordCreationFailureKind.SecureFilingRefused => StatusCodes.Status403Forbidden,
-        RecordCreationFailureKind.SecureFilingFailed => StatusCodes.Status500InternalServerError,
-        _ => StatusCodes.Status500InternalServerError
-    };
+        /// <summary>
+        /// Set only for the Assigned To refusal, which is rendered in the route filter's own shape (<c>errorCode</c>
+        /// <c>OFFICE_009</c>, this <c>reasonCode</c>, title "Forbidden"): see
+        /// <see cref="Sprk.Bff.Api.Api.Filters.QuickCreateSourceAccessFilter"/>.
+        /// </summary>
+        public string? ReasonCode { get; init; }
+    }
+
+    /// <summary>
+    /// THE refusal map of the quick-create Matter/Project leg (field mapping task 018b, ADR-019, NFR-07; UAC-r2 condition (b)
+    /// item iii): one row per service refusal kind and code, each to the Office code and status the old core gave. A kind
+    /// or code with no row fails closed to the generic <see cref="OfficeErrorCodes.InternalError"/> 500 — never a 200.
+    /// <c>OfficeQuickCreateRefusalMapTests</c> enumerates every kind and code the service can return and fails on one this
+    /// map does not name.
+    /// </summary>
+    /// <remarks>
+    /// <para>G2: a <c>PrincipalUnresolved</c> refusal carries the WhoAmI failure. No Dataverse user (<c>AccessDenied</c>) is
+    /// 403 <c>owner_unresolved</c>; no usable token (<c>UserContextRequired</c>, <c>OboNotConfigured</c>,
+    /// <c>OboExchangeFailed</c>), an absent failure or any other is 500 <c>caller_rights_unverifiable</c> (fail closed).</para>
+    /// <para>G5: a step-5 <c>NotFoundOrDenied</c> refusal names its column. The Assigned To column is the existing Office
+    /// assignee refusal (<see cref="Sprk.Bff.Api.Api.Filters.QuickCreateSourceAccessFilter.AssigneeDeniedReasonCode"/>, its constant detail — never
+    /// "not found"); any other column, or none, is <c>caller_cannot_file_under_parent</c>. The detail is never parsed.</para>
+    /// </remarks>
+    internal static QuickCreateRefusal MapQuickCreateRefusal(
+        Sprk.Bff.Api.Services.RecordCreation.RecordCreationRefusal refusal, string noun, string assignedToColumn,
+        bool filedUnderParent)
+    {
+        ArgumentNullException.ThrowIfNull(refusal);
+        const int Forbidden = StatusCodes.Status403Forbidden;
+        const int ServerError = StatusCodes.Status500InternalServerError;
+        var internalError = new QuickCreateRefusal(OfficeErrorCodes.InternalError, ServerError, InternalErrorDetail(noun));
+
+        return (refusal.Kind, refusal.Code) switch
+        {
+            // ── PrincipalUnresolved (G2) ──
+            (Sprk.Bff.Api.Services.RecordCreation.RecordCreationRefusalKind.PrincipalUnresolved, _)
+                when refusal.ClientFailure?.ErrorCode == DataverseUserClientErrorCodes.AccessDenied
+                => new(QuickCreateOwnerUnresolvedCode, Forbidden, OwnerUnresolvedDetail(noun)),
+            (Sprk.Bff.Api.Services.RecordCreation.RecordCreationRefusalKind.PrincipalUnresolved, _)
+                => new(CallerRightsUnverifiableCode, ServerError,
+                    $"The {noun} was not created: your permission to create it could not be checked."),
+
+            // ── NotFoundOrDenied (G5) ──
+            (Sprk.Bff.Api.Services.RecordCreation.RecordCreationRefusalKind.NotFoundOrDenied, _)
+                when string.Equals(refusal.RefusedColumn, assignedToColumn, StringComparison.OrdinalIgnoreCase)
+                => new(OfficeErrorCodes.AccessDenied, Forbidden,
+                    Sprk.Bff.Api.Api.Filters.QuickCreateSourceAccessFilter.AssigneeDeniedDetail)
+                {
+                    ReasonCode = Sprk.Bff.Api.Api.Filters.QuickCreateSourceAccessFilter.AssigneeDeniedReasonCode,
+                },
+            (Sprk.Bff.Api.Services.RecordCreation.RecordCreationRefusalKind.NotFoundOrDenied, _)
+                => new(CallerCannotFileUnderParentCode, Forbidden,
+                    $"The {noun} was not created: you do not have permission to file a {noun} under the record it names."),
+
+            // ── Forbidden ──
+            (Sprk.Bff.Api.Services.RecordCreation.RecordCreationRefusalKind.Forbidden,
+                Sprk.Bff.Api.Services.RecordCreation.RecordCreationRefusal.DeniedCode)
+                => new(CallerCannotCreateCode, Forbidden, refusal.Detail),
+            (Sprk.Bff.Api.Services.RecordCreation.RecordCreationRefusalKind.Forbidden,
+                Sprk.Bff.Api.Api.ExternalAccess.ProvisionProjectEndpoint.ReasonCreatorNoAccess
+                or Sprk.Bff.Api.Services.Access.AccessFollowsParent.SecureFlagReasonCode
+                or Sprk.Bff.Api.Services.Access.AccessInheritance.ServerOnlyReasonCode)
+                => new(refusal.Code, Forbidden, refusal.Detail),
+
+            // ── OwnerUnresolved (stays 403) ──
+            (Sprk.Bff.Api.Services.RecordCreation.RecordCreationRefusalKind.OwnerUnresolved,
+                Sprk.Bff.Api.Services.Dataverse.RecordOwnerRefusal.ParentUndetermined)
+                => new(refusal.Code, Forbidden, $"The {noun} was not created: {refusal.Detail}."),
+            // Ownership is record-first: the caller's own business unit is the cause only when the resolver names it (no
+            // default team for the caller's unit, or the acting user could not be resolved). Any other code (a parent in
+            // another unit with no owner team, a plan/resolver race's "Try again", the ownership exception) keeps the
+            // service's own text — never Dataverse's — so the user is not told to check a unit that is not the cause.
+            // A project filed under a record is owned by THAT record's unit (record-first), so its missing default team is the
+            // record's unit's, not the caller's: neutral wording. Without a parent the caller's own unit decides.
+            (Sprk.Bff.Api.Services.RecordCreation.RecordCreationRefusalKind.OwnerUnresolved,
+                Sprk.Bff.Api.Services.Dataverse.RecordOwnerRefusal.NoDefaultOwnerTeam)
+                when filedUnderParent
+                => new(OfficeErrorCodes.RecordOwnerUnresolved, Forbidden,
+                    $"The {noun} could not be created: the business unit of the record it is filed under has no default owner "
+                    + "team. Ask an administrator to check that unit's default team. Nothing was created."),
+            (Sprk.Bff.Api.Services.RecordCreation.RecordCreationRefusalKind.OwnerUnresolved,
+                Sprk.Bff.Api.Services.Dataverse.RecordOwnerRefusal.NoDefaultOwnerTeam
+                or Sprk.Bff.Api.Services.Dataverse.RecordOwnerRefusal.ActingUserUnresolved)
+                => new(OfficeErrorCodes.RecordOwnerUnresolved, Forbidden,
+                    $"The new {noun} could not be assigned to your business unit's team, so it was not created. Ask an "
+                    + "administrator to check that your user has a business unit and that the unit has its default team."),
+            // UAC-r2 018b re-check F4: the service's owner details are often fragments written to be embedded ("a read
+            // failed"), so they are wrapped the way the ParentUndetermined row and RecordCreationProblemMap wrap them.
+            (Sprk.Bff.Api.Services.RecordCreation.RecordCreationRefusalKind.OwnerUnresolved, _)
+                => new(OfficeErrorCodes.RecordOwnerUnresolved, Forbidden,
+                    $"The {noun} was not created: {refusal.Detail.TrimEnd().TrimEnd('.')}."),
+
+            // ── Conflict ──
+            (Sprk.Bff.Api.Services.RecordCreation.RecordCreationRefusalKind.Conflict,
+                Sprk.Bff.Api.Services.RecordCreation.RecordCreationRefusal.NumberUnavailableCode)
+                => new(refusal.Code, StatusCodes.Status409Conflict, refusal.Detail),
+
+            // ── Undecided: the secure-create plan's and provisioning's own codes pass through (500) ──
+            (Sprk.Bff.Api.Services.RecordCreation.RecordCreationRefusalKind.Undecided,
+                Sprk.Bff.Api.Services.Dataverse.RecordOwnerRefusal.SecureOwnerTeamUnresolved)
+                => new(refusal.Code, ServerError, refusal.Detail),
+            // The isolated row's removal carries the provisioning code that failed (RecordCreationService.AfterCreateAsync passes
+            // secured.ReasonCode): creator_share_failed ("Try again in a few minutes"), creator_no_access ("an administrator needs
+            // to review your access"), and so on. The old core passed each through at 500 with its detail (NFR-07), so every
+            // ProvisionProjectEndpoint.Reason* constant does. The set is read from those constants (ProvisioningReasonCodes), not
+            // matched by a "sdap.provision." prefix: a code passes through because someone declared it, and the refusal-map test
+            // reflects over the same type, so a new constant is a decided row rather than a silent one.
+            (Sprk.Bff.Api.Services.RecordCreation.RecordCreationRefusalKind.Undecided, var provisioningCode)
+                when ProvisioningReasonCodes.Contains(provisioningCode)
+                => new(refusal.Code, ServerError, refusal.Detail),
+            (Sprk.Bff.Api.Services.RecordCreation.RecordCreationRefusalKind.Undecided, var code)
+                when code.StartsWith(SecureInheritReasonPrefix, StringComparison.Ordinal)
+                => new(refusal.Code, ServerError, refusal.Detail),
+
+            // ── Everything else — Invalid, BlockedColumn (the adapter built the payload: a server defect), Unavailable,
+            //    Upstream, Undecided no_decision, Forbidden system_principal_unsupported, an unknown code or kind — fails
+            //    closed to the generic Office 500. ──
+            _ => internalError,
+        };
+    }
+
+    /// <summary>
+    /// Every <c>Reason*</c> code <see cref="Sprk.Bff.Api.Api.ExternalAccess.ProvisionProjectEndpoint"/> declares, read from its
+    /// constants (its private <c>ReasonKey</c> is the body key, not a code: only values under <c>sdap.provision.</c> count).
+    /// </summary>
+    internal static readonly IReadOnlySet<string> ProvisioningReasonCodes =
+        typeof(Sprk.Bff.Api.Api.ExternalAccess.ProvisionProjectEndpoint)
+            .GetFields(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)
+            .Where(f => f is { IsLiteral: true, IsInitOnly: false } && f.FieldType == typeof(string)
+                && f.Name.StartsWith("Reason", StringComparison.Ordinal))
+            .Select(f => (string)f.GetRawConstantValue()!)
+            .Where(code => code.StartsWith("sdap.provision.", StringComparison.Ordinal))
+            .ToHashSet(StringComparer.Ordinal);
+
+    /// <summary>The prefix of the isolated create's completion codes (<c>SecureRootInheritance.Reason*</c>), passed through.</summary>
+    internal const string SecureInheritReasonPrefix = "sdap.inherit.";
 
     /// <summary>Friendly regarding type → (entity-specific <c>sprk_todo</c> lookup attribute, target logical name).
     /// Mirrors <c>TodoRegardingUpdateBuilder.TODO_REGARDING_CATALOG</c>. The first three entries are the types
@@ -2327,11 +2956,10 @@ public class OfficeService : IOfficeService
                         ? (TodoRegardingMap["Communication"].LogicalName, communicationId)
                         : (null, null);
 
-        var primary = target.LogicalName is not null && target.Id is { } targetId
-            ? new Sprk.Bff.Api.Services.Dataverse.RecordOwnershipParent(target.LogicalName, targetId)
-            : null;
+        // UAC task 194b fix round R (B3): in sprk_todo's primary order (ForChild → ForRow) — the subject, then the document
+        // carrier, then the email carrier: the rule above, as the reconciler asks the written row; never a primary named here.
         var todoOwner = await _ownershipResolver.ResolveOwnerAsync(
-            Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext.ForChild(todo, primary) with
+            Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext.ForChild(todo) with
             {
                 CallerSystemUserId = Guid.TryParse(ownerSystemUserId, out var callerSystemUserId)
                     ? callerSystemUserId

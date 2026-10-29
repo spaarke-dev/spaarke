@@ -778,7 +778,7 @@ public class GrantorCeilingTests
     /// <param name="callerRights">The caller's rights the probe reports; <c>null</c> makes the probe THROW.</param>
     private Task<IResult> Grant(GrantAccessRequest request, AccessRights? callerRights) =>
         GrantExternalAccessEndpoint.GrantAccessAsync(
-            request, _dataverse, _participations, DenyList(), new FixedRightsProbe(callerRights),
+            request, _dataverse, _participations, DenyList(), new TestInfrastructure.RecordOwnershipResolverDouble(), new TestInfrastructure.TeamPrivilegeCheckerDouble(), new FixedRightsProbe(callerRights),
             AssignedAccessTestDoubles.InertMaterializer(), AssignedAccessTestDoubles.InertNotifier(),
             AssignedAccessTestDoubles.InertInvites(), Context(), NullLogger<Program>.Instance, new FixedClock(Today),
             CancellationToken.None);
@@ -793,8 +793,8 @@ public class GrantorCeilingTests
     {
         var ciam = new AssignedAccessTestDoubles.RecordingCiamProvisioner();
         var result = await InviteAndGrantExternalUserEndpoint.InviteAndGrantAsync(
-            request, _dataverse, _participations, DenyList(), new FixedRightsProbe(callerRights),
-            ciam, emailService: null!, IdentityBindingTestKit.Binder(_identities),
+            request, _dataverse, _participations, DenyList(), new TestInfrastructure.RecordOwnershipResolverDouble(), new TestInfrastructure.TeamPrivilegeCheckerDouble(), new FixedRightsProbe(callerRights),
+            ciam, emailService: null!, IdentityBindingTestKit.Binder(_identities), InviteOrganizationTestKit.PortalOnly(),
             PortalConfig(), Sprk.Bff.Api.Tests.TestInfrastructure.TestSpeOwnership.Customer("acme"),
             AssignedAccessTestDoubles.InertMaterializer(), AssignedAccessTestDoubles.InertNotifier(), Context(),
             NullLogger<Program>.Instance, new FixedClock(Today), CancellationToken.None);
@@ -807,7 +807,7 @@ public class GrantorCeilingTests
         GrantAccessRequest request, GrantCeiling ceiling, IAccessibleRecordSetService? noAccessCheck = null) =>
         GrantExternalAccessEndpoint.CreateGrantAsync(
             request, ExternalGrantRootType.Project, ProjectId, Today, ceiling, callerOid: null,
-            _dataverse, _participations, noAccessCheck ?? DenyList(), NullLogger.Instance,
+            _dataverse, _participations, noAccessCheck ?? DenyList(), Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.AccessibleRecordSetTestFactory.UnlinkedIdentityStore(), new TestInfrastructure.RecordOwnershipResolverDouble(), new TestInfrastructure.TeamPrivilegeCheckerDouble(), NullLogger.Instance,
             CancellationToken.None);
 
     private void AssertNothingOnboardedOrWritten()

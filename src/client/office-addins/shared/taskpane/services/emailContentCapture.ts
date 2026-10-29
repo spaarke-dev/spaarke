@@ -7,7 +7,8 @@
  * Spaarke's tenant cannot reach, so a guest's save stored an `.eml` with headers only and no attachment documents
  * (owner UAT 2026-10-08). Every Model 1 customer's staff are such guests. Office.js reads the open item in any tenant,
  * so the content is read here and sent with the save. The server already prefers content the client sent: it fetches
- * from Graph only when the request carries no body (`OfficeEmailEnricher.EnrichEmailFromGraphAsync`), builds the
+ * the body and attachments from Graph only when the request carries no body (`OfficeEmailEnricher.EnrichEmailFromGraphAsync`;
+ * a request with a body still gets one light read of `sentDateTime` there, task 132), builds the
  * `.eml` from `email.body` + `email.attachments[].contentBase64`, and creates the attachment documents from that
  * `.eml`, filtered by `email.selectedAttachmentFileNames`.
  *
@@ -119,11 +120,23 @@ export interface EmailContentCapture {
 
 /** The email could not be read, so nothing was saved. `message` is written for the user. */
 export class EmailCaptureError extends Error {
-  constructor(message: string) {
+  /**
+   * What failed, for callers that word it themselves (the Submit Invoice view must not show the Save view's
+   * "untick it" / "nothing was saved" text). `message` stays the Save view's wording.
+   */
+  readonly failure?: EmailCaptureFailure;
+
+  constructor(message: string, failure?: EmailCaptureFailure) {
     super(message);
     this.name = 'EmailCaptureError';
+    if (failure) this.failure = failure;
   }
 }
+
+export type EmailCaptureFailure =
+  | { kind: 'body-unreadable' }
+  | { kind: 'body-too-large'; sizeBytes: number; budgetBytes: number }
+  | { kind: 'attachment-unreadable'; fileName: string };
 
 /** Length in bytes of a string sent as UTF-8. */
 function utf8Length(text: string): number {
@@ -260,7 +273,8 @@ export async function captureEmailContent(
   } catch (err) {
     const detail = errorText(err);
     throw new EmailCaptureError(
-      `Couldn't read this email's text, so nothing was saved. Try again.${detail ? ` (${detail})` : ''}`
+      `Couldn't read this email's text, so nothing was saved. Try again.${detail ? ` (${detail})` : ''}`,
+      { kind: 'body-unreadable' }
     );
   }
 
@@ -269,7 +283,8 @@ export async function captureEmailContent(
   if (used > budget) {
     throw new EmailCaptureError(
       `This email's text is too large to save (${formatSize(used)}; one save can carry about ` +
-        `${formatSize(budget)}). Nothing was saved.`
+        `${formatSize(budget)}). Nothing was saved.`,
+      { kind: 'body-too-large', sizeBytes: used, budgetBytes: budget }
     );
   }
 
@@ -304,7 +319,8 @@ export async function captureEmailContent(
       }
       throw new EmailCaptureError(
         `Couldn't read the attachment "${attachment.name}", so nothing was saved. Try again, or untick it to save ` +
-          `the email without it as a document.${detail ? ` (${detail})` : ''}`
+          `the email without it as a document.${detail ? ` (${detail})` : ''}`,
+        { kind: 'attachment-unreadable', fileName: attachment.name }
       );
     }
 

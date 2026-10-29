@@ -89,6 +89,14 @@ public sealed class InboundBodyDtoMappingGuardTests
         ["ComposeActiveDocumentRequest.SpeDriveId"] =
             "SECURITY — deliberately NOT read (task 166 r1). Same as SpeDriveItemId: the recorded drive is the " +
             "caller-readable row's. Kept on the DTO only so the client payload binds.",
+
+        // spaarke-ontology-platform-r1 task 104. Not an inbound body at all: OntologyAdminCapabilities is the
+        // OUTBOUND response of GET /api/v1/ontology/admin/capabilities. The guard's same-file parameter match picks
+        // it up from the private cache helper TrySetCachedAsync(..., OntologyAdminCapabilities value, ...), which
+        // stores the probe's answer; the property is set by the probe and serialized to the client.
+        ["OntologyAdminCapabilities.CanAuthorPolicies"] =
+            "OUTBOUND response record (task 104), matched only through the cache helper's parameter in " +
+            "OntologyAdminCapabilityProbe.cs. No request binds it; the probe sets it and the route returns it.",
     };
 
     private static string ApiRoot => Path.Combine(

@@ -169,6 +169,41 @@ internal static class IlCallScan
         }
     }
 
+    /// <summary>
+    /// Every TYPE referenced as an IL operand from <paramref name="types"/>' own method and constructor bodies: the
+    /// type-token operands (<c>castclass</c>, <c>isinst</c>, <c>box</c>, <c>unbox</c>, <c>newarr</c>, <c>initobj</c>,
+    /// <c>ldobj</c>, <c>stobj</c>, <c>constrained.</c>, <c>sizeof</c>, …) and an <c>ldtoken</c> of a type (the handle a
+    /// <c>typeof</c> is built from). Task 188 round 4b: a <c>typeof(Seam)</c> or a cast to a seam references the seam even
+    /// when no method of it is called (<c>((Delegate)sp.GetService(typeof(Seam))).DynamicInvoke(…)</c>). A
+    /// <c>newobj</c>'s type is its constructor's declaring type, which <see cref="MethodReferences"/> already yields.
+    /// </summary>
+    internal static IEnumerable<(Type Caller, MethodBase CallerMethod, Type Target)> TypeReferences(IEnumerable<Type> types)
+    {
+        foreach (var type in types)
+        {
+            foreach (var method in Bodies(type))
+            {
+                foreach (var instruction in Instructions(method))
+                {
+                    var kind = instruction.OpCode.OperandType;
+                    if (kind != OperandType.InlineType && !(kind == OperandType.InlineTok && IsTypeTable(instruction.Operand)))
+                    {
+                        continue;
+                    }
+
+                    var target = Resolve(method, instruction.Operand, (module, token, ta, ma) => module.ResolveType(token, ta, ma));
+                    if (target is not null)
+                    {
+                        yield return (type, method, target);
+                    }
+                }
+            }
+        }
+    }
+
+    /// <summary>Metadata tables a type-token operand names a TYPE from (TypeRef, TypeDef, TypeSpec).</summary>
+    private static bool IsTypeTable(int token) => (token >> 24) is 0x01 or 0x02 or 0x1B;
+
     /// <summary>Every string constant (<c>ldstr</c>) loaded from <paramref name="types"/>' own method and constructor bodies.</summary>
     internal static IEnumerable<(Type Caller, MethodBase CallerMethod, string Value)> StringLoads(IEnumerable<Type> types)
     {

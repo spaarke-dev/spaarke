@@ -152,6 +152,14 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          # `*.docx filter=lfs` (.gitattributes): without LFS the checkout yields a
+          # pointer file where tests read real fixtures, e.g. Spaarke.Compose.Components'
+          # ComposeWorkspace.redline-from-ledger.test.tsx reads
+          # tests/integration/Spe.Integration.Tests/fixtures/sample.docx; with the
+          # pointer 25 of its 30 tests fail with `Unable to find role="textbox"`.
+          # Same fix as ci-standalone-checks.yml compose-client-gate.
+          lfs: true
 
       - name: Setup Node 20
         uses: actions/setup-node@v4

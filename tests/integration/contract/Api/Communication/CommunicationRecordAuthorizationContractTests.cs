@@ -848,6 +848,156 @@ public class CommunicationRecordAuthorizationContractTests : IClassFixture<Commu
         AssertNothingSent();
     }
 
+    // Task 065 fix round 3 (F3): a send into a thread with no association of its own is filed against the thread's
+    // regarding record (CommunicationService.ApplyTargetThreadAsync), so the route asks AppendTo on THAT record, read as
+    // the caller, in the priority order the send uses.
+
+    private void VisibleThreadAnchoredTo(Guid thread, params (string Column, Guid RecordId)[] regarding)
+    {
+        var columns = new Dictionary<string, object?> { ["sprk_communicationthreadid"] = thread.ToString() };
+        foreach (var (column, recordId) in regarding)
+        {
+            columns[$"_{column}_value"] = recordId.ToString();
+        }
+
+        _host.Query.Visible(ThreadSet, thread, JsonSerializer.Serialize(columns));
+    }
+
+    [Fact]
+    public async Task Send_AMessageIntoARecordThreadWithoutAppendToOnItsRecord_Is403_AndNothingIsSent()
+    {
+        var thread = Guid.NewGuid();
+        var matter = Guid.NewGuid();
+        VisibleThreadAnchoredTo(thread, ("sprk_regardingmatter", matter));
+        _host.Probe.Grant(MatterSet, matter, AccessRights.Read); // may read the matter, may not file against it
+
+        var response = await _host.SendAsync(Request(HttpMethod.Post, "/api/communications/send",
+            SendBody(type: "Message", threadId: thread)));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        await ShouldCarryReasonCode(response, CommunicationRecordAuthorizationFilter.SendDenyReasonCode);
+        _host.Probe.Calls.Should().Contain($"rights {MatterSet}({matter})");
+        AssertNothingSent();
+    }
+
+    [Fact]
+    public async Task Send_AMessageIntoARecordThreadWithAppendToOnItsRecord_IsSent()
+    {
+        var thread = Guid.NewGuid();
+        var matter = Guid.NewGuid();
+        VisibleThreadAnchoredTo(thread, ("sprk_regardingmatter", matter));
+        _host.Probe.Grant(MatterSet, matter, AccessRights.Read | AccessRights.AppendTo);
+
+        var response = await _host.SendAsync(Request(HttpMethod.Post, "/api/communications/send",
+            SendBody(type: "Message", threadId: thread)));
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+        _host.MessageSender.Sent.Should().ContainSingle();
+    }
+
+    [Fact]
+    public async Task Send_IntoAThreadWhoseRegardingCannotBeRead_Is403_AndNothingIsSent()
+    {
+        var thread = Guid.NewGuid();
+        var matter = Guid.NewGuid();
+        VisibleThreadAnchoredTo(thread, ("sprk_regardingmatter", matter));
+        _host.Probe.Grant(MatterSet, matter, AccessRights.Read | AccessRights.AppendTo); // would be allowed if it were read
+        // The thread is visible (the existence probe selects only the key); the READ of its regarding lookups faults.
+        _host.Query.ThrowWhenQueryContains = "_sprk_regardingmatter_value";
+
+        var response = await _host.SendAsync(Request(HttpMethod.Post, "/api/communications/send",
+            SendBody(type: "Message", threadId: thread)));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        await ShouldCarryReasonCode(response, CommunicationRecordAuthorizationFilter.SendDenyReasonCode);
+        AssertNothingSent();
+    }
+
+    [Fact]
+    public async Task Send_IntoAThreadWithNoRegarding_AddsNoTarget_AndIsSent()
+    {
+        var thread = Guid.NewGuid();
+        VisibleThreadAnchoredTo(thread); // no typed regarding lookup populated
+
+        var response = await _host.SendAsync(Request(HttpMethod.Post, "/api/communications/send",
+            SendBody(type: "Message", threadId: thread)));
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+        _host.Probe.Calls.Should().BeEmpty("a thread with no regarding adds no AppendTo target");
+        _host.MessageSender.Sent.Should().ContainSingle();
+    }
+
+    [Fact]
+    public async Task Send_IntoAThreadWithTwoRegardingLookups_ChecksTheOneTheSendFilesUnder_ThePriorityOrderAnchor()
+    {
+        var thread = Guid.NewGuid();
+        var matter = Guid.NewGuid();
+        var invoice = Guid.NewGuid();
+        // ADR-024 priority: matter before invoice. The send files under the matter, so that is the record checked.
+        VisibleThreadAnchoredTo(thread, ("sprk_regardinginvoice", invoice), ("sprk_regardingmatter", matter));
+        _host.Probe.Grant(MatterSet, matter, AccessRights.Read | AccessRights.AppendTo);
+        _host.Probe.Grant("sprk_invoices", invoice, AccessRights.Read); // no AppendTo on the invoice: irrelevant
+
+        var response = await _host.SendAsync(Request(HttpMethod.Post, "/api/communications/send",
+            SendBody(type: "Message", threadId: thread)));
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+        _host.Probe.Calls.Should().Contain($"rights {MatterSet}({matter})")
+            .And.NotContain($"rights sprk_invoices({invoice})");
+    }
+
+    // Fix round 4 (K3): step 3b keys on "no association" as `associations is not { Length: > 0 }`, so an EMPTY array (not
+    // just null) must still check the thread's record - the send files under it either way.
+    [Fact]
+    public async Task Send_IntoARecordThreadWithAnEmptyAssociationsArray_StillChecksTheThreadsRecord_Is403WithoutAppendTo()
+    {
+        var thread = Guid.NewGuid();
+        var matter = Guid.NewGuid();
+        VisibleThreadAnchoredTo(thread, ("sprk_regardingmatter", matter));
+        _host.Probe.Grant(MatterSet, matter, AccessRights.Read); // may read the matter, may not file against it
+
+        var response = await _host.SendAsync(Request(HttpMethod.Post, "/api/communications/send",
+            SendBody(type: "Message", threadId: thread, emptyAssociations: true)));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        await ShouldCarryReasonCode(response, CommunicationRecordAuthorizationFilter.SendDenyReasonCode);
+        _host.Probe.Calls.Should().Contain($"rights {MatterSet}({matter})");
+        AssertNothingSent();
+    }
+
+    [Fact]
+    public async Task Send_IntoARecordThreadWithAnEmptyAssociationsArray_AndAppendToOnItsRecord_IsSent()
+    {
+        var thread = Guid.NewGuid();
+        var matter = Guid.NewGuid();
+        VisibleThreadAnchoredTo(thread, ("sprk_regardingmatter", matter));
+        _host.Probe.Grant(MatterSet, matter, AccessRights.Read | AccessRights.AppendTo);
+
+        var response = await _host.SendAsync(Request(HttpMethod.Post, "/api/communications/send",
+            SendBody(type: "Message", threadId: thread, emptyAssociations: true)));
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+        _host.Probe.Calls.Should().Contain($"rights {MatterSet}({matter})");
+        _host.MessageSender.Sent.Should().ContainSingle();
+    }
+
+    [Fact]
+    public async Task Send_IntoARecordThreadWithAnAssociationOfItsOwn_ChecksTheAssociation_NotTheThreadsRecord()
+    {
+        var thread = Guid.NewGuid();
+        var threadMatter = Guid.NewGuid();
+        var ownMatter = Guid.NewGuid();
+        VisibleThreadAnchoredTo(thread, ("sprk_regardingmatter", threadMatter));
+        _host.Probe.Grant(MatterSet, ownMatter, AccessRights.Read | AccessRights.AppendTo);
+        // No rights at all on the thread's matter: the send does not file under it (the request's association wins).
+
+        var response = await _host.SendAsync(Request(HttpMethod.Post, "/api/communications/send",
+            SendBody(type: "Message", threadId: thread, association: ("sprk_matter", ownMatter))));
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+        _host.Probe.Calls.Should().NotContain($"rights {MatterSet}({threadMatter})");
+    }
+
     [Fact]
     public async Task Send_151Attachments_GetsTodays400_BeforeAnyRightsQuery()
     {
@@ -1145,7 +1295,8 @@ public class CommunicationRecordAuthorizationContractTests : IClassFixture<Commu
         string[]? attachments = null,
         Guid? threadId = null,
         Guid? inheritFrom = null,
-        (string Type, Guid Id)? association = null) => new
+        (string Type, Guid Id)? association = null,
+        bool emptyAssociations = false) => new
         {
             to = new[] { "recipient@outside.com" },
             subject = "Re: the matter",
@@ -1155,8 +1306,125 @@ public class CommunicationRecordAuthorizationContractTests : IClassFixture<Commu
             attachmentDocumentIds = attachments,
             threadId,
             inheritRegardingFromCommunicationId = inheritFrom,
-            associations = association is { } a ? new[] { new { entityType = a.Type, entityId = a.Id } } : null,
+            associations = association is { } a
+                ? new object[] { new { entityType = a.Type, entityId = a.Id } }
+                : emptyAssociations ? Array.Empty<object>() : null,
         };
+
+    // =============================================================================================
+    // Task 188 round 4b (F1-2): send attachments go through THE external document narrowing
+    // =============================================================================================
+
+    private const int RestrictedPermission = 100000002;
+    private const int OpenThreadPrivacy = 100000000;
+
+    /// <summary>A Standard document with no link and no parent: visible to every caller.</summary>
+    private Guid VisibleAttachmentDocument() => _host.World.Document(Guid.NewGuid());
+
+    /// <summary>
+    /// Arranges a must-fire case and returns the attachment's document. The caller is a systemuser flagged external unless
+    /// the case states a lookup fault (which counts as external).
+    /// </summary>
+    private Guid ArrangeHiddenAttachment(string @case)
+    {
+        _host.Identity.Setup(i => i.IsExternalAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>())).ReturnsAsync(true);
+        switch (@case)
+        {
+            case "own-restricted":
+                return _host.World.Document(Guid.NewGuid(), permission: RestrictedPermission);
+            case "internal-only-communication":
+                var communication = Guid.NewGuid();
+                var thread = Guid.NewGuid();
+                _host.World.Thread(thread, OpenThreadPrivacy);
+                _host.World.Communication(communication, internalOnly: true, thread);
+                return _host.World.Document(Guid.NewGuid(), communication: communication);
+            case "restricted-parent":
+                return _host.World.Document(Guid.NewGuid(), parent: _host.World.Document(Guid.NewGuid(), permission: RestrictedPermission));
+            case "narrowing-fault":
+                _host.World.Faults["sprk_documents"] = System.Net.HttpStatusCode.ServiceUnavailable;
+                return VisibleAttachmentDocument();
+            case "lookup-fault":
+                _host.Identity.Setup(i => i.IsExternalAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+                    .ThrowsAsync(new InvalidOperationException("simulated external-flag read failure (test)"));
+                return _host.World.Document(Guid.NewGuid(), permission: RestrictedPermission);
+            default:
+                throw new ArgumentOutOfRangeException(nameof(@case), @case, null);
+        }
+    }
+
+    [Theory(DisplayName = "Task 188 r4b F1-2: send — an attachment the narrowing hides is the send's 403 for a caller who is not an internal systemuser; nothing is sent or downloaded")]
+    [InlineData("own-restricted")]
+    [InlineData("internal-only-communication")]
+    [InlineData("restricted-parent")]
+    [InlineData("narrowing-fault")]
+    [InlineData("lookup-fault")]
+    public async Task Send_ExternalCaller_HiddenAttachment_Is403_LikeAnUnreadableOne(string @case)
+    {
+        var document = ArrangeHiddenAttachment(@case);
+        var matter = Guid.NewGuid();
+        await _host.SeedAttachmentAsync(document, "b!drive-161", "item-r4b");
+        _host.Access.GrantDocument(document, AccessRights.Read);
+        _host.Probe.Grant(MatterSet, matter, AccessRights.Read | AccessRights.AppendTo);
+
+        var response = await _host.SendAsync(Request(HttpMethod.Post, "/api/communications/send",
+            SendBody(attachments: new[] { document.ToString() }, association: ("sprk_matter", matter))));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        await ShouldCarryReasonCode(response, CommunicationRecordAuthorizationFilter.SendDenyReasonCode);
+        AssertNothingSent();
+        _host.Downloads.Should().BeEmpty();
+        _host.World.Calls.Should().Be(1, "ONE narrowing call over every attachment of the send");
+    }
+
+    [Fact(DisplayName = "Task 188 r4b F1-2: send-bulk — a hidden attachment is the one 403 for the whole request")]
+    public async Task SendBulk_ExternalCaller_HiddenAttachment_Is403ForTheWholeRequest()
+    {
+        var document = ArrangeHiddenAttachment("own-restricted");
+        await _host.SeedAttachmentAsync(document, "b!drive-161", "item-r4b-bulk");
+        _host.Access.GrantDocument(document, AccessRights.Read);
+
+        var response = await _host.SendAsync(Request(HttpMethod.Post, "/api/communications/send-bulk",
+            BulkBody(attachments: new[] { document.ToString() })));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        await ShouldCarryReasonCode(response, CommunicationRecordAuthorizationFilter.SendBulkDenyReasonCode);
+        AssertNothingSent();
+    }
+
+    [Fact(DisplayName = "Task 188 r4b F1-2: must not fire — an external caller sends a VISIBLE attachment as today")]
+    public async Task Send_ExternalCaller_VisibleAttachment_IsSentAsToday()
+    {
+        _host.Identity.Setup(i => i.IsExternalAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>())).ReturnsAsync(true);
+        var document = VisibleAttachmentDocument();
+        var matter = Guid.NewGuid();
+        await _host.SeedAttachmentAsync(document, "b!drive-161", "item-r4b-ok");
+        _host.Access.GrantDocument(document, AccessRights.Read);
+        _host.Probe.Grant(MatterSet, matter, AccessRights.Read | AccessRights.AppendTo);
+
+        var response = await _host.SendAsync(Request(HttpMethod.Post, "/api/communications/send",
+            SendBody(attachments: new[] { document.ToString() }, association: ("sprk_matter", matter))));
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+        _host.EmailSender.Sent.Should().ContainSingle();
+        _host.World.Calls.Should().Be(1);
+    }
+
+    [Fact(DisplayName = "Task 188 r4b F1-2: must not fire — an internal caller sends a Restricted attachment with no narrowing call and no app-only read")]
+    public async Task Send_InternalCaller_RestrictedAttachment_IsNotNarrowed()
+    {
+        var document = _host.World.Document(Guid.NewGuid(), permission: RestrictedPermission);
+        var matter = Guid.NewGuid();
+        await _host.SeedAttachmentAsync(document, "b!drive-161", "item-r4b-internal");
+        _host.Access.GrantDocument(document, AccessRights.Read);
+        _host.Probe.Grant(MatterSet, matter, AccessRights.Read | AccessRights.AppendTo);
+
+        var response = await _host.SendAsync(Request(HttpMethod.Post, "/api/communications/send",
+            SendBody(attachments: new[] { document.ToString() }, association: ("sprk_matter", matter))));
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+        _host.World.Calls.Should().Be(0);
+        _host.World.AllReads.Should().BeEmpty();
+    }
 
     private static object BulkBody(string[]? attachments = null, (string Type, Guid Id)? association = null) => new
     {

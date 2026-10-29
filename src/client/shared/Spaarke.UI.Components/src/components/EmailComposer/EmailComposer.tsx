@@ -106,6 +106,7 @@ import { RecipientField } from './subcomponents/RecipientField';
 import { BodyEditor } from './subcomponents/BodyEditor';
 import { AttachmentList } from './subcomponents/AttachmentList';
 import { AssociationChips } from './subcomponents/AssociationChips';
+import { InternalOnlySwitch } from './subcomponents/InternalOnlySwitch';
 import { ComposerActionBar } from './subcomponents/ComposerActionBar';
 import { ComposerSendButton } from './subcomponents/ComposerSendButton';
 
@@ -1108,6 +1109,10 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
   }, [props.allowEmptyBody, props.maxRecipients]);
 
   const send = React.useCallback(async (): Promise<{ communicationId: string }> => {
+    // Task 160 (D-179): a compose-only host sends the email itself; the engine never does.
+    if (props.composeOnly) {
+      throw new Error('EmailComposer.send(): this composer is compose-only; the host sends the email.');
+    }
     const result = validateState(stateRef.current, {
       forSend: true,
       allowEmptyBody: props.allowEmptyBody,
@@ -1145,7 +1150,11 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
         refusedInline = true;
         throw new Error(message);
       }
-      const request = mapStateToSendRequest({ ...stateRef.current, attachments: resolvedAttachments }, props.threadId);
+      const request = mapStateToSendRequest(
+        { ...stateRef.current, attachments: resolvedAttachments },
+        props.threadId,
+        props.threadIsPrivate
+      );
       response = await sendCommunication(request, {
         authenticatedFetch: props.authenticatedFetch,
         bffBaseUrl: props.bffBaseUrl,
@@ -1173,9 +1182,21 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
     }
     return response;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [props.authenticatedFetch, props.bffBaseUrl, props.allowEmptyBody, props.maxRecipients, props.threadId]);
+  }, [
+    props.authenticatedFetch,
+    props.bffBaseUrl,
+    props.allowEmptyBody,
+    props.maxRecipients,
+    props.threadId,
+    props.threadIsPrivate,
+    props.composeOnly,
+  ]);
 
   const saveDraft = React.useCallback(async (): Promise<{ communicationId: string }> => {
+    // Task 160 (D-179): a compose-only composer never persists anything itself.
+    if (props.composeOnly) {
+      throw new Error('EmailComposer.saveDraft(): this composer is compose-only; nothing is saved.');
+    }
     if (!props.onSaveDraftRequest) {
       // No BFF draft-persistence endpoint exists yet (CommunicationEndpoints.cs
       // has /send, /send-bulk, /{id}/status only) — see EmailComposer.reducer.ts
@@ -1196,7 +1217,7 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
       throw err;
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [props.onSaveDraftRequest, props.onSaveDraft]);
+  }, [props.onSaveDraftRequest, props.onSaveDraft, props.composeOnly]);
 
   const getState = React.useCallback((): EmailComposerState => stateRef.current, []);
 
@@ -1256,7 +1277,8 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
           mailbox. Wired to the engine's existing `sendMode` state. Hidden in read-only (view)
           mode — there is nothing to send. The primary Send control lives HERE, left of "From:"
           (owner UAT 2026-08-03 item 1 — Outlook-style Send in the address section, not a bottom bar). */}
-      {!state.readOnly && (
+      {/* Task 160 (D-179): compose-only hides the whole row: Send, "From:" and the sender (switcher or static text). */}
+      {!state.readOnly && !props.composeOnly && (
         <div className={styles.fromRow} role="group" aria-label="From">
           <ComposerSendButton
             isSending={state.isSending}
@@ -1309,6 +1331,19 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
             )}
           </div>
         </div>
+      )}
+
+      {/* "External" | "Internal Only" tags (task 068; owner 2026-10-14) — External by default; Internal Only for a
+          reply/forward of an internal source, and Internal Only locked when the host knows the target thread is
+          Private. Hidden in read-only (view) mode — there is nothing to send. */}
+      {!state.readOnly && !props.composeOnly && (
+        <InternalOnlySwitch
+          variant="tags"
+          checked={state.isInternalOnly}
+          locked={props.threadIsPrivate === true}
+          disabled={state.isSending}
+          onChange={value => dispatch({ type: 'SET_INTERNAL_ONLY', value })}
+        />
       )}
 
       <div className={styles.section} role="region" aria-label="Recipients">
@@ -1547,7 +1582,7 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
         isSending={state.isSending}
         isSavingDraft={state.isSavingDraft}
         isDraftRecord={props.isDraftRecord}
-        canSaveDraft={draftSaveAvailable}
+        canSaveDraft={draftSaveAvailable && !props.composeOnly}
         onSaveDraft={() => {
           // A failed Save Draft ALWAYS tells the user — `sendFailureDisplay` governs send only, and there is
           // no draft onError a host could show it from (callers awaiting composerRef.current.saveDraft()

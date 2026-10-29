@@ -64,7 +64,7 @@ Load when:
 Terms: **Spaarke tenant** = Spaarke's Entra directory; **customer's home directory** = the customer's own Entra directory. Never write a bare "tenant" for the second.
 
 - ✅ **MUST** treat a Model 1 **licensed core user** as a **B2B guest in the Spaarke tenant** who authenticates in their customer's home directory: the stamp token carries `tid` = Spaarke, `acct = 1`, `idp` = home-directory issuer (ADR-028 A8).
-- ✅ **MUST** sign a Model 1 **workforce contact** in to the browser SPA with their company account, through one multitenant Spaarke SPA client at their customer's home directory. The BFF accepts the token only when `iss` exactly matches `https://login.microsoftonline.com/{tid}/v2.0`, `tid` is in that stamp's `WorkforceIdentity:CustomerTenantIds`, `aud` is that stamp's BFF app, it is a user token and `acct` = 0. Identity is keyed on (`tid`, `oid`). Workforce contacts are **not** B2B guests (ADR-028 A9).
+- ✅ **MUST** sign a Model 1 **workforce contact** in to the browser SPA and the Teams host with their company account, through one multitenant Spaarke SPA client at their customer's home directory. The BFF accepts the token only when `iss` exactly matches `https://login.microsoftonline.com/{tid}/v2.0`, `tid` is in that stamp's `WorkforceIdentity:CustomerTenantIds`, `aud` is that stamp's BFF app, it is a user token and `acct` = 0. Identity is keyed on (`tid`, `oid`). Workforce contacts are **not** B2B guests (ADR-028 A9).
 - ✅ **MUST** resolve a licensed core user who opens the browser SPA with their company account to their `systemuser` only through the stored link home (`tid`, `oid`) → `systemuserid` — never by email or UPN (A9).
 - ✅ **MUST** key workforce membership on the customer's home directory id(s) in `WorkforceIdentity:CustomerTenantIds` — **never** on `AzureAd:TenantId` (= Spaarke on Model 1), an email domain or a `#EXT#` UPN.
   - **Scope (owner 2026-10-13, §6.5 path B; word-add-in-r1 task 126):** this governs what the BFF accepts or binds from a sign-in token, as ADR-028 A9 states it (validated `iss`/`tid`).
@@ -74,7 +74,7 @@ Terms: **Spaarke tenant** = Spaarke's Entra directory; **customer's home directo
     - is reviewed as a dry run;
     - never writes a guest it cannot place.
   - Workforce contacts never reach it. They are contacts, not systemusers, and their plane is `contact.sprk_identityplane`, written at sign-in.
-- ❌ **MUST NOT** use a multitenant / `common` / `organizations` authority for Model 1 licensed-user sign-in (model-driven apps, Office add-ins, Teams) — the guest lands in the home directory with a different `oid` (A8). The **only** exception is the A9 workforce-contact browser-SPA client.
+- ❌ **MUST NOT** use a multitenant / `common` / `organizations` authority for Model 1 licensed-user sign-in to model-driven apps or the Office add-ins — the guest lands in the home directory with a different `oid` (A8). The **only** exception is the A9 multitenant SPA client, used by the browser SPA and the Teams host for both populations. Licensed users there resolve through the stored link.
 - Full explanation and where each value lives: [`SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md` §6.5.2 "Model 1: why a customer has a home tenant at all"](../../docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md). Code: `WorkforceIdentityOptions.cs` `WorkforceMembershipTest`.
 
 ### SPE File Access — broker-only byte identity (binding — task 171, 2026-10-06; supersedes Pattern 4's writer-identity rule)
@@ -87,6 +87,16 @@ Terms: **Spaarke tenant** = Spaarke's Entra directory; **customer's home directo
 - ❌ **MUST NOT** wire new post-upload pipelines through `JobSubmissionService.SubmitJobAsync(RagIndexingJobPayload)` from request-scoped endpoints. Use the helper's OBO method.
 
 > See: [`docs/architecture/sdap-auth-patterns.md` § Pattern 4 — Writer-Identity Matching Rule](../../docs/architecture/sdap-auth-patterns.md#writer-identity-matching-rule-binding--2026-06-08-post-phase-3a-uat-incident)
+
+### External document narrowing — D7 (binding — task 188, owner rounds 110/111, 2026-10-21; CLAUDE.md §6.5 path B)
+
+- ✅ **MUST** treat a child document's Access Permission as able to NARROW partner visibility, never widen it. A caller who is not a resolved internal systemuser sees a document only when ALL of these hold: the root rule allows it; its own value is not Restricted; no `sprk_parentdocument` ancestor within 3 hops is Restricted; and its communication passes the task 065 rule. The communication is the document's own link, else its parent's, else its grandparent's; the first link found decides. Cycles, a 4th hop and any unreadable value hide the document. Limited does NOT hide (owner round 111).
+- ✅ **MUST** apply the ONE predicate, `ExternalDocumentNarrowing`, on every surface that returns document rows or content to such a caller: the external plane, the AI tools and retrieval trim, `DocumentAuthorizationFilter` (with the routes that delegate to it), the bulk download, and the document list routes. A failed externality lookup counts as external.
+- ✅ **MUST** run the predicate's own reads app-only on every surface. **Path B amendment:** the AI tools' User-OBO-only rule (`IDataverseUserClient`) has exactly one exception, the injected `AppOnlyDocumentNarrowing` / `InternalRouteDocumentNarrowing`. These re-read documents by id and return ONLY a hide decision: never rows, never a widening.
+- ❌ **MUST NOT** add a second copy of the rule, or return rows or content from a new external document surface without classifying it in the guard.
+- Known limit (open, tracked as task 191): flagged-external systemusers with direct Dataverse access (MDA or Web API) are not narrowed there yet. Owner round 113 reversed round 111's #2179 (c): a systemuser with `sprk_isexternal` = true must reach no internal-only record in Dataverse either. Task 191 builds that Dataverse-side enforcement, so this limit is temporary, not accepted.
+- Deleting a communication, or a parent document that still has child documents, must not un-hide them (owner round 111, (a) Restrict). It is enforced by the `Restrict` cascade on `sprk_relatedcommunication` and `sprk_parentdocument` and by the BFF refusing such a delete (task 188 slice D). Until slice D ships, a delete un-links and un-hides those documents.
+- Enforced by: `ExternalDocumentNarrowingGuardTests` (every surface reaches the predicate; the core decision is called only from the app-only seams), plus task 188's route, handler and trim tests.
 
 ---
 

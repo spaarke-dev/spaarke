@@ -21,6 +21,9 @@
  *               `/api/v1/external/{projects|matters|workassignments|servicerequests|invoices}/{id}/documents` - list,
  *               download, version history and upload (Create, gated by the list's `canCreate`). A service request's
  *               documents are reachable ONLY there.
+ *   - document file (task 066): a document's detail shows Download, over the task 031 content route of the parent the row
+ *               is filed to (project, matter, work assignment - tried in the BFF's order, moving on only on a 403); the
+ *               same download code as the Documents section. No new route. Inline preview is deferred to R4.
  *   - delete-own (task 054, FR-26): `GET /api/v1/external/me` says who the caller is; a document, to-do or event whose
  *               creator stamp is that principal shows Delete (asks first, 204 removes it, a 403 shows an error). Messages
  *               have no Delete. An invoice's documents use the `invoices` root (owner decision 2026-10-11, option A).
@@ -44,7 +47,7 @@
  */
 import * as React from 'react';
 import { makeStyles, tokens, Button, MessageBar, MessageBarBody, Spinner, Text } from '@fluentui/react-components';
-import { LockClosedRegular } from '@fluentui/react-icons';
+import { ArrowDownloadRegular, LockClosedRegular } from '@fluentui/react-icons';
 import { SprkModal } from '@spaarke/ui-components/components/SprkModal';
 import { bffApiCall } from '../../auth/bff-client';
 import { ApiError, AccessLevel } from '../../types';
@@ -53,7 +56,12 @@ import type { DocumentRoot, EventsTodosRoot } from '../../api/web-api-client';
 import type { ExternalUserContextResponse } from '../../auth/bff-client';
 import { useCallerContext } from '../../hooks/useCallerContext';
 import { canUpload as levelCanUpload, mapAccessLevelString } from '../../hooks/useAccessLevel';
-import { DocumentLibrary } from '../DocumentLibrary';
+import {
+  DocumentLibrary,
+  downloadDocumentFromParents,
+  downloadFailureLogText,
+  downloadFailureMessage,
+} from '../DocumentLibrary';
 import { EventsCalendar } from '../EventsCalendar';
 import { SmartTodo } from '../SmartTodo';
 import { TruncatedListNotice } from '../TruncatedListNotice';
@@ -62,6 +70,7 @@ import { ServiceRequestActions } from './ServiceRequestActions';
 import {
   EMPTY_VALUE,
   RecordDetailFields,
+  documentParentCandidates,
   formatDetailValue,
   getRecordDetailEntity,
   recordDetailTitle,
@@ -360,7 +369,7 @@ const INVOICE_COLUMNS = [
   'sprk_name',
   'sprk_invoicenumber',
   'sprk_invoicedate',
-  'sprk_invoicestatus',
+  'statuscode',
   'sprk_totalamount',
 ] as const;
 const INVOICE_ORDER = { attribute: 'sprk_invoicedate', descending: true };
@@ -377,6 +386,8 @@ function uploadOverride(
   context: ExternalUserContextResponse | null
 ): boolean | undefined {
   if (root !== 'projects') return undefined;
+  // Task 036 fix round 1: a per-record caller's level says only what they may see; the list's `canCreate` decides.
+  if (context?.writeAccessPerRecord === true) return undefined;
   const entry = context?.projects.find(p => p.projectId.toLowerCase() === id.toLowerCase());
   return levelCanUpload(mapAccessLevelString(entry?.accessLevel));
 }
@@ -401,7 +412,64 @@ const DocumentsSection: React.FC<{
         canUpload={uploadOverride(root, id, context)}
         canDownload
         caller={caller}
+        writeAccessPerRecord={context?.writeAccessPerRecord === true}
       />
+    </section>
+  );
+};
+
+/**
+ * Download (task 066, owner check 3; inline preview is deferred to R4): the document detail's one file action, on the same
+ * download code the record's Documents section uses (`downloadDocumentFromParents` over the existing content route; no
+ * new route, no signed link). It asks the parents the row is filed to in the BFF's order and the server decides which one
+ * the caller may read. A document with no usable parent link offers nothing. A failure is shown here, never only logged.
+ */
+const DocumentDownload: React.FC<{ record: DetailRecord; documentId: string }> = ({ record, documentId }) => {
+  const styles = useStyles();
+  const parents = React.useMemo(() => documentParentCandidates(record), [record]);
+  const [busy, setBusy] = React.useState(false);
+  const [error, setError] = React.useState<string | null>(null);
+  if (parents.length === 0) return null;
+  // R3 ISS-011 (#1886): the BFF derives `hasFile` on a documents-module row. A document with no file is still shown (its
+  // fields above), but offers no Download: it could only answer 409 "No file attached". Only an explicit false hides it;
+  // absent (an older BFF) keeps today's behaviour.
+  if (record.hasFile === false) return null;
+
+  const shownName = formatDetailValue(record, { attribute: 'sprk_documentname' });
+  const name = shownName !== EMPTY_VALUE ? shownName : 'document';
+
+  const handleDownload = async (): Promise<void> => {
+    setBusy(true);
+    setError(null);
+    try {
+      await downloadDocumentFromParents(parents, documentId, name);
+    } catch (err) {
+      console.error(`[RecordDetailModal] Download failed for document ${documentId}: ${downloadFailureLogText(err)}`);
+      setError(downloadFailureMessage(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <section className={styles.section} aria-label="File" data-testid="record-detail-download">
+      <h3 className={styles.heading}>File</h3>
+      {error && (
+        <MessageBar intent="error" data-testid="record-detail-download-error">
+          <MessageBarBody>{error}</MessageBarBody>
+        </MessageBar>
+      )}
+      <div>
+        <Button
+          appearance="secondary"
+          icon={busy ? <Spinner size="tiny" /> : <ArrowDownloadRegular />}
+          disabled={busy}
+          onClick={() => void handleDownload()}
+          aria-label={`Download ${name}`}
+        >
+          Download
+        </Button>
+      </div>
     </section>
   );
 };
@@ -422,7 +490,7 @@ const InvoicesSection: React.FC<{ parentAttribute: string; parentId: string }> =
       }}
       meta={row =>
         [
-          formatDetailValue(row, { attribute: 'sprk_invoicestatus' }),
+          formatDetailValue(row, { attribute: 'statuscode' }),
           formatDetailValue(row, { attribute: 'sprk_totalamount', kind: 'money' }),
         ].join(' · ')
       }
@@ -607,6 +675,8 @@ export const RecordDetailModal: React.FC<RecordDetailModalProps> = ({
           <React.Fragment key={`${cfg.entity}:${id}`}>
             <>
               <RecordDetailFields cfg={cfg} record={state.record} />
+              {/* The document's file (task 066): Download on the existing content route; preview is R4. */}
+              {cfg.entity === 'sprk_document' && <DocumentDownload record={state.record} documentId={id} />}
               {/* The requester's actions on their own service request (owner decisions 2026-10-11). */}
               {cfg.entity === 'sprk_servicerequest' && (
                 <ServiceRequestActions

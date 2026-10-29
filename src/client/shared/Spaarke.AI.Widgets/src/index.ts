@@ -287,6 +287,33 @@ export { AnalysisHubWidget } from './widgets/workspace/AnalysisHubWidget';
 export type { AnalysisHubWidgetData } from './widgets/workspace/AnalysisHubWidget';
 
 // ---------------------------------------------------------------------------
+// Worklist lookup (ontology task 156): the decision wizard's Person / Lookup search over Dataverse
+// (contacts, sprk_budget, sprk_organization). Exported so LegalWorkspace's `worklist` section shim can
+// fill `WorklistWidget`'s `lookup` slot exactly as `WorklistWorkspaceWidget` does. Task 158 (D-182): the same two
+// hosts also fill `openLookup` / `openRecord` (the side-pane lookup and the record modal) from `INavigationService`.
+// ---------------------------------------------------------------------------
+export {
+  createWorklistLookup,
+  createWorklistOpenLookup,
+  createWorklistOpenRecord,
+} from './widgets/workspace/worklistLookup';
+export type { WorklistLookupDataSource } from './widgets/workspace/worklistLookup';
+
+// ---------------------------------------------------------------------------
+// Ontology admin gate (ontology task 104, D-22): the host starts it after sign-in; it registers the
+// 'ontology-admin' tab only when the BFF capability probe says the caller can author policies.
+// registerOntologyAdminWidget is deliberately NOT exported: the gate is its only caller.
+// ---------------------------------------------------------------------------
+export {
+  startOntologyAdminGate,
+  whenOntologyAdminGateSettled,
+  useOntologyAdminTabAvailable,
+  isOntologyAdminTabAvailable,
+  resolveRestorableWorkspaceWidget,
+} from './widgets/workspace/ontologyAdminGate';
+export { ONTOLOGY_ADMIN_WIDGET_TYPE } from './widgets/workspace/register-workspace-widgets';
+
+// ---------------------------------------------------------------------------
 // Widgets: DocumentUploadWizardWidget — embedded document upload (AIPU2-104)
 //
 // Three-step file upload flow (Select → Details → Review & Upload) embedded

@@ -8,6 +8,8 @@
   <RolePrivileges>
     <RolePrivilege name="prvAppendsprk_BudgetRevision" level="Deep" />
     <RolePrivilege name="prvAppendsprk_DecisionRecord" level="Deep" />
+    <RolePrivilege name="prvAppendsprk_Policy" level="Deep" />
+    <RolePrivilege name="prvAppendsprk_PolicyVersion" level="Deep" />
     <RolePrivilege name="prvAppendsprk_Signal" level="Deep" />
     <RolePrivilege name="prvAppendTosprk_BudgetRevision" level="Deep" />
     <RolePrivilege name="prvAppendTosprk_DecisionRecord" level="Deep" />
@@ -17,7 +19,6 @@
     <RolePrivilege name="prvAssignsprk_Signal" level="Deep" />
     <RolePrivilege name="prvCreateSharePointData" level="Global" />
     <RolePrivilege name="prvCreatesprk_BudgetRevision" level="Deep" />
-    <RolePrivilege name="prvCreatesprk_DecisionRecord" level="Deep" />
     <RolePrivilege name="prvCreatesprk_Policy" level="Deep" />
     <RolePrivilege name="prvCreatesprk_PolicyVersion" level="Deep" />
     <RolePrivilege name="prvCreatesprk_TriageCategory" level="Global" />
@@ -42,7 +43,6 @@
     <RolePrivilege name="prvWritesprk_BudgetRevision" level="Deep" />
     <RolePrivilege name="prvWritesprk_Policy" level="Deep" />
     <RolePrivilege name="prvWritesprk_PolicyVersion" level="Deep" />
-    <RolePrivilege name="prvWritesprk_Signal" level="Deep" />
     <RolePrivilege name="prvWritesprk_TriageCategory" level="Global" />
   </RolePrivileges>
 </Role>

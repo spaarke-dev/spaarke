@@ -55,9 +55,10 @@ public sealed partial class AccessCacheInvalidationTests
 
     /// <summary>
     /// A share change on a project removes every user's impersonated root set for projects (the set is answered by an
-    /// impersonated query, which sees shares; a team share changes every member's) and every user's snapshot of THAT
-    /// project, under every tenant — and leaves membership and identity (a share is not a membership term), the matter
-    /// root sets, another project's snapshot and the same id under another entity set.
+    /// impersonated query, which sees shares; a team share changes every member's), every user's snapshot of THAT
+    /// project and every user's Secure lookup-only rights answer for it (#2121 round 2, F4: Dataverse's answer, which a
+    /// share changes), under every tenant — and leaves membership and identity (a share is not a membership term), the
+    /// matter root sets, another project's snapshot and rights answer, and the same id under another entity set.
     /// </summary>
     [Fact]
     public async Task ShareChangeEviction_RemovesEveryUsersRootSetForTheType_AndEverySnapshotOfTheRecord_Only()
@@ -71,13 +72,17 @@ public sealed partial class AccessCacheInvalidationTests
         await world.WarmSnapshotAsync(OidV, "sprk_projects", record, TenantB);
         await world.WarmSnapshotAsync(OidU, "sprk_projects", otherRecord, TenantA);
         await world.WarmSnapshotAsync(OidU, "sprk_matters", record, TenantA);
+        await world.WarmSecureLookupRightsAsync(UserU, AccessCacheWorld.ProjectEntity, otherRecord, TenantA);
+        await world.WarmSecureLookupRightsAsync(UserU, AccessCacheWorld.MatterEntity, record, TenantA);
         var before = world.Keyspace.Keys.ToHashSet();
 
         var expectedGone = before.Where(k =>
                 (k.Contains($":{ImpersonatedRootSetSource.CacheResource}:", StringComparison.Ordinal) && k.Contains(":sprk_project:", StringComparison.Ordinal))
-                || (k.Contains($":{CachedAccessDataSource.RecordAccessResource}:sprk_projects:", StringComparison.Ordinal) && k.Contains(record.ToString("D"), StringComparison.Ordinal)))
+                || (k.Contains($":{CachedAccessDataSource.RecordAccessResource}:sprk_projects:", StringComparison.Ordinal) && k.Contains(record.ToString("D"), StringComparison.Ordinal))
+                || IsRightsEntry(k, "sprk_projects", record))
             .ToHashSet();
-        expectedGone.Should().HaveCount(2 + 2, "precondition: each user's project root set, and two snapshots of the record");
+        expectedGone.Should().HaveCount(2 + 2 + 2,
+            "precondition: each user's project root set, two snapshots of the record, and each user's rights answer for it");
 
         foreach (var pattern in MembershipCacheInvalidator.RecordShareChangePatterns(InMemoryRedisKeyspace.InstanceName, "sprk_projects", record))
         {
@@ -88,7 +93,8 @@ public sealed partial class AccessCacheInvalidationTests
         await world.Keyspace.Invalidator().InvalidateRecordShareChangeAsync("sprk_projects", record, "test", CancellationToken.None);
 
         world.Keyspace.Keys.Should().BeEquivalentTo(before.Except(expectedGone),
-            "identity, membership, matter root sets, the other project's snapshot and the matter-set snapshot all stay");
+            "identity, membership, matter root sets, the other project's snapshot and rights answer, and the matter-set " +
+            "snapshot and rights answer all stay");
     }
 
     /// <summary>
@@ -117,6 +123,37 @@ public sealed partial class AccessCacheInvalidationTests
             "every snapshot of the document goes; the other document's snapshot and the user's root sets stay");
         world.Keyspace.ScannedPatterns.Should().NotContain(p => p.Contains(ImpersonatedRootSetSource.CacheResource, StringComparison.Ordinal),
             "a document is not a root type: no root-set pattern is built, so none is scanned");
+    }
+
+    /// <summary>
+    /// #2121 round 2 (F4), end to end: a Secure project a colleague reaches only through a lookup is kept at Read because
+    /// Dataverse said so, and that answer is cached. An UNSHARE through the production client evicts it, so the colleague's
+    /// next composition asks Dataverse again — and loses the record at once, not after the TTL. Another record's cached
+    /// answer is still served from the cache.
+    /// </summary>
+    [Fact]
+    public async Task Unshare_EvictsTheCachedRightsAnswer_SoTheNextCompositionAsksDataverseAgain()
+    {
+        var world = new AccessCacheWorld();
+        var record = AccessCacheWorld.Project;
+        var otherRecord = Guid.Parse("13200000-0000-0000-0000-0000000003c3");
+        (await world.WarmSecureLookupRightsAsync(UserV, AccessCacheWorld.ProjectEntity, record, TenantA))
+            .RightsFor(record).Should().Be(AccessRights.Read, "precondition: Dataverse grants Read through the share");
+        await world.WarmSecureLookupRightsAsync(UserV, AccessCacheWorld.ProjectEntity, otherRecord, TenantA);
+        await world.WarmSecureLookupRightsAsync(UserV, AccessCacheWorld.ProjectEntity, record, TenantA);
+        world.RightsQuestions(UserV, record).Should().Be(1, "precondition: the second composition was answered from the cache");
+
+        await using var dataverse = await PoaDataverse.StartAsync(refuseWrites: false);
+        await dataverse.Client(world.Keyspace.Invalidator())
+            .RevokeAccessAsync("sprk_projects", record, DataversePrincipalRef.User(UserV), CancellationToken.None);
+        world.RightsAnswer = AccessRights.None; // what Dataverse answers once the share is gone
+
+        var after = await world.WarmSecureLookupRightsAsync(UserV, AccessCacheWorld.ProjectEntity, record, TenantA);
+        await world.WarmSecureLookupRightsAsync(UserV, AccessCacheWorld.ProjectEntity, otherRecord, TenantA);
+
+        world.RightsQuestions(UserV, record).Should().Be(2, "the unshare evicted the cached answer: Dataverse is asked again");
+        after.Rights.Should().NotContainKey(record, "the colleague loses the record on the next composition, not after the TTL");
+        world.RightsQuestions(UserV, otherRecord).Should().Be(1, "another record's cached answer is untouched");
     }
 
     // ═════════════════════════════════════════════════════════════════════════════════════════════════════════
@@ -464,7 +501,8 @@ public sealed partial class AccessCacheInvalidationTests
 
         await invalidator.InvalidateRecordOwnerChangeAsync(
             AccessCacheWorld.ProjectEntity, "sprk_projects", AccessCacheWorld.Project, "test", CancellationToken.None);
-        world.Keyspace.ScannedPatterns.Should().HaveCount(3, "the root's eviction is unchanged: membership, root set, snapshot");
+        world.Keyspace.ScannedPatterns.Should().HaveCount(4,
+            "the root's eviction: membership, root set, snapshot, and the Secure lookup-only rights answer (#2121 round 2, F4)");
     }
 
     /// <summary>
@@ -503,9 +541,9 @@ public sealed partial class AccessCacheInvalidationTests
     private static readonly Guid TeamT = Guid.Parse("13200000-0000-0000-0000-0000000009a1");
 
     /// <summary>
-    /// Caches what a share write on <paramref name="record"/> must evict — a colleague's project root set (tenant A) and two
-    /// users' snapshots of the record (tenants A and B) — and returns exactly those keys; everything else warmed (the
-    /// colleague's identity and membership) must stay.
+    /// Caches what a share write on <paramref name="record"/> must evict — a colleague's project root set and Secure
+    /// lookup-only rights answer for the record (tenant A) and two users' snapshots of the record (tenants A and B) — and
+    /// returns exactly those keys; everything else warmed (the colleague's identity and membership) must stay.
     /// </summary>
     private static async Task<HashSet<string>> WarmTheRecordAsync(AccessCacheWorld world, Guid record)
     {
@@ -514,9 +552,11 @@ public sealed partial class AccessCacheInvalidationTests
         await world.WarmSnapshotAsync(OidU, "sprk_projects", record, TenantB);
         var expectedGone = world.Keyspace.Keys.Where(k =>
                 (k.Contains($":{ImpersonatedRootSetSource.CacheResource}:", StringComparison.Ordinal) && k.Contains(":sprk_project:", StringComparison.Ordinal))
-                || k.Contains($":{CachedAccessDataSource.RecordAccessResource}:", StringComparison.Ordinal))
+                || k.Contains($":{CachedAccessDataSource.RecordAccessResource}:", StringComparison.Ordinal)
+                || IsRightsEntry(k, "sprk_projects", record))
             .ToHashSet();
-        expectedGone.Should().HaveCount(1 + 2, "precondition: the colleague's project root set and two snapshots of the record");
+        expectedGone.Should().HaveCount(1 + 2 + 1,
+            "precondition: the colleague's project root set, two snapshots of the record, and the colleague's rights answer for it");
         return expectedGone;
     }
 

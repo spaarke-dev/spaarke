@@ -181,9 +181,12 @@ import {
   Text,
   Tooltip,
   MessageBar,
+  MessageBarActions,
   MessageBarBody,
   MessageBarTitle,
   Badge,
+  Field,
+  Input,
   makeStyles,
   tokens,
   shorthands,
@@ -263,6 +266,23 @@ const useStyles = makeStyles({
     alignItems: 'center',
     columnGap: tokens.spacingHorizontalS,
     flexShrink: 0,
+  },
+  // Task 099c: the record-wide "Expiration" on the "Add Access Permissions" toolbar row (Fluent `Input type="date"`, the
+  // library's date idiom — RecordHeader/fields/DateField.tsx).
+  shareExpiryField: {
+    display: 'flex',
+    flexDirection: 'row',
+    alignItems: 'center',
+    columnGap: tokens.spacingHorizontalS,
+  },
+  shareExpiryInput: {
+    width: '150px',
+  },
+  shareExpiryHint: {
+    display: 'block',
+    fontSize: tokens.fontSizeBase200,
+    color: tokens.colorNeutralForeground3,
+    marginTop: tokens.spacingVerticalXS,
   },
   // Padding below the "Add Access Permissions" header row, before the list
   // (task 073 UAT v1.0.24 #3).
@@ -388,9 +408,94 @@ const useStyles = makeStyles({
  * parsing fails, and to an em-dash when absent. */
 function formatGrantDate(iso: string | undefined): string {
   if (!iso) return '—';
-  const d = new Date(iso);
+  // Task 099a: the BFF's Date Only values (`/record-grants`: grantedDate, expiresDate) arrive as a bare `yyyy-MM-dd`.
+  // `new Date('2026-12-10')` is UTC midnight, which shows as the PREVIOUS day anywhere west of UTC — so a bare date is
+  // read as the calendar date it names.
+  const dateOnly = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso);
+  const d = dateOnly ? new Date(Number(dateOnly[1]), Number(dateOnly[2]) - 1, Number(dateOnly[3])) : new Date(iso);
   if (Number.isNaN(d.getTime())) return iso;
   return d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+}
+
+/**
+ * Task 099a: Current Access's error state when the record's grants could not be read and the failure carries no
+ * ProblemDetails `detail` of its own (a network failure, a sign-in failure, a host that threw a plain Error).
+ */
+export const CURRENT_ACCESS_READ_FAILED_MESSAGE =
+  'Current Access could not be loaded, so who has access to this record is not shown here. Close and reopen to try again.';
+
+/**
+ * Task 099c (FR-33): `POST /api/v1/external-access/set-record-share-expiry` — one expiry on every active external share
+ * of the record, all-or-nothing. Its body is `{ recordType, recordId, expiryDate }` and nothing else: the Expiration
+ * changes the date only, never the access level (ISS-023).
+ */
+const SET_RECORD_SHARE_EXPIRY_PATH = '/api/v1/external-access/set-record-share-expiry';
+
+/** The route's 500 when the transaction was attempted and its outcome is unknown (it may have applied). */
+const SHARE_EXPIRY_UNCONFIRMED_REASON_CODE = 'sdap.access.share_expiry.write_failed';
+
+/** The server's expiry for a share added without one (`ExternalGrantLifecycle.DefaultExpiryDays`). Display only. */
+const DEFAULT_SHARE_EXPIRY_DAYS = 90;
+
+/**
+ * The UTC calendar date `days` from today, `yyyy-MM-dd` — the server's "today" for every expiry decision
+ * (`ExternalGrantLifecycle.TodayUtc`). The picker's minimum mirrors the route's rule: a date before UTC today is
+ * refused (400), today itself is valid, and there is no maximum. The server stays the authority.
+ */
+function utcDateOnly(days = 0): string {
+  const now = new Date();
+  return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + days))
+    .toISOString()
+    .slice(0, 10);
+}
+
+/** An add while the Expiration holds no usable date (task 099c): nothing is sent until it is corrected. It names the
+ * UTC minimum the same way the field's own error does. */
+function addExpiryInvalidMessage(): string {
+  return `Choose ${formatGrantDate(utcDateOnly())} or later before adding people.`;
+}
+
+/** What the Expiration shows for the record's shares (task 099c). */
+type ShareExpirySummary =
+  /** The grants read failed (or has not answered): the date is not known, so it cannot be shown or changed. */
+  | { kind: 'unknown' }
+  /** The record has no external share: the server gives a new share today + 90 days. */
+  | { kind: 'noShares' }
+  | {
+      kind: 'shares';
+      /**
+       * The record's date: the earliest expiry among the shares still in force (it governs the soonest lapse). When
+       * every share has lapsed, the earliest lapsed date (shown, never sent: the route refuses a past date). Null when
+       * no share carries a date.
+       */
+      earliest: string | null;
+      /** The shares do not all end on the same date — stated, never silently resolved to one. */
+      diverges: boolean;
+      /** A share has lapsed: applying a date renews it (the route's "renew them too", owner 2026-09-11). */
+      anyLapsed: boolean;
+    };
+
+/**
+ * Summarizes the record's external shares — the rows the host's grants read returned (each with an `accessRecordId`;
+ * standing members and user shares are not shares the route dates) — for the Expiration (task 099c).
+ */
+function summarizeShareExpiry(grants: IAccessGrantRecord[] | null): ShareExpirySummary {
+  if (grants === null) return { kind: 'unknown' };
+  const shares = grants.filter(g => !!g.accessRecordId);
+  if (shares.length === 0) return { kind: 'noShares' };
+  const dates = shares.map(g => (g.expiresDate ? g.expiresDate.slice(0, 10) : null));
+  const dated = dates.filter((d): d is string => d !== null).sort();
+  const liveDated = shares
+    .filter(g => g.isExpired !== true && !!g.expiresDate)
+    .map(g => (g.expiresDate as string).slice(0, 10))
+    .sort();
+  return {
+    kind: 'shares',
+    // `noUncheckedIndexedAccess` is off, so `[0]` is typed `string` although it is `undefined` on an empty array.
+    earliest: liveDated.length > 0 ? liveDated[0] : dated.length > 0 ? dated[0] : null,
+    diverges: new Set(dates.map(d => d ?? '')).size > 1,
+    anyLapsed: shares.some(g => g.isExpired === true),
+  };
 }
 
 /** Mirrors the BFF's `SpeContainerRevokeOutcome` enum (camelCase-serialized
@@ -409,6 +514,25 @@ type SpeContainerRevokeOutcome = 'NotAttempted' | 'PermissionRemoved' | 'NoPermi
  * revoke and a project closure must stay distinguishable to a caller
  * switching on the code. */
 const REVOKE_SPE_CLEANUP_INCOMPLETE_REASON_CODE = 'sdap.revoke.incomplete.container_not_cleared';
+
+/** #2103 follow-up: the NON-retryable leaf of the same family — an organization grant was revoked, but the
+ * organization has more active members than one revoke may sweep, so no member's container permission was removed
+ * and a retry cannot change that. The server's `detail` says what an administrator must do. MUST match
+ * `RevokeExternalAccessEndpoint.RevokeOrganizationTooLargeReason` exactly. */
+const REVOKE_ORGANIZATION_TOO_LARGE_REASON_CODE = 'sdap.revoke.incomplete.organization_too_large';
+
+/** #2104 round 3: the other NON-retryable leaf of the family — the grant was revoked, but a container permission
+ * matching the revoked grantee is ambiguous (more than one matches) or its holder cannot be verified, so nothing was
+ * removed for them and a retry refuses again. The server's `detail` tells an administrator to resolve the container's
+ * permissions in the SPE admin app. MUST match `RevokeExternalAccessEndpoint.RevokePermissionAmbiguousReason` exactly. */
+const REVOKE_PERMISSION_AMBIGUOUS_REASON_CODE = 'sdap.revoke.incomplete.permission_ambiguous';
+
+/** The `/revoke` reason codes a retry cannot fix: the grant WAS deactivated, and the server's `detail` says what an
+ * administrator must do — shown as a warning, never as "please try again". */
+const NON_RETRYABLE_REVOKE_REASON_CODES: ReadonlySet<string> = new Set([
+  REVOKE_ORGANIZATION_TOO_LARGE_REASON_CODE,
+  REVOKE_PERMISSION_AMBIGUOUS_REASON_CODE,
+]);
 
 /**
  * Thrown by {@link postJson}/{@link getJson} for a non-OK BFF response (task-024
@@ -503,17 +627,17 @@ class AccessGrantModalApiError extends Error {
       // Task 181: an extension of `/share-user`'s related-records-pending 500.
       notificationFailed?: unknown;
     };
-    const reasonCode = typeof body?.reasonCode === 'string' ? body.reasonCode : undefined;
-    const detail = body?.detail ?? body?.title ?? `HTTP ${status}`;
-    const deactivatedCount = typeof body?.deactivatedCount === 'number' ? body.deactivatedCount : undefined;
+    const reasonCode = typeof body.reasonCode === 'string' ? body.reasonCode : undefined;
+    const detail = body.detail ?? body.title ?? `HTTP ${status}`;
+    const deactivatedCount = typeof body.deactivatedCount === 'number' ? body.deactivatedCount : undefined;
     const speContainerOutcome =
-      typeof body?.speContainerOutcome === 'string'
+      typeof body.speContainerOutcome === 'string'
         ? (body.speContainerOutcome as SpeContainerRevokeOutcome)
         : undefined;
-    const problemDetail = typeof body?.detail === 'string' && body.detail.trim() ? body.detail : undefined;
+    const problemDetail = typeof body.detail === 'string' && body.detail.trim() ? body.detail : undefined;
     return new AccessGrantModalApiError(status, detail, reasonCode, deactivatedCount, speContainerOutcome, {
       problemDetail,
-      parentRecordType: typeof body?.parentRecordType === 'string' ? body.parentRecordType : undefined,
+      parentRecordType: typeof body.parentRecordType === 'string' ? body.parentRecordType : undefined,
       notificationFailed: body.notificationFailed === true,
     });
   }
@@ -616,8 +740,10 @@ function splitAccessFailure(err: unknown): { deny: IAccessDeny | null; parentRef
  * person, so the modal shows it verbatim instead of a generic "try again": a
  * policy refusal says why retrying would fail the same way, and the two 503s
  * (`.policy_unreadable`, `.no_access_unverifiable`) say themselves that a retry
- * may succeed. */
+ * may succeed. Task 099c: `.expiry_in_past` (400 — the add's Expiration is
+ * before UTC today; the server's sentence names its "today"). */
 const GRANT_POLICY_REASON_CODES = new Set([
+  'sdap.access.grant.expiry_in_past',
   'sdap.access.grant.record_restricted',
   'sdap.access.grant.org_grant_direct_only_record',
   'sdap.access.grant.policy_unreadable',
@@ -796,6 +922,116 @@ interface IGrantBatchOutcome {
   /** Task 149: the server's `detail` for each share that WAS written while some related records of the secure record
    * are not updated yet. Those shares are counted in `granted`; this only adds the server's sentence. */
   relatedRecordsPending?: string[];
+  /** Slice B3: the people granted whose invite is for a work account (`WorkAccountInvited`). */
+  workAccountInvited?: string[];
+  /** Slice B3: the people whose organisation could not be checked (503 tenant_lookup_unavailable): nothing was
+   * written for them; they stay selected and the notice offers Retry. */
+  lookupUnavailable?: string[];
+  /** The people granted by `/grant` whose automatic invite did not complete (`invite.status` Failed): the grant
+   * stands but they cannot sign in yet. `organisationUnchecked` is the part whose organisation could not be checked.
+   * They stay selected and the notice offers Retry, as for {@link lookupUnavailable}. */
+  inviteNotSent?: { names: string[]; organisationUnchecked: string[] };
+  /** Slice C2b: the people whose invite was not sent because they already have an account (`/invite` answered
+   * {@link INVITE_CONTACT_ALREADY_HAS_ACCOUNT_REASON_CODE}). They stay selected; the notice shows the server's text and
+   * the sign-in link for staff to pass on. */
+  alreadyHasAccount?: IAlreadyHasAccount[];
+}
+
+/** Slice C2b: a person `/invite` sent nothing to because they already have an account. */
+interface IAlreadyHasAccount {
+  name: string;
+  /** The server's staff text, or {@link ALREADY_HAS_ACCOUNT_FALLBACK_SENTENCE} when the response has none. */
+  message: string;
+  signInUrl?: string;
+}
+
+/** Slice C2b: `/invite`'s `emailErrorCode` when the person already has an account: no invite was due or sent. */
+export const INVITE_CONTACT_ALREADY_HAS_ACCOUNT_REASON_CODE = 'sdap.access.invite.contact_already_has_account';
+
+/** Slice C2b: shown for a person who already has an account when the response carries no staff text. */
+export const ALREADY_HAS_ACCOUNT_FALLBACK_SENTENCE = 'This person already has an account, so no invite was sent.';
+
+/** Slice C2b: the batch notice's sentence for one person who already has an account. */
+export function alreadyHasAccountSentence(entry: IAlreadyHasAccount): string {
+  return `${entry.name}: ${entry.message}${entry.signInUrl ? ` ${entry.signInUrl}` : ''}`;
+}
+
+/**
+ * Slice C2c: the server's sign-in link, as a link target only when it is an absolute `https:` URL; otherwise `undefined`
+ * and the link is shown as text, never as a link. Pure.
+ */
+export function safeSignInHref(url: string | undefined): string | undefined {
+  if (!url) return undefined;
+  try {
+    return new URL(url).protocol === 'https:' ? url : undefined;
+  } catch {
+    return undefined; // not an absolute URL
+  }
+}
+
+/** Slice B3: `/invite-and-grant`'s 503 when the person's organisation could not be checked (nothing was written). */
+export const INVITE_TENANT_LOOKUP_UNAVAILABLE_REASON_CODE = 'sdap.access.invite.tenant_lookup_unavailable';
+
+/** Slice B3: the invite status of a person who will sign in with their work account (`onboardStatus` / `invite.status`). */
+const WORK_ACCOUNT_INVITED_STATUS = 'WorkAccountInvited';
+
+/** Slice B3: added to the batch notice after the names of people invited for a work-account sign-in. */
+export const WORK_ACCOUNT_INVITED_SENTENCE = 'invited — will sign in with their work account.';
+
+/** Slice B3: the batch notice's sentence for people whose organisation could not be checked; the notice offers Retry. */
+export function tenantLookupRetrySentence(names: string[]): string {
+  return `Couldn't check the organisation of ${names.join(', ')}, so nothing was granted or sent for them. Retry.`;
+}
+
+/** `/grant`'s `invite.status` when the automatic invite did not complete (the grant stands). */
+const GRANT_INVITE_FAILED_STATUS = 'Failed';
+
+/** C2d: `/invite-and-grant`'s `emailErrorCode` when the invite email was attempted and not sent (the grant stands). */
+export const INVITE_EMAIL_NOT_SENT_REASON_CODE = 'sdap.access.invite.email_not_sent';
+
+/** The batch notice's sentence for people granted by `/grant` whose invite was not sent; the notice offers Retry. */
+export function inviteNotSentRetrySentence(inviteNotSent: {
+  names: string[];
+  organisationUnchecked: string[];
+}): string {
+  const unchecked = inviteNotSent.organisationUnchecked;
+  const others = inviteNotSent.names.filter(n => !unchecked.includes(n));
+  const parts: string[] = [];
+  if (unchecked.length > 0) {
+    parts.push(`Couldn't check the organisation of ${unchecked.join(', ')}, so no invite was sent.`);
+  }
+  if (others.length > 0) parts.push(`No invite was sent to ${others.join(', ')}.`);
+  return `${parts.join(' ')} They hold access but cannot sign in yet. Retry.`;
+}
+
+/** The notice the modal shows; `retry` adds a Retry action that re-runs Add for the rows still selected (slice B3). */
+interface IModalNotice {
+  intent: 'success' | 'warning' | 'error';
+  text: string;
+  retry?: boolean;
+  /** Slice C2c: the sign-in links in `text` that render as links: each one {@link safeSignInHref} accepted. Any other
+   * link in `text` stays text. */
+  links?: string[];
+}
+
+/** Slice C2c: `text`, with each of `links` it contains rendered as a link (opened in a new tab); the rest as text. */
+function noticeContent(text: string, links: string[] | undefined): React.ReactNode {
+  if (!links || links.length === 0) return text;
+  const parts: React.ReactNode[] = [];
+  let rest = text;
+  links.forEach((href, i) => {
+    const at = rest.indexOf(href);
+    if (at < 0) return;
+    parts.push(rest.slice(0, at));
+    parts.push(
+      <Link key={`notice-link-${i}`} href={href} target="_blank" rel="noopener noreferrer">
+        {href}
+      </Link>
+    );
+    rest = rest.slice(at + href.length);
+  });
+  parts.push(rest);
+  return parts;
 }
 
 /** Builds the post-batch notice for `Add (N)` — five distinct shapes ordered by
@@ -805,21 +1041,44 @@ interface IGrantBatchOutcome {
  * without Write on the record fails the same way). Task 181: whichever shape
  * applies, a grant whose person could not be notified adds
  * {@link NOTIFICATION_FAILED_SENTENCE}, and a success becomes a warning. */
-function buildGrantBatchNotice(outcome: IGrantBatchOutcome): { intent: 'success' | 'warning' | 'error'; text: string } {
+function buildGrantBatchNotice(outcome: IGrantBatchOutcome): IModalNotice {
   const { granted, selectedCount, failures, denied, anyNotificationFailed, anyNarrowed } = outcome;
   const policyRefusals = outcome.policyRefusals ?? [];
+  const lookupUnavailable = outcome.lookupUnavailable ?? [];
+  const inviteNotSent = outcome.inviteNotSent ?? { names: [], organisationUnchecked: [] };
+  const alreadyHasAccount = outcome.alreadyHasAccount ?? [];
+  // Slice B3: who was invited for a work-account sign-in, named once, before the other suffixes.
+  const workAccount = outcome.workAccountInvited ?? [];
+  const workSuffix = workAccount.length > 0 ? ` ${workAccount.join(', ')}: ${WORK_ACCOUNT_INVITED_SENTENCE}` : '';
   // Task 149: shares that WERE written (counted in `granted`) while some related records of the secure record are not
   // updated yet — the server's sentence is appended to whichever notice applies, never reported as a failure.
   // Task 181: likewise the could-not-notify sentence, last.
   const relatedPending = Array.from(new Set(outcome.relatedRecordsPending ?? [])).join(' ');
   const notifySuffix = anyNotificationFailed ? ` ${NOTIFICATION_FAILED_SENTENCE}` : '';
-  const relatedSuffix = `${relatedPending ? ` ${relatedPending}` : ''}${notifySuffix}`;
+  const relatedSuffix = `${workSuffix}${relatedPending ? ` ${relatedPending}` : ''}${notifySuffix}`;
 
   if (denied) {
     return {
       intent: 'error',
       text: `Granted access to ${granted} of ${selectedCount} before access was denied; the message above says why.${relatedSuffix}`,
     };
+  }
+  const needsRetry = lookupUnavailable.length > 0 || inviteNotSent.names.length > 0;
+  if (needsRetry || alreadyHasAccount.length > 0) {
+    // Slice B3: nothing was written for the lookup-unavailable people; they stay selected, and Retry adds them again.
+    // A `/grant` whose invite did not complete gets the same notice and Retry (the grant stands; Retry re-sends it).
+    // Slice C2b: a person who already has an account was sent nothing; they stay selected and the notice shows the
+    // server's text and sign-in link. Retrying would answer the same, so that alone offers no Retry.
+    const lookupSentence = lookupUnavailable.length > 0 ? ` ${tenantLookupRetrySentence(lookupUnavailable)}` : '';
+    const inviteSentence = inviteNotSent.names.length > 0 ? ` ${inviteNotSentRetrySentence(inviteNotSent)}` : '';
+    const accountSentence = alreadyHasAccount.map(entry => ` ${alreadyHasAccountSentence(entry)}`).join('');
+    const reasons = policyRefusals.length > 0 ? ` ${Array.from(new Set(policyRefusals)).join(' ')}` : '';
+    const others = failures > 0 ? ` ${failures} other item(s) failed; please try those again.` : '';
+    const text = `Granted access to ${granted} of ${selectedCount}.${lookupSentence}${inviteSentence}${accountSentence}${reasons}${others}${relatedSuffix}`;
+    // Slice C2c: a sign-in link is a link only when it is an absolute https URL; any other value stays text.
+    const links = alreadyHasAccount.flatMap(entry => safeSignInHref(entry.signInUrl) ?? []);
+    if (!needsRetry) return { intent: policyRefusals.length > 0 || failures > 0 ? 'error' : 'warning', text, links };
+    return { intent: 'error', text, retry: true, links };
   }
   if (policyRefusals.length > 0) {
     // Task 138: the record's access policy refused at least one grant. The
@@ -846,7 +1105,7 @@ function buildGrantBatchNotice(outcome: IGrantBatchOutcome): { intent: 'success'
   if (relatedPending || anyNarrowed || anyNotificationFailed) {
     return { intent: 'warning', text: `Granted access to ${granted} item(s).${narrowedNote}${relatedSuffix}` };
   }
-  return { intent: 'success', text: `Granted access to ${granted} item(s).` };
+  return { intent: 'success', text: `Granted access to ${granted} item(s).${workSuffix}` };
 }
 
 /** Task 181 (owner round 89 item 3): added to the batch notice when the server granted access but could not send the
@@ -989,6 +1248,66 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
   const [loading, setLoading] = React.useState(false);
   const [candidates, setCandidates] = React.useState<IAccessGrantCandidate[]>([]);
   const [existingGrants, setExistingGrants] = React.useState<IAccessGrantRecord[]>([]);
+  // Task 099a: set when the record's grants could not be read — Current Access then shows this message (the server's
+  // ProblemDetails `detail`, verbatim) instead of a list, never "No active grants". `notShown`: another message on screen
+  // already says why (the deny banner for a refused grants read, the generic notice when another read failed) — the
+  // section says only that it is not shown, so one failure is one message.
+  const [currentAccessError, setCurrentAccessError] = React.useState<
+    { kind: 'failed'; text: string } | { kind: 'notShown' } | null
+  >(null);
+  // Task 099a (verifier F2): the host's source listed only part of the record's grants (its cap) — stated, never silent.
+  // Holds how many it listed; null when the list is whole.
+  const [grantsTruncatedAt, setGrantsTruncatedAt] = React.useState<number | null>(null);
+  // Task 099c: the record's external shares as the grants read returned them (null: not read, or the read failed) —
+  // the source of the toolbar Expiration — and the date the user has picked but not yet applied (null: none).
+  const [recordShares, setRecordShares] = React.useState<IAccessGrantRecord[] | null>(null);
+  const [expiryDraft, setExpiryDraft] = React.useState<string | null>(null);
+  const [expiryApplying, setExpiryApplying] = React.useState(false);
+  // Task 099c: the record's one Expiration (owner 2026-09-10: it "applies to all sharing", and every add sends it).
+  // The minimum mirrors the route (UTC today, today valid, no maximum); the server stays the authority.
+  const shareExpiry = summarizeShareExpiry(recordShares);
+  const expiryMin = utcDateOnly();
+  const expiryDraftBeforeMin = expiryDraft !== null && expiryDraft !== '' && expiryDraft < expiryMin;
+  const expiryDraftValid = expiryDraft !== null && /^\d{4}-\d{2}-\d{2}$/.test(expiryDraft) && !expiryDraftBeforeMin;
+  // With no share yet, the field's own value is the record's date: an unusable one holds every add back.
+  const addExpiryInvalid = shareExpiry.kind === 'noShares' && expiryDraft !== null && !expiryDraftValid;
+  /**
+   * THE ADD RULE (task 099c): every external add — contact, organization, suggestion — sends the record's APPLIED date.
+   * With shares, that is their date (never an unapplied edit, so a new share cannot silently land off the record's
+   * date); re-adding someone whose live grant ends later moves it to the record date (one date per record, owner
+   * 2026-09-10; `/grant` writes an explicit date as given). With no share, it is the field's value (default
+   * today + 90). Nothing is sent when the date is unknown (the grants read failed) or has lapsed (the route would
+   * refuse it): the server then keeps a live grant's date and gives a new or lapsed one today + 90.
+   */
+  const addExpiryDate: string | undefined =
+    shareExpiry.kind === 'shares'
+      ? shareExpiry.earliest !== null && shareExpiry.earliest >= expiryMin
+        ? shareExpiry.earliest
+        : undefined
+      : shareExpiry.kind === 'noShares'
+        ? expiryDraft === null
+          ? utcDateOnly(DEFAULT_SHARE_EXPIRY_DAYS)
+          : expiryDraftValid
+            ? expiryDraft
+            : undefined
+        : undefined;
+  // Task 099c (review F1-c): an add with no share sent the field's date, and the refresh now shows that date as the
+  // shares' own — the draft has been applied, so it is no longer pending. (A draft the shares did not take stays.)
+  const shareExpiryKind = shareExpiry.kind;
+  const shareExpiryEarliest = shareExpiry.kind === 'shares' ? shareExpiry.earliest : null;
+  const prevShareExpiryKindRef = React.useRef(shareExpiryKind);
+  React.useEffect(() => {
+    const was = prevShareExpiryKindRef.current;
+    prevShareExpiryKindRef.current = shareExpiryKind;
+    if (
+      was === 'noShares' &&
+      shareExpiryKind === 'shares' &&
+      expiryDraft !== null &&
+      expiryDraft === shareExpiryEarliest
+    ) {
+      setExpiryDraft(null);
+    }
+  }, [shareExpiryKind, shareExpiryEarliest, expiryDraft]);
   // Items (contacts OR organizations) checked to grant, keyed by contactId/orgId.
   const [selectedCandidateIds, setSelectedCandidateIds] = React.useState<Set<string>>(new Set());
   const [approving, setApproving] = React.useState(false);
@@ -998,11 +1317,15 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
 
   // Per-row access level (task 073 v1.0.23) — keyed by item id (contactId/orgId/systemUserId).
   // NO default: a row is not grantable until the admin picks its level ("Pick access level").
-  const [rowLevels, setRowLevels] = React.useState<Record<string, number>>({});
+  const [rowLevels, setRowLevels] = React.useState<Record<string, number | undefined>>({});
   // Contacts + organizations + users staged via the native "+ Contact" /
   // "+ Organization" / "+ User" advanced lookup — appended into the "Add
   // Access Permissions" list as selectable rows.
   const [lookedUpContacts, setLookedUpContacts] = React.useState<IContactSearchResult[]>([]);
+  /** Contacts whose `/grant` was written but whose invite was not sent. Their grant stands, so Retry invites them through
+   * `/invite` (which always sends) instead of granting again: a re-grant answers an invite whose marker was written before
+   * the send failed as still pending, and sends nothing. */
+  const [inviteRetryContactIds, setInviteRetryContactIds] = React.useState<ReadonlySet<string>>(new Set());
   const [lookedUpOrgs, setLookedUpOrgs] = React.useState<IOrganizationPick[]>([]);
   const [lookedUpUsers, setLookedUpUsers] = React.useState<IUserPick[]>([]);
 
@@ -1014,7 +1337,7 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
   const [assignedEntries, setAssignedEntries] = React.useState<IAssignedAccessEntry[]>([]);
   const [suggestionBusy, setSuggestionBusy] = React.useState<string | null>(null);
 
-  const [notice, setNotice] = React.useState<{ intent: 'success' | 'warning' | 'error'; text: string } | null>(null);
+  const [notice, setNotice] = React.useState<IModalNotice | null>(null);
 
   // The designed 401/403 deny states (task 008 FR-07 delegation gate; project
   // constraint "the 403 delegation deny is a designed UI state, not a toast").
@@ -1081,7 +1404,7 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
     [recordId]
   );
   const setNoticeIfCurrent = React.useCallback(
-    (n: { intent: 'success' | 'warning' | 'error'; text: string } | null) => {
+    (n: IModalNotice | null) => {
       if (showsThisRecord()) setNotice(n);
     },
     [showsThisRecord]
@@ -1127,7 +1450,8 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
   const fetchUserShares = React.useCallback(async (): Promise<IAccessGrantRecord[]> => {
     const query = `recordType=${encodeURIComponent(recordType)}&recordId=${encodeURIComponent(recordId)}`;
     const data = await getJson<{
-      shares: Array<{
+      // Untrusted server JSON: a response without `shares` reads as an empty list (see the `?? []` below).
+      shares?: Array<{
         systemUserId: string;
         fullName?: string | null;
         accessLevel?: number | null;
@@ -1171,9 +1495,9 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
    * still visible in Current Access. */
   const fetchAssignedAccess = React.useCallback(async (): Promise<IAssignedAccessEntry[]> => {
     const query = `recordType=${encodeURIComponent(recordType)}&recordId=${encodeURIComponent(recordId)}`;
-    const data = await getJson<{ entries?: IAssignedAccessEntry[] }>(
-      `/api/v1/external-access/assigned-access?${query}`
-    );
+    const data = await getJson<{
+      entries?: Array<Omit<IAssignedAccessEntry, 'residualAccessTerms'> & { residualAccessTerms?: string[] | null }>;
+    }>(`/api/v1/external-access/assigned-access?${query}`);
     return (data.entries ?? []).map(e => ({ ...e, residualAccessTerms: e.residualAccessTerms ?? [] }));
   }, [getJson, recordType, recordId]);
 
@@ -1215,10 +1539,15 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
     setLoading(true);
     setNotice(null);
     try {
-      const [candidateList, grantList, standingList, userShareList, ownerInfo, assignedList, noAccessRead] =
+      const [candidateList, grantsSettled, standingList, userShareList, ownerInfo, assignedList, noAccessRead] =
         await Promise.all([
           fetchCandidates(),
-          fetchExistingGrants(),
+          // Task 099a (verifier pass 2, F1): the grants read settles on its own, like /user-shares — its failure is
+          // Current Access's own state, and every other section still loads.
+          fetchExistingGrants().then(
+            read => ({ read, failed: null as { err: unknown } | null }),
+            (err: unknown) => ({ read: null, failed: { err } })
+          ),
           // Standing-grant members (task 073 UAT #2) — optional; a host that
           // hasn't wired the flag omits it. Failing soft so a standing-read
           // problem (e.g. field-level-security denial) never blocks the modal.
@@ -1242,6 +1571,9 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
           fetchNoAccess(),
         ]);
       if (!isCurrent()) return;
+      // Task 099a: a capped source says so (`{ grants, truncated }`); a plain array is the whole list.
+      const grantsRead = grantsSettled.read;
+      const grantList = grantsRead === null ? [] : Array.isArray(grantsRead) ? grantsRead : grantsRead.grants;
       const noAccess = noAccessRead.section;
       // Task 174: the effective access the gate and the "No effect" marks use (null: the host's values alone).
       setServerAccess(noAccessRead.access);
@@ -1252,10 +1584,41 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
       // and stays revocable. User-share rows key on a DIFFERENT id space
       // (systemUserId, reusing the `contactId` field per the doc comment
       // above) so they never collide with contact-keyed rows.
-      const grantedContactIds = new Set(grantList.map(g => g.contactId));
-      const standingOnly = standingList.filter(s => !grantedContactIds.has(s.contactId));
-      const currentAccess = [...grantList, ...standingOnly, ...userShareList];
+      // Task 099a (verifier F1): only a grant that still CONFERS hides the contact's standing row. A lapsed grant confers
+      // nothing, while the standing row still does (the server's union, AccessibleRecordSetService.ComposeForContactAsync),
+      // so both are listed — the lapsed one marked Expired, the standing one as live access.
+      const liveGrantContactIds = new Set(grantList.filter(g => !g.isExpired).map(g => g.contactId));
+      const standingOnly = standingList.filter(s => !liveGrantContactIds.has(s.contactId));
+      // Task 099a: a failed grants read lists nothing — Current Access shows its own state instead (never a partial
+      // list without the record's grants, never "No active grants"). A refusal by the delegation/sign-in rule is the
+      // deny banner's state (every write blocked, as for /user-shares); any other failure is the section's own error,
+      // with the server's ProblemDetails `detail` verbatim (rendered as text) or the generic sentence.
+      const currentAccess = grantsSettled.failed ? [] : [...grantList, ...standingOnly, ...userShareList];
       setExistingGrants(currentAccess);
+      // Task 099c: the Expiration reads the shares themselves; a failed read leaves it unknown, never "no shares".
+      setRecordShares(grantsSettled.failed ? null : grantList);
+      if (grantsSettled.failed) {
+        const grantsErr = grantsSettled.failed.err;
+        const grantsDeny = splitAccessFailure(AccessGrantModalApiError.fromThrown(grantsErr) ?? grantsErr).deny;
+        if (grantsDeny) setAccessDenyState(grantsDeny);
+        const detail: unknown = problemOf(grantsErr)?.detail;
+        setCurrentAccessError(
+          grantsDeny
+            ? { kind: 'notShown' }
+            : {
+                kind: 'failed',
+                text:
+                  typeof detail === 'string' && detail.trim() !== ''
+                    ? detail.trim()
+                    : CURRENT_ACCESS_READ_FAILED_MESSAGE,
+              }
+        );
+      } else {
+        setCurrentAccessError(null);
+      }
+      setGrantsTruncatedAt(
+        grantsRead !== null && !Array.isArray(grantsRead) && grantsRead.truncated === true ? grantList.length : null
+      );
 
       // Task 067: an organization wall in force walls off the organization's people, so the contacts in Current Access
       // are checked against it — only when such a wall exists and there are contacts to check.
@@ -1290,7 +1653,13 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
       setOrgWallCheck(orgCheck);
       // Exclude both explicitly-granted AND standing members from the
       // candidate-approve list (they already have access).
-      const currentAccessContactIds = new Set([...grantedContactIds, ...standingOnly.map(s => s.contactId)]);
+      // Task 099a: a LAPSED grant's contact is excluded too — they are listed once, in Current Access, as Expired and
+      // revocable. Re-adding them (the contact lookup) restores that same row on the server (owner round 80 / task 113),
+      // so they are not offered as a fresh candidate beside it.
+      const currentAccessContactIds = new Set([
+        ...grantList.map(g => g.contactId),
+        ...standingOnly.map(s => s.contactId),
+      ]);
       // Task 142: a contact the server already SUGGESTS (a secure record) is offered once — in Suggested Access,
       // with Grant / Dismiss — not a second time as a role-based candidate.
       const suggestedContactIds = new Set(
@@ -1303,7 +1672,13 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
       setSecureOwnerInfo(ownerInfo);
     } catch {
       if (!isCurrent()) return;
+      // A read other than the grants read failed (the grants read never rejects here): the generic notice says so, and
+      // Current Access — not shown, never "No active grants" — does not add a second error of its own (task 099a,
+      // verifier pass 2).
       setNotice({ intent: 'error', text: 'Failed to load access data. Close and reopen to retry.' });
+      setCurrentAccessError({ kind: 'notShown' });
+      setGrantsTruncatedAt(null);
+      setRecordShares(null);
       // Never leave the No Access List spinning, or showing the previous load's rows as current.
       setNoAccessState({ kind: 'error' });
       setServerAccess(null);
@@ -1329,6 +1704,7 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
       setSelectedCandidateIds(new Set());
       setRowLevels({});
       setLookedUpContacts([]);
+      setInviteRetryContactIds(new Set());
       setLookedUpOrgs([]);
       setLookedUpUsers([]);
       setPendingRevoke(null);
@@ -1336,6 +1712,9 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
       // gets a fresh chance to load and write (server truth only; no
       // client-side memory of "you were denied last time").
       setAccessDenyState(null);
+      // Task 099c: nor the previous record's shares or an unapplied Expiration.
+      setRecordShares(null);
+      setExpiryDraft(null);
       // Task 067: a fresh open never shows the previous record's or session's No Access answer.
       setNoAccessState({ kind: 'loading' });
       // Task 174: nor the previous record's effective access.
@@ -1387,6 +1766,11 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
     notificationFailed: boolean;
     /** Task 139: the server capped the grant at the caller's own level. */
     narrowed: boolean;
+    /** Slice B3: the person's invite is for a work account (they sign in with it; no portal account). */
+    workAccountInvited?: boolean;
+    /** `/grant`: the grant was written but its automatic invite did not complete (`invite.status` Failed); `errorCode`
+     * is the server's reason. Absent when the invite was sent, not needed, or not reported. */
+    inviteFailed?: { errorCode?: string };
   }
 
   /** The additive fields `/grant`, `/invite-and-grant` and `/share-user` return (task 139; task 181's
@@ -1396,6 +1780,14 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
     grantedAccessLevel?: number | null;
     narrowed?: boolean;
     notificationFailed?: boolean;
+    /** `/invite-and-grant`: how the person was onboarded (slice B3: `WorkAccountInvited`). */
+    onboardStatus?: string;
+    /** `/grant`: what the grant did about the person's invite (slice B3: `WorkAccountInvited`). */
+    invite?: { status?: string; errorCode?: string | null } | null;
+    /** `/invite-and-grant`: whether the invite email was sent. Only `false` with `email_not_sent` is a send that did not
+     * happen; `contact_already_has_account` means none was due, and `null` or absent (an older server) reports nothing. */
+    emailSent?: boolean | null;
+    emailErrorCode?: string | null;
   }
 
   /**
@@ -1423,6 +1815,8 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
       // failure directions are not symmetric, so the catch must not default
       // to the more harmful one.
       const internal = await isInternalContact(contact.contactId).catch(() => true);
+      // Task 099c: the record's applied Expiration rides on the add (see addExpiryDate).
+      const expiryBody = addExpiryDate ? { expiryDate: addExpiryDate } : {};
       let data: IGrantWriteResponseBody | undefined;
 
       if (!internal && contact.email) {
@@ -1436,6 +1830,7 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
           accessLevel: opts.level,
           firstName,
           lastName,
+          ...expiryBody,
         });
       } else {
         // Internal workforce contact, or an external contact with no email on
@@ -1446,14 +1841,78 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
           recordType,
           recordId,
           accessLevel: opts.level,
+          ...expiryBody,
         });
       }
 
       // Task 139: every grant is capped at the caller's own level; the server
       // says when it did, and the batch notice reports it.
-      return { notificationFailed: data.notificationFailed === true, narrowed: data.narrowed === true };
+      return {
+        notificationFailed: data.notificationFailed === true,
+        narrowed: data.narrowed === true,
+        // C5: "invited" only when the invite email was not reported as unsent; one that did not send is never "invited".
+        workAccountInvited:
+          data.emailSent !== false &&
+          (data.onboardStatus === WORK_ACCOUNT_INVITED_STATUS || data.invite?.status === WORK_ACCOUNT_INVITED_STATUS),
+        // C2d: `/invite-and-grant` whose invite email was attempted and not sent takes the same path as `/grant`'s failed
+        // invite (the not-sent notice, and Retry through `/invite`). Already-has-account, sent, or not reported: none.
+        // C5: an email reported sent never offers Retry.
+        inviteFailed:
+          data.emailSent === true
+            ? undefined
+            : data.invite?.status === GRANT_INVITE_FAILED_STATUS
+              ? { errorCode: data.invite.errorCode ?? undefined }
+              : data.emailSent === false && data.emailErrorCode === INVITE_EMAIL_NOT_SENT_REASON_CODE
+                ? { errorCode: data.emailErrorCode }
+                : undefined,
+      };
     },
-    [isInternalContact, postJson, recordId, recordType]
+    [isInternalContact, postJson, recordId, recordType, addExpiryDate]
+  );
+
+  /**
+   * Retry for a person whose grant stands but whose invite was not sent: `/invite` (onboard only; it writes no grant),
+   * which re-runs the organisation decision and sends. Returns whether the invite was sent; throws when the request
+   * fails. Slice C2b: sent only when `emailSent` is `true`; `false`, `null` or absent is not sent. A person who already
+   * has an account is reported with the server's text and sign-in link (`alreadyHasAccount`).
+   */
+  const inviteGrantedContact = React.useCallback(
+    async (
+      contact: { email: string },
+      level: number
+    ): Promise<{
+      sent: boolean;
+      workAccountInvited: boolean;
+      alreadyHasAccount?: { message: string; signInUrl?: string };
+    }> => {
+      const data = await postJson<{
+        status?: string;
+        emailSent?: boolean | null;
+        emailErrorCode?: string | null;
+        staffMessage?: string | null;
+        signInUrl?: string | null;
+      }>('/api/v1/external-access/invite', {
+        email: contact.email,
+        recordType,
+        recordId,
+        accessLevel: level,
+      });
+      const sent = data.emailSent === true;
+      const alreadyHasAccount =
+        !sent && data.emailErrorCode === INVITE_CONTACT_ALREADY_HAS_ACCOUNT_REASON_CODE
+          ? {
+              message: data.staffMessage || ALREADY_HAS_ACCOUNT_FALLBACK_SENTENCE,
+              signInUrl: data.signInUrl || undefined,
+            }
+          : undefined;
+      // C5: a work-account invite whose notice was not sent is not "invited"; it stays staged for Retry.
+      return {
+        sent,
+        workAccountInvited: data.status === WORK_ACCOUNT_INVITED_STATUS && data.emailSent !== false,
+        alreadyHasAccount,
+      };
+    },
+    [postJson, recordId, recordType]
   );
 
   // Unified "Available Contacts & Organizations & Users" list (task 073 v1.0.23; task
@@ -1520,16 +1979,18 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
    * active member of the organization then inherits access at check time (server Term-3 union). */
   const grantOrganization = React.useCallback(
     async (org: IOrganizationPick, level: number): Promise<{ narrowed: boolean }> => {
-      const data = await postJson<IGrantWriteResponseBody>('/api/v1/external-access/grant', {
+      const data = await postJson<IGrantWriteResponseBody | null>('/api/v1/external-access/grant', {
         recordType,
         recordId,
         accessLevel: level,
         organizationId: org.id,
+        // Task 099c: the record's applied Expiration rides on the add (see addExpiryDate).
+        ...(addExpiryDate ? { expiryDate: addExpiryDate } : {}),
       });
       // Task 139: an organization-wide grant is capped at the caller's level too.
       return { narrowed: data?.narrowed === true };
     },
-    [postJson, recordType, recordId]
+    [postJson, recordType, recordId, addExpiryDate]
   );
 
   /** Writes an internal system-user POA SHARE (task 065, FR-29) via the task-063
@@ -1559,6 +2020,11 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
   const handleGrantSelected = React.useCallback(async (): Promise<boolean> => {
     const selected = availableItems.filter(it => selectedCandidateIds.has(it.id));
     if (selected.length === 0) return true;
+    // Task 099c: contacts and organizations carry the record's Expiration; an unusable one is corrected first.
+    if (addExpiryInvalid && selected.some(it => it.kind !== 'user')) {
+      setNoticeIfCurrent({ intent: 'warning', text: addExpiryInvalidMessage() });
+      return false;
+    }
     // Every selected row must have a level (no default) before it can be granted.
     const missing = selected.filter(it => rowLevels[it.id] === undefined);
     if (missing.length > 0) {
@@ -1576,13 +2042,39 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
     let denied = false;
     const policyRefusals: string[] = [];
     const relatedRecordsPending: string[] = [];
+    const workAccountInvited: string[] = [];
+    const lookupUnavailable: IAvailableItem[] = [];
+    // `/grant` wrote the grant but its automatic invite did not complete: reported with Retry, kept selected.
+    const inviteNotSent: IAvailableItem[] = [];
+    const organisationUnchecked: string[] = [];
+    // Slice C2b: `/invite` sent nothing because the person already has an account; kept selected with the server's text.
+    const alreadyHasAccount: { item: IAvailableItem; message: string; signInUrl?: string }[] = [];
     for (const it of selected) {
       const level = rowLevels[it.id];
+      // Unreachable: the missing-level guard above returned before any write. Narrows `level` for the writes below.
+      if (level === undefined) continue;
+      // The person's grant stands and only their invite is retried (inviteRetryContactIds).
+      const inviteRetryEmail =
+        it.kind === 'contact' && it.contact && inviteRetryContactIds.has(it.contact.contactId)
+          ? it.contact.email
+          : undefined;
       try {
-        if (it.kind === 'contact' && it.contact) {
+        if (inviteRetryEmail) {
+          const invited = await inviteGrantedContact({ email: inviteRetryEmail }, level);
+          if (invited.workAccountInvited) workAccountInvited.push(it.name);
+          if (invited.alreadyHasAccount) alreadyHasAccount.push({ item: it, ...invited.alreadyHasAccount });
+          else if (!invited.sent) inviteNotSent.push(it);
+        } else if (it.kind === 'contact' && it.contact) {
           const outcome = await grantContact(it.contact, { level });
           anyNotificationFailed = anyNotificationFailed || outcome.notificationFailed;
           anyNarrowed = anyNarrowed || outcome.narrowed;
+          if (outcome.workAccountInvited) workAccountInvited.push(it.name);
+          if (outcome.inviteFailed) {
+            inviteNotSent.push(it);
+            if (outcome.inviteFailed.errorCode === INVITE_TENANT_LOOKUP_UNAVAILABLE_REASON_CODE) {
+              organisationUnchecked.push(it.name);
+            }
+          }
         } else if (it.kind === 'organization' && it.org) {
           const outcome = await grantOrganization(it.org, level);
           anyNarrowed = anyNarrowed || outcome.narrowed;
@@ -1607,6 +2099,27 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
         // Task 175: this item would make the record looser than its parent's floor. A refusal of this item only.
         if (parentRefusal) {
           policyRefusals.push(`${it.name}: ${parentRefusal}`);
+          continue;
+        }
+        // An invite retry that did not send: the grant still stands, so the person stays staged with the same notice.
+        if (inviteRetryEmail) {
+          inviteNotSent.push(it);
+          if (
+            err instanceof AccessGrantModalApiError &&
+            err.reasonCode === INVITE_TENANT_LOOKUP_UNAVAILABLE_REASON_CODE
+          ) {
+            organisationUnchecked.push(it.name);
+          }
+          continue;
+        }
+        // Slice B3: the person's organisation could not be checked, so nothing was written for them. Kept selected for
+        // Retry; never counted as an ordinary failure.
+        if (
+          err instanceof AccessGrantModalApiError &&
+          err.status === 503 &&
+          err.reasonCode === INVITE_TENANT_LOOKUP_UNAVAILABLE_REASON_CODE
+        ) {
+          lookupUnavailable.push(it);
           continue;
         }
         // Task 149: the share on the record WAS written; only some related records of the secure record are not yet
@@ -1636,9 +2149,24 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
     setApproving(false);
     // Rebound to another record meanwhile: its staged picks, list and notice are not this batch's to touch.
     if (!showsThisRecord()) return false;
-    setSelectedCandidateIds(new Set());
-    setRowLevels({});
-    setLookedUpContacts([]);
+    // Slice B3: the rows whose organisation could not be checked stay staged (selection, level, looked-up contact), so
+    // the notice's Retry adds exactly them again.
+    // A granted person whose invite was not sent is no longer a candidate once Current Access lists them, so they are
+    // kept as a looked-up contact for Retry.
+    // Slice C2b: a person who already has an account stays staged the same way, with the notice's text and link.
+    const keptInvitees = [...inviteNotSent, ...alreadyHasAccount.map(a => a.item)];
+    const retryIds = new Set([...lookupUnavailable, ...keptInvitees].map(it => it.id));
+    setInviteRetryContactIds(new Set(keptInvitees.flatMap(it => (it.contact?.email ? [it.contact.contactId] : []))));
+    setSelectedCandidateIds(new Set(retryIds));
+    setRowLevels(Object.fromEntries(Object.entries(rowLevels).filter(([id]) => retryIds.has(id))));
+    setLookedUpContacts(prev => {
+      const kept = prev.filter(c => retryIds.has(c.contactId));
+      const keptIds = new Set(kept.map(c => c.contactId));
+      for (const it of keptInvitees) {
+        if (it.contact && !keptIds.has(it.contact.contactId)) kept.push(it.contact);
+      }
+      return kept;
+    });
     setLookedUpOrgs([]);
     setLookedUpUsers([]);
     await loadData();
@@ -1653,6 +2181,14 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
         anyNarrowed,
         policyRefusals,
         relatedRecordsPending,
+        workAccountInvited,
+        lookupUnavailable: lookupUnavailable.map(it => it.name),
+        inviteNotSent: { names: inviteNotSent.map(it => it.name), organisationUnchecked },
+        alreadyHasAccount: alreadyHasAccount.map(a => ({
+          name: a.item.name,
+          message: a.message,
+          signInUrl: a.signInUrl,
+        })),
       })
     );
     // Success (for Save's close decision) iff nothing failed, nothing was refused
@@ -1667,6 +2203,9 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
       failures === 0 &&
       policyRefusals.length === 0 &&
       relatedRecordsPending.length === 0 &&
+      lookupUnavailable.length === 0 &&
+      inviteNotSent.length === 0 &&
+      alreadyHasAccount.length === 0 &&
       !anyNotificationFailed
     );
   }, [
@@ -1674,12 +2213,15 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
     selectedCandidateIds,
     rowLevels,
     grantContact,
+    inviteGrantedContact,
+    inviteRetryContactIds,
     grantOrganization,
     shareUser,
     loadData,
     showsThisRecord,
     setNoticeIfCurrent,
     setDenyIfCurrent,
+    addExpiryInvalid,
   ]);
 
   // Save (task 073 UAT v1.0.29 #1B): if rows are staged but not yet added, COMMIT
@@ -1755,6 +2297,11 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
    * Adopted. Refusals show the server's own sentence. */
   const grantSuggestion = React.useCallback(
     async (entry: IAssignedAccessEntry) => {
+      // Task 099c: an external grant carries the record's Expiration; an unusable one is corrected first.
+      if (!entry.systemUserId && addExpiryInvalid) {
+        setNoticeIfCurrent({ intent: 'warning', text: addExpiryInvalidMessage() });
+        return;
+      }
       setSuggestionBusy(entry.entryId);
       const name = entry.subjectName ?? 'This person';
       try {
@@ -1771,6 +2318,8 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
               accessLevel: ASSIGNED_ACCESS_LEVEL,
               recordType,
               recordId,
+              // Task 099c: the record's applied Expiration rides on the add (see addExpiryDate).
+              ...(addExpiryDate ? { expiryDate: addExpiryDate } : {}),
             });
         await loadData();
         const notificationFailed = data.notificationFailed === true;
@@ -1809,7 +2358,7 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
         setSuggestionBusy(null);
       }
     },
-    [postJson, recordType, recordId, loadData, setNoticeIfCurrent, setDenyIfCurrent]
+    [postJson, recordType, recordId, loadData, setNoticeIfCurrent, setDenyIfCurrent, addExpiryDate, addExpiryInvalid]
   );
 
   /** Task 142 (owner A3): "Dismiss" declines the suggestion — the Assigned-To rule will not suggest or grant it again
@@ -1843,6 +2392,61 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
           });
       } finally {
         setSuggestionBusy(null);
+      }
+    },
+    [postJson, recordType, recordId, loadData, setNoticeIfCurrent, setDenyIfCurrent]
+  );
+
+  /**
+   * Task 099c (FR-33, #961): applies the toolbar Expiration to every external share of the record — ONE call to
+   * `/set-record-share-expiry`, the date only. Success refreshes Current Access from the grants read. A failure says
+   * what did not happen (the server's own sentence when it gave one) and puts the picker back on the shares' date; a
+   * delegation/sign-in refusal is the deny banner. When the server could not confirm the outcome (it may have applied),
+   * the list is re-read so it shows which, beside the server's sentence.
+   */
+  const applyShareExpiry = React.useCallback(
+    async (expiryDate: string) => {
+      setExpiryApplying(true);
+      try {
+        const data = await postJson<{ updatedCount?: number }>(SET_RECORD_SHARE_EXPIRY_PATH, {
+          recordType,
+          recordId,
+          expiryDate,
+        });
+        // With no active share the route stores nothing and the date is kept as the next add's (the route's contract,
+        // `SetRecordShareExpiryResponse.UpdatedCount`): the field, now in its no-shares state, holds it.
+        setExpiryDraft(data.updatedCount === 0 ? expiryDate : null);
+        await loadData();
+        setNoticeIfCurrent(
+          data.updatedCount === 0
+            ? {
+                intent: 'warning',
+                text: `This record has no external shares now, so no share was changed. People you add have access until ${formatGrantDate(expiryDate)}.`,
+              }
+            : {
+                intent: 'success',
+                text: `Every external share on this record now ends on ${formatGrantDate(expiryDate)}.`,
+              }
+        );
+      } catch (err) {
+        // The picker returns to the shares' own date: nothing here may suggest the new date took.
+        setExpiryDraft(null);
+        const { deny, parentRefusal } = splitAccessFailure(err);
+        if (deny) {
+          setDenyIfCurrent(deny);
+          return;
+        }
+        const apiErr = err instanceof AccessGrantModalApiError ? err : null;
+        if (apiErr?.reasonCode === SHARE_EXPIRY_UNCONFIRMED_REASON_CODE) await loadData();
+        setNoticeIfCurrent({
+          intent: 'error',
+          text:
+            parentRefusal ??
+            apiErr?.problemDetail ??
+            `The expiration date was not changed to ${formatGrantDate(expiryDate)}. Please try again.`,
+        });
+      } finally {
+        setExpiryApplying(false);
       }
     },
     [postJson, recordType, recordId, loadData, setNoticeIfCurrent, setDenyIfCurrent]
@@ -1912,6 +2516,19 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
           })
         );
       } else if (
+        pendingRevoke.kind === 'grant' &&
+        err instanceof AccessGrantModalApiError &&
+        err.reasonCode !== undefined &&
+        NON_RETRYABLE_REVOKE_REASON_CODES.has(err.reasonCode)
+      ) {
+        // #2103 follow-up: the organization is too large for one revoke to sweep; #2104 round 3: a matching container
+        // permission is ambiguous or unverifiable. Either way the grant WAS deactivated, and a retry meets the same
+        // answer — so show the server's sentence (what an administrator must do), never the generic "please try
+        // again" below.
+        setPendingRevoke(null);
+        await loadData();
+        setNoticeIfCurrent({ intent: 'warning', text: err.detail });
+      } else if (
         pendingRevoke.kind === 'share' &&
         err instanceof AccessGrantModalApiError &&
         err.reasonCode === UNSHARE_LAST_READER_REASON_CODE
@@ -1959,6 +2576,43 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
   // their level dropdowns and Add must stay usable, because Restricted never
   // limits internal access.
   const actionsBlocked = accessDenyState !== null;
+
+  // Task 099c (FR-33, #961): the toolbar Expiration (state and the add rule: see addExpiryDate above). With shares it
+  // shows their date and Apply moves every share to a new one; with no share it holds the date the next add sends
+  // (default today + 90) — there is nothing to Apply to. It cannot be changed while the date is unknown (the grants
+  // read failed) or writes are blocked.
+  const expiryShown =
+    shareExpiry.kind === 'shares'
+      ? (shareExpiry.earliest ?? '')
+      : shareExpiry.kind === 'noShares'
+        ? utcDateOnly(DEFAULT_SHARE_EXPIRY_DAYS)
+        : '';
+  // Review F1-a: not while an add or a suggestion's Grant is in flight — it sends the date read when it started, so an
+  // Apply meanwhile would leave the rest of that batch on the old date.
+  const expiryEditable =
+    shareExpiry.kind !== 'unknown' && !actionsBlocked && !expiryApplying && !approving && suggestionBusy === null;
+  // With shares: an edit that differs from the applied date is pending (review F1-c: a draft the shares now carry is
+  // not). Apply sends the edit, or — when the shares end on different dates — the shown date, which aligns them
+  // (review F1-b: the divergence line offers Apply, so it is there with no edit).
+  const expiryPending = shareExpiry.kind === 'shares' && expiryDraft !== null && expiryDraft !== expiryShown;
+  // Review round 2 (F4): Apply with no edit is offered only while the shown (earliest) date is still usable — when it
+  // has lapsed there is nothing valid to apply, so the user is told to choose a date instead.
+  const expiryShownLapsed = expiryShown !== '' && expiryShown < expiryMin;
+  const expiryApplyOffered =
+    shareExpiry.kind === 'shares' && (expiryPending || (shareExpiry.diverges && expiryShown >= expiryMin));
+  const expiryApplyValue = expiryDraft ?? expiryShown;
+  const expiryCanApply =
+    expiryEditable &&
+    expiryApplyOffered &&
+    /^\d{4}-\d{2}-\d{2}$/.test(expiryApplyValue) &&
+    expiryApplyValue >= expiryMin;
+  const expiryValidationMessage = expiryDraftBeforeMin
+    ? `Choose ${formatGrantDate(expiryMin)} or later.`
+    : addExpiryInvalid
+      ? 'Choose the date new shares end.'
+      : undefined;
+  // With no share and no contact-based access offered (Restricted), there is nothing for the Expiration to govern.
+  const showShareExpiry = shareExpiry.kind !== 'noShares' || contactGrantsOffered;
 
   // Task 142: suggestions the server is waiting on (secure records) — contact suggestions only where contacts may be
   // granted (never on Restricted); a linked internal user's suggestion is a share, which Restricted never limits.
@@ -2053,7 +2707,8 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
           </Button>
         }
         footer={
-          <Button appearance="primary" onClick={() => void handleSave()}>
+          // Review F1-a: Save commits staged adds, so not while an Expiration Apply is in flight.
+          <Button appearance="primary" disabled={expiryApplying} onClick={() => void handleSave()}>
             Save
           </Button>
         }
@@ -2071,8 +2726,15 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
                   <MessageBarTitle>
                     {notice.intent === 'success' ? 'Success' : notice.intent === 'warning' ? 'Notice' : 'Error'}
                   </MessageBarTitle>
-                  {notice.text}
+                  {noticeContent(notice.text, notice.links)}
                 </MessageBarBody>
+                {notice.retry && (
+                  <MessageBarActions>
+                    <Button size="small" disabled={approving} onClick={() => void handleGrantSelected()}>
+                      Retry
+                    </Button>
+                  </MessageBarActions>
+                )}
               </MessageBar>
             )}
 
@@ -2155,7 +2817,8 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
                               appearance="primary"
                               size="small"
                               onClick={() => void grantSuggestion(entry)}
-                              disabled={actionsBlocked || suggestionBusy !== null}
+                              // Review F1-a: not while an Apply is in flight — the grant would carry the old date.
+                              disabled={actionsBlocked || suggestionBusy !== null || expiryApplying}
                               aria-label={`Grant ${entry.subjectName ?? 'suggested person'}`}
                             >
                               Grant
@@ -2184,6 +2847,49 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
                   <div className={styles.sectionHeaderRow}>
                     <Text className={styles.sectionTitle}>Add Access Permissions</Text>
                     <div className={styles.sectionHeaderActions}>
+                      {/* Task 099c (FR-33, #961; owner 2026-09-10): ONE Expiration for every external share of the
+                          record. Picking a date stages it; Apply (or Enter) sends it once. The date only — never a
+                          level (ISS-023). */}
+                      {showShareExpiry && (
+                        <div className={styles.shareExpiryField}>
+                          <Field
+                            label="Expiration"
+                            orientation="horizontal"
+                            size="small"
+                            validationState={expiryValidationMessage ? 'error' : 'none'}
+                            validationMessage={expiryValidationMessage}
+                          >
+                            <Input
+                              type="date"
+                              size="small"
+                              className={styles.shareExpiryInput}
+                              value={expiryDraft ?? expiryShown}
+                              min={expiryMin}
+                              disabled={!expiryEditable}
+                              onChange={(_, d) => setExpiryDraft(d.value)}
+                              onKeyDown={e => {
+                                if (e.key === 'Enter' && expiryCanApply) {
+                                  // With shares only: with none, Enter has nothing to apply (the date goes with an add).
+                                  e.preventDefault();
+                                  void applyShareExpiry(expiryApplyValue);
+                                }
+                              }}
+                              data-testid="share-expiry-input"
+                            />
+                          </Field>
+                          {expiryApplyOffered && (
+                            <Button
+                              appearance="primary"
+                              size="small"
+                              disabled={!expiryCanApply}
+                              onClick={() => void applyShareExpiry(expiryApplyValue)}
+                              data-testid="share-expiry-apply"
+                            >
+                              {expiryApplying ? 'Applying…' : 'Apply'}
+                            </Button>
+                          )}
+                        </div>
+                      )}
                       {/* Icon-only "+" triggers (task 073 UAT v1.0.24 #4; task 065 adds "+ User") —
                           open the native advanced-lookup pane (pickContact/pickOrganization/pickUser). */}
                       {pickContact && contactGrantsOffered && (
@@ -2230,6 +2936,32 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
                       )}
                     </div>
                   </div>
+
+                  {/* Task 099c: what the Expiration shows and what applying it does. Different dates are stated,
+                      never silently resolved to one (owner 2026-09-10). */}
+                  {showShareExpiry && shareExpiry.kind === 'noShares' && (
+                    <Text className={styles.shareExpiryHint} data-testid="share-expiry-default">
+                      No external shares yet. People you add have access until this date.
+                    </Text>
+                  )}
+                  {shareExpiry.kind === 'shares' && shareExpiry.diverges && (
+                    <Text className={styles.shareExpiryHint} data-testid="share-expiry-divergence">
+                      {expiryShownLapsed && !(expiryPending && expiryDraftValid)
+                        ? `Shares on this record end on different dates, and the earliest has passed. Choose ${formatGrantDate(expiryMin)} or later.`
+                        : 'Shares on this record end on different dates; the earliest is shown. Apply, or adding a person, sets them to this date.'}
+                    </Text>
+                  )}
+                  {expiryPending && (
+                    <Text className={styles.shareExpiryHint} data-testid="share-expiry-unapplied">
+                      Not applied yet. Until you apply it, people you add get{' '}
+                      {addExpiryDate ? formatGrantDate(addExpiryDate) : `${DEFAULT_SHARE_EXPIRY_DAYS} days of access`}.
+                    </Text>
+                  )}
+                  {shareExpiry.kind === 'shares' && shareExpiry.anyLapsed && (
+                    <Text className={styles.shareExpiryHint} data-testid="share-expiry-lapsed">
+                      Shares marked Expired are renewed to the date you apply.
+                    </Text>
+                  )}
 
                   {/* Padding below the header row, before the list (task 073 UAT v1.0.24 #3). */}
                   <div className={styles.listArea}>
@@ -2307,7 +3039,8 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
                   <div className={styles.levelRow}>
                     <Button
                       appearance="primary"
-                      disabled={selectedOfferedCount === 0 || approving || actionsBlocked}
+                      // Review F1-a: not while an Apply is in flight — the add would carry the old date.
+                      disabled={selectedOfferedCount === 0 || approving || actionsBlocked || expiryApplying}
                       icon={approving ? <Spinner size="tiny" /> : undefined}
                       onClick={handleGrantSelected}
                     >
@@ -2320,7 +3053,27 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
                 <div className={styles.section} style={{ marginTop: tokens.spacingVerticalXXL }}>
                   <Text className={styles.sectionTitle}>Current Access</Text>
                   <div className={styles.listArea}>
-                    {existingGrants.length === 0 ? (
+                    {/* Task 099a (verifier F2): a capped list says it is partial (NFR-03). */}
+                    {currentAccessError === null && grantsTruncatedAt !== null && (
+                      <MessageBar intent="warning" data-testid="current-access-truncated">
+                        <MessageBarBody>Only the first {grantsTruncatedAt} grants are shown.</MessageBarBody>
+                      </MessageBar>
+                    )}
+                    {currentAccessError?.kind === 'notShown' ? (
+                      // Task 099a: the message above (the deny banner, or the load notice) says why — not repeated
+                      // here, and never "No active grants".
+                      <Text className={styles.emptyState} data-testid="current-access-not-shown">
+                        Not shown.
+                      </Text>
+                    ) : currentAccessError?.kind === 'failed' ? (
+                      // Task 099a: the read failed — say so (the server's own sentence), never "No active grants".
+                      <MessageBar intent="error" data-testid="current-access-error">
+                        <MessageBarBody>
+                          <MessageBarTitle>Current Access unavailable</MessageBarTitle>
+                          {currentAccessError.text}
+                        </MessageBarBody>
+                      </MessageBar>
+                    ) : existingGrants.length === 0 ? (
                       <Text className={styles.emptyState}>No active grants for this record.</Text>
                     ) : (
                       existingGrants.map(grant => {
@@ -2345,7 +3098,8 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
                           ? null
                           : suppressionFor(rowKind, accessPermissionState, isSecureRecord);
                         const levelClassName = vetoReason ? styles.vetoedLevel : undefined;
-                        const levelAppearance = vetoReason || suppressedReason ? 'outline' : 'tint';
+                        // Task 099a: a lapsed grant confers nothing, so its level is outlined like any row without effect.
+                        const levelAppearance = vetoReason || suppressedReason || grant.isExpired ? 'outline' : 'tint';
                         const rowKey = grant.accessRecordId
                           ? grant.accessRecordId
                           : isInherited
@@ -2357,7 +3111,15 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
                           <div
                             className={styles.row}
                             key={rowKey}
-                            data-access-state={vetoReason ? 'vetoed' : suppressedReason ? 'suppressed' : 'active'}
+                            data-access-state={
+                              vetoReason
+                                ? 'vetoed'
+                                : grant.isExpired
+                                  ? 'expired'
+                                  : suppressedReason
+                                    ? 'suppressed'
+                                    : 'active'
+                            }
                           >
                             <div className={styles.rowMain}>
                               {/* Contact name → link opening the Contact record (task 073 UAT v1.0.24 #6).
@@ -2394,6 +3156,12 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
                               {suppressedReason && <Text className={styles.suppressedReason}>{suppressedReason}</Text>}
                             </div>
                             <div className={styles.rowActions}>
+                              {/* Task 099a: a lapsed grant confers nothing — shown as expired, never as live access. */}
+                              {grant.isExpired && (
+                                <Badge appearance="outline" color="danger" data-testid="grant-expired-badge">
+                                  {grant.expiresDate ? `Expired ${formatGrantDate(grant.expiresDate)}` : 'Expired'}
+                                </Badge>
+                              )}
                               {/* Task 067: the wall's marker, over the level the row would otherwise carry. */}
                               {vetoReason && (
                                 <Badge appearance="filled" color="danger">

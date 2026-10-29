@@ -49,6 +49,10 @@ oob_entities:
       - sprk_identitycollisionplane # identity binding
       - sprk_identitycollisionreason # identity binding (option set sprk_identitycollisionreason)
       - sprk_identityplane # identity binding (option set sprk_identityplane)
+      - sprk_externaltenantid # TEXT(36), field-secured; A9 WorkforceHome tenant id (SPA-external-access-r3 task 044)
+      - sprk_externalinvitedemailhash # invite email hash, NVARCHAR(100), field-secured BFF-only read+write, not audited
+      - sprk_externalinvitedtenantid # TEXT(36), field-secured BFF-only read+write; tenant the invite named (optional)
+      - sprk_externalaccessremovedon # DATETIME (UTC), field-secured; every user reads, only the BFF writes
     alternate_keys:
       # T255: an OOB-table KEY is not a column — the package rule includes unmanaged sprk_ keys on OOB tables since
       # T255 (SpaarkePackageScope.psm1). The BFF creates contacts by contacts(sprk_externalobjectidkey='<oid>').
@@ -58,11 +62,18 @@ oob_entities:
     custom_columns:
       - sprk_communicationuserid # NVARCHAR(1000)
       - sprk_containerid # NVARCHAR(100)
+      - sprk_homeobjectid # TEXT(36), field-secured; A9 home object id (task 044)
+      - sprk_homeobjectidkey # TEXT(36), unsecured key mirror (task 044)
+      - sprk_hometenantid # TEXT(36), field-secured; A9 home tenant id (task 044)
+      - sprk_hometenantidkey # TEXT(36), unsecured key mirror (task 044)
       - sprk_isexternal # BIT
       - sprk_primarycontact # LOOKUP -> contact
       - sprk_primaryworkoffice # LOOKUP -> sprk_workoffice
       - sprk_userprofile # LOOKUP -> sprk_userprofile
       - sprk_usertype # LOOKUP -> sprk_usertype_ref
+    alternate_keys:
+      # A9 (task 044, owner option A 2026-10-14): one key on the two unsecured mirrors; the secured pair cannot be keyed.
+      - sprk_homeidentityuniquekey # on (sprk_hometenantidkey, sprk_homeobjectidkey)
 
   businessunit:
     custom_columns:

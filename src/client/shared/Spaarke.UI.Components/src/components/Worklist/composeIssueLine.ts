@@ -63,6 +63,8 @@ export function formatDueState(
 export function composeIssueLine(item: WorklistItem, today: Date = new Date()): IssueLineView {
   const headline = clean(item.subjectName) ?? clean(item.title) ?? UNTITLED;
   const ruleShortName = clean(item.ruleShortName);
+  const timingText = clean(item.timingText);
+  if (timingText) return { headline, ruleShortName, timing: { text: timingText, tone: 'age' } };
   if (item.lane === 'Do') {
     const due = formatDueState(item.dueDate, today, item.pastDueWording === 'late' ? 'late' : 'overdue');
     return { headline, ruleShortName, timing: due };

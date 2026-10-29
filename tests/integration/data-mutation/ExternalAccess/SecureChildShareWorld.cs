@@ -38,6 +38,15 @@ internal sealed class SecureChildShareWorld
 
     public static readonly Guid SomeUser = Guid.Parse("8d7bad7a-e39e-f011-bbd3-7c1e5217cd7c");
 
+    /// <summary>UAC task 194b R4b-2c (owner round 136): the restricted-content owner team — named, non-default, in the
+    /// CUSTOMER's top business unit (<see cref="CustomerBu"/>, the root's direct child), no members.</summary>
+    public static readonly Guid RestrictedContentTeam = Guid.Parse("0e5c0e5c-0086-4086-8086-000000000086");
+
+    /// <summary>R4b-2c: the customer's top business unit (a direct child of the root, as dev's "Spaarke Business Unit 1")
+    /// and its default team.</summary>
+    public static readonly Guid CustomerBu = Guid.Parse("0e5c0e5c-0086-4086-8086-0000000000c3");
+    public static readonly Guid CustomerTeam = Guid.Parse("0e5c0e5c-0086-4086-8086-0000000000c4");
+
     public const string SecureBuName = "Secure Record";
     public const string SecureOwnerTeamName = "Secure Record Owners";
 
@@ -49,8 +58,14 @@ internal sealed class SecureChildShareWorld
     private readonly HashSet<Guid> _ignoredOwnerWrites = new();
     private readonly List<(string Table, int AfterCount, Action<SecureChildShareWorld> Change)> _afterQueries = new();
 
+    /// <summary>#2091 round 4: how many single-row reads (<see cref="Retrieve"/>) this world answered.</summary>
+    public int RowReads { get; private set; }
+
     /// <summary>Every table queried, in order.</summary>
     public List<string> QueriedTables { get; } = new();
+
+    /// <summary>#2143 round 7 (R7e): every query asked, in order (one entry per page read).</summary>
+    public List<QueryExpression> Queries { get; } = new();
 
     /// <summary>
     /// The NAMED owner team of THIS world (task 148): <see cref="SecureTeam"/> unless the world was built to match another
@@ -82,12 +97,24 @@ internal sealed class SecureChildShareWorld
     {
         var world = new SecureChildShareWorld { OwnerTeam = secureTeam, OwnerTeamBusinessUnit = secureBu };
         world.Add("businessunit", GeneralBu, ("name", "Spaarke"));
-        world.Add("businessunit", secureBu, ("name", SecureBuName));
+        // R4b-2: the general unit is the ROOT business unit (no parent); the Secure Record unit sits under it.
+        world.Add("businessunit", secureBu, ("name", SecureBuName), ("parentbusinessunitid", new EntityReference("businessunit", GeneralBu)));
         world.Team(GeneralTeam, GeneralBu, "Spaarke", isDefault: true, teamType: 0);
         world.Team(SecureDefaultTeam, secureBu, SecureBuName, isDefault: true, teamType: 0);
         world.Team(Guid.NewGuid(), secureBu, SecureOwnerTeamName, isDefault: false, teamType: 1); // access team, right name
         world.Team(Guid.NewGuid(), secureBu, SecureOwnerTeamName + " Extra", isDefault: false, teamType: 0);
         world.Team(secureTeam, secureBu, SecureOwnerTeamName, isDefault: false, teamType: 0);
+        // R4b-2c: the customer's top unit, beside the Secure Record unit, holds the restricted-content owner team.
+        world.Add("businessunit", CustomerBu, ("name", "Spaarke Business Unit 1"), ("parentbusinessunitid", new EntityReference("businessunit", GeneralBu)));
+        world.Team(CustomerTeam, CustomerBu, "Spaarke Business Unit 1", isDefault: true, teamType: 0);
+        // R4b-4 (A-F2): an ACCESS team and a GROUP team with the restricted-content name, before the real one, so a team
+        // query that dropped teamtype = 0 (Owner) matches two rows (or a decoy first).
+        world.Team(Guid.NewGuid(), CustomerBu,
+            Sprk.Bff.Api.Infrastructure.Dataverse.RestrictedContentOwnerTeam.DefaultOwnerTeamName, isDefault: false, teamType: 1);
+        world.Team(Guid.NewGuid(), CustomerBu,
+            Sprk.Bff.Api.Infrastructure.Dataverse.RestrictedContentOwnerTeam.DefaultOwnerTeamName, isDefault: false, teamType: 2);
+        world.Team(RestrictedContentTeam, CustomerBu,
+            Sprk.Bff.Api.Infrastructure.Dataverse.RestrictedContentOwnerTeam.DefaultOwnerTeamName, isDefault: false, teamType: 0);
         world.User(SomeUser, GeneralBu);
         return world;
     }
@@ -95,6 +122,10 @@ internal sealed class SecureChildShareWorld
     /// <summary>A systemuser in a business unit — what a user-owned row's <c>owningbusinessunit</c> derives from (task 148).</summary>
     public SecureChildShareWorld User(Guid id, Guid businessUnit) =>
         Add("systemuser", id, ("businessunitid", new EntityReference("businessunit", businessUnit)));
+
+    /// <summary>#2072: a DISABLED systemuser — Dataverse keeps its oid and business unit, and the BFF must never resolve it (#1576).</summary>
+    public SecureChildShareWorld DisabledUser(Guid id, Guid businessUnit) =>
+        Add("systemuser", id, ("businessunitid", new EntityReference("businessunit", businessUnit)), ("isdisabled", true));
 
     /// <summary>An environment with no Secure Record BU at all.</summary>
     public static SecureChildShareWorld WithoutSecureBusinessUnit()
@@ -146,6 +177,10 @@ internal sealed class SecureChildShareWorld
         => Add(table, id, lookups.Select(l => (l.Column, (object)new EntityReference(l.Target, l.TargetId)))
             .Prepend(owner).ToArray());
 
+    /// <summary>#2091 round 3: what a query of a <see cref="FailingQueriesOf"/> table throws instead of the Dataverse fault
+    /// (a <see cref="TaskCanceledException"/> models an HttpClient timeout).</summary>
+    public Func<Exception>? QueryFault { get; set; }
+
     /// <summary>Makes every query of one table throw (a Dataverse fault).</summary>
     public SecureChildShareWorld FailingQueriesOf(string table)
     {
@@ -158,8 +193,23 @@ internal sealed class SecureChildShareWorld
     {
         _failingTables.Clear();
         _failingIdListReads.Clear();
+        _failingLikeReads.Clear();
         return this;
     }
+
+    private readonly HashSet<string> _failingLikeReads = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>UAC task 194b R4b-2c (F3c): makes every query of one table with a text match (<c>LIKE</c>, in any filter) throw —
+    /// the Decision Record steps read — while its other queries still answer.</summary>
+    public SecureChildShareWorld FailingLikeReadsOf(string table)
+    {
+        _failingLikeReads.Add(table);
+        return this;
+    }
+
+    /// <summary>True when <paramref name="filter"/> or a filter below it holds a <c>LIKE</c> condition.</summary>
+    internal static bool HasLike(FilterExpression filter) =>
+        filter.Conditions.Any(c => c.Operator == ConditionOperator.Like) || filter.Filters.Any(HasLike);
 
     /// <summary>
     /// Makes every read of ONE row by its id throw (task 149 r1: a lineage fault on one record — the walk's single-row
@@ -170,6 +220,28 @@ internal sealed class SecureChildShareWorld
         _failingRowReads.Add((table, id));
         return this;
     }
+
+    private readonly Dictionary<(string Table, Guid Id), (Func<int, bool> Fails, int Reads)> _transientRowReadFaults = new();
+
+    /// <summary>
+    /// #2143 round 9: a TRANSIENT fault on the query reads of ONE row by its id (<c>&lt;table&gt;id = id</c>): the reads, counted
+    /// from 1 in the order they are asked, for which <paramref name="fails"/> answers <c>true</c> throw; every other read answers.
+    /// </summary>
+    public SecureChildShareWorld TransientRowReadFaultsOf(string table, Guid id, Func<int, bool> fails)
+    {
+        _transientRowReadFaults[(table, id)] = (fails, 0);
+        _transientRowReadFaultsFired[(table, id)] = 0;
+        return this;
+    }
+
+    private readonly Dictionary<(string Table, Guid Id), int> _transientRowReadFaultsFired = new();
+
+    /// <summary>
+    /// #2143 round 10: how many of <see cref="TransientRowReadFaultsOf"/>'s faults on that row actually fired — so a test that
+    /// relies on one cannot pass vacuously when a read is added earlier and the fault lands on another step.
+    /// </summary>
+    public int TransientRowReadFaultsFired(string table, Guid id) =>
+        _transientRowReadFaultsFired.TryGetValue((table, id), out var fired) ? fired : 0;
 
     private readonly HashSet<(string Table, Guid Id)> _failingIdListReads = new();
 
@@ -182,6 +254,23 @@ internal sealed class SecureChildShareWorld
         _failingIdListReads.Add((table, id));
         return this;
     }
+
+    private readonly Dictionary<(string Table, Guid Id), (Func<int, bool> Fails, int Reads, int Fired)> _transientIdListReadFaults = new();
+
+    /// <summary>
+    /// Owner round 122 fix round 1 (B): a TRANSIENT fault on the id-LIST reads (<c>id IN (…)</c>, the parent walk's batched
+    /// read) that name ONE row: those reads, counted from 1 in the order they are asked, for which <paramref name="fails"/>
+    /// answers <c>true</c> throw; every other read answers.
+    /// </summary>
+    public SecureChildShareWorld TransientIdListReadFaultsOf(string table, Guid id, Func<int, bool> fails)
+    {
+        _transientIdListReadFaults[(table, id)] = (fails, 0, 0);
+        return this;
+    }
+
+    /// <summary>How many of <see cref="TransientIdListReadFaultsOf"/>'s faults on that row actually fired.</summary>
+    public int TransientIdListReadFaultsFired(string table, Guid id) =>
+        _transientIdListReadFaults.TryGetValue((table, id), out var fault) ? fault.Fired : 0;
 
     /// <summary>
     /// Makes every PAGED query of one table report more rows to come, however many pages have been read (task 149 r2: a
@@ -211,8 +300,47 @@ internal sealed class SecureChildShareWorld
         return this;
     }
 
+    /// <summary>Task 189: access-record writes to THIS row succeed again.</summary>
+    public SecureChildShareWorld AcceptingAccessRecordWritesOf(Guid id)
+    {
+        _refusedAccessRecordWrites.Remove(id);
+        return this;
+    }
+
     /// <summary>Task 173: every <c>sprk_accesspermission</c> write, in order.</summary>
     public List<(string Table, Guid Id, int Value)> AccessPermissionWrites { get; } = new();
+
+    /// <summary>
+    /// Task 189: the updates that carried BOTH the value and the own-narrowing record (each is also in
+    /// <see cref="AccessPermissionWrites"/> and <see cref="AccessRecordWrites"/>).
+    /// </summary>
+    public List<(string Table, Guid Id)> CombinedAccessWrites { get; } = new();
+
+    /// <summary>
+    /// Task 189: this environment's documents lack the own-narrowing record column (<c>sprk_accessinheritance</c>) — the
+    /// schema script has not run. Read by the probe of <see cref="CoreAncestorsOver"/>. Fix round C (K2): a query, read or
+    /// write of a document that names the column then fails, as Dataverse refuses an attribute the table does not have.
+    /// </summary>
+    public bool DocumentsLackAccessRecordColumn { get; set; }
+
+    private void RefuseMissingAccessRecordColumn(string table, IEnumerable<string> columns)
+    {
+        if (DocumentsLackAccessRecordColumn && string.Equals(table, "sprk_document", StringComparison.OrdinalIgnoreCase)
+            && columns.Contains("sprk_accessinheritance", StringComparer.OrdinalIgnoreCase))
+            throw new InvalidOperationException("Test: sprk_document has no sprk_accessinheritance in this environment.");
+    }
+
+    private readonly List<(string Table, Guid Id, Action<SecureChildShareWorld> Change)> _beforeAccessRecordReads = new();
+
+    /// <summary>
+    /// Task 189: changes the world once, right BEFORE it answers a by-id read (<c>{table}id = id</c>) of this row that asks
+    /// for its own-narrowing record — a user's edit landing between the reconciler's listing and its re-read.
+    /// </summary>
+    public SecureChildShareWorld BeforeAccessRecordReadOf(string table, Guid id, Action<SecureChildShareWorld> change)
+    {
+        _beforeAccessRecordReads.Add((table, id, change));
+        return this;
+    }
 
     private readonly HashSet<Guid> _refusedAccessPermissionWrites = new();
 
@@ -230,6 +358,18 @@ internal sealed class SecureChildShareWorld
         return this;
     }
 
+    private readonly Dictionary<Guid, Exception> _ownerWriteFaults = new();
+
+    /// <summary>
+    /// UAC task 099b review round 5: an owner write to THIS row throws <paramref name="fault"/> (recorded first) — Dataverse
+    /// refusing the re-own with a specific fault, e.g. the Web API client's bare 403 on a privilege check.
+    /// </summary>
+    public SecureChildShareWorld RefusingOwnerWritesOf(Guid id, Exception fault)
+    {
+        _ownerWriteFaults[id] = fault;
+        return this;
+    }
+
     /// <summary>Task 148: an owner write to THIS row is accepted (recorded) but not applied — the read-back must catch it.</summary>
     public SecureChildShareWorld IgnoringOwnerWritesOf(Guid id)
     {
@@ -242,6 +382,7 @@ internal sealed class SecureChildShareWorld
     {
         _refusedOwnerWrites.Clear();
         _ignoredOwnerWrites.Clear();
+        _ownerWriteFaults.Clear();
         return this;
     }
 
@@ -352,6 +493,27 @@ internal sealed class SecureChildShareWorld
     /// </summary>
     public void Update(string table, Guid id, Dictionary<string, object> fields)
     {
+        RefuseMissingAccessRecordColumn(table, fields.Keys);
+        // Task 189 (D7 T7a): a document's value and its own-narrowing record, in ONE update. Both are recorded (in
+        // AccessPermissionWrites and AccessRecordWrites) before a refusal of either throws; neither lands when one is refused.
+        if (fields.Count == 2
+            && fields.TryGetValue("sprk_accesspermission", out var both) && both is OptionSetValue bothOption
+            && fields.TryGetValue("sprk_accessinheritance", out var bothRecord) && bothRecord is string bothText)
+        {
+            AccessPermissionWrites.Add((table, id, bothOption.Value));
+            AccessRecordWrites.Add((table, id, bothText));
+            CombinedAccessWrites.Add((table, id));
+            if (_refusedAccessPermissionWrites.Contains(id))
+                throw new InvalidOperationException("Test: Dataverse refused the Access Permission write.");
+            if (_refusedAccessRecordWrites.Contains(id))
+                throw new InvalidOperationException("Test: Dataverse refused the access-record write.");
+            if (!_rows.TryGetValue((table, id), out var bothTarget))
+                throw new InvalidOperationException($"Test: {table} {id} does not exist.");
+            bothTarget["sprk_accesspermission"] = bothOption;
+            bothTarget["sprk_accessinheritance"] = bothText;
+            return;
+        }
+
         // Task 173: the inherited Access Permission pass writes ONE column, sprk_accesspermission.
         if (fields.Count == 1 && fields.TryGetValue("sprk_accesspermission", out var level) && level is OptionSetValue option)
         {
@@ -383,9 +545,26 @@ internal sealed class SecureChildShareWorld
         OwnerWrites.Add((table, id, principal, Sequence?.Invoke() ?? 0));
         if (_refusedOwnerWrites.Contains(id))
             throw new InvalidOperationException("Test: Dataverse refused the re-own.");
+        if (_ownerWriteFaults.TryGetValue(id, out var fault))
+            throw fault;
         if (_ignoredOwnerWrites.Contains(id))
             return;
         MoveOwner(table, id, principal);
+    }
+
+    /// <summary>
+    /// #2143: an <see cref="IGenericEntityService.UpdateIfRowVersionMatchesAsync"/> of this world — <see cref="Update"/>'s rules,
+    /// applied only while the row's <c>versionnumber</c> (a column, as the Web API doubles here read it; <see cref="Add"/>
+    /// starts it at 1) is still <paramref name="version"/>, then bumped; otherwise Dataverse's version mismatch
+    /// (<see cref="System.Data.DBConcurrencyException"/>) and nothing is written.
+    /// </summary>
+    public void UpdateIfVersion(string table, Guid id, string version, Dictionary<string, object> fields)
+    {
+        var current = ValueOf<long?>(table, id, "versionnumber")?.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        if (!string.Equals(current, version, StringComparison.Ordinal))
+            throw new System.Data.DBConcurrencyException($"Test: {table} {id} is at version {current}, not {version}.");
+        Update(table, id, fields);
+        Set(table, id, "versionnumber", (ValueOf<long?>(table, id, "versionnumber") ?? 0L) + 1);
     }
 
     /// <summary>Ontology task 144: every core-ancestor stamp write (<see cref="RestamperOver"/>), in order, as sent.</summary>
@@ -420,8 +599,11 @@ internal sealed class SecureChildShareWorld
     /// Ontology task 144: one row by id with the requested columns only (an empty list answers the row with none), or
     /// Dataverse's ObjectDoesNotExist fault — an <see cref="IGenericEntityService.RetrieveAsync"/> of this world.
     /// </summary>
+    /// <remarks>#2091 round 4: counted in <see cref="RowReads"/>.</remarks>
     public Entity Retrieve(string table, Guid id, string[]? columns)
     {
+        RowReads++;
+        RefuseMissingAccessRecordColumn(table, columns ?? []);
         if (_failingRowReads.Contains((table, id)))
             throw new InvalidOperationException($"Test: this {table} row cannot be read.");
         if (!_rows.TryGetValue((table, id), out var row))
@@ -434,11 +616,27 @@ internal sealed class SecureChildShareWorld
     public SecureChildShareWorld Add(string table, Guid id, params (string Column, object Value)[] columns)
     {
         var row = new Entity(table, id);
+        // #1943: a project, matter or work assignment always has a modifiedon in Dataverse, and the reconciliation job's
+        // recent-changes pass reconciles a secure record whose own modifiedon is in its window (one with none counts as
+        // changed). A record a test does not touch was therefore last modified long ago; Modified() moves it.
+        if (SecureChildLineage.IsRoot(table))
+            row["modifiedon"] = RecordsLastModified;
         foreach (var (column, value) in columns)
             row[column] = value;
+        // #2072: Dataverse ALWAYS returns isdisabled on a systemuser, and the BFF's user queries filter isdisabled = false
+        // (#1576). A seeded user that carries no value for it would never match that condition (Matches treats an absent
+        // column as no match), so the user must say "enabled" unless the test marked it disabled.
+        if (table == "systemuser" && !row.Attributes.ContainsKey("isdisabled"))
+            row["isdisabled"] = false;
+        // #2143: every Dataverse row carries a versionnumber; the re-file's conditional owner write is conditioned on it.
+        if (!row.Attributes.ContainsKey("versionnumber"))
+            row["versionnumber"] = 1L;
         _rows[(table, id)] = row;
         return this;
     }
+
+    /// <summary>#1943: when a project, matter or work assignment a test does not touch was last modified.</summary>
+    public static readonly DateTime RecordsLastModified = new(2020, 1, 1, 0, 0, 0, DateTimeKind.Utc);
 
     private static EntityReference TeamRef(Guid id) => new("team", id);
 
@@ -478,11 +676,24 @@ internal sealed class SecureChildShareWorld
         entities
             .Setup(e => e.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
             .Returns((QueryExpression query, CancellationToken _) => Task.FromResult(current().Answer(query)));
+        // 194b: a single-row read (the record-type catalog row a Signal's or Decision Record's core pair names).
+        entities
+            .Setup(e => e.RetrieveAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .Returns((string table, Guid id, string[] columns, CancellationToken _) => Task.FromResult(current().Retrieve(table, id, columns)));
         entities
             .Setup(e => e.UpdateAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object>>(), It.IsAny<CancellationToken>()))
             .Returns((string table, Guid id, Dictionary<string, object> fields, CancellationToken _) =>
             {
                 current().Update(table, id, fields);
+                return Task.CompletedTask;
+            });
+        entities
+            .Setup(e => e.UpdateIfRowVersionMatchesAsync(
+                It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<Dictionary<string, object>>(),
+                It.IsAny<CancellationToken>()))
+            .Returns((string table, Guid id, string version, Dictionary<string, object> fields, CancellationToken _) =>
+            {
+                current().UpdateIfVersion(table, id, version, fields);
                 return Task.CompletedTask;
             });
         entities
@@ -503,17 +714,27 @@ internal sealed class SecureChildShareWorld
         Func<SecureChildShareWorld> current, IDataverseRecordShareService shares,
         Spaarke.Dataverse.DataverseWebApiClient webApi, SecureShareNoAccessGuard? noAccessGuard = null,
         Sprk.Bff.Api.Services.Ai.Membership.IMembershipCacheInvalidator? accessCacheInvalidator = null,
-        Sprk.Bff.Api.Services.Communication.IThreadResolver? threads = null)
+        Sprk.Bff.Api.Services.Communication.IThreadResolver? threads = null,
+        Sprk.Bff.Api.Services.Dataverse.Privileges.IDataversePrivilegeChecker? ownerPrivileges = null,
+        Sprk.Bff.Api.Services.Signals.GateDecisionRecordSharing? gateDecisionRecords = null,
+        Sprk.Bff.Api.Services.Documents.DocumentContainerRelocator? relocator = null,
+        Microsoft.Extensions.Logging.ILogger<SecureChildReconciler>? logger = null,
+        Microsoft.Extensions.Logging.ILogger<SecureChildShareSynchronizer>? sharesLogger = null,
+        Sprk.Bff.Api.Services.ExternalAccess.AssignedAccessStore? links = null)
     {
         var entities = EntitiesOver(current).Object;
         var configuration = Configuration();
         var resolver = new Sprk.Bff.Api.Services.Dataverse.RecordOwnershipResolver(
             entities, configuration, NullLogger<Sprk.Bff.Api.Services.Dataverse.RecordOwnershipResolver>.Instance);
         var synchronizer = new SecureChildShareSynchronizer(
-            entities, shares, noAccessGuard ?? NobodyWalled(), configuration, NullLogger<SecureChildShareSynchronizer>.Instance);
+            entities, shares, noAccessGuard ?? NobodyWalled(), configuration,
+            sharesLogger ?? NullLogger<SecureChildShareSynchronizer>.Instance);
         return new SecureChildReconciler(
-            entities, resolver, synchronizer, webApi, configuration, NullLogger<SecureChildReconciler>.Instance,
-            accessCacheInvalidator, threads);
+            entities, resolver, synchronizer, webApi, configuration, logger ?? NullLogger<SecureChildReconciler>.Instance,
+            gateDecisionRecords ?? new Sprk.Bff.Api.Tests.Services.Signals.GateSharingWorld().Sharing, // ontology 042b: a gate-record double over an empty world
+            accessCacheInvalidator, threads, ownerPrivileges, relocator,
+            coreAncestors: CoreAncestorsOver(current), // 194b: a Signal's or Decision Record's subject stamps
+            links: links ?? new AssignedAccessTestDoubles.FakeAssignedAccessStore()); // 194b F1-c: the To Do job's predicate (nobody linked)
     }
 
     /// <summary>
@@ -552,15 +773,23 @@ internal sealed class SecureChildShareWorld
     /// </summary>
     public static Sprk.Bff.Api.Services.Dataverse.CoreAncestorResolver CoreAncestorsOver(
         Func<SecureChildShareWorld> current, params string[] tablesWithoutAccessPermission) =>
-        new(EntitiesOver(current).Object, ColumnProbe(tablesWithoutAccessPermission),
+        new(EntitiesOver(current).Object, ProbeOver(current, tablesWithoutAccessPermission),
             NullLogger<Sprk.Bff.Api.Services.Dataverse.CoreAncestorResolver>.Instance);
 
     /// <summary>
     /// Task 173: the column probe of this world — every lineage lookup, root column and stamp column exists, and so does
-    /// <c>sprk_accesspermission</c>, except on the tables named.
+    /// <c>sprk_accesspermission</c>, except on the tables named. Task 189: a document also has its own-narrowing record
+    /// column <c>sprk_accessinheritance</c>.
     /// </summary>
     public static Sprk.Bff.Api.Services.Dataverse.CoreAncestorResolver.EntityColumnProbe ColumnProbe(
-        params string[] tablesWithoutAccessPermission) => (table, _) =>
+        params string[] tablesWithoutAccessPermission) => ProbeOver(null, tablesWithoutAccessPermission);
+
+    /// <summary>
+    /// <see cref="ColumnProbe"/>, with a document's record column absent while <paramref name="current"/>'s
+    /// <see cref="DocumentsLackAccessRecordColumn"/> is set (task 189).
+    /// </summary>
+    private static Sprk.Bff.Api.Services.Dataverse.CoreAncestorResolver.EntityColumnProbe ProbeOver(
+        Func<SecureChildShareWorld>? current, string[] tablesWithoutAccessPermission) => (table, _) =>
     {
         var columns = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         if (SecureChildLineage.Children.TryGetValue(table, out var lineage))
@@ -570,6 +799,9 @@ internal sealed class SecureChildShareWorld
         columns.UnionWith(Sprk.Bff.Api.Services.Dataverse.CoreAncestorResolver.CoreAncestorLookups.Select(l => l.LookupAttribute));
         if (!tablesWithoutAccessPermission.Contains(table, StringComparer.OrdinalIgnoreCase))
             columns.Add("sprk_accesspermission");
+        if (string.Equals(table, "sprk_document", StringComparison.OrdinalIgnoreCase)
+            && current?.Invoke().DocumentsLackAccessRecordColumn != true)
+            columns.Add("sprk_accessinheritance");
         return Task.FromResult<IReadOnlySet<string>>(columns);
     };
 
@@ -586,17 +818,56 @@ internal sealed class SecureChildShareWorld
     public EntityCollection Answer(QueryExpression query)
     {
         QueriedTables.Add(query.EntityName);
+        Queries.Add(query);
+        RefuseMissingAccessRecordColumn(query.EntityName, query.ColumnSet.Columns);
+        foreach (var hook in _beforeAccessRecordReads.Where(h =>
+                     string.Equals(h.Table, query.EntityName, StringComparison.OrdinalIgnoreCase)
+                     && query.ColumnSet.Columns.Contains("sprk_accessinheritance")
+                     && query.Criteria.Conditions.Any(c => c.AttributeName == query.EntityName + "id"
+                         && c.Operator == ConditionOperator.Equal && c.Values.Single() is Guid read && read == h.Id)).ToList())
+        {
+            _beforeAccessRecordReads.Remove(hook);
+            hook.Change(this);
+        }
         if (_failingTables.Contains(query.EntityName))
-            throw new InvalidOperationException($"Test: {query.EntityName} cannot be read.");
+            throw QueryFault?.Invoke() ?? new InvalidOperationException($"Test: {query.EntityName} cannot be read.");
+        if (_failingLikeReads.Contains(query.EntityName) && HasLike(query.Criteria))
+            throw new InvalidOperationException($"Test: a text match on {query.EntityName} cannot be read.");
         if (query.Criteria.Conditions.Any(c =>
                 c.AttributeName == query.EntityName + "id" && c.Operator == ConditionOperator.Equal
                 && c.Values.Single() is Guid id && _failingRowReads.Contains((query.EntityName, id))))
             throw new InvalidOperationException($"Test: this {query.EntityName} row cannot be read.");
+        if (query.Criteria.Conditions.FirstOrDefault(c =>
+                c.AttributeName == query.EntityName + "id" && c.Operator == ConditionOperator.Equal) is { } byId
+            && byId.Values.Single() is Guid readId
+            && _transientRowReadFaults.TryGetValue((query.EntityName, readId), out var transient))
+        {
+            var read = transient.Reads + 1;
+            _transientRowReadFaults[(query.EntityName, readId)] = (transient.Fails, read);
+            if (transient.Fails(read))
+            {
+                _transientRowReadFaultsFired[(query.EntityName, readId)] =
+                    _transientRowReadFaultsFired.GetValueOrDefault((query.EntityName, readId)) + 1;
+                throw new InvalidOperationException($"Test: read {read} of this {query.EntityName} row faulted (transient).");
+            }
+        }
 
         if (query.Criteria.Conditions.Any(c =>
                 c.AttributeName == query.EntityName + "id" && c.Operator == ConditionOperator.In
                 && c.Values.Any(v => v is Guid id && _failingIdListReads.Contains((query.EntityName, id)))))
             throw new InvalidOperationException($"Test: a {query.EntityName} row in this id list cannot be read.");
+        foreach (var listed in query.Criteria.Conditions
+                     .Where(c => c.AttributeName == query.EntityName + "id" && c.Operator == ConditionOperator.In)
+                     .SelectMany(c => c.Values.OfType<Guid>()).Distinct().ToList())
+        {
+            if (!_transientIdListReadFaults.TryGetValue((query.EntityName, listed), out var fault))
+                continue;
+            var read = fault.Reads + 1;
+            var fires = fault.Fails(read);
+            _transientIdListReadFaults[(query.EntityName, listed)] = (fault.Fails, read, fault.Fired + (fires ? 1 : 0));
+            if (fires)
+                throw new InvalidOperationException($"Test: id-list read {read} naming this {query.EntityName} row faulted (transient).");
+        }
 
         var matched = _rows.Values
             .Where(r => r.LogicalName == query.EntityName && Matches(r, query.Criteria))

@@ -1,5 +1,7 @@
 using System.Text.Json;
 using FluentAssertions;
+using Microsoft.Extensions.Caching.Distributed;
+using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
@@ -17,6 +19,7 @@ using Sprk.Bff.Api.Services.Ai.PublicContracts;
 using Sprk.Bff.Api.Services.Communication;
 using Sprk.Bff.Api.Services.Communication.Models;
 using Sprk.Bff.Api.Services.Identity;
+using Sprk.Bff.Api.Services.Jobs;
 using Sprk.Bff.Api.Services.Notifications;
 using Sprk.Bff.Api.Services.Notifications.Envelopes;
 using Xunit;
@@ -50,6 +53,9 @@ namespace Sprk.Bff.Api.Tests.Seam.Communication;
 /// </remarks>
 public sealed class RiActionsViaSeamSeamTests
 {
+    /// <summary>The ontology writer's own application user (WhoAmI on its connection): the <c>createdby</c> of the records it creates.</summary>
+    private static readonly Guid WriterUser = Guid.Parse("3121bf1b-9fbf-f111-aaaf-0022482913fc");
+
     /// <summary>Records the real ping calls + appends "ping:{recipient}" to the shared ordering log.</summary>
     private sealed class RecordingDelivery : SignalRDeliveryService
     {
@@ -86,6 +92,16 @@ public sealed class RiActionsViaSeamSeamTests
         public required Mock<IOrganizationServiceAsync2> WriterOrg { get; init; }
 
         public required Guid RuleId { get; init; }
+
+        /// <summary>Task 149 (D-139): every Decision Record job the consumer queued, in order. The gate does not write the record; this job does.</summary>
+        public required List<JobContract> QueuedJobs { get; init; }
+
+        /// <summary>Task 149: the queue's send, so a test can make the enqueue fail.</summary>
+        public required Mock<JobSubmissionService> Queue { get; init; }
+
+        /// <summary>Task 149: runs the REAL <see cref="GateDecisionRecordJobHandler"/> over every job queued so far and not yet run, as the
+        /// job processor would, and returns what each answered.</summary>
+        public required Func<Task<List<JobOutcome>>> RunQueuedJobsAsync { get; init; }
     }
 
     /// <summary>
@@ -146,7 +162,7 @@ public sealed class RiActionsViaSeamSeamTests
             ["sprk_matter"] = new EntityReference("sprk_matter", matterId),
             ["sprk_confidencethreshold"] = ruleThreshold,
         };
-        // Task 042: the consumer reads the matched rule's priority for the Decision Record's fact snapshot.
+        // Task 042 / 149: the Decision Record job reads the matched rule's priority for the fact snapshot.
         entity
             .Setup(s => s.RetrieveAsync("sprk_communicationrule", ruleId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(rule);
@@ -198,8 +214,50 @@ public sealed class RiActionsViaSeamSeamTests
         var decisionRecords = new List<DataverseEntity>();
         var writerOrg = new Mock<IOrganizationServiceAsync2>();
         writerOrg.Setup(o => o.CreateAsync(It.IsAny<DataverseEntity>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((DataverseEntity e, CancellationToken _) => { decisionRecords.Add(e); events.Add("decision-record-create"); return Guid.NewGuid(); });
+            .ReturnsAsync((DataverseEntity e, CancellationToken _) =>
+            {
+                // Dataverse stamps the creator: the writer's own application user, with no impersonation (uac-r2 re-check, F3-1).
+                e["createdby"] = new EntityReference("systemuser", WriterUser);
+                decisionRecords.Add(e);
+                events.Add("decision-record-create");
+                return Guid.NewGuid();
+            });
+        // WhoAmI on the writer's own connection: the createdby the gate's "already recorded" lookup narrows on (without it the lookup fails closed).
+        writerOrg.Setup(o => o.ExecuteAsync(It.IsAny<Microsoft.Crm.Sdk.Messages.WhoAmIRequest>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.FromResult<OrganizationResponse>(new Microsoft.Crm.Sdk.Messages.WhoAmIResponse { Results = { ["UserId"] = WriterUser } }));
+        // Task 149 (D-139): the gate only QUEUES the decision (the queue's send is the doubled boundary; it logs "decision-job-enqueue" in the
+        // ordering log), and a REAL GateDecisionRecordJobHandler writes the record when a test runs the queued jobs, with the real writer, the
+        // real idempotency service over an in-memory cache, and the doubled Dataverse boundary above. The writer's "already recorded" lookup
+        // is answered from the records the writer has created (equality on the lookup, LIKE on sprk_steps), as Dataverse would.
+        var queuedJobs = new List<JobContract>();
+        var queue = new Mock<JobSubmissionService>(
+            MockBehavior.Loose, Options.Create(new ServiceBusOptions { QueueName = "test" }), NullLogger<JobSubmissionService>.Instance, new Mock<Azure.Messaging.ServiceBus.ServiceBusClient>().Object);
+        queue.Setup(q => q.SubmitJobAsync(It.IsAny<JobContract>(), It.IsAny<CancellationToken>()))
+            .Returns((JobContract job, CancellationToken _) => { queuedJobs.Add(job); events.Add("decision-job-enqueue"); return Task.CompletedTask; });
+
+        entity
+            .Setup(s => s.RetrieveMultipleAsync(
+                It.Is<QueryExpression>(q => q.EntityName == "sprk_decisionrecord"),
+                It.IsAny<CancellationToken>()))
+            .Returns((QueryExpression query, CancellationToken _) =>
+            {
+                var communicationCondition = query.Criteria.Conditions.Single(c => c.AttributeName == "sprk_regardingcommunication");
+                var likeCondition = query.Criteria.Conditions.Single(c => c.AttributeName == "sprk_steps");
+                var needle = ((string)likeCondition.Values.Single()).Trim('%');
+                // Like Dataverse, answer only the rows whose createdby equals the query's createdby condition (the writer's own records).
+                var createdBy = query.Criteria.Conditions.FirstOrDefault(c => c.AttributeName == "createdby" && c.Operator == ConditionOperator.Equal);
+                var found = decisionRecords
+                    .Where(r => createdBy is null || Equals(r.GetAttributeValue<EntityReference>("createdby")?.Id, createdBy.Values.Single()))
+                    .Where(r => r.GetAttributeValue<EntityReference>("sprk_regardingcommunication")?.Id.Equals(communicationCondition.Values.Single()) == true
+                                && (r.GetAttributeValue<string>("sprk_steps") ?? string.Empty).Contains(needle, StringComparison.Ordinal))
+                    .Select(r => new DataverseEntity("sprk_decisionrecord", Guid.NewGuid()))
+                    .Take(1)
+                    .ToList();
+                return Task.FromResult(new EntityCollection(found));
+            });
+
         DecisionRecordWriter? writer = null;
+        GateDecisionRecordJobHandler? handler = null;
         if (withDecisionRecords)
         {
             writer = new DecisionRecordWriter(
@@ -210,16 +268,36 @@ public sealed class RiActionsViaSeamSeamTests
                     (_, _) => Task.FromResult<IReadOnlySet<string>>(new HashSet<string>(
                         CoreAncestorResolver.CoreAncestorLookups.Select(l => l.LookupAttribute), StringComparer.OrdinalIgnoreCase)),
                     NullLogger<CoreAncestorResolver>.Instance),
+                entity.Object,
                 new Sprk.Bff.Api.Tests.TestInfrastructure.RecordTypeCatalogStub(Sprk.Bff.Api.Tests.TestInfrastructure.RecordTypeCatalogStub.SpaarkeDev1),
                 TimeProvider.System,
-                NullLogger<DecisionRecordWriter>.Instance);
+                NullLogger<DecisionRecordWriter>.Instance,
+                new Sprk.Bff.Api.Tests.Services.Signals.GateSharingWorld().Sharing);
+            handler = new GateDecisionRecordJobHandler(
+                writer,
+                entity.Object,
+                new IdempotencyService(new MemoryDistributedCache(Options.Create(new MemoryDistributedCacheOptions())), NullLogger<IdempotencyService>.Instance),
+                NullLogger<GateDecisionRecordJobHandler>.Instance);
+        }
+
+        var ranJobs = 0;
+        async Task<List<JobOutcome>> RunQueuedJobs()
+        {
+            var outcomes = new List<JobOutcome>();
+            while (handler is not null && ranJobs < queuedJobs.Count)
+                outcomes.Add(await handler.ProcessAsync(queuedJobs[ranJobs++], CancellationToken.None));
+            return outcomes;
         }
 
         var consumer = new RuleGatedAssessedConsumer(
-            entity.Object, gate, riAction, NullLogger<RuleGatedAssessedConsumer>.Instance, signalTrigger: null, decisionRecords: writer);
+            entity.Object, gate, riAction, NullLogger<RuleGatedAssessedConsumer>.Instance, signalTrigger: null,
+            decisionRecords: withDecisionRecords ? new GateDecisionRecordEnqueuer(queue.Object, NullLogger<GateDecisionRecordEnqueuer>.Instance) : null);
 
         return new Harness
         {
+            QueuedJobs = queuedJobs,
+            Queue = queue,
+            RunQueuedJobsAsync = RunQueuedJobs,
             Consumer = consumer,
             Delivery = delivery,
             Creates = creates,
@@ -355,16 +433,24 @@ public sealed class RiActionsViaSeamSeamTests
     }
 
     [Fact]
-    public async Task PublishAsync_WhenGateAuthorizes_WritesAnAuthorizedDecisionRecord_BeforeTheRiAction_AndTheRiActionStillRuns()
+    public async Task PublishAsync_WhenGateAuthorizes_QueuesTheDecisionBeforeTheRiAction_TheRiActionRunsWithoutTheRecord_AndTheJobWritesAnAuthorizedRecord()
     {
         var h = BuildHarness(ruleThreshold: 0.7m, withDecisionRecords: true);
 
         await h.Consumer.PublishAsync(Signal(h.CommunicationId, confidence: 0.9));
 
+        // Task 149 (D-139): one job is queued BEFORE the branch, and the RI action ran to its end without waiting for (or having) the record.
+        h.QueuedJobs.Should().ContainSingle();
+        h.DecisionRecords.Should().BeEmpty("the gate writes nothing: the job does");
+        h.Events.Should().Equal("decision-job-enqueue", "seam-task-create", "outbox-write", $"ping:{h.OwnerId}", "appnotification-create");
+
+        var outcomes = await h.RunQueuedJobsAsync();
+
+        outcomes.Should().ContainSingle().Which.Status.Should().Be(JobStatus.Completed);
         var record = h.DecisionRecords.Should().ContainSingle("criterion 1: an authorize writes a Decision Record").Subject;
         record.GetAttributeValue<OptionSetValue>("sprk_decisionoutcome").Value.Should().Be(100000000, "Authorized");
         record.GetAttributeValue<OptionSetValue>("sprk_recordclass").Value.Should().Be(100000000, "Judgement");
-        record.GetAttributeValue<string>("sprk_actioncode").Should().Be(RuleGatedAssessedConsumer.ProposedActionCode);
+        record.GetAttributeValue<string>("sprk_actioncode").Should().Be(GateDecisionRecordJobHandler.ProposedActionCode);
         record.GetAttributeValue<EntityReference>("sprk_regardingcommunication").Id.Should().Be(h.CommunicationId);
         record.GetAttributeValue<EntityReference>("sprk_regardingmatter").Id.Should().Be(h.MatterId);
         record.GetAttributeValue<EntityReference>("sprk_matter").Id.Should().Be(h.MatterId);
@@ -372,16 +458,23 @@ public sealed class RiActionsViaSeamSeamTests
         record.Contains("sprk_gatesessionid").Should().BeFalse("criterion 4 as amended: null for enrichment-gate records");
         record.GetAttributeValue<string>("sprk_factsnapshot").Should().Contain(h.RuleId.ToString("D")).And.Contain(h.CommunicationId.ToString("D"));
 
-        // One call site before the branch: the record is written first, and the RI action still runs after it, unchanged.
-        h.Events.Should().Equal("decision-record-create", "seam-task-create", "outbox-write", $"ping:{h.OwnerId}", "appnotification-create");
+        // The record is written AFTER the RI action, by the job: the RI action did not wait for it.
+        h.Events.Should().Equal(
+            "decision-job-enqueue", "seam-task-create", "outbox-write", $"ping:{h.OwnerId}", "appnotification-create", "decision-record-create");
     }
 
     [Fact]
-    public async Task PublishAsync_WhenGateDenies_WritesADeniedDecisionRecord_AndStillProducesNoSideEffect()
+    public async Task PublishAsync_WhenGateDenies_QueuesTheDecision_TheJobWritesADeniedRecord_AndTheGateStillProducesNoSideEffect()
     {
         var h = BuildHarness(ruleThreshold: 0.9m, withDecisionRecords: true);
 
         await h.Consumer.PublishAsync(Signal(h.CommunicationId, confidence: 0.5));
+
+        h.QueuedJobs.Should().ContainSingle("a deny queues its decision too");
+        h.DecisionRecords.Should().BeEmpty();
+        h.Events.Should().Equal("decision-job-enqueue");
+
+        await h.RunQueuedJobsAsync();
 
         var record = h.DecisionRecords.Should().ContainSingle("criterion 2: a deny writes a Decision Record").Subject;
         record.GetAttributeValue<OptionSetValue>("sprk_decisionoutcome").Value.Should().Be(100000001, "Denied");
@@ -390,7 +483,7 @@ public sealed class RiActionsViaSeamSeamTests
         record.GetAttributeValue<string>("sprk_reason").Should().Be("rule-matched-confidence-below-threshold");
         h.Creates.Should().BeEmpty("the record is written by the ontology writer identity; a deny still creates no task, outbox row or appnotification");
         h.Delivery.Pings.Should().BeEmpty();
-        h.Events.Should().Equal("decision-record-create");
+        h.Events.Should().Equal("decision-job-enqueue", "decision-record-create");
     }
 
     [Fact]
@@ -400,6 +493,7 @@ public sealed class RiActionsViaSeamSeamTests
 
         await h.Consumer.PublishAsync(Signal(h.CommunicationId, confidence: 0.9)); // authorize
         await h.Consumer.PublishAsync(Signal(h.CommunicationId, confidence: 0.4)); // deny: below the rule's 0.7
+        await h.RunQueuedJobsAsync();
 
         var found = Run(PerMatterFetchXml(h.MatterId), h.DecisionRecords);
         found.Select(r => r.GetAttributeValue<OptionSetValue>("sprk_decisionoutcome").Value)
@@ -408,7 +502,25 @@ public sealed class RiActionsViaSeamSeamTests
     }
 
     [Fact]
-    public async Task PublishAsync_WhenTheDecisionRecordCannotBeWritten_TheRiActionStillRuns_AndTheFailureIsNotSilent()
+    public async Task PublishAsync_ARetryOfTheSameEnrichment_QueuesTheDecisionAgain_ButOnlyOneRecordIsWritten_D139()
+    {
+        // Enrichment is retried: the gate evaluates again (with a new run id) and queues again. Two jobs, the same idempotency key, ONE record.
+        var h = BuildHarness(ruleThreshold: 0.7m, withDecisionRecords: true);
+
+        await h.Consumer.PublishAsync(Signal(h.CommunicationId, confidence: 0.9));
+        await h.Consumer.PublishAsync(Signal(h.CommunicationId, confidence: 0.9));
+        var outcomes = await h.RunQueuedJobsAsync();
+
+        h.QueuedJobs.Should().HaveCount(2);
+        h.QueuedJobs.Select(j => j.IdempotencyKey).Distinct().Should().ContainSingle()
+            .Which.Should().Be(GateDecisionKey.Of(h.CommunicationId, authorize: true));
+        h.QueuedJobs.Select(j => j.JobId).Distinct().Should().HaveCount(2);
+        outcomes.Should().HaveCount(2).And.OnlyContain(o => o.Status == JobStatus.Completed);
+        h.DecisionRecords.Should().ContainSingle("the second job found the first job's record and wrote nothing");
+    }
+
+    [Fact]
+    public async Task PublishAsync_WhenTheJobCannotWriteTheRecord_TheRiActionHasAlreadyRun_AndTheJobFailsVisibly()
     {
         var h = BuildHarness(ruleThreshold: 0.7m, withDecisionRecords: true);
         h.WriterOrg.Setup(o => o.CreateAsync(It.IsAny<DataverseEntity>(), It.IsAny<CancellationToken>())).ThrowsAsync(new TimeoutException("dataverse"));
@@ -416,8 +528,24 @@ public sealed class RiActionsViaSeamSeamTests
         var act = () => h.Consumer.PublishAsync(Signal(h.CommunicationId, confidence: 0.9));
 
         await act.Should().NotThrowAsync("the gate's outcome and the enrichment that triggered it are unaffected by a lost record");
+        h.Events.Should().Equal("decision-job-enqueue", "seam-task-create", "outbox-write", $"ping:{h.OwnerId}", "appnotification-create");
+
+        var outcomes = await h.RunQueuedJobsAsync();
+
+        outcomes.Should().ContainSingle().Which.Status.Should().Be(JobStatus.Failed, "abandoned and redelivered by the processor, dead-lettered after the last delivery");
         h.DecisionRecords.Should().BeEmpty();
-        // The authorize path ran exactly as it does without a writer.
+    }
+
+    [Fact]
+    public async Task PublishAsync_WhenTheDecisionCannotBeQueued_TheGateOutcomeAndTheRiActionAreUnchanged()
+    {
+        var h = BuildHarness(ruleThreshold: 0.7m, withDecisionRecords: true);
+        h.Queue.Setup(q => q.SubmitJobAsync(It.IsAny<JobContract>(), It.IsAny<CancellationToken>())).ThrowsAsync(new InvalidOperationException("service bus down"));
+
+        var act = () => h.Consumer.PublishAsync(Signal(h.CommunicationId, confidence: 0.9));
+
+        await act.Should().NotThrowAsync("a degraded queue never fails the enrichment that triggered the assessment");
+        h.QueuedJobs.Should().BeEmpty();
         h.Events.Should().Equal("seam-task-create", "outbox-write", $"ping:{h.OwnerId}", "appnotification-create");
     }
 }

@@ -149,15 +149,55 @@ public sealed class SecretClientKvWriter : IKvSecretsWriter
             : new SecretClient(vaultUri, _credential, _clientOptions);
 
         var results = new List<KvSecretWriteResult>(capacity: request.Entries.Count);
+        var rbacWait = System.Diagnostics.Stopwatch.StartNew();
 
         foreach (var entry in request.Entries)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            var result = await ExecuteEntryAsync(client, entry, request, cancellationToken).ConfigureAwait(false);
+            var result = await ExecuteEntryWithRbacRetryAsync(client, entry, request, rbacWait, cancellationToken)
+                .ConfigureAwait(false);
             results.Add(result);
         }
 
         return new KvSecretsWriteOutcome.Success(results);
+    }
+
+    /// <summary>
+    /// T186 L24: H4 grants L2 Key Vault Secrets Officer on the vault immediately before this write, and the
+    /// grant takes minutes to reach the Key Vault data plane — the first live run got 403 ForbiddenByRbac on 10 of
+    /// 13 entries and quarantined. A 403 is retried (every entry operation is idempotent: existence check, upsert,
+    /// delete) until <see cref="KvSecretsPopulationOptions.RbacPropagationTimeout"/>, measured across the whole
+    /// write; after that the entry fails as before.
+    /// </summary>
+    private async Task<KvSecretWriteResult> ExecuteEntryWithRbacRetryAsync(
+        SecretClient client,
+        KvSecretEntry entry,
+        KvSecretWriteRequest request,
+        System.Diagnostics.Stopwatch rbacWait,
+        CancellationToken cancellationToken)
+    {
+        while (true)
+        {
+            try
+            {
+                return await ExecuteEntryAsync(client, entry, request, cancellationToken).ConfigureAwait(false);
+            }
+            catch (RequestFailedException ex) when (ex.Status == 403)
+            {
+                if (rbacWait.Elapsed + _options.RbacPropagationRetryInterval > _options.RbacPropagationTimeout)
+                {
+                    return new KvSecretWriteResult(entry.CanonicalName, KvSecretWriteAction.Failed,
+                        $"Key Vault still denied access after waiting {(int)rbacWait.Elapsed.TotalSeconds}s for the Secrets Officer " +
+                        $"grant to propagate: {ex.GetType().Name}: {ex.Message}");
+                }
+                _logger.LogInformation(
+                    "H4 KV writer: 403 on {SecretName} (vault {Vault}) — role grant not yet effective; retrying in {Interval} " +
+                    "(waited {Waited} of {Timeout})",
+                    entry.CanonicalName, request.TargetKeyVaultName, _options.RbacPropagationRetryInterval,
+                    rbacWait.Elapsed, _options.RbacPropagationTimeout);
+                await Task.Delay(_options.RbacPropagationRetryInterval, cancellationToken).ConfigureAwait(false);
+            }
+        }
     }
 
     private async Task<KvSecretWriteResult> ExecuteEntryAsync(
@@ -261,6 +301,10 @@ public sealed class SecretClientKvWriter : IKvSecretsWriter
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
             throw;
+        }
+        catch (RequestFailedException ex) when (ex.Status == 403)
+        {
+            throw;   // ExecuteEntryWithRbacRetryAsync waits out role propagation (T186 L24).
         }
         catch (Exception ex)
         {

@@ -4,7 +4,7 @@
     <title>Child-record contract live gate (contract §5, 11 items) on spaarkedev1</title>
     <phase>4c Standard child-record contract (D-131)</phase>
     <gate>blocked: 140-145 done; uac-r2 lineage + census PR deployed; BFF with 141-145 deployed to dev (035 or an approved dev deploy per D-126); Redis key sdap:dv:entitymetadata:sprk_decisionrecord expired or evicted with owner approval</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Live security verification of secure-family isolation.</rigor-reason>
     <model-tier>sonnet</model-tier>

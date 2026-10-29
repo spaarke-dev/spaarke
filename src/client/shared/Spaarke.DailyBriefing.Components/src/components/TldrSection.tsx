@@ -24,7 +24,7 @@
  * `resolvableItems` map the caller supplies (built from the same narrate
  * request's items — see `DailyBriefingApp`'s `tldrResolvableItems`). A
  * resolving itemId gets its `anchorText` wrapped as a clickable link inline
- * in whichever of summary/keyTakeaways/topAction contains it (reuses
+ * in whichever of summary/keyTakeaways contains it (reuses
  * `NarrativeCitedText.buildSegments`, the same matching rule the item-row
  * links already use). A NON-resolving itemId is DROPPED — the anchor text
  * renders as plain prose, exactly as if no itemRefs entry had ever named it.
@@ -35,7 +35,7 @@
 
 import * as React from 'react';
 import { makeStyles, tokens, Text, Badge, Skeleton, SkeletonItem, Link } from '@fluentui/react-components';
-import { InfoRegular, SparkleRegular, ArrowRightRegular } from '@fluentui/react-icons';
+import { InfoRegular, SparkleRegular } from '@fluentui/react-icons';
 import { buildSegments } from './NarrativeCitedText';
 import { formatRelativeTime } from '@spaarke/ui-components';
 import type { NarrativeBulletReferenceResult, TldrItemRefResult } from '../services/briefingService';
@@ -92,46 +92,6 @@ const useStyles = makeStyles({
   },
   takeawayItem: {
     marginBottom: tokens.spacingVerticalXS,
-  },
-  topAction: {
-    display: 'block',
-  },
-  topActionBox: {
-    display: 'flex',
-    alignItems: 'flex-start',
-    gap: tokens.spacingHorizontalS,
-    backgroundColor: tokens.colorNeutralBackground1,
-    borderTopLeftRadius: tokens.borderRadiusMedium,
-    borderTopRightRadius: tokens.borderRadiusMedium,
-    borderBottomLeftRadius: tokens.borderRadiusMedium,
-    borderBottomRightRadius: tokens.borderRadiusMedium,
-    borderLeftWidth: '3px',
-    borderLeftStyle: 'solid',
-    borderLeftColor: tokens.colorBrandStroke1,
-    paddingTop: tokens.spacingVerticalS,
-    paddingBottom: tokens.spacingVerticalS,
-    paddingLeft: tokens.spacingHorizontalM,
-    paddingRight: tokens.spacingHorizontalM,
-    marginTop: tokens.spacingVerticalXS,
-    marginBottom: tokens.spacingVerticalS,
-  },
-  topActionContent: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '2px',
-  },
-  topActionLabel: {
-    color: tokens.colorBrandForeground1,
-    fontWeight: tokens.fontWeightSemibold,
-    fontSize: tokens.fontSizeBase100,
-    textTransform: 'uppercase',
-    letterSpacing: '0.05em',
-  },
-  topActionIcon: {
-    color: tokens.colorBrandForeground1,
-    fontSize: '18px',
-    flexShrink: 0,
-    marginTop: '2px',
   },
   footer: {
     color: tokens.colorNeutralForeground3,
@@ -196,7 +156,6 @@ export interface TldrSectionProps {
   tldr: {
     summary: string;
     keyTakeaways: string[];
-    topAction: string;
     categoryCount: number;
     priorityItemCount: number;
     /** R5 task 014 (FR-A5) — anchor-to-item grounding. See module JSDoc. */
@@ -433,27 +392,9 @@ export const TldrSection: React.FC<TldrSectionProps> = ({
           ))}
         </ul>
       )}
-      {tldr.topAction && (
-        <div className={styles.topActionBox}>
-          <ArrowRightRegular className={styles.topActionIcon} aria-hidden="true" />
-          <div className={styles.topActionContent}>
-            <Text className={styles.topActionLabel}>Top action</Text>
-            <Text size={300} weight="semibold" className={styles.topAction}>
-              <TldrAnchoredText
-                text={tldr.topAction}
-                refs={resolvedRefs}
-                onOpenRecord={onOpenRecord}
-                linkClassName={styles.inlineLink}
-              />
-            </Text>
-          </div>
-        </div>
-      )}
       <div className={styles.footer}>
         {generatedAt && <Text size={200}>Generated {formatRelativeTime(generatedAt, { style: 'compact' })}</Text>}
-        <Text size={200}>
-          {tldr.categoryCount} categories, {tldr.priorityItemCount} priority items
-        </Text>
+        <Text size={200}>{tldr.categoryCount} categories</Text>
       </div>
     </div>
   );

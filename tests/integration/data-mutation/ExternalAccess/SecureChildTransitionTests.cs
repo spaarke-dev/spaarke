@@ -124,6 +124,7 @@ public class SecureChildTransitionTests : IClassFixture<ProvisionProjectTestFixt
 
         // A message on the record, in a per-user Direct thread: the message is the record's child; the thread is not.
         world.UserOwnedChild("sprk_communicationthread", family.DirectThread);
+        world.Set("sprk_communicationthread", family.DirectThread, "sprk_threadtype", new Microsoft.Xrm.Sdk.OptionSetValue(100000001)); // #2143 r7d
         Child("sprk_communication", family.MessageInDirectThread,
             (regarding, rootTable, rootId), ("sprk_communicationthread", "sprk_communicationthread", family.DirectThread));
 
@@ -754,6 +755,44 @@ public class SecureChildTransitionTests : IClassFixture<ProvisionProjectTestFixt
         _fixture.ShareMaskOf(usersOwn, Outsider).Should().NotBe(0, "a share on an ordinary row is not the mirror's");
         _fixture.OwnerOfCascadeChild(location).Should().Be(DataversePrincipalRef.User(Creator),
             "a repeat unsecure is no transition for the record's own SharePoint rows");
+    }
+
+    /// <summary>
+    /// UAC task 194b fix round R (A2): an Unsecure HOLDS a Decision Record whose question is incomplete (its sprk_steps lists no
+    /// Signals) on the Secure team — and takes the matter's mirror off it as it does a released child's, so the colleague the
+    /// matter was shared with keeps no access through it. Holding only removes access: the call completes and reports it.
+    /// </summary>
+    [Fact]
+    public async Task Unsecure_HoldsADecisionRecordWithAnIncompleteQuestion_RemovesItsMirror_AndReportsItHeld()
+    {
+        var rootId = Guid.NewGuid();
+        SeedRoot("sprk_matter", rootId, owningTeam: SecureTeam);
+        _fixture.UseChildWorldForRoots();
+        var world = _fixture.ChildWorld;
+        var catalog = Guid.NewGuid();
+        world.Add("sprk_recordtype_ref", catalog, ("sprk_recordlogicalname", "sprk_matter"));
+        var record = Guid.NewGuid();
+        world.SecureChild("sprk_decisionrecord", record,
+            ("sprk_matter", "sprk_matter", rootId), ("sprk_regardingmatter", "sprk_matter", rootId));
+        world.Set("sprk_decisionrecord", record, "sprk_corerecordtype", new Microsoft.Xrm.Sdk.EntityReference("sprk_recordtype_ref", catalog));
+        world.Set("sprk_decisionrecord", record, "sprk_corerecordid", rootId.ToString("D"));
+        world.Set("sprk_decisionrecord", record, "sprk_regardingrecordid", rootId.ToString("D"));
+        _fixture.SeedShare(rootId, DataversePrincipalRef.User(Colleague), RecordShareLevels.ViewOnlyRights);
+        _fixture.SeedShare(record, DataversePrincipalRef.User(Colleague), RecordShareLevels.ViewOnlyRights);
+
+        var response = await _fixture.CreateAuthenticatedClient()
+            .PostAsJsonAsync(UnsecureRoute, new { recordType = RecordType("sprk_matter"), recordId = rootId });
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+        world.OwnerOf("sprk_decisionrecord", record).Should().Be(DataversePrincipalRef.Team(SecureTeam), "held, never moved out");
+        _fixture.SharesOn(record).Should().BeEmpty("the colleague keeps no access through the held record");
+        _fixture.IsSecureOf(rootId).Should().BeFalse("the Unsecure completes");
+        var children = (await JsonOf(response)).GetProperty("children");
+        children.GetProperty("held").GetInt32().Should().Be(1);
+        var held = children.GetProperty("heldRecords").EnumerateArray().Should().ContainSingle().Subject;
+        held.GetProperty("table").GetString().Should().Be("sprk_decisionrecord");
+        held.GetProperty("id").GetGuid().Should().Be(record);
+        held.GetProperty("reason").GetString().Should().Contain("incomplete");
     }
 
     /// <summary>

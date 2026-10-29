@@ -1,0 +1,88 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="154" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>Worklist route: subject id/type on Do rows, rule sentence, Not filed last; inquiry lookup for a To Do</title>
+    <phase>5 The worklist surface</phase>
+    <gate>none (BFF only; independent of 059's review)</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Changes the Signal read route's response and adds a caller-scoped read endpoint (bff-api, access model).</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Route visibility rules (caller-scoped reads, fail-closed, D-123 withheld lines) must hold for every new field; the new endpoint reads as the caller.</model-tier-reason>
+    <effort>high</effort>
+    <deps>038, 071</deps>
+    <tags>bff-api,api,dataverse,security,testing</tags>
+    <estimated-effort>3-5 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Task 059 (Worklist widget, PR #1964) stopped at its escalation trigger: the D-111 disposition picker and two HANDOFF behaviours need data the task 038 route does not return, and the widget may not read Dataverse. Extend the BFF so the widget can do all three. Issues #1958 and #1959 (items 1 and 3) hold the finding; #1959 item 2 (the Decision Record for closed items) is NOT in this task, it belongs to task 045.</prompt>
+  <role>SPAARKE BFF engineer.</role>
+  <goal>`GET /api/v1/signals/worklist` returns the subject reference on Do-lane rows, the rule sentence on every row, and the Not filed group last in the Do lane; a new caller-scoped read returns the inquiry and its replies for an inquiry-outcome To Do.</goal>
+
+  <context>
+    <background>Route: `Api/Signals/SignalReadEndpoints.cs`, service `Services/Signals/SignalReadService.cs` (records `WorklistItemRow`, `WorklistGroup` ~L81-108; read the class remarks on visibility before changing anything). Inquiry: `Api/InquiryEndpoints.cs` (POST disposition), `Services/Signals/Actions/InquiryDispositionService.cs` (`TodoIdNamespace`, the v5 To Do id derivation), contract in `notes/071-disposition-accrual.md` (section "UI hand-off" L34 gives the exact lookups the client was going to do; this task moves them to the server). The 059 widget: `src/client/shared/Spaarke.UI.Components/src/components/Worklist/` (`worklistService.ts`, `worklistWizardItem.ts`) in PR #1964 (not merged; do not edit it).</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Signals/SignalReadService.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/InquiryEndpoints.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Signals/Actions/InquiryDispositionService.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Signals/SignalReadService.cs (DoLaneMineRules: the caller's own subject read)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="D-15">Scope: every new field and the new endpoint return only what the CALLER's own read admitted (`IDataverseUserClient`). Nothing read with the BFF's own identity is returned unless the caller's read admitted the row it belongs to (the route's existing rule).</constraint>
+    <constraint source="project">Scope (subject reference): add `SubjectRecordType` (logical name) and `SubjectRecordId` to `WorklistItemRow` ONLY for Do-lane rows, where the caller's "mine" read of the subject already proved they can read it. Decide-lane rows return null for both. No extra Dataverse request per row.</constraint>
+    <constraint source="D-23">Scope (sentence): add `Sentence` from `sprk_sentence` on every row. It is returned as stored (FR-48/D-23 bind what it may assert at write time). If the worklist `sprk_gridconfiguration` fetch does not select the column, add it to the route's column handling the same way the existing display columns are handled; if the configuration row itself must change, change its seed source in the repo and STOP to report the live Dataverse step (the main session applies data changes).</constraint>
+    <constraint source="D-35">Scope (order): in the Do lane the Not filed group is emitted LAST; every other group keeps the configuration's order. Decide lane unchanged (it never has a Not filed group).</constraint>
+    <constraint source="D-111">Scope (inquiry lookup): add `GET /api/v1/inquiries/for-todo/{todoId:guid}` in `InquiryEndpoints.cs`. It reads the To Do AS THE CALLER (404 when not readable); takes the `serviceRequestId=` first line of `sprk_notes` as a HINT and accepts it only when the derived v5 id (`TodoIdNamespace`) equals `todoId`; otherwise lists the To Do's matter's open outbound service requests as the caller and picks the one whose derived id equals `todoId`; 404 when none matches. Returns `{ serviceRequestId, replies: [{ communicationId, subject, receivedOn }] }`, replies = the inquiry's incoming communications read as the caller, newest first. Same auth pattern as the POST: `RequireAuthorization` + `RecordRouteAccessAuthorizationFilter("read", ...)` on the To Do (`todoId`), using the To Do's entity set name as the filter's other registrations do. Reuse the existing v5 derivation; do not duplicate it.</constraint>
+    <constraint source="project">Scope: the route stays fail-closed: a fault is Unavailable, never a shorter list. The new endpoint: a Dataverse fault is 503 with a reason, never 404.</constraint>
+    <constraint source="D-111 (059 review, added 2026-10-15 by the main session)">Scope (inquiry-outcome To Do is not mark-completable): POL-TODO-OVERDUE raises a Do Signal on the overdue "Record the outcome of the budget inquiry" To Do, and the generic Mark complete would close the To Do while the service request stays open with no disposition (breaks D-111, success criterion 10). For a Signal whose subject is an inquiry-outcome To Do, the decision plan must not offer mark-complete, and the commit route must refuse mark-complete with a 409 reason code (`inquiry.disposition_required`). Identify the To Do with the SAME logic as the for-todo lookup (the `sprk_notes` hint accepted only when the derived v5 id equals the To Do id), factored once and reused. Add no request to the plan path unless the To Do is already read there; if it is not, state the cost. Reschedule and reassign stay available. The completion path is 071's POST disposition.</constraint>
+    <constraint source="CLAUDE.md §10">BFF hygiene: placement decision, publish-size delta against a fresh master build, no new package.</constraint>
+  </constraints>
+
+  <justification>
+    <existing>`GET /api/v1/signals/worklist` (038) and `POST /api/v1/inquiries/{id}/disposition` (071); `InquiryDispositionService` owns the v5 derivation.</existing>
+    <extension>The three route fields extend the existing response. The inquiry lookup is a read and the POST is a write, so a GET beside it on the same group is the extension; the derivation is reused, not copied.</extension>
+    <cost-of-doing-nothing>The D-111 picker cannot find the inquiry or its reply without Dataverse reads from the widget (forbidden by D-15), so the inquiry-outcome To Do cannot be completed with a disposition (success criterion 10); the wizard shows "Missing statement" for every item; Not filed renders first, contrary to HANDOFF section 1.2.</cost-of-doing-nothing>
+  </justification>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>.claude/patterns/api/endpoint-filters.md</file>
+      <file>projects/spaarke-ontology-platform-r1/notes/071-disposition-accrual.md</file>
+      <file>projects/spaarke-ontology-platform-r1/notes/decisions.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare FULL rigor; read the knowledge files and the SignalReadService remarks.</step>
+    <step order="1">Route fields and Not filed order, with tests.</step>
+    <step order="2">Inquiry lookup endpoint, with tests.</step>
+    <step order="3">Publish-size delta; PR into docs/ontology-platform-design.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If returning the subject reference or sentence needs a per-row request or a read with the BFF's own identity that the caller's read did not admit, STOP and report.</trigger>
+    <trigger>If the worklist grid configuration row in Dataverse must change, STOP after the repo change and report the exact live change.</trigger>
+  </escalation>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a Do-lane row, then it carries the subject's logical name and id; given a Decide-lane row, then both are null.</criterion>
+    <criterion testable="true">Given any row, then `Sentence` equals the Signal's stored `sprk_sentence` (null when empty).</criterion>
+    <criterion testable="true">Given a Do lane with a Not filed group and core groups, then Not filed is last and the core groups keep the configuration's order.</criterion>
+    <criterion testable="true">Given an inquiry-outcome To Do the caller can read, with a valid hint, then the lookup returns its service request and incoming replies newest first.</criterion>
+    <criterion testable="true">Given a missing or wrong hint, then the fallback finds the service request by the derived id; given none matches, then 404.</criterion>
+    <criterion testable="true">Negative: a To Do the caller cannot read is 404; a service request or reply the caller cannot read is not returned; an unauthenticated call is 401; a Dataverse fault is 503.</criterion>
+    <criterion testable="true">Negative: no new per-row request on the route (assert the request count on a multi-row fixture is unchanged).</criterion>
+    <criterion testable="true">Given a Signal whose subject is an inquiry-outcome To Do, then its decision plan offers no mark-complete (reschedule and reassign remain), and committing mark-complete on it is 409 with reason code `inquiry.disposition_required` and changes nothing.</criterion>
+    <criterion testable="true">Negative: an ordinary overdue To Do still offers and executes mark-complete. Seeding proof on the refusal: remove the commit guard and confirm the 409 test fails.</criterion>
+    <criterion testable="true">Tests cover the criteria above; anything beyond needs a one-line justification in task notes. Seeding proof for the caller-scoped To Do read only (replace it with the BFF identity and confirm the 404 test fails). Filtered Sprk.Bff.Api.Tests + Spaarke.ArchTests pass; never run the unfiltered suite.</criterion>
+  </acceptance-criteria>
+
+  <notes>From task 059's escalation (#1958, #1959 items 1 and 3). Task 155 consumes these fields in the widget. #1959 item 2 goes to task 045.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

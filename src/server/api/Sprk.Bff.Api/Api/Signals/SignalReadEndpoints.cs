@@ -33,8 +33,9 @@ public static class SignalReadEndpoints
             .WithName("GetSignalWorklist")
             .WithSummary("Get the caller's worklist: visible Signals per lane, grouped by core record and ordered")
             .WithDescription("set = lanes (default; Decide and Do, ordered severity, high priority, oldest, record number), closedToday, "
-                + "suppressed or closedEarlier. Membership comes from the worklist grid configuration; a Signal whose core record the "
+                + "suppressed, closedEarlier or decided (the Decision Record tab, task 045). Membership comes from the worklist grid configuration; a Signal whose core record the "
                 + "caller cannot read is absent, and a Do-lane Signal is returned only when its subject is the caller's own work. "
+                + "Each row carries its sentence; a Do-lane row also carries its subject reference; Not filed is the Do lane's last group. "
                 + "403 when the caller cannot be resolved; 503 when the list cannot be read.")
             .Produces<WorklistResponse>(200)
             .ProducesValidationProblem()
@@ -52,11 +53,11 @@ public static class SignalReadEndpoints
         {
             return Results.ValidationProblem(new Dictionary<string, string[]>
             {
-                ["set"] = ["set must be one of: lanes, closedToday, suppressed, closedEarlier."],
+                ["set"] = ["set must be one of: lanes, closedToday, suppressed, closedEarlier, decided."],
             });
         }
 
-        var result = await signalRead.ReadAsync(worklistSet, ct);
+        var result = await signalRead.ReadAsync(worklistSet, httpContext.User, ct);
         return result.Outcome switch
         {
             SignalReadOutcome.Ok when result.Response is { } body => Results.Ok(body),

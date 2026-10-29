@@ -50,7 +50,11 @@ public sealed class EmailUploadCaptureService
     private readonly ILogger<EmailUploadCaptureService> _logger;
     private readonly IThreadResolver? _threadResolver;
     private readonly Access.IDirectThreadAccessService? _directThreadAccess;
+    private readonly IGenericEntityService? _genericEntityService;
 
+    /// <param name="genericEntityService">Task 065 fix round 3: reads the resolved thread's privacy and lowers the capture's
+    /// <c>sprk_isinternalonly</c> (written <c>true</c> at create). Optional like the thread seams; without it (or without a
+    /// resolved thread) the capture stays internal-only, never shared by mistake.</param>
     /// <param name="threadResolver">Spaarkeai-word-add-in-r1 task 129: the captured email gets a thread through the same
     /// resolution the mailbox and send paths use — without one it never shows on its record's Messages panel, which lists
     /// threads. Optional
@@ -64,8 +68,10 @@ public sealed class EmailUploadCaptureService
         Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver ownership,
         ILogger<EmailUploadCaptureService> logger,
         IThreadResolver? threadResolver = null,
-        Access.IDirectThreadAccessService? directThreadAccess = null)
+        Access.IDirectThreadAccessService? directThreadAccess = null,
+        IGenericEntityService? genericEntityService = null)
     {
+        _genericEntityService = genericEntityService;
         _threadResolver = threadResolver;
         _directThreadAccess = directThreadAccess;
         _communicationService = communicationService;
@@ -219,7 +225,36 @@ public sealed class EmailUploadCaptureService
             // ── Thread (task 129): after the association, so a new thread is anchored to the record the email is filed to —
             //    the same order as the mailbox path (IncomingCommunicationProcessor step 4.6) and the same join→grant sequence
             //    as the send path (CommunicationService). Best-effort (NFR-02/NFR-04): the record already exists. ──
-            await ResolveThreadAsync(communicationId, envelope, ct);
+            var threadId = await ResolveThreadAsync(communicationId, envelope, ct);
+
+            // ── Internal-only (task 065 fix round 3/4, owner 2026-10-14): BuildCommunicationEntity wrote the row
+            //    internal-only because its thread was unknown. Lower it only when the thread resolved and reads Open AND the
+            //    parent it replies to is explicitly shareable. The parent is known only when the upload carries In-Reply-To /
+            //    References (optional EmailMetadata fields; the current add-in sends none): then the SAME rule as the mailbox
+            //    path applies (CommunicationInternalOnlyFloor.HasParentNotExplicitlyShareableAsync). With no headers the
+            //    capture follows CommunicationInternalOnlyFloor.AddInSaveWithoutReplyHeadersIsShareable. Fail closed, non-fatal. ──
+            //    Fix round 6 (K2): cancellation is caught here, as MessagingIngestor does: the row exists, so it stays internal-only
+            //    (true), a warning is logged and the capture continues to enrichment, rather than escaping to the outer catch,
+            //    which would skip enrichment. ──
+            if (_genericEntityService is not null && threadId is not null)
+            {
+                try
+                {
+                    var parentNotShareable = HasReplyHeaders(envelope)
+                        ? await CommunicationInternalOnlyFloor.HasParentNotExplicitlyShareableAsync(
+                            _communicationService, _genericEntityService, envelope, _logger, ct)
+                        : !CommunicationInternalOnlyFloor.AddInSaveWithoutReplyHeadersIsShareable;
+                    await CommunicationInternalOnlyFloor.LowerWhenSafeAsync(
+                        _genericEntityService, communicationId, threadId, parentNotShareable, _logger, ct);
+                }
+                catch (OperationCanceledException ex)
+                {
+                    _logger.LogWarning(
+                        ex,
+                        "Internal-only lowering cancelled (non-fatal; the row stays internal-only) | CommunicationId: {CommunicationId}",
+                        communicationId);
+                }
+            }
 
             // ── Triage/enrichment: the SAME entry point the inbound + outbound paths invoke, so upload capture
             //    is not forked. archivedDocumentId=null: the .eml + attachments are RAG-indexed / AI-analyzed by
@@ -258,14 +293,15 @@ public sealed class EmailUploadCaptureService
 
     /// <summary>
     /// Gives the captured email a thread through the shared resolution and grants it to that thread's audience (#1629: the
-    /// audience the resolution fixed). The upload envelope carries no reply-chain headers (In-Reply-To / References), which
-    /// are what the email key strategy joins on, so in practice a capture starts a new thread anchored to the record it is
-    /// filed to. Never throws: a failure leaves the email without a thread, which the next filing reconcile resolves.
+    /// audience the resolution fixed). The upload envelope carries reply-chain headers (In-Reply-To / References, which the
+    /// email key strategy joins on) only when the client sends the optional <see cref="EmailMetadata.InReplyTo"/> /
+    /// <see cref="EmailMetadata.References"/>; the current add-in sends none, so in practice a capture starts a new thread
+    /// anchored to the record it is filed to. Never throws: a failure leaves the email without a thread, which the next filing reconcile resolves.
     /// </summary>
-    private async Task ResolveThreadAsync(Guid communicationId, NormalizedMessage envelope, CancellationToken ct)
+    private async Task<Guid?> ResolveThreadAsync(Guid communicationId, NormalizedMessage envelope, CancellationToken ct)
     {
         if (_threadResolver is null)
-            return;
+            return null;
 
         try
         {
@@ -281,13 +317,24 @@ public sealed class EmailUploadCaptureService
 
             if (assignment is not null && _directThreadAccess is not null)
                 await _directThreadAccess.GrantMessageAccessAsync(communicationId, assignment, ct);
+
+            return assignment?.ThreadId;
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             _logger.LogWarning(
                 ex, "Upload-capture thread resolution failed (non-fatal) | CommunicationId: {CommunicationId}", communicationId);
+            return null;
         }
     }
+
+    private static bool HasReplyHeaders(NormalizedMessage envelope) =>
+        !string.IsNullOrWhiteSpace(envelope.InReplyTo) || envelope.References.Count > 0;
+
+    private static IReadOnlyList<string> SplitReferences(string? references) =>
+        string.IsNullOrWhiteSpace(references)
+            ? Array.Empty<string>()
+            : references.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 
     /// <summary>
     /// Maps the upload DTO (<see cref="EmailMetadata"/>) to the channel-neutral <see cref="NormalizedMessage"/>
@@ -312,6 +359,9 @@ public sealed class EmailUploadCaptureService
             BodyText = isHtml ? GraphMessageNormalizer.HtmlToPlainText(body) : body,
             BodyHtml = isHtml ? body : null,
             InternetMessageId = email.InternetMessageId,
+            // Task 065 fix round 4: optional reply headers (the current add-in sends none). Blank = absent.
+            InReplyTo = string.IsNullOrWhiteSpace(email.InReplyTo) ? null : email.InReplyTo.Trim(),
+            References = SplitReferences(email.References),
             ConversationId = email.ConversationId,
             SentAt = email.SentDate ?? email.ReceivedDate,
             Attachments = MapAttachments(email.Attachments),
@@ -369,7 +419,22 @@ public sealed class EmailUploadCaptureService
             ["sprk_body"] = email.Body ?? string.Empty,
             ["sprk_sentat"] = (email.SentDate ?? email.ReceivedDate)?.UtcDateTime ?? DateTime.UtcNow,
             ["sprk_receiveddate"] = (email.ReceivedDate ?? email.SentDate)?.UtcDateTime ?? DateTime.UtcNow,
+
+            // Task 065 fix round 3 (owner 2026-10-14): a received email is hidden from partners unless its thread is
+            // confirmed Open. The thread is unknown at create, so the row starts internal-only and CaptureWithOutcomeAsync
+            // lowers it (CommunicationInternalOnlyFloor.LowerWhenSafeAsync) once the thread is resolved and Open.
+            [CommunicationInternalOnlyFloor.InternalOnlyField] = true,
         };
+
+        // Task 065 fix round 6 (K1): store the parent the upload names, so the filing sweep (which cannot read headers) can tell a
+        // reply from a header-less save. The In-Reply-To, else the newest References entry (the parent by the same rule the email
+        // thread key uses); absent when the upload carried neither.
+        var parentReference = !string.IsNullOrWhiteSpace(envelope.InReplyTo)
+            ? envelope.InReplyTo
+            : envelope.References.LastOrDefault(r => !string.IsNullOrWhiteSpace(r));
+        if (!string.IsNullOrWhiteSpace(parentReference))
+            // sprk_inreplyto holds at most 1000 characters; the filing sweep only tests it for non-blank.
+            communication["sprk_inreplyto"] = TruncateTo(parentReference, 1000);
 
         // Stamp the internet-message-id when present (it is ALSO the race-proof create's dedup key). A
         // null/blank id leaves the attribute unset — the alternate key excludes nulls (unguarded create).

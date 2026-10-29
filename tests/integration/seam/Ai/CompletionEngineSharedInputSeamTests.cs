@@ -214,7 +214,7 @@ public sealed class CompletionEngineSharedInputSeamTests
                    Id = Guid.NewGuid(),
                    Name = TldrActionCode,
                    SystemPrompt = tldrSystemPrompt,
-                   OutputSchemaJson = """{"type":"object","properties":{"summary":{"type":"string"},"keyTakeaways":{"type":"array","items":{"type":"string"}},"topAction":{"type":"string"}},"required":["summary","keyTakeaways","topAction"],"additionalProperties":false}""",
+                   OutputSchemaJson = """{"type":"object","properties":{"summary":{"type":"string"},"keyTakeaways":{"type":"array","items":{"type":"string"}}},"required":["summary","keyTakeaways"],"additionalProperties":false}""",
                    ExecutorType = ExecutorType.AiAnalysis,
                    OwnerType = ScopeOwnerType.System,
                    Temperature = 0.0m,
@@ -224,7 +224,6 @@ public sealed class CompletionEngineSharedInputSeamTests
         {
             summary = "You have items to review today.",
             keyTakeaways = Array.Empty<string>(),
-            topAction = string.Empty,
         });
 
         // Strict — the TL;DR action is the ONLY LLM call the narrator may make (task 010).

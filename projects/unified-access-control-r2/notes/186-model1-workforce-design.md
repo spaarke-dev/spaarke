@@ -104,7 +104,7 @@ The sign-in path, in order (`WorkforcePrincipalResolver.cs:126-289`):
 
 | Token | Member-test result | Code (`sdap.access.deny.*`) |
 |---|---|---|
-| Guest: tid = stamp, `acct = 1`, `idp` home ∈ list | **Member** (FR-15) | — |
+| Guest: tid = stamp, `acct = 1`, `idp` home ∈ list | **Member** (FR-15), then refused by the binder since #2128 (2026-10-20): nothing created, bound or resolved | `workforce_guest_use_home_signin` |
 | Guest whose home is not listed, or whose `idp` is missing or unparsable | ForeignTenant | `workforce_tenant_not_customer` (on dev, where the list holds Spaarke's own tenant: `workforce_guest`) |
 | Spaarke staff, `acct = 0`, no systemuser (prod stamp) | ForeignTenant | `workforce_tenant_not_customer` |
 | List empty | TenantListEmpty | `workforce_tenant_list_empty` |

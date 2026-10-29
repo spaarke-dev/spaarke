@@ -24,7 +24,7 @@ import { cleanGuid as realCleanGuid } from '../../../Spaarke.UI.Components/src/u
 import type { DataGridConfiguration } from '../../../Spaarke.UI.Components/src/types/DataGridConfiguration';
 import type { SavedQueryResult } from '../../../Spaarke.UI.Components/src/services/IDataverseClient';
 
-// C-9 (spaarke-ontology-platform-r1 task 052): NarrativeBullet and HighPrioritySection render their row menu through the
+// C-9 (spaarke-ontology-platform-r1 task 052): NarrativeBullet renders its row menu through the
 // shared RowActionMenu. Re-export the REAL component (dependency-free deep import, same pattern as getXrm / cleanGuid):
 // a stub would hide the menu behaviour these suites assert.
 export { RowActionMenu } from '../../../Spaarke.UI.Components/src/components/RowActionMenu/RowActionMenu';
@@ -64,7 +64,11 @@ export interface ISendEmailDialogMockProps {
 }
 export const SendEmailDialog: React.FC<ISendEmailDialogMockProps> = () => null;
 // `describeSendFailure` — DailyBriefingApp.tsx imports it for the failed-send dialog copy.
-export const describeSendFailure: (...args: unknown[]) => { title: string; message: string; reference?: string } = () => ({
+export const describeSendFailure: (...args: unknown[]) => {
+  title: string;
+  message: string;
+  reference?: string;
+} = () => ({
   title: 'Email not sent',
   message: '',
 });
@@ -195,6 +199,20 @@ export interface AggregateCardProps {
   className?: string;
 }
 export const AggregateCard: React.FC<AggregateCardProps> = () => null;
+// `worklist.registration.ts` (LegalWorkspace section, ontology task 156) imports these three. `WorklistWidget` renders nothing and
+// `createWorklistService` / `launchDecisionWizard` are inert stubs; `worklistSectionRegistration.test.ts` spies on them to assert the wiring.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export const WorklistWidget: React.FC<any> = () => null;
+// `decisionRecords.registration.ts` (ontology task 045) imports `DecisionRecordsWidget`; it renders nothing here.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export const DecisionRecordsWidget: React.FC<any> = () => null;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export const createWorklistService: (...args: any[]) => any = () => ({});
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export const launchDecisionWizard: (...args: any[]) => Promise<any> = async () => ({
+  opened: false,
+  reason: 'no-host',
+});
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export const DataGridViewSelector: React.FC<any> = () => null;
 // `EntityCreationService` / `cleanGuid` (task 092, 2026-10-04) —
@@ -442,6 +460,8 @@ export const SECTION_METADATA_CATALOG: ReadonlyArray<{ id: string; widthPreferen
   { id: 'compose-editor' },
   { id: 'email' },
   { id: 'reconciliation' },
+  { id: 'worklist' },
+  { id: 'decisionRecords' },
   { id: 'analysis' },
   { id: 'communications' },
 ];
@@ -466,6 +486,10 @@ const _driftGuard = {
   RichFilePreviewDialog,
   sanitizeEmailHtml,
   DataGridViewSelector,
+  WorklistWidget,
+  DecisionRecordsWidget,
+  createWorklistService,
+  launchDecisionWizard,
   EntityCreationService,
   cleanGuid,
   XrmDataverseClient,

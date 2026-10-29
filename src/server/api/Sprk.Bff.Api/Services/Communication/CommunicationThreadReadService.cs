@@ -136,6 +136,26 @@ public sealed class CommunicationThreadReadService
     // (the contact's name) is the sender name when sprk_sentby is unset.
     private const string CreatedByContactValue = "_sprk_createdbycontact_value";
     private const string CreatedByContactFormattedValue = "_sprk_createdbycontact_value@OData.Community.Display.V1.FormattedValue";
+    // spaarke-SPA-external-access-platform-r3 task 062 (owner check-2 issue 4): a message created in the model-driven app has
+    // neither sprk_sentby nor a creator contact, so the sender name was null ("Unknown sender", bell "Someone"). The row's
+    // createdby (the creating systemuser) FormattedValue is the last fallback: sprk_sentby name -> creator contact name ->
+    // createdby name -> null. Only the display name is projected (the annotation); the id is selected solely so Dataverse
+    // returns the annotation and is never mapped to a DTO field.
+    // Person-only (owner decision 2026-10-13): the BFF creates communication rows through the APP identity, so for a BFF-sent
+    // message createdby is the BFF's application user and its name must never be shown as the sender. The createdby name is
+    // used only when createdby is a real person: the same read expands createdby to its applicationid + accessmode (no extra
+    // round trip) and CreatedByIsAPerson requires no applicationid and an interactive access mode. Anything that cannot be
+    // classified is NOT a person (null name). Same rule as RecordContainerResolver.ReadRowCreatorAsync (person = no
+    // applicationid) and SecureBuRoleDepthCensusBuilder.IsHumanPrincipal (access mode 3/4 are not people).
+    private const string CreatedByValue = "_createdby_value";
+    private const string CreatedByFormattedValue = "_createdby_value@OData.Community.Display.V1.FormattedValue";
+    private const string CreatedByNavigation = "createdby";
+    private const string CreatedByApplicationIdColumn = "applicationid";
+    private const string CreatedByAccessModeColumn = "accessmode";
+    private const string CreatedByExpand =
+        "$expand=" + CreatedByNavigation + "(" + "$select=" + CreatedByApplicationIdColumn + "," + CreatedByAccessModeColumn + ")";
+    private const int AccessModeSupportUser = 3;
+    private const int AccessModeNonInteractive = 4;
 
     // sprk_communicationattachment columns (pre-existing intersection, task 070).
     private const string AttachmentPkField = "sprk_communicationattachmentid";
@@ -205,6 +225,15 @@ public sealed class CommunicationThreadReadService
         var callerSystemUserId = await ResolveCallerOrThrowAsync(caller, ct);
         var pageSize = NormalizePageSize(top);
 
+        // #675 / ISS-006: the internal-vs-external bit is the AUTHORITATIVE per-caller value (systemuser.sprk_isexternal
+        // via the shared resolver), NOT a hardcoded `true`. IsExternalAsync fails closed (external) on an unresolvable id.
+        var isExternal = await _identityResolver.IsExternalAsync(callerSystemUserId, ct);
+
+        // D7 (task 065 fix round 5): a partner sees nothing in a thread that is not explicitly Open at read time. Checked
+        // before the message read; the answer is the same empty result as "no visible messages" (no existence leak).
+        if (isExternal && !await IsThreadOpenForExternalAsync(threadId, callerSystemUserId, ct))
+            return new ThreadReadResult(ThreadId: threadId, Name: null, Messages: Array.Empty<ThreadMessageDto>(), Count: 0);
+
         // 1) Impersonated message read — Dataverse row-level security applies natively.
         var select = string.Join(',', new[]
         {
@@ -212,23 +241,20 @@ public sealed class CommunicationThreadReadService
             // sprk_sentbyname is NOT selected — it is broken in the env (IsValidODataAttribute=false) and 400s the
             // whole read. The sender display name instead comes from the _sprk_sentby_value lookup's FormattedValue
             // annotation (the impersonated query requests annotations; ParseMessageRow reads it) — messaging-r3 2026-07-22.
-            DirectionField, SentByValue,
+            DirectionField, SentByValue, CreatedByValue,
             SentAtField, CreatedOnField, InReplyToField, InternalOnlyField, PrivilegeField, IsPrivateField,
         });
         var filter = new StringBuilder($"{ThreadLookupValue} eq {threadId} and {ActiveOnlyClause}");
         if (since is { } s)
             filter.Append($" and {CreatedOnField} gt {FormatOData(s)}");
 
-        var odata = $"$select={select}&$filter={filter}&$orderby={CreatedOnField} asc&$top={pageSize}";
+        var odata = $"$select={select}&{CreatedByExpand}&$filter={filter}&$orderby={CreatedOnField} asc&$top={pageSize}";
         var rows = await _query.QueryAsync(CommunicationSet, odata, callerSystemUserId, ct);
 
-        // 2) Apply the SHARED internal-only + privilege filter on top of the already-scoped rows.
-        // #675 / ISS-006: the internal-vs-external bit is the AUTHORITATIVE per-caller value (systemuser.sprk_isexternal
-        // via the shared resolver), NOT a hardcoded `true`. Hardcoding internal made CommunicationAccessFilter treat
-        // every caller as internal, so an external-licensed systemuser could read internal-only (D-05) messages
-        // (over-disclosure). IsExternalAsync fails closed (external) on an unresolvable id.
+        // 2) Apply the SHARED internal-only + privilege filter on top of the already-scoped rows. Hardcoding internal made
+        // CommunicationAccessFilter treat every caller as internal, so an external-licensed systemuser could read
+        // internal-only (D-05) messages (over-disclosure); the per-caller bit above is what prevents that.
         var parsed = rows.Select(ParseMessageRow).ToList();
-        var isExternal = await _identityResolver.IsExternalAsync(callerSystemUserId, ct);
         var context = new CommunicationAccessContext(CallerSystemUserId: callerSystemUserId, IsInternalUser: !isExternal);
         var filtered = _accessFilter.FilterMessages(context, parsed.Select(p => p.Entity).ToList());
 
@@ -269,6 +295,15 @@ public sealed class CommunicationThreadReadService
     {
         var callerSystemUserId = await ResolveCallerOrThrowAsync(caller, ct);
 
+        // #675 / ISS-006: authoritative per-caller internal/external bit (fail-closed external) — an unread scan must
+        // NOT count internal-only messages for an external-licensed caller (mirrors the thread-read filter).
+        var isExternal = await _identityResolver.IsExternalAsync(callerSystemUserId, ct);
+
+        // D7 (task 065 fix round 5): a count never includes an item the list hides. A thread that is not explicitly Open
+        // is hidden from a partner entirely, so its unread count is zero.
+        if (isExternal && !await IsThreadOpenForExternalAsync(threadId, callerSystemUserId, ct))
+            return new UnreadCountResult(threadId, since, 0);
+
         var select = string.Join(',', new[] { PkField, InternalOnlyField, PrivilegeField });
         var filter = new StringBuilder($"{ThreadLookupValue} eq {threadId} and {ActiveOnlyClause}");
         if (since is { } s)
@@ -277,9 +312,6 @@ public sealed class CommunicationThreadReadService
         var odata = $"$select={select}&$filter={filter}&$top={MaxUnreadScan}";
         var rows = await _query.QueryAsync(CommunicationSet, odata, callerSystemUserId, ct);
 
-        // #675 / ISS-006: authoritative per-caller internal/external bit (fail-closed external) — an unread scan must
-        // NOT count internal-only messages for an external-licensed caller (mirrors the thread-read filter above).
-        var isExternal = await _identityResolver.IsExternalAsync(callerSystemUserId, ct);
         var context = new CommunicationAccessContext(CallerSystemUserId: callerSystemUserId, IsInternalUser: !isExternal);
         var entities = rows.Select(r => ParseMessageRow(r).Entity).ToList();
         var filtered = _accessFilter.FilterMessages(context, entities);
@@ -324,8 +356,13 @@ public sealed class CommunicationThreadReadService
         // 1) Impersonated thread query by the typed regarding lookup (entity-set-agnostic; task 002 lookups).
         // PinnedField added (task 041 / FR-24) so the record-mode thread list can mark/sort pinned threads too.
         var threadSelect = string.Join(',', new[] { ThreadPkField, ThreadNameField, PinnedField });
+        // Fix round 6 (F1): an external caller (a contact, or a systemuser flagged sprk_isexternal) lists only EXPLICITLY Open
+        // threads, in the query itself, so a Private thread's name never leaves Dataverse. Internal callers are unchanged.
+        var openOnly = await _identityResolver.IsExternalAsync(callerSystemUserId, ct)
+            ? $" and {CommunicationOpenThreadGate.OpenOnlyThreadFilterClause}"
+            : string.Empty;
         var threadOData =
-            $"$select={threadSelect}&$filter=_{regardingField}_value eq {recordId} and {ActiveOnlyClause}" +
+            $"$select={threadSelect}&$filter=_{regardingField}_value eq {recordId} and {ActiveOnlyClause}{openOnly}" +
             $"&$orderby={CreatedOnField} asc&$top={MaxThreads}";
         var threadRows = await _query.QueryAsync(ThreadSet, threadOData, callerSystemUserId, ct);
 
@@ -433,7 +470,7 @@ public sealed class CommunicationThreadReadService
         // below. Active AND sent/received only (ExternalStatusClause) — a Draft/Queued/Failed/Bounded/Recalled row is
         // never read for the external plane.
         var odata =
-            $"$select={select}&$filter={regardingValue} eq {recordId} and {ActiveOnlyClause} and {ExternalStatusClause}" +
+            $"$select={select}&{CreatedByExpand}&$filter={regardingValue} eq {recordId} and {ActiveOnlyClause} and {ExternalStatusClause}" +
             $" and {ExternalPrivilegeFilterClause}" +
             $"&$orderby={CreatedOnField} desc,{PkField} desc&$top={MaxRegardingScan + 1}";
         var rows = await appOnlyQuery.QueryAsync(CommunicationSet, odata, ct);
@@ -523,16 +560,20 @@ public sealed class CommunicationThreadReadService
 
         columns.AddRange(new[]
         {
-            DirectionField, SentByValue, CreatedByContactValue, CreatedOnField, InternalOnlyField, PrivilegeField,
+            DirectionField, SentByValue, CreatedByContactValue, CreatedByValue, CreatedOnField, InternalOnlyField, PrivilegeField,
             StatusCodeAttribute,
+            // D7 (task 065 fix round 5): the thread each row sits in, so the open-thread gate can read the distinct threads.
+            ThreadLookupValue,
         });
-        return string.Join(',', columns.Concat(regardingValues));
+        // Distinct over the whole list: the live-parent lookups include the thread lookup the D7 gate already selects.
+        return string.Join(',', columns.Concat(regardingValues).Distinct());
     }
 
     /// <summary>
     /// The shared tail of every EXTERNAL read: the internal-only decision (an internal systemuser only — the same
     /// <see cref="ISystemUserIdentityResolver.IsExternalAsync"/> bit the impersonated reads use, #675), the shared
-    /// <see cref="ICommunicationAccessFilter"/>, and the shared DTO builder. Returns the visible messages in input order.
+    /// <see cref="ICommunicationAccessFilter"/>, the D7 open-thread gate for a non-internal caller (the thread must read
+    /// explicitly Open now), and the shared DTO builder. Returns the visible messages in input order.
     /// </summary>
     private async Task<(List<ThreadMessageDto> Messages, bool IsInternal)> FilterExternalMessagesAsync(
         IReadOnlyList<Dictionary<string, JsonElement>> rows, Guid? callerSystemUserId, CancellationToken ct)
@@ -546,10 +587,21 @@ public sealed class CommunicationThreadReadService
         var parsed = rows.Select(ParseMessageRow).Where(p => p.MessageId != Guid.Empty).ToList();
         var filtered = _accessFilter.FilterMessages(context, parsed.Select(p => p.Entity).ToList());
         var byId = parsed.ToDictionary(p => p.MessageId);
-        var messages = filtered.Decisions
+        var visible = filtered.Decisions
             .Where(d => d.Decision.IsVisible)
-            .Select(d => BuildDto(byId[d.Message.Id], d.Decision, EmptyAttachments))
+            .Select(d => (Parsed: byId[d.Message.Id], d.Decision))
             .ToList();
+
+        // D7 (task 065 fix round 5, ISS-009): a non-internal caller sees an item only when its thread is EXPLICITLY Open at
+        // read time, on top of the flag rule above. One batched read of the page's distinct threads; a hidden row is
+        // filtered exactly like one the flag hid (it never counts toward truncation). Internal callers are unchanged.
+        if (!isInternal && visible.Count > 0)
+        {
+            var open = await ReadOpenThreadIdsAppOnlyAsync(visible.Select(v => v.Parsed.ThreadId), ct);
+            visible = visible.Where(v => open.Contains(v.Parsed.ThreadId)).ToList();
+        }
+
+        var messages = visible.Select(v => BuildDto(v.Parsed, v.Decision, EmptyAttachments)).ToList();
         return (messages, isInternal);
     }
 
@@ -628,7 +680,7 @@ public sealed class CommunicationThreadReadService
             var regardingValues = chunk.Select(r => r.Value).Distinct().ToList();
             var idFilter = string.Join(" or ", chunk.Select(r => $"{r.Value} eq {r.RecordId}"));
             var odata =
-                $"$select={ExternalSelect(regardingValues, includeContent: false)}" +
+                $"$select={ExternalSelect(regardingValues, includeContent: false)}&{CreatedByExpand}" +
                 $"&$filter=({idFilter}) and {ActiveOnlyClause} and {ExternalStatusClause} and {ExternalPrivilegeFilterClause}" +
                 $" and {CreatedOnField} ge {FormatOData(since)}" +
                 $"&$orderby={CreatedOnField} desc,{PkField} desc&$top={max + 1}";
@@ -716,6 +768,10 @@ public sealed class CommunicationThreadReadService
         // Build the filter: NO regarding scoping (record-less inclusion) + optional name search + keyset cursor.
         // Active-only (round-8): deactivated (soft-deleted) threads must drop out of the list.
         var clauses = new List<string> { ActiveOnlyClause };
+        // Fix round 6 (F1): an external caller lists only EXPLICITLY Open threads. The clause is part of the query's
+        // $filter, so $top, the over-fetch row and the keyset next-page token are all computed over visible threads.
+        if (await _identityResolver.IsExternalAsync(callerSystemUserId, ct))
+            clauses.Add(CommunicationOpenThreadGate.OpenOnlyThreadFilterClause);
         if (!string.IsNullOrWhiteSpace(search))
         {
             // Two-stage escape: (1) double single quotes so the value cannot break out of the OData string literal;
@@ -1025,12 +1081,12 @@ public sealed class CommunicationThreadReadService
             // sprk_sentbyname is NOT selected — broken in the env (IsValidODataAttribute=false) → 400 → 500 on the
             // by-regarding + filtered-query paths. Sender name comes from the _sprk_sentby_value FormattedValue
             // annotation instead (see ReadThreadAsync + ParseMessageRow) — messaging-r3 2026-07-22.
-            DirectionField, SentByValue,
+            DirectionField, SentByValue, CreatedByValue,
             SentAtField, CreatedOnField, InReplyToField, InternalOnlyField, PrivilegeField, IsPrivateField, ThreadLookupValue,
         });
         // Active-only (round-8): deactivated (soft-deleted) messages must drop out of every by-regarding / filtered
         // read that composes onto this shared pipeline. Wrap the caller filter so the AND binds correctly.
-        var odata = $"$select={select}&$filter=({odataFilter}) and {ActiveOnlyClause}&$orderby={CreatedOnField} asc&$top={top}";
+        var odata = $"$select={select}&{CreatedByExpand}&$filter=({odataFilter}) and {ActiveOnlyClause}&$orderby={CreatedOnField} asc&$top={top}";
         var rows = await _query.QueryAsync(CommunicationSet, odata, callerSystemUserId, ct);
 
         // #675 / ISS-006: authoritative per-caller internal/external bit (fail-closed external) on the SHARED read
@@ -1046,6 +1102,15 @@ public sealed class CommunicationThreadReadService
             .Where(d => d.Decision.IsVisible)
             .Select(d => (Parsed: byId[d.Message.Id], d.Decision))
             .ToList();
+
+        // D7 (task 065 fix round 5, ISS-009): an external caller sees an item only when its thread is EXPLICITLY Open at
+        // read time. One batched read of the page's distinct threads (impersonated, like the rows); a thread the caller
+        // cannot read is absent from the answer and so hides its rows. Internal callers are unchanged.
+        if (isExternal && visible.Count > 0)
+        {
+            var open = await ReadOpenThreadIdsImpersonatedAsync(visible.Select(v => v.Parsed.ThreadId), callerSystemUserId, ct);
+            visible = visible.Where(v => open.Contains(v.Parsed.ThreadId)).ToList();
+        }
 
         var attachmentsByMessage = await LoadAttachmentsAsync(
             visible.Select(v => v.Parsed.MessageId).ToList(), callerSystemUserId, ct);
@@ -1115,6 +1180,29 @@ public sealed class CommunicationThreadReadService
         return systemUserId;
     }
 
+    // ── D7 open-thread gate (task 065 fix round 5, ISS-009) ─────────────────────────────────────────
+
+    /// <summary>The distinct threads' open set read APP-ONLY (the external plane's identity). The seam being absent is a
+    /// refusal, never "show everything".</summary>
+    private Task<HashSet<Guid>> ReadOpenThreadIdsAppOnlyAsync(IEnumerable<Guid> threadIds, CancellationToken ct)
+    {
+        var appOnlyQuery = _appOnlyQuery
+            ?? throw new InvalidOperationException(
+                "IAppOnlyCommunicationQuery is not registered; the external-plane thread privacy read cannot run (fail closed).");
+        return CommunicationOpenThreadGate.ReadOpenThreadIdsAsync(
+            threadIds, (odata, c) => appOnlyQuery.QueryAsync(ThreadSet, odata, c), ct);
+    }
+
+    /// <summary>The distinct threads' open set read IMPERSONATED as the caller (same identity as the impersonated message
+    /// read: a thread the caller cannot read is absent, which hides it).</summary>
+    private Task<HashSet<Guid>> ReadOpenThreadIdsImpersonatedAsync(
+        IEnumerable<Guid> threadIds, Guid callerSystemUserId, CancellationToken ct)
+        => CommunicationOpenThreadGate.ReadOpenThreadIdsAsync(
+            threadIds, (odata, c) => _query.QueryAsync(ThreadSet, odata, callerSystemUserId, c), ct);
+
+    private async Task<bool> IsThreadOpenForExternalAsync(Guid threadId, Guid callerSystemUserId, CancellationToken ct)
+        => (await ReadOpenThreadIdsImpersonatedAsync(new[] { threadId }, callerSystemUserId, ct)).Contains(threadId);
+
     // ── thread label (single bounded impersonated projection) ───────────────────────────────────────
 
     /// <summary>
@@ -1140,13 +1228,50 @@ public sealed class CommunicationThreadReadService
     /// thread they cannot see (ADR-028 / NFR-01). Because it is impersonated, a caller with no read access simply
     /// gets zero rows (no existence leak — NFR-06). Fail-closed: an unresolved caller throws 403 (no app-only
     /// fallback that would widen access).
+    /// <para><b>D9 (task 065 fix round 6, owner decision 2026-10-14):</b> an EXTERNAL caller (a systemuser flagged
+    /// <c>sprk_isexternal</c>) can see, and so rename, pin or deactivate, only a thread that reads EXPLICITLY Open. The
+    /// clause is part of the same one query, so a Private thread answers exactly like a missing one (no existence leak).
+    /// Internal callers are unchanged.</para>
     /// </summary>
     public async Task<bool> CanCallerSeeThreadAsync(Guid threadId, ClaimsPrincipal? caller, CancellationToken ct)
     {
         var callerSystemUserId = await ResolveCallerOrThrowAsync(caller, ct);
-        var odata = $"$select={ThreadPkField}&$filter={ThreadPkField} eq {threadId}&$top=1";
+        var openOnly = await _identityResolver.IsExternalAsync(callerSystemUserId, ct)
+            ? $" and {CommunicationOpenThreadGate.OpenOnlyThreadFilterClause}"
+            : string.Empty;
+        var odata = $"$select={ThreadPkField}&$filter={ThreadPkField} eq {threadId}{openOnly}&$top=1";
         var rows = await _query.QueryAsync(ThreadSet, odata, callerSystemUserId, ct);
         return rows.Count > 0;
+    }
+
+    /// <summary>The record a thread is filed against: its first populated typed regarding lookup (ADR-024 priority).</summary>
+    /// <param name="EntityType">The record's entity logical name; null when the thread has no typed regarding.</param>
+    /// <param name="RecordId">The record's id; null when the thread has no typed regarding.</param>
+    public sealed record ThreadRegardingTarget(string? EntityType, Guid? RecordId);
+
+    /// <summary>
+    /// Task 065 fix round 3 (F3): the typed regarding record of a thread the caller can SEE, from one IMPERSONATED
+    /// projection (the same Dataverse row-level security as <see cref="CanCallerSeeThreadAsync"/>). The send route's
+    /// authorization filter uses it to run AppendTo on the record a send into the thread is filed against (the send
+    /// inherits the thread's regarding). The anchor is chosen in <c>RegardingFieldMap</c> priority order, the same order
+    /// the send reads it in. Returns <c>null</c> when the thread is not visible to the caller or does not exist; an
+    /// unresolved caller throws 403 and a query fault propagates (the caller denies, fail closed).
+    /// </summary>
+    public async Task<ThreadRegardingTarget?> ReadVisibleThreadRegardingAsync(
+        Guid threadId, ClaimsPrincipal? caller, CancellationToken ct)
+    {
+        var callerSystemUserId = await ResolveCallerOrThrowAsync(caller, ct);
+        if (threadId == Guid.Empty)
+            return null;
+
+        var select = string.Join(',', new[] { ThreadPkField }.Concat(ThreadRegardingFields.Select(x => $"_{x.RegardingField}_value")));
+        var odata = $"$select={select}&$filter={ThreadPkField} eq {threadId}&$top=1";
+        var rows = await _query.QueryAsync(ThreadSet, odata, callerSystemUserId, ct);
+        if (rows.Count == 0)
+            return null;
+
+        var (entityType, recordId) = ResolveRegardingFromRow(rows[0]);
+        return new ThreadRegardingTarget(entityType, recordId);
     }
 
     /// <summary>
@@ -1193,7 +1318,12 @@ public sealed class CommunicationThreadReadService
         if (communicationId == Guid.Empty)
             return null;
 
+        // An external caller's answer also depends on the row's thread (D7), so the thread lookup is selected for them
+        // only; an internal caller's query is unchanged.
+        var isExternal = await _identityResolver.IsExternalAsync(callerSystemUserId, ct);
         var columns = new List<string> { PkField, InternalOnlyField, PrivilegeField };
+        if (isExternal)
+            columns.Add(ThreadLookupValue);
         if (additionalColumns is not null)
         {
             columns.AddRange(additionalColumns.Where(c => !string.IsNullOrWhiteSpace(c) && !columns.Contains(c, StringComparer.Ordinal)));
@@ -1205,11 +1335,21 @@ public sealed class CommunicationThreadReadService
             return null;
 
         var row = rows[0];
-        var isExternal = await _identityResolver.IsExternalAsync(callerSystemUserId, ct);
         var context = new CommunicationAccessContext(CallerSystemUserId: callerSystemUserId, IsInternalUser: !isExternal);
         var decision = _accessFilter.EvaluateMessage(context, ParseMessageRow(row).Entity);
+        if (!decision.IsVisible)
+            return null;
 
-        return decision.IsVisible ? row : null;
+        // D7: an external caller sees the row only when its thread is explicitly Open at read time.
+        if (isExternal)
+        {
+            var threadId = TryGuid(row, ThreadLookupValue) ?? Guid.Empty;
+            var open = await ReadOpenThreadIdsImpersonatedAsync(new[] { threadId }, callerSystemUserId, ct);
+            if (!open.Contains(threadId))
+                return null;
+        }
+
+        return row;
     }
 
     // ── attachments (single bulk query per read) ────────────────────────────────────────────────────
@@ -1294,13 +1434,35 @@ public sealed class CommunicationThreadReadService
             Direction = TryInt(row, DirectionField),
             SentBy = TryGuid(row, SentByValue),
             CreatedByContactId = TryGuid(row, CreatedByContactValue),
-            // The systemuser sender's name; else (task 034) the contact author's name — selected only by the external read.
-            SentByName = TryString(row, SentByFormattedValue) ?? TryString(row, CreatedByContactFormattedValue),
+            // The systemuser sender's name; else (task 034) the contact author's name — selected only by the external read;
+            // else (task 062) the creating user's name (an MDA-sent message stamps neither) — ONLY when createdby is a person,
+            // never the BFF's application user; else null.
+            SentByName = TryString(row, SentByFormattedValue)
+                ?? TryString(row, CreatedByContactFormattedValue)
+                ?? (CreatedByIsAPerson(row) ? TryString(row, CreatedByFormattedValue) : null),
             SentAt = TryDateTimeOffset(row, SentAtField),
             CreatedOn = TryDateTimeOffset(row, CreatedOnField),
             InReplyTo = TryString(row, InReplyToField),
             Entity = entity,
         };
+    }
+
+    /// <summary>
+    /// True only when the row's expanded <c>createdby</c> is positively a person: the nested object is present, its
+    /// <c>applicationid</c> is present and JSON null (an application user has one), and its <c>accessmode</c> is a number that
+    /// is not Support User (3) or Non-interactive (4). A missing expand, a missing/odd member, or any other shape is "not a
+    /// person" (fail toward a null sender name — the application user's name is never shown).
+    /// </summary>
+    private static bool CreatedByIsAPerson(Dictionary<string, JsonElement> row)
+    {
+        if (!row.TryGetValue(CreatedByNavigation, out var createdBy) || createdBy.ValueKind != JsonValueKind.Object)
+            return false;
+        if (!createdBy.TryGetProperty(CreatedByApplicationIdColumn, out var applicationId) || applicationId.ValueKind != JsonValueKind.Null)
+            return false;
+        return createdBy.TryGetProperty(CreatedByAccessModeColumn, out var accessMode)
+            && accessMode.ValueKind == JsonValueKind.Number
+            && accessMode.TryGetInt32(out var mode)
+            && mode is not (AccessModeSupportUser or AccessModeNonInteractive);
     }
 
     private sealed class ParsedMessage

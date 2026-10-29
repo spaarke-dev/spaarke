@@ -212,8 +212,17 @@ public class CommunicationPrivilegePrivacySeamTests
               .ReturnsAsync(new[] { RestrictedRow(internalOnlyId), RegularRow(regularId) });
         _query.Setup(q => q.QueryAsync(AttachmentSet, It.IsAny<string>(), UnauthorizedCallerId, It.IsAny<CancellationToken>()))
               .ReturnsAsync(Array.Empty<Dictionary<string, JsonElement>>());
+        // Owner decision D7: an external caller needs the thread to read explicitly Open (100000000) as well; this case is about the flag.
         _query.Setup(q => q.QueryAsync(ThreadSet, It.IsAny<string>(), UnauthorizedCallerId, It.IsAny<CancellationToken>()))
-              .ReturnsAsync(new[] { new Dictionary<string, JsonElement> { ["sprk_name"] = El("Acme v. Roe") } });
+              .ReturnsAsync(new[]
+              {
+                  new Dictionary<string, JsonElement>
+                  {
+                      ["sprk_name"] = El("Acme v. Roe"),
+                      ["sprk_communicationthreadid"] = El(ThreadId.ToString()),
+                      ["sprk_privacystate"] = El(100000000),
+                  },
+              });
 
         var result = await Sut().ReadThreadAsync(ThreadId, Caller(), since: null, top: null, CancellationToken.None);
 
@@ -237,6 +246,16 @@ public class CommunicationPrivilegePrivacySeamTests
 
         _query.Setup(q => q.QueryAsync(CommunicationSet, It.IsAny<string>(), UnauthorizedCallerId, It.IsAny<CancellationToken>()))
               .ReturnsAsync(new[] { RestrictedRow(Guid.NewGuid()), RegularRow(Guid.NewGuid()) });
+        // Owner decision D7: the thread must read explicitly Open for an external caller; this case is about the flag.
+        _query.Setup(q => q.QueryAsync(ThreadSet, It.IsAny<string>(), UnauthorizedCallerId, It.IsAny<CancellationToken>()))
+              .ReturnsAsync(new[]
+              {
+                  new Dictionary<string, JsonElement>
+                  {
+                      ["sprk_communicationthreadid"] = El(ThreadId.ToString()),
+                      ["sprk_privacystate"] = El(100000000),
+                  },
+              });
 
         var result = await Sut().GetUnreadCountAsync(ThreadId, Caller(), since: null, CancellationToken.None);
 

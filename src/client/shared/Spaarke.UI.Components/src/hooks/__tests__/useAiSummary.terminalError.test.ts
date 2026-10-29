@@ -124,3 +124,43 @@ describe('useAiSummary - terminal error event', () => {
     expect(result.current.documents[0].error).toBe('Document has no extractable text.');
   });
 });
+
+describe('useAiSummary - progress chunks', () => {
+  const originalFetch = global.fetch;
+  let fetchMock: jest.Mock;
+
+  beforeEach(() => {
+    jest.spyOn(console, 'log').mockImplementation(() => undefined);
+    fetchMock = jest.fn();
+    (global as unknown as { fetch: typeof fetch }).fetch = fetchMock as unknown as typeof fetch;
+  });
+
+  afterEach(() => {
+    (global as unknown as { fetch: typeof fetch }).fetch = originalFetch;
+    jest.restoreAllMocks();
+  });
+
+  it('keeps progress status lines out of the summary text', async () => {
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse({ playbookId: 'pb-1' }))
+      .mockResolvedValueOnce(
+        sseResponse([
+          data({ type: 'progress', content: 'Extracting document text…', done: false, step: 'extracting_text' }),
+          data({ type: 'chunk', content: 'The summary.', done: false }),
+          data({ type: 'progress', content: 'Updating document record…', done: false, step: 'updating_record' }),
+          data({ type: 'done', content: null, done: true, analysisId: 'a-1' }),
+        ])
+      );
+
+    const { result } = renderHook(() => useAiSummary({ apiBaseUrl: BASE_URL, autoStart: false }));
+    act(() => {
+      result.current.addDocuments([DOC]);
+    });
+    act(() => {
+      result.current.startAll();
+    });
+
+    await waitFor(() => expect(result.current.documents[0]?.status).toBe('complete'));
+    expect(result.current.documents[0].summary).toBe('The summary.');
+  });
+});

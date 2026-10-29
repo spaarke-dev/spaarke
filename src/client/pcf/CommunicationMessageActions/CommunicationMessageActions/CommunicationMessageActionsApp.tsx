@@ -37,7 +37,7 @@ import {
 } from '@spaarke/ui-components';
 import { IInputs } from './generated/ManifestTypes';
 import { initializeAuth, resolveDataverseUrl } from './authInit';
-import { resolveMessageTarget, type IResolvedMessageTarget } from './hostContext';
+import { resolveMessageTarget, resolveInternalOnlySeed, type IResolvedMessageTarget } from './hostContext';
 import { getMsalClientId, getBffApiAppId, getApiBaseUrl, getTenantId } from '../../shared/utils/environmentVariables';
 
 // React 16 type seam: the shared lib's .d.ts is emitted against React 19 types, whose FC return
@@ -92,6 +92,19 @@ function getHostEntityName(): string | undefined {
   return undefined;
 }
 
+function getHostThreadPrivacyState(): unknown {
+  // The thread form's own `sprk_privacystate` value - read from the form that is already loaded, never from
+  // Dataverse (task 068). `undefined` when the form does not carry the field.
+  // `any` view: typed XrmContext does not declare the members used below.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const xrm = getXrm('page') as any;
+  try {
+    return xrm?.Page?.getAttribute?.('sprk_privacystate')?.getValue?.() ?? undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 async function refreshHostForm(): Promise<void> {
   // Shared cross-frame walker (task 081 / C-8).
   // `any` view: typed XrmContext does not declare the members used below.
@@ -142,6 +155,9 @@ export const CommunicationMessageActionsApp: React.FC<ICommunicationMessageActio
   const [communicationType, setCommunicationType] = React.useState<number | null>(null);
   const [threadLookupId, setThreadLookupId] = React.useState<string | null>(null);
   const [fromEmail, setFromEmail] = React.useState<string | undefined>(undefined);
+  // The source message's `sprk_isinternalonly` (respond placement) - selected by the SAME record read as the
+  // channel + thread lookup above, not a new read. Starts the "Internal Only" switch on (task 068).
+  const [sourceIsInternalOnly, setSourceIsInternalOnly] = React.useState(false);
 
   // Bootstrap @spaarke/auth once (identical pattern to CommunicationActions).
   React.useEffect(() => {
@@ -184,7 +200,7 @@ export const CommunicationMessageActionsApp: React.FC<ICommunicationMessageActio
         const rec = await context.webAPI.retrieveRecord(
           SPRK_COMMUNICATION,
           hostRecordId,
-          '?$select=sprk_communicationtype,sprk_from,_sprk_communicationthread_value'
+          '?$select=sprk_communicationtype,sprk_from,sprk_isinternalonly,_sprk_communicationthread_value'
         );
         if (cancelled) return;
         // context.webAPI.retrieveRecord returns option-set columns as a raw number (no {Value} wrapper —
@@ -194,6 +210,7 @@ export const CommunicationMessageActionsApp: React.FC<ICommunicationMessageActio
         setCommunicationType(typeValue);
         setThreadLookupId((rec._sprk_communicationthread_value as string | undefined) ?? null);
         setFromEmail((rec.sprk_from as string | undefined) ?? undefined);
+        setSourceIsInternalOnly(rec.sprk_isinternalonly === true);
       } catch (err) {
         console.warn('[CommunicationMessageActions] record retrieve failed:', err);
       } finally {
@@ -210,6 +227,22 @@ export const CommunicationMessageActionsApp: React.FC<ICommunicationMessageActio
     [hostEntityName, hostRecordId, communicationType, threadLookupId]
   );
 
+  // "Internal Only" switch seed (task 068): thread placement -> locked on when the thread form says Private;
+  // respond placement -> starts on when the source message is internal-only. Nothing else is read.
+  const internalOnlySeed = React.useMemo(
+    () =>
+      resolveInternalOnlySeed(
+        target.mode,
+        sourceIsInternalOnly,
+        target.mode === 'thread' ? getHostThreadPrivacyState() : undefined
+      ),
+    [target.mode, sourceIsInternalOnly]
+  );
+  const composePrefill = React.useMemo(
+    () => (internalOnlySeed.startInternalOnly ? { isInternalOnly: true } : undefined),
+    [internalOnlySeed.startInternalOnly]
+  );
+
   // Errors are surfaced by TimelineComposeBox's OWN inline error text (it catches whatever this
   // callback rethrows) — mirrors CommunicationTimeline.tsx's own handleSend (task 060), which
   // rethrows for the same reason rather than duplicating a second error banner here.
@@ -224,6 +257,7 @@ export const CommunicationMessageActionsApp: React.FC<ICommunicationMessageActio
             body: payload.body,
             bodyFormat: payload.bodyFormat === 'PlainText' ? 'text' : 'html',
             attachmentDocumentIds: payload.attachmentDocumentIds,
+            isInternalOnly: payload.isInternalOnly,
             communicationType: 'message',
             threadId: target.threadId,
             inReplyToMessageId: target.inReplyToMessageId,
@@ -289,6 +323,8 @@ export const CommunicationMessageActionsApp: React.FC<ICommunicationMessageActio
 
       <TimelineComposeBoxR16
         defaultTo={fromEmail ? [fromEmail] : undefined}
+        prefill={composePrefill}
+        threadIsPrivate={internalOnlySeed.threadIsPrivate}
         isSending={isSending}
         onSend={handleSend}
         disabled={readOnly}

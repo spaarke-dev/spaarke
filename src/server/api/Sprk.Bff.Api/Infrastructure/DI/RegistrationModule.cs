@@ -1,4 +1,6 @@
 using System.ComponentModel.DataAnnotations;
+using Microsoft.Extensions.DependencyInjection.Extensions;
+using Spaarke.Scheduling;
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Services.Registration;
 using Sprk.Bff.Api.Services.Registration.CommunicationProvisioning;
@@ -21,8 +23,8 @@ public static class RegistrationModule
     /// <remarks>
     /// Task 261 (G31): this is what keeps directory WRITE roles (<c>User.ReadWrite.All</c>, <c>GroupMember.ReadWrite.All</c>,
     /// <c>Directory.ReadWrite.All</c>) off stamp identities — the feature is the BFF's only app-only caller of
-    /// <c>/users</c> and <c>/groups</c>. It also stops a stamp from failing at start: <see cref="DemoExpirationService"/>
-    /// (a hosted service) reads <c>IOptions&lt;DemoProvisioningOptions&gt;.Value</c> in its constructor, which throws
+    /// <c>/users</c> and <c>/groups</c>. It also stops a stamp from failing at start: <see cref="DemoExpirationJob"/>
+    /// (a scheduled job the registry builds at host start) reads <c>IOptions&lt;DemoProvisioningOptions&gt;.Value</c> in its constructor, which throws
     /// unless every <c>[Required]</c> key is present (<c>AccountDomain</c>, <c>DemoUsersGroupId</c>, the license SKUs,
     /// at least one <c>AdminNotificationEmails</c>). The gate therefore requires the whole set — the section bound and
     /// validated with DataAnnotations, license SKUs included — not one key; a PARTIAL set disables the feature (fails
@@ -63,6 +65,7 @@ public static class RegistrationModule
         // BaseAddress/default headers are set per-instance in the service ctor because the
         // Dataverse URL is resolved from runtime config, not known at registration time.
         services.AddHttpClient(RegistrationDataverseService.HttpClientName);
+        services.AddHttpClient(DataverseEnvironmentService.HttpClientName);
 
         // ADR-010: Concrete registrations (no interfaces). These four are shared with other modules
         // (external access, communication, identity-link reconciliation) and are registered everywhere.
@@ -79,8 +82,11 @@ public static class RegistrationModule
             services.AddSingleton<DemoProvisioningService>();
             services.AddSingleton<EmailDomainValidator>();
 
-            // Hand-rolled timer BackgroundService (existing debt — migrates to an IScheduledJob when next touched, ADR-052 §1)
-            services.AddHostedService<DemoExpirationService>();
+            // Demo expiry: daily at midnight UTC on the in-process Spaarke.Scheduling host (ADR-036 A1 rule 6), one dispatch
+            // per tick across instances. Migrated from a hand-rolled timer BackgroundService by #1363 (ADR-052 §1). Its
+            // dependencies are the ones above plus IIdempotencyService (WorkersModule, unconditional) and TimeProvider.
+            services.TryAddSingleton(TimeProvider.System);
+            services.AddScheduledJob<DemoExpirationJob>(DemoExpirationJob.DefaultCronSchedule);
         }
 
         // ── ACS + Event Grid per-boundary provisioning (messaging-communication-app-r1, task 012, FR-18) ──

@@ -17,6 +17,7 @@ using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using Moq;
 using Spaarke.Dataverse;
+using Sprk.Bff.Api.Infrastructure.Authentication;
 using Sprk.Bff.Api.Infrastructure.Cache;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Services.Ai.Membership;
@@ -110,8 +111,10 @@ public class WorkforcePrincipalResolverTests
     [Fact]
     public async Task ResolveAsync_TheBindingReceivesTheEmailFromTheToken_PreferredUsernameIncluded()
     {
-        // The email claim chain is threaded from the token to the first-sign-in bind.
+        // The email claim chain is threaded from the token to the first-sign-in bind (which needs the invite stamp for
+        // that email, naming the token's tenant).
         _store.AddContact(TestContactId, email: TestEmail);
+        _store.StampInvite(TestContactId, TestEmail, CustomerTenant);
         var dataverse = new Mock<IDataverseService>();
         SetupSystemUserLookup(dataverse, TestOid, systemUserId: null);
 
@@ -160,7 +163,8 @@ public class WorkforcePrincipalResolverTests
     }
 
     // ─────────────────────────────────────────────────────────────────────
-    // R3 FR-15 (#1563) — registered workforce-contact guest. Stamp-shaped configuration (NFR-07, never dev's):
+    // R3 FR-15 (#1563) — the customer-tenant guest, refused "use home sign-in" since #2128 (owner 2026-10-20).
+    // Stamp-shaped configuration (NFR-07, never dev's):
     // CustomerTenantIds = { CustomerTenant }, stamp tenant (AzureAd:TenantId) = SpaarkeTenant, which the list
     // does NOT hold. Live guest token shape (2026-10-08): tid = Spaarke, acct = 1, idp = home-tenant issuer.
     // ─────────────────────────────────────────────────────────────────────
@@ -176,46 +180,48 @@ public class WorkforcePrincipalResolverTests
     [InlineData("https://sts.windows.net/11111111-aaaa-4aaa-8aaa-111111111111/")]          // v1 issuer (live shape)
     [InlineData("https://login.microsoftonline.com/11111111-aaaa-4aaa-8aaa-111111111111/v2.0")] // v2 issuer
     [InlineData("11111111-aaaa-4aaa-8aaa-111111111111")]                                     // bare tenant id
-    public async Task ResolveAsync_RegisteredGuestFirstSignIn_IsAMemberAndCreatesExactlyOneContactKeyedByTheGuestOid(
+    public async Task ResolveAsync_CustomerTenantGuestFirstSignIn_IsRefusedUseHomeSignIn_AndNothingIsReadOrCreated(
         string idp)
     {
+        // #2128 (inverts FR-15's "creates exactly one contact keyed by the guest oid"): the guest is pointed at home
+        // sign-in. No contact is created; the binder reads nothing (no oid lookup, no email lookup).
         var result = await ResolveGuestAsync(SpaarkeTenant, idp);
 
-        result.IsResolved.Should().BeTrue(result.DenyCode);
-        result.Principal!.Kind.Should().Be(WorkforcePrincipalKind.ContactOnly);
-        var created = _store.Contacts.Values.Should().ContainSingle().Subject;
-        result.Principal.ContactId.Should().Be(created.Id);
-        created.Oid.Should().Be(GuestOid.ToString("D"), "the contact is keyed by the guest oid, never client input");
-        created.Plane.Should().Be((int)IdentityPlaneMarker.Workforce);
-        created.Email.Should().Be(GuestEmail);
-        _store.Writes.Should().ContainSingle(w => w.Op == "create");
+        AssertDeniedWithNoWrites(result, "sdap.access.deny.workforce_guest_use_home_signin");
+        _store.Reads.Should().BeEmpty("the refusal comes before every contact read");
     }
 
     [Fact]
-    public async Task ResolveAsync_RegisteredGuestFirstSignIn_EmailBindsTheOneUnboundContactAndCreatesNone()
+    public async Task ResolveAsync_CustomerTenantGuestWhoseEmailMatchesAContact_IsRefused_AndTheContactStaysUnbound()
     {
+        // #2128 (inverts FR-15's "email-binds the one unbound contact").
         _store.AddContact(TestContactId, email: GuestEmail);
 
         var result = await ResolveGuestAsync(SpaarkeTenant, V1Issuer(CustomerTenant));
 
-        result.Principal!.ContactId.Should().Be(TestContactId);
+        result.IsResolved.Should().BeFalse();
+        result.DenyCode.Should().Be(WorkforceMembershipTest.DenyGuestUseHomeSignin);
         _store.Contacts.Should().ContainSingle();
-        _store.Contacts[TestContactId].Oid.Should().Be(GuestOid.ToString("D"));
-        _store.Writes.Should().NotContain(w => w.Op == "create");
+        _store.Contacts[TestContactId].Oid.Should().BeNull("a refused guest is never email-bound");
+        _store.Writes.Should().BeEmpty();
+        _store.Reads.Should().BeEmpty();
     }
 
     [Fact]
-    public async Task ResolveAsync_RegisteredGuestSecondSignIn_ResolvesTheSameContactAndCreatesNone()
+    public async Task ResolveAsync_ContactAlreadyBoundToTheCustomerTenantGuestOid_IsRefused_NotResolved()
     {
-        var first = await ResolveGuestAsync(SpaarkeTenant, V1Issuer(CustomerTenant));
-        var writesAfterFirst = _store.Writes.Count;
+        // #2128 (inverts FR-15's "second sign-in resolves the same contact"): a binding the retired path wrote (dev had
+        // three on 2026-10-20) grants nothing any more. The contact is left as it is: nothing is cleared or flagged.
+        _store.AddContact(TestContactId, email: GuestEmail, oid: GuestOid.ToString("D"), plane: IdentityPlaneMarker.Workforce);
 
-        var second = await ResolveGuestAsync(SpaarkeTenant, V1Issuer(CustomerTenant));
+        var result = await ResolveGuestAsync(SpaarkeTenant, V1Issuer(CustomerTenant));
 
-        second.IsResolved.Should().BeTrue(second.DenyCode);
-        second.Principal!.ContactId.Should().Be(first.Principal!.ContactId);
-        _store.Contacts.Should().ContainSingle("a second sign-in never creates a second contact");
-        _store.Writes.Should().HaveCount(writesAfterFirst, "the second sign-in resolves by oid and writes nothing");
+        result.IsResolved.Should().BeFalse();
+        result.Principal.Should().BeNull();
+        result.DenyCode.Should().Be(WorkforceMembershipTest.DenyGuestUseHomeSignin);
+        _store.Contacts[TestContactId].Oid.Should().Be(GuestOid.ToString("D"), "the stored binding is not modified");
+        _store.Writes.Should().BeEmpty();
+        _store.Reads.Should().BeEmpty("the oid lookup that would resolve the binding never runs");
     }
 
     [Theory]
@@ -272,9 +278,10 @@ public class WorkforcePrincipalResolverTests
     }
 
     [Fact]
-    public async Task ResolveAsync_RegisteredGuestUnderTheMappedIdpClaimName_IsAMember()
+    public async Task ResolveAsync_CustomerTenantGuestUnderTheMappedIdpClaimName_IsRefusedUseHomeSignIn()
     {
-        // MapInboundClaims=true renames idp; the claim is read under both names, like tid.
+        // MapInboundClaims=true renames idp; the claim is read under both names, like tid — so the mapped form is the
+        // same customer-tenant guest and gets the same #2128 refusal (was: admitted, one contact created).
         var claims = new List<Claim>
         {
             new("scp", "user_impersonation"), new("acct", "1"), new("sub", "pairwise"),
@@ -284,8 +291,7 @@ public class WorkforcePrincipalResolverTests
 
         var result = await ResolveAsync(new ClaimsPrincipal(new ClaimsIdentity(claims, "TestWorkforce")));
 
-        result.IsResolved.Should().BeTrue(result.DenyCode);
-        _store.Contacts.Should().ContainSingle();
+        AssertDeniedWithNoWrites(result, WorkforceMembershipTest.DenyGuestUseHomeSignin);
     }
 
     [Theory]
@@ -347,23 +353,17 @@ public class WorkforcePrincipalResolverTests
     [Theory]
     [InlineData("11111111-aaaa-4aaa-8aaa-111111111111", true)]
     [InlineData("77777777-cccc-4ccc-8ccc-777777777777", false)]
-    public async Task ResolveAsync_ADeploymentListingItsOwnTenant_AdmitsOnlyAGuestWithAListedHomeTenant(
-        string homeTenant, bool admitted)
+    public async Task ResolveAsync_ADeploymentListingItsOwnTenant_RefusesAGuestWithAListedHomeTenantUseHomeSignIn(
+        string homeTenant, bool listedHome)
     {
         // Covers the acct switch's guest arm, reached only when the stamp tenant is ON the list (dev's shape,
-        // NFR-07). A guest with an unlisted home tenant keeps today's workforce_guest code there.
+        // NFR-07). #2128: a listed home tenant is the customer-tenant guest — refused, pointed at home sign-in (was:
+        // admitted). A guest with an unlisted home tenant keeps today's workforce_guest code there.
         var result = await ResolveGuestAsync(SpaarkeTenant, V1Issuer(Guid.Parse(homeTenant)),
             listedTenants: new[] { CustomerTenant, SpaarkeTenant });
 
-        if (admitted)
-        {
-            result.IsResolved.Should().BeTrue(result.DenyCode);
-            _store.Contacts.Should().ContainSingle();
-        }
-        else
-        {
-            AssertDeniedWithNoWrites(result, WorkforceMembershipTest.DenyGuest);
-        }
+        AssertDeniedWithNoWrites(
+            result, listedHome ? WorkforceMembershipTest.DenyGuestUseHomeSignin : WorkforceMembershipTest.DenyGuest);
     }
 
     // ─────────────────────────────────────────────────────────────────────
@@ -424,6 +424,373 @@ public class WorkforcePrincipalResolverTests
         _store.Reads.Should().BeEmpty("the binder is never called for a disabled systemuser");
         _store.Writes.Should().BeEmpty();
         _store.Contacts.Should().BeEmpty();
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // R3 task 046 — ADR-028 A9 home principals (authenticated by the WorkforceHome scheme). Design §3/§4/§5:
+    // missing oid/tid → 401; stored link (secured pair) → systemuser; WorkforceHome contact by (tid, oid);
+    // else 403 registration_required. Nothing is created, updated or bound; the oid → systemuser lookup and the
+    // binder's workforce path never run (finding (d)).
+    // ─────────────────────────────────────────────────────────────────────
+
+    private static readonly Guid HomeTenant = Guid.Parse("99999999-eeee-4eee-8eee-999999999999");
+    private static readonly Guid OtherHomeTenant = Guid.Parse("12121212-ffff-4fff-8fff-121212121212");
+    private static readonly Guid HomeOid = Guid.Parse("13131313-1313-4313-8313-131313131313");
+
+    /// <summary>The A9 home-token shape: customer tid, acct = 0, a user token, authenticated by WorkforceHome.</summary>
+    private static ClaimsPrincipal HomeUser(Guid? oid = null, Guid? tid = null, bool omitOid = false, bool omitTid = false)
+        => HomePrincipal(BuildUser(omitOid ? null : oid ?? HomeOid, omitTid ? null : tid ?? HomeTenant, email: TestEmail));
+
+    private InMemoryContactIdentityStore.Contact AddHomeContact(
+        Guid id, Guid? tid, Guid oid, int? plane = ContactBindingDecision.WorkforceHomePlaneValue, int stateCode = 0)
+    {
+        var c = _store.AddContact(id, oid: oid.ToString("D"), stateCode: stateCode);
+        c.Plane = plane;
+        c.ExternalTenantId = tid?.ToString("D");
+        return c;
+    }
+
+    private InMemoryContactIdentityStore.SystemUser AddLinkedSystemUser(
+        Guid id, Guid? tid, Guid? oid, bool disabled = false, Guid? aadOid = null)
+    {
+        var u = _store.AddSystemUser(id, aadOid ?? Guid.NewGuid(), "licensed@customer.example", disabled: disabled);
+        u.HomeTenantId = tid?.ToString("D");
+        u.HomeObjectId = oid?.ToString("D");
+        u.HomeTenantIdKey = u.HomeTenantId;
+        u.HomeObjectIdKey = u.HomeObjectId;
+        return u;
+    }
+
+    private (WorkforcePrincipalResolver Sut, Mock<IDataverseService> Dataverse, Mock<IIdentityNormalizationService> Identity)
+        HomeSut(Guid? derivedContact = null)
+    {
+        var dataverse = new Mock<IDataverseService>();
+        var identity = new Mock<IIdentityNormalizationService>();
+        identity
+            .Setup(x => x.ResolveAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Guid suid, CancellationToken _) => new PersonIdentity(suid, ContactId: derivedContact));
+        return (CreateSut(dataverse.Object, identity.Object), dataverse, identity);
+    }
+
+    /// <summary>AC "no Dataverse write occurs during resolution": nothing written, created, bound, linked or invalidated.</summary>
+    private void AssertNothingWritten(Mock<IDataverseService> dataverse, Mock<IIdentityNormalizationService> identity)
+    {
+        _store.Writes.Should().BeEmpty("nothing is created, updated or bound at sign-in (047/048 do that)");
+        dataverse.Invocations.Should().BeEmpty(
+            "finding (d): the oid → systemuser lookup (ResolveSystemUserAsync) never runs for a home principal");
+        identity.Verify(x => x.InvalidateAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
+        _store.Reads.Should().NotContain(new[] { "oid", "email", "references", "intent", "probe", "systemuser" },
+            "the binder's workforce path (bind, create, inline link) is never reached");
+    }
+
+    [Fact]
+    public async Task Home_TwoWorkforceHomeContactsWithTheSameTidAndOid_AreDeniedAmbiguous()
+    {
+        // UAC review F3: two ACTIVE WorkforceHome contacts for one (tid, oid) must never resolve to either of them.
+        AddHomeContact(TestContactId, HomeTenant, HomeOid);
+        AddHomeContact(Guid.Parse("55555555-5555-4555-8555-555555555555"), HomeTenant, HomeOid);
+        var (sut, dataverse, identity) = HomeSut();
+
+        var result = await sut.ResolveAsync(HomeUser(), CancellationToken.None);
+
+        result.IsResolved.Should().BeFalse();
+        result.Principal.Should().BeNull();
+        result.DenyCode.Should().Be(ContactBindingDecision.DenyContactOidAmbiguous);
+        AssertNothingWritten(dataverse, identity);
+    }
+
+    [Theory]
+    [InlineData("no-oid")]
+    [InlineData("no-tid")]
+    [InlineData("tid-not-a-guid")]
+    public async Task Home_MissingOidOrTid_Is401MissingIdentityClaims_BeforeAnyLookup(string shape)
+    {
+        var (sut, dataverse, identity) = HomeSut();
+        var user = shape switch
+        {
+            "no-oid" => HomeUser(omitOid: true),
+            "no-tid" => HomeUser(omitTid: true),
+            _ => HomePrincipal(new ClaimsPrincipal(new ClaimsIdentity(
+                BuildUser(HomeOid, null, email: TestEmail).Claims.Append(new Claim("tid", "not-a-tenant")), "x"))),
+        };
+
+        var result = await sut.ResolveAsync(user, CancellationToken.None);
+
+        result.IsResolved.Should().BeFalse();
+        result.DenyReason.Should().Be(WorkforceDenyReason.MissingIdentityClaims);
+        result.DenyCode.Should().Be(WorkforcePrincipalResolver.DenyMissingIdentityClaims);
+        _store.Reads.Should().BeEmpty();
+        AssertNothingWritten(dataverse, identity);
+    }
+
+    [Fact]
+    public async Task Home_StoredLinkToAnEnabledSystemUser_ResolvesThatSystemUser_WithItsDerivedContact()
+    {
+        AddLinkedSystemUser(TestSystemUserId, HomeTenant, HomeOid);
+        var (sut, dataverse, identity) = HomeSut(derivedContact: TestContactId);
+
+        var result = await sut.ResolveAsync(HomeUser(), CancellationToken.None);
+
+        result.IsResolved.Should().BeTrue(result.DenyCode);
+        result.Principal!.Kind.Should().Be(WorkforcePrincipalKind.SystemUser);
+        result.Principal.SystemUserId.Should().Be(TestSystemUserId);
+        result.Principal.ContactId.Should().Be(TestContactId);
+        result.Principal.Oid.Should().Be(HomeOid.ToString("D"));
+        result.Principal.TenantId.Should().Be(HomeTenant.ToString("D"));
+        _store.Reads.Should().Equal(new[] { "home-link" }, "a linked caller never reaches the contact lookup");
+        AssertNothingWritten(dataverse, identity);
+    }
+
+    [Fact]
+    public async Task Home_StoredLinkToADisabledSystemUser_IsDeniedSystemUserDisabled_AndNeverReachesTheContactLookup()
+    {
+        AddLinkedSystemUser(TestSystemUserId, HomeTenant, HomeOid, disabled: true);
+        AddHomeContact(TestContactId, HomeTenant, HomeOid);
+        var (sut, dataverse, identity) = HomeSut();
+
+        var result = await sut.ResolveAsync(HomeUser(), CancellationToken.None);
+
+        result.IsResolved.Should().BeFalse();
+        result.DenyReason.Should().Be(WorkforceDenyReason.PrincipalNotResolved);
+        result.DenyCode.Should().Be(WorkforcePrincipalResolver.DenySystemUserDisabled);
+        _store.Reads.Should().NotContain("home-contact");
+        AssertNothingWritten(dataverse, identity);
+    }
+
+    [Fact]
+    public async Task Home_WorkforceHomeContactWithTheSameTidAndOid_ResolvesThatContact()
+    {
+        AddHomeContact(TestContactId, HomeTenant, HomeOid);
+        var (sut, dataverse, identity) = HomeSut();
+
+        var result = await sut.ResolveAsync(HomeUser(), CancellationToken.None);
+
+        result.IsResolved.Should().BeTrue(result.DenyCode);
+        result.Principal!.Kind.Should().Be(WorkforcePrincipalKind.ContactOnly);
+        result.Principal.ContactId.Should().Be(TestContactId);
+        result.Principal.SystemUserId.Should().BeNull();
+        result.Principal.Oid.Should().Be(HomeOid.ToString("D"));
+        result.Principal.TenantId.Should().Be(HomeTenant.ToString("D"));
+        _store.Reads.Should().Equal("home-link", "home-contact");
+        AssertNothingWritten(dataverse, identity);
+    }
+
+    /// <summary>
+    /// The WorkforceHome contact is resolved by (tid, oid) alone: the invite stamp is neither read nor needed, so a contact
+    /// with no stamp, or a stamp for another address and tenant, resolves the same.
+    /// </summary>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Home_ResolvesByTidAndOid_TheInviteStampIsNeverConsulted(bool foreignStamp)
+    {
+        AddHomeContact(TestContactId, HomeTenant, HomeOid);
+        if (foreignStamp)
+        {
+            _store.StampInvite(TestContactId, "someone.else@elsewhere.example", OtherHomeTenant);
+        }
+
+        var (sut, dataverse, identity) = HomeSut();
+
+        var result = await sut.ResolveAsync(HomeUser(), CancellationToken.None);
+
+        result.IsResolved.Should().BeTrue(result.DenyCode);
+        result.Principal!.ContactId.Should().Be(TestContactId);
+        _store.Reads.Should().Equal("home-link", "home-contact");
+        AssertNothingWritten(dataverse, identity);
+    }
+
+    [Fact]
+    public async Task Home_ClaimsShapedLikeACustomerTenantGuest_StillResolveTheWorkforceHomeContact_NeverTheGuestRefusal()
+    {
+        // #2128 pin: the WorkforceHome guard runs first, so the binder's guest refusal can never reach an A9 principal,
+        // whatever acct / idp claims it carries.
+        AddHomeContact(TestContactId, HomeTenant, HomeOid);
+        var (sut, dataverse, identity) = HomeSut();
+        var claims = BuildUser(HomeOid, HomeTenant, email: TestEmail, acct: "1", idp: V1Issuer(CustomerTenant)).Claims;
+
+        var result = await sut.ResolveAsync(HomePrincipal(new ClaimsPrincipal(new ClaimsIdentity(claims, "x"))),
+            CancellationToken.None);
+
+        result.IsResolved.Should().BeTrue(result.DenyCode);
+        result.Principal!.ContactId.Should().Be(TestContactId);
+        _store.Reads.Should().Equal("home-link", "home-contact");
+        AssertNothingWritten(dataverse, identity);
+    }
+
+    [Theory]
+    [InlineData("other-tenant")]      // same oid, a WorkforceHome contact of ANOTHER customer directory
+    [InlineData("no-tenant")]         // same oid, WorkforceHome plane, no sprk_externaltenantid
+    [InlineData("plane-external")]    // same oid and tid, but a CIAM partner contact
+    [InlineData("plane-workforce")]   // same oid and tid, but the Spaarke-tenant workforce plane (A8)
+    [InlineData("no-plane")]          // same oid and tid, a pre-141 binding with no plane marker
+    [InlineData("nothing")]           // no contact and no link at all
+    public async Task Home_NoMatchingContact_IsRegistrationRequired_AndNothingIsCreated(string seed)
+    {
+        switch (seed)
+        {
+            case "other-tenant": AddHomeContact(TestContactId, OtherHomeTenant, HomeOid); break;
+            case "no-tenant": AddHomeContact(TestContactId, null, HomeOid); break;
+            case "plane-external": AddHomeContact(TestContactId, HomeTenant, HomeOid, (int)IdentityPlaneMarker.External); break;
+            case "plane-workforce": AddHomeContact(TestContactId, HomeTenant, HomeOid, (int)IdentityPlaneMarker.Workforce); break;
+            case "no-plane": AddHomeContact(TestContactId, HomeTenant, HomeOid, plane: null); break;
+        }
+
+        var (sut, dataverse, identity) = HomeSut();
+
+        var result = await sut.ResolveAsync(HomeUser(), CancellationToken.None);
+
+        result.IsResolved.Should().BeFalse();
+        result.Principal.Should().BeNull();
+        result.DenyReason.Should().Be(WorkforceDenyReason.PrincipalNotResolved);
+        result.DenyCode.Should().Be(WorkforcePrincipalResolver.DenyRegistrationRequired)
+            .And.Be("sdap.access.registration_required");
+        AssertNothingWritten(dataverse, identity);
+        _store.Contacts.Should().HaveCount(seed == "nothing" ? 0 : 1, "no contact is created at sign-in");
+    }
+
+    [Fact]
+    public async Task Home_LinkedInAnotherDirectory_IsNotThisCallersLink_IsRegistrationRequired()
+    {
+        // The same home oid stored with ANOTHER directory's tid: the pair is (tid, oid), never the oid alone.
+        AddLinkedSystemUser(TestSystemUserId, OtherHomeTenant, HomeOid);
+        var (sut, dataverse, identity) = HomeSut();
+
+        var result = await sut.ResolveAsync(HomeUser(), CancellationToken.None);
+
+        result.DenyCode.Should().Be(WorkforcePrincipalResolver.DenyRegistrationRequired);
+        AssertNothingWritten(dataverse, identity);
+    }
+
+    [Fact]
+    public async Task Home_OidEqualToASystemUsersAadObjectId_WithNoStoredLink_IsRegistrationRequired_NeverThatSystemUser()
+    {
+        // Finding (d): a systemuser whose azureactivedirectoryobjectid IS the home oid, with no stored link. The Spaarke-tenant
+        // lookup would resolve it; a home principal must never reach that lookup.
+        _store.AddSystemUser(TestSystemUserId, HomeOid, "someone@spaarke.example");
+        var (sut, dataverse, identity) = HomeSut(derivedContact: TestContactId);
+        SetupSystemUserLookup(dataverse, HomeOid, TestSystemUserId);
+
+        var result = await sut.ResolveAsync(HomeUser(), CancellationToken.None);
+
+        result.IsResolved.Should().BeFalse("a home oid is never compared with systemuser.azureactivedirectoryobjectid");
+        result.Principal.Should().BeNull();
+        result.DenyCode.Should().Be(WorkforcePrincipalResolver.DenyRegistrationRequired);
+        AssertNothingWritten(dataverse, identity);
+    }
+
+    [Fact]
+    public async Task Home_AKeyMirrorEdit_NeverRedirectsASignIn()
+    {
+        // Design §5: someone with systemuser Write sets ANOTHER user's unsecured mirrors to this caller's (tid, oid). The
+        // secured pair is untouched (null), so that user is not this caller's link.
+        var u = AddLinkedSystemUser(TestSystemUserId, tid: null, oid: null);
+        u.HomeTenantIdKey = HomeTenant.ToString("D");
+        u.HomeObjectIdKey = HomeOid.ToString("D");
+        var (sut, dataverse, identity) = HomeSut(derivedContact: TestContactId);
+
+        var result = await sut.ResolveAsync(HomeUser(), CancellationToken.None);
+
+        result.IsResolved.Should().BeFalse();
+        result.DenyCode.Should().Be(WorkforcePrincipalResolver.DenyRegistrationRequired);
+        AssertNothingWritten(dataverse, identity);
+    }
+
+    // Beyond the named cases (one-line justifications in notes/task-046-notes.md): the fail-closed arms of the new code.
+
+    [Theory]
+    [InlineData("link", "Failed")]
+    [InlineData("link", "ColumnMissing")]
+    [InlineData("contact", "Failed")]
+    [InlineData("contact", "ColumnMissing")]
+    public async Task Home_AReadThatFails_Denies_NeverRegistrationRequired(string read, string status)
+    {
+        var lookupStatus = Enum.Parse<LookupStatus>(status);
+        if (read == "link") _store.HomeLinkLookupStatus = lookupStatus;
+        else _store.HomeContactLookupStatus = lookupStatus;
+        var (sut, dataverse, identity) = HomeSut();
+
+        var result = await sut.ResolveAsync(HomeUser(), CancellationToken.None);
+
+        result.IsResolved.Should().BeFalse();
+        result.DenyCode.Should().Be(lookupStatus == LookupStatus.ColumnMissing
+            ? ContactBindingDecision.DenyBindingColumnMissing
+            : ContactBindingDecision.DenyContactLookupFailed,
+            "an unreadable answer is never 'not registered' — that would send a registered user to the form");
+        AssertNothingWritten(dataverse, identity);
+    }
+
+    [Fact]
+    public async Task Home_TwoEnabledSystemUsersWithTheSameStoredLink_AreDeniedAmbiguous()
+    {
+        AddLinkedSystemUser(TestSystemUserId, HomeTenant, HomeOid);
+        AddLinkedSystemUser(Guid.Parse("44444444-4444-4444-4444-444444444444"), HomeTenant, HomeOid);
+        var (sut, dataverse, identity) = HomeSut();
+
+        var result = await sut.ResolveAsync(HomeUser(), CancellationToken.None);
+
+        result.DenyCode.Should().Be(ContactBindingDecision.DenyHomeLinkAmbiguous);
+        AssertNothingWritten(dataverse, identity);
+    }
+
+    [Fact]
+    public async Task Home_ADisabledAndTwoEnabledSystemUsersWithTheSameStoredLink_AreDeniedAmbiguous_NotResolvedToAnEnabledOne()
+    {
+        // Seeded disabled-first: without the enabled-first ordering the two-row sample is {disabled, enabled}, which resolves.
+        AddLinkedSystemUser(Guid.Parse("33333333-3333-3333-3333-333333333333"), HomeTenant, HomeOid, disabled: true);
+        AddLinkedSystemUser(TestSystemUserId, HomeTenant, HomeOid);
+        AddLinkedSystemUser(Guid.Parse("44444444-4444-4444-4444-444444444444"), HomeTenant, HomeOid);
+        var (sut, dataverse, identity) = HomeSut();
+
+        var result = await sut.ResolveAsync(HomeUser(), CancellationToken.None);
+
+        result.IsResolved.Should().BeFalse();
+        result.DenyCode.Should().Be(ContactBindingDecision.DenyHomeLinkAmbiguous);
+        AssertNothingWritten(dataverse, identity);
+    }
+
+    [Fact]
+    public async Task Home_TheMatchingContactIsInactive_IsDeniedContactInactive_NotRegistrationRequired()
+    {
+        AddHomeContact(TestContactId, HomeTenant, HomeOid, stateCode: 1);
+        var (sut, dataverse, identity) = HomeSut();
+
+        var result = await sut.ResolveAsync(HomeUser(), CancellationToken.None);
+
+        result.DenyCode.Should().Be(ContactBindingDecision.DenyContactInactive);
+        AssertNothingWritten(dataverse, identity);
+    }
+
+    [Fact]
+    public async Task Home_AnAppOnlyToken_IsDeniedNotUserToken_BeforeAnyLookup()
+    {
+        AddLinkedSystemUser(TestSystemUserId, HomeTenant, HomeOid);
+        var (sut, dataverse, identity) = HomeSut();
+
+        var result = await sut.ResolveAsync(HomePrincipal(AppOnlyToken(HomeOid, HomeTenant)), CancellationToken.None);
+
+        result.DenyCode.Should().Be(WorkforceMembershipTest.DenyNotUserToken);
+        _store.Reads.Should().BeEmpty();
+        AssertNothingWritten(dataverse, identity);
+    }
+
+    [Fact]
+    public async Task ResolveAsync_BearerWorkforcePrincipal_IsUnaffectedByTheWorkforceHomeGuard()
+    {
+        // Regression control for the guard above: a Bearer (default scheme) workforce principal is unaffected.
+        var dataverse = new Mock<IDataverseService>();
+        SetupSystemUserLookup(dataverse, TestOid, TestSystemUserId);
+        var identity = new Mock<IIdentityNormalizationService>();
+        identity
+            .Setup(x => x.ResolveAsync(TestSystemUserId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new PersonIdentity(TestSystemUserId, ContactId: TestContactId));
+        var user = new ClaimsPrincipal(new ClaimsIdentity(
+            BuildUser(TestOid, CustomerTenant).Claims, authenticationType: Microsoft.AspNetCore.Authentication.JwtBearer.JwtBearerDefaults.AuthenticationScheme));
+
+        var result = await CreateSut(dataverse.Object, identity.Object).ResolveAsync(user, CancellationToken.None);
+
+        result.IsResolved.Should().BeTrue();
+        result.Principal!.SystemUserId.Should().Be(TestSystemUserId);
     }
 
     [Fact]
@@ -613,15 +980,21 @@ public class WorkforcePrincipalResolverTests
     }
 
     [Fact]
-    public async Task ResolveAsync_RegisteredGuestResolved_LogsTheParsedHomeTenant()
+    public async Task ResolveAsync_CustomerTenantGuestRefused_LogsTheGuestDenyLineWithTheParsedHomeTenant()
     {
+        // #2128 (was: "registered guest resolved, logs the parsed home tenant"): the refusal reaches the operator's
+        // guest diagnostic line with the new code and the home tenant, and no email.
         var log = new BindingLogCapture<WorkforcePrincipalResolver>();
 
         var result = await ResolveAsync(
             BuildUser(GuestOid, SpaarkeTenant, email: GuestEmail, acct: "1", idp: V1Issuer(CustomerTenant)), logger: log);
 
-        result.IsResolved.Should().BeTrue(result.DenyCode);
-        log.Messages.Should().Contain(m => m.Contains("Resolved workforce caller") && m.Contains($"homeTenant: {CustomerTenant:D}"));
+        result.DenyCode.Should().Be(WorkforceMembershipTest.DenyGuestUseHomeSignin);
+        log.Messages.Should().ContainSingle(m => m.Contains("Guest (acct=1)"))
+            .Which.Should().Contain(WorkforceMembershipTest.DenyGuestUseHomeSignin)
+            .And.Contain($"idpHomeTenant={CustomerTenant:D}");
+        log.Messages.Should().NotContain(m => m.Contains("Resolved workforce caller"));
+        log.Messages.Should().NotContain(m => m.Contains(GuestEmail));
     }
 
     [Fact]
@@ -636,7 +1009,12 @@ public class WorkforcePrincipalResolverTests
             var validator = new WorkforceIdentityOptionsValidator(config, log);
 
             log.Entries.Should().ContainSingle(e => e.Level == Microsoft.Extensions.Logging.LogLevel.Warning)
-                .Which.Message.Should().Contain("FR-15 registered-guest admission disabled");
+                .Which.Message.Should().Contain("not workforce_guest_use_home_signin")
+                .And.Contain("FR-15 guest admission is retired")
+                .And.Contain("acct=1 workforce caller with no enabled systemuser is denied",
+                    "an enabled systemuser, a licensed B2B guest included, is admitted before the binder (#2128 round 2)")
+                .And.NotContain("every acct=1 workforce caller")
+                .And.NotContain("admission disabled", "FR-15 guest admission is retired, not switchable (#2128)");
             validator.Validate(null, new WorkforceIdentityOptions()).Succeeded
                 .Should().BeTrue("a missing stamp tenant must never fail startup");
         }
@@ -655,33 +1033,31 @@ public class WorkforcePrincipalResolverTests
     }
 
     [Fact]
-    public async Task ResolveAsync_GuestWithOnlyAnExtUpn_CreatesTheContactWithoutAnEmail()
+    public async Task ResolveAsync_GuestWithOnlyAnExtUpn_IsRefused_AndTheUpnIsNeverTheTokenEmail()
     {
         // preferred_username / upn of a B2B guest is "name_home.example#EXT#@spaarke.onmicrosoft.com": not the person's
-        // address. With no real email claim the contact is created WITHOUT one, never with the UPN.
+        // address. #2128: no contact is created for the guest at all (was: created WITHOUT an email); the token email
+        // still skips the UPN.
         const string ExtUpn = "new.hire_customer.example#EXT#@spaarke.onmicrosoft.com";
         var user = BuildUser(GuestOid, SpaarkeTenant, preferredUsername: ExtUpn, acct: "1", idp: V1Issuer(CustomerTenant));
         ((ClaimsIdentity)user.Identity!).AddClaim(new Claim("upn", ExtUpn));
 
         var result = await ResolveAsync(user);
 
-        result.IsResolved.Should().BeTrue(result.DenyCode);
-        var created = _store.Contacts.Values.Should().ContainSingle().Subject;
-        created.Email.Should().BeNull();
+        AssertDeniedWithNoWrites(result, WorkforceMembershipTest.DenyGuestUseHomeSignin);
         WorkforcePrincipalResolver.ExtractTokenEmail(user).Should().BeNull();
     }
 
     [Fact]
-    public async Task ResolveAsync_GuestWithARealEmailAndAnExtUpn_UsesTheRealEmail()
+    public void TokenEmail_ForAGuestWithARealEmailAndAnExtUpn_IsTheRealEmail()
     {
+        // Was ResolveAsync_GuestWithARealEmailAndAnExtUpn_UsesTheRealEmail, which read the email off the contact the
+        // retired FR-15 create made (#2128). The claim rule it proved is kept, read directly.
         var user = BuildUser(GuestOid, SpaarkeTenant, email: GuestEmail,
             preferredUsername: "new.hire_customer.example#EXT#@spaarke.onmicrosoft.com", acct: "1",
             idp: V1Issuer(CustomerTenant));
 
-        var result = await ResolveAsync(user);
-
-        result.IsResolved.Should().BeTrue(result.DenyCode);
-        _store.Contacts.Values.Should().ContainSingle().Which.Email.Should().Be(GuestEmail);
+        WorkforceCallerClaims.TokenEmail(user).Should().Be(GuestEmail);
     }
 
     [Fact]
@@ -694,8 +1070,9 @@ public class WorkforcePrincipalResolverTests
         var result = await ResolveAsync(
             BuildUser(GuestOid, SpaarkeTenant, preferredUsername: ExtUpn, acct: "1", idp: V1Issuer(CustomerTenant)));
 
-        result.Principal!.ContactId.Should().NotBe(TestContactId);
+        result.DenyCode.Should().Be(WorkforceMembershipTest.DenyGuestUseHomeSignin);
         _store.Contacts[TestContactId].Oid.Should().BeNull("the UPN was not used as the bind email");
+        _store.Writes.Should().BeEmpty();
     }
 
     [Fact]
@@ -778,6 +1155,10 @@ public class WorkforcePrincipalResolverTests
                 ["AzureAd:TenantId"] = stampTenant,
             }).Build(),
             logger ?? NullLogger<WorkforcePrincipalResolver>.Instance);
+
+    /// <summary>The same claims, authenticated by the WorkforceHome scheme (the handler stamps this AuthenticationType).</summary>
+    private static ClaimsPrincipal HomePrincipal(ClaimsPrincipal source)
+        => new(new ClaimsIdentity(source.Claims, authenticationType: AuthSchemes.WorkforceHome));
 
     private static ClaimsPrincipal BuildUser(
         Guid? oid, Guid? tid = null, string? email = null, string? preferredUsername = null, string? acct = "0",

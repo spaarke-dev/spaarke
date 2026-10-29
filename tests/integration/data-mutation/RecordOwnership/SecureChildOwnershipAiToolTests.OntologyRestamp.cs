@@ -73,6 +73,33 @@ public sealed partial class SecureChildOwnershipAiToolTests
         }
     }
 
+    // ── Task 149 (D-144 as amended): a gate Decision Record about an UNFILED communication is owned by the communication's own USER ──
+
+    [Theory]
+    [MemberData(nameof(OntologyRefileRoutes))]
+    public async Task OntologyRestamp_AUserOwnedGateDecisionRecord_FollowsItsCommunicationIntoIsolation_WhenTheCommunicationIsLaterFiledUnderASecureMatter(
+        string route)
+    {
+        // The gate decided while the communication stood alone, so the record is owned by the communication's owning user (D-144 as
+        // amended), not by a team. When the communication is later filed under a secure matter, the secure-child walk reaches the record
+        // through sprk_regardingcommunication and moves it to the Secure team, exactly as it moves a team-owned one.
+        _world.WithRecord("sprk_communication", OntologyCommunication, Directory.ChildBu, owningTeam: Directory.ChildTeam, extra: new()
+        {
+            ["sprk_regardingmatter"] = new EntityReference("sprk_matter", OrdinaryMatter),
+        });
+        ShareWorld.OrdinaryChild("sprk_communication", OntologyCommunication, ("sprk_regardingmatter", "sprk_matter", SecureMatter));
+        OntologyRowsAboutTheCommunication(stamp: OrdinaryMatter, isolated: false, userOwnedDecisionRecord: true);
+        ShareWorld.OwnerOf("sprk_decisionrecord", OntologyDecisionRecord).Should().Be(DataversePrincipalRef.User(SecureChildShareWorld.SomeUser),
+            "the seed: the decision record starts user-owned");
+        var before = DecisionContextOf("sprk_decisionrecord");
+
+        await RefileOntologyCommunication(route, SecureMatter, OntologyRestamper());
+
+        ShareWorld.OwnerOf("sprk_decisionrecord", OntologyDecisionRecord).Should().Be(DataversePrincipalRef.Team(Directory.SecureNamedTeam),
+            "a user-owned gate record follows its communication into isolation (secure-child walk via sprk_regardingcommunication)");
+        DecisionContextOf("sprk_decisionrecord").Should().Equal(before, "the decision context is immutable (D-34)");
+    }
+
     // ── Criterion 3: back to M (a Full Access holder) ────────────────────────────────────────────────────────────
 
     [Theory]
@@ -154,6 +181,9 @@ public sealed partial class SecureChildOwnershipAiToolTests
         _user.OwningTeamOf[OntologyCommunication] = Directory.SecureNamedTeam;
         ShareWorld.Add("businessunit", Directory.ChildBu, ("name", "Spaarke Business Unit 1"));
         ShareWorld.Team(Directory.ChildTeam, Directory.ChildBu, "Spaarke Business Unit 1", isDefault: true, teamType: 0);
+        // 194b: the share world places the ordinary matter where the harness's directory does (its unit's team). The Signal's and
+        // Decision Record's core IS that matter, and their writers ask about the core first, so the two worlds must agree on it.
+        ShareWorld.Add("sprk_matter", OrdinaryMatter, ("owningteam", new EntityReference("team", Directory.ChildTeam)), ("sprk_issecure", false));
         ShareWorld.SecureChild("sprk_communication", OntologyCommunication, ("sprk_regardingmatter", "sprk_matter", OrdinaryMatter));
         OntologyRowsAboutTheCommunication(stamp: SecureMatter, isolated: true);
         foreach (var table in OntologyTables)
@@ -162,7 +192,7 @@ public sealed partial class SecureChildOwnershipAiToolTests
 
     /// <summary>A Signal and a Decision Record whose subject is the communication, stamped with <paramref name="stamp"/>, and
     /// a full decision context naming the ordinary matter they were decided about.</summary>
-    private void OntologyRowsAboutTheCommunication(Guid stamp, bool isolated)
+    private void OntologyRowsAboutTheCommunication(Guid stamp, bool isolated, bool userOwnedDecisionRecord = false)
     {
         foreach (var table in OntologyTables)
         {
@@ -174,13 +204,22 @@ public sealed partial class SecureChildOwnershipAiToolTests
             };
             if (isolated)
                 ShareWorld.SecureChild(table, row, lookups);
+            else if (userOwnedDecisionRecord && table == "sprk_decisionrecord")
+                ShareWorld.UserOwnedChild(table, row, lookups);
             else
                 ShareWorld.OrdinaryChild(table, row, lookups);
             ShareWorld.Set(table, row, "sprk_matter", new EntityReference("sprk_matter", OrdinaryMatter));
             ShareWorld.Set(table, row, "sprk_corerecordid", OrdinaryMatter.ToString("D"));
             ShareWorld.Set(table, row, "sprk_corerecordtype", new EntityReference("sprk_recordtype_ref", OntologyCoreType));
+            // 194b: as the writers file them: the regarding pair names the subject, the catalog row names the core's table.
+            ShareWorld.Set(table, row, "sprk_regardingrecordid", OntologyCommunication.ToString("D"));
+            ShareWorld.Add("sprk_recordtype_ref", OntologyCoreType, ("sprk_recordlogicalname", "sprk_matter"));
             ShareWorld.Set(table, row, "sprk_policyversion", new EntityReference("sprk_policyversion", OntologyPolicyVersion));
             ShareWorld.Set(table, row, "sprk_snapshot", "{\"evidence\":[1,2,3]}");
+            // 194b fix round R (ontology answer (c)): the record lists the Signals it resolved, as DecisionRecordWriter writes it;
+            // its owner question asks about their subjects from this list.
+            if (table == "sprk_decisionrecord")
+                ShareWorld.Set(table, row, "sprk_steps", $"{{\"reviewId\":\"a1440000-0000-4000-8000-0000000000f3\",\"resolvedSignalIds\":[\"{OntologySignal:D}\"],\"steps\":[]}}");
         }
     }
 

@@ -2,59 +2,53 @@
 
 > **Format**: CURRENT state only, REWRITTEN at each checkpoint (≤ 10 KB) — never prepend. Standing rules → project `CLAUDE.md` §2/§3/§6. Decisions → `notes/model1-dedicated-remediation-plan.md` D-table. Session narrative → commit messages.
 
-> **Last Updated**: 2026-10-14 SESSION 48. PR #1860 merged (master `bd52b6290`). SpaarkeMaster **1.2.3.0 PUBLISHED** (CI run 38603706393): it carries `contact.sprk_externalinvitecodehash`, which satisfies the T240d release gate; UAC has been told. The old demo stack has been retired (owner D35). T186 = the ACME Corporation demo stamp; prerequisites are in progress.
+> **Last Updated**: 2026-10-20 SESSION 50. T186 ACME run `b6941254-ac1b-42a6-8b12-dec7587090fc` **Completed** 16:24:26 UTC (all H13 gates). Post-run Steps 6a/6b/6e/7 done; 6f (Copilot agent) waits on the owner. HEAD `1a3743843`+, pushed.
 
 ## 🎯 Quick Recovery (READ THIS FIRST)
 
 | Field | Value |
 |-------|-------|
-| **Task** | T186: first live E2E via `/provision-environment acme` ("ACME Corporation", DEMO subscription `2ff9ee48-…`, managed SpaarkeMaster 1.2.3.0). Run log: `notes/t186-acme-run-log.md`, kept up to date AS THINGS HAPPEN (owner 2026-10-14: the process must be fully documented and repeatable; each lesson goes into the operator docs before T186 closes). |
-| **Status** | Waiting on the owner's prerequisites (below). My prerequisites done: PRQ-S-04 (L2 Worker UAMI Owner on the DEMO sub) and PRQ-C-10 (group `sprk-acme-users` `7de5a154-2604-438b-b1cd-462406a869a9`). No agents running. |
-| **Next Action** | When the owner says the environment `spaarke-acme` exists: (1) add the L2 Worker as a System Administrator application user (PRQ-C-09); (2) set `restrictGuestUserAccess=false` (PRQ-C-12); (3) create the registry placeholder on spaarkedev1 (PRQ-E-13, skill Step 1); (4) create two ACME test users; (5) run `/provision-environment acme`. Each live action needs the owner's OK. |
-| **Branch** | `work/customer-provisioning-orchestration-r1` = master + this checkpoint |
+| **Task** | T186: first live E2E via `/provision-environment acme` ("ACME Corporation", DEMO sub `2ff9ee48-6f1d-4664-865c-f11868dd1b50`, dev L2 control plane, managed SpaarkeMaster 1.2.3.1). Run log: `notes/t186-acme-run-log.md` (lessons L1–L63 + timeline). |
+| **Status** | Run **Completed** (H14m mailbox `sprk-acme-mail@demo.spaarke.com` in `Spaarke-AppAccess-acme`; H13 8/8 gates; cost drift −74.7 % advisory). 6a: registry already Ready, nothing reconciled. 6b: `runs/b6941254-….md`. 6e: secure-record §7 15/15 PASS (probes deleted). 7: `provisioning-runs/acme-b6941254-…/lessons-learned.md` + INDEX row. |
+| **Next Action** | 1) **6f Copilot gate** (owner, Teams developer portal): pre-check passed (BFF app pre-authorizes `3a36eac4-…`; `sprk_bffappid` set). Owner creates auth config `spaarke-copilot-acme` → gives the OAuth client registration ID → PATCH `sprk_copilotauthconfigid` (confirm first) → render package (`scripts/copilot-agent/Render-CopilotAgentPackage.ps1`). 2) Carry the open lessons into the guide + prereqs (run log rows not yet `applied`: L1–L3, L5–L8, L11, L13–L16, L22, L30, L49, L56; many "fixed in code" rows still need their status column set to applied with the doc). 3) Merge the branch to master (`Closes #2034`, `#2040`, `#2027`), then redeploy the control plane. |
 
-## 🔔 Waiting on the owner
+## Active
 
-1. **ACME prerequisites:**
-   - the ACME Workforce tenant (PRQ-C-13; plus the PRQ-C-14 outbound B2B attestation);
-   - the Dataverse environment `spaarke-acme` (US, Production, security group `sprk-acme-users`);
-   - the PAYG billing policy on the DEMO sub (PRQ-C-11);
-   - the Exchange group `Spaarke-AppAccess-acme` (PRQ-C-08).
-2. **Demo accounts the owner hasn't classified:** `jake.schroeder`, `rachel.schroeder`, `sarah.johnson`, `jane.smith`, `alex.demo` @demo.spaarke.com. Keep or delete?
-3. **Dev BFF secrets:** an agent printed the email-processing webhook secret, the signing key and the SignalR key into its local transcript. Rotating them is the owner's call.
-4. **ISS-026** publisher verification: Partner ID 7011236. The owner asked why it is needed; the answer was "consent-screen trust, not functionally required". The operator steps wait for Partner Center facts.
+- **Task 264 ✅ (2026-10-22)** — H3 sets / H13 T7 verifies `removeUnverifiedEmailClaim` (#2001 closed; NOT this project's ISS-013 #1500, which stays open). ACME BFF app set to `true` 2026-10-23 01:53 UTC (owner OK), read back `true`.
+- **Task 265 ✅ (2026-10-22)** — H13 T7 reads back `ExternalAccess__CustomerBusinessUnitId` on both slots (#2265; write in `faf36207d`). #2265 closes with the branch merge.
+- **R3 `fix/r3-iss-005-combined` (1b0d9cdf36) edits H7b**: S18 `IdentityLinkColumns` + 6 contact identity-plane/collision locks. OK'd 2026-10-23 on condition: the published SpaarkeMaster (`dataverse-solutions-latest.json`) carries the locks before/with the control-plane redeploy that ships it (else every run stalls at H7b `identity_link_lock_incomplete`; 1.2.3.1 lacks them). R3 agreed: S19 (`sprk_accesspermissiongrant`) and S22 (3 new BFF-only columns, verify-only) go into their change set, tracked as #2317; the PR body carries the ordering condition. 2026-10-26: re-review of their fix range `17438552c3..c2e5da998d` OK (S19 other-writer, 1.2.4.0 Version line + packaged tests, roletemplateid match — verified read-only on ACME: all 3 BU copies carry `627090ff-…`); one K3 sent (remedy "import (H6), then resume" cannot work past a completed H6). Owner decision "Allow teams" relayed (no SGA team-member check). #2321 answered: no provisioning change (H10 step 9 associates System Administrator directly on the BFF App User); UAC's follow-up PR adds the roletemplateid match + team legs (#2320) and records that moving the BFF off System Administrator needs a canread-4 profile on `sprk_accessinheritance`. 2026-10-27: K3 → `3ed44fd7aa`; my F1 (standing-grant remedy named the schema script, which never writes `sprk_standinggrant`) → `f0f90bce89` (names `Import-SpaarkeMasterPackage.ps1`), OK'd. R3 `f2e2fefe91` adds `-Verify` step (h) (BFF must be a DIRECT SGA member): already done by our S20 (ACME read-only: BFF holds SGA directly); sent F1 — the "-Apply, then -Verify (exit 0), then resume" remedy loops on a stamp refused at S18/S19 before S20 ran → should be "-Apply, then resume; -Verify after H7b". Awaiting their SHA. Dev SGA add is R3's (their owner's go; we don't touch dev). **Gate our next control-plane redeploy on that SpaarkeMaster 1.2.4.0 publish if their PR merges first** (no branch or master claims 1.2.4.0 yet; scan 2026-10-26).
+- **uac-r2 #2318 (merged to master 2026-10-23, `7479ce22a9`)**: the BFF census clause 1 grades Read on every codified secure child table, so H13 refuses a stamp where a non-admin human reaches the secure BU through Console User / Ontology Administrator (Deep) or AI Analysis Admin (Global) held from an ancestor. Applies per stamp once its BFF build has it. Provisioning creates no such principal (H11 = Basic User in the customer BU). When the ACME BFF upgrades, re-run the census (§7 item 11).
+- Merge PR body must also reference #2001, `Closes #2265` and `Closes #2283` (field-mapping target type, fixed on the branch in `5916a0599`, still `= 1` on master).
 
 ## Live state
 
-- Dev control plane `rg-spaarke-platform-dev`: redeployed 2026-10-14 from `e18cb33a0` (= master `630373cbb`); all checks green; `CustomerRunGuard__Enabled=True`.
-- Store: SpaarkeMaster **1.2.3.0** latest (2026-10-14, managed sha256 `e84cd5d9…3f662e`). 1.2.3.0 adds `sprk_externalinvitecodehash`, secured: Writers 4/4/4, Readers no row. It also adds other projects' dev work: ServiceRequest autonumber `RQST-{SEQNUM:4}`, the CommunicationConnections PCF, and 3 web resources. Nothing removed. The workforce role `Spaarke Internal Contact User (Workforce)` is still excluded until UAC 186 closes.
-- **Old demo (D35), retired 2026-10-14:**
-  - Deleted: the Dataverse env `spaarke-demo` (deleted by the owner), `spaarke-bff-demo` and its plan, SB, OpenAI, docintel, Cosmos, Redis, App Insights, `spaarke-demo-logs`, `mi-bff-api-demo`, the apps "Spaarke BFF API - Demo" and "Spaarke UI - Demo", and 10 test accounts.
-  - KEPT: the website functions with `WestUS2Plan`, `sprkdemosa`, `sprk-demo-kv` and the Smart Detection action group; Syntex `1f3cfdfb` (owner OK); the group "Spaarke Demo Users" `745bfdf6` (used by dev BFF demo approvals); and the accounts jessica, lori, chelsea, `demo@` and `uac.child.user`.
-- The demo-request flow is UNCHANGED and works: website → `spaarke-bff-dev` → `sprk_registrationrequest` (spaarkedev1) → "Approve Demo Access" → registry row "Dev". Retargeting it to the ACME stamp needs a code change (it ignores the row's `sprk_securitygroupid`) plus a cross-stamp identity decision. Bring the owner ONE recommendation after T186 (run log L3).
+- **ACME BFF upgrade is gated** (project CLAUDE.md §3, R3 2026-10-20): no build with UAC #2128 on `sprk-acme-prod-api` until A9 home sign-in is in place for ACME. R3 tracks the production-SPA gate in `projects/spaarke-SPA-external-access-platform-r3/notes/task-073-gate-acme.md`. H4b now writes `ExternalAccess__CustomerBusinessUnitId` (H10, `faf36207d`) and `SessionFileStore__BlobEndpoint` (H2a, `d2860c45f`); ACME gets both at its next (gated) run.
+
+- Exchange (Spaarke tenant): `Spaarke Exchange Admin` holds only the two direct `-App` D32 assignments (New-Mailbox entry carries the common parameters since 2026-10-20); no role group; override False.
+- Worker sidecar `exchange-policy-sidecar` = `provisioning-sidecar:2026.10.20-40` (master `05bcdeee6`, L62 fix); dev bicepparam pin matches (`SidecarImagePinTests`). Roll forward: ARM GET/PUT `.../sites/spaarke-provisioning-controlplane-worker-dev/sitecontainers/exchange-policy-sidecar?api-version=2024-04-01`, then `Verify-Sidecar-Live.ps1 -Environment dev [-InTenant]`.
+- Control plane API/Worker code: the #2034 fix (246f6f166) and #2027 (c28d9dc48) are on the branch only — redeploy the control plane before the next customer run (verify what is live first).
+- Stamp job status without a BFF token: App Insights heartbeat query in `SECURE-PROJECT-ENVIRONMENT-SETUP.md` §7 (L63); ACME App Insights appId `2479293f-fe03-4c29-8f19-3ee1feb52b13`.
+- Local Pester: Pester 6.2.0 fails the sidecar suite at import on this machine; run under the saved Pester 5.7.1 (`scratchpad/psmods`). CI (Linux) passes.
+
+## 🔔 Waiting on the owner
+
+1. **L56 AI content for ACME**: ACME has 0 playbooks / nodes / actions / tools / consumers (dev: 34 / 93 / 80 / 51 / 40); H12a seeded 4 of 12 sets and the repo lacks dev's content. Recommended: export what the 40 consumer rows reach from dev with ids preserved, port a PK-preserving writer into H12a (tools → actions → playbooks → N:N → nodes after H12c → node N:N → canvas → consumers), re-seed ACME. Does not block the run.
+2. **#2027 org auditing** (code done `c28d9dc48`: H6 contract `isauditenabled=true`, `auditretentionperiodv2=-1`, read-back): OK needed for two live writes — spaarkedev1 retention null→-1 (uac-r2 waits to verify read-only), and ACME (H6 already ran under the old contract). Tell uac-r2 when dev is set.
+3. Demo accounts not classified: `jake.schroeder`, `rachel.schroeder`, `sarah.johnson`, `jane.smith`, `alex.demo` @demo.spaarke.com.
+4. Dev BFF secrets an agent printed locally (webhook secret, signing key, SignalR key): rotation is the owner's call.
+5. ISS-026 publisher verification (Partner ID 7011236) — waits on Partner Center facts.
 
 ## 📋 Remaining
 
-- **T186 live proofs:**
-  - ISS-008: a second POST is refused;
-  - T261: OwnedBy at H3;
-  - ISS-015: Worker FIC at H6;
-  - T260: census at H13;
-  - H7b S19–S22;
-  - T259: BU placement;
-  - PRQ-C-14;
-  - H14m route-level M4;
-  - H3: 6-entry delegated catalog with the admin-consent gate (`POST /api/runs/{id}/gates/admin-consent/advance`).
-- **Repo cleanup of old-demo references** (after #1860, now unblocked): `config/environments.json:77-115`, `config/spaarke-resources.yaml:601-630`, `spaarke-constants.yaml:79`, `scripts/Reconcile-DemoEnvironment.ps1`, `redis-demo.bicepparam`, `DocumentOperations.js:164` (demo-URL runtime branch), docs.
-- **Builds:**
-  - D36: H4b keyless SignalR string when `signalrEnabled`, plus a manifest note on `Rag__ApiKey`;
-  - D37: `appRoleAssignmentRequired` on stamp BFF SPs, after A9;
-  - T240c directory service (after T186; D38);
-  - T240d (option 2; the keyless `CiamGraphClientFactory`, with `CertificateName` optional under MI-FIC);
-  - A9 H3 changes (wait on SPA-r3 task 059);
-  - 203d; wrap-up 090.
-- Remove the old L2 broad Graph roles after the T186 H3 proof.
+- **When this branch merges to master**: PR body must say `Closes #2034`, `Closes #2040` and `Closes #2027` (UAC offered a review of the isdisabled check — send them the PR number).
+- **#2232 (from ebilling-r1 091)**: wire `modules/ebilling-file-store.bicep` into `customer.bicep` for the stamp UAMI (custom role at stamp-RG scope + 3 private containers, per-container grants), recompile `customer.json`, add the per-stamp checks (`Test-EbillingFileStoreRole.ps1`, tag-write proof) to H13. **Blocked until ebilling-r1 merges the module and its 091 container-scope grant change (`97bb759493`) to master**; then merge master into this branch first. Owner decides `enableMalwareScanning` per environment (Defender for Storage cost). The Worker holds Owner on DEMO, so the role-definition write is allowed. **Decided (ebilling owner, relayed 2026-10-22): option (a), a dedicated eBilling storage account per stamp** (as dev's `sprkspaarkedevebillsa`). `ebilling-file-store.bicep` is the only owner of that account's `blobServices/default` (`blobSoftDeleteRetentionDays`, default 30); `storage-account.bicep` and the main account stay at 7 days, unchanged. Reason: the stamp UAMI holds account-scope Storage Blob Data Contributor on the main account (includes `tags/write`, so it could forge the malware-scan tag); on the dedicated account its only grant is the container-scoped custom role (no `tags/write`) — H13 should assert no account-scope data role on the eBilling account. Wiring = new storage account resource/module in `customer.bicep` (name per stamp naming convention, network/TLS settings matching the main account) → pass its name to `ebilling-file-store.bicep`; per-stamp params `enableMalwareScanning` (owner, per environment) and `blobSoftDeleteRetentionDays`. The module takes the account as `existing` (`ebilling-file-store.bicep:71`, `storageAccountName`), so `customer.bicep` creates it: StorageV2 / Standard_LRS, TLS 1.2, HTTPS only, `allowBlobPublicAccess=false`, `allowSharedKeyAccess=false` (keyless), network matching the main account's posture or tighter (dev left Allow); source 091 notes §8.6 step 0. The module owns the 3 containers, `blobServices/default`, the container-scoped role assignments and the Defender setting. ebilling will say when #1911 is on master.
+- **T186 close-out**: 6f (above); carry the open lessons into the guide + prereqs; fix L15 and L30; remove the old broad L2 Graph roles; track the S18 columns.
+- **Report to the owner**: S1 plan cost; L49 ComposeIdentityKey DEGRADED on the ACME BFF; task 264 ordering vs task 047; registry table shipping in SpaarkeMaster (does the BFF need it per environment?).
+- **T186 live proofs still open**: ISS-008 (second POST refused); PRQ-C-14. (H14m route-level M4 and the H13 census proved 2026-10-20.)
+- **Repo cleanup of old-demo references**: `config/environments.json:77-115`, `config/spaarke-resources.yaml:601-630`, `spaarke-constants.yaml:79`, `scripts/Reconcile-DemoEnvironment.ps1`, `redis-demo.bicepparam`, `DocumentOperations.js:164`, docs.
+- **Builds**: D36 (H4b keyless SignalR + `Rag__ApiKey` note); D37 (`appRoleAssignmentRequired` after A9); T240c (D38); T240d; A9 H3 changes (wait on SPA-r3 task 059); 203d; wrap-up 090.
+- Leftovers for the user to delete: `C:\code_files\spaarke-wt-spaarkemaster-1231`, `C:\code_files\spaarke\.claude\worktrees\agent-aaff1644fa899f03b`; worktrees `C:\code_files\spaarke-wt-sidecar-l59` (merged; holds local researcher-memory edits) and `C:\code_files\spaarke-wt-sidecar-l62` (#2136 merged) — remove only with `scripts/worktree/Remove-WorktreeSafe.ps1`.
 
 ## 🐞 Open defects
 
-#1543 ISS-018 · #1484 ISS-008 · #1485 ISS-009 · #1487 ISS-011 · #1499 ISS-012 · #1500 ISS-013 · #1523 ISS-017 · #1561/#1562/#1563/#1564/#1570 · #1590 ISS-023 · #1803 ISS-025 · #1811 ISS-026 · #1504 · #1432 · #1376 · #1377.
+#1543 ISS-018 · #1484 ISS-008 · #1485 ISS-009 · #1487 ISS-011 · #1499 ISS-012 · #1500 ISS-013 · #1523 ISS-017 · #1561/#1562/#1563/#1564/#1570 · #1590 ISS-023 · #1803 ISS-025 · #1811 ISS-026 · #1504 · #1432 · #1376 · #1377 · #2034 / #2040 (fixed on branch; close on merge).

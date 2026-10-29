@@ -10,6 +10,7 @@
 
 import * as React from 'react';
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
+import { confirmRevoke } from '../../../__tests__/helpers/confirmDialog';
 import { FluentProvider, webLightTheme, webDarkTheme } from '@fluentui/react-components';
 import { AccessGrantModal } from '../AccessGrantModal';
 import { throwingAuthenticatedFetch } from '../../../__tests__/helpers/authenticatedFetchDouble';
@@ -641,10 +642,12 @@ describe('AccessGrantModal — "No Access" is a veto, never a level (spec FR-23)
     const props = makeProps({
       noAccess: async () => jsonResponse(noAccessBody([entry({})])),
       overrides: {
-        pickContact: jest.fn(async (): Promise<IContactSearchResult | null> => ({
-          contactId: 'contact-new',
-          fullName: 'Nina New',
-        })),
+        pickContact: jest.fn(
+          async (): Promise<IContactSearchResult | null> => ({
+            contactId: 'contact-new',
+            fullName: 'Nina New',
+          })
+        ),
         pickOrganization: jest.fn(async (): Promise<IOrganizationPick | null> => ({ id: 'org-new', name: 'NewOrg' })),
         pickUser: jest.fn(async (): Promise<IUserPick | null> => ({ id: 'user-new', name: 'Ulf New' })),
       },
@@ -895,8 +898,7 @@ describe('AccessGrantModal — a write that finishes after a rebind never shows 
     // Revoke Alpha on A; the POST stays pending.
     fireEvent.click(within(currentAccessRow('Alpha Contact')).getByRole('button', { name: 'Revoke' }));
     await screen.findByText('Revoke access?');
-    const confirm = screen.getAllByRole('button', { name: 'Revoke' });
-    fireEvent.click(confirm[confirm.length - 1]);
+    await confirmRevoke(); // G-21-safe: clicks Revoke inside the confirm dialog
     await waitFor(() => expect(fetchFn.mock.calls.some(c => String(c[0]).includes('/revoke'))).toBe(true));
 
     // The host rebinds to B and the modal loads B.

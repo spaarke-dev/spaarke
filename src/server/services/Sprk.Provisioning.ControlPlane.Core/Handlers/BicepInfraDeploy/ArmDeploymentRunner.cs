@@ -176,7 +176,10 @@ public sealed class ArmDeploymentRunner : IBicepDeployRunner
             Template = BinaryData.FromString(templateJson),
             Parameters = parameters,
         };
-        var content = new ArmDeploymentContent(properties);
+        // A SUBSCRIPTION-scope deployment must name the region its metadata lives in; without it ARM refuses with
+        // 400 InvalidDeployment "The 'location' property must be specified" (T186 L20 — `az deployment sub create`
+        // always required --location, and the SDK port dropped it).
+        var content = new ArmDeploymentContent(properties) { Location = new AzureLocation(request.Location) };
         var deploymentName = $"customer-{request.CustomerId}-{DateTimeOffset.UtcNow:yyyyMMddHHmmss}";
 
         ArmOperation<ArmDeploymentResource> deployOperation;
@@ -453,7 +456,7 @@ public sealed class ArmDeploymentRunner : IBicepDeployRunner
     [
         "userAssignedIdentityResourceId", "userAssignedIdentityObjectId", "userAssignedIdentityClientId",
         "appServiceName", "appServiceStagingSlotName", "openAiEndpoint", "aiSearchEndpoint", "cosmosAccountEndpoint",
-        "keyVaultName", "keyVaultUri", "serviceBusEndpoint", "redisEndpoint", "contentSafetyEndpoint",
+        "keyVaultName", "keyVaultUri", "serviceBusEndpoint", "redisEndpoint", "contentSafetyEndpoint", "storagePrimaryEndpoint",
     ];
 
     /// <summary>
@@ -519,6 +522,7 @@ public sealed class ArmDeploymentRunner : IBicepDeployRunner
                 : string.Empty,
             RedisEndpoint = hasRoot ? ReadString(root, "redisEndpoint") : string.Empty,
             ContentSafetyEndpoint = hasRoot ? ReadString(root, "contentSafetyEndpoint") : string.Empty,
+            StorageBlobEndpoint = hasRoot ? ReadString(root, "storagePrimaryEndpoint") : string.Empty,
             SignalRDeployed = hasRoot && ReadBool(root, "signalrEnabled"),
         };
     }

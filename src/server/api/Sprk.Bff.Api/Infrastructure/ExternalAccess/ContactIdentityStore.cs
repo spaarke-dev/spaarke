@@ -40,7 +40,40 @@ public sealed record SystemUserLookup(LookupStatus Status, SystemUserIdentityRow
 }
 
 /// <summary>Contact details for a contact created keyed by an oid.</summary>
-public sealed record NewContactDetails(string? FirstName, string LastName, string? Email);
+public sealed record NewContactDetails(string? FirstName, string LastName, string? Email)
+{
+    /// <summary>ADR-028 A9 (r3 task 047): the registration form's optional department.</summary>
+    public string? Department { get; init; }
+
+    /// <summary>
+    /// ADR-028 A9 (r3 task 047): the home directory (<c>tid</c>), written as <c>sprk_externaltenantid</c>. Required on plane
+    /// WorkforceHome and refused on every other plane, the Workforce plane included
+    /// (<see cref="DataverseContactIdentityStore.CreatePayload"/>).
+    /// </summary>
+    public Guid? ExternalTenantId { get; init; }
+
+    /// <summary>
+    /// ADR-028 A9 (r3 task 047): the owning team (the default team of <c>ExternalAccess:CustomerBusinessUnitId</c>).
+    /// Required on plane WorkforceHome. ISS-005 (#1673): carried by the Workforce plane's creates (first sign-in and the
+    /// licensed-user link) too, which the binder resolves from the same setting. Refused on every other plane (the CIAM
+    /// create sets no owner).
+    /// </summary>
+    public Guid? OwningTeamId { get; init; }
+}
+
+/// <summary>ADR-028 A9 (r3 task 047): a business unit's default owner teams (two rows, so ambiguity is visible).</summary>
+public sealed record OwnerTeamLookup(LookupStatus Status, IReadOnlyList<Guid> TeamIds)
+{
+    /// <summary>A team read that could not be read.</summary>
+    public static OwnerTeamLookup Failed { get; } = new(LookupStatus.Failed, Array.Empty<Guid>());
+}
+
+/// <summary>ADR-028 A9 (r3 task 047): the business units carrying a name (two rows, so ambiguity is visible).</summary>
+public sealed record BusinessUnitLookup(LookupStatus Status, IReadOnlyList<Guid> BusinessUnitIds)
+{
+    /// <summary>A business-unit read that could not be read.</summary>
+    public static BusinessUnitLookup Failed { get; } = new(LookupStatus.Failed, Array.Empty<Guid>());
+}
 
 /// <summary>How a store write ended.</summary>
 public enum StoreWriteStatus
@@ -62,6 +95,22 @@ public enum StoreWriteStatus
 
     /// <summary>Any other failure.</summary>
     Failed,
+
+    /// <summary>
+    /// Dataverse refused the write for a missing PRIVILEGE (HTTP 403, or a 400 that names a privilege): the identity's
+    /// roles do not allow it (e.g. the owner team holds no role with contact read, or the application user cannot
+    /// Assign). A permanent configuration fault — retrying changes nothing. See <see cref="DataverseContactIdentityStore.IsPermissionFault"/>.
+    /// </summary>
+    Forbidden,
+
+    /// <summary>
+    /// A contact CREATE was refused because the OWNER it names may not own the row: Dataverse's
+    /// <c>0x80040299</c> "Read Privilege Check For Owner failed", raised when none of the owner team's security roles holds
+    /// Read on <c>contact</c> (ISS-005 UAC re-check K1, #1673). A permanent configuration fault of the customer business
+    /// unit's default team, so the create routes answer it as <c>sdap.access.registration_owner_unconfigured</c>, not as a
+    /// generic failure. See <see cref="DataverseContactIdentityStore.IsOwnerPrivilegeFault"/>. Only a POST returns it.
+    /// </summary>
+    OwnerPrivilegeMissing,
 
     /// <summary>
     /// The write would put the oid into the uniqueness mirror while ANOTHER contact already holds it — Dataverse's
@@ -86,6 +135,17 @@ public sealed record StoreWriteResult(StoreWriteStatus Status, Guid? ContactId =
     public static StoreWriteResult Written { get; } = new(StoreWriteStatus.Written);
 }
 
+/// <summary>
+/// The invite stamp written with the pending-invite marker: the salted hash of the address the invite was sent to
+/// (<see cref="InviteEmailStamp"/>, never the address) and the Entra tenant the invite named, or null for none (which clears
+/// an earlier one). Every email bind onto the contact needs it (<see cref="ContactBindingDecision.CheckInviteStamp"/>).
+/// </summary>
+public sealed record InviteStamp(string InvitedEmailHash, Guid? InvitedTenantId)
+{
+    /// <summary>Never prints the hash.</summary>
+    public override string ToString() => $"InviteStamp {{ InvitedTenantId = {InvitedTenantId?.ToString("D") ?? "(none)"} }}";
+}
+
 /// <summary>Whether this identity can READ the binding column (field-level security).</summary>
 public enum BindingReadability
 {
@@ -98,12 +158,31 @@ public enum BindingReadability
     /// <summary>Every marked row came back with no oid: the column is masked. No bind, create or link is safe.</summary>
     Masked,
 
-    /// <summary>The probe itself could not be read.</summary>
+    /// <summary>The probe itself could not be read (transient: a throttle, a 5xx, a network fault). Retryable.</summary>
     Failed,
+
+    /// <summary>
+    /// The home probe selected a column that is not provisioned here (the A9 schema is not applied). A permanent
+    /// configuration fault, not a transient read failure; only <see cref="IContactIdentityStore.ProbeHomeReadabilityAsync"/> reports it.
+    /// </summary>
+    ColumnMissing,
 }
 
 /// <summary>One page of a scan, and the continuation for the next page (null when done).</summary>
 public sealed record StorePage<T>(LookupStatus Status, IReadOnlyList<T> Rows, string? Continuation, string? Error = null);
+
+/// <summary>Slice C: what the live read of a contact's removed marker says. Only <see cref="NotRemoved"/> composes anything.</summary>
+public enum RemovedMarkerRead
+{
+    /// <summary>The marker, or the row, could not be read, or an empty marker's read is not proven. Composes nothing.</summary>
+    Unreadable = 0,
+
+    /// <summary>The marker read empty on a proven read: the person's external access was not removed.</summary>
+    NotRemoved = 1,
+
+    /// <summary>The marker is set: an administrator removed the person's external access. Composes nothing.</summary>
+    Removed = 2,
+}
 
 /// <summary>The identity-binding reads and writes. Testing seam (ADR-010).</summary>
 public interface IContactIdentityStore
@@ -121,8 +200,62 @@ public interface IContactIdentityStore
     /// <summary>ACTIVE contacts whose <c>emailaddress1</c> is <paramref name="email"/>, two rows.</summary>
     Task<ContactLookup> FindActiveContactsByEmailAsync(string email, CancellationToken ct);
 
+    /// <summary>
+    /// ADR-028 A9 (r3 task 047, fix round 2): INACTIVE contacts (<c>statecode eq 1</c>) whose <c>emailaddress1</c> is
+    /// <paramref name="email"/>, two rows. Read-only; consulted by the registration route only when no ACTIVE contact
+    /// carries the email, so a deactivated contact is refused and flagged instead of a second contact being created.
+    /// </summary>
+    Task<ContactLookup> FindInactiveContactsByEmailAsync(string email, CancellationToken ct);
+
     /// <summary>One contact by id; a missing row reads as zero rows.</summary>
     Task<ContactLookup> GetContactAsync(Guid contactId, CancellationToken ct);
+
+    /// <summary>
+    /// Slice C: whether an administrator removed <paramref name="contactId"/>'s external access, read LIVE. An empty marker is
+    /// <see cref="RemovedMarkerRead.NotRemoved"/> only on a proven read; an unproven or faulted read, or a missing row, is
+    /// <see cref="RemovedMarkerRead.Unreadable"/> (fail closed). The composition's check; it never caches an answer.
+    /// </summary>
+    Task<RemovedMarkerRead> ReadRemovedMarkerAsync(Guid contactId, CancellationToken ct);
+
+    /// <summary>
+    /// Slice C (administrator removal and reinstatement): writes the removed marker
+    /// (<c>sprk_externalaccessremovedon</c> = <paramref name="removedOn"/>, UTC), or clears it when <paramref name="removedOn"/>
+    /// is null. One PATCH naming that column only, <c>If-Match: *</c>, so a missing row is never created. Nothing else on the
+    /// row is written: the binding, the statecode and every other column are left as they are.
+    /// </summary>
+    Task<StoreWriteResult> WriteRemovedMarkerAsync(Guid contactId, DateTimeOffset? removedOn, CancellationToken ct);
+
+    /// <summary>
+    /// Slice C5: the removed-marker write of <see cref="WriteRemovedMarkerAsync"/> (set, or cleared when
+    /// <paramref name="removedOn"/> is null), made ONLY on the row as it was read: <c>If-Match</c> on <paramref name="etag"/>,
+    /// the row version read with the decision. Never <c>*</c>; no row version, no write. A row changed since that read is
+    /// <see cref="StoreWriteStatus.PreconditionFailed"/> and nothing is written.
+    /// </summary>
+    /// <remarks>
+    /// CLAUDE.md §11. Existing: <see cref="WriteRemovedMarkerAsync"/> writes the same column with <c>If-Match: *</c>.
+    /// Extension: that write serves an administrator's explicit removal, which is meant to land whatever the row holds; a
+    /// null-means-<c>*</c> parameter on it would let a missing version turn into an unconditional write. Cost of doing nothing:
+    /// the removal sweep marks a contact that was reactivated after its decision read, and a reinstatement clears a marker
+    /// on a row whose state it did not read.
+    /// </remarks>
+    Task<StoreWriteResult> WriteRemovedMarkerIfUnchangedAsync(
+        Guid contactId, string? etag, DateTimeOffset? removedOn, CancellationToken ct);
+
+    /// <summary>
+    /// Slice C (administrator removal): clears the invite state (<c>sprk_externalinvitedon</c>,
+    /// <c>sprk_externalinvitecodehash</c>, <c>sprk_externalinvitedemailhash</c>, <c>sprk_externalinvitedtenantid</c>) and
+    /// <c>sprk_accesspermissiongrant</c> in ONE PATCH, <c>If-Match: *</c>, so no outstanding invite link or stamp can bind.
+    /// The binding columns (the object id, its plane and its key mirror) are never named, so the person is still found by
+    /// their object id and refused.
+    /// </summary>
+    Task<StoreWriteResult> ClearRemovedPersonAccessStateAsync(Guid contactId, CancellationToken ct);
+
+    /// <summary>
+    /// Slice C (administrator removal): clears <c>sprk_standinggrant</c> in a PATCH of its own, <c>If-Match: *</c>. The
+    /// application user may update that column only through its direct membership of the standing-grant administrators
+    /// profile; without it Dataverse refuses the write and the result says so (never reported as written).
+    /// </summary>
+    Task<StoreWriteResult> ClearStandingGrantAsync(Guid contactId, CancellationToken ct);
 
     /// <summary>Systemusers (any state) whose <c>sprk_primarycontact</c> is one of <paramref name="contactIds"/>.</summary>
     Task<ReferenceLookup> FindSystemUsersLinkingAsync(IReadOnlyCollection<Guid> contactIds, CancellationToken ct);
@@ -134,11 +267,72 @@ public interface IContactIdentityStore
     Task<BindingReadability> ProbeBindingReadabilityAsync(CancellationToken ct);
 
     /// <summary>
-    /// Tasks 184 and 185 — this environment's intent for <paramref name="contactId"/>, for the CIAM plane's E11: its
-    /// pending-invite marker (<c>sprk_externalinvitedon</c>) and the stored invite-code hash
-    /// (<c>sprk_externalinvitecodehash</c>), read together in ONE query of their own (never in <c>ContactSelect</c>), so a
-    /// missing column reads as <see cref="LookupStatus.ColumnMissing"/> here and nowhere else. No grant is read (task 185,
-    /// option (c)): a grant is no bind evidence.
+    /// ADR-028 A9 (r3 task 046): systemusers whose stored home link — the FIELD-SECURED pair <c>sprk_hometenantid</c> /
+    /// <c>sprk_homeobjectid</c> — is (<paramref name="homeTenantId"/>, <paramref name="homeObjectId"/>). Any state, two rows.
+    /// Read-only. Never filters on the unsecured key mirrors and never on <c>azureactivedirectoryobjectid</c>.
+    /// </summary>
+    Task<HomeLinkLookup> FindHomeLinkedSystemUsersAsync(Guid homeTenantId, Guid homeObjectId, CancellationToken ct);
+
+    /// <summary>
+    /// ADR-028 A9 (r3 task 048): the systemusers whose <c>azureactivedirectoryobjectid</c> is <paramref name="guestObjectId"/>
+    /// — a SPAARKE-TENANT object id, proven by a validated guest token, never a home oid. Any state, two rows, enabled first,
+    /// each with its stored home pair (the SECURED columns) and row version. Read-only; the link route's target.
+    /// </summary>
+    Task<HomeLinkLookup> FindSystemUsersByGuestObjectIdAsync(Guid guestObjectId, CancellationToken ct);
+
+    /// <summary>
+    /// ADR-028 A9 (r3 task 048): writes the stored home link — <c>sprk_hometenantid</c>, <c>sprk_homeobjectid</c> and their
+    /// key mirrors <c>sprk_hometenantidkey</c>, <c>sprk_homeobjectidkey</c>, the same values — in ONE request, conditional on
+    /// <paramref name="etag"/> (no version → no write). A pair another systemuser holds fails on the mirrors' alternate key
+    /// (<see cref="StoreWriteStatus.KeyConflict"/>).
+    /// </summary>
+    Task<StoreWriteResult> WriteHomeLinkAsync(
+        Guid systemUserId, string? etag, Guid homeTenantId, Guid homeObjectId, CancellationToken ct);
+
+    /// <summary>
+    /// ADR-028 A9 (r3 task 046): contacts on plane WorkforceHome whose <c>sprk_externaltenantid</c> is
+    /// <paramref name="homeTenantId"/> and whose binding is <paramref name="homeObjectId"/>. Any state, two rows. Read-only.
+    /// </summary>
+    Task<ContactLookup> FindHomeContactsAsync(Guid homeTenantId, Guid homeObjectId, CancellationToken ct);
+
+    /// <summary>
+    /// ADR-028 A9 (r3 task 047): ENABLED systemusers whose <c>internalemailaddress</c> OR <c>domainname</c> equals
+    /// <paramref name="email"/> (owner 2026-10-15), two rows. Read-only; the registration route's licensed-user refusal.
+    /// </summary>
+    Task<SystemUserEmailLookup> FindEnabledSystemUsersByEmailAsync(string email, CancellationToken ct);
+
+    /// <summary>
+    /// ADR-028 A9 (r3 task 047, fix round 1): the business units named <paramref name="name"/>, two rows. Read-only. The
+    /// registration create's guard that <c>ExternalAccess:CustomerBusinessUnitId</c> is not the Secure Record business unit
+    /// (the same name rule and filter as <c>RecordOwnershipResolver</c>: <c>SecureRecordOwnerTeam</c>).
+    /// </summary>
+    Task<BusinessUnitLookup> FindBusinessUnitsByNameAsync(string name, CancellationToken ct);
+
+    /// <summary>ADR-028 A9 (r3 task 047): the default (owner) team of <paramref name="businessUnitId"/>, two rows. Read-only.</summary>
+    Task<OwnerTeamLookup> FindDefaultOwnerTeamsAsync(Guid businessUnitId, CancellationToken ct);
+
+    /// <summary>
+    /// ADR-028 A9 (r3 task 047): can this identity READ the A9 field-secured columns (<c>contact.sprk_externaltenantid</c>,
+    /// <c>systemuser.sprk_hometenantid</c> / <c>sprk_homeobjectid</c>)? A masked column reads as "no match" in the 046
+    /// reads, so the registration route probes this before any create or bind and denies unless it is readable.
+    /// </summary>
+    Task<BindingReadability> ProbeHomeReadabilityAsync(CancellationToken ct);
+
+    /// <summary>
+    /// ADR-028 A9 (r3 task 047): binds an existing, unbound contact to a home identity — the binding, the uniqueness mirror,
+    /// plane WorkforceHome and <c>sprk_externaltenantid</c>, in ONE request, conditional on <paramref name="etag"/> (no
+    /// version → no write).
+    /// </summary>
+    Task<StoreWriteResult> BindHomeOidAsync(Guid contactId, string? etag, Guid homeTenantId, Guid oid, CancellationToken ct);
+
+    /// <summary>
+    /// Tasks 184 and 185 — this environment's intent for <paramref name="contactId"/>, for E11: its pending-invite marker
+    /// (<c>sprk_externalinvitedon</c>), the stored invite-code hash (<c>sprk_externalinvitecodehash</c>) and the invite stamp
+    /// (<c>sprk_externalinvitedemailhash</c>, <c>sprk_externalinvitedtenantid</c>) with the contact's current
+    /// <c>emailaddress1</c> and row version, read together in ONE query of their own (never in <c>ContactSelect</c>), so a
+    /// missing column reads as <see cref="LookupStatus.ColumnMissing"/> here and nowhere else. An email hash read EMPTY while
+    /// the BFF's read of the stamp columns is not proven is marked (<see cref="BindIntentLookup.StampColumnsUnproven"/>). No
+    /// grant is read (task 185, option (c)): a grant is no bind evidence.
     /// </summary>
     Task<BindIntentLookup> FindBindIntentAsync(Guid contactId, CancellationToken ct);
 
@@ -146,24 +340,45 @@ public interface IContactIdentityStore
     /// Tasks 184 and 185 — writes the pending-invite marker (<c>sprk_externalinvitedon</c> = <paramref name="invitedOn"/>,
     /// UTC) AND the new invite's stored code hash (<c>sprk_externalinvitecodehash</c> = <paramref name="inviteCodeHash"/>)
     /// onto an existing contact in ONE request, so a re-invite replaces both together. Conditional on
-    /// <paramref name="etag"/> when there is one (else <c>If-Match: *</c>, so the PATCH never creates a row). Writes nothing
-    /// else. <see cref="StoreWriteStatus.ColumnMissing"/> when either column is not provisioned here.
+    /// <paramref name="etag"/> (never <c>*</c>; no row version, no write — #2005: a contact bound since it was read must
+    /// never receive a marker or a hash). The same request writes the invite stamp (<paramref name="stamp"/>: the email hash
+    /// and the invited tenant, null clearing an earlier one). Writes nothing else. <see cref="StoreWriteStatus.ColumnMissing"/>
+    /// when any of the four columns is not provisioned here.
+    /// <para>A portal-account invite carries a code hash and names no tenant; a work-account invite names its resolved
+    /// tenant and carries no code hash (<paramref name="inviteCodeHash"/> null clears an earlier one). Any other pairing
+    /// throws before anything is sent (<see cref="DataverseContactIdentityStore.InviteMarkerPayload"/>).</para>
     /// </summary>
     Task<StoreWriteResult> MarkInvitedAsync(
-        Guid contactId, string? etag, DateTimeOffset invitedOn, string inviteCodeHash, CancellationToken ct);
+        Guid contactId, string? etag, DateTimeOffset invitedOn, string? inviteCodeHash, InviteStamp stamp, CancellationToken ct);
+
+    /// <summary>
+    /// Slice C2b: retracts an invite whose email did not go out. Clears the pending-invite marker
+    /// (<c>sprk_externalinvitedon</c>), the invite-code hash and the invite stamp (email hash and invited tenant) in ONE
+    /// request, conditional on <paramref name="etag"/> (never <c>*</c>; no row version, no write), so an invite written
+    /// after that version is never cleared. Writes nothing else: never a binding column or the access baseline.
+    /// </summary>
+    Task<StoreWriteResult> ClearPendingInviteAsync(Guid contactId, string? etag, CancellationToken ct);
 
     /// <summary>
     /// Writes the oid (D format) into the binding AND the uniqueness mirror, with the plane, in ONE request,
     /// conditional on <paramref name="etag"/>. Another contact holding the oid in its mirror makes the platform
-    /// refuse the write (<see cref="StoreWriteStatus.KeyConflict"/>).
+    /// refuse the write (<see cref="StoreWriteStatus.KeyConflict"/>). It never names the invite-code hash column, so it
+    /// is used only where that column is KNOWN to be absent (the invite's marker-and-hash write answered
+    /// <see cref="StoreWriteStatus.ColumnMissing"/>); every other bind is <see cref="BindOidAndConsumeInviteAsync"/>.
     /// </summary>
     Task<StoreWriteResult> BindOidAsync(Guid contactId, string? etag, Guid oid, IdentityPlaneMarker plane, CancellationToken ct);
 
     /// <summary>
-    /// Task 185 — <see cref="BindOidAsync"/>'s bind PLUS <c>sprk_externalinvitecodehash = null</c>, in ONE request
-    /// conditional on <paramref name="etag"/> (never <c>*</c>; no row version, no write). The invite code is consumed by
-    /// the same write that binds the oid, so it is single-use. The marker is not touched. A separate method so the
-    /// workforce and systemuser binds stay byte-identical.
+    /// Task 185 — <see cref="BindOidAsync"/>'s bind PLUS <c>sprk_externalinvitecodehash = null</c> and the invite stamp
+    /// cleared (<c>sprk_externalinvitedemailhash</c>, <c>sprk_externalinvitedtenantid</c> = null), in ONE request conditional
+    /// on <paramref name="etag"/> (never <c>*</c>; no row version, no write). The invite code and stamp are consumed by the
+    /// same write that binds the oid, so they are single-use. The marker is not touched.
+    /// <para>
+    /// #2005 — EVERY bind of an oid onto an existing contact uses this, on every plane (CIAM, workforce, systemuser), so a
+    /// bound contact never holds an unused code hash and an operator unbind cannot revive an earlier invite link. Where the
+    /// hash column is not provisioned the platform refuses the whole PATCH as a missing property; nothing was written, so
+    /// the plain bind is sent under the SAME row version and its result is returned (there is no hash to consume).
+    /// </para>
     /// </summary>
     Task<StoreWriteResult> BindOidAndConsumeInviteAsync(
         Guid contactId, string? etag, Guid oid, IdentityPlaneMarker plane, CancellationToken ct);
@@ -226,7 +441,48 @@ public sealed class DataverseContactIdentityStore : IContactIdentityStore
         "contactid", "statecode", "emailaddress1",
         ContactBindingDecision.ExternalObjectIdColumn, ContactBindingDecision.IdentityPlaneColumn,
         ContactBindingDecision.KeyMirrorColumn,
-        FlagOnColumn, FlagOidColumn, FlagPlaneColumn, FlagReasonColumn, FlagPartiesColumn);
+        FlagOnColumn, FlagOidColumn, FlagPlaneColumn, FlagReasonColumn, FlagPartiesColumn,
+        ContactBindingDecision.ExternalAccessRemovedOnColumn);
+
+    /// <summary>
+    /// Slice C: the removed marker's field-secured column (its own readability proof). An EMPTY marker is trusted only while
+    /// the BFF's read of it is proven; a row whose marker read empty without that proof is marked
+    /// (<see cref="ContactBindingRow.RemovedMarkerUnproven"/>) and counts as removed.
+    /// </summary>
+    public static readonly IReadOnlyList<string> RemovedMarkerColumns = new[]
+    {
+        ContactBindingDecision.ExternalAccessRemovedOnColumn,
+    };
+
+    /// <summary>
+    /// The field-secured binding columns: the binding and its plane. An EMPTY plane is trusted only while the BFF's read of
+    /// both is proven (<see cref="SecuredColumnReadProof"/>); a row whose plane read empty without that proof is marked
+    /// (<see cref="ContactBindingRow.IdentityColumnsUnproven"/>).
+    /// </summary>
+    public static readonly IReadOnlyList<string> BindingColumns = new[]
+    {
+        ContactBindingDecision.ExternalObjectIdColumn, ContactBindingDecision.IdentityPlaneColumn,
+    };
+
+    /// <summary>
+    /// The five field-secured collision-flag columns. A flag read while the BFF's read of all five is not proven may be
+    /// hidden in whole or in part, so it is never overwritten: the row is marked
+    /// (<see cref="ContactBindingRow.CollisionColumnsUnproven"/>) and its flag reads as one whose parties cannot be read.
+    /// The proof is per column set: the binding columns and these are proven separately.
+    /// </summary>
+    public static readonly IReadOnlyList<string> CollisionColumns = new[]
+    {
+        FlagOnColumn, FlagOidColumn, FlagPlaneColumn, FlagReasonColumn, FlagPartiesColumn,
+    };
+
+    /// <summary>
+    /// Every field-secured identity column a binding read decides on (<see cref="BindingColumns"/> and
+    /// <see cref="CollisionColumns"/>). The masking probe reads as Masked unless the BFF's read of all of them is proven.
+    /// </summary>
+    public static readonly IReadOnlyList<string> IdentityColumns = BindingColumns.Concat(CollisionColumns).ToArray();
+
+    /// <summary>The table the identity columns live on.</summary>
+    public const string ContactTable = "contact";
 
     /// <summary>The systemuser columns the link decision selects.</summary>
     public const string SystemUserSelect =
@@ -237,18 +493,56 @@ public sealed class DataverseContactIdentityStore : IContactIdentityStore
     private readonly string _apiUrl;
     private readonly ILogger _logger;
 
+    // The proofs that this store's identity can READ the binding columns and the collision columns, made over THIS store's
+    // environment and token (a store may target another environment than the BFF's own). Each is held for
+    // SecuredColumnReadProof.ProofLifetime; a store built by ContactIdentityBinderFactory shares them with every other store
+    // the factory builds for the same environment.
+    private readonly SecuredColumnReadProof _bindingColumnsProof;
+    private readonly SecuredColumnReadProof _collisionColumnsProof;
+
+    // The proof that this store's identity can READ the invite stamp's columns: an email hash read empty without it may be a
+    // hidden one. Either way an empty stamp is no stamp (the bind is refused); the proof names the reason for the operator.
+    private readonly SecuredColumnReadProof _inviteStampColumnsProof;
+
+    // Slice C: the proof that this store's identity can READ the removed marker. A marker read empty without it may be a
+    // hidden one, so the row counts as removed (fail closed).
+    private readonly SecuredColumnReadProof _removedMarkerProof;
+
     /// <summary>The store for an environment, authenticated by <paramref name="getToken"/>.</summary>
     public DataverseContactIdentityStore(
         IHttpClientFactory httpClientFactory,
         Func<CancellationToken, Task<string>> getToken,
         string dataverseBaseUrl,
-        ILogger logger)
+        ILogger logger,
+        TimeProvider? time = null)
+        : this(httpClientFactory, getToken, dataverseBaseUrl, logger,
+            (source, table, columns) => new SecuredColumnReadProof(source, table, columns, logger, time))
+    {
+    }
+
+    /// <summary>
+    /// The store for an environment, whose readability proofs come from <paramref name="readProofs"/> (given this store's
+    /// own permission source, the table and the column set): the seam through which
+    /// <see cref="ContactIdentityBinderFactory"/> shares one proof per environment and column set across its stores.
+    /// </summary>
+    internal DataverseContactIdentityStore(
+        IHttpClientFactory httpClientFactory,
+        Func<CancellationToken, Task<string>> getToken,
+        string dataverseBaseUrl,
+        ILogger logger,
+        Func<IColumnReadPermissionSource, string, IReadOnlyList<string>, SecuredColumnReadProof> readProofs)
     {
         _httpClientFactory = httpClientFactory ?? throw new ArgumentNullException(nameof(httpClientFactory));
         _getToken = getToken ?? throw new ArgumentNullException(nameof(getToken));
         ArgumentException.ThrowIfNullOrWhiteSpace(dataverseBaseUrl);
         _apiUrl = $"{dataverseBaseUrl.TrimEnd('/')}/api/data/v9.2";
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        ArgumentNullException.ThrowIfNull(readProofs);
+        var source = new WebApiColumnReadPermissionSource(this);
+        _bindingColumnsProof = readProofs(source, ContactTable, BindingColumns);
+        _collisionColumnsProof = readProofs(source, ContactTable, CollisionColumns);
+        _inviteStampColumnsProof = readProofs(source, ContactTable, InviteStampColumns);
+        _removedMarkerProof = readProofs(source, ContactTable, RemovedMarkerColumns);
     }
 
     /// <summary>
@@ -291,6 +585,17 @@ public sealed class DataverseContactIdentityStore : IContactIdentityStore
         => $"contacts?$select={ContactSelect}"
            + $"&$filter=emailaddress1 eq '{Literal(email)}' and statecode eq 0&$top=2";
 
+    /// <summary>
+    /// INACTIVE contacts by email, two rows (r3 task 047, fix round 2). The pair of <see cref="BuildEmailLookupPath"/>:
+    /// <c>statecode eq 1</c> instead of <c>eq 0</c>, same email literal and same selected columns. Slice C2b: removed
+    /// contacts first (the removed marker descending; an empty marker sorts last), so the two rows read always include a
+    /// removed contact for the email when one exists, however many inactive contacts carry it.
+    /// </summary>
+    public static string BuildInactiveEmailLookupPath(string email)
+        => $"contacts?$select={ContactSelect}"
+           + $"&$filter=emailaddress1 eq '{Literal(email)}' and statecode eq 1"
+           + $"&$orderby={ContactBindingDecision.ExternalAccessRemovedOnColumn} desc&$top=2";
+
     /// <summary>Systemusers linking any of the contacts — any state, so a disabled user's link still counts.</summary>
     public static string BuildReferenceLookupPath(IReadOnlyCollection<Guid> contactIds)
         => $"systemusers?$select=systemuserid,azureactivedirectoryobjectid,_sprk_primarycontact_value"
@@ -304,7 +609,37 @@ public sealed class DataverseContactIdentityStore : IContactIdentityStore
     /// </summary>
     public static string BuildInviteMarkerPath(Guid contactId)
         => $"contacts({contactId:D})?$select=contactid,{ContactBindingDecision.ExternalInvitedOnColumn},"
-           + ContactBindingDecision.ExternalInviteCodeHashColumn;
+           + $"{ContactBindingDecision.ExternalInviteCodeHashColumn},emailaddress1,"
+           + $"{ContactBindingDecision.ExternalInvitedEmailHashColumn},{ContactBindingDecision.ExternalInvitedTenantIdColumn}";
+
+    /// <summary>
+    /// The invite stamp's part of the marker read's answer (<see cref="BuildInviteMarkerPath"/>), from a body
+    /// <see cref="InterpretMarkerLeg"/> already read as this contact's row: the stored email hash, the invited tenant (raw
+    /// text), the contact's current <c>emailaddress1</c> and the row version (<c>@odata.etag</c>). Each is null when absent
+    /// or not a string. Pure; the decision interprets them.
+    /// </summary>
+    public static (string? InvitedEmailHash, string? RawInvitedTenantId, string? CurrentEmail, string? ETag) InterpretStampLeg(
+        string? body)
+    {
+        using var doc = body is null ? null : TryParseJson(body);
+        if (doc is null || doc.RootElement.ValueKind != JsonValueKind.Object)
+        {
+            return (null, null, null, null);
+        }
+
+        var row = doc.RootElement;
+        return (StringOf(row, ContactBindingDecision.ExternalInvitedEmailHashColumn),
+            StringOf(row, ContactBindingDecision.ExternalInvitedTenantIdColumn),
+            StringOf(row, "emailaddress1"),
+            StringOf(row, "@odata.etag"));
+    }
+
+    /// <summary>The invite stamp's two field-secured columns (the readability proof's column set; every bind clears both).</summary>
+    public static readonly IReadOnlyList<string> InviteStampColumns = new[]
+    {
+        ContactBindingDecision.ExternalInvitedEmailHashColumn,
+        ContactBindingDecision.ExternalInvitedTenantIdColumn,
+    };
 
     /// <summary>
     /// Tasks 184 and 185 — what the marker leg's answer says. Pure.
@@ -344,25 +679,54 @@ public sealed class DataverseContactIdentityStore : IContactIdentityStore
     }
 
     /// <summary>
-    /// Tasks 184 and 185 — the marker write's body: the marker (UTC, second precision) AND the new invite's stored code
-    /// hash, together, so a re-invite replaces both in one request. Nothing else.
+    /// Tasks 184 and 185 — the marker write's body: the marker (UTC, second precision), the new invite's stored code hash
+    /// AND the invite stamp (the email hash, and the invited tenant as lowercase "D" text or null), together, so a re-invite
+    /// replaces all four in one request. Nothing else.
+    /// <para>Exactly one of the code hash and the tenant is set. A portal-account invite carries a code hash and no tenant
+    /// (it is bound by a CIAM sign-in presenting the code); a work-account invite carries its resolved tenant and no code
+    /// hash, which clears an earlier one (it is bound only by a Workforce or WorkforceHome sign-in from that tenant). A
+    /// tenant is never written beside a code, and a code is never cleared without a tenant: the tenant column alone says
+    /// which kind of sign-in the invite is for (<see cref="ContactBindingDecision.IsWorkAccountInvite"/>). Both or neither
+    /// throws.</para>
     /// </summary>
-    public static Dictionary<string, object?> InviteMarkerPayload(DateTimeOffset invitedOn, string inviteCodeHash)
+    public static Dictionary<string, object?> InviteMarkerPayload(DateTimeOffset invitedOn, string? inviteCodeHash, InviteStamp stamp)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(inviteCodeHash);
+        ArgumentNullException.ThrowIfNull(stamp);
+        ArgumentException.ThrowIfNullOrWhiteSpace(stamp.InvitedEmailHash);
+        if (stamp.InvitedTenantId == Guid.Empty)
+        {
+            throw new ArgumentException("An invited tenant is a non-empty GUID, or null for none.", nameof(stamp));
+        }
+
+        if (inviteCodeHash is not null)
+        {
+            ArgumentException.ThrowIfNullOrWhiteSpace(inviteCodeHash);
+        }
+
+        if ((inviteCodeHash is null) != (stamp.InvitedTenantId is not null))
+        {
+            throw new ArgumentException(
+                "An invite stamp carries an invite code (a portal-account invite, no tenant) or a resolved tenant (a "
+                + "work-account invite, no code): exactly one of the two.", nameof(inviteCodeHash));
+        }
+
         return new Dictionary<string, object?>
         {
             [ContactBindingDecision.ExternalInvitedOnColumn] =
                 invitedOn.UtcDateTime.ToString("yyyy-MM-ddTHH:mm:ssZ", CultureInfo.InvariantCulture),
             [ContactBindingDecision.ExternalInviteCodeHashColumn] = inviteCodeHash,
+            [ContactBindingDecision.ExternalInvitedEmailHashColumn] = stamp.InvitedEmailHash,
+            [ContactBindingDecision.ExternalInvitedTenantIdColumn] = stamp.InvitedTenantId?.ToString("D"),
         };
     }
 
-    /// <summary>The marker write's columns: a write fault naming EITHER is <see cref="StoreWriteStatus.ColumnMissing"/>.</summary>
+    /// <summary>The marker write's columns: a write fault naming ANY is <see cref="StoreWriteStatus.ColumnMissing"/>.</summary>
     public static readonly IReadOnlyList<string> InviteMarkerColumns = new[]
     {
         ContactBindingDecision.ExternalInvitedOnColumn,
         ContactBindingDecision.ExternalInviteCodeHashColumn,
+        ContactBindingDecision.ExternalInvitedEmailHashColumn,
+        ContactBindingDecision.ExternalInvitedTenantIdColumn,
     };
 
     /// <summary>
@@ -389,10 +753,384 @@ public sealed class DataverseContactIdentityStore : IContactIdentityStore
                || error.Contains("Invalid property", StringComparison.OrdinalIgnoreCase)
                || error.Contains("Could not find a property named", StringComparison.OrdinalIgnoreCase));
 
+    /// <summary>
+    /// ADR-028 A9 (r3 task 046): the stored-link read. Filters on the FIELD-SECURED pair only (design §5: a mirror edit must
+    /// never redirect a sign-in), any state (a disabled link must be seen so it can deny), two rows (an ambiguous link must
+    /// be visible). Selects <c>isdisabled</c> and the secured pair, which the decision re-checks. Ordered
+    /// <c>isdisabled asc</c> (as <c>WorkforcePrincipalResolver.ResolveSystemUserAsync</c>): the two rows are an ENABLED-first
+    /// sample, so [disabled, enabled, enabled] returns two enabled rows and denies <c>home_link_ambiguous</c> rather than
+    /// resolving the second enabled one.
+    /// </summary>
+    public static string BuildHomeLinkLookupPath(Guid homeTenantId, Guid homeObjectId)
+        => $"systemusers?$select=systemuserid,isdisabled,{ContactBindingDecision.HomeTenantIdColumn},"
+           + ContactBindingDecision.HomeObjectIdColumn
+           + $"&$filter={ContactBindingDecision.HomeTenantIdColumn} eq '{homeTenantId:D}'"
+           + $" and {ContactBindingDecision.HomeObjectIdColumn} eq '{homeObjectId:D}'&$top=2&$orderby=isdisabled asc";
+
+    /// <summary>
+    /// <c>systemuser.internalemailaddress</c>: with <c>domainname</c>, the A9 licensed-user email read
+    /// (<see cref="BuildLicensedUserEmailLookupPath"/>, <see cref="ContactBindingDecision.DecideLicensedUserEmail"/>). <c>internal</c> (#2253 fix round 2): <c>InheritedAccessPermission.AccessColumns</c> refuses it to app-only generic writers.
+    /// </summary>
+    internal const string InternalEmailColumn = "internalemailaddress";
+
+    /// <summary>The systemuser home-link uniqueness mirror (unsecured): the home probe's row filter (task 044).</summary>
+    public const string HomeObjectIdKeyColumn = "sprk_homeobjectidkey";
+
+    /// <summary>The systemuser home-tenant uniqueness mirror (unsecured), written with the link (task 044). Never read.</summary>
+    public const string HomeTenantIdKeyColumn = "sprk_hometenantidkey";
+
+    /// <summary>
+    /// ADR-028 A9 (r3 task 048): the link route's target read — systemusers by their Spaarke-tenant object id (the guest
+    /// token's <c>oid</c>), any state (a disabled user must be seen so it can refuse), two rows (an ambiguous id must be
+    /// visible), enabled first (as <see cref="BuildHomeLinkLookupPath"/>). Selects the SECURED pair the decision re-checks.
+    /// </summary>
+    public static string BuildGuestSystemUserLookupPath(Guid guestObjectId)
+        => $"systemusers?$select=systemuserid,isdisabled,{ContactBindingDecision.HomeTenantIdColumn},"
+           + ContactBindingDecision.HomeObjectIdColumn
+           // includes disabled: the link must see a disabled guest systemuser in order to refuse it;
+           // ContactBindingDecision.DecideHomeLinkWrite keeps only enabled rows and denies when none is left.
+           + $"&$filter=azureactivedirectoryobjectid eq {guestObjectId:D}&$top=2&$orderby=isdisabled asc";
+
+    /// <summary>
+    /// ADR-028 A9 (r3 task 048): the link write's payload — the SECURED pair and its two unsecured key mirrors, the same
+    /// values (design §5). Pure.
+    /// </summary>
+    public static Dictionary<string, object?> HomeLinkPayload(Guid homeTenantId, Guid homeObjectId)
+    {
+        if (homeTenantId == Guid.Empty) throw new ArgumentException("A home link needs the home tenant.", nameof(homeTenantId));
+        if (homeObjectId == Guid.Empty) throw new ArgumentException("A home link needs the home object id.", nameof(homeObjectId));
+        var tenant = homeTenantId.ToString("D");
+        var oid = homeObjectId.ToString("D");
+        return new Dictionary<string, object?>
+        {
+            [ContactBindingDecision.HomeTenantIdColumn] = tenant,
+            [ContactBindingDecision.HomeObjectIdColumn] = oid,
+            [HomeTenantIdKeyColumn] = tenant,
+            [HomeObjectIdKeyColumn] = oid,
+        };
+    }
+
+    /// <summary>The owner lookup bind key on a create.</summary>
+    public const string OwnerBindKey = "ownerid@odata.bind";
+
+    /// <summary>
+    /// ADR-028 A9 (r3 task 047): the licensed-user read — ENABLED systemusers whose <c>internalemailaddress</c> OR
+    /// <c>domainname</c> equals the email (owner 2026-10-15: in dev 2 of 11 enabled users differ between the two), two rows.
+    /// Dataverse compares text case-insensitively; <see cref="ContactBindingDecision.DecideLicensedUserEmail"/> re-checks.
+    /// </summary>
+    public static string BuildLicensedUserEmailLookupPath(string email)
+        => "systemusers?$select=systemuserid,isdisabled," + InternalEmailColumn + ",domainname"
+           + "&$filter=isdisabled eq false and (" + InternalEmailColumn
+           + $" eq '{Literal(email)}' or domainname eq '{Literal(email)}')"
+           + "&$top=2";
+
+    /// <summary>
+    /// ADR-028 A9 (r3 task 047): the business unit's default team (<c>isdefault</c>, owner team type 0), two rows — the
+    /// same filter as <c>RecordOwnershipResolver</c>'s default-team read.
+    /// </summary>
+    public static string BuildDefaultOwnerTeamPath(Guid businessUnitId)
+        => $"teams?$select=teamid&$filter=_businessunitid_value eq {businessUnitId:D} and isdefault eq true and teamtype eq 0&$top=2";
+
+    /// <summary>The business units carrying a name, two rows (the filter is <c>SecureRecordOwnerTeam.BusinessUnitFilter</c>).</summary>
+    public static string BuildBusinessUnitByNamePath(string name)
+        => $"businessunits?$select=businessunitid&$filter={Sprk.Bff.Api.Infrastructure.Dataverse.SecureRecordOwnerTeam.BusinessUnitFilter(name)}&$top=2";
+
+    /// <summary>The A9 contact probe: WorkforceHome rows with their binding and home directory.</summary>
+    public static string BuildHomeContactProbePath()
+        => $"contacts?$select=contactid,{ContactBindingDecision.ExternalObjectIdColumn},{ContactBindingDecision.IdentityPlaneColumn},"
+           + ContactBindingDecision.ExternalTenantIdColumn
+           + $"&$filter={ContactBindingDecision.IdentityPlaneColumn} eq {ContactBindingDecision.WorkforceHomePlaneValue}&$top=50";
+
+    /// <summary>
+    /// The A9 systemuser probe: rows whose UNSECURED key mirror is set, with the secured pair they mirror. It also selects
+    /// the tenant mirror (r3 task 048): the link write sets both mirrors, so an environment missing either column reports
+    /// ColumnMissing here, before any write, rather than failing the write as a retryable fault.
+    /// </summary>
+    public static string BuildHomeLinkProbePath()
+        => $"systemusers?$select=systemuserid,isdisabled,{ContactBindingDecision.HomeTenantIdColumn},"
+           + $"{ContactBindingDecision.HomeObjectIdColumn},{HomeTenantIdKeyColumn}"
+           + $"&$filter={HomeObjectIdKeyColumn} ne null&$top=50";
+
+    /// <summary>
+    /// ADR-028 A9 (r3 task 047): the A9 masking verdict. Pure. Every A9 write sets the secured column with its mirror or
+    /// plane in one request, so when EVERY marked row comes back without the secured value the column is masked from this
+    /// identity. A read that failed (or a missing column) → <see cref="BindingReadability.Failed"/>.
+    /// </summary>
+    public static BindingReadability ClassifyHomeProbe(ContactLookup contacts, HomeLinkLookup links)
+    {
+        ArgumentNullException.ThrowIfNull(contacts);
+        ArgumentNullException.ThrowIfNull(links);
+        // A missing column is a permanent fault (an operator applies the schema); any other unread status is transient.
+        if (contacts.Status == LookupStatus.ColumnMissing || links.Status == LookupStatus.ColumnMissing) return BindingReadability.ColumnMissing;
+        if (contacts.Status != LookupStatus.Read || links.Status != LookupStatus.Read) return BindingReadability.Failed;
+
+        if (contacts.Rows.Count > 0 && contacts.Rows.All(r => string.IsNullOrWhiteSpace(r.RawExternalTenantId)))
+        {
+            return BindingReadability.Masked;
+        }
+
+        if (links.Rows.Count > 0
+            && links.Rows.All(r => string.IsNullOrWhiteSpace(r.RawHomeTenantId) || string.IsNullOrWhiteSpace(r.RawHomeObjectId)))
+        {
+            return BindingReadability.Masked;
+        }
+
+        return contacts.Rows.Count == 0 && links.Rows.Count == 0 ? BindingReadability.NoMarkedRows : BindingReadability.Readable;
+    }
+
+    /// <summary>
+    /// ADR-028 A9 (r3 task 047): the home bind payload — <see cref="BindPayload"/> on plane WorkforceHome plus the home
+    /// directory, lowercase "D" text (the 046 reads match only that form).
+    /// </summary>
+    public static Dictionary<string, object?> HomeBindPayload(Guid homeTenantId, Guid oid)
+    {
+        if (homeTenantId == Guid.Empty) throw new ArgumentException("A home bind needs the home tenant.", nameof(homeTenantId));
+        var payload = BindPayload(oid, IdentityPlaneMarker.WorkforceHome);
+        payload[ContactBindingDecision.ExternalTenantIdColumn] = homeTenantId.ToString("D");
+        return payload;
+    }
+
+    /// <summary>
+    /// ADR-028 A9 (r3 task 047, UAC review F1): the registration's home bind payload — exactly <see cref="HomeBindPayload"/>
+    /// plus the invite-code hash set to null, in the one request (task 185's invariant: a bound contact never holds an
+    /// unused invite-code hash, or a later unbind would let a forwarded invite link bind the contact through the CIAM
+    /// path). The marker (<c>sprk_externalinvitedon</c>) is not touched. Pure.
+    /// </summary>
+    public static Dictionary<string, object?> HomeBindAndConsumeInvitePayload(Guid homeTenantId, Guid oid)
+    {
+        var payload = HomeBindPayload(homeTenantId, oid);
+        ClearInvite(payload);
+        return payload;
+    }
+
+    /// <summary>
+    /// Sets the consumed invite's columns to null on <paramref name="payload"/>: the invite-code hash and the invite stamp
+    /// (the email hash and the invited tenant). The marker is not touched.
+    /// </summary>
+    private static void ClearInvite(Dictionary<string, object?> payload)
+    {
+        payload[ContactBindingDecision.ExternalInviteCodeHashColumn] = null;
+        foreach (var column in InviteStampColumns)
+        {
+            payload[column] = null;
+        }
+    }
+
+    /// <summary>
+    /// The one write request every store write sends. Pure, so its headers are pinned directly: OData versions, the
+    /// optional precondition, JSON — and never <c>MSCRM.SuppressDuplicateDetection</c> (r3 task 047, owner 2026-10-15:
+    /// API writes do not opt in to duplicate-detection rules; email is the canonical duplicate check).
+    /// </summary>
+    public static HttpRequestMessage BuildWriteRequest(
+        HttpMethod method, Uri uri, Dictionary<string, object?> payload, string token, (string Name, string Value)? precondition)
+    {
+        var request = new HttpRequestMessage(method, uri)
+        {
+            Content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json"),
+        };
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        request.Headers.Add("OData-MaxVersion", "4.0");
+        request.Headers.Add("OData-Version", "4.0");
+        if (precondition is { } header)
+        {
+            request.Headers.TryAddWithoutValidation(header.Name, header.Value);
+        }
+
+        request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+        return request;
+    }
+
+    /// <summary>The home contact read's columns: every binding column, plus the home directory.</summary>
+    public static readonly string HomeContactSelect = $"{ContactSelect},{ContactBindingDecision.ExternalTenantIdColumn}";
+
+    /// <summary>
+    /// ADR-028 A9 (r3 task 046): the home contact read — plane WorkforceHome AND the home directory AND the binding, any
+    /// state, two rows. Its own select (<see cref="HomeContactSelect"/>), so no other read depends on the A9 column.
+    /// </summary>
+    public static string BuildHomeContactLookupPath(Guid homeTenantId, Guid homeObjectId)
+        => $"contacts?$select={HomeContactSelect}"
+           + $"&$filter={ContactBindingDecision.IdentityPlaneColumn} eq {ContactBindingDecision.WorkforceHomePlaneValue}"
+           + $" and {ContactBindingDecision.ExternalTenantIdColumn} eq '{homeTenantId:D}'"
+           + $" and {ContactBindingDecision.ExternalObjectIdColumn} eq '{homeObjectId:D}'&$top=2";
+
+    /// <summary>Parses one stored-link row from Web API JSON. <c>isdisabled</c> that is not a boolean reads as null.</summary>
+    public static HomeLinkRow? ParseHomeLinkRow(JsonElement row)
+    {
+        if (row.ValueKind != JsonValueKind.Object) return null;
+        var id = GuidOf(row, "systemuserid");
+        if (id is null) return null;
+
+        bool? disabled = row.TryGetProperty("isdisabled", out var d) && d.ValueKind is JsonValueKind.True or JsonValueKind.False
+            ? d.GetBoolean()
+            : null;
+        return new HomeLinkRow(
+            id.Value, disabled,
+            StringOf(row, ContactBindingDecision.HomeTenantIdColumn),
+            StringOf(row, ContactBindingDecision.HomeObjectIdColumn),
+            StringOf(row, "@odata.etag"));
+    }
+
     /// <summary>The masking probe: rows that carry a plane marker.</summary>
     public static string BuildProbePath()
         => $"contacts?$select=contactid,{ContactBindingDecision.ExternalObjectIdColumn},{ContactBindingDecision.IdentityPlaneColumn}"
            + $"&$filter={ContactBindingDecision.IdentityPlaneColumn} ne null&$top=50";
+
+    /// <summary>The readability proof's first read: this store's own Dataverse user.</summary>
+    public static string BuildWhoAmIPath() => "WhoAmI";
+
+    /// <summary>
+    /// The readability proof's System Administrator leg: a role of the System Administrator template (by role template id,
+    /// so a business unit's copy counts and a renamed role still does), joined to <paramref name="user"/> through
+    /// <c>systemuserroles</c>. The same query as the SDK source (<see cref="SdkColumnReadPermissionSource"/>), as FetchXML.
+    /// </summary>
+    public static string BuildSystemAdministratorRolePath(Guid user)
+        => "roles?fetchXml=" + Uri.EscapeDataString(
+            "<fetch top=\"1\"><entity name=\"role\"><attribute name=\"roleid\" />"
+            + $"<filter><condition attribute=\"roletemplateid\" operator=\"eq\" value=\"{SecuredColumnReadProof.SystemAdministratorRoleTemplateId:D}\" /></filter>"
+            + "<link-entity name=\"systemuserroles\" from=\"roleid\" to=\"roleid\" link-type=\"inner\">"
+            + $"<filter><condition attribute=\"systemuserid\" operator=\"eq\" value=\"{user:D}\" /></filter>"
+            + "</link-entity></entity></fetch>");
+
+    /// <summary>
+    /// The readability proof's profile legs: the field permissions granting Read on <paramref name="columns"/> of
+    /// <paramref name="table"/> through a profile of <paramref name="user"/> — its own (<c>systemuserprofiles</c>) or, with
+    /// <paramref name="throughTeam"/>, a team's it is a member of (<c>teamprofiles</c> to <c>teammembership</c>).
+    /// The read has no condition on the table: Dataverse refuses a FetchXML condition on <c>fieldpermission.entityname</c>
+    /// given a table's logical name (observed live: the read answers 400). It selects <c>entityname</c> instead, and
+    /// <see cref="ParseGrantedColumns"/> checks the table in code. One page of
+    /// <see cref="SdkColumnReadPermissionSource.FieldPermissionPageSize"/> rows is asked for explicitly (<c>count</c>), so a
+    /// fuller answer is recognised as possibly cut short.
+    /// </summary>
+    public static string BuildFieldPermissionReadPath(Guid user, string table, IEnumerable<string> columns, bool throughTeam)
+    {
+        ArgumentNullException.ThrowIfNull(columns);
+        var values = string.Concat(columns.Select(c => $"<value>{Xml(c)}</value>"));
+        var member = $"<filter><condition attribute=\"systemuserid\" operator=\"eq\" value=\"{user:D}\" /></filter>";
+        var link = throughTeam
+            ? "<link-entity name=\"teamprofiles\" from=\"fieldsecurityprofileid\" to=\"fieldsecurityprofileid\" link-type=\"inner\">"
+              + "<link-entity name=\"teammembership\" from=\"teamid\" to=\"teamid\" link-type=\"inner\">" + member
+              + "</link-entity></link-entity>"
+            : "<link-entity name=\"systemuserprofiles\" from=\"fieldsecurityprofileid\" to=\"fieldsecurityprofileid\" link-type=\"inner\">"
+              + member + "</link-entity>";
+        return "fieldpermissions?fetchXml=" + Uri.EscapeDataString(
+            $"<fetch count=\"{SdkColumnReadPermissionSource.FieldPermissionPageSize}\"><entity name=\"fieldpermission\">"
+            + "<attribute name=\"attributelogicalname\" /><attribute name=\"entityname\" /><filter>"
+            + $"<condition attribute=\"canread\" operator=\"eq\" value=\"{SecuredColumnReadProof.FieldPermissionAllowed}\" />"
+            + $"<condition attribute=\"attributelogicalname\" operator=\"in\">{values}</condition>"
+            + "</filter>" + link + "</entity></fetch>");
+    }
+
+    /// <summary>
+    /// The columns of <paramref name="table"/> a field-permission read (<see cref="BuildFieldPermissionReadPath"/>) answered.
+    /// Pure. A row counts only when its <c>entityname</c> is a string equal to <paramref name="table"/> (ignoring case); a row
+    /// whose table is missing or not a string never counts (fail closed). This check is what keeps a grant on a same-named
+    /// column of another table (for example <c>sprk_accesspermissiongrant</c>, on both <c>contact</c> and
+    /// <c>sprk_organization</c>) from proving this table's column.
+    /// <para>The answer must be complete: one page. The rows are bounded by the asked columns times the user's profiles, far
+    /// below a page, so an answer without a <c>value</c> array, one that says more rows exist (<c>@odata.nextLink</c> or
+    /// <c>@Microsoft.Dynamics.CRM.morerecords</c>), or one that fills the page throws; the proof is then Faulted, never
+    /// "no grant".</para>
+    /// </summary>
+    internal static IReadOnlyCollection<string> ParseGrantedColumns(JsonElement root, string table)
+    {
+        if (root.ValueKind != JsonValueKind.Object
+            || !root.TryGetProperty("value", out var value) || value.ValueKind != JsonValueKind.Array)
+        {
+            throw new InvalidOperationException("A field-permission read did not answer a value array.");
+        }
+
+        if (root.TryGetProperty("@odata.nextLink", out _)
+            || (root.TryGetProperty("@Microsoft.Dynamics.CRM.morerecords", out var more) && more.ValueKind == JsonValueKind.True)
+            || value.GetArrayLength() >= SdkColumnReadPermissionSource.FieldPermissionPageSize)
+        {
+            throw new InvalidOperationException(
+                "A field-permission read answered more than one page; a partial answer is not taken as an answer.");
+        }
+
+        return value.EnumerateArray()
+            .Where(r => r.ValueKind == JsonValueKind.Object
+                && StringOf(r, "entityname") is { } rowTable && string.Equals(rowTable, table, StringComparison.OrdinalIgnoreCase))
+            .Select(r => StringOf(r, "attributelogicalname"))
+            .Where(c => !string.IsNullOrWhiteSpace(c))
+            .Select(c => c!)
+            .ToArray();
+    }
+
+    private static string Xml(string value) => System.Security.SecurityElement.Escape(value) ?? string.Empty;
+
+    /// <summary>
+    /// The masking verdict once the identity columns' readability proof has run. Pure. Without proof every marked row may
+    /// be hidden (a hidden plane reads as no plane, and the probe then finds no marked rows), so an unproven read is
+    /// <see cref="BindingReadability.Masked"/> and a proof that faulted is <see cref="BindingReadability.Failed"/>, whatever
+    /// the probe returned. Only a proven read is classified by its rows (<see cref="ClassifyProbe(ContactLookup)"/>).
+    /// </summary>
+    internal static BindingReadability ClassifyProbe(ContactLookup probe, ColumnReadProofOutcome proof) => proof switch
+    {
+        ColumnReadProofOutcome.Proven => ClassifyProbe(probe),
+        ColumnReadProofOutcome.Unproven => BindingReadability.Masked,
+        _ => BindingReadability.Failed,
+    };
+
+    /// <summary>The marking below, with one outcome for both column sets. Pure.</summary>
+    internal static ContactLookup WithIdentityColumnsProof(ContactLookup lookup, ColumnReadProofOutcome proof)
+        => WithIdentityColumnsProof(lookup, proof, proof);
+
+    /// <summary>
+    /// Marks every row of a read lookup by the proofs of its two column sets. Pure.
+    /// <list type="bullet">
+    ///   <item><paramref name="bindingProof"/> not <see cref="ColumnReadProofOutcome.Proven"/>: the row's binding is read
+    ///     without proof (<see cref="ContactBindingRow.IdentityColumnsUnproven"/>), so an empty plane is Unreadable.</item>
+    ///   <item><paramref name="collisionProof"/> not <see cref="ColumnReadProofOutcome.Proven"/>: the row's collision flag
+    ///     may be hidden (<see cref="ContactBindingRow.CollisionColumnsUnproven"/>), so it reads as a flag whose parties
+    ///     cannot be read (<see cref="CollisionFlag.ReadWithoutProof"/>), which is never overwritten or cleared.</item>
+    /// </list>
+    /// </summary>
+    internal static ContactLookup WithIdentityColumnsProof(
+        ContactLookup lookup, ColumnReadProofOutcome bindingProof, ColumnReadProofOutcome collisionProof)
+        => lookup.Status != LookupStatus.Read
+           || (bindingProof == ColumnReadProofOutcome.Proven && collisionProof == ColumnReadProofOutcome.Proven)
+            ? lookup
+            : lookup with { Rows = lookup.Rows.Select(r => Marked(r, bindingProof, collisionProof)).ToList() };
+
+    /// <summary>The systemuser form of the marking above, with one outcome for both column sets. Pure.</summary>
+    internal static SystemUserIdentityRow WithIdentityColumnsProof(SystemUserIdentityRow row, ColumnReadProofOutcome proof)
+        => WithIdentityColumnsProof(row, proof, proof);
+
+    /// <summary>The systemuser form of the marking above: its linked contact. Pure.</summary>
+    internal static SystemUserIdentityRow WithIdentityColumnsProof(
+        SystemUserIdentityRow row, ColumnReadProofOutcome bindingProof, ColumnReadProofOutcome collisionProof)
+        => row.LinkedContact is null
+           || (bindingProof == ColumnReadProofOutcome.Proven && collisionProof == ColumnReadProofOutcome.Proven)
+            ? row
+            : row with { LinkedContact = Marked(row.LinkedContact, bindingProof, collisionProof) };
+
+    private static ContactBindingRow Marked(
+        ContactBindingRow row, ColumnReadProofOutcome bindingProof, ColumnReadProofOutcome collisionProof)
+    {
+        var marked = bindingProof == ColumnReadProofOutcome.Proven ? row : row with { IdentityColumnsUnproven = true };
+        return collisionProof == ColumnReadProofOutcome.Proven
+            ? marked
+            : marked with { CollisionColumnsUnproven = true, Flag = CollisionFlag.ReadWithoutProof(marked.Flag) };
+    }
+
+    /// <summary>
+    /// Slice C: marks every row whose removed marker read EMPTY while <paramref name="proof"/> is not
+    /// <see cref="ColumnReadProofOutcome.Proven"/> (<see cref="ContactBindingRow.RemovedMarkerUnproven"/>): such a row counts as
+    /// removed. A marker that was read is a value and is kept. Pure.
+    /// </summary>
+    internal static ContactLookup WithRemovedMarkerProof(ContactLookup lookup, ColumnReadProofOutcome proof)
+        => lookup.Status != LookupStatus.Read || proof == ColumnReadProofOutcome.Proven
+            ? lookup
+            : lookup with { Rows = lookup.Rows.Select(RemovedMarked).ToList() };
+
+    /// <summary>The systemuser form of the marking above: its linked contact. Pure.</summary>
+    internal static SystemUserIdentityRow WithRemovedMarkerProof(SystemUserIdentityRow row, ColumnReadProofOutcome proof)
+        => row.LinkedContact is null || proof == ColumnReadProofOutcome.Proven
+            ? row
+            : row with { LinkedContact = RemovedMarked(row.LinkedContact) };
+
+    private static ContactBindingRow RemovedMarked(ContactBindingRow row)
+        => row.RemovedOn is not null ? row : row with { RemovedMarkerUnproven = true };
 
     /// <summary>
     /// The interactive-systemuser scan: enabled, not an application user, and a human access mode —
@@ -446,7 +1184,7 @@ public sealed class DataverseContactIdentityStore : IContactIdentityStore
     public static Dictionary<string, object?> BindAndConsumeInvitePayload(Guid oid, IdentityPlaneMarker plane)
     {
         var payload = BindPayload(oid, plane);
-        payload[ContactBindingDecision.ExternalInviteCodeHashColumn] = null;
+        ClearInvite(payload);
         return payload;
     }
 
@@ -455,6 +1193,15 @@ public sealed class DataverseContactIdentityStore : IContactIdentityStore
     /// mirror (the key column) and the plane — the same oid in both columns, in the one create request
     /// (<see cref="BuildCreateRequest"/>).
     /// </summary>
+    /// <remarks>
+    /// The owner rule (ISS-005, #1673; DATAVERSE-WRITE-PATH-ARCHITECTURE I-6): every IDENTITY contact this BFF creates in its own
+    /// environment - the four external-access creates (registration, first sign-in, licensed-user link, invite) - is owned by the
+    /// default owner team of <c>ExternalAccess:CustomerBusinessUnitId</c>, whatever the plane; the payload carries
+    /// <c>ownerid@odata.bind</c> on any plane, refuses an empty team, and requires one for WorkforceHome. This is NOT the only
+    /// contact create in the BFF: the chat <c>dataverse.create_record</c> tool can create a <c>contact</c> row app-only, owned by the
+    /// caller's business-unit team, record-first through the general resolver (<c>OwnedChildWrite</c>), and it does not read
+    /// <c>CustomerBusinessUnitId</c> (see <c>ContactCreateOwnerPolicyGuardTests.UndetectableSeams</c>).
+    /// </remarks>
     public static Dictionary<string, object?> CreatePayload(Guid oid, IdentityPlaneMarker plane, NewContactDetails details)
     {
         ArgumentNullException.ThrowIfNull(details);
@@ -467,6 +1214,43 @@ public sealed class DataverseContactIdentityStore : IContactIdentityStore
         };
         if (!string.IsNullOrWhiteSpace(details.FirstName)) payload["firstname"] = details.FirstName;
         if (!string.IsNullOrWhiteSpace(details.Email)) payload["emailaddress1"] = details.Email;
+
+        // THE OWNER RULE (ISS-005, #1673; DATAVERSE-WRITE-PATH-ARCHITECTURE I-6): every contact this BFF creates in its OWN
+        // environment is owned by the default owner team of ExternalAccess:CustomerBusinessUnitId, whatever the plane; the binder
+        // resolves it before the create and refuses the create when it cannot (ContactIdentityBinder). The payload therefore
+        // takes an owner on ANY plane (the CIAM plane is email-bind-only today and creates nothing, but a future create there
+        // is owned the same way). What it refuses: an EMPTY team on any plane, and a WorkforceHome create with no owner at
+        // all. No owner is built only for a binder over ANOTHER environment (ContactCreateOwner.NoneForForeignEnvironment,
+        // ContactIdentityBinderFactory only; tracked in #2270). A home directory belongs to WorkforceHome alone.
+        var home = plane == IdentityPlaneMarker.WorkforceHome;
+        if (home && (details.ExternalTenantId is not { } tenant || tenant == Guid.Empty))
+        {
+            throw new ArgumentException("A WorkforceHome create needs the home tenant.", nameof(details));
+        }
+
+        // The owner-seam refusal (RecordOwnerAssignmentCensusTests.EverySeamRefusesAnOwnerlessCreate): never an app-owned contact.
+        if ((home && details.OwningTeamId is null) || details.OwningTeamId == Guid.Empty)
+        {
+            throw new InvalidOperationException(
+                $"No owning team was resolved for the {plane} contact; refusing to create an app-owned contact.");
+        }
+
+        if (!home && details.ExternalTenantId is not null)
+        {
+            throw new ArgumentException("Only a WorkforceHome create carries a home tenant.", nameof(details));
+        }
+
+        if (home)
+        {
+            payload[ContactBindingDecision.ExternalTenantIdColumn] = details.ExternalTenantId!.Value.ToString("D");
+            if (!string.IsNullOrWhiteSpace(details.Department)) payload["department"] = details.Department;
+        }
+
+        if (details.OwningTeamId is { } owner)
+        {
+            payload[OwnerBindKey] = $"/teams({owner:D})";
+        }
+
         return payload;
     }
 
@@ -583,7 +1367,35 @@ public sealed class DataverseContactIdentityStore : IContactIdentityStore
             StringOf(row, "@odata.etag"),
             StringOf(row, "emailaddress1"),
             flag,
-            StringOf(row, ContactBindingDecision.KeyMirrorColumn));
+            StringOf(row, ContactBindingDecision.KeyMirrorColumn),
+            StringOf(row, ContactBindingDecision.ExternalTenantIdColumn))
+        {
+            RemovedOn = RemovedOnOf(row),
+        };
+    }
+
+    /// <summary>
+    /// Slice C: the removed marker as read from one contact row. A value that does not parse as a date is still a marker
+    /// (something wrote it), so it reads as <see cref="DateTimeOffset.MinValue"/>, never as "not removed".
+    /// </summary>
+    internal static DateTimeOffset? RemovedOnOf(JsonElement row)
+    {
+        if (!row.TryGetProperty(ContactBindingDecision.ExternalAccessRemovedOnColumn, out var value)
+            || value.ValueKind is JsonValueKind.Null or JsonValueKind.Undefined)
+        {
+            return null;
+        }
+
+        if (value.ValueKind == JsonValueKind.String && string.IsNullOrWhiteSpace(value.GetString()))
+        {
+            return null;
+        }
+
+        return value.ValueKind == JsonValueKind.String
+               && DateTimeOffset.TryParse(value.GetString(), CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal,
+                   out var removedOn)
+            ? removedOn
+            : DateTimeOffset.MinValue;
     }
 
     /// <summary>Parses one systemuser row (with an optional expanded linked contact) from Web API JSON.</summary>
@@ -621,6 +1433,63 @@ public sealed class DataverseContactIdentityStore : IContactIdentityStore
             ? LookupStatus.ColumnMissing
             : LookupStatus.Failed;
 
+    /// <summary>
+    /// True when a write refusal is a missing PRIVILEGE, not a fault that a retry can clear: HTTP 403, or a 400 whose body
+    /// names a privilege (<c>prv…</c> / "privilege") or the access-check code <c>0x80040220</c>. 429, 5xx and network
+    /// faults are NOT permission faults (they stay retryable). Pure.
+    /// </summary>
+    public static bool IsPermissionFault(HttpStatusCode status, string? body)
+        => status == HttpStatusCode.Forbidden
+           || (status == HttpStatusCode.BadRequest && body is not null
+               && (body.Contains("privilege", StringComparison.OrdinalIgnoreCase)
+                   || body.Contains("0x80040220", StringComparison.OrdinalIgnoreCase)));
+
+    /// <summary>
+    /// True when a create's refusal is Dataverse's OWNER read-check: HTTP 403 (a 400 is tolerated) whose body carries
+    /// <c>0x80040299</c> or "Privilege Check For Owner" - the owner team's roles hold no Read on the table (seen live on
+    /// <c>sprk_signal</c> and <c>sprk_decisionrecord</c>). Narrower than <see cref="IsPermissionFault"/> on purpose: a missing
+    /// privilege of the BFF's own identity (<c>0x80040220</c>, "missing prvCreateContact") is not an owner fault and keeps its
+    /// <see cref="StoreWriteStatus.Forbidden"/> mapping. Pure.
+    /// </summary>
+    public static bool IsOwnerPrivilegeFault(HttpStatusCode status, string? body)
+        => status is HttpStatusCode.Forbidden or HttpStatusCode.BadRequest
+           && body is not null
+           && (body.Contains("0x80040299", StringComparison.OrdinalIgnoreCase)
+               || body.Contains("Privilege Check For Owner", StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>
+    /// True when a write's error text says a choice value is not an option of its choice - Dataverse's "The value N of 'col'
+    /// ... is outside the valid range" (seen live on <c>sprk_event.sprk_priority</c>, task 097). On a flag write that means
+    /// the collision-reason option is not provisioned yet (r3 task 047, fix round 3). Pure; the store's write error is
+    /// <c>"{status}: {body}"</c>.
+    /// </summary>
+    public static bool IsOptionValueOutOfRange(string? error)
+        => error is not null && error.Contains("outside the valid range", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// The <c>error.code</c> of a Dataverse error body (e.g. <c>0x80060888</c>), or null when the body is not that JSON shape.
+    /// Never the message: a syntax error's message echoes the request's whole <c>$filter</c> (r3 task 047, UAC re-check). Pure.
+    /// </summary>
+    public static string? ErrorCodeOf(string? body)
+    {
+        if (string.IsNullOrWhiteSpace(body)) return null;
+        try
+        {
+            using var doc = JsonDocument.Parse(body);
+            return doc.RootElement.ValueKind == JsonValueKind.Object
+                   && doc.RootElement.TryGetProperty("error", out var error)
+                   && error.ValueKind == JsonValueKind.Object
+                   && error.TryGetProperty("code", out var code)
+                   && code.ValueKind == JsonValueKind.String
+                ? code.GetString()
+                : null;
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
     /// <summary>True when a Dataverse error body says the alternate key in the URL is not defined.</summary>
     public static bool IsKeyMissing(string? body)
         => body is not null && body.Contains("key in the request URI is not valid", StringComparison.OrdinalIgnoreCase);
@@ -644,7 +1513,15 @@ public sealed class DataverseContactIdentityStore : IContactIdentityStore
     public Task<ContactLookup> FindActiveContactsByEmailAsync(string email, CancellationToken ct)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(email);
-        return ReadContactsAsync(BuildEmailLookupPath(email.Trim()), "email lookup", ct);
+        return ReadContactsAsync(BuildEmailLookupPath(email.Trim()), "email lookup", ct, logLabel: "contacts by email");
+    }
+
+    /// <inheritdoc />
+    public Task<ContactLookup> FindInactiveContactsByEmailAsync(string email, CancellationToken ct)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(email);
+        return ReadContactsAsync(BuildInactiveEmailLookupPath(email.Trim()), "inactive email lookup", ct,
+            logLabel: "inactive contacts by email");
     }
 
     /// <inheritdoc />
@@ -668,8 +1545,103 @@ public sealed class DataverseContactIdentityStore : IContactIdentityStore
 
         using var doc = TryParseJson(body);
         var row = doc is null ? null : ParseContactRow(doc.RootElement);
-        return row is null ? ContactLookup.Failed : ContactLookup.Of(row);
+        return row is null ? ContactLookup.Failed : await ProvenAsync(ContactLookup.Of(row), ct).ConfigureAwait(false);
     }
+
+    /// <inheritdoc />
+    public async Task<RemovedMarkerRead> ReadRemovedMarkerAsync(Guid contactId, CancellationToken ct)
+    {
+        var (status, code, body, _) = await GetAsync(BuildRemovedMarkerReadPath(contactId), ct).ConfigureAwait(false);
+        var (readable, removedOn) = ParseRemovedMarkerResponse(status, code, body);
+        if (!readable)
+        {
+            return RemovedMarkerRead.Unreadable;
+        }
+
+        return removedOn is not null
+            ? RemovedMarkerRead.Removed
+            : RemovedMarkerFrom(null, await _removedMarkerProof.ProveAsync(ct).ConfigureAwait(false));
+    }
+
+    /// <inheritdoc />
+    public Task<StoreWriteResult> WriteRemovedMarkerAsync(Guid contactId, DateTimeOffset? removedOn, CancellationToken ct)
+        => WriteAsync(HttpMethod.Patch, $"contacts({contactId:D})", RemovedMarkerPayload(removedOn), ("If-Match", "*"), ct);
+
+    /// <inheritdoc />
+    public Task<StoreWriteResult> WriteRemovedMarkerIfUnchangedAsync(
+        Guid contactId, string? etag, DateTimeOffset? removedOn, CancellationToken ct)
+        => RowVersionPrecondition(etag) is { } version
+            ? WriteAsync(HttpMethod.Patch, $"contacts({contactId:D})", RemovedMarkerPayload(removedOn), ("If-Match", version), ct)
+            : Task.FromResult(NoRowVersion("removed marker", contactId));
+
+    /// <inheritdoc />
+    public Task<StoreWriteResult> ClearRemovedPersonAccessStateAsync(Guid contactId, CancellationToken ct)
+        => WriteAsync(HttpMethod.Patch, $"contacts({contactId:D})", RemovedPersonAccessStatePayload(), ("If-Match", "*"), ct);
+
+    /// <inheritdoc />
+    public Task<StoreWriteResult> ClearStandingGrantAsync(Guid contactId, CancellationToken ct)
+        => WriteAsync(HttpMethod.Patch, $"contacts({contactId:D})", StandingGrantClearPayload(), ("If-Match", "*"), ct);
+
+    /// <summary>Slice C: the removed-marker write: that one column, set (UTC) or cleared (null). Pure.</summary>
+    public static Dictionary<string, object?> RemovedMarkerPayload(DateTimeOffset? removedOn) => new()
+    {
+        [ContactBindingDecision.ExternalAccessRemovedOnColumn] =
+            removedOn?.UtcDateTime.ToString("yyyy-MM-ddTHH:mm:ssZ", CultureInfo.InvariantCulture),
+    };
+
+    /// <summary>
+    /// Slice C: the columns an administrator removal clears in one write: the invite state and the access permission
+    /// baseline. Never a binding column (<see cref="BindingColumns"/>, the key mirror) and never the statecode.
+    /// </summary>
+    public static readonly IReadOnlyList<string> RemovedPersonAccessStateColumns = new[]
+    {
+        ContactBindingDecision.ExternalInvitedOnColumn,
+        ContactBindingDecision.ExternalInviteCodeHashColumn,
+        ContactBindingDecision.ExternalInvitedEmailHashColumn,
+        ContactBindingDecision.ExternalInvitedTenantIdColumn,
+        SubjectStandingGrantReader.BaselineAttribute,
+    };
+
+    /// <summary>Slice C: every <see cref="RemovedPersonAccessStateColumns"/> column set to null. Pure.</summary>
+    public static Dictionary<string, object?> RemovedPersonAccessStatePayload()
+        => RemovedPersonAccessStateColumns.ToDictionary(column => column, _ => (object?)null);
+
+    /// <summary>Slice C: the standing grant cleared, in a write of its own. Pure.</summary>
+    public static Dictionary<string, object?> StandingGrantClearPayload() => new()
+    {
+        [SubjectStandingGrantReader.StandingGrantAttribute] = null,
+    };
+
+    /// <summary>Slice C: one contact's removed marker, by id, in a query of its own. Any state: a row is never filtered out.</summary>
+    public static string BuildRemovedMarkerReadPath(Guid contactId)
+        => $"contacts({contactId:D})?$select={ContactBindingDecision.ExternalAccessRemovedOnColumn}";
+
+    /// <summary>
+    /// Slice C: the marker read's answer. Not <c>Readable</c> unless the read succeeded and returned the row as an object; a
+    /// missing row (404), a failed read or a body that is not JSON is unreadable (fail closed). Pure.
+    /// </summary>
+    internal static (bool Readable, DateTimeOffset? RemovedOn) ParseRemovedMarkerResponse(
+        LookupStatus status, HttpStatusCode code, string? body)
+    {
+        if (status != LookupStatus.Read || code == HttpStatusCode.NotFound || body is null)
+        {
+            return (false, null);
+        }
+
+        using var doc = TryParseJson(body);
+        return doc is null || doc.RootElement.ValueKind != JsonValueKind.Object
+            ? (false, null)
+            : (true, RemovedOnOf(doc.RootElement));
+    }
+
+    /// <summary>
+    /// Slice C: the live marker read's answer. A marker that was read is <see cref="RemovedMarkerRead.Removed"/>; an empty one is
+    /// <see cref="RemovedMarkerRead.NotRemoved"/> only on a proven read, else <see cref="RemovedMarkerRead.Unreadable"/>. Pure.
+    /// </summary>
+    internal static RemovedMarkerRead RemovedMarkerFrom(DateTimeOffset? removedOn, ColumnReadProofOutcome proof)
+        => removedOn is not null ? RemovedMarkerRead.Removed
+            : proof == ColumnReadProofOutcome.Proven ? RemovedMarkerRead.NotRemoved
+            : RemovedMarkerRead.Unreadable;
 
     /// <inheritdoc />
     public async Task<ReferenceLookup> FindSystemUsersLinkingAsync(IReadOnlyCollection<Guid> contactIds, CancellationToken ct)
@@ -717,15 +1689,208 @@ public sealed class DataverseContactIdentityStore : IContactIdentityStore
 
         using var doc = TryParseJson(body);
         var row = doc is null ? null : ParseSystemUserRow(doc.RootElement);
-        return row is null ? SystemUserLookup.Failed : new SystemUserLookup(LookupStatus.Read, row);
+        return row is null
+            ? SystemUserLookup.Failed
+            : new SystemUserLookup(LookupStatus.Read, await ProvenAsync(row, ct).ConfigureAwait(false));
     }
 
     /// <inheritdoc />
     public async Task<BindingReadability> ProbeBindingReadabilityAsync(CancellationToken ct)
     {
+        // A hidden plane reads as no plane, so without proof the probe would find "no marked rows": nothing to protect.
+        // Every identity column's read must be proven: the binding columns, then the collision columns.
+        var proof = await _bindingColumnsProof.ProveAsync(ct).ConfigureAwait(false);
+        if (proof == ColumnReadProofOutcome.Proven)
+        {
+            proof = await _collisionColumnsProof.ProveAsync(ct).ConfigureAwait(false);
+        }
+
+        if (proof != ColumnReadProofOutcome.Proven)
+        {
+            return ClassifyProbe(ContactLookup.Failed, proof);
+        }
+
         var lookup = await ReadContactsAsync(BuildProbePath(), "masking probe", ct).ConfigureAwait(false);
-        return ClassifyProbe(lookup);
+        return ClassifyProbe(lookup, proof);
     }
+
+    /// <inheritdoc />
+    public async Task<HomeLinkLookup> FindHomeLinkedSystemUsersAsync(Guid homeTenantId, Guid homeObjectId, CancellationToken ct)
+    {
+        var (status, _, body, _) = await GetAsync(BuildHomeLinkLookupPath(homeTenantId, homeObjectId), ct).ConfigureAwait(false);
+        if (status != LookupStatus.Read || body is null)
+        {
+            if (status == LookupStatus.ColumnMissing)
+            {
+                LogHomeSchemaMissing("home link lookup");
+                return HomeLinkLookup.ColumnMissing;
+            }
+
+            return HomeLinkLookup.Failed;
+        }
+
+        using var doc = TryParseJson(body);
+        if (doc is null)
+        {
+            return HomeLinkLookup.Failed;
+        }
+
+        var rows = Values(doc.RootElement).Select(ParseHomeLinkRow).Where(r => r is not null).Select(r => r!).ToList();
+        return new HomeLinkLookup(LookupStatus.Read, rows);
+    }
+
+    /// <inheritdoc />
+    public async Task<HomeLinkLookup> FindSystemUsersByGuestObjectIdAsync(Guid guestObjectId, CancellationToken ct)
+    {
+        var (status, _, body, _) = await GetAsync(BuildGuestSystemUserLookupPath(guestObjectId), ct).ConfigureAwait(false);
+        if (status != LookupStatus.Read || body is null)
+        {
+            if (status == LookupStatus.ColumnMissing)
+            {
+                LogHomeSchemaMissing("guest systemuser lookup");
+                return HomeLinkLookup.ColumnMissing;
+            }
+
+            return HomeLinkLookup.Failed;
+        }
+
+        using var doc = TryParseJson(body);
+        if (doc is null)
+        {
+            return HomeLinkLookup.Failed;
+        }
+
+        var rows = Values(doc.RootElement).Select(ParseHomeLinkRow).Where(r => r is not null).Select(r => r!).ToList();
+        return new HomeLinkLookup(LookupStatus.Read, rows);
+    }
+
+    /// <inheritdoc />
+    public Task<StoreWriteResult> WriteHomeLinkAsync(
+        Guid systemUserId, string? etag, Guid homeTenantId, Guid homeObjectId, CancellationToken ct)
+        => RowVersionPrecondition(etag) is { } version
+            ? WriteAsync(HttpMethod.Patch, $"systemusers({systemUserId:D})", HomeLinkPayload(homeTenantId, homeObjectId),
+                ("If-Match", version), ct)
+            : Task.FromResult(NoRowVersion("home link", systemUserId));
+
+    /// <inheritdoc />
+    public async Task<ContactLookup> FindHomeContactsAsync(Guid homeTenantId, Guid homeObjectId, CancellationToken ct)
+    {
+        // Not ReadContactsAsync: its missing-column branch logs the binding-schema script, and a missing A9 column must be
+        // ONE error naming Set-WorkforceHomeIdentitySchema.ps1 (as the home link read above).
+        var (status, _, body, _) = await GetAsync(BuildHomeContactLookupPath(homeTenantId, homeObjectId), ct).ConfigureAwait(false);
+        if (status != LookupStatus.Read || body is null)
+        {
+            if (status == LookupStatus.ColumnMissing)
+            {
+                LogHomeSchemaMissing("home contact lookup");
+                return ContactLookup.ColumnMissing;
+            }
+
+            return ContactLookup.Failed;
+        }
+
+        using var doc = TryParseJson(body);
+        if (doc is null)
+        {
+            return ContactLookup.Failed;
+        }
+
+        var rows = Values(doc.RootElement).Select(ParseContactRow).Where(r => r is not null).Select(r => r!).ToList();
+        return await ProvenAsync(new ContactLookup(LookupStatus.Read, rows), ct).ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
+    public async Task<SystemUserEmailLookup> FindEnabledSystemUsersByEmailAsync(string email, CancellationToken ct)
+    {
+        var (status, _, body, _) = await GetAsync(BuildLicensedUserEmailLookupPath(email), ct, logLabel: "systemusers by email")
+            .ConfigureAwait(false);
+        using var doc = status == LookupStatus.Read && body is not null ? TryParseJson(body) : null;
+        if (doc is null)
+        {
+            return SystemUserEmailLookup.Failed;
+        }
+
+        var rows = new List<SystemUserEmailRow>();
+        foreach (var row in Values(doc.RootElement))
+        {
+            if (row.ValueKind != JsonValueKind.Object || GuidOf(row, "systemuserid") is not { } id) continue;
+            bool? disabled = row.TryGetProperty("isdisabled", out var d) && d.ValueKind is JsonValueKind.True or JsonValueKind.False
+                ? d.GetBoolean()
+                : null;
+            rows.Add(new SystemUserEmailRow(id, disabled, StringOf(row, "internalemailaddress"), StringOf(row, "domainname")));
+        }
+
+        return new SystemUserEmailLookup(LookupStatus.Read, rows);
+    }
+
+    /// <inheritdoc />
+    public async Task<OwnerTeamLookup> FindDefaultOwnerTeamsAsync(Guid businessUnitId, CancellationToken ct)
+    {
+        var (status, _, body, _) = await GetAsync(BuildDefaultOwnerTeamPath(businessUnitId), ct).ConfigureAwait(false);
+        using var doc = status == LookupStatus.Read && body is not null ? TryParseJson(body) : null;
+        if (doc is null)
+        {
+            return OwnerTeamLookup.Failed;
+        }
+
+        var ids = Values(doc.RootElement).Select(r => GuidOf(r, "teamid")).Where(g => g is not null).Select(g => g!.Value).ToList();
+        return new OwnerTeamLookup(LookupStatus.Read, ids);
+    }
+
+    /// <inheritdoc />
+    public async Task<BusinessUnitLookup> FindBusinessUnitsByNameAsync(string name, CancellationToken ct)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
+        var (status, _, body, _) = await GetAsync(BuildBusinessUnitByNamePath(name), ct).ConfigureAwait(false);
+        using var doc = status == LookupStatus.Read && body is not null ? TryParseJson(body) : null;
+        if (doc is null)
+        {
+            return BusinessUnitLookup.Failed;
+        }
+
+        var ids = Values(doc.RootElement).Select(r => GuidOf(r, "businessunitid")).Where(g => g is not null).Select(g => g!.Value).ToList();
+        return new BusinessUnitLookup(LookupStatus.Read, ids);
+    }
+
+    /// <inheritdoc />
+    public async Task<BindingReadability> ProbeHomeReadabilityAsync(CancellationToken ct)
+    {
+        var (cStatus, _, cBody, _) = await GetAsync(BuildHomeContactProbePath(), ct).ConfigureAwait(false);
+        var (lStatus, _, lBody, _) = await GetAsync(BuildHomeLinkProbePath(), ct).ConfigureAwait(false);
+        if (cStatus == LookupStatus.ColumnMissing || lStatus == LookupStatus.ColumnMissing)
+        {
+            LogHomeSchemaMissing("home masking probe");
+        }
+
+        using var cDoc = cStatus == LookupStatus.Read && cBody is not null ? TryParseJson(cBody) : null;
+        using var lDoc = lStatus == LookupStatus.Read && lBody is not null ? TryParseJson(lBody) : null;
+        var contacts = cDoc is null
+            ? (cStatus == LookupStatus.ColumnMissing ? ContactLookup.ColumnMissing : ContactLookup.Failed)
+            : new ContactLookup(LookupStatus.Read,
+                Values(cDoc.RootElement).Select(ParseContactRow).Where(r => r is not null).Select(r => r!).ToList());
+        var links = lDoc is null
+            ? (lStatus == LookupStatus.ColumnMissing ? HomeLinkLookup.ColumnMissing : HomeLinkLookup.Failed)
+            : new HomeLinkLookup(LookupStatus.Read,
+                Values(lDoc.RootElement).Select(ParseHomeLinkRow).Where(r => r is not null).Select(r => r!).ToList());
+        return ClassifyHomeProbe(contacts, links);
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// UAC review F1 (#2005): the home bind consumes the invite-code hash in the SAME conditional PATCH, through the one
+    /// consuming-bind path every bind shares (<see cref="BindConsumingInviteAsync"/>, PR #2007).
+    /// </remarks>
+    public Task<StoreWriteResult> BindHomeOidAsync(Guid contactId, string? etag, Guid homeTenantId, Guid oid, CancellationToken ct)
+        => RowVersionPrecondition(etag) is { } version
+            ? BindConsumingInviteAsync(contactId, version, HomeBindAndConsumeInvitePayload(homeTenantId, oid),
+                HomeBindPayload(homeTenantId, oid), ct)
+            : Task.FromResult(NoRowVersion("bind", contactId));
+
+    private void LogHomeSchemaMissing(string what)
+        => _logger.LogError(
+            "[ID-BIND] {What} failed: an A9 home-identity column is not provisioned in this environment. Every home sign-in is "
+            + "denied until scripts/Set-WorkforceHomeIdentitySchema.ps1 is applied.",
+            what);
 
     /// <inheritdoc />
     /// <remarks>
@@ -742,20 +1907,58 @@ public sealed class DataverseContactIdentityStore : IContactIdentityStore
         if (inviteStatus == LookupStatus.ColumnMissing)
         {
             _logger.LogWarning(
-                "[ID-BIND] {Marker} or {Hash} is not provisioned in this environment: CIAM email binds are denied "
-                + "(contact_not_invited). Apply scripts/Set-ExternalInviteMarkerSchema.ps1 and "
-                + "scripts/Set-ExternalInviteCodeHashSchema.ps1.",
-                ContactBindingDecision.ExternalInvitedOnColumn, ContactBindingDecision.ExternalInviteCodeHashColumn);
+                "[ID-BIND] {Marker}, {Hash}, {StampHash} or {Tenant} is not provisioned in this environment: email binds "
+                + "are denied (contact_not_invited). Apply scripts/Set-ExternalInviteMarkerSchema.ps1, "
+                + "scripts/Set-ExternalInviteCodeHashSchema.ps1 and scripts/Set-ExternalAccessContactSecuritySchema.ps1.",
+                ContactBindingDecision.ExternalInvitedOnColumn, ContactBindingDecision.ExternalInviteCodeHashColumn,
+                ContactBindingDecision.ExternalInvitedEmailHashColumn, ContactBindingDecision.ExternalInvitedTenantIdColumn);
         }
 
-        return new BindIntentLookup(contactId, inviteStatus, invitedOn) { InviteCodeHash = inviteCodeHash };
+        if (inviteStatus != LookupStatus.Read)
+        {
+            return new BindIntentLookup(contactId, inviteStatus, invitedOn) { InviteCodeHash = inviteCodeHash };
+        }
+
+        var (emailHash, tenant, currentEmail, rowVersion) = InterpretStampLeg(inviteBody);
+
+        // An empty email hash is trusted as "no stamp" only on a proven read; unproven, it may be hidden. Both refuse the
+        // bind, so the proof is made only for an empty hash, and only to name the reason.
+        var unproven = string.IsNullOrWhiteSpace(emailHash)
+                       && await _inviteStampColumnsProof.ProveAsync(ct).ConfigureAwait(false) != ColumnReadProofOutcome.Proven;
+
+        return new BindIntentLookup(contactId, inviteStatus, invitedOn)
+        {
+            InviteCodeHash = inviteCodeHash,
+            InvitedEmailHash = emailHash,
+            RawInvitedTenantId = tenant,
+            CurrentEmail = currentEmail,
+            ETag = rowVersion,
+            StampColumnsUnproven = unproven,
+        };
     }
 
     /// <inheritdoc />
     public Task<StoreWriteResult> MarkInvitedAsync(
-        Guid contactId, string? etag, DateTimeOffset invitedOn, string inviteCodeHash, CancellationToken ct)
-        => WriteAsync(HttpMethod.Patch, $"contacts({contactId:D})", InviteMarkerPayload(invitedOn, inviteCodeHash),
-            ("If-Match", RowVersionPrecondition(etag) ?? "*"), ct, missingColumns: InviteMarkerColumns);
+        Guid contactId, string? etag, DateTimeOffset invitedOn, string? inviteCodeHash, InviteStamp stamp, CancellationToken ct)
+    {
+        // Built first: a code-and-tenant pairing the payload refuses throws whatever the row version.
+        var payload = InviteMarkerPayload(invitedOn, inviteCodeHash, stamp);
+        return RowVersionPrecondition(etag) is { } version
+            ? WriteAsync(HttpMethod.Patch, $"contacts({contactId:D})", payload,
+                ("If-Match", version), ct, missingColumns: InviteMarkerColumns)
+            : Task.FromResult(NoRowVersion("invite mark", contactId));
+    }
+
+    /// <inheritdoc />
+    public Task<StoreWriteResult> ClearPendingInviteAsync(Guid contactId, string? etag, CancellationToken ct)
+        => RowVersionPrecondition(etag) is { } version
+            ? WriteAsync(HttpMethod.Patch, $"contacts({contactId:D})", PendingInviteClearPayload(),
+                ("If-Match", version), ct, missingColumns: InviteMarkerColumns)
+            : Task.FromResult(NoRowVersion("invite retract", contactId));
+
+    /// <summary>Slice C2b: every <see cref="InviteMarkerColumns"/> column set to null (the retract of an unsent invite). Pure.</summary>
+    public static Dictionary<string, object?> PendingInviteClearPayload()
+        => InviteMarkerColumns.ToDictionary(column => column, _ => (object?)null);
 
     /// <summary>The masking verdict over the probe's rows. Pure.</summary>
     public static BindingReadability ClassifyProbe(ContactLookup probe)
@@ -791,9 +1994,67 @@ public sealed class DataverseContactIdentityStore : IContactIdentityStore
     public Task<StoreWriteResult> BindOidAndConsumeInviteAsync(
         Guid contactId, string? etag, Guid oid, IdentityPlaneMarker plane, CancellationToken ct)
         => RowVersionPrecondition(etag) is { } version
-            ? WriteAsync(HttpMethod.Patch, $"contacts({contactId:D})", BindAndConsumeInvitePayload(oid, plane),
-                ("If-Match", version), ct)
+            ? BindConsumingInviteAsync(contactId, version, BindAndConsumeInvitePayload(oid, plane), BindPayload(oid, plane), ct)
             : Task.FromResult(NoRowVersion("bind", contactId));
+
+    /// <summary>
+    /// #2005: the one consuming bind. Sends <paramref name="consuming"/> (the bind plus the code hash and the invite stamp
+    /// cleared) under <paramref name="version"/>; where a cleared column is not provisioned the platform refuses the whole
+    /// PATCH (nothing written) and no contact can hold a value there to consume. A missing code-hash column sends
+    /// <paramref name="plain"/> (that environment predates the stamp columns too); missing stamp columns alone send the bind
+    /// with the code hash cleared, and then the plain bind if that is refused for the code-hash column. Every retry goes
+    /// under the SAME row version. Any other status returns as is. Shared by the CIAM/workforce/systemuser binds and the A9
+    /// home bind.
+    /// </summary>
+    private async Task<StoreWriteResult> BindConsumingInviteAsync(
+        Guid contactId, string version, Dictionary<string, object?> consuming, Dictionary<string, object?> plain,
+        CancellationToken ct)
+    {
+        var path = $"contacts({contactId:D})";
+        var write = await WriteAsync(HttpMethod.Patch, path, consuming, ("If-Match", version),
+            ct, missingColumns: ConsumedInviteColumns).ConfigureAwait(false);
+        if (write.Status != StoreWriteStatus.ColumnMissing)
+        {
+            return write;
+        }
+
+        if (!IsWriteColumnMissing(write.Error, ContactBindingDecision.ExternalInviteCodeHashColumn))
+        {
+            // Only the stamp columns are missing: no stamp can exist here. Clear the code hash with the bind.
+            _logger.LogWarning(
+                "[ID-BIND] {StampHash} or {Tenant} is not provisioned in this environment: contact {ContactId} is bound without "
+                + "clearing an invite stamp. Apply scripts/Set-ExternalAccessContactSecuritySchema.ps1.",
+                ContactBindingDecision.ExternalInvitedEmailHashColumn, ContactBindingDecision.ExternalInvitedTenantIdColumn,
+                contactId);
+            var codeOnly = new Dictionary<string, object?>(consuming);
+            foreach (var column in InviteStampColumns)
+            {
+                codeOnly.Remove(column);
+            }
+
+            write = await WriteAsync(HttpMethod.Patch, path, codeOnly, ("If-Match", version),
+                ct, missingColumns: InviteCodeHashColumn).ConfigureAwait(false);
+            if (write.Status != StoreWriteStatus.ColumnMissing)
+            {
+                return write;
+            }
+        }
+
+        _logger.LogWarning(
+            "[ID-BIND] {Hash} is not provisioned in this environment: contact {ContactId} is bound without consuming an "
+            + "invite code. Apply scripts/Set-ExternalInviteCodeHashSchema.ps1.",
+            ContactBindingDecision.ExternalInviteCodeHashColumn, contactId);
+        return await WriteAsync(HttpMethod.Patch, path, plain, ("If-Match", version), ct).ConfigureAwait(false);
+    }
+
+    /// <summary>The consuming bind's only extra column: a write fault naming it is a missing hash column (#2005).</summary>
+    private static readonly IReadOnlyList<string> InviteCodeHashColumn = new[]
+    {
+        ContactBindingDecision.ExternalInviteCodeHashColumn,
+    };
+
+    /// <summary>Every column the consuming bind clears: a write fault naming any is a missing column (#2005).</summary>
+    private static readonly IReadOnlyList<string> ConsumedInviteColumns = InviteCodeHashColumn.Concat(InviteStampColumns).ToArray();
 
     /// <inheritdoc />
     public async Task<StoreWriteResult> CreateContactForOidAsync(
@@ -846,18 +2107,131 @@ public sealed class DataverseContactIdentityStore : IContactIdentityStore
     // ── Scans ──────────────────────────────────────────────────────────────────────────────────────────
 
     /// <inheritdoc />
-    public Task<StorePage<SystemUserIdentityRow>> ScanInteractiveSystemUsersAsync(string? continuation, CancellationToken ct)
-        => ScanAsync(continuation ?? BuildSystemUserScanPath(), ParseSystemUserRow, ct);
+    public async Task<StorePage<SystemUserIdentityRow>> ScanInteractiveSystemUsersAsync(string? continuation, CancellationToken ct)
+    {
+        var page = await ScanAsync(continuation ?? BuildSystemUserScanPath(), ParseSystemUserRow, ct).ConfigureAwait(false);
+        var linked = page.Status == LookupStatus.Read
+            ? page.Rows.Where(r => r.LinkedContact is not null).Select(r => r.LinkedContact!).ToList()
+            : new List<ContactBindingRow>();
+        if (linked.Count == 0)
+        {
+            return page;
+        }
+
+        var (binding, collision) = await ProofsForAsync(linked, ct).ConfigureAwait(false);
+        var removed = await RemovedMarkerProofForAsync(linked, ct).ConfigureAwait(false);
+        return page with
+        {
+            Rows = page.Rows.Select(r => WithRemovedMarkerProof(WithIdentityColumnsProof(r, binding, collision), removed)).ToList(),
+        };
+    }
 
     /// <inheritdoc />
-    public Task<StorePage<ContactBindingRow>> ScanFlaggedContactsAsync(string? continuation, CancellationToken ct)
-        => ScanAsync(continuation ?? BuildFlaggedContactScanPath(), ParseContactRow, ct);
+    public async Task<StorePage<ContactBindingRow>> ScanFlaggedContactsAsync(string? continuation, CancellationToken ct)
+    {
+        var page = await ScanAsync(continuation ?? BuildFlaggedContactScanPath(), ParseContactRow, ct).ConfigureAwait(false);
+        if (page.Status != LookupStatus.Read)
+        {
+            return page;
+        }
+
+        var proven = await ProvenAsync(ContactLookup.Of(page.Rows.ToArray()), ct).ConfigureAwait(false);
+        return page with { Rows = proven.Rows };
+    }
+
+    /// <summary>
+    /// Applies the readability proofs to a read. Every row needs the collision columns' proof: a hidden flag, or a hidden
+    /// part of one, reads like no flag whatever the plane holds. The binding columns' proof is needed only when a plane
+    /// read empty, since a plane that was read is a value. A read with no rows needs no proof, so none is made for it.
+    /// </summary>
+    private async Task<ContactLookup> ProvenAsync(ContactLookup lookup, CancellationToken ct)
+    {
+        if (lookup.Status != LookupStatus.Read || lookup.Rows.Count == 0)
+        {
+            return lookup;
+        }
+
+        var (binding, collision) = await ProofsForAsync(lookup.Rows, ct).ConfigureAwait(false);
+        var marked = WithIdentityColumnsProof(lookup, binding, collision);
+        return WithRemovedMarkerProof(marked, await RemovedMarkerProofForAsync(marked.Rows, ct).ConfigureAwait(false));
+    }
+
+    private async Task<SystemUserIdentityRow> ProvenAsync(SystemUserIdentityRow row, CancellationToken ct)
+    {
+        if (row.LinkedContact is null)
+        {
+            return row;
+        }
+
+        var (binding, collision) = await ProofsForAsync(new[] { row.LinkedContact }, ct).ConfigureAwait(false);
+        var marked = WithIdentityColumnsProof(row, binding, collision);
+        return WithRemovedMarkerProof(marked,
+            await RemovedMarkerProofForAsync(new[] { marked.LinkedContact! }, ct).ConfigureAwait(false));
+    }
+
+    /// <summary>
+    /// Slice C: the removed marker's proof for <paramref name="rows"/>. Needed only when a marker read empty, since a marker
+    /// that was read is a value. A fault or an unproven read is not <see cref="ColumnReadProofOutcome.Proven"/>.
+    /// </summary>
+    private async Task<ColumnReadProofOutcome> RemovedMarkerProofForAsync(
+        IReadOnlyCollection<ContactBindingRow> rows, CancellationToken ct)
+        => rows.Any(r => r.RemovedOn is null)
+            ? await _removedMarkerProof.ProveAsync(ct).ConfigureAwait(false)
+            : ColumnReadProofOutcome.Proven;
+
+    private async Task<(ColumnReadProofOutcome Binding, ColumnReadProofOutcome Collision)> ProofsForAsync(
+        IReadOnlyCollection<ContactBindingRow> rows, CancellationToken ct)
+    {
+        var binding = rows.Any(r => r.RawPlane is null)
+            ? await _bindingColumnsProof.ProveAsync(ct).ConfigureAwait(false)
+            : ColumnReadProofOutcome.Proven;
+        var collision = await _collisionColumnsProof.ProveAsync(ct).ConfigureAwait(false);
+        return (binding, collision);
+    }
+
+    /// <summary>
+    /// The readability proof's reads over this store's Web API channel (its environment, its token). A read that does not
+    /// answer throws, which the proof reports as <see cref="ColumnReadProofOutcome.Faulted"/>.
+    /// </summary>
+    private sealed class WebApiColumnReadPermissionSource(DataverseContactIdentityStore store) : IColumnReadPermissionSource
+    {
+        public async Task<Guid?> ReadOwnUserIdAsync(CancellationToken ct)
+        {
+            using var doc = await store.ReadProofAsync(BuildWhoAmIPath(), ct).ConfigureAwait(false);
+            return GuidOf(doc.RootElement, "UserId");
+        }
+
+        public async Task<bool> HoldsSystemAdministratorAsync(Guid user, CancellationToken ct)
+        {
+            using var doc = await store.ReadProofAsync(BuildSystemAdministratorRolePath(user), ct).ConfigureAwait(false);
+            return Values(doc.RootElement).Any();
+        }
+
+        public async Task<IReadOnlyCollection<string>> ColumnsGrantingReadAsync(
+            Guid user, string table, IReadOnlyCollection<string> columns, bool throughTeam, CancellationToken ct)
+        {
+            using var doc = await store.ReadProofAsync(BuildFieldPermissionReadPath(user, table, columns, throughTeam), ct)
+                .ConfigureAwait(false);
+            return ParseGrantedColumns(doc.RootElement, table);
+        }
+    }
+
+    private async Task<JsonDocument> ReadProofAsync(string path, CancellationToken ct)
+    {
+        var (status, code, body, error) = await GetAsync(path, ct).ConfigureAwait(false);
+        if (status != LookupStatus.Read || code == HttpStatusCode.NotFound || body is null)
+        {
+            throw new InvalidOperationException($"A readability-proof read did not answer ({status}, {error ?? code.ToString()}).");
+        }
+
+        return TryParseJson(body) ?? throw new InvalidOperationException("A readability-proof read did not answer JSON.");
+    }
 
     // ── Plumbing ───────────────────────────────────────────────────────────────────────────────────────
 
-    private async Task<ContactLookup> ReadContactsAsync(string path, string what, CancellationToken ct)
+    private async Task<ContactLookup> ReadContactsAsync(string path, string what, CancellationToken ct, string? logLabel = null)
     {
-        var (status, _, body, _) = await GetAsync(path, ct).ConfigureAwait(false);
+        var (status, _, body, _) = await GetAsync(path, ct, logLabel: logLabel).ConfigureAwait(false);
         if (status != LookupStatus.Read || body is null)
         {
             if (status == LookupStatus.ColumnMissing)
@@ -879,7 +2253,7 @@ public sealed class DataverseContactIdentityStore : IContactIdentityStore
         }
 
         var rows = Values(doc.RootElement).Select(ParseContactRow).Where(r => r is not null).Select(r => r!).ToList();
-        return new ContactLookup(LookupStatus.Read, rows);
+        return await ProvenAsync(new ContactLookup(LookupStatus.Read, rows), ct).ConfigureAwait(false);
     }
 
     private async Task<StorePage<T>> ScanAsync<T>(string pathOrNextLink, Func<JsonElement, T?> parse, CancellationToken ct)
@@ -916,18 +2290,7 @@ public sealed class DataverseContactIdentityStore : IContactIdentityStore
         try
         {
             var token = await _getToken(ct).ConfigureAwait(false);
-            using var request = new HttpRequestMessage(method, Absolute(path))
-            {
-                Content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json"),
-            };
-            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
-            request.Headers.Add("OData-MaxVersion", "4.0");
-            request.Headers.Add("OData-Version", "4.0");
-            if (precondition is { } header)
-            {
-                request.Headers.TryAddWithoutValidation(header.Name, header.Value);
-            }
-            request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+            using var request = BuildWriteRequest(method, new Uri(Absolute(path)), payload, token, precondition);
 
             using var client = _httpClientFactory.CreateClient(HttpClientName);
             using var response = await client.SendAsync(request, ct).ConfigureAwait(false);
@@ -976,6 +2339,16 @@ public sealed class DataverseContactIdentityStore : IContactIdentityStore
             }
 
             _logger.LogWarning("[ID-BIND] {Method} {Path} failed: {Status} {Body}", method, path, (int)response.StatusCode, Trim(body));
+            if (method == HttpMethod.Post && IsOwnerPrivilegeFault(response.StatusCode, body))
+            {
+                return new StoreWriteResult(StoreWriteStatus.OwnerPrivilegeMissing, Error: $"{(int)response.StatusCode}: {Trim(body)}");
+            }
+
+            if (IsPermissionFault(response.StatusCode, body))
+            {
+                return new StoreWriteResult(StoreWriteStatus.Forbidden, Error: $"{(int)response.StatusCode}: {Trim(body)}");
+            }
+
             return new StoreWriteResult(StoreWriteStatus.Failed, Error: $"{(int)response.StatusCode}: {Trim(body)}");
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
@@ -990,8 +2363,13 @@ public sealed class DataverseContactIdentityStore : IContactIdentityStore
         }
     }
 
+    /// <param name="path">The request path (never logged when <paramref name="logLabel"/> is given).</param>
+    /// <param name="logLabel">
+    /// UAC review K2: a FIXED label logged in place of the path by a read whose OData filter carries the caller's email
+    /// (PII, URL-escaped in the path). Null for every other read, which logs its path.
+    /// </param>
     private async Task<(LookupStatus Status, HttpStatusCode Code, string? Body, string? Error)> GetAsync(
-        string path, CancellationToken ct, string? prefer = null)
+        string path, CancellationToken ct, string? prefer = null, string? logLabel = null)
     {
         try
         {
@@ -1019,7 +2397,17 @@ public sealed class DataverseContactIdentityStore : IContactIdentityStore
             }
 
             var classified = ClassifyError(body);
-            _logger.LogWarning("[ID-BIND] GET {Path} failed: {Status} {Body}", path, (int)response.StatusCode, Trim(body));
+            if (logLabel is null)
+            {
+                _logger.LogWarning("[ID-BIND] GET {Path} failed: {Status} {Body}", path, (int)response.StatusCode, Trim(body));
+            }
+            else
+            {
+                // A labelled read carries the caller's email in its $filter, and Dataverse echoes the whole filter in a syntax
+                // error's message (UAC 047 re-check, probed on dev). Log the status and the error code only, never the body.
+                _logger.LogWarning("[ID-BIND] GET {Path} failed: {Status} {ErrorCode}", logLabel, (int)response.StatusCode,
+                    ErrorCodeOf(body) ?? "(no error code)");
+            }
             return (classified, response.StatusCode, null, $"{(int)response.StatusCode}: {Trim(body)}");
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
@@ -1028,7 +2416,7 @@ public sealed class DataverseContactIdentityStore : IContactIdentityStore
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "[ID-BIND] GET {Path} threw — treated as could-not-read (deny)", path);
+            _logger.LogWarning(ex, "[ID-BIND] GET {Path} threw — treated as could-not-read (deny)", logLabel ?? path);
             return (LookupStatus.Failed, default, null, ex.Message);
         }
     }

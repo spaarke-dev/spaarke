@@ -94,7 +94,7 @@ public class DecisionActionExecutorsTests
         AccessRights rights, Guid? userId = null, bool createPrivilege = true, Func<string, AccessRights>? bySet = null)
     {
         var probe = new Mock<CallerRecordAccessProbe>(
-            new HttpClient(), new ConfigurationBuilder().Build(), NullLogger<CallerRecordAccessProbe>.Instance, null!)
+            new HttpClient(), new ConfigurationBuilder().Build(), NullLogger<CallerRecordAccessProbe>.Instance, null!, null!)
         { CallBase = false };
         probe.Setup(p => p.GetCallerRightsAsync(It.IsAny<string?>(), It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
             .Returns<string?, string, Guid, CancellationToken>((_, set, _, _) => Task.FromResult(bySet is null ? rights : bySet(set)));
@@ -259,6 +259,27 @@ public class DecisionActionExecutorsTests
         person.Should().NotBeNull("sprk_budgetrevision is a stamped child table, so ApplyTo writes the creator person");
         person.LogicalName.Should().Be("systemuser");
         person.Id.Should().Be(CallerUserId);
+    }
+
+    [Fact]
+    public async Task ReviseBudget_AsksAboutTheRevisionInItsTablesPrimaryOrder_TheBudgetFirst()
+    {
+        // UAC task 194b R3b-2: sprk_budgetrevision's primary order is its budget, then its matter — the order the reconciler
+        // asks the written revision in; never the matter named first.
+        var questions = new List<RecordOwnershipContext>();
+        var writer = new WriterHarness();
+        var executor = new ReviseBudgetExecutor(Probe(CanWrite).Object, BudgetUser(MatterId), writer.Build(),
+            OwnerThatRecordsTheRequester(questions.Add).Object, new FakeTimeProvider(Now), NullLogger<ReviseBudgetExecutor>.Instance);
+
+        var outcome = await executor.ExecuteAsync(Request(ReviseParams()), CancellationToken.None);
+
+        outcome.Status.Should().Be(DecisionActionStatus.Done);
+        var asked = questions.Should().ContainSingle("the plan asks once, before anything is written").Subject;
+        asked.TargetEntityLogicalName.Should().Be("sprk_budget");
+        asked.TargetRecordId.Should().Be(BudgetId);
+        asked.Parents.Should().Equal(new RecordOwnershipParent("sprk_budget", BudgetId), new RecordOwnershipParent("sprk_matter", MatterId));
+        asked.Parents.Should().Equal(RecordOwnershipContext.OrderedParentsOf(writer.Created.Single()),
+            "the writer asks exactly the question the reconciler asks about the written revision");
     }
 
     [Fact]
@@ -914,6 +935,7 @@ public class DecisionActionExecutorsTests
         return
         [
             new ReviseBudgetExecutor(probe, user, new WriterHarness().Build(), Owner().Object, new FakeTimeProvider(Now), NullLogger<ReviseBudgetExecutor>.Instance),
+            new CreateBudgetExecutor(probe, cores, entities, new FakeTimeProvider(Now), Sources().Object),
             new ApproveVarianceExecutor(),
             new MarkCompleteExecutor(probe, user, cores, new FakeTimeProvider(Now)),
             new RescheduleExecutor(probe, OpenEventUser(), cores),
@@ -925,6 +947,7 @@ public class DecisionActionExecutorsTests
             new CreateEventExecutor(probe, cores, entities),
             new SendEmailExecutor(probe, user, cores),
             new AssignWorkExecutor(probe, cores, entities),
+            new AssignTaskExecutor(probe, cores, entities),
             new BudgetInquiryActionExecutor(Inquiry()),
         ];
     }
@@ -994,6 +1017,481 @@ public class DecisionActionExecutorsTests
         outcome.Status.Should().Be(DecisionActionStatus.Refused);
         outcome.ReasonCode.Should().Be(DecisionActionReasons.SubjectUnsupported);
         cores.VerifyNoOtherCalls();
+    }
+
+    // ---------------------------------------------------------------------------------------------------------------
+    // assign-task (task 159; D-178): a sprk_event of type Task, assigned to a contact
+    // ---------------------------------------------------------------------------------------------------------------
+
+    /// <summary>The Task row of <c>sprk_eventtype_ref</c> (spaarkedev1, read 2026-10-22). Written out here on purpose: the executor's
+    /// own constant must equal the live id, so the test does not borrow it.</summary>
+    private const string LiveTaskEventTypeId = "124f5fc9-98ff-f011-8406-7c1e525abd8b";
+
+    private static async Task<(DecisionActionOutcome Outcome, string? Table, JsonElement? Sent, Mock<CallerRecordAccessProbe> Probe)> RunAssignTaskAsync(
+        Dictionary<string, string?> parameters, Guid created)
+    {
+        var cores = Cores();
+        string? table = null;
+        JsonElement? sent = null;
+        cores.Setup(c => c.CreateChildAsync(It.IsAny<HttpContext>(), It.IsAny<string>(), It.IsAny<JsonElement>(), It.IsAny<CancellationToken>()))
+            .Callback<HttpContext, string, JsonElement, CancellationToken>((_, t, b, _) => { table = t; sent = b; })
+            .ReturnsAsync(Reply(201, body: new { id = created }));
+        var probe = Probe(CanCreate);
+
+        var outcome = await new AssignTaskExecutor(probe.Object, cores.Object, Entities())
+            .ExecuteAsync(Request(parameters, null, MatterCore), CancellationToken.None);
+        return (outcome, table, sent, probe);
+    }
+
+    [Fact]
+    public async Task AssignTask_CreatesAnOpenTaskEvent_AssignedToTheContact_FiledUnderTheCore_AndReturnsTheId()
+    {
+        var created = Guid.Parse("cccccccc-0000-0000-0000-0000000000b1");
+
+        var (outcome, table, sent, probe) = await RunAssignTaskAsync(new()
+        {
+            ["assignee"] = ContactId.ToString("D"),
+            ["description"] = "Set up the budget for this matter\nuse the standard rate card",
+            ["dueDate"] = "2026-10-30",
+        }, created);
+
+        outcome.Status.Should().Be(DecisionActionStatus.Done);
+        outcome.Written.Should().Equal(new DecisionRecordRef("sprk_event", created)); // its id is in the step's written list
+        table.Should().Be("sprk_event", "a Task is a sprk_event, not a sprk_todo and not a sprk_workassignment");
+        var body = sent!.Value;
+        body.GetProperty("sprk_eventname").GetString().Should().Be("Set up the budget for this matter");
+        body.GetProperty("sprk_description").GetString().Should().Be("Set up the budget for this matter\nuse the standard rate card");
+        body.GetProperty("sprk_duedate").GetString().Should().Be("2026-10-30");
+        body.GetProperty("statuscode").GetInt32().Should().Be(659490001, "Open");
+        body.GetProperty("sprk_eventtype_ref@odata.bind").GetString().Should().Be($"/sprk_eventtype_refs({LiveTaskEventTypeId})");
+        body.GetProperty("sprk_assignedto@odata.bind").GetString().Should().Be($"/contacts({ContactId:D})");
+        body.GetProperty("sprk_regardingmatter@odata.bind").GetString().Should().Be($"/sprk_matters({MatterId:D})");
+        body.GetProperty("sprk_regardingrecordid").GetString().Should().Be(MatterId.ToString("D"));
+        body.GetProperty("sprk_regardingrecordname").GetString().Should().Be("Acme v. Roe");
+        body.GetProperty("sprk_regardingrecordtype@odata.bind").GetString().Should().Be($"/sprk_recordtype_refs({MatterCore.RecordTypeRefId:D})");
+        body.TryGetProperty("sprk_assignedtointernal@odata.bind", out _).Should().BeFalse("that is the work assignment's assignee column, not the event's");
+        probe.Verify(p => p.CallerHoldsPrivilegeAsync(It.IsAny<string?>(), Sprk.Bff.Api.Api.Filters.CommunicationRecordAuthorizationFilter.CreateEventPrivilege, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task AssignTask_WithoutADueDate_WritesNoDueDateColumn()
+    {
+        var (outcome, _, sent, _) = await RunAssignTaskAsync(
+            new() { ["assignee"] = ContactId.ToString("D"), ["description"] = "Set up the budget" }, Guid.NewGuid());
+
+        outcome.Status.Should().Be(DecisionActionStatus.Done);
+        sent!.Value.TryGetProperty("sprk_duedate", out _).Should().BeFalse("the due date is optional; none is invented");
+        sent.Value.GetProperty("sprk_eventname").GetString().Should().Be("Set up the budget");
+    }
+
+    [Fact]
+    public async Task AssignTask_ALongFirstLine_IsTruncatedToTheNameColumn()
+    {
+        var (_, _, sent, _) = await RunAssignTaskAsync(
+            new() { ["assignee"] = ContactId.ToString("D"), ["description"] = new string('x', 300) }, Guid.NewGuid());
+
+        sent!.Value.GetProperty("sprk_eventname").GetString().Should().HaveLength(200).And.EndWith("...");
+        sent.Value.GetProperty("sprk_description").GetString().Should().HaveLength(300);
+    }
+
+    [Fact]
+    public async Task AssignTask_ADescriptionOverTheColumnMaximum_IsRefusedBeforeTheCore_WithAnAccurateMessage()
+    {
+        var cores = Cores();
+
+        var outcome = await new AssignTaskExecutor(Probe(CanCreate).Object, cores.Object, Entities()).ExecuteAsync(
+            Request(new() { ["assignee"] = ContactId.ToString("D"), ["description"] = new string('x', 2001) }, null, MatterCore), CancellationToken.None);
+
+        outcome.Status.Should().Be(DecisionActionStatus.Refused);
+        outcome.ReasonCode.Should().Be(DecisionActionReasons.InvalidParameter);
+        outcome.Detail.Should().Be("Keep 'What to do' under 2,000 characters.");
+        cores.VerifyNoOtherCalls();
+    }
+
+    [Fact]
+    public void AssignTask_TheDescriptionLimit_EqualsTheMaxLengthOfSprkEventSprkDescription()
+    {
+        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+        while (dir is not null && !File.Exists(Path.Combine(dir.FullName, "src", "server", "api", "Sprk.Bff.Api", "Program.cs"))) dir = dir.Parent;
+        var xml = System.Xml.Linq.XDocument.Load(Path.Combine(dir!.FullName, "src", "dataverse", "solutions", "SpaarkeMaster", "Entities", "sprk_Event", "Entity.xml"));
+        var attribute = xml.Descendants("attribute").Single(a => (string?)a.Element("LogicalName") == "sprk_description");
+
+        ((int)attribute.Element("MaxLength")!).Should().Be(AssignTaskExecutor.DescriptionMaxLength);
+    }
+
+    [Fact]
+    public async Task AssignTask_ADescriptionOfExactlyTheColumnMaximum_IsAccepted()
+    {
+        var (outcome, _, sent, _) = await RunAssignTaskAsync(
+            new() { ["assignee"] = ContactId.ToString("D"), ["description"] = new string('x', 2000) }, Guid.NewGuid());
+
+        outcome.Status.Should().Be(DecisionActionStatus.Done);
+        sent!.Value.GetProperty("sprk_description").GetString().Should().HaveLength(2000);
+    }
+
+    [Theory]
+    [InlineData(null, "Set up the budget", "2026-10-30")]
+    [InlineData("not-a-guid", "Set up the budget", "2026-10-30")]
+    [InlineData("66666666-0000-0000-0000-000000000001", null, "2026-10-30")]
+    [InlineData("66666666-0000-0000-0000-000000000001", "Set up the budget", "soon")]
+    public async Task AssignTask_BadInput_IsRefusedBeforeTheCore(string? assignee, string? description, string? dueDate)
+    {
+        var cores = Cores();
+
+        var outcome = await new AssignTaskExecutor(Probe(CanCreate).Object, cores.Object, Entities()).ExecuteAsync(
+            Request(new() { ["assignee"] = assignee, ["description"] = description, ["dueDate"] = dueDate }, null, MatterCore), CancellationToken.None);
+
+        outcome.Status.Should().Be(DecisionActionStatus.Refused);
+        outcome.ReasonCode.Should().Be(DecisionActionReasons.InvalidParameter);
+        cores.VerifyNoOtherCalls();
+    }
+
+    [Fact]
+    public async Task Preflight_AssignTask_RefusesWithoutTheCreatePrivilege_OrAppendToOnTheCoreTheAssigneeOrTheTaskType_AndWritesNothing()
+    {
+        var parameters = new Dictionary<string, string?> { ["assignee"] = ContactId.ToString("D"), ["description"] = "t" };
+
+        var noPrivilege = new Spy();
+        await AssertPreflightRefusesWithoutWriting(
+            new AssignTaskExecutor(Probe(CanCreate, createPrivilege: false).Object, noPrivilege.Cores.Object, Entities()),
+            Request(parameters, null, MatterCore), noPrivilege, DecisionActionReasons.NotAuthorized);
+
+        var noCore = new Spy();
+        await AssertPreflightRefusesWithoutWriting(
+            new AssignTaskExecutor(Probe(CanCreate, bySet: set => set == "sprk_matters" ? ReadOnly : CanCreate).Object, noCore.Cores.Object, Entities()),
+            Request(parameters, null, MatterCore), noCore, DecisionActionReasons.NotAuthorized);
+
+        var noAssignee = new Spy();
+        await AssertPreflightRefusesWithoutWriting(
+            new AssignTaskExecutor(Probe(CanCreate, bySet: set => set == "contacts" ? ReadOnly : CanCreate).Object, noAssignee.Cores.Object, Entities()),
+            Request(parameters, null, MatterCore), noAssignee, DecisionActionReasons.NotAuthorized);
+
+        // The core also asks AppendTo on the Task type row it binds; a caller whose role lacks it is refused up front.
+        var noTaskType = new Spy();
+        await AssertPreflightRefusesWithoutWriting(
+            new AssignTaskExecutor(Probe(CanCreate, bySet: set => set == "sprk_eventtype_refs" ? ReadOnly : CanCreate).Object, noTaskType.Cores.Object, Entities()),
+            Request(parameters, null, MatterCore), noTaskType, DecisionActionReasons.NotAuthorized);
+    }
+
+    // ---------------------------------------------------------------------------------------------------------------
+    // create-budget (task 161, D-180): a matter with no active budget; the child-records create core, as the caller
+    // ---------------------------------------------------------------------------------------------------------------
+
+    private static readonly Guid EuroId = Guid.Parse("cccccccc-0000-0000-0000-0000000000e1");
+
+    /// <summary>Task 167 (D-193): the resolver of option lists and the budget currency. By default the live Category / Period lists hold
+    /// two options each and the matter's business-unit currency is the euro.</summary>
+    private static Mock<DecisionParameterSources> Sources(BudgetCurrency? currency = null, bool optionsUnreadable = false)
+    {
+        var sources = new Mock<DecisionParameterSources>(
+            new Mock<IDataverseUserClient>().Object, new Mock<IGenericEntityService>().Object, new Mock<Sprk.Bff.Api.Infrastructure.Cache.ITenantCache>().Object,
+            NullLogger<DecisionParameterSources>.Instance)
+        { CallBase = false };
+        sources.Setup(s => s.OptionsAsync(It.IsAny<HttpContext>(), "metadata:sprk_budget.sprk_budgetcategory", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(optionsUnreadable ? null : new List<DecisionParameterOption> { new("100000000", "Fees"), new("100000001", "Expenses") });
+        sources.Setup(s => s.OptionsAsync(It.IsAny<HttpContext>(), "metadata:sprk_budget.sprk_budgetperiod", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(optionsUnreadable ? null : new List<DecisionParameterOption> { new("0", "Annual"), new("1", "Quarter 1") });
+        sources.Setup(s => s.ResolveBudgetCurrencyAsync(It.IsAny<Guid>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(currency ?? new BudgetCurrency(EuroId, "EUR", null));
+        return sources;
+    }
+
+    private static Dictionary<string, string?> CreateBudgetParams() =>
+        new() { ["amount"] = "250000.50", ["reason"] = "No budget was ever set; the estimate from counsel" };
+
+    [Fact]
+    public async Task CreateBudget_CreatesOneBudgetUnderTheMatterThroughTheChildRecordsCore_AsTheCaller_AndReturnsItsId()
+    {
+        var created = Guid.Parse("cccccccc-0000-0000-0000-0000000000b1");
+        var cores = Cores();
+        string? table = null;
+        JsonElement? sent = null;
+        cores.Setup(c => c.CreateChildAsync(It.IsAny<HttpContext>(), It.IsAny<string>(), It.IsAny<JsonElement>(), It.IsAny<CancellationToken>()))
+            .Callback<HttpContext, string, JsonElement, CancellationToken>((_, t, b, _) => { table = t; sent = b; })
+            .ReturnsAsync(Reply(201, body: new { id = created }));
+        var probe = Probe(CanCreate);
+
+        var outcome = await new CreateBudgetExecutor(probe.Object, cores.Object, Entities(), new FakeTimeProvider(Now), Sources().Object).ExecuteAsync(
+            Request(CreateBudgetParams(), null, MatterCore), CancellationToken.None);
+
+        outcome.Status.Should().Be(DecisionActionStatus.Done);
+        outcome.Code.Should().Be("create-budget");
+        outcome.Written.Should().Equal(new DecisionRecordRef("sprk_budget", created));
+        table.Should().Be("sprk_budget");
+        var body = sent!.Value;
+        body.GetProperty("sprk_name").GetString().Should().Be("Budget 2026-10-09");
+        body.GetProperty("sprk_totalbudget").GetDecimal().Should().Be(250000.50m);
+        body.GetProperty("sprk_matter@odata.bind").GetString().Should().Be($"/sprk_matters({MatterId:D})");
+        var names = body.EnumerateObject().Select(p => p.Name).ToList();
+        names.Should().OnlyContain(n => !n.StartsWith("sprk_regarding", StringComparison.Ordinal),
+            "a budget has no regarding lookups: it is filed through sprk_matter");
+        names.Should().NotContain("ownerid@odata.bind").And.NotContain("sprk_createdbyperson",
+            "the create core owns the owner and the creator person; the executor sends neither");
+        probe.Verify(p => p.CallerHoldsPrivilegeAsync(It.IsAny<string?>(), "prvCreatesprk_Budget", It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Theory]
+    [InlineData("-1", "a reason")]
+    [InlineData("lots", "a reason")]
+    [InlineData("", "a reason")]
+    [InlineData("1000", "")]
+    [InlineData("1000", null)]
+    public async Task CreateBudget_BadAmountOrNoReason_IsRefusedBeforeAnyWrite(string amount, string? reason)
+    {
+        var cores = Cores();
+
+        var outcome = await new CreateBudgetExecutor(Probe(CanCreate).Object, cores.Object, Entities(), new FakeTimeProvider(Now), Sources().Object).ExecuteAsync(
+            Request(new() { ["amount"] = amount, ["reason"] = reason }, null, MatterCore), CancellationToken.None);
+
+        outcome.Status.Should().Be(DecisionActionStatus.Refused);
+        outcome.ReasonCode.Should().Be(DecisionActionReasons.InvalidParameter);
+        outcome.Written.Should().BeEmpty();
+        cores.VerifyNoOtherCalls();
+    }
+
+    [Theory]
+    [InlineData("sprk_project")]
+    [InlineData("sprk_workassignment")]
+    [InlineData(null)]
+    public async Task CreateBudget_UnderACoreThatIsNotAMatter_IsRefusedBeforeAnyWrite(string? coreEntity)
+    {
+        var cores = Cores();
+        var core = coreEntity is null ? null : new DecisionCoreRecord(coreEntity, Guid.NewGuid(), Guid.NewGuid());
+
+        var outcome = await new CreateBudgetExecutor(Probe(CanCreate).Object, cores.Object, Entities(), new FakeTimeProvider(Now), Sources().Object).ExecuteAsync(
+            Request(CreateBudgetParams(), null, core), CancellationToken.None);
+
+        outcome.Status.Should().Be(DecisionActionStatus.Refused);
+        outcome.ReasonCode.Should().Be(DecisionActionReasons.BudgetNotOnMatter);
+        cores.VerifyNoOtherCalls();
+    }
+
+    [Fact]
+    public async Task Preflight_CreateBudget_RefusesWithoutTheCreatePrivilege_OrAppendToOnTheMatter_WithZeroWrites()
+    {
+        var noPrivilege = new Spy();
+        await AssertPreflightRefusesWithoutWriting(
+            new CreateBudgetExecutor(Probe(CanCreate, createPrivilege: false).Object, noPrivilege.Cores.Object, Entities(), new FakeTimeProvider(Now), Sources().Object),
+            Request(CreateBudgetParams(), null, MatterCore), noPrivilege, DecisionActionReasons.NotAuthorized);
+
+        var noMatter = new Spy();
+        await AssertPreflightRefusesWithoutWriting(
+            new CreateBudgetExecutor(Probe(CanCreate, bySet: set => set == "sprk_matters" ? ReadOnly : CanCreate).Object, noMatter.Cores.Object, Entities(), new FakeTimeProvider(Now), Sources().Object),
+            Request(CreateBudgetParams(), null, MatterCore), noMatter, DecisionActionReasons.NotAuthorized);
+    }
+
+    [Theory]
+    [InlineData(403, DecisionActionReasons.NotAuthorized)]
+    [InlineData(404, DecisionActionReasons.NotFound)]
+    public async Task CreateBudget_TheCoreRefusesTheCaller_IsRefusedWithNoId(int status, string reason)
+    {
+        var cores = Cores();
+        cores.Setup(c => c.CreateChildAsync(It.IsAny<HttpContext>(), It.IsAny<string>(), It.IsAny<JsonElement>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Reply(status, "child_record.denied", "no"));
+
+        var outcome = await new CreateBudgetExecutor(Probe(CanCreate).Object, cores.Object, Entities(), new FakeTimeProvider(Now), Sources().Object).ExecuteAsync(
+            Request(CreateBudgetParams(), null, MatterCore), CancellationToken.None);
+
+        outcome.Status.Should().Be(DecisionActionStatus.Refused);
+        outcome.ReasonCode.Should().Be(reason);
+        outcome.Written.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task CreateBudget_AServerError_IsFailed_NeverSilentlyDone()
+    {
+        var cores = Cores();
+        cores.Setup(c => c.CreateChildAsync(It.IsAny<HttpContext>(), It.IsAny<string>(), It.IsAny<JsonElement>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Reply(503, null, "unavailable"));
+
+        var outcome = await new CreateBudgetExecutor(Probe(CanCreate).Object, cores.Object, Entities(), new FakeTimeProvider(Now), Sources().Object).ExecuteAsync(
+            Request(CreateBudgetParams(), null, MatterCore), CancellationToken.None);
+
+        outcome.Status.Should().Be(DecisionActionStatus.Failed);
+        outcome.ReasonCode.Should().Be(DecisionActionReasons.WriteFailed);
+    }
+
+    [Fact]
+    public async Task CreateBudget_WhenTheMattersEntitySetCannotBeResolved_IsFailed_NothingIsCreated_K3()
+    {
+        var cores = Cores();
+        var entities = new Mock<IGenericEntityService>();
+        entities.Setup(e => e.GetEntitySetNameAsync("sprk_matter", It.IsAny<CancellationToken>())).ThrowsAsync(new InvalidOperationException("metadata is down"));
+
+        var outcome = await new CreateBudgetExecutor(Probe(CanCreate).Object, cores.Object, entities.Object, new FakeTimeProvider(Now), Sources().Object).ExecuteAsync(
+            Request(CreateBudgetParams(), null, MatterCore), CancellationToken.None);
+
+        outcome.Status.Should().Be(DecisionActionStatus.Failed);
+        outcome.ReasonCode.Should().Be(DecisionActionReasons.WriteFailed);
+        outcome.Detail.Should().Be("The matter could not be resolved; nothing was created.");
+        outcome.Written.Should().BeEmpty();
+        cores.Verify(c => c.CreateChildAsync(It.IsAny<HttpContext>(), It.IsAny<string>(), It.IsAny<JsonElement>(), It.IsAny<CancellationToken>()), Times.Never,
+            "a budget that cannot be filed under its matter is never created");
+    }
+
+    // ---------------------------------------------------------------------------------------------------------------
+    // create-budget fields (task 167, D-193): category, year, dates, period, and the currency pair
+    // ---------------------------------------------------------------------------------------------------------------
+
+    private static async Task<(DecisionActionOutcome Outcome, JsonElement? Sent, Mock<DecisionRouteCores> Cores)> RunCreateBudgetAsync(
+        Dictionary<string, string?> parameters, Mock<DecisionParameterSources>? sources = null)
+    {
+        var cores = Cores();
+        JsonElement? sent = null;
+        cores.Setup(c => c.CreateChildAsync(It.IsAny<HttpContext>(), It.IsAny<string>(), It.IsAny<JsonElement>(), It.IsAny<CancellationToken>()))
+            .Callback<HttpContext, string, JsonElement, CancellationToken>((_, _, b, _) => sent = b)
+            .ReturnsAsync(Reply(201, body: new { id = Guid.NewGuid() }));
+        var outcome = await new CreateBudgetExecutor(Probe(CanCreate).Object, cores.Object, Entities(), new FakeTimeProvider(Now), (sources ?? Sources()).Object)
+            .ExecuteAsync(Request(parameters, null, MatterCore), CancellationToken.None);
+        return (outcome, sent, cores);
+    }
+
+    [Fact]
+    public async Task CreateBudget_WritesEverySuppliedField_AndTheCurrencyPair_NeverTheBudgetNumber_D193()
+    {
+        var parameters = CreateBudgetParams();
+        parameters["category"] = "100000001";
+        parameters["year"] = "2026";
+        parameters["startDate"] = "2026-01-01";
+        parameters["endDate"] = "2026-12-31";
+        parameters["period"] = "0";
+        parameters["currency"] = EuroId.ToString("D");
+        var sources = Sources();
+
+        var (outcome, sent, _) = await RunCreateBudgetAsync(parameters, sources);
+
+        outcome.Status.Should().Be(DecisionActionStatus.Done);
+        var body = sent!.Value;
+        body.GetProperty("sprk_budgetcategory").GetInt32().Should().Be(100000001);
+        body.GetProperty("sprk_budgetyear").GetString().Should().Be("2026");
+        body.GetProperty("sprk_budgetstartdate").GetString().Should().Be("2026-01-01");
+        body.GetProperty("sprk_budgetenddate").GetString().Should().Be("2026-12-31");
+        body.GetProperty("sprk_budgetperiod").GetInt32().Should().Be(0);
+        body.GetProperty("transactioncurrencyid@odata.bind").GetString().Should().Be($"/transactioncurrencies({EuroId:D})");
+        body.GetProperty("sprk_currency").GetString().Should().Be("EUR", "the ISO code of the chosen currency, never blank");
+        var names = body.EnumerateObject().Select(p => p.Name).ToList();
+        names.Should().NotContain("sprk_budgetnumber", "the platform autonumber fills it");
+        names.Should().NotContain(n => n.Contains("reason", StringComparison.OrdinalIgnoreCase), "the reason goes to the Decision Record only");
+        sources.Verify(s => s.ResolveBudgetCurrencyAsync(MatterId, EuroId.ToString("D"), It.IsAny<CancellationToken>()), Times.AtLeastOnce);
+    }
+
+    [Fact]
+    public async Task CreateBudget_WithNoOptionalFields_StillWritesTheDefaultCurrencyPair_AndNoneOfTheOthers_D193()
+    {
+        var sources = Sources();
+
+        var (outcome, sent, _) = await RunCreateBudgetAsync(CreateBudgetParams(), sources);
+
+        outcome.Status.Should().Be(DecisionActionStatus.Done);
+        var body = sent!.Value;
+        body.GetProperty("transactioncurrencyid@odata.bind").GetString().Should().Be($"/transactioncurrencies({EuroId:D})");
+        body.GetProperty("sprk_currency").GetString().Should().Be("EUR");
+        var names = body.EnumerateObject().Select(p => p.Name).ToList();
+        names.Should().NotContain(["sprk_budgetcategory", "sprk_budgetyear", "sprk_budgetstartdate", "sprk_budgetenddate", "sprk_budgetperiod", "sprk_budgetnumber"]);
+        sources.Verify(s => s.ResolveBudgetCurrencyAsync(MatterId, null, It.IsAny<CancellationToken>()), Times.AtLeastOnce,
+            "an omitted currency is resolved by the server to the business-unit default");
+        sources.Verify(s => s.OptionsAsync(It.IsAny<HttpContext>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never,
+            "no option list is read for a field that was not supplied");
+    }
+
+    [Fact]
+    public async Task CreateBudget_AnUnknownInactiveOrUndeterminedCurrency_IsRefused_NothingIsWritten_D193()
+    {
+        var parameters = CreateBudgetParams();
+        parameters["currency"] = Guid.NewGuid().ToString("D");
+
+        var (outcome, sent, cores) = await RunCreateBudgetAsync(parameters, Sources(new BudgetCurrency(null, null, "That is not an existing, active currency.")));
+
+        outcome.Status.Should().Be(DecisionActionStatus.Refused);
+        outcome.ReasonCode.Should().Be(DecisionActionReasons.InvalidParameter);
+        outcome.Detail.Should().Be("That is not an existing, active currency.");
+        outcome.Written.Should().BeEmpty();
+        sent.Should().BeNull();
+        cores.Verify(c => c.CreateChildAsync(It.IsAny<HttpContext>(), It.IsAny<string>(), It.IsAny<JsonElement>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Theory]
+    [InlineData("category", "100000009")]  // a number that is not in the live option set
+    [InlineData("category", "Fees")]       // a label is not a value
+    [InlineData("period", "9")]
+    [InlineData("period", "Q1")]
+    [InlineData("year", "20267")]          // longer than the column's MaxLength (4)
+    [InlineData("startDate", "01/02/2026")]
+    [InlineData("startDate", "2026-13-01")]
+    [InlineData("endDate", "soon")]
+    public async Task CreateBudget_ABadOptionalField_IsRefused_NothingIsWritten_D193(string field, string value)
+    {
+        var parameters = CreateBudgetParams();
+        parameters[field] = value;
+
+        var (outcome, sent, cores) = await RunCreateBudgetAsync(parameters);
+
+        outcome.Status.Should().Be(DecisionActionStatus.Refused);
+        outcome.ReasonCode.Should().Be(DecisionActionReasons.InvalidParameter);
+        outcome.Written.Should().BeEmpty();
+        sent.Should().BeNull();
+        cores.Verify(c => c.CreateChildAsync(It.IsAny<HttpContext>(), It.IsAny<string>(), It.IsAny<JsonElement>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task CreateBudget_AnEndDateBeforeTheStartDate_IsRefused_ButTheSameDayIsAccepted_D193()
+    {
+        var before = CreateBudgetParams();
+        before["startDate"] = "2026-06-02";
+        before["endDate"] = "2026-06-01";
+        var (refused, sentBefore, _) = await RunCreateBudgetAsync(before);
+
+        var sameDay = CreateBudgetParams();
+        sameDay["startDate"] = "2026-06-01";
+        sameDay["endDate"] = "2026-06-01";
+        var (accepted, sentSame, _) = await RunCreateBudgetAsync(sameDay);
+
+        refused.Status.Should().Be(DecisionActionStatus.Refused);
+        refused.ReasonCode.Should().Be(DecisionActionReasons.InvalidParameter);
+        sentBefore.Should().BeNull();
+        accepted.Status.Should().Be(DecisionActionStatus.Done, "must-not-fire: an end date equal to the start date is a one-day budget");
+        sentSame!.Value.GetProperty("sprk_budgetstartdate").GetString().Should().Be("2026-06-01");
+    }
+
+    [Fact]
+    public async Task CreateBudget_AnEndDateWithNoStartDate_IsAccepted_D193()
+    {
+        var parameters = CreateBudgetParams();
+        parameters["endDate"] = "2026-12-31";
+
+        var (outcome, sent, _) = await RunCreateBudgetAsync(parameters);
+
+        outcome.Status.Should().Be(DecisionActionStatus.Done);
+        sent!.Value.TryGetProperty("sprk_budgetstartdate", out _).Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task Preflight_CreateBudget_RefusesABadCurrencyOrOption_WithZeroWrites_D193()
+    {
+        var parameters = CreateBudgetParams();
+        parameters["category"] = "100000009";
+        var spy = new Spy();
+
+        await AssertPreflightRefusesWithoutWriting(
+            new CreateBudgetExecutor(Probe(CanCreate).Object, spy.Cores.Object, Entities(), new FakeTimeProvider(Now), Sources().Object),
+            Request(parameters, null, MatterCore), spy, DecisionActionReasons.InvalidParameter);
+
+        var currency = new Spy();
+        await AssertPreflightRefusesWithoutWriting(
+            new CreateBudgetExecutor(Probe(CanCreate).Object, currency.Cores.Object, Entities(), new FakeTimeProvider(Now), Sources(new BudgetCurrency(null, null, "No currency.")).Object),
+            Request(CreateBudgetParams(), null, MatterCore), currency, DecisionActionReasons.InvalidParameter);
+    }
+
+    [Fact]
+    public async Task Preflight_CreateBudget_WhenTheLiveOptionsCannotBeRead_Throws_SoTheCommitIs503_NotAnAcceptedGuess_D193()
+    {
+        var parameters = CreateBudgetParams();
+        parameters["period"] = "0";
+        var executor = new CreateBudgetExecutor(Probe(CanCreate).Object, Cores().Object, Entities(), new FakeTimeProvider(Now), Sources(optionsUnreadable: true).Object);
+
+        var act = () => executor.PreflightAsync(Request(parameters, null, MatterCore), CancellationToken.None);
+
+        await act.Should().ThrowAsync<InvalidOperationException>();
     }
 
     // ---------------------------------------------------------------------------------------------------------------
@@ -1091,6 +1589,54 @@ public class DecisionActionExecutorsTests
 
         request.Should().BeNull();
         refusal!.Status.Should().Be(DecisionActionStatus.Refused);
+    }
+
+    [Theory]
+    [InlineData("lead@firm")]
+    [InlineData("lead")]
+    [InlineData("@firm.example")]
+    [InlineData("good@firm.example; lead@firm")]
+    public async Task InquiryAdapter_RefusesAnAddressThatIsNotOne_BeforeAnyReadOrWrite(string to)
+    {
+        // Fix round 1 (F1 pre-existing): `lead@firm` passed Next, the service request was written, then Graph refused the address and
+        // left an orphan row. Every token must be an address, and the refusal comes before the preflight reads anything.
+        var user = new FakeUserClient();
+        var appOnly = new Mock<IFieldMappingDataverseService>(MockBehavior.Strict);
+        var inquiry = new BudgetInquiryExecutor(
+            user, Owner().Object, appOnly.Object, new InquiryEmailSender(null!, new HttpContextAccessor()), new HttpContextAccessor(),
+            NullLogger<BudgetInquiryExecutor>.Instance);
+        var executor = new BudgetInquiryActionExecutor(inquiry);
+        var request = Request(new() { ["to"] = to, ["subject"] = "s", ["body"] = "b", ["outsideFirm"] = FirmId.ToString("D") });
+
+        var (mapped, refusal) = BudgetInquiryActionExecutor.Map(request);
+        mapped.Should().BeNull();
+        refusal!.Status.Should().Be(DecisionActionStatus.Refused);
+        refusal.ReasonCode.Should().Be(DecisionActionReasons.RecipientUnresolved);
+
+        var preflight = await executor.PreflightAsync(request, CancellationToken.None);
+        preflight!.ReasonCode.Should().Be(DecisionActionReasons.RecipientUnresolved);
+        var executed = await executor.ExecuteAsync(request, CancellationToken.None);
+        executed.Status.Should().Be(DecisionActionStatus.Refused);
+        executed.ReasonCode.Should().Be(DecisionActionReasons.RecipientUnresolved);
+        executed.Written.Should().BeNullOrEmpty("no service request is written for a bad address");
+
+        user.Gets.Should().BeEmpty("nothing is read as the caller before the refusal");
+        user.Patches.Should().BeEmpty();
+        appOnly.VerifyNoOtherCalls();
+    }
+
+    [Fact]
+    public void InquiryAdapter_AcceptsOrdinaryAddresses_IncludingPlusTagsAndSubdomains()
+    {
+        var (request, refusal) = BudgetInquiryActionExecutor.Map(Request(new()
+        {
+            ["to"] = "Lead.Name+tag@mail.firm.example, second@firm.example",
+            ["subject"] = "s",
+            ["body"] = "b",
+        }));
+
+        refusal.Should().BeNull();
+        request!.To.Should().Equal("Lead.Name+tag@mail.firm.example", "second@firm.example");
     }
 
     [Fact]
@@ -1276,9 +1822,10 @@ public class DecisionActionExecutorsTests
         var revision = writer.Created.Should().ContainSingle().Subject;
         revision.GetAttributeValue<EntityReference>("ownerid").Should().Be(new EntityReference("team", team),
             "the revision must not fall to the writer's own business unit");
-        asked!.TargetEntityLogicalName.Should().Be("sprk_matter");
-        asked.TargetRecordId.Should().Be(MatterId);
-        asked.Parents.Should().Contain(new RecordOwnershipParent("sprk_budget", BudgetId));
+        // UAC task 194b R3b-2: asked over both, in sprk_budgetrevision's primary order (the budget first, then the matter).
+        asked!.TargetEntityLogicalName.Should().Be("sprk_budget");
+        asked.TargetRecordId.Should().Be(BudgetId);
+        asked.Parents.Should().Contain(new RecordOwnershipParent("sprk_matter", MatterId));
     }
 
     [Fact]
@@ -1485,6 +2032,8 @@ public class DecisionActionExecutorsTests
             (new SendEmailExecutor(probe, spy.User, cores), Request(Message("a@b.example"), null, MatterCore)),
             (new AddTodoExecutor(probe, cores, Entities()), Request(new() { ["title"] = "t", ["assignee"] = ContactId.ToString("D"), ["dueDate"] = "2026-10-20" }, null, MatterCore)),
             (new CreateEventExecutor(probe, cores, Entities()), Request(new() { ["title"] = "t", ["date"] = "2026-10-22" }, null, MatterCore)),
+            (new AssignTaskExecutor(probe, cores, Entities()), Request(new() { ["assignee"] = ContactId.ToString("D"), ["description"] = "t" }, null, MatterCore)),
+            (new CreateBudgetExecutor(probe, cores, Entities(), new FakeTimeProvider(Now), Sources().Object), Request(CreateBudgetParams(), null, MatterCore)),
         };
 
         foreach (var (executor, request) in cases)

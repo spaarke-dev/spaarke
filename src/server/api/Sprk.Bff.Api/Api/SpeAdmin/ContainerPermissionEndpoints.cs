@@ -227,6 +227,21 @@ public static class ContainerPermissionEndpoints
                 configGuid, context.TraceIdentifier);
             return ConfigNotFoundProblem(configGuid, context);
         }
+        catch (SpeAdminGraphService.UserNotResolvedException ex)
+        {
+            logger.LogWarning(
+                "GrantPermission: user '{UserKey}' not found in Entra for container '{ContainerId}', TraceId={TraceId}",
+                ex.UserKey, containerId, context.TraceIdentifier);
+            return Results.Problem(
+                detail: ex.Message,
+                statusCode: StatusCodes.Status400BadRequest,
+                title: "User Not Found",
+                extensions: new Dictionary<string, object?>
+                {
+                    ["errorCode"] = "spe.containers.permissions.user_not_found",
+                    ["traceId"] = context.TraceIdentifier,
+                });
+        }
         catch (SpaarkeStorageException sse)
         {
             logger.LogError(

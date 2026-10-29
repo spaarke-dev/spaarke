@@ -355,6 +355,58 @@ describe('applyDocumentIdentityOutcome', () => {
     });
   });
 
+  it('task 132: an UNKNOWN-record answer for the same document keeps the record the pane already knows', () => {
+    const known = { entityType: 'sprk_matter', id: '11111111-2222-3333-4444-555555555555', name: 'PAT-191111' };
+    const prev: DocumentIdentityContext = {
+      documentId: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
+      documentName: 'Old name',
+      fileName: 'old.eml',
+      relatedRecord: known,
+      regardingEntity: 'Matter',
+      regardingRecordId: known.id,
+      regardingName: known.name,
+    };
+
+    const next = applyDocumentIdentityOutcome(
+      prev,
+      {
+        kind: 'resolved',
+        documentId: 'AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE',
+        documentName: 'New name',
+        fileName: 'new.eml',
+        relatedRecord: null,
+        relatedRecordKnown: false,
+      },
+      toFriendlyRegardingType
+    );
+
+    expect(next?.relatedRecord).toEqual(known);
+    expect(next?.regardingRecordId).toBe(known.id);
+    expect(next?.documentName).toBe('New name');
+  });
+
+  it('task 132: an UNKNOWN-record answer for a DIFFERENT document does not carry the old record over', () => {
+    const prev: DocumentIdentityContext = {
+      documentId: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
+      relatedRecord: { entityType: 'sprk_matter', id: '11111111-2222-3333-4444-555555555555', name: 'PAT-191111' },
+    };
+
+    const next = applyDocumentIdentityOutcome(
+      prev,
+      {
+        kind: 'resolved',
+        documentId: 'ffffffff-bbbb-cccc-dddd-eeeeeeeeeeee',
+        documentName: 'Other',
+        fileName: 'other.eml',
+        relatedRecord: null,
+        relatedRecordKnown: false,
+      },
+      toFriendlyRegardingType
+    );
+
+    expect(next?.relatedRecord).toBeNull();
+  });
+
   it('merges a resolved outcome with NO related record — no regarding fields are set', () => {
     const next = applyDocumentIdentityOutcome(
       undefined,

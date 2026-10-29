@@ -24,6 +24,11 @@ export interface EvidenceLineProps {
   text: string | number | null | undefined;
   /** What is missing, shown when the value is null (e.g. "Spend snapshot"). */
   subject?: string;
+  /**
+   * True when the server withheld the value because its witness is on a record the reader may not see (task 038). The line
+   * keeps its stored tier and reads "Details withheld (restricted record)"; it is not a missing fact.
+   */
+  withheld?: boolean;
   /** Where the value came from. */
   source?: string;
   /** When the value was true (ISO 8601); formatted for display. */
@@ -77,14 +82,29 @@ function formatAsOf(asOf: string | null | undefined): string | null {
   return Number.isNaN(d.getTime()) ? asOf : d.toLocaleDateString();
 }
 
-export const EvidenceLine: React.FC<EvidenceLineProps> = ({ tier, text, subject, source, asOf, clause, className }) => {
+export const EvidenceLine: React.FC<EvidenceLineProps> = ({
+  tier,
+  text,
+  subject,
+  withheld,
+  source,
+  asOf,
+  clause,
+  className,
+}) => {
   const styles = useStyles();
-  const missing = isBlank(text);
+  const missing = isBlank(text) && !withheld;
   const shown: 'Fact' | 'Interpretation' | 'Missing' = missing ? 'Missing' : (TIER_DISPLAY[tier] ?? 'Missing');
   const tierClass =
     shown === 'Fact' ? styles.tierFact : shown === 'Interpretation' ? styles.tierInterpretation : styles.tierMissing;
 
-  const bodyText = missing ? (subject ? `${subject}: no value recorded` : 'No value recorded') : String(text);
+  const bodyText = withheld
+    ? 'Details withheld (restricted record)'
+    : missing
+      ? subject
+        ? `${subject}: no value recorded`
+        : 'No value recorded'
+      : String(text);
   const asOfText = formatAsOf(asOf);
   const detail = [
     source,

@@ -20,6 +20,7 @@
 
 import * as React from 'react';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { confirmRevoke } from '../../../__tests__/helpers/confirmDialog';
 import { FluentProvider, webLightTheme, webDarkTheme } from '@fluentui/react-components';
 import { AccessGrantModal } from '../AccessGrantModal';
 import { apiErrorFor, throwingAuthenticatedFetch } from '../../../__tests__/helpers/authenticatedFetchDouble';
@@ -373,8 +374,7 @@ describe('AccessGrantModal (v1.0.26)', () => {
       expect(await screen.findByText('Revoke access?')).toBeInTheDocument();
       (props.fetchExistingGrants as jest.Mock).mockResolvedValueOnce([]);
 
-      const revokeButtons = screen.getAllByRole('button', { name: 'Revoke' });
-      fireEvent.click(revokeButtons[revokeButtons.length - 1]);
+      await confirmRevoke();
 
       await waitFor(() =>
         expect(props.authenticatedFetch).toHaveBeenCalledWith(

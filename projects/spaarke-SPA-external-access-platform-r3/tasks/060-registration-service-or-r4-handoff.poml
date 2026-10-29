@@ -4,7 +4,7 @@
     <title>Shared registration service: host decision, then build or R4 hand-off (FR-14)</title>
     <phase>6 Registration service</phase>
     <gate>after 003 — BLOCKED on the owner decision of who builds/hosts the T240c directory and registration service</gate>
-    <status>not-started</status>
+    <status>cancelled</status>
     <rigor>FULL</rigor>
     <rigor-reason>New identity service holding invite permission (tags auth, placement)</rigor-reason>
     <model-tier>opus</model-tier>
@@ -97,7 +97,9 @@
     <criterion testable="true">Test scope: cover the stated contract plus the negative and edge cases named in these criteria. Anything beyond that needs a one-line justification in the task notes.</criterion>
   </acceptance-criteria>
 
-  <notes>Spec FR-14 and Unresolved Questions. If FR-14 moves to R4, success criterion 6 is met by the hand-off per README.</notes>
+  <notes>Spec FR-14 and Unresolved Questions. If FR-14 moves to R4, success criterion 6 is met by the hand-off per README.
+
+    CANCELLED 2026-10-13 (owner approved ADR-028 A9 and the A9 design): superseded by ADR-028 A9. Workforce contacts register through the stamp BFF route POST /api/v1/external/registration (task 047) behind the SPA profile form (task 058); no shared registration service is built. See notes/a9-bff-design.md §6, §10.</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>

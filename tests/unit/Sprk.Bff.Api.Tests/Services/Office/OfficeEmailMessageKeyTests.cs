@@ -161,12 +161,10 @@ public class OfficeEmailMessageKeyTests
             .ReturnsAsync(new Entity("sprk_communication", communicationId));
 
         var generic = new Mock<IGenericEntityService>();
-        generic.Setup(g => g.RetrieveAsync("sprk_document", newDocId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new Entity("sprk_document", newDocId));
-        Dictionary<string, object>? link = null;
-        generic.Setup(g => g.UpdateAsync("sprk_document", newDocId, It.IsAny<Dictionary<string, object>>(), It.IsAny<CancellationToken>()))
-            .Callback<string, Guid, Dictionary<string, object>, CancellationToken>((_, _, f, _) => link = f)
-            .Returns(Task.CompletedTask);
+        CreateDocumentRequest? created = null;
+        docSvc.Setup(d => d.CreateDocumentAsync(It.IsAny<CreateDocumentRequest>(), It.IsAny<CancellationToken>()))
+            .Callback<CreateDocumentRequest, CancellationToken>((r, _) => created = r)
+            .ReturnsAsync(newDocId.ToString());
 
         var sut = new OfficeDocumentPersistence(
             docSvc.Object, NotADuplicate().Object, NullLogger<OfficeDocumentPersistence>.Instance, comm.Object, generic.Object);
@@ -176,8 +174,9 @@ public class OfficeEmailMessageKeyTests
             CancellationToken.None, owningTeamId: RecordOwnershipResolverDouble.DefaultTeamId);
 
         captured().EmailMessageId.Should().Be(RfcId);
-        link.Should().NotBeNull("the archive links to the communication that captured the same email (FR-C4)");
-        ((EntityReference)link![CrossPathLink.LinkedCommunicationAttribute]).Id.Should().Be(communicationId);
+        // Task 130: the link is written IN the create, not by a second write.
+        created!.RelatedCommunicationId.Should().Be(communicationId,
+            "the archive links to the communication that captured the same email (FR-C4)");
     }
 
     [Fact]

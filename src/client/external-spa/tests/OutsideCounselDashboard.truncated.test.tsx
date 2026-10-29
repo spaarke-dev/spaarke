@@ -107,6 +107,7 @@ describe('OutsideCounselDashboard — cut-short and unreadable lists', () => {
     renderDashboard();
 
     expect(await screen.findByText('My Documents (12)')).toBeTruthy();
-    expect(screen.getByText(/Showing 10 of 12 documents/)).toBeTruthy();
+    // findBy, not getBy: under a loaded runner the "Showing" line can render a tick after the heading.
+    expect(await screen.findByText(/Showing 10 of 12 documents/)).toBeTruthy();
   });
 });

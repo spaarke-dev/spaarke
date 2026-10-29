@@ -131,6 +131,14 @@ public class PlaybookRunContext
     public string? StartedByOid { get; init; }
 
     /// <summary>
+    /// Who started this run (#2257, owner round 123). On a <see cref="PlaybookRunStartedBy.Person"/> run, <see cref="UserId"/>
+    /// is that person, and the playbook's record writes run AS them; a <see cref="PlaybookRunStartedBy.System"/> run writes
+    /// app-only, whatever <see cref="UserId"/> it targets (a scheduler's per-user notification run). Defaults to Person, so a
+    /// run with no user refuses to write instead of writing app-only by accident.
+    /// </summary>
+    public PlaybookRunStartedBy StartedBy { get; init; } = PlaybookRunStartedBy.Person;
+
+    /// <summary>
     /// User-specific preferences for notification delivery (e.g., quiet hours, channel opt-outs).
     /// Populated from the user's sprk_userpreferences record. Null when not applicable.
     /// </summary>
@@ -329,6 +337,7 @@ public class PlaybookRunContext
             TenantId = TenantId,
             UserContext = UserContext,
             UserId = UserId,
+            StartedBy = StartedBy,
             CallerObjectId = StartedByOid,
             ModelDeploymentId = node.ModelDeploymentId,
             CorrelationId = RunId.ToString()

@@ -159,7 +159,9 @@ public static class E2EAcceptanceModule
         services.AddSingleton<ITrapProbe, T5SlotMiKvRbacTrapProbe>();                // T5 (task 172)
         services.AddSingleton<IT6GraphAppOnlyProbe, GraphContainersListAppOnlyProbe>(); // task 248
         services.AddSingleton<ITrapProbe, T6SpeConfidentialClientTrapProbe>();       // T6 (task 175)
-        services.AddSingleton<ITrapProbe, CustomerIdentityT7Probe>();                // T7 (task 238, D-14 — ArmClient)
+        // T7 (task 238, D-14 — ArmClient; task 264 adds a per-call tenant-scoped Graph client built inside the probe's
+        // single public constructor, so no hand-built registration is needed).
+        services.AddSingleton<ITrapProbe, CustomerIdentityT7Probe>();
         // Task 230a: the I1 PackagedScriptTenantLiteralInvariantProbe registration DELETED (I1 is build-time).
         // I2 (task 173) — real AI Search tenant-filter probe. Issues a live
         // /docs/search POST on each canonical index of the stamp's own AI

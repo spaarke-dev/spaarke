@@ -208,6 +208,14 @@ public static class EntraAppRegRejectionCodes
     /// (<c>workforce_acct_claim_missing</c>). Resumable — the step is idempotent.
     /// </summary>
     public const string AcctClaimFailed = "appreg-acct-claim-failed";
+
+    /// <summary>
+    /// T264 (#2001 from SPA-r3 ISS-013): H3 could not set <c>authenticationBehaviors.removeUnverifiedEmailClaim</c> on the
+    /// registration, or did not read it back afterwards. Without it the stamp BFF's email-bound contact registration
+    /// (R3 task 047) is exposed to a user whose unverified-domain email equals a contact's. Resumable — the step is
+    /// idempotent.
+    /// </summary>
+    public const string UnverifiedEmailClaimFailed = "appreg-unverified-email-claim-failed";
 }
 
 /// <summary>

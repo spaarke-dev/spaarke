@@ -99,6 +99,11 @@ public sealed class ActionSeam : IActionSeam
         if (string.IsNullOrWhiteSpace(request.Subject))
             return new CreateTaskResult(false, Guid.Empty, "subject is required");
 
+        // UAC task 194b V-fix (verifier A F1): a regarding ownership parent the task table cannot file is refused with its
+        // named code before anything is written (the core refuses it too, but only as a bare Guid.Empty).
+        if (TaskActionCore.RegardingRefusalOf(request.RegardingObjectType, request.RegardingObjectId) is { } refusal)
+            return new CreateTaskResult(false, Guid.Empty, refusal);
+
         var core = new TaskActionCore(_entityService, _coreAncestors, _ownership, _identity, _recordTypes, _logger);
         var taskId = await core.CreateAsync(
             new TaskActionInput(
@@ -146,7 +151,11 @@ public sealed class ActionSeam : IActionSeam
                     renderedMappings,
                     request.LegacyFields,
                     renderedLookups,
-                    request.ImpersonateSystemUserId),
+                    request.ImpersonateSystemUserId,
+                    // #2257 fix round 1: every caller of this seam applies a proposal the impersonated user confirmed (the
+                    // Job B apply), so it keeps its behaviour: written AS that user, it is not asked the app-only refusal;
+                    // with no user it still is.
+                    UpdateRecordPayloadSource.ConfirmedProposal),
                 cancellationToken);
 
             return new UpdateRecordResult(true, fieldsUpdated.ToArray(), null);

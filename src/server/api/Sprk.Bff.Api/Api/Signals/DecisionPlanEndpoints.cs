@@ -39,20 +39,24 @@ public static class DecisionPlanEndpoints
             .WithName("GetSignalDecisionPlan")
             .WithSummary("Get a Signal's decision plan resolved against the action catalog")
             .WithDescription("Returns the plan's actions in plan order (the first is the recommendation), the Next-steps set and the "
-                + "lane's closed dismissal reasons. 404 when the Signal or its core record is not readable by the caller; "
+                + "lane's closed dismissal reasons. 404 when the Signal or its core record is not readable by the caller, or a Do item "
+                + "is not the caller's own work (D-141); 503 when that could not be checked; "
                 + "422 when the plan does not resolve against the closed catalog.")
             .Produces<DecisionPlanResponse>(200)
             .ProducesProblem(StatusCodes.Status403Forbidden)
             .ProducesProblem(StatusCodes.Status404NotFound)
-            .ProducesProblem(StatusCodes.Status422UnprocessableEntity);
+            .ProducesProblem(StatusCodes.Status422UnprocessableEntity)
+            .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
 
         // Task 034 (FR-17, reconciliation B.2 row 034): the suppression count the wizard's dismissal step and admin show.
         group.MapGet("/{signalId:guid}/suppression", GetSuppressionAsync)
             .WithName("GetSignalSuppression")
             .WithSummary("Get the (policy, core record) dismissal count and suppression date for a Signal")
             .WithDescription("Returns the counted and recorded dismissals in the trailing 30 days for the Signal's policy on the Signal's "
-                + "core record (or on the item itself when it has none) and the current sprk_suppresseduntil. 404 when the Signal or its "
-                + "core record is not readable by the caller; 403 when the caller cannot be resolved; 503 when an authorized caller's count cannot be read.")
+                + "core record (or on the item itself when it has none) and the current sprk_suppresseduntil; for a Do item, only the dismissals "
+                + "of that item's person's own Do items, reported only to that person (D-145a). 404 when the Signal or its "
+                + "core record is not readable by the caller, or a Do item is not the caller's own work (D-141); 403 when the caller cannot be "
+                + "resolved; 503 when access could not be checked or an authorized caller's count cannot be read.")
             .Produces<SuppressionResponse>(200)
             .ProducesProblem(StatusCodes.Status403Forbidden)
             .ProducesProblem(StatusCodes.Status404NotFound)
@@ -90,7 +94,8 @@ public static class DecisionPlanEndpoints
         SuppressionStatus? status;
         try
         {
-            status = await suppression.GetStatusForSignalAsync(signalId, caller, ct);
+            // D-145a (task 152): a Do item's count is its person's own, and only that person is told it.
+            status = await suppression.GetStatusForSignalAsync(signalId, caller, ct, decision.CallerContactId);
         }
         catch (SuppressionPartitionUndeterminedException)
         {
@@ -128,7 +133,8 @@ public static class DecisionPlanEndpoints
             : Results.Ok(SuppressionResponse.From(signalId, status));
     }
 
-    /// <summary>A no-core Signal's subject could not be read because of a fault: 503, never the uniform 404 (that is for "not yours").</summary>
+    /// <summary>A no-core Signal's subject, or a Do-lane Signal's "mine" read, could not be answered because of a fault: 503, never the
+    /// uniform 404 (that is for "not yours").</summary>
     private static IResult AccessUnavailable(HttpContext httpContext) =>
         Results.Problem(
             title: "Service Unavailable",
@@ -158,7 +164,8 @@ public static class DecisionPlanEndpoints
         DecisionPlanService planService,
         RuleBodyDescriber describer,
         CancellationToken ct,
-        [FromServices] DecisionPlanReadStamp? planReadStamp = null)
+        [FromServices] DecisionPlanReadStamp? planReadStamp = null,
+        [FromServices] DecisionParameterSources? parameterSources = null)
     {
         var decision = await signalAccess.AuthorizeAsync(signalId, ct);
         if (decision.Outcome == SignalAccessOutcome.CallerUnresolved)
@@ -191,6 +198,40 @@ public static class DecisionPlanEndpoints
                 });
         }
 
+        // Task 154 (D-111): an OPEN inquiry's "Record the outcome" To Do is completed by recording the disposition, never by Mark
+        // complete. Pass 2 F1: identified exactly as the commit route identifies it (the hint, else the To Do's matter's open
+        // inquiries), from the notes and matter the gate's own "mine" read returned, as the caller; only for a To Do whose plan offers
+        // Mark complete. Once the inquiry is closed the To Do is ordinary (adversarial pass 1). A fault offers nothing (503).
+        if (plan.Actions.Any(a => a.Code == ResolvedDecisionPlan.MarkCompleteCode))
+        {
+            var inquiry = await signalAccess.CheckSubjectTodoInquiryAsync(decision, ct);
+            if (inquiry == InquiryOutcomeTodoCheck.Unavailable)
+            {
+                return AccessUnavailable(httpContext);
+            }
+
+            if (inquiry == InquiryOutcomeTodoCheck.OpenInquiry)
+            {
+                plan = plan.WithoutMarkComplete();
+            }
+        }
+
+        // Task 161 (D-180): a matter with no active budget has nothing to revise, so Create budget takes Revise budget's place in the
+        // plan. Read as the caller; the commit route applies the same substitution (SignalCoreRecordAccess), so the two always agree.
+        // A count that cannot be read leaves Revise budget offered and never fails this read.
+        plan = await signalAccess.WithCreateBudgetWhenNoneAsync(plan, decision, ct);
+
+        // Task 160 (D-179): the budget inquiry's To pre-fill, read as the caller; none when it cannot be read. Never fails the read.
+        var inquiryRecipient = await signalAccess.ReadInquiryRecipientAsync(plan, decision, ct);
+
+        // Task 167 (D-193): the live option lists and starting values the plan's parameters name (Create budget's Category, Period and
+        // Currency), read once per source through the one resolver. Never fails the read: a list that cannot be read is empty.
+        var parameterFacts = parameterSources is null
+            ? DecisionParameterFacts.None
+            : await parameterSources.ForPlanAsync(
+                httpContext, plan,
+                string.Equals(decision.CoreTable, "sprk_matter", StringComparison.OrdinalIgnoreCase) ? decision.CoreId : null, ct);
+
         // "How this was determined" (task 026). A body that cannot be described is shown without the description, never
         // as a guess; it does not stop the decision from being taken.
         var described = await describer.DescribeAsync(resolution.RuleBodyJson, ct);
@@ -202,7 +243,7 @@ public static class DecisionPlanEndpoints
             await planReadStamp.StampAsync(httpContext, signalId, ct);
         }
 
-        return Results.Ok(DecisionPlanResponse.From(signalId, lane, versionId, plan, described.Description));
+        return Results.Ok(DecisionPlanResponse.From(signalId, lane, versionId, plan, described.Description, inquiryRecipient, parameterFacts));
     }
 }
 
@@ -216,13 +257,20 @@ public sealed record DecisionPlanResponse(
     IReadOnlyList<DismissalReasonDto> DismissalReasons,
     RuleDescription? RuleDescription)
 {
+    /// <param name="inquiryRecipient">Task 160 (D-179): the To pre-fill of <c>send-budget-inquiry</c> only; null leaves To empty.</param>
+    /// <param name="parameterFacts">Task 167 (D-193): the resolved option lists and starting values of the parameters that name a source; null adds none.</param>
     internal static DecisionPlanResponse From(
-        Guid signalId, DecisionLane lane, Guid policyVersionId, ResolvedDecisionPlan plan, RuleDescription? ruleDescription = null) =>
+        Guid signalId, DecisionLane lane, Guid policyVersionId, ResolvedDecisionPlan plan, RuleDescription? ruleDescription = null,
+        OutsideFirmContact? inquiryRecipient = null, DecisionParameterFacts? parameterFacts = null) =>
         new(signalId,
             lane.ToString(),
             policyVersionId,
-            plan.Actions.Select((a, i) => DecisionActionDto.From(a, isRecommended: i == 0)).ToList(),
-            plan.NextSteps.Select(a => DecisionActionDto.From(a, isRecommended: false)).ToList(),
+            plan.Actions.Select((a, i) => DecisionActionDto.From(a, isRecommended: i == 0,
+                prefillTo: a.Code == BudgetInquiryExecutor.ActionCode && inquiryRecipient is { } r
+                    ? [new DecisionRecipientDto(r.ContactId, r.Name, r.Email)]
+                    : null,
+                parameterFacts)).ToList(),
+            plan.NextSteps.Select(a => DecisionActionDto.From(a, isRecommended: false, parameterFacts: parameterFacts)).ToList(),
             plan.DismissalReasons.Select(r => new DismissalReasonDto(r.Code, r.Label, r.CountsTowardSuppression, r.RequiresDetail)).ToList(),
             ruleDescription);
 }
@@ -235,15 +283,36 @@ public sealed record DecisionActionDto(
     bool IsRecommended,
     IReadOnlyList<DecisionParameterDto> Parameters,
     IReadOnlyList<string> EffectLines,
-    IReadOnlyList<string> Excludes)
+    IReadOnlyList<string> Excludes,
+    string? Composer = null,
+    IReadOnlyList<DecisionRecipientDto>? PrefillTo = null)
 {
-    internal static DecisionActionDto From(DecisionActionDefinition a, bool isRecommended) =>
+    /// <param name="prefillTo">Task 160 (D-179): the To starting value (the outside firm's contact), or null.</param>
+    internal static DecisionActionDto From(
+        DecisionActionDefinition a, bool isRecommended, IReadOnlyList<DecisionRecipientDto>? prefillTo = null,
+        DecisionParameterFacts? parameterFacts = null) =>
         new(a.Code, a.Label, a.WorkType, a.RecordClass.ToString(), isRecommended,
             a.Parameters.Select(p => new DecisionParameterDto(p.Code, p.Label, p.Kind.ToString(), p.Required, p.Hint, p.LookupEntity,
-                p.Options?.Select(o => new DecisionOptionDto(o.Value, o.Label)).ToList(), p.OptionsSource)).ToList(),
+                OptionsOf(p, parameterFacts), p.OptionsSource,
+                p.DefaultSource is not null && parameterFacts is not null && parameterFacts.DefaultsBySource.TryGetValue(p.DefaultSource, out var start) ? start : null,
+                p.NotBefore, p.MaxLength)).ToList(),
             a.EffectLines,
-            a.Excludes);
+            a.Excludes,
+            a.Composer,
+            prefillTo);
+
+    /// <summary>A fixed list as declared; a named source's list as resolved (task 167); null when the parameter has neither or the plan
+    /// route resolved none (a plan read without the resolver).</summary>
+    private static List<DecisionOptionDto>? OptionsOf(DecisionActionParameter p, DecisionParameterFacts? facts) =>
+        p.Options is not null
+            ? p.Options.Select(o => new DecisionOptionDto(o.Value, o.Label)).ToList()
+            : p.OptionsSource is not null && facts is not null && facts.OptionsBySource.TryGetValue(p.OptionsSource, out var resolved)
+                ? resolved.Select(o => new DecisionOptionDto(o.Value, o.Label)).ToList()
+                : null;
 }
+
+/// <summary>A recipient the wizard starts To with (task 160, D-179): a contact the caller can read, with an email address.</summary>
+public sealed record DecisionRecipientDto(Guid ContactId, string? Name, string Email);
 
 public sealed record DecisionParameterDto(
     string Code,
@@ -253,7 +322,10 @@ public sealed record DecisionParameterDto(
     string? Hint,
     string? LookupEntity,
     IReadOnlyList<DecisionOptionDto>? Options,
-    string? OptionsSource);
+    string? OptionsSource,
+    string? DefaultValue = null,
+    string? NotBefore = null,
+    int? MaxLength = null);
 
 public sealed record DecisionOptionDto(string Value, string Label);
 

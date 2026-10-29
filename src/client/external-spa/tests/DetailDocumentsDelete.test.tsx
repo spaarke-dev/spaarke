@@ -959,7 +959,12 @@ const RECORD_ROW: Record<string, Record<string, unknown>> = {
 
 interface DetailNet {
   /** `/me` answer; `null` makes the call fail. */
-  me: { contactId: string; projects: Array<{ projectId: string; accessLevel: string }> } | null;
+  me: {
+    contactId: string;
+    projects: Array<{ projectId: string; accessLevel: string }>;
+    /** Task 036 fix round 1: the caller's write access is decided per record. */
+    writeAccessPerRecord?: boolean;
+  } | null;
   documents: DocRow[];
   /** The BFF's `canCreate` on the document list; `undefined` omits the member (a BFF that does not say). */
   documentsCanCreate?: boolean;
@@ -1206,6 +1211,36 @@ describe('the record detail view', () => {
       await within(docs).findByText('Mine.pdf');
       await waitFor(() => expect(within(docs).queryAllByRole('button', { name: /^Delete / })).toHaveLength(1));
       expect(within(docs).queryByRole('button', { name: /Upload Document/ })).toBeNull();
+    },
+    SLOW
+  );
+
+  it.each([
+    [true, true],
+    [false, false],
+  ])(
+    'Project, per-record caller (task 036 fix round 2, F3): the list canCreate=%s decides Upload (offered: %s) over a ViewOnly level',
+    async (canCreate, offered) => {
+      installDetailNet(
+        'project',
+        emptyNet({
+          me: {
+            contactId: ME,
+            projects: [{ projectId: PROJECT, accessLevel: 'ViewOnly' }],
+            writeAccessPerRecord: true,
+          },
+          documents: mixedDocs(),
+          documentsCanCreate: canCreate,
+        })
+      );
+      const dialog = await openDetail('project');
+      const docs = await within(dialog).findByTestId('record-detail-documents');
+      await within(docs).findByText('Mine.pdf');
+      // /me has returned once the caller's own Delete shows.
+      await waitFor(() => expect(within(docs).queryAllByRole('button', { name: /^Delete / })).toHaveLength(1));
+
+      expect(within(docs).queryByRole('button', { name: /Upload Document/ }) !== null).toBe(offered);
+      expect(within(docs).getByRole('button', { name: 'Download Theirs.pdf' })).toBeTruthy();
     },
     SLOW
   );

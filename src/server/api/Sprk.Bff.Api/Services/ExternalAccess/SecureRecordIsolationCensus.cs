@@ -78,7 +78,8 @@ public static class SecureRecordIsolationCensus
             .ToArray();
 
         // The guarded root-table Reads (clause 1) plus every privilege of the codified owner-role set (clause 5, task
-        // 145) — read from the ONE list compiled into this assembly.
+        // 145; clause 1 grades its child tables too since UAC 2026-10-23) — read from the ONE list compiled into this
+        // assembly.
         var ownerRoleSet = SecureRecordOwnerRoleSet.Embedded;
         var privilegeNames = SecureBuRoleDepthCensusBuilder.CensusPrivilegeNames(ownerRoleSet);
 
@@ -110,19 +111,17 @@ public static class SecureRecordIsolationCensus
             "systemuserid", "roleid");
 
         var users = (await RetrieveAllAsync(dataverse,
-                Query("systemuser", "systemuserid", "fullname", "domainname", "accessmode", "applicationid",
+                Query("systemuser", "systemuserid", "accessmode", "applicationid",
                     "isdisabled", "businessunitid"), ct))
             .Select(row =>
             {
-                var name = row.GetAttributeValue<string>("fullname") ?? string.Empty;
                 var isHuman = SecureBuRoleDepthCensusBuilder.IsHumanPrincipal(
                     hasApplicationId: OptionalGuid(row, "applicationid") is { } appId && appId != Guid.Empty,
                     isDisabled: row.GetAttributeValue<bool>("isdisabled"),
-                    fullName: name,
                     accessMode: row.GetAttributeValue<OptionSetValue>("accessmode")?.Value ?? 0);
 
                 return new CensusUser(
-                    row.Id, name, row.GetAttributeValue<string>("domainname"), isHuman,
+                    row.Id, isHuman,
                     OptionalGuid(row, "businessunitid"),
                     userRoles.TryGetValue(row.Id, out var ids) ? ids : Array.Empty<Guid>());
             })

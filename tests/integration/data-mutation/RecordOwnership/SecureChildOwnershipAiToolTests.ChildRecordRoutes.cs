@@ -96,7 +96,72 @@ public sealed partial class SecureChildOwnershipAiToolTests
     /// platform-cascade rows, so it needs no Web API client.
     /// </summary>
     private SecureChildReconciler Children(Sprk.Bff.Api.Services.Communication.IThreadResolver? threads = null) =>
-        SecureChildShareWorld.ReconcilerOver(() => ShareWorld, _shareTable, null!, threads: threads);
+        SecureChildShareWorld.ReconcilerOver(
+            () => ShareWorld, _shareTable, null!, threads: threads, gateDecisionRecords: _gateOverShareWorld ?? _gate.Sharing,
+            logger: _reconcilerLog, sharesLogger: _sharesLogger ?? _sharesLog);
+
+    /// <summary>#2143 round 10: what the reconciler's synchronizer logged (unless a test swaps in <see cref="_sharesLogger"/>).</summary>
+    private readonly Sprk.Bff.Api.Tests.Services.Communication.CapturingLogger<SecureChildShareSynchronizer> _sharesLog = new();
+
+    /// <summary>#2143 round 10 (K1 pin): a test's own logger for the reconciler's synchronizer, in place of <see cref="_sharesLog"/>.</summary>
+    private Microsoft.Extensions.Logging.ILogger<SecureChildShareSynchronizer>? _sharesLogger;
+
+    /// <summary>#2143 round 9: what the reconciler's step after a re-file logged.</summary>
+    private readonly Sprk.Bff.Api.Tests.Services.Communication.CapturingLogger<SecureChildReconciler> _reconcilerLog = new();
+
+    /// <summary>Ontology task 042b round 2 (D-169): the gate Decision Records the reconciler's after-re-file step re-owns (empty unless a
+    /// test seeds it).</summary>
+    private readonly Sprk.Bff.Api.Tests.Services.Signals.GateSharingWorld _gate = new();
+
+    /// <summary>Ontology task 042b round 4: when set, the reconciler's gate helper is <see cref="GateHelperOverTheShareWorld"/>'s.</summary>
+    private Sprk.Bff.Api.Services.Signals.GateDecisionRecordSharing? _gateOverShareWorld;
+
+    /// <summary>The ontology writer's systemuser in <see cref="GateHelperOverTheShareWorld"/> (WhoAmI): the gate records' creator.</summary>
+    private static readonly Guid GateWriter = Guid.Parse("a2470000-0000-4000-8000-0000000000d7");
+
+    /// <summary>
+    /// Ontology task 042b round 4: the REAL gate helper over THE SAME share world and share table as the engine — its reads are this world's
+    /// queries and single-row reads, the REAL <see cref="RecordOwnershipResolver"/> over the same rows answers its owner question, and its
+    /// Assign moves the owner here. Only the writer's connection (WhoAmI, the Assign) and the cache eviction are doubles.
+    /// </summary>
+    private (Sprk.Bff.Api.Services.Signals.GateDecisionRecordSharing Sharing,
+        Moq.Mock<Microsoft.PowerPlatform.Dataverse.Client.IOrganizationServiceAsync2> Org,
+        Sprk.Bff.Api.Tests.Services.Communication.CapturingLogger<Sprk.Bff.Api.Services.Signals.GateDecisionRecordSharing> Log)
+        GateHelperOverTheShareWorld()
+    {
+        var entities = SecureChildShareWorld.EntitiesOver(() => ShareWorld);
+        entities
+            .Setup(e => e.RetrieveAsync(Moq.It.IsAny<string>(), Moq.It.IsAny<Guid>(), Moq.It.IsAny<string[]>(), Moq.It.IsAny<CancellationToken>()))
+            .Returns((string table, Guid id, string[] columns, CancellationToken _) => Task.FromResult(ShareWorld.Retrieve(table, id, columns)));
+        var org = new Moq.Mock<Microsoft.PowerPlatform.Dataverse.Client.IOrganizationServiceAsync2>();
+        org.Setup(o => o.ExecuteAsync(Moq.It.IsAny<Microsoft.Crm.Sdk.Messages.WhoAmIRequest>(), Moq.It.IsAny<CancellationToken>()))
+            .Returns(() => Task.FromResult<OrganizationResponse>(
+                new Microsoft.Crm.Sdk.Messages.WhoAmIResponse { Results = { ["UserId"] = GateWriter } }));
+        org.Setup(o => o.ExecuteAsync(Moq.It.IsAny<Microsoft.Crm.Sdk.Messages.AssignRequest>(), Moq.It.IsAny<CancellationToken>()))
+            .Returns((OrganizationRequest request, CancellationToken _) =>
+            {
+                var assign = (Microsoft.Crm.Sdk.Messages.AssignRequest)request;
+                ShareWorld.MoveOwner(assign.Target.LogicalName, assign.Target.Id, DataversePrincipalRef.Team(assign.Assignee.Id));
+                return Task.FromResult(new OrganizationResponse());
+            });
+        var log = new Sprk.Bff.Api.Tests.Services.Communication.CapturingLogger<Sprk.Bff.Api.Services.Signals.GateDecisionRecordSharing>();
+        var sharing = new Sprk.Bff.Api.Services.Signals.GateDecisionRecordSharing(
+            entities.Object,
+            _shareTable,
+            new Sprk.Bff.Api.Services.Signals.OntologyWriterDataverseClient(
+                () => org.Object, NullLogger<Sprk.Bff.Api.Services.Signals.OntologyWriterDataverseClient>.Instance),
+            new RecordOwnershipResolver(entities.Object, SecureChildShareWorld.Configuration(), NullLogger<RecordOwnershipResolver>.Instance),
+            Moq.Mock.Of<Sprk.Bff.Api.Services.Ai.Membership.IMembershipCacheInvalidator>(),
+            log);
+        return (sharing, org, log);
+    }
+
+    /// <summary>A user-owned gate record of <paramref name="communication"/> in the share world, created by <see cref="GateWriter"/>.</summary>
+    private void ShareWorldGateRecord(Guid record, Guid communication)
+    {
+        ShareWorld.UserOwnedChild("sprk_decisionrecord", record, ("sprk_regardingcommunication", "sprk_communication", communication));
+        ShareWorld.Set("sprk_decisionrecord", record, "createdby", new EntityReference("systemuser", GateWriter));
+    }
 
     // ── Create (G5) ───────────────────────────────────────────────────────────────────────────────────────────
 
@@ -864,7 +929,7 @@ public sealed partial class SecureChildOwnershipAiToolTests
         ShareWorld.UserOwnedChild("sprk_communication", communication, ("sprk_regardingmatter", "sprk_matter", SecureMatter));
         var threads = new Moq.Mock<Sprk.Bff.Api.Services.Communication.IThreadResolver>();
         threads
-            .Setup(t => t.ReconcileThreadForFilingAsync(communication, Moq.It.IsAny<CancellationToken>()))
+            .Setup(t => t.ReconcileThreadForFilingAsync(communication, Moq.It.IsAny<Sprk.Bff.Api.Services.Communication.FilingReconcileHost>(), Moq.It.IsAny<Sprk.Bff.Api.Services.Access.SecureRemovalCaller?>(), Moq.It.IsAny<Func<CancellationToken, Task>?>(), Moq.It.IsAny<CancellationToken>()))
             .Callback(() => _world.Assignments.Should().NotBeEmpty("the reconcile runs after the filing and its owner are written"))
             .Returns(Task.CompletedTask);
 
@@ -872,7 +937,7 @@ public sealed partial class SecureChildOwnershipAiToolTests
             communication, new() { ["sprk_RegardingMatter@odata.bind"] = $"/sprk_matters({SecureMatter:D})" }, threads.Object);
 
         Status(result).Should().Be(StatusCodes.Status204NoContent, Detail(result));
-        threads.Verify(t => t.ReconcileThreadForFilingAsync(communication, Moq.It.IsAny<CancellationToken>()), Moq.Times.Once);
+        threads.Verify(t => t.ReconcileThreadForFilingAsync(communication, Moq.It.IsAny<Sprk.Bff.Api.Services.Communication.FilingReconcileHost>(), Moq.It.Is<Sprk.Bff.Api.Services.Access.SecureRemovalCaller?>(c => c != null), Moq.It.IsAny<Func<CancellationToken, Task>?>(), Moq.It.IsAny<CancellationToken>()), Moq.Times.Once);
     }
 
     [Fact]
@@ -887,7 +952,7 @@ public sealed partial class SecureChildOwnershipAiToolTests
             communication, new() { ["sprk_RegardingMatter@odata.bind"] = $"/sprk_matters({SecureMatter:D})" }, threads.Object);
 
         Status(result).Should().Be(StatusCodes.Status404NotFound);
-        threads.Verify(t => t.ReconcileThreadForFilingAsync(Moq.It.IsAny<Guid>(), Moq.It.IsAny<CancellationToken>()), Moq.Times.Never);
+        threads.Verify(t => t.ReconcileThreadForFilingAsync(Moq.It.IsAny<Guid>(), Moq.It.IsAny<Sprk.Bff.Api.Services.Communication.FilingReconcileHost>(), Moq.It.IsAny<Sprk.Bff.Api.Services.Access.SecureRemovalCaller?>(), Moq.It.IsAny<Func<CancellationToken, Task>?>(), Moq.It.IsAny<CancellationToken>()), Moq.Times.Never);
     }
 
     [Fact]
@@ -904,7 +969,7 @@ public sealed partial class SecureChildOwnershipAiToolTests
             "sprk_communication", communication, threads.Object, Lookup("sprk_regardingmatter", "sprk_matter", SecureMatter));
 
         result.Success.Should().BeTrue(result.ErrorMessage);
-        threads.Verify(t => t.ReconcileThreadForFilingAsync(communication, Moq.It.IsAny<CancellationToken>()), Moq.Times.Once);
+        threads.Verify(t => t.ReconcileThreadForFilingAsync(communication, Moq.It.IsAny<Sprk.Bff.Api.Services.Communication.FilingReconcileHost>(), Moq.It.Is<Sprk.Bff.Api.Services.Access.SecureRemovalCaller?>(c => c != null), Moq.It.IsAny<Func<CancellationToken, Task>?>(), Moq.It.IsAny<CancellationToken>()), Moq.Times.Once);
     }
 
     [Fact]
@@ -919,8 +984,225 @@ public sealed partial class SecureChildOwnershipAiToolTests
             "sprk_communication", communication, threads.Object, Lookup("sprk_regardingmatter", "sprk_matter", SecureMatter));
 
         result.Success.Should().BeFalse();
-        threads.Verify(t => t.ReconcileThreadForFilingAsync(Moq.It.IsAny<Guid>(), Moq.It.IsAny<CancellationToken>()), Moq.Times.Never);
+        threads.Verify(t => t.ReconcileThreadForFilingAsync(Moq.It.IsAny<Guid>(), Moq.It.IsAny<Sprk.Bff.Api.Services.Communication.FilingReconcileHost>(), Moq.It.IsAny<Sprk.Bff.Api.Services.Access.SecureRemovalCaller?>(), Moq.It.IsAny<Func<CancellationToken, Task>?>(), Moq.It.IsAny<CancellationToken>()), Moq.Times.Never);
     }
+
+    // ── Ontology task 042b round 2 (D-169, uac-r2 choice A): both re-file paths end in the gate record's re-own ──────────
+
+    [Fact]
+    public async Task CommunicationFiling_IntoASecureMatter_RemovesTheGateDecisionRecordsParticipantShares_D169_042bRound3()
+    {
+        // uac-r2 (042b round 3 K5): a communication whose user-owned gate Decision Record carries D-169 participant shares is re-filed into a
+        // SECURE matter. The REAL reconciler's pass over the communication's descendants and the REAL synchronizer (which revokes direct shares
+        // outside the mirror) leave none of the participant shares on the record. Round 4: the gate helper runs over THE SAME world (its
+        // after-re-file step finds the record, now Secure-team-owned and carrying the mirror's user share), asks the REAL resolver, gets the
+        // Secure answer and leaves the record and its shares to the engine.
+        var (gate, gateOrg, gateLog) = GateHelperOverTheShareWorld();
+        _gateOverShareWorld = gate;
+        var communication = Guid.Parse("a2470000-0000-4000-8000-000000000005");
+        var gateRecord = Guid.Parse("a2470000-0000-4000-8000-0000000000d5");
+        var participant = Guid.Parse("a2470000-0000-4000-8000-0000000000d6");
+        _world.WithRecord("sprk_communication", communication, Directory.ChildBu, owningTeam: Directory.ChildTeam);
+        ShareWorld.UserOwnedChild("sprk_communication", communication, ("sprk_regardingmatter", "sprk_matter", SecureMatter));
+        ShareWorldGateRecord(gateRecord, communication);
+        _shareTable.Seed("sprk_decisionrecord", gateRecord, DataversePrincipalRef.User(participant), 1);
+
+        var result = await RefileCommunication(
+            communication, new() { ["sprk_RegardingMatter@odata.bind"] = $"/sprk_matters({SecureMatter:D})" });
+
+        Status(result).Should().Be(StatusCodes.Status204NoContent, Detail(result));
+        _shareTable.MaskOf("sprk_decisionrecord", gateRecord, DataversePrincipalRef.User(participant)).Should().BeNull(
+            "a participant who is not a sharee of the secure matter keeps no access to the gate record");
+        ShareWorld.OwnerOf("sprk_decisionrecord", gateRecord).Should().Be(DataversePrincipalRef.Team(Directory.SecureNamedTeam),
+            "the record follows its communication into isolation");
+        _shareTable.MaskOf("sprk_decisionrecord", gateRecord, DataversePrincipalRef.User(Sharee)).Should().NotBeNull(
+            "the secure matter's sharee keeps the mirror's share: the gate helper does not revoke a Secure-team-owned record's shares");
+        gateLog.Entries.Should().Contain(e => e.Level == Microsoft.Extensions.Logging.LogLevel.Information
+                                              && e.Message.Contains($"Gate Decision Record {gateRecord}", StringComparison.Ordinal)
+                                              && e.Message.Contains("left as they are", StringComparison.Ordinal),
+            "the helper saw the record, asked the real resolver and skipped it on the Secure answer");
+        gateOrg.Verify(o => o.ExecuteAsync(Moq.It.IsAny<Microsoft.Crm.Sdk.Messages.AssignRequest>(), Moq.It.IsAny<CancellationToken>()),
+            Moq.Times.Never, "the helper never re-owns a record of a secure matter");
+        gateLog.Entries.Should().NotContain(e => e.Level >= Microsoft.Extensions.Logging.LogLevel.Warning);
+    }
+
+    [Fact]
+    public async Task GateRecordSharing_OverTheRealResolver_AContactOnlyCommunicationIsUnfiledAndShared_AMatterOneIsFiledAndReowned_D169_042bRound4()
+    {
+        // 042b round 4: the helper's "filed" test (IsFiled) paired with the REAL RecordOwnershipResolver over the same rows. A communication
+        // regarding only a contact is unfiled for both: its record is shared at write, and the resolver's answer on a filing pass keeps it
+        // user-owned and shared. One regarding an ordinary matter is filed for both: no participant share, and the record is re-owned at write
+        // to the matter's team.
+        var (gate, gateOrg, gateLog) = GateHelperOverTheShareWorld();
+        var contactOnly = Guid.Parse("a2470000-0000-4000-8000-0000000000e3");
+        var matterFiled = Guid.Parse("a2470000-0000-4000-8000-0000000000e4");
+        var contactRecord = Guid.Parse("a2470000-0000-4000-8000-0000000000e5");
+        var matterRecord = Guid.Parse("a2470000-0000-4000-8000-0000000000e6");
+        var participant = Guid.Parse("a2470000-0000-4000-8000-0000000000e7");
+        var owner = SecureChildShareWorld.SomeUser;
+        ShareWorld.User(participant, SecureChildShareWorld.GeneralBu); // no external flag: internal
+        ShareWorld.UserOwnedChild("sprk_communication", contactOnly, ("sprk_regardingperson", "contact", Guid.NewGuid()));
+        ShareWorld.UserOwnedChild("sprk_communication", matterFiled, ("sprk_regardingmatter", "sprk_matter", OrdinaryMatter));
+        foreach (var communication in new[] { contactOnly, matterFiled })
+        {
+            ShareWorld.Set("sprk_communication", communication, "ownerid", new EntityReference("systemuser", owner));
+            _shareTable.Seed("sprk_communication", communication, DataversePrincipalRef.User(participant), 1);
+        }
+
+        ShareWorldGateRecord(contactRecord, contactOnly);
+        ShareWorldGateRecord(matterRecord, matterFiled);
+
+        await gate.ShareAtWriteAsync(contactRecord, contactOnly, owner);
+        await gate.ShareAtWriteAsync(matterRecord, matterFiled, owner);
+        await gate.ReownAfterFilingAsync(contactOnly);
+
+        _shareTable.MaskOf("sprk_decisionrecord", contactRecord, DataversePrincipalRef.User(participant)).Should().Be(1,
+            "unfiled: the record is shared Read with the communication's internal sharee");
+        ShareWorld.OwnerOf("sprk_decisionrecord", contactRecord).Should().Be(DataversePrincipalRef.User(owner),
+            "the real resolver answers Unchanged for a communication regarding only a contact");
+        ShareWorld.OwnerOf("sprk_decisionrecord", matterRecord).Should().Be(DataversePrincipalRef.Team(SecureChildShareWorld.GeneralTeam),
+            "filed: the real resolver answers the ordinary matter's team and the record is re-owned at write");
+        _shareTable.MaskOf("sprk_decisionrecord", matterRecord, DataversePrincipalRef.User(participant)).Should().BeNull(
+            "a filed communication's record gets no participant share");
+        gateOrg.Verify(o => o.ExecuteAsync(Moq.It.IsAny<Microsoft.Crm.Sdk.Messages.AssignRequest>(), Moq.It.IsAny<CancellationToken>()),
+            Moq.Times.Once);
+        gateLog.Entries.Should().NotContain(e => e.Level >= Microsoft.Extensions.Logging.LogLevel.Warning);
+    }
+
+    private static readonly Guid GateRecord = Guid.Parse("d0d0d0d0-0000-4000-8000-0000000000e1");
+    private static readonly Guid GateSharee = Guid.Parse("a0000000-0000-4000-8000-0000000000e2");
+
+    /// <summary>The communication's user-owned gate record, shared with a participant, and the ordinary matter's team as the answer.</summary>
+    private void SeedGateRecordOf(Guid communication)
+    {
+        _gate.WithGateRecord(GateRecord, communication, Caller).Share(Sprk.Bff.Api.Tests.Services.Signals.GateSharingWorld.Record, GateRecord, GateSharee);
+        _gate.OwnerAnswers(RecordOwnerResolution.Owned(Directory.ChildTeam));
+    }
+
+    private void TheGateRecordIsTeamOwnedAndUnshared()
+    {
+        _gate.Rows[(Sprk.Bff.Api.Tests.Services.Signals.GateSharingWorld.Record, GateRecord)]
+            .GetAttributeValue<EntityReference>("owningteam").Id.Should().Be(Directory.ChildTeam);
+        _gate.RecordSharees(GateRecord).Should().BeEmpty("its participant shares are revoked once the team owner reads back");
+    }
+
+    [Fact]
+    public async Task CommunicationFiling_UnderAnOrdinaryMatter_ReownsTheGateDecisionRecord_AndRevokesItsShares_D169()
+    {
+        var communication = Guid.Parse("a2470000-0000-4000-8000-000000000005");
+        _world.WithRecord("sprk_communication", communication, Directory.ChildBu, owningTeam: Directory.ChildTeam);
+        ShareWorld.UserOwnedChild("sprk_communication", communication, ("sprk_regardingmatter", "sprk_matter", OrdinaryMatter));
+        SeedGateRecordOf(communication);
+
+        var result = await RefileCommunication(
+            communication, new() { ["sprk_RegardingMatter@odata.bind"] = $"/sprk_matters({OrdinaryMatter:D})" });
+
+        Status(result).Should().Be(StatusCodes.Status204NoContent, Detail(result));
+        TheGateRecordIsTeamOwnedAndUnshared();
+    }
+
+    [Fact]
+    public async Task UpdateTool_ReFilingACommunication_ReownsTheGateDecisionRecord_AndRevokesItsShares_D169()
+    {
+        var communication = Guid.Parse("a2470000-0000-4000-8000-000000000005");
+        _world.WithRecord("sprk_communication", communication, Directory.ChildBu, owningTeam: Directory.ChildTeam);
+        ShareWorld.UserOwnedChild("sprk_communication", communication, ("sprk_regardingmatter", "sprk_matter", OrdinaryMatter));
+        SeedGateRecordOf(communication);
+
+        var result = await UpdateRecordWithShares(
+            "sprk_communication", communication, Lookup("sprk_regardingmatter", "sprk_matter", OrdinaryMatter));
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        TheGateRecordIsTeamOwnedAndUnshared();
+    }
+
+    // ── #2091: a filing route's write that moves none of the row's parents (RecordOwnerResolution.ParentsUnchanged — every lookup
+    //    it sets already names that record in that column, every column it clears held no parent) is no re-file ─────────────
+
+    public static TheoryData<string, string> FilingRoutesAndTheLookupOfAToDoUnderTheirRow => new()
+    {
+        { "event-filing", "sprk_regardingevent" },
+        { "communication-filing", "sprk_regardingcommunication" },
+    };
+
+    [Theory(DisplayName = "#2091: a filing route re-binding the matter the row is already filed under writes it and runs no step after a re-file")]
+    [MemberData(nameof(FilingRoutesAndTheLookupOfAToDoUnderTheirRow))]
+    public async Task FilingRoute_ReBindingTheHeldMatter_IsWritten_AndRunsNoStepAfterARefile(string route, string todoLookup)
+    {
+        var (table, id) = route == "event-filing"
+            ? ("sprk_event", Event)
+            : ("sprk_communication", Guid.Parse("a2091000-0000-4000-8000-0000000000a1"));
+        var todo = Guid.Parse("a2091000-0000-4000-8000-0000000000a2");
+        _world.WithRecord(table, id, Directory.SecureBu, owningTeam: Directory.SecureNamedTeam, extra: new()
+        {
+            ["sprk_regardingmatter"] = new EntityReference("sprk_matter", SecureMatter),
+        });
+        _user.OwningTeamOf[id] = Directory.SecureNamedTeam;
+        ShareWorld.SecureChild(table, id, ("sprk_regardingmatter", "sprk_matter", SecureMatter));
+        // An ordinary to-do under the isolated row (drift the two-minute net corrects): the step's pass would isolate it now.
+        ShareWorld.OrdinaryChild("sprk_todo", todo, (todoLookup, table, id));
+        SeedGateRecordOf(id);
+        var threads = new Moq.Mock<Sprk.Bff.Api.Services.Communication.IThreadResolver>();
+
+        var result = await RefileThroughWithThreads(
+            route, id, new() { ["sprk_RegardingMatter@odata.bind"] = $"/sprk_matters({SecureMatter:D})" }, threads.Object);
+
+        Status(result).Should().Be(StatusCodes.Status204NoContent, Detail(result));
+        _user.Patches.Should().ContainSingle("the caller's own update is written");
+        _world.Assignments.Should().BeEmpty("nothing it is filed under moved, so its owner is not re-decided");
+        _shareTable.MaskOf(table, id, DataversePrincipalRef.User(Sharee)).Should().BeNull("the step's mirror did not run");
+        ShareWorld.OwnerOf("sprk_todo", todo).Should().Be(DataversePrincipalRef.Team(SecureChildShareWorld.GeneralTeam),
+            "the step's pass over what is filed under the row did not run");
+        threads.Verify(t => t.ReconcileThreadForFilingAsync(Moq.It.IsAny<Guid>(), Moq.It.IsAny<Sprk.Bff.Api.Services.Communication.FilingReconcileHost>(), Moq.It.IsAny<Sprk.Bff.Api.Services.Access.SecureRemovalCaller?>(), Moq.It.IsAny<Func<CancellationToken, Task>?>(), Moq.It.IsAny<CancellationToken>()), Moq.Times.Never);
+        _gate.Entities.Verify(
+            e => e.RetrieveMultipleAsync(Moq.It.IsAny<Microsoft.Xrm.Sdk.Query.QueryExpression>(), Moq.It.IsAny<CancellationToken>()),
+            Moq.Times.Never, "the step's gate Decision Record re-own did not run");
+        _gate.RecordSharees(GateRecord).Should().Equal(GateSharee);
+    }
+
+    [Fact(DisplayName = "#2091 (b): the held matter re-bound WITH a different secure ancestor (a secure project) is a re-file — the step runs")]
+    public async Task CommunicationFiling_TheHeldMatterPlusASecureProject_IsARefile_TheStepRuns()
+    {
+        // ParentsUnchanged compares COLUMN BY COLUMN: sprk_regardingmatter re-binds the matter it holds (unchanged), but
+        // sprk_regardingproject now names a secure project it did not hold — a parent change, so the row is re-filed.
+        var communication = Guid.Parse("a2091000-0000-4000-8000-0000000000a3");
+        var secureProject = Guid.Parse("a2091000-0000-4000-8000-0000000000a4");
+        _world.WithSecureRoot("sprk_project", secureProject);
+        _world.WithRecord("sprk_communication", communication, Directory.ChildBu, owningTeam: Directory.ChildTeam, extra: new()
+        {
+            ["sprk_regardingmatter"] = new EntityReference("sprk_matter", OrdinaryMatter),
+        });
+        ShareWorld.SecureRoot("sprk_project", secureProject);
+        _shareTable.Seed("sprk_project", secureProject, DataversePrincipalRef.User(Sharee), CollaborateMask);
+        // What the caller's PATCH leaves: the same matter, and the secure project too.
+        ShareWorld.OrdinaryChild("sprk_communication", communication,
+            ("sprk_regardingmatter", "sprk_matter", OrdinaryMatter), ("sprk_regardingproject", "sprk_project", secureProject));
+        SeedGateRecordOf(communication);
+        var threads = new Moq.Mock<Sprk.Bff.Api.Services.Communication.IThreadResolver>();
+
+        var result = await RefileCommunication(communication, new()
+        {
+            ["sprk_RegardingMatter@odata.bind"] = $"/sprk_matters({OrdinaryMatter:D})",
+            ["sprk_RegardingProject@odata.bind"] = $"/sprk_projects({secureProject:D})",
+        }, threads.Object);
+
+        Status(result).Should().Be(StatusCodes.Status204NoContent, Detail(result));
+        _world.Assignments.Should().Equal(("sprk_communication", communication, Directory.SecureNamedTeam));
+        _shareTable.MaskOf("sprk_communication", communication, DataversePrincipalRef.User(Sharee)).Should().Be(CollaborateMask,
+            "the step's mirror ran: the secure project's sharee sees the message");
+        threads.Verify(t => t.ReconcileThreadForFilingAsync(communication, Moq.It.IsAny<Sprk.Bff.Api.Services.Communication.FilingReconcileHost>(), Moq.It.Is<Sprk.Bff.Api.Services.Access.SecureRemovalCaller?>(c => c != null), Moq.It.IsAny<Func<CancellationToken, Task>?>(), Moq.It.IsAny<CancellationToken>()), Moq.Times.Once,
+            "the step ran once (it reconciles a communication's thread)");
+        TheGateRecordIsTeamOwnedAndUnshared();
+    }
+
+    /// <summary><see cref="RefileThrough"/> for the two filing routes, with the step's thread seam.</summary>
+    private Task<IResult> RefileThroughWithThreads(
+        string route, Guid id, Dictionary<string, object?> payload, Sprk.Bff.Api.Services.Communication.IThreadResolver threads) =>
+        route == "event-filing"
+            ? Sprk.Bff.Api.Api.Events.EventEndpoints.RefileEventAsync(
+                id, Payload(payload), _user, _world.Resolver(), Restamper(), Children(threads), HttpContextOfCaller(),
+                NullLogger<Program>.Instance, CancellationToken.None)
+            : RefileCommunication(id, payload, threads);
 
     [Fact]
     public async Task CommunicationFiling_WithTheAssociationStatus_Is400_TheStatusIsTheCallersOwnUpdate()
@@ -1105,6 +1387,41 @@ public sealed partial class SecureChildOwnershipAiToolTests
         result.Success.Should().BeTrue(result.ErrorMessage);
         _world.Assignments.Should().Equal(("sprk_todo", Todo, Directory.ChildTeam));
         _shareTable.MaskOf("sprk_todo", Todo, DataversePrincipalRef.User(Sharee)).Should().BeNull();
+    }
+
+    [Theory(DisplayName = "#2091 r5: the chat update tool shares the writers' isolation read — one fault is retried and the move out releases; a second is a faulted answer that releases nothing")]
+    [InlineData(1, true)]
+    [InlineData(2, false)]
+    public async Task UpdateTool_MovingAToDoOutOfASecureMatter_RetriesTheIsolationReadOnce(int faultsBeforeItHeals, bool released)
+    {
+        _world.WithRecord("sprk_todo", Todo, Directory.SecureBu, owningTeam: Directory.SecureNamedTeam, extra: new()
+        {
+            ["sprk_regardingmatter"] = new EntityReference("sprk_matter", SecureMatter),
+        });
+        ShareWorld.SecureChild("sprk_todo", Todo, ("sprk_regardingmatter", "sprk_matter", SecureMatter));
+        _shareTable.Seed("sprk_todo", Todo, DataversePrincipalRef.User(Sharee), CollaborateMask);
+        _user.FullAccessOn.Add(SecureMatter);
+        ShareWorld.Set("sprk_todo", Todo, "sprk_regardingmatter", new EntityReference("sprk_matter", OrdinaryMatter));
+        var faults = 0;
+        ShareWorld.QueryFault = () =>
+        {
+            if (++faults == faultsBeforeItHeals)
+                ShareWorld.ClearQueryFaults();
+            return new TaskCanceledException("The request was canceled due to the configured HttpClient.Timeout of 100 seconds elapsing.");
+        };
+        ShareWorld.FailingQueriesOf("sprk_todo");
+
+        var result = await UpdateRecordWithShares(
+            "sprk_todo", Todo, Lookup("sprk_regardingmatter", "sprk_matter", OrdinaryMatter));
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        faults.Should().Be(faultsBeforeItHeals, "the read, and at most one retry");
+        _world.Assignments.Should().Equal(("sprk_todo", Todo, Directory.ChildTeam));
+        if (released)
+            _shareTable.MaskOf("sprk_todo", Todo, DataversePrincipalRef.User(Sharee)).Should().BeNull("the retried read answered");
+        else
+            _shareTable.MaskOf("sprk_todo", Todo, DataversePrincipalRef.User(Sharee)).Should().Be(CollaborateMask,
+                "whether the row WAS isolated is unknown, so nothing is released");
     }
 
     [Fact]
@@ -1293,6 +1610,28 @@ public sealed partial class SecureChildOwnershipAiToolTests
         ReasonCode(result).Should().Be(ChildRecordEndpoints.InvalidPayloadCode);
         _user.Patches.Should().BeEmpty();
         _world.Assignments.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task ChildRefile_WhenTheOwnerCannotBeSettledAgainstConcurrentWriters_Answers409RecordOwnerUnsettled_NotA500()
+    {
+        // #2143 F2: the shared re-file core (child records, event filing, communication filing) answers the resolver's typed
+        // "owner unsettled" as a 409 with a stable reason code — reload and retry — never the global 500.
+        _world.WithRecord("sprk_todo", Todo, Directory.ChildBu, owningTeam: Directory.ChildTeam);
+        var ownership = new RecordOwnershipResolverDouble
+        {
+            FaultAfterChange = new RecordOwnerUnsettledException("sprk_todo", Todo, "test: unsettled"),
+        };
+
+        var result = await ChildRecordEndpoints.RefileAsync(
+            "sprk_todo", Todo, Payload(new() { ["sprk_RegardingMatter@odata.bind"] = $"/sprk_matters({OrdinaryMatter:D})" }),
+            _user, ownership, Restamper(), Children(), HttpContextOfCaller(), NullLogger<Program>.Instance,
+            CancellationToken.None);
+
+        Status(result).Should().Be(StatusCodes.Status409Conflict, Detail(result));
+        ReasonCode(result).Should().Be(RecordOwnerUnsettledException.ReasonCode);
+        Detail(result).Should().Contain("Reload it and try again").And.NotContain(Todo.ToString("D"));
+        ownership.Reparents.Should().ContainSingle("the re-file reached the resolver");
     }
 
     // ── Task 147 r1c-v1 (verifier item 2, AC9): a row the caller may not READ answers exactly as a row that does not

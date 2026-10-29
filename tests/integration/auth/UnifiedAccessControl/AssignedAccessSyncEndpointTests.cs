@@ -365,6 +365,10 @@ public sealed class AssignedAccessSyncTestFixture : WorkspaceTestFixture
             services.AddScoped<IAccessibleRecordSetService>(_ => Harness.AccessibleRecords);
             services.RemoveAll<NoAccessEnforcementStore>();
             services.AddScoped<NoAccessEnforcementStore>(_ => EnforcementStore);
+            // Task 099b (D-11): the grant core asks the ownership resolver for a new grant row's owner team; the harness's
+            // double answers a fixed team (the real resolver over this host's mocked Dataverse would refuse every create).
+            services.RemoveAll<Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver>();
+            services.AddScoped(_ => Harness.Ownership);
         });
     }
 

@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="151" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>Hide Signal evidence detail when the caller cannot read the witness (D-142)</title>
+    <phase>3 Worklist</phase>
+    <gate>038 merged (#1891), #1892 merged</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Data-exposure rule on the Signal read path.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Security-sensitive read filter layered on the secure-family witness rule; query-cost limits matter (uac-r2 K1).</model-tier-reason>
+    <effort>high</effort>
+    <deps>038</deps>
+    <tags>bff-api,security,testing</tags>
+    <estimated-effort>3-5 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Today the evidence rule (145 write-time redaction; 038 read-time witness rule, `SignalSuppressionService.KeepsDetail`) guards only the D-123 secure wall. A witness communication re-filed to an ordinary matter in another business unit, or unfiled (privately owned), still shows its subject and sender to every reader of the Signal (DI-80 #1873; uac-r2 K2 on #1891). The owner decided (D-142): hide the detail from any reader who cannot read the witness.</prompt>
+  <role>SPAARKE BFF engineer.</role>
+  <goal>Every Signal read path that returns evidence lines returns a witness's detail (subject, sender, text, source) only when the caller can read that witness row; otherwise the line carries `withheld: true`, exactly as a secure-wall withhold does.</goal>
+
+  <context>
+    <background>D-142 (notes/decisions.md); #1873 comments; `notes/task-038-signal-read-route.md`; the walker batching in #1892 (`SecureRootsAboveEachAsync` read-ahead).</background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Signals/SignalSuppressionService.cs (KeepsDetail :686, WitnessOf, WitnessItemsAsync / WitnessFamiliesAsync :654-680)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Signals/SignalReadService.cs (worklist read path; OBO caller reads)</file>
+    </relevant-files>
+  </context>
+
+  <justification>
+    <existing>The secure-wall withhold and the `withheld: true` line shape exist; the caller-identity (OBO) Dataverse read exists in SignalReadService.</existing>
+    <extension>Add a caller-readability input to the existing KeepsDetail decision; no new route or registration.</extension>
+    <cost-of-doing-nothing>A user sees the subject and sender of a communication they cannot open, contrary to D-142.</cost-of-doing-nothing>
+  </justification>
+
+  <constraints>
+    <constraint source="D-142">Readability is decided by the CALLER's own (OBO) read of the witness rows: one batched query per witness table per request (In lists of at most 200 ids), never one per witness. A witness the caller's read does not return: detail withheld.</constraint>
+    <constraint source="fail-closed">A fault in the caller read withholds every detail on the page (the list itself unchanged), as the 038 placement fault does.</constraint>
+    <constraint source="scope">Apply to every route that returns evidence lines (the worklist and any per-Signal route that returns evidence; list them in the notes). The secure-wall rule stays as it is and is evaluated as well (both must keep).</constraint>
+    <constraint source="write-time">The 145 write-time redaction cannot know future readers. Do NOT change it unless a rule using existing ownership primitives clearly matches D-142; otherwise record it as a known limit in the notes with a self-contained `ontology-deferred` issue + DI row.</constraint>
+    <constraint source="D-123">uac-r2 reviews the PR (SendMessage + #1355). Logs carry counts and type names only.</constraint>
+    <constraint source="bff-extensions">Publish-size delta vs a fresh build of origin/master, no new HIGH CVE; report the query count for 4 and 24 Signals before and after.</constraint>
+  </constraints>
+
+  <steps mode="directional">
+    <step order="1">Read KeepsDetail, the witness collection and the OBO read path.</step>
+    <step order="2">Add the batched caller read and pass readability into the keep decision.</step>
+    <step order="3">Tests (filtered), seeding proof, query counts, size delta, PR into docs/ontology-platform-design.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">A witness the caller can read, outside any secure family: detail shown.</criterion>
+    <criterion testable="true">Negative: a witness in another BU's ordinary matter the caller cannot read: detail withheld (`withheld: true`).</criterion>
+    <criterion testable="true">Negative: an unfiled, privately owned witness the caller cannot read: withheld.</criterion>
+    <criterion testable="true">A secure-family witness the caller can read while the Signal is ordinary: still withheld by the existing rule.</criterion>
+    <criterion testable="true">A fault in the caller read withholds every detail on the page and does not change the list.</criterion>
+    <criterion testable="true">Query count: one caller read per witness table per request, pinned by a test.</criterion>
+    <criterion testable="false">Test scope: the cases above only; seeding proof on the caller-unreadable withhold.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>If the change requires editing uac-r2's SecureChildShareSynchronizer.cs, STOP and report what is needed.</trigger>
+  </escalation>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+  </knowledge>
+</task>

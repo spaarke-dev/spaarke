@@ -127,7 +127,7 @@ public sealed partial class DataverseCreateRecordHandler : IToolHandler
         return $"{SprkDocumentCreateBlockedMessage} Open the correct path now: [Document Upload wizard]({url})";
     }
 
-    [GeneratedRegex(@"^[a-z][a-z0-9_]*$")]
+    [GeneratedRegex(@"^[a-z][a-z0-9_]*\z")]
     private static partial Regex LogicalNameRegex();
 
     /// <summary>
@@ -340,7 +340,7 @@ public sealed partial class DataverseCreateRecordHandler : IToolHandler
                 // secure parent or of the record itself, refuses with nothing created.
                 var owned = await OwnedChildWrite.CreateAsync(
                     _dataverse, _ownership, _appOnly, tablename, forMapped, serverSet,
-                    CallerObjectId(context), cancellationToken, _rootFiling).ConfigureAwait(false);
+                    CallerObjectId(context), cancellationToken, _rootFiling, _logger).ConfigureAwait(false);
 
                 if (owned.PlanRefusal is { } rootRefusal)
                 {
@@ -499,7 +499,7 @@ public sealed partial class DataverseCreateRecordHandler : IToolHandler
             return (mapped, null, null);
         }
 
-        var me = await OwnedChildWrite.WhoAmIAsync(_dataverse, ct).ConfigureAwait(false);
+        var me = await CallerWriteAuthorization.WhoAmIAsync(_dataverse, ct).ConfigureAwait(false);
         if (me.Failure is { } failure)
             return (mapped, null, failure);
 
@@ -618,6 +618,9 @@ public sealed partial class DataverseCreateRecordHandler : IToolHandler
                 secured.ReasonCode ?? ToolErrorCodes.InternalError, startedAt);
         }
 
+        // Task 037 (fix round 1): what the row was WRITTEN with — a copied default the create filled (a work assignment's
+        // Assigned To) is reported as set, never as left blank.
+        var written = owned.WrittenColumns ?? item.Columns;
         return ToolResult.Ok(
             HandlerId, tool.Id, tool.Name,
             data: new
@@ -626,10 +629,10 @@ public sealed partial class DataverseCreateRecordHandler : IToolHandler
                 tablename,
                 recordId = createdId.ToString("D"),
                 path = DataverseRecordCitations.RecordPath(tablename, createdId),
-                columnsSet = item.Columns,
-                columnCount = item.Columns.Count
+                columnsSet = written,
+                columnCount = written.Count
             },
-            summary: $"Created record {createdId:D} in '{tablename}' ({item.Columns.Count} columns set). It is owned by the " +
+            summary: $"Created record {createdId:D} in '{tablename}' ({written.Count} columns set). It is owned by the " +
                      "team of the record it is filed under (or the calling user's own team), checked against the calling " +
                      "user's permissions.",
             confidence: 1.0,
@@ -649,18 +652,18 @@ public sealed partial class DataverseCreateRecordHandler : IToolHandler
     /// or work assignment: AppendTo on each named record AS THE CALLER, then the one resolver's answer — refused when it
     /// is the Secure team (or a refusal), so the row never sits in the caller's ordinary business unit under a secure
     /// record (task 146 r2). A row that sets the ADR-024 regarding pair also needs AppendTo on the record the pair names
-    /// (<see cref="OwnedChildWrite.PairTargetAsync"/>), as the owned path asks it. <c>null</c> = proceed as a run-as-user create.
+    /// (<see cref="CallerWriteAuthorization.PairTargetAsync"/>), as the owned path asks it. <c>null</c> = proceed as a run-as-user create.
     /// </summary>
     private async Task<ToolResult?> RefuseSecureFilingAsync(
         AnalysisTool tool, string tablename, DataverseWriteItemMapper.MappedItem item, ChatInvocationContext context,
         DateTimeOffset startedAt, CancellationToken ct)
     {
-        var parents = OwnedChildWrite.ParentsOf(item);
+        var parents = OwnedChildWrite.ParentsOf(tablename, item);
         var pair = OwnedChildWrite.PairOf(item);
         if (parents.Count == 0 && !pair.SetsId)
             return null;
 
-        var me = await OwnedChildWrite.WhoAmIAsync(_dataverse, ct).ConfigureAwait(false);
+        var me = await CallerWriteAuthorization.WhoAmIAsync(_dataverse, ct).ConfigureAwait(false);
         if (me.Failure is { } failure)
             return MapClientError(tool, failure, startedAt);
 
@@ -674,11 +677,11 @@ public sealed partial class DataverseCreateRecordHandler : IToolHandler
                                    "the record this row is filed under.", ToolErrorCodes.ValidationFailed, startedAt);
             }
 
-            var target = await OwnedChildWrite.PairTargetAsync(
+            var target = await CallerWriteAuthorization.PairTargetAsync(
                 _dataverse, tablename, pair.IdText, pair.TypeId, pair.TypeEntitySet, item.Lookups, ct).ConfigureAwait(false);
             var pairOutcome = target.Refusal
                 ?? (target.Lookup is { } named
-                    ? await OwnedChildWrite.CheckCallerMayAppendToAsync(_dataverse, me.SystemUserId, new[] { named }, ct).ConfigureAwait(false)
+                    ? await CallerWriteAuthorization.CheckCallerMayAppendToAsync(_dataverse, me.SystemUserId, new[] { named }, ct).ConfigureAwait(false)
                     : OwnedChildWrite.Outcome.Allowed);
             if (pairOutcome.ClientFailure is { } pairFailure)
                 return MapClientError(tool, pairFailure, startedAt);
@@ -691,7 +694,7 @@ public sealed partial class DataverseCreateRecordHandler : IToolHandler
         if (parents.Count == 0)
             return null;
 
-        var appendTo = await OwnedChildWrite.CheckCallerMayAppendToAsync(
+        var appendTo = await CallerWriteAuthorization.CheckCallerMayAppendToAsync(
             _dataverse, me.SystemUserId,
             item.Lookups.Where(l => Sprk.Bff.Api.Services.Dataverse.RecordOwnershipResolver.IsOwnershipParent(l.RelatedTable)),
             ct).ConfigureAwait(false);
@@ -699,7 +702,7 @@ public sealed partial class DataverseCreateRecordHandler : IToolHandler
             return Error(tool, denied, DataverseUserClientErrorCodes.AccessDenied, startedAt);
 
         var owner = await _ownership.ResolveOwnerAsync(
-            Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext.ForParents(parents, CallerObjectId(context), me.SystemUserId),
+            OwnedChildWrite.OwnershipOf(tablename, item, CallerObjectId(context), me.SystemUserId), // 194b R (B3): the one builder
             ct).ConfigureAwait(false);
         if (owner.IsRefused || owner.IsSecureOwner)
         {

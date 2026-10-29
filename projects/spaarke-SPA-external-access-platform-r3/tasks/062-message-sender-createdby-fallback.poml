@@ -1,0 +1,69 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="062" project="spaarke-SPA-external-access-platform-r3">
+  <metadata>
+    <title>Message sender name falls back to the creating user (check-2 issue 4: "Unknown sender", bell "Someone")</title>
+    <phase>5b Owner check-2 fixes</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Tag bff-api; modifies a shared BFF read service</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Single-method change with a located root cause</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>CHK2</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>none</deps>
+    <tags>bff-api, testing</tags>
+    <estimated-effort>2-3 hours</estimated-effort>
+  </metadata>
+
+  <prompt>When a message row has neither sprk_sentby nor a creator contact, return the creating user's name (createdby formatted value) as SentByName, so the SPA and the notification bell show who sent an MDA message.</prompt>
+  <role>SPAARKE platform developer. BFF communication services and Dataverse Web API. Follow ADRs strictly.</role>
+  <goal>A message created in the model-driven app by a system user shows that user's name in the SPA message list and in the bell ("{name} sent a message on …").</goal>
+
+  <context>
+    <background>Owner check 2. Root cause (code map): SentByName = TryString(row, SentByFormattedValue) ?? TryString(row, CreatedByContactFormattedValue) (CommunicationThreadReadService.cs:1290); the MDA send path leaves sprk_sentby empty; createdby is not selected. Consumers: ExternalMessageEndpoints.cs:595, ExternalNotificationFeedEndpoints.cs:345, RecordMessages.tsx:260, NotificationBell.tsx:162.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationThreadReadService.cs</file>
+      <file role="modify">the existing CommunicationThreadReadService unit tests (find with Grep)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Precedence: sprk_sentby name → creator contact name → createdby name → null (the SPA already handles null). Select _createdby_value with its FormattedValue annotation only in the query(ies) that feed SentByName.</constraint>
+    <constraint source="project / external plane">For an external caller, the createdby name of a system user is a display name the contact already sees on the record's messages; no other createdby field (email, id) is returned. If the external read returns DTO fields beyond SenderName for the sender, leave them unchanged.</constraint>
+    <constraint source="CLAUDE.md §10">BFF hygiene: publish-size delta; no new package.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/patterns/testing/unit-test-structure.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load knowledge; /conflict-check (Services/Communication is shared); declare rigor/tier.</step>
+    <step order="1">Tests first; implement; build + test; notes/task-062-notes.md; status + drift check. Reaches dev with the next BFF deploy (owner-approved).</step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationThreadReadService.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Row with only createdby formatted value → SentByName = that name.</criterion>
+    <criterion testable="true">Row with sprk_sentby → that name (unchanged); row with creator contact and no sprk_sentby → contact name (unchanged); row with none → null.</criterion>
+    <criterion testable="true">Existing communication tests pass.</criterion>
+    <criterion testable="true">Test scope: cover the stated contract plus the edge cases named above. Anything beyond that needs a one-line justification in task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>Owner check 2 issue 4. The MDA send path not stamping sprk_sentby is a separate data-quality item: record it in the notes and file it via /project-defer-issue-tracking.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow the task-execute skill for the mandatory pre-execution checklist.</protocol>
+  </execution>
+</task>

@@ -492,7 +492,7 @@ public static class RegistrationEndpoints
             // in spaarkedev1, and the admin got "Record Is Unavailable".
             //
             // No registry-wide "default" or "first active" pick exists any more:
-            // DemoExpirationService reads each request's own DataverseEnvironmentId, as the
+            // DemoExpirationJob reads each request's own DataverseEnvironmentId, as the
             // approve path does. Do not reintroduce one by flagging a row as default.
             var recordUrl = BuildRegistrationRecordUrl(dataverseUrl, appId, recordId);
 

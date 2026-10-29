@@ -31,11 +31,13 @@
 
 | Plane | What It Controls | Internal Mechanism | External Mechanism |
 |-------|-----------------|-------------------|-------------------|
-| **Plane 1: Dataverse Records** | CRUD access to Dataverse rows | Security roles, teams, BU, record sharing | `sprk_externalrecordaccess` grant rows, read by the BFF (`Infrastructure/ExternalAccess/ExternalParticipationService.cs`). External callers are Static Web Apps + Entra External ID (CIAM) — Power Pages is retired |
+| **Plane 1: Dataverse Records** | CRUD access to Dataverse rows | Security roles, teams, BU, record sharing (in the MDA; on the SPA/Teams systemuser plane shares count only when `ExternalAccess:ImpersonatedRootSets:Enabled` is on) | `sprk_externalrecordaccess` grant rows, read by the BFF (`Infrastructure/ExternalAccess/ExternalParticipationService.cs`). External callers are Static Web Apps + Entra External ID (CIAM) — Power Pages is retired |
 | **Plane 2: SPE Files** | Read/write/delete files in SharePoint Embedded containers | BFF `AuthorizationService` → `OperationAccessPolicy` | Broker-only (ADR-028 A1): external users never authenticate to SPE; all external file access is app-only via the BFF. Contacts are NOT added to containers |
 | **Plane 3: AI Search** | Query results from Azure AI Search | BFF constructs filter from user's accessible entities | NOT IMPLEMENTED — no CIAM/external route reaches AI Search |
 
-**What a grant actually does** (corrected 2026-08-20 — the old "three-plane orchestration" was never built): granting external access = (1) create ONE `sprk_externalrecordaccess` record + (2) invalidate the contact's Redis participation cache (`Api/ExternalAccess/GrantExternalAccessEndpoint.cs:13-23, 98-117`). No web role is assigned (Power Pages retired), and no SPE container membership is written — `SpeContainerMembershipService.GrantMembershipAsync` exists but has NO production callers. Revoking = deactivate the record + invalidate the cache, plus a defensive removal of any stray SPE container permission when a `ContainerId` is supplied (`Api/ExternalAccess/RevokeExternalAccessEndpoint.cs:93-147`).
+**What a grant actually does** (corrected 2026-08-20 — the old "three-plane orchestration" was never built): granting external access = (1) create ONE `sprk_externalrecordaccess` record + (2) invalidate the contact's Redis participation cache (`Api/ExternalAccess/GrantExternalAccessEndpoint.cs:13-23, 98-117`). No web role is assigned (Power Pages retired), and no SPE container membership is written for the grantee — external contacts are never added to containers. *(Corrected 2026-10-27: `SpeContainerMembershipSyncJob` does grant marked writer roles, to internal users only — standing writers on business-unit containers and just-in-time writers on a secure record's own container.)* Revoking = deactivate the record + invalidate the cache, plus a defensive removal of any stray SPE container permission when a `ContainerId` is supplied (`Api/ExternalAccess/RevokeExternalAccessEndpoint.cs:93-147`).
+
+**Known limit: person removal** (`POST /api/v1/external-access/remove-person`, `Api/ExternalAccess/ExternalPersonRemovalService.cs`): its cleanup of the person's own permission on the containers of their organizations' grants covers their ACTIVE organization memberships only, so a container permission created outside the BFF, on a root granted to an organization whose membership of that person is already inactive, is not removed.
 
 ---
 
@@ -109,7 +111,7 @@ Deny codes follow pattern `{domain}.{area}.{action}.{reason}` (e.g., `sdap.acces
 
 ## External Caller Access Levels
 
-Actual level → effective-rights mapping per `Infrastructure/ExternalAccess/CallerPrincipalResolver.cs:126-134` (corrected 2026-08-20). The former "SPE Container Role" column reflected `SpeContainerMembershipService`'s role map, which is NOT wired — external SPE access is broker-only and no container role is ever assigned:
+Actual level → effective-rights mapping per `ExternalCallerContext.ToAccessRights` (`Infrastructure/ExternalAccess/ExternalCallerContext.cs`; corrected 2026-10-27). The former "SPE Container Role" column reflected `SpeContainerMembershipService`'s role map, which is NOT wired — external SPE access is broker-only and no container role is ever assigned:
 
 | Access Level | Effective `AccessRights` (BFF) | SPE Container Role |
 |-------------|-------------------------------|--------------------|
@@ -134,7 +136,7 @@ closed.
 - **Where it applies.** The read path (`AccessibleRecordSetService`: direct-only cancellation, Restricted, the systemuser
   plane's Restricted survivor — one walk per composition shared with the No Access veto) and every access caller of the
   flag read through `ExternalParticipationService.GetEffectiveRootRecordFlagsAsync`: the write-time grant policy, the
-  grantor ceiling's counted rows, the internal-user Restricted bar and its listing marker, the share-link refusal, the
+  grantor ceiling's counted rows, the internal-user Restricted bar and its listing marker, the
   Restricted share remover and the Assigned-To materializer. The No Access guard and enforcer treat a record with a secure
   ancestor as secure (Q4's "secure" is the record or any filing ancestor, round 82).
 - **The contact plane honours a secure parent's No Access list (#1425).** The read-time contact veto and the write-time
@@ -183,8 +185,9 @@ constraint. Round 87 refines round 84: the parent is a FLOOR, not an equality.
   no caller (no F3) and a TEAM owner — the business-unit team the ownership rule (`RecordOwnershipResolver`, record-first,
   D-11) gives a record filed under its now-ordinary parents; never the Secure Record Owners team. It runs only for an
   INHERITED Secure. Ownership is moved and read back first, related records leave isolation, the shares are revoked, the
-  flag is cleared LAST. Existing documents stay in the record's former container (as for `/unsecure-project` on a parent);
-  reads are broker-only either way.
+  flag is cleared LAST. The un-secure call moves no file; once a document has been re-owned out of the Secure Record
+  business unit, `SecureChildReconciliationJob`'s re-file pass (every 2 minutes) moves its file out of the secure
+  container (corrected 2026-10-27; `DocumentContainerRelocator`). Reads are broker-only either way.
 - **Fail closed.** Order inside one record: a STRICTER Access Permission first, then the un-secure, then a LOOSER Access
   Permission, then the access record. A step that does not complete leaves the record at the more restrictive state (still
   flagged secure, permission not loosened, the access record still saying "secure applied"), reports it, and the next call
@@ -303,6 +306,7 @@ This works only when **org-level** auditing is on (`organization.isauditenabled`
 
 | Document | Purpose |
 |----------|---------|
+| [UAC-ACCESS-MODEL-GUIDE.md](../guides/UAC-ACCESS-MODEL-GUIDE.md) | How access is decided and set, per user type, record family and setting (start here) |
 | [sdap-auth-patterns.md](sdap-auth-patterns.md) | OBO patterns including Pattern 5 (direct query fix) |
 | [external-access-spa-architecture.md](external-access-spa-architecture.md) | External SPA three-plane access detail |
 | `.claude/patterns/auth/uac-access-control.md` | Concise implementation guide |

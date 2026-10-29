@@ -1,7 +1,11 @@
 using System.Globalization;
 using System.Text.Json;
 using Spaarke.Scheduling;
+using Spaarke.Dataverse;
+using Sprk.Bff.Api.Api.ExternalAccess;
+using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
+using Sprk.Bff.Api.Services.Ai.Membership;
 using Sprk.Bff.Api.Services.Registration;
 
 namespace Sprk.Bff.Api.Services.ExternalAccess;
@@ -61,6 +65,11 @@ namespace Sprk.Bff.Api.Services.ExternalAccess;
 /// <para><b>Cheap when nothing changed.</b> The scan expands each user's linked contact, so a verified user costs
 /// no query beyond its page. Every 5 minutes because the owner's rule for access changes is "minutes, never
 /// hourly" (round 3 R3/R4) and Assigned-To grants depend on this link.</para>
+///
+/// <para><b>The removal sweep</b> (C4, <see cref="ExternalAccessRemovalSweep"/>): in the own environment, after the probe, a
+/// contact staff deactivated while it still holds a binding or a grant is removed through the shared removal
+/// <c>POST /remove-person</c> uses. It has its own write switch, ANDed with the link switch, so a deploy to an environment
+/// where linking writes are on still only reports until that switch is set too.</para>
 ///
 /// <para><b>Placement</b> (ADR-052; CLAUDE.md §10): in the BFF on the in-process <c>Spaarke.Scheduling</c> host —
 /// BFF domain code (the binder), BFF-owned tables, BFF identity, low volume (B2/B3). The only Functions-leaning
@@ -139,18 +148,54 @@ public sealed class IdentityLinkReconciliationJob : IScheduledJob
     public string Description =>
         "Links every enabled interactive systemuser to its contact by Entra oid (bind, create, or link), flags "
         + "identity collisions for an operator, and clears flags whose collision has been resolved — in this BFF's "
-        + "own environment and in every environment it provisions users into (DATAVERSE_URL and the active "
+        + "own environment and in every environment it provisions users into (DATAVERSE_URL and the active, set-up "
         + "sprk_dataverseenvironment rows). Never re-points or clears an existing link. Report-only until "
-        + "IdentityLink:Reconciliation:WritesEnabled is true.";
+        + "IdentityLink:Reconciliation:WritesEnabled is true. In its own environment it also removes the external access "
+        + "of inactive contacts that still hold a binding or a grant (the removal sweep), which writes only when "
+        + "IdentityLink:Reconciliation:RemovalSweepWritesEnabled is true as well.";
 
     /// <summary>Report-only unless the switch parses to <c>true</c>.</summary>
     internal bool WritesEnabled => ContactIdentityBinder.LinkWritesEnabled(_configuration);
 
     /// <summary>
+    /// The URLs of the registry rows this job reconciles: active rows whose setup has finished. A row still being
+    /// provisioned (<see cref="EnvironmentSetupStatus.NotStarted"/>, <see cref="EnvironmentSetupStatus.InProgress"/>) or
+    /// whose provisioning failed (<see cref="EnvironmentSetupStatus.Issue"/>) has no identity-binding schema and no BFF
+    /// access yet, so reading it fails every run (T186: the ACME placeholder failed the job every 5 minutes from
+    /// 2026-10-14). A row with no status predates the column and is kept, as before. Pure.
+    /// </summary>
+    public static IEnumerable<string?> ReconcilableRegistryUrls(IEnumerable<DataverseEnvironmentRecord> activeEnvironments)
+    {
+        ArgumentNullException.ThrowIfNull(activeEnvironments);
+        return activeEnvironments
+            .Where(e => e.SetupStatus is null or EnvironmentSetupStatus.Ready)
+            .Select(e => e.DataverseUrl);
+    }
+
+    /// <summary>
+    /// The active registry rows <see cref="ReconcilableRegistryUrls"/> leaves out, counted by setup status (ordered by
+    /// status). Pure.
+    /// </summary>
+    public static IReadOnlyDictionary<EnvironmentSetupStatus, int> SkippedRegistryRowsByStatus(
+        IEnumerable<DataverseEnvironmentRecord> activeEnvironments)
+    {
+        ArgumentNullException.ThrowIfNull(activeEnvironments);
+        return activeEnvironments
+            .Where(e => e.SetupStatus is { } status && status != EnvironmentSetupStatus.Ready)
+            .GroupBy(e => e.SetupStatus!.Value)
+            .OrderBy(g => g.Key)
+            .ToDictionary(g => g.Key, g => g.Count());
+    }
+
+    /// <summary>
     /// The provisioning-target environments to reconcile besides this BFF's own: <paramref name="registrationEnvironment"/>
     /// (<c>DATAVERSE_URL</c>) and every <paramref name="registryEnvironments"/> URL, trailing slash trimmed, blanks
-    /// dropped, de-duplicated case-insensitively, and never <paramref name="ownEnvironment"/> (already reconciled
-    /// through the DI binder). Pure.
+    /// dropped, de-duplicated by environment key (<see cref="RegistrationDataverseService.TryEnvironmentKey"/>: the <c>.api.</c> and plain
+    /// spellings of one environment are one target), and never <paramref name="ownEnvironment"/> (already reconciled
+    /// through the DI binder). "Never the own environment" is <see cref="RegistrationDataverseService.IsSameEnvironment"/>,
+    /// not a string match: the same environment spelled with an <c>.api.</c> host, a different case or a path is still
+    /// the own environment (ISS-005, #1673 review F1 - reconciled through a factory binder it would create ownerless
+    /// contacts). A URL that cannot be read is kept as a target and fails visibly when it is reconciled. Pure.
     /// </summary>
     public static IReadOnlyList<string> ProvisioningTargetUrls(
         string? ownEnvironment, string? registrationEnvironment, IEnumerable<string?> registryEnvironments)
@@ -158,12 +203,19 @@ public sealed class IdentityLinkReconciliationJob : IScheduledJob
         ArgumentNullException.ThrowIfNull(registryEnvironments);
         static string? Normalise(string? url) => string.IsNullOrWhiteSpace(url) ? null : url.Trim().TrimEnd('/');
 
-        var own = Normalise(ownEnvironment);
+        // De-duplicated on the environment key, so the .api. and plain spellings of one environment are one target; a URL
+        // that has no key is compared on its normalised text (and kept, to fail visibly when reconciled).
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var targets = new List<string>();
         foreach (var candidate in new[] { registrationEnvironment }.Concat(registryEnvironments).Select(Normalise))
         {
-            if (candidate is null || string.Equals(candidate, own, StringComparison.OrdinalIgnoreCase) || !seen.Add(candidate))
+            if (candidate is null || RegistrationDataverseService.IsSameEnvironment(candidate, ownEnvironment))
+            {
+                continue;
+            }
+
+            var identity = RegistrationDataverseService.TryEnvironmentKey(candidate, out var key) ? key : candidate;
+            if (!seen.Add(identity))
             {
                 continue;
             }
@@ -184,6 +236,9 @@ public sealed class IdentityLinkReconciliationJob : IScheduledJob
         var mode = writes ? ModeWrite : ModeReportOnly;
         var own = new RunReport(Normalised(_configuration["Dataverse:ServiceUrl"]) ?? "(own environment)");
         var targets = new ProvisioningTargets();
+        var sweep = new SweepState(
+            ExternalAccessRemovalSweep.WritesEnabled(_configuration),
+            ExternalAccessRemovalSweep.MaxContactsPerRun(_configuration));
         var status = StatusOk;
         var problems = new List<string>();
 
@@ -192,6 +247,8 @@ public sealed class IdentityLinkReconciliationJob : IScheduledJob
             using var scope = _scopeFactory.CreateScope();
             var binder = scope.ServiceProvider.GetRequiredService<ContactIdentityBinder>();
             await ReconcileEnvironmentAsync(binder, own, writes, mode, context, cancellationToken).ConfigureAwait(false);
+            await RunRemovalSweepAsync(scope.ServiceProvider, binder.Store, own, sweep, context, cancellationToken)
+                .ConfigureAwait(false);
             await ReconcileProvisioningTargetsAsync(scope.ServiceProvider, targets, writes, mode, context, cancellationToken)
                 .ConfigureAwait(false);
         }
@@ -228,6 +285,11 @@ public sealed class IdentityLinkReconciliationJob : IScheduledJob
             }
         }
 
+        if (sweep.Assess(problems))
+        {
+            status = StatusError;
+        }
+
         if (status == StatusOk && problems.Count > 0)
         {
             status = StatusPartial;
@@ -242,9 +304,69 @@ public sealed class IdentityLinkReconciliationJob : IScheduledJob
         return new JobRunResult(
             Success: status == StatusOk,
             ErrorMessage: problems.Count > 0 ? string.Join(" ", problems) : null,
-            ProcessedItems: own.Changed + targets.Environments.Sum(t => t.Changed),
+            ProcessedItems: own.Changed + targets.Environments.Sum(t => t.Changed) + (sweep.Report?.Changed ?? 0),
             Duration: duration,
-            ResultJson: JsonSerializer.Serialize(ToResult(own, targets, status, mode, writes), ResultJsonOptions));
+            ResultJson: JsonSerializer.Serialize(ToResult(own, targets, sweep, status, mode, writes), ResultJsonOptions));
+    }
+
+    /// <summary>
+    /// C4: the removal sweep (<see cref="ExternalAccessRemovalSweep"/>), in this BFF's own environment only, after its probe.
+    /// Not run when the binding column could not be read (a masked binding reads as "no binding", so the selection would be
+    /// made blind). Writes need both switches; otherwise it reports what it would do. A fault fails the run and never stops
+    /// the provisioning targets.
+    /// </summary>
+    private async Task RunRemovalSweepAsync(
+        IServiceProvider services, IContactIdentityStore store, RunReport own, SweepState sweep, JobRunContext context,
+        CancellationToken ct)
+    {
+        if (own.ProbeBlocked)
+        {
+            sweep.Skipped = true;
+            return;
+        }
+
+        try
+        {
+            var dataverse = services.GetService<DataverseWebApiClient>()
+                ?? throw new InvalidOperationException("DataverseWebApiClient is not registered; the removal sweep cannot read.");
+            var loggerFactory = services.GetService<ILoggerFactory>();
+            var auditLogger = loggerFactory?.CreateLogger(ExternalAccessAudit.Category) ?? (ILogger)_logger;
+            var removalSweep = new ExternalAccessRemovalSweep(
+                dataverse, store, () => BuildRemoval(services, dataverse, store), _logger, auditLogger);
+            sweep.Report = await removalSweep.RunAsync(
+                sweep.Writes, sweep.MaxContactsPerRun, own.Environment, context.CorrelationId, ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            sweep.Fault = ex.Message;
+            _logger.LogError(ex, "[ID-LINK-RECON] removal-sweep failed; the next run retries it. correlationId={CorrelationId}",
+                context.CorrelationId);
+        }
+    }
+
+    /// <summary>
+    /// The shared removal <c>POST /remove-person</c> runs (<see cref="ExternalPersonRemovalService.RemoveAsync"/>), built from
+    /// this run's scope exactly as that handler builds it: the one revoke, then the removal over it.
+    /// </summary>
+    private ExternalPersonRemovalService BuildRemoval(IServiceProvider services, DataverseWebApiClient dataverse, IContactIdentityStore store)
+    {
+        var participations = services.GetRequiredService<ExternalParticipationService>();
+        var revocation = new ExternalGrantRevocationService(
+            dataverse,
+            services.GetRequiredService<SpeContainerMembershipService>(),
+            participations,
+            services.GetRequiredService<AssignedAccessMaterializer>(),
+            services.GetRequiredService<RecordContainerResolver>(),
+            _timeProvider,
+            store,
+            _logger);
+        return new ExternalPersonRemovalService(
+            dataverse, revocation, participations, store, services.GetRequiredService<IMembershipCacheInvalidator>(),
+            _timeProvider, _logger);
     }
 
     /// <summary>Probe, pass 1, pass 2 — for one environment.</summary>
@@ -297,9 +419,21 @@ public sealed class IdentityLinkReconciliationJob : IScheduledJob
         {
             var registry = services.GetService<DataverseEnvironmentService>()
                 ?? throw new InvalidOperationException("DataverseEnvironmentService is not registered.");
-            registryUrls = (await registry.GetActiveEnvironmentsAsync(ct).ConfigureAwait(false))
-                .Select(e => e.DataverseUrl)
-                .ToList();
+            var active = await registry.GetActiveEnvironmentsAsync(ct).ConfigureAwait(false);
+            registryUrls = ReconcilableRegistryUrls(active).ToList();
+
+            // Skipped rows are logged, so a live environment stuck in Issue (a failed re-provision) shows in the run log
+            // rather than silently dropping out of reconciliation (uac-r2 review of #1901).
+            var skipped = SkippedRegistryRowsByStatus(active);
+            if (skipped.Count > 0)
+            {
+                _logger.LogInformation(
+                    "[ID-LINK-RECON] Skipped {SkippedCount} registry row(s) whose setup is not Ready: {SkippedByStatus}. "
+                    + "correlationId={CorrelationId}",
+                    skipped.Values.Sum(),
+                    string.Join(", ", skipped.Select(kv => $"{kv.Key}={kv.Value}")),
+                    context.CorrelationId);
+            }
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
@@ -376,10 +510,12 @@ public sealed class IdentityLinkReconciliationJob : IScheduledJob
                     }
                 }
 
+                // #2130 (CODE-QUALITY-RUBRIC D9): the user and the contact are named by id. The email was logged here for
+                // every enabled interactive user on every run.
                 _logger.LogInformation(
-                    "[ID-LINK-RECON] decision mode={Mode} environment={Environment} systemuser={SystemUserId} email={Email} "
+                    "[ID-LINK-RECON] decision mode={Mode} environment={Environment} systemuser={SystemUserId} "
                     + "outcome={Outcome} contact={ContactId} code={Code} reason={Reason} correlationId={CorrelationId}",
-                    mode, report.Environment, user.SystemUserId, user.InternalEmail, result.Outcome, result.ContactId,
+                    mode, report.Environment, user.SystemUserId, result.Outcome, result.ContactId,
                     result.DenyCode, result.Reason, context.CorrelationId);
 
                 foreach (var change in result.Changes)
@@ -557,7 +693,8 @@ public sealed class IdentityLinkReconciliationJob : IScheduledJob
             report.UserScanTruncated, (long)duration.TotalMilliseconds, context.Attempt, context.Trigger,
             context.CorrelationId);
 
-    private static object ToResult(RunReport own, ProvisioningTargets targets, string status, string mode, bool writesEnabled) => new
+    private static object ToResult(
+        RunReport own, ProvisioningTargets targets, SweepState sweep, string status, string mode, bool writesEnabled) => new
     {
         status,
         mode,
@@ -566,6 +703,7 @@ public sealed class IdentityLinkReconciliationJob : IScheduledJob
         readability = own.Readability,
         systemUsers = own.SystemUsersResult(),
         flags = own.FlagsResult(),
+        removalSweep = sweep.Result(),
         provisioningTargets = new
         {
             configured = targets.Configured,
@@ -583,6 +721,99 @@ public sealed class IdentityLinkReconciliationJob : IScheduledJob
     };
 
     private static string? Normalised(string? url) => string.IsNullOrWhiteSpace(url) ? null : url.Trim().TrimEnd('/');
+
+    /// <summary>C4: the removal sweep's state for one run.</summary>
+    private sealed class SweepState
+    {
+        public SweepState(bool writes, int maxContactsPerRun)
+        {
+            Writes = writes;
+            MaxContactsPerRun = maxContactsPerRun;
+        }
+
+        public bool Writes { get; }
+        public int MaxContactsPerRun { get; }
+        public bool Skipped;
+        public string? Fault;
+        public RemovalSweepReport? Report;
+
+        /// <summary>Adds the sweep's problems; true when one of them makes the run a FAILED run.</summary>
+        public bool Assess(List<string> problems)
+        {
+            if (Fault is not null)
+            {
+                problems.Add($"The removal sweep failed ({Fault}); the next run retries it.");
+                return true;
+            }
+
+            if (Skipped)
+            {
+                problems.Add("The removal sweep did not run: the binding column could not be read, so no contact was decided.");
+                return false;
+            }
+
+            if (Report is not { } report)
+            {
+                return false;
+            }
+
+            if (report.ScanFailed)
+            {
+                problems.Add($"The removal sweep's candidate scan failed ({report.ScanError}); the run is NOT 'nothing to remove'.");
+                return true;
+            }
+
+            if (report.ScanTruncated)
+                problems.Add($"The removal sweep read more than {ExternalAccessRemovalSweep.MaxCandidatesPerQuery} candidates in a query; later ones wait for the next run.");
+            if (report.MarkerUnproven > 0)
+                problems.Add($"{report.MarkerUnproven} contact(s) skipped by the removal sweep: the removed marker's read is not proven. None was marked.");
+            if (report.ReadFailed > 0)
+                problems.Add($"{report.ReadFailed} contact(s) not decided by the removal sweep: a live read failed. The next run retries them.");
+            if (report.ChangedSinceRead > 0)
+                problems.Add($"{report.ChangedSinceRead} contact(s) not marked by the removal sweep: the contact changed after it was decided. The next run decides them again.");
+            if (report.DeferredByCap > 0)
+                problems.Add(DeferredByCapProblem(report.DeferredByCap, report.MaxContactsPerRun, Writes));
+            if (report.Incomplete > 0)
+                problems.Add($"{report.Incomplete} removal(s) by the sweep did not complete; the person stays marked, and the next run re-runs a removal while an active grant row remains.");
+            return false;
+        }
+
+        /// <summary>
+        /// What the run says about candidates past the cap. With writes enabled the marked candidates drop out of the next
+        /// scan, so the next run takes the rest. In report-only mode nothing is marked, so every run previews the same first
+        /// candidates and the rest are not processed until the sweep's writes are enabled.
+        /// </summary>
+        private static string DeferredByCapProblem(int deferred, int cap, bool writes) => writes
+            ? $"{deferred} candidate(s) not read by the removal sweep: the run reached its cap of {cap}. The next run takes them."
+            : $"{deferred} candidate(s) not read by the removal sweep: the run reached its cap of {cap}. In report-only mode each " +
+              $"run previews only the first {cap} candidate(s); the rest are not processed until the removal sweep's writes " +
+              "are enabled.";
+
+        public object Result() => new
+        {
+            writesEnabled = Writes,
+            mode = Writes ? ModeWrite : ModeReportOnly,
+            maxContactsPerRun = MaxContactsPerRun,
+            skipped = Skipped,
+            fault = Fault,
+            scanFailed = Report?.ScanFailed ?? false,
+            scanTruncated = Report?.ScanTruncated ?? false,
+            candidates = Report?.Candidates ?? 0,
+            markerUnproven = Report?.MarkerUnproven ?? 0,
+            readFailed = Report?.ReadFailed ?? 0,
+            clean = Report?.Clean ?? 0,
+            deferredByCap = Report?.DeferredByCap ?? 0,
+            changedSinceRead = Report?.ChangedSinceRead ?? 0,
+            completed = Report?.Completed ?? 0,
+            incomplete = Report?.Incomplete ?? 0,
+            contacts = (Report?.Contacts ?? new List<RemovalSweepContact>()).Take(MaxSampledIds).Select(c => new
+            {
+                contactId = c.ContactId.ToString("D", CultureInfo.InvariantCulture),
+                action = c.Action.ToString(),
+                status = c.Status?.ToString(),
+            }).ToArray(),
+        };
+    }
 
     /// <summary>The provisioning-target pass's state.</summary>
     private sealed class ProvisioningTargets
@@ -620,6 +851,27 @@ public sealed class IdentityLinkReconciliationJob : IScheduledJob
         public int Kept;
         public int ClearFailed;
         public int Changed;
+
+        /// <summary>
+        /// ISS-005 (#1673 review K3): systemusers whose contact create was refused because no owner team could be resolved from
+        /// <c>ExternalAccess:CustomerBusinessUnitId</c>. A configuration fault that repeats every run, so it makes the run
+        /// Partial (never a silent Ok).
+        /// </summary>
+        public int OwnerUnconfigured;
+
+        /// <summary>
+        /// ISS-005 (#1673 UAC round 3, F): systemusers whose contact create Dataverse refused for the owner team's privilege
+        /// (0x80040299: the default owner team holds no security role with Read on contact). Counted apart from
+        /// <see cref="OwnerUnconfigured"/> because the fix is different (a role on the team, not the setting).
+        /// </summary>
+        public int OwnerPrivilegeMissing;
+
+        /// <summary>
+        /// ISS-005 (#1673 UAC re-check K4): systemusers refused with <see cref="ContactBindingDecision.DenyContactLookupFailed"/>
+        /// (a contact read, or the owner-team read of a create, could not be answered). Retryable, but the user was not
+        /// reconciled, so the run is Partial, never a silent Ok.
+        /// </summary>
+        public int LookupFailed;
         public readonly HashSet<Guid> ScannedOids = new();
         public readonly HashSet<Guid> DecidedOids = new();
         public readonly HashSet<(Guid ContactId, Guid Oid)> CollisionsThisRun = new();
@@ -635,6 +887,21 @@ public sealed class IdentityLinkReconciliationJob : IScheduledJob
             }
 
             ids.Add(result.SystemUserId);
+            if (result.Outcome == SystemUserLinkOutcome.Denied && result.DenyCode == ContactBindingDecision.DenyOwnerUnconfigured)
+            {
+                OwnerUnconfigured++;
+            }
+
+            if (result.Outcome == SystemUserLinkOutcome.Denied && result.DenyCode == ContactBindingDecision.DenyOwnerPrivilegeMissing)
+            {
+                OwnerPrivilegeMissing++;
+            }
+
+            if (result.Outcome == SystemUserLinkOutcome.Denied && result.DenyCode == ContactBindingDecision.DenyContactLookupFailed)
+            {
+                LookupFailed++;
+            }
+
             if (result.WritesApplied && result.Outcome is not (SystemUserLinkOutcome.Failed or SystemUserLinkOutcome.Denied))
             {
                 Changed++;
@@ -683,6 +950,28 @@ public sealed class IdentityLinkReconciliationJob : IScheduledJob
             if (UserScanTruncated)
             {
                 problems.Add($"{p}Stopped after {MaxPages} pages of systemusers; later users were not reconciled.");
+            }
+
+            if (OwnerUnconfigured > 0)
+            {
+                problems.Add(
+                    $"{p}{OwnerUnconfigured} contact create(s) refused: ExternalAccess:CustomerBusinessUnitId is not configured "
+                    + "(or names no single default owner team). Set it for this environment; the next run retries them.");
+            }
+
+            if (OwnerPrivilegeMissing > 0)
+            {
+                problems.Add(
+                    $"{p}{OwnerPrivilegeMissing} contact create(s) refused by Dataverse (0x80040299, Privilege Check For Owner): "
+                    + "the customer business unit's default owner team holds no security role with Read on contact. "
+                    + "Grant that team a role with Read on contact (see the [ID-BIND] error); the next run retries them.");
+            }
+
+            if (LookupFailed > 0)
+            {
+                problems.Add(
+                    $"{p}{LookupFailed} systemuser(s) were not reconciled: a contact or owner-team read could not be answered. "
+                    + "Nothing was created for them; the next run retries them.");
             }
 
             var failed = Count(SystemUserLinkOutcome.Failed) + ClearFailed;

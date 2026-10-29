@@ -15,7 +15,8 @@
     "./logic/attachments": "./src/logic/attachments/index.ts",
     "./logic/actions": "./src/logic/actions/index.ts",
     "./components": "./src/components/index.ts",
-    "./components/AttachmentList": "./src/components/AttachmentList/index.ts"
+    "./components/AttachmentList": "./src/components/AttachmentList/index.ts",
+    "./invoice-attachment-marking": "./src/components/InvoiceAttachmentMarking/index.ts"
   },
   "scripts": {
     "build:deps": "npm --prefix ../Spaarke.Auth run build && npm --prefix ../Spaarke.UI.Components run build",

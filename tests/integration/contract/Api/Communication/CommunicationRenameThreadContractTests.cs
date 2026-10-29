@@ -146,6 +146,9 @@ public sealed class CommunicationRenameTestWebAppFactory : WebApplicationFactory
     public Mock<IImpersonatedCommunicationQuery> ImpersonatedQueryMock { get; } = new();
     public Mock<ICallerSystemUserResolver> CallerResolverMock { get; } = new();
 
+    /// <summary>Task 065 fix round 6 (D9): the thread-visibility check asks whether the caller is flagged external. Internal by default.</summary>
+    public Mock<Sprk.Bff.Api.Services.Identity.ISystemUserIdentityResolver> IdentityMock { get; } = new();
+
     /// <summary>Task 161: the record gate asks the probe for Write on the thread (the rename/pin/delete write the SHARED record).</summary>
     public RecordingProbe Probe { get; } = new();
 
@@ -276,6 +279,8 @@ public sealed class CommunicationRenameTestWebAppFactory : WebApplicationFactory
             services.AddSingleton(ImpersonatedQueryMock.Object);
             services.RemoveAll<ICallerSystemUserResolver>();
             services.AddScoped(_ => CallerResolverMock.Object);
+            services.RemoveAll<Sprk.Bff.Api.Services.Identity.ISystemUserIdentityResolver>();
+            services.AddSingleton(IdentityMock.Object);
             services.RemoveAll<Sprk.Bff.Api.Infrastructure.ExternalAccess.CallerRecordAccessProbe>();
             services.AddSingleton<Sprk.Bff.Api.Infrastructure.ExternalAccess.CallerRecordAccessProbe>(Probe);
 

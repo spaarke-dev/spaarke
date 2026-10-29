@@ -26,6 +26,29 @@ namespace Sprk.Bff.Api.Api.Ai;
 /// </summary>
 public static class AnalysisEndpoints
 {
+    /// <summary>
+    /// THE ownership question for an analysis PROMOTED from a chat session (task 146): its document (when it has one), then
+    /// its regarding record — secure-if-any, so an analysis of an ordinary document filed to a secure matter is the named
+    /// Secure team's; the document is the primary. UAC task 194b fix round, slice 3: one builder, which the existing-row parity
+    /// test calls.
+    /// </summary>
+    /// <remarks>UAC task 194b fix round R (B3): through the one builder (<c>ForRow</c>), keyed by the columns the create writes —
+    /// <c>sprk_documentid</c> and the regarding lookup <c>PopulateAnalysisRegardingAsync</c> stages.</remarks>
+    internal static Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext OwnershipOfPromotedAnalysis(
+        Guid? documentId, string? regardingTable, Guid? regardingId) =>
+        Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext.ForRow("sprk_analysis", new[]
+        {
+            KeyValuePair.Create("sprk_documentid", documentId is { } docId
+                ? new Sprk.Bff.Api.Services.Dataverse.RecordOwnershipParent("sprk_document", docId)
+                : (Sprk.Bff.Api.Services.Dataverse.RecordOwnershipParent?)null),
+            KeyValuePair.Create(
+                (regardingTable is null ? null : Spaarke.Dataverse.RegardingRecordType.GetRegardingLookupFieldByEntity(regardingTable))
+                    ?? regardingTable ?? "sprk_regarding",
+                regardingTable is not null && regardingId is { } regId
+                    ? new Sprk.Bff.Api.Services.Dataverse.RecordOwnershipParent(regardingTable, regId)
+                    : (Sprk.Bff.Api.Services.Dataverse.RecordOwnershipParent?)null),
+        });
+
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase
@@ -150,8 +173,7 @@ public static class AnalysisEndpoints
             // Task 146: the analysis is a child of its document — owned by the document's team (the named Secure team
             // for a document of a secure record). A refusal creates nothing and is a 409 with a stable reason code.
             var owner = await ownership.ResolveOwnerAsync(
-                Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext.ForParents(
-                    new[] { new Sprk.Bff.Api.Services.Dataverse.RecordOwnershipParent("sprk_document", request.DocumentId) })
+                Sprk.Bff.Api.Services.Ai.AppOnlyAnalysisService.OwnershipOfNewAnalysis(request.DocumentId)
                     with { RequestedBy = Sprk.Bff.Api.Services.Dataverse.RecordRequester.OfCaller(httpContext.User) },
                 cancellationToken);
             if (!owner.IsOwned)
@@ -718,7 +740,9 @@ public static class AnalysisEndpoints
             {
                 Conditions =
                 {
-                    new ConditionExpression("azureactivedirectoryobjectid", ConditionOperator.Equal, azureAdOid)
+                    new ConditionExpression("azureactivedirectoryobjectid", ConditionOperator.Equal, azureAdOid),
+                    // Issue #1576: a disabled systemuser keeps its oid and must not resolve.
+                    new ConditionExpression("isdisabled", ConditionOperator.Equal, false)
                 }
             }
         };
@@ -726,7 +750,7 @@ public static class AnalysisEndpoints
         var result = await entityService.RetrieveMultipleAsync(query, CancellationToken.None);
         if (result.Entities.Count == 0)
         {
-            logger.LogWarning("No Dataverse systemuser found for Azure AD OID {AzureAdOid}", azureAdOid);
+            logger.LogWarning("No active Dataverse systemuser found for Azure AD OID {AzureAdOid}", azureAdOid);
             return null;
         }
 
@@ -889,7 +913,16 @@ public static class AnalysisEndpoints
         // Step 4: Build Dataverse field mapping directly from the AI output (the output
         // schema uses sprk_* property names natively — typed Choice coercion for
         // sprk_documenttype + a computed search profile).
-        var fields = BuildDocumentProfileFields(aiOutput, docText.FileName, parentEntity, logger);
+        var fields = BuildDocumentProfileFields(documentId, aiOutput, docText.FileName, parentEntity, logger);
+        if (fields.Count == 0)
+        {
+            // #2239: no profile column mapped (e.g. a misconfigured output schema) is a failed profile, not a success —
+            // the same rule the app-only and Compose consumers apply. Nothing is written and nothing is indexed.
+            logger.LogWarning(
+                "Document {DocumentId} profile — the action produced no mappable profile fields; nothing written", documentId);
+            yield return AnalysisStreamChunk.FromError("AI analysis produced no profile fields.");
+            yield break;
+        }
 
         logger.LogInformation(
             "Document {DocumentId} profile — mapped {FieldCount} fields for update: {Fields}",
@@ -1007,11 +1040,12 @@ public static class AnalysisEndpoints
     /// <see cref="DocumentProfileFieldMapper.BuildSearchProfile"/>.
     /// </summary>
     private static Dictionary<string, object?> BuildDocumentProfileFields(
+        Guid documentId,
         JsonElement root,
         string fileName,
         ParentEntityContext? parentEntity,
         ILogger logger)
-        => DocumentProfileOutputMapper.BuildFields(root, fileName, parentEntity, logger);
+        => DocumentProfileOutputMapper.BuildFields(documentId, root, fileName, parentEntity, logger);
 
     // =========================================================================
     // Shared by promote (the fork endpoint that also used these was deleted by task 162)
@@ -1180,15 +1214,8 @@ public static class AnalysisEndpoints
         // document filed to a secure matter is the named Secure team's. Resolved before any write; a refusal is a 409
         // and the session is untouched; a Dataverse fault propagates as the request's 5xx.
         var owner = await ownership.ResolveOwnerAsync(
-            Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext.ForParents(new[]
-            {
-                documentId is { } docId
-                    ? new Sprk.Bff.Api.Services.Dataverse.RecordOwnershipParent("sprk_document", docId)
-                    : null,
-                regarding is not null
-                    ? new Sprk.Bff.Api.Services.Dataverse.RecordOwnershipParent(regarding.EntityLogicalName, regarding.RecordId)
-                    : null,
-            }) with { RequestedBy = Sprk.Bff.Api.Services.Dataverse.RecordRequester.OfCaller(httpContext.User) },
+            OwnershipOfPromotedAnalysis(documentId, regarding?.EntityLogicalName, regarding?.RecordId)
+                with { RequestedBy = Sprk.Bff.Api.Services.Dataverse.RecordRequester.OfCaller(httpContext.User) },
             cancellationToken);
         if (!owner.IsOwned)
         {

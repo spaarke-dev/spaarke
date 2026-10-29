@@ -72,6 +72,13 @@ public static class RollbackTransitions
         };
 
     /// <summary>
+    /// Consecutive automatic re-dispatches a <see cref="FailureClass.RetryableWithCleanup"/> failure gets before the
+    /// run stops for an operator (T186 L44 — unbounded, H9 re-ran ~370 times in 12 minutes, downloading its artifact
+    /// each time). Counted in <c>ProvisioningRun.HandlerAutoRetries</c>.
+    /// </summary>
+    public const int MaxAutoRetries = 3;
+
+    /// <summary>
     /// Returns true when the reconciler should re-enqueue the failed handler
     /// automatically (§4C RetryableWithCleanup — handler's own idempotency
     /// handles partial write). Resumable requires operator action (POST resume);
@@ -120,15 +127,11 @@ public static class RollbackTransitions
             // statistically inevitable during F19/F20 hardening (real-world
             // halt on Session-13's "downstream writes will flow cleanly"
             // promise). EXEC-07 releases the guard on Failed so a fresh run
-            // is possible. Trade-off: an operator POST /resume of the OLD
-            // runId concurrent with a fresh POST /api/runs for the SAME
-            // customer creates dual dispatch (both against the same customer's
-            // Azure resources). This is an operator-avoidable race — the
-            // resume-path continues to work for the old runId, but the
-            // operator is expected to pick ONE recovery path (resume the
-            // failed run OR start fresh). Ideally ResumeRun would re-acquire
-            // the guard against the resumed runId; that endpoint enhancement
-            // is a follow-on row.
+            // is possible. POST /resume now re-acquires the guard for the
+            // resumed runId (RunControlService.ResumeAsync), so a resume while
+            // a fresh run for the SAME customer holds the guard is a 409
+            // (customer-run-in-flight) rather than dual dispatch; the operator
+            // picks ONE recovery path (resume the failed run OR start fresh).
             FailureClass.Resumable => true, // EXEC-07 (2026-08-27): unblock fresh runs after Failed.
             FailureClass.RetryableWithCleanup => false, // Auto-retry is in-flight; keep guard held.
             FailureClass.QuarantineRequired => false, // BLOCKS new runs per spec FR-24 SCOPE.

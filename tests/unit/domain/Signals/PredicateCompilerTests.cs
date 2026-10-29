@@ -154,6 +154,41 @@ public class PredicateCompilerTests
         act.Should().Throw<PredicateCompilationException>().WithMessage("*'sprk_invoice.sprk_matter' is not a verified lookup*");
     }
 
+    // ── Task 063: the (sprk_matter, sprk_budget) join ("this matter has no budget") ──────────────────────
+
+    [Fact]
+    public void Compile_NotExistsBudgetViaSprkMatter_IsAcceptedWithTheVerifiedPath_AsAnOuterJoinWithItsOwnNullTest()
+    {
+        // sprk_budget.sprk_matter is the one lookup from sprk_budget to sprk_matter (relationship sprk_Matter_Budget_1n, live 2026-10-16).
+        PredicateCompiler.VerifiedJoins[("sprk_matter", "sprk_budget")].Should().Be("sprk_matter");
+
+        var entity = XElement.Parse(Compiler().Compile(Clause("notExists", "sprk_budget", "sprk_matter", """{"statecode":0}""")).FetchXml)
+            .Element("entity")!;
+
+        var link = entity.Elements("link-entity").Should().ContainSingle().Subject;
+        (link.Attribute("name")!.Value, link.Attribute("from")!.Value, link.Attribute("to")!.Value, link.Attribute("link-type")!.Value)
+            .Should().Be(("sprk_budget", "sprk_matter", "sprk_matterid", "outer"));
+        var nullTest = entity.Element("filter")!.Elements("condition").Should().ContainSingle().Subject;
+        nullTest.Attribute("entityname")!.Value.Should().Be(link.Attribute("alias")!.Value);
+        nullTest.Attribute("attribute")!.Value.Should().Be("sprk_budgetid");
+        nullTest.Attribute("operator")!.Value.Should().Be("null");
+    }
+
+    [Theory]
+    [InlineData("sprk_project")]            // a real lookup on sprk_budget, but to sprk_project: ids never match a matter id
+    [InlineData("sprk_createdbyperson")]    // a real lookup on sprk_budget, but to a person
+    [InlineData("ownerid")]
+    [InlineData("sprk_budgetid")]           // the row's own key
+    [InlineData("sprk_regardingmatter")]    // the communication's column name, not the budget's
+    public void Compile_BudgetPathThatIsNotTheVerifiedLookupToTheMatter_IsRefusedWithTheVerifiedPathNamed(string path)
+    {
+        // Fail closed: a wrong path never matches, which would make this notExists TRUE for every matter.
+        var act = () => Compiler().Compile(Clause("notExists", "sprk_budget", path, """{"statecode":0}"""));
+
+        act.Should().Throw<PredicateCompilationException>()
+            .WithMessage($"*'sprk_budget.{path}' is not a verified lookup from sprk_budget to sprk_matter*The verified path is 'sprk_matter'*");
+    }
+
     // ── Read depth fails closed (task 006 finding, notes/security-roles.md §9) ──────────────────────────
 
     [Theory]

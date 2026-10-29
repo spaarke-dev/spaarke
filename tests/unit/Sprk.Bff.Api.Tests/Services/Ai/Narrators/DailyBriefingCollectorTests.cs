@@ -1021,8 +1021,14 @@ public sealed class DailyBriefingCollectorTests
             new[] { dueOct7.ToString(), rescheduled.ToString(), dueOct9.ToString() },
             "upcoming = sprk_duedate within 5 days, ordered by sprk_duedate (Oct 7, 8, 9); the overdue task's final due "
             + "date (Oct 7) does not pull it in");
-        request.PriorityItems.Single(p => p.Title == "Due Oct 7").DueDate!.Value.Date
-            .Should().Be(new DateTime(2026, 10, 7), "the date shown is sprk_duedate, not the final due date (Oct 30)");
+
+        // Task 062 (FR-34): the narrative SUMMARISES Do volume, it does not list it. The task channels feed the category COUNTS only: no
+        // named priority items, and no task title or matter name is nameable in the TL;DR facts.
+        request.PriorityItems.Should().BeEmpty("a top-N list of named Do items is what the narrative must not be");
+        request.Categories.Should().Contain(c => c.Name == "Overdue Tasks" && c.Count == 1);
+        request.Categories.Should().Contain(c => c.Name == "Upcoming Tasks" && c.Count == 3);
+        request.TldrFacts!.KeyDates.Should().BeEmpty();
+        request.TldrFacts.RecordNames.Should().NotContain(new[] { "Overdue by its due date", "Rescheduled", "Due Oct 9", "Due Oct 7" });
     }
 }
 
@@ -1079,9 +1085,10 @@ public sealed class DailyBriefingTldrFactsTests
         facts.KeyDates[0].RecordName.Should().Be("Review engagement letter");
         facts.KeyDates[0].Date.Should().Be(dueDate);
 
-        // RecordNames carries the priority-item titles + channel record names — the TL;DR's
-        // allow-list of names it may reference.
-        facts.RecordNames.Should().Contain(new[] { "Review engagement letter", "File motion", "Acme Matter" });
+        // RecordNames carries the caller-supplied priority-item titles. The Do channel (overdue-tasks) contributes counts only, so its
+        // matter name is not nameable (task 062, FR-34).
+        facts.RecordNames.Should().Contain(new[] { "Review engagement letter", "File motion" });
+        facts.RecordNames.Should().NotContain("Acme Matter");
     }
 
     [Fact]
@@ -1154,6 +1161,42 @@ public sealed class DailyBriefingTldrFactsTests
     }
 
     [Fact]
+    public void BuildTldrFacts_DoChannels_ContributeCountsOnly_KnowChannelsStayNameable()
+    {
+        // Task 062 (FR-31, FR-34): Do items (tasks, To Dos) are summarised by their category counts and never listed; Know items
+        // (documents, matters, projects) are awareness, so their names stay nameable.
+        ChannelNarrationInput Channel(string category, string title, string regarding) => new()
+        {
+            Category = category,
+            Label = category,
+            Items = [new ChannelItemDto { Id = category, Title = title, RegardingName = regarding }],
+        };
+        var request = new DailyBriefingNarrateRequest
+        {
+            Categories =
+            [
+                new NotificationCategoryDto { Name = "Overdue Tasks", Count = 1, UnreadCount = 1 },
+                new NotificationCategoryDto { Name = "To Dos", Count = 1, UnreadCount = 1 },
+                new NotificationCategoryDto { Name = "Matters", Count = 1, UnreadCount = 1 },
+            ],
+            PriorityItems = [],
+            TotalNotificationCount = 3,
+            Channels =
+            [
+                Channel(DailyBriefingCollector.ChannelOverdueTasks, "Task title A", "Task matter A"),
+                Channel(DailyBriefingCollector.ChannelUpcomingTasks, "Task title B", "Task matter B"),
+                Channel(DailyBriefingCollector.ChannelTodos, "Todo title C", "Todo matter C"),
+                Channel(DailyBriefingCollector.ChannelMatters, "Know matter D", "Know matter D"),
+            ],
+        };
+
+        var facts = DailyBriefingCollector.BuildTldrFacts(request);
+
+        facts.CategoryCounts.Select(c => c.Name).Should().Contain(new[] { "Overdue Tasks", "To Dos" }, "Do volume is still counted");
+        facts.RecordNames.Should().BeEquivalentTo(new[] { "Know matter D" });
+    }
+
+    [Fact]
     public void BuildTldrFacts_ChannelWithManyItems_CapsRecordNamesInsteadOfDumpingEveryRecord()
     {
         // ADR-015 data-minimization / aggregation constraint: the TL;DR scaffolding must
@@ -1176,5 +1219,107 @@ public sealed class DailyBriefingTldrFactsTests
         facts.TotalNotificationCount.Should().Be(30);
         // ...but the enumerated name list stays bounded regardless of channel size.
         facts.RecordNames.Length.Should().BeLessOrEqualTo(DailyBriefingCollector.TldrFactsMaxRecordNames);
+    }
+}
+
+/// <summary>
+/// Task 062 (FR-32, BR-3) — <c>sprk_monitor</c> is a SUBSCRIPTION to Know, <c>sprk_highpriority</c> is a rank input and neither is a list. Pure unit tests
+/// of <see cref="DailyBriefingCollector.WithMonitoredSubscription"/>: monitored records changed inside the recency window are COUNTED in the
+/// narrative request, never named, and a failed flagged-entity read is reported rather than under-counted.
+/// </summary>
+[Trait("status", "task-062")]
+public sealed class DailyBriefingMonitoredSubscriptionTests
+{
+    private static readonly DateTimeOffset Now = new(2026, 10, 16, 12, 0, 0, TimeSpan.Zero);
+
+    private static DailyBriefingNarrateRequest Request() => new()
+    {
+        Categories = [new NotificationCategoryDto { Name = "Matters", Count = 1, UnreadCount = 1 }],
+        TotalNotificationCount = 1,
+        FailedChannels = ["documents"],
+    };
+
+    private static HighPriorityItemDto Item(string name, bool monitor, bool highPriority, DateTimeOffset? modifiedOn) => new()
+    {
+        EntityType = "sprk_matter",
+        EntityId = Guid.NewGuid().ToString(),
+        Name = name,
+        Monitor = monitor,
+        HighPriority = highPriority,
+        ModifiedOn = modifiedOn,
+    };
+
+    [Fact]
+    public void MonitoredRecordsChangedInTheWindow_AreCounted_NotNamed_AndNotAddedToTheTotal()
+    {
+        var flagged = new HighPriorityCollection(
+            [
+                Item("Monitored and changed", monitor: true, highPriority: false, Now.AddHours(-3)),
+                Item("Monitored and flagged", monitor: true, highPriority: true, Now.AddHours(-119)),
+                Item("Monitored but quiet", monitor: true, highPriority: false, Now.AddHours(-121)),
+                Item("Monitored, never modified", monitor: true, highPriority: false, null),
+            ],
+            []);
+
+        var result = DailyBriefingCollector.WithMonitoredSubscription(Request(), flagged, recencyHours: 120, Now);
+
+        result.Categories.Should().ContainSingle(c => c.Name == DailyBriefingCollector.MonitoredCategoryLabel(120)).Which.Count.Should().Be(2);
+        result.TotalNotificationCount.Should().Be(1, "a monitored record that changed is usually already counted in its own channel");
+        result.TldrFacts!.CategoryCounts.Should().Contain(c => c.Name == DailyBriefingCollector.MonitoredCategoryLabel(120) && c.Count == 2);
+        result.TldrFacts.RecordNames.Should().NotContain(new[] { "Monitored and changed", "Monitored and flagged" });
+        result.Channels.Should().BeEmpty("a subscription count adds no list of items");
+        result.PriorityItems.Should().BeEmpty();
+        result.FailedChannels.Should().Equal("documents");
+    }
+
+    [Theory]
+    [InlineData(120, "Monitored records changed in the last 120 hours")]
+    [InlineData(48, "Monitored records changed in the last 48 hours")]
+    [InlineData(1, "Monitored records changed in the last 1 hour")]
+    public void WithMonitoredSubscription_LabelStatesTheRecencyWindowTheCountWasTakenWith(int recencyHours, string expectedLabel)
+    {
+        var flagged = new HighPriorityCollection(
+            [Item("Monitored and changed", monitor: true, highPriority: false, Now.AddMinutes(-10))],
+            []);
+
+        var result = DailyBriefingCollector.WithMonitoredSubscription(Request(), flagged, recencyHours, Now);
+
+        var category = result.Categories.Should().ContainSingle(c => c.Name == expectedLabel).Subject;
+        category.Count.Should().Be(1);
+        category.Name.Should().NotBe("Monitored records", "the count is records changed in a window, never a total");
+    }
+
+    [Fact]
+    public void HighPriorityAloneIsARankInput_NotASubscription_SoItAddsNothingToTheNarrative()
+    {
+        var flagged = new HighPriorityCollection([Item("Flagged only", monitor: false, highPriority: true, Now.AddHours(-1))], []);
+
+        var result = DailyBriefingCollector.WithMonitoredSubscription(Request(), flagged, 120, Now);
+
+        result.Should().BeEquivalentTo(Request(), "sprk_highpriority is the worklist read route's second rank key, not a Know subscription");
+        result.Categories.Should().NotContain(c => c.Name == DailyBriefingCollector.MonitoredCategoryLabel(120));
+    }
+
+    [Fact]
+    public void NothingMonitoredChanged_AddsNoCategory()
+    {
+        var flagged = new HighPriorityCollection([Item("Quiet", monitor: true, highPriority: false, Now.AddDays(-30))], []);
+
+        var result = DailyBriefingCollector.WithMonitoredSubscription(Request(), flagged, 120, Now);
+
+        result.Categories.Should().NotContain(c => c.Name == DailyBriefingCollector.MonitoredCategoryLabel(120));
+    }
+
+    [Fact]
+    public void AFailedFlaggedRead_IsReportedAsAFailedChannel_NeverCountedAsNothingChanged()
+    {
+        var flagged = new HighPriorityCollection(
+            [Item("Read ok", monitor: true, highPriority: false, Now.AddHours(-1))],
+            ["sprk_invoice"]);
+
+        var result = DailyBriefingCollector.WithMonitoredSubscription(Request(), flagged, 120, Now);
+
+        result.FailedChannels.Should().Equal("documents", DailyBriefingCollector.ChannelMonitored);
+        result.Categories.Should().NotContain(c => c.Name == DailyBriefingCollector.MonitoredCategoryLabel(120), "an undercount would be a claim the read does not support");
     }
 }

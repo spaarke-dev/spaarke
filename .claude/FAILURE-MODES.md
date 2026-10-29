@@ -56,6 +56,10 @@ The distinction matters because the fix is different. Anti-patterns require *unl
 - [G-17: A test that pins a cache-version constant to an exact value fails every later legitimate bump](#g-17-a-test-that-pins-a-cache-version-constant-to-an-exact-value)
 - [G-18: `git stash pop` in one worktree applies ANOTHER session's stash](#g-18-git-stash-pop-in-one-worktree-applies-another-sessions-stash)
 - [G-19: Sub-agent fan-out multiplies cost and exhausts memory](#g-19-sub-agent-fan-out-multiplies-cost-and-exhausts-memory)
+- [G-20: Deleting a worktree deletes through its junctions into another worktree](#g-20-deleting-a-worktree-deletes-through-its-junctions-into-another-worktree)
+- [G-21: In jsdom, a Fluent v9 dialog can be `aria-hidden`, so role queries cannot find its contents](#g-21-in-jsdom-a-fluent-v9-dialog-can-be-aria-hidden-so-role-queries-cannot-find-its-contents)
+- [G-22: `python3` on Windows is the Store alias stub and hangs on stdin scripts](#g-22-python3-on-windows-is-the-store-alias-stub-and-hangs-on-stdin-scripts)
+- [G-23: A narrowed Exchange role entry refuses `-ErrorAction` — and the module calls it a "server side error"](#g-23-a-narrowed-exchange-role-entry-refuses--erroraction--and-the-module-calls-it-a-server-side-error)
 
 ---
 
@@ -1162,6 +1166,91 @@ every read that carries a value — and in-memory doubles that serialize the sha
 - `autoCompactWindow: 400000`.
 
 Cross-session concurrency is not enforceable by settings; it stays a practice.
+
+---
+
+### G-20: Deleting a worktree deletes through its junctions into another worktree
+
+> **Added 2026-10-15** by the procedure / code-quality cleanup session. **Class**: shared mutable state between parallel agents (the file system).
+
+**What happens.** To skip `npm install`, uac-r2 workflow agents replaced `<task-worktree>\src\client\shared\Spaarke.UI.Components\node_modules` with an NTFS junction to the uac-r2 worktree's real `node_modules`. On 2026-10-13 a bulk cleanup of 166 finished agent worktrees (`git worktree remove --force`, with an `rm -rf` fallback) deleted through two of those junctions. The review of the fix established that `git worktree remove` itself, forced or not (Git for Windows 2.51), follows junctions; `rm -rf`, `rd /s`, `Remove-Item -Recurse` and `git clean` did not in the same test. It emptied uac-r2's `node_modules`, and through npm's own `@spaarke/auth` and `@spaarke/sdap-client` junctions inside it, all 70 tracked files under uac-r2's `Spaarke.Auth` and `Spaarke.SdapClient`. The signature is a set of directories left in place but empty, all with the same modification time. Nothing reported an error. The uac-r2 session found it two days later as unexplained deletions in `git status`. A commit at that point would have deleted both packages from master.
+
+**Rule.**
+- Never link a `node_modules` (or any folder) into another worktree. Run `npm install --legacy-peer-deps --no-audit --no-fund` in the worktree that needs it.
+- Remove worktrees only with `pwsh scripts/worktree/Remove-WorktreeSafe.ps1 -Path <root>` (`-Force` discards uncommitted changes, `-WhatIf` previews). It unlinks every junction and symlink as a link, without descending into it, then runs `git worktree remove`, and never falls back to a recursive delete. It refuses locked worktrees and fails closed (touches nothing) if any folder cannot be scanned.
+- Recovery: in the damaged worktree, `git restore -- <paths>` before any commit or merge, then reinstall and rebuild. Uncommitted edits in the emptied folders are not recoverable.
+
+**Enforced by:** the `PreToolUse` hook `scripts/quality/guard-worktree-links.py` on Bash/PowerShell (`.claude/settings.json`, root §16). It denies creating a junction or symlink whose target is in a different registered worktree, and a recursive delete or `git worktree remove` aimed exactly at a worktree root or `.claude/worktrees`. Controls: `scripts/quality/tests/test_guard_worktree_links.py` and `tests/scripts/Remove-WorktreeSafe.Tests.ps1`, both run by `ci-standalone-checks.yml` (`agent-guard-tests`). The hook reads literal paths only: loops, variables, pipelines (`for w in ...; do git worktree remove ...`) and links made inside a script are not inspected. The 2026-10-13 cleanup was such a loop, so **the script is the control and the hook is the reminder**; the script unlinks every junction at removal time however it was made.
+
+---
+
+### G-21: In jsdom, a Fluent v9 dialog can be `aria-hidden`, so role queries cannot find its contents
+
+> **Added 2026-10-15** by `spaarkeai-word-add-in-r1` (nightly quality alert #1906). **Class**: test-environment artifact mistaken for a timing or product defect.
+
+**What happens.** Fluent v9's focus manager (tabster) hides everything outside an open modal by setting `aria-hidden="true"`. In jsdom its modalizer is sometimes not active when the surface takes focus. This happens most often for the first dialog opened in a test file, and on a timer for nested dialogs. The `DialogSurface` itself then ends up `aria-hidden`. Testing Library's role queries (`getByRole`, `findByRole`, `within(...).getByRole`) skip `aria-hidden` subtrees by default, so they report "Unable to find an accessible element with the role ..." for an element that is in the DOM and clickable. Waiting longer never helps. The failure can look like a flake, because which query loses the race varies from run to run. In #1906 it accounted for three of seven red packages: `DecisionWizard`, `ReconciliationWorkspace` and `PinnedMemoryListWidget`. One of them had already been "fixed" with a 4000 ms wait.
+
+**Not a product bug.** Checked in a real browser on 2026-10-15 (Communication Reconciliation modal in dev). The page root and the backdrop carry `aria-hidden="true"`, as a modal should arrange. The surface (`role="dialog" aria-modal="true"`) does not, so screen readers can read it.
+
+**Rule.**
+- When a role query inside an open Fluent dialog fails in jest, inspect the surface with `screen.debug()` or `prettyDOM` and look for `aria-hidden` before blaming timing.
+- Query it with `{ hidden: true }`, scoped to the dialog or to a container test id, so the hidden-inclusive query cannot match background content.
+- Never fix this with a longer timeout, and never replace the role query with a weaker assertion.
+- Leave a one-line comment at the query that cites this entry.
+
+**Enforced by:** prose only. A lint rule cannot tell that a role query will run inside an open dialog. The durable fix would be a shared jest setup that makes tabster's modalizer activate under jsdom. An attempt that deduplicated `@fluentui/react-*` through `moduleNameMapper` passed once and then failed, so it was reverted.
+
+---
+
+### G-22: `python3` on Windows is the Store alias stub and hangs on stdin scripts
+
+> **Added 2026-10-15** after the third occurrence. **Class**: environment trap.
+
+**What happens.** A Python.org install on Windows provides `python.exe` and `py.exe`, not `python3.exe`. So `python3` resolves to `%LOCALAPPDATA%\Microsoft\WindowsApps\python3.exe`, an App Execution Alias stub that launches the real interpreter. The stub does not reliably forward standard input. With a script fed on stdin (`python3 - <<EOF`, `python3 - file...`), the real interpreter never gets the script and spins at 100% CPU, and the Bash call times out. Occurrences:
+- 2026-10-13: processes leaked for days;
+- 2026-10-15: another session's `python3 -` call ran for 76 minutes;
+- 2026-10-15: `scripts/quality/post-edit-lint.sh`, which runs after every edit, preferred `python3`. Fixed in #1999.
+
+Agents reach for `python3` from Linux/macOS habit.
+
+**Rule.** Use `python` (the real interpreter) on this machine, never `python3`. In scripts that must also run on Linux, pick the interpreter at run time and skip any path under `WindowsApps` (see `post-edit-lint.sh`).
+
+**Enforced by:** the PreToolUse hook `scripts/quality/guard-python3-stub.py` (Bash and PowerShell). It denies `python3` in command position only when `python3` resolves into `WindowsApps`, so it does nothing where `python3` is real. It ignores quoted text (including multi-line `-m "..."` / `--body "..."`), heredoc and here-string bodies, comments and arguments. Known limits: misses `python3` inside a quoted `bash -c "..."` string, in a script file, or behind a prefix word with options (`env -i`, `xargs -I{}`). One false-deny shape remains: double quotes nested in `"$(printf "...")"` with `python3` at the start of an inner line. Use a heredoc for such messages. Controls: `scripts/quality/tests/test_guard_python3_stub.py`, run in CI by `agent-guard-tests`. Machine-level fix (optional, per developer): turn off the `python3.exe` App execution alias and add a `python3.exe` copy of `python.exe` next to the real interpreter.
+
+---
+
+### G-23: A narrowed Exchange role entry refuses `-ErrorAction` — and the module calls it a "server side error"
+
+> **Added 2026-10-20** (customer-provisioning-orchestration-r1, T186 L62). **Class**: platform trap. Cost: H14m blocked
+> about four days, two needless owner changes in Exchange.
+
+**What happens.** Exchange Online RBAC checks the PowerShell common parameters (`ErrorAction`, `ErrorVariable`,
+`WarningAction`, `WarningVariable`, `OutVariable`, `OutBuffer`, `Confirm`, `WhatIf`) against the caller's role entry like
+any other parameter. `Set-ManagementRoleEntry '<role>\<cmdlet>' -Parameters a,b,c` REPLACES the entry's list, so a
+narrowed entry drops them. Then `New-Mailbox … -ErrorAction Stop` gets 403 `CmdletAccessDeniedException`. Four things
+hide this:
+- `Get-Command <cmdlet>` in the caller's session lists every parameter, common ones included, whatever the role says.
+- EXO module 3.5.x reports the 403 only as "A server side error has occurred because of which the operation could not
+  be completed. Please try again after some time." — it reads like a Microsoft outage.
+- A `-WhatIf` probe is refused for the same reason, so it "proves" a refusal that the real call may not have.
+- Some parents hold no common parameter for a cmdlet (Security Group Creation and Membership →
+  `Add-DistributionGroupMember`), and Exchange refuses adding them to a child. That call must run with **no** common
+  parameter; the module writes its errors as non-terminating, so read them from the error stream.
+
+**Rule.** When narrowing a role entry, list the common parameters the caller passes; if the parent refuses them, drop
+them from the call. To test whether an app may run a write, run the **exact** call on an address that can never be
+accepted (`…@authz-probe.invalid`) and read the answer: `NotAcceptedDomain` (400) or `ManagementObjectNotFound` (404)
+means authorized, 403 means refused, and nothing is created. On the raw adminapi `InvokeCommand` endpoint, read the
+`X-ExceptionType` header. Never conclude "Microsoft changed enforcement" before ruling this out.
+
+**Enforced by:** the sidecar's PRQ-E-16 probe, `Test-CustomerMailboxWriteAuthorization` in
+`src/server/services/Sprk.Provisioning.ControlPlane.Sidecar/SidecarCore.psm1`, which makes H14m fail before creating
+anything and name the refused write; Pester controls in `Sidecar.Tests.ps1` (join without `-ErrorAction`, stream error =
+failed join, probe of both writes, refused probe → Failure). Prose for hand-written role changes: the role set lives in
+the deployment guide §4.2.1 step 5.
+
+**Evidence**: `projects/customer-provisioning-orchestration-r1/notes/t186-acme-run-log.md` L62 ·
+`projects/customer-provisioning-orchestration-r1/notes/t263-customer-shared-mailbox.md` §5 (M4 correction, M8).
 
 ---
 

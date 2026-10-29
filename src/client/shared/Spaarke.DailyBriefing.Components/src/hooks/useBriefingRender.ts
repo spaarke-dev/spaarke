@@ -63,20 +63,11 @@ export function isEmptyResponse(response: NarrateResponse): boolean {
   if (hasChannels) return false;
   const tldr = response.tldr;
   const hasTldrText =
-    (tldr?.summary?.trim().length ?? 0) > 0 ||
-    (tldr?.topAction?.trim().length ?? 0) > 0 ||
-    (Array.isArray(tldr?.keyTakeaways) && tldr.keyTakeaways.length > 0);
+    (tldr?.summary?.trim().length ?? 0) > 0 || (Array.isArray(tldr?.keyTakeaways) && tldr.keyTakeaways.length > 0);
   if (hasTldrText) return false;
-  // R7 W12 feedback item 9 (2026-07-01): high-priority items ALONE are enough
-  // to keep the widget out of the empty state — operators want flagged records
-  // visible even when narrative channels are empty.
-  const hasHighPriority = Array.isArray(response.highPriorityItems) && response.highPriorityItems.length > 0;
-  if (hasHighPriority) return false;
   // unified-access-control-r2 task 152: a section that could not be loaded is NOT "all caught up" — keep the widget
   // out of the empty state so the "could not be loaded" warning is shown.
-  const hasFailures =
-    (Array.isArray(response.failedChannels) && response.failedChannels.length > 0) ||
-    (Array.isArray(response.highPriorityFailedEntityTypes) && response.highPriorityFailedEntityTypes.length > 0);
+  const hasFailures = Array.isArray(response.failedChannels) && response.failedChannels.length > 0;
   return !hasFailures;
 }
 

@@ -99,7 +99,7 @@ public sealed class DailyBriefingNarratorItemRefsTests
     }
 
     [Fact]
-    public async Task NarrateAsync_PopulatesItemRefsFromKeyTakeawaysAndTopAction_NotOnlySummary()
+    public async Task NarrateAsync_PopulatesItemRefsFromKeyTakeaways_NotOnlySummary()
     {
         var item = new ChannelItemDto
         {
@@ -114,14 +114,38 @@ public sealed class DailyBriefingNarratorItemRefsTests
 
         var sut = BuildNarrator(
             tldrSummary: "You have 1 notification today.",
-            tldrKeyTakeaways: ["Gamma Matter has a new draft awaiting review."],
-            tldrTopAction: "Review the NDA draft.docx for Gamma Matter.");
+            tldrKeyTakeaways: ["Gamma Matter has a new draft awaiting review."]);
 
         var response = await sut.NarrateAsync(req, CancellationToken.None);
 
         response.Tldr.ItemRefs.Should().ContainSingle(
             r => r.AnchorText == "Gamma Matter" && r.ItemId == "doc-1",
-            because: "the match is drawn from the takeaway/topAction text, not just the summary field");
+            because: "the match is drawn from the takeaway text, not just the summary field");
+    }
+
+    [Fact]
+    public async Task NarrateAsync_AModelThatStillEmitsATopAction_HasItIgnored_NeitherSurfacedNorLinked()
+    {
+        // Task 062 (FR-32): the top action is gone. A deployed BRIEF-NARRATE-TLDR row that has not been re-synced still asks for it, so the
+        // model may return it; the narrator must neither return it nor let it name an item.
+        var item = new ChannelItemDto
+        {
+            Id = "doc-1",
+            Title = "NDA draft.docx",
+            RegardingName = "Gamma Matter",
+            RegardingEntityType = "sprk_matter",
+            RegardingId = "22222222-2222-2222-2222-222222222222",
+            SourceEntityType = "sprk_document"
+        };
+
+        var sut = BuildNarrator(
+            tldrSummary: "You have 1 notification today.",
+            legacyTopAction: "Review the NDA draft.docx for Gamma Matter.");
+
+        var response = await sut.NarrateAsync(BuildRequest(item), CancellationToken.None);
+
+        response.Tldr.ItemRefs.Should().BeEmpty("only the summary and takeaways can name an item; a legacy topAction is dropped");
+        JsonSerializer.Serialize(response.Tldr).Should().NotContain("topAction").And.NotContain("Review the NDA");
     }
 
     // ─── Test infrastructure ──────────────────────────────────────────────────────────────
@@ -145,7 +169,7 @@ public sealed class DailyBriefingNarratorItemRefsTests
     private static DailyBriefingNarrator BuildNarrator(
         string tldrSummary,
         string[]? tldrKeyTakeaways = null,
-        string tldrTopAction = "")
+        string? legacyTopAction = null)
     {
         var actions = new Mock<AnalysisActionService>(MockBehavior.Loose,
             new HttpClient { BaseAddress = new Uri("https://example.crm.dynamics.com/api/data/v9.2/") },
@@ -156,12 +180,13 @@ public sealed class DailyBriefingNarratorItemRefsTests
         actions.Setup(s => s.GetActionByCodeAsync(TldrActionCode, It.IsAny<CancellationToken>()))
                .ReturnsAsync(MakeTldrAction());
 
-        var tldrJson = JsonSerializer.Serialize(new
+        var tldrFields = new Dictionary<string, object?>
         {
-            summary = tldrSummary,
-            keyTakeaways = tldrKeyTakeaways ?? Array.Empty<string>(),
-            topAction = tldrTopAction
-        });
+            ["summary"] = tldrSummary,
+            ["keyTakeaways"] = tldrKeyTakeaways ?? Array.Empty<string>(),
+        };
+        if (legacyTopAction is not null) tldrFields["topAction"] = legacyTopAction;
+        var tldrJson = JsonSerializer.Serialize(tldrFields);
 
         var llm = new Mock<IOpenAiClient>(MockBehavior.Strict);
         llm.Setup(c => c.GetStructuredCompletionRawAsync(
@@ -187,7 +212,7 @@ public sealed class DailyBriefingNarratorItemRefsTests
         Id = Guid.NewGuid(),
         Name = TldrActionCode,
         SystemPrompt = "TLDR.",
-        OutputSchemaJson = """{"type":"object","properties":{"summary":{"type":"string"},"keyTakeaways":{"type":"array","items":{"type":"string"}},"topAction":{"type":"string"}},"required":["summary","keyTakeaways","topAction"],"additionalProperties":false}""",
+        OutputSchemaJson = """{"type":"object","properties":{"summary":{"type":"string"},"keyTakeaways":{"type":"array","items":{"type":"string"}}},"required":["summary","keyTakeaways"],"additionalProperties":false}""",
         SortOrder = 0,
         ExecutorType = ExecutorType.AiAnalysis,
         OwnerType = ScopeOwnerType.System,

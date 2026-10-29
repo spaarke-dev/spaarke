@@ -1,0 +1,143 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="164" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>Deploy-Release.ps1 applies and verifies the worklist grid configuration between the BFF and the SpaarkeMaster import (D-185 release order)</title>
+    <phase>11 UAT</phase>
+    <gate>startable (owner decision 2026-10-23: automate in Deploy-Release.ps1 as a separate task)</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Changes the production release script (every customer release runs it) and adds a release phase; the ordering protects a security role change (D-185).</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>One script, one new phase that calls an existing idempotent script, Pester tests over the script's AST. The pattern to copy is Phase 3's call to Import-SpaarkeMasterPackage.ps1.</model-tier-reason>
+    <effort>high</effort>
+    <deps>163 (the order it requires; this task can merge before 163)</deps>
+    <tags>deploy,scripts,dataverse,testing</tags>
+    <estimated-effort>2-4 hours</estimated-effort>
+    <parallel-group>K</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Task 163 (D-185, #2285) moves the worklist's policy columns to a BFF read and removes direct policy Read from Spaarke Basic User and Spaarke Console User. On any environment, the order must be:
+    1. the BFF that no longer needs the link;
+    2. the worklist grid configuration row without the policy link (config/worklist.gridconfiguration.json, applied by scripts/Apply-WorklistGridConfiguration.ps1);
+    3. the role change, which ships in the SpaarkeMaster solution.
+
+    If roles arrive before the configuration, Dataverse refuses the worklist's linked query and every user gets an empty worklist (200, with a warning in the log only).
+
+    The configuration row reaches no environment automatically today:
+    - scripts/Deploy-Release.ps1 runs Phase 2 (BFF, :574) and then Phase 3 (the SpaarkeMaster import, :610), with nothing in between;
+    - the H12b seeder seeds only the reconciliation grids (5001-5003);
+    - nothing in .github/workflows names row 00000000-0000-4000-8000-000000005010.
+
+    The owner decided on 2026-10-23 to automate the step in Deploy-Release.ps1.
+  </prompt>
+  <role>Spaarke release engineer (PowerShell release pipeline).</role>
+  <goal>For every target environment, Deploy-Release.ps1 applies the worklist grid configuration and verifies it (-Verify -RequireRow) after Phase 2 and before Phase 3. If that step fails, Phase 3 does not run for that environment, so the role change can never land without the configuration.</goal>
+
+  <context>
+    <background>
+      - **Reference implementation (copy its shape):** Phase 3's call to `solution-authoring/Import-SpaarkeMasterPackage.ps1` (Deploy-Release.ps1 ~:610-640):
+        - a `Write-Phase` header;
+        - `$phaseStart` timing;
+        - `-WhatIf:$WhatIfPreference` passed through;
+        - try/catch;
+        - `Write-Ok` / `Write-Fail`;
+        - `$envFailed = $true` on failure.
+      - **Phase names:**
+        - `-SkipPhase` has a `ValidateSet('Build', 'BffApi', 'Solutions', 'WebResources', 'Validation')` (:115) and `Test-PhaseSkipped` (:176).
+        - Phases 1/2/3/5 loop over `$targetEnvironments`, from `config/environments.json`. Each `$env` has a `DataverseUrl`.
+      - **Apply-WorklistGridConfiguration.ps1:**
+        - It is idempotent (create, update or "unchanged") and supports `-WhatIf` (SupportsShouldProcess).
+        - `-Verify -RequireRow` is read-only and exits 1 on a lint failure, a query error, DRIFT or ABSENT.
+        - It takes `-DataverseUrl` and gets its token with `az account get-access-token`. That is the operator's own sign-in, the same one Phase 3 uses since T218f (NFR-11).
+        - Its `.DESCRIPTION` already states the D-185 order. `docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md` §7.8 documents the manual step, which this task replaces.
+      - **Authoring environment:** dev (`solutionPackageType` none) skips Phase 3. The configuration step still runs there. It is idempotent, and dev is where the row is maintained.
+      - **Existing Pester style:** `tests/scripts/Apply-DoLanePolicies.Tests.ps1` reads the shipped functions from the script's AST, with no live calls. CI runs Pester in `ci-standalone-checks.yml` job `ontology-script-tests` (`-MinimumVersion 5.5.0`). Pester 6 fails locally on this machine only, so run locally with Pester 5.7.1 from `C:\Users\RALPHS~1\AppData\Local\Temp\p571\Pester\5.7.1` (Import-Module by path).
+    </background>
+    <relevant-files>
+      <file>scripts/Deploy-Release.ps1 (Phase 2 :574-606; Phase 3 :608-640; SkipPhase :115; Test-PhaseSkipped :176; .DESCRIPTION :9-21 phase list)</file>
+      <file>scripts/Apply-WorklistGridConfiguration.ps1 (parameters :52-56; -Verify/-RequireRow semantics in .DESCRIPTION)</file>
+      <file>docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md §7.8 (the manual-step text to update)</file>
+      <file>.github/workflows/ci-standalone-checks.yml job ontology-script-tests (add the new test file)</file>
+      <file>REFERENCE TO COPY: Deploy-Release.ps1 Phase 3 block</file>
+    </relevant-files>
+  </context>
+
+  <justification>
+    <existing>Apply-WorklistGridConfiguration.ps1 already does the work, and Deploy-Release.ps1 already sequences the phases. Nothing applies the row during a release.</existing>
+    <extension>This adds one phase inside the existing per-environment loop of Deploy-Release.ps1, calling the existing script. There is no new script and no new module.</extension>
+    <cost-of-doing-nothing>Once task 163's role XML reaches master, a customer release imports the role change with no configuration row in place. Every user on that environment then gets an empty worklist.</cost-of-doing-nothing>
+  </justification>
+
+  <constraints>
+    <constraint source="owner 2026-10-23">
+      Add a phase between Phase 2 and Phase 3 for every target environment: "Phase 2b: Ontology configuration", or renumber consistently. It runs Apply-WorklistGridConfiguration.ps1 `-DataverseUrl $env.DataverseUrl -WhatIf:$WhatIfPreference`, then (not under -WhatIf) `-Verify -RequireRow`.
+      - A non-zero exit or an exception from either call is a phase failure.
+    </constraint>
+    <constraint source="D-185 fail-closed">
+      If the configuration phase fails for an environment, Phase 3 must not run for that environment, even without `-StopOnFailure`.
+      - Print a message naming the reason: "the SpaarkeMaster import carries the D-185 role change and needs the worklist configuration first".
+      - Phases 4 and 5 keep their existing `$envFailed` / `$StopOnFailure` behaviour.
+    </constraint>
+    <constraint source="skip semantics">
+      Add `'OntologyConfig'` to the `-SkipPhase` ValidateSet.
+      - Skipping it is an explicit operator choice. Print a warning that Phase 3 may then remove policy Read before the configuration is in place.
+      - Do not block Phase 3 when the operator explicitly skipped it.
+    </constraint>
+    <constraint source="NFR-11">No service principal or client secret. Use the operator's az sign-in, as Phase 3 does. `-ClientSecret` stays ignored.</constraint>
+    <constraint source="scope">
+      Only the worklist grid configuration. The Do-lane and know-promotion policies (Apply-DoLanePolicies.ps1) also reach customer environments only by hand. That is NOT in this task.
+      - Record it in the notes as a known gap, with the issue to file.
+      - The main session files it.
+    </constraint>
+    <constraint source="docs">
+      - Update the Deploy-Release.ps1 `.DESCRIPTION` phase list and `-SkipPhase` help.
+      - Update SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md §7.8 so it says the release does this, and keep the manual command for an out-of-band fix.
+      - Update `.github/WORKFLOWS.md` / `docs/procedures/ci-cd-workflow.md` only if the CI job's file list changes the documented description.
+    </constraint>
+    <constraint source="project">Do not run Deploy-Release.ps1 or Apply-WorklistGridConfiguration.ps1 in write mode against any environment. A `-WhatIf` run of Deploy-Release.ps1 against dev is allowed only if it makes no writes. Read its code to confirm that before running it, and if you cannot confirm it, do not run it.</constraint>
+  </constraints>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare the rigor level per root CLAUDE.md §8, then load the knowledge files.</step>
+    <step order="1">
+      Write failing Pester tests first, in `tests/scripts/Deploy-Release.OntologyConfig.Tests.ps1`, over the script's AST and source. No live calls.
+      - the configuration phase appears after Phase 2 and before Phase 3 in the per-environment loop;
+      - it calls Apply-WorklistGridConfiguration.ps1 with `-DataverseUrl` and passes `-WhatIf` through;
+      - it runs `-Verify -RequireRow` after a non-WhatIf apply;
+      - a configuration failure blocks Phase 3 without `-StopOnFailure` (must-fire);
+      - an explicit `-SkipPhase OntologyConfig` does not block Phase 3 (must-not-fire);
+      - `'OntologyConfig'` is in the ValidateSet.
+      If behaviour cannot be tested through the AST alone, extract the gating decision into a small function in the script and test it directly.
+    </step>
+    <step order="2">Implement. Add the new test file to the `ontology-script-tests` CI job's `Invoke-Pester -Path` list.</step>
+    <step order="3">Run Pester 5.7.1 on the new file and the two existing ontology files, then PSScriptAnalyzer on Deploy-Release.ps1 if it is installed. Open a PR into docs/ontology-platform-design.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">For each target environment, the configuration phase runs after Phase 2 and before Phase 3, applying then verifying (-RequireRow).</criterion>
+    <criterion testable="true">A configuration failure for an environment skips Phase 3 for that environment even without -StopOnFailure, and says why.</criterion>
+    <criterion testable="true">-WhatIf runs the apply in -WhatIf mode, skips the verify, and makes no writes.</criterion>
+    <criterion testable="true">-SkipPhase OntologyConfig skips it with a warning and does not block Phase 3 (must-not-fire).</criterion>
+    <criterion testable="true">Phases 1, 2, 4, 5 and 6 behave exactly as before (diff review; no change outside the new phase, the ValidateSet, the help text and the Phase 3 gate).</criterion>
+    <criterion testable="true">Test scope: the cases above. Anything beyond needs a one-line justification in the task notes.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>If Phase 3 cannot be gated per environment without restructuring the loop, STOP and report the smallest option.</trigger>
+    <trigger>If Apply-WorklistGridConfiguration.ps1 needs a capability the operator's az sign-in lacks on a customer environment, STOP and report.</trigger>
+  </escalation>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/provisioning.md</file>
+      <file>projects/spaarke-ontology-platform-r1/notes/task-163-notes.md</file>
+      <file>.claude/constraints/testing.md</file>
+    </files>
+  </knowledge>
+
+  <completion date="2026-10-23">
+    Deploy-Release.ps1 now has a per-environment Phase 2b (Invoke-OntologyConfigPhase: apply, then -Verify -RequireRow; -WhatIf applies in WhatIf mode and skips the verify) between the BFF and the SpaarkeMaster import. A failure sets $ontologyConfigFailed, the first branch of Phase 3's chain, so Phase 3 is skipped for that environment even without -StopOnFailure, with the D-185 reason printed. 'OntologyConfig' is in the -SkipPhase ValidateSet; skipping warns and does not block Phase 3. Tests: tests/scripts/Deploy-Release.OntologyConfig.Tests.ps1, 19 failed before / 19 passed after (Pester 5.7.1), added to the ontology-script-tests CI job. Docs: .DESCRIPTION, SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md section 7.8, two CI doc lines. Nothing was run against any environment. Detail, deviations and the policies-gap issue text: notes/task-164-notes.md. TASK-INDEX is updated at merge by the main session.
+  </completion>
+</task>

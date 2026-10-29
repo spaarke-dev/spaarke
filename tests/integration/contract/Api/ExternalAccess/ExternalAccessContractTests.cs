@@ -919,6 +919,13 @@ public sealed class ExternalAccessContractFixture : WebApplicationFactory<Progra
     public Sprk.Bff.Api.Tests.AccessControl.FakeRecordShareTable RecordShares { get; } = new();
 
     /// <summary>
+    /// The Workforce-role ceiling (unified-access-control-r2 task 186) this host answers with: every privilege the
+    /// <c>/api/v1/external</c> routes need, so the "workforce" plane's contacts (no systemuser) keep the contract these
+    /// tests pin. The role read needs a live ServiceClient; the per-user Read questions still go to the real checker.
+    /// </summary>
+    internal Sprk.Bff.Api.Tests.AccessControl.WorkforceCeilingDouble WorkforceCeiling { get; } = new();
+
+    /// <summary>
     /// The instant the fixture's clock is fixed at (task 097). Grant-expiry decisions read "today" from the
     /// injected <see cref="TimeProvider"/>, so every expiry assertion here is deterministic. Never advanced —
     /// <see cref="FakeTimeProvider"/> cannot move backwards, so a test that advanced it would leak.
@@ -1062,6 +1069,18 @@ public sealed class ExternalAccessContractFixture : WebApplicationFactory<Progra
 
             services.RemoveAll<IHostedService>();
 
+            // Task 186: the Workforce role ceiling, scripted (see WorkforceCeiling).
+            services.RemoveAll<Sprk.Bff.Api.Services.Dataverse.Privileges.IDataversePrivilegeChecker>();
+            services.AddSingleton<Sprk.Bff.Api.Services.Dataverse.Privileges.IDataversePrivilegeChecker>(sp =>
+            {
+                WorkforceCeiling.Inner = ActivatorUtilities.CreateInstance<Sprk.Bff.Api.Services.Dataverse.Privileges.UserPrivilegeChecker>(sp);
+                // Task 099b review round 2: /invite-and-grant asks whether the owner team may own the row (it does); the
+                // host's UserPrivilegeChecker would need a real ServiceClient, so the owner-team question is answered at its
+                // boundary. One registration: a second IDataversePrivilegeChecker would replace this ceiling double.
+                WorkforceCeiling.OwnerTeams = new Sprk.Bff.Api.Tests.TestInfrastructure.TeamPrivilegeCheckerDouble();
+                return WorkforceCeiling;
+            });
+
             // Avoid real MSAL on incidental Graph paths.
             services.RemoveAll<IGraphClientFactory>();
             services.AddSingleton<IGraphClientFactory, FakeGraphClientFactory>();
@@ -1088,6 +1107,14 @@ public sealed class ExternalAccessContractFixture : WebApplicationFactory<Progra
 
             services.RemoveAll<DataverseWebApiClient>();
             services.AddSingleton<DataverseWebApiClient>(Dataverse);
+
+            // Task 099b (D-11): the grant core asks the ownership resolver for a new grant row's owner team — at its module
+            // boundary here (a fixed team); the real resolver over this host's mocked Dataverse would refuse every create.
+            services.RemoveAll<Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver>();
+            services.AddSingleton<Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver>(
+                new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble());
+            // Task 099b review round 2: the owner-team question is answered by WorkforceCeiling.OwnerTeams (registered with
+            // the task 186 ceiling above).
 
             // Task 063: the system-user share routes read and write POA shares through the one seam. In memory, so
             // their wire contract can be asserted without a Dataverse.
@@ -1731,12 +1758,33 @@ internal sealed class HeaderDrivenIdentityStore : IContactIdentityStore
 
     public Task<ContactLookup> FindContactsByKeyMirrorAsync(Guid oid, CancellationToken ct) => _inner.FindContactsByKeyMirrorAsync(oid, ct);
     public Task<ContactLookup> FindActiveContactsByEmailAsync(string email, CancellationToken ct) => _inner.FindActiveContactsByEmailAsync(email, ct);
+    public Task<ContactLookup> FindInactiveContactsByEmailAsync(string email, CancellationToken ct) => _inner.FindInactiveContactsByEmailAsync(email, ct);
     public Task<ContactLookup> GetContactAsync(Guid contactId, CancellationToken ct) => _inner.GetContactAsync(contactId, ct);
+    // Slice C: a contact this double synthesizes from the header is active, bound and NOT removed (as described above); a
+    // contact the shared in-memory store holds answers as that store does.
+    public Task<RemovedMarkerRead> ReadRemovedMarkerAsync(Guid contactId, CancellationToken ct)
+        => _inner.Contacts.ContainsKey(contactId)
+            ? _inner.ReadRemovedMarkerAsync(contactId, ct)
+            : Task.FromResult(RemovedMarkerRead.NotRemoved);
+    public Task<StoreWriteResult> WriteRemovedMarkerAsync(Guid contactId, DateTimeOffset? removedOn, CancellationToken ct) => _inner.WriteRemovedMarkerAsync(contactId, removedOn, ct);
+    public Task<StoreWriteResult> WriteRemovedMarkerIfUnchangedAsync(Guid contactId, string? etag, DateTimeOffset? removedOn, CancellationToken ct) => _inner.WriteRemovedMarkerIfUnchangedAsync(contactId, etag, removedOn, ct);
+    public Task<StoreWriteResult> ClearRemovedPersonAccessStateAsync(Guid contactId, CancellationToken ct) => _inner.ClearRemovedPersonAccessStateAsync(contactId, ct);
+    public Task<StoreWriteResult> ClearStandingGrantAsync(Guid contactId, CancellationToken ct) => _inner.ClearStandingGrantAsync(contactId, ct);
     public Task<ReferenceLookup> FindSystemUsersLinkingAsync(IReadOnlyCollection<Guid> contactIds, CancellationToken ct) => _inner.FindSystemUsersLinkingAsync(contactIds, ct);
     public Task<SystemUserLookup> GetSystemUserAsync(Guid systemUserId, CancellationToken ct) => _inner.GetSystemUserAsync(systemUserId, ct);
     public Task<BindingReadability> ProbeBindingReadabilityAsync(CancellationToken ct) => _inner.ProbeBindingReadabilityAsync(ct);
+    public Task<HomeLinkLookup> FindHomeLinkedSystemUsersAsync(Guid homeTenantId, Guid homeObjectId, CancellationToken ct) => _inner.FindHomeLinkedSystemUsersAsync(homeTenantId, homeObjectId, ct);
+    public Task<HomeLinkLookup> FindSystemUsersByGuestObjectIdAsync(Guid guestObjectId, CancellationToken ct) => _inner.FindSystemUsersByGuestObjectIdAsync(guestObjectId, ct);
+    public Task<StoreWriteResult> WriteHomeLinkAsync(Guid systemUserId, string? etag, Guid homeTenantId, Guid homeObjectId, CancellationToken ct) => _inner.WriteHomeLinkAsync(systemUserId, etag, homeTenantId, homeObjectId, ct);
+    public Task<ContactLookup> FindHomeContactsAsync(Guid homeTenantId, Guid homeObjectId, CancellationToken ct) => _inner.FindHomeContactsAsync(homeTenantId, homeObjectId, ct);
+    public Task<SystemUserEmailLookup> FindEnabledSystemUsersByEmailAsync(string email, CancellationToken ct) => _inner.FindEnabledSystemUsersByEmailAsync(email, ct);
+    public Task<OwnerTeamLookup> FindDefaultOwnerTeamsAsync(Guid businessUnitId, CancellationToken ct) => _inner.FindDefaultOwnerTeamsAsync(businessUnitId, ct);
+    public Task<BusinessUnitLookup> FindBusinessUnitsByNameAsync(string name, CancellationToken ct) => _inner.FindBusinessUnitsByNameAsync(name, ct);
+    public Task<BindingReadability> ProbeHomeReadabilityAsync(CancellationToken ct) => _inner.ProbeHomeReadabilityAsync(ct);
+    public Task<StoreWriteResult> BindHomeOidAsync(Guid contactId, string? etag, Guid homeTenantId, Guid oid, CancellationToken ct) => _inner.BindHomeOidAsync(contactId, etag, homeTenantId, oid, ct);
     public Task<BindIntentLookup> FindBindIntentAsync(Guid contactId, CancellationToken ct) => _inner.FindBindIntentAsync(contactId, ct);
-    public Task<StoreWriteResult> MarkInvitedAsync(Guid contactId, string? etag, DateTimeOffset invitedOn, string inviteCodeHash, CancellationToken ct) => _inner.MarkInvitedAsync(contactId, etag, invitedOn, inviteCodeHash, ct);
+    public Task<StoreWriteResult> MarkInvitedAsync(Guid contactId, string? etag, DateTimeOffset invitedOn, string? inviteCodeHash, InviteStamp stamp, CancellationToken ct) => _inner.MarkInvitedAsync(contactId, etag, invitedOn, inviteCodeHash, stamp, ct);
+    public Task<StoreWriteResult> ClearPendingInviteAsync(Guid contactId, string? etag, CancellationToken ct) => _inner.ClearPendingInviteAsync(contactId, etag, ct);
     public Task<StoreWriteResult> BindOidAsync(Guid contactId, string? etag, Guid oid, IdentityPlaneMarker plane, CancellationToken ct) => _inner.BindOidAsync(contactId, etag, oid, plane, ct);
     public Task<StoreWriteResult> BindOidAndConsumeInviteAsync(Guid contactId, string? etag, Guid oid, IdentityPlaneMarker plane, CancellationToken ct) => _inner.BindOidAndConsumeInviteAsync(contactId, etag, oid, plane, ct);
     public Task<StoreWriteResult> CreateContactForOidAsync(Guid oid, IdentityPlaneMarker plane, NewContactDetails details, CancellationToken ct) => _inner.CreateContactForOidAsync(oid, plane, details, ct);

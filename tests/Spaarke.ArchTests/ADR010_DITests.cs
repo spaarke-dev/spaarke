@@ -318,7 +318,18 @@ public class ADR010_DITests
         // through its Moq double in ExternalMessageEndpointsTests, and ADR-038 bans Mock<HttpMessageHandler>. Adding an
         // app-only member to IImpersonatedCommunicationQuery instead would contradict that interface's "no app-only
         // fallback" contract and break its hand-written test doubles.
-        const int knownOneToOneCeiling = 159;
+        //
+        // ───────── Ceiling raised 159 → 160, 2026-10-16 (spaarke-ontology-platform-r1 task 101) ─────────
+        // IOntologyAdminAuthoringSignalEngine -> OntologyAdminAuthoringSignalEngine. SEAM JUSTIFICATION: the module boundary
+        // between the admin authoring routes (which run AS THE CALLER) and the evaluator identity: the dry run's
+        // SignalEvaluator.EvaluateAsync and the publish's SignalReevaluationJob.ReevaluatePolicyAsync. Both targets are sealed
+        // concrete singletons over the application-identity client and the writer, so the route tests could not run them
+        // without a full Dataverse fake. The production implementation is two delegating lines and holds no logic. It is a real
+        // test seam: RecordingEngine (tests/integration/auth/Ontology/OntologyAdminAuthoringEndpointTests.cs) is its double, and
+        // the security negatives are proven through it. They are: the dry run evaluates a policy built from the CALLER's read,
+        // never the request's lane; a non-Ontology or unreadable policy is never evaluated; publish re-evaluates once, after the
+        // pointer moved. Same category as IAppOnlyCommunicationQuery.
+        const int knownOneToOneCeiling = 160;
 
         Assert.True(
             oneToOneInterfaces.Count <= knownOneToOneCeiling,

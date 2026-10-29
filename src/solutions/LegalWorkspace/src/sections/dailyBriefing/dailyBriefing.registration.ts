@@ -7,6 +7,16 @@
  * closes over LegalWorkspace-local `authenticatedFetch` + `trackEvent`
  * telemetry — preserving FR-25 / NFR-10.
  *
+ * # Retired as the landing tab, kept for one release (ontology R1 task 064, BR-4)
+ *
+ * The Console lands on the system `sprk_workspacelayout` row flagged default. Since the Daily Briefing cutover that is the
+ * "Worklist" row (section `worklist`, `worklist.registration.ts`), not the "Daily Briefing" row that mounts this section. This
+ * registration, the `daily-briefing` section id and the Daily Briefing layout row are deliberately LEFT IN PLACE for one release
+ * so a regression is recoverable with no deploy: `scripts/Set-DefaultWorkspaceLayout.ps1 -To 'Daily Briefing'` flips the default
+ * flag back. Do not delete this file or the `sectionRegistry.ts` entry until that release has passed; the guard
+ * `Spaarke.DailyBriefing.Components/test/briefingCutoverLayouts.test.ts` fails if either goes. Cutover record:
+ * `projects/spaarke-ontology-platform-r1/notes/briefing-cutover.md`.
+ *
  * # History of the customization seam
  *
  * Pre-R2: STATIC `SectionRegistration` const that lost the factory's

@@ -43,17 +43,16 @@
 //   transitions to Status=Failed with FailureClass.Resumable + a per-scope
 //   rejection code; operator resolves the underlying issue (Dataverse creds,
 //   script availability, target-env URL) then POSTs /api/runs/{id}/resume
-//   which re-dispatches H12b with the same envelope + same idempotency key.
+//   which re-dispatches H12b with a fresh-attempt envelope (RunControlService) + same idempotency key.
 //
-// DOWNSTREAM ENQUEUE (WAVE C4 TEMPORARY BRIDGE):
-//   Same pattern as H0/H0.5/H1/H2a handlers in this wave: the wave-C5
-//   reconciler does not exist yet, so H12b enqueues H12c (task 072) directly
-//   here as a TEMPORARY BRIDGE. H12c is the DAG-join point that requires
-//   BOTH H12a + H12b complete; a separate join-coordinator (wave C5) will
-//   own the actual advancement decision. For wave Cp, H12b enqueues H12c
-//   unconditionally on its own success — H12a's parallel enqueue is
-//   duplicate-detected by Service Bus MessageId dedup + the H12c handler's
-//   own idempotency check on CompletedPhases.
+// DOWNSTREAM CHAINING (NOT THIS HANDLER'S JOB):
+//   H12b does not enqueue H12c (or anything else). Handler-to-handler chaining
+//   is owned by the state reconciler (Core/Reconciler/StateReconcilerService.cs
+//   + DagAdvancer.HandlerDependencies: H12c needs H12a + H12b + H2a). The
+//   wave-C4 handler-side enqueue was removed (T186 L19, 2026-10-15): it
+//   dispatched H12c as soon as H12b finished, before H12a (a dependency of
+//   H12c) had completed. On success H12b only records itself complete
+//   (CurrentPhase = H12b).
 //
 // IDEMPOTENCY (3-level per ADR-004 + design.md §4.1):
 //   Level 1 (wire): ServiceBusHandlerEnqueuer sets a deterministic
@@ -96,14 +95,6 @@ public sealed class H12bAppConfigSeedHandler : IProvisioningHandler
     /// <summary>Handler identifier — matches design.md §4.1 catalog verbatim.</summary>
     public const string HandlerIdentifier = HandlerIds.H12b;
 
-    /// <summary>
-    /// Handler identifier of the downstream DAG-join point that consumes
-    /// H12b's completion. H12a (task 070) also enqueues H12c; both parallel
-    /// enqueues are duplicate-detected via Service Bus MessageId dedup +
-    /// H12c's own idempotency check.
-    /// </summary>
-    public const string DownstreamHandlerId = "H12c";
-
     /// <summary>Non-secret parameter key carrying the Entra tenant id (§4D I1).</summary>
     public const string TenantIdParameterKey = "tenantId";
 
@@ -113,7 +104,6 @@ public sealed class H12bAppConfigSeedHandler : IProvisioningHandler
     // scripts hit the correct env (never a default fallback per §4D I1).
 
     private readonly IProvisioningRunRepository _repository;
-    private readonly IHandlerEnqueuer _enqueuer;
     private readonly IReadOnlyList<IAppConfigSeeder> _seeders;
     private readonly ISeedManifestReader _manifestReader;
     private readonly ILogger<H12bAppConfigSeedHandler> _logger;
@@ -125,25 +115,21 @@ public sealed class H12bAppConfigSeedHandler : IProvisioningHandler
     /// Constructs the H12b app-config seed handler.
     /// </summary>
     /// <param name="repository">Cosmos-backed run state store (task 037).</param>
-    /// <param name="enqueuer">Service Bus enqueuer used to dispatch H12c on success (wave-C4 temporary bridge — see file header).</param>
     /// <param name="seeders">Registered per-scope seeders. Registration order is preserved (data-grid → workspace-layout → field-mapping → chart-def is the canonical sequence but the handler does not enforce a specific order — it aggregates all outcomes).</param>
     /// <param name="manifestReader">The seed manifest reader H12a uses (its content hash is H12b's idempotency-key suffix).</param>
     /// <param name="logger">Structured logger.</param>
     public H12bAppConfigSeedHandler(
         IProvisioningRunRepository repository,
-        IHandlerEnqueuer enqueuer,
         IEnumerable<IAppConfigSeeder> seeders,
         ISeedManifestReader manifestReader,
         ILogger<H12bAppConfigSeedHandler> logger)
     {
         ArgumentNullException.ThrowIfNull(repository);
-        ArgumentNullException.ThrowIfNull(enqueuer);
         ArgumentNullException.ThrowIfNull(seeders);
         ArgumentNullException.ThrowIfNull(manifestReader);
         ArgumentNullException.ThrowIfNull(logger);
 
         _repository = repository;
-        _enqueuer = enqueuer;
         _seeders = seeders.ToList();
         _manifestReader = manifestReader;
         _logger = logger;
@@ -335,7 +321,7 @@ public sealed class H12bAppConfigSeedHandler : IProvisioningHandler
                 diagnostic);
         }
 
-        // (7) All scopes OK or Deferred → mark H12b complete + enqueue H12c.
+        // (7) All scopes OK or Deferred → mark H12b complete (the reconciler dispatches H12c once H12a + H12b + H2a are done).
         stopwatch.Stop();
         var okCount = scopeOutcomes.Count(o => o.Result.Status == AppConfigSeederStatus.Ok);
         var deferredCount = scopeOutcomes.Count(o => o.Result.Status == AppConfigSeederStatus.Deferred);
@@ -381,9 +367,7 @@ public sealed class H12bAppConfigSeedHandler : IProvisioningHandler
         JsonElement? evidence,
         CancellationToken cancellationToken)
     {
-        run.Status = RunStatus.Failed;
-        run.CurrentPhase = HandlerIdentifier;
-        run.ErrorDetail = $"[{rejectionCode}] {diagnostic}";
+        run.MarkPhaseFailed(HandlerIdentifier, RunStatus.Failed, $"[{rejectionCode}] {diagnostic}"); // T186 L41
 
         var gateEntry = new GateEntry
         {
@@ -421,8 +405,7 @@ public sealed class H12bAppConfigSeedHandler : IProvisioningHandler
         var completedAt = DateTimeOffset.UtcNow;
         var startedAt = completedAt - TimeSpan.FromMilliseconds(1); // Approximate; per-seeder start not tracked separately.
 
-        run.Status = RunStatus.Running;
-        run.CurrentPhase = DownstreamHandlerId; // The reconciler observes this + knows H12c is next.
+        run.MarkPhaseSucceeded(HandlerIdentifier); // Reconciler observes + fans out
         run.CompletedPhases.Add(new CompletedPhase
         {
             Phase = HandlerIdentifier,
@@ -468,38 +451,6 @@ public sealed class H12bAppConfigSeedHandler : IProvisioningHandler
                 RejectionCode: AppConfigSeedRejectionCodes.RunDeletedDuringSeed,
                 Diagnostic: $"ProvisioningRun '{run.RunId}' was deleted while H12b app-config seed " +
                              $"was in flight.");
-        }
-
-        // Enqueue H12c — TEMPORARY WAVE-C4 BRIDGE (see file header). H12c is
-        // the DAG-join point that requires BOTH H12a + H12b complete; sibling
-        // H12a (task 070) also enqueues H12c on its own success. Service Bus
-        // MessageId dedup + H12c's own idempotency check ensure the parallel
-        // enqueues collapse to a single H12c execution.
-        var downstreamEnvelope = new HandlerEnvelope
-        {
-            HandlerId = DownstreamHandlerId,
-            RunId = envelope.RunId,
-            CustomerId = envelope.CustomerId,
-            ParametersJson = "{}", // H12c reads its own parameters from Cosmos.
-            EnqueuedAt = completedAt,
-        };
-        try
-        {
-            await _enqueuer.EnqueueAsync(downstreamEnvelope, cancellationToken).ConfigureAwait(false);
-        }
-        catch (Exception ex)
-        {
-            // The Cosmos state already records H12b complete + CurrentPhase =
-            // H12c. Enqueue failure is recoverable — the reconciler's
-            // background scan (wave C5, design.md §crash recovery I6) will
-            // re-emit the H12c job. Log + return success so the handler
-            // outcome accurately reflects the H12b completion; the enqueue
-            // failure is a downstream concern.
-            _logger.LogError(
-                ex,
-                "H12b succeeded but H12c downstream enqueue failed — reconciler scan will re-emit: " +
-                "runId={RunId} customerId={CustomerId}",
-                run.RunId, run.CustomerId);
         }
 
         return new HandlerResult.Success(idempotencyKey);

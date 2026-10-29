@@ -1,0 +1,90 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="157" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>Hide a billing Duplicate Signal's earlier-invoice detail from a reader who cannot read that invoice (D-176, #2118)</title>
+    <phase>3 Worklist</phase>
+    <gate>startable (D-176 owner 2026-10-21; ebilling field list 22fe2e6c73 + duplicateOf.invoiceId 6017ebdf20 on work/ebilling-r1)</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Data-exposure rule on the Signal read path (security tag).</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Security-sensitive read filter on the shared Signal read path; detection must work from stored evidence because the billing code is not on this branch.</model-tier-reason>
+    <effort>high</effort>
+    <deps>151 (pattern, on master)</deps>
+    <tags>bff-api,security,testing</tags>
+    <estimated-effort>3-5 hours</estimated-effort>
+    <parallel-group>J</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>A billing Duplicate Signal written while its author could see the earlier invoice quotes that invoice (its tracking number, a sentence naming it, reason texts). A later reader of the Signal who cannot read the earlier invoice still sees that detail (#2118, DI-120). The owner decided (D-176 option b): hide on read. Ontology owns the read check; ebilling supplied the stored-field list.</prompt>
+  <role>SPAARKE BFF engineer.</role>
+  <goal>`SignalReadService.ReadAsync` returns a Duplicate Signal's earlier-invoice detail only when the caller's own read returns that earlier invoice; otherwise the row is returned in the same withheld shape ebilling writes at write time.</goal>
+
+  <context>
+    <background>
+      D-176 in notes/decisions.md. ebilling field list: `git show origin/work/ebilling-r1:projects/ebilling-r1/notes/2118-duplicate-signal-stored-fields.md`. The writer side (read it, do not change it): `git show origin/work/ebilling-r1:src/server/api/Sprk.Bff.Api/Services/Signals/Billing/Handlers/DuplicateHandler.cs`, `.../Billing/BillingFindingSignalMapper.cs` (withheld shape :334, :375, :440-442, :483; ReferenceEvidenceKind :143), `.../Billing/BillingRuleCatalogue.cs:188` (WithheldDuplicateTemplate). The billing code is NOT on this branch or master: detect Duplicate Signals from their stored evidence only.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Signals/SignalReadService.cs: ReadAsync :289; ApplyWitnessRuleAsync :1119-1196 (THE REFERENCE TO COPY: ParseEvidence :1264, withheld line shape :1174-1181, batched caller read WitnessesTheCallerReadsAsync :1211-1260, chunk 200 :185, fail-closed null); SignalRow.TryParse :1534+ (sprk_evidencerefs :1555, sprk_sentence :1559)</file>
+      <file>tests/integration/Sprk.Bff.Api.IntegrationTests/Signals/SignalReadRouteTests.cs: D-142 section :794-990 (test pattern to copy), World helpers ~:1623</file>
+    </relevant-files>
+  </context>
+
+  <justification>
+    <existing>ApplyWitnessRuleAsync already withholds evidence detail by a batched caller-rights read (SignalReadService.cs:1119-1260); nothing resolves or checks an earlier invoice.</existing>
+    <extension>The Signal-side step extends SignalReadService. The readability check itself is one new internal class in Services/Signals (amended 2026-10-21) because a second caller exists: ebilling task 119 (InvoiceReviewReadService, GET /api/finance/invoices/{id}/review, sprk_findingsjson) must apply the identical rule, and the witness read in SignalReadService is private and keyed on SecureChildLineage tables, so it cannot be reused as is.</extension>
+    <cost-of-doing-nothing>A reader who cannot open the earlier invoice sees its tracking number and details in the Duplicate finding (D-176); without the shared check, ebilling 119 would carry a second copy of a data-exposure rule that can drift.</cost-of-doing-nothing>
+  </justification>
+
+  <constraints>
+    <constraint source="D-176 detection">A row is a Duplicate quoting another invoice when its parsed evidence has a line with kind `billing.reference` (case-insensitive, as ParseEvidence) and ref `duplicateOf.invoiceId` or `duplicateOf.trackingNumber`. No other row is touched. Do not add a policy/rule-type column or link-entity to the read.</constraint>
+    <constraint source="D-176 resolution">Earlier invoice id: the `duplicateOf.invoiceId` line's text when it parses as a GUID. Otherwise (older Signals, and every DuplicateOfEarlierLine) resolve the `duplicateOf.trackingNumber` text through `sprk_invoicesubmissions` filtered on (`_sprk_vendororg_value` = the current invoice's vendor org, `sprk_trackingnumber` = the number), read AS THE CALLER, taking `_sprk_invoice_value`; zero rows, more than one row, or no invoice value → withhold. The CURRENT invoice (amended 2026-10-21 after escalation 1, option B): when the Signal's subject (regarding type + `sprk_regardingrecordid`) is `sprk_invoice`, that id; when it is `sprk_billingevent`, the event's `_sprk_invoice_value` from ONE batched caller read of `sprk_billingevents` (In list ≤ 200); an event the caller cannot read, or with no invoice → withhold. The current invoice's `_sprk_vendororg_value` comes from one batched caller read of `sprk_invoices`. Any other subject type with only a tracking number → withhold. Live names (confirmed 2026-10-21): sprk_invoices/sprk_invoiceid/_sprk_vendororg_value; sprk_invoicesubmissions/sprk_trackingnumber/_sprk_vendororg_value/_sprk_invoice_value (alternate key sprk_invoicesubmission_firm_trackingnumber Active); sprk_billingevents/_sprk_invoice_value.</constraint>
+    <constraint source="D-176 readability">Readable = the caller's own `_user.GetAsync` read of `sprk_invoices` returns the id. One batched read per request (In lists of at most 200 ids, as WitnessesTheCallerReadsAsync); fallback submission reads also batched (one query per distinct vendor org, In list of tracking numbers ≤ 200). Never one query per Signal.</constraint>
+    <constraint source="fail-closed">Any fault, 401, unparseable body, or unresolvable/ambiguous number withholds (for a fault: every Duplicate row on the page). A 403 on the invoice or submission table = none readable. Non-Duplicate rows are unaffected by a fault in this step.</constraint>
+    <constraint source="withheld shape (mirror ebilling write time)">For a withheld Duplicate row: (1) remove every evidence line whose ref starts with `duplicateOf.`; (2) on every remaining line remove `text` and `source` and set `withheld: true` (the D-142 line shape); (3) Sentence = "This matches an earlier submission." — a private const in SignalReadService with a comment naming BillingRuleCatalogue.WithheldDuplicateTemplate on work/ebilling-r1 (it is not on this branch); (4) Title (`sprk_name`) cannot carry the earlier invoice (checked 2026-10-21: static headlines only) — leave it unchanged. Note: a withheld `billing.reason` line keeps no text here, while ebilling's write-time shape carries the withheld template; accepted difference, record it in the notes.</constraint>
+    <constraint source="shared check (ebilling 119)">Put the earlier-invoice readability check in one internal sealed class in `Services/Signals/` (name it for what it does, e.g. `EarlierInvoiceReadability`), registered in the existing Signals DI module beside SignalReadService with the same lifetime. Input: the caller's `IDataverseUserClient` (passed in, so it reads as the caller) and a set of refs, each (EarlierInvoiceId?, VendorOrgId?, TrackingNumber?); output: the set of refs whose earlier invoice the caller reads (an id-resolved ref needs only the invoice read; a number-only ref needs VendorOrgId and the submission resolution). It owns the batched submission and invoice reads and the fail-closed rules; on a fault it returns "none readable". Resolving the CURRENT invoice / vendor org from a Signal subject (incl. the billing-event read) stays in SignalReadService. The withheld-sentence const lives on this class (public const) so 119 uses the same text. Unit tests for the class directly, plus the route tests.</constraint>
+    <constraint source="scope">Only `SignalReadService.cs`, the new class, its one DI registration line and their tests change. The existing D-123/D-142 witness rule is unchanged and still runs first; both must keep. Do not change any billing code, SignalWriter, or write-time redaction. Facts (`sprk_factsnapshot`) are not returned by this service: no change there.</constraint>
+    <constraint source="BFF hygiene">.claude/constraints/bff-extensions.md: publish-size delta measured against a fresh master build (expect ~0), no new package, ArchTests in full.</constraint>
+    <constraint source="tests">Never run the unfiltered Sprk.Bff.Api.Tests; run SignalReadRouteTests and the Signals unit filters. Use `python`, never `python3`.</constraint>
+  </constraints>
+
+  <steps mode="directional">
+    <step order="1">Read the reference (ApplyWitnessRuleAsync and its D-142 tests) and ebilling's field-list note and writer files via git show. Confirm entity sets/columns live (read-only).</step>
+    <step order="2">Add the Duplicate step after ApplyWitnessRuleAsync: detect, collect ids/numbers, batched caller reads, withhold per the shape.</step>
+    <step order="3">Tests in SignalReadRouteTests (new "D-176 (task 157)" section) using the World helpers; seeding proof for the fail-closed path and the readability check.</step>
+    <step order="4">Notes file notes/task-157-duplicate-hide-on-read.md: live names, Title finding, known limits; ArchTests; publish-size delta; PR to docs/ontology-platform-design.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">A Duplicate row with `duplicateOf.invoiceId` whose invoice the caller reads keeps its sentence and evidence unchanged.</criterion>
+    <criterion testable="true">A Duplicate row with `duplicateOf.invoiceId` whose invoice the caller's read does not return: no `duplicateOf.*` line, every remaining line withheld (no text/source, withheld true), sentence = the withheld text.</criterion>
+    <criterion testable="true">Older row (tracking number only): resolves through the submission to a readable invoice → kept; to an unreadable invoice → withheld; zero submissions → withheld; two submissions → withheld; a submission the caller cannot read → withheld.</criterion>
+    <criterion testable="true">Invoice read throws / 401 / unparseable → every Duplicate row on the page withheld, non-Duplicate rows unchanged; 403 → withheld.</criterion>
+    <criterion testable="true">A non-Duplicate row (including a billing row with only `billing.field`/`billing.reason` lines) is unchanged and causes no invoice, submission or billing-event read.</criterion>
+    <criterion testable="true">Line-level (subject sprk_billingevent): a DuplicateOfEarlierLine row (trackingNumber = its own invoice's number + lineIndex, no invoiceId) whose event and invoice the caller reads is kept; the same row with the billing event unreadable → withheld; a DuplicateOfPriorSubmissionLine row with invoiceId behaves as the invoice-level cases.</criterion>
+    <criterion testable="true">Bounded reads per request for N Duplicate rows (In lists ≤ 200 ids): at most one billing-event read, one current-invoice read, one submission read per vendor org, one earlier-invoice readability read.</criterion>
+    <criterion testable="true">A D-123 secure-wall withhold and the D-142 rule still behave as before (existing tests pass unedited).</criterion>
+    <criterion testable="true">Seeding proofs: (a) make the readability check always true → the unreadable-invoice test fails; (b) make a fault return "all readable" → the fault test fails. Restore and rerun.</criterion>
+    <criterion testable="true">Test scope: the cases above only; anything beyond needs a one-line justification in the notes. ArchTests full pass; publish-size delta recorded.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>(Resolved 2026-10-21: line-level rows use option B above.) If live metadata contradicts the sprk_invoicesubmission key (vendor org + tracking number), STOP and report rather than inventing a resolution path.</trigger>
+    <trigger>If hiding requires changing the billing writer or any file outside SignalReadService.cs, the new class, its DI line and their tests, STOP and report.</trigger>
+  </escalation>
+
+  <notes>Created 2026-10-21 by the main session (D-176). Known limits to record: native model-driven sprk_signal form/views and ebilling's own invoice-review surfaces are not covered by this BFF read check (ebilling told to apply the same rule on their surfaces); ApprovedRate/Discount rate-card quotes are inside the family (agreed with ebilling 2026-10-21). ebilling reviews the range before merge.
+
+    Implemented 2026-10-21 on task/ontology-157-duplicate-hide (bdc4178cc5): EarlierInvoiceReadability (shared with ebilling 119, public sealed: SignalReadService's public ctor takes it) + SignalReadService steps (9a) detect from STORED evidence before D-142 (which strips every billing line's text) and (9b) withhold after it. Escalation 1 raised and resolved (option B). Tests: 12 route cases + 15 unit cases; seeding proofs (a) and (b) fire. Awaiting the main session's independent review, PR and merge; status → completed and TASK-INDEX at merge. Detail: notes/task-157-duplicate-hide-on-read.md.
+    rework: none task 157</notes>
+
+  <completion date="2026-10-22">
+    Merged to docs/ontology-platform-design via PR #2231 (2a020e05ff). Shared check EarlierInvoiceReadability (ShownAsync combining rule, public WithheldSentence) registered in SignalsModule; SignalReadService steps (9a) detect and (9b) withhold. Every read runs as the caller and fails closed.
+    Review: two adversarial passes PASS (security tag); three fix rounds (r1 casing + all-priors rule; r2 shared combining rule, batched submission read, JSON-string In literals after a live 400; r3 ebilling F3: org groups of 20 on every submission read, a paged body is a fault). Scoped re-checks PASS; ebilling PASS on r1, r2 (F3 raised) and r3.
+    Evidence: Signals unit 396/396, SignalReadRouteTests 83/83, ArchTests 1093/1093, -warnaserror build 0 warnings, publish size +0.009 MB; live GETs on spaarkedev1 prove the query shapes parse (0 submissions on dev, so no row match proven).
+    Known limits (K-class, in notes/task-157-duplicate-hide-on-read.md): native sprk_signal form/views not covered; ebilling 119 applies the rule on its surfaces; inactive submissions not filtered; untested structural characters beyond apostrophe, quote and backslash; OrdinalIgnoreCase vs collation (fail closed). Follow-up: equality guard against ebilling's withheld template once both are on master.
+  </completion>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

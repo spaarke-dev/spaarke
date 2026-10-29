@@ -1,0 +1,110 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="023" project="field-mapping-server-write-path-r1">
+  <metadata>
+    <title>Migrate Create Event wizard to the server write path (FR-16)</title>
+    <phase>3 W3 Product creators onto the service</phase>
+    <gate>022 complete</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies .ts/.tsx in Spaarke.UI.Components; tags include frontend, deploy, testing (TEST-MODIFYING override).</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Mechanical migration following the 021 reference.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>W3-wizards</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Wizards migrate one at a time, each live-verified before the next (spec FR-16).</parallel-reason>
+    <deps>022</deps>
+    <tags>frontend, fluent-ui, field-mapping, deploy, testing</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Migrate the Create Event wizard: remove applyFieldMappings, send only user-entered values, create through the BFF child-records adapter (it already uses withBffChildWrites), pass mappingSource when the filed-under parent differs from the mapping source.</prompt>
+  <role>SPAARKE platform developer, React 18 / Fluent UI v9 code pages, Dataverse. Follow ADRs strictly.</role>
+  <goal>eventService.createEvent has no applyFieldMappings; the payload holds only user-entered values; mapped fields appear on first load; owner = team.</goal>
+
+  <context>
+    <background>spec.md FR-16. eventService.ts calls applyFieldMappings at ~:368 and creates via withBffChildWrites(...).createRecord at ~:384; sprk_priority is set from the form at ~:208. Host: src/solutions/CreateEventWizard/src/main.tsx (sprk_createeventwizard).</background>
+    <relevant-files>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/CreateEventWizard/eventService.ts (applyFieldMappings ~:368 REMOVED; BFF create ~:384)</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/CreateEventWizard/__tests__/eventService.fieldMapping.test.ts (rewrite: payload only user-entered values)</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/CreateEventWizard/__tests__/eventService.cascade.test.ts (adjust only if it asserts the mapping call)</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/CreateEventWizard/CreateEventWizard.tsx (createRecord ~:272 wiring)</file>
+      <file role="modify">src/solutions/CreateEventWizard/src/main.tsx (host; only if it constructs the data service)</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/components/CreateMatterWizard/matterService.ts (reference migration (task 021))</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/RecordCreation/RecordTableRules.cs (created by task 012; Event row)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="022" status="complete">Project migrated and live-verified.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Scope: this wizard only. One wizard per task, live-verified on dev before the next starts (spec FR-16). Do not edit another wizard's files or bffChildWriteAdapter.ts beyond what task 020 delivered; if the adapter needs a change, stop and escalate.</constraint>
+    <constraint source="project">Scope: the create payload. The wizard sends ONLY values the user entered or picked (plus the filing/regarding keys the route needs). It must not call applyFieldMappings, read a mapping profile or pre-fill mapped fields; mapping, owner, search-index and I-1 stamp are applied by the server (FR-02, FR-06, FR-09, FR-10).</constraint>
+    <constraint source="ADR-012">Scope: the shared UI library. Edits stay in Spaarke.UI.Components (or the named package) and the wizard's code-page host; no copy of shared logic into the host.</constraint>
+    <constraint source="ADR-021">Scope: any UI touched by this task. Fluent v9 tokens only, no hard-coded colors, dark mode must render correctly.</constraint>
+    <constraint source="project">Scope: deployment. Deploy through the code-page-deploy skill (build with the host's own npm script, never a hand-edited web resource). Rollback is redeploying the previous bundle; no runtime flag is added (spec rollout decision).</constraint>
+    <constraint source="CLAUDE.md §9">Scope: auth. The wizard sends no owner, owning-team or impersonation value; the BFF decides ownership from the caller (FR-09). The route stays authenticated (existing authenticatedFetch).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Create Event wizard; BFF child-records adapter</topic>
+    <files>
+      <file>docs/architecture/SPAARKE-FIELD-MAPPING-FRAMEWORK.md</file>
+      <file>docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-024-polymorphic-resolver-pattern.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/constraints/webresource.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/skills/code-page-deploy/SKILL.md</file>
+    </files>
+    <patterns>
+      <pattern name="entity-operations" location=".claude/patterns/dataverse/entity-operations.md">Lookup bind / option-set value shapes the payload still uses for user-entered fields.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare FULL rigor; read spec FR-16 (and FR-16), the create-surface inventory in notes/design-review-2026-10-19.md, CreateEventWizard/eventService.ts, and the existing tests listed in relevant-files. Re-grep the line numbers cited here before editing (they are approximate).</step>
+    <step order="1">Inventory keys on the event `entity` in eventService.ts; classify user-entered vs client default; ensure client defaults are Event-row server rules in the task-012 registry or dropped; list in task notes.</step>
+    <step order="2">Delete the applyFieldMappings call (~:368) and import (~:19) and any code consuming only its result.</step>
+    <step order="3">Keep the existing withBffChildWrites create (~:384); add mappingSource only when the filed-under parent differs from the intended mapping source.</step>
+    <step order="4">Rewrite eventService.fieldMapping.test.ts (payload = user-entered keys only); run all CreateEventWizard jest tests.</step>
+    <step order="5">Build library and src/solutions/CreateEventWizard; deploy via code-page-deploy (sprk_createeventwizard); live check per ui-tests.</step>
+    <step order="6">Update TASK-INDEX.md: set this task's status to ✅.</step>
+    <step order="7">Document any deviation in projects/field-mapping-server-write-path-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If removing the client mapping leaves a field required by an Event rule empty on first load (no server default exists), STOP and escalate to the registry owner (task 012) rather than re-adding client logic.</trigger>
+  </escalation>
+
+  <ui-tests>
+    <test name="Event wizard renders"><steps><step>Open the Event wizard code page on dev from its launch command</step><step>Step through to the last step</step></steps><expected>All steps render with no console errors; Fluent v9 styling intact.</expected></test>
+    <test name="Event create flow"><steps><step>Fill the required fields and click Finish</step></steps><expected>The record is created through POST /api/v1/child-records/{table}; the success state shows the new record; no direct Xrm.WebApi create call for the table.</expected></test>
+    <test name="Mapped values visible on first load"><steps><step>Create the record under a parent that has an active field-mapping profile</step><step>Open the new record immediately (first load, no refresh or save)</step></steps><expected>Every field the active Mapping Profile maps from the parent is populated on the new record at first load; no client write filled them.</expected></test>
+    <test name="User value preserved"><steps><step>Type a value into a field the profile also maps</step><step>Finish and open the record</step></steps><expected>The user's own value is stored; the mapped value did not overwrite it (fill-only, FR-02).</expected></test>
+    <test name="ADR-021 dark mode"><steps><step>Switch the host to dark mode (theme toggle or prefers-color-scheme)</step><step>Open the wizard and step through every step</step></steps><expected>No unreadable text, no hard-coded light backgrounds, focus rings visible.</expected></test>
+  </ui-tests>
+
+  <tools><tool name="npm">Build/test the code page and shared library</tool><tool name="code-page-deploy">Deploy the wizard web resource to dev</tool><tool name="ui-test">Browser verification on dev</tool></tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/CreateEventWizard/eventService.ts</output>
+    <output type="test">src/client/shared/Spaarke.UI.Components/src/components/CreateEventWizard/__tests__/eventService.fieldMapping.test.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">eventService.ts has no applyFieldMappings call or import (grep).</criterion>
+    <criterion testable="true">A jest test proves the payload contains only user-entered values.</criterion>
+    <criterion testable="true">The Event is created through the BFF route (no direct Xrm create).</criterion>
+    <criterion testable="true">Negative: with a user value and a mapped value for the same field, the user value is stored; a mapped field the user never touched is populated on first load of the new record; the wizard payload contains no key the user did not enter.</criterion>
+    <criterion testable="true">Deployed to dev via code-page-deploy; live check recorded in the task notes (mapped fields present on first load, user values kept, owner = owning team per FR-09); rollback bundle noted.</criterion>
+    <criterion testable="true">`applyFieldMappings` no longer appears in CreateEventWizard/eventService.ts; jest for the shared library and the host build pass; no existing test outside this wizard changes.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-16. Follows the 021 reference migration.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

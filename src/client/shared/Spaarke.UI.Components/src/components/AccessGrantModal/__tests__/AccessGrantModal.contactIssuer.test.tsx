@@ -8,6 +8,7 @@
 
 import * as React from 'react';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { confirmRevoke } from '../../../__tests__/helpers/confirmDialog';
 import { FluentProvider, webLightTheme } from '@fluentui/react-components';
 import { AccessGrantModal } from '../AccessGrantModal';
 import type { IAccessGrantModalProps, IAccessGrantRecord } from '../types';
@@ -82,8 +83,7 @@ describe('AccessGrantModal — contact-issued grants (task 140)', () => {
     const revokeInRow = Array.from(row.querySelectorAll('button')).find(b => b.textContent === 'Revoke')!;
     fireEvent.click(revokeInRow);
     expect(await screen.findByText('Revoke access?')).toBeInTheDocument();
-    const confirm = screen.getAllByRole('button', { name: 'Revoke' });
-    fireEvent.click(confirm[confirm.length - 1]);
+    await confirmRevoke();
 
     await waitFor(() =>
       expect(p.authenticatedFetch).toHaveBeenCalledWith(

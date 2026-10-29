@@ -47,6 +47,7 @@ public class RegistrationDataverseService : IDisposable
     private readonly TokenCredential _credential;
     private readonly ILogger<RegistrationDataverseService> _logger;
     private readonly ContactIdentityBinderFactory _binderFactory;
+    private readonly ContactIdentityBinder _ownEnvironmentBinder;
     private readonly IMembershipCacheInvalidator _accessCacheInvalidator;
     private readonly TrackingIdGenerator _trackingIdGenerator;
     private readonly SemaphoreSlim _tokenSemaphore = new(1, 1);
@@ -68,10 +69,12 @@ public class RegistrationDataverseService : IDisposable
         IHttpClientFactory httpClientFactory,
         ILogger<RegistrationDataverseService> logger,
         ContactIdentityBinderFactory binderFactory,
+        ContactIdentityBinder ownEnvironmentBinder,
         IMembershipCacheInvalidator accessCacheInvalidator)
     {
         _logger = logger;
         _binderFactory = binderFactory ?? throw new ArgumentNullException(nameof(binderFactory));
+        _ownEnvironmentBinder = ownEnvironmentBinder ?? throw new ArgumentNullException(nameof(ownEnvironmentBinder));
         _accessCacheInvalidator = accessCacheInvalidator ?? throw new ArgumentNullException(nameof(accessCacheInvalidator));
         _trackingIdGenerator = trackingIdGenerator;
         _credential = credential;
@@ -293,7 +296,8 @@ public class RegistrationDataverseService : IDisposable
     }
 
     /// <summary>
-    /// Queries registration requests filtered by status.
+    /// Queries registration requests filtered by status, following <c>@odata.nextLink</c> until every page is read
+    /// (or <paramref name="top"/> rows are), so a status holding more than one page (5,000 rows) is read whole (#1363).
     /// </summary>
     public async Task<List<RegistrationRequestRecord>> GetRequestsByStatusAsync(
         RegistrationStatus status, int? top = null, CancellationToken ct = default)
@@ -313,12 +317,47 @@ public class RegistrationDataverseService : IDisposable
 
         _logger.LogDebug("GET registration requests by status {Status}", status);
 
-        using var request = await CreateAuthenticatedRequestAsync(HttpMethod.Get, url, ct);
-        var response = await _httpClient.SendAsync(request, ct);
-        response.EnsureSuccessStatusCode();
+        var records = new List<RegistrationRequestRecord>();
+        var seenLinks = new HashSet<string>(StringComparer.Ordinal);
+        string? next = url;
+        while (next is not null)
+        {
+            using var request = await CreateAuthenticatedRequestAsync(HttpMethod.Get, next, ct);
+            using var response = await _httpClient.SendAsync(request, ct);
+            response.EnsureSuccessStatusCode();
 
-        var result = await response.Content.ReadFromJsonAsync<ODataCollectionResponse>(cancellationToken: ct);
-        return result?.Value?.Select(MapToRecord).ToList() ?? new List<RegistrationRequestRecord>();
+            var page = await response.Content.ReadFromJsonAsync<ODataCollectionResponse>(cancellationToken: ct);
+            if (page?.Value is not null)
+                records.AddRange(page.Value.Select(MapToRecord));
+
+            if (top.HasValue && records.Count >= top.Value)
+                return records.Take(top.Value).ToList();
+
+            next = page?.NextLink;
+            if (next is not null)
+            {
+                // The next page must come from the same Dataverse (same scheme, host and port; an absolute link only):
+                // the bearer token is never sent anywhere else, nor in cleartext.
+                var baseAddress = _httpClient.BaseAddress!;
+                if (!Uri.TryCreate(next, UriKind.Absolute, out var nextUri)
+                    || !string.Equals(nextUri.Scheme, baseAddress.Scheme, StringComparison.OrdinalIgnoreCase)
+                    || !string.Equals(nextUri.Host, baseAddress.Host, StringComparison.OrdinalIgnoreCase)
+                    || nextUri.Port != baseAddress.Port)
+                {
+                    throw new InvalidOperationException(
+                        $"Dataverse returned a next page link outside {baseAddress.GetLeftPart(UriPartial.Authority)}; the {status} list was not read whole.");
+                }
+
+                // A link already followed would loop forever (with no top, only a missing link ends the read).
+                if (!seenLinks.Add(nextUri.AbsoluteUri))
+                {
+                    throw new InvalidOperationException(
+                        $"Dataverse repeated a next page link; the {status} list was not read whole.");
+                }
+            }
+        }
+
+        return records;
     }
 
     /// <summary>
@@ -457,7 +496,7 @@ public class RegistrationDataverseService : IDisposable
     /// environment (<paramref name="targetDataverseUrl"/>, else <c>DATAVERSE_URL</c>) is a different one — a demo or
     /// customer target — has nothing here to evict, and is skipped. When either URL is unknown it evicts: an
     /// unnecessary eviction costs one re-read; a missing one leaves old access for the TTLs.</para>
-    /// <para><b>Works with no HttpContext</b> (<c>DemoExpirationService</c> is a background path): the eviction is
+    /// <para><b>Works with no HttpContext</b> (<c>DemoExpirationJob</c> is a background path): the eviction is
     /// tenant-agnostic. <b>Never fails the write</b> — it has already happened; the TTL is the backstop. Not bound to
     /// the caller's token, for the same reason.</para>
     /// </remarks>
@@ -490,7 +529,8 @@ public class RegistrationDataverseService : IDisposable
 
     /// <summary>
     /// Whether <paramref name="dataverseBaseUrl"/> is this BFF's own <c>Dataverse:ServiceUrl</c> environment (task 132).
-    /// Unknown on either side counts as "yes" — see <see cref="EvictUserAccessAsync"/>.
+    /// Unknown on either side counts as "yes" — see <see cref="EvictUserAccessAsync"/>. The comparison itself is
+    /// <see cref="IsSameEnvironment"/>, shared with the binder selection and the reconciliation job.
     /// </summary>
     internal bool IsThisBffsEnvironment(string? dataverseBaseUrl)
     {
@@ -500,7 +540,54 @@ public class RegistrationDataverseService : IDisposable
             return true;
         }
 
-        return string.Equals(own.Trim().TrimEnd('/'), dataverseBaseUrl.Trim().TrimEnd('/'), StringComparison.OrdinalIgnoreCase);
+        return IsSameEnvironment(own, dataverseBaseUrl);
+    }
+
+    /// <summary>
+    /// The ONE decision whether two Dataverse URLs name the same environment (ISS-005, #1673 review F1). It compares
+    /// scheme, host and port, case-insensitively, and ignores a trailing slash, a path, a query and credentials; an
+    /// <c>.api.</c> host segment is the same environment as the host without it
+    /// (<c>x.api.crm.dynamics.com</c> == <c>x.crm.dynamics.com</c>; only on a <c>crm*</c> Dataverse host, so an
+    /// unrelated <c>foo.api.example.com</c> is never folded). Pure.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>An unusable URL is "not the same" (false), never "the same".</b> The answer picks the binder that writes
+    /// a new systemuser's contact: "same" selects the owner-aware binder over THIS environment, "different" the factory
+    /// binder over the named URL. A URL that cannot be read names no environment, so it must not select this one (that
+    /// would write into this environment on the strength of a URL nobody could resolve). As "different" it reaches the
+    /// factory, whose request to an unusable URL faults: nothing is written and the fault is logged / reported
+    /// (<see cref="LinkContactForNewSystemUserAsync"/> is non-fatal by design; the reconciliation job fails its run).
+    /// Callers that want the opposite default for an unknown URL (eviction treats it as "yes": an unnecessary
+    /// eviction costs a re-read) handle blanks themselves, as <see cref="IsThisBffsEnvironment"/> does.</para>
+    /// <para>A trailing dot on the host (<c>org.crm.dynamics.com.</c>, the fully-qualified form) is ignored.</para>
+    /// <para>The port is part of the identity: Dataverse listens on the default port, so a URL naming another port is
+    /// not the environment this BFF is configured for.</para>
+    /// </remarks>
+    public static bool IsSameEnvironment(string? first, string? second)
+        => TryEnvironmentKey(first, out var a) && TryEnvironmentKey(second, out var b)
+           && string.Equals(a, b, StringComparison.Ordinal);
+
+    /// <summary>The environment key <see cref="IsSameEnvironment"/> compares (scheme, host without an <c>.api.</c> segment, port); false for an unusable URL.</summary>
+    internal static bool TryEnvironmentKey(string? url, out string key)
+    {
+        key = string.Empty;
+        if (string.IsNullOrWhiteSpace(url)
+            || !Uri.TryCreate(url.Trim(), UriKind.Absolute, out var uri)
+            || (uri.Scheme != Uri.UriSchemeHttps && uri.Scheme != Uri.UriSchemeHttp)
+            || string.IsNullOrEmpty(uri.IdnHost))
+        {
+            return false;
+        }
+
+        // A fully-qualified host ("org.crm.dynamics.com.") is the same host: the trailing dot is not part of the name.
+        var labels = uri.IdnHost.ToLowerInvariant().TrimEnd('.').Split('.').ToList();
+        if (labels.Count >= 4 && labels[1] == "api" && labels[2].StartsWith("crm", StringComparison.Ordinal))
+        {
+            labels.RemoveAt(1);
+        }
+
+        key = $"{uri.Scheme}://{string.Join('.', labels)}:{uri.Port}";
+        return true;
     }
 
     /// <summary>
@@ -518,10 +605,23 @@ public class RegistrationDataverseService : IDisposable
     /// new systemuser's contact link at creation, and by the identity-link reconciliation job for every environment
     /// this BFF provisions users into (task 141, third fix round).
     /// </summary>
+    /// <remarks>
+    /// ISS-005 (#1673 review F1): when <paramref name="dataverseBaseUrl"/> is THIS BFF's own environment
+    /// (<see cref="IsSameEnvironment"/> against <c>Dataverse:ServiceUrl</c>, however the URL is spelled - e.g. the
+    /// registration default <c>DATAVERSE_URL</c> naming the same environment with an <c>.api.</c> host), the result is the
+    /// DI-registered binder, whose owner policy is <c>ContactCreateOwner.FromCustomerBusinessUnit</c>. A factory binder's is
+    /// <c>NoneForForeignEnvironment</c>: it creates ownerless contacts, which is right only for a genuinely different
+    /// environment (tracked in #2270).
+    /// </remarks>
     public ContactIdentityBinder ContactBinderFor(string dataverseBaseUrl)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(dataverseBaseUrl);
         var baseUrl = dataverseBaseUrl.TrimEnd('/');
+        if (IsSameEnvironment(_configuration["Dataverse:ServiceUrl"], baseUrl))
+        {
+            return _ownEnvironmentBinder;
+        }
+
         return _binderFactory.CreateBinder(baseUrl, token => GetAccessTokenForUrlAsync(baseUrl, token));
     }
 
@@ -677,12 +777,37 @@ public class RegistrationDataverseService : IDisposable
     /// <param name="systemUserId">Dataverse systemuser ID.</param>
     /// <param name="ct">Cancellation token.</param>
     /// <param name="targetDataverseUrl">Target Dataverse URL. If null, uses the default (admin) environment.</param>
+    /// <remarks>Idempotent (#1363): a user who is not a member is left as they are — demo expiry repeats every cleanup step
+    /// on its next run when any one failed, so a second removal must succeed without a change.</remarks>
     public async Task RemoveUserFromTeamAsync(
         string teamName, Guid systemUserId, CancellationToken ct = default,
         string? targetDataverseUrl = null)
     {
         // Removal is never guarded: taking a member OUT of any team cannot widen access (task 144 guards additions).
         var (teamId, _) = await ResolveTeamAsync(teamName, ct, targetDataverseUrl);
+
+        // Idempotent: check whether the user is actually a member (the GraphUserService.RemoveFromGroupAsync shape).
+        using (var membership = await SendGetAsync(
+                   $"{TeamEntitySet}({teamId})/teammembership_association?$select=systemuserid&$filter=systemuserid eq {systemUserId}",
+                   ct, targetDataverseUrl))
+        {
+            membership.EnsureSuccessStatusCode();
+            var members = await membership.Content.ReadFromJsonAsync<ODataCollectionResponse>(cancellationToken: ct);
+            if (members?.Value is null)
+            {
+                // No collection is not "no members": the membership is unread, so the removal is not skipped on it.
+                throw new InvalidOperationException(
+                    $"Dataverse returned no membership collection for team {teamName}; systemuser {systemUserId} was not removed.");
+            }
+
+            if (members.Value.Count == 0)
+            {
+                _logger.LogInformation(
+                    "Systemuser {UserId} is not a member of team {TeamName}, nothing to remove", systemUserId, teamName);
+                return;
+            }
+        }
+
         var navigationUrl = $"{TeamEntitySet}({teamId})/teammembership_association({systemUserId})/$ref";
 
         _logger.LogInformation("Removing systemuser {UserId} from team {TeamName}", systemUserId, teamName);
@@ -709,7 +834,7 @@ public class RegistrationDataverseService : IDisposable
         finally
         {
             // Task 132 (C12): the OVER-GRANT direction — without this the removed user keeps every team-owned record
-            // for the identity + membership TTLs. Runs with no HttpContext too (DemoExpirationService).
+            // for the identity + membership TTLs. Runs with no HttpContext too (DemoExpirationJob).
             await EvictUserAccessAsync(systemUserId, targetDataverseUrl, "team remove").ConfigureAwait(false);
         }
     }
@@ -724,6 +849,8 @@ public class RegistrationDataverseService : IDisposable
     public async Task<Guid?> ResolveSystemUserIdByAadObjectIdAsync(
         string aadObjectId, CancellationToken ct = default, string? targetDataverseUrl = null)
     {
+        // includes disabled: the one caller is DemoExpirationService, which removes an EXPIRED demo user from the demo
+        // team after disabling their Entra account — that systemuser may already be disabled and must still resolve.
         var filter = $"azureactivedirectoryobjectid eq '{EscapeODataValue(aadObjectId)}'";
         var url = $"{SystemUserEntitySet}?$filter={filter}&$select=systemuserid&$top=1";
 

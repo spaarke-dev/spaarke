@@ -25,7 +25,10 @@ public static class GrantInviteStatus
     /// </summary>
     public const string Sent = "Sent";
 
-    /// <summary>The grantee holds a current (under 30 days) invite: no new code was made (§12 I-2).</summary>
+    /// <summary>
+    /// The grantee holds a pending invite — a current (under 30 days) marker whose code no bind has consumed: no new code was
+    /// made (§12 I-2).
+    /// </summary>
     public const string AlreadyPending = "AlreadyPending";
 
     /// <summary>
@@ -45,6 +48,12 @@ public static class GrantInviteStatus
     /// so no invite was sent; the record's internal owner was told the colleague needs one.
     /// </summary>
     public const string NeedsInternalInvite = "NeedsInternalInvite";
+
+    /// <summary>
+    /// Slice B3: the grantee's email belongs to one of this deployment's customer tenants, so the contact was stamped for a
+    /// work-account sign-in from that tenant (no CIAM account, no code). The person signs in with their work account.
+    /// </summary>
+    public const string WorkAccountInvited = "WorkAccountInvited";
 
     /// <summary>The invite failed for a reason the invite core has no code for (an unexpected fault, or no usable portal URL).</summary>
     public const string InviteFailedReasonCode = "sdap.access.invite.failed";

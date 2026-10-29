@@ -118,6 +118,24 @@ public class DocumentAuthorizationFilter : IEndpointFilter
             return ProblemDetailsHelper.Forbidden(result.ReasonCode);
         }
 
+        // unified-access-control-r2 task 188 round 3 slice B: the root grants allowed; a caller who is not an internal
+        // systemuser also needs THE external document narrowing to show the document (own Restricted, a Restricted
+        // ancestor, or an internal-only / non-Open communication hides it). Every operation on every route carrying this
+        // filter (read, download, versions, preview, update, delete, checkout, ...). A hidden document — or a narrowing
+        // that faults — is refused with the same 403 a caller without the operation's right gets, before the handler runs,
+        // so nothing is streamed or written. An id that is not a GUID names no document (sprk_documentid is a GUID), so it is
+        // left to the handler's own validation, as before (e.g. /identity's 400 for a non-GUID id).
+        if (Guid.TryParse(resourceId, out _))
+        {
+            var narrowingLogger = httpContext.RequestServices?.GetService<ILogger<DocumentAuthorizationFilter>>();
+            var visibility = await InternalPlaneDocumentNarrowing.ForCallerAsync(
+                httpContext, new[] { resourceId }, $"document-route:{_operation}", narrowingLogger);
+            if (!visibility.IsShown(resourceId))
+            {
+                return ProblemDetailsHelper.Forbidden(InternalPlaneDocumentNarrowing.HiddenReasonCode);
+            }
+        }
+
         return await next(context);
     }
 

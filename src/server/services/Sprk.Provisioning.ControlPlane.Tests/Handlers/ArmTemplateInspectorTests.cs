@@ -51,11 +51,11 @@ public sealed class ArmTemplateInspectorTests
     [Fact]
     public void Inspect_TemplateMissingRequiredOutputs_FailsR4_NamingThem()
     {
-        var declared = ArmDeploymentRunner.RequiredOutputNames.Where(n => n is not ("contentSafetyEndpoint" or "redisEndpoint"))
+        var declared = ArmDeploymentRunner.RequiredOutputNames.Where(n => n is not ("contentSafetyEndpoint" or "redisEndpoint" or "storagePrimaryEndpoint"))
             .Select(n => $"\"{n}\":{{\"type\":\"string\",\"value\":\"x\"}}");
         var json = "{\"resources\":[],\"outputs\":{" + string.Join(",", declared) + "}}";
 
-        Inspect(json).MissingRequiredOutputs.Should().Equal("redisEndpoint", "contentSafetyEndpoint");
+        Inspect(json).MissingRequiredOutputs.Should().Equal("redisEndpoint", "contentSafetyEndpoint", "storagePrimaryEndpoint");
         Inspect("""{"resources":[]}""").MissingRequiredOutputs.Should().Equal(ArmDeploymentRunner.RequiredOutputNames,
             "a template with no outputs object declares none of them");
     }
@@ -196,6 +196,47 @@ public sealed class ArmTemplateInspectorTests
             "H0 checks quota by QuotaName — a SKU change must change the quota name with it");
         root.GetProperty("parameters").GetProperty("openAiLocation").GetProperty("defaultValue").GetString()
             .Should().Be(PinnedModelCatalog.DefaultOpenAiLocation);
+    }
+
+    /// <summary>
+    /// T186 L21: H2a verifies T1 (keyVaultReferenceIdentity == the stamp UAMI on both slots) right after the deploy, before
+    /// H4 runs — so the template itself must set it. R3 only rejects an explicit 'SystemAssigned'; an ABSENT property also
+    /// leaves App Service on 'SystemAssigned', which quarantined the first live run. Every site and slot the compiled
+    /// customer.json creates (module templates included) must bind it to the UAMI parameter.
+    /// </summary>
+    [Fact]
+    public void RealCustomerTemplate_EverySiteAndSlot_SetsKeyVaultReferenceIdentityToTheUami()
+    {
+        using var template = JsonDocument.Parse(File.ReadAllText(Path.Combine(RepoRoot(), "infrastructure", "bicep", "customer.json")));
+        var sites = new List<JsonElement>();
+        CollectResources(template.RootElement, sites, "Microsoft.Web/sites", "Microsoft.Web/sites/slots");
+
+        sites.Should().HaveCountGreaterThanOrEqualTo(2, "customer.json creates the BFF site and its staging slot");
+        foreach (var site in sites)
+        {
+            var properties = site.GetProperty("properties");
+            properties.TryGetProperty("keyVaultReferenceIdentity", out var kvRefIdentity).Should().BeTrue(
+                $"{site.GetProperty("type").GetString()} must set keyVaultReferenceIdentity at creation (T1; T186 L21)");
+            kvRefIdentity.GetString().Should().Be("[parameters('userAssignedIdentityResourceId')]");
+        }
+    }
+
+    private static void CollectResources(JsonElement element, List<JsonElement> found, params string[] types)
+    {
+        if (element.ValueKind == JsonValueKind.Object)
+        {
+            if (element.TryGetProperty("type", out var type) && type.ValueKind == JsonValueKind.String
+                && types.Contains(type.GetString(), StringComparer.OrdinalIgnoreCase)
+                && element.TryGetProperty("properties", out _))
+            {
+                found.Add(element);
+            }
+            foreach (var property in element.EnumerateObject()) CollectResources(property.Value, found, types);
+        }
+        else if (element.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var item in element.EnumerateArray()) CollectResources(item, found, types);
+        }
     }
 
     private static string RepoRoot()

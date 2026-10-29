@@ -1,0 +1,98 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="053" project="field-mapping-server-write-path-r1">
+  <metadata>
+    <title>W5 deploy to dev + live import of 5 rows repaired within 10 minutes (FR-24, FR-25)</title>
+    <phase>5 W5 Records created outside the product</phase>
+    <gate>051+052 complete</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Deploys the BFF and Dataverse customizations and writes live test data (deployment gate for a security-sensitive job).</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Follows a scripted deploy-and-verify checklist; the design and review happened in 051 and 052.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Deploy gate: deploys the shared BFF and Dataverse solution state for dev; must not overlap other deploys.</parallel-reason>
+    <deps>051, 052</deps>
+    <tags>deploy, dataverse, bff-api</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Deploy the BFF (repair pass) and the native-UI customizations to dev, then prove on dev: import 5 rows natively, verify mapping, standard owner, search-index default and stamp within 10 minutes; a re-run is a no-op; a pre-go-live row is untouched; `Test-NativeCreateSurfaces.ps1 -Verify` passes. Do not enable beyond dev without the owner's explicit OK.</prompt>
+  <role>SPAARKE platform engineer, BFF and Dataverse deployment, live verification.</role>
+  <goal>Dev evidence, recorded in the task notes, that FR-24 and FR-25 acceptance hold in a real environment, and a recorded owner decision on any wider rollout.</goal>
+
+  <context>
+    <background>spec.md FR-24, FR-25, NFR-01, NFR-05. Deploy via the bff-deploy and dataverse-deploy skills. The repair pass is forward-only, so the test uses rows created after the configured go-live instant plus one deliberately pre-go-live row that must stay untouched.</background>
+    <relevant-files>
+      <file role="canonical-reference">.claude/skills/bff-deploy/SKILL.md</file>
+      <file role="canonical-reference">.claude/skills/dataverse-deploy/SKILL.md</file>
+      <file role="canonical-reference">scripts/Test-NativeCreateSurfaces.ps1 (created in task 051)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Dataverse/FieldMapping/RecordRepairPassJob.cs (task 052; counters and logs to read)</file>
+      <file role="modify">projects/field-mapping-server-write-path-r1/notes/ (live-check evidence file, e.g. w5-live-check.md)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="051" status="pending">Ribbon, quick-create and Assign changes plus -Verify.</dependency>
+      <dependency task="052" status="pending">Repair pass job and on-demand trigger, adversarially reviewed.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="skill bff-deploy">Scope: BFF deploy. Follow .claude/skills/bff-deploy/SKILL.md; deploy to dev only; confirm health after deploy.</constraint>
+    <constraint source="root CLAUDE.md §5/§6">Scope: environments. Any environment beyond dev requires explicit owner OK recorded in the task notes; stop and ask instead of proceeding.</constraint>
+    <constraint source="project (forward-only)">Scope: test data. Create test rows only in dev, label them (name prefix) and remove or leave them marked after the check; never touch pre-existing business rows; the pre-go-live row is one created for the check with a createdon earlier than go-live only if the platform allows (otherwise use an existing pre-go-live dev row read-only and verify it is unchanged).</constraint>
+    <constraint source="CLAUDE.md §10">Scope: BFF publish. Record the publish-size delta against a fresh master build per root CLAUDE.md §10.4 and the `dotnet list package --vulnerable --include-transitive` result.</constraint>
+    <constraint source="NFR-04">Scope: evidence. Capture App Insights counters scanned / repaired / no-op / failed for the check window and confirm no new exception class.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Deployment; live verification of the repair pass</topic>
+    <files>
+      <file>.claude/skills/bff-deploy/SKILL.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+      <file>.claude/constraints/azure-deployment.md</file>
+      <file>.claude/constraints/jobs.md</file>
+      <file>.claude/adr/ADR-036-background-job-infrastructure.md</file>
+      <file>docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md</file>
+    </files>
+    <patterns>
+      <pattern name="web-api-client" location=".claude/patterns/dataverse/web-api-client.md">Import / read-back queries for the check.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="0" name="Context + rigor declaration">Declare FULL rigor; confirm 051 and 052 are complete and reviewed; confirm the go-live config value on dev.</step>
+    <step order="1">Deploy the BFF with the bff-deploy skill; confirm health; deploy ribbon and web resources with dataverse-deploy if 051 did not already leave them on dev.</step>
+    <step order="2">Run `Test-NativeCreateSurfaces.ps1 -Verify` on dev; it must exit 0.</step>
+    <step order="3">Import 5 rows natively (data import or direct API as a non-BFF principal) across at least two mapping-target tables; record the exact timestamps.</step>
+    <step order="4">Within 10 minutes verify each row: mapping applied, owner = standard owner, search-index default, stamp. Record elapsed time per row.</step>
+    <step order="5">Wait one more tick (or use the admin trigger): confirm the second pass wrote nothing (counters no-op). Confirm the pre-go-live row is unchanged. Confirm a value set by the importer was not overwritten.</step>
+    <step order="6">Check App Insights: counters, no new exception class; record publish-size delta and CVE result.</step>
+    <step order="7">Ask the owner for explicit OK before any wider rollout; record the answer.</step>
+    <step order="8">Update TASK-INDEX.md: set this task's status to ✅.</step>
+    <step order="9">Document any deviation in projects/field-mapping-server-write-path-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>Any 5xx, any row repaired after more than 10 minutes, any owner mismatch, or any write to a pre-go-live row: STOP, record evidence, and escalate per CLAUDE.md §6; do not retry blindly.</trigger>
+    <trigger>Any request to enable beyond dev: stop and obtain explicit owner OK first.</trigger>
+  </escalation>
+
+  <tools><tool name="bff-deploy">Deploy the BFF to dev</tool><tool name="dataverse-mcp">Read rows to verify (read_query)</tool><tool name="pwsh">Run -Verify</tool></tools>
+
+  <outputs>
+    <output type="docs">projects/field-mapping-server-write-path-r1/notes/w5-live-check.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">5 natively imported rows each have mapping, standard owner, search-index default and stamp within 10 minutes of creation (elapsed time recorded per row).</criterion>
+    <criterion testable="true">A second pass (next tick or admin trigger) writes nothing: counters show no-op for all 5 rows; importer-supplied values are unchanged.</criterion>
+    <criterion testable="true">Negative: a pre-go-live row is unchanged after at least two passes (before/after read-back recorded).</criterion>
+    <criterion testable="true">`Test-NativeCreateSurfaces.ps1 -Verify` exits 0 on dev; App Insights shows counters and no new exception class; publish-size delta and CVE result are recorded.</criterion>
+    <criterion testable="true">Owner decision on any wider rollout is recorded; nothing beyond dev was changed without it; deployment healthy (BFF health 200).</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-24, FR-25, NFR-04, NFR-05. Evidence feeds 062 (docs) and 090 (lessons learned).</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

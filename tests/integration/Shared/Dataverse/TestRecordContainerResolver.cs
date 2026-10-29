@@ -201,8 +201,15 @@ internal static class TestRecordContainerResolver
         /// <summary>The environment does not have the <c>sprk_createdbyperson</c> column on documents (owner round 17).</summary>
         public bool CreatedByPersonColumnMissing { get; init; }
 
-        /// <summary>The Graph creator read throws (Graph unavailable).</summary>
-        public Exception? ItemReadFault { get; init; }
+        /// <summary>The Graph creator read throws (Graph unavailable). Settable so a test can fault a world its helper already built.</summary>
+        public Exception? ItemReadFault { get; set; }
+
+        /// <summary>
+        /// Drives this stamp does NOT own: the creator read refuses them with the ownership guard's own 404
+        /// <c>spe_container_not_owned</c> problem before any item is read, as the real <c>GetItemCreatorAsync</c> does
+        /// (it opens with <c>SpeContainerOwnershipGuard.ForOwnedContainerAsync</c>). Every other drive is owned.
+        /// </summary>
+        public HashSet<string> UnownedDrives { get; } = new(StringComparer.Ordinal);
 
         /// <summary>The resolver is built with NO SharePoint Embedded item reader (a host that registers none).</summary>
         public bool NoItemReader { get; init; }
@@ -219,8 +226,28 @@ internal static class TestRecordContainerResolver
         /// <summary><c>EmailProcessing:DefaultContainerId</c> — an unfiled document's container of last resort (task 166 f1).</summary>
         public string? UnfiledDefaultContainer { get; init; }
 
+        /// <summary>Further configuration the resolver reads (#2151: the declared home containers of unfiled documents).</summary>
+        public Dictionary<string, string?> Settings { get; } = new(StringComparer.Ordinal);
+
         /// <summary>Every app-only UPDATE the built resolver's entity service received (the relocator's re-point).</summary>
         public List<(string Entity, Guid Id, Dictionary<string, object> Fields)> Updates { get; } = new();
+
+        /// <summary>
+        /// #2159 slice 2c: a retrieve returns a COPY of the row, as Dataverse does — so a caller that keeps a row it read sees
+        /// a later write only through what it does to that copy itself. Off by default (the rows are shared).
+        /// </summary>
+        public bool CopiesOnRetrieve { get; set; }
+
+        private static Entity Copy(Entity row)
+        {
+            var copy = new Entity(row.LogicalName, row.Id);
+            foreach (var (column, value) in row.Attributes)
+            {
+                copy[column] = value;
+            }
+
+            return copy;
+        }
 
         /// <summary>
         /// The environment does not have <c>sprk_document.sprk_relocationpending</c> yet (task 166 f1-v1: the relocation
@@ -240,6 +267,23 @@ internal static class TestRecordContainerResolver
         /// </summary>
         public string? FaultQueriesOf { get; set; }
 
+        /// <summary>
+        /// #2159 A2: the Secure Record business unit exists (the name query of
+        /// <c>SecureRecordOwnerTeam.ResolveSecureBusinessUnitAsync</c> finds <see cref="SecureRecordBusinessUnit"/>).
+        /// A row is ISOLATED when its own business unit is it, or its owning team's (<see cref="Teams"/>) is. Unset (the
+        /// default), this environment has none and no row is isolated.
+        /// </summary>
+        public bool HasSecureRecordBusinessUnit { get; set; }
+
+        /// <summary>#2159 A2: TWO business units carry the Secure Record name (ambiguous).</summary>
+        public bool SecureRecordBusinessUnitAmbiguous { get; set; }
+
+        /// <summary>The Secure Record business unit the name query finds.</summary>
+        public static readonly Guid SecureRecordBusinessUnit = Guid.Parse("5ec0be00-0000-4000-8000-000000002159");
+
+        /// <summary>#2159 A2: teams and their business units (a team absent here cannot be read).</summary>
+        public Dictionary<Guid, Guid> Teams { get; } = new();
+
         /// <summary>Every RetrieveMultiple query the entity service answered, in order.</summary>
         public List<QueryExpression> Queries { get; } = new();
 
@@ -255,14 +299,20 @@ internal static class TestRecordContainerResolver
         /// <summary>Every app-only UPDATE faults (the relocator's re-point fails).</summary>
         public Exception? UpdateFault { get; set; }
 
+        /// <summary>#2159 slice 2: a single-row read that faults when this answers an exception for (table, columns).</summary>
+        public Func<string, string[], Exception?>? RetrieveFault { get; set; }
+
         /// <summary>The entity service the last <see cref="Build"/> created — the relocator shares it (task 166 f1).</summary>
         public IGenericEntityService? EntityService { get; private set; }
+
+        /// <summary>#2159 B9: what an item not in <see cref="Items"/> reports (unset: created by the pointer world's creator).</summary>
+        public SpeItemCreator? DefaultItem { get; set; }
 
         /// <summary>The SPE item reader the last <see cref="Build"/> created, over <see cref="Items"/>.</summary>
         public SpeItemCreator? ItemFacts(string drive, string item)
             => Items.TryGetValue((drive, item), out var creator)
                 ? creator
-                : new SpeItemCreator("file.pdf", PointerWorldCreatorObjectId.ToString("D"), PointerWorldBffApplicationId.ToString("D"), Size: 1234, QuickXorHash: "hash-1234");
+                : DefaultItem ?? new SpeItemCreator("file.pdf", PointerWorldCreatorObjectId.ToString("D"), PointerWorldBffApplicationId.ToString("D"), Size: 1234, QuickXorHash: "hash-1234");
 
         /// <summary>A document row created by <paramref name="createdBy"/> and owned in <paramref name="owningBusinessUnit"/>.</summary>
         public static Entity Document(Guid id, Guid? createdBy = null, Guid? owningBusinessUnit = null)
@@ -296,6 +346,11 @@ internal static class TestRecordContainerResolver
             entityService.Setup(s => s.RetrieveAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync((string entity, Guid id, string[] columns, CancellationToken _) =>
                 {
+                    if (RetrieveFault?.Invoke(entity, columns) is { } scripted)
+                    {
+                        throw scripted;
+                    }
+
                     if (entity == "sprk_document" && CreatedByPersonColumnMissing && columns.Contains("sprk_createdbyperson"))
                     {
                         throw new InvalidOperationException(
@@ -316,7 +371,7 @@ internal static class TestRecordContainerResolver
 
                     if (Rows.TryGetValue((entity, id), out var row) || people.TryGetValue((entity, id), out row))
                     {
-                        return row;
+                        return CopiesOnRetrieve ? Copy(row) : row;
                     }
 
                     if (entity == "businessunit" && BusinessUnits.TryGetValue(id, out var unit))
@@ -376,6 +431,34 @@ internal static class TestRecordContainerResolver
                     }
 
                     var collection = new EntityCollection();
+
+                    // #2159 A2: the Secure Record business unit by name; a team's business unit by id.
+                    if (query.EntityName == "businessunit" && query.Criteria.Conditions.Any(c => c.AttributeName == "name"))
+                    {
+                        if (HasSecureRecordBusinessUnit || SecureRecordBusinessUnitAmbiguous)
+                        {
+                            collection.Entities.Add(new Entity("businessunit", SecureRecordBusinessUnit));
+                        }
+
+                        if (SecureRecordBusinessUnitAmbiguous)
+                        {
+                            collection.Entities.Add(new Entity("businessunit", Guid.Parse("5ec0be00-0000-4000-8000-000000002160")));
+                        }
+
+                        return collection;
+                    }
+
+                    if (query.EntityName == "team")
+                    {
+                        var teamId = query.Criteria.Conditions.FirstOrDefault(c => c.AttributeName == "teamid")?.Values.FirstOrDefault();
+                        if (teamId is Guid id && Teams.TryGetValue(id, out var unit))
+                        {
+                            collection.Entities.Add(new Entity("team", id) { ["businessunitid"] = new EntityReference("businessunit", unit) });
+                        }
+
+                        return collection;
+                    }
+
                     if (query.EntityName is "sprk_document" or "sprk_communicationattachment")
                     {
                         // The relocator's and the migration's row queries (task 166 f1 / f1-v1): answered from Rows by the
@@ -460,6 +543,13 @@ internal static class TestRecordContainerResolver
             speFiles.Setup(f => f.GetItemCreatorAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync((string drive, string item, CancellationToken _) =>
                 {
+                    if (UnownedDrives.Contains(drive))
+                    {
+                        throw new Sprk.Bff.Api.Infrastructure.Exceptions.SdapProblemException(
+                            Sprk.Bff.Api.Infrastructure.Graph.SpeContainerOwnershipGuard.NotOwnedErrorCode,
+                            "Not Found", "SharePoint Embedded container not found.", 404);
+                    }
+
                     if (ItemReadFault is not null)
                     {
                         throw ItemReadFault;
@@ -478,6 +568,7 @@ internal static class TestRecordContainerResolver
                     [RecordContainerResolver.ItemIdBoundBackfillCompleteKey] = ItemIdBoundBackfillComplete ? "true" : null,
                     [RecordContainerResolver.UnfiledDefaultContainerKey] = UnfiledDefaultContainer,
                 })
+                .AddInMemoryCollection(Settings)
                 .Build();
 
             EntityService = entityService.Object;

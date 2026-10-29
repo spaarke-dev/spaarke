@@ -394,8 +394,7 @@ public sealed class H12aAiSeedChainHandler : IProvisioningHandler
         var completedAt = DateTimeOffset.UtcNow;
         var startedAt = completedAt - TimeSpan.FromMilliseconds(1);
 
-        run.Status = RunStatus.Running;
-        run.CurrentPhase = HandlerIdentifier; // Reconciler observes + fans out to H14 when H12a/b/c triangle is green.
+        run.MarkPhaseSucceeded(HandlerIdentifier); // Reconciler observes + fans out to H14 when H12a/b/c triangle is green.
         run.CompletedPhases.Add(new CompletedPhase
         {
             Phase = HandlerIdentifier,

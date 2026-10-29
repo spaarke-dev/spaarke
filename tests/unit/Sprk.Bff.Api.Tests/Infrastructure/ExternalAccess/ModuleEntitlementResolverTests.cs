@@ -33,6 +33,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using EntityReference = Microsoft.Xrm.Sdk.EntityReference;
+using Sprk.Bff.Api.Infrastructure.Authentication;
 using Sprk.Bff.Api.Infrastructure.DI;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Tests.Infrastructure.Cache;
@@ -208,6 +209,27 @@ public class ModuleEntitlementResolverTests
 
         result.Should().OnlyHaveUniqueItems();
         result.Should().BeEquivalentTo(new[] { "legal-front-door", "policy-library" });
+    }
+
+    // R3 task 046, finding (e): a home principal's roles claim was issued for the CUSTOMER directory's app registration — it
+    // is not Spaarke's App-Role assignment. It is ignored: exactly the defaults, and the map is never read.
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    public async Task ResolveAsync_WorkforceHomePrincipal_IgnoresTheRolesClaim_GetsExactlyTheDefaults(bool partnerSwitch, bool systemUser)
+    {
+        var map = new[] { new AppRoleModuleMapping { AppRoleName = "AdminUser", ModuleCode = "admin" } };
+        var resolver = new TestResolver(map, partnerSwitch);
+        var home = new ClaimsPrincipal(new ClaimsIdentity(
+            new[] { new Claim("roles", "AdminUser") }, AuthSchemes.WorkforceHome));
+
+        var result = await resolver.ResolveAsync(systemUser ? WorkforceSystemUser() : WorkforceContact(), home);
+
+        result.Should().BeEquivalentTo(new[] { "legal-front-door", "policy-library" });
+        result.Should().NotContain("admin", "a customer directory's role never maps to a Spaarke module");
+        resolver.MapReads.Should().Be(0, "the roles claim of a home principal is never read, so neither is the map");
     }
 
     // (7) CIAM — assigned-work only with the switch off (today's behaviour), never reading the map.

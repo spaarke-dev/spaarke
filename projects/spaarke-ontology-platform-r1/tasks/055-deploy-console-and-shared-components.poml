@@ -4,7 +4,7 @@
     <title>Deploy the Console and shared components to dev</title>
     <phase>5 The worklist surface</phase>
     <gate>059, 043, 035 complete</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Deployment to a shared environment.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -103,4 +103,5 @@
   <notes>spec.md FR-24 through FR-29, FR-51, FR-54, FR-55. push-to-github Step 1.7 requires the real-Dataverse confirmation for Dataverse-querying UI changes. Amended 2026-10-07 per reconciliation B.2 row 055: deps 059 + 043 (and the BFF deploy); one full wizard review verified live. Task 049 (remove Console User Write on sprk_signal) follows this deploy.</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+  <completion date="2026-10-17">Owner browser check 2026-10-17: "seems correct; formal UAT once delivered" (D-154). Dataverse read-back: DR-1066 `67d34ab5-…` (Judgement, Authorized, steps Send budget inquiry + Revise budget taken, confirmed by the owner), budget revision 15:03:06Z (150000), inquiry `sprk_communication` status Send regarding its service request, Signal `b35d4ec2-…` Resolved with the record linked. Earlier review DR-1064 (Revise budget) likewise. Not exercised: the Next step To Do (follow-ons empty) — carried to 105 UAT. Deploy steps: notes/deploy-log.md (2026-10-16).</completion>
 </task>

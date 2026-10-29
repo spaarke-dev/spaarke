@@ -4,7 +4,7 @@
     <title>Decision Record tab in the Console (D-47)</title>
     <phase>5 The worklist surface</phase>
     <gate>058, 043 complete</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>A DataGrid configuration plus one registration, reusing the read-only wizard.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -36,6 +36,7 @@
     <constraint source="ADR-021">Scope: Fluent v9 tokens only; light and dark correct.</constraint>
     <constraint source="owner">COORDINATION WITH uac-r2 (owner 2026-10-07): (1) Before starting, fetch origin/master and re-read the current uac-r2 implementation this task depends on, and name the files (with commit) in the completion record: SecureChildLineage.cs, config/secure-record-owner-role.json, RecordOwnershipResolver (I-6), RecordRouteAccessAuthorizationFilter, CallerRecordAccessProbe, tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.Ledger.cs, ADR-034 and its amendments, ExternalCallerContext (ADR-003), CoreAncestorResolver (FR-26 core-ancestor stamps, D-34). (2) Check uac-r2's open PRs and active work for overlap (gh pr list --state open; the uac-r2 current-task.md and TASK-INDEX in C:\code_files\spaarke-wt-unified-access-control-r2 if present) and run /conflict-check. (3) Reuse uac-r2's mechanisms; never build a parallel one. Any change to uac-r2-owned files (the lineage list, the owner-role config, the ledger) goes through uac-r2's review, with the PR linked in this task. (4) If the uac-r2 code has changed in a way that invalidates this plan, STOP and escalate rather than adapting silently.</constraint>
     <constraint source="project">From task 040 (#1600, 2026-10-10): a NON-secure Decision Record is created owned by the writer with no owningbusinessunit set (unlike SignalWriter's FR-14 path, which sets the matter's BU). Before building the tab, prove live which users can read a non-secure Decision Record (matter member in another BU, Basic User at Deep depth); if the tab would hide records users should see, escalate (a BU or share decision) rather than widening reads in the UI.</constraint>
+    <constraint source="project">ADDED 2026-10-15 from task 059 (#1959 item 2): the worklist route (038) returns, for Closed today and Closed earlier items, the Decision Record the caller can read (steps, note, record number, decided on), so the 058 wizard replays it (`worklistWizardItem.ts` `resolutionFor`). A record the caller cannot read is omitted, not withheld-by-name.</constraint>
   </constraints>
 
   <knowledge>
@@ -95,6 +96,8 @@
     <criterion testable="true">Given a row, when Open is clicked, then the item opens in the decision wizard read-only.</criterion>
     <criterion testable="true">Negative: no row offers edit or delete.</criterion>
   </acceptance-criteria>
+
+  <completion date="2026-10-16">PR #2014 merged `1931b405c` into docs/ontology-platform-design. GET /api/v1/signals/worklist returns `decision` on closed items and a 90-day `set=decided` (Resolved + Acknowledged-with-record); every Decision Record is read as the caller AND must be created by the ontology writer (forgery guard; 049 later removes user Create); 403 omits with a Warning, 401/faults 503; "decided by" = sprk_confirmedby (D-145b). DecisionRecordsWidget (All/Judgement/Routine/Dismissal, Open read-only with replay) as the `decisionRecords` LegalWorkspace section; layout row via scripts/seed-decision-records-workspace-layout.ps1 (run after the Console deploys from master). Opus review (2 F1, F2, F3) fixed in one round, re-checked. Known limits: DI-104 #2015 (record-first read: earlier reviews of a Signal, gate DRs); Do-lane decided items follow the current assignee; K2/K3 in notes/045-decision-record-tab.md.</completion>
 
   <notes>Reconciliation W-18; D-47 (O-8 decided).</notes>
 

@@ -33,12 +33,17 @@ public sealed class EmailDraftToolHandlerTests : TypedToolHandlerTestFixture
     private readonly Mock<IDataverseUserClient> _dataverse = new();
     private readonly Mock<Sprk.Bff.Api.Services.Ai.PublicContracts.IEmailDraftAi> _emailDraftAi = new();
 
+    /// <summary>Task 065 fix round 6 (F1): the communication-visibility seam; default = an internal caller reading a shareable email.</summary>
+    private (Sprk.Bff.Api.Services.Communication.CommunicationThreadReadService Service, Microsoft.AspNetCore.Http.IHttpContextAccessor Accessor) Visibility { get; set; } =
+        new Sprk.Bff.Api.Tests.TestInfrastructure.CommunicationVisibilityFixtures().Build();
+
     private EmailDraftToolHandler CreateHandler() =>
         new(_dataverse.Object, _emailDraftAi.Object,
             Sprk.Bff.Api.Tests.TestInfrastructure.CoreAncestorResolverFixtures.Inert(),
             CreateLogger<EmailDraftToolHandler>(),
             new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(),
-            new Mock<Spaarke.Dataverse.IFieldMappingDataverseService>(MockBehavior.Strict).Object);
+            new Mock<Spaarke.Dataverse.IFieldMappingDataverseService>(MockBehavior.Strict).Object,
+            Visibility.Service, Visibility.Accessor);
 
     private static AnalysisTool BuildDraftTool() =>
         BuildAnalysisTool(handlerClass: nameof(EmailDraftToolHandler), name: "SYS-Email Draft");

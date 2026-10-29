@@ -9,7 +9,36 @@ namespace Sprk.Bff.Api.Services.Signals.Actions;
 public sealed record ResolvedDecisionPlan(
     IReadOnlyList<DecisionActionDefinition> Actions,
     IReadOnlyList<DecisionActionDefinition> NextSteps,
-    IReadOnlyList<DecisionDismissalReason> DismissalReasons);
+    IReadOnlyList<DecisionDismissalReason> DismissalReasons)
+{
+    /// <summary>The catalog code of Mark complete.</summary>
+    public const string MarkCompleteCode = "mark-complete";
+
+    /// <summary>
+    /// Task 154 (D-111, 059 review): the plan for an inquiry's "Record the outcome" To Do. Mark complete is removed, because completing
+    /// that To Do without the inquiry's disposition leaves the inquiry open with nobody prompted again; it is completed by 071's
+    /// disposition route. Every other action keeps its place. The ONE reduction: the plan route and the commit route both apply it.
+    /// </summary>
+    public ResolvedDecisionPlan WithoutMarkComplete() =>
+        this with { Actions = Actions.Where(a => a.Code != MarkCompleteCode).ToList() };
+
+    /// <summary>The catalog code of Revise budget.</summary>
+    public const string ReviseBudgetCode = "revise-budget";
+
+    /// <summary>The catalog code of Create budget, the substitution-only action (task 161, D-180).</summary>
+    public const string CreateBudgetCode = "create-budget";
+
+    /// <summary>
+    /// Task 161 (D-180): the plan for a matter with NO active budget. Revise budget has nothing to revise, so Create budget takes its
+    /// place: same position, hence the same recommended flag. Every other action is untouched, and a plan without Revise budget is
+    /// returned as it is. The ONE substitution: the plan route and the commit route both apply it
+    /// (<see cref="SignalCoreRecordAccess.WithCreateBudgetWhenNoneAsync"/>), so the client and the server agree on the offered actions.
+    /// </summary>
+    public ResolvedDecisionPlan WithCreateBudgetInsteadOfRevise() =>
+        Actions.Any(a => a.Code == ReviseBudgetCode) && DecisionActionCatalog.TryGet(CreateBudgetCode, out var create)
+            ? this with { Actions = Actions.Select(a => a.Code == ReviseBudgetCode ? create : a).ToList() }
+            : this;
+}
 
 /// <summary>Exactly one of <see cref="Plan"/> / <see cref="RefusalReason"/> is set.</summary>
 public sealed record DecisionPlanResolution(ResolvedDecisionPlan? Plan, string? RefusalReason)
@@ -121,7 +150,8 @@ public sealed class DecisionPlanService
                 return Refused(DecisionPlanRefusalReason.UnknownAction);
             }
 
-            if (action.PlanLane != lane)
+            // Task 161 (D-180): a substitution-only action is never authored; the routes swap it in. A stored plan naming it is refused.
+            if (action.PlanLane != lane || action.SubstitutionOnly)
             {
                 return Refused(DecisionPlanRefusalReason.ActionNotAllowed);
             }

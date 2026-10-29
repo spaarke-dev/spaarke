@@ -3,7 +3,7 @@
  *
  * Placed at the package-root `test/` directory (not `src/components/__tests__/`) to match
  * this package's established test-file convention — see the sibling
- * `NarrativeCitedText.test.tsx` / `NarrativeBullet.test.tsx` / `HighPrioritySection.badges.test.ts`,
+ * `NarrativeCitedText.test.tsx` / `NarrativeBullet.test.tsx`,
  * all of which live here rather than under `src/components/__tests__/`. This is a deliberate
  * deviation from the task POML's suggested `<outputs>` path, noted per the directional
  * step-mode allowance (task-execute Step 8.5 / root CLAUDE.md §8.5).
@@ -19,7 +19,7 @@
  *     affordance ever renders, confirming the "doesn't exist" claim rather than a "disabled"
  *     one).
  *   - A resolving anchor (itemId present) is wrapped as a clickable Link pointing at the
- *     resolved entityType/entityId — matched in whichever of summary/keyTakeaways/topAction
+ *     resolved entityType/entityId — matched in whichever of summary/keyTakeaways
  *     contains the anchor text.
  *   - Absent/empty `itemRefs` or `resolvableItems` never crashes rendering (safe defaults).
  */
@@ -33,14 +33,13 @@ import type { TldrSectionProps, TldrResolvableItem } from '../src/components/Tld
 
 // NOTE: "Acme Matter" appears ONLY in `summary` by default so tests using `getByRole`
 // (singular) don't collide with multiple matches — dedicated tests below explicitly set
-// keyTakeaways/topAction to exercise those fields independently.
+// keyTakeaways to exercise that field independently.
 function baseTldr(
   overrides: Partial<NonNullable<TldrSectionProps['tldr']>> = {}
 ): NonNullable<TldrSectionProps['tldr']> {
   return {
     summary: 'You have 2 notifications today, including a follow-up on Acme Matter.',
     keyTakeaways: ['Review the overdue filings.'],
-    topAction: 'Check your notifications.',
     categoryCount: 2,
     priorityItemCount: 1,
     ...overrides,
@@ -117,7 +116,6 @@ describe('TldrSection — binary anchor resolution (R5 task 014 / FR-A5)', () =>
       tldr: baseTldr({
         summary: 'You have 2 notifications today.',
         keyTakeaways: ['Follow up needed on Acme Matter.'],
-        topAction: '',
         itemRefs: [{ anchorText: 'Acme Matter', itemId: 'item-1' }],
       }),
       resolvableItems: RESOLVABLE,
@@ -126,18 +124,15 @@ describe('TldrSection — binary anchor resolution (R5 task 014 / FR-A5)', () =>
     expect(screen.getByRole('link', { name: /Acme Matter/i })).toBeInTheDocument();
   });
 
-  it('resolves an anchor that only appears in topAction', () => {
-    renderTldr({
-      tldr: baseTldr({
-        summary: 'You have 2 notifications today.',
-        keyTakeaways: [],
-        topAction: 'Review the filing for Acme Matter.',
-        itemRefs: [{ anchorText: 'Acme Matter', itemId: 'item-1' }],
-      }),
-      resolvableItems: RESOLVABLE,
-    });
+  it('renders no "Top action" and shows no text from a legacy topAction field (task 062, FR-32)', () => {
+    // A stale response (or a deployed row not yet re-synced) may still carry `topAction`; the section never renders it.
+    const stale = { ...baseTldr(), topAction: 'Review the filing for Acme Matter.' } as unknown as NonNullable<
+      TldrSectionProps['tldr']
+    >;
+    renderTldr({ tldr: stale });
 
-    expect(screen.getByRole('link', { name: /Acme Matter/i })).toBeInTheDocument();
+    expect(screen.queryByText(/top action/i)).toBeNull();
+    expect(screen.queryByText(/Review the filing for Acme Matter/)).toBeNull();
   });
 
   it('renders normally with no itemRefs at all (backward compatible with pre-R5-task-014 responses)', () => {
@@ -185,14 +180,15 @@ describe('TldrSection — no groundedness-score warning/withhold path exists (FR
     expect(screen.getAllByText('AI Insight')).toHaveLength(1);
   });
 
-  it('a dropped anchor does not change categoryCount/priorityItemCount footer rendering', () => {
+  it('a dropped anchor does not change the categoryCount footer rendering', () => {
     renderTldr({
       tldr: baseTldr({
         itemRefs: [{ anchorText: 'Acme Matter', itemId: 'item-does-not-exist' }],
       }),
       resolvableItems: RESOLVABLE,
     });
-    expect(screen.getByText(/2 categories, 1 priority items/)).toBeInTheDocument();
+    expect(screen.getByText(/2 categories/)).toBeInTheDocument();
+    expect(screen.queryByText(/priority items/)).toBeNull();
   });
 });
 

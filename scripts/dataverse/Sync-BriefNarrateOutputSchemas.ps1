@@ -29,6 +29,13 @@
 .PARAMETER DryRun
     Print what would be PATCHed without applying.
 
+.PARAMETER IncludeSystemPrompt
+    Also PATCH sprk_systemprompt on the BRIEF-NARRATE-TLDR row with its source action JSON (minus every key that starts
+    with an underscore, at any depth: _dataverseRow and every _comment), which is how the row stores its JPS document. Ontology platform r1 task 062 (FR-32)
+    removed the model-chosen topAction from BRIEF-NARRATE-TLDR: the repo JSON is already changed, but the
+    deployed row keeps asking for a top action until this switch is run. Without it the script patches
+    sprk_outputschemajson only, as before.
+
 .EXAMPLE
     ./Sync-BriefNarrateOutputSchemas.ps1
     Sync schemas on spaarkedev1.
@@ -39,7 +46,8 @@
 #>
 param(
     [string]$DataverseUrl = ($env:DATAVERSE_URL ?? 'https://spaarkedev1.crm.dynamics.com'),
-    [switch]$DryRun
+    [switch]$DryRun,
+    [switch]$IncludeSystemPrompt
 )
 
 $ErrorActionPreference = 'Stop'
@@ -51,7 +59,8 @@ $Actions = @(
         Code     = 'BRIEF-NARRATE-TLDR'
         Id       = 'ce299eb4-fc70-f111-ab0e-7ced8ddc4cc6'
         Source   = 'projects/spaarke-daily-update-service/notes/playbooks/actions/brief-narrate-tldr.action.json'
-        Required = @('summary', 'keyTakeaways', 'topAction', 'categoryCount', 'priorityItemCount')
+        Required = @('summary', 'keyTakeaways', 'categoryCount', 'priorityItemCount')
+        Prompt   = $true   # -IncludeSystemPrompt applies to this row only (task 062); the CHANNEL row's prompt is left as deployed
     },
     @{
         Code     = 'BRIEF-NARRATE-CHANNEL'
@@ -71,6 +80,26 @@ function Convert-JpsTypeToSchemaType {
         'array'   { return 'array' }
         default   { throw "Unknown JPS field type '$JpsType' — extend Convert-JpsTypeToSchemaType." }
     }
+}
+
+# The text stored in sprk_systemprompt: the source JPS document with EVERY key that starts with '_' removed, at any depth.
+# '_dataverseRow' (the row mapping) and every '_comment' are authoring notes for people; some of them name the example
+# entities the prompt must never contain (examples[0]._comment names three), and the model would read them as context.
+function Remove-UnderscoreKeys {
+    param($Node)
+    if ($Node -is [System.Collections.IDictionary]) {
+        $out = [ordered]@{}
+        foreach ($k in $Node.Keys) {
+            if (([string]$k).StartsWith('_')) { continue }
+            $out[$k] = Remove-UnderscoreKeys -Node $Node[$k]
+        }
+        return $out
+    }
+    if ($Node -is [System.Collections.IList]) {
+        $items = foreach ($item in $Node) { , (Remove-UnderscoreKeys -Node $item) }
+        return , @($items)
+    }
+    return $Node
 }
 
 # Build a JSON Schema draft-07 object from a JPS action's output.fields[] array
@@ -137,15 +166,26 @@ foreach ($a in $Actions) {
     $schema = Build-SchemaFromJpsAction -ActionJson $actionJson -Required $a.Required
     $schemaJson = $schema | ConvertTo-Json -Depth 25 -Compress
 
+    $promptBody = $null
+    if ($IncludeSystemPrompt -and $a.Prompt) {
+        $promptBody = (Remove-UnderscoreKeys -Node $actionJson) | ConvertTo-Json -Depth 25
+    }
+
     Write-Host "  $($a.Code) ($($a.Id)) — $($schemaJson.Length) chars"
     if ($DryRun) {
-        Write-Host "    [DryRun] Would PATCH sprk_outputschemajson" -ForegroundColor Yellow
+        Write-Host "    [DryRun] Would PATCH sprk_outputschemajson$(if ($null -ne $promptBody) { ' and sprk_systemprompt' })" -ForegroundColor Yellow
         Write-Host "    $schemaJson" -ForegroundColor DarkGray
+        if ($null -ne $promptBody) {
+            Write-Host "    [DryRun] sprk_systemprompt body ($($promptBody.Length) chars), exactly as it would be written:" -ForegroundColor Yellow
+            Write-Host $promptBody -ForegroundColor DarkGray
+        }
         continue
     }
 
     try {
-        $body = @{ sprk_outputschemajson = $schemaJson } | ConvertTo-Json -Compress
+        $patch = @{ sprk_outputschemajson = $schemaJson }
+        if ($null -ne $promptBody) { $patch['sprk_systemprompt'] = $promptBody }
+        $body = $patch | ConvertTo-Json -Compress
         Invoke-RestMethod -Uri "$ApiBase/sprk_analysisactions($($a.Id))" -Headers $headers -Method Patch -Body $body | Out-Null
         Write-Host "    PATCHED" -ForegroundColor Green
     } catch {

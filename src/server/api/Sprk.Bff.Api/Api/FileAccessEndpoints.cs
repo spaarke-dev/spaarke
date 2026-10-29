@@ -1,12 +1,10 @@
 using System.IO;
 using System.Security.Claims;
 using System.Text.Json;
-using Microsoft.Extensions.Options;
 using Spaarke.Core.Auth;
 using Spaarke.Core.Utilities;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.Filters;
-using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Infrastructure.Authentication;
 using Sprk.Bff.Api.Infrastructure.Exceptions;
 using Sprk.Bff.Api.Infrastructure.Graph;
@@ -31,6 +29,11 @@ namespace Sprk.Bff.Api.Api;
 /// (<c>OfficeEditAccessService</c>); a business-unit container's internal users are standing writers
 /// (<c>SpeContainerMembershipSyncJob</c>).
 ///
+/// The <c>POST /{documentId}/share-link</c> route was RETIRED on 2026-10-16 (unified-access-control-r2; #1350, #1752):
+/// Graph refuses <c>createLink</c> in SharePoint Embedded containers, so it answered 502 for every document; no client
+/// called it; and a link that did work would reach people outside Dataverse's decision (Secure, No Access). Spec FR-11
+/// is met by option (b), "disabled". Document links in email are the Spaarke record link (word-add-in task 098).
+///
 /// References:
 /// - Preview: https://learn.microsoft.com/en-us/graph/api/driveitem-preview
 /// - Content: https://learn.microsoft.com/en-us/graph/api/driveitem-get-content
@@ -38,150 +41,6 @@ namespace Sprk.Bff.Api.Api;
 /// </summary>
 public static class FileAccessEndpoints
 {
-    /// <summary>Share-link refusal: the document belongs to a SECURE record (owner round 72 item 2).</summary>
-    internal const string ShareLinkSecureRecordCode = "sdap.access.deny.share_link_secure_record";
-
-    /// <summary>Share-link refusal: the document belongs to a RESTRICTED record (owner round 72 item 2).</summary>
-    internal const string ShareLinkRestrictedRecordCode = "sdap.access.deny.share_link_restricted_record";
-
-    /// <summary>Share-link refusal: the document row could not be read, so its record's protection is unknown.</summary>
-    internal const string ShareLinkProtectionUnverifiableCode = "sdap.access.deny.share_link_protection_unverifiable";
-
-    private const string ShareLinkSecureDetail =
-        "Sharing links cannot be created for documents of a secure record: a link reaches people outside the record's "
-        + "access list. Share the record with the person instead.";
-
-    private const string ShareLinkRestrictedDetail =
-        "Sharing links cannot be created for documents of a restricted record. Share the record with the person instead.";
-
-    /// <summary>The record types that carry sprk_issecure / sprk_accesspermission (the share-link refusal reads them).</summary>
-    private static readonly HashSet<string> ShareLinkRootTypes = new(StringComparer.Ordinal)
-    {
-        "sprk_project", "sprk_matter", "sprk_workassignment",
-    };
-
-    /// <summary>
-    /// Why a sharing link may NOT be minted for <paramref name="documentId"/> — its record is SECURE or RESTRICTED (owner
-    /// round 72 item 2; task 171 adversarial findings 10 and V2) — or <see langword="null"/> for a standard document.
-    /// </summary>
-    /// <remarks>
-    /// <para><b>Which records.</b> Every record the document is filed to, resolved to its project / matter / work
-    /// assignment: a ROOT link directly; any other link (communication — every email archive and attachment carries only
-    /// <c>sprk_relatedcommunication</c> — event, invoice, to-do, agreement, …) through
-    /// <see cref="CoreAncestorResolver.ResolveStampsAsync"/>, the one-hop ancestor rule the access model already uses (a
-    /// communication inherits its parent's access permission). Party links (contact, organization) carry no protection.</para>
-    /// <para><b>Which flags.</b> <see cref="ExternalParticipationService.GetRootRecordFlagsAsync"/> for every such root (an
-    /// id it cannot read comes back secure AND restricted), plus <c>RecordContainerResolver.DeriveDocumentContainersAsync</c>
-    /// <c>.IsSecure</c>.</para>
-    /// <para><b>Fail closed.</b> An unreadable row, an ancestor read that ERRORS, or — when the document has a child link —
-    /// a derivation that cannot be decided answers <see cref="ShareLinkProtectionUnverifiableCode"/>. A document whose
-    /// links are all roots (or none) keeps the earlier behaviour: an undecided derivation adds no refusal there, because
-    /// the root flags already decided every record it is filed to.</para>
-    /// </remarks>
-    internal static async Task<(string ReasonCode, string Detail)?> ShareLinkProtectionRefusalAsync(
-        Guid documentId,
-        Sprk.Bff.Api.Infrastructure.Dataverse.RecordContainerResolver containerResolver,
-        IGenericEntityService entityService,
-        Sprk.Bff.Api.Infrastructure.ExternalAccess.ExternalParticipationService participations,
-        Sprk.Bff.Api.Services.Dataverse.CoreAncestorResolver ancestors,
-        ILogger logger,
-        CancellationToken ct)
-    {
-        var row = await entityService
-            .RetrieveAsync("sprk_document", documentId, DocumentLinkFields.LogicalNames.ToArray(), ct)
-            .ConfigureAwait(false);
-        if (row is null)
-        {
-            return Unverifiable("the document row could not be read");
-        }
-
-        var roots = new HashSet<(string Entity, Guid Id)>();
-        var hasChildLink = false;
-        foreach (var link in DocumentLinkFields.All)
-        {
-            if (row.GetAttributeValue<Microsoft.Xrm.Sdk.EntityReference>(link.LogicalName) is not { Id: var linkedId }
-                || linkedId == Guid.Empty)
-            {
-                continue;
-            }
-
-            if (ShareLinkRootTypes.Contains(link.TargetEntityLogicalName))
-            {
-                roots.Add((link.TargetEntityLogicalName, linkedId));
-                continue;
-            }
-
-            var resolved = await ancestors.ResolveStampsAsync(link.TargetEntityLogicalName, linkedId, ct).ConfigureAwait(false);
-            switch (resolved.Status)
-            {
-                case Sprk.Bff.Api.Services.Dataverse.CoreAncestorStatus.Error:
-                    return Unverifiable($"the record behind {link.LogicalName} could not be resolved ({resolved.Error})");
-                case Sprk.Bff.Api.Services.Dataverse.CoreAncestorStatus.Unclassified:
-                    // A party (contact, organization) or a non-content type: no protection flag applies to it.
-                    continue;
-                default:
-                    // A CHILD (Derived / NoAncestor) is what makes an undecided derivation unverifiable; a core target that
-                    // is not a flag-bearing root (a service request) carries no protection flag of its own.
-                    hasChildLink |= resolved.Status is Sprk.Bff.Api.Services.Dataverse.CoreAncestorStatus.Derived
-                        or Sprk.Bff.Api.Services.Dataverse.CoreAncestorStatus.NoAncestor;
-                    foreach (var stamp in resolved.Stamps)
-                    {
-                        if (ShareLinkRootTypes.Contains(stamp.EntityType) && stamp.RecordId != Guid.Empty)
-                        {
-                            roots.Add((stamp.EntityType, stamp.RecordId));
-                        }
-                    }
-
-                    break;
-            }
-        }
-
-        foreach (var group in roots.GroupBy(r => r.Entity, StringComparer.Ordinal))
-        {
-            var ids = group.Select(r => r.Id).ToArray();
-            // Task 174 (owner round 84): EFFECTIVE flags — a record under a secure or Restricted parent refuses a link too.
-            var flags = await participations.GetEffectiveRootRecordFlagsAsync(group.Key, ids, ct).ConfigureAwait(false);
-            foreach (var id in ids)
-            {
-                // Every id asked about is in the map; an unreadable one is secure AND restricted (fail closed).
-                var f = flags.TryGetValue(id, out var known) ? known : Sprk.Bff.Api.Infrastructure.ExternalAccess.RootRecordFlags.Unreadable;
-                if (f.IsSecure || f.IsRestricted)
-                {
-                    logger.LogInformation(
-                        "CreateShareLink REFUSED | DocumentId: {DocumentId} | {Entity} {RecordId} is {What}.",
-                        documentId, group.Key, id,
-                        f.IsUnreadable ? "unreadable (fail closed)" : f.IsSecure ? "secure" : "restricted");
-                    return f.IsSecure && !f.IsRestricted
-                        ? (ShareLinkSecureRecordCode, ShareLinkSecureDetail)
-                        : (ShareLinkRestrictedRecordCode, ShareLinkRestrictedDetail);
-                }
-            }
-        }
-
-        var derivation = await containerResolver.DeriveDocumentContainersAsync(documentId, ct).ConfigureAwait(false);
-        if (derivation.Decided && derivation.IsSecure)
-        {
-            logger.LogInformation(
-                "CreateShareLink REFUSED | DocumentId: {DocumentId} | the document belongs to a secure record ({Reason}).",
-                documentId, derivation.Reason);
-            return (ShareLinkSecureRecordCode, ShareLinkSecureDetail);
-        }
-
-        if (!derivation.Decided && hasChildLink)
-        {
-            return Unverifiable($"the document's container could not be derived ({derivation.Reason})");
-        }
-
-        return null;
-
-        (string ReasonCode, string Detail) Unverifiable(string why)
-        {
-            logger.LogWarning("CreateShareLink REFUSED | DocumentId: {DocumentId} | protection unverifiable: {Why}.", documentId, why);
-            return (ShareLinkProtectionUnverifiableCode,
-                "Whether this document's record allows a sharing link could not be determined, so none was created.");
-        }
-    }
-
     public static IEndpointRouteBuilder MapFileAccessEndpoints(this IEndpointRouteBuilder app)
     {
         var docs = app.MapGroup("/api/documents").RequireAuthorization();
@@ -260,34 +119,6 @@ public static class FileAccessEndpoints
             .Produces(StatusCodes.Status409Conflict)
             .Produces(StatusCodes.Status500InternalServerError);
 
-        // Recipient-openable SPE sharing link for a document (email-communication-solution-r5 R2 item
-        // 12). Minted APP-ONLY since task 171, after the "share" gate below and the pointer check. Used by the
-        // email composer's "Link" attachments so an emailed link opens the actual file (incl. for external recipients).
-        //
-        // Per-document authorization (unified-access-control-r2 task 072, spec FR-01). This was the ONE
-        // route on this group with no filter — and the one that mints a credential. Its authority was the
-        // caller's container-scoped OBO access, which is coarser than per-document Dataverse rights: the
-        // exact coarseness the id-keyed routes in this file exist to close (see the header comment).
-        //
-        // "share", not "read" like the eight siblings: those return content to a caller the platform can
-        // still identify and revoke. This one mints a URL that OUTLIVES revocation. Rationale + the
-        // precedent it follows (driveitem.createlink / share_document, both already Share) are recorded on
-        // the ["share"] entry in OperationAccessPolicy.
-        docs.MapPost("/{documentId}/share-link", CreateShareLink)
-            .AddDocumentAuthorizationFilter("share")
-            .WithName("CreateDocumentShareLink")
-            .WithTags("File Access")
-            .WithDescription("Create a recipient-openable SPE sharing link (Graph createLink) for a document. "
-                           + "Requires Share on the document. Organization-scoped by default; set "
-                           + "allowExternalRecipients=true for an anonymous link. Always expires.")
-            .Produces<ShareLinkResponse>(StatusCodes.Status200OK)
-            .Produces(StatusCodes.Status400BadRequest)
-            .Produces(StatusCodes.Status401Unauthorized)
-            .Produces(StatusCodes.Status403Forbidden)
-            .Produces(StatusCodes.Status404NotFound)
-            .Produces(StatusCodes.Status409Conflict)
-            .Produces(StatusCodes.Status502BadGateway);
-
         docs.MapGet("/{documentId}/view-url", GetViewUrl)
             .AddDocumentAuthorizationFilter("read")
             .WithName("GetDocumentViewUrl")
@@ -359,7 +190,7 @@ public static class FileAccessEndpoints
         //      answering 403 with no metadata when the caller may not read the record.
         // The handler runs only after (2) allows, and it is the only place document metadata enters a response.
         //
-        // No rate-limit policy, matching the nine sibling routes in this group: the pane calls this once per open,
+        // No rate-limit policy, matching the eight sibling routes in this group: the pane calls this once per open,
         // the same cadence as open-links.
         docs.MapPost("/resolve-identity", ResolveIdentity)
             .AddEndpointFilter<DocumentUrlIdentityFilter>()
@@ -402,11 +233,18 @@ public static class FileAccessEndpoints
         // and to which record? The keys travel in the body (they identify a message in the caller's mailbox).
         //
         // Same two-filter shape as resolve-identity, and the order is the design:
-        //   1. DocumentEmailIdentityFilter — keys → the NEWEST saved .eml sprk_document (sprk_isemailarchive = true,
-        //      sprk_emailmessageid = either key; app-only read). None: it returns 200 {resolved:false,
-        //      reason:"not_saved"} itself. Otherwise it writes that id into the route values as `documentId`.
-        //   2. DocumentAuthorizationFilter("read") — 403 with no metadata when the caller may not read THAT row. An older
-        //      copy the caller could read is not searched (no oracle; one authorization per request).
+        //   1. DocumentEmailIdentityFilter — keys → the NEWEST saved .eml sprk_document (sprk_isemailarchive = true, AND
+        //      sprk_emailmessageid = either key OR — task 132 — its sprk_relatedcommunication's sprk_internetmessageid =
+        //      the RFC id, which is how mailbox-captured and Spaarke-sent archives are found; one app-only query). None:
+        //      it returns 200 {resolved:false, reason:"not_saved"} itself. Otherwise it writes that id into the route
+        //      values as `documentId`.
+        //   2. DocumentAuthorizationFilter("read") — refuses when the caller may not read THAT row (no right, or hidden by
+        //      the external document narrowing). That refusal never reaches the caller as such: filter 1 folds it into the
+        //      200 not_saved answer, identical to no match, because the keys are caller-supplied and (task 132) the match
+        //      covers captured and Spaarke-sent mail — a distinct refusal would be an existence signal. An older copy the
+        //      caller could read is not searched (one authorization per request).
+        // Task 132: a captured archive carries no direct slot; its record is the communication's regarding. That record is
+        // shown only when the caller may read it (BuildIdentityResponseAsync, shared by all three identity routes).
         // No rate-limit policy, matching the sibling routes: the pane calls this once per open and after a save.
         docs.MapPost("/resolve-email-identity", ResolveEmailIdentity)
             .AddEndpointFilter<DocumentEmailIdentityFilter>()
@@ -414,12 +252,11 @@ public static class FileAccessEndpoints
             .WithName("ResolveEmailDocumentIdentity")
             .WithTags("File Access")
             .WithDescription("Find the saved Spaarke document (.eml) of an Outlook email by its message id. " +
-                "resolved=false with reason not_saved (200) means it is not saved; 403 means the newest saved copy " +
-                "is not readable by the caller; 503 means it could not be determined.")
+                "resolved=false with reason not_saved (200) means it is not saved or not readable by the caller (the " +
+                "two are deliberately indistinguishable); 503 means it could not be determined.")
             .Produces<DocumentIdentityResponse>(StatusCodes.Status200OK)
             .Produces(StatusCodes.Status400BadRequest)
             .Produces(StatusCodes.Status401Unauthorized)
-            .Produces(StatusCodes.Status403Forbidden)
             .Produces(StatusCodes.Status503ServiceUnavailable);
 
         return app;
@@ -434,12 +271,14 @@ public static class FileAccessEndpoints
         /// this method now also resolves: the access model treats record access as equivalent to document access
         /// (see <c>DocumentUrlIdentityResolution.ResolveRelatedRecordDisplayAsync</c> and
         /// <c>notes/026-slot-scope-decision.md</c> §6), so a SECOND authorization check on the related record
-        /// itself would be redundant, not defense-in-depth. <paramref name="request"/> is bound here so the filter
-        /// can read it from the invocation arguments.
+        /// itself would be redundant, not defense-in-depth. The exception is a record DERIVED through the document's
+        /// communication (task 132, §6a), which <c>BuildIdentityResponseAsync</c> checks for the caller before showing it.
+        /// <paramref name="request"/> is bound here so the filter can read it from the invocation arguments.
         /// </summary>
         static async Task<IResult> ResolveIdentity(
             ResolveDocumentIdentityRequest? request,
             IGenericEntityService dataverse,
+            [Microsoft.AspNetCore.Mvc.FromServices] Sprk.Bff.Api.Infrastructure.ExternalAccess.CallerRecordAccessProbe callerAccessProbe,
             ILogger<Program> logger,
             HttpContext context,
             CancellationToken ct)
@@ -452,18 +291,20 @@ public static class FileAccessEndpoints
                     "resolve-identity reached its handler without a filter-resolved identity.");
             }
 
-            return TypedResults.Ok(await BuildIdentityResponseAsync(identity, dataverse, logger, ct));
+            return TypedResults.Ok(await BuildIdentityResponseAsync(identity, dataverse, callerAccessProbe, context, logger, ct));
         }
 
         /// <summary>
         /// POST /api/documents/resolve-email-identity (task 120). Reached only after
         /// <see cref="DocumentEmailIdentityFilter"/> found the email's saved <c>.eml</c> AND
         /// <see cref="DocumentAuthorizationFilter"/> allowed <c>read</c> on it; like <c>ResolveIdentity</c> it performs
-        /// no access check of its own (ADR-008). <paramref name="request"/> is bound so the filter can read it.
+        /// no access check on the DOCUMENT (ADR-008) — only the derived-record check of task 132, in
+        /// <c>BuildIdentityResponseAsync</c>. <paramref name="request"/> is bound so the filter can read it.
         /// </summary>
         static async Task<IResult> ResolveEmailIdentity(
             ResolveEmailIdentityRequest? request,
             IGenericEntityService dataverse,
+            [Microsoft.AspNetCore.Mvc.FromServices] Sprk.Bff.Api.Infrastructure.ExternalAccess.CallerRecordAccessProbe callerAccessProbe,
             ILogger<Program> logger,
             HttpContext context,
             CancellationToken ct)
@@ -476,7 +317,7 @@ public static class FileAccessEndpoints
                     "resolve-email-identity reached its handler without a filter-resolved identity.");
             }
 
-            return TypedResults.Ok(await BuildIdentityResponseAsync(identity, dataverse, logger, ct));
+            return TypedResults.Ok(await BuildIdentityResponseAsync(identity, dataverse, callerAccessProbe, context, logger, ct));
         }
 
         /// <summary>
@@ -488,7 +329,9 @@ public static class FileAccessEndpoints
         static async Task<IResult> GetDocumentIdentity(
             string documentId,
             IGenericEntityService dataverse,
+            [Microsoft.AspNetCore.Mvc.FromServices] Sprk.Bff.Api.Infrastructure.ExternalAccess.CallerRecordAccessProbe callerAccessProbe,
             ILogger<Program> logger,
+            HttpContext context,
             CancellationToken ct)
         {
             if (!Guid.TryParse(documentId, out var docGuid))
@@ -512,22 +355,56 @@ public static class FileAccessEndpoints
                     404);
             }
 
-            return TypedResults.Ok(await BuildIdentityResponseAsync(identity, dataverse, logger, ct));
+            return TypedResults.Ok(await BuildIdentityResponseAsync(identity, dataverse, callerAccessProbe, context, logger, ct));
         }
 
         /// <summary>
-        /// The resolved-identity response both identity routes return — extracted from <c>ResolveIdentity</c> by task
-        /// 112 so the URL and id routes share one body (names, related record, display name and number). Call it only
-        /// after the route's <see cref="DocumentAuthorizationFilter"/> has allowed the caller: this is where document
-        /// metadata enters a response.
+        /// The resolved-identity response all three identity routes return — extracted from <c>ResolveIdentity</c> by
+        /// task 112 so the routes share one body (names, related record, display name and number). Call it only after the
+        /// route's <see cref="DocumentAuthorizationFilter"/> has allowed the caller: this is where document metadata
+        /// enters a response.
         /// </summary>
+        /// <remarks>
+        /// Task 132: a document with no direct slot but a communication (a mailbox-captured or Spaarke-sent archive) shows
+        /// the communication's record — DERIVED, so the document's authorization does not cover it (an external
+        /// participant may read the email without reading the matter; <c>notes/026-slot-scope-decision.md</c> §6a). It is
+        /// shown only when the caller's own rights on it include Read, asked through the same
+        /// <see cref="Sprk.Bff.Api.Infrastructure.ExternalAccess.CallerRecordAccessProbe"/> behind
+        /// <see cref="RecordRouteAccessAuthorizationFilter"/>. Not readable, an unmapped type, or a failed check: no card,
+        /// and the rest of this 200 answer is unchanged — never a 403 or 503 for the whole answer. When the communication
+        /// IS filed but the card is left out for one of those reasons, the answer says so
+        /// (<see cref="DocumentIdentityResponse.RelatedRecordWithheld"/> = <c>true</c>), so the pane shows the record as
+        /// unknown rather than "not filed" and does not offer to file the document a second time; it is absent otherwise.
+        /// A document's own slot keeps today's behaviour, and its communication is then not read.
+        /// </remarks>
         static async Task<DocumentIdentityResponse> BuildIdentityResponseAsync(
             Sprk.Bff.Api.Services.Documents.DocumentUrlIdentityResolution.Resolution identity,
             IGenericEntityService dataverse,
+            Sprk.Bff.Api.Infrastructure.ExternalAccess.CallerRecordAccessProbe callerAccessProbe,
+            HttpContext context,
             ILogger logger,
             CancellationToken ct)
         {
             var related = identity.RelatedRecord;
+            var relatedRecordWithheld = false;
+            if (related is null)
+            {
+                var (derived, undetermined) = await Sprk.Bff.Api.Services.Documents.DocumentUrlIdentityResolution
+                    .ResolveDerivedRelatedRecordAsync(identity, dataverse, logger, ct);
+                if (derived is not null)
+                {
+                    if (await CallerMayReadDerivedRecordAsync(derived, callerAccessProbe, context, logger, ct))
+                        related = derived;
+                    else
+                        relatedRecordWithheld = true; // filed, but not shown: the pane must not read a null card as "not filed"
+                }
+                else if (undetermined)
+                {
+                    // The communication could not be read, so it may be filed: the same "unknown", never "not filed".
+                    relatedRecordWithheld = true;
+                }
+            }
+
             RelatedRecordIdentity? relatedRecordResponse = null;
             if (related is not null)
             {
@@ -543,7 +420,46 @@ public static class FileAccessEndpoints
                 DocumentName: identity.DocumentName,
                 FileName: identity.FileName,
                 RelatedRecord: relatedRecordResponse,
-                Reason: null);
+                Reason: null,
+                RelatedRecordWithheld: relatedRecordWithheld ? true : null);
+        }
+
+        /// <summary>
+        /// Task 132: whether the CALLER holds Read on a record derived through the document's communication. Fail closed:
+        /// a type outside <see cref="EntityAccessFilter"/>'s entity-set table, no rights answer, or a throw is "no". Not an
+        /// authorization gate (nothing is refused; the optional card is only left out), so it asks the plain
+        /// <see cref="Sprk.Bff.Api.Infrastructure.ExternalAccess.CallerRecordAccessProbe.GetCallerRightsAsync"/>.
+        /// </summary>
+        static async Task<bool> CallerMayReadDerivedRecordAsync(
+            Microsoft.Xrm.Sdk.EntityReference record,
+            Sprk.Bff.Api.Infrastructure.ExternalAccess.CallerRecordAccessProbe callerAccessProbe,
+            HttpContext context,
+            ILogger logger,
+            CancellationToken ct)
+        {
+            if (!EntityAccessFilter.TryResolveEntitySet(record.LogicalName, out var entitySet))
+            {
+                logger.LogWarning(
+                    "Document identity: the communication's record type {EntityType} has no entity set in " +
+                    "EntityAccessFilter's table, so the caller's access cannot be checked; the related-record card is omitted.",
+                    record.LogicalName);
+                return false;
+            }
+
+            try
+            {
+                var rights = await callerAccessProbe.GetCallerRightsAsync(
+                    Sprk.Bff.Api.Infrastructure.Auth.TokenHelper.ExtractBearerTokenOrNull(context), entitySet, record.Id, ct);
+                return (rights & AccessRights.Read) == AccessRights.Read;
+            }
+            catch (Exception ex) when (!ct.IsCancellationRequested)
+            {
+                logger.LogWarning(ex,
+                    "Document identity: the caller's access to {EntitySet}({RecordId}) could not be checked; the " +
+                    "related-record card is omitted.",
+                    entitySet, record.Id);
+                return false;
+            }
         }
 
         /// <summary>
@@ -1053,136 +969,6 @@ public static class FileAccessEndpoints
         }
 
         /// <summary>
-        /// POST /api/documents/{documentId}/share-link
-        /// Creates a recipient-openable SPE sharing link (Graph createLink) for the document, so an
-        /// emailed "Link" opens the actual file — including, on request, for external recipients
-        /// (email-communication-solution-r5 R2 item 12). APP-ONLY since task 171: per-document authorization is the
-        /// <c>"share"</c> filter on the route, plus the pointer check; the BFF identity performs the createLink.
-        /// </summary>
-        /// <remarks>
-        /// <para>
-        /// <b>unified-access-control-r2 task 072.</b> Three things changed and they are independent:
-        /// the route gained a per-document <c>share</c> gate (it had none); the link gained a bounded
-        /// expiry (it was <c>expiration: null</c> — permanent); and <c>anonymous</c> stopped being the
-        /// silent default (it is now an explicit request, capped harder, and logged).
-        /// </para>
-        /// <para>
-        /// <b>Why expiry is the load-bearing control.</b> A minted SPE URL is not revocable through
-        /// Dataverse — removing the caller's rights afterwards does not invalidate it. This file's header
-        /// already records that as unsolved in general. Task 072 does not solve it in general; it removes
-        /// the worst instance (permanent + anonymous + ungated) and bounds the rest.
-        /// </para>
-        /// </remarks>
-        static async Task<IResult> CreateShareLink(
-            string documentId,
-            ShareLinkRequest? request,
-            IDocumentDataverseService dataverseService,
-            SpeFileStore speFileStore,
-            Sprk.Bff.Api.Infrastructure.Dataverse.RecordContainerResolver containerResolver,
-            IGenericEntityService entityService,
-            Sprk.Bff.Api.Infrastructure.ExternalAccess.ExternalParticipationService participations,
-            Sprk.Bff.Api.Services.Dataverse.CoreAncestorResolver ancestors,
-            IOptionsMonitor<ShareLinkOptions> shareLinkOptions,
-            TimeProvider timeProvider,
-            ILogger<Program> logger,
-            HttpContext context,
-            CancellationToken ct)
-        {
-            logger.LogInformation("CreateShareLink called | DocumentId: {DocumentId} | TraceId: {TraceId}",
-                documentId, context.TraceIdentifier);
-
-            if (!Guid.TryParse(documentId, out var docGuid))
-            {
-                throw new SdapProblemException(
-                    "invalid_id", "Invalid Document ID",
-                    $"Document ID '{documentId}' is not a valid GUID format", 400);
-            }
-
-            var document = await dataverseService.GetDocumentAsync(documentId, ct);
-            if (document == null)
-            {
-                throw new SdapProblemException(
-                    "document_not_found", "Document Not Found",
-                    $"Document with ID '{documentId}' does not exist", 404);
-            }
-
-            // Reuses the same SPE-pointer validation as open-links (404/409 on missing/malformed pointers).
-            ValidateSpePointers(document.GraphDriveId, document.GraphItemId, documentId, document.HasFile);
-
-            // uac-r2 task 171: the read below runs AS THE APPLICATION, so the row's pointer must name a container this
-            // document may use (409 document_storage_unverified otherwise, before any Graph read) — the check OBO used to
-            // get for free from SPE's own container ACL.
-            await containerResolver.EnsureDocumentPointerContainerAsync(docGuid, document.GraphDriveId, document.GraphItemId, ct);
-
-            // Owner round 72 item 2 (task 171, adversarial finding 10): a sharing link reaches people OUTSIDE Dataverse's
-            // decision, so it is never minted for a document of a SECURE or RESTRICTED record. Standard documents keep it.
-            if (await ShareLinkProtectionRefusalAsync(docGuid, containerResolver, entityService, participations, ancestors, logger, ct)
-                is { } protection)
-            {
-                return Sprk.Bff.Api.Infrastructure.Errors.ProblemDetailsHelper.Forbidden(protection.ReasonCode, protection.Detail, context.TraceIdentifier);
-            }
-
-            var (scope, expiresAt) = ResolveShareLinkPolicy(
-                request, shareLinkOptions.CurrentValue, timeProvider, documentId, logger, context);
-            var wantsExternalReach = scope == AnonymousScope;
-
-            if (wantsExternalReach)
-            {
-                // Warning, not Information: this is the one branch that publishes a handle reachable by
-                // parties with no Spaarke identity. The caller's oid is what makes it attributable.
-                logger.LogWarning(
-                    "CreateShareLink minting an ANONYMOUS link | DocumentId: {DocumentId} | "
-                    + "Caller: {CallerObjectId} | ExpiresAt: {ExpiresAt} | TraceId: {TraceId}",
-                    documentId,
-                    // The comment above is the whole point: "the caller's oid is what makes it
-                    // attributable". Until 2026-08-27 this read `FindFirst("oid") ?? NameIdentifier`,
-                    // which under inbound claim mapping resolved `sub` — pairwise per user+app and
-                    // joinable to nothing. The audit line for minting an ANONYMOUS link was therefore
-                    // recording a pseudonym, defeating exactly the attributability task 072 added it for.
-                    CallerResolution.ResolveObjectId(context.User),
-                    expiresAt,
-                    context.TraceIdentifier);
-            }
-
-            try
-            {
-                // Requires the tenant SPE/SharePoint external-sharing policy to allow "Anyone" links when
-                // scope is anonymous; if disabled Graph throws → mapped to 502 below and the caller
-                // (composer) falls back to the prior link (best-effort, never blocks the send).
-                var url = await speFileStore.CreateSharingLinkAsync(
-                    document.GraphDriveId!, document.GraphItemId!,
-                    linkType: "view", scope: scope, expiration: expiresAt, ct: ct);
-
-                if (string.IsNullOrWhiteSpace(url))
-                {
-                    throw new SdapProblemException(
-                        "share_link_unavailable", "Share Link Unavailable",
-                        $"Graph returned no sharing link for document {documentId}", 502);
-                }
-
-                logger.LogInformation(
-                    "CreateShareLink succeeded | DocumentId: {DocumentId} | Scope: {Scope} | "
-                    + "ExpiresAt: {ExpiresAt} | TraceId: {TraceId}",
-                    documentId, scope, expiresAt, context.TraceIdentifier);
-                return TypedResults.Ok(new ShareLinkResponse(url, expiresAt, scope));
-            }
-            // ADR-007: endpoints must NOT reference Microsoft.Graph SDK types directly (the Graph
-            // request/response + error types stay isolated in Infrastructure.Graph). We still want the
-            // clean 502 mapping for a Graph OData error (most commonly: tenant policy forbids anonymous
-            // links), so match it by type NAME via an exception filter — no `Microsoft.Graph.*` type
-            // reference in this endpoint. Non-Graph exceptions propagate unchanged (behavior preserved).
-            catch (Exception ex) when (ex.GetType().FullName?.Contains("ODataError", StringComparison.Ordinal) == true)
-            {
-                logger.LogWarning(ex,
-                    "CreateShareLink Graph error | DocumentId: {DocumentId} | TraceId: {TraceId}",
-                    documentId, context.TraceIdentifier);
-                throw new SdapProblemException(
-                    "share_link_failed", "Share Link Failed",
-                    $"Could not create a sharing link (Graph): {ex.Message}", 502);
-            }
-        }
-
-        /// <summary>
         /// GET /api/documents/{documentId}/view-url
         /// Returns embeddable view URL using driveItem webUrl (not cached Preview action).
         /// Use this for real-time file viewing without the 30-60s Preview cache delay.
@@ -1549,57 +1335,6 @@ public static class FileAccessEndpoints
     /// never flipped) — use it only to distinguish "never uploaded" (HasFile=false) from
     /// "partial/failed upload" (HasFile=true) when DriveId/ItemId is missing.
     /// </summary>
-    /// <summary>Graph link scopes used by the share-link route.</summary>
-    private const string AnonymousScope = "anonymous";
-    private const string OrganizationScope = "organization";
-
-    /// <summary>
-    /// Decides the sharing scope and expiry for one share-link request (unified-access-control-r2
-    /// task 072). Extracted from the handler because it is the one piece of genuine POLICY on that
-    /// route — it changes for product/compliance reasons, while the rest of the handler changes for SPE
-    /// plumbing reasons. Separate reasons-to-change, per docs/standards/COMPONENT-COMPLEXITY.md.
-    /// </summary>
-    /// <returns>The Graph link scope, and the instant the link stops working.</returns>
-    /// <exception cref="SdapProblemException">
-    /// 403 when external reach is requested but disabled for this environment.
-    /// </exception>
-    private static (string Scope, DateTimeOffset ExpiresAt) ResolveShareLinkPolicy(
-        ShareLinkRequest? request,
-        ShareLinkOptions options,
-        TimeProvider timeProvider,
-        string documentId,
-        ILogger logger,
-        HttpContext context)
-    {
-        var wantsExternalReach = request?.AllowExternalRecipients == true;
-
-        // Refuse rather than downgrade. A silent downgrade to organization scope yields a link that
-        // looks fine to the sender and is dead on arrival for the external recipient — the failure
-        // mode hardest to diagnose from a support ticket.
-        if (wantsExternalReach && !options.AnonymousLinksEnabled)
-        {
-            logger.LogWarning(
-                "CreateShareLink refused an anonymous link: Documents:ShareLinks:AnonymousLinksEnabled "
-                + "is false | DocumentId: {DocumentId} | TraceId: {TraceId}",
-                documentId, context.TraceIdentifier);
-
-            throw new SdapProblemException(
-                "anonymous_links_disabled", "Anonymous Links Disabled",
-                "This environment does not permit anyone-with-the-link sharing. Remove "
-                + "allowExternalRecipients to mint an organization-scoped link instead.", 403);
-        }
-
-        // Scope is organization unless the caller explicitly asked for external reach. The dangerous
-        // option must be requested, never inherited from omission.
-        var lifetimeDays = wantsExternalReach
-            ? options.AnonymousMaxLifetimeDays
-            : options.MaxLifetimeDays;
-
-        return (
-            wantsExternalReach ? AnonymousScope : OrganizationScope,
-            timeProvider.GetUtcNow().AddDays(lifetimeDays));
-    }
-
     private static void ValidateSpePointers(string? driveId, string? itemId, string documentId, bool hasFile)
     {
         // Validate driveId exists

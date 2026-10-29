@@ -2,6 +2,8 @@ using System.Text.Json.Serialization;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.ExternalAccess.Dtos;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
+using Sprk.Bff.Api.Services.Dataverse;
+using Sprk.Bff.Api.Services.Dataverse.Privileges;
 
 namespace Sprk.Bff.Api.Api.ExternalAccess;
 
@@ -50,6 +52,9 @@ public static class ContactGrantEndpoints
         group.MapPost("/contact-grants", GrantAsync)
             .AddContactGrantorAuthorizationFilter()
             .WithName("GrantAccessAsContact")
+            // The record is in the body (bound before the filter runs): AppendTo on ITS table, plus the grant row itself.
+            .RequireWorkforceCeiling(context => WorkforceRoleCeilingGate.GrantAsContact(
+                context.Arguments.OfType<ContactGrantRequest>().FirstOrDefault()?.RecordType))
             .WithSummary("A contact grants a colleague of their own organization access to a record")
             .WithDescription(
                 "Grants ONE active colleague of the caller's own organization access to a project, matter or work " +
@@ -67,6 +72,7 @@ public static class ContactGrantEndpoints
         group.MapGet("/contact-grants", ListAsync)
             .AddContactGrantorAuthorizationFilter()
             .WithName("ListGrantsIssuedByContact")
+            .RequireWorkforceCeiling(WorkforceRoleCeilingGate.ListIssuedGrants)
             .WithSummary("The grants the calling contact issued on a record")
             .Produces<ContactIssuedGrantsResponse>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status400BadRequest)
@@ -77,6 +83,7 @@ public static class ContactGrantEndpoints
         group.MapPost("/contact-grants/revoke", RevokeAsync)
             .AddContactGrantorAuthorizationFilter()
             .WithName("RevokeGrantIssuedByContact")
+            .RequireWorkforceCeiling(WorkforceRoleCeilingGate.RevokeIssuedGrant)
             .WithSummary("The calling contact revokes a grant they issued")
             .Produces<ContactGrantRevokeResponse>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status400BadRequest)
@@ -99,6 +106,8 @@ public static class ContactGrantEndpoints
         DataverseWebApiClient dataverseClient,
         ExternalParticipationService participations,
         IAccessibleRecordSetService accessibleRecords,
+        IRecordOwnershipResolver ownership,
+        IDataversePrivilegeChecker ownerPrivileges,
         IContactIdentityStore identities,
         ExternalInviteService invites,
         GrantAccessNotifier accessNotifier,
@@ -164,7 +173,7 @@ public static class ContactGrantEndpoints
         {
             outcome = await GrantExternalAccessEndpoint.CreateGrantAsync(
                 coreRequest, g.RootType, g.RootId, today, ceiling, callerOid: null,
-                dataverseClient, participations, accessibleRecords, logger, ct, issuer);
+                dataverseClient, participations, accessibleRecords, identities, ownership, ownerPrivileges, logger, ct, issuer);
         }
         catch (Exception ex) when (!ct.IsCancellationRequested)
         {
@@ -184,6 +193,17 @@ public static class ContactGrantEndpoints
                 {
                     Detail = $"{granteeLabel} already has access to this record that was granted by someone else; ask " +
                              "them or the record's team to change it. Nothing was changed.",
+                };
+            }
+            else if (refusal.IsOwnerRefusal)
+            {
+                // Task 099b review round 2 (F1 low): the owner refusals' detail is written for an INTERNAL administrator — it
+                // names the internal role, the table and what to add. This caller is an external contact, who can act on none
+                // of it, so they get a neutral sentence; the code and status are unchanged, and the log below keeps the reason.
+                refusal = refusal with
+                {
+                    Detail = "Access could not be granted right now because of a problem on our side. Nothing was " +
+                             "granted; try again later, or ask the record's team for help.",
                 };
             }
 

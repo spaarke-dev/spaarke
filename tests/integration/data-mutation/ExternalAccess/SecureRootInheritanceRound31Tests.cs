@@ -287,6 +287,34 @@ public class SecureRootInheritanceRound31Tests : IClassFixture<ProvisionProjectT
     }
 
     /// <summary>
+    /// #1620: the filed work assignment was re-owned to the very user the matter passed a share on to (out of band, or an
+    /// unsecure that handed it to them). Dataverse refuses an app-only revoke of the owning user's own share (0x80040223), so
+    /// the matter's unshare ends the inherited share AS that user — removed, row Revoked — instead of failing on every pass.
+    /// </summary>
+    [Fact]
+    public async Task UnsharingFromTheMatter_RemovesTheInheritedShareOfTheFiledRecordsOwningUser_AsTheOwner()
+    {
+        var (matter, workAssignment) = (Guid.NewGuid(), Guid.NewGuid());
+        SecureMatter(_fixture, matter);
+        _fixture.SeedWorkAssignment(workAssignment, owningTeamId: null, containerId: $"b!wa-{workAssignment:N}", isSecure: true,
+            owningUserId: Colleague);
+        _fixture.SeedShare(workAssignment, DataversePrincipalRef.User(Creator), ProvisionProjectEndpoint.CreatorAccessRights);
+        World.Set("sprk_workassignment", workAssignment, "sprk_regardingmatter", new Microsoft.Xrm.Sdk.EntityReference("sprk_matter", matter));
+        _fixture.SeedShare(matter, DataversePrincipalRef.User(Colleague), ProvisionProjectEndpoint.CollaboratorAccessRights);
+        _fixture.SeedShare(workAssignment, DataversePrincipalRef.User(Colleague), RecordShareLevels.RightsCsvForMask(Mirror));
+        _fixture.InheritedLedger.SeedInheritedRow(ExternalGrantRootType.WorkAssignment, workAssignment, "sprk_matter", matter,
+            DataversePrincipalRef.User(Colleague), new AssignedAccessLedgerWrite(AssignedAccessState.Shared, null, GrantedLevel: Mirror));
+
+        await UnshareAsync("matter", matter, Colleague);
+
+        _fixture.ShareMaskOf(workAssignment, Colleague).Should().Be(0, "the owner's own inherited share is removed as the owner");
+        _fixture.RevokesAsOwner.Should().ContainSingle(r => r.RecordId == workAssignment && r.Principal == DataversePrincipalRef.User(Colleague));
+        _fixture.OwnerShareRevokesRefused.Should().BeEmpty("no app-only revoke of the owner's share was sent");
+        _fixture.OwningUserOf(workAssignment).Should().Be(Colleague, "ownership is not changed");
+        Provenance(workAssignment).Single(r => r.SystemUserId == Colleague).State.Should().Be(AssignedAccessState.Revoked);
+    }
+
+    /// <summary>
     /// The parent's unshare (<c>/unshare-user</c> on the matter) removes the share the matter's sharing gave the user on the
     /// filed work assignment — in the same call — because it is still the unmodified inherited one; its row is Revoked.
     /// </summary>

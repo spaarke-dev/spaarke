@@ -1,0 +1,102 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="001" project="field-mapping-server-write-path-r1">
+  <metadata>
+    <title>Promote CreateTimeFieldMapping to Services/Dataverse/FieldMapping/ as the one canonical engine, with written semantics and tests (FR-01)</title>
+    <phase>1 W1 Canonical engine and configuration</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies .cs in Sprk.Bff.Api; tags include bff-api; adds tests at KEEP paths (TEST-MODIFYING override).</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-specified move + characterization tests; no security boundary, no architectural judgment.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>W1-A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>none</deps>
+    <tags>bff-api, field-mapping, dataverse, testing</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Move `Services/Office/CreateTimeFieldMapping.cs` to `Services/Dataverse/FieldMapping/CreateTimeFieldMapping.cs` (namespace updated, still `internal static`), keep every current behaviour, and pin those behaviours with unit tests and a written semantics table. Do not change semantics in this task; fill-only and source resolution are tasks 002 and 003.</prompt>
+  <role>SPAARKE platform developer, .NET 10 BFF, Dataverse Web API value typing. Follow ADRs strictly.</role>
+  <goal>The engine lives at `Services/Dataverse/FieldMapping/`, every existing caller compiles against the new location, a unit-test class covers each mapping type × each target field type and each semantic rule in spec FR-01, and `SPAARKE-FIELD-MAPPING-FRAMEWORK.md` carries the semantics table.</goal>
+
+  <context>
+    <background>spec.md FR-01; design.md §4.2 "One engine". Three engines exist today (client TS, push `ApplyMappingRule`, C# `CreateTimeFieldMapping`); the C# one becomes canonical. Evidence notes §2 list the semantic differences between engines.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Office/CreateTimeFieldMapping.cs (moved; delete the old file)</file>
+      <file role="new">src/server/api/Sprk.Bff.Api/Services/Dataverse/FieldMapping/CreateTimeFieldMapping.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Office/RecordCreationService.cs (using/namespace only)</file>
+      <file role="new">tests/unit/Sprk.Bff.Api.Tests/Services/Dataverse/FieldMapping/CreateTimeFieldMappingTests.cs</file>
+      <file role="modify">docs/architecture/SPAARKE-FIELD-MAPPING-FRAMEWORK.md (add the semantics table)</file>
+      <file role="canonical-reference">projects/field-mapping-server-write-path-r1/notes/design-review-2026-10-19.md §2 (engine semantic diff)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="none" status="complete">Master code only.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-010">Scope: the engine. It stays `internal static`; no DI registration added or removed in this task.</constraint>
+    <constraint source="ADR-038">Scope: tests added by this task. Unit tests under `tests/unit/Sprk.Bff.Api.Tests/`; no `Mock&lt;HttpMessageHandler&gt;`; no DI-registration tests.</constraint>
+    <constraint source="project">Scope: behaviour. Zero semantic change; if an existing behaviour looks wrong, record it in the task notes and escalate rather than fixing it here.</constraint>
+    <constraint source="CLAUDE.md §10">Scope: BFF publish. State Placement Justification in the PR (a move, in BFF); measure publish-size delta against a fresh master build per root CLAUDE.md §10.4; run `dotnet list package --vulnerable --include-transitive`.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Field mapping engine; Dataverse value typing</topic>
+    <files>
+      <file>.claude/adr/ADR-002-thin-plugins.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>docs/architecture/SPAARKE-FIELD-MAPPING-FRAMEWORK.md</file>
+    </files>
+    <patterns>
+      <pattern name="entity-operations" location=".claude/patterns/dataverse/entity-operations.md">Value shapes for lookups, option sets, dates.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare FULL rigor; read spec FR-01, design §4.2, evidence notes §2; re-grep `CreateTimeFieldMapping` usages.</step>
+    <step order="1">Move the file and update its namespace and every `using`; build the BFF.</step>
+    <step order="2">Write characterization tests: Copy/Default/Concat/Template × Text, Memo, WholeNumber, Decimal, Money, Boolean, OptionSet, DateTime, Lookup targets; option-set label / ISO-8601 date / Yes-No rendering into text; null source skipped; protected column skipped with warning; `sprk_executionorder` ordering; one `{field}` resolver for Concat/Template.</step>
+    <step order="3">Add the semantics table (rule → behaviour → test name) to `SPAARKE-FIELD-MAPPING-FRAMEWORK.md`.</step>
+    <step order="4">Build + run tests; measure publish size; run the CVE check.</step>
+    <step order="5">Update TASK-INDEX.md: set this task's status to ✅.</step>
+    <step order="6">Document any deviation in projects/field-mapping-server-write-path-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If a current engine behaviour contradicts a semantic listed in spec FR-01 (e.g. dates not ISO-8601), STOP and escalate per CLAUDE.md §6 instead of choosing a behaviour.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>Services/Office/CreateTimeFieldMapping.cs (the same class; this is a move). Overlapping engines: FieldMappingEndpoints.ApplyMappingRule (push, Copy-only) and the client FieldMappingService.applyFieldMappings.</existing>
+    <extension>Yes, extended in place: the file moves to a non-Office namespace so the unified create service (W2) and push (W4) can share it; no new type is introduced. The test class is new because the engine has no dedicated unit tests today.</extension>
+    <cost-of-doing-nothing>The engine stays under Services/Office, so W2's RecordCreationService and W4's push would depend on an Office-scoped type or fork it, and the FR-01 semantics stay untested, so tasks 002/040 cannot prove parity.</cost-of-doing-nothing>
+  </justification>
+
+  <tools><tool name="dotnet">Build/test .NET</tool></tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Dataverse/FieldMapping/CreateTimeFieldMapping.cs</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Dataverse/FieldMapping/CreateTimeFieldMappingTests.cs</output>
+    <output type="docs">docs/architecture/SPAARKE-FIELD-MAPPING-FRAMEWORK.md (semantics table)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`Services/Office/CreateTimeFieldMapping.cs` no longer exists; the class is at `Services/Dataverse/FieldMapping/` and is `internal static`.</criterion>
+    <criterion testable="true">Unit tests cover every mapping type (Copy, Default, Concat, Template) against every listed target type, and each FR-01 semantic rule has at least one named test.</criterion>
+    <criterion testable="true">Negative: a null source value produces no output column; a protected target column produces no output column and one warning.</criterion>
+    <criterion testable="true">The semantics table in SPAARKE-FIELD-MAPPING-FRAMEWORK.md names the test for each rule.</criterion>
+    <criterion testable="true">BFF build 0 errors; all existing tests that reference the engine pass unchanged; publish-size delta and CVE result recorded in the task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-01. No behaviour change. Tasks 002 (fill-only) and 003 (source resolver) build on this location.
+Completed 2026-10-20. Engine moved; 88 characterization cases, which live in tests/unit/domain/Dataverse/FieldMapping/ (KEEP path) after a main-session fix. Publish +314 B; no CVE. Two pinned engine defects filed as #2124 for task 002. Details: notes/task-001-notes.md.
+rework: fix-round-1 task 001</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

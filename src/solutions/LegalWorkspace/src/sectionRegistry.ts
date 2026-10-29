@@ -66,6 +66,14 @@ import { emailRegistration } from "./sections/email.registration";
 // with the `communications-reconciliation` direct widget; appears as a system
 // widget in the workspace dropdown via a "Reconciliation" sprk_workspacelayout row.
 import { reconciliationRegistration } from "./sections/reconciliation.registration";
+// spaarke-ontology-platform-r1 task 156 (2026-10-16): Worklist section — the Console
+// worklist (Decide / Do lanes over the Signal read route). Section shim for the `worklist`
+// direct widget; appears as a system widget in the workspace dropdown via a "Worklist"
+// sprk_workspacelayout row (scripts/seed-worklist-workspace-layout.ps1).
+import { worklistRegistration } from "./sections/worklist.registration";
+// spaarke-ontology-platform-r1 task 045 (D-47): Decision Records section - the Console's Decision Record
+// tab, surfaced via a "Decision Records" sprk_workspacelayout row (scripts/seed-decision-records-workspace-layout.ps1).
+import { decisionRecordsRegistration } from "./sections/decisionRecords.registration";
 // ai-advanced-capabilities-analysis-hub-r1 (front door, 2026-07-29): Analysis
 // section — the Analysis platform home/launcher (create-by-type cards + grid of
 // sprk_analysis). Pattern D dual-use with the `analysis-hub` direct widget in
@@ -137,6 +145,8 @@ export function createLegalWorkspaceSectionRegistry(
     composeEditorRegistration,
     emailRegistration,
     reconciliationRegistration,
+    worklistRegistration,
+    decisionRecordsRegistration,
     analysisHubRegistration,
   ] as const;
 

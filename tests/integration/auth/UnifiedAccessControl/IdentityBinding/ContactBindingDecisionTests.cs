@@ -52,6 +52,7 @@ public class ContactBindingDecisionTests
     [InlineData("", null, BindingKind.Unbound)]
     [InlineData("aaaaaaaa-0000-4000-8000-000000000001", 100000000, BindingKind.Bound)]
     [InlineData("AAAAAAAA-0000-4000-8000-000000000001", 100000001, BindingKind.Bound)]
+    [InlineData("aaaaaaaa-0000-4000-8000-000000000001", 100000002, BindingKind.Bound)] // r3 047: WorkforceHome
     [InlineData("aaaaaaaa-0000-4000-8000-000000000001", null, BindingKind.Bound)]   // pre-141 CIAM row
     [InlineData(null, 100000001, BindingKind.Unreadable)]                          // marker, no oid = masked/orphaned
     [InlineData("not-a-guid", 100000000, BindingKind.Unreadable)]
@@ -181,7 +182,9 @@ public class ContactBindingDecisionTests
 
     [Fact]
     public void E3_PerturbToOneContact_Proceeds()
-        => ContactBindingDecision.Decide(Workforce(), NoRows, ContactLookup.Of(Unbound(ContactA)), ReferenceLookup.Of())
+        // One match proceeds to E11, which on the Workforce token plane needs the invite stamp naming this caller's tenant.
+        => ContactBindingDecision.Decide(Workforce() with { TokenTenantId = InvitedTenant }, NoRows,
+                ContactLookup.Of(Unbound(ContactA)), ReferenceLookup.Of(), Stamped(Intent(invitedOn: Now), InvitedTenant))
             .Action.Should().Be(BindingAction.BindByEmail);
 
     [Fact]
@@ -291,7 +294,7 @@ public class ContactBindingDecisionTests
         // Task 184: on the CIAM plane this bind also needs this environment's intent; task 185: a pending invite AND its
         // code. The workforce form of this row is E11_TheWorkforceAndSystemUserPlanes_BindWithoutAnyIntent, unchanged.
         => ContactBindingDecision.Decide(Ciam(code: InviteA.Code), NoRows, ContactLookup.Of(Unbound(ContactA)),
-                ReferenceLookup.Of(), Intent(invitedOn: Now, hash: InviteA.StoredValue))
+                ReferenceLookup.Of(), Invited())
             .Should().Be(BindsAndConsumes);
 
     // ── E11 intent gate (task 184, owner round 96): the CIAM plane binds only on THIS environment's intent ─────
@@ -304,9 +307,27 @@ public class ContactBindingDecisionTests
         DateTimeOffset? asOf = null, string? hash = null)
         => new(contact ?? ContactA, inviteStatus, invitedOn) { AsOf = asOf ?? Now, InviteCodeHash = hash };
 
-    /// <summary>ContactA's current invite: a marker at <paramref name="invitedOn"/> (default now) and its stored hash.</summary>
+    /// <summary>The tenant an invite named, in the Workforce rows.</summary>
+    private static readonly Guid InvitedTenant = Guid.Parse("11111111-aaaa-4aaa-8aaa-111111111111");
+
+    /// <summary>
+    /// <paramref name="intent"/> with the invite stamp an invite to <see cref="Email"/> wrote (naming
+    /// <paramref name="tenant"/>), and the contact's current email still <see cref="Email"/>.
+    /// </summary>
+    private static BindIntentLookup Stamped(BindIntentLookup intent, Guid? tenant = null)
+        => intent with
+        {
+            InvitedEmailHash = InviteEmailStamp.Create(Email),
+            RawInvitedTenantId = tenant?.ToString("D"),
+            CurrentEmail = Email,
+        };
+
+    /// <summary>
+    /// ContactA's current invite: a marker at <paramref name="invitedOn"/> (default now), its stored code hash, and the
+    /// invite stamp for <see cref="Email"/>.
+    /// </summary>
     private static BindIntentLookup Invited(DateTimeOffset? invitedOn = null)
-        => Intent(invitedOn: invitedOn ?? Now, hash: InviteA.StoredValue);
+        => Stamped(Intent(invitedOn: invitedOn ?? Now, hash: InviteA.StoredValue));
 
     private static BindingDecision CiamE11(BindIntentLookup? intent, string? code = null)
         => ContactBindingDecision.Decide(Ciam(code: code), NoRows, ContactLookup.Of(Unbound(ContactA)), ReferenceLookup.Of(),
@@ -481,7 +502,7 @@ public class ContactBindingDecisionTests
         // A re-invite overwrote the marker and the hash; the earlier email's code is presented.
         var superseded = InviteCode.Create(ContactA);
         var reInvite = InviteCode.Create(ContactA);
-        var intent = Intent(invitedOn: Now, hash: reInvite.StoredValue);
+        var intent = Stamped(Intent(invitedOn: Now, hash: reInvite.StoredValue));
 
         CiamE11(intent, superseded.Code).DenyCode.Should().Be(ContactBindingDecision.DenyContactNotInvited);
         CiamE11(intent, reInvite.Code).Should().Be(BindsAndConsumes);
@@ -577,19 +598,36 @@ public class ContactBindingDecisionTests
         => CiamE11(Intent(invitedOn: Now, contact: ContactB, hash: InviteA.StoredValue), InviteA.Code).DenyCode
             .Should().Be(ContactBindingDecision.DenyContactLookupFailed);
 
-    [Theory]
-    [InlineData(BindingPlane.WorkforceToken)]
-    [InlineData(BindingPlane.SystemUser)]
-    public void E11_TheWorkforceAndSystemUserPlanes_BindWithoutAnyIntent(BindingPlane plane)
+    [Fact]
+    public void E11_TheSystemUserPlane_BindsWithoutAnyIntent()
     {
-        // Workforce-plane E11 is unchanged (Model 1 workforce sign-in is under separate owner discussion): it never asks
-        // for intent, and a "no intent" answer handed to it changes nothing. Pins the gate to the CIAM plane.
-        var request = new BindingRequest(plane, Caller, Email, BindingEligibility.EmailBindAndCreate);
+        // The systemuser plane's email is directory-synced from a licensed user: it never asks for intent, and a "no intent"
+        // answer handed to it changes nothing. Before the invite stamp this row also covered the Workforce token plane, which
+        // now needs the stamp (E11_TheWorkforcePlane_NeedsTheInviteStamp).
+        var request = new BindingRequest(BindingPlane.SystemUser, Caller, Email, BindingEligibility.EmailBindAndCreate);
         var rows = ContactLookup.Of(Unbound(ContactA));
 
         ContactBindingDecision.Decide(request, NoRows, rows, ReferenceLookup.Of()).Action.Should().Be(BindingAction.BindByEmail);
         ContactBindingDecision.Decide(request, NoRows, rows, ReferenceLookup.Of(), Intent()).Action
             .Should().Be(BindingAction.BindByEmail);
+    }
+
+    /// <summary>
+    /// The Workforce token plane binds by email only on a current invite stamp: it asks for the intent, a lookup with no
+    /// stamp is denied not-invited, and a stamp naming the caller's tenant binds (without consuming a code).
+    /// </summary>
+    [Fact]
+    public void E11_TheWorkforcePlane_NeedsTheInviteStamp()
+    {
+        var request = Workforce() with { TokenTenantId = InvitedTenant };
+        var rows = ContactLookup.Of(Unbound(ContactA));
+
+        ContactBindingDecision.Decide(request, NoRows, rows, ReferenceLookup.Of())
+            .Should().Be(new BindingDecision(BindingAction.NeedIntentLookup, ContactA));
+        ContactBindingDecision.Decide(request, NoRows, rows, ReferenceLookup.Of(), Intent(invitedOn: Now)).DenyCode
+            .Should().Be(ContactBindingDecision.DenyContactNotInvited);
+        ContactBindingDecision.Decide(request, NoRows, rows, ReferenceLookup.Of(), Stamped(Intent(invitedOn: Now), InvitedTenant))
+            .Should().Be(new BindingDecision(BindingAction.BindByEmail, ContactA));
     }
 
     [Theory]
@@ -598,15 +636,25 @@ public class ContactBindingDecisionTests
     public void E11_TheNonCiamPlanes_BypassTheCodeCheck_AndNeverConsumeACode(BindingPlane plane)
     {
         // Task 185 changes nothing outside the CIAM block (owner round 98, R3's request): a presented code, a wrong code or
-        // none changes nothing on these planes, and their bind never asks the binder to consume a code.
+        // none changes nothing on these planes, and their bind never asks the binder to consume a code. (The Workforce
+        // token plane needs the invite stamp, given here; the code is still not checked.)
         var rows = ContactLookup.Of(Unbound(ContactA));
         var plain = new BindingDecision(BindingAction.BindByEmail, ContactA);
+        var stamped = Stamped(Invited(), InvitedTenant);
 
         foreach (var code in new[] { null, InviteA.Code, InviteCode.Create(ContactA).Code })
         {
-            var request = new BindingRequest(plane, Caller, Email, BindingEligibility.EmailBindAndCreate) { InviteCode = code };
-            ContactBindingDecision.Decide(request, NoRows, rows, ReferenceLookup.Of()).Should().Be(plain);
-            ContactBindingDecision.Decide(request, NoRows, rows, ReferenceLookup.Of(), Invited()).Should().Be(plain);
+            var request = new BindingRequest(plane, Caller, Email, BindingEligibility.EmailBindAndCreate)
+            {
+                InviteCode = code,
+                TokenTenantId = InvitedTenant,
+            };
+            if (plane == BindingPlane.SystemUser)
+            {
+                ContactBindingDecision.Decide(request, NoRows, rows, ReferenceLookup.Of()).Should().Be(plain);
+            }
+
+            ContactBindingDecision.Decide(request, NoRows, rows, ReferenceLookup.Of(), stamped).Should().Be(plain);
         }
     }
 
@@ -677,11 +725,13 @@ public class ContactBindingDecisionTests
 
     // ── Invite ───────────────────────────────────────────────────────────────────────────────────────
 
-    [Fact]
-    public void Invite_AWorkforceBoundContact_IsRefused()
+    [Theory]
+    [InlineData(IdentityPlaneMarker.Workforce)]
+    [InlineData(IdentityPlaneMarker.WorkforceHome)] // r3 047: a home-registered employee is never re-invited as a partner
+    public void Invite_AWorkforceBoundContact_IsRefused(IdentityPlaneMarker plane)
     {
         var decision = ContactBindingDecision.DecideInvite(
-            ContactLookup.Of(Bound(ContactA, Other, IdentityPlaneMarker.Workforce)));
+            ContactLookup.Of(Bound(ContactA, Other, plane)));
 
         decision.Action.Should().Be(InviteContactAction.Refuse);
         decision.ReasonCode.Should().Be(ContactBindingDecision.InviteWorkforceBoundContact);
@@ -852,6 +902,126 @@ public class ContactBindingDecisionTests
         Holds(flag, Unbound(ContactA)).Should().BeFalse();
     }
 
+    // ── r3 047 fix round 2: a DEACTIVATED contact carrying the token email refuses and flags the registration ──────
+
+    [Fact]
+    public void DecideInactiveRegistrationEmail_AnInactiveMatch_IsAConflict_FlaggedInactiveContactEmailMatch_OverEveryInactiveRow()
+    {
+        var rows = new[] { Unbound(ContactA, state: 1), Unbound(ContactB, state: 1) };
+
+        var decision = ContactBindingDecision.DecideInactiveRegistrationEmail(ContactLookup.Of(rows));
+
+        decision.Action.Should().Be(RegistrationEmailAction.Conflict);
+        decision.FlagReason.Should().Be(IdentityCollisionReason.InactiveContactEmailMatch);
+        decision.FlagContactIds.Should().BeEquivalentTo(new[] { ContactA, ContactB });
+    }
+
+    [Fact]
+    public void DecideInactiveRegistrationEmail_NoInactiveRow_Creates_AndAFailedReadDenies()
+    {
+        ContactBindingDecision.DecideInactiveRegistrationEmail(NoRows).Action.Should().Be(RegistrationEmailAction.Create);
+        ContactBindingDecision.DecideInactiveRegistrationEmail(ContactLookup.Failed).Action
+            .Should().Be(RegistrationEmailAction.Deny, "an inactive match cannot be ruled out, so nothing is created");
+    }
+
+    [Fact]
+    public void CollisionStillHolds_InactiveContactEmailMatch_HoldsWhileInactiveAndCarryingAnEmail_ClearsWhenReactivatedOrEmailGone()
+    {
+        var party = Party(IdentityCollisionReason.InactiveContactEmailMatch, Caller, IdentityPlaneMarker.WorkforceHome);
+        var inactive = Unbound(ContactA, state: 1) with { Email = "Mike.Okafor@Customer.example" };
+
+        Holds(party, inactive).Should().BeTrue("the inactive contact still carries the email: the job must NOT clear it");
+        Holds(party, inactive with { StateCode = 0 }).Should().BeFalse("an operator reactivated the contact: resolved");
+        Holds(party, inactive with { Email = null }).Should().BeFalse("the email is gone from the contact: resolved");
+        Holds(party, inactive with { Email = "  " }).Should().BeFalse();
+        ContactBindingDecision.CollisionStillHolds(party, inactive, ContactLookup.Failed, NoRows, ReferenceLookup.Of())
+            .Should().BeTrue("a failed read keeps the party (fail closed)");
+    }
+
+    [Fact]
+    public void CollisionStillHolds_Control_EveryOtherReason_IsClearedOnAnInactiveContact()
+    {
+        // The control for the case above: without the dedicated reason an inactive flagged contact is cleared (the person was
+        // removed) - which is why an existing reason could not carry the deactivated-contact refusal.
+        var inactive = Unbound(ContactA, state: 1) with { Email = "mike.okafor@customer.example" };
+        foreach (var reason in new[]
+                 {
+                     IdentityCollisionReason.BoundToDifferentOid, IdentityCollisionReason.EmailAmbiguous,
+                     IdentityCollisionReason.BindingUnreadable, IdentityCollisionReason.LinkedToOtherUser,
+                 })
+        {
+            Holds(Party(reason, Caller, IdentityPlaneMarker.WorkforceHome), inactive)
+                .Should().BeFalse($"{reason} is moot once the contact is deactivated");
+        }
+    }
+
+    // ── r3 047 fix round 1 (F-A): a single unbindable registration match is flagged by CAUSE ──────────
+
+    private static ContactBindingRow UnreadableBinding(Guid id) => new(id, 0, null, (int)IdentityPlaneMarker.Workforce);
+
+    private static readonly SystemUserReference LinkedToA = new(Guid.Parse("dddddddd-0000-4000-8000-00000000000d"), Other, ContactA);
+
+    [Theory]
+    [InlineData("bound-workforce", IdentityCollisionReason.BoundToDifferentOid)]
+    [InlineData("bound-external", IdentityCollisionReason.BoundToDifferentOid)]
+    [InlineData("bound-workforcehome", IdentityCollisionReason.BoundToDifferentOid)]
+    [InlineData("unreadable", IdentityCollisionReason.BindingUnreadable)]
+    [InlineData("linked", IdentityCollisionReason.LinkedToOtherUser)]
+    [InlineData("two", IdentityCollisionReason.EmailAmbiguous)]
+    public void DecideRegistrationEmail_UnbindableMatch_IsFlaggedByCause_AndOnlyTwoOrMoreAreEmailAmbiguous(
+        string shape, IdentityCollisionReason expected)
+    {
+        var rows = shape switch
+        {
+            "bound-workforce" => new[] { Bound(ContactA, Other, IdentityPlaneMarker.Workforce) },
+            "bound-external" => new[] { Bound(ContactA, Other, IdentityPlaneMarker.External) },
+            "bound-workforcehome" => new[] { Bound(ContactA, Other, IdentityPlaneMarker.WorkforceHome) },
+            "unreadable" => new[] { UnreadableBinding(ContactA) },
+            "two" => new[] { Unbound(ContactA), Unbound(ContactB) },
+            _ => new[] { Unbound(ContactA) },
+        };
+        var references = shape == "linked" ? ReferenceLookup.Of(LinkedToA) : ReferenceLookup.Of();
+
+        var decision = ContactBindingDecision.DecideRegistrationEmail(ContactLookup.Of(rows), Caller, references);
+
+        decision.Action.Should().Be(RegistrationEmailAction.Conflict);
+        decision.FlagReason.Should().Be(expected);
+        decision.FlagContactIds.Should().BeEquivalentTo(rows.Select(r => r.ContactId));
+    }
+
+    [Theory]
+    [InlineData(IdentityCollisionReason.BoundToDifferentOid)]
+    [InlineData(IdentityCollisionReason.BindingUnreadable)]
+    [InlineData(IdentityCollisionReason.LinkedToOtherUser)]
+    public void CollisionStillHolds_ASingleMatchReason_HoldsForAWorkforceHomeParty_WhileTheCauseHolds(IdentityCollisionReason reason)
+    {
+        // The registering party is a WorkforceHome identity whose home oid is never a systemuser's or the other binding's.
+        var party = Party(reason, Caller, IdentityPlaneMarker.WorkforceHome);
+        var oneCarrier = Unbound(ContactA);
+        var (flagged, refs) = reason switch
+        {
+            IdentityCollisionReason.BoundToDifferentOid => (Bound(ContactA, Other, IdentityPlaneMarker.WorkforceHome), ReferenceLookup.Of()),
+            IdentityCollisionReason.BindingUnreadable => (UnreadableBinding(ContactA), ReferenceLookup.Of()),
+            _ => (oneCarrier, ReferenceLookup.Of(LinkedToA)),
+        };
+
+        // ONE active carrier of the email: the old EmailAmbiguous reason would have been cleared here.
+        Holds(party, flagged, email: ContactLookup.Of(flagged), refs: refs)
+            .Should().BeTrue("the cause still holds, so the reconciliation job must keep the flag");
+
+        // Control: once the cause is gone it clears (the job is not made inert).
+        Holds(party, Unbound(ContactA), email: ContactLookup.Of(Unbound(ContactA)))
+            .Should().BeFalse("the cause is gone");
+    }
+
+    [Fact]
+    public void CollisionStillHolds_EmailAmbiguousForAWorkforceHomeParty_StillClearsWhenOnlyOneCarrierRemains()
+    {
+        var party = Party(IdentityCollisionReason.EmailAmbiguous, Caller, IdentityPlaneMarker.WorkforceHome);
+        Holds(party, Unbound(ContactA), email: ContactLookup.Of(Unbound(ContactA), Unbound(ContactB))).Should().BeTrue();
+        Holds(party, Unbound(ContactA), email: ContactLookup.Of(Unbound(ContactA))).Should().BeFalse();
+    }
+
     // ── B2 (owner round 4 item 4): the uniqueness mirror ─────────────────────────────────────────────────
 
     [Fact]
@@ -981,6 +1151,92 @@ public class ContactBindingDecisionTests
     private static bool Holds(CollisionParty party, ContactBindingRow flagged, ContactLookup? email = null,
         ContactLookup? oid = null, ReferenceLookup? refs = null)
         => ContactBindingDecision.CollisionStillHolds(party, flagged, email ?? NoRows, oid ?? NoRows, refs ?? ReferenceLookup.Of());
+
+    // ── r3 task 048: the A9 link write (DecideHomeLinkWrite) ──────────────────────────────────────────
+
+    private static readonly Guid LinkTenant = Guid.Parse("dddddddd-0000-4000-8000-0000000000d1");
+    private static readonly Guid LinkOid = Guid.Parse("dddddddd-0000-4000-8000-0000000000d2");
+    private static readonly Guid GuestUser = Guid.Parse("eeeeeeee-0000-4000-8000-0000000000e1");
+    private static readonly Guid OtherUser = Guid.Parse("eeeeeeee-0000-4000-8000-0000000000e2");
+
+    private static HomeLinkRow Guest(Guid id, bool? disabled = false, Guid? tenant = null, Guid? oid = null)
+        => new(id, disabled, tenant?.ToString("D"), oid?.ToString("D"), "W/\"7\"");
+
+    [Fact]
+    public void DecideHomeLinkWrite_OneEnabledUnlinkedSystemUser_NobodyHoldingThePair_WritesWithItsVersion()
+    {
+        var decision = ContactBindingDecision.DecideHomeLinkWrite(
+            HomeLinkLookup.Of(Guest(GuestUser)), HomeLinkLookup.Of(), LinkTenant, LinkOid);
+
+        decision.Should().Be(new HomeLinkWriteDecision(HomeLinkWriteAction.Write, GuestUser, "W/\"7\""));
+    }
+
+    [Fact]
+    public void DecideHomeLinkWrite_ItsOwnPairAlready_IsAlreadyLinked_AndADifferentPairIsNeverRePointed()
+    {
+        ContactBindingDecision.DecideHomeLinkWrite(
+                HomeLinkLookup.Of(Guest(GuestUser, tenant: LinkTenant, oid: LinkOid)), HomeLinkLookup.Of(), LinkTenant, LinkOid)
+            .Action.Should().Be(HomeLinkWriteAction.AlreadyLinked);
+
+        // Perturb ONE input: the stored oid is another person's — and a half-written row (tenant only) is a link too.
+        ContactBindingDecision.DecideHomeLinkWrite(
+                HomeLinkLookup.Of(Guest(GuestUser, tenant: LinkTenant, oid: Guid.NewGuid())), HomeLinkLookup.Of(), LinkTenant, LinkOid)
+            .Action.Should().Be(HomeLinkWriteAction.Collision);
+        ContactBindingDecision.DecideHomeLinkWrite(
+                HomeLinkLookup.Of(Guest(GuestUser, tenant: LinkTenant)), HomeLinkLookup.Of(), LinkTenant, LinkOid)
+            .Action.Should().Be(HomeLinkWriteAction.Collision);
+    }
+
+    [Fact]
+    public void DecideHomeLinkWrite_ItsOwnPair_InAFormThe046ReadCannotMatch_OrAlsoOnAnotherSystemUser_IsACollision()
+    {
+        // Braces: the same GUID, but the 046 resolution's D-form filter never finds it, so sign-in would still fail.
+        var braced = new HomeLinkRow(GuestUser, false, LinkTenant.ToString("B"), LinkOid.ToString("D"), "W/\"7\"");
+        ContactBindingDecision.DecideHomeLinkWrite(HomeLinkLookup.Of(braced), HomeLinkLookup.Of(), LinkTenant, LinkOid)
+            .Action.Should().Be(HomeLinkWriteAction.Collision);
+
+        // A second holder of the same pair: the 046 resolution denies it as ambiguous, so "already linked" would mislead.
+        var own = Guest(GuestUser, tenant: LinkTenant, oid: LinkOid);
+        var second = new HomeLinkRow(OtherUser, false, LinkTenant.ToString("D"), LinkOid.ToString("D"));
+        ContactBindingDecision.DecideHomeLinkWrite(HomeLinkLookup.Of(own), HomeLinkLookup.Of(own, second), LinkTenant, LinkOid)
+            .Action.Should().Be(HomeLinkWriteAction.Collision);
+    }
+
+    [Fact]
+    public void DecideHomeLinkWrite_ThePairOnAnotherSystemUser_IsACollision_WhateverItsState()
+    {
+        var holder = new HomeLinkRow(OtherUser, true, LinkTenant.ToString("D"), LinkOid.ToString("D"));
+
+        ContactBindingDecision.DecideHomeLinkWrite(HomeLinkLookup.Of(Guest(GuestUser)), HomeLinkLookup.Of(holder), LinkTenant, LinkOid)
+            .Should().Be(new HomeLinkWriteDecision(HomeLinkWriteAction.Collision, GuestUser));
+    }
+
+    [Fact]
+    public void DecideHomeLinkWrite_NoEnabledRow_IsNoSystemUserOrDisabled_AndTwoEnabledRowsAreAmbiguous()
+    {
+        ContactBindingDecision.DecideHomeLinkWrite(HomeLinkLookup.Of(), HomeLinkLookup.Of(), LinkTenant, LinkOid)
+            .Action.Should().Be(HomeLinkWriteAction.NoSystemUser);
+        ContactBindingDecision.DecideHomeLinkWrite(HomeLinkLookup.Of(Guest(GuestUser, disabled: true)), HomeLinkLookup.Of(), LinkTenant, LinkOid)
+            .Action.Should().Be(HomeLinkWriteAction.SystemUserDisabled);
+        ContactBindingDecision.DecideHomeLinkWrite(HomeLinkLookup.Of(Guest(GuestUser, disabled: null)), HomeLinkLookup.Of(), LinkTenant, LinkOid)
+            .Action.Should().Be(HomeLinkWriteAction.SystemUserDisabled, "an unreadable state is never treated as enabled");
+        ContactBindingDecision.DecideHomeLinkWrite(
+                HomeLinkLookup.Of(Guest(GuestUser), Guest(OtherUser)), HomeLinkLookup.Of(), LinkTenant, LinkOid)
+            .Should().Be(new HomeLinkWriteDecision(HomeLinkWriteAction.Deny, DenyCode: ContactBindingDecision.DenyGuestSystemUserAmbiguous));
+    }
+
+    [Fact]
+    public void DecideHomeLinkWrite_AFailedOrMissingRead_OfEitherLookup_Denies_AndNeverWrites()
+    {
+        var target = HomeLinkLookup.Of(Guest(GuestUser));
+
+        ContactBindingDecision.DecideHomeLinkWrite(HomeLinkLookup.Failed, HomeLinkLookup.Of(), LinkTenant, LinkOid)
+            .DenyCode.Should().Be(ContactBindingDecision.DenyContactLookupFailed);
+        ContactBindingDecision.DecideHomeLinkWrite(HomeLinkLookup.ColumnMissing, HomeLinkLookup.Of(), LinkTenant, LinkOid)
+            .DenyCode.Should().Be(ContactBindingDecision.DenyBindingColumnMissing);
+        ContactBindingDecision.DecideHomeLinkWrite(target, HomeLinkLookup.Failed, LinkTenant, LinkOid)
+            .Should().Be(new HomeLinkWriteDecision(HomeLinkWriteAction.Deny, DenyCode: ContactBindingDecision.DenyContactLookupFailed));
+    }
 
     private static CollisionParty Party(IdentityCollisionReason reason, Guid oid,
         IdentityPlaneMarker plane = IdentityPlaneMarker.Workforce)

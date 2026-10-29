@@ -32,7 +32,7 @@
  * @see D-08    — data-refreshed restore
  */
 
-import { registerWorkspaceWidget } from '../../registry/WorkspaceWidgetRegistry';
+import { hasWorkspaceWidget, registerWorkspaceWidget } from '../../registry/WorkspaceWidgetRegistry';
 import { createWorkspaceWrapper } from './WorkspaceWidgetWrapper';
 import { safeRegister } from '@spaarke/ui-components';
 import type { WorkspaceWidgetComponent } from '../../types/widget-types';
@@ -177,6 +177,13 @@ const DISPATCHER_OPT_OUT = assistantContractOptOut(
 const METRICS_DASHBOARD_OPT_OUT = assistantContractOptOut(
   'Standalone metrics/report dashboard — no parameterized overview tool and no per-item cards ' +
     '(outside R3 FR-06/07 scope).'
+);
+
+// spaarke-ontology-platform-r1 task 059 — the Worklist. Its lists are the Signal read route's answer (D-15); the Assistant's
+// part is the Briefing narrative written from those same lists (W-10, task 062), not a second overview tool over the grid.
+const WORKLIST_OPT_OUT = assistantContractOptOut(
+  'Worklist — the lists come from the Signal read route; the Assistant narrates them in the Briefing (task 062) and does not ' +
+    'query or order them through an overview tool (outside R3 FR-06/07 scope).'
 );
 
 // ---------------------------------------------------------------------------
@@ -1037,6 +1044,36 @@ safeRegisterWidget(
 );
 
 // ---------------------------------------------------------------------------
+// spaarke-ontology-platform-r1 task 059 — Worklist (Decide / Do lanes + closed sets).
+//
+// `WorklistWorkspaceWidget.tsx` is a thin host over the shared `WorklistWidget` (`@spaarke/ui-components`): it supplies the
+// authenticated Signal read route client, the wizard's lookup search and the email reconciliation card (task 054) and nothing
+// else. The decision wizard is mounted by the Console shell (task 058), so nothing is registered for it here. The type string
+// `worklist` is distinct from every other registration (ADR-039 Path C — surface identity stays in code).
+// ---------------------------------------------------------------------------
+
+safeRegisterWidget(
+  'worklist',
+  {
+    displayName: 'Worklist',
+    category: 'data',
+    icon: 'TaskListSquareLtrRegular',
+    // One worklist per user: a second tab would show the same lists.
+    allowMultiple: false,
+    // defaultOrder=247: next to Email (245) and Reconciliation (246), whose tab the aggregate card opens.
+    defaultOrder: 247,
+    // A page of lanes and counts, not a grid of one entity.
+    contextType: 'dashboard',
+    // FR-15 (task 050): explicit opt-out — see WORKLIST_OPT_OUT.
+    assistantContract: WORKLIST_OPT_OUT,
+  },
+  () =>
+    import('./WorklistWorkspaceWidget').then(m => ({
+      default: m.WorklistWorkspaceWidget as unknown as import('../../types/widget-types').WorkspaceWidgetComponent,
+    }))
+);
+
+// ---------------------------------------------------------------------------
 // ai-spaarke-ai-workspace-UI-r1 #7 (2026-06-08) — Metrics dashboards
 //
 // Each dashboard ("Matters Report", "Invoice Report", "Project Report", …) is
@@ -1185,4 +1222,45 @@ registerWorkspaceWidget(
 export function registerWorkspaceWidgets(): void {
   // All registrations execute at module evaluation time (top-level side effects above).
   // This function is a no-op that exists for explicitness at the call site.
+}
+
+// ---------------------------------------------------------------------------
+// spaarke-ontology-platform-r1 task 104 — Ontology admin (D-22, FR-56). GATED: NOT registered at module load.
+//
+// Unlike every registration above, this one runs only when `registerOntologyAdminWidget()` is called, and the only caller is
+// `ontologyAdminGate.ts`, once the BFF capability probe has answered, AS THE CALLER, that they hold prvCreatesprk_PolicyVersion.
+// A user without the Spaarke Ontology Administrator role never has the type registered, so nothing can open the tab for them.
+// The registration decides what is SHOWN only: every admin write route authorizes itself as the caller.
+// ---------------------------------------------------------------------------
+
+/** The registered type string of the Ontology admin tab (ADR-039 Path C: surface identity stays in code). */
+export const ONTOLOGY_ADMIN_WIDGET_TYPE = 'ontology-admin';
+
+const ONTOLOGY_ADMIN_OPT_OUT = assistantContractOptOut(
+  'Ontology admin — an administration surface for rules and triage categories; the Assistant does not query or act on it ' +
+    '(outside R3 FR-06/07 scope).'
+);
+
+/** Registers the Ontology admin tab. Call it only when the capability probe said yes (`ontologyAdminGate.ts`). Idempotent. */
+export function registerOntologyAdminWidget(): void {
+  if (hasWorkspaceWidget(ONTOLOGY_ADMIN_WIDGET_TYPE)) return;
+  safeRegisterWidget(
+    ONTOLOGY_ADMIN_WIDGET_TYPE,
+    {
+      displayName: 'Ontology admin',
+      category: 'admin',
+      icon: 'ShieldTaskRegular',
+      // One admin tab: a second would show the same areas.
+      allowMultiple: false,
+      // After the worklist (247) and the metrics dashboards (300s): an operator surface, last in any listing.
+      defaultOrder: 400,
+      // FR-15 (task 050): explicit opt-out — see ONTOLOGY_ADMIN_OPT_OUT.
+      assistantContract: ONTOLOGY_ADMIN_OPT_OUT,
+    },
+    () =>
+      import('./OntologyAdminWorkspaceWidget').then(m => ({
+        default:
+          m.OntologyAdminWorkspaceWidget as unknown as import('../../types/widget-types').WorkspaceWidgetComponent,
+      }))
+  );
 }

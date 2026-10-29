@@ -52,7 +52,9 @@ public sealed record BudgetInquiryResult(
 /// <c>POST /api/communications/send</c> uses. Concrete (ADR-010); <see cref="SendAsync"/> is virtual only as the test seam
 /// for the Graph boundary, the <see cref="CommunicationService"/> precedent.
 /// </summary>
-public class InquiryEmailSender(CommunicationService communication, IHttpContextAccessor http)
+/// <remarks>Task 160 (D-181): <paramref name="facts"/> adds, at send time, the record link chosen by recipient and the record's name for the
+/// footer. Optional so the test seams that build a sender without it keep working; DI always supplies it.</remarks>
+public class InquiryEmailSender(CommunicationService communication, IHttpContextAccessor http, InquiryRecordFacts? facts = null)
 {
     /// <summary>Sends the inquiry email, associated with the matter and the service request. Throws on failure.</summary>
     /// <returns>The <c>sprk_communication</c> id when the core tracked one.</returns>
@@ -61,8 +63,22 @@ public class InquiryEmailSender(CommunicationService communication, IHttpContext
         var context = http.HttpContext
             ?? throw new InvalidOperationException("The inquiry email is sent as the signed-in user and needs an HTTP request.");
 
-        var response = await communication.SendAsync(Build(request, serviceRequestId), context, ct).ConfigureAwait(false);
+        var send = await PrepareAsync(request, serviceRequestId, ct).ConfigureAwait(false);
+        var response = await communication.SendAsync(send, context, ct).ConfigureAwait(false);
         return response.CommunicationId;
+    }
+
+    /// <summary>
+    /// The send request as <see cref="SendAsync"/> hands it to the communication core: the record facts (label and link lines, read
+    /// at send time) folded into <see cref="Build"/>. Its own method so the test reaches the real wiring without a Graph send.
+    /// </summary>
+    internal async Task<SendCommunicationRequest> PrepareAsync(BudgetInquiryRequest request, Guid serviceRequestId, CancellationToken ct)
+    {
+        // The commit route sets MatterId only for a matter core, so the inquiry's core record is always that matter.
+        var extras = facts is null
+            ? null
+            : await facts.ResolveAsync(BudgetInquiryExecutor.MatterTable, request.MatterId, request.To ?? [], ct).ConfigureAwait(false);
+        return Build(request, serviceRequestId, extras);
     }
 
     /// <summary>
@@ -73,23 +89,33 @@ public class InquiryEmailSender(CommunicationService communication, IHttpContext
     /// <c>sprk_servicerequest.sprk_regardingcommunication</c> because that is a second write that could fail AFTER the
     /// email went out. The matter stays reachable through <c>sprk_servicerequest.sprk_regardingmatter</c> and is still the
     /// second association (counted, not mapped). Plain text: the wizard's body is plain text.
+    /// <para>Task 160 (D-181; owner 2026-10-23): the service request's <c>EntityName</c> names the RECORD, "{core name} ({core number})"
+    /// with no "Budget inquiry:" prefix (the subject already says so), because it is both the footer's record reference and
+    /// <c>sprk_communication.sprk_regardingrecordname</c>. When the record's name could not be read it is the inquiry's own name (its
+    /// subject), never a logical name and GUID. The link lines follow the body.</para>
     /// </summary>
-    internal static SendCommunicationRequest Build(BudgetInquiryRequest request, Guid serviceRequestId)
+    internal static SendCommunicationRequest Build(BudgetInquiryRequest request, Guid serviceRequestId, InquiryEmailExtras? extras = null)
     {
         var to = request.To?.Where(a => !string.IsNullOrWhiteSpace(a)).Select(a => a.Trim()).ToArray() ?? [];
         if (to.Length == 0)
             throw new ArgumentException("An inquiry email needs at least one recipient.", nameof(request));
 
+        var lines = extras?.LinkLines ?? [];
         return new SendCommunicationRequest
         {
             To = to,
             Subject = request.Subject,
-            Body = request.Body,
+            Body = lines.Count > 0 ? $"{request.Body}\n\n{string.Join("\n", lines)}" : request.Body,
             BodyFormat = BodyFormat.PlainText,
             SendMode = SendMode.User,
             Associations =
             [
-                new CommunicationAssociation { EntityType = "sprk_servicerequest", EntityId = serviceRequestId },
+                new CommunicationAssociation
+                {
+                    EntityType = "sprk_servicerequest",
+                    EntityId = serviceRequestId,
+                    EntityName = extras?.RecordLabel ?? InquiryRecordFacts.RecordLabel(request.Subject, null),
+                },
                 new CommunicationAssociation { EntityType = "sprk_matter", EntityId = request.MatterId },
             ],
         };
@@ -125,7 +151,7 @@ public sealed class BudgetInquiryExecutor(
         ["sprk_name", "sprk_direction", "sprk_regardingmatter", "sprk_regardingrecordid", "sprk_regardingrecordtype", "sprk_regardingrecordtypelogicalname"];
 
     private const string RecordTypeSet = "sprk_recordtype_refs";
-    private const string MatterTable = "sprk_matter";
+    internal const string MatterTable = "sprk_matter";
 
     /// <summary>
     /// Everything that can refuse the inquiry, WITHOUT writing or sending: confirmation, shape, the caller's Create on the
@@ -146,17 +172,17 @@ public sealed class BudgetInquiryExecutor(
             return typed.Refusal;
 
         var item = BuildItem(request, typed.TypeId);
-        var me = await OwnedChildWrite.WhoAmIAsync(user, ct).ConfigureAwait(false);
+        var me = await CallerWriteAuthorization.WhoAmIAsync(user, ct).ConfigureAwait(false);
         if (me.Failure is not null)
             return new(BudgetInquiryOutcome.Refused, Error: me.Failure.ErrorMessage ?? "The calling user could not be identified.");
 
-        var check = await OwnedChildWrite.CheckCallerMayCreateAsync(user, me.SystemUserId, Table, item, null, ct).ConfigureAwait(false);
+        var check = await CallerWriteAuthorization.CheckCallerMayCreateAsync(user, me.SystemUserId, Table, item, null, ct).ConfigureAwait(false);
         if (!check.Succeeded)
             return new(BudgetInquiryOutcome.Refused,
                 Error: check.Denied ?? check.ClientFailure?.ErrorMessage ?? "You do not have permission to send this inquiry.");
 
         var owner = await ownership.ResolveOwnerAsync(
-            RecordOwnershipContext.ForParents(OwnedChildWrite.ParentsOf(item), CallerObjectId(), me.SystemUserId) with
+            OwnedChildWrite.OwnershipOf(Table, item, CallerObjectId(), me.SystemUserId) with // 194b R (B3): the one builder
             {
                 RequestedBy = RecordRequester.Of(me.SystemUserId),
             },
@@ -189,7 +215,7 @@ public sealed class BudgetInquiryExecutor(
     /// <summary>
     /// The <c>sprk_recordtype_ref</c> catalog row for <c>sprk_matter</c>, read AS THE CALLER (the same read the pair rule makes
     /// of the type row). A <c>sprk_servicerequest</c> is a core table with no pair agreement column, so the ADR-024 pair
-    /// (<c>sprk_regardingrecordid</c>) is accepted only TYPED (<see cref="OwnedChildWrite.PairTargetAsync"/>); an untyped pair
+    /// (<c>sprk_regardingrecordid</c>) is accepted only TYPED (<see cref="CallerWriteAuthorization.PairTargetAsync"/>); an untyped pair
     /// is refused 400 Invalid, however the lookup beside it agrees.
     /// </summary>
     private async Task<(Guid TypeId, BudgetInquiryResult? Refusal)> ResolveMatterTypeAsync(CancellationToken ct)

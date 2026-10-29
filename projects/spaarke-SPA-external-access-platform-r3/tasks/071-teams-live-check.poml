@@ -1,9 +1,9 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <task id="071" project="spaarke-SPA-external-access-platform-r3">
   <metadata>
-    <title>Teams live check with the owner's test guest (FR-21)</title>
+    <title>Teams live check: workforce contact, licensed user, unlisted directory; desktop, web, mobile (FR-21, ADR-028 A9)</title>
     <phase>7 Deploy and verify</phase>
-    <gate>after 070 — owner-driven session</gate>
+    <gate>after 070, 075, 076 — owner-driven session</gate>
     <status>not-started</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Live verification with a written result</rigor-reason>
@@ -13,7 +13,7 @@
     <parallel-group>none</parallel-group>
     <parallel-safe>false</parallel-safe>
     <parallel-reason>live, owner-driven</parallel-reason>
-    <deps>070</deps>
+    <deps>070, 075, 076</deps>
     <tags>auth, e2e-test</tags>
     <estimated-effort>2-4 hours</estimated-effort>
   </metadata>
@@ -52,7 +52,7 @@
 
   <steps mode="prescriptive">
     <step order="0" name="Context + rigor declaration">Load the knowledge files, read the relevant files listed above, declare rigor and model tier per task-execute Step 0.5.</step>
-    <step order="1">Prepare a checklist (4 runs: member/guest × desktop/web).</step>
+    <step order="1">Prepare a checklist (9 runs: workforce contact / licensed user / unlisted directory × desktop / web / mobile; see notes).</step>
     <step order="2">Run each with the owner; capture the sign-in path and the decoded claims.</step>
     <step order="3">If a run fails, capture the AADSTS code; if it names the broker, test adding the broker pre-authorization on the dev app (owner-approved), re-run, and record.</step>
     <step order="4">Write the result; if stamps need the broker, send provisioning an H3 request (notes/coordination/).</step>
@@ -88,12 +88,14 @@
   </outputs>
 
   <acceptance-criteria>
-    <criterion testable="true">All four runs are recorded with path used, masked claims and outcome.</criterion>
+    <criterion testable="true">All nine runs (workforce contact, licensed user, unlisted directory × Teams desktop, web, mobile) are recorded with path used, masked claims and outcome (see notes: scope updated 2026-10-13).</criterion>
     <criterion testable="true">The broker pre-authorization question is answered yes/no with evidence.</criterion>
     <criterion testable="true">If yes, an H3 request is in notes/coordination/ for provisioning.</criterion>
   </acceptance-criteria>
 
-  <notes>Spec FR-21, success criterion 7. Tags include auth but the task makes no code change.</notes>
+  <notes>Spec FR-21, success criterion 7. Tags include auth but the task makes no code change.
+
+    SCOPE UPDATED 2026-10-13 (ADR-028 A9 Teams amendment, owner "yes include teams"): Teams now signs in BOTH populations with the multitenant client through NAA (authority = the Teams context tid; task 075). The runs become: workforce contact (Dewey Cheatham member: profile form, then workspace), licensed user (company account: stored link, resolves to the systemuser), and a member of an unlisted directory (not-set-up page, no BFF call), each on Teams desktop, web and MOBILE (iOS or Android). The member/guest × desktop/web runs above are replaced by these nine; the broker pre-authorization question and the K1/K3 constraints still apply. Teams mobile NAA is unverified (design note §12): record any failure exactly and escalate. Acceptance: all nine runs recorded with path used, masked claims and outcome.</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>

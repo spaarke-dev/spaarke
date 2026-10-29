@@ -447,9 +447,9 @@ git rebase --abort
 ### Cleaning Up After Project Completion
 
 ```powershell
-# After PR is merged, remove the worktree
+# After PR is merged, remove the worktree. Use the safe script, not a bare git worktree remove / rm -rf
 cd C:\code_files\spaarke
-git worktree remove ../spaarke-wt-project-a
+pwsh scripts/worktree/Remove-WorktreeSafe.ps1 -Path ../spaarke-wt-project-a   # add -Force to discard uncommitted changes; -WhatIf to preview
 
 # Optionally delete the local branch
 git branch -d work/project-a
@@ -457,6 +457,28 @@ git branch -d work/project-a
 # Delete remote branch (usually done via PR merge)
 git push origin --delete work/project-a
 ```
+
+
+#### Never link between worktrees, never delete a worktree root recursively
+
+Do not point one worktree's `node_modules` (or any folder) at another worktree with a junction or symlink to skip
+`npm install`. On 2026-10-13 a bulk cleanup (`git worktree remove --force` plus an `rm -rf` fallback) deleted
+THROUGH such a junction: it emptied the other worktree's `node_modules` and, through npm's own `@spaarke/auth` /
+`@spaarke/sdap-client` junctions inside it, 70 tracked files. `git worktree remove` itself, forced or not, follows junctions. Run
+`npm install --legacy-peer-deps --no-audit --no-fund` in the worktree instead.
+
+Two mechanical guards back this up:
+
+- `scripts/worktree/Remove-WorktreeSafe.ps1` removes worktrees. It refuses the main worktree, an unregistered folder
+  and (without `-Force`) a dirty worktree; unlinks every junction/symlink as a link only (never descending into one);
+  reports links that point outside the worktree; then runs `git worktree remove`. It never falls back to a recursive
+  delete: a path git cannot remove is reported for a human. It refuses locked worktrees and touches nothing if any
+  folder cannot be scanned. Tests: `tests/scripts/Remove-WorktreeSafe.Tests.ps1`.
+- The PreToolUse hook `scripts/quality/guard-worktree-links.py` (Bash and PowerShell tools) denies creating a link
+  whose two ends sit in different worktrees, and denies `rm -r`, `Remove-Item -Recurse`, `rd /s` or
+  `git worktree remove` aimed exactly at a worktree root or at `.claude/worktrees`. Deleting a subfolder inside a
+  worktree is still allowed. It reads literal paths only (not loops, variables or pipelines), so the script is the
+  control and the hook is the reminder. Tests: `python -m unittest discover -s scripts/quality/tests`.
 
 ---
 

@@ -48,7 +48,7 @@ namespace Sprk.Bff.Api.Tests.Integration.DataMutation.Signals;
 /// dismissal reasons; D-119; the gate tier; the server-derived core and owner; step 6 against a system closure.
 /// Option values are the live ones (SignalWriter constants; sprk_decisionrecord read 2026-10-10).
 /// </remarks>
-public sealed class DecisionCommitServiceTests
+public sealed partial class DecisionCommitServiceTests
 {
     private static readonly DateTimeOffset Now = new(2026, 10, 11, 12, 0, 0, TimeSpan.Zero);
     private static readonly Guid Caller = Guid.Parse("c0430000-0000-4000-8000-000000000001");
@@ -77,15 +77,23 @@ public sealed class DecisionCommitServiceTests
     private static readonly Guid SecureTeam = Guid.Parse("c0430000-0000-4000-8000-000000000074");
     private static readonly Guid OrdinaryTeam = Guid.Parse("c0430000-0000-4000-8000-000000000076");
     private static readonly Guid ReminderVersion = Guid.Parse("c0430000-0000-4000-8000-000000000075");
+    private static readonly Guid ReassignVersion = Guid.Parse("c0430000-0000-4000-8000-000000000077");
 
     private const string PathBPlan = "{\"actions\":[\"send-budget-inquiry\",\"revise-budget\",\"approve-variance\"],\"nextSteps\":[\"add-todo\",\"send-email\"]}";
     private const string DoPlan = "{\"actions\":[\"mark-complete\",\"reschedule\"],\"nextSteps\":[\"add-todo\"]}";
     private const string ReminderPlan = "{\"actions\":[\"send-reminder\",\"mark-complete\"]}";
+    private const string ReassignPlan = "{\"actions\":[\"reassign\",\"mark-complete\"],\"nextSteps\":[\"add-todo\"]}";
 
     private const int Open = SignalWriter.SignalStatusOpen;
     private const int Resolved = SignalWriter.SignalStatusResolved;
 
     // ── The rig ──────────────────────────────────────────────────────────────────────────────────────────────────
+
+    /// <summary>Uac-r2 re-check F1: the ontology writer's own application user (WhoAmI on its connection), the <c>createdby</c> of its records.</summary>
+    private static readonly Guid WriterUser = Guid.Parse("3121bf1b-9fbf-f111-aaaf-0022482913fc");
+
+    /// <summary>Uac-r2 re-check F1: a Console user, who has Deep Create on <c>sprk_decisionrecord</c>.</summary>
+    private static readonly Guid ConsoleCreator = Guid.Parse("c0430000-0000-4000-8000-0000000000cc");
 
     private sealed class Rig
     {
@@ -101,10 +109,38 @@ public sealed class DecisionCommitServiceTests
         public Exception? FailRecordWith { get; set; }
         public Action<Guid>? BeforeSignalUpdate { get; set; }
         public List<Entity> ExistingRecords { get; } = new();
+
+        /// <summary>Task 161 (D-180, fix round 1 F1-a): how many ACTIVE budgets the matter really has, as the BFF's own (app-only) read
+        /// sees them; null: the read is not scripted and throws, which the routes must treat as "cannot be counted".
+        /// <see cref="AppBudgetsFault"/> throws instead when set.</summary>
+        public int? ActiveBudgets { get; set; }
+
+        /// <summary>How many of those the CALLER's own read of <c>sprk_budgets</c> returns (a Deep Read cannot see a budget owned in a
+        /// parent business unit). Null: the caller sees what is there. The routes must not rely on it.</summary>
+        public int? CallerSeesBudgets { get; set; }
+
+        public Exception? AppBudgetsFault { get; set; }
+
+        /// <summary>The caller-identity reads of <c>sprk_budgets</c> (the old, wrong source of "has no budget").</summary>
+        public List<string> BudgetReads { get; } = new();
+
+        /// <summary>The app-only reads of <c>sprk_budget</c>.</summary>
+        public List<QueryExpression> AppBudgetReads { get; } = new();
+
+        /// <summary>Uac-r2 re-check F1: every query the commit service's reads asked (the stored-record lookup included).</summary>
+        public List<QueryExpression> QueriesAsked { get; } = new();
+
+        /// <summary>Uac-r2 re-check F1: when set, WhoAmI on the writer's connection throws it; and how often it was asked.</summary>
+        public Exception? WhoAmIFault { get; set; }
+
+        public int WhoAmICalls;
         public Mock<IOrganizationServiceAsync2> Org { get; } = new();
         public Mock<IGenericEntityService> Entities { get; } = new();
         public Mock<IDataverseUserClient> User { get; } = new();
         public Mock<CallerRecordAccessProbe> Probe { get; }
+
+        /// <summary>Task 170: when set, the commit asks THIS probe (the shipped one, wire seams counted) instead of <see cref="Probe"/>.</summary>
+        public CallerRecordAccessProbe? ProbeOverride { get; set; }
         public InMemoryTenantCache Ledger { get; } = new();
         public Mock<DecisionCommitFollowUps> FollowUps { get; }
         public FakeTimeProvider Clock { get; } = new(Now);
@@ -156,6 +192,40 @@ public sealed class DecisionCommitServiceTests
         public HashSet<Guid> CallerCannotReadSubject { get; } = new();
 
         public DataverseUserResponse? SubjectReadFails { get; set; }
+
+        /// <summary>Task 154 (D-111): a To Do's <c>sprk_notes</c> as the caller reads it (the inquiry hint), returned when selected.</summary>
+        public Dictionary<Guid, string> TodoNotes { get; } = new();
+
+        /// <summary>Task 154: a fault answer for the caller's read of a To Do's notes only.</summary>
+        public DataverseUserResponse? TodoNotesReadFails { get; set; }
+
+        /// <summary>Task 154 (adversarial pass 1): a To Do's matter (<c>_sprk_regardingmatter_value</c>), returned with its notes.</summary>
+        public Dictionary<Guid, Guid> TodoMatter { get; } = new();
+
+        /// <summary>Task 154 (adversarial pass 1): service requests as the caller reads them: their matter, direction and statecode.
+        /// One that is absent is 404.</summary>
+        public Dictionary<Guid, (Guid Matter, int Direction, int State)> Inquiries { get; } = new();
+
+        /// <summary>The caller's reads of service requests (task 154).</summary>
+        public List<string> InquiryReads { get; } = new();
+
+        /// <summary>Task 154 pass 2 F3: a fault answer for the caller's GET of a hinted inquiry.</summary>
+        public DataverseUserResponse? InquiryReadFails { get; set; }
+
+        /// <summary>Task 154 pass 2 F3: the answer to the caller's list of the matter's open inquiries, instead of the list (a fault,
+        /// or a page with an <c>@odata.nextLink</c>).</summary>
+        public DataverseUserResponse? InquiryListFails { get; set; }
+
+        /// <summary>Task 154 pass 2 F3: thrown by the caller's list of the matter's open inquiries.</summary>
+        public Exception? InquiryListThrows { get; set; }
+
+        /// <summary>Task 150 (D-141): subjects the caller can read but that are not their own work (the "mine" read omits them).</summary>
+        public HashSet<Guid> CallerNotMine { get; } = new();
+
+        /// <summary>Task 150: a fault answer for the Do-lane "mine" read, and every such read asked.</summary>
+        public DataverseUserResponse? MineReadFails { get; set; }
+
+        public List<string> MineAsked { get; } = new();
         public Dictionary<Guid, Guid> CallerSeesCore { get; } = new();
         public List<(string Set, Guid Id)> RightsAsked { get; } = new();
 
@@ -175,9 +245,29 @@ public sealed class DecisionCommitServiceTests
             Entities.Setup(e => e.GetEntitySetNameAsync("sprk_todo", It.IsAny<CancellationToken>())).ReturnsAsync("sprk_todos");
             Entities.Setup(e => e.RetrieveAsync("sprk_policyversion", It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync((string _, Guid id, string[] _, CancellationToken _) =>
-                    new Entity("sprk_policyversion", id) { ["sprk_decisionplan"] = id == DoVersion ? DoPlan : id == ReminderVersion ? ReminderPlan : PathBPlan });
+                    new Entity("sprk_policyversion", id) { ["sprk_decisionplan"] = id == DoVersion ? DoPlan : id == ReminderVersion ? ReminderPlan : id == ReassignVersion ? ReassignPlan : PathBPlan });
+            // The stored-record lookup is narrowed by createdby (uac-r2 re-check F1): like Dataverse, answer only the rows whose createdby
+            // equals the query's createdby condition, when it has one.
             Entities.Setup(e => e.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
-                .ReturnsAsync(() => new EntityCollection(ExistingRecords.ToList()));
+                .ReturnsAsync((QueryExpression query, CancellationToken _) =>
+                {
+                    QueriesAsked.Add(query);
+                    if (query.EntityName == "sprk_budget")
+                    {
+                        // Task 161 (F1-a): the matter's active budgets, as the BFF's own app-only read sees them.
+                        AppBudgetReads.Add(query);
+                        if (AppBudgetsFault is { } appFault)
+                            throw appFault;
+                        if (ActiveBudgets is not { } actual)
+                            throw new InvalidOperationException("the budget count is not scripted");
+                        return new EntityCollection(Enumerable.Range(0, Math.Min(actual, 1)).Select(_ => new Entity("sprk_budget", Budget)).ToList());
+                    }
+
+                    var createdBy = query.Criteria.Conditions.FirstOrDefault(c => c.AttributeName == "createdby" && c.Operator == ConditionOperator.Equal);
+                    return new EntityCollection(ExistingRecords
+                        .Where(r => createdBy is null || Equals(r.GetAttributeValue<EntityReference>("createdby")?.Id, createdBy.Values.Single()))
+                        .ToList());
+                });
             Entities.Setup(e => e.RetrieveAsync("sprk_todo", It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
                 .Returns((string _, Guid id, string[] columns, CancellationToken _) =>
                     (columns.Contains("sprk_assignedto") ? TodoReadFault : TodoFilingReadFault) is { } fault
@@ -203,7 +293,16 @@ public sealed class DecisionCommitServiceTests
                     Records.Add(e);
                     return Task.FromResult(RecordId);
                 });
-            Org.Setup(o => o.ExecuteAsync(It.IsAny<OrganizationRequest>(), It.IsAny<CancellationToken>()))
+            // Uac-r2 re-check F1: WhoAmI on the writer's own connection (the createdby of every row it creates).
+            Org.Setup(o => o.ExecuteAsync(It.IsAny<Microsoft.Crm.Sdk.Messages.WhoAmIRequest>(), It.IsAny<CancellationToken>()))
+                .Returns((OrganizationRequest _, CancellationToken _) =>
+                {
+                    WhoAmICalls++;
+                    return WhoAmIFault is { } fault
+                        ? Task.FromException<OrganizationResponse>(fault)
+                        : Task.FromResult<OrganizationResponse>(new Microsoft.Crm.Sdk.Messages.WhoAmIResponse { Results = { ["UserId"] = WriterUser } });
+                });
+            Org.Setup(o => o.ExecuteAsync(It.IsAny<UpdateRequest>(), It.IsAny<CancellationToken>()))
                 .Returns((OrganizationRequest request, CancellationToken _) =>
                 {
                     var target = ((UpdateRequest)request).Target;
@@ -225,7 +324,7 @@ public sealed class DecisionCommitServiceTests
             PlanReads = new DecisionPlanReadStamp(Ledger, Clock, NullLogger<DecisionPlanReadStamp>.Instance);
 
             Probe = new Mock<CallerRecordAccessProbe>(
-                new HttpClient(), new ConfigurationBuilder().Build(), NullLogger<CallerRecordAccessProbe>.Instance, null!)
+                new HttpClient(), new ConfigurationBuilder().Build(), NullLogger<CallerRecordAccessProbe>.Instance, null!, null!)
             { CallBase = false };
             Probe.Setup(p => p.GetCallerSystemUserIdAsync(It.IsAny<string?>(), It.IsAny<CancellationToken>())).ReturnsAsync(() => CallerUnresolved ? null : Caller);
             // FR-51: the caller's rights on the subject and the core record; every record is granted unless a test takes it away.
@@ -342,8 +441,24 @@ public sealed class DecisionCommitServiceTests
         {
             if (CallerUnresolved)
                 return DataverseUserResponse.Fail(401, DataverseUserClientErrorCodes.UserContextRequired, "no user");
-            if (path == "WhoAmI")
+            if (path is "WhoAmI" or "WhoAmI()")
                 return Ok(new Dictionary<string, object?> { ["UserId"] = Caller.ToString("D") });
+            if (path.Contains("&$filter=Microsoft.Dynamics.CRM.In(PropertyName='", StringComparison.Ordinal))
+            {
+                // Task 150 (D-141): the worklist's Do-lane "mine" read of a subject, AS THE CALLER. The subject is the caller's own
+                // work unless a test says otherwise.
+                var pk = System.Text.RegularExpressions.Regex.Match(path, "PropertyName='(\\w+)'").Groups[1].Value;
+                var id = Guid.Parse(System.Text.RegularExpressions.Regex.Match(path, "PropertyValues=\\['([0-9a-f-]{36})'").Groups[1].Value);
+                MineAsked.Add(path);
+                if (MineReadFails is { } mineFault)
+                    return mineFault;
+                return Ok(new Dictionary<string, object?>
+                {
+                    ["value"] = CallerNotMine.Contains(id) || CallerCannotReadSubject.Contains(id)
+                        ? Array.Empty<object>()
+                        : new object[] { new Dictionary<string, object?> { [pk] = id.ToString("D") } },
+                });
+            }
             if (path.StartsWith("sprk_signals(", StringComparison.Ordinal))
             {
                 var id = Guid.Parse(path["sprk_signals(".Length..path.IndexOf(')')]);
@@ -374,9 +489,56 @@ public sealed class DecisionCommitServiceTests
                 var id = Guid.Parse(path["sprk_todos(".Length..path.IndexOf(')')]);
                 if (SubjectReadFails is { } fault)
                     return fault;
-                return CallerCannotReadSubject.Contains(id)
-                    ? DataverseUserResponse.Fail(404, DataverseUserClientErrorCodes.NotFound, "no")
-                    : Ok(new Dictionary<string, object?> { ["createdon"] = "2026-01-01T00:00:00Z" });
+                var selectsNotes = path.Contains("$select=sprk_notes", StringComparison.Ordinal);
+                if (selectsNotes && TodoNotesReadFails is { } notesFault)
+                    return notesFault;
+                if (CallerCannotReadSubject.Contains(id))
+                    return DataverseUserResponse.Fail(404, DataverseUserClientErrorCodes.NotFound, "no");
+                var todo = new Dictionary<string, object?> { ["createdon"] = "2026-01-01T00:00:00Z" };
+                if (selectsNotes)
+                {
+                    todo["sprk_notes"] = TodoNotes.TryGetValue(id, out var notes) ? notes : null;
+                    todo["_sprk_regardingmatter_value"] = TodoMatter.TryGetValue(id, out var todoMatter) ? todoMatter.ToString("D") : null;
+                }
+                return Ok(todo);
+            }
+
+            if (path.StartsWith("sprk_servicerequests(", StringComparison.Ordinal))
+            {
+                InquiryReads.Add(path);
+                if (InquiryReadFails is { } inquiryFault)
+                    return inquiryFault;
+                var id = Guid.Parse(path["sprk_servicerequests(".Length..path.IndexOf(')')]);
+                return Inquiries.TryGetValue(id, out var inquiry)
+                    ? Ok(new Dictionary<string, object?> { ["statecode"] = inquiry.State, ["sprk_direction"] = inquiry.Direction })
+                    : DataverseUserResponse.Fail(404, DataverseUserClientErrorCodes.NotFound, "no");
+            }
+
+            if (path.StartsWith("sprk_servicerequests?", StringComparison.Ordinal))
+            {
+                // The matter's open outbound inquiries (the fallback), evaluated like Dataverse.
+                InquiryReads.Add(path);
+                if (InquiryListThrows is { } thrown)
+                    throw thrown;
+                if (InquiryListFails is { } listFault)
+                    return listFault;
+                var matter = Guid.Parse(System.Text.RegularExpressions.Regex.Match(path, "_sprk_regardingmatter_value eq ([0-9a-f-]{36})").Groups[1].Value);
+                var direction = int.Parse(System.Text.RegularExpressions.Regex.Match(path, "sprk_direction eq (\\d+)").Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture);
+                var state = int.Parse(System.Text.RegularExpressions.Regex.Match(path, "statecode eq (\\d+)").Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture);
+                return Ok(new Dictionary<string, object?>
+                {
+                    ["value"] = Inquiries.Where(kv => kv.Value.Matter == matter && kv.Value.Direction == direction && kv.Value.State == state)
+                        .Select(kv => new Dictionary<string, object?> { ["sprk_servicerequestid"] = kv.Key.ToString("D") }).ToList(),
+                });
+            }
+
+            if (path.StartsWith("sprk_budgets?", StringComparison.Ordinal))
+            {
+                // Task 161: the matter's active budgets, as the caller reads them.
+                BudgetReads.Add(path);
+                return (CallerSeesBudgets ?? ActiveBudgets) is { } count
+                    ? Ok(new Dictionary<string, object?> { ["value"] = Enumerable.Range(0, Math.Min(count, 1)).Select(_ => new Dictionary<string, object?> { ["sprk_budgetid"] = Budget.ToString("D") }).ToList() })
+                    : DataverseUserResponse.Fail(404, DataverseUserClientErrorCodes.NotFound, "unscripted");
             }
 
             if (path.StartsWith("sprk_matters(", StringComparison.Ordinal) || path.StartsWith("sprk_projects(", StringComparison.Ordinal))
@@ -394,7 +556,7 @@ public sealed class DecisionCommitServiceTests
 
         public DecisionCommitService Service()
         {
-            var access = new SignalCoreRecordAccess(User.Object, Entities.Object, NullLogger<SignalCoreRecordAccess>.Instance);
+            var access = new SignalCoreRecordAccess(User.Object, Entities.Object, Identity.Object, NullLogger<SignalCoreRecordAccess>.Instance);
             var plans = new DecisionPlanService(Entities.Object, NullLogger<DecisionPlanService>.Instance);
             var ownership = new Mock<IRecordOwnershipResolver>();
             ownership.Setup(o => o.ResolveOwnerAsync(It.IsAny<RecordOwnershipContext>(), It.IsAny<CancellationToken>()))
@@ -418,9 +580,9 @@ public sealed class DecisionCommitServiceTests
                 resolver = recording.Object;
             }
 
-            var records = new DecisionRecordWriter(WriterClient(), resolver, CoreAncestors(), RecordTypes, Clock, NullLogger<DecisionRecordWriter>.Instance);
+            var records = new DecisionRecordWriter(WriterClient(), resolver, CoreAncestors(), Entities.Object, RecordTypes, Clock, NullLogger<DecisionRecordWriter>.Instance, new Sprk.Bff.Api.Tests.Services.Signals.GateSharingWorld().Sharing);
             return new DecisionCommitService(access, plans, new DecisionActionExecutors(Executors.Values), records, WriterClient(),
-                Entities.Object, Probe.Object, Identity.Object, Links, LedgerStore ?? Ledger, FollowUps.Object, Lease, PlanReads, Clock, NullLogger<DecisionCommitService>.Instance);
+                Entities.Object, ProbeOverride ?? Probe.Object, Identity.Object, Links, LedgerStore ?? Ledger, FollowUps.Object, Lease, PlanReads, Clock, NullLogger<DecisionCommitService>.Instance);
         }
 
         public Task StampPlanRead(Guid signal, DateTimeOffset at) => PlanReads.StampAtAsync(Tenant, CallerOid.ToString("D"), signal, at, CancellationToken.None);
@@ -479,6 +641,7 @@ public sealed class DecisionCommitServiceTests
         private static DecisionRecordRef[] DefaultWritten(string code) => code switch
         {
             "revise-budget" => [new("sprk_budgetrevision", RevisionId), new("sprk_budget", Budget)],
+            "create-budget" => [new("sprk_budget", Budget)],
             "add-todo" => [new("sprk_todo", TodoId)],
             "send-budget-inquiry" => [new("sprk_servicerequest", ServiceRequestId), new("sprk_communication", CommunicationId)],
             "send-email" => [new("sprk_communication", Guid.Parse("c0430000-0000-4000-8000-000000000055"))],
@@ -506,6 +669,9 @@ public sealed class DecisionCommitServiceTests
 
     private static readonly IReadOnlyDictionary<string, JsonElement> ApproveValues = Values(("amount", 5000), ("note", "ok"));
 
+    private static readonly IReadOnlyDictionary<string, JsonElement> CreateBudgetValues =
+        Values(("amount", 90000m), ("reason", "No budget was ever set"));
+
     private static readonly IReadOnlyDictionary<string, JsonElement> TodoValues =
         Values(("title", "Chase the revision"), ("assignee", Assignee.ToString("D")), ("dueDate", "2026-10-20"));
 
@@ -529,6 +695,22 @@ public sealed class DecisionCommitServiceTests
             ],
             NextSteps = todo ? [new DecisionReviewNextStep { Code = "add-todo", Values = TodoValues }] : null,
             Because = "The firm agreed the scope change",
+        };
+
+    /// <summary>Task 161 (D-180): the Path B review as the wizard builds it for a matter with no active budget: Create budget in the
+    /// place Revise budget had.</summary>
+    private static DecisionReview CreateBudgetReview(bool create = true, bool inquiry = false, Guid? reviewId = null) =>
+        new()
+        {
+            ReviewId = reviewId ?? Guid.NewGuid(),
+            Confirmed = true,
+            Actions =
+            [
+                inquiry ? Take("send-budget-inquiry", InquiryValues) : Skip("send-budget-inquiry"),
+                create ? Take("create-budget", CreateBudgetValues) : Skip("create-budget"),
+                Skip("approve-variance"),
+            ],
+            Because = "The matter never had a budget",
         };
 
     private static DecisionReview Dismissal(string? code, string? detail = null) =>
@@ -796,8 +978,10 @@ public sealed class DecisionCommitServiceTests
         var rig = new Rig();
         QueryExpression? asked = null;
         rig.Entities.Setup(e => e.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
-            .Callback<QueryExpression, CancellationToken>((q, _) => asked = q)
-            .ReturnsAsync(new EntityCollection());
+            .Callback<QueryExpression, CancellationToken>((q, _) => { if (q.EntityName == "sprk_decisionrecord") asked = q; }) // the budget count is app-only too (F1-a)
+            .ReturnsAsync((QueryExpression q, CancellationToken _) => q.EntityName == "sprk_budget"
+                ? new EntityCollection(new List<Entity> { new Entity("sprk_budget", Budget) }) // the matter has a budget: Revise budget stays
+                : new EntityCollection());
         var review = PathBReview();
 
         await rig.CommitAsync(review);
@@ -1337,6 +1521,310 @@ public sealed class DecisionCommitServiceTests
 
     private static DecisionReview MarkComplete() =>
         new() { ReviewId = Guid.NewGuid(), Confirmed = true, Actions = [Take("mark-complete"), Skip("reschedule")] };
+
+    // ── Task 154 (D-111, 059 review): an inquiry's "Record the outcome" To Do is never completed by Mark complete ──────────
+
+    private static readonly Guid InquiryTodo = InquiryDispositionService.TodoIdFor(ServiceRequestId);
+
+    /// <summary>A Do Signal on <paramref name="todoId"/>, a To Do on <see cref="Matter"/>; the inquiry <see cref="ServiceRequestId"/> is an
+    /// outbound inquiry on that matter, open unless <paramref name="inquiryState"/> says otherwise.</summary>
+    private static Rig InquiryTodoRig(Guid todoId, string? notes, int inquiryState = 0)
+    {
+        var rig = new Rig();
+        rig.AddSignal(DoSignal, DecisionLane.Do, Matter, DoVersion, subjectEntity: "sprk_todo", subjectId: todoId);
+        if (notes is not null)
+            rig.TodoNotes[todoId] = notes;
+        rig.TodoMatter[todoId] = Matter;
+        rig.Inquiries[ServiceRequestId] = (Matter, BudgetInquiryExecutor.DirectionOutbound, inquiryState);
+        return rig;
+    }
+
+    private static string InquiryHint(Guid serviceRequestId) => $"{InquiryReplyTodoCreator.NotesKey}{serviceRequestId:D}";
+
+    private static readonly IReadOnlyDictionary<string, JsonElement> RescheduleValues =
+        Values(("dueDate", "2026-10-30"), ("reason", "Waiting for the client's reply"));
+
+    [Fact]
+    public async Task AnInquiryOutcomeTodo_MarkCompleteTaken_Is409DispositionRequired_AndNothingIsWritten()
+    {
+        var rig = InquiryTodoRig(InquiryTodo, InquiryHint(ServiceRequestId));
+
+        var result = await rig.CommitAsync(MarkComplete(), DoSignal);
+
+        result.Status.Should().Be(DecisionCommitStatus.Conflict, result.Detail);
+        result.ReasonCode.Should().Be(DecisionCommitReasons.InquiryDispositionRequired);
+        result.ReasonCode.Should().Be("inquiry.disposition_required");
+        rig.Writes.Should().BeEmpty();
+        rig.Records.Should().BeEmpty();
+        rig.SignalUpdates.Should().BeEmpty();
+        rig.Executors["mark-complete"].Requests.Should().BeEmpty();
+        rig.Log.Should().NotContain(l => l.StartsWith("preflight:", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task AnInquiryOutcomeTodo_RescheduleUnderTheReducedPlan_IsRecorded()
+    {
+        // The plan route offers [reschedule] (Mark complete removed); a review built from it lists only that action.
+        var rig = InquiryTodoRig(InquiryTodo, InquiryHint(ServiceRequestId));
+
+        var result = await rig.CommitAsync(
+            new DecisionReview { ReviewId = Guid.NewGuid(), Confirmed = true, Actions = [Take("reschedule", RescheduleValues)] }, DoSignal);
+
+        result.Status.Should().Be(DecisionCommitStatus.Recorded, result.Detail);
+        rig.Executors["reschedule"].Requests.Should().ContainSingle();
+        rig.Executors["mark-complete"].Requests.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task AnInquiryOutcomeTodo_AReviewThatSkipsMarkComplete_IsRecorded_TheSkipIsNotAnActionOfThePlan()
+    {
+        var rig = InquiryTodoRig(InquiryTodo, InquiryHint(ServiceRequestId));
+
+        var result = await rig.CommitAsync(
+            new DecisionReview { ReviewId = Guid.NewGuid(), Confirmed = true, Actions = [Skip("mark-complete"), Take("reschedule", RescheduleValues)] }, DoSignal);
+
+        result.Status.Should().Be(DecisionCommitStatus.Recorded, result.Detail);
+        rig.Executors["mark-complete"].Requests.Should().BeEmpty();
+    }
+
+    [Theory]
+    [InlineData(null)]                                   // no notes: an ordinary To Do
+    [InlineData("Call the client back")]                 // notes without the hint
+    [InlineData("serviceRequestId=other")]               // a hint that is not a GUID
+    public async Task AnOrdinaryTodo_StillExecutesMarkComplete(string? notes)
+    {
+        var rig = InquiryTodoRig(ItemTodo, notes);
+
+        var result = await rig.CommitAsync(MarkComplete(), DoSignal);
+
+        result.Status.Should().Be(DecisionCommitStatus.Recorded, result.Detail);
+        rig.Executors["mark-complete"].Requests.Single().Subject.Should().Be(new DecisionRecordRef("sprk_todo", ItemTodo));
+    }
+
+    [Fact]
+    public async Task ATodoWhoseHintNamesAnInquiryThatDoesNotDeriveItsId_IsOrdinary_MarkCompleteExecutes()
+    {
+        // The hint is only a hint: a To Do that copies another inquiry's hint is not that inquiry's outcome To Do.
+        var rig = InquiryTodoRig(ItemTodo, InquiryHint(ServiceRequestId));
+
+        var result = await rig.CommitAsync(MarkComplete(), DoSignal);
+
+        result.Status.Should().Be(DecisionCommitStatus.Recorded, result.Detail);
+        rig.Executors["mark-complete"].Requests.Should().ContainSingle();
+    }
+
+    [Fact]
+    public async Task AClosedInquirysOutcomeTodo_IsOrdinary_MarkCompleteExecutes()
+    {
+        // Adversarial pass 1 F1: the disposition was recorded but the To Do's completion failed (logged only); the To Do went overdue.
+        // It must not be stuck: the disposition route answers already_resolved, so Mark complete is the way out.
+        var rig = InquiryTodoRig(InquiryTodo, InquiryHint(ServiceRequestId), inquiryState: 1);
+
+        var result = await rig.CommitAsync(MarkComplete(), DoSignal);
+
+        result.Status.Should().Be(DecisionCommitStatus.Recorded, result.Detail);
+        rig.Executors["mark-complete"].Requests.Single().Subject.Should().Be(new DecisionRecordRef("sprk_todo", InquiryTodo));
+        rig.InquiryReads.Should().Equal($"sprk_servicerequests({ServiceRequestId:D})?$select=statecode,sprk_direction");
+    }
+
+    [Fact]
+    public async Task AnInquiryTheCallerCannotRead_IsOrdinary_MarkCompleteExecutes()
+    {
+        var rig = InquiryTodoRig(InquiryTodo, InquiryHint(ServiceRequestId));
+        rig.Inquiries.Clear();
+
+        var result = await rig.CommitAsync(MarkComplete(), DoSignal);
+
+        result.Status.Should().Be(DecisionCommitStatus.Recorded, result.Detail);
+    }
+
+    [Fact]
+    public async Task AnOpenInquirysOutcomeTodo_WithAValidHint_CostsOneGetOfTheInquiry_AndNoList()
+    {
+        var rig = InquiryTodoRig(InquiryTodo, InquiryHint(ServiceRequestId));
+
+        (await rig.CommitAsync(MarkComplete(), DoSignal)).ReasonCode.Should().Be(DecisionCommitReasons.InquiryDispositionRequired);
+
+        rig.InquiryReads.Should().Equal($"sprk_servicerequests({ServiceRequestId:D})?$select=statecode,sprk_direction");
+    }
+
+    [Fact]
+    public async Task AHintOnTheSecondLine_IsGuarded_409()
+    {
+        // Adversarial pass 1 F2: the assignee typed a note above the hint in TodoDetail.
+        // No matter on the To Do, so the matter fallback cannot find it: the hint alone must.
+        var rig = InquiryTodoRig(InquiryTodo, $"Phoned the firm on Tuesday\n{InquiryHint(ServiceRequestId)}");
+        rig.TodoMatter.Remove(InquiryTodo);
+
+        var result = await rig.CommitAsync(MarkComplete(), DoSignal);
+
+        result.Status.Should().Be(DecisionCommitStatus.Conflict, result.Detail);
+        result.ReasonCode.Should().Be(DecisionCommitReasons.InquiryDispositionRequired);
+        rig.Executors["mark-complete"].Requests.Should().BeEmpty();
+        rig.InquiryReads.Should().Equal($"sprk_servicerequests({ServiceRequestId:D})?$select=statecode,sprk_direction");
+    }
+
+    [Theory]
+    [InlineData(null)]                       // the notes were cleared
+    [InlineData("Waiting on the firm")]      // the hint line was deleted
+    public async Task AHintlessOpenInquirysOutcomeTodo_IsFoundByTheMatterFallback_AndRefused_409(string? notes)
+    {
+        // Adversarial pass 1 F2: the commit agrees with for-todo, which finds the inquiry by the derived id.
+        var rig = InquiryTodoRig(InquiryTodo, notes);
+
+        var result = await rig.CommitAsync(MarkComplete(), DoSignal);
+
+        result.Status.Should().Be(DecisionCommitStatus.Conflict, result.Detail);
+        result.ReasonCode.Should().Be(DecisionCommitReasons.InquiryDispositionRequired);
+        rig.Executors["mark-complete"].Requests.Should().BeEmpty();
+        rig.InquiryReads.Should().ContainSingle().Which.Should().StartWith("sprk_servicerequests?$select=sprk_servicerequestid&$filter=");
+    }
+
+    [Fact]
+    public async Task AnOrdinaryTodoOnAMatterWithAnOpenInquiry_IsUnaffected_MarkCompleteExecutes_AfterOneList()
+    {
+        // The fallback finds the matter's open inquiry, but its derived To Do id is not this To Do's.
+        var rig = InquiryTodoRig(ItemTodo, "Call the client back");
+
+        var result = await rig.CommitAsync(MarkComplete(), DoSignal);
+
+        result.Status.Should().Be(DecisionCommitStatus.Recorded, result.Detail);
+        rig.Executors["mark-complete"].Requests.Single().Subject.Should().Be(new DecisionRecordRef("sprk_todo", ItemTodo));
+        rig.InquiryReads.Should().ContainSingle("the matter fallback: one list as the caller");
+    }
+
+    [Theory]
+    [InlineData(404, DataverseUserClientErrorCodes.NotFound)]
+    [InlineData(403, DataverseUserClientErrorCodes.AccessDenied)]
+    public async Task WhenTheCallerCannotReadTheTodosNotes_TheCommitIsNotFound_NotUnavailable(int status, string code)
+    {
+        // Adversarial pass 1 K2: "cannot read" is the item's not-readable answer, never "try again".
+        var rig = InquiryTodoRig(InquiryTodo, InquiryHint(ServiceRequestId));
+        rig.TodoNotesReadFails = DataverseUserResponse.Fail(status, code, "no");
+
+        var result = await rig.CommitAsync(MarkComplete(), DoSignal);
+
+        result.Status.Should().Be(DecisionCommitStatus.NotFound, result.Detail);
+        rig.Writes.Should().BeEmpty();
+        rig.Executors["mark-complete"].Requests.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task WhenTheTodosNotesCannotBeRead_TheCommitIsUnavailable_NeverMarkedComplete()
+    {
+        var rig = InquiryTodoRig(InquiryTodo, InquiryHint(ServiceRequestId));
+        rig.TodoNotesReadFails = DataverseUserResponse.Fail(503, DataverseUserClientErrorCodes.ServiceError, "boom");
+
+        var result = await rig.CommitAsync(MarkComplete(), DoSignal);
+
+        result.Status.Should().Be(DecisionCommitStatus.Unavailable, result.Detail);
+        result.ReasonCode.Should().Be(DecisionCommitReasons.SignalUnreadable);
+        rig.Writes.Should().BeEmpty();
+        rig.Executors["mark-complete"].Requests.Should().BeEmpty();
+    }
+
+    // ── Task 154 pass 2 F3: the commit fails closed when the inquiry read faults ─────────────────────────────────────────
+
+    public enum InquiryFault { HintedGet503, MatterList503, MatterListHasMorePages, MatterListThrows }
+
+    [Theory]
+    [InlineData(InquiryFault.HintedGet503)]
+    [InlineData(InquiryFault.MatterList503)]
+    [InlineData(InquiryFault.MatterListHasMorePages)]
+    [InlineData(InquiryFault.MatterListThrows)]
+    public async Task WhenTheInquiryCannotBeRead_TheCommitIsUnavailable_NothingRunsOrIsWritten(InquiryFault fault)
+    {
+        // The hinted fault keeps the hint; the matter-list faults have none, so the fallback is the only way to know.
+        var rig = InquiryTodoRig(InquiryTodo, fault == InquiryFault.HintedGet503 ? InquiryHint(ServiceRequestId) : null);
+        switch (fault)
+        {
+            case InquiryFault.HintedGet503:
+                rig.InquiryReadFails = DataverseUserResponse.Fail(503, DataverseUserClientErrorCodes.ServiceError, "boom");
+                break;
+            case InquiryFault.MatterList503:
+                rig.InquiryListFails = DataverseUserResponse.Fail(503, DataverseUserClientErrorCodes.ServiceError, "boom");
+                break;
+            case InquiryFault.MatterListHasMorePages:
+                rig.InquiryListFails = DataverseUserResponse.Ok(200, JsonSerializer.SerializeToElement(new Dictionary<string, object?>
+                {
+                    ["value"] = Array.Empty<object>(),
+                    ["@odata.nextLink"] = "https://org.example/api/data/v9.2/sprk_servicerequests?$skiptoken=2",
+                }));
+                break;
+            case InquiryFault.MatterListThrows:
+                rig.InquiryListThrows = new TaskCanceledException("Dataverse timed out");
+                break;
+        }
+
+        var result = await rig.CommitAsync(MarkComplete(), DoSignal);
+
+        result.Status.Should().Be(DecisionCommitStatus.Unavailable, result.Detail);
+        result.ReasonCode.Should().Be(DecisionCommitReasons.SignalUnreadable);
+        rig.InquiryReads.Should().ContainSingle("the fault came from the inquiry read, not before it");
+        rig.Executors.Values.SelectMany(e => e.Requests).Should().BeEmpty("no executor runs");
+        rig.Log.Should().NotContain(l => l.StartsWith("preflight:", StringComparison.Ordinal));
+        rig.Writes.Should().BeEmpty();
+        rig.Records.Should().BeEmpty();
+        rig.SignalUpdates.Should().BeEmpty();
+    }
+
+    // ── Task 154 pass 2 K4: the finishing path (a writer-created record of this review exists) runs no inquiry check ──────
+
+    [Fact]
+    public async Task K4_FinishingAMarkCompleteRecordedWhileTheInquiryWasClosed_ClosesTheSignal_EvenThoughTheInquiryIsNowOpen()
+    {
+        // Mark complete ran while the inquiry was closed (an ordinary To Do); the close failed; the ledger forgot. The inquiry is
+        // open again by the retry: before, the guard ran on the finishing path and answered 409, leaving the Signal open forever.
+        var rig = InquiryTodoRig(InquiryTodo, InquiryHint(ServiceRequestId), inquiryState: 1);
+        FirstCloseFails(rig);
+        var review = MarkComplete();
+        (await rig.CommitAsync(review, DoSignal)).Status.Should().Be(DecisionCommitStatus.Recorded);
+        rig.Status(DoSignal).Should().Be(Open);
+        await LedgerForgetsButTheRecordStays(rig, review);
+        rig.Inquiries[ServiceRequestId] = (Matter, BudgetInquiryExecutor.DirectionOutbound, 0);
+        var reads = rig.InquiryReads.Count;
+        var executes = rig.Log.Count(l => l.StartsWith("execute:", StringComparison.Ordinal));
+
+        var result = await rig.CommitAsync(review, DoSignal);
+
+        result.Status.Should().Be(DecisionCommitStatus.Recorded, result.Detail);
+        result.ReasonCode.Should().NotBe(DecisionCommitReasons.InquiryDispositionRequired);
+        result.Replayed.Should().BeTrue();
+        rig.LinkedRecord(DoSignal).Should().Be(RecordId, "the Signal is closed with the record found");
+        rig.Status(DoSignal).Should().NotBe(Open);
+        rig.Log.Count(l => l.StartsWith("execute:", StringComparison.Ordinal)).Should().Be(executes, "nothing is run again");
+        rig.InquiryReads.Should().HaveCount(reads, "the finishing path reads no inquiry");
+    }
+
+    public enum InquiryAtFinish { StillOpen, NowClosed, ReadFaults }
+
+    [Theory]
+    [InlineData(InquiryAtFinish.StillOpen)]
+    [InlineData(InquiryAtFinish.NowClosed)]
+    [InlineData(InquiryAtFinish.ReadFaults)]
+    public async Task K4_FinishingAReviewRecordedUnderTheReducedPlan_ClosesTheSignal_WhateverTheInquiryIsNow(InquiryAtFinish now)
+    {
+        // The review was matched against the plan without Mark complete (the inquiry was open) and lists only Reschedule. Its stored
+        // record carries the review's hash, so the finishing path matches it against that plan without reading the inquiry again.
+        var rig = InquiryTodoRig(InquiryTodo, InquiryHint(ServiceRequestId));
+        FirstCloseFails(rig);
+        var review = new DecisionReview { ReviewId = Guid.NewGuid(), Confirmed = true, Actions = [Take("reschedule", RescheduleValues)] };
+        (await rig.CommitAsync(review, DoSignal)).Status.Should().Be(DecisionCommitStatus.Recorded);
+        rig.Status(DoSignal).Should().Be(Open);
+        await LedgerForgetsButTheRecordStays(rig, review);
+        if (now == InquiryAtFinish.NowClosed)
+            rig.Inquiries[ServiceRequestId] = (Matter, BudgetInquiryExecutor.DirectionOutbound, 1);
+        if (now == InquiryAtFinish.ReadFaults)
+            rig.InquiryReadFails = DataverseUserResponse.Fail(503, DataverseUserClientErrorCodes.ServiceError, "boom");
+
+        var result = await rig.CommitAsync(review, DoSignal);
+
+        result.Status.Should().Be(DecisionCommitStatus.Recorded, result.Detail);
+        result.Replayed.Should().BeTrue();
+        rig.LinkedRecord(DoSignal).Should().Be(RecordId);
+        rig.Executors["reschedule"].Requests.Should().ContainSingle("nothing is run again");
+        rig.Executors["mark-complete"].Requests.Should().BeEmpty();
+    }
 
     [Fact]
     public async Task ATeamOwnedNoCoreItem_NowRecords_OwnedByTheTeamUac2sResolverNames_D129()
@@ -2223,17 +2711,248 @@ public sealed class DecisionCommitServiceTests
     {
         // Task 141 review F3: the pair id is set but no subject lookup carries it (the sprk_signal_reg* relationships cascade a
         // subject delete as RemoveLink, which clears the lookup and leaves the pair id). An unknown subject is never "no subject".
+        // Task 150 (D-141): on a Decide Signal. A Do Signal whose subject cannot be derived has no "mine" and is now the uniform 404 at
+        // the access check (ADoSignalWhoseSubjectCannotBeDerived_IsTheUniform404_D141), before this refusal is reached.
         var rig = new Rig();
-        rig.AddSignal(DoSignal, DecisionLane.Do, Matter, DoVersion, subjectEntity: null, subjectId: ItemTodo);
-        var review = new DecisionReview { ReviewId = Guid.NewGuid(), Confirmed = true, Actions = [Take("mark-complete"), Skip("reschedule")] };
+        rig.Signals[Primary]["sprk_regardingrecordid"] = ItemTodo.ToString("D"); // the pair id, with no subject lookup carrying it
+        var review = PathBReview(inquiry: false, todo: false);
 
-        var result = await rig.CommitAsync(review, DoSignal);
+        var result = await rig.CommitAsync(review);
 
         // Task 141 fix round 2 (K2): the same refusal (Forbidden, fail closed), with its own code and message.
         result.Status.Should().Be(DecisionCommitStatus.Forbidden);
         result.ReasonCode.Should().Be(DecisionCommitReasons.SignalSubjectMissing);
         result.ReasonCode.Should().Be("ontology.decision.signal_subject_missing");
         result.Detail.Should().Be("This Signal's subject no longer exists.");
+        rig.Writes.Should().BeEmpty();
+        rig.Status(Primary).Should().Be(Open);
+    }
+
+    // ── Task 150 (D-141): Do items are private to their assignee ─────────────────────────────────────────────────────────
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task D141_ASameBuColleagueWhoIsNotTheDoItemsAssignee_GetsExactlyTheUnreadableSignalAnswer_AndNothingIsWritten(bool hasCore)
+    {
+        var notMine = new Rig();
+        notMine.AddSignal(DoSignal, DecisionLane.Do, hasCore ? Matter : null, DoVersion, subjectEntity: "sprk_todo", subjectId: ItemTodo);
+        notMine.CallerNotMine.Add(ItemTodo);   // the caller reads the Signal, the matter and the To Do, but it is not their work
+        var unreadable = new Rig();
+        unreadable.AddSignal(DoSignal, DecisionLane.Do, hasCore ? Matter : null, DoVersion, subjectEntity: "sprk_todo", subjectId: ItemTodo);
+        unreadable.CallerCannotRead.Add(DoSignal);
+        var review = MarkComplete();
+
+        var denied = await notMine.CommitAsync(review, DoSignal);
+        var baseline = await unreadable.CommitAsync(review, DoSignal);
+
+        denied.Status.Should().Be(DecisionCommitStatus.NotFound);
+        denied.Should().BeEquivalentTo(baseline);
+        notMine.MineAsked.Should().ContainSingle("the worklist's own mine read, as the caller");
+        notMine.Writes.Should().BeEmpty();
+        notMine.Status(DoSignal).Should().Be(Open);
+    }
+
+    [Fact]
+    public async Task D141_ANotMineDoItemInAlsoResolve_RefusesTheWholeReview_AsAnUnreadableOneDoes()
+    {
+        var rig = new Rig();
+        rig.AddSignal(Second, DecisionLane.Do, Matter, DoVersion, subjectEntity: "sprk_todo", subjectId: ItemTodo);
+        rig.CallerNotMine.Add(ItemTodo);
+        var review = PathBReview(inquiry: false, todo: false) with { AlsoResolve = [Second] };
+
+        var result = await rig.CommitAsync(review);
+
+        result.Status.Should().Be(DecisionCommitStatus.NotFound);
+        rig.Writes.Should().BeEmpty();
+        rig.Status(Primary).Should().Be(Open);
+    }
+
+    [Fact]
+    public async Task D141_TheAssignee_StillCommits()
+    {
+        var rig = new Rig();
+        rig.AddSignal(DoSignal, DecisionLane.Do, Matter, DoVersion, subjectEntity: "sprk_todo", subjectId: ItemTodo);
+
+        var result = await rig.CommitAsync(MarkComplete(), DoSignal);
+
+        result.Status.Should().Be(DecisionCommitStatus.Recorded, result.Detail);
+        rig.MineAsked.Should().ContainSingle();
+    }
+
+    [Fact]
+    public async Task D141_AFaultInTheMineRead_IsUnavailable_AndNothingIsWritten()
+    {
+        var rig = new Rig { MineReadFails = DataverseUserResponse.Fail(503, DataverseUserClientErrorCodes.ServiceError, "boom") };
+        rig.AddSignal(DoSignal, DecisionLane.Do, Matter, DoVersion, subjectEntity: "sprk_todo", subjectId: ItemTodo);
+
+        var result = await rig.CommitAsync(MarkComplete(), DoSignal);
+
+        result.Status.Should().Be(DecisionCommitStatus.Unavailable);
+        rig.Writes.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task D141_ARepeatOfARecordedReview_AfterTheDecisionReassignedTheItem_ReturnsTheFirstOutcome()
+    {
+        // Adversarial review F1: Reassign moves the To Do to someone else; the wizard resends the same review id after a lost
+        // response. The caller passed the "mine" check on the first attempt; the repeat returns that outcome, never a 404.
+        var rig = new Rig();
+        rig.AddSignal(DoSignal, DecisionLane.Do, Matter, DoVersion, subjectEntity: "sprk_todo", subjectId: ItemTodo);
+        var review = MarkComplete();
+        (await rig.CommitAsync(review, DoSignal)).Status.Should().Be(DecisionCommitStatus.Recorded);
+        rig.CallerNotMine.Add(ItemTodo);   // the item is no longer the caller's work
+
+        var repeat = await rig.CommitAsync(review, DoSignal);
+
+        repeat.Status.Should().Be(DecisionCommitStatus.Recorded, repeat.Detail);
+        repeat.Replayed.Should().BeTrue();
+    }
+
+    /// <summary>A Do review whose own <c>reassign</c> moves the To Do away from the caller (the fake executor makes it not-mine as
+    /// it lands) and then adds a To Do, which a test makes fail so the review is stored Failed and resumable.</summary>
+    private static DecisionReview ReassignThenAddTodo() =>
+        new()
+        {
+            ReviewId = Guid.NewGuid(),
+            Confirmed = true,
+            Actions = [Take("reassign", Values(("assignee", Assignee.ToString("D")))), Skip("mark-complete")],
+            NextSteps = [new DecisionReviewNextStep { Code = "add-todo", Values = TodoValues }],
+        };
+
+    private static Rig ReassignRig()
+    {
+        var rig = new Rig();
+        rig.AddSignal(DoSignal, DecisionLane.Do, Matter, ReassignVersion, subjectEntity: "sprk_todo", subjectId: ItemTodo);
+        rig.Executors["reassign"].OnExecute = () => rig.CallerNotMine.Add(ItemTodo);   // the review's own reassign moves the item away
+        return rig;
+    }
+
+    [Fact]
+    public async Task D141_AResumeOfTheCallersFailedReview_WhoseOwnReassignLanded_StillRuns_WithoutAskingMineAgain()
+    {
+        // Adversarial review F1 (pass 1): the review's own landed reassign is what made the item not-mine; its resume is not judged by it.
+        var rig = ReassignRig();
+        rig.Executors["add-todo"].Result = DecisionActionOutcome.Refused("add-todo", DecisionActionReasons.WriteFailed, "no");
+        var review = ReassignThenAddTodo();
+        var failed = await rig.CommitAsync(review, DoSignal);
+        failed.Status.Should().Be(DecisionCommitStatus.Failed, failed.Detail);
+        failed.Resumable.Should().BeTrue();
+        failed.Steps.Should().Contain(s => s.Code == "reassign" && s.Status == "Done");
+        rig.CallerNotMine.Should().Contain(ItemTodo, "the reassign landed");
+        rig.Executors["add-todo"].Result = null;
+
+        var resumed = await rig.CommitAsync(review with { Retry = true }, DoSignal);
+
+        resumed.Status.Should().Be(DecisionCommitStatus.Recorded, resumed.Detail);
+        rig.Log.Count(l => l == "execute:reassign").Should().Be(1, "a landed step is not run again");
+        rig.MineAsked.Should().ContainSingle("the check ran on the first attempt only");
+    }
+
+    [Fact]
+    public async Task D141_ARepairReplayOfARecordedReview_WhoseOwnReassignLanded_StillCloses()
+    {
+        var rig = ReassignRig();
+        FirstCloseFails(rig);
+        var review = ReassignThenAddTodo();
+        (await rig.CommitAsync(review, DoSignal)).Status.Should().Be(DecisionCommitStatus.Recorded);
+        rig.Status(DoSignal).Should().Be(Open, "the close failed after the record");
+
+        var replay = await rig.CommitAsync(review, DoSignal);
+
+        replay.Status.Should().Be(DecisionCommitStatus.Recorded, replay.Detail);
+        replay.Replayed.Should().BeTrue();
+        rig.Status(DoSignal).Should().Be(Resolved, "the repair finished the close the first run did not");
+        rig.MineAsked.Should().ContainSingle("the check ran on the first attempt only");
+    }
+
+    [Fact]
+    public async Task D141_ARetryOfTheCallersFailedReview_AfterAnOutsideReassign_IsTheUniform404_AndWritesNothing()
+    {
+        // Adversarial review F (pass 2): Bob's mark-complete failed transiently and is stored resumable; a manager then reassigns the
+        // To Do to Alice, outside the decision. Bob's Retry must not complete Alice's item as Bob.
+        var rig = new Rig();
+        rig.AddSignal(DoSignal, DecisionLane.Do, Matter, DoVersion, subjectEntity: "sprk_todo", subjectId: ItemTodo);
+        rig.Executors["mark-complete"].Result = DecisionActionOutcome.Refused("mark-complete", DecisionActionReasons.WriteFailed, "no");
+        var review = MarkComplete();
+        var failed = await rig.CommitAsync(review, DoSignal);
+        failed.Status.Should().Be(DecisionCommitStatus.Failed, failed.Detail);
+        failed.Resumable.Should().BeTrue();
+        failed.Steps.Should().NotContain(s => s.Code == "reassign", "no reassign of this review landed: the item moved outside the decision");
+        var writes = rig.Writes.ToList();
+        rig.CallerNotMine.Add(ItemTodo);
+        rig.Executors["mark-complete"].Result = null;
+
+        var retried = await rig.CommitAsync(review with { Retry = true }, DoSignal);
+
+        retried.Status.Should().Be(DecisionCommitStatus.NotFound);
+        retried.Should().BeEquivalentTo(new DecisionCommitResult { Status = DecisionCommitStatus.NotFound, ReviewId = review.ReviewId });
+        rig.Writes.Should().Equal(writes, "nothing is written for an item that is no longer the caller's");
+        rig.Status(DoSignal).Should().Be(Open);
+
+        // The refusal wrote no marker: if the item comes back to the caller, the same failure still resumes.
+        rig.CallerNotMine.Remove(ItemTodo);
+        var back = await rig.CommitAsync(review with { Retry = true }, DoSignal);
+        back.Status.Should().Be(DecisionCommitStatus.Recorded, back.Detail);
+    }
+
+    [Fact]
+    public async Task D141_ARepairReplayOfTheCallersRecordedReview_AfterAnOutsideReassign_IsTheUniform404_AndWritesNothing()
+    {
+        // The same hole through the repair: the record landed, the close did not; the item then moves outside the decision.
+        var rig = new Rig();
+        rig.AddSignal(DoSignal, DecisionLane.Do, Matter, DoVersion, subjectEntity: "sprk_todo", subjectId: ItemTodo);
+        FirstCloseFails(rig);
+        var review = MarkComplete();
+        var first = await rig.CommitAsync(review, DoSignal);
+        first.Status.Should().Be(DecisionCommitStatus.Recorded, first.Detail);
+        rig.Status(DoSignal).Should().Be(Open, "the close failed after the record, so the repair has a close to finish");
+        var writes = rig.Writes.ToList();
+        var closes = rig.SignalUpdates.Count;
+        rig.CallerNotMine.Add(ItemTodo);
+
+        var replay = await rig.CommitAsync(review, DoSignal);
+
+        replay.Status.Should().Be(DecisionCommitStatus.NotFound);
+        replay.Should().BeEquivalentTo(new DecisionCommitResult { Status = DecisionCommitStatus.NotFound, ReviewId = review.ReviewId });
+        rig.Writes.Should().Equal(writes, "the repair closes nothing for an item that is no longer the caller's");
+        rig.SignalUpdates.Should().HaveCount(closes);
+        rig.Status(DoSignal).Should().Be(Open);
+
+        // And it stays a repair for the caller who still owns the item.
+        rig.CallerNotMine.Remove(ItemTodo);
+        var repaired = await rig.CommitAsync(review, DoSignal);
+        repaired.Status.Should().Be(DecisionCommitStatus.Recorded, repaired.Detail);
+        repaired.Replayed.Should().BeTrue();
+        rig.Status(DoSignal).Should().Be(Resolved);
+    }
+
+    [Fact]
+    public async Task D141_AReviewIdTheCallerUsedBefore_OnANotMineItem_IsTheUniform404_NotReviewChanged()
+    {
+        // Same review id, other content: never the same review, so the "mine" check runs before the ledger can answer.
+        var rig = new Rig();
+        var review = PathBReview(inquiry: false, todo: false);
+        (await rig.CommitAsync(review)).Status.Should().Be(DecisionCommitStatus.Recorded);
+        rig.AddSignal(DoSignal, DecisionLane.Do, Matter, DoVersion, subjectEntity: "sprk_todo", subjectId: ItemTodo);
+        rig.CallerNotMine.Add(ItemTodo);
+
+        var reused = await rig.CommitAsync(MarkComplete() with { ReviewId = review.ReviewId }, DoSignal);
+
+        reused.Status.Should().Be(DecisionCommitStatus.NotFound);
+        rig.Status(DoSignal).Should().Be(Open);
+    }
+
+    [Fact]
+    public async Task ADoSignalWhoseSubjectCannotBeDerived_IsTheUniform404_D141()
+    {
+        // Task 141 review F3's case on a Do Signal: no subject, so no "mine"; the worklist shows it to nobody.
+        var rig = new Rig();
+        rig.AddSignal(DoSignal, DecisionLane.Do, Matter, DoVersion, subjectEntity: null, subjectId: ItemTodo);
+
+        var result = await rig.CommitAsync(MarkComplete(), DoSignal);
+
+        result.Status.Should().Be(DecisionCommitStatus.NotFound);
         rig.Writes.Should().BeEmpty();
         rig.Status(DoSignal).Should().Be(Open);
     }
@@ -2526,6 +3245,7 @@ public sealed class DecisionCommitServiceTests
     {
         var written = rig.Records.Single();
         written.Id = RecordId;
+        written["createdby"] = new EntityReference("systemuser", WriterUser); // Dataverse stamps the creator: the writer, with no impersonation
         rig.ExistingRecords.Add(written);
         await ForgetLedger(rig, review);
     }
@@ -2579,6 +3299,303 @@ public sealed class DecisionCommitServiceTests
         var unproven = await rig.CommitAsync(review);
         unproven.ReasonCode.Should().Be(DecisionCommitReasons.ReviewChanged, "a record that cannot prove it is this review answers nothing");
 
+        rig.Status(Primary).Should().Be(Open);
+    }
+
+    // ── Task 161 (D-180): Create budget in place of Revise budget on a matter with no active budget ─────────────────────────
+
+    [Fact]
+    public async Task CreateBudget_OnAMatterWithNoActiveBudget_RunsTheCreate_RecordsIt_AndClosesTheSignalActed_D180()
+    {
+        var rig = new Rig { ActiveBudgets = 0 };
+
+        var result = await rig.CommitAsync(CreateBudgetReview());
+
+        result.Status.Should().Be(DecisionCommitStatus.Recorded, result.Detail);
+        rig.Writes.Should().Equal("execute:create-budget", "record:sprk_decisionrecord", $"close:{Primary}");
+        rig.Executors["create-budget"].Requests.Single().Parameters["amount"].Should().Be("90000");
+        rig.Executors["create-budget"].Requests.Single().Core.Should().NotBeNull();
+        rig.Executors["revise-budget"].Requests.Should().BeEmpty();
+        var steps = Steps(rig.Record).GetProperty("steps").EnumerateArray().ToList();
+        steps.Select(x => (x.GetProperty("code").GetString(), x.GetProperty("taken").GetBoolean()))
+            .Should().Equal(("send-budget-inquiry", false), ("create-budget", true), ("approve-variance", false));
+        steps[1].GetProperty("label").GetString().Should().Be("Create budget");
+        steps[1].GetProperty("written").EnumerateArray().Select(w => (w.GetProperty("entity").GetString(), w.GetProperty("id").GetGuid()))
+            .Should().Equal(("sprk_budget", Budget));
+        rig.Resolution(Primary).Should().Be(SignalWriter.ResolutionActed);
+        rig.AppBudgetReads.Should().ContainSingle("one count read, the BFF's own (F1-a)");
+        rig.BudgetReads.Should().BeEmpty("the caller's own read of sprk_budgets decides nothing: a Deep Read cannot see a parent-BU budget");
+    }
+
+    [Fact]
+    public async Task CreateBudget_ReviewedOnZeroBudgets_ButTheMatterNowHasOne_IsRefusedAsTheActionsMismatch_NothingWritten_D17()
+    {
+        var rig = new Rig { ActiveBudgets = 1 };
+
+        var result = await rig.CommitAsync(CreateBudgetReview());
+
+        result.Status.Should().Be(DecisionCommitStatus.Refused);
+        result.ReasonCode.Should().Be(DecisionCommitReasons.ActionsDoNotMatchPlan);
+        result.Detail.Should().Be("The matter's budgets changed while you were deciding; reopen the item.");
+        rig.Writes.Should().BeEmpty("a create-budget is never silently turned into a revise-budget");
+        rig.Executors["create-budget"].Requests.Should().BeEmpty();
+        rig.Executors["revise-budget"].Requests.Should().BeEmpty();
+        rig.Status(Primary).Should().Be(Open);
+    }
+
+    [Fact]
+    public async Task ReviseBudget_ReviewedOnABudget_ButTheMatterNowHasNone_IsRefusedAsTheActionsMismatch_NothingWritten_D17()
+    {
+        var rig = new Rig { ActiveBudgets = 0 };
+
+        var result = await rig.CommitAsync(PathBReview());
+
+        result.Status.Should().Be(DecisionCommitStatus.Refused);
+        result.ReasonCode.Should().Be(DecisionCommitReasons.ActionsDoNotMatchPlan);
+        rig.Writes.Should().BeEmpty("a revise-budget is never silently turned into a create-budget");
+    }
+
+    [Theory]
+    [InlineData(1)]
+    [InlineData(3)]
+    public async Task ReviseBudget_OnAMatterWithBudgets_IsUnchanged_MustNotFire_D180(int budgets)
+    {
+        var rig = new Rig { ActiveBudgets = budgets };
+
+        var result = await rig.CommitAsync(PathBReview(inquiry: false, todo: false));
+
+        result.Status.Should().Be(DecisionCommitStatus.Recorded, result.Detail);
+        rig.Writes.Should().Equal("execute:revise-budget", "record:sprk_decisionrecord", $"close:{Primary}");
+        rig.Executors["create-budget"].Requests.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task TheBudgetsCannotBeCounted_ReviseBudgetStays_AndACreateBudgetReviewIsUnavailable_NothingWritten_F1b()
+    {
+        foreach (var fault in new Exception?[] { null, new TimeoutException("no answer"), new InvalidOperationException("Dataverse 503") })
+        {
+            var rig = new Rig { ActiveBudgets = null, AppBudgetsFault = fault };
+
+            var revise = await rig.CommitAsync(PathBReview(inquiry: false, todo: false));
+            revise.Status.Should().Be(DecisionCommitStatus.Recorded, revise.Detail);
+            rig.Executors["revise-budget"].Requests.Should().ContainSingle();
+
+            foreach (var review in new[] { CreateBudgetReview(), CreateBudgetReview(create: false) })
+            {
+                var other = new Rig { ActiveBudgets = null, AppBudgetsFault = fault };
+                var create = await other.CommitAsync(review);
+                create.Status.Should().Be(DecisionCommitStatus.Unavailable, "a read that failed is not a change in the budgets");
+                create.ReasonCode.Should().Be(DecisionCommitReasons.SignalUnreadable);
+                create.Detail.Should().Be("Whether the matter has a budget could not be checked; nothing was done. Try again.");
+                other.Writes.Should().BeEmpty();
+                other.Status(Primary).Should().Be(Open);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task TheCallerSeesNoBudget_ButTheBffSeesOne_NothingIsSubstituted_AndCreateBudgetIsRefused_F1a()
+    {
+        // A Core User whose Read on sprk_budget is Deep cannot see a budget owned in a parent business unit: the caller's read says 0.
+        var rig = new Rig { ActiveBudgets = 1, CallerSeesBudgets = 0 };
+
+        var create = await rig.CommitAsync(CreateBudgetReview());
+
+        create.Status.Should().Be(DecisionCommitStatus.Refused);
+        create.ReasonCode.Should().Be(DecisionCommitReasons.ActionsDoNotMatchPlan);
+        create.Detail.Should().Be("The matter's budgets changed while you were deciding; reopen the item.");
+        rig.Writes.Should().BeEmpty("no second active budget is ever written");
+        rig.Executors["create-budget"].Requests.Should().BeEmpty();
+
+        var revise = await rig.CommitAsync(PathBReview(inquiry: false, todo: false));
+        revise.Status.Should().Be(DecisionCommitStatus.Recorded, revise.Detail);
+        rig.Executors["revise-budget"].Requests.Should().ContainSingle("the plan keeps Revise budget for a matter that has a budget");
+    }
+
+    [Fact]
+    public async Task TheBffSeesNoBudget_ButTheCallerSeesOne_StillSubstitutes_MustNotFire_F1a()
+    {
+        var rig = new Rig { ActiveBudgets = 0, CallerSeesBudgets = 1 };
+
+        var result = await rig.CommitAsync(CreateBudgetReview());
+
+        result.Status.Should().Be(DecisionCommitStatus.Recorded, result.Detail);
+        rig.Executors["create-budget"].Requests.Should().ContainSingle();
+    }
+
+    [Fact]
+    public async Task TheAppOnlyBudgetRead_IsTheActiveBudgetsOfTheCoreMatter_AndNeverRunsForACallerWhoCannotReadTheMatter_F1a()
+    {
+        var rig = new Rig { ActiveBudgets = 0 };
+        (await rig.CommitAsync(CreateBudgetReview())).Status.Should().Be(DecisionCommitStatus.Recorded);
+        var query = rig.AppBudgetReads.Single();
+        query.TopCount.Should().Be(1);
+        query.Criteria.Conditions.Select(c => (c.AttributeName, c.Values.Single())).Should()
+            .BeEquivalentTo(new[] { ("sprk_matter", (object)Matter), ("statecode", (object)0) });
+
+        // The caller cannot read the Signal's matter: the uniform 404 comes before anything is read app-only.
+        var blocked = new Rig { ActiveBudgets = 0 };
+        blocked.CallerCannotReadCore.Add(Matter);
+        var result = await blocked.CommitAsync(CreateBudgetReview());
+        result.Status.Should().Be(DecisionCommitStatus.NotFound);
+        blocked.AppBudgetReads.Should().BeEmpty("never an app-only read for a matter the caller could not read");
+    }
+
+    // ── Task 161 fix round 1 (K2a): two commits on one matter are serialized by a budget lease ──────────────────────────────
+
+    [Fact]
+    public async Task TakingCreateBudget_HoldsTheMatterBudgetLease_SoACommitOnAnotherSignalOfTheMatterIsInProgress_K2a()
+    {
+        var rig = new Rig { ActiveBudgets = 0 };
+        var held = await rig.Lease.TryAcquireAsync($"decision-budget:{Tenant}:{Matter:D}", null, TimeSpan.FromMinutes(1), CancellationToken.None);
+        held.Status.Should().Be(ScheduledJobLeaseStatus.Granted);
+
+        var taken = await rig.CommitAsync(CreateBudgetReview());
+
+        taken.Status.Should().Be(DecisionCommitStatus.InProgress);
+        rig.Writes.Should().BeEmpty();
+        rig.Executors["create-budget"].Requests.Should().BeEmpty();
+        await rig.Lease.ReleaseAsync($"decision-budget:{Tenant}:{Matter:D}", held.Token!, CancellationToken.None);
+        (await rig.CommitAsync(CreateBudgetReview())).Status.Should().Be(DecisionCommitStatus.Recorded);
+        (await rig.Lease.TryAcquireAsync($"decision-budget:{Tenant}:{Matter:D}", null, TimeSpan.FromMinutes(1), CancellationToken.None))
+            .Status.Should().Be(ScheduledJobLeaseStatus.Granted, "the lease is released after a commit");
+    }
+
+    [Fact]
+    public async Task TheMatterBudgetLease_IsNotTaken_WhenCreateBudgetIsSkipped_OrNotInThePlan_MustNotFire_K2a()
+    {
+        var skip = new Rig { ActiveBudgets = 0 };
+        await skip.Lease.TryAcquireAsync($"decision-budget:{Tenant}:{Matter:D}", null, TimeSpan.FromMinutes(1), CancellationToken.None);
+        (await skip.CommitAsync(CreateBudgetReview(create: false, inquiry: true))).Status.Should().Be(DecisionCommitStatus.Recorded, "a skipped create writes nothing: no lease");
+
+        var revise = new Rig { ActiveBudgets = 1 };
+        await revise.Lease.TryAcquireAsync($"decision-budget:{Tenant}:{Matter:D}", null, TimeSpan.FromMinutes(1), CancellationToken.None);
+        (await revise.CommitAsync(PathBReview(inquiry: false, todo: false))).Status.Should().Be(DecisionCommitStatus.Recorded);
+    }
+
+    // ── Task 161 fix round 1 (K2b): a resume with Create budget skipped is not refused for a budget someone else made ───────
+
+    [Fact]
+    public async Task ARetryOfAFailedReview_ThatSkippedCreateBudget_KeepsThePlan_WhenSomeoneElseCreatedTheBudgetMeanwhile_K2b()
+    {
+        var rig = new Rig { ActiveBudgets = 0 };
+        rig.Executors["add-todo"].Result = DecisionActionOutcome.Refused("add-todo", DecisionActionReasons.WriteFailed, "no");
+        var review = CreateBudgetReview(create: false) with { NextSteps = [new DecisionReviewNextStep { Code = "add-todo", Values = TodoValues }] };
+
+        var failed = await rig.CommitAsync(review);
+        failed.Resumable.Should().BeTrue(failed.Detail);
+
+        rig.ActiveBudgets = 1; // another user created the budget while the first attempt was stuck
+        rig.Executors["add-todo"].Result = null;
+        var retried = await rig.CommitAsync(review with { Retry = true });
+
+        retried.Status.Should().Be(DecisionCommitStatus.Recorded, retried.Detail);
+        rig.Executors["create-budget"].Requests.Should().BeEmpty("it was skipped and still is");
+        rig.Executors["revise-budget"].Requests.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task ARetryOfAFailedReview_WhoseCreateBudgetAlreadyLanded_KeepsThePlanItWasTakenUnder_AndNeverCreatesTheBudgetTwice_D180()
+    {
+        var rig = new Rig { ActiveBudgets = 0 };
+        rig.Executors["add-todo"].Result = DecisionActionOutcome.Refused("add-todo", DecisionActionReasons.WriteFailed, "no");
+        var review = CreateBudgetReview() with { NextSteps = [new DecisionReviewNextStep { Code = "add-todo", Values = TodoValues }] };
+
+        var failed = await rig.CommitAsync(review);
+        failed.Resumable.Should().BeTrue(failed.Detail);
+
+        // The first attempt's create-budget landed, so the matter now HAS a budget: the plan the review was taken under is kept.
+        rig.ActiveBudgets = 1;
+        rig.Executors["add-todo"].Result = null;
+        var retried = await rig.CommitAsync(review with { Retry = true });
+
+        retried.Status.Should().Be(DecisionCommitStatus.Recorded, retried.Detail);
+        rig.Log.Count(l => l == "execute:create-budget").Should().Be(1, "a landed step is not run again");
+        rig.Executors["revise-budget"].Requests.Should().BeEmpty();
+        Steps(rig.Record).GetProperty("steps")[1].GetProperty("code").GetString().Should().Be("create-budget");
+    }
+
+    [Fact]
+    public async Task AFinishedReview_WhoseCreateBudgetAlreadyLanded_IsAnsweredByItsRecord_AndNeverRefusedForTheNewBudget_D180()
+    {
+        var rig = new Rig { ActiveBudgets = 0 };
+        FirstCloseFails(rig);
+        var review = CreateBudgetReview();
+        (await rig.CommitAsync(review)).Status.Should().Be(DecisionCommitStatus.Recorded);
+        await LedgerForgetsButTheRecordStays(rig, review);
+
+        rig.ActiveBudgets = 1; // the budget the first run created
+        var finished = await rig.CommitAsync(review);
+
+        finished.Status.Should().Be(DecisionCommitStatus.Recorded, finished.Detail);
+        finished.Replayed.Should().BeTrue();
+        rig.Log.Count(l => l == "execute:create-budget").Should().Be(1);
+    }
+
+    // ── uac-r2 re-check F1 (PR #1953): the stored-record lookup matches only records the ontology writer created ───────────────────────
+
+    [Fact]
+    public async Task F1_AUserCreatedRowWithTheReviewsIdAndHash_IsIgnored_TheFullPathRuns_AndTheGenuineRecordIsWrittenAndLinked()
+    {
+        // A Console user (Deep create on sprk_decisionrecord; sprk_steps and sprk_confirmedby are not field-secured) pre-creates a row with
+        // their own confirmedby, the review id, the predictable review hash and the Signals.
+        var rig = new Rig();
+        var review = PathBReview(inquiry: false, todo: false);
+        var forged = new Entity("sprk_decisionrecord", Guid.NewGuid())
+        {
+            ["sprk_confirmedby"] = new EntityReference("systemuser", Caller),
+            ["createdby"] = new EntityReference("systemuser", ConsoleCreator),
+            ["sprk_steps"] = JsonSerializer.Serialize(new Dictionary<string, object?>
+            {
+                ["reviewId"] = review.ReviewId.ToString("D"),
+                ["reviewHash"] = DecisionCommitService.ContentHash(Primary, review),
+                ["resolvedSignalIds"] = new[] { Primary.ToString("D") },
+                ["steps"] = new[] { new { code = "approve-variance", taken = true } },
+            }),
+            ["sprk_followons"] = "[]",
+        };
+        rig.ExistingRecords.Add(forged);
+
+        var result = await rig.CommitAsync(review);
+
+        result.Status.Should().Be(DecisionCommitStatus.Recorded, result.Detail);
+        result.Replayed.Should().BeFalse("the forged row is not an earlier run of this review");
+        result.DecisionRecordId.Should().Be(RecordId).And.NotBe(forged.Id);
+        rig.Log.Should().Contain(l => l.StartsWith("execute:", StringComparison.Ordinal), "the executors ran");
+        rig.Records.Should().ContainSingle("the genuine record is written");
+        rig.LinkedRecord(Primary).Should().Be(RecordId, "the Signal links the genuine record, not the forged row");
+    }
+
+    [Fact]
+    public async Task F1_AWriterCreatedRecordWithTheSameKey_StillTakesTheFinishingPath_NoRegression()
+    {
+        var rig = new Rig();
+        FirstCloseFails(rig);
+        var review = PathBReview(inquiry: false, todo: false);
+        (await rig.CommitAsync(review)).Status.Should().Be(DecisionCommitStatus.Recorded);
+        await LedgerForgetsButTheRecordStays(rig, review);
+        var executes = rig.Log.Count(l => l.StartsWith("execute:", StringComparison.Ordinal));
+
+        var result = await rig.CommitAsync(review);
+
+        result.Status.Should().Be(DecisionCommitStatus.Recorded, result.Detail);
+        result.Replayed.Should().BeTrue();
+        rig.Log.Count(l => l.StartsWith("execute:", StringComparison.Ordinal)).Should().Be(executes, "nothing is run again");
+        rig.Records.Should().ContainSingle("nothing is recorded again");
+        rig.QueriesAsked.Last(q => q.EntityName == "sprk_decisionrecord").Criteria.Conditions.Should().Contain(
+            c => c.AttributeName == "createdby" && c.Operator == ConditionOperator.Equal && c.Values.Single().Equals(WriterUser));
+    }
+
+    [Fact]
+    public async Task F1_WhenTheWritersIdentityCannotBeRead_TheCommitIsUnavailable_AndNothingIsDoneOrClosed()
+    {
+        var rig = new Rig { WhoAmIFault = new TimeoutException("whoami") };
+
+        var result = await rig.CommitAsync(PathBReview(inquiry: false, todo: false));
+
+        result.Status.Should().Be(DecisionCommitStatus.Unavailable, "the lookup cannot be narrowed, so it fails closed, never 'no record found'");
+        rig.WhoAmICalls.Should().BeGreaterThan(0);
+        rig.Writes.Should().BeEmpty("nothing is executed, recorded or closed");
         rig.Status(Primary).Should().Be(Open);
     }
 

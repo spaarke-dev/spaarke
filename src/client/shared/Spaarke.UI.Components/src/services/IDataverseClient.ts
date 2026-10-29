@@ -143,6 +143,12 @@ export interface FetchMultipleResult<T = Record<string, unknown>> {
    * Absent when `moreRecords` is `false`.
    */
   pagingCookie?: string;
+  /**
+   * The external module seam (`BffDataverseClient`) only: `true` when the BFF scoped these rows through an accessible
+   * set it knows is incomplete (its root set hit a row cap), so records the caller may read can be missing. Absent means
+   * complete (unified-access-control-r2 task 036, NFR-03).
+   */
+  truncated?: boolean;
 }
 
 /**

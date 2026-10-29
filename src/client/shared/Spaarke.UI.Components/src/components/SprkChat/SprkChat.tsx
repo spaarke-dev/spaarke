@@ -621,6 +621,7 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
     switchContext,
     addMessage,
     updateLastMessage,
+    insertMessageBeforeLast,
     updateLastMessageMetadata,
     updateMessageMetadataAt,
   } = chatSession;
@@ -672,6 +673,32 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
   // Separate from the main sseStream so plan execution doesn't overwrite chat content.
   const [isPlanApproving, setIsPlanApproving] = React.useState(false);
   const planApproveAbortRef = React.useRef<AbortController | null>(null);
+
+  // A reply is being written into the LAST message by one of three writers: the chat stream
+  // (isStreamingRef — set from send until the stream ends), plan execution, or editor refine.
+  // While one is active, sends are blocked and any other message is inserted BEFORE that last
+  // message, because every writer targets the last position (updateLastMessage) (#1906).
+  const isReplyBusy = isStreaming || isPlanApproving || isEditorRefining;
+  const otherWriterActiveRef = React.useRef<boolean>(false);
+  otherWriterActiveRef.current = isPlanApproving || isEditorRefining;
+  const appendMessage = React.useCallback(
+    (message: IChatMessage) => {
+      if (isStreamingRef.current || otherWriterActiveRef.current) {
+        insertMessageBeforeLast(message);
+      } else {
+        addMessage(message);
+      }
+    },
+    [addMessage, insertMessageBeforeLast]
+  );
+
+  // "Stop generating" stops whichever writer is active (plan execution and editor refine have
+  // their own streams; without this the composer stays locked until they end on their own).
+  const handleStopGenerating = React.useCallback(() => {
+    cancelStream();
+    planApproveAbortRef.current?.abort();
+    editorRefineAbortRef.current?.abort();
+  }, [cancelStream]);
 
   // ── Document persistence state (FR-14: Save to matter files) ─────────────
   // Tracks persistence state per document ID, keyed by documentId.
@@ -801,14 +828,21 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
     }
     if (lastInjectedRef.current === injectLocalMessage) return;
     lastInjectedRef.current = injectLocalMessage;
-    addMessage(injectLocalMessage);
-    // UAT round 1 #7 — give an injected turn the SAME pin-to-top treatment a typed turn gets, anchored
-    // to the injected message itself. Releasing the bottom-pin matters as much as arming the top-pin:
-    // without it the streaming auto-scroll below yanks the viewport back down (the same pairing
-    // handleSend does).
-    isPinnedToBottomRef.current = false;
-    pinTargetIsLastMessageRef.current = true;
-    pendingPinToTopRef.current = true;
+    // While a reply is being written into the last message, insert BEFORE it (appendMessage):
+    // an appended injection would be overwritten by the reply. The reply's turn is already
+    // pinned, so the pin is not re-armed for it.
+    if (isStreamingRef.current || otherWriterActiveRef.current) {
+      appendMessage(injectLocalMessage);
+    } else {
+      addMessage(injectLocalMessage);
+      // UAT round 1 #7 — give an injected turn the SAME pin-to-top treatment a typed turn gets, anchored
+      // to the injected message itself. Releasing the bottom-pin matters as much as arming the top-pin:
+      // without it the streaming auto-scroll below yanks the viewport back down (the same pairing
+      // handleSend does).
+      isPinnedToBottomRef.current = false;
+      pinTargetIsLastMessageRef.current = true;
+      pendingPinToTopRef.current = true;
+    }
     if (onLocalMessageInjected) {
       try {
         onLocalMessageInjected();
@@ -816,7 +850,7 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
         // Host callback errors must not break the injection lifecycle.
       }
     }
-  }, [injectLocalMessage, onLocalMessageInjected, addMessage]);
+  }, [injectLocalMessage, onLocalMessageInjected, addMessage, appendMessage]);
 
   // Imperative handle for SprkChatInput so the [Prompt] button in our controls
   // strip can open the slash menu without re-implementing the wiring (FR-09).
@@ -918,14 +952,15 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
   const handleActionOutcomeEvent = React.useCallback(
     (data: IChatSseEventData) => {
       const card = actionOutcomeDataToCard(data);
-      addMessage({
+      // Arrives mid-stream: keep the streaming reply in the last position.
+      appendMessage({
         role: 'Assistant',
         content: `✅ ${card.summary.userFacing}`,
         timestamp: new Date().toISOString(),
         metadata: { responseType: 'outcome_card', data: card },
       });
     },
-    [addMessage]
+    [appendMessage]
   );
 
   /**
@@ -1149,18 +1184,47 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session?.sessionId]);
 
-  // Update streaming message content as tokens arrive
+  // Update streaming message content as tokens arrive.
+  //
+  // Gated on isStreamingRef, not `isStreaming` (#1906): when the final tokens and
+  // the terminal event (done, error, or the stream closing) arrive in one network
+  // read, React commits the last setContent together with setIsStreaming(false),
+  // so no render sees `isStreaming` true with the final text — the reply rendered
+  // truncated or empty and lost its citation markers. isStreamingRef stays true
+  // until the completion effects below clear it, and they must stay declared
+  // AFTER this one: effects run in declaration order within a commit, so the
+  // final render is still treated as part of the stream. `isStreaming` is not a
+  // dependency, so its flip at the end never writes on its own.
   React.useEffect(() => {
-    if (isStreaming && streamedContent) {
+    if (streamedContent && isStreamingRef.current) {
       updateLastMessage(streamedContent);
     }
-  }, [streamedContent, isStreaming, updateLastMessage]);
+  }, [streamedContent, updateLastMessage]);
 
-  // Handle stream completion
+  // Store the reply's citations on its message so the [N] markers stay clickable after later
+  // turns (the hook's `citations` state is cleared by the next stream). Same ordering rule.
+  React.useEffect(() => {
+    if (streamCitations.length > 0 && isStreamingRef.current) {
+      updateLastMessageMetadata({ citations: streamCitations });
+    }
+  }, [streamCitations, updateLastMessageMetadata]);
+
+  // Handle stream completion. Keep this effect AFTER the two effects above (#1906).
+  // The ref is cleared when the stream ends by ANY path (done, error, abort, or the
+  // server closing without `done`) so the injection effect knows the last message
+  // is no longer being written.
+  const wasStreamingRef = React.useRef<boolean>(false);
+  React.useEffect(() => {
+    const ended = wasStreamingRef.current && !isStreaming;
+    wasStreamingRef.current = isStreaming;
+    if (ended && !streamDone) {
+      isStreamingRef.current = false;
+    }
+  }, [isStreaming, streamDone]);
   React.useEffect(() => {
     if (streamDone && isStreamingRef.current) {
       isStreamingRef.current = false;
-      // Final content is already set by the token updates
+      // Final content was applied by the content effect above in this same commit.
       // FR-07 (task 026): clear in-memory attachment chips on successful send
       // completion. On error (streamError set, streamDone NOT set), chips remain
       // visible so the user can retry without re-attaching. clearAll is a no-op
@@ -1527,7 +1591,9 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
   // Send a message and start streaming the response
   const handleSend = React.useCallback(
     async (messageText: string) => {
-      if (!session || isStreaming) {
+      // Plan execution and editor refine also write into the last message; a send during
+      // either would interleave two replies in one bubble.
+      if (!session || isReplyBusy) {
         return;
       }
 
@@ -1554,15 +1620,6 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
         timestamp: new Date().toISOString(),
       };
       addMessage(userMessage);
-
-      // Add placeholder assistant message for streaming
-      const assistantMessage: IChatMessage = {
-        role: 'Assistant',
-        content: '',
-        timestamp: new Date().toISOString(),
-      };
-      addMessage(assistantMessage);
-      isStreamingRef.current = true;
 
       // FIX 1: pin the new user message to the top of the viewport instead of
       // following to the bottom. Turning off the bottom-pin guard here also
@@ -1600,9 +1657,8 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
         try {
           const decorated = await onDecorateOutboundBody(body);
           if (decorated === null) {
-            // Host cancelled the send (e.g. `/clear`, `/help`). Reset streaming
-            // state set above and stop here.
-            isStreamingRef.current = false;
+            // Host cancelled the send (e.g. `/clear`, `/help`) and answers the turn itself
+            // (an injected message) — no assistant placeholder was added for it.
             return;
           }
           if (decorated !== undefined) {
@@ -1613,11 +1669,21 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
         }
       }
 
+      // Add the placeholder the stream writes into only now that the send is going ahead, so a
+      // host-cancelled turn leaves no empty bubble and its injected answer follows the user's message.
+      const assistantMessage: IChatMessage = {
+        role: 'Assistant',
+        content: '',
+        timestamp: new Date().toISOString(),
+      };
+      addMessage(assistantMessage);
+      isStreamingRef.current = true;
+
       startStream(`${baseUrl}/api/ai/chat/sessions/${session.sessionId}/messages`, finalBody, getAccessToken);
     },
     [
       session,
-      isStreaming,
+      isReplyBusy,
       addMessage,
       startStream,
       clearSuggestions,
@@ -1761,7 +1827,7 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
    */
   const handlePlanProceed = React.useCallback(
     (messageIndex: number) => {
-      if (!session || !pendingPlanId || isPlanApproving) {
+      if (!session || !pendingPlanId || isReplyBusy) {
         console.warn(
           '[SprkChat] handlePlanProceed: cannot proceed — session:',
           !!session,
@@ -1921,6 +1987,7 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
       session,
       pendingPlanId,
       isPlanApproving,
+      isReplyBusy,
       apiBaseUrl,
       getAccessToken,
       addMessage,
@@ -2179,7 +2246,8 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
         documentStatus: docStatus,
       };
 
-      addMessage(statusMessage);
+      // Drag-drop is not gated on streaming — keep a streaming reply in the last position.
+      appendMessage(statusMessage);
 
       // Dismiss the upload overlay after a short delay so the user sees the success state
       setTimeout(() => {
@@ -2197,7 +2265,7 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
         doc.status
       );
     },
-    [addMessage]
+    [appendMessage]
   );
 
   /**
@@ -2288,7 +2356,7 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
    */
   const handleEditorRefine = React.useCallback(
     (selectedText: string, instruction: string) => {
-      if (!session || !bridge || isEditorRefining || isStreaming) {
+      if (!session || !bridge || isReplyBusy) {
         return;
       }
 
@@ -2321,6 +2389,16 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
 
       const operationId = `refine-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`;
       let tokenIndex = 0;
+      // The editor's diff review stays in its streaming state until it gets document_stream_end,
+      // so emit it exactly once on every exit path — including a stream that closes without `done`.
+      // An `error` after `done` therefore no longer re-ends the operation as cancelled; the server
+      // ends a refine stream with exactly one of the two.
+      let endEmitted = false;
+      const emitEnd = (cancelled: boolean) => {
+        if (endEmitted) return;
+        endEmitted = true;
+        bridge.emit('document_stream_end', { operationId, cancelled, totalTokens: tokenIndex });
+      };
 
       const runRefineStream = async () => {
         try {
@@ -2363,17 +2441,13 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
                   index: tokenIndex++,
                 });
               } else if (event.type === 'done') {
-                // Stream completed successfully
-                bridge.emit('document_stream_end', {
-                  operationId,
-                  cancelled: false,
-                  totalTokens: tokenIndex,
-                });
+                emitEnd(false);
               } else if (event.type === 'error') {
                 throw new Error(event.content || 'Refinement stream error');
               }
             },
           });
+          emitEnd(false);
 
           // Update the chat status message
           if (tokenIndex === 0) {
@@ -2387,11 +2461,7 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
         } catch (err: unknown) {
           if (err instanceof DOMException && err.name === 'AbortError') {
             // Cancelled by user, not an error
-            bridge.emit('document_stream_end', {
-              operationId,
-              cancelled: true,
-              totalTokens: tokenIndex,
-            });
+            emitEnd(true);
             updateLastMessage('Refinement cancelled.');
             return;
           }
@@ -2400,11 +2470,7 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
           setEditorRefineError(errorObj);
 
           // Emit stream end with cancel to clean up Analysis Workspace state
-          bridge.emit('document_stream_end', {
-            operationId,
-            cancelled: true,
-            totalTokens: tokenIndex,
-          });
+          emitEnd(true);
 
           // Show error in the chat status message
           updateLastMessage(`Refinement error: ${errorObj.message}`);
@@ -2416,17 +2482,7 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
 
       runRefineStream();
     },
-    [
-      session,
-      bridge,
-      isEditorRefining,
-      isStreaming,
-      addMessage,
-      updateLastMessage,
-      apiBaseUrl,
-      getAccessToken,
-      clearCrossPaneSelection,
-    ]
+    [session, bridge, isReplyBusy, addMessage, updateLastMessage, apiBaseUrl, getAccessToken, clearCrossPaneSelection]
   );
 
   /**
@@ -2435,7 +2491,7 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
    */
   const handleChatRefine = React.useCallback(
     (selectedText: string, instruction: string) => {
-      if (!session || isStreaming) {
+      if (!session || isReplyBusy) {
         return;
       }
 
@@ -2465,7 +2521,7 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
         getAccessToken
       );
     },
-    [session, isStreaming, addMessage, startStream, apiBaseUrl, getAccessToken]
+    [session, isReplyBusy, addMessage, startStream, apiBaseUrl, getAccessToken]
   );
 
   /**
@@ -2500,10 +2556,10 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
    */
   const handleChipAction = React.useCallback(
     (action: InlineAiAction) => {
-      if (!session || isStreaming) return;
+      if (!session || isReplyBusy) return;
       handleSend(`[Quick Action: ${action.label}]`);
     },
-    [session, isStreaming, handleSend]
+    [session, isReplyBusy, handleSend]
   );
 
   // ── Task 031: Subscribe to inline_action BroadcastChannel events ─────
@@ -2718,7 +2774,7 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
                   appearance="outline"
                   size="small"
                   onClick={() => handlePlaybookChipClick(pb)}
-                  disabled={isStreaming || !session}
+                  disabled={isReplyBusy || !session}
                   title={pb.description || pb.name}
                 >
                   {pb.name}
@@ -2731,7 +2787,7 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
           <SprkChatPredefinedPrompts
             prompts={predefinedPrompts}
             onSelect={handlePromptSelect}
-            disabled={isStreaming || !session}
+            disabled={isReplyBusy || !session}
           />
         )}
 
@@ -2747,7 +2803,7 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
           // They are cleared on each new startStream call, so they always correspond
           // to the most recent response.
           const isLastAssistant = index === messages.length - 1 && msg.role === 'Assistant';
-          const messageCitations = isLastAssistant && streamCitations.length > 0 ? streamCitations : undefined;
+          const messageCitations = msg.role === 'Assistant' ? msg.metadata?.citations : undefined;
 
           // Build plan preview callbacks — only meaningful for plan_preview messages.
           // Capture the index so each plan card targets the correct message position
@@ -2898,7 +2954,7 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
           <SprkChatSuggestions
             suggestions={suggestions}
             onSelect={handleSuggestionSelect}
-            visible={!isStreaming && suggestions.length > 0}
+            visible={!isReplyBusy && suggestions.length > 0}
           />
         )}
 
@@ -2943,18 +2999,18 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
           actions={quickChipActions}
           onChipClick={handleChipAction}
           containerRef={rootContainerRef as React.RefObject<HTMLElement>}
-          disabled={isStreaming || !session || isSessionLoading}
+          disabled={isReplyBusy || !session || isSessionLoading}
         />
       )}
 
-      {/* Stop generating button — visible during active streaming */}
-      {isStreaming && (
+      {/* Stop generating button — visible while any reply is being written */}
+      {isReplyBusy && (
         <div className={styles.stopGeneratingContainer} data-testid="stop-generating-container">
           <Button
             appearance="subtle"
             size="small"
             icon={React.createElement(StopRegular)}
-            onClick={cancelStream}
+            onClick={handleStopGenerating}
             data-testid="stop-generating-button"
           >
             Stop generating
@@ -3117,7 +3173,7 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
           // dropped). Busy = message streaming OR assistant typing OR a file still
           // `extracting` OR the host signalling `inputBusy` (its Event-path
           // classify/summarize). Re-enables when all clear.
-          disabled={isStreaming || isTyping || !!inputBusy || attachmentFiles.some(f => f.status === 'extracting')}
+          disabled={isReplyBusy || isTyping || !!inputBusy || attachmentFiles.some(f => f.status === 'extracting')}
           maxCharCount={maxCharCount}
           placeholder={inputPlaceholder}
           minRows={inputMinRows}

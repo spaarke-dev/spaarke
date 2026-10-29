@@ -95,7 +95,7 @@ public class TemplateEngine_Wave11Debug
   "$version": 1,
   "instruction": {
     "role": "notification summarizer",
-    "task": "Generate a TL;DR summary of the user's daily notification briefing. Read the structured input payload (categories, priorityItems, channels, totalNotificationCount) and produce: a one-sentence overall summary, 2-4 short key-takeaway bullets, one suggested top action, plus the integer counts.",
+    "task": "Generate a TL;DR summary of the user's daily notification briefing. Read the structured input payload (categories, priorityItems, channels, totalNotificationCount) and produce: a one-sentence overall summary, and 2-4 short key-takeaway bullets that summarise the volume, plus the integer counts.",
     "constraints": [
       "Use ONLY entity names present in the provided input.",
       "Keep summary to a single sentence (max 30 words)."

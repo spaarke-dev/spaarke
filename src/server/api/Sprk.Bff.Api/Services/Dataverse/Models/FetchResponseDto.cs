@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace Sprk.Bff.Api.Services.Dataverse.Models;
 
 /// <summary>
@@ -25,4 +27,16 @@ namespace Sprk.Bff.Api.Services.Dataverse.Models;
 public sealed record FetchResponseDto(
     IReadOnlyList<IReadOnlyDictionary<string, object?>> Entities,
     bool MoreRecords,
-    string? PagingCookie);
+    string? PagingCookie)
+{
+    /// <summary>
+    /// <c>true</c> when the rows were scoped through an accessible set that is KNOWN INCOMPLETE: the caller's root set hit
+    /// its ceiling with more records available (unified-access-control-r2 task 036, NFR-03 — the impersonated read's row
+    /// cap or the membership walk's), so records the caller may read can be missing here. Set only by the external module
+    /// seam. Omitted from the JSON when <c>false</c>, so an uncapped response is byte-for-byte what it was before the field
+    /// existed (the <c>ExternalCollectionResponse.Truncated</c> convention); clients read a missing field as <c>false</c>.
+    /// </summary>
+    [JsonPropertyName("truncated")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public bool Truncated { get; init; }
+}

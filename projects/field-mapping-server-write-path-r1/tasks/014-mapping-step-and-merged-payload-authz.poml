@@ -1,0 +1,143 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="014" project="field-mapping-server-write-path-r1">
+  <metadata>
+    <title>Wire field mapping (step 3) and caller checks on the merged payload; close #1614 and #1617 (FR-06 step 3, FR-08)</title>
+    <phase>2 W2 Unified RecordCreationService</phase>
+    <gate>002+003+013 complete</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies .cs in Sprk.Bff.Api; tags include bff-api, security, authorization; adds tests at KEEP paths (TEST-MODIFYING override); mapped values must never bypass AppendTo (NFR-01).</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Security boundary: decides which mapped values are written or dropped and must not become an existence oracle or AppendTo bypass.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits the RecordCreationService core that 015 and 016 also edit.</parallel-reason>
+    <deps>002, 003, 013</deps>
+    <tags>bff-api, security, field-mapping, authorization, testing</tags>
+    <estimated-effort>8-12 hours</estimated-effort>
+  </metadata>
+
+  <prompt>In `RecordCreationService`, wire step 3 (field mapping: source resolver from task 003, fill-only applier from task 002, canonical engine from task 001) and make step 5 run `CallerWriteAuthorization` on the MERGED payload. A caller-supplied value that fails Create/Append, field security or AppendTo refuses (uniform 404/403, unchanged behaviour). A MAPPED value that fails AppendTo or field security is DROPPED with a warning and the create proceeds. Add the #1614 and #1617 regression tests.</prompt>
+  <role>SPAARKE platform developer, .NET 10 BFF, Dataverse authorization. Follow ADRs strictly; fail closed.</role>
+  <goal>Create applies mapping inline in the create request (WP-1, WP-4); every mapped lookup is AppendTo / field-security checked as the caller; the response carries the dropped-value warnings; #1614 and #1617 are closed by tests; the existing `SecureChildOwnershipAiToolTests*` suite passes unchanged.</goal>
+
+  <context>
+    <background>spec.md FR-06 (step 3, step 4, step 5), FR-08, NFR-01; design.md §4. Today the Office core applies mapping with explicit source only and overwrites, and a regarding-pair mapping skips the caller AppendTo check (#1617); Office Project AppendTo is checked for secure parents only (#1614). Mapped values must be tracked by origin ("caller-supplied" vs "mapped") through steps 3-5 so step 5 can apply different outcomes. The principal's source Read probe (task 003) is already in the resolver; this task only wires it.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/RecordCreation/RecordCreationService.cs (steps 3-5)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Dataverse/CallerWriteAuthorization.cs (only to accept an origin tag per column if needed; existing behaviour for caller-supplied values stays byte-identical)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Dataverse/FieldMapping/CreateTimeFieldMapping.cs (task 001)</file>
+      <file role="canonical-reference">grep for the mapping-source resolver and FillOnlyMappingApplier symbols under src/server/api/Sprk.Bff.Api/Services/Dataverse/FieldMapping/ (tasks 002, 003)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Office/OfficeRecordCreationService.cs (ApplyFieldMappingsAsync - old behaviour to supersede, grep for the symbol)</file>
+      <file role="new">tests/integration/data-mutation/RecordOwnership/MappedValueAuthorizationTests.cs (regression tests for #1614 and #1617 and the drop-with-warning rule)</file>
+      <file role="canonical-reference">tests/integration/data-mutation/RecordOwnership/SecureChildOwnershipAiToolTests.BusinessOwnedAppendTo.cs (fixture style; must pass unchanged)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="002" status="required">Fill-only applier and target guard.</dependency>
+      <dependency task="003" status="required">Mapping-source resolver and Read-as-caller probe.</dependency>
+      <dependency task="013" status="required">RecordCreationService with the 12-step pipeline and the step 3 seam.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-008 (path A, spec ADR Tensions)">Scope: payload-dependent authorization. The merged-payload checks stay in `CallerWriteAuthorization` and are called by the service. Do NOT add an endpoint filter that tries to see mapped values. Cite path A in the PR description.</constraint>
+    <constraint source="ADR-019">Scope: responses. Warnings and refusals carry stable codes; a dropped mapped value returns a warning code and the column name, never the source record's id, name or any value; no raw exception text.</constraint>
+    <constraint source="ADR-028">Scope: identity. Caller checks run as the caller (WhoAmI on the caller token); the create itself stays app-only. System principal reads the mapping source app-only and skips as-caller checks, as in task 013.</constraint>
+    <constraint source="ADR-010">Scope: DI. No new registration; mapping collaborators are static or already registered. If the resolver needs a registration, record it and justify per CLAUDE.md §11.</constraint>
+    <constraint source="NFR-01 (spec)">Scope: all checks added or touched. Fail closed: an error while checking a MAPPED value drops that value with a warning (never writes it); an error while checking a CALLER-SUPPLIED value refuses. A denied or missing mapping source gives the same outcome (no mapped values plus one uniform warning) so it is not an existence oracle. A typed lookup the caller cannot AppendTo still refuses.</constraint>
+    <constraint source="project">Scope: origin tracking. Do not rely on comparing values to detect mapped columns; carry an explicit origin set (caller / mapped) produced by the fill-only applier. A mapped column that the caller also supplied is by definition caller-supplied (fill-only: the caller wins).</constraint>
+    <constraint source="CLAUDE.md §10">Scope: BFF publish. Placement Justification in the PR (BFF write path); fresh-master publish-size delta per §10.4; `dotnet list package --vulnerable --include-transitive`; no package.</constraint>
+    <constraint source="ADR-038">Scope: tests added by this task. Integration tests under tests/integration/data-mutation/RecordOwnership/ (KEEP path); no Mock&lt;HttpMessageHandler&gt;; no DI-registration tests. Cover the stated contract plus the named edge cases only. One seeding proof is requested for the fail-closed guard (temporarily make the merged-payload check a no-op, confirm the #1617 test fails, restore).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Field mapping at create; AppendTo/field-security authorization</topic>
+    <files>
+      <file>.claude/adr/ADR-002-thin-plugins.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+      <file>.claude/adr/ADR-019-problemdetails.md</file>
+      <file>.claude/adr/ADR-024-polymorphic-resolver-pattern.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>docs/architecture/SPAARKE-FIELD-MAPPING-FRAMEWORK.md</file>
+      <file>docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md</file>
+    </files>
+    <patterns>
+      <pattern name="polymorphic-resolver" location=".claude/patterns/dataverse/polymorphic-resolver.md">Regarding pair columns the mapping must not target.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare FULL rigor; read spec FR-06/FR-08, NFR-01, issues #1614 and #1617 (gh issue view), and the 002/003/013 outputs; re-grep the step 3 seam in RecordCreationService.</step>
+    <step order="1">Run /conflict-check; record the result. Escalate if another PR changes CallerWriteAuthorization or the OwnedChildWrite authorization helpers.</step>
+    <step order="2">Write the failing regression tests first (#1617: a mapped regarding-pair or lookup the caller cannot AppendTo is not written and a warning is returned; #1614: Office-style Project under a non-secure parent is AppendTo checked; typed lookup the caller cannot AppendTo still refuses; caller-supplied value survives fill-only; denied source = no mapped values + warning).</step>
+    <step order="3">Implement step 3: resolve source (explicit or inferred), probe Read as the caller, read the profile, apply the canonical engine with fill-only semantics, and tag each column with its origin.</step>
+    <step order="4">Implement step 5 on the merged payload: run CallerWriteAuthorization for every lookup column; failing caller-supplied columns refuse; failing mapped columns are removed from the payload and a warning is added to the result; then proceed.</step>
+    <step order="5">Surface warnings through the service result and the shared ProblemDetails/response shape from task 013 (success responses carry `warnings`; confirm the field already exists on the child-records and Office responses, else record the gap for 017/018 rather than changing a contract here).</step>
+    <step order="6">Run the seeding proof described in the ADR-038 constraint; run SecureChildOwnershipAiToolTests*, RefileWriterAfterRefileGuardTests and RouteAuthorizationGuardTests unchanged; build; publish-size delta; CVE check.</step>
+    <step order="7">Update TASK-INDEX.md: set this task's status to ✅.</step>
+    <step order="8">Document any deviation in projects/field-mapping-server-write-path-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If dropping a mapped lookup would leave a required column empty (the create would then fail at Dataverse), STOP and escalate per CLAUDE.md §6 with the table and column; do not choose between refusing and writing.</trigger>
+    <trigger>If a mapped value cannot be distinguished from a caller-supplied value at step 5 without changing the CallerWriteAuthorization contract, STOP and escalate before editing it.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>Grep `ApplyFieldMappingsAsync` in src/server/api/Sprk.Bff.Api/Services/Office/OfficeRecordCreationService.cs (explicit source only, overwrite semantics) and `CheckCallerMayCreateAsync` in Services/Dataverse/CallerWriteAuthorization.cs; the new test file has no existing neighbour covering mapped-value authorization (grep "Mapped" under tests/integration/data-mutation/RecordOwnership returned none).</existing>
+    <extension>Yes for production code: this task extends the service from task 013 and the engine/resolver from 001-003; no new production file. The only new file is a test class, because the existing RecordOwnership suites are ADR-038 KEEP tests that must pass unchanged and should not be edited.</extension>
+    <cost-of-doing-nothing>Mapped lookups bypass AppendTo (#1617) and Office Project AppendTo is checked for secure parents only (#1614), so a user can attach a record to a parent they cannot append to through mapping (spec FR-08 acceptance).</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="dotnet">Build/test .NET</tool>
+    <tool name="gh">Read issues #1614 and #1617</tool>
+    <tool name="skill:conflict-check">Detect overlap with UAC-r2 work</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/RecordCreation/RecordCreationService.cs (steps 3-5)</output>
+    <output type="test">tests/integration/data-mutation/RecordOwnership/MappedValueAuthorizationTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">A mapped lookup the caller cannot AppendTo is NOT written, a warning with a stable code and the column name is returned, and the create succeeds (closes #1617).</criterion>
+    <criterion testable="true">A typed (caller-supplied) lookup the caller cannot AppendTo still refuses with the uniform 404/403 outcome; the existing behaviour is unchanged.</criterion>
+    <criterion testable="true">FR-08 amendment (owner 2026-10-20, UAC-r2 condition c): a MAPPED filing lookup (SecureChildLineage / RecordReparent.FilingParentOf for the target table) that the caller cannot AppendTo REFUSES with the uniform outcome and no create call is issued; must-fire test on a Secure parent, plus a must-not-fire control where a mapped non-filing reference lookup is dropped with a warning.</criterion>
+    <criterion testable="true">A mapped value that fails field security is dropped with a warning and the create proceeds; a caller-supplied value that fails field security refuses.</criterion>
+    <criterion testable="true">A Project created under a non-secure parent is AppendTo checked as the caller on the merged payload (closes #1614).</criterion>
+    <criterion testable="true">A caller-supplied value for a mapped column survives create (fill-only, caller wins); an unsupplied mapped column receives the mapped value in the same create request (no follow-up update).</criterion>
+    <criterion testable="true">Negative: when the Read probe on the mapping source is denied, or the source does not exist, the create proceeds with no mapped values and ONE identical warning; the two cases are indistinguishable in status, body and warning text.</criterion>
+    <criterion testable="true">Negative: an exception while checking a mapped value drops that value (never writes it); an exception while checking a caller-supplied value refuses the create with no create call issued.</criterion>
+    <criterion testable="true">The seeding proof for the merged-payload check is recorded in the task notes (test fails with the check disabled, passes after restore).</criterion>
+    <criterion testable="true">BFF build 0 errors; SecureChildOwnershipAiToolTests*, RefileWriterAfterRefileGuardTests and RouteAuthorizationGuardTests pass unchanged; publish-size delta, CVE result and /conflict-check result recorded in the task notes.</criterion>
+    <criterion testable="true">From task 002 (2026-10-20): the mapping step passes `moneyAttributes` (the target table's Money columns, from attribute metadata) to `CreateTimeFieldMapping.ApplyFillOnly`, so a Default rule into a money column writes a `Money`; test it, then close #2124 (DI-001).</criterion>
+    <criterion testable="true">From task 002 (2026-10-20): `ApplyFillOnly` never writes the regarding pair or resolver fields. Any create whose secure-root filing plan reads a pair that mapping supplied today (Office Project-under-Matter, task 158) gets the pair from the caller or derives it from the filed-under parent BEFORE mapping; SecureRootInheritanceWriterTests.OfficeCreate_* and SecureRootCreateRouteTests.OfficeQuickCreate_* pass unchanged.</criterion>
+    <criterion testable="true">From UAC-r2 D7 / #2169 (2026-10-21):
+      - `sprk_document.sprk_accessinheritance` is never a mapping target, at create or on push. It is a BFF-only record of the inherited floor and the document's own narrowing. A rule targeting it is skipped with a per-rule warning reason, matching the push skip. Prefer a protected-target entry on the sprk_document row of RecordTableRules (task 012) over a special case.
+      - `sprk_document.sprk_accesspermission` stays fill-only at create, unchanged.
+      - Tests: a must-fire case where accessinheritance is skipped at create with its warning, and a must-not-fire case where accesspermission is still filled on an empty new document.
+      - UAC-r2 reviews this part of the diff before merge.
+    </criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-06 step 3, FR-08, NFR-01. Owner decision 2026-10-19: mapped values that fail AppendTo or field security are skipped with a warning and the create proceeds. Task 015 changes the owner step; do not touch it here.
+Completed 2026-10-21.
+- What landed: mapping is opt-in per request (RecordCreationRequest.Mapping) and fill-only; the source is probed for the caller's Read first; moneyAttributes and protected sets are honoured; caller checks run on the merged payload by origin; a mapped filing lookup refuses; other mapped failures drop with record_creation.mapped_value_dropped; a server-set filing lookup is asked AppendTo before the plan (new code record_creation.server_set_filing_lookup); D7 accessinheritance is never mapped; ebilling items 1-3 are met.
+- Reviews: two opus passes, every F fixed. Pass 2 caught a pre-plan ordering existence oracle.
+- Tests: 134 in the task test classes; mutants M1-M18 killed except M12 (equivalent).
+- Publish: +60,395 B for 011-014.
+- Open items:
+  - #2124: Money form to be verified in 018;
+  - DI-004 / #2188: source field security, blocks 017;
+  - OWNER: a mapped filing lookup failing field security refuses (403); kept (fail closed).
+- Details: notes/task-014-notes.md.
+rework: fix-round-2 task 014</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

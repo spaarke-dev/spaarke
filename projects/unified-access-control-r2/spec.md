@@ -208,12 +208,12 @@ exceptions are ratified rather than merely present.
 
 | Task | Requirement deviated from | What shipped instead | Why accepted |
 |---|---|---|---|
-| **012** | **FR-11** wanted anonymous share links either (a) tracked + revocable **or** (b) disabled | A defensible **third** thing: bounded expiry + explicit opt-in + capped + logged + config-gated (delivered by task **072**) | **Revocation is a PLATFORM property, not an oversight** — a minted SPE URL cannot be revoked through Dataverse; that needs a Graph permission-delete. Option (b) was rejected because SPE `organization` scope is tenant-wide, so disabling would have broken the external sharing this project exists to build. Neither (a) nor (b) was reachable; the shipped shape narrows the exposure on every axis that *is* reachable. |
+| **012** | **FR-11** wanted anonymous share links either (a) tracked + revocable **or** (b) disabled | A defensible **third** thing: bounded expiry + explicit opt-in + capped + logged + config-gated (delivered by task **072**) | **Revocation is a PLATFORM property, not an oversight** — a minted SPE URL cannot be revoked through Dataverse; that needs a Graph permission-delete. Option (b) was rejected because SPE `organization` scope is tenant-wide, so disabling would have broken the external sharing this project exists to build. Neither (a) nor (b) was reachable; the shipped shape narrows the exposure on every axis that *is* reachable. **Superseded 2026-10-16 (owner):** Graph refuses links in SPE containers anyway (#1350), so the route, its options and its tests were retired — FR-11 is now **met by option (b), disabled**. |
 | **023** | FR-09 grant-expiry **write** path | Expiry is written; the escalation is a **contract** question left open — clearing an expiry (date → `null`): omitted field versus explicit null | Correctly escalated rather than guessed. It is an API-contract decision, and picking silently would have baked one reading into the wire format. The write path itself is complete and tested. |
 | **062** | NFR-05 role-depth standing assertion | The assertion exists but runs **by hand**, not in CI | 🔴 Its **primary finding was remediated by the owner on 2026-09-09 and re-verified** (root BU default team `roles=[]`; the previously-exposed user now gets 403). What remains is *automation*, which is blocked on the CI Dataverse credential (§ open decisions) — not on this project's code. |
 
 ⚠️ **012 and 062 carry live residuals that acceptance does NOT close**: anonymous SPE links remain
-non-revocable by design, and NFR-05 remains a manual check until CI has a Dataverse credential. Accepting
+non-revocable by design (012's residual closed 2026-10-16: no route mints a link any more, #1350), and NFR-05 remains a manual check until CI has a Dataverse credential. Accepting
 the exception ratifies the *decision*, not the disappearance of the risk.
 
 ## Success Criteria

@@ -3,7 +3,9 @@
  * Step 3: "Enter Info" -- core work assignment fields.
  *
  * Fields: Name (required), Description, Matter Type, Practice Area,
- *         Priority (required), Response Due Date (required).
+ *         Priority (required), Response Due Date (required),
+ *         Assigned To (optional contact; blank sends no sprk_assignedto key so the
+ *         server's Assigned To Internal default applies -- FR-36 / FR-37).
  *
  * Pre-fill:
  *   - From the record selected in Step 1 (matching fields)
@@ -28,7 +30,7 @@ import { LookupField } from '../LookupField/LookupField';
 import type { ILookupItem } from '../../types/LookupTypes';
 import { useAiPrefill, type IResolvedPrefillFields } from '../../hooks/useAiPrefill';
 import type { IUploadedFile } from '../FileUpload/fileUploadTypes';
-import { searchMatterTypes, searchPracticeAreas } from './workAssignmentService';
+import { searchMatterTypes, searchPracticeAreas, searchContactsAsLookup } from './workAssignmentService';
 import type { ICreateWorkAssignmentFormState } from './formTypes';
 import type { IDataService } from '../../types/serviceInterfaces';
 import type { AuthenticatedFetchFn } from '../../services/EntityCreationService';
@@ -51,6 +53,8 @@ export interface IEnterInfoStepProps {
       | 'practiceAreaName'
       | 'priority'
       | 'responseDueDate'
+      | 'assignedToId'
+      | 'assignedToName'
     >
   ) => void;
   initialValues?: Partial<ICreateWorkAssignmentFormState>;
@@ -128,6 +132,8 @@ export const EnterInfoStep: React.FC<IEnterInfoStepProps> = ({
   const [practiceAreaName, setPracticeAreaName] = React.useState(initialValues?.practiceAreaName ?? '');
   const [priority, setPriority] = React.useState(initialValues?.priority ?? 100000001);
   const [responseDueDate, setResponseDueDate] = React.useState(initialValues?.responseDueDate ?? '');
+  const [assignedToId, setAssignedToId] = React.useState(initialValues?.assignedToId ?? '');
+  const [assignedToName, setAssignedToName] = React.useState(initialValues?.assignedToName ?? '');
 
   // Track whether initial values have been applied (for pre-fill)
   const appliedPrefillRef = React.useRef(false);
@@ -208,6 +214,8 @@ export const EnterInfoStep: React.FC<IEnterInfoStepProps> = ({
       practiceAreaName,
       priority,
       responseDueDate,
+      assignedToId,
+      assignedToName,
     });
   }, [
     name,
@@ -218,6 +226,8 @@ export const EnterInfoStep: React.FC<IEnterInfoStepProps> = ({
     practiceAreaName,
     priority,
     responseDueDate,
+    assignedToId,
+    assignedToName,
     onValidChange,
     onFormValues,
   ]);
@@ -249,6 +259,17 @@ export const EnterInfoStep: React.FC<IEnterInfoStepProps> = ({
     [dataService]
   );
 
+  const handleAssignedToChange = React.useCallback((item: ILookupItem | null) => {
+    setAssignedToId(item?.id ?? '');
+    setAssignedToName(item?.name ?? '');
+  }, []);
+
+  // sprk_workassignment.sprk_assignedto is a CONTACT lookup -- search contacts (same source as the follow-on event step).
+  const handleSearchAssignees = React.useCallback(
+    (query: string) => searchContactsAsLookup(dataService, query),
+    [dataService]
+  );
+
   const handlePriorityChange = React.useCallback((_e: unknown, data: { optionValue?: string }) => {
     setPriority(parseInt(data.optionValue ?? '100000001', 10));
   }, []);
@@ -260,6 +281,7 @@ export const EnterInfoStep: React.FC<IEnterInfoStepProps> = ({
 
   const matterTypeValue: ILookupItem | null = matterTypeId ? { id: matterTypeId, name: matterTypeName } : null;
   const practiceAreaValue: ILookupItem | null = practiceAreaId ? { id: practiceAreaId, name: practiceAreaName } : null;
+  const assignedToValue: ILookupItem | null = assignedToId ? { id: assignedToId, name: assignedToName } : null;
   const selectedPriorityText = PRIORITY_OPTIONS.find(o => o.key === priority)?.text ?? 'Normal';
 
   if (prefill.status === 'loading') {
@@ -339,6 +361,16 @@ export const EnterInfoStep: React.FC<IEnterInfoStepProps> = ({
           <Input type="date" value={responseDueDate} onChange={handleDueDateChange} />
         </Field>
       </div>
+
+      <LookupField
+        label="Assigned To"
+        value={assignedToValue}
+        onChange={handleAssignedToChange}
+        onSearch={handleSearchAssignees}
+        placeholder="Search contacts..."
+        minSearchLength={2}
+        hint="Leave blank to use the Assigned To Internal value"
+      />
     </div>
   );
 };

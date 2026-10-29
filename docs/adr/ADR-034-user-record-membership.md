@@ -4,7 +4,7 @@
 |-------|-------|
 | Status | **Accepted, as amended** |
 | Date | 2026-06-21 |
-| Updated | 2026-10-08 (correction note in §5: FetchXML list helper, ISS-018 #1452 — no rule change); 2026-10-03 (Amendment A4 accepted; A3 2026-10-02; A1 2026-09-04) |
+| Updated | 2026-10-17 (Amendment A2 written — accepted 2026-10-06, owner round 75; task 036; fix round 1: a child create also needs the caller's Create privilege on the child table, single-record views report Dataverse write affordances, write-route guard); 2026-10-08 (correction note in §5: FetchXML list helper, ISS-018 #1452 — no rule change); 2026-10-03 (Amendment A4 accepted; A3 2026-10-02; A1 2026-09-04) |
 | Authors | Spaarke Engineering, R3 project |
 | Source project | `spaarke-platform-foundations-r3` Part 1 |
 | Supersedes | n/a (closes a gap — there was no prior canonical mechanism) |
@@ -15,6 +15,12 @@
 > authorization**. Nothing below is retired — A1 *narrows one consumer*, it does not change the
 > mechanism. The 1-hop cap, the event semantics, the canonical-resolver rule and the
 > non-existent-entity ban are all unchanged.
+>
+> ⚠️ **[Amendment A2](#amendment-a2-2026-10-06-accepted-for-an-internal-users-access-on-the-spateams-plane-dataverses-own-answer-replaces-the-membership-rules) (accepted by the owner, round 75; task 036) takes internal users' SPA/Teams ACCESS off this mechanism**
+> when `ExternalAccess:ImpersonatedRootSets:Enabled` is on: Dataverse's own answer (the impersonated read) decides which
+> records a systemuser reaches there, at Read, and every write is confirmed against the user's real Dataverse rights on
+> the record. The membership walk — A1.1's ownership columns included — stays for scoping, for the contact plane, and for
+> the systemuser plane while the flag is off.
 >
 > ⚠️ **[Amendment A3](#amendment-a3-2026-10-02-accepted-the-people-targeting-surface--who-a-record-is-for) (accepted by the owner, round 3 D1; task 152) adds a THIRD surface — people targeting —**
 > for "which records are FOR this person" (briefing, notifications): a human Created By, the user-valued owner, and
@@ -347,6 +353,153 @@ depends on unfiltered systemuser-plane descriptors *as an access answer*. Every 
 
 **No consumer outside `AccessibleRecordSetService` uses these descriptors as an access answer**, so the
 narrowing changes no other surface's behaviour contract.
+
+---
+
+## Amendment A2 (2026-10-06, accepted): For an internal user's access on the SPA/Teams plane, Dataverse's own answer replaces the membership rules
+
+> **Status**: **Accepted** (resolution path **B — amendment**, per root CLAUDE.md §6.5). Owner approval: **round 75,
+> 2026-10-06** — "APPROVED: the ADR-034 section 6.5 path B amendment as reworded per owner D1". The owner delegated ADR
+> decisions that are consistent with the project's objectives, and this one is objective **D1** ("a user with access in
+> the Dataverse model-driven app should have access to Teams/SPA"). Basis: owner rules **C9** (round 2: "if a systemuser
+> has access in dataverse then they have access in Teams/SPA … do the full fix however that needs to be done"), **D1**
+> (round 3) and **round 59** (the rights shape below). Source:
+> `projects/unified-access-control-r2/notes/session27-owner-decisions-and-research.md`; the task POML
+> `projects/unified-access-control-r2/tasks/036-fr20-flag-gated-swap.poml` (its ADR-tension block and owner decision).
+> **Driver**: `unified-access-control-r2` task 036 (FR-20; GitHub #1074, #1567).
+> **Numbering**: A2 was claimed by task 036 before A3 was drafted (see A3's numbering note).
+> **Concise version**: the A1.1 replacement and the A2 rules for `.claude/adr/ADR-034-user-record-membership.md` are
+> drafted in `projects/unified-access-control-r2/notes/036-adr034-concise-amendment.md`; the main session applies them
+> (sub-agents cannot write `.claude/`) with, or before, the task 036 PR.
+
+### Why
+
+A1.1 (2026-09-17, task 043) made the three platform ownership columns — `ownerid`, `owningteam`, `owningbusinessunit` —
+confer on the authorization surface, on the grounds that "being the owner IS Dataverse access — the very thing this
+filter approximates until the FR-20 impersonated read (task 036) replaces it with Dataverse's own answer". On the
+systemuser plane the approximation is wrong in both directions, and its rights are a constant:
+
+1. **Over-grant.** `owningbusinessunit` binds the caller's own unit, so every record owned in that unit — and, through
+   `owningteam`, every record owned by the unit's default team — confers access whether or not the user's role depth
+   reaches it. A user whose role grants Read at Basic (user) depth is shown records Dataverse refuses them.
+2. **Under-grant.** A record shared with the user (`principalobjectaccess`), or reached through role depth beyond the
+   rows the walk matches, is invisible to a pattern match over the record's own columns.
+3. **A constant for rights.** Every match is stamped `Read | Write | Create` (`MembershipTermRights`), whatever Dataverse
+   grants on the record (defect C9, second half).
+
+No wording of the column rules makes a pattern match equal Dataverse's answer — ownership, role depth across the
+business-unit tree, teams, shares and hierarchy security together. Path C (comply) was therefore rejected. Path A (a
+project exception) was rejected because the business-unit guess is wrong in general, not for this project alone.
+
+### The decision
+
+For **systemuser ACCESS on the SPA/Teams plane** (the `/api/v1/external` routes, ADR-028 A3's one ExternalCollaboration
+group) while **`ExternalAccess:ImpersonatedRootSets:Enabled` is `true`**:
+
+- **The records come from Dataverse.** Which projects, matters and work assignments an internal user reaches is
+  Dataverse's own answer, read AS the user through `IImpersonatedRootSetSource` (task 035; one id-only read per root
+  type, cached two minutes, capped at 5,000 rows — a capped set is `Capped` and the module data response says
+  `truncated`). That answer confers **Read**.
+- **Every write is confirmed by Dataverse.** Before any write on that plane — create to-do, upload, create event, edit a
+  to-do, post a message, delete own — the route asks Dataverse for the user's rights on the target record: app-only, as
+  the BFF application user, naming the user's resolved systemuser and impersonating it (`RetrievePrincipalAccess` with
+  `Principal = systemusers(<id>)`, through `CallerRecordAccessProbe.GetPrincipalRightsAppOnlyOrUnknownAsync` over
+  `DataverseWebApiService.RetrievePrincipalRightsOrUnknownAsync`; fail closed). A child (to-do, document, event, message)
+  is admitted by `AppendTo` on the parent record **AND** the user's own Create privilege on the child table
+  (`prvCreatesprk_Todo` / `_Document` / `_Event` / `_Communication`, asked the same way through
+  `CallerRecordAccessProbe.PrincipalHoldsPrivilegeAppOnlyOrUnknownAsync` — `RetrieveUserSetOfPrivilegesByNames` on that
+  systemuser — uncached). The second half matters because the BFF writes the child app-only: Dataverse would otherwise
+  never check the user's Create privilege, and a user MDA refuses could create the row here (task 036 fix round 1).
+  `Write` admits an edit; `Delete` admits a delete-own, which also still requires the creator stamp.
+- **The same mechanism for every systemuser** (task 036 decision (a), owner 2026-10-18, widened by option C, owner
+  2026-10-20). ADR-028 forbids exchanging the caller's token on this plane (A1–A3), and a WorkforceHome-linked user's
+  customer-directory token (ADR-028 A9) could not be exchanged for Dataverse anyway. So every systemuser — whether they
+  signed in with a Spaarke-tenant token or through the stored home link — is confirmed by the questions above, under
+  ADR-028 A5's trust basis: the id is the one the authenticated identity was resolved to, never client-supplied, and
+  Dataverse answers from that user's own roles, teams and shares. The plane's read set (the impersonated read) and its
+  write confirmation therefore rest on one mechanism and one resolved id. A 404 is re-asked on the replication-lag
+  schedule (a write right after a create); an impersonation fault (`0x8004A110`, or `0x80040220` whose message names
+  `prvActOnBehalfOfAnotherUser` as a whole token) is UNKNOWN, not a denial, and adds no
+  rights; each question is bounded at 15 seconds. A write refused only because Dataverse gave no answer (a timeout, a
+  throttle or 5xx, an UNKNOWN 403) is a retry-able 503 that writes nothing (`sdap.access.dataverse_unavailable`, or the
+  to-do PATCH's and delete-own's own 503), never a "no access" 403 (task 036 fix round 4). The same answer drives the user's list `canCreate`, and `/me` says
+  `writeAccessPerRecord: true` for every Dataverse-decided user. Enforced by:
+  `tests/Spaarke.ArchTests/ExternalPlaneNoOboGuardTests.cs` (no token-taking probe question, OBO exchange or
+  caller-token read in the plane's handler files or in any filter or handler file its mappings bind).
+- **Exempt — a service request's writes** (upload to it, a message on it, deleting one's own request) keep the
+  requester rule in both flag states and are not confirmed (task 036 decision e, accepted by the owner). The requester's
+  access is explicit access Dataverse cannot see, like the B-17 contact grants: widening could add nothing, and replacing
+  would refuse requesters whose request is owned by another unit's team. The other exemptions are writes that touch no
+  core record (filing a new request, self identity and self state) and the contact-grant routes, which refuse a
+  systemuser; `RouteAuthorizationGuardTests.ExternalWrites` lists each with its reason.
+- **Write affordances come from the same answer, for the record in hand.** A view scoped to ONE record reports what its
+  create route would admit: the document list's `canCreate`, and — for a Dataverse-decided user only — the to-do list's and
+  a project event list's `canCreate` (one confirmation per view; no per-row reads). `/me` carries
+  `writeAccessPerRecord: true` for such a user, because its per-project level then says only what they may see; the
+  client takes create/upload controls from the record's list instead. Read-only actions (download, version history) are
+  offered wherever the list rendered, and the to-do status toggle is offered on a project's to-dos and decided by the
+  edit route's own confirmation (a refusal reverts it).
+- **The membership walk is not consulted** for that user's access: not the A1 registry terms, not A1.1's ownership
+  columns, not `MembershipTermRights`.
+- **Unchanged:** the contact-grants union (`sprk_externalrecordaccess` — Dataverse cannot see it, register B-17) on both
+  flag states; the deny veto and the Restricted veto on both flag states, with the Dataverse term as the Restricted
+  survivor under the flag.
+
+**The membership walk stays** for: non-access scoping (A1's AI-scoping surface, A3's people-targeting surface); the
+contact plane (A1's registry, A4's materialization); and the systemuser plane **while the flag is off**. Off is
+transitional and unchanged — including A1.1: `PlatformOwnershipColumns` is not edited and the business-unit pin in
+`MembershipResolverServiceTests` stands, because removing `owningbusinessunit` there would under-grant every user whose
+Dataverse Read reaches a record through their unit's depth (owner D1).
+
+### New MUST / MUST NOT rules
+
+- **MUST**, with the flag on, take a systemuser's SPA/Teams record set from the impersonated read only, at Read.
+- **MUST** confirm every write a Dataverse-decided caller makes on `/api/v1/external` against Dataverse on the target
+  record through `CallerRecordAccessProbe` before writing; a child create needs `AppendTo` on the parent AND the caller's
+  Create privilege on the child table. No write rests on a constant. (Enforced by:
+  `ExternalProjectDataEndpoints.WithDataverseRightsAsync` at each write route, the per-route tests listed in the task
+  036 notes, and `RouteAuthorizationGuardTests.ExternalWrites` — every `MapPost`/`MapPatch`/`MapPut`/`MapDelete` on the
+  group reaches the confirmation or is an exemption with a reason.)
+- **Known limit:** the child table's **Append** privilege (`prvAppend<child>`, which Dataverse also asks of a user setting
+  the child's parent lookup) is not checked. The existing checker answers one privilege per round trip; Create plus
+  AppendTo on the parent is the material gate, and every SpaarkeMaster role grants Append on each of these tables it
+  grants Create on (Spaarke Core User: all four; Spaarke Basic User: `sprk_communication` only; Spaarke Office Add In
+  User: `sprk_event` only). Internal users who write on the SPA/Teams plane therefore need Spaarke Core User (or
+  equivalent privileges), exactly as in the model-driven app.
+- **MUST** fail closed: a failed impersonated read (a fault, a missing or empty `SystemUserId`, no source) fails the
+  composition; a failed, refused or absent rights answer adds no rights. **MUST NOT** fall back to the membership walk, an
+  app-only read or a constant. (The app-only, named-principal confirmation is not a fallback: it is the plane's only
+  confirmation, for every systemuser, and a fault on it adds no rights either.)
+- **MUST NOT** stamp `MembershipTermRights`, or any constant, on a record of a flag-on systemuser composition.
+- **MUST NOT** edit `PlatformOwnershipColumns`, or otherwise narrow A1.1, for the flag-off path.
+- **MUST NOT** turn the flag on in an environment before tasks 142 and 143 are complete there and the task 034 negative
+  canary passes there **strictly smaller** (equal sets are a failure). **MUST NOT** check in a value other than `false`
+  (enforced by `ImpersonationNegativeCanaryTests`' config tripwire).
+
+### Explicitly NOT amended
+
+- **A1** (the per-surface allow-list) and **A3** (people targeting) — unchanged on their surfaces.
+- **A4** (Assigned-To materialization) — unchanged. Under the flag it is how an internal user's "Assigned To *" access
+  survives: through the POA share it writes, which the impersonated read sees.
+- **M1** (the canonical resolver), the 1-hop cap, the event semantics, the non-existent-entity ban.
+
+### Residual stated with the amendment
+
+- **Off does not close the over-grant.** Until the flag is on, the systemuser plane keeps A1.1's business-unit
+  over-grant. This amendment does not claim otherwise.
+- **Listed rights are Read under the flag.** Settled (task 036 decision g): single-record views report their create
+  route's own Dataverse answer and `/me` says `writeAccessPerRecord`, so the SPA offers create/upload, download and the
+  to-do status toggle where the routes admit them. Still level-gated for such a user: Invite User and the issued-grants
+  list (contact-grant routes refuse a systemuser, so hiding them is correct).
+- **Every systemuser is confirmed app-only, naming them** (settled, task 036 decision (a), owner 2026-10-18, widened by
+  option C, owner 2026-10-20; above). Writes and lists' `canCreate` follow Dataverse's answer for the user's own
+  systemuser, so a WorkforceHome tenant needs nothing beyond the flag's other preconditions. That answer is expected to
+  match what the model-driven app allows the same user; it is not yet proven live for roles a user holds only through a
+  team, or for disabled and unlicensed users (the 036 dev gate checks them).
+- **A capped set keeps the most recently modified records** (register item C-1; settled, task 036 decision (f), owner
+  2026-10-18): the impersonated read orders by `modifiedon desc` before its 5,000-row `$top`, and the cap is still
+  flagged. The flag-off membership walk keeps its own total order (primary id ascending, FR-14), which its page cookies
+  depend on.
 
 ---
 

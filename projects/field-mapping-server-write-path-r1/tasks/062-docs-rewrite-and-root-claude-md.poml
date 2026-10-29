@@ -1,0 +1,97 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="062" project="field-mapping-server-write-path-r1">
+  <metadata>
+    <title>Rewrite field-mapping docs, update registry rows I-3/I-5/I-6, root CLAUDE.md pointers and CHANGELOG (FR-28 docs)</title>
+    <phase>6 W6 Standard, guards, docs, retirement</phase>
+    <gate>040+053+060 complete</gate>
+    <status>not-started</status>
+    <rigor>MINIMAL</rigor>
+    <rigor-reason>Documentation only; no code or tests changed.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Documentation rewrite from settled decisions and shipped behaviour.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits root CLAUDE.md and .claude/CHANGELOG.md, which sub-agents cannot write: these edits are made by the MAIN SESSION only; also edits the shared DATAVERSE-WRITE-PATH-ARCHITECTURE.md.</parallel-reason>
+    <deps>040, 053, 060</deps>
+    <tags>docs</tags>
+    <estimated-effort>5-7 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Rewrite `SPAARKE-FIELD-MAPPING-FRAMEWORK.md` and `FIELD-MAPPING-ADMIN-GUIDE.md` for the shipped behaviour: server-side, fill-only at create; `/push` Copy-only by sync mode; "use a quick view when the child only needs to show the parent's value"; never define OOB relationship mappings on rule-owned fields. Update the registry rows I-3 and I-5 to done and I-6 in `DATAVERSE-WRITE-PATH-ARCHITECTURE.md`. Update the root `CLAUDE.md` §17 Field Mapping row and §13 entry point, and add a `.claude/CHANGELOG.md` entry. The root CLAUDE.md and .claude/CHANGELOG.md edits MUST be made by the MAIN SESSION; a sub-agent cannot write under .claude/ and root CLAUDE.md edits are applied by the main session.</prompt>
+  <role>SPAARKE technical writer / platform developer; docs follow the docs-architecture and docs-guide skills.</role>
+  <goal>The docs describe what shipped (verified against code), the invariant registry marks I-3/I-5 done and I-6 current, and the root pointers send agents to the right documents.</goal>
+
+  <context>
+    <background>spec.md FR-28 (docs part). Code wins; docs lag: write only behaviour verified in code or in the live checks of tasks 040 and 053, and the matrix from task 060. DATAVERSE-WRITE-PATH-ARCHITECTURE.md is ALSO edited by PR #1911 and UAC-r2 PR #2110 (merge-aware: re-read the latest merged file, confine edits to I-3/I-5/I-6 rows, run /conflict-check). Root CLAUDE.md §13 and §17 rows follow root CLAUDE.md §18 maintainer notes (read the HTML comment at the top before editing).</background>
+    <relevant-files>
+      <file role="modify">docs/architecture/SPAARKE-FIELD-MAPPING-FRAMEWORK.md (rewrite; keep the task 001 semantics table accurate)</file>
+      <file role="modify">docs/guides/FIELD-MAPPING-ADMIN-GUIDE.md (fill-only, push and sync mode, quick view advice, no OOB relationship maps on rule-owned fields)</file>
+      <file role="modify">docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md (registry rows I-3/I-5 done; I-6 updated; matrix from task 060 stays)</file>
+      <file role="modify">CLAUDE.md (root; MAIN SESSION ONLY: §17 "Touch field mapping or set-regarding" row and §13 entry point for the canonical engine/RecordCreationService)</file>
+      <file role="modify">.claude/CHANGELOG.md (MAIN SESSION ONLY: one entry for the CLAUDE.md pointer change)</file>
+      <file role="canonical-reference">projects/field-mapping-server-write-path-r1/spec.md FR-28; notes/decisions.md; notes/w5-live-check.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="040" status="pending">Push behaviour as shipped (Copy-only, sync mode, fixed error text).</dependency>
+      <dependency task="053" status="pending">W5 behaviour as verified live.</dependency>
+      <dependency task="060" status="pending">Ownership matrix and exception decisions.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="root CLAUDE.md §3">Scope: .claude/ and root CLAUDE.md. Sub-agents cannot write under .claude/ ("Edit denied on .claude/..." is the boundary working). The MAIN SESSION applies the root CLAUDE.md and .claude/CHANGELOG.md edits; a sub-agent drafts the exact text in notes/ and stops.</constraint>
+    <constraint source="root CLAUDE.md §2">Scope: truth. Every statement in the rewritten docs is verified against code or recorded evidence; no aspirational text; remove statements about the client engine and quick-create flags that are now false.</constraint>
+    <constraint source="project (merge-aware)">Scope: shared doc. DATAVERSE-WRITE-PATH-ARCHITECTURE.md is also edited by PR #1911 and UAC-r2 PR #2110; edit only the I-3/I-5/I-6 rows on the latest merge; never overwrite their sections; run /conflict-check.</constraint>
+    <constraint source="root CLAUDE.md §18">Scope: CLAUDE.md edits. Read the maintainer notes in the HTML comment at the top of the file before editing; keep rows concise; add the CHANGELOG entry in the same change.</constraint>
+    <constraint source="ADR-002">Scope: wording. Docs state the server is the single owner of each invariant and that OOB relationship maps, plugins, flows and business rules do not own invariants.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Field mapping documentation; write-path registry</topic>
+    <files>
+      <file>.claude/adr/ADR-002-thin-plugins.md</file>
+      <file>docs/architecture/SPAARKE-FIELD-MAPPING-FRAMEWORK.md</file>
+      <file>docs/guides/FIELD-MAPPING-ADMIN-GUIDE.md</file>
+      <file>docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md</file>
+      <file>.claude/skills/conflict-check/SKILL.md</file>
+    </files>
+    <patterns>
+      <pattern name="entity-operations" location=".claude/patterns/dataverse/entity-operations.md">Terminology for create vs repair vs push.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare MINIMAL rigor; state that root CLAUDE.md and .claude/CHANGELOG.md edits run in the main session; read spec FR-28 and the evidence notes; /conflict-check on the three docs.</step>
+    <step order="1">Rewrite the two field-mapping docs from verified behaviour; keep the semantics table (task 001) and add fill-only, sync mode, push, repair pass, quick-view advice, OOB-map prohibition.</step>
+    <step order="2">Update I-3/I-5 (done) and I-6 rows in the write-path doc on the latest merge.</step>
+    <step order="3">Draft the root CLAUDE.md §17 and §13 text and the CHANGELOG entry in notes/ (sub-agent) and have the MAIN SESSION apply them to CLAUDE.md and .claude/CHANGELOG.md.</step>
+    <step order="4">Grep the repo docs for stale statements (client mapping, applyFieldMappings, quick create on) and fix or list them.</step>
+    <step order="5">Update TASK-INDEX.md: set this task's status to ✅.</step>
+    <step order="6">Document any deviation in projects/field-mapping-server-write-path-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If a doc statement cannot be verified against code or live evidence, do not write it: STOP and escalate or mark it open in notes/ per CLAUDE.md §6.</trigger>
+    <trigger>If PR #1911 or #2110 restructured the registry rows so I-3/I-5/I-6 no longer exist as such, stop and ask before reshaping.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="docs">docs/architecture/SPAARKE-FIELD-MAPPING-FRAMEWORK.md</output>
+    <output type="docs">docs/guides/FIELD-MAPPING-ADMIN-GUIDE.md</output>
+    <output type="docs">docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md</output>
+    <output type="docs">CLAUDE.md and .claude/CHANGELOG.md (main session)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Both field-mapping docs state fill-only create, push Copy-only by Manual Refresh sync mode, the quick-view advice and the "no OOB relationship mappings on rule-owned fields" rule; none mentions a client mapping engine as current.</criterion>
+    <criterion testable="true">Registry rows I-3 and I-5 read done and I-6 reflects the record-first owner rule and points at the matrix.</criterion>
+    <criterion testable="true">Root CLAUDE.md §17 Field Mapping row and §13 entry point updated and a matching `.claude/CHANGELOG.md` entry exists; both edits were made by the main session.</criterion>
+    <criterion testable="true">Negative: no content from PR #1911 or #2110 was removed from the write-path doc, and no sub-agent wrote under `.claude/` (git diff reviewed).</criterion>
+    <criterion testable="true">Docs merged to the working branch with no conflict markers and all cross-links resolve.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-28 (docs). Parallel-safe false because the main session must apply the .claude/ and root CLAUDE.md edits.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

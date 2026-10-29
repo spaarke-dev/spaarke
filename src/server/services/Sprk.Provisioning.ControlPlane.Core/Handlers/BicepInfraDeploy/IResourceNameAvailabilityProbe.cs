@@ -57,9 +57,15 @@ public interface IResourceNameAvailabilityProbe
 /// </summary>
 /// <param name="SubscriptionId">Target Azure subscription id.</param>
 /// <param name="Names">List of (kind, name) pairs to check.</param>
+/// <param name="ResourceGroupName">
+/// The stamp's own resource group (<c>rg-spaarke-{customerId}-{env}</c>). A name Azure reports unavailable that
+/// already exists HERE belongs to this stamp — a re-run of H2a after an earlier deploy (T186 L23) — and is not a
+/// collision.
+/// </param>
 public sealed record ResourceNameAvailabilityRequest(
     string SubscriptionId,
-    IReadOnlyList<ResourceNameCheckEntry> Names);
+    IReadOnlyList<ResourceNameCheckEntry> Names,
+    string ResourceGroupName);
 
 /// <summary>
 /// One (resource kind, requested name) tuple in a
@@ -105,7 +111,7 @@ public enum ResourceNameKind
 /// <summary>Result of one <see cref="IResourceNameAvailabilityProbe.CheckAvailabilityAsync"/> invocation.</summary>
 public abstract record ResourceNameAvailabilityResult
 {
-    /// <summary>Every checked name is available.</summary>
+    /// <summary>Every checked name is available, or already belongs to this stamp's resource group.</summary>
     public sealed record AllAvailable : ResourceNameAvailabilityResult;
 
     /// <summary>

@@ -1734,6 +1734,318 @@ public class ThreadResolverTests
             communicationId, ThreadAssignment.Anchored(created, "sprk_matter", matter), It.IsAny<CancellationToken>()), Times.Once);
     }
 
+    // ── Task 065 fix round 4 (K1): the filing sweep lowers a RECEIVED email it gave a thread, or it stays hidden for good ──
+
+    private const int DirectionIncoming = 100000000;
+    private const int DirectionOutgoing = 100000001;
+
+    private static bool IsLowering(Dictionary<string, object> d) =>
+        d.Count == 1 && d.TryGetValue("sprk_isinternalonly", out var v) && Equals(v, false);
+
+    private async Task<Guid> SweepThreadlessEmailAsync(int? direction, string? graphMessageId, int? threadPrivacy, string? inReplyTo = null)
+    {
+        var communicationId = Guid.NewGuid();
+        var matter = Guid.NewGuid();
+        var email = SetupFiledEmail(communicationId, threadId: null, "sprk_matter", matter);
+        if (direction is { } d)
+            email["sprk_direction"] = new OptionSetValue(d);
+        if (graphMessageId is not null)
+            email["sprk_graphmessageid"] = graphMessageId;
+        if (inReplyTo is not null)
+            email["sprk_inreplyto"] = inReplyTo;
+        var created = SetupThreadCreateCapture(out _);
+        var thread = new DataverseEntity("sprk_communicationthread") { Id = created };
+        if (threadPrivacy is { } p)
+            thread["sprk_privacystate"] = new OptionSetValue(p);
+        SetupReconcileThreadRead(created, thread);
+
+        await CreateFilingSut(true, new StubThreadKeyStrategy(CommunicationType.Email, ThreadKeyResolution.CreateNew))
+            .ReconcileThreadForFilingAsync(communicationId, CancellationToken.None);
+
+        return communicationId;
+    }
+
+    [Fact]
+    public async Task ReconcileThreadForFiling_ThreadlessIncomingAddInEmail_GivenAnOpenThread_IsLoweredToNotInternalOnly()
+    {
+        var id = await SweepThreadlessEmailAsync(DirectionIncoming, graphMessageId: null, threadPrivacy: PrivacyStateOpen);
+
+        _entity.Verify(e => e.UpdateAsync("sprk_communication", id, It.Is<Dictionary<string, object>>(d => IsLowering(d)), It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
+
+    [Fact]
+    public async Task ReconcileThreadForFiling_ThreadlessIncomingMailboxEmail_ParentUnknown_StaysInternalOnly()
+    {
+        // A mailbox email (it has a Graph message id) keeps no In-Reply-To / References on its row, so the sweep cannot
+        // evaluate its parent: fail closed.
+        var id = await SweepThreadlessEmailAsync(DirectionIncoming, graphMessageId: "AAMk-graph-1", threadPrivacy: PrivacyStateOpen);
+
+        _entity.Verify(e => e.UpdateAsync("sprk_communication", id, It.Is<Dictionary<string, object>>(d => d.ContainsKey("sprk_isinternalonly")), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    [Theory]
+    [InlineData(DirectionOutgoing)]
+    [InlineData(null)] // an unread direction is not "Incoming": fail closed
+    public async Task ReconcileThreadForFiling_ThreadlessEmailNotKnownToBeIncoming_IsNeverLowered(int? direction)
+    {
+        var id = await SweepThreadlessEmailAsync(direction, graphMessageId: null, threadPrivacy: PrivacyStateOpen);
+
+        _entity.Verify(e => e.UpdateAsync("sprk_communication", id, It.Is<Dictionary<string, object>>(d => d.ContainsKey("sprk_isinternalonly")), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    [Theory]
+    [InlineData(100000001)] // Private
+    [InlineData(null)]  // no privacy value
+    public async Task ReconcileThreadForFiling_ThreadlessIncomingEmail_GivenAPrivateOrUnmarkedThread_StaysInternalOnly(int? privacy)
+    {
+        var id = await SweepThreadlessEmailAsync(DirectionIncoming, graphMessageId: null, threadPrivacy: privacy);
+
+        _entity.Verify(e => e.UpdateAsync("sprk_communication", id, It.Is<Dictionary<string, object>>(d => d.ContainsKey("sprk_isinternalonly")), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    // ── Task 065 fix round 6 (K1): a row that stores a parent reference is not shareable to the sweep ──
+
+    [Theory]
+    [InlineData("<parent@contoso.com>")]
+    [InlineData("  <parent@contoso.com>  ")]
+    public async Task ReconcileThreadForFiling_ThreadlessIncomingAddInEmail_WithAStoredInReplyTo_StaysInternalOnly(string inReplyTo)
+    {
+        // The add-in capture now stores sprk_inreplyto when the upload carried reply headers. The sweep cannot evaluate that
+        // parent, so a non-blank value keeps the row internal-only even in an Open thread and with no Graph message id.
+        var id = await SweepThreadlessEmailAsync(DirectionIncoming, graphMessageId: null, threadPrivacy: PrivacyStateOpen, inReplyTo: inReplyTo);
+
+        _entity.Verify(e => e.UpdateAsync("sprk_communication", id, It.Is<Dictionary<string, object>>(d => d.ContainsKey("sprk_isinternalonly")), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    public async Task ReconcileThreadForFiling_ThreadlessIncomingAddInEmail_WithABlankInReplyTo_IsStillLowered_D6(string? inReplyTo)
+    {
+        var id = await SweepThreadlessEmailAsync(DirectionIncoming, graphMessageId: null, threadPrivacy: PrivacyStateOpen, inReplyTo: inReplyTo);
+
+        _entity.Verify(e => e.UpdateAsync("sprk_communication", id, It.Is<Dictionary<string, object>>(d => IsLowering(d)), It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
+
+    // ── Task 065 fix round 6 (D8): a partner's post never lands in a Private default thread ──
+
+    private static DataverseEntity RecordDefaultThread(string entityType, Guid recordId, int? privacy)
+    {
+        var thread = Thread(Guid.NewGuid(), regardingType: entityType, regardingId: recordId.ToString(),
+            isDefault: true, threadType: ThreadTypeRecordAnchored);
+        thread["sprk_regardingrecordid"] = recordId.ToString();
+        if (privacy is { } p)
+            thread["sprk_privacystate"] = new OptionSetValue(p);
+        return thread;
+    }
+
+    /// <summary>
+    /// Resolves a record-regarding message that no channel key groups (the external thread post's shape: a Message with no ACS
+    /// thread id) against the record's existing default threads. Returns the thread it joined and any thread it created.
+    /// </summary>
+    private async Task<(Guid? Joined, List<DataverseEntity> Created, Guid CreatedId, ThreadResolutionRequest Request)> ResolveRecordPostAsync(
+        bool requireOpenDefaultThread, Guid matter, params DataverseEntity[] existingDefaults)
+    {
+        var request = Request(CommunicationType.Message, acsThreadId: null) with { RequireOpenDefaultThread = requireOpenDefaultThread };
+        var communication = new DataverseEntity("sprk_communication") { Id = request.CommunicationId };
+        SetMessageRegarding(communication, "sprk_matter", matter, "Acme v Widgets");
+        SetupRegardingRead(request.CommunicationId, communication);
+        SetupDefaultThreadRows(existingDefaults);
+        var createdId = SetupThreadCreateCapture(out var created);
+        var sut = CreateSut(new StubThreadKeyStrategy(CommunicationType.Message, ThreadKeyResolution.Skip));
+
+        var joined = await sut.ResolveAndAssignThreadAsync(request, CancellationToken.None);
+        return (joined, created, createdId, request);
+    }
+
+    [Fact]
+    public async Task D8_PartnerPost_WhenTheRecordsDefaultThreadIsPrivate_LandsInANewOpenDefaultThread_TheAuthorCanReadBack()
+    {
+        var matter = Guid.NewGuid();
+        var priv = RecordDefaultThread("sprk_matter", matter, PrivacyStatePrivate);
+
+        var (joined, created, createdId, request) = await ResolveRecordPostAsync(true, matter, priv);
+
+        joined.Should().Be(createdId).And.NotBe(priv.Id);
+        var thread = created.Should().ContainSingle().Subject;
+        thread.GetAttributeValue<OptionSetValue>("sprk_privacystate").Value.Should().Be(PrivacyStateOpen);
+        thread.GetAttributeValue<bool>("sprk_isdefaultthread").Should().BeTrue();
+        thread.GetAttributeValue<EntityReference>("sprk_regardingmatter").Id.Should().Be(matter);
+        VerifyAssigned(request.CommunicationId, createdId, Times.Once());
+        VerifyAssigned(request.CommunicationId, priv.Id, Times.Never());
+
+        // Read-back: the D7 gate every external read applies shows the post, because its thread reads explicitly Open.
+        var threadRow = new Dictionary<string, System.Text.Json.JsonElement>
+        {
+            ["sprk_communicationthreadid"] = System.Text.Json.JsonSerializer.SerializeToElement(createdId.ToString("D")),
+            ["sprk_privacystate"] = System.Text.Json.JsonSerializer.SerializeToElement(
+                thread.GetAttributeValue<OptionSetValue>("sprk_privacystate").Value),
+        };
+        var open = await CommunicationOpenThreadGate.ReadOpenThreadIdsAsync(
+            new[] { createdId },
+            (_, _) => Task.FromResult<IReadOnlyList<Dictionary<string, System.Text.Json.JsonElement>>>(new[] { threadRow }),
+            CancellationToken.None);
+        open.Should().Contain(createdId);
+    }
+
+    [Fact]
+    public async Task D8_PartnerPost_WhenTheRecordsDefaultThreadIsOpen_ReusesIt_AndCreatesNothing()
+    {
+        var matter = Guid.NewGuid();
+        var open = RecordDefaultThread("sprk_matter", matter, PrivacyStateOpen);
+
+        var (joined, created, _, request) = await ResolveRecordPostAsync(true, matter, open);
+
+        joined.Should().Be(open.Id);
+        created.Should().BeEmpty();
+        VerifyAssigned(request.CommunicationId, open.Id, Times.Once());
+    }
+
+    [Fact]
+    public async Task D8_PartnerPost_WhenAPrivateAndAnOpenDefaultBothExist_JoinsTheOpenOne()
+    {
+        var matter = Guid.NewGuid();
+        var priv = RecordDefaultThread("sprk_matter", matter, PrivacyStatePrivate);
+        var open = RecordDefaultThread("sprk_matter", matter, PrivacyStateOpen);
+
+        var (joined, created, _, _) = await ResolveRecordPostAsync(true, matter, priv, open);
+
+        joined.Should().Be(open.Id);
+        created.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task D8_PartnerPost_WhenTheDefaultHasNoPrivacyValue_IsNotJoined_ItIsNotExplicitlyOpen()
+    {
+        var matter = Guid.NewGuid();
+        var unmarked = RecordDefaultThread("sprk_matter", matter, privacy: null);
+
+        var (joined, created, createdId, _) = await ResolveRecordPostAsync(true, matter, unmarked);
+
+        joined.Should().Be(createdId);
+        created.Should().ContainSingle();
+    }
+
+    [Fact]
+    public async Task D8_InternalResolution_IsUnchanged_ItStillJoinsAPrivateDefaultThread()
+    {
+        var matter = Guid.NewGuid();
+        var priv = RecordDefaultThread("sprk_matter", matter, PrivacyStatePrivate);
+
+        var (joined, created, _, request) = await ResolveRecordPostAsync(false, matter, priv);
+
+        joined.Should().Be(priv.Id);
+        created.Should().BeEmpty();
+        VerifyAssigned(request.CommunicationId, priv.Id, Times.Once());
+    }
+
+    [Fact]
+    public async Task D8_TheDefaultThreadLookup_TakesTheOldestMatch_SoAnInternalResolutionStaysDeterministic()
+    {
+        var matter = Guid.NewGuid();
+        QueryExpression? seen = null;
+        var request = Request(CommunicationType.Message, acsThreadId: null);
+        var communication = new DataverseEntity("sprk_communication") { Id = request.CommunicationId };
+        SetMessageRegarding(communication, "sprk_matter", matter);
+        SetupRegardingRead(request.CommunicationId, communication);
+        _entity
+            .Setup(e => e.RetrieveMultipleAsync(It.Is<QueryExpression>(q => q.EntityName == "sprk_communicationthread"), It.IsAny<CancellationToken>()))
+            .Callback<QueryExpression, CancellationToken>((q, _) => seen = q)
+            .ReturnsAsync(new EntityCollection { Entities = { new DataverseEntity("sprk_communicationthread") { Id = Guid.NewGuid() } } });
+
+        await CreateSut(new StubThreadKeyStrategy(CommunicationType.Message, ThreadKeyResolution.Skip))
+            .ResolveAndAssignThreadAsync(request, CancellationToken.None);
+
+        seen.Should().NotBeNull();
+        seen!.Orders.Should().ContainSingle(o => o.AttributeName == "createdon" && o.OrderType == OrderType.Ascending);
+        seen.Criteria.Conditions.Should().NotContain(c => c.AttributeName == "sprk_privacystate",
+            "an internal resolution adds no privacy condition");
+    }
+
+    // ── #2091: the filing reconcile IS the step after a re-file's thread step — its own joins run no step of their own ──────
+
+    /// <summary>A host's scope factory that fails the moment a scope is opened: the step after a re-file would open one.</summary>
+    private static ScopesThatMustNotBeOpened NoStepScopes() => new();
+
+    private sealed class ScopesThatMustNotBeOpened : Microsoft.Extensions.DependencyInjection.IServiceScopeFactory
+    {
+        public Microsoft.Extensions.DependencyInjection.IServiceScope CreateScope() =>
+            throw new InvalidOperationException("Test: the filing reconcile's own join opened a scope for the step after a re-file.");
+    }
+
+    private ThreadResolver CreateFilingSutWithScopes(
+        Microsoft.Extensions.DependencyInjection.IServiceScopeFactory scopes, params IThreadKeyStrategy[] strategies) =>
+        new(strategies, _entity.Object, _owners, NullLogger<ThreadResolver>.Instance, _grants.Object, SecureNames, scopes);
+
+    [Fact]
+    public async Task ReconcileThreadForFiling_TheMoveToTheRecordsDefaultThread_RunsNoStepAfterARefile_2091()
+    {
+        var communicationId = Guid.NewGuid();
+        var threadId = Guid.NewGuid();
+        var matter = Guid.NewGuid();
+        SetupFiledEmail(communicationId, threadId, "sprk_matter", matter);
+        SetupReconcileThreadRead(threadId, OpenThread(threadId));
+        SetupThreadMessagesForFiling(
+            threadId,
+            Message(communicationId, "sprk_matter", matter),
+            Message(Guid.NewGuid(), entityType: null, Guid.Empty, type: CommunicationTypeMessage));
+        var recordThread = SetupRecordsDefaultThread("sprk_matter", matter);
+
+        await CreateFilingSutWithScopes(NoStepScopes()).ReconcileThreadForFilingAsync(communicationId, CancellationToken.None);
+
+        VerifyOnlyTheEmailMoved(communicationId, threadId, recordThread, "sprk_matter", matter);
+    }
+
+    [Fact]
+    public async Task ReconcileThreadForFiling_AThreadlessEmailJoiningARecordThread_RunsNoStepAfterARefile_2091()
+    {
+        var communicationId = Guid.NewGuid();
+        var matter = Guid.NewGuid();
+        var existing = Guid.NewGuid();
+        SetupFiledEmail(communicationId, threadId: null, "sprk_matter", matter);
+        _entity
+            .Setup(e => e.RetrieveAsync("sprk_communicationthread", existing, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Thread(existing, regardingType: "sprk_matter", regardingId: matter.ToString(), threadType: ThreadTypeRecordAnchored));
+
+        await CreateFilingSutWithScopes(
+                NoStepScopes(), new StubThreadKeyStrategy(CommunicationType.Email, ThreadKeyResolution.Join(existing)))
+            .ReconcileThreadForFilingAsync(communicationId, CancellationToken.None);
+
+        VerifyAssigned(communicationId, existing, Times.Once());
+        _owners.Reparents.Should().ContainSingle("the join files the email under the thread's record (S6)");
+    }
+
+    [Fact]
+    public async Task ResolveAndAssignAsync_JoiningARecordThread_InAHostWithoutTheReconciler_StillJoins_AndLogsAnError_2091()
+    {
+        var request = Request(CommunicationType.Email);
+        var existing = Guid.NewGuid();
+        var matter = Guid.NewGuid();
+        _entity
+            .Setup(e => e.RetrieveAsync("sprk_communicationthread", existing, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Thread(existing, regardingType: "sprk_matter", regardingId: matter.ToString(), threadType: ThreadTypeRecordAnchored));
+        var log = new CapturingLogger<ThreadResolver>();
+        var sut = new ThreadResolver(
+            new[] { new StubThreadKeyStrategy(CommunicationType.Email, ThreadKeyResolution.Join(existing)) }, _entity.Object,
+            new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(), log);
+
+        var result = await sut.ResolveAndAssignAsync(request, CancellationToken.None);
+
+        result.Should().Be(ThreadAssignment.Anchored(existing, "sprk_matter", matter), "the join stands");
+        VerifyAssigned(request.CommunicationId, existing, Times.Once());
+        log.Entries.Should().Contain(e => e.Level == Microsoft.Extensions.Logging.LogLevel.Error
+                                          && e.Message.Contains("no SecureChildReconciler is registered", StringComparison.Ordinal)
+                                          && e.Message.Contains(request.CommunicationId.ToString(), StringComparison.Ordinal),
+            "a host without the reconciler skips the step after a re-file loudly, never silently");
+    }
+
     [Fact]
     public async Task ReconcileThreadForFiling_UnfiledEmailWithNoThread_DoesNothing()
     {
@@ -1778,6 +2090,125 @@ public class ThreadResolverTests
         defaultLookups.Should().NotBeEmpty().And.OnlyContain(q => q.Criteria.Conditions.Any(c =>
                 c.AttributeName == "statecode" && c.Operator == ConditionOperator.Equal && Equals(c.Values[0], 0)),
             "an inactive default thread is never joined");
+    }
+
+    [Theory]
+    [InlineData(true, Microsoft.Extensions.Logging.LogLevel.Error)] // a person's re-file, F3-checked before it wrote: a race
+    [InlineData(false, Microsoft.Extensions.Logging.LogLevel.Warning)] // no person (the sweep): a legacy row it cannot move
+    public async Task ReconcileThreadForFiling_WhenTheMoveToTheRecordsThreadIsRefused_LogsItNamingTheEmail_AndLeavesItInItsThread(
+        bool aPersonsRefile, Microsoft.Extensions.Logging.LogLevel expected)
+    {
+        // #2143 round 7b (K-limit): the re-file asked F3 about every secure record the thread move leaves, so a refused move is
+        // only a race (the thread re-filed between that check and this move) or a reconcile no person's re-file started. It is
+        // never silent: it names the email and the threads, and the email keeps its thread (nothing is assigned or granted).
+        // Round 8: an Error only for the race (a caller was carried); a person-less reconcile — the sweep, every run, for each
+        // legacy row it cannot move — logs a Warning.
+        var communicationId = Guid.NewGuid();
+        var threadId = Guid.NewGuid();
+        var matter = Guid.NewGuid();
+        SetupFiledEmail(communicationId, threadId, "sprk_matter", matter);
+        var thread = OpenThread(threadId);
+        thread["statecode"] = new OptionSetValue(1); // Inactive: only the email can move
+        SetupReconcileThreadRead(threadId, thread);
+        SetupThreadMessagesForFiling(threadId, Message(communicationId, "sprk_matter", matter));
+        var recordThread = SetupRecordsDefaultThread("sprk_matter", matter);
+        _entity
+            .Setup(e => e.RetrieveMultipleAsync(It.Is<QueryExpression>(q => q.EntityName == "sprk_communicationthread"), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new EntityCollection { Entities = { new DataverseEntity("sprk_communicationthread") { Id = recordThread } } });
+        _owners.TeamId = null;
+        _owners.RefusalCode = Sprk.Bff.Api.Services.Access.SecureDesignationRemoval.NotPermittedReasonCode;
+        var log = new CapturingLogger<ThreadResolver>();
+
+        var caller = aPersonsRefile
+            ? new Sprk.Bff.Api.Services.Access.SecureRemovalCaller(
+                _ => Task.FromResult<Guid?>(Guid.NewGuid()), (_, _) => Task.FromResult(AccessRights.None))
+            : null;
+
+        await new ThreadResolver(Array.Empty<IThreadKeyStrategy>(), _entity.Object, _owners, log, _grants.Object, SecureNames)
+            .ReconcileThreadForFilingAsync(communicationId, FilingReconcileHost.AfterRefileStep, caller, beforeMessageGrant: null,
+                CancellationToken.None);
+
+        VerifyAssigned(communicationId, recordThread, Times.Never());
+        VerifyNoGrant();
+        log.Entries.Where(e => e.Level == Microsoft.Extensions.Logging.LogLevel.Error).Should().HaveCount(
+            aPersonsRefile ? 1 : 0, "an Error only for a person's re-file");
+        log.Entries.Should().Contain(e => e.Level == expected
+                                          && e.Message.Contains(communicationId.ToString(), StringComparison.Ordinal)
+                                          && e.Message.Contains(threadId.ToString(), StringComparison.Ordinal)
+                                          && e.Message.Contains(Sprk.Bff.Api.Services.Access.SecureDesignationRemoval.NotPermittedReasonCode, StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// #2143 round 9 (K3): the email filed to a matter, alone in an inactive thread, so only the email moves to the matter's
+    /// default thread; <paramref name="refused"/> makes the S6 join refuse it. Runs the reconcile with a hook that records
+    /// its run in <paramref name="order"/>, as the grant does.
+    /// </summary>
+    private async Task ReconcileWithAHookBeforeTheGrant(bool refused, List<string> order, Guid communicationId, Guid recordThread)
+    {
+        _grants
+            .Setup(g => g.GrantMessageAccessAsync(It.IsAny<Guid>(), It.IsAny<ThreadAssignment>(), It.IsAny<CancellationToken>()))
+            .Callback(() => order.Add("grant"))
+            .Returns(Task.CompletedTask);
+        if (refused)
+        {
+            _owners.TeamId = null;
+            _owners.RefusalCode = Sprk.Bff.Api.Services.Access.SecureDesignationRemoval.NotPermittedReasonCode;
+        }
+
+        await new ThreadResolver(Array.Empty<IThreadKeyStrategy>(), _entity.Object, _owners, NullLogger<ThreadResolver>.Instance,
+                _grants.Object, SecureNames)
+            .ReconcileThreadForFilingAsync(communicationId, FilingReconcileHost.AfterRefileStep, secureExitCaller: null,
+                beforeMessageGrant: _ =>
+                {
+                    order.Add("hook");
+                    return Task.CompletedTask;
+                },
+                CancellationToken.None);
+    }
+
+    private (Guid CommunicationId, Guid RecordThread) AnEmailAloneInAnInactiveThreadFiledToAMatter()
+    {
+        var communicationId = Guid.NewGuid();
+        var threadId = Guid.NewGuid();
+        var matter = Guid.NewGuid();
+        SetupFiledEmail(communicationId, threadId, "sprk_matter", matter);
+        var thread = OpenThread(threadId);
+        thread["statecode"] = new OptionSetValue(1); // Inactive: only the email can move
+        SetupReconcileThreadRead(threadId, thread);
+        SetupThreadMessagesForFiling(threadId, Message(communicationId, "sprk_matter", matter));
+        var recordThread = SetupRecordsDefaultThread("sprk_matter", matter);
+        _entity
+            .Setup(e => e.RetrieveMultipleAsync(It.Is<QueryExpression>(q => q.EntityName == "sprk_communicationthread"), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new EntityCollection { Entities = { new DataverseEntity("sprk_communicationthread") { Id = recordThread } } });
+        return (communicationId, recordThread);
+    }
+
+    [Fact]
+    public async Task ReconcileThreadForFiling_WhenTheMoveIsJoined_TheHookRunsOnce_BeforeTheGrant()
+    {
+        // Must-fire (#2143 round 9, K3): the hook the step after a re-file passes (its mirror removal) runs between the join and
+        // the #1629 grant, once — never after the grant, which the removal would revoke.
+        var (communicationId, recordThread) = AnEmailAloneInAnInactiveThreadFiledToAMatter();
+        var order = new List<string>();
+
+        await ReconcileWithAHookBeforeTheGrant(refused: false, order, communicationId, recordThread);
+
+        VerifyAssigned(communicationId, recordThread, Times.Once());
+        order.Should().Equal(new[] { "hook", "grant" }, "the hook runs after the join and before the grant");
+    }
+
+    [Fact]
+    public async Task ReconcileThreadForFiling_WhenTheJoinIsRefused_TheHookIsSkipped_AndNothingIsGranted()
+    {
+        // Must-not-fire (#2143 round 9, K3): a refused join leaves the email in its thread and isolation, so the hook (which
+        // takes off the mirror of an email that LEFT isolation) never runs, and nothing is granted.
+        var (communicationId, recordThread) = AnEmailAloneInAnInactiveThreadFiledToAMatter();
+        var order = new List<string>();
+
+        await ReconcileWithAHookBeforeTheGrant(refused: true, order, communicationId, recordThread);
+
+        VerifyAssigned(communicationId, recordThread, Times.Never());
+        order.Should().BeEmpty("a refused join runs neither the hook nor the grant");
     }
 
     [Fact]

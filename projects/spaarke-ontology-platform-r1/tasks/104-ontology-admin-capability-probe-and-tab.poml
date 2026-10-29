@@ -4,7 +4,7 @@
     <title>Ontology admin: BFF capability probe and the role-gated workspace tab</title>
     <phase>10 Ontology admin (D-22)</phase>
     <gate>008, 059 complete</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Authorization-adjacent BFF route plus a gated UI entry point.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -106,6 +106,8 @@
     <criterion testable="true">Negative: no Actions, Suppression, Health or Access page exists.</criterion>
     <criterion testable="true">Tests cover the stated contract; anything beyond needs a one-line justification in task notes. Both sides build.</criterion>
   </acceptance-criteria>
+
+  <completion date="2026-10-16">PR #2019 merged `b187253a` into docs/ontology-platform-design. GET /api/v1/ontology/admin/capabilities answers `canAuthorPolicies` for the caller only (WhoAmI then RetrieveUserPrivilegeByPrivilegeName as the caller, team roles included); a clean answer is cached per tenant+oid for min(token exp, 5 min), faults never; unresolved caller = uniform 403, other faults 503. The Console registers the "Ontology admin" tab only when the gate says available; restore waits for the gate only for a snapshot holding that tab. Display only (D-22): OntologyAdminCallerBoundaryGuardTests (Rule A: only OntologyAdminCapabilityProbe.cs touches the answer, route file makes exactly one ResolveAsync call; Rule B: no app-identity Dataverse type in Api/Ontology or OntologyAdmin* files). Ledger: GovernedFile + Permanent CallerScopedOnly waiver; ExpectedEndpointFileCount 126. Reviews: Opus pass 1 (F1 restore delay, F3 restore test), fix round, Opus pass 2 (F3 Rule A exempted the route file), fix round, re-check; uac-r2 OK. Known limits: role change visible after reload + up to 5 min; OBO failure is 403 not 503; probe once per page load.</completion>
 
   <notes>spec.md FR-56, NFR-10; D-22. Admin pages beyond slices a-c are reconciliation C-16, undecided.</notes>
 

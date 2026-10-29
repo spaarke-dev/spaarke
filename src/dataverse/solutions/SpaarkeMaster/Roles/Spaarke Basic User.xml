@@ -61,7 +61,6 @@
     <RolePrivilege name="prvAppendsprk_CommunicationChannelRef" level="Basic" />
     <RolePrivilege name="prvAppendsprk_CommunicationParticipant" level="Basic" />
     <RolePrivilege name="prvAppendsprk_CommunicationThread" level="Basic" />
-    <RolePrivilege name="prvAppendsprk_ContactOrganization" level="Global" />
     <RolePrivilege name="prvAppendSyncError" level="Basic" />
     <RolePrivilege name="prvAppendToAccount" level="Basic" />
     <RolePrivilege name="prvAppendToActionCard" level="Global" />
@@ -119,7 +118,6 @@
     <RolePrivilege name="prvAppendTosprk_CommunicationChannelRef" level="Basic" />
     <RolePrivilege name="prvAppendTosprk_CommunicationParticipant" level="Basic" />
     <RolePrivilege name="prvAppendTosprk_CommunicationThread" level="Basic" />
-    <RolePrivilege name="prvAppendTosprk_ContactOrganization" level="Global" />
     <RolePrivilege name="prvAppendTosprk_Document" level="Deep" />
     <RolePrivilege name="prvAppendTosprk_DocumentType" level="Deep" />
     <RolePrivilege name="prvAppendTosprk_documenttype_ref" level="Global" />
@@ -188,7 +186,6 @@
     <RolePrivilege name="prvAssignsprk_CommunicationChannelRef" level="Basic" />
     <RolePrivilege name="prvAssignsprk_CommunicationParticipant" level="Basic" />
     <RolePrivilege name="prvAssignsprk_CommunicationThread" level="Basic" />
-    <RolePrivilege name="prvAssignsprk_ContactOrganization" level="Global" />
     <RolePrivilege name="prvAssignSyncError" level="Basic" />
     <RolePrivilege name="prvAssignUserEntityInstanceData" level="Basic" />
     <RolePrivilege name="prvAssignUserForm" level="Basic" />
@@ -242,7 +239,6 @@
     <RolePrivilege name="prvCreatesprk_CommunicationChannelRef" level="Basic" />
     <RolePrivilege name="prvCreatesprk_CommunicationParticipant" level="Basic" />
     <RolePrivilege name="prvCreatesprk_CommunicationThread" level="Basic" />
-    <RolePrivilege name="prvCreatesprk_ContactOrganization" level="Global" />
     <RolePrivilege name="prvCreateSyncError" level="Basic" />
     <RolePrivilege name="prvCreateTraceLog" level="Global" />
     <RolePrivilege name="prvCreatetrait" level="Basic" />
@@ -291,7 +287,6 @@
     <RolePrivilege name="prvDeletesprk_CommunicationChannelRef" level="Basic" />
     <RolePrivilege name="prvDeletesprk_CommunicationParticipant" level="Basic" />
     <RolePrivilege name="prvDeletesprk_CommunicationThread" level="Basic" />
-    <RolePrivilege name="prvDeletesprk_ContactOrganization" level="Global" />
     <RolePrivilege name="prvDeleteSyncError" level="Basic" />
     <RolePrivilege name="prvDeleteTranslationProcess" level="Global" />
     <RolePrivilege name="prvDeleteUserApplicationMetadata" level="Basic" />
@@ -649,7 +644,6 @@
     <RolePrivilege name="prvWritesprk_CommunicationChannelRef" level="Basic" />
     <RolePrivilege name="prvWritesprk_CommunicationParticipant" level="Basic" />
     <RolePrivilege name="prvWritesprk_CommunicationThread" level="Basic" />
-    <RolePrivilege name="prvWritesprk_ContactOrganization" level="Global" />
     <RolePrivilege name="prvWriteSyncError" level="Basic" />
     <RolePrivilege name="prvWritetrait" level="Basic" />
     <RolePrivilege name="prvWriteTranslationProcess" level="Global" />

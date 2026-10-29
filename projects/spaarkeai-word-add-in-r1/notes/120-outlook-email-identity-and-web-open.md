@@ -48,6 +48,7 @@ Request (JSON body, never in the URL, because the keys identify a message in som
 
 - `DocumentEmailIdentityFilter` runs the lookup app-only through `IGenericEntityService`, the same seam the URL path uses:
   - **Match:** `sprk_isemailarchive = true` AND (`sprk_emailmessageid` = RFC id OR = item id).
+    - **Widened by task 132:** OR `sprk_relatedcommunication` → `sprk_communication.sprk_internetmessageid` = RFC id (one query, outer link). Mailbox capture and the Spaarke-send archive never stamp `sprk_emailmessageid`, so before this they always answered `not_saved`. Such an archive's record comes from the communication's regarding and is shown only when the caller may read it (`notes/026-slot-scope-decision.md` §6a).
   - **Order:** `createdon` desc, then `sprk_documentid` desc as a deterministic tie-break.
   - **Result:** `TopCount = 1`, the same `LookupColumns`.
   - It writes the newest row's id into the route values as `documentId`, the key `DocumentAuthorizationFilter` reads. It uses the same `HttpContext.Items` key as resolve-identity.

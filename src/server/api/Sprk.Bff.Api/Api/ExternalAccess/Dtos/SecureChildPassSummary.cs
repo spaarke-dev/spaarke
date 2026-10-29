@@ -30,7 +30,44 @@ public sealed record SecureChildPassSummary(
         report.Tables
             .Select(t => new SecureChildPassTable(t.Table, t.Examined, t.AlreadyCorrect, t.Changed, t.Refused, t.Failed, t.NeedsF3))
             .ToList(),
-        report.ChildrenNeedingF3);
+        report.ChildrenNeedingF3)
+    {
+        Held = report.HeldInIsolation.Count,
+        HeldRecords = report.HeldInIsolation
+            .Take(MaxHeldListed)
+            .Select(h => new SecureChildHeldRecord(h.Table, h.Id, h.Detail))
+            .ToList(),
+    };
+
+    /// <summary>How many held records <see cref="HeldRecords"/> lists (<see cref="Held"/> counts them all).</summary>
+    public const int MaxHeldListed = 50;
+
+    /// <summary>
+    /// UAC task 194b fix round R (A2): related records the call HELD on the Secure Record owner team although the ownership rule
+    /// gives them an ordinary team — a Decision Record whose question is incomplete, or a record whose owner another rule keeps
+    /// (the To Do assignee's). An Unsecure took their mirrored shares off, so no one keeps access through them; they are not
+    /// "remaining" (the call completes). Additive.
+    /// </summary>
+    public int Held { get; init; }
+
+    /// <summary>The held records, each with why (at most <see cref="MaxHeldListed"/>). Additive.</summary>
+    public IReadOnlyList<SecureChildHeldRecord> HeldRecords { get; init; } = [];
+
+    /// <summary>
+    /// UAC task 099b review round 3 (K2): the problem-detail extension naming what blocks a <c>children_incomplete</c> that a
+    /// repeat call cannot complete — today only <c>sdap.access.grant.owner_privilege_missing</c>. Absent otherwise.
+    /// </summary>
+    public const string ChildrenBlockedByKey = "childrenBlockedBy";
+
+    /// <summary>
+    /// UAC task 099b review round 4: the <see cref="ChildrenBlockedByKey"/> extension of an incomplete pass, for every endpoint
+    /// that answers one (provisioning and unsecure) — present only when a grant row was left where it is for want of the
+    /// owner privilege (<see cref="SecureChildReconcileReport.BlockedByGrantOwnerPrivilege"/>).
+    /// </summary>
+    internal static IEnumerable<(string Key, object? Value)> BlockedByExtensions(SecureChildReconcileReport report) =>
+        report.BlockedByGrantOwnerPrivilege
+            ? [(ChildrenBlockedByKey, Sprk.Bff.Api.Infrastructure.ExternalAccess.ExternalGrantLifecycle.GrantOwnerPrivilegeMissingReasonCode)]
+            : [];
 }
 
 /// <summary>
@@ -95,6 +132,9 @@ public sealed record MakeSecureFilesSummary(
     internal static bool IsUnresolvable(Sprk.Bff.Api.Services.Documents.DocumentRelocationOutcome outcome)
         => outcome.State == Sprk.Bff.Api.Services.Documents.RelocationState.FileMissing && outcome.Pending.Count == 0;
 }
+
+/// <summary>A related record held on the Secure Record owner team (<see cref="SecureChildPassSummary.HeldRecords"/>).</summary>
+public sealed record SecureChildHeldRecord(string Table, Guid Id, string? Reason);
 
 /// <summary>One table of a <see cref="SecureChildPassSummary"/>.</summary>
 public sealed record SecureChildPassTable(

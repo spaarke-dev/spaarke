@@ -1321,6 +1321,65 @@ public class MembershipResolverServiceTests
     }
 
     [Fact]
+    public async Task ResolveAsync_AccessConferringOnly_OwnershipIdentityTypes_EmitOnlyThePlatformOwnershipConditions()
+    {
+        // #2121 — the contract AccessibleRecordSetService's OWNERSHIP walk relies on: AccessConferringOnly plus
+        // IdentityTypes [SystemUser, Team] selects exactly the user/team ownership columns (round 1, K6: not
+        // owningbusinessunit, which on a Secure record is confirmed against Dataverse instead). The
+        // registry-listed "Assigned …" columns (Contact- and Organization-typed) are access-conferring too, so only the
+        // identity-type narrowing keeps them out — if one leaked in, a Secure record reached through a lookup column
+        // would read as owned and keep its membership.
+        var discovery = BuildDiscoveryMock(
+            Descriptor("ownerid", "owner", "SystemUser"),
+            Descriptor("owningteam", "owningTeam", "Team"),
+            Descriptor("owningbusinessunit", "owningBusinessUnit", "BusinessUnit"),
+            Descriptor("sprk_assignedattorney1", "assignedAttorney", "Contact"),
+            Descriptor("sprk_assignedlawfirm1", "assignedLawFirm", "Organization"));
+
+        var identity = BuildIdentityMock(BuildFullIdentity());
+
+        FetchExpression? captured = null;
+        var dataverse = new Mock<IDataverseService>();
+        dataverse
+            .Setup(x => x.RetrieveMultipleAsync(It.IsAny<FetchExpression>(), It.IsAny<CancellationToken>()))
+            .Callback<FetchExpression, CancellationToken>((fe, _) => captured = fe)
+            .ReturnsAsync(new EntityCollection());
+
+        // Both "Assigned …" columns ARE in the registry, so the access-conferring filter alone would admit them.
+        var membershipOptions = SeededOptions();
+        membershipOptions.AccessConferringRoles.Entities[EntityType] = new List<AccessConferringColumn>
+        {
+            new() { Field = "sprk_assignedattorney1", IdentityType = "Contact" },
+            new() { Field = "sprk_assignedlawfirm1", IdentityType = "Organization" },
+        };
+
+        var sut = CreateSut(discovery.Object, identity.Object, dataverse.Object, membershipOptions: membershipOptions);
+
+        var result = await sut.ResolveAsync(
+            TestSystemUserId,
+            EntityType,
+            new MembershipResolveOptions(
+                IdentityTypes: new[] { "SystemUser", "Team" },
+                AccessConferringOnly: true),
+            CancellationToken.None);
+
+        result.ByRole.Keys.Should().BeEquivalentTo(new[] { "owner", "owningTeam" });
+        captured.Should().NotBeNull();
+        captured!.Query.Should().Contain("attribute='ownerid'");
+        captured.Query.Should().Contain("attribute='owningteam'");
+        captured.Query.Should().NotContain("owningbusinessunit",
+            "business-unit ownership is not real ownership on a Secure record (K6): it must not reach the ownership walk");
+        captured.Query.Should().NotContain("sprk_assignedattorney1",
+            "a Contact-typed registry column must not reach the ownership walk");
+        captured.Query.Should().NotContain("sprk_assignedlawfirm1",
+            "an Organization-typed registry column must not reach the ownership walk");
+        captured.Query.Should().NotContain(TestContactId.ToString("D"),
+            "no condition may bind the caller's contact");
+        captured.Query.Should().NotContain(TestOrgA.ToString("D"),
+            "no condition may bind the caller's organizations");
+    }
+
+    [Fact]
     public async Task ResolveByContactAsync_EntityWithNoRegistryEntries_YieldsZeroConferringDescriptors()
     {
         // AC (fail-closed default, spec NFR-01): an entity with ZERO registry entries confers nothing

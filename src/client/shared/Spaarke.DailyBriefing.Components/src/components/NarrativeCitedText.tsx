@@ -34,7 +34,7 @@
  *   - `regardingName` found verbatim (case-insensitive) inside `narrative`
  *     -> wrapped in place as a clickable inline Link with a trailing "open"
  *     arrow (matches the existing entity-link convention used across the
- *     Daily Briefing surface, e.g. `HighPrioritySection` / `SubRowLink`).
+ *     Daily Briefing surface, e.g. `SubRowLink`).
  *   - Not found (the common case — item titles rarely restate the regarding
  *     record's own display name), or no regarding target supplied -> plain
  *     text only, no link. This component deliberately does NOT render a

@@ -145,6 +145,44 @@ public class IdentityLinkReconciliationTests
         beforeStates.Should().AllSatisfy(m => m.Should().Contain("mode=report-only"));
     }
 
+    /// <summary>
+    /// #2130 (CODE-QUALITY-RUBRIC D9) must-fire: the decision line named every scanned user's email, and the create
+    /// change's before-state line carried <c>emailaddress1=&lt;the email&gt;</c> and a last name that falls back to the
+    /// email's local part. Both now name ids, and the change says only that the columns are set. Report-only and write
+    /// runs log the same lines.
+    /// </summary>
+    [Theory]
+    [InlineData(null)]
+    [InlineData(true)]
+    public async Task NoLogLine_CarriesAScannedUsersEmail_AndTheCreateChangeSaysOnlyThatTheColumnsAreSet(bool? writes)
+    {
+        var probe = Guid.NewGuid();
+        _store.AddSystemUser(probe, Guid.NewGuid(), "pii.probe@example.test");
+
+        await RunAsync(writes);
+
+        _log.Messages.Should().Contain(m => m.Contains("decision") && m.Contains(probe.ToString()),
+            "the user is still logged, by systemuser id");
+        _log.Messages.Should().AllSatisfy(m => m.Should().NotContain("pii.probe"));
+        var create = _log.Messages.Where(m => m.Contains("before-state") && m.Contains(probe.ToString())
+                                              && m.Contains("create contact")).Should().ContainSingle().Subject;
+        create.Should().Contain("lastname=(set)").And.Contain("emailaddress1=(set)");
+    }
+
+    /// <summary>#2130: a created contact with no email says <c>emailaddress1=(none)</c>, so the change keeps its meaning.</summary>
+    [Fact]
+    public async Task TheCreateChange_OfAUserWithNoEmail_SaysEmailNone()
+    {
+        var user = Guid.NewGuid();
+        _store.AddSystemUser(user, Guid.NewGuid(), email: null);
+
+        var outcome = await Binder(_store).EnsureSystemUserLinkAsync(user, applyWrites: false, CancellationToken.None);
+
+        outcome.Outcome.Should().Be(SystemUserLinkOutcome.CreatedAndLinked);
+        outcome.Changes.Should().ContainSingle(c => c.Entity == "contact")
+            .Which.After.Should().Contain("emailaddress1=(none)").And.Contain("lastname=(set)");
+    }
+
     [Theory]
     [InlineData("")]
     [InlineData("yes")]
@@ -232,6 +270,37 @@ public class IdentityLinkReconciliationTests
 
         FlagCount(result, "cleared").Should().Be(0, "the slot is still held");
         _log.Messages.Should().NotContain(m => m.Contains("before-state") && m.Contains(holder.ToString()) && m.Contains("flag=(none)"));
+    }
+
+    [Fact]
+    public async Task AnInactiveContactEmailMatchFlag_IsKeptByTheJobWhileTheContactStaysInactive_AndClearedOnReactivation()
+    {
+        // r3 task 047 fix round 2: a registration refused because a DEACTIVATED contact carries the email flags that contact.
+        // Every other reason is cleared on an inactive contact (the person was removed); this one must survive the runs.
+        var registrant = Guid.NewGuid();
+        var contact = Guid.NewGuid();
+        _store.AddContact(contact, "mike.okafor@customer.example", stateCode: 1,
+            flag: Flag(IdentityCollisionReason.InactiveContactEmailMatch, registrant, IdentityPlaneMarker.WorkforceHome));
+
+        await RunAsync(writes: true);
+        await RunAsync(writes: true);
+        _store.Contacts[contact].Flag.Should().NotBeNull("it is still inactive and still carries the email");
+
+        _store.Contacts[contact].StateCode = 0;
+        await RunAsync(writes: true);
+        _store.Contacts[contact].Flag.Should().BeNull("an operator reactivated the contact: the job clears the flag");
+    }
+
+    [Fact]
+    public async Task Control_AnotherReasonOnAnInactiveContact_IsClearedByTheJob()
+    {
+        var contact = Guid.NewGuid();
+        _store.AddContact(contact, "mike.okafor@customer.example", stateCode: 1,
+            flag: Flag(IdentityCollisionReason.BindingUnreadable, Guid.NewGuid(), IdentityPlaneMarker.WorkforceHome));
+
+        await RunAsync(writes: true);
+
+        _store.Contacts[contact].Flag.Should().BeNull("without the dedicated reason the inactive contact's flag is moot");
     }
 
     [Fact]
@@ -472,6 +541,95 @@ public class IdentityLinkReconciliationTests
         _store.SystemUsers[user].PrimaryContactId.Should().Be(linked, "the existing link is never cleared or re-pointed");
     }
 
+    // ── #2005: every systemuser bind consumes a pending invite-code hash ─────────────────────────────
+
+    /// <summary>
+    /// #2005: a licensed user email-bound onto a contact that holds a pending invite-code hash (a granted contact is
+    /// auto-invited, 185 §11) clears that hash in the SAME conditional write as the oid, so a later operator unbind cannot
+    /// revive the invite link. Where the hash column is not provisioned the bind is exactly the plain bind, as before.
+    /// MUTATION PROOF: <c>BindOidAsync</c> in the systemuser <c>BindByEmail</c> case fails the provisioned case.
+    /// </summary>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task ASystemUserEmailBind_ConsumesAPendingInviteCodeHash_InTheSameWrite(bool hashColumnProvisioned)
+    {
+        var oid = Guid.NewGuid();
+        var contact = Guid.NewGuid();
+        var user = Guid.NewGuid();
+        _store.AddContact(contact, "invited.member@spaarke.com",
+            inviteCodeHash: hashColumnProvisioned ? InviteCode.Create(contact).StoredValue : null);
+        _store.AddSystemUser(user, oid, "invited.member@spaarke.com");
+        _store.InviteCodeHashColumnMissing = !hashColumnProvisioned;
+
+        var outcome = await Binder(_store).EnsureSystemUserLinkAsync(user, applyWrites: true, CancellationToken.None);
+
+        outcome.Outcome.Should().Be(SystemUserLinkOutcome.BoundAndLinked);
+        AssertBoundOnce(contact, oid, hashColumnProvisioned);
+        _store.SystemUsers[user].PrimaryContactId.Should().Be(contact);
+    }
+
+    /// <summary>
+    /// #2005: the same for a user already LINKED to an unbound contact (L12, <c>BindLinkedContact</c>).
+    /// MUTATION PROOF: <c>BindOidAsync</c> in the <c>BindLinkedContact</c> case fails the provisioned case.
+    /// </summary>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task ALinkedContactBind_ConsumesAPendingInviteCodeHash_InTheSameWrite(bool hashColumnProvisioned)
+    {
+        var oid = Guid.NewGuid();
+        var contact = Guid.NewGuid();
+        var user = Guid.NewGuid();
+        _store.AddContact(contact, "linked.member@spaarke.com",
+            inviteCodeHash: hashColumnProvisioned ? InviteCode.Create(contact).StoredValue : null);
+        _store.AddSystemUser(user, oid, "linked.member@spaarke.com", primaryContactId: contact);
+        _store.InviteCodeHashColumnMissing = !hashColumnProvisioned;
+
+        var outcome = await Binder(_store).EnsureSystemUserLinkAsync(user, applyWrites: true, CancellationToken.None);
+
+        outcome.Outcome.Should().Be(SystemUserLinkOutcome.BoundLinkedContact);
+        AssertBoundOnce(contact, oid, hashColumnProvisioned);
+    }
+
+    /// <summary>
+    /// #2005 K2: the job's before/after change log (what a report-only run lists) says the bind also clears the invite-code
+    /// hash and the invite stamp, so a dry run does not under-report the write. No hash value is ever logged.
+    /// </summary>
+    [Theory]
+    [InlineData(false)] // BindByEmail
+    [InlineData(true)]  // BindLinkedContact (L12)
+    public async Task TheChangeLog_OfAWorkforceBind_SaysTheInviteCodeHashIsCleared_NeverItsValue(bool linked)
+    {
+        var oid = Guid.NewGuid();
+        var contact = Guid.NewGuid();
+        var user = Guid.NewGuid();
+        var stored = InviteCode.Create(contact).StoredValue;
+        _store.AddContact(contact, "dry.run@spaarke.com", inviteCodeHash: stored);
+        _store.AddSystemUser(user, oid, "dry.run@spaarke.com", primaryContactId: linked ? contact : null);
+
+        var outcome = await Binder(_store).EnsureSystemUserLinkAsync(user, applyWrites: false, CancellationToken.None);
+
+        outcome.Outcome.Should().Be(linked ? SystemUserLinkOutcome.BoundLinkedContact : SystemUserLinkOutcome.BoundAndLinked);
+        var bind = outcome.Changes.Should().ContainSingle(c => c.Entity == "contact").Subject;
+        bind.After.Should().Be(
+            $"sprk_externalobjectid={oid:D} sprk_identityplane={IdentityPlaneMarker.Workforce} sprk_externalinvitecodehash=(cleared) "
+            + "sprk_externalinvitedemailhash=(cleared) sprk_externalinvitedtenantid=(cleared)");
+        outcome.Changes.Should().AllSatisfy(c => (c.Before + c.After).Should().NotContain(stored));
+        _store.Writes.Should().BeEmpty("a dry run writes nothing");
+        _store.Contacts[contact].InviteCodeHash.Should().Be(stored);
+    }
+
+    private void AssertBoundOnce(Guid contact, Guid oid, bool consumed)
+    {
+        _store.Writes.Where(w => w.Op == "bind").Should().ContainSingle().Which.Should().Be(("bind", (Guid?)contact,
+            consumed
+                ? $"{oid:D}|{IdentityPlaneMarker.Workforce}|invite-code-hash=null"
+                : $"{oid:D}|{IdentityPlaneMarker.Workforce}"));
+        _store.Contacts[contact].Oid.Should().Be(oid.ToString("D"));
+        _store.Contacts[contact].InviteCodeHash.Should().BeNull();
+    }
+
     // ── Failure shapes ───────────────────────────────────────────────────────────────────────────────
 
     [Fact]
@@ -651,6 +809,114 @@ public class IdentityLinkReconciliationTests
                 new[] { DemoEnvironment.ToUpperInvariant(), null, "  ", OwnEnvironment, OtherDemoEnvironment })
             .Should().Equal(DemoEnvironment, OtherDemoEnvironment);
 
+    // ISS-005 (#1673 review nit): targets are de-duplicated on the environment key, so the .api. and plain spellings of one
+    // environment (and a fully-qualified host) are ONE target, the first spelling kept.
+    [Theory]
+    [InlineData("https://spaarke-demo.crm.dynamics.com", "https://spaarke-demo.api.crm.dynamics.com")]
+    [InlineData("https://spaarke-demo.api.crm.dynamics.com", "https://spaarke-demo.crm.dynamics.com")]
+    [InlineData("https://spaarke-demo.crm.dynamics.com", "https://spaarke-demo.crm.dynamics.com./")]
+    public void ProvisioningTargetUrls_ThePlainAndApiSpellingsOfOneEnvironment_AreOneTarget(string first, string second)
+        => IdentityLinkReconciliationJob.ProvisioningTargetUrls(
+                OwnEnvironment, first, new[] { second, OtherDemoEnvironment })
+            .Should().Equal(first.TrimEnd('/'), OtherDemoEnvironment);
+
+    // ISS-005 (#1673 review K3): an owner-unconfigured Denied result (the own environment's creates refused because
+    // ExternalAccess:CustomerBusinessUnitId is unset) makes the run Partial - a configuration fault that repeats every run is
+    // never reported as an Ok run.
+    [Fact]
+    public async Task ARun_WhoseCreatesWereRefusedForNoOwner_IsPartial_NotOk()
+    {
+        var result = await RunAsync(writes: true, ownerAwareBinder: OwnerAwareBinder(_store, customerBusinessUnitId: null));
+
+        Outcome(result, "Denied").Should().BeGreaterThan(0, "the licensed users with no contact are refused, not created");
+        _store.CreatePayloads.Should().BeEmpty("nothing was created without an owner");
+        using var doc = JsonDocument.Parse(result.ResultJson!);
+        doc.RootElement.GetProperty("status").GetString().Should().Be("partial");
+        result.Success.Should().BeFalse();
+        result.ErrorMessage.Should().Contain("ExternalAccess:CustomerBusinessUnitId");
+    }
+
+    // ISS-005 (#1673 UAC round 3, F): Dataverse refusing the owner team's privilege (0x80040299) is its OWN counter and message,
+    // not "CustomerBusinessUnitId is not configured": the setting is fine, the default owner team has no role with Read on contact.
+    [Fact]
+    public async Task ARun_WhoseCreatesWereRefusedForTheOwnersPrivilege_IsPartial_AndNamesTheRoleNotTheSetting()
+    {
+        var customerBu = Guid.NewGuid();
+        _store.DefaultTeams[customerBu] = new List<Guid> { Guid.NewGuid() };
+        _store.CreateStatusOverride = StoreWriteStatus.OwnerPrivilegeMissing;
+        var contactsBefore = _store.Contacts.Count;
+
+        var result = await RunAsync(writes: true, ownerAwareBinder: OwnerAwareBinder(_store, customerBu));
+
+        Outcome(result, "Denied").Should().BeGreaterThan(0, "the licensed users with no contact are refused, not created");
+        _store.Contacts.Count.Should().Be(contactsBefore, "nothing was created");
+        using var doc = JsonDocument.Parse(result.ResultJson!);
+        doc.RootElement.GetProperty("status").GetString().Should().Be("partial");
+        result.Success.Should().BeFalse();
+        result.ErrorMessage.Should().Contain("0x80040299").And.Contain("Read on contact")
+            .And.NotContain("is not configured", "the setting is configured; this is the team's role")
+            .And.NotContain(customerBu.ToString());
+    }
+
+    // ISS-005 (#1673 UAC re-check K4): an owner-team read that cannot be answered refuses the create with
+    // DenyContactLookupFailed. The user was not reconciled, so the run is Partial - never an Ok that hid the unreadable lookup.
+    [Fact]
+    public async Task ARun_WhoseOwnerLookupCouldNotBeRead_IsPartial_NotOk()
+    {
+        var customerBu = Guid.NewGuid();
+        _store.DefaultTeams[customerBu] = new List<Guid> { Guid.NewGuid() };
+        _store.FailTeamLookup = true;
+
+        var result = await RunAsync(writes: true, ownerAwareBinder: OwnerAwareBinder(_store, customerBu));
+
+        Outcome(result, "Denied").Should().BeGreaterThan(0, "the licensed users with no contact are refused, not created");
+        _store.CreatePayloads.Should().BeEmpty("nothing was created without a readable owner");
+        using var doc = JsonDocument.Parse(result.ResultJson!);
+        doc.RootElement.GetProperty("status").GetString().Should().Be("partial");
+        result.Success.Should().BeFalse();
+        result.ErrorMessage.Should().Contain("could not be answered").And.NotContain(customerBu.ToString());
+        result.ErrorMessage.Should().NotContain("CustomerBusinessUnitId", "this is not the unconfigured-setting message");
+    }
+
+    [Fact]
+    public async Task ARun_WhoseCreatesAreOwned_IsNotMadePartialByTheOwnerCheck()
+    {
+        var customerBu = Guid.NewGuid();
+        _store.DefaultTeams[customerBu] = new List<Guid> { Guid.NewGuid() };
+
+        var result = await RunAsync(writes: true, ownerAwareBinder: OwnerAwareBinder(_store, customerBu));
+
+        _store.CreatePayloads.Should().NotBeEmpty("the licensed users with no contact are created, owned");
+        (result.ErrorMessage ?? string.Empty).Should().NotContain("ExternalAccess:CustomerBusinessUnitId");
+    }
+
+    // ISS-005 (#1673 review F1): the own environment is excluded however it is spelled. Reconciled through a factory binder
+    // (owner policy NoneForForeignEnvironment) it would create ownerless contacts in this environment.
+    private const string OwnEnvironmentApi = "https://spaarkedev1.api.crm.dynamics.com";
+
+    [Theory]
+    [InlineData(OwnEnvironment, OwnEnvironmentApi)]
+    [InlineData(OwnEnvironment, OwnEnvironmentApi + "/")]
+    [InlineData(OwnEnvironmentApi, OwnEnvironment)]
+    [InlineData(OwnEnvironment, "HTTPS://SPAARKEDEV1.API.CRM.DYNAMICS.COM/api/data/v9.2/")]
+    public void ProvisioningTargetUrls_ExcludeTheOwnEnvironment_InEitherSpelling_AndKeepTheOthers(string own, string ownSpelledOtherwise)
+        => IdentityLinkReconciliationJob.ProvisioningTargetUrls(
+                own,
+                ownSpelledOtherwise,
+                new[] { DemoEnvironment, ownSpelledOtherwise, OtherDemoEnvironment, own })
+            .Should().Equal(DemoEnvironment, OtherDemoEnvironment);
+
+    [Fact]
+    public async Task TheRegistrationDefault_NamingTheOwnEnvironmentWithAnApiHost_IsNotAProvisioningTarget()
+    {
+        // DATAVERSE_URL = the .api. spelling of Dataverse:ServiceUrl. Before the fix it was a target: its binder came from the
+        // factory (no store here -> "could not be reached"), and in production would create ownerless contacts.
+        var result = await RunAsync(writes: true, targets: new(), registrationEnvironment: OwnEnvironmentApi);
+
+        TargetEnvironments(result).Should().BeEmpty("the own environment is reconciled through the DI binder only");
+        result.Success.Should().BeTrue(result.ErrorMessage);
+    }
+
     // ── Shipping state ───────────────────────────────────────────────────────────────────────────────
 
     /// <remarks>
@@ -687,7 +953,8 @@ public class IdentityLinkReconciliationTests
         Dictionary<string, InMemoryContactIdentityStore>? targets = null,
         string[]? registry = null,
         string? registrationEnvironment = null,
-        bool registryFails = false)
+        bool registryFails = false,
+        ContactIdentityBinder? ownerAwareBinder = null)
     {
         var settings = new Dictionary<string, string?> { ["Dataverse:ServiceUrl"] = OwnEnvironment };
         if (writes is { } w) settings["IdentityLink:Reconciliation:WritesEnabled"] = w ? "true" : "false";
@@ -696,7 +963,11 @@ public class IdentityLinkReconciliationTests
         var configuration = new ConfigurationBuilder().AddInMemoryCollection(settings).Build();
 
         var services = new ServiceCollection();
-        services.AddSingleton(Binder(_store));
+        var ownBinder = ownerAwareBinder ?? Binder(_store);
+        services.AddSingleton(ownBinder);
+        // C4: the removal sweep reads the own environment's grants and contacts; none here is inactive or marked.
+        services.AddSingleton<Spaarke.Dataverse.DataverseWebApiClient>(
+            new RemovalSweepWorld(new AssignedAccessTestDoubles.GrantTable(), _store));
         if (targets is not null)
         {
             services.AddSingleton(new RegistrationDataverseService(
@@ -706,6 +977,7 @@ public class IdentityLinkReconciliationTests
                 Mock.Of<IHttpClientFactory>(f => f.CreateClient(It.IsAny<string>()) == new HttpClient()),
                 NullLogger<RegistrationDataverseService>.Instance,
                 new PerEnvironmentBinderFactory(targets),
+                ownBinder,
                 // Task 132: the team/BU write-path eviction hook; this suite writes no team or BU.
                 new Sprk.Bff.Api.Services.Ai.Membership.NullMembershipCacheInvalidator(
                     NullLogger<Sprk.Bff.Api.Services.Ai.Membership.NullMembershipCacheInvalidator>.Instance)));
@@ -783,7 +1055,7 @@ public class IdentityLinkReconciliationTests
     /// </summary>
     private sealed class PerEnvironmentBinderFactory(Dictionary<string, InMemoryContactIdentityStore> stores)
         : ContactIdentityBinderFactory(Mock.Of<IHttpClientFactory>(), NullLoggerFactory.Instance, Tenants(CustomerTenant),
-            new FakeTimeProvider(Now))
+            new FakeTimeProvider(Now), FactoryConfiguration())
     {
         public override IContactIdentityStore CreateStore(string dataverseBaseUrl, Func<CancellationToken, Task<string>> getToken)
             => stores.TryGetValue(dataverseBaseUrl, out var store)
@@ -793,7 +1065,11 @@ public class IdentityLinkReconciliationTests
 
     /// <summary>The environment registry at its virtual read (no HTTP double).</summary>
     private sealed class RegistryDouble(IConfiguration configuration, string[] activeUrls, bool fails)
-        : DataverseEnvironmentService(configuration, Mock.Of<TokenCredential>(), NullLogger<DataverseEnvironmentService>.Instance)
+        : DataverseEnvironmentService(
+            configuration,
+            Mock.Of<TokenCredential>(),
+            Mock.Of<IHttpClientFactory>(f => f.CreateClient(It.IsAny<string>()) == new HttpClient()),
+            NullLogger<DataverseEnvironmentService>.Instance)
     {
         public override Task<List<DataverseEnvironmentRecord>> GetActiveEnvironmentsAsync(CancellationToken ct = default)
             => fails

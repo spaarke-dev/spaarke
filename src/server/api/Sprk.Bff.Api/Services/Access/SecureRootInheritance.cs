@@ -349,11 +349,12 @@ public sealed partial class SecureRootInheritance
 
     internal const string PairIdColumn = "sprk_regardingrecordid";
     internal const string PairTypeColumn = "sprk_regardingrecordtype";
-    private const string RecordTypeRefEntity = "sprk_recordtype_ref";
+    internal const string RecordTypeRefEntity = "sprk_recordtype_ref"; // #2253 fix round 3 (F3): refused whole (AccessTables)
     private const string RecordTypeLogicalNameColumn = "sprk_recordlogicalname";
     private const string IsSecureColumn = "sprk_issecure";
     private const string AccessPermissionColumn = "sprk_accesspermission"; // task 174: read with the flag (round 84)
     private const string OwningTeamColumn = "owningteam";
+    private const string OwningUserColumn = "owninguser";
     private const string ContainerColumn = "sprk_containerid";
 
     /// <summary>A pair, a type or another filing value could not be resolved to a record: nothing was written.</summary>
@@ -2083,6 +2084,14 @@ public sealed partial class SecureRootInheritance
             // then decides it afresh (below): covered again by what is left, or — on a secure record — the assignee suggested.
             // A removal that fails leaves a Skipped row over the share as it was: 142's next pass records it covered again
             // (Skipped is re-evaluated every pass).
+            // #1620: the record's owning USER, read before anything is written. The rule assumes the record sits on the Secure
+            // team, but one re-owned to this very sharee (out of band, or an unsecure that handed it to its creator) can only
+            // have the sharee's own share revoked AS them — Dataverse refuses that app-only (0x80040223). A fault ends here
+            // (not done, retried), before any write.
+            var owningUser = prior == 0 && principal.Kind == DataversePrincipalKind.SystemUser
+                ? await ReadOwningUserAsync(logical, recordId, ct).ConfigureAwait(false)
+                : null;
+
             var uncovered = assigned.Where(r => r.State == AssignedAccessState.CoveredByExisting).ToList();
             foreach (var covering in uncovered)
             {
@@ -2094,6 +2103,8 @@ public sealed partial class SecureRootInheritance
             var entitySet = SecureDesignationRemoval.EntitySetFor(logical);
             if (prior != 0)
                 await _recordShare.ModifyAccessAsync(entitySet, recordId, principal, RecordShareLevels.RightsCsvForMask(prior), ct).ConfigureAwait(false);
+            else if (owningUser is { } owner)
+                await _recordShare.RevokeAccessAsync(entitySet, recordId, principal, DataversePrincipalRef.User(owner), ct).ConfigureAwait(false);
             else
                 await _recordShare.RevokeAccessAsync(entitySet, recordId, principal, ct).ConfigureAwait(false);
 
@@ -3376,6 +3387,20 @@ public sealed partial class SecureRootInheritance
         IReadOnlyDictionary<string, Guid?> Typed,
         string? PairId,
         Guid? PairType);
+
+    /// <summary>
+    /// #1620: the record's owning USER, or <c>null</c> when a team owns it. A record that is not there, or a fault, throws —
+    /// never read as "team-owned".
+    /// </summary>
+    private async Task<Guid?> ReadOwningUserAsync(string table, Guid id, CancellationToken ct)
+    {
+        var query = Query(table, new[] { OwningUserColumn });
+        query.TopCount = 1;
+        query.Criteria.AddCondition(table + "id", ConditionOperator.Equal, id);
+        var row = (await _dataverse.RetrieveMultipleAsync(query, ct).ConfigureAwait(false)).Entities.FirstOrDefault()
+                  ?? throw new InvalidOperationException($"{table} {id} was not found, so its owner is unknown.");
+        return row.GetAttributeValue<EntityReference>(OwningUserColumn)?.Id is { } user && user != Guid.Empty ? user : null;
+    }
 
     /// <summary>The row's filing, or <c>null</c> when it does not exist. A fault propagates.</summary>
     private Task<FilingFacts?> ReadFactsAsync(string table, Guid id, CancellationToken ct) => ReadFactsAsync(_dataverse, table, id, ct);

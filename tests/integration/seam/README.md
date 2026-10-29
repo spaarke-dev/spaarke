@@ -80,6 +80,33 @@ nothing.
   Live tests pin their clock to the seed's anchor rather than the wall clock, so seeded rows cannot age out of a
   relative window and read as a regression.
 
+## Sub-category: `seam/RecordCreation/**` — the unified record-create pipeline
+
+**Established by**: `field-mapping-server-write-path-r1` task 013, 2026-10-20. Adjudicated here for the same reason as
+`seam/Auth/**`, so that these files do not inherit deletion protection **by accident**.
+
+The spine here is the one server create of a Dataverse record (`RecordCreationService`, spec FR-06), driven end to end
+rather than shape-checked:
+
+```
+caller (WhoAmI, as the caller) → table rules → field mapping → payload mapped → caller checks (as the caller)
+  → pre-write rules → secure-root plan → owner (the real resolver) → search-index default → creator / defaults
+  → ONE app-only create → post-create (number read-back, "Assigned *", re-stamp, I-16, sharee mirror, membership event)
+```
+
+**The bar.** A pipeline step that is skipped, reordered or run twice still returns "created", so a status never
+establishes an outcome here. A test MUST assert the ORDER of what the dependencies were asked (one journal, written as
+each call happens), MUST assert exactly ONE create on what the app-only seam was asked to write, and every refusal MUST
+assert that nothing was created. Refusals are asserted on the rendered ProblemDetails (`RecordCreationProblemMap`).
+
+**Real path.** The service, `RecordOwnershipResolver` (over `OwnershipDirectory`), `CallerWriteAuthorization`,
+`DataverseWriteItemMapper`, `SecureRootFilingGate`, `CoreAncestorRestamper` (over `StampWorld`) and
+`SecureChildShareSynchronizer` (over `SecureChildShareWorld`) are the production types. Only the Dataverse module
+boundaries are doubled: the caller's `IDataverseUserClient` (the scripted client), the app-only create
+(`IFieldMappingDataverseService`), the app-only read-back (`IGenericEntityService`) and `IMembershipEventPublisher`.
+
+Files: `RecordCreationServicePipelineSeamTests`.
+
 ## Rules (per ADR-038 + ADR-043)
 
 - **Real path, not mocked.** The binder, the completion engine, the output router, and the session

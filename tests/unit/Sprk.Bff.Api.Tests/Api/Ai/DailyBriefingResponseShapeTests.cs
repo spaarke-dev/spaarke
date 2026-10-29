@@ -17,8 +17,9 @@ namespace Sprk.Bff.Api.Tests.Api.Ai;
 ///
 /// Locks in the JSON contract consumed by <c>useBriefingNarration.ts</c> in
 /// <c>@spaarke/daily-briefing-components</c>. The widget reads:
-///   - <c>tldr.summary</c> / <c>tldr.keyTakeaways</c> / <c>tldr.topAction</c>
+///   - <c>tldr.summary</c> / <c>tldr.keyTakeaways</c>
 ///     / <c>tldr.categoryCount</c> / <c>tldr.priorityItemCount</c>
+///     (task 062 / FR-32 REMOVED <c>tldr.topAction</c>: no model chooses priority)
 ///   - <c>channelNarratives[].category</c>
 ///   - <c>channelNarratives[].bullets[].narrative</c> / <c>itemIds</c> /
 ///     <c>primaryEntityType</c> / <c>primaryEntityId</c> / <c>primaryEntityName</c>
@@ -157,7 +158,8 @@ public sealed class DailyBriefingResponseShapeTests
     [Fact]
     public async Task HandleNarrate_ResponseShape_MatchesDailyBriefingNarrateResponse()
     {
-        // Arrange — the coded workflow returns the canonical structured shape.
+        // Arrange — the coded workflow returns the canonical structured shape. The "topAction" below stands in for a deployed
+        // BRIEF-NARRATE-TLDR row not yet re-synced (task 062): a model that still emits it is IGNORED, never surfaced.
         var request = BuildNonEmptyRequest();
         var composite = BuildCompositeReturning("""
             {
@@ -190,7 +192,7 @@ public sealed class DailyBriefingResponseShapeTests
         response.Tldr.Should().NotBeNull();
         response.Tldr.Summary.Should().Be("Sum.");
         response.Tldr.KeyTakeaways.Should().BeEquivalentTo(new[] { "A", "B" });
-        response.Tldr.TopAction.Should().Be("Do A.");
+        JsonSerializer.Serialize(response, WidgetSerializerOptions).Should().NotContain("topAction", "the model-chosen top action is gone (FR-32)");
         response.Tldr.CategoryCount.Should().Be(request.Categories.Length);
         response.Tldr.PriorityItemCount.Should().Be(request.PriorityItems.Length);
 
@@ -250,7 +252,7 @@ public sealed class DailyBriefingResponseShapeTests
         // tldr.* camelCase
         tldrEl.TryGetProperty("summary", out _).Should().BeTrue();
         tldrEl.TryGetProperty("keyTakeaways", out _).Should().BeTrue();
-        tldrEl.TryGetProperty("topAction", out _).Should().BeTrue();
+        tldrEl.TryGetProperty("topAction", out _).Should().BeFalse("no model chooses priority (task 062)");
         tldrEl.TryGetProperty("categoryCount", out _).Should().BeTrue();
         tldrEl.TryGetProperty("priorityItemCount", out _).Should().BeTrue();
 
@@ -292,8 +294,7 @@ public sealed class DailyBriefingResponseShapeTests
             {
                 summary = sampleRoot.GetProperty("tldr").GetProperty("summary").GetString(),
                 keyTakeaways = sampleRoot.GetProperty("tldr").GetProperty("keyTakeaways")
-                    .EnumerateArray().Select(e => e.GetString()).ToArray(),
-                topAction = sampleRoot.GetProperty("tldr").GetProperty("topAction").GetString()
+                    .EnumerateArray().Select(e => e.GetString()).ToArray()
             },
             channelNarratives = sampleRoot.GetProperty("channelNarratives")
         };
@@ -324,8 +325,7 @@ public sealed class DailyBriefingResponseShapeTests
         // 2. TL;DR text fields preserved byte-identical from the sample.
         responseRoot.GetProperty("tldr").GetProperty("summary").GetString()
             .Should().Be(sampleRoot.GetProperty("tldr").GetProperty("summary").GetString());
-        responseRoot.GetProperty("tldr").GetProperty("topAction").GetString()
-            .Should().Be(sampleRoot.GetProperty("tldr").GetProperty("topAction").GetString());
+        responseRoot.GetProperty("tldr").TryGetProperty("topAction", out _).Should().BeFalse();
 
         var sampleTakeaways = sampleRoot.GetProperty("tldr").GetProperty("keyTakeaways")
             .EnumerateArray().Select(e => e.GetString()).ToArray();

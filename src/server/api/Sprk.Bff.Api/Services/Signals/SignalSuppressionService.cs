@@ -36,7 +36,8 @@ public sealed record SuppressionStatus(
 
 /// <summary>
 /// The suppression grain (FR-17 as amended; D-34, D-36, D-39): (policy, core-record type, core-record id) for EVERY core type,
-/// read from the Signal's generic columns; a Signal with no core record is its own grain, (policy, item).
+/// read from the Signal's generic columns; a Signal with no core record is its own grain, (policy, item). In the Do lane each grain is
+/// further split by <see cref="SuppressionHolder"/> (D-145a), inside the service, so the grain a caller names is unchanged.
 /// </summary>
 public readonly record struct SuppressionGrain(Guid? CoreTypeRefId, Guid? CoreRecordId, string? SubjectEntity, Guid? SubjectId)
 {
@@ -83,6 +84,51 @@ public readonly record struct SuppressionPartition
     public override string ToString() => Key switch { null => "ordinary", UndeterminedKey => "undetermined", var k => "secure[" + k + "]" };
 }
 
+/// <summary>
+/// Whose Do item a Signal is (owner D-145a, task 152; issue #1921): the Do-lane split of a grain, applied inside each secure-family
+/// partition. A Do-lane Signal belongs to the person its subject is FOR, the contact in the subject table's "mine" person column
+/// (<see cref="SignalReadService.DoLaneMineRules"/>, built on <see cref="OwnedChildWrite.ForPersonColumns"/>; D-129), read from the
+/// subject NOW; a subject that names no individual (or whose table has no "mine" rule, or that cannot be found) is its own holder, the
+/// per-item grain (D-39). Decide-lane Signals are not split (<see cref="Everyone"/>), so their grain is unchanged.
+/// </summary>
+/// <remarks>A dismissal counts toward a PERSON holder only when its Decision Record's decider (<c>sprk_assignedtointernal</c>, D-129) is
+/// that person: the subject's person is read now, and a subject reassigned after a dismissal must not carry the old assignee's
+/// dismissals to the new one (<see cref="SignalSuppressionService"/>, "Do lane").</remarks>
+public readonly record struct SuppressionHolder
+{
+    private SuppressionHolder(Guid? personId, string? itemEntity, Guid? itemId)
+    {
+        PersonId = personId;
+        ItemEntity = itemEntity;
+        ItemId = itemId;
+    }
+
+    /// <summary>The contact the Do item is for; null for an item holder and for <see cref="Everyone"/>.</summary>
+    public Guid? PersonId { get; }
+
+    /// <summary>The subject table (lower case) of an item holder; null otherwise.</summary>
+    public string? ItemEntity { get; }
+
+    /// <summary>The subject id of an item holder; null otherwise.</summary>
+    public Guid? ItemId { get; }
+
+    /// <summary>Not split: every Decide-lane Signal.</summary>
+    public static SuppressionHolder Everyone => default;
+
+    /// <summary>A Do item for <paramref name="contactId"/>.</summary>
+    public static SuppressionHolder Person(Guid contactId) => new(contactId, null, null);
+
+    /// <summary>A Do item that names no individual: only its own dismissals count toward it (D-39).</summary>
+    public static SuppressionHolder Item(string entity, Guid id) => new(null, entity.ToLowerInvariant(), id);
+
+    public bool IsEveryone => PersonId is null && ItemEntity is null;
+
+    public override string ToString() =>
+        PersonId is { } person ? "person:" + person.ToString("D", CultureInfo.InvariantCulture)
+        : ItemEntity is { } entity ? "item:" + entity + ":" + ItemId!.Value.ToString("D", CultureInfo.InvariantCulture)
+        : "everyone";
+}
+
 /// <summary>Stable EventIds for suppression (the 5030x range is the Signal side's; 5031x the Decision Record's).</summary>
 public static class SuppressionEvents
 {
@@ -95,8 +141,9 @@ public static class SuppressionEvents
     /// <summary>Information: stamps a partition's own dismissals no longer justify were lowered or cleared (#1661 F1).</summary>
     public static readonly EventId Withdrawn = new(50352, nameof(Withdrawn));
 
-    /// <summary>Warning: the read-time witness rule (task 038, D-123) could not place the families, so every detail on the worklist page
-    /// is withheld (fail closed). Properties: Signal count, exception type.</summary>
+    /// <summary>Warning: the read-time witness rule (task 038, D-123) could not place the families, or the caller's own read of the
+    /// witness rows failed (task 151, D-142), so every detail on the worklist page is withheld (fail closed). Properties: Signal count
+    /// and exception type, or the witness table and error code.</summary>
     public static readonly EventId WitnessReadFailed = new(50353, nameof(WitnessReadFailed));
 }
 
@@ -167,6 +214,12 @@ public sealed class SuppressionPartitionUndeterminedException : InvalidOperation
 /// rows of any status (#1661 F1), and only while the row is as it was counted (round 2 K6). Only rows whose stamp would change are
 /// written (D-61). This service does not implement the 14-day quiet window after a 1st or 2nd dismissal (FR-17a): that is task 031's
 /// re-raise rule.</para>
+/// <para><b>Do lane: per person (owner D-145a, task 152; issue #1921).</b> A dismissal of one person's Do item never suppresses another
+/// person's Do item. Inside each partition, a Do-lane grain is split by <see cref="SuppressionHolder"/>: the person the subject is for
+/// (the "mine" rule's person column), or the item itself when it names no individual (D-39). A holder is counted, stamped and muted from
+/// its own rows only, and a person's count holds only the dismissals that person decided (the Decision Record's
+/// <c>sprk_assignedtointernal</c>). Decide-lane grains are not split. No column is added: the holder is read from the subject, the
+/// decider from the Decision Record.</para>
 /// <para><b>Who calls it.</b> The nightly job (<see cref="ReconcileAsync"/>) and the decision commit route (task 043) right after it
 /// closes the dismissed Signals (<see cref="ApplyAsync"/>), so the effect is immediate rather than next night.</para>
 /// <para><b>Component justification (CLAUDE.md section 11).</b> Existing: <see cref="SignalEpisodePlanner"/> already READS the stamp;
@@ -463,6 +516,86 @@ public sealed class SignalSuppressionService
     }
 
     /// <summary>
+    /// D-145a (task 152): whose Do item each hit's new episode is (<see cref="SuppressionHolder"/>), read from its subject now, so a stamp
+    /// mutes a hit only within the same person's (or the same item's) Do items. Asked only for Do-lane hits on a grain that carries a live
+    /// stamp. Keyed like <see cref="PartitionsOfHitsAsync"/>. Null on a fault: the caller then plans nothing for the policy this pass,
+    /// exactly as for a partition fault (a hit is never answered per hit on a guess).
+    /// </summary>
+    internal async Task<IReadOnlyDictionary<(string SubjectEntity, Guid SubjectId), SuppressionHolder>?> HoldersOfHitsAsync(
+        string policyCode, IReadOnlyList<SignalHit> hits, CancellationToken ct)
+    {
+        var placed = new Dictionary<(string, Guid), SuppressionHolder>();
+        if (hits.Count == 0) return placed;
+
+        IReadOnlyDictionary<(string, Guid), SuppressionHolder> holders;
+        try
+        {
+            holders = await HoldersOfSubjectsAsync(hits.Select(h => (h.SubjectEntity, h.SubjectId)), ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            LogFailure(policyCode, ex);
+            return null;
+        }
+
+        foreach (var hit in hits) placed[(hit.SubjectEntity, hit.SubjectId)] = HolderOf(holders, hit.SubjectEntity, hit.SubjectId);
+        return placed;
+    }
+
+    /// <summary>
+    /// D-145a: each Do-lane subject's holder, from the "mine" rule's person column of its table (<see cref="SignalReadService.DoLaneMineRules"/>,
+    /// never a second map), read app-only in batches. A subject whose table has no "mine" rule, whose row is absent, or whose person
+    /// column is empty is its own item holder. A fault throws (fail closed: the caller writes nothing).
+    /// </summary>
+    private async Task<IReadOnlyDictionary<(string, Guid), SuppressionHolder>> HoldersOfSubjectsAsync(
+        IEnumerable<(string Entity, Guid Id)> subjects, CancellationToken ct)
+    {
+        var found = new Dictionary<(string, Guid), SuppressionHolder>();
+        var wanted = subjects
+            .Where(s => s.Id != Guid.Empty && SignalReadService.DoLaneMineRules.ContainsKey(s.Entity))
+            .Select(s => (Entity: s.Entity.ToLowerInvariant(), s.Id))
+            .Distinct()
+            .GroupBy(s => s.Entity, StringComparer.Ordinal);
+        foreach (var group in wanted)
+        {
+            var rule = SignalReadService.DoLaneMineRules[group.Key];
+            foreach (var chunk in group.Select(s => s.Id).Chunk(InChunk))
+            {
+                // Every subject asked is answered (the item itself unless its row names a person), so a later count does not ask again.
+                foreach (var id in chunk) found[(rule.Table, id)] = SuppressionHolder.Item(rule.Table, id);
+                var query = new QueryExpression(rule.Table) { ColumnSet = new ColumnSet(rule.PersonColumn), NoLock = true };
+                query.Criteria.AddCondition(rule.Table + "id", ConditionOperator.In, chunk.Cast<object>().ToArray());
+                var rows = await _entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false);
+                foreach (var row in rows.Entities)
+                {
+                    if (row.GetAttributeValue<EntityReference>(rule.PersonColumn) is { Id: var person } && person != Guid.Empty)
+                    {
+                        found[(rule.Table, row.Id)] = SuppressionHolder.Person(person);
+                    }
+                }
+            }
+        }
+
+        return found;
+    }
+
+    /// <summary>The holder of one subject from <see cref="HoldersOfSubjectsAsync"/>'s answer: its person, else the item itself.</summary>
+    private static SuppressionHolder HolderOf(IReadOnlyDictionary<(string, Guid), SuppressionHolder> holders, string entity, Guid id) =>
+        holders.TryGetValue((entity.ToLowerInvariant(), id), out var holder) ? holder : SuppressionHolder.Item(entity, id);
+
+    /// <summary>The holder of a Signal row read by <see cref="ReadGrainSignalsAsync"/> (its subject from the dedupe key); a row whose key
+    /// cannot be read is its own holder, so it never pools with another.</summary>
+    private static SuppressionHolder HolderOf(IReadOnlyDictionary<(string, Guid), SuppressionHolder> holders, Entity signal) =>
+        SignalWriter.TryParseDedupeKey(signal.GetAttributeValue<string>("sprk_dedupekey"), out _, out var entity, out var subjectId, out _)
+            ? HolderOf(holders, entity, subjectId)
+            : SuppressionHolder.Item(signal.LogicalName, signal.Id);
+
+    private static (string Entity, Guid Id)? SubjectOf(Entity signal) =>
+        SignalWriter.TryParseDedupeKey(signal.GetAttributeValue<string>("sprk_dedupekey"), out _, out var entity, out var subjectId, out _)
+            ? (entity, subjectId)
+            : null;
+
+    /// <summary>
     /// Ontology task 142 (child-record contract C9, acceptance 7; uac-r2 #1665 N1 / #1778): the secure family of each of
     /// <paramref name="signalIds"/>, in order, from THE partition truth (<see cref="PartitionsAsync"/>: the secure roots above the Signal
     /// row and its subject, uac-r2's own walk). The decision commit route refuses a Decision Record whose Signals are not all in one
@@ -692,8 +825,9 @@ public sealed class SignalSuppressionService
         && witnessFamily == signalFamily;
 
     /// <summary>The (table, id) a witness line's <see cref="SignalEvidenceRef.Ref"/> (<c>{table}:{id}</c>, as the evaluator writes it)
-    /// names, when the table is a lineage child the walk can start from; otherwise null (its detail is then never kept).</summary>
-    private static (string Table, Guid Id)? WitnessOf(string? reference)
+    /// names, when the table is a lineage child the walk can start from; otherwise null (its detail is then never kept). The table is
+    /// lower-cased. The Signal read route's caller read (task 151, D-142) keys its answer by this same pair.</summary>
+    internal static (string Table, Guid Id)? WitnessOf(string? reference)
     {
         var separator = reference?.IndexOf(':', StringComparison.Ordinal) ?? -1;
         if (separator <= 0) return null;
@@ -721,11 +855,18 @@ public sealed class SignalSuppressionService
     /// Dataverse client. A fault (including a caller read that is not a success, an ambiguous Secure team, or an anchor whose partition
     /// is undetermined) throws: it is never an empty or a partial count. Null when the Signal does not carry what the grain needs (no
     /// policy, or an unparseable key on a no-core Signal): the route answers the uniform 404, never a guess.
+    /// <para><b>Do lane (D-145a, task 152; D-141).</b> The count is the anchor's HOLDER's (<see cref="SuppressionHolder"/>) within its
+    /// partition: a Do item for a person reports only that person's own counted dismissals, and only to that person
+    /// (<paramref name="callerContactId"/>, the caller's linked contact the "mine" read resolved); any other caller, including one the
+    /// "mine" rule admits as the item's owner, creator or assigner, is told nothing and that its dismissal counts toward nothing (an empty
+    /// status whose <see cref="SuppressionStatus.PolicyCountsTowardSuppression"/> is false). So is the caller of a Do Signal whose policy
+    /// is no longer in the Do lane. An item with no individual reports its own per-item count.</para>
     /// </summary>
-    public async Task<SuppressionStatus?> GetStatusForSignalAsync(Guid signalId, IDataverseUserClient caller, CancellationToken ct)
+    public async Task<SuppressionStatus?> GetStatusForSignalAsync(
+        Guid signalId, IDataverseUserClient caller, CancellationToken ct, Guid? callerContactId = null)
     {
         var signal = await _entities.RetrieveAsync("sprk_signal", signalId,
-            ["sprk_policy", "sprk_corerecordtype", "sprk_corerecordid", "sprk_dedupekey", "ownerid", .. SignalLineageColumns], ct).ConfigureAwait(false);
+            ["sprk_policy", "sprk_corerecordtype", "sprk_corerecordid", "sprk_dedupekey", "ownerid", "sprk_lane", .. SignalLineageColumns], ct).ConfigureAwait(false);
 
         if (signal.GetAttributeValue<EntityReference>("sprk_policy") is not { Id: var policyId } || policyId == Guid.Empty)
         {
@@ -748,10 +889,19 @@ public sealed class SignalSuppressionService
             return null;
         }
 
-        var policy = await _entities.RetrieveAsync("sprk_policy", policyId, ["sprk_policycode"], ct).ConfigureAwait(false);
+        var policy = await _entities.RetrieveAsync("sprk_policy", policyId, ["sprk_policycode", "sprk_lane"], ct).ConfigureAwait(false);
         if (policy.GetAttributeValue<string>("sprk_policycode") is not { Length: > 0 } code)
         {
             return null; // a no-core grain is keyed by the policy code: without it the count would be silently zero
+        }
+
+        // Task 152 review K3: the count is split by the POLICY's lane, the route's "mine" gate by the SIGNAL's. A Do Signal of a policy
+        // since switched to another lane would be answered from the unsplit (policy, core) count, colleagues' dismissals included: it is
+        // answered as a dismissal that counts toward nothing instead.
+        if (signal.GetAttributeValue<OptionSetValue>("sprk_lane")?.Value == SignalWriter.LaneDo
+            && policy.GetAttributeValue<OptionSetValue>("sprk_lane")?.Value != SignalWriter.LaneDo)
+        {
+            return CountsTowardNothing;
         }
 
         // The count is the CALLER's: the grain's Signals are trimmed to those the caller's own read returns, then Decision-Record facts
@@ -765,21 +915,34 @@ public sealed class SignalSuppressionService
             throw new SuppressionPartitionUndeterminedException();
         }
 
-        return assessed.Partitions.FirstOrDefault(p => p.Partition == anchor).Assessment?.Status
+        if (assessed.AnchorHolder.PersonId is { } person && person != callerContactId)
+        {
+            // D-145a / D-141: another person's Do-lane count is never reported, and this caller's dismissal of it counts toward no one
+            // (it is not theirs to count, review F1), so the wizard says it does not count rather than "1 of 3".
+            return CountsTowardNothing;
+        }
+
+        return assessed.Partitions.FirstOrDefault(p => p.Partition == anchor && p.Holder == assessed.AnchorHolder).Assessment?.Status
             ?? new SuppressionStatus(0, 0, null, assessed.PolicyCounts);
     }
+
+    /// <summary>The count for a caller whose dismissal of this Signal counts toward no one (task 152): nothing counted, nothing reported, and
+    /// <see cref="SuppressionStatus.PolicyCountsTowardSuppression"/> false so the wizard does not promise a count.</summary>
+    private static SuppressionStatus CountsTowardNothing => new(0, 0, null, false);
 
     /// <summary>
     /// Counts the pairing and brings its stamps into line, in every partition (#1661, D-123): at the threshold the partition's open and
     /// in-window dismissed Signals are stamped, and any live stamp the partition's own dismissals do not justify is lowered or cleared
     /// (F1, on rows of any status). Idempotent: a second call writes nothing. Returns the status of <paramref name="report"/> (default the
-    /// ordinary partition: the only one a non-member may be told about; an empty status when it has no Signal).
+    /// ordinary partition: the only one a non-member may be told about; an empty status when it has no Signal). In the Do lane every
+    /// holder of every partition is brought into line (D-145a), and the status reported is the first holder's of that partition (the
+    /// decision route ignores it; the count route is <see cref="GetStatusForSignalAsync"/>).
     /// </summary>
     public async Task<SuppressionStatus> ApplyAsync(
         Guid policyId, string policyCode, SuppressionGrain grain, CancellationToken ct, SuppressionPartition? report = null)
     {
         var assessed = await AssessAsync(policyId, policyCode, grain, policyCounts: null, visibleSignalIds: null, known: null, anchor: null, ct).ConfigureAwait(false);
-        foreach (var (_, assessment) in assessed.Partitions) await StampAsync(policyCode, assessment, ct).ConfigureAwait(false);
+        foreach (var (_, _, assessment) in assessed.Partitions) await StampAsync(policyCode, assessment, ct).ConfigureAwait(false);
 
         var wanted = report ?? SuppressionPartition.Ordinary;
         return assessed.Partitions.FirstOrDefault(p => p.Partition == wanted).Assessment?.Status
@@ -799,9 +962,15 @@ public sealed class SignalSuppressionService
     /// <remarks>Fail closed, the same way for every partition (#1661 round 2 F3, K1): when the partitions, the Decision-Record facts or
     /// ANY worked grain's count cannot be read, <see cref="SuppressionReconciliation.PartitionsUnavailable"/> is set, NOTHING is written
     /// (no stamp is raised, lowered or cleared), and the caller must plan nothing for the policy this pass. Withholding the stamps instead
-    /// would let the planner re-raise every suppressed subject of the policy on one timeout.</remarks>
+    /// would let the planner re-raise every suppressed subject of the policy on one timeout.
+    /// <para><b>Do lane (D-145a, task 152).</b> <paramref name="doLane"/> (the policy's <c>sprk_lane</c>; the job passes it) splits every
+    /// partition by <see cref="SuppressionHolder"/> (<see cref="ExistingSignal.Holder"/>, which the planner reads). A stamp written before
+    /// this split, on (policy, core record) for every Do item alike, is therefore RE-DERIVED on the first pass: it stays on the rows of a
+    /// holder whose own dismissals justify it, and is lowered or withdrawn on every other holder's rows (only rows that change are written,
+    /// D-61). A holder read fault is a partition fault (fail closed, nothing written).</para></remarks>
     internal async Task<SuppressionReconciliation> ReconcileAsync(
-        Guid policyId, string policyCode, bool policyCountsTowardSuppression, IReadOnlyList<ExistingSignal> existing, CancellationToken ct)
+        Guid policyId, string policyCode, bool policyCountsTowardSuppression, IReadOnlyList<ExistingSignal> existing, CancellationToken ct,
+        bool doLane = false)
     {
         var now = _timeProvider.GetUtcNow().UtcDateTime;
         var readSince = ReadSince(now);
@@ -822,11 +991,13 @@ public sealed class SignalSuppressionService
 
         var rows = grains.SelectMany(g => g).ToList();
         var partitionOf = new Dictionary<Guid, SuppressionPartition>();
+        IReadOnlyDictionary<(string, Guid), SuppressionHolder>? holders = null;
         IReadOnlyDictionary<Guid, DecisionRecordFacts> records;
         try
         {
             var partitions = await PartitionsAsync(rows.Select(ItemOf).ToList(), ct).ConfigureAwait(false);
             for (var i = 0; i < rows.Count; i++) partitionOf[rows[i].Id] = partitions[i];
+            if (doLane) holders = await HoldersOfSubjectsAsync(rows.Select(s => (s.SubjectEntity, s.SubjectId)), ct).ConfigureAwait(false);
 
             // The facts the exact rule needs (class, reason, decided-on), for the dismissals of the partitions that may carry a stamp.
             records = policyCountsTowardSuppression
@@ -841,13 +1012,15 @@ public sealed class SignalSuppressionService
             return new SuppressionReconciliation(existing, 1, PartitionsUnavailable: true);
         }
 
-        existing = existing.Select(s => partitionOf.TryGetValue(s.Id, out var p) ? s with { Partition = p } : s).ToList();
+        existing = existing.Select(s => partitionOf.TryGetValue(s.Id, out var p)
+            ? s with { Partition = p, Holder = holders is null ? SuppressionHolder.Everyone : HolderOf(holders, s.SubjectEntity, s.SubjectId) }
+            : s).ToList();
 
         var candidates = existing
             .Where(s => s.Partition is not null)
-            .GroupBy(s => (Grain: GrainKeyOf(s), Partition: s.Partition!.Value))
+            .GroupBy(s => (Grain: GrainKeyOf(s), Partition: s.Partition!.Value, Holder: s.Holder ?? SuppressionHolder.Everyone))
             .Where(g => Assess(g.Select(RowOf).ToList(), records, policyCountsTowardSuppression,
-                stampable: policyCountsTowardSuppression && !g.Key.Partition.IsUndetermined, now).Changes.Any())
+                stampable: policyCountsTowardSuppression && !g.Key.Partition.IsUndetermined, now, g.Key.Holder).Changes.Any())
             .Select(g => g.Key.Grain)
             .Distinct()
             .ToList();
@@ -860,7 +1033,7 @@ public sealed class SignalSuppressionService
             try
             {
                 assessed.Add(await AssessAsync(policyId, policyCode, new SuppressionGrain(type, core, entity, subject), policyCountsTowardSuppression,
-                    visibleSignalIds: null, partitionOf, anchor: null, ct).ConfigureAwait(false));
+                    visibleSignalIds: null, partitionOf, anchor: null, ct, doLane, holders).ConfigureAwait(false));
             }
             catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
             {
@@ -871,7 +1044,7 @@ public sealed class SignalSuppressionService
 
         // In memory first: the planner must see the corrected stamps this pass even when a write below fails.
         var changed = new Dictionary<Guid, DateTime?>();
-        foreach (var (_, assessment) in assessed.SelectMany(a => a.Partitions))
+        foreach (var (_, _, assessment) in assessed.SelectMany(a => a.Partitions))
         {
             foreach (var (id, to) in assessment.Changes) changed[id] = to;
         }
@@ -881,7 +1054,7 @@ public sealed class SignalSuppressionService
         {
             try
             {
-                foreach (var (_, assessment) in grainAssessment.Partitions) await StampAsync(policyCode, assessment, ct).ConfigureAwait(false);
+                foreach (var (_, _, assessment) in grainAssessment.Partitions) await StampAsync(policyCode, assessment, ct).ConfigureAwait(false);
             }
             catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
             {
@@ -919,8 +1092,12 @@ public sealed class SignalSuppressionService
                 .Concat(Lowers.Select(l => (l.Id, StampUntil)));
     }
 
+    /// <param name="Partitions">One assessment per (partition, holder): a Decide-lane grain has one holder per partition
+    /// (<see cref="SuppressionHolder.Everyone"/>); a Do-lane grain one per person or item (D-145a).</param>
+    /// <param name="AnchorHolder">The anchor Signal's holder (<see cref="SuppressionHolder.Everyone"/> without an anchor or in the Decide lane).</param>
     private sealed record GrainAssessment(
-        IReadOnlyList<(SuppressionPartition Partition, Assessment Assessment)> Partitions, SuppressionPartition? Anchor, bool PolicyCounts);
+        IReadOnlyList<(SuppressionPartition Partition, SuppressionHolder Holder, Assessment Assessment)> Partitions, SuppressionPartition? Anchor,
+        bool PolicyCounts, SuppressionHolder AnchorHolder = default);
 
     /// <summary>One Signal as the counting rule needs it, whether read by the grain query or handed over by the nightly job: the SAME rule
     /// (<see cref="Assess"/>) decides both whether a grain needs work and what is written (#1661 round 2 N1/F4).</summary>
@@ -944,18 +1121,23 @@ public sealed class SignalSuppressionService
     /// <summary>
     /// Counts one pairing in every partition it has (#1661, D-123): the grain's Signals are read once, each is placed in its partition
     /// (<paramref name="known"/> placements are reused; the rest, and <paramref name="anchor"/>, are placed by <see cref="PartitionsAsync"/>),
-    /// and each partition is counted from its own rows only. The ordinary partition comes first.
+    /// and each partition is counted from its own rows only. The ordinary partition comes first. In the Do lane (D-145a) each partition is
+    /// further split by <see cref="SuppressionHolder"/> (<paramref name="knownHolders"/> are reused; the rest are read), and each holder is
+    /// counted from its own rows only. <paramref name="doLane"/> null (the commit route and the count read): the policy's <c>sprk_lane</c>
+    /// decides, read with its counting switch.
     /// </summary>
     private async Task<GrainAssessment> AssessAsync(
         Guid policyId, string policyCode, SuppressionGrain grain, bool? policyCounts, IReadOnlySet<Guid>? visibleSignalIds,
-        IReadOnlyDictionary<Guid, SuppressionPartition>? known, Entity? anchor, CancellationToken ct)
+        IReadOnlyDictionary<Guid, SuppressionPartition>? known, Entity? anchor, CancellationToken ct, bool? doLane = null,
+        IReadOnlyDictionary<(string, Guid), SuppressionHolder>? knownHolders = null)
     {
         var now = _timeProvider.GetUtcNow().UtcDateTime;
 
-        if (policyCounts is null)
+        if (policyCounts is null || doLane is null)
         {
-            var policy = await _entities.RetrieveAsync("sprk_policy", policyId, ["sprk_countstowardsuppression"], ct).ConfigureAwait(false);
-            policyCounts = policy.GetAttributeValue<bool?>("sprk_countstowardsuppression") ?? true;
+            var policy = await _entities.RetrieveAsync("sprk_policy", policyId, ["sprk_countstowardsuppression", "sprk_lane"], ct).ConfigureAwait(false);
+            policyCounts ??= policy.GetAttributeValue<bool?>("sprk_countstowardsuppression") ?? true;
+            doLane ??= policy.GetAttributeValue<OptionSetValue>("sprk_lane")?.Value == SignalWriter.LaneDo;
         }
 
         var all = await ReadGrainSignalsAsync(policyId, policyCode, grain, ReadSince(now), now, ct).ConfigureAwait(false);
@@ -970,19 +1152,37 @@ public sealed class SignalSuppressionService
         for (var i = 0; i < toPlace.Count; i++) partitionOf[toPlace[i].Id] = placed[i];
         SuppressionPartition PartitionOf(Entity s) => known is not null && known.TryGetValue(s.Id, out var p) ? p : partitionOf[s.Id];
 
+        // D-145a: whose Do item each row (and the anchor) is; Decide-lane rows are not split.
+        IReadOnlyDictionary<(string, Guid), SuppressionHolder> holders = new Dictionary<(string, Guid), SuppressionHolder>();
+        if (doLane.Value)
+        {
+            var subjects = all.Append(anchor).OfType<Entity>().Select(SubjectOf).OfType<(string Entity, Guid Id)>()
+                .Where(s => knownHolders is null || !knownHolders.ContainsKey((s.Entity.ToLowerInvariant(), s.Id)))
+                .ToList();
+            var read = subjects.Count == 0 ? holders : await HoldersOfSubjectsAsync(subjects, ct).ConfigureAwait(false);
+            holders = knownHolders is null ? read
+                : read.Count == 0 ? knownHolders
+                : knownHolders.Concat(read).GroupBy(p => p.Key).ToDictionary(g => g.Key, g => g.Last().Value);
+        }
+
+        SuppressionHolder HolderOfRow(Entity s) => doLane.Value ? HolderOf(holders, s) : SuppressionHolder.Everyone;
+
         var rows = all.Select(RowOf).ToList();
         var records = await ReadDecisionRecordsAsync(rows
             .Where(r => r.Resolution == SignalWriter.ResolutionDismissed && r.DecisionRecordId is not null)
             .Select(r => r.DecisionRecordId!.Value).Distinct().ToList(), ct).ConfigureAwait(false);
 
-        var results = new List<(SuppressionPartition, Assessment)>();
-        foreach (var group in all.GroupBy(PartitionOf).OrderBy(g => g.Key.IsOrdinary ? 0 : 1).ThenBy(g => g.Key.Key, StringComparer.Ordinal))
+        var results = new List<(SuppressionPartition, SuppressionHolder, Assessment)>();
+        foreach (var group in all.GroupBy(s => (Partition: PartitionOf(s), Holder: HolderOfRow(s)))
+                     .OrderBy(g => g.Key.Partition.IsOrdinary ? 0 : 1).ThenBy(g => g.Key.Partition.Key, StringComparer.Ordinal)
+                     .ThenBy(g => g.Key.Holder.ToString(), StringComparer.Ordinal))
         {
-            var stampable = policyCounts.Value && !group.Key.IsUndetermined;
-            results.Add((group.Key, Assess(group.Select(RowOf).ToList(), records, policyCounts.Value, stampable, now)));
+            var stampable = policyCounts.Value && !group.Key.Partition.IsUndetermined;
+            results.Add((group.Key.Partition, group.Key.Holder, Assess(group.Select(RowOf).ToList(), records, policyCounts.Value, stampable, now, group.Key.Holder)));
         }
 
-        return new GrainAssessment(results, anchor is null ? null : placed[^1], policyCounts.Value);
+        return new GrainAssessment(results, anchor is null ? null : placed[^1], policyCounts.Value,
+            anchor is null ? SuppressionHolder.Everyone : HolderOfRow(anchor));
     }
 
     /// <summary>
@@ -998,10 +1198,15 @@ public sealed class SignalSuppressionService
     /// although its oldest dismissal ages out of the trailing count first (spec FR-17).</item>
     /// <item>A live stamp later than the justified date (or live with none justified) is lowered or cleared; open rows, and rows
     /// dismissed in the trailing window, with no or an earlier stamp are raised to it. A stamp at or below it is never lowered.</item>
+    /// <item>D-145a: for a PERSON <paramref name="holder"/>, a dismissal is that person's (counted and recorded) only when its Decision
+    /// Record is of class Dismissal and its decider (<c>sprk_assignedtointernal</c>) is that person. The subject's person is read now, so a
+    /// dismissal of an item that was reassigned since, one made by the item's owner or creator rather than its person, or one with no
+    /// decider on record, counts toward no one: never toward another person's Do items.</item>
     /// </list>
     /// </summary>
     private static Assessment Assess(
-        IReadOnlyList<StampRow> rows, IReadOnlyDictionary<Guid, DecisionRecordFacts> records, bool policyCounts, bool stampable, DateTime now)
+        IReadOnlyList<StampRow> rows, IReadOnlyDictionary<Guid, DecisionRecordFacts> records, bool policyCounts, bool stampable, DateTime now,
+        SuppressionHolder holder = default)
     {
         var windowStart = now.AddDays(-WindowDays);
         var readSince = ReadSince(now);
@@ -1019,12 +1224,14 @@ public sealed class SignalSuppressionService
             if (d.DecisionRecordId is { } recordId && records.TryGetValue(recordId, out var record))
             {
                 if (record.Class != (int)RecordedDecisionClass.Dismissal) continue; // an action was taken: not a dismissal
+                if (holder.PersonId is { } person && record.DeciderContactId != person) continue; // D-145a: not this person's dismissal
                 key = recordId;
                 on = record.DecidedOn ?? d.ResolvedOn!.Value;
                 counts = !IsNonCountingReason(record.Reason);
             }
             else
             {
+                if (holder.PersonId is not null) continue; // D-145a: no record names who dismissed it, so it is no one's
                 key = d.DecisionRecordId ?? d.Id;
                 on = d.ResolvedOn!.Value;
             }
@@ -1232,7 +1439,8 @@ public sealed class SignalSuppressionService
         }
     }
 
-    private sealed record DecisionRecordFacts(int? Class, string? Reason, DateTime? DecidedOn);
+    /// <param name="DeciderContactId">The decider (<c>sprk_assignedtointernal</c>, D-129), which a Do-lane person holder counts by (D-145a).</param>
+    private sealed record DecisionRecordFacts(int? Class, string? Reason, DateTime? DecidedOn, Guid? DeciderContactId = null);
 
     private async Task<IReadOnlyDictionary<Guid, DecisionRecordFacts>> ReadDecisionRecordsAsync(IReadOnlyList<Guid> ids, CancellationToken ct)
     {
@@ -1241,7 +1449,7 @@ public sealed class SignalSuppressionService
         {
             var query = new QueryExpression("sprk_decisionrecord")
             {
-                ColumnSet = new ColumnSet("sprk_recordclass", "sprk_reason", "sprk_decidedon"),
+                ColumnSet = new ColumnSet("sprk_recordclass", "sprk_reason", "sprk_decidedon", "sprk_assignedtointernal"),
             };
             query.Criteria.AddCondition("sprk_decisionrecordid", ConditionOperator.In, chunk.Cast<object>().ToArray());
             var result = await _entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false);
@@ -1250,7 +1458,8 @@ public sealed class SignalSuppressionService
                 found[row.Id] = new DecisionRecordFacts(
                     row.GetAttributeValue<OptionSetValue>("sprk_recordclass")?.Value,
                     row.GetAttributeValue<string>("sprk_reason"),
-                    row.GetAttributeValue<DateTime?>("sprk_decidedon") is { } on ? DateTime.SpecifyKind(on, DateTimeKind.Utc) : null);
+                    row.GetAttributeValue<DateTime?>("sprk_decidedon") is { } on ? DateTime.SpecifyKind(on, DateTimeKind.Utc) : null,
+                    row.GetAttributeValue<EntityReference>("sprk_assignedtointernal")?.Id);
             }
         }
 
@@ -1269,8 +1478,13 @@ public sealed class SignalSuppressionService
     /// owner, and every lineage is placed in ONE call (the Secure team identified once, one walker run, so the reads are bounded by
     /// the distinct rows and parents). A reference that names no lineage child, a witness or Signal row that cannot be read, or an
     /// undetermined family on either side keeps nothing. No Secure Record owner team in this environment: every family is ordinary
-    /// and every reference keeps its detail. A fault (an ambiguous team, a walk that does not complete, a read failure) returns null,
-    /// logged at Warning (<see cref="SuppressionEvents.WitnessReadFailed"/>): the caller then withholds every line's detail.
+    /// and every reference the caller reads keeps its detail. A fault (an ambiguous team, a walk that does not complete, a read
+    /// failure) returns null, logged at Warning (<see cref="SuppressionEvents.WitnessReadFailed"/>): the caller then withholds every
+    /// line's detail.
+    /// <para><b>Both rules must keep (task 151, D-142).</b> A reference keeps its detail only when the caller's own read admitted its
+    /// witness row as well: <paramref name="readableByCaller"/> holds the witnesses (<see cref="WitnessOf"/>) the caller's batched
+    /// read returned. A reference whose witness is not in it keeps nothing, and is never placed (no app-only read of a row the
+    /// caller cannot read). The secure-family rule above is unchanged and applies to the rest.</para>
     /// </summary>
     /// <remarks>Component justification (CLAUDE.md section 11). Existing: <see cref="PartitionsAsync"/> (the one partition truth) and
     /// <see cref="ReadSubjectRowsAsync"/>; <see cref="EvidenceWithinPartitionAsync"/> / <see cref="StoredEvidenceToRedactAsync"/> (task
@@ -1279,12 +1493,20 @@ public sealed class SignalSuppressionService
     /// placed in one call (one rule, one helper; DI-87, #1890). Cost of doing nothing: until the job's next pass, a matter's readers
     /// see the subject and sender of a communication that has since been filed under another secure family (D-123).</remarks>
     internal async Task<IReadOnlyDictionary<Guid, IReadOnlySet<string>>?> WitnessDetailShownOnReadAsync(
-        IReadOnlyList<(Guid SignalId, IReadOnlyList<string> References)> signals, CancellationToken ct)
+        IReadOnlyList<(Guid SignalId, IReadOnlyList<string> References)> signals,
+        IReadOnlySet<(string Table, Guid Id)> readableByCaller,
+        CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(signals);
+        ArgumentNullException.ThrowIfNull(readableByCaller);
         var shown = new Dictionary<Guid, IReadOnlySet<string>>();
-        var wanted = signals.Where(s => s.References.Count > 0).GroupBy(s => s.SignalId)
-            .Select(g => (SignalId: g.Key, References: g.SelectMany(s => s.References).Distinct(StringComparer.Ordinal).ToList()))
+
+        // D-142: only a reference whose witness the caller's own read returned is judged at all; every other keeps nothing.
+        var wanted = signals.GroupBy(s => s.SignalId)
+            .Select(g => (SignalId: g.Key, References: g.SelectMany(s => s.References)
+                .Where(r => WitnessOf(r) is { } witness && readableByCaller.Contains(witness))
+                .Distinct(StringComparer.Ordinal).ToList()))
+            .Where(w => w.References.Count > 0)
             .ToList();
         if (wanted.Count == 0) return shown;
 

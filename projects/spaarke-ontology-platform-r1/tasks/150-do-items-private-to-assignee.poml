@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="150" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>Do items are private to their assignee on the per-Signal routes (D-141)</title>
+    <phase>3 Worklist</phase>
+    <gate>038 merged (#1891)</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Authorization change on shipped BFF routes (decision plan, suppression, commit).</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Security-sensitive authorization on three routes; must reuse the worklist's admission rule exactly.</model-tier-reason>
+    <effort>high</effort>
+    <deps>038</deps>
+    <tags>bff-api,auth,security,testing</tags>
+    <estimated-effort>3-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>uac-r2's review of 038 (DI-86, #1883): the per-Signal routes authorize a Do-lane Signal by "caller can read the Signal and its core / subject" through `SignalCoreRecordAccess.AuthorizeAsync`, with no "mine" filter. A same-BU colleague who has a Do item's id can open its plan and commit actions. The owner decided (D-141): Do items are private to their assignee.</prompt>
+  <role>SPAARKE BFF engineer.</role>
+  <goal>Every per-Signal route admits a Do-lane Signal only for a caller the worklist's Do-lane "mine" rule admits for that Signal's subject; Know-lane behaviour is unchanged.</goal>
+
+  <context>
+    <background>D-141 and D-129 (notes/decisions.md); issue #1883 (uac-r2's facts: route authorization paths, role depths, secure wall unaffected). The worklist rule is `SignalReadService.DoLaneMineRules` (`SignalReadService.cs:150-175`): OR of owner-is-caller, the table's person column (`OwnedChildWrite.ForPersonColumns`) resolved to the caller's linked contact, creator-is-caller, evaluated as the caller's own (OBO) read of the subject.</background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Signals/SignalCoreRecordAccess.cs (AuthorizeAsync, :105 — the single gate for the decision-plan, suppression and commit routes)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Signals/SignalReadService.cs (DoLaneMineRules and the "mine" subject read — REUSE, do not copy)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Signals/DecisionCommitService.cs (:456 caller of AuthorizeAsync; read only)</file>
+    </relevant-files>
+  </context>
+
+  <justification>
+    <existing>`SignalReadService` already evaluates "mine" for Do-lane rows; `SignalCoreRecordAccess` is the per-Signal gate.</existing>
+    <extension>Extend AuthorizeAsync with the existing rule (extract a shared internal helper if needed); no new service, endpoint or registration.</extension>
+    <cost-of-doing-nothing>A colleague can open and act on another person's private Do item by id, contrary to D-141.</cost-of-doing-nothing>
+  </justification>
+
+  <constraints>
+    <constraint source="D-141">Applies to every route that calls `SignalCoreRecordAccess.AuthorizeAsync` and to every other route that returns or acts on a single Signal by id (check the Signals endpoint files; list them in the notes). A Do-lane Signal the caller is not "mine" for answers exactly as an unreadable Signal does today (same status code and body — no existence oracle).</constraint>
+    <constraint source="single-source">One "mine" rule: the worklist and the per-Signal gate call the same code. A copy of the predicate is a defect.</constraint>
+    <constraint source="D-129">Individuals come from Assigned To Internal (contact) via the existing linked-contact path; never treat ownerid as the individual beyond what DoLaneMineRules already does.</constraint>
+    <constraint source="fail-closed">A fault reading the caller's contact or the subject denies (as the worklist does: 503 where it returns 503).</constraint>
+    <constraint source="D-123">No change to the secure-family checks; uac-r2 reviews the PR (SendMessage + #1355).</constraint>
+    <constraint source="bff-extensions">Publish-size delta vs a fresh build of origin/master, no new HIGH CVE.</constraint>
+  </constraints>
+
+  <steps mode="directional">
+    <step order="1">Read AuthorizeAsync and the worklist's Do-lane "mine" read; list every per-Signal route.</step>
+    <step order="2">Extract the rule into one helper both call; apply it to Do-lane Signals in AuthorizeAsync.</step>
+    <step order="3">Tests (filtered), seeding proof on the new denial, size delta, PR into docs/ontology-platform-design.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">A Do-lane Signal whose subject's person column is the caller's contact: plan, suppression and commit are allowed.</criterion>
+    <criterion testable="true">A Do-lane Signal owned by or created by the caller (per the table's rule): allowed.</criterion>
+    <criterion testable="true">Negative: a same-BU colleague who can read the Signal and its subject but is not "mine": every per-Signal route answers exactly as for an unreadable Signal.</criterion>
+    <criterion testable="true">Know-lane Signals: authorization unchanged (existing tests green, unmodified).</criterion>
+    <criterion testable="true">A fault in the "mine" read denies (fail closed).</criterion>
+    <criterion testable="true">The worklist and AuthorizeAsync call the same rule (a test or ArchTest pins it).</criterion>
+    <criterion testable="false">Test scope: the cases above only; seeding proof on the colleague denial.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>If a per-Signal route cannot apply the rule without changing uac-r2's files, STOP and report.</trigger>
+  </escalation>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+  </knowledge>
+</task>

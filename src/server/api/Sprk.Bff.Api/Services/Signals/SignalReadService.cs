@@ -1,5 +1,6 @@
 using System.Collections.Frozen;
 using System.Globalization;
+using System.Security.Claims;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Xml.Linq;
@@ -7,8 +8,11 @@ using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
+using Sprk.Bff.Api.Services.Access;
+using Sprk.Bff.Api.Services.Ai.Context;
 using Sprk.Bff.Api.Services.Ai.Membership;
 using Sprk.Bff.Api.Services.Dataverse;
+using Sprk.Bff.Api.Services.Identity;
 using Sprk.Bff.Api.Services.Signals.Actions;
 
 namespace Sprk.Bff.Api.Services.Signals;
@@ -44,6 +48,14 @@ public enum WorklistSet
 
     /// <summary>Resolved within the configured window but not today in the item's own time zone.</summary>
     ClosedEarlier,
+
+    /// <summary>
+    /// Task 045 (D-47): the Decision Record tab. Every Signal a person resolved through a Decision Record whose record the caller
+    /// can read, within <see cref="SignalReadService.DecidedWindowDays"/> days, newest first on the client. Membership is the
+    /// configuration's <c>closedEarlier</c> query with its window widened and a "has a Decision Record" condition; an item whose
+    /// record the caller cannot read is absent.
+    /// </summary>
+    Decided,
 }
 
 /// <summary>What <see cref="SignalReadService.ReadAsync"/> decided.</summary>
@@ -84,9 +96,24 @@ public sealed record WorklistCoreRecord(string RecordType, Guid RecordId, string
 
 /// <summary>One Work Item: display columns only (D-23, task 051 #1513, task 052 #1536 F4).</summary>
 /// <param name="EvidenceRefs">The stored witness lines (a JSON array, as <see cref="SignalWriter"/> writes them) after the read-time
-/// witness rule (D-123): a line whose witness is not in the Signal's own known secure family has no <c>text</c> or <c>source</c> and
-/// carries <c>"withheld": true</c>, so the UI can say the detail is withheld rather than absent. Null when nothing is stored or the
+/// witness rules (D-123, D-142): a line whose witness the caller cannot read, or whose witness is not in the Signal's own known secure
+/// family, has no <c>text</c> or <c>source</c> and carries <c>"withheld": true</c>, so the UI can say the detail is withheld rather
+/// than absent. A billing Duplicate whose earlier invoice the caller cannot read (D-176, task 157) also loses every
+/// <c>duplicateOf.*</c> line, and every other line is withheld. Null when nothing is stored or the
 /// stored value is not a JSON array.</param>
+/// <param name="Sentence">The Signal's stored rule sentence (<c>sprk_sentence</c>), returned as stored. FR-48/D-23 bind what it may
+/// assert when it is written: the rule's literal text, with its tokens filled from the subject's own tested fields
+/// (<c>SignalWriter.RenderSentence</c>), never a witness value. It adds nothing beyond the caller's own read of the Signal row (the
+/// column is not field-secured); a non-core subject the caller cannot read is DI-89 (#1913). Null when empty. Task 154 (#1959 item 1).
+/// Exception (D-176, task 157): a billing Duplicate whose earlier invoice the caller cannot read carries
+/// <see cref="EarlierInvoiceReadability.WithheldSentence"/> instead.</param>
+/// <param name="SubjectRecordType">Do lane only (task 154, #1958): the subject's table (logical name), the table whose caller-scoped
+/// "mine" read returned it (<see cref="SignalReadService.DoLaneMineRules"/>), so the caller has already been proven to read it. Null on
+/// a Decide-lane row.</param>
+/// <param name="SubjectRecordId">Do lane only: the subject's id, with <see cref="SubjectRecordType"/>. Null on a Decide-lane row.</param>
+/// <param name="Decision">Closed today, Closed earlier and Decided sets only (task 045, #1959 item 2): the Decision Record that closed
+/// the item, read AS THE CALLER. Null when the item was closed by the system (no record), or when the caller cannot read the record
+/// (omitted, never withheld by name).</param>
 public sealed record WorklistItemRow(
     Guid SignalId,
     string Lane,
@@ -102,7 +129,11 @@ public sealed record WorklistItemRow(
     Guid? PolicyVersionId,
     DateTimeOffset? ResolvedOn = null,
     int? ResolutionType = null,
-    DateTimeOffset? SuppressedUntil = null);
+    DateTimeOffset? SuppressedUntil = null,
+    string? Sentence = null,
+    string? SubjectRecordType = null,
+    Guid? SubjectRecordId = null,
+    WorklistDecisionRecord? Decision = null);
 
 /// <summary>
 /// The Signal read route's service (task 038). Every row-visibility question is asked AS THE CALLER through
@@ -122,13 +153,22 @@ public sealed record WorklistItemRow(
 /// (5) A Do-lane row is kept only when the caller's own read of its subject, filtered to "mine", returns it
 /// (<see cref="DoLaneMineRules"/>); that read also proves the caller can read the subject (D-35 as amended by D-129). A dropped
 /// row leaves no trace: no count, no placeholder, no group.</para>
+/// <para><b>What a row carries (task 154).</b> Every returned value belongs to a row the caller's own reads admitted. The rule sentence
+/// is a column of the Signal row the caller read. The subject reference (<see cref="WorklistItemRow.SubjectRecordType"/>,
+/// <see cref="WorklistItemRow.SubjectRecordId"/>) is returned on Do-lane rows only, from the step (5) read that returned the subject to
+/// the caller; a Decide-lane row has no such read and returns neither. Neither adds a request.</para>
+/// <para><b>Group order.</b> The lanes follow D-42 and the secondary sets the configuration's order; in the Do lane the "Not filed"
+/// group (D-35) is always emitted last (HANDOFF 1.2, task 154).</para>
 /// <para><b>Fail closed, honestly.</b> A row the caller cannot read is dropped; a FAULT (a 5xx, throttling, an unparseable
 /// configuration, more than <see cref="MaxPages"/> pages) is <see cref="SignalReadOutcome.Unavailable"/>, never a shorter list
 /// presented as complete (uac-r2 F4-b: a fault is not a denial).</para>
 /// <para><b>Bounded queries</b> (POML escalation trigger 2): per page of Signals, one caller read per core type per
 /// <see cref="IdChunk"/> ids, one per Do-subject table per chunk, one per Decide-subject table per chunk, plus one
-/// catalog query; and, only for returned rows whose evidence carries detail, the app-only secure-family placement of those
-/// Signals and their witnesses (<see cref="SignalSuppressionService.WitnessDetailShownOnReadAsync"/>: it withholds, never adds).
+/// catalog query; and, only for returned rows whose evidence carries detail, one caller read per witness table per
+/// <see cref="WitnessIdChunk"/> ids (D-142) and the app-only secure-family placement of those Signals and the witnesses the caller
+/// reads (<see cref="SignalSuppressionService.WitnessDetailShownOnReadAsync"/>: it withholds, never adds); and, only for billing
+/// Duplicate rows (D-176, task 157), at most one billing-event read, one current-invoice read, one submission read per chunk of 200
+/// distinct tracking numbers and one earlier-invoice read per chunk of 200 invoice ids (<see cref="EarlierInvoiceReadability"/>: it withholds, never adds).
 /// Nothing is cached across callers.</para>
 /// </remarks>
 public sealed class SignalReadService
@@ -139,13 +179,31 @@ public sealed class SignalReadService
     /// <summary>Pages of Signals read per set before the route refuses (fails loudly) rather than ranking a partial list.</summary>
     internal const int MaxPages = 5;
 
+    /// <summary>How far back the <see cref="WorklistSet.Decided"/> set reaches (task 045). One number; the set is refused (503) past
+    /// <see cref="MaxPages"/> pages rather than truncated.</summary>
+    internal const int DecidedWindowDays = 90;
+
+    /// <summary>The Decision Record table's entity set.</summary>
+    internal const string DecisionRecordEntitySet = "sprk_decisionrecords";
+
     /// <summary>Ids per batched caller read (keeps the GET URL well under Dataverse's limit).</summary>
     internal const int IdChunk = 100;
 
+    /// <summary>Witness ids per batched caller read (task 151, D-142: In lists of at most 200 ids).</summary>
+    internal const int WitnessIdChunk = 200;
+
     internal const string SignalEntitySet = "sprk_signals";
     internal const string HighPriorityColumn = "sprk_highpriority";
+
+    /// <summary><c>sprk_todo.sprk_notes</c>: it carries the inquiry hint of an inquiry-outcome To Do (task 071, task 154).</summary>
+    internal const string TodoNotesColumn = "sprk_notes";
+
+    /// <summary><c>sprk_todo</c>'s matter lookup as a Web API name: the inquiry-outcome To Do's matter fallback reads that matter's
+    /// open inquiries (task 154, pass 2 F1).</summary>
+    internal const string TodoMatterColumn = "_sprk_regardingmatter_value";
     private const string RecordTypeRefEntity = "sprk_recordtype_ref";
     private const string ConfigurationEntity = "sprk_gridconfiguration";
+    private const string PolicyEntity = "sprk_policy";
 
     /// <summary>A Do-lane subject table's "mine" rule. Each part is OR-ed, each compared with the caller.</summary>
     /// <param name="Table">The subject table.</param>
@@ -216,15 +274,27 @@ public sealed class SignalReadService
     private readonly TimeProvider _clock;
     private readonly ILogger<SignalReadService> _logger;
     private readonly SignalSuppressionService _families;
+    private readonly DecisionRecordWriter _records;
+    private readonly EarlierInvoiceReadability _earlierInvoices;
+    private readonly ICallerSystemUserResolver _callerResolver;
+    private readonly ISystemUserIdentityResolver _systemUsers;
 
     public SignalReadService(
         IDataverseUserClient user,
         IGenericEntityService entities,
         IIdentityNormalizationService identity,
         SignalSuppressionService families,
+        DecisionRecordWriter records,
+        EarlierInvoiceReadability earlierInvoices,
+        ICallerSystemUserResolver callerResolver,
+        ISystemUserIdentityResolver systemUsers,
         TimeProvider clock,
         ILogger<SignalReadService> logger)
     {
+        _records = records ?? throw new ArgumentNullException(nameof(records));
+        _earlierInvoices = earlierInvoices ?? throw new ArgumentNullException(nameof(earlierInvoices));
+        _callerResolver = callerResolver ?? throw new ArgumentNullException(nameof(callerResolver));
+        _systemUsers = systemUsers ?? throw new ArgumentNullException(nameof(systemUsers));
         _user = user ?? throw new ArgumentNullException(nameof(user));
         _entities = entities ?? throw new ArgumentNullException(nameof(entities));
         _identity = identity ?? throw new ArgumentNullException(nameof(identity));
@@ -234,43 +304,17 @@ public sealed class SignalReadService
     }
 
     /// <summary>The caller's visible Signals in <paramref name="set"/>, grouped and ordered.</summary>
-    public async Task<SignalReadResult> ReadAsync(WorklistSet set, CancellationToken ct)
+    public async Task<SignalReadResult> ReadAsync(WorklistSet set, ClaimsPrincipal? user, CancellationToken ct)
     {
-        // (1) Who the caller is, as Dataverse sees them (the identity every later caller read runs as).
-        var who = await _user.GetAsync("WhoAmI()", ct).ConfigureAwait(false);
-        if (!who.IsSuccess || !TryReadGuid(who.Body, "UserId", out var callerId))
+        // (1) + (2) Who the caller is and their linked contact: the inputs of the Do-lane "mine" rule.
+        var caller = await ResolveMineCallerAsync(_user, _identity, _logger, ct).ConfigureAwait(false);
+        if (caller.Failure is { } callerFailure)
         {
-            if (who.IsSuccess || IsCallerUnresolved(who.ErrorCode) || who.ErrorCode == DataverseUserClientErrorCodes.AccessDenied)
-            {
-                _logger.LogWarning("Signal read: the caller could not be resolved ({ErrorCode}); single 403.", who.ErrorCode ?? "no-user-id");
-                return SignalReadResult.CallerUnresolved;
-            }
-
-            _logger.LogWarning("Signal read: the caller's identity could not be checked ({ErrorCode}); unavailable.", who.ErrorCode);
-            return SignalReadResult.Unavailable("caller_identity_fault");
+            return callerFailure;
         }
 
-        // (2) The caller's linked contact (the person columns are contact lookups). Under D-129 records are team-owned, so most of
-        // the caller's own work matches only on an assignee column: a contact that cannot be READ (a fault, as opposed to a user
-        // with no linked contact) is 503, never a Do lane silently missing that work.
-        Guid? contactId;
-        try
-        {
-            var person = await _identity.ResolveAsync(callerId, ct).ConfigureAwait(false);
-            if (person.ContactUnreadable)
-            {
-                _logger.LogWarning("Signal read: the caller's linked contact could not be read; unavailable.");
-                return SignalReadResult.Unavailable("caller_contact_fault");
-            }
-
-            contactId = person.ContactId is { } c && c != Guid.Empty ? c : null;
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
-        {
-            _logger.LogWarning("Signal read: the caller's linked contact could not be resolved ({ExceptionType}); unavailable.",
-                ex.GetType().Name);
-            return SignalReadResult.Unavailable("caller_contact_fault");
-        }
+        var callerId = caller.CallerId;
+        var contactId = caller.ContactId;
 
         try
         {
@@ -360,12 +404,13 @@ public sealed class SignalReadService
                         continue;
                     }
 
-                    visible.Add(new VisibleRow(row, mine.HighPriority, mine.AssigneeContact));
+                    visible.Add(new VisibleRow(row, mine.HighPriority, mine.AssigneeContact, mine.Table));
                 }
                 else
                 {
+                    // No subject reference on a Decide row: no caller read of its subject admitted it (task 154).
                     var decide = key != Guid.Empty && subjects.Decide.TryGetValue(key, out var found) ? found : null;
-                    visible.Add(new VisibleRow(row, decide?.HighPriority == true, decide?.AssigneeContact));
+                    visible.Add(new VisibleRow(row, decide?.HighPriority == true, decide?.AssigneeContact, SubjectTable: null));
                 }
             }
 
@@ -375,14 +420,53 @@ public sealed class SignalReadService
                 visible = await PartitionClosedAsync(visible, set == WorklistSet.ClosedToday, ct).ConfigureAwait(false);
             }
 
-            // (9) The witness rule at read time (D-123; task 145 review F1, option B): a stored line keeps its subject and sender only
-            // while its witness is in the Signal's own known secure family.
+            // (9) The witness rules at read time (D-123; task 145 review F1, option B; D-142, task 151): a stored line keeps its subject
+            // and sender only when the caller's own read returns its witness AND the witness is in the Signal's own known secure family.
+            // D-176 (task 157): a billing Duplicate's earlier-invoice references are taken from the STORED evidence first, because (9)
+            // removes the text of every line whose ref is not a witness, which is every billing line.
+            var duplicates = DuplicateQuotesOf(visible);
             visible = await ApplyWitnessRuleAsync(visible, ct).ConfigureAwait(false);
+
+            // (9b) D-176 (task 157): a Duplicate keeps its earlier-invoice detail only when the caller's own read returns that invoice;
+            // otherwise it is shaped as ebilling withholds it at write time. Runs after (9); both rules must keep.
+            if (duplicates.Count > 0)
+            {
+                visible = await ApplyDuplicateRuleAsync(visible, duplicates, catalog, ct).ConfigureAwait(false);
+            }
+
+            // (10) Task 045 (#1959 item 2, D-47): the Decision Record of each closed item, read AS THE CALLER. A record the caller
+            // cannot read is omitted; in the Decided set an item without a readable record is not listed at all.
+            var decisions = new Dictionary<Guid, WorklistDecisionRecord>();
+            if (set is WorklistSet.ClosedToday or WorklistSet.ClosedEarlier or WorklistSet.Decided)
+            {
+                var records = await ReadDecisionRecordsAsync(visible.Select(v => v.Row.DecisionRecordId), ct).ConfigureAwait(false);
+                if (records.Outcome is { } recordFailure)
+                {
+                    return recordFailure;
+                }
+
+                foreach (var v in visible)
+                {
+                    if (v.Row.DecisionRecordId is { } recordId && records.ByRecord.TryGetValue(recordId, out var found))
+                    {
+                        decisions[v.Row.SignalId] = found;
+                    }
+                }
+
+                if (set == WorklistSet.Decided)
+                {
+                    visible = [.. visible.Where(v => decisions.ContainsKey(v.Row.SignalId))];
+                }
+            }
+
+            // (11) D-185 (task 163, #2285): the policy short name, work type and severity of the rows that are returned, read as the
+            // BFF. A read fault is caught below as "fault" (503): severity ranks the list, so rows are never returned without it.
+            visible = await ApplyPolicyColumnsAsync(visible, user, ct).ConfigureAwait(false);
 
             _logger.LogInformation(
                 "Signal read: set {Set}, {Read} Signals read as the caller, {Visible} returned.", set, rows.Count, visible.Count);
 
-            return Ok(set, Shape(set, visible, cores.Readable, catalog));
+            return Ok(set, Shape(set, visible, cores.Readable, catalog, decisions));
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
@@ -401,6 +485,7 @@ public sealed class SignalReadService
         WorklistSet.ClosedToday => "closedToday",
         WorklistSet.Suppressed => "suppressed",
         WorklistSet.ClosedEarlier => "closedEarlier",
+        WorklistSet.Decided => "decided",
         _ => throw new ArgumentOutOfRangeException(nameof(set)),
     };
 
@@ -459,10 +544,12 @@ public sealed class SignalReadService
                 WorklistSet.ClosedToday => [("secondary", "closedToday")],
                 WorklistSet.Suppressed => [("secondary", "suppressed")],
                 WorklistSet.ClosedEarlier => [("secondary", "closedEarlier")],
+                // Task 045: the Decision Record tab derives from closedEarlier (same columns, same order), see DecidedFetch.
+                WorklistSet.Decided => [("secondary", "closedEarlier")],
                 _ => [],
             };
 
-            var fetches = new List<string>();
+            var fetches = new List<string?>();
             foreach (var (section, key) in paths)
             {
                 if (!root.TryGetProperty(section, out var s) || !s.TryGetProperty(key, out var entry)
@@ -477,15 +564,64 @@ public sealed class SignalReadService
                     return null;
                 }
 
-                fetches.Add(fetch);
+                fetches.Add(set switch
+                {
+                    WorklistSet.ClosedToday or WorklistSet.ClosedEarlier => WithDecisionRecordColumn(fetch),
+                    WorklistSet.Decided => DecidedFetch(fetch),
+                    _ => fetch,
+                });
             }
 
-            return fetches.Count == 0 ? null : fetches;
+            return fetches.Count == 0 || fetches.Any(f => f is null) ? null : fetches.Select(f => f!).ToList();
         }
         catch (Exception ex) when (ex is JsonException or System.Xml.XmlException)
         {
             return null;
         }
+    }
+
+    /// <summary>The query with <c>sprk_decisionrecord</c> selected (a no-op when the configuration already selects it), so a closed
+    /// item can be joined to its record whatever version of the configuration row is live (task 045).</summary>
+    private static string WithDecisionRecordColumn(string fetchXml)
+    {
+        var doc = XDocument.Parse(fetchXml);
+        var entity = doc.Root!.Element("entity")!;
+        if (!entity.Elements("attribute").Any(a => a.Attribute("name")?.Value == "sprk_decisionrecord"))
+        {
+            var last = entity.Elements("attribute").LastOrDefault();
+            var column = new XElement("attribute", new XAttribute("name", "sprk_decisionrecord"));
+            if (last is null) entity.AddFirst(column); else last.AddAfterSelf(column);
+        }
+
+        return doc.ToString(SaveOptions.DisableFormatting);
+    }
+
+    /// <summary>
+    /// The <see cref="WorklistSet.Decided"/> query: the configuration's closedEarlier query with its resolved-on window replaced by
+    /// <see cref="DecidedWindowDays"/> days and a "has a Decision Record" condition added. Null when the query has no resolved-on
+    /// window to replace (a configuration this build does not understand fails closed, 503, rather than reading everything).
+    /// </summary>
+    private static string? DecidedFetch(string closedEarlierFetch)
+    {
+        var doc = XDocument.Parse(WithDecisionRecordColumn(closedEarlierFetch));
+        var filter = doc.Root!.Element("entity")!.Elements("filter").FirstOrDefault();
+        var window = filter?.Elements("condition").FirstOrDefault(c => c.Attribute("attribute")?.Value == "sprk_resolvedon");
+        var status = filter?.Elements("condition").FirstOrDefault(c => c.Attribute("attribute")?.Value == "sprk_signalstatus");
+        if (filter is null || window is null || status is null)
+        {
+            return null;
+        }
+
+        // A review that leaves its Signal open (inquiry sent, reminder, follow-on only) writes a Decision Record and leaves the Signal
+        // Acknowledged: those records belong in the history too, so Acknowledged joins Resolved here (closedToday / closedEarlier unchanged).
+        status.SetAttributeValue("operator", "in");
+        status.SetAttributeValue("value", null);
+        status.Add(new XElement("value", "100000001"), new XElement("value", "100000002"));
+
+        window.SetAttributeValue("operator", "last-x-days");
+        window.SetAttributeValue("value", DecidedWindowDays.ToString(CultureInfo.InvariantCulture));
+        filter.Add(new XElement("condition", new XAttribute("attribute", "sprk_decisionrecord"), new XAttribute("operator", "not-null")));
+        return doc.ToString(SaveOptions.DisableFormatting);
     }
 
     // ---------------------------------------------------------------------------------------------------------------
@@ -526,7 +662,9 @@ public sealed class SignalReadService
                 if (response.ErrorCode == DataverseUserClientErrorCodes.AccessDenied)
                 {
                     // No Read on sprk_signal at all: the caller reads nothing, which is an empty list, not an error (FR-54).
-                    _logger.LogInformation("Signal read: the caller has no read on sprk_signal; nothing to return.");
+                    // Warning (task 149, uac-r2 K3 on #1891): an empty worklist from a refused read looks exactly like "no work", so the
+                    // refusal must be visible at the level an operator filters on. No behaviour change.
+                    _logger.LogWarning("Signal read: the caller has no read on sprk_signal; nothing to return.");
                     return new FetchPages([], null);
                 }
 
@@ -593,6 +731,97 @@ public sealed class SignalReadService
             return null;
         }
     }
+
+    // ---------------------------------------------------------------------------------------------------------------
+    // (11) policy columns, as the BFF (D-185)
+    // ---------------------------------------------------------------------------------------------------------------
+
+    /// <summary>The three <c>sprk_policy</c> columns the worklist shows and ranks by.</summary>
+    private sealed record PolicyColumns(string? ShortName, int? WorkType, int? Severity);
+
+    /// <summary>
+    /// D-185 (task 163, #2285): the rule short name, work type and severity come from ONE batched BFF read of <c>sprk_policy</c> by id
+    /// (<see cref="IdChunk"/> ids per query), not from a caller-run join, so a user needs no Read on <c>sprk_policy</c>. This is
+    /// configuration, not matter data, so the read is the BFF's own (as <c>DecisionPlanService</c>). Only the rows that are already
+    /// visible to the caller are enriched, and the read reveals nothing beyond the three columns the worklist already shows. It runs
+    /// whether or not the configuration still carries the old <c>policy</c> link, so the new BFF works with either configuration. The
+    /// reverse does not hold: an old BFF with the new configuration (no <c>policy</c> link) loses names and severity. Deploy order is
+    /// BFF, then configuration, then roles last (roles first empties the worklist while the old link is still configured).
+    /// A row with no policy id, or whose policy no longer exists, keeps what its Signal row carried (today's missing-alias behaviour:
+    /// no short name or work type, severity unknown, ranked last). A faulted read, or a fault resolving the caller, throws to the caller's catch (unavailable).
+    /// A caller who is external or unknown (<see cref="IsExternalOrUnknownCallerAsync"/>) gets no BFF enrichment and no query: they get only
+    /// what their own read returned (the same blanks as the caller-run link gave), so the BFF read never shows them more than their own read did.
+    /// </summary>
+    private async Task<List<VisibleRow>> ApplyPolicyColumnsAsync(List<VisibleRow> visible, ClaimsPrincipal? user, CancellationToken ct)
+    {
+        var ids = visible.Select(v => v.Row.PolicyId).Where(id => id is { } g && g != Guid.Empty).Select(id => id!.Value).Distinct().ToArray();
+        if (ids.Length == 0)
+        {
+            return visible;
+        }
+
+        // D-185 (uac-r2 condition): a caller who is external or unknown gets no enrichment and no sprk_policy query. Their rows keep what
+        // the caller-run read carried (blank name and work type, severity unknown, ranked last), as when the link was caller-run.
+        if (await IsExternalOrUnknownCallerAsync(_callerResolver, _systemUsers, user, _logger, ct).ConfigureAwait(false))
+        {
+            return visible;
+        }
+
+        var found = new Dictionary<Guid, PolicyColumns>();
+        foreach (var chunk in ids.Chunk(IdChunk))
+        {
+            var query = new QueryExpression(PolicyEntity) { ColumnSet = new ColumnSet("sprk_shortname", "sprk_worktype", "sprk_severity") };
+            query.Criteria.AddCondition("sprk_policyid", ConditionOperator.In, chunk.Cast<object>().ToArray());
+            var result = await _entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false);
+            foreach (var policy in result.Entities.Where(e => chunk.Contains(e.Id)))
+            {
+                found[policy.Id] = new PolicyColumns(
+                    policy.GetAttributeValue<string>("sprk_shortname"),
+                    policy.GetAttributeValue<OptionSetValue>("sprk_worktype")?.Value,
+                    policy.GetAttributeValue<OptionSetValue>("sprk_severity")?.Value);
+            }
+        }
+
+        return [.. visible.Select(v => v.Row.PolicyId is { } id && found.TryGetValue(id, out var p)
+            ? v with { Row = v.Row with { RuleShortName = p.ShortName, WorkType = p.WorkType, Severity = p.Severity } }
+            : v)];
+    }
+
+    /// <summary>
+    /// True when the caller is external or unknown: <c>ISystemUserIdentityResolver.IsExternalAsync</c> is true, the resolver cannot match
+    /// the caller (<c>no-claims-principal</c>, <c>no-oid-claim</c>, <c>no-matching-systemuser</c>, <c>resolver-not-registered</c>), or the
+    /// resolved id is not a GUID. Those are answers, not faults: the rows are returned without enrichment.
+    /// A Dataverse fault is NOT an answer: the resolver's <c>lookup-failed</c>, or any exception from either resolver, is thrown to
+    /// <c>ReadAsync</c>'s catch (503 worklist unavailable), because severity ranks every row and an internal user must never get a
+    /// 200 whose rule names, work types and severities are silently blank. Cancellation propagates unchanged.
+    /// </summary>
+    // Deliberate deviation from InternalPlaneDocumentNarrowing.IsExternalOrUnknownCallerAsync (master): there a fault only narrows
+    // documents (fail closed); here it would re-rank every row. The externality test itself is kept in step with it.
+    internal static async Task<bool> IsExternalOrUnknownCallerAsync(
+        ICallerSystemUserResolver callerResolver, ISystemUserIdentityResolver systemUsers, ClaimsPrincipal? user, ILogger logger, CancellationToken ct)
+    {
+        var resolution = await callerResolver.ResolveAsync(user, ct).ConfigureAwait(false);
+        if (!resolution.IsResolved)
+        {
+            if (string.Equals(resolution.UnresolvedReason, CallerLookupFailedReason, StringComparison.Ordinal))
+            {
+                logger.LogWarning("Signal read: the caller could not be resolved ({Reason}); unavailable.", CallerLookupFailedReason);
+                throw new InvalidOperationException("The caller's systemuser lookup failed.");
+            }
+
+            return true;
+        }
+
+        if (!Guid.TryParse(resolution.SystemUserId, out var systemUserId))
+        {
+            return true;
+        }
+
+        return await systemUsers.IsExternalAsync(systemUserId, ct).ConfigureAwait(false);
+    }
+
+    /// <summary><see cref="CallerSystemUserResolution.UnresolvedReason"/> of a Dataverse fault in <c>CallerSystemUserResolver</c>.</summary>
+    internal const string CallerLookupFailedReason = "lookup-failed";
 
     // ---------------------------------------------------------------------------------------------------------------
     // (5) catalog
@@ -695,7 +924,8 @@ public sealed class SignalReadService
     // (7) subjects: Do-lane "mine", the D-42 flag, the closed sets' assignee
     // ---------------------------------------------------------------------------------------------------------------
 
-    private sealed record MineSubject(bool HighPriority, Guid? AssigneeContact);
+    /// <param name="Table">The table whose caller read returned the subject (task 154: the Do-lane row's subject reference).</param>
+    private sealed record MineSubject(bool HighPriority, Guid? AssigneeContact, string Table);
 
     private sealed record SubjectReads(Dictionary<Guid, MineSubject> MineDo, Dictionary<Guid, MineSubject> Decide, SignalReadResult? Outcome);
 
@@ -719,12 +949,10 @@ public sealed class SignalReadService
 
             var entitySet = await _entities.GetEntitySetNameAsync(rule.Table, ct).ConfigureAwait(false);
             var pk = $"{rule.Table}id";
-            var mineFilter = MineFilter(rule, callerId, contactId);
-            var select = $"{pk},_{rule.PersonColumn}_value" + (HighPriorityTables.Contains(rule.Table) ? $",{HighPriorityColumn}" : string.Empty);
             foreach (var chunk in ids.Chunk(IdChunk))
             {
                 var response = await _user.GetAsync(
-                    $"{entitySet}?$select={select}&$filter={InFilter(pk, chunk)} and ({mineFilter})", ct).ConfigureAwait(false);
+                    MineSubjectQuery(rule, entitySet, chunk, callerId, contactId), ct).ConfigureAwait(false);
                 var result = ReadAccessRows(response, "Do-lane subject");
                 if (result.Outcome is { } failure)
                 {
@@ -737,7 +965,8 @@ public sealed class SignalReadService
                     {
                         mine[id] = new MineSubject(
                             subject.TryGetProperty(HighPriorityColumn, out var hp) && hp.ValueKind == JsonValueKind.True,
-                            TryReadGuid(subject, $"_{rule.PersonColumn}_value", out var person) ? person : null);
+                            TryReadGuid(subject, $"_{rule.PersonColumn}_value", out var person) ? person : null,
+                            rule.Table);
                     }
                 }
             }
@@ -772,7 +1001,8 @@ public sealed class SignalReadService
                     {
                         decide[id] = new MineSubject(
                             subject.TryGetProperty(HighPriorityColumn, out var hp) && hp.ValueKind == JsonValueKind.True,
-                            person is not null && TryReadGuid(subject, $"_{person}_value", out var assignee) ? assignee : null);
+                            person is not null && TryReadGuid(subject, $"_{person}_value", out var assignee) ? assignee : null,
+                            table);
                     }
                 }
             }
@@ -784,6 +1014,74 @@ public sealed class SignalReadService
     /// <summary>The subject's table from its <c>sprk_regardingrecordtype</c> catalog row; null when untyped or not cataloged.</summary>
     private static string? SubjectTable(SignalRow row, IReadOnlyDictionary<Guid, CatalogRow> catalog) =>
         row.SubjectTypeId is { } t && catalog.TryGetValue(t, out var type) ? type.LogicalName : null;
+
+    /// <summary>The caller and their linked contact, as the Do-lane "mine" rule compares them; or why they could not be resolved.</summary>
+    /// <param name="Failure">Null when resolved; otherwise the single 403 (<see cref="SignalReadOutcome.CallerUnresolved"/>) or a
+    /// 503 (<see cref="SignalReadOutcome.Unavailable"/>).</param>
+    /// <param name="CallerId">The caller's <c>systemuserid</c>; set only when resolved.</param>
+    /// <param name="ContactId">The caller's linked contact, or null when they have none (never null because a read faulted).</param>
+    internal sealed record MineCaller(SignalReadResult? Failure, Guid CallerId, Guid? ContactId);
+
+    /// <summary>
+    /// The inputs of the Do-lane "mine" rule, read AS THE CALLER: who they are (<c>WhoAmI</c>) and their linked contact (the person
+    /// columns are contact lookups). Shared by the worklist and the per-Signal gate (<see cref="SignalCoreRecordAccess"/>, task 150,
+    /// D-141) so both resolve "the caller" the same way. An unresolvable caller is the single 403; a fault reading their identity or
+    /// contact is 503 (under D-129 records are team-owned, so most of the caller's own work matches only on an assignee column: a
+    /// contact that cannot be READ, as opposed to a user with no linked contact, never reads as "no contact").
+    /// </summary>
+    internal static async Task<MineCaller> ResolveMineCallerAsync(
+        IDataverseUserClient user, IIdentityNormalizationService identity, ILogger logger, CancellationToken ct)
+    {
+        var who = await user.GetAsync("WhoAmI()", ct).ConfigureAwait(false);
+        if (!who.IsSuccess || !TryReadGuid(who.Body, "UserId", out var callerId))
+        {
+            if (who.IsSuccess || IsCallerUnresolved(who.ErrorCode) || who.ErrorCode == DataverseUserClientErrorCodes.AccessDenied)
+            {
+                logger.LogWarning("Do-lane mine: the caller could not be resolved ({ErrorCode}); single 403.", who.ErrorCode ?? "no-user-id");
+                return new MineCaller(SignalReadResult.CallerUnresolved, Guid.Empty, null);
+            }
+
+            logger.LogWarning("Do-lane mine: the caller's identity could not be checked ({ErrorCode}); unavailable.", who.ErrorCode);
+            return new MineCaller(SignalReadResult.Unavailable("caller_identity_fault"), Guid.Empty, null);
+        }
+
+        try
+        {
+            var person = await identity.ResolveAsync(callerId, ct).ConfigureAwait(false);
+            if (person.ContactUnreadable)
+            {
+                logger.LogWarning("Do-lane mine: the caller's linked contact could not be read; unavailable.");
+                return new MineCaller(SignalReadResult.Unavailable("caller_contact_fault"), Guid.Empty, null);
+            }
+
+            return new MineCaller(null, callerId, person.ContactId is { } c && c != Guid.Empty ? c : null);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            logger.LogWarning("Do-lane mine: the caller's linked contact could not be resolved ({ExceptionType}); unavailable.",
+                ex.GetType().Name);
+            return new MineCaller(SignalReadResult.Unavailable("caller_contact_fault"), Guid.Empty, null);
+        }
+    }
+
+    /// <summary>
+    /// THE Do-lane "mine" read (task 150, D-141): the caller's own read of <paramref name="ids"/> in <paramref name="rule"/>'s table,
+    /// filtered to the rows <see cref="MineFilter"/> admits. A row comes back only when the caller can read it AND it is their own
+    /// work. The worklist (a chunk of ids) and the per-Signal gate (<see cref="SignalCoreRecordAccess"/>, one id) both send this
+    /// request; neither builds the predicate itself.
+    /// </summary>
+    /// <param name="includeTodoNotes">The per-Signal gate's single-id read only (task 154, D-111): a To Do's notes (the inquiry hint)
+    /// and its matter (the fallback, pass 2 F1), so the plan route identifies an inquiry-outcome To Do exactly as the commit route does
+    /// with no To Do request of its own. Columns, never a predicate. The worklist's chunked read leaves them out (adversarial pass 1
+    /// K3: an unused ntext column on up to 100 rows).</param>
+    internal static string MineSubjectQuery(
+        DoLaneMineRule rule, string entitySet, IEnumerable<Guid> ids, Guid callerId, Guid? contactId, bool includeTodoNotes = false)
+    {
+        var pk = $"{rule.Table}id";
+        var select = $"{pk},_{rule.PersonColumn}_value" + (HighPriorityTables.Contains(rule.Table) ? $",{HighPriorityColumn}" : string.Empty)
+            + (includeTodoNotes && string.Equals(rule.Table, "sprk_todo", StringComparison.OrdinalIgnoreCase) ? $",{TodoNotesColumn},{TodoMatterColumn}" : string.Empty);
+        return $"{entitySet}?$select={select}&$filter={InFilter(pk, ids)} and ({MineFilter(rule, callerId, contactId)})";
+    }
 
     /// <summary>The OData "mine" clause: the rule's parts OR-ed, each compared with the caller (never widened, only narrowed).</summary>
     internal static string MineFilter(DoLaneMineRule rule, Guid callerId, Guid? contactId)
@@ -856,14 +1154,89 @@ public sealed class SignalReadService
     }
 
     // ---------------------------------------------------------------------------------------------------------------
+    // (10) the Decision Records of the closed items, as the caller (task 045)
+    // ---------------------------------------------------------------------------------------------------------------
+
+    private sealed record DecisionRecordReads(Dictionary<Guid, WorklistDecisionRecord> ByRecord, SignalReadResult? Outcome);
+
+    /// <summary>
+    /// One caller read per <see cref="IdChunk"/> record ids (a FetchXML <c>in</c>, with an outer link to the confirming user's name).
+    /// Dataverse trims the answer by the caller's own security: a secure child reaches only its family's members through the mirrored
+    /// shares (D-33/D-123), an owner-only record (D-35/D-39) only its owner. A service identity is never used. No Read on the table at
+    /// all is an empty answer (the records are omitted); any other failure is a fault (503), never a shorter list.
+    /// </summary>
+    private async Task<DecisionRecordReads> ReadDecisionRecordsAsync(IEnumerable<Guid?> recordIds, CancellationToken ct)
+    {
+        var found = new Dictionary<Guid, WorklistDecisionRecord>();
+        var ids = recordIds.Where(id => id is { } g && g != Guid.Empty).Select(id => id!.Value).Distinct().ToArray();
+        if (ids.Length == 0)
+        {
+            return new DecisionRecordReads(found, null);
+        }
+
+        // Only a record the ontology writer itself created is a Decision Record here (the condition DecisionCommitService.FindRecordAsync
+        // uses): Console User can Create a row and Write a Signal's lookup, and no field is secured, so any other row could be a forgery
+        // ("Judgement, decided by <partner>"). Such a row is treated like an unreadable one. A WhoAmI fault throws to ReadAsync's catch (503).
+        var writerUserId = await _records.WriterUserIdAsync(ct).ConfigureAwait(false);
+        foreach (var chunk in ids.Chunk(IdChunk))
+        {
+            var fetch = new XElement("fetch",
+                new XElement("entity", new XAttribute("name", "sprk_decisionrecord"),
+                    WorklistDecisionRecordReader.Columns.Select(c => new XElement("attribute", new XAttribute("name", c))),
+                    new XElement("link-entity", new XAttribute("name", "systemuser"), new XAttribute("from", "systemuserid"),
+                        new XAttribute("to", "sprk_confirmedby"), new XAttribute("link-type", "outer"), new XAttribute("alias", "by"),
+                        new XElement("attribute", new XAttribute("name", "fullname"))),
+                    new XElement("filter", new XAttribute("type", "and"),
+                        new XElement("condition", new XAttribute("attribute", "sprk_decisionrecordid"), new XAttribute("operator", "in"),
+                            chunk.Select(id => new XElement("value", id.ToString("D")))),
+                        new XElement("condition", new XAttribute("attribute", DecisionRecordWriter.CreatedByColumn), new XAttribute("operator", "eq"),
+                            new XAttribute("value", writerUserId.ToString("D"))))));
+
+            var response = await _user.GetAsync(
+                $"{DecisionRecordEntitySet}?fetchXml={Uri.EscapeDataString(fetch.ToString(SaveOptions.DisableFormatting))}", ct).ConfigureAwait(false);
+            if (!response.IsSuccess && response.ErrorCode == DataverseUserClientErrorCodes.AccessDenied)
+            {
+                if (response.StatusCode == 401)
+                {
+                    // The same mapped code, but the caller's token failed mid-request: a fault, not a verdict (as the witness read).
+                    _logger.LogWarning("Signal read: the Decision Record read was answered 401; unavailable.");
+                    return new DecisionRecordReads(found, SignalReadResult.Unavailable("decision record read unauthorized"));
+                }
+
+                // A 403 is "no Read on the table (or on the confirming user the query links to)": the records are omitted. Warning, not Debug:
+                // an empty tab from a refused read looks exactly like "no decisions".
+                _logger.LogWarning("Signal read: the caller's Decision Record read was refused (403); the records are omitted.");
+                return new DecisionRecordReads(found, null);
+            }
+
+            var result = ReadAccessRows(response, "decision record");
+            if (result.Outcome is { } failure)
+            {
+                return new DecisionRecordReads(found, failure);
+            }
+
+            foreach (var raw in result.Rows)
+            {
+                if (WorklistDecisionRecordReader.TryParse(raw, out var record) && chunk.Contains(record.RecordId))
+                {
+                    found[record.RecordId] = record;
+                }
+            }
+        }
+
+        return new DecisionRecordReads(found, null);
+    }
+
+    // ---------------------------------------------------------------------------------------------------------------
     // (9) the witness rule at read time (D-123)
     // ---------------------------------------------------------------------------------------------------------------
 
     /// <summary>
     /// Each returned row's stored witness lines, judged now (<see cref="SignalSuppressionService.WitnessDetailShownOnReadAsync"/>): a
-    /// line that carries a <c>text</c> or <c>source</c> keeps them only when its witness is in the Signal's own known secure family;
+    /// line that carries a <c>text</c> or <c>source</c> keeps them only when the caller's own read returns its witness
+    /// (<see cref="WitnessesTheCallerReadsAsync"/>, D-142) AND its witness is in the Signal's own known secure family (D-123);
     /// otherwise both are removed and the line carries <c>"withheld": true</c> (kind, ref, tier, as-of and clause stay). A fault in
-    /// that judgement withholds every such line (fail closed; the list itself is unchanged). Stored evidence that is not a JSON array
+    /// either judgement withholds every such line (fail closed; the list itself is unchanged). Stored evidence that is not a JSON array
     /// is returned as null: what it holds cannot be judged line by line.
     /// </summary>
     private async Task<List<VisibleRow>> ApplyWitnessRuleAsync(List<VisibleRow> rows, CancellationToken ct)
@@ -891,7 +1264,14 @@ public sealed class SignalReadService
             return rows;
         }
 
-        var shown = asked.Count == 0 ? new Dictionary<Guid, IReadOnlySet<string>>() : await _families.WitnessDetailShownOnReadAsync(asked, ct).ConfigureAwait(false);
+        // D-142 (task 151): the caller's own read of the witness rows first; a fault there withholds every detail on the page.
+        IReadOnlyDictionary<Guid, IReadOnlySet<string>>? shown = new Dictionary<Guid, IReadOnlySet<string>>();
+        if (asked.Count > 0)
+        {
+            var readable = await WitnessesTheCallerReadsAsync(asked.SelectMany(a => a.References), ct).ConfigureAwait(false);
+            shown = readable is null ? null : await _families.WitnessDetailShownOnReadAsync(asked, readable, ct).ConfigureAwait(false);
+        }
+
         var withheld = 0;
         var result = new List<VisibleRow>(rows.Count);
         foreach (var row in rows)
@@ -928,7 +1308,7 @@ public sealed class SignalReadService
 
         if (withheld > 0)
         {
-            _logger.LogInformation("Signal read: the detail of {Count} witness line(s) is withheld (another or an undetermined secure family; D-123).", withheld);
+            _logger.LogInformation("Signal read: the detail of {Count} witness line(s) is withheld (a witness the caller cannot read, or another or an undetermined secure family; D-142, D-123).", withheld);
         }
 
         return result;
@@ -937,6 +1317,344 @@ public sealed class SignalReadService
 
         static string? RefOf(JsonObject line) => line["ref"] is JsonValue value && value.TryGetValue<string>(out var text) ? text : null;
     }
+
+    /// <summary>
+    /// D-142 (task 151): the witnesses (<see cref="SignalSuppressionService.WitnessOf"/>) the CALLER's own read returns. One batched
+    /// read per witness table per request, in lists of at most <see cref="WitnessIdChunk"/> ids, never one per witness. The table's
+    /// entity set and key come from uac-r2's lineage (<see cref="SecureChildLineage"/>), the only tables a witness can name. A table
+    /// the caller has no Read on (403) returns none of its rows. Any other failure (a 5xx, throttling, an unparseable body, an
+    /// exception) returns null: the caller then withholds every detail on the page, and the list itself is unchanged (fail closed,
+    /// logged at Warning with the table and the error code only).
+    /// </summary>
+    /// <remarks>Component justification (CLAUDE.md section 11). Existing: the core-record and subject reads above (batched caller
+    /// reads through <see cref="IDataverseUserClient"/>, <see cref="InFilter"/>). Extension: they read core and subject tables, never
+    /// the rows a Signal's evidence quotes, so this applies the same caller read to the witness rows. Cost of doing nothing: a reader
+    /// sees the subject and sender of a communication they cannot open (re-filed to another business unit's matter, or unfiled and
+    /// privately owned), contrary to D-142.</remarks>
+    private async Task<IReadOnlySet<(string Table, Guid Id)>?> WitnessesTheCallerReadsAsync(IEnumerable<string> references, CancellationToken ct)
+    {
+        var readable = new HashSet<(string Table, Guid Id)>();
+        foreach (var byTable in references.Select(SignalSuppressionService.WitnessOf).OfType<(string Table, Guid Id)>().Distinct()
+                     .GroupBy(w => w.Table, StringComparer.Ordinal))
+        {
+            var lineage = SecureChildLineage.Children[byTable.Key];
+            var pk = lineage.IdColumn;
+            foreach (var chunk in byTable.Select(w => w.Id).Chunk(WitnessIdChunk))
+            {
+                DataverseUserResponse response;
+                try
+                {
+                    response = await _user.GetAsync($"{lineage.EntitySet}?$select={pk}&$filter={InFilter(pk, chunk)}", ct).ConfigureAwait(false);
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+                {
+                    _logger.LogWarning(SuppressionEvents.WitnessReadFailed,
+                        "Signal read: the caller's read of {Table} witnesses faulted ({ExceptionType}); every witness line is shown without its detail (D-142, fail closed).",
+                        byTable.Key, ex.GetType().Name);
+                    return null;
+                }
+
+                if (response.IsSuccess
+                    && response.Body is { } body && body.TryGetProperty("value", out var value) && value.ValueKind == JsonValueKind.Array)
+                {
+                    foreach (var row in value.EnumerateArray())
+                    {
+                        if (TryReadGuid(row, pk, out var id) && chunk.Contains(id))
+                        {
+                            readable.Add((byTable.Key, id));
+                        }
+                    }
+
+                    continue;
+                }
+
+                // A 403 is "no Read on the table": none of its witnesses is readable. A 401 is the same mapped code but means the
+                // caller's token failed mid-request, which is a fault (every detail on the page is withheld), not a verdict.
+                if (!response.IsSuccess && response.ErrorCode == DataverseUserClientErrorCodes.AccessDenied && response.StatusCode != 401)
+                {
+                    continue;
+                }
+
+                _logger.LogWarning(SuppressionEvents.WitnessReadFailed,
+                    "Signal read: the caller's read of {Table} witnesses failed ({ErrorCode}); every witness line is shown without its detail (D-142, fail closed).",
+                    byTable.Key, response.IsSuccess ? "unparseable" : response.ErrorCode);
+                return null;
+            }
+        }
+
+        return readable;
+    }
+
+    // ---------------------------------------------------------------------------------------------------------------
+    // (9b) a billing Duplicate's earlier invoice (D-176, task 157)
+    // ---------------------------------------------------------------------------------------------------------------
+
+    /// <summary>Evidence kind of a billing reference value (ebilling's <c>BillingFindingSignalMapper.ReferenceEvidenceKind</c>).</summary>
+    internal const string BillingReferenceKind = "billing.reference";
+
+    /// <summary>The ref prefix of every evidence line that quotes the earlier submission (ebilling's <c>DuplicateHandler</c>).</summary>
+    internal const string DuplicateOfPrefix = "duplicateOf.";
+
+    internal const string DuplicateOfInvoiceIdRef = "duplicateOf.invoiceId";
+    internal const string DuplicateOfTrackingNumberRef = "duplicateOf.trackingNumber";
+
+    /// <summary><c>sprk_billingevent</c>'s entity set (live on spaarkedev1, 2026-10-21): a line-level Duplicate's subject.</summary>
+    internal const string BillingEventEntitySet = "sprk_billingevents";
+
+    /// <summary>What a stored Duplicate quotes about its earlier invoice: the <c>duplicateOf.invoiceId</c> values that are GUIDs and the
+    /// non-blank <c>duplicateOf.trackingNumber</c> values.</summary>
+    private sealed record DuplicateQuote(IReadOnlyList<Guid> InvoiceIds, IReadOnlyList<string> TrackingNumbers);
+
+    /// <summary>
+    /// D-176: the rows whose STORED evidence has a <c>billing.reference</c> line (kind and ref matched case-insensitively) with ref
+    /// <c>duplicateOf.invoiceId</c> or <c>duplicateOf.trackingNumber</c>, with what those lines quote. No other row is a Duplicate.
+    /// Evidence that is not a JSON array cannot be judged and is returned as null by (9) anyway.
+    /// </summary>
+    private static Dictionary<Guid, DuplicateQuote> DuplicateQuotesOf(IEnumerable<VisibleRow> rows)
+    {
+        var quotes = new Dictionary<Guid, DuplicateQuote>();
+        foreach (var row in rows)
+        {
+            if (string.IsNullOrWhiteSpace(row.Row.EvidenceRefs) || ParseEvidence(row.Row.EvidenceRefs) is not { } lines)
+            {
+                continue;
+            }
+
+            var duplicate = false;
+            var ids = new List<Guid>();
+            var numbers = new List<string>();
+            foreach (var line in lines.OfType<JsonObject>())
+            {
+                if (!string.Equals(StringOf(line["kind"]), BillingReferenceKind, StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                var reference = StringOf(line["ref"]);
+                var text = StringOf(line["text"]);
+                if (string.Equals(reference, DuplicateOfInvoiceIdRef, StringComparison.OrdinalIgnoreCase))
+                {
+                    duplicate = true;
+                    if (Guid.TryParse(text, out var id) && id != Guid.Empty)
+                    {
+                        ids.Add(id);
+                    }
+                }
+                else if (string.Equals(reference, DuplicateOfTrackingNumberRef, StringComparison.OrdinalIgnoreCase))
+                {
+                    duplicate = true;
+                    if (!string.IsNullOrWhiteSpace(text))
+                    {
+                        numbers.Add(text);
+                    }
+                }
+            }
+
+            if (duplicate)
+            {
+                quotes[row.Row.SignalId] = new DuplicateQuote([.. ids.Distinct()], [.. numbers.Distinct(StringComparer.Ordinal)]);
+            }
+        }
+
+        return quotes;
+    }
+
+    /// <summary>
+    /// D-176: each Duplicate row keeps its earlier-invoice detail only when the caller's own read returns every earlier invoice it
+    /// quotes (<see cref="EarlierInvoiceReadability"/>). Otherwise the row takes ebilling's write-time withheld shape: no
+    /// <c>duplicateOf.*</c> line, every other line without <c>text</c> or <c>source</c> and marked <c>"withheld": true</c>, and the
+    /// sentence <see cref="EarlierInvoiceReadability.WithheldSentence"/>. The title is unchanged (ebilling's headlines are static
+    /// text). A fault in any read withholds every Duplicate row on the page; no other row is touched and the list is unchanged.
+    /// </summary>
+    private async Task<List<VisibleRow>> ApplyDuplicateRuleAsync(
+        List<VisibleRow> rows,
+        IReadOnlyDictionary<Guid, DuplicateQuote> duplicates,
+        IReadOnlyDictionary<Guid, CatalogRow> catalog,
+        CancellationToken ct)
+    {
+        var shown = await DuplicatesShownAsync(rows, duplicates, catalog, ct).ConfigureAwait(false);
+        var withheld = 0;
+        var result = new List<VisibleRow>(rows.Count);
+        foreach (var row in rows)
+        {
+            if (!duplicates.ContainsKey(row.Row.SignalId) || shown.Contains(row.Row.SignalId))
+            {
+                result.Add(row);
+                continue;
+            }
+
+            result.Add(row with
+            {
+                Row = row.Row with
+                {
+                    EvidenceRefs = WithheldDuplicateEvidence(row.Row.EvidenceRefs),
+                    Sentence = EarlierInvoiceReadability.WithheldSentence,
+                },
+            });
+            withheld++;
+        }
+
+        if (withheld > 0)
+        {
+            _logger.LogInformation(
+                "Signal read: the earlier-invoice detail of {Count} Duplicate Signal(s) is withheld (an earlier invoice the caller cannot read, an unresolved number, or a fault; D-176).",
+                withheld);
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// The Duplicate rows whose earlier invoice(s) the caller reads. An id quoted as <c>duplicateOf.invoiceId</c> is judged directly.
+    /// A row that quotes only a tracking number is resolved within its CURRENT invoice's vendor org: the current invoice is the subject
+    /// when the subject is <c>sprk_invoice</c>, or the subject billing event's invoice (<c>sprk_billingevent</c>, option B after
+    /// escalation 1), each read AS THE CALLER; any other subject, an event or invoice the caller cannot read, or one with no invoice or
+    /// vendor org: withheld. Reads per request: at most one billing-event read and one current-invoice read (In lists of at most
+    /// <see cref="WitnessIdChunk"/> ids), then <see cref="EarlierInvoiceReadability.ShownAsync{TKey}"/>, which owns the combining
+    /// rule (at least one reference, every one readable; none shown on a fault). A Duplicate with no usable reference is not shown.
+    /// </summary>
+    private async Task<HashSet<Guid>> DuplicatesShownAsync(
+        List<VisibleRow> rows,
+        IReadOnlyDictionary<Guid, DuplicateQuote> duplicates,
+        IReadOnlyDictionary<Guid, CatalogRow> catalog,
+        CancellationToken ct)
+    {
+        var shown = new HashSet<Guid>();
+        var referencesOf = new Dictionary<Guid, IReadOnlyCollection<EarlierInvoiceReadability.Reference>>();
+        var currentInvoiceOf = new Dictionary<Guid, Guid>();
+        var eventOf = new Dictionary<Guid, Guid>();
+        foreach (var row in rows)
+        {
+            if (!duplicates.TryGetValue(row.Row.SignalId, out var quote))
+            {
+                continue;
+            }
+
+            // Every Duplicate gets an entry. One with no reference found below is not shown (EarlierInvoiceReadability.ShownAsync).
+            referencesOf[row.Row.SignalId] = [];
+            if (quote.InvoiceIds.Count > 0)
+            {
+                referencesOf[row.Row.SignalId] = [.. quote.InvoiceIds.Select(id => new EarlierInvoiceReadability.Reference(id, null, null))];
+            }
+            else if (quote.TrackingNumbers.Count > 0 && row.Row.SubjectId is { } subject)
+            {
+                switch (SubjectTable(row.Row, catalog))
+                {
+                    case "sprk_invoice":
+                        currentInvoiceOf[row.Row.SignalId] = subject;
+                        break;
+                    case "sprk_billingevent":
+                        eventOf[row.Row.SignalId] = subject;
+                        break;
+                }
+            }
+
+            // Otherwise nothing identifies the earlier invoice: no reference, so withheld.
+        }
+
+        if (eventOf.Count > 0)
+        {
+            var invoiceOfEvent = await CallerLookupAsync(
+                BillingEventEntitySet, "sprk_billingeventid", EarlierInvoiceReadability.InvoiceColumn, eventOf.Values, "sprk_billingevent", ct)
+                .ConfigureAwait(false);
+            if (invoiceOfEvent is null)
+            {
+                return shown;
+            }
+
+            foreach (var (signalId, billingEvent) in eventOf)
+            {
+                if (invoiceOfEvent.TryGetValue(billingEvent, out var invoice))
+                {
+                    currentInvoiceOf[signalId] = invoice;
+                }
+            }
+        }
+
+        if (currentInvoiceOf.Count > 0)
+        {
+            var vendorOrgOf = await CallerLookupAsync(
+                EarlierInvoiceReadability.InvoiceEntitySet, EarlierInvoiceReadability.InvoiceKey, EarlierInvoiceReadability.VendorOrgColumn,
+                currentInvoiceOf.Values, "sprk_invoice", ct).ConfigureAwait(false);
+            if (vendorOrgOf is null)
+            {
+                return shown;
+            }
+
+            foreach (var (signalId, invoice) in currentInvoiceOf)
+            {
+                if (vendorOrgOf.TryGetValue(invoice, out var vendorOrg))
+                {
+                    referencesOf[signalId] =
+                        [.. duplicates[signalId].TrackingNumbers.Select(n => new EarlierInvoiceReadability.Reference(null, vendorOrg, n))];
+                }
+            }
+        }
+
+        return (await _earlierInvoices.ShownAsync(_user, referencesOf, ct).ConfigureAwait(false)).ToHashSet();
+    }
+
+    /// <summary>One lookup column of the rows the CALLER's batched read returns (In lists of at most <see cref="WitnessIdChunk"/> ids):
+    /// id → the lookup's value; a row without it is absent. Null on a fault (<see cref="EarlierInvoiceReadability.ReadAsCallerAsync"/>).</summary>
+    private async Task<Dictionary<Guid, Guid>?> CallerLookupAsync(
+        string entitySet, string key, string lookup, IEnumerable<Guid> ids, string table, CancellationToken ct)
+    {
+        var found = new Dictionary<Guid, Guid>();
+        foreach (var chunk in ids.Distinct().Chunk(WitnessIdChunk))
+        {
+            var rows = await _earlierInvoices.ReadAsCallerAsync(
+                _user, $"{entitySet}?$select={key},{lookup}&$filter={InFilter(key, chunk)}", table, ct).ConfigureAwait(false);
+            if (rows is null)
+            {
+                return null;
+            }
+
+            foreach (var row in rows)
+            {
+                if (EarlierInvoiceReadability.ReadGuid(row, key) is { } id && chunk.Contains(id)
+                    && EarlierInvoiceReadability.ReadGuid(row, lookup) is { } value)
+                {
+                    found[id] = value;
+                }
+            }
+        }
+
+        return found;
+    }
+
+    /// <summary>ebilling's write-time withheld shape for a Duplicate's evidence, applied to the lines (9) returned: every
+    /// <c>duplicateOf.*</c> line removed; every other line without <c>text</c> or <c>source</c> and marked <c>"withheld": true</c>.
+    /// Null stays null; evidence that cannot be parsed is returned as null.</summary>
+    private static string? WithheldDuplicateEvidence(string? evidence)
+    {
+        if (string.IsNullOrWhiteSpace(evidence))
+        {
+            return evidence;
+        }
+
+        if (ParseEvidence(evidence) is not { } lines)
+        {
+            return null;
+        }
+
+        for (var i = lines.Count - 1; i >= 0; i--)
+        {
+            var line = (JsonObject)lines[i]!;
+            if (StringOf(line["ref"]) is { } reference && reference.StartsWith(DuplicateOfPrefix, StringComparison.OrdinalIgnoreCase))
+            {
+                lines.RemoveAt(i);
+                continue;
+            }
+
+            line.Remove("text");
+            line.Remove("source");
+            line["withheld"] = true;
+        }
+
+        return lines.ToJsonString();
+    }
+
+    private static string? StringOf(JsonNode? node) => node is JsonValue value && value.TryGetValue<string>(out var text) ? text : null;
 
     /// <summary>The stored evidence as a JSON array of lines, or null when it is not one (never judged, never shown).</summary>
     /// <remarks>Property names are matched case-insensitively (a <c>Text</c> or <c>SOURCE</c> is detail too). A line whose names
@@ -969,13 +1687,15 @@ public sealed class SignalReadService
     // shaping and D-42 order
     // ---------------------------------------------------------------------------------------------------------------
 
-    private sealed record VisibleRow(SignalRow Row, bool HighPriority, Guid? AssigneeContact);
+    /// <param name="SubjectTable">Do lane: the table whose caller-scoped "mine" read returned the subject; null on a Decide row.</param>
+    private sealed record VisibleRow(SignalRow Row, bool HighPriority, Guid? AssigneeContact, string? SubjectTable);
 
     private static IReadOnlyList<WorklistLaneGroups> Shape(
         WorklistSet set,
         IReadOnlyList<VisibleRow> rows,
         IReadOnlyDictionary<(Guid TypeId, Guid CoreId), (string? Name, string? Number)> cores,
-        IReadOnlyDictionary<Guid, CatalogRow> catalog)
+        IReadOnlyDictionary<Guid, CatalogRow> catalog,
+        IReadOnlyDictionary<Guid, WorklistDecisionRecord> decisions)
     {
         var lanes = new List<WorklistLaneGroups>();
         foreach (var lane in new[] { DecisionLane.Decide, DecisionLane.Do })
@@ -1020,8 +1740,17 @@ public sealed class SignalReadService
 
             // Secondary sets keep the configuration's order (membership and order come from the row, FR-24), grouped by first
             // appearance; the closed and suppressed queries already order by the core pair first.
+
+            if (lane == DecisionLane.Do)
+            {
+                // HANDOFF 1.2 (task 154, #1959 item 3): in every set, the Do lane's "Not filed" group (D-35) comes last; every other
+                // group keeps its order above. Stable, so nothing else moves. The Decide lane has no Not filed group (no-core rows
+                // are Do-only).
+                groups = [.. groups.Where(g => g.Core is not null), .. groups.Where(g => g.Core is null)];
+            }
+
             lanes.Add(new WorklistLaneGroups(LaneName(lane), groups
-                .Select(g => new WorklistGroup(g.Core, g.Core is null, g.Rows.Select(r => ToItem(r.Row)).ToList()))
+                .Select(g => new WorklistGroup(g.Core, g.Core is null, g.Rows.Select(r => ToItem(r, decisions)).ToList()))
                 .ToList()));
         }
 
@@ -1055,9 +1784,13 @@ public sealed class SignalReadService
     private static int CompareNullableOrdinal(string? a, string? b) =>
         a is null ? (b is null ? 0 : 1) : b is null ? -1 : string.CompareOrdinal(a, b);
 
-    private static WorklistItemRow ToItem(SignalRow row)
+    private static WorklistItemRow ToItem(VisibleRow visible, IReadOnlyDictionary<Guid, WorklistDecisionRecord> decisions)
     {
+        var row = visible.Row;
         var workType = row.WorkType is { } w && WorkTypeKeys.TryGetValue(w, out var key) ? key : null;
+
+        // Task 154 (#1958): the subject reference only where the caller's own "mine" read returned the subject (Do lane).
+        var subjectTable = row.Lane == DecisionLane.Do ? visible.SubjectTable : null;
         return new WorklistItemRow(
             row.SignalId,
             LaneName(row.Lane!.Value),
@@ -1073,7 +1806,11 @@ public sealed class SignalReadService
             row.PolicyVersionId,
             row.ResolvedOn,
             row.ResolutionType,
-            row.SuppressedUntil);
+            row.SuppressedUntil,
+            row.Sentence,
+            subjectTable,
+            subjectTable is null ? null : row.SubjectId,
+            decisions.GetValueOrDefault(row.SignalId));
     }
 
     // ---------------------------------------------------------------------------------------------------------------
@@ -1169,13 +1906,16 @@ public sealed class SignalReadService
         Guid? CoreId,
         bool HasNoCore,
         Guid? PolicyVersionId,
+        Guid? PolicyId,
         string? EvidenceRefs,
         string? RuleShortName,
         int? WorkType,
         int? Severity,
         DateTimeOffset? ResolvedOn,
         int? ResolutionType,
-        DateTimeOffset? SuppressedUntil)
+        DateTimeOffset? SuppressedUntil,
+        string? Sentence,
+        Guid? DecisionRecordId)
     {
         internal static bool TryParse(JsonElement raw, out SignalRow row)
         {
@@ -1206,18 +1946,24 @@ public sealed class SignalReadService
                 hasType && hasCoreId ? coreId : null,
                 noCore,
                 TryReadGuid(raw, "_sprk_policyversion_value", out var version) ? version : null,
+                TryReadGuid(raw, "_sprk_policy_value", out var policyId) ? policyId : null,
                 ReadString(raw, "sprk_evidencerefs"),
                 AsString(Aliased(raw, "sprk_shortname")),
                 Int(Aliased(raw, "sprk_worktype")),
                 Int(Aliased(raw, "sprk_severity")),
                 Instant(raw, "sprk_resolvedon"),
                 Int(raw, "sprk_resolutiontype"),
-                Instant(raw, "sprk_suppresseduntil"));
+                Instant(raw, "sprk_suppresseduntil"),
+                // Task 154: as stored; an empty or blank sentence is null (selected by the worklist configuration's queries).
+                ReadString(raw, "sprk_sentence") is { } sentence && !string.IsNullOrWhiteSpace(sentence) ? sentence : null,
+                // Task 045: the Decision Record that closed it (closed and decided sets select the column).
+                TryReadGuid(raw, "_sprk_decisionrecord_value", out var decisionRecord) ? decisionRecord : null);
             return true;
         }
 
-        /// <summary>The <c>policy</c> link-entity column: the Web API names it <c>policy.{column}</c> (verified live on spaarkedev1,
-        /// 2026-10-14); the OData-escaped <c>policy_x002e_{column}</c> is accepted too.</summary>
+        /// <summary>The <c>policy</c> link-entity column, present only under the pre-D-185 configuration: the Web API names it
+        /// <c>policy.{column}</c> (verified live on spaarkedev1, 2026-10-14); the OData-escaped <c>policy_x002e_{column}</c> is accepted
+        /// too. Since D-185 the BFF reads these columns itself (<c>ApplyPolicyColumnsAsync</c>) and the configuration has no link.</summary>
         private static JsonElement? Aliased(JsonElement raw, string column) =>
             raw.TryGetProperty($"policy.{column}", out var v) || raw.TryGetProperty($"policy_x002e_{column}", out v) ? v : null;
 

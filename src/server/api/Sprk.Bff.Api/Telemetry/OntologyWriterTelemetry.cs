@@ -30,7 +30,9 @@ public static class OntologyWriterTelemetry
 
     /// <summary>
     /// <c>customMetrics/ontology.writer.skips</c> (task 042, K1): a write that was deliberately NOT made, by design (today only
-    /// <c>gate_dr_skipped_unfiled</c>), kept off <see cref="FailuresCounter"/> so an alert on <c>ontology.writer.failures</c> counts real
+    /// <c>gate_dr_skipped_no_unit_team</c>, which task 149 / D-144 put in place of task 042's <c>gate_dr_skipped_unfiled</c>, and task 153's
+    /// <c>cleared_dr_skipped_*</c>), kept off
+    /// <see cref="FailuresCounter"/> so an alert on <c>ontology.writer.failures</c> counts real
     /// failures only and stays unfiltered. Same <see cref="MeterName"/>.
     /// </summary>
     private static readonly Counter<long> SkipsCounter = Meter.CreateCounter<long>(
@@ -225,7 +227,7 @@ public static class DecisionPlanRefusalReason
     /// the Signal's lane, or a Next step that is not a Next-step creator).</summary>
     public const string ActionNotAllowed = "action_not_allowed";
 
-    /// <summary>The same code appears twice in one list.</summary>
+    /// <summary>The same code appears twice in one list, or in both <c>actions</c> and <c>nextSteps</c>.</summary>
     public const string DuplicateAction = "duplicate_action";
 }
 
@@ -332,6 +334,38 @@ public static class OntologyWriterFailureReason
     /// <c>ReownOrdinaryRowAsync</c> answered Failed, or faulted).</summary>
     public const string SignalReassignFailed = "signal_reassign_failed";
 
+    /// <summary>Ontology task 153 (D-145b): linking a Do-lane Signal closed as ConditionCleared to its Routine Decision Record
+    /// (<c>sprk_decisionrecord</c>, <c>sprk_resolvedby</c>) failed in Dataverse. The record exists; the next pass finds it by its key and links it.</summary>
+    public const string SignalRecordLinkFailed = "signal_record_link_failed";
+
+    /// <summary>Ontology task 153 (adversarial pass 1 F1/F2): the <c>ontology.writer.skips</c> tags of a Do-lane condition-cleared closure
+    /// whose Decision Record can never be written or linked. Each is permanent, so it is a counted skip, never a failure, and it is not
+    /// retried: the subject no longer exists; it cannot be filed (its lineage conflicts); it is not a table a record can be filed under; its
+    /// core record type names no core table; or the Signal names a Decision Record other than the one it named when it was closed.</summary>
+    public const string ClosureRecordSkippedSubjectMissing = "cleared_dr_skipped_subject_missing";
+
+    /// <inheritdoc cref="ClosureRecordSkippedSubjectMissing"/>
+    public const string ClosureRecordSkippedSubjectUnfileable = "cleared_dr_skipped_subject_unfileable";
+
+    /// <inheritdoc cref="ClosureRecordSkippedSubjectMissing"/>
+    public const string ClosureRecordSkippedSubjectUnsupported = "cleared_dr_skipped_subject_unsupported";
+
+    /// <inheritdoc cref="ClosureRecordSkippedSubjectMissing"/>
+    public const string ClosureRecordSkippedCoreTypeNotCataloged = "cleared_dr_skipped_core_type_not_cataloged";
+
+    /// <inheritdoc cref="ClosureRecordSkippedSubjectMissing"/>
+    public const string ClosureRecordSkippedForeignLink = "cleared_dr_skipped_foreign_link";
+
+    /// <summary>Ontology task 153 (uac-r2 re-check K2): a closed Signal links a Decision Record the retry does not recognise as a D-128 link
+    /// it may replace (not found among the writer's own records, created after the close, or with a code the catalog does not know), so
+    /// its closure's record is not retried. A counted skip, logged at Warning, never silent.</summary>
+    public const string ClosureRecordSkippedUnrecognisedPriorLink = "cleared_dr_skipped_unrecognised_prior_link";
+
+    /// <summary>Ontology task 153 (adversarial pass 2 K1): a Do-lane condition-cleared closure's Decision Record was written, but before the
+    /// job could link it a person's decision re-closed the Signal (with its own record). The human decision wins and the closure's record is
+    /// left unlinked; a counted skip, logged at Warning, never retried.</summary>
+    public const string ClosureRecordSkippedSignalReclosed = "cleared_dr_skipped_signal_reclosed";
+
     /// <summary>Task 031 (D-13): a <c>sprk_signal.sprk_dedupekey</c> under a policy is not
     /// <c>{policycode}|{type}|{id}|{episode}</c>, so its episode cannot be read and the subject is not re-raised.</summary>
     public const string DedupeKeyUnparseable = "dedupe_key_unparseable";
@@ -366,6 +400,12 @@ public static class OntologyWriterFailureReason
     /// non-global-readable entity, a cross-clause <c>$</c>-reference, or a bounded-refusal limit (clause count,
     /// <c>in</c>-list length).</summary>
     public const string CompileRefused = "compile_refused";
+
+    /// <summary>Task 102a (owner option 101(b)): the body compiled, but it names a column outside
+    /// <see cref="Sprk.Bff.Api.Services.Signals.PolicyVersionValidator.AuthorableColumns"/>. Returned only by
+    /// <see cref="Sprk.Bff.Api.Services.Signals.PolicyVersionValidator.ValidateForAuthoring"/> (the BFF authoring routes); never
+    /// logged or metered by the evaluator.</summary>
+    public const string ColumnNotAuthorable = "column_not_authorable";
 
     /// <summary>The <c>sprk_messagetemplate</c> references a <c>{{field}}</c> token outside
     /// <see cref="Sprk.Bff.Api.Services.Signals.CompiledPredicate.TemplateEligibleFields"/> — absent entirely,

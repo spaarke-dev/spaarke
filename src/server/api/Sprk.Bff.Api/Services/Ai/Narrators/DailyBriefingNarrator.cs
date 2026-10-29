@@ -341,11 +341,16 @@ public class DailyBriefingNarrator : ICodedWorkflow
     ///                    (flatMap start.channels 'items.regardingName')
     ///                    (flatMap start.channels 'items.title'))
     /// Done as straight LINQ. Compiler enforces field names.
+    /// Task 062: the request's own category names and its TL;DR facts' record names are names the model was GIVEN,
+    /// so the narrative may repeat them. A count-only request (the worklist narrative) carries no item at all; without
+    /// these the allow list is empty and the scrubber removes every capitalised word that is not a function word.
     /// </summary>
     private static string[] BuildAllowList(DailyBriefingNarrateRequest req) =>
         req.PriorityItems.Select(p => p.Title)
             .Concat(req.Channels.SelectMany(ch => ch.Items.Select(i => i.RegardingName)))
             .Concat(req.Channels.SelectMany(ch => ch.Items.Select(i => i.Title)))
+            .Concat(req.Categories.Select(c => c.Name))
+            .Concat(req.TldrFacts?.RecordNames ?? [])
             .Where(s => !string.IsNullOrWhiteSpace(s))
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray();
@@ -357,7 +362,7 @@ public class DailyBriefingNarrator : ICodedWorkflow
     /// and are excluded — they cannot hallucinate.
     /// </summary>
     private static string BuildTldrCandidateText(TldrResult tldr) =>
-        string.Join("\n\n", tldr.Summary, string.Join("\n", tldr.KeyTakeaways), tldr.TopAction);
+        string.Join("\n\n", tldr.Summary, string.Join("\n", tldr.KeyTakeaways));
 
     /// <summary>
     /// R5 task 014 (FR-A5): deterministic anchor-to-item grounding pass for the TL;DR — NEVER
@@ -367,8 +372,7 @@ public class DailyBriefingNarrator : ICodedWorkflow
     /// fabrication or a guaranteed-empty field. Instead: for every channel item whose
     /// <c>RegardingName</c> or <c>Title</c> appears VERBATIM (case-insensitive, matches the
     /// widget's own <c>NarrativeCitedText.buildSegments</c> matching rule) in the TL;DR's own
-    /// <see cref="TldrResult.Summary"/> / <see cref="TldrResult.KeyTakeaways"/> / <see
-    /// cref="TldrResult.TopAction"/> text, pair that matched span with the item's id. Uses the
+    /// <see cref="TldrResult.Summary"/> / <see cref="TldrResult.KeyTakeaways"/> text, pair that matched span with the item's id. Uses the
     /// SAME candidate-name universe as <see cref="BuildAllowList"/> (RegardingName ahead of
     /// Title) so the entity-scrub allow-list and the itemRefs grounding agree on what counts as
     /// "named". <see cref="PriorityItemDto"/> carries no <c>Id</c> — its titles are excluded (no
@@ -377,7 +381,7 @@ public class DailyBriefingNarrator : ICodedWorkflow
     /// </summary>
     private static TldrItemRefDto[] BuildTldrItemRefs(DailyBriefingNarrateRequest req, TldrResult tldr)
     {
-        var candidateText = string.Join("\n", tldr.Summary, string.Join("\n", tldr.KeyTakeaways), tldr.TopAction);
+        var candidateText = string.Join("\n", tldr.Summary, string.Join("\n", tldr.KeyTakeaways));
         if (string.IsNullOrWhiteSpace(candidateText))
         {
             return [];

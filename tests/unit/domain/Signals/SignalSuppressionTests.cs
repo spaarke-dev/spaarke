@@ -603,7 +603,7 @@ public partial class SignalSuppressionTests
             .ThrowsAsync(new TaskCanceledException("timeout"));
         var users = new Mock<IDataverseUserClient>();
         users.Setup(u => u.GetAsync(It.Is<string>(p => p.StartsWith("sprk_signals(", StringComparison.Ordinal)), It.IsAny<CancellationToken>())).ReturnsAsync(Ok(SignalRow()));
-        var access = new SignalCoreRecordAccess(users.Object, entities.Object, NullLogger<SignalCoreRecordAccess>.Instance);
+        var access = new SignalCoreRecordAccess(users.Object, entities.Object, Mock.Of<Sprk.Bff.Api.Services.Ai.Membership.IIdentityNormalizationService>(), NullLogger<SignalCoreRecordAccess>.Instance);
 
         var result = await Route(signal, s, (access, users.Object));
 
@@ -633,7 +633,7 @@ public partial class SignalSuppressionTests
             }));
         users.Setup(u => u.GetAsync(It.Is<string>(p => p.StartsWith("sprk_todos(", StringComparison.Ordinal)), It.IsAny<CancellationToken>()))
             .ReturnsAsync(Fail(500, DataverseUserClientErrorCodes.ServiceError));
-        var access = new SignalCoreRecordAccess(users.Object, entities.Object, NullLogger<SignalCoreRecordAccess>.Instance);
+        var access = new SignalCoreRecordAccess(users.Object, entities.Object, Mock.Of<Sprk.Bff.Api.Services.Ai.Membership.IIdentityNormalizationService>(), NullLogger<SignalCoreRecordAccess>.Instance);
 
         var result = await Route(signal, s, (access, users.Object));
 
@@ -1652,7 +1652,7 @@ public partial class SignalSuppressionTests
             });
         users.Setup(u => u.GetAsync(It.Is<string>(p => !p.StartsWith("sprk_signals", StringComparison.Ordinal) && p != "WhoAmI"), It.IsAny<CancellationToken>())).ReturnsAsync(core);
         users.Setup(u => u.GetAsync("WhoAmI", It.IsAny<CancellationToken>())).ReturnsAsync(Fail(0, DataverseUserClientErrorCodes.UserContextRequired));
-        return (new SignalCoreRecordAccess(users.Object, entities.Object, NullLogger<SignalCoreRecordAccess>.Instance), users.Object);
+        return (new SignalCoreRecordAccess(users.Object, entities.Object, Mock.Of<Sprk.Bff.Api.Services.Ai.Membership.IIdentityNormalizationService>(), NullLogger<SignalCoreRecordAccess>.Instance), users.Object);
     }
 
     private static DataverseUserResponse Ok(object body) => DataverseUserResponse.Ok(200, JsonSerializer.SerializeToElement(body));
@@ -1681,6 +1681,9 @@ public partial class SignalSuppressionTests
         public List<Entity> Others { get; } = new();
         public List<Guid> StampedIds { get; } = new();
         public bool PolicyCounts { get; set; } = true;
+
+        /// <summary>Task 152: the policy's <c>sprk_lane</c> (null: not set, as every earlier test reads it).</summary>
+        public int? PolicyLane { get; set; }
         public bool FailWrites { get; set; }
         public int FailWriteNumber { get; set; }
         private int _writes;
@@ -1748,7 +1751,11 @@ public partial class SignalSuppressionTests
             var entities = new Mock<IGenericEntityService>();
             entities.Setup(e => e.RetrieveAsync("sprk_policy", It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync((string _, Guid id, string[] _, CancellationToken _) =>
-                    new Entity("sprk_policy", id) { ["sprk_countstowardsuppression"] = PolicyCounts, ["sprk_policycode"] = Code });
+                {
+                    var policy = new Entity("sprk_policy", id) { ["sprk_countstowardsuppression"] = PolicyCounts, ["sprk_policycode"] = Code };
+                    if (PolicyLane is { } lane) policy["sprk_lane"] = new OptionSetValue(lane);
+                    return policy;
+                });
             entities.Setup(e => e.RetrieveAsync("sprk_signal", It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync((string _, Guid id, string[] _, CancellationToken _) =>
                     FailReads ? throw new InvalidOperationException("dataverse is down") : Signals.Single(x => x.Id == id));
@@ -1945,7 +1952,7 @@ public partial class SignalSuppressionTests
                 "sprk_decisionrecord" => Records,
                 "businessunit" => SecureBusinessUnits(),
                 "team" => CountTeamRead(),
-                "sprk_matter" or "sprk_project" or "sprk_workassignment" or "sprk_communication" or "sprk_todo" =>
+                "sprk_matter" or "sprk_project" or "sprk_workassignment" or "sprk_communication" or "sprk_todo" or "sprk_event" =>
                     Others.Where(r => r.LogicalName == q.EntityName).ToList(),
                 _ => throw new NotSupportedException(q.EntityName),
             };

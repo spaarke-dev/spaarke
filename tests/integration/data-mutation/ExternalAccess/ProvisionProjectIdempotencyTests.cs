@@ -1,8 +1,16 @@
 using System.Net;
+using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
 using FluentAssertions;
+using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.AspNetCore.TestHost;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Time.Testing;
 using Sprk.Bff.Api.Api.ExternalAccess;
+using Sprk.Bff.Api.Infrastructure.Graph;
 using Xunit;
 
 namespace Sprk.Bff.Api.Tests.DataMutation.ExternalAccess;
@@ -401,6 +409,335 @@ public class ProvisionProjectIdempotencyTests : IClassFixture<ProvisionProjectTe
         problem.RootElement.GetProperty("speContainerId").GetString()
             .Should().Be(ProvisionProjectTestFixture.ProvisionedContainerId,
                 "an operator cannot reconcile an orphaned container whose id was never reported");
+    }
+
+    /// <summary>
+    /// #1755: a client that disconnects while Step 7 is recording the container Step 6 created does not stop the write.
+    /// It used to run on the request's token, so the disconnect left an empty container no record names — and the next
+    /// call created another.
+    /// </summary>
+    [Fact]
+    public async Task ProvisionProject_WhenTheClientDisconnectsWhileTheContainerIsBeingRecorded_StillRecordsIt()
+    {
+        var projectId = Guid.NewGuid();
+        _fixture.SeedProject(projectId);
+        using var disconnect = new CancellationTokenSource();
+        var heldToTheEnd = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        _fixture.OnContainerRecord = async ct =>
+        {
+            disconnect.Cancel(); // the client goes away while the PATCH is in flight
+            try
+            {
+                await Task.Delay(TimeSpan.FromMilliseconds(500), ct);
+                heldToTheEnd.TrySetResult(true);
+            }
+            catch (OperationCanceledException)
+            {
+                heldToTheEnd.TrySetResult(false);
+                throw;
+            }
+        };
+        using var client = _fixture.CreateEntitledClient();
+
+        var send = () => client.PostAsJsonAsync(Route, new { projectId, projectRef = "P-2026-0001" }, disconnect.Token);
+
+        await send.Should().ThrowAsync<OperationCanceledException>("the client disconnected");
+        (await heldToTheEnd.Task.WaitAsync(TimeSpan.FromSeconds(30))).Should().BeTrue(
+            "the write that records an existing container must not be cancelled by the client going away");
+        // The server goes on after the client left: wait for IT to finish, so nothing it does runs into the next test.
+        await _fixture.ServerRequestsCompleted.WaitAsync(TimeSpan.FromSeconds(30));
+        _fixture.ContainerIdOf(projectId).Should().Be(ProvisionProjectTestFixture.ProvisionedContainerId);
+    }
+
+    /// <summary>
+    /// #1755: Step 7's own bound. A record write that never answers is a failure like any other: non-2xx, and the error
+    /// log and the problem both name the container, so the orphan is never silent. The bound runs on the host's
+    /// <see cref="TimeProvider"/>: this test holds the write open and advances a fake clock past it, so nothing waits on the
+    /// wall clock and no process-wide state is changed.
+    /// </summary>
+    [Fact]
+    public async Task ProvisionProject_WhenRecordingTheContainerTimesOut_FailsLoudlyAndLogsTheContainerId()
+    {
+        var projectId = Guid.NewGuid();
+        _fixture.SeedProject(projectId);
+        var clock = new FakeTimeProvider(DateTimeOffset.UtcNow);
+        var holding = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        _fixture.OnContainerRecord = ct =>
+        {
+            holding.TrySetResult();
+            return Task.Delay(Timeout.InfiniteTimeSpan, ct); // the PATCH never answers; only its token ends it
+        };
+        await using var host = _fixture.WithWebHostBuilder(b => b.ConfigureTestServices(services =>
+        {
+            services.RemoveAll<TimeProvider>();
+            services.AddSingleton<TimeProvider>(clock);
+        }));
+        using var client = host.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", "provision-test-token");
+
+        var pending = ProvisionAsync(client, projectId);
+        await holding.Task.WaitAsync(TimeSpan.FromSeconds(30));
+        clock.Advance(ProvisionProjectEndpoint.ContainerRecordTimeout + TimeSpan.FromSeconds(1));
+        var response = await pending.WaitAsync(TimeSpan.FromSeconds(30));
+
+        response.IsSuccessStatusCode.Should().BeFalse("a record write that timed out recorded nothing");
+        (await ReasonCodeOf(response)).Should().Be(ProvisionProjectEndpoint.ReasonContainerNotRecorded);
+        using var problem = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        problem.RootElement.GetProperty("speContainerId").GetString()
+            .Should().Be(ProvisionProjectTestFixture.ProvisionedContainerId);
+        _fixture.Logs.Entries.Should().Contain(e =>
+            e.Level == LogLevel.Error
+            && e.Message.Contains(ProvisionProjectTestFixture.ProvisionedContainerId)
+            && e.Message.Contains(projectId.ToString()),
+            "the orphaned container's id is logged for the operator who reconciles it");
+        _fixture.ContainerIdOf(projectId).Should().NotBe(ProvisionProjectTestFixture.ProvisionedContainerId);
+        await _fixture.ServerRequestsCompleted.WaitAsync(TimeSpan.FromSeconds(30));
+    }
+
+    /// <summary>
+    /// #1755: a Step 7 write that Dataverse COMMITTED but whose answer failed is read back, and the record names the
+    /// container, so Step 7 is done. It used to answer 500 and say the live container "can be deleted".
+    /// </summary>
+    [Fact]
+    public async Task ProvisionProject_WhenTheContainerWriteLandsButItsAnswerFails_ReadsItBackAndCompletes()
+    {
+        var projectId = Guid.NewGuid();
+        _fixture.SeedProject(projectId);
+        _fixture.OnContainerRecorded = _ => throw new HttpRequestException("the answer to the committed PATCH was lost");
+        using var client = _fixture.CreateEntitledClient();
+
+        var response = await ProvisionAsync(client, projectId);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, "the record names the container: the write landed");
+        using var body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        body.RootElement.GetProperty("speContainerId").GetString()
+            .Should().Be(ProvisionProjectTestFixture.ProvisionedContainerId);
+        _fixture.ContainerIdOf(projectId).Should().Be(ProvisionProjectTestFixture.ProvisionedContainerId);
+        _fixture.Logs.Entries.Should().NotContain(e => e.Level >= LogLevel.Error && e.Message.Contains("orphaned"),
+            "a container the record names is not an orphan");
+    }
+
+    /// <summary>
+    /// #1755: a Step 7 write that reports a failure, and a read-back that fails too. Nothing says whether the record
+    /// names the container, so deleting it is NOT advised: it may be the record's own.
+    /// </summary>
+    [Fact]
+    public async Task ProvisionProject_WhenTheContainerWriteAndItsReadBackBothFail_SaysTheStateIsUnknownAndDoesNotAdviseDeletion()
+    {
+        var projectId = Guid.NewGuid();
+        _fixture.SeedProject(projectId);
+        _fixture.ContainerStampSucceeds = false;
+        _fixture.RecordedContainerReadBackFails = true;
+        using var client = _fixture.CreateEntitledClient();
+
+        var response = await ProvisionAsync(client, projectId);
+
+        response.StatusCode.Should().Be(HttpStatusCode.InternalServerError);
+        (await ReasonCodeOf(response)).Should().Be(ProvisionProjectEndpoint.ReasonContainerNotRecorded);
+        var detail = await DetailOf(response);
+        detail.Should().Contain("Do not delete").And.Contain("unknown");
+        detail.Should().NotContain("can be deleted");
+        _fixture.Logs.Entries.Should().Contain(e =>
+            e.Level == LogLevel.Error && e.Message.Contains("UNKNOWN")
+            && e.Message.Contains(ProvisionProjectTestFixture.ProvisionedContainerId) && e.Message.Contains(projectId.ToString()));
+    }
+
+    /// <summary>
+    /// #1755: a Step 7 write that did not land, read back as not recorded. The container is an orphan, and the message
+    /// still says it can be deleted (once the record is confirmed not to name it).
+    /// </summary>
+    [Fact]
+    public async Task ProvisionProject_WhenTheContainerWriteDidNotLand_ReadsItBackAndReportsTheOrphan()
+    {
+        var projectId = Guid.NewGuid();
+        _fixture.SeedProject(projectId);
+        _fixture.ContainerStampSucceeds = false;
+        using var client = _fixture.CreateEntitledClient();
+
+        var response = await ProvisionAsync(client, projectId);
+
+        response.StatusCode.Should().Be(HttpStatusCode.InternalServerError);
+        (await ReasonCodeOf(response)).Should().Be(ProvisionProjectEndpoint.ReasonContainerNotRecorded);
+        (await DetailOf(response)).Should().Contain("can be deleted").And.NotContain("Do not delete");
+    }
+
+    /// <summary>
+    /// #1755: Step 6 failing BEFORE the create was sent leaves nothing behind, so "nothing needs undoing" is true.
+    /// </summary>
+    [Fact]
+    public async Task ProvisionProject_WhenTheContainerCreateFailsBeforeItIsSent_SaysNothingNeedsUndoing()
+    {
+        var projectId = Guid.NewGuid();
+        _fixture.SeedProject(projectId);
+        _fixture.SpeContainerCreationFailsWith = _ => new InvalidOperationException("Graph 400: refused");
+        using var client = _fixture.CreateEntitledClient();
+
+        var response = await ProvisionAsync(client, projectId);
+
+        (await ReasonCodeOf(response)).Should().Be(ProvisionProjectEndpoint.ReasonContainerCreationFailed);
+        (await DetailOf(response)).Should().Contain("Nothing needs undoing").And.NotContain("may have been created");
+    }
+
+    /// <summary>
+    /// #1755: Step 6 failing AFTER the create was sent, with no answer that settles it, may have left a container nothing
+    /// names. It used to say "Nothing needs undoing"; now it says a container may exist and logs at Error what finds it.
+    /// </summary>
+    [Fact]
+    public async Task ProvisionProject_WhenTheContainerCreateOutcomeIsUnknown_SaysAContainerMayExistAndLogsIt()
+    {
+        var projectId = Guid.NewGuid();
+        _fixture.SeedProject(projectId);
+        _fixture.SpeContainerCreationFailsWith = name =>
+            new ContainerCreateOutcomeUnknownException(name, new TimeoutException("no answer"));
+        using var client = _fixture.CreateEntitledClient();
+
+        var response = await ProvisionAsync(client, projectId);
+
+        response.StatusCode.Should().Be(HttpStatusCode.InternalServerError);
+        (await ReasonCodeOf(response)).Should().Be(ProvisionProjectEndpoint.ReasonContainerCreationFailed);
+        var detail = await DetailOf(response);
+        detail.Should().Contain("may have been created").And.NotContain("Nothing needs undoing");
+        // K1 (#1755 round 3): true of every unknown case, a 2xx with no id included — not "no answer that settles it".
+        detail.Should().Contain("got no answer that names the container").And.NotContain("settles it");
+        var traceId = await TraceIdOf(response);
+        var displayName = _fixture.CreatedContainerDisplayNames.Should().ContainSingle().Subject;
+        _fixture.Logs.Entries.Should().Contain(e =>
+            e.Level == LogLevel.Error && e.Message.Contains(projectId.ToString())
+            && e.Message.Contains(traceId) && e.Message.Contains(displayName),
+            "the operator finds the possible orphan by the record, the trace and the container's display name");
+    }
+
+    /// <summary>
+    /// #1755 round 2, through the REAL <see cref="ContainerOperations"/> over a fake Graph: a 201 with no container used
+    /// to come back as null and be reported as "Nothing needs undoing"; a 503 was logged at Error three times. Both now say
+    /// a container may exist, and the outcome is logged at Error once — by the endpoint.
+    /// </summary>
+    [Theory]
+    [InlineData("", 201)]
+    [InlineData("{\"displayName\":\"x\"}", 201)]
+    [InlineData("{\"error\":{\"code\":\"serviceNotAvailable\",\"message\":\"x\"}}", 503)]
+    public async Task ProvisionProject_WhenGraphsAnswerToTheCreateDoesNotSettleIt_SaysAContainerMayExist_AndLogsItOnce(
+        string body, int status)
+    {
+        using var graph = new Sprk.Bff.Api.Tests.Contract.SpeAdmin.GraphWireMockFixture();
+        graph.StubPostExact("/storage/fileStorage/containers", body, status);
+        var factory = new Sprk.Bff.Api.Tests.Contract.SpeAdmin.WireMockGraphClientFactory(() => graph.CreateGraphClient());
+        using var loggers = new LoggerFactory(new[] { _fixture.Logs });
+        _fixture.SpeContainerOperations = new ContainerOperations(
+            factory, Sprk.Bff.Api.Tests.TestInfrastructure.TestSpeOwnership.AllowAll(factory),
+            loggers.CreateLogger<ContainerOperations>());
+        var projectId = Guid.NewGuid();
+        _fixture.SeedProject(projectId);
+        using var client = _fixture.CreateEntitledClient();
+
+        var response = await ProvisionAsync(client, projectId);
+
+        response.StatusCode.Should().Be(HttpStatusCode.InternalServerError);
+        (await ReasonCodeOf(response)).Should().Be(ProvisionProjectEndpoint.ReasonContainerCreationFailed);
+        (await DetailOf(response)).Should().Contain("may have been created").And.NotContain("Nothing needs undoing");
+        _fixture.Logs.Entries.Where(e => e.Level >= LogLevel.Error).Should().ContainSingle(
+            "one unknown create is one Error, at the endpoint, with what finds the container")
+            .Which.Message.Should().Contain(projectId.ToString());
+    }
+
+    /// <summary>
+    /// #1755 round 3 (F1 and item 5), through the REAL <see cref="ContainerOperations"/> over a fake Graph: a step after
+    /// the create (activate or bind) fails, and so may the delete that undoes it. A failed delete used to be reported as
+    /// "Nothing needs undoing" while a live container remained; it now names the container, logged once at the endpoint.
+    /// </summary>
+    [Theory]
+    [InlineData("activate", false)]
+    [InlineData("activate", true)]
+    [InlineData("bind", false)]
+    [InlineData("bind", true)]
+    public async Task ProvisionProject_WhenASetUpStepAfterTheCreateFails_SaysWhetherAContainerIsLeft(
+        string failingStep, bool deleteFails)
+    {
+        const string containers = "/storage/fileStorage/containers";
+        const string graphError = "{\"error\":{\"code\":\"x\",\"message\":\"x\"}}";
+        using var graph = new Sprk.Bff.Api.Tests.Contract.SpeAdmin.GraphWireMockFixture();
+        graph.StubPostExact(containers, "{\"id\":\"c-left\",\"displayName\":\"x\",\"status\":\"inactive\"}", 201);
+        graph.StubPostExact($"{containers}/c-left/activate", failingStep == "activate" ? graphError : "",
+            failingStep == "activate" ? 400 : 204);
+        graph.StubPatch($"{containers}/c-left/customProperties", graphError, 400);
+        graph.StubDelete($"{containers}/c-left", deleteFails ? graphError : "", deleteFails ? 500 : 204);
+        var factory = new Sprk.Bff.Api.Tests.Contract.SpeAdmin.WireMockGraphClientFactory(() => graph.CreateGraphClient());
+        using var loggers = new LoggerFactory(new[] { _fixture.Logs });
+        _fixture.SpeContainerOperations = new ContainerOperations(
+            factory, Sprk.Bff.Api.Tests.TestInfrastructure.TestSpeOwnership.AllowAll(factory),
+            loggers.CreateLogger<ContainerOperations>());
+        var projectId = Guid.NewGuid();
+        _fixture.SeedProject(projectId);
+        using var client = _fixture.CreateEntitledClient();
+
+        var response = await ProvisionAsync(client, projectId);
+
+        response.StatusCode.Should().Be(HttpStatusCode.InternalServerError);
+        (await ReasonCodeOf(response)).Should().Be(ProvisionProjectEndpoint.ReasonContainerCreationFailed);
+        var body = await response.Content.ReadAsStringAsync();
+        using var problem = JsonDocument.Parse(body);
+        var detail = problem.RootElement.GetProperty("detail").GetString()!;
+        var provisionErrors = _fixture.Logs.Entries
+            .Where(e => e.Level >= LogLevel.Error && e.Message.Contains("[PROVISION]")).ToList();
+        if (deleteFails)
+        {
+            detail.Should().Contain("no record names").And.Contain("c-left").And.NotContain("Nothing needs undoing");
+            problem.RootElement.GetProperty("speContainerId").GetString().Should().Be("c-left");
+            provisionErrors.Should().ContainSingle("the endpoint logs the container left active once")
+                .Which.Message.Should().Contain("c-left").And.Contain(projectId.ToString());
+        }
+        else
+        {
+            detail.Should().Contain("Nothing needs undoing").And.NotContain("no record names");
+            problem.RootElement.TryGetProperty("speContainerId", out _).Should().BeFalse();
+        }
+
+        graph.RequestsFor($"{containers}/c-left").Should().Contain(r => r.Method == "DELETE");
+    }
+
+    /// <summary>
+    /// K2 (#1755 round 3), through the real <see cref="ContainerOperations"/> and production's Graph resilience handler:
+    /// a create whose connection is refused sent nothing. It used to be reported as "a container may have been created".
+    /// </summary>
+    [Fact]
+    public async Task ProvisionProject_WhenTheCreateConnectionIsRefused_SaysNothingNeedsUndoing()
+    {
+        var baseUrl = $"http://127.0.0.1:{Sprk.Bff.Api.Tests.Contract.SpeAdmin.ContainerCreationStampContractTests.ClosedLoopbackPort()}";
+        var handler = new Sprk.Bff.Api.Infrastructure.Http.GraphHttpMessageHandler(
+            Microsoft.Extensions.Logging.Abstractions.NullLogger<Sprk.Bff.Api.Infrastructure.Http.GraphHttpMessageHandler>.Instance,
+            Microsoft.Extensions.Options.Options.Create(new Sprk.Bff.Api.Configuration.GraphResilienceOptions
+            {
+                RetryCount = 3, RetryBackoffSeconds = 0, HonorRetryAfterHeader = false, TimeoutSeconds = 30,
+                CircuitBreakerFailureThreshold = 100
+            }))
+        { InnerHandler = new HttpClientHandler() };
+        var graphClient = new Microsoft.Graph.GraphServiceClient(
+            new HttpClient(handler) { BaseAddress = new Uri(baseUrl) },
+            new Microsoft.Kiota.Abstractions.Authentication.AnonymousAuthenticationProvider(), baseUrl);
+        var factory = new Sprk.Bff.Api.Tests.Contract.SpeAdmin.WireMockGraphClientFactory(() => graphClient);
+        _fixture.SpeContainerOperations = new ContainerOperations(
+            factory, Sprk.Bff.Api.Tests.TestInfrastructure.TestSpeOwnership.AllowAll(factory),
+            Microsoft.Extensions.Logging.Abstractions.NullLogger<ContainerOperations>.Instance);
+        var projectId = Guid.NewGuid();
+        _fixture.SeedProject(projectId);
+        using var client = _fixture.CreateEntitledClient();
+
+        var response = await ProvisionAsync(client, projectId);
+
+        (await ReasonCodeOf(response)).Should().Be(ProvisionProjectEndpoint.ReasonContainerCreationFailed);
+        (await DetailOf(response)).Should().Contain("Nothing needs undoing").And.NotContain("may have been created");
+    }
+
+    private static async Task<string> DetailOf(HttpResponseMessage response)
+    {
+        using var problem = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        return problem.RootElement.GetProperty("detail").GetString()!;
+    }
+
+    private static async Task<string> TraceIdOf(HttpResponseMessage response)
+    {
+        using var problem = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        return problem.RootElement.GetProperty("traceId").GetString()!;
     }
 
     // ─────────────────────────────────────────────────────────────────────────

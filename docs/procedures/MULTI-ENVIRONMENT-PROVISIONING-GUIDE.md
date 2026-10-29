@@ -182,7 +182,7 @@ pac data create --table sprk_dataverseenvironment --data @"
 
 Choice values for `sprk_environmenttype` are defined in the solution schema. Look them up via `pac data list --table sprk_dataverseenvironment --select sprk_environmenttype`.
 
-**Important**: do NOT set `sprk_isdefault: true` for the new environment unless you're intentionally rotating which environment is the "default". The default flag is currently load-bearing in `DemoExpirationService.cs` per the migration gap documented in `docs/assessments/bff-warning-suppression-analysis-2026-06-01.md` § 3.1. Setting two rows to default may cause unpredictable behavior in the daily expiration job.
+**Important**: do NOT set `sprk_isdefault: true` for the new environment unless you're intentionally rotating which environment is the "default". Demo expiry no longer reads the default flag (since T186, `DemoExpirationJob` uses each request's own target environment), but other readers may; keep exactly one default row.
 
 ### Step 4 — Configure CI/CD federated identity (if deploying via `deploy-promote.yml`)
 
@@ -208,7 +208,7 @@ Alternatively, keep deployment to the new environment as a local `Deploy-BffApi.
 1. Submit a test demo request against the new environment's registration endpoint (or the central admin Dataverse's, if you're not running per-env BFF instances).
 2. Approve the request via the admin UI.
 3. Verify the user is provisioned: receives welcome email, can log in, has access to the demo team in Dataverse, has read access to the SPE container.
-4. Trigger the daily `DemoExpirationService` manually (if you have an admin endpoint) or wait for its midnight UTC run — verify the new environment's expirations are processed correctly. **Note**: per the assessment § 3.1, this currently uses a single global default; multi-env iteration is on the follow-on cleanup project's backlog.
+4. Trigger the daily `demo-expiration` job manually (`POST /api/admin/jobs/demo-expiration/trigger`, SystemAdmin) or wait for its midnight UTC run — verify the new environment's expirations are processed correctly. Each request is expired against its own target environment.
 
 ## 5. Cleanup / decommissioning
 
@@ -228,7 +228,7 @@ These are documented gaps tracked by `github-actions-rationalization-r1` and its
 
 - **Step 3 is manual**: provisioning a `sprk_dataverseenvironment` row requires hand-running PAC CLI. A future enhancement should automate this as Step 13 of `Provision-Customer.ps1`.
 - **Step 5 verification is partially manual**: no end-to-end smoke test for the daily expiration job in a multi-env config.
-- **`DemoExpirationService` multi-env migration**: see [`docs/assessments/bff-warning-suppression-analysis-2026-06-01.md`](../assessments/bff-warning-suppression-analysis-2026-06-01.md) § 3.1. Currently the service uses a single global default; full multi-env iteration is on the cleanup follow-on backlog.
+- **Demo expiry multi-env**: done — T186 made expiry use each request's own target environment, and #1363 moved it to the `demo-expiration` scheduled job (`DemoExpirationJob`).
 - **`Provision-Customer.ps1` idempotency on Steps 7–12**: not 100% verified. Manual re-runs may need cleanup if a step fails partway.
 - **OIDC federated credentials**: must be set up per-env per [D-11](../../projects/github-actions-rationalization-r1/decisions/D-11-deploy-promote-oidc-federated-credential-gap.md) before `deploy-promote.yml` can deploy to a new env.
 
@@ -266,4 +266,4 @@ For each new environment `{name}`:
 
 ---
 
-*Authored 2026-06-01 during github-actions-rationalization-r1 closeout (Item 3 of 3). Update as the multi-env provisioning chain matures — especially as Step 3 automation lands and the `DemoExpirationService` multi-env migration is completed.*
+*Authored 2026-06-01 during github-actions-rationalization-r1 closeout (Item 3 of 3). Update as the multi-env provisioning chain matures — especially as Step 3 automation lands.*

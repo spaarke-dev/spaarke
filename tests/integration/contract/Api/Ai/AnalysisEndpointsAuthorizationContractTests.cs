@@ -1215,6 +1215,17 @@ internal sealed class AnalysisAuthHost : IAsyncDisposable
     public Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble Ownership { get; } = new();
     public ChatSessionManager Sessions { get; private set; } = null!;
 
+    /// <summary>
+    /// Task 188 round 4a: who the caller is for THE external document narrowing (default: a resolved internal systemuser,
+    /// so the narrowing makes no call and these tests stay about the routes' own decisions) and what the BFF's app-only
+    /// identity reads (<see cref="Sprk.Bff.Api.Tests.Services.Ai.Handlers.AppOnlyDocumentWorld"/>). Pointer:
+    /// <c>AnalysisDerivedContentNarrowingTests</c> and <c>AiDocumentNarrowingTests</c> state the external caller.
+    /// </summary>
+    public Sprk.Bff.Api.Tests.AccessControl.NarrowingCallerMode CallerMode { get; set; } = Sprk.Bff.Api.Tests.AccessControl.NarrowingCallerMode.Internal;
+
+    /// <summary>Task 188 round 4a: the app-only world THE external document narrowing reads.</summary>
+    public Sprk.Bff.Api.Tests.Services.Ai.Handlers.AppOnlyDocumentWorld World { get; } = new();
+
     /// <param name="configure">Registrations added LAST (so they win) — e.g. an AuthorizationService built with a fault.</param>
     public static async Task<AnalysisAuthHost> StartAsync(Action<IServiceCollection>? configure = null)
     {
@@ -1255,6 +1266,7 @@ internal sealed class AnalysisAuthHost : IAsyncDisposable
         {
             opt.AddPolicy("ai-batch", _ => RateLimitPartition.GetNoLimiter("ai-batch-test"));
             opt.AddPolicy("ai-stream", _ => RateLimitPartition.GetNoLimiter("ai-stream-test"));
+            opt.AddPolicy("ai-context", _ => RateLimitPartition.GetNoLimiter("ai-context-test"));
         });
 
         // The REAL authorization stack, substituted only at the access-data boundary and the privilege seam.
@@ -1297,6 +1309,9 @@ internal sealed class AnalysisAuthHost : IAsyncDisposable
             persistence: null,
             cleanupSignal: null);
         builder.Services.AddSingleton(Sessions);
+        Sprk.Bff.Api.Tests.TestInfrastructure.StatedNarrowingCaller.AddStatedNarrowingCaller(builder.Services, () => CallerMode, () => World);
+        builder.Services.AddSingleton(sp => new AnalysisChatContextResolver(
+            EntityService.Object, _cache, NullLogger<AnalysisChatContextResolver>.Instance));
         configure?.Invoke(builder.Services);
 
         builder.WebHost.UseTestServer();
@@ -1306,6 +1321,7 @@ internal sealed class AnalysisAuthHost : IAsyncDisposable
         _app.UseAuthorization();
         _app.UseRateLimiter();
         _app.MapAnalysisEndpoints();
+        _app.MapAnalysisChatContextEndpoints();
 
         await _app.StartAsync();
         _client = _app.GetTestClient();
@@ -1475,6 +1491,10 @@ internal static class AnalysisAuthorizationTestRegistrations
         services.AddSingleton(access.Object);
         services.AddScoped<IAuthorizationRule, OperationAccessRule>();
         services.AddScoped<AuthorizationService>();
+        // Task 188 round 4b: the document grants now apply THE external document narrowing after the root grants; these
+        // hosts are about dispatch and promote, so nothing is hidden (Option A double; the narrowing on the analysis
+        // document path is pinned by FinanceDocumentNarrowingTests and DocumentGrantNarrowingTests).
+        Sprk.Bff.Api.Tests.TestInfrastructure.AllVisibleDocumentNarrowing.UseAllVisibleDocumentNarrowing(services);
 
         var probe = new FinanceAuthz.RecordingPrivilegeProbe();
         probe.Hold(AnalysisAuthorizationFilter.CreateAnalysisPrivilege);

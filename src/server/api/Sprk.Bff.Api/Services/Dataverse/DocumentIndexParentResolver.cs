@@ -23,7 +23,13 @@ namespace Sprk.Bff.Api.Services.Dataverse;
 /// filed there; "a related matter is still a matter"). Only when it names none of them: the core stamps of the event and of
 /// the communication it is related to (work assignment, project, matter — read through <see cref="CoreAncestorResolver"/>, one
 /// hop each); search cannot authorize an <c>event</c> or <c>communication</c> parent, and each inherits its access from those
-/// records. A communication's own candidates are its <c>sprk_regarding{core}</c> lookups.</para>
+/// records. A communication's own candidates are its <c>sprk_regarding{core}</c> lookups. A related <b>service request</b>
+/// (GitHub #1839, R3 ISS-007) is the same hop with a different read: it is a CORE record that carries no stamp copy, so
+/// <see cref="CoreAncestorResolver"/> answers "itself" (which search cannot authorize); its own typed
+/// <c>sprk_regarding{workassignment,project,matter}</c> lookups — the three columns <c>RecordContainerResolver</c> follows
+/// to store its documents — are the candidates. Its communication / invoice / to-do regardings and its party lookups are
+/// never candidates, and a request regarding none of the three gives NO parent (fail closed). An event or communication
+/// stamped only with a service request still gives no parent: storage holds that shape, so there is no governing record.</para>
 /// <para><b>The rule</b> (main-session decision 2026-10-09, task 177 verifier round; matches the storage decision):
 /// (1) if exactly ONE candidate is secure (EFFECTIVE: its own flag or a secure record it is filed under, task 174 / round
 /// 87), it is the parent — or, when several secure candidates are one secure family, the most specific of them;
@@ -63,18 +69,23 @@ public sealed class DocumentIndexParentResolver
         ("sprk_invoice", "invoice", "Unknown Invoice"),
     ];
 
-    /// <summary>The intermediates whose core stamps name the parent when the document names no record directly.</summary>
+    private const string ServiceRequestTable = "sprk_servicerequest";
+
+    /// <summary>The intermediates that name the parent when the document names no record directly: the event and the
+    /// communication through their core stamps, the service request (GitHub #1839, R3 ISS-007) through its own
+    /// <c>sprk_regarding{core}</c> lookups — it is a CORE record, so the stamp derivation answers with the request itself.</summary>
     private static readonly (string Table, string NamedType, string UnknownName)[] IntermediateTypes =
     [
         ("sprk_event", "event", "Unknown Event"),
         ("sprk_communication", "communication", "Unknown Communication"),
+        (ServiceRequestTable, "servicerequest", "Unknown Service Request"),
     ];
 
     /// <summary>
     /// A named projection of the ONE document link vocabulary (<see cref="DocumentLinkFields.All"/>): every link to a
     /// <see cref="ParentTypes"/> table, most specific type first, the typed lookup before its <c>sprk_related*</c> twin (both
-    /// target the same table — "a related matter is still a matter"). EXCLUDED, by name: the agreement, to-do and service
-    /// request links (not records search authorizes a parent by, and not roots), the PARTY links (contact, organization,
+    /// target the same table — "a related matter is still a matter"). EXCLUDED, by name: the agreement and to-do
+    /// links (not records search authorizes a parent by, and not roots; the service request is an intermediate, below), the PARTY links (contact, organization,
     /// vendor organization — referenced, never an owner of content) and the source email (an activity).
     /// </summary>
     private static readonly (string Column, string Table, string SearchType, string UnknownName)[] DirectLinks =
@@ -86,7 +97,7 @@ public sealed class DocumentIndexParentResolver
             .Select(x => (x.Field.LogicalName, ParentTypes[x.Rank].Table, ParentTypes[x.Rank].SearchType, ParentTypes[x.Rank].UnknownName))
             .ToArray();
 
-    /// <summary>The projection's links to an <see cref="IntermediateTypes"/> table (the related event and communication).</summary>
+    /// <summary>The projection's links to an <see cref="IntermediateTypes"/> table (the related event, communication and service request).</summary>
     private static readonly (string Column, string Table, string NamedType, string UnknownName)[] IntermediateLinks =
         DocumentLinkFields.All
             .Select(f => (Field: f, Rank: Array.FindIndex(IntermediateTypes, t => t.Table == f.TargetEntityLogicalName)))
@@ -334,7 +345,25 @@ public sealed class DocumentIndexParentResolver
             }
 
             named.Add(new ParentEntityContext(namedType, link.Id.ToString(), link.Name ?? unknownName));
-            var ancestors = await _coreAncestors.ResolveStampsAsync(table, link.Id, ct).ConfigureAwait(false);
+
+            if (string.Equals(table, ServiceRequestTable, StringComparison.OrdinalIgnoreCase))
+            {
+                var requestRow = await ReadServiceRequestAsync(link.Id, ct).ConfigureAwait(false);
+                if (requestRow is null)
+                {
+                    return new IndexParentDecision(null, named, Decided: false);
+                }
+
+                foreach (var core in CoreRegardingsOf(requestRow, coreSearchType => CoreOrder.First(o => o.SearchType == coreSearchType).UnknownName))
+                {
+                    AddCandidate(stamps, core.Table, core.Parent.EntityType, core.Parent.EntityId, core.Parent.EntityName);
+                }
+
+                continue;
+            }
+
+            // Read-only (GitHub #2002): the answer picks a search parent; nothing is written against the related record.
+            var ancestors = await _coreAncestors.ResolveStampsAsync(table, link.Id, ct, CoreAncestorIntent.ReadOnly).ConfigureAwait(false);
             ct.ThrowIfCancellationRequested();
             if (!ancestors.Succeeded)
             {
@@ -360,7 +389,8 @@ public sealed class DocumentIndexParentResolver
 
         if (stamps.Count == 0)
         {
-            // No ancestor, or only one search cannot name (a service request).
+            // No ancestor, or only ones search cannot name (an event or communication under a service request; a service
+            // request regarding no matter, project or work assignment).
             _logger.LogInformation(
                 "Index parent: document {DocumentId}'s related records are under no matter, project or work assignment; indexing without a parent.",
                 documentId);
@@ -373,6 +403,32 @@ public sealed class DocumentIndexParentResolver
             .ToList();
         var governing = await ChooseGoverningAsync(ordered, ct).ConfigureAwait(false);
         return new IndexParentDecision(governing, named, Decided: governing is not null);
+    }
+
+    /// <summary>
+    /// A related service request's row, carrying only its core regarding lookups (the records its documents are stored
+    /// under). Null when it cannot be read or is not found: the caller then fails closed and undecided.
+    /// </summary>
+    private async Task<Entity?> ReadServiceRequestAsync(Guid serviceRequestId, CancellationToken ct)
+    {
+        var columns = CoreOrder.Select(o => CoreAncestorResolver.StampColumnFor(o.Table)).ToArray();
+        try
+        {
+            var row = await _dataverse.RetrieveAsync(ServiceRequestTable, serviceRequestId, columns, ct).ConfigureAwait(false);
+            if (row is null)
+            {
+                _logger.LogWarning(
+                    "Index parent: service request {Id} was not found; indexing without a parent (fail closed).", serviceRequestId);
+            }
+
+            return row;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            _logger.LogWarning(ex,
+                "Index parent: service request {Id} could not be read; indexing without a parent (fail closed).", serviceRequestId);
+            return null;
+        }
     }
 
     private async Task<Entity?> ReadRowAsync(Guid documentId, string[] columns, CancellationToken ct)

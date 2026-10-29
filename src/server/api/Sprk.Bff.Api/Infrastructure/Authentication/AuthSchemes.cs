@@ -27,4 +27,16 @@ public static class AuthSchemes
     /// default scheme. Pinned onto the <c>/api/v1/external</c> endpoint group in task 021.
     /// </summary>
     public const string Ciam = "Ciam";
+
+    /// <summary>
+    /// JwtBearer scheme validating a workforce contact's token issued by their CUSTOMER'S HOME DIRECTORY
+    /// (ADR-028 Amendment A9 · external-access-platform-r3 task 045). Multitenant signing metadata
+    /// (<c>organizations</c>) on the stamp's own BFF app id, then the A9 allowlist (<c>tid</c> listed in
+    /// <c>WorkforceIdentity:CustomerTenantIds</c>, exact v2 <c>iss</c>, user token with
+    /// <c>user_impersonation</c>, <c>acct</c> = 0). Named by the <see cref="AuthPolicies.ExternalCollaboration"/>
+    /// policy and by NO other (no OBO on the external plane); <c>AuthenticationSchemeCensusTests</c> pins that.
+    /// The <see cref="System.Security.Claims.ClaimsIdentity.AuthenticationType"/> of the identity it produces is
+    /// this name, so principal resolution can branch on the authenticating scheme rather than on <c>iss</c>.
+    /// </summary>
+    public const string WorkforceHome = "WorkforceHome";
 }

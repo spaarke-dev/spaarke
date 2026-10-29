@@ -278,6 +278,17 @@ public static class FinanceEndpoints
 
             return ConfirmFailure(ex, correlationId);
         }
+        catch (Sprk.Bff.Api.Services.Dataverse.RecordOwnerUnsettledException)
+        {
+            // #2143 round 2: a RESUMED confirmation re-files the document under its invoice after the status write; a
+            // concurrent writer kept the document's owner from settling. The invoice and its link stand (a retry resumes from
+            // them): reload and retry, never the generic 500.
+            logger.LogWarning(
+                "Invoice review confirmation: the document's owner could not be settled under its invoice against concurrent "
+                + "writers. DocumentId={DocumentId}, CorrelationId={CorrelationId}",
+                request.DocumentId, correlationId);
+            return ProblemDetailsHelper.RecordOwnerUnsettled("document", correlationId, traceIdExtension: "correlationId");
+        }
         catch (Exception ex)
         {
             logger.LogError(ex,

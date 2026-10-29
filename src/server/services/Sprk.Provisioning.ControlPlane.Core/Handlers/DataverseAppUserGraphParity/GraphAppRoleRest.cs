@@ -148,7 +148,7 @@ internal static class GraphAppRoleRest
         if (!response.IsSuccessStatusCode)
         {
             var body = await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
-            throw new InvalidOperationException(
+            throw new H10HttpException(response.StatusCode,
                 $"POST appRoleAssignments failed: {(int)response.StatusCode} {response.StatusCode}. Body: {Truncate(body, 300)}");
         }
     }
@@ -168,7 +168,7 @@ internal static class GraphAppRoleRest
             return;
         }
         var body = await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
-        throw new InvalidOperationException(
+        throw new H10HttpException(response.StatusCode,
             $"DELETE appRoleAssignments/{assignmentId} failed: {(int)response.StatusCode} {response.StatusCode}. Body: {Truncate(body, 300)}");
     }
 
@@ -180,7 +180,7 @@ internal static class GraphAppRoleRest
         var text = await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
         if (!response.IsSuccessStatusCode)
         {
-            throw new InvalidOperationException(
+            throw new H10HttpException(response.StatusCode,
                 $"GET {uri} failed: {(int)response.StatusCode} {response.StatusCode}. Body: {Truncate(text, 300)}");
         }
         return JsonDocument.Parse(string.IsNullOrWhiteSpace(text) ? "{}" : text);

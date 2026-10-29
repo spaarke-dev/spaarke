@@ -65,7 +65,8 @@ public sealed class DecisionRecordWriterSeamTests : IClassFixture<SignalWriterSe
             return (await _dv.OperatorClient.RetrieveMultipleAsync(query, ct)).Entities.FirstOrDefault();
         });
         return new DecisionRecordWriter(
-            client, ownership, coreAncestors, recordTypes, TimeProvider.System, NullLogger<DecisionRecordWriter>.Instance);
+            client, ownership, coreAncestors, sysadmin, recordTypes, TimeProvider.System, NullLogger<DecisionRecordWriter>.Instance,
+            new Sprk.Bff.Api.Tests.Services.Signals.GateSharingWorld().Sharing);
     }
 
     /// <summary>Name prefix of the To Do the no-core test creates as its subject; <see cref="DisposeAsync"/> sweeps by it.</summary>
@@ -289,6 +290,7 @@ public sealed class DecisionRecordWriterSeamTests : IClassFixture<SignalWriterSe
 
         public Task<Guid> CreateAsync(Entity entity, CancellationToken ct = default) => throw new NotImplementedException();
         public Task<(Guid Id, bool Created)> UpsertAsync(Entity entity, CancellationToken ct = default) => throw new NotImplementedException();
+        public Task UpdateIfRowVersionMatchesAsync(string entityLogicalName, Guid id, string rowVersion, Dictionary<string, object> fields, CancellationToken ct = default) => throw new NotImplementedException();
         public Task UpdateAsync(string entityLogicalName, Guid id, Dictionary<string, object> fields, CancellationToken ct = default) => throw new NotImplementedException();
         public Task BulkUpdateAsync(string entityLogicalName, List<(Guid id, Dictionary<string, object> fields)> updates, CancellationToken ct = default) => throw new NotImplementedException();
         public Task<Entity> RetrieveByAlternateKeyAsync(string entityLogicalName, KeyAttributeCollection alternateKeyValues, string[]? columns = null, CancellationToken ct = default) => throw new NotImplementedException();

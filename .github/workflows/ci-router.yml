@@ -122,6 +122,7 @@ jobs:
     timeout-minutes: 5
     outputs:
       bff: ${{ steps.filter.outputs.bff }}
+      dotnet_tests: ${{ steps.filter.outputs.dotnet_tests }}
       spaarke_ai: ${{ steps.filter.outputs.spaarke_ai }}
       docs: ${{ steps.filter.outputs.docs }}
       ci_workflows: ${{ steps.filter.outputs.ci_workflows }}
@@ -151,6 +152,40 @@ jobs:
               - 'tests/unit/Sprk.Bff.Api.Tests/**'
               - 'Directory.Packages.props'
               - 'Directory.Build.props'
+            # Which diffs run Tier 2 `Full Unit Tests` (run-unit-tests below). Deliberately SEPARATE
+            # from `bff`: `bff` also gates Tier 1's bff_changed, Tier 2 lint and plugin-size, and
+            # widening it would put more work into the blocking tier (p95 <= 3 min budget). This is
+            # a SUPERSET of `bff` that adds the paths that compile into a test project in Spaarke.sln,
+            # plus the non-code files those tests read and assert on (Bicep templates, seed-data
+            # manifest, config/, Dataverse solution XML, scripts/). Known gap: ~40 source-scan tests in
+            # Sprk.Bff.Api.Tests also read src/client/** and src/solutions/**; adding those would run the
+            # four Windows shards on nearly every client PR, so they are covered by the nightly full run
+            # (nightly-health.yml) instead. The Tier 2 shards run `dotnet test` over the WHOLE
+            # solution with a namespace filter, and `rest` is the complement of the other shards,
+            # so any test project in the solution runs there; the only thing missing was this trigger.
+            # Before 2026-10-15 these paths ran in two standalone jobs in ci-standalone-checks.yml
+            # (unit-tests-outside-router, bff-seam-contract-tests), now deleted.
+            dotnet_tests:
+              - 'src/server/**'
+              - 'tests/unit/**'
+              - 'tests/integration/**'
+              - 'tests/Insights/**'
+              - 'tests/fixtures/**'
+              # Non-code inputs that tests in these projects read and assert on (review of #1922):
+              # ControlPlane tests pin infrastructure/bicep/** and scripts/seed-data/manifest.yaml,
+              # IntegrationTests read src/dataverse/solutions/** and config/**, BFF source-scan
+              # tests read src/dataverse/** and scripts/**.
+              - 'infrastructure/bicep/**'
+              - 'config/**'
+              - 'src/dataverse/**'
+              - 'scripts/**'
+              - 'Directory.Packages.props'
+              - 'Directory.Build.props'
+              - 'Spaarke.sln'
+              - 'global.json'
+              # Changing the test runner itself must run the tests it runs.
+              - '.github/workflows/ci-router.yml'
+              - '.github/workflows/ci-tier2-advisory.yml'
             spaarke_ai:
               - 'src/solutions/SpaarkeAi/**'
               - 'src/client/shared/Spaarke.AI.**/**'
@@ -252,6 +287,7 @@ jobs:
             echo "| Surface | Changed |"
             echo "|---|---|"
             echo "| BFF (Sprk.Bff.Api + shared server) | ${{ steps.filter.outputs.bff }} |"
+            echo "| .NET unit tests (bff + services + test projects; Tier 2 Full Unit Tests) | ${{ steps.filter.outputs.dotnet_tests }} |"
             echo "| SpaarkeAi (solutions/SpaarkeAi + AI client libs) | ${{ steps.filter.outputs.spaarke_ai }} |"
             echo "| Docs (docs/, .claude/, *.md, etc.) | ${{ steps.filter.outputs.docs }} |"
             echo "| CI workflows (.github/workflows/) | ${{ steps.filter.outputs.ci_workflows }} |"
@@ -342,7 +378,8 @@ jobs:
       # expression).
       run-lint: ${{ (needs.classify.outputs.spaarke_ai == 'true' || needs.classify.outputs.bff == 'true') && 'true' || 'false' }}
       run-format: ${{ 'true' }}
-      run-unit-tests: ${{ needs.classify.outputs.bff == 'true' && 'true' || 'false' }}
+      # dotnet_tests (a superset of bff), not bff: see the filter's comment in `classify`. bff still drives lint and plugin-size.
+      run-unit-tests: ${{ needs.classify.outputs.dotnet_tests == 'true' && 'true' || 'false' }}
       run-adr-compliance: ${{ 'true' }}
       run-markdown: ${{ 'true' }}
       run-last-reviewed: ${{ 'true' }}

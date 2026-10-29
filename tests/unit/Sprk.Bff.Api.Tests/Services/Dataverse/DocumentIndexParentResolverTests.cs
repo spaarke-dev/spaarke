@@ -300,4 +300,186 @@ public class DocumentIndexParentResolverTests
 
         parent.Should().Be(new ParentEntityContext("project", Linked.ToString(), "Unknown Project"));
     }
+
+    // ── GitHub #1839 (R3 ISS-007): a document filed only to a service request ───────────────────────────────────────
+
+    private static readonly Guid ServiceRequest = Guid.Parse("4d000000-0000-4000-8000-0000000017c7");
+    private static readonly Guid Unrelated = Guid.Parse("4d000000-0000-4000-8000-0000000017c8");
+
+    /// <summary>The document is related only to <see cref="ServiceRequest"/>; the request's row carries <paramref name="regardings"/>.
+    /// Returns the columns each read of the request asked for.</summary>
+    private List<string[]> ServiceRequestRow(params (string Column, string Target, Guid Id)[] regardings)
+    {
+        DocumentRow(("sprk_relatedservicerequest", "sprk_servicerequest", ServiceRequest, "SR-0042"));
+        var row = new Entity("sprk_servicerequest", ServiceRequest);
+        foreach (var (column, target, id) in regardings)
+        {
+            row[column] = new EntityReference(target, id);
+        }
+
+        var asked = new List<string[]>();
+        _dataverse.Setup(d => d.RetrieveAsync("sprk_servicerequest", ServiceRequest, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .Callback((string _, Guid _, string[] columns, CancellationToken _) => asked.Add(columns))
+            .ReturnsAsync(row);
+        return asked;
+    }
+
+    [Theory]
+    [InlineData("sprk_regardingmatter", "sprk_matter", "matter", "Unknown Matter")]
+    [InlineData("sprk_regardingproject", "sprk_project", "project", "Unknown Project")]
+    [InlineData("sprk_regardingworkassignment", "sprk_workassignment", "workassignment", "Unknown Work Assignment")]
+    public async Task ADocumentRelatedOnlyToAServiceRequest_IsFiledUnderTheRecordTheRequestRegards(
+        string column, string target, string searchType, string expectedName)
+    {
+        ServiceRequestRow((column, target, Linked));
+
+        var parent = await Resolver().ResolveAsync(Document.ToString(), CancellationToken.None);
+
+        parent.Should().Be(new ParentEntityContext(searchType, Linked.ToString(), expectedName),
+            "search cannot authorize a service request parent; the request hangs off the record that governs its documents");
+        _flags.Reads.Should().BeEmpty("one candidate is its own answer");
+    }
+
+    /// <summary>Send-to-Index's / index-file's path: the same answer, and the request is one of the records the row names
+    /// (so the body-parent check of <c>/index-file</c> sees it).</summary>
+    [Fact]
+    public async Task SendToIndexsPath_ADocumentRelatedOnlyToAServiceRequest_IsFiledUnderTheRequestsRecord()
+    {
+        ServiceRequestRow(("sprk_regardingmatter", "sprk_matter", Linked));
+        var document = new DocumentEntity { Id = Document.ToString(), Name = "intake.pdf" };
+
+        var decision = await Resolver().DecideAsync(document, CancellationToken.None);
+
+        decision.Parent.Should().NotBeNull();
+        decision.Parent!.EntityType.Should().Be("matter");
+        decision.Parent.EntityId.Should().Be(Linked.ToString());
+        decision.Decided.Should().BeTrue();
+        decision.Named.Should().ContainSingle(p => p.EntityType == "servicerequest" && p.EntityId == ServiceRequest.ToString());
+    }
+
+    /// <summary>Control: only the three core regardings are candidates. The request's invoice, to-do, communication and party
+    /// lookups are NOT parents, and the read does not even ask for them.</summary>
+    [Fact]
+    public async Task AServiceRequest_AddsOnlyItsCoreRegardings_NeverItsInvoiceTodoCommunicationOrParties()
+    {
+        var asked = ServiceRequestRow(
+            ("sprk_regardingmatter", "sprk_matter", Linked),
+            ("sprk_regardinginvoice", "sprk_invoice", Unrelated),
+            ("sprk_regardingtodo", "sprk_todo", Unrelated),
+            ("sprk_regardingcommunication", "sprk_communication", Unrelated),
+            ("sprk_regardingcontact", "contact", Unrelated),
+            ("sprk_regardingorganization", "sprk_organization", Unrelated));
+
+        var decision = await Resolver().DecideAsync(new DocumentEntity { Id = Document.ToString(), Name = "intake.pdf" }, CancellationToken.None);
+
+        decision.Parent!.EntityId.Should().Be(Linked.ToString());
+        decision.Parent.EntityType.Should().Be("matter");
+        asked.Should().ContainSingle().Which.Should().BeEquivalentTo(
+            new[] { "sprk_regardingworkassignment", "sprk_regardingproject", "sprk_regardingmatter" });
+    }
+
+    /// <summary>Control: a request that regards no matter, project or work assignment (only an invoice) is ambiguous for
+    /// search — no parent, decided (fail closed), never the invoice.</summary>
+    [Fact]
+    public async Task AServiceRequestRegardingNoCoreRecord_GivesNoParent()
+    {
+        ServiceRequestRow(("sprk_regardinginvoice", "sprk_invoice", Unrelated));
+
+        var decision = await Resolver().DecideAsync(new DocumentEntity { Id = Document.ToString(), Name = "intake.pdf" }, CancellationToken.None);
+
+        decision.Parent.Should().BeNull();
+        decision.Decided.Should().BeTrue();
+        decision.Named.Should().ContainSingle(p => p.EntityType == "servicerequest");
+    }
+
+    /// <summary>Control: a request that cannot be read, or is not found, gives no parent AND is undecided (a caller must not
+    /// substitute a parent of its own).</summary>
+    [Theory]
+    [InlineData("throws")]
+    [InlineData("missing")]
+    public async Task AnUnreadableServiceRequest_GivesNoParent_AndIsUndecided(string how)
+    {
+        DocumentRow(("sprk_relatedservicerequest", "sprk_servicerequest", ServiceRequest, "SR-0042"));
+        var setup = _dataverse.Setup(d => d.RetrieveAsync("sprk_servicerequest", ServiceRequest, It.IsAny<string[]>(), It.IsAny<CancellationToken>()));
+        if (how == "throws")
+        {
+            setup.ThrowsAsync(new TimeoutException("Dataverse did not answer"));
+        }
+        else
+        {
+            setup.ReturnsAsync((Entity)null!);
+        }
+
+        var decision = await Resolver().DecideAsync(new DocumentEntity { Id = Document.ToString(), Name = "intake.pdf" }, CancellationToken.None);
+
+        decision.Parent.Should().BeNull();
+        decision.Decided.Should().BeFalse();
+        (await Resolver().ResolveAsync(Document.ToString(), CancellationToken.None)).Should().BeNull();
+    }
+
+    /// <summary>Control: a document that names a record directly keeps it; the service request it is also related to is not
+    /// read (the Strict mock has no setup for it) and its record is not added.</summary>
+    [Fact]
+    public async Task ADocumentNamingARecordDirectly_IgnoresTheServiceRequestItIsAlsoRelatedTo()
+    {
+        DocumentRow(
+            ("sprk_matter", "sprk_matter", Linked, "Direct Matter"),
+            ("sprk_relatedservicerequest", "sprk_servicerequest", ServiceRequest, "SR-0042"));
+
+        var parent = await Resolver().ResolveAsync(Document.ToString(), CancellationToken.None);
+
+        parent.Should().Be(new ParentEntityContext("matter", Linked.ToString(), "Direct Matter"));
+        _dataverse.Verify(d => d.RetrieveAsync("sprk_servicerequest", It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    /// <summary>Rule (2) over a request's records: none secure — the more specific one.</summary>
+    [Fact]
+    public async Task AServiceRequestRegardingAMatterAndAProject_NeitherSecure_IsFiledUnderTheProject()
+    {
+        ServiceRequestRow(("sprk_regardingmatter", "sprk_matter", Other), ("sprk_regardingproject", "sprk_project", Linked));
+
+        var parent = await Resolver().ResolveAsync(Document.ToString(), CancellationToken.None);
+
+        parent!.EntityType.Should().Be("project");
+        parent.EntityId.Should().Be(Linked.ToString());
+    }
+
+    /// <summary>Rule (1) over a request's records: the secure record governs, whichever is more specific.</summary>
+    [Fact]
+    public async Task AServiceRequestRegardingASecureMatterAndANonSecureProject_IsFiledUnderTheSecureMatter()
+    {
+        ServiceRequestRow(("sprk_regardingmatter", "sprk_matter", Other), ("sprk_regardingproject", "sprk_project", Linked));
+        _flags.Flags[Other] = Secure;
+
+        var parent = await Resolver().ResolveAsync(Document.ToString(), CancellationToken.None);
+
+        parent!.EntityType.Should().Be("matter");
+        parent.EntityId.Should().Be(Other.ToString());
+    }
+
+    /// <summary>Rule (3) over a request's records: two different secure roots — no parent.</summary>
+    [Fact]
+    public async Task AServiceRequestRegardingTwoDifferentSecureRoots_GivesNoParent()
+    {
+        ServiceRequestRow(("sprk_regardingmatter", "sprk_matter", Other), ("sprk_regardingproject", "sprk_project", Linked));
+        _flags.Flags[Other] = Secure;
+        _flags.Flags[Linked] = Secure;
+
+        var parent = await Resolver().ResolveAsync(Document.ToString(), CancellationToken.None);
+
+        parent.Should().BeNull();
+    }
+
+    /// <summary>Known limit, pinned: an event (or communication) stamped only with a service request still has no parent —
+    /// the storage resolver HOLDS that shape, so search has no governing record to agree with. The request is not read.</summary>
+    [Fact]
+    public async Task AnEventStampedOnlyWithAServiceRequest_StillGivesNoParent_AndTheRequestIsNotRead()
+    {
+        EventStamps(("sprk_regardingservicerequest", "sprk_servicerequest", ServiceRequest));
+
+        var parent = await Resolver().ResolveAsync(Document.ToString(), CancellationToken.None);
+
+        parent.Should().BeNull();
+        _dataverse.Verify(d => d.RetrieveAsync("sprk_servicerequest", It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
 }

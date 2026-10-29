@@ -280,6 +280,8 @@ public sealed class BulkOperationContainerTypeTests : IDisposable
             $"{ContainersPath}/c-same/permissions",
             """{"id":"p1","roles":["owner"],"grantedToV2":{"user":{"id":"u-1","displayName":"U"}}}""",
             201);
+        // A container grant names the user by UPN, so the object id is resolved first.
+        _graph.StubGet("/users/u-1", """{"userPrincipalName":"u1@contoso.com"}""");
 
         var error = await Grant("c-same", LeafA);
 

@@ -111,7 +111,7 @@ export const TeamsAuthError: React.FC<TeamsAuthErrorProps> = ({ message, diagnos
         {busy ? 'Signing in...' : 'Sign in'}
       </Button>
       <Text size={200} className={s.hint}>
-        Sign in with your work account in Spaarke's directory. If it keeps failing, contact your administrator.
+        Sign in with your work account for your organization. If it keeps failing, contact your administrator.
       </Text>
       <pre className={s.diagnostics}>{`Diagnostic detail (share this):\n${shownDiagnostics}`}</pre>
     </div>

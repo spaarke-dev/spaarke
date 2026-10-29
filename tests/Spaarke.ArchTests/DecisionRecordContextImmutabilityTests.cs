@@ -20,8 +20,9 @@ namespace Spaarke.ArchTests;
 /// <para><b>Crude by design</b>, like every <see cref="SourceScan"/> rule: it reads comment-stripped text, not a compilation. Each
 /// rule has a must-fire control (a seeded violation is reported) and a must-not-fire control (the sanctioned shape and the reads
 /// that name the same columns are not).</para>
-/// <para><b>One create site, every entry point (task 042).</b> The writer has two public entry points that create a record,
-/// <c>WriteAsync</c> (a human review) and <c>WriteGateDecisionAsync</c> (an automated communications-gate decision). Both must reach
+/// <para><b>One create site, every entry point (task 042).</b> The writer has three public entry points that create a record,
+/// <c>WriteAsync</c> (a human review), <c>WriteGateDecisionAsync</c> (an automated communications-gate decision) and, task 153,
+/// <c>WriteConditionClearedAsync</c> (a Do-lane ConditionCleared closure). All must reach
 /// the SAME private <c>CreateAsync</c> (the only <c>_writerClient.CreateAsync</c> call, which builds the payload from
 /// <c>Content</c> and files and owns it through <c>FiledAndOwnedAsync</c>), so a new entry point cannot grow a second create that
 /// skips the filing, the owner answer or the D-34 context rule. <see cref="OneCreateSiteReachedByEveryEntryPoint"/> pins it, with
@@ -60,7 +61,19 @@ public class DecisionRecordContextImmutabilityTests
     /// <summary>A call on the Decision Record writer's Dataverse client.</summary>
     private static readonly Regex WriterClientCall = new(@"\b_writerClient\s*\.\s*(?<method>\w+)\s*\(", RegexOptions.Compiled);
 
-    private static readonly HashSet<string> AllowedWriterClientCalls = new(StringComparer.Ordinal) { "CreateAsync", "RetrieveAsync" };
+    /// <summary>Any mention of the writer's shared sysadmin reader (<c>IGenericEntityService</c>, which CAN create and update).</summary>
+    private static readonly Regex EntitiesToken = new(@"\b_entities\b", RegexOptions.Compiled);
+
+    /// <summary>The ONE sanctioned use: a read (task 149's gate-record lookup; task 153's condition-cleared lookup and its attribution read of the
+    /// subject's last change). <c>\s</c> spans newlines, so a split call is allowed.</summary>
+    private static readonly Regex EntitiesLookupRead = new(@"\G_entities\s*\.\s*RetrieveMultipleAsync\s*\(", RegexOptions.Compiled);
+
+    /// <summary>(a) the field declaration (checked inline, preceded by the type) and (b) the constructor assignment: the only other sanctioned mentions.</summary>
+    private static readonly Regex EntitiesCtorAssignment = new(@"\G_entities\s*=(?![=>])\s*entities\b[^;]*;", RegexOptions.Compiled);
+
+    /// <remarks>Task 153 (adversarial pass 2 F1): <c>GetWriterUserIdAsync</c> is WhoAmI on the writer's own connection (a read of its
+    /// identity, so the "already recorded" lookups match only rows the writer created); it writes nothing.</remarks>
+    private static readonly HashSet<string> AllowedWriterClientCalls = new(StringComparer.Ordinal) { "CreateAsync", "RetrieveAsync", "GetWriterUserIdAsync" };
 
     /// <summary>A Decision Record row addressed for an update through a string literal: a Web API path to one row
     /// (<c>"sprk_decisionrecords(…"</c>), an update/upsert/patch call naming the table or its entity set as its first argument,
@@ -105,10 +118,83 @@ public class DecisionRecordContextImmutabilityTests
         var others = calls.Where(c => !AllowedWriterClientCalls.Contains(c)).Distinct().ToList();
         Assert.True(others.Count == 0,
             "D-34: DecisionRecordWriter is create-only (a Decision Record is append-only except the live stamp columns, task 144 C2); it calls its Dataverse client for: " + string.Join(", ", others));
+
+        // Task 149: the shared sysadmin reader the gate lookup uses can also create and update, so it is held to the one read.
+        var entityOthers = EntitiesViolations(code);
+        Assert.True(entityOthers.Count == 0,
+            "D-34: DecisionRecordWriter may use the shared entity service only to declare it, assign it in the constructor and call RetrieveMultipleAsync (the gate record lookup); other uses:\n  " + string.Join("\n  ", entityOthers));
+    }
+
+    /// <summary>Every <c>_entities</c> token that is not the field declaration, the constructor assignment or a
+    /// <c>.RetrieveMultipleAsync(</c> call: a write call (also via <c>?.</c> or split across lines), a local alias, a method group, or a
+    /// hand-off to a helper all land here. Returns "line N" for each.</summary>
+    private static List<string> EntitiesViolations(string code)
+    {
+        var violations = new List<string>();
+        foreach (Match m in EntitiesToken.Matches(code))
+        {
+            var before = code[..m.Index];
+            if (Regex.IsMatch(before, @"\bIGenericEntityService\s+$")
+                || EntitiesCtorAssignment.IsMatch(code, m.Index)
+                || EntitiesLookupRead.IsMatch(code, m.Index))
+            {
+                continue;
+            }
+
+            violations.Add($"line {SourceScan.LineOf(code, m.Index)}");
+        }
+
+        return violations;
+    }
+
+    [Fact(DisplayName = "Task 149 / D-34: shared-entity-service detector controls — writes, aliases, ?. and split calls fire; the lookup read, declaration and constructor do not")]
+    public void EntitiesCall_Controls()
+    {
+        static List<string> Scan(params string[] body) => EntitiesViolations(SourceScan.CodeText(
+            new[] { "private async Task Other(Entity e, QueryExpression q, CancellationToken ct)", "{" }.Concat(body).Append("}").ToArray()));
+
+        // Must fire: a create (or any write) through the shared sysadmin service.
+        Assert.Single(Scan("    await _entities.CreateAsync(e, CancellationToken.None);"));
+
+        // Must fire: the null-conditional form.
+        Assert.Single(Scan("    await _entities?.UpdateAsync(e, ct);"));
+
+        // Must fire: a local alias (the write then goes through the alias, which no token scan sees).
+        Assert.Single(Scan("    var r = _entities;", "    await r.CreateAsync(e, ct);"));
+
+        // Must fire: a call split across lines.
+        Assert.Single(Scan("    await _entities", "        .CreateAsync(e, ct);"));
+
+        // Must fire: a method group (no parenthesis) and a hand-off to a helper.
+        Assert.Single(Scan("    Func<Entity, CancellationToken, Task<Guid>> f = _entities.CreateAsync;"));
+        Assert.Single(Scan("    await Helper(_entities, e, ct);"));
+
+        // Must NOT fire: the sanctioned lookup read, on one line or split across lines.
+        Assert.Empty(Scan(
+            "    var rows = await _entities.RetrieveMultipleAsync(q, ct).ConfigureAwait(false);",
+            "    var more = await _entities",
+            "        .RetrieveMultipleAsync(q, ct);",
+            "    var again = await _entities . RetrieveMultipleAsync",
+            "        (q, ct);"));
+
+        // Must NOT fire: the field declaration and the constructor assignment.
+        Assert.Empty(EntitiesViolations(SourceScan.CodeText(new[]
+        {
+            "public sealed class DecisionRecordWriter",
+            "{",
+            "    private readonly IGenericEntityService _entities;",
+            "",
+            "    public DecisionRecordWriter(IGenericEntityService entities)",
+            "    {",
+            "        _entities = entities ?? throw new ArgumentNullException(nameof(entities));",
+            "    }",
+            "}",
+        })));
     }
 
     /// <summary>The entry points that create a Decision Record (public members of the writer), each of which must reach <see cref="SharedCreate"/>.</summary>
-    private static readonly string[] CreateEntryPoints = ["WriteAsync", "WriteGateDecisionAsync"];
+    /// <remarks>Task 153 adds <c>WriteConditionClearedAsync</c> (the Routine record of a Do-lane ConditionCleared closure).</remarks>
+    private static readonly string[] CreateEntryPoints = ["WriteAsync", "WriteGateDecisionAsync", "WriteConditionClearedAsync"];
 
     private const string SharedCreate = "CreateAsync";
 
@@ -127,7 +213,7 @@ public class DecisionRecordContextImmutabilityTests
     [Fact(DisplayName = "Task 042 / D-34: create-site detector controls — a second create, a missing entry point and a bypassing entry point fire")]
     public void OneCreateSite_Controls()
     {
-        static string Writer(string gateBody, string extra = "") => SourceScan.CodeText(new[]
+        static string Writer(string gateBody, string extra = "", string clearedBody = "        return await CreateAsync(review, plan, null, ct);") => SourceScan.CodeText(new[]
         {
             "public sealed class DecisionRecordWriter",
             "{",
@@ -139,6 +225,11 @@ public class DecisionRecordContextImmutabilityTests
             "    public async Task<R> WriteGateDecisionAsync(G request, CancellationToken ct = default)",
             "    {",
             gateBody,
+            "    }",
+            "",
+            "    public async Task<R> WriteConditionClearedAsync(C request, CancellationToken ct = default)",
+            "    {",
+            clearedBody,
             "    }",
             "",
             "    private async Task<R> CreateAsync(A request, Plan plan, DecisionRecordOwner? o, CancellationToken ct)",
@@ -165,6 +256,11 @@ public class DecisionRecordContextImmutabilityTests
 
         // Must fire: an entry point is renamed away (the list must move with it, not silently empty).
         Assert.NotEmpty(CreateSiteProblems(Writer("        return await CreateAsync(review, plan, null, ct);").Replace("WriteGateDecisionAsync", "WriteGateAsync")));
+
+        // Must fire (task 153): the condition-cleared entry builds and creates its own record, or never reaches the shared create.
+        Assert.NotEmpty(CreateSiteProblems(Writer("        return await CreateAsync(review, plan, null, ct);",
+            clearedBody: "        return await _writerClient.CreateAsync(new Entity(\"sprk_decisionrecord\"), ct);")));
+        Assert.NotEmpty(CreateSiteProblems(Writer("        return await CreateAsync(review, plan, null, ct);", clearedBody: "        return new R();")));
     }
 
     /// <summary>Problems with the writer's create shape: not exactly one <c>_writerClient.CreateAsync</c> call, that call outside

@@ -13,6 +13,7 @@
 
 import * as React from 'react';
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
+import { confirmRevoke } from '../../../__tests__/helpers/confirmDialog';
 import { FluentProvider, webLightTheme } from '@fluentui/react-components';
 import { AccessGrantModal } from '../AccessGrantModal';
 import { throwingAuthenticatedFetch } from '../../../__tests__/helpers/authenticatedFetchDouble';
@@ -337,7 +338,7 @@ describe('AccessGrantModal — the 409 access_follows_parent is an inline refusa
 
   async function revokeCarla(): Promise<void> {
     fireEvent.click(within(currentAccessRow('Carla Contact')).getByRole('button', { name: 'Revoke' }));
-    fireEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Revoke' }));
+    await confirmRevoke();
   }
 
   it('a refused Revoke shows the server sentence for that action and nothing else changes', async () => {
@@ -426,7 +427,7 @@ describe('AccessGrantModal — a host whose fetch RETURNS the refusal (control)'
     await loaded();
 
     fireEvent.click(within(currentAccessRow('Carla Contact')).getByRole('button', { name: 'Revoke' }));
-    fireEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Revoke' }));
+    await confirmRevoke();
 
     expect(await screen.findByText(sentence)).toBeInTheDocument();
   });

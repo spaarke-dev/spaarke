@@ -81,15 +81,13 @@
 //           A tenancy migration or endpoint rotation changes the hash,
 //           forcing a re-write on next invocation.
 //
-// DOWNSTREAM ENQUEUE (WAVE Cp TEMPORARY BRIDGE):
-//   H12c is the single upstream trigger for H14 (post-deploy integration
-//   wiring, task 073) per the design.md §4.1 DAG (H12c -> H14 -> H13). Same
-//   temporary-bridge pattern as H0->H0.5 and H12a/H12b->H12c: the wave-C5
-//   reconciler does not exist yet, so H12c enqueues H14 directly here on its
-//   own success. Enqueue failure does NOT fail the handler — Cosmos state
-//   already records H12c complete; the reconciler's crash-recovery scan
-//   (design.md §4C I6) re-emits H14 (parity with H12b's enqueue-failure
-//   handling).
+// DOWNSTREAM CHAINING (NOT THIS HANDLER'S JOB):
+//   H12c does not enqueue H14 (or anything else). Handler-to-handler chaining
+//   is owned by the state reconciler (Core/Reconciler/StateReconcilerService.cs
+//   + DagAdvancer.HandlerDependencies: H14 follows H12c). The wave-Cp
+//   handler-side enqueue was removed (T186 L19, 2026-10-15): it duplicated the
+//   reconciler's H14 dispatch under a different envelope. On success H12c only
+//   records itself complete (CurrentPhase = H12c).
 // -----------------------------------------------------------------------------
 
 using System.Diagnostics;
@@ -109,12 +107,6 @@ public sealed class H12cRuntimeReferencesHandler : IProvisioningHandler
     /// <summary>Handler identifier — matches design.md §4.1 catalog verbatim.</summary>
     public const string HandlerIdentifier = HandlerIds.H12c;
 
-    /// <summary>
-    /// Handler identifier of the downstream DAG successor H12c enqueues on
-    /// its own success (temporary wave-Cp bridge — see file header).
-    /// </summary>
-    public const string DownstreamHandlerId = "H14";
-
     /// <summary>Non-secret parameter key carrying the Entra tenant id (§4D I1).</summary>
     public const string TenantIdParameterKey = "tenantId";
 
@@ -130,7 +122,6 @@ public sealed class H12cRuntimeReferencesHandler : IProvisioningHandler
 
     private readonly IProvisioningRunRepository _repository;
     private readonly IModelDeploymentReferenceWriter _writer;
-    private readonly IHandlerEnqueuer _enqueuer;
     private readonly ILogger<H12cRuntimeReferencesHandler> _logger;
 
     /// <inheritdoc/>
@@ -144,17 +135,14 @@ public sealed class H12cRuntimeReferencesHandler : IProvisioningHandler
     public H12cRuntimeReferencesHandler(
         IProvisioningRunRepository repository,
         IModelDeploymentReferenceWriter writer,
-        IHandlerEnqueuer enqueuer,
         ILogger<H12cRuntimeReferencesHandler> logger)
     {
         ArgumentNullException.ThrowIfNull(repository);
         ArgumentNullException.ThrowIfNull(writer);
-        ArgumentNullException.ThrowIfNull(enqueuer);
         ArgumentNullException.ThrowIfNull(logger);
 
         _repository = repository;
         _writer = writer;
-        _enqueuer = enqueuer;
         _logger = logger;
     }
 
@@ -211,9 +199,9 @@ public sealed class H12cRuntimeReferencesHandler : IProvisioningHandler
         }
 
         // (3) DAG-join guard — H12c needs BOTH H12a + H12b complete
-        // (design.md §4.1 DAG). H12a and/or H12b sibling-race to enqueue
-        // H12c on their own success; whichever finishes second is the one
-        // whose invocation actually finds both entries present.
+        // (design.md §4.1 DAG). The reconciler dispatches H12c only once
+        // DagAdvancer sees H12a + H12b + H2a complete; this guard is
+        // defence-in-depth against an out-of-order or manual dispatch.
         var missingUpstream = RequiredUpstreamHandlers
             .Where(h => !run.CompletedPhases.Any(cp => string.Equals(cp.Phase, h, StringComparison.Ordinal)))
             .ToList();
@@ -222,8 +210,8 @@ public sealed class H12cRuntimeReferencesHandler : IProvisioningHandler
             var diagnostic =
                 $"H12c requires BOTH H12a and H12b to be present in CompletedPhases before it can populate " +
                 $"runtime references (design.md §4.1 DAG). Missing: {string.Join(", ", missingUpstream)}. " +
-                "This is the normal DAG-join race — the missing handler(s) will enqueue H12c again on their " +
-                "own completion; no operator action required unless this persists.";
+                "The reconciler dispatches H12c once the missing handler(s) complete; " +
+                "no operator action required unless this persists.";
             return await FailAsync(run, etag, RuntimeReferencesRejectionCodes.MissingUpstreamHandlers, diagnostic, cancellationToken)
                 .ConfigureAwait(false);
         }
@@ -327,7 +315,7 @@ public sealed class H12cRuntimeReferencesHandler : IProvisioningHandler
 
         var success = (ModelDeploymentReferenceWriteOutcome.Success)outcome;
 
-        // (9) All post-conditions cleared — advance Cosmos state + enqueue H14.
+        // (9) All post-conditions cleared — advance Cosmos state (the reconciler dispatches H14).
         stopwatch.Stop();
         _logger.LogInformation(
             "H12c runtime references succeeded: runId={RunId} customerId={CustomerId} tenancyModel={TenancyModel} " +
@@ -390,9 +378,7 @@ public sealed class H12cRuntimeReferencesHandler : IProvisioningHandler
     {
         // Every H12c failure mode is Resumable — see file header ROLLBACK
         // CLASSIFICATION table.
-        run.Status = RunStatus.Failed;
-        run.CurrentPhase = HandlerIdentifier;
-        run.ErrorDetail = $"[{rejectionCode}] {diagnostic}";
+        run.MarkPhaseFailed(HandlerIdentifier, RunStatus.Failed, $"[{rejectionCode}] {diagnostic}"); // T186 L41
 
         run.GateStates[$"h12c-{rejectionCode}"] = new GateEntry
         {
@@ -429,8 +415,7 @@ public sealed class H12cRuntimeReferencesHandler : IProvisioningHandler
         var completedAt = DateTimeOffset.UtcNow;
         var startedAt = completedAt - TimeSpan.FromMilliseconds(1);
 
-        run.Status = RunStatus.Running;
-        run.CurrentPhase = DownstreamHandlerId; // Reconciler observes + knows H14 is next.
+        run.MarkPhaseSucceeded(HandlerIdentifier); // Reconciler observes + fans out
         run.CompletedPhases.Add(new CompletedPhase
         {
             Phase = HandlerIdentifier,
@@ -470,31 +455,6 @@ public sealed class H12cRuntimeReferencesHandler : IProvisioningHandler
                 Class: FailureClass.Resumable,
                 RejectionCode: RuntimeReferencesRejectionCodes.RunDeletedDuringWrite,
                 Diagnostic: $"ProvisioningRun '{run.RunId}' was deleted while H12c was in flight.");
-        }
-
-        // Enqueue H14 — TEMPORARY WAVE-Cp BRIDGE (see file header).
-        var downstreamEnvelope = new HandlerEnvelope
-        {
-            HandlerId = DownstreamHandlerId,
-            RunId = envelope.RunId,
-            CustomerId = envelope.CustomerId,
-            ParametersJson = "{}", // H14 reads its own parameters from Cosmos.
-            EnqueuedAt = completedAt,
-        };
-        try
-        {
-            await _enqueuer.EnqueueAsync(downstreamEnvelope, cancellationToken).ConfigureAwait(false);
-        }
-        catch (Exception ex)
-        {
-            // Cosmos state already records H12c complete + CurrentPhase = H14.
-            // Enqueue failure is recoverable — the reconciler's background
-            // scan (wave C5, design.md §crash recovery I6) will re-emit H14.
-            _logger.LogError(
-                ex,
-                "H12c succeeded but H14 downstream enqueue failed — reconciler scan will re-emit: " +
-                "runId={RunId} customerId={CustomerId}",
-                run.RunId, run.CustomerId);
         }
 
         return new HandlerResult.Success(idempotencyKey);

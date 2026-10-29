@@ -413,27 +413,155 @@ public class UpdateRecordNodeExecutorTests
     {
         // Arrange
         var recordId = Guid.NewGuid();
-        var ownerId = Guid.NewGuid();
+        var reviewerId = Guid.NewGuid();
+        // #2247: a user lookup that is not the owner or the creator (an app-only node may not write those).
         var config = $@"{{
             ""entityLogicalName"":""sprk_document"",
             ""recordId"":""{recordId}"",
             ""fields"":{{""sprk_status"":""Assigned""}},
             ""lookups"":{{
-                ""ownerid"":{{
+                ""sprk_ReviewedBy"":{{
                     ""targetEntity"":""systemuser"",
-                    ""targetId"":""{ownerId}""
+                    ""targetId"":""{reviewerId}""
                 }}
             }}
         }}";
         var context = CreateValidContext(config);
 
         SetupMockPassThrough();
+        var written = UseEntitySetsFromMetadata();
 
         // Act
         var result = await _executor.ExecuteAsync(context, CancellationToken.None);
 
         // Assert
         result.Success.Should().BeTrue();
+        written.Should().ContainSingle().Which["sprk_ReviewedBy@odata.bind"].Should().Be($"/systemusers({reviewerId})");
+    }
+
+    [Theory(DisplayName = "#2247: an app-only node's lookup onto the owner or the creator is refused, and nothing is written")]
+    [InlineData("sprk_document", "ownerid", "systemuser")]
+    [InlineData("sprk_matter", "ownerid", "team")]
+    [InlineData("sprk_event", "sprk_CreatedByPerson", "systemuser")]
+    public async Task ExecuteAsync_ALookupOntoTheOwnerOrTheCreator_FailsTheNode_AndWritesNothing(
+        string table, string field, string target)
+    {
+        var config = $@"{{
+            ""entityLogicalName"":""{table}"",
+            ""recordId"":""{Guid.NewGuid()}"",
+            ""fields"":{{""sprk_name"":""x""}},
+            ""lookups"":{{
+                ""{field}"":{{
+                    ""targetEntity"":""{target}"",
+                    ""targetId"":""{Guid.NewGuid()}""
+                }}
+            }}
+        }}";
+        SetupMockPassThrough();
+        var written = UseEntitySetsFromMetadata();
+
+        var result = await _executor.ExecuteAsync(CreateValidContext(config), CancellationToken.None);
+
+        result.Success.Should().BeFalse();
+        written.Should().BeEmpty("the refusal comes before the write");
+    }
+
+    [Theory(DisplayName = "#2251: an app-only node onto an access table or a secure root's secure columns fails, and nothing is written")]
+    [InlineData("sprk_externalrecordaccess", "sprk_accesslevel", InheritedAccessPermission.AppOnlyAccessTableWriteReasonCode)]
+    [InlineData(" SPRK_ContactOrganization ", "statecode", InheritedAccessPermission.AppOnlyAccessTableWriteReasonCode)]
+    [InlineData("sprk_noaccessentry", "sprk_name", InheritedAccessPermission.AppOnlyAccessTableWriteReasonCode)]
+    [InlineData("sprk_assignedaccess", "sprk_state", InheritedAccessPermission.AppOnlyAccessTableWriteReasonCode)]
+    [InlineData("sprk_matter", "sprk_issecure", InheritedAccessPermission.AppOnlySecureRootWriteReasonCode)]
+    [InlineData("sprk_matter", "sprk_containerid", InheritedAccessPermission.AppOnlySecureRootWriteReasonCode)]
+    [InlineData("sprk_project", "SPRK_SecurityBU", InheritedAccessPermission.AppOnlySecureRootWriteReasonCode)]
+    [InlineData("sprk_workassignment", "sprk_accesspermission", InheritedAccessPermission.AppOnlySecureRootWriteReasonCode)]
+    [InlineData("contact", "sprk_externalobjectid", InheritedAccessPermission.AppOnlyAccessColumnWriteReasonCode)]
+    [InlineData("systemuser", "sprk_isexternal", InheritedAccessPermission.AppOnlyAccessColumnWriteReasonCode)]
+    [InlineData("sprk_externalrecordaccess')?$select=EntitySetName#", "sprk_name", InheritedAccessPermission.AppOnlyTableNameInvalidReasonCode)]
+    public async Task ExecuteAsync_AnAccessTableOrASecureRootColumn_FailsTheNode_AndWritesNothing(string table, string field, string code)
+    {
+        var config = $@"{{
+            ""entityLogicalName"":""{table}"",
+            ""recordId"":""{Guid.NewGuid()}"",
+            ""fields"":{{""{field}"":""1""}}
+        }}";
+        SetupMockPassThrough();
+        var written = UseEntitySetsFromMetadata();
+
+        var result = await _executor.ExecuteAsync(CreateValidContext(config), CancellationToken.None);
+
+        result.Success.Should().BeFalse();
+        result.ErrorMessage.Should().Contain($"({code})", "the node fails with the refusal's own code (#2253 K5)");
+        written.Should().BeEmpty("the refusal comes before the write");
+    }
+
+    [Fact(DisplayName = "#2251 must not fire: the live matter node's update of an ordinary column (sprk_performancesummary) is written")]
+    public async Task ExecuteAsync_AnOrdinaryColumnOnAMatter_IsWritten()
+    {
+        var config = $@"{{
+            ""entityLogicalName"":""sprk_matter"",
+            ""recordId"":""{Guid.NewGuid()}"",
+            ""fieldMappings"":[{{""field"":""sprk_performancesummary"",""type"":""string"",""value"":""a health summary""}}]
+        }}";
+        SetupMockPassThrough();
+        var written = UseEntitySetsFromMetadata();
+
+        var result = await _executor.ExecuteAsync(CreateValidContext(config), CancellationToken.None);
+
+        result.Success.Should().BeTrue();
+        written.Should().ContainSingle().Which.Should().ContainKey("sprk_performancesummary");
+    }
+
+    [Fact(DisplayName = "#2091 r4: a lookup's bind names the target's entity set as metadata answers it (sprk_analysis → sprk_analysises), never a guessed plural")]
+    public async Task ExecuteAsync_WithALookupToSprkAnalysis_BindsTheMetadataEntitySet()
+    {
+        var recordId = Guid.NewGuid();
+        var analysisId = Guid.NewGuid();
+        var config = $@"{{
+            ""entityLogicalName"":""sprk_analysisoutput"",
+            ""recordId"":""{recordId}"",
+            ""fields"":{{""sprk_name"":""Output""}},
+            ""lookups"":{{
+                ""sprk_AnalysisId"":{{
+                    ""targetEntity"":""sprk_analysis"",
+                    ""targetId"":""{analysisId}""
+                }}
+            }}
+        }}";
+        SetupMockPassThrough();
+        var written = UseEntitySetsFromMetadata();
+
+        var result = await _executor.ExecuteAsync(CreateValidContext(config), CancellationToken.None);
+
+        result.Success.Should().BeTrue();
+        written.Should().ContainSingle().Which["sprk_AnalysisId@odata.bind"].Should().Be($"/sprk_analysises({analysisId})");
+    }
+
+    /// <summary>
+    /// #2091 round 4: the node reads a lookup target's entity set from metadata (<see cref="IGenericEntityService"/>, from a
+    /// scope); answers the live names and captures every payload written.
+    /// </summary>
+    private List<Dictionary<string, object?>> UseEntitySetsFromMetadata()
+    {
+        var written = new List<Dictionary<string, object?>>();
+        _dataverseServiceMock
+            .Setup(s => s.GetEntitySetNameAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((string table, CancellationToken _) => Sprk.Bff.Api.Tests.TestInfrastructure.EntitySetNameFixtures.SetOf(table));
+        _dataverseServiceMock
+            .Setup(s => s.UpdateRecordFieldsAsync(
+                It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object?>>(), It.IsAny<CancellationToken>(),
+                It.IsAny<Guid?>()))
+            .Callback<string, Guid, Dictionary<string, object?>, CancellationToken, Guid?>((_, _, fields, _, _) => written.Add(fields))
+            .Returns(Task.CompletedTask);
+
+        var serviceProviderMock = new Mock<IServiceProvider>();
+        serviceProviderMock
+            .Setup(sp => sp.GetService(typeof(IGenericEntityService)))
+            .Returns(_dataverseServiceMock.Object);
+        var scopeMock = new Mock<IServiceScope>();
+        scopeMock.Setup(s => s.ServiceProvider).Returns(serviceProviderMock.Object);
+        _scopeFactoryMock.Setup(f => f.CreateScope()).Returns(scopeMock.Object);
+        return written;
     }
 
     #endregion
@@ -683,7 +811,9 @@ public class UpdateRecordNodeExecutorTests
             },
             ExecutorType = ExecutorType.UpdateRecord,
             Scopes = new ResolvedScopes([], [], []),
-            TenantId = "test-tenant"
+            TenantId = "test-tenant",
+            // #2257: these pin the app-only node write (a system run); the run-identity rule has its own tests.
+            StartedBy = PlaybookRunStartedBy.System
         };
     }
 

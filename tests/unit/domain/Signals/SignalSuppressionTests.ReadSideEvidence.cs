@@ -4,6 +4,7 @@
 // merges, the two share one helper and these cases stay.
 using FluentAssertions;
 using Microsoft.Xrm.Sdk;
+using Sprk.Bff.Api.Services.Signals;
 using Xunit;
 
 namespace Sprk.Bff.Api.Tests.Domain.Signals;
@@ -11,6 +12,15 @@ namespace Sprk.Bff.Api.Tests.Domain.Signals;
 public partial class SignalSuppressionTests
 {
     private static string WitnessRef(Guid communicationId) => $"sprk_communication:{communicationId:D}";
+
+    /// <summary>The read-time rule as the route calls it when the caller's own read returned every witness named, so these cases
+    /// judge the secure-family rule alone. The caller-read rule (task 151, D-142) is proven at the route (SignalReadRouteTests).</summary>
+    private static Task<IReadOnlyDictionary<Guid, IReadOnlySet<string>>?> ShownOnReadAsync(
+        Store s, IReadOnlyList<(Guid SignalId, IReadOnlyList<string> References)> signals) =>
+        s.Service.WitnessDetailShownOnReadAsync(
+            signals,
+            signals.SelectMany(x => x.References).Select(SignalSuppressionService.WitnessOf).OfType<(string, Guid)>().ToHashSet(),
+            default);
 
     /// <summary>A communication filed under <paramref name="matterId"/> and, when given, also under a secure project.</summary>
     private static Guid ReadSideCommunication(Store s, Guid matterId, Guid? secureProject = null, string owner = Store.OrdinaryTeam)
@@ -29,7 +39,7 @@ public partial class SignalSuppressionTests
         var refiled = ReadSideCommunication(s, MatterId, secureProject: Store.ProjectA, owner: Store.SecureOwner);
         var ordinary = ReadSideCommunication(s, MatterId);
 
-        var shown = await s.Service.WitnessDetailShownOnReadAsync([(signal, [WitnessRef(refiled), WitnessRef(ordinary)])], default);
+        var shown = await ShownOnReadAsync(s, [(signal, [WitnessRef(refiled), WitnessRef(ordinary)])]);
 
         shown![signal].Should().BeEquivalentTo([WitnessRef(ordinary)], "the re-filed witness is in project A's family, not the matter's");
     }
@@ -43,7 +53,7 @@ public partial class SignalSuppressionTests
         var signal = s.Open(secureMatter, secureMatter, secure: true, subjectEntity: "sprk_matter");
         var own = ReadSideCommunication(s, secureMatter, owner: Store.SecureOwner);
 
-        var shown = await s.Service.WitnessDetailShownOnReadAsync([(signal, [WitnessRef(own)])], default);
+        var shown = await ShownOnReadAsync(s, [(signal, [WitnessRef(own)])]);
 
         shown![signal].Should().BeEquivalentTo([WitnessRef(own)]);
     }
@@ -55,8 +65,8 @@ public partial class SignalSuppressionTests
         var signal = s.Open(MatterId, MatterId, secure: false, subjectEntity: "sprk_matter");
         var orphan = ReadSideCommunication(s, MatterId, owner: Store.SecureOwner); // Secure-owned, no secure root: undetermined
 
-        var shown = await s.Service.WitnessDetailShownOnReadAsync(
-            [(signal, [WitnessRef(orphan), $"sprk_matter:{MatterId:D}", "not-a-ref"])], default);
+        var shown = await ShownOnReadAsync(s,
+            [(signal, [WitnessRef(orphan), $"sprk_matter:{MatterId:D}", "not-a-ref"])]);
 
         shown![signal].Should().BeEmpty();
     }
@@ -68,7 +78,7 @@ public partial class SignalSuppressionTests
         var signal = s.Open(MatterId, MatterId, subjectEntity: "sprk_matter");
         var anything = Guid.NewGuid();
 
-        var shown = await s.Service.WitnessDetailShownOnReadAsync([(signal, [WitnessRef(anything)])], default);
+        var shown = await ShownOnReadAsync(s, [(signal, [WitnessRef(anything)])]);
 
         shown![signal].Should().BeEquivalentTo([WitnessRef(anything)], "with no Secure team every family is ordinary");
     }
@@ -82,7 +92,7 @@ public partial class SignalSuppressionTests
         var signal = s.Open(MatterId, MatterId, secure: false, subjectEntity: "sprk_matter");
         var windowed = ReadSideCommunication(s, MatterId, secureProject: Store.ProjectA, owner: Store.OrdinaryTeam);
 
-        var shown = await s.Service.WitnessDetailShownOnReadAsync([(signal, [WitnessRef(windowed)])], default);
+        var shown = await ShownOnReadAsync(s, [(signal, [WitnessRef(windowed)])]);
 
         shown![signal].Should().BeEmpty("filed under secure project A, the witness is in A's family whoever owns it today");
     }
@@ -96,7 +106,7 @@ public partial class SignalSuppressionTests
         var signal = s.Open(MatterId, MatterId, secure: true, subjectEntity: "sprk_matter");
         var ordinary = ReadSideCommunication(s, MatterId);
 
-        var shown = await s.Service.WitnessDetailShownOnReadAsync([(signal, [WitnessRef(ordinary)])], default);
+        var shown = await ShownOnReadAsync(s, [(signal, [WitnessRef(ordinary)])]);
 
         shown![signal].Should().BeEmpty();
     }
@@ -126,7 +136,7 @@ public partial class SignalSuppressionTests
             }
 
             var before = s.Queries;
-            var shown = await s.Service.WitnessDetailShownOnReadAsync(batch, default);
+            var shown = await ShownOnReadAsync(s, batch);
             shown.Should().NotBeNull();
             return s.Queries - before;
         }
@@ -170,7 +180,7 @@ public partial class SignalSuppressionTests
         {
             var (s, batch) = WorklistOf(signals);
             var before = s.Queries;
-            var shown = await s.Service.WitnessDetailShownOnReadAsync(batch, default);
+            var shown = await ShownOnReadAsync(s, batch);
             shown.Should().NotBeNull();
             shown!.Values.Should().OnlyContain(v => v.Count == 1, "every Signal and its witness are ordinary: the detail is shown");
             return s.Queries - before;
@@ -188,7 +198,7 @@ public partial class SignalSuppressionTests
         var (s, batch) = WorklistOf(3);
         s.FailReadsOf = "sprk_workassignment"; // read only by the walker, in its batched parent read
 
-        (await s.Service.WitnessDetailShownOnReadAsync(batch, default)).Should().BeNull();
+        (await ShownOnReadAsync(s, batch)).Should().BeNull();
     }
 
     [Fact]
@@ -199,7 +209,7 @@ public partial class SignalSuppressionTests
         var ordinary = ReadSideCommunication(s, MatterId);
         s.FailReads = true;
 
-        (await s.Service.WitnessDetailShownOnReadAsync([(signal, [WitnessRef(ordinary)])], default)).Should().BeNull();
+        (await ShownOnReadAsync(s, [(signal, [WitnessRef(ordinary)])])).Should().BeNull();
     }
 
     [Fact]
@@ -209,7 +219,7 @@ public partial class SignalSuppressionTests
         var ordinary = ReadSideCommunication(s, MatterId);
         var missing = Guid.NewGuid();
 
-        var shown = await s.Service.WitnessDetailShownOnReadAsync([(missing, [WitnessRef(ordinary)])], default);
+        var shown = await ShownOnReadAsync(s, [(missing, [WitnessRef(ordinary)])]);
 
         shown!.ContainsKey(missing).Should().BeFalse("absent means withheld");
     }

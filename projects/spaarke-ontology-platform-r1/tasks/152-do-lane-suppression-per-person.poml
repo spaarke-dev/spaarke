@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="152" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>Do-lane suppression counts per person: a colleague's dismissals never mute your Do items (D-145a)</title>
+    <phase>3 Worklist</phase>
+    <gate>blocked: #1903 (task 151) and #1905 (task 150) merged into docs/ontology-platform-design</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Changes the suppression grain used by the nightly job and the suppression route; privacy rule (D-141/D-145).</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Grain change across the nightly stamp, the reconcile/withdraw path and the per-caller route; must not break the secure-family partition or D-61.</model-tier-reason>
+    <effort>high</effort>
+    <deps>150, 151</deps>
+    <tags>bff-api,job,security,testing</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Issue #1921: Do-lane suppression is keyed (policy, core record) and global. Bob's three dismissals of his own Do items on matter M stamp `sprk_suppresseduntil` for the whole (policy, M) grain, so Alice's Do items for the same policy on M stop being raised. The owner decided (D-145a): a dismissal of one person's Do item never suppresses another person's Do item.</prompt>
+  <role>SPAARKE BFF engineer.</role>
+  <goal>For Do-lane Signals, a dismissal counts only toward the suppression of Do items belonging to the same person; Decide/Know-lane suppression is unchanged.</goal>
+
+  <context>
+    <background>D-145, D-141, D-129, D-11/D-39 (notes/decisions.md); issue #1921. Facts mapped 2026-10-15 at origin/docs/ontology-platform-design: `SuppressionGrain` ForCore/ForItem (`SignalSuppressionService.cs:41-47`), `Assess` (:1000-1060, counts Dismissal records, no filter on `sprk_confirmedby`), threshold 3 / window 30 days (:181, :184), stamp writers `ApplyAsync` (commit follow-up `DecisionCommitFollowUps.cs:72`, repair `DecisionCommitService.cs:738, 890`) and `ReconcileAsync` (`SignalReevaluationJob.cs:249`), re-raise muted by the stored stamp per grain (`SignalReevaluationJob.cs:1278`), per-caller count on `GET /suppression` (`GetStatusForSignalAsync`, `ReadVisibleSignalIdsAsync` :1135-1172). Re-read these at your base; line numbers drift.</background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Signals/SignalSuppressionService.cs (grain, Assess, ApplyAsync, ReconcileAsync, GetStatusForSignalAsync)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Signals/SignalReevaluationJob.cs (stamp read for re-raise; read only unless the grain key must change there)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Signals/SignalCoreRecordAccess.cs and SignalReadService.cs (the "mine" rule and Do-lane person columns; REUSE, do not copy)</file>
+    </relevant-files>
+  </context>
+
+  <justification>
+    <existing>SuppressionGrain already has two shapes (core, item) and the secure-family partition.</existing>
+    <extension>Add the person to the Do-lane grain inside SignalSuppressionService; no new service, route, registration or column.</extension>
+    <cost-of-doing-nothing>A colleague's dismissals silently stop your Do items from being raised, contrary to D-145 and undercutting D-141.</cost-of-doing-nothing>
+  </justification>
+
+  <constraints>
+    <constraint source="D-145a">Do lane only. A Do-lane grain includes the person the item belongs to: the subject's individual from Assigned To Internal (`sprk_assignedtointernal`, or `sprk_assignedto1` on `sprk_invoice`/`sprk_event`; D-129 contact), via the same person-column map the "mine" rule uses (`OwnedChildWrite.ForPersonColumns`). An item with no individual keeps the per-item grain (D-39). Dismissals of the same person's Do items on the same core record still count together.</constraint>
+    <constraint source="D-145a">Which person a dismissal counts for must be decided from data that exists today. If the only correct answer needs a new column (for example the person at dismissal time stored on the Signal or the Decision Record), STOP and escalate with the options; a new column is a schema change needing the owner.</constraint>
+    <constraint source="D-145a">Decide and Know lanes: grain, counts and stamps unchanged (existing tests green, unmodified).</constraint>
+    <constraint source="D-123">The secure-family partition stays as it is and still splits every grain.</constraint>
+    <constraint source="D-61">Never stamp an unchanged Signal; the nightly pass writes only rows whose stamp changes. Existing (policy, core) stamps on Do-lane Signals written before this change are withdrawn or re-derived on the first nightly pass, never left muting another person's items: state which, and test it.</constraint>
+    <constraint source="D-141">`GET /suppression` keeps answering only for "mine" callers (150) and counts only the caller's own person grain.</constraint>
+    <constraint source="bff-extensions">Publish-size delta vs a fresh build of origin/master, no new HIGH CVE.</constraint>
+    <constraint source="D-123">uac-r2 reviews the PR (SendMessage + #1355).</constraint>
+  </constraints>
+
+  <steps mode="directional">
+    <step order="1">Re-read the grain, Assess, the two stamp writers, the nightly re-raise read and the "mine" person-column map at your base.</step>
+    <step order="2">Add the person to the Do-lane grain; carry it through ApplyAsync, ReconcileAsync and the suppression route.</step>
+    <step order="3">Handle the pre-existing (policy, core) Do-lane stamps.</step>
+    <step order="4">Tests (filtered), seeding proof, size delta, PR into docs/ontology-platform-design.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">Negative: Bob dismisses three of his own Do items for policy P on matter M within 30 days; Alice's Do item for P on M is still raised by the nightly pass and is not reported suppressed to Alice.</criterion>
+    <criterion testable="true">Bob's next Do item for P on M is suppressed (D-11 still holds for one person).</criterion>
+    <criterion testable="true">A Do item with no individual: per-item grain, unchanged from D-39.</criterion>
+    <criterion testable="true">Decide-lane suppression for (P, M) behaves exactly as before.</criterion>
+    <criterion testable="true">A pre-existing (policy, core) stamp on a Do-lane Signal stops muting other people's items after one nightly pass.</criterion>
+    <criterion testable="true">The secure-family partition still separates counts (existing test green).</criterion>
+    <criterion testable="false">Test scope: the cases above only; seeding proof on the colleague case (restore the (policy, core) key, the test fails).</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>If the person grain needs a new column, STOP (see constraint).</trigger>
+    <trigger>If the change requires editing uac-r2's files (SecureChildLineage, SecureChildShareSynchronizer, RecordOwnershipResolver), STOP and report.</trigger>
+  </escalation>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/jobs.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/testing.md</file>
+    </files>
+  </knowledge>
+</task>

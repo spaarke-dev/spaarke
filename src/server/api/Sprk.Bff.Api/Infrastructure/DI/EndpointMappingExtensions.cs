@@ -6,6 +6,7 @@ using Sprk.Bff.Api.Api.Agent;
 using Sprk.Bff.Api.Api.Ai;
 using Sprk.Bff.Api.Api.Events;
 using Sprk.Bff.Api.Api.Signals;
+using Sprk.Bff.Api.Api.Ontology;
 using Sprk.Bff.Api.Api.ExternalAccess;
 using Sprk.Bff.Api.Api.FieldMappings;
 using Sprk.Bff.Api.Api.Finance;
@@ -234,6 +235,8 @@ public static class EndpointMappingExtensions
         app.MapDecisionCommitEndpoints();
         // Ontology platform R1 task 038: the worklist's Signal read route (core-record check and Do-lane scope as the caller).
         app.MapSignalReadEndpoints();
+        // Ontology platform R1 task 104 (D-22): the Ontology admin capability probe (shows the tab; never authorizes a write).
+        app.MapOntologyAdminEndpoints();
         // MapWorkAssignmentEndpoints() REMOVED 2026-10-03 — unified-access-control-r2 task 166 (sweep finding S-76,
         // owner round 10 item 1). Api/WorkAssignmentEndpoints.cs is DELETED. Its one route, POST
         // /api/v1/work-assignments, created a sprk_workassignment APP-ONLY with ownerid = a caller-chosen user (records

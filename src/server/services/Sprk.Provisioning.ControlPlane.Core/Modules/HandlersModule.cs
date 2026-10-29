@@ -8,7 +8,7 @@
 //       Provisioning handlers register in L2 control-plane service, NOT the
 //       BFF. This module is the L2 handler DI surface.
 //   - projects/customer-provisioning-orchestration-r1/spec.md FR-01 + NFR-12:
-//       H0 preflight owns four quota / readiness checks; each is a distinct
+//       H0 preflight owns three quota / readiness checks; each is a distinct
 //       IPreflightQuotaProbe registration.
 //   - ADR-010: Feature-module extension method keeps Program.cs at ~15
 //              non-framework DI lines (NFR-07 god-class ratchet). One
@@ -22,18 +22,20 @@
 //              itself.
 //
 // SCOPE (task 041):
-//   - Register the four IPreflightQuotaProbe instances.
+//   - Register the three IPreflightQuotaProbe instances.
 //   - Register H0PreflightHandler as IProvisioningHandler (Scoped).
 //   - Do NOT register any downstream handler (H0.5, H1, ...) — those tasks
 //     own their own registrations.
 //
 // TASK 120 UPDATE (Wave G-2, Option D hybrid per DS-1b §1 H0 row):
-//   The four probes are now pure .NET SDK/REST implementations
-//   (ArmCognitiveServicesTpmProbe, ArmComputeVCpuProbe, KeyVaultCertBootstrapProbe — task 248 replaced the last
-//   with SpeOwnerCredentialProbe; T228 removed the BAP environment-creation-rate probe with environment creation) — the shell-out
+//   The probes are pure .NET SDK/REST implementations
+//   (ArmCognitiveServicesTpmProbe, ArmOpenAiPinFreshnessProbe, SpeOwnerCredentialProbe — task 248 replaced
+//   KeyVaultCertBootstrapProbe with the last; T228 removed the BAP environment-creation-rate probe with environment
+//   creation; T186 L17 (2026-10-15) removed ArmComputeVCpuProbe: the stamp consumes no Microsoft.Compute vCPU
+//   quota, and a real App Service quota shortfall surfaces at H2a) — the shell-out
 //   PowerShellPreflightProbe + its Preflight:{PwshExecutable,
 //   ScriptsDirectory, Timeout} options binding are RETIRED (grep-verified
-//   zero remaining callers). The TPM + vCPU probes share ONE platform
+//   zero remaining callers). The TPM + pin-freshness probes share ONE platform
 //   ArmClient singleton (built here from the CosmosModule TokenCredential,
 //   TryAddSingleton so task 121's ArmSubscriptionReadinessProbe can reuse
 //   the same instance rather than constructing a second one — CLAUDE.md
@@ -72,7 +74,7 @@ namespace Sprk.Provisioning.ControlPlane.Modules;
 public static class HandlersModule
 {
     /// <summary>
-    /// Registers <see cref="H0PreflightHandler"/> + its four
+    /// Registers <see cref="H0PreflightHandler"/> + its three
     /// <see cref="IPreflightQuotaProbe"/> dependencies with the DI container.
     /// </summary>
     /// <param name="services">Service collection.</param>
@@ -95,18 +97,15 @@ public static class HandlersModule
         // Typed HttpClient for the BAP REST probe (task 120) — matches the
         // GraphRestB2BConsentVerifier / GraphRestSubscriptionCreator
         // AddHttpClient<TInterface, TImplementation>() convention. Additive:
-        // IPreflightQuotaProbe already has 3 other registrations below: all 4
+        // IPreflightQuotaProbe already has 2 other registrations below: all 3
         // resolve via the IEnumerable<IPreflightQuotaProbe> H0 injects.
 
-        // Remaining three probe registrations (task 120 — SDK ports; Option D
+        // Remaining probe registrations (task 120 — SDK ports; Option D
         // hybrid per DS-1b §1 H0 row). Order does not matter; H0 orchestrates
-        // all four in parallel.
+        // all three in parallel.
         services.AddScoped<IPreflightQuotaProbe>(sp => new ArmCognitiveServicesTpmProbe(
             sp.GetRequiredService<ArmClient>(),
             sp.GetRequiredService<ILogger<ArmCognitiveServicesTpmProbe>>()));
-        services.AddScoped<IPreflightQuotaProbe>(sp => new ArmComputeVCpuProbe(
-            sp.GetRequiredService<ArmClient>(),
-            sp.GetRequiredService<ILogger<ArmComputeVCpuProbe>>()));
         services.AddScoped<IPreflightQuotaProbe>(sp => new SpeOwnerCredentialProbe(
             sp.GetRequiredService<SpeConfidentialClientGraphFactory>(),
             sp.GetRequiredService<IOptions<SpeContainerOptions>>(),

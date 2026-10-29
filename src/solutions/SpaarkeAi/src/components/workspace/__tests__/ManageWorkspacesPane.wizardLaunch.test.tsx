@@ -27,6 +27,9 @@ jest.mock("@spaarke/ai-widgets", () => ({
     isAuthenticated: true,
   }),
   useDispatchPaneEvent: () => mockDispatch,
+  // Ontology task 104: the gated Administration entry (not under test here; the caller has no admin tab).
+  useOntologyAdminTabAvailable: () => false,
+  ONTOLOGY_ADMIN_WIDGET_TYPE: "ontology-admin",
 }));
 
 const mockRefetch = jest.fn();

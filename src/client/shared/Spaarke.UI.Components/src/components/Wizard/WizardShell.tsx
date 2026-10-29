@@ -37,7 +37,16 @@
  */
 
 import * as React from 'react';
-import { Button, MessageBar, MessageBarBody, Text, Spinner, makeStyles, mergeClasses, tokens } from '@fluentui/react-components';
+import {
+  Button,
+  MessageBar,
+  MessageBarBody,
+  Text,
+  Spinner,
+  makeStyles,
+  mergeClasses,
+  tokens,
+} from '@fluentui/react-components';
 
 import { ModalWindowControls } from '../ModalWindowControls';
 import { SprkModal } from '../SprkModal/SprkModal';
@@ -115,6 +124,8 @@ const useStyles = makeStyles({
     paddingLeft: tokens.spacingHorizontalXL,
     paddingRight: tokens.spacingHorizontalXL,
   },
+  // Added only with `resetKey` (task 165): the content area is a programmatic focus target, not a tab stop, so no ring.
+  contentFocusTarget: { outlineStyle: 'none' },
   // Footer (embedded mode — in modal mode SprkModal renders the footer from the same slot content).
   footer: {
     display: 'flex',
@@ -165,6 +176,8 @@ export const WizardShell = React.forwardRef<IWizardShellHandle, IWizardShellProp
     footer: footerOverride,
     stayOpenOnFinish = false,
     showSkippedSteps = false,
+    // ontology task 165 — additive, opt-in: a changed value starts the wizard over without unmounting the dialog
+    resetKey,
   } = props;
 
   const styles = useStyles();
@@ -229,6 +242,41 @@ export const WizardShell = React.forwardRef<IWizardShellHandle, IWizardShellProp
     }),
     [shellState, forceRender]
   );
+
+  // ── Reset in place when `resetKey` changes (task 165) ──────────────────
+  // Applied DURING render (React's derived-state pattern), not in an effect: an effect would let one render commit the new
+  // `steps` against the previous step state, and the step contents (which act on the shell state they see) would run
+  // against it before the reset landed. React re-renders this component at once with the reset state, so the committed
+  // output is never the mixed one. The dialog is not remounted; the keyed fragment below remounts only its content.
+  const [appliedResetKey, setAppliedResetKey] = React.useState(resetKey);
+  // Object.is, not !==: a NaN key must compare equal to itself or the reset would run on every render, forever.
+  if (!Object.is(resetKey, appliedResetKey)) {
+    setAppliedResetKey(resetKey);
+    dispatch({ type: 'RESET', steps: stepConfigs, initialStepId });
+    setIsFinishing(false);
+    setFinishError(null);
+    setSuccessConfig(null);
+    // Dynamic steps of the previous session are gone with the state; the base configs are re-registered below.
+    configMapRef.current = new Map();
+  }
+
+  // After a reset the content has been remounted, so the control that held keyboard focus (Try again, Next open item) is gone and
+  // focus would fall to <body>, outside the dialog. Put it on the content area only when focus was LOST (on <body> or nowhere):
+  // focus held anywhere else (a control still in the dialog, a confirm or side pane opened above it) is left alone. Skips the
+  // first mount (under StrictMode in development the ref survives the simulated remount, so it may focus the content area once
+  // at open, which is harmless); a shell without `resetKey` never changes `appliedResetKey`, so it never runs there after mount.
+  const contentRef = React.useRef<HTMLDivElement>(null);
+  const resetMountedRef = React.useRef(false);
+  React.useEffect(() => {
+    if (!resetMountedRef.current) {
+      resetMountedRef.current = true;
+      return;
+    }
+    const content = contentRef.current;
+    if (!content) return;
+    const active = document.activeElement;
+    if (!active || active === document.body) content.focus();
+  }, [appliedResetKey]);
 
   // ── Reset on open (false -> true) ──────────────────────────────────────
   const prevOpenRef = React.useRef(open);
@@ -363,19 +411,29 @@ export const WizardShell = React.forwardRef<IWizardShellHandle, IWizardShellProp
     <div className={className}>
       <WizardStepper steps={shellState.steps} />
 
-      <div className={styles.contentArea}>
-        {/* Status bar slot (task 056) — above everything else in the content area */}
-        {statusBar}
+      {/* tabIndex only with `resetKey` (task 165), so the reset can park focus here; other wizards render as before. */}
+      <div
+        className={
+          resetKey !== undefined ? mergeClasses(styles.contentArea, styles.contentFocusTarget) : styles.contentArea
+        }
+        ref={contentRef}
+        tabIndex={resetKey !== undefined ? -1 : undefined}
+      >
+        {/* Keyed by `resetKey` (task 165): a reset remounts the content, never the dialog. No key: a plain fragment. */}
+        <React.Fragment key={resetKey}>
+          {/* Status bar slot (task 056) — above everything else in the content area */}
+          {statusBar}
 
-        {/* Finish error bar */}
-        {finishError && (
-          <MessageBar intent="error" role="alert">
-            <MessageBarBody>{finishError}</MessageBarBody>
-          </MessageBar>
-        )}
+          {/* Finish error bar */}
+          {finishError && (
+            <MessageBar intent="error" role="alert">
+              <MessageBarBody>{finishError}</MessageBarBody>
+            </MessageBar>
+          )}
 
-        {/* Success screen replaces step content */}
-        {successConfig ? <WizardSuccessScreen config={successConfig} /> : currentConfig?.renderContent(handle)}
+          {/* Success screen replaces step content */}
+          {successConfig ? <WizardSuccessScreen config={successConfig} /> : currentConfig?.renderContent(handle)}
+        </React.Fragment>
       </div>
     </div>
   );

@@ -19,14 +19,13 @@
  */
 
 import * as React from 'react';
-import { Button, MessageBar, MessageBarBody, Spinner, Text, makeStyles, tokens } from '@fluentui/react-components';
 import { ConfirmModal } from '../SprkModal/presets/ConfirmModal';
-import { WizardShell } from '../Wizard/WizardShell';
 import type { SprkModalNav } from '../SprkModal/SprkModal.types';
 import { DecisionItemWizard, hasRecordedDecision } from './DecisionItemWizard';
+import type { DecisionItemView } from './DecisionItemWizard';
 import { buildReview, emptyDraft, hasUnrecordedChoices, newReviewId } from './decisionDraft';
 import type { ItemDraft } from './decisionDraft';
-import type { DecisionLookup } from './decisionItemContext';
+import type { DecisionLookup, DecisionOpenLookupForItem } from './decisionItemContext';
 import {
   closesSignal,
   failureKeepsReview,
@@ -41,6 +40,8 @@ import type {
   DecisionCommitResult,
   DecisionItemLoader,
   DecisionLookupSearch,
+  DecisionOpenLookup,
+  DecisionOpenRecord,
   DecisionPlan,
   DecisionResolution,
   DecisionWizardItem,
@@ -58,6 +59,14 @@ export interface DecisionWizardProps {
   loadItem: DecisionItemLoader;
   /** Searches for Lookup / Person fields. Absent: those fields say they cannot be searched. */
   lookup?: DecisionLookupSearch;
+  /**
+   * The host's side-pane lookup (`Xrm.Utility.lookupObjects` through `INavigationService.openLookup`, D-182). Present: every
+   * Person / Lookup field opens it (or, when it lists `supportedEntities`, every field on a listed table; the rest keep the
+   * inline type-ahead). Absent: those fields keep the inline type-ahead over `lookup`.
+   */
+  openLookup?: DecisionOpenLookup;
+  /** The host's open-record-in-a-modal (`INavigationService.openRecordModal`, D-182). Absent: the subject is plain text. */
+  openRecord?: DecisionOpenRecord;
   /** Close the wizard. Called only after the discard check (or when nothing is unrecorded). */
   onClose: () => void;
   /** Raised after an item was recorded, so the host can refresh its worklist. */
@@ -84,16 +93,6 @@ interface Recorded {
   resolution: DecisionResolution;
 }
 
-const useStyles = makeStyles({
-  center: {
-    display: 'flex',
-    flexDirection: 'column',
-    alignItems: 'center',
-    rowGap: tokens.spacingVerticalM,
-    padding: tokens.spacingVerticalXXL,
-  },
-});
-
 /** The plan of an item that closed without a person deciding it (superseded, cleared): there is nothing to replay. */
 function emptyPlan(item: DecisionWizardItem): DecisionPlan {
   return {
@@ -115,12 +114,13 @@ export const DecisionWizard: React.FC<DecisionWizardProps> = ({
   service,
   loadItem,
   lookup,
+  openLookup,
+  openRecord,
   onClose,
   onRecorded,
   uiScale,
   today: todayProp,
 }) => {
-  const styles = useStyles();
   const today = React.useMemo(() => todayProp ?? new Date(), [todayProp]);
 
   const [index, setIndex] = React.useState(() => Math.max(0, itemIds.indexOf(startItemId)));
@@ -292,8 +292,7 @@ export const DecisionWizard: React.FC<DecisionWizardProps> = ({
         const wasPinned = prior?.pinned === true;
         // The first failure that keeps the id pins the review. After that only a new Failed outcome replaces the failure that
         // decides `retry`; a refusal or an in-progress answer leaves it alone.
-        const pinning =
-          keeps && (!wasPinned || isFailedOutcome(failure)) ? failure : (prior?.pinning ?? null);
+        const pinning = keeps && (!wasPinned || isFailedOutcome(failure)) ? failure : (prior?.pinning ?? null);
         const isNowPinned = keeps || wasPinned;
         attempts.current[id] = {
           key: wasPinned ? prior.key : reviewKey(review),
@@ -372,79 +371,70 @@ export const DecisionWizard: React.FC<DecisionWizardProps> = ({
         : null,
     [lookup, readyItem]
   );
+  const itemOpenLookup = React.useMemo<DecisionOpenLookupForItem | null>(
+    () =>
+      openLookup && readyItem
+        ? Object.assign(
+            (req: Parameters<DecisionOpenLookupForItem>[0]) =>
+              openLookup({
+                ...req,
+                core: readyItem.core
+                  ? { recordType: readyItem.core.recordType, recordId: readyItem.core.recordId }
+                  : null,
+              }),
+            { supportedEntities: openLookup.supportedEntities }
+          )
+        : null,
+    [openLookup, readyItem]
+  );
   const draft = drafts[currentId];
   const done = recorded[currentId];
 
-  let body: React.ReactNode;
+  // ONE dialog for the whole session (task 165): `DecisionItemWizard` is always mounted, with no key. What changes with the item
+  // (loading, an error and Try again, ready, another item, recorded) is its `view`; it starts the shell's steps over in place.
+  let view: DecisionItemView;
   if (state?.status === 'ready' && (draft || state.item.resolution)) {
     const resolution = done?.resolution ?? state.item.resolution ?? null;
-    body = (
-      <DecisionItemWizard
-        // Recording remounts the shell so it opens, read-only, on its last step (the Confirm step): the steps it listed while
-        // being decided can differ from the steps a closed item lists.
-        key={done ? `${currentId}:recorded` : currentId}
-        item={state.item}
-        plan={state.plan}
-        suppression={state.suppression}
-        suppressionFailed={state.suppressionFailed}
-        draft={draft ?? emptyDraft(currentId)}
-        onDraftChange={change => updateDraft(currentId, change)}
-        resolution={resolution}
-        justRecorded={done != null}
-        failure={failures[currentId] ?? null}
-        pinnedFailure={pinned[currentId] ?? null}
-        closedIds={closedIds}
-        recordResult={done?.result ?? null}
-        recording={recording === currentId}
-        onRecord={() => record(currentId)}
-        lookup={itemLookup}
-        openItemsLeft={openItemsLeft}
-        onNextOpenItem={nextOpenIndex >= 0 ? () => setIndex(nextOpenIndex) : undefined}
-        nav={nav}
-        onClose={requestClose}
-        uiScale={uiScale}
-        today={today}
-      />
-    );
+    view = {
+      status: 'ready',
+      ready: {
+        item: state.item,
+        plan: state.plan,
+        suppression: state.suppression,
+        suppressionFailed: state.suppressionFailed,
+        draft: draft ?? emptyDraft(currentId),
+        onDraftChange: change => updateDraft(currentId, change),
+        resolution,
+        justRecorded: done != null,
+        failure: failures[currentId] ?? null,
+        pinnedFailure: pinned[currentId] ?? null,
+        closedIds,
+        recordResult: done?.result ?? null,
+        recording: recording === currentId,
+        onRecord: () => record(currentId),
+        lookup: itemLookup,
+        openLookup: itemOpenLookup,
+        openRecord: openRecord ?? null,
+        openItemsLeft,
+        onNextOpenItem: nextOpenIndex >= 0 ? () => setIndex(nextOpenIndex) : undefined,
+      },
+    };
+  } else if (state?.status === 'error') {
+    view = { status: 'error', message: state.message, onRetry: () => void loadOne(currentId) };
   } else {
-    const failed = state?.status === 'error';
-    body = (
-      <WizardShell
-        key={`${currentId}:${failed ? 'error' : 'loading'}`}
-        open
-        title="Decision"
-        steps={[
-          {
-            id: 'loading',
-            label: failed ? 'Unavailable' : 'Loading',
-            canAdvance: () => false,
-            renderContent: () =>
-              failed ? (
-                <div className={styles.center} data-testid="item-error">
-                  <MessageBar intent="error">
-                    <MessageBarBody>{state.message}</MessageBarBody>
-                  </MessageBar>
-                  <Button appearance="primary" onClick={() => void loadOne(currentId)}>
-                    Try again
-                  </Button>
-                </div>
-              ) : (
-                <div className={styles.center} data-testid="item-loading">
-                  <Spinner size="small" />
-                  <Text>Loading the decision...</Text>
-                </div>
-              ),
-          },
-        ]}
-        onClose={requestClose}
-        onFinish={async () => undefined}
-        stayOpenOnFinish
-        dismiss="explicit"
-        uiScale={uiScale}
-        nav={nav}
-      />
-    );
+    view = { status: 'loading' };
   }
+
+  const body = (
+    <DecisionItemWizard
+      itemId={currentId}
+      view={view}
+      nav={nav}
+      onClose={requestClose}
+      uiScale={uiScale}
+      today={today}
+    />
+  );
 
   return (
     <>

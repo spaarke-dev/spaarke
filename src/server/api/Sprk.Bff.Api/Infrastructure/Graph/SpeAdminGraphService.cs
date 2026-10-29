@@ -12,6 +12,7 @@ using Microsoft.Kiota.Abstractions.Serialization;
 using Microsoft.Kiota.Authentication.Azure;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Exceptions;
+using Sprk.Bff.Api.Infrastructure.Http;
 
 namespace Sprk.Bff.Api.Infrastructure.Graph;
 
@@ -1377,8 +1378,11 @@ public sealed class SpeAdminGraphService
     /// container that cannot be stamped is soft-deleted and <see cref="ContainerBindingException"/> is thrown.
     /// </param>
     /// <returns>A <see cref="SpeContainerSummary"/> representing the newly created container.</returns>
-    /// <exception cref="InvalidOperationException">Thrown when Graph API returns null unexpectedly.</exception>
-    /// <exception cref="ODataError">Thrown when Graph API returns an error response.</exception>
+    /// <exception cref="ODataError">Graph refused the create: nothing was created.</exception>
+    /// <exception cref="ContainerCreateOutcomeUnknownException">
+    /// The create reached Graph but its answer (a 5xx, a 408, a lost response, or a success naming no container) does not
+    /// settle whether a container was made. It is not re-sent (#2032).
+    /// </exception>
     /// <exception cref="ContainerBindingException">The container was created but could not be bound.</exception>
     public async Task<SpeContainerSummary> CreateContainerAsync(
         GraphServiceClient graphClient,
@@ -1412,15 +1416,37 @@ public sealed class SpeAdminGraphService
             ContainerTypeId = Guid.TryParse(containerTypeId, out var ctGuid) ? ctGuid : Guid.Empty
         };
 
-        var created = await ExecuteWithRetryAsync(
-            () => graphClient.Storage.FileStorage.Containers.PostAsync(body, cancellationToken: ct),
-            ct);
-
-        if (created is null)
+        // #2032: the create is not idempotent. NoTransientRetryOption stops the Graph handler re-sending it after a 5xx, a
+        // 408 or a transport fault (Graph may have committed the first, leaving a duplicate); it still retries a 429, which
+        // Graph did not process — so no ExecuteWithRetryAsync here. An answer that leaves it unknown whether a container
+        // was created is reported as such, not as "nothing was created" (ContainerOperations.CreateContainerAsync, #1755).
+        // The caller's last chance to stop the create (#1735/#1755, as ContainerOperations): once the POST is sent, Graph
+        // may commit a container whose id only its answer carries, so the POST runs on its own token, not the caller's —
+        // a cancel mid-POST would leave one that nothing can find, bind or remove.
+        ct.ThrowIfCancellationRequested();
+        var createOption = new NoTransientRetryOption();
+        Microsoft.Graph.Models.FileStorageContainer? created;
+        using (var send = new CancellationTokenSource(UncancellableStepTimeout))
         {
-            throw new InvalidOperationException(
-                $"Graph API returned null when creating container '{displayName}' " +
-                $"for containerTypeId '{containerTypeId}'. The container may not have been created.");
+            try
+            {
+                created = await graphClient.Storage.FileStorage.Containers
+                    .PostAsync(body, rc => rc.Options.Add(createOption), send.Token);
+            }
+            catch (Exception ex) when (CreateOutcomeIsUnknown(createOption, ex))
+            {
+                throw new ContainerCreateOutcomeUnknownException(displayName, ex);
+            }
+        }
+
+        // A 2xx is Graph committing the create. One that names no container leaves a container nothing names: not
+        // "nothing was created" (ContainerOperations, #1755 round 2).
+        if (string.IsNullOrEmpty(created?.Id))
+        {
+            throw new ContainerCreateOutcomeUnknownException(displayName,
+                new InvalidOperationException(created is null
+                    ? "Graph answered the create with success but no container."
+                    : "Graph answered the create with a container that has no id."));
         }
 
         _logger.LogInformation(
@@ -1429,10 +1455,10 @@ public sealed class SpeAdminGraphService
 
         // Owner round 20 item 1: the container carries its owning business unit from the moment it exists. A
         // stamp that cannot be written AND read back removes the container again (ContainerBindingException).
-        await BindNewContainerAsync(graphClient, created.Id ?? string.Empty, owningBusinessUnitId, ct).ConfigureAwait(false);
+        await BindNewContainerAsync(graphClient, created.Id, owningBusinessUnitId, ct).ConfigureAwait(false);
 
         return new SpeContainerSummary(
-            Id: created.Id ?? string.Empty,
+            Id: created.Id,
             DisplayName: created.DisplayName ?? displayName,
             Description: created.Description,
             ContainerTypeId: created.ContainerTypeId?.ToString() ?? containerTypeId,
@@ -1441,13 +1467,20 @@ public sealed class SpeAdminGraphService
             // and hardcoded null — but an inference is not a measurement, and if Graph ever does
             // report a value here we would still have been discarding it.
             StorageUsedInBytes: ReadStorageUsedInBytes(created.AdditionalData),
-            // CREATE genuinely returns this — measured 2026-08-27, a fresh container comes back
-            // `status: inactive` until /activate is called. So unlike the LIST paths this is a real
-            // read, and the old `: "active"` fallback was actively wrong here: it reported a
-            // brand-new, not-yet-activated container as active.
-            Status: ReadContainerStatus(created.Status, created.AdditionalData),
+            // CREATE answers `status: inactive` (measured 2026-08-27) — that is the state BEFORE the bind. The bind
+            // activates it (POST /activate, #2032) and throws when that fails, so reaching here means Graph accepted the
+            // activation: report what the container now is, not the create response's snapshot of what it was.
+            Status: "active",
             ArchiveStatus: ReadArchiveStatus(created.AdditionalData));
     }
+
+    /// <summary>
+    /// True when a failed create POST leaves unknown whether Graph created the container: an attempt reached Graph and its
+    /// answer was not a settled refusal. The same rule as <c>ContainerOperations.OutcomeIsUnknown</c> (#1755), which the
+    /// external-access create uses; see <see cref="NoTransientRetryOption"/> for what the handler records.
+    /// </summary>
+    private static bool CreateOutcomeIsUnknown(NoTransientRetryOption option, Exception ex) =>
+        option.CloseAndReadOutcomeUnknown() || ex is ApiException { ResponseStatusCode: >= 500 or 408 };
 
     /// <summary>
     /// Retrieves a single SPE container by its Graph FileStorageContainer ID.
@@ -1588,10 +1621,15 @@ public sealed class SpeAdminGraphService
     }
 
     /// <summary>
-    /// Activates an SPE container by PATCHing its status to <c>active</c>.
+    /// Activates an SPE container with Graph's <c>POST /storage/fileStorage/containers/{id}/activate</c> action (#2032).
     /// Returns <c>false</c> when Graph responds 404.
-    /// Throws <see cref="ODataError"/> for other failures (e.g., 409 Conflict if state transition is invalid).
+    /// Throws <see cref="ODataError"/> for other failures.
     /// </summary>
+    /// <remarks>
+    /// This used to PATCH <c>status = "active"</c>, but <c>status</c> is read-only on <c>fileStorageContainer</c>: the
+    /// PATCH either failed or "worked" only as a property update that may itself activate the container. The action is the
+    /// documented way. It is idempotent, so it keeps the 429 retry.
+    /// </remarks>
     /// <param name="graphClient">App-only Graph client: from <see cref="GetClientForContainerAsync"/> for one container, or <see cref="GetTypeWideClientForConfigAsync"/> for type-wide work.</param>
     /// <param name="containerId">The Graph FileStorageContainer ID to activate.</param>
     /// <param name="ct">Cancellation token.</param>
@@ -1606,23 +1644,9 @@ public sealed class SpeAdminGraphService
 
         _logger.LogInformation("Activating SPE container {ContainerId}", containerId);
 
-        // Use AdditionalData to set status as a raw string value, bypassing the FileStorageContainerStatus enum
-        // which may not include all SPE beta status values in the current SDK version.
-        var patch = new Microsoft.Graph.Models.FileStorageContainer
-        {
-            AdditionalData = new Dictionary<string, object> { ["status"] = "active" }
-        };
-
         try
         {
-            await ExecuteWithRetryAsync(
-                async () =>
-                {
-                    await graphClient.Storage.FileStorage.Containers[containerId]
-                        .PatchAsync(patch, cancellationToken: ct);
-                    return (object?)null;
-                },
-                ct);
+            await PostActivateAsync(graphClient, containerId, ct).ConfigureAwait(false);
 
             _logger.LogInformation("SPE container {ContainerId} activated successfully", containerId);
             return true;
@@ -1635,10 +1659,28 @@ public sealed class SpeAdminGraphService
     }
 
     /// <summary>
-    /// Locks an SPE container by PATCHing its status to <c>locked</c>.
-    /// Returns <c>false</c> when Graph responds 404.
-    /// Throws <see cref="ODataError"/> for other failures (e.g., 409 Conflict if state transition is invalid).
+    /// <c>POST /storage/fileStorage/containers/{id}/activate</c> with the 429 retry. Shared by
+    /// <see cref="ActivateContainerAsync"/> and the bind of a container this service has just created.
     /// </summary>
+    private Task PostActivateAsync(GraphServiceClient graphClient, string containerId, CancellationToken ct) =>
+        ExecuteWithRetryAsync<object?>(
+            async () =>
+            {
+                await graphClient.Storage.FileStorage.Containers[containerId].Activate
+                    .PostAsync(cancellationToken: ct).ConfigureAwait(false);
+                return null;
+            },
+            ct);
+
+    /// <summary>
+    /// Locks an SPE container read-only with Graph's <c>POST /storage/fileStorage/containers/{id}/lock</c> action
+    /// (<c>lockState: lockedReadOnly</c>, #2032).
+    /// Returns <c>false</c> when Graph responds 404.
+    /// Throws <see cref="ODataError"/> for other failures.
+    /// </summary>
+    /// <remarks>
+    /// This used to PATCH <c>status = "locked"</c>; <c>status</c> is read-only, and "locked" is not one of its values.
+    /// </remarks>
     /// <param name="graphClient">App-only Graph client: from <see cref="GetClientForContainerAsync"/> for one container, or <see cref="GetTypeWideClientForConfigAsync"/> for type-wide work.</param>
     /// <param name="containerId">The Graph FileStorageContainer ID to lock.</param>
     /// <param name="ct">Cancellation token.</param>
@@ -1653,9 +1695,9 @@ public sealed class SpeAdminGraphService
 
         _logger.LogInformation("Locking SPE container {ContainerId}", containerId);
 
-        var patch = new Microsoft.Graph.Models.FileStorageContainer
+        var lockBody = new Microsoft.Graph.Storage.FileStorage.Containers.Item.Lock.LockPostRequestBody
         {
-            AdditionalData = new Dictionary<string, object> { ["status"] = "locked" }
+            LockState = Microsoft.Graph.Models.SiteLockState.LockedReadOnly
         };
 
         try
@@ -1663,8 +1705,8 @@ public sealed class SpeAdminGraphService
             await ExecuteWithRetryAsync(
                 async () =>
                 {
-                    await graphClient.Storage.FileStorage.Containers[containerId]
-                        .PatchAsync(patch, cancellationToken: ct);
+                    await graphClient.Storage.FileStorage.Containers[containerId].Lock
+                        .PostAsync(lockBody, cancellationToken: ct);
                     return (object?)null;
                 },
                 ct);
@@ -1680,10 +1722,11 @@ public sealed class SpeAdminGraphService
     }
 
     /// <summary>
-    /// Unlocks an SPE container by PATCHing its status back to <c>active</c>.
+    /// Unlocks an SPE container with Graph's <c>POST /storage/fileStorage/containers/{id}/unlock</c> action (#2032).
     /// Returns <c>false</c> when Graph responds 404.
-    /// Throws <see cref="ODataError"/> for other failures (e.g., 409 Conflict if not currently locked).
+    /// Throws <see cref="ODataError"/> for other failures.
     /// </summary>
+    /// <remarks>This used to PATCH the read-only <c>status</c> back to <c>active</c>.</remarks>
     /// <param name="graphClient">App-only Graph client: from <see cref="GetClientForContainerAsync"/> for one container, or <see cref="GetTypeWideClientForConfigAsync"/> for type-wide work.</param>
     /// <param name="containerId">The Graph FileStorageContainer ID to unlock.</param>
     /// <param name="ct">Cancellation token.</param>
@@ -1698,19 +1741,13 @@ public sealed class SpeAdminGraphService
 
         _logger.LogInformation("Unlocking SPE container {ContainerId}", containerId);
 
-        // Unlock transitions a locked container back to active (the only valid transition from locked).
-        var patch = new Microsoft.Graph.Models.FileStorageContainer
-        {
-            AdditionalData = new Dictionary<string, object> { ["status"] = "active" }
-        };
-
         try
         {
             await ExecuteWithRetryAsync(
                 async () =>
                 {
-                    await graphClient.Storage.FileStorage.Containers[containerId]
-                        .PatchAsync(patch, cancellationToken: ct);
+                    await graphClient.Storage.FileStorage.Containers[containerId].Unlock
+                        .PostAsync(cancellationToken: ct);
                     return (object?)null;
                 },
                 ct);
@@ -2386,25 +2423,34 @@ public sealed class SpeAdminGraphService
     /// grant. Conflating the two is what made the original failure unreadable.
     /// </para>
     /// </remarks>
-    private static async Task<string?> ResolveUserObjectIdAsync(
-        GraphServiceClient client, string userPrincipalName, CancellationToken ct)
+    private static Task<string?> ResolveUserObjectIdAsync(
+        GraphServiceClient client, string userPrincipalName, CancellationToken ct) =>
+        ReadUserPropertyAsync(client, userPrincipalName, "id", ct);
+
+    /// <summary>
+    /// Reads one string property of a user addressed by object id or UPN (<c>GET /users/{key}</c>), or
+    /// null when no user matches. Used both ways: UPN → id for container-TYPE grants, id → UPN for
+    /// CONTAINER grants — Graph keys the two by different identifiers.
+    /// </summary>
+    private static async Task<string?> ReadUserPropertyAsync(
+        GraphServiceClient client, string userKey, string property, CancellationToken ct)
     {
         // Base address derived from the client about to issue the request, never hardcoded — task
         // 020's lesson. A hardcoded host would also make every contract test reach the REAL Graph
         // instead of the fixture, which is a far worse failure than a wrong version. `/users` exists
         // on both v1.0 and beta, so either base resolves it.
         var url = ResolveGraphBaseUrl(client) + "/users/" +
-                  Uri.EscapeDataString(userPrincipalName) + "?$select=id";
+                  Uri.EscapeDataString(userKey) + "?$select=" + property;
         try
         {
             using var json = await SendGraphJsonAsync(client, HttpMethod.Get, url, body: null, ct)
                 .ConfigureAwait(false);
 
             if (json is not null &&
-                json.RootElement.TryGetProperty("id", out var id) &&
-                id.ValueKind == JsonValueKind.String)
+                json.RootElement.TryGetProperty(property, out var value) &&
+                value.ValueKind == JsonValueKind.String)
             {
-                return id.GetString();
+                return value.GetString();
             }
         }
         catch (ODataError odataError) when (odataError.ResponseStatusCode == (int)HttpStatusCode.NotFound)
@@ -3451,6 +3497,12 @@ public sealed class SpeAdminGraphService
                 throw new InvalidOperationException("Graph created a container but reported no id.");
             }
 
+            // #2032: Graph creates a container inactive and deletes it on its own if it is not activated within 24 hours.
+            // The stamp PATCH below may activate it implicitly, but nothing has measured that it does, so activate it
+            // explicitly, as ContainerOperations and the control plane's GraphContainerProvisioner do. Inside the try, so
+            // a failed activation removes the container like any other failed bind step.
+            await PostActivateAsync(graphClient, containerId, ct).ConfigureAwait(false);
+
             await ExecuteWithRetryAsync<object?>(async () =>
             {
                 await WriteBusinessUnitStampAsync(graphClient, containerId, businessUnitId, ct).ConfigureAwait(false);
@@ -4060,15 +4112,35 @@ public sealed class SpeAdminGraphService
             "Granting '{Role}' to (userId={UserId}, groupId={GroupId}) on container {ContainerId}",
             role, userId, groupId, containerId);
 
-        // Build the Graph SDK permission payload for SPE container permissions.
-        // SPE uses grantedToV2 with SharePointIdentitySet.
+        /*
+         * 🔑 A CONTAINER grant names the user by userPrincipalName — the opposite of a container-TYPE
+         * grant, which takes only the object id (AddContainerTypeOwnerAsync). Sending { id } here is
+         * refused with `400 'userPrincipalName' is required` (UAT 2026-10-07: Add Permission failed
+         * every time). The page sends the object id from its user picker, so it is resolved to a UPN
+         * first; an identifier that already looks like a UPN is used as given. An id that resolves to
+         * no user is reported as that, not as Graph's generic 400.
+         */
+        string? userPrincipalName = null;
+        if (!string.IsNullOrWhiteSpace(userId))
+        {
+            userPrincipalName = userId.Contains('@', StringComparison.Ordinal)
+                ? userId
+                : await ReadUserPropertyAsync(graphClient, userId, "userPrincipalName", ct).ConfigureAwait(false)
+                  ?? throw new UserNotResolvedException(userId);
+        }
+
+        // SPE uses grantedToV2 with SharePointIdentitySet. Graph SDK 5.x has no typed UPN property on
+        // SharePointIdentity, so it travels in AdditionalData — as SpeContainerMembershipService sends it.
         var permissionRequest = new Microsoft.Graph.Models.Permission
         {
             Roles = new List<string> { role.ToLowerInvariant() },
             GrantedToV2 = new Microsoft.Graph.Models.SharePointIdentitySet
             {
-                User = !string.IsNullOrWhiteSpace(userId)
-                    ? new Microsoft.Graph.Models.SharePointIdentity { Id = userId }
+                User = userPrincipalName is not null
+                    ? new Microsoft.Graph.Models.SharePointIdentity
+                    {
+                        AdditionalData = new Dictionary<string, object> { ["userPrincipalName"] = userPrincipalName },
+                    }
                     : null,
                 Group = !string.IsNullOrWhiteSpace(groupId)
                     ? new Microsoft.Graph.Models.SharePointIdentity { Id = groupId }
@@ -6575,6 +6647,18 @@ public sealed class SpeAdminGraphService
             "to it. Register the container type in this tenant first (SharePoint admin center).")
     {
         public string ContainerTypeId { get; } = containerTypeId;
+    }
+
+    /// <summary>
+    /// A container permission named a user Microsoft Entra could not resolve. A distinct type so the endpoint
+    /// answers "no such user" (400) rather than a generic 500 — the two mean different things to the admin.
+    /// </summary>
+    public sealed class UserNotResolvedException(string userKey)
+        : InvalidOperationException(
+            $"No user was found for '{userKey}'. A container permission can only be granted to a user " +
+            "Microsoft Entra can resolve.")
+    {
+        public string UserKey { get; } = userKey;
     }
 
     /// <summary>

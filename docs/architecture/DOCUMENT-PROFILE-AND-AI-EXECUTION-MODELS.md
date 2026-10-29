@@ -88,6 +88,8 @@ Registry: [`NodeExecutorRegistry.cs`](../../src/server/api/Sprk.Bff.Api/Services
 
 > **Important**: `UpdateRecordNodeExecutor`, `CreateTaskNodeExecutor`, `CreateNotificationNodeExecutor`, and `SendEmailNodeExecutor` **all accept the same Playbook-Builder wrapper config format** and therefore share the Part 4 exposure whenever an upstream **multi-line or quote-bearing** value is templated into their config. Update Record is simply the one profiling hits first.
 
+> **Who the write runs as** (#2257, owner round 123, "run as the user"): `UpdateRecordNodeExecutor` writes AS the person who started the run (`NodeExecutionContext.StartedBy = Person`, the user in `NodeExecutionContext.UserId`): a node playbook run from any HTTP entry (the playbook run routes, `/api/ai/analysis/execute` for a non-profile playbook, Insights ask, workspace pre-fill, the Console's re-analysis tool) writes with the caller's own rights. Paths A and B do not run this node (Direct Action). The app-only analysis job (Path C, for a playbook other than Document Profile, which it profiles on the Direct Action spine) is a system run (`StartedBy = System`) and writes app-only. Either way the node's payload is asked `InheritedAccessPermission.RefuseAppOnlyWrite` (fix round 1: it is the playbook author's configuration or a model's, never the runner's). A person's run whose user cannot be resolved fails the node with `playbook.run_user_unresolved` and writes nothing; a write Dataverse refuses for that person fails it with `playbook.write_access_denied`. The rule: `PlaybookRunWriteIdentity` (`Services/Ai/IPlaybookOrchestrationService.cs`); the full statement is in `DATAVERSE-WRITE-PATH-ARCHITECTURE.md`, I-16.
+
 ---
 
 ## Part 2 — The document-profile capability (ACT-011) and its entry points
@@ -127,6 +129,8 @@ flowchart LR
 **Path C — Outlook add-in / app-only background (Node Playbook — the bug path):** the save pipeline (Part 3) enqueues an app-only analysis job → [`AppOnlyAnalysisService.cs`](../../src/server/api/Sprk.Bff.Api/Services/Ai/AppOnlyAnalysisService.cs) `AnalyzeDocumentAsync(documentId, "Document Profile")` (:182) → `ExecutePlaybookAnalysisAsync` (:468) → the playbook **has nodes**, so `ExecuteNodeBasedAnalysisAsync` (:691) → `PlaybookOrchestrationService.ExecuteAppOnlyAsync` (:730). **This runs the node graph, and the graph's Update Record node is what fails.**
 
 > **Office "Generate Profile" (FR-08) takes this queue too, since `spaarkeai-word-add-in-r1` task 068 (#1086).** It used to call Path B in a `Task.Run` behind its 202, which a restart lost. It now queues the same `AppOnlyDocumentAnalysis` job (`Services/Office/OfficeProfileQueue.cs`), keyed with the request's own id (`AppOnlyDocumentAnalysisJobHandler.ProfileIdempotencyKey`, task 029's discriminator) so every click runs. Since `f5c7687d8` (#919 Fix 2), `AppOnlyAnalysisService` routes the "Document Profile" consumer onto the direct-Action spine, so this job runs ACT-011 and `DocumentProfileOutputMapper`, not the node graph above. The Path C description above, and the "Know which spine you're on" line in Part 5, predate that fix.
+
+> **The external upload route queues the same job too (`spaarke-SPA-external-access-platform-r3` task 063).** `ExternalProjectDataEndpoints.UploadDocumentForParent` queues one `AppOnlyDocumentAnalysis` profile job (`Source` `ExternalUpload`, keyed `ProfileIdempotencyKey(documentId)`) after the app-only SPE write and the row create, best-effort and bounded, so an external upload is profiled like an MDA upload.
 
 ### The "Document Profile" playbook graph (live, `18cf3cc8-02ec-f011-8406-7c1e520aa4df`)
 
@@ -171,6 +175,7 @@ flowchart TD
 - **Trigger**: `OfficeJobQueue.QueueUploadFinalizationAsync` sets `TriggerAiProcessing` and `AiProcessingOptions{ProfileSummary, RagIndex, DeepAnalysis}` on the payload.
 - **Hand-off**: `UploadFinalizationWorker.QueueNextStageAsync` (gated on `TriggerAiProcessing`, :313) enqueues an `AppOnlyDocumentAnalysis` job to `sdap-jobs` with idempotency key `analysis-{documentId}-documentprofile`. It does **not** run AI inline.
 - **Profile**: `AppOnlyDocumentAnalysisJobHandler` → `AppOnlyAnalysisService.AnalyzeDocumentAsync(documentId, "Document Profile")` → node-based playbook (Path C).
+- **Other producers of the same job**: the external upload route (`ExternalProjectDataEndpoints.UploadDocumentForParent`, task 063) enqueues the same `AppOnlyDocumentAnalysis` profile job, plus app-only RAG indexing through `IPostUploadIndexingEnqueuer.EnqueueAppOnlyIfApplicableAsync`; it does not go through `UploadFinalizationWorker`.
 
 > **Design note**: this path chose the **node playbook** for profiling while the interactive paths chose the **direct Action**. That divergence is the root architectural smell behind Part 4. There is no functional reason the app-only path could not also use the direct Action (see Fix Option 3).
 

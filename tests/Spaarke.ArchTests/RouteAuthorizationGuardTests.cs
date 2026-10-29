@@ -1854,6 +1854,11 @@ public partial class RouteAuthorizationGuardTests
                 // so the pin follows the new spelling (batch-4 integration, 2026-10-05).
                 return Regex.IsMatch(code, @"if\s*\(\s*present\.Count\s*==\s*0\s*\)\s*\{\s*return\s+await\s+next\s*\(");
 
+            case "AddWorkforceCeilingFilter":
+                // Task 186: the ceiling passes every caller it does not apply to straight through, and never names a record.
+                return Regex.IsMatch(code, @"\|\|\s*!WorkforceRoleCeilingGate\.Applies\s*\(\s*principal\s*\)\s*\)\s*\{[^{}]*?return\s+await\s+next\s*\(")
+                       && !ConsultsAny(code, RecordLevelTokens);
+
             case "AddComposeDocumentAuthorizationFilter":
                 // Task 171: decides (DocumentAuthorizationFilter on the row) when the item has a sprk_document, and passes
                 // through for a row-less item (Compose Path B — the caller's OBO identity, SPE decides).
@@ -6348,13 +6353,16 @@ public partial class RouteAuthorizationGuardTests
         Assert.Empty(UnusedEntryViolations(used, CreditedForms.Select(c => c.Form)));
     }
 
-    [Fact(DisplayName = "Task 167 controls: admin credit is exactly five mechanisms, and the admin pin fires both ways")]
-    public void Admin_NegativeControl_PinFiresAndOnlyFiveMechanismsCount()
+    [Fact(DisplayName = "Task 167 controls: admin credit is exactly six mechanisms, and the admin pin fires both ways")]
+    public void Admin_NegativeControl_PinFiresAndOnlySixMechanismsCount()
     {
         // Five since customer-provisioning task 230b added AddKeylessProofAuthorizationFilter (an application role on
-        // an app-only token, held only by the L2 Worker identity). A sixth needs the same review.
+        // an app-only token, held only by the L2 Worker identity). Six since external-access-r3 slice C3 added
+        // AddExternalAccessAdministratorAuthorizationFilter (standing-grant administrators profile membership, direct or
+        // through a team, the caller from WhoAmI over their own token; reviewed with that slice). A seventh needs the same review.
         Assert.Equal(new[]
         {
+            "AddExternalAccessAdministratorAuthorizationFilter",
             "AddKeylessProofAuthorizationFilter",
             "AddRegistrationAuthorizationFilter", "AddSpeAdminAuthorizationFilter",
             "RequireAuthorization(\"SystemAdmin\")", "RequireAuthorization(AuthPolicies.RagApiKey)",

@@ -100,23 +100,16 @@ export interface NarrateResponse {
   channelNarratives: ChannelNarrationResult[];
   generatedAtUtc: string;
   /**
-   * R7 W12 feedback item 9 (2026-07-01) — cross-entity high-priority items.
-   * Populated when any of the 7 flagged entities (matter, project, invoice,
-   * document, workassignment, event, todo) has sprk_HighPriority=true or
-   * sprk_Monitor=true. Widget renders a compact "High Priority" section
-   * above the TL;DR with subtle red background. Absent/empty = no flagged
-   * items → widget hides the section.
-   */
-  highPriorityItems?: HighPriorityItemResult[];
-  /**
    * unified-access-control-r2 task 152 — channel codes (e.g. "matters") whose read AS THE CALLER failed. A failed
    * channel is "could not be loaded", never "nothing to report"; the widget says so instead of showing it as empty.
    */
   failedChannels?: string[];
-  /** Task 152 — High Priority entity types (e.g. "sprk_invoice") whose read as the caller failed. */
-  highPriorityFailedEntityTypes?: string[];
 }
 
+/**
+ * A single record in the shape the single-record email draft needs (`buildItemEmailDraft`: the document preview's "Email" action).
+ * Task 062 (FR-32) retired the "Critical Today" list that /render used to return these in: the response no longer carries them.
+ */
 export interface HighPriorityItemResult {
   /** Dataverse logical name (e.g., "sprk_matter"). */
   entityType: string;
@@ -147,8 +140,6 @@ export interface TldrResult {
   summary: string;
   /** 3-5 short key-takeaway bullet strings (no leading "- "). */
   keyTakeaways: string[];
-  /** ONE-sentence top action for today. */
-  topAction: string;
   /** Count of notification categories that fed the summary. */
   categoryCount: number;
   /** Count of priority items that fed the summary. */
@@ -457,7 +448,6 @@ export async function fetchBriefingNarration(channels: ChannelFetchResult[]): Pr
     if (data?.tldr) {
       data.tldr.keyTakeaways = Array.isArray(data.tldr.keyTakeaways) ? data.tldr.keyTakeaways : [];
       data.tldr.summary = data.tldr.summary ?? '';
-      data.tldr.topAction = data.tldr.topAction ?? '';
       // R5 task 014 (FR-A5): same defensive normalization for itemRefs — an omitted/malformed
       // field must never crash the resolution pass; empty array = "no anchors named", the
       // common case, never itself a warning signal (FR-A6 — no groundedness gate).
@@ -539,7 +529,6 @@ export async function fetchBriefingLive(windows?: BriefingWindowParams): Promise
     if (data?.tldr) {
       data.tldr.keyTakeaways = Array.isArray(data.tldr.keyTakeaways) ? data.tldr.keyTakeaways : [];
       data.tldr.summary = data.tldr.summary ?? '';
-      data.tldr.topAction = data.tldr.topAction ?? '';
       // R5 task 014 (FR-A5): same defensive normalization for itemRefs — an omitted/malformed
       // field must never crash the resolution pass; empty array = "no anchors named", the
       // common case, never itself a warning signal (FR-A6 — no groundedness gate).

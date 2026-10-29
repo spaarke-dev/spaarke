@@ -72,6 +72,12 @@ public partial class ContactGrantAuthorizationTests
     /// <summary>Task 185 slice E: the grant notifier the grant handler gets; an inert one unless a test sets it.</summary>
     private GrantAccessNotifier? Notifier { get; set; }
 
+    /// <summary>Task 099b (D-11): the ownership resolver the grant handler gets; a fixed-team double unless a test sets it.</summary>
+    private Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver? Ownership { get; set; }
+
+    /// <summary>Task 099b review round 2: the owner-team privilege reader the grant core asks; every team holds Read unless set.</summary>
+    private TestInfrastructure.TeamPrivilegeCheckerDouble? OwnerPrivileges { get; set; }
+
     public ContactGrantAuthorizationTests()
     {
         // The standard world: grantor and colleague are active members of firm A; the outsider of firm B.
@@ -870,7 +876,7 @@ public partial class ContactGrantAuthorizationTests
         var outcome = await GrantExternalAccessEndpoint.CreateGrantAsync(
             new GrantAccessRequest(Colleague, Guid.Empty, ExternalAccessLevel.Collaborate, null, null, "project", ProjectId),
             ExternalGrantRootType.Project, ProjectId, Today, GrantCeiling.FromGrantorRights(AccessRights.Read | AccessRights.Write | AccessRights.Delete),
-            callerOid: null, _dataverse, _participations, DenyList(), NullLogger.Instance, CancellationToken.None);
+            callerOid: null, _dataverse, _participations, DenyList(), Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.AccessibleRecordSetTestFactory.UnlinkedIdentityStore(), new TestInfrastructure.RecordOwnershipResolverDouble(), new TestInfrastructure.TeamPrivilegeCheckerDouble(), NullLogger.Instance, CancellationToken.None);
 
         outcome.Refusal.Should().BeNull();
         row.AccessLevel.Should().Be((int)ExternalAccessLevel.Collaborate);
@@ -895,7 +901,7 @@ public partial class ContactGrantAuthorizationTests
         var outcome = await GrantExternalAccessEndpoint.CreateGrantAsync(
             new GrantAccessRequest(Colleague, Guid.Empty, ExternalAccessLevel.Collaborate, null, null, "project", ProjectId),
             ExternalGrantRootType.Project, ProjectId, Today, GrantCeiling.FromGrantorRights(AccessRights.Read | AccessRights.Write | AccessRights.Delete),
-            callerOid: InternalUserOid.ToString(), _dataverse, _participations, DenyList(), NullLogger.Instance, CancellationToken.None);
+            callerOid: InternalUserOid.ToString(), _dataverse, _participations, DenyList(), Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.AccessibleRecordSetTestFactory.UnlinkedIdentityStore(), new TestInfrastructure.RecordOwnershipResolverDouble(), new TestInfrastructure.TeamPrivilegeCheckerDouble(), NullLogger.Instance, CancellationToken.None);
 
         outcome.Refusal.Should().BeNull();
         row.GrantedByContactProvenance.Should().BeNull();
@@ -936,7 +942,7 @@ public partial class ContactGrantAuthorizationTests
         await GrantExternalAccessEndpoint.CreateGrantAsync(
             new GrantAccessRequest(Colleague, Guid.Empty, ExternalAccessLevel.ViewOnly, null, null, "project", ProjectId),
             ExternalGrantRootType.Project, ProjectId, Today, GrantCeiling.FromGrantorRights(AccessRights.Read | AccessRights.Write),
-            callerOid: null, _dataverse, _participations, DenyList(), NullLogger.Instance, CancellationToken.None);
+            callerOid: null, _dataverse, _participations, DenyList(), Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.AccessibleRecordSetTestFactory.UnlinkedIdentityStore(), new TestInfrastructure.RecordOwnershipResolverDouble(), new TestInfrastructure.TeamPrivilegeCheckerDouble(), NullLogger.Instance, CancellationToken.None);
 
         row.GrantedByContactId.Should().Be(Grantor);
         _dataverse.Updates.Should().BeEmpty();
@@ -955,7 +961,7 @@ public partial class ContactGrantAuthorizationTests
         var outcome = await GrantExternalAccessEndpoint.CreateGrantAsync(
             new GrantAccessRequest(Colleague, Guid.Empty, ExternalAccessLevel.Collaborate, null, null, "project", ProjectId),
             ExternalGrantRootType.Project, ProjectId, Today, GrantCeiling.FromGrantorRights(AccessRights.Read | AccessRights.Write | AccessRights.Delete),
-            callerOid: InternalUserOid.ToString(), _dataverse, _participations, DenyList(), NullLogger.Instance, CancellationToken.None);
+            callerOid: InternalUserOid.ToString(), _dataverse, _participations, DenyList(), Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.AccessibleRecordSetTestFactory.UnlinkedIdentityStore(), new TestInfrastructure.RecordOwnershipResolverDouble(), new TestInfrastructure.TeamPrivilegeCheckerDouble(), NullLogger.Instance, CancellationToken.None);
 
         outcome.Refusal.Should().BeNull();
         row.GrantedByContactId.Should().BeNull();
@@ -1485,7 +1491,7 @@ public partial class ContactGrantAuthorizationTests
 
     private Task<IResult> HandlerGrant(ContactGrantRequest request, HttpContext httpContext)
         => ContactGrantEndpoints.GrantAsync(
-            request, _dataverse, _participations, DenyList(), _identities, Invites ?? AssignedAccessTestDoubles.InertInvites(),
+            request, _dataverse, _participations, DenyList(), Ownership ?? new TestInfrastructure.RecordOwnershipResolverDouble(), OwnerPrivileges ?? new TestInfrastructure.TeamPrivilegeCheckerDouble(), _identities, Invites ?? AssignedAccessTestDoubles.InertInvites(),
             Notifier ?? AssignedAccessTestDoubles.InertNotifier(), httpContext,
             NullLogger<ContactGrantorAuthorizationFilter>.Instance, new FixedClock(Today), CancellationToken.None);
 
@@ -1905,10 +1911,11 @@ internal sealed class ContactGrantTable : DataverseWebApiClient
         return rows.ToList();
     }
 
-    /// <summary>The internal caller's systemuser by Entra object id — the one clause the issuer-stamp lookup sends (strict).</summary>
+    /// <summary>The internal caller's ACTIVE systemuser by Entra object id — the one clause pair the issuer-stamp lookup sends
+    /// (strict; the isdisabled clause is issue #1576's).</summary>
     private List<Dictionary<string, object?>> MatchSystemUsers(string filter)
     {
-        var oid = Regex.Match(filter, @"^azureactivedirectoryobjectid eq ([0-9a-fA-F-]{36})$");
+        var oid = Regex.Match(filter, @"^azureactivedirectoryobjectid eq ([0-9a-fA-F-]{36}) and isdisabled eq false$");
         if (!oid.Success)
             throw new InvalidOperationException($"The fake does not understand the systemusers filter '{filter}'.");
 
@@ -1971,6 +1978,10 @@ public sealed class ContactGrantRouteFixture : ExternalCollaborationTestFixture
             services.AddScoped<IAccessibleRecordSetService>(_ => GrantPolicyTestDoubles.RealDenyList(Participations, DenyReader));
             services.RemoveAll<IContactIdentityStore>();
             services.AddSingleton<IContactIdentityStore>(Identities);
+            // Task 099b (D-11): the grant core's ownership resolver at its module boundary (a fixed team).
+            services.RemoveAll<Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver>();
+            services.AddSingleton<Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver>(
+                new TestInfrastructure.RecordOwnershipResolverDouble());
             // Production answers a malformed body with a plain 400 (RouteHandlerOptions.ThrowOnBadRequest is false
             // outside Development); the test host runs as Development, so pin the production value.
             services.Configure<RouteHandlerOptions>(o => o.ThrowOnBadRequest = false);

@@ -156,6 +156,7 @@ public class AssignedAccessSendsInviteTests
         var invitedOn = _h.Time.GetUtcNow().AddDays(-29);
         _h.Identities.Contacts[contact].InvitedOn = invitedOn;
         _h.Identities.Contacts[contact].InviteCodeHash = "v1.pending-hash-of-the-earlier-invite";
+        _h.Identities.Contacts[contact].InvitedEmailHash = "v1:pending-stamp-of-the-earlier-invite";
         _h.Store.Assign(Matter, _matter, Attorney1, contact);
 
         var outcome = await InternalSync();
@@ -180,6 +181,10 @@ public class AssignedAccessSendsInviteTests
         _h.Logger = materializerLog;
         _h.Ciam.Failure = new HttpRequestException("Simulated Graph outage.");
 
+        // C5: the throw after the marker retracts the invite this call wrote; the hash it wrote is captured as it is cleared.
+        string? stored = null;
+        _h.Identities.BeforePendingInviteClear = c => stored = c.InviteCodeHash;
+
         var outcome = await InternalSync();
 
         outcome.Complete.Should().BeTrue("the grant is the assignment's; the invite's failure is reported on the entry");
@@ -190,9 +195,10 @@ public class AssignedAccessSendsInviteTests
         _h.Emails.InviteUrls.Should().BeEmpty();
         inviteLog.Entries.Should().Contain(e => e.Level == LogLevel.Warning);
 
-        var stored = _h.Identities.Contacts[contact].InviteCodeHash!;
+        stored.Should().NotBeNull("the invite wrote a code hash, then retracted it");
+        _h.Identities.Contacts[contact].InviteCodeHash.Should().BeNull("a pending invite exists only if its email went out");
         var messages = inviteLog.Messages.Concat(materializerLog.Messages).ToList();
-        foreach (var part in new[] { stored }.Concat(stored.Split(':', '.').Where(p => p.Length >= 16)))
+        foreach (var part in new[] { stored! }.Concat(stored!.Split(':', '.').Where(p => p.Length >= 16)))
             messages.Should().NotContain(m => m.Contains(part, StringComparison.Ordinal), "never log a hash");
     }
 
@@ -218,6 +224,40 @@ public class AssignedAccessSendsInviteTests
         _h.Identities.Contacts[colleague].InvitedOn.Should().BeNull();
         _h.SentNotifications.Should().ContainSingle("the internal owner is told the colleague needs an invite")
             .Which.GetAttributeValue<Microsoft.Xrm.Sdk.EntityReference>("ownerid").Id.Should().Be(owner);
+    }
+
+    // ── A disabled internal user is nobody — never a partner (issue #1576) ─────────────────────────────────────────
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task DisabledInternalUsersAssignment_SendsNoInvite_AndIsNeverClassedAsAPartner(bool aContactCarriesTheSameOid)
+    {
+        // A disabled systemuser keeps its oid. Resolved, it would invite as an internal user; filtered out naively, it would
+        // fall through to the contact lookup and — when a contact carries the same oid — be classed as a PARTNER (told to
+        // the record's owner as "needs an internal invite"). It must be neither: nobody is behind the pass.
+        var disabledOid = Guid.NewGuid();
+        _h.Grants.SystemUserIdsByOid[disabledOid] = Guid.NewGuid();
+        _h.Grants.DisabledSystemUserOids[disabledOid] = true;
+        if (aContactCarriesTheSameOid)
+        {
+            _h.Identities.AddContact(Guid.NewGuid(), email: "same-oid@outside.test", oid: disabledOid.ToString("D"),
+                plane: IdentityPlaneMarker.External);
+        }
+
+        _h.Grants.RootOwners[_matter] = Guid.NewGuid();
+        var contact = UnboundContact();
+        _h.Store.Assign(Matter, _matter, Attorney1, contact);
+
+        var outcome = await Pass(AssignedAccessTrigger.Sync, disabledOid.ToString("D"));
+
+        outcome.Complete.Should().BeTrue();
+        _h.Grants.ActiveRowsOf(_matter, contact).Should().ContainSingle("the grant stands; only the invite depends on who asked");
+        EntryOf(outcome, contact).Invite.Should().BeNull("nobody is behind a disabled user's pass");
+        _h.Ciam.Attempts.Should().BeEmpty();
+        _h.Emails.InviteUrls.Should().BeEmpty();
+        _h.Identities.Contacts[contact].InvitedOn.Should().BeNull();
+        _h.SentNotifications.Should().BeEmpty("a partner's 'needs an internal invite' notice would mean it was classed a partner");
     }
 
     // ── A background pass never invites ─────────────────────────────────────────────────────────────────────────────

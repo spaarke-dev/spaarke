@@ -165,6 +165,26 @@ public enum SignalCloseOutcome
     ChangedSinceRead,
 }
 
+/// <summary>What <see cref="SignalWriter.LinkConditionClearedRecordAsync"/> did (task 153).</summary>
+public enum SignalRecordLinkOutcome
+{
+    /// <summary>The Signal now names the record (and, when known, the person in <c>sprk_resolvedby</c>).</summary>
+    Linked,
+
+    /// <summary>The Signal already named this record; nothing was written.</summary>
+    AlreadyLinked,
+
+    /// <summary>The Signal is no longer a ConditionCleared closure (a person's decision re-closed it); nothing was written.</summary>
+    NotApplicable,
+
+    /// <summary>The Signal changed between the read and the write (its row version moved); nothing was written. The next pass retries.</summary>
+    ChangedSinceRead,
+
+    /// <summary>Adversarial pass 1 F2: the Signal names a Decision Record other than the one it named when the job closed it; nothing was
+    /// overwritten. Logged at Warning and counted on <c>ontology.writer.skips</c> (permanent: not retried).</summary>
+    ForeignLink,
+}
+
 /// <summary>
 /// Thrown when the writer's binding escalation trigger fires: a subject whose core record or owner cannot be derived, or a
 /// row whose owner cannot be verified. The caller MUST stop rather than write a Signal it cannot group or leave it silently
@@ -358,16 +378,25 @@ public sealed partial class SignalWriter
     /// same agreement rule uac-r2 applies to an untyped pair (a lookup carrying the pair id). A later core-ancestor stamp in
     /// another <c>sprk_regarding*</c> column (task 144) carries a different id and so never matches.
     /// </remarks>
-    internal static string? SubjectEntityOf(Guid pairId, Func<string, Guid?> lookupIdOf)
+    internal static string? SubjectEntityOf(Guid pairId, Func<string, Guid?> lookupIdOf) =>
+        SubjectEntityOf(SignalEntity, pairId, lookupIdOf);
+
+    /// <summary>
+    /// UAC task 194b: <see cref="SubjectEntityOf(Guid, Func{string, Guid?})"/> for any host table of the shared regarding builder
+    /// (<c>TodoRegardingBuilder.RegardingLookupsByHostTable</c>): a Decision Record is filed under its subject by the same builder,
+    /// so the same agreement rule names it. <c>null</c> for a host table the builder does not file.
+    /// </summary>
+    internal static string? SubjectEntityOf(string hostTable, Guid pairId, Func<string, Guid?> lookupIdOf)
     {
         ArgumentNullException.ThrowIfNull(lookupIdOf);
-        if (pairId == Guid.Empty)
+        if (pairId == Guid.Empty
+            || !TodoRegardingBuilder.RegardingLookupsByHostTable.TryGetValue(hostTable ?? string.Empty, out var lookupByEntity))
         {
             return null;
         }
 
         string? subject = null;
-        foreach (var (entity, lookup) in RegardingLookupByEntity)
+        foreach (var (entity, lookup) in lookupByEntity)
         {
             if (lookupIdOf(lookup) != pairId)
             {
@@ -851,8 +880,10 @@ public sealed partial class SignalWriter
 
     /// <summary>
     /// Task 031 (FR-16, FR-15): closes ONE Signal as a system resolution (<see cref="ResolutionConditionCleared"/>,
-    /// <see cref="ResolutionSuperseded"/> or <see cref="ResolutionPolicyRetired"/>). <c>sprk_decisionrecord</c> is never
-    /// written: a system closure has no Decision Record. The update is conditional on <paramref name="rowVersion"/>
+    /// <see cref="ResolutionSuperseded"/> or <see cref="ResolutionPolicyRetired"/>). <c>sprk_decisionrecord</c> and
+    /// <c>sprk_resolvedby</c> are not written by the close. Task 153 (D-145b): after a Do-lane ConditionCleared close the job writes a
+    /// Routine Decision Record and links it with <see cref="LinkConditionClearedRecordAsync"/>; every other system closure (Superseded,
+    /// PolicyRetired, a Decide-lane ConditionCleared) stays record-free. The update is conditional on <paramref name="rowVersion"/>
     /// (<c>sprk_signal</c> has optimistic concurrency enabled), so a Signal a person resolved after the evaluator read it is
     /// never closed a second time; that case returns <see cref="SignalCloseOutcome.ChangedSinceRead"/> and writes nothing.
     /// A failure is logged at Error (<see cref="OntologyWriterEvents.WriteRefused"/>), metered and rethrown.
@@ -903,6 +934,93 @@ public sealed partial class SignalWriter
             OntologyWriterTelemetry.RecordFailure(reason);
             throw;
         }
+    }
+
+    /// <summary>
+    /// Task 153 (D-145b): links a Do-lane Signal the job closed as ConditionCleared to its Routine Decision Record: <c>sprk_decisionrecord</c>
+    /// and, when the record names the person who did the work, <c>sprk_resolvedby</c>. Nothing else. Reads the Signal first and writes only
+    /// when it is still Resolved as ConditionCleared, conditional on the version just read, so a person's decision that re-closed it in
+    /// between (with its own record) is never overwritten.
+    /// <para><b>Replacing the link (adversarial pass 1 F2, D-128 Q18).</b> A D-128 reminder or inquiry leaves the Signal Acknowledged and
+    /// linked to that record; the item stays open until the work is done, so the closing record REPLACES that link. The link replaces exactly
+    /// <paramref name="expectedPriorRecordId"/>, the record the Signal named when the job closed it (null: none), and nothing else: any other
+    /// record the Signal names now is a foreign link, left as it is, logged at Warning and counted on <c>ontology.writer.skips</c>
+    /// (<see cref="SignalRecordLinkOutcome.ForeignLink"/>). The replaced record itself is not touched (records are append-only).</para>
+    /// A failure is logged at Error, metered and thrown as the writer's escalation (already metered: the caller does not meter it again).
+    /// </summary>
+    internal async Task<SignalRecordLinkOutcome> LinkConditionClearedRecordAsync(
+        Guid signalId, Guid recordId, Guid? expectedPriorRecordId, Guid? resolvedBy, string policyCode, CancellationToken ct = default)
+    {
+        if (signalId == Guid.Empty) throw new ArgumentException("signalId must not be Guid.Empty.", nameof(signalId));
+        if (recordId == Guid.Empty) throw new ArgumentException("recordId must not be Guid.Empty.", nameof(recordId));
+
+        try
+        {
+            var row = await _writerClient.RetrieveAsync(SignalEntity, signalId,
+                new[] { "sprk_signalstatus", "sprk_resolutiontype", "sprk_decisionrecord", "versionnumber" }, ct).ConfigureAwait(false);
+            var linked = row.GetAttributeValue<EntityReference>("sprk_decisionrecord")?.Id;
+            if (linked == recordId) return SignalRecordLinkOutcome.AlreadyLinked;
+            if (row.GetAttributeValue<OptionSetValue>("sprk_signalstatus")?.Value != SignalStatusResolved
+                || row.GetAttributeValue<OptionSetValue>("sprk_resolutiontype")?.Value != ResolutionConditionCleared)
+            {
+                _logger.LogInformation(
+                    "Signal {SignalId} (policy {PolicyCode}) is no longer a condition-cleared closure; Decision Record {RecordId} was not linked to it.",
+                    signalId, policyCode, recordId);
+                return SignalRecordLinkOutcome.NotApplicable;
+            }
+
+            if (linked is not null && linked != expectedPriorRecordId)
+            {
+                _logger.LogWarning(OntologyWriterEvents.WriteRefused,
+                    "Signal {SignalId} (policy {PolicyCode}) names Decision Record {LinkedRecordId}, not the one it named when it was closed; " +
+                    "its condition-cleared Decision Record {RecordId} was NOT linked (reason={Reason}). Nothing was overwritten.",
+                    signalId, policyCode, linked, recordId, OntologyWriterFailureReason.ClosureRecordSkippedForeignLink);
+                OntologyWriterTelemetry.RecordSkip(OntologyWriterFailureReason.ClosureRecordSkippedForeignLink);
+                return SignalRecordLinkOutcome.ForeignLink;
+            }
+
+            var version = row.RowVersion ?? (row.GetAttributeValue<long?>("versionnumber") is { } v ? v.ToString(CultureInfo.InvariantCulture) : null);
+            if (string.IsNullOrWhiteSpace(version))
+            {
+                throw new InvalidOperationException($"Signal {signalId:D} was read without a row version, so it cannot be linked conditionally.");
+            }
+
+            var fields = new Dictionary<string, object> { ["sprk_decisionrecord"] = new EntityReference("sprk_decisionrecord", recordId) };
+            if (resolvedBy is { } person && person != Guid.Empty)
+            {
+                fields["sprk_resolvedby"] = new EntityReference("systemuser", person);
+            }
+
+            await _writerClient.UpdateIfRowVersionMatchesAsync(SignalEntity, signalId, version, fields, ct).ConfigureAwait(false);
+            return SignalRecordLinkOutcome.Linked;
+        }
+        catch (Exception ex) when (IsConcurrencyVersionMismatch(ex))
+        {
+            _logger.LogInformation(
+                "Signal {SignalId} changed since it was read; Decision Record {RecordId} NOT linked (policy {PolicyCode}). The next pass retries.",
+                signalId, recordId, policyCode);
+            return SignalRecordLinkOutcome.ChangedSinceRead;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            var reason = IsDataverseAccessDenied(ex) ? OntologyWriterFailureReason.DataverseAccessDenied : OntologyWriterFailureReason.SignalRecordLinkFailed;
+            _logger.LogError(OntologyWriterEvents.WriteRefused, ex,
+                "Decision Record link refused for policy {PolicyCode}, signal {SignalId} (reason={Reason}).", policyCode, signalId, reason);
+            OntologyWriterTelemetry.RecordFailure(reason);
+            throw new SignalWriterEscalationException(
+                $"Decision Record {recordId:D} could not be linked to Signal {signalId:D} ({ex.GetType().Name}).", reason, ex);
+        }
+    }
+
+    /// <summary>
+    /// Task 153 (D-134): the one enabled user a personal To Do's Assigned To names (<see cref="PersonalToDoAssignee"/>, through the scoped
+    /// <see cref="AssignedAccessStore"/>), or null for no single user. A read fault propagates (the caller must not fall back).
+    /// </summary>
+    internal async Task<Guid?> PersonalToDoAssigneeAsync(Guid todoId, CancellationToken ct = default)
+    {
+        await using var scope = _scopes.CreateAsyncScope();
+        return await PersonalToDoAssignee.ResolveAsync(
+            _sysadminClient, scope.ServiceProvider.GetRequiredService<AssignedAccessStore>(), todoId, ct).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -1134,6 +1252,20 @@ public sealed partial class SignalWriter
         }
     }
 
+    /// <summary>
+    /// UAC task 194b fix round (F3): the ownership question this writer asks for a Signal about the subject — its core record
+    /// derived as a write derives it (<see cref="ResolveCoreAsync"/>, <see cref="PickStampAsync"/> included), the list
+    /// <see cref="OwnershipContextOf"/> builds — and the owner it resolves (<see cref="ResolveOwnerAsync"/>), with no write. The
+    /// parity seam: tests compare it with the reconciler's question for the existing row.
+    /// </summary>
+    internal async Task<(RecordOwnershipContext Question, RecordOwnerResolution Owner)> OwnershipOfAsync(
+        string subjectEntity, Guid subjectId, int lane, CancellationToken ct)
+    {
+        var core = await ResolveCoreAsync(subjectEntity, subjectId, lane, ct).ConfigureAwait(false);
+        var question = OwnershipContextOf(core.Entity, core.Id, core.Stamps, subjectEntity, subjectId, requestedBy: null);
+        return (question, await ResolveOwnerAsync(core, subjectEntity, subjectId, requestedBy: null, ct).ConfigureAwait(false));
+    }
+
     /// <summary>True when the existing Signal's core record (or, for a no-core Signal, its owner team) is not the one planned
     /// now (<paramref name="owner"/>: the resolver's answer for the item, task 143).</summary>
     private static bool CoreRecordChanged(Entity existing, CorePlan core, RecordOwnerResolution owner)
@@ -1225,7 +1357,8 @@ public sealed partial class SignalWriter
 
         parents.Add(new RecordOwnershipParent(subjectEntity, subjectId));
         parents.AddRange(stamps.Select(stamp => new RecordOwnershipParent(stamp.EntityType, stamp.RecordId)));
-        return RecordOwnershipContext.ForParents(parents) with { RequestedBy = requestedBy };
+        // UAC task 194b fix round R (B3): the writer's own order IS sprk_signal's rule (core, subject, stamps) — the closed opt-out.
+        return RecordOwnershipContext.ForParentsInWriterOrder(parents) with { RequestedBy = requestedBy };
     }
 
     /// <summary>
@@ -1257,9 +1390,7 @@ public sealed partial class SignalWriter
         Guid? assignee;
         try
         {
-            await using var scope = _scopes.CreateAsyncScope();
-            assignee = await PersonalToDoAssignee.ResolveAsync(
-                _sysadminClient, scope.ServiceProvider.GetRequiredService<AssignedAccessStore>(), subjectId, ct).ConfigureAwait(false);
+            assignee = await PersonalToDoAssigneeAsync(subjectId, ct).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {

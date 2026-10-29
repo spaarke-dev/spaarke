@@ -43,7 +43,7 @@ internal static partial class DataverseSqlQueryTranslator
 
     private static readonly Regex IdentifierRegex = MyIdentifierRegex();
 
-    [GeneratedRegex(@"^[a-z][a-z0-9_]*$", RegexOptions.IgnoreCase)]
+    [GeneratedRegex(@"^[a-z][a-z0-9_]*\z", RegexOptions.IgnoreCase)]
     private static partial Regex MyIdentifierRegex();
 
     internal sealed record TranslationResult(
