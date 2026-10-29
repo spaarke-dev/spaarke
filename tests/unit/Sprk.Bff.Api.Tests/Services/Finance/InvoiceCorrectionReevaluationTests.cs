@@ -33,7 +33,8 @@ public sealed class InvoiceCorrectionReevaluationTests
         var evaluator = Kit.Evaluator();
         var loaded = Kit.Loaded(rules);
         var reevaluation = new InvoiceCorrectionReevaluation(
-            world.Entities.Object, (_, _) => Task.FromResult(loaded), evaluator.Evaluate, NullLogger<InvoiceCorrectionReevaluation>.Instance);
+            world.Entities.Object, (_, _) => Task.FromResult(loaded), evaluator.Evaluate, world.WriteSignalAsync, world.CloseSignalAsync,
+            NullLogger<InvoiceCorrectionReevaluation>.Instance);
         world.Seam = reevaluation.ApplyAsync;
         return world.Service();
     }
@@ -55,6 +56,10 @@ public sealed class InvoiceCorrectionReevaluationTests
         root["signalPlan"] = plan ?? [];
         world.Submission!["sprk_findingsjson"] = root.ToJsonString();
     }
+
+    /// <summary>The findings as the findings step wrote them (B2b-2's Signals step then reconciles and removes <c>pendingSignalChanges</c>).</summary>
+    private static JsonObject FindingsPatch(CorrectionWorld world) =>
+        JsonNode.Parse((string)world.ValueWrites.First(w => w.Entity == "sprk_invoicesubmission").Fields["sprk_findingsjson"])!.AsObject();
 
     private static JsonObject Stored(CorrectionWorld world) => JsonNode.Parse(world.Submission!.GetAttributeValue<string>("sprk_findingsjson"))!.AsObject();
 
@@ -113,7 +118,7 @@ public sealed class InvoiceCorrectionReevaluationTests
         plan["policyCode"]!.GetValue<string>().Should().Be("BILL-INC");
         plan["subjectId"]!.GetValue<string>().Should().Be(W.FeeLineId.ToString("D"));
 
-        var pending = Objects(root[InvoiceCorrectionReevaluation.PendingSignalChangesMember]!["rule"]).ToList();
+        var pending = Objects(FindingsPatch(world)[InvoiceCorrectionReevaluation.PendingSignalChangesMember]!["rule"]).ToList();
         pending.Should().HaveCount(2);
         var close = pending.Single(p => Text(p, "policyCode") == "BILL-CAP");
         Text(close, "closeFingerprint").Should().Be(CapFingerprint);
@@ -168,7 +173,7 @@ public sealed class InvoiceCorrectionReevaluationTests
         var entry = Objects(root["codingFindings"]).Should().ContainSingle().Subject;
         Objects(entry["refused"]).Select(r => Text(r, "kind")).Should().Equal("Activity");
         entry["task"]!["mismatch"]!.GetValue<bool>().Should().BeFalse();
-        Objects(root[InvoiceCorrectionReevaluation.PendingSignalChangesMember]!["system"])
+        Objects(FindingsPatch(world)[InvoiceCorrectionReevaluation.PendingSignalChangesMember]!["system"])
             .Select(s => (s["line"]!.GetValue<int>(), Text(s, "kind"), Text(s, "reason")))
             .Should().BeEquivalentTo(new[] { (FeeIndex, "Task", "refused"), (FeeIndex, "Task", "firmCodeMismatch") });
         StatusOf(world.Line()).Should().Be((int)InvoiceLineStatus.Flagged, "the activity code refusal still stands");
@@ -357,8 +362,12 @@ public sealed class InvoiceCorrectionReevaluationTests
 
         repeat.IsApplied.Should().BeTrue();
         world.Corrections.Should().ContainSingle();
-        world.ValueWrites.Count(w => w.Entity == "sprk_invoicesubmission").Should().Be(1, "the repeat finds the patch applied and writes none");
-        world.Submission!.GetAttributeValue<string>("sprk_findingsjson").Should().Be(patched);
+        // B2b-2: the first attempt stopped at the status step, so the Signals step (which removes pendingSignalChanges) first ran on the repeat; the
+        // findings patch itself was not written again.
+        world.ValueWrites.Count(w => w.Entity == "sprk_invoicesubmission").Should().Be(2, "the patch once, then the Signals step's clear");
+        var final = Stored(world);
+        final["findings"]!.ToJsonString().Should().Be(JsonNode.Parse(patched)!["findings"]!.ToJsonString());
+        final.ContainsKey(InvoiceCorrectionReevaluation.PendingSignalChangesMember).Should().BeFalse();
         StatusOf(world.Line()).Should().Be((int)InvoiceLineStatus.Clean);
     }
 }

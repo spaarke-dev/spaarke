@@ -148,12 +148,19 @@ internal sealed class SignalEpisodeLifecycle
         return new SignalStep(true, null);
     }
 
-    private sealed record ExistingEpisode(Guid Id, int Episode, bool IsResolved, string? Fingerprint, string? RowVersion);
+    /// <summary>The latest episode of one (policy, subject): its row, number, whether it is resolved, its stored fingerprint and row version.</summary>
+    internal sealed record ExistingEpisode(Guid Id, int Episode, bool IsResolved, string? Fingerprint, string? RowVersion);
 
-    private async Task<ExistingEpisode?> LatestEpisodeAsync(SignalWriteRequest request, CancellationToken ct)
+    private Task<ExistingEpisode?> LatestEpisodeAsync(SignalWriteRequest request, CancellationToken ct) =>
+        LatestEpisodeAsync(request.PolicyCode, request.SubjectEntityLogicalName, request.SubjectId, ct);
+
+    /// <summary>
+    /// The latest episode of (<paramref name="policyCode"/>, <paramref name="subjectEntity"/>, <paramref name="subjectId"/>) by the dedupe-key prefix;
+    /// null when none exists. Task 101 B2b-2 reads it to close a Signal whose condition a correction cleared.
+    /// </summary>
+    internal async Task<ExistingEpisode?> LatestEpisodeAsync(string policyCode, string subjectEntity, Guid subjectId, CancellationToken ct)
     {
-        var subjectId = request.SubjectId.ToString("D").ToLowerInvariant();
-        var prefix = SignalWriter.DedupeKeySubjectPrefix(request.PolicyCode, request.SubjectEntityLogicalName, subjectId);
+        var prefix = SignalWriter.DedupeKeySubjectPrefix(policyCode, subjectEntity, subjectId.ToString("D").ToLowerInvariant());
         var query = new QueryExpression(SignalEntity)
         {
             ColumnSet = new ColumnSet("sprk_dedupekey", "sprk_signalstatus", "sprk_evidencerefs", "versionnumber"),
@@ -166,8 +173,8 @@ internal sealed class SignalEpisodeLifecycle
         foreach (var row in rows.Entities)
         {
             if (!SignalWriter.TryParseDedupeKey(row.GetAttributeValue<string>("sprk_dedupekey"), out var code, out var entity, out var id, out var episode)
-                || !string.Equals(code, request.PolicyCode, StringComparison.Ordinal)
-                || !string.Equals(entity, request.SubjectEntityLogicalName, StringComparison.Ordinal) || id != request.SubjectId)
+                || !string.Equals(code, policyCode, StringComparison.Ordinal)
+                || !string.Equals(entity, subjectEntity, StringComparison.Ordinal) || id != subjectId)
             {
                 continue;
             }

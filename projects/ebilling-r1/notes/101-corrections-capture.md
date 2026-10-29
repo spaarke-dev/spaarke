@@ -210,3 +210,55 @@ Changed 101 test files: `CorrectionWorld` (firm, submission version, a transacti
 3. Clear the member (or the entries it reconciled) in the same row-version-conditional write, so a repeat converges. The member accumulates across corrections until then.
 4. The D-125 coding hold: when the last uncoded line is re-coded, close the hold Signal and decide whether `pipelineFindings[]`'s hold entry is removed (this part leaves it).
 5. The end-to-end approval test (a corrected invoice becomes approvable).
+
+## B2b-2. Signals, the coding hold, the end-to-end path
+
+Branch `task/ebill-101-corrections`, on top of `472565fd26`.
+
+| Piece | Where |
+|---|---|
+| Signals step | `InvoiceCorrectionReevaluation.ReconcileSignalsAsync`, run after the status step; a failure is `CorrectionStepException(CorrectionCodes.SignalsStep)` (`failedStep` `signals`) |
+| Writer wiring | the public constructor takes the singleton `SignalWriter` (write, and the record-free system close); the unit-test constructor takes the calls and an optional system-policy read. No DI registration added. |
+| Shared helpers (behaviour unchanged) | `SignalEpisodeLifecycle.LatestEpisodeAsync(policy, entity, id)` (internal; the private request overload delegates); `InvoiceSubmissionAfterSteps.ReadSystemPolicyAsync(IGenericEntityService, ...)` static (049's instance method delegates); `StoredFindings.ParsePlanEntry` internal; `InvoiceSubmissionPersister.SignalPlanRefusalEntryJson` (the persister's inline builder, extracted) |
+
+**Rule Signals.** Per `pendingSignalChanges.rule[]` entry: when `closeFingerprint` is set and differs from `raiseFingerprint`, the latest episode of (policy, subject) is closed with `SignalWriter.CloseAsync(id, rowVersion, ResolutionConditionCleared, policyCode)` (record-free, the `SignalReevaluationJob` precedent; no Decision Record), and only when it is open AND carries `closeFingerprint`; a resolved, absent or differently fingerprinted episode is left (no-op). When `raiseFingerprint` is set, the current `signalPlan[]` entry of that key is parsed (`StoredFindings.ParsePlanEntry`) and written through `SignalEpisodeLifecycle.WriteAsync(..., ReopenAsNextEpisode)`: after a close, episode n+1; with equal fingerprints there is no close and the open episode is refreshed in place. A plan entry that does not match the change is logged and not raised.
+
+**System Signals.** For the lines named in `system[]`: `StoredFindings.Parse` of the patched JSON, then `SystemFindings` under the system policy (049's read), then the line's findings. None left: its latest open system Signal is closed (ConditionCleared, any fingerprint). Some left: mapped (`BillingFindingSignalMapper.MapAll`) and written through the lifecycle (open with another fingerprint: Superseded, then n+1). An unusable system policy (missing, disabled, ...) wrote no system Signal in 049, so nothing is reconciled (logged).
+
+**Clearing.** After every Signal call, ONE row-version-conditional update removes `pendingSignalChanges` (and the hold entry, below) and adds any permanent writer refusal to 049's `signalWriteRefusals` (same shape, de-duplicated). A failure part-way throws before that write, so the member stays and the repeat converges: an already closed Signal is left, one already at the new episode is refreshed (no n+2). A concurrent write fails the update (Incomplete) and the repeat re-reads.
+
+**D-125 coding hold.** Shape (persister / after-steps): a `pipelineFindings[]` entry `ebilling.submission.coding_no_code_set` or `ebilling.submission.coding_unavailable`, which 049 maps to the INVOICE's `BILL-SYSTEM-SUBMISSION` Signal (reasons `coding.no_code_set` / `coding.unavailable`, grouped with any other invoice-level system reason). It clears when no UNDECIDED fee or expense line lacks a `coding.codeSetId`. Two readings to confirm: a decided line can no longer be re-coded, so it does not keep the hold; and B2b-1 keeps `status: NotCoded` on a re-coded line, so the recorded code set is the test, not the status. On clearing, the entry is removed in the clearing write and the invoice's system Signal is closed ConditionCleared, or refreshed when another invoice-level system finding remains. No new decision path was needed. After the clearing write, every undecided line still Pending with a recorded code set takes `StatusOf` (the persister's rule); this is idempotent, so a status failure after the clear is finished by the repeat.
+
+**073 presentation (B2b-1 K1, fixed).** Option (a), reusing 073's stored output and the mapper rather than copying either: both sides of the plan diff are mapped with 073's STORED decisions and the stored kind. `StoredDecisions` gives the n-th finding of a key the n-th stored `findings[]` entry of that key (`consequence`, `rejects`, `heldBecause`); the before side reads the pre-patch copy, the after side the patched one. A Held or Blocked group is therefore presented as 049 stored it. A guard makes sure a correction can never drop a hold: a stored entry presented `Blocked` that the after side would present otherwise (its deciding reason corrected away, or the group gone) is KEPT as stored and marked `correctionReview: true`, and no Signal change is recorded for it. Its Signal stays open until 105's override / return resolves every Signal (D-122). A root with no `decision` maps without decisions, as before.
+
+**What the hold checks read.** `InvoiceApprovalService.IsHeldAsync` and 104's `InvoiceRejectReturnService.IsHeldAsync` (on `work/ebilling-r1`, not on this branch) both read `FinanceBaseValues.HeldSubmissionConditions` on the SUBMISSION (Processing, or Rejected with the Blocked reason); neither reads the plan. A correction never writes the submission status, so a held invoice stays refused. Test: `HeldInvoice_AfterACorrectionThatChangesTheHeldGroup_IsStillRefusedApproval`. 104 is not merged into this branch, so the reject / return refusal is not exercised here (it uses the same predicate); add the twin test when the branches meet.
+
+**Plan refusals (B2b-1 K3, fixed).** A replacement or new entry that `SignalWriter.PreflightRefusal` refuses is left out and recorded in `signalPlanRefusals` with the persister's own entry builder, once.
+
+**Tests.** `InvoiceCorrectionSignalsTests` (11 cases, over `CorrectionWorld` with an in-memory Signal store and `BeginsWith`):
+- coded clear then re-raise (ConditionCleared, then episode 2);
+- refresh;
+- line system Signal closed / refreshed (theory, 2 cases);
+- hold kept while a line is uncoded, then closed and the lines re-derived after the last re-code;
+- Blocked group changed keeps the held presentation;
+- Blocked group whose reason is removed is kept and marked, Signal open;
+- refused replacement recorded;
+- failure at the signals step, then repeat;
+- failed clear, then repeat (no episode 3);
+- half-cleared member.
+
+`InvoiceCorrectionEndToEndTests` (2, over `ApprovalWorld` with the real resolver, line-decision, approval and recorder): an uncoded invoice re-coded line by line, the hold closes, the Flagged line is accepted, then the invoice is approved; a held invoice is refused approval after a correction.
+
+Changed B2b-1 tests: the two that read `pendingSignalChanges` now read the findings step's write (the Signals step clears the member); the status-failure retry test counts two submission writes (the patch, then the clear). `ApprovalWorld` gains `BeginsWith`. 049's suites are unchanged.
+
+**Seeded proofs** (each reverted, watched fail, restored):
+1. The Blocked guard disabled: `BlockedGroup_WhoseReasonACorrectionRemoves_IsKeptAndMarked` and the end-to-end held test failed. The latter fails on its plan assertion; its approval assertion reads the submission, which the guard does not touch.
+2. The stored decisions dropped from the mapping: `BlockedGroup_ChangedByACorrection_KeepsTheHeldPresentation` failed.
+3. The open-episode check dropped from the close (retry idempotency): `AFailedSignalsStep_IsIncomplete_AndTheRepeatConverges` and `AHalfClearedPendingMember_Converges` failed.
+
+**Known limits (K-class).**
+1. A refused plan entry, or a Signal write refused permanently in the Signals step, is recorded in the findings JSON but does not set `sprk_adminattention` (049 sets it from its own run).
+2. A stored Blocked entry kept by the guard keeps its pre-correction facts until override / return.
+3. A Signal a person resolved, whose group a later correction re-raises with the same fingerprint, reopens as episode n+1 (`ReopenAsNextEpisode`, the B2a rule).
+4. Reject / return (104) is not on this branch; only the approval half of item 5 is tested.
+5. The hold-refresh case (another invoice-level system reason left when the hold clears) has no test of its own; it is the same lifecycle write the line-refresh test covers.

@@ -1527,16 +1527,19 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
         };
         if (planRefusals.Count > 0)
         {
-            root[SignalPlanRefusalsMember] = new JsonArray(planRefusals.Select(r => (JsonNode)new JsonObject
-            {
-                ["policyCode"] = r.PolicyCode,
-                ["subject"] = new JsonObject { ["entity"] = r.SubjectEntity, ["id"] = r.SubjectId.ToString("D") },
-                ["code"] = r.Code,
-            }).ToArray());
+            root[SignalPlanRefusalsMember] = new JsonArray(planRefusals.Select(r => (JsonNode)SignalPlanRefusalEntryJson(r)).ToArray());
         }
 
         return root.ToJsonString(Json);
     }
+
+    /// <summary>One <see cref="SignalPlanRefusalsMember"/> entry (task 101 B2b-2: the corrections re-evaluation records a refused replacement the same way).</summary>
+    internal static JsonObject SignalPlanRefusalEntryJson(SignalPlanRefusal r) => new()
+    {
+        ["policyCode"] = r.PolicyCode,
+        ["subject"] = new JsonObject { ["entity"] = r.SubjectEntity, ["id"] = r.SubjectId.ToString("D") },
+        ["code"] = r.Code,
+    };
 
     /// <summary>
     /// The Signal plan (notes section 5; part D): the billing findings mapped by <see cref="BillingFindingSignalMapper.MapAll(BillingEvaluationResult, BillingSignalSubjects, IReadOnlyList{FindingDecision}, SubmissionEvaluationKind?)"/>

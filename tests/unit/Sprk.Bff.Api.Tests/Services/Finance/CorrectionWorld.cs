@@ -13,6 +13,9 @@ using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.Finance;
 using Sprk.Bff.Api.Services.Finance.Coding;
 using Sprk.Bff.Api.Services.Finance.Models;
+using Sprk.Bff.Api.Services.Finance.Submission;
+using Sprk.Bff.Api.Services.Signals;
+using Sprk.Bff.Api.Services.Signals.Billing;
 
 namespace Sprk.Bff.Api.Tests.Services.Finance;
 
@@ -66,6 +69,16 @@ internal sealed class CorrectionWorld
     public Entity? Submission { get; set; }
     public readonly List<Entity> CodeSets = [];
     public readonly List<Entity> Codes = [];
+
+    /// <summary>B2b-2: the Signals, as the writer files them (dedupe key, status, evidence with the reason-set fingerprint, row version).</summary>
+    public readonly List<Entity> Signals = [];
+
+    /// <summary>B2b-2: every Signal write (policy, subject, episode) and every system close (Signal id, resolution type) that reached the writer.</summary>
+    public readonly List<(string PolicyCode, Guid SubjectId, int Episode)> SignalWrites = [];
+    public readonly List<(Guid SignalId, int Resolution)> SignalCloses = [];
+
+    /// <summary>B2b-2: a fault for the Signal writer's write (null = none).</summary>
+    public Func<SignalWriteRequest, Exception?>? SignalWriteFault;
 
     public readonly Mock<IGenericEntityService> Entities = new(MockBehavior.Strict);
     public readonly Mock<IRecordOwnershipResolver> Ownership = new();
@@ -169,6 +182,7 @@ internal sealed class CorrectionWorld
                         "sprk_invoicesubmission" => Submission is null ? [] : [Submission],
                         "sprk_billingcodeset" => CodeSets,
                         "sprk_billingcode" => Codes,
+                        "sprk_signal" => Signals,
                         _ => [],
                     };
                     var rows = source.Where(r => Matches(r, query.Criteria)).Select(Copy).ToList();
@@ -356,6 +370,7 @@ internal sealed class CorrectionWorld
                 ConditionOperator.In => value is not null && condition.Values.Select(Norm).Contains(value),
                 ConditionOperator.Null => value is null,
                 ConditionOperator.NotNull => value is not null,
+                ConditionOperator.BeginsWith => value is string text && text.StartsWith((string)condition.Values[0], StringComparison.Ordinal),
                 _ => throw new NotSupportedException($"The test store does not model {condition.Operator}."),
             };
             if (!ok)
@@ -394,6 +409,97 @@ internal sealed class CorrectionWorld
         }
 
         return copy;
+    }
+
+    /// <summary>An existing Signal of (policy, subject) at <paramref name="episode"/> with <paramref name="fingerprint"/>, as 049 left it.</summary>
+    public Entity AddSignal(string policyCode, string subjectEntity, Guid subjectId, int episode, string fingerprint, bool resolved = false)
+    {
+        var row = new Entity("sprk_signal", Guid.NewGuid())
+        {
+            ["sprk_dedupekey"] = SignalWriter.BuildDedupeKey(policyCode, subjectEntity, subjectId.ToString("D").ToLowerInvariant(), episode),
+            ["sprk_signalstatus"] = new OptionSetValue(resolved ? SignalWriter.SignalStatusResolved : SignalWriter.SignalStatusOpen),
+            ["sprk_evidencerefs"] = Evidence(fingerprint),
+            ["versionnumber"] = 1L,
+        };
+        lock (Lines)
+        {
+            Signals.Add(row);
+        }
+
+        return row;
+    }
+
+    private static string Evidence(string fingerprint) =>
+        "[{\"kind\":\"" + BillingFindingSignalMapper.FingerprintEvidenceKind + "\",\"ref\":\"" + fingerprint + "\"}]";
+
+    /// <summary>The Signal rows of (policy, subject), by episode: whether resolved, the resolution type, the stored fingerprint.</summary>
+    public List<(int Episode, bool Resolved, int? Resolution, string? Fingerprint)> SignalsOf(string policyCode, Guid subjectId)
+    {
+        lock (Lines)
+        {
+            var found = new List<(int, bool, int?, string?)>();
+            foreach (var row in Signals)
+            {
+                if (SignalWriter.TryParseDedupeKey(row.GetAttributeValue<string>("sprk_dedupekey"), out var code, out _, out var id, out var episode)
+                    && code == policyCode && id == subjectId)
+                {
+                    found.Add((episode,
+                        row.GetAttributeValue<OptionSetValue>("sprk_signalstatus")?.Value == SignalWriter.SignalStatusResolved,
+                        row.GetAttributeValue<OptionSetValue>("sprk_resolutiontype")?.Value,
+                        SignalEpisodeLifecycle.FingerprintOf(row.GetAttributeValue<string>("sprk_evidencerefs"))));
+                }
+            }
+
+            return found.OrderBy(f => f.Item1).ToList();
+        }
+    }
+
+    /// <summary>The writer's create-or-refresh by dedupe key (a row of the same key is refreshed in place and stays Open).</summary>
+    public Task<SignalWriteResult> WriteSignalAsync(SignalWriteRequest request, CancellationToken ct)
+    {
+        if (SignalWriteFault?.Invoke(request) is { } fault)
+        {
+            return Task.FromException<SignalWriteResult>(fault);
+        }
+
+        lock (Lines)
+        {
+            SignalWrites.Add((request.PolicyCode, request.SubjectId, request.Episode));
+            var key = SignalWriter.BuildDedupeKey(request.PolicyCode, request.SubjectEntityLogicalName, request.SubjectId.ToString("D").ToLowerInvariant(), request.Episode);
+            var fingerprint = (request.EvidenceRefs ?? []).FirstOrDefault(e => e.Kind == BillingFindingSignalMapper.FingerprintEvidenceKind)?.Ref ?? string.Empty;
+            var row = Signals.FirstOrDefault(r => r.GetAttributeValue<string>("sprk_dedupekey") == key);
+            var created = row is null;
+            if (row is null)
+            {
+                row = new Entity("sprk_signal", Guid.NewGuid()) { ["sprk_dedupekey"] = key, ["versionnumber"] = 0L };
+                Signals.Add(row);
+            }
+
+            row["sprk_signalstatus"] = new OptionSetValue(SignalWriter.SignalStatusOpen);
+            row["sprk_evidencerefs"] = Evidence(fingerprint);
+            row["sprk_name"] = request.ShortHeadline;
+            row["versionnumber"] = row.GetAttributeValue<long>("versionnumber") + 1;
+            return Task.FromResult(new SignalWriteResult(row.Id, created, Guid.Empty, Guid.Empty));
+        }
+    }
+
+    /// <summary>The writer's system close, conditional on the row version (ChangedSinceRead when it moved).</summary>
+    public Task<SignalCloseOutcome> CloseSignalAsync(Guid id, string rowVersion, int resolution, string policyCode, CancellationToken ct)
+    {
+        lock (Lines)
+        {
+            var row = Signals.Single(r => r.Id == id);
+            if (row.GetAttributeValue<long>("versionnumber").ToString(System.Globalization.CultureInfo.InvariantCulture) != rowVersion)
+            {
+                return Task.FromResult(SignalCloseOutcome.ChangedSinceRead);
+            }
+
+            row["sprk_signalstatus"] = new OptionSetValue(SignalWriter.SignalStatusResolved);
+            row["sprk_resolutiontype"] = new OptionSetValue(resolution);
+            row["versionnumber"] = row.GetAttributeValue<long>("versionnumber") + 1;
+            SignalCloses.Add((id, resolution));
+            return Task.FromResult(SignalCloseOutcome.Closed);
+        }
     }
 
     public Entity SingleRow(Guid id) => Corrections.Single(c => c.Id == id);

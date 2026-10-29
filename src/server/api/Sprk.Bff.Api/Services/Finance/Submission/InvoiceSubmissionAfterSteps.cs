@@ -1125,7 +1125,13 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
     /// current version from its start, a superseded one inside its window) and is of the SubmissionIntegrity type. A version superseded
     /// after the received date (a re-seed) therefore still applies to that submission, as it does for the rule evaluation (K1, notes 13a).
     /// </summary>
-    internal async Task<(BillingRuleCandidate? Rule, string State)> ReadSystemPolicyAsync(DateOnly? receivedOn, CancellationToken ct)
+    internal Task<(BillingRuleCandidate? Rule, string State)> ReadSystemPolicyAsync(DateOnly? receivedOn, CancellationToken ct) =>
+        ReadSystemPolicyAsync(_entities, receivedOn, ct);
+
+    /// <inheritdoc cref="ReadSystemPolicyAsync(DateOnly?, CancellationToken)"/>
+    /// <remarks>Static (task 101 B2b-2) so the corrections re-evaluation reads the system policy the same way; 049's instance call is unchanged.</remarks>
+    internal static async Task<(BillingRuleCandidate? Rule, string State)> ReadSystemPolicyAsync(
+        IGenericEntityService entities, DateOnly? receivedOn, CancellationToken ct)
     {
         var query = new QueryExpression(BillingFactLoader.PolicyEntity)
         {
@@ -1136,7 +1142,7 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
         RuleDomains.AddBillingFilter(query);
         query.Criteria.AddCondition("sprk_policycode", ConditionOperator.Equal, BillingRuleCatalogue.SystemPolicyCode);
 
-        var rows = (await _entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false)).Entities
+        var rows = (await entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false)).Entities
             .Where(r => RuleDomains.IsBillingRow(r)
                 && string.Equals(r.GetAttributeValue<string>("sprk_policycode")?.Trim(), BillingRuleCatalogue.SystemPolicyCode, StringComparison.Ordinal))
             .ToList();
@@ -1169,7 +1175,7 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
         };
         versionQuery.Criteria.AddCondition("sprk_policy", ConditionOperator.Equal, policy.Id);
         var currentId = policy.GetAttributeValue<EntityReference>("sprk_currentversion")?.Id;
-        var versions = (await _entities.RetrieveMultipleAsync(versionQuery, ct).ConfigureAwait(false)).Entities
+        var versions = (await entities.RetrieveMultipleAsync(versionQuery, ct).ConfigureAwait(false)).Entities
             .Where(v => v.GetAttributeValue<EntityReference>("sprk_policy")?.Id == policy.Id)
             .Select(v => new BillingRuleCandidate
             {
@@ -1488,7 +1494,8 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
             }
         }
 
-        private static StoredPlanEntry ParsePlanEntry(JsonObject entry)
+        /// <summary>One stored <c>signalPlan[]</c> entry read back (task 101 B2b-2 raises a corrected group's entry with it).</summary>
+        internal static StoredPlanEntry ParsePlanEntry(JsonObject entry)
         {
             var facts = new Dictionary<string, object?>(StringComparer.Ordinal);
             foreach (var (name, value) in entry["facts"] as JsonObject ?? [])

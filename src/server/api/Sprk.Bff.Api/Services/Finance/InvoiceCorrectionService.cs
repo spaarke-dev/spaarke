@@ -62,6 +62,9 @@ public static class CorrectionCodes
 
     /// <summary>The <c>failedStep</c> of an <see cref="Incomplete"/> answer: the line status re-derived from the patched findings (B2b-1).</summary>
     public const string StatusStep = "status";
+
+    /// <summary>The <c>failedStep</c> of an <see cref="Incomplete"/> answer: the Signals closed or raised for the patched findings, and the D-125 coding hold (B2b-2).</summary>
+    public const string SignalsStep = "signals";
     public const string ReviewerUnresolved = LineDecisionCodes.DeciderUnresolved;
 
     /// <summary>FR-22: the code is not in the line's resolved code set; nothing was written.</summary>
@@ -144,8 +147,8 @@ public sealed record CorrectionApplied(Guid InvoiceId, Guid? LineId, string Fiel
 /// (<see cref="IIdentityNormalizationService.ResolveAsync"/>, EB-D-171) is in the live eligible set of the invoice's single core record
 /// (<c>EligibleApproverResolver.SingleCoreOf</c>, #2455); otherwise <c>invoice-reviewer</c>, also when the lookup fails (logged).</para>
 /// <para><b>Follow-through (part B2).</b> B2b-1 wires <see cref="InvoiceCorrectionReevaluation"/> into <see cref="OnValueWrittenAsync"/>: the billing
-/// rules re-run, <c>findings[]</c> / <c>signalPlan[]</c> and the line findings of the stored copy patched, then the line status re-derived. Still not
-/// here: the Signal reconcile (B2b-2) and the totals follow-through (B2c). Timekeeper and date corrections (the rate must be re-resolved) are refused
+/// rules re-run, <c>findings[]</c> / <c>signalPlan[]</c> and the line findings of the stored copy patched, then the line status re-derived; B2b-2 adds
+/// the Signal reconcile and the D-125 coding hold. Still not here: the totals follow-through (B2c). Timekeeper and date corrections (the rate must be re-resolved) are refused
 /// with <see cref="CorrectionCodes.FieldNotSupportedYet"/>. <b>Uncoded invoices (D-126).</b> A code correction of a Pending line whose coding says
 /// <c>NotCoded</c> is the re-code path: its set is resolved through <see cref="CodeSetResolver.ResolveAsync"/> for the invoice's single core record
 /// and recorded on the line; no resolvable set is 409 <see cref="CorrectionCodes.CodeSetUnavailable"/>. Any other Pending line is still refused.</para>

@@ -551,6 +551,8 @@ internal sealed class ApprovalWorld
             ConditionOperator.In => condition.Values.Any(v => Same(actual, v)),
             ConditionOperator.Null => actual is null,
             ConditionOperator.NotNull => actual is not null,
+            // Task 101 B2b-2: the Signal lifecycle finds a (policy, subject)'s latest episode by the dedupe-key prefix.
+            ConditionOperator.BeginsWith => actual is string text && text.StartsWith((string)condition.Values.Single(), StringComparison.Ordinal),
             _ => throw new NotSupportedException($"Test world: {condition.Operator} is not evaluated."),
         };
     }

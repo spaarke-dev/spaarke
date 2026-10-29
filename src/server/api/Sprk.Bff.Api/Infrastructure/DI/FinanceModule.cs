@@ -143,7 +143,8 @@ public static class FinanceModule
         // Scoped: it holds the scoped CodeSetResolver and the scoped EligibleApproverResolver. Unconditional (flag rule above); the routes carry the kill switch.
         services.AddScoped<InvoiceCorrectionService>();
         // B2b-1: the follow-through of a saved correction (re-evaluation diff, findings patch, line status), the service's onValueWritten seam. Concrete
-        // (ADR-010), scoped: it holds the scoped BillingFactLoader and InvoiceComplianceEvaluator. Unconditional (flag rule above).
+        // (ADR-010), scoped: it holds the scoped BillingFactLoader and InvoiceComplianceEvaluator. Unconditional (flag rule above). B2b-2: it also takes the
+        // singleton SignalWriter (SignalsModule) for the Signals step; no registration added.
         services.AddScoped<InvoiceCorrectionReevaluation>();
         // UTBMS line coding (ebilling-r1 task 047, FR-22, D-46): resolves an invoice's code set (CodeSetResolver), codes its
         // lines through IInvoiceAi.CodeLinesAsync in chunks, and refuses any code outside the set (ILineCodingService).
