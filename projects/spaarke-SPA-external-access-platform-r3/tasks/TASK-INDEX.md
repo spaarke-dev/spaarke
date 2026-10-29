@@ -34,7 +34,7 @@ Legend: Tier S = sonnet, O = opus · Effort h = high · status tokens `[open]` `
 | 046 | BFF home principal resolution (link, contact by tid+oid, registration_required, guards d/e) | P4b | ✅ [done] merged dfee0a438 (2 Opus passes, fix round 1 bc0113e9d); on dev | 044, 045 | O/h | FULL | A9 Wave 2 |
 | 047 | BFF registration endpoint POST /api/v1/external/registration | P4b | ✅ [done] merged 176857143 (2 Opus passes, fix rounds 1-3; schema label fix 69eed60c7); on dev 2026-10-16 (2c2fed38d); option 100000012 applied; UAC review #2005 clean | 046 | O/h | FULL | A9 Wave 3 |
 | 048 | BFF link endpoint POST /api/v1/external/workforce/link (dual-token proof) | P4b | ✅ [done] on branch (a9c5faf1d, 6e6fa656b, 543afaefa + code-review fixes; 2 Opus passes; adr-check 0 violations; +0.06 MB); on dev 2026-10-17 (d5401cf2d) | 046 (after 047: shared files) | O/h | FULL | A9 Wave 4 |
-| 043 | Production build + Teams package in CI (FR-20) | P4 | 🔄 [wip] dev environment done + dev package built (run 39489551799); prod environment external-spa-prod + TEAMS_APP_ID missing (owner; gates 073) | 040 | S/h | STANDARD | Wave 3 |
+| 043 | Production build + Teams package in CI (FR-20) | P4 | ✅ [done] 2026-10-29: workflows and dev path live (run 39489551799); remainder handed to provisioning — #2443 (external-spa-prod values, TEAMS_APP_ID, prod redirects/DNS/CORS, prod Teams dry run) | 040 | S/h | STANDARD | Wave 3 |
 | 050 | Record detail view: fields, docs/invoices, events/tasks (FR-01–03) | P5 | ✅ [done] | none | S/h | FULL | Wave 1 |
 | 051 | Detail messages section: read + send (FR-04/FR-11 client) | P5 | ✅ [done] | 050, 034 | S/h | FULL | Wave 5 |
 | 052 | Intake wizards: wiring + NDA + Policy Question (FR-05) | P5 | ✅ [done] | 035 | S/h | FULL | Wave 6 |
@@ -44,7 +44,7 @@ Legend: Tier S = sonnet, O = opus · Effort h = high · status tokens `[open]` `
 | 056 | Join page (FR-13), flagged until 060 | P5 | ✅ [done] | 003, 041 | O/h | FULL | Wave 8 |
 | 057 | Detail events + to-dos for Matter and Work Assignment (FR-03 client) | P5 | ✅ [done] | 039, 055 | S/h | FULL | Wave 8 |
 | 058 | SPA multitenant sign-in, tid → backend, silent/interactive link, profile form, landing wording | P4b | ✅ [done] 2026-10-19 | 047, 048 | S/xh | FULL | A9 Wave 5 |
-| 059 | Dev Entra + settings setup for A9 (live, owner-gated) | P4b | 🔄 [wip] stages R, A–F done 2026-10-19/20; only the C-1 revoke in Dewey Cheatham remains (owner, low priority) | 044, 077 (stage B) | S/h | STANDARD | A9 Wave 2 (live, alongside 046) |
+| 059 | Dev Entra + settings setup for A9 (live, owner-gated) | P4b | ✅ [done] 2026-10-29: stages R, A–F done 2026-10-19/20; C-1 revoked in Dewey Cheatham 2026-10-29 (dev BFF grants 0; workforce SPA grant kept) | 044, 077 (stage B) | S/h | STANDARD | A9 Wave 2 (live, alongside 046) |
 | 060 | Registration service: owner host decision, then build or R4 hand-off (FR-14) | P6 | 🚫 [cancelled] superseded by ADR-028 A9 (047 + 058) | 003 + owner decision | O/h | FULL | — |
 | 061 | Shared DataGrid shows option-set labels from @formattedValues (check-2 #1) | P5b | ✅ [done] reaches dev with the next SPA deploy | none | S/h | FULL | CHK2 |
 | 062 | Message sender name falls back to createdby (check-2 #4) | P5b | ✅ [done] merged a379d71fa; live check of the createdby expand after the BFF deploy | none | S/h | FULL | CHK2 |

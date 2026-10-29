@@ -82,6 +82,75 @@ public class DataverseWebApiServiceImpersonationTests
     }
 
     /// <summary>
+    /// field-mapping-server-write-path-r1 task 071 fix round 1: a 403 from the impersonated read keeps Dataverse's error code
+    /// and message (<see cref="DataverseForbiddenException"/>), so the family reader can tell a missing table privilege from
+    /// every other refusal; it is still an <see cref="HttpRequestException"/> with status 403 and the usual message.
+    /// </summary>
+    [Fact]
+    public async Task RetrieveMultipleImpersonatedAsync_Forbidden_ThrowsWithDataversesErrorCodeAndMessage()
+    {
+        const string body = "{\"error\":{\"code\":\"0x80040220\",\"message\":\"Principal user (Id=44444444-4444-4444-4444-444444444444, "
+                            + "type=8, roleCount=3), is missing prvReadsprk_Policy privilege on OTC=10234.\"}}";
+        var handler = new RecordingHandler(_ => new HttpResponseMessage(HttpStatusCode.Forbidden)
+        {
+            Content = new StringContent(body, Encoding.UTF8, "application/json"),
+        });
+        var sut = new OfflineService(handler);
+
+        var act = () => sut.RetrieveMultipleImpersonatedAsync("sprk_policies", "$select=sprk_policyid", CallerSystemUserId);
+
+        var thrown = (await act.Should().ThrowAsync<DataverseForbiddenException>()).Which;
+        thrown.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        thrown.Message.Should().Be("Response status code does not indicate success: 403 (Forbidden).",
+            "the Dataverse text names the principal; it is kept out of the message");
+        thrown.ErrorCode.Should().Be(DataverseWebApiService.AccessCheckDeniedErrorCode);
+        thrown.IsMissingReadPrivilegeOn("sprk_policy").Should().BeTrue();
+        thrown.IsMissingReadPrivilegeOn("sprk_policyversion").Should().BeFalse("another table's privilege is not this one");
+    }
+
+    /// <summary>
+    /// A 403 whose body cannot be read or decoded (a stream fault, or the decoder's own <see cref="InvalidOperationException"/>
+    /// for a bad charset) still throws the 403, with no code or message — never the decoder's exception. The same tolerated set
+    /// as <c>DataverseWebApiClient.CreateFailureAsync</c>.
+    /// </summary>
+    [Theory]
+    [InlineData("io")]
+    [InlineData("invalid-operation")]
+    [InlineData("http-request")]
+    public async Task RetrieveMultipleImpersonatedAsync_ForbiddenWithAnUnreadableBody_StillThrowsTheForbidden(string fault)
+    {
+        Exception thrown = fault switch
+        {
+            "io" => new IOException("The stream was reset."),
+            "invalid-operation" => new InvalidOperationException("The character set provided in ContentType is invalid."),
+            _ => new HttpRequestException("The response ended prematurely."),
+        };
+        var handler = new RecordingHandler(_ => new HttpResponseMessage(HttpStatusCode.Forbidden) { Content = new FaultingContent(thrown) });
+        var sut = new OfflineService(handler);
+
+        var act = () => sut.RetrieveMultipleImpersonatedAsync("sprk_policies", "$select=sprk_policyid", CallerSystemUserId);
+
+        var forbidden = (await act.Should().ThrowAsync<DataverseForbiddenException>()).Which;
+        forbidden.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        forbidden.ErrorCode.Should().BeNull();
+        forbidden.ErrorMessage.Should().BeNull();
+        forbidden.IsMissingReadPrivilegeOn("sprk_policy").Should().BeFalse("an unreadable refusal is never a missing-privilege answer");
+    }
+
+    [Fact]
+    public async Task RetrieveMultipleImpersonatedAsync_OtherFailure_ThrowsAPlainHttpRequestException()
+    {
+        var handler = new RecordingHandler(_ => new HttpResponseMessage(HttpStatusCode.InternalServerError));
+        var sut = new OfflineService(handler);
+
+        var act = () => sut.RetrieveMultipleImpersonatedAsync("sprk_policies", "$select=sprk_policyid", CallerSystemUserId);
+
+        var thrown = (await act.Should().ThrowAsync<HttpRequestException>()).Which;
+        thrown.Should().NotBeOfType<DataverseForbiddenException>();
+        thrown.StatusCode.Should().Be(HttpStatusCode.InternalServerError);
+    }
+
+    /// <summary>
     /// The Job B apply path (task 031): the PATCH runs as the confirming user. The EntitySetName lookup before it
     /// is environment metadata and stays app-only.
     /// </summary>
@@ -434,6 +503,18 @@ public class DataverseWebApiServiceImpersonationTests
     {
         public IReadOnlyCollection<string> Values(string header) =>
             Headers.TryGetValue(header, out var values) ? values : Array.Empty<string>();
+    }
+
+    /// <summary>A response body whose read throws <paramref name="fault"/>.</summary>
+    private sealed class FaultingContent(Exception fault) : HttpContent
+    {
+        protected override Task SerializeToStreamAsync(Stream stream, TransportContext? context) => Task.FromException(fault);
+
+        protected override bool TryComputeLength(out long length)
+        {
+            length = 0;
+            return false;
+        }
     }
 
     private sealed class RecordingHandler(Func<HttpRequestMessage, HttpResponseMessage> respond) : HttpMessageHandler

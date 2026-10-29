@@ -123,11 +123,11 @@ So the grid has to move between the BFF deploy and the delete, and the grid belo
    7. publishes `sprk_invoice`;
    8. verifies both return 404.
    Record the dependency output after the delete (expected 0, then 404) in this file.
-7. **A follow-up commit removes the transitional allow-list entries** (below).
+7. ~~A follow-up commit removes the transitional allow-list entries~~ Done ahead of the delete (below): the entry was removed on master in #2450, and the dev column delete waits for the next dev BFF deploy.
 
 **Rule agreed with R3.** After the delete, every dev BFF deploy must contain 015, **checked by content, not ancestry** (a squash merge breaks `merge-base --is-ancestor`). The check: `FinanceBaseValues.cs` has `InvoiceStatusCodeColumn` and none of FinanceBaseValues, FinanceRollupService or InvoiceReviewService names the old column. `Remove-EbillingInvoiceStatus.ps1` runs exactly that check at the attested commit; R3's deploy gate should run the same grep.
 
-**Follow-up (open): remove the transitional entries after the dev column delete.** One commit, after step 6 verified:
+**Follow-up (done 2026-10-29, ebilling-r1 integration merge of master ≥ 929dc42d31).** The external invoices allow-list entry was removed on master in #2450 (R3 task 002, with ebilling's OK), ahead of the dev column delete, which waits for the next dev BFF deploy. The integration merge took master's `ExternalAccessModule.cs`, dropped the test constant and the transition tests, and removed the guard's exemption list; the plain guard now allows the name nowhere but in its own file (master's must-refuse tests name the column through a constant spelled in two parts). What the follow-up originally listed:
 - `Infrastructure/DI/ExternalAccessModule.cs`: the invoices `ReadableColumns` line marked `transitional (015/D-97)`;
 - `tests/integration/auth/UnifiedAccessControl/ExternalModuleColumnAllowListTests.cs`: the `TransitionalInvoiceStatusColumn` constant and its uses (the live-grid row goes back to `statuscode`, the transition tests go, the two list pins drop the entry);
 - `tests/Spaarke.ArchTests/InvoiceStatusRetirementGuardTests.cs`: the `TransitionalExemptions` list and its three controls. The guard has a ratchet for this: `EveryTransitionalExemption_IsStillNeeded` fails as soon as one of the two lines is removed without its exemption.

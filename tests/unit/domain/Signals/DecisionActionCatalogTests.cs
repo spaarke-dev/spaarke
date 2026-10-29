@@ -1082,6 +1082,8 @@ public class DecisionActionCatalogTests
     {
         var sources = new Mock<DecisionParameterSources>(
             new Mock<IDataverseUserClient>().Object, new Mock<IGenericEntityService>().Object, new Mock<Sprk.Bff.Api.Infrastructure.Cache.ITenantCache>().Object,
+            new Microsoft.Extensions.Configuration.ConfigurationBuilder().Build(),
+            new Mock<Microsoft.Extensions.Options.IOptionsMonitor<Sprk.Bff.Api.Infrastructure.ExternalAccess.ExternalAccessOptions>>().Object,
             NullLogger<DecisionParameterSources>.Instance)
         { CallBase = false };
         sources.Setup(s => s.ForPlanAsync(It.IsAny<HttpContext>(), It.IsAny<ResolvedDecisionPlan>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>())).ReturnsAsync(facts);

@@ -251,12 +251,15 @@ internal static class SecureChildLineage
     /// UAC task 194b R4: the primary order of a ROOT table whose rows are filed under a parent (a root is not a
     /// <see cref="Children"/> entry, so it has no <see cref="Table.LookupOrder"/> there). A project's primary is the record its
     /// ADR-024 pair names (<c>sprk_regardingrecordid</c>, <c>SecureRootInheritance.PairNamesAParentOnItsOwn</c>; the
-    /// field-mapping 070 registry's project→pair edge), asked under that column.
+    /// field-mapping 070 registry's project→pair edge), asked under that column. A work assignment's primary is its matter,
+    /// then its project, invoice, event: its filing order (<c>SecureRootInheritance.TypedLookupsOf</c>, owner decision
+    /// 2026-10-29). Without an entry the order fell to column name, which put the event first.
     /// </summary>
     internal static readonly IReadOnlyDictionary<string, IReadOnlyList<string>> RootLookupOrder =
         new Dictionary<string, IReadOnlyList<string>>(StringComparer.OrdinalIgnoreCase)
         {
             [Project] = ["sprk_regardingrecordid"],
+            [WorkAssignment] = SecureRootInheritance.TypedLookupsOf(WorkAssignment).Select(t => t.Column).ToArray(),
         };
 
     /// <summary>True for a table whose rows the synchronizer mirrors (a child, never a root).</summary>

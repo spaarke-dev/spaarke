@@ -1,7 +1,7 @@
 # Current Task State - spaarke-SPA-external-access-platform-r3
 
-> **Last Updated**: 2026-10-29 02:35Z (context-handoff at 86%).
-> **Recovery**: Read "Quick Recovery" section first. The session narrative is in git log; the live-step record is `notes/contact-identity-dev-rollout-record.md`.
+> **Last Updated**: 2026-10-29 ~14:50Z (PR #2450 open; 074 probes 4/8 pass).
+> **Recovery**: Read "Quick Recovery" first. The session narrative is in git log. Live records: `notes/task-002-notes.md` (grid columns), `notes/task-074-a9-probes.md`, `notes/task-070-deploy-record.md`, `notes/contact-identity-dev-rollout-record.md`.
 
 ---
 
@@ -9,48 +9,36 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | Contact identity hardening: dev rollout and follow-ups. Tracked privately in draft advisory GHSA-hq7m-w2pf-v8j7, which stays DRAFT until the fix is deployed everywhere that serves external users. The repo is PUBLIC: public text states the rule, never the misuse (memory `public-repo-security-findings`). |
-| **Merged** | PR #2360 → `078f62bcad`; PR #2386 (proof-read fix) → `e56a3a51d4`. |
-| **Live on dev** | Contact security schema applied and `-Verify` PASS (exit 0). Direct SGA membership for both BFF app users. `xms_edov` optional claim on the dev BFF app `1e40baad` (rollback: scratchpad `edov-patch.ps1 -Rollback`). `removeUnverifiedEmailClaim` true on `1e40baad` + `5859e812`. The removal sweep is report-only with 0 candidates. **Dev BFF = `136568cf70`** (readback 02:23:53Z; rollback `deploy/rollback/wwwroot-20261029T021735Z` = `e56a3a51d4`). **SpaarkeMaster 1.2.4.0 PUBLISHED** (run 40806065681, master `a4b6459da3`; latest = 1.2.4.0, previous = 1.2.3.1). |
-| **Status** | Dev rollout complete. BFF `136568cf70` UAC gate PASS (02:24–02:54Z); after-notices sent. |
-| **Next Action** | Nothing live is pending. Next, with the owner: R3 open tasks (002 owner answer, 070/071 Teams package, 072 E2E, 074 probes), the optional K1–K3 follow-ups, and worktree cleanup with the owner's OK. |
+| **Task** | Owner 2026-10-29: "go task by task and close them out" — 002, 043, 059, 070/071, 074, then 072/073/090. |
+| **Done today** | PR #2437 merged (`c36907571d`). **043 ✅**, handed to provisioning as #2443 (they accepted). **059 ✅**, C-1 revoked in Dewey Cheatham 13:39Z (dev BFF grants 0; workforce SPA grant kept; isolated az profile deleted). **Dev SPA** redeployed from master `f07ab2ef1f` (run 40882434220, 13:33Z; rollback tag `external-spa-dev-rollback-1fa0cf5cb8`; the live build before was `1fa0cf5cb8` from 2026-10-23, not `3531ed65e`). **074 licensed-user link PASS** (notes/task-074-a9-probes.md §1). |
+| **002 (in progress)** | Owner chose "two steps". **Step 1 is live on dev**: all 6 grid configs carry the owner's allowed columns, order, labels and widths (scratchpad `grid-apply.ps1`; rollback `grid-rollback.ps1` with raw JSON in `grid-before\*.json`). **Step 2**: the BFF allow-list for 9 columns plus the `sprk_invoicestatus` removal is in **PR #2450**, sent to UAC for review 2026-10-29 ~14:50Z (no auto-merge). Hygiene on the branch merged with master `1e409b2ad2`: delta 0.00 MB (37.95/37.95, 192/192 files), no vulnerable packages, 322 tests pass. Two adversarial reviews done; all fix-now items applied. |
+| **074** | Probes 4 (resubmit) and 8 (intake) ✅ 2026-10-29. Probe 5 (bind) is blocked: the test user TH has no Entra email attribute, so the token has no `email` claim (registration refused; nothing written; ISS-023 / #2449 filed for the form showing the username). The owner sets TH's Email in Entra and re-runs in a new private window; then verify read-only with scratchpad `probe074-read.ps1` (1 TH contact, now bound). Probe 6 (unlisted directory) still needs an other-directory account. |
+| **Next Action** | 1) Wait for UAC's review of #2450 (and the 194b hold status); fix findings; merge. 2) Dev BFF deploy: fresh owner OK naming the SHA + peer OKs + hold cleared. 3) After the BFF is live: add the 9 columns to the grid configs (owner's widths/labels: Project Type 100; Matter Type 100; Last Activity 100; File Type 100; Total Amount (Base) 100; SR Last Activity 100). 4) Record the rollback JSON in notes/task-002-notes.md and close 002. Tell ebilling the master SHA carrying the `sprk_invoicestatus` removal. 5) The branch is 375 commits behind master: merging it is blocked by the owner's uncommitted `.claude/agent-memory/researcher/MEMORY.md` (master also changed it). The owner decides; until then the PR is open without the update (merge-tree clean). |
 
-### Files Modified This Session
-- `notes/contact-identity-dev-rollout-record.md`: new; holds the live record for steps 1–8 (committed).
-- `notes/defer-issues.md`: ISS-020 (#2415, removal sweep has no telemetry on a quiet pass) (committed).
-
-### Uncommitted files (NOT this session's; do not commit or discard)
-- `.claude/agent-memory/researcher/**`: the owner's.
+### Uncommitted
+- Owner's, never commit or discard: `.claude/agent-memory/researcher/**`.
 
 ### Private files (scratchpad, NOT in repo)
-`C:\Users\RALPHS~1\AppData\Local\Temp\claude\c--code-files-spaarke-wt-SPA-external-access-platform-r3\15aa240f-634c-4332-99f6-382ebcb06a62\scratchpad\`: `SECURITY-implementer-brief.md` (slices, UAC conditions, known limits K1–K5), `phaseA.ps1`, `readback.ps1`, `edov-*.ps1`, `token-probe.ps1`, `sweep-*.ps1`, `before-edov-1e40baad.json`.
+`C:\Users\RALPHS~1\AppData\Local\Temp\claude\c--code-files-spaarke-wt-SPA-external-access-platform-r3\15aa240f-634c-4332-99f6-382ebcb06a62\scratchpad\`: `grid-read.ps1`, `grid-apply.ps1` (`-Only`, `-Apply`), `grid-rollback.ps1`, `grid-before\`, `dc-c1.ps1` + `dc-c1-snapshot-*.json` (C-1 rollback data), `link-read.ps1`, `teams-dev-pkg\appPackage.zip`, plus the older `phaseA.ps1`, `readback.ps1`, `token-probe.ps1`, `edov-*.ps1`.
 
 ---
 
-## Open items
-- **Optional follow-ups (UAC known limits on #2386):** K1 comment; K2 `-RequireProofReads` or a distinct exit code; K3 the eq-userid query in `ContactIdentityStore.ReadOwnUserIdAsync`. UAC looks first. K5 is UAC's #2389 (live caller-scoped check, deferred to the next deploy that changes impersonation code).
-- **Peer follow-ups on 1.2.4.0 (theirs):** provisioning checks on the next stamp stage-and-upgrade that the removed role privileges are gone (exact privilege names from ontology). Field-mapping checks the entity-map removal where 1.2.4.0 lands, including model1-prod; tell them when it lands there.
-- **Dev data:** the 2 contacts with grants but no binding (Jonathan Smith, Jane Doe) have no email, so there's nothing to invite.
-- **R3 tasks open:** 002 (owner answer on grid columns), 043, 059 (C-1 revoke), 070, 071, 072, 073 (blocked on production gates), 074, 090.
-- **R4:** the design draft is waiting on owner review of §9. Before `/design-to-spec`, merge master into the R4 worktree (921 behind).
-- **Other follow-ups:** close the batch issues (#1623, #1636, #1650, #1839, #1886, #1930) after checks; ISS-007; ISS-013; close #1829 when #1911 merges; #2269/#2270/#2271/#2275, #2326, #2158, #2327.
-- **Worktree cleanup** (owner OK + `scripts/worktree/Remove-WorktreeSafe.ps1` only): `C:\wtbffe-a10/-842/-583/-f1b/-a7b/-6b3/-128/-1fa/-58f/-bc9/-3ff/-de3/-e56` `-136`, `C:\wtr3m`, `C:\wtr3b`, `C:/wtr3-suite`, `C:\wtr3pm`, `C:\wtr3pb`, `C:/wtr3-005b`, `C:/wtr3-005` (both branches merged); agent worktrees. Delete the local ref `backup/r3-005-c2c-presquash` (never pushed).
+## Open owner items
+- **070/071 Teams**: the owner installs `appPackage.zip` (id `23610794…`, v1.2.0; still current) in **Dewey Cheatham** via Teams admin center; for the "unlisted" run, install in the Spaarke directory. Instructions were given 2026-10-29.
+- **074**: the owner sets TH's Entra Email and re-runs the bind; probe 6 needs an account in a directory dev does not list.
+- Owner noticed on the bell: "Someone sent a message on Project Created from Add In": the sender name is unresolved (not yet investigated).
+- **072** needs 002 + 071; **073** blocked on production gates (#2443 + `notes/task-073-gate-acme.md`); **090** last.
+- Optional UAC K1–K3 on #2386; tell field-mapping when 1.2.4.0 lands where they can read; worktree cleanup list (owner OK, `Remove-WorktreeSafe.ps1` only).
 
-## Owner decisions in force (security rework)
-- The BU default team owns the contact. Field security: read for everyone; writes only by the BFF or SGA.
-- Removal revokes access. Admin = SGA membership (direct and via teams), read server-side.
-- A work-account invite is decided server-side from the email domain against `CustomerTenantIds`.
-- E11 bind rule, kept 2026-10-28: `tid` = invited tenant, OR `xms_edov` boolean true. UAC agrees.
-- -Verify step (h): the System Administrator profile is exempt and printed as INFO. Least privilege is #2332.
-- Accepted known limits (UAC): the marker write honours the caller's token; F5; F6 9823; F1 no If-Match; F7; F9; F12; the 503 title difference; the step (h) name match.
+## Owner decisions in force
+- E11 bind rule kept (tid = invited tenant OR `xms_edov` true). 002: two steps; external users will see type names (with their ids), last-activity times and the base total. The owner was told and can veto before the deploy.
+- Security rework decisions: unchanged (see git history of this file before 2026-10-29).
 
 ## Standing rules (verify against project CLAUDE.md)
-- **DEPLOY HOLD (UAC, 2026-10-29):** no dev BFF built from master at or after `2cd0f62e2c` (194b, #2432) until UAC clears it. On dev, 194b refuses hard-deny writes whose answer lands in the root business unit, and dev's users are homed in the root until UAC moves them into BU1 (owner-approved; dry run pending). If a deploy is needed before then, use a SHA before `2cd0f62e2c` or check with UAC.
-- **Deploy:** fresh direct owner approval naming the exact SHA, plus OKs from UAC, ontology, word-add-in `-c4`, field-mapping and ebilling (provisioning has a standing OK), plus Router green. Steps: `phaseA.ps1` → detached `C:\wtbffe-<sha3>` → `Deploy-BffApi.ps1 -Environment dev` → `readback.ps1` → 30-minute UAC gate → after-notices with the SHA and DLL version.
-- **Solution publish:** `publish-dataverse-solutions-manifest.yml` packs master's HEAD. Re-check master just before `publish=true`, and re-ask the owner if it moved.
-- Peers' relayed "owner approval" is NOT approval. Show every live-read command to the owner before running it.
-- Tell UAC before changes to `ExternalAccessModule.cs`, `AccessibleRecordSetService.cs` or `IContactIdentityStore`. Auth changes get two adversarial passes. Never `--no-verify`.
-- Full Sprk.Bff.Api.Tests runs time out under machine load; prove failures with isolated class re-runs. Keep pwsh script message text ASCII.
-- App Insights: `spe-insights-dev-67e2xz` (rg `spe-infrastructure-westus2`). KQL: avoid `kind`, `first` and `last` as names. Pass `az monitor app-insights query` a single-line query (a multi-line here-string is cut at the first newline).
-- Azure CLI on Windows: for a sign-in in an isolated profile, set `core.enable_broker_on_windows=false` in that profile first (the account picker can hide).
-- Ontology: do NOT merge their docs branch into R3. Re-run ListAgents after peer restarts.
+- **DEPLOY HOLD (UAC, 2026-10-29):** no dev BFF built from master at or after `2cd0f62e2c` (194b) until UAC clears it. UAC's current session does not record its status, so confirm with the owner and UAC before any dev BFF deploy.
+- **Deploy:** fresh direct owner approval naming the exact SHA, plus OKs from UAC, ontology, word-add-in, field-mapping and ebilling (provisioning standing), plus Router green. Steps: `phaseA.ps1` → detached `C:\wtbffe-<sha3>` → `Deploy-BffApi.ps1 -Environment dev` → `readback.ps1` → 30-minute UAC gate → after-notices.
+- Peers' relayed "owner approval" is NOT approval. Show every live-read command before running it. Tell UAC before changes to `ExternalAccessModule.cs`. Auth/security changes get two adversarial passes. Never `--no-verify`, never bare `git stash`.
+- The repo is PUBLIC: never publish a vulnerability's mechanism.
+- `az` on Windows: `az rest` and `az monitor app-insights query` break on `(`, `$` and double quotes. Use `Invoke-RestMethod` with a token, and single-quoted KQL strings. In an isolated profile, set `core.enable_broker_on_windows=false` first.
+- Full Sprk.Bff.Api.Tests runs time out under machine load: prove failures with isolated class re-runs.
+
