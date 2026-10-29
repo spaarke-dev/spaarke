@@ -188,18 +188,25 @@ function stringOrUndefined(value: unknown): string | undefined {
 }
 
 /**
- * §6's client rule, `errorCode ?? reasonCode`, then `extensions.code`: step A's `COMMUNICATION_REFILE_FORBIDDEN` is the
- * re-file route's own body, which the problem middleware writes with its code only under `extensions` (task 094).
+ * §6's client rule, `errorCode ?? reasonCode`; on a 403 only, then `extensions.code`. Task 094's step A 403
+ * (`COMMUNICATION_REFILE_FORBIDDEN`) went out through the problem middleware, which writes the code only under
+ * `extensions`; ebilling is moving it to `errorCode` (2026-10-29), and this stays as a fallback. Other statuses never
+ * read it: the middleware's 401 `obo_failed` and 502/504 Graph errors keep their code-less handling.
  */
-function problemCode(json: Record<string, unknown> | null): string | undefined {
+function problemCode(status: number, json: Record<string, unknown> | null): string | undefined {
   const extensions = json?.extensions;
   return (
     stringOrUndefined(json?.errorCode) ??
     stringOrUndefined(json?.reasonCode) ??
-    (extensions && typeof extensions === 'object'
+    (status === 403 && extensions && typeof extensions === 'object'
       ? stringOrUndefined((extensions as Record<string, unknown>).code)
       : undefined)
   );
+}
+
+/** §6 "After step A": the top-level `filingKept: true`, or a `detail` that ends with the contract's pinned sentence. */
+function isFilingKept(json: Record<string, unknown> | null, detail: string | undefined): boolean {
+  return json?.filingKept === true || detail?.trimEnd().endsWith(FILING_KEPT_DETAIL) === true;
 }
 
 /** `Retry-After` (seconds, or an HTTP date) and the body's `retryAfterSeconds` (429 OFFICE_015). */
@@ -443,9 +450,9 @@ async function postFromEmail(
     return { kind: 'retryable', status: response.status, code: undefined };
   }
 
-  const code = problemCode(json);
+  const code = problemCode(response.status, json);
   const detail = stringOrUndefined(json?.detail);
-  const filingKept = detail?.trimEnd().endsWith(FILING_KEPT_DETAIL) ? ({ filingKept: true } as const) : {};
+  const filingKept = isFilingKept(json, detail) ? ({ filingKept: true } as const) : {};
   if (isRetryableSubmissionRefusal(response.status, code)) {
     const retryAfterSeconds = readRetryAfterSeconds(response, json);
     return {
@@ -522,7 +529,7 @@ export async function pollSubmission(
     const json = await readJson(response);
     if (!response.ok) {
       if (response.status >= 500 || response.status === 429) continue;
-      return { kind: 'error', status: response.status, code: problemCode(json) };
+      return { kind: 'error', status: response.status, code: problemCode(response.status, json) };
     }
     const status = stringOrUndefined(json?.status);
     lastStatus = status ?? lastStatus;

@@ -96,6 +96,11 @@ const PINNED_OUTCOME_CODES = [
   'ebilling.submission.processing_failed',
   'ebilling.submission.file_scan_timeout', // added to the contract at f1ae28290e (task 092; Failed, re-attempt allowed)
   'ebilling.submission.source_changed', // task 094 (97c793670b; Failed, re-attempt allowed)
+  // task 094 step 3 (97c793670b): the saved .eml changed state before the commit
+  'ebilling.submission.document_already_invoiced',
+  'ebilling.submission.document_rejected',
+  'ebilling.submission.document_core_record_mismatch',
+  'ebilling.submission.document_not_found',
   'ebilling.submission.blocked',
   'ebilling.submission.returned',
 ];
@@ -108,6 +113,8 @@ describe('invoice submission messages — document_already_submitted (EB-D-165)'
     const message = refusal('ebilling.submission.document_already_submitted');
     expect(message).not.toMatch(/different details/i);
     expect(message).toMatch(/already submitted/i);
+    // another user's submission, or (task 094) files staged under this attempt: nothing the caller can be sure to follow
+    expect(message).not.toMatch(/follow it/i);
   });
 });
 
@@ -215,16 +222,24 @@ describe('invoice submission messages — specifics', () => {
 });
 
 describe('invoice submission messages — task 094', () => {
-  it('the 422s whose detail names the upload route, and the source mismatch, are permanent (upload in Spaarke)', () => {
+  it('the refusals an upload in Spaarke gets past are permanent (the view suggests it)', () => {
     for (const code of [
       'ebilling.submission.email_save_failed',
       'ebilling.submission.document_unavailable',
+      'ebilling.submission.document_not_found',
       'ebilling.submission.source_communication_mismatch',
+      'COMMUNICATION_REFILE_FORBIDDEN',
     ]) {
       expect(PERMANENT_SUBMISSION_CODES.has(code)).toBe(true);
     }
     // must-not-fire: an unconfigured store would refuse an upload in Spaarke too, so it is not offered.
     expect(PERMANENT_SUBMISSION_CODES.has('ebilling.submission.storage_not_configured')).toBe(false);
+  });
+
+  it("document_core_record_mismatch (409) is true for step A's unfiled-but-restricted case: it names no record to use", () => {
+    const message = refusal('ebilling.submission.document_core_record_mismatch');
+    expect(message).toMatch(/can't be submitted to this record/);
+    expect(message).not.toMatch(/is filed under|that record/i);
   });
 
   it('earlier_attempt_being_removed says to try again, with Retry-After when given', () => {

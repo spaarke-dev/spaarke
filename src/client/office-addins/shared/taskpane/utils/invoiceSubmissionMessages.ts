@@ -16,20 +16,24 @@ export const EMAIL_UNIDENTIFIABLE_CODE = 'ebilling.submission.email_unidentifiab
 /**
  * §6 refusals that cannot work from Outlook, so the view also suggests uploading in Spaarke: the email can't be
  * identified, or a marked file can't be kept byte for byte in the saved email (422, 2026-10-28; its `detail` names the
- * internal upload route). Task 094 (2026-10-28): the saved `.eml` is gone or empty, or no longer carries a marked file
- * as marked (both 422, `detail` names the upload route), or belongs to another communication.
+ * internal upload route). Task 094 (2026-10-28): the saved `.eml` is gone, empty or deleted, no longer carries a marked
+ * file as marked (422s whose `detail` names the upload route), or belongs to another communication; or the caller may
+ * not file the email under the record (an upload in Spaarke does not file the email).
  */
 export const PERMANENT_SUBMISSION_CODES: ReadonlySet<string> = new Set([
   EMAIL_UNIDENTIFIABLE_CODE,
   'ebilling.submission.attachment_not_preserved',
   'ebilling.submission.email_save_failed',
   'ebilling.submission.document_unavailable',
+  'ebilling.submission.document_not_found',
   'ebilling.submission.source_communication_mismatch',
+  'COMMUNICATION_REFILE_FORBIDDEN',
 ]);
 
 /**
  * §6 "After step A" (task 094): a refusal that comes after the submission filed the communication under the record
- * keeps that filing, and its `detail` ENDS with this pinned sentence. It is the only signal the contract gives.
+ * keeps that filing, and its `detail` ENDS with this pinned sentence (kept word for word; ebilling is adding a top-level
+ * `filingKept: true` too, which the service reads first).
  */
 export const FILING_KEPT_DETAIL = 'The communication was filed under the record first; that filing is kept.';
 
@@ -141,7 +145,9 @@ export const SUBMISSION_ERROR_MESSAGES: Readonly<Record<string, Entry>> = {
   'ebilling.submission.submission_already_ended':
     'This email was already submitted with these same details, and the invoice was rejected. You can follow it in ' +
     `Spaarke. ${NOTHING}`,
-  'ebilling.submission.document_already_submitted': `This email was already submitted as an invoice for this record. You can follow it in Spaarke. ${NOTHING}`,
+  // Also another user's submission, or (task 094) other files already staged under this attempt: the caller may have
+  // nothing to follow, so the sentence does not promise it.
+  'ebilling.submission.document_already_submitted': `This email was already submitted as an invoice for this record. ${NOTHING}`,
   OFFICE_IDEMPOTENCY_CONFLICT: f => `This submission is still being sent. ${tryAgain(f)}`,
   // §6 access and filters
   OFFICE_AUTH_001: `Your sign-in has expired. Sign in again, then submit. ${NOTHING}`,
@@ -173,7 +179,9 @@ export const SUBMISSION_ERROR_MESSAGES: Readonly<Record<string, Entry>> = {
     `Spaarke couldn't reach the record right now. ${NOTHING} ${tryAgain(f)}`,
   'ebilling.submission.failed': f => `The submission couldn't be queued. ${NOTHING} ${tryAgain(f)}`,
   'ebilling.submission.attachment_not_preserved': `One of the marked files couldn't be saved exactly as attached. ${NOTHING}`,
-  'ebilling.submission.document_core_record_mismatch': `This email is filed under a different matter, project or work assignment. Submit the invoice to that record. ${NOTHING}`,
+  // Filed under another core record, or (task 094 step A) unfiled but held under a restricted record; the body does
+  // not say which, so the sentence is true for both and names no record to submit to.
+  'ebilling.submission.document_core_record_mismatch': `This email belongs to a different matter, project or work assignment, so it can't be submitted to this record. ${NOTHING}`,
   'ebilling.submission.correction_not_allowed': fromReasons(CORRECTION_REASON_MESSAGES, CORRECTION_FALLBACK),
   'sdap.access.deny.record_unavailable': `The invoice isn't available to you: it may not exist, or you can't change it. ${NOTHING}`,
   // §6 task 094 (2026-10-28): step 1 reads the saved .eml and its communication, step A files an unfiled communication
@@ -223,6 +231,15 @@ export const INVOICE_OUTCOME_MESSAGES: Readonly<Record<string, Entry>> = {
   'ebilling.submission.processing_failed': "The invoice couldn't be processed.",
   'ebilling.submission.file_scan_timeout':
     "The malware scan of a marked file didn't finish in time, so the invoice was not processed. Submit it again.",
+  // Task 094 step 3 (2026-10-28): the saved .eml changed state before the commit.
+  'ebilling.submission.document_already_invoiced':
+    "This email's saved copy was linked to another invoice while this one was being processed, so it was not processed.",
+  'ebilling.submission.document_rejected':
+    "This email's saved copy was marked as not an invoice while it was being processed, so it was not processed.",
+  'ebilling.submission.document_core_record_mismatch':
+    'This email was filed under, or is held by, a different record by the time the invoice was processed, so it was not processed.',
+  'ebilling.submission.document_not_found':
+    "This email's saved copy was deleted from Spaarke while the invoice was being processed, so it was not processed.",
   // Task 094 (2026-10-28): a re-attempt is allowed (EB-D-160).
   'ebilling.submission.source_changed':
     "The email's saved copy in Spaarke changed while the invoice was being processed, so it was not processed. Submit it again.",
