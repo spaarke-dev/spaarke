@@ -86,8 +86,8 @@ internal sealed record RecordFamilyMember(
 /// <param name="Members">This page's members: on the first page the anchor's chain (top first), then the anchor's own subtree,
 /// then the rest, each level in a fixed order (UAC C4).</param>
 /// <param name="CountsByTable">How many of <paramref name="Members"/> each table has — of what IS shown, never of what is hidden.</param>
-/// <param name="Truncated">True when anything the caller can read was left out: more members than one page holds, a record
-/// past the depth cap (below the view, or above its top), or rows past the per-query row ceiling. Never left out silently.</param>
+/// <param name="Truncated">True when anything the caller can read was left out: more members than one page holds, or a record
+/// past the depth cap (below the view, or above its top). Never left out silently.</param>
 /// <param name="Continuation">The opaque token that loads the next page, or null when no further page can be loaded.</param>
 internal sealed record RecordFamilyRead(
     RecordFamilyReadOutcome Outcome,
@@ -111,8 +111,12 @@ internal sealed record RecordFamilyRead(
 /// authorization input and decides no isolation; nothing is cached across calls.</para>
 /// <para><b>The walk.</b> Driven by <see cref="RecordFamilyEdges"/> rows of ONE kind (ontology 3a; any other kind is refused
 /// before a read). One batched query per (child table, lookup) per level, chunked by <see cref="ParentIdsPerQuery"/> parent ids
-/// (no N+1), and a visited set always, so a bad-data loop ends. The default view skips
+/// (no N+1) and paged by id, and a visited set always, so a bad-data loop ends. The default view skips
 /// <see cref="RecordFamilyEdges.DetailTables"/>: their rows are neither listed nor walked through.</para>
+/// <para><b>A table the caller holds no Read privilege on</b> is read as no rows (fix round 1): Dataverse refuses the whole
+/// query with a 403 naming <c>prvRead{table}</c> (<see cref="DataverseForbiddenException.IsMissingReadPrivilegeOn"/>), which
+/// depends only on the caller's own roles, so the walk goes on without that table. Every other refusal (the application
+/// user's impersonation privilege, ADR-028) and every other fault propagates.</para>
 /// <para><b>Never through an unreadable record (UAC F2).</b> A child is found only from a parent the caller read, so a readable
 /// record below an unreadable one is never reached. Going up, the walk stops at the first ancestor the caller cannot read; the
 /// full view walks down from the highest readable one. Counts and truncation are of accepted members only.</para>
@@ -120,16 +124,19 @@ internal sealed record RecordFamilyRead(
 /// edges. The primary is UAC 194b's, never a second ordering (UAC-r2 ruling 2026-10-28): (a) a Signal or Decision Record names
 /// its core record first (<see cref="RecordOwnershipContext.ForExistingRowAsync"/>), mapped to the edge that holds it, the stamp
 /// row first; then its subject; (b) a work assignment follows <see cref="SecureRootInheritance.TypedLookupsOf"/>, a project its
-/// regarding pair; (c) every other row takes the first of <see cref="RecordOwnershipContext.OrderedParentsOf"/> that is a Filing
-/// row of its table; (d) a message ranks its thread after its own parents, and a Direct thread files nothing
-/// (<see cref="RecordThreadFiling"/>). ForExistingRowAsync itself is not called: its reads are app-only.</para>
+/// regarding pair; (c) every other row ranks the Filing columns it holds by <see cref="RecordOwnershipContext.InPrimaryOrder"/>
+/// (the parents <see cref="RecordOwnershipContext.OrderedParentsOf"/> keeps) and takes the first. A message's thread column
+/// ranks at its place in that order (<see cref="RecordThreadFiling.QuestionWithThreadFiling"/>), when the thread files
+/// something: a Direct thread, or one regarding nothing, files nothing (<see cref="RecordThreadFiling.ParentsOf"/>), so the
+/// next column decides. ForExistingRowAsync itself is not called: its reads are app-only.</para>
 /// <para><b>Caps and continuation (UAC C1, C4).</b> Depth <see cref="MaxDepth"/>, <see cref="MaxMembers"/> per page. The first
 /// page holds the anchor's chain, then the anchor's own subtree, then the rest. The continuation is ASP.NET Data Protection,
 /// bound to the caller's oid, the anchor, the kind, the direction and the top; it carries only that top and an offset. A resumed
 /// read re-walks AS THE CALLER and is refused unless it derives the same top, so a carried top that became unreadable is never
 /// traversed and the token cannot steer the walk.</para>
 /// <para><b>Placement and component justification (CLAUDE.md §10, §11):</b> project notes <c>task-071-notes.md</c>. Existing:
-/// UAC's access walks (app-only, enforcing invariants) and /push's one-level child query. Extension: no — the access walks must
+/// UAC's access walks (app-only, enforcing invariants), /push's one-level child query, ParentLineage / ParentLineageWalk and
+/// CoreAncestorResolver's upward reads (app-only). Extension: no — the access walks must
 /// stay app-only, and the push query cannot walk depth or prune without becoming this reader. Cost of doing nothing: the Family
 /// modal (073) and push preview (040) would each build their own caller walk.</para>
 /// </remarks>
@@ -141,8 +148,8 @@ internal sealed class RecordFamilyReader
     /// <summary>Unique members per page (FR-30).</summary>
     internal const int MaxMembers = 500;
 
-    /// <summary>The per-level cap: the most rows one batched read of a level returns (one Dataverse page). A level that needs
-    /// more for one (table, lookup, chunk) is reported truncated, never silently cut.</summary>
+    /// <summary>The most rows one request of a batched read asks for (one Dataverse page). A (table, lookup, chunk) with more
+    /// is read on, page by page, keyed by id (<c>{table}id gt</c> the last id read), until a page comes back short.</summary>
     internal const int MaxRowsPerQuery = 5000;
 
     /// <summary>Parent ids per batched child query (keeps the OData URL short).</summary>
@@ -392,6 +399,12 @@ internal sealed class RecordFamilyReader
         private readonly HashSet<string> _familyTables;
         private readonly HashSet<(string, Guid)> _visited = new();
         private readonly Dictionary<string, string[]> _selects = new(StringComparer.Ordinal);
+
+        /// <summary>Tables the caller holds no Read privilege on, met this read: asked once, then read as no rows.</summary>
+        private readonly HashSet<string> _noReadPrivilege = new(StringComparer.Ordinal);
+
+        /// <summary>Every thread row read this call (as the caller), or null for one the caller cannot read.</summary>
+        private readonly Dictionary<Guid, Node?> _threads = new();
         private Dictionary<Guid, string>? _recordTypes;
 
         public Walk(RecordFamilyReader reader, RecordFamilyCaller caller, FamilyKind kind, CancellationToken ct)
@@ -413,14 +426,11 @@ internal sealed class RecordFamilyReader
         public RecordFamilyRecordRef? ResumeTop { get; set; }
 
         /// <summary>Something was left out that no further page reaches: a readable record past the depth cap (below the view,
-        /// or above it), or rows past the per-query ceiling.</summary>
-        public bool Incomplete => DepthCapped || CeilingHit;
+        /// or above it).</summary>
+        public bool Incomplete => DepthCapped;
 
         /// <summary>A readable record lies past the depth cap. The cap ends that branch only; the walk of the others goes on.</summary>
         private bool DepthCapped { get; set; }
-
-        /// <summary>A batched read met <see cref="MaxRowsPerQuery"/>: rows past it cannot be listed in order, so the walk stops.</summary>
-        private bool CeilingHit { get; set; }
 
         public int Queries { get; private set; }
 
@@ -454,7 +464,7 @@ internal sealed class RecordFamilyReader
         {
             if (EntitySetOf(table) is not { } set)
                 return null;
-            var rows = await QueryAsync(set, $"$select={string.Join(',', SelectFor(table))}&$filter={table}id eq {id:D}&$top=1")
+            var rows = await QueryAsync(table, set, $"$select={string.Join(',', SelectFor(table))}&$filter={table}id eq {id:D}&$top=1")
                 .ConfigureAwait(false);
             return rows.Select(r => ToNode(table, r)).FirstOrDefault(n => n?.Id == id);
         }
@@ -510,7 +520,7 @@ internal sealed class RecordFamilyReader
             var frontier = new List<Node> { start };
             var enqueued = new HashSet<(string, Guid)> { start.Key };
             var depth = start.Depth;
-            while (frontier.Count > 0 && !Full && !CeilingHit)
+            while (frontier.Count > 0 && !Full)
             {
                 if (depth >= MaxDepth)
                 {
@@ -533,7 +543,7 @@ internal sealed class RecordFamilyReader
 
         /// <summary>
         /// One level: the children of <paramref name="frontier"/> whose primary parent is in it. Returns the next frontier, or
-        /// null when the walk must stop (the page is full, a row ceiling was met, or — probing — a child exists).
+        /// null when the walk must stop (the page is full, or — probing — a child exists).
         /// </summary>
         private async Task<List<Node>?> ExpandAsync(
             List<Node> frontier, int depth, IReadOnlyDictionary<(string, Guid), Node>? passThrough, (string, Guid)? skip,
@@ -587,9 +597,10 @@ internal sealed class RecordFamilyReader
 
         /// <summary>
         /// Runs one batched child query for <paramref name="edge"/> over <paramref name="parentIds"/>, AS THE CALLER, rows in id
-        /// order, handing each to <paramref name="handle"/> until it answers stop. The first read asks for as many rows as
-        /// <paramref name="needed"/> says plus one; a full answer is read again up to <see cref="MaxRowsPerQuery"/> (a skipped row
-        /// counts for nothing). Past that ceiling the walk is incomplete and stops. True when the walk must stop.
+        /// order, handing each to <paramref name="handle"/> until it answers stop. Each request asks for as many rows as
+        /// <paramref name="needed"/> says plus one (at most <see cref="MaxRowsPerQuery"/>); a full page is followed by the next,
+        /// keyed by id (<c>{table}id gt</c> the last id read), until a page comes back short, so no row is ever out of reach (a
+        /// skipped row costs a read, never the walk). True when the walk must stop.
         /// </summary>
         private async Task<bool> ForEachChildAsync(Edge edge, string set, Guid[] parentIds, Func<int> needed, Func<Node, Task<bool>> handle)
         {
@@ -598,15 +609,18 @@ internal sealed class RecordFamilyReader
                 // exactly (SecureRootInheritance's child-direction rule) — PrimaryOfAsync keeps only an exact id of the right type.
                 ? "(" + string.Join(" or ", parentIds.Select(p => $"contains({RecordFamilyEdges.PairIdColumn},'{p.ToString("N")[..8]}')")) + ")"
                 : "(" + string.Join(" or ", parentIds.Select(p => $"{LookupValue(edge.LookupColumn)} eq {p:D}")) + ")";
-            var handled = 0;
-            var top = Math.Min(MaxRowsPerQuery, Math.Max(needed(), 1) + 1);
+            var idColumn = edge.ChildTable + "id";
+            Guid? after = null;
             while (true)
             {
+                var top = Math.Min(MaxRowsPerQuery, Math.Max(needed(), 1) + 1);
+                var page = after is { } last ? $"{filter} and {idColumn} gt {last:D}" : filter;
                 var rows = await QueryAsync(
+                    edge.ChildTable,
                     set,
-                    $"$select={string.Join(',', SelectFor(edge.ChildTable))}&$filter={filter}&$orderby={edge.ChildTable}id asc&$top={top}")
+                    $"$select={string.Join(',', SelectFor(edge.ChildTable))}&$filter={page}&$orderby={idColumn} asc&$top={top}")
                     .ConfigureAwait(false);
-                foreach (var row in rows.Skip(handled))
+                foreach (var row in rows)
                 {
                     if (ToNode(edge.ChildTable, row) is { } child && await handle(child).ConfigureAwait(false))
                         return true;
@@ -614,14 +628,10 @@ internal sealed class RecordFamilyReader
 
                 if (rows.Count < top)
                     return false;
-                if (top >= MaxRowsPerQuery)
-                {
-                    CeilingHit = true; // the per-level cap: the rows past it cannot be read in order, so nothing past it is listed
-                    return true;
-                }
 
-                handled = rows.Count;
-                top = MaxRowsPerQuery;
+                after = GuidOf(rows[^1], idColumn)
+                        ?? throw new InvalidOperationException(
+                            $"A {edge.ChildTable} row came back without its id, so the next page of the read cannot be keyed.");
             }
         }
 
@@ -680,27 +690,44 @@ internal sealed class RecordFamilyReader
                     return about;
             }
 
-            // (c) The first of the row's ordered parents that a Filing edge of its table holds.
-            foreach (var parent in RecordOwnershipContext.OrderedParentsOf(node.Entity))
+            // (c) The Filing columns the row holds, in its table's primary order (194b's InPrimaryOrder): the columns whose parent
+            // OrderedParentsOf keeps (an ownership parent, not a citation, not Secure-only) and a message's thread column, which
+            // ranks at its place in the order (RecordThreadFiling.QuestionWithThreadFiling) when the thread files something.
+            var held = edges
+                .Where(e => e.EdgeKind != EdgeKind.Pair && IdOf(node.Entity, e.LookupColumn) is not null
+                            && (IsThreadEdge(e)
+                                || (RecordOwnershipResolver.IsOwnershipParent(e.ParentTable)
+                                    && !RecordOwnershipResolver.IsCitation(node.Table, e.LookupColumn)
+                                    && !RecordOwnershipResolver.IsSecureOnlyParent(node.Table, e.LookupColumn))))
+                .Select(e => KeyValuePair.Create(e.LookupColumn, e));
+            foreach (var (_, edge) in RecordOwnershipContext.InPrimaryOrder(node.Table, held, subject))
             {
-                var holding = edges.Where(e => e.EdgeKind != EdgeKind.Pair
-                                               && e.ParentTable == parent.EntityLogicalName
-                                               && IdOf(node.Entity, e.LookupColumn) == parent.RecordId).ToArray();
-                if (FirstInPrimaryOrder(node.Table, holding, subject) is { } filing)
-                    return (filing, parent.RecordId);
-            }
-
-            // (d) A message's thread ranks after its own parents (RecordThreadFiling; FilesUnder refuses a Direct thread).
-            if (RecordThreadFiling.ThreadOf(node.Entity) is { } threadId
-                && edges.FirstOrDefault(e => e.LookupColumn == RecordThreadFiling.ThreadColumn) is { } thread)
-            {
-                return (thread, threadId);
+                var parentId = IdOf(node.Entity, edge.LookupColumn)!.Value;
+                if (IsThreadEdge(edge) && !await ThreadFilesSomethingAsync(parentId).ConfigureAwait(false))
+                    continue;
+                return (edge, parentId);
             }
 
             return null;
         }
 
-        /// <summary>(d) A Direct thread files nothing under it (RecordThreadFiling.ParentsOf); every other parent files.</summary>
+        private static bool IsThreadEdge(Edge edge) =>
+            RecordThreadFiling.AppliesTo(edge.ChildTable)
+            && string.Equals(edge.LookupColumn, RecordThreadFiling.ThreadColumn, StringComparison.OrdinalIgnoreCase);
+
+        /// <summary>
+        /// Whether the thread files its messages under anything (<see cref="RecordThreadFiling.ParentsOf"/>: not a Direct thread,
+        /// and it carries an ownership parent), from its row read AS THE CALLER. A thread the caller cannot read counts as one
+        /// that files (194b reads an unknown type as a record thread), so its messages are reached through it or not at all.
+        /// </summary>
+        private async Task<bool> ThreadFilesSomethingAsync(Guid threadId)
+        {
+            if (!_threads.TryGetValue(threadId, out var thread))
+                thread = _threads[threadId] = await ReadNodeAsync(RecordThreadFiling.ThreadTable, threadId).ConfigureAwait(false);
+            return thread is null || RecordThreadFiling.ParentsOf(thread.Entity).Count > 0;
+        }
+
+        /// <summary>A Direct thread files nothing under it (RecordThreadFiling.ParentsOf); every other parent files.</summary>
         private static bool FilesUnder(Edge edge, Node parent) =>
             !(RecordThreadFiling.AppliesTo(edge.ChildTable)
               && edge.ParentTable == RecordThreadFiling.ThreadTable
@@ -735,7 +762,8 @@ internal sealed class RecordFamilyReader
             if (_recordTypes is null)
             {
                 var rows = await QueryAsync(
-                    RegardingRecordType.RecordTypeRefEntitySet, $"$select={RecordTypeTable}id,{RecordTypeTableColumn}").ConfigureAwait(false);
+                    RecordTypeTable, RegardingRecordType.RecordTypeRefEntitySet, $"$select={RecordTypeTable}id,{RecordTypeTableColumn}")
+                    .ConfigureAwait(false);
                 _recordTypes = new Dictionary<Guid, string>();
                 foreach (var row in rows)
                 {
@@ -747,10 +775,28 @@ internal sealed class RecordFamilyReader
             return _recordTypes.TryGetValue(typeId, out var table) ? table : null;
         }
 
-        private Task<IReadOnlyList<Dictionary<string, JsonElement>>> QueryAsync(string set, string query)
+        /// <summary>
+        /// One read of <paramref name="table"/> AS THE CALLER. A table the caller holds no Read privilege on is no rows (asked
+        /// once per read): Dataverse's 403 naming <c>prvRead{table}</c> depends only on the caller's own roles. Every other
+        /// refusal, the impersonation privilege's included (ADR-028), and every other fault propagates.
+        /// </summary>
+        private async Task<IReadOnlyList<Dictionary<string, JsonElement>>> QueryAsync(string table, string set, string query)
         {
+            if (_noReadPrivilege.Contains(table))
+                return Array.Empty<Dictionary<string, JsonElement>>();
+
             Queries++;
-            return _reader._query.QueryAsync(set, query, _caller.SystemUserId, _ct);
+            try
+            {
+                return await _reader._query.QueryAsync(set, query, _caller.SystemUserId, _ct).ConfigureAwait(false);
+            }
+            catch (DataverseForbiddenException ex) when (ex.IsMissingReadPrivilegeOn(table))
+            {
+                _noReadPrivilege.Add(table);
+                _reader._logger.LogInformation(
+                    "[RECORD-FAMILY] The caller holds no Read privilege on {Table}; it is read as no rows.", table);
+                return Array.Empty<Dictionary<string, JsonElement>>();
+            }
         }
 
         /// <summary>The columns read for a row of <paramref name="table"/>: its id, display columns and filing lookups.</summary>
@@ -811,7 +857,17 @@ internal sealed class RecordFamilyReader
                 entity[CoreRecordTypeColumn] = new EntityReference(RecordTypeTable, coreType);
             if (StringOf(row, CoreRecordIdColumn) is { } coreId)
                 entity[CoreRecordIdColumn] = coreId;
-            return new Node(table, id, row, entity);
+            var node = new Node(table, id, row, entity);
+            if (table == RecordThreadFiling.ThreadTable)
+            {
+                // The thread's type, for RecordThreadFiling.ParentsOf; and the row, so a message ranked under it is decided
+                // without reading it again.
+                if (IntOf(row, RecordThreadFiling.ThreadTypeColumn) is { } type)
+                    entity[RecordThreadFiling.ThreadTypeColumn] = new OptionSetValue(type);
+                _threads[id] = node;
+            }
+
+            return node;
         }
 
         private static string? StringOf(Dictionary<string, JsonElement> row, string? column) =>
