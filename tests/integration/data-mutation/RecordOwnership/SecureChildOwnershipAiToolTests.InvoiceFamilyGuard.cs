@@ -299,8 +299,14 @@ public sealed partial class SecureChildOwnershipAiToolTests
                     : Task.FromResult(new EntityCollection(
                         Sprk.Bff.Api.Tests.Services.Dataverse.QueryEvaluator.Run(q, _appLines).ToList()));
             });
+        // UAC-r2 ruling (RecordFamilyEdges, 2026-10-28): the work assignment an invoice would move under, as the APP reads it.
+        app.Setup(a => a.RetrieveAsync("sprk_workassignment", It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((string _, Guid id, string[] _, CancellationToken _) =>
+                _appWorkAssignments.TryGetValue(id, out var row) ? row : null!);
         return app.Object;
     }
+
+    private readonly Dictionary<Guid, Entity> _appWorkAssignments = new();
 
     /// <summary>A stored line of <paramref name="invoice"/> as the APP reads it (one core lookup, or none).</summary>
     private Guid AppLine(Guid invoice, string? column, string? core, Guid coreId)
@@ -347,6 +353,55 @@ public sealed partial class SecureChildOwnershipAiToolTests
         AppLine(SupersededInvoice, "sprk_matter", "sprk_matter", OrdinaryMatter); // another invoice's line is not this one's
 
         var result = await RefileChild("sprk_invoice", GuardInvoice, MoveGuardInvoiceToTheProject());
+
+        Status(result).Should().Be(StatusCodes.Status204NoContent, Detail(result));
+        _user.Patches.Should().ContainSingle();
+    }
+
+    // ── UAC-r2 ruling (RecordFamilyEdges, 2026-10-28): never an invoice and a work assignment each filed under the other ──
+
+    private static readonly Guid GuardWorkAssignment = Guid.Parse("a2470000-0000-4000-8000-0000000013a5");
+
+    /// <summary>The work assignment as the APP reads it: filed under <paramref name="invoice"/> (null = under no invoice).</summary>
+    private void AppWorkAssignment(Guid? invoice)
+    {
+        var row = new Entity("sprk_workassignment", GuardWorkAssignment) { ["sprk_regardingmatter"] = new EntityReference("sprk_matter", OrdinaryMatter) };
+        if (invoice is { } filedUnder)
+            row[InvoiceFamilyCoreRecordGuard.WorkAssignmentInvoiceColumn] = new EntityReference("sprk_invoice", filedUnder);
+        _appWorkAssignments[GuardWorkAssignment] = row;
+        _world.WithRecord("sprk_workassignment", GuardWorkAssignment, Directory.ChildBu, owningTeam: Directory.ChildTeam);
+    }
+
+    private static Dictionary<string, object?> MoveGuardInvoiceToTheWorkAssignment() => new()
+    {
+        ["sprk_Matter@odata.bind"] = null,
+        ["sprk_RegardingWorkAssignment@odata.bind"] = $"/sprk_workassignments({GuardWorkAssignment:D})",
+    };
+
+    [Fact]
+    public async Task ChildRefile_AnInvoiceMovedUnderAWorkAssignmentFiledUnderThatInvoice_IsRefusedWithTheCycleCode_AndNothingIsWritten()
+    {
+        StoredInvoice(GuardInvoice, "sprk_matter", OrdinaryMatter);
+        AppWorkAssignment(GuardInvoice);
+
+        var result = await RefileChild("sprk_invoice", GuardInvoice, MoveGuardInvoiceToTheWorkAssignment());
+
+        Status(result).Should().Be(StatusCodes.Status400BadRequest, Detail(result));
+        ReasonCode(result).Should().Be(InvoiceFamilyCoreRecordGuard.WorkAssignmentCycleCode);
+        _user.Patches.Should().BeEmpty();
+        _world.Assignments.Should().BeEmpty();
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task ChildRefile_AnInvoiceMovedUnderAWorkAssignmentFiledUnderAnotherInvoiceOrNone_IsWritten(bool filedUnderAnotherInvoice)
+    {
+        StoredInvoice(GuardInvoice, "sprk_matter", OrdinaryMatter);
+        ShareWorld.OrdinaryChild("sprk_invoice", GuardInvoice, ("sprk_matter", "sprk_matter", OrdinaryMatter));
+        AppWorkAssignment(filedUnderAnotherInvoice ? SupersededInvoice : null);
+
+        var result = await RefileChild("sprk_invoice", GuardInvoice, MoveGuardInvoiceToTheWorkAssignment());
 
         Status(result).Should().Be(StatusCodes.Status204NoContent, Detail(result));
         _user.Patches.Should().ContainSingle();

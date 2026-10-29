@@ -1387,6 +1387,10 @@ internal static class OwnedChildWrite
             // D-96: an update that moves an invoice to another core record must not leave its lines behind (counted as the app).
             stored is { } invoiceRow && InvoiceFamilyCoreRecordGuard.WritesCoreLookup(table, written)
                 ? InvoiceFamilyCoreRecordGuard.LinesOfAnotherCoreRecord(appOnlyEntities, invoiceRow.RecordId)
+                : null,
+            // UAC-r2 ruling (RecordFamilyEdges, 2026-10-28): nor be filed under a work assignment that is filed under it (as the app).
+            stored is { } refiled && InvoiceFamilyCoreRecordGuard.WritesCoreLookup(table, written)
+                ? InvoiceFamilyCoreRecordGuard.WorkAssignmentFiledUnderInvoice(appOnlyEntities, refiled.RecordId)
                 : null).ConfigureAwait(false);
 
         if (supersededUnavailable)

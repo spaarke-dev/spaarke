@@ -99,6 +99,20 @@ public static class InvoiceFamilyCoreRecordGuard
     /// </summary>
     public const string LineInvoiceCoreRecordMismatchCode = "invoice_family_line_invoice_core_record_mismatch";
 
+    /// <summary>
+    /// An invoice would be filed under a work assignment (<c>sprk_regardingworkassignment</c>) that is itself filed under that
+    /// same invoice (<c>sprk_workassignment.sprk_regardinginvoice</c>, owner Option A). Neither record would then say which
+    /// matter or project the pair belongs to (unified-access-control-r2 ruling on RecordFamilyEdges, 2026-10-28). The work
+    /// assignment is read as the APP.
+    /// </summary>
+    public const string WorkAssignmentCycleCode = "invoice_family_work_assignment_cycle";
+
+    /// <summary><c>sprk_workassignment.sprk_regardinginvoice</c> (lookup to <c>sprk_invoice</c>): the invoice a work assignment
+    /// is filed under (<c>SecureRootInheritance.IntermediateFilingColumns</c>).</summary>
+    public const string WorkAssignmentInvoiceColumn = "sprk_regardinginvoice";
+
+    private const string WorkAssignmentEntity = "sprk_workassignment";
+
     /// <summary><c>sprk_billingevent.sprk_invoice</c> (lookup to <c>sprk_invoice</c>): the invoice a line belongs to.</summary>
     public const string LineInvoiceColumn = "sprk_invoice";
 
@@ -216,17 +230,49 @@ public static class InvoiceFamilyCoreRecordGuard
     /// none) — <see cref="LinesOfAnotherCoreRecord"/>, read as the APP. True is
     /// <see cref="LineInvoiceCoreRecordMismatchCode"/>; a fault is <see cref="ReadFailedCode"/>. Null for every other write
     /// (a create has no lines yet). Lines are never re-filed from their invoice (D-75).</param>
+    /// <param name="workAssignmentFiledUnderThisInvoice">For an UPDATE of a stored invoice that writes one of its core lookups,
+    /// whether the work assignment the invoice would regard is itself filed under this invoice —
+    /// <see cref="WorkAssignmentFiledUnderInvoice"/>, read as the APP. True is <see cref="WorkAssignmentCycleCode"/>; a fault is
+    /// <see cref="ReadFailedCode"/>. Asked only when the invoice would regard a work assignment. Null for every other write (a
+    /// new invoice has no work assignment filed under it yet).</param>
     public static async Task<InvoiceFamilyCoreRecord> CheckWriteAsync(
         string entityLogicalName,
         Func<string, object?> read,
         Func<EntityReference, CancellationToken, Task<InvoiceFamilyCoreRecord>> resolveSuperseded,
         CancellationToken ct = default,
-        Func<EntityReference, CancellationToken, Task<bool>>? anyLineOfAnotherCoreRecord = null)
+        Func<EntityReference, CancellationToken, Task<bool>>? anyLineOfAnotherCoreRecord = null,
+        Func<EntityReference, CancellationToken, Task<bool>>? workAssignmentFiledUnderThisInvoice = null)
     {
         ArgumentNullException.ThrowIfNull(read);
         ArgumentNullException.ThrowIfNull(resolveSuperseded);
         var decided = await CheckWriteAgainstOtherInvoiceAsync(entityLogicalName, read, resolveSuperseded, ct).ConfigureAwait(false);
-        if (decided.IsRefused || anyLineOfAnotherCoreRecord is null || !IsInvoice(decided.EntityLogicalName))
+        if (decided.IsRefused || !IsInvoice(decided.EntityLogicalName))
+            return decided;
+
+        if (workAssignmentFiledUnderThisInvoice is not null
+            && string.Equals(decided.Regarding!.LogicalName, WorkAssignmentEntity, StringComparison.OrdinalIgnoreCase))
+        {
+            bool cycle;
+            try
+            {
+                cycle = await workAssignmentFiledUnderThisInvoice(decided.Regarding, ct).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+            {
+                return decided.Refuse(ReadFailedCode,
+                    $"The work assignment's own filing could not be read ({ex.GetType().Name}); nothing was written.");
+            }
+
+            if (cycle)
+            {
+                return decided.Refuse(WorkAssignmentCycleCode,
+                    "The invoice would be filed under a work assignment that is itself filed under this invoice, so neither "
+                    + "would say which matter or project it belongs to. File the invoice under another matter, project or work "
+                    + "assignment, or file the work assignment elsewhere first. Nothing was written.");
+            }
+        }
+
+        if (anyLineOfAnotherCoreRecord is null)
             return decided;
 
         // D-96 (owner, on uac-r2's 026 re-check F1): an invoice re-filed to another core record must not leave its lines
@@ -280,6 +326,25 @@ public static class InvoiceFamilyCoreRecordGuard
             : async (core, ct) =>
                 (await appOnly.RetrieveMultipleAsync(LinesOfAnotherCoreRecordQuery(invoiceId, core), ct).ConfigureAwait(false))
                     .Entities.Count > 0;
+
+    /// <summary>
+    /// The work-assignment cycle check for an update of invoice <paramref name="invoiceId"/>: reads the work assignment's
+    /// <see cref="WorkAssignmentInvoiceColumn"/> with the APP-only <paramref name="appOnly"/> (a work assignment the caller cannot
+    /// see counts too) and answers whether it names this invoice. With no reader, or a work assignment that cannot be found, the
+    /// check throws, which <see cref="CheckWriteAsync"/> refuses as <see cref="ReadFailedCode"/> (fail closed).
+    /// </summary>
+    public static Func<EntityReference, CancellationToken, Task<bool>> WorkAssignmentFiledUnderInvoice(
+        IGenericEntityService? appOnly, Guid invoiceId) =>
+        appOnly is null
+            ? (_, _) => throw new InvalidOperationException("No app-only reader for the work assignment.")
+            : async (workAssignment, ct) =>
+            {
+                var row = await appOnly.RetrieveAsync(WorkAssignmentEntity, workAssignment.Id, [WorkAssignmentInvoiceColumn], ct)
+                              .ConfigureAwait(false)
+                          ?? throw new InvalidOperationException("The work assignment was not found.");
+                return row.GetAttributeValue<EntityReference>(WorkAssignmentInvoiceColumn) is { } filedUnder
+                       && filedUnder.Id == invoiceId;
+            };
 
     /// <summary>
     /// D-96: one bounded query — the first line of <paramref name="invoiceId"/> whose own core lookups are not exactly
@@ -421,7 +486,8 @@ public static class InvoiceFamilyCoreRecordGuard
                     : Check(invoice.LogicalName, column => other.Attributes.TryGetValue(column, out var value) ? value : null);
             },
             ct,
-            IsInvoice(entity) && WritesCoreLookup(entity, change.Keys) ? LinesOfAnotherCoreRecord(appOnly, recordId) : null)
+            IsInvoice(entity) && WritesCoreLookup(entity, change.Keys) ? LinesOfAnotherCoreRecord(appOnly, recordId) : null,
+            IsInvoice(entity) && WritesCoreLookup(entity, change.Keys) ? WorkAssignmentFiledUnderInvoice(appOnly, recordId) : null)
             .ConfigureAwait(false);
 
         return decided.IsRefused ? decided : null;
