@@ -1,7 +1,10 @@
 using System.Security.Claims;
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
+using Microsoft.Extensions.Time.Testing;
 using Moq;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
@@ -11,6 +14,7 @@ using Sprk.Bff.Api.Services.ExternalAccess;
 using Sprk.Bff.Api.Services.Signals;
 using Sprk.Bff.Api.Services.Signals.Actions;
 using Sprk.Bff.Api.Tests.AccessControl;
+using Sprk.Bff.Api.Tests.AccessControl.IdentityBinding;
 using Sprk.Bff.Api.Tests.Api.ExternalAccess;
 using Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess;
 using Xunit;
@@ -328,5 +332,86 @@ public sealed class AssignTaskRecipientGatePlaneTests
         (await gate.Object.DecideAsync(Contact, Core, Guid.NewGuid(), null, CancellationToken.None))
             .Should().Be(AssignTaskRecipient.ForInternal(LicensedUser));
         sets.Invocations.Should().BeEmpty("no external composition is asked");
+    }
+
+    // ── Fix round 4: the gate asks the link read with the pair the binder STORED; the portal asks it with the sign-in's ──
+    //
+    // The only writers of a WorkforceHome binding are the registration create (CreatePayload, plane WorkforceHome) and the
+    // registration bind (HomeBindPayload); both write the oid, the plane and sprk_externaltenantid in ONE request, from the
+    // validated home token's (tid, oid). Every other bind writes its own plane with its oid (BindPayload), so a WorkforceHome
+    // row's oid is the home oid. These tests run those real writes and assert the gate's read answers what the resolver's
+    // DecideHomeLink answers for that sign-in's token pair.
+
+    private static readonly Guid CustomerBu = Guid.Parse("c1680004-0000-4000-8000-0000000000d1");
+    private static readonly Guid CustomerTeam = Guid.Parse("c1680004-0000-4000-8000-0000000000d2");
+
+    /// <summary>The REAL binder over the in-memory store, owning creates to <see cref="CustomerTeam"/> (as DI builds it).</summary>
+    private static ContactIdentityBinder RegisteringBinder(InMemoryContactIdentityStore store)
+    {
+        store.DefaultTeams[CustomerBu] = new List<Guid> { CustomerTeam };
+        var external = new Mock<IOptionsMonitor<ExternalAccessOptions>>();
+        external.SetupGet(o => o.CurrentValue).Returns(new ExternalAccessOptions { CustomerBusinessUnitId = CustomerBu });
+        return new ContactIdentityBinder(
+            store, IdentityBindingTestKit.Tenants(IdentityBindingTestKit.CustomerTenant), new FakeTimeProvider(IdentityBindingTestKit.Now),
+            new BindingLogCapture<ContactIdentityBinder>(),
+            ContactCreateOwner.FromCustomerBusinessUnit(external.Object, new ConfigurationBuilder().Build()));
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task AWorkforceHomeContact_AsRegistrationStoresIt_TheGatesLinkRead_AnswersWhatTheResolverAnswersForItsSignIn(bool linked)
+    {
+        var store = new InMemoryContactIdentityStore();
+        var registered = await RegisteringBinder(store).RegisterHomeContactAsync(
+            new HomeRegistrationRequest(HomeTenant, HomeOid, Address, "Sam", "Employee", null, false, CustomerBu, "Secure Record"),
+            CancellationToken.None);
+        registered.Outcome.Should().Be(HomeRegistrationOutcome.Created);
+        var contactId = registered.ContactId!.Value;
+
+        // Later, the link route writes a licensed user's home pair: this sign-in's (linked), or another person's (the control).
+        var user = store.AddSystemUser(LicensedUser, Guid.NewGuid(), "sam.guest@spaarke.example");
+        (await store.WriteHomeLinkAsync(LicensedUser, $"W/\"{user.Version}\"", HomeTenant, linked ? HomeOid : Guid.NewGuid(), CancellationToken.None))
+            .Status.Should().Be(StoreWriteStatus.Written);
+
+        // The resolver's answer for the home sign-in: its token's (tid, oid), WorkforcePrincipalResolver.ResolveHomeAsync.
+        var resolverAnswer = ContactBindingDecision.DecideHomeLink(
+            await store.FindHomeLinkedSystemUsersAsync(HomeTenant, HomeOid, CancellationToken.None), HomeTenant, HomeOid).Outcome;
+        resolverAnswer.Should().Be(linked ? HomeLinkOutcome.Enabled : HomeLinkOutcome.NotLinked);
+
+        // The gate's answer, from the contact row as stored: the stored pair IS the token pair.
+        var row = (await store.GetContactAsync(contactId, CancellationToken.None)).Rows.Should().ContainSingle().Subject;
+        row.Binding.Should().Be(new BindingState(BindingKind.Bound, HomeOid, IdentityPlaneMarker.WorkforceHome));
+        Guid.Parse(row.RawExternalTenantId!).Should().Be(HomeTenant);
+
+        var sets = new Mock<IAccessibleRecordSetService>(MockBehavior.Strict);
+        var gate = Gate(store, sets.Object);
+        (await gate.HomeLinkAsync(row, CancellationToken.None)).Should().Be(resolverAnswer);
+
+        var decided = await gate.DecideAsync(contactId, Core, Guid.NewGuid(), null, CancellationToken.None);
+        if (linked)
+        {
+            decided.Should().Be(AssignTaskRecipient.Refused(AssignTaskRefusal.Unverified));
+            sets.Invocations.Should().BeEmpty("the sign-in is the licensed user's, so the contact's access is never composed");
+        }
+        else
+        {
+            sets.Invocations.Should().NotBeEmpty("the control: an unlinked home contact goes on to the portal's composition");
+        }
+    }
+
+    [Fact]
+    public void TheRegistrationBind_WritesTheHomeOidAndTenantWithThePlane_InOneRequest_SoTheStoredPairIsTheTokenPair()
+    {
+        // The other WorkforceHome writer (an existing contact bound on confirmation): its exact column values, read back the way
+        // every binding reader reads them.
+        var payload = DataverseContactIdentityStore.HomeBindPayload(HomeTenant, HomeOid);
+        var row = new ContactBindingRow(Contact, 0, (string?)payload[ContactBindingDecision.ExternalObjectIdColumn],
+            (int?)payload[ContactBindingDecision.IdentityPlaneColumn], Email: Address,
+            RawExternalTenantId: (string?)payload[ContactBindingDecision.ExternalTenantIdColumn]);
+
+        row.Binding.Should().Be(new BindingState(BindingKind.Bound, HomeOid, IdentityPlaneMarker.WorkforceHome));
+        Guid.Parse(row.RawExternalTenantId!).Should().Be(HomeTenant);
+        AssignTaskRecipientGate.PortalPlaneOf(row).Should().Be(ExternalContactPlane.WorkforceHome);
     }
 }
