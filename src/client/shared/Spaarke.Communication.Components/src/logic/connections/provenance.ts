@@ -99,24 +99,110 @@ const RUNG_PHRASES: Record<string, string> = {
 };
 
 /**
- * Structured detail parsed from a RecordNameMatch contributor's provenance string, e.g.
- * `record-name-match:sprk_matter:where=subject:matched=name:name="Smith v Smith":number="REAL-2026-123456.02":reason="name in subject"`.
+ * A candidate target's display name AS THE VIEWER sees it, from a read the host made as the viewer
+ * (see `createViewerRecordNameResolver`): a non-empty string = readable, with that name; `null` = not readable
+ * or the read failed; `undefined` = not known yet. Only a string makes a candidate visible — anything else hides
+ * it (fail closed). A stored association trace holds ids and reason codes only, so this is the ONLY source of a
+ * candidate's display name.
+ */
+export type ViewerTargetName = (entity: string, id: string) => string | null | undefined;
+
+/** The name to show for a candidate target, or undefined when the viewer may not see it (no card). */
+export function viewerVisibleName(
+  viewerName: ViewerTargetName | undefined,
+  entity: string,
+  id: string
+): string | undefined {
+  const name = viewerName?.(entity, id);
+  return typeof name === 'string' && name.trim().length > 0 ? name.trim() : undefined;
+}
+
+/** The candidates of `candidates` the viewer may see, in their original order. */
+export function visibleCandidates(
+  candidates: readonly ProvenanceCandidate[],
+  viewerName: ViewerTargetName | undefined
+): ProvenanceCandidate[] {
+  return candidates.filter(c => viewerVisibleName(viewerName, c.targetEntity, c.targetId) !== undefined);
+}
+
+const STORED_LOCATIONS: ReadonlySet<string> = new Set(['subject', 'body', 'attachment']);
+const STORED_MATCH_KINDS: ReadonlySet<string> = new Set(['name', 'number']);
+
+/** The value of the first `:`-delimited segment starting with `key`, when it is in `allowed`. */
+function closedSetToken(provenance: string | undefined, key: string, allowed: ReadonlySet<string>): string | undefined {
+  if (!provenance) return undefined;
+  for (const segment of provenance.split(':')) {
+    if (segment.startsWith(key)) {
+      const value = segment.slice(key.length);
+      return allowed.has(value) ? value : undefined;
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Where and how a RecordNameMatch contributor matched — closed-set values only (`where`: subject | body |
+ * attachment; `matched`: name | number). Reads both stored forms: the v2 reason code
+ * (`record-name-match:where=subject:matched=name`) and an older v1 provenance string. The record's own name,
+ * number or reason text is never returned.
  */
 export interface NameMatchInfo {
   where?: 'subject' | 'body' | 'attachment' | string | undefined;
   matched?: 'name' | 'number' | string | undefined;
-  number?: string | undefined;
-  reason?: string | undefined;
 }
 
-/** Parse a RecordNameMatch contributor provenance string; null for any other rung. */
+/** Parse a RecordNameMatch contributor's provenance (v2 reason code or v1 string); null for any other rung. */
 export function parseNameMatch(provenance: string | undefined): NameMatchInfo | null {
-  if (!provenance || !provenance.startsWith('record-name-match:')) return null;
-  const where = /where=([^:]+)/.exec(provenance)?.[1];
-  const matched = /matched=([^:]+)/.exec(provenance)?.[1];
-  const number = /number="([^"]*)"/.exec(provenance)?.[1];
-  const reason = /reason="([^"]*)"/.exec(provenance)?.[1];
-  return { where, matched, number: number || undefined, reason };
+  if (!provenance || !provenance.startsWith('record-name-match')) return null;
+  return {
+    where: closedSetToken(provenance, 'where=', STORED_LOCATIONS),
+    matched: closedSetToken(provenance, 'matched=', STORED_MATCH_KINDS),
+  };
+}
+
+/**
+ * A contributor's stored reason code (the v2 stored form) — mirrors the server's
+ * `AssociationProvenance.StoredReasonCode`: the rung in kebab case (`unknown` when it is not a plain identifier),
+ * then `:where=` and `:matched=` when the provenance names one of their closed-set values. Nothing else survives.
+ */
+export function storedReasonCode(rung: string, provenance: string | undefined): string {
+  let code = /^[A-Za-z0-9]+$/.test(rung ?? '') ? rung.replace(/(?!^)([A-Z])/g, '-$1').toLowerCase() : 'unknown';
+  const where = closedSetToken(provenance, 'where=', STORED_LOCATIONS);
+  if (where) code += `:where=${where}`;
+  const matched = closedSetToken(provenance, 'matched=', STORED_MATCH_KINDS);
+  if (matched) code += `:matched=${matched}`;
+  return code;
+}
+
+/** Version of the stored form `toStoredProvenance` produces (matches the server's `StoredFormVersion`). */
+export const STORED_PROVENANCE_VERSION = 2;
+
+/**
+ * Converts a parsed provenance document (any version) to the v2 stored form: every candidate contributor's
+ * `provenance` becomes its reason code (`storedReasonCode`), any `targetName` on a candidate is dropped, and
+ * `version` becomes 2. Everything else (decision, signals, override fields) is kept. Used before any client
+ * re-save of `sprk_associationprovenance`, so a re-save never re-persists text from an older row.
+ */
+export function toStoredProvenance(doc: Record<string, unknown>): Record<string, unknown> {
+  const candidates = Array.isArray(doc.candidates) ? (doc.candidates as Record<string, unknown>[]) : [];
+  return {
+    ...doc,
+    version: STORED_PROVENANCE_VERSION,
+    candidates: candidates.map(c => {
+      const { targetName: _dropped, ...rest } = c;
+      const contributors = Array.isArray(c.contributors) ? (c.contributors as Record<string, unknown>[]) : [];
+      return {
+        ...rest,
+        contributors: contributors.map(k => ({
+          ...k,
+          provenance: storedReasonCode(
+            typeof k.rung === 'string' ? k.rung : '',
+            typeof k.provenance === 'string' ? k.provenance : undefined
+          ),
+        })),
+      };
+    }),
+  };
 }
 
 /** The RecordNameMatch contributor for a candidate, if any (carries the human match reason + record number). */
@@ -164,28 +250,30 @@ export function candidateMatchReason(candidate: ProvenanceCandidate): string {
   return 'No match reason recorded';
 }
 
-/** The record's reference number when a RecordNameMatch contributor captured it. */
-export function candidateRecordNumber(candidate: ProvenanceCandidate): string | undefined {
-  return nameMatchOf(candidate)?.number;
-}
-
 /**
- * Best-effort human display NAME for a candidate (owner UAT 2026-08-19, item 3). The flat
- * provenance candidate carries only `targetId` (a GUID) — the resolved record/contact name
- * lives inside a contributor's provenance string as a `name="…"` token (RecordNameMatch,
- * ContactNameMatch, …). Return the first such name so cards show "{number} : {name}" instead
- * of the raw GUID. Undefined when no contributor recorded a name.
+ * A candidate's reference number from the stored trace. Always undefined: a stored association trace holds ids and
+ * reason codes only, and text an older row still carries (`number="…"`) is never shown. A filed record's number
+ * comes from the host record's own fields (`PrimaryDenorm.recordNumber`).
  */
-export function candidateDisplayName(candidate: ProvenanceCandidate): string | undefined {
-  for (const c of candidate.contributors ?? []) {
-    const m = /name="([^"]*)"/.exec(c.provenance ?? '');
-    if (m && m[1]) return m[1];
-  }
+export function candidateRecordNumber(_candidate: ProvenanceCandidate): string | undefined {
   return undefined;
 }
 
+/**
+ * The display NAME for a candidate: the name the viewer's own read returned (`viewerName`), else undefined — and
+ * undefined means the candidate is not shown. Never text from the stored trace (`targetName`, or a `name="…"`
+ * token an older row still carries).
+ */
+export function candidateDisplayName(
+  candidate: ProvenanceCandidate,
+  viewerName?: ViewerTargetName
+): string | undefined {
+  return viewerVisibleName(viewerName, candidate.targetEntity, candidate.targetId);
+}
+
+/** Phrase for one contributor's rung; a rung with no phrase reads generically (never the raw provenance text). */
 export function contributorPhrase(c: ProvenanceContributor): string {
-  return RUNG_PHRASES[c.rung] ?? c.provenance;
+  return RUNG_PHRASES[c.rung] ?? 'another signal matched';
 }
 
 export function isAiRung(rung: string): boolean {
@@ -289,11 +377,19 @@ export interface CandidateGroup {
   candidates: ProvenanceCandidate[];
 }
 
-/** Group a slot's alternative candidates by display name so duplicates collapse into one expandable row. */
-export function groupCandidatesByName(candidates: ProvenanceCandidate[]): CandidateGroup[] {
+/**
+ * Group a slot's alternative candidates by display name so duplicates collapse into one expandable row. Only
+ * candidates the viewer may see are grouped (by the viewer-read name); the rest are left out. No `viewerName` →
+ * no groups.
+ */
+export function groupCandidatesByName(
+  candidates: ProvenanceCandidate[],
+  viewerName?: ViewerTargetName
+): CandidateGroup[] {
   const byName = new Map<string, ProvenanceCandidate[]>();
   for (const c of candidates) {
-    const name = c.targetName ?? c.targetId;
+    const name = candidateDisplayName(c, viewerName);
+    if (name === undefined) continue;
     const list = byName.get(name) ?? [];
     list.push(c);
     byName.set(name, list);
@@ -332,8 +428,16 @@ const SLOT_META: Record<string, { label: string; order: number }> = {
   sprk_regardingworkassignment: { label: 'Work Assignment', order: 9 },
 };
 
-/** Group candidates by field into typed connection slots. */
-export function deriveConnections(doc: ProvenanceDoc, isResolved: boolean): Connection[] {
+/**
+ * Group candidates by field into typed connection slots. Only candidates the viewer may see (`viewerName`) become
+ * cards; a field with none visible has no slot, and no `viewerName` means no slots. Whether a slot is ambiguous
+ * comes from the stored decision (all of the field's candidates), not from what the viewer can see.
+ */
+export function deriveConnections(
+  doc: ProvenanceDoc,
+  isResolved: boolean,
+  viewerName?: ViewerTargetName
+): Connection[] {
   const byField = new Map<string, ProvenanceCandidate[]>();
   for (const c of doc.candidates) {
     const list = byField.get(c.field) ?? [];
@@ -341,9 +445,15 @@ export function deriveConnections(doc: ProvenanceDoc, isResolved: boolean): Conn
     byField.set(c.field, list);
   }
   const out: Connection[] = [];
-  byField.forEach((cands, field) => {
+  byField.forEach((allCands, field) => {
+    // Visible candidates only, each carrying the viewer-read name (never a stored `targetName`).
+    const cands = visibleCandidates(allCands, viewerName).map(c => ({
+      ...c,
+      targetName: candidateDisplayName(c, viewerName) as string,
+    }));
+    if (cands.length === 0) return;
     const meta = SLOT_META[field] ?? { label: entityLabel(cands[0]?.targetEntity ?? field), order: 99 };
-    const conflict = cands.length >= 2 && cands.some(c => c.conflict);
+    const conflict = allCands.length >= 2 && allCands.some(c => c.conflict);
     const primary = cands.reduce((a, b) => (b.reinforcedConfidence > a.reinforcedConfidence ? b : a));
     // Non-conflict runners-up (everything but the primary), highest-confidence first.
     const others = conflict
@@ -358,7 +468,7 @@ export function deriveConnections(doc: ProvenanceDoc, isResolved: boolean): Conn
       field,
       entity: primary.targetEntity,
       slotLabel: meta.label,
-      targetName: primary.targetName ?? candidateDisplayName(primary) ?? primary.targetId,
+      targetName: primary.targetName,
       targetId: primary.targetId,
       confidence: primary.reinforcedConfidence,
       status: conflict ? 'ambiguous' : isWritten ? 'confirmed' : 'suggested',
@@ -758,26 +868,46 @@ function primaryKey(entity: string, id: string): string {
   return `${entity}:${id.replace(/[{}]/g, '').toLowerCase()}`;
 }
 
-/** Flatten provenance candidates → ranked, de-duplicated `PrimaryCandidate` list (highest confidence first). */
-export function flattenPrimaryCandidates(doc: ProvenanceDoc): PrimaryCandidate[] {
-  const byKey = new Map<string, PrimaryCandidate>();
+/**
+ * Flatten provenance candidates → ranked, de-duplicated `PrimaryCandidate` list (highest confidence first). Only
+ * candidates the viewer may see are listed, named by the viewer's own read; no `viewerName` → an empty list.
+ */
+export function flattenPrimaryCandidates(doc: ProvenanceDoc, viewerName?: ViewerTargetName): PrimaryCandidate[] {
+  return rankCandidates(doc, viewerName)
+    .filter(r => r.visible)
+    .map(r => r.candidate);
+}
+
+/** One ranked stored candidate and whether the viewer may see it. */
+interface RankedCandidate {
+  candidate: PrimaryCandidate;
+  visible: boolean;
+}
+
+/**
+ * Every stored candidate, ranked and de-duplicated (highest confidence first). The review STATE is computed over
+ * this full list (stored decision and scores); only `visible` entries become cards, named by the viewer's read.
+ */
+function rankCandidates(doc: ProvenanceDoc, viewerName: ViewerTargetName | undefined): RankedCandidate[] {
+  const byKey = new Map<string, RankedCandidate>();
   for (const c of doc.candidates) {
     const key = primaryKey(c.targetEntity, c.targetId);
-    const cand: PrimaryCandidate = {
-      entity: c.targetEntity,
-      // Item 3: prefer the flat targetName, else the name parsed from a contributor's
-      // `name="…"` token, else the GUID as a last resort (previously the GUID showed
-      // whenever the flat candidate carried no targetName — which is always, today).
-      targetName: c.targetName ?? candidateDisplayName(c) ?? c.targetId,
-      targetId: c.targetId,
-      recordNumber: candidateRecordNumber(c),
-      confidence: c.reinforcedConfidence,
-      matchReason: candidateMatchReason(c),
+    const name = candidateDisplayName(c, viewerName);
+    const ranked: RankedCandidate = {
+      visible: name !== undefined,
+      candidate: {
+        entity: c.targetEntity,
+        targetName: name ?? '',
+        targetId: c.targetId,
+        recordNumber: candidateRecordNumber(c),
+        confidence: c.reinforcedConfidence,
+        matchReason: candidateMatchReason(c),
+      },
     };
     const existing = byKey.get(key);
-    if (!existing || cand.confidence > existing.confidence) byKey.set(key, cand);
+    if (!existing || ranked.candidate.confidence > existing.candidate.confidence) byKey.set(key, ranked);
   }
-  return Array.from(byKey.values()).sort((a, b) => b.confidence - a.confidence);
+  return Array.from(byKey.values()).sort((a, b) => b.candidate.confidence - a.candidate.confidence);
 }
 
 /** The confirmed primary: the filed lookup (authoritative), enriched with a matching candidate's number, else the denorm fields. */
@@ -823,10 +953,14 @@ export function derivePrimaryReview(
   provenanceJson: string | null | undefined,
   associationStatus: number | null | undefined,
   filed: FiledAssociation[] | undefined,
-  denorm?: PrimaryDenorm
+  denorm?: PrimaryDenorm,
+  viewerName?: ViewerTargetName
 ): PrimaryReviewModel {
   const doc = parseProvenance(provenanceJson) ?? emptyProvenanceDoc();
-  const ranked = flattenPrimaryCandidates(doc);
+  // The STATE (🔴/🟡/🟢) is decided over every stored candidate — the stored decision and scores, no names — so
+  // hiding a candidate the viewer may not see never changes it. Only visible candidates become cards.
+  const rankedAll = rankCandidates(doc, viewerName);
+  const ranked = rankedAll.filter(r => r.visible).map(r => r.candidate);
   // The full above-floor list feeds the "See all" modal; `candidates` is its top-3 slice.
   const allCandidates = ranked.filter(c => c.confidence >= PRIMARY_MATCH_MIN_CONFIDENCE);
   const candidates = allCandidates.slice(0, PRIMARY_CANDIDATE_SLOTS);
@@ -841,10 +975,16 @@ export function derivePrimaryReview(
   // 🟡 Needs confirmation — the engine auto-matched (autoFiled or a lone 100%), NOT
   // an ambiguous conflict (2+ competing high-confidence candidates stay 🔴).
   const hasConflict = doc.candidates.some(c => c.conflict);
-  const top = ranked[0];
-  const autoMatched = !hasConflict && (doc.decision.autoFiled === true || (top !== undefined && top.confidence >= 1));
+  const top = rankedAll[0];
+  const autoMatched =
+    !hasConflict && (doc.decision.autoFiled === true || (top !== undefined && top.candidate.confidence >= 1));
   if (autoMatched && top) {
-    const primary: PrimaryCandidate = { ...top, recordNumber: top.recordNumber ?? denorm?.recordNumber ?? undefined };
+    // The auto-matched primary is shown only when the viewer may see it; the state holds either way.
+    if (!top.visible) return { state: 'needs-confirmation', candidates, allCandidates };
+    const primary: PrimaryCandidate = {
+      ...top.candidate,
+      recordNumber: top.candidate.recordNumber ?? denorm?.recordNumber ?? undefined,
+    };
     return { state: 'needs-confirmation', candidates, allCandidates, primary };
   }
 

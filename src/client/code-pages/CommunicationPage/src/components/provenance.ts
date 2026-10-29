@@ -86,8 +86,27 @@ const RUNG_PHRASES: Record<string, string> = {
   AiClassification: 'AI classified the content',
 };
 
+/** Phrase for one contributor's rung; a rung with no phrase reads generically (never the raw provenance text). */
 export function contributorPhrase(c: ProvenanceContributor): string {
-  return RUNG_PHRASES[c.rung] ?? c.provenance;
+  return RUNG_PHRASES[c.rung] ?? 'another signal matched';
+}
+
+/**
+ * A candidate target's display name AS THE VIEWER sees it, from a read the host made as the viewer: a non-empty
+ * string = readable; `null` = not readable or the read failed; `undefined` = not known yet. Only a string makes a
+ * candidate visible (fail closed). Same contract as `ViewerTargetName` in `@spaarke/communication-components`; a
+ * stored association trace holds ids and reason codes only, so this is the only source of a candidate's name.
+ */
+export type ViewerTargetName = (entity: string, id: string) => string | null | undefined;
+
+/** The name to show for a candidate target, or undefined when the viewer may not see it (no card). */
+export function viewerVisibleName(
+  viewerName: ViewerTargetName | undefined,
+  entity: string,
+  id: string
+): string | undefined {
+  const name = viewerName?.(entity, id);
+  return typeof name === 'string' && name.trim().length > 0 ? name.trim() : undefined;
 }
 
 export function isAiRung(rung: string): boolean {
@@ -172,8 +191,16 @@ const SLOT_META: Record<string, { label: string; order: number }> = {
   sprk_regardingworkassignment: { label: 'Work Assignment', order: 9 },
 };
 
-/** Group candidates by field into typed connection slots. */
-export function deriveConnections(doc: ProvenanceDoc, isResolved: boolean): Connection[] {
+/**
+ * Group candidates by field into typed connection slots. Only candidates the viewer may see (`viewerName`) become
+ * cards, named by the viewer's read; a field with none visible has no slot, and no `viewerName` means no slots.
+ * Whether a slot is ambiguous comes from the stored decision (all of the field's candidates).
+ */
+export function deriveConnections(
+  doc: ProvenanceDoc,
+  isResolved: boolean,
+  viewerName?: ViewerTargetName
+): Connection[] {
   const byField = new Map<string, ProvenanceCandidate[]>();
   for (const c of doc.candidates) {
     const list = byField.get(c.field) ?? [];
@@ -181,15 +208,21 @@ export function deriveConnections(doc: ProvenanceDoc, isResolved: boolean): Conn
     byField.set(c.field, list);
   }
   const out: Connection[] = [];
-  byField.forEach((cands, field) => {
+  byField.forEach((allCands, field) => {
+    const cands: ProvenanceCandidate[] = [];
+    for (const c of allCands) {
+      const name = viewerVisibleName(viewerName, c.targetEntity, c.targetId);
+      if (name !== undefined) cands.push({ ...c, targetName: name });
+    }
+    if (cands.length === 0) return;
     const meta = SLOT_META[field] ?? { label: entityLabel(cands[0].targetEntity), order: 99 };
-    const conflict = cands.length >= 2 && cands.some(c => c.conflict);
+    const conflict = allCands.length >= 2 && allCands.some(c => c.conflict);
     const primary = cands.reduce((a, b) => (b.reinforcedConfidence > a.reinforcedConfidence ? b : a));
     out.push({
       field,
       entity: primary.targetEntity,
       slotLabel: meta.label,
-      targetName: primary.targetName ?? primary.targetId,
+      targetName: primary.targetName as string,
       targetId: primary.targetId,
       confidence: primary.reinforcedConfidence,
       status: conflict ? 'ambiguous' : isResolved ? 'confirmed' : 'suggested',

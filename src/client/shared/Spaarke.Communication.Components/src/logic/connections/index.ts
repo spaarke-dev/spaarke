@@ -20,6 +20,8 @@
 
 export * from './provenance';
 export * from './ConnectionsWriteHandler';
+// Viewer-side, batched candidate names (a stored trace holds ids and reason codes only).
+export * from './viewerRecordNames';
 // UAT Fix #6 — shared resolveReview/resolveRegarding wiring for every
 // ReconciliationWorkspace mount (code page, SpaarkeAi widget, LegalWorkspace section).
 // Type-only imports of component prop types keep this Layer-1 module React-free at runtime.

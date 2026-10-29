@@ -2,8 +2,8 @@
  * Provenance identity + full-candidate-list tests (email-communication-intelligence-r2).
  *
  *  - R3-CARD-1: `looksLikeGuid` classifies a raw Dataverse GUID vs a real name, and
- *    `deriveConnections` falls back to a contributor's embedded `name="…"` when the flat
- *    candidate carries no `targetName` (so a card shows the name, never the opaque GUID).
+ *    `deriveConnections` names a card only with the name the VIEWER's own read returned — never a
+ *    contributor's stored `name="…"` and never the opaque GUID (no card instead).
  *  - R3-CARD-2: `derivePrimaryReview` exposes the FULL above-floor candidate set
  *    (`allCandidates`) behind the top-3 (`PRIMARY_CANDIDATE_SLOTS`) strip cap — the data
  *    the "See all" modal renders.
@@ -19,7 +19,7 @@ import {
 const GUID = '11111111-2222-3333-4444-555555555555';
 const STATUS_PENDING = 100000001;
 
-/** Raw provenance candidate. `name`/`number` (when given) land inside a RecordNameMatch contributor string. */
+/** Raw provenance candidate. `name`/`number` (when given) land inside a v1 RecordNameMatch contributor string. */
 function rawCand(
   field: string,
   entity: string,
@@ -86,20 +86,20 @@ describe('R3-CARD-1 · looksLikeGuid', () => {
   });
 });
 
-describe('R3-CARD-1 · deriveConnections name fallback', () => {
-  it('uses a contributor\'s embedded name="…" when the flat candidate has no targetName (never the raw GUID)', () => {
+describe("R3-CARD-1 · deriveConnections names come from the viewer's read only", () => {
+  it('names a card with the viewer-read name — never a stored name="…", a stored number, or the raw GUID', () => {
     const doc = parseProvenance(
       provenanceJson([
-        rawCand('sprk_regardingmatter', 'sprk_matter', GUID, 0.9, { name: 'Acme v Beta', number: 'MAT-1' }),
+        rawCand('sprk_regardingmatter', 'sprk_matter', GUID, 0.9, { name: 'Stored Title', number: 'MAT-1' }),
       ])
     )!;
-    const [conn] = deriveConnections(doc, false);
-    expect(conn.targetName).toBe('Acme v Beta');
-    expect(conn.targetName).not.toBe(GUID);
+    const [conn] = deriveConnections(doc, false, () => 'Viewer Read Title');
+    expect(conn.targetName).toBe('Viewer Read Title');
+    expect(conn.recordNumber).toBeUndefined();
     expect(looksLikeGuid(conn.targetName)).toBe(false);
   });
 
-  it('falls back to the raw targetId only when NO name is recoverable (documents the GUID-only case the card guards)', () => {
+  it('shows no card for a candidate the viewer cannot read, or with no viewer read at all (no GUID-fallback card)', () => {
     const doc = parseProvenance(
       // thread/attachment match: a GUID target, no targetName, no name="…" contributor.
       provenanceJson([
@@ -115,21 +115,30 @@ describe('R3-CARD-1 · deriveConnections name fallback', () => {
         },
       ])
     )!;
-    const [conn] = deriveConnections(doc, false);
-    expect(conn.targetName).toBe(GUID);
-    expect(looksLikeGuid(conn.targetName)).toBe(true); // the card renders type+reason instead of this
+    expect(deriveConnections(doc, false, () => null)).toEqual([]);
+    expect(deriveConnections(doc, false)).toEqual([]);
   });
 });
+
+/** Viewer names by target id (stands in for a host's viewer-side read). */
+const VIEWER_NAMES: Record<string, string> = {
+  'mtr-1': 'Alpha',
+  'mtr-2': 'Bravo',
+  'mtr-3': 'Charlie',
+  'mtr-4': 'Delta',
+  'mtr-weak': 'TooWeak',
+};
+const viewerName = (_entity: string, id: string): string | null => VIEWER_NAMES[id] ?? null;
 
 describe('R3-CARD-2 · derivePrimaryReview.allCandidates (full set behind the top-3 cap)', () => {
   it('caps `candidates` at 3 but exposes ALL above-floor candidates in `allCandidates`, ranked', () => {
     const json = provenanceJson([
-      rawCand('sprk_regardingmatter', 'sprk_matter', 'mtr-1', 0.95, { name: 'Alpha', number: 'MAT-1' }),
-      rawCand('sprk_regardingmatter', 'sprk_matter', 'mtr-2', 0.9, { name: 'Bravo', number: 'MAT-2' }),
-      rawCand('sprk_regardingmatter', 'sprk_matter', 'mtr-3', 0.85, { name: 'Charlie', number: 'MAT-3' }),
-      rawCand('sprk_regardingmatter', 'sprk_matter', 'mtr-4', 0.8, { name: 'Delta', number: 'MAT-4' }),
+      rawCand('sprk_regardingmatter', 'sprk_matter', 'mtr-1', 0.95),
+      rawCand('sprk_regardingmatter', 'sprk_matter', 'mtr-2', 0.9),
+      rawCand('sprk_regardingmatter', 'sprk_matter', 'mtr-3', 0.85),
+      rawCand('sprk_regardingmatter', 'sprk_matter', 'mtr-4', 0.8),
     ]);
-    const model = derivePrimaryReview(json, STATUS_PENDING, []);
+    const model = derivePrimaryReview(json, STATUS_PENDING, [], undefined, viewerName);
 
     expect(model.candidates).toHaveLength(3);
     expect(model.allCandidates).toHaveLength(4);
@@ -141,10 +150,10 @@ describe('R3-CARD-2 · derivePrimaryReview.allCandidates (full set behind the to
 
   it('drops below-floor (<70%) candidates from BOTH lists', () => {
     const json = provenanceJson([
-      rawCand('sprk_regardingmatter', 'sprk_matter', 'mtr-1', 0.95, { name: 'Alpha' }),
-      rawCand('sprk_regardingmatter', 'sprk_matter', 'mtr-weak', 0.4, { name: 'TooWeak' }),
+      rawCand('sprk_regardingmatter', 'sprk_matter', 'mtr-1', 0.95),
+      rawCand('sprk_regardingmatter', 'sprk_matter', 'mtr-weak', 0.4),
     ]);
-    const model = derivePrimaryReview(json, STATUS_PENDING, []);
+    const model = derivePrimaryReview(json, STATUS_PENDING, [], undefined, viewerName);
     expect(model.allCandidates.map(c => c.targetName)).toEqual(['Alpha']);
   });
 

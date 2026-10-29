@@ -358,7 +358,7 @@
   },
   "src/client/shared/Spaarke.Communication.Components/src/logic/connections/provenance.ts": {
     "@typescript-eslint/no-unnecessary-condition": {
-      "count": 12
+      "count": 11
     }
   },
   "src/client/shared/Spaarke.Communication.Components/src/widgets/CommunicationsWorkspaceWidget/useCommunicationArrivals.ts": {

@@ -33,6 +33,7 @@ import {
   type ITodoRegardingTargetCatalogEntry,
 } from '@spaarke/ui-components';
 import type { AuthenticatedFetchFn } from '@spaarke/auth';
+import { toStoredProvenance } from './provenance';
 
 // `sprk_associationstatus` = Resolved (task 002 verified integer).
 const ASSOCIATION_STATUS_RESOLVED = 100000000;
@@ -468,9 +469,9 @@ export async function advanceAssociationStatus(ctx: IResolverWriteContext): Prom
 
 /**
  * Persist a reviewer's override reason back into the `sprk_associationprovenance`
- * JSON as a feedback signal. This mutates only the decision block's override
- * fields and rewrites the column — nothing downstream consumes it (no learning
- * loop; out of R4 scope per task 042 constraint).
+ * JSON as a feedback signal. It sets the decision block's override fields and
+ * rewrites the column in the v2 stored form (`toStoredProvenance`) — nothing
+ * downstream consumes it (no learning loop; out of R4 scope per task 042 constraint).
  *
  * `nowIso` is injected so callers (and tests) control the timestamp; the App
  * passes `new Date().toISOString()`.
@@ -499,6 +500,9 @@ export async function persistOverrideReason(
   decision.overriddenField = overriddenField;
   decision.overriddenAt = nowIso;
   doc.decision = decision;
+  // A re-save always writes the v2 stored form (ids and reason codes only), so an older row's text is not
+  // written back.
+  doc = toStoredProvenance(doc);
 
   try {
     await ctx.webApi.updateRecord(ctx.hostEntity, cleanId, {

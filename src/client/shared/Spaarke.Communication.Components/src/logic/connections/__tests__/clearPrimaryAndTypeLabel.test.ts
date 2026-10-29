@@ -160,9 +160,8 @@ describe('derivePrimaryReview type label (item 1 — "Matter", not "Record")', (
   });
 });
 
-describe('candidate display name (item 3 — parse name from contributor provenance, not the GUID)', () => {
-  // Real provenance shape (spaarkedev1 2026-08-19): the flat candidate carries only a GUID
-  // targetId; the resolved name lives in the contributor's `name="…"` token.
+describe('candidate display name (a stored trace holds ids and reason codes only)', () => {
+  // A v1 row: the flat candidate carries only a GUID targetId, and contributors still carry name/number text.
   const prov = JSON.stringify({
     version: 1,
     direction: 'Incoming',
@@ -182,7 +181,7 @@ describe('candidate display name (item 3 — parse name from contributor provena
             rung: 'RecordNameMatch',
             confidence: 0.97,
             provenance:
-              'record-name-match:sprk_matter:where=subject:matched=number:name="Monte Rosa Biotechnology v Spaarke Inc":number="LITG-119896":reason="reference number in subject"',
+              'record-name-match:sprk_matter:where=subject:matched=number:name="Stored Matter Title":number="STORED-NUMBER-1":reason="reference number in subject"',
           },
         ],
       },
@@ -198,7 +197,8 @@ describe('candidate display name (item 3 — parse name from contributor provena
           {
             rung: 'ContactNameMatch',
             confidence: 0.7,
-            provenance: 'contact-name-match:where=body:matched=fullname:name="Ralph Schroeder":reason="name in body"',
+            provenance:
+              'contact-name-match:where=body:matched=fullname:name="Stored Contact Name":reason="name in body"',
           },
         ],
       },
@@ -206,14 +206,12 @@ describe('candidate display name (item 3 — parse name from contributor provena
     signals: [],
   });
 
-  it('flattens the candidate name/number from the contributor provenance (never the raw GUID)', () => {
-    const model = derivePrimaryReview(prov, 100000001 /* pending */, [], {});
-    const matter = model.candidates.find(c => c.entity === 'sprk_matter');
-    const contact = model.candidates.find(c => c.entity === 'contact');
-    expect(matter?.targetName).toBe('Monte Rosa Biotechnology v Spaarke Inc');
-    expect(matter?.recordNumber).toBe('LITG-119896');
-    expect(contact?.targetName).toBe('Ralph Schroeder');
-    // Never the GUID.
-    expect(model.candidates.some(c => c.targetName.includes('-f111-'))).toBe(false);
+  it('never shows a stored name or number; a card is named by the viewer read, an unreadable record has no card', () => {
+    const viewer = (entity: string): string | null => (entity === 'sprk_matter' ? 'Viewer Matter Title' : null);
+    const model = derivePrimaryReview(prov, 100000001 /* pending */, [], {}, viewer);
+    expect(model.candidates.map(c => c.entity)).toEqual(['sprk_matter']);
+    expect(model.candidates[0].targetName).toBe('Viewer Matter Title');
+    expect(model.candidates[0].recordNumber).toBeUndefined();
+    expect(JSON.stringify(model)).not.toMatch(/Stored Matter Title|STORED-NUMBER-1|Stored Contact Name/);
   });
 });
