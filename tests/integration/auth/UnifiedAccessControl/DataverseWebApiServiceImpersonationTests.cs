@@ -108,6 +108,35 @@ public class DataverseWebApiServiceImpersonationTests
         thrown.IsMissingReadPrivilegeOn("sprk_policyversion").Should().BeFalse("another table's privilege is not this one");
     }
 
+    /// <summary>
+    /// A 403 whose body cannot be read or decoded (a stream fault, or the decoder's own <see cref="InvalidOperationException"/>
+    /// for a bad charset) still throws the 403, with no code or message — never the decoder's exception. The same tolerated set
+    /// as <c>DataverseWebApiClient.CreateFailureAsync</c>.
+    /// </summary>
+    [Theory]
+    [InlineData("io")]
+    [InlineData("invalid-operation")]
+    [InlineData("http-request")]
+    public async Task RetrieveMultipleImpersonatedAsync_ForbiddenWithAnUnreadableBody_StillThrowsTheForbidden(string fault)
+    {
+        Exception thrown = fault switch
+        {
+            "io" => new IOException("The stream was reset."),
+            "invalid-operation" => new InvalidOperationException("The character set provided in ContentType is invalid."),
+            _ => new HttpRequestException("The response ended prematurely."),
+        };
+        var handler = new RecordingHandler(_ => new HttpResponseMessage(HttpStatusCode.Forbidden) { Content = new FaultingContent(thrown) });
+        var sut = new OfflineService(handler);
+
+        var act = () => sut.RetrieveMultipleImpersonatedAsync("sprk_policies", "$select=sprk_policyid", CallerSystemUserId);
+
+        var forbidden = (await act.Should().ThrowAsync<DataverseForbiddenException>()).Which;
+        forbidden.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        forbidden.ErrorCode.Should().BeNull();
+        forbidden.ErrorMessage.Should().BeNull();
+        forbidden.IsMissingReadPrivilegeOn("sprk_policy").Should().BeFalse("an unreadable refusal is never a missing-privilege answer");
+    }
+
     [Fact]
     public async Task RetrieveMultipleImpersonatedAsync_OtherFailure_ThrowsAPlainHttpRequestException()
     {
@@ -320,6 +349,18 @@ public class DataverseWebApiServiceImpersonationTests
     {
         public IReadOnlyCollection<string> Values(string header) =>
             Headers.TryGetValue(header, out var values) ? values : Array.Empty<string>();
+    }
+
+    /// <summary>A response body whose read throws <paramref name="fault"/>.</summary>
+    private sealed class FaultingContent(Exception fault) : HttpContent
+    {
+        protected override Task SerializeToStreamAsync(Stream stream, TransportContext? context) => Task.FromException(fault);
+
+        protected override bool TryComputeLength(out long length)
+        {
+            length = 0;
+            return false;
+        }
     }
 
     private sealed class RecordingHandler(Func<HttpRequestMessage, HttpResponseMessage> respond) : HttpMessageHandler

@@ -1251,7 +1251,9 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
             HttpMethod.Get, url, ct, impersonateSystemUserId);
         request.Headers.TryAddWithoutValidation(
             "Prefer", "odata.include-annotations=\"OData.Community.Display.V1.FormattedValue\"");
-        var response = await _httpClient.SendAsync(request, ct);
+        // Headers first: the body of a 403 is read by TryReadErrorAsync, which tolerates one that cannot be read or decoded.
+        // Buffering it inside SendAsync would let a bad charset or a stream fault replace the 403 with another exception.
+        using var response = await _httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct);
         if (response.StatusCode == System.Net.HttpStatusCode.Forbidden)
         {
             // Task 071 fix round 1: a 403 keeps Dataverse's code and message, so a caller can tell a missing table privilege
@@ -1890,8 +1892,12 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
 
             return (StringOf(error, "code"), StringOf(error, "message"));
         }
-        catch (JsonException)
+        catch (Exception ex) when (ex is JsonException or HttpRequestException or IOException or InvalidOperationException
+                                       or NotSupportedException)
         {
+            // An undecodable body (a bad charset, a stream fault) or a non-JSON one leaves code and message null; the 403 still
+            // identifies the failure. The same tolerated set as DataverseWebApiClient.CreateFailureAsync. Both callers treat
+            // (null, null) as "not an answer about the principal / not a missing privilege", never as success.
             return (null, null);
         }
     }
