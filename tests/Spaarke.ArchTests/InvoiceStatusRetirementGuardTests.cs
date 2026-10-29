@@ -17,7 +17,8 @@ namespace Spaarke.ArchTests;
 /// <para>No exemption: the external invoices allow-list entry, the last transitional mention, was removed on master in #2450
 /// (spaarke-SPA-external-access-platform-r3 task 002), so the transition window and its exemption list are gone. The dev column delete
 /// (015 -Delete, D-97) waits for the next dev BFF deploy.</para>
-/// <para>Excluded: <c>projects/**</c> (task history, not scanned at all), this file (it must spell what it looks for), and build
+/// <para>Excluded: <c>projects/**</c> (task history, not scanned at all), the files in <see cref="ExcludedFiles"/> (this file, and
+/// the external allow-list must-refuse tests: each must spell the name to guard against it), and build
 /// output / dependencies (<c>bin</c>, <c>obj</c>, <c>node_modules</c>, <c>dist</c>, <c>coverage</c>, <c>.git</c>).</para>
 /// <para>Controls: <see cref="TheDetector_FiresOnEachRetiredName"/> (must fire) and
 /// <see cref="TheDetector_StaysQuietOnTheStatuscodeReplacements"/> (must not fire); <see cref="TheWalk_ReachesEveryScannedRoot"/>
@@ -37,6 +38,18 @@ public class InvoiceStatusRetirementGuardTests
     };
 
     private const string GuardFileName = nameof(InvoiceStatusRetirementGuardTests) + ".cs";
+
+    /// <summary>
+    /// Files that must spell the retired name, each with its reason (repo-relative, forward slashes). This file names what it looks
+    /// for; the external allow-list tests prove the BFF REFUSES the column (master #2450 must-refuse tests), which they cannot do
+    /// without naming it. Keep this list to files whose purpose is to guard against the name.
+    /// </summary>
+    private static readonly IReadOnlyDictionary<string, string> ExcludedFiles = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+    {
+        ["tests/Spaarke.ArchTests/" + GuardFileName] = "this guard spells what it looks for",
+        ["tests/integration/auth/UnifiedAccessControl/ExternalModuleColumnAllowListTests.cs"] =
+            "must-refuse tests: the external invoice fetch and /record refuse the retired column",
+    };
 
     private static readonly (Regex Pattern, string Description)[] Detectors =
     {
@@ -69,7 +82,7 @@ public class InvoiceStatusRetirementGuardTests
             foreach (var file in Directory.EnumerateFiles(dir))
             {
                 if (TextExtensions.Contains(Path.GetExtension(file))
-                    && !Path.GetFileName(file).Equals(GuardFileName, StringComparison.OrdinalIgnoreCase))
+                    && !ExcludedFiles.ContainsKey(SourceScan.Relative(file).Replace('\\', '/')))
                 {
                     yield return file;
                 }
@@ -134,5 +147,10 @@ public class InvoiceStatusRetirementGuardTests
         Assert.Contains("tests/unit/Sprk.Bff.Api.Tests/Services/Finance/FinanceBaseValuesTests.cs", files);
         Assert.DoesNotContain(files, f => f.EndsWith("/" + GuardFileName, StringComparison.OrdinalIgnoreCase));
         Assert.DoesNotContain(files, f => f.Contains("/node_modules/", StringComparison.OrdinalIgnoreCase));
+        foreach (var excluded in ExcludedFiles.Keys)
+        {
+            Assert.True(File.Exists(Path.Combine(SourceScan.RepoRoot, excluded)), $"excluded file is gone; remove it from ExcludedFiles: {excluded}");
+            Assert.DoesNotContain(excluded, files);
+        }
     }
 }

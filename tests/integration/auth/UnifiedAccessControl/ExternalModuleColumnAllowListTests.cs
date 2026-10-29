@@ -901,7 +901,7 @@ public sealed class ExternalModuleColumnAllowListTests : IClassFixture<ExternalA
     /// column delete waits for the next dev BFF deploy). Spelled in two parts because InvoiceStatusRetirementGuardTests allows the
     /// full name nowhere but in its own file: these tests only prove the column is refused, they never read it.
     /// </summary>
-    private const string RetiredInvoiceStatusColumn = "sprk_invoice" + "status";
+    private const string RetiredInvoiceStatusColumn = "sprk_invoicestatus";
 
     public static TheoryData<string> DerivedEntities
     {

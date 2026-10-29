@@ -153,8 +153,8 @@ function Test-InvoicesAllowListHasStatuscode([string]$ModuleSource) {
     return ($body -match '"statuscode"')
 }
 
-# The ONE line that may still name the column in the BFF source at a -Delete attestation (ExternalAccessModule.cs; D-97 transition
-# window). Same text as InvoiceStatusRetirementGuardTests.TransitionalExemptions[0]; compared after trimming.
+# The transitional line an older attested BFF commit may still carry (ExternalAccessModule.cs; D-97 transition window). Master
+# removed it in #2450, so a commit built after that has no such line, which this check also accepts. Compared after trimming.
 $TransitionalModuleLine = '"sprk_invoicestatus", // transitional (015/D-97): remove after the dev column delete'
 
 # Content scan of the whole source tree a deployed artifact was built from (git grep over the attested commit, not a list of known
