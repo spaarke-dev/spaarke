@@ -302,6 +302,17 @@ public sealed class StoredFileService
     }
 
     /// <summary>
+    /// UAC 194b R4b-2 (uac-r2 Q2): the ownership question of the row <see cref="BuildRow"/> writes for <paramref name="spec"/> — its table
+    /// (<c>sprk_storedfile</c>, a hard-deny table) and the lookups it holds, through the one builder — with the acting user's ids for a
+    /// row whose parent files nothing, and the person who asked. Kept apart from the create so the table name is loaded only here
+    /// (the task 094 writer guard reads a method that loads it and creates a row as a Stored File writer).
+    /// </summary>
+    private static RecordOwnershipContext OwnerQuestionOf(StoredFileRowSpec spec, RecordRequester? requester, Guid? creatorPersonId) =>
+        RecordOwnershipContext.ForRow(
+            StoredFileSchema.Entity, RowLookupsOf(spec),
+            callerObjectId: requester?.ObjectId, callerSystemUserId: creatorPersonId) with { RequestedBy = requester };
+
+    /// <summary>
     /// The lookups <see cref="BuildRow"/> writes on a row for <paramref name="spec"/> (column → record): the parent lookup and, when set,
     /// the source document and source communication. The ownership question of the row is asked over exactly these.
     /// </summary>
@@ -453,15 +464,11 @@ public sealed class StoredFileService
             return StoredFileCreateResult.Refused(StoredFileRefusal.InvalidRequest);
         }
 
-        // UAC 194b R4b-2 (uac-r2 Q2): sprk_storedfile is a hard-deny table, so the question is the row's own (ForRow: its table and the
-        // lookups BuildRow writes), never its parent's content question. An ordinary answer is then the restricted-content owner team, a
-        // Secure one the Secure team. A parent that files nothing (a billing export, a procedure version) leaves the row unfiled: the
-        // acting user's business unit decides, through the same restricted-content exit; no acting user refuses.
-        var owner = await _owners.ResolveOwnerAsync(
-            RecordOwnershipContext.ForRow(
-                StoredFileSchema.Entity, RowLookupsOf(spec),
-                callerObjectId: requester?.ObjectId, callerSystemUserId: creatorPersonId) with { RequestedBy = requester },
-            ct).ConfigureAwait(false);
+        // UAC 194b R4b-2 (uac-r2 Q2): sprk_storedfile is a hard-deny table, so the question is the row's own (OwnerQuestionOf: its table
+        // and the lookups BuildRow writes), never its parent's content question. An ordinary answer is then the restricted-content owner
+        // team, a Secure one the Secure team. A parent that files nothing (a billing export, a procedure version) leaves the row unfiled:
+        // the acting user's business unit decides, through the same restricted-content exit; no acting user refuses.
+        var owner = await _owners.ResolveOwnerAsync(OwnerQuestionOf(spec, requester, creatorPersonId), ct).ConfigureAwait(false);
         if (owner.IsRefused)
         {
             _logger.LogWarning("Stored file {FileId} refused: no owner under {ParentTable} {ParentId} ({OwnerCode})",
