@@ -158,6 +158,7 @@ public static class HandlerRunInputs
                 RunInput.Output(nameof(InterStepState.DataverseEnvUrl)),   // T245b: Dataverse__ServiceUrl / __EnvironmentUrl
                 RunInput.Output(nameof(InterStepState.SpeContainerId)),    // T227c: EmailProcessing__DefaultContainerId / Communication__ArchiveContainerId
                 RunInput.Output(nameof(InterStepState.CustomerBusinessUnitId)),   // R3 073 / A9: ExternalAccess__CustomerBusinessUnitId
+                RunInput.Output(nameof(InterStepState.AiSearchIndexNames)),   // T186 follow-up: AiSearch__AllowedIndexes__N
                 // (+ intake tenantId / containerTypeId above; customer_id reads run.CustomerId — run
                 //  identity, which RunInputSource has no kind for and needs no declaration.)
             ],

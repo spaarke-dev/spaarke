@@ -972,6 +972,23 @@ per_env_settings:
       Search Service Contributor) already granted to the BFF runtime UAMI.
       Global literal -- every deployed env sets this to true.
 
+  - key: 'AiSearch__AllowedIndexes'
+    per_env_source: 'from-h2b-output:ai_search_index_names'
+    indexed: true
+    iOptionsModule: 'AiSearchOptions'
+    required: true
+    notes: >-
+      T186 follow-up (AiSearch allow-list). The AI Search indexes the BFF may be asked to
+      query, written as AiSearch__AllowedIndexes__0, __1, … on BOTH slots. The BFF's
+      DataverseAllowedIndexesProvider reads sprk_aisearchindex rows first (H12b seeds them,
+      #2429) and falls back to this configured list when there are none -- before the rows
+      exist, or if they are missing. AiSearchOptions.AllowedIndexes defaults to empty, so
+      without this setting and without rows every call that names an index (record search,
+      semantic search, RAG, visualization) answers 400 INDEX_NOT_ALLOWED. The value is exactly the indexes H2b built and verified
+      on the stamp's OWN search service (InterStepState.AiSearchIndexNames, canonical-catalog
+      order; H4b <- H2b in the DAG) -- never a hand-kept list. Indices the list no longer has
+      are removed.
+
   - key: 'AiSafety__ContentSafety__ManagedIdentity__Enabled'
     per_env_source: 'literal'
     literal_value: 'true'
