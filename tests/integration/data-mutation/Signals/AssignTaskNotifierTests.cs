@@ -103,7 +103,11 @@ public sealed class AssignTaskNotifierTests
         // The record name InquiryRecordFacts would show (Standard + confirmed internal).
         public string? RecordLabel { get; set; } = Label;
 
+        /// <summary>The Communication options the notifier reads (the system mailbox, <c>Communication:DefaultMailbox</c>).</summary>
+        public CommunicationOptions Communication { get; } = new() { DefaultMailbox = SystemMailbox };
+
         public Exception? UserSendFault { get; set; }
+        public Exception? SystemSendFault { get; set; }
         public bool UserSendHangs { get; set; }
         public Exception? EnqueueFault { get; set; }
         public Exception? BellFault { get; set; }
@@ -170,7 +174,7 @@ public sealed class AssignTaskNotifierTests
 
             Notifier = new Mock<AssignTaskNotifier>(
                 null!, new NotificationService(Entities.Object, NullLogger<NotificationService>.Instance), Entities.Object, Gate.Object, Facts.Object,
-                Jobs.Object, Options.Create(new CommunicationOptions { DefaultMailbox = SystemMailbox }), customer, config,
+                Jobs.Object, Options.Create(Communication), customer, config,
                 Options.Create(new DataverseOptions { EnvironmentUrl = EnvironmentUrl }), Log)
             { CallBase = true };
 
@@ -182,8 +186,11 @@ public sealed class AssignTaskNotifierTests
                     if (UserSendFault is { } fault) throw fault;
                 });
             Notifier.Setup(n => n.SendAsSystemAsync(It.IsAny<SendCommunicationRequest>(), It.IsAny<HttpContext?>(), It.IsAny<CancellationToken>()))
-                .Callback((SendCommunicationRequest r, HttpContext? sender, CancellationToken _) => SystemSends.Add((r, sender)))
-                .Returns(Task.CompletedTask);
+                .Returns((SendCommunicationRequest r, HttpContext? sender, CancellationToken _) =>
+                {
+                    SystemSends.Add((r, sender));
+                    return SystemSendFault is { } fault ? Task.FromException(fault) : Task.CompletedTask;
+                });
 
             Jobs.Setup(j => j.SubmitJobAsync(It.IsAny<JobContract>(), It.IsAny<CancellationToken>()))
                 .Returns((JobContract job, CancellationToken _) =>
@@ -404,17 +411,76 @@ public sealed class AssignTaskNotifierTests
         var warnings = await h.NotifyAsync();
 
         warnings.Should().BeEmpty();
-        var sent = h.UserSends.Should().ContainSingle().Which;
+        // D-199 amendment: from the system mailbox, never as the assigner.
+        h.UserSends.Should().BeEmpty("an external assignee is never emailed from the assigner's mailbox");
+        var (sent, sender) = h.SystemSends.Should().ContainSingle().Which;
+        sent.SendMode.Should().Be(SendMode.SharedMailbox);
+        sent.FromMailbox.Should().Be(SystemMailbox, "Communication:DefaultMailbox");
         sent.To.Should().Equal(Address);
         sent.IsInternalOnly.Should().BeTrue();
+        sent.CorrelationId.Should().Be($"assign-task-{TaskId:N}");
         sent.Subject.Should().Be("A task was assigned to you", "an external recipient is never told the record's name");
         sent.Body.Should().Contain($"href=\"{System.Net.WebUtility.HtmlEncode(PortalLink)}\"").And.Contain("Open in the Spaarke portal");
         sent.Body.Should().NotContain("main.aspx").And.NotContain(EnvironmentUrl, "never a model-driven link");
         sent.Body.Should().NotContain("Acme");
         sent.Body.Should().Contain($"Assigned by {AssignerName}").And.NotContain(AssignerUpn);
+        sent.Subject.Should().NotContain("@");
+        sent.Body.Should().NotContain("@", "no email address or UPN anywhere in the body");
+        sender!.User.FindFirst("oid")!.Value.Should().Be(AssignerOid.ToString("D"), "the send path stamps sprk_sentby from it");
+        sender.User.Claims.Should().ContainSingle("the sender context carries the oid and nothing else, never the assigner's UPN");
+        h.Queued.Should().BeEmpty();
         h.Bells.Should().BeEmpty("an external contact has no model-driven app");
         h.Facts.Verify(f => f.ResolveAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<IReadOnlyList<string>>(), It.IsAny<CancellationToken>()), Times.Never);
         h.GateQuestions.Should().Equal($"grants {Contact} sprk_matter {Matter}", $"portal {Contact} {TaskId}");
+    }
+
+    [Fact]
+    public async Task OnboardedExternal_TheSystemSendFails_QueuesTheSystemMailboxJob_NeverTheAssignersMailbox()
+    {
+        var h = new Harness { SystemSendFault = new SdapProblemException("GRAPH_SEND_FAILED", "Send failed", "graph 500", 502) };
+        h.MakeExternal();
+
+        var warnings = await h.NotifyAsync();
+
+        warnings.Should().BeEmpty("the email is still going, from the system mailbox, in a job");
+        h.UserSends.Should().BeEmpty("a failed system send is retried from the system mailbox, never as the assigner");
+        h.SystemSends.Should().ContainSingle();
+        var job = h.Queued.Should().ContainSingle().Which;
+        h.SystemSends.Clear();
+        h.SystemSendFault = null;
+        (await h.Handler().ProcessAsync(job, CancellationToken.None)).Status.Should().Be(JobStatus.Completed);
+        h.SystemSends.Should().ContainSingle().Which.Request.FromMailbox.Should().Be(SystemMailbox);
+        h.UserSends.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task OnboardedExternal_WithNoSystemMailboxConfigured_SendsNothing_AndSaysSo_NeverFallsBackToTheAssigner_MustNotFire()
+    {
+        var h = new Harness();
+        h.Communication.DefaultMailbox = " ";
+        h.MakeExternal();
+
+        var warnings = await h.NotifyAsync();
+
+        warnings.Should().Equal(AssignTaskNotifier.EmailNotSentWarning);
+        h.NothingWasSent();
+    }
+
+    [Fact]
+    public async Task OnboardedExternal_ThroughTheRealSendPath_IsStoredInternalOnly_AndSentByTheAssigner()
+    {
+        var h = new Harness();
+        h.MakeExternal();
+        await h.NotifyAsync();
+        var (request, sender) = h.SystemSends.Single();
+
+        var dataverse = new Mock<ICommunicationDataverseService>();
+        dataverse.Setup(d => d.QuerySystemUserByAzureAdOidAsync(AssignerOid.ToString("D"), It.IsAny<CancellationToken>())).ReturnsAsync(AssignerUser);
+        var row = await OutboundCommunicationRow.WriteAsync(request, sender, dataverse.Object);
+
+        row.GetAttributeValue<bool>("sprk_isinternalonly").Should().BeTrue();
+        row.GetAttributeValue<EntityReference>("sprk_sentby")!.Id.Should().Be(AssignerUser, "sprk_sentby still records the assigner");
+        row.GetAttributeValue<string>("sprk_correlationid").Should().Be($"assign-task-{TaskId:N}");
     }
 
     // ── Must not fire: the gate refuses (D-199) ──────────────────────────────────────────────────────────────────────────
@@ -664,12 +730,15 @@ public sealed class AssignTaskNotifierTests
         h.SystemSends.Should().BeEmpty();
 
         // And an external contact whose grant was removed before the job ran.
-        var x = new Harness { UserSendFault = new HttpRequestException("graph 500") };
+        // (An external assignee's in-request send is the system mailbox, D-199 amendment, so it is the SYSTEM send that fails here.)
+        var x = new Harness { SystemSendFault = new HttpRequestException("graph 500") };
         x.MakeExternal();
         await x.NotifyAsync();
+        x.SystemSends.Clear();
         x.PortalRights = AccessRights.None;
         (await x.Handler().ProcessAsync(x.Queued.Single(), CancellationToken.None)).Status.Should().Be(JobStatus.Completed);
         x.SystemSends.Should().BeEmpty();
+        x.UserSends.Should().BeEmpty();
     }
 
     [Fact]

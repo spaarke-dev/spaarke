@@ -56,6 +56,9 @@ public static class AssignTaskNotifierEvents
 
     /// <summary>Information or Warning: what the system-mailbox job did.</summary>
     public static readonly EventId SystemEmailJob = new(50394, nameof(SystemEmailJob));
+
+    /// <summary>Information: the email to an external assignee went from the system mailbox, in the request (D-199 amendment).</summary>
+    public static readonly EventId EmailSentFromSystem = new(50395, nameof(EmailSentFromSystem));
 }
 
 /// <summary>
@@ -121,7 +124,8 @@ public enum AssignTaskSystemEmailOutcome
 /// <summary>
 /// Assign Task's email and bell for the assignee (task 168, D-194; fix round D-199). <see cref="NotifyAsync"/> runs in the commit
 /// request after the record: first the recipient gate (<see cref="AssignTaskRecipientGate"/>); for an assignee it lets through, the
-/// email from the ASSIGNER's own mailbox (delegated, bounded by <see cref="UserSendTimeout"/>), and on any failure an ADR-004 job sends
+/// email from the ASSIGNER's own mailbox (delegated, bounded by <see cref="UserSendTimeout"/>) for an internal assignee, or from the
+/// system mailbox for an EXTERNAL one (D-199 amendment: never as the assigner), and on any failure an ADR-004 job sends
 /// it from the system mailbox (<c>Communication:DefaultMailbox</c>, approved-sender checked by the send path) after asking the SAME gate
 /// again, so the request never waits twice and the fallback never reaches a refused recipient; then one bell notification, for an
 /// internal assignee only. Never throws.
@@ -473,25 +477,58 @@ public class AssignTaskNotifier
             return (EmailNotSentWarning, null);
 
         var content = BuildEmail(Template.Value, record, notice.Description, notice.Due, GrantAccessNotifier.ExternalGranterName(http.User), DateTime.UtcNow.Year);
-        var request = Request(content, address, notice.Core, record, notice.TaskId is { } task ? CorrelationIdFor(task) : null) with
-        { SendMode = SendMode.User };
+        var request = Request(content, address, notice.Core, record, notice.TaskId is { } task ? CorrelationIdFor(task) : null);
+
+        // D-199 amendment: an EXTERNAL assignee is always emailed from the system mailbox (Communication:DefaultMailbox), never as the
+        // assigner, so an outside party never sees a lawyer's address in From. Same send as the job (SendAsSystemAsync, app-only,
+        // approved-sender checked); the body names the assigner by display name and the tracked row's sprk_sentby is still them.
+        var external = recipient.Kind == AssignTaskRecipientKind.External;
+        if (external)
+        {
+            try
+            {
+                request = request with { SendMode = SendMode.SharedMailbox, FromMailbox = RegistrationEmailService.ResolveFromMailbox(_communicationOptions.Value) };
+            }
+            catch (InvalidOperationException)
+            {
+                // No system sender is configured: there is no mailbox to send from, and the job could not send either.
+                _logger.LogWarning(AssignTaskNotifierEvents.EmailSkipped,
+                    "[ASSIGN-TASK-NOTIFY] task {TaskId}: Communication:DefaultMailbox is not configured, so no email to the external assignee was sent.", notice.TaskId);
+                return (EmailNotSentWarning, record);
+            }
+        }
+        else
+        {
+            request = request with { SendMode = SendMode.User };
+        }
 
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
         timeout.CancelAfter(UserSendTimeout);
         try
         {
-            await SendAsUserAsync(request, http, timeout.Token).ConfigureAwait(false);
-            _logger.LogInformation(AssignTaskNotifierEvents.EmailSentAsUser,
-                "[ASSIGN-TASK-NOTIFY] task {TaskId}: emailed contact {ContactId} from the assigner's mailbox.", notice.TaskId, notice.AssigneeContactId);
+            if (external)
+            {
+                await SendAsSystemAsync(request, SenderContext(assignerOid), timeout.Token).ConfigureAwait(false);
+                _logger.LogInformation(AssignTaskNotifierEvents.EmailSentFromSystem,
+                    "[ASSIGN-TASK-NOTIFY] task {TaskId}: emailed external contact {ContactId} from the system mailbox.", notice.TaskId, notice.AssigneeContactId);
+            }
+            else
+            {
+                await SendAsUserAsync(request, http, timeout.Token).ConfigureAwait(false);
+                _logger.LogInformation(AssignTaskNotifierEvents.EmailSentAsUser,
+                    "[ASSIGN-TASK-NOTIFY] task {TaskId}: emailed contact {ContactId} from the assigner's mailbox.", notice.TaskId, notice.AssigneeContactId);
+            }
+
             return (null, record);
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
             // D-194: no mailbox, no consent, a Graph error or the timeout. The system mailbox sends it from a job (the request does not
-            // wait twice), behind the same gate (D-199 Q2). Known limit: a send that reached Graph and timed out on our side may also arrive.
+            // wait twice), behind the same gate (D-199 Q2). For an external assignee the in-request send was already the system mailbox,
+            // so the job is a retry from the same sender. Known limit: a send that reached Graph and timed out on our side may also arrive.
             _logger.LogWarning(AssignTaskNotifierEvents.EmailFellBack,
-                "[ASSIGN-TASK-NOTIFY] task {TaskId}: the assigner's send to contact {ContactId} failed ({ExceptionType}, {ErrorCode}{Timeout}); falling back to the system mailbox.",
-                notice.TaskId, notice.AssigneeContactId, ex.GetType().Name, ErrorCode(ex), timeout.IsCancellationRequested ? ", timed out" : string.Empty);
+                "[ASSIGN-TASK-NOTIFY] task {TaskId}: the {Sender} send to contact {ContactId} failed ({ExceptionType}, {ErrorCode}{Timeout}); falling back to the system-mailbox job.",
+                notice.TaskId, external ? "system-mailbox" : "assigner's", notice.AssigneeContactId, ex.GetType().Name, ErrorCode(ex), timeout.IsCancellationRequested ? ", timed out" : string.Empty);
             return (await FallBackAsync(notice, assignerOid, ct).ConfigureAwait(false) ? null : EmailNotSentWarning, record);
         }
     }
