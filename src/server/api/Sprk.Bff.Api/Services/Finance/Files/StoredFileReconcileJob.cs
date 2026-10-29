@@ -40,7 +40,7 @@ public static class StoredFileRetention
 /// a scope per run; one heartbeat per attempt with its counts (rule 5); it THROWS when no progress is possible (the row query or the
 /// blob listing faults, rule 4), otherwise counts unit failures and completes. Rule 3: each unit's side effects are deletes, ordered
 /// blob-then-row and idempotent (a delete of something already gone succeeds), so a re-run under the lease converges and a second
-/// run over the same state does nothing new; no claim row is needed. The eBilling flag is read by the job itself (ADR-018).</para>
+/// run over the same state does nothing new; no claim row is needed. The eBilling flag is read by the job itself (ADR-018), and so is the dedicated <c>Ebilling:StoredFileReconcileEnabled</c> switch (default off; hard rule: off until F4 is merged and DEF-044 is fixed).</para>
 /// </remarks>
 public sealed class StoredFileReconcileJob : IScheduledJob
 {
@@ -103,9 +103,13 @@ public sealed class StoredFileReconcileJob : IScheduledJob
         var started = _timeProvider.GetTimestamp();
         var counts = new ReconcileCounts();
 
-        if (!_ebilling.Value.Enabled || !_blobs.IsConfigured)
+        // The dedicated switch is read first, before anything else: this job deletes, and a standing hard rule keeps it off until
+        // fix F4 is merged and DEF-044 is fixed (EbillingOptions.StoredFileReconcileEnabled).
+        if (!_ebilling.Value.StoredFileReconcileEnabled || !_ebilling.Value.Enabled || !_blobs.IsConfigured)
         {
-            counts.SkippedReason = !_ebilling.Value.Enabled ? "ebilling-disabled" : "store-not-configured";
+            counts.SkippedReason = !_ebilling.Value.StoredFileReconcileEnabled
+                ? "reconcile-disabled"
+                : !_ebilling.Value.Enabled ? "ebilling-disabled" : "store-not-configured";
             LogHeartbeat(context, counts);
             return new JobRunResult(true, null, 0, _timeProvider.GetElapsedTime(started), Serialize(counts), Skipped: true);
         }

@@ -32,7 +32,7 @@ public sealed class StoredFileReconcileJobTests
     {
         public Harness(
             bool ebilling = true, bool configured = true, int graceMinutes = 1440, int alertMinutes = 60, int pageSize = 5000, int maxPages = 50,
-            Guid? organizationId = null)
+            Guid? organizationId = null, bool reconcileSwitch = true)
         {
             Rig = new StoredFileRig(
                 configured: configured, organizationId: organizationId is { } org ? _ => Task.FromResult(org) : null);
@@ -43,7 +43,7 @@ public sealed class StoredFileReconcileJobTests
             Job = new StoredFileReconcileJob(
                 provider.GetRequiredService<IServiceScopeFactory>(),
                 Rig.Blobs,
-                Options.Create(new EbillingOptions { Enabled = ebilling }),
+                Options.Create(new EbillingOptions { Enabled = ebilling, StoredFileReconcileEnabled = reconcileSwitch }),
                 Options.Create(new FinanceOptions { FileStore = new FinanceFileStoreOptions { OrphanGraceMinutes = graceMinutes, NotServableAlertMinutes = alertMinutes } }),
                 Clock,
                 Log)
@@ -678,6 +678,33 @@ public sealed class StoredFileReconcileJobTests
         h.Rig.Gateway.StorageCalls.Should().Be(0);
         h.Log.Entries.Should().ContainSingle(e => e.EventId.Id == 9092);
     }
+
+    [Fact(DisplayName = "eBilling on, store configured, dedicated reconcile switch absent → Skipped reconcile-disabled; nothing is read or deleted")]
+    public async Task SkippedWhenReconcileSwitchAbsent()
+    {
+        var h = new Harness(reconcileSwitch: false);
+        var goneParent = new StoredFileParent(StoredFileParentKind.Invoice, Guid.NewGuid());
+        var doomed = Guid.NewGuid();
+        h.Rig.SeedFile(doomed, goneParent, Pdf);
+        var orphan = h.SeedOrphan(h.Clock.GetUtcNow().AddDays(-2));
+        var storageCallsBefore = h.Rig.Gateway.StorageCalls;
+
+        var result = await h.RunAsync();
+
+        result.Skipped.Should().BeTrue();
+        h.Counts(result)["skippedReason"].GetString().Should().Be("reconcile-disabled");
+        h.Rig.Dataverse.Calls.Should().BeEmpty();
+        h.Rig.Gateway.StorageCalls.Should().Be(storageCallsBefore);
+        h.Rig.Gateway.Calls.Should().NotContain(c => c.StartsWith("delete", StringComparison.Ordinal));
+        h.Rig.Dataverse.Rows.Keys.Should().Contain(doomed);
+        h.Rig.Gateway.Get("invoice-files", h.PathOf(goneParent, doomed)).Should().NotBeNull();
+        h.Rig.Gateway.Get("invoice-files", orphan).Should().NotBeNull();
+        h.Log.Entries.Should().ContainSingle(e => e.EventId.Id == 9092);
+    }
+
+    [Fact(DisplayName = "The reconcile switch defaults to off, so a host with eBilling on and no Ebilling:StoredFileReconcileEnabled setting skips")]
+    public void ReconcileSwitchDefaultsOff() =>
+        new EbillingOptions { Enabled = true }.StoredFileReconcileEnabled.Should().BeFalse();
 
     [Fact(DisplayName = "Identity: registered id, cron at minute 23 hourly")]
     public void Identity()

@@ -42,7 +42,7 @@ public static class FinanceModule
         // ============================================================================
         // eBilling flag (ebilling-r1 task 040, FR-45, ADR-018 rule 2, ADR-032)
         // ============================================================================
-        // ONE flag for the whole capability: Ebilling:Enabled (default false). No per-service flags.
+        // ONE flag for the whole capability: Ebilling:Enabled (default false). No per-service flags, except the temporary hard-rule guard Ebilling:StoredFileReconcileEnabled (default false; StoredFileReconcileJob stays off until F4 is merged and DEF-044 is fixed).
         // FLAG-OFF REGISTRATION RULE (every later eBilling task follows this):
         //   * eBilling services register UNCONDITIONALLY - no `if (ebillingEnabled)` registration gates.
         //   * The kill switch is the endpoint filter (chain RequireEbillingEnabled() AFTER each eBilling

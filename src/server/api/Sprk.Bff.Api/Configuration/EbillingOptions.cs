@@ -10,7 +10,8 @@ namespace Sprk.Bff.Api.Configuration;
 /// <para>
 /// <b>The one eBilling flag</b> (ebilling-r1 spec FR-45, ADR-018 "Flag Scope Discipline" rule 2).
 /// <see cref="Enabled"/> is the only kill switch for the whole capability; there are no per-service
-/// flags. Every eBilling route chains <c>RequireEbillingEnabled()</c> after its authorization filter
+/// flags, with ONE recorded exception: <see cref="StoredFileReconcileEnabled"/>, a destructive job held off by a hard rule until a
+/// defect is fixed (a temporary guard, not a feature flag). Every eBilling route chains <c>RequireEbillingEnabled()</c> after its authorization filter
 /// (<c>EbillingEnabledFilter</c>), and every eBilling job handler checks <see cref="Enabled"/> itself
 /// (ADR-018: "check same flag in both endpoints and async handlers"). The flag never replaces
 /// authorization.
@@ -41,6 +42,16 @@ public class EbillingOptions
     /// handlers do no work.
     /// </summary>
     public bool Enabled { get; set; } = false;
+
+    /// <summary>
+    /// Dedicated switch for <c>StoredFileReconcileJob</c> (the Finance file store's hourly reconcile, which DELETES blobs and Stored
+    /// File rows). Default <c>false</c> (off), also when the "Ebilling" section is absent. It is separate from <see cref="Enabled"/>
+    /// because <see cref="Enabled"/> also gates every eBilling route, and switching eBilling on must not start this job.
+    /// <b>Standing hard rule: keep it off in every environment until fix F4 is merged and DEF-044 (the ETag pin misses a reused
+    /// staged blob, #2296) is fixed.</b> When false the job skips with <c>reconcile-disabled</c> before it reads anything. When
+    /// true the job still needs <see cref="Enabled"/> and a configured file store.
+    /// </summary>
+    public bool StoredFileReconcileEnabled { get; set; } = false;
 
     /// <summary>
     /// Largest invoice PDF a submission may upload, in megabytes. Default 25. Must be within
