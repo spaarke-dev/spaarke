@@ -1,9 +1,12 @@
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using FluentAssertions;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Xrm.Sdk;
 using Moq;
 using Spaarke.Dataverse;
+using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Services.Communication;
 using Sprk.Bff.Api.Services.Communication.Engine;
 using Sprk.Bff.Api.Services.Communication.Engine.Rungs;
@@ -107,6 +110,42 @@ public class StoredAssociationTraceTests
     public void StoredReasonCode_IsBuiltFromClosedSetsOnly(string rung, string provenance, string expected)
         => AssociationProvenance.StoredReasonCode(rung, provenance).Should().Be(expected);
 
+    [Fact]
+    public async Task CallerScopedSuggestions_CarryReasonCodesOnly_NeverRecordTextOrAnotherRecordsId()
+    {
+        // The attachment-document rung names a matched DOCUMENT (id + name) on a contributor whose candidate is the
+        // document's linked record; the caller's reads authorize the candidate, not the document.
+        var documentId = Guid.NewGuid();
+        const string DocumentName = "Matched Document Record Title.pdf";
+        var matches = Matches().Append(new RungMatch
+        {
+            RegardingFieldName = "sprk_regardingmatter",
+            Target = new EntityReference("sprk_matter", _candidateMatter),
+            Confidence = 0.65,
+            Provenance = $"attachment-document:document={documentId:D}:name=\"{DocumentName}\":link=sprk_matter:target=sprk_matter",
+            Rung = RungKind.DocumentAssociation,
+        }).ToList();
+        var userClient = new Mock<IDataverseUserClient>();
+        userClient
+            .Setup(u => u.GetAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(DataverseUserResponse.Ok(200, JsonDocument.Parse("{}").RootElement));
+
+        var scoped = await SuggestionCandidateAccess.EvaluateForCallerAsync(
+            CommunicationId, Envelope(), new AssociationContext(), Resolver(matches), userClient.Object,
+            NullLogger.Instance, CancellationToken.None);
+
+        var contributors = scoped.Suggestions.Candidates.SelectMany(c => c.Contributors).ToList();
+        contributors.Should().NotBeEmpty();
+        contributors.Select(k => k.Provenance).Should().OnlyContain(
+            p => Regex.IsMatch(p, "^[a-z0-9-]+(:where=(subject|body|attachment))?(:matched=(name|number))?$"),
+            "a suggestion response carries the stored form's reason codes only");
+        var json = JsonSerializer.Serialize(scoped.Suggestions);
+        foreach (var text in RecordText.Concat([DocumentName, documentId.ToString("D"), documentId.ToString("N")]))
+        {
+            json.Should().NotContain(text);
+        }
+    }
+
     // ── helpers ─────────────────────────────────────────────────────────────────────────────────
 
     private async Task<string> StoredByInboundJobAsync()
@@ -123,8 +162,8 @@ public class StoredAssociationTraceTests
         return (string)written[0]["sprk_associationprovenance"];
     }
 
-    private IncomingAssociationResolver Resolver() => new(
-        new IAssociationRung[] { new FixedMatchesRung(Matches()) },
+    private IncomingAssociationResolver Resolver(IReadOnlyList<RungMatch>? matches = null) => new(
+        new IAssociationRung[] { new FixedMatchesRung(matches ?? Matches()) },
         _dataverse.Object,
         _dataverse.Object,
         AssociationTestSupport.Mapper(),

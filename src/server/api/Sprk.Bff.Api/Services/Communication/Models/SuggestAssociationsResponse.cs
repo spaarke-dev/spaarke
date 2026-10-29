@@ -10,6 +10,9 @@ namespace Sprk.Bff.Api.Services.Communication.Models;
 /// <b>without writing to the record</b>. Projected from the engine's <see cref="AssociationProvenance"/>
 /// (<see cref="CandidateTrace"/>/<see cref="SignalTrace"/>) so the wire contract stays decoupled from the
 /// engine-internal provenance records. System.Text.Json-friendly (plain init records).
+/// Each contributor carries the stored form's reason code (<see cref="AssociationProvenance.StoredReasonCode"/>), never
+/// the rung's provenance text: that text can hold content the engine read from a record (a name, a number, another
+/// record's id), which the caller's own reads did not authorize.
 /// </summary>
 public sealed record SuggestAssociationsResponse
 {
@@ -53,7 +56,7 @@ public sealed record SuggestAssociationsResponse
                     {
                         Rung = contrib.Rung,
                         Confidence = contrib.Confidence,
-                        Provenance = contrib.Provenance,
+                        Provenance = AssociationProvenance.StoredReasonCode(contrib.Rung, contrib.Provenance),
                     })
                     .ToArray(),
             })
