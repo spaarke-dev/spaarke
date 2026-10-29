@@ -123,10 +123,12 @@ public sealed class AssignTaskEmailJobHandler : IJobHandler
     }
 
     /// <summary>A fault no redelivery can fix (review finding 5): a 4xx from the send path (an unset or unapproved sender, an owner
-    /// refusal, a validation error) or an <see cref="InvalidOperationException"/> (a configuration or contract fault).</summary>
+    /// refusal, a validation error) or an <see cref="InvalidOperationException"/> (a configuration or contract fault). Not 408 or 429
+    /// (fix round 2): a timeout, Graph throttling and the send path's own daily limit (<c>DAILY_SEND_LIMIT_REACHED</c>) pass with
+    /// time, so they are retried, never dead-lettered.</summary>
     internal static bool IsPermanent(Exception ex) => ex switch
     {
-        Sprk.Bff.Api.Infrastructure.Exceptions.SdapProblemException { StatusCode: >= 400 and < 500 } => true,
+        Sprk.Bff.Api.Infrastructure.Exceptions.SdapProblemException { StatusCode: >= 400 and < 500 and not 408 and not 429 } => true,
         InvalidOperationException => true,
         _ => false,
     };

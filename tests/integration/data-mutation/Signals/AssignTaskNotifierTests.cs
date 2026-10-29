@@ -660,6 +660,9 @@ public sealed class AssignTaskNotifierTests
     [InlineData("timeout", JobStatus.Failed)]
     [InlineData("sender-not-approved-4xx", JobStatus.Poisoned)]
     [InlineData("owner-refusal-409", JobStatus.Poisoned)]
+    [InlineData("request-timeout-408", JobStatus.Failed)]
+    [InlineData("graph-throttled-429", JobStatus.Failed)]
+    [InlineData("daily-send-limit-429", JobStatus.Failed)]
     [InlineData("invalid-operation", JobStatus.Poisoned)]
     public async Task TheJob_ATransientFaultIsRetried_AFaultNoRetryCanFixIsPoisoned(string fault, JobStatus expected)
     {
@@ -670,6 +673,9 @@ public sealed class AssignTaskNotifierTests
             "timeout" => new TimeoutException("graph"),
             "sender-not-approved-4xx" => new SdapProblemException("INVALID_SENDER", "Invalid Sender", "x", 400),
             "owner-refusal-409" => new SdapProblemException("OWNER_REFUSED", "Refused", "x", 409),
+            "request-timeout-408" => new SdapProblemException("GRAPH_SEND_FAILED", "Request Timeout", "x", 408),
+            "graph-throttled-429" => new SdapProblemException("GRAPH_SEND_FAILED", "Too Many Requests", "x", 429),
+            "daily-send-limit-429" => new SdapProblemException("DAILY_SEND_LIMIT_REACHED", "Daily send limit reached", "x", 429),
             _ => new InvalidOperationException("DefaultMailbox is not set"),
         };
         h.Notifier.Setup(n => n.SendAsSystemAsync(It.IsAny<SendCommunicationRequest>(), It.IsAny<HttpContext?>(), It.IsAny<CancellationToken>())).ThrowsAsync(ex);
