@@ -142,14 +142,17 @@ public sealed class AssignTaskNotifierTests
                     GateQuestions.Add($"restricted {entity} {id}");
                     return Restricted;
                 });
-            Gate.Setup(g => g.ContactRightsAsync(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
-                .ReturnsAsync((Guid contact, string table, Guid id, CancellationToken _) =>
+            // Fix round 3: one composition per decision; its rights and the events list's verdict are this harness's answers.
+            Gate.Setup(g => g.ComposePortalPrincipalAsync(It.IsAny<ContactBindingRow>(), It.IsAny<ExternalContactPlane>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync((ContactBindingRow contact, ExternalContactPlane _, CancellationToken _) => Composition(contact.ContactId));
+            Gate.Setup(g => g.ContactRights(It.IsAny<ContactPrincipalComposition>(), It.IsAny<string>(), It.IsAny<Guid>()))
+                .Returns((ContactPrincipalComposition composed, string table, Guid id) =>
                 {
-                    GateQuestions.Add($"grants {contact} {table} {id}");
+                    GateQuestions.Add($"grants {composed.Principal.ContactId} {table} {id}");
                     return PortalRightsByRecord.TryGetValue(id, out var byRecord) ? byRecord : PortalRights;
                 });
-            Gate.Setup(g => g.PortalListsTaskAsync(It.IsAny<ContactBindingRow>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
-                .ReturnsAsync((ContactBindingRow contact, Guid task, CancellationToken _) =>
+            Gate.Setup(g => g.PortalListsTaskAsync(It.IsAny<ContactBindingRow>(), It.IsAny<ContactPrincipalComposition>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync((ContactBindingRow contact, ContactPrincipalComposition _, Guid task, CancellationToken _) =>
                 {
                     GateQuestions.Add($"portal {contact.ContactId} {task}");
                     return PortalListsTask;
@@ -238,6 +241,24 @@ public sealed class AssignTaskNotifierTests
             ContactOid = PortalOid;
             ContactPlane = (int)IdentityPlaneMarker.External;
             PortalRights = portalRights;
+        }
+
+        /// <summary>A composition naming <paramref name="contactId"/> (its sets are this harness's <see cref="PortalRights"/>, asked
+        /// through the stubbed <c>ContactRights</c>).</summary>
+        private static ContactPrincipalComposition Composition(Guid contactId)
+        {
+            AccessibleRecordSet Empty(string entity) => new()
+            {
+                PrincipalKind = WorkforcePrincipalKind.ContactOnly,
+                EntityType = entity,
+                Rights = new Dictionary<Guid, AccessRights>(),
+                Sources = new AccessibleRecordSetSources(false, true, false),
+            };
+
+            return new ContactPrincipalComposition(
+                new CallerPrincipal { Plane = CallerPrincipalPlane.CiamContact, ContactId = contactId, ProjectAccess = [] },
+                Empty(AccessibleRecordSetService.ProjectEntity), Empty(AccessibleRecordSetService.MatterEntity),
+                Empty(AccessibleRecordSetService.WorkAssignmentEntity));
         }
 
         public Task<IReadOnlyList<string>> NotifyAsync(AssignTaskNotice? notice = null, ClaimsPrincipal? caller = null) =>

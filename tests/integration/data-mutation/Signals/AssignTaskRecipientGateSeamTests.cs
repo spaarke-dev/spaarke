@@ -71,6 +71,10 @@ public sealed class AssignTaskRecipientGateSeamTests
     private static ContactBindingRow ExternalContact() =>
         new(Contact, 0, PortalOid.ToString("D"), (int)IdentityPlaneMarker.External, Email: Address);
 
+    /// <summary>The gate's one composition for <see cref="ExternalContact"/> (fix round 3: composed once per decision).</summary>
+    private static Task<ContactPrincipalComposition> Composed(AssignTaskRecipientGate gate) =>
+        gate.ComposePortalPrincipalAsync(ExternalContact(), ExternalContactPlane.Ciam, CancellationToken.None);
+
     // ── WallAsync: the REAL guard, asked AsFlagged ───────────────────────────────────────────────────────────────────────
 
     private static (SecureShareNoAccessGuard Guard, GrantPolicyTestDoubles.FlagStubParticipationService Flags) WalledUser()
@@ -211,19 +215,19 @@ public sealed class AssignTaskRecipientGateSeamTests
         allowed.Should().Be(AssignTaskRecipient.ForInternal(User));
     }
 
-    // ── ContactRightsAsync: the portal's grant composition for the contact ──────────────────────────────────────────────
+    // ── ContactRights: the portal's grant composition for the contact ───────────────────────────────────────────────────
 
     [Theory]
     [InlineData(false, true, AccessRights.Read)]
     [InlineData(true, true, AccessRights.Read)]
     [InlineData(false, false, AccessRights.None)]
     [InlineData(true, false, null)]
-    public async Task ContactRightsAsync_ReadsTheGrantTable_AndAMissingRecordInACappedSet_IsNull(bool capped, bool granted, AccessRights? expected)
+    public async Task ContactRights_ReadsTheGrantTable_AndAMissingRecordInACappedSet_IsNull(bool capped, bool granted, AccessRights? expected)
     {
         var sets = Grants(capped, granted ? new[] { Matter } : Array.Empty<Guid>());
+        var gate = Gate(accessibleSet: sets.Object);
 
-        (await Gate(accessibleSet: sets.Object).ContactRightsAsync(Contact, AccessibleRecordSetService.MatterEntity, Matter, CancellationToken.None))
-            .Should().Be(expected);
+        gate.ContactRights(await Composed(gate), AccessibleRecordSetService.MatterEntity, Matter).Should().Be(expected);
         sets.Verify(s => s.ComposeForCiamContactAsync(Contact, AccessibleRecordSetService.MatterEntity, It.IsAny<CancellationToken>()), Times.Once);
     }
 
@@ -249,8 +253,9 @@ public sealed class AssignTaskRecipientGateSeamTests
         var service = data.NewService();
         var gate = Gate(accessibleSet: sets.Object, portalData: service);
 
-        (await gate.PortalListsTaskAsync(ExternalContact(), Guid.Parse(alsoSecure), CancellationToken.None)).Should().BeFalse();
-        (await gate.PortalListsTaskAsync(ExternalContact(), Guid.Parse(plain), CancellationToken.None)).Should().BeTrue();
+        var composed = await Composed(gate);
+        (await gate.PortalListsTaskAsync(ExternalContact(), composed, Guid.Parse(alsoSecure), CancellationToken.None)).Should().BeFalse();
+        (await gate.PortalListsTaskAsync(ExternalContact(), composed, Guid.Parse(plain), CancellationToken.None)).Should().BeTrue();
 
         // The same verdict the events list gives for those rows.
         (await ListedOnTheMatter(service, sets)).Should().Equal(plain);
@@ -283,8 +288,8 @@ public sealed class AssignTaskRecipientGateSeamTests
         var data = new ExternalRootEventReadTests.FakeDataverse { FlagReadThrows = true };
         var task = Guid.Parse(data.Add("matters", Matter, "Matter and secure project", project: SecureProject));
 
-        (await Gate(accessibleSet: Grants(false, Matter).Object, portalData: data.NewService())
-                .PortalListsTaskAsync(ExternalContact(), task, CancellationToken.None))
+        var gate = Gate(accessibleSet: Grants(false, Matter).Object, portalData: data.NewService());
+        (await gate.PortalListsTaskAsync(ExternalContact(), await Composed(gate), task, CancellationToken.None))
             .Should().BeNull();
     }
 
@@ -295,8 +300,8 @@ public sealed class AssignTaskRecipientGateSeamTests
         data.AddSecureRoot(ExternalGrantRootType.Project, SecureProject);
         var task = Guid.Parse(data.Add("matters", Matter, "Matter and secure project", project: SecureProject));
 
-        (await Gate(accessibleSet: Grants(true, Matter).Object, portalData: data.NewService())
-                .PortalListsTaskAsync(ExternalContact(), task, CancellationToken.None))
+        var gate = Gate(accessibleSet: Grants(true, Matter).Object, portalData: data.NewService());
+        (await gate.PortalListsTaskAsync(ExternalContact(), await Composed(gate), task, CancellationToken.None))
             .Should().BeNull();
     }
 
@@ -306,8 +311,8 @@ public sealed class AssignTaskRecipientGateSeamTests
         var data = new ExternalRootEventReadTests.FakeDataverse();
         var task = Guid.Parse(data.Add("matters", Matter, "Matter only"));
 
-        (await Gate(accessibleSet: Grants(false, Matter).Object, portalData: data.NewService())
-                .PortalListsTaskAsync(ExternalContact(), task, CancellationToken.None))
+        var gate = Gate(accessibleSet: Grants(false, Matter).Object, portalData: data.NewService());
+        (await gate.PortalListsTaskAsync(ExternalContact(), await Composed(gate), task, CancellationToken.None))
             .Should().BeTrue();
         data.Urls.Should().Contain(u => u.Contains($"/sprk_events({task})", StringComparison.OrdinalIgnoreCase));
     }

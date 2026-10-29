@@ -17,9 +17,12 @@ namespace Sprk.Bff.Api.Services.Signals;
 //     IAccessibleRecordSetService.ComposeForCiamContactAsync (the portal's own grant term + vetoes for a contact);
 //     CallerRecordAccessProbe.GetPrincipalRightsAppOnlyOrUnknownAsync (Dataverse's answer for a named systemuser);
 //     ExternalDataService.CheckLiveParentsAsync (fix round 2: the portal events list's per-row rule, tasks 039/187, for one event)
-//     over CiamContactPrincipalStrategy.ComposeAsync (the principal the portal builds for the contact).
+//     over CiamContactPrincipalStrategy.ComposeAsync (the principal the portal builds for the contact), or, for a WorkforceHome
+//     contact (fix round 3), WorkforcePrincipalStrategy.ComposeAsync (the principal its home sign-in builds) after the portal's
+//     own stored-link read (IContactIdentityStore.FindHomeLinkedSystemUsersAsync + ContactBindingDecision.DecideHomeLink).
 //   Extension: every one of those is called unchanged (IsOnboardedWithEmail only became internal; fix round 2 lifted the CIAM
-//     principal composition out of CiamContactPrincipalStrategy.ResolveAsync into an internal static, same behaviour). The grant notifier cannot be
+//     principal composition out of CiamContactPrincipalStrategy.ResolveAsync into an internal static, same behaviour; fix round 3
+//     did the same for WorkforcePrincipalStrategy.ResolveAsync). The grant notifier cannot be
 //     extended for this: it answers "who to tell about a grant on a root" and sends its own messages; this answers "may this one
 //     assignee be emailed about a task under this record", which adds the task Read check and the external grant check.
 //     uac-r2 task 193's ContactUserRepresentation (the one extracted contact -> user rule) is not on master yet (K-1): the
@@ -97,18 +100,22 @@ public sealed record AssignTaskRecipient(AssignTaskRecipientKind Kind, AssignTas
 /// the No Access check on the record and its secure parents (<see cref="SecureWallRecordScope.AsFlagged"/>) is NotSecure or
 /// NotWalled; and Dataverse answers Read for that user on the task.</item>
 /// <item><b>External</b> (the <c>EmailExternalContactGrantAsync</c> gate): no internal user represents the contact; it is active,
-/// onboarded with an email (<see cref="GrantAccessNotifier.IsOnboardedWithEmail"/>), not the assigner, the portal's own grant
-/// composition (<see cref="IAccessibleRecordSetService.ComposeForCiamContactAsync"/>: grants, Secure suppression, No Access,
-/// Restricted) gives it Read on the record, and the portal's events list would show it THIS task: the list's per-row rule
+/// onboarded with an email (<see cref="GrantAccessNotifier.IsOnboardedWithEmail"/>), not the assigner, the principal the portal
+/// composes for it gives it Read on the record, and the portal's events list would show it THIS task: the list's per-row rule
 /// (<see cref="ExternalDataService.CheckLiveParentsAsync"/>, tasks 039/187) withholds a task also filed to a secure record the
-/// contact cannot read.</item>
+/// contact cannot read. The principal is composed ONCE per decision, by the contact's sign-in plane (fix round 3): a
+/// WorkforceHome contact as its home sign-in resolves it (<see cref="WorkforcePrincipalStrategy.ComposeAsync"/>: grants,
+/// standing-grant membership and organization expansion), and only when no licensed user carries its home pair (the portal
+/// resolves that sign-in as the user, never as this contact); every other contact as a CIAM sign-in
+/// (<see cref="CiamContactPrincipalStrategy.ComposeAsync"/>: grants only). Both run Secure suppression, No Access and
+/// Restricted.</item>
 /// <item><b>Nobody else</b>, and nobody when a check cannot be made (ADR-003).</item>
 /// </list>
 /// Never throws (except the caller's cancellation): a fault is <see cref="AssignTaskRefusal.Unverified"/>. App-only reads; ids only in
 /// the logs.
 /// </summary>
 /// <remarks>The Dataverse-facing steps (<see cref="WallAsync"/>, <see cref="TaskRightsAsync"/>, <see cref="RestrictedAsync"/>,
-/// <see cref="ContactRightsAsync"/>, <see cref="PortalListsTaskAsync"/>) are virtual: the test seams, so the decision itself is
+/// <see cref="ComposePortalPrincipalAsync"/>, <see cref="ContactRights"/>, <see cref="PortalListsTaskAsync"/>) are virtual: the test seams, so the decision itself is
 /// what the notifier tests run; each seam's own logic is tested directly over its real dependency.</remarks>
 public class AssignTaskRecipientGate
 {
@@ -319,7 +326,34 @@ public class AssignTaskRecipientGate
         if (grantTable is null || core is null)
             return Refuse(AssignTaskRefusal.NoAccess, contact.ContactId, taskId, "the task is not filed under a record an external grant can name");
 
-        var rights = await ContactRightsAsync(contact.ContactId, grantTable, core.Id, ct).ConfigureAwait(false);
+        // A WorkforceHome contact signs in with its home directory, and the portal asks the stored link FIRST
+        // (WorkforcePrincipalResolver.ResolveHomeAsync): a licensed user carrying the contact's home pair is who that sign-in
+        // resolves to, so the contact's own access is not what the person sees (and the "represents" step above cannot see
+        // that link: it reads sprk_primarycontact and the Spaarke-tenant oid only).
+        var plane = PortalPlaneOf(contact);
+        if (plane == ExternalContactPlane.WorkforceHome)
+        {
+            switch (await HomeLinkAsync(contact, ct).ConfigureAwait(false))
+            {
+                case HomeLinkOutcome.NotLinked:
+                    break;
+                case HomeLinkOutcome.Disabled:
+                    return Refuse(AssignTaskRefusal.NoAccess, contact.ContactId, taskId,
+                        "the contact's home sign-in is linked to a disabled user, so the portal admits it nowhere");
+                case HomeLinkOutcome.Enabled:
+                    return Refuse(AssignTaskRefusal.Unverified, contact.ContactId, taskId,
+                        "the contact's home sign-in resolves in the portal as a licensed user, not as this contact");
+                default:
+                    return Refuse(AssignTaskRefusal.Unverified, contact.ContactId, taskId,
+                        "whether a licensed user carries the contact's home sign-in could not be read");
+            }
+        }
+
+        // ONE principal per decision, the one the portal builds for this contact's sign-in plane: the matter Read and the
+        // events list's per-row rule below are asked of the same composition.
+        var composed = await ComposePortalPrincipalAsync(contact, plane, ct).ConfigureAwait(false);
+
+        var rights = ContactRights(composed, grantTable, core.Id);
         if (rights is not { } answered)
             return Refuse(AssignTaskRefusal.Unverified, contact.ContactId, taskId, "the contact's grants could not be fully read");
         if (!answered.HasFlag(AccessRights.Read))
@@ -330,7 +364,7 @@ public class AssignTaskRecipientGate
         if (taskId is not { } task || task == Guid.Empty)
             return Refuse(AssignTaskRefusal.Unverified, contact.ContactId, taskId, "the task id is unknown, so the portal's rule for it cannot be asked");
 
-        switch (await PortalListsTaskAsync(contact, task, ct).ConfigureAwait(false))
+        switch (await PortalListsTaskAsync(contact, composed, task, ct).ConfigureAwait(false))
         {
             case true:
                 return AssignTaskRecipient.ForExternal();
@@ -397,11 +431,72 @@ public class AssignTaskRecipientGate
         }
     }
 
-    /// <summary>The contact's rights on the record from the portal's own composition (the CIAM principal's grant term and vetoes);
-    /// null when the composition is known to be incomplete and the record is not in it.</summary>
-    internal virtual async Task<AccessRights?> ContactRightsAsync(Guid contactId, string grantTable, Guid recordId, CancellationToken ct)
+    /// <summary>Which composition the portal runs for <paramref name="contact"/>: <see cref="ExternalContactPlane.WorkforceHome"/>
+    /// only for a readable WorkforceHome binding (the plane read the way every binding reader reads it,
+    /// <see cref="ContactBindingRow.Binding"/>); any other binding, or none, or one that cannot be read, is
+    /// <see cref="ExternalContactPlane.Ciam"/>: the smaller composition, so an unknown plane never widens who is emailed.</summary>
+    internal static ExternalContactPlane PortalPlaneOf(ContactBindingRow contact) =>
+        contact.Binding is { Kind: BindingKind.Bound, Plane: IdentityPlaneMarker.WorkforceHome }
+            ? ExternalContactPlane.WorkforceHome
+            : ExternalContactPlane.Ciam;
+
+    /// <summary>
+    /// What the portal's stored-link read says about a WorkforceHome contact's home pair (<c>sprk_externaltenantid</c>, its
+    /// bound oid): <see cref="ContactBindingDecision.DecideHomeLink"/> over the same read the home sign-in makes
+    /// (<see cref="IContactIdentityStore.FindHomeLinkedSystemUsersAsync"/>). A pair that cannot be parsed, or a read that throws,
+    /// is <see cref="HomeLinkOutcome.Denied"/> (could not tell).
+    /// </summary>
+    internal virtual async Task<HomeLinkOutcome> HomeLinkAsync(ContactBindingRow contact, CancellationToken ct)
     {
-        var set = await _accessibleSet.ComposeForCiamContactAsync(contactId, grantTable, ct).ConfigureAwait(false);
+        if (!Guid.TryParse(contact.RawExternalTenantId?.Trim(), out var homeTenant) || homeTenant == Guid.Empty
+            || contact.Binding.Oid is not { } homeOid)
+        {
+            _logger.LogWarning(AssignTaskNotifierEvents.EmailSkipped,
+                "[ASSIGN-TASK-NOTIFY] WorkforceHome contact {ContactId} carries no readable home pair.", contact.ContactId);
+            return HomeLinkOutcome.Denied;
+        }
+
+        try
+        {
+            var lookup = await _identities.FindHomeLinkedSystemUsersAsync(homeTenant, homeOid, ct).ConfigureAwait(false);
+            return ContactBindingDecision.DecideHomeLink(lookup, homeTenant, homeOid).Outcome;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            _logger.LogWarning(AssignTaskNotifierEvents.EmailSkipped,
+                "[ASSIGN-TASK-NOTIFY] the home link read for contact {ContactId} threw ({ExceptionType}).",
+                contact.ContactId, ex.GetType().Name);
+            return HomeLinkOutcome.Denied;
+        }
+    }
+
+    /// <summary>
+    /// The principal the portal composes for <paramref name="contact"/> on <paramref name="plane"/>: a WorkforceHome contact's
+    /// home sign-in (<see cref="WorkforcePrincipalStrategy.ComposeAsync"/> over the ContactOnly principal
+    /// <see cref="Sprk.Bff.Api.Infrastructure.ExternalAccess.WorkforcePrincipalResolver"/> builds for it), else a CIAM sign-in
+    /// (<see cref="CiamContactPrincipalStrategy.ComposeAsync"/>). An evaluator fault propagates (the decision is Unverified).
+    /// </summary>
+    internal virtual Task<ContactPrincipalComposition> ComposePortalPrincipalAsync(
+        ContactBindingRow contact, ExternalContactPlane plane, CancellationToken ct)
+    {
+        var oid = contact.Binding.Oid?.ToString("D");
+        if (plane == ExternalContactPlane.WorkforceHome)
+        {
+            var principal = WorkforcePrincipalResolution.ForContact(
+                contact.ContactId, oid ?? string.Empty, contact.RawExternalTenantId?.Trim() ?? string.Empty).Principal!;
+            return WorkforcePrincipalStrategy.ComposeAsync(_accessibleSet, principal, contact.Email, ct);
+        }
+
+        return CiamContactPrincipalStrategy.ComposeAsync(_accessibleSet, contact.ContactId, contact.Email, oid, ct);
+    }
+
+    /// <summary>The contact's rights on the record in <paramref name="composed"/> (the set the portal composed for the record's
+    /// table: the grant term and vetoes, plus the two derived-member terms on the workforce plane); null when that set is
+    /// known to be incomplete and the record is not in it.</summary>
+    internal virtual AccessRights? ContactRights(ContactPrincipalComposition composed, string grantTable, Guid recordId)
+    {
+        var set = composed.SetFor(grantTable)
+                  ?? throw new ArgumentOutOfRangeException(nameof(grantTable), grantTable, "Not a table an external grant can name.");
         var rights = set.RightsFor(recordId);
         return !rights.HasFlag(AccessRights.Read) && set.Capped ? null : rights;
     }
@@ -410,15 +505,13 @@ public class AssignTaskRecipientGate
     /// Would the portal's events list show this contact the task? The list's own per-row rule for one event
     /// (<see cref="ExternalDataService.CheckLiveParentsAsync"/>: the task's three <c>sprk_regarding*</c> roots and the live roots
     /// of its other parents, the secure flags of those the contact cannot read, <see cref="ExternalMultiRootRule.ChildRowReadable"/>)
-    /// on the principal the portal composes for the contact (<see cref="CiamContactPrincipalStrategy.ComposeAsync"/>). True: listed;
-    /// false: withheld; null: a read the rule needed failed, or it was withheld while a composition was capped (the contact may
-    /// hold the root the principal lacks).
+    /// on <paramref name="composed"/>, the principal the portal composes for the contact (<see cref="ComposePortalPrincipalAsync"/>).
+    /// True: listed; false: withheld; null: a read the rule needed failed, or it was withheld while a composition was capped
+    /// (the contact may hold the root the principal lacks).
     /// </summary>
-    internal virtual async Task<bool?> PortalListsTaskAsync(ContactBindingRow contact, Guid taskId, CancellationToken ct)
+    internal virtual async Task<bool?> PortalListsTaskAsync(
+        ContactBindingRow contact, ContactPrincipalComposition composed, Guid taskId, CancellationToken ct)
     {
-        var composed = await CiamContactPrincipalStrategy
-            .ComposeAsync(_accessibleSet, contact.ContactId, contact.Email, contact.Binding.Oid?.ToString("D"), ct)
-            .ConfigureAwait(false);
         var decision = await _portalData
             .CheckLiveParentsAsync(ExternalDataService.DeletableKind.Event, taskId, composed.Principal, ct)
             .ConfigureAwait(false);
@@ -429,4 +522,14 @@ public class AssignTaskRecipientGate
             _ => null,
         };
     }
+}
+
+/// <summary>Which of the portal's two contact compositions an external assignee gets (<see cref="AssignTaskRecipientGate.PortalPlaneOf"/>).</summary>
+internal enum ExternalContactPlane
+{
+    /// <summary>A CIAM (portal account) sign-in: grants only (<c>includeDerivedMemberTerms: false</c>).</summary>
+    Ciam,
+
+    /// <summary>A WorkforceHome (customer home directory) sign-in: grants, standing-grant membership and organization expansion.</summary>
+    WorkforceHome,
 }
