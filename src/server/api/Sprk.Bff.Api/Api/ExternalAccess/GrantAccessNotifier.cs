@@ -336,8 +336,9 @@ public sealed class GrantAccessNotifier
     /// emailed as one (task 036 review K4). An oid with no plane marker is a pre-141 CIAM binding (<see cref="ContactBindingDecision.ReadBinding"/>).
     /// A WorkforceHome binding (ADR-028 A9, r3 task 047) IS emailed: that contact registered through, and signs in to, the
     /// same external portal the email links to.
+    /// Ontology task 168 (D-199) asks the same test before an Assign Task email to an external contact (<c>AssignTaskRecipientGate</c>).
     /// </remarks>
-    private static bool IsOnboardedWithEmail(ContactBindingRow contact)
+    internal static bool IsOnboardedWithEmail(ContactBindingRow contact)
     {
         var binding = contact.Binding;
         return binding.Kind == BindingKind.Bound
