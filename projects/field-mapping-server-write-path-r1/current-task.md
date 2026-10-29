@@ -2,7 +2,7 @@
 
 > **Last updated**: 2026-10-29 ~02:15Z (by context-handoff). Recovery: read Quick Recovery first.
 > **Done on master**: 001–006, 010–016, 018, 037, 038, 070, 073. Work branch merged to master as #2392 (14b9335a6c); later doc commits are on the work branch (e2771ff315, 86dc5c1f92 and this one).
-> **Live on dev: 136568cf70** (R3, readback 2026-10-29 02:23:53Z; UAC gate running). SpaarkeMaster 1.2.4.0 published 02:24:48Z (run 40806065681, master a4b6459da3), not yet imported anywhere: map check follows model1-prod's upgrade or the next provisioning run (H6). #2408 merged a4b6459da3; C:\wt2400 removed.
+> **Live on dev: 136568cf70** (R3, live 2026-10-29 02:23:53Z; UAC gate passed, no 5xx). SpaarkeMaster 1.2.4.0 published 02:24:48Z (run 40806065681, master a4b6459da3), not yet imported anywhere: map check follows model1-prod's upgrade or the next provisioning run (H6). #2408 merged a4b6459da3; C:\wt2400 removed.
 
 ## Quick Recovery
 
