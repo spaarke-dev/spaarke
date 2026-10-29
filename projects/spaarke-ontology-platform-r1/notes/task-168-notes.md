@@ -319,3 +319,32 @@ No package was added.
 ### To file
 
 - `GrantAccessNotifier.NotifyContactGrantAsync` has the same home-link gap. A grant to a WorkforceHome contact whose home pair a licensed user carries emails the contact as external, although the portal resolves that person as the user. This is outside this task's scope. It is reported to the main session to file for the external-access owner (not filed from here).
+
+## Fix round 4 — the gate's home-link read uses the stored pair (uac-r2, 2026-10-29)
+
+**The concern.** The portal asks `FindHomeLinkedSystemUsersAsync` + `DecideHomeLink` with the signed-in token's (tid, oid) (`WorkforcePrincipalResolver.cs:376-377`). The gate asks with the contact's stored pair (`RawExternalTenantId`, `Binding.Oid`). If a WorkforceHome row could carry a Spaarke-tenant oid, the read would miss the link and answer NotLinked. NotLinked is the one outcome that goes on to the external branch, so the gate would fail open.
+
+**Step 1: established from code. A WorkforceHome row's oid is always the home oid.** Production code writes plane WorkforceHome in only two places:
+- **The registration create:** `ContactIdentityBinder.cs:1455-1461` → `DataverseContactIdentityStore.CreatePayload` (`ContactIdentityStore.cs:1205-1247`). It writes `sprk_externalobjectid` = `request.HomeObjectId`, plane WorkforceHome and `sprk_externaltenantid` = `request.HomeTenantId`.
+- **The registration bind:** `ContactIdentityBinder.cs:1125` (`tid`/`oid` = `request.HomeTenantId`/`HomeObjectId`, lines 991-992) → `BindHomeOidAsync` (`ContactIdentityStore.cs:1883-1887`) → `HomeBindPayload` (`ContactIdentityStore.cs:885-891`).
+
+Both put the oid, the plane and the tenant in ONE request. The request's pair is the validated home token's (`ExternalRegistrationEndpoints.cs:117,130,172-175,195-196`, the WorkforceHome scheme identity). Every other bind writes its own plane with its oid in the same payload (`BindPayload`, `ContactIdentityStore.cs:1172-1177`), so a later Spaarke-tenant or CIAM bind moves the row off WorkforceHome. No other writer sets `sprk_externaltenantid`. The schema scripts add only the option value; they write no rows. Step 3 was therefore not needed, and no production code changed.
+
+The case where the gate could not tell a home pair (a missing or unparseable tenant, or no oid) was already Unverified (round 3). A row edited by hand outside the BFF is not provable from code. It also cannot be resolved by the portal on the home plane, because `DecideHomeContact` needs the stored pair to equal the token's.
+
+**Tests (step 2)**, in `AssignTaskRecipientGatePlaneTests`:
+- **Linked, plus a NotLinked control:** the REAL `ContactIdentityBinder.RegisterHomeContactAsync` creates the contact over the in-memory store, and the link route's write (`WriteHomeLinkAsync`) links a licensed user to the same sign-in. In the control, the user is linked to another person's.
+  - The resolver's `DecideHomeLink` for the token pair answers Enabled, or NotLinked in the control.
+  - The stored row's binding is (Bound, home oid, WorkforceHome), with the home tenant.
+  - The gate's `HomeLinkAsync` gives the same answer.
+  - Linked: Unverified, never composed. Control: proceeds to the composition.
+- **The bind writer's exact column values** (`HomeBindPayload`) read back as (Bound, home oid, WorkforceHome) plus the tenant, and as plane WorkforceHome.
+
+**Counts:** `AssignTask` 145/145; `Workforce|Ciam|CallerPrincipal` 1021/1021. ArchTests were not rerun, because no production code changed.
+
+**Mutations** (`AssignTask` + resolver regression, 148 tests). Each was reverted, then rebuilt clean.
+
+| Mutation | Failed |
+|---|---|
+| The link read asks with a non-home oid | 5, including the round-4 test |
+| The link read always answers NotLinked | 6, including the round-4 test |
