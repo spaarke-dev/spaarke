@@ -206,6 +206,7 @@ is closed as **Acted**, never Dismissed.
   - The writer refuses to read the set (more than one record under the key, or a set it cannot read): it never picks one (ReviewInvalid).
   - The invoice is gone: there is nothing to authorize the close against.
   - A caller without the rights (or a probe that cannot answer, which is a no): the app-identity writer closes only for an authorized caller (FR-51).
+  - A repeat by a different person (a principal change): the repeat's rights are asked of whoever repeats it, not of the original decider. A different person who lacks Write on the Signal subjects (or AppendTo on the core record) is refused the re-close and the repeat answers `alreadyDecided` with one warning (not a 403: the first decision stands), so the Signals stay open and only the original decider's retry, or another person who holds those rights, completes the closes. The closes are made in the stored decider's name (the writer-created record's `sprk_confirmedby`), never the repeating caller's. (ontology-r1 ask 1)
 - **Races.** Losing the race at the set store to a concurrent run of the same decision is the same `AlreadyDecided` no-op as losing it at
   the state write; any other change is `concurrent_change`.
 
