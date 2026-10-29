@@ -45,11 +45,23 @@
 .PARAMETER RequireRows
     With -Verify: treat an ABSENT policy or version as a failure (use after the apply).
 
+.PARAMETER CustomerBusinessUnit
+    OPTIONAL. The customer's top business unit (the root's direct child that provisioning H10 creates), by id or by name. Task 171,
+    D-197 (UAC round 137). With it, every sprk_policy and sprk_policyversion row the script CREATES is owned by that unit's
+    restricted-content owner team (`ownerid@odata.bind` on the two creates) instead of by the operator who runs it. The team is found
+    by the SAME rule as Infrastructure/Dataverse/RestrictedContentOwnerTeam.cs (see Resolve-RestrictedContentOwner): a non-default
+    Owner team named 'Spaarke Restricted Content Owners', exactly one in that unit, with no member. Existing rows are never re-owned;
+    -Verify reports each existing row owned by anyone else as DRIFT (and writes nothing). -WhatIf names the owner it would bind.
+    FAIL CLOSED, before any write (non-zero exit): the unit is the root, is not the root's direct child, is the Secure Record unit,
+    cannot be found or is ambiguous, or its team is missing, ambiguous or has a member; and (apply and -WhatIf only) the operator does
+    not hold Assign on sprk_policy and sprk_policyversion. Without the parameter the script behaves exactly as before.
+
 .EXAMPLE
     pwsh scripts/Apply-DoLanePolicies.ps1 -DataverseUrl https://spaarkedev1.crm.dynamics.com -WhatIf
     pwsh scripts/Apply-DoLanePolicies.ps1 -DataverseUrl https://spaarkedev1.crm.dynamics.com
     pwsh scripts/Apply-DoLanePolicies.ps1 -DataverseUrl https://spaarkedev1.crm.dynamics.com -Verify -RequireRows
     pwsh scripts/Apply-DoLanePolicies.ps1 -DataverseUrl https://spaarkedev1.crm.dynamics.com -DefinitionPath config/know-promotion.policies.json -WhatIf
+    pwsh scripts/Apply-DoLanePolicies.ps1 -DataverseUrl https://<customer>.crm.dynamics.com -CustomerBusinessUnit <top business unit id or name> -WhatIf
 #>
 #Requires -Version 7.0
 [CmdletBinding(SupportsShouldProcess)]
@@ -57,7 +69,8 @@ param(
     [string]$DataverseUrl = $env:DATAVERSE_URL,
     [string]$DefinitionPath,
     [switch]$Verify,
-    [switch]$RequireRows
+    [switch]$RequireRows,
+    [string]$CustomerBusinessUnit
 )
 
 $ErrorActionPreference = 'Stop'
@@ -78,6 +91,16 @@ $KindRules = @{
     'know-promotion-policies' = @{ Lane = 'Decide'; NextSteps = $NextStepCodes; Codes = @('send-budget-inquiry', 'revise-budget', 'approve-variance', 'assign-work', 'assign-task') }
 }
 $MaxHeadline = 200; $MaxProposedAction = 400; $MaxShortName = 100
+
+# Task 171 (D-197). The restricted-content owner team rule of RestrictedContentOwnerTeam.cs, which this script copies and never
+# redefines. The names are that class's DEFAULTS (RestrictedContentOwnerTeam.DefaultOwnerTeamName,
+# SecureRecordOwnerTeam.DefaultBusinessUnitName); the C# reads RestrictedContent:OwnerTeamName and SecureRecord:BusinessUnitName from
+# configuration, which a script cannot see, so a deployment that renames either gets a refusal here (team not found) and edits these.
+# The two limits are RestrictedContentOwnerTeam.MaxParentWalk and .MemberReadLimit.
+$RestrictedOwnerTeamName = 'Spaarke Restricted Content Owners'
+$SecureBusinessUnitName = 'Secure Record'
+$MaxParentWalk = 32; $MemberReadLimit = 5
+$AssignPrivileges = @('prvAssignsprk_policy', 'prvAssignsprk_policyversion')
 
 $definition = Get-Content -LiteralPath $DefinitionPath -Raw -Encoding utf8 | ConvertFrom-Json -Depth 32
 
@@ -203,14 +226,17 @@ if ($lint.Count -gt 0) {
 Write-Host "Definition OK: $DefinitionPath ($(@($definition.policies).Count) policies)."
 
 # ---- reads and comparisons ----------------------------------------------------------------------------------------
+# With -CustomerBusinessUnit the owner is read too (-Verify drift and the read-back of created rows); without it the reads are as before.
+function Get-OwnerSelect { if ($script:OwnerTeamId) { ',_ownerid_value' } else { '' } }
+
 function Get-PolicyRow([string]$Id) {
-    $r = Invoke-Dv GET "$ApiBase/sprk_policies?`$select=sprk_policyid,sprk_name,sprk_policycode,sprk_shortname,sprk_lane,sprk_subjecttype,sprk_worktype,sprk_severity,sprk_priority,sprk_countstowardsuppression,sprk_enabled,statecode,_sprk_currentversion_value&`$filter=sprk_policyid eq $Id" $null
+    $r = Invoke-Dv GET "$ApiBase/sprk_policies?`$select=sprk_policyid,sprk_name,sprk_policycode,sprk_shortname,sprk_lane,sprk_subjecttype,sprk_worktype,sprk_severity,sprk_priority,sprk_countstowardsuppression,sprk_enabled,statecode,_sprk_currentversion_value$(Get-OwnerSelect)&`$filter=sprk_policyid eq $Id" $null
     if (@($r.value).Count -eq 0) { return $null }
     $r.value[0]
 }
 
 function Get-VersionRow([string]$Id) {
-    $r = Invoke-Dv GET "$ApiBase/sprk_policyversions?`$select=sprk_policyversionid,sprk_name,_sprk_policy_value,sprk_versionnumber,sprk_ruletype,sprk_rulebody,sprk_shortheadline,sprk_messagetemplate,sprk_proposedaction,sprk_decisionplan,sprk_inforcefrom,sprk_inforceto,statecode&`$filter=sprk_policyversionid eq $Id" $null
+    $r = Invoke-Dv GET "$ApiBase/sprk_policyversions?`$select=sprk_policyversionid,sprk_name,_sprk_policy_value,sprk_versionnumber,sprk_ruletype,sprk_rulebody,sprk_shortheadline,sprk_messagetemplate,sprk_proposedaction,sprk_decisionplan,sprk_inforcefrom,sprk_inforceto,statecode$(Get-OwnerSelect)&`$filter=sprk_policyversionid eq $Id" $null
     if (@($r.value).Count -eq 0) { return $null }
     $r.value[0]
 }
@@ -256,6 +282,118 @@ function Get-VersionDiffs($p, $v, $row) {
     $diffs
 }
 
+# ---- owner (task 171, D-197) --------------------------------------------------------------------------------------
+# The owner of a row is only judged with -CustomerBusinessUnit; without it this returns nothing.
+function Get-OwnerDiff($row) {
+    if ($script:OwnerTeamId -and $row._ownerid_value -ne $script:OwnerTeamId) { "ownerid live='$($row._ownerid_value)' expected='$script:OwnerTeamId'" }
+}
+
+function ConvertTo-ODataLiteral([string]$Text) { [uri]::EscapeDataString($Text.Replace("'", "''")) }
+
+# The customer's top business unit above $BusinessUnitId: the direct child of the root it sits under (itself when it is one).
+# Port of RestrictedContentOwnerTeam.CustomerTopBusinessUnitAsync, same statuses. A Dataverse fault propagates (Invoke-Dv throws).
+function Get-CustomerTopBusinessUnit([string]$BusinessUnitId) {
+    $visited = @{}
+    $below = $null
+    $current = $BusinessUnitId
+    for ($step = 0; $step -le $MaxParentWalk; $step++) {
+        if (-not $current -or $current -eq [guid]::Empty.ToString() -or $visited.ContainsKey($current)) { return @{ TopBusinessUnitId = $null; Status = 'ParentChainLoops' } }
+        $visited[$current] = $true
+        $r = Invoke-Dv GET "$ApiBase/businessunits?`$select=businessunitid,_parentbusinessunitid_value&`$filter=businessunitid eq $current&`$top=1" $null
+        $row = @($r.value) | Select-Object -First 1
+        if ($null -eq $row) { return @{ TopBusinessUnitId = $null; Status = 'ParentChainUnreadable' } }
+        $parent = $row._parentbusinessunitid_value
+        if (-not $parent -or $parent -eq [guid]::Empty.ToString()) {
+            # `current` is the root: the unit below it on the walk is the customer's top unit, or there is none (the unit is the root).
+            if ($below) { return @{ TopBusinessUnitId = $below; Status = 'Resolved' } }
+            return @{ TopBusinessUnitId = $null; Status = 'AnswerIsRootBusinessUnit' }
+        }
+        $below = $current
+        $current = [string]$parent
+    }
+    @{ TopBusinessUnitId = $null; Status = 'ParentChainLoops' }
+}
+
+# WHICH team owns the customer top business unit's restricted-content rows, and whether it may be used. A port of
+# RestrictedContentOwnerTeam.IdentifyAsync (src/server/api/Sprk.Bff.Api/Infrastructure/Dataverse/RestrictedContentOwnerTeam.cs): not the
+# Secure Record unit; the named, non-default Owner team (teamtype 0), exactly one, in that unit; no member of any kind. Never throws
+# for an answer; a Dataverse fault propagates. Status is the C# RestrictedContentOwnerTeamStatus name, plus three the script adds
+# because it is handed a unit rather than a record: CustomerBusinessUnitNotFound / CustomerBusinessUnitAmbiguous (a name that matches
+# none or several) and CustomerBusinessUnitNotTopLevel (the C# would walk UP to the top unit; the script refuses a unit that is not
+# already the root's direct child, so the operator names exactly the unit that owns the rows).
+function New-OwnerResult($Status, $TeamId, $BusinessUnitId, $Members) {
+    @{ Status = $Status; OwnerTeamId = $TeamId; CustomerBusinessUnitId = $BusinessUnitId; MembersFound = $Members }
+}
+
+function Resolve-RestrictedContentOwner([string]$BusinessUnit) {
+    $parsed = [guid]::Empty
+    if ([guid]::TryParse($BusinessUnit, [ref]$parsed)) { $buId = $parsed.ToString() }
+    else {
+        $r = Invoke-Dv GET "$ApiBase/businessunits?`$select=businessunitid&`$filter=name eq '$(ConvertTo-ODataLiteral $BusinessUnit)'&`$top=2" $null
+        $found = @($r.value)
+        if ($found.Count -eq 0) { return New-OwnerResult 'CustomerBusinessUnitNotFound' $null $null 0 }
+        if ($found.Count -gt 1) { return New-OwnerResult 'CustomerBusinessUnitAmbiguous' $null $null 0 }
+        $buId = [string]$found[0].businessunitid
+    }
+
+    $walk = Get-CustomerTopBusinessUnit $buId
+    if ($walk.Status -ne 'Resolved') { return New-OwnerResult $walk.Status $null $null 0 }
+    $top = [string]$walk.TopBusinessUnitId
+    if ($top -ne $buId) { return New-OwnerResult 'CustomerBusinessUnitNotTopLevel' $null $top 0 }
+
+    # The Secure Record unit, by name (SecureRecordOwnerTeam.ResolveSecureBusinessUnitAsync: TOP 2; two matches cannot be classified;
+    # none means this environment has no Secure Record unit, so none is it).
+    $secure = @((Invoke-Dv GET "$ApiBase/businessunits?`$select=businessunitid&`$filter=name eq '$(ConvertTo-ODataLiteral $SecureBusinessUnitName)'&`$top=2" $null).value)
+    if ($secure.Count -gt 1) { return New-OwnerResult 'SecureBusinessUnitAmbiguous' $null $top 0 }
+    if ($secure.Count -eq 1 -and [string]$secure[0].businessunitid -eq $top) { return New-OwnerResult 'CustomerBusinessUnitIsSecureRecord' $null $top 0 }
+
+    $teams = @((Invoke-Dv GET "$ApiBase/teams?`$select=teamid&`$filter=name eq '$(ConvertTo-ODataLiteral $RestrictedOwnerTeamName)' and teamtype eq 0 and isdefault eq false and _businessunitid_value eq $top&`$top=2" $null).value)
+    if ($teams.Count -eq 0 -or -not $teams[0].teamid) { return New-OwnerResult 'OwnerTeamNotFound' $null $top 0 }
+    if ($teams.Count -gt 1) { return New-OwnerResult 'OwnerTeamAmbiguous' $null $top 0 }
+
+    # No member of any kind (human or application user): the membership rows themselves.
+    $teamId = [string]$teams[0].teamid
+    $members = @((Invoke-Dv GET "$ApiBase/teammemberships?`$select=systemuserid&`$filter=teamid eq $teamId&`$top=$MemberReadLimit" $null).value).Count
+    if ($members -gt 0) { return New-OwnerResult 'OwnerTeamHasMembers' $teamId $top $members }
+    New-OwnerResult 'Resolved' $teamId $top 0
+}
+
+# The Assign privileges the operator is missing (names), by the operator's effective privileges (RetrieveUserPrivileges covers the
+# roles of the user and of their teams). A privilege that does not exist on the environment counts as missing: fail closed.
+function Get-MissingAssignPrivileges([string]$UserId) {
+    $held = @((Invoke-Dv GET "$ApiBase/systemusers($UserId)/Microsoft.Dynamics.CRM.RetrieveUserPrivileges()" $null).RolePrivileges | ForEach-Object { ([string]$_.PrivilegeId).ToLowerInvariant() })
+    foreach ($name in $AssignPrivileges) {
+        $priv = @((Invoke-Dv GET "$ApiBase/privileges?`$select=privilegeid,name&`$filter=name eq '$name'" $null).value) | Select-Object -First 1
+        if ($null -eq $priv -or $held -notcontains ([string]$priv.privilegeid).ToLowerInvariant()) { $name }
+    }
+}
+
+# The WhoAmI user (the operator), once.
+$whoami = $null
+function Get-AuthoredBy {
+    if ($null -eq $script:whoami) { $script:whoami = (Invoke-Dv GET "$ApiBase/WhoAmI" $null).UserId }
+    $script:whoami
+}
+
+# Resolved before anything is written (also in -WhatIf and -Verify). $OwnerTeamId stays $null without -CustomerBusinessUnit.
+$OwnerTeamId = $null
+if ($CustomerBusinessUnit) {
+    $owner = Resolve-RestrictedContentOwner $CustomerBusinessUnit
+    if ($owner.Status -ne 'Resolved') {
+        Write-Host "OWNER FAIL: $($owner.Status) for customer business unit '$CustomerBusinessUnit' (business unit $($owner.CustomerBusinessUnitId); members found $($owner.MembersFound))." -ForegroundColor Red
+        throw "The restricted-content owner team cannot be used ($($owner.Status)). Nothing was written to $DataverseUrl."
+    }
+    $OwnerTeamId = $owner.OwnerTeamId
+    Write-Host "Owner: created rows belong to team '$RestrictedOwnerTeamName' ($OwnerTeamId) in customer business unit $($owner.CustomerBusinessUnitId) (D-197)."
+    if (-not $Verify) {
+        $missing = @(Get-MissingAssignPrivileges (Get-AuthoredBy))
+        if ($missing.Count -gt 0) {
+            Write-Host "OWNER FAIL: the operator lacks $($missing -join ', ')." -ForegroundColor Red
+            throw "The operator cannot assign the rows to the owner team (missing $($missing -join ', ')). Nothing was written to $DataverseUrl."
+        }
+    }
+}
+
 # ---- -Verify: read only -------------------------------------------------------------------------------------------
 if ($Verify) {
     $failed = $false
@@ -267,7 +405,7 @@ if ($Verify) {
             if ($RequireRows) { $failed = $true }
         }
         else {
-            $d = @(Get-PolicyDiffs $p $row)
+            $d = @(Get-PolicyDiffs $p $row) + @(Get-OwnerDiff $row)
             if ($d.Count -eq 0) { Write-Host ("{0,-18} policy IN SYNC (enabled={1}, statecode={2})" -f $p.code, $row.sprk_enabled, $row.statecode) -ForegroundColor Green }
             else { Write-Host ("{0,-18} policy DRIFT: {1}" -f $p.code, ($d -join '; ')) -ForegroundColor Red; $failed = $true }
         }
@@ -278,7 +416,7 @@ if ($Verify) {
                 if ($RequireRows) { $failed = $true }
             }
             else {
-                $d = @(Get-VersionDiffs $p $v $vr)
+                $d = @(Get-VersionDiffs $p $v $vr) + @(Get-OwnerDiff $vr)
                 if ($d.Count -eq 0) { Write-Host ("{0,-18} v{1} IN SYNC" -f $p.code, $v.versionNumber) -ForegroundColor Green }
                 else { Write-Host ("{0,-18} v{1} DRIFT: {2}" -f $p.code, $v.versionNumber, ($d -join '; ')) -ForegroundColor Red; $failed = $true }
             }
@@ -289,12 +427,7 @@ if ($Verify) {
 }
 
 # ---- apply --------------------------------------------------------------------------------------------------------
-$whoami = $null
-function Get-AuthoredBy {
-    if ($null -eq $script:whoami) { $script:whoami = (Invoke-Dv GET "$ApiBase/WhoAmI" $null).UserId }
-    $script:whoami
-}
-
+$created = [System.Collections.Generic.HashSet[string]]::new()
 foreach ($p in $definition.policies) {
     $currentVersion = $p.versions | Where-Object { $_.versionNumber -eq $p.currentVersion }
     $row = Get-PolicyRow $p.policyId
@@ -313,8 +446,11 @@ foreach ($p in $definition.policies) {
             sprk_countstowardsuppression = [bool]$p.countsTowardSuppression
             sprk_enabled                 = $false
         }
-        if ($PSCmdlet.ShouldProcess("$DataverseUrl sprk_policy $($p.policyId)", "CREATE $($p.code) (sprk_enabled = No)")) {
+        if ($OwnerTeamId) { $body['ownerid@odata.bind'] = "/teams($OwnerTeamId)" }
+        $ownerNote = if ($OwnerTeamId) { ", owner = team $OwnerTeamId" } else { '' }
+        if ($PSCmdlet.ShouldProcess("$DataverseUrl sprk_policy $($p.policyId)", "CREATE $($p.code) (sprk_enabled = No$ownerNote)")) {
             Invoke-Dv POST "$ApiBase/sprk_policies" $body | Out-Null
+            [void]$created.Add([string]$p.policyId)
             Write-Host "CREATED policy $($p.code) -> $($p.policyId) (enabled = No)"
         }
     }
@@ -350,12 +486,18 @@ foreach ($p in $definition.policies) {
                 sprk_decisionplan      = (ConvertTo-CompactJson $v.decisionPlan)
                 sprk_inforcefrom       = (Get-Instant $v.inForceFrom)
             }
-            if ($PSCmdlet.ShouldProcess("$DataverseUrl sprk_policyversion $($v.versionId)", "CREATE $($p.code) v$($v.versionNumber)")) {
+            if ($OwnerTeamId) { $vbody['ownerid@odata.bind'] = "/teams($OwnerTeamId)" }
+            $ownerNote = if ($OwnerTeamId) { " (owner = team $OwnerTeamId)" } else { '' }
+            if ($PSCmdlet.ShouldProcess("$DataverseUrl sprk_policyversion $($v.versionId)", "CREATE $($p.code) v$($v.versionNumber)$ownerNote")) {
                 $vbody['sprk_AuthoredBy@odata.bind'] = "/systemusers($(Get-AuthoredBy))"
                 Invoke-Dv POST "$ApiBase/sprk_policyversions" $vbody | Out-Null
+                [void]$created.Add([string]$v.versionId)
                 Write-Host "CREATED version $($p.code) v$($v.versionNumber) -> $($v.versionId)"
             }
-            else { Write-Host "  would write sprk_rulebody = $(ConvertTo-CompactJson $v.ruleBody)"; Write-Host "  would write sprk_decisionplan = $(ConvertTo-CompactJson $v.decisionPlan)" }
+            else {
+                Write-Host "  would write sprk_rulebody = $(ConvertTo-CompactJson $v.ruleBody)"; Write-Host "  would write sprk_decisionplan = $(ConvertTo-CompactJson $v.decisionPlan)"
+                if ($OwnerTeamId) { Write-Host "  would write ownerid = /teams($OwnerTeamId)" }
+            }
         }
         else {
             # sprk_inforceto is judged in the end pass below (stamped when it is the allowed write, DRIFT otherwise); the rest is immutable.
@@ -412,12 +554,15 @@ foreach ($p in $definition.policies) {
     $row = Get-PolicyRow $p.policyId
     if ($null -eq $row) { Write-Host "READ-BACK FAIL: policy $($p.code) is absent." -ForegroundColor Red; $bad = $true; continue }
     $d = @(Get-PolicyDiffs $p $row)
+    # Only rows this run created are held to the owner: an existing row is never re-owned (-Verify reports it).
+    if ($created.Contains([string]$p.policyId)) { $d += @(Get-OwnerDiff $row) }
     if ($d.Count -gt 0) { Write-Host "READ-BACK FAIL: policy $($p.code): $($d -join '; ')" -ForegroundColor Red; $bad = $true }
     else { Write-Host ("READ-BACK OK policy  {0} {1} lane={2} subject={3} worktype={4} severity={5} enabled={6} statecode={7} currentversion={8}" -f $p.code, $p.policyId, $row.sprk_lane, $row.sprk_subjecttype, $row.sprk_worktype, $row.sprk_severity, $row.sprk_enabled, $row.statecode, $row._sprk_currentversion_value) -ForegroundColor Green }
     foreach ($v in $p.versions) {
         $vr = Get-VersionRow $v.versionId
         if ($null -eq $vr) { Write-Host "READ-BACK FAIL: version $($p.code) v$($v.versionNumber) is absent." -ForegroundColor Red; $bad = $true; continue }
         $vd = @(Get-VersionDiffs $p $v $vr)
+        if ($created.Contains([string]$v.versionId)) { $vd += @(Get-OwnerDiff $vr) }
         if ($vd.Count -gt 0) { Write-Host "READ-BACK FAIL: version $($p.code) v$($v.versionNumber): $($vd -join ', ')" -ForegroundColor Red; $bad = $true }
         else { Write-Host ("READ-BACK OK version {0} v{1} {2} ruletype={3} plan={4}" -f $p.code, $v.versionNumber, $v.versionId, $vr.sprk_ruletype, $vr.sprk_decisionplan) -ForegroundColor Green }
     }
