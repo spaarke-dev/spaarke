@@ -12,16 +12,20 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.TestHost;
+using Microsoft.Extensions.Caching.Distributed;
+using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
+using Moq;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.Records;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Services.Communication;
 using Sprk.Bff.Api.Services.Dataverse;
+using Sprk.Bff.Api.Services.Dataverse.Models;
 using Xunit;
 using FamilyKind = Sprk.Bff.Api.Services.Dataverse.RecordFamilyEdges.FamilyKind;
 
@@ -78,7 +82,26 @@ public class RecordFamilyEndpointsTests
             ("_sprk_matter_value", MatterId.ToString()));
         host.Probe.Grant("sprk_documents", DocumentId, AccessRights.Read);
         host.Probe.Grant("sprk_matters", MatterId, AccessRights.Read);
+        host.SeedTableDisplayName(Matter, "Matter");
+        host.SeedTableDisplayName(Document, "Document");
         return host;
+    }
+
+    // ── recordType: the table's display name, and never a reason to fail the read ──
+
+    [Fact]
+    public async Task Family_AMetadataFailureForOneTable_GivesNullForThatTablesMembers_AndTheReadStillReturns200()
+    {
+        await using var host = ReadableFamily(await FamilyHost.StartAsync());
+        host.UnseedTableDisplayName(Document); // the metadata read for sprk_document now falls through to Dataverse and faults
+
+        var (status, body) = await GetAsync(host, Route(Document, DocumentId));
+
+        status.Should().Be(HttpStatusCode.OK, body);
+        var members = JsonNode.Parse(body)!["members"]!.AsArray().Select(m => m!.AsObject()).ToList();
+        members.Should().HaveCount(2);
+        members.Single(m => m["table"]!.GetValue<string>() == Matter)["recordType"]!.GetValue<string>().Should().Be("Matter");
+        members.Single(m => m["table"]!.GetValue<string>() == Document)["recordType"].Should().BeNull();
     }
 
     // ── 200: the documented shape ──
@@ -109,7 +132,8 @@ public class RecordFamilyEndpointsTests
                 "id", "table", "name", "recordNumber", "recordType", "status", "modifiedOn", "kind", "edgeKind", "parentId", "depth",
             });
             member["kind"]!.GetValue<string>().Should().Be("Filing");
-            member["recordType"].Should().BeNull("no existing table-display-name source covers the family tables (task 072 notes)");
+            member["recordType"]!.GetValue<string>().Should().Be(member["table"]!.GetValue<string>() == Matter ? "Matter" : "Document",
+                "the display name of the member's TABLE");
         }
 
         var top = members[0];
@@ -420,6 +444,16 @@ public class RecordFamilyEndpointsTests
         public FakeCallerDataverse Dataverse { get; } = new();
         private EphemeralDataProtectionProvider Keys { get; } = new();
         public IDataProtector Protector => Keys.CreateProtector(RecordFamilyReader.ContinuationPurpose);
+        private readonly MemoryDistributedCache _metadataCache = new(Options.Create(new MemoryDistributedCacheOptions()));
+
+        /// <summary>The cached metadata of <paramref name="table"/> as MetadataService wrote it (key and camelCase JSON).</summary>
+        public void SeedTableDisplayName(string table, string displayName) =>
+            _metadataCache.SetString("sdap:dv:entitymetadata:" + table, JsonSerializer.Serialize(
+                new EntityMetadataDto(table, table + "id", "name", Array.Empty<AttributeDto>(), displayName),
+                new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase }));
+
+        /// <summary>No cache entry: MetadataService goes to Dataverse, which the substituted service cannot reach (a fault).</summary>
+        public void UnseedTableDisplayName(string table) => _metadataCache.Remove("sdap:dv:entitymetadata:" + table);
 
         public static async Task<FamilyHost> StartAsync()
         {
@@ -445,6 +479,8 @@ public class RecordFamilyEndpointsTests
             builder.Services.AddSingleton<CallerRecordAccessProbe>(Probe);
             builder.Services.AddSingleton<IImpersonatedCommunicationQuery>(Dataverse);
             builder.Services.AddSingleton(new RecordFamilyReader(Dataverse, Keys, NullLogger<RecordFamilyReader>.Instance));
+            builder.Services.AddSingleton(new MetadataService(
+                new Mock<IDataverseService>().Object, _metadataCache, NullLogger<MetadataService>.Instance));
 
             builder.WebHost.UseTestServer();
             _app = builder.Build();

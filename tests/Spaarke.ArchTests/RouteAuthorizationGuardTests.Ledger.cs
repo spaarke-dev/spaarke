@@ -2110,11 +2110,11 @@ public partial class RouteAuthorizationGuardTests
             + "(FieldMappingEndpoints.cs:474, :776), then the source and the children are read and written impersonated as "
             + "the caller (:530, :710); an unauthorized source is the uniform 404."),
         new HandlerDecision("GET /api/v1/records/{table}/{id:guid}/family", "GetFamilyAsync", "CallerRecordAccessProbe", Array.Empty<string>(),
-            "Task 072 (FR-31): the caller's systemuserid (WhoAmI on their own token, RecordFamilyEndpoints.cs:208) and Read on the "
+            "Task 072 (FR-31): the caller's systemuserid (WhoAmI on their own token, RecordFamilyEndpoints.cs:210) and Read on the "
             + "ANCHOR through CallerRecordAccessProbe.GetCallerRightsForAuthorizationGateAsync on the reader's own entity set for the "
-            + "route table (:137, :150, :162) before anything is read; no Read, an unknown id, a non-family table and a probe fault "
+            + "route table (:138, :151, :163) before anything is read; no Read, an unknown id, a non-family table and a probe fault "
             + "are the uniform 404. The walk then reads every member AS THE CALLER (RecordFamilyReader over "
-            + "IImpersonatedCommunicationQuery, :171): a record the caller cannot read is never listed."),
+            + "IImpersonatedCommunicationQuery, :172): a record the caller cannot read is never listed."),
         new HandlerDecision("POST /api/compose/active-document", "RegisterActiveDocument", "IDataverseUserClient", Array.Empty<string>(),
             "Task 166 r1 (was UNOWNED-NEW): the body session must be the caller's (ResolveOwnedSessionAsync, "
             + "ComposeActiveDocumentEndpoints.cs:402), and a STORED document is recorded only when the caller can read its row "

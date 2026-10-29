@@ -56,23 +56,27 @@ on the full view, `null` on `down` (never anything that hints at an unreadable r
 edgeKind (the EdgeKind name; null for the top), parentId, depth (>= 0)`. No access metadata and no `CountsByTable` (the client
 contract does not list it). The first page always holds the anchor (the reader guarantees it; asserted in a test).
 
-### `recordType`: emitted as null — OPEN ITEM
+### `recordType`: the table's display name (fix round 1; the open item is closed)
 
 The owner decision: the display name of the member's TABLE (e.g. "Matter"), a property of the table and never a per-record
-value. Search result: **no existing mechanism covers the family tables** without a Dataverse call per request.
+value. First pass emitted null because no existing source covered the family tables (the static maps list 7 and 8 tables;
+`MetadataService` dropped the label). Fix round 1 extends the existing cached component (FR-31/FR-32, F4):
 
-- `MetadataService` (Redis-cached, 6 h) projects the table's attributes only; `ProjectToDto` explicitly drops the localized
-  labels, and `EntityMetadataDto` has no display-name field.
-- The static maps are partial: `StandaloneChatContextProvider.EntityDisplayNames` (7 tables, AI chat, `internal` to
-  `Services/Ai/Chat`), `RegardingRecordType.GetDisplayName(int)` (8 regarding types, keyed by integer), and the AI
-  `DataverseDescribeHandler` (a live metadata call per request). The Filing registry has dozens of tables.
-
-Per the brief (no new service, no per-request metadata call) the field is emitted as `null`; the modal tolerates it. The
-mapping lives in one place (`RecordFamilyEndpoints.ToMember`), with a comment, and a test pins the null. **Follow-up for the
-owner**: either (a) add a `DisplayName` to `EntityMetadataDto` (read from `EntityMetadata.DisplayName.UserLocalizedLabel`,
-one extra field on an already cached, already fetched call; the cache key bump is the only cost) and have the endpoint read it
-once per distinct table per page, or (b) a static table-label map beside `RecordFamilyEdges`, pinned by a test that it covers
-every Filing-registry table. Either is a separate, small task.
+- `EntityMetadataDto` gets a trailing optional `string? DisplayName = null` (additive: existing constructor calls and the
+  `GET /api/dataverse/metadata` JSON stay compatible, the new property is simply present). `MetadataService.ProjectToDto`
+  (now `internal`, like `ProjectAttribute`) fills it from `entity.DisplayName?.UserLocalizedLabel?.Label`, else the first
+  `LocalizedLabels` label, else null. One label string, never the localized arrays, so the FR-BFF-03 budget comment stays true
+  (and says so).
+- Source: `RetrieveEntityRequest` with `EntityFilters.Attributes` is the existing call. `EntityMetadata.DisplayName` is an
+  entity-level scalar of the same returned object as `LogicalName` and `PrimaryIdAttribute`, which `ProjectToDto` already reads
+  from this very response; `EntityFilters` (Entity/Default = 1, Attributes = 2, ...) only selects which child collections come
+  back. No filter was added. The SDK enum cannot prove the server returns it, and no live call was made: a null label is the
+  safe fallback.
+- The endpoint (`ReadTableLabelsAsync`) asks `MetadataService.GetMetadataAsync` once per DISTINCT member table on the page. It
+  is app-level schema metadata read with the application identity, not caller data, so there is no impersonation concern. Any
+  failure for a table (not found, Dataverse fault, cache fault) gives `recordType` null for that table's members, a Warning with
+  the table name, and the 200 still returns. Cancellation of the request propagates. There is no `IMetadataService`; the
+  concrete scoped `MetadataService` is injected (no new service, no new DI registration).
 
 ## Ledger scope chosen, and why
 
@@ -105,6 +109,11 @@ overload denies with a 403, the wrong shape. Census `ExpectedEndpointFileCount` 
 The two small additions to the reader (`FamilyTablesOf`, `TryGetFamilyEntitySet`) are extensions of existing surface that remove
 a second copy of the family-table test; no new service or abstraction.
 
+**`EntityMetadataDto.DisplayName` (fix round 1, CLAUDE.md §11).**
+- *Existing:* `MetadataService` / `EntityMetadataDto`, the Redis-cached entity metadata (6 h) that already fetches the entity.
+- *Extension:* yes, this is it: one trailing optional string on the existing DTO, filled in the existing projection.
+- *Cost of doing nothing:* the Family modal's Record type column is always blank.
+
 ## Tests (`tests/unit/domain/Api/Records/RecordFamilyEndpointsTests.cs`, 21 cases)
 
 KEEP path `tests/unit/domain/**` (ADR-038 §2). A minimal TestServer host (the push contract tests' shape) maps the REAL
@@ -115,7 +124,9 @@ call and the caller it impersonated).
 
 | Case | Criterion |
 |---|---|
-| 200 for a readable anchor: exact property sets (no extras), kind and edgeKind on members, anchor among the members, `recordType` null, every read impersonates the caller | shape, first page |
+| 200 for a readable anchor: exact property sets (no extras), kind and edgeKind on members, anchor among the members, `recordType` = each member's table display name, every read impersonates the caller | shape, first page, recordType |
+| a metadata failure for one table: null `recordType` for that table's members, the page still 200 | recordType never fails the read |
+| `MetadataServiceDisplayNameTests` (3, in `tests/unit/Sprk.Bff.Api.Tests/Services/Dataverse`): `ProjectToDto` carries the user-localized label, falls back to the first localized label, and is null when absent | DTO projection |
 | `direction=down` / `DOWN&kind=filing`: root omitted, anchor on top | root omitted |
 | default / `full` / `FULL&kind=Filing`: root present | root present |
 | unknown anchor vs unreadable anchor: identical 404 (apart from ids), both asked through the gate method, nothing read | equalised 404 |
@@ -126,11 +137,14 @@ call and the caller it impersonated).
 | unauthenticated: 401, nothing touched | 401 |
 
 Red phase (before the endpoint existed, with a 501 skeleton mapping the route): 20 failed / 1 passed (the 401 case passes on
-the skeleton because the group's `RequireAuthorization` already existed). Green: 21 / 21. ArchTests: see the report.
+the skeleton because the group's `RequireAuthorization` already existed). Green: 21 / 21 (22 endpoint cases after fix round 1). Fix round 1 red phase (mapping and endpoint label disabled): 4 failed / 21 passed
+of 25; green 25 / 25.
 
 ## Known limits / open items
 
-- **K-class: `recordType` is null** (above). Not a defect on a real path; the modal tolerates it.
+- **K-class: stale metadata cache.** Cache entries written before `DisplayName` existed deserialize with it null until their 6-hour
+  TTL ends (no cache-key bump, by decision), so `recordType` is null for those tables for up to 6 hours after deploy. The
+  modal tolerates null.
 - **Residual timing:** the table gate and the Guid.Empty branch answer without a probe (public information, by design); the
   systemuserid lookup (WhoAmI) runs before the table gate, as the brief orders, so a non-family table costs one OBO exchange.
 - The reflection read of `CallerRecordAccessProbe.EqualizeNoAccessWithNotFound` in the test fails loudly (it throws in the

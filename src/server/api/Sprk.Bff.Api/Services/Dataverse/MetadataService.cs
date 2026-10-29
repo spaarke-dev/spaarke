@@ -135,10 +135,10 @@ public sealed class MetadataService
 
     /// <summary>
     /// Projects a full <see cref="EntityMetadata"/> to the slim <see cref="EntityMetadataDto"/>.
-    /// Drops localized labels, privilege catalogs, security descriptors, and audit metadata to stay
-    /// under the &lt;50KB per-entity budget (FR-BFF-03).
+    /// Drops localized label arrays (keeping the entity's display name as one string), privilege catalogs, security
+    /// descriptors, and audit metadata to stay under the &lt;50KB per-entity budget (FR-BFF-03).
     /// </summary>
-    private static EntityMetadataDto ProjectToDto(EntityMetadata entity)
+    internal static EntityMetadataDto ProjectToDto(EntityMetadata entity) // internal for tests (task 072)
     {
         var attributes = entity.Attributes ?? Array.Empty<AttributeMetadata>();
 
@@ -158,7 +158,9 @@ public sealed class MetadataService
             LogicalName: entity.LogicalName ?? string.Empty,
             PrimaryIdAttribute: entity.PrimaryIdAttribute ?? string.Empty,
             PrimaryNameAttribute: entity.PrimaryNameAttribute ?? string.Empty,
-            Attributes: projectedAttributes);
+            Attributes: projectedAttributes,
+            DisplayName: entity.DisplayName?.UserLocalizedLabel?.Label
+                         ?? entity.DisplayName?.LocalizedLabels?.FirstOrDefault()?.Label);
     }
 
     internal static AttributeDto ProjectAttribute(AttributeMetadata attr) // internal for tests (task 098)

@@ -79,6 +79,7 @@ public static class RecordFamilyEndpoints
         Guid id,
         HttpContext httpContext,
         RecordFamilyReader reader,
+        MetadataService metadata,
         CallerRecordAccessProbe probe,
         ILogger<Program> logger,
         CancellationToken ct)
@@ -175,12 +176,13 @@ public static class RecordFamilyEndpoints
         switch (read.Outcome)
         {
             case RecordFamilyReadOutcome.Read when read.Anchor is { } anchor && read.Top is { } top:
+                var tableLabels = await ReadTableLabelsAsync(metadata, read.Members, logger, ct).ConfigureAwait(false);
                 return TypedResults.Ok(new RecordFamilyResponse(
                     ToRef(anchor),
                     direction == RecordFamilyDirection.Full ? ToRef(top) : null,
                     read.Truncated,
                     read.Continuation,
-                    read.Members.Select(ToMember).ToList()));
+                    read.Members.Select(m => ToMember(m, tableLabels)).ToList()));
 
             case RecordFamilyReadOutcome.ContinuationInvalid:
                 logger.LogInformation("{Marker} {Table} {RecordId}: the continuation was refused. Answered 400.", LogMarker, anchorTable, id);
@@ -219,6 +221,37 @@ public static class RecordFamilyEndpoints
         }
     }
 
+    /// <summary>
+    /// The display name of each DISTINCT member table on the page (<c>recordType</c>: "Matter", a property of the table, never of
+    /// a record), from <see cref="MetadataService"/>: Redis-cached, app-level schema metadata read with the application identity.
+    /// It is not caller data, so there is no impersonation concern; which tables exist is already public. A label is decoration:
+    /// any failure for a table (not found, Dataverse fault, cache fault) gives null for that table, a Warning with the table
+    /// name, and the read still returns. Only cancellation of <paramref name="ct"/> propagates.
+    /// </summary>
+    private static async Task<IReadOnlyDictionary<string, string?>> ReadTableLabelsAsync(
+        MetadataService metadata, IEnumerable<RecordFamilyMember> members, ILogger logger, CancellationToken ct)
+    {
+        var labels = new Dictionary<string, string?>(StringComparer.Ordinal);
+        foreach (var table in members.Select(m => m.Table).Distinct(StringComparer.Ordinal))
+        {
+            try
+            {
+                labels[table] = (await metadata.GetMetadataAsync(table, ct).ConfigureAwait(false)).DisplayName;
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "{Marker} The display name of table {Table} could not be read; recordType is null for it.", LogMarker, table);
+                labels[table] = null;
+            }
+        }
+
+        return labels;
+    }
+
     /// <summary>ONE fixed 400 for every continuation that is malformed, oversize, tampered, re-bound or stale.</summary>
     private static IResult InvalidContinuation() => ProblemDetailsHelper.ValidationError("The continuation is not valid.");
 
@@ -226,15 +259,13 @@ public static class RecordFamilyEndpoints
 
     private static RecordFamilyRef ToRef(RecordFamilyMember member) => new(member.Id, member.Table, member.Name);
 
-    private static RecordFamilyMemberDto ToMember(RecordFamilyMember member) => new(
+    private static RecordFamilyMemberDto ToMember(RecordFamilyMember member, IReadOnlyDictionary<string, string?> tableLabels) => new(
         member.Id,
         member.Table,
         member.Name,
         member.RecordNumber,
-        // The display name of the member's TABLE ("Matter"), never a per-record value. No existing source covers the family
-        // tables without a Dataverse metadata call per request (MetadataService projects no table label; the static maps list
-        // eight tables), so it is null until one does (task 072 notes, open item).
-        RecordType: null,
+        // The display name of the member's TABLE ("Matter"), never a per-record value; null when it could not be read.
+        RecordType: tableLabels.GetValueOrDefault(member.Table),
         member.Status,
         member.ModifiedOn,
         member.Kind.ToString(),
