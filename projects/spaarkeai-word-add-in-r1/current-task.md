@@ -24,11 +24,16 @@
   - The scoped re-check was clean; the F4 doc fix is 39a8b88ce8. **#2419 MERGED at 136568cf70** (2026-10-28).
 - **Waiting on R3:** I asked R3 for a dev BFF deploy of origin/master at or after 136568cf70, carrying #2417 + #2419 (OK on content; the owner's go is given in R3's session). After it is live, mark #2420 ready and auto-merge it (the master push deploys the add-in). Then the owner re-tests one save with a typed name.
   - Offer to correct the owner's 10-28 test record (comm 12f1f3f8…, doc 536204ff…) only if they ask.
-- **ebilling 094 round 5** changed the from-email contract (e8ef9a89d4). When 094 merges to work, update `invoiceSubmissionMessages.ts`:
-  - `email_save_failed` and `document_unavailable` are permanent;
-  - `earlier_attempt_being_removed` is a retryable 503;
-  - the race-loser 409 says the filing is kept.
-  - I've acknowledged it to ebilling.
+- **ebilling 094** changed the from-email contract (now 97c793670b; uac-r2 is re-checking). When 094 merges to work, update `invoiceSubmissionMessages.ts` and the service.
+  - Already mapped on master: `email_save_failed`, `document_unavailable`, `record_unavailable`, `failed` (confirm they are in the permanent/retryable sets).
+  - **Missing; add these:**
+    - `earlier_attempt_being_removed`: 503, retryable, "finishing an earlier attempt, try again shortly".
+    - `source_changed`: §9 outcome, re-attempt allowed, "the email changed; submit it again".
+    - `source_forbidden`: 403, step 1.
+    - `COMMUNICATION_REFILE_FORBIDDEN`: 403, step A.
+    - `storage_not_configured`: 422, permanent; it never follows a filing.
+  - The race-loser 409 says the filing is kept. In every refusal case, nothing is filed.
+  - I've acknowledged both messages to ebilling.
 - Cleanup later (Remove-WorktreeSafe): C:\wt2412, C:\wt2412m, C:\wt2416, C:\wt2416c.
 
 ## ⚡ Quick Recovery (READ THIS FIRST)
