@@ -818,6 +818,7 @@ The structured family entity (`sprk_securefamily`) is **not built now**; it is o
 - On a search-indexed table, a client-supplied `sprk_ai_search_index` is **not** a lookup the caller binds. The server **drops** it before step 5, so no AppendTo is asked on the catalog. Step 8 then applies the index of the record's **final owning BU** (FR-10; UAC-r2 condition 1).
   - "Final" means after the ownership step (194b's resolver): a Secure Record BU owner, the restricted-content team in the customer top BU, or a parent-inherited owner.
   - It is never the caller's BU and never the client's value.
+- **The per-BU lookup stays** (owner's Q2 = (B), 2026-10-29). Customer environments have catalog rows but no BU defaults, so the lookup finds none and the column stays empty. It is the hook for a future per-BU index, such as Secure Records, at the cost of one lookup the server already does in step 8.
 - **An owning BU with no index** (always the case for Secure Record today): the column stays **empty** and the server logs `search_index_unset_for_owner_bu`. It does not walk up to the root and does not use the caller's index.
   - Tests pin both cases: a secure record, and a BU with no index.
 - **Every BFF write path, not only creates (UAC-r2 condition 2).** An update or PATCH through the BFF that carries `sprk_ai_search_index` gets the same drop, so a client cannot repoint an existing record. Native form edits stay out of scope.
