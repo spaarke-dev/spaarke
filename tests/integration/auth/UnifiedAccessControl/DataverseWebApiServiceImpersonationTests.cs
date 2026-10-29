@@ -82,6 +82,46 @@ public class DataverseWebApiServiceImpersonationTests
     }
 
     /// <summary>
+    /// field-mapping-server-write-path-r1 task 071 fix round 1: a 403 from the impersonated read keeps Dataverse's error code
+    /// and message (<see cref="DataverseForbiddenException"/>), so the family reader can tell a missing table privilege from
+    /// every other refusal; it is still an <see cref="HttpRequestException"/> with status 403 and the usual message.
+    /// </summary>
+    [Fact]
+    public async Task RetrieveMultipleImpersonatedAsync_Forbidden_ThrowsWithDataversesErrorCodeAndMessage()
+    {
+        const string body = "{\"error\":{\"code\":\"0x80040220\",\"message\":\"Principal user (Id=44444444-4444-4444-4444-444444444444, "
+                            + "type=8, roleCount=3), is missing prvReadsprk_Policy privilege on OTC=10234.\"}}";
+        var handler = new RecordingHandler(_ => new HttpResponseMessage(HttpStatusCode.Forbidden)
+        {
+            Content = new StringContent(body, Encoding.UTF8, "application/json"),
+        });
+        var sut = new OfflineService(handler);
+
+        var act = () => sut.RetrieveMultipleImpersonatedAsync("sprk_policies", "$select=sprk_policyid", CallerSystemUserId);
+
+        var thrown = (await act.Should().ThrowAsync<DataverseForbiddenException>()).Which;
+        thrown.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        thrown.Message.Should().Be("Response status code does not indicate success: 403 (Forbidden).",
+            "the Dataverse text names the principal; it is kept out of the message");
+        thrown.ErrorCode.Should().Be(DataverseWebApiService.AccessCheckDeniedErrorCode);
+        thrown.IsMissingReadPrivilegeOn("sprk_policy").Should().BeTrue();
+        thrown.IsMissingReadPrivilegeOn("sprk_policyversion").Should().BeFalse("another table's privilege is not this one");
+    }
+
+    [Fact]
+    public async Task RetrieveMultipleImpersonatedAsync_OtherFailure_ThrowsAPlainHttpRequestException()
+    {
+        var handler = new RecordingHandler(_ => new HttpResponseMessage(HttpStatusCode.InternalServerError));
+        var sut = new OfflineService(handler);
+
+        var act = () => sut.RetrieveMultipleImpersonatedAsync("sprk_policies", "$select=sprk_policyid", CallerSystemUserId);
+
+        var thrown = (await act.Should().ThrowAsync<HttpRequestException>()).Which;
+        thrown.Should().NotBeOfType<DataverseForbiddenException>();
+        thrown.StatusCode.Should().Be(HttpStatusCode.InternalServerError);
+    }
+
+    /// <summary>
     /// The Job B apply path (task 031): the PATCH runs as the confirming user. The EntitySetName lookup before it
     /// is environment metadata and stays app-only.
     /// </summary>

@@ -1252,6 +1252,14 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
         request.Headers.TryAddWithoutValidation(
             "Prefer", "odata.include-annotations=\"OData.Community.Display.V1.FormattedValue\"");
         var response = await _httpClient.SendAsync(request, ct);
+        if (response.StatusCode == System.Net.HttpStatusCode.Forbidden)
+        {
+            // Task 071 fix round 1: a 403 keeps Dataverse's code and message, so a caller can tell a missing table privilege
+            // from every other refusal (DataverseForbiddenException). Still an HttpRequestException with StatusCode 403.
+            var (code, message) = await TryReadErrorAsync(response, ct).ConfigureAwait(false);
+            throw new DataverseForbiddenException(code, message);
+        }
+
         response.EnsureSuccessStatusCode();
 
         var data = await response.Content.ReadFromJsonAsync<ODataCollectionResponse>(cancellationToken: ct);
