@@ -1351,8 +1351,15 @@ System Administrator application user there. **H10** follows (before H6 — §5.
 only when the intake says `solutionPackageType = unmanaged` (ADR-027 §3, amended 2026-10-07). It refuses to switch an
 environment's type and refuses a downgrade; an upgrade is `StageAndUpgrade`. Package definition, release, IAM and
 upgrade: [`SPAARKE-SOLUTION-RELEASE-PROCESS.md`](../procedures/SPAARKE-SOLUTION-RELEASE-PROCESS.md). H6 side built
-2026-10-07 (T218b). ⚠️ A real run fails at H6 until the package is published in the new format (T218c–e: content,
-git source, CI publish) — the store still holds the hand-made 2026-08-21 manifest.
+2026-10-07 (T218b); the store holds CI-published packages (1.2.4.0 since 2026-10-29).
+
+**After any SpaarkeMaster upgrade of a stamp** (an H6 run or a manual `pac solution import --stage-and-upgrade`), check
+the security roles against the release:
+`scripts/provisioning/Test-RolePrivilegeExpectations.ps1 -EnvironmentUrl <stamp> -ExpectationsPath
+scripts/provisioning/role-privilege-expectations/spaarkemaster-<version>.json` (read-only; exit 0 = match). A managed
+role loses a privilege the release removed only on a stage-and-upgrade, so a leftover means the wrong import method or a
+privilege added by hand. A leftover Signal Write or Decision Record Create lets callers bypass the BFF commit route. Add
+an expectations file for every release that changes roles (the owning project supplies the list).
 
 **H7** sets the 7 per-customer env-var values (§6.4).
 
