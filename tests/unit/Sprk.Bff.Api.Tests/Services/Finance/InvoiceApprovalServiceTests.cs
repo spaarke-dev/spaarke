@@ -237,8 +237,39 @@ public sealed class InvoiceApprovalServiceTests
         (await w.ApproveAs(BobUser)).Outcome.Should().Be(ApprovalOutcome.Approved);
     }
 
-    [Fact(DisplayName = "103 K2: the clear is conditional on the version just read - a portion changed since is left alone")]
-    public async Task TransitionRefused_ClaimChangedSince_IsNotCleared()
+    [Fact(DisplayName = "103 K2 SEEDED: the clear is conditional on the version just read - a portion written between that read and the clear keeps our claim")]
+    public async Task TransitionRefused_VersionChangedSince_IsNotCleared()
+    {
+        var w = new ApprovalWorld();
+        w.AddLine(InvoiceLineStatus.Accepted, approved: 100m);
+        var clearAttempted = false;
+        w.Lifecycle.Setup(l => l.TransitionAsync(w.InvoiceId, InvoiceLifecycleStatus.Approved, It.IsAny<CancellationToken>()))
+            .Returns(() =>
+            {
+                // Armed after the claim: the next conditional portion write is the clear. Between its re-read and its update another
+                // writer changes the portion (version only); the claim fields still name us, so only the version condition can refuse.
+                w.BeforeClaim = () =>
+                {
+                    clearAttempted = true;
+                    w.Portion["versionnumber"] = w.Portion.GetAttributeValue<long>("versionnumber") + 1000;
+                    return Task.CompletedTask;
+                };
+                return Task.FromResult(new InvoiceTransitionResult(InvoiceTransitionOutcome.Refused, InvoiceLifecycleStatus.Approved, InvoiceLifecycleStatus.InReview, "invoice-lifecycle.transition-not-allowed"));
+            });
+
+        (await w.ApproveAs(AliceUser)).Code.Should().Be("ebilling.approve.refused");
+
+        w.Portion.GetAttributeValue<EntityReference>("sprk_decidedby")?.Id.Should().Be(Alice, "the version changed since the read: the clear is refused");
+        w.Portion.Contains("sprk_decidedby").Should().BeTrue("the claim survives");
+        w.Portion.Contains("sprk_decidedon").Should().BeTrue();
+        w.Portion.Contains("sprk_approvedamount").Should().BeTrue();
+        clearAttempted.Should().BeTrue("the claim was still ours, so the conditional clear was tried");
+        w.WriteLog.Count(e => e == "claim:sprk_invoiceapproval").Should().Be(1, "only the claim landed");
+        w.ApproveRecords.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "103 K2: a claim that is no longer ours (another decider since) is never cleared")]
+    public async Task TransitionRefused_ClaimNoLongerOurs_IsNotCleared()
     {
         var w = new ApprovalWorld();
         w.AddLine(InvoiceLineStatus.Accepted, approved: 100m);

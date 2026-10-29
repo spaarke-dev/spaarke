@@ -150,7 +150,7 @@ The K2 row in the code-review table above (claim left after a refused transition
 | F3 | Approve, GET and `RefreshInvoiceAsync` take the core from exactly one of `InvoiceFamilyCoreRecordGuard.CoreRecordLookups` (`EligibleApproverResolver.SingleCoreOf`). Before any write, approve also runs the recorder's filing read (`CoreAncestorResolver.ResolveStampsAsync`) and requires its one stamp to be that core. | `TwoCoreLookups_AreRefused` (SEEDED), `FilingReadFault_IsUnavailable`; resolver `Job_TwoCoreLookupsOnTheInvoice_IsSkipped`, `RefreshInvoice_TwoCoreLookups_StoresNothing` |
 | F4 | GET `canApprove` also requires the decide right: Write on the invoice, asked through `CallerReadCheck` with `ebilling.invoice.decide`, as the review read does. | `Get_CanApproveNeedsTheDecideRight`; contract `Get_CanApprove_NeedsWriteOnTheInvoice` |
 | K1 | The claim is refused (409 `ebilling.approval.claimed`) when the portion names a decider other than the caller's contact. The shared per-invoice lock was already taken: `InvoiceLineDecisionService.LockKeyFor` is `LockKeyPrefix` plus the invoice id, alongside the 104/105 decision lock. | `ClaimedByAnother_Is409` (SEEDED) |
-| K2 | A refused transition clears decidedby, decidedon and approvedamount. The clear is conditional on the version re-read, and only runs while the portion still holds this call's claim. | `TransitionRefused_RecordsNothing_AndClearsTheClaim` (SEEDED), `TransitionRefused_ClaimChangedSince_IsNotCleared` |
+| K2 | A refused transition clears decidedby, decidedon and approvedamount. The clear is conditional on the version re-read, and only runs while the portion still holds this call's claim. | `TransitionRefused_RecordsNothing_AndClearsTheClaim` (SEEDED), `TransitionRefused_VersionChangedSince_IsNotCleared` (SEEDED: our claim, only the version changed between the re-read and the clear), `TransitionRefused_ClaimNoLongerOurs_IsNotCleared` |
 | K3 | The refresh job reads the core from the INVOICE (aliased link columns), not from the portion's copy. The approved amount is in the record's Values, so the hash covers it. | resolver `Job_ReadsTheCoreFromTheInvoice`; `ApprovedAmount_IsCoveredByTheHash` (SEEDED) |
 | K4 | A missing or unknown portion status gives 409 `ebilling.approval.status_unknown` and is never read as Pending. GET shows `Unknown`. | `UnknownPortionStatus_IsRefused` (SEEDED) |
 
@@ -166,6 +166,7 @@ The K2 row in the code-review table above (claim left after a refused transition
 | The K4 check | 2 |
 | The K1 check | 1 |
 | The K2 check | 1 |
+| The K2 version condition (the clear made unconditional) | 1: `TransitionRefused_VersionChangedSince_IsNotCleared` ("the claim survives, but found False") |
 | Dropping the close count | 2 |
 
 **Deviations, for the reviewer.**
