@@ -1012,8 +1012,9 @@ public sealed partial class SignalWriter
     /// <para><b>Reads, then decides</b> (the commit route's rule, as <c>DecisionCommitService.CloseSignalAsync</c> applies it):
     /// already Resolved and naming this record → <see cref="SignalAutomatedCloseOutcome.AlreadyClosedByThisRecord"/>, no write; Open or
     /// Acknowledged → closed; closed by the SYSTEM (ConditionCleared, Superseded, PolicyRetired) at or after <paramref name="setReadAtUtc"/>,
-    /// the moment the caller read the set it decided against → re-closed, so the Signal and the record agree; anything else (a person's
-    /// Acted or Dismissed, another record, a system close before the set was read) → <see cref="SignalAutomatedCloseOutcome.LeftAsIs"/> and one
+    /// the moment the caller read the set it decided against, and linked to no Decision Record → re-closed, so the Signal and the record
+    /// agree; anything else (a person's Acted or Dismissed, another record, a system close before the set was read, a system close already
+    /// linked to a record) → <see cref="SignalAutomatedCloseOutcome.LeftAsIs"/> and one
     /// Information line (ids and the policy code only).</para>
     /// <para><b>One write</b>, conditional on the row version just read: status Resolved, resolution Acted, <c>sprk_resolvedon</c> and
     /// <c>sprk_lastevaluated</c> the same instant (D-120), <c>sprk_decisionrecord</c>, and <c>sprk_resolvedby</c> (the systemuser
@@ -1051,7 +1052,10 @@ public sealed partial class SignalWriter
                 }
 
                 var open = status is SignalStatusOpen or SignalStatusAcknowledged;
+                // K1 (ontology-r1 review of #1911): a system close that already carries a Decision Record link (another record's) is not
+                // re-closed: the write would replace that link. Only a record-free system close is ours to re-close.
                 var systemClosedSinceRead = status == SignalStatusResolved
+                    && row.GetAttributeValue<EntityReference>("sprk_decisionrecord") is null
                     && resolution is { } r && SystemResolutions.Contains(r)
                     && row.GetAttributeValue<DateTime?>("sprk_resolvedon") is { } resolvedOn
                     && DateTime.SpecifyKind(resolvedOn, DateTimeKind.Utc) >= setReadAtUtc;
