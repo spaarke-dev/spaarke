@@ -903,6 +903,14 @@ Setup, guard and docs (pass B):
   refused (exit 1).
 - **Publish size** (Release, BFF only, against 12aeb8742a): +620 bytes total, +512 bytes `Sprk.Bff.Api.dll`.
 
+**R4b-4b (re-check follow-ups).** The script's second Secure-unit check on the customer top units could not fire (the
+line above filters it out) and is deleted. Phase 7a states its precondition: the Secure Record unit exists (H7b; the
+interim sequence has no step that creates it, so SECURE-PROJECT-ENVIRONMENT-SETUP.md §3-§5 by hand). The guard now fails on
+any write of `$DeclaredRoleFiles` other than its one array literal (`+=`, a reassignment, a scoped name, `Set-Variable`, the
+`variable:` drive, a collection method, `[ref]`): five must-fire and four must-not-fire controls (a commented write, a
+read, a comparison). A live `+=` append is red on the new guard and green on the R4b-4 one. The owner-teams Pester file
+runs in CI (`ci-standalone-checks.yml`, job `owner-teams-script-tests`, ubuntu-latest); it passes on Pester 5.7.1 and 6.2.0.
+
 Known limits, accepted:
 - **K2.** The restricted-content team's member check is read once per pass and cached; a member added mid-pass is seen
   by the next pass.

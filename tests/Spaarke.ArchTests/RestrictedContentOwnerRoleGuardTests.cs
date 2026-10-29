@@ -222,6 +222,23 @@ public class RestrictedContentOwnerRoleGuardTests
 
     private static string WithoutBlockComments(string script) => Regex.Replace(script, @"<#[\s\S]*?#>", "");
 
+    /// <summary>The script's code: block comments dropped, and each line cut at its first <c>#</c>.</summary>
+    private static string CodeOnly(string script) =>
+        string.Join('\n', WithoutBlockComments(script).Split('\n').Select(line => line.Split('#')[0]));
+
+    /// <summary>
+    /// R4b-4b: every way the script could WRITE <c>$DeclaredRoleFiles</c> — an assignment of any form (<c>=</c>, <c>+=</c>,
+    /// <c>-=</c>, <c>??=</c>, a scoped or braced name), <c>Set-Variable</c>/<c>New-Variable</c>, the <c>variable:</c> drive,
+    /// a collection method that changes it, or a <c>[ref]</c>. Only the one array literal may write it.
+    /// </summary>
+    private static readonly Regex DeclaredRoleFilesWrite = new(
+        @"\$\{?(?:(?:script|global|local|private|variable):)?DeclaredRoleFiles\}?\s*(?:[-+*/%]|\?\?)?=(?!=)"
+        + @"|\b(?:Set|New)-Variable\b[^\n]*\bDeclaredRoleFiles\b"
+        + @"|\bvariable:\s*DeclaredRoleFiles\b"
+        + @"|\$\{?DeclaredRoleFiles\}?\s*\.\s*(?:Add|AddRange|Insert|InsertRange|Clear|Remove\w*|Set\w*)\s*\("
+        + @"|\[ref\]\s*\$\{?DeclaredRoleFiles\b",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+
     /// <summary>
     /// R4b-4 (B-F3): the script's <c>$DeclaredRoleFiles</c> array as the script runs it — block comments and the comment part
     /// of each line dropped, so a commented-out entry is not declared — up to the array's closing parenthesis.
@@ -251,6 +268,11 @@ public class RestrictedContentOwnerRoleGuardTests
         var assignments = DeclaredRoleFilesAssignment.Matches(WithoutBlockComments(script)).Count;
         if (assignments != 1)
             return [$"$DeclaredRoleFiles is assigned {assignments} time(s), not once"];
+
+        // R4b-4b: the one array literal is the ONLY write; an appended or reassigned file would bypass the parse below.
+        var writes = DeclaredRoleFilesWrite.Matches(CodeOnly(script)).Select(m => m.Value.Trim()).ToList();
+        if (writes.Count != 1)
+            return [$"$DeclaredRoleFiles is written {writes.Count} time(s) ({string.Join("; ", writes)}); only its one array literal may write it"];
 
         var findings = new List<string>();
         var files = ScriptDeclaredRoleFiles(script);
@@ -298,7 +320,46 @@ public class RestrictedContentOwnerRoleGuardTests
             "the assignment itself commented out",
             LiveScript().Replace("$DeclaredRoleFiles = @(", "# $DeclaredRoleFiles = @(", StringComparison.Ordinal)
         },
+        {
+            "(R4b-4b) a file appended with +=",
+            AfterTheArray("$DeclaredRoleFiles += 'secure-record-owner-role.json'")
+        },
+        {
+            "(R4b-4b) the array reassigned from itself",
+            AfterTheArray("$DeclaredRoleFiles = $DeclaredRoleFiles + @('secure-record-owner-role.json')")
+        },
+        {
+            "(R4b-4b) a scoped reassignment",
+            AfterTheArray("$script:DeclaredRoleFiles = @('secure-record-owner-role.json')")
+        },
+        {
+            "(R4b-4b) Set-Variable",
+            AfterTheArray("Set-Variable -Name DeclaredRoleFiles -Value @('secure-record-owner-role.json')")
+        },
+        {
+            "(R4b-4b) a collection method",
+            AfterTheArray("$DeclaredRoleFiles.Add('secure-record-owner-role.json')")
+        },
     };
+
+    /// <summary>The live script with <paramref name="line"/> added right after the <c>$DeclaredRoleFiles</c> array.</summary>
+    private static string AfterTheArray(string line)
+    {
+        var script = LiveScript();
+        var start = script.IndexOf("$DeclaredRoleFiles = @(", StringComparison.Ordinal);
+        var close = script.IndexOf("\n)", start, StringComparison.Ordinal) + 2;
+        return script[..close] + "\n" + line + script[close..];
+    }
+
+    [Theory]
+    [InlineData("# $DeclaredRoleFiles += 'secure-record-owner-role.json'")]
+    [InlineData("<# $DeclaredRoleFiles += 'secure-record-owner-role.json' #>")]
+    [InlineData("$copy = $DeclaredRoleFiles")]
+    [InlineData("if ($DeclaredRoleFiles -eq $null) { throw 'none' }")]
+    public void AReadOrACommentedWrite_GivesNoFinding(string line)
+    {
+        Assert.Empty(ScriptFindings(AfterTheArray(line)));
+    }
 
     [Theory]
     [MemberData(nameof(ScriptMustFire))]

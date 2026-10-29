@@ -240,7 +240,6 @@ try {
 
     # Every customer top unit: a direct child of the root that is not the Secure Record unit.
     $customerTops = @($units | Where-Object { $_._parentbusinessunitid_value -eq $rootId -and $_.businessunitid -ne $secureId })
-    if (@($customerTops | ForEach-Object businessunitid) -contains $secureId) { throw 'The Secure Record unit was counted as a customer top unit. Nothing was decided.' }
 
     # ── Each table's Read privilege, from METADATA ──────────────────────────────────────────────────────────
     foreach ($d in $defs) {
