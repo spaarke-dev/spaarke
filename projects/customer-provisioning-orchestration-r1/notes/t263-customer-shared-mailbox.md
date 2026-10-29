@@ -125,7 +125,7 @@ names another customer's group is refused (Drift) **before** this customer's mai
 the other customer's stamp read and send as this mailbox. Group names are unique in an Exchange organization. The name is
 also the filter of the membership scope in §5, so the Exchange role and the code agree.
 
-## 5. Exchange permissions — owner decision D32 (approved 2026-10-10; applied on Spaarke's tenant 2026-10-13; M1–M5, M7 PASS)
+## 5. Exchange permissions — owner decision D32 (approved 2026-10-10; applied on Spaarke's tenant 2026-10-13; M1–M5, M7 PASS; common parameters on `New-Mailbox` 2026-10-20, T186 L62)
 
 The current role, `Spaarke App RBAC Admin`, is a child of Role Management trimmed to 14 cmdlets. With
 `View-Only Recipients`, it covers every read H14m and H13 need: `Get-Recipient` (View-Only Recipients),
@@ -155,11 +155,11 @@ Get-ManagementRoleEntry '*\Add-DistributionGroupMember' -Parameters BypassSecuri
 
 # 1. Create role: New-Mailbox, shared parameter set only
 New-ManagementRole -Name 'Spaarke Shared Mailbox Create' -Parent 'Mail Recipient Creation' -EnabledCmdlets New-Mailbox
-Set-ManagementRoleEntry 'Spaarke Shared Mailbox Create\New-Mailbox' -Parameters Shared,Name,Alias,DisplayName,PrimarySmtpAddress
+Set-ManagementRoleEntry 'Spaarke Shared Mailbox Create\New-Mailbox' -Parameters Shared,Name,Alias,DisplayName,PrimarySmtpAddress,ErrorAction,ErrorVariable,WarningAction,WarningVariable,OutVariable,OutBuffer,Confirm,WhatIf   # common parameters: T186 L62
 
 # 2. Membership role: Add-DistributionGroupMember only
 New-ManagementRole -Name 'Spaarke Scope Group Membership' -Parent 'Security Group Creation and Membership' -EnabledCmdlets Add-DistributionGroupMember
-Set-ManagementRoleEntry 'Spaarke Scope Group Membership\Add-DistributionGroupMember' -Parameters Identity,Member,BypassSecurityGroupManagerCheck
+Set-ManagementRoleEntry 'Spaarke Scope Group Membership\Add-DistributionGroupMember' -Parameters Identity,Member,BypassSecurityGroupManagerCheck   # no common parameters: the parent role has none (T186 L62)
 
 # 3. Scope: only the customers' scope groups
 New-ManagementScope -Name 'Spaarke Customer Scope Groups' -RecipientRestrictionFilter "RecipientTypeDetails -eq 'MailUniversalSecurityGroup' -and Name -like 'Spaarke-AppAccess-*'"
@@ -200,10 +200,11 @@ mail roles.
 | M1 | Step 0 shows the two parents | `New-Mailbox -Shared` in Mail Recipient Creation; the bypass parameter in Security Group Creation and Membership |
 | M2 | `New-Mailbox` **without** `-Shared` as the app | refused (only the Shared parameter set is completable) |
 | M3 | `Add-DistributionGroupMember` on a group **not** named `Spaarke-AppAccess-*` | refused |
-| M4 | The ensure route against a test customer | `Success`; second call `AlreadyCompliant`; `Test-ServicePrincipalAuthorization` `InScope True` for the 3 roles |
+| M4 | The ensure route against a test customer — or by hand, **exactly the sidecar's calls**: `New-Mailbox -Shared … -ErrorAction Stop`, and `Add-DistributionGroupMember … -BypassSecurityGroupManagerCheck` with **no** common parameter. Never use `-WhatIf` as the test: Exchange checks it against the role entry, so its 403 says nothing about the call (T186 L62) | `Success`; second call `AlreadyCompliant`; `Test-ServicePrincipalAuthorization` `InScope True` for the 3 roles |
 | M5 | `Get-Recipient -Filter "Members -eq '<mailbox DN>'"` (the "no other group" rule; the in-scope-group rule uses the documented `MemberOfGroup` filter) | returns the scope group. If it returns nothing, the "no other group" rule is inert (the in-scope rule still holds) — replace it with a per-group check over `Get-Recipient -RecipientTypeDetails MailUniversalSecurityGroup -Filter "Name -like 'Spaarke-AppAccess-*'"` + `MemberOfGroup` before relying on it |
 | M6 | (optional) creation scope `Alias -like 'sprk-*-mail'` on the create assignment | a create outside the pattern is refused. If it is, add `-CustomResourceScope` to the create assignment |
 | M7 | `Get-User <mailbox>` → `AccountDisabled` | record it. Learn conflicts on whether sign-in is blocked by default. Owner decides whether to require a disabled account (that needs `Set-User` — not requested) |
+| M8 | The sidecar's authorization probe (T186 L62), creating nothing: `New-Mailbox -Shared -Name sprk-authz-probe -Alias sprk-authz-probe -DisplayName sprk-authz-probe -PrimarySmtpAddress sprk-authz-probe@authz-probe.invalid -ErrorAction Stop`, then `Add-DistributionGroupMember -Identity <a Spaarke-AppAccess-* group DN> -Member sprk-authz-probe@authz-probe.invalid -BypassSecurityGroupManagerCheck` | `NotAcceptedDomain` (raw 400) and `ManagementObjectNotFound` (raw 404): both authorized. A 403 `CmdletAccessDeniedException` — which the EXO module reports only as "A server side error has occurred … try again after some time" — is refused |
 
 **Results, 2026-10-13** (as the app: an ACI from the Worker's sidecar image, running as the Worker UAMI → MI-FIC →
 `Spaarke Exchange Admin` → `Connect-ExchangeOnline -AccessToken -Organization spaarke.onmicrosoft.com`; test group
@@ -215,10 +216,21 @@ unchanged):
 | Cmdlets | The app sees `New-Mailbox` with exactly `Alias, DisplayName, Name, PrimarySmtpAddress, Shared` and `Add-DistributionGroupMember` with exactly `BypassSecurityGroupManagerCheck, Identity, Member` |
 | M2 | PASS. Without `-Shared`, `New-Mailbox` fails parameter-set resolution: every other set needs a parameter the role does not grant (for example `Password`, `MicrosoftOnlineServicesID`) |
 | M3 | PASS. Adding to `sprk-t251-spike-scope` is refused: "out of the current user's write scope" |
-| M4 | PASS at the cmdlet level: the shared mailbox is created (`SharedMailbox`, visible at once) and added to the scope group; a second add reports "already a member". The route-level check runs in T186 at H14m |
+| M4 | PASS at the cmdlet level: the shared mailbox is created (`SharedMailbox`, visible at once) and added to the scope group; a second add reports "already a member". The route-level check runs in T186 at H14m. **Corrected 2026-10-20 (T186 L62):** this test called both writes without `-ErrorAction`; the sidecar passed `-ErrorAction Stop` on both, which the narrowed entries did not grant, so H14m got 403 at T186. The PASS did not cover the sidecar's call shape |
 | M5 | PASS. `Members -eq '<DN>'` returns the scope group, so the "no other group" rule is live; `MemberOfGroup` returns the mailbox |
 | M6 | Not run (optional). The create assignment stays organization-scoped, constrained by the 5 parameters |
 | M7 | `AccountDisabled = True` by default, so sign-in is blocked without `Set-User` |
+
+**Results, 2026-10-20 (T186 L62)** — the owner, signed in as Organization Management:
+
+| Change | Result |
+|---|---|
+| `Set-ManagementRoleEntry 'Spaarke Shared Mailbox Create\New-Mailbox'` with the 5 names plus `ErrorAction,ErrorVariable,WarningAction,WarningVariable,OutVariable,OutBuffer,Confirm,WhatIf` | Accepted |
+| The same common parameters on `'Spaarke Scope Group Membership\Add-DistributionGroupMember'` | **Refused**: the parent, Security Group Creation and Membership, holds no common parameter for that cmdlet. The sidecar therefore joins with no common parameter and reads the error stream (PR #2136) |
+| Undo the 2026-10-19/20 experiments | Role group `Spaarke Mailbox Provisioning` removed; `-OverrideEnforceExoAppRbacPermissions` back to `False`. Final state: the two direct `-App` assignments of the block above |
+
+M8 (raw, as the app) is re-run every 10 minutes until `New-Mailbox -ErrorAction Stop` answers 400; still 403 at 15:47 UTC
+(propagation, 30 min – 2 h documented).
 
 ## 6. Identities
 
@@ -259,7 +271,7 @@ L2 is not granted `Remove-*`. A role nobody runs is a role nobody needs ("needed
 ## 9. Owner decisions needed
 
 1. **D32 (proposed)**: approve PRQ-E-16, the two custom Exchange roles plus one scope in §5. Exact cmdlets and
-   parameters as listed. Then an Organization Management admin applies it and runs live checks M1–M7.
+   parameters as listed. Then an Organization Management admin applies it and runs live checks M1–M8.
    **Until then H14m fails Resumable at every run (T186 included) and creates nothing.** The mail model (#1562) cannot be
    met without some Exchange write permission. Recommend yes.
 2. Confirm the address source is intake `communicationDefaultMailbox` (§2) and not a derived address. Recommend yes:

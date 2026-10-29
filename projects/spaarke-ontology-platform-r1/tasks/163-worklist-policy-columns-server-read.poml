@@ -4,7 +4,7 @@
     <title>The worklist reads policy columns as the BFF, so users need no direct Read on sprk_policy or sprk_policyversion (D-185, #2285)</title>
     <phase>11 UAT</phase>
     <gate>startable (D-185, owner 2026-10-23)</gate>
-    <status>completed</status>
+    <status>in-progress</status>
     <rigor>FULL</rigor>
     <rigor-reason>Changes a caller-scoped read path in Sprk.Bff.Api (.cs), the worklist configuration and security-role XML; security-tagged.</rigor-reason>
     <model-tier>sonnet</model-tier>

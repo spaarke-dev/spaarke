@@ -69,7 +69,7 @@
 // may extend the seeded defaults (add more rules, tweak execution order),
 // and a re-run of this seeder (e.g. on an idempotency retry) must never
 // clobber that. If not found: POST a new profile bound via
-// sprk_sourcerecordtype@odata.bind / sprk_targetrecordtype@odata.bind to
+// sprk_SourceRecordType@odata.bind / sprk_TargetRecordType@odata.bind to
 // the resolved sprk_recordtype_ref rows, then POST each of its rules bound
 // via sprk_FieldMappingProfile@odata.bind (exact casing per the admin
 // guide's ground-truthed seeding recipe — Dataverse nav-property binds are
@@ -121,6 +121,15 @@ public sealed class DataverseWebApiFieldMappingSeeder : IAppConfigSeeder
 
     private const string ODataVersion = "4.0";
     private const string MatterLogicalName = "sprk_matter";
+
+    // T186 L40: single-valued navigation-property names, exactly as $metadata spells them (ReferencingEntity-
+    // NavigationPropertyName, verified on spaarkedev1 2026-10-16). A bind's name is case-sensitive: the lowercase
+    // "sprk_sourcerecordtype@odata.bind" is refused with 400, so every profile POST of a new stamp failed.
+    internal const string SourceRecordTypeBind = "sprk_SourceRecordType@odata.bind";
+    internal const string TargetRecordTypeBind = "sprk_TargetRecordType@odata.bind";
+
+    /// <summary><c>sprk_fieldmappingrule.sprk_targetfieldtype</c> "Lookup" (its own option set: 100000000-based).</summary>
+    internal const int TargetFieldTypeLookup = 100000001;
 
     /// <summary>
     /// The default attorney-matrix profiles this seeder maintains. Ground-truthed
@@ -441,8 +450,8 @@ public sealed class DataverseWebApiFieldMappingSeeder : IAppConfigSeeder
         var createBody = new Dictionary<string, object?>
         {
             ["sprk_name"] = profileName,
-            ["sprk_sourcerecordtype@odata.bind"] = $"/sprk_recordtype_refs({sourceRecordTypeId})",
-            ["sprk_targetrecordtype@odata.bind"] = $"/sprk_recordtype_refs({targetRecordTypeId})",
+            [SourceRecordTypeBind] = $"/sprk_recordtype_refs({sourceRecordTypeId})",
+            [TargetRecordTypeBind] = $"/sprk_recordtype_refs({targetRecordTypeId})",
         };
 
         var postUri = new Uri(envUri, "/api/data/v9.2/sprk_fieldmappingprofiles");
@@ -536,7 +545,9 @@ public sealed class DataverseWebApiFieldMappingSeeder : IAppConfigSeeder
             ["sprk_sourcefield"] = rule.SourceField,
             ["sprk_targetfield"] = rule.TargetField,
             ["sprk_sourcefieldtype"] = 1, // Lookup
-            ["sprk_targetfieldtype"] = 1, // Lookup
+            // T186 L57: the target type is a different option set from the source type — Lookup is 100000001
+            // (live spaarkedev1 rules and ACME metadata); 1 is not a valid option and Dataverse refuses it.
+            ["sprk_targetfieldtype"] = TargetFieldTypeLookup,
             ["sprk_executionorder"] = rule.ExecutionOrder,
             ["sprk_isactive"] = true,
         };

@@ -125,6 +125,7 @@ public sealed class SolutionImportOptions
         // (throws with an actionable message; result discarded — only the
         // shape check is wanted at this boundary).
         _ = Credentials.ResolveEffectiveOrder(SectionName);
+        Credentials.ValidatePropagation(SectionName);
 
         if (string.IsNullOrWhiteSpace(ProvisioningArtifactsContainerUri))
         {

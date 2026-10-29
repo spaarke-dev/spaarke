@@ -98,13 +98,42 @@ internal static class OwnedChildWrite
 
     /// <summary>The ownership parents a mapped row of <paramref name="table"/> is filed under (resolver's definition — no per-table
     /// list). #2084: a lookup that CITES rather than files (<see cref="RecordOwnershipResolver.IsCitation"/>, the one predicate the
-    /// resolver's own <c>ParentsOf</c> applies) is left out, so a Signal created naming its rule is never filed under the rule.</summary>
+    /// resolver's own <c>ParentsOf</c> applies) is left out, so a Signal created naming its rule is never filed under the rule.
+    /// UAC task 194b fix round F4: in the table's primary order (<see cref="RecordOwnershipContext.InPrimaryOrder"/>, the order the
+    /// reconciler asks the row in once it exists), never the order the caller's payload named the lookups in — the first is the
+    /// primary, whose business unit decides an ordinary row's owner.</summary>
     internal static IReadOnlyList<RecordOwnershipParent> ParentsOf(string table, DataverseWriteItemMapper.MappedItem item) =>
-        item.Lookups
-            .Where(l => RecordOwnershipResolver.IsOwnershipParent(l.RelatedTable) && !RecordOwnershipResolver.IsCitation(table, l.Column))
-            .Select(l => new RecordOwnershipParent(l.RelatedTable, l.RecordId))
-            .Distinct()
-            .ToArray();
+        OwnershipOf(table, item).Parents; // 194b R (B3): the one builder's parents, so the two cannot drift
+
+    /// <summary>UAC task 194b fix round R (B3): the ownership question for a mapped row of <paramref name="table"/> — the one
+    /// builder (<see cref="RecordOwnershipContext.ForRow"/>) over the lookups the item writes and its regarding pair id.</summary>
+    internal static RecordOwnershipContext OwnershipOf(
+        string table, DataverseWriteItemMapper.MappedItem item, Guid? callerObjectId = null, Guid? callerSystemUserId = null) =>
+        RecordOwnershipContext.ForRow(table, LookupsOf(item), PairIdOf(item.JsonBody), callerObjectId, callerSystemUserId);
+
+    /// <summary>UAC task 194b R4: every lookup the mapped item writes, column → the record it names (the builder filters).</summary>
+    internal static IEnumerable<KeyValuePair<string, RecordOwnershipParent?>> LookupsOf(DataverseWriteItemMapper.MappedItem item) =>
+        item.Lookups.Select(l => KeyValuePair.Create(l.Column, (RecordOwnershipParent?)new RecordOwnershipParent(l.RelatedTable, l.RecordId)));
+
+    /// <summary>The body's <c>sprk_regardingrecordid</c> (the regarding pair's id, a text column), or <c>null</c>.</summary>
+    private static string? PairIdOf(string jsonBody)
+    {
+        if (string.IsNullOrWhiteSpace(jsonBody))
+            return null;
+        try
+        {
+            using var body = JsonDocument.Parse(jsonBody);
+            return body.RootElement.ValueKind == JsonValueKind.Object
+                   && body.RootElement.TryGetProperty(CoreAncestorResolver.RegardingRecordIdColumn, out var pair)
+                   && pair.ValueKind == JsonValueKind.String
+                ? pair.GetString()
+                : null;
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
 
     /// <summary>
     /// True when an <c>email.draft</c> takes the owned path: a draft (a <c>sprk_communication</c>, a CHILD in the ownership
@@ -179,8 +208,11 @@ internal static class OwnedChildWrite
     /// third root and carries the same Assigned To (Internal) / (External) pair as the other two (live metadata,
     /// 2026-10-02). Task 152 (<see cref="AssignedToDefaults.ResponsibleContactColumns"/>) already reads its
     /// <c>sprk_assignedtointernal</c> as the work assignment's responsible internal person, so that column follows the
-    /// matter/project precedent. Its extra <c>sprk_assignedto</c> is left to the model (b2-r2, verifier b2-r1 item 4; task
-    /// note §15b). A table not listed has no "for" column.
+    /// matter/project precedent. Its extra <c>sprk_assignedto</c> is not a "for" column (b2-r2, verifier b2-r1 item 4; task
+    /// note §15b); by owner decision 2026-10-27 (field-mapping-server-write-path-r1 task 037, FR-36, #2354) it is a copied
+    /// default instead — the new row's own <c>sprk_assignedtointernal</c>, when the create leaves it unset
+    /// (<see cref="Sprk.Bff.Api.Services.RecordCreation.ServerDefault.CopiedFrom"/>, applied by <see cref="CreateAsync"/>).
+    /// A table not listed has no "for" column.
     /// </summary>
     /// <remarks>Field-mapping-server-write-path-r1 task 012: a view over the registry's
     /// <see cref="Sprk.Bff.Api.Services.RecordCreation.RecordTableRule.ForPerson"/> entries, the one source; deleted when
@@ -231,6 +263,13 @@ internal static class OwnedChildWrite
     internal sealed record Outcome
     {
         public Guid? CreatedId { get; init; }
+
+        /// <summary>
+        /// Task 037 (fix round 1): with <see cref="CreatedId"/>, the columns the created row was written with — the
+        /// caller's own plus any copied default this create filled (a work assignment's Assigned To), so a caller reports
+        /// what was actually set rather than what it sent. <c>null</c> when nothing was created.
+        /// </summary>
+        public IReadOnlyList<string>? WrittenColumns { get; init; }
 
         /// <summary>Refused by the caller's own rights — surfaced as the user's access error.</summary>
         public string? Denied { get; init; }
@@ -308,6 +347,8 @@ internal static class OwnedChildWrite
     /// may not file under a secure record learns nothing more about it. A refusal creates nothing; an isolated plan creates
     /// the row owned by the plan's named Secure Record Owners team with <c>sprk_issecure = true</c> in the create itself.
     /// <c>null</c> for every other create.</param>
+    /// <param name="logger">Task 037: where a copied default that could not be applied is reported (a structured
+    /// warning); <c>null</c> reports nothing.</param>
     internal static async Task<Outcome> CreateAsync(
         IDataverseUserClient user,
         IRecordOwnershipResolver ownership,
@@ -317,11 +358,30 @@ internal static class OwnedChildWrite
         IReadOnlySet<string>? serverSetLookupColumns,
         Guid? callerObjectId,
         CancellationToken ct,
-        SecureRootFilingGate? planSecureCreate = null)
+        SecureRootFilingGate? planSecureCreate = null,
+        ILogger? logger = null)
     {
         var me = await WhoAmIAsync(user, ct).ConfigureAwait(false);
         if (me.Failure is not null)
             return new Outcome { ClientFailure = me.Failure };
+
+        // Task 037 (FR-36): the table's copied defaults (a work assignment's Assigned To from its own Assigned To Internal),
+        // fill-only, on the row BEFORE anything is checked or written — so the value is checked as the caller exactly like
+        // a supplied one, written in the create itself, and read back by the "Assigned *" materialisation after it. A copy of
+        // a SERVER-set source (the chat create's "for" person, the caller's own contact) names the same server-chosen record,
+        // so it is server-set too: it costs no more AppendTo than its source did.
+        var defaulted = await WithCopiedDefaultsAsync(user, table, item, logger, ct).ConfigureAwait(false);
+        if (defaulted.ClientFailure is { } defaultFailure)
+            return new Outcome { ClientFailure = defaultFailure };
+        item = defaulted.Item;
+        var serverSetCopies = defaulted.Copied
+            .Where(c => serverSetLookupColumns?.Contains(c.Source) == true)
+            .Select(c => c.Column)
+            .ToArray();
+        if (serverSetCopies.Length > 0)
+        {
+            serverSetLookupColumns = new HashSet<string>(serverSetLookupColumns!.Concat(serverSetCopies), StringComparer.OrdinalIgnoreCase);
+        }
 
         var check = await CheckCallerMayCreateAsync(user, me.SystemUserId, table, item, serverSetLookupColumns, ct)
             .ConfigureAwait(false);
@@ -368,7 +428,7 @@ internal static class OwnedChildWrite
         // Task 146 c1-r1 (owner round 13 item 9): the caller asked for this row, so the app-only create records them as its
         // creator person — F3's "or the creator" branch can then admit them, as it admits a run-as-user row's createdby.
         var owner = await ownership.ResolveOwnerAsync(
-            RecordOwnershipContext.ForParents(ParentsOf(table, item), callerObjectId, me.SystemUserId) with
+            OwnershipOf(table, item, callerObjectId, me.SystemUserId) with
             {
                 RequestedBy = RecordRequester.Of(me.SystemUserId),
             },
@@ -408,7 +468,7 @@ internal static class OwnedChildWrite
 
         var id = Guid.NewGuid();
         await appOnly.UpdateRecordFieldsAsync(table, id, fields, ct).ConfigureAwait(false);
-        return new Outcome { CreatedId = id };
+        return new Outcome { CreatedId = id, WrittenColumns = item.Columns };
     }
 
     /// <summary>
@@ -432,7 +492,62 @@ internal static class OwnedChildWrite
 
         var id = Guid.NewGuid();
         await appOnly.UpdateRecordFieldsAsync(table, id, fields, ct).ConfigureAwait(false);
-        return new Outcome { CreatedId = id };
+        return new Outcome { CreatedId = id, WrittenColumns = item.Columns };
+    }
+
+    /// <summary>
+    /// Task 037 (FR-36): <paramref name="item"/> with the table's copied defaults
+    /// (<see cref="Sprk.Bff.Api.Services.RecordCreation.RecordTableRules.CopiedDefaultsFor"/>) filled — each lookup the row
+    /// binds in the source column, bound as-is in the target the row leaves unset, mapped as the caller (navigation property
+    /// from metadata, as every other lookup) and merged in. A target the row sets (an explicit null included) is never
+    /// touched. A source the row leaves unset leaves the target blank, with a structured warning. A default the table's
+    /// metadata cannot bind is left out with a warning (the create goes on); the caller's own failure reading that
+    /// metadata is returned, and nothing is written. A table with no copied default costs nothing.
+    /// </summary>
+    /// <returns>The item to check and write, each (column, source column) pair it filled, or the caller's own failure.</returns>
+    private static async Task<(DataverseWriteItemMapper.MappedItem Item, IReadOnlyList<(string Column, string Source)> Copied,
+        DataverseUserResponse? ClientFailure)> WithCopiedDefaultsAsync(
+        IDataverseUserClient user, string table, DataverseWriteItemMapper.MappedItem item, ILogger? logger, CancellationToken ct)
+    {
+        var fills = Sprk.Bff.Api.Services.RecordCreation.RecordTableRules.CopiedDefaultsFor(
+            Sprk.Bff.Api.Services.RecordCreation.RecordTableRules.Find(table), item);
+        if (fills.Count == 0)
+            return (item, [], null);
+
+        var extra = new Dictionary<string, object?>(StringComparer.Ordinal);
+        var copied = new List<(string Column, string Source)>();
+        foreach (var fill in fills)
+        {
+            if (fill.Source is { } source)
+            {
+                extra[fill.Default.Column] = new { relatedTable = source.RelatedTable, recordId = source.RecordId };
+                copied.Add((fill.Default.Column, source.Column));
+                continue;
+            }
+
+            logger?.LogWarning(
+                "copied_default_source_unset: entity={Entity} column={Column} source={Source} — the create leaves both unset, " +
+                "so the column stays blank (task 037, FR-36)",
+                table, fill.Default.Column, fill.Default.CopiedFrom);
+        }
+
+        if (extra.Count == 0)
+            return (item, [], null);
+
+        var mapped = await DataverseWriteItemMapper.MapAsync(user, table, JsonSerializer.SerializeToElement(extra), ct)
+            .ConfigureAwait(false);
+        if (mapped.ClientFailure is { } mapFailure)
+            return (item, [], mapFailure);
+        if (mapped.Item is not { } added)
+        {
+            logger?.LogWarning(
+                "copied_default_not_bound: entity={Entity} columns={Columns} — the table's metadata cannot bind them, so they " +
+                "are left blank: {Reason} (task 037, FR-36)",
+                table, string.Join(",", extra.Keys), mapped.ValidationError);
+            return (item, [], null);
+        }
+
+        return (Merge(item, added), copied, null);
     }
 
     // ── The ADR-024 regarding pair (sprk_regardingrecordid + sprk_regardingrecordtype) ─────────────────────────────
@@ -1043,9 +1158,12 @@ internal static class OwnedChildWrite
 
         if (!isChild)
         {
+            // UAC task 194b R3b-2: through the one builder, keyed by the columns the update writes.
             var owner = await ownership.ResolveOwnerAsync(
-                RecordOwnershipContext.ForParents(
-                    newParents.Select(l => new RecordOwnershipParent(l.RelatedTable, l.RecordId)), callerObjectId, me.SystemUserId),
+                RecordOwnershipContext.ForRow(
+                    table,
+                    newParents.Select(l => KeyValuePair.Create(l.Column, (RecordOwnershipParent?)new RecordOwnershipParent(l.RelatedTable, l.RecordId))),
+                    PairIdOf(item.JsonBody), callerObjectId, me.SystemUserId),
                 ct).ConfigureAwait(false);
             return owner.IsRefused || owner.IsSecureOwner
                 ? new RefileOutcome { SecureFilingRefused = owner }

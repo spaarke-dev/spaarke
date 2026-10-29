@@ -18,9 +18,13 @@
 //      (RollbackTransitions.ShouldReleaseCustomerGuard(Resumable) == true, EXEC-07)
 //      or a clear-quarantine / cancel did. Another run holding it ->
 //      GuardConflict; transport failure -> GuardUnavailable.
-//   4. Bump HandlerRetryAttempts[phase], Status=Running, ErrorDetail=null,
-//      CompletedOn=null, ReplaceRunAsync(ETag).
-//   5. THEN enqueue ReconcilerEnvelopeBuilder.Build(phase, run, time, attempt).
+//   4. Bump HandlerRetryAttempts for the current phase AND every other handler in
+//      run.FailedHandlers (T186 L41: a later sibling failure used to hide an earlier one,
+//      which then never ran again), Status=Running, ErrorDetail=null, CompletedOn=null,
+//      ReplaceRunAsync(ETag).
+//      The first resume after a clear-quarantine also adds every DAG-ready handler (T186 L55) and stamps
+//      Quarantine.ResumedAt.
+//   5. THEN enqueue ReconcilerEnvelopeBuilder.Build(id, run, time, attempt) for each, current phase first.
 //      If the enqueue throws, revert the run to Failed (previous ErrorDetail,
 //      CompletedOn=now, new ETag) and return EnqueueFailed.
 //   Entry-point handlers H0 / H0.5 are covered too: the reconciler never
@@ -46,6 +50,9 @@ namespace Sprk.Provisioning.ControlPlane.Rollback;
 /// <inheritdoc/>
 public sealed class RunControlService : IRunControlService
 {
+    // Stateless (the DAG is static data); not injected because the API host does not register the reconciler.
+    private static readonly DagAdvancer ReadyHandlers = new();
+
     private readonly IProvisioningRunRepository _repository;
     private readonly ICustomerRunGuard _customerRunGuard;
     private readonly IHandlerEnqueuer _enqueuer;
@@ -131,10 +138,44 @@ public sealed class RunControlService : IRunControlService
                 return new RunResumeResult.GuardUnavailable(txf.Diagnostic);
         }
 
-        // Fresh MessageId: attempt = prior + 1, persisted in the same write.
-        run.HandlerRetryAttempts.TryGetValue(handlerId, out var priorAttempts);
-        var attempt = priorAttempts + 1;
-        run.HandlerRetryAttempts[handlerId] = attempt;
+        // T186 L41: re-dispatch EVERY handler whose last attempt failed, not only the current phase — a later sibling
+        // failure becomes the run's current phase and used to hide the earlier one, which then never ran again.
+        var toDispatch = new List<string> { handlerId };
+        toDispatch.AddRange(run.FailedHandlers.Where(h =>
+            !string.Equals(h, handlerId, StringComparison.Ordinal)
+            && HandlerIds.Dispatchable.Contains(h, StringComparer.Ordinal)));
+
+        // T186 L55: while the run was Quarantined the dispatcher completed every arriving envelope without running it
+        // (a quarantined run is terminal to it). A sibling dispatched alongside the quarantining handler — H12b next to
+        // H12a — was lost that way, and the reconciler's re-sends reuse its MessageId, which Service Bus duplicate
+        // detection drops for an hour. So the first resume after a clear also re-dispatches every ready handler with a
+        // fresh attempt. Only that resume: a plain Failed run invokes its envelopes, and a ready handler may still be
+        // running (a long H6 import) — re-sending it then would start a second copy.
+        var previousQuarantineResumedAt = run.Quarantine?.ResumedAt;
+        if (run.Quarantine is { State: QuarantineState.Cleared, ResumedAt: null } clearedQuarantine)
+        {
+            var statusBefore = run.Status;
+            run.Status = RunStatus.Running; // ComputeReadyHandlers returns nothing for a Failed run
+            foreach (var ready in ReadyHandlers.ComputeReadyHandlers(run))
+            {
+                if (!toDispatch.Contains(ready, StringComparer.Ordinal))
+                {
+                    toDispatch.Add(ready);
+                }
+            }
+            run.Status = statusBefore;
+            clearedQuarantine.ResumedAt = _timeProvider.GetUtcNow();
+        }
+
+        // Fresh MessageId: attempt = prior + 1 for each, persisted in the same write.
+        var attempts = new List<(string HandlerId, int Attempt)>();
+        foreach (var id in toDispatch)
+        {
+            run.HandlerRetryAttempts.TryGetValue(id, out var prior);
+            attempts.Add((id, prior + 1));
+            run.HandlerRetryAttempts[id] = prior + 1;
+            run.ResetAutoRetries(id); // T186 L44: an operator re-dispatch restores the auto-retry budget
+        }
 
         var previousErrorDetail = run.ErrorDetail;
         run.Status = RunStatus.Running;
@@ -157,27 +198,39 @@ public sealed class RunControlService : IRunControlService
             case ReplaceRunResult.NotFound:
                 return new RunResumeResult.NotFound();
             case ReplaceRunResult.Success s:
-                return await EnqueueResumedHandlerAsync(
-                    s, handlerId, attempt, previousErrorDetail, actorObjectId, cancellationToken).ConfigureAwait(false);
+                return await EnqueueResumedHandlersAsync(
+                    s, handlerId, attempts, previousErrorDetail, previousQuarantineResumedAt, actorObjectId, cancellationToken).ConfigureAwait(false);
             default:
                 throw new System.Diagnostics.UnreachableException(
                     "ReplaceRunResult exhaustive union changed — update RunControlService.");
         }
     }
 
-    private async Task<RunResumeResult> EnqueueResumedHandlerAsync(
+    private async Task<RunResumeResult> EnqueueResumedHandlersAsync(
         ReplaceRunResult.Success persisted,
         string handlerId,
-        int attempt,
+        IReadOnlyList<(string HandlerId, int Attempt)> attempts,
         string? previousErrorDetail,
+        DateTimeOffset? previousQuarantineResumedAt,
         string? actorObjectId,
         CancellationToken cancellationToken)
     {
         var run = persisted.Run;
+        var attempt = attempts[0].Attempt;
         try
         {
-            var envelope = ReconcilerEnvelopeBuilder.Build(handlerId, run, _timeProvider, attempt);
-            await _enqueuer.EnqueueAsync(envelope, cancellationToken).ConfigureAwait(false);
+            // The current phase first (attempts[0]), then the other failed handlers.
+            foreach (var (id, idAttempt) in attempts)
+            {
+                var envelope = ReconcilerEnvelopeBuilder.Build(id, run, _timeProvider, idAttempt);
+                await _enqueuer.EnqueueAsync(envelope, cancellationToken).ConfigureAwait(false);
+                if (!string.Equals(id, handlerId, StringComparison.Ordinal))
+                {
+                    _logger.LogInformation(
+                        "RunResumed (other failed or ready handler, T186 L41/L55): CustomerId={CustomerId} RunId={RunId} HandlerId={HandlerId} Attempt={Attempt}",
+                        run.CustomerId, run.RunId, id, idAttempt);
+                }
+            }
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -189,6 +242,10 @@ public sealed class RunControlService : IRunControlService
                 ex,
                 "RunResume: enqueue failed — reverting run to Failed. CustomerId={CustomerId} RunId={RunId} HandlerId={HandlerId} Attempt={Attempt}",
                 run.CustomerId, run.RunId, handlerId, attempt);
+            if (run.Quarantine is not null)
+            {
+                run.Quarantine.ResumedAt = previousQuarantineResumedAt; // the next resume must still re-dispatch the ready handlers
+            }
             await RevertToFailedAsync(run, persisted.ETag, previousErrorDetail, cancellationToken).ConfigureAwait(false);
             return new RunResumeResult.EnqueueFailed($"{ex.GetType().Name}: {ex.Message}");
         }
@@ -330,9 +387,14 @@ public sealed class RunControlService : IRunControlService
         }
 
         var run = read.Run;
-        if (run.Status != RunStatus.WaitingOnGate)
+        // T186 L37: also a Running run. A sibling's success could overwrite the gated handler's WaitingOnGate (fixed in
+        // ProvisioningRun.MarkPhaseSucceeded, but a run already in that state, or one whose gate a later failure +
+        // resume left Pending, would otherwise have no way forward: the reconciler's re-dispatch of the verifier reuses
+        // its MessageId and is dropped as a duplicate). Re-dispatching a Pending gate's verifier on a Running run is
+        // safe: per-customer messages are serialised by session, and the verifier re-checks the gate idempotently.
+        if (run.Status is not (RunStatus.WaitingOnGate or RunStatus.Running))
         {
-            return new GateAdvanceResult.Conflict(run.Status, "a gate can only be advanced while the run is WaitingOnGate");
+            return new GateAdvanceResult.Conflict(run.Status, "a gate can only be advanced while the run is WaitingOnGate or Running");
         }
 
         if (!run.GateStates.TryGetValue(gateId, out var gate))
@@ -358,6 +420,7 @@ public sealed class RunControlService : IRunControlService
         run.HandlerRetryAttempts.TryGetValue(verifier, out var priorAttempts);
         var attempt = priorAttempts + 1;
         run.HandlerRetryAttempts[verifier] = attempt;
+        run.ResetAutoRetries(verifier); // T186 L44
 
         var replace = await _repository.ReplaceRunAsync(run, read.ETag, cancellationToken).ConfigureAwait(false);
         switch (replace)

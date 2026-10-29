@@ -13,6 +13,7 @@ using Sprk.Bff.Api.Infrastructure.Cache;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Infrastructure.Graph;
+using Sprk.Bff.Api.Tests.AccessControl.IdentityBinding;
 using Xunit;
 using Sprk.Bff.Api.Tests.TestInfrastructure;
 
@@ -277,7 +278,8 @@ public class ProjectClosureCascadeTests
         Guid? projectId = null,
         Mock<SpeContainerMembershipService>? spe = null,
         ExternalParticipationService? participations = null,
-        RecordContainerResolver? resolver = null) =>
+        RecordContainerResolver? resolver = null,
+        IContactIdentityStore? identityStore = null) =>
         ProjectClosureEndpoint.Handle(
             new CloseProjectRequest(projectId ?? ProjectId),
             client.Object,
@@ -290,7 +292,9 @@ public class ProjectClosureCascadeTests
             resolver ?? TestRecordContainerResolver.ForNonSecureRecord("sprk_project", projectId ?? ProjectId),
             AuthenticatedContext(),
             NullLogger<Program>.Instance,
-            CancellationToken.None);
+            CancellationToken.None,
+            // Proven by default (no marked rows): an empty binding is "no binding", as the #2103 cases below need.
+            identityStore ?? new InMemoryContactIdentityStore());
 
     /// <summary>The secure project's OWN container — the only one task 166 lets a closure touch.</summary>
     private const string OwnContainer = "b!secure-project-own-container";
@@ -739,6 +743,35 @@ public class ProjectClosureCascadeTests
         OkBody(result).SpeContainerMembersRemoved.Should().Be(1);
         calls.Should().ContainSingle();
         calls[0].Emails.Should().BeEquivalentTo(new[] { ContactEmail });
+    }
+
+    /// <summary>
+    /// The binding and its plane are field-secured, so a hidden binding reads EMPTY, like none: a no-email grantee has
+    /// "nothing to clear" only while the identity columns' read is proven. Unproven, the grantee's key is not resolved and
+    /// the closure reports container_not_cleared, as for an email that could not be read.
+    /// </summary>
+    [Fact]
+    public async Task CloseProject_SecureProject_ANoEmailGranteeWhoseEmptyBindingReadIsUnproven_IsNotCleared()
+    {
+        var table = new FakeGrantTable();
+        table.SeedContactGrant(NoEmailContactId, ProjectId);
+        var client = table.BuildMock();
+        ArrangeGranteeIdentities(client);
+
+        var calls = new List<(string ContainerId, IReadOnlyCollection<string> Emails)>();
+        var confirmations = new List<bool>();
+        var spe = SpeAnswering(_ => Removed, calls, confirmations: confirmations);
+
+        var result = await CloseProject(client, spe: spe,
+            resolver: TestRecordContainerResolver.ForSecureRecord("sprk_project", ProjectId, OwnContainer),
+            identityStore: new InMemoryContactIdentityStore { IdentityColumnsProof = ColumnReadProofOutcome.Unproven });
+
+        Problem(result).ProblemDetails.Extensions["reasonCode"].Should()
+            .Be(ProjectClosureEndpoint.ClosureContainerNotClearedReason, "an unproven empty binding is not \"nothing to clear\"");
+        // As for an unreadable email: no key could be matched, so the container is only asked whether ANY contact
+        // permission remains.
+        calls.Should().ContainSingle().Which.Emails.Should().BeEmpty();
+        confirmations.Should().Equal(true);
     }
 
     /// <summary>

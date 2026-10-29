@@ -1,0 +1,109 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="168" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>Assign Task: "Send email notification" (ticked by default) emails the assignee and raises a model-driven bell notification (D-194, UAT round 2 item 2)</title>
+    <phase>11 UAT</phase>
+    <gate>startable after 167 merges (both change DecisionActionCatalog.cs, DecisionActionExecutors.cs and ParameterFields.tsx)</gate>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Adds a parameter kind, a post-commit side effect that sends email on the user's behalf, and an ADR-004 job in Sprk.Bff.Api (.cs); client rendering (.tsx); modifies tests.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Sends email as the user with a fallback, and must keep the commit contract (DR last, failure never fails the decision); judgment is needed on the post-commit placement.</model-tier-reason>
+    <effort>high</effort>
+    <deps>159 (assign-task), 167 (same files)</deps>
+    <tags>bff,api,frontend,email,testing</tags>
+    <estimated-effort>6-8 hours</estimated-effort>
+    <parallel-group>M</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>Owner UAT round 2 (notes/uat-v4-log.md, 2026-10-28, item 2; decision D-194): add a "Send email notification" checkbox, ticked by default, to the Assign Task action. When it is ticked, the decision sends the Assigned To contact an email with the matter link, What to do and Due, and raises a model-driven app notification for the assignee's user. The email goes from the assigner's own mailbox when available; the fallback is the system mailbox.</prompt>
+  <role>SPAARKE BFF engineer (Signals decision actions, communication).</role>
+  <goal>After a decision whose Assign Task step had the box ticked is recorded, the assignee contact receives one email from the assigner, or from the system mailbox when the assigner's send fails. The assignee's linked user gets one bell notification that links to the matter. A failed email or notification never fails or rolls back the decision, and it is logged.</goal>
+
+  <context>
+    <background>
+      Reuse (found 2026-10-28, `path:line` on `docs/ontology-platform-design`):
+      <ul>
+        <li><b>Delegated send:</b> `BudgetInquiryExecutor.cs:57` (`InquiryEmailSender`) sends as the signed-in user through `CommunicationService.SendAsync` → `Channels/EmailChannelSender.cs:62` (`Me.SendMail`). That path also writes a tracked `sprk_communication`.</li>
+        <li><b>System send:</b> `Services/Registration/RegistrationEmailService.cs` (embedded HTML templates with `{{placeholder}}`, `:12`, `:33`; app-only from `Communication:DefaultMailbox`, which must be in `Communication:ApprovedSenders`, `Configuration/CommunicationOptions.cs:20,26`). `Api/ExternalAccess/GrantAccessNotifier.cs:51-55` reuses it best-effort with a 15 s timeout.</li>
+        <li><b>Bell:</b> `Services/NotificationService.cs:61` `CreateNotificationAsync(userId, title, body, category, priority, actionUrl, regardingId, …, actionTitle)` writes a native `appnotification`. `GrantAccessNotifier.cs:36-50` is the best-effort caller. In-app notifications are on for Matter Management (`AppModule.xml:169-171`).</li>
+        <li><b>Contact → user:</b> `Services/Signals/PersonalToDoAssignee.cs:19-22,64` (the enabled systemuser whose `sprk_primarycontact` is the contact, via `AssignedAccessStore.ReadLinkCandidatesAsync`). Also `GrantAccessNotifier.cs:38-41`, `AssignedLinkCandidate.Represents`.</li>
+        <li><b>Link:</b> `Services/Signals/Actions/InquiryRecordFacts.cs:161` `AppLink(envUrl, logicalName, id)`.</li>
+        <li><b>Assign Task:</b> `DecisionActionCatalog.cs:211-220` (assignee Person, description TextArea, dueDate Date). The executor is `DecisionActionExecutors.cs:1327-1391` (`AssignTaskExecutor`, `ChildCreateExecutorBase`).</li>
+        <li><b>Parameter kinds:</b> `DecisionParameterKind` (`DecisionActionCatalog.cs:25-34`) has no Boolean. Rendering is in `ParameterFields.tsx:281`, and `decisionDisplay.ts:33,41` switches on kind.</li>
+        <li><b>Post-commit hook:</b> `DecisionCommitFollowUps.cs:140`. The ADR-004 job precedent is `GateDecisionRecordJob.cs` (enqueuer `:89`, handler `:168`).</li>
+      </ul>
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Signals/Actions/DecisionActionCatalog.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Signals/Actions/DecisionActionExecutors.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Signals/DecisionCommitFollowUps.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Signals/GateDecisionRecordJob.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Signals/Actions/BudgetInquiryExecutor.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Registration/RegistrationEmailService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/ExternalAccess/GrantAccessNotifier.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/NotificationService.cs</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/DecisionWizard/ParameterFields.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/DecisionWizard/decisionDisplay.ts</file>
+    </relevant-files>
+  </context>
+
+  <justification>
+    <existing>`CommunicationService` (delegated and app-only email), `RegistrationEmailService` templates, `NotificationService` (`appnotification`), `PersonalToDoAssignee` (contact → user), `InquiryRecordFacts.AppLink`, the `GateDecisionRecordJob` pattern and `DecisionCommitFollowUps`.</existing>
+    <extension>Reuse all of them. The only new pieces are: a Boolean parameter kind (a checkbox, so a Yes/No Choice is not used), one embedded HTML template, one notifier class that composes the existing senders, and (if the send runs after the response) one `IJobHandler` modelled on `GateDecisionRecordJob`. No new email or notification framework.</extension>
+    <cost-of-doing-nothing>The assignee is not told that a task was assigned. The owner wants the notice by email and in the app (UAT round 2).</cost-of-doing-nothing>
+  </justification>
+
+  <constraints>
+    <constraint source="D-17">The DR remains the last write of the commit, and notifying runs after it (in `DecisionCommitFollowUps` or a job it enqueues). A notification failure never changes the commit result, the DR or the created event. The commit response may include a non-blocking `notification` outcome field. If you add one, the wizard shows a quiet warning when the email did not go.</constraint>
+    <constraint source="D-194 sender">First, the assigner's delegated send through `CommunicationService` (the `InquiryEmailSender` path), in the request, with a bounded timeout of at most 10 s. On any failure (no mailbox, no consent, a Graph error, the timeout), fall back to the system mailbox (`Communication:DefaultMailbox`, approved-sender checked) on an ADR-004 job, because the request must not wait twice. State in the PR whether the delegated path writes a tracked `sprk_communication` (D-194 accepts it if that is by design). Never send both.</constraint>
+    <constraint source="D-194 content">The recipient is the Assigned To contact's `emailaddress1`; if it is empty, skip the email and log it. The subject and body come from an embedded HTML template with HTML-encoded values: the matter name and an `AppLink` to the matter, What to do (the description), and Due (the date, or "No due date"). Nothing else from the decision or Signal goes in it. Never put the Signal sentence, the facts or the DR content in the email.</constraint>
+    <constraint source="D-194 bell">Resolve the contact to its single enabled linked user through the existing path. If there are zero or several users, no bell, log it. The bell's `actionUrl` is the matter's model-driven link. The title and body are short and contain no decision content.</constraint>
+    <constraint source="D-194 default">The checkbox is ticked by default (the parameter's default is true). A request that omits it is treated as true at commit, so the server and the wizard agree.</constraint>
+    <constraint source="security">Send only to the contact the step bound, which the caller was already allowed to append (`DecisionActionExecutors.cs:1154`). Nothing about a Secure matter beyond its name and link: if the matter is Secure, the email still goes to the assignee (a member by assignment). Log record ids only, never email addresses.</constraint>
+    <constraint source="CLAUDE.md">Use `python`, never `python3`. No --no-verify, no bare stash, no sub-agents. Measure the publish-size delta. Run the full ArchTests and filtered Signals tests. Never send a real email from tests; use fakes. Never call a live mailbox from the lane.</constraint>
+  </constraints>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare FULL rigor and the reason, then load the knowledge files. Work in `C:\wts-168` on `task/168-assign-task-notify` from `origin/docs/ontology-platform-design`, after 167 has merged there.</step>
+    <step order="1">Failing tests first:
+      <ul>
+        <li>the plan shows `notify` (Boolean, default true) on assign-task only;</li>
+        <li>commit with notify true: delegated send attempted, with the right recipient and an encoded body containing the link, What to do and Due; then the bell for the single linked user;</li>
+        <li>the delegated send fails or times out, so one system-mailbox job is enqueued and executed;</li>
+        <li>notify false, or a contact with no email: no send;</li>
+        <li>zero or several linked users: no bell, the email still goes;</li>
+        <li>a notification failure leaves the commit result and the DR unchanged (must-not-fire);</li>
+        <li>client: the checkbox renders ticked and its value is sent.</li>
+      </ul>
+    </step>
+    <step order="2">Implement the Boolean kind (server enum, client checkbox, display), the template, the notifier and the job. Register them under ADR-010 (concretes) and the BFF hygiene rules.</step>
+    <step order="3">Run the tests, the ArchTests, the size delta, and `tsc` for `Spaarke.UI.Components`. Open a PR into `docs/ontology-platform-design`.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">Assign Task's plan has a `notify` checkbox, ticked by default. No other action has it.</criterion>
+    <criterion testable="true">With notify true, exactly one email goes to the assignee contact (delegated first, the system mailbox on failure), carrying the matter link, What to do and Due, HTML-encoded. The single linked user gets one bell with the matter link.</criterion>
+    <criterion testable="true">Must-not-fire: notify false sends nothing. A contact with no email gets no email. Zero or several linked users get no bell. A send or notification failure never changes the commit result, the event or the DR.</criterion>
+    <criterion testable="true">The DR is still the last write of the commit (existing commit-order tests pass unchanged).</criterion>
+    <criterion testable="true">Test scope: the stated contract plus the cases above. Anything beyond needs a one-line justification in the task notes.</criterion>
+  </acceptance-criteria>
+
+  <ui-tests>
+    <test name="Notify on dev (owner, after deploy)"><steps><step>Record an Assign Task to a zz- contact whose email is the owner's, with the box ticked.</step></steps><expected>One email from the owner's mailbox with the matter link, What to do and Due. A bell notification for the linked user opens the matter.</expected></test>
+  </ui-tests>
+
+  <escalation>
+    <trigger>STOP and report if delegated send needs a new Graph permission or consent, if the system mailbox is not in ApprovedSenders on dev, or if the notification has to be sent before the DR.</trigger>
+  </escalation>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ontology-platform-r1/notes/decisions.md (D-17, D-129, D-194)</file>
+      <file>docs/adr/ADR-004-async-job-contract.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+  </knowledge>
+</task>

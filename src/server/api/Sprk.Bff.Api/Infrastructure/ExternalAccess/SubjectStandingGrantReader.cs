@@ -37,7 +37,12 @@ namespace Sprk.Bff.Api.Infrastructure.ExternalAccess;
 /// were rejected because a level nobody chose must not confer access. Recorded in
 /// <c>notes/task-042-standing-grant-levels.md</c> §4.</para>
 /// </param>
-public readonly record struct StandingGrantState(bool Held, ExternalAccessLevel? Baseline)
+/// <param name="BaselineUnreadable">
+/// <c>true</c> when the baseline read EMPTY on a field-secured column whose read by the BFF could not be proven
+/// (<see cref="SecuredColumnReadProof"/>): the level may be set and hidden. <see cref="Baseline"/> is then <c>null</c> and the
+/// standing term contributes nothing — an unreadable level is never replaced by a default, lower or higher.
+/// </param>
+public readonly record struct StandingGrantState(bool Held, ExternalAccessLevel? Baseline, bool BaselineUnreadable = false)
 {
     /// <summary>The fail-closed value: no standing grant, no baseline.</summary>
     public static StandingGrantState NotHeld => new(false, null);
@@ -116,14 +121,21 @@ public sealed class SubjectStandingGrantReader : ISubjectStandingGrantReader
     private readonly IDataverseService _dataverse;
     private readonly ILogger<SubjectStandingGrantReader> _logger;
 
+    // contact.sprk_accesspermissiongrant is field-secured: an EMPTY read is trusted as "not set" only once the BFF's read of
+    // the column is proven (docs/data-model/access-inheritance.md, "When a record is trusted"). The reader is a singleton: the
+    // proof is made at first use, held for SecuredColumnReadProof.ProofLifetime, then made again.
+    private readonly SecuredColumnReadProof _contactBaselineReadProof;
+
     public SubjectStandingGrantReader(
         IDataverseService dataverse,
-        ILogger<SubjectStandingGrantReader> logger)
+        ILogger<SubjectStandingGrantReader> logger,
+        TimeProvider? time = null)
     {
         ArgumentNullException.ThrowIfNull(dataverse);
         ArgumentNullException.ThrowIfNull(logger);
         _dataverse = dataverse;
         _logger = logger;
+        _contactBaselineReadProof = new SecuredColumnReadProof(dataverse, ContactEntity, BaselineAttribute, logger, time);
     }
 
     /// <inheritdoc />
@@ -184,6 +196,10 @@ public sealed class SubjectStandingGrantReader : ISubjectStandingGrantReader
                     entityName, subjectId, StandingGrantAttribute, entityName, StandingGrantAttribute);
             }
 
+            // A value read on THIS row is not empty, so it needs no proof. It proves nothing about another row's empty read:
+            // a field share can grant one record without the column.
+            var baselineRead = entity is not null && entity.Contains(BaselineAttribute) && entity[BaselineAttribute] is not null;
+
             var held = entity?.GetAttributeValue<bool>(StandingGrantAttribute) ?? false;
 
             if (!held)
@@ -194,6 +210,22 @@ public sealed class SubjectStandingGrantReader : ISubjectStandingGrantReader
             }
 
             var baseline = ReadBaseline(entity);
+
+            if (baseline is null
+                && isFlsSecured
+                && !baselineRead
+                && !await _contactBaselineReadProof.IsProvenAsync(ct).ConfigureAwait(false))
+            {
+                // The baseline column is field-secured and read EMPTY, and the BFF's read of it is not proven: the level may be
+                // set and hidden. Fail closed — no baseline, so the standing term contributes nothing. Never a default level.
+                _logger.LogWarning(
+                    "[WF-STANDING] {Entity} {SubjectId} holds a standing grant but '{Baseline}' read EMPTY and the BFF's read " +
+                    "of it is not proven, so the standing term contributes NO access (fail-closed). Grant the BFF " +
+                    "application user Read on {Entity}.{Baseline}.",
+                    entityName, subjectId, BaselineAttribute, entityName, BaselineAttribute);
+
+                return new StandingGrantState(Held: true, Baseline: null, BaselineUnreadable: true);
+            }
 
             if (baseline is null)
             {

@@ -372,13 +372,13 @@ internal sealed class SecureRecordSetupWebApi
     internal async Task<IReadOnlyList<SecureSetupRole>> FindRolesAsync(string name, Guid businessUnitId, CancellationToken ct)
         => (await GetValuesAsync(
                 $"roles?$filter=name eq '{Literal(name)}' and _businessunitid_value eq {businessUnitId}" +
-                "&$select=roleid,name,_businessunitid_value,_parentrootroleid_value&$top=2",
+                "&$select=roleid,name,_businessunitid_value,_parentrootroleid_value,_roletemplateid_value&$top=2",
                 $"Reading role '{name}'", ct).ConfigureAwait(false))
             .Select(Role).ToArray();
 
     internal async Task<IReadOnlyList<SecureSetupRole>> ListTeamRolesAsync(Guid teamId, CancellationToken ct)
         => (await GetAllValuesAsync(
-                $"teams({teamId})/teamroles_association?$select=roleid,name,_businessunitid_value,_parentrootroleid_value",
+                $"teams({teamId})/teamroles_association?$select=roleid,name,_businessunitid_value,_parentrootroleid_value,_roletemplateid_value",
                 "Reading the team's roles", ct).ConfigureAwait(false))
             .Select(Role).ToArray();
 
@@ -693,7 +693,8 @@ internal sealed class SecureRecordSetupWebApi
             e.TryGetProperty("isdefault", out var d) && d.ValueKind == JsonValueKind.True);
 
     private static SecureSetupRole Role(JsonElement e)
-        => new(Id(e, "roleid"), Text(e, "name") ?? string.Empty, Id(e, "_businessunitid_value"), OptionalId(e, "_parentrootroleid_value"));
+        => new(Id(e, "roleid"), Text(e, "name") ?? string.Empty, Id(e, "_businessunitid_value"), OptionalId(e, "_parentrootroleid_value"),
+            OptionalId(e, "_roletemplateid_value"));
 
     private static string? Text(JsonElement e, string property)
         => e.TryGetProperty(property, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() : null;

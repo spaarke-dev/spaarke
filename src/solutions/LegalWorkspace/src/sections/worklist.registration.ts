@@ -97,7 +97,11 @@ const WorklistSectionMount: React.FC = () => {
   // D-182: the wizard's Person / Lookup fields open the platform side-pane lookup and its subject opens in a modal; without Xrm
   // the wizard keeps its inline type-ahead and shows the subject as text.
   const navigation = React.useMemo(() => (webApi ? createXrmNavigationService() : undefined), [webApi]);
-  const openLookup = React.useMemo(() => (navigation ? createWorklistOpenLookup(navigation) : undefined), [navigation]);
+  // Task 160: with Xrm.WebApi the pane also reads a picked contact's address (the inquiry's To lookup).
+  const openLookup = React.useMemo(
+    () => (navigation ? createWorklistOpenLookup(navigation, webApi ?? undefined) : undefined),
+    [navigation, webApi]
+  );
   const openRecord = React.useMemo(() => (navigation ? createWorklistOpenRecord(navigation) : undefined), [navigation]);
 
   const openEmailReview = React.useCallback(() => {

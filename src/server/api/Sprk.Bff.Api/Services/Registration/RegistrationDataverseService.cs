@@ -47,6 +47,7 @@ public class RegistrationDataverseService : IDisposable
     private readonly TokenCredential _credential;
     private readonly ILogger<RegistrationDataverseService> _logger;
     private readonly ContactIdentityBinderFactory _binderFactory;
+    private readonly ContactIdentityBinder _ownEnvironmentBinder;
     private readonly IMembershipCacheInvalidator _accessCacheInvalidator;
     private readonly TrackingIdGenerator _trackingIdGenerator;
     private readonly SemaphoreSlim _tokenSemaphore = new(1, 1);
@@ -68,10 +69,12 @@ public class RegistrationDataverseService : IDisposable
         IHttpClientFactory httpClientFactory,
         ILogger<RegistrationDataverseService> logger,
         ContactIdentityBinderFactory binderFactory,
+        ContactIdentityBinder ownEnvironmentBinder,
         IMembershipCacheInvalidator accessCacheInvalidator)
     {
         _logger = logger;
         _binderFactory = binderFactory ?? throw new ArgumentNullException(nameof(binderFactory));
+        _ownEnvironmentBinder = ownEnvironmentBinder ?? throw new ArgumentNullException(nameof(ownEnvironmentBinder));
         _accessCacheInvalidator = accessCacheInvalidator ?? throw new ArgumentNullException(nameof(accessCacheInvalidator));
         _trackingIdGenerator = trackingIdGenerator;
         _credential = credential;
@@ -526,7 +529,8 @@ public class RegistrationDataverseService : IDisposable
 
     /// <summary>
     /// Whether <paramref name="dataverseBaseUrl"/> is this BFF's own <c>Dataverse:ServiceUrl</c> environment (task 132).
-    /// Unknown on either side counts as "yes" — see <see cref="EvictUserAccessAsync"/>.
+    /// Unknown on either side counts as "yes" — see <see cref="EvictUserAccessAsync"/>. The comparison itself is
+    /// <see cref="IsSameEnvironment"/>, shared with the binder selection and the reconciliation job.
     /// </summary>
     internal bool IsThisBffsEnvironment(string? dataverseBaseUrl)
     {
@@ -536,7 +540,54 @@ public class RegistrationDataverseService : IDisposable
             return true;
         }
 
-        return string.Equals(own.Trim().TrimEnd('/'), dataverseBaseUrl.Trim().TrimEnd('/'), StringComparison.OrdinalIgnoreCase);
+        return IsSameEnvironment(own, dataverseBaseUrl);
+    }
+
+    /// <summary>
+    /// The ONE decision whether two Dataverse URLs name the same environment (ISS-005, #1673 review F1). It compares
+    /// scheme, host and port, case-insensitively, and ignores a trailing slash, a path, a query and credentials; an
+    /// <c>.api.</c> host segment is the same environment as the host without it
+    /// (<c>x.api.crm.dynamics.com</c> == <c>x.crm.dynamics.com</c>; only on a <c>crm*</c> Dataverse host, so an
+    /// unrelated <c>foo.api.example.com</c> is never folded). Pure.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>An unusable URL is "not the same" (false), never "the same".</b> The answer picks the binder that writes
+    /// a new systemuser's contact: "same" selects the owner-aware binder over THIS environment, "different" the factory
+    /// binder over the named URL. A URL that cannot be read names no environment, so it must not select this one (that
+    /// would write into this environment on the strength of a URL nobody could resolve). As "different" it reaches the
+    /// factory, whose request to an unusable URL faults: nothing is written and the fault is logged / reported
+    /// (<see cref="LinkContactForNewSystemUserAsync"/> is non-fatal by design; the reconciliation job fails its run).
+    /// Callers that want the opposite default for an unknown URL (eviction treats it as "yes": an unnecessary
+    /// eviction costs a re-read) handle blanks themselves, as <see cref="IsThisBffsEnvironment"/> does.</para>
+    /// <para>A trailing dot on the host (<c>org.crm.dynamics.com.</c>, the fully-qualified form) is ignored.</para>
+    /// <para>The port is part of the identity: Dataverse listens on the default port, so a URL naming another port is
+    /// not the environment this BFF is configured for.</para>
+    /// </remarks>
+    public static bool IsSameEnvironment(string? first, string? second)
+        => TryEnvironmentKey(first, out var a) && TryEnvironmentKey(second, out var b)
+           && string.Equals(a, b, StringComparison.Ordinal);
+
+    /// <summary>The environment key <see cref="IsSameEnvironment"/> compares (scheme, host without an <c>.api.</c> segment, port); false for an unusable URL.</summary>
+    internal static bool TryEnvironmentKey(string? url, out string key)
+    {
+        key = string.Empty;
+        if (string.IsNullOrWhiteSpace(url)
+            || !Uri.TryCreate(url.Trim(), UriKind.Absolute, out var uri)
+            || (uri.Scheme != Uri.UriSchemeHttps && uri.Scheme != Uri.UriSchemeHttp)
+            || string.IsNullOrEmpty(uri.IdnHost))
+        {
+            return false;
+        }
+
+        // A fully-qualified host ("org.crm.dynamics.com.") is the same host: the trailing dot is not part of the name.
+        var labels = uri.IdnHost.ToLowerInvariant().TrimEnd('.').Split('.').ToList();
+        if (labels.Count >= 4 && labels[1] == "api" && labels[2].StartsWith("crm", StringComparison.Ordinal))
+        {
+            labels.RemoveAt(1);
+        }
+
+        key = $"{uri.Scheme}://{string.Join('.', labels)}:{uri.Port}";
+        return true;
     }
 
     /// <summary>
@@ -554,10 +605,23 @@ public class RegistrationDataverseService : IDisposable
     /// new systemuser's contact link at creation, and by the identity-link reconciliation job for every environment
     /// this BFF provisions users into (task 141, third fix round).
     /// </summary>
+    /// <remarks>
+    /// ISS-005 (#1673 review F1): when <paramref name="dataverseBaseUrl"/> is THIS BFF's own environment
+    /// (<see cref="IsSameEnvironment"/> against <c>Dataverse:ServiceUrl</c>, however the URL is spelled - e.g. the
+    /// registration default <c>DATAVERSE_URL</c> naming the same environment with an <c>.api.</c> host), the result is the
+    /// DI-registered binder, whose owner policy is <c>ContactCreateOwner.FromCustomerBusinessUnit</c>. A factory binder's is
+    /// <c>NoneForForeignEnvironment</c>: it creates ownerless contacts, which is right only for a genuinely different
+    /// environment (tracked in #2270).
+    /// </remarks>
     public ContactIdentityBinder ContactBinderFor(string dataverseBaseUrl)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(dataverseBaseUrl);
         var baseUrl = dataverseBaseUrl.TrimEnd('/');
+        if (IsSameEnvironment(_configuration["Dataverse:ServiceUrl"], baseUrl))
+        {
+            return _ownEnvironmentBinder;
+        }
+
         return _binderFactory.CreateBinder(baseUrl, token => GetAccessTokenForUrlAsync(baseUrl, token));
     }
 

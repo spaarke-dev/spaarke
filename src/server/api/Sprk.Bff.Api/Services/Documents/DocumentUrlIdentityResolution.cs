@@ -476,7 +476,7 @@ public static class DocumentUrlIdentityResolution
             logger.LogWarning(ex,
                 "Email identity: Dataverse could not answer the saved-email lookup; reporting unavailable, NOT " +
                 "\"not saved\".");
-            throw Unavailable("Dataverse could not be reached to check whether this email is saved. Try again.");
+            throw EmailLookupUnavailable();
         }
 
         var row = rows?.Entities.FirstOrDefault();
@@ -664,6 +664,14 @@ public static class DocumentUrlIdentityResolution
     private static bool IsAlternateKeyRecordDoesNotExist(Exception ex)
         => ex is FaultException<OrganizationServiceFault> fault
            && fault.Detail?.ErrorCode == unchecked((int)0x80060891);
+
+    /// <summary>
+    /// The one 503 the email-identity route gives when the answer cannot be determined — Dataverse not answering the
+    /// lookup, or the access check faulting (<c>DocumentEmailIdentityFilter</c>). One factory, so the two are the same
+    /// answer byte for byte and cannot drift apart.
+    /// </summary>
+    internal static SdapProblemException EmailLookupUnavailable()
+        => Unavailable("Dataverse could not be reached to check whether this email is saved. Try again.");
 
     private static SdapProblemException Unavailable(string detail)
         => new("identity_resolution_unavailable", "Document Identity Unavailable", detail, 503);

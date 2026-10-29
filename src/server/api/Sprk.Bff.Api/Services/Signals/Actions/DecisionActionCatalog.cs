@@ -38,6 +38,15 @@ public enum DecisionParameterKind
 /// <see cref="Kind"/> is <see cref="DecisionParameterKind.Lookup"/>. A <see cref="DecisionParameterKind.Choice"/> carries
 /// EITHER a fixed <see cref="Options"/> list OR a named <see cref="OptionsSource"/> the wizard reads (never neither).
 /// </summary>
+/// <param name="OptionsSource">Task 167 (D-193): a named source the plan route resolves into <see cref="Options"/> from live data
+/// (<c>metadata:{table}.{column}</c> for a picklist's current labels, <c>currency:active</c>), one resolver for every action
+/// (<see cref="DecisionParameterSources"/>), so an owner's relabel shows up and nothing is hard-coded.</param>
+/// <param name="DefaultSource">Task 167 (D-193): a named source of the parameter's starting value, resolved by the plan route (the
+/// matter's business-unit currency). The wizard shows it as prefilled; the commit route resolves an omitted value to the same source.</param>
+/// <param name="NotBefore">Task 167 (D-193): for a Date, the code of another Date of the same step it must not be earlier than.
+/// The wizard flags it and the executor refuses it; equal dates are fine.</param>
+/// <param name="MaxLength">Task 167 (D-193 review F4-4): for a Text, the most characters the target column holds. The wizard step flags a longer
+/// value before Record decision, and the executor refuses it too. Null (every other parameter) means no declared limit.</param>
 public sealed record DecisionActionParameter(
     string Code,
     string Label,
@@ -46,7 +55,10 @@ public sealed record DecisionActionParameter(
     string? Hint = null,
     string? LookupEntity = null,
     IReadOnlyList<DecisionParameterOption>? Options = null,
-    string? OptionsSource = null);
+    string? OptionsSource = null,
+    string? DefaultSource = null,
+    string? NotBefore = null,
+    int? MaxLength = null);
 
 /// <summary>One fixed choice: the stable <see cref="Value"/> the commit route receives and the <see cref="Label"/> the
 /// user sees.</summary>
@@ -96,6 +108,11 @@ public sealed record DecisionActionDefinition(
     /// <see cref="ResolvedDecisionPlan.WithCreateBudgetInsteadOfRevise"/>). <see cref="DecisionPlanService.Resolve"/> refuses a stored plan
     /// that names it and the authoring catalog does not list it, so a published plan can never carry it (D-14).</summary>
     public bool SubstitutionOnly { get; init; }
+
+    /// <summary>How the wizard renders the step's message fields (task 160, D-179): <see cref="DecisionActionCatalog.EmailComposer"/> for the
+    /// actions whose <c>to</c>, <c>subject</c> and <c>body</c> the shared EmailComposer edits (compose-only: it never sends; the commit route
+    /// does). <c>null</c>: one field per parameter. A presentation hint only; the parameters and what is committed are unchanged.</summary>
+    public string? Composer { get; init; }
 }
 
 /// <summary>One closed dismissal reason. The stored form on a Signal is <c>"code - detail"</c>.</summary>
@@ -127,6 +144,9 @@ public sealed record DecisionDismissalReason(
 /// </remarks>
 public static class DecisionActionCatalog
 {
+    /// <summary>The <see cref="DecisionActionDefinition.Composer"/> value for the shared EmailComposer (task 160, D-179).</summary>
+    public const string EmailComposer = "email";
+
     private const string ApproveVarianceEffect = "The Decision Record is the approval; nothing else is written";
 
     private static readonly DecisionActionParameter[] MessageParameters =
@@ -154,7 +174,7 @@ public static class DecisionActionCatalog
             ],
             Excludes: [],
             DecisionRecordClass.Judgement)
-        { Gate = new DecisionGateFactors(GateRiskTier.Tier4, Reversible: false, ExternallyVisible: true), ResolvesSignal = false, SendsMessage = true },
+        { Gate = new DecisionGateFactors(GateRiskTier.Tier4, Reversible: false, ExternallyVisible: true), ResolvesSignal = false, SendsMessage = true, Composer = EmailComposer },
 
         new("revise-budget", "Revise budget", DecisionLane.Decide, IsNextStep: false, WorkType: "fund",
             [
@@ -175,9 +195,24 @@ public static class DecisionActionCatalog
         // Task 161 (D-180, UAT round 1): revise-budget on a matter with NO active budget. Never authored (SubstitutionOnly): the plan and
         // commit routes swap it in for revise-budget, in place, when the matter has none. Same lane, work type, class, gate and
         // resolution as revise-budget; no "budget to revise" because there is none. The amount becomes the new budget's total.
+        // Task 167 (D-193, UAT round 2): the budget also collects Category, Year, Start date, End date, Period and Currency, all optional.
+        // Category and Period read their options live (an owner relabel shows up); Currency defaults from the matter's business unit.
         new("create-budget", "Create budget", DecisionLane.Decide, IsNextStep: false, WorkType: "fund",
             [
                 new("amount", "Budget amount", DecisionParameterKind.Money, Required: true),
+                new("category", "Category", DecisionParameterKind.Choice, Required: false,
+                    OptionsSource: "metadata:sprk_budget.sprk_budgetcategory"),
+                new("year", "Year", DecisionParameterKind.Text, Required: false,
+                    Hint: "The budget year, up to four characters, for example 2026",
+                    MaxLength: CreateBudgetExecutor.BudgetYearMaxLength),
+                new("startDate", "Start date", DecisionParameterKind.Date, Required: false),
+                new("endDate", "End date", DecisionParameterKind.Date, Required: false, NotBefore: "startDate"),
+                new("period", "Period", DecisionParameterKind.Choice, Required: false,
+                    OptionsSource: "metadata:sprk_budget.sprk_budgetperiod"),
+                new("currency", "Currency", DecisionParameterKind.Choice, Required: false,
+                    Hint: "Defaults to the matter's business unit currency",
+                    OptionsSource: DecisionParameterSources.ActiveCurrencies,
+                    DefaultSource: DecisionParameterSources.MatterCurrencyDefault),
                 new("reason", "Reason for the budget", DecisionParameterKind.TextArea, Required: true),
             ],
             [
@@ -244,7 +279,7 @@ public static class DecisionActionCatalog
             ["Sends the message above to the recipient", "The response date is unchanged", "The item stays open until the work is done or its due date moves"],
             Excludes: [],
             DecisionRecordClass.Judgement)
-        { Gate = new DecisionGateFactors(GateRiskTier.Tier4, Reversible: false, ExternallyVisible: true), ResolvesSignal = false, SendsMessage = true },
+        { Gate = new DecisionGateFactors(GateRiskTier.Tier4, Reversible: false, ExternallyVisible: true), ResolvesSignal = false, SendsMessage = true, Composer = EmailComposer },
 
         new("extend-response-date", "Extend response date", DecisionLane.Do, IsNextStep: false, WorkType: null,
             [
@@ -300,7 +335,7 @@ public static class DecisionActionCatalog
             ["Sends the message above when the decision is recorded"],
             Excludes: [],
             DecisionRecordClass.Judgement)
-        { Gate = new DecisionGateFactors(GateRiskTier.Tier4, Reversible: false, ExternallyVisible: true), SendsMessage = true },
+        { Gate = new DecisionGateFactors(GateRiskTier.Tier4, Reversible: false, ExternallyVisible: true), SendsMessage = true, Composer = EmailComposer },
 
         // assign-work is both: a Next step on any plan, and a Decide-lane plan action the Know-promotion rule offers (D-51).
         new("assign-work", "Assign Work", DecisionLane.Decide, IsNextStep: true, WorkType: null,

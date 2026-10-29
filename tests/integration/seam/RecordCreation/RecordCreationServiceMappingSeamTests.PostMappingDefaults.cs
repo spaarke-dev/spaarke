@@ -1,9 +1,14 @@
 using System.Text.Json;
 using FluentAssertions;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Microsoft.Xrm.Sdk;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
+using Sprk.Bff.Api.Infrastructure.ExternalAccess;
+using Sprk.Bff.Api.Services.ExternalAccess;
 using Sprk.Bff.Api.Services.RecordCreation;
 using Xunit;
+using Harness = Sprk.Bff.Api.Tests.AccessControl.AssignedAccessTestDoubles.Harness;
 
 namespace Sprk.Bff.Api.Tests.Seam.RecordCreation;
 
@@ -479,5 +484,238 @@ public sealed partial class RecordCreationServiceMappingSeamTests
             .Should().Be("no server-owned column in the caller's payload");
         none.Steps.Single(s => s.Step == RecordCreationStep.MapPayload).Note
             .Should().MatchRegex(@"^\d+ column\(s\) \(\d+ mapped\), \d+ lookup\(s\)$");
+    }
+
+    // =====================================================================================
+    // Task 037 (FR-36): the table's copied default — a work assignment's Assigned To from its own Assigned To Internal
+    // =====================================================================================
+
+    private const string WaAssignedToBind = "sprk_AssignedTo@odata.bind";
+
+    /// <summary>The work assignment's columns as its metadata declares them, and a matter → work assignment profile that maps
+    /// the matter's Assigned To Internal onto the work assignment's (the wizard's mapping, now the server's).</summary>
+    private void WorkAssignmentColumnsAndProfile()
+    {
+        _user.Columns["sprk_workassignment"] = new()
+        {
+            ["sprk_name"] = ("String", true),
+            ["sprk_assignedto"] = ("Lookup", true),
+            ["sprk_assignedtointernal"] = ("Lookup", true),
+            ["sprk_regardingmatter"] = ("Lookup", true),
+        };
+        Profile("sprk_matter", "sprk_workassignment", Rule("sprk_assignedtointernal", "sprk_assignedtointernal", Lookup));
+    }
+
+    /// <summary>A work assignment filed under the ordinary matter by the caller's bind, asking for field mapping.</summary>
+    private RecordCreationRequest MappedWorkAssignment(params (string Key, object? Value)[] extra)
+    {
+        var body = new Dictionary<string, object?>
+        {
+            ["sprk_name"] = "Review the lease",
+            ["sprk_RegardingMatter@odata.bind"] = $"/sprk_matters({OrdinaryMatter:D})",
+        };
+        foreach (var (key, value) in extra)
+            body[key] = value;
+        return Request("sprk_workassignment", body);
+    }
+
+    [Fact]
+    public async Task CopiedDefault_AssignedToUnset_TakesTheAssignedToInternalTheMappingFilled_AsIs()
+    {
+        WorkAssignmentColumnsAndProfile();
+
+        var outcome = await Service().CreateAsync(MappedWorkAssignment(), AsCaller(), CancellationToken.None);
+
+        outcome.Succeeded.Should().BeTrue(outcome.Refusal?.Detail);
+        var fields = _creates.Should().ContainSingle().Subject.Fields;
+        StringOf(fields, "sprk_AssignedToInternal@odata.bind").Should().Be($"/contacts({Assignee:D})", "mapped from the matter");
+        StringOf(fields, WaAssignedToBind).Should().Be($"/contacts({Assignee:D})",
+            "FR-36: after mapping, the row's own Assigned To Internal, copied as-is (both are contact lookups)");
+        outcome.MappingWarnings.Should().BeEmpty();
+        outcome.Steps.Single(s => s.Step == RecordCreationStep.MapPayload).Note.Should().EndWith("; 1 default(s) filled");
+    }
+
+    [Fact]
+    public async Task CopiedDefault_ASuppliedAssignedTo_IsKept()
+    {
+        WorkAssignmentColumnsAndProfile();
+
+        var outcome = await Service().CreateAsync(
+            MappedWorkAssignment((WaAssignedToBind, $"/contacts({NamedContact:D})")), AsCaller(), CancellationToken.None);
+
+        outcome.Succeeded.Should().BeTrue(outcome.Refusal?.Detail);
+        StringOf(_creates.Should().ContainSingle().Subject.Fields, WaAssignedToBind).Should().Be($"/contacts({NamedContact:D})",
+            "a supplied value is never replaced");
+    }
+
+    /// <summary>UNSET (absent) takes the default; an explicit null — a null bind or a plain null — is the caller's and stays.</summary>
+    [Theory]
+    [InlineData(WaAssignedToBind)]
+    [InlineData("sprk_assignedto")]
+    public async Task CopiedDefault_AnExplicitNullAssignedTo_StaysNull(string key)
+    {
+        WorkAssignmentColumnsAndProfile();
+
+        var outcome = await Service().CreateAsync(MappedWorkAssignment((key, null)), AsCaller(), CancellationToken.None);
+
+        outcome.Succeeded.Should().BeTrue(outcome.Refusal?.Detail);
+        var fields = _creates.Should().ContainSingle().Subject.Fields;
+        fields.Should().ContainKey(WaAssignedToBind);
+        fields[WaAssignedToBind].Should().Match<object?>(v => v == null || ((JsonElement)v).ValueKind == JsonValueKind.Null,
+            "an explicit null is a value the caller chose: the default does not fill it");
+        outcome.Steps.Single(s => s.Step == RecordCreationStep.MapPayload).Note.Should().NotContain("default");
+    }
+
+    /// <summary>
+    /// Fix round 1 (path parity with the owned create): a copy of a SERVER-set source names the same server-chosen record,
+    /// so it is server-set too — it costs no AppendTo its source did not. Without that, a caller with no AppendTo on the
+    /// contact the server named would see the copied Assigned To dropped at step 5.
+    /// </summary>
+    [Fact]
+    public async Task CopiedDefault_TheCopyOfAServerSetAssignedToInternal_CostsNoAppendTo_AndIsWritten()
+    {
+        WorkAssignmentColumnsAndProfile();
+        _scripted.NoAppendToIn.Add(("contacts", CallersContact));
+        var request = Request("sprk_workassignment", new Dictionary<string, object?>
+        {
+            ["sprk_name"] = "Review the lease",
+            ["sprk_RegardingMatter@odata.bind"] = $"/sprk_matters({OrdinaryMatter:D})",
+            ["sprk_AssignedToInternal@odata.bind"] = $"/contacts({CallersContact:D})",
+        }, mapping: false) with
+        {
+            ServerSetLookupColumns = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "sprk_assignedtointernal" },
+        };
+
+        var outcome = await Service().CreateAsync(request, AsCaller(), CancellationToken.None);
+
+        outcome.Succeeded.Should().BeTrue(outcome.Refusal?.Detail);
+        var fields = _creates.Should().ContainSingle().Subject.Fields;
+        StringOf(fields, "sprk_AssignedToInternal@odata.bind").Should().Be($"/contacts({CallersContact:D})");
+        StringOf(fields, WaAssignedToBind).Should().Be($"/contacts({CallersContact:D})",
+            "the copy of a server-set source is server-set: it is written, not dropped for an AppendTo its source never cost");
+        outcome.MappingWarnings.Should().NotContain(w => w.Code == RecordCreationWarning.DefaultValueDroppedCode);
+    }
+
+    /// <summary>
+    /// Fix round 2 (must not fire): an ADAPTER's own post-mapping default for Assigned To is the adapter's, not a copy — it is
+    /// never made server-set, even when it names the very contact a server-set Assigned To Internal names. It is checked like
+    /// any default: a caller with no AppendTo on that contact has it dropped (fails closed on an access-conferring column).
+    /// </summary>
+    [Fact]
+    public async Task CopiedDefault_AnAdaptersOwnAssignedToDefault_IsNeverMadeServerSet_ItIsCheckedAndDropped()
+    {
+        WorkAssignmentColumnsAndProfile();
+        _scripted.NoAppendToIn.Add(("contacts", CallersContact));
+        var request = Request("sprk_workassignment", new Dictionary<string, object?>
+        {
+            ["sprk_name"] = "Review the lease",
+            ["sprk_RegardingMatter@odata.bind"] = $"/sprk_matters({OrdinaryMatter:D})",
+            ["sprk_AssignedToInternal@odata.bind"] = $"/contacts({CallersContact:D})",
+        }, mapping: false) with
+        {
+            ServerSetLookupColumns = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "sprk_assignedtointernal" },
+            PostMappingDefaults = MakersContactDefault(),
+        };
+
+        var outcome = await Service().CreateAsync(request, AsCaller(), CancellationToken.None);
+
+        outcome.Succeeded.Should().BeTrue(outcome.Refusal?.Detail);
+        var fields = _creates.Should().ContainSingle().Subject.Fields;
+        StringOf(fields, "sprk_AssignedToInternal@odata.bind").Should().Be($"/contacts({CallersContact:D})");
+        fields.Should().NotContainKey(WaAssignedToBind,
+            "the adapter's default is checked as the caller's (no AppendTo on the contact), never treated as a server-set copy");
+        outcome.MappingWarnings.Should().Contain(w =>
+            w.Code == RecordCreationWarning.DefaultValueDroppedCode && w.Column == "sprk_assignedto");
+    }
+
+    [Fact]
+    public async Task CopiedDefault_AssignedToInternalUnsetToo_LeavesAssignedToBlank_AndLogsAStructuredWarning()
+    {
+        WorkAssignmentColumnsAndProfile();
+        _profiles.Clear(); // nothing maps the Assigned To Internal either
+        var log = new SeamLog();
+        _logger = log;
+
+        var outcome = await Service().CreateAsync(MappedWorkAssignment(), AsCaller(), CancellationToken.None);
+
+        outcome.Succeeded.Should().BeTrue(outcome.Refusal?.Detail);
+        _creates.Should().ContainSingle().Subject.Fields.Keys
+            .Should().NotContain(k => k.StartsWith("sprk_AssignedTo", StringComparison.OrdinalIgnoreCase));
+        var warning = log.Entries.Should().ContainSingle(e => e.Message.StartsWith("copied_default_source_unset")).Subject;
+        warning.Level.Should().Be(LogLevel.Warning);
+        warning.Values["Entity"].Should().Be("sprk_workassignment");
+        warning.Values["Column"].Should().Be("sprk_assignedto");
+        warning.Values["Source"].Should().Be("sprk_assignedtointernal");
+    }
+
+    /// <summary>
+    /// UAC-r2 condition 2 on this path: the defaulted value is in the create (step 11), so the "Assigned *" materialisation
+    /// (step 12, the REAL materializer over uac-r2's harness) reads it on the created row and decides as for a supplied one:
+    /// an ordinary record grants the contact, a Secure one only suggests.
+    /// </summary>
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    [InlineData(true, true)]
+    public async Task CopiedDefault_TheAssignedToMaterialisation_TreatsTheDefaultedValueExactlyAsASuppliedOne(bool supplied, bool secure)
+    {
+        WorkAssignmentColumnsAndProfile();
+        var harness = new Harness { Participations = new(new RootRecordFlags(IsSecure: secure, IsRestricted: false)) };
+        harness.Contact(Assignee);
+        _onCreate = (table, id, fields) =>
+        {
+            // The created row as Dataverse holds it: what the materializer's root read returns.
+            if (table != "sprk_workassignment")
+                return;
+            harness.Store.Root(ExternalGrantRootType.WorkAssignment, id);
+            foreach (var key in fields.Keys.Where(k =>
+                         k.StartsWith("sprk_Assigned", StringComparison.Ordinal) && k.EndsWith("@odata.bind", StringComparison.Ordinal)))
+            {
+                if (StringOf(fields, key) is { } path && path.StartsWith("/contacts(", StringComparison.Ordinal))
+                {
+                    harness.Store.Assign(ExternalGrantRootType.WorkAssignment, id, key[..^"@odata.bind".Length].ToLowerInvariant(),
+                        Guid.Parse(path["/contacts(".Length..^1]));
+                }
+            }
+        };
+        var services = new ServiceCollection();
+        services.AddScoped(_ => harness.Materializer);
+        _scopes = services.BuildServiceProvider().GetRequiredService<IServiceScopeFactory>();
+
+        var outcome = await Service().CreateAsync(
+            supplied ? MappedWorkAssignment((WaAssignedToBind, $"/contacts({Assignee:D})")) : MappedWorkAssignment(),
+            AsCaller(), CancellationToken.None);
+
+        outcome.Succeeded.Should().BeTrue(outcome.Refusal?.Detail);
+        var waId = _creates.Should().ContainSingle().Subject.Id;
+        var row = harness.Store.RowsOf(waId, Assignee).Should().ContainSingle(r => r.SourceField == "sprk_assignedto",
+            "the materializer evaluated the row's Assigned To — the defaulted value is on the row it reads").Subject;
+        if (secure)
+        {
+            row.State.Should().Be(AssignedAccessState.PendingConfirmation, "Secure: a suggestion only");
+            harness.Grants.ActiveRowsOf(waId, Assignee).Should().BeEmpty();
+        }
+        else
+        {
+            row.State.Should().Be(AssignedAccessState.Granted);
+            harness.Grants.ActiveRowsOf(waId, Assignee).Should().ContainSingle();
+        }
+    }
+
+    /// <summary>The service's log, with each entry's structured values.</summary>
+    private sealed class SeamLog : ILogger<RecordCreationService>
+    {
+        public List<(LogLevel Level, string Message, IReadOnlyDictionary<string, object?> Values)> Entries { get; } = new();
+
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception,
+            Func<TState, Exception?, string> formatter) =>
+            Entries.Add((logLevel, formatter(state, exception),
+                (state as IReadOnlyList<KeyValuePair<string, object?>>)?.ToDictionary(kv => kv.Key, kv => kv.Value)
+                ?? new Dictionary<string, object?>()));
     }
 }

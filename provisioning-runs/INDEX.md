@@ -16,9 +16,9 @@ Storage discipline: `provisioning-runs/` lives in the **main git repo at root**,
 
 | runId | customerId | tenancyModel | profile | started | ended | status | lessons-count | tenant-hot-path* | link |
 |-------|-----------|--------------|---------|---------|-------|--------|---------------|------------------|------|
-| — | — | — | — | — | — | — | — | — | — |
+| `b6941254-ac1b-42a6-8b12-dec7587090fc` | acme | Model1 | spaarke-hosted-model2 | 2026-10-15 | 2026-10-20 | Completed | 62 | Y (Exchange app roles, SPE container type, L2 Worker sidecar) | [lessons](acme-b6941254-ac1b-42a6-8b12-dec7587090fc/lessons-learned.md) · [handoff](../runs/b6941254-ac1b-42a6-8b12-dec7587090fc.md) · [run log](../projects/customer-provisioning-orchestration-r1/notes/t186-acme-run-log.md) |
 
-_No runs yet. First live-fire target sub `cd95fcec-6b89-49ea-8339-c2b579b12587` per task 186._
+T186, the first live run. Intake, handler progress and manual gates were kept in the run log rather than the per-run file set below; the folder holds the Step 7 postmortem.
 
 `*tenant-hot-path`: Y if the run touched a shared tenant resource that another concurrent run might contend on (SPE container-type, shared BFF Entra app-reg, per-tenant KV RBAC bootstrap). Feeds the shared-tenant coordination workflow (analog of `/conflict-check`). Updated atomically by skill Step 6 (Completion Handoff) — no cron.
 

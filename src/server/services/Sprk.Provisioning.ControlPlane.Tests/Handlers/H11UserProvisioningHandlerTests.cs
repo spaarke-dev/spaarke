@@ -163,6 +163,118 @@ public sealed class H11UserProvisioningHandlerTests
         writer.ResolvedUnits.Should().Equal(CustomerUnitId);
     }
 
+    // ---------- T186 L51 (owner 2026-10-16): every B2B guest is licensed — Dataverse will not add an unlicensed guest ----------
+
+    [Fact]
+    public async Task L51_EachGuest_IsLicensedExactlyOnce_AfterTheGroupAdd_AndBeforeItsDataverseWrite()
+    {
+        var run = BuildRun(identityPreset: "B2BGuest", usersJson: B2BUsersJson, tenancyModel: "Model1");
+        var log = new List<string>();
+        var userProvisioner = FakeUserProvisioner.AllSucceed();
+        userProvisioner.CallLog = log;
+        var group = FakeSecurityGroupClient.ThisCustomers();
+        group.CallLog = log;
+        var writer = FakeGuestUserWriter.AllSucceed();
+        writer.CallLog = log;
+        var handler = BuildHandler(new FakeRepository(run, "e"), userProvisioner, FakeInvitationClient.Success(),
+            FakeConsentVerifier.Verified(), group, writer);
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        result.Should().BeOfType<HandlerResult.Success>();
+        userProvisioner.GuestLicensedUserIds.Should().Equal("guestid-Ada", "guestid-Grace");
+        userProvisioner.AssignGuestLicenseCallCount.Should().Be(2);
+        userProvisioner.AssignLicenseCallCount.Should().Be(0, "guests get the guest SKU, never the NativeAccount set");
+        log.Should().Equal(
+            "group:guestid-Ada", "licence:guestid-Ada", "dataverse:guestid-Ada",
+            "group:guestid-Grace", "licence:guestid-Grace", "dataverse:guestid-Grace");
+    }
+
+    [Fact]
+    public async Task L51_AGuestWhoseLicenceFails_FailsTheRunResumable_AndIsNeverMadeADataverseUser()
+    {
+        var run = BuildRun(identityPreset: "B2BGuest", usersJson: B2BUsersJson, tenancyModel: "Model1");
+        var repo = new FakeRepository(run, "e");
+        var userProvisioner = FakeUserProvisioner.AllSucceed();
+        userProvisioner.GuestLicenseBehavior = _ => new LicenseAssignmentOutcome.Failure("400 no available licenses");
+        var writer = FakeGuestUserWriter.AllSucceed();
+        var handler = BuildHandler(repo, userProvisioner, FakeInvitationClient.Success(),
+            FakeConsentVerifier.Verified(), FakeSecurityGroupClient.ThisCustomers(), writer);
+
+        var failure = (await handler.HandleAsync(BuildEnvelope(), CancellationToken.None))
+            .Should().BeOfType<HandlerResult.Failure>().Subject;
+
+        failure.Class.Should().Be(FailureClass.Resumable);
+        failure.RejectionCode.Should().Be(H11Rejections.LicenseAssignmentFailed);
+        repo.LastWrittenRun!.ErrorDetail.Should().StartWith($"[{H11Rejections.LicenseAssignmentFailed}]");
+        failure.Diagnostic.Should().Contain("entry 1").And.Contain("guestid-Ada").And.Contain("400 no available licenses")
+            .And.NotContain("ada@customer.com");
+        writer.Requests.Should().BeEmpty("a guest that could not be licensed is never made a Dataverse user");
+        userProvisioner.AssignGuestLicenseCallCount.Should().Be(1, "the run stops at the first failure");
+    }
+
+    [Fact]
+    public async Task L51_AGuestLicenceCallThatThrows_FailsTheRunResumable()
+    {
+        var run = BuildRun(identityPreset: "B2BGuest", usersJson: B2BUsersJson, tenancyModel: "Model1");
+        var userProvisioner = FakeUserProvisioner.AllSucceed();
+        userProvisioner.GuestLicenseBehavior = _ => throw new HttpRequestException("socket closed");
+        var writer = FakeGuestUserWriter.AllSucceed();
+        var handler = BuildHandler(new FakeRepository(run, "e"), userProvisioner, FakeInvitationClient.Success(),
+            FakeConsentVerifier.Verified(), FakeSecurityGroupClient.ThisCustomers(), writer);
+
+        var failure = (await handler.HandleAsync(BuildEnvelope(), CancellationToken.None))
+            .Should().BeOfType<HandlerResult.Failure>().Subject;
+
+        failure.Class.Should().Be(FailureClass.Resumable);
+        failure.RejectionCode.Should().Be(H11Rejections.LicenseAssignmentFailed);
+        failure.Diagnostic.Should().Contain("HttpRequestException").And.Contain("socket closed");
+        writer.Requests.Should().BeEmpty();
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    public async Task L51_ABlankGuestLicenceSku_IsRefusedBeforeAnyInvitation(string? sku)
+    {
+        var run = BuildRun(identityPreset: "B2BGuest", usersJson: B2BUsersJson, tenancyModel: "Model1");
+        var invitations = FakeInvitationClient.Success();
+        var userProvisioner = FakeUserProvisioner.AllSucceed();
+        var group = FakeSecurityGroupClient.ThisCustomers();
+        var writer = FakeGuestUserWriter.AllSucceed();
+        var handler = BuildHandler(new FakeRepository(run, "e"), userProvisioner, invitations,
+            FakeConsentVerifier.Verified(), group, writer,
+            new H11UserProvisioningOptions { GuestLicenseSkuId = sku });
+
+        var failure = (await handler.HandleAsync(BuildEnvelope(), CancellationToken.None))
+            .Should().BeOfType<HandlerResult.Failure>().Subject;
+
+        failure.Class.Should().Be(FailureClass.Resumable);
+        failure.RejectionCode.Should().Be(H11Rejections.LicenseSkuNotConfigured);
+        failure.Diagnostic.Should().Contain("GuestLicenseSkuId").And.Contain("no invitation sent");
+        invitations.CallCount.Should().Be(0);
+        userProvisioner.AssignGuestLicenseCallCount.Should().Be(0);
+        group.AddedMembers.Should().BeEmpty();
+        writer.Requests.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task L51_ANativeAccountRun_DoesNotNeedAGuestLicenceSku_AndNeverLicensesAGuest()
+    {
+        var run = BuildRun(identityPreset: "NativeAccount", usersJson: NativeUsersJson);
+        var userProvisioner = FakeUserProvisioner.AllSucceed();
+        var handler = BuildHandler(new FakeRepository(run, "e"), userProvisioner, FakeInvitationClient.Success(),
+            FakeConsentVerifier.Verified(),
+            options: new H11UserProvisioningOptions { PowerAppsPlan2TrialSkuId = "sku-power-apps", GuestLicenseSkuId = null });
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        result.Should().BeOfType<HandlerResult.Success>();
+        userProvisioner.AssignLicenseCallCount.Should().Be(2);
+        userProvisioner.AssignGuestLicenseCallCount.Should().Be(0);
+    }
+
     [Theory]
     [InlineData(null)]
     [InlineData("not-a-guid")]
@@ -220,6 +332,24 @@ public sealed class H11UserProvisioningHandlerTests
         failure.Class.Should().Be(FailureClass.QuarantineRequired);
         failure.RejectionCode.Should().Be(H11Rejections.GuestInForeignBusinessUnit);
         failure.Diagnostic.Should().Contain(secureUnit.ToString()).And.Contain("entry 1").And.NotContain("ada@customer.com");
+        repo.LastWrittenRun!.Status.Should().Be(RunStatus.Quarantined);
+    }
+
+    [Fact]
+    public async Task Issue2034_ADisabledGuest_QuarantinesTheRun_NeverReportedAsProvisioned()
+    {
+        var run = BuildRun(identityPreset: "B2BGuest", usersJson: B2BUsersJson, tenancyModel: "Model1");
+        var repo = new FakeRepository(run, "e");
+        var handler = BuildHandler(repo, FakeUserProvisioner.AllSucceed(), FakeInvitationClient.Success(),
+            FakeConsentVerifier.Verified(), FakeSecurityGroupClient.ThisCustomers(),
+            FakeGuestUserWriter.Returning(new DataverseGuestUserOutcome.Disabled("sysuser-x")));
+
+        var failure = (await handler.HandleAsync(BuildEnvelope(), CancellationToken.None))
+            .Should().BeOfType<HandlerResult.Failure>().Subject;
+
+        failure.Class.Should().Be(FailureClass.QuarantineRequired);
+        failure.RejectionCode.Should().Be(H11Rejections.GuestDisabled);
+        failure.Diagnostic.Should().Contain("sysuser-x").And.Contain("entry 1").And.NotContain("ada@customer.com");
         repo.LastWrittenRun!.Status.Should().Be(RunStatus.Quarantined);
     }
 
@@ -880,6 +1010,14 @@ public sealed class H11UserProvisioningHandlerTests
         private readonly Func<string, LicenseAssignmentOutcome> _licenseBehavior;
         public int CreateCallCount { get; private set; }
         public int AssignLicenseCallCount { get; private set; }
+        public int AssignGuestLicenseCallCount { get; private set; }
+        public List<string> GuestLicensedUserIds { get; } = [];
+
+        /// <summary>Behaviour of the guest-licence call (default: success); may throw.</summary>
+        public Func<string, LicenseAssignmentOutcome> GuestLicenseBehavior { get; set; } = _ => new LicenseAssignmentOutcome.Success();
+
+        /// <summary>Shared call log across the fakes — lets a test assert the order of calls between collaborators.</summary>
+        public List<string>? CallLog { get; set; }
 
         private FakeUserProvisioner(
             Func<UserProvisioningEntry, UserCreationOutcome> createBehavior,
@@ -916,6 +1054,14 @@ public sealed class H11UserProvisioningHandlerTests
             AssignLicenseCallCount++;
             return Task.FromResult(_licenseBehavior(userId));
         }
+
+        public Task<LicenseAssignmentOutcome> AssignGuestLicenseAsync(string userId, string tenantId, CancellationToken ct)
+        {
+            AssignGuestLicenseCallCount++;
+            GuestLicensedUserIds.Add(userId);
+            CallLog?.Add($"licence:{userId}");
+            return Task.FromResult(GuestLicenseBehavior(userId));
+        }
     }
 
     private sealed class FakeInvitationClient : IB2BInvitationClient
@@ -947,6 +1093,9 @@ public sealed class H11UserProvisioningHandlerTests
         public List<string> ReadGroupIds { get; } = [];
         public List<(string GroupId, string UserId)> AddedMembers { get; } = [];
 
+        /// <summary>Shared call log across the fakes (see <see cref="FakeUserProvisioner.CallLog"/>).</summary>
+        public List<string>? CallLog { get; set; }
+
         private FakeSecurityGroupClient(SecurityGroupReadOutcome read, SecurityGroupMembershipOutcome membership)
         {
             _read = read;
@@ -971,6 +1120,7 @@ public sealed class H11UserProvisioningHandlerTests
             if (_membership is SecurityGroupMembershipOutcome.Success)
             {
                 AddedMembers.Add((groupId, userId));
+                CallLog?.Add($"group:{userId}");
             }
             return Task.FromResult(_membership);
         }
@@ -986,6 +1136,9 @@ public sealed class H11UserProvisioningHandlerTests
         public List<DataverseGuestUserRequest> Requests { get; } = [];
         public List<IReadOnlyList<string>> ResolvedRoleNames { get; } = [];
         public List<Guid> ResolvedUnits { get; } = [];
+
+        /// <summary>Shared call log across the fakes (see <see cref="FakeUserProvisioner.CallLog"/>).</summary>
+        public List<string>? CallLog { get; set; }
 
         private FakeGuestUserWriter(
             Func<DataverseGuestUserRequest, DataverseGuestUserOutcome> behavior, GuestAccessOutcome guestAccess,
@@ -1014,6 +1167,7 @@ public sealed class H11UserProvisioningHandlerTests
         public Task<DataverseGuestUserOutcome> EnsureGuestUserAsync(DataverseGuestUserRequest request, CancellationToken ct)
         {
             Requests.Add(request);
+            CallLog?.Add($"dataverse:{request.EntraObjectId}");
             return Task.FromResult(_behavior(request));
         }
 

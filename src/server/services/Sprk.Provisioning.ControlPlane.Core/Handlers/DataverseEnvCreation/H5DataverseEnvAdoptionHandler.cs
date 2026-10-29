@@ -240,9 +240,7 @@ public sealed class H5DataverseEnvAdoptionHandler : IProvisioningHandler
         string diagnostic,
         CancellationToken cancellationToken)
     {
-        run.Status = RunStatus.Failed;
-        run.CurrentPhase = HandlerIdentifier;
-        run.ErrorDetail = $"[{rejectionCode}] {diagnostic}";
+        run.MarkPhaseFailed(HandlerIdentifier, RunStatus.Failed, $"[{rejectionCode}] {diagnostic}"); // T186 L41
         run.GateStates[$"h5-{rejectionCode}"] = new GateEntry
         {
             Status = GateState.Pending,
@@ -276,8 +274,7 @@ public sealed class H5DataverseEnvAdoptionHandler : IProvisioningHandler
     {
         var completedAt = _timeProvider.GetUtcNow();
 
-        run.Status = RunStatus.Running;
-        run.CurrentPhase = HandlerIdentifier; // Reconciler observes + fans out.
+        run.MarkPhaseSucceeded(HandlerIdentifier); // Reconciler observes + fans out.
         run.CompletedPhases.Add(new CompletedPhase
         {
             Phase = HandlerIdentifier,

@@ -264,7 +264,8 @@ public sealed class AuthenticationSchemeCensusTests
     /// <summary>
     /// The WorkforceHome writes and the ONE type allowed to reference each (by its outermost declaring type, so closures and
     /// async state machines count as their owner). A WorkforceHome create needs <see cref="Sprk.Bff.Api.Infrastructure.ExternalAccess.NewContactDetails"/>'s
-    /// home tenant and owner (<c>CreatePayload</c> refuses one without them), so setting either is the create's fingerprint.
+    /// home tenant and owner (<c>CreatePayload</c> refuses one without them), so setting the tenant is the create's fingerprint
+    /// (ISS-005, #1673: the Workforce creates set the owner too, always inside the binder, never the tenant).
     /// </summary>
     private static readonly (Type Owner, string Member, Type AllowedCaller)[] WorkforceHomeWrites =
     {

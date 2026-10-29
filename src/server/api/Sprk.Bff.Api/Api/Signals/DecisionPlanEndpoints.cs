@@ -164,7 +164,8 @@ public static class DecisionPlanEndpoints
         DecisionPlanService planService,
         RuleBodyDescriber describer,
         CancellationToken ct,
-        [FromServices] DecisionPlanReadStamp? planReadStamp = null)
+        [FromServices] DecisionPlanReadStamp? planReadStamp = null,
+        [FromServices] DecisionParameterSources? parameterSources = null)
     {
         var decision = await signalAccess.AuthorizeAsync(signalId, ct);
         if (decision.Outcome == SignalAccessOutcome.CallerUnresolved)
@@ -220,6 +221,17 @@ public static class DecisionPlanEndpoints
         // A count that cannot be read leaves Revise budget offered and never fails this read.
         plan = await signalAccess.WithCreateBudgetWhenNoneAsync(plan, decision, ct);
 
+        // Task 160 (D-179): the budget inquiry's To pre-fill, read as the caller; none when it cannot be read. Never fails the read.
+        var inquiryRecipient = await signalAccess.ReadInquiryRecipientAsync(plan, decision, ct);
+
+        // Task 167 (D-193): the live option lists and starting values the plan's parameters name (Create budget's Category, Period and
+        // Currency), read once per source through the one resolver. Never fails the read: a list that cannot be read is empty.
+        var parameterFacts = parameterSources is null
+            ? DecisionParameterFacts.None
+            : await parameterSources.ForPlanAsync(
+                httpContext, plan,
+                string.Equals(decision.CoreTable, "sprk_matter", StringComparison.OrdinalIgnoreCase) ? decision.CoreId : null, ct);
+
         // "How this was determined" (task 026). A body that cannot be described is shown without the description, never
         // as a guess; it does not stop the decision from being taken.
         var described = await describer.DescribeAsync(resolution.RuleBodyJson, ct);
@@ -231,7 +243,7 @@ public static class DecisionPlanEndpoints
             await planReadStamp.StampAsync(httpContext, signalId, ct);
         }
 
-        return Results.Ok(DecisionPlanResponse.From(signalId, lane, versionId, plan, described.Description));
+        return Results.Ok(DecisionPlanResponse.From(signalId, lane, versionId, plan, described.Description, inquiryRecipient, parameterFacts));
     }
 }
 
@@ -245,13 +257,20 @@ public sealed record DecisionPlanResponse(
     IReadOnlyList<DismissalReasonDto> DismissalReasons,
     RuleDescription? RuleDescription)
 {
+    /// <param name="inquiryRecipient">Task 160 (D-179): the To pre-fill of <c>send-budget-inquiry</c> only; null leaves To empty.</param>
+    /// <param name="parameterFacts">Task 167 (D-193): the resolved option lists and starting values of the parameters that name a source; null adds none.</param>
     internal static DecisionPlanResponse From(
-        Guid signalId, DecisionLane lane, Guid policyVersionId, ResolvedDecisionPlan plan, RuleDescription? ruleDescription = null) =>
+        Guid signalId, DecisionLane lane, Guid policyVersionId, ResolvedDecisionPlan plan, RuleDescription? ruleDescription = null,
+        OutsideFirmContact? inquiryRecipient = null, DecisionParameterFacts? parameterFacts = null) =>
         new(signalId,
             lane.ToString(),
             policyVersionId,
-            plan.Actions.Select((a, i) => DecisionActionDto.From(a, isRecommended: i == 0)).ToList(),
-            plan.NextSteps.Select(a => DecisionActionDto.From(a, isRecommended: false)).ToList(),
+            plan.Actions.Select((a, i) => DecisionActionDto.From(a, isRecommended: i == 0,
+                prefillTo: a.Code == BudgetInquiryExecutor.ActionCode && inquiryRecipient is { } r
+                    ? [new DecisionRecipientDto(r.ContactId, r.Name, r.Email)]
+                    : null,
+                parameterFacts)).ToList(),
+            plan.NextSteps.Select(a => DecisionActionDto.From(a, isRecommended: false, parameterFacts: parameterFacts)).ToList(),
             plan.DismissalReasons.Select(r => new DismissalReasonDto(r.Code, r.Label, r.CountsTowardSuppression, r.RequiresDetail)).ToList(),
             ruleDescription);
 }
@@ -264,15 +283,36 @@ public sealed record DecisionActionDto(
     bool IsRecommended,
     IReadOnlyList<DecisionParameterDto> Parameters,
     IReadOnlyList<string> EffectLines,
-    IReadOnlyList<string> Excludes)
+    IReadOnlyList<string> Excludes,
+    string? Composer = null,
+    IReadOnlyList<DecisionRecipientDto>? PrefillTo = null)
 {
-    internal static DecisionActionDto From(DecisionActionDefinition a, bool isRecommended) =>
+    /// <param name="prefillTo">Task 160 (D-179): the To starting value (the outside firm's contact), or null.</param>
+    internal static DecisionActionDto From(
+        DecisionActionDefinition a, bool isRecommended, IReadOnlyList<DecisionRecipientDto>? prefillTo = null,
+        DecisionParameterFacts? parameterFacts = null) =>
         new(a.Code, a.Label, a.WorkType, a.RecordClass.ToString(), isRecommended,
             a.Parameters.Select(p => new DecisionParameterDto(p.Code, p.Label, p.Kind.ToString(), p.Required, p.Hint, p.LookupEntity,
-                p.Options?.Select(o => new DecisionOptionDto(o.Value, o.Label)).ToList(), p.OptionsSource)).ToList(),
+                OptionsOf(p, parameterFacts), p.OptionsSource,
+                p.DefaultSource is not null && parameterFacts is not null && parameterFacts.DefaultsBySource.TryGetValue(p.DefaultSource, out var start) ? start : null,
+                p.NotBefore, p.MaxLength)).ToList(),
             a.EffectLines,
-            a.Excludes);
+            a.Excludes,
+            a.Composer,
+            prefillTo);
+
+    /// <summary>A fixed list as declared; a named source's list as resolved (task 167); null when the parameter has neither or the plan
+    /// route resolved none (a plan read without the resolver).</summary>
+    private static List<DecisionOptionDto>? OptionsOf(DecisionActionParameter p, DecisionParameterFacts? facts) =>
+        p.Options is not null
+            ? p.Options.Select(o => new DecisionOptionDto(o.Value, o.Label)).ToList()
+            : p.OptionsSource is not null && facts is not null && facts.OptionsBySource.TryGetValue(p.OptionsSource, out var resolved)
+                ? resolved.Select(o => new DecisionOptionDto(o.Value, o.Label)).ToList()
+                : null;
 }
+
+/// <summary>A recipient the wizard starts To with (task 160, D-179): a contact the caller can read, with an email address.</summary>
+public sealed record DecisionRecipientDto(Guid ContactId, string? Name, string Email);
 
 public sealed record DecisionParameterDto(
     string Code,
@@ -282,7 +322,10 @@ public sealed record DecisionParameterDto(
     string? Hint,
     string? LookupEntity,
     IReadOnlyList<DecisionOptionDto>? Options,
-    string? OptionsSource);
+    string? OptionsSource,
+    string? DefaultValue = null,
+    string? NotBefore = null,
+    int? MaxLength = null);
 
 public sealed record DecisionOptionDto(string Value, string Label);
 

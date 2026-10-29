@@ -45,6 +45,12 @@ export interface DecisionParameter {
   lookupEntity?: string | null;
   options?: DecisionOption[] | null;
   optionsSource?: string | null;
+  /** Task 167 (D-193): the server's starting value (a Choice's option value), shown as a prefilled default and never a choice. */
+  defaultValue?: string | null;
+  /** Task 167 (D-193): the code of a Date parameter of the same step this one must not be earlier than (End date after Start date). */
+  notBefore?: string | null;
+  /** Task 167 (D-193, review F4-4): for a Text, the most characters the target column holds; the step flags a longer value before Record decision. */
+  maxLength?: number | null;
 }
 
 /** One catalog action (or Next-step creator) as the plan route returns it. */
@@ -60,6 +66,20 @@ export interface DecisionAction {
   effectLines: string[];
   /** Codes that cannot be combined with this action (mutual). */
   excludes: string[];
+  /**
+   * Task 160 (D-179): `'email'` renders the step's `to`, `subject` and `body` in the shared EmailComposer, compose-only (the commit
+   * route sends at Record decision). Absent or null: one field per parameter.
+   */
+  composer?: 'email' | null;
+  /** Task 160 (D-179): the recipients To starts with (the outside firm's contact, read as the caller). Absent or null: To starts empty. */
+  prefillTo?: DecisionRecipient[] | null;
+}
+
+/** A recipient the plan pre-fills To with (task 160): a contact the caller can read, with an email address. */
+export interface DecisionRecipient {
+  contactId: string;
+  name?: string | null;
+  email: string;
 }
 
 export interface DismissalReason {
@@ -343,7 +363,7 @@ export interface DecisionOpenLookupRequest {
  */
 export type DecisionOpenLookup = ((
   request: DecisionOpenLookupRequest
-) => Promise<{ id: string; name: string } | null>) & {
+) => Promise<{ id: string; name: string; email?: string | null } | null>) & {
   /**
    * The tables this host's pane can open (K2). The wizard uses the pane only for these and keeps the inline field for the rest,
    * so a table the host cannot open is never a dead field. Absent: the pane is used for every table (the host handles all).

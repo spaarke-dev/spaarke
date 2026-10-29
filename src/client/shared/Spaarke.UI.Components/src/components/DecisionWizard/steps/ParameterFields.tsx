@@ -29,10 +29,19 @@ import {
 import { DismissRegular, SearchRegular } from '@fluentui/react-icons';
 import { LookupField } from '../../LookupField/LookupField';
 import type { ILookupItem } from '../../../types/LookupTypes';
-import { fieldLabel, fieldValue, parameterValid, withLookup, withValue } from '../decisionDraft';
+import {
+  dateOrderMessage,
+  fieldLabel,
+  fieldValue,
+  lengthMessage,
+  parameterValid,
+  withLookup,
+  withValue,
+} from '../decisionDraft';
 import type { StepScope } from '../decisionDraft';
 import { useDecisionItem } from '../decisionItemContext';
 import type { DecisionAction, DecisionParameter } from '../decisionWizardTypes';
+import { EMAIL_MESSAGE_CODES, EmailMessageFields } from './EmailMessageFields';
 
 const useStyles = makeStyles({
   form: { display: 'flex', flexDirection: 'column', rowGap: tokens.spacingVerticalM },
@@ -59,6 +68,8 @@ export const LockedNote: React.FC = () => (
 interface FieldProps {
   parameter: DecisionParameter;
   scope: StepScope;
+  /** The step the parameter belongs to, for a rule that compares it with another parameter of the same step (task 167). */
+  action: DecisionAction;
 }
 
 const LookupParameter: React.FC<FieldProps> = ({ parameter, scope }) => {
@@ -208,13 +219,16 @@ const LookupParameter: React.FC<FieldProps> = ({ parameter, scope }) => {
   );
 };
 
-const ScalarParameter: React.FC<FieldProps> = ({ parameter, scope }) => {
+const ScalarParameter: React.FC<FieldProps> = ({ parameter, scope, action }) => {
   const { draft, update, locked } = useDecisionItem();
   const styles = useStyles();
   const value = fieldValue(draft, scope, parameter.code);
   const typed = draft.values[scope]?.[parameter.code] !== undefined;
   const prefilled = !typed && value !== '';
-  const invalid = value.trim() !== '' && !parameterValid(parameter, value);
+  // Task 167 (D-193): End date before Start date, and a Text over its column length, are named in words; any other invalid value
+  // keeps the kind's generic text.
+  const order = dateOrderMessage(action, parameter, draft, scope) ?? lengthMessage(parameter, value);
+  const invalid = (value.trim() !== '' && !parameterValid(parameter, value)) || order !== null;
   const set = (next: string) => update(d => withValue(d, scope, parameter.code, next));
   const hint = prefilled ? 'Prefilled from this item. Edit it as needed.' : (parameter.hint ?? undefined);
 
@@ -253,7 +267,7 @@ const ScalarParameter: React.FC<FieldProps> = ({ parameter, scope }) => {
       required={parameter.required}
       hint={hint ? <span className={prefilled ? styles.prefilled : undefined}>{hint}</span> : undefined}
       validationState={invalid ? 'error' : 'none'}
-      validationMessage={invalid ? (INVALID[parameter.kind] ?? 'Check this value.') : undefined}
+      validationMessage={invalid ? (order ?? INVALID[parameter.kind] ?? 'Check this value.') : undefined}
       data-testid={`field-${parameter.code}`}
     >
       {control}
@@ -264,14 +278,23 @@ const ScalarParameter: React.FC<FieldProps> = ({ parameter, scope }) => {
 /** The editable form of an action or Next step. */
 export const ParameterFields: React.FC<{ action: DecisionAction; scope: StepScope }> = ({ action, scope }) => {
   const styles = useStyles();
+  const { locked } = useDecisionItem();
   if (action.parameters.length === 0) return null;
+  // Task 160 (D-179): the plan's `composer: "email"` puts to / subject / body in the shared EmailComposer (compose-only). A locked
+  // review keeps the read-only fields below, which show exactly what will be sent.
+  const composed =
+    action.composer === 'email' &&
+    !locked &&
+    EMAIL_MESSAGE_CODES.every(code => action.parameters.some(p => p.code === code));
+  const fields = composed ? action.parameters.filter(p => !EMAIL_MESSAGE_CODES.includes(p.code)) : action.parameters;
   return (
     <div className={styles.form} data-testid="parameter-fields">
-      {action.parameters.map(p =>
+      {composed ? <EmailMessageFields scope={scope} /> : null}
+      {fields.map(p =>
         p.kind === 'Person' || p.kind === 'Lookup' ? (
-          <LookupParameter key={p.code} parameter={p} scope={scope} />
+          <LookupParameter key={p.code} parameter={p} scope={scope} action={action} />
         ) : (
-          <ScalarParameter key={p.code} parameter={p} scope={scope} />
+          <ScalarParameter key={p.code} parameter={p} scope={scope} action={action} />
         )
       )}
     </div>
