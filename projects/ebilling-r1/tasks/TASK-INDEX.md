@@ -94,8 +94,8 @@ To begin: `work on task 001`. Wave W0-1 (001, 002, 003) and W2-1 (040, 041) have
 | 091 | ✅ [done] | File store provisioning: blob containers, container-scoped role, malware-scan setting, customer-provisioning hand-off | FULL | opus / high | P3-A | none |
 | 092 | 🔲 [open] | Submission on the file store: uploads stage Stored Files, extraction reads the blob, review gets file id, 028 retires | FULL | opus / high | P3-C | 090 |
 | 093 | 🔲 [open] | Firm file routes GET /api/v1/external/invoices/{id}/files and …/content; the four invoice-document routes retire | FULL | opus / high | P3-D (p-safe false) | 090, 098 |
-| 094 | 🔲 [open] | Submit Invoice from a source Document: all-or-nothing steps 1-6, file first (A), copy rule (B), 050a re-file retired | FULL | opus / high | P3-E | 086, 090, 092, 098 |
-| 095 | 🔄 [merged 8733963565; live once 094 fills the seam] | Submit Invoice from the Outlook add-in: POST /api/finance/invoice-submissions/from-email (email-only save + submission) | FULL | opus / high | P3-F (p-safe false) | 094, 088 |
+| 094 | ✅ [done; on master eaa0d44f7f (#1911)] | Submit Invoice from a source Document: all-or-nothing steps 1-6, file first (A), copy rule (B), 050a re-file retired | FULL | opus / high | P3-E | 086, 090, 092, 098 |
+| 095 | ✅ [done; on master eaa0d44f7f (#1911); dev after the BFF deploy + EB-D-173] | Submit Invoice from the Outlook add-in: POST /api/finance/invoice-submissions/from-email (email-only save + submission) | FULL | opus / high | P3-F (p-safe false) | 094, 088 |
 | 096 | 🔲 [open] | Remove the Office server legs for Invoice as a save target and invoice quick-create | FULL | sonnet / high | P3-F | 095 |
 | 097 | 🔲 [open] | Corrected invoice: the old invoice closes Superseded in step 4 (guarded) and its open Signals close Superseded | FULL | opus / high | P3-F (p-safe false) | 094, 104, 088 |
 | 098 | ✅ [merged 8b1aa1fa58; uac READY round 5] | (a′) on sprk_invoice: hide invoices with an isolated Submit Invoice source, and derived rows, from external callers | FULL | opus / high | P3-C (p-safe false) | 088, 090 |
@@ -119,10 +119,10 @@ To begin: `work on task 001`. Wave W0-1 (001, 002, 003) and W2-1 (040, 041) have
 | ID | Status | Title | Rigor | Model / Effort | Group | Deps |
 |---|---|---|---|---|---|---|
 | 100 | 🟡 [wip] | Review read model and line decision endpoints | FULL | sonnet / high | P4-A | 014, 016, 049 |
-| 101 | 🔲 [open] | Value / code corrections, structured capture, re-evaluation | FULL | sonnet / xhigh | P4-B | 100, 027, 072 |
-| 102 | 🔲 [open] | Invoice-level adjustments | STANDARD | sonnet / high | P4-B | 100 |
-| 103 | 🔲 [open] | Approval: eligible approvers, worklist, approve | FULL | opus / high | P4-B | 100, 021, 024, 025, 074 |
-| 104 | 🔲 [open] | Reject and Return to Firm; resubmission linkage | FULL | sonnet / high | P4-C | 103, 045 |
+| 101 | 🟡 [wip] Part A + EB-D-175/176 + B1 on task/ebill-101-corrections; B2 running | Value / code corrections, structured capture, re-evaluation | FULL | sonnet / xhigh | P4-B | 100, 027, 072 |
+| 102 | ✅ [done; on master eaa0d44f7f (#1911)] | Invoice-level adjustments | STANDARD | sonnet / high | P4-B | 100 |
+| 103 | ✅ [done; on master eaa0d44f7f (#1911)] | Approval: eligible approvers, worklist, approve | FULL | opus / high | P4-B | 100, 021, 024, 025, 074 |
+| 104 | ✅ [done; on work a4e0721bdc, adversarial F1-a/F1-b fixed] | Reject and Return to Firm; resubmission linkage | FULL | sonnet / high | P4-C | 103, 045 |
 | 105 | 🟡 [wip] | Override (server) | FULL | sonnet / high | P4-B | 044, 049, 074 |
 | 106 | ✅ [done] | Context panel API | STANDARD | sonnet / high | P4-A | 029, 040 |
 | 107 | ✅ [done] | Related work product API | STANDARD | sonnet / high | P4-A | 029, 040 |
