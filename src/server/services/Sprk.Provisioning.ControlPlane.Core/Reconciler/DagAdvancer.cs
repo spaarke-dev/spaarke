@@ -16,7 +16,7 @@
 //     ├── H2b (AI Search indexes)
 //     ├── H4 (per-tenant KV secrets + T1 patch)
 //     │     │
-//     │     ├──→ H4b (BulkAppSettings — task 201 / F20/F20a; needs H4)
+//     │     ├──→ H4b (BulkAppSettings — task 201 / F20/F20a; needs H4; also H2b — AiSearch__AllowedIndexes)
 //     │     │     │
 //     │     │     └──→ (feeds H9 below)
 //     │     │
@@ -153,7 +153,7 @@ public sealed class DagAdvancer : IDagAdvancer
             [HandlerH4] = new[] { HandlerH2a },
             [HandlerH5] = new[] { HandlerH2a },
             [HandlerH3] = new[] { HandlerH4 },                              // Needs KV for secret storage.
-            [HandlerH4b] = new[] { HandlerH4, HandlerH3, HandlerH5, HandlerH8, HandlerH10 }, // Task 201 / F20 — batched app-settings needs the customer KV populated. (T226 2026-09-30: H4-shared retired.) T245a: + H3 — AzureAd__ClientId is H3's InterStepState.BffAppRegId. T245b: + H5 — Dataverse__ServiceUrl/EnvironmentUrl are H5's InterStepState.DataverseEnvUrl. T227c: + H8 — EmailProcessing__DefaultContainerId / Communication__ArchiveContainerId are H8's SpeContainerId (so H9 also waits for H8). R3 073: + H10 — ExternalAccess__CustomerBusinessUnitId is H10's CustomerBusinessUnitId.
+            [HandlerH4b] = new[] { HandlerH4, HandlerH3, HandlerH5, HandlerH8, HandlerH10, HandlerH2b },// Task 201 / F20 — batched app-settings needs the customer KV populated. (T226 2026-09-30: H4-shared retired.) T245a: + H3 — AzureAd__ClientId is H3's InterStepState.BffAppRegId. T245b: + H5 — Dataverse__ServiceUrl/EnvironmentUrl are H5's InterStepState.DataverseEnvUrl. T227c: + H8 — EmailProcessing__DefaultContainerId / Communication__ArchiveContainerId are H8's SpeContainerId (so H9 also waits for H8). R3 073: + H10 — ExternalAccess__CustomerBusinessUnitId is H10's CustomerBusinessUnitId. T186 follow-up: + H2b — AiSearch__AllowedIndexes is H2b's AiSearchIndexNames.
             // T228: H6 and H7 sign in to the customer environment AS the BFF app registration, which is an application user
             // there only once H10 has registered it — so H10 runs before H6. (H8 and H5 act as the L2 Worker identity, which the
             // operator's prerequisite PRQ-C-09 makes an application user; they do not wait for H10.)

@@ -3,7 +3,9 @@
  *
  * Contract: `projects/ebilling-r1/notes/095-from-email-contract.md`, agreed 2026-10-27 at 717cf238d9, current at fd70b8e1f6 (work/ebilling-r1); the 2026-10-28 review round
  * (cc7bb5eeee, task/ebill-095-from-email: key v2 without the firm fields, 422 `attachment_not_preserved`, 500
- * `OFFICE_AUTH_ERROR`, the firms route's 404, `poNumber` at most 100 characters) agreed by word-add-in-r1:
+ * `OFFICE_AUTH_ERROR`, the firms route's 404, `poNumber` at most 100 characters) agreed by word-add-in-r1; task 094's
+ * rows (97c793670b, merged into work/ebilling-r1 at ba63082008: step 1 and step A refusals, the "filing is kept" note,
+ * 503 `earlier_attempt_being_removed`, outcome `source_changed`):
  * - §2 `POST /api/finance/invoice-submissions/from-email` — {@link submitInvoiceFromEmail};
  * - §3 `GET statusUrl` until the status is final — {@link pollSubmission};
  * - §8 `GET /api/finance/core-records/{entityType}/{entityId}/firms` — {@link loadInvoiceFirms};
@@ -27,6 +29,7 @@ import {
   describeInvoiceOutcome,
   describeSubmissionRefusal,
   EMAIL_UNIDENTIFIABLE_CODE,
+  FILING_KEPT_DETAIL,
   HELD_FOR_REVIEW_MESSAGE,
   isRetryableSubmissionRefusal,
   PERMANENT_SUBMISSION_CODES,
@@ -102,6 +105,8 @@ export interface InvoiceRefusalExtras {
   fileName?: string;
   mark?: string;
   invoiceStatus?: string;
+  /** §6 "After step A" (task 094): the email was filed under the record before the refusal, and stays filed. */
+  filingKept?: true;
 }
 
 /**
@@ -123,7 +128,14 @@ export type InvoiceSubmitResult = (
       detail?: string;
       local?: true;
     } & InvoiceRefusalExtras)
-  | { kind: 'retryable'; status: number; code: string | undefined; retryAfterSeconds?: number; detail?: string }
+  | {
+      kind: 'retryable';
+      status: number;
+      code: string | undefined;
+      retryAfterSeconds?: number;
+      detail?: string;
+      filingKept?: true;
+    }
 ) & { skipped?: SkippedAttachment[] };
 
 /** §3 statuses. */
@@ -173,6 +185,28 @@ const MAX_RETRY_AFTER_SECONDS = 300;
 
 function stringOrUndefined(value: unknown): string | undefined {
   return typeof value === 'string' ? value : undefined;
+}
+
+/**
+ * §6's client rule, `errorCode ?? reasonCode`; on a 403 only, then `extensions.code`. Task 094's step A 403
+ * (`COMMUNICATION_REFILE_FORBIDDEN`) went out through the problem middleware, which writes the code only under
+ * `extensions`; ebilling is moving it to `errorCode` (2026-10-29), and this stays as a fallback. Other statuses never
+ * read it: the middleware's 401 `obo_failed` and 502/504 Graph errors keep their code-less handling.
+ */
+function problemCode(status: number, json: Record<string, unknown> | null): string | undefined {
+  const extensions = json?.extensions;
+  return (
+    stringOrUndefined(json?.errorCode) ??
+    stringOrUndefined(json?.reasonCode) ??
+    (status === 403 && extensions && typeof extensions === 'object'
+      ? stringOrUndefined((extensions as Record<string, unknown>).code)
+      : undefined)
+  );
+}
+
+/** §6 "After step A": the top-level `filingKept: true`, or a `detail` that ends with the contract's pinned sentence. */
+function isFilingKept(json: Record<string, unknown> | null, detail: string | undefined): boolean {
+  return json?.filingKept === true || detail?.trimEnd().endsWith(FILING_KEPT_DETAIL) === true;
 }
 
 /** `Retry-After` (seconds, or an HTTP date) and the body's `retryAfterSeconds` (429 OFFICE_015). */
@@ -416,8 +450,9 @@ async function postFromEmail(
     return { kind: 'retryable', status: response.status, code: undefined };
   }
 
-  const code = stringOrUndefined(json?.errorCode) ?? stringOrUndefined(json?.reasonCode);
+  const code = problemCode(response.status, json);
   const detail = stringOrUndefined(json?.detail);
+  const filingKept = isFilingKept(json, detail) ? ({ filingKept: true } as const) : {};
   if (isRetryableSubmissionRefusal(response.status, code)) {
     const retryAfterSeconds = readRetryAfterSeconds(response, json);
     return {
@@ -426,6 +461,7 @@ async function postFromEmail(
       code,
       ...(retryAfterSeconds !== undefined ? { retryAfterSeconds } : {}),
       ...(detail ? { detail } : {}),
+      ...filingKept,
     };
   }
   const reason = stringOrUndefined(json?.reason);
@@ -441,6 +477,7 @@ async function postFromEmail(
     ...(fileName ? { fileName } : {}),
     ...(mark ? { mark } : {}),
     ...(invoiceStatus ? { invoiceStatus } : {}),
+    ...filingKept,
   };
 }
 
@@ -492,11 +529,7 @@ export async function pollSubmission(
     const json = await readJson(response);
     if (!response.ok) {
       if (response.status >= 500 || response.status === 429) continue;
-      return {
-        kind: 'error',
-        status: response.status,
-        code: stringOrUndefined(json?.errorCode) ?? stringOrUndefined(json?.reasonCode),
-      };
+      return { kind: 'error', status: response.status, code: problemCode(response.status, json) };
     }
     const status = stringOrUndefined(json?.status);
     lastStatus = status ?? lastStatus;

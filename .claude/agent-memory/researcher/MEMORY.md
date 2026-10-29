@@ -1,4 +1,7 @@
 ## SharePoint Embedded + Graph
+- [SPE container permission user identity (2026-10-19)](spe-container-permission-user-identity-2026-10-19.md) — grantedToV2.user id/email/UPN in AdditionalData (SDK v5); guest email-vs-UPN undocumented
+- [SPE inactive container auto-delete (2026-10-16)](spe-container-inactive-autodelete-2026-10-16.md) — 24h auto-delete documented; customProperties PATCH/permission/upload activates; only H8 calls /activate
+- [atk oauth/register minimal project (2026-10-28)](atk-oauth-register-minimal-project-2026-10-28.md) — yaml-only project works; appId any non-empty GUID; scopes comma-split; idempotent only via env-file configurationId; verified to token step
 - [Entra publisher verification (2026-10-14)](publisher-verification-2026-10-14.md) — setVerifiedPublisher delegated-only (app-only NOT supported); PGA ID + MFA + App Admin; admin consent not blocked
 - [B2B guest (A8) vs multi-tenant /organizations (Option A) (2026-10-13)](b2b-guest-vs-multitenant-home-authority-2026-10-13.md) — auto-redeem needs BOTH tenants; MFA trust off by default; MS-managed consent default; NAA silent for guest/multitenant unconfirmed
 - [B2B guest home-tenant classification (2026-10-12)](b2b-guest-home-tenant-classification-2026-10-12.md) — no documented home-tid claim/user prop; tid=resource tenant; idp GUID practice only; beta signIn.homeTenantId; bind at invite time
@@ -48,6 +51,10 @@
 - [Dataverse Word templates (2026-08-13)](dataverse-word-templates-storage-merge-2026-08-13.md) — documenttemplate vs template vs File column; merge encoding
 
 ## Dataverse / Power Platform / MDA
+- [User BU change semantics (2026-10-28)](dataverse-user-bu-change-semantics-2026-10-28.md) — roles stripped, owned records move (defaults); SetBusinessSystemUser bound + DoNotMoveAllRecords; Assign moves BU + Cascade All
+- [T191a flagged-external baseline (2026-10-21)](uac191a-flagged-external-dataverse-baseline-2026-10-21.md) — hierarchy off; matrix on; root default team Deep = org-wide; prvRead/WriteUser min Local; BU change strips roles
+- [Dataverse cascade delete (2026-10-18)](dataverse-cascade-delete-2026-10-18.md) — Delete opts Cascade/RemoveLink/Restrict; multi-parent rule any-action; async 5,000; child priv check UNDOCUMENTED; restore 30 vs 90d
+- [Dataverse audit defaults (2026-10-16)](dataverse-audit-defaults-2026-10-16.md) — new-env default undocumented; retention 30 vs Forever conflict; share=14/48/49; org PATCH supported
 - [navigateTo dialog chrome vs dark mode (2026-10-05)](navigateto-dialog-chrome-dark-mode-2026-10-05.md) — 5 navOptions, no hideHeader; MDA dark mode unsupported (Spaarke uses undocumented flag); sidePanes hideHeader
 - [PP licensing: multiplexing/ISV/app-only API (2026-10-13)](pp-licensing-multiplexing-isv-workforce-partners-2026-10-13.md) — PLG Oct 2026 p.24-25; no API-only SKU; non-licensed req pool 25k/day; ISV licence mgmt = model-driven only
 - [PAYG + B2B guest Dataverse users (2026-10-07)](payg-b2b-guest-dataverse-user-provisioning-2026-10-07.md) — guests covered w/o licence; `pac licensing *billing-policy*` (not pac admin); JIT role-assoc by oid alternate key; BAP addUser = tenant admin only

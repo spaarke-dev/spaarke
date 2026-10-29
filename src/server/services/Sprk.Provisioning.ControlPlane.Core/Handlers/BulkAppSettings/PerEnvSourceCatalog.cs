@@ -106,6 +106,13 @@ public static class PerEnvSourceCatalog
             _ => null,
             r => CustomerWorkforceTenantsRule.ParseStored(
                 r.Parameters.NonSecret.TryGetValue(IntakeParameterCatalog.CustomerWorkforceTenantIds, out var v) ? v : null)),
+        // T186 follow-up (AiSearch allow-list): the indexes H2b built and verified on the stamp's own search service —
+        // a LIST source (indexed entry AiSearch__AllowedIndexes). The BFF prefers sprk_aisearchindex rows (seeded by
+        // H12b, #2429) and falls back to this list. H4b ← H2b in the DAG.
+        new("from-h2b-output:ai_search_index_names", "ai_search_index_names", HandlerIds.H2b,
+            $"InterStepState.{nameof(InterStepState.AiSearchIndexNames)} ({HandlerIds.H2b} output)",
+            _ => null,
+            r => r.InterStepState.AiSearchIndexNames is { Count: > 0 } names ? names.ToArray() : null),
     ];
 
     /// <summary>Accepted sources, by source key (the part after the colon; ordinal).</summary>
