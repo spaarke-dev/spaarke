@@ -150,12 +150,18 @@ describe('AccessGrantModal — Assigned-To suggestions on a secure record (task 
 
     fireEvent.click(await screen.findByRole('button', { name: 'Grant Ines Internal' }));
 
+    // Task 193 G4b: a user share carries the record's Expiration too, for its paired workforce-app grant.
+    const now = new Date();
+    const defaultExpiry = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 90))
+      .toISOString()
+      .slice(0, 10);
     await waitFor(() =>
       expect(bodyOf(fetchMock, '/api/v1/external-access/share-user')).toEqual({
         recordType: 'matter',
         recordId: 'matter-1',
         systemUserId: 'user-2',
         accessLevel: 100000001,
+        expiryDate: defaultExpiry,
       })
     );
     expect(bodyOf(fetchMock, '/api/v1/external-access/grant')).toBeUndefined();

@@ -9,9 +9,10 @@
  * Expiration — that the SHARE itself has no end date.
  *
  * Current Access lists a share and its paired grant together (`pairedWith`), removing the share says it removes both,
- * removing the grant alone says the share stays, and `/unshare-user`'s `pairedGrantEnded: false` adds a neutral note.
- * G3d: that note promises no timing (the daily clean-up ends the grant only when its writes are on); it says the grant
- * is still listed under Current Access, where it can be revoked — and the reload keeps it listed once its share is gone.
+ * removing the grant alone says the share stays, and `/unshare-user`'s answer about the paired grant is worded truthfully.
+ * G3d: no note promises timing (the daily clean-up ends the grant only when its writes are on), and the reload keeps a
+ * grant listed once its share is gone. G4b: `pairedGrant` is read first; a grant not confirmed ended may still be active,
+ * and the notice offers Try again (`AccessGrantModal.unshareOutcome.test.tsx`).
  * G3e: a grant counts as paired only while its share is listed; one whose share is not listed is worded without a share
  * (row, revoke confirmation, success notice).
  */
@@ -24,12 +25,12 @@ import { FluentProvider, webLightTheme } from '@fluentui/react-components';
 import {
   AccessGrantModal,
   COLLEAGUE_FALLBACK_NAME,
-  PAIRED_GRANT_NOT_ENDED_SENTENCE,
   REVOKE_PAIRED_SHARE_SENTENCE,
   SHARE_EXPIRY_NOT_APPLIED_SENTENCE,
-  UNSHARE_PAIRED_GRANT_LEFT_SENTENCE,
   groupPairedAccess,
+  pairedGrantNotEndedSentence,
   pairedShareNote,
+  shareExpiryPairedSentence,
   revokePairedGrantSentence,
   revokeUnlistedShareGrantSentence,
   sharedWithColleagueSentence,
@@ -39,7 +40,13 @@ import {
 } from '../AccessGrantModal';
 import { throwingAuthenticatedFetch } from '../../../__tests__/helpers/authenticatedFetchDouble';
 import { confirmRevoke } from '../../../__tests__/helpers/confirmDialog';
-import type { IAccessGrantModalProps, IAccessGrantRecord, IContactSearchResult, IPersonPick, IUserPick } from '../types';
+import type {
+  IAccessGrantModalProps,
+  IAccessGrantRecord,
+  IContactSearchResult,
+  IPersonPick,
+  IUserPick,
+} from '../types';
 import { personFromContact, personFromUser } from './personPickDouble';
 
 const renderWithTheme = (ui: React.ReactElement) => render(<FluentProvider theme={webLightTheme}>{ui}</FluentProvider>);
@@ -49,7 +56,11 @@ const SHARE_USER = '/api/v1/external-access/share-user';
 const UNSHARE_USER = '/api/v1/external-access/unshare-user';
 const REVOKE = '/api/v1/external-access/revoke';
 
-const ADA_CONTACT: IContactSearchResult = { contactId: 'contact-ada', fullName: 'Ada (contact)', email: 'ada@x.example' };
+const ADA_CONTACT: IContactSearchResult = {
+  contactId: 'contact-ada',
+  fullName: 'Ada (contact)',
+  email: 'ada@x.example',
+};
 const ADA_USER_ID = 'systemuser-ada';
 const UMA_USER: IUserPick = { id: 'systemuser-uma', name: 'Uma Userton' };
 const UNTIL = '2027-01-26';
@@ -66,7 +77,11 @@ function jsonResponse(body: unknown): Response {
 }
 
 function problemResponse(body: unknown, status: number): Response {
-  return { ok: false, status, json: async () => ({ status, ...(body as Record<string, unknown>) }) } as unknown as Response;
+  return {
+    ok: false,
+    status,
+    json: async () => ({ status, ...(body as Record<string, unknown>) }),
+  } as unknown as Response;
 }
 
 const SHARED_WITH_ADA = {
@@ -191,7 +206,9 @@ describe('AccessGrantModal — Add person and workforce-app access (task 193 G3b
       await addPerson(ADA_CONTACT.fullName);
 
       expect(
-        await screen.findByText(`Shared with Ada Lovelace — visible in their workforce app until ${displayDate(UNTIL)}.`)
+        await screen.findByText(
+          `Shared with Ada Lovelace — visible in their workforce app until ${displayDate(UNTIL)}.`
+        )
       ).toBeInTheDocument();
     });
 
@@ -256,7 +273,7 @@ describe('AccessGrantModal — Add person and workforce-app access (task 193 G3b
       expect(
         await screen.findByText(
           `Shared with Ada Lovelace — visible in their workforce app until ${displayDate(UNTIL)}. ` +
-            SHARE_EXPIRY_NOT_APPLIED_SENTENCE
+            shareExpiryPairedSentence(UNTIL)
         )
       ).toBeInTheDocument();
     });
@@ -335,7 +352,12 @@ describe('AccessGrantModal — Add person and workforce-app access (task 193 G3b
         }
         if (url.includes('/user-shares')) return jsonResponse({ shares: [] });
         if (url === SHARE_USER) {
-          return jsonResponse({ systemUserId: ADA_USER_ID, outcome: 'created', narrowed: false, workforceApp: VISIBLE });
+          return jsonResponse({
+            systemUserId: ADA_USER_ID,
+            outcome: 'created',
+            narrowed: false,
+            workforceApp: VISIBLE,
+          });
         }
         return jsonResponse({});
       });
@@ -369,7 +391,11 @@ describe('AccessGrantModal — Add person and workforce-app access (task 193 G3b
     it('the sentences, pure: visible, not visible, with and without an Expiration, and no workforceApp', () => {
       const until = displayDate(UNTIL);
       expect(
-        sharedWithColleagueSentence({ name: 'Ada Lovelace', expiryNotApplied: false, workforceApp: { visible: true, until: UNTIL } })
+        sharedWithColleagueSentence({
+          name: 'Ada Lovelace',
+          expiryNotApplied: false,
+          workforceApp: { visible: true, until: UNTIL },
+        })
       ).toBe(`Shared with Ada Lovelace — visible in their workforce app until ${until}.`);
       expect(
         sharedWithColleagueSentence({
@@ -377,7 +403,20 @@ describe('AccessGrantModal — Add person and workforce-app access (task 193 G3b
           expiryNotApplied: true,
           workforceApp: { visible: false, reason: 'sdap.access.grant.record_restricted' },
         })
-      ).toBe(`Shared with your colleague. ${LEAD} because the record is Restricted. ${SHARE_EXPIRY_NOT_APPLIED_SENTENCE}`);
+      ).toBe(
+        `Shared with your colleague. ${LEAD} because the record is Restricted. ${SHARE_EXPIRY_NOT_APPLIED_SENTENCE}`
+      );
+      // G4b: visible with an Expiration: the share has no end date, the workforce app access ends on its date.
+      expect(
+        sharedWithColleagueSentence({
+          name: 'Ada Lovelace',
+          expiryNotApplied: true,
+          workforceApp: { visible: true, until: UNTIL },
+        })
+      ).toBe(
+        `Shared with Ada Lovelace — visible in their workforce app until ${until}. The share itself has no end date; only ` +
+          `their workforce app access ends on ${until}.`
+      );
       // An older server (no workforceApp): unchanged lead; the Expiration sentence names the share.
       expect(sharedWithColleagueSentence({ name: 'Ada Lovelace', expiryNotApplied: false })).toBe(
         'Shared with Ada Lovelace — internal user.'
@@ -472,7 +511,9 @@ describe('AccessGrantModal — Add person and workforce-app access (task 193 G3b
         jsonResponse({ systemUserId: ADA_USER_ID, removed: true, pairedGrantEnded: true })
       );
       renderWithTheme(
-        <AccessGrantModal {...makeProps(fetchMock, null, { fetchExistingGrants: jest.fn(async () => [PAIRED_GRANT]) })} />
+        <AccessGrantModal
+          {...makeProps(fetchMock, null, { fetchExistingGrants: jest.fn(async () => [PAIRED_GRANT]) })}
+        />
       );
 
       await screen.findByText('Ada Lovelace');
@@ -489,12 +530,14 @@ describe('AccessGrantModal — Add person and workforce-app access (task 193 G3b
       expect(postsTo(fetchMock, REVOKE)).toHaveLength(0);
     });
 
-    it('pairedGrantEnded: false after removing the share: the neutral note', async () => {
+    it('pairedGrantEnded: false (an older answer, no pairedGrant): may still be active, with Try again', async () => {
       const fetchMock = currentAccessFetch(() =>
         jsonResponse({ systemUserId: ADA_USER_ID, removed: true, pairedGrantEnded: false })
       );
       renderWithTheme(
-        <AccessGrantModal {...makeProps(fetchMock, null, { fetchExistingGrants: jest.fn(async () => [PAIRED_GRANT]) })} />
+        <AccessGrantModal
+          {...makeProps(fetchMock, null, { fetchExistingGrants: jest.fn(async () => [PAIRED_GRANT]) })}
+        />
       );
 
       await screen.findByText('Ada Lovelace');
@@ -503,33 +546,43 @@ describe('AccessGrantModal — Add person and workforce-app access (task 193 G3b
 
       expect(
         await screen.findByText(
-          "Removed Ada Lovelace's share. Their workforce app access could not be removed just now; it is still listed " +
-            'under Current Access, where you can revoke it.'
+          "Removed Ada Lovelace's share. Their workforce app access could not be confirmed removed, so it may still be " +
+            'active. Try again.'
         )
       ).toBeInTheDocument();
       expect(screen.getByText('Notice')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Try again' })).toBeEnabled();
     });
 
-    it('pairedGrantEnded: false, and the reload lists the grant without its share: a standalone row with Revoke', async () => {
+    it('pairedGrant endFailed, and the reload lists the grant without its share: a standalone row with Revoke', async () => {
       // The reload after the removal no longer lists Ada's share; her paired grant is still active.
       let shareRemoved = false;
       const fetchMock = throwingAuthenticatedFetch(async (url: string) => {
         if (url.includes('/user-shares')) return jsonResponse({ shares: shareRemoved ? [] : [ADA_SHARE_JSON] });
         if (url === UNSHARE_USER) {
           shareRemoved = true;
-          return jsonResponse({ systemUserId: ADA_USER_ID, removed: true, pairedGrantEnded: false });
+          return jsonResponse({
+            systemUserId: ADA_USER_ID,
+            removed: true,
+            pairedGrantEnded: false,
+            pairedGrant: 'endFailed',
+          });
         }
         return jsonResponse({});
       });
       renderWithTheme(
-        <AccessGrantModal {...makeProps(fetchMock, null, { fetchExistingGrants: jest.fn(async () => [PAIRED_GRANT]) })} />
+        <AccessGrantModal
+          {...makeProps(fetchMock, null, { fetchExistingGrants: jest.fn(async () => [PAIRED_GRANT]) })}
+        />
       );
 
       await screen.findByText('Ada Lovelace');
       fireEvent.click(within(rowOf('Ada Lovelace')).getByRole('button', { name: 'Revoke' }));
       await confirmRevoke();
 
-      expect(await screen.findByText(`Removed Ada Lovelace's share. ${UNSHARE_PAIRED_GRANT_LEFT_SENTENCE}`)).toBeInTheDocument();
+      expect(
+        await screen.findByText(`Removed Ada Lovelace's share. ${pairedGrantNotEndedSentence('endFailed')}`)
+      ).toBeInTheDocument();
       // The share row is gone; the grant the notice points to is listed on its own, with its Revoke.
       expect(screen.queryByText('Ada Lovelace')).not.toBeInTheDocument();
       const rows = Array.from(document.body.querySelectorAll('[data-access-state]'));
@@ -551,7 +604,9 @@ describe('AccessGrantModal — Add person and workforce-app access (task 193 G3b
         return jsonResponse({});
       });
       renderWithTheme(
-        <AccessGrantModal {...makeProps(fetchMock, null, { fetchExistingGrants: jest.fn(async () => [PAIRED_GRANT]) })} />
+        <AccessGrantModal
+          {...makeProps(fetchMock, null, { fetchExistingGrants: jest.fn(async () => [PAIRED_GRANT]) })}
+        />
       );
 
       await screen.findByText('Ada (contact)');
@@ -580,7 +635,7 @@ describe('AccessGrantModal — Add person and workforce-app access (task 193 G3b
       expect(postsTo(fetchMock, UNSHARE_USER)).toHaveLength(0);
     });
 
-    it('pairedGrantEnded: false on a share removed while related records are pending: the note follows the detail', async () => {
+    it('pairedGrant endFailed on a share removed while related records are pending: the note follows the detail', async () => {
       const fetchMock = currentAccessFetch(() =>
         problemResponse(
           {
@@ -588,12 +643,15 @@ describe('AccessGrantModal — Add person and workforce-app access (task 193 G3b
             detail: '1 related record is not updated yet; it completes automatically.',
             reasonCode: 'sdap.access.user_share.children_incomplete',
             pairedGrantEnded: false,
+            pairedGrant: 'endFailed',
           },
           500
         )
       );
       renderWithTheme(
-        <AccessGrantModal {...makeProps(fetchMock, null, { fetchExistingGrants: jest.fn(async () => [PAIRED_GRANT]) })} />
+        <AccessGrantModal
+          {...makeProps(fetchMock, null, { fetchExistingGrants: jest.fn(async () => [PAIRED_GRANT]) })}
+        />
       );
 
       await screen.findByText('Ada Lovelace');
@@ -602,18 +660,18 @@ describe('AccessGrantModal — Add person and workforce-app access (task 193 G3b
 
       expect(
         await screen.findByText(
-          `1 related record is not updated yet; it completes automatically. ${PAIRED_GRANT_NOT_ENDED_SENTENCE}`
+          `1 related record is not updated yet; it completes automatically. ${pairedGrantNotEndedSentence('endFailed')}`
         )
       ).toBeInTheDocument();
-      expect(PAIRED_GRANT_NOT_ENDED_SENTENCE).toBe(
-        'Their workforce app access could not be removed just now; you can revoke it under Current Access.'
-      );
+      expect(screen.getByRole('button', { name: 'Try again' })).toBeEnabled();
     });
 
     it('removing the paired grant alone: the confirmation and the notice say the share stays', async () => {
       const fetchMock = currentAccessFetch();
       renderWithTheme(
-        <AccessGrantModal {...makeProps(fetchMock, null, { fetchExistingGrants: jest.fn(async () => [PAIRED_GRANT]) })} />
+        <AccessGrantModal
+          {...makeProps(fetchMock, null, { fetchExistingGrants: jest.fn(async () => [PAIRED_GRANT]) })}
+        />
       );
 
       await screen.findByText('Ada (contact)');
@@ -635,9 +693,14 @@ describe('AccessGrantModal — Add person and workforce-app access (task 193 G3b
 
     it('MUST NOT FIRE: an unpaired share and grant keep the plain confirmations and notices', async () => {
       const unpairedShare = { ...ADA_SHARE_JSON, pairedWith: undefined };
-      const fetchMock = currentAccessFetch(() => jsonResponse({ systemUserId: ADA_USER_ID, removed: true }), unpairedShare);
+      const fetchMock = currentAccessFetch(
+        () => jsonResponse({ systemUserId: ADA_USER_ID, removed: true }),
+        unpairedShare
+      );
       renderWithTheme(
-        <AccessGrantModal {...makeProps(fetchMock, null, { fetchExistingGrants: jest.fn(async () => [OTHER_GRANT]) })} />
+        <AccessGrantModal
+          {...makeProps(fetchMock, null, { fetchExistingGrants: jest.fn(async () => [OTHER_GRANT]) })}
+        />
       );
 
       await screen.findByText('Ada Lovelace');
@@ -666,7 +729,11 @@ describe('AccessGrantModal — Add person and workforce-app access (task 193 G3b
       };
       const grantSideOnly: IAccessGrantRecord = { ...PAIRED_GRANT };
       const shareSideOnly: IAccessGrantRecord = { ...PAIRED_GRANT, pairedWith: undefined };
-      const orphan: IAccessGrantRecord = { ...PAIRED_GRANT, accessRecordId: 'g-orphan', pairedWith: { id: 'su-gone', kind: 'share' } };
+      const orphan: IAccessGrantRecord = {
+        ...PAIRED_GRANT,
+        accessRecordId: 'g-orphan',
+        pairedWith: { id: 'su-gone', kind: 'share' },
+      };
 
       // Grant-side pairing only (the share row's own pairedWith absent); the share id compared case-insensitively.
       let entries = groupPairedAccess([grantSideOnly, OTHER_GRANT, share]);
@@ -675,7 +742,10 @@ describe('AccessGrantModal — Add person and workforce-app access (task 193 G3b
       expect(entries[2].pairedShare).toBe(share);
 
       // Share-side pairing only.
-      entries = groupPairedAccess([shareSideOnly, { ...share, pairedWith: { id: PAIRED_GRANT_ID.toUpperCase(), kind: 'grant' } }]);
+      entries = groupPairedAccess([
+        shareSideOnly,
+        { ...share, pairedWith: { id: PAIRED_GRANT_ID.toUpperCase(), kind: 'grant' } },
+      ]);
       expect(entries.map(e => e.row.fullName)).toEqual(['Ada Lovelace', 'Ada (contact)']);
 
       // A grant whose share is not listed stays where it is, marked as going with a share.
@@ -690,21 +760,28 @@ describe('AccessGrantModal — Add person and workforce-app access (task 193 G3b
       expect(pairedShareNote([{ ...PAIRED_GRANT, isExpired: true }])).toBe(
         `(workforce app access expired ${displayDate(UNTIL)})`
       );
-      expect(pairedShareNote([])).toBe('(with workforce app access)');
+      // G4b: a grant the server pairs but Current Access does not list is not described; an undated one gives nothing.
+      expect(pairedShareNote([])).toBe('(paired workforce app access not listed)');
+      expect(pairedShareNote([{ ...PAIRED_GRANT, expiresDate: undefined }])).toBe(
+        '(workforce app access has no date yet, so it gives no access)'
+      );
       expect(unlistedShareGrantMeta('Ada (contact)', '2026-10-28')).toBe(
         `Workforce app access for Ada (contact) · granted ${displayDate('2026-10-28')}`
       );
       expect(revokeUnlistedShareGrantSentence('Ada (contact)')).toBe(
         "Remove Ada (contact)'s workforce app access? The record will no longer show in their workforce app."
       );
-      expect(unshareNotice('Ada', true)).toEqual({ intent: 'success', text: "Removed Ada's share and their workforce app access." });
-      expect(unshareNotice('Ada', false)).toEqual({
-        intent: 'info',
-        text:
-          "Removed Ada's share. Their workforce app access could not be removed just now; it is still listed under " +
-          'Current Access, where you can revoke it.',
+      const ada = { systemUserId: ADA_USER_ID, fullName: 'Ada' };
+      expect(unshareNotice(ada, 'ended')).toEqual({
+        intent: 'success',
+        text: "Removed Ada's share and their workforce app access.",
       });
-      expect(unshareNotice('Ada', undefined)).toEqual({ intent: 'success', text: "Removed Ada's share." });
+      expect(unshareNotice(ada, 'notConfirmed')).toEqual({
+        intent: 'warning',
+        text: "Removed Ada's share. Their workforce app access could not be confirmed removed, so it may still be active. Try again.",
+        retryUnshare: ada,
+      });
+      expect(unshareNotice(ada, 'none')).toEqual({ intent: 'success', text: "Removed Ada's share." });
     });
 
     it('no notice promises when workforce-app access goes: "within a day" is nowhere in the modal', () => {
