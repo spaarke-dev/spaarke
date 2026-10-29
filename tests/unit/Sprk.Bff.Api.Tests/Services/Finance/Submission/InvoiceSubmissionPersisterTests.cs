@@ -515,6 +515,45 @@ public class InvoiceSubmissionPersisterTests
             .Should().BeTrue();
     }
 
+    [Theory(DisplayName = "uac-r2 Q1 parity: the persisted invoice and its Stored File agree - an ordinary core gives the invoice its unit's team and the file the restricted-content team (neither Secure), a Secure core gives both the Secure team")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task StoredFile_AndItsInvoice_AgreeOnSecureOrNot(bool secureCore)
+    {
+        var directory = secureCore
+            ? MatterIn(Sprk.Bff.Api.Tests.TestInfrastructure.OwnershipDirectory.SecureBu,
+                Sprk.Bff.Api.Tests.TestInfrastructure.OwnershipDirectory.SecureNamedTeam, secure: true)
+            : MatterIn(Sprk.Bff.Api.Tests.TestInfrastructure.OwnershipDirectory.CustomerChildBu,
+                Sprk.Bff.Api.Tests.TestInfrastructure.OwnershipDirectory.CustomerChildTeam);
+        var outcome = await new ProcessorHarness().RunAsync();
+        var store = new Store { Ownership = directory };
+
+        await store.Build().PersistAsync(outcome, null);
+
+        var file = CreatedOf(store, StoredFileSchema.Entity);
+        var fileOwner = file.GetAttributeValue<EntityReference>("ownerid").Id;
+        var invoiceOwner = CreatedOf(store, "sprk_invoice").GetAttributeValue<EntityReference>("ownerid").Id;
+        directory.IsTeamOfTheSecureRecordBusinessUnit(fileOwner).Should().Be(secureCore);
+        directory.IsTeamOfTheSecureRecordBusinessUnit(invoiceOwner).Should().Be(secureCore, "the file and its invoice are classified alike");
+        if (secureCore)
+        {
+            fileOwner.Should().Be(Sprk.Bff.Api.Tests.TestInfrastructure.OwnershipDirectory.SecureNamedTeam);
+            invoiceOwner.Should().Be(fileOwner);
+        }
+        else
+        {
+            fileOwner.Should().Be(Sprk.Bff.Api.Tests.TestInfrastructure.OwnershipDirectory.RestrictedContentTeam, "sprk_storedfile is a hard-deny table");
+            invoiceOwner.Should().Be(Sprk.Bff.Api.Tests.TestInfrastructure.OwnershipDirectory.CustomerChildTeam, "sprk_invoice is not");
+        }
+
+        // The file's question keys the core under the core's table: the Stored File row holds no core lookup of its own (its one
+        // ownership parent is the invoice this transaction creates), so no column of the written row is a core column.
+        var coreColumns = Sprk.Bff.Api.Services.Dataverse.InvoiceFamilyCoreRecordGuard.CoreRecordLookups.Values
+            .SelectMany(lookups => lookups.Select(l => l.Column)).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        file.Attributes.Where(a => a.Value is EntityReference).Select(a => a.Key).Should().NotContain(c => coreColumns.Contains(c));
+        file.GetAttributeValue<EntityReference>(StoredFileSchema.InvoiceTable).Id.Should().Be(CreatedOf(store, "sprk_invoice").Id);
+    }
+
     [Fact(DisplayName = "EB-D-168a (fail closed): a Stored File answered in the root business unit is refused and nothing is persisted")]
     public async Task StoredFile_AnsweredInTheRootBusinessUnit_IsRefused_NothingPersisted()
     {
