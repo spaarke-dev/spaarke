@@ -118,3 +118,9 @@ CLAUDE.md fact 1 used to read "on the MDA, Dataverse enforces natively and we wr
     - The row must always be readable as the caller, and every refusal returns the same uniform 404.
   - Why: the literal rule over-grants. It would apply a foreign team's Local or Deep grant at the caller's own BU. PR #2012's own-BU-only narrowing gives a false 404 to matrix-BU and cross-BU owner-team users.
   - Still open: whether `RetrieveUserSetOfPrivilegesByNames` returns team-inherited grants. Ontology's live leg will settle it.
+
+- **A work assignment's owning business unit follows its matter** (owner, 2026-10-29).
+  - Primary-parent order for `sprk_workassignment`: matter, project, invoice, event (its filing order, `SecureRootInheritance.TypedLookupsOf`); any other lookup (e.g. `sprk_regardingcommunication`) after, by column name.
+  - Before: a work assignment, being a root, had no order entry, so its parents ranked by column name (event before matter). Found by field-mapping's 071 review.
+  - Shipped in PR #2451 (3d54ac845d): `SecureChildLineage.RootLookupOrder` entry derived from `TypedLookupsOf`. Dev: 0 of 31 work assignments change primary.
+  - Open with the owner: confirm the communication lookup ranking last; how to track two older mismatches found in review (creation vs un-secure for a work assignment filed only under an invoice or event; the Decision Record gate writer vs the owner-check job).
