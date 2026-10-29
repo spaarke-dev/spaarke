@@ -470,7 +470,8 @@ jobs:
   # Phase 2b gate in scripts/Deploy-Release.ps1 (task 164). The first two did not run in CI before
   # (ontology task 159, K3). The tests read the shipped functions out of the
   # scripts' own syntax trees and the checked-in config/*.policies.json; nothing talks to Dataverse.
-  # Same Pester setup as verdict-script-tests: -MinimumVersion 5.5.0, no pin.
+  # Pester pinned to 5.7.1 (2026-10-29): Pester 6.x fails every container here with "Export-ModuleMember ... can only be
+  # called from inside a module" (found in the 194b review); owner-teams-script-tests pins the same version.
   # --------------------------------------------------------------------------
   ontology-script-tests:
     name: Ontology script tests (Pester)
@@ -488,8 +489,8 @@ jobs:
       - name: Pester
         shell: pwsh
         run: |
-          Install-Module Pester -MinimumVersion 5.5.0 -Scope CurrentUser -Force -SkipPublisherCheck
-          Import-Module Pester -MinimumVersion 5.5.0
+          Install-Module Pester -RequiredVersion 5.7.1 -Scope CurrentUser -Force -SkipPublisherCheck
+          Import-Module Pester -RequiredVersion 5.7.1
           $r = Invoke-Pester -Path tests/scripts/Apply-DoLanePolicies.Tests.ps1, tests/scripts/Invoke-OntologyStampBackfill.Tests.ps1, tests/scripts/Deploy-Release.OntologyConfig.Tests.ps1 -Output Detailed -PassThru
           if ($r.FailedCount -gt 0 -or $r.TotalCount -eq 0) { exit 1 }
 
