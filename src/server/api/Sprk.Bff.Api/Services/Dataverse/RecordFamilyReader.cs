@@ -353,6 +353,30 @@ internal sealed class RecordFamilyReader
         }
     }
 
+    /// <summary>Every table a family of <paramref name="kind"/> walks: the edges' child and parent tables and the cores.</summary>
+    private static HashSet<string> FamilyTablesOf(FamilyKind kind) =>
+        new(RecordFamilyEdges.Of(kind).SelectMany(e => new[] { e.ChildTable, e.ParentTable }).Concat(RecordFamilyEdges.CoreTables),
+            StringComparer.Ordinal);
+
+    /// <summary>
+    /// The entity set of <paramref name="table"/> when it is a table a <paramref name="kind"/> family walks, else false. The
+    /// reader's own notion of a family table (the same test <see cref="ReadAsync"/> applies to its anchor), for the family
+    /// endpoint's table gate (task 072). <paramref name="table"/> is a logical name, trimmed and lower-cased as
+    /// <see cref="ReadAsync"/> does.
+    /// </summary>
+    internal static bool TryGetFamilyEntitySet(string? table, FamilyKind kind, out string entitySet)
+    {
+        var name = table?.Trim().ToLowerInvariant();
+        if (!string.IsNullOrEmpty(name) && FamilyTablesOf(kind).Contains(name) && EntitySetOf(name) is { } set)
+        {
+            entitySet = set;
+            return true;
+        }
+
+        entitySet = string.Empty;
+        return false;
+    }
+
     /// <summary>The table's entity set: <see cref="SecureChildLineage"/>'s for a child table, the regarding catalogue's for a core.</summary>
     private static string? EntitySetOf(string table) =>
         SecureChildLineage.Children.TryGetValue(table, out var child) ? child.EntitySet : RegardingNameFields.EntitySetName(table);
@@ -417,8 +441,7 @@ internal sealed class RecordFamilyReader
             _edgesByChild = edges.ToLookup(e => e.ChildTable, StringComparer.Ordinal);
             // The default view: detail rows are neither listed nor walked through (UAC-r2 ruling 2026-10-28).
             _listedEdges = edges.Where(e => !RecordFamilyEdges.DetailTables.Contains(e.ChildTable)).ToArray();
-            _familyTables = new HashSet<string>(
-                edges.SelectMany(e => new[] { e.ChildTable, e.ParentTable }).Concat(RecordFamilyEdges.CoreTables), StringComparer.Ordinal);
+            _familyTables = FamilyTablesOf(kind);
         }
 
         public List<Node> Sequence { get; } = new();
