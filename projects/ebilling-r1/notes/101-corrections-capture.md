@@ -139,3 +139,21 @@ Seeded proof: the seam call guarded by `!rowExists || valueChanged` made the rep
 - Seeded proof: with the F2 flag condition removed and the F3 condition reverted, three tests failed (both F2 tests and the F3 test); restored.
 
 rework: none
+
+## B2d. `lineFindings[]` in the review read model
+
+`InvoiceReviewReadService` now reads the `lineFindings` member of `sprk_findingsjson` (written by the persister, section 9) and returns each entry on its line.
+
+Contract change (additive): `ReviewLineDto` gains a last member `LineFindings` (wire `lineFindings`), a list of `ReviewLineFindingDto(Code, Message)`:
+
+- `code` is `coding.not_returned` or `line.no_description`; `message` is the stored sentence (null when the entry has none).
+- Entries are matched to the line by index (stored `line` = the line's sequence - 1), the same key the policy findings use.
+- It is a separate list from `findings`: a `ReviewFindingDto` requires a policy, rule type and clause, which these notes do not have. `findingCount` and `highestSeverity` still count the policy findings only.
+- A row stored before the member existed, a `null` member, or no stored submission reads as `[]`. An entry that is not an object, or lacks an integer `line` (>= 0) or a non-empty string `code`, is skipped; a member that is not an array reads as empty. Skips are logged as one warning per read with the count only (no content, ADR-015), following the existing tolerance for a damaged findings column.
+- The read stays inside `InvoiceReviewReadService` (the `FindingsJsonAppOnlyReadGuardTests` allow-list is unchanged).
+
+Consumers: no SPA or shared client type mirrors this read model (searched `src/` and `tests/` for the model's member names in `.ts`/`.tsx`/`.json`; only server code and notes). The review endpoint's contract tests (`InvoiceLineReviewEndpointsAuthorizationContractTests`) assert authorization only, not the body shape, so there is no field list to extend; the shape is covered by the unit tests.
+
+Tests (`InvoiceReviewReadServiceTests`): each code shown on its line and not on others; old row (no member) reads empty with no log; no submission reads empty; five kinds of malformed entry skipped with one warning and the good entry kept; non-array member reads empty with one warning.
+
+UI follow-up (not built): the review page should show `lineFindings[].message` as the reason on a Flagged line that has no policy findings, and may count them in its line badge. The server counts do not include them.

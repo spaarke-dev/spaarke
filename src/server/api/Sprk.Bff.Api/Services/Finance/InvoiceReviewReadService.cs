@@ -74,6 +74,7 @@ public sealed record ReviewFlagsDto(bool CanRead, bool CanDecide);
 /// <param name="Rate">The billed rate of a Fee line, the unit cost of an Expense line.</param>
 /// <param name="HighestSeverity"><c>Info</c>, <c>Warning</c> or <c>Critical</c>; null when the line has no finding.</param>
 /// <param name="Fields">Per extracted field: its page, bounding box and confidence (the Document tab and the low-confidence marker).</param>
+/// <param name="LineFindings">EB-D-175 / EB-D-176: why the line is Flagged when no policy finding says so: the AI did not check it (<c>coding.not_returned</c>) or it has no description (<c>line.no_description</c>). Empty for a line with neither, and for a submission stored before these were written. Not counted in <see cref="FindingCount"/> or <see cref="HighestSeverity"/>, which describe the policy findings.</param>
 public sealed record ReviewLineDto(
     Guid Id,
     int Sequence,
@@ -96,7 +97,8 @@ public sealed record ReviewLineDto(
     int FindingCount,
     string? HighestSeverity,
     IReadOnlyList<ReviewFindingDto> Findings,
-    IReadOnlyDictionary<string, ReviewFieldDto> Fields);
+    IReadOnlyDictionary<string, ReviewFieldDto> Fields,
+    IReadOnlyList<ReviewLineFindingDto> LineFindings);
 
 /// <summary>The roster entry a fee line's timekeeper name matched (046), with its classification.</summary>
 public sealed record ReviewTimekeeperDto(Guid Id, string? Name, int? Classification);
@@ -163,6 +165,14 @@ public sealed record ReviewFindingDto(
     bool Overridden,
     ReviewSuggestionDto? SuggestedAdjustment,
     IReadOnlyList<ReviewValueReadDto> ValuesRead);
+
+/// <summary>
+/// One reviewer-facing note on a line that lacks a check or a description (EB-D-175, EB-D-176), as the persister stored it in the
+/// <c>lineFindings</c> member of the findings JSON. It cites no policy and carries no values.
+/// </summary>
+/// <param name="Code"><c>coding.not_returned</c> or <c>line.no_description</c>.</param>
+/// <param name="Message">The stored sentence; null when the stored entry had none.</param>
+public sealed record ReviewLineFindingDto(string Code, string? Message);
 
 /// <summary>What the pipeline itself noted (codes only): the D-91 invoice-number mismatch, a code set needing review, a hold.</summary>
 public sealed record ReviewPipelineFindingDto(string ReasonCode, IReadOnlyDictionary<string, string?> Values);
@@ -440,7 +450,7 @@ public sealed class InvoiceReviewReadService
             // The plan and the findings are both keyed on the line INDEX (D-176 K4): a row whose sequence was edited cannot pair one index's findings with another's plan sentence.
             var planSubject = submission is null ? row.Id : InvoiceSubmissionPersister.LineIdFor(submission.Dto.SubmissionId, sequence - 1);
             var findings = FindingsFor(parsed, "Line", sequence - 1, planSubject, overridden, withheld);
-            lines.Add(ToLine(row, sequence, findings, roster: rosterTask.Result, threshold));
+            lines.Add(ToLine(row, sequence, findings, LineFindingsFor(parsed, sequence - 1), roster: rosterTask.Result, threshold));
         }
 
         var invoiceFindings = FindingsFor(parsed, "Invoice", null, invoiceId, overridden, withheld);
@@ -675,6 +685,7 @@ public sealed class InvoiceReviewReadService
         Entity row,
         int sequence,
         IReadOnlyList<ReviewFindingDto> findings,
+        IReadOnlyList<ReviewLineFindingDto> lineFindings,
         Dictionary<Guid, (string? Name, int? Classification)> roster,
         decimal? threshold)
     {
@@ -717,7 +728,8 @@ public sealed class InvoiceReviewReadService
             findings.Count,
             severity,
             findings,
-            extraction.Fields);
+            extraction.Fields,
+            lineFindings);
     }
 
     /// <summary>The label the screen shows for a status: Pending is shown as Processing (D-58, prototype F-1).</summary>
@@ -772,6 +784,12 @@ public sealed class InvoiceReviewReadService
             .ToList();
     }
 
+    /// <summary>The EB-D-175 / EB-D-176 notes of the line at this index (the persister keys them on the line index, as it does the findings).</summary>
+    private static IReadOnlyList<ReviewLineFindingDto> LineFindingsFor(ParsedFindings? parsed, int lineIndex) =>
+        parsed is null
+            ? []
+            : parsed.LineFindings.Where(f => f.Line == lineIndex).Select(f => new ReviewLineFindingDto(f.Code, f.Message)).ToList();
+
     // ── D-176: a Duplicate's earlier invoice, judged as the caller (task 119) ──
 
     /// <summary>
@@ -794,6 +812,8 @@ public sealed class InvoiceReviewReadService
         string ReasonCode, string? Consequence, bool Rejects, string? HeldBecause, bool DetailWithheld, ReviewSuggestionDto? Suggestion,
         IReadOnlyList<ReviewValueReadDto> Values);
 
+    private sealed record StoredLineFinding(int Line, string Code, string? Message);
+
     private sealed record PlanEntry(Guid SubjectId, string PolicyCode, string? Severity, string? Sentence, IReadOnlyList<string> ReasonCodes);
 
     private sealed class ParsedFindings
@@ -807,6 +827,9 @@ public sealed class InvoiceReviewReadService
         public IReadOnlyList<StoredFinding> Findings { get; private init; } = [];
 
         public IReadOnlyList<ReviewPipelineFindingDto> Pipeline { get; private init; } = [];
+
+        /// <summary>The <c>lineFindings</c> member (EB-D-175 / EB-D-176); empty for a row stored before it existed.</summary>
+        public IReadOnlyList<StoredLineFinding> LineFindings { get; private init; } = [];
 
         private IReadOnlyList<PlanEntry> Plan { get; init; } = [];
 
@@ -930,6 +953,37 @@ public sealed class InvoiceReviewReadService
                     }
                 }
 
+                var lineFindings = new List<StoredLineFinding>();
+                var skippedLineFindings = 0;
+                if (root.TryGetProperty(InvoiceSubmissionPersister.LineFindingsMember, out var lineFindingsJson) && lineFindingsJson.ValueKind != JsonValueKind.Null)
+                {
+                    if (lineFindingsJson.ValueKind == JsonValueKind.Array)
+                    {
+                        foreach (var entry in lineFindingsJson.EnumerateArray())
+                        {
+                            if (entry.ValueKind == JsonValueKind.Object && LineExtraction.Int(entry, "line") is { } entryLine && entryLine >= 0
+                                && LineExtraction.Text(entry, "code") is { Length: > 0 } entryCode)
+                            {
+                                lineFindings.Add(new StoredLineFinding(entryLine, entryCode, LineExtraction.Text(entry, "message")));
+                            }
+                            else
+                            {
+                                skippedLineFindings++;
+                            }
+                        }
+                    }
+                    else
+                    {
+                        skippedLineFindings++;
+                    }
+                }
+
+                if (skippedLineFindings > 0)
+                {
+                    // Logged once per read, without the content (ADR-015); the lines affected show no note rather than failing the page.
+                    logger.LogWarning("Invoice review: {Skipped} stored line finding(s) were malformed and are not shown.", skippedLineFindings);
+                }
+
                 string? decision = null;
                 if (root.TryGetProperty("decision", out var decisionJson) && decisionJson.ValueKind == JsonValueKind.Object)
                 {
@@ -944,6 +998,7 @@ public sealed class InvoiceReviewReadService
                     Findings = findings,
                     Plan = plan,
                     Pipeline = pipeline,
+                    LineFindings = lineFindings,
                 };
             }
             catch (JsonException)
