@@ -131,8 +131,51 @@ No violations or warnings.
 
 ## Known limits and open questions
 
-1. **Signals on approve.** Approve does not close invoice-level Signals (the line accept closes line Signals through the line service). Owner: should approve resolve open invoice-level Signals, or leave them to 104 or a later task?
-2. **Nothing in code moves a line from Pending to Clean.** The only writers of `sprk_linestatus` are the persister (`InvoiceSubmissionPersister.cs:812`, which writes Pending or Flagged) and the line decisions (`InvoiceLineDecisionService.cs:766`). No code writes Clean. Until the extraction/scoring path sets it, a freshly extracted invoice shows Pending lines and approve is refused (I-2). Reported for the owner of 049/071.
+1. **Signals on approve.** Resolved by EB-D-172 (fix round 1, below).
+2. **Nothing in code moves a line from Pending to Clean.** (Fixed by task 101 in 049's persister; tests still seed Clean lines.) The only writers of `sprk_linestatus` are the persister (`InvoiceSubmissionPersister.cs:812`, which writes Pending or Flagged) and the line decisions (`InvoiceLineDecisionService.cs:766`). No code writes Clean. Until the extraction/scoring path sets it, a freshly extracted invoice shows Pending lines and approve is refused (I-2). Reported for the owner of 049/071.
 3. **The live view evidence (step 5) was not run.** The brief says nothing live. The 029 view reads the N:N that this task writes. Evidence still needed in dev: an invoice for each eligible approver, and not for another user.
 4. An eligible approver also needs Write on the invoice, because the route checks `ebilling.invoice.decide` first. Approvers normally hold it through the core record's access. Flagged for the operator in case an approver role does not.
 5. Unreviewed and Accepted-in-bulk rows written before a later refusal (totals, claim conflict, transition refused) remain. They are true statements about those lines, and a later approve reuses the same ids.
+
+## Fix round 1 (coordinator, 2026-10-29: EB-D-171, EB-D-172, F2-F4, K1-K4, #1911 F2)
+
+The K2 row in the code-review table above (claim left after a refused transition) is now fixed.
+
+| Item | Change | Tests (`InvoiceApprovalServiceTests` unless named) |
+|---|---|---|
+| EB-D-171 | Eligibility matches the caller's OWN contact (`IIdentityNormalizationService.ResolveAsync(caller).ContactId`, the recorder's rule) against the eligible assignment contacts (`EligibleApproverSet.ForContact`). `contact.sprk_systemuser` never grants: not in approve, not in GET `callerEligible`, not in the claimant check on a repeat (which used to read `sprk_systemuser`). No contact gives 403 `ebilling.approver.not_eligible`. | `ContactSpoof_SystemUserLinkNeverGrants` (SEEDED), `OwnContact_Grants`, `UnresolvableIdentity_FailsClosed`; resolver `RolesSet_ResolveTheUsersInTheSelectedFields` |
+| EB-D-172 | Approve resolves the invoice's Open and Acknowledged Signals created at or before the decision time (`ReadOpenSignalsAsync(..., createdOnOrBefore)`). It asks the close rights as the caller before ANY write (403 `ebilling.decision.not_authorized`), stores the set with the record (`ResolvedSignalIds` plus the set fact), and closes after the record, before the link. A repeat uses the stored set. Before the record exists, a repeat re-derives the set under the frozen `sprk_decidedon`. | `Approve_ClosesTheInvoiceSignals`, `NoCloseRights_IsRefused_AndWritesNothing` (SEEDED), `NoSignals_NoRightsAsked`, `Replay_AfterTheRecord_UsesTheStoredSet`, `Replay_BeforeTheRecord_IsBoundedByTheFrozenTime` |
+| #1911 F2 | The close's failed count is no longer dropped. Above 0, approve is Incomplete at step `signals` (503 `ebilling.approval.incomplete`), before the link, so the claimant's repeat runs the finish again: the record answers AlreadyRecorded and the remaining closes run. | `FailedClose_IsIncomplete_AndTheRepeatFinishesIt` (timeout and ChangedSinceRead; SEEDED), `CleanClose_IsApproved` |
+| F2 | Before the bulk accept, approve finds Accepted Fee and Expense lines that have a reviewer and no line Decision Record (one query on `sprk_regardinginvoiceline` plus the line action codes). The caller's lines are completed under `AcceptCleanDecisionIdFor(approvalId)` by `InvoiceLineDecisionService.CompleteBulkAcceptHeldAsync`: same values, same "Accepted in bulk" row ids, only the missing records. Another person's lines give 409 `ebilling.approve.decision_incomplete` with the ids, and nothing is written. | `RetryAfterAFailedBulkAccept_CompletesIt` (faults in records, totals and corrections; SEEDED), `AnotherPersonsUnrecordedLine_Is409`, `RecordedLines_AreLeftAlone` |
+| F3 | Approve, GET and `RefreshInvoiceAsync` take the core from exactly one of `InvoiceFamilyCoreRecordGuard.CoreRecordLookups` (`EligibleApproverResolver.SingleCoreOf`). Before any write, approve also runs the recorder's filing read (`CoreAncestorResolver.ResolveStampsAsync`) and requires its one stamp to be that core. | `TwoCoreLookups_AreRefused` (SEEDED), `FilingReadFault_IsUnavailable`; resolver `Job_TwoCoreLookupsOnTheInvoice_IsSkipped`, `RefreshInvoice_TwoCoreLookups_StoresNothing` |
+| F4 | GET `canApprove` also requires the decide right: Write on the invoice, asked through `CallerReadCheck` with `ebilling.invoice.decide`, as the review read does. | `Get_CanApproveNeedsTheDecideRight`; contract `Get_CanApprove_NeedsWriteOnTheInvoice` |
+| K1 | The claim is refused (409 `ebilling.approval.claimed`) when the portion names a decider other than the caller's contact. The shared per-invoice lock was already taken: `InvoiceLineDecisionService.LockKeyFor` is `LockKeyPrefix` plus the invoice id, alongside the 104/105 decision lock. | `ClaimedByAnother_Is409` (SEEDED) |
+| K2 | A refused transition clears decidedby, decidedon and approvedamount. The clear is conditional on the version re-read, and only runs while the portion still holds this call's claim. | `TransitionRefused_RecordsNothing_AndClearsTheClaim` (SEEDED), `TransitionRefused_ClaimChangedSince_IsNotCleared` |
+| K3 | The refresh job reads the core from the INVOICE (aliased link columns), not from the portion's copy. The approved amount is in the record's Values, so the hash covers it. | resolver `Job_ReadsTheCoreFromTheInvoice`; `ApprovedAmount_IsCoveredByTheHash` (SEEDED) |
+| K4 | A missing or unknown portion status gives 409 `ebilling.approval.status_unknown` and is never read as Pending. GET shows `Unknown`. | `UnknownPortionStatus_IsRefused` (SEEDED) |
+
+**Seeds (all run, all restored).** Each guard was disabled in `InvoiceApprovalService`, and its tests went red:
+
+| Guard disabled | Tests red |
+|---|---|
+| Eligibility by the `sprk_systemuser` match | 3 (EB-D-171) |
+| The close authorization | 1 |
+| The F2 completion | 3 theory rows (plus the 409 case) |
+| The single-core check and the filing read | 2 |
+| Values set to null | 1 |
+| The K4 check | 2 |
+| The K1 check | 1 |
+| The K2 check | 1 |
+| Dropping the close count | 2 |
+
+**Deviations, for the reviewer.**
+- **EB-D-172 replay before the record.** The portion has no column to store the set before the record exists. So a repeat with no record re-derives the set, bounded by the frozen decision time. The set can shrink (a Signal resolved meanwhile) but never widen.
+- **F2.** There is no durable store for the committed ids, so the outstanding lines are found from the data: Accepted, with a reviewer, and no line record. Limit: if the caller has an unrecorded individual Accept of their own (not the approve's bulk accept), it would be completed under the approve's bulk id.
+- **EB-D-171 identity fault.** A caller with no contact gets 403, as ruled. A FAILED identity read (a fault, or `ContactUnreadable`) gets 503 `ebilling.approval.unavailable` instead of 403. Neither writes anything. A 403 during an outage would tell an eligible approver they are not eligible.
+- **`ReadApproversAsync`** still lists only contacts that have a `sprk_systemuser`. This is the more restrictive set: it no longer grants, it only narrows who is listed.
+
+**Known limits (new).**
+- **Approved with no Decision Record if the claimant never retries.** After the transition, only the claimant's repeat writes the record, and nothing sweeps an Approved invoice whose portion has no record. The coordinator files the sweep.
+- **K1: an abandoned claim blocks other approvers.** If the claimant's call fails after the claim, before or at the transition (outcome unknown), other approvers are blocked until the claimant repeats.
+- **One rare close path cannot be finished by a repeat.** A portion that is Approved and linked counts as complete. If the record link existed before the portion was Approved and a close fails, approve returns Incomplete, but the next repeat is a no-op.
+- **Found in passing, not changed.** `InvoiceLineDecisionService.CoreOf` picks the FIRST core lookup that is set. The line service's owner stamp should use the single-core rule too.
