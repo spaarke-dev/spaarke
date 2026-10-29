@@ -41,3 +41,24 @@
 - App Insights since 14:11Z: no `removal-sweep` lines. The dev environment's heartbeat shows `readability=Readable`, so the sweep was not skipped, and no failure line was logged.
 - Direct count of the sweep's candidate queries on spaarkedev1 (filters from the code at `e56a3a51d4`): inactive, bound, unmarked contacts **0**; active grants of inactive or marked contacts **0**; contacts already marked removed **0**. The sweep has nothing to mark on dev.
 - Gap found: a pass with no candidates leaves no telemetry. Filed as ISS-020, #2415.
+
+## 6. Re-invite the unbound contacts (read 2026-10-28)
+
+- Two contacts hold active grants without a binding: Jonathan Smith (2 grants) and Jane Doe (4 grants). Neither has an email address, so neither can be invited or bound. They are left as they are; the owner was told.
+
+## 7. SpaarkeMaster 1.2.4.0 published (2026-10-29 02:24:48Z)
+
+- Owner go. Peer OKs: UAC, ontology, field-mapping; provisioning had no objection, and its H6/H7b lock-columns check passed at `136568cf70`.
+- Dry run `40803358901` (publish:false) on `136568cf70`: success.
+- Master moved to `a4b6459da3` (#2400, a wizard UI fix) before the publish. The SpaarkeMaster source diff between the two commits is empty, and the owner re-approved naming `a4b6459da3`.
+- Run `40806065681`, attempt 1: success. Blobs `dataverse-solution-SpaarkeMaster-1.2.4.0-managed.zip` and `-unmanaged.zip`; manifest `dataverse-solutions-2026.10.29-277-1.json` → `dataverse-solutions-latest.json`, read back as version `1.2.4.0`.
+- Rollback: check that `dataverse-solutions-latest.previous.json` names 1.2.3.1, then copy it over latest. If it doesn't, re-point to 1.2.3.1's versioned manifest. New provisioning runs then refuse at H7b again.
+- Follow-ups owned elsewhere:
+  - Provisioning: after a stamp's stage-and-upgrade, confirm the removed role privileges are gone (ontology's check).
+  - Field-mapping: check that the entity map is removed where 1.2.4.0 lands.
+
+## 8. Dev BFF `136568cf70` (2026-10-29)
+
+- Owner go; OKs from UAC, ontology, word-add-in, field-mapping, ebilling (provisioning standing).
+- Readback 02:23:53Z: ProductVersion `1.0.0+136568cf701b68fe8b4132fe2223185a45f8f7a2`, healthz 200, healthz/dataverse 200, `/api/me` anonymous 401.
+- Rollback: `scripts/Deploy-BffApi.ps1 -SkipBuild -PublishPath deploy/rollback/wwwroot-20261029T021735Z` (`e56a3a51d4`). Deploy worktree `C:\wtbffe-136`.

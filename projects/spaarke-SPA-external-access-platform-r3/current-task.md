@@ -1,6 +1,6 @@
 # Current Task State - spaarke-SPA-external-access-platform-r3
 
-> **Last Updated**: 2026-10-29 02:00Z. Dev BFF = e56a3a51d4 (gate PASS). Dev rollout steps 1-4 done (record: notes/contact-identity-dev-rollout-record.md). Now: SpaarkeMaster 1.2.4.0 publish + BFF 136568cf70, waiting on peer OKs. Dev SPA = 1fa0cf5cb8.
+> **Last Updated**: 2026-10-29 02:30Z. Dev BFF = **136568cf70** (live 02:23:53Z; UAC gate 02:24-02:54Z, then after-notices to ontology, word-add-in [releases #2420], field-mapping, ebilling, provisioning). SpaarkeMaster **1.2.4.0 PUBLISHED** (run 40806065681, master a4b6459da3). Dev rollout steps done (notes/contact-identity-dev-rollout-record.md). Dev SPA = 1fa0cf5cb8.
 > **Recovery**: Read "Quick Recovery" section first
 
 ---
