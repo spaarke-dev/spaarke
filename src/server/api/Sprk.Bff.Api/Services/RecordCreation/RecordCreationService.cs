@@ -742,8 +742,9 @@ internal sealed partial class RecordCreationService
     /// under (<see cref="CoreAncestorRestamper.PlanMissingStampAsync"/>, task 016's in-memory planner — fill-only, nothing
     /// written), bound into <paramref name="fields"/>; then I-16 from every lookup the row now names. A derivation that fails
     /// refuses: a data condition (<see cref="CoreAncestorStampUnderivableException.IsPermanent"/>) is
-    /// <see cref="RecordCreationRefusal.StampUnderivableCode"/> (400), anything else <see cref="RecordCreationRefusal.StampUnavailableCode"/>
-    /// (503). I-16 never refuses: it is display only, and a null is simply not set. A document gets neither (#2169).
+    /// <see cref="RecordCreationRefusal.StampUnderivableCode"/> (400), a derived stamp the table's metadata cannot bind is the
+    /// non-retryable <see cref="RecordCreationRefusalKind.Undecided"/> (500, F-5), anything else
+    /// <see cref="RecordCreationRefusal.StampUnavailableCode"/> (503). I-16 never refuses: it is display only, and a null is simply not set. A document gets neither (#2169).
     /// </summary>
     /// <remarks>Only <paramref name="fields"/> changes: the item (what the owner, the plan and step 12 read) is the row as the
     /// earlier steps decided it. The stamp is bound under the table's navigation property, read as the caller through
@@ -808,11 +809,20 @@ internal sealed partial class RecordCreationService
                 }
                 else
                 {
-                    var bound = await BindStampAsync(user, table, missing, ct).ConfigureAwait(false);
+                    var (bound, permanent) = await BindStampAsync(user, table, missing, ct).ConfigureAwait(false);
+                    if (bound is null && permanent)
+                    {
+                        // Task 017 review F-5: the table's metadata cannot bind the derived stamp, and a retry will not change
+                        // that, so it is not "try again" (503) but the non-retryable Undecided (500). Ids only.
+                        _logger.LogError("[RECORD-CREATE] the I-1 stamp of a new {Table} was derived but the table's metadata " +
+                                         "cannot bind it (permanent); nothing was created", table);
+                        return (StampUnbindable(noun), RecordCreationStepState.Refused, null);
+                    }
+
                     if (bound is null)
                     {
-                        _logger.LogError("[RECORD-CREATE] the I-1 stamp of a new {Table} was derived but could not be bound; " +
-                                         "nothing was created", table);
+                        _logger.LogError("[RECORD-CREATE] the I-1 stamp of a new {Table} was derived but could not be bound " +
+                                         "(Dataverse did not answer); nothing was created", table);
                         return (StampUnavailable(noun), RecordCreationStepState.Refused, null);
                     }
 
@@ -849,17 +859,19 @@ internal sealed partial class RecordCreationService
 
     /// <summary>
     /// The derived stamp columns as the create body binds them (<c>sprk_RegardingMatter@odata.bind</c>), mapped AS THE CALLER
-    /// through <see cref="DataverseWriteItemMapper"/>, the one place a column's navigation property is read. <see langword="null"/>
-    /// when Dataverse did not answer or the table cannot bind a column.
+    /// through <see cref="DataverseWriteItemMapper"/>, the one place a column's navigation property is read. Binds are
+    /// <see langword="null"/> when the stamp could not be bound; <c>Permanent</c> says whether a retry would change that:
+    /// <see langword="false"/> only when Dataverse did not answer (the mapper's client failure), <see langword="true"/> when the
+    /// mapper refused the item or the table cannot bind a column (task 017 review F-5).
     /// </summary>
-    private static async Task<IReadOnlyList<KeyValuePair<string, string>>?> BindStampAsync(
+    private static async Task<(IReadOnlyList<KeyValuePair<string, string>>? Binds, bool Permanent)> BindStampAsync(
         IDataverseUserClient user, string table, IReadOnlyDictionary<string, object> stamp, CancellationToken ct)
     {
         var lookups = new Dictionary<string, object>(StringComparer.Ordinal);
         foreach (var (column, value) in stamp)
         {
             if (value is not EntityReference reference)
-                return null;
+                return (null, true);
             lookups[column.ToLowerInvariant()] = new Dictionary<string, string>
             {
                 ["relatedTable"] = reference.LogicalName,
@@ -870,19 +882,24 @@ internal sealed partial class RecordCreationService
         var mapped = await DataverseWriteItemMapper.MapAsync(user, table, JsonSerializer.SerializeToElement(lookups), ct)
             .ConfigureAwait(false);
         if (mapped.Item is not { } item)
-            return null;
+            return (null, Permanent: mapped.ClientFailure is null);
 
         using var body = JsonDocument.Parse(item.JsonBody);
         var binds = new List<KeyValuePair<string, string>>();
         foreach (var property in body.RootElement.EnumerateObject())
         {
             if (property.Value.ValueKind != JsonValueKind.String)
-                return null;
+                return (null, true);
             binds.Add(KeyValuePair.Create(property.Name, property.Value.GetString()!));
         }
 
-        return binds.Count == lookups.Count ? binds : null;
+        return binds.Count == lookups.Count ? (binds, false) : (null, true);
     }
+
+    /// <summary>Task 017 review F-5: the derived stamp cannot be bound by the table's metadata. Not retryable, so the
+    /// existing non-retryable <see cref="RecordCreationRefusalKind.Undecided"/> (500), not a "try again" 503.</summary>
+    private static RecordCreationRefusal StampUnbindable(string noun) => new(RecordCreationRefusalKind.Undecided,
+        RecordCreationRefusal.NoDecisionCode, $"The {noun} was not created.");
 
     private static RecordCreationRefusal StampUnderivable(string noun) => new(RecordCreationRefusalKind.Invalid,
         RecordCreationRefusal.StampUnderivableCode,

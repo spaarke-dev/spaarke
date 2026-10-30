@@ -1,7 +1,9 @@
 using System.Text.Json;
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Logging;
 using Microsoft.Xrm.Sdk;
+using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.RecordCreation;
 using Xunit;
@@ -113,6 +115,49 @@ public sealed partial class RecordCreationServicePipelineSeamTests
         problem.Status.Should().Be(StatusCodes.Status503ServiceUnavailable);
         problem.Extensions["errorCode"].Should().Be("record_creation.stamp_unavailable");
         problem.Detail.Should().NotContain("timed out", "a fault's text stays in the log (ADR-019)");
+        _createAttempts.Should().BeEmpty();
+    }
+
+    /// <summary>The table's relationships read for the stamp bind: after the owner (step 7), so not the payload's own mapping read.</summary>
+    private bool IsTheStampBindsMetadataRead(string path) =>
+        path.Contains("ManyToOneRelationships", StringComparison.Ordinal) && _journal.Contains("owner");
+
+    [Fact]
+    public async Task CreateAsync_WhenTheTablesMetadataCannotBindTheDerivedStamp_IsTheNonRetryable500Undecided_NotTryAgain()
+    {
+        // Task 017 review F-5: the stamp WAS derived, but the table's relationships do not carry the column (the mapper's
+        // validation error): a misconfiguration a retry does not clear. Not "stamp_unavailable, try again" (503).
+        WithParentEventUnderTheOrdinaryMatter();
+        _user.RespondTo = path => IsTheStampBindsMetadataRead(path)
+            ? DataverseUserResponse.Ok(200, JsonSerializer.SerializeToElement(new { ManyToOneRelationships = Array.Empty<object>() }))
+            : null;
+
+        var outcome = await Service().CreateAsync(EventUnderTheParentEvent(), AsCaller(), CancellationToken.None);
+
+        outcome.Refusal!.Kind.Should().Be(RecordCreationRefusalKind.Undecided);
+        outcome.Refusal.Code.Should().Be(RecordCreationRefusal.NoDecisionCode, "the existing non-retryable code, no new one");
+        outcome.Refusal.Code.Should().NotBe(RecordCreationRefusal.StampUnavailableCode);
+        Problem(outcome, "sprk_event").Status.Should().Be(StatusCodes.Status500InternalServerError);
+        outcome.Steps.Last().Should().Be(new RecordCreationStepRecord(
+            RecordCreationStep.StampAndInheritance, RecordCreationStepState.Refused, RecordCreationRefusal.NoDecisionCode));
+        _logger.Entries.Should().Contain(e => e.Level == LogLevel.Error && e.Message.Contains("permanent", StringComparison.Ordinal));
+        _createAttempts.Should().BeEmpty("nothing is written");
+    }
+
+    [Fact]
+    public async Task CreateAsync_WhenDataverseDoesNotAnswerTheStampBindsMetadataRead_StaysThe503StampUnavailable()
+    {
+        // The other branch, unchanged: the metadata read itself failed at Dataverse, which a retry may clear.
+        WithParentEventUnderTheOrdinaryMatter();
+        _user.RespondTo = path => IsTheStampBindsMetadataRead(path)
+            ? DataverseUserResponse.Fail(503, "Unavailable", "0x80072321 The service is busy.")
+            : null;
+
+        var outcome = await Service().CreateAsync(EventUnderTheParentEvent(), AsCaller(), CancellationToken.None);
+
+        outcome.Refusal!.Kind.Should().Be(RecordCreationRefusalKind.Unavailable);
+        outcome.Refusal.Code.Should().Be(RecordCreationRefusal.StampUnavailableCode);
+        Problem(outcome, "sprk_event").Status.Should().Be(StatusCodes.Status503ServiceUnavailable);
         _createAttempts.Should().BeEmpty();
     }
 

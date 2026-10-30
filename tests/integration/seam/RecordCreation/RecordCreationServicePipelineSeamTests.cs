@@ -872,12 +872,17 @@ public sealed partial class RecordCreationServicePipelineSeamTests
 
         public Func<string, Exception?>? ThrowOn { get; set; }
 
+        /// <summary>Answers a read itself (instead of the scripted Dataverse) when it returns a response; null lets it through.</summary>
+        public Func<string, DataverseUserResponse?>? RespondTo { get; set; }
+
         public Task<DataverseUserResponse> GetAsync(string relativePath, CancellationToken cancellationToken)
         {
             var path = Uri.UnescapeDataString(relativePath);
             journal.Add(KindOf(path));
             if (ThrowOn?.Invoke(path) is { } fault)
                 throw fault;
+            if (RespondTo?.Invoke(path) is { } answer)
+                return Task.FromResult(answer);
             if (path == "WhoAmI()" && WhoAmIFailure is { } failure)
                 return Task.FromResult(failure);
             return inner.GetAsync(relativePath, cancellationToken);
