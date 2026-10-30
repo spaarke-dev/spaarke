@@ -50,3 +50,15 @@ Owner direction 2026-10-20: "070-071-072 - yes proceed".
 - No `/api/v1/external/*` errors after 16:51:10Z. Every error in the 45-minute window was the registration-without-email sequence above.
 - **Client (owner, 2026-10-29):** all of today's Teams runs used **Teams web**: the Spaarke-tenant not-set-up check, the new-employee registration, Tracy and Ralph Dewey. Desktop and mobile are still to run.
 - **CORRECTION (owner, ~17:10Z):** in Teams web the app "opens in its own browser as the SPA (not in Teams)". So the web results above most likely ran in a separate browser window (the browser plane), **not** in the Teams-hosted tab. They prove the sign-in planes, not the Teams host. Teams desktop: Ralph Dewey gets "This tab can't be used with a guest account" (a client-side guard; no BFF call), and Tracy gets "400 … can't connect to service". **071 is not passed on any Teams client yet.** The root-cause investigation is under way.
+
+### Dev portal deploy for the Teams guest check (2026-10-29)
+
+- **Why:** Teams desktop showed members of Dewey Cheatham (Ralph Dewey, and Tracy Cheatham on a fresh PC) "This tab can't be used with a guest account". Fix: PR #2461. The guest verdict comes from the issued token's `acct` claim; every Teams sign-in sets its own account active; the guest screen shows a masked diagnostic (`path= acct= home= ext= src=`).
+- **Owner go:** "go 96f1f6b675".
+- **UAC:** confirmed the 194b hold covers only the dev BFF; `2cd0f62e2c` changes nothing under `src/client`.
+- **Run:** "Deploy External SPA (Static Web App)" 40989384010, environment dev, ref tag `external-spa-dev-96f1f6b675` (master `96f1f6b675`): success.
+- **Changes against the previous dev build `f07ab2ef1f`:** only the two 071 commits. A shared TrackingFieldTrio change is not used by the portal. The BFF is unchanged (`136568cf70`).
+- **Check:** `/` and `/auth-callback.html` answer 200; the served bundle contains the new diagnostic code.
+- **Rollback:** dispatch the same workflow on tag `external-spa-dev-rollback-f07ab2ef1` with environment dev.
+- **Separate finding:** Tracy's first PC could not sign in to Teams desktop itself ("We can't connect you", HTTP 400 at login.microsoftonline.com; "No Network Connection [2603]"). That is the Teams client's own sign-in, before Spaarke loads, so it is not a Spaarke defect.
+- **Next:** Ralph and Tracy retest on Teams desktop. If the guest screen still shows, record its Diagnostic line.
