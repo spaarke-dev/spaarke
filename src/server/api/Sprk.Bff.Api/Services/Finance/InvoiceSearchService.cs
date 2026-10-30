@@ -298,7 +298,7 @@ public sealed class InvoiceSearchService : IInvoiceSearchService
     /// <summary>
     /// Create a search result item from a document.
     /// </summary>
-    private static InvoiceSearchResultItem CreateSearchResultItem(
+    internal static InvoiceSearchResultItem CreateSearchResultItem(
         InvoiceSearchDocument doc,
         double score,
         IReadOnlyList<string>? highlights)
@@ -306,7 +306,9 @@ public sealed class InvoiceSearchService : IInvoiceSearchService
         return new InvoiceSearchResultItem
         {
             InvoiceId = Guid.Parse(doc.InvoiceId),
-            DocumentId = Guid.Parse(doc.DocumentId),
+            // Task 152: a document is built from the invoice's structured records and carries a documentId only when the invoice links one, so
+            // an absent or unparseable value is Guid.Empty (the DTO's existing "no document" shape) rather than an exception.
+            DocumentId = Guid.TryParse(doc.DocumentId, out var documentId) ? documentId : Guid.Empty,
             Score = score,
             InvoiceNumber = doc.InvoiceNumber,
             VendorName = doc.VendorName,
@@ -349,7 +351,7 @@ internal class InvoiceSearchDocument
     public string Id { get; set; } = null!;
     public string Content { get; set; } = null!;
     public string InvoiceId { get; set; } = null!;
-    public string DocumentId { get; set; } = null!;
+    public string? DocumentId { get; set; }
     public string? MatterId { get; set; }
     public string? VendorName { get; set; }
     public string? InvoiceNumber { get; set; }

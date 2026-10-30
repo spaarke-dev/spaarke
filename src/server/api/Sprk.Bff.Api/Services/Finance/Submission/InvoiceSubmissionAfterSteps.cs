@@ -44,9 +44,9 @@ namespace Sprk.Bff.Api.Services.Finance.Submission;
 /// <item><b>Decision Record</b>, AutoRejected only, after the Signals (D-122 moved it there). It resolves every open Signal on the invoice
 /// and its lines: the set is read once and stored in the findings JSON before the record, and each Signal in it is closed as Acted by the
 /// record after it (D-122, notes 13c).</item>
-/// <item><b>No indexing</b> (ebilling-r1 task 094): an invoice's PDF is its Stored File on every channel (an upload since task 092, a
-/// Submit Invoice copy since task 094), and the copy stays out of indexing, search and chat grounding (owner K, model 9.2); the
-/// document-keyed invoice index is not fed from a submission.</item>
+/// <item><b>Invoice index job</b> (ebilling-r1 task 152, FR-43): an accepted or blocked invoice is queued for the invoice index, built from its
+/// structured records. An automatic rejection is not. The invoice's PDF is its Stored File on every channel (tasks 092, 094) and stays
+/// out of indexing, search and chat grounding (owner K, model 9.2); this job never reads it.</item>
 /// <item><b>Notification</b>, once per submission (an idempotency marker).</item>
 /// <item><b>Terminal status</b>, last: derived from the STORED kind and root reason (<see cref="InvoiceSubmissionPersister.TerminalFor(SubmissionEvaluationKind, string?)"/>),
 /// written only while the submission is Processing and conditional on its row version (notes section 13a).</item>
@@ -65,6 +65,7 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
     internal const string NotProcessingCode = "ebilling.submission.not_processing";
     internal const string TerminalWriteConflictCode = "ebilling.submission.terminal_write_conflict";
     internal const string RowVersionMissingCode = "ebilling.submission.row_version_missing";
+    internal const string IndexEnqueueFailedCode = "ebilling.submission.index_enqueue_failed";
 
     /// <summary>The automatic rejection's action code (074's billing catalog).</summary>
     internal const string RejectActionCode = "reject-invoice";
@@ -110,6 +111,7 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
     private readonly Action<BillingDecision> _preflight;
     private readonly Func<Guid, CancellationToken, Task<SubmissionCommitGateResult>> _commitGate;
     private readonly Func<Guid, CancellationToken, Task<bool>> _refreshApprovers;
+    private readonly Func<Guid, string?, CancellationToken, Task> _enqueueIndex;
 
     public InvoiceSubmissionAfterSteps(
         IGenericEntityService entities,
@@ -120,6 +122,7 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
         IEbillingNotificationSink sink,
         SubmissionCommitGate gate,
         EligibleApproverResolver approvers,
+        JobSubmissionService jobs,
         ILogger<InvoiceSubmissionAfterSteps> logger)
         : this(
             entities,
@@ -134,8 +137,17 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
             (recorder ?? throw new ArgumentNullException(nameof(recorder))).RecordAsync,
             recorder.Preflight,
             commitGate: (gate ?? throw new ArgumentNullException(nameof(gate))).RunAsync,
-            refreshApprovers: (approvers ?? throw new ArgumentNullException(nameof(approvers))).RefreshInvoiceAsync)
+            refreshApprovers: (approvers ?? throw new ArgumentNullException(nameof(approvers))).RefreshInvoiceAsync,
+            enqueueIndex: EnqueueAcceptedIndex(jobs))
     {
+    }
+
+    /// <summary>The acceptance's index job (task 152): change key <see cref="InvoiceIndexingJobHandler.AcceptedChange"/>, submitted through the real queue.</summary>
+    internal static Func<Guid, string?, CancellationToken, Task> EnqueueAcceptedIndex(JobSubmissionService jobs)
+    {
+        ArgumentNullException.ThrowIfNull(jobs);
+        return (invoiceId, correlationId, ct) =>
+            jobs.SubmitJobAsync(InvoiceIndexingJobHandler.BuildJob(invoiceId, InvoiceIndexingJobHandler.AcceptedChange, correlationId), ct);
     }
 
     /// <summary>The seam the unit tests use: the ontology-owned writers and the recorder are concrete, so they are passed as their calls.</summary>
@@ -152,8 +164,11 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
         Action<BillingDecision> preflight,
         Func<Guid, CancellationToken, Task<SubmissionCommitGateResult>> commitGate,
         TimeProvider? time = null,
-        Func<Guid, CancellationToken, Task<bool>>? refreshApprovers = null)
+        Func<Guid, CancellationToken, Task<bool>>? refreshApprovers = null,
+        Func<Guid, string?, CancellationToken, Task>? enqueueIndex = null)
     {
+        // Task 152: the acceptance's index job. The unit-test seam defaults to "nothing to queue".
+        _enqueueIndex = enqueueIndex ?? ((_, _, _) => Task.CompletedTask);
         // Task 103: the eligible approvers at acceptance (D-78). The unit-test seam defaults to "nothing to resolve".
         _refreshApprovers = refreshApprovers ?? ((_, _) => Task.FromResult(false));
         _entities = entities ?? throw new ArgumentNullException(nameof(entities));
@@ -461,11 +476,25 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
                 with { SignalsWritten = written, DecisionRecordId = recordId };
         }
 
-        // ── 3. No indexing (tasks 092, 094; model 9.2, owner K): the invoice's PDF is a Stored File on every channel and the document-keyed
-        //    invoice index takes no bytes from one; a Submit Invoice copy stays out of indexing, search and chat grounding. ──
+        // ── 3. Index the accepted invoice (task 152, FR-43, NFR-03): the invoice index is built from the invoice's structured records, never from
+        //    the PDF (tasks 092, 094: the PDF is a Stored File and stays out of indexing, search and chat grounding). An automatic rejection is
+        //    not indexed (a rejected submission is not in the invoice index); an accepted or blocked (In Review, held) invoice is. The key
+        //    carries the change ("accepted"), so a redelivery repeats one message and a later status move (014) is a different one. A fault
+        //    leaves the submission Processing so the redelivery enqueues again. ──
         if (stored.Kind != SubmissionEvaluationKind.AutoRejected)
         {
-            _logger.LogInformation("Invoice submission {SubmissionId}: invoice {InvoiceId}'s PDF is a Stored File; not indexed", submissionId, invoiceId);
+            try
+            {
+                await _enqueueIndex(invoiceId, correlationId ?? submission.GetAttributeValue<string>(InvoiceSubmissionPersister.SubmissionCorrelationId), ct)
+                    .ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+            {
+                _logger.LogWarning("Invoice submission {SubmissionId}: the index job of invoice {InvoiceId} could not be queued ({Fault}); it stays Processing for a retry",
+                    submissionId, invoiceId, ex.GetType().Name);
+                return Stop(SubmissionAfterStepsStatus.Retry, submissionId, invoiceId, IndexEnqueueFailedCode)
+                    with { SignalsWritten = written, DecisionRecordId = recordId };
+            }
         }
 
         // ── Task 103 (D-78): the eligible approvers at acceptance, best effort (the refresh job and GET re-resolve; approve resolves live) ──

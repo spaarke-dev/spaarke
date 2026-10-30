@@ -5,66 +5,98 @@ using Azure.Search.Documents;
 using Azure.Search.Documents.Indexes;
 using Azure.Search.Documents.Models;
 using Spaarke.Dataverse;
-using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.PublicContracts;
-using Sprk.Bff.Api.Telemetry;
+using Sprk.Bff.Api.Services.Finance;
 
 namespace Sprk.Bff.Api.Services.Jobs.Handlers;
 
 /// <summary>
-/// Job handler for invoice indexing into Azure AI Search.
-/// Indexes invoices with embeddings for semantic search and filtering.
-///
-/// Follows ADR-013 (refined 2026-05-20): AI consumed through
-/// <see cref="IInvoiceAi"/> facade per FR-E2 part 3 (task 049).
-/// Follows ADR-015: No content logging (IDs only).
+/// Job handler that indexes one invoice into <c>spaarke-invoices-index</c> from its structured records (ebilling-r1 task 152, FR-43, D-44):
+/// the <c>sprk_invoice</c> row and its <c>sprk_billingevent</c> lines (firm, core record, timekeepers, UTBMS codes, amounts, status,
+/// narratives). It reads no document text and never touches a submission (<see cref="InvoiceIndexDocument"/> builds the document).
 /// </summary>
+/// <remarks>
+/// <para><b>One job, one invoice, the invoice as it is when the job runs.</b> A job names an invoice and the change that caused it; the handler
+/// reads the current rows, so jobs from two changes that run out of order still converge on the latest state, and an at-least-once
+/// re-delivery rewrites the same document (<c>MergeOrUpload</c> keyed by the invoice id; ADR-004).</para>
+/// <para><b>Enqueue keys carry the change.</b> <see cref="BuildJob"/> puts the change in the idempotency key, which
+/// <see cref="JobSubmissionService"/> uses as the Service Bus <c>MessageId</c> for duplicate detection. A fixed per-invoice key would drop
+/// every re-index after the first.</para>
+/// <para>ADR-013: embeddings only through <see cref="IInvoiceAi"/>. ADR-015: logs carry ids, counts and timings, never narrative text.
+/// ADR-014: the document's <c>tenantId</c> is the BFF's <c>AzureAd:TenantId</c>, the value <see cref="InvoiceSearchService"/> filters on; with none
+/// configured the job is poisoned rather than written without one.</para>
+/// </remarks>
 public sealed class InvoiceIndexingJobHandler : IJobHandler
 {
     private readonly SearchIndexClient _searchIndexClient;
+    private readonly IGenericEntityService _entities;
+    private readonly IConfiguration _configuration;
     private readonly IInvoiceAi? _invoiceAi;
-    private readonly IDocumentDataverseService _documentService;
-    private readonly TextExtractorService _textExtractorService;
-    private readonly FinanceTelemetry _telemetry;
+    private readonly TimeProvider _time;
     private readonly ILogger<InvoiceIndexingJobHandler> _logger;
 
-    /// <summary>
-    /// Job type constant - must match the JobType used when enqueuing.
-    /// </summary>
+    /// <summary>Job type constant - must match the JobType used when enqueuing.</summary>
     public const string JobTypeName = "InvoiceIndexing";
+
+    /// <summary>The change key of an invoice's acceptance (the first index of its document).</summary>
+    public const string AcceptedChange = "accepted";
 
     /// <summary>
     /// Canonical index name: spaarke-invoices-index (per AI-SEARCH-INDEX-CATALOG.md; FR-10 + NFR-03).
     /// MVP uses a single index; per-tenant fan-out is a future extension.
     /// </summary>
-    private const string IndexNamePattern = "spaarke-invoices-index";
+    internal const string IndexNamePattern = "spaarke-invoices-index";
+
+    internal const string TenantSettingKey = "AzureAd:TenantId";
 
     public InvoiceIndexingJobHandler(
         SearchIndexClient searchIndexClient,
-        IDocumentDataverseService documentService,
-        TextExtractorService textExtractorService,
-        FinanceTelemetry telemetry,
+        IGenericEntityService entities,
+        IConfiguration configuration,
         ILogger<InvoiceIndexingJobHandler> logger,
-        IInvoiceAi? invoiceAi = null)
+        IInvoiceAi? invoiceAi = null,
+        TimeProvider? time = null)
     {
         _searchIndexClient = searchIndexClient ?? throw new ArgumentNullException(nameof(searchIndexClient));
-        _documentService = documentService ?? throw new ArgumentNullException(nameof(documentService));
-        _textExtractorService = textExtractorService ?? throw new ArgumentNullException(nameof(textExtractorService));
-        _telemetry = telemetry ?? throw new ArgumentNullException(nameof(telemetry));
+        _entities = entities ?? throw new ArgumentNullException(nameof(entities));
+        _configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-        _invoiceAi = invoiceAi; // Nullable: when AI is disabled, RequireAi() throws → job is dead-lettered → operator can re-enable AI and re-enqueue.
+        _invoiceAi = invoiceAi; // Nullable: when AI is disabled the embedding step is skipped and the document is indexed without a new vector.
+        _time = time ?? TimeProvider.System;
     }
 
-    /// <summary>
-    /// Returns the AI facade or throws if AI features are disabled. Embedding generation
-    /// for invoice indexing has no non-AI fallback — if the throw escapes, the job will be
-    /// dead-lettered (acceptable: operator can re-enable AI and retry).
-    /// </summary>
-    private IInvoiceAi RequireAi() =>
-        _invoiceAi ?? throw new InvalidOperationException(
-            "Invoice indexing requires AI features. Set 'Analysis:Enabled=true' AND 'DocumentIntelligence:Enabled=true' to enable.");
-
     public string JobType => JobTypeName;
+
+    /// <summary>
+    /// The indexing job of <paramref name="invoiceId"/> for one <paramref name="change"/>. The idempotency key is
+    /// <c>invoice-index-{invoiceId:N}-{change}</c>: two changes never share a key, one change always does.
+    /// </summary>
+    /// <param name="invoiceId">The <c>sprk_invoice</c> to index.</param>
+    /// <param name="change">What changed, unique per change of the invoice: <see cref="AcceptedChange"/>, or the row version the change
+    /// replaced (<c>v{versionnumber}</c>; a conditional write moves the version, so each change has its own).</param>
+    /// <param name="correlationId">The caller's correlation id; a new one when null.</param>
+    public static JobContract BuildJob(Guid invoiceId, string change, string? correlationId)
+    {
+        if (invoiceId == Guid.Empty)
+        {
+            throw new ArgumentException("An invoice id is required.", nameof(invoiceId));
+        }
+
+        ArgumentException.ThrowIfNullOrWhiteSpace(change);
+
+        return new JobContract
+        {
+            JobId = Guid.NewGuid(),
+            JobType = JobTypeName,
+            SubjectId = invoiceId.ToString(),
+            CorrelationId = correlationId ?? Activity.Current?.Id ?? Guid.NewGuid().ToString(),
+            IdempotencyKey = $"invoice-index-{invoiceId:N}-{change}",
+            Attempt = 1,
+            MaxAttempts = 3,
+            CreatedAt = DateTimeOffset.UtcNow,
+            Payload = JsonDocument.Parse(JsonSerializer.Serialize(new { InvoiceId = invoiceId, Change = change })),
+        };
+    }
 
     public async Task<JobOutcome> ProcessAsync(JobContract job, CancellationToken ct)
     {
@@ -76,116 +108,78 @@ public sealed class InvoiceIndexingJobHandler : IJobHandler
                 "Processing invoice indexing job {JobId} for subject {SubjectId}, Attempt {Attempt}, CorrelationId {CorrelationId}",
                 job.JobId, job.SubjectId, job.Attempt, job.CorrelationId);
 
-            // Parse payload to get invoiceId and documentId
             var payload = ParsePayload(job.Payload);
-            if (payload == null || payload.InvoiceId == Guid.Empty || payload.DocumentId == Guid.Empty)
+            if (payload == null || payload.InvoiceId == Guid.Empty)
             {
                 _logger.LogError("Invalid payload for invoice indexing job {JobId}", job.JobId);
                 return JobOutcome.Poisoned(job.JobId, JobType, "Invalid job payload", job.Attempt, stopwatch.Elapsed);
             }
 
             var invoiceId = payload.InvoiceId;
-            var documentId = payload.DocumentId;
 
-            _logger.LogDebug(
-                "Indexing invoice {InvoiceId}, document {DocumentId}",
-                invoiceId, documentId);
+            // ADR-014: a document without a tenant is never written (the search filters on it; a misconfigured tenant would otherwise fail open).
+            var tenantId = _configuration[TenantSettingKey];
+            if (string.IsNullOrWhiteSpace(tenantId))
+            {
+                _logger.LogError("Invoice indexing job {JobId}: {Setting} is not configured; invoice {InvoiceId} is not indexed", job.JobId, TenantSettingKey, invoiceId);
+                return JobOutcome.Poisoned(job.JobId, JobType, "Tenant id is not configured", job.Attempt, stopwatch.Elapsed);
+            }
 
-            // Step 1: Load invoice record from Dataverse
-            var invoice = await LoadInvoiceRecordAsync(invoiceId, ct);
+            // Step 1: the invoice and its lines, as they are now.
+            var invoiceRows = await _entities.RetrieveMultipleAsync(InvoiceIndexDocument.InvoiceQuery(invoiceId), ct);
+            var invoice = invoiceRows.Entities.FirstOrDefault();
             if (invoice == null)
             {
                 _logger.LogError("Invoice {InvoiceId} not found in Dataverse", invoiceId);
                 return JobOutcome.Poisoned(job.JobId, JobType, "Invoice record not found", job.Attempt, stopwatch.Elapsed);
             }
 
-            // Step 2: Load document record from Dataverse
-            var document = await LoadDocumentRecordAsync(documentId, ct);
-            if (document == null)
-            {
-                _logger.LogError("Document {DocumentId} not found in Dataverse", documentId);
-                return JobOutcome.Poisoned(job.JobId, JobType, "Document record not found", job.Attempt, stopwatch.Elapsed);
-            }
+            var lines = await InvoiceReviewReadService.ReadPagedAsync(_entities, InvoiceIndexDocument.LineQuery(invoiceId), ct);
 
-            // Step 3: Get document text (from extraction results if available)
-            string documentText;
-            if (!string.IsNullOrWhiteSpace(document.ExtractedText))
-            {
-                _logger.LogDebug("Using cached extracted text for document {DocumentId}", documentId);
-                documentText = document.ExtractedText;
-            }
-            else
-            {
-                _logger.LogWarning(
-                    "Document {DocumentId} has no extracted text, indexing will proceed with empty content",
-                    documentId);
-                documentText = string.Empty;
-            }
+            // Step 2: the document's facts and text.
+            var model = InvoiceIndexDocument.Read(invoice, lines);
 
-            // Step 4: Generate embedding for document text
-            ReadOnlyMemory<float> embedding;
-            if (!string.IsNullOrWhiteSpace(documentText))
+            // Step 3: the embedding. A failure (AI off, throttled, model error) indexes the document without a new vector: keyword and filter
+            // search keep working, and the vector an earlier run wrote stays (the document omits the field).
+            ReadOnlyMemory<float> embedding = ReadOnlyMemory<float>.Empty;
+            if (!string.IsNullOrWhiteSpace(model.Content))
             {
                 try
                 {
                     embedding = await RequireAi().GenerateEmbeddingAsync(
-                        documentText,
+                        InvoiceIndexDocument.EmbeddingInput(model),
                         model: "text-embedding-3-large",
                         dimensions: 3072,
                         cancellationToken: ct);
-
-                    _logger.LogDebug(
-                        "Generated embedding for document {DocumentId}, dimensions: {Dimensions}",
-                        documentId, embedding.Length);
                 }
-                catch (Exception ex)
+                catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
                 {
-                    _logger.LogError(ex,
-                        "Failed to generate embedding for document {DocumentId}: {Error}. Indexing without vector.",
-                        documentId, ex.Message);
-
-                    // Continue without embedding - allow keyword search only
+                    _logger.LogWarning(
+                        "No embedding for invoice {InvoiceId} ({ExceptionType}); indexing without a new vector",
+                        invoiceId, ex.GetType().Name);
                     embedding = ReadOnlyMemory<float>.Empty;
                 }
             }
-            else
-            {
-                // No text to embed
-                embedding = ReadOnlyMemory<float>.Empty;
-            }
 
-            // Step 5: Create search document
-            var searchDocument = CreateSearchDocument(
-                invoiceId,
-                documentId,
-                invoice,
-                document,
-                documentText,
-                embedding);
-
-            // Step 6: Index document into Azure AI Search
+            // Step 4: MergeOrUpload keyed by the invoice id.
+            var searchDocument = InvoiceIndexDocument.ToSearchDocument(model, tenantId, embedding, _time.GetUtcNow());
             var searchClient = _searchIndexClient.GetSearchClient(IndexNamePattern);
 
             try
             {
-                var batch = new[]
-                {
-                    new IndexDocumentsAction<SearchDocument>(
-                        IndexActionType.MergeOrUpload,
-                        searchDocument)
-                };
+                var batch = new[] { new IndexDocumentsAction<SearchDocument>(IndexActionType.MergeOrUpload, searchDocument) };
 
                 var response = await searchClient.IndexDocumentsAsync(
                     IndexDocumentsBatch.Create(batch),
-                    new IndexDocumentsOptions { ThrowOnAnyError = true },
+                    new IndexDocumentsOptions { ThrowOnAnyError = false },
                     cancellationToken: ct);
 
                 var result = response.Value.Results.FirstOrDefault();
                 if (result?.Succeeded != true)
                 {
                     _logger.LogError(
-                        "Failed to index invoice {InvoiceId}: {Error}",
-                        invoiceId, result?.ErrorMessage ?? "Unknown error");
+                        "Failed to index invoice {InvoiceId}: status {Status}, {Error}",
+                        invoiceId, result?.Status, result?.ErrorMessage ?? "Unknown error");
 
                     return JobOutcome.Failure(
                         job.JobId, JobType,
@@ -194,43 +188,43 @@ public sealed class InvoiceIndexingJobHandler : IJobHandler
                 }
 
                 _logger.LogInformation(
-                    "Successfully indexed invoice {InvoiceId} into Azure AI Search in {Duration}ms",
-                    invoiceId, stopwatch.ElapsedMilliseconds);
+                    "Indexed invoice {InvoiceId} ({LineCount} lines, status {Status}, vector {HasVector}) into Azure AI Search in {Duration}ms",
+                    invoiceId, lines.Count, model.Status, embedding.Length > 0, stopwatch.ElapsedMilliseconds);
 
                 return JobOutcome.Success(job.JobId, JobType, stopwatch.Elapsed);
             }
             catch (RequestFailedException ex)
             {
                 _logger.LogError(ex,
-                    "Azure AI Search request failed for invoice {InvoiceId}: {Error}",
-                    invoiceId, ex.Message);
+                    "Azure AI Search request failed for invoice {InvoiceId}: status {Status}",
+                    invoiceId, ex.Status);
 
-                // Check if this is a retryable error
-                var isRetryable = ex.Status is 429 or 503; // Throttling or Service Unavailable
-                if (isRetryable)
+                // Throttling and service-unavailable retry; anything else is permanent.
+                if (ex.Status is 429 or 503)
                 {
                     return JobOutcome.Failure(job.JobId, JobType, ex.Message, job.Attempt, stopwatch.Elapsed);
                 }
 
-                // Permanent failure
                 return JobOutcome.Poisoned(job.JobId, JobType, ex.Message, job.Attempt, stopwatch.Elapsed);
             }
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Invoice indexing job {JobId} failed: {Error}", job.JobId, ex.Message);
+            _logger.LogError(ex, "Invoice indexing job {JobId} failed ({ExceptionType})", job.JobId, ex.GetType().Name);
 
-            // Determine if retryable
-            var isRetryable = IsRetryableException(ex);
-            if (isRetryable)
-            {
-                return JobOutcome.Failure(job.JobId, JobType, ex.Message, job.Attempt, stopwatch.Elapsed);
-            }
-
-            // Permanent failure
-            return JobOutcome.Poisoned(job.JobId, JobType, ex.Message, job.Attempt, stopwatch.Elapsed);
+            return IsRetryableException(ex)
+                ? JobOutcome.Failure(job.JobId, JobType, ex.Message, job.Attempt, stopwatch.Elapsed)
+                : JobOutcome.Poisoned(job.JobId, JobType, ex.Message, job.Attempt, stopwatch.Elapsed);
         }
     }
+
+    /// <summary>
+    /// Returns the AI facade or throws if AI features are disabled. The throw is caught at the call site: the document is then indexed without
+    /// a new vector.
+    /// </summary>
+    private IInvoiceAi RequireAi() =>
+        _invoiceAi ?? throw new InvalidOperationException(
+            "Invoice embeddings require AI features. Set 'Analysis:Enabled=true' AND 'DocumentIntelligence:Enabled=true' to enable.");
 
     private InvoiceIndexingPayload? ParsePayload(JsonDocument? payload)
     {
@@ -250,134 +244,6 @@ public sealed class InvoiceIndexingJobHandler : IJobHandler
             _logger.LogError(ex, "Failed to parse invoice indexing job payload");
             return null;
         }
-    }
-
-    /// <summary>
-    /// Load invoice record from Dataverse.
-    /// Note: This is a placeholder - actual implementation needs proper Dataverse query.
-    /// </summary>
-    private async Task<InvoiceSearchRecord?> LoadInvoiceRecordAsync(Guid invoiceId, CancellationToken ct)
-    {
-        try
-        {
-            // TRACKED: GitHub #229 - Implement Dataverse query for sprk_invoice
-            // For now, return minimal record to allow compilation
-            // In production, this would query sprk_invoice entity with fields:
-            // - sprk_invoicenumber, sprk_invoicedate, sprk_totalamount, sprk_currency
-            // - sprk_matter (lookup), sprk_vendororg (lookup)
-            // - sprk_extractionconfidence, sprk_reviewstatus
-
-            _logger.LogWarning(
-                "LoadInvoiceRecordAsync not fully implemented - using placeholder. Invoice {InvoiceId}",
-                invoiceId);
-
-            await Task.CompletedTask; // Suppress warning
-
-            return new InvoiceSearchRecord
-            {
-                InvoiceId = invoiceId,
-                InvoiceNumber = null,
-                InvoiceDate = null,
-                TotalAmount = null,
-                Currency = null,
-                MatterId = null,
-                MatterNumber = null,
-                MatterName = null,
-                VendorOrgId = null,
-                VendorName = null,
-                Confidence = null,
-                ReviewStatus = null
-            };
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to load invoice {InvoiceId} from Dataverse", invoiceId);
-            return null;
-        }
-    }
-
-    /// <summary>
-    /// Load document record from Dataverse to get extracted text and metadata.
-    /// </summary>
-    private async Task<DocumentSearchRecord?> LoadDocumentRecordAsync(Guid documentId, CancellationToken ct)
-    {
-        try
-        {
-            var document = await _documentService.GetDocumentAsync(documentId.ToString(), ct);
-            if (document == null)
-                return null;
-
-            // Check if document has extracted text (from document intelligence or OCR)
-            // This may be stored in a custom field like sprk_extractedtext
-            // For now, we'll assume text extraction happens elsewhere and is cached
-
-            return new DocumentSearchRecord
-            {
-                DocumentId = documentId,
-                FileName = document.FileName ?? "unknown",
-                ExtractedText = null, // TRACKED: GitHub #233 - Load from actual field when available
-                TenantId = null, // TRACKED: GitHub #233 - Load from actual tenant context
-                ProjectId = null // TRACKED: GitHub #233 - Load if document has project association
-            };
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to load document {DocumentId} from Dataverse", documentId);
-            return null;
-        }
-    }
-
-    /// <summary>
-    /// Create search document matching the invoice index schema.
-    /// Schema from infrastructure/ai-search/spaarke-invoices-index.json
-    /// </summary>
-    private SearchDocument CreateSearchDocument(
-        Guid invoiceId,
-        Guid documentId,
-        InvoiceSearchRecord invoice,
-        DocumentSearchRecord document,
-        string documentText,
-        ReadOnlyMemory<float> embedding)
-    {
-        var searchDoc = new SearchDocument
-        {
-            // Primary key: composite of invoice and document IDs for uniqueness
-            ["id"] = $"{invoiceId:N}_{documentId:N}",
-
-            // Content fields
-            ["content"] = documentText,
-
-            // Vector field (3072 dimensions for text-embedding-3-large)
-            ["contentVector"] = embedding.Length > 0 ? embedding.ToArray() : null,
-
-            // Chunk index (always 0 for full invoice documents, not chunked)
-            ["chunkIndex"] = 0,
-
-            // Invoice identifiers
-            ["invoiceId"] = invoiceId.ToString(),
-            ["documentId"] = documentId.ToString(),
-            ["matterId"] = invoice.MatterId?.ToString(),
-            ["projectId"] = document.ProjectId?.ToString(),
-            ["vendorOrgId"] = invoice.VendorOrgId?.ToString(),
-
-            // Invoice metadata
-            ["vendorName"] = invoice.VendorName,
-            ["invoiceNumber"] = invoice.InvoiceNumber,
-            ["invoiceDate"] = invoice.InvoiceDate,
-            ["totalAmount"] = invoice.TotalAmount,
-            ["currency"] = invoice.Currency,
-
-            // Document metadata
-            ["documentType"] = "invoice", // Static value for filtering
-
-            // Tenant isolation
-            ["tenantId"] = document.TenantId ?? "default",
-
-            // Indexing timestamp
-            ["indexedAt"] = DateTimeOffset.UtcNow
-        };
-
-        return searchDoc;
     }
 
     /// <summary>
@@ -411,44 +277,15 @@ public sealed class InvoiceIndexingJobHandler : IJobHandler
 /// </summary>
 public class InvoiceIndexingPayload
 {
-    /// <summary>
-    /// The Dataverse invoice ID to index.
-    /// </summary>
+    /// <summary>The Dataverse invoice ID to index.</summary>
     public Guid InvoiceId { get; set; }
 
     /// <summary>
-    /// The Dataverse document ID containing the invoice file.
+    /// Legacy: the document the retired document-centric path sent (InvoiceExtractionJobHandler, retired by 050b). Accepted and ignored; the
+    /// document id of the index row comes from the invoice's own <c>sprk_document</c> lookup.
     /// </summary>
-    public Guid DocumentId { get; set; }
-}
+    public Guid? DocumentId { get; set; }
 
-/// <summary>
-/// Internal record for invoice data loaded from Dataverse.
-/// </summary>
-internal record InvoiceSearchRecord
-{
-    public Guid InvoiceId { get; init; }
-    public string? InvoiceNumber { get; init; }
-    public DateTimeOffset? InvoiceDate { get; init; }
-    public decimal? TotalAmount { get; init; }
-    public string? Currency { get; init; }
-    public Guid? MatterId { get; init; }
-    public string? MatterNumber { get; init; }
-    public string? MatterName { get; init; }
-    public Guid? VendorOrgId { get; init; }
-    public string? VendorName { get; init; }
-    public decimal? Confidence { get; init; }
-    public int? ReviewStatus { get; init; }
-}
-
-/// <summary>
-/// Internal record for document data loaded from Dataverse.
-/// </summary>
-internal record DocumentSearchRecord
-{
-    public Guid DocumentId { get; init; }
-    public string FileName { get; init; } = null!;
-    public string? ExtractedText { get; init; }
-    public string? TenantId { get; init; }
-    public Guid? ProjectId { get; init; }
+    /// <summary>What changed (<see cref="InvoiceIndexingJobHandler.BuildJob"/>); informational, the handler always reads the current rows.</summary>
+    public string? Change { get; set; }
 }

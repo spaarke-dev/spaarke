@@ -357,7 +357,7 @@ public static class FinanceModule
         // Scoped: extracts invoice facts via AI (Playbook B), creates BillingEvent records
         // IdempotencyKey: extract-{invoiceId}
         // VisibilityState ALWAYS "Invoiced" (deterministic, never from LLM)
-        // Enqueues InvoiceIndexing on success (InvoiceExtractionJobHandler.cs:344).
+        // Enqueues InvoiceIndexing on success (legacy path, no producer since 050a; 050b deletes it).
         // NOTE (verified 2026-08-20): it does NOT enqueue SpendSnapshotGeneration — no code
         // anywhere submits that job type. The snapshots → signals → rollup analytics chain has
         // no automatic trigger; FinanceRollupService runs ONLY via the manual
@@ -370,12 +370,15 @@ public static class FinanceModule
         // ============================================================================
         // Invoice Indexing Job Handler (indexes invoices into Azure AI Search)
         // ============================================================================
-        // Scoped: generates embeddings and indexes invoice documents for semantic search
-        // IdempotencyKey: invoice-index-{invoiceId}
+        // Scoped: builds one search document per invoice from its structured records (sprk_invoice + sprk_billingevent lines;
+        // ebilling-r1 task 152, FR-43) and indexes it with an embedding for semantic search
+        // IdempotencyKey: invoice-index-{invoiceId:N}-{change} (InvoiceIndexingJobHandler.BuildJob). Producers: the acceptance
+        // (InvoiceSubmissionAfterSteps, change "accepted") and every lifecycle move (InvoiceLifecycleService, change "v{replaced row version}")
         // Index: spaarke-invoices-index (MVP single index; per-tenant fan-out is a future extension)
         // Embeddings: text-embedding-3-large (3072 dimensions)
         //
-        // Depends on IOpenAiClient + SearchIndexClient — both gated on DocumentIntelligence:Enabled.
+        // Depends on IInvoiceAi + SearchIndexClient — SearchIndexClient is gated on DocumentIntelligence:Enabled. With the gate off no handler
+        // is registered and a queued InvoiceIndexing message is dead-lettered NoHandler (049 notes, map row 9).
         if (documentIntelligenceEnabled)
         {
             services.AddScoped<IJobHandler, InvoiceIndexingJobHandler>();
