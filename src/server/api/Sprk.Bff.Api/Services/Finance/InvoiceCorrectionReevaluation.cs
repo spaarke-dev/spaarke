@@ -104,6 +104,24 @@ public sealed class InvoiceCorrectionReevaluation
     /// </summary>
     internal const string ResolutionChangeMember = "resolutionChange";
 
+    /// <summary>
+    /// Fix round, part 3 (F-2): the findings JSON member listing the correction rows (ids, <c>D</c> format) whose findings step has finished: <c>[ "id", ... ]</c>.
+    /// The findings step adds every Corrected / Confirmed row of the corrected field (on its line) in the same row-version-conditional write as the patch,
+    /// also when the patch itself is empty. A Corrected / Confirmed row of a re-evaluated field that is not listed has not been followed through, and
+    /// <see cref="InvoiceApprovalService"/> refuses to approve the invoice until the correction is repeated (<see cref="ReadUnappliedAsync"/>).
+    /// </summary>
+    public const string AppliedCorrectionsMember = "appliedCorrections";
+
+    /// <summary>
+    /// Fix round, part 3 (F-2): the findings JSON member keeping, per fee line (key: the line index), the roster match, approved rate and reasons the stored
+    /// findings were last patched with by a timekeeper or date correction: <c>{ "2": { timekeeperId, approvedRate, timekeeperReason, rateStatus, rateReason } }</c>.
+    /// The "before" side of the next timekeeper or date correction of that line starts from it, so a correction whose findings step never ran is still diffed.
+    /// </summary>
+    internal const string AppliedResolutionsMember = "appliedResolutions";
+
+    /// <summary>A Corrected / Confirmed correction row whose findings step has not finished (fix round, part 3).</summary>
+    internal sealed record UnappliedCorrection(Guid RowId, Guid? LineId, string Field);
+
     private static readonly HashSet<string> Reevaluated = new(StringComparer.Ordinal)
     {
         ResolutionFieldNames.Hours, ResolutionFieldNames.Rate, ResolutionFieldNames.Amount, BillingFieldNames.Narrative,
@@ -323,7 +341,9 @@ public sealed class InvoiceCorrectionReevaluation
                 ?? throw new InvalidOperationException("The corrected line is not a fee or expense line of the invoice.");
         }
 
-        // The corrected field: its final value (the latest Corrected / Confirmed row) and its value before this correction.
+        // The corrected field: its final value (the latest Corrected / Confirmed row) and its value as the stored findings last saw it. Fix round, part 3
+        // (F-2): that is the final value of the last row whose findings step FINISHED (listed in appliedCorrections), not simply the previous row: a row
+        // saved without its follow-through would otherwise be the "before" and its change would never be diffed.
         var fieldRows = rows.Where(r => r.Field == applied.Field && r.LineId == applied.LineId).ToList();
         var labels = fieldRows.Where(r => r.IsLabel).ToList();
         if (labels.Count == 0)
@@ -331,14 +351,21 @@ public sealed class InvoiceCorrectionReevaluation
             throw new InvalidOperationException("The correction row of the field was not found.");
         }
 
+        var appliedIds = AppliedOf(root);
         var latest = labels[^1];
-        var previous = labels.Count > 1 ? labels[^2] : null;
+        var previous = labels.Take(labels.Count - 1).LastOrDefault(r => appliedIds.Contains(r.Id));
         var preValue = previous is not null ? previous.Final : fieldRows[0].Ai;
         var verified = rows.Where(r => r.IsLabel).Select(r => (r.LineId, r.Field)).ToHashSet();
 
+        // A timekeeper or date correction of a fee line also diffs the roster match and the rate: from the pair the findings were last patched with.
+        StoredLine? correctedLine = correctedIndex is { } at ? lines[at] : null;
+        var resolutionField = applied.Field is ResolutionFieldNames.Date or ResolutionFieldNames.TimekeeperAsBilled
+            && correctedLine?.Row.GetAttributeValue<OptionSetValue>(InvoiceTotalsService.LineCostType)?.Value == (int)InvoiceLineCostType.Fee;
+        var resolutionBefore = resolutionField ? ResolutionBefore(root, correctedLine!) : null;
+
         var provenance = ExtractionProvenance.ParseSubmission(json);
         var core = InvoiceLineDecisionService.SingleCoreOf(invoice) ?? throw new InvalidOperationException("The invoice names no single core record.");
-        var basis = new RequestBasis(applied, invoice, lines, provenance, verified, submission.Id, root, core, latest.Final);
+        var basis = new RequestBasis(applied, invoice, lines, provenance, verified, submission.Id, root, core, resolutionBefore);
         var before = basis.Build(preValue, preVerified: previous is not null, before: true);
         var after = basis.Build(latest.Final, preVerified: true, before: false);
 
@@ -362,6 +389,20 @@ public sealed class InvoiceCorrectionReevaluation
             ClearLineFindings(root, applied.Field, index, latest.Final);
         }
 
+        // Fix round, part 3 (F-2): this field's rows are now followed through, and (a timekeeper or date correction) the pair the findings now reflect is
+        // kept. Both ride in the same conditional write as the patch, and are written even when the patch itself is empty; a repeat adds nothing.
+        if (resolutionField && ResolutionNow(correctedLine!) is { } now)
+        {
+            if (root[AppliedResolutionsMember] is not JsonObject resolutions)
+            {
+                root[AppliedResolutionsMember] = resolutions = new JsonObject();
+            }
+
+            resolutions[correctedLine!.Index.ToString(CultureInfo.InvariantCulture)] = now;
+        }
+
+        MarkApplied(root, appliedIds, labels.Select(l => l.Id));
+
         if (!string.Equals(original, root.ToJsonString(), StringComparison.Ordinal))
         {
             var update = new Entity(InvoiceReviewReadService.SubmissionEntity, submission.Id)
@@ -377,6 +418,93 @@ public sealed class InvoiceCorrectionReevaluation
         }
 
         return new Patched(root, lines, touched);
+    }
+
+    /// <summary>The correction row ids listed in <see cref="AppliedCorrectionsMember"/> (an entry that is not an id is ignored).</summary>
+    private static HashSet<Guid> AppliedOf(JsonObject root)
+    {
+        var ids = new HashSet<Guid>();
+        foreach (var node in root[AppliedCorrectionsMember] as JsonArray ?? [])
+        {
+            if (node is JsonValue value && value.TryGetValue<string>(out var text) && Guid.TryParse(text, out var id))
+            {
+                ids.Add(id);
+            }
+        }
+
+        return ids;
+    }
+
+    /// <summary>Adds the ids not yet listed to <see cref="AppliedCorrectionsMember"/>, in order; nothing changes when all are listed (a repeat).</summary>
+    private static void MarkApplied(JsonObject root, HashSet<Guid> listed, IEnumerable<Guid> ids)
+    {
+        foreach (var id in ids)
+        {
+            if (!listed.Add(id))
+            {
+                continue;
+            }
+
+            if (root[AppliedCorrectionsMember] is not JsonArray array)
+            {
+                root[AppliedCorrectionsMember] = array = [];
+            }
+
+            array.Add(id.ToString("D"));
+        }
+    }
+
+    /// <summary>The roster match, approved rate and reasons a timekeeper or date correction is diffed FROM.</summary>
+    private sealed record ResolutionFacts(Guid? TimekeeperId, decimal? ApprovedRate, TimekeeperUnmatchedReason TimekeeperReason, RateResolutionStatus RateStatus, RateNotFoundReason RateReason);
+
+    /// <summary>
+    /// The pair the stored findings reflect for a fee line (fix round, part 3): the one recorded in <see cref="AppliedResolutionsMember"/> by the last
+    /// timekeeper or date correction whose findings step finished; else, when a correction changed the pair, the pair the line had before its FIRST
+    /// timekeeper or date correction (<c>resolutionChange.original</c>, or <c>before</c> on a line written before <c>original</c> existed) with the reasons the
+    /// first evaluation stored; else null (the pair was never changed: the columns are what the findings saw).
+    /// </summary>
+    private static ResolutionFacts? ResolutionBefore(JsonObject root, StoredLine line)
+    {
+        if ((root[AppliedResolutionsMember] as JsonObject)?[line.Index.ToString(CultureInfo.InvariantCulture)] is JsonObject recorded)
+        {
+            return new ResolutionFacts(
+                Guid.TryParse(Text(recorded, "timekeeperId"), out var id) ? id : null,
+                recorded["approvedRate"] is JsonValue rate && rate.TryGetValue<decimal>(out var approved) ? approved : null,
+                Enum.TryParse<TimekeeperUnmatchedReason>(Text(recorded, "timekeeperReason"), out var tr) ? tr : TimekeeperUnmatchedReason.None,
+                Enum.TryParse<RateResolutionStatus>(Text(recorded, "rateStatus"), out var rs) ? rs : RateResolutionStatus.NotFound,
+                Enum.TryParse<RateNotFoundReason>(Text(recorded, "rateReason"), out var rr) ? rr : RateNotFoundReason.None);
+        }
+
+        if (line.Extraction?[ResolutionChangeMember] is not JsonObject change)
+        {
+            return null;
+        }
+
+        var was = change["original"] as JsonObject ?? change["before"] as JsonObject;
+        var (timekeeperReason, rateStatus, rateReason) = RequestBasis.StoredReasons(root, line.Index);
+        return new ResolutionFacts(
+            was is not null && Guid.TryParse(Text(was, "timekeeperId"), out var wasId) ? wasId : null,
+            was?["approvedRate"] is JsonValue wasRate && wasRate.TryGetValue<decimal>(out var wasApproved) ? wasApproved : null,
+            timekeeperReason, rateStatus, rateReason);
+    }
+
+    /// <summary>The pair a fee line holds now (its columns) with the reasons its latest timekeeper or date correction stored; null when no correction changed it.</summary>
+    private static JsonObject? ResolutionNow(StoredLine line)
+    {
+        if (line.Extraction?[ResolutionChangeMember] is not JsonObject change)
+        {
+            return null;
+        }
+
+        var after = change["after"] as JsonObject;
+        return new JsonObject
+        {
+            ["timekeeperId"] = line.Row.GetAttributeValue<EntityReference>(InvoiceSubmissionPersister.LineResolvedTimekeeper)?.Id.ToString("D"),
+            ["approvedRate"] = line.Row.GetAttributeValue<Money>(InvoiceSubmissionPersister.LineApprovedRate)?.Value,
+            ["timekeeperReason"] = after is null ? null : Text(after, "timekeeperReason"),
+            ["rateStatus"] = after is null ? null : Text(after, "rateStatus"),
+            ["rateReason"] = after is null ? null : Text(after, "rateReason"),
+        };
     }
 
     private static string KeyOf(BillingFinding f) =>
@@ -741,11 +869,20 @@ public sealed class InvoiceCorrectionReevaluation
     private async Task DeriveStatusAsync(CorrectionApplied applied, Patched patched, CancellationToken ct)
     {
         var requests = new List<OrganizationRequest>();
+        var noExtraction = 0;
         foreach (var index in patched.Touched.Order())
         {
             if (!patched.Lines.TryGetValue(index, out var line) || line.Decided)
             {
                 continue; // a decided line is never changed
+            }
+
+            if (line.Extraction is null)
+            {
+                // Fix round, part 3: "coded" is read from the extraction JSON, which this line does not have (it was over the column limit, or unreadable).
+                // Re-deriving would make it Pending; its status is left as it is.
+                noExtraction++;
+                continue;
             }
 
             var current = line.Row.GetAttributeValue<OptionSetValue>(InvoiceTotalsService.LineStatus)?.Value;
@@ -766,6 +903,12 @@ public sealed class InvoiceCorrectionReevaluation
                 [InvoiceTotalsService.LineStatus] = new OptionSetValue(status),
             };
             requests.Add(new UpdateRequest { Target = update, ConcurrencyBehavior = ConcurrencyBehavior.IfRowVersionMatches });
+        }
+
+        if (noExtraction > 0)
+        {
+            _logger.LogWarning("Correction of {Field} on invoice {InvoiceId}: {Count} touched lines have no stored extraction; their status was left unchanged.",
+                applied.Field, applied.InvoiceId, noExtraction);
         }
 
         if (requests.Count > 0)
@@ -1062,11 +1205,11 @@ public sealed class InvoiceCorrectionReevaluation
 
     // ── The request, rebuilt from the stored rows ──
 
-    private sealed record CorrectionRow(Guid? LineId, string Field, string? Ai, string? Final, bool IsLabel);
+    private sealed record CorrectionRow(Guid Id, Guid? LineId, string Field, string? Ai, string? Final, bool IsLabel);
 
     private sealed class RequestBasis(
         CorrectionApplied applied, Entity invoice, IReadOnlyDictionary<int, StoredLine> lines, ExtractionProvenance.SubmissionProvenance? provenance,
-        IReadOnlySet<(Guid? LineId, string Field)> verified, Guid submissionId, JsonObject root, (string Entity, Guid Id) core, string? latestFinal)
+        IReadOnlySet<(Guid? LineId, string Field)> verified, Guid submissionId, JsonObject root, (string Entity, Guid Id) core, ResolutionFacts? resolutionBefore)
     {
         /// <summary>The request with the corrected field at <paramref name="value"/>; <paramref name="preVerified"/>: the field counts as verified (confidence 1.0);
         /// <paramref name="before"/>: the side of the diff before the correction (a timekeeper or date correction reads the line's pre-correction roster match and rate).</summary>
@@ -1200,16 +1343,15 @@ public sealed class InvoiceCorrectionReevaluation
                 timekeeperReason = Enum.TryParse<TimekeeperUnmatchedReason>(after is null ? null : Text(after, "timekeeperReason"), out var tr) ? tr : timekeeperReason;
                 rateStatus = Enum.TryParse<RateResolutionStatus>(after is null ? null : Text(after, "rateStatus"), out var rs) ? rs : rateStatus;
                 rateReason = Enum.TryParse<RateNotFoundReason>(after is null ? null : Text(after, "rateReason"), out var rr) ? rr : rateReason;
-                if (before && target && applied.Field is ResolutionFieldNames.Date or ResolutionFieldNames.TimekeeperAsBilled
-                    && Text(change, "field") == applied.Field && Text(change, "value") == latestFinal)
-                {
-                    // The stored columns hold the pair the correction gave; the "before" side is the pair it replaced, with the reasons the first
-                    // evaluation stored (the findings are patched after this diff is computed, so on the first pass they still name them).
-                    var was = change["before"] as JsonObject;
-                    timekeeperId = was is not null && Guid.TryParse(Text(was, "timekeeperId"), out var wasId) ? wasId : null;
-                    approvedRate = was?["approvedRate"] is JsonValue rateValue && rateValue.TryGetValue<decimal>(out var wasRate) ? wasRate : null;
-                    (timekeeperReason, rateStatus, rateReason) = StoredReasons(root, line.Index);
-                }
+            }
+
+            if (before && target && resolutionBefore is { } was)
+            {
+                // A timekeeper or date correction (fix round, part 3): the stored columns hold the pair the latest correction gave; the "before" side is
+                // the pair the stored findings were last patched with (see ResolutionBefore), so a correction whose findings step never ran is diffed too.
+                timekeeperId = was.TimekeeperId;
+                approvedRate = was.ApprovedRate;
+                (timekeeperReason, rateStatus, rateReason) = (was.TimekeeperReason, was.RateStatus, was.RateReason);
             }
 
             return new BillingLineFacts
@@ -1241,7 +1383,7 @@ public sealed class InvoiceCorrectionReevaluation
         }
 
         /// <summary>The unmatched / not-found reasons of a line as the first evaluation stored them: the reason codes of its ApprovedTimekeeper and ApprovedRate findings.</summary>
-        private static (TimekeeperUnmatchedReason, RateResolutionStatus, RateNotFoundReason) StoredReasons(JsonObject root, int line)
+        internal static (TimekeeperUnmatchedReason, RateResolutionStatus, RateNotFoundReason) StoredReasons(JsonObject root, int line)
         {
             var timekeeper = TimekeeperUnmatchedReason.None;
             var status = RateResolutionStatus.NotFound;
@@ -1354,6 +1496,7 @@ public sealed class InvoiceCorrectionReevaluation
             .OrderBy(r => r.GetAttributeValue<DateTime?>("sprk_reviewedon") ?? r.GetAttributeValue<DateTime?>("createdon") ?? DateTime.MinValue)
             .ThenBy(r => r.GetAttributeValue<DateTime?>("createdon"))
             .Select(r => new CorrectionRow(
+                r.Id,
                 r.GetAttributeValue<EntityReference>("sprk_invoiceline")?.Id,
                 r.GetAttributeValue<string>("sprk_fieldname") ?? string.Empty,
                 r.GetAttributeValue<string>("sprk_aivalue"),
@@ -1362,7 +1505,10 @@ public sealed class InvoiceCorrectionReevaluation
             .ToList();
     }
 
-    private async Task<Entity?> ReadSubmissionAsync(Guid invoiceId, CancellationToken ct)
+    private Task<Entity?> ReadSubmissionAsync(Guid invoiceId, CancellationToken ct) => ReadSubmissionAsync(_entities, invoiceId, ct);
+
+    /// <summary>The invoice's latest submission (its findings JSON, version and administrator text), read app-only.</summary>
+    private static async Task<Entity?> ReadSubmissionAsync(IGenericEntityService entities, Guid invoiceId, CancellationToken ct)
     {
         var query = new QueryExpression(InvoiceReviewReadService.SubmissionEntity)
         {
@@ -1372,7 +1518,53 @@ public sealed class InvoiceCorrectionReevaluation
         };
         query.Criteria.AddCondition(InvoiceSubmissionPersister.SubmissionInvoice, ConditionOperator.Equal, invoiceId);
         query.AddOrder("createdon", OrderType.Descending);
-        return (await _entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false)).Entities.FirstOrDefault();
+        return (await entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false)).Entities.FirstOrDefault();
+    }
+
+    /// <summary>
+    /// Fix round, part 3 (F-2): the Corrected / Confirmed correction rows of the invoice, of a field this follow-through re-evaluates, that are not listed in
+    /// the latest submission's <see cref="AppliedCorrectionsMember"/>: corrections whose value was saved but whose findings step has not finished (the client
+    /// stopped after a 503 Incomplete). A row of another field (TotalDue) has no findings step and is never listed here. A row of a line that
+    /// <paramref name="lines"/> shows a reviewer has since decided (Accepted, Reduced, Disallowed) is not listed either: the findings step never patches a
+    /// decided line, and the correction service refuses a decided line, so its repeat could never clear it. The submission is read only when a row is left; with no
+    /// findings JSON every such row is unapplied. A read fault throws (the caller refuses: fail closed). App-only (<see cref="IGenericEntityService"/>), as every
+    /// read of the findings JSON.
+    /// </summary>
+    internal static async Task<IReadOnlyList<UnappliedCorrection>> ReadUnappliedAsync(
+        IGenericEntityService entities, Guid invoiceId, IEnumerable<Entity> lines, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(entities);
+        ArgumentNullException.ThrowIfNull(lines);
+        var decidedLines = lines
+            .Where(l => l.GetAttributeValue<OptionSetValue>(InvoiceTotalsService.LineStatus)?.Value
+                is (int)InvoiceLineStatus.Accepted or (int)InvoiceLineStatus.Reduced or (int)InvoiceLineStatus.Disallowed)
+            .Select(l => l.Id)
+            .ToHashSet();
+        var query = new QueryExpression(InvoiceLineDecisionService.CorrectionEntity)
+        {
+            ColumnSet = new ColumnSet("sprk_fieldname", "sprk_invoiceline", "sprk_outcometype"),
+            Criteria = new FilterExpression(LogicalOperator.And),
+        };
+        query.Criteria.AddCondition("sprk_invoice", ConditionOperator.Equal, invoiceId);
+        query.Criteria.AddCondition("sprk_outcometype", ConditionOperator.In, InvoiceCorrectionService.OutcomeCorrected, InvoiceCorrectionService.OutcomeConfirmed);
+        query.AddOrder($"{InvoiceLineDecisionService.CorrectionEntity}id", OrderType.Ascending);
+        var rows = (await InvoiceReviewReadService.ReadPagedAsync(entities, query, ct).ConfigureAwait(false))
+            .Where(r => r.GetAttributeValue<OptionSetValue>("sprk_outcometype")?.Value is InvoiceCorrectionService.OutcomeCorrected or InvoiceCorrectionService.OutcomeConfirmed
+                && r.GetAttributeValue<string>("sprk_fieldname") is { } field && Reevaluated.Contains(field)
+                && !(r.GetAttributeValue<EntityReference>("sprk_invoiceline")?.Id is { } line && decidedLines.Contains(line)))
+            .ToList();
+        if (rows.Count == 0)
+        {
+            return [];
+        }
+
+        var submission = await ReadSubmissionAsync(entities, invoiceId, ct).ConfigureAwait(false);
+        var json = submission?.GetAttributeValue<string>(InvoiceSubmissionPersister.SubmissionFindingsJson);
+        var appliedIds = !string.IsNullOrWhiteSpace(json) && JsonNode.Parse(json) is JsonObject root ? AppliedOf(root) : [];
+        return rows
+            .Where(r => !appliedIds.Contains(r.Id))
+            .Select(r => new UnappliedCorrection(r.Id, r.GetAttributeValue<EntityReference>("sprk_invoiceline")?.Id, r.GetAttributeValue<string>("sprk_fieldname")!))
+            .ToList();
     }
 
     // ── JSON helpers ──

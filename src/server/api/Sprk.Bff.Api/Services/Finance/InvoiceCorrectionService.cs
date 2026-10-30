@@ -1134,16 +1134,22 @@ public sealed class InvoiceCorrectionService
                 if (extraction is JsonObject root && target is not null)
                 {
                     // The pair as it was BEFORE this correction, and why the new pair is unmatched / not found (046's reasons), so the re-evaluation can
-                    // diff the line's facts: the stored columns hold only the new pair and no reason.
+                    // diff the line's facts: the stored columns hold only the new pair and no reason. Fix round, part 3: `original` keeps the pair from
+                    // before the line's FIRST timekeeper or date correction, carried over every later one, so the re-evaluation can diff from it while no
+                    // such correction's findings step has finished (the stored findings still reflect that pair).
+                    var before = new JsonObject
+                    {
+                        ["timekeeperId"] = target.GetAttributeValue<EntityReference>(InvoiceSubmissionPersister.LineResolvedTimekeeper)?.Id.ToString("D"),
+                        ["approvedRate"] = target.GetAttributeValue<Money>(InvoiceSubmissionPersister.LineApprovedRate)?.Value,
+                    };
+                    var earlier = root[InvoiceCorrectionReevaluation.ResolutionChangeMember] as JsonObject;
+                    var original = (earlier?["original"] as JsonObject ?? earlier?["before"] as JsonObject)?.DeepClone() ?? before.DeepClone();
                     root[InvoiceCorrectionReevaluation.ResolutionChangeMember] = new JsonObject
                     {
                         ["field"] = spec.Name,
                         ["value"] = finalText,
-                        ["before"] = new JsonObject
-                        {
-                            ["timekeeperId"] = target.GetAttributeValue<EntityReference>(InvoiceSubmissionPersister.LineResolvedTimekeeper)?.Id.ToString("D"),
-                            ["approvedRate"] = target.GetAttributeValue<Money>(InvoiceSubmissionPersister.LineApprovedRate)?.Value,
-                        },
+                        ["before"] = before,
+                        ["original"] = original,
                         ["after"] = new JsonObject
                         {
                             ["timekeeperReason"] = derived.TimekeeperReason.ToString(),

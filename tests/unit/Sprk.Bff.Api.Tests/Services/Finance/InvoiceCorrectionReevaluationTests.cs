@@ -243,7 +243,9 @@ public sealed class InvoiceCorrectionReevaluationTests
         var result = await Service(world, Cap).CorrectAsync(Line("Hours", "2.5"), CancellationToken.None); // 30 h on the day becomes 7.5 h
 
         result.IsApplied.Should().BeTrue();
-        world.Submission!.GetAttributeValue<string>("sprk_findingsjson").Should().Be(stored, "nothing on a decided line is patched");
+        var patched = Stored(world);
+        patched.Remove(InvoiceCorrectionReevaluation.AppliedCorrectionsMember).Should().BeTrue("fix round, part 3: the empty patch still records the row as followed through");
+        patched.ToJsonString().Should().Be(stored, "nothing on a decided line is patched");
         StatusOf(world.Line(decidedId)).Should().Be((int)InvoiceLineStatus.Accepted);
         world.ValueWrites.Should().NotContain(w => w.Id == decidedId);
         StatusOf(world.Line()).Should().Be((int)InvoiceLineStatus.Clean);
