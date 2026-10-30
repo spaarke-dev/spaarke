@@ -3196,7 +3196,7 @@ public partial class InvoiceSubmissionPersisterTests
                 .ReturnsAsync((string entity, Guid id, string[] columns, CancellationToken _) => entity switch
                 {
                     "sprk_invoicesubmission" when SubmissionDeleted => throw new System.ServiceModel.FaultException<OrganizationServiceFault>(new OrganizationServiceFault { ErrorCode = -2147220969 }, "Does Not Exist"),
-                    "sprk_invoicesubmission" when OtherSubmissions.TryGetValue(id, out var other) => Copy(other),
+                    "sprk_invoicesubmission" when OtherSubmissions.TryGetValue(id, out var other) => Project(columns, Copy(other)),
                     "sprk_invoicesubmission" => Capture(columns, Copy(Submission)),
                     "sprk_invoice" when OldInvoice is { } old && old.Id == id => ReadOldInvoice(columns),
                     "sprk_document" when DocumentDeleted => throw new System.ServiceModel.FaultException<OrganizationServiceFault>(new OrganizationServiceFault { ErrorCode = -2147220969 }, "Does Not Exist"),
@@ -3498,6 +3498,13 @@ public partial class InvoiceSubmissionPersisterTests
         /// <summary>Task 097c: re-index jobs queued by the persister and the gate.</summary>
         public IndexQueueDouble Index { get; } = new();
 
+        /// <summary>
+        /// Task 097c (review F3): reads return only the columns asked for, as Dataverse does, so a column dropped from a read (the gate's
+        /// <c>sprk_resubmissionof</c>, the old invoice's status or version) fails the test instead of being answered anyway. Off by default:
+        /// the older tests were written against whole rows.
+        /// </summary>
+        public bool ProjectReads { get; set; }
+
         /// <summary>Task 097c: other submission rows by id (the earlier submission a Correction names).</summary>
         public Dictionary<Guid, Entity> OtherSubmissions { get; } = [];
 
@@ -3559,7 +3566,7 @@ public partial class InvoiceSubmissionPersisterTests
                 throw new HttpRequestException("Dataverse unavailable");
             }
 
-            return Copy(OldInvoice!);
+            return Project(columns, Copy(OldInvoice!));
         }
 
         private bool OldInvoiceMatches(UpdateRequest update) =>
@@ -3615,6 +3622,21 @@ public partial class InvoiceSubmissionPersisterTests
         private Entity Capture(string[] columns, Entity row)
         {
             SubmissionReadColumns.Add(columns);
+            return Project(columns, row);
+        }
+
+        private Entity Project(string[] columns, Entity row)
+        {
+            if (!ProjectReads)
+            {
+                return row;
+            }
+
+            foreach (var column in row.Attributes.Keys.Where(c => !columns.Contains(c)).ToList())
+            {
+                row.Attributes.Remove(column);
+            }
+
             return row;
         }
 

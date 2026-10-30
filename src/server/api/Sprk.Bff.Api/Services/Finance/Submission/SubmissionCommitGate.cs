@@ -500,8 +500,8 @@ public class SubmissionCommitGate
     /// <see cref="IInvoiceLifecycleService.BuildSupersedeUndoRequest"/> at the version read here, sent as its own transaction
     /// (<c>IfRowVersionMatches</c>). Nothing to do, and done: a New submission (no <c>sprk_resubmissionof</c>); a target that no longer
     /// resolves or no longer exists; an invoice already In Review (<c>Current == Requested</c>: the commit never superseded it, or an earlier
-    /// run reopened it); an invoice in any other status (Superseded is left only by this undo, so this commit's close is not in force); and a
-    /// Superseded invoice that another invoice still supersedes (another correction committed after this one's automatic rejection, so the
+    /// run reopened it); an invoice in any other status, one the lifecycle does not know included (Superseded is left only by this undo, so
+    /// this commit's close is not in force); and a Superseded invoice that another invoice still supersedes (another correction committed after this one's automatic rejection, so the
     /// close is that correction's, not this one's). A fault propagates, a stale row version included: the caller holds the undo and reports it.
     /// After a reopen, the invoice's re-index is queued (best effort).
     /// </summary>
@@ -524,7 +524,7 @@ public class SubmissionCommitGate
         try
         {
             old = await _entities.RetrieveAsync(
-                InvoiceReviewService.InvoiceEntity, oldId, ["statecode", "statuscode", InvoiceReviewService.VersionNumber], ct).ConfigureAwait(false);
+                InvoiceReviewService.InvoiceEntity, oldId, ["statuscode", InvoiceReviewService.VersionNumber], ct).ConfigureAwait(false);
         }
         catch (Exception ex) when (IsNotFound(ex))
         {
@@ -532,13 +532,18 @@ public class SubmissionCommitGate
             return;
         }
 
+        // Only a Superseded invoice can carry this commit's close. Any other status, one the lifecycle does not know included, is nothing to
+        // undo (In Review: Current == Requested), so it is done without needing the version (review K3: an undo is never held for a row it
+        // would not touch).
         var statusCode = old.GetAttributeValue<OptionSetValue>("statuscode")?.Value;
-        if (statusCode is not { } code || !InvoiceStatusCodes.TryFromStatusCode(code, out var current))
+        if (statusCode is not { } code || !InvoiceStatusCodes.TryFromStatusCode(code, out var current) || current != InvoiceLifecycleStatus.Superseded)
         {
-            throw new InvalidOperationException($"Invoice {oldId} has a status the lifecycle does not know; its reopen is held.");
+            _logger.LogInformation("Invoice submission {SubmissionId}: invoice {OldInvoiceId} is not Superseded (statuscode {Status}); nothing to reopen",
+                submissionId, oldId, statusCode);
+            return;
         }
 
-        if (current == InvoiceLifecycleStatus.Superseded && await SupersededByAnotherAsync(oldId, ct).ConfigureAwait(false))
+        if (await SupersededByAnotherAsync(oldId, ct).ConfigureAwait(false))
         {
             _logger.LogInformation("Invoice submission {SubmissionId}: invoice {OldInvoiceId} is superseded by another invoice; not reopened", submissionId, oldId);
             return;
@@ -549,7 +554,7 @@ public class SubmissionCommitGate
         var built = _lifecycle.BuildSupersedeUndoRequest(oldId, current, version);
         if (!built.Succeeded)
         {
-            // Current == Requested (already In Review) or a status this commit's close cannot have produced: nothing to undo.
+            // Defensive: the builder refuses only a status other than Superseded, which returned above.
             _logger.LogInformation("Invoice submission {SubmissionId}: invoice {OldInvoiceId} is {Status}; nothing to reopen", submissionId, oldId, current);
             return;
         }

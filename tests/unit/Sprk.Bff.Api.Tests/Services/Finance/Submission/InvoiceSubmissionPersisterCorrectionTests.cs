@@ -24,7 +24,7 @@ public partial class InvoiceSubmissionPersisterTests
     /// <summary>A store whose submission is a Correction of <see cref="OldInvoiceId"/> (In Review, this firm, this matter, version 41).</summary>
     private static Store CorrectionStore(Action<Store>? beforeTransaction = null, Action<Store>? afterCommit = null)
     {
-        var store = new Store { BeforeTransaction = beforeTransaction, AfterCommit = afterCommit };
+        var store = new Store { BeforeTransaction = beforeTransaction, AfterCommit = afterCommit, ProjectReads = true };
         store.Submission[InvoiceSubmissionService.ResubmissionOfColumn] = new EntityReference("sprk_invoicesubmission", EarlierSubmission);
         store.OtherSubmissions[EarlierSubmission] = new Entity("sprk_invoicesubmission", EarlierSubmission)
         {
@@ -297,6 +297,24 @@ public partial class InvoiceSubmissionPersisterTests
 
         store.OldInvoiceWrites.Should().HaveCount(writes, "Current == Requested: nothing to undo, and not a failure");
         store.OldInvoiceStatus.Should().Be(InvoiceStatusCodes.InReview);
+    }
+
+    [Fact(DisplayName = "097c (review K3): an old invoice in a status the lifecycle does not know, with no version, cannot carry this commit's close - the undo is done, not held")]
+    public async Task Undo_UnknownStatusWithoutVersion_IsDone()
+    {
+        var store = CorrectionStore(afterCommit: s =>
+        {
+            s.Files.Gateway.Overwrite(s.StagedBlob!.Container, s.StagedBlob.BlobPath, "%PDF-tampered"u8.ToArray(), s.Files.Gateway.Now.AddMinutes(5));
+            s.ChangeOldInvoice(statusCode: 123456789);
+            s.OldInvoice!.Attributes.Remove("versionnumber");
+        });
+
+        var result = await store.Build().PersistAsync(await CorrectionOutcomeAsync(), null);
+
+        result.Status.Should().Be(SubmissionPersistStatus.Undone);
+        result.UndoHeld.Should().BeFalse("only a Superseded invoice needs the reopen");
+        store.OldInvoiceWrites.Should().BeEmpty();
+        store.Submission.Attributes.Should().NotContainKey(InvoiceSubmissionPersister.SubmissionInvoice);
     }
 
     [Fact(DisplayName = "097c SEEDED: a stale row version at the reopen is reported - the undo is held (Failed, link kept, note pending), the change is not overwritten; a later compensation reopens")]
