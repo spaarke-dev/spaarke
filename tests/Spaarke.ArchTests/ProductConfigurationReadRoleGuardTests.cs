@@ -294,6 +294,49 @@ public class ProductConfigurationReadRoleGuardTests
         Assert.True(findings.Count == 0, "A credential column must stay field-secured:\n  " + string.Join("\n  ", findings));
     }
 
+    [Fact(DisplayName = "Product configuration read list: no Spaarke field security profile grants a listed credential column")]
+    public void NoProfileGrantsASecuredColumn()
+    {
+        var path = Path.Combine(SourceScan.RepoRoot, "src", "dataverse", "solutions", "SpaarkeMaster", "Other", "FieldSecurityProfiles.xml");
+        Assert.True(File.Exists(path), $"Profile file not found: {path}. Repo root resolved to '{SourceScan.RepoRoot}'.");
+        var findings = ProfileGrantFindings(File.ReadAllText(path), SecuredColumns);
+        Assert.True(findings.Count == 0, "A credential column must not be granted by a field security profile:\n  " + string.Join("\n  ", findings));
+    }
+
+    [Fact(DisplayName = "Product configuration read guard control: a profile permission on a listed credential column is reported; one on another column passes")]
+    public void ProfileGrantGuardFires()
+    {
+        static string Profiles(string entity, string attribute) => $"""
+            <FieldSecurityProfiles><FieldSecurityProfile name="P"><FieldPermissions><FieldPermission>
+              <EntityName>{entity}</EntityName><AttributeName>{attribute}</AttributeName><CanRead>4</CanRead>
+            </FieldPermission></FieldPermissions></FieldSecurityProfile></FieldSecurityProfiles>
+            """;
+
+        Assert.Single(ProfileGrantFindings(Profiles("sprk_externalserviceconfig", "sprk_clientsecret"), SecuredColumns));
+        Assert.Single(ProfileGrantFindings(Profiles("SPRK_ExternalServiceConfig", "SPRK_ClientSecret"), SecuredColumns));
+        Assert.Empty(ProfileGrantFindings(Profiles("sprk_externalserviceconfig", "sprk_name"), SecuredColumns));
+        Assert.Empty(ProfileGrantFindings(Profiles("sprk_matter", "sprk_clientsecret"), SecuredColumns));
+    }
+
+    /// <summary>Every field permission in <paramref name="profilesXml"/> on one of <paramref name="columns"/> (table and column compared case-insensitively).</summary>
+    internal static List<string> ProfileGrantFindings(string profilesXml, IEnumerable<(string EntityFolder, string Column)> columns)
+    {
+        var permissions = XDocument.Parse(profilesXml).Descendants().Where(e => e.Name.LocalName == "FieldPermission").ToList();
+        var findings = new List<string>();
+        foreach (var (folder, column) in columns)
+        {
+            foreach (var p in permissions)
+            {
+                var entity = p.Elements().FirstOrDefault(c => c.Name.LocalName == "EntityName")?.Value.Trim();
+                var attribute = p.Elements().FirstOrDefault(c => c.Name.LocalName == "AttributeName")?.Value.Trim();
+                if (string.Equals(entity, folder, StringComparison.OrdinalIgnoreCase) && string.Equals(attribute, column, StringComparison.OrdinalIgnoreCase))
+                    findings.Add($"{entity}.{attribute}: granted by profile '{p.Ancestors().FirstOrDefault(a => a.Name.LocalName == "FieldSecurityProfile")?.Attribute("name")?.Value}'");
+            }
+        }
+
+        return findings;
+    }
+
     [Fact(DisplayName = "Product configuration read guard control: an unsecured, missing or undeclared credential column is reported; a secured one passes")]
     public void SecuredColumnGuardFires()
     {
