@@ -81,3 +81,7 @@
 - Readback 14:40:39Z: ProductVersion `1.0.0+9f4afe82ac9fef2aaf725464f46bae09eadf33db`, healthz 200, healthz/dataverse 200, `/api/me` anonymous 401.
 - Rollback (owner approval): `scripts/Deploy-BffApi.ps1 -SkipBuild -PublishPath deploy/rollback/wwwroot-20261030T143826Z` (222 files, `136568cf70`).
 - After-notices were sent about 14:42Z to UAC (App Insights gate), ontology (168/173 proof), field-mapping (task 076), word-add-in, ebilling (hold until "gate passed, you can go") and provisioning.
+- UAC server gate (14:40–15:12Z, compared with the prior 7 days): PASS.
+  - Clean: 0 5xx (the 6 failures are anonymous 401 probes); 0 [OWNERSHIP-REFUSED]; 0 OFFICE_022/014; the SecureChild reconciler made no reassign or put-back writes, and ordinary moves ran report-only.
+  - Pre-existing, unchanged: [SECURE-CENSUS] root-BU reach until the BU1 move; #2163 FLS proof 403 and [ID-LINK-RECON] for spaarke-acme; 1 transient Redis lease renew.
+- About 15:13Z: R3 sent ebilling "gate passed, you can go".
