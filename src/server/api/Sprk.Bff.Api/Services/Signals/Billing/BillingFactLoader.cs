@@ -55,6 +55,22 @@ public sealed record BillingEvaluationRequest
 
     /// <summary>The lines in invoice order; <see cref="BillingLineFacts.Index"/> is the position 046 used.</summary>
     public required IReadOnlyList<BillingLineFacts> Lines { get; init; }
+
+    /// <summary>
+    /// ebilling-r1 task 097b: for a Correction, the invoice it replaces, which keeps the same firm invoice number (D-37) and is still In
+    /// Review when the correction is judged. The job derives it on the server only (the submission's <c>sprk_resubmissionof</c>, then that
+    /// submission's <c>sprk_invoice</c>; never a caller-supplied value). The loader excludes exactly this invoice from the priors, and only
+    /// when it is this firm's and carries this firm invoice number (<see cref="SubmittedFirmInvoiceNumber"/>); otherwise it is ignored with
+    /// a warning. <c>null</c> for a New submission.
+    /// </summary>
+    public Guid? ReplacedInvoiceId { get; init; }
+
+    /// <summary>
+    /// ebilling-r1 task 097b: the firm invoice number the submitter typed (<c>sprk_invoicesubmission.sprk_firminvoicenumber</c>, the number
+    /// the tracking sequence and the intake's correction check use), which can differ from the number read off the document
+    /// (<see cref="FirmInvoiceNumber"/>). Read only to check <see cref="ReplacedInvoiceId"/>; set by the job with it.
+    /// </summary>
+    public string? SubmittedFirmInvoiceNumber { get; init; }
 }
 
 /// <summary>
@@ -519,7 +535,9 @@ public sealed class BillingFactLoader
             return [];
         }
 
-        var invoiceColumns = WalkColumns(InvoiceEntity).Append("statuscode").Distinct(StringComparer.Ordinal).ToArray();
+        var invoiceColumns = WalkColumns(InvoiceEntity).Append("statuscode")
+            .Concat(request.ReplacedInvoiceId is null ? [] : [ReplacedInvoiceFirmColumn]) // task 097b: the replaced invoice's firm is checked
+            .Distinct(StringComparer.Ordinal).ToArray();
         var invoiceIds = submissions
             .Select(s => s.GetAttributeValue<EntityReference>("sprk_invoice")?.Id)
             .OfType<Guid>().Where(id => id != Guid.Empty).Distinct().Order().ToList();
@@ -544,6 +562,11 @@ public sealed class BillingFactLoader
             {
                 kept.Add((submission, invoice, status)); // a Cancelled invoice never reached the firm as a payable one; a Superseded one was replaced
             }
+        }
+
+        if (request.ReplacedInvoiceId is { } replaced)
+        {
+            ExcludeReplacedInvoice(kept, replaced, request);
         }
 
         // 072 review B1: lines only when a Duplicate rule compares lines, and only of Active priors (the only ones Duplicate compares).
@@ -580,6 +603,35 @@ public sealed class BillingFactLoader
 
         return priors;
     }
+
+    /// <summary>ebilling-r1 task 097b: the invoice's firm, read only to check a replaced invoice (<see cref="BillingEvaluationRequest.ReplacedInvoiceId"/>).</summary>
+    private const string ReplacedInvoiceFirmColumn = "sprk_vendororg";
+
+    /// <summary>
+    /// ebilling-r1 task 097b (reviewed by ontology-r1, 2026-10-30): a Correction keeps the firm invoice number of the invoice it replaces
+    /// (D-37) and is judged before its commit supersedes that invoice, so the replaced invoice is no prior. Removes exactly the priors of
+    /// <paramref name="replaced"/>, and only when that invoice is this firm's (its own <c>sprk_vendororg</c>, and its submission is one of
+    /// this firm's by the query) AND its submission's typed firm invoice number is the one this submission's submitter typed
+    /// (<see cref="BillingEvaluationRequest.SubmittedFirmInvoiceNumber"/>, never the number read off the document; trimmed, ignoring case,
+    /// as the tracking sequence keys it). Any other id is ignored with a warning (ids only) and the priors are unchanged.
+    /// </summary>
+    private void ExcludeReplacedInvoice(
+        List<(Entity Submission, Entity? Invoice, BillingPriorStatus Status)> kept, Guid replaced, BillingEvaluationRequest request)
+    {
+        var excluded = kept.RemoveAll(k => k.Invoice is { } invoice
+            && invoice.Id == replaced
+            && invoice.GetAttributeValue<EntityReference>(ReplacedInvoiceFirmColumn)?.Id == request.FirmId
+            && SameFirmInvoiceNumber(k.Submission.GetAttributeValue<string>("sprk_firminvoicenumber"), request.SubmittedFirmInvoiceNumber));
+        if (excluded == 0)
+        {
+            _logger.LogWarning(
+                "Billing facts: replaced invoice {ReplacedInvoiceId} of submission {SubmissionId} is not a prior of this firm with this firm invoice number; ignored, priors unchanged",
+                replaced, request.SubmissionId);
+        }
+    }
+
+    private static bool SameFirmInvoiceNumber(string? prior, string? judged) =>
+        prior?.Trim() is { Length: > 0 } a && judged?.Trim() is { Length: > 0 } b && string.Equals(a, b, StringComparison.OrdinalIgnoreCase);
 
     private static BillingPriorStatus? StatusOf(Entity submission, Entity? invoice)
     {

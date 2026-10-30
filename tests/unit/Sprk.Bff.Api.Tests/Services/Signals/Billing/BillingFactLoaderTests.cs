@@ -754,4 +754,100 @@ public class BillingFactLoaderTests
         loaded.PriorSubmissions.Should().ContainSingle().Which.SecureRoots.Should().BeEmpty();
         finding.DetailWithheld.Should().BeFalse();
     }
+
+    // ── ebilling-r1 task 097b: a Correction's replaced invoice is no prior (reviewed by ontology-r1) ─────────────────
+
+    /// <summary>An In Review invoice of the firm under the ordinary matter, with its submission: what a Correction replaces.</summary>
+    private (Guid Submission, Guid Invoice) InReviewPrior(Guid? invoiceFirm = null, string number = "INV-100")
+    {
+        var invoice = Guid.NewGuid();
+        _world.Add("sprk_invoice", invoice, ("statuscode", new OptionSetValue(1)), ("owningteam", OrdinaryTeam),
+            ("sprk_matter", Ref("sprk_matter", OrdinaryMatter)), ("sprk_vendororg", Ref("sprk_organization", invoiceFirm ?? FirmId)));
+        return (Submission("INV-100.1", invoice, firmInvoiceNumber: number), invoice);
+    }
+
+    private BillingEvaluationRequest Correcting(Guid replacedInvoice) =>
+        Request(OrdinaryMatter) with { ReplacedInvoiceId = replacedInvoice, SubmittedFirmInvoiceNumber = "INV-100" };
+
+    [Theory(DisplayName = "097b (review F1): the replaced invoice is matched on the number the submitter typed, not the number read off the document")]
+    [InlineData("INV-100-R")]
+    [InlineData(null)]
+    public async Task TheReplacedInvoice_IsMatchedOnTheTypedNumber_NotTheReadOne(string? read)
+    {
+        DuplicateRule(DuplicateByLine);
+        _world.OrdinaryRoot("sprk_matter", OrdinaryMatter);
+        var (_, replaced) = InReviewPrior();
+
+        var loaded = await Loader().LoadAsync(Correcting(replaced) with { FirmInvoiceNumber = read }, CancellationToken.None);
+        var typedElsewhere = await Loader().LoadAsync(
+            Correcting(replaced) with { FirmInvoiceNumber = "INV-100", SubmittedFirmInvoiceNumber = "INV-101" }, CancellationToken.None);
+
+        loaded.PriorSubmissions.Should().BeEmpty("a misread number on the corrected PDF does not bring the replaced invoice back as a prior");
+        typedElsewhere.PriorSubmissions.Should().ContainSingle("a read number equal to the prior's does not stand in for the typed one");
+    }
+
+    [Fact(DisplayName = "097b (must fire): a correction whose predecessor is still In Review with the same number is NOT flagged Duplicate")]
+    public async Task ACorrection_IsNotADuplicateOfTheInvoiceItReplaces()
+    {
+        DuplicateRule();
+        _world.OrdinaryRoot("sprk_matter", OrdinaryMatter);
+        var (_, replaced) = InReviewPrior(number: " inv-100 ");
+        var logger = new Sprk.Bff.Api.Tests.Domain.Signals.Billing.BillingEvaluationKit.CapturingLogger<BillingFactLoader>();
+        _loaderLogger = logger;
+
+        var loaded = await Loader().LoadAsync(Correcting(replaced), CancellationToken.None);
+        var result = await Evaluator().EvaluateAsync(Correcting(replaced), CancellationToken.None);
+
+        loaded.PriorSubmissions.Should().BeEmpty("the replaced invoice is no earlier use of the number");
+        result.Findings.Should().NotContain(f => f.RuleType == RuleType.Duplicate);
+        logger.Entries.Should().NotContain(e => e.Level == LogLevel.Warning);
+        AssertWroteNothing();
+    }
+
+    [Fact(DisplayName = "097b (must not fire): another In Review invoice with the same number is still flagged Duplicate on a correction; a New submission is unchanged")]
+    public async Task ACorrection_IsStillADuplicateOfAnotherInvoiceWithItsNumber()
+    {
+        DuplicateRule();
+        _world.OrdinaryRoot("sprk_matter", OrdinaryMatter);
+        var (_, replaced) = InReviewPrior();
+        var (unrelated, _) = InReviewPrior();
+
+        var loaded = await Loader().LoadAsync(Correcting(replaced), CancellationToken.None);
+        var correction = await Evaluator().EvaluateAsync(Correcting(replaced), CancellationToken.None);
+        var asNew = await Loader().LoadAsync(Request(OrdinaryMatter), CancellationToken.None);
+
+        loaded.PriorSubmissions.Select(p => p.SubmissionId).Should().Equal(unrelated);
+        correction.Findings.Should().ContainSingle(f => f.RuleType == RuleType.Duplicate);
+        asNew.PriorSubmissions.Should().HaveCount(2, "without a replaced invoice nothing is excluded");
+    }
+
+    public static TheoryData<string> NotTheReplacedInvoice => new() { "another firm", "another number", "not a prior" };
+
+    [Theory(DisplayName = "097b (ontology-r1 condition 2): a replaced-invoice id of another firm, another number, or no prior is ignored with a warning; the priors are unchanged")]
+    [MemberData(nameof(NotTheReplacedInvoice))]
+    public async Task AReplacedInvoiceThatIsNotThisFirmsWithThisNumber_IsIgnored_WithAWarning(string why)
+    {
+        DuplicateRule();
+        _world.OrdinaryRoot("sprk_matter", OrdinaryMatter);
+        var (prior, invoice) = why switch
+        {
+            "another firm" => InReviewPrior(invoiceFirm: OtherFirmId),
+            "another number" => InReviewPrior(number: "INV-999"),
+            _ => InReviewPrior(),
+        };
+        var passed = why == "not a prior" ? Guid.NewGuid() : invoice;
+        var logger = new Sprk.Bff.Api.Tests.Domain.Signals.Billing.BillingEvaluationKit.CapturingLogger<BillingFactLoader>();
+        _loaderLogger = logger;
+
+        var loaded = await Loader().LoadAsync(Correcting(passed), CancellationToken.None);
+
+        loaded.PriorSubmissions.Select(p => p.SubmissionId).Should().Equal(prior);
+        var warning = logger.Entries.Should().ContainSingle(e => e.Level == LogLevel.Warning).Subject;
+        warning.Message.Should().Contain(passed.ToString()).And.NotContain("INV-");
+        if (why != "another number")
+        {
+            (await Evaluator().EvaluateAsync(Correcting(passed), CancellationToken.None)).Findings
+                .Should().ContainSingle(f => f.RuleType == RuleType.Duplicate, "that prior still counts");
+        }
+    }
 }

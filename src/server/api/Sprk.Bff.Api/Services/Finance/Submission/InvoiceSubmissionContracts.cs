@@ -153,6 +153,15 @@ public sealed record InvoiceSubmissionRequest
     /// nothing to file. It throws to refuse (the route renders its own answer). Null: nothing to file (the job's own channels).
     /// </summary>
     public Func<CancellationToken, Task<bool>>? FileSourceBeforeWrite { get; init; }
+
+    /// <summary>
+    /// ebilling-r1 task 097b (EB-D-179): a Correction's old invoice, as the route read it app-only AFTER the caller's own Write on it passed
+    /// (<c>InvoiceSubmissionEndpoints.PrepareCorrectionAsync</c>), with <see cref="InvoiceSubmissionService.CorrectionInvoiceColumns"/>. Null
+    /// for a New submission: the request then behaves exactly as before 097b. Read only by
+    /// <see cref="InvoiceSubmissionService.SubmitExistingDocumentAsync"/>, which judges it (<see cref="InvoiceSubmissionService.CheckCorrectionAsync"/>)
+    /// and records the target on the new submission (<see cref="InvoiceSubmissionService.ResubmissionOfColumn"/>).
+    /// </summary>
+    public Microsoft.Xrm.Sdk.Entity? CorrectedInvoice { get; init; }
 }
 
 /// <summary>A submission that was received: the row exists with its tracking number and the processing job is enqueued.</summary>
@@ -199,11 +208,18 @@ public sealed record InvoiceSubmissionOutcome
     /// </summary>
     public bool FilingKept { get; init; }
 
+    /// <summary>
+    /// ebilling-r1 task 097b: the fields a refusal carries beside its code (a Correction's <c>reason</c> and <c>invoiceStatus</c>), rendered
+    /// as top-level ProblemDetails members. Null on every other refusal, which renders exactly as before.
+    /// </summary>
+    public IReadOnlyDictionary<string, object?>? Extensions { get; init; }
+
     internal static InvoiceSubmissionOutcome Received(InvoiceSubmissionReceipt receipt) =>
         new() { Kind = InvoiceSubmissionOutcomeKind.Received, Receipt = receipt, StatusCode = StatusCodes.Status202Accepted };
 
-    internal static InvoiceSubmissionOutcome Refused(int statusCode, string errorCode, string detail) =>
-        new() { Kind = InvoiceSubmissionOutcomeKind.Refused, StatusCode = statusCode, ErrorCode = errorCode, Detail = detail };
+    internal static InvoiceSubmissionOutcome Refused(
+        int statusCode, string errorCode, string detail, IReadOnlyDictionary<string, object?>? extensions = null) =>
+        new() { Kind = InvoiceSubmissionOutcomeKind.Refused, StatusCode = statusCode, ErrorCode = errorCode, Detail = detail, Extensions = extensions };
 
     internal static InvoiceSubmissionOutcome OwnerRefused(RecordOwnerResolution resolution) =>
         new() { Kind = InvoiceSubmissionOutcomeKind.OwnerRefused, OwnerRefusal = resolution, StatusCode = StatusCodes.Status409Conflict };
@@ -260,6 +276,14 @@ public sealed record InvoiceSubmissionView
     /// </summary>
     [JsonIgnore]
     public Guid? InvoiceId { get; init; }
+
+    /// <summary>
+    /// ebilling-r1 task 097b: the earlier submission a Correction replaces (<c>sprk_resubmissionof</c>), read so a retry of the
+    /// from-document route is answered with the earlier submission only when it names the same target. Server-side only: never
+    /// serialized, so the response contract is unchanged.
+    /// </summary>
+    [JsonIgnore]
+    public Guid? ResubmissionOfId { get; init; }
 }
 
 /// <summary>Stable error codes of the submission operation (ADR-019). The strings are a contract with the SPA (051) and the review UI.</summary>
@@ -357,6 +381,13 @@ public static class InvoiceSubmissionErrors
     /// finished yet (<see cref="SubmissionCommitGate.UndoUnfinished"/>), so no new attempt is made. 503, retryable; nothing was written.
     /// </summary>
     public const string EarlierAttemptBeingRemoved = "ebilling.submission.earlier_attempt_being_removed";
+
+    /// <summary>
+    /// ebilling-r1 task 097b (model 9.1 "Existing invoice", EB-D-179): a Correction is refused before anything is written. 409; the
+    /// <c>reason</c> member is one of <see cref="FromEmailCorrectionReasons"/> (the same code and reasons on the from-email and the
+    /// from-document routes). A caller without Write on the invoice never gets this code: it gets the uniform not-found answer.
+    /// </summary>
+    public const string CorrectionNotAllowed = "ebilling.submission.correction_not_allowed";
 
     public const string StorageNotConfigured = "ebilling.submission.storage_not_configured";
     public const string CoreRecordUnavailable = "ebilling.submission.record_unavailable";

@@ -86,14 +86,19 @@ public static class InvoiceSubmissionEndpoints
             .WithDescription(
                 "Submits the source document, a document of the communication named (communicationId is required), as an internal invoice " +
                 "submission; the processing job copies its bytes into the invoice's file (the document is never moved). Body: " +
-                "{communicationId, documentId, coreRecord: {kind: matter|project|workassignment, id}, firmId, firmInvoiceNumber, poNumber?}. " +
-                "The caller needs Read on the document and its communication, Read and AppendTo on the core record and AppendTo on the firm; " +
+                "{communicationId, documentId, coreRecord: {kind: matter|project|workassignment, id}, firmId, firmInvoiceNumber, poNumber?, " +
+                "mode?: New|Correction, invoiceId? (required for Correction: the In Review invoice it replaces, same firm, record and firm " +
+                "invoice number)}. " +
+                "The caller needs Read on the document and its communication, Read and AppendTo on the core record and AppendTo on the firm " +
+                "(and Write on the invoice a Correction replaces); " +
                 "after every read-only check passes, a communication the D-140 chain reads as unfiled is filed " +
                 "to the core record first, as the caller (Write on it). 202 {submissionId, jobId, trackingNumber, statusUrl}; a retry for " +
                 "the same document returns the same submission. Refusals are ProblemDetails with errorCode: 400 validation; 403 " +
                 "source_forbidden, COMMUNICATION_REFILE_FORBIDDEN, " +
-                "the core record and firm checks; 404 document_not_found; 409 document_core_record_mismatch, document_already_invoiced, " +
-                "document_rejected, document_already_submitted, submission_already_ended; 422 source_communication_mismatch, " +
+                "the core record and firm checks; 404 document_not_found, or (reasonCode record_unavailable) the invoice a Correction " +
+                "names is not one the caller can Write; 409 document_core_record_mismatch, document_already_invoiced, " +
+                "document_rejected, document_already_submitted, submission_already_ended, correction_not_allowed (reason); " +
+                "422 source_communication_mismatch, " +
                 "document_has_no_file; 503 record_unavailable.")
             .Accepts<SubmitInvoiceFromDocumentRequest>("application/json")
             .Produces<InvoiceSubmissionAccepted>(StatusCodes.Status202Accepted)
@@ -127,6 +132,7 @@ public static class InvoiceSubmissionEndpoints
             .ProducesValidationProblem()
             .ProducesProblem(StatusCodes.Status401Unauthorized)
             .ProducesProblem(StatusCodes.Status403Forbidden)
+            .ProducesProblem(StatusCodes.Status404NotFound) // task 097b: a Correction of an invoice the caller cannot Write
             .ProducesProblem(StatusCodes.Status409Conflict)
             .ProducesProblem(StatusCodes.Status413PayloadTooLarge)
             .ProducesProblem(StatusCodes.Status422UnprocessableEntity)
@@ -352,6 +358,45 @@ public static class InvoiceSubmissionEndpoints
     }
 
     /// <summary>
+    /// Task 097b (model 9.1 "Existing invoice", 097 constraint 1): the first check of a Correction, on both Submit Invoice routes, READ-ONLY.
+    /// The caller's OWN Write on <paramref name="invoiceId"/>, gate variant (<see cref="CallerRecordAccessProbe.GetCallerRightsForAuthorizationGateAsync"/>):
+    /// without it, or for an invoice that does not exist, the answer is the uniform not-found answer
+    /// (<see cref="FinanceAuthorizationFilter.UniformRecordNotFound"/>, 404 <c>sdap.access.deny.record_unavailable</c>), the same bytes and
+    /// schedule for both, so nothing about the invoice is revealed. Only then is the invoice read app-only with
+    /// <see cref="InvoiceSubmissionService.CorrectionInvoiceColumns"/>, for the intake's own checks
+    /// (<see cref="InvoiceSubmissionService.CheckCorrectionAsync"/>); a row gone since is the same uniform answer, and a read fault is 503
+    /// <see cref="InvoiceSubmissionErrors.CoreRecordUnavailable"/>.
+    /// </summary>
+    internal static async Task<(IResult? Refusal, Entity? Invoice)> PrepareCorrectionAsync(Guid invoiceId, HttpContext http, CancellationToken ct)
+    {
+        var services = SourceServices.From(http);
+        var rights = await services.Probe.GetCallerRightsForAuthorizationGateAsync(
+            TokenHelper.ExtractBearerTokenOrNull(http), FinanceAuthorizationFilter.InvoiceEntitySet, invoiceId, ct);
+        if (!rights.HasFlag(AccessRights.Write))
+        {
+            services.Logger.LogInformation("Submit Invoice: a Correction of an invoice the caller cannot Write was refused (uniform not-found)");
+            return (FinanceAuthorizationFilter.UniformRecordNotFound(http), null);
+        }
+
+        try
+        {
+            var invoice = await services.Entities.RetrieveAsync(
+                Services.Finance.FinanceBaseValues.InvoiceEntity, invoiceId, InvoiceSubmissionService.CorrectionInvoiceColumns, ct);
+            return invoice is null ? (FinanceAuthorizationFilter.UniformRecordNotFound(http), null) : (null, invoice);
+        }
+        catch (Exception ex) when (IsNotFound(ex))
+        {
+            return (FinanceAuthorizationFilter.UniformRecordNotFound(http), null);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            services.Logger.LogWarning("Submit Invoice: invoice {InvoiceId} to correct could not be read ({Fault})", invoiceId, ex.GetType().Name);
+            return (InvoiceSubmissionHttp.Refused(StatusCodes.Status503ServiceUnavailable, InvoiceSubmissionErrors.CoreRecordUnavailable,
+                "The invoice to correct could not be checked right now. Nothing was saved; try again shortly."), null);
+        }
+    }
+
+    /// <summary>
     /// Step A of Submit Invoice (procedure-and-file-model 9.1), run by the intake after its read-only refusals (fix round F1-b). It decides
     /// "unfiled" from the D-140 chain (<see cref="InvoiceSubmissionService.IsCommunicationFiledAsync"/>: the communication's own filing
     /// columns and every parent its record thread files it under) and files only a communication the chain leaves empty: a filed one is left
@@ -540,6 +585,20 @@ public static class InvoiceSubmissionEndpoints
         }
 
         var core = request.ToCoreRecord()!;
+
+        // Task 097b: a Correction first needs the caller's own Write on the invoice it replaces (else the uniform not-found answer).
+        Entity? correctedInvoice = null;
+        if (request.CorrectedInvoiceId is { } invoiceId)
+        {
+            var correction = await PrepareCorrectionAsync(invoiceId, http, ct);
+            if (correction.Refusal is { } correctionRefused)
+            {
+                return correctionRefused;
+            }
+
+            correctedInvoice = correction.Invoice;
+        }
+
         var prepared = await PrepareSourceAsync(request.DocumentId, request.CommunicationId, core, http, documentReadChecked: false, ct);
         if (prepared.Refusal is { } refused)
         {
@@ -562,6 +621,7 @@ public static class InvoiceSubmissionEndpoints
                 CallerObjectId = callerOid,
                 CorrelationId = http.TraceIdentifier,
                 FileSourceBeforeWrite = prepared.Hook, // step A: the intake runs it after its read-only refusals (fix round F1-b)
+                CorrectedInvoice = correctedInvoice, // task 097b: judged by the intake after the retry check, before step A
             }, ct);
         }
         catch (SourceFilingRefusedException ex)
@@ -642,6 +702,18 @@ public sealed record SubmitInvoiceFromDocumentRequest
 
     public string? PoNumber { get; init; }
 
+    /// <summary>
+    /// Task 097b (EB-D-179 item 2): <c>New</c> or <c>Correction</c>, exact case, as on the from-email route (contract section 2). Optional
+    /// and additive: absent is <c>New</c>, so a request without it behaves exactly as before 097b.
+    /// </summary>
+    public string? Mode { get; init; }
+
+    /// <summary>Task 097b: the invoice a <c>Correction</c> replaces; required for <c>Correction</c>, absent (or null) otherwise.</summary>
+    public Guid? InvoiceId { get; init; }
+
+    /// <summary>Task 097b: the invoice a valid body corrects, or null for a New submission (call after <see cref="Validate"/>).</summary>
+    internal Guid? CorrectedInvoiceId => Mode == FromEmailModes.Correction ? InvoiceId : null;
+
     /// <summary>The core record, or null when <see cref="CoreRecord"/> does not name one.</summary>
     internal InvoiceCoreRecord? ToCoreRecord() =>
         CoreRecord is { Id: var id } && id != Guid.Empty && SubmitInvoiceCoreRecord.KindOf(CoreRecord.Kind) is { } kind
@@ -677,6 +749,22 @@ public sealed record SubmitInvoiceFromDocumentRequest
         if (string.IsNullOrWhiteSpace(FirmInvoiceNumber))
         {
             errors["firmInvoiceNumber"] = ["firmInvoiceNumber is required (D-91)."];
+        }
+
+        // Task 097b: the from-email route's mode rules (InvoiceSubmissionFromEmailHttp.Validate), with an absent mode read as New.
+        switch (Mode ?? FromEmailModes.New)
+        {
+            case FromEmailModes.New when InvoiceId is not null:
+                errors["invoiceId"] = ["invoiceId is not sent for mode New."];
+                break;
+            case FromEmailModes.Correction when InvoiceId is not { } invoiceId || invoiceId == Guid.Empty:
+                errors["invoiceId"] = ["invoiceId is required for mode Correction."];
+                break;
+            case FromEmailModes.New or FromEmailModes.Correction:
+                break;
+            default:
+                errors["mode"] = ["mode must be New or Correction."];
+                break;
         }
 
         return errors;

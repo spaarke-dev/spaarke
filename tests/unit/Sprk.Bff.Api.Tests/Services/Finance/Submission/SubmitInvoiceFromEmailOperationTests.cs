@@ -654,19 +654,52 @@ public sealed class SubmitInvoiceFromEmailOperationTests
         var input = Input();
         var wrongId = input with { MarkedParts = input.MarkedParts.Select(p => p with { StoredFileId = Guid.NewGuid() }).ToList() };
         var correction = input with { Mode = FromEmailModes.Correction };
+        // Task 097b: a Correction names its invoice AND that invoice's own submission (the intake's check found it); New names neither.
+        var target = Guid.NewGuid();
+        var correctionNoTarget = input with { Mode = FromEmailModes.Correction, InvoiceId = InvoiceSubmissionPersister.InvoiceIdFor(target) };
+        var correctionWrongTarget = correctionNoTarget with { ResubmissionOf = Guid.NewGuid() };
+        var newWithTarget = input with { ResubmissionOf = target };
+        var newWithInvoice = input with { InvoiceId = InvoiceSubmissionPersister.InvoiceIdFor(target) };
         // Review round 5 (pass-2 F4-2): the fields 095 and the route refuse first, so the intake's own field codes never reach the add-in.
         var noFirm = input with { FirmId = Guid.Empty };
         var noRecord = input with { CoreRecord = new InvoiceCoreRecord(InvoiceCoreRecordKind.Matter, Guid.Empty) };
         var longNumber = input with { FirmInvoiceNumber = new string('9', TrackingNumberAllocator.MaxFirmInvoiceNumberLength + 1) };
         var longPo = input with { PoNumber = new string('P', InvoiceSubmissionService.MaxPoNumberLength + 1) };
 
-        foreach (var defect in new[] { wrongId, correction, noFirm, noRecord, longNumber, longPo })
+        foreach (var defect in new[]
+        {
+            wrongId, correction, correctionNoTarget, correctionWrongTarget, newWithTarget, newWithInvoice, noFirm, noRecord, longNumber, longPo,
+        })
         {
             await Build().Invoking(o => o.SubmitAsync(defect, CancellationToken.None)).Should().ThrowAsync<ArgumentException>();
         }
 
         H.Writes.Should().Be(0);
         H.OwnerContexts.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "097b: a Correction creates its submission with sprk_resubmissionof = the replaced invoice's submission; New writes none")]
+    public async Task Submit_ACorrection_RecordsItsTarget_OnTheSubmission()
+    {
+        var target = Guid.NewGuid();
+        var input = Input() with
+        {
+            Mode = FromEmailModes.Correction, InvoiceId = InvoiceSubmissionPersister.InvoiceIdFor(target), ResubmissionOf = target,
+        };
+
+        var result = await Build().SubmitAsync(input, CancellationToken.None);
+
+        result.Outcome.Should().Be(FromEmailSubmitOutcome.Received);
+        H.Allocations.Should().ContainSingle().Which.Fields!["sprk_resubmissionof"]
+            .Should().Be(new EntityReference(InvoiceSubmissionService.SubmissionEntity, target));
+    }
+
+    [Fact(DisplayName = "097b: a New submission from an email writes no sprk_resubmissionof")]
+    public async Task Submit_New_RecordsNoTarget()
+    {
+        await Build().SubmitAsync(Input(), CancellationToken.None);
+
+        H.Allocations.Should().ContainSingle().Which.Fields!.Should().NotContainKey("sprk_resubmissionof");
     }
 
     // ═══════════════════════════════════════════════════════════════════════════

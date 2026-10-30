@@ -224,6 +224,12 @@ internal class SubmitInvoiceFromEmailOperation : ISubmitInvoiceFromEmail
         row!["sprk_name"] = input.FirmInvoiceNumber;
         row["sprk_processingstatus"] = new OptionSetValue((int)InvoiceSubmissionStatus.Received);
         row["sprk_channel"] = new OptionSetValue((int)InvoiceSubmissionChannel.Internal);
+        if (input.ResubmissionOf is { } earlierSubmission)
+        {
+            // Task 097b: the Correction's target, as the intake's guard found it (Validate ties it to InvoiceId).
+            row[InvoiceSubmissionService.ResubmissionOfColumn] = new EntityReference(InvoiceSubmissionService.SubmissionEntity, earlierSubmission);
+        }
+
         row["sprk_receivedon"] = DateTime.UtcNow;
         if (!string.IsNullOrWhiteSpace(input.PoNumber))
         {
@@ -373,7 +379,11 @@ internal class SubmitInvoiceFromEmailOperation : ISubmitInvoiceFromEmail
         ArgumentNullException.ThrowIfNull(input);
         if (input.SubmissionId == Guid.Empty || input.JobId == Guid.Empty || input.SourceEmlDocumentId == Guid.Empty
             || input.CommunicationId == Guid.Empty || input.CallerSystemUserId == Guid.Empty || input.Generation < 1
-            || string.IsNullOrWhiteSpace(input.FirmInvoiceNumber) || input.Mode != FromEmailModes.New
+            || string.IsNullOrWhiteSpace(input.FirmInvoiceNumber)
+            // Task 097b: New names no invoice and no target; a Correction names both, and the target is the invoice's own submission.
+            || !(input.Mode == FromEmailModes.New && input.InvoiceId is null && input.ResubmissionOf is null
+                || input.Mode == FromEmailModes.Correction && input.InvoiceId is { } invoiceId && invoiceId != Guid.Empty
+                    && input.ResubmissionOf is { } target && InvoiceSubmissionPersister.InvoiceIdFor(target) == invoiceId)
             // Review round 5 (pass-2 F4-2): the route's body shape and 095's own checks refuse these first, with the contract's answers.
             || input.FirmId == Guid.Empty || input.CoreRecord is null || input.CoreRecord.RecordId == Guid.Empty
             || input.FirmInvoiceNumber.Trim().Length > TrackingNumberAllocator.MaxFirmInvoiceNumberLength

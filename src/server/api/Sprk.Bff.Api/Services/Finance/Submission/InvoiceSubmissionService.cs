@@ -90,10 +90,37 @@ public class InvoiceSubmissionService
         "sprk_regardingmatter", "sprk_regardingproject", "sprk_regardingworkassignment", "createdon",
         // ebilling-r1 task 098: the resulting invoice, so the external routes can apply (a') to the submission (a derived row).
         InvoiceColumn,
+        // ebilling-r1 task 097b: a Correction's target, so a from-document retry is matched on it (never serialized).
+        ResubmissionOfColumn,
     };
 
     /// <summary>The resulting invoice of an accepted submission (<c>sprk_invoicesubmission.sprk_invoice</c>).</summary>
     internal const string InvoiceColumn = "sprk_invoice";
+
+    /// <summary>
+    /// ebilling-r1 task 097b (EB-D-179 item 1): <c>sprk_invoicesubmission.sprk_resubmissionof</c>, the earlier submission a Correction
+    /// replaces (task 020 created the lookup; this task is its first writer). The replaced invoice is that submission's <see cref="InvoiceColumn"/>,
+    /// which must be <see cref="InvoiceSubmissionPersister.InvoiceIdFor"/> of it (<see cref="SubmissionSnapshot.ReadCorrectedInvoiceAsync"/>).
+    /// It is written only at create, after <see cref="CheckCorrectionAsync"/> found the earlier submission under the SAME core record, so the
+    /// peer edge <c>SecureChildLineage</c> lists for it (sprk_invoicesubmission is not an ownership parent) reaches no other root.
+    /// </summary>
+    internal const string ResubmissionOfColumn = "sprk_resubmissionof";
+
+    /// <summary>
+    /// ebilling-r1 task 097b: what the Correction guard reads of the old invoice (app-only, after the caller's own Write passed): its firm,
+    /// its core lookups (<see cref="InvoiceFamilyCoreRecordGuard.CoreRecordLookups"/>) and its status pair.
+    /// </summary>
+    internal static readonly string[] CorrectionInvoiceColumns =
+    [
+        InvoiceSubmissionPersister.InvoiceVendorOrg, "statecode", "statuscode",
+        .. InvoiceFamilyCoreRecordGuard.CoreRecordLookups[FinanceBaseValues.InvoiceEntity].Select(l => l.Column),
+    ];
+
+    private static readonly string[] CorrectionSubmissionColumns =
+    [
+        InvoiceColumn, TrackingNumberAllocator.FirmColumn, TrackingNumberAllocator.FirmInvoiceNumberColumn,
+        "sprk_regardingmatter", "sprk_regardingproject", "sprk_regardingworkassignment",
+    ];
 
     private readonly ITrackingNumberAllocator _allocator;
     private readonly IGenericEntityService _entities;
@@ -431,6 +458,20 @@ public class InvoiceSubmissionService
             return refused;
         }
 
+        // ── 4a. Task 097b: a Correction's own checks (the invoice's firm, core record, status, submission and number), read-only, before
+        //        step A and the create. Only a NEW attempt reaches here: a retry was answered by its earlier submission above. ──
+        Guid? resubmissionOf = null;
+        if (request.CorrectedInvoice is { } correctedInvoice)
+        {
+            var (correctionRefusal, target) = await CheckCorrectionAsync(request.CoreRecord, request.FirmId, number, correctedInvoice, ct);
+            if (correctionRefusal is not null)
+            {
+                return correctionRefusal;
+            }
+
+            resubmissionOf = target;
+        }
+
         // ── 4b. Step A (fix round F1-b): the route's filing of an unfiled source communication, as the caller - only now, after every
         //        read-only refusal above, so a refused submission never leaves a filing behind. Its refusal throws (the route answers). ──
         var filed = request.FileSourceBeforeWrite is { } fileSource && await fileSource(ct);
@@ -446,6 +487,11 @@ public class InvoiceSubmissionService
         row["sprk_processingstatus"] = new OptionSetValue((int)InvoiceSubmissionStatus.Received);
         row["sprk_channel"] = new OptionSetValue((int)InvoiceSubmissionChannel.Internal);
         row["sprk_document"] = new EntityReference(DocumentEntity, documentId);
+        if (resubmissionOf is { } earlierSubmission)
+        {
+            row[ResubmissionOfColumn] = new EntityReference(SubmissionEntity, earlierSubmission);
+        }
+
         row["sprk_receivedon"] = DateTime.UtcNow;
         if (!string.IsNullOrWhiteSpace(request.PoNumber))
         {
@@ -547,6 +593,7 @@ public class InvoiceSubmissionService
             && earlier.DocumentId == documentId
             && (string.Equals(earlier.FirmInvoiceNumber?.Trim(), number, StringComparison.OrdinalIgnoreCase)
                 || (ended && string.IsNullOrWhiteSpace(earlier.FirmInvoiceNumber)))
+            && SameCorrectionTarget(earlier.ResubmissionOfId, request.CorrectedInvoice?.Id)
             && !string.IsNullOrEmpty(earlier.TrackingNumber);
         if (!same)
         {
@@ -581,6 +628,15 @@ public class InvoiceSubmissionService
             earlier.SubmissionId, documentId, earlier.Status);
         return InvoiceSubmissionOutcome.Received(new InvoiceSubmissionReceipt(earlier.SubmissionId, jobId, earlier.TrackingNumber!, documentId));
     }
+
+    /// <summary>
+    /// Task 097b: whether an earlier submission's Correction target (<see cref="InvoiceSubmissionView.ResubmissionOfId"/>, the replaced
+    /// submission) is the one this request names (its old invoice, <paramref name="requestInvoiceId"/>): both none, or the same invoice by
+    /// <see cref="InvoiceSubmissionPersister.InvoiceIdFor"/> (the guard records only a submission whose id derives its invoice).
+    /// </summary>
+    internal static bool SameCorrectionTarget(Guid? earlierResubmissionOf, Guid? requestInvoiceId) => earlierResubmissionOf is { } earlier
+        ? requestInvoiceId is { } invoice && InvoiceSubmissionPersister.InvoiceIdFor(earlier) == invoice
+        : requestInvoiceId is null;
 
     /// <summary>
     /// Null when the document can be submitted; otherwise the refusal. A read fault is 503 (never "not found"). A document filed under a core
@@ -1065,6 +1121,121 @@ public class InvoiceSubmissionService
 
         var decision = await DecideAsync(request, spaCaller: null, ct, callerSystemUserId);
         return (decision.Refusal, decision.Row, decision.ResolverFields);
+    }
+
+    // ── ebilling-r1 task 097b: a Correction (model 9.1 "Existing invoice", EB-D-179) ──
+
+    /// <summary>
+    /// ebilling-r1 task 097b (model 9.1 "Existing invoice"; EB-D-179): may <paramref name="invoice"/> be corrected by a submission of
+    /// <paramref name="firmId"/> for <paramref name="core"/> carrying <paramref name="firmInvoiceNumber"/>? Reads only; nothing is written.
+    /// The caller's own Write on the invoice is the ROUTE's check and has already passed (a caller without it got the uniform not-found
+    /// answer and never reaches here); <paramref name="invoice"/> is the route's app-only read of it with <see cref="CorrectionInvoiceColumns"/>.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Order</b> (each a 409 <see cref="InvoiceSubmissionErrors.CorrectionNotAllowed"/> with its <c>reason</c>): the invoice's firm
+    /// (<see cref="FromEmailCorrectionReasons.DifferentFirm"/>); its one core record (<see cref="FromEmailCorrectionReasons.DifferentCoreRecord"/>;
+    /// an invoice that names none or several is refused the same way, fail closed); its status: only In Review (statecode Active) may be
+    /// corrected, so Approved, Sent to AP, Paid and every inactive status, including one this lifecycle does not know, are
+    /// <see cref="FromEmailCorrectionReasons.InvoiceStatus"/> with <c>invoiceStatus</c> (the status name; absent for an unknown value);
+    /// the invoice's submission (EB-D-179 item 1: the one whose <see cref="InvoiceColumn"/> is the invoice AND whose id derives it,
+    /// <see cref="InvoiceSubmissionPersister.InvoiceIdFor"/>; none is <see cref="FromEmailCorrectionReasons.NoSubmission"/>), which must
+    /// itself be of the same firm and core record; then the firm invoice number (EB-D-179 item 3, D-37: the submission's typed number, trimmed
+    /// and compared ignoring case as the tracking sequence does; else <see cref="FromEmailCorrectionReasons.DifferentInvoiceNumber"/>).</para>
+    /// <para>A read fault is 503 <see cref="InvoiceSubmissionErrors.CoreRecordUnavailable"/>, never a guess. No answer names another firm,
+    /// record or number. The answer's <c>ResubmissionOf</c> is the submission to record in <see cref="ResubmissionOfColumn"/>.</para>
+    /// </remarks>
+    internal virtual async Task<(InvoiceSubmissionOutcome? Refusal, Guid? ResubmissionOf)> CheckCorrectionAsync(
+        InvoiceCoreRecord core, Guid firmId, string firmInvoiceNumber, Entity invoice, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(core);
+        ArgumentNullException.ThrowIfNull(invoice);
+
+        if (invoice.GetAttributeValue<EntityReference>(InvoiceSubmissionPersister.InvoiceVendorOrg)?.Id is not { } invoiceFirm || invoiceFirm != firmId)
+        {
+            return (CorrectionRefused(invoice.Id, FromEmailCorrectionReasons.DifferentFirm,
+                "The invoice to correct is from another firm, so this submission cannot replace it. Nothing was saved."), null);
+        }
+
+        if (!IsCore(EligibleApproverResolver.SingleCoreOf(FinanceBaseValues.InvoiceEntity, invoice), core))
+        {
+            return (DifferentCoreRecord(invoice.Id), null);
+        }
+
+        var state = invoice.GetAttributeValue<OptionSetValue>("statecode")?.Value;
+        var statusCode = invoice.GetAttributeValue<OptionSetValue>("statuscode")?.Value;
+        if (state != InvoiceStatusCodes.StateActive || statusCode != InvoiceStatusCodes.InReview)
+        {
+            var extensions = new Dictionary<string, object?> { ["reason"] = FromEmailCorrectionReasons.InvoiceStatus };
+            if (statusCode is { } known && InvoiceStatusCodes.TryFromStatusCode(known, out var status))
+            {
+                extensions["invoiceStatus"] = status.ToString();
+            }
+
+            _logger.LogInformation("Invoice correction refused (409 {Reason}): invoice {InvoiceId} has statecode {State} statuscode {Status}",
+                FromEmailCorrectionReasons.InvoiceStatus, invoice.Id, state, statusCode);
+            return (InvoiceSubmissionOutcome.Refused(StatusCodes.Status409Conflict, InvoiceSubmissionErrors.CorrectionNotAllowed,
+                "Only an invoice in review can be corrected; this one has moved on, so nothing was saved.", extensions), null);
+        }
+
+        Entity? submission;
+        try
+        {
+            // No TopCount: a cap could leave the invoice's own submission out when other rows also point at the invoice.
+            var query = new QueryExpression(SubmissionEntity) { ColumnSet = new ColumnSet(CorrectionSubmissionColumns) };
+            query.Criteria.AddCondition(InvoiceColumn, ConditionOperator.Equal, invoice.Id);
+            var found = await _entities.RetrieveMultipleAsync(query, ct);
+            // Only the submission the invoice was created from: its id derives the invoice's (the job's InvoiceIdFor). A row that merely points
+            // at the invoice is not its submission.
+            submission = found.Entities.SingleOrDefault(s => InvoiceSubmissionPersister.InvoiceIdFor(s.Id) == invoice.Id);
+        }
+        catch (Exception ex) when (!IsCallerCancellation(ex, ct))
+        {
+            _logger.LogWarning(ex, "Invoice correction refused: the submission of invoice {InvoiceId} could not be read", invoice.Id);
+            return (InvoiceSubmissionOutcome.Refused(StatusCodes.Status503ServiceUnavailable, InvoiceSubmissionErrors.CoreRecordUnavailable,
+                "The invoice to correct could not be checked right now. Nothing was saved; try again shortly."), null);
+        }
+
+        if (submission is null)
+        {
+            return (CorrectionRefused(invoice.Id, FromEmailCorrectionReasons.NoSubmission,
+                "The invoice to correct has no submission record, so it cannot be corrected. Nothing was saved."), null);
+        }
+
+        // The earlier submission is the peer the new one will name (ResubmissionOfColumn): it must be of the same firm and core record, so the
+        // lineage edge adds no other root.
+        var earlier = ToView(submission);
+        if (earlier.FirmId != firmId)
+        {
+            return (CorrectionRefused(invoice.Id, FromEmailCorrectionReasons.DifferentFirm,
+                "The invoice to correct is from another firm, so this submission cannot replace it. Nothing was saved."), null);
+        }
+
+        if (earlier.CoreRecord != core)
+        {
+            return (DifferentCoreRecord(invoice.Id), null);
+        }
+
+        if (!string.Equals(earlier.FirmInvoiceNumber?.Trim(), firmInvoiceNumber.Trim(), StringComparison.OrdinalIgnoreCase))
+        {
+            return (CorrectionRefused(invoice.Id, FromEmailCorrectionReasons.DifferentInvoiceNumber,
+                "A corrected invoice keeps the firm invoice number of the invoice it replaces; this one has another number, so nothing was saved."), null);
+        }
+
+        return (null, submission.Id);
+    }
+
+    private static bool IsCore((string Entity, Guid Id)? found, InvoiceCoreRecord core) =>
+        found is { } single && string.Equals(single.Entity, core.EntityLogicalName, StringComparison.Ordinal) && single.Id == core.RecordId;
+
+    private InvoiceSubmissionOutcome DifferentCoreRecord(Guid invoiceId) =>
+        CorrectionRefused(invoiceId, FromEmailCorrectionReasons.DifferentCoreRecord,
+            "The invoice to correct is filed under another record, so this submission cannot replace it. Nothing was saved.");
+
+    private InvoiceSubmissionOutcome CorrectionRefused(Guid invoiceId, string reason, string detail)
+    {
+        _logger.LogInformation("Invoice correction refused (409 {Reason}) for invoice {InvoiceId}", reason, invoiceId);
+        return InvoiceSubmissionOutcome.Refused(StatusCodes.Status409Conflict, InvoiceSubmissionErrors.CorrectionNotAllowed, detail,
+            new Dictionary<string, object?> { ["reason"] = reason });
     }
 
     private InvoiceSubmissionOutcome? Validate(InvoiceSubmissionRequest request)
@@ -1595,6 +1766,9 @@ public class InvoiceSubmissionService
             CreatedOn = row.GetAttributeValue<DateTime?>("createdon"),
             InvoiceId = row.GetAttributeValue<EntityReference>(InvoiceColumn) is { Id: var invoiceId } && invoiceId != Guid.Empty
                 ? invoiceId
+                : null,
+            ResubmissionOfId = row.GetAttributeValue<EntityReference>(ResubmissionOfColumn) is { Id: var earlierId } && earlierId != Guid.Empty
+                ? earlierId
                 : null,
         };
     }

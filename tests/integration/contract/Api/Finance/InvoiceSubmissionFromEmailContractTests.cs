@@ -93,6 +93,8 @@ public sealed class InvoiceSubmissionFromEmailContractTests : IAsyncLifetime
         builder.Services.AddSingleton(_world.Intake.Build());
         builder.Services.AddSingleton(_world.Intake.Participations);
         builder.Services.AddSingleton(_world.Build());
+        // Task 097b: a Correction's invoice read (app-only, after the caller's own Write), through the intake harness's Dataverse.
+        builder.Services.AddSingleton(_world.Intake.Entities.Object);
 
         builder.WebHost.UseTestServer();
         _app = builder.Build();
@@ -556,15 +558,50 @@ public sealed class InvoiceSubmissionFromEmailContractTests : IAsyncLifetime
         NothingWritten();
     }
 
-    [Fact]
-    public async Task Correction_BeforeTask097_Is409CorrectionNotAllowed_NotAvailable()
+    // ── a Correction (task 097b, EB-D-179; contract section 6, changed 2026-10-30) ──
+
+    [Fact(DisplayName = "097b (seed-proof, the Write guard): a Correction of an invoice the caller cannot Write is the uniform 404, byte-for-byte the answer for an unknown invoice; nothing written")]
+    public async Task Correction_WithoutWrite_IsTheUniform404_SameAsAnUnknownInvoice()
     {
-        var response = await PostAsync(Request(mode: "Correction", invoiceId: Guid.NewGuid()));
+        CorrectionSeed.Seed(_world.Intake);
+        _probe.Rights[CorrectionSeed.OldInvoiceId] = AccessRights.Read;
+
+        var denied = await PostAsync(Request(number: CorrectionSeed.Number, mode: "Correction", invoiceId: CorrectionSeed.OldInvoiceId));
+        var unknown = await PostAsync(Request(number: CorrectionSeed.Number, mode: "Correction", invoiceId: Guid.NewGuid()));
+
+        denied.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        unknown.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        (await CodeAsync(denied)).Should().Be("sdap.access.deny.record_unavailable");
+        var normalise = (string body) => System.Text.RegularExpressions.Regex.Replace(body, "\"correlationId\":\"[^\"]*\"", "\"correlationId\":\"x\"");
+        var deniedBody = await denied.Content.ReadAsStringAsync();
+        normalise(await unknown.Content.ReadAsStringAsync()).Should().Be(normalise(deniedBody), "the answer reveals nothing about the invoice");
+        deniedBody.Should().NotContain(CorrectionSeed.OldInvoiceId.ToString());
+        NothingWritten();
+    }
+
+    [Fact(DisplayName = "097b: an allowed Correction from an email is 202, submitted naming the replaced invoice's submission")]
+    public async Task Correction_Allowed_Is202_WithTheTarget()
+    {
+        CorrectionSeed.Seed(_world.Intake);
+        _probe.Rights[CorrectionSeed.OldInvoiceId] = AccessRights.Read | AccessRights.Write;
+
+        await Accepted(await PostAsync(Request(number: CorrectionSeed.Number, mode: "Correction", invoiceId: CorrectionSeed.OldInvoiceId)));
+
+        _world.Operation.Submits.Should().ContainSingle().Which.ResubmissionOf.Should().Be(CorrectionSeed.OldSubmissionId);
+    }
+
+    [Fact(DisplayName = "097b (D3, must fire): a Correction under another firm invoice number is 409 correction_not_allowed, reason different_invoice_number; nothing written")]
+    public async Task Correction_AnotherNumber_Is409CorrectionNotAllowed()
+    {
+        CorrectionSeed.Seed(_world.Intake);
+        _probe.Rights[CorrectionSeed.OldInvoiceId] = AccessRights.Read | AccessRights.Write;
+
+        var response = await PostAsync(Request(number: "INV-8", mode: "Correction", invoiceId: CorrectionSeed.OldInvoiceId));
 
         response.StatusCode.Should().Be(HttpStatusCode.Conflict);
         var body = await BodyAsync(response);
         body.GetProperty("errorCode").GetString().Should().Be("ebilling.submission.correction_not_allowed");
-        body.GetProperty("reason").GetString().Should().Be("not_available");
+        body.GetProperty("reason").GetString().Should().Be("different_invoice_number");
         NothingWritten();
     }
 
