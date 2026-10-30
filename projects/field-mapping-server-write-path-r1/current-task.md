@@ -14,7 +14,7 @@
 | **#2399** | Live part FIXED: the owner re-tested the WA create as Test User 1 on 2026-10-29 (saves, with number and Assigned To). Open for the durable fix: FR-38/W3 still need the scope procedure (spec amendment → task-create → TASK-INDEX → owner approval); FR-39 and the index rows are provisioning's #2429. |
 | **Open PRs** | #2387 (075, HOLD, ships with 040). It overlaps current-task.md: keep the work branch's version. |
 | **Issues** | #2444 (UAC: shared reads-agnostic ordering helper). #2413 (known limit). #2429 (provisioning H7c team + H12b index-row seed + H4b allow-list; I review the PR). |
-| **Waiting on** | UAC 195 → 040, 076. Provisioning's #2429 PR. 017 blocked on ebilling #1911. |
+| **Waiting on** | UAC 195 → 040 (UAC 2026-10-29: 194b merged, 195 queued next after its two owner-ruling branches; UAC sends the wizard-write SHA and the dev-backfill notice). Provisioning's #2429 PR. 017 blocked on ebilling #1911. |
 | **Owner to do** | Leftover locked worktree agent-aec6d06ca99a5a9f6 (075): end of project. |
 
 ## Blocked: 017
