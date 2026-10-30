@@ -27,13 +27,16 @@ public sealed class InvoiceCorrectionEndToEndTests
     private static readonly BillingRuleCandidate Cap = Kit.Version("BILL-CAP", RuleType.DailyHoursCap);
     private static readonly BillingRuleCandidate SystemPolicy = Kit.Version(BillingRuleCatalogue.SystemPolicyCode, RuleType.SubmissionIntegrity, "{}");
 
-    private static InvoiceCorrectionService Corrections(ApprovalWorld w, params BillingRuleCandidate[] rules)
+    private static InvoiceCorrectionService Corrections(ApprovalWorld w, params BillingRuleCandidate[] rules) => Corrections(w, null, rules);
+
+    private static InvoiceCorrectionService Corrections(
+        ApprovalWorld w, Func<SignalWriteRequest, CancellationToken, Task<SignalWriteResult>>? writeSignal, params BillingRuleCandidate[] rules)
     {
         var resolver = new CodeSetResolver(w.Entities.Object, w.Settings.Object, new Mock<ICodeSetSuggestionProvider>().Object, NullLogger<CodeSetResolver>.Instance);
         var loaded = Kit.Loaded(rules);
         var reevaluation = new InvoiceCorrectionReevaluation(
             w.Entities.Object, (_, _) => Task.FromResult(loaded), Kit.Evaluator().Evaluate,
-            (request, _) => Task.FromException<SignalWriteResult>(new InvalidOperationException("no Signal is raised on this path")),
+            writeSignal ?? ((request, _) => Task.FromException<SignalWriteResult>(new InvalidOperationException("no Signal is raised on this path"))),
             (id, rowVersion, resolution, _, _) => Task.FromResult(Close(w, id, rowVersion, resolution)),
             NullLogger<InvoiceCorrectionReevaluation>.Instance,
             (_, _) => Task.FromResult<(BillingRuleCandidate?, string)>((SystemPolicy, "in_force")));
@@ -205,5 +208,98 @@ public sealed class InvoiceCorrectionEndToEndTests
         approve.Outcome.Should().Be(ApprovalOutcome.Held);
         approve.Code.Should().Be(InvoiceApprovalCodes.Held);
         w.InvoiceStatus.Should().Be(InvoiceStatusCodes.InReview);
+    }
+
+    // =========================================================================================
+    // Fix round, part 3 (F-2): an unfinished correction is never approved past
+    // =========================================================================================
+
+    /// <summary>A Clean, coded line on an Accepted submission with no findings; the correction's findings write (its first all-update transaction) fails once.</summary>
+    private static (Entity Line, Entity Submission) CleanInvoice(ApprovalWorld w)
+    {
+        Prepare(w);
+        var line = w.AddLine(InvoiceLineStatus.Clean, extraction: W.ExtractionJson());
+        line["sprk_timekeeper"] = "A. Lee";
+        var submission = Submission(w, Root(nameof(SubmissionEvaluationKind.Accepted)), InvoiceSubmissionStatus.Accepted, "accepted");
+        return (line, submission);
+    }
+
+    private static void AssertApproveWroteNothing(ApprovalWorld w, int writesBefore, Entity line)
+    {
+        w.Writes.Should().Be(writesBefore, "a refused approve writes nothing");
+        w.Transitions.Should().Be(0);
+        w.ApproveRecords.Should().BeEmpty();
+        w.InvoiceStatus.Should().Be(InvoiceStatusCodes.InReview);
+        w.Portion.Contains("sprk_decidedby").Should().BeFalse("nothing is claimed");
+        StatusOf(w.Row("sprk_billingevent", line.Id)).Should().Be((int)InvoiceLineStatus.Clean, "the Clean line is not accepted in bulk");
+    }
+
+    [Fact(DisplayName = "101 fix 3 F-2 SEEDED: while a saved correction's findings step has not finished, approve is 409 corrections_pending and canApprove is false; after the repeat the invoice is approved")]
+    public async Task AnUnfinishedCorrection_BlocksApproval_UntilItIsRepeated()
+    {
+        var w = new ApprovalWorld();
+        var (line, _) = CleanInvoice(w);
+        var corrections = Corrections(w);
+        var command = new CorrectionCommand(w.InvoiceId, line.Id, "Narrative", "Prepared the brief", false, AliceUser);
+        w.FaultsOnce["tx:approvers"] = new TimeoutException("simulated"); // the findings patch is the first all-update transaction
+
+        var first = await corrections.CorrectAsync(command, CancellationToken.None);
+
+        first.Status.Should().Be(CorrectionStatus.Incomplete);
+        first.FailedStep.Should().Be(CorrectionCodes.FindingsStep);
+        (await w.GetAs(AliceUser))!.CanApprove.Should().BeFalse("a correction is waiting for its follow-through");
+        var writes = w.Writes;
+
+        var refused = await w.ApproveAs(AliceUser);
+
+        refused.Outcome.Should().Be(ApprovalOutcome.Conflict);
+        refused.Code.Should().Be(InvoiceApprovalCodes.CorrectionsPending);
+        refused.Detail.Should().Be("These corrections were saved but did not finish: Narrative (line 1). Repeat each correction, then approve again.");
+        refused.Detail.Should().NotContain(w.InvoiceId.ToString("D")).And.NotContain(line.Id.ToString("D"));
+        AssertApproveWroteNothing(w, writes, line);
+
+        (await corrections.CorrectAsync(command, CancellationToken.None)).IsApplied.Should().BeTrue();
+        (await w.GetAs(AliceUser))!.CanApprove.Should().BeTrue();
+
+        (await w.ApproveAs(AliceUser)).Outcome.Should().Be(ApprovalOutcome.Approved);
+        w.InvoiceStatus.Should().Be(InvoiceStatusCodes.Approved);
+    }
+
+    [Fact(DisplayName = "101 fix 3 F-2: a Clean line corrected from 2.5 to 25 hours whose findings step failed is not accepted in bulk; the repeat flags it")]
+    public async Task AnUnfinishedHoursCorrection_IsNotBulkAccepted_AndTheRepeatFlagsTheLine()
+    {
+        var w = new ApprovalWorld();
+        var (line, _) = CleanInvoice(w);
+        var corrections = Corrections(w, (_, _) => Task.FromResult(new SignalWriteResult(Guid.NewGuid(), true, Guid.Empty, Guid.Empty)), Cap);
+        var command = new CorrectionCommand(w.InvoiceId, line.Id, "Hours", "25", false, AliceUser);
+        w.FaultsOnce["tx:approvers"] = new TimeoutException("simulated");
+
+        (await corrections.CorrectAsync(command, CancellationToken.None)).FailedStep.Should().Be(CorrectionCodes.FindingsStep);
+        var writes = w.Writes;
+
+        var refused = await w.ApproveAs(AliceUser);
+
+        refused.Code.Should().Be(InvoiceApprovalCodes.CorrectionsPending);
+        AssertApproveWroteNothing(w, writes, line);
+
+        (await corrections.CorrectAsync(command, CancellationToken.None)).IsApplied.Should().BeTrue();
+        StatusOf(w.Row("sprk_billingevent", line.Id)).Should().Be((int)InvoiceLineStatus.Flagged, "25 hours is over the daily cap");
+        (await w.ApproveAs(AliceUser)).Outcome.Should().Be(ApprovalOutcome.LinesOpen);
+    }
+
+    [Fact(DisplayName = "101 fix 3 F-2: the guard's read fails closed - a fault refuses the approve (nothing written) and the approval GET does not answer canApprove")]
+    public async Task TheGuardsReadFault_RefusesApproval()
+    {
+        var w = new ApprovalWorld();
+        var (line, _) = CleanInvoice(w);
+        w.Faults["read:sprk_invoicecorrection"] = new TimeoutException("simulated");
+        var writes = w.Writes;
+
+        var refused = await w.ApproveAs(AliceUser);
+
+        refused.Outcome.Should().Be(ApprovalOutcome.Unavailable);
+        refused.Code.Should().Be(InvoiceApprovalCodes.Unavailable);
+        AssertApproveWroteNothing(w, writes, line);
+        await FluentActions.Awaiting(() => w.GetAs(AliceUser)).Should().ThrowAsync<TimeoutException>("the GET throws on a read fault, as for the hold read");
     }
 }
