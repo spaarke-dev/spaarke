@@ -1283,6 +1283,8 @@ their OWN app registrations (production add-in: `1958aec2…` "Spaarke Office Ad
 `https://<host>/auth-callback.html` are registered ONCE, on that client app, for the production site
 (`addins.spaarke.com`) — never per customer. A customer BFF only pre-authorizes the client (above) and lists its origin in
 CORS (H4b). Reference impl: [`src/client/shared/Spaarke.Auth/src/strategies/OfficeNaaStrategy.ts`](../../src/client/shared/Spaarke.Auth/src/strategies/OfficeNaaStrategy.ts).
+For the External Access Teams app (package build, customer-tenant install, Teams sign-in prerequisites and support), see
+[EXTERNAL-ACCESS-TEAMS-APP-GUIDE.md](EXTERNAL-ACCESS-TEAMS-APP-GUIDE.md).
 
 **The `acct` optional claim (access tokens) — REQUIRED on every per-customer BFF registration** (task 141).
 The BFF's first-sign-in identity binding admits only a MEMBER of a configured customer tenant (§6.5.2), and
@@ -1297,7 +1299,7 @@ it once by hand:
 ```
 
 Both are idempotent and keep every other optional claim. Optional claims on the resource registration apply to
-every access token issued FOR it — including the workforce tokens the External Access SPA and Teams tab acquire (the single-tenant Spaarke client, NAA then MSAL popup, scope `user_impersonation`; the Teams manifest declares no `webApplicationInfo` and there is no Teams-SSO path, ADR-028 A8) — see
+every access token issued FOR it — including the workforce tokens the External Access SPA and Teams tab acquire (the browser company-account sign-in and the Teams tab use the multitenant workforce client on the user's own tenant authority, NAA then MSAL popup in Teams, scope `user_impersonation`; the Teams manifest declares no `webApplicationInfo` and there is no Teams-SSO path, ADR-028 A9; the single-tenant Spaarke client is used only for a licensed user's account link — corrected 2026-10-29 against `src/client/external-spa/src/auth/msal-auth.ts`) — see
 Microsoft's [optional claims reference](https://learn.microsoft.com/en-us/entra/identity-platform/optional-claims-reference).
 Without it every contact-only Type-2 sign-in is denied `sdap.access.deny.workforce_acct_claim_missing` (fail closed).
 
