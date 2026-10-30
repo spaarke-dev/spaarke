@@ -127,5 +127,8 @@ Measured on head `8a1c40fc5b` (before the notes commit).
 
 - K4: a per-user idempotency-cache replay of the caller's own earlier 202 after losing Write (nothing created or revealed).
 - K5: a fault of the caller-rights probe in the Write check is the uniform 404 (the gate variant answers no rights), not 503.
+- K6 (ontology-r1, 2026-10-30): `sprk_resubmissionof` and `sprk_firminvoicenumber` are ordinary columns. An internal user with Write on `sprk_invoicesubmission` could edit them in Dataverse before a reprocess and point the duplicate exclusion at another invoice of the same firm and number. Worst case a missed Duplicate flag, using Write the user already holds. No code change.
+
+**Agreed (2026-10-30).** ontology-r1: the loader exclusion is OK (6b9ca5e390, 8a1c40fc5b), on condition that 097b reaches master only together with 097c, stated in the PR. word-add-in-r1: the 095 contract changes are agreed; the add-in keeps Correction off until 097b, 097c and 097e are on master.
 
 rework: fix-round-1 task 097b
