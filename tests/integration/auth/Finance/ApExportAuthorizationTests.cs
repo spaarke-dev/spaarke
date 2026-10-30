@@ -435,6 +435,23 @@ public sealed class ApExportAuthorizationTests
             "the file rows are owned through the acting user, resolved from the caller's token");
     }
 
+    [Fact(DisplayName = "150 review F4: a credit-memo batch whose total is below the batch total column's minimum is 400 ebilling.export.batch_total_out_of_range through the route, with nothing claimed or written")]
+    public async Task BatchTotalOutOfRange_Is400_AndWritesNothing()
+    {
+        await using var host = await Host.StartAsync();
+        var credit = host.World.AddInvoice("INV-CREDIT", approved: -250m);
+        host.World.GrantEverything();
+        var writesBefore = host.World.Dataverse.Writes;
+
+        var response = await host.SendAsync("POST", ids: [credit.Id]);
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        JsonNode.Parse(await response.Content.ReadAsStringAsync())!["errorCode"]!.GetValue<string>().Should().Be(ApExportCodes.BatchTotalOutOfRange);
+        host.World.Dataverse.Writes.Should().Be(writesBefore);
+        host.World.Batches().Should().BeEmpty();
+        host.World.StatusOfInvoice(credit.Id).Should().Be(InvoiceStatusCodes.Approved);
+    }
+
     [Fact(DisplayName = "150: a caller whose systemuser cannot be established is 403 ebilling.export.caller_unresolved and nothing is written")]
     public async Task UnresolvedCaller_Is403()
     {
