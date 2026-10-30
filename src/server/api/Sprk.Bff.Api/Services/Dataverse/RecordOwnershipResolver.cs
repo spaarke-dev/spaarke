@@ -3960,7 +3960,7 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
     /// #2468: whether <paramref name="communication"/> is filed under anything — its own ownership-parent lookups (the
     /// parents its own question names, <see cref="RecordOwnershipContext.OrderedParentsOf"/>) or its record thread's filing
     /// (<see cref="RecordThreadFiling"/>: a Direct thread files nothing). Read committed. <c>null</c> when the communication or
-    /// its thread cannot be read (the caller refuses); a Dataverse fault propagates, as every resolver read does.
+    /// its thread does not come back (zero rows; the caller refuses); a Dataverse fault propagates, as every resolver read does.
     /// </summary>
     private async Task<bool?> IsCommunicationFiledAsync(RecordOwnershipParent communication, CancellationToken ct)
     {
@@ -3979,17 +3979,17 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
         if (RecordThreadFiling.ThreadOf(row) is not { } threadId)
             return false;
 
-        try
+        // #2471 follow-up: a thread that is not there is decided from the zero-row result (fail closed: its filing is not known,
+        // so the caller refuses); a fault of any type propagates, never taken as a missing row.
+        var thread = await RecordThreadFiling.TryReadThreadAsync(_dataverse, threadId, ct).ConfigureAwait(false);
+        if (thread is null)
         {
-            var thread = await RecordThreadFiling.ReadThreadAsync(_dataverse, threadId, ct).ConfigureAwait(false);
-            return RecordThreadFiling.ParentsOf(thread).Count > 0;
-        }
-        catch (InvalidOperationException ex)
-        {
-            _logger.LogWarning(ex, "The thread {ThreadId} of communication {CommunicationId} could not be read (#2468).",
+            _logger.LogWarning("The thread {ThreadId} of communication {CommunicationId} could not be found (#2468).",
                 threadId, communication.RecordId);
             return null;
         }
+
+        return RecordThreadFiling.ParentsOf(thread).Count > 0;
     }
 
     /// <summary>

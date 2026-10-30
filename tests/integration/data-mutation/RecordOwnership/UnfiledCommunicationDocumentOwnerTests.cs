@@ -223,6 +223,75 @@ public class UnfiledCommunicationDocumentOwnerTests
             "no owner is looked up once whether the communication is filed cannot be read");
     }
 
+    [Fact(DisplayName = "#2471 follow-up must-not-fire: a thread read that FAULTS propagates; it is not taken as a missing thread")]
+    public async Task AThreadReadThatFaults_Propagates_ItIsNotTakenAsAMissingThread()
+    {
+        // The thread read alone faults, with the exception type the old catch swallowed into a refusal. A fault is not "the row
+        // is missing": it propagates (fail closed, as every resolver read does), and no owner is looked up.
+        var thread = Guid.NewGuid();
+        var directory = WithCommunication(World(), RootBu, RootTeam, new()
+            {
+                ["sprk_communicationthread"] = new EntityReference("sprk_communicationthread", thread),
+            })
+            .WithRecord("sprk_communicationthread", thread, RootBu, owningTeam: RootTeam);
+        var queried = new List<string>();
+        var resolver = StrictResolverOver(directory, query =>
+        {
+            queried.Add(query.EntityName);
+            return query.EntityName == RecordThreadFiling.ThreadTable
+                ? new InvalidOperationException("the thread read faulted")
+                : null;
+        });
+
+        var act = () => resolver.ResolveOwnerAsync(SaveQuestion(), CancellationToken.None);
+
+        await act.Should().ThrowAsync<InvalidOperationException>("a faulted read is not an answer, and not a missing row");
+        queried.Should().NotContain(new[] { "team", "systemuser" }, "no owner is looked up once the thread read faulted");
+    }
+
+    [Fact(DisplayName = "#2471 follow-up must-not-fire: a thread that is not there (zero rows) refuses, decided without an exception")]
+    public async Task AThreadThatIsNotThere_Refuses_DecidedFromTheZeroRowResult()
+    {
+        var directory = WithCommunication(World(), RootBu, RootTeam, new()
+        {
+            ["sprk_communicationthread"] = new EntityReference("sprk_communicationthread", Guid.NewGuid()), // not seeded
+        });
+        var threadReads = 0;
+        var resolver = StrictResolverOver(directory, query =>
+        {
+            if (query.EntityName == RecordThreadFiling.ThreadTable)
+                threadReads++;
+            return null;
+        });
+
+        var answer = await resolver.ResolveOwnerAsync(SaveQuestion(), CancellationToken.None);
+
+        threadReads.Should().Be(1, "the thread was asked for and came back with no row");
+        answer.Outcome.Should().Be(RecordOwnerOutcome.Refused, "a missing thread's filing is not known: never the unfiled answer");
+    }
+
+    /// <summary>The real resolver over <paramref name="directory"/>; <paramref name="faultFor"/> may fault one query.</summary>
+    private static RecordOwnershipResolver StrictResolverOver(
+        FakeDirectory directory, Func<Microsoft.Xrm.Sdk.Query.QueryExpression, Exception?> faultFor)
+    {
+        var entities = new Moq.Mock<IGenericEntityService>(Moq.MockBehavior.Strict);
+        entities
+            .Setup(e => e.RetrieveMultipleAsync(Moq.It.IsAny<Microsoft.Xrm.Sdk.Query.QueryExpression>(), Moq.It.IsAny<CancellationToken>()))
+            .Returns((Microsoft.Xrm.Sdk.Query.QueryExpression query, CancellationToken _) =>
+                faultFor(query) is { } fault
+                    ? Task.FromException<EntityCollection>(fault)
+                    : Task.FromResult(directory.Answer(query)));
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["SecureRecord:BusinessUnitName"] = FakeDirectory.SecureBuName,
+                ["SecureRecord:OwnerTeamName"] = FakeDirectory.SecureOwnerTeamName,
+            })
+            .Build();
+        return new RecordOwnershipResolver(
+            entities.Object, configuration, Microsoft.Extensions.Logging.Abstractions.NullLogger<RecordOwnershipResolver>.Instance);
+    }
+
     [Theory(DisplayName = "#2468 must-not-fire: a communication filed only through its record thread names its documents' owner")]
     [InlineData(null)]
     [InlineData(100000000)]

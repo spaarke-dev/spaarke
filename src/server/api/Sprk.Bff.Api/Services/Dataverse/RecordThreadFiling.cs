@@ -65,12 +65,6 @@ internal static class RecordThreadFiling
     }
 
     /// <summary>
-    /// The thread row, read COMMITTED (<c>NoLock = false</c>) with every column — its ownership parents are whatever lookups
-    /// it carries, as for the message itself. A thread that does not come back is a fault (fail closed): "no parents" would
-    /// release a message from a secure thread. A Dataverse fault propagates.
-    /// </summary>
-    /// <exception cref="InvalidOperationException">The thread does not exist (or cannot be seen).</exception>
-    /// <summary>
     /// UAC task 194b R4: a message's thread filing (<see cref="ParentsOf"/>) as lookups of the MESSAGE — each parent keyed under
     /// <see cref="ThreadColumn"/>, the column that files the message under it — for <c>RecordOwnershipContext.ForRow</c>, which
     /// ranks that column after the message's own lookups (<c>SecureChildLineage</c>). Two parents under the one column keep
@@ -90,7 +84,24 @@ internal static class RecordThreadFiling
             RecordOwnershipContext.LookupsOf(row).Concat(FilingLookupsOf(threadParents)),
             RecordOwnershipContext.PairIdOf(row));
 
-    internal static async Task<Entity> ReadThreadAsync(IGenericEntityService dataverse, Guid threadId, CancellationToken ct)
+    /// <summary>
+    /// The thread row, read COMMITTED (<c>NoLock = false</c>) with every column — its ownership parents are whatever lookups
+    /// it carries, as for the message itself. A thread that does not come back is a fault (fail closed): "no parents" would
+    /// release a message from a secure thread. A Dataverse fault propagates.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The thread does not exist (or cannot be seen).</exception>
+    internal static async Task<Entity> ReadThreadAsync(IGenericEntityService dataverse, Guid threadId, CancellationToken ct) =>
+        await TryReadThreadAsync(dataverse, threadId, ct).ConfigureAwait(false)
+            ?? throw new InvalidOperationException(
+                $"The {ThreadTable} {threadId:D} a message sits in could not be read, so the parents it files the message under "
+                + "are not known; no owner is decided from it (#2143).");
+
+    /// <summary>
+    /// #2471 follow-up: the thread row as <see cref="ReadThreadAsync"/> reads it, or <c>null</c> when the read comes back with
+    /// no row — decided from the zero-row result, never from an exception, so a caller that answers "missing" itself does not
+    /// have to catch one (and a Dataverse fault, whatever its type, still propagates).
+    /// </summary>
+    internal static async Task<Entity?> TryReadThreadAsync(IGenericEntityService dataverse, Guid threadId, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(dataverse);
         var query = new QueryExpression(ThreadTable)
@@ -100,10 +111,7 @@ internal static class RecordThreadFiling
             NoLock = false,
         };
         query.Criteria.AddCondition($"{ThreadTable}id", ConditionOperator.Equal, threadId);
-        return (await dataverse.RetrieveMultipleAsync(query, ct).ConfigureAwait(false)).Entities.FirstOrDefault()
-            ?? throw new InvalidOperationException(
-                $"The {ThreadTable} {threadId:D} a message sits in could not be read, so the parents it files the message under "
-                + "are not known; no owner is decided from it (#2143).");
+        return (await dataverse.RetrieveMultipleAsync(query, ct).ConfigureAwait(false)).Entities.FirstOrDefault();
     }
 
     /// <summary>
