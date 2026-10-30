@@ -2,6 +2,10 @@ using FluentAssertions;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
+using Microsoft.Extensions.DependencyInjection;
+using Moq;
+using Spaarke.Dataverse;
+using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Models.Office;
 using Sprk.Bff.Api.Services.Access;
 using Sprk.Bff.Api.Services.Finance.Submission;
@@ -156,16 +160,154 @@ public class FromEmailSubmissionServiceTests
         RefusedBeforeAnyWrite(world);
     }
 
-    [Fact]
-    public async Task Correction_Is409CorrectionNotAllowed_NotAvailable_UntilTask097()
+    // ── a Correction (task 097b, EB-D-179) ──────────────────────────────────────────────────────────────────────
+
+    /// <summary>A request whose services answer the route's Correction reads: the caller's rights (<paramref name="probe"/>) and the
+    /// intake harness's Dataverse (the invoice, its submission).</summary>
+    private static HttpContext CorrectionHttp(W world, Sprk.Bff.Api.Tests.Finance.Files.RecordingRightsProbe probe)
+    {
+        var http = W.Http();
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddSingleton<CallerRecordAccessProbe>(probe);
+        services.AddSingleton(world.Intake.Entities.Object);
+        http.RequestServices = services.BuildServiceProvider();
+        http.Request.Headers.Authorization = "Bearer caller-token";
+        return http;
+    }
+
+    private static FromEmailSubmissionInput Correction(Guid? invoiceId = null, string number = CorrectionSeed.Number) =>
+        W.Input(number: number, mode: "Correction") with { InvoiceId = invoiceId ?? CorrectionSeed.OldInvoiceId };
+
+    private static (W World, Sprk.Bff.Api.Tests.Finance.Files.RecordingRightsProbe Probe) CorrectionWorld(Entity? invoice = null)
+    {
+        var world = new W();
+        CorrectionSeed.Seed(world.Intake, invoice);
+        var probe = new Sprk.Bff.Api.Tests.Finance.Files.RecordingRightsProbe();
+        probe.Grant("sprk_invoices", CorrectionSeed.OldInvoiceId, AccessRights.Read | AccessRights.Write);
+        return (world, probe);
+    }
+
+    private static Task<FromEmailSubmissionOutcome> RunCorrection(
+        W world, Sprk.Bff.Api.Tests.Finance.Files.RecordingRightsProbe probe, FromEmailSubmissionInput? input = null) =>
+        world.Build().SubmitAsync(input ?? Correction(), "office-user", CorrectionHttp(world, probe), CancellationToken.None);
+
+    [Fact(DisplayName = "097b (seed-proof, the Write guard): without the caller's own Write on the invoice, the uniform not-found answer, the same bytes as for an unknown invoice; nothing read or written")]
+    public async Task Correction_WithoutWrite_IsTheUniformNotFound_SameAsAnUnknownInvoice()
+    {
+        var (world, probe) = CorrectionWorld();
+        probe.Grant("sprk_invoices", CorrectionSeed.OldInvoiceId, AccessRights.Read);
+
+        var denied = await FluentActions.Awaiting(() => RunCorrection(world, probe)).Should().ThrowAsync<FromEmailRouteAnswerException>();
+        var unknown = await FluentActions.Awaiting(() => RunCorrection(world, probe, Correction(Guid.NewGuid())))
+            .Should().ThrowAsync<FromEmailRouteAnswerException>();
+
+        var (deniedStatus, deniedBody) = await WireBody.OfAsync(denied.Which.Answer);
+        var (unknownStatus, unknownBody) = await WireBody.OfAsync(unknown.Which.Answer);
+        deniedStatus.Should().Be(404);
+        WireBody.Code(deniedBody).Should().Be("sdap.access.deny.record_unavailable");
+        (unknownStatus, unknownBody.GetRawText()).Should().Be((deniedStatus, deniedBody.GetRawText()), "the answer reveals nothing about the invoice");
+        deniedBody.GetRawText().Should().NotContain(CorrectionSeed.OldInvoiceId.ToString());
+        RefusedBeforeAnyWrite(world);
+        world.Intake.Entities.Verify(e => e.RetrieveAsync("sprk_invoice", It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()),
+            Times.Never(), "nothing is read about an invoice the caller cannot Write");
+    }
+
+    [Fact(DisplayName = "097b: Write on an invoice that is gone is the same uniform not-found answer")]
+    public async Task Correction_WriteOnAGoneInvoice_IsTheUniformNotFound()
+    {
+        var (world, probe) = CorrectionWorld();
+        world.Intake.Invoices.Clear();
+        world.Intake.Invoices[Guid.NewGuid()] = CorrectionSeed.Invoice();
+
+        var answer = await FluentActions.Awaiting(() => RunCorrection(world, probe)).Should().ThrowAsync<FromEmailRouteAnswerException>();
+
+        var (status, body) = await WireBody.OfAsync(answer.Which.Answer);
+        (status, WireBody.Code(body)).Should().Be((404, "sdap.access.deny.record_unavailable"));
+        RefusedBeforeAnyWrite(world);
+    }
+
+    [Fact(DisplayName = "097b: an allowed Correction is submitted naming the replaced invoice's submission (sprk_resubmissionof)")]
+    public async Task Correction_Allowed_PassesTheTargetToTheOperation()
+    {
+        var (world, probe) = CorrectionWorld();
+
+        var outcome = await RunCorrection(world, probe);
+
+        outcome.Receipt.Should().NotBeNull();
+        var submit = world.Operation.Submits.Should().ContainSingle().Subject;
+        (submit.Mode, submit.InvoiceId, submit.ResubmissionOf).Should().Be(("Correction", CorrectionSeed.OldInvoiceId, CorrectionSeed.OldSubmissionId));
+    }
+
+    [Fact(DisplayName = "097b: a New submission names no target")]
+    public async Task New_NamesNoTarget()
     {
         var world = new W();
 
-        var outcome = await Run(world, W.Input(mode: "Correction") with { InvoiceId = Guid.NewGuid() });
+        await Run(world);
+
+        world.Operation.Submits.Single().ResubmissionOf.Should().BeNull();
+    }
+
+    [Fact(DisplayName = "097b: a refused Correction is 409 correction_not_allowed with its reason, before the save")]
+    public async Task Correction_Refused_Is409WithItsReason_BeforeTheSave()
+    {
+        var (world, probe) = CorrectionWorld(CorrectionSeed.Invoice(status: Sprk.Bff.Api.Services.Finance.InvoiceStatusCodes.SentToAp));
+
+        var outcome = await RunCorrection(world, probe);
 
         (outcome.Status, outcome.ErrorCode).Should().Be((409, "ebilling.submission.correction_not_allowed"));
-        outcome.Extensions.Should().Contain("reason", "not_available");
+        outcome.Extensions.Should().Contain("reason", "invoice_status").And.Contain("invoiceStatus", "SentToAp");
         RefusedBeforeAnyWrite(world);
+    }
+
+    [Fact(DisplayName = "097b (seed-proof, the firm guard): a Correction of another firm's invoice is 409 different_firm, before the save")]
+    public async Task Correction_AnotherFirmsInvoice_Is409DifferentFirm()
+    {
+        var (world, probe) = CorrectionWorld(CorrectionSeed.Invoice(firm: Guid.NewGuid()));
+
+        var outcome = await RunCorrection(world, probe);
+
+        (outcome.Status, outcome.ErrorCode).Should().Be((409, "ebilling.submission.correction_not_allowed"));
+        outcome.Extensions.Should().Contain("reason", "different_firm");
+        RefusedBeforeAnyWrite(world);
+    }
+
+    [Fact(DisplayName = "097b (seed-proof, the core-record guard): a Correction of an invoice under another record is 409 different_core_record, before the save")]
+    public async Task Correction_AnotherRecordsInvoice_Is409DifferentCoreRecord()
+    {
+        var (world, probe) = CorrectionWorld(CorrectionSeed.Invoice(coreId: Guid.NewGuid()));
+
+        var outcome = await RunCorrection(world, probe);
+
+        (outcome.Status, outcome.ErrorCode).Should().Be((409, "ebilling.submission.correction_not_allowed"));
+        outcome.Extensions.Should().Contain("reason", "different_core_record");
+        RefusedBeforeAnyWrite(world);
+    }
+
+    [Fact(DisplayName = "097b (D3): a Correction under another firm invoice number is 409 different_invoice_number")]
+    public async Task Correction_AnotherNumber_Is409DifferentInvoiceNumber()
+    {
+        var (world, probe) = CorrectionWorld();
+
+        var outcome = await RunCorrection(world, probe, Correction(number: "INV-8"));
+
+        outcome.Extensions.Should().Contain("reason", "different_invoice_number");
+        RefusedBeforeAnyWrite(world);
+    }
+
+    [Fact(DisplayName = "097b: a replay of a Correction attempt is answered from the attempt, even when the old invoice has moved on")]
+    public async Task Correction_Replay_IsNotRefused_ByTheInvoicesNewStatus()
+    {
+        var (world, probe) = CorrectionWorld(CorrectionSeed.Invoice(state: 1, status: 659490005));
+        var k = W.K(Correction());
+        world.AddAttempt(k, 1, InvoiceSubmissionStatus.Accepted, number: CorrectionSeed.Number);
+
+        var outcome = await RunCorrection(world, probe);
+
+        outcome.Receipt.Should().NotBeNull();
+        outcome.Receipt!.SubmissionId.Should().Be(FromEmailSubmissionKey.SubmissionIdFor(k, 1));
+        world.Operation.Submits.Should().BeEmpty();
     }
 
     [Fact]

@@ -29,8 +29,9 @@ public static class FromEmailSubmissionErrors
     /// </summary>
     public const string EmailUnavailable = "ebilling.submission.email_unavailable";
 
-    /// <summary>409: a Correction is refused; <c>reason</c> is one of <see cref="FromEmailCorrectionReasons"/>.</summary>
-    public const string CorrectionNotAllowed = "ebilling.submission.correction_not_allowed";
+    /// <summary>409: a Correction is refused; <c>reason</c> is one of <see cref="FromEmailCorrectionReasons"/>. Task 097b: the intake's code
+    /// (<see cref="InvoiceSubmissionErrors.CorrectionNotAllowed"/>), shared with the from-document route.</summary>
+    public const string CorrectionNotAllowed = InvoiceSubmissionErrors.CorrectionNotAllowed;
 
     /// <summary>Outcome code (contract section 9): the <c>.eml</c> save did not finish, so the submission ended Failed.</summary>
     public const string EmailSaveFailed = "ebilling.submission.email_save_failed";
@@ -64,13 +65,28 @@ public static class FromEmailUnidentifiableReasons
     public const string EmlAmbiguous = "eml_ambiguous";
 }
 
-/// <summary>The <c>reason</c> values of 409 <see cref="FromEmailSubmissionErrors.CorrectionNotAllowed"/>; <see cref="NotAvailable"/> until task 097 (OP-7).</summary>
+/// <summary>
+/// The <c>reason</c> values of 409 <see cref="FromEmailSubmissionErrors.CorrectionNotAllowed"/> on both Submit Invoice routes (from-email and,
+/// since task 097b, from-document). <see cref="NotAvailable"/> was the answer until task 097b (OP-7) and is no longer produced.
+/// </summary>
 public static class FromEmailCorrectionReasons
 {
     public const string NotAvailable = "not_available";
+
+    /// <summary>The invoice is not In Review (Approved, Sent to AP, Paid, or any inactive status); the answer also carries <c>invoiceStatus</c>.</summary>
     public const string InvoiceStatus = "invoice_status";
+
+    /// <summary>The invoice (or its submission) is from another firm than the request's.</summary>
     public const string DifferentFirm = "different_firm";
+
+    /// <summary>The invoice (or its submission) is filed under another core record than the request's.</summary>
     public const string DifferentCoreRecord = "different_core_record";
+
+    /// <summary>Task 097b (EB-D-179 item 3, D-37): the request's firm invoice number is not the one the invoice was submitted with.</summary>
+    public const string DifferentInvoiceNumber = "different_invoice_number";
+
+    /// <summary>Task 097b (EB-D-179 item 1): the invoice has no submission record, so it cannot be corrected.</summary>
+    public const string NoSubmission = "no_submission";
 }
 
 /// <summary>The mark values (exact case, contract section 2).</summary>

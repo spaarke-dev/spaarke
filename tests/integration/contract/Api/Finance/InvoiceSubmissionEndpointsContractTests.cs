@@ -1954,4 +1954,137 @@ public sealed class InvoiceSubmissionEndpointsContractTests : IAsyncLifetime
         _sourceRights.Calls.Should().BeEmpty();
         NothingWritten();
     }
+
+    // ── ebilling-r1 task 097b (EB-D-179 item 2): a Correction from a document (mode / invoiceId, as the from-email route takes them) ──
+
+    private static object CorrectionBody(Guid? invoiceId = null, string? mode = "Correction", string number = CorrectionSeed.Number) => new
+    {
+        communicationId = SourceCommunicationId,
+        documentId = SourceDocumentId,
+        coreRecord = new { kind = "matter", id = MatterId },
+        firmId = FirmId,
+        firmInvoiceNumber = number,
+        mode,
+        invoiceId = invoiceId ?? CorrectionSeed.OldInvoiceId,
+    };
+
+    /// <summary>A correctable invoice (In Review, its own submission, this firm and matter) the caller may Write.</summary>
+    private void CorrectableInvoice(Entity? invoice = null, AccessRights rights = AccessRights.Read | AccessRights.Write)
+    {
+        GrantInternalSubmit();
+        SourceDocumentExists();
+        CorrectionSeed.Seed(_h, invoice);
+        _sourceRights.Grant(FinanceAuthorizationFilter.InvoiceEntitySet, CorrectionSeed.OldInvoiceId, rights);
+    }
+
+    [Fact(DisplayName = "097b: a Correction from a document is 202; its submission names the replaced invoice's submission in sprk_resubmissionof")]
+    public async Task FromDocument_correction_is_202_with_the_target_recorded()
+    {
+        CorrectableInvoice();
+
+        var response = await PostFromDocumentAsync(CorrectionBody());
+
+        response.StatusCode.Should().Be(HttpStatusCode.Accepted, await response.Content.ReadAsStringAsync());
+        _h.Allocations.Should().ContainSingle().Which.Fields!["sprk_resubmissionof"]
+            .Should().Be(new EntityReference("sprk_invoicesubmission", CorrectionSeed.OldSubmissionId));
+        _sourceRights.Calls.Should().Contain(c => c.Set == FinanceAuthorizationFilter.InvoiceEntitySet && c.Id == CorrectionSeed.OldInvoiceId && c.Token != null,
+            "the Write check is the caller's own (OBO)");
+    }
+
+    [Fact(DisplayName = "097b: a from-document body without mode or invoiceId is unchanged: a New submission, no sprk_resubmissionof, no invoice asked about")]
+    public async Task FromDocument_without_the_correction_fields_is_unchanged()
+    {
+        CorrectableInvoice();
+
+        var response = await PostFromDocumentAsync(FromDocumentBody());
+
+        response.StatusCode.Should().Be(HttpStatusCode.Accepted);
+        _h.Allocations.Should().ContainSingle().Which.Fields!.Should().NotContainKey("sprk_resubmissionof");
+        _sourceRights.Calls.Should().NotContain(c => c.Set == FinanceAuthorizationFilter.InvoiceEntitySet);
+    }
+
+    [Fact(DisplayName = "097b (seed-proof, the Write guard): without the caller's own Write on the invoice the route is the uniform 404, byte-for-byte the answer for an unknown invoice; nothing read about it, nothing written")]
+    public async Task FromDocument_correction_without_write_is_the_uniform_404()
+    {
+        CorrectableInvoice(rights: AccessRights.Read);
+
+        var denied = await PostFromDocumentAsync(CorrectionBody());
+        var unknown = await PostFromDocumentAsync(CorrectionBody(invoiceId: Guid.NewGuid()));
+
+        denied.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        unknown.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        var deniedBody = await denied.Content.ReadAsStringAsync();
+        using (var problem = JsonDocument.Parse(deniedBody))
+        {
+            problem.RootElement.GetProperty("reasonCode").GetString().Should().Be("sdap.access.deny.record_unavailable");
+        }
+
+        var normalise = (string body) => System.Text.RegularExpressions.Regex.Replace(body, "\"correlationId\":\"[^\"]*\"", "\"correlationId\":\"x\"");
+        normalise(await unknown.Content.ReadAsStringAsync()).Should().Be(normalise(deniedBody), "the answer reveals nothing about the invoice");
+        deniedBody.Should().NotContain(CorrectionSeed.OldInvoiceId.ToString());
+        _h.Entities.Verify(e => e.RetrieveAsync("sprk_invoice", It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()), Times.Never());
+        _sourceRights.Calls.Should().NotContain(c => c.Set == FinanceAuthorizationFilter.DocumentEntitySet, "the source is not read for a refused Correction");
+        NothingWritten();
+    }
+
+    public static TheoryData<string> CorrectionRefusals => new() { "invoice_status", "different_firm", "different_core_record", "different_invoice_number", "no_submission" };
+
+    [Theory(DisplayName = "097b (seed-proof, the firm and core-record guards; must fire): a Correction the guard refuses is 409 correction_not_allowed with its reason; nothing written")]
+    [MemberData(nameof(CorrectionRefusals))]
+    public async Task FromDocument_correction_refused_is_409_with_its_reason(string reason)
+    {
+        CorrectableInvoice(reason switch
+        {
+            "invoice_status" => CorrectionSeed.Invoice(status: Sprk.Bff.Api.Services.Finance.InvoiceStatusCodes.Approved),
+            "different_firm" => CorrectionSeed.Invoice(firm: Guid.NewGuid()),
+            "different_core_record" => CorrectionSeed.Invoice(coreId: Guid.NewGuid()),
+            _ => null,
+        });
+        if (reason == "no_submission")
+        {
+            _h.PriorSubmissions.Clear();
+        }
+
+        var response = await PostFromDocumentAsync(CorrectionBody(number: reason == "different_invoice_number" ? "INV-8" : CorrectionSeed.Number));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Conflict, await response.Content.ReadAsStringAsync());
+        using var problem = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        problem.RootElement.GetProperty("errorCode").GetString().Should().Be("ebilling.submission.correction_not_allowed");
+        problem.RootElement.GetProperty("reason").GetString().Should().Be(reason);
+        if (reason == "invoice_status")
+        {
+            problem.RootElement.GetProperty("invoiceStatus").GetString().Should().Be("Approved");
+        }
+
+        NothingWritten();
+    }
+
+    [Theory(DisplayName = "097b: an invalid mode, a New naming an invoice, or a Correction without one is 400 before anything is read; nothing written")]
+    [InlineData("Replace", true, "mode")]
+    [InlineData("New", true, "invoiceId")]
+    [InlineData(null, true, "invoiceId")]
+    [InlineData("Correction", false, "invoiceId")]
+    public async Task FromDocument_invalid_correction_fields_are_400(string? mode, bool withInvoice, string field)
+    {
+        CorrectableInvoice();
+        object body = withInvoice
+            ? CorrectionBody(mode: mode)
+            : new
+            {
+                communicationId = SourceCommunicationId,
+                documentId = SourceDocumentId,
+                coreRecord = new { kind = "matter", id = MatterId },
+                firmId = FirmId,
+                firmInvoiceNumber = CorrectionSeed.Number,
+                mode,
+            };
+
+        var response = await PostFromDocumentAsync(body);
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        using var problem = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        problem.RootElement.GetProperty("errors").TryGetProperty(field, out _).Should().BeTrue();
+        _sourceRights.Calls.Should().BeEmpty("the body is validated before anything is asked");
+        NothingWritten();
+    }
 }

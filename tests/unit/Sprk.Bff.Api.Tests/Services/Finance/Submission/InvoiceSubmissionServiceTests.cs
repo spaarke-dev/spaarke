@@ -111,6 +111,18 @@ public sealed class InvoiceSubmissionServiceTests
         /// <summary>050a review #5: non-null, the allocator's create stores this row as <see cref="Submission"/> (what a concurrent creator left).</summary>
         public Entity? StoredOnCreate;
 
+        /// <summary>Task 097b: the <c>sprk_invoice</c> rows a Correction reads, by id (absent: not found).</summary>
+        public readonly Dictionary<Guid, Entity> Invoices = new();
+
+        /// <summary>
+        /// Task 097b: the submissions the Correction guard's query (<c>sprk_invoicesubmission</c> by <c>sprk_invoice</c>) can find; each is
+        /// returned when its <c>sprk_invoice</c> is the queried invoice.
+        /// </summary>
+        public readonly List<Entity> PriorSubmissions = new();
+
+        /// <summary>Task 097b: non-null, the Correction guard's submission query throws this.</summary>
+        public Exception? PriorSubmissionReadFailure;
+
         /// <summary>050a: the <c>sprk_document</c> the existing-document entry reads (null: not found).</summary>
         public Entity? ExistingDocument;
 
@@ -235,10 +247,29 @@ public sealed class InvoiceSubmissionServiceTests
                     "sprk_communicationthread" => ThreadReadFailure is { } threadFailure
                         ? throw threadFailure
                         : Threads.TryGetValue(id, out var thread) ? OnlyColumns(thread, columns) : throw NotFound(),
+                    "sprk_invoice" when Invoices.Count > 0 => Invoices.TryGetValue(id, out var invoice) ? OnlyColumns(invoice, columns) : throw NotFound(),
                     _ => null!,
                 });
             Entities.Setup(e => e.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
-                .ReturnsAsync(new EntityCollection());
+                .ReturnsAsync((QueryExpression q, CancellationToken _) =>
+                {
+                    // Task 097b: the Correction guard's read of an invoice's submission; every other query finds nothing, as before.
+                    if (q.EntityName == "sprk_invoicesubmission"
+                        && q.Criteria.Conditions.FirstOrDefault(c => c.AttributeName == "sprk_invoice") is { } byInvoice)
+                    {
+                        if (PriorSubmissionReadFailure is { } failure)
+                        {
+                            throw failure;
+                        }
+
+                        return new EntityCollection(PriorSubmissions
+                            .Where(s => s.GetAttributeValue<EntityReference>("sprk_invoice")?.Id is { } invoiceId
+                                && byInvoice.Values.Contains(invoiceId))
+                            .ToList());
+                    }
+
+                    return new EntityCollection();
+                });
             Entities.Setup(e => e.DeleteAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
                 .Callback((string entity, Guid id, CancellationToken _) => Deleted.Add((entity, id)))
                 .Returns(Task.CompletedTask);
