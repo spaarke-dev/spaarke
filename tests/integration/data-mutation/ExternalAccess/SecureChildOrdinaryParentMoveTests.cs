@@ -17,6 +17,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Xrm.Sdk;
+using Microsoft.Xrm.Sdk.Query;
 using Spaarke.Dataverse;
 using Spaarke.Scheduling;
 using Sprk.Bff.Api.Services.Access;
@@ -1955,5 +1956,44 @@ public class SecureChildOrdinaryParentMoveTests
         _world.OwnerOf("sprk_todo", inB).Should().Be(DataversePrincipalRef.Team(GeneralTeam),
             "a default-team row out of step with its primary follows the primary, not the walked root");
         _world.OwnerWrites.Should().NotContain(w => w.Id == workAssignment, "the work assignment is a hop, never a row of the pass");
+    }
+
+    private static IEnumerable<object> ConditionValuesOf(FilterExpression filter) =>
+        filter.Conditions.SelectMany(c => c.Values).Concat(filter.Filters.SelectMany(ConditionValuesOf));
+
+    [Fact(DisplayName = "Owner decision 2026-10-29: the work-assignment hop reads only the root's own — a person-owned work assignment filed under an UNRELATED matter's invoice is never listed and that invoice never read; a team-owned one under the root is not listed either")]
+    public async Task TheWorkAssignmentHop_ReadsNoWorkAssignmentOrIntermediateOutsideTheRoot()
+    {
+        MatterMovedToB();
+        var someone = new EntityReference("systemuser", SecureChildShareWorld.SomeUser);
+        var related = WorkAssignmentUnderTheMatter(someone, throughAnInvoice: true);
+        Row("sprk_event", EventId, TeamRef(GeneralTeam), ("sprk_regardingworkassignment", "sprk_workassignment", related));
+        var teamOwned = WorkAssignmentUnderTheMatter(TeamRef(GeneralTeam), throughAnInvoice: true);
+
+        var unrelatedMatter = OrdinaryMatterOwnedBy(GeneralTeam);
+        var unrelatedInvoice = Guid.NewGuid();
+        Row("sprk_invoice", unrelatedInvoice, TeamRef(GeneralTeam), ("sprk_matter", Matter, unrelatedMatter));
+        var unrelated = PersonOwnedWorkAssignment(("sprk_regardinginvoice", "sprk_invoice", unrelatedInvoice));
+        var before = _world.Queries.Count;
+
+        var report = await Reconciler().ReconcileOrdinaryParentMoveAsync(
+            Matter, MatterId, SecureChildReconcileMode.Apply, maxWrites: 200, CancellationToken.None);
+
+        report.Status.Should().Be(SecureChildReconcileStatus.Completed, report.Detail);
+        _world.OwnerOf("sprk_event", EventId).Should().Be(DataversePrincipalRef.Team(TeamB),
+            "the root's own person-owned work assignment is still reached through its invoice");
+
+        var pass = _world.Queries.Skip(before).ToList();
+        pass.Where(q => q.EntityName == "sprk_invoice").SelectMany(q => ConditionValuesOf(q.Criteria))
+            .Should().NotContain(unrelatedInvoice, "an invoice outside the root is never read");
+        var hopQueries = pass.Where(q => q.EntityName == "sprk_workassignment").ToList();
+        hopQueries.Should().NotBeEmpty();
+        foreach (var query in hopQueries)
+        {
+            query.PageInfo = null; // replayed whole: every row the query names
+            _world.Answer(query).Entities.Select(e => e.Id).Should()
+                .NotContain(unrelated, "a work assignment filed under another matter's invoice is not the root's to list")
+                .And.NotContain(teamOwned, "a team-owned work assignment is left out by the query itself");
+        }
     }
 }
