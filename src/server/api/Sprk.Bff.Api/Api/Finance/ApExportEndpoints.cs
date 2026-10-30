@@ -18,7 +18,7 @@ namespace Sprk.Bff.Api.Api.Finance;
 /// through <see cref="ApExportAuthorization.RouteTargets"/> (refused before the handler runs and nothing is read or written); the per-invoice part is asked by the service on
 /// every export. The batch read needs Read on the batch (Dataverse as the caller), uniform 404 otherwise. A later dedicated export right changes
 /// that class only.</para>
-/// <para><b>Answers.</b> 201 with the batch; 400 <c>ebilling.export.invalid_request</c> / <c>selection_refused</c> (per-invoice reasons, nothing claimed);
+/// <para><b>Answers.</b> 201 with the batch; 400 <c>ebilling.export.invalid_request</c> / <c>selection_refused</c> (per-invoice reasons, nothing claimed) / <c>batch_total_out_of_range</c> (nothing claimed);
 /// 403 <c>ebilling.export.not_permitted</c> (names no invoice); 409 <c>invoice_conflict</c> (nothing claimed); 422 <c>mapping_invalid</c>; 500/503 for faults,
 /// each saying whether anything was exported. 503 <c>ebilling.disabled</c> when the module is off.</para>
 /// </remarks>
@@ -155,6 +155,7 @@ public static class ApExportEndpoints
                 ["errorCode"] = result.Code,
                 ["invoices"] = result.Invoices?.Select(i => new { invoiceId = i.InvoiceId, reason = i.Reason }).ToArray() ?? [],
             }),
+        ApExportOutcome.TotalOutOfRange => InvoiceLineReviewEndpoints.Refused(StatusCodes.Status400BadRequest, result.Code!, result.Detail),
         ApExportOutcome.MappingInvalid => InvoiceLineReviewEndpoints.Refused(StatusCodes.Status422UnprocessableEntity, result.Code!, result.Detail),
         ApExportOutcome.Conflict => Results.Problem(
             statusCode: StatusCodes.Status409Conflict, detail: result.Detail,

@@ -26,7 +26,7 @@ namespace Sprk.Bff.Api.Tests.Auth.Finance;
 
 /// <summary>
 /// Who may export invoices to AP (ebilling-r1 task 150; owner decision EB-D-178, ADR-008, ADR-019): Create on <c>sprk_billingexport</c> AND
-/// <c>ebilling.invoice.decide</c> (Write) on EVERY invoice of the batch. Any failure refuses the whole batch before anything is written, names no
+/// <c>ebilling.invoice.decide</c> (Write) AND Read (D-85) on EVERY invoice of the batch. Any failure refuses the whole batch before anything is written, names no
 /// other invoice, and a rights read that cannot be answered refuses too (fail closed).
 /// </summary>
 /// <remarks>
@@ -57,9 +57,69 @@ public sealed class ApExportAuthorizationTests
 
         outcome.Should().Be(ApExportAuthorizationOutcome.Allowed);
         world.Probe.Calls.Should().ContainSingle().Which.Should().Be(new FinAuth.PrivilegeCall(ApExportAuthorization.CreateBatchPrivilege, HasToken: true));
+        // Two rights per invoice (the decide right = Write, then Read), each asked of Dataverse as the caller.
         world.Access.Calls.Should().BeEquivalentTo([
             new FinAuth.AccessCall(FinAuth.AccessPath.Record, InvoiceSet, a.Id, HasToken: true),
+            new FinAuth.AccessCall(FinAuth.AccessPath.Record, InvoiceSet, b.Id, HasToken: true),
+            new FinAuth.AccessCall(FinAuth.AccessPath.Record, InvoiceSet, a.Id, HasToken: true),
             new FinAuth.AccessCall(FinAuth.AccessPath.Record, InvoiceSet, b.Id, HasToken: true)]);
+    }
+
+    [Fact(DisplayName = "150 D-85 review SEEDED: Write without Read on an invoice refuses the WHOLE batch (the files would carry values the caller cannot read), nothing is written, no invoice is named")]
+    public async Task WriteWithoutRead_RefusesTheWholeBatch_NothingWritten()
+    {
+        var world = new ApExportWorld();
+        var a = world.AddInvoice("INV-A");
+        var b = world.AddInvoice("INV-B");
+        world.GrantEverything();
+        world.Access.Grant(InvoiceSet, b.Id, AccessRights.Write); // can approve it, cannot read it
+
+        var outcome = await world.Authorization.AuthorizeExportAsync(world.Caller, [a.Id, b.Id], CancellationToken.None);
+        var result = await world.ExportAsync(a, b);
+
+        outcome.Should().Be(ApExportAuthorizationOutcome.NotPermitted);
+        result.Outcome.Should().Be(ApExportOutcome.NotPermitted);
+        result.Code.Should().Be(ApExportCodes.NotPermitted);
+        result.Invoices.Should().BeNull();
+        $"{result.Detail} {result.Code}".Should().NotContain(a.Id.ToString()).And.NotContain(b.Id.ToString());
+        world.Dataverse.Log.Should().BeEmpty("refused before anything is read or written");
+        world.Batches().Should().BeEmpty();
+        world.StoredFiles().Should().BeEmpty();
+        world.StatusOfInvoice(a.Id).Should().Be(InvoiceStatusCodes.Approved);
+        world.StatusOfInvoice(b.Id).Should().Be(InvoiceStatusCodes.Approved);
+    }
+
+    [Fact(DisplayName = "150 D-85 review: the candidates list leaves out an invoice the caller can write but not read")]
+    public async Task WriteWithoutRead_IsNotACandidate()
+    {
+        var world = new ApExportWorld();
+        var ok = world.AddInvoice("INV-OK");
+        var writeOnly = world.AddInvoice("INV-WRITE-ONLY");
+        world.GrantEverything();
+        world.Access.Grant(InvoiceSet, writeOnly.Id, AccessRights.Write);
+
+        var candidates = await world.Service.ListCandidatesAsync(world.Caller, CancellationToken.None);
+
+        candidates!.Candidates.Select(c => c.InvoiceId).Should().BeEquivalentTo([ok.Id]);
+    }
+
+    [Fact(DisplayName = "150 D-85 review: a Read answer that cannot be given (Write held, the lookup faulted) is 'undetermined' - not allowed - and the list shows nothing")]
+    public async Task ReadAnswerFault_FailsClosed()
+    {
+        var world = new ApExportWorld();
+        var a = world.AddInvoice("INV-A");
+        world.GrantEverything();
+        world.Access.Grant(InvoiceSet, a.Id, AccessRights.Write); // the decide right holds; Read does not, and Dataverse gave no answer for it
+        world.Access.Fault(InvoiceSet, a.Id);
+
+        var outcome = await world.Authorization.AuthorizeExportAsync(world.Caller, [a.Id], CancellationToken.None);
+        var result = await world.ExportAsync(a);
+        var candidates = await world.Service.ListCandidatesAsync(world.Caller, CancellationToken.None);
+
+        outcome.Should().Be(ApExportAuthorizationOutcome.Undetermined);
+        result.Outcome.Should().Be(ApExportOutcome.AuthorizationUnavailable);
+        candidates.Should().BeNull();
+        world.Batches().Should().BeEmpty();
     }
 
     [Fact(DisplayName = "150 EB-D-178: no Create on the batch table is refused before any invoice right is asked, and nothing is written")]
@@ -275,6 +335,24 @@ public sealed class ApExportAuthorizationTests
         host.World.Dataverse.Log.Should().BeEmpty();
     }
 
+    [Fact(DisplayName = "150 D-85 review: with Create and Write but no Read on one invoice, POST is 403 ebilling.export.not_permitted, names no invoice, and nothing is written")]
+    public async Task WriteWithoutRead_Is403_NamingNoInvoice()
+    {
+        await using var host = await Host.StartAsync();
+        var a = host.World.AddInvoice("INV-A");
+        var b = host.World.AddInvoice("INV-B");
+        host.World.GrantEverything();
+        host.World.Access.Grant(InvoiceSet, b.Id, AccessRights.Write);
+
+        var response = await host.SendAsync("POST", ids: [a.Id, b.Id]);
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        var body = await response.Content.ReadAsStringAsync();
+        body.Should().Contain(ApExportCodes.NotPermitted).And.NotContain(a.Id.ToString()).And.NotContain(b.Id.ToString());
+        host.World.Dataverse.Log.Should().BeEmpty();
+        host.World.Batches().Should().BeEmpty();
+    }
+
     [Fact(DisplayName = "150: a rights read fault on POST is 503 ebilling.export.authorization_unavailable and nothing is written")]
     public async Task RightsFault_Is503()
     {
@@ -355,6 +433,23 @@ public sealed class ApExportAuthorizationTests
         host.World.StatusOfInvoice(a.Id).Should().Be(InvoiceStatusCodes.SentToAp);
         host.World.OwnerQuestions.Should().OnlyContain(q => q.RequestedBy != null && q.RequestedBy.SystemUserId == ApExportWorld.CallerSystemUser,
             "the file rows are owned through the acting user, resolved from the caller's token");
+    }
+
+    [Fact(DisplayName = "150 review F4: a credit-memo batch whose total is below the batch total column's minimum is 400 ebilling.export.batch_total_out_of_range through the route, with nothing claimed or written")]
+    public async Task BatchTotalOutOfRange_Is400_AndWritesNothing()
+    {
+        await using var host = await Host.StartAsync();
+        var credit = host.World.AddInvoice("INV-CREDIT", approved: -250m);
+        host.World.GrantEverything();
+        var writesBefore = host.World.Dataverse.Writes;
+
+        var response = await host.SendAsync("POST", ids: [credit.Id]);
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        JsonNode.Parse(await response.Content.ReadAsStringAsync())!["errorCode"]!.GetValue<string>().Should().Be(ApExportCodes.BatchTotalOutOfRange);
+        host.World.Dataverse.Writes.Should().Be(writesBefore);
+        host.World.Batches().Should().BeEmpty();
+        host.World.StatusOfInvoice(credit.Id).Should().Be(InvoiceStatusCodes.Approved);
     }
 
     [Fact(DisplayName = "150: a caller whose systemuser cannot be established is 403 ebilling.export.caller_unresolved and nothing is written")]
