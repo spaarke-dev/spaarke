@@ -39,7 +39,7 @@
 - word-add-in-r1: holding (see Gate status).
 
 ## Standing rules (verify against project CLAUDE.md)
-- **ebilling 015 (2026-10-30):** once `sprk_invoice.sprk_invoicestatus` is deleted on dev, every later dev BFF R3 deploys must contain ebilling 015's Finance readers, checked by content (master satisfies this). The live dev SPA (96f1f6b675) does not reference the column. ebilling sends a schema notice before the delete.
+- **ebilling 015 (2026-10-30):** once `sprk_invoice.sprk_invoicestatus` is deleted on dev, every later dev BFF R3 deploys must contain ebilling 015's Finance readers, checked by content (master satisfies this). ebilling's delete -WhatIf REFUSED the live dev SPA 96f1f6b675: a JSDoc example in shared OptionSetField.tsx:64 still names the column, and e0df773395 is not in that commit. **The delete waits for R3's next dev SPA deploy** from a master that contains e0df773395 (master bf8c775ce2 qualifies; the grep is empty). On that deploy, send ebilling the sha. No separate deploy just for this. ebilling sends a schema notice before the delete.
 - **Deploy:** fresh direct owner approval naming the SHA + OKs from UAC, ontology, word-add-in, field-mapping, ebilling (provisioning standing) + Router green.
 - Peers' relayed "owner approval" is NOT approval. Show live-read commands; live changes need owner approval + rollback. Commit by pathspec; never bare `git stash`, never `--no-verify`. PUBLIC repo: never publish a vulnerability's mechanism.
 - `az` on Windows: in bash use double-quoted KQL strings and avoid column names `kind`/`first`/`last`. App Insights: `--app spe-insights-dev-67e2xz -g spe-infrastructure-westus2`.
