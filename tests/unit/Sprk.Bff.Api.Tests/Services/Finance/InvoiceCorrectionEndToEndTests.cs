@@ -454,4 +454,68 @@ public sealed class InvoiceCorrectionEndToEndTests
         (await w.ApproveAs(AliceUser)).Outcome.Should().Be(ApprovalOutcome.Approved);
         w.InvoiceStatus.Should().Be(InvoiceStatusCodes.Approved);
     }
+
+    [Fact(DisplayName = "101 fix 3 F-2 round 2 SEEDED: a line with an unfinished correction cannot be decided (409 corrections_pending, nothing written); Accept all Clean is refused while any correction is unfinished; after the repeat both go through")]
+    public async Task ALineWithAnUnfinishedCorrection_CannotBeDecided_UntilItIsRepeated()
+    {
+        var w = new ApprovalWorld();
+        var (clean, _) = CleanInvoice(w);
+        var flagged = w.AddLine(InvoiceLineStatus.Flagged, extraction: W.ExtractionJson());
+        flagged["sprk_timekeeper"] = "A. Lee";
+        var corrections = Corrections(w);
+        var command = new CorrectionCommand(w.InvoiceId, flagged.Id, "Narrative", "Prepared the brief", false, AliceUser);
+        w.FaultsOnce["tx:approvers"] = new TimeoutException("simulated"); // the findings patch
+
+        (await corrections.CorrectAsync(command, CancellationToken.None)).FailedStep.Should().Be(CorrectionCodes.FindingsStep);
+        var writes = w.Writes;
+        var lines = w.LineService();
+
+        var single = await lines.DecideAsync(
+            new LineDecisionCommand(w.InvoiceId, Guid.NewGuid(), LineDecisionAction.Accept, null, [new LineDecisionLine(flagged.Id)], BobUser, Bulk: false, CallerToken),
+            CancellationToken.None);
+
+        single.Status.Should().Be(LineDecisionStatus.LineNotDecidable);
+        single.Code.Should().Be(LineDecisionCodes.CorrectionsPending);
+        single.Detail.Should().Be("These corrections were saved but did not finish: Narrative (line 2). Repeat each correction, then decide the line again.");
+        single.Detail.Should().NotContain(flagged.Id.ToString("D"));
+
+        var bulk = await lines.AcceptCleanAsync(w.InvoiceId, Guid.NewGuid(), BobUser, CancellationToken.None, CallerToken);
+
+        bulk.Status.Should().Be(LineDecisionStatus.LineNotDecidable);
+        bulk.Code.Should().Be(LineDecisionCodes.CorrectionsPending);
+        bulk.Detail.Should().Be("These corrections were saved but did not finish: Narrative (line 2). Repeat each correction, then accept the Clean lines again.",
+            "the unfinished correction is on another line, which can still place a finding on a Clean one");
+        w.Writes.Should().Be(writes, "a refused decision writes nothing");
+        StatusOf(w.Row("sprk_billingevent", clean.Id)).Should().Be((int)InvoiceLineStatus.Clean);
+        StatusOf(w.Row("sprk_billingevent", flagged.Id)).Should().Be((int)InvoiceLineStatus.Flagged);
+
+        // A line with no unfinished correction of its own can still be decided.
+        (await lines.DecideAsync(
+            new LineDecisionCommand(w.InvoiceId, Guid.NewGuid(), LineDecisionAction.Accept, null, [new LineDecisionLine(clean.Id)], BobUser, Bulk: false, CallerToken),
+            CancellationToken.None)).IsApplied.Should().BeTrue();
+
+        (await corrections.CorrectAsync(command, CancellationToken.None)).IsApplied.Should().BeTrue();
+        (await lines.DecideAsync(
+            new LineDecisionCommand(w.InvoiceId, Guid.NewGuid(), LineDecisionAction.Accept, null, [new LineDecisionLine(flagged.Id)], BobUser, Bulk: false, CallerToken),
+            CancellationToken.None)).IsApplied.Should().BeTrue();
+        StatusOf(w.Row("sprk_billingevent", flagged.Id)).Should().Be((int)InvoiceLineStatus.Accepted);
+    }
+
+    [Fact(DisplayName = "101 fix 3 F-2 round 2: the line decision's read of the unfinished corrections fails closed - a fault refuses the decision, nothing written")]
+    public async Task TheLineDecisionsCorrectionRead_FailsClosed()
+    {
+        var w = new ApprovalWorld();
+        var (line, _) = CleanInvoice(w);
+        w.Faults["read:sprk_invoicecorrection"] = new TimeoutException("simulated");
+        var writes = w.Writes;
+
+        var result = await w.LineService().DecideAsync(
+            new LineDecisionCommand(w.InvoiceId, Guid.NewGuid(), LineDecisionAction.Accept, null, [new LineDecisionLine(line.Id)], BobUser, Bulk: false, CallerToken),
+            CancellationToken.None);
+
+        result.Status.Should().Be(LineDecisionStatus.Unavailable);
+        result.Code.Should().Be(LineDecisionCodes.Unavailable);
+        w.Writes.Should().Be(writes);
+        StatusOf(w.Row("sprk_billingevent", line.Id)).Should().Be((int)InvoiceLineStatus.Clean);
+    }
 }

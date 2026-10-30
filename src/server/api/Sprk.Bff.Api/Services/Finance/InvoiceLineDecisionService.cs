@@ -101,6 +101,10 @@ public static class LineDecisionCodes
     public const string Incomplete = "ebilling.decision.incomplete";
     public const string DeciderUnresolved = "ebilling.decider.unresolved";
     public const string NotAuthorized = "ebilling.decision.not_authorized";
+
+    /// <summary>101 fix round, part 3 (F-2): a correction of the line (for Accept all Clean, of the invoice) was saved but its follow-through has not
+    /// finished; 409, nothing was changed. The detail names each correction by field and line and says to repeat it.</summary>
+    public const string CorrectionsPending = "ebilling.line.corrections_pending";
 }
 
 /// <summary>A decided line as the caller needs it to update the screen without a second read.</summary>
@@ -289,7 +293,7 @@ public sealed class InvoiceLineDecisionService
 
         try
         {
-            return await ApplyAsync(command, acceptClean, ct).ConfigureAwait(false);
+            return await ApplyAsync(command, acceptClean, checkCorrections: true, ct).ConfigureAwait(false);
         }
         finally
         {
@@ -317,7 +321,7 @@ public sealed class InvoiceLineDecisionService
         Guid invoiceId, Guid decisionId, Guid deciderSystemUserId, string? callerBearerToken, CancellationToken ct)
     {
         var command = new LineDecisionCommand(invoiceId, decisionId, LineDecisionAction.Accept, null, [], deciderSystemUserId, Bulk: true, callerBearerToken);
-        return ShapeError(command, acceptClean: true) is { } invalid ? Task.FromResult(invalid) : ApplyAsync(command, acceptClean: true, ct);
+        return ShapeError(command, acceptClean: true) is { } invalid ? Task.FromResult(invalid) : ApplyAsync(command, acceptClean: true, checkCorrections: false, ct);
     }
 
     /// <summary>
@@ -330,7 +334,7 @@ public sealed class InvoiceLineDecisionService
     {
         var command = new LineDecisionCommand(
             invoiceId, decisionId, LineDecisionAction.Accept, null, lineIds.Select(id => new LineDecisionLine(id)).ToList(), deciderSystemUserId, Bulk: true, callerBearerToken);
-        return ShapeError(command, acceptClean: false) is { } invalid ? Task.FromResult(invalid) : ApplyAsync(command, acceptClean: false, ct);
+        return ShapeError(command, acceptClean: false) is { } invalid ? Task.FromResult(invalid) : ApplyAsync(command, acceptClean: false, checkCorrections: false, ct);
     }
 
     /// <summary>
@@ -501,7 +505,9 @@ public sealed class InvoiceLineDecisionService
 
     private sealed record Proposal(Target Line, InvoiceLineStatus Status, decimal Approved, string? Reason, string Action, string Outcome);
 
-    private async Task<LineDecisionResult> ApplyAsync(LineDecisionCommand command, bool acceptClean, CancellationToken ct)
+    /// <param name="checkCorrections">Refuse while a correction is unapplied (<see cref="RefuseUnappliedAsync"/>). False on the approval's held paths: the
+    /// approval's own guard has just refused on the same read (<see cref="InvoiceApprovalCodes.CorrectionsPending"/>).</param>
+    private async Task<LineDecisionResult> ApplyAsync(LineDecisionCommand command, bool acceptClean, bool checkCorrections, CancellationToken ct)
     {
         Entity? invoice;
         List<Entity> lineRows;
@@ -613,6 +619,12 @@ public sealed class InvoiceLineDecisionService
                     proposals.Add(new Proposal(target, InvoiceLineStatus.Reduced, approved, reason, "reduce-line", "Reduced"));
                     break;
             }
+        }
+
+        // ── 101 fix round, part 3 (F-2): no line is decided while a correction of it has not been followed through. ──
+        if (checkCorrections && await RefuseUnappliedAsync(command.InvoiceId, acceptClean, chosen, lineRows, ct).ConfigureAwait(false) is { } pending)
+        {
+            return pending;
         }
 
         // ── Dry-run the totals (I-1 via 016's calculator): a refusal changes nothing. ──
@@ -761,6 +773,39 @@ public sealed class InvoiceLineDecisionService
         return signalsNotClosed > 0
             ? Incomplete(command, committed, SignalsStep, $"signals-not-closed:{signalsNotClosed}")
             : new LineDecisionResult(LineDecisionStatus.Applied, "ok", Lines: decided, Totals: TotalsOf(invoice, calculation));
+    }
+
+    /// <summary>
+    /// 101 fix round, part 3 (F-2): a decision is refused (409 <see cref="LineDecisionCodes.CorrectionsPending"/>, nothing changed) while a correction of a
+    /// chosen line was saved but not followed through (<see cref="InvoiceCorrectionReevaluation.ReadUnappliedAsync"/>): the line's findings and status may
+    /// not show the corrected value yet, and once decided its findings are never patched again. Accept all Clean is refused while ANY correction of the
+    /// invoice is unapplied (a header correction, or one of another line, can still place a finding on a Clean line), and names them all. A read fault
+    /// refuses (503 <see cref="LineDecisionCodes.Unavailable"/>): fail closed.
+    /// </summary>
+    private async Task<LineDecisionResult?> RefuseUnappliedAsync(
+        Guid invoiceId, bool acceptClean, IReadOnlyList<LineDecisionLine> chosen, IReadOnlyList<Entity> lineRows, CancellationToken ct)
+    {
+        IReadOnlyList<InvoiceCorrectionReevaluation.UnappliedCorrection> unapplied;
+        try
+        {
+            unapplied = await InvoiceCorrectionReevaluation.ReadUnappliedAsync(_entities, invoiceId, lineRows, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            return ReadFailed(invoiceId, ex);
+        }
+
+        var chosenIds = chosen.Select(l => l.LineId).ToHashSet();
+        var blocking = acceptClean ? unapplied : unapplied.Where(u => u.LineId is { } id && chosenIds.Contains(id)).ToList();
+        if (blocking.Count == 0)
+        {
+            return null;
+        }
+
+        _logger.LogWarning("Line decision on invoice {InvoiceId}: {Count} corrections have not been followed through; nothing changed.", invoiceId, blocking.Count);
+        return new LineDecisionResult(
+            LineDecisionStatus.LineNotDecidable, LineDecisionCodes.CorrectionsPending,
+            InvoiceCorrectionReevaluation.UnappliedText(blocking, lineRows, acceptClean ? "accept the Clean lines again" : "decide the line again"));
     }
 
     private LineDecisionResult ReadFailed(LineDecisionCommand command, Exception ex) => ReadFailed(command.InvoiceId, ex);
