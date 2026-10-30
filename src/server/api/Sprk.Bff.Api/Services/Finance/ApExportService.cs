@@ -24,6 +24,7 @@ public static class ApExportCodes
     public const string TransitionIncomplete = "ebilling.export.transition_incomplete";
     public const string CompensationIncomplete = "ebilling.export.compensation_incomplete";
     public const string CompletionIncomplete = "ebilling.export.completion_incomplete";
+    public const string BatchTotalOutOfRange = "ebilling.export.batch_total_out_of_range";
 
     /// <summary>Per-invoice reasons of <see cref="SelectionRefused"/>.</summary>
     public const string ReasonNotApproved = "invoice_not_approved";
@@ -60,6 +61,9 @@ public enum ApExportOutcome
     Conflict,
     Failed,
     Incomplete,
+
+    /// <summary>The batch total is outside what <c>sprk_billingexport.sprk_totalamount</c> can hold (400, nothing claimed or written).</summary>
+    TotalOutOfRange,
 }
 
 /// <summary>The answer of <see cref="ApExportService.CreateBatchAsync"/>: a created batch, or one outcome with its stable code.</summary>
@@ -109,7 +113,17 @@ public sealed class ApExportService
     /// <summary>The most invoices one batch may hold; and the most the candidates list shows.</summary>
     public const int MaxInvoicesPerBatch = 200, CandidateCap = 500;
 
+    /// <summary>
+    /// The range of <c>sprk_billingexport.sprk_totalamount</c> as configured (docs/data-model/sprk_billingexport.md): a batch whose total is outside it
+    /// is refused before any claim, because the write that completes the batch would fail AFTER the invoices were sent to AP. The minimum is 0 until
+    /// <c>scripts/ebilling/Deploy-EbillingInvoiceTotalsRange.ps1</c> has run on the environment (it lowers it to -922337203685477, D-129 (4)); once it
+    /// has, relax <see cref="BatchTotalMinimum"/> here, the only place the minimum is spelled.
+    /// </summary>
+    public const decimal BatchTotalMinimum = 0m, BatchTotalMaximum = 1_000_000_000m;
+
     private const int PortionApproved = 100000001;
+
+    /// <summary>The page size of every multi-row read here. Dataverse caps <c>TopCount</c> and a page at 5,000: a larger number fails the call.</summary>
     private const int ReadLimit = 5000;
     private static readonly string[] SelectionColumns =
     [
@@ -237,6 +251,16 @@ public sealed class ApExportService
                 "Only Approved invoices that are not yet in an export batch can be exported. Nothing was exported.", null, refusals, null);
         }
 
+        // The batch total, computed once here: it is written to the batch at the very end, after the invoices were sent to AP, so a total the column
+        // cannot hold must be refused NOW, before any claim (a failing completion write there would leave a Generating batch of sent invoices).
+        var total = selected.Sum(r => Dec(r, "sprk_approvedtotal") ?? 0m);
+        if (total < BatchTotalMinimum || total > BatchTotalMaximum)
+        {
+            _logger.LogWarning("AP export: the batch total is outside {Minimum}..{Maximum}; nothing was claimed", BatchTotalMinimum, BatchTotalMaximum);
+            return ApExportResult.Refused(ApExportOutcome.TotalOutOfRange, ApExportCodes.BatchTotalOutOfRange,
+                "The total of the selected invoices is outside the range an export batch can record. Select different invoices. Nothing was exported.");
+        }
+
         // (5) The batch, Generating. Owned like any user-owned row the caller creates (the caller's business-unit team), so the people who can see
         // the invoices can see the batch (D-90).
         var batchId = Guid.NewGuid();
@@ -319,7 +343,6 @@ public sealed class ApExportService
             }
 
             var model = mapping.Model!;
-            var total = selected.Sum(r => Dec(r, "sprk_approvedtotal") ?? 0m);
             var written = new List<ApExportFileDto>();
             foreach (var format in formats)
             {
@@ -601,13 +624,16 @@ public sealed class ApExportService
         throw new InvalidOperationException($"Invoice {invoiceId} kept changing; its claim by batch {batchId} could not be released.");
     }
 
-    /// <summary>Whether the invoice is (or, when its status cannot be read, may be) Sent to AP. Unknown counts as sent: its claim is kept (fail safe).</summary>
+    /// <summary>
+    /// Whether the invoice is (or, when its status cannot be read, may be) sent: Sent to AP or Paid. Any other status (still Approved, or moved elsewhere
+    /// by someone else) is NOT sent by this batch, so its claim is released. Unknown counts as sent: its claim is kept (fail safe).
+    /// </summary>
     private async Task<bool> MaybeSentAsync(Guid invoiceId)
     {
         try
         {
             var row = await _entities.RetrieveAsync(InvoiceEntity, invoiceId, ["statuscode"], CancellationToken.None).ConfigureAwait(false);
-            return StatusOf(row) != InvoiceStatusCodes.Approved;
+            return StatusOf(row) is InvoiceStatusCodes.SentToAp or InvoiceStatusCodes.Paid;
         }
         catch (Exception ex)
         {
@@ -616,18 +642,19 @@ public sealed class ApExportService
         }
     }
 
+    /// <summary>True only when THIS call moved the invoice (<see cref="InvoiceTransitionOutcome.Transitioned"/>): an invoice that was already Sent to AP was moved by someone else.</summary>
     private async Task<bool> TrySendAsync(Guid invoiceId)
     {
         var ct = CancellationToken.None;
         try
         {
             var result = await _lifecycle.TransitionAsync(invoiceId, InvoiceLifecycleStatus.SentToAp, ct).ConfigureAwait(false);
-            if (!result.Succeeded)
+            if (result.Outcome != InvoiceTransitionOutcome.Transitioned)
             {
-                _logger.LogError("AP export: invoice {InvoiceId} could not move to Sent to AP ({Reason})", invoiceId, result.Reason);
+                _logger.LogError("AP export: invoice {InvoiceId} was not moved to Sent to AP by this batch ({Outcome}, {Reason})", invoiceId, result.Outcome, result.Reason);
             }
 
-            return result.Succeeded;
+            return result.Outcome == InvoiceTransitionOutcome.Transitioned;
         }
         catch (Exception ex)
         {
@@ -720,6 +747,10 @@ public sealed class ApExportService
 
     internal static DateOnly? DateOf(Entity row, string column) =>
         row.GetAttributeValue<DateTime?>(column) is { } dt ? DateOnly.FromDateTime(dt) : null;
+
+    /// <summary>A Dataverse date-time as a UTC instant: Dataverse returns UTC (kind Utc or Unspecified); a Local kind is converted.</summary>
+    internal static DateTimeOffset InstantOf(DateTime value) =>
+        new(value.Kind == DateTimeKind.Local ? value.ToUniversalTime() : DateTime.SpecifyKind(value, DateTimeKind.Utc));
 
     private static string Truncate(string value, int max) => value.Length <= max ? value : value[..max];
 
@@ -814,9 +845,16 @@ public sealed class ApExportService
             }
 
             values["approval.approvedBy"] = approvedBy;
-            values["approval.approvedOn"] = approval is null ? null : DateOf(approval, "sprk_decidedon");
+            // The full instant, not a date: the stored value is a moment (Dataverse hands it back in UTC), and its UTC date can be a day off from the
+            // approver's local date. ApExportWriter writes a DateTimeOffset as ISO 8601 UTC (2026-10-20T15:00:00Z), whatever the column's format says.
+            values["approval.approvedOn"] = approval?.GetAttributeValue<DateTime?>("sprk_decidedon") is { } decidedOn ? InstantOf(decidedOn) : null;
         }
 
+        /// <summary>
+        /// The invoice's lines, read the way every other reader reads them: a removed (deactivated) Adjustment line is excluded by the query
+        /// (<see cref="InvoiceTotalsService.ExcludeInactiveAdjustments"/>) and again here (<see cref="InvoiceTotalsService.IsCounted"/>), so the file never
+        /// lists a line the invoice's totals do not count. One page of <see cref="ReadLimit"/> rows (Dataverse's cap); more than that fails the batch.
+        /// </summary>
         private async Task<IReadOnlyList<IReadOnlyDictionary<string, object?>>> ReadLinesAsync(Guid invoiceId, CancellationToken ct)
         {
             var query = new QueryExpression("sprk_billingevent")
@@ -824,32 +862,58 @@ public sealed class ApExportService
                 ColumnSet = new ColumnSet(
                     "sprk_eventdate", "sprk_costtype", "sprk_timekeeper", "sprk_quantity", "sprk_rate", "sprk_amount", "sprk_approvedamount", "sprk_linestatus",
                     "sprk_linesequence", "sprk_taskcode", "sprk_activitycode", "sprk_expensecode", "sprk_taskcodeasbilled", "sprk_activitycodeasbilled",
-                    "sprk_expensecodeasbilled"),
-                TopCount = ReadLimit + 1,
-                Criteria = { Conditions = { new ConditionExpression("sprk_invoice", ConditionOperator.Equal, invoiceId) } },
+                    "sprk_expensecodeasbilled", InvoiceTotalsService.LineState),
+                Criteria = new FilterExpression(LogicalOperator.And),
+                PageInfo = new PagingInfo { PageNumber = 1, Count = ReadLimit },
             };
+            query.Criteria.AddCondition("sprk_invoice", ConditionOperator.Equal, invoiceId);
+            InvoiceTotalsService.ExcludeInactiveAdjustments(query);
             query.AddOrder("sprk_linesequence", OrderType.Ascending);
-            var lines = (await entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false)).Entities;
-            if (lines.Count > ReadLimit)
+            query.AddOrder("sprk_billingeventid", OrderType.Ascending);
+            var page = await entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false);
+            if (page.MoreRecords)
             {
                 throw new InvalidOperationException($"Invoice {invoiceId} has more than {ReadLimit} lines; the export would silently drop some.");
             }
 
+            var lines = page.Entities.Where(InvoiceTotalsService.IsCounted).ToList();
             var result = new List<IReadOnlyDictionary<string, object?>>();
             foreach (var line in lines.OrderBy(l => l.GetAttributeValue<int?>("sprk_linesequence") ?? int.MaxValue))
             {
-                var billed = Dec(line, "sprk_amount");
-                var status = line.GetAttributeValue<OptionSetValue>("sprk_linestatus")?.Value;
-                var approved = status switch
+                var costType = line.GetAttributeValue<OptionSetValue>("sprk_costtype")?.Value;
+                var amount = Dec(line, "sprk_amount");
+                decimal? billed, approved;
+                if (costType == (int)InvoiceLineCostType.Adjustment)
                 {
-                    100000005 => 0m,
-                    100000004 => Dec(line, "sprk_approvedamount") ?? billed,
-                    _ => billed,
-                };
+                    // An Adjustment line's sprk_amount is a positive deduction. Emitted as its SIGNED contribution to the totals, the way
+                    // InvoiceTotalsCalculator subtracts it: to the approved total it contributes -amount (a deduction is negative); to the billed total
+                    // it contributes nothing (the firm billed nothing for it; BilledTotal is fees + expenses). So the file's lines[].billed add up to the
+                    // invoice's BilledTotal and lines[].approved add up to its ApprovedTotal, and approved - billed is the adjustment on every line type.
+                    // Its own status is never read (only Fee and Expense lines are decided). 0 - x, never -x: a zero amount stays +0.
+                    billed = 0m;
+                    approved = amount is { } deduction ? 0m - deduction : null;
+                }
+                else
+                {
+                    billed = amount;
+                    approved = line.GetAttributeValue<OptionSetValue>("sprk_linestatus")?.Value switch
+                    {
+                        (int)InvoiceLineStatus.Disallowed => 0m,
+                        (int)InvoiceLineStatus.Reduced => Dec(line, "sprk_approvedamount") ?? billed,
+                        _ => billed,
+                    };
+                }
+
                 result.Add(new Dictionary<string, object?>(StringComparer.Ordinal)
                 {
                     ["line.date"] = DateOf(line, "sprk_eventdate"),
-                    ["line.type"] = line.GetAttributeValue<OptionSetValue>("sprk_costtype")?.Value switch { 100000000 => "Fee", 100000001 => "Expense", 100000002 => "Adjustment", _ => null },
+                    ["line.type"] = costType switch
+                    {
+                        (int)InvoiceLineCostType.Fee => "Fee",
+                        (int)InvoiceLineCostType.Expense => "Expense",
+                        (int)InvoiceLineCostType.Adjustment => "Adjustment",
+                        _ => null,
+                    },
                     ["line.timekeeper"] = line.GetAttributeValue<string>("sprk_timekeeper"),
                     ["line.hours"] = Dec(line, "sprk_quantity"),
                     ["line.rate"] = Dec(line, "sprk_rate"),

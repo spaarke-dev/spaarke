@@ -146,6 +146,36 @@ internal sealed class ApExportWorld
         return invoice;
     }
 
+    /// <summary>Adds one more line to <paramref name="invoice"/> (cost type: Fee 100000000, Expense 100000001, Adjustment 100000002; state: 0 Active, 1 Inactive).</summary>
+    public Entity AddLine(Entity invoice, int costType, decimal amount, int sequence, int? state = null, int? status = null, decimal? approvedAmount = null)
+    {
+        var line = new Entity("sprk_billingevent", Guid.NewGuid())
+        {
+            ["sprk_invoice"] = new EntityReference("sprk_invoice", invoice.Id),
+            ["sprk_linesequence"] = sequence,
+            ["sprk_eventdate"] = new DateTime(2026, 9, 20, 0, 0, 0, DateTimeKind.Utc),
+            ["sprk_costtype"] = new OptionSetValue(costType),
+            ["sprk_amount"] = new Money(amount),
+        };
+        if (state is { } s)
+        {
+            line["statecode"] = new OptionSetValue(s);
+        }
+
+        if (status is { } st)
+        {
+            line["sprk_linestatus"] = new OptionSetValue(st);
+        }
+
+        if (approvedAmount is { } approved)
+        {
+            line["sprk_approvedamount"] = new Money(approved);
+        }
+
+        Dataverse.Put(line);
+        return line;
+    }
+
     private static InvoiceLifecycleStatus StatusOf(int statuscode) =>
         InvoiceStatusCodes.TryFromStatusCode(statuscode, out var s) ? s : InvoiceLifecycleStatus.InReview;
 
@@ -235,7 +265,14 @@ internal sealed class ExportDataverse
                         return Task.FromException<EntityCollection>(fault);
                     }
 
-                    var matches = _rows.Values.Where(r => r.LogicalName == q.EntityName && q.Criteria.Conditions.All(c => Matches(r, c))).ToList();
+                    // Dataverse caps TopCount and a page at 5,000; a larger number fails the call (so a regression of the cap fails a test here).
+                    if (q.TopCount > DataverseRowCap || q.PageInfo is { Count: > DataverseRowCap })
+                    {
+                        return Task.FromException<EntityCollection>(new InvalidOperationException(
+                            $"Dataverse caps TopCount and the page size at {DataverseRowCap} (asked: TopCount {q.TopCount}, page {q.PageInfo?.Count})."));
+                    }
+
+                    var matches = _rows.Values.Where(r => r.LogicalName == q.EntityName && Evaluate(r, q.Criteria)).ToList();
                     foreach (var order in q.Orders.Reverse())
                     {
                         matches = (order.OrderType == OrderType.Ascending
@@ -248,7 +285,15 @@ internal sealed class ExportDataverse
                         matches = matches.Take(top).ToList();
                     }
 
-                    return Task.FromResult(new EntityCollection(matches.Select(Copy).ToList()));
+                    var more = false;
+                    if (q.PageInfo is { Count: > 0 } paging)
+                    {
+                        var rest = matches.Skip((Math.Max(paging.PageNumber, 1) - 1) * paging.Count).ToList();
+                        more = rest.Count > paging.Count;
+                        matches = rest.Take(paging.Count).ToList();
+                    }
+
+                    return Task.FromResult(new EntityCollection(matches.Select(Copy).ToList()) { MoreRecords = more });
                 }
             });
         Mock.Setup(e => e.DeleteAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
@@ -357,8 +402,25 @@ internal sealed class ExportDataverse
     private Entity Find(string table, Guid id) =>
         _rows.TryGetValue((table, id), out var row) ? row : throw StoredFileDataverse.NotFound();
 
+    /// <summary>
+    /// A Money column's range as configured on the live table: a write outside it fails, as Dataverse fails it. The batch total is 0 .. 1,000,000,000 until
+    /// <c>Deploy-EbillingInvoiceTotalsRange.ps1</c> has run (docs/data-model/sprk_billingexport.md); these literals are the environment, NOT the code under test.
+    /// </summary>
+    public Dictionary<(string Table, string Column), (decimal Min, decimal Max)> MoneyRanges { get; } = new()
+    {
+        [("sprk_billingexport", "sprk_totalamount")] = (0m, 1_000_000_000m),
+    };
+
     private void Apply(Entity row, Dictionary<string, object> fields)
     {
+        foreach (var (key, value) in fields)
+        {
+            if (value is Money money && MoneyRanges.TryGetValue((row.LogicalName, key), out var range) && (money.Value < range.Min || money.Value > range.Max))
+            {
+                throw new InvalidOperationException($"{row.LogicalName}.{key} = {money.Value} is outside the column's range {range.Min} .. {range.Max}.");
+            }
+        }
+
         foreach (var (key, value) in fields)
         {
             if (value is DBNull)
@@ -386,14 +448,33 @@ internal sealed class ExportDataverse
         return copy;
     }
 
+    /// <summary>The most rows Dataverse returns for a TopCount or a page.</summary>
+    internal const int DataverseRowCap = 5000;
+
+    /// <summary>A filter, as Dataverse evaluates it: its conditions AND its nested filters, combined with its operator (And, or Or).</summary>
+    private static bool Evaluate(Entity row, FilterExpression filter)
+    {
+        var parts = filter.Conditions.Select(c => Matches(row, c)).Concat(filter.Filters.Select(f => Evaluate(row, f)));
+        return filter.FilterOperator == LogicalOperator.Or ? parts.Any(p => p) : parts.All(p => p);
+    }
+
     private static bool Matches(Entity row, ConditionExpression condition)
     {
         var has = row.Contains(condition.AttributeName) && row[condition.AttributeName] is not null;
         var value = has ? Comparable(row[condition.AttributeName]) : null;
+        if (!has && condition.AttributeName == "statecode")
+        {
+            // Every Dataverse row has a statecode; a row put here without one is Active.
+            has = true;
+            value = 0;
+        }
+
         return condition.Operator switch
         {
             ConditionOperator.Null => !has,
             ConditionOperator.NotNull => has,
+            // SQL semantics, as Dataverse: a row with no value is not "not equal" to anything (hence the explicit Null condition callers add).
+            ConditionOperator.NotEqual => has && !condition.Values.Any(v => Equals(value, Comparable(v))),
             ConditionOperator.Equal => has && condition.Values.Any(v => Equals(value, Comparable(v))),
             ConditionOperator.In => has && condition.Values.Any(v => Equals(value, Comparable(v))),
             _ => throw new NotSupportedException($"Condition operator {condition.Operator} is not modelled."),
@@ -434,8 +515,20 @@ internal sealed class WorldLifecycle(ExportDataverse dataverse) : IInvoiceLifecy
 
     public List<Guid> Sent { get; } = [];
 
+    /// <summary>Invoices the service answers "already in the target status" for, without moving them (a no-op the batch did not cause).</summary>
+    public HashSet<Guid> ReportsAlreadyInTarget { get; } = [];
+
+    /// <summary>Runs first on every transition call (a test changes the invoice behind the batch's back here).</summary>
+    public Action<Guid>? BeforeTransition { get; set; }
+
     public Task<InvoiceTransitionResult> TransitionAsync(Guid invoiceId, InvoiceLifecycleStatus target, CancellationToken ct = default)
     {
+        BeforeTransition?.Invoke(invoiceId);
+        if (ReportsAlreadyInTarget.Contains(invoiceId))
+        {
+            return Task.FromResult(new InvoiceTransitionResult(InvoiceTransitionOutcome.AlreadyInTarget, target, target, null));
+        }
+
         if (Fails.Contains(invoiceId))
         {
             throw new InvalidOperationException("dataverse down");

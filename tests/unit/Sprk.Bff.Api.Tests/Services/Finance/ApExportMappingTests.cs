@@ -148,11 +148,61 @@ public sealed class ApExportMappingTests
     [InlineData("""{"version":1,"columns":[]}""")]
     [InlineData("""{"version":1,"columns":[{"name":"X","source":"line.hours"}]}""")]
     [InlineData("not json")]
+    [InlineData("""{"version":1,"columns":[{"name":"lines","source":"invoice.id"}]}""")]
+    [InlineData("""{"version":1,"columns":[{"name":"LINES","source":"invoice.id"}]}""")]
+    [InlineData("""{"version":1,"columns":[{"name":"Lines","source":"invoice.id"}]}""")]
     public void InvalidMappings_AreRefused(string json)
     {
         var parsed = ApExportMappingParser.Parse(json);
 
         parsed.IsValid.Should().BeFalse();
         parsed.Error.Should().NotBeNullOrWhiteSpace();
+    }
+
+    [Fact(DisplayName = "150 review F8: a column named 'lines' (any case) is refused with the parser's usual shape - the JSON invoice object would otherwise carry two properties of one name")]
+    public void ReservedColumnName_Lines_IsRefusedWithTheUsualShape()
+    {
+        var parsed = ApExportMappingParser.Parse("""{"version":1,"columns":[{"name":"Lines","source":"invoice.id"}]}""");
+
+        parsed.IsValid.Should().BeFalse();
+        parsed.Model.Should().BeNull();
+        parsed.Error.Should().StartWith("columns: ").And.Contain("'Lines'").And.Contain("reserved");
+    }
+
+    [Fact(DisplayName = "150 review F8: the D-56 default column 'BatchId' stays valid (it lives in the invoice object; the document root's batchId is a different object) and so does a LINE column named 'lines'")]
+    public void BatchIdColumn_AndALineColumnNamedLines_AreValid()
+    {
+        ApExportMappingParser.Parse("""{"version":1,"columns":[{"name":"BatchId","source":"batch.id"},{"name":"Other","source":"invoice.id"}]}""").IsValid.Should().BeTrue();
+        ApExportMappingParser.Parse("""{"version":1,"columns":[{"name":"X","source":"invoice.id"}],"lineColumns":[{"name":"lines","source":"line.date"}]}""").IsValid.Should().BeTrue();
+        ApExportMappingParser.Parse(null).IsValid.Should().BeTrue();
+    }
+
+    [Theory(DisplayName = "150 review F8 security: a header NAME that starts with a formula character is prefixed too (an admin-set name is text a spreadsheet would run)")]
+    [InlineData("=HYPERLINK(1)", "'=HYPERLINK(1)")]
+    [InlineData("+x", "'+x")]
+    [InlineData("-x", "'-x")]
+    [InlineData("@x", "'@x")]
+    [InlineData("Plain", "Plain")]
+    public void CsvHeader_PrefixesFormulaNames(string name, string expectedHeader)
+    {
+        var mapping = new ApExportMappingModel([new ApExportColumn(name, "invoice.firmInvoiceNumber", null)], []);
+
+        var csv = Encoding.UTF8.GetString(ApExportWriter.WriteCsv(mapping, [Invoice("INV-1")]));
+
+        csv.Should().StartWith(expectedHeader + "\r\n");
+    }
+
+    [Fact(DisplayName = "150 review F7: an instant (ApprovedOn) is written as the full ISO 8601 UTC timestamp in the CSV and the JSON, whatever the column's format says")]
+    public void Instant_IsWrittenAsTheFullUtcTimestamp()
+    {
+        var instant = new DateTimeOffset(2026, 10, 20, 23, 30, 15, TimeSpan.FromHours(-7)); // 2026-10-21T06:30:15Z
+        var mapping = ApExportMappingParser.Parse("""{"version":1,"columns":[{"name":"On","source":"approval.approvedOn","format":"date"}]}""").Model!;
+        var invoice = Invoice("INV-1", v => v["approval.approvedOn"] = instant);
+
+        var csv = Encoding.UTF8.GetString(ApExportWriter.WriteCsv(mapping, [invoice]));
+        using var json = JsonDocument.Parse(ApExportWriter.WriteJson("EXP-1", mapping, [invoice]));
+
+        csv.Should().Be("On\r\n2026-10-21T06:30:15Z\r\n");
+        json.RootElement.GetProperty("invoices")[0].GetProperty("On").GetString().Should().Be("2026-10-21T06:30:15Z");
     }
 }

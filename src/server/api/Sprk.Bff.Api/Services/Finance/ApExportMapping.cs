@@ -93,6 +93,15 @@ public static class ApExportMappingParser
 {
     public const int SupportedVersion = 1;
 
+    /// <summary>
+    /// Names an invoice column may not take: the JSON invoice object carries the mapped columns AND a <c>lines</c> array, so a column named
+    /// <c>lines</c> (any case) would write two properties of one name. (The document root's <c>batchId</c> is a different object, so the D-56 column
+    /// <c>BatchId</c> does not collide with it and stays valid.)
+    /// </summary>
+    private static readonly IReadOnlySet<string> ReservedInvoiceNames = new HashSet<string>(["lines"], StringComparer.OrdinalIgnoreCase);
+
+    private static readonly IReadOnlySet<string> NoReservedNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
     public static ApExportMappingResult Parse(string? json)
     {
         if (string.IsNullOrWhiteSpace(json))
@@ -119,14 +128,14 @@ public static class ApExportMappingParser
                 return Invalid("the mapping has no columns");
             }
 
-            if (ReadColumns(columns, ApExportSources.InvoiceSources, out var invoiceColumns) is { } columnError)
+            if (ReadColumns(columns, ApExportSources.InvoiceSources, ReservedInvoiceNames, out var invoiceColumns) is { } columnError)
             {
                 return Invalid($"columns: {columnError}");
             }
 
             IReadOnlyList<ApExportColumn> lines = [];
             if (TryGet(root, "lineColumns", out var lineColumns) && lineColumns.ValueKind != JsonValueKind.Null
-                && ReadColumns(lineColumns, ApExportSources.LineSources, out lines) is { } lineError)
+                && ReadColumns(lineColumns, ApExportSources.LineSources, NoReservedNames, out lines) is { } lineError)
             {
                 return Invalid($"lineColumns: {lineError}");
             }
@@ -157,7 +166,7 @@ public static class ApExportMappingParser
     }
 
     /// <summary>Null when the list is valid; otherwise why not. At least one column, unique non-blank names, a known source, a known format.</summary>
-    private static string? ReadColumns(JsonElement array, IReadOnlySet<string> vocabulary, out IReadOnlyList<ApExportColumn> columns)
+    private static string? ReadColumns(JsonElement array, IReadOnlySet<string> vocabulary, IReadOnlySet<string> reservedNames, out IReadOnlyList<ApExportColumn> columns)
     {
         columns = [];
         if (array.ValueKind != JsonValueKind.Array || array.GetArrayLength() == 0)
@@ -185,6 +194,11 @@ public static class ApExportMappingParser
             if (!names.Add(name))
             {
                 return $"the name '{name}' is used twice";
+            }
+
+            if (reservedNames.Contains(name))
+            {
+                return $"the name '{name}' is reserved by the export file";
             }
 
             if (source is null || !vocabulary.Contains(source))
@@ -223,7 +237,7 @@ public static class ApExportWriter
     {
         ArgumentNullException.ThrowIfNull(mapping);
         var builder = new StringBuilder();
-        builder.Append(string.Join(',', mapping.Columns.Select(c => Quote(c.Name)))).Append("\r\n");
+        builder.Append(string.Join(',', mapping.Columns.Select(c => Quote(NeutralizeFormula(c.Name))))).Append("\r\n");
         foreach (var invoice in InFileOrder(invoices))
         {
             builder.Append(string.Join(',', mapping.Columns.Select(c => Quote(CsvText(c, invoice.Values))))).Append("\r\n");
@@ -288,6 +302,8 @@ public static class ApExportWriter
 
         return (column.Format, raw) switch
         {
+            // An instant is always the full ISO 8601 UTC timestamp, whatever the column's format (a date alone can be a day off from the user's local date).
+            (_, DateTimeOffset instant) => instant.UtcDateTime.ToString("yyyy-MM-dd'T'HH:mm:ss'Z'", CultureInfo.InvariantCulture),
             ("date", DateOnly d) => d.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
             ("date", DateTime dt) => DateOnly.FromDateTime(dt).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
             ("decimal", decimal m) => m.ToString("0.00##", CultureInfo.InvariantCulture),
@@ -308,8 +324,12 @@ public static class ApExportWriter
     {
         var text = FormatText(column, values) ?? string.Empty;
         var isTextValue = values.TryGetValue(column.Source, out var raw) && raw is string;
-        return isTextValue && text.Length > 0 && text[0] is '=' or '+' or '-' or '@' or '\t' or '\r' ? "'" + text : text;
+        return isTextValue ? NeutralizeFormula(text) : text;
     }
+
+    /// <summary>Prefixes an apostrophe when the text starts with <c>=</c>, <c>+</c>, <c>-</c>, <c>@</c>, a tab or a carriage return (CSV injection). Header names get it too: an admin-set name is text a spreadsheet would run.</summary>
+    private static string NeutralizeFormula(string text) =>
+        text.Length > 0 && text[0] is '=' or '+' or '-' or '@' or '\t' or '\r' ? "'" + text : text;
 
     private static string Quote(string value) =>
         value.IndexOfAny([',', '"', '\r', '\n']) >= 0 ? "\"" + value.Replace("\"", "\"\"", StringComparison.Ordinal) + "\"" : value;
