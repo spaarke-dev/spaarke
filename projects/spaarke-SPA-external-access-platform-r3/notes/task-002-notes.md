@@ -370,3 +370,54 @@ The six `sprk_gridconfiguration` records as they are live today. This supersedes
 | Service Requests | `403e5d37…` (2026-08-12) | Number 150 · Name 280 · Status 120 (badge) · Submitted = createdon 140 (date) | sprk_requestedby | created desc |
 
 All six records: `source.type = inline`; row open = formDialog; command bar shows Refresh and Export to Excel only (no New, Delete, Edit columns or Edit filters); page size 25 (Projects, Matters, WA) or 250 (others). Every visible column is on the server allow-list (Invoices `statuscode` was added 2026-10-17, ebilling D-41).
+
+## Step 2 applied 2026-10-30 (owner go, after dev BFF 9f4afe82ac and UAC's gate)
+
+- The nine columns that PR #2450 admits are added to the six dev grids (`spaarkedev1`), in the owner's order (owner list 2026-10-29), with the owner's labels and 100px widths:
+  - Projects: Project Type (`sprk_projecttype_ref`).
+  - Matters: Matter Type (`sprk_mattertype`), Last Activity (`modifiedon`).
+  - Work Assignments: Matter Type (`sprk_mattertype`), Last Activity (`modifiedon`).
+  - Documents: File Type (`sprk_filetype`), Last Activity (`modifiedon`).
+  - Invoices: Total Amount (Base) (`sprk_totalamount_base`, currency).
+  - Service Requests: Last Activity (`modifiedon`).
+- Method: a read-modify-write of `sprk_configjson` only (layout cells, fetch attributes for the new columns, columns-map entries). Every other key was compared and is unchanged. Each record was read back after the PATCH and matched what was written.
+- The records had not changed since step 1 (2026-10-29 13:32–13:50Z), so the rollback below is the step-1 state.
+- Rollback: PATCH each record's `sprk_configjson` back to the raw value below (scratchpad `grid-rollback2.ps1`). Takes effect at once; no publish.
+
+### Rollback JSON (raw `sprk_configjson` before step 2)
+
+**projects**
+
+```json
+{"_version":"1.0","source":{"type":"inline","fetchXml":"<fetch><entity name='sprk_project'><attribute name='sprk_projectid'/><attribute name='sprk_projectname'/><attribute name='sprk_projectnumber'/><attribute name='statuscode'/><attribute name='modifiedon'/><order attribute='sprk_projectname' descending='false'/></entity></fetch>","layoutXml":"<grid name=\"result\" object=\"1\" jump=\"sprk_projectname\" select=\"1\" icon=\"1\" preview=\"1\"><row name=\"result\" id=\"sprk_projectid\"><cell name=\"sprk_projectnumber\" width=\"100\" /><cell name=\"sprk_projectname\" width=\"300\" /><cell name=\"statuscode\" width=\"100\" /><cell name=\"modifiedon\" width=\"100\" /></row></grid>"},"display":{"title":"Projects","emptyStateMessage":"You do not have access to any projects yet. Contact your administrator to request access."},"rowOpen":{"type":"formDialog"},"commandBar":{"showDefaultCommands":{"newRecord":false,"refresh":true,"exportExcel":true,"delete":false,"editColumns":false,"editFilters":false}},"columns":{"statuscode":{"renderer":"badge","label":"Status","width":100},"modifiedon":{"renderer":"date","label":"Last Activity","width":100},"sprk_projectnumber":{"label":"Project Number","width":100},"sprk_projectname":{"label":"Project Name","width":300}},"behavior":{"selectionMode":"none","pageSize":25,"enableSorting":true,"enableColumnResize":true}}
+```
+
+**matters**
+
+```json
+{"_version":"1.0","source":{"type":"inline","fetchXml":"<fetch><entity name='sprk_matter'><attribute name='sprk_matterid'/><attribute name='sprk_mattername'/><attribute name='sprk_matternumber'/><attribute name='statuscode'/><order attribute='sprk_mattername' descending='false'/></entity></fetch>","layoutXml":"<grid name=\"result\" object=\"1\" jump=\"sprk_mattername\" select=\"1\" icon=\"1\" preview=\"1\"><row name=\"result\" id=\"sprk_matterid\"><cell name=\"sprk_matternumber\" width=\"100\" /><cell name=\"sprk_mattername\" width=\"300\" /><cell name=\"statuscode\" width=\"100\" /></row></grid>"},"display":{"title":"Matters","emptyStateMessage":"No matters found for the records you can access."},"rowOpen":{"type":"formDialog"},"commandBar":{"showDefaultCommands":{"newRecord":false,"refresh":true,"exportExcel":true,"delete":false,"editColumns":false,"editFilters":false}},"columns":{"statuscode":{"renderer":"badge","label":"Status","width":100},"sprk_matternumber":{"label":"Matter Number","width":100},"sprk_mattername":{"label":"Matter Name","width":300}},"behavior":{"selectionMode":"none","pageSize":25,"enableSorting":true,"enableColumnResize":true}}
+```
+
+**workassignments**
+
+```json
+{"_version":"1.0","source":{"type":"inline","fetchXml":"<fetch><entity name='sprk_workassignment'><attribute name='sprk_workassignmentid' /><attribute name='sprk_name' /><attribute name='sprk_workassignmentnumber' /><attribute name='sprk_priority' /><attribute name='sprk_responseduedate' /><attribute name='statuscode' /><attribute name='sprk_regardingproject' /><order attribute='sprk_responseduedate' descending='false' /></entity></fetch>","layoutXml":"<grid name=\"result\" object=\"1\" jump=\"sprk_workassignmentnumber\" select=\"1\" icon=\"1\" preview=\"1\"><row name=\"result\" id=\"sprk_workassignmentid\"><cell name=\"sprk_workassignmentnumber\" width=\"100\" /><cell name=\"sprk_name\" width=\"300\" /><cell name=\"statuscode\" width=\"100\" /></row></grid>"},"display":{"title":"Work Assignments","emptyStateMessage":"The law department has not assigned you any tasks."},"rowOpen":{"type":"formDialog"},"commandBar":{"showDefaultCommands":{"newRecord":false,"refresh":true,"exportExcel":true,"delete":false,"editColumns":false,"editFilters":false}},"columns":{"statuscode":{"renderer":"badge","label":"Status","width":100},"sprk_regardingproject":{"hidden":true},"sprk_workassignmentnumber":{"label":"Assignment Number","width":100},"sprk_name":{"label":"Work Assignment Name","width":300}},"behavior":{"selectionMode":"none","pageSize":25,"enableSorting":true,"enableColumnResize":true}}
+```
+
+**documents**
+
+```json
+{"_version":"1.0","source":{"type":"inline","fetchXml":"<fetch><entity name='sprk_document'><attribute name='sprk_documentid'/><attribute name='sprk_documentname'/><attribute name='sprk_documenttype'/><attribute name='createdon'/><attribute name='sprk_project'/><attribute name='sprk_matter'/><attribute name='sprk_workassignment'/><order attribute='createdon' descending='true'/></entity></fetch>","layoutXml":"<grid name=\"result\" object=\"1\" jump=\"sprk_documentname\" select=\"1\" icon=\"1\" preview=\"1\"><row name=\"result\" id=\"sprk_documentid\"><cell name=\"sprk_documentname\" width=\"300\" /><cell name=\"sprk_documenttype\" width=\"100\" /><cell name=\"createdon\" width=\"100\" /></row></grid>"},"display":{"title":"Documents","emptyStateMessage":"No documents found across the records you can access."},"rowOpen":{"type":"formDialog"},"commandBar":{"showDefaultCommands":{"newRecord":false,"refresh":true,"exportExcel":true,"delete":false,"editColumns":false,"editFilters":false}},"columns":{"sprk_documenttype":{"renderer":"badge","label":"Type","width":100},"createdon":{"renderer":"date","label":"Created","width":100},"sprk_project":{"hidden":true},"sprk_matter":{"hidden":true},"sprk_workassignment":{"hidden":true},"sprk_documentname":{"label":"Document Name","width":300}},"behavior":{"selectionMode":"none","pageSize":250,"enableSorting":true,"enableColumnResize":true}}
+```
+
+**invoices**
+
+```json
+{"_version":"1.0","source":{"type":"inline","fetchXml":"<fetch><entity name='sprk_invoice'><attribute name='sprk_invoiceid' /><attribute name='sprk_name' /><attribute name='sprk_invoicenumber' /><attribute name='sprk_invoicedate' /><attribute name='statuscode' /><attribute name='sprk_totalamount' /><attribute name='sprk_project' /><attribute name='sprk_matter' /><order attribute='sprk_invoicedate' descending='true' /></entity></fetch>","layoutXml":"<grid name=\"result\" object=\"1\" jump=\"sprk_invoicenumber\" select=\"1\" icon=\"1\" preview=\"1\"><row name=\"result\" id=\"sprk_invoiceid\"><cell name=\"sprk_invoicenumber\" width=\"100\" /><cell name=\"sprk_name\" width=\"300\" /><cell name=\"sprk_invoicedate\" width=\"100\" /><cell name=\"statuscode\" width=\"100\" /><cell name=\"sprk_totalamount\" width=\"100\" /></row></grid>"},"display":{"title":"Invoices","emptyStateMessage":"No invoices found across the records you can access."},"rowOpen":{"type":"formDialog"},"commandBar":{"showDefaultCommands":{"newRecord":false,"refresh":true,"exportExcel":true,"delete":false,"editColumns":false,"editFilters":false}},"columns":{"sprk_invoicedate":{"renderer":"date","label":"Invoice Date","width":100},"statuscode":{"renderer":"badge","label":"Status","width":100},"sprk_totalamount":{"renderer":"currency","align":"right","label":"Total Amount (Local)","width":100},"sprk_project":{"hidden":true},"sprk_matter":{"hidden":true},"sprk_invoicenumber":{"label":"Invoice Number","width":100},"sprk_name":{"label":"Invoice Name","width":300}},"behavior":{"selectionMode":"none","pageSize":250,"enableSorting":true,"enableColumnResize":true}}
+```
+
+**servicerequests**
+
+```json
+{"_version":"1.0","source":{"type":"inline","fetchXml":"<fetch><entity name='sprk_servicerequest'><attribute name='sprk_servicerequestid'/><attribute name='sprk_servicerequestnumber'/><attribute name='sprk_name'/><attribute name='statuscode'/><attribute name='createdon'/><attribute name='sprk_requestedby'/><order attribute='createdon' descending='true'/></entity></fetch>","layoutXml":"<grid name=\"result\" object=\"1\" jump=\"sprk_name\" select=\"1\" icon=\"1\" preview=\"1\"><row name=\"result\" id=\"sprk_servicerequestid\"><cell name=\"sprk_servicerequestnumber\" width=\"100\" /><cell name=\"sprk_name\" width=\"300\" /><cell name=\"statuscode\" width=\"100\" /><cell name=\"createdon\" width=\"100\" /></row></grid>"},"display":{"title":"Service Requests","emptyStateMessage":"You have not submitted any service requests yet."},"rowOpen":{"type":"formDialog"},"commandBar":{"showDefaultCommands":{"newRecord":false,"refresh":true,"exportExcel":true,"delete":false,"editColumns":false,"editFilters":false}},"columns":{"statuscode":{"renderer":"badge","label":"Request Status","width":100},"createdon":{"renderer":"date","label":"Submitted Date","width":100},"sprk_requestedby":{"hidden":true},"sprk_servicerequestnumber":{"label":"Request Number","width":100},"sprk_name":{"label":"Request Name","width":300}},"behavior":{"selectionMode":"none","pageSize":250,"enableSorting":true,"enableColumnResize":true}}
+```
