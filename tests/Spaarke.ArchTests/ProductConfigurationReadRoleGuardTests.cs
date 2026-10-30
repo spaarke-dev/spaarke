@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using System.Text.RegularExpressions;
 using System.Xml.Linq;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Services.Access;
@@ -63,10 +64,30 @@ public class ProductConfigurationReadRoleGuardTests
 
     /// <summary>
     /// Platform service configuration: external service connections, Dataverse environment registrations and AI model
-    /// deployments. Not product configuration, and never on this list.
+    /// deployments. Not product configuration, and never on this list. The ONE list is <c>$PlatformServiceTables</c> in
+    /// <c>scripts/Set-ProductConfigurationReadDepth.ps1</c>, which refuses these tables in every mode; this guard reads it
+    /// from there (<see cref="ParsePlatformServiceTables"/>), so the build and the script cannot disagree.
     /// </summary>
     internal static readonly string[] PlatformServiceTables =
-        ["sprk_externalserviceconfig", "sprk_dataverseenvironment", "sprk_aimodeldeployment"];
+        ParsePlatformServiceTables(File.ReadAllText(Path.Combine(SourceScan.RepoRoot, "scripts", "Set-ProductConfigurationReadDepth.ps1")));
+
+    /// <summary>
+    /// The tables of the script's one <c>$PlatformServiceTables = @('a', 'b', ...)</c> assignment, lower case. Throws when
+    /// there is not exactly one such assignment or it names no table, so a renamed or emptied list fails the build.
+    /// </summary>
+    internal static string[] ParsePlatformServiceTables(string scriptText)
+    {
+        var matches = Regex.Matches(scriptText, @"(?m)^\s*\$PlatformServiceTables\s*=\s*@\(([^)]*)\)");
+        if (matches.Count != 1)
+            throw new InvalidOperationException($"Set-ProductConfigurationReadDepth.ps1 must assign $PlatformServiceTables exactly once; found {matches.Count}.");
+
+        var tables = Regex.Matches(matches[0].Groups[1].Value, @"'([^']+)'")
+            .Select(m => m.Groups[1].Value.Trim().ToLowerInvariant())
+            .ToArray();
+        if (tables.Length == 0)
+            throw new InvalidOperationException("Set-ProductConfigurationReadDepth.ps1 assigns $PlatformServiceTables no table.");
+        return tables;
+    }
 
     /// <summary>
     /// Tables the two roles read at Global through this list and must hold NO Create privilege on, at any depth: a row a
@@ -168,6 +189,20 @@ public class ProductConfigurationReadRoleGuardTests
 
         foreach (var table in seeded)
             Assert.Contains(findings, f => f.StartsWith($"{table}:", StringComparison.Ordinal) && f.Contains("never gets Global Read", StringComparison.Ordinal));
+    }
+
+    [Fact(DisplayName = "Product configuration read guard: the platform service list is read from the script, and holds the three tables")]
+    public void PlatformServiceListComesFromTheScript()
+    {
+        Assert.Equal(
+            new[] { "sprk_aimodeldeployment", "sprk_dataverseenvironment", "sprk_externalserviceconfig" },
+            PlatformServiceTables.OrderBy(t => t, StringComparer.Ordinal).ToArray());
+
+        // Controls: the parse reads the one live assignment, ignores a commented one, and refuses none, two or an empty list.
+        Assert.Equal(new[] { "sprk_a", "sprk_b" }, ParsePlatformServiceTables("# $PlatformServiceTables = @('sprk_x')\n$PlatformServiceTables = @('SPRK_A', 'sprk_b')\n"));
+        Assert.Throws<InvalidOperationException>(() => ParsePlatformServiceTables("$Other = @('sprk_a')"));
+        Assert.Throws<InvalidOperationException>(() => ParsePlatformServiceTables("$PlatformServiceTables = @('sprk_a')\n$PlatformServiceTables = @('sprk_b')"));
+        Assert.Throws<InvalidOperationException>(() => ParsePlatformServiceTables("$PlatformServiceTables = @()"));
     }
 
     [Fact(DisplayName = "Product configuration read guard control: a privilegeName that is not prvRead + the table's own name is reported")]

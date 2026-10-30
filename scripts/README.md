@@ -1350,6 +1350,8 @@ Detail: [`projects/spaarkeai-word-add-in-r1/notes/082-secure-owner-role.md`](../
 **Safety model:**
 - Raises Read only; never lowers or removes a privilege, and touches no other privilege type.
 - Refuses a config other than Read at Global for exactly those two roles, and any table in the restricted-content, customer-configuration or Secure Record owner role files.
+- Refuses, in every mode (dry run, `-Apply`, `-Verify`) and before it connects, any listed table that is platform service configuration: `sprk_externalserviceconfig`, `sprk_dataverseenvironment`, `sprk_aimodeldeployment`. The one list is `$PlatformServiceTables` in the script; `ProductConfigurationReadRoleGuardTests` reads it from there. Tested by `tests/scripts/Set-ProductConfigurationReadDepth.Tests.ps1` (Pester 3.4).
+- Playbook create, clone and share stay with playbook administrators: only `Spaarke AI Analysis Admin` holds Create and Share on `sprk_analysisplaybook`, and the BFF create, clone, share and unshare routes require the caller's own privilege.
 - Refuses to run until both role XML files hold each listed Read at Global.
 - Resolves each role to exactly one root role and changes only that; every business-unit copy takes its privileges from it and is read back.
 - Takes privilege ids from entity metadata and refuses a name mismatch; names any privilege the platform added unasked, and fails if a privilege outside the list changed depth.

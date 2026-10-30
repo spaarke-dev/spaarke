@@ -23,7 +23,8 @@
       /{id}/unshare require the caller's own Create (create, clone) or Share (share, unshare) privilege on that table
       before they read or write anything. Core and Basic User also hold no Create on sprk_gridconfiguration.
       Platform service configuration (sprk_externalserviceconfig, sprk_dataverseenvironment, sprk_aimodeldeployment) is
-      never on this list; the build-time guard refuses it.
+      never on this list. This script refuses a config that lists one, in every mode (dry run, -Apply and -Verify),
+      before it connects. The list is $PlatformServiceTables in this script; the build-time guard reads it from there.
 
     BUSINESS-UNIT COPIES
       Dataverse keeps one copy of a role per business unit. The copies are not edited separately: each one takes its
@@ -43,7 +44,8 @@
       - The config asks for Read at Global for exactly the two roles, and no listed table is a hard-deny table
         (config/restricted-content-owner-role.json), a customer configuration table
         (config/customer-configuration-owner-role.json) or a table the Secure Record census guards
-        (config/secure-record-owner-role.json). The build-time guard checks the BFF's own sets too.
+        (config/secure-record-owner-role.json) or platform service configuration ($PlatformServiceTables). The
+        build-time guard checks the BFF's own sets too.
       - Both role XML files hold each listed Read at Global.
       - Each role name resolves to exactly one ROOT role.
       - Each table's Read privilege comes from entity METADATA and its name must equal the config's privilegeName.
@@ -145,6 +147,18 @@ foreach ($pair in @(
 $bad = @($tables | Where-Object { $forbidden.ContainsKey(([string]$_.logicalName).ToLowerInvariant()) } |
     ForEach-Object { "$($_.logicalName): $($forbidden[([string]$_.logicalName).ToLowerInvariant()])" })
 if ($bad.Count -gt 0) { throw "Config lists customer or restricted tables, which never get Global Read:`n  $($bad -join "`n  ")" }
+
+# Platform service configuration is never product configuration. This line is THE one list: the build guard
+# (ProductConfigurationReadRoleGuardTests.PlatformServiceTables) reads it from here, so the two cannot disagree.
+$PlatformServiceTables = @('sprk_externalserviceconfig', 'sprk_dataverseenvironment', 'sprk_aimodeldeployment')
+function Get-PlatformServiceViolations([object[]]$Tables, [string[]]$Platform) {
+    @($Tables | Where-Object { $Platform -contains ([string]$_.logicalName).Trim().ToLowerInvariant() } |
+        ForEach-Object { "$($_.logicalName): platform service configuration" })
+}
+$platformBad = @(Get-PlatformServiceViolations $tables $PlatformServiceTables)
+if ($platformBad.Count -gt 0) {
+    throw "Config lists platform service configuration, which never gets Global Read through this list (refused in every mode):`n  $($platformBad -join "`n  ")"
+}
 
 # The solution role XML is the source of truth: it must already hold each listed Read at Global.
 $xmlGaps = @()
