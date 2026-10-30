@@ -725,6 +725,8 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
             ["sprk_invoicesubmission"] = "sprk_invoicesubmissions",
             // Field mapping task 017 (item 9): the budget inquiry's service request.
             ["sprk_servicerequest"] = "sprk_servicerequests",
+            // Field mapping task 017-d2: the chat create's company table (contact and task are above).
+            ["account"] = "accounts",
         };
 
         /// <summary>
