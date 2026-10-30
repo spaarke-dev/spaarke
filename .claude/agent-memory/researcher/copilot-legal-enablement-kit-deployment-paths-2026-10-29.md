@@ -1,0 +1,22 @@
+---
+name: copilot-legal-enablement-kit-deployment-paths-2026-10-29
+description: Enablement-kit deployment paths into a customer M365 tenant — user-level Cowork skill/plugin upload+share (no admin, incl. Claude plugin auto-convert + MCP connectors), Agent Builder limits/sharing, admin upload paths, store 4-6 wks, Word legal plugin not extensible, Foundry/Copilot Studio high tier
+metadata:
+  type: reference
+---
+
+## 2026-10-29: Enablement kits for Copilot for Legal / Cowork — who can deploy what, how fast
+
+**Question**: What can an attorney do without IT, what needs an admin, what needs Partner Center, for kits (skills, playbooks, agents, plugins, MCP, knowledge) deployed into a law dept's own tenant?
+
+**Findings**:
+- **Cowork is the no-admin tier (GA).** Users create skills (Customize page, chat, or SKILL.md in OneDrive `/Documents/Cowork/skills/`; 50 max; 1 MB SKILL.md; ≤20 companions/10 MB), **upload skills (.md/.zip/.skill)**, and **upload plugin .zip packages — Claude packages auto-converted, incl. bundled MCP connectors** — then share with "Only you" / "Specific users". Org-wide publish needs admin approval. **There is no tenant setting that turns off user plugin sharing** (cowork-manage-plugins, 2026-08-31, upd 10-29). Each recipient does their own connector OAuth. Projects (Oct 2026) hold instructions + context but are **private to the creator**. Access to Cowork itself requires an admin spending policy (usage-based billing).
+- **Word legal plugin: on by default, not extensible.** Playbooks are .docx, uploaded or "Attach from Cloud" per review. Save, reuse, share and library are not documented. Custom skills are documented for Excel and PowerPoint (OneDrive, no admin) but **not for Word**. Admin policy: "Legal Skills in M365 Copilot in Word".
+- **Agent Builder**: 100 SharePoint files, 1 list, 50 OneDrive files, 20 embedded files (512 MB docx/pdf), 4 URLs; connectors need an admin. Sharing to users, groups (chat only), link, or org-wide toggle (default All users). Org catalog needs admin approval. Downloadable .zip, but embedded files are stripped.
+- **Admin paths**: MAC > Agents > Tools > Registry > Upload, or Manage apps > Upload custom app. No store validation. MCP registration approval needs AI Admin or Global Admin plus tenant-wide consent, then ≤30 min propagation. Per-tool toggles are still rolling out.
+- **Store**: Partner Center "Microsoft 365 and Copilot" offer, typically 4–6 weeks. M365 App Compliance is optional. Validation bans file embedding and Dataverse capabilities outside LOB, requires value beyond native Copilot, 99.9% availability, and p99 response under 9 s.
+- **High tier**: Foundry publish is "Just you" (no approval) or tenant (admin approval). It creates a Bot Service in the publisher's subscription. Cross-tenant use by an ISV is not documented. Copilot Studio supports solution export/import. System Customizer is required. Auth must be reconfigured and the agent republished after import.
+
+**Sources**: learn.microsoft.com/en-us/copilot/cowork/{use-cowork (upd 10-21), cowork-customize (10-21), cowork-plugins (10-29), cowork-manage-plugins (10-29), cowork-plugin-development (10-21), cowork-projects (10-28), cowork-admin-governance (10-27), whats-new (10-28)}; microsoft-agent-365/admin/manage-plugins-skills-mcp-servers (10-14); microsoft-365/admin/manage/agent-settings (upd 10-23); manage-copilot-for-legal (10-13); support.microsoft.com get-started-with-copilot-for-legal; extensibility/agent-builder-add-knowledge (09-30), agent-builder-share-manage-agents (10-12), publish / publish-plugin-publicly / publish-plugin-organization (10-12); partner-center add-in-submission-guide (upd 10-01); Teams review-copilot-validation-guidelines (10-23); azure/foundry publish-copilot (09-28); copilot-studio authoring-solutions-import-export (10-15); sharepoint get-started-sharepoint-agents (10-16); techcommunity plugin registry 4559682 (2026-09-30).
+
+**Open questions**: Does the "Allow agents and plugins built by your organization" toggle block user-uploaded Cowork plugins? Is the Word legal plugin able to load registry/partner plugins yet (the blog lists Word as a "supported experience", but no per-surface release note)? Copilot Notebooks reference limits conflict (100 vs 300) with no primary doc. Does user consent to an ISV multitenant MCP app succeed under the tenant's consent policy (MS-managed default = yes for non-listed scopes)?
