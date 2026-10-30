@@ -1,0 +1,126 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="104" project="ebilling-r1">
+  <metadata>
+    <title>Reject and Return to Firm; resubmission linkage</title>
+    <phase>4 Review and approval (WP4) — wave W4-3</phase>
+    <gate>startable</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Terminal invoice decisions (Rejected is final) with authorization and Decision Record obligations, plus a change to the accepted-submission write path (supersedes link).</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Follows 103's eligibility, lifecycle and recorder sequencing exactly; the supersedes link is a small, well-specified addition to 049's persist step.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P4-C</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>103, 045</deps>
+    <tags>bff, api, auth</tags>
+    <estimated-effort>1-2 days</estimated-effort>
+  </metadata>
+
+  <prompt>Add whole-invoice Reject (final, reason required) and Return to Firm (reason required; invoice becomes Returned to Firm, Inactive) for eligible approvers, each through 014 with exactly one Decision Record via 074, and link the accepted resubmission of a returned invoice to it through sprk_supersedesinvoice (D-43).</prompt>
+
+  <role>SPAARKE platform developer. Expert in ASP.NET Core Minimal APIs, idempotent decision writes and the Finance submission write path.</role>
+
+  <goal>InvoiceRejectReturnEndpoints.cs and InvoiceRejectReturnService (reject, return), the supersedes link in 049's accept path, and tests proving authorization, reason rules, idempotency, rollup exclusion and the link.</goal>
+
+  <context>
+    <background>Spec FR-36 (acceptance: Returned / Rejected invoices excluded from rollups and the export; Duplicate rule ignores Rejected / Returned attempts for the same invoice number), FR-06 matrix (In Review → Rejected | Returned to Firm), FR-30 (exactly one Decision Record per reject / return), D-34, D-37 (resubmission keeps the firm invoice number, new .n via 045), D-43 (accepted resubmission = new invoice linked to the superseded one), I-4. Eligibility: 103's EligibleApproverResolver (any eligible approver may reject or return — prototype F-7 notes "Return to firm and Reject stay available to any eligible approver"). 012: sprk_supersedesinvoice lookup. 020: sprk_resubmissionof on the submission. Rollups count only FinanceBaseValues.CountedInvoiceStatuses (Services/Finance/FinanceBaseValues.cs; changed to statuscode In Review, Approved, Sent to AP, Paid by 015). Duplicate's exclusion of Rejected / Returned attempts is 071's handler. Export exclusion is enforced by 150. The firm notice and email are WP5 (131, 132): this task stores the reason and leaves the notification to 132.</background>
+    <relevant-files>
+      <file role="new">src/server/api/Sprk.Bff.Api/Api/Finance/InvoiceRejectReturnEndpoints.cs</file>
+      <file role="new">src/server/api/Sprk.Bff.Api/Services/Finance/InvoiceRejectReturnService.cs</file>
+      <file role="modify">049's invoice creation in the accept path (file named in 049's notes): set sprk_supersedesinvoice</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/DI/FinanceModule.cs (shared append point)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/DI/EndpointMappingExtensions.cs:376-377 (shared append point)</file>
+      <file role="new">tests/unit/Sprk.Bff.Api.Tests/Services/Finance/InvoiceRejectReturnServiceTests.cs</file>
+      <file role="new">tests/integration/contract/Api/Finance/InvoiceRejectReturnEndpointsAuthorizationContractTests.cs</file>
+      <file role="read">src/server/api/Sprk.Bff.Api/Services/Finance/InvoiceApprovalService.cs (103 — sequencing to copy)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="103" status="pending">Eligibility resolver and exactly-once sequencing</dependency>
+      <dependency task="045" status="pending">Tracking numbers for the resubmission</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="074 ontology-r1 review K1/K3 (2026-10-17)">Recording billing Decision Records through BillingDecisionRecorder (074) brings two caller obligations.
+- (1) Exactly-once. The writer is exactly-once only for retries made one after another; two concurrent calls with one decision id can both write, and a duplicate in an append-only ledger is permanent. So:
+  - this task names its serialisation mechanism as an acceptance criterion. Examples: the job claims IIdempotencyService keyed by the decision id; an endpoint does a RowVersion-conditional status update and records only after it succeeds;
+  - it adds a test for the concurrent same-id case.
+- (2) Decider identity:
+  - derive the deciding user from the authenticated principal, never from request input;
+  - check invoice access through the UAC filter before recording;
+  - pass no contact id. The recorder looks the contact up itself, as DecisionCommitService does; 074's fix round removes that parameter.</constraint>
+    <constraint source="owner D-101 (2026-10-17)">A blocked or rejected submission already has its invoice (049 persists it). Return to firm sets that invoice to Returned to Firm through the lifecycle service, and its Decision Record files under the invoice (D-100 WriteBillingDecisionAsync). Do not add a submission lookup to sprk_decisionrecord.</constraint>
+    <constraint source="FR-36">Reason required for both (400 ebilling.reason_required); reject and return only from In Review (409 otherwise); a second call after the invoice left In Review is a no-op with no new Decision Record.</constraint>
+    <constraint source="FR-35 / F-7 default, root CLAUDE.md section 6">Only eligible approvers (103's live check) may reject or return: 403 ebilling.approver.not_eligible otherwise. Route filter "ebilling.invoice.decide".</constraint>
+    <constraint source="FR-30">Exactly one Decision Record per reject or return through 074's recorder; the approval portion status set to Rejected or Returned with decider and time.</constraint>
+    <constraint source="D-43">Only a Returned to Firm predecessor is linked: when a submission with the same firm and firm invoice number is accepted and the most recent prior invoice for that pair is Returned to Firm, the new invoice's sprk_supersedesinvoice points to it. A Rejected predecessor is never linked.</constraint>
+    <constraint source="ADR-001, ADR-008, ADR-019">Route conventions from 100; own endpoints file.</constraint>
+    <constraint source=".claude/constraints/bff-extensions.md">Placement BFF (B1 caller identity, B4 live request); publish-size delta; no new HIGH CVE; no package.</constraint>
+    <constraint source="074 fix-round adversarial pass (2026-10-18), caller obligations of BillingDecisionRecorder">Callers that record billing decisions through BillingDecisionRecorder must:
+- Derive the resolved Signal ids and the policy version id server-side, from the decision's own invoice and lines. Never take them from the request. The writer accepts any existing Signal or policy version (074 review K-2).
+- Record before mutating, or run the recorder's reads first. Its refusals that depend on Dataverse reads (unknown policy version, missing Signal, undetermined subject, contact read fault) happen after Preflight, so a caller that changes invoice status first can be left with a changed status and no Decision Record (K-3).
+- Serialise decisions per invoice (one at a time per invoice). The recorder's "already recorded" check and its create are not atomic (K-4).
+- Build Values the same way on every attempt (same types, same decimal scale), so that an honest retry hashes to the same content (K-5, unless 074's follow-up normalises decimals).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ebilling-r1/spec.md (FR-06, FR-30, FR-36, I-4)</file>
+      <file>projects/ebilling-r1/notes/decisions-log.md (D-34, D-37, D-43)</file>
+      <file>c:\code_files\spaarke-prototype\projects\ebilling.r1\README.md (F-7; invoice decision wizard row)</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Read 103's service and notes, 074's actions, 049's accept path and 045's numbering; confirm 015 has changed CountedInvoiceStatuses.</step>
+    <step order="1">Routes under /api/finance/invoices/{invoiceId} (names directional): POST reject, POST return (decision id, reason).</step>
+    <step order="2">Service: eligibility, In Review check, 014 transition, portion update, 074 record — same exactly-once order as 103.</step>
+    <step order="3">049 accept path: look up the most recent prior invoice for the firm and firm invoice number; link only if Returned to Firm.</step>
+    <step order="4">Tests: reject and return happy paths; reason required; not eligible 403; not In Review 409; repeat is a no-op with one record; resubmission of a returned invoice is linked and of a rejected one is not; a Rejected or Returned invoice is excluded from the rollup query built from CountedInvoiceStatuses; contract tests 401 / 403 / disabled.</step>
+    <step order="5">dotnet build and dotnet test green; publish-size delta and vulnerable-package check recorded.</step>
+    <step order="6">Update TASK-INDEX.md: this task's status cell to "✅ [done]".</step>
+    <step order="7">Record deviations in projects/ebilling-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>Owner decided D-73 (F-7): Return of a blocked internal submission needs no privilege (105 implements it). Invoice Return here keeps its existing access rule; if that conflicts with D-73, STOP and align with 105.</trigger>
+    <trigger>If 015 has not landed (rollups still read sprk_invoicestatus), STOP before the rollup test and report; do not add a statuscode filter here.</trigger>
+    <trigger>If two prior invoices for the same firm and number are both Returned (ambiguous predecessor), STOP and confirm the rule (default: most recent by created on).</trigger>
+  </escalation>
+
+  <justification>
+    <existing>Spec section 11 row "Review / approval / export / rule endpoints"; 014 owns transitions, 074 the record, 103 eligibility; no reject / return route exists (InvoiceReviewService reject is "not an invoice" for documents, FinanceEndpoints.cs:51).</existing>
+    <extension>Reuses 103's resolver and sequencing; own endpoints file; the supersedes link is one addition to the existing accept path rather than a new service.</extension>
+    <cost-of-doing-nothing>Reviewers cannot refuse or send back an invoice, resubmissions are unlinked from what they replace, and FR-36 and success criterion 5 fail.</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="dotnet">build, test</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">Api/Finance/InvoiceRejectReturnEndpoints.cs; Services/Finance/InvoiceRejectReturnService.cs; 049 accept path (supersedes link)</output>
+    <output type="test">InvoiceRejectReturnServiceTests.cs; InvoiceRejectReturnEndpointsAuthorizationContractTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Routes return 401 unauthenticated, 403 for a non-eligible caller, 503 ebilling.disabled when off, 409 when the invoice is not In Review.</criterion>
+    <criterion testable="true">Reject or return without a reason is 400 and writes nothing.</criterion>
+    <criterion testable="true">Reject moves the invoice to Rejected (Inactive), return to Returned to Firm (Inactive); each writes exactly one Decision Record and sets the portion status, decider and time; a repeated call writes no new record.</criterion>
+    <criterion testable="true">An accepted resubmission for the same firm and invoice number of a Returned to Firm invoice is created with sprk_supersedesinvoice set to it; after a Rejected invoice it is not set.</criterion>
+    <criterion testable="true">Rejected and Returned invoices are excluded from the rollup set defined by CountedInvoiceStatuses (test).</criterion>
+    <criterion testable="true">dotnet build 0 errors; all tests green.</criterion>
+    <criterion testable="true">Publish-size delta measured against a fresh master build and recorded in task notes; no new HIGH CVE.</criterion>
+    <criterion testable="true">Cover the stated contract plus the edge cases named above. Anything beyond that needs a one-line justification in task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>P4-C with 052 and 110: no file overlap (frontend). 049's accept path is shared with 103 / 105 edits that landed earlier in W4-2: re-read before editing. Export exclusion of Rejected / Returned invoices is 150's acceptance; Duplicate's exclusion is 071's (already tested there). Notification on Return / Reject is 132's; the firm-notice draft step in the decision wizard arrives with 131.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load the knowledge files first. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

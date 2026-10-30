@@ -1,0 +1,7 @@
+{"probe": "GET sprk_invoice_v1p @ 2025-11-01", "http": 404, "workflow": null, "error": "NotFound", "inner": "ModelNotFound", "at": "2026-10-15T15:28:59Z", "id": "GET sprk_invoice_v1p @ 2025-11-01"}
+{"probe": "analyze sprk_invoice_v1p @ 2025-11-01 on B-0004", "post_http": 404, "error": "NotFound", "message": "Resource not found.", "inner": "ModelNotFound", "at": "2026-10-15T15:28:59Z", "id": "analyze sprk_invoice_v1p @ 2025-11-01 on B-0004"}
+{"probe": "GET sprk_invoice_router_p @ 2025-11-01", "http": 404, "workflow": null, "error": "NotFound", "inner": "ModelNotFound", "at": "2026-10-15T15:28:59Z", "id": "GET sprk_invoice_router_p @ 2025-11-01"}
+{"probe": "analyze sprk_invoice_router_p @ 2025-11-01 on B-0019", "post_http": 404, "error": "NotFound", "message": "Resource not found.", "inner": "ModelNotFound", "at": "2026-10-15T15:28:59Z", "id": "analyze sprk_invoice_router_p @ 2025-11-01 on B-0019"}
+{"probe": "GET sprk_invoice_v1 @ 2026-06-01-preview", "http": 404, "workflow": null, "error": "NotFound", "inner": "ModelNotFound", "at": "2026-10-15T15:28:59Z", "id": "GET sprk_invoice_v1 @ 2026-06-01-preview"}
+{"probe": "GET sprk_invoice_v1 @ 2025-11-01", "http": 200, "workflow": null, "error": null, "inner": null, "at": "2026-10-15T15:28:59Z", "id": "GET sprk_invoice_v1 @ 2025-11-01"}
+{"probe": "GET sprk_invoice_v1p @ 2026-06-01-preview", "http": 200, "workflow": "standard.2026-06-01-preview", "error": null, "inner": null, "at": "2026-10-15T15:28:59Z", "id": "GET sprk_invoice_v1p @ 2026-06-01-preview"}

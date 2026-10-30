@@ -1,0 +1,86 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="124" project="ebilling-r1">
+  <metadata>
+    <title>Retire the Procedure Library container: remove Finance:ProcedureLibraryContainerId and close the per-customer SPE container hand-off (DEF-013 / #1967)</title>
+    <phase>3 Rules (WP3) — Procedures and files (EB-D-148); added 2026-10-27 (EB-D-163)</phase>
+    <gate>116 merged (no reader of the key is left: the rule-set upload, the draft source and the rate-card workbook are the Procedure Version's Stored File); 092 merged (it retired Finance:EbillingOutputContainerId from the same files)</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies BFF configuration code (.cs) and the start-up validator; removes a provisioning requirement.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Mechanical removal of one configuration key with an exact reference (092's retirement of EbillingOutputContainerId).</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P3-F</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>116, 092</deps>
+    <tags>bff-api, config, storage, provisioning</tags>
+    <estimated-effort>0.5 day</estimated-effort>
+  </metadata>
+
+  <prompt>The file model (notes/procedure-and-file-model.md 3.4, 4) stores every Procedure document as a Stored File (purpose Procedure source, parent its Procedure Version) in the Finance file store that 091 provisions with the stamp, and retires "Procedure Library". 116 moves the last three readers (RuleSetService CreateAsync and GetDraftSourceAsync, RateCardImportService.ImportAsync) onto that file. 092 retired the other eBilling SPE key (EbillingOutputContainerId) and left this one because it still had readers. Nothing then removes the key, so every customer stamp would still need an owner-created SPE container nothing uses (DEF-013, handed to customer-provisioning-orchestration-r1 as #1967). The owner decided on 2026-10-27 (EB-D-163) to retire it so eBilling deploys through the stamp's file store alone.</prompt>
+
+  <role>SPAARKE platform developer. Expert in FinanceOptions, start-up validation and the provisioning hand-offs.</role>
+
+  <goal>No code, template or provisioning artifact names Finance:ProcedureLibraryContainerId or the Procedure Library container; eBilling on a new customer stamp needs no SPE container; DEF-013 and #1967 are closed with the reason.</goal>
+
+  <context>
+    <background>Copy 092's retirement of EbillingOutputContainerId (projects/ebilling-r1/notes/092-submission-on-files.md, "Retired key") for this key. References at HEAD on 2026-10-27: Configuration/FinanceOptions.cs:62-66; Configuration/FinanceOptionsValidator.cs:21,35; Infrastructure/DI/GraphModule.cs:32 (the stamp-container keys); Infrastructure/Dataverse/RecordContainerResolver.DocumentPointer.cs:64 (declared unfiled homes); appsettings.template.json:461-462 (token SPE_PROCEDURE_LIBRARY_CONTAINER_ID); any indexing skip that names the container. Re-grep at HEAD after 116 and 092 merge.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Configuration/FinanceOptions.cs, FinanceOptionsValidator.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/DI/GraphModule.cs; Infrastructure/Dataverse/RecordContainerResolver.DocumentPointer.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/appsettings.template.json</file>
+      <file role="modify">the tests that pin these lists (options, validator, stamp-container keys, unfiled homes), as 092 changed them</file>
+      <file role="modify">projects/ebilling-r1/notes/defer-issues.md (DEF-013)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="EB-D-163">Remove the key everywhere in src/server, tests, infrastructure, scripts and .github. No replacement key: Procedure files use 091's Finance:FileStore settings, which already exist.</constraint>
+    <constraint source="ADR / start-up">An environment that still carries the app setting Finance__ProcedureLibraryContainerId must start normally (the setting binds to nothing); prove it with a test, as 092 did for the output key.</constraint>
+    <constraint source="owner D-55">Never delete or modify the owner-created dev SPE containers. The dev app setting is removed only in 079's live steps, not here.</constraint>
+    <constraint source="CLAUDE.md §3">Do not edit .claude/; report the .claude/constraints/provisioning.md lines that name either key for the main session.</constraint>
+    <constraint source="bff-extensions.md">No package; publish-size delta recorded.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/config.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>projects/ebilling-r1/notes/procedure-and-file-model.md (3.4, 4)</file>
+      <file>projects/ebilling-r1/notes/092-submission-on-files.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Grep the key and the token at HEAD; confirm only plumbing remains (if a reader remains, STOP: see escalation).</step>
+    <step order="2">Remove it from options, validator, stamp-container keys, unfiled homes, template; update the pinning tests; add the leftover-setting start-up test.</step>
+    <step order="3">DEF-013: close both halves (output key by 092, this key by 124) with the reason; comment on and close #1967; send customer-provisioning-orchestration-r1 the note that eBilling needs no SPE container on a stamp.</step>
+    <step order="4">Build, tests, publish-size delta, notes; TASK-INDEX row 124.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If any reader of ProcedureLibraryContainerId remains after 116, STOP and report it; do not move a reader in this task.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="code">FinanceOptions.cs, FinanceOptionsValidator.cs, GraphModule.cs, RecordContainerResolver.DocumentPointer.cs, appsettings.template.json</output>
+    <output type="test">the pinning tests; the leftover-setting start-up test</output>
+    <output type="docs">projects/ebilling-r1/notes/124-retire-procedure-library-key.md; DEF-013 closed</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">grep -ri "ProcedureLibraryContainerId\|PROCEDURE_LIBRARY_CONTAINER" over src, tests, infrastructure, scripts and .github finds nothing (bin/obj excluded).</criterion>
+    <criterion testable="true">The BFF starts with a leftover Finance__ProcedureLibraryContainerId value set, valid or malformed, and with none; the validator reports nothing about it.</criterion>
+    <criterion testable="true">Rule-set create, draft and rate-card import still pass their tests (116's), with no SPE container configured.</criterion>
+    <criterion testable="true">DEF-013 is Closed with the reason, #1967 is closed with a comment, and customer-provisioning-orchestration-r1 has been told.</criterion>
+    <criterion testable="true">Cover the stated contract plus the edge cases named above. Anything beyond that needs a one-line justification in task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>Added 2026-10-27 (EB-D-163) after 092's escalation: the owner asked for it because it aligns eBilling's setup with the stamp's file store (no per-customer SPE containers). 116 owns moving the readers; this task removes only what is left.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load the knowledge files first. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

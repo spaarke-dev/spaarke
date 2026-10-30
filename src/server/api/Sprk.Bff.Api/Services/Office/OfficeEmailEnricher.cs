@@ -506,11 +506,18 @@ public class OfficeEmailEnricher
                     }
                     else
                     {
-                        // Regular attachment
-                        bodyBuilder.Attachments.Add(
+                        // Regular attachment. Base64 always (ebilling-r1 095 review F1): MimeKit otherwise sends a text/* part
+                        // 7-bit or quoted-printable and rewrites its CRLF/LF to the writer's newline format on write (the BFF
+                        // runs on Linux), so the bytes read back are not the bytes attached. A message/* part is a MessagePart,
+                        // which has no transfer encoding to set; a marked one is refused at step 0.
+                        var entity = bodyBuilder.Attachments.Add(
                             attachment.FileName,
                             contentBytes,
                             contentType);
+                        if (entity is MimePart part)
+                        {
+                            part.ContentTransferEncoding = ContentEncoding.Base64;
+                        }
                     }
                 }
                 catch (FormatException)

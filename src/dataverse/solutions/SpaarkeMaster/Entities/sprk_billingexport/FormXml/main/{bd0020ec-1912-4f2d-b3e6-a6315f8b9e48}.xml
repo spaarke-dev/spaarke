@@ -1,0 +1,118 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<forms xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <systemform>
+    <formid>{bd0020ec-1912-4f2d-b3e6-a6315f8b9e48}</formid>
+    <IntroducedVersion>1.0</IntroducedVersion>
+    <FormPresentation>1</FormPresentation>
+    <FormActivationState>1</FormActivationState>
+    <form>
+      <tabs>
+        <tab verticallayout="true" id="{229C4B49-11A2-73CE-1363-3E8D06899D78}" name="tab_general" IsUserDefined="1" expanded="true" showlabel="true">
+          <labels>
+            <label description="General" languagecode="1033" />
+          </labels>
+          <columns>
+            <column width="100%">
+              <sections>
+                <section name="section_general" id="{B73A414C-7606-C20D-B12F-54425062147B}" IsUserDefined="1" showlabel="true" showbar="false" columns="11" celllabelposition="Top" labelwidth="115" celllabelalignment="Left" layout="varwidth">
+                  <labels>
+                    <label description="Export batch" languagecode="1033" />
+                  </labels>
+                  <rows>
+                    <row>
+                      <cell id="{7564EC62-3866-7AF8-29F4-22FF82252764}">
+                        <labels>
+                          <label description="Name" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_name" classid="{4273EDBD-AC1D-40D3-9FB2-095C621B552D}" datafieldname="sprk_name" />
+                      </cell>
+                      <cell id="{8A6E8081-4615-5D1F-B6DD-E6440E21DF33}">
+                        <labels>
+                          <label description="Export Status" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_exportstatus" classid="{3EF39988-22BB-4F0B-BBBE-64B5A3748AEE}" datafieldname="sprk_exportstatus" />
+                      </cell>
+                    </row>
+                    <row>
+                      <cell id="{E0A49AA3-4030-C731-A18D-A6340BC3AA2A}">
+                        <labels>
+                          <label description="Invoice Count" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_invoicecount" classid="{C6D124CA-7EDA-4A60-AEA9-7FB8D318B68F}" datafieldname="sprk_invoicecount" />
+                      </cell>
+                      <cell id="{C2C92A1F-92FB-4AE8-C497-ADB2943F7C47}">
+                        <labels>
+                          <label description="Total Amount" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_totalamount" classid="{533B9E00-756B-4312-95A0-DC888637AC78}" datafieldname="sprk_totalamount" />
+                      </cell>
+                    </row>
+                    <row>
+                      <cell id="{6EF4AC9A-247F-ACDA-F7E8-2E29AF9C840A}">
+                        <labels>
+                          <label description="Formats" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_formats" classid="{4AA28AB7-9C13-4F57-A73D-AD894D048B5F}" datafieldname="sprk_formats" />
+                      </cell>
+                      <cell id="{2C078669-1CE1-B561-17D4-8A7E66F957C5}">
+                        <labels>
+                          <label description="Failure Reason" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_failurereason" classid="{4273EDBD-AC1D-40D3-9FB2-095C621B552D}" datafieldname="sprk_failurereason" />
+                      </cell>
+                    </row>
+                    <row>
+                      <cell id="{26EBB34B-F2EF-D3B1-0521-198E13C4D689}">
+                        <labels>
+                          <label description="CSV Document" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_csvdocument" classid="{270BD3DB-D9AF-4782-9025-509E298DEC0A}" datafieldname="sprk_csvdocument" />
+                      </cell>
+                      <cell id="{E025B3DB-C2CC-C9C3-F3F6-9E95094A5A01}">
+                        <labels>
+                          <label description="JSON Document" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_jsondocument" classid="{270BD3DB-D9AF-4782-9025-509E298DEC0A}" datafieldname="sprk_jsondocument" />
+                      </cell>
+                    </row>
+                    <row>
+                      <cell id="{4C931FBD-87CC-CC72-2D29-1301B2DEBCA5}">
+                        <labels>
+                          <label description="Owner" languagecode="1033" />
+                        </labels>
+                        <control id="ownerid" classid="{270BD3DB-D9AF-4782-9025-509E298DEC0A}" datafieldname="ownerid" />
+                      </cell>
+                    </row>
+                  </rows>
+                </section>
+                <section name="section_mapping" id="{23CF2821-4705-88BE-CFF9-7AA3E58B4E3A}" IsUserDefined="1" showlabel="true" showbar="false" columns="11" celllabelposition="Top" labelwidth="115" celllabelalignment="Left" layout="varwidth">
+                  <labels>
+                    <label description="Mapping snapshot" languagecode="1033" />
+                  </labels>
+                  <rows>
+                    <row>
+                      <cell id="{7A705285-862C-A765-85D1-34CC9ED7EB38}" colspan="2" rowspan="3">
+                        <labels>
+                          <label description="Mapping Snapshot" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_mappingsnapshot" classid="{E0DECE4B-6FC8-4A8F-A065-082708572369}" datafieldname="sprk_mappingsnapshot" />
+                      </cell>
+                    </row>
+                  </rows>
+                </section>
+              </sections>
+            </column>
+          </columns>
+        </tab>
+      </tabs>
+    </form>
+    <IsCustomizable>1</IsCustomizable>
+    <CanBeDeleted>1</CanBeDeleted>
+    <LocalizedNames>
+      <LocalizedName description="Information" languagecode="1033" />
+    </LocalizedNames>
+    <Descriptions>
+      <Description description="A form for this entity." languagecode="1033" />
+    </Descriptions>
+  </systemform>
+</forms>

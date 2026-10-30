@@ -1,0 +1,111 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="023" project="ebilling-r1">
+  <metadata>
+    <title>sprk_billingexport schema and invoice batch lookup</title>
+    <phase>1 Data model (WP1)</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Creates a new table, a lookup on an existing table and a new script file; no C# code.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Single-table schema script with an exact column list and a canonical exemplar.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P1-A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>none</deps>
+    <tags>dataverse, schema</tags>
+    <estimated-effort>2-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Create the new Dataverse table sprk_billingexport (one AP export batch) and a lookup from sprk_invoice to its batch in dev with an idempotent Web API script, then document both.</prompt>
+
+  <role>SPAARKE platform developer. Expert in Dataverse metadata Web API scripting. Follow ADRs strictly.</role>
+
+  <goal>scripts/ebilling/Deploy-EbillingExportSchema.ps1 exists and has been run against spaarkedev1 (second run: no change); a metadata read shows sprk_billingexport with the columns in the steps and sprk_invoice.sprk_billingexport as a lookup to it; docs/data-model is updated.</goal>
+
+  <context>
+    <background>spec.md FR-13 (created by / on, invoice count, total, format, file document, status; invoice lookup to its batch) and FR-41 (CSV and JSON from a configurable mapping, exported values snapshotted with the batch, an invoice cannot be in two batches). D-21: export file formats CSV / JSON / XML per batch. Task 150 writes batches; a single lookup on the invoice is what structurally keeps an invoice in one batch.</background>
+    <relevant-files>
+      <file role="new">scripts/ebilling/Deploy-EbillingExportSchema.ps1</file>
+      <file role="new">docs/data-model/sprk_billingexport.md</file>
+      <file role="modify">docs/data-model/sprk_invoice.md (add the sprk_billingexport lookup row only)</file>
+      <file role="modify">docs/data-model/INDEX.md (one row under "Entity Documentation — Financial")</file>
+      <file role="canonical-reference">scripts/Deploy-ChartDefinitionEntity.ps1</file>
+      <file role="canonical-reference">scripts/Create-ScopeCapabilityFields.ps1:197 (MultiSelectPicklistAttributeMetadata)</file>
+      <file role="canonical-reference">scripts/Deploy-AccessEventEntity.ps1:585 (MSCRM.SolutionUniqueName header)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="none" status="complete">Parallel with 012, which also adds columns to sprk_invoice (different columns; additive Web API calls do not conflict).</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">This task writes ONE script, scripts/ebilling/Deploy-EbillingExportSchema.ps1, runs it only against https://spaarkedev1.crm.dynamics.com, supports -WhatIf, checks existence before every create, entity-scoped PublishXml for sprk_billingexport and sprk_invoice.</constraint>
+    <constraint source="project">Do NOT edit src/dataverse/solutions/SpaarkeMaster/** (task 029). Additive only; the only change to sprk_invoice is the one new lookup.</constraint>
+    <constraint source="ADR-002">No plugin, rollup or flow computes invoice count or total; task 150 writes them server-side.</constraint>
+    <constraint source="project">Shared append points docs/data-model/sprk_invoice.md and INDEX.md: re-read before editing, add only this task's rows.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Dataverse schema via Web API</topic>
+    <files>
+      <file>.claude/skills/dataverse-create-schema/SKILL.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+      <file>.claude/constraints/plugins.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="0" name="Rigor + discovery">Declare RIGOR LEVEL: STANDARD. Read FR-13, FR-41, D-21, D-56. Describe sprk_billingexport (expect absent) and sprk_invoice in dev.</step>
+    <step order="1" name="Table + columns">Script from the Deploy-ChartDefinitionEntity.ps1 helpers. User/team-owned table sprk_billingexport (display "Billing Export"), primary name sprk_name (text 100, the batch id). Columns: sprk_invoicecount (whole number, min 0); sprk_totalamount (currency); sprk_formats (multi-select local choice CSV, JSON, XML — XML reserved, D-21); sprk_exportstatus (local choice Generating, Completed, Failed); sprk_mappingsnapshot (multiline 1048576 — the field mapping used, snapshotted per FR-41); sprk_failurereason (text 200).</step>
+    <step order="2" name="Lookups">OneToMany (Delete = RemoveLink, others NoCascade): sprk_csvdocument → sprk_document; sprk_jsondocument → sprk_document; and on sprk_invoice: sprk_billingexport → sprk_billingexport (display "Export Batch"). Created by / on are the platform columns.</step>
+    <step order="3" name="Run">Header MSCRM.SolutionUniqueName = SpaarkeMaster. -WhatIf, real run, second run reports no change.</step>
+    <step order="4" name="Verify">Metadata read of both tables; record in task notes.</step>
+    <step order="5" name="Docs">docs/data-model/sprk_billingexport.md (format of sprk_invoice.md); add the lookup row to docs/data-model/sprk_invoice.md; one INDEX.md row.</step>
+    <step order="6">Update TASK-INDEX.md: set this task's status cell to ✅ [done].</step>
+    <step order="7">Record any deviation in projects/ebilling-r1/notes/ and this task's notes.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If sprk_invoice already has a column named sprk_billingexport or a lookup to another export table in dev, STOP and escalate rather than adding a second batch link.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>No export batch table exists (Entities/ has none; git grep sprk_billingexport outside projects/ finds nothing). Spec section New Components: none found.</existing>
+    <extension>No — there is no record of an AP hand-off to extend; Decision Records and job rows do not carry a file, a mapping snapshot or a set of invoices.</extension>
+    <cost-of-doing-nothing>No record of what was sent to AP: an invoice could be exported twice (double payment risk, FR-41) and a past batch file could not be reproduced after a mapping change.</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="pwsh">Run the schema script</tool>
+    <tool name="az">Dataverse token</tool>
+    <tool name="mcp-dataverse">describe for pre-validation and verification</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">scripts/ebilling/Deploy-EbillingExportSchema.ps1</output>
+    <output type="docs">docs/data-model/sprk_billingexport.md</output>
+    <output type="docs">docs/data-model/sprk_invoice.md and INDEX.md (rows)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">A metadata read of sprk_billingexport in spaarkedev1 lists every column and lookup in steps 1-2 with the stated types and choice values.</criterion>
+    <criterion testable="true">sprk_invoice has the single-valued lookup sprk_billingexport targeting sprk_billingexport, so an invoice row can reference at most one batch.</criterion>
+    <criterion testable="true">A second run of the script reports no change; -WhatIf makes no change.</criterion>
+    <criterion testable="true">No file under src/dataverse/solutions/SpaarkeMaster/ is modified, and no existing sprk_invoice column is changed.</criterion>
+    <criterion testable="true">The data-model docs and INDEX.md row exist.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Completed 2026-10-15. Script scripts/ebilling/Deploy-EbillingExportSchema.ps1 run against spaarkedev1 (second run: no change). Full evidence, live schema changes and deviations: projects/ebilling-r1/notes/023-billingexport-schema.md. Escalation trigger did not fire. Defect filed: DEF-012 (#1942).
+    rework: fix-round-1 task 023
+    The brief named the invoice lookup sprk_billingexportid; that is the primary key name of sprk_billingexport itself, so the lookup is named sprk_billingexport.
+    FR-13 says "file document" (one); FR-41 produces a CSV and a JSON file, so there is one document lookup per format (sprk_csvdocument, sprk_jsondocument), and "format" records which files a batch produced.
+    sprk_failurereason supports a Failed status; the batch writer is task 150.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load the knowledge files first. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

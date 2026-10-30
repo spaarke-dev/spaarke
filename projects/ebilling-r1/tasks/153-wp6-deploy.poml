@@ -1,0 +1,118 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="153" project="ebilling-r1">
+  <metadata>
+    <title>Deploy WP6 to dev</title>
+    <phase>6 Export and index (WP6) — wave W6-3</phase>
+    <gate>startable</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Deployment, WP6 solution-source sync using the 029 procedure, index deploy and smoke verification; no new code.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Prescriptive deploy procedure with existing scripts and skills.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Writes the shared dev environment (BFF, AI Search index, Dataverse components, web resources) and SpaarkeMaster solution source (serial-only after 029).</parallel-reason>
+    <deps>150, 151, 152, 136</deps>
+    <tags>deploy, bff, ai-search</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Deploy WP6 to dev — the invoice index schema, the BFF with export, Mark Paid and structured indexing, and 151's export UI with its views, configuration rows, commands and navigation entry (synced into SpaarkeMaster source with the 029 procedure) — then smoke every new route and prove an export batch file lands in the output container, Sent to AP to Paid works, and an accepted invoice is searchable within 5 minutes.</prompt>
+
+  <role>SPAARKE platform developer. Expert in bff-deploy, code-page-deploy, dataverse-deploy, Azure AI Search index deployment and dev smoke verification.</role>
+
+  <goal>Dev runs WP6; Deploy-AllIndexes.ps1 -VerifyOnly passes for invoices-index; new routes answer 401 unauthenticated and the expected status authenticated; the export, Mark Paid and NFR-03 checks pass; 151's components and navigation entry are in SpaarkeMaster source; evidence in notes/153-wp6-deploy.md.</goal>
+
+  <context>
+    <background>Spec WP6 (FR-41 – FR-43, NFR-03), success criterion 7, project CLAUDE.md sections 3 and 5 (deploy tasks add navigation entries for pages they deploy and sync any columns / components their phase added after 029, using 029's procedure; Deploy-BffApi.ps1 for the BFF; Import-SolutionScoped.ps1 is the only import path). WP5 (136) is deployed first. Index: scripts/ai-search/Deploy-AllIndexes.ps1 (-Environment dev -Indexes invoices-index; -DryRun / -WhatIf; -VerifyOnly runs the invariant verifier). Web resources: scripts/Deploy-WebResourceInline.ps1 or the code-page-deploy skill; grid configuration rows: scripts/Deploy-AllDataGridConsumers.ps1. 151's notes list the dev components and the chosen surface; 150's and 152's notes list routes, settings and any recreate need. App setting Finance__EbillingOutputContainerId (028) is needed by 150.</background>
+    <relevant-files>
+      <file role="read">scripts/ai-search/Deploy-AllIndexes.ps1</file>
+      <file role="read">scripts/Deploy-BffApi.ps1</file>
+      <file role="read">scripts/Deploy-WebResourceInline.ps1</file>
+      <file role="read">scripts/Deploy-AllDataGridConsumers.ps1</file>
+      <file role="read">scripts/solution-authoring/Test-SolutionCompleteness.ps1</file>
+      <file role="read">scripts/solution-authoring/Export-SpaarkeMasterSource.ps1</file>
+      <file role="read">scripts/Import-SolutionScoped.ps1</file>
+      <file role="modify">src/dataverse/solutions/SpaarkeMaster/ (WP6 eBilling hunks and navigation entry only)</file>
+      <file role="read">projects/ebilling-r1/tasks/029-wp1-apply-and-export.poml (sync procedure)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="150-152" status="pending">All WP6 tasks complete on the branch</dependency>
+      <dependency task="136" status="pending">WP5 deployed to dev</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project CLAUDE.md section 5">Dev only; no secrets in the repo or notes (setting names only).</constraint>
+    <constraint source=".claude/skills/bff-deploy/SKILL.md">BFF only through scripts/Deploy-BffApi.ps1 with hash verification.</constraint>
+    <constraint source="project CLAUDE.md section 3">Solution source: only WP6 eBilling components and the export UI navigation entry, via the 029 procedure; no real import, no Assemble, no version bump.</constraint>
+    <constraint source="project">Index deploy -DryRun first; a recreate of spaarke-invoices-index only if 152's notes call for it and the main session agreed.</constraint>
+    <constraint source="project">No destructive Dataverse change; test export batches and paid invoices are dev test data, recorded by id.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/bff-deploy/SKILL.md</file>
+      <file>.claude/skills/code-page-deploy/SKILL.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+      <file>docs/architecture/AI-SEARCH-INDEX-CATALOG.md</file>
+      <file>docs/procedures/SPAARKE-SOLUTION-RELEASE-PROCESS.md</file>
+      <file>projects/ebilling-r1/CLAUDE.md (sections 3 and 5)</file>
+    </files>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="1">Preconditions: every dependency shows ✅ in TASK-INDEX.md; dotnet build and dotnet test green; record the commit SHA. Collect from 150-152 notes: routes, setting names, components created in dev, index recreate need.</step>
+    <step order="2">Index: Deploy-AllIndexes.ps1 -Environment dev -Indexes invoices-index -DryRun, then for real, then -VerifyOnly; record output.</step>
+    <step order="3">App Service settings: verify Finance__EbillingOutputContainerId and Ebilling__Enabled on spaarke-bff-dev; set any new setting named in the notes (values never written to notes).</step>
+    <step order="4">BFF: scripts/Deploy-BffApi.ps1 against spaarke-bff-dev; hash verification passed; /healthz Healthy.</step>
+    <step order="5">UI: build and deploy 151's surface (code page via code-page-deploy / Deploy-WebResourceInline.ps1, or views and ribbon per its option); deploy its grid configuration rows; publish touched components only.</step>
+    <step order="6">Solution source: for every WP6 component (151's views, configuration-backed web resource, commands, sitemap entry for the export page in the Matter Management app; any column 150 or 151 added), follow 029 steps 4-6 (completeness check, AddSolutionComponent, export to temp, copy only those eBilling files and hunks, pac pack, Import-SolutionScoped -PlanOnly). Record the diff summary.</step>
+    <step order="7">Route smoke: every route added by 150 and 151 — unauthenticated (expect 401), finance user (expect 200 / 201), non-finance user on a write route (expect 403). Record status codes.</step>
+    <step order="8">End to end: approve two invoices (or use approved test invoices), create an export batch in the UI, verify CSV and JSON documents in the E-Billing Output Files container and both invoices Sent to AP; try exporting one again (expect refusal); Mark Paid one (expect Paid) and try Mark Paid on an Approved invoice (expect 409).</step>
+    <step order="9">Search: accept a new submission, then time until the invoice is returned by GET /api/finance/invoices/search filtered by firm, core record and a UTBMS code; must be within 5 minutes (NFR-03). Verify the export file never appears in any search result and a rejected submission is not in the invoice index.</step>
+    <step order="10">Run 151's ui-tests in dev (including dark mode); record results.</step>
+    <step order="11">Record evidence (SHA, script outputs, setting names, status codes, record ids, timing, screenshots paths) in projects/ebilling-r1/notes/153-wp6-deploy.md.</step>
+    <step order="12">Update TASK-INDEX.md: this task's status cell to "✅ [done]".</step>
+    <step order="13">Record deviations in projects/ebilling-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If any deploy script, hash verification or index invariant check fails, STOP and report; do not deploy by another route.</trigger>
+    <trigger>If any smoke route returns 500, a non-finance write succeeds, or an invoice lands in two batches, STOP before continuing.</trigger>
+    <trigger>If the invoice is not searchable within 5 minutes, record the measured time and STOP for a decision (fix in 152, or owner accepts) rather than marking NFR-03 met.</trigger>
+    <trigger>If an eBilling change cannot be separated from another project's drift in a shared solution file, STOP and ask the owner how to split it.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="pwsh">deploy, index and solution scripts</tool>
+    <tool name="npm">build</tool>
+    <tool name="az">App Service settings</tool>
+    <tool name="pac">solution pack</tool>
+    <tool name="dataverse-mcp">read_query verification</tool>
+    <tool name="ui-test">browser checks</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/ebilling-r1/notes/153-wp6-deploy.md</output>
+    <output type="config">src/dataverse/solutions/SpaarkeMaster/ (WP6 hunks and navigation entry)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Deploy-AllIndexes.ps1 -VerifyOnly passes for invoices-index after deploy.</criterion>
+    <criterion testable="true">Deploy-BffApi.ps1 completed with hash verification passed; /healthz Healthy.</criterion>
+    <criterion testable="true">Every new WP6 route returns 401 unauthenticated, success for a finance user and 403 for a non-finance write (recorded per route).</criterion>
+    <criterion testable="true">An export batch produced CSV and JSON documents in the output container, its invoices are Sent to AP, a second export of the same invoice was refused, Mark Paid moved one invoice to Paid and was refused (409) on an Approved invoice.</criterion>
+    <criterion testable="true">An accepted invoice was searchable by firm, core record and UTBMS code within 5 minutes (measured time recorded); the export file and rejected submissions are absent from search.</criterion>
+    <criterion testable="true">151's components and the export page navigation entry are in SpaarkeMaster source; pac pack succeeds; Import-SolutionScoped -PlanOnly lists them; no real import ran.</criterion>
+    <criterion testable="true">151's ui-tests pass in dev, including dark mode; evidence recorded in notes/153-wp6-deploy.md.</criterion>
+  </acceptance-criteria>
+
+  <notes>Shared dev environment: coordinate timing with other projects deploying spaarke-bff-dev and the shared search service. Record the deployed BFF package size for the cumulative NFR-12 view.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load the knowledge files first. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

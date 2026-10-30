@@ -1,0 +1,35 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0228",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0228","generator_id":"gen_eval_set.py@1 F-0228","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0228.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-06"},
+ "header":{"firm":"Kestrel Forsythe PC","firm_invoice_number":"INV-2026-32753","invoice_date":"2026-02-03","billing_period_start":"2026-01-01","billing_period_end":"2026-01-31","firm_matter_reference":"94512-0025","po_number":"PO-4599337","fees_total":3264.0,"expenses_total":2413.97,"adjustments_total":0.0,"total_due":5677.97,"currency":"USD"},
+ "timekeepers":[{"name":"Beatrix Voss","title":"Paralegal","rate":125.0,"billed_as":"BV"},{"name":"Daniel Fairweather","title":"Associate","rate":220.0,"billed_as":"DF"},{"name":"Gregory Mbeki","title":"Senior Associate","rate":230.0,"billed_as":"GM"},{"name":"Imani Halloran","title":"Partner","rate":390.0,"billed_as":"IH"},{"name":"Ingrid Quillen","title":"Paralegal","rate":115.0,"billed_as":"IQ"},{"name":"Yusuf Ashdown","title":"Associate","rate":220.0,"billed_as":"YA"},{"name":"Yusuf Brennan","title":"Associate","rate":235.0,"billed_as":"YB"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2026-01-05","timekeeper":"GM","timekeeper_name":"Gregory Mbeki","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":2.8,"rate":230.0,"amount":644.0,"narrative":"Revise appellate brief after cite check","codes":["L520","A104"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2026-01-06","timekeeper":"IH","timekeeper_name":"Imani Halloran","timekeeper_title":"Partner","title":"Ptr","hours":0.4,"rate":390.0,"amount":156.0,"narrative":"Draft notice of appeal and docketing statement for the supply agreement","codes":["L510","A103"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2026-01-09","timekeeper":"YB","timekeeper_name":"Yusuf Brennan","timekeeper_title":"Associate","title":"Assoc","hours":0.4,"rate":235.0,"amount":94.0,"narrative":"Prepare for oral argument in the vendor agreement","codes":["L530","A101"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2026-01-12","timekeeper":"IQ","timekeeper_name":"Ingrid Quillen","timekeeper_title":"Paralegal","title":"Para","hours":0.4,"rate":115.0,"amount":46.0,"narrative":"Analyze exposure and damages model for the employment claim","codes":["L120","A104"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2026-01-15","timekeeper":"GM","timekeeper_name":"Gregory Mbeki","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":0.5,"rate":230.0,"amount":115.0,"narrative":"Draft notice of appeal and docketing statement for the construction contract","codes":["L510","A103"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2026-01-20","timekeeper":"BV","timekeeper_name":"Beatrix Voss","timekeeper_title":"Paralegal","title":"Para","hours":1.3,"rate":125.0,"amount":162.5,"narrative":"Draft notice of appeal and docketing statement for the customs audit","codes":["L510","A103"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2026-01-21","timekeeper":"DF","timekeeper_name":"Daniel Fairweather","timekeeper_title":"Associate","title":"Assoc","hours":2.7,"rate":275.0,"amount":742.5,"narrative":"Prepare for oral argument in the lease dispute","codes":["L530","A101"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2026-01-21","timekeeper":"YB","timekeeper_name":"Yusuf Brennan","timekeeper_title":"Associate","title":"Assoc","hours":2.0,"rate":235.0,"amount":470.0,"narrative":"Draft appellate brief in the employment claim","codes":["L520","A103"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"fee","date":"2026-01-27","timekeeper":"BV","timekeeper_name":"Beatrix Voss","timekeeper_title":"Paralegal","title":"Para","hours":1.6,"rate":125.0,"amount":200.0,"narrative":"Revise appellate brief after cite check","codes":["L520","A104"],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"fee","date":"2026-01-28","timekeeper":"BV","timekeeper_name":"Beatrix Voss","timekeeper_title":"Paralegal","title":"Para","hours":1.2,"rate":125.0,"amount":150.0,"narrative":"Revise appellate brief after cite check","codes":["L520","A104"],"page":1,"narrative_style":"clear"},
+  {"n":11,"line_type":"fee","date":"2026-01-30","timekeeper":"YA","timekeeper_name":"Yusuf Ashdown","timekeeper_title":"Associate","title":"Assoc","hours":1.6,"rate":220.0,"amount":352.0,"narrative":"Attend and present oral argument in the distribution agreement","codes":["L530","A109"],"page":1,"narrative_style":"clear"},
+  {"n":12,"line_type":"fee","date":"2026-01-30","timekeeper":"YA","timekeeper_name":"Yusuf Ashdown","timekeeper_title":"Associate","title":"Assoc","hours":0.6,"rate":220.0,"amount":132.0,"narrative":"Research appealability issues in the employment claim","codes":["L510","A102"],"page":1,"narrative_style":"clear"},
+  {"n":13,"line_type":"expense","date":"2026-01-12","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":2290.99,"amount":2290.99,"narrative":"Consulting expert fees","codes":["E119"],"page":1,"narrative_style":"clear"},
+  {"n":14,"line_type":"expense","date":"2026-01-12","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":12.0,"rate":1.62,"amount":19.44,"narrative":"Facsimile charges","codes":["E104"],"page":1,"narrative_style":"clear"},
+  {"n":15,"line_type":"expense","date":"2026-01-28","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":334.0,"rate":0.31,"amount":103.54,"narrative":"Photocopies - 334 pages","codes":["E101"],"page":1,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["509 Congress Boulevard","Portland","Tax ID 98-8444891"],"template":"T01","pages":2},
+ "rule_set_id":"RS-06",
+ "context":{"matter_open":"2025-02-13","matter_close":"2026-05-01","matter_budget":47711.0,"approved_timekeepers":["Gregory Mbeki","Daniel Fairweather","Yusuf Brennan","Yusuf Ashdown","Beatrix Voss","Yusuf Santoro","Imani Halloran","Ingrid Quillen"],"invoice_received_date":"2026-02-18"},
+ "expected_findings":[
+  {"rule_id":"RS-06-R02","rule_type":"ApprovedRate","scope":"line","line_refs":[7],"consequence":"Reduce"},
+  {"rule_id":"RS-06-R03","rule_type":"ExpenseRule","scope":"line","line_refs":[14],"consequence":"Disallow"},
+  {"rule_id":"RS-06-R04","rule_type":"ExpenseRule","scope":"line","line_refs":[15],"consequence":"Reduce"}
+ ],
+ "seeded_violations":3
+}

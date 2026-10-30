@@ -1,0 +1,37 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0090",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0090","generator_id":"gen_eval_set.py@1 F-0090","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0090.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-06"},
+ "header":{"firm":"Eastlake & Zeller LLP","firm_invoice_number":"INV-2025-00395","invoice_date":"2026-06-04","billing_period_start":"2026-04-01","billing_period_end":"2026-04-30","firm_matter_reference":"46540-0034","po_number":"PO-4574001","fees_total":3654.0,"expenses_total":1636.04,"adjustments_total":0.0,"total_due":5290.04,"currency":"USD"},
+ "timekeepers":[{"name":"Clara Rosenthal","title":"Associate","rate":225.0,"billed_as":"CR"},{"name":"Hannah Whitfield","title":"Paralegal","rate":100.0,"billed_as":"HW"},{"name":"Oliver Thornbury","title":"Associate","rate":180.0,"billed_as":"OT"},{"name":"Priya Castellanos","title":"Associate","rate":200.0,"billed_as":"PC"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2026-04-01","timekeeper":"HW","timekeeper_name":"Hannah Whitfield","timekeeper_title":"Paralegal","title":"Para","hours":3.0,"rate":100.0,"amount":300.0,"narrative":"Review privilege log entries before service","codes":["L140","A104"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2026-04-02","timekeeper":"CR","timekeeper_name":"Clara Rosenthal","timekeeper_title":"Associate","title":"Assoc","hours":0.9,"rate":225.0,"amount":202.5,"narrative":"Prepare for case management conference in the customs audit","codes":["L230","A101"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2026-04-06","timekeeper":"OT","timekeeper_name":"Oliver Thornbury","timekeeper_title":"Associate","title":"Assoc","hours":1.4,"rate":180.0,"amount":252.0,"narrative":"Analyze exposure and damages model for the insurance coverage issue","codes":["L120","A104"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2026-04-08","timekeeper":"CR","timekeeper_name":"Clara Rosenthal","timekeeper_title":"Associate","title":"Assoc","hours":2.4,"rate":225.0,"amount":540.0,"narrative":"Research pleading standards applicable to the distribution agreement","codes":["L210","A102"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2026-04-09","timekeeper":"PC","timekeeper_name":"Priya Castellanos","timekeeper_title":"Associate","title":"Assoc","hours":0.8,"rate":200.0,"amount":160.0,"narrative":"Prepare case assessment memorandum regarding the employment claim and recommended strategy","codes":["L120","A103"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2026-04-13","timekeeper":"HW","timekeeper_name":"Hannah Whitfield","timekeeper_title":"Paralegal","title":"Para","hours":0.6,"rate":100.0,"amount":60.0,"narrative":"Prepare for case management conference in the data incident","codes":["L230","A101"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2026-04-14","timekeeper":"HW","timekeeper_name":"Hannah Whitfield","timekeeper_title":"Paralegal","title":"Para","hours":1.9,"rate":100.0,"amount":190.0,"narrative":"Prepare monthly status report to client regarding the data incident","codes":["L190","A111"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2026-04-22","timekeeper":"HW","timekeeper_name":"Hannah Whitfield","timekeeper_title":"Paralegal","title":"Para","hours":2.6,"rate":100.0,"amount":260.0,"narrative":"Analyze exposure and damages model for the supply agreement","codes":["L120","A104"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"fee","date":"2026-04-27","timekeeper":"PC","timekeeper_name":"Priya Castellanos","timekeeper_title":"Associate","title":"Assoc","hours":2.0,"rate":200.0,"amount":400.0,"narrative":"Draft motion for preliminary injunction in the warranty claim","codes":["L220","A103"],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"fee","date":"2026-04-30","timekeeper":"CR","timekeeper_name":"Clara Rosenthal","timekeeper_title":"Associate","title":"Assoc","hours":2.7,"rate":285.0,"amount":769.5,"narrative":"Prepare monthly status report to client regarding the construction contract","codes":["L190","A111"],"page":1,"narrative_style":"clear"},
+  {"n":11,"line_type":"fee","date":"2026-04-30","timekeeper":"CR","timekeeper_name":"Clara Rosenthal","timekeeper_title":"Associate","title":"Assoc","hours":1.6,"rate":325.0,"amount":520.0,"narrative":"Review and organize incoming production from Harbor Point Capital for matter file","codes":["L140","A104"],"page":2,"narrative_style":"clear"},
+  {"n":12,"line_type":"expense","date":"2026-04-10","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":644.0,"rate":0.11,"amount":70.84,"narrative":"Photocopies - 644 pages","codes":["E101"],"page":2,"narrative_style":"clear"},
+  {"n":13,"line_type":"expense","date":"2026-04-10","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":693.0,"rate":0.33,"amount":228.69,"narrative":"Photocopies - 693 pages","codes":["E101"],"page":2,"narrative_style":"clear"},
+  {"n":14,"line_type":"expense","date":"2026-04-13","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":3.0,"rate":11.19,"amount":33.57,"narrative":"Postage - certified mail","codes":["E108"],"page":2,"narrative_style":"clear"},
+  {"n":15,"line_type":"expense","date":"2026-04-17","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":700.0,"rate":0.09,"amount":63.0,"narrative":"Photocopies - 700 pages","codes":["E101"],"page":2,"narrative_style":"clear"},
+  {"n":16,"line_type":"expense","date":"2026-04-28","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":1239.94,"amount":1239.94,"narrative":"Court reporter and transcript - deposition","codes":["E115"],"page":2,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["585 Lakeshore Drive","Atlanta","Tax ID 23-9796888"],"template":"T05","pages":2},
+ "rule_set_id":"RS-06",
+ "context":{"matter_open":"2024-12-18","matter_close":"2026-07-29","matter_budget":46160.0,"approved_timekeepers":["Leila Okafor","Beatrix Kowalczyk","Hannah Whitfield","Dmitri Lindqvist","Clara Rosenthal","Priya Castellanos","Oliver Thornbury"],"invoice_received_date":"2026-06-05"},
+ "expected_findings":[
+  {"rule_id":"RS-06-R02","rule_type":"ApprovedRate","scope":"line","line_refs":[10],"consequence":"Reduce"},
+  {"rule_id":"RS-06-R02","rule_type":"ApprovedRate","scope":"line","line_refs":[11],"consequence":"Reduce"},
+  {"rule_id":"RS-06-R04","rule_type":"ExpenseRule","scope":"line","line_refs":[13],"consequence":"Reduce"},
+  {"rule_id":"RS-06-R06","rule_type":"InvoiceAge","scope":"invoice","line_refs":[],"consequence":"Flag"}
+ ],
+ "seeded_violations":4
+}

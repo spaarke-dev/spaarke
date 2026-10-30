@@ -252,6 +252,8 @@ export function parameterValid(parameter: DecisionParameter, value: string): boo
       return ISO_DATE.test(value.trim());
     case 'Choice':
       return !parameter.options || parameter.options.some(o => o.value === value);
+    case 'Boolean':
+      return /^(true|false)$/i.test(value.trim());
     default:
       return true;
   }
@@ -304,6 +306,11 @@ export function stepValues(action: DecisionAction, draft: ItemDraft, scope: Step
   const values: Record<string, DecisionValue> = {};
   for (const p of action.parameters) {
     const raw = fieldValue(draft, scope, p.code);
+    // Task 168 (D-194): a yes/no is always sent, as a boolean; an unset one is on (the server reads an omitted value the same way).
+    if (p.kind === 'Boolean') {
+      values[p.code] = raw.trim().toLowerCase() !== 'false';
+      continue;
+    }
     if (isBlank(raw)) continue;
     values[p.code] = p.kind === 'Money' ? (parseMoney(raw) as number) : raw.trim();
   }

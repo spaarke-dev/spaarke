@@ -1,0 +1,28 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0024",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0024","generator_id":"gen_eval_set.py@1 F-0024","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0024.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-06"},
+ "header":{"firm":"Jarrow Forsythe PC","firm_invoice_number":"INV-2026-05959","invoice_date":"2026-01-04","billing_period_start":"2025-12-01","billing_period_end":"2025-12-31","firm_matter_reference":"27180-0024","po_number":"PO-4544117","fees_total":1601.0,"expenses_total":1569.56,"adjustments_total":0.0,"total_due":3170.56,"currency":"USD"},
+ "timekeepers":[{"name":"Helena Carmichael","title":"Legal Assistant","rate":85.0,"billed_as":"HC"},{"name":"Katya Nakamura","title":"Senior Associate","rate":255.0,"billed_as":"KN"},{"name":"Katya Pemberton","title":"Partner","rate":420.0,"billed_as":"KP"},{"name":"Marcus Whitfield","title":"Paralegal","rate":110.0,"billed_as":"MW"},{"name":"Sofia Blackwood","title":"Partner","rate":440.0,"billed_as":"SB"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2025-12-08","timekeeper":"HC","timekeeper_name":"Helena Carmichael","timekeeper_title":"Legal Assistant","title":"LA","hours":0.8,"rate":85.0,"amount":68.0,"narrative":"Correspondence with consulting expert regarding scope of analysis","codes":["L130","A108"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2025-12-09","timekeeper":"KN","timekeeper_name":"Katya Nakamura","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":0.4,"rate":255.0,"amount":102.0,"narrative":"Draft motion for preliminary injunction in the distribution agreement","codes":["L220","A103"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2025-12-12","timekeeper":"HC","timekeeper_name":"Helena Carmichael","timekeeper_title":"Legal Assistant","title":"LA","hours":1.7,"rate":85.0,"amount":144.5,"narrative":"Review privilege log entries before service","codes":["L140","A104"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2025-12-16","timekeeper":"SB","timekeeper_name":"Sofia Blackwood","timekeeper_title":"Partner","title":"Ptr","hours":0.8,"rate":440.0,"amount":352.0,"narrative":"Draft settlement term sheet for the warranty claim","codes":["L160","A103"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2025-12-22","timekeeper":"MW","timekeeper_name":"Marcus Whitfield","timekeeper_title":"Paralegal","title":"Para","hours":1.6,"rate":110.0,"amount":176.0,"narrative":"Telephone conference with opposing counsel regarding settlement terms","codes":["L160","A107"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2025-12-24","timekeeper":"HC","timekeeper_name":"Helena Carmichael","timekeeper_title":"Legal Assistant","title":"LA","hours":2.7,"rate":85.0,"amount":229.5,"narrative":"Research public records concerning Harbor Point Capital and related entities","codes":["L110","A102"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2025-12-31","timekeeper":"KP","timekeeper_name":"Katya Pemberton","timekeeper_title":"Partner","title":"Ptr","hours":0.5,"rate":420.0,"amount":210.0,"narrative":"Attend case management conference in the customs audit","codes":["L230","A109"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2026-04-22","timekeeper":"MW","timekeeper_name":"Marcus Whitfield","timekeeper_title":"Paralegal","title":"Para","hours":2.9,"rate":110.0,"amount":319.0,"narrative":"Review court docket and calendar of pending deadlines for the licensing dispute","codes":["L190","A104"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"expense","date":"2025-12-12","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":1519.96,"amount":1519.96,"narrative":"Court reporter and transcript - deposition","codes":["E115"],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"expense","date":"2025-12-31","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":4.0,"rate":12.4,"amount":49.6,"narrative":"Postage - certified mail","codes":["E108"],"page":1,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["122 Market Street","Atlanta","Tax ID 42-4797112"],"template":"T01","pages":1},
+ "rule_set_id":"RS-06",
+ "context":{"matter_open":"2024-12-08","matter_close":"2026-03-31","matter_budget":37682.0,"approved_timekeepers":["Marcus Whitfield","Katya Nakamura","Helena Carmichael","Katya Pemberton","Sofia Blackwood","Louis Galbraith"],"invoice_received_date":"2026-01-07"},
+ "expected_findings":[
+  {"rule_id":"RS-06-R05","rule_type":"CoreRecordWindow","scope":"line","line_refs":[8],"consequence":"Flag"}
+ ],
+ "seeded_violations":1
+}

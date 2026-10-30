@@ -174,6 +174,23 @@ public sealed class PostUploadIndexingEnqueuerTests
     }
 
     [Fact]
+    public async Task EnqueueIfApplicableAsync_FileSkippedByIndexing_ReturnsSkipped_AndDoesNotStampTheDocument()
+    {
+        // ebilling-r1 task 028 (FR-16): a file in the E-Billing Output Files container is deliberately not indexed.
+        _fileIndexingMock
+            .Setup(s => s.IndexFileAsync(It.IsAny<FileIndexRequest>(), It.IsAny<HttpContext>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(FileIndexingResult.Skip(FileIndexingService.NonIndexedContainerReason, "doc-guid-123", "item-xyz"));
+
+        var result = await CreateSut().EnqueueIfApplicableAsync(ValidRequest(), CreateHttpContext(), CancellationToken.None);
+
+        result.JobSubmitted.Should().BeFalse();
+        result.SkipReason.Should().Be(FileIndexingService.NonIndexedContainerReason);
+        _documentServiceMock.Verify(
+            s => s.UpdateDocumentAsync(It.IsAny<string>(), It.IsAny<UpdateDocumentRequest>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    [Fact]
     public async Task EnqueueIfApplicableAsync_SuccessWithExplicitIndexName_PrefersRequestIndexName()
     {
         _fileIndexingMock

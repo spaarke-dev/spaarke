@@ -1,0 +1,21 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"rate-card",
+ "id":"E-RC-02",
+ "set":"E",
+ "meta":{"title":"Louisiana Maximum Hourly Fee Schedule for professional legal services (memo 2024-02-22)","source_url":"https://doa.louisiana.gov/media/kzvd34i0/memo-legal-services-contract-changes-effective-02-22-2024-ada.docx","licence":"No licence stated. Government/public-institution publication posted on the open web; used only as a public document for internal evaluation, not redistributed.","licence_status":"public-record-no-licence","pii_note":"Public document from an agency or court; counts only, no matched text recorded. No pattern hits. Hits are agency contact details, addresses and generic role words, not private individuals.","pii_scan":{"file":"la-memo-legal-services-2024.docx","tool":"pii_scan.py@1","scanned":"2026-10-15","chars":2737,"counts":{"email":0,"phone_us":0,"ssn":0,"card_number":0,"dob_label":0,"iban":0,"street_address":0,"case_party_marker":0},"disposition":"Business and agency contact details only; no private-person data expected. Safe for local evaluation use."},"storage":{"location":"local-only","path":"local/rate-cards/la-memo-legal-services-2024.docx"},"spike":false,"label_method":"ai-drafted-pending-review"},
+ "document":{"issuer_type":"state","currency":"USD","retrieved":"2026-10-15","pages":null},
+ "rates":[
+  {"key":"Attorney, 10 or more years","amount":350,"unit":"hour","effective_from":"2024-02-22","effective_to":null,"scope":"attorney"},
+  {"key":"Attorney, 5 to 10 years","amount":275,"unit":"hour","effective_from":"2024-02-22","effective_to":null,"scope":"attorney"},
+  {"key":"Attorney, 3 to 5 years","amount":225,"unit":"hour","effective_from":"2024-02-22","effective_to":null,"scope":"attorney"},
+  {"key":"Attorney, under 3 years","amount":175,"unit":"hour","effective_from":"2024-02-22","effective_to":null,"scope":"attorney"},
+  {"key":"Paralegal","amount":80,"unit":"hour","effective_from":"2024-02-22","effective_to":null,"scope":"paralegal"}
+ ],
+ "rules":[
+  {"rule_id":"E-RC-02-R01","rule_type":"ApprovedRate","params":{"rates":{"attorney_10y_plus":350,"attorney_5_to_10y":275,"attorney_3_to_5y":225,"attorney_under_3y":175,"paralegal":80},"kind":"maximum"},"consequence":"Reduce","clause_ref":{"section":"Schedule","page":1},"paraphrase":"Maximum hourly fees by years of practice and a paralegal maximum for state legal services contracts.","expressible":true}
+ ],
+ "unmapped_provisions":[
+  {"clause_ref":{"section":"Memo","page":1},"paraphrase":"Contracts run for one year and may be extended twice.","reason":"not-billing"}
+ ]
+}

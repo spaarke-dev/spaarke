@@ -226,6 +226,38 @@ public class SecureChildOrdinaryParentMoveTests
         _world.OwnerOf("sprk_budgetbucket", bucket).Should().Be(DataversePrincipalRef.Team(TeamB));
     }
 
+    [Fact(DisplayName = "194 must fire (ebilling-r1): an invoice and every invoice-family row filed only under it follow its matter to B")]
+    public async Task TheInvoiceFamily_FollowsAnOrdinaryMove_ThroughTheInvoice()
+    {
+        var (invoice, line, submission, approval) = (Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid());
+        var (externalIdentifier, correction) = (Guid.NewGuid(), Guid.NewGuid());
+        MatterMovedToB();
+        Row("sprk_invoice", invoice, TeamRef(GeneralTeam), ("sprk_matter", Matter, MatterId));
+        // No core lookup on any family row: the walk reaches them only through the invoice (the correction also through its line).
+        Row("sprk_billingevent", line, TeamRef(GeneralTeam), ("sprk_invoice", "sprk_invoice", invoice));
+        Row("sprk_invoicesubmission", submission, TeamRef(GeneralTeam), ("sprk_invoice", "sprk_invoice", invoice));
+        Row("sprk_invoiceapproval", approval, TeamRef(GeneralTeam), ("sprk_invoice", "sprk_invoice", invoice));
+        Row("sprk_externalidentifier", externalIdentifier, TeamRef(GeneralTeam), ("sprk_regardinginvoice", "sprk_invoice", invoice));
+        Row("sprk_invoicecorrection", correction, TeamRef(GeneralTeam),
+            ("sprk_invoice", "sprk_invoice", invoice), ("sprk_invoiceline", "sprk_billingevent", line));
+
+        var report = await Reconciler().ReconcileOrdinaryParentMoveAsync(
+            Matter, MatterId, SecureChildReconcileMode.Apply, maxWrites: 200, CancellationToken.None);
+
+        report.Status.Should().Be(SecureChildReconcileStatus.Completed, report.Detail);
+        foreach (var (table, id) in new[]
+                 {
+                     ("sprk_invoice", invoice), ("sprk_billingevent", line), ("sprk_invoicesubmission", submission),
+                     ("sprk_invoiceapproval", approval), ("sprk_externalidentifier", externalIdentifier),
+                     ("sprk_invoicecorrection", correction),
+                 })
+        {
+            _world.OwnerOf(table, id).Should().Be(DataversePrincipalRef.Team(TeamB), $"{table} follows its invoice's matter to B");
+        }
+
+        report.ChildrenReowned.Should().Be(6);
+    }
+
     [Fact(DisplayName = "194 must fire: report-only plans every move, the grandchild through its planned parent, and writes nothing")]
     public async Task ReportOnly_PlansEveryMove_AndWritesNothing()
     {

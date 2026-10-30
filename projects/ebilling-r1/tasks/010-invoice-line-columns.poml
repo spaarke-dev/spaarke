@@ -1,0 +1,111 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="010" project="ebilling-r1">
+  <metadata>
+    <title>Invoice Line columns on sprk_billingevent</title>
+    <phase>1 Data model (WP1)</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>New idempotent schema script and additive dev schema change; no BFF code.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Column list fixed by spec FR-04 / FR-05 and the existing-column map below; exemplar script to copy.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P1-A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>none</deps>
+    <tags>dataverse, schema</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Turn sprk_billingevent into the Invoice Line (D-18, FR-04) and give it the FR-05 core-record fields, by writing scripts/ebilling/Deploy-EbillingInvoiceLineSchema.ps1 (idempotent Web API metadata script), running it against dev, verifying with a metadata read, and updating docs/data-model/sprk_billingevent.md. Reuse existing columns where they already carry the meaning.</prompt>
+
+  <role>SPAARKE platform developer. Expert in Dataverse metadata Web API (EntityDefinitions, Attributes, global option sets, relationships) and PowerShell.</role>
+
+  <goal>In dev, sprk_billingevent has display name "Invoice Line" / "Invoice Lines" and every FR-04 / FR-05 column below; a second script run makes no change; docs/data-model/sprk_billingevent.md lists the new and repurposed columns with their logical names and option values.</goal>
+
+  <context>
+    <background>Existing columns on sprk_billingevent (solution source Entities/sprk_BillingEvent/Entity.xml, read 2026-10-15): sprk_invoice (lookup), sprk_matter and sprk_project (typed lookups), sprk_linesequence (int; alternate key sprk_invoicelinekey = invoice + line sequence), sprk_amount (money), sprk_quantity (decimal), sprk_rate (money), sprk_costtype (global choice sprk_costtype: Fee 100000000, Expense 100000001 — used by no other table; read by SpendSnapshotService.cs:71), sprk_eventdate, sprk_description, sprk_timekeeper (TEXT, 100 chars — today's extracted name), sprk_timekeeperrole (global choice), sprk_roleclass (text), sprk_vendororg, sprk_visibilitystate. No resolver fields, no work-assignment lookup, no line status. New invoice-family tables (020–022) use sprk_regardingmatter / sprk_regardingproject / sprk_regardingworkassignment. Note: the logical name sprk_timekeeper is already taken by the text column, so the roster lookup needs another name.</background>
+    <relevant-files>
+      <file role="new">scripts/ebilling/Deploy-EbillingInvoiceLineSchema.ps1</file>
+      <file role="modify">docs/data-model/sprk_billingevent.md (this entity's section only)</file>
+      <file role="read">src/dataverse/solutions/SpaarkeMaster/Entities/sprk_BillingEvent/Entity.xml</file>
+      <file role="read">src/dataverse/solutions/SpaarkeMaster/OptionSets/sprk_costtype.xml</file>
+      <file role="read">src/server/api/Sprk.Bff.Api/Services/Finance/InvoiceReviewService.cs (resolver-field write shape for sprk_invoice, BuildInvoiceCreateFields ~line 828)</file>
+      <file role="read">src/server/api/Sprk.Bff.Api/Services/Finance/SpendSnapshotService.cs (reads sprk_costtype)</file>
+      <file role="read">scripts/Deploy-ChartDefinitionEntity.ps1 (exemplar)</file>
+    </relevant-files>
+    <dependencies>none (the three code lookups target sprk_billingcode from task 018 — see constraints)</dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Columns to add or repurpose — exact set: (1) display name "Invoice Line" / "Invoice Lines"; (2) line type = ADD option "Adjustment" to global choice sprk_costtype (no new sprk_linetype column); (3) roster timekeeper lookup sprk_resolvedtimekeeper → sprk_timekeeper, and relabel the existing text column sprk_timekeeper to "Timekeeper (as billed)" (no new name-as-billed column); (4) sprk_approvedrate (money), sprk_approvedamount (money), sprk_adjustmentreason (multiline text), sprk_reviewedby (lookup → systemuser), sprk_reviewedon (date-time); (5) sprk_linestatus local choice with exactly Pending, Clean, Flagged, Accepted, Reduced, Disallowed (spec FR-04); (6) sprk_taskcode, sprk_activitycode, sprk_expensecode lookups → sprk_billingcode, plus text sprk_taskcodeasbilled, sprk_activitycodeasbilled, sprk_expensecodeasbilled and decimal sprk_codingconfidence; (7) sprk_extractionconfidence (multiline text, JSON: per field confidence, page and bounding box — FR-04 / FR-21); (8) sprk_adjustmentmethod local choice Percent / Fixed and decimal sprk_adjustmentvalue (Adjustment lines); (9) sprk_adjustmentrule lookup → sprk_policyversion (FR-32 "optional rule"); (10) FR-05: sprk_regardingworkassignment lookup → sprk_workassignment and the five resolver fields sprk_regardingrecordtype (lookup → sprk_recordtype_ref), sprk_regardingrecordid, sprk_regardingrecordname, sprk_regardingrecordurl, sprk_regardingrecordnumber, with the same types and max lengths as on sprk_invoice (read them from dev metadata).</constraint>
+    <constraint source="ADR-024 / project">Naming scheme for the invoice family (consistent with 012 and 020–022): entity-specific core-record lookups use the CoreAncestorResolver.CoreAncestorLookups names (CoreAncestorResolver.cs:116-122) — sprk_regardingmatter, sprk_regardingproject, sprk_regardingworkassignment — EXCEPT that on sprk_billingevent the existing typed sprk_matter / sprk_project are reused as the Matter and Project lookups (no duplicate regarding columns, no data migration); task 013 maps them. Only sprk_regardingworkassignment is added here. Task 013 owns derivation and the one-lookup guard.</constraint>
+    <constraint source="project">sprk_billingcode does not exist until task 018's script runs. The script creates the three code lookups only when sprk_billingcode exists; otherwise it prints "deferred: sprk_billingcode missing" and continues (exit 0). Task 029 re-runs all WP1 scripts with 018 before 010, which creates them.</constraint>
+    <constraint source="project">Additive only: no column, option or relationship is deleted or renamed by logical name; relabels change display names only. Do NOT edit src/dataverse/solutions/SpaarkeMaster/** (task 029 syncs solution source).</constraint>
+    <constraint source="ADR-002">No plugin, business rule, calculated / rollup column or Power Automate flow for any of these columns; values are written server-side by later tasks.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/dataverse-create-schema/SKILL.md</file>
+      <file>.claude/constraints/plugins.md</file>
+      <file>.claude/constraints/data.md</file>
+      <file>.claude/adr/ADR-024-polymorphic-resolver-pattern.md</file>
+      <file>.claude/adr/ADR-002-thin-plugins.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+      <file>docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="1">Read current dev metadata for sprk_billingevent and sprk_invoice's five resolver fields (EntityDefinitions … Attributes); record any difference from the background list in task notes. If a column in the constraint already exists in dev, the script must skip it.</step>
+    <step order="2">Write scripts/ebilling/Deploy-EbillingInvoiceLineSchema.ps1 modelled on scripts/Deploy-ChartDefinitionEntity.ps1 and the dataverse-create-schema skill: -EnvironmentUrl, -WhatIf, check-then-create per column / option / relationship, a final summary of created / skipped / deferred; publish customizations at the end.</step>
+    <step order="3">Run with -WhatIf against dev; review the plan; run for real; record output.</step>
+    <step order="4">Run again; confirm every item reports skipped (no change).</step>
+    <step order="5">Verify with a metadata read (attributes, option values of sprk_linestatus, sprk_adjustmentmethod and sprk_costtype, entity display names); record option values (they are needed by 014, 016, 100) in task notes.</step>
+    <step order="6">Update docs/data-model/sprk_billingevent.md with the new / repurposed columns and option values.</step>
+    <step order="7">Update TASK-INDEX.md: change this task's status cell to ✅ [done].</step>
+    <step order="8">If any deviations from plan, document in projects/ebilling-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If any change would delete or rename a column, option or relationship, or if dev already holds a column of the same logical name with a different type, STOP and escalate (project CLAUDE.md §5: destructive changes need explicit owner OK).</trigger>
+    <trigger>Before creating sprk_regardingworkassignment: sprk_regarding{core} columns are access-stamp columns in CoreAncestorResolver (ApplyStamps writes a stamp to any host carrying the column, ~line 718-790). If the mixed scheme (typed sprk_matter / sprk_project + sprk_regardingworkassignment) cannot map cleanly — it would make the resolver stamp sprk_billingevent, change a derivation, or uac-r2 wants all three regarding columns (duplicating and migrating the typed lookups) — STOP and decide with the owner and uac-r2 before creating any core-record column.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>sprk_billingevent already carries amount, quantity, rate, cost type, date, invoice / matter / project lookups and a text timekeeper (Entity.xml); grep of SpaarkeMaster shows no line status, approved values, code lookups, resolver fields or work-assignment lookup on it (typed sprk_matter / sprk_project are reused). scripts/ebilling/ does not exist.</existing>
+    <extension>Yes for the table (extended, not new — D-18), for line type (extend sprk_costtype) and for name-as-billed (reuse sprk_timekeeper text). The remaining columns have no existing carrier; the script is new because each WP1 task owns one idempotent script (pipeline decision 2026-10-15).</extension>
+    <cost-of-doing-nothing>Lines cannot hold review outcomes, approved amounts, UTBMS codes, extraction confidence or a work-assignment core record, so FR-04 / FR-05 acceptance fails and the review (100), coding (047) and rejection rule (073) have nowhere to write.</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="pwsh">Run the schema script</tool>
+    <tool name="az">Token for Dataverse Web API</tool>
+    <tool name="dataverse-mcp">Metadata verification reads</tool>
+  </tools>
+
+  <outputs>
+    <output type="script">scripts/ebilling/Deploy-EbillingInvoiceLineSchema.ps1</output>
+    <output type="docs">docs/data-model/sprk_billingevent.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">A dev metadata read shows every column in constraint 1 with the stated type and target, sprk_linestatus with exactly the six options, sprk_costtype with Fee, Expense and Adjustment, and entity display names "Invoice Line" / "Invoice Lines".</criterion>
+    <criterion testable="true">A second run of the script reports no created item and makes no write (output recorded).</criterion>
+    <criterion testable="true">When run before sprk_billingcode exists, the script exits 0 and lists the three code lookups as deferred; when run after, it creates them.</criterion>
+    <criterion testable="true">No column, option or relationship was deleted or renamed by logical name; no file under src/dataverse/solutions/SpaarkeMaster/ changed (git diff).</criterion>
+    <criterion testable="true">docs/data-model/sprk_billingevent.md lists every added or relabelled column with logical name, type and option values; option values are also in task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>Shared append point: docs/data-model/sprk_billingevent.md (edit only this entity's rows). SpendSnapshotService reads sprk_costtype — record in notes how it treats the new Adjustment value (it is a reader, not changed here; file an issue if adjustments would be double-counted in spend). The D-64 correction record shape (columns on the line vs child table) is task 027's; do not pre-empt it here. Signals' sprk_regardinginvoiceline is 026's. 
+
+COMPLETION 2026-10-15 (dev): script scripts/ebilling/Deploy-EbillingInvoiceLineSchema.ps1 applied; 21 columns + option sprk_costtype.Adjustment (100000002) created, entity and sprk_timekeeper relabelled; 3 code lookups deferred (sprk_billingcode absent, task 018); re-run reports 0 created / 24 skipped. Option values: sprk_linestatus 100000000-100000005 (Pending, Clean, Flagged, Accepted, Reduced, Disallowed); sprk_adjustmentmethod Percent 100000000, Fixed 100000001; sprk_costtype Fee 100000000, Expense 100000001, Adjustment 100000002. ApplyStamps analysis (mixed scheme maps cleanly; billingevent is never stamped) and follow-ups for 012 / 013 / 026: notes/010-invoice-line-columns.md section 3. SpendSnapshotService reads sprk_costtype but never uses it: DEF-004 / #1923. TASK-INDEX.md not edited by this agent (main session).
+rework: fix-round-1 task 010
+</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in knowledge files. Follow the task-execute skill for the mandatory pre-execution checklist.</protocol>
+  </execution>
+</task>

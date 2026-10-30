@@ -1,0 +1,147 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="041" project="ebilling-r1">
+  <metadata>
+    <title>Reshape IInvoiceAi to capability methods; consumer-type keys</title>
+    <phase>2 Submission and extraction (WP2)</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Changes a PublicContracts facade (ADR-013) that four later tasks build on; adds Action-backed dispatch consumers (ADR-043 seam test required).</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Architectural facade contract (four capability methods, DTO shapes, failure semantics) that 042, 047, 075 and 131 consume; a wrong shape propagates.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P2-A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>none</deps>
+    <tags>bff, ai, public-contracts</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Add four Action-backed capability methods to IInvoiceAi — ClassifyAsync, CodeLinesAsync, DraftRulesAsync, DraftFirmNoticeAsync — as thin wrappers over IActionResolver plus IActionRunner keyed by new consumer-type constants, with typed request and result DTOs and Null peers, copying CommunicationTriageAi. Keep GenerateEmbeddingAsync, GetPlaybookByNameAsync and GetStructuredCompletionAsync unchanged (042 and 050 retire the old members); ReadInvoiceAsync is task 043's.</prompt>
+
+  <role>SPAARKE platform developer. Expert in the Spaarke AI PublicContracts facades, the linear Action runner (ADR-039 / ADR-043) and xUnit seam tests. Follow ADRs strictly.</role>
+
+  <goal>IInvoiceAi, InvoiceAi and NullInvoiceAi expose the four new methods; ConsumerTypes.cs declares InvoiceClassify "invoice-classify", InvoiceLineCode "invoice-line-code", BillingRuleDraft "billing-rule-draft", InvoiceFirmNotice "invoice-firm-notice"; DTOs live in PublicContracts; unit tests and one ADR-043 seam test pass.</goal>
+
+  <context>
+    <background>D-52 / spec MUST rules: every prompted AI step runs as an Action + Binding through IActionRunner behind IInvoiceAi, model by tier, no by-name playbook lookup, no C# output schemas. Today IInvoiceAi (IInvoiceAi.cs:31-86) exposes only GetPlaybookByNameAsync (:44), GetStructuredCompletionAsync (:62) and GenerateEmbeddingAsync (:81); InvoiceAi wraps IPlaybookService + IOpenAiClient. ExtractInvoiceFactsAsync is NOT on IInvoiceAi — it is on IInvoiceAnalysisService (Services/Finance/IInvoiceAnalysisService.cs:33) and is retired by 050. Spec §11 row "IInvoiceAi capability methods" says reshape, not a new facade.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/IInvoiceAi.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/InvoiceAi.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/NullInvoiceAi.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/ConsumerTypes.cs (constants only — NOT the All list, see constraints)</file>
+      <file role="new">src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/InvoiceAiContracts.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/CommunicationTriageAi.cs:70-123 (resolve Action, BoundInputs with OperandChannel.Input, LinearRunContext, RunAsync, parse)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Ai/LinearConsumers/IActionRunner.cs:55 (BoundInputs overload)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Infrastructure/DI/AnalysisServicesModule.cs:588 (NullInvoiceAi) and :1402 (InvoiceAi) registrations</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/RoutingConsumerTypeHealthCheck.cs:251-262 (ConsumerTypes.All vs Binding rows reconciliation)</file>
+      <file role="new">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/PublicContracts/InvoiceAiCapabilityTests.cs</file>
+      <file role="new">tests/integration/seam/Finance/InvoiceAiActionSeamTests.cs</file>
+      <file role="canonical-reference">tests/integration/seam/Ai/ContextBinderActionRunnerSeamTests.cs (real ActionRunner with a fake IOpenAiClient)</file>
+      <file role="canonical-reference">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/PublicContracts/CommunicationTriageAiInputTests.cs</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="none" status="complete">No prerequisites. The Actions and Bindings themselves arrive in 042, 047, 075, 131.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="CLAUDE.md §10">Every change under src/server/api/Sprk.Bff.Api follows .claude/constraints/bff-extensions.md, including the PublicContracts facade rule and the publish-size measurement.</constraint>
+    <constraint source="ADR-013 / ADR-039">Each new InvoiceAi method resolves its Action only through IActionResolver.ResolveAsync with its ConsumerTypes constant and runs it only through IActionRunner.RunAsync (BoundInputs overload). No IPlaybookService, no IOpenAiClient, no prompt text, no output JSON schema and no deployment name in C# for these methods.</constraint>
+    <constraint source="FR-46 fail-closed">In InvoiceAi, a missing Binding or Action, a completion failure or an output that does not parse into the DTO raises a typed exception carrying a stable reason code (ai.invoice.binding_missing, ai.invoice.completion_failed, ai.invoice.output_invalid) after logging identifiers only. Never return a fabricated default and never fall back to a hard-coded prompt. Reuse an existing exception type if one fits; otherwise add exactly one exception type in PublicContracts and justify it in notes.</constraint>
+    <constraint source="ADR-032">NullInvoiceAi implements every new method with the existing P3 shape (log, throw FeatureDisabledException with ErrorCode ai.invoice.disabled), matching its current methods.</constraint>
+    <constraint source="ADR-039 boot reconciliation">Add the four constants to ConsumerTypes.cs but do NOT add them to ConsumerTypes.All: RoutingConsumerTypeHealthCheck turns /healthz Unhealthy for any All entry without a Binding row. Each Action task adds its own constant to All in the same change that seeds its Binding (042, 047, 075, 131).</constraint>
+    <constraint source="ADR-015">Logs carry identifiers, sizes, timings and reason codes only — never document text, line narratives or model output.</constraint>
+    <constraint source="project">PublicContracts DTOs do not reference Services/Finance types (Finance consumes the facade, not the reverse). Do not change ActionRunner, IActionRunner, BoundInputs or LinearRunContext.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>AI capability wiring</topic>
+    <files>
+      <file>docs/guides/ai-guide-consumer-wiring.md</file>
+      <file>.claude/patterns/ai/public-contracts-facade.md</file>
+      <file>.claude/patterns/ai/endpoint-di-symmetry.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+      <file>.claude/adr/ADR-043-ai-capability-execution-spine.md</file>
+      <file>.claude/adr/ADR-032-bff-nullobject-kill-switch.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/constraints/ai.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>tests/integration/seam/README.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+    <patterns>
+      <pattern name="Action-backed facade method" location="src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/CommunicationTriageAi.cs">Copy TriageAsync lines 70-123 for the resolve/bind/run/parse sequence; differ only in fail-closed exception semantics (triage degrades to null; invoice capabilities throw typed).</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context and rigor">Declare rigor FULL. Read IInvoiceAi.cs, InvoiceAi.cs, NullInvoiceAi.cs, CommunicationTriageAi.cs and spec FR-21, FR-22, FR-27, FR-46, FR-50.</step>
+    <step order="1">Define DTOs in InvoiceAiContracts.cs. Classify: request (document text, tenant id); result mirroring today's Finance ClassificationResult fields (classification InvoiceCandidate / NotInvoice / Unknown, confidence, hints vendorName / invoiceNumber / invoiceDate / totalAmount / currency / matterReference, reasoning) so 042 maps one-to-one. CodeLines: request (line chunk with line key, date, type, narrative, hours, amount, codes as billed; allowed task / activity / expense codes each with description and guidance text; tenant id); result per line (line key, task / activity / expense code, confidence, observations of type BlockBilling or VagueDescription with confidence and quoted text). DraftRules: request (document text, document id, closed list of billing rule types with their parameter schemas, tenant id); result (proposals with rule type, parameters JSON, consequence, clause quote, clause location; not-converted items with text, location, reason). DraftFirmNotice: request (outcome kind SubmissionRejected / ReturnedToFirm / InvoiceRejected / ApprovedWithAdjustments, structured findings summary, tenant id); result (subject, body prose) with no numeric fields (FR-50).</step>
+    <step order="2">Add the four constants to ConsumerTypes.cs with XML docs naming the facade method and the Action task that seeds the Binding.</step>
+    <step order="3">Extend IInvoiceAi and InvoiceAi (inject IActionResolver, IActionRunner, logger); implement each method per the reference; serialize the request as the Input operand JSON; parse the JsonElement into the DTO.</step>
+    <step order="4">Extend NullInvoiceAi with the four methods.</step>
+    <step order="5">Unit tests (mock IActionResolver / IActionRunner) per method: operand carries the request fields; output parses; missing Binding, runner failure and malformed output each raise the typed exception with its reason code; Null peer throws ai.invoice.disabled.</step>
+    <step order="6">Seam test under tests/integration/seam/Finance/: ClassifyAsync through the REAL ActionRunner with a fake IOpenAiClient capturing the request — proves the operand reaches the prompt and the structured output reaches the DTO (fails if either is stubbed).</step>
+    <step order="7">Run the ArchTests (ADR013_AiBoundaryTests, ADR013_LinearConsumerBoundaryTests, Adr032/GateCombinationConstructibilityTests) and the full unit suite; measure the publish-size delta.</step>
+    <step order="8">Update TASK-INDEX.md: change this task's status cell to `✅ [done]`.</step>
+    <step order="9">Record deviations (DTO shape decisions 047 / 075 / 131 must know) in projects/ebilling-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If any method needs a change to ActionRunner, IActionRunner, BoundInputs or LinearRunContext (for example a per-call output-schema override), STOP and escalate per root CLAUDE.md §6 — that is a platform dispatch change under ADR-043, not part of this task.</trigger>
+    <trigger>If an ArchTest or the ADR-032 constructibility test fails because of the new InvoiceAi constructor dependencies and the fix would require changing another module's registration gate, STOP and escalate.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>IInvoiceAi (IInvoiceAi.cs:31) exposes only by-name playbook lookup, raw structured completion and embeddings; CommunicationTriageAi is the Action-backed facade pattern. grep "invoice-classify|invoice-line-code|billing-rule-draft|invoice-firm-notice" in src finds nothing.</existing>
+    <extension>Yes, and it is extended: the same IInvoiceAi facade gains methods (spec §11 row "IInvoiceAi capability methods"); no new facade. The DTO file is new because PublicContracts must not depend on Finance models.</extension>
+    <cost-of-doing-nothing>042, 047, 075 and 131 have no MUST-compliant way to call their Actions; Finance keeps calling raw completion with C# prompts and schemas, violating D-52 and success criterion 12.</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="dotnet">dotnet build src/server/api/Sprk.Bff.Api/ ; dotnet test</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/IInvoiceAi.cs, InvoiceAi.cs, NullInvoiceAi.cs, ConsumerTypes.cs, InvoiceAiContracts.cs</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/PublicContracts/InvoiceAiCapabilityTests.cs</output>
+    <output type="test">tests/integration/seam/Finance/InvoiceAiActionSeamTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">IInvoiceAi declares ClassifyAsync, CodeLinesAsync, DraftRulesAsync, DraftFirmNoticeAsync, and still declares GenerateEmbeddingAsync, GetPlaybookByNameAsync and GetStructuredCompletionAsync with unchanged signatures and behaviour.</criterion>
+    <criterion testable="true">Each new InvoiceAi method resolves its Action with exactly its ConsumerTypes constant and calls IActionRunner.RunAsync once with an Input-channel operand containing the request fields (asserted per method).</criterion>
+    <criterion testable="true">Negative: no Binding (resolver throws), runner throws, or output missing a required field — each yields the typed exception with reason code ai.invoice.binding_missing, ai.invoice.completion_failed or ai.invoice.output_invalid respectively; no method returns a default result.</criterion>
+    <criterion testable="true">NullInvoiceAi throws FeatureDisabledException with ErrorCode ai.invoice.disabled for each new method.</criterion>
+    <criterion testable="true">ConsumerTypes.cs contains the four constants with the exact string values above; ConsumerTypes.All is unchanged.</criterion>
+    <criterion testable="true">The DraftFirmNotice result type has no numeric property; the CodeLines result carries only codes, confidence and observations (no amounts).</criterion>
+    <criterion testable="true">The seam test drives ClassifyAsync through the production ActionRunner and fails if the operand is not in the rendered prompt or the output is not parsed.</criterion>
+    <criterion testable="true">grep in the new InvoiceAi code finds no IPlaybookService, IOpenAiClient, deployment name or JSON-schema literal used by the four new methods.</criterion>
+    <criterion testable="true">ADR013_AiBoundaryTests, ADR013_LinearConsumerBoundaryTests and Adr032 GateCombinationConstructibilityTests pass.</criterion>
+    <criterion testable="true">Cover the stated contract plus the edge cases named above. Anything beyond that needs a one-line justification in task notes.</criterion>
+    <criterion testable="true">Publish-size delta of Sprk.Bff.Api measured against a fresh master build and recorded in task notes; no new HIGH CVE.</criterion>
+    <criterion testable="true">dotnet build exits 0; dotnet test exits 0.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-21, FR-22, FR-27, FR-46, FR-50; Processing Pipeline "Rules for the AI steps". Registration lines in AnalysisServicesModule (:588, :1402) need no change unless the constructor change requires it. The DTO shapes are a starting contract: 047, 075 and 131 may refine their own DTO when authoring the Action and must keep facade, Action schema and parser in step. ActionRunner $choices enrichment (ActionRunner.cs:379 ResolveLookupChoicesAsync, :426 EnrichOutputSchemaWithResolvedChoices — the spec cites :424) applies automatically to JPS Actions; nothing to add here.
+Adversarial review (main session, 2026-10-15): one F3 (retry semantics of binding_missing / completion_failed; seam test mocked an impossible path) fixed in 7ee8a9000 with the K3 optional-string null and K4 docs/FR-50 recursion; remaining K items recorded as "Notes for callers" in notes/041-iinvoiceai-capability-contract.md; platform follow-up #1936. Targeted re-run 37/37.</notes>
+  <completion-notes date="2026-10-15">
+    Completed 2026-10-15, FULL rigor. Contract for 042/047/075/131: notes/041-iinvoiceai-capability-contract.md.
+    Code: IInvoiceAi + InvoiceAi (linear path: IActionResolver -> IActionRunner, Input-channel PreResolved operand; strict InvoiceAiOutputParser) + NullInvoiceAi + InvoiceAiContracts.cs (DTOs + InvoiceAiException) + ConsumerTypes (4 constants; All unchanged). No DI change (InvoiceAi registration already sits in the branch that registers IActionResolver/IActionRunner).
+    Publish size (framework-dependent linux-x64 Release, Compress-Archive Optimal, PDBs included, 192 files each side): master f63b57f8d 37.1024 MB; branch 37.1211 MB; delta +0.0187 MB. No package added; no vulnerable package.
+    Gates: build 0 errors; ArchTests 1045/1045 (ADR013_AiBoundaryTests, ADR013_LinearConsumerBoundaryTests, GateCombinationConstructibilityTests 17/17); dotnet format verify clean on the 7 files; code-review: no F-class finding (4 K4 notes); adr-check: no violation.
+    Deviation: tests placed at KEEP paths (tests/integration/seam/Finance/InvoiceAiActionSeamTests.cs real ActionResolver+ActionRunner; tests/unit/domain/Ai/PublicContracts/InvoiceAiContractTests.cs) instead of the POML path, per tests/CLAUDE.md (owner decision 2026-10-12).
+    Extra tests (one line each): out-of-range confidence / bad enum names (FR-26 threshold safety); transient resolver failure -> completion_failed (retry semantics); kill-switch pass-through (ADR-032 503 contract); no-numeric request + finding types (131 escalation trigger).
+    Found in passing, filed in notes/defer-issues.md: ISS-005 (Binding sprk_modeltieroverride ignored on linear path), ISS-006 (## Input renderer escapes non-ASCII). GitHub issues to be filed by main session.
+    Full Sprk.Bff.Api.Tests run not clean on this shared machine: WebApplicationFactory tests time out (3-5 min each) under contention from parallel agents; every failing class re-run in isolation passed (54 + 228 + 269 tests, incl. all InvoiceAi/Finance). Integration, Spe.Integration, Nightly, Core, ControlPlane, Scheduling suites pass. CI must confirm the full suite.
+    rework: none task 041
+  </completion-notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load every file in knowledge/files before Step 1. Follow task-execute for rigor, checkpoints and quality gates.</protocol>
+  </execution>
+</task>

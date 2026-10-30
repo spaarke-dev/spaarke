@@ -1,0 +1,33 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0235",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0235","generator_id":"gen_eval_set.py@1 F-0235","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0235.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-01"},
+ "header":{"firm":"Lindenmeyer & Beckett LLP","firm_invoice_number":"INV-2025-65255","invoice_date":"2026-10-01","billing_period_start":"2026-07-01","billing_period_end":"2026-07-31","firm_matter_reference":"40939-0020","po_number":"PO-4527346","fees_total":6109.0,"expenses_total":1153.53,"adjustments_total":0.0,"total_due":7262.53,"currency":"USD"},
+ "timekeepers":[{"name":"Farah Ashdown","title":"Associate","rate":500.0,"billed_as":"Ashdown, F."},{"name":"Gideon Tavares","title":"Paralegal","rate":280.0,"billed_as":"Tavares, G."},{"name":"Jordan Quillen","title":"Associate","rate":540.0,"billed_as":"Quillen, J."},{"name":"Samuel Okafor","title":"Partner","rate":910.0,"billed_as":"Okafor, S."},{"name":"Victor Castellanos","title":"Associate","rate":485.0,"billed_as":"Castellanos, V."}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2026-07-07","timekeeper":"Ashdown, F.","timekeeper_name":"Farah Ashdown","timekeeper_title":"Associate","title":"Associate","hours":0.4,"rate":500.0,"amount":200.0,"narrative":"Prepare case assessment memorandum regarding the data incident and recommended strategy","codes":["L120","A103"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2026-07-14","timekeeper":"Ashdown, F.","timekeeper_name":"Farah Ashdown","timekeeper_title":"Associate","title":"Associate","hours":0.7,"rate":500.0,"amount":350.0,"narrative":"Review court docket and calendar of pending deadlines for the lease dispute","codes":["L190","A104"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2026-07-14","timekeeper":"Ashdown, F.","timekeeper_name":"Farah Ashdown","timekeeper_title":"Associate","title":"Associate","hours":3.0,"rate":500.0,"amount":1500.0,"narrative":"Research appealability issues in the customs audit","codes":["L510","A102"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2026-07-15","timekeeper":"Tavares, G.","timekeeper_name":"Gideon Tavares","timekeeper_title":"Paralegal","title":"Paralegal","hours":2.5,"rate":280.0,"amount":700.0,"narrative":"Attend and present oral argument in the distribution agreement","codes":["L530","A109"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2026-07-21","timekeeper":"Okafor, S.","timekeeper_name":"Samuel Okafor","timekeeper_title":"Partner","title":"Partner","hours":2.6,"rate":910.0,"amount":2366.0,"narrative":"Prepare monthly status report to client regarding the customs audit","codes":["L190","A111"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2026-07-23","timekeeper":"Ashdown, F.","timekeeper_name":"Farah Ashdown","timekeeper_title":"Associate","title":"Associate","hours":0.8,"rate":500.0,"amount":400.0,"narrative":"Draft notice of appeal and docketing statement for the insurance coverage issue","codes":["L510","A103"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2026-07-29","timekeeper":"Quillen, J.","timekeeper_name":"Jordan Quillen","timekeeper_title":"Associate","title":"Associate","hours":0.4,"rate":540.0,"amount":216.0,"narrative":"Draft appellate brief in the construction contract","codes":["L520","A103"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2026-07-30","timekeeper":"Tavares, G.","timekeeper_name":"Gideon Tavares","timekeeper_title":"Paralegal","title":"Paralegal","hours":1.0,"rate":280.0,"amount":280.0,"narrative":"Attend and present oral argument in the lease dispute","codes":["L530","A109"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"fee","date":"2026-07-31","timekeeper":"Castellanos, V.","timekeeper_name":"Victor Castellanos","timekeeper_title":"Associate","title":"Associate","hours":0.2,"rate":485.0,"amount":97.0,"narrative":"Draft appellate brief in the employment claim","codes":["L520","A103"],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"expense","date":"2026-07-09","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":867.76,"amount":867.76,"narrative":"Document hosting and processing vendor","codes":["E118"],"page":1,"narrative_style":"clear"},
+  {"n":11,"line_type":"expense","date":"2026-07-21","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":5.0,"amount":5.0,"narrative":"Long distance conference call charges","codes":["E105"],"page":1,"narrative_style":"clear"},
+  {"n":12,"line_type":"expense","date":"2026-07-29","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":202.56,"amount":202.56,"narrative":"Online legal research charges","codes":["E106"],"page":1,"narrative_style":"clear"},
+  {"n":13,"line_type":"expense","date":"2026-07-29","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":78.21,"amount":78.21,"narrative":"Word processing and document formatting","codes":["E103"],"page":1,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["631 Lakeshore Drive","Denver","Tax ID 95-3127668"],"template":"T06","pages":2},
+ "rule_set_id":"RS-01",
+ "context":{"matter_open":"2025-07-09","matter_close":"2026-10-29","matter_budget":54050.0,"approved_timekeepers":["Victor Castellanos","Samuel Okafor","Farah Ashdown","Gideon Tavares","Leila Blackwood","Victor Kowalczyk","Jordan Quillen"],"invoice_received_date":"2026-10-02"},
+ "expected_findings":[
+  {"rule_id":"RS-01-R04","rule_type":"ExpenseRule","scope":"line","line_refs":[12],"consequence":"Disallow"},
+  {"rule_id":"RS-01-R04","rule_type":"ExpenseRule","scope":"line","line_refs":[13],"consequence":"Disallow"},
+  {"rule_id":"RS-01-R06","rule_type":"InvoiceAge","scope":"invoice","line_refs":[],"consequence":"Flag"}
+ ],
+ "seeded_violations":3
+}

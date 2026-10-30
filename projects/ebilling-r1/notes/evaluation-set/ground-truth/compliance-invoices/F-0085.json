@@ -1,0 +1,33 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0085",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0085","generator_id":"gen_eval_set.py@1 F-0085","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0085.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-01"},
+ "header":{"firm":"Montclair and Whitcombe LLP","firm_invoice_number":"INV-2025-99053","invoice_date":"2026-07-03","billing_period_start":"2026-06-01","billing_period_end":"2026-06-30","firm_matter_reference":"31548-0029","po_number":"PO-4505084","fees_total":4247.25,"expenses_total":1774.35,"adjustments_total":0.0,"total_due":6021.6,"currency":"USD"},
+ "timekeepers":[{"name":"Clara Whitfield","title":"Associate","rate":380.0,"billed_as":"Clara Whitfield"},{"name":"Ingrid Carmichael","title":"Partner","rate":740.0,"billed_as":"Ingrid Carmichael"},{"name":"Ivan Lockhart","title":"Paralegal","rate":210.0,"billed_as":"Ivan Lockhart"},{"name":"Leila Voss","title":"Senior Associate","rate":495.0,"billed_as":"Leila Voss"},{"name":"Samuel Delacroix","title":"Paralegal","rate":235.0,"billed_as":"Samuel Delacroix"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2026-06-02","timekeeper":"Clara Whitfield","timekeeper_name":"Clara Whitfield","timekeeper_title":"Associate","title":"Associate","hours":1.3,"rate":380.0,"amount":494.0,"narrative":"Draft motion for preliminary injunction in the insurance coverage issue","codes":["L220","A103"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2026-06-23","timekeeper":"Clara Whitfield","timekeeper_name":"Clara Whitfield","timekeeper_title":"Associate","title":"Associate","hours":1.25,"rate":380.0,"amount":475.0,"narrative":"Research standard for provisional remedies concerning the warranty claim","codes":["L220","A102"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2026-06-24","timekeeper":"Clara Whitfield","timekeeper_name":"Clara Whitfield","timekeeper_title":"Associate","title":"Associate","hours":4.0,"rate":380.0,"amount":1520.0,"narrative":"Review court docket and calendar of pending deadlines for the insurance coverage issue; Prepare for case management conference in the regulatory inquiry; Telephone conference with opposing counsel regarding settlement terms.","codes":["L230","A109"],"page":1,"narrative_style":"block_billed"},
+  {"n":4,"line_type":"fee","date":"2026-06-17","timekeeper":"Ingrid Carmichael","timekeeper_name":"Ingrid Carmichael","timekeeper_title":"Partner","title":"Partner","hours":0.5,"rate":740.0,"amount":370.0,"narrative":"Correspondence.","codes":["L110","A102"],"page":1,"narrative_style":"vague"},
+  {"n":5,"line_type":"fee","date":"2026-06-26","timekeeper":"Ivan Lockhart","timekeeper_name":"Ivan Lockhart","timekeeper_title":"Paralegal","title":"Paralegal","hours":0.2,"rate":210.0,"amount":42.0,"narrative":"Draft motion for preliminary injunction in the distribution agreement","codes":["L220","A103"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2026-06-23","timekeeper":"Leila Voss","timekeeper_name":"Leila Voss","timekeeper_title":"Senior Associate","title":"Senior Associate","hours":0.55,"rate":495.0,"amount":272.25,"narrative":"Prepare monthly status report to client regarding the regulatory inquiry","codes":["L190","A111"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2026-06-24","timekeeper":"Leila Voss","timekeeper_name":"Leila Voss","timekeeper_title":"Senior Associate","title":"Senior Associate","hours":1.6,"rate":495.0,"amount":792.0,"narrative":"Continue work on project.","codes":["L140","A104"],"page":1,"narrative_style":"vague"},
+  {"n":8,"line_type":"fee","date":"2026-06-16","timekeeper":"Samuel Delacroix","timekeeper_name":"Samuel Delacroix","timekeeper_title":"Paralegal","title":"Paralegal","hours":1.2,"rate":235.0,"amount":282.0,"narrative":"Conference with client regarding budget variance for the customs audit","codes":["L150","A106"],"page":2,"narrative_style":"clear"},
+  {"n":9,"line_type":"expense","date":"2026-06-02","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":1470.11,"amount":1470.11,"narrative":"Document hosting and processing vendor","codes":["E118"],"page":2,"narrative_style":"clear"},
+  {"n":10,"line_type":"expense","date":"2026-06-10","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":4.0,"rate":52.39,"amount":209.56,"narrative":"Working meal during deposition preparation","codes":["E111"],"page":2,"narrative_style":"clear"},
+  {"n":11,"line_type":"expense","date":"2026-06-17","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":3.0,"rate":31.56,"amount":94.68,"narrative":"Overnight courier to Alder & Finch Ltd counsel","codes":["E107"],"page":2,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["761 Lakeshore Drive","Portland","Tax ID 79-8010909"],"template":"T13","pages":2},
+ "rule_set_id":"RS-01",
+ "context":{"matter_open":"2025-02-09","matter_close":"2026-09-28","matter_budget":49086.0,"approved_timekeepers":["Samuel Delacroix","Helena Eriksen","Elena Yilmaz","Ingrid Carmichael","Leila Voss","Elena Dunleavy","Clara Whitfield","Ivan Lockhart","Anders Blackwood"],"invoice_received_date":"2026-07-10"},
+ "expected_findings":[
+  {"rule_id":"RS-01-R01","rule_type":"TimeIncrement","scope":"line","line_refs":[2],"consequence":"Reduce"},
+  {"rule_id":"RS-01-R01","rule_type":"TimeIncrement","scope":"line","line_refs":[6],"consequence":"Reduce"},
+  {"rule_id":"RS-01-R02","rule_type":"AiObservation","scope":"line","line_refs":[3],"consequence":"Flag"},
+  {"rule_id":"RS-01-R02","rule_type":"AiObservation","scope":"line","line_refs":[4],"consequence":"Flag"},
+  {"rule_id":"RS-01-R02","rule_type":"AiObservation","scope":"line","line_refs":[7],"consequence":"Flag"}
+ ],
+ "seeded_violations":5
+}

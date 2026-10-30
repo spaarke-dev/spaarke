@@ -1668,6 +1668,23 @@ public class DecisionActionExecutorsTests
     }
 
     [Fact]
+    public void Registry_RefusesAnExecutorForABillingCode_AndTheCompleteSetStaysComplete_Ebilling074()
+    {
+        // ebilling-r1 task 074: billing decisions are recorded by the eBilling endpoints, never executed by the Signals commit route,
+        // so no executor (and no no-op stand-in) can be registered for one.
+        DecisionActionCatalog.BillingActions.Should().NotBeEmpty();
+        foreach (var billing in DecisionActionCatalog.BillingActions)
+        {
+            var stand_in = new Mock<IDecisionActionExecutor>();
+            stand_in.SetupGet(e => e.Code).Returns(billing.Code);
+            FluentActions.Invoking(() => new DecisionActionExecutors(AllExecutors().Append(stand_in.Object)))
+                .Should().Throw<InvalidOperationException>(because: billing.Code);
+        }
+
+        new DecisionActionExecutors(AllExecutors()).MissingCodes().Should().BeEmpty("billing codes are not commit-route actions");
+    }
+
+    [Fact]
     public async Task NoExecutor_EverNamesFinalDueDate()
     {
         // Every write body any executor produces is captured, then searched for the informational column (D-27/D-63).

@@ -165,6 +165,14 @@ public sealed class SignalReevaluationJob : IScheduledJob
     {
         if (policyId == Guid.Empty) throw new ArgumentException("policyId must not be Guid.Empty.", nameof(policyId));
         var row = await _entities.RetrieveAsync("sprk_policy", policyId, PolicyColumns, cancellationToken).ConfigureAwait(false);
+        if (!RuleDomains.IsOntologyPolicy(row))
+        {
+            // ebilling-r1 task 070 (ontology-r1 review of 019): a Billing (or any non-Ontology) policy is never evaluated by a
+            // Signals pass; a caller that hands one in is refused before anything is read or written.
+            throw new InvalidOperationException(
+                $"Policy {policyId} is not an Ontology policy (sprk_domain); the Signals pass does not evaluate it.");
+        }
+
         var enabled = row.GetAttributeValue<bool?>("sprk_enabled") ?? false;
         var active = row.GetAttributeValue<OptionSetValue>("statecode")?.Value is null or 0;
         if (!enabled || !active)
@@ -1225,26 +1233,29 @@ public sealed class SignalReevaluationJob : IScheduledJob
         bool CountsTowardSuppression = true, Guid? MatterId = null);
 
     /// <summary>Every enabled, active policy (the same filter as <see cref="PolicyScopeResolver"/>: <c>sprk_enabled</c> and
-    /// <c>statecode</c> Active, so a disabled or Retired policy is not evaluated at all), with its lane, severity and headline.</summary>
+    /// <c>statecode</c> Active, so a disabled or Retired policy is not evaluated at all), with its lane, severity and headline.
+    /// Ontology policies only (ebilling-r1 task 070): <c>sprk_domain</c> empty or Ontology, in the query and again per row
+    /// (<see cref="RuleDomains"/>), so a Billing policy is neither evaluated nor counted as invalid.</summary>
     private async Task<IReadOnlyList<PolicyRow>> ReadEnabledPoliciesAsync(CancellationToken ct)
     {
         var query = new QueryExpression("sprk_policy")
         {
             ColumnSet = new ColumnSet("sprk_policycode", "sprk_lane", "sprk_severity", "sprk_shortname", "sprk_name",
-                "sprk_currentversion", "sprk_tenant", "sprk_matter", "sprk_countstowardsuppression"),
+                "sprk_currentversion", "sprk_tenant", "sprk_matter", "sprk_countstowardsuppression", RuleDomains.PolicyDomainColumn),
         };
         query.Criteria.AddCondition("sprk_enabled", ConditionOperator.Equal, true);
         query.Criteria.AddCondition("statecode", ConditionOperator.Equal, 0);
+        RuleDomains.AddOntologyPolicyAllowlist(query);
         query.AddOrder("sprk_policycode", OrderType.Ascending);
         var rows = await _entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false);
 
-        return rows.Entities.Select(ToPolicyRow).ToList();
+        return rows.Entities.Where(RuleDomains.IsOntologyPolicy).Select(ToPolicyRow).ToList();
     }
 
     private static readonly string[] PolicyColumns =
     {
         "sprk_policycode", "sprk_lane", "sprk_severity", "sprk_shortname", "sprk_name", "sprk_currentversion", "sprk_tenant",
-        "sprk_matter", "sprk_enabled", "statecode", "sprk_countstowardsuppression",
+        "sprk_matter", "sprk_enabled", "statecode", "sprk_countstowardsuppression", RuleDomains.PolicyDomainColumn,
     };
 
     private static PolicyRow ToPolicyRow(Entity row)

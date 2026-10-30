@@ -1,0 +1,27 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0453",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0453","generator_id":"gen_eval_set.py@1 F-0453","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0453.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-03"},
+ "header":{"firm":"Maddox & Dunmore LLP","firm_invoice_number":"INV-2025-34890","invoice_date":"2025-08-04","billing_period_start":"2025-07-01","billing_period_end":"2025-07-31","firm_matter_reference":"11753-0028","po_number":"PO-4562882","fees_total":5017.5,"expenses_total":692.36,"adjustments_total":0.0,"total_due":5709.86,"currency":"USD"},
+ "timekeepers":[{"name":"Elena Mbeki","title":"Paralegal","rate":130.0,"billed_as":"EM"},{"name":"Louis Nwosu","title":"Associate","rate":270.0,"billed_as":"LN"},{"name":"Nadia Esposito","title":"Partner","rate":400.0,"billed_as":"NE"},{"name":"Priya Dunleavy","title":"Associate","rate":265.0,"billed_as":"PD"},{"name":"Samuel Hargrove","title":"Associate","rate":220.0,"billed_as":"SH"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2025-07-01","timekeeper":"NE","timekeeper_name":"Nadia Esposito","timekeeper_title":"Partner","title":"Ptr","hours":2.8,"rate":400.0,"amount":1120.0,"narrative":"Prepare expert witness for testimony in the vendor agreement","codes":["L420","A101"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"expense","date":"2025-07-02","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":641.27,"amount":641.27,"narrative":"Airfare to Denver for deposition","codes":["E110"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2025-07-03","timekeeper":"PD","timekeeper_name":"Priya Dunleavy","timekeeper_title":"Associate","title":"Assoc","hours":2.3,"rate":265.0,"amount":609.5,"narrative":"Telephone conference with witness regarding the supply agreement","codes":["L410","A106"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2025-07-03","timekeeper":"NE","timekeeper_name":"Nadia Esposito","timekeeper_title":"Partner","title":"Ptr","hours":2.9,"rate":400.0,"amount":1160.0,"narrative":"Prepare monthly status report to client regarding the distribution agreement","codes":["L190","A111"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2025-07-09","timekeeper":"PD","timekeeper_name":"Priya Dunleavy","timekeeper_title":"Associate","title":"Assoc","hours":0.6,"rate":265.0,"amount":159.0,"narrative":"Prepare case assessment memorandum regarding the distribution agreement and recommended strategy","codes":["L120","A103"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2025-07-10","timekeeper":"PD","timekeeper_name":"Priya Dunleavy","timekeeper_title":"Associate","title":"Assoc","hours":1.2,"rate":265.0,"amount":318.0,"narrative":"Plan strategy for upcoming phase of the distribution agreement with team","codes":["L120","A101"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2025-07-14","timekeeper":"LN","timekeeper_name":"Louis Nwosu","timekeeper_title":"Associate","title":"Assoc","hours":1.0,"rate":270.0,"amount":270.0,"narrative":"Attend hearing on interrogatory responses in the employment claim","codes":["L450","A109"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2025-07-24","timekeeper":"SH","timekeeper_name":"Samuel Hargrove","timekeeper_title":"Associate","title":"Assoc","hours":1.8,"rate":220.0,"amount":396.0,"narrative":"Review draft expert disclosure for the licensing dispute","codes":["L420","A104"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"fee","date":"2025-07-24","timekeeper":"NE","timekeeper_name":"Nadia Esposito","timekeeper_title":"Partner","title":"Ptr","hours":2.3,"rate":400.0,"amount":920.0,"narrative":"Review draft expert disclosure for the regulatory inquiry","codes":["L420","A104"],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"expense","date":"2025-07-28","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":51.09,"amount":51.09,"narrative":"Working meal during deposition preparation","codes":["E111"],"page":1,"narrative_style":"clear"},
+  {"n":11,"line_type":"fee","date":"2025-07-30","timekeeper":"EM","timekeeper_name":"Elena Mbeki","timekeeper_title":"Paralegal","title":"Para","hours":0.5,"rate":130.0,"amount":65.0,"narrative":"Prepare expert witness for testimony in the lease dispute","codes":["L420","A101"],"page":1,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["290 Elm Court","Dallas","Tax ID 51-8936644"],"template":"T09","pages":1},
+ "rule_set_id":"RS-03",
+ "context":{"matter_open":"2024-02-29","matter_close":"2025-10-29","matter_budget":47839.0,"approved_timekeepers":["Victor Okafor","Samuel Hargrove","Nadia Esposito","Helena Sandoval","Peter Rosenthal","Elena Mbeki","Ivan Nakamura","Louis Nwosu","Priya Dunleavy"],"invoice_received_date":"2025-08-10"},
+ "expected_findings":[],
+ "seeded_violations":0
+}

@@ -1621,7 +1621,7 @@ public sealed partial class SecureChildOwnershipAiToolTests
         using var document = JsonDocument.Parse(json);
 
         var result = await ChildRecordEndpoints.RefileAsync(
-            "sprk_todo", Todo, document.RootElement.Clone(), _user, _world.Resolver(), Restamper(), Children(),
+            "sprk_todo", Todo, document.RootElement.Clone(), _user, _world.Resolver(), Restamper(), Children(), AppEntities(),
             HttpContextOfCaller(), NullLogger<Program>.Instance, CancellationToken.None);
 
         Status(result).Should().Be(StatusCodes.Status400BadRequest);
@@ -1643,7 +1643,7 @@ public sealed partial class SecureChildOwnershipAiToolTests
 
         var result = await ChildRecordEndpoints.RefileAsync(
             "sprk_todo", Todo, Payload(new() { ["sprk_RegardingMatter@odata.bind"] = $"/sprk_matters({OrdinaryMatter:D})" }),
-            _user, ownership, Restamper(), Children(), HttpContextOfCaller(), NullLogger<Program>.Instance,
+            _user, ownership, Restamper(), Children(), AppEntities(), HttpContextOfCaller(), NullLogger<Program>.Instance,
             CancellationToken.None);
 
         Status(result).Should().Be(StatusCodes.Status409Conflict, Detail(result));
@@ -1713,7 +1713,7 @@ public sealed partial class SecureChildOwnershipAiToolTests
 
     private Task<IResult> RefileChild(string table, Guid id, Dictionary<string, object?> payload) =>
         ChildRecordEndpoints.RefileAsync(
-            table, id, Payload(payload), _user, _world.Resolver(), Restamper(), Children(), HttpContextOfCaller(),
+            table, id, Payload(payload), _user, _world.Resolver(), Restamper(), Children(), AppEntities(), HttpContextOfCaller(),
             NullLogger<Program>.Instance, CancellationToken.None);
 
     /// <summary>PATCH /api/v1/events/{id}/filing's REAL handler (the route's filters are pinned through the real mapper by

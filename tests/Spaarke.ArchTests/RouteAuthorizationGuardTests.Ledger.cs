@@ -339,6 +339,89 @@ public partial class RouteAuthorizationGuardTests
             "/api/finance/* — each route declares the id it authorizes (AddFinanceAuthorizationFilter, task 130)."),
         new GovernedFile("Api/Finance/FinanceRollupEndpoints.cs", Scope.RouteLevelGate,
             "matter/project rollup recalculation, Read on the parent as the caller (task 130)."),
+        new GovernedFile("Api/Finance/RateCardImportEndpoints.cs", Scope.RouteLevelGate,
+            "/api/finance/ratecards/* (ebilling-r1 task 078, FR-29) -- rate card and timekeeper workbook template, import and publish. "
+            + "Each route declares the Dataverse table privileges the caller must hold (AddFinanceAuthorizationFilter, D-76, fail closed), "
+            + "plus a Read check on any matter, project or work assignment the card is scoped to; the eBilling kill switch runs after it."),
+        new GovernedFile("Api/Finance/RuleSetEndpoints.cs", Scope.RouteLevelGate,
+            "/api/finance/rulesets/* (ebilling-r1 task 076, FR-28) -- create a rule set from a source document, list / read it with its rules, "
+            + "edit / accept / reject a rule, publish, assign, visibility, and (task 075, FR-27) POST .../{ruleSetId}/draft which queues the rule "
+            + "drafting job (the count of endpoint files is unchanged at 137: a route in an existing file). Each route declares the billing-admin Dataverse table privileges the "
+            + "caller must hold (BillingAdminAuthorization via AddFinanceAuthorizationFilter, D-76, fail closed; Write on sprk_ruleset is the marker "
+            + "because the Ontology Administrator holds every privilege on the shared policy tables); reads of the proposals are admin-only too. "
+            + "The eBilling kill switch runs after it."),
+        new GovernedFile("Api/Finance/ProcedureEndpoints.cs", Scope.RouteLevelGate,
+            "/api/finance/procedures/* (ebilling-r1 task 081, EB-D-148) -- Procedures and their versions. Step 0 on the group "
+            + "(RequireInternalFinanceCaller, reads included: Procedures are internal-only). Each route then declares its basis through "
+            + "AddFinanceAuthorizationFilter, as the caller, fail closed (BillingAdminAuthorization): POST / -- Create on sprk_procedure "
+            + "(prvCreatesprk_procedure) plus Create and Write on sprk_ruleset (it creates the rule set too); GET /{procedureId} -- Read on the "
+            + "Procedure (Record path, sprk_procedures); PATCH /{procedureId}, PATCH .../versions/{versionId}, POST .../versions/{versionId}/retire "
+            + "and GET .../retire-preview -- Write on the Procedure AND the billing-admin marker (Write on sprk_ruleset); POST .../versions -- the "
+            + "same plus Create on sprk_policyversion; POST .../versions/{versionId}/publish -- the same plus Write on sprk_policyversion and "
+            + "sprk_policy; POST .../retire -- the same plus Write on sprk_policy. The eBilling kill switch runs after it."),
+        new GovernedFile("Api/Finance/InvoiceAdjustmentEndpoints.cs", Scope.RouteLevelGate,
+            "GET /api/finance/invoices/{invoiceId}/adjustment-rules, POST .../adjustments and DELETE .../adjustments/{lineId} (ebilling-r1 task 102, "
+            + "FR-32) -- the invoice-level adjustments. Every route carries AddFinanceAuthorizationFilter on sprk_invoices(invoiceId) as the caller, fail "
+            + "closed: the rule list with \"finance.read\" (Read), add and remove with \"ebilling.invoice.decide\" (Write, D-77); invoice access reaches "
+            + "the caller through the core record (013, ADR-034). The eBilling kill switch runs after it. The body carries no amount and no total (016 "
+            + "computes both), a removed line must be an Adjustment line of the route's own invoice (uniform 404), and the reviewer is the caller's "
+            + "systemuserid from their own token, never the body."),
+        new GovernedFile("Api/Finance/InvoiceContextEndpoints.cs", Scope.RouteLevelGate,
+            "GET /api/finance/invoices/{invoiceId}/context (ebilling-r1 task 106, FR-33) -- the Invoice Review context panel. The route carries "
+            + "AddFinanceAuthorizationFilter(\"finance.read\", sprk_invoices, invoiceId): Read on the invoice as the caller, fail closed; the eBilling "
+            + "kill switch runs after it. The firm and core record the sections are scoped to are read from that invoice, never from the request."),
+        new GovernedFile("Api/Finance/InvoiceLineReviewEndpoints.cs", Scope.RouteLevelGate,
+            "GET /api/finance/invoices/{invoiceId}/review and POST /api/finance/invoices/{invoiceId}/lines/{lineId}/decision, .../lines/decisions, "
+            + ".../lines/accept-clean (ebilling-r1 task 100, FR-31) -- the Invoice Review read model and the line decisions. Every route carries "
+            + "AddFinanceAuthorizationFilter on sprk_invoices(invoiceId) as the caller, fail closed: the read with \"finance.read\" (Read), the three "
+            + "decisions with \"ebilling.invoice.decide\" (Write, D-77); invoice access reaches the caller through the core record (013, ADR-034). The "
+            + "eBilling kill switch runs after it. Every line id is checked against the invoice's own lines (uniform 404) before a write; the decider "
+            + "is the caller's systemuserid from their own token, never the body."),
+        new GovernedFile("Api/Finance/InvoiceRelatedWorkEndpoints.cs", Scope.RouteLevelGate,
+            "GET /api/finance/invoices/{invoiceId}/lines/{lineId}/related-work (ebilling-r1 task 107, FR-34) -- the Related work pane of one fee line. "
+            + "The route carries AddFinanceAuthorizationFilter(\"finance.read\", sprk_invoices, invoiceId): Read on the invoice as the caller, fail closed; "
+            + "the eBilling kill switch runs after it. The line must belong to the invoice (uniform 404); the core record, author and window are read from "
+            + "the line, so no core, container or document id comes from the request, and every candidate document is put to the caller's own Read "
+            + "(sprk_documents, \"read\") before it is searched or returned."),
+        new GovernedFile("Api/Finance/InvoiceSubmissionEndpoints.cs", Scope.RouteLevelGate,
+            "/api/finance/{matters|projects|workassignments}/{id}/invoice-submissions and /api/finance/invoice-submissions/{id} "
+            + "(ebilling-r1 task 044, FR-17 internal channel). The submits run AddFinanceAuthorizationFilter as the caller: Read and "
+            + "AppendTo on the route's core record (finance.submit_invoice) and AppendTo on the query firm (finance.attach_invoice); "
+            + "the status read needs Read on the submission (uniform 404). The eBilling kill switch runs after each filter. The firm must also be "
+            + "linked to the record (task 051, D-110: the record's assigned law firms only; 403 firm_not_linked, 503 when the link cannot be read) "
+            + "-- decided in InvoiceSubmissionService.SubmitAsync, the one owner both channels call, not in this file. "
+            + "Task 095 adds POST /api/finance/invoice-submissions/from-email (the Outlook add-in): the same Finance filter first "
+            + "(finance.submit_invoice on the body's core record, finance.attach_invoice on its firm; a malformed body is a 400 before any "
+            + "check), then the /office/save chain (OfficeAuth, EntityAccess entity.associate_document, rate limit, version-save "
+            + "authorization), the kill switch and the idempotency filter bound to the submission key; firm_not_linked through "
+            + "CheckFirmLinkAsync. And GET /api/finance/core-records/{entityType}/{entityId}/firms (finance.read on the core record, "
+            + "uniform 404), which lists only the record's active linked firms."),
+        new GovernedFile("Api/Finance/CodeSetMappingEndpoints.cs", Scope.RouteLevelGate,
+            "/api/finance/code-set-mappings/* (ebilling-r1 task 048, FR-22) -- AI code-set proposals (GET) and the admin confirm that writes one "
+            + "default code set (POST). Each route declares the Dataverse table privileges the caller must hold (AddFinanceAuthorizationFilter, "
+            + "D-76, fail closed): Write on BOTH reference tables for the list, Write on the one table named in the path for the confirm; the "
+            + "eBilling kill switch runs after it. Only the confirm route writes a mapping."),
+        new GovernedFile("Api/Finance/SubmissionOverrideEndpoints.cs", Scope.RouteLevelGate,
+            "/api/finance/submissions/{submissionId}/blocked, /override and /return (ebilling-r1 task 105, FR-19, FR-37, D-24, D-73, D-76) -- read, "
+            + "override and return a blocked internal submission. Each route carries AddFinanceAuthorizationFilter as the caller on the submission "
+            + "named in the path (Read for the read, uniform 404; Read and Write for the two decisions, ebilling.submission.decide); the eBilling kill "
+            + "switch runs after it. The override additionally needs the caller's own Dataverse table privilege on sprk_ebillingoverride, asked of "
+            + "Dataverse as the caller on EVERY call inside SubmissionOverrideService (EbillingOverridePrivilege, fail closed: 403 "
+            + "ebilling.override.not_permitted); Return needs no privilege (D-73). The decider, the invoice, the findings and the decision id are "
+            + "derived server-side, never taken from the request."),
+        new GovernedFile("Api/Finance/InvoiceApprovalEndpoints.cs", Scope.RouteLevelGate,
+            "GET /api/finance/invoices/{invoiceId}/approval and POST /api/finance/invoices/{invoiceId}/approve (ebilling-r1 task 103, FR-35, "
+            + "FR-11, D-40, D-78) -- the approval state and the approve operation. Each route carries AddFinanceAuthorizationFilter as the caller on "
+            + "the invoice named in the path (finance.read: Read; ebilling.invoice.decide: Write), fail closed; the eBilling kill switch runs after "
+            + "it. Approve additionally resolves the caller's eligibility LIVE from the invoice's core record inside InvoiceApprovalService on every "
+            + "call (403 ebilling.approver.not_eligible, nothing written); the stored eligible-approver set never grants. The decider and the "
+            + "decision id are derived server-side, never taken from the request."),
+        new GovernedFile("Api/Finance/StoredFileEndpoints.cs", Scope.RouteLevelGate,
+            "GET /api/finance/files/{fileId}/content (ebilling-r1 task 090, EB-D-148, procedure-and-file-model 4.3) -- an internal caller downloads "
+            + "a Stored File's bytes. AddStoredFileAccessFilter runs the download rule before the handler: step 0 (403 before any record read), "
+            + "the app-only row read, the CALLER's own Read on the parent and, for a copy, on its source document (gate variant, uniform 404), "
+            + "then StoredFileService.JudgeServableAsync: Servable / own path / scan verdict (404, 409 file_scan_pending, 503). The eBilling kill "
+            + "switch runs after it."),
         new GovernedFile("Api/ScorecardCalculatorEndpoints.cs", Scope.RouteLevelGate,
             "matter/project grade recalculation, Read on the parent as the caller (task 130)."),
         new GovernedFile("Api/NavMapEndpoints.cs", Scope.RouteLevelGate,
@@ -427,6 +510,18 @@ public partial class RouteAuthorizationGuardTests
             + "(ModuleEntitlementResolver.IsEntitledAsync — the /me/entitlements set, partner switch included) and has a "
             + "contact; the one row it writes app-only names that contact as sprk_requestedby, so it lands only in the "
             + "caller's own Service Requests set. Takes no record id."),
+        new GovernedFile("Api/ExternalAccess/ExternalInvoiceSubmissionEndpoints.cs", Scope.GroupGated,
+            "POST /api/v1/external/{matters|projects|workassignments}/{id}/invoice-submissions, GET /api/v1/external/invoice-submissions"
+            + "/{id} and GET /api/v1/external/invoice-submissions (ebilling-r1 task 044, FR-17 SPA channel, NFR-10) on the COLLABORATION "
+            + "group. Each route runs AddExternalInvoiceSubmissionAuthorizationFilter: a submit needs Read and Create on the core "
+            + "record (the principal's post-veto rights) and a firm among the caller contact's conferring memberships; a read needs the "
+            + "submission's firm to be the caller's and Read on its core record (uniform 404); the list is the caller's firms on the "
+            + "caller's readable records. The eBilling kill switch runs after the filter. Task 051 (D-106) adds GET "
+            + "/api/v1/external/invoice-submissions/firm-records under the same filter (the firm must be one of the caller's ACTIVE "
+            + "memberships; it lists only ids from the caller's own readable sets that the firm is linked to, at most 200 per kind from at "
+            + "most 500 examined, with partial and truncated flags; a systemuser is refused), a systemuser refusal on a submit before any "
+            + "write, and the firm-to-record link a submit requires. The filter's link check is an early copy: the owner is "
+            + "InvoiceSubmissionService.SubmitAsync (D-110), so the internal route enforces the same rule with the same codes."),
         new GovernedFile("Api/ExternalAccess/ExternalRegistrationEndpoints.cs", Scope.RouteLevelGate,
             "POST /api/v1/external/registration (spaarke-SPA-external-access-platform-r3 task 047, ADR-028 A9) on its OWN "
             + "group: RequireAuthorization(ExternalCollaboration) WITHOUT CallerPrincipalAuthorizationFilter (the caller is "
@@ -906,8 +1001,55 @@ public partial class RouteAuthorizationGuardTests
     //            Share on the RECORD; an unknown id and an unmanageable one are the same 403). Pinned through the real
     //            pipeline by tests/integration/auth/UnifiedAccessControl/RecordGrantsEndpointTests.cs.
     //
+    // 125 -> 126 (2026-10-16, ebilling-r1 task 078, FR-29). Net +1: Api/Finance/RateCardImportEndpoints.cs ADDED -- GET
+    // /api/finance/ratecards/import-template, POST /api/finance/ratecards/import and POST /api/finance/ratecards/{rateCardId}/publish.
+    // Classified by GovernedFiles (RouteLevelGate: each route's AddFinanceAuthorizationFilter requires the caller's own Dataverse
+    // table privilege, D-76); the kill-switch filter .RequireEbillingEnabled is classified in NotAuthorizationForms.
+    //
+    // 126 -> 127 (2026-10-16, ebilling-r1 task 106, FR-33). Net +1: Api/Finance/InvoiceContextEndpoints.cs ADDED -- GET
+    // /api/finance/invoices/{invoiceId}/context. Classified by GovernedFiles (RouteLevelGate: AddFinanceAuthorizationFilter, finance.read on the
+    // route's invoice); the kill-switch filter .RequireEbillingEnabled is already classified in NotAuthorizationForms.
+    // 127 -> 129 (2026-10-16, ebilling-r1 task 044, FR-17). Net +2: Api/Finance/InvoiceSubmissionEndpoints.cs ADDED (RouteLevelGate:
+    // AddFinanceAuthorizationFilter as the caller on the core record, the firm and the submission) and
+    // Api/ExternalAccess/ExternalInvoiceSubmissionEndpoints.cs ADDED (GroupGated: AddExternalInvoiceSubmissionAuthorizationFilter,
+    // credited below). The kill-switch filter .RequireEbillingEnabled is classified in NotAuthorizationForms.
+    // 129 -> 130 (2026-10-16, ebilling-r1 task 048, FR-22). Net +1: Api/Finance/CodeSetMappingEndpoints.cs ADDED -- GET
+    // /api/finance/code-set-mappings/proposals and POST /api/finance/code-set-mappings/{table}/{id}/confirm. Classified by GovernedFiles
+    // (RouteLevelGate: each route's AddFinanceAuthorizationFilter requires the caller's own Dataverse table privilege, D-76); the
+    // kill-switch filter and the errorCode-stamping filter are classified in NotAuthorizationForms.
+    // 130 -> 131 (2026-10-16, ebilling-r1 task 107, FR-34). Net +1: Api/Finance/InvoiceRelatedWorkEndpoints.cs ADDED -- GET
+    // /api/finance/invoices/{invoiceId}/lines/{lineId}/related-work. Classified by GovernedFiles (RouteLevelGate: AddFinanceAuthorizationFilter,
+    // finance.read on the route's invoice); the kill-switch filter .RequireEbillingEnabled is already classified in NotAuthorizationForms.
+    //
+    // Integration (2026-10-17, ebilling-r1 merge of origin/master 1df4ee12d): both sides counted from 125: master +5 (130) and
+    // ebilling-r1 +6 (131). Combined 125 + 5 + 6 = 136.
+    // 136 -> 137 (2026-10-17, ebilling-r1 task 076, FR-28). Net +1: Api/Finance/RuleSetEndpoints.cs ADDED -- POST/GET /api/finance/rulesets,
+    // GET /api/finance/rulesets/{ruleSetId}, PATCH .../proposals/{policyId}, POST .../proposals/{policyId}/accept|reject, POST .../publish,
+    // PUT .../assignment and PUT .../visibility. Classified by GovernedFiles (RouteLevelGate: AddFinanceAuthorizationFilter, the caller's own
+    // billing-admin table privileges, D-76); the kill-switch filter .RequireEbillingEnabled is already classified in NotAuthorizationForms.
+    //
     // 131 + 130 -> 132 (2026-10-17, merge of master 1d435e695 into work/spaarke-SPA-external-access-platform-r3): master's 130
     // (129 + UAC 099a) plus external-access-r3's two (047 registration, 048 workforce link). No route added or removed here.
+    // 137 + 132 -> 139 (2026-10-18, ebilling-r1 merge of origin/master 1473b34c6): both sides already shared master 1df4ee12d (130).
+    // ebilling-r1 added 7 on it (137); master added 2 (external-access-r3 047 ExternalRegistrationEndpoints.cs, 048
+    // ExternalWorkforceLinkEndpoints.cs) for 132. Union 130 + 7 + 2 = 139. No route added or removed here.
+    // 139 -> 140 (2026-10-20, ebilling-r1 task 100, FR-31). Net +1: Api/Finance/InvoiceLineReviewEndpoints.cs ADDED -- GET
+    // /api/finance/invoices/{invoiceId}/review, POST .../lines/{lineId}/decision, POST .../lines/decisions, POST .../lines/accept-clean.
+    // Classified by GovernedFiles (RouteLevelGate: AddFinanceAuthorizationFilter, finance.read / ebilling.invoice.decide on the route's invoice);
+    // the kill-switch filter .RequireEbillingEnabled is already classified in NotAuthorizationForms. Parallel tasks that also add a file (050,
+    // 105) each bump this by one: reconcile the sum at integration.
+    // 140 -> 141 (2026-10-20, ebilling-r1 task 105, integrated after task 100, FR-19 / FR-37). Net +1: Api/Finance/SubmissionOverrideEndpoints.cs ADDED -- GET
+    // /api/finance/submissions/{submissionId}/blocked, POST .../override and POST .../return. Classified by GovernedFiles (RouteLevelGate:
+    // AddFinanceAuthorizationFilter as the caller on the submission; the override's privilege is asked inside the service on every call);
+    // the kill-switch filter .RequireEbillingEnabled is already classified in NotAuthorizationForms.
+    // 141 -> 142 (2026-10-22, ebilling-r1 task 081, EB-D-148). Net +1: Api/Finance/ProcedureEndpoints.cs ADDED -- POST/GET/PATCH
+    // /api/finance/procedures[/{procedureId}], POST .../versions, PATCH .../versions/{versionId}, POST .../versions/{versionId}/publish|retire,
+    // GET .../retire-preview and POST .../retire. Classified by GovernedFiles (RouteLevelGate: step 0 on the group, then
+    // AddFinanceAuthorizationFilter per route as the caller); the kill-switch filter is already classified in NotAuthorizationForms.
+    // 142 -> 143 (2026-10-22, ebilling-r1 task 090, integrated after task 081, EB-D-148). Net +1: Api/Finance/StoredFileEndpoints.cs ADDED -- GET
+    // /api/finance/files/{fileId}/content. Classified by GovernedFiles (RouteLevelGate: AddStoredFileAccessFilter, credited in CreditedForms:
+    // step 0, then the caller's own Read on the parent and the source document via the gate variant); .RequireEbillingEnabled is already in
+    // NotAuthorizationForms.
     //
     // 132 -> 133 (2026-10-27, spaarke-SPA-external-access-platform-r3, contact identity hardening slice C3). An UPWARD move:
     //
@@ -915,6 +1057,24 @@ public partial class RouteAuthorizationGuardTests
     //           and /reinstate-person. GovernedFiles entry (RouteLevelGate), AdminMechanism
     //           (AddExternalAccessAdministratorAuthorizationFilter) and AdminOnlyRoutes group added with it. The filter
     //           consults CallerRecordAccessProbe (WhoAmI over the caller's token), so it passes Rule B as a decision service.
+    //
+    // 143 + 133 -> 144 (2026-10-28, ebilling-r1 merge of origin/master cae791a74): both sides already shared 132. ebilling-r1
+    // added 11 on it (143); master added 1 (external-access-r3 C3 PersonAccessAdministrationEndpoints.cs) for 133.
+    // Union 132 + 11 + 1 = 144. No route added or removed here.
+    //
+    // 144 -> 145 (2026-10-29, ebilling-r1 task 102, FR-32). Net +1: Api/Finance/InvoiceAdjustmentEndpoints.cs ADDED -- GET
+    // /api/finance/invoices/{invoiceId}/adjustment-rules, POST .../adjustments and DELETE .../adjustments/{lineId}. Classified by GovernedFiles
+    // (RouteLevelGate: step 0 on the group, then AddFinanceAuthorizationFilter as the caller on the route's invoice); .RequireEbillingEnabled is
+    // already in NotAuthorizationForms. (Written on the branch as 143 -> 144; reconciled at the ebilling-r1 integration merge.)
+    //
+    // 145 -> 146 (2026-10-29, ebilling-r1 task 103, FR-35). Net +1: Api/Finance/InvoiceApprovalEndpoints.cs ADDED -- GET
+    // /api/finance/invoices/{invoiceId}/approval and POST .../approve. Classified by GovernedFiles (RouteLevelGate: AddFinanceAuthorizationFilter,
+    // finance.read / ebilling.invoice.decide on the route's invoice; approve's eligibility is asked inside the service on every call); the
+    // kill-switch filter .RequireEbillingEnabled is already classified in NotAuthorizationForms. (Written on the branch as 143 -> 144;
+    // reconciled at the ebilling-r1 integration merge: 132 shared + 11 ebilling-r1 + 1 master + 102 + 103 = 146.)
+    //
+    // 146 -> 147 (2026-10-29, ebilling-r1 merge of origin/master): master moved 133 -> 134 (field-mapping-server-write-path-r1 task 072,
+    // FR-31), added on the shared 132 line, so the union is 146 + 1 = 147. Master's entry, verbatim:
     //
     // 133 -> 134 (2026-10-29, field-mapping-server-write-path-r1 task 072, FR-31). An UPWARD move:
     //
@@ -926,7 +1086,7 @@ public partial class RouteAuthorizationGuardTests
     //            denies 403). The uniform 404 covers no Read, an unknown id, a non-family table and a probe fault. Pinned
     //            through a minimal TestServer host (this endpoint mapped alone, probe and Dataverse substituted) by
     //            tests/integration/contract/Api/Records/RecordFamilyEndpointsContractTests.cs.
-    private const int ExpectedEndpointFileCount = 134;
+    private const int ExpectedEndpointFileCount = 147;
 
     // =============================================================================================
     // THE CREDITED ALLOW-LIST — the only attachment forms Rule A credits as a per-resource decision
@@ -971,6 +1131,19 @@ public partial class RouteAuthorizationGuardTests
         new CreditedForm("AddFinanceAuthorizationFilter", "Api/Filters/FinanceAuthorizationFilter.cs",
             "Each route declares the id it authorizes; the filter evaluates it as the caller via GetCallerRecordAccessAsync + "
             + "OperationAccessPolicy.HasRequiredRights (FinanceAuthorizationFilter.cs:409-412), uniform 404 on deny (task 130)."),
+        new CreditedForm("RequireWriteOnTheRuleSetsProcedure", "Api/Finance/BillingAdminAuthorization.cs",
+            "Reads the route rule set's Procedure (BillingAdminAuthorization.cs:172) and, when set, asks the caller's own Write on "
+            + "sprk_procedures via CallerReadCheck.CheckAsync (:191); a read fault or an unanswered question is 403 system_failure (:178, :200) "
+            + "(ebilling-r1 081, uac D; /draft added in re-check round 2)."),
+        new CreditedForm("RequireReadOnTheRuleSetsProcedure", "Api/Finance/BillingAdminAuthorization.cs",
+            "The sibling for the rule set READ: the same Procedure resolution (BillingAdminAuthorization.cs:172) and CallerReadCheck.CheckAsync "
+            + "(:191) asking Read; denied is 403 insufficient_rights, an unanswered question or a read fault 403 system_failure (:178, :200) "
+            + "(ebilling-r1 081, uac r2 I-P5)."),
+        new CreditedForm("AddStoredFileAccessFilter", "Api/Finance/StoredFileEndpoints.cs",
+            "StoredFileAccessFilter decides before the handler: step 0 via FinanceAuthorizationFilter.EvaluateStepZeroAsync "
+            + "(StoredFileEndpoints.cs:241, 403), then RetrievePrincipalAccess as the caller over OBO via "
+            + "CallerRecordAccessProbe.GetCallerRightsForAuthorizationGateAsync on the row's parent (:264) and, for a copy, its source "
+            + "document (:280), uniform 404 on deny (:224); any unexpected fault refuses with 503 (:207) (ebilling-r1 task 090)."),
         new CreditedForm("AddRecordRouteAccessAuthorizationFilter", "Api/Filters/RecordRouteAccessAuthorizationFilter.cs",
             "RetrievePrincipalAccess on the route record over OBO via CallerRecordAccessProbe "
             + "(RecordRouteAccessAuthorizationFilter.cs:110), 403 on deny (:155); the probe throwing is a denial (task 076)."),
@@ -1046,6 +1219,11 @@ public partial class RouteAuthorizationGuardTests
             "Task 140: a CONTACT principal holding Collaborate or Full Access on the named record, from the evaluator's "
             + "post-veto rights (principal.RightsOn, ContactGrantorAuthorizationFilter.cs:182, :272); a revoke needs a row the "
             + "caller issued (one 404, :253); an unmapped request type is denied (:146-151)."),
+        new CreditedForm("AddExternalInvoiceSubmissionAuthorizationFilter", "Api/ExternalAccess/ExternalInvoiceSubmissionAuthorizationFilter.cs",
+            "ebilling-r1 task 044: a submit needs Read and Create on the route's core record from the evaluator's post-veto rights "
+            + "(principal.RightsOn, ExternalInvoiceSubmissionAuthorizationFilter.cs:153) and a firm among the caller contact's conferring "
+            + "memberships (:180, :256; an unreadable read is 503, never 'no firm'); a read needs the submission's firm among them and "
+            + "Read on its core record, else one uniform 404 (:206-225); a missing principal denies (:119)."),
         new CreditedForm("AddInsightsAskAuthorizationFilter", "Api/Insights/InsightEndpoints.cs",
             "Task 163 f1: the shared playbook-parameter policy, registered insights-ask playbooks only, then Read on the subject "
             + "matter (Write when a node that can write reaches it) and each record parameter, as the caller, through "
@@ -1190,6 +1368,13 @@ public partial class RouteAuthorizationGuardTests
         new NotAuthorizationForm("RequireWebhookSignature", "HMAC authenticity of a webhook body (WebhookSignatureFilter.cs) — the control an AnonymousByDesign waiver names."),
         new NotAuthorizationForm("AddOfficeAuthFilter", "IsAuthenticated + stash the oid (OfficeAuthFilter.cs:76-135); authentication only."),
         new NotAuthorizationForm("AddOfficeRateLimitFilter", "Office throughput limiter, explicitly fail-OPEN."),
+        new NotAuthorizationForm("RequireEbillingEnabled",
+            "ebilling-r1 task 078: the eBilling kill switch (EbillingEnabledFilter.cs) answers 503 ebilling.disabled when the feature flag is off. "
+            + "It is chained AFTER the route's AddFinanceAuthorizationFilter and decides nothing about who may act on what."),
+        new NotAuthorizationForm("AddEndpointFilter<CodeSetForbiddenCodeFilter>",
+            "ebilling-r1 task 048: stamps the stable errorCode ebilling.codeset.forbidden (ADR-019) on a 403 that the route's "
+            + "AddFinanceAuthorizationFilter produced (CodeSetMappingEndpoints.cs). It is chained BEFORE that filter, only reads its result, "
+            + "and can never turn a denial into anything else; it decides nothing."),
         new NotAuthorizationForm("AddIdempotencyFilter", "Replays a cached response for a repeated client key."),
         new NotAuthorizationForm("AddEndpointFilter<DocumentUrlIdentityFilter>", "Resolves a document URL to an id; the route's decision is its AddDocumentAuthorizationFilter."),
         new NotAuthorizationForm("AddEndpointFilter<DocumentEmailIdentityFilter>", "Word add-in task 120: resolves an email's message id to its saved .eml document id; the route's decision is its AddDocumentAuthorizationFilter."),
@@ -1207,6 +1392,11 @@ public partial class RouteAuthorizationGuardTests
             "Task 186 (review round 1 F1): endpoint METADATA, not a filter — the route's table x operation set for the "
             + "workforce privilege ceiling, read by the group's AddWorkforceCeilingFilter (NonDecidingAttachments). It narrows "
             + "what a workforce contact may do and decides nothing about any record."),
+        new NotAuthorizationForm("RequireInternalFinanceCaller",
+            "ebilling-r1 task 099 (procedure-and-file-model section 5.3): endpoint METADATA on every /api/finance route group, not a "
+            + "filter. It switches on step 0 inside the route's own AddFinanceAuthorizationFilter (CreditedForms), which refuses a "
+            + "flagged-external, row-less or unreadable caller before its record checks. It only narrows that filter and decides "
+            + "nothing itself; FinanceStepZeroCoverageGuardTests pins it on every /api/finance route."),
         new NotAuthorizationForm("AddEndpointFilter(ValidateFilingRequestAsync)",
             "Task 147 r1c: PATCH /api/v1/events/{id}/filing request SHAPE only (EventEndpoints.cs:172-177, "
             + "ChildRecordEndpoints.FilingShapeProblem, no I/O), before the route's RecordRouteAccessAuthorizationFilter(\"write\")."),
@@ -3014,8 +3204,10 @@ public partial class RouteAuthorizationGuardTests
             + "shares Read to that colleague (DirectThreadAccessService.cs:62-100). The caller is always a party; "
             + "no other principal's record is read."),
         Permanent("GET /api/v1/external/me", PermanentBasis.CallerScopedOnly, "167",
-            "The resolved caller principal's own access context (ExternalUserContextEndpoint.cs:45, :74 — "
-            + "caller.ReadableProjects). Takes no id."),
+            "The resolved caller principal's own access context: ExternalUserContextEndpoint.HandleAsync (the mapped handler) returns "
+            + "Handle's answer (ExternalUserContextEndpoint.cs:45, :74 — caller.ReadableProjects) plus the caller's own firms "
+            + "(ExternalInvoiceSubmissionAuthorizationFilter.ReadCallerFirmsAsync: the caller contact's memberships only, id and name). "
+            + "Takes no id."),
         Permanent("GET /api/v1/external/me/entitlements", PermanentBasis.CallerScopedOnly, "167",
             "The caller principal's own module entitlements (MeEntitlementsEndpoint.cs:32). Takes no id."),
         Permanent("GET /api/v1/external/notifications", PermanentBasis.CallerScopedOnly, "r3-037",

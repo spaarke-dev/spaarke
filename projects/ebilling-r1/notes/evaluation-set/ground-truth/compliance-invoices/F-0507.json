@@ -1,0 +1,27 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0507",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0507","generator_id":"gen_eval_set.py@1 F-0507","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0507.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-03"},
+ "header":{"firm":"Tennant & Zeller LLP","firm_invoice_number":"INV-2026-96870","invoice_date":"2025-08-01","billing_period_start":"2025-07-01","billing_period_end":"2025-07-31","firm_matter_reference":"55298-0028","po_number":"PO-4556083","fees_total":2018.0,"expenses_total":4024.42,"adjustments_total":0.0,"total_due":6042.42,"currency":"USD"},
+ "timekeepers":[{"name":"Beatrix Blackwood","title":"Partner","rate":520.0,"billed_as":"Beatrix Blackwood"},{"name":"Dmitri Sandoval","title":"Of Counsel","rate":415.0,"billed_as":"Dmitri Sandoval"},{"name":"Ivan Castellanos","title":"Paralegal","rate":120.0,"billed_as":"Ivan Castellanos"},{"name":"Priya Yilmaz","title":"Paralegal","rate":115.0,"billed_as":"Priya Yilmaz"},{"name":"Samuel Rosenthal","title":"Associate","rate":225.0,"billed_as":"Samuel Rosenthal"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2025-07-09","timekeeper":"Beatrix Blackwood","timekeeper_name":"Beatrix Blackwood","timekeeper_title":"Partner","title":"Partner","hours":0.9,"rate":520.0,"amount":468.0,"narrative":"Attend trial day in the insurance coverage issue","codes":["L450","A109"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2025-07-07","timekeeper":"Dmitri Sandoval","timekeeper_name":"Dmitri Sandoval","timekeeper_title":"Of Counsel","title":"Of Counsel","hours":0.9,"rate":415.0,"amount":373.5,"narrative":"Draft post-trial motion in the warranty claim","codes":["L460","A103"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2025-07-15","timekeeper":"Dmitri Sandoval","timekeeper_name":"Dmitri Sandoval","timekeeper_title":"Of Counsel","title":"Of Counsel","hours":1.4,"rate":415.0,"amount":581.0,"narrative":"Revise notice of deposition after review by lead counsel","codes":["L430","A104"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2025-07-09","timekeeper":"Ivan Castellanos","timekeeper_name":"Ivan Castellanos","timekeeper_title":"Paralegal","title":"Paralegal","hours":0.8,"rate":120.0,"amount":96.0,"narrative":"Research standard for new trial in the construction contract","codes":["L460","A102"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2025-07-09","timekeeper":"Priya Yilmaz","timekeeper_name":"Priya Yilmaz","timekeeper_title":"Paralegal","title":"Paralegal","hours":1.8,"rate":115.0,"amount":207.0,"narrative":"Draft post-trial motion in the regulatory inquiry","codes":["L460","A103"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2025-07-10","timekeeper":"Samuel Rosenthal","timekeeper_name":"Samuel Rosenthal","timekeeper_title":"Associate","title":"Associate","hours":0.4,"rate":225.0,"amount":90.0,"narrative":"Draft mediation statement for trial in the warranty claim","codes":["L430","A103"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2025-07-16","timekeeper":"Samuel Rosenthal","timekeeper_name":"Samuel Rosenthal","timekeeper_title":"Associate","title":"Associate","hours":0.2,"rate":225.0,"amount":45.0,"narrative":"Telephone conference with witness regarding the employment claim","codes":["L410","A106"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2025-07-25","timekeeper":"Samuel Rosenthal","timekeeper_name":"Samuel Rosenthal","timekeeper_title":"Associate","title":"Associate","hours":0.7,"rate":225.0,"amount":157.5,"narrative":"Attend trial day in the insurance coverage issue","codes":["L450","A109"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"expense","date":"2025-07-16","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":3895.53,"amount":3895.53,"narrative":"Consulting expert fees","codes":["E119"],"page":2,"narrative_style":"clear"},
+  {"n":10,"line_type":"expense","date":"2025-07-18","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":61.57,"amount":61.57,"narrative":"Overnight courier to Orchard Row Brands counsel","codes":["E107"],"page":2,"narrative_style":"clear"},
+  {"n":11,"line_type":"expense","date":"2025-07-25","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":67.32,"amount":67.32,"narrative":"Court filing fee","codes":["E112"],"page":2,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["133 Congress Boulevard","Chicago","Tax ID 16-4811210"],"template":"T13","pages":2},
+ "rule_set_id":"RS-03",
+ "context":{"matter_open":"2024-10-07","matter_close":"2025-10-29","matter_budget":49169.0,"approved_timekeepers":["Samuel Rosenthal","Daniel Sandoval","Ivan Castellanos","Gregory Tavares","Dmitri Sandoval","Priya Yilmaz","Beatrix Blackwood","Dmitri Pemberton"],"invoice_received_date":"2025-08-15"},
+ "expected_findings":[],
+ "seeded_violations":0
+}

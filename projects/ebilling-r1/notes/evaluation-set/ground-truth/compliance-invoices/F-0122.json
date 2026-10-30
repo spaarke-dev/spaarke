@@ -1,0 +1,36 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0122",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0122","generator_id":"gen_eval_set.py@1 F-0122","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0122.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-02"},
+ "header":{"firm":"Penhallow and Yardley LLP","firm_invoice_number":"INV-2025-10501","invoice_date":"2025-09-02","billing_period_start":"2025-08-01","billing_period_end":"2025-08-31","firm_matter_reference":"26003-0026","po_number":"PO-4587189","fees_total":9055.0,"expenses_total":5.97,"adjustments_total":0.0,"total_due":9060.97,"currency":"USD"},
+ "timekeepers":[{"name":"Beatrix Carmichael","title":"Of Counsel","rate":510.0,"billed_as":"BC"},{"name":"Clara Lockhart","title":"Associate","rate":285.0,"billed_as":"CL"},{"name":"Hannah Esposito","title":"Associate","rate":255.0,"billed_as":"HE"},{"name":"Helena Ashdown","title":"Paralegal","rate":180.0,"billed_as":"HA"},{"name":"Marcus Yilmaz","title":"Paralegal","rate":185.0,"billed_as":"MY"},{"name":"Samuel Castellanos","title":"Associate","rate":275.0,"billed_as":"SC"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2025-08-06","timekeeper":"BC","timekeeper_name":"Beatrix Carmichael","timekeeper_title":"Of Counsel","title":"O/C","hours":1.3,"rate":510.0,"amount":663.0,"narrative":"Prepare responses and objections to motion to dismiss","codes":["L310","A103"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2025-08-07","timekeeper":"MY","timekeeper_name":"Marcus Yilmaz","timekeeper_title":"Paralegal","title":"Para","hours":1.3,"rate":185.0,"amount":240.5,"narrative":"Prepare case assessment memorandum regarding the licensing dispute and recommended strategy","codes":["L120","A103"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2025-08-11","timekeeper":"SC","timekeeper_name":"Samuel Castellanos","timekeeper_title":"Associate","title":"Assoc","hours":2.1,"rate":275.0,"amount":577.5,"narrative":"Review expert report served by Larkspur Medical","codes":["L340","A104"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2025-08-14","timekeeper":"HE","timekeeper_name":"Hannah Esposito","timekeeper_title":"Associate","title":"Assoc","hours":2.7,"rate":255.0,"amount":688.5,"narrative":"Review and organize incoming production from Quarry Lane Partners for matter file","codes":["L140","A104"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2025-08-14","timekeeper":"HA","timekeeper_name":"Helena Ashdown","timekeeper_title":"Paralegal","title":"Para","hours":4.0,"rate":180.0,"amount":720.0,"narrative":"Review and analyze motion to compel received from Orchard Row Brands","codes":["L310","A104"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2025-08-14","timekeeper":"HA","timekeeper_name":"Helena Ashdown","timekeeper_title":"Paralegal","title":"Para","hours":4.0,"rate":180.0,"amount":720.0,"narrative":"Draft witness list regarding deficiencies in Pacifica Telecom responses","codes":["L350","A103"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2025-08-14","timekeeper":"HA","timekeeper_name":"Helena Ashdown","timekeeper_title":"Paralegal","title":"Para","hours":3.5,"rate":180.0,"amount":630.0,"narrative":"Meet and confer with counsel for Meridian Foods regarding discovery dispute","codes":["L350","A107"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2025-08-15","timekeeper":"CL","timekeeper_name":"Clara Lockhart","timekeeper_title":"Associate","title":"Assoc","hours":0.7,"rate":285.0,"amount":199.5,"narrative":"Draft motion to dismiss and supporting memorandum","codes":["L240","A103"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"fee","date":"2025-08-18","timekeeper":"MY","timekeeper_name":"Marcus Yilmaz","timekeeper_title":"Paralegal","title":"Para","hours":1.9,"rate":185.0,"amount":351.5,"narrative":"Plan strategy for upcoming phase of the insurance coverage issue with team","codes":["L120","A101"],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"fee","date":"2025-08-22","timekeeper":"HE","timekeeper_name":"Hannah Esposito","timekeeper_title":"Associate","title":"Assoc","hours":4.0,"rate":255.0,"amount":1020.0,"narrative":"Review expert report served by Summit Ridge Homes","codes":["L340","A104"],"page":1,"narrative_style":"clear"},
+  {"n":11,"line_type":"fee","date":"2025-08-22","timekeeper":"HE","timekeeper_name":"Hannah Esposito","timekeeper_title":"Associate","title":"Assoc","hours":4.0,"rate":255.0,"amount":1020.0,"narrative":"Conference with client expert regarding rebuttal report","codes":["L340","A106"],"page":1,"narrative_style":"clear"},
+  {"n":12,"line_type":"fee","date":"2025-08-22","timekeeper":"HE","timekeeper_name":"Hannah Esposito","timekeeper_title":"Associate","title":"Assoc","hours":3.7,"rate":255.0,"amount":943.5,"narrative":"Draft motion to dismiss to Bluepine Holdings","codes":["L310","A103"],"page":1,"narrative_style":"clear"},
+  {"n":13,"line_type":"fee","date":"2025-08-22","timekeeper":"HE","timekeeper_name":"Hannah Esposito","timekeeper_title":"Associate","title":"Assoc","hours":0.1,"rate":255.0,"amount":25.5,"narrative":"Review documents produced by Tidewater Retail for responsiveness","codes":["L320","A104"],"page":1,"narrative_style":"clear"},
+  {"n":14,"line_type":"fee","date":"2025-08-25","timekeeper":"HA","timekeeper_name":"Helena Ashdown","timekeeper_title":"Paralegal","title":"Para","hours":2.7,"rate":180.0,"amount":486.0,"narrative":"Plan strategy for upcoming phase of the supply agreement with team","codes":["L120","A101"],"page":1,"narrative_style":"clear"},
+  {"n":15,"line_type":"fee","date":"2025-08-25","timekeeper":"CL","timekeeper_name":"Clara Lockhart","timekeeper_title":"Associate","title":"Assoc","hours":2.7,"rate":285.0,"amount":769.5,"narrative":"Draft pretrial brief and supporting memorandum","codes":[],"page":1,"narrative_style":"clear"},
+  {"n":16,"line_type":"expense","date":"2025-08-28","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":5.97,"amount":5.97,"narrative":"Postage - certified mail","codes":["E108"],"page":1,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["259 Market Street","Boston","Tax ID 32-9330121"],"template":"T01","pages":2},
+ "rule_set_id":"RS-02",
+ "context":{"matter_open":"2024-05-16","matter_close":"2025-11-29","matter_budget":61243.0,"approved_timekeepers":["Clara Lockhart","Beatrix Carmichael","Samuel Castellanos","Hannah Tavares","Marcus Yilmaz","Hannah Esposito","Jordan Voss","Helena Ashdown"],"invoice_received_date":"2025-09-07"},
+ "expected_findings":[
+  {"rule_id":"RS-02-R04","rule_type":"DailyHoursCap","scope":"line","line_refs":[7],"consequence":"Reduce"},
+  {"rule_id":"RS-02-R04","rule_type":"DailyHoursCap","scope":"line","line_refs":[12],"consequence":"Reduce"},
+  {"rule_id":"RS-02-R05","rule_type":"RequiredData","scope":"line","line_refs":[15],"consequence":"Reject"}
+ ],
+ "seeded_violations":3
+}

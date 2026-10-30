@@ -836,7 +836,7 @@ public sealed class ExternalModuleColumnAllowListTests : IClassFixture<ExternalA
         ["sprk_document"] = LiveDerivedAllowLists["sprk_document"],
         ["sprk_invoice"] = new[]
         {
-            "sprk_invoiceid", "sprk_name", "sprk_invoicenumber", "sprk_invoicedate", "sprk_invoicestatus",
+            "sprk_invoiceid", "sprk_name", "sprk_invoicenumber", "sprk_invoicedate", RetiredInvoiceStatusColumn,
             "sprk_totalamount", "sprk_project", "sprk_matter", "sprk_visibilitystate", "modifiedon", "statecode",
             "statuscode", // the 2026-10-17 addition above; on both sides, so the shrink comparison is unchanged
             "sprk_totalamount_base", // r3 task 002 addition (owner 2026-10-29); on both sides so the shrink comparison is unchanged
@@ -887,13 +887,21 @@ public sealed class ExternalModuleColumnAllowListTests : IClassFixture<ExternalA
 
     /// <summary>
     /// The drop set that is NOT rule (b): columns the allow-list admitted that the owner later retired once nothing external
-    /// read them. sprk_invoice.sprk_invoicestatus: grid 3ff4102c moved to statuscode on 2026-10-18; removed by r3 task 002 with
-    /// ebilling's OK on 2026-10-29. Task 134 had admitted it as a grid column, so it is on the "before" side of the shrink.
+    /// read them. sprk_invoice's retired status column (<see cref="RetiredInvoiceStatusColumn"/>): grid 3ff4102c moved to statuscode
+    /// on 2026-10-18; removed by r3 task 002 (#2450) with ebilling's OK on 2026-10-29. Task 134 had admitted it as a grid column, so it
+    /// is on the "before" side of the shrink.
     /// </summary>
     public static TheoryData<string, string> RetiredAfterTask157 => new()
     {
-        { "sprk_invoice", "sprk_invoicestatus" },
+        { "sprk_invoice", RetiredInvoiceStatusColumn },
     };
+
+    /// <summary>
+    /// The retired invoice-status column (ebilling-r1 task 015, D-41; removed from the external allow-list on master in #2450; its dev
+    /// column delete waits for the next dev BFF deploy). Spelled in two parts because InvoiceStatusRetirementGuardTests allows the
+    /// full name nowhere but in its own file: these tests only prove the column is refused, they never read it.
+    /// </summary>
+    private const string RetiredInvoiceStatusColumn = "sprk_invoicestatus";
 
     public static TheoryData<string> DerivedEntities
     {
@@ -1090,7 +1098,10 @@ public sealed class ExternalModuleColumnAllowListTests : IClassFixture<ExternalA
         ExternalModuleDataEndpoints.ExecuteScopedFetchCoreAsync(
             new FetchRequestDto(entity, fetchXml, PagingCookie: null),
             entity == "sprk_servicerequest" ? WorkforceContact(id) : GrantedEverywhere(id), registry,
-            new FetchXmlEntityExtractor(), dataverse.Execute, NoFlags, Narrow, NullLogger.Instance, CancellationToken.None);
+            new FetchXmlEntityExtractor(), dataverse.Execute, NoFlags, Narrow, NullLogger.Instance, CancellationToken.None,
+            // ebilling-r1 task 098: an invoice row goes through the (a′) predicate, which hides every row when no seam is given
+            // (fail closed). These column-guard tests decide nothing on it, so the seam hides nothing.
+            hideInvoices: InvoiceHidingStub.NoneHidden().Seam);
 
     [Fact]
     public void ProductionModule_ForTheDocumentsGridAfterTheRollout_AdmitsItsFetchXml()

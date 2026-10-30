@@ -221,6 +221,16 @@ public class RagIndexingJobHandler : IJobHandler
                     TimeSpan.FromDays(7), // Keep record for 7 days
                     ct);
 
+                if (result.Skipped)
+                {
+                    // Deliberately not indexed (E-Billing Output Files container, ebilling-r1 FR-16): the job is done,
+                    // but nothing was indexed — no index-status stamp and no indexing-success telemetry.
+                    _logger.LogInformation(
+                        "RAG indexing job {JobId}: {FileName} was not indexed ({SkipReason})",
+                        job.JobId, payload.FileName, result.SkipReason);
+                    return JobOutcome.Success(job.JobId, JobType, stopwatch.Elapsed);
+                }
+
                 // Update Dataverse tracking fields when DocumentId is provided
                 // Same pattern as RagEndpoints.cs manual indexing.
                 // R3 FR-3H3.2 dual-write: set new sprk_searchindexcompletedon AND keep legacy

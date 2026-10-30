@@ -272,8 +272,27 @@ public class DecisionActionCatalogTests
         action.Parameters.Select(p => (p.Code, p.Kind, p.Required)).Should().Equal(
             ("assignee", DecisionParameterKind.Person, true),
             ("description", DecisionParameterKind.TextArea, true),
-            ("dueDate", DecisionParameterKind.Date, false));
-        action.EffectLines.Should().Equal("Creates a task (an event of type Task) linked to the record, assigned to the person above, when the decision is recorded");
+            ("dueDate", DecisionParameterKind.Date, false),
+            ("notify", DecisionParameterKind.Boolean, false));
+        action.EffectLines.Should().Equal(
+            "Creates a task (an event of type Task) linked to the record, assigned to the person above, when the decision is recorded",
+            "With Send email notification on, emails the person the task and notifies them in Spaarke");
+    }
+
+    [Fact]
+    public void OnlyAssignTask_HasSendEmailNotification_AYesNoTickedByDefault_D194()
+    {
+        DecisionActionCatalog.TryGet("assign-task", out var action).Should().BeTrue();
+        var notify = action.Parameters.Single(p => p.Code == "notify");
+        notify.Label.Should().Be("Send email notification");
+        notify.Kind.Should().Be(DecisionParameterKind.Boolean);
+        notify.Required.Should().BeFalse();
+        notify.DefaultValue.Should().Be("true", "the box is ticked by default (D-194)");
+
+        DecisionActionCatalog.All.Where(a => a.Parameters.Any(p => p.Kind == DecisionParameterKind.Boolean || p.Code == "notify"))
+            .Select(a => a.Code).Should().Equal(["assign-task"], "no other action has the checkbox");
+        DecisionActionCatalog.All.SelectMany(a => a.Parameters).Where(p => p.DefaultValue is not null)
+            .Should().ContainSingle("a fixed default is only Send email notification's");
     }
 
     [Fact]
@@ -300,6 +319,126 @@ public class DecisionActionCatalogTests
         decide.Concat(doLane).Where(r => !r.CountsTowardSuppression).Select(r => r.Label)
             .Should().Equal("Wrong matter - misresolved");
         decide.Concat(doLane).Where(r => r.RequiresDetail).Select(r => r.Label).Should().Equal("Other", "Other");
+    }
+
+    // =================================================================================================
+    // Billing actions (ebilling-r1 task 074; FR-30, D-75): a closed set of their own, outside the Signals commit route
+    // =================================================================================================
+
+    private static readonly string[] BillingCodes =
+        ["accept-line", "reduce-line", "disallow-line", "approve-invoice", "reject-invoice", "return-to-firm", "override-submission"];
+
+    [Fact]
+    public void BillingActions_AreExactlyTheStatedSet_EachWithAPlanLaneARecordClassAndAGate()
+    {
+        DecisionActionCatalog.BillingActions.Select(a => a.Code).Should().Equal(BillingCodes);
+
+        foreach (var action in DecisionActionCatalog.BillingActions)
+        {
+            action.PlanLane.Should().Be(DecisionLane.Decide, because: action.Code);
+            action.IsNextStep.Should().BeFalse(because: action.Code);
+            action.WorkType.Should().BeNull(because: $"{action.Code}: no Signals plan offers a billing action");
+            action.Gate.Should().NotBeNull(because: $"{action.Code}: every action declares its gate");
+            action.ResolvesSignal.Should().BeTrue(because: $"{action.Code}: deciding resolves the findings it is about");
+            action.SendsMessage.Should().BeFalse(because: $"{action.Code}: the firm notice is sent by WP5, not by the decision");
+            action.EffectLines.Should().NotBeEmpty().And.OnlyContain(l => !l.Contains("sprk_"));
+        }
+    }
+
+    [Theory]
+    [InlineData("accept-line", DecisionRecordClass.Routine, GateRiskTier.Tier2b)]
+    [InlineData("reduce-line", DecisionRecordClass.Judgement, GateRiskTier.Tier2b)]
+    [InlineData("disallow-line", DecisionRecordClass.Judgement, GateRiskTier.Tier2b)]
+    [InlineData("approve-invoice", DecisionRecordClass.Judgement, GateRiskTier.Tier4)]
+    [InlineData("reject-invoice", DecisionRecordClass.Judgement, GateRiskTier.Tier4)]
+    [InlineData("return-to-firm", DecisionRecordClass.Judgement, GateRiskTier.Tier4)]
+    [InlineData("override-submission", DecisionRecordClass.Judgement, GateRiskTier.Tier3)]
+    public void EachBillingAction_HasItsRecordClassAndGateTier(string code, DecisionRecordClass recordClass, GateRiskTier tier)
+    {
+        DecisionActionCatalog.TryGetBilling(code, out var action).Should().BeTrue();
+
+        action.RecordClass.Should().Be(recordClass);
+        DecisionGateTier.Resolve(action.Gate!).Should().Be(tier);
+    }
+
+    [Theory]
+    [InlineData("reduce-line", "approvedAmount", "reason")]
+    [InlineData("disallow-line", "reason")]
+    [InlineData("reject-invoice", "reason")]
+    [InlineData("return-to-firm", "reason")]
+    [InlineData("override-submission", "reason")]
+    [InlineData("accept-line")]
+    [InlineData("approve-invoice")]
+    public void BillingActions_RequireExactlyTheStatedParameters_AReasonForEveryAdverseDecisionAndOverride(string code, params string[] required)
+    {
+        DecisionActionCatalog.TryGetBilling(code, out var action).Should().BeTrue();
+
+        action.Parameters.Where(p => p.Required).Select(p => p.Code).Should().Equal(required);
+        if (required.Contains("reason"))
+            action.Parameters.Single(p => p.Code == "reason").Kind.Should().Be(DecisionParameterKind.TextArea);
+        if (required.Contains("approvedAmount"))
+            action.Parameters.Single(p => p.Code == "approvedAmount").Kind.Should().Be(DecisionParameterKind.Money);
+    }
+
+    [Fact]
+    public void BillingExclusions_HoldInBothOrders_OneOutcomePerLine_OneOutcomePerInvoice()
+    {
+        string[][] exclusive =
+        [
+            ["accept-line", "reduce-line"], ["accept-line", "disallow-line"], ["reduce-line", "disallow-line"],
+            ["approve-invoice", "reject-invoice"], ["approve-invoice", "return-to-firm"], ["reject-invoice", "return-to-firm"],
+        ];
+        foreach (var pair in exclusive)
+        {
+            DecisionActionCatalog.FirstBillingConflict(pair).Should().NotBeNull(because: string.Join(" + ", pair));
+            DecisionActionCatalog.FirstBillingConflict(pair.Reverse()).Should().NotBeNull(because: string.Join(" + ", pair.Reverse()));
+        }
+
+        foreach (var action in DecisionActionCatalog.BillingActions)
+        {
+            foreach (var excluded in action.Excludes)
+            {
+                DecisionActionCatalog.TryGetBilling(excluded, out var other).Should().BeTrue(because: $"{action.Code} excludes {excluded}");
+                other.Excludes.Should().Contain(action.Code);
+            }
+        }
+
+        // A line decision and an invoice decision are about different records; the override stands alone.
+        DecisionActionCatalog.FirstBillingConflict(["accept-line", "approve-invoice"]).Should().BeNull();
+        DecisionActionCatalog.FirstBillingConflict(["override-submission", "approve-invoice"]).Should().BeNull();
+        DecisionActionCatalog.TryGetBilling("override-submission", out var overrideAction).Should().BeTrue();
+        overrideAction.Excludes.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void BillingCodes_AreNotSignalsActions_AndSignalsCodesAreNotBillingActions()
+    {
+        foreach (var code in BillingCodes)
+        {
+            DecisionActionCatalog.TryGet(code, out _).Should().BeFalse(because: $"{code} must never reach the Signals commit route");
+            DecisionActionCatalog.All.Select(a => a.Code).Should().NotContain(code);
+            DecisionActionCatalog.FirstConflict([code, "revise-budget"]).Should().BeNull();
+        }
+
+        foreach (var action in DecisionActionCatalog.All)
+            DecisionActionCatalog.TryGetBilling(action.Code, out _).Should().BeFalse(because: action.Code);
+
+        DecisionActionCatalog.TryGetBilling("Approve-Invoice", out _).Should().BeFalse("codes are exact, never guessed");
+        DecisionActionCatalog.TryGetBilling(null, out _).Should().BeFalse();
+    }
+
+    [Theory]
+    [InlineData("""{"actions":["approve-invoice"]}""")]
+    [InlineData("""{"actions":["accept-line","reduce-line","disallow-line"]}""")]
+    [InlineData("""{"actions":["send-budget-inquiry","reject-invoice"]}""")]
+    [InlineData("""{"actions":["send-budget-inquiry"],"nextSteps":["override-submission"]}""")]
+    public void ASignalsPlanNamingABillingCode_IsRefusedAsUnknown_FailClosed(string plan)
+    {
+        var resolution = DecisionPlanService.Resolve(plan, DecisionLane.Decide);
+
+        resolution.IsRefused.Should().BeTrue();
+        resolution.Plan.Should().BeNull();
+        resolution.RefusalReason.Should().Be(DecisionPlanRefusalReason.UnknownAction);
     }
 
     // =================================================================================================
@@ -844,6 +983,19 @@ public class DecisionActionCatalogTests
     }
 
     [Fact]
+    public void AssignTask_ThePlanDtoSendsSendEmailNotificationTickedByDefault_AsABoolean_D194()
+    {
+        DecisionActionCatalog.TryGet("assign-task", out var assign).Should().BeTrue();
+
+        var dto = DecisionActionDto.From(assign, isRecommended: true);
+
+        var notify = dto.Parameters.Single(p => p.Code == "notify");
+        notify.Kind.Should().Be("Boolean");
+        notify.DefaultValue.Should().Be("true");
+        dto.Parameters.Where(p => p.Code != "notify").Should().OnlyContain(p => p.DefaultValue == null, "must not fire: no other parameter starts filled");
+    }
+
+    [Fact]
     public void NoOtherActionDeclaresADefaultSourceOrANotBefore_MustNotFire_D193()
     {
         DecisionActionCatalog.All.Where(a => a.Code != "create-budget")
@@ -1311,6 +1463,7 @@ public class DecisionActionCatalogTests
             {
                 return reasons.ToArray();
             }
-        });
+        }
+        );
     }
 }

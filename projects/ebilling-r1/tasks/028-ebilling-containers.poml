@@ -1,0 +1,142 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="028" project="ebilling-r1">
+  <metadata>
+    <title>Containers: config keys, internal-only access, non-indexed exports, provisioning hand-off</title>
+    <phase>1 Data model (WP1)</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Small BFF configuration change plus one indexing guard and verification of existing access enforcement; brief sets STANDARD.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Config keys follow the existing DefaultContainerId / ArchiveContainerId pattern; the one security-sensitive edit (container ownership keys) is gated by an escalation trigger.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P1-A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>none</deps>
+    <tags>spe, config, bff</tags>
+    <estimated-effort>1 day</estimated-effort>
+  </metadata>
+
+  <prompt>Wire the two owner-created SPE containers (Procedure Library, E-Billing Output Files; D-55) into the BFF as configuration keys with start-up format validation, make the BFF treat them as this stamp's own containers, keep export files out of every AI index, prove CIAM users cannot open or search Procedure Library documents, and file the customer-provisioning hand-off.</prompt>
+
+  <role>SPAARKE platform developer. Expert in SharePoint Embedded through SpeFileStore, BFF options validation, the SPE container ownership guard and external-access (CIAM) authorization. Follow ADRs strictly.</role>
+
+  <goal>FinanceOptions carries ProcedureLibraryContainerId and EbillingOutputContainerId (validated at start when set); appsettings.template.json has their tokens; the ownership guard recognises them (after the escalation decision); a file in the output container is never indexed (test); a negative test shows a CIAM caller cannot open or search a Procedure Library document; the hand-off issue exists; findings are in task notes.</goal>
+
+  <context>
+    <background>spec.md FR-16 and D-35, D-44, D-55, D-63, D-66. Dev ids: Procedure Library b!tqSgSM13R06R6O5ymHDynNNtZCRkudVMkCm7XnMdUkAEyFUFBjlmQJQzNXlrHp-y, E-Billing Output Files b!1m_ZuA0VWUKCsWg44OvUtNNtZCRkudVMkCm7XnMdUkAEyFUFBjlmQJQzNXlrHp-y, type 8a6ce34c-6055-4681-8f87-2f4f9f921c06. Discovered: app-only SPE access is refused (404 spe_container_not_owned) for any container not named by GraphModule.StampContainerSettingKeys or carrying the spaarkeCustomerId marker (.claude/constraints/provisioning.md, task 227d), so app-only writers (export job 150, report 133, rule-draft job 075) fail unless the new containers are owned. tests/Spaarke.ArchTests/IOptionsDriftTests.cs fails the build if a ValidateOnStart option demands a key that no stamp deployment channel writes.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Configuration/FinanceOptions.cs (two properties)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/appsettings.template.json (Finance section, two tokens)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/DI/GraphModule.cs:24-29 (StampContainerSettingKeys — add both keys, owner decision D-67)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Jobs/Handlers/RagIndexingJobHandler.cs (skip the output container) or the converging indexing sink found by Grep</file>
+      <file role="modify">tests/integration/tenant/Spe/SpeAppOnlyContainerIsolationTests.cs:870 (StampContainerIds coverage)</file>
+      <file role="modify">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/PostUploadIndexingEnqueuerTests.cs or the sink's tests (exclusion test)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Configuration/EmailProcessingOptions.cs:22 and CommunicationOptions.cs:32 (container id options)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Infrastructure/Graph/SpeContainerOwnershipGuard.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Ai/PostUploadIndexingEnqueuer.cs:100 and :266 (enqueue paths; DriveId is the container id)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/SpeContainerMembershipService.cs, AccessibleRecordSetService.cs, src/server/api/Sprk.Bff.Api/Api/ExternalAccess/Tier2ScopeFilterInjector.cs (where CIAM file and search access is decided)</file>
+      <file role="canonical-reference">tests/Spaarke.ArchTests/IOptionsDriftTests.cs</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="none" status="complete">Consumers: 075, 078 (Procedure Library), 133, 150 (output container). Task 040 later adds EbillingOptions; it may move these keys (note for 040).</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-007">Every SPE read or write added or changed in this task goes through SpeFileStore; no Graph client is created here.</constraint>
+    <constraint source="project">MUST NOT create an SPE container or container type (docs/architecture/SPAARKE-SPE-CONTAINER-TYPE-TOPOLOGY.md); never delete the owner-created containers.</constraint>
+    <constraint source="project">The two keys are optional at start-up: validation rejects a malformed id (not starting with b!) but allows empty, so no stamp fails to boot and IOptionsDriftTests stays green; consumers refuse with a stable ProblemDetails code when the key they need is empty (implemented by the consumers).</constraint>
+    <constraint source="project">No live App Service setting is changed in this task; the dev values and the exact app-setting names (Finance__ProcedureLibraryContainerId, Finance__EbillingOutputContainerId) go in task notes for the WP2 deploy (053).</constraint>
+    <constraint source="bff-extensions.md">Publish-size delta against a fresh master build recorded; no new HIGH CVE; no new package or DI registration beyond the existing FinanceOptions binding.</constraint>
+    <constraint source="ADR-028">CIAM access rules are verified, not loosened; any gap found is fixed fail-closed or escalated.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>SPE containers, ownership guard, indexing, CIAM access</topic>
+    <files>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/config.md</file>
+      <file>.claude/constraints/provisioning.md</file>
+      <file>.claude/adr/ADR-007-spefilestore.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>docs/architecture/SPAARKE-SPE-CONTAINER-TYPE-TOPOLOGY.md</file>
+      <file>.claude/skills/spe-integration/SKILL.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+    <patterns>
+      <pattern name="UAC access control" location=".claude/patterns/auth/uac-access-control.md">How CIAM callers are scoped to records.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Rigor + read">Declare RIGOR LEVEL: STANDARD. Read FR-16, D-55, D-63, provisioning.md container-ownership rule, GraphModule.cs:13-37.</step>
+    <step order="1" name="Options">Add ProcedureLibraryContainerId and EbillingOutputContainerId (string, optional) to FinanceOptions with a format check that allows empty; add #{SPE_PROCEDURE_LIBRARY_CONTAINER_ID}# / #{SPE_EBILLING_OUTPUT_CONTAINER_ID}# tokens to the Finance section of appsettings.template.json with a comment citing D-55.</step>
+    <step order="2" name="Ownership">Apply the ownership escalation trigger, then implement the chosen option and extend SpeAppOnlyContainerIsolationTests so the new ids are owned exactly when configured.</step>
+    <step order="3" name="Not indexed">Grep every indexing entry point (PostUploadIndexingEnqueuer, RagIndexingJobHandler, re-index endpoints in Api/DocumentOperationsEndpoints.cs). Add the exclusion at the point every path converges: a file whose drive id equals EbillingOutputContainerId is skipped with an INFO log and a Skipped result. Test: must-skip for the output container, must-not-skip for another container.</step>
+    <step order="4" name="CIAM verification">Trace how a CIAM caller opens a file and searches (SpeContainerMembershipService, AccessibleRecordSetService, Tier2ScopeFilterInjector, external search). Record in notes why a Procedure Library document is unreachable. Add a negative test at that layer: a CIAM caller requesting a Procedure Library document (open and search) is refused or gets no result. If a path would allow it, fix it fail-closed.</step>
+    <step order="5" name="Hand-off">File a GitHub issue for customer-provisioning-orchestration-r1: create both containers per customer environment of the existing type, mark them, write the two app settings (manifest.yaml per_env_settings entries), with dev ids as example; record it via /project-defer-issue-tracking (notes/defer-issues.md plus the issue).</step>
+    <step order="6" name="Build + size">dotnet build; affected unit, integration and ArchTests green (incl. IOptionsDriftTests); publish-size delta; vulnerable-package check.</step>
+    <step order="7">Update TASK-INDEX.md: set this task's status cell to ✅ [done].</step>
+    <step order="8">Record deviations, the dev app-setting values for 053 and the CIAM findings in projects/ebilling-r1/notes/ and this task's notes.</step>
+  </steps>
+
+  <escalation>
+    <trigger>Owner decided D-67 (2026-10-15): add Finance:ProcedureLibraryContainerId and Finance:EbillingOutputContainerId to GraphModule.StampContainerSettingKeys (same status as the existing operator-written keys). If doing so would admit any other container or change the guard for existing keys, STOP and report.</trigger>
+    <trigger>If CIAM access to Procedure Library documents cannot be shown to be denied without changing external-access code shared with unified-access-control-r2 or SPA-r3, STOP and escalate before editing Infrastructure/ExternalAccess/**.</trigger>
+    <trigger>If the owner wants the keys required at start-up, STOP: that needs manifest.yaml entries (customer-provisioning-orchestration-r1) or IOptionsDriftTests fails.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>EmailProcessingOptions.DefaultContainerId and CommunicationOptions.ArchiveContainerId (Configuration/); GraphModule.StampContainerSettingKeys (Infrastructure/DI/GraphModule.cs:24).</existing>
+    <extension>Yes — the same pattern is extended with two keys on the existing FinanceOptions; no new options class, service or registration.</extension>
+    <cost-of-doing-nothing>Guidelines and exports would land in the general container, mixing them into search and analysis (D-35); app-only export and report writes would be refused as not owned; export files would be AI-indexed.</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="dotnet">Build and test</tool>
+    <tool name="gh">Hand-off issue</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">FinanceOptions.cs, appsettings.template.json, GraphModule.cs (per decision), indexing sink</output>
+    <output type="test">Ownership, exclusion and CIAM negative tests</output>
+    <output type="docs">Task notes: dev values, CIAM trace, hand-off issue link</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Per D-67 both keys are in GraphModule.StampContainerSettingKeys; a test shows an app-only write to each configured container is admitted by SpeContainerOwnershipGuard and a write to an unlisted container is still refused (seeding proof for the guard).</criterion>
+    <criterion testable="true">With both keys set to well-formed ids the BFF starts; with a malformed id start-up validation fails with a message naming the key; with both empty it starts.</criterion>
+    <criterion testable="true">Under the chosen ownership option, an app-only client for each configured container is allowed and an unconfigured container is still refused (test).</criterion>
+    <criterion testable="true">A file in the output container is skipped by indexing (must-skip test) and a file in another container is not (must-not-skip test).</criterion>
+    <criterion testable="true">Negative: a CIAM caller cannot open, and search never returns, a Procedure Library document (test at the enforcing layer, plus the trace in notes).</criterion>
+    <criterion testable="true">The customer-provisioning hand-off issue exists and is listed in notes/defer-issues.md.</criterion>
+    <criterion testable="true">dotnet build green; affected tests pass incl. IOptionsDriftTests; publish-size delta recorded; no new HIGH CVE.</criterion>
+    <criterion testable="true">Cover the stated contract plus the edge cases named above. Anything beyond that needs a one-line justification in task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Brief said "validation on start"; making the keys required would break stamp boots (IOptionsDriftTests), so start-up validation is format-only and consumers fail closed.
+    The brief did not mention the SPE ownership guard; without it every app-only eBilling write to these containers returns 404 spe_container_not_owned.
+    Internal (OBO) access to the two containers depends on container permissions; record what the trace finds for 075 / 077 / 078.
+
+    COMPLETED 2026-10-15 (sub-agent worktree, rigor raised to FULL: BFF .cs plus storage access control; two adversarial-review passes). Commits d33c95486, dbb277643, 0c594a220, cce75bdbc, 5d7780ac5. Detail: notes/028-ebilling-containers.md.
+    - Config: FinanceOptions.ProcedureLibraryContainerId / EbillingOutputContainerId, optional, format-checked (b!...) at start-up; template tokens added.
+    - Ownership (D-67): both keys added to GraphModule.StampContainerSettingKeys; only the exact configured ids are owned.
+    - Not indexed: FileIndexingService skips a file in the output container on both entry points; no caller stamps a skipped file as indexed; the bulk job counts it as skipped.
+    - CIAM: proven for BYTES (download refused 409 by the existing pointer check; no search route admits Ciam). Metadata in external document lists is NOT covered: DEF-015 / #1975 (owner decision).
+    - Callers: every caller has a skip test except IndexingWorkerHostedService (Office worker), which has none; its change only alters a log line.
+    - Known limit: chunks indexed before the output-container key was set are not removed (the skip returns before ReplaceStaleChunks).
+    - Known limit: the bulk-job skip is unreachable until #1516 is fixed.
+    - Review follow-up: container-id pattern tightened to ^b![A-Za-z0-9_-]+$; FinanceOptionsValidator fails start-up when the two ids are equal or equal EmailProcessing:DefaultContainerId / Communication:ArchiveContainerId.
+    - Hand-off DEF-013 / #1967; pointer check vs eBilling document reads DEF-014 / #1968.
+    - No live change. Publish delta +1,468 B. ADR-010 ceiling unchanged (162). ArchTests 1045/1045.
+    rework: fix-round-1 task 028
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load the knowledge files first. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

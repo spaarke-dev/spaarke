@@ -31,6 +31,7 @@ public class CoreAncestorRestamperTests
     private static readonly Guid OtherEvent = Guid.Parse("15600000-0000-0000-0000-000000000e02");
     private static readonly Guid Document = Guid.Parse("15600000-0000-0000-0000-000000000d01");
     private static readonly Guid Invoice = Guid.Parse("15600000-0000-0000-0000-000000000f01");
+    private static readonly Guid Budget = Guid.Parse("15600000-0000-0000-0000-000000000f02");
     private static readonly Guid TodoUnderComm = Guid.Parse("15600000-0000-0000-0000-000000000101");
     private static readonly Guid EventUnderComm = Guid.Parse("15600000-0000-0000-0000-000000000102");
     private static readonly Guid AnalysisUnderComm = Guid.Parse("15600000-0000-0000-0000-000000000103");
@@ -115,23 +116,63 @@ public class CoreAncestorRestamperTests
             "its copy is the event's matter; the communication is only a carrier on it");
     }
 
-    [Fact(DisplayName = "Task 156: a root type the source cannot carry is never written (a communication filed under an invoice keeps its own work assignment)")]
+    [Fact(DisplayName = "Task 156: a root type the source cannot carry is never written (a communication filed under a budget keeps its own work assignment)")]
     public async Task RootTypeTheSourceCannotCarry_IsNeverWritten()
     {
+        // ebilling-r1 task 013: this used an invoice, until the invoice gained sprk_regardingworkassignment (FR-05). A budget
+        // still names only a matter or project, so it carries the same scenario.
         var world = new StampWorld()
-            .Row("sprk_invoice", Invoice, [("sprk_matter", "sprk_matter", MatterB)])
+            .Row("sprk_budget", Budget, [("sprk_matter", "sprk_matter", MatterB)])
             .Row("sprk_communication", Communication,
             [
-                ("sprk_regardinginvoice", "sprk_invoice", Invoice), ("sprk_regardingmatter", "sprk_matter", MatterA),
+                ("sprk_regardingbudget", "sprk_budget", Budget), ("sprk_regardingmatter", "sprk_matter", MatterA),
                 ("sprk_regardingworkassignment", "sprk_workassignment", WorkAssignment),
-            ], pairId: Invoice.ToString());
+            ], pairId: Budget.ToString());
 
         await world.Restamper.RestampChildAsync("sprk_communication", Communication);
 
         var patch = world.PatchesTo("sprk_communication", Communication).Should().ContainSingle().Subject;
         patch.Fields.Keys.Should().BeEquivalentTo(["sprk_regardingmatter"],
-            "an invoice names a project or matter — never a work assignment, so that column is not a copy of it");
+            "a budget names a project or matter — never a work assignment, so that column is not a copy of it");
         world.Lookup("sprk_communication", Communication, "sprk_regardingworkassignment").Should().Be(WorkAssignment);
+    }
+
+    [Fact(DisplayName = "ebilling-r1 task 013: an invoice CAN carry a work assignment, so a communication under an invoice copies the invoice's work assignment")]
+    public async Task InvoiceWorkAssignment_IsACopy()
+    {
+        var world = new StampWorld()
+            .Row("sprk_invoice", Invoice, [("sprk_regardingworkassignment", "sprk_workassignment", WorkAssignment)])
+            .Row("sprk_communication", Communication,
+                [("sprk_regardinginvoice", "sprk_invoice", Invoice), ("sprk_regardingmatter", "sprk_matter", MatterA)],
+                pairId: Invoice.ToString());
+
+        await world.Restamper.RestampChildAsync("sprk_communication", Communication);
+
+        world.Lookup("sprk_communication", Communication, "sprk_regardingworkassignment").Should().Be(WorkAssignment,
+            "the invoice's sprk_regardingworkassignment is one of its root columns (task 012 / 013)");
+        world.Lookup("sprk_communication", Communication, "sprk_regardingmatter").Should().BeNull(
+            "the invoice names no matter, so the matter copy is cleared");
+    }
+
+    [Fact(DisplayName = "ebilling-r1 task 013: a communication under a matter-only invoice that holds its own work assignment has it CLEARED — the column is now a copy of the invoice")]
+    public async Task InvoiceWithoutAWorkAssignment_ClearsTheChildsWorkAssignment()
+    {
+        // Behaviour change made explicit (adversarial review K1): before task 013 an invoice could not carry a work
+        // assignment, so a child's own sprk_regardingworkassignment was its direct link and was never written. Now it is a
+        // copy of the invoice's (live 2026-10-15: no child under an invoice holds one, so no stored row changes).
+        var world = new StampWorld()
+            .Row("sprk_invoice", Invoice, [("sprk_matter", "sprk_matter", MatterB)])
+            .Row("sprk_communication", Communication,
+            [
+                ("sprk_regardinginvoice", "sprk_invoice", Invoice), ("sprk_regardingmatter", "sprk_matter", MatterB),
+                ("sprk_regardingworkassignment", "sprk_workassignment", WorkAssignment),
+            ], pairId: Invoice.ToString());
+
+        await world.Restamper.RestampChildAsync("sprk_communication", Communication);
+
+        world.Lookup("sprk_communication", Communication, "sprk_regardingworkassignment").Should().BeNull(
+            "the invoice names no work assignment, so the copy is cleared");
+        world.Lookup("sprk_communication", Communication, "sprk_regardingmatter").Should().Be(MatterB);
     }
 
     [Fact(DisplayName = "Task 156: re-filing a record to NO root CLEARS the copies (they would otherwise keep granting the old root's access)")]
