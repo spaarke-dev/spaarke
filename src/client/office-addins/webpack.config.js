@@ -91,11 +91,12 @@ const ENV_CONFIG = {
  * 1.1.1 (task 089, UAT-10): the Word ribbon's Share is replaced by "Open Spaarke".
  * 1.1.2 (task 115): no `webApplicationInfo` (a customer tenant's deployment failed on its consent step,
  *   AADSTS700016); the 404 `CommandRuntime.code.script` entries removed.
+ * 1.1.3 (task 133): the Outlook read ribbon gains "Submit Invoice" (opens the pane with `?action=submitInvoice`).
  */
 const UNIFIED_PACKAGE = {
   APP_ID: process.env.ADDIN_APP_ID || 'e68f3cb1-3702-4a58-8c02-972e7d1667eb',
   TEST_APP_ID: process.env.ADDIN_TEST_APP_ID || 'b490de25-d155-44cd-8825-6e125102dd84',
-  VERSION: '1.1.2',
+  VERSION: '1.1.3',
 };
 
 /** Reads the `<Id>` of a live XML add-in manifest — the id its `alternates.hide` entry must name. */
