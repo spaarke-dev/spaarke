@@ -24,7 +24,7 @@ namespace Sprk.Bff.Api.Tests.Services.Signals.Billing;
 /// partition, this submission excluded), the secure-root sets under uac-r2's four calling conditions, bounded reads, and no writes.
 /// The D-112 cases run end to end through <see cref="InvoiceComplianceEvaluator.EvaluateAsync"/> with 071's Duplicate handler.
 /// </summary>
-public class BillingFactLoaderTests
+public partial class BillingFactLoaderTests
 {
     private const int Published = 659490000;
     private const int Billing = RuleDomains.PolicyDomainBilling;

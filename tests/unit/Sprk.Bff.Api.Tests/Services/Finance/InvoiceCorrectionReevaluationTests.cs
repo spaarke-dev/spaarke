@@ -40,7 +40,7 @@ public sealed class InvoiceCorrectionReevaluationTests
     }
 
     /// <summary>The stored findings as 049 left them: the header provenance, plus the members a test names.</summary>
-    private static void Store(CorrectionWorld world, JsonArray? findings = null, JsonArray? plan = null, JsonArray? coding = null, JsonArray? lineFindings = null)
+    internal static void Store(CorrectionWorld world, JsonArray? findings = null, JsonArray? plan = null, JsonArray? coding = null, JsonArray? lineFindings = null)
     {
         var root = JsonNode.Parse(W.HeaderFindingsJson)!.AsObject();
         root["schema"] = 1;
