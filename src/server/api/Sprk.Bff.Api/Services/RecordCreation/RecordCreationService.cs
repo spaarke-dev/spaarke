@@ -409,19 +409,8 @@ internal sealed partial class RecordCreationService
             // The table's own server-owned columns first (the child-record route's order) — its autonumber among them: the
             // platform issues the number, as the Office create's protected list says — then the ones every app-only create
             // owns, with the creator person (the G5 core's first check, the same words).
-            if (item.Columns.FirstOrDefault(c => rule.TableServerOwnedColumns.Contains(c) || IsNumberColumn(rule, c)) is { } tableColumn)
-            {
-                return Decision.Refuse(new RecordCreationRefusal(RecordCreationRefusalKind.BlockedColumn,
-                    RecordCreationRefusal.BlockedColumnCode, $"Column '{tableColumn}' of a {noun} is set by Spaarke — omit it."));
-            }
-
-            if (item.Columns.FirstOrDefault(c => RecordTableRules.CommonServerOwnedColumns.Contains(c) || RecordCreatorPerson.NamesColumn(c))
-                is { } serverColumn)
-            {
-                return Decision.Refuse(new RecordCreationRefusal(RecordCreationRefusalKind.BlockedColumn,
-                    RecordCreationRefusal.BlockedColumnCode,
-                    $"Column '{serverColumn}' is set by the server on a record the application creates for you — omit it."));
-            }
+            if (CallerBlockedColumnRefusal(rule, noun, item.Columns) is { } blockedColumn)
+                return Decision.Refuse(blockedColumn);
 
             // Task 018a (K-3): the references the request names — optional values the caller chose — are asked alone, as the
             // caller; one the caller may not use is dropped with a warning (FR-08's mapped-value path), never refused. Before
@@ -1587,6 +1576,32 @@ internal sealed partial class RecordCreationService
     private static bool IsAlternateKeyDuplicate(Exception ex) =>
         ex is HttpRequestException { StatusCode: HttpStatusCode.PreconditionFailed }
         || DataverseServiceClientImpl.IsAlternateKeyDuplicate(ex);
+
+    /// <summary>
+    /// Step 2's column policy for a CALLER's payload, with no I/O (so a chat create can be refused before it suspends for
+    /// confirmation — task 017 review F-2 — from this rule, not a copy of it): the table's own server-owned columns and its
+    /// autonumber first (the child-record route's order), then the ones every app-only create owns and the creator person
+    /// (the G5 core's first check, the same words). Null when the payload names none.
+    /// </summary>
+    internal static RecordCreationRefusal? CallerBlockedColumnRefusal(RecordTableRule rule, string noun, IEnumerable<string> columns)
+    {
+        var named = columns as IReadOnlyCollection<string> ?? columns.ToList();
+        if (named.FirstOrDefault(c => rule.TableServerOwnedColumns.Contains(c) || IsNumberColumn(rule, c)) is { } tableColumn)
+        {
+            return new RecordCreationRefusal(RecordCreationRefusalKind.BlockedColumn,
+                RecordCreationRefusal.BlockedColumnCode, $"Column '{tableColumn}' of a {noun} is set by Spaarke — omit it.");
+        }
+
+        if (named.FirstOrDefault(c => RecordTableRules.CommonServerOwnedColumns.Contains(c) || RecordCreatorPerson.NamesColumn(c))
+            is { } serverColumn)
+        {
+            return new RecordCreationRefusal(RecordCreationRefusalKind.BlockedColumn,
+                RecordCreationRefusal.BlockedColumnCode,
+                $"Column '{serverColumn}' is set by the server on a record the application creates for you — omit it.");
+        }
+
+        return null;
+    }
 
     /// <summary>The table's autonumber column (<see cref="RecordTableRule.AutonumberColumn"/>), which the platform fills.</summary>
     private static bool IsNumberColumn(RecordTableRule rule, string column) =>

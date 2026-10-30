@@ -287,7 +287,43 @@ internal sealed partial class DataverseCreateRecordHandler : IToolHandler
         if (ServerWrittenInvoiceFamilyTables.Contains(tablename))
             return ToolValidationResult.Failure(ServerWrittenInvoiceFamilyCreateBlockedMessage(tablename));
 
+        // Task 017 review F-2 (AIR2-034): a column the service refuses at step 2 is refused before the dialog, not after the
+        // user confirms it.
+        if (BlockedColumnBeforeSuspend(tablename, item) is { } blocked)
+            return ToolValidationResult.Failure(blocked);
+
         return ToolValidationResult.Success();
+    }
+
+    /// <summary>
+    /// Task 017 review F-2 (AIR2-034: a create that can never succeed is refused before it suspends): the text of the refusal
+    /// <see cref="RecordCreationService"/> gives at step 2 for a column the server owns (the autonumber, a root's container /
+    /// secure business unit / Access Permission, the owner and audit columns), or null when the pre-check cannot PROVE the
+    /// refusal. It asks the service's own pure rule (<see cref="RecordCreationService.CallerBlockedColumnRefusal"/>) and words
+    /// it as the post-confirm refusal is (<see cref="RefusalText"/>) — only the timing changes.
+    /// </summary>
+    /// <remarks>
+    /// <para>Proof is limited to what needs no I/O. A registered table (<see cref="RecordTableRules.Find"/>) is the service's;
+    /// a table outside the registry is refused post-confirm as <c>table_unsupported</c> only if it is team- or user-owned, which
+    /// is table metadata and not known here, so it is NOT pre-refused (an organisation-owned table is a valid run-as-user
+    /// create). A per-user table and a communication or thread (unfiled, it keeps its creator) may take the run-as-user path
+    /// (<see cref="OwnedChildWrite.PathFor"/>), where the service is not asked, so they are not pre-refused either.</para>
+    /// </remarks>
+    internal static string? BlockedColumnBeforeSuspend(string tablename, JsonElement item)
+    {
+        if (item.ValueKind != JsonValueKind.Object
+            || RecordTableRules.Find(tablename) is not { } rule
+            || OwnedChildWrite.PerUserTables.Contains(tablename)
+            || OwnedChildWrite.KeepsItsCreatorWhenUnfiled(tablename))
+        {
+            return null;
+        }
+
+        // The mapper's own spelling of a column name (DataverseWriteItemMapper: trimmed, lower-cased).
+        var columns = item.EnumerateObject().Select(p => p.Name.Trim().ToLowerInvariant()).ToList();
+        return RecordCreationService.CallerBlockedColumnRefusal(rule, RecordCreationService.NounOf(tablename), columns) is { } refusal
+            ? RefusalText(refusal, tablename, correlationId: string.Empty)
+            : null;
     }
 
     /// <inheritdoc />
