@@ -29,6 +29,8 @@ using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.Finance.Coding;
 using Sprk.Bff.Api.Services.Finance.Files;
 using Sprk.Bff.Api.Services.Finance.Resolution;
+using Sprk.Bff.Api.Services.Jobs;
+using Sprk.Bff.Api.Services.Jobs.Handlers;
 using Sprk.Bff.Api.Services.Signals;
 using Sprk.Bff.Api.Services.Signals.Billing;
 
@@ -176,6 +178,7 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
     private readonly StoredFileService _files;
     private readonly SubmissionCommitGate _gate;
     private readonly ILogger<InvoiceSubmissionPersister> _logger;
+    private readonly JobSubmissionService? _jobs;
 
     /// <summary>
     /// Task 094: the step-3 source check could not read the source's isolation or flags (nothing committed; the job retries). The string
@@ -192,7 +195,8 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
         ExistingDocumentIsolationCheck isolation,
         StoredFileService files,
         SubmissionCommitGate gate,
-        ILogger<InvoiceSubmissionPersister> logger)
+        ILogger<InvoiceSubmissionPersister> logger,
+        JobSubmissionService? jobs = null)
     {
         _entities = entities ?? throw new ArgumentNullException(nameof(entities));
         _recordTypes = recordTypes ?? throw new ArgumentNullException(nameof(recordTypes));
@@ -203,6 +207,7 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
         _files = files ?? throw new ArgumentNullException(nameof(files));
         _gate = gate ?? throw new ArgumentNullException(nameof(gate));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _jobs = jobs; // Task 097c: the old invoice's re-index; null only in a test seam (the DI path always supplies the singleton).
     }
 
     /// <summary>The submission columns the persister re-reads: the snapshot's (core record, link, status), the correlation id and the submitters.</summary>
@@ -519,9 +524,27 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
             invoice[InvoiceSubmittedBy] = new EntityReference(ContactEntity, contactId);
         }
 
+        // Task 097c (model 9.1 "Existing invoice", step 4; EB-D-179): a Correction names the invoice it replaces (sprk_resubmissionof, written
+        // by the intake after its guard). That explicit target REPLACES 104's automatic lookup below: the new invoice links to it, and the old
+        // invoice closes Superseded in this same transaction, guarded on the version read here. As for 104, an automatic rejection is not
+        // accepted: it links nothing and supersedes nothing, so the old invoice stays In Review for the next correction.
+        SupersedeTarget? supersede = null;
+        if (outcome.Kind != SubmissionEvaluationKind.AutoRejected && outcome.Submission!.ResubmissionOfSubmissionId is not null)
+        {
+            var (targetRefusal, target) = await CheckCorrectionTargetAsync(outcome, core, ct).ConfigureAwait(false);
+            if (targetRefusal is not null)
+            {
+                return targetRefusal;
+            }
+
+            supersede = target;
+            invoice[InvoiceFamilyCoreRecordGuard.SupersedesInvoiceColumn] = new EntityReference(InvoiceReviewService.InvoiceEntity, target!.InvoiceId);
+        }
+
         // Task 104 (FR-36, D-43): an ACCEPTED resubmission of a Returned to Firm invoice is linked to the invoice it replaces. An automatic
         // rejection is not accepted and is never linked. A fault reading the predecessor is a Retry (a missed link would be permanent).
-        if (outcome.Kind != SubmissionEvaluationKind.AutoRejected)
+        // Task 097c: a New submission only (a Correction's target is explicit, above).
+        if (outcome.Kind != SubmissionEvaluationKind.AutoRejected && outcome.Submission!.ResubmissionOfSubmissionId is null)
         {
             Guid? superseded;
             try
@@ -617,6 +640,13 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
             requests.Add(new CreateRequest { Target = approval });
         }
 
+        if (supersede is not null)
+        {
+            // Task 097c: the old invoice's close, as 097a's lifecycle built it (the status pair at the version read above, IfRowVersionMatches).
+            // A change since that read (an approval, a decision, any edit) faults this request and the whole transaction rolls back.
+            requests.Add(supersede.Request);
+        }
+
         var guardIndex = -1;
         var guardedSource = sourceDocument ? documentId : fromEmail?.SourceDocumentId;
         if (guardedSource is not null)
@@ -687,6 +717,14 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
                 return refusedNow;
             }
 
+            // Task 097c (model 9.1 step 4): the old invoice is read again. Approved, Sent to AP or Paid since the check: the correction can never
+            // commit, so the submission ends Failed with the intake's reason. Anything else (a row-version race, a transient fault, a read fault)
+            // is the transaction's ordinary Retry, and the next delivery's check decides.
+            if (supersede is not null && await RecheckSupersedeTargetAsync(submissionId, supersede.InvoiceId, ct).ConfigureAwait(false) is { } decidedNow)
+            {
+                return decidedNow;
+            }
+
             if (guardedSource is not null && ex.FailedRequestIndex == guardIndex)
             {
                 // A from-email submission has no job-staged copy, so the job retries the delivery and step 3 reads the .eml again.
@@ -700,6 +738,17 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
 
         _logger.LogInformation("Invoice submission {SubmissionId}: committed invoice {InvoiceId} ({Kind}) with {LineCount} lines in {RequestCount} requests",
             submissionId, invoiceId, outcome.Kind, lines.Count, requests.Count);
+
+        if (supersede is not null)
+        {
+            // Task 097c (task 152): the OLD invoice's index document must show it Superseded, keyed to the version the close replaced, as
+            // InvoiceLifecycleService.TransitionAsync keys a move. Queued right after the commit, before the gate: the document is built from the
+            // old invoice's own row (nothing of the new submission or its source), and Superseded is terminal, so a re-index lost to a gate
+            // fault (a resume never comes back here) would leave it stale for good. If the gate undoes the commit, the undo's reopen queues its
+            // own re-index (SubmissionCommitGate.CompensateAsync), and each job reads the row as it then is. Best effort.
+            await InvoiceIndexingJobHandler.TryEnqueueAsync(
+                _jobs, _logger, supersede.InvoiceId, $"v{supersede.RowVersion.ToString(CultureInfo.InvariantCulture)}").ConfigureAwait(false);
+        }
 
         // Model 9.1 steps 5-6 (tasks 092, 094): the commit gate, immediately after the commit and before the totals and every after-step, on
         // every channel: the source re-run, then the flip. A fault throws (the job retries; the submission now links its invoice, so the retry
@@ -1013,6 +1062,129 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
     }
 
     private static int? StatusOfInvoice(Entity invoice) => invoice.GetAttributeValue<OptionSetValue>("statuscode")?.Value;
+
+    // ── Task 097c: a Correction supersedes the invoice it replaces (model 9.1 "Existing invoice", step 4) ──
+
+    /// <summary>The old invoice's close in this commit: its id, the version it was read at and 097a's request built at that version.</summary>
+    internal sealed record SupersedeTarget(Guid InvoiceId, long RowVersion, UpdateRequest Request);
+
+    /// <summary>What the commit-time check reads of the old invoice in ONE read: the intake guard's columns and the row version.</summary>
+    internal static readonly string[] SupersedeTargetColumns = [.. InvoiceSubmissionService.CorrectionInvoiceColumns, InvoiceReviewService.VersionNumber];
+
+    /// <summary>The statuses a correction can never replace once reached (model 9.1: a credit or an adjustment instead).</summary>
+    private static bool IsDecidedForPayment(int? statusCode) =>
+        statusCode is InvoiceStatusCodes.Approved or InvoiceStatusCodes.SentToAp or InvoiceStatusCodes.Paid;
+
+    /// <summary>
+    /// Task 097c: the commit-time re-check of a Correction's target (the intake's check, <see cref="InvoiceSubmissionService.CheckCorrectionAsync"/>,
+    /// is not a lock). The target is resolved from the submission's <c>sprk_resubmissionof</c> (<see cref="SubmissionSnapshot.ReadCorrectedInvoiceAsync(IGenericEntityService, CancellationToken)"/>),
+    /// then the old invoice is read ONCE (status, firm, core lookups, row version) and must still be In Review, this firm's and filed under
+    /// <paramref name="core"/> alone. The close is 097a's <see cref="IInvoiceLifecycleService.BuildSupersedeRequest"/> at that version; a refused
+    /// build is a stop, never a send. Refusals are permanent (Failed with the intake's reason as one stored code); a read fault is a Retry.
+    /// Reads only; nothing is written.
+    /// </summary>
+    private async Task<(SubmissionPersistResult? Refusal, SupersedeTarget? Target)> CheckCorrectionTargetAsync(
+        SubmissionEvaluationOutcome outcome, InvoiceCoreRecord core, CancellationToken ct)
+    {
+        var submissionId = outcome.SubmissionId;
+        Entity old;
+        try
+        {
+            var target = await outcome.Submission!.ReadCorrectedInvoiceAsync(_entities, ct).ConfigureAwait(false);
+            if (target.CorrectedInvoiceId is not { } oldId)
+            {
+                _logger.LogWarning("Invoice submission {SubmissionId}: the invoice its correction replaces no longer resolves from submission {Earlier}; nothing persisted",
+                    submissionId, target.ResubmissionOfSubmissionId);
+                return (Result(SubmissionPersistStatus.Refused, submissionId, SubmissionReasonCodes.CorrectionTargetUnavailable), null);
+            }
+
+            old = await _entities.RetrieveAsync(InvoiceReviewService.InvoiceEntity, oldId, SupersedeTargetColumns, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (IsRecordNotFound(ex))
+        {
+            _logger.LogWarning("Invoice submission {SubmissionId}: the invoice its correction replaces no longer exists; nothing persisted", submissionId);
+            return (Result(SubmissionPersistStatus.Refused, submissionId, SubmissionReasonCodes.CorrectionTargetUnavailable), null);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            _logger.LogWarning("Invoice submission {SubmissionId}: the invoice its correction replaces could not be read ({Fault}); retry",
+                submissionId, ex.GetType().Name);
+            return (Result(SubmissionPersistStatus.Retry, submissionId, SupersedesReadFailedCode), null);
+        }
+
+        string? refusal = null;
+        var state = old.GetAttributeValue<OptionSetValue>("statecode")?.Value;
+        var status = StatusOfInvoice(old);
+        if (old.GetAttributeValue<EntityReference>(InvoiceVendorOrg)?.Id is not { } firm || firm != outcome.Submission!.FirmId)
+        {
+            refusal = SubmissionReasonCodes.CorrectionDifferentFirm;
+        }
+        else if (EligibleApproverResolver.SingleCoreOf(InvoiceReviewService.InvoiceEntity, old) is not { } oldCore
+            || !string.Equals(oldCore.Entity, core.EntityLogicalName, StringComparison.Ordinal) || oldCore.Id != core.RecordId)
+        {
+            refusal = SubmissionReasonCodes.CorrectionDifferentCoreRecord;
+        }
+        else if (state != InvoiceStatusCodes.StateActive || status != InvoiceStatusCodes.InReview)
+        {
+            // Every status but In Review, as the intake refuses it (owner 2026-10-21: an Inactive invoice is not changeable either).
+            refusal = SubmissionReasonCodes.CorrectionInvoiceStatus;
+        }
+
+        if (refusal is not null)
+        {
+            _logger.LogWarning("Invoice submission {SubmissionId}: the invoice {OldInvoiceId} its correction replaces is refused at commit ({Code}; statuscode {Status}); nothing persisted",
+                submissionId, old.Id, refusal, status);
+            return (Result(SubmissionPersistStatus.Refused, submissionId, refusal), null);
+        }
+
+        var read = old.GetAttributeValue<long?>(InvoiceReviewService.VersionNumber)
+            ?? (StoredFileSourceVersion.TryParseRowVersion(old.RowVersion, out var rowVersion) ? rowVersion : (long?)null);
+        if (read is not { } version || version <= 0)
+        {
+            // The close could not be conditional: never sent blind.
+            _logger.LogWarning("Invoice submission {SubmissionId}: the row version of invoice {OldInvoiceId} could not be read; retry", submissionId, old.Id);
+            return (Result(SubmissionPersistStatus.Retry, submissionId, SupersedesReadFailedCode), null);
+        }
+
+        // The status as read (In Review by the check above) goes to the builder, so the lifecycle's own matrix judges it too.
+        var built = InvoiceStatusCodes.TryFromStatusCode(status!.Value, out var current)
+            ? _lifecycle.BuildSupersedeRequest(old.Id, current, version)
+            : null;
+        if (built is not { Succeeded: true })
+        {
+            _logger.LogWarning("Invoice submission {SubmissionId}: the lifecycle refused the close of invoice {OldInvoiceId} ({Reason}); nothing persisted",
+                submissionId, old.Id, built?.Reason ?? InvoiceTransitionReasons.StatusUnknown);
+            return (Result(SubmissionPersistStatus.Refused, submissionId, SubmissionReasonCodes.CorrectionInvoiceStatus), null);
+        }
+
+        return (null, new SupersedeTarget(old.Id, version, built.Request!));
+    }
+
+    /// <summary>
+    /// Task 097c: after a rolled-back transaction, the old invoice read again. A refusal (<see cref="SubmissionReasonCodes.CorrectionInvoiceStatus"/>)
+    /// only when it is now Approved, Sent to AP or Paid; null for anything else, a read fault included (the caller's ordinary Retry).
+    /// </summary>
+    private async Task<SubmissionPersistResult?> RecheckSupersedeTargetAsync(Guid submissionId, Guid oldInvoiceId, CancellationToken ct)
+    {
+        try
+        {
+            var old = await _entities.RetrieveAsync(InvoiceReviewService.InvoiceEntity, oldInvoiceId, SupersedeTargetColumns, ct).ConfigureAwait(false);
+            if (!IsDecidedForPayment(StatusOfInvoice(old)))
+            {
+                return null;
+            }
+
+            _logger.LogWarning("Invoice submission {SubmissionId}: the invoice {OldInvoiceId} its correction replaces was decided (statuscode {Status}) before the commit; nothing persisted",
+                submissionId, oldInvoiceId, StatusOfInvoice(old));
+            return Result(SubmissionPersistStatus.Refused, submissionId, SubmissionReasonCodes.CorrectionInvoiceStatus);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            _logger.LogWarning("Invoice submission {SubmissionId}: the invoice {OldInvoiceId} could not be read again after the failed transaction ({Fault}); retry",
+                submissionId, oldInvoiceId, ex.GetType().Name);
+            return null;
+        }
+    }
 
     /// <summary>The ids among <paramref name="invoiceIds"/> that have an approval row (one read). A fault throws (the caller retries).</summary>
     private async Task<HashSet<Guid>> ReadInvoicesWithApprovalAsync(IReadOnlyList<Guid> invoiceIds, CancellationToken ct)

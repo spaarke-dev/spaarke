@@ -25,6 +25,8 @@ using Spaarke.Dataverse;
 using Sprk.Bff.Api.Services.Access;
 using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.Finance.Files;
+using Sprk.Bff.Api.Services.Jobs;
+using Sprk.Bff.Api.Services.Jobs.Handlers;
 
 namespace Sprk.Bff.Api.Services.Finance.Submission;
 
@@ -100,6 +102,8 @@ public class SubmissionCommitGate
         InvoiceSubmissionPersister.SubmissionStatus, InvoiceSubmissionPersister.SubmissionReasonCode, InvoiceSubmissionPersister.SubmissionInvoice,
         InvoiceSubmissionPersister.SubmissionFindingsJson, InvoiceSubmissionPersister.SubmissionAdminAttention, SubmissionFirmInvoiceNumber,
         SubmissionPoNumber,
+        // Task 097c: a Correction's target; the undo reopens the invoice it superseded.
+        InvoiceSubmissionService.ResubmissionOfColumn,
     ];
 
     /// <summary>The reason codes a held undo is stored with: a Failed submission with one of them may still have rows to remove.</summary>
@@ -120,20 +124,26 @@ public class SubmissionCommitGate
     private readonly StoredFileService _files;
     private readonly ExistingDocumentIsolationCheck _isolation;
     private readonly SecureChildShareSynchronizer _shares;
+    private readonly IInvoiceLifecycleService _lifecycle;
     private readonly ILogger<SubmissionCommitGate> _logger;
+    private readonly JobSubmissionService? _jobs;
 
     public SubmissionCommitGate(
         IGenericEntityService entities,
         StoredFileService files,
         ExistingDocumentIsolationCheck isolation,
         SecureChildShareSynchronizer shares,
-        ILogger<SubmissionCommitGate> logger)
+        IInvoiceLifecycleService lifecycle,
+        ILogger<SubmissionCommitGate> logger,
+        JobSubmissionService? jobs = null)
     {
         _entities = entities ?? throw new ArgumentNullException(nameof(entities));
         _files = files ?? throw new ArgumentNullException(nameof(files));
         _isolation = isolation ?? throw new ArgumentNullException(nameof(isolation));
         _shares = shares ?? throw new ArgumentNullException(nameof(shares));
+        _lifecycle = lifecycle ?? throw new ArgumentNullException(nameof(lifecycle));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _jobs = jobs; // Task 097c: the reopened invoice's re-index; null only in a test seam (the DI path always supplies the singleton).
     }
 
     /// <summary>
@@ -409,6 +419,12 @@ public class SubmissionCommitGate
                 left |= await DeleteIfPresentAsync(InvoiceReviewService.InvoiceEntity, invoiceId, ct).ConfigureAwait(false);
             }
 
+            // Task 097c (model 9.1 step 5): a Correction's undo reopens the invoice it superseded, only now that the new invoice's rows are
+            // gone. A fault (a stale row version included) holds the undo like any other step: the link stays, the note stays pending, and a
+            // later delivery runs this compensation again, deletes first, then a fresh read and reopen.
+            step = "reopen";
+            await ReopenSupersededAsync(submissionId, submission, ct).ConfigureAwait(false);
+
             var current = submission.GetAttributeValue<string>(InvoiceSubmissionPersister.SubmissionAdminAttention);
             if (left || AdminAttentionText.HasUnfinishedUndo(current))
             {
@@ -477,6 +493,79 @@ public class SubmissionCommitGate
                 submissionId, ex.GetType().Name);
             return false;
         }
+    }
+
+    /// <summary>
+    /// Task 097c: the reopen of the invoice this submission's commit superseded (Superseded back to In Review), through 097a's
+    /// <see cref="IInvoiceLifecycleService.BuildSupersedeUndoRequest"/> at the version read here, sent as its own transaction
+    /// (<c>IfRowVersionMatches</c>). Nothing to do, and done: a New submission (no <c>sprk_resubmissionof</c>); a target that no longer
+    /// resolves or no longer exists; an invoice already In Review (<c>Current == Requested</c>: the commit never superseded it, or an earlier
+    /// run reopened it); an invoice in any other status (Superseded is left only by this undo, so this commit's close is not in force); and a
+    /// Superseded invoice that another invoice still supersedes (another correction committed after this one's automatic rejection, so the
+    /// close is that correction's, not this one's). A fault propagates, a stale row version included: the caller holds the undo and reports it.
+    /// After a reopen, the invoice's re-index is queued (best effort).
+    /// </summary>
+    private async Task ReopenSupersededAsync(Guid submissionId, Entity submission, CancellationToken ct)
+    {
+        if (submission.GetAttributeValue<EntityReference>(InvoiceSubmissionService.ResubmissionOfColumn)?.Id is not { } earlier || earlier == Guid.Empty)
+        {
+            return;
+        }
+
+        var target = await SubmissionSnapshot.ReadCorrectedInvoiceAsync(_entities, earlier, ct).ConfigureAwait(false);
+        if (target.CorrectedInvoiceId is not { } oldId)
+        {
+            _logger.LogWarning("Invoice submission {SubmissionId}: the invoice its correction replaced no longer resolves from submission {Earlier}; nothing to reopen",
+                submissionId, earlier);
+            return;
+        }
+
+        Entity old;
+        try
+        {
+            old = await _entities.RetrieveAsync(
+                InvoiceReviewService.InvoiceEntity, oldId, ["statecode", "statuscode", InvoiceReviewService.VersionNumber], ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (IsNotFound(ex))
+        {
+            _logger.LogWarning("Invoice submission {SubmissionId}: the invoice {OldInvoiceId} its correction replaced no longer exists; nothing to reopen", submissionId, oldId);
+            return;
+        }
+
+        var statusCode = old.GetAttributeValue<OptionSetValue>("statuscode")?.Value;
+        if (statusCode is not { } code || !InvoiceStatusCodes.TryFromStatusCode(code, out var current))
+        {
+            throw new InvalidOperationException($"Invoice {oldId} has a status the lifecycle does not know; its reopen is held.");
+        }
+
+        if (current == InvoiceLifecycleStatus.Superseded && await SupersededByAnotherAsync(oldId, ct).ConfigureAwait(false))
+        {
+            _logger.LogInformation("Invoice submission {SubmissionId}: invoice {OldInvoiceId} is superseded by another invoice; not reopened", submissionId, oldId);
+            return;
+        }
+
+        var version = old.GetAttributeValue<long?>(InvoiceReviewService.VersionNumber)
+            ?? throw new InvalidOperationException($"The versionnumber of invoice {oldId} could not be read; its reopen is held.");
+        var built = _lifecycle.BuildSupersedeUndoRequest(oldId, current, version);
+        if (!built.Succeeded)
+        {
+            // Current == Requested (already In Review) or a status this commit's close cannot have produced: nothing to undo.
+            _logger.LogInformation("Invoice submission {SubmissionId}: invoice {OldInvoiceId} is {Status}; nothing to reopen", submissionId, oldId, current);
+            return;
+        }
+
+        await _entities.ExecuteTransactionAsync([built.Request!], ct).ConfigureAwait(false);
+        _logger.LogInformation("Invoice submission {SubmissionId}: invoice {OldInvoiceId} reopened (In Review) by the undo", submissionId, oldId);
+        await InvoiceIndexingJobHandler.TryEnqueueAsync(_jobs, _logger, oldId, $"v{version.ToString(System.Globalization.CultureInfo.InvariantCulture)}")
+            .ConfigureAwait(false);
+    }
+
+    /// <summary>Task 097c: whether a live invoice other than this commit's (already deleted when this runs) still supersedes <paramref name="invoiceId"/>.</summary>
+    private async Task<bool> SupersededByAnotherAsync(Guid invoiceId, CancellationToken ct)
+    {
+        var query = new QueryExpression(InvoiceReviewService.InvoiceEntity) { ColumnSet = new ColumnSet(false), TopCount = 1, NoLock = true };
+        query.Criteria.AddCondition(InvoiceFamilyCoreRecordGuard.SupersedesInvoiceColumn, ConditionOperator.Equal, invoiceId);
+        return (await _entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false)).Entities.Count > 0;
     }
 
     /// <summary>Deletes a row by id. True when it was there; false when it was already gone. Any other fault propagates.</summary>
