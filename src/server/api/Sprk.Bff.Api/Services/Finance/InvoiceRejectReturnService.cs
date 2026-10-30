@@ -321,7 +321,8 @@ public sealed class InvoiceRejectReturnService
             return await CompleteOrNoOpAsync(verb, invoice, portions, caller, reason, callerBearerToken, ct).ConfigureAwait(false);
         }
 
-        // ── FR-36 / FR-06: only an invoice In Review can be rejected or returned (any other status, the other final decision included, is 409). ──
+        // ── FR-36 / FR-06: only an invoice In Review can be rejected or returned (any other status, the other final decision included, is 409).
+        //    Task 097: a Superseded invoice is refused here too; its correction is the invoice to decide. ──
         if (invoiceStatus != InvoiceStatusCodes.InReview)
         {
             return new InvoiceDecisionResult(InvoiceDecisionOutcome.NotInReview, InvoiceRejectReturnCodes.NotInReview,

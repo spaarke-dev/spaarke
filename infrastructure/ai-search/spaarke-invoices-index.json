@@ -303,7 +303,7 @@
       "facetable": true
     },
     {
-      "// status": "the lifecycle status name (InReview, Approved, SentToAp, Paid, Rejected, ReturnedToFirm, Cancelled)",
+      "// status": "the lifecycle status name (InReview, Approved, SentToAp, Paid, Rejected, ReturnedToFirm, Cancelled, Superseded)",
       "name": "status",
       "type": "Edm.String",
       "searchable": false,

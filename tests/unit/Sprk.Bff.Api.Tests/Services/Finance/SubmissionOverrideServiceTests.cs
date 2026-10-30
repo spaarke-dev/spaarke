@@ -934,6 +934,7 @@ public class SubmissionOverrideServiceTests
     [InlineData(InvoiceLifecycleStatus.Paid)]
     [InlineData(InvoiceLifecycleStatus.Rejected)]
     [InlineData(InvoiceLifecycleStatus.Cancelled)]
+    [InlineData(InvoiceLifecycleStatus.Superseded)] // task 097a: closed by its correction
     public async Task Override_WhenTheInvoiceIsNoLongerInReview_Is409InvoiceNotHeld_AndNothingChanges(InvoiceLifecycleStatus status)
     {
         var w = await World.CreateAsync();
@@ -1388,11 +1389,13 @@ public class SubmissionOverrideServiceTests
         overridden.Transitions.Should().BeEmpty();
     }
 
-    [Fact]
-    public async Task Return_WhenTheInvoiceIsAlreadyApprovedOrGone_Is409_AndNothingChanges()
+    [Theory]
+    [InlineData(InvoiceLifecycleStatus.Approved)]
+    [InlineData(InvoiceLifecycleStatus.Superseded)] // task 097a: closed by its correction; never returned
+    public async Task Return_WhenTheInvoiceIsAlreadyApprovedOrGone_Is409_AndNothingChanges(InvoiceLifecycleStatus status)
     {
         var w = await World.CreateAsync();
-        w.SetInvoiceStatus(InvoiceLifecycleStatus.Approved);
+        w.SetInvoiceStatus(status);
 
         var result = await w.ReturnAsync();
 
@@ -1461,6 +1464,7 @@ public class SubmissionOverrideServiceTests
     [Theory]
     [InlineData(InvoiceLifecycleStatus.Approved)]
     [InlineData(InvoiceLifecycleStatus.Paid)]
+    [InlineData(InvoiceLifecycleStatus.Superseded)] // task 097a
     public async Task Get_WhenTheInvoiceIsNoLongerInReview_CannotOverrideOrReturn(InvoiceLifecycleStatus status)
     {
         var w = await World.CreateAsync();

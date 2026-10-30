@@ -683,6 +683,7 @@ public sealed class SubmissionOverrideService
 
         // The invoice must still be where the decision expects it. Override releases a HELD invoice, so it must be In Review. Return
         // moves an In Review invoice, or finishes an interrupted return (the invoice already Returned to Firm, the submission not yet).
+        // Task 097: a Superseded invoice (closed by its correction) is neither, so both verbs refuse it as not held.
         var invoiceOk = verb == Verb.Override
             ? invoiceStatus == InvoiceLifecycleStatus.InReview
             : invoiceStatus is InvoiceLifecycleStatus.InReview or InvoiceLifecycleStatus.ReturnedToFirm;

@@ -156,6 +156,7 @@ public sealed class ApExportBatchTests
     [InlineData(InvoiceStatusCodes.ReturnedToFirm, false, ApExportCodes.ReasonNotApproved)]
     [InlineData(InvoiceStatusCodes.Paid, false, ApExportCodes.ReasonNotApproved)]
     [InlineData(InvoiceStatusCodes.SentToAp, false, ApExportCodes.ReasonNotApproved)]
+    [InlineData(InvoiceStatusCodes.Superseded, false, ApExportCodes.ReasonNotApproved)] // task 097a: never exportable
     [InlineData(InvoiceStatusCodes.Approved, true, ApExportCodes.ReasonAlreadyExported)]
     public async Task NotExportable_RefusesTheWholeRequest_NothingClaimed(int status, bool alreadyInABatch, string reason)
     {
@@ -681,6 +682,7 @@ public sealed class ApExportBatchTests
         var world = new ApExportWorld();
         var ok = world.AddInvoice("INV-OK");
         world.AddInvoice("INV-REVIEW", status: InvoiceStatusCodes.InReview);
+        world.AddInvoice("INV-SUPERSEDED", status: InvoiceStatusCodes.Superseded); // task 097a: never a candidate
         world.AddInvoice("INV-BATCHED", batch: Guid.NewGuid());
         world.GrantEverything();
         var secure = world.AddInvoice("INV-SECURE", grant: false); // added after the grant: the caller holds no decide right on it
