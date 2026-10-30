@@ -485,3 +485,22 @@ Split of the remaining 2d work:
 - 2d-1 (step 10) and 2d-2 (task/contact/account) run in parallel;
 - then 2d-3 (chat create + budget) and 2d-4 (email.draft);
 - then 2d-5 (delete the create half of OwnedChildWrite, publish delta, CVE, notes).
+
+**Revision (2026-10-30, the same day): `email.draft` uses option (a′), not (a).**
+2d-4 probed the real resolver and found that (a) changes behaviour. The service's step 10 writes the stamp only into
+the create body, and the owner (step 7) and the AppendTo checks (step 5) read the item.
+- Today, a draft regarding an invoice under a secure, isolated matter goes to `SecureNamedTeam`. Under (a) it would
+  go to the child BU team.
+- A matter flagged secure but not isolated would no longer be refused.
+- A caller who can AppendTo the invoice but not its matter would no longer be refused.
+
+Under (a′) the handler keeps writing its derived stamp into the create item, as it does today, and step 10 has nothing
+missing to add. Owners and refusals are unchanged, and the service needs no change.
+- The sender stays the handler's: `sprk_sentby` is a server-set lookup. The service never writes "for" columns; step
+  9 leaves them to the adapters.
+- The handler keeps ONE WhoAmI. It guards the AppendTo check that must run before the derivation (otherwise an
+  existence oracle).
+- This deviates from 017's criterion "no longer resolve WhoAmI themselves". The reason is recorded here and goes in the
+  PR.
+- Option (b) is rejected for now: making steps 5 and 7 read step 10's stamp changes the contract for every caller and
+  needs owner and UAC-r2 review.
