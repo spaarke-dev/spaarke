@@ -9,10 +9,10 @@
 | Field | Value |
 |---|---|
 | **Active** | **076 waiting on the dev BFF deploy.** We OK'd R3's candidate c91b99e575 (contains W7; Router green; 266 related tests + live dev schema check for the new ebilling family rows; full ArchTests 1857/1858, the 1 = flaky ISS-005 wall-clock guard, filed #2469). R3 has the deploy ON HOLD: word-add-in blocking finding #2468 (UAC 194b, unfiled Outlook save ownership); the owner is choosing hold-for-fix vs deploy. A new SHA needs our re-OK. |
-| **Next Action** | 1) On R3's re-OK request: verify the new SHA (contains W7 + #2470 if merged; related suites; ArchTests) and OK it. 2) After R3's readback: task-execute 076 (TrackingFieldTrio 1.0.55 via pcf-deploy; owner + narrow-user live checks; App Insights). 3) After #2470 merges: remove C:\wtfmn with Remove-WorktreeSafe.ps1. |
+| **Next Action** | 1) On R3's re-OK request: verify the new SHA (contains W7 + #2470 (merged 63a3daa576); related suites; ArchTests) and OK it. 2) After R3's readback: task-execute 076 (TrackingFieldTrio 1.0.55 via pcf-deploy; owner + narrow-user live checks; App Insights). |
 | **Owner decisions today** | Q1 drop; Q2 (B), seeding the 7 canonical index rows per customer, team-owned, no BU defaults. Depth cap counted from the TOP (exception to UAC C4; design §12.11, quoted on #2442; UAC adopted it). WA owning unit follows its matter (UAC #2451). |
 | **#2399** | Live part FIXED: the owner re-tested the WA create as Test User 1 on 2026-10-29 (saves, with number and Assigned To). Open for the durable fix: FR-38/W3 still need the scope procedure (spec amendment → task-create → TASK-INDEX → owner approval); FR-39 and the index rows are provisioning's #2429. |
-| **Open PRs** | #2470 (fix/fm-family-name-columns, auto-merge: name columns for 4 ebilling family tables + guard; −60 B, no CVE). #2387 (075, HOLD, ships with 040). |
+| **Open PRs** | #2387 (075, HOLD, ships with 040). |
 | **Issues** | #2444 (UAC: shared reads-agnostic ordering helper). #2413 (known limit). #2429 (provisioning H7c team + H12b index-row seed + H4b allow-list; I review the PR). #2469 (flaky ISS-005 ArchTest, not ours). |
 | **Waiting on** | UAC 195 → 040 (UAC 2026-10-29: 194b merged, 195 queued next after its two owner-ruling branches; UAC sends the wizard-write SHA and the dev-backfill notice). Provisioning's #2429 PR. 017 blocked on ebilling #1911. |
 | **Owner to do** | Leftover locked worktree agent-aec6d06ca99a5a9f6 (075): end of project. |
