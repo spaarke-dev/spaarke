@@ -65,6 +65,20 @@ public class RecordFamilyReaderTests
 
     // ── Pruning (UAC F2): a readable record below an unreadable one is absent, and nothing reveals it ──
 
+    // Every Filing table the walk can list has a display-name column, so a new RecordFamilyEdges row cannot land with members
+    // that show no name (ebilling's invoice-family rows did, 2026-10-29).
+    [Fact]
+    public void EveryFilingFamilyTable_HasADisplayNameColumn()
+    {
+        var unnamed = RecordFamilyReader.FamilyTablesOf(FamilyKind.Filing)
+            .Where(table => RecordFamilyReader.NameColumnOf(table) is null)
+            .OrderBy(table => table, StringComparer.Ordinal)
+            .ToList();
+
+        unnamed.Should().BeEmpty(
+            "each family table needs its primary name attribute (Entity.xml) in RecordFamilyReader.NameColumnsBeyondTheRegardingMap");
+    }
+
     [Fact]
     public async Task ReadAsync_ReadableRecordsBelowAnUnreadableSecureRecord_AreAbsentAndTheViewEqualsAFamilyWithoutThatBranch()
     {

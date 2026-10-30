@@ -195,7 +195,11 @@ internal sealed class RecordFamilyReader
             ["sprk_emailartifact"] = "sprk_name",
             ["sprk_emailreviewlog"] = "sprk_name",
             ["sprk_eventlog"] = "sprk_eventlogname",
+            ["sprk_externalidentifier"] = "sprk_name",
             ["sprk_fileversion"] = "sprk_versionnumber",
+            ["sprk_invoiceapproval"] = "sprk_name",
+            ["sprk_invoicecorrection"] = "sprk_name",
+            ["sprk_invoicesubmission"] = "sprk_name",
             ["sprk_kpiassessment"] = "sprk_kpiname",
             ["sprk_memo"] = "sprk_name",
             ["sprk_policy"] = "sprk_name",
@@ -354,7 +358,7 @@ internal sealed class RecordFamilyReader
     }
 
     /// <summary>Every table a family of <paramref name="kind"/> walks: the edges' child and parent tables and the cores.</summary>
-    private static HashSet<string> FamilyTablesOf(FamilyKind kind) =>
+    internal static HashSet<string> FamilyTablesOf(FamilyKind kind) =>
         new(RecordFamilyEdges.Of(kind).SelectMany(e => new[] { e.ChildTable, e.ParentTable }).Concat(RecordFamilyEdges.CoreTables),
             StringComparer.Ordinal);
 
@@ -381,7 +385,7 @@ internal sealed class RecordFamilyReader
     private static string? EntitySetOf(string table) =>
         SecureChildLineage.Children.TryGetValue(table, out var child) ? child.EntitySet : RegardingNameFields.EntitySetName(table);
 
-    private static string? NameColumnOf(string table) =>
+    internal static string? NameColumnOf(string table) =>
         RegardingRecordType.GetPrimaryNameField(table)
         ?? (NameColumnsBeyondTheRegardingMap.TryGetValue(table, out var column) ? column : null);
 
