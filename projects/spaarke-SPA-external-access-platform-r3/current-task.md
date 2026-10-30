@@ -1,7 +1,7 @@
 # Current Task State - spaarke-SPA-external-access-platform-r3
 
-> **Last Updated**: 2026-10-29 ~17:15Z (context-handoff at 85%).
-> **Recovery**: Read "Quick Recovery" first. Narrative is in git log. Live records: `notes/task-070-deploy-record.md` (Teams checks), `notes/task-074-a9-probes.md` (closed), `notes/defer-issues.md` (ISS-021..024).
+> **Last Updated**: 2026-10-30 ~03:10Z.
+> **Recovery**: Read "Quick Recovery" first. Narrative is in git log. Live records: `notes/fr-21-teams-live-check.md` (071 closed), `notes/task-070-deploy-record.md`, `notes/defer-issues.md` (ISS-021..025).
 
 ---
 
@@ -9,9 +9,9 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | Owner 2026-10-29: "go task by task and close them out". Done today: 043 ✅, 059 ✅, 074 ✅ (all 8 A9 probes). Open: 002 (deploy held), 070/071 (Teams checks; ACTIVE), 072, 073 (blocked), 090. |
-| **ACTIVE: 071 Teams desktop/web** | Owner 17:10Z: Teams **desktop** won't work. Ralph Dewey (`ralph@deweycheatham…`, a Dewey Cheatham MEMBER) gets "This tab can't be used with a guest account". Tracy gets "400 can't connect to service". In Teams **web** the app opens in its own browser window as the SPA, not inside Teams. **So the "Teams web ✅" rows recorded in notes/task-070-deploy-record.md are probably browser-plane runs, not Teams-hosted: correct that record.** Server (App Insights, after 16:59Z): 16:59:15 `JWT auth failed … IDX40001 issuer … does not match any of the valid issuers`, then a 16:59:16 linked-systemuser resolution (Ralph) with 28/64/32 roots; `GET /` 401 x14 (16:16–17:12, probes/health, likely noise); no Tracy 400 seen at the BFF yet (it may be a Teams/NAA token error client-side). |
-| **Next Action** | 1) Read `TeamsHostAdapter.ts` `assertNotGuest` (~354-362) and `isTeamsGuestAccount` (auth module) to see why a member account is judged a guest in desktop (account picked by NAA vs `cfg.tenantId`: Ralph is also a B2B guest in the Spaarke tenant; desktop NAA may return the Spaarke-tenant account). 2) Find the IDX40001 token's issuer tenant (masked): which scheme rejected it, and whether it is the desktop NAA token. 3) Ask the owner for Tracy's exact 400 text or screenshot and console. 4) Why Teams web pops out to a browser window: check whether the manifest static tab / `validDomains` or an auth redirect breaks out of the iframe. 5) Correct the 070 record and tell the owner which "web" results stand. |
+| **Task** | Owner 2026-10-29: "go task by task and close them out". Done: 043, 059, 074, **070, 071** ✅ (Teams: 8/9 pass, unlisted × mobile deferred by owner; broker pre-auth answered NO from the Microsoft NAA docs; guest-check fix PR #2461 deployed to the dev SPA `96f1f6b675`). Open: 002 (BFF deploy held), 072 (needs 002), 073 (blocked), 090. |
+| **ACTIVE: Teams guide** | Owner: "ensure we have the Teams deployment/setup fully documented". A writer agent (opus) is drafting the NEW `docs/guides/EXTERNAL-ACCESS-TEAMS-APP-GUIDE.md` plus cross-links (EXTERNAL-ACCESS-ADMIN-SETUP.md, SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md, docs/INDEX.md). It does not commit. Next: review its claims against the code, then commit by pathspec and push. |
+| **Next Action** | 1) Review and commit the Teams guide. 2) Wait for UAC to clear 194b (dev BFF only; the SPA is not held), then the BFF candidate = master ≥ `c8bb55d0cd` (carries #2450, field-mapping W7, ebilling #1911 `eaa0d44f7f`, ontology #2463, plus UAC `fix/uac-r2-wa-owner-paths` when merged). Fresh owner go naming the SHA + peer OKs, then 002 grid columns, then notify field-mapping (ProductVersion), ebilling ("gate passed") and ontology. 3) 072 after 002. |
 | **002** | Step 1 live on dev. Step 2 merged: **PR #2450 → master `929dc42d31`** (UAC approved). **Dev deploy HELD**: UAC 194b hold OPEN (dev runs `136568cf70`); UAC will message when cleared, or the owner OKs a pre-`2cd0f62e2c` build. Then fresh owner OK naming the SHA + peer OKs → `Deploy-BffApi.ps1` → add 9 grid columns (scratchpad `grid-apply.ps1` plan + owner widths/labels: Project Type, Matter Type, Last Activity, File Type, Total Amount (Base), SR Last Activity; 100 each) → record rollback JSON in notes/task-002-notes.md → close 002. Ebilling told the SHA (don't drop the column from dev before that deploy). |
 
 ### Uncommitted
@@ -32,10 +32,11 @@
 - R4 issues filed/labelled: #2449, #2452 (messages refresh + new-message indicator), #2453 (threads), #2445 (events Task type/assignee). Flaky test #2456.
 
 ## Peer state
-- uac-r2: approved #2450; 194b hold OPEN.
-- ontology-r1: task 168 round 3 (`CallerPrincipalResolver` ComposeAsync lifts) reviewed and APPROVED by R3 (no findings); they filed DI-137 #2458.
+- uac-r2: approved #2450; 194b hold OPEN, **dev BFF only** (confirmed ~18:30Z: the dev external-SPA deploy is NOT held). UAC will send the SHA of `fix/uac-r2-wa-owner-paths` (work-assignment owner paths, BFF) for the first post-hold BFF deploy.
+- ontology-r1: PR #2463 merged, master `c8bb55d0cd` (tasks 168 + 173; no deploy). The next BFF candidate carries them; ontology runs the 168/173 live proof after the deploy.
+- ontology-r1 (earlier): task 168 round 3 (`CallerPrincipalResolver` ComposeAsync lifts) reviewed and APPROVED by R3 (no findings); they filed DI-137 #2458.
 - ebilling: told the `sprk_invoicestatus` removal SHA `929dc42d31`.
-- ebilling (~18:00Z): wants the next dev BFF to carry master with #1911 (ebilling-r1; merge pending, CI hang). R3 told them to apply `Ebilling:Enabled=true` + Finance settings THEMSELVES, AFTER R3's UAC 30-min gate passes, with their own owner go (`StoredFileReconcileEnabled` stays false). R3 to message them: deployed commit/ProductVersion after readback, and "gate passed". Whether to wait for #1911 is the owner's call.
+- ebilling (~18:00Z): wants the next dev BFF to carry master with #1911 (ebilling-r1; merge pending, CI hang). R3 told them to apply `Ebilling:Enabled=true` + Finance settings THEMSELVES, AFTER R3's UAC 30-min gate passes, with their own owner go (`StoredFileReconcileEnabled` stays false). R3 to message them: deployed commit/ProductVersion after readback, and "gate passed". Whether to wait for #1911 is the owner's call. **#1911 MERGED at `eaa0d44f7f` (21:33Z)**, so the BFF candidate must be master ≥ `eaa0d44f7f` (ships with `Ebilling:Enabled` false by default).
 - field-mapping (17:4xZ): asked that the next dev candidate be master ≥ `b86381d4c4` (W7: #2442 RecordFamilyReader, #2459 GET /api/v1/records/{table}/{id}/family, MetadataService Redis key v1→v2, census 133→134). That SHA contains `2cd0f62e2c`, so it is under the UAC hold. Told them; after readback send them the ProductVersion/commit for their task 076 (GET-only Family check; they may ask for a rollback, which is the owner's call).
 
 ## Standing rules (verify against project CLAUDE.md)

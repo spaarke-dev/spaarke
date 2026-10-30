@@ -36,6 +36,7 @@
 4. **Teams.** NAA first, then the MSAL popup (brokered).
    - **No `webApplicationInfo`** and **no Teams-SSO fallback**: `getAuthToken` needs `webApplicationInfo`, and the SSO token's audience would be wrong for a per-customer server.
    - Open live check (Teams desktop/web, using the existing test guest `ralph@deweycheatham…`): whether NAA against a stamp app also needs Microsoft's broker pre-authorized, as teams-app-r1 needed on dev. If it does, H3 adds it to the platform list.
+   - **Answered 2026-10-29: not needed** (Microsoft's NAA doc; `fr-21-teams-live-check.md`). Note also that since task 075 the Teams tab uses the **multitenant workforce client** on the Teams tenant's authority, not the single-tenant client this section describes (code: `src/client/external-spa/src/auth/msal-auth.ts`; guide: `docs/guides/EXTERNAL-ACCESS-TEAMS-APP-GUIDE.md`).
 5. **Which server.** The SPA resolves the customer server at run time and never bakes it.
    - Workforce: through the T240c directory (membership of `sprk-{customerId}-users`).
    - Until 240c ships, dev runs against one configured server (as today).
@@ -66,7 +67,7 @@ The production CIAM SPA client (redirect `https://external.spaarke.com`) is crea
 
 ## 5. Owner decisions (2026-10-09)
 
-1. **Scope — DECIDED: standardise on `user_impersonation`** for every client (Teams tab, browser work account, Copilot, CIAM plane). No `access_as_user` on stamps. Nothing blocks it: the BFF never checks the scope value (`CallerIdentity.cs:113,248`), and every stamp app already exposes the scope. One-time dev housekeeping: the dev BFF app's hand-made Teams/broker pre-authorizations are attached to `access_as_user`, so they are re-added on `user_impersonation` when the client changes.
+1. **Scope — DECIDED: standardise on `user_impersonation`** for every client (Teams tab, browser work account, Copilot, CIAM plane). No `access_as_user` on stamps. Nothing blocks it: the BFF never checks the scope value (`CallerIdentity.cs:113,248`), and every stamp app already exposes the scope. One-time dev housekeeping: the dev BFF app's hand-made Teams/broker pre-authorizations are attached to `access_as_user`, so they are re-added on `user_impersonation` when the client changes. (Done in task 040: as of 2026-10-29 they are on both scopes; read-only check in `task-070-deploy-record.md`.)
 2. **Licence-free customer staff — DECIDED: self-registration through a link the customer shares.** They become B2B guests in Spaarke's tenant (no licence). Nobody creates them in advance. Proposed flow (not yet built; design open for the owner):
    1. The customer shares a join link: `https://external.spaarke.com/join?customer={key}`.
    2. The employee signs in with their **own company account** in their home tenant. This step needs a small registration-only client that reads nothing but their profile.
