@@ -1678,6 +1678,7 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
     private const string OwningUserColumn = "owninguser";
     private const string OwnerColumn = "ownerid";
     private const string IsSecureColumn = "sprk_issecure";
+    private const string DocumentEntity = "sprk_document";
 
     /// <summary>
     /// Owner-team teamtype. Dataverse defines 0 = Owner, 1 = Access. BOTH this and <c>isdefault</c> are
@@ -1901,6 +1902,39 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
         RecordOwnershipContext context, bool committedParentReads, CancellationToken ct)
     {
         var parents = CollectParents(context);
+
+        // #2468: a DOCUMENT whose primary parent is a communication filed under nothing. Such a communication keeps its
+        // creating identity (E1: the application user, or a root team) — a technical owner, never the family the document
+        // belongs to — so it does not name the document's owner: it counts for secure-if-any only, and the document takes
+        // the question's unfiled answer (an Office save: the saver's team, task 080; the reconciler: the owner it has). A
+        // FILED communication still names it (the family rule). Decided from the communication's filing alone, never from
+        // its owner kind; ContentOf questions (no ChildEntityLogicalName) are unchanged.
+        if (parents.Count > 0
+            && string.Equals(context.ChildEntityLogicalName, DocumentEntity, StringComparison.OrdinalIgnoreCase)
+            && string.Equals(parents[0].EntityLogicalName, RecordThreadFiling.CommunicationTable, StringComparison.OrdinalIgnoreCase))
+        {
+            var filed = await IsCommunicationFiledAsync(parents[0], ct).ConfigureAwait(false);
+            if (filed is null)
+            {
+                return RecordOwnerResolution.Refused(
+                    RecordOwnerRefusal.ParentUnresolved,
+                    $"the parent {parents[0].EntityLogicalName} {parents[0].RecordId:D} or the thread it sits in could not be "
+                    + "read, so whether it is filed cannot be decided");
+            }
+
+            if (filed == false)
+            {
+                var rest = parents.Skip(1).ToArray();
+                var demoted = context with
+                {
+                    TargetEntityLogicalName = rest.FirstOrDefault()?.EntityLogicalName,
+                    TargetRecordId = rest.FirstOrDefault()?.RecordId,
+                    Parents = rest,
+                    SecureOnlyParents = context.SecureOnlyParents.Append(parents[0]).Distinct().ToArray(),
+                };
+                return await ResolveOwnerOnlyAsync(demoted, committedParentReads, ct).ConfigureAwait(false);
+            }
+        }
 
         // ── 1. PREFERRED: the parents' business units (record-first, secure-if-any) ─────────────────────
         // A filed record belongs with what it is filed against, not with whoever uploaded it. This is also
@@ -3863,6 +3897,42 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
 
         static bool IsUnownedChild(ParentFacts fact) =>
             !fact.HasOwningTeam && IsReparentableChild(fact.Parent.EntityLogicalName);
+    }
+
+    /// <summary>
+    /// #2468: whether <paramref name="communication"/> is filed under anything — its own ownership-parent lookups (the
+    /// parents its own question names, <see cref="RecordOwnershipContext.OrderedParentsOf"/>) or its record thread's filing
+    /// (<see cref="RecordThreadFiling"/>: a Direct thread files nothing). Read committed. <c>null</c> when the communication or
+    /// its thread cannot be read (the caller refuses); a Dataverse fault propagates, as every resolver read does.
+    /// </summary>
+    private async Task<bool?> IsCommunicationFiledAsync(RecordOwnershipParent communication, CancellationToken ct)
+    {
+        var query = new QueryExpression(RecordThreadFiling.CommunicationTable)
+        {
+            ColumnSet = new ColumnSet(true),
+            TopCount = 1,
+            NoLock = false,
+        };
+        query.Criteria.AddCondition($"{RecordThreadFiling.CommunicationTable}id", ConditionOperator.Equal, communication.RecordId);
+        var row = (await _dataverse.RetrieveMultipleAsync(query, ct).ConfigureAwait(false)).Entities.FirstOrDefault();
+        if (row is null)
+            return null;
+        if (RecordOwnershipContext.OrderedParentsOf(row).Count > 0)
+            return true;
+        if (RecordThreadFiling.ThreadOf(row) is not { } threadId)
+            return false;
+
+        try
+        {
+            var thread = await RecordThreadFiling.ReadThreadAsync(_dataverse, threadId, ct).ConfigureAwait(false);
+            return RecordThreadFiling.ParentsOf(thread).Count > 0;
+        }
+        catch (InvalidOperationException ex)
+        {
+            _logger.LogWarning(ex, "The thread {ThreadId} of communication {CommunicationId} could not be read (#2468).",
+                threadId, communication.RecordId);
+            return null;
+        }
     }
 
     /// <summary>
