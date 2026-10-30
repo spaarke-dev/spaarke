@@ -11,6 +11,7 @@
 // Doubles are module boundaries only (ADR-038 §4): the shared ownership directory and the secure-child world.
 
 using FluentAssertions;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Xrm.Sdk;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Services.Access;
@@ -187,6 +188,67 @@ public class UnfiledCommunicationDocumentOwnerTests
         await act.Should().ThrowAsync<TimeoutException>("a fault is not an answer: never the saver's team on a guess");
     }
 
+    [Fact(DisplayName = "#2468 must-not-fire: a fault on the communication's filing read ALONE propagates; no owner is looked up")]
+    public async Task AFaultOnTheCommunicationsFilingReadAlone_Propagates_AndNoOwnerIsLookedUp()
+    {
+        // Review F3-1: only the communication's whole-row (filing) read faults; its owner-facts read and every team, user and
+        // business-unit read answer. A filing read whose fault were taken as "unfiled" would go on to the saver's team. The
+        // root-team shape: a team-owned communication is never re-read by the secure lineage walk, so nothing else faults.
+        var directory = WithUnfiledCommunication(World(), UnfiledOwner.RootTeam);
+        var queried = new List<string>();
+        var entities = new Moq.Mock<IGenericEntityService>(Moq.MockBehavior.Strict);
+        entities
+            .Setup(e => e.RetrieveMultipleAsync(Moq.It.IsAny<Microsoft.Xrm.Sdk.Query.QueryExpression>(), Moq.It.IsAny<CancellationToken>()))
+            .Returns((Microsoft.Xrm.Sdk.Query.QueryExpression query, CancellationToken _) =>
+            {
+                queried.Add(query.EntityName);
+                return query.EntityName == "sprk_communication" && query.ColumnSet.AllColumns
+                    ? Task.FromException<EntityCollection>(new TimeoutException("the filing read timed out"))
+                    : Task.FromResult(directory.Answer(query));
+            });
+        var configuration = new Microsoft.Extensions.Configuration.ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["SecureRecord:BusinessUnitName"] = FakeDirectory.SecureBuName,
+                ["SecureRecord:OwnerTeamName"] = FakeDirectory.SecureOwnerTeamName,
+            })
+            .Build();
+        var resolver = new RecordOwnershipResolver(
+            entities.Object, configuration, Microsoft.Extensions.Logging.Abstractions.NullLogger<RecordOwnershipResolver>.Instance);
+
+        var act = () => resolver.ResolveOwnerAsync(SaveQuestion(), CancellationToken.None);
+
+        await act.Should().ThrowAsync<TimeoutException>("the filing read's fault is not an answer");
+        queried.Should().NotContain(new[] { "team", "systemuser" },
+            "no owner is looked up once whether the communication is filed cannot be read");
+    }
+
+    [Theory(DisplayName = "#2468 must-not-fire: a communication filed only through its record thread names its documents' owner")]
+    [InlineData(null)]
+    [InlineData(100000000)]
+    public async Task ACommunicationFiledOnlyThroughItsRecordThread_NamesItsDocumentsOwner(int? threadType)
+    {
+        // Review F3-2: no ownership lookup of its own; its thread (a record thread, or type unset: counted as one) regards a
+        // matter in another unit.
+        var thread = Guid.NewGuid();
+        var threadColumns = new Dictionary<string, object>
+        {
+            ["sprk_regardingmatter"] = new EntityReference("sprk_matter", OtherMatter),
+        };
+        if (threadType is { } type)
+            threadColumns["sprk_threadtype"] = new OptionSetValue(type);
+        var resolver = WithCommunication(World(), OtherBu, OtherTeam, new()
+            {
+                ["sprk_communicationthread"] = new EntityReference("sprk_communicationthread", thread),
+            })
+            .WithRecord("sprk_communicationthread", thread, OtherBu, owningTeam: OtherTeam, extra: threadColumns)
+            .Resolver();
+
+        var answer = await resolver.ResolveOwnerAsync(SaveQuestion(), CancellationToken.None);
+
+        answer.OwningTeamId.Should().Be(OtherTeam, "a filed communication (here through its record thread) names the family's owner");
+    }
+
     // ── A filed communication still names its documents' owner (the family rule) ───────────────────────────────────
 
     [Fact(DisplayName = "#2468 intended: an unassociated save of an email filed to another unit's record goes to that unit's team")]
@@ -300,5 +362,53 @@ public class UnfiledCommunicationDocumentUnsecureTests
         _world.OwnerOf("sprk_communication", communication).Should().Be(DataversePrincipalRef.Team(SecureChildShareWorld.GeneralTeam));
         _world.OwnerOf("sprk_document", document).Should().Be(DataversePrincipalRef.Team(SecureChildShareWorld.GeneralTeam),
             "the email's documents leave isolation with it: a filed communication names its documents' owner");
+    }
+}
+
+/// <summary>
+/// #2468 review K-1: one REAL ordinary pass (<see cref="SecureChildReconciler.ReconcileOrdinaryParentMoveAsync"/>) reaches an
+/// unfiled save's document (a copy of a canonical filed under a matter that moved) whose communication is unfiled: the
+/// reconciler's answer for it is "unchanged", so the saver's document is left where the save put it, never moved to the root.
+/// </summary>
+[Trait("status", "issue-2468")]
+public class UnfiledCommunicationDocumentOrdinaryPassTests
+{
+    private static readonly Guid BuB = Guid.Parse("24680000-0000-4000-8000-0000000000b1");
+    private static readonly Guid TeamB = Guid.Parse("24680000-0000-4000-8000-0000000000b2");
+
+    private readonly SecureChildShareWorld _world = SecureChildShareWorld.Standard()
+        .Add("businessunit", BuB, ("name", "Litigation"))
+        .Team(TeamB, BuB, "Litigation", isDefault: true, teamType: 0);
+
+    public enum UnfiledOwner { ApplicationUser, RootTeam }
+
+    [Theory(DisplayName = "#2468 must-fire: a real ordinary pass leaves an unfiled save's document alone when its email is unfiled")]
+    [InlineData(UnfiledOwner.ApplicationUser)]
+    [InlineData(UnfiledOwner.RootTeam)]
+    public async Task ARealOrdinaryPass_LeavesAnUnfiledSavesDocumentAlone(UnfiledOwner owner)
+    {
+        var (matter, canonical, copy, communication) = (Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid());
+        var saverTeam = SecureChildShareWorld.CustomerTeam; // the saver's unit (a child of the root): its default team
+        _world.Add("sprk_matter", matter, ("owningteam", new EntityReference("team", TeamB)), ("sprk_issecure", false)); // moved to B
+        _world.Add("sprk_document", canonical, ("owningteam", new EntityReference("team", SecureChildShareWorld.GeneralTeam)),
+            ("sprk_matter", new EntityReference("sprk_matter", matter)), ("versionnumber", 1L));
+        _world.Add("sprk_communication", communication, owner == UnfiledOwner.RootTeam
+            ? ("owningteam", new EntityReference("team", SecureChildShareWorld.GeneralTeam))
+            : ("owninguser", new EntityReference("systemuser", SecureChildShareWorld.SomeUser)));
+        _world.Add("sprk_document", copy, ("owningteam", new EntityReference("team", saverTeam)),
+            ("sprk_canonicaldocument", new EntityReference("sprk_document", canonical)),
+            ("sprk_relatedcommunication", new EntityReference("sprk_communication", communication)), ("versionnumber", 1L));
+        var webApi = new SecureChildOrdinaryParentMoveTests.ConditionalOwnerWebApi(() => _world);
+
+        var report = await SecureChildShareWorld.ReconcilerOver(() => _world, new FakeRecordShareTable(), webApi)
+            .ReconcileOrdinaryParentMoveAsync("sprk_matter", matter, SecureChildReconcileMode.Apply, maxWrites: 200, CancellationToken.None);
+
+        report.Status.Should().Be(SecureChildReconcileStatus.Completed, report.Detail);
+        _world.OwnerOf("sprk_document", canonical).Should().Be(DataversePrincipalRef.Team(TeamB),
+            "the pass ran and reached the matter's document");
+        _world.OwnerOf("sprk_document", copy).Should().Be(DataversePrincipalRef.Team(saverTeam),
+            "the saver's document stays the saver's team's");
+        webApi.ConditionalWrites.Should().NotContain(w => w.Id == copy, "no owner write for the unfiled save's document");
+        _world.OwnerWrites.Should().NotContain(w => w.Id == copy);
     }
 }
