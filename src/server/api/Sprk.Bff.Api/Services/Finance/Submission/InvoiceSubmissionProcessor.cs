@@ -167,6 +167,7 @@ public sealed class InvoiceSubmissionProcessor : IInvoiceSubmissionProcessor
         var request = BuildEvaluationRequest(snapshot, read, resolution, coding) with
         {
             ReplacedInvoiceId = await ReplacedInvoiceAsync(snapshot, ct).ConfigureAwait(false),
+            SubmittedFirmInvoiceNumber = snapshot.FirmInvoiceNumber,
         };
         var evaluation = await _evaluate(request, ct).ConfigureAwait(false);
 

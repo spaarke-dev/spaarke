@@ -296,6 +296,22 @@ public class FromEmailSubmissionServiceTests
         RefusedBeforeAnyWrite(world);
     }
 
+    [Theory(DisplayName = "097b (review F3): the Write check runs before the replay: without Write an existing Correction attempt is the uniform 404, never its receipt or a re-queue")]
+    [InlineData(InvoiceSubmissionStatus.Accepted)]
+    [InlineData(InvoiceSubmissionStatus.Received)]
+    public async Task Correction_Replay_WithoutWrite_IsTheUniformNotFound(InvoiceSubmissionStatus status)
+    {
+        var (world, probe) = CorrectionWorld();
+        probe.Grant("sprk_invoices", CorrectionSeed.OldInvoiceId, AccessRights.Read);
+        world.AddAttempt(W.K(Correction()), 1, status, number: CorrectionSeed.Number);
+
+        var answer = await FluentActions.Awaiting(() => RunCorrection(world, probe)).Should().ThrowAsync<FromEmailRouteAnswerException>();
+
+        var (code, body) = await WireBody.OfAsync(answer.Which.Answer);
+        (code, WireBody.Code(body)).Should().Be((404, "sdap.access.deny.record_unavailable"));
+        RefusedBeforeAnyWrite(world);
+    }
+
     [Fact(DisplayName = "097b: a replay of a Correction attempt is answered from the attempt, even when the old invoice has moved on")]
     public async Task Correction_Replay_IsNotRefused_ByTheInvoicesNewStatus()
     {

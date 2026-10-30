@@ -60,9 +60,17 @@ public sealed record BillingEvaluationRequest
     /// ebilling-r1 task 097b: for a Correction, the invoice it replaces, which keeps the same firm invoice number (D-37) and is still In
     /// Review when the correction is judged. The job derives it on the server only (the submission's <c>sprk_resubmissionof</c>, then that
     /// submission's <c>sprk_invoice</c>; never a caller-supplied value). The loader excludes exactly this invoice from the priors, and only
-    /// when it is this firm's and carries this firm invoice number; otherwise it is ignored with a warning. <c>null</c> for a New submission.
+    /// when it is this firm's and carries this firm invoice number (<see cref="SubmittedFirmInvoiceNumber"/>); otherwise it is ignored with
+    /// a warning. <c>null</c> for a New submission.
     /// </summary>
     public Guid? ReplacedInvoiceId { get; init; }
+
+    /// <summary>
+    /// ebilling-r1 task 097b: the firm invoice number the submitter typed (<c>sprk_invoicesubmission.sprk_firminvoicenumber</c>, the number
+    /// the tracking sequence and the intake's correction check use), which can differ from the number read off the document
+    /// (<see cref="FirmInvoiceNumber"/>). Read only to check <see cref="ReplacedInvoiceId"/>; set by the job with it.
+    /// </summary>
+    public string? SubmittedFirmInvoiceNumber { get; init; }
 }
 
 /// <summary>
@@ -602,8 +610,9 @@ public sealed class BillingFactLoader
     /// ebilling-r1 task 097b (reviewed by ontology-r1, 2026-10-30): a Correction keeps the firm invoice number of the invoice it replaces
     /// (D-37) and is judged before its commit supersedes that invoice, so the replaced invoice is no prior. Removes exactly the priors of
     /// <paramref name="replaced"/>, and only when that invoice is this firm's (its own <c>sprk_vendororg</c>, and its submission is one of
-    /// this firm's by the query) AND its submission carries this firm invoice number (trimmed, ignoring case, as the tracking sequence keys
-    /// it). Any other id is ignored with a warning (ids only) and the priors are unchanged.
+    /// this firm's by the query) AND its submission's typed firm invoice number is the one this submission's submitter typed
+    /// (<see cref="BillingEvaluationRequest.SubmittedFirmInvoiceNumber"/>, never the number read off the document; trimmed, ignoring case,
+    /// as the tracking sequence keys it). Any other id is ignored with a warning (ids only) and the priors are unchanged.
     /// </summary>
     private void ExcludeReplacedInvoice(
         List<(Entity Submission, Entity? Invoice, BillingPriorStatus Status)> kept, Guid replaced, BillingEvaluationRequest request)
@@ -611,7 +620,7 @@ public sealed class BillingFactLoader
         var excluded = kept.RemoveAll(k => k.Invoice is { } invoice
             && invoice.Id == replaced
             && invoice.GetAttributeValue<EntityReference>(ReplacedInvoiceFirmColumn)?.Id == request.FirmId
-            && SameFirmInvoiceNumber(k.Submission.GetAttributeValue<string>("sprk_firminvoicenumber"), request.FirmInvoiceNumber));
+            && SameFirmInvoiceNumber(k.Submission.GetAttributeValue<string>("sprk_firminvoicenumber"), request.SubmittedFirmInvoiceNumber));
         if (excluded == 0)
         {
             _logger.LogWarning(

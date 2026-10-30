@@ -2027,7 +2027,33 @@ public sealed class InvoiceSubmissionEndpointsContractTests : IAsyncLifetime
         NothingWritten();
     }
 
-    public static TheoryData<string> CorrectionRefusals => new() { "invoice_status", "different_firm", "different_core_record", "different_invoice_number", "no_submission" };
+    [Fact(DisplayName = "097b (review F3): the Write check runs before the earlier-submission path: a retry of a correction without Write is the uniform 404, never the earlier receipt")]
+    public async Task FromDocument_correction_retry_without_write_is_the_uniform_404()
+    {
+        CorrectableInvoice(rights: AccessRights.Read);
+        _h.Submission = new Entity("sprk_invoicesubmission", InvoiceSubmissionService.ExistingDocumentSubmissionIdFor(SourceDocumentId))
+        {
+            ["sprk_trackingnumber"] = "INV-7.2",
+            ["sprk_firminvoicenumber"] = CorrectionSeed.Number,
+            ["sprk_vendororg"] = new EntityReference("sprk_organization", FirmId),
+            ["sprk_processingstatus"] = new OptionSetValue((int)InvoiceSubmissionStatus.Accepted),
+            ["sprk_channel"] = new OptionSetValue((int)InvoiceSubmissionChannel.Internal),
+            ["sprk_document"] = new EntityReference("sprk_document", SourceDocumentId),
+            ["sprk_regardingmatter"] = new EntityReference("sprk_matter", MatterId),
+            ["sprk_resubmissionof"] = new EntityReference("sprk_invoicesubmission", CorrectionSeed.OldSubmissionId),
+        };
+
+        var response = await PostFromDocumentAsync(CorrectionBody());
+
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        using var problem = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        problem.RootElement.GetProperty("reasonCode").GetString().Should().Be("sdap.access.deny.record_unavailable");
+        problem.RootElement.TryGetProperty("submissionId", out _).Should().BeFalse();
+        _h.SubmissionReads.Should().BeEmpty("the earlier submission is not read for a caller without Write");
+        NothingWritten();
+    }
+
+    public static TheoryData<string> CorrectionRefusals =>new() { "invoice_status", "different_firm", "different_core_record", "different_invoice_number", "no_submission" };
 
     [Theory(DisplayName = "097b (seed-proof, the firm and core-record guards; must fire): a Correction the guard refuses is 409 correction_not_allowed with its reason; nothing written")]
     [MemberData(nameof(CorrectionRefusals))]

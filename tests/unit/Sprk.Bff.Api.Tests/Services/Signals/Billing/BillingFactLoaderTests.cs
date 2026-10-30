@@ -730,7 +730,25 @@ public class BillingFactLoaderTests
         return (Submission("INV-100.1", invoice, firmInvoiceNumber: number), invoice);
     }
 
-    private BillingEvaluationRequest Correcting(Guid replacedInvoice) => Request(OrdinaryMatter) with { ReplacedInvoiceId = replacedInvoice };
+    private BillingEvaluationRequest Correcting(Guid replacedInvoice) =>
+        Request(OrdinaryMatter) with { ReplacedInvoiceId = replacedInvoice, SubmittedFirmInvoiceNumber = "INV-100" };
+
+    [Theory(DisplayName = "097b (review F1): the replaced invoice is matched on the number the submitter typed, not the number read off the document")]
+    [InlineData("INV-100-R")]
+    [InlineData(null)]
+    public async Task TheReplacedInvoice_IsMatchedOnTheTypedNumber_NotTheReadOne(string? read)
+    {
+        DuplicateRule(DuplicateByLine);
+        _world.OrdinaryRoot("sprk_matter", OrdinaryMatter);
+        var (_, replaced) = InReviewPrior();
+
+        var loaded = await Loader().LoadAsync(Correcting(replaced) with { FirmInvoiceNumber = read }, CancellationToken.None);
+        var typedElsewhere = await Loader().LoadAsync(
+            Correcting(replaced) with { FirmInvoiceNumber = "INV-100", SubmittedFirmInvoiceNumber = "INV-101" }, CancellationToken.None);
+
+        loaded.PriorSubmissions.Should().BeEmpty("a misread number on the corrected PDF does not bring the replaced invoice back as a prior");
+        typedElsewhere.PriorSubmissions.Should().ContainSingle("a read number equal to the prior's does not stand in for the typed one");
+    }
 
     [Fact(DisplayName = "097b (must fire): a correction whose predecessor is still In Review with the same number is NOT flagged Duplicate")]
     public async Task ACorrection_IsNotADuplicateOfTheInvoiceItReplaces()

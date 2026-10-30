@@ -63,7 +63,7 @@ public class InvoiceSubmissionProcessorTests
     {
         var earlier = Guid.NewGuid();
         var replaced = InvoiceSubmissionPersister.InvoiceIdFor(earlier);
-        var h = new Harness();
+        var h = new Harness { ReadInvoiceNumber = "INV-100-R" };
         h.Row["sprk_resubmissionof"] = new EntityReference("sprk_invoicesubmission", earlier);
         h.Entities.Setup(e => e.RetrieveAsync("sprk_invoicesubmission", earlier, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new Entity("sprk_invoicesubmission", earlier) { ["sprk_invoice"] = new EntityReference("sprk_invoice", replaced) });
@@ -73,6 +73,7 @@ public class InvoiceSubmissionProcessorTests
         await asNew.RunAsync();
 
         h.Evaluated!.ReplacedInvoiceId.Should().Be(replaced);
+        h.Evaluated.SubmittedFirmInvoiceNumber.Should().Be("INV-100", "the typed number on the submission row, not the read one");
         asNew.Evaluated!.ReplacedInvoiceId.Should().BeNull();
         asNew.Entities.Invocations.Should().BeEmpty();
     }
