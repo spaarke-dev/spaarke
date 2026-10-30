@@ -43,6 +43,8 @@ public class OntologyStampedChildRestampTests
             ("sprk_regardingcommunication", "sprk_communication"), ("sprk_regardingdocument", "sprk_document"),
             ("sprk_regardingevent", "sprk_event"), ("sprk_regardinginvoice", "sprk_invoice"),
             ("sprk_regardingtodo", "sprk_todo"),
+            // ebilling-r1 task 026 (FR-15, D-94): the invoice-line subject.
+            ("sprk_regardinginvoiceline", "sprk_billingevent"),
         });
 
         CoreAncestorResolver.StampSourceColumns[table].Select(s => s.Column).Should().NotIntersectWith(
@@ -169,6 +171,59 @@ public class OntologyStampedChildRestampTests
 
         world.Lookup("sprk_todo", TodoUnderCommunication, "sprk_regardingmatter").Should().Be(SecureMatter);
         world.Lookup("sprk_signal", Row, "sprk_regardingmatter").Should().Be(SecureMatter);
+    }
+
+    // ── ebilling-r1 task 026 (D-94 condition 2): a Signal / Decision Record about an invoice line ────────────────────────
+
+    private static readonly Guid Line = Guid.Parse("02600000-0000-0000-0000-000000000b01");
+    private static readonly Guid Invoice = Guid.Parse("02600000-0000-0000-0000-000000000a01");
+
+    /// <summary>A line filed under <paramref name="lineRoots"/> (its invoice under the ordinary matter) and a <paramref name="table"/>
+    /// row about the line stamped with the ordinary matter, with a full decision context.</summary>
+    private static StampWorld SubjectLine(string table, params (string Column, string Target, Guid Id)[] lineRoots) =>
+        new StampWorld()
+            .Row("sprk_invoice", Invoice, [("sprk_matter", "sprk_matter", OrdinaryMatter)])
+            .Row("sprk_billingevent", Line, [.. lineRoots, ("sprk_invoice", "sprk_invoice", Invoice)])
+            .Row(table, Row,
+                [
+                    ("sprk_regardinginvoiceline", "sprk_billingevent", Line),
+                    ("sprk_regardingmatter", "sprk_matter", OrdinaryMatter),
+                    ("sprk_matter", "sprk_matter", OrdinaryMatter),
+                    ("sprk_corerecordtype", "sprk_recordtype_ref", CoreType),
+                    ("sprk_policyversion", "sprk_policyversion", PolicyVersion),
+                ],
+                pairId: Line.ToString())
+            .Set(table, Row, "sprk_corerecordid", OrdinaryMatter.ToString("D"))
+            .Set(table, Row, "sprk_snapshot", "{\"evidence\":[1]}");
+
+    [Theory(DisplayName = "ebilling-r1 task 026: re-filing an invoice line matter → project re-stamps its Signal / Decision Record, and writes no decision-context column")]
+    [MemberData(nameof(OntologyTables))]
+    public async Task RefiledInvoiceLine_RestampsTheRow_AndLeavesTheDecisionContextByteIdentical(string table)
+    {
+        var world = SubjectLine(table, ("sprk_project", "sprk_project", Project));
+        var before = DecisionContext(world, table);
+
+        var report = await world.Restamper.AfterWriteAsync("sprk_billingevent", Line, ["sprk_matter", "sprk_project"]);
+
+        report.Complete.Should().BeTrue();
+        world.Lookup(table, Row, "sprk_regardingproject").Should().Be(Project, "the stamp follows the line's own root");
+        world.Lookup(table, Row, "sprk_regardingmatter").Should().BeNull("the line's invoice's matter is never the stamp (D-75)");
+        world.PatchesTo(table, Row).Should().ContainSingle()
+            .Which.Fields.Keys.Should().BeSubsetOf(CoreAncestorResolver.CoreAncestorLookups.Select(l => l.LookupAttribute));
+        DecisionContext(world, table).Should().Equal(before, "sprk_corerecordid/type, policy version and snapshot are immutable");
+    }
+
+    [Theory(DisplayName = "ebilling-r1 task 026: an invoice line naming two roots re-stamps nothing (refused, never a guess)")]
+    [MemberData(nameof(OntologyTables))]
+    public async Task InvoiceLineWithTwoRoots_RestampsNothing(string table)
+    {
+        var world = SubjectLine(table, ("sprk_project", "sprk_project", Project), ("sprk_matter", "sprk_matter", SecureMatter));
+
+        var report = await world.Restamper.AfterWriteAsync("sprk_billingevent", Line, ["sprk_matter", "sprk_project"]);
+
+        report.Complete.Should().BeFalse("a two-root line cannot be derived; the stamp is left for the reconciler to report");
+        world.PatchesTo(table, Row).Should().BeEmpty();
+        world.Lookup(table, Row, "sprk_regardingmatter").Should().Be(OrdinaryMatter);
     }
 
     // ── Helpers ─────────────────────────────────────────────────────────────────────────────────────────────────

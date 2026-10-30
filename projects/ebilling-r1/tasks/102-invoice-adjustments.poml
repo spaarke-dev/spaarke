@@ -1,0 +1,118 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="102" project="ebilling-r1">
+  <metadata>
+    <title>Invoice-level adjustments</title>
+    <phase>4 Review and approval (WP4) — wave W4-2</phase>
+    <gate>startable</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Small write path over 016's calculator and 100's route conventions; the negative-total invariant is enforced and tested by 016.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Two or three routes copying 100's pattern with a fixed calculator contract.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P4-B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>100</deps>
+    <tags>bff, api, finance</tags>
+    <estimated-effort>1 day</estimated-effort>
+  </metadata>
+
+  <prompt>Let the reviewer add and remove invoice-level Adjustment lines (percent of fees after line adjustments, or fixed amount) with a mandatory reason and an optional rule, recompute totals through 016, refuse any adjustment that would make the approved total negative, and expose the list of rules a reviewer may cite (owner question F-8).</prompt>
+
+  <role>SPAARKE platform developer. Expert in ASP.NET Core Minimal APIs and decimal money handling.</role>
+
+  <goal>InvoiceAdjustmentEndpoints.cs and InvoiceAdjustmentService: add, remove and list-rule-options routes; Adjustment lines created as sprk_billingevent rows of type Adjustment with the invoice's core-record fields; totals per I-1 after every change.</goal>
+
+  <context>
+    <background>Spec FR-32 (acceptance: totals per FR-07; an adjustment that would make the approved total negative is refused), FR-07 (percent adjustment uses fees after line adjustments; expenses excluded), D-42, I-1, NFR-09. Columns from 010: sprk_costtype option Adjustment, sprk_adjustmentmethod (Percent / Fixed), sprk_adjustmentvalue, sprk_adjustmentreason, sprk_adjustmentrule (lookup to sprk_policyversion), sprk_reviewedby / sprk_reviewedon, FR-05 core-record lookup plus resolver fields (copy the invoice's; 013's guard validates one lookup). Calculator: 016 (percent base and negative-total refusal live there). Prototype: the Approve path of the invoice decision wizard has an optional "Invoice adjustment" step (InvoiceDecisionWizard.tsx AdjustStep, adjustmentOf); F-8 proposes sourcing the rule list from guideline clauses tagged as discounts. Route conventions, authorization and In Review rule: 100 ("ebilling.invoice.decide" on sprk_invoices(route invoiceId), RequireEbillingEnabled).</background>
+    <relevant-files>
+      <file role="new">src/server/api/Sprk.Bff.Api/Api/Finance/InvoiceAdjustmentEndpoints.cs</file>
+      <file role="new">src/server/api/Sprk.Bff.Api/Services/Finance/InvoiceAdjustmentService.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/DI/FinanceModule.cs (shared append point)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/DI/EndpointMappingExtensions.cs:376-377 (shared append point)</file>
+      <file role="new">tests/unit/Sprk.Bff.Api.Tests/Services/Finance/InvoiceAdjustmentServiceTests.cs</file>
+      <file role="new">tests/integration/contract/Api/Finance/InvoiceAdjustmentEndpointsAuthorizationContractTests.cs</file>
+      <file role="read">src/server/api/Sprk.Bff.Api/Api/Finance/InvoiceLineReviewEndpoints.cs (100 — conventions, do not edit)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="100" status="pending">Route conventions, policy key, In Review rule</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="FR-32, D-42, I-1">The server computes the adjustment amount (016); the request carries method, value (percent 0 to 100, or a positive fixed amount), reason (required) and an optional rule id — never an amount for a percent adjustment and never a total.</constraint>
+    <constraint source="FR-32">A change that would make the approved total negative is refused (400 ebilling.adjustment.negative_total) and nothing is written.</constraint>
+    <constraint source="F-8 default">The optional rule must be one of the options the list route returns for this invoice; any other id is 400.</constraint>
+    <constraint source="NFR-09">Removing an adjustment deactivates the row (audited), never deletes it; inactive Adjustment lines are excluded from totals (confirm 016 does this; escalation otherwise).</constraint>
+    <constraint source="ADR-001, ADR-008, ADR-019">Route conventions from 100; In Review only (409).</constraint>
+    <constraint source=".claude/constraints/bff-extensions.md">Placement BFF (B4 live request); publish-size delta; no new HIGH CVE; no package.</constraint>
+    <constraint source="owner D-128 / D-129 (2026-10-19), 049 credit totals">Credit lines in reviewer corrections and adjustments:
+- A reviewer may DISALLOW a credit line (D-128): it raises the payable total, and the adjustment report shows it.
+- A reviewer may REDUCE a credit line (D-129 (3)) to an approved amount between the billed credit and 0. Accepting more credit than billed, or flipping the sign, stays refused (line-approved-amount-invalid).
+- Do not add any refusal of negative lines. D-105 still holds for automatic rules: NonBillableActivity never suggests disallowing a negative amount.
+- A percent adjustment applies to the fee (or expense) base clamped at zero (D-129 (2)): on a net-negative base it adjusts nothing. A fixed adjustment still applies.
+- The FR-32 floor (approved total not below zero) applies only to invoices billed at zero or more; a credit memo has no extra limit (D-129 (1)).
+- Counted spend now sums the approved total (D-130 (2)). Today nothing recalculates sprk_approvedtotal after submission: IInvoiceTotalsService.RecalculateAsync's only caller is the 049 persister. So THIS task must call RecalculateAsync after every write that changes a line's approved amount or an adjustment, and a test must show sprk_approvedtotal changes (ontology-r1 D-130 review).
+See projects/ebilling-r1/notes/049-credit-totals.md.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ebilling-r1/spec.md (FR-07, FR-32, I-1)</file>
+      <file>c:\code_files\spaarke-prototype\projects\ebilling.r1\src\review\InvoiceDecisionWizard.tsx (AdjustStep, adjustmentOf)</file>
+      <file>c:\code_files\spaarke-prototype\projects\ebilling.r1\README.md (F-8)</file>
+      <file>docs/data-model/sprk_billingevent.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Read 016's calculator API and 010's option values; confirm how 016 treats inactive Adjustment lines.</step>
+    <step order="1">Routes under /api/finance/invoices/{invoiceId} (names directional): POST adjustments; DELETE adjustments/{lineId} (deactivate); GET adjustment-rules.</step>
+    <step order="2">Rule options (F-8 default): published billing policy versions in force on the invoice date in the invoice's applicable rule sets (client default plus the firm's), each with rule set name, version and clause reference; no Procedure Library link.</step>
+    <step order="3">Create the Adjustment line (type, method, value, reason, rule, reviewer, time, core-record fields from the invoice), recompute and persist totals via 016 in the same request; return the updated totals.</step>
+    <step order="4">Tests: percent on fees after line adjustments with expenses excluded; fixed amount; negative total refused with nothing written; reason required; rule not in options refused; remove restores totals; not In Review 409; contract tests 401 / 403 / disabled.</step>
+    <step order="5">dotnet build and dotnet test green; publish-size delta and vulnerable-package check recorded.</step>
+    <step order="6">Update TASK-INDEX.md: this task's status cell to "✅ [done]".</step>
+    <step order="7">Record deviations (routes, F-8 handling) in projects/ebilling-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>Owner decided D-74 (F-8): the citable rule list is the published rules of the invoice's applicable rule sets in force on the invoice date.</trigger>
+    <trigger>If 016 counts inactive Adjustment lines or cannot recompute on removal, STOP and report rather than computing totals here.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>Spec section 11 row "Review / approval / export / rule endpoints"; Adjustment lines reuse sprk_billingevent (010) and 016's calculator; no adjustment route exists.</existing>
+    <extension>Same Finance route group; own endpoints file so P4-B tasks share no file; no new table or calculator.</extension>
+    <cost-of-doing-nothing>Reviewers cannot apply a volume discount or fixed write-down, so FR-32 and success criterion 4 fail.</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="dotnet">build, test</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">Api/Finance/InvoiceAdjustmentEndpoints.cs; Services/Finance/InvoiceAdjustmentService.cs</output>
+    <output type="test">InvoiceAdjustmentServiceTests.cs; InvoiceAdjustmentEndpointsAuthorizationContractTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Each route returns 401 unauthenticated, 403 without access to the invoice's core record, 503 ebilling.disabled when off, and (writes) 409 when not In Review.</criterion>
+    <criterion testable="true">A 10 percent adjustment on an invoice with fees and expenses reduces the approved total by 10 percent of fees after line adjustments; expenses are unaffected.</criterion>
+    <criterion testable="true">An adjustment that would make the approved total negative is 400 ebilling.adjustment.negative_total and writes nothing.</criterion>
+    <criterion testable="true">Missing reason is 400; a rule id not returned by the options route is 400.</criterion>
+    <criterion testable="true">Removing an adjustment deactivates the row and restores totals; the row and its audit remain.</criterion>
+    <criterion testable="true">The options route returns only published, in-force billing rules of the invoice's rule sets with name, version and clause reference, and no document link.</criterion>
+    <criterion testable="true">dotnet build 0 errors; all tests green.</criterion>
+    <criterion testable="true">Publish-size delta measured against a fresh master build and recorded in task notes; no new HIGH CVE.</criterion>
+    <criterion testable="true">Cover the stated contract plus the edge cases named above. Anything beyond that needs a one-line justification in task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>Parallel group P4-B with 101, 103, 105: own files; FinanceModule.cs and EndpointMappingExtensions.cs are shared append points. Adjustment lines show in 100's read model as lines of type Adjustment. Whether an adjustment also needs a Decision Record is not in FR-30's list; it is attributable through sprk_reviewedby / on and audit (NFR-09) — record in notes if 074 decided otherwise. UI: 111's Approve wizard step.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load the knowledge files first. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

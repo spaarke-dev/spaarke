@@ -663,7 +663,8 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
     private Task<ToolResult> UpdateRecord(string table, Guid id, params (string Column, JsonElement Value)[] item) =>
         new DataverseUpdateRecordHandler(
                 _user, new Sprk.Bff.Api.Tests.Integration.DataMutation.CoreAncestorStamping.StampWorld().AfterWriteRestamp,
-                CreateLogger<DataverseUpdateRecordHandler>(), _world.Resolver(), Sprk.Bff.Api.Tests.TestInfrastructure.SecureRootFilingGateFixtures.NothingSecure())
+                CreateLogger<DataverseUpdateRecordHandler>(), _world.Resolver(), Sprk.Bff.Api.Tests.TestInfrastructure.SecureRootFilingGateFixtures.NothingSecure(),
+                appOnlyEntities: AppEntities())
             .ExecuteChatAsync(
                 BuildChatInvocationContext(toolArgumentsJson: JsonSerializer.Serialize(new
                 {
@@ -757,6 +758,8 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
             {
                 ("sprk_regardingmatter", "sprk_matter", "sprk_RegardingMatter"),
                 ("sprk_regardingproject", "sprk_project", "sprk_RegardingProject"),
+                // Owner decision 2026-10-29: a To Do filed under a work assignment (live navigation property, as TodoRegardingUpdateBuilder binds it).
+                ("sprk_regardingworkassignment", "sprk_workassignment", "sprk_RegardingWorkAssignment"),
                 ("sprk_assignedto", "contact", "sprk_AssignedTo"),
                 ("ownerid", "systemuser", "ownerid"),
                 ("sprk_createdbyperson", "systemuser", "sprk_CreatedByPerson"), // task 146 c1-r1 schema step
@@ -818,6 +821,9 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
             {
                 ("sprk_matter", "sprk_matter", "sprk_Matter"),
                 ("sprk_project", "sprk_project", "sprk_Project"),
+                // ebilling-r1 task 012: the invoice's work-assignment filing and the invoice it supersedes (a peer reference).
+                ("sprk_regardingworkassignment", "sprk_workassignment", "sprk_RegardingWorkAssignment"),
+                ("sprk_supersedesinvoice", "sprk_invoice", "sprk_SupersedesInvoice"),
             },
             ["sprk_reportcard"] = new[]
             {
@@ -843,6 +849,9 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
             {
                 ("sprk_matter", "sprk_matter", "sprk_matter"),
                 ("sprk_project", "sprk_project", "sprk_project"),
+                // ebilling-r1 task 012: the line's work-assignment filing, and its invoice (never its core record, D-75).
+                ("sprk_regardingworkassignment", "sprk_workassignment", "sprk_RegardingWorkAssignment"),
+                ("sprk_invoice", "sprk_invoice", "sprk_Invoice"),
             },
             // A polymorphic lookup: one navigation property per target table (task 147 r1c-v1: a clear goes through one).
             ["task"] = new[]
@@ -973,6 +982,10 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
 
         /// <summary>Further columns a row read as the caller reports (e.g. its pair: <c>sprk_regardingrecordid</c>).</summary>
         public Dictionary<Guid, Dictionary<string, object?>> RowValues { get; } = new();
+
+        /// <summary>ebilling-r1 ISS-010: answers a read first when it returns a response (a fault or a malformed row).</summary>
+        public Func<string, DataverseUserResponse?>? GetOverride { get; set; }
+
         public int PatchStatus { get; set; } = 204;
         public List<(string Path, string Body)> Posts { get; } = new();
         public List<(string Path, string Body)> Patches { get; } = new();
@@ -1082,6 +1095,9 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
 
         private DataverseUserResponse Get(string path)
         {
+            if (GetOverride?.Invoke(path) is { } overridden)
+                return overridden;
+
             if (path == "WhoAmI()")
                 return Ok(new { UserId = me });
 
@@ -1233,6 +1249,16 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
                 foreach (var (column, value) in values)
                     rowBody[column] = value;
             }
+
+            // ebilling-r1 ISS-010: Dataverse answers every $select'ed lookup value, null when it is unset.
+            var selectAt = path.IndexOf("$select=", StringComparison.Ordinal);
+            if (selectAt >= 0)
+            {
+                var selected = path[(selectAt + "$select=".Length)..].Split('&')[0].Split(',');
+                foreach (var column in selected.Where(c => c.StartsWith('_') && c.EndsWith("_value", StringComparison.Ordinal)))
+                    rowBody.TryAdd(column, null);
+            }
+
             return Ok(rowBody);
         }
 

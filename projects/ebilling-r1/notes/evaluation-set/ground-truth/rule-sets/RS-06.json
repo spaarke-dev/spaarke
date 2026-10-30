@@ -1,0 +1,22 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"rule-set",
+ "id":"RS-06",
+ "set":"F",
+ "meta":{"title":"Public-defender style guideline","generator_id":"gen_eval_set.py@1","licence":"Synthetic - authored for this evaluation set","licence_status":"synthetic","pii_note":"No personal data.","pii_scan":null,"storage":{"location":"committed","path":"ground-truth/rule-sets/RS-06.json"},"spike":false,"label_method":"generator"},
+ "modelled_on":["E-OCG-02","E-OCG-06","E-OCG-08"],
+ "rules":[
+  {"rule_id":"RS-06-R01","rule_type":"ApprovedTimekeeper","params":{"approved_names":"context.approved_timekeepers"},"consequence":"Reject","expressible":true},
+  {"rule_id":"RS-06-R02","rule_type":"ApprovedRate","params":{"rates":{"Partner":455,"Of Counsel":400,"Senior Associate":315,"Associate":245,"Paralegal":130,"Legal Assistant":105}},"consequence":"Reduce","expressible":true},
+  {"rule_id":"RS-06-R03","rule_type":"ExpenseRule","params":{"non_reimbursable":["E103","E104","E106"]},"consequence":"Disallow","expressible":true},
+  {"rule_id":"RS-06-R04","rule_type":"ExpenseRule","params":{"caps":{"E101":0.15,"E107":40.0}},"consequence":"Reduce","expressible":true},
+  {"rule_id":"RS-06-R05","rule_type":"CoreRecordWindow","params":{"require_within_matter_dates":true,"budget_cap":true},"consequence":"Flag","expressible":true},
+  {"rule_id":"RS-06-R06","rule_type":"InvoiceAge","params":{"max_days_after_period_end":30},"consequence":"Flag","expressible":true},
+  {"rule_id":"RS-06-R07","rule_type":"DailyHoursCap","params":{"max_hours_per_timekeeper_per_day":10},"consequence":"Reduce","expressible":true},
+  {"rule_id":"RS-06-R08","rule_type":"TimeIncrement","params":{"increment_hours":0.1},"consequence":"Reduce","expressible":true},
+  {"rule_id":"RS-06-R09","rule_type":"Duplicate","params":{"match_on":["timekeeper","date","hours","narrative"]},"consequence":"Disallow","expressible":true},
+  {"rule_id":"RS-06-R10","rule_type":"RequiredData","params":{"codes_required":true},"consequence":"Reject","expressible":true},
+  {"rule_id":"RS-06-R11","rule_type":"AiObservation","params":{"observations":["vague_description"]},"consequence":"Flag","expressible":true}
+ ],
+ "unmapped_provisions":[]
+}

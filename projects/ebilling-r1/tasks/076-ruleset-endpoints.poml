@@ -1,0 +1,118 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="076" project="ebilling-r1">
+  <metadata>
+    <title>Rule set endpoints: proposals, edit, publish, visibility</title>
+    <phase>3 Rules (WP3) — wave W3-2</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Adds admin-only write endpoints that publish immutable policy versions into the shared store and control firm visibility of clause text (D-66); authorization and immutability are security-relevant.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Endpoint and service work following the Finance endpoint pattern, with the validation contract supplied by 070.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P3-B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>019, 070</deps>
+    <tags>bff, api, rules</tags>
+    <estimated-effort>2-3 days</estimated-effort>
+  </metadata>
+
+  <prompt>Add the rule set API behind the Rule Review page (FR-28): create a rule set from an uploaded source document, list rule sets and their proposals beside clause quotes, edit / reject / accept proposals, publish (PolicyVersionValidator on every rule, all or nothing, immutable versions with an effective date), assign the set to the client default or a firm, and toggle "visible to firms" — admin-only, flag-gated.</prompt>
+
+  <role>SPAARKE platform developer. Expert in ASP.NET Core Minimal APIs, ADR-008 endpoint filters, ProblemDetails and Dataverse write paths.</role>
+
+  <goal>A RuleSetEndpoints file and RuleSetService that implement every FR-28 operation with admin-only authorization, publish-time validation, version immutability, and a single server-side helper deciding whether a rule's clause text may be shown to a firm.</goal>
+
+  <context>
+    <background>Spec FR-28 (acceptance: editing a published version creates a new version; non-admin cannot publish, 403; a rule from a rule set with the flag off never shows its clause text to a firm — findings show rule name and reason only), D-66 (flag default on for billing guidelines and rate cards, off for internal procedures; at publish the admin is told "clause quotes will be visible to firms"), FR-16 / D-55 (source documents in the Procedure Library container, internal only), design.md 7.2. 019 provides sprk_ruleset (domain, name, source document, scope client default or firm, status, effective dates, visible-to-firms flag) and the policy columns (domain, rule set, clause, consequence). No BFF write path for sprk_policyversion exists today (Services/Signals/PolicyVersionValidator.cs:58-60 remarks); this is the first, so it calls ValidateForSave. Publish semantics to mirror: the Ontology contract stamps the old version's sprk_inforceto and moves sprk_policy.sprk_currentversion (Services/Signals/SignalReevaluationJob.cs:142-148 remarks). Existing Finance routes: Api/Finance/FinanceEndpoints.cs:28-60 (group /api/finance, per-route AddFinanceAuthorizationFilter). Admin-check building blocks: FinanceAuthorizationCheck.CallerPrivilege (Api/Filters/FinanceAuthorizationFilter.cs:154) — caller's Dataverse table privilege; the "SystemAdmin" app-role policy (Infrastructure/DI/AuthorizationModule.cs:465). SPE uploads go through Infrastructure/Graph/SpeFileStore.cs; the Procedure Library container id is 028's option.</background>
+    <relevant-files>
+      <file role="new">src/server/api/Sprk.Bff.Api/Api/Finance/RuleSetEndpoints.cs</file>
+      <file role="new">src/server/api/Sprk.Bff.Api/Services/Finance/RuleSetService.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/DI/FinanceModule.cs and the Finance endpoint-mapping call site (shared append points)</file>
+      <file role="new">tests/unit/Sprk.Bff.Api.Tests/Api/Finance/RuleSetEndpointsTests.cs</file>
+      <file role="new">tests/unit/Sprk.Bff.Api.Tests/Services/Finance/RuleSetServiceTests.cs</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="019" status="pending">sprk_ruleset and policy store columns</dependency>
+      <dependency task="070" status="pending">Billing ValidateForSave</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-001, ADR-008, ADR-019">Minimal API; every route carries its own endpoint-filter authorization; ProblemDetails with stable error codes; eBilling disabled code (040) when the flag is off.</constraint>
+    <constraint source="spec FR-28, root CLAUDE.md section 6">Admin-only for every write and for proposal reads. Mechanism decided by the owner (D-76): caller Dataverse privilege on sprk_ruleset / sprk_policyversion via CallerHoldsPrivilegeAsync, failing closed; not the SystemAdmin app role.</constraint>
+    <constraint source="spec MUST">A published version is never updated: an edit creates a new Draft version; publishing it stamps the predecessor's in-force-to and moves the current-version pointer. Publish is all or nothing: one invalid rule refuses the whole publish with per-rule errors and writes nothing.</constraint>
+    <constraint source="D-66, D-63">The clause-visibility helper returns clause text for a firm only when the rule's rule set has the flag on; the Procedure Library document link is never returned by any firm-facing projection.</constraint>
+    <constraint source="ADR-007, ADR-002">Source documents uploaded only through SpeFileStore to the Procedure Library container; no client creates policy rows directly; server-side owner for publish.</constraint>
+    <constraint source="ADR-010">Registrations in AddFinanceModule only; concrete service.</constraint>
+    <constraint source=".claude/constraints/bff-extensions.md">BFF hygiene: placement (BFF, B1 caller identity and user-attributed upload, B4 live request), publish-size delta, no new HIGH CVE, no package.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ebilling-r1/spec.md (FR-16, FR-28, FR-49)</file>
+      <file>projects/ebilling-r1/design.md (7.2)</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>.claude/patterns/api/endpoint-filters.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+    <patterns>
+      <pattern name="Finance route with own filter" location="src/server/api/Sprk.Bff.Api/Api/Finance/FinanceEndpoints.cs">Group /api/finance, per-route AddFinanceAuthorizationFilter, Produces / ProducesProblem metadata.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Step-0 check: git merge-base --is-ancestor f292ad119 HEAD. Read 019's columns in dev metadata and 070's billing ValidateForSave signature.</step>
+    <step order="1">Implement the D-76 admin check (caller privilege on sprk_ruleset / sprk_policyversion) once as a reusable route helper (075 reuses it).</step>
+    <step order="2">Routes under /api/finance/rulesets (names directional): POST create (multipart: source document, name, scope, firm, source kind Guideline / RateCard / InternalProcedure sets the initial flag per D-66); GET list; GET one with proposals (rule type, parameters, consequence, describer text from RuleBodyDescriber, clause quote and location, status); PATCH proposal (Draft only; on a Published version create a new Draft version); POST proposal reject / accept; POST publish (effective date; validate every accepted rule; all or nothing; response states whether clause quotes will be visible to firms); PUT assignment (client default or firm); PUT visibility.</step>
+    <step order="3">Service: Dataverse writes as the app after the caller check; in-force stamping and current-version move on publish; Procedure Library upload through SpeFileStore.</step>
+    <step order="4">Clause-visibility helper (one method) for 130 / 134 / 135 to call; unit-tested.</step>
+    <step order="5">Tests: each route 401, 403 non-admin, disabled code, happy path; publish refused when one rule is invalid (nothing published); edit of a Published version creates a new version and leaves the old one unchanged; flag-off rule set: helper returns no clause text; flag default per source kind; Draft rules never become in force without publish.</step>
+    <step order="6">dotnet build and dotnet test green; publish-size delta and vulnerable-package check recorded.</step>
+    <step order="7">Update TASK-INDEX.md: this task's status cell to "✅ [done]".</step>
+    <step order="8">Record deviations (routes, admin mechanism, source-kind handling) in projects/ebilling-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If neither the caller-privilege check nor the SystemAdmin app role expresses "billing admin" without granting more than intended, STOP and raise 🔔 Human Input Required (auth is security-sensitive, root CLAUDE.md section 6) with options.</trigger>
+    <trigger>If 019 cannot represent Draft / Accepted / Rejected proposal states or the predecessor link between versions, STOP and propose the smallest schema addition rather than overloading another column.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>Spec section 11 row "Review / approval / export / rule endpoints" (overlap: /api/finance/invoice-review/*, Api/Finance/FinanceEndpoints.cs); no policy or rule set write route exists (PolicyVersionValidator.cs:58-60, grep "sprk_ruleset" in src finds none).</existing>
+    <extension>Same Finance module and route group; a new endpoints file because the rule-set operations share no handler or filter with invoice-review routes.</extension>
+    <cost-of-doing-nothing>Proposals from 075 can never be reviewed or published, so no billing rule is ever in force (FR-25 has nothing to evaluate) and firms' visibility cannot be controlled (D-66).</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="dotnet">build, test</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Finance/RuleSetEndpoints.cs; Services/Finance/RuleSetService.cs</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Api/Finance/RuleSetEndpointsTests.cs; tests/unit/Sprk.Bff.Api.Tests/Services/Finance/RuleSetServiceTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Every route returns 401 unauthenticated, 403 for a non-admin (including publish), the eBilling disabled code when the flag is off, and success for an admin.</criterion>
+    <criterion testable="true">Publishing a rule set where one accepted rule fails PolicyVersionValidator returns 400 ProblemDetails listing that rule's errors and publishes nothing.</criterion>
+    <criterion testable="true">Editing a Published version creates a new Draft version; the published row is unchanged; publishing the new version stamps the predecessor's in-force-to and moves the current-version pointer.</criterion>
+    <criterion testable="true">Rejected and Draft proposals never become in force.</criterion>
+    <criterion testable="true">For a rule set with "visible to firms" off, the clause-visibility helper returns no clause text; with it on, it returns quote and section reference and never a document link.</criterion>
+    <criterion testable="true">A rule set created with source kind Guideline or RateCard starts with the flag on; InternalProcedure starts off; the publish response states whether clause quotes will be visible to firms.</criterion>
+    <criterion testable="true">The source document is stored in the Procedure Library container through SpeFileStore.</criterion>
+    <criterion testable="true">Publish-size delta measured against a fresh master build and recorded in task notes; no new HIGH CVE.</criterion>
+    <criterion testable="true">Cover the stated contract plus the edge cases named above. Anything beyond that needs a one-line justification in task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>073 adds the consequence-eligibility check to ValidateForSave later; once it lands, the publish route refuses an AiObservation Reject rule with no change here (073 adds that endpoint test). Shared append points FinanceModule.cs and the Finance endpoint-mapping call site: re-read before editing, add only this task's lines. Parallel group P3-B: no file overlap with 071, 074, 075 (075 owns the draft trigger route in its own file).</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load the knowledge files first. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

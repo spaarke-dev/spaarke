@@ -1,0 +1,26 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0547",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0547","generator_id":"gen_eval_set.py@1 F-0547","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0547.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-01"},
+ "header":{"firm":"Sutherland and Cranmer LLP","firm_invoice_number":"INV-2026-59425","invoice_date":"2026-07-01","billing_period_start":"2026-06-01","billing_period_end":"2026-06-30","firm_matter_reference":"62247-0013","po_number":"PO-4528942","fees_total":6659.5,"expenses_total":421.68,"adjustments_total":0.0,"total_due":7081.18,"currency":"USD"},
+ "timekeepers":[{"name":"Hector Okafor","title":"Associate","rate":485.0,"billed_as":"Hector Okafor"},{"name":"Helena Thornbury","title":"Associate","rate":450.0,"billed_as":"Helena Thornbury"},{"name":"Leila Blackwood","title":"Partner","rate":885.0,"billed_as":"Leila Blackwood"},{"name":"Marcus Blackwood","title":"Paralegal","rate":265.0,"billed_as":"Marcus Blackwood"},{"name":"Sofia Okafor","title":"Paralegal","rate":260.0,"billed_as":"Sofia Okafor"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2026-06-05","timekeeper":"Hector Okafor","timekeeper_name":"Hector Okafor","timekeeper_title":"Associate","title":"Associate","hours":2.5,"rate":485.0,"amount":1212.5,"narrative":"Review court docket and calendar of pending deadlines for the licensing dispute","codes":["L190","A104"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2026-06-19","timekeeper":"Hector Okafor","timekeeper_name":"Hector Okafor","timekeeper_title":"Associate","title":"Associate","hours":2.4,"rate":485.0,"amount":1164.0,"narrative":"Correspondence with consulting expert regarding scope of analysis","codes":["L130","A108"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2026-06-26","timekeeper":"Helena Thornbury","timekeeper_name":"Helena Thornbury","timekeeper_title":"Associate","title":"Associate","hours":2.4,"rate":450.0,"amount":1080.0,"narrative":"Telephone conference with opposing counsel regarding settlement terms","codes":["L160","A107"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2026-06-04","timekeeper":"Leila Blackwood","timekeeper_name":"Leila Blackwood","timekeeper_title":"Partner","title":"Partner","hours":2.0,"rate":885.0,"amount":1770.0,"narrative":"Prepare monthly status report to client regarding the vendor agreement","codes":["L190","A111"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2026-06-29","timekeeper":"Marcus Blackwood","timekeeper_name":"Marcus Blackwood","timekeeper_title":"Paralegal","title":"Paralegal","hours":0.6,"rate":265.0,"amount":159.0,"narrative":"Research pleading standards applicable to the licensing dispute","codes":["L210","A102"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2026-06-08","timekeeper":"Sofia Okafor","timekeeper_name":"Sofia Okafor","timekeeper_title":"Paralegal","title":"Paralegal","hours":1.6,"rate":260.0,"amount":416.0,"narrative":"Correspondence with consulting expert regarding scope of analysis","codes":["L130","A108"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2026-06-09","timekeeper":"Sofia Okafor","timekeeper_name":"Sofia Okafor","timekeeper_title":"Paralegal","title":"Paralegal","hours":2.4,"rate":260.0,"amount":624.0,"narrative":"Plan strategy for upcoming phase of the construction contract with team","codes":["L120","A101"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2026-06-11","timekeeper":"Sofia Okafor","timekeeper_name":"Sofia Okafor","timekeeper_title":"Paralegal","title":"Paralegal","hours":0.9,"rate":260.0,"amount":234.0,"narrative":"Telephone conference with client representative regarding factual background of the customs audit","codes":["L110","A106"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"expense","date":"2026-06-23","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":4.0,"rate":8.13,"amount":32.52,"narrative":"Postage - certified mail","codes":["E108"],"page":2,"narrative_style":"clear"},
+  {"n":10,"line_type":"expense","date":"2026-06-25","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":389.16,"amount":389.16,"narrative":"Airfare to Houston for deposition","codes":["E110"],"page":2,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["554 Peachtree Way","Minneapolis","Tax ID 18-4384060"],"template":"T13","pages":2},
+ "rule_set_id":"RS-01",
+ "context":{"matter_open":"2025-01-21","matter_close":"2026-09-28","matter_budget":53324.0,"approved_timekeepers":["Leila Blackwood","Hector Okafor","Helena Nwosu","Sofia Okafor","Helena Thornbury","Marcus Santoro","Marcus Blackwood"],"invoice_received_date":"2026-07-10"},
+ "expected_findings":[],
+ "seeded_violations":0
+}

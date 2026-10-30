@@ -1091,17 +1091,38 @@ public class ExternalDocumentNarrowingGuardTests
     /// </summary>
     private static readonly IReadOnlyDictionary<string, string> GenericWritersThatUpdateNoDocument = new Dictionary<string, string>
     {
-        ["Sprk.Bff.Api.Services.Finance.InvoiceReviewService::CreateInvoiceRecordAsync"] =
-            "Creates sprk_invoice only (InvoiceEntity), a create by upsert on a fresh id.",
-        ["Sprk.Bff.Api.Services.Finance.InvoiceReviewService::LinkDocumentOrCompensateAsync"] =
-            "Writes only sprk_Invoice@odata.bind (DocInvoiceLinkBind) on sprk_document: a literal key, not a D7 link or access column.",
+        // ebilling-r1 task 094: 050a's InvoiceDocumentRefile is retired - a Submit Invoice source is copied, never linked or re-filed.
         ["Sprk.Bff.Api.Services.Finance.InvoiceReviewService::MarkDocumentConfirmedAsync"] =
             "Writes BuildReviewStatusFields on sprk_document: the invoice review status, reviewed-on and notes (literal keys).",
         ["Sprk.Bff.Api.Services.Finance.InvoiceReviewService::RejectInvoiceAsync"] =
             "Writes BuildReviewStatusFields on sprk_document: the invoice review status, reviewed-on and notes (literal keys).",
         ["Sprk.Bff.Api.Services.Finance.SignalEvaluationService::UpsertSignalAsync"] = "Writes sprk_spendsignal only (SignalEntity).",
-        ["Sprk.Bff.Api.Services.Finance.FinanceRollupService::RecalculateForEntityAsync"] =
-            "Writes its own rollup fields to sprk_matter or sprk_project only (UpdateExistingRecordFieldsAsync).",
+        // ebilling-r1 (D-104): the rollup's write moved into WriteRollupAsync, whose one caller passes BuildRollupFields.
+        ["Sprk.Bff.Api.Services.Finance.FinanceRollupService::WriteRollupAsync"] =
+            "Writes its own rollup fields (BuildRollupFields, then BuildPendingSpendFields) to sprk_matter or sprk_project only " +
+            "(UpdateExistingRecordFieldsAsync).",
+        // ebilling-r1 typed finance writers: literal keys on finance tables, never sprk_document.
+        ["Sprk.Bff.Api.Services.Finance.Coding.CodeSetProposalService::ConfirmAsync"] =
+            "Writes only sprk_DefaultBillingCodeSet@odata.bind (DefaultSetBind) on a matter type or practice area reference row.",
+        ["Sprk.Bff.Api.Services.Finance.InvoiceLifecycleService::TransitionAsync"] =
+            "Writes only statuscode and statecode on sprk_invoice (InvoiceEntity), conditioned on the row version.",
+        ["Sprk.Bff.Api.Services.Finance.InvoiceTotalsService::RecalculateAsync"] =
+            "Writes only sprk_amount on an adjustment sprk_billingevent and the five totals columns on sprk_invoice (literal keys).",
+        // ebilling-r1 task 103: the approval claim, conditioned on the approval portion's row version.
+        ["Sprk.Bff.Api.Services.Finance.InvoiceApprovalService::ApproveHeldAsync"] =
+            "Writes only sprk_decidedby, sprk_decidedon and sprk_approvedamount (ClaimFields, literal keys) on sprk_invoiceapproval (ApprovalEntity).",
+        // ebilling-r1 task 103 fix round (K2): a refused transition clears the claim it wrote, conditional on the version just read.
+        ["Sprk.Bff.Api.Services.Finance.InvoiceApprovalService::ReleaseClaimAsync"] =
+            "Clears only sprk_decidedby, sprk_decidedon and sprk_approvedamount (DBNull, literal keys) on sprk_invoiceapproval (ApprovalEntity).",
+        // ebilling-r1 task 090 (found at the merge of master's #2253 guard): the Stored File store's verified flip. It cannot ask the
+        // refusal: sprk_storedfile is itself refused whole (AccessTables, uac-r2 F4), and this is its typed writer.
+        ["Sprk.Bff.Api.Services.Finance.Files.StoredFileService::FlipToServableAsync"] =
+            "Writes only sprk_filestatus (StoredFileSchema.Status, Servable) on sprk_storedfile, a literal key, under the row's own " +
+            "version (UpdateIfRowVersionMatchesAsync); never a document.",
+        // ebilling-r1 task 094 (uac-r2 re-check (b)): the submission undo withdraws the invoice's file rows before their blobs go.
+        ["Sprk.Bff.Api.Services.Finance.Files.StoredFileService::WithdrawForUndoAsync"] =
+            "Writes only sprk_filestatus (StoredFileSchema.Status, Removed) on sprk_storedfile, a literal key, under the row's own " +
+            "version (UpdateIfRowVersionMatchesAsync); never a document.",
         ["Sprk.Bff.Api.Services.ScorecardCalculatorService::UpdateEntityGradesAsync"] =
             "Writes its own grade fields to sprk_matter or sprk_project only (UpdateExistingRecordFieldsAsync).",
         ["Sprk.Bff.Api.Services.Communication.CommunicationEnrichmentService::AssignOwningTeamAsync"] =
@@ -1114,10 +1135,13 @@ public class ExternalDocumentNarrowingGuardTests
         ["Sprk.Bff.Api.Services.Dataverse.OwnedChildWrite::PatchWithBffManagedPairAsync"] =
             "Writes only the BFF-managed pair columns (PairColumns: sprk_regardingrecordid, sprk_regardingrecordtype), picked " +
             "out of the body by name; every other column goes in the caller's own PATCH.",
-        ["Sprk.Bff.Api.Services.Dataverse.DataverseUpdateHandler::WriteAsync"] =
-            "private; sole caller UpdateAsync, which refuses first",
-        ["Sprk.Bff.Api.Services.Dataverse.DataverseUpdateHandler::UpdateWithOptimisticConcurrencyAsync"] =
-            "private; sole caller UpdateAsync, which refuses first",
+        // ebilling-r1 (#2081): the handler's one write member is PatchAsync (an invoice or line update-only, through
+        // InvoiceFamilyCoreRecordGuard.UpdateExistingAsync); WriteAsync and UpdateWithOptimisticConcurrencyAsync reach it.
+        ["Sprk.Bff.Api.Services.Dataverse.DataverseUpdateHandler::PatchAsync"] =
+            "private; reached only through WriteAsync and UpdateWithOptimisticConcurrencyAsync, whose sole caller UpdateAsync refuses first",
+        ["Sprk.Bff.Api.Services.Dataverse.InvoiceFamilyCoreRecordGuard::UpdateExistingAsync"] =
+            "The invoice family's update-only write primitive: it writes its caller's payload, so it is itself a recognised " +
+            "generic update (GenericUpdateNames) and each of its callers is held to the refusal here.",
         ["Sprk.Bff.Api.Services.Dataverse.RecordOwnershipResolver::PutBackFilingAsync"] =
             "Rollback of this re-file's own failed write (#2143): writes back only the values this row held before the re-file " +
             "(`restore`, read from the row before the write), and only while the row is still filed as the re-file left it " +
@@ -1188,11 +1212,13 @@ public class ExternalDocumentNarrowingGuardTests
             Assert.True(use!.Refuses, $"{writer} should be seen calling RefuseAppOnlyWrite — the scan lost its signal.");
         }
 
-        // DataverseUpdateHandler refuses in UpdateAsync and writes in its private WriteAsync (listed with that reason).
+        // DataverseUpdateHandler refuses in UpdateAsync and writes in its private PatchAsync (listed with that reason;
+        // ebilling-r1 #2081 moved the write there from WriteAsync, and an invoice or line goes through the invoice-family
+        // update, which is a recognised generic update itself).
         Assert.True(scan.TryGetValue("Sprk.Bff.Api.Services.Dataverse.DataverseUpdateHandler::UpdateAsync", out var handler)
                     && handler.Refuses, "DataverseUpdateHandler.UpdateAsync should be seen calling RefuseAppOnlyWrite.");
-        Assert.True(scan.TryGetValue("Sprk.Bff.Api.Services.Dataverse.DataverseUpdateHandler::WriteAsync", out var write)
-                    && write.Writes, "DataverseUpdateHandler.WriteAsync should be seen calling the generic update.");
+        Assert.True(scan.TryGetValue("Sprk.Bff.Api.Services.Dataverse.DataverseUpdateHandler::PatchAsync", out var write)
+                    && write.Writes, "DataverseUpdateHandler.PatchAsync should be seen calling the generic update.");
 
         // The widened set (#2170 option c): the row-version update is seen.
         Assert.True(scan.TryGetValue("Sprk.Bff.Api.Services.Dataverse.RecordOwnershipResolver::SettleOwnerAsync", out var settle)
@@ -1209,7 +1235,7 @@ public class ExternalDocumentNarrowingGuardTests
         Assert.True(problems.Count == 0,
             "A member that calls a generic update (IFieldMappingDataverseService.UpdateRecordFieldsAsync, UpdateExistingRecordFieldsAsync " +
             "or UpdateRecordFieldsIfUnchangedAsync; IGenericEntityService.UpdateIfRowVersionMatchesAsync; " +
-            "IDocumentDataverseService.UpdateDocumentFieldsAsync, #2237) writes a payload it may " +
+            "IDocumentDataverseService.UpdateDocumentFieldsAsync, #2237; InvoiceFamilyCoreRecordGuard.UpdateExistingAsync) writes a payload it may " +
             "not have built. It must ask InheritedAccessPermission.RefuseAppOnlyWrite ITSELF before the write, so a document's D7 " +
             "link columns (sprk_parentdocument, sprk_relatedcommunication) and its Access Permission are never written by it " +
             "(task 188 round 4e, task 189 K5, #2170), or be listed as Type::Member in GenericWritersThatUpdateNoDocument with the " +
@@ -1228,6 +1254,26 @@ public class ExternalDocumentNarrowingGuardTests
 
         Assert.Equal(new[] { $"{handler.FullName}::UpdateAsync" }, ReferencersOf("WriteAsync"));
         Assert.Equal(new[] { $"{handler.FullName}::WriteAsync" }, ReferencersOf("UpdateWithOptimisticConcurrencyAsync"));
+        // ebilling-r1 #2081: the write member, reached only through the two above.
+        Assert.Equal(
+            new[] { $"{handler.FullName}::UpdateWithOptimisticConcurrencyAsync", $"{handler.FullName}::WriteAsync" },
+            ReferencersOf("PatchAsync"));
+    }
+
+    [Fact(DisplayName = "UAC review K1 (on e371dce6bf): FinanceRollupService.WriteRollupAsync, listed as writing only its own rollup fields, has the one production caller that passes them")]
+    public void FinanceRollupWriteRollupAsync_IsReachedOnlyFromRecalculateForEntityAsync()
+    {
+        // WriteRollupAsync takes the parent table and the counted fields as parameters, and stays internal for its unit test
+        // (FinanceRollupPendingSpendWriteTests). Its GenericWritersThatUpdateNoDocument reason holds only while its one BFF caller
+        // passes BuildRollupFields to sprk_matter or sprk_project; a second caller fails here.
+        var rollup = typeof(Sprk.Bff.Api.Services.Finance.FinanceRollupService);
+        var referencers = new SortedSet<string>(
+            IlCallScan.MethodReferences(BffTypes.Value)
+                .Where(r => r.Target.DeclaringType == rollup && r.Target.Name == "WriteRollupAsync")
+                .Select(r => SourceKey(r.Caller, r.CallerMethod)),
+            StringComparer.Ordinal);
+
+        Assert.Equal(new[] { $"{rollup.FullName}::RecalculateForEntityAsync" }, referencers);
     }
 
     [Fact(DisplayName = "Task 188 r4e / #2170 / #2237: negative control — per member: a write beside a refusing member, a mention only, the concrete service and an unasked document field update are found; a refusal in a lambda, a listed member, a typed update and an asked document field update are not; stale member entries are reported")]
@@ -1240,6 +1286,7 @@ public class ExternalDocumentNarrowingGuardTests
             typeof(GenericWriterControlTypedUpdate), typeof(GenericWriterControlListedButRefuses),
             typeof(GenericWriterControlTwoMembers), typeof(GenericWriterControlDocumentFieldsUnasked),
             typeof(GenericWriterControlDocumentFieldsThroughTheComposite), typeof(GenericWriterControlDocumentFieldsAsked),
+            typeof(GenericWriterControlThroughTheInvoiceFamilyUpdate),
         };
         static string Member(Type type, string member) => $"{type.FullName}::{member}";
         var listed = new Dictionary<string, string>
@@ -1260,6 +1307,7 @@ public class ExternalDocumentNarrowingGuardTests
                 $"NEW generic update writer without the refusal: {Member(typeof(GenericWriterControlDocumentFieldsUnasked), "WriteAsync")}",
                 $"NEW generic update writer without the refusal: {Member(typeof(GenericWriterControlMentionOnly), "WriteAsync")}",
                 $"NEW generic update writer without the refusal: {Member(typeof(GenericWriterControlThroughTheConcreteService), "WriteAsync")}",
+                $"NEW generic update writer without the refusal: {Member(typeof(GenericWriterControlThroughTheInvoiceFamilyUpdate), "WriteAsync")}",
                 $"NEW generic update writer without the refusal: {Member(typeof(GenericWriterControlTwoMembers), "WritesWithoutRefusingAsync")}",
                 "STALE entry Spaarke.ArchTests.GenericWriterControlGone::WriteAsync: it no longer calls the generic update — remove it.",
                 $"STALE entry {Member(typeof(GenericWriterControlListed), "ReadAsync")}: it no longer calls the generic update — remove it.",
@@ -1375,6 +1423,10 @@ public class ExternalDocumentNarrowingGuardTests
         [nameof(Spaarke.Dataverse.IGenericEntityService.UpdateIfRowVersionMatchesAsync)] = typeof(Spaarke.Dataverse.IGenericEntityService),
         // #2237: the sprk_document field update; the AI document-profile mapper's output is written through it.
         [nameof(Spaarke.Dataverse.IDocumentDataverseService.UpdateDocumentFieldsAsync)] = typeof(Spaarke.Dataverse.IDocumentDataverseService),
+        // ebilling-r1 (#2081): the invoice family's update-only write, which writes whatever payload its caller hands it
+        // (DataverseUpdateHandler, the Update Record core and the field-mapping push write an invoice or line through it).
+        [nameof(Sprk.Bff.Api.Services.Dataverse.InvoiceFamilyCoreRecordGuard.UpdateExistingAsync)] =
+            typeof(Sprk.Bff.Api.Services.Dataverse.InvoiceFamilyCoreRecordGuard),
     };
 
     private static bool IsGenericUpdate(MethodBase method) =>
@@ -1821,6 +1873,14 @@ internal sealed class GenericWriterControlDocumentFieldsAsked(Spaarke.Dataverse.
         Sprk.Bff.Api.Services.Dataverse.InheritedAccessPermission.RefuseAppOnlyWrite("sprk_document", payload.Keys) is null
             ? documents.UpdateDocumentFieldsAsync(id.ToString(), payload, CancellationToken.None)
             : Task.CompletedTask;
+}
+
+/// <summary>MUST FIRE (ebilling-r1 #2081): a payload it did not build, written through the invoice family's update-only write.</summary>
+internal sealed class GenericWriterControlThroughTheInvoiceFamilyUpdate(Spaarke.Dataverse.IFieldMappingDataverseService writes)
+{
+    internal Task<string?> WriteAsync(string table, Guid id, Dictionary<string, object?> payload) =>
+        Sprk.Bff.Api.Services.Dataverse.InvoiceFamilyCoreRecordGuard.UpdateExistingAsync(
+            writes, table, id, payload, impersonateSystemUserId: null, notFoundAsReadFailed: false, CancellationToken.None);
 }
 
 /// <summary>MUST NOT FIRE (r4e): a typed update with literal keys, not the generic update.</summary>

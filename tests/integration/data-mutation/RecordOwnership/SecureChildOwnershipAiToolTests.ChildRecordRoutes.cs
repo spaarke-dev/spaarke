@@ -265,6 +265,24 @@ public sealed partial class SecureChildOwnershipAiToolTests
         _shareTable.WriteLog.Should().BeEmpty("an ordinary record's child is never mirrored or shared");
     }
 
+    [Fact(DisplayName = "Owner decision 2026-10-29 must fire: a child created through the route under a FILED person-owned work assignment is owned by its matter's business-unit team")]
+    public async Task ChildCreate_AToDoUnderAFiledPersonOwnedWorkAssignment_IsOwnedByItsMattersBusinessUnitTeam()
+    {
+        var workAssignment = Guid.NewGuid();
+        _world.WithRecord("sprk_workassignment", workAssignment, Directory.GeneralBu, owningTeam: null,
+            extra: new() { ["sprk_regardingmatter"] = new EntityReference("sprk_matter", OrdinaryMatter) });
+
+        var result = await CreateChild("sprk_todo", new()
+        {
+            ["sprk_name"] = "Call back",
+            ["sprk_RegardingWorkAssignment@odata.bind"] = $"/sprk_workassignments({workAssignment:D})",
+        });
+
+        Status(result).Should().Be(StatusCodes.Status201Created, Detail(result));
+        Owner(_appCreates.Should().ContainSingle().Subject.Fields).Should().Be(Directory.ChildTeam,
+            $"the work assignment belongs to its matter: the matter's unit, never the work assignment's own ({Directory.GeneralTeam:D})");
+    }
+
     [Fact]
     public async Task ChildCreate_AMemoUnderASecureMatter_IsOwnedByTheNamedTeam()
     {
@@ -1603,7 +1621,7 @@ public sealed partial class SecureChildOwnershipAiToolTests
         using var document = JsonDocument.Parse(json);
 
         var result = await ChildRecordEndpoints.RefileAsync(
-            "sprk_todo", Todo, document.RootElement.Clone(), _user, _world.Resolver(), Restamper(), Children(),
+            "sprk_todo", Todo, document.RootElement.Clone(), _user, _world.Resolver(), Restamper(), Children(), AppEntities(),
             HttpContextOfCaller(), NullLogger<Program>.Instance, CancellationToken.None);
 
         Status(result).Should().Be(StatusCodes.Status400BadRequest);
@@ -1625,7 +1643,7 @@ public sealed partial class SecureChildOwnershipAiToolTests
 
         var result = await ChildRecordEndpoints.RefileAsync(
             "sprk_todo", Todo, Payload(new() { ["sprk_RegardingMatter@odata.bind"] = $"/sprk_matters({OrdinaryMatter:D})" }),
-            _user, ownership, Restamper(), Children(), HttpContextOfCaller(), NullLogger<Program>.Instance,
+            _user, ownership, Restamper(), Children(), AppEntities(), HttpContextOfCaller(), NullLogger<Program>.Instance,
             CancellationToken.None);
 
         Status(result).Should().Be(StatusCodes.Status409Conflict, Detail(result));
@@ -1695,7 +1713,7 @@ public sealed partial class SecureChildOwnershipAiToolTests
 
     private Task<IResult> RefileChild(string table, Guid id, Dictionary<string, object?> payload) =>
         ChildRecordEndpoints.RefileAsync(
-            table, id, Payload(payload), _user, _world.Resolver(), Restamper(), Children(), HttpContextOfCaller(),
+            table, id, Payload(payload), _user, _world.Resolver(), Restamper(), Children(), AppEntities(), HttpContextOfCaller(),
             NullLogger<Program>.Instance, CancellationToken.None);
 
     /// <summary>PATCH /api/v1/events/{id}/filing's REAL handler (the route's filters are pinned through the real mapper by

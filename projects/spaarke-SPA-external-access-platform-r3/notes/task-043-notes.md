@@ -145,3 +145,10 @@ One adversarial pass, no F-class finding. Five known-limit items fixed in scope 
 - `external-spa-prod` created empty, with required reviewer `spaarke-dev` (self-review allowed: single-owner repo) and deployment branches limited to `master` (custom branch policy). Its variables and secret wait on the owner (section 3.2).
 - Rollback: `gh api -X DELETE repos/spaarke-dev/spaarke/environments/<name>`.
 - Not run yet: the section 7 dispatches (dev Teams package, then dev SPA). The dev SPA build also needs task 041 step 1 (CIAM `user_impersonation`), which waits on an interactive CIAM sign-in.
+
+## Closed 2026-10-29: remainder handed to provisioning (#2443)
+
+- Owner direction 2026-10-29: hand the production setup to `customer-provisioning-orchestration-r1`, which controls the demo environment (the first production instance).
+- Provisioning accepted, tracked as #2443. It covers §3.2 (the `external-spa-prod` variables, `TEAMS_APP_ID` and `AZURE_SWA_TOKEN_EXTERNAL_SPA_PROD`), §3.3 (prod workforce and CIAM redirects, the `external.spaarke.com` custom domain/DNS, stamp BFF CORS) and the prod Teams dry run (§7 step 4). Each live write gets the owner's own OK.
+- Already in place (provisioning read-only check): `external-spa-prod` has required reviewers and a `master`-only branch policy, and 0 variables; `swa-spaarke-external-spa-prod` already has the custom domain `external.spaarke.com` bound (DNS and validation state to be confirmed).
+- Acceptance: actionlint now runs as a CI check and passes on master. The dev path is proven live (Teams package run 39489551799; SPA deploys of 2026-10-20 and 2026-10-21). The prod criteria are met statically. The live prod package and the prod SPA dispatch are #2443 and task 073.

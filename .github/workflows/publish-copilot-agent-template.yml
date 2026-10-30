@@ -168,11 +168,16 @@ jobs:
           blob upload --name "${BLOB}" --file "out/${BLOB}" --overwrite true --metadata "sourcesha=${GITHUB_SHA}"
           blob upload --name "copilot-agent-template-${BUILD_ID}-${GITHUB_RUN_ATTEMPT}.json" --file out/manifest.json --overwrite false
 
-          # Rollback pointer: keep the manifest being replaced.
+          # Rollback pointer: keep the manifest being replaced. A re-run of THIS commit finds its own manifest in latest
+          # already; copying that would lose the real previous version.
           latest_exists=$(blob exists --name copilot-agent-template-latest.json --query exists -o tsv)
           if [ "${latest_exists}" = "true" ]; then
             blob download --name copilot-agent-template-latest.json --file out/previous-latest.json --overwrite true
-            blob upload --name copilot-agent-template-latest.previous.json --file out/previous-latest.json --overwrite true
+            if grep -q "${GITHUB_SHA}" out/previous-latest.json; then
+              echo "latest already names this commit (re-run) — keeping the existing rollback pointer."
+            else
+              blob upload --name copilot-agent-template-latest.previous.json --file out/previous-latest.json --overwrite true
+            fi
           fi
           blob upload --name copilot-agent-template-latest.json --file out/manifest.json --overwrite true
 

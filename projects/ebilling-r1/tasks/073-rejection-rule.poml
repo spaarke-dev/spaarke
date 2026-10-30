@@ -1,0 +1,120 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="073" project="ebilling-r1">
+  <metadata>
+    <title>Rejection rule and reject-eligibility at publish</title>
+    <phase>3 Rules (WP3) — wave W3-4</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Security-class guard: a submission may be rejected only under all three FR-26 conditions; AI must never reject (I-5). A wrong guard rejects valid invoices (NFR-06).</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>A small, fully specified boolean contract with many negative cases; xhigh effort for exhaustive condition coverage and seeding proofs.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>072, 025</deps>
+    <tags>bff, rules, security</tags>
+    <estimated-effort>1-2 days</estimated-effort>
+  </metadata>
+
+  <prompt>Implement the FR-26 rejection rule as a pure decider over 072's findings (Rejected only when a Reject-consequence rule fails, every field it read has combined confidence at or above the settings threshold, and the type is reject-eligible; otherwise Accepted with the failure as a Flag), and extend 070's billing save-time validation and billing gate so a Reject consequence on a non-eligible type is refused at publish and at evaluation.</prompt>
+
+  <role>SPAARKE platform developer. Expert in fail-closed decision logic and negative-case testing.</role>
+
+  <goal>A deterministic decider returning Accepted or Rejected with the deciding findings and the values read; the publish path refuses Reject on TimeIncrement, DailyHoursCap, NonBillableActivity and AiObservation; seeded proofs show each guard is load-bearing; an NFR-06 property test proves low-confidence reads never reject.</goal>
+
+  <context>
+    <background>Spec FR-26 (acceptance: tests for each condition false; an AiObservation rule configured as Reject is refused at publish), I-5, MUST "MUST NOT reject a submission on an AI observation or on low-confidence inputs", NFR-06, Processing Pipeline step 5 ("Decide — Submission service"), design.md 6.1 "Allowed consequences" and 7.5. Reject-eligible catalogue positions 1, 2, 6-10 map to FR-24 order: ApprovedTimekeeper, ApprovedRate, ExpenseRule, InvoiceAge, CoreRecordWindow, Duplicate, RequiredData. Not eligible: TimeIncrement (3), DailyHoursCap (4), NonBillableActivity (5), AiObservation (11). Duplicate rejects only at invoice level (design 6.1: Reject for the invoice, Flag for a line). Threshold: 025's settings reader (reliability threshold, default 0.90). Read fields and their combined confidence (D-47, from 046) come on each 071 finding. Consequence is the 019 column on the policy version; 070's ValidateForSave takes (type, body, template) today (Services/Signals/PolicyVersionValidator.cs:138), so the consequence check needs a billing overload or parameter.</background>
+    <relevant-files>
+      <file role="new">src/server/api/Sprk.Bff.Api/Services/Finance/SubmissionRejectionRule.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Signals/PolicyVersionValidator.cs (billing save path: consequence eligibility)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Signals/Billing/ (070's catalogue: eligibility and allowed consequences per type; billing gate)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/DI/FinanceModule.cs (shared append point)</file>
+      <file role="new">tests/unit/domain/Signals/Billing/SubmissionRejectionRuleTests.cs</file>
+      <file role="modify">tests/unit/domain/Signals/PolicyVersionValidatorTests.cs</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="072" status="pending">Findings with read fields and confidence</dependency>
+      <dependency task="025" status="pending">Settings reader: reliability threshold</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="D-89, 071 adversarial review F1">D-89 ("ApprovedTimekeeper holds, never auto-rejects") must be enforced in 073, not left to a confidence coincidence.
+- Today it rests on 046's ReferenceMissingCap (0.80) staying below ReliabilityThreshold. Both are tunable, and with threshold = 0.80 the comparison at HandlerContext.cs:136 lets an ApprovedTimekeeper Reject rule reject.
+- Refuse a Reject consequence for ApprovedTimekeeper at publish, as for AiObservation. The rejection rule also treats ApprovedTimekeeper findings as hold-only.
+- Add an EbillingSettingsReader validation that ReferenceMissingCap is below ReliabilityThreshold, so an out-of-range save is refused.
+- The same applies to 071 judgment call 2: ApprovedRate with no approved rate holds.
+- Must-fire tests: threshold 0.80 with an ApprovedTimekeeper Reject rule never rejects; publishing that rule is refused.</constraint>
+    <constraint source="spec FR-26, I-5">Reject requires all three conditions; any one false gives Accepted plus a Flag finding. AiObservation never rejects, even if a stored row claims Reject (defence in depth beyond publish validation).</constraint>
+    <constraint source="project">Eligibility and allowed consequences are code on the closed catalogue keyed by RuleType, not Dataverse option values and not configuration.</constraint>
+    <constraint source="project">Fail-closed on missing data: a read field with no confidence, a threshold that cannot be read, or an unknown consequence value is treated as "not reliable", so the outcome is Accepted plus Flag, never Rejected.</constraint>
+    <constraint source="project">The evaluation-time gate refuses a stored version whose consequence is not allowed for its type (rows can be authored directly in Dataverse — PolicyVersionValidator.cs:49-52 remarks); it logs and meters with 070's reason vocabulary.</constraint>
+    <constraint source="project">Ontology save and evaluation paths unchanged (existing tests unmodified).</constraint>
+    <constraint source=".claude/constraints/bff-extensions.md">BFF hygiene: publish-size delta, no new HIGH CVE, no package.</constraint>
+    <constraint source="071 fix round 2 (reported defects)">(1) When BillingFinding.DetailWithheld is true (D-112), the finding is rendered and stored only with BillingRuleCatalogue.WithheldDuplicateTemplate. Never use the rule's own or the default template, and never write a withheld value into the Signal or its facts. Required test: a withheld Duplicate stores no tracking number in any field. (2) The default Duplicate template in BillingRuleDraftTranslator.Wording(Duplicate) names {{line.date}} and {{line.timekeeperName}}, which an invoice-level Duplicate finding lacks. Choose the template by subject (invoice vs line) so an invoice-level finding is never refused for absent tokens. Required test: an invoice-level Duplicate with the default template is written.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ebilling-r1/spec.md (FR-26, I-5, NFR-06, Processing Pipeline)</file>
+      <file>projects/ebilling-r1/design.md (6.1, 7.5)</file>
+      <file>projects/ebilling-r1/notes/071-read-fields-per-type.md (written by 071)</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Step-0 check: git merge-base --is-ancestor f292ad119 HEAD. Confirm 070's option-value-to-position pinning and 071's read-field contract.</step>
+    <step order="1">Add to 070's catalogue: reject-eligible set and allowed consequences per type (design 6.1).</step>
+    <step order="2">Decider: inputs = findings, consequence per finding's policy version, threshold; output = Accepted or Rejected, deciding findings, values read; invoice-level Duplicate may reject, line-level Duplicate never does.</step>
+    <step order="3">Save path: billing ValidateForSave refuses a consequence not allowed for the type with a stable reason (e.g. consequence_not_allowed); billing gate refuses the same at evaluation.</step>
+    <step order="4">Tests: each condition false on its own (consequence Flag; one read field below threshold; one read field with no confidence; non-eligible type configured Reject); all three true rejects; AiObservation with Reject stored refused at publish and never rejects at decide; threshold change takes effect without restart (settings reader); NFR-06 property: for every eligible type, any failure with at least one read field below threshold yields Accepted.</step>
+    <step order="5">Seeding proof: remove the confidence condition, the eligibility condition and the publish-time refusal in turn; the named tests fail; restore. Record outputs in notes.</step>
+    <step order="6">dotnet build and dotnet test green; publish-size delta and vulnerable-package check recorded.</step>
+    <step order="7">Request ontology-r1 review of the PolicyVersionValidator change; record outcome in notes.</step>
+    <step order="8">Update TASK-INDEX.md: this task's status cell to "✅ [done]".</step>
+    <step order="9">Record deviations in projects/ebilling-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the spec's reject-eligible numbering (1, 2, 6-10) does not map onto the 11 types as 070 ordered them, or design 6.1's allowed consequences contradict FR-26, STOP and escalate with the mapping table; do not pick one silently.</trigger>
+    <trigger>If 071's findings do not carry the read fields with combined confidence, STOP: the decider must not infer them.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>None for submission decisions (grep "Reject" under Services/Finance finds only InvoiceReviewService's not-an-invoice rejection); consequence validation would otherwise live in PolicyVersionValidator.cs.</existing>
+    <extension>The publish-time check extends 070's billing save path and gate. The decider is new because no service decides a submission outcome; 044 / 049 call it.</extension>
+    <cost-of-doing-nothing>Without it the job either never rejects (FR-26 fails) or rejects on AI observations and misread values, violating I-5 and NFR-06.</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="dotnet">build, test</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Finance/SubmissionRejectionRule.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Signals/PolicyVersionValidator.cs and Services/Signals/Billing/ (eligibility, consequence checks)</output>
+    <output type="test">tests/unit/domain/Signals/Billing/SubmissionRejectionRuleTests.cs; tests/unit/domain/Signals/PolicyVersionValidatorTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Rejected only when consequence is Reject, every read field's combined confidence is at or above the threshold, and the type is one of ApprovedTimekeeper, ApprovedRate, ExpenseRule, InvoiceAge, CoreRecordWindow, Duplicate (invoice level), RequiredData.</criterion>
+    <criterion testable="true">Each condition false on its own yields Accepted with the failure as a Flag finding (one test per condition, including missing confidence and unreadable threshold).</criterion>
+    <criterion testable="true">ValidateForSave refuses Reject for TimeIncrement, DailyHoursCap, NonBillableActivity and AiObservation with a stable reason; the billing gate refuses such a stored row; a stored AiObservation Reject row never rejects a submission.</criterion>
+    <criterion testable="true">NFR-06 property test: no eligible-type failure with any below-threshold read field rejects.</criterion>
+    <criterion testable="true">Seeding proofs for the confidence, eligibility and publish-time guards recorded in notes.</criterion>
+    <criterion testable="true">Existing Ontology validator tests unmodified and green; dotnet build 0 errors.</criterion>
+    <criterion testable="true">Publish-size delta measured against a fresh master build and recorded in task notes; no new HIGH CVE.</criterion>
+    <criterion testable="true">ontology-r1 review recorded in task notes.</criterion>
+    <criterion testable="true">Cover the stated contract plus the edge cases named above. Anything beyond that needs a one-line justification in task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>076's publish route calls the billing ValidateForSave; once this task lands, add (or confirm 076 added) an endpoint test that publishing a rule set containing an AiObservation Reject rule returns 400 and publishes nothing. Touches the shared append point FinanceModule.cs: re-read before editing, add only this task's lines. 049 is the caller (decide step).</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load the knowledge files first. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

@@ -107,7 +107,7 @@ public partial class SignalReevaluationJobTests
         var update = h.Org.ConditionalUpdates.Should().ContainSingle().Subject;
         update.Id.Should().Be(signalId);
         update.Fields["sprk_resolutiontype"].Should().BeEquivalentTo(new OptionSetValue(SignalWriter.ResolutionConditionCleared));
-        h.Sysadmin.AggregateFetches.Should().HaveCount(2).And.OnlyContain(f => f.Contains(MatterId.ToString("D")) && !f.Contains(OtherMatterId.ToString("D")),
+        h.Sysadmin.AggregateFetches.Should().HaveCount(4, "three invoice reads (D-130: billed, approved, billed re-check) and one budget query").And.OnlyContain(f => f.Contains(MatterId.ToString("D")) && !f.Contains(OtherMatterId.ToString("D")),
             "the trigger reads the base rows of the ONE matter");
     }
 

@@ -1,0 +1,26 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0338",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0338","generator_id":"gen_eval_set.py@1 F-0338","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0338.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-02"},
+ "header":{"firm":"Northcott Whitcombe PC","firm_invoice_number":"INV-2025-66539","invoice_date":"2026-08-04","billing_period_start":"2026-07-01","billing_period_end":"2026-07-31","firm_matter_reference":"34667-0025","po_number":"PO-4592955","fees_total":3311.5,"expenses_total":2505.5,"adjustments_total":0.0,"total_due":5817.0,"currency":"USD"},
+ "timekeepers":[{"name":"Aisha Hargrove","title":"Paralegal","rate":165.0,"billed_as":"Aisha Hargrove"},{"name":"Dalia Mbeki","title":"Associate","rate":340.0,"billed_as":"Dalia Mbeki"},{"name":"Hannah Nwosu","title":"Paralegal","rate":160.0,"billed_as":"Hannah Nwosu"},{"name":"Hector Lindqvist","title":"Partner","rate":500.0,"billed_as":"Hector Lindqvist"},{"name":"Imani Delacroix","title":"Associate","rate":265.0,"billed_as":"Imani Delacroix"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2026-07-02","timekeeper":"Dalia Mbeki","timekeeper_name":"Dalia Mbeki","timekeeper_title":"Associate","title":"Assoc","hours":2.6,"rate":340.0,"amount":884.0,"narrative":"Review privilege log entries before service","codes":["L140","A104"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"expense","date":"2026-07-06","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":323.94,"amount":323.94,"narrative":"Document hosting and processing vendor","codes":["E118"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2026-07-14","timekeeper":"Hannah Nwosu","timekeeper_name":"Hannah Nwosu","timekeeper_title":"Paralegal","title":"Para","hours":2.3,"rate":160.0,"amount":368.0,"narrative":"Review and summarize deposition transcript of Meridian Foods witness","codes":["L330","A104"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2026-07-14","timekeeper":"Imani Delacroix","timekeeper_name":"Imani Delacroix","timekeeper_title":"Associate","title":"Assoc","hours":0.8,"rate":265.0,"amount":212.0,"narrative":"Review privilege log entries before service","codes":["L140","A104"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2026-07-16","timekeeper":"Imani Delacroix","timekeeper_name":"Imani Delacroix","timekeeper_title":"Associate","title":"Assoc","hours":1.1,"rate":265.0,"amount":291.5,"narrative":"Review documents produced by Solano Freight for responsiveness","codes":["L320","A104"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2026-07-21","timekeeper":"Hannah Nwosu","timekeeper_name":"Hannah Nwosu","timekeeper_title":"Paralegal","title":"Para","hours":1.4,"rate":160.0,"amount":224.0,"narrative":"Prepare production set and cover correspondence for service on Meridian Foods","codes":["L320","A110"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"expense","date":"2026-07-22","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":1425.29,"amount":1425.29,"narrative":"Document hosting and processing vendor","codes":["E118"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2026-07-24","timekeeper":"Aisha Hargrove","timekeeper_name":"Aisha Hargrove","timekeeper_title":"Paralegal","title":"Para","hours":0.8,"rate":165.0,"amount":132.0,"narrative":"Review documents produced by Harbor Point Capital for responsiveness","codes":["L320","A104"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"fee","date":"2026-07-27","timekeeper":"Hector Lindqvist","timekeeper_name":"Hector Lindqvist","timekeeper_title":"Partner","title":"Ptr","hours":2.4,"rate":500.0,"amount":1200.0,"narrative":"Research authority for settlement proposal","codes":["L250","A102"],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"expense","date":"2026-07-28","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":756.27,"amount":756.27,"narrative":"Court reporter and transcript - deposition","codes":["E115"],"page":1,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["82 Lakeshore Drive","Portland","Tax ID 65-2739327"],"template":"T18","pages":1},
+ "rule_set_id":"RS-02",
+ "context":{"matter_open":"2025-05-07","matter_close":"2026-10-29","matter_budget":48268.0,"approved_timekeepers":["Tomas Oyelaran","Dalia Mbeki","Clara Thornbury","Hannah Nwosu","Aisha Hargrove","Ingrid Halloran","Imani Delacroix","Hector Lindqvist"],"invoice_received_date":"2026-08-04"},
+ "expected_findings":[],
+ "seeded_violations":0
+}

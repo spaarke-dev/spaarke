@@ -1,0 +1,29 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0202",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0202","generator_id":"gen_eval_set.py@1 F-0202","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0202.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-04"},
+ "header":{"firm":"Draycott Ellison PC","firm_invoice_number":"INV-2025-80772","invoice_date":"2025-09-01","billing_period_start":"2025-08-01","billing_period_end":"2025-08-31","firm_matter_reference":"32034-0016","po_number":"PO-4525616","fees_total":5995.0,"expenses_total":3111.67,"adjustments_total":0.0,"total_due":9106.67,"currency":"USD"},
+ "timekeepers":[{"name":"Dalia Abernathy","title":"Associate","rate":345.0,"billed_as":"Abernathy, D."},{"name":"Dalia Nwosu","title":"Partner","rate":710.0,"billed_as":"Nwosu, D."},{"name":"Emeka Quillen","title":"Partner","rate":545.0,"billed_as":"Quillen, E."},{"name":"Farah Ramanathan","title":"Associate","rate":380.0,"billed_as":"Ramanathan, F."},{"name":"Jordan Mbeki","title":"Paralegal","rate":175.0,"billed_as":"Mbeki, J."}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2025-08-25","timekeeper":"Abernathy, D.","timekeeper_name":"Dalia Abernathy","timekeeper_title":"Associate","title":"Assoc","hours":0.25,"rate":345.0,"amount":86.25,"narrative":"Conference with client regarding budget variance for the vendor agreement","codes":["L150","A106"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2025-08-08","timekeeper":"Nwosu, D.","timekeeper_name":"Dalia Nwosu","timekeeper_title":"Partner","title":"Ptr","hours":1.75,"rate":710.0,"amount":1242.5,"narrative":"Draft motion for preliminary injunction in the regulatory inquiry","codes":["L220","A103"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2025-08-08","timekeeper":"Quillen, E.","timekeeper_name":"Emeka Quillen","timekeeper_title":"Partner","title":"Ptr","hours":2.75,"rate":945.0,"amount":2598.75,"narrative":"Research pleading standards applicable to the customs audit","codes":["L210","A102"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2025-08-08","timekeeper":"Ramanathan, F.","timekeeper_name":"Farah Ramanathan","timekeeper_title":"Associate","title":"Assoc","hours":1.75,"rate":380.0,"amount":665.0,"narrative":"Research pleading standards applicable to the lease dispute","codes":["L210","A102"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2025-08-08","timekeeper":"Ramanathan, F.","timekeeper_name":"Farah Ramanathan","timekeeper_title":"Associate","title":"Assoc","hours":1.5,"rate":380.0,"amount":570.0,"narrative":"Prepare updated litigation budget for the construction contract","codes":["L150","A103"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2025-08-26","timekeeper":"Ramanathan, F.","timekeeper_name":"Farah Ramanathan","timekeeper_title":"Associate","title":"Assoc","hours":1.5,"rate":380.0,"amount":570.0,"narrative":"Conference with client regarding budget variance for the insurance coverage issue","codes":["L150","A106"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2025-08-13","timekeeper":"Mbeki, J.","timekeeper_name":"Jordan Mbeki","timekeeper_title":"Paralegal","title":"Para","hours":1.5,"rate":175.0,"amount":262.5,"narrative":"Prepare updated litigation budget for the supply agreement","codes":["L150","A103"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"expense","date":"2025-08-01","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":47.0,"rate":0.66,"amount":31.02,"narrative":"Mileage to courthouse","codes":["E109"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"expense","date":"2025-08-11","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":777.26,"amount":777.26,"narrative":"Document hosting and processing vendor","codes":["E118"],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"expense","date":"2025-08-13","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":27.21,"amount":27.21,"narrative":"Long distance conference call charges","codes":["E105"],"page":1,"narrative_style":"clear"},
+  {"n":11,"line_type":"expense","date":"2025-08-18","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":2276.18,"amount":2276.18,"narrative":"Consulting expert fees","codes":["E119"],"page":2,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["398 Elm Court","Portland","Tax ID 55-3245657"],"template":"T24","pages":2},
+ "rule_set_id":"RS-04",
+ "context":{"matter_open":"2024-05-03","matter_close":"2025-11-29","matter_budget":61426.0,"approved_timekeepers":["Dalia Abernathy","Farah Ramanathan","Dalia Nwosu","Daniel Lindqvist","Yusuf Ramanathan","Jordan Mbeki","Imani Pemberton","Emeka Quillen"],"invoice_received_date":"2025-09-10"},
+ "expected_findings":[
+  {"rule_id":"RS-04-R02","rule_type":"ApprovedRate","scope":"line","line_refs":[3],"consequence":"Reduce"}
+ ],
+ "seeded_violations":1
+}

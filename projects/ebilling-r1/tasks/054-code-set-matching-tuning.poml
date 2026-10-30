@@ -1,0 +1,113 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="054" project="ebilling-r1">
+  <metadata>
+    <title>Code-set matching: tuning data, full coverage and an AI review step</title>
+    <phase>2 Submission and extraction (WP2)</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>New Action + Binding (closed catalog), new Dataverse columns, changes to the 048 proposal service and the 047 per-line suggestion hook, and an evaluation gate with must-pass cases.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Matching design (pre-rank + Action decision + "none fits"), prompt and few-shot design, and an evaluation that must reach 11/11 on the seeded data.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P2-D</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>047, 048</deps>
+    <tags>bff, ai, dataverse, jps</tags>
+    <estimated-effort>2 days</estimated-effort>
+  </metadata>
+
+  <prompt>Owner decision D-93 (2026-10-16), replacing 048's embeddings-only proposals: (1) add the tuning information needed so every matter type and practice area is covered by a sensible code set; (2) add matching assistance (descriptions, hints, examples, a classifier/matching prompt) to improve matching; (3) add an AI-reviewed step that decides among candidates and can answer "none fits". 048's probe on dev mapped Commercial -> Trademark, Mergers &amp; Acquisitions -> Bankruptcy and Commercial Transactions -> Trademark although the UTBMS Project (transactional) set is seeded: names-only embeddings ("UTBMS Project") carry no meaning. Make every one of the 11 dev reference rows map correctly, and make "none fits" an explicit, visible outcome instead of a wrong guess.</prompt>
+
+  <role>SPAARKE platform developer. Expert in BFF services, JPS Actions and Bindings (ADR-039), Dataverse schema and AI evaluation. Follow ADRs strictly.</role>
+
+  <goal>Each code set carries admin-editable tuning data (what work it covers, which matter types / practice areas it fits, synonyms); the six UTBMS task sets are seeded with it; proposals pre-rank candidates with embeddings over a rich set profile, then an Action `INVOICE-CODESET-MATCH@v1` picks one or answers "none fits" with a reason and confidence, using confirmed mappings as in-prompt examples; GET proposals reports coverage (mapped / proposed / none-fits) so an admin sees every gap; the 047 per-line hook uses the same matcher; an evaluation over the 11 dev rows passes 11/11.</goal>
+
+  <context>
+    <background>048 (notes/048-code-set-mapping-proposals.md section 3) has the probe table. sprk_billingcodeset has only name, body, version, source URL; sprk_billingcode rows carry sprk_description and sprk_guidancetext (seeded by scripts/ebilling/Seed-EbillingBillingCodes.ps1 from per-set CSVs: litigation, counseling, project, bankruptcy, IP patent prosecution, trademark, activity, expense). D-61/D-64: R1 does not depend on the tuning platform, but stores confirmations in structured form so they can become examples; a confirmed mapping (sprk_defaultbillingcodeset set by the 048 confirm route) is exactly such a confirmation, so using confirmed mappings as few-shot examples is in scope here. Expected answers for the dev rows (verify against the code descriptions, record any you change with the reason): Litigation, Appellate -> UTBMS Litigation; Patent, IP Patents -> IP Patent Prosecution; Trademark, IP Trademarks -> Trademark; Employment -> Counseling (or Litigation if the evidence says so; record it); Commercial, Mergers &amp; Acquisitions, Commercial Transactions -> UTBMS Project; Banking &amp; Finance -> Project or Bankruptcy, decided by the set descriptions (record the reasoning). Activity and Expense sets are never candidates (048 rule: a set is usable only with at least one active Task code).</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Finance/Coding/CodeSetProposalService.cs (048)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/Finance/CodeSetMappingEndpoints.cs (048; response gains coverage + noneFits rows)</file>
+      <file role="new">infra/dataverse/actions/invoice-codeset-match.action.json; infra/dataverse/outputschemas/invoice-codeset-match.schema.json; infra/dataverse/inputschemas/invoice-codeset-match.input.schema.json</file>
+      <file role="modify">infra/dataverse/sprk_playbookconsumer-rows.json (Binding row) and ConsumerTypes.All (same change), plus the eval family in tests/integration/contract/Eval/golden-utterances.json</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/IInvoiceAi.cs / InvoiceAi.cs (one capability method for the match, if the existing members do not fit; ADR-013 facade)</file>
+      <file role="modify">scripts/ebilling/Deploy-EbillingBillingCodeSchema.ps1 (additive columns) and scripts/ebilling/Seed-EbillingBillingCodes.ps1 + its CSVs or a sibling data file (tuning text for the six task sets; idempotent, drift reported not overwritten)</file>
+      <file role="modify">src/dataverse/solutions/SpaarkeMaster/Entities/sprk_billingcodeset/Entity.xml and its main form (new columns visible and editable to admins)</file>
+      <file role="canonical-reference">047: infra/dataverse/actions/invoice-line-code.action.json, Services/Finance/Coding/LineCodingService.cs, scripts/ebilling/Ensure-ActionRow.ps1 (Action + Binding + eval family pattern)</file>
+      <file role="new">tests/integration/seam/Finance/CodeSetMatchingSeamTests.cs; tests/integration/contract/Api/Finance/ (extend 048's contract tests); an evaluation case file for the 11 dev rows (follow the repo's eval convention: tests/eval/ or the project's notes/evaluation-set/, whichever the existing Action evals use)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="047" status="required">Action/Binding pattern, CodeSetResolver, ICodeSetSuggestionProvider.</dependency>
+      <dependency task="048" status="required">CodeSetProposalService, proposal and confirm routes.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="CLAUDE.md §10 / §11">BFF changes follow .claude/constraints/bff-extensions.md; every new column, Action, Binding, facade member and type answers the three §11 questions in the notes. Publish-size delta against a fresh master build.</constraint>
+    <constraint source="D-93 (owner)">Every active matter type and practice area ends in exactly one of: mapped (confirmed), proposed (with set, confidence, reason, runner-up), or none-fits (with reason and the closest set named as context). A none-fits row is never given a proposal the admin could confirm by mistake; it tells the admin to map by hand or add a code set.</constraint>
+    <constraint source="FR-22">Still nothing is written except by the confirm route acting on one admin-confirmed row. The per-line hook's suggestion stays flagged for review and is never persisted as a mapping; a none-fits result returns no suggestion.</constraint>
+    <constraint source="D-52 / ADR-013 / ADR-039">The Action owns the prompt, model tier and output schema (JPS mirror, Fast tier, temperature 0, closed output: chosen code-set id from the candidate list or "none", confidence, reason). No prompt text, model or schema literal in C#. The output guard refuses any id not in the candidate list (same discipline as 047's LineCodingGuard). Add to ConsumerTypes.All only together with its Binding row and eval family.</constraint>
+    <constraint source="Matching design">Embeddings rank candidates over a set profile built from name + new description + match hints + its Task codes' descriptions (cached per scope); the top candidates (all usable sets when there are few, otherwise top 4) go to the Action with their profiles and up to N confirmed mappings as examples (N in settings or a constant with a comment; never examples from another tenant/environment). If the Action fails or is unavailable, fall back to the embedding result marked lowConfidence / unreviewed — never fail the proposals list, never fabricate a "none fits".</constraint>
+    <constraint source="Dataverse write path">New columns are additive on sprk_billingcodeset (project-owned, task 018): description (multiline) and match hints (multiline), names per the existing sprk_ naming; no change to Ontology tables. Seeding is idempotent and reports drift rather than overwriting an admin's edits.</constraint>
+    <constraint source="DEF-020 / D-51">Use the existing tiers; do not change the OpenAI client or tier map (gpt-5.4-mini low effort is blocked by #2011).</constraint>
+    <constraint source="Live changes">Run the schema and seed scripts on dev (WhatIf first, then real, then a no-change rerun) for the additive columns and tuning text. Hold Action / Binding seeding for task 053's deploy order, as 047 and 048 did, and add the commands to 053's POML.</constraint>
+    <constraint source="Evaluation (must-pass)">The 11 dev reference rows, with the expected answers in the background (adjusted only with a recorded reason), pass 11/11 with the Action against the seeded sets, run live read-only against dev AI before completion; plus negative cases: a row that fits no set returns none-fits; an Action reply naming an id outside the candidates is refused; Activity/Expense are never candidates. Record the run (model, date, scores) in the notes.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Actions, Bindings, evaluation, Finance coding</topic>
+    <files>
+      <file>projects/ebilling-r1/notes/047-line-code-action.md</file>
+      <file>projects/ebilling-r1/notes/048-code-set-mapping-proposals.md</file>
+      <file>docs/guides/ai-guide-consumer-wiring.md</file>
+      <file>docs/architecture/SPAARKE-PLAYBOOK-LLM-OUTPUT-PATTERN.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/ai.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>docs/standards/TEST-ARCHITECTURE.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context and rigor">Declare rigor FULL. Read 047/048 notes and code; confirm the six task sets and their code descriptions on dev (read-only).</step>
+    <step order="1">Schema: add the two columns to sprk_billingcodeset (script + Entity.xml + form); run on dev (WhatIf, real, rerun).</step>
+    <step order="2">Tuning data: write description and match hints for the six UTBMS task sets from the UTBMS code descriptions (covered work, typical matter types / practice areas, synonyms such as transactional, M&amp;A, corporate, commercial contracts for Project); seed on dev.</step>
+    <step order="3">Set profiles and pre-rank: embed name + description + hints + Task code descriptions; re-run 048's probe and record the new table.</step>
+    <step order="4">Action INVOICE-CODESET-MATCH@v1 (JPS + schemas + Binding + ConsumerTypes.All + eval family), facade member, output guard, examples from confirmed mappings, fallback.</step>
+    <step order="5">Proposals response: coverage summary and none-fits rows; 047 hook uses the matcher.</step>
+    <step order="6">Tests (seam, contract, guard negative cases) and the live 11-row evaluation; ArchTests (ADR-010 ceiling: count any new 1:1 interface; RouteAuthorizationGuard unchanged unless routes change).</step>
+    <step order="7">Update 053's POML with the Action/Binding seeding commands; notes with §11 table, evaluation record, deviations.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the evaluation cannot reach 11/11 after tuning the descriptions, hints and prompt, STOP and report the failing rows with the Action's reasons; do not loosen the expected answers silently.</trigger>
+    <trigger>If an admin screen beyond the code-set form's two new fields is needed (for example a coverage page), STOP: UI belongs to a deploy or UI task.</trigger>
+    <trigger>If the seeded set list itself lacks a sensible home for a dev reference row (a genuinely missing UTBMS set), STOP and propose seeding it; do not force a wrong mapping.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>048's CodeSetProposalService (embeddings over set name + body) and 047's INVOICE-LINE-CODE Action (codes lines, not sets); sprk_billingcodeset has no column describing what work a set covers; sprk_billingcode descriptions exist per code only.</existing>
+    <extension>Extend CodeSetProposalService and 048's routes rather than add a second service; the new Action is a new consumer type because no existing Action decides between code sets; the two columns extend the project-owned sprk_billingcodeset (task 018) because sprk_body holds the standards body, not scope.</extension>
+    <cost-of-doing-nothing>Proposals for Commercial, Mergers &amp; Acquisitions and Commercial Transactions point at Trademark or Bankruptcy on dev (048 probe), the 047 per-line hook passes such a set into line coding, and rows that fit no set get a confirmable wrong proposal instead of a visible gap (D-93).</cost-of-doing-nothing>
+  </justification>
+
+  <acceptance-criteria>
+    <criterion>sprk_billingcodeset has description and match-hints columns on dev and in SpaarkeMaster source; the six task sets carry tuning text; a seed rerun changes nothing.</criterion>
+    <criterion>GET proposals returns every unmapped active row as proposed or none-fits, with a coverage summary; no row is silently omitted.</criterion>
+    <criterion>Live evaluation over the 11 dev rows passes 11/11 (recorded in notes with model and date).</criterion>
+    <criterion>An Action reply naming a set outside the candidates is refused; a failed Action falls back to the marked embedding result; Activity and Expense sets never appear.</criterion>
+    <criterion>The 047 per-line hook returns no suggestion on none-fits and a flagged suggestion otherwise; nothing is persisted as a mapping except by the confirm route.</criterion>
+    <criterion>No prompt, model or schema literal in C#; ConsumerTypes.All, Binding row and eval family added together; 053 POML lists the seeding commands.</criterion>
+    <criterion>Build 0 warnings / 0 errors; Finance, eval-contract and ArchTests green; publish-size delta reported.</criterion>
+  </acceptance-criteria>
+
+  <notes>Completed 2026-10-16 (rigor FULL). Record: projects/ebilling-r1/notes/054-code-set-matching.md.
+- Columns sprk_description / sprk_matchhints on sprk_billingcodeset: on spaarkedev1 (schema script WhatIf, real, rerun 0 changes) and in SpaarkeMaster source (Entity.xml + main form Matching section). Six task sets seeded with tuning text (seed WhatIf, real, rerun 0 writes).
+- Action INVOICE-CODESET-MATCH@v1 (invoice-codeset-match, Fast, temperature 0) + output/input schemas + Binding row + ConsumerTypes.All + GU-144, reached via IInvoiceAi.MatchCodeSetAsync. Action and Binding NOT seeded: task 053 seeds them (commands added to 053's POML).
+- Proposals: embedding pre-rank over rich set profiles, AI review with confirmed mappings as examples, output guard (only a candidate id), NoneFits with no confirmable proposal, unreviewed embedding fallback on any failure; coverage per table in GET proposals. 047 hook uses the same matcher; none-fits gives no suggestion; nothing persisted except by confirm.
+- Live evaluation (gpt-4o-mini Fast deployment, text-embedding-3-large, 2026-10-16): 11/11 dev rows + negative control none, two runs. Employment -> Counseling and Banking &amp; Finance -> Project, reasoning in notes section 2.
+- Fix-now from the 048 review: confirm write is conditional on versionnumber (If-Match); a concurrent mapping answers 409 AlreadyMapped; race test fails with the old write, passes with the fix; 048 notes L1 corrected.
+- ADR-010 delta 0; publish size task delta +0.01 MB (37.38 -> 37.39 MB; master 37.17 MB); no package added; no vulnerable package.
+- Deferred D1 (reported to owner): sequential per-row completions can exceed the 230 s front-end timeout with ~100 unmapped rows.
+rework: fix-round-1 task 054</notes>
+</task>

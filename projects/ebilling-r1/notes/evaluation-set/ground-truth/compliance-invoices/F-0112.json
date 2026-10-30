@@ -1,0 +1,36 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0112",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0112","generator_id":"gen_eval_set.py@1 F-0112","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0112.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-04"},
+ "header":{"firm":"Ingersoll & Yardley LLP","firm_invoice_number":"INV-2025-42066","invoice_date":"2025-08-28","billing_period_start":"2025-05-01","billing_period_end":"2025-05-31","firm_matter_reference":"29975-0038","po_number":"PO-4540282","fees_total":5322.75,"expenses_total":5643.63,"adjustments_total":0.0,"total_due":10966.38,"currency":"USD"},
+ "timekeepers":[{"name":"Daniel Delacroix","title":"Partner","rate":595.0,"billed_as":"DD"},{"name":"Elena Pemberton","title":"Associate","rate":315.0,"billed_as":"EP"},{"name":"Farah Ashdown","title":"Senior Associate","rate":420.0,"billed_as":"FA"},{"name":"Samuel Whitfield","title":"Legal Assistant","rate":155.0,"billed_as":"SW"},{"name":"Victor Galbraith","title":"Paralegal","rate":195.0,"billed_as":"VG"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2025-05-02","timekeeper":"SW","timekeeper_name":"Samuel Whitfield","timekeeper_title":"Legal Assistant","title":"LA","hours":2.75,"rate":155.0,"amount":426.25,"narrative":"Prepare case assessment memorandum regarding the lease dispute and recommended strategy","codes":["L120","A103"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2025-05-02","timekeeper":"DD","timekeeper_name":"Daniel Delacroix","timekeeper_title":"Partner","title":"Ptr","hours":1.75,"rate":595.0,"amount":1041.25,"narrative":"Telephone conference with client representative regarding factual background of the warranty claim","codes":["L110","A106"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2025-05-02","timekeeper":"SW","timekeeper_name":"Samuel Whitfield","timekeeper_title":"Legal Assistant","title":"LA","hours":2.75,"rate":155.0,"amount":426.25,"narrative":"Prepare case assessment memorandum regarding the lease dispute and recommended strategy","codes":["L120","A103"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2025-05-14","timekeeper":"EP","timekeeper_name":"Elena Pemberton","timekeeper_title":"Associate","title":"Assoc","hours":0.35,"rate":315.0,"amount":110.25,"narrative":"Research pleading standards applicable to the insurance coverage issue","codes":["L210","A102"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2025-05-15","timekeeper":"DD","timekeeper_name":"Daniel Delacroix","timekeeper_title":"Partner","title":"Ptr","hours":2.75,"rate":595.0,"amount":1636.25,"narrative":"Research pleading standards applicable to the data incident","codes":["L210","A102"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2025-05-27","timekeeper":"DD","timekeeper_name":"Daniel Delacroix","timekeeper_title":"Partner","title":"Ptr","hours":1.0,"rate":595.0,"amount":595.0,"narrative":"Review court docket and calendar of pending deadlines for the warranty claim","codes":["L190","A104"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2025-05-27","timekeeper":"EP","timekeeper_name":"Elena Pemberton","timekeeper_title":"Associate","title":"Assoc","hours":0.5,"rate":315.0,"amount":157.5,"narrative":"Research public records concerning Summit Ridge Homes and related entities","codes":["L110","A102"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2025-05-28","timekeeper":"VG","timekeeper_name":"Victor Galbraith","timekeeper_title":"Paralegal","title":"Para","hours":1.0,"rate":195.0,"amount":195.0,"narrative":"Review and organize incoming production from Larkspur Medical for matter file","codes":["L140","A104"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"fee","date":"2025-05-29","timekeeper":"FA","timekeeper_name":"Farah Ashdown","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":1.75,"rate":420.0,"amount":735.0,"narrative":"Draft motion for summary judgment in the employment claim","codes":["L210","A103"],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"expense","date":"2025-05-08","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":846.63,"amount":846.63,"narrative":"Document hosting and processing vendor","codes":["E118"],"page":1,"narrative_style":"clear"},
+  {"n":11,"line_type":"expense","date":"2025-05-14","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":3766.33,"amount":3766.33,"narrative":"Consulting expert fees","codes":["E119"],"page":1,"narrative_style":"clear"},
+  {"n":12,"line_type":"expense","date":"2025-05-14","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":14.0,"rate":3.73,"amount":52.22,"narrative":"Facsimile charges","codes":["E104"],"page":1,"narrative_style":"clear"},
+  {"n":13,"line_type":"expense","date":"2025-05-21","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":33.31,"amount":33.31,"narrative":"Long distance conference call charges","codes":["E105"],"page":1,"narrative_style":"clear"},
+  {"n":14,"line_type":"expense","date":"2025-05-22","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":945.14,"amount":945.14,"narrative":"Court reporter and transcript - deposition","codes":["E115"],"page":1,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["350 Lakeshore Drive","Portland","Tax ID 25-7037562"],"template":"T11","pages":2},
+ "rule_set_id":"RS-04",
+ "context":{"matter_open":"2024-05-15","matter_close":"2025-08-29","matter_budget":8773.0,"approved_timekeepers":["Louis Eriksen","Elena Pemberton","Gideon Kowalczyk","Victor Galbraith","Leila Dunleavy","Farah Ashdown","Samuel Whitfield","Daniel Delacroix"],"invoice_received_date":"2025-08-29"},
+ "expected_findings":[
+  {"rule_id":"RS-04-R03","rule_type":"TimeIncrement","scope":"line","line_refs":[4],"consequence":"Reduce"},
+  {"rule_id":"RS-04-R04","rule_type":"CoreRecordWindow","scope":"invoice","line_refs":[],"consequence":"Flag"},
+  {"rule_id":"RS-04-R05","rule_type":"InvoiceAge","scope":"invoice","line_refs":[],"consequence":"Flag"},
+  {"rule_id":"RS-04-R06","rule_type":"Duplicate","scope":"line","line_refs":[3],"consequence":"Disallow","related_line_refs":[1]},
+  {"rule_id":"RS-04-R07","rule_type":"ExpenseRule","scope":"line","line_refs":[12],"consequence":"Disallow"}
+ ],
+ "seeded_violations":5
+}

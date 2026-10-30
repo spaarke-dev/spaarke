@@ -1,0 +1,176 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "metadata": {
+    "_generator": {
+      "name": "bicep",
+      "version": "0.46.1.21595",
+      "templateHash": "15638523227508516644"
+    }
+  },
+  "parameters": {
+    "storageAccountName": {
+      "type": "string",
+      "metadata": {
+        "description": "Name of the existing storage account, in the resource group this module deploys into."
+      }
+    },
+    "principalId": {
+      "type": "string",
+      "minLength": 36,
+      "metadata": {
+        "description": "Object (principal) id of the BFF managed identity granted the file-store role on each container. On a stamp: the stamp UAMI (modules/uami.bicep). On dev: mi-bff-api-dev."
+      }
+    },
+    "containerNames": {
+      "type": "array",
+      "defaultValue": [
+        "procedures",
+        "invoice-files",
+        "billing-exports"
+      ],
+      "minLength": 1,
+      "metadata": {
+        "description": "The file-store containers (model 4.2): Procedure sources, invoice PDFs and supporting files, export files. One role assignment per container, at container scope."
+      }
+    },
+    "enableMalwareScanning": {
+      "type": "bool",
+      "metadata": {
+        "description": "Configure Defender for Storage on-upload malware scanning on the account. Required, no default: each environment states its choice. false = the explicit \"Scanning not enabled\" setting, which the BFF must also be told (FileStore MalwareScanningEnabled=false, task 090)."
+      }
+    },
+    "malwareScanningCapGBPerMonth": {
+      "type": "int",
+      "defaultValue": 5000,
+      "minValue": 1,
+      "metadata": {
+        "description": "Monthly cap, in GB scanned, for on-upload malware scanning. Used only when enableMalwareScanning is true."
+      }
+    },
+    "blobSoftDeleteRetentionDays": {
+      "type": "int",
+      "defaultValue": 30,
+      "minValue": 1,
+      "maxValue": 365,
+      "metadata": {
+        "description": "Blob soft delete retention, in days, for the file store account (ebilling-r1 DEF-038). Every environment gets 30 unless it overrides (customer-provisioning passes it per environment)."
+      }
+    }
+  },
+  "resources": [
+    {
+      "type": "Microsoft.Storage/storageAccounts/blobServices",
+      "apiVersion": "2023-01-01",
+      "name": "[format('{0}/{1}', parameters('storageAccountName'), 'default')]",
+      "properties": {
+        "deleteRetentionPolicy": {
+          "enabled": true,
+          "days": "[parameters('blobSoftDeleteRetentionDays')]"
+        }
+      }
+    },
+    {
+      "copy": {
+        "name": "fileStoreContainers",
+        "count": "[length(parameters('containerNames'))]"
+      },
+      "type": "Microsoft.Storage/storageAccounts/blobServices/containers",
+      "apiVersion": "2023-01-01",
+      "name": "[format('{0}/{1}/{2}', parameters('storageAccountName'), 'default', parameters('containerNames')[copyIndex()])]",
+      "properties": {
+        "publicAccess": "None"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Storage/storageAccounts/blobServices', parameters('storageAccountName'), 'default')]"
+      ]
+    },
+    {
+      "type": "Microsoft.Authorization/roleDefinitions",
+      "apiVersion": "2022-04-01",
+      "name": "[guid(resourceGroup().id, 'spaarke-ebilling-file-store-blob-role')]",
+      "properties": {
+        "roleName": "[format('Spaarke eBilling File Store Blob Data ({0})', uniqueString(resourceGroup().id))]",
+        "description": "Storage Blob Data Contributor plus reading blob index tags (Defender malware-scan verdict). Cannot write tags. Assigned per eBilling container only (ebilling-r1 task 091).",
+        "type": "customRole",
+        "permissions": [
+          {
+            "actions": [
+              "Microsoft.Storage/storageAccounts/blobServices/containers/delete",
+              "Microsoft.Storage/storageAccounts/blobServices/containers/read",
+              "Microsoft.Storage/storageAccounts/blobServices/containers/write",
+              "Microsoft.Storage/storageAccounts/blobServices/generateUserDelegationKey/action"
+            ],
+            "notActions": [],
+            "dataActions": [
+              "Microsoft.Storage/storageAccounts/blobServices/containers/blobs/delete",
+              "Microsoft.Storage/storageAccounts/blobServices/containers/blobs/read",
+              "Microsoft.Storage/storageAccounts/blobServices/containers/blobs/write",
+              "Microsoft.Storage/storageAccounts/blobServices/containers/blobs/move/action",
+              "Microsoft.Storage/storageAccounts/blobServices/containers/blobs/add/action",
+              "Microsoft.Storage/storageAccounts/blobServices/containers/blobs/tags/read"
+            ],
+            "notDataActions": []
+          }
+        ],
+        "assignableScopes": [
+          "[resourceGroup().id]"
+        ]
+      }
+    },
+    {
+      "copy": {
+        "name": "fileStoreGrants",
+        "count": "[length(parameters('containerNames'))]"
+      },
+      "type": "Microsoft.Authorization/roleAssignments",
+      "apiVersion": "2022-04-01",
+      "scope": "[resourceId('Microsoft.Storage/storageAccounts/blobServices/containers', parameters('storageAccountName'), 'default', parameters('containerNames')[copyIndex()])]",
+      "name": "[guid(resourceId('Microsoft.Storage/storageAccounts/blobServices/containers', parameters('storageAccountName'), 'default', parameters('containerNames')[copyIndex()]), parameters('principalId'), resourceId('Microsoft.Authorization/roleDefinitions', guid(resourceGroup().id, 'spaarke-ebilling-file-store-blob-role')))]",
+      "properties": {
+        "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', guid(resourceGroup().id, 'spaarke-ebilling-file-store-blob-role'))]",
+        "principalId": "[parameters('principalId')]",
+        "principalType": "ServicePrincipal",
+        "description": "BFF file-store access on this container only (custom role: blob data + tag read, no tag write; ebilling-r1 task 091)"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Storage/storageAccounts/blobServices/containers', parameters('storageAccountName'), 'default', parameters('containerNames')[copyIndex()])]",
+        "[resourceId('Microsoft.Storage/storageAccounts/blobServices/containers', parameters('storageAccountName'), 'default', parameters('containerNames')[copyIndex()])]",
+        "[resourceId('Microsoft.Authorization/roleDefinitions', guid(resourceGroup().id, 'spaarke-ebilling-file-store-blob-role'))]"
+      ]
+    },
+    {
+      "condition": "[parameters('enableMalwareScanning')]",
+      "type": "Microsoft.Security/defenderForStorageSettings",
+      "apiVersion": "2022-12-01-preview",
+      "scope": "[resourceId('Microsoft.Storage/storageAccounts', parameters('storageAccountName'))]",
+      "name": "current",
+      "properties": {
+        "isEnabled": true,
+        "malwareScanning": {
+          "onUpload": {
+            "isEnabled": true,
+            "capGBPerMonth": "[parameters('malwareScanningCapGBPerMonth')]"
+          }
+        },
+        "sensitiveDataDiscovery": {
+          "isEnabled": false
+        },
+        "overrideSubscriptionLevelSettings": true
+      }
+    }
+  ],
+  "outputs": {
+    "containerNames": {
+      "type": "array",
+      "copy": {
+        "count": "[length(parameters('containerNames'))]",
+        "input": "[parameters('containerNames')[copyIndex()]]"
+      }
+    },
+    "blobEndpoint": {
+      "type": "string",
+      "value": "[reference(resourceId('Microsoft.Storage/storageAccounts', parameters('storageAccountName')), '2023-01-01').primaryEndpoints.blob]"
+    }
+  }
+}

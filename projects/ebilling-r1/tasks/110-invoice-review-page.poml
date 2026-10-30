@@ -1,0 +1,169 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="110" project="ebilling-r1">
+  <metadata>
+    <title>Invoice Review code page — lines, review pane, corrections, bulk, by-rule</title>
+    <phase>4 Review and approval (WP4) — wave W4-3</phase>
+    <gate>startable</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Frontend over server-enforced routes (100–102); authorization, totals and transitions live in the BFF, so the page is presentation and workflow.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Largest UI in the project: many interacting states (selection, pane, PDF highlight, bulk, by-rule, read-only), a prototype-to-production component mapping and a grid-framework decision.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P4-C</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>100, 101, 102, 108, 109</deps>
+    <tags>frontend, code-page, fluent-ui</tags>
+    <estimated-effort>4-5 days</estimated-effort>
+  </metadata>
+
+  <prompt>Build the Invoice Review code page from the owner-reviewed prototype (layout A, D-58): header and totals, count filters, the lines grid with findings badge and value marks, the right pane (Review tab: findings, line decision as outcome cards, what was read with Correct, and the bounding-box document view), the By-rule view with "apply suggestion to n lines", bulk actions on ticked rows, Accept all clean lines, Pending shown as Processing, and read-only states — calling 100, 101 and 102.</prompt>
+
+  <role>SPAARKE frontend developer. Expert in React code pages, Fluent UI v9, @spaarke/ui-components and @spaarke/auth.</role>
+
+  <goal>A single-file web resource built from src/solutions/InvoiceReview/ that reproduces the prototype's review flow on real data with shared components, registers the Navigator side pane, leaves tab and action slots for 111, passes the ui-tests below including dark mode, and adds no npm package.</goal>
+
+  <context>
+    <background>Spec FR-31, FR-32 (adjustment lines shown; the add-adjustment step is in 111's approve wizard, as in the prototype), NFR-02, NFR-13, D-58. Reference (copy, never import): c:\code_files\spaarke-prototype\projects\ebilling.r1\ — README (answers 1–4, F-1, F-5, F-6, F-10), src\review\ ReviewPage, LinesGrid, LinePanel, RuleGroups, Dialogs (CorrectValueModal, BulkModal); screenshots\v1\. API: 100 (GET .../review, line decision routes), 101 (corrections, GET corrections), 102 (adjustment lines appear in the read model). Document bytes: GET /api/documents/{documentId}/content (Api/FileAccessEndpoints.cs:232). Skeleton to copy: src/solutions/CommunicationReconciliation/ (single-file vite build, renamed output; main.tsx imports resolveCodePageTheme, setupCodePageThemeListener, AppErrorBoundary, ensureNavigatorSidePane :51, called in a mount effect :194-196). Entry: the page is opened with an invoice id (URL or data envelope — copy the parsing pattern of src/solutions/sprk_invoicespage/src/main.tsx parseMatterId).</background>
+    <relevant-files>
+      <file role="new">src/solutions/InvoiceReview/ (index.html, package.json, vite.config.ts, tsconfig*.json, src/main.tsx, src/App.tsx, src/services/invoiceReviewApi.ts, src/components/)</file>
+      <file role="read">src/client/shared/Spaarke.UI.Components/src/components/FilePreview/ (108's PdfHighlightViewer)</file>
+      <file role="read">src/client/shared/Spaarke.UI.Components/src/components/ConsoleKit/ (109's StatusBar / RecordRow statusOverride; EvidenceLine for values read)</file>
+      <file role="read">src/client/shared/Spaarke.UI.Components/src/components/WorkspaceShell/ (MetricCard, MetricCardRow, types.ts MetricCardConfig), src/components/Worklist/laneCountFilters.ts (card-building example), src/components/SprkChat/OutcomeCard.tsx</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="100" status="pending">Read model and line decisions</dependency>
+      <dependency task="101" status="pending">Corrections</dependency>
+      <dependency task="102" status="pending">Adjustment lines and totals</dependency>
+      <dependency task="108" status="pending">Bounding-box viewer</dependency>
+      <dependency task="109" status="pending">ConsoleKit additions</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="task 109 (2026-10-15), ontology-r1 review">Run the visual ui-tests in light, dark and high-contrast on this page for statusOverride on StatusBar / RecordRow plus the reused components named in the "reuse" constraint below (MetricCard count filters, Accordion disclosure, outcome choice); task 109 covered statusOverride in Jest only. ConsoleKit gained ONLY statusOverride: OutcomeCards, CountFilters and Disclosure were removed after the review and must not be re-added.</constraint>
+    <constraint source="CLAUDE.md section 11, D-24, ontology-r1 review of task 109 (reuse; exact imports, all from @spaarke/ui-components unless noted)">Count filters (All, Processing, To decide, Clean, Decided): `import { MetricCardRow } from '@spaarke/ui-components'` (src/components/WorkspaceShell/MetricCardRow.tsx) fed `MetricCardConfig[]` (`import type { MetricCardConfig } from '@spaarke/ui-components'`, WorkspaceShell/types.ts:50). Per card: `selected` (aria-pressed, one selected), `value` (the count), `disableWhenEmpty: true` (count 0 disables the card; keep All enabled), `ariaLabel` "label, n lines", `onClick`; render MetricCardRow with layout="wide", ariaLabel "Line filters" and the cards array. Copy the card-building shape of src/components/Worklist/laneCountFilters.ts (buildLaneCountCards) into a page-local builder; do NOT add a new count-filter card component (D-24) and do not use StatTiles. Disclosure ("Why this was flagged", policy version, quoted clause, values read): Fluent v9 `import { Accordion, AccordionItem, AccordionHeader, AccordionPanel } from '@fluentui/react-components'` (collapsible, closed by default), as in src/components/ConsoleKit/RecordRow.tsx and src/components/DecisionWizard/steps/FoundStep.tsx in this tree and as src/components/Worklist/WorklistDisclosures.tsx does on branch task/ontology-059-worklist-widget (that file is not yet in this tree; do not depend on it). No custom Disclosure. Outcome choice (Your decision: Approve / Reduce / Disallow, suggestion first, body under the chosen option): `import { OutcomeCard } from '@spaarke/ui-components'` (src/components/SprkChat/OutcomeCard.tsx) is a read-only completion card driven by a server payload (IOutcomeCard), not a selector, so it does not fit the choice itself; build the choice from Fluent `import { RadioGroup, Radio } from '@fluentui/react-components'` (named group with an accessible name; arrow keys move selection; nothing happens until the single Confirm) and render the chosen option's body (reason, amount) in the page directly beneath it. OutcomeCard may be used to show the result of a confirmed decision if a server completion payload exists; otherwise use the decided StatusBar override. Status: `import { StatusBar, RecordRow, EvidenceLine } from '@spaarke/ui-components'` with the statusOverride prop (label, tone, optional description) (ConsoleKit/consoleStatus.ts ConsoleStatusOverride).</constraint>
+    <constraint source="task 108 (2026-10-15)">PdfHighlightViewer (Spaarke.UI.Components FilePreview) was unit-tested with pdfjs faked; this task runs its three browser ui-tests (highlight, scroll-to-field, error/retry) against a real invoice PDF in the deployed code page, and confirms the Dataverse code-page CSP allows the pdfjs worker. If it does not, set GlobalWorkerOptions.workerSrc to a same-origin worker before the first load (the loader does not overwrite it).</constraint>
+    <constraint source="ADR-012, prototype mapping">Shared components only (map, do not copy): PanelSplitter + useTwoPanelLayout (resizable right pane), PdfHighlightViewer (108) for DocumentView, StatusBar / RecordRow statusOverride (109), MetricCardRow + MetricCard for count filters, Fluent Accordion for disclosures and Fluent RadioGroup for the outcome choice (see the reuse constraint) for the kit.tsx pieces, EvidenceLine for values read, StatusBadge for line status, AiFieldTag for AI-coded fields, SprkModal FormModal for Correct value and bulk decide (ADR-050).</constraint>
+    <constraint source="grid decision">The brief names the DataGrid framework, but it is FetchXML / config-driven (DataGrid.tsx:107-116 needs configId and an IDataverseClient; overrides are cell renderers only, configResolution.ts:41) and cannot take 100's read-model rows with selection, row ticks and per-value click. Use the Fluent v9 DataGrid primitive fed by the read model, no virtualization (F-5); record the decision in notes.</constraint>
+    <constraint source="ADR-021, F-10">Fluent v9 semantic tokens only; light, dark, high contrast; style a wrapper div, never the FluentProvider className.</constraint>
+    <constraint source="FR-31, prototype answer 3">Correct (the reading is wrong; 101) and Reduce (the bill is wrong; 100) are separate affordances; a low-confidence value offers "Compare with the document, then confirm or correct".</constraint>
+    <constraint source="F-1">Stored Pending is displayed as Processing (spinner, not decidable); the page refreshes while any line is Processing and stops when none is.</constraint>
+    <constraint source="ADR-002, I-1">The page never computes totals or writes Dataverse; it shows the server's totals after each call.</constraint>
+    <constraint source=".claude/patterns/webresource/full-page-custom-page.md, ADR-028">Single self-contained HTML; guarded Xrm access; initAuth before render; BFF calls through authenticatedFetch; ensureNavigatorSidePane() on mount.</constraint>
+    <constraint source="NFR-12">No new npm package; npm install --legacy-peer-deps --no-audit --no-fund.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>c:\code_files\spaarke-prototype\projects\ebilling.r1\README.md</file>
+      <file>projects/ebilling-r1/notes/review-screen-prototype-brief.md</file>
+      <file>.claude/patterns/webresource/full-page-custom-page.md</file>
+      <file>docs/architecture/SPAARKE-SIDE-PANE-NAVIGATION.md</file>
+      <file>.claude/patterns/ui/fluent-v9-theming.md</file>
+      <file>.claude/patterns/ui/modal-shell.md</file>
+      <file>docs/standards/MODAL-DECISION-CRITERIA.md</file>
+      <file>docs/architecture/SPAARKE-DATAGRID-FRAMEWORK-ARCHITECTURE.md</file>
+      <file>.claude/skills/fluent-v9-component/SKILL.md</file>
+    </files>
+    <patterns>
+      <pattern name="Code page skeleton" location="src/solutions/CommunicationReconciliation/src/main.tsx">Theme, auth, error boundary, Navigator registration.</pattern>
+      <pattern name="Layout A" location="c:\code_files\spaarke-prototype\projects\ebilling.r1\src\review\ReviewPage.tsx">Grid left, pane right via PanelSplitter + useTwoPanelLayout.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Scaffold src/solutions/InvoiceReview/ from CommunicationReconciliation (output name directional: sprk_invoicereviewpage.html); npm install with the flags above.</step>
+    <step order="2">API client for 100 / 101 / 102 with ProblemDetails handling (stable code shown; 403 makes the page read-only; ebilling.disabled shows a disabled notice).</step>
+    <step order="3">Header (firm, invoice and tracking number, core record link, period, date, status), totals strip, count filters as MetricCardRow (All, Processing, To decide, Clean, Decided).</step>
+    <step order="4">Lines grid: status, date, timekeeper (unmatched mark), narrative, hours, amount, findings badge (severity and count, hover lists rules), approved; low-confidence value mark; AI-observation mark; row tick; clicking a value selects the line and highlights that field on the PDF.</step>
+    <step order="5">Right pane, Review tab: findings (rule, message, suggestion; Accordion reveal for policy version, quoted clause and values read), Your decision (Fluent RadioGroup, suggestion first, one Confirm, then move to the next line to decide), What was read (EvidenceLine rows with Correct), decided state (StatusBar override), PdfHighlightViewer below scrolled to the line. Leave a tab slot for 111 (Context, Related work, History).</step>
+    <step order="6">By-rule view (groups by rule, most severe first, then count) with "Apply suggestion to n lines" through the multi-line route; action bar: Accept all clean lines (n), Accept / Disallow on ticked rows (FormModal, one reason), progress, and a "Decide invoice" button slot for 111.</step>
+    <step order="7">States: loading, all clean, heavily flagged, low-confidence value, unmatched timekeeper, decided read-only, viewer without write access (read-only), 150 lines.</step>
+    <step order="8">npm run build; check the single-file output; run the ui-tests below against dev after 112 deploys (or a local server with a mocked API for visual checks); record results.</step>
+    <step order="9">Update TASK-INDEX.md: this task's status cell to "✅ [done]".</step>
+    <step order="10">Record deviations (web resource name, grid decision, any prototype behaviour not reproduced) in projects/ebilling-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the page needs a navigation entry (sitemap subarea, invoice form command or view command) it is a solution change: do not edit src/dataverse/solutions/SpaarkeMaster/**; record the need for 112.</trigger>
+    <trigger>If a needed shared component is missing or a prototype behaviour needs a new shared component beyond 108 / 109 and the reuse constraint, STOP and propose it with a section 11 justification; never copy from the prototype repository.</trigger>
+    <trigger>If the owner requires the DataGrid framework for the lines grid, STOP: it needs a read-model data source added to the framework first.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>Spec section 11 row "Invoice Review and Rule Review code pages" (overlap sprk_invoicespage, a matter invoice grid); no invoice review page exists (Glob src/solutions/*).</existing>
+    <extension>sprk_invoicespage stays the list; review needs a per-invoice workspace with the document. The page composes shared components (108, 109 and existing kit) rather than adding new ones.</extension>
+    <cost-of-doing-nothing>Reviewers cannot decide lines, correct values or see sources, so FR-31 and success criterion 4 fail.</cost-of-doing-nothing>
+  </justification>
+
+  <ui-tests>
+    <test name="Page renders and registers Navigator">
+      <url>https://{org}.crm.dynamics.com/main.aspx?appid={app-id}&amp;pagetype=webresource&amp;webresourceName=sprk_invoicereviewpage&amp;data=invoiceId%3D{id}</url>
+      <steps>
+        <step>Open an In Review invoice as a user with write access</step>
+        <step>Verify header, totals, count cards and grid load, the document shows page 1, and the Navigator side pane is docked</step>
+        <step>Check the console for errors</step>
+      </steps>
+      <expected>Layout A as in prototype screenshots v1; no console errors</expected>
+    </test>
+    <test name="Decide a flagged line">
+      <steps>
+        <step>Start with the first line to decide; choose the suggested Reduce; confirm with a reason</step>
+        <step>Verify totals update from the server and the next line to decide is selected</step>
+        <step>Try Reduce without a reason; verify the server error is shown and nothing changes</step>
+      </steps>
+      <expected>Matches prototype walkthrough step 2</expected>
+    </test>
+    <test name="Correct a misread value">
+      <steps>
+        <step>Open a line with a low-confidence hours value; click the value; verify the PDF boxes that field</step>
+        <step>Correct the hours; verify findings clear, the line becomes Clean, and the correction is distinct from a Reduce</step>
+      </steps>
+      <expected>Matches prototype walkthrough step 3</expected>
+    </test>
+    <test name="Bulk, by rule, read-only, Processing">
+      <steps>
+        <step>Accept all clean lines; in By rule apply a suggestion to several lines; tick rows and Disallow with one reason</step>
+        <step>Open as a read-only user: no decision or correction affordances</step>
+        <step>Open an invoice with Pending lines: they show Processing and are not decidable</step>
+      </steps>
+      <expected>One server request per bulk action; read-only view; F-1 label</expected>
+    </test>
+    <test name="Dark Mode Compliance (ADR-021, F-4)">
+      <steps>
+        <step>Switch the app theme to dark</step>
+        <step>Verify no white backgrounds or black text in header, grid, pane, modals; badges legible</step>
+        <step>Verify the PDF page stays light and its highlight boxes stay visible</step>
+      </steps>
+      <expected>Tokens only; page light in dark mode</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="npm">install, build</tool>
+    <tool name="ui-test">browser checks via the ui-test skill</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/solutions/InvoiceReview/</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">npm run build produces one self-contained HTML file; package.json adds no dependency beyond the copied skeleton's.</criterion>
+    <criterion testable="true">Every 100 / 101 route is reachable from the page and the page reflects server results, including ProblemDetails errors.</criterion>
+    <criterion testable="true">Correct and Reduce are separate affordances; clicking a value highlights that field on the PDF.</criterion>
+    <criterion testable="true">Pending lines show Processing and cannot be decided; a 403 makes the page read-only; ebilling.disabled shows a notice.</criterion>
+    <criterion testable="true">The prototype-to-shared mapping in the constraints is used; no file imports from the prototype repository; the grid decision is recorded.</criterion>
+    <criterion testable="true">ensureNavigatorSidePane() is called on mount; no file under src/dataverse/solutions/SpaarkeMaster/ changed.</criterion>
+    <criterion testable="true">The ui-tests above pass, including dark mode; a 150-line invoice opens in under 3 s in dev (measured in 112).</criterion>
+    <criterion testable="true">Cover the stated contract plus the edge cases named above. Anything beyond that needs a one-line justification in task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>P4-C with 052 and 104: no file overlap. 111 adds the Context / Related work / History tabs, the header "Awaiting" approvers (103), the invoice decision wizard and the blocked-submission state into this page's slots. Deployment and the navigation entry are 112's.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load the knowledge files first, then the fluent-v9-component skill. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

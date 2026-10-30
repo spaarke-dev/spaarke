@@ -1,0 +1,38 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0049",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0049","generator_id":"gen_eval_set.py@1 F-0049","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0049.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-01"},
+ "header":{"firm":"Stanhope & Cranmer LLP","firm_invoice_number":"INV-2025-83148","invoice_date":"2025-12-26","billing_period_start":"2025-10-01","billing_period_end":"2025-10-31","firm_matter_reference":"78673-0017","po_number":"PO-4538255","fees_total":8116.75,"expenses_total":630.96,"adjustments_total":0.0,"total_due":8747.71,"currency":"USD"},
+ "timekeepers":[{"name":"Clara Ramanathan","title":"Partner","rate":710.0,"billed_as":"CR"},{"name":"Gideon Galbraith","title":"Associate","rate":400.0,"billed_as":"GG"},{"name":"Hector Lindqvist","title":"Associate","rate":430.0,"billed_as":"HL"},{"name":"Naomi Hargrove","title":"Paralegal","rate":235.0,"billed_as":"NH"},{"name":"Samuel Marchetti","title":"Senior Associate","rate":515.0,"billed_as":"SM"},{"name":"Victor Whitfield","title":"Legal Assistant","rate":180.0,"billed_as":"VW"}],
+ "lines":[
+  {"n":1,"line_type":"expense","date":"2025-10-02","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":4.0,"rate":5.11,"amount":20.44,"narrative":"Postage - certified mail","codes":["E108"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2025-10-06","timekeeper":"SM","timekeeper_name":"Samuel Marchetti","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":0.75,"rate":515.0,"amount":386.25,"narrative":"Prepare monthly status report to client regarding the licensing dispute","codes":["L190","A111"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2025-10-06","timekeeper":"HL","timekeeper_name":"Hector Lindqvist","timekeeper_title":"Associate","title":"Assoc","hours":3.0,"rate":430.0,"amount":1290.0,"narrative":"Prepare examination outlines for trial in the warranty claim","codes":["L440","A101"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"expense","date":"2025-10-13","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":34.89,"amount":34.89,"narrative":"Long distance conference call charges","codes":["E105"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"expense","date":"2025-10-13","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":169.71,"amount":169.71,"narrative":"Court filing fee","codes":["E112"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2025-10-14","timekeeper":"VW","timekeeper_name":"Victor Whitfield","timekeeper_title":"Legal Assistant","title":"LA","hours":0.25,"rate":180.0,"amount":45.0,"narrative":"Revise complaint after review by lead counsel","codes":["L430","A104"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2025-10-15","timekeeper":"NH","timekeeper_name":"Naomi Hargrove","timekeeper_title":"Paralegal","title":"Para","hours":2.3,"rate":235.0,"amount":540.5,"narrative":"Attend trial day in the supply agreement","codes":["L450","A109"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2025-10-16","timekeeper":"HL","timekeeper_name":"Hector Lindqvist","timekeeper_title":"Associate","title":"Assoc","hours":2.1,"rate":430.0,"amount":903.0,"narrative":"Docketed deadlines in case management system","codes":["L440","A110"],"page":1,"narrative_style":"clerical"},
+  {"n":9,"line_type":"fee","date":"2025-10-17","timekeeper":"CR","timekeeper_name":"Clara Ramanathan","timekeeper_title":"Partner","title":"Ptr","hours":1.6,"rate":710.0,"amount":1136.0,"narrative":"Attend trial day in the lease dispute","codes":["L450","A109"],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"fee","date":"2025-10-17","timekeeper":"GG","timekeeper_name":"Gideon Galbraith","timekeeper_title":"Associate","title":"Assoc","hours":1.9,"rate":400.0,"amount":760.0,"narrative":"Telephone conference with witness regarding the construction contract","codes":["L410","A106"],"page":1,"narrative_style":"clear"},
+  {"n":11,"line_type":"fee","date":"2025-10-27","timekeeper":"HL","timekeeper_name":"Hector Lindqvist","timekeeper_title":"Associate","title":"Assoc","hours":1.9,"rate":430.0,"amount":817.0,"narrative":"Revise discovery plan after review by lead counsel","codes":["L430","A104"],"page":1,"narrative_style":"clear"},
+  {"n":12,"line_type":"fee","date":"2025-10-27","timekeeper":"HL","timekeeper_name":"Hector Lindqvist","timekeeper_title":"Associate","title":"Assoc","hours":0.4,"rate":430.0,"amount":172.0,"narrative":"Plan strategy for upcoming phase of the distribution agreement with team","codes":["L120","A101"],"page":1,"narrative_style":"clear"},
+  {"n":13,"line_type":"fee","date":"2025-10-29","timekeeper":"SM","timekeeper_name":"Samuel Marchetti","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":1.8,"rate":515.0,"amount":927.0,"narrative":"Prepare case assessment memorandum regarding the construction contract and recommended strategy","codes":["L120","A103"],"page":1,"narrative_style":"clear"},
+  {"n":14,"line_type":"fee","date":"2025-10-30","timekeeper":"GG","timekeeper_name":"Gideon Galbraith","timekeeper_title":"Associate","title":"Assoc","hours":1.35,"rate":400.0,"amount":540.0,"narrative":"Analyze exposure and damages model for the construction contract","codes":["L120","A104"],"page":1,"narrative_style":"clear"},
+  {"n":15,"line_type":"fee","date":"2025-10-30","timekeeper":"GG","timekeeper_name":"Gideon Galbraith","timekeeper_title":"Associate","title":"Assoc","hours":1.5,"rate":400.0,"amount":600.0,"narrative":"Draft post-trial motion in the supply agreement","codes":["L460","A103"],"page":1,"narrative_style":"clear"},
+  {"n":16,"line_type":"expense","date":"2025-10-31","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":405.92,"amount":405.92,"narrative":"Airfare to Phoenix for deposition","codes":["E110"],"page":1,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["937 Federal Plaza","Portland","Tax ID 23-5158553"],"template":"T09","pages":2},
+ "rule_set_id":"RS-01",
+ "context":{"matter_open":"2024-08-29","matter_close":"2026-01-29","matter_budget":59990.0,"approved_timekeepers":["Naomi Hargrove","Marcus Esposito","Clara Ramanathan","Victor Whitfield","Gideon Galbraith","Samuel Marchetti","Hector Lindqvist","Peter Hargrove"],"invoice_received_date":"2025-12-27"},
+ "expected_findings":[
+  {"rule_id":"RS-01-R01","rule_type":"TimeIncrement","scope":"line","line_refs":[2],"consequence":"Reduce"},
+  {"rule_id":"RS-01-R01","rule_type":"TimeIncrement","scope":"line","line_refs":[6],"consequence":"Reduce"},
+  {"rule_id":"RS-01-R01","rule_type":"TimeIncrement","scope":"line","line_refs":[14],"consequence":"Reduce"},
+  {"rule_id":"RS-01-R03","rule_type":"NonBillableActivity","scope":"line","line_refs":[8],"consequence":"Disallow"},
+  {"rule_id":"RS-01-R06","rule_type":"InvoiceAge","scope":"invoice","line_refs":[],"consequence":"Flag"}
+ ],
+ "seeded_violations":5
+}

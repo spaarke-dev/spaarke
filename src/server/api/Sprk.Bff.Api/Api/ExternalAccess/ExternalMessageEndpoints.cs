@@ -155,6 +155,7 @@ public static class ExternalMessageEndpoints
         CommunicationService communicationService,
         ExternalDataService dataService,
         CallerRecordAccessProbe probe,
+        [Microsoft.AspNetCore.Mvc.FromServices] ExternalInvoiceHiding? hideInvoices,
         ILogger<Program> logger,
         CancellationToken ct)
     {
@@ -172,7 +173,7 @@ public static class ExternalMessageEndpoints
             root, id, request, principal, registry, recordService.GetRecordAsync, communicationService, logger, ct,
             dataService.GetNonSecureRootsAsync, dataService.GetLiveParentRootsAsync,
             ExternalProjectDataEndpoints.CallerRightsReader(probe, httpContext),
-            ExternalProjectDataEndpoints.CallerPrivilegeReader(probe, httpContext));
+            ExternalProjectDataEndpoints.CallerPrivilegeReader(probe, httpContext), hideInvoices);
     }
 
     /// <summary>
@@ -218,7 +219,8 @@ public static class ExternalMessageEndpoints
         NonSecureRootReader? readNonSecureRoots = null,
         LiveParentRootReader? readLiveParents = null,
         Func<string, Guid, CancellationToken, Task<Spaarke.Dataverse.AccessRights?>>? readCallerRights = null,
-        Func<string, CancellationToken, Task<bool?>>? readCallerPrivilege = null)
+        Func<string, CancellationToken, Task<bool?>>? readCallerPrivilege = null,
+        ExternalInvoiceHiding? hideInvoices = null)
     {
         if (string.IsNullOrWhiteSpace(root) || !Roots.TryGetValue(root, out var messageRoot))
         {
@@ -259,7 +261,8 @@ public static class ExternalMessageEndpoints
         try
         {
             var rights = await GetRecordRightsAsync(
-                    messageRoot, id, principal, registry, readRecord, logger, ct, readNonSecureRoots, readLiveParents)
+                    messageRoot, id, principal, registry, readRecord, logger, ct, readNonSecureRoots, readLiveParents,
+                    hideInvoices)
                 .ConfigureAwait(false);
 
             if (!rights.HasFlag(Spaarke.Dataverse.AccessRights.Read))
@@ -361,6 +364,7 @@ public static class ExternalMessageEndpoints
         RecordService recordService,
         CommunicationThreadReadService threadReadService,
         ExternalDataService dataService,
+        [Microsoft.AspNetCore.Mvc.FromServices] ExternalInvoiceHiding? hideInvoices,
         ILogger<Program> logger,
         CancellationToken ct)
     {
@@ -374,7 +378,7 @@ public static class ExternalMessageEndpoints
 
         return GetMessagesCoreAsync(
             root, id, principal, registry, recordService.GetRecordAsync, threadReadService, dataService.GetNonSecureRootsAsync,
-            logger, ct, dataService.GetLiveParentRootsAsync);
+            logger, ct, dataService.GetLiveParentRootsAsync, hideInvoices);
     }
 
     /// <summary>
@@ -393,7 +397,8 @@ public static class ExternalMessageEndpoints
         NonSecureRootReader readNonSecureRoots,
         ILogger logger,
         CancellationToken ct,
-        LiveParentRootReader? readLiveParents = null)
+        LiveParentRootReader? readLiveParents = null,
+        ExternalInvoiceHiding? hideInvoices = null)
     {
         ArgumentNullException.ThrowIfNull(readNonSecureRoots);
         if (string.IsNullOrWhiteSpace(root) || !Roots.TryGetValue(root, out var messageRoot))
@@ -410,7 +415,8 @@ public static class ExternalMessageEndpoints
             // this endpoint's coded 500, not the global handler's. RecordNotFoundException is handled inside the gate
             // and stays a 403 (no existence oracle); no message is read unless the gate returned true.
             if (!await IsRootRecordReadableAsync(
-                        messageRoot, id, principal, registry, readRecord, logger, ct, readNonSecureRoots, readLiveParents)
+                        messageRoot, id, principal, registry, readRecord, logger, ct, readNonSecureRoots, readLiveParents,
+                        hideInvoices)
                     .ConfigureAwait(false))
             {
                 logger.LogWarning(
@@ -425,7 +431,7 @@ public static class ExternalMessageEndpoints
             var read = await threadReadService
                 .ReadRegardingAppOnlyAsync(
                     messageRoot.EntityLogicalName, id, principal.SystemUserId,
-                    RootsReadableFor(messageRoot, id, principal, readNonSecureRoots, logger, readLiveParents), ct)
+                    RootsReadableFor(messageRoot, id, principal, readNonSecureRoots, logger, readLiveParents, hideInvoices), ct)
                 .ConfigureAwait(false);
 
             return Results.Ok(new ExternalCollectionResponse<ExternalMessageDto>
@@ -468,12 +474,13 @@ public static class ExternalMessageEndpoints
     /// </remarks>
     internal static MessageRootsFilter RootsReadableFor(
         MessageRoot root, Guid id, CallerPrincipal principal, NonSecureRootReader readNonSecureRoots, ILogger logger,
-        LiveParentRootReader? readLiveParents = null) =>
+        LiveParentRootReader? readLiveParents = null, ExternalInvoiceHiding? hideInvoices = null) =>
         SecureRootsFilter(
             principal, readNonSecureRoots, logger, readLiveParents,
             string.Equals(root.EntityLogicalName, "sprk_invoice", StringComparison.OrdinalIgnoreCase)
                 ? (root.EntityLogicalName, id)
-                : null);
+                : null,
+            hideInvoices);
 
     /// <summary>
     /// The multi-root rule as a message-read filter (<see cref="MessageRootsFilter"/>): the secure flags of the candidate
@@ -489,7 +496,8 @@ public static class ExternalMessageEndpoints
     /// again.</remarks>
     internal static MessageRootsFilter SecureRootsFilter(
         CallerPrincipal principal, NonSecureRootReader readNonSecureRoots, ILogger logger,
-        LiveParentRootReader? readLiveParents = null, (string Table, Guid Id)? authorizedParent = null) =>
+        LiveParentRootReader? readLiveParents = null, (string Table, Guid Id)? authorizedParent = null,
+        ExternalInvoiceHiding? hideInvoices = null) =>
         async (candidates, ct) =>
         {
             var live = await ExternalMultiRootRule.ReadLiveParentsAsync(
@@ -501,8 +509,64 @@ public static class ExternalMessageEndpoints
                 readNonSecureRoots, principal,
                 candidates.Select(r => (IEnumerable<(ExternalGrantRootType, string?)>)RuleInput(r, live, authorizedParent)),
                 logger, ct).ConfigureAwait(false);
-            return r => ExternalMultiRootRule.ChildRowReadable(principal, flags, RuleInput(r, live, authorizedParent));
+            // ebilling-r1 task 098 (uac-r2 2026-10-21): a message about an invoice reaches an external caller only when that
+            // invoice passes (a') too (the 065 gate is the read service's). The route's own invoice is the gate's decision.
+            var invoices = await RegardingInvoicesVisibleAsync(principal, candidates, authorizedParent, hideInvoices, logger, ct)
+                .ConfigureAwait(false);
+            return r => ExternalMultiRootRule.ChildRowReadable(principal, flags, RuleInput(r, live, authorizedParent))
+                && invoices(r);
         };
+
+    /// <summary>The invoice a message regards (raw lookup values; at most one in practice).</summary>
+    private static IEnumerable<string?> RegardingInvoicesOf(MessageRootLookups row) =>
+        ExternalMultiRootRule.LiveParentsOf(CommunicationTable, row.Row)
+            .Where(p => string.Equals(p.Table, ExternalInvoiceVisibility.InvoiceTable, StringComparison.OrdinalIgnoreCase))
+            .Select(p => p.LookupValue);
+
+    /// <summary>
+    /// Task 098: the per-message (a') term of <see cref="SecureRootsFilter"/>. Reads the predicate ONCE for every invoice the
+    /// candidates regard (none: no read). A message regarding an invoice the predicate hides, a lookup that is not a GUID, and
+    /// any invoice when no predicate is given (fail closed) are withheld; the route's own invoice
+    /// (<paramref name="authorizedParent"/>) was decided by the gate and is not asked again.
+    /// </summary>
+    private static async Task<Func<MessageRootLookups, bool>> RegardingInvoicesVisibleAsync(
+        CallerPrincipal principal, IReadOnlyCollection<MessageRootLookups> candidates, (string Table, Guid Id)? authorizedParent,
+        ExternalInvoiceHiding? hideInvoices, ILogger logger, CancellationToken ct)
+    {
+        bool IsAuthorized(string? value) =>
+            authorizedParent is { } parent
+            && string.Equals(parent.Table, ExternalInvoiceVisibility.InvoiceTable, StringComparison.OrdinalIgnoreCase)
+            && Guid.TryParse(value, out var id) && id == parent.Id;
+
+        var asked = candidates
+            .SelectMany(RegardingInvoicesOf)
+            .Where(v => !IsAuthorized(v))
+            .Select(v => Guid.TryParse(v, out var id) ? id : Guid.Empty)
+            .Where(id => id != Guid.Empty)
+            .Distinct()
+            .ToList();
+        InvoiceVisibilityResult? decision = null;
+        if (asked.Count > 0 && hideInvoices is not null)
+        {
+            decision = await hideInvoices(principal, asked, ct).ConfigureAwait(false);
+            if (decision.Hidden.Count > 0)
+            {
+                logger.LogInformation(
+                    "[EXT-MESSAGES] {Hidden} of {Count} regarded invoice(s) hidden by the (a') predicate ({Reasons}); their messages are withheld.",
+                    decision.Hidden.Count, asked.Count, decision.HiddenSummary());
+            }
+        }
+        else if (asked.Count > 0)
+        {
+            logger.LogError(
+                "[EXT-MESSAGES] No invoice (a') predicate is configured; messages regarding {Count} invoice(s) are withheld (fail closed).",
+                asked.Count);
+        }
+
+        return row => RegardingInvoicesOf(row).All(value =>
+            IsAuthorized(value)
+            || (Guid.TryParse(value, out var id) && id != Guid.Empty && decision is not null && decision.IsVisible(id)));
+    }
 
     /// <summary>The table every message row is read from.</summary>
     private const string CommunicationTable = "sprk_communication";
@@ -541,8 +605,10 @@ public static class ExternalMessageEndpoints
         ILogger logger,
         CancellationToken ct,
         NonSecureRootReader? readNonSecureRoots = null,
-        LiveParentRootReader? readLiveParents = null) =>
-        (await EvaluateRecordGateAsync(root, id, principal, registry, readRecord, logger, ct, readNonSecureRoots, readLiveParents)
+        LiveParentRootReader? readLiveParents = null,
+        ExternalInvoiceHiding? hideInvoices = null) =>
+        (await EvaluateRecordGateAsync(
+                root, id, principal, registry, readRecord, logger, ct, readNonSecureRoots, readLiveParents, hideInvoices)
             .ConfigureAwait(false))
             .Readable;
 
@@ -567,10 +633,11 @@ public static class ExternalMessageEndpoints
         ILogger logger,
         CancellationToken ct,
         NonSecureRootReader? readNonSecureRoots = null,
-        LiveParentRootReader? readLiveParents = null)
+        LiveParentRootReader? readLiveParents = null,
+        ExternalInvoiceHiding? hideInvoices = null)
     {
         var gate = await EvaluateRecordGateAsync(
-                root, id, principal, registry, readRecord, logger, ct, readNonSecureRoots, readLiveParents)
+                root, id, principal, registry, readRecord, logger, ct, readNonSecureRoots, readLiveParents, hideInvoices)
             .ConfigureAwait(false);
         return RightsFromGate(root, id, principal, gate).Rights;
     }
@@ -590,10 +657,11 @@ public static class ExternalMessageEndpoints
         ILogger logger,
         CancellationToken ct,
         NonSecureRootReader? readNonSecureRoots = null,
-        LiveParentRootReader? readLiveParents = null)
+        LiveParentRootReader? readLiveParents = null,
+        ExternalInvoiceHiding? hideInvoices = null)
     {
         var gate = await EvaluateRecordGateAsync(
-                root, id, principal, registry, readRecord, logger, ct, readNonSecureRoots, readLiveParents)
+                root, id, principal, registry, readRecord, logger, ct, readNonSecureRoots, readLiveParents, hideInvoices)
             .ConfigureAwait(false);
         return RightsFromGate(root, id, principal, gate);
     }
@@ -663,7 +731,8 @@ public static class ExternalMessageEndpoints
         ILogger logger,
         CancellationToken ct,
         NonSecureRootReader? readNonSecureRoots,
-        LiveParentRootReader? readLiveParents)
+        LiveParentRootReader? readLiveParents,
+        ExternalInvoiceHiding? hideInvoices = null)
     {
         if (id == Guid.Empty)
         {
@@ -733,7 +802,31 @@ public static class ExternalMessageEndpoints
                 .ConfigureAwait(false);
         var readable = module.ScopeRows(principal, new[] { row }, flags, live).Count > 0;
         // Fix round 2 (F1): a refusal that rests on a read that failed is UNDECIDED, not "behind the wall".
-        return (readable, row, !readable && (live.Faulted || !flags.IsComplete));
+        if (!readable)
+            return (false, row, live.Faulted || !flags.IsComplete);
+
+        // ebilling-r1 task 098 (model 9.1, (a')): an invoice whose Submit Invoice source is isolated is refused like a missing
+        // one, for a caller who is not an internal systemuser. No predicate, a hidden invoice and a failed read all refuse with
+        // the SAME answer as a missing record (Undecided false: a fault must not be distinguishable from "hidden").
+        if (string.Equals(root.EntityLogicalName, ExternalInvoiceVisibility.InvoiceTable, StringComparison.OrdinalIgnoreCase))
+        {
+            if (hideInvoices is null)
+            {
+                logger.LogError("[EXT-MESSAGES] No invoice (a') predicate is configured; refusing invoice {RecordId} (fail closed).", id);
+                return (false, row, false);
+            }
+
+            var decision = await hideInvoices(principal, new[] { id }, ct).ConfigureAwait(false);
+            if (!decision.IsVisible(id))
+            {
+                logger.LogInformation(
+                    "[EXT-MESSAGES] Invoice {RecordId} hidden by the (a') predicate ({Reasons}); refused like a missing record.",
+                    id, decision.HiddenSummary());
+                return (false, row, false);
+            }
+        }
+
+        return (true, row, false);
     }
 
     /// <summary>

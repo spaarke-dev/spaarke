@@ -1,0 +1,26 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0577",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0577","generator_id":"gen_eval_set.py@1 F-0577","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0577.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-01"},
+ "header":{"firm":"Aldridge and Zeller LLP","firm_invoice_number":"INV-2025-99883","invoice_date":"2025-09-03","billing_period_start":"2025-08-01","billing_period_end":"2025-08-31","firm_matter_reference":"69728-0026","po_number":"PO-4524946","fees_total":6869.0,"expenses_total":93.77,"adjustments_total":0.0,"total_due":6962.77,"currency":"USD"},
+ "timekeepers":[{"name":"Dalia Brennan","title":"Partner","rate":655.0,"billed_as":"Dalia Brennan"},{"name":"Dalia Whitfield","title":"Associate","rate":350.0,"billed_as":"Dalia Whitfield"},{"name":"Hannah Wickham","title":"Partner","rate":680.0,"billed_as":"Hannah Wickham"},{"name":"Helena Brennan","title":"Paralegal","rate":200.0,"billed_as":"Helena Brennan"},{"name":"Louis Dunleavy","title":"Of Counsel","rate":580.0,"billed_as":"Louis Dunleavy"},{"name":"Naomi Nwosu","title":"Associate","rate":345.0,"billed_as":"Naomi Nwosu"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2025-08-13","timekeeper":"Dalia Brennan","timekeeper_name":"Dalia Brennan","timekeeper_title":"Partner","title":"Partner","hours":1.6,"rate":655.0,"amount":1048.0,"narrative":"Revise appellate brief after cite check","codes":["L520","A104"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2025-08-11","timekeeper":"Dalia Whitfield","timekeeper_name":"Dalia Whitfield","timekeeper_title":"Associate","title":"Associate","hours":3.0,"rate":350.0,"amount":1050.0,"narrative":"Plan strategy for upcoming phase of the warranty claim with team","codes":["L120","A101"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2025-08-11","timekeeper":"Hannah Wickham","timekeeper_name":"Hannah Wickham","timekeeper_title":"Partner","title":"Partner","hours":1.4,"rate":680.0,"amount":952.0,"narrative":"Attend and present oral argument in the employment claim","codes":["L530","A109"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2025-08-07","timekeeper":"Helena Brennan","timekeeper_name":"Helena Brennan","timekeeper_title":"Paralegal","title":"Paralegal","hours":2.6,"rate":200.0,"amount":520.0,"narrative":"Research appealability issues in the insurance coverage issue","codes":["L510","A102"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2025-08-06","timekeeper":"Louis Dunleavy","timekeeper_name":"Louis Dunleavy","timekeeper_title":"Of Counsel","title":"Of Counsel","hours":2.0,"rate":580.0,"amount":1160.0,"narrative":"Attend and present oral argument in the supply agreement","codes":["L530","A109"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2025-08-05","timekeeper":"Naomi Nwosu","timekeeper_name":"Naomi Nwosu","timekeeper_title":"Associate","title":"Associate","hours":0.4,"rate":345.0,"amount":138.0,"narrative":"Draft notice of appeal and docketing statement for the distribution agreement","codes":["L510","A103"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2025-08-18","timekeeper":"Naomi Nwosu","timekeeper_name":"Naomi Nwosu","timekeeper_title":"Associate","title":"Associate","hours":1.5,"rate":345.0,"amount":517.5,"narrative":"Research appealability issues in the distribution agreement","codes":["L510","A102"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2025-08-20","timekeeper":"Naomi Nwosu","timekeeper_name":"Naomi Nwosu","timekeeper_title":"Associate","title":"Associate","hours":2.6,"rate":345.0,"amount":897.0,"narrative":"Prepare for oral argument in the customs audit","codes":["L530","A101"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"fee","date":"2025-08-27","timekeeper":"Naomi Nwosu","timekeeper_name":"Naomi Nwosu","timekeeper_title":"Associate","title":"Associate","hours":1.7,"rate":345.0,"amount":586.5,"narrative":"Draft appellate brief in the supply agreement","codes":["L520","A103"],"page":2,"narrative_style":"clear"},
+  {"n":10,"line_type":"expense","date":"2025-08-26","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":93.77,"amount":93.77,"narrative":"Court filing fee","codes":["E112"],"page":2,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["827 Harbor Road","Atlanta","Tax ID 44-1399259"],"template":"T13","pages":2},
+ "rule_set_id":"RS-01",
+ "context":{"matter_open":"2024-11-18","matter_close":"2025-11-29","matter_budget":52851.0,"approved_timekeepers":["Dalia Whitfield","Katya Santoro","Helena Brennan","Victor Sandoval","Louis Dunleavy","Hannah Wickham","Naomi Nwosu","Dalia Brennan"],"invoice_received_date":"2025-09-15"},
+ "expected_findings":[],
+ "seeded_violations":0
+}

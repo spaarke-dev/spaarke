@@ -267,6 +267,7 @@ Sources: **design** = [`design.md`](../design.md) §8 (D-1..D-12, §8.0c) and §
 - The owner asked for Basic User to be set "to what it needs to be". Live (669 privileges) already lacks the policy, policyversion and ruleset Reads, and has no depth differences from master's XML. So no change was made (security-roles §19).
 - The owner does not believe they edited the role on 10-22. The cause stays unexplained.
 - The leftover AppendTo on `sprk_policy` and `sprk_policyversion` (Console User, depth 4) is outside D-185, which covered only Read. It is left as is (uac-r2 observation, no write path).
+- **Customer stamps (added 2026-10-29, customer-provisioning):** D-189 covers spaarkedev1 only. Published stamps run SpaarkeMaster 1.2.3.1 (`736ed4d648`), which already contains Basic User `prvReadsprk_Policy` at Deep (added `49ef71b852`, D-110). So the 1.2.4.0 upgrade REMOVES it from every stamp. It is a real D-185 removal on Basic User, not a net-zero change. The upgrade also ADDS `prvAppendsprk_Policy` and `prvAppendsprk_PolicyVersion` (Deep) to Ontology Administrator (task 101). Checked after each stamp upgrade by customer-provisioning's `Test-RolePrivilegeExpectations.ps1` (`spaarkemaster-1.2.4.0.json`).
 
 ## D-190 — DI-126 accepted as a known limit (owner, 2026-10-26)
 
@@ -387,10 +388,35 @@ Sources: **design** = [`design.md`](../design.md) §8 (D-1..D-12, §8.0c) and §
 
 - **Context:** review of task 167 (#2403, K1). D-193 prefills the budget currency from the matter's owning business unit. A secure matter is owned by the Secure Record unit, whose `transactioncurrencyid` is null, so its budget fell back to the organization base currency. In a multi-currency organization, a secure EUR matter would default to USD.
 - **Owner ruling: fix it now** (option B over accepting the fallback).
-- **Proposed rule** (sent to uac-r2 for confirmation, 2026-10-28):
+- **Rule:**
   - When the matter's owning business unit is the Secure Record unit (uac-r2's shared predicate, D-191), use the currency of the configured customer business unit, `ExternalAccess:CustomerBusinessUnitId`.
   - If that unit is not configured or has no currency, use the organization base currency.
   - Never apply this to a non-secure matter.
-- **Implementation:** in `DecisionParameterSources` on PR #2414 (the uac-r2 follow-up that reads the owning business unit as the caller).
+- **uac-r2 confirmed (2026-10-28):**
+  - `ExternalAccess:CustomerBusinessUnitId` is the deployment's single customer business unit (provisioning H10, a child of the root).
+  - There is no better per-record answer. Secure Record is the customer unit's sibling, and nothing stores a matter's original unit.
+  - Reuse `SecureChildShareSynchronizer.ResolveSecureBusinessUnitAsync` (`Services/Access/SecureChildShareSynchronizer.cs:1293`) with `SecureRecordOwnerTeam.IsInSecureBusinessUnit` (`Infrastructure/Dataverse/SecureRecordOwnerTeam.cs:287`). Do not copy `RecordOwnershipResolver`'s private copy.
+  - Ambiguous, a null id, or a null predicate result means "undeterminable", and the matter is treated as not secure. That ends at the base currency either way, because Secure Record has no currency.
+  - If the configured customer unit is Secure Record itself or the root, treat it as unconfigured: base currency, with a Warning.
+- **Tests that pin the rule (uac-r2):**
+  - a secure matter gets the customer unit's currency;
+  - customer unit not set → base currency;
+  - customer unit = Secure Record → base currency;
+  - a non-secure matter never reads `CustomerBusinessUnitId`;
+  - ambiguous → not secure.
+- **Known limit:** a secure matter loses the currency of the sub-unit it came from. Acceptable, because the currency is a prefill the user can change.
+- **Implementation:** a separate small PR into docs after #2414 (the as-caller business-unit read) merges, task 167c, in `DecisionParameterSources.DefaultCurrencyAsync`.
 - **Dev fact (2026-10-28):** Secure Record, Spaarke Demo, Spaarke Dev 1 and Spaarke Test 1 have no currency; root (Spaarke) and Spaarke Business Unit 1 are USD. An ordinary unit with no currency still falls back to the base currency (D-193 unchanged).
 
+
+## D-199 — Who gets the Assign Task email, and the system-mailbox fallback (owner, 2026-10-29)
+
+Task 168, owner questions Q1 and Q2 (asked 2026-10-28, explained in detail 2026-10-29).
+- **Q1, recipients (owner: A).** The Assign Task email goes to the assignee only when they can see the matter:
+  - **An eligible internal user**, by the same gate as master `GrantAccessNotifier` (`Api/ExternalAccess/GrantAccessNotifier.cs:200-260`): exactly one eligible user represents the contact, the No Access check on the record and its secure parents (`AsFlagged`) is NotSecure or NotWalled, and they have Read on the task.
+  - **An external contact** with an active External Access grant on the matter who is onboarded (a portal identity binding and an email address). They get the portal link, never a model-driven link, and the assigner is named by display name only, as in `EmailExternalContactGrantAsync` (`GrantAccessNotifier.cs:270-330`).
+  - **Nobody else.** Not a contact with no grant, not one that isn't onboarded, not anyone on the No Access list, not when the contact maps to several users, and not when the check can't be made (fail closed, ADR-003). The task is still created. The outcome records why no email was sent, so the assigner sees it.
+- **Owner requirement (Q1):** the matter, or whatever record the task belongs to, shows its related tasks to a user who has access to them, including in the external portal. Task 168 verifies this for the portal. A gap goes to the owner and becomes a filed issue, not a silent link to a page that doesn't show the task.
+- **Q2, fallback (owner: yes).** When the email can't be sent as the assigning user, it is sent from the system mailbox. The fallback covers the same recipients only: it never emails someone the Q1 gate refused.
+- **Implementation:** the task 168 fix round, `task/168-assign-task-notify` (#2418); plan in `current-task.md`.
+- **Amendment (owner, 2026-10-29): the sender for an external assignee.** Email to an external contact always comes from the system mailbox (`Communication:DefaultMailbox`), never from the assigning user's mailbox. Only the body names the assigner, as "Assigned by {display name}". This matches the portal-access email (`GrantAccessNotifier` → `SendPortalNotificationEmailAsync`) and keeps internal addresses out of external inboxes. An internal assignee is unchanged: the assigner's own mailbox, with the system mailbox as the fallback. Implemented as a 168 follow-up.

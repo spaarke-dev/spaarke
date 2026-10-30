@@ -1,0 +1,30 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0063",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0063","generator_id":"gen_eval_set.py@1 F-0063","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0063.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-03"},
+ "header":{"firm":"Pryce and Whitcombe LLP","firm_invoice_number":"LF0093148","invoice_date":"2025-10-04","billing_period_start":"2025-09-01","billing_period_end":"2025-09-30","firm_matter_reference":"55766-0024","po_number":null,"fees_total":4093.25,"expenses_total":508.15,"adjustments_total":0.0,"total_due":4601.4,"currency":"USD"},
+ "timekeepers":[{"name":"Aisha Kowalczyk","title":"Senior Associate","rate":320.0,"billed_as":"AK"},{"name":"Dmitri Eriksen","title":"Associate","rate":205.0,"billed_as":"DE"},{"name":"Oliver Abernathy","title":"Associate","rate":220.0,"billed_as":"OA"},{"name":"Rafael Sandoval","title":"Associate","rate":230.0,"billed_as":"RS"},{"name":"Sofia Marchetti","title":"Partner","rate":515.0,"billed_as":"SM"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2025-09-03","timekeeper":"AK","timekeeper_name":"Aisha Kowalczyk","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":3.2,"rate":320.0,"amount":1024.0,"narrative":"Revise appellate brief after cite check; Draft appellate brief in the distribution agreement; Prepare case assessment memorandum regarding the regulatory inquiry and recommended strategy.","codes":["L510","A103"],"page":1,"narrative_style":"block_billed"},
+  {"n":2,"line_type":"fee","date":"2025-09-08","timekeeper":"OA","timekeeper_name":"Oliver Abernathy","timekeeper_title":"Associate","title":"Assoc","hours":2.9,"rate":220.0,"amount":638.0,"narrative":"Draft notice of appeal and docketing statement for the regulatory inquiry","codes":["L510","A103"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2025-09-10","timekeeper":"DE","timekeeper_name":"Dmitri Eriksen","timekeeper_title":"Associate","title":"Assoc","hours":1.15,"rate":205.0,"amount":235.75,"narrative":"Review court docket and calendar of pending deadlines for the lease dispute","codes":["L190","A104"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2025-09-10","timekeeper":"SM","timekeeper_name":"Sofia Marchetti","timekeeper_title":"Partner","title":"Ptr","hours":2.4,"rate":515.0,"amount":1236.0,"narrative":"Prepare monthly status report to client regarding the vendor agreement","codes":["L190","A111"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2025-09-17","timekeeper":"RS","timekeeper_name":"Rafael Sandoval","timekeeper_title":"Associate","title":"Assoc","hours":2.3,"rate":230.0,"amount":529.0,"narrative":"Review court docket and calendar of pending deadlines for the distribution agreement","codes":["L190","A104"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2025-09-17","timekeeper":"DE","timekeeper_name":"Dmitri Eriksen","timekeeper_title":"Associate","title":"Assoc","hours":0.7,"rate":205.0,"amount":143.5,"narrative":"Prepare for oral argument in the data incident","codes":["L530","A101"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2025-09-26","timekeeper":"DE","timekeeper_name":"Dmitri Eriksen","timekeeper_title":"Associate","title":"Assoc","hours":1.4,"rate":205.0,"amount":287.0,"narrative":"Revise appellate brief after cite check","codes":["L520","A104"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"expense","date":"2025-09-01","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":3.0,"rate":48.17,"amount":144.51,"narrative":"Overnight courier to Northwind Logistics counsel","codes":["E107"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"expense","date":"2025-09-10","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":4.0,"rate":90.91,"amount":363.64,"narrative":"Working meal during deposition preparation","codes":["E111"],"page":1,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["433 Market Street","Chicago","Tax ID 31-9831326"],"template":"T19","pages":1},
+ "rule_set_id":"RS-03",
+ "context":{"matter_open":"2024-07-28","matter_close":"2025-12-29","matter_budget":43405.0,"approved_timekeepers":["Sofia Marchetti","Anders Dunleavy","Oliver Abernathy","Rafael Sandoval","Beatrix Marchetti","Aisha Kowalczyk","Dmitri Eriksen","Clara Pemberton"],"invoice_received_date":"2025-10-15"},
+ "expected_findings":[
+  {"rule_id":"RS-03-R02","rule_type":"TimeIncrement","scope":"line","line_refs":[3],"consequence":"Reduce"},
+  {"rule_id":"RS-03-R06","rule_type":"ExpenseRule","scope":"line","line_refs":[9],"consequence":"Reduce"},
+  {"rule_id":"RS-03-R07","rule_type":"AiObservation","scope":"line","line_refs":[1],"consequence":"Flag"},
+  {"rule_id":"RS-03-R08","rule_type":"RequiredData","scope":"invoice","line_refs":[],"consequence":"Reject"}
+ ],
+ "seeded_violations":4
+}

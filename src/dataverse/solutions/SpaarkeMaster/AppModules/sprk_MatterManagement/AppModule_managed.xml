@@ -46,6 +46,7 @@
     <AppModuleComponent type="1" schemaName="sprk_analysistool" />
     <AppModuleComponent type="1" schemaName="sprk_analysisworkingversion" />
     <AppModuleComponent type="1" schemaName="sprk_approlemodulemap" />
+    <AppModuleComponent type="1" schemaName="sprk_billingexport" />
     <AppModuleComponent type="1" schemaName="sprk_chartdefinition" />
     <AppModuleComponent type="1" schemaName="sprk_charttype" />
     <AppModuleComponent type="1" schemaName="sprk_communication" />
@@ -66,6 +67,7 @@
     <AppModuleComponent type="1" schemaName="sprk_fieldmappingrule" />
     <AppModuleComponent type="1" schemaName="sprk_gridconfiguration" />
     <AppModuleComponent type="1" schemaName="sprk_invoice" />
+    <AppModuleComponent type="1" schemaName="sprk_invoicesubmission" />
     <AppModuleComponent type="1" schemaName="sprk_kpiassessment" />
     <AppModuleComponent type="1" schemaName="sprk_matter" />
     <AppModuleComponent type="1" schemaName="sprk_mattersubtype_ref" />

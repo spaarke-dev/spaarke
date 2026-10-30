@@ -1,0 +1,116 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="078" project="ebilling-r1">
+  <metadata>
+    <title>Rate card and timekeeper import and publish</title>
+    <phase>3 Rules (WP3) — wave W2-2</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Admin data import with per-row validation over existing 017 tables; no AI, no ontology-owned code.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-specified import and validation endpoint following the Finance endpoint pattern.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P2-B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>017, 028, 029</deps>
+    <tags>bff, api, dataverse</tags>
+    <estimated-effort>2 days</estimated-effort>
+  </metadata>
+
+  <prompt>Add rate card and timekeeper import from a spreadsheet template (FR-29, FR-08): a template download, an import that reports invalid rows one by one and writes nothing when any row is invalid, Draft rate cards with their rates and timekeepers, overlap validation of rate effective dates, the source workbook kept in the Procedure Library container, and a publish route moving a card from Draft to Published.</prompt>
+
+  <role>SPAARKE platform developer. Expert in ASP.NET Core Minimal APIs, DocumentFormat.OpenXml spreadsheet parsing and Dataverse batch writes.</role>
+
+  <goal>Template, import and publish routes with admin-only authorization; per-row errors; overlap refusal at import and publish; nothing published until the admin publishes; no new package.</goal>
+
+  <context>
+    <background>Spec FR-29 (acceptance: invalid rows reported per row; nothing published until the admin publishes), FR-08 (sprk_timekeeper extended with firm, classification, status Approved / Pending / Inactive, effective dates, linked external contact; sprk_ratecard + sprk_ratecardrate with firm, optional core-record scope, source document, status Draft / Published, effective dates, rate per timekeeper or classification with approved and rack rate; acceptance: overlapping effective-date ranges for the same timekeeper / classification on one card are refused), FR-16 / D-55 (Procedure Library container, internal only), design.md 7.1. 017 defines the columns; 028 adds the Procedure Library container option; 029 applies them to dev. DocumentFormat.OpenXml 3.5.1 is already referenced (src/server/api/Sprk.Bff.Api/Sprk.Bff.Api.csproj:217) — no spreadsheet package is added (NFR-12). Manual edits on the model-driven forms bypass the BFF (no plugins, ADR-002), so overlap is re-checked at publish, the server-side owner of the Published state. Not dependent on #1111.</background>
+    <relevant-files>
+      <file role="new">src/server/api/Sprk.Bff.Api/Api/Finance/RateCardImportEndpoints.cs</file>
+      <file role="new">src/server/api/Sprk.Bff.Api/Services/Finance/RateCardImportService.cs (template, parse, validate, write, publish)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/DI/FinanceModule.cs and the Finance endpoint-mapping call site (shared append points)</file>
+      <file role="new">tests/unit/Sprk.Bff.Api.Tests/Services/Finance/RateCardImportServiceTests.cs</file>
+      <file role="new">tests/unit/Sprk.Bff.Api.Tests/Api/Finance/RateCardImportEndpointsTests.cs</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="017" status="pending">Timekeeper, rate card and rate card rate schema</dependency>
+      <dependency task="028" status="pending">Procedure Library container option</dependency>
+      <dependency task="029" status="pending">Schema applied to dev</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="DEF-015 (owner, 2026-10-15)">Do not create Procedure Library sprk_document rows linked to a matter, project or work assignment: how procedure files are stored (dedicated Procedures table vs unlinked Documents) is an open design discussion with the owner. If this task needs a decision, STOP and report.</constraint>
+    <constraint source="NFR-12">No new NuGet package: parse .xlsx with the already-referenced DocumentFormat.OpenXml. Generate the template from code (one source for the column set) rather than committing a binary file.</constraint>
+    <constraint source="spec FR-29">Import is all or nothing: any invalid row returns 400 ProblemDetails with an errors extension (sheet, row number, column, message) and writes nothing. Valid imports create Draft cards and Pending timekeepers only.</constraint>
+    <constraint source="spec FR-08">Overlapping effective ranges for the same timekeeper or classification on one card are refused at import and again at publish.</constraint>
+    <constraint source="ADR-007, D-55, D-63">The source workbook is stored only through SpeFileStore in the Procedure Library container and linked as the card's source document; never in a firm-visible location.</constraint>
+    <constraint source="ADR-001, ADR-008, ADR-019, 040">Every route has endpoint-filter admin authorization (the mechanism 076 chooses), ProblemDetails with stable codes, eBilling disabled code when the flag is off. Upload size limited (reuse the configured submission limit pattern).</constraint>
+    <constraint source="ADR-010">Registrations in AddFinanceModule only; concrete service.</constraint>
+    <constraint source=".claude/constraints/bff-extensions.md">BFF hygiene: placement (BFF, B1 caller identity and user-attributed upload), publish-size delta, no new HIGH CVE.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ebilling-r1/spec.md (FR-08, FR-16, FR-29)</file>
+      <file>projects/ebilling-r1/notes/research/ledes-utbms-ocg-reference.md (timekeeper classifications)</file>
+      <file>docs/data-model/sprk_financial-related-entities.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>.claude/patterns/api/endpoint-filters.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+    <patterns>
+      <pattern name="Finance route with own filter" location="src/server/api/Sprk.Bff.Api/Api/Finance/FinanceEndpoints.cs">Group /api/finance, per-route authorization filter, ProducesProblem metadata.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Read 017's columns in dev metadata and 028's option name; confirm whether 076's admin helper exists (else implement the same FinanceAuthorizationCheck.CallerPrivilege check and note it).</step>
+    <step order="1">GET template (route under /api/finance/ratecards, directional): workbook with a Timekeepers sheet (name, classification, effective from / to, linked contact email) and a Rates sheet (timekeeper name or classification, approved rate, rack rate, currency, effective from / to), header row plus one example row.</step>
+    <step order="2">POST import (multipart: workbook, firm, optional core record, card name): parse; validate each row (required cells, numeric and date formats, approved rate not above rack rate, known classification, timekeeper referenced by a rate exists in the sheet or the firm roster, effective from before effective to, no overlap); on any error return all row errors; else upload the workbook to the Procedure Library and create card, rates and timekeepers in one batch.</step>
+    <step order="3">POST publish: re-validate overlap against the card's rows; Draft to Published; imported Pending timekeepers become Approved; a Published card is not editable through this API.</step>
+    <step order="4">Tests: per-row errors with row numbers; one bad row writes nothing; overlap refused at import and at publish (a row edited on the form after import); approved above rack refused; template round-trips through the parser; 401, 403, disabled code on every route; source document stored through SpeFileStore in the Procedure Library container.</step>
+    <step order="5">dotnet build and dotnet test green; publish-size delta and vulnerable-package check recorded.</step>
+    <step order="6">Update TASK-INDEX.md: this task's status cell to "✅ [done]".</step>
+    <step order="7">Record deviations (routes, template columns) in projects/ebilling-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If 017's schema cannot hold a value the template needs (for example rack rate or linked contact), STOP and report the gap instead of storing it elsewhere.</trigger>
+    <trigger>If no admin mechanism exists yet (076 not landed and the caller-privilege check does not fit), raise 🔔 Human Input Required (auth is security-sensitive).</trigger>
+  </escalation>
+
+  <justification>
+    <existing>No spreadsheet import exists in the BFF (grep "SpreadsheetDocument" in src/server/api finds none); rate card tables come from 017; spec section 11 rows for sprk_ratecard / sprk_ratecardrate and sprk_timekeeper.</existing>
+    <extension>New routes and service in the existing Finance module and route group; parsing reuses the already-referenced DocumentFormat.OpenXml.</extension>
+    <cost-of-doing-nothing>ApprovedRate and ApprovedTimekeeper rules have no reference data unless admins type every rate by hand on forms, with no overlap check and no source document (FR-29, FR-08 fail).</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="dotnet">build, test</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Finance/RateCardImportEndpoints.cs; Services/Finance/RateCardImportService.cs</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Finance/RateCardImportServiceTests.cs; tests/unit/Sprk.Bff.Api.Tests/Api/Finance/RateCardImportEndpointsTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">A workbook with invalid rows returns 400 ProblemDetails listing each invalid row (sheet, row, column, message) and creates no record and no file.</criterion>
+    <criterion testable="true">A valid workbook creates one Draft card with its rates and Pending timekeepers, and stores the workbook in the Procedure Library container as the card's source document.</criterion>
+    <criterion testable="true">Overlapping effective ranges for the same timekeeper or classification on one card are refused at import and at publish.</criterion>
+    <criterion testable="true">Nothing is Published until the publish route is called; publish moves the card to Published and its imported timekeepers to Approved.</criterion>
+    <criterion testable="true">Every route returns 401 unauthenticated, 403 non-admin, and the eBilling disabled code when the flag is off.</criterion>
+    <criterion testable="true">The csproj gains no PackageReference.</criterion>
+    <criterion testable="true">Publish-size delta measured against a fresh master build and recorded in task notes; no new HIGH CVE.</criterion>
+    <criterion testable="true">Cover the stated contract plus the edge cases named above. Anything beyond that needs a one-line justification in task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>Shared append points FinanceModule.cs and the Finance endpoint-mapping call site: re-read before editing, add only this task's lines. Parallel group P2-B (wave W2-2) with 042 – 047: own files only. 046 reads the published rate card in force per line date; 072 reads it for ApprovedRate. The Rule Review page (077) does not cover rate cards; admins use the routes from model-driven forms or a later UI — record in notes if a UI entry point is needed for UAT. COMPLETED 2026-10-16. Full record: projects/ebilling-r1/notes/078-ratecard-import.md. DEVIATIONS: firm, name and core record are query parameters (not multipart fields); admin gate is the D-76 caller table privileges (076 not landed); an imported timekeeper is "the firm Pending timekeeper a rate names", so a new timekeeper needs a rate row; no UI entry point exists for UAT (admins call the routes). Procedure Library document is created unlinked (DEF-015). Edited shared ArchTests ledgers (route census 125->126, SPE sink provenance, RequireEbillingEnabled classified). Tests: 72 pass; ArchTests 1052 pass; ADR-010 ceiling unchanged (162); publish size +40,120 B (base = branch point 70bfb7586); no new CVE. Step 7 (TASK-INDEX) left to the main session by instruction. rework: fix-round-1 task 078</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load the knowledge files first. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

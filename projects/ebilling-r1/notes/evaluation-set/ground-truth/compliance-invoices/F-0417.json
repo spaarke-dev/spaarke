@@ -1,0 +1,29 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0417",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0417","generator_id":"gen_eval_set.py@1 F-0417","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0417.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-03"},
+ "header":{"firm":"Hartwell & Forsythe LLP","firm_invoice_number":"INV-2025-53082","invoice_date":"2026-02-02","billing_period_start":"2026-01-01","billing_period_end":"2026-01-31","firm_matter_reference":"32886-0011","po_number":"PO-4589962","fees_total":4703.0,"expenses_total":1730.01,"adjustments_total":0.0,"total_due":6433.01,"currency":"USD"},
+ "timekeepers":[{"name":"Anders Nwosu","title":"Associate","rate":200.0,"billed_as":"AN"},{"name":"Beatrix Sandoval","title":"Senior Associate","rate":330.0,"billed_as":"BS"},{"name":"Dmitri Zielinski","title":"Partner","rate":455.0,"billed_as":"DZ"},{"name":"Ivan Pemberton","title":"Associate","rate":270.0,"billed_as":"IP"},{"name":"Naomi Lindqvist","title":"Paralegal","rate":120.0,"billed_as":"NL"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2026-01-02","timekeeper":"IP","timekeeper_name":"Ivan Pemberton","timekeeper_title":"Associate","title":"Assoc","hours":1.9,"rate":270.0,"amount":513.0,"narrative":"Analyze key documents for deposition preparation","codes":["L320","A104"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2026-01-07","timekeeper":"BS","timekeeper_name":"Beatrix Sandoval","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":1.4,"rate":330.0,"amount":462.0,"narrative":"Research authority for pretrial brief","codes":["L250","A102"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2026-01-16","timekeeper":"BS","timekeeper_name":"Beatrix Sandoval","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":1.4,"rate":330.0,"amount":462.0,"narrative":"Review court docket and calendar of pending deadlines for the supply agreement","codes":["L190","A104"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2026-01-19","timekeeper":"NL","timekeeper_name":"Naomi Lindqvist","timekeeper_title":"Paralegal","title":"Para","hours":2.6,"rate":120.0,"amount":312.0,"narrative":"Analyze key documents for deposition preparation","codes":["L320","A104"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2026-01-21","timekeeper":"IP","timekeeper_name":"Ivan Pemberton","timekeeper_title":"Associate","title":"Assoc","hours":2.4,"rate":270.0,"amount":648.0,"narrative":"Prepare production set and cover correspondence for service on Orchard Row Brands","codes":["L320","A110"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2026-01-22","timekeeper":"BS","timekeeper_name":"Beatrix Sandoval","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":1.1,"rate":330.0,"amount":363.0,"narrative":"Prepare production set and cover correspondence for service on Solano Freight","codes":["L320","A110"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2026-01-26","timekeeper":"AN","timekeeper_name":"Anders Nwosu","timekeeper_title":"Associate","title":"Assoc","hours":2.8,"rate":200.0,"amount":560.0,"narrative":"Meet and confer with counsel for Ironbridge Steel regarding discovery dispute","codes":["L350","A107"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2026-01-26","timekeeper":"AN","timekeeper_name":"Anders Nwosu","timekeeper_title":"Associate","title":"Assoc","hours":0.9,"rate":200.0,"amount":180.0,"narrative":"Attend deposition of Larkspur Medical corporate representative","codes":["L330","A109"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"fee","date":"2026-01-30","timekeeper":"DZ","timekeeper_name":"Dmitri Zielinski","timekeeper_title":"Partner","title":"Ptr","hours":2.6,"rate":455.0,"amount":1183.0,"narrative":"Research case law supporting answer and affirmative defenses","codes":["L240","A102"],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"fee","date":"2026-01-30","timekeeper":"AN","timekeeper_name":"Anders Nwosu","timekeeper_title":"Associate","title":"Assoc","hours":0.1,"rate":200.0,"amount":20.0,"narrative":"Draft pretrial brief and supporting memorandum","codes":["L240","A103"],"page":1,"narrative_style":"clear"},
+  {"n":11,"line_type":"expense","date":"2026-01-01","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":6.17,"amount":6.17,"narrative":"Postage - certified mail","codes":["E108"],"page":1,"narrative_style":"clear"},
+  {"n":12,"line_type":"expense","date":"2026-01-09","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":345.88,"amount":345.88,"narrative":"Court filing fee","codes":["E112"],"page":1,"narrative_style":"clear"},
+  {"n":13,"line_type":"expense","date":"2026-01-21","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":1377.96,"amount":1377.96,"narrative":"Court reporter and transcript - deposition","codes":["E115"],"page":1,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["261 Elm Court","Atlanta","Tax ID 81-9180316"],"template":"T08","pages":2},
+ "rule_set_id":"RS-03",
+ "context":{"matter_open":"2025-05-10","matter_close":"2026-05-01","matter_budget":50732.0,"approved_timekeepers":["Dmitri Zielinski","Beatrix Sandoval","Naomi Lindqvist","Gideon Whitfield","Anders Nwosu","Ivan Pemberton"],"invoice_received_date":"2026-02-11"},
+ "expected_findings":[],
+ "seeded_violations":0
+}

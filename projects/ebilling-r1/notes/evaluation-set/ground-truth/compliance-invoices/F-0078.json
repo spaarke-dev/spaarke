@@ -1,0 +1,31 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0078",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0078","generator_id":"gen_eval_set.py@1 F-0078","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0078.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-06"},
+ "header":{"firm":"Calloway Whitcombe PC","firm_invoice_number":"INV-2026-88899","invoice_date":"2025-10-03","billing_period_start":"2025-09-01","billing_period_end":"2025-09-30","firm_matter_reference":"11399-0031","po_number":"PO-4549763","fees_total":3162.5,"expenses_total":1546.45,"adjustments_total":0.0,"total_due":4708.95,"currency":"USD"},
+ "timekeepers":[{"name":"Clara Ramanathan","title":"Paralegal","rate":120.0,"billed_as":"Clara Ramanathan"},{"name":"Dmitri Nwosu","title":"Partner","rate":385.0,"billed_as":"Dmitri Nwosu"},{"name":"Imani Esposito","title":"Paralegal","rate":100.0,"billed_as":"Imani Esposito"},{"name":"Ingrid Whitfield","title":"Associate","rate":225.0,"billed_as":"Ingrid Whitfield"},{"name":"Leila Quillen","title":"Associate","rate":210.0,"billed_as":"Leila Quillen"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2025-09-15","timekeeper":"Clara Ramanathan","timekeeper_name":"Clara Ramanathan","timekeeper_title":"Paralegal","title":"Para","hours":2.8,"rate":120.0,"amount":336.0,"narrative":"Review court docket and calendar of pending deadlines for the insurance coverage issue","codes":["L190","A104"],"page":2,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2026-01-17","timekeeper":"Dmitri Nwosu","timekeeper_name":"Dmitri Nwosu","timekeeper_title":"Partner","title":"Ptr","hours":1.7,"rate":385.0,"amount":654.5,"narrative":"Conference with client expert regarding rebuttal report","codes":["L340","A106"],"page":2,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2025-09-12","timekeeper":"Imani Esposito","timekeeper_name":"Imani Esposito","timekeeper_title":"Paralegal","title":"Para","hours":1.3,"rate":100.0,"amount":130.0,"narrative":"Draft protective order regarding deficiencies in Northwind Logistics responses","codes":["L350","A103"],"page":2,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2025-09-25","timekeeper":"Imani Esposito","timekeeper_name":"Imani Esposito","timekeeper_title":"Paralegal","title":"Para","hours":2.6,"rate":100.0,"amount":260.0,"narrative":"Review opposing brief in response to requests for production","codes":["L240","A104"],"page":2,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2025-09-25","timekeeper":"Imani Esposito","timekeeper_name":"Imani Esposito","timekeeper_title":"Paralegal","title":"Para","hours":2.1,"rate":100.0,"amount":210.0,"narrative":"Prepare monthly status report to client regarding the supply agreement","codes":["L190","A111"],"page":2,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2025-09-18","timekeeper":"Ingrid Whitfield","timekeeper_name":"Ingrid Whitfield","timekeeper_title":"Associate","title":"Assoc","hours":1.5,"rate":225.0,"amount":337.5,"narrative":"Draft complaint regarding deficiencies in Northwind Logistics responses","codes":["L350","A103"],"page":2,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2025-09-25","timekeeper":"Ingrid Whitfield","timekeeper_name":"Ingrid Whitfield","timekeeper_title":"Associate","title":"Assoc","hours":1.5,"rate":225.0,"amount":337.5,"narrative":"Review opposing brief in response to reply brief","codes":["L240","A104"],"page":2,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2025-09-29","timekeeper":"Ingrid Whitfield","timekeeper_name":"Ingrid Whitfield","timekeeper_title":"Associate","title":"Assoc","hours":1.0,"rate":225.0,"amount":225.0,"narrative":"Review opposing brief in response to requests for production","codes":["L240","A104"],"page":2,"narrative_style":"clear"},
+  {"n":9,"line_type":"fee","date":"2025-09-03","timekeeper":"Leila Quillen","timekeeper_name":"Leila Quillen","timekeeper_title":"Associate","title":"Assoc","hours":1.2,"rate":210.0,"amount":252.0,"narrative":"Prepare outline for deposition of Orchard Row Brands witness","codes":["L330","A101"],"page":2,"narrative_style":"clear"},
+  {"n":10,"line_type":"fee","date":"2025-09-08","timekeeper":"Leila Quillen","timekeeper_name":"Leila Quillen","timekeeper_title":"Associate","title":"Assoc","hours":0.4,"rate":210.0,"amount":84.0,"narrative":"Research case law supporting pretrial brief","codes":["L240","A102"],"page":2,"narrative_style":"clear"},
+  {"n":11,"line_type":"fee","date":"2025-09-16","timekeeper":"Leila Quillen","timekeeper_name":"Leila Quillen","timekeeper_title":"Associate","title":"Assoc","hours":1.6,"rate":210.0,"amount":336.0,"narrative":"Review and organize incoming production from Meridian Foods for matter file","codes":["L140","A104"],"page":2,"narrative_style":"clear"},
+  {"n":12,"line_type":"expense","date":"2025-09-05","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":1538.81,"amount":1538.81,"narrative":"Court reporter and transcript - deposition","codes":["E115"],"page":2,"narrative_style":"clear"},
+  {"n":13,"line_type":"expense","date":"2025-09-19","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":7.64,"amount":7.64,"narrative":"Postage - certified mail","codes":["E108"],"page":2,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["955 Elm Court","Boston","Tax ID 14-6013510"],"template":"T10","pages":2},
+ "rule_set_id":"RS-06",
+ "context":{"matter_open":"2024-04-22","matter_close":"2025-12-29","matter_budget":43835.0,"approved_timekeepers":["Imani Esposito","Leila Quillen","Dmitri Blackwood","Nadia Nwosu","Emeka Mbeki","Dmitri Nwosu","Ingrid Whitfield","Clara Ramanathan"],"invoice_received_date":"2025-10-18"},
+ "expected_findings":[
+  {"rule_id":"RS-06-R05","rule_type":"CoreRecordWindow","scope":"line","line_refs":[2],"consequence":"Flag"}
+ ],
+ "seeded_violations":1
+}

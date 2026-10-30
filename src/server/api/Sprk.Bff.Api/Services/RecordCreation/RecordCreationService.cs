@@ -794,8 +794,21 @@ internal sealed partial class RecordCreationService
                 refused.Reason!) { OwnerDecision = refused });
         }
 
+        // Owner decision 2026-10-29: a work assignment filed only under an invoice or event is owned with the matters and
+        // projects that record belongs to — the parents the un-secure cascade names for it — ranked first; the invoice or event
+        // stays among the parents (secure-if-any). One that cannot be read refuses, as the cascade's "unverifiable" does.
+        var throughIntermediates = await _rootFiling.OwnerLookupsThroughIntermediatesAsync(table, filed, ct).ConfigureAwait(false);
+        if (throughIntermediates.Unverifiable is { } unread)
+        {
+            var refused = RecordOwnerResolution.Refused(RecordOwnerRefusal.ParentUndetermined,
+                $"what it is filed under could not be told ({unread})");
+            return (null, new RecordCreationRefusal(RecordCreationRefusalKind.OwnerUnresolved, RecordOwnerRefusal.ParentUndetermined,
+                refused.Reason!) { OwnerDecision = refused });
+        }
+
         var owner = await _ownership.ResolveOwnerAsync(
-            OwnerQuestionOf(table, filed, pairParent.Parent, subjectPairId ?? pairIdText, callerObjectId, callerSystemUserId) with
+            OwnerQuestionOf(table, throughIntermediates.Lookups.Concat(filed), pairParent.Parent, subjectPairId ?? pairIdText,
+                callerObjectId, callerSystemUserId) with
             {
                 RequestedBy = requestedBy,
             },

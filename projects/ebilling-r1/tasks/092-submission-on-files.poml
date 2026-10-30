@@ -1,0 +1,113 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="092" project="ebilling-r1">
+  <metadata>
+    <title>Submission on the file store: uploads stage Stored Files, extraction reads the blob, review gets file id, 028 retires</title>
+    <phase>3 Rules (WP3) — Procedures and files (EB-D-148), wave W3-C</phase>
+    <gate>090 merged; 050a merged (same files: InvoiceSubmissionService, InvoiceSubmissionPersister, the job handler); the Procedure Library half of step 6 also needs its three readers gone (escalation below); no live writes</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Changes the invoice write path (049's transaction and after-step order), the submission intake of both channels, extraction input and start-up configuration.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Cross-cutting migration over more than three existing files and consumers (submission service, persister, job handler, review read model, options, graph guard, indexing skip) with an all-or-nothing ordering contract.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P3-C</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Beside 098 and 089: no shared files (098 edits external-access and AI tool files; 089 the assignment service).</parallel-reason>
+    <deps>090</deps>
+    <tags>bff-api, finance, write-path, storage, refactoring, testing</tags>
+    <estimated-effort>2 days</estimated-effort>
+  </metadata>
+
+  <prompt>Move invoice submission onto the file store (model 9.2 and section 12 rows 028, 044 / 049 / 051, 108; reviews section 5 Q2: the invoice-PDF-as-Document path and its components are removed). The SPA and internal upload channels stage the PDF through 090 instead of uploading to SharePoint Embedded and creating a sprk_document; the job reads the bytes from the staged file; the commit transaction writes the Stored File row (Not yet servable); the flip runs right after commit and before any after-step; the review read model exposes the Invoice PDF's file id so the review page loads it through 090's route; the 028 container keys retire from code. 051's UI and the external route contract are unchanged.</prompt>
+
+  <role>SPAARKE platform developer. Expert in the eBilling submission operation (044), the processing job and persister (049) and the file store API (090).</role>
+
+  <goal>A submission through either upload channel creates no sprk_document and no SPE file; its invoice ends with exactly one Servable Stored File (Invoice PDF; Firm-visible Yes for SPA, No for internal) before any after-step runs; extraction reads that file's bytes; /review returns its file id; the 028 keys are gone from code or the task stopped on the escalation.</goal>
+
+  <context>
+    <background>Model 4.1, 4.3, 9.1 steps 2 and 4-6 (for the upload path: staging at request time, no source document, id ForUpload), 9.2, 12. Code: InvoiceSubmissionService.SubmitAsync stages today by SpeFileStore.UploadSmallAsync and creates the document (InvoiceSubmissionService.cs:977-1068, ExternalDataService.CreateDocumentAsync at :1100, IDocumentDataverseService.CreateDocumentAsync at :1110, submission row's sprk_document at :1026); the job loads bytes in LoadDocumentAsync (InvoiceSubmissionProcessingJobHandler.cs:531-555: pointer check :541, download :547); the persister commits in one transaction and resumes at :235-238 (ResumeAsync), invoice id from InvoiceIdFor (:189); the review read model is InvoiceReviewReadService (no file reference today). 028 keys: FinanceOptions.cs:62-77, FinanceOptionsValidator.cs:20-35, GraphModule.StampContainerSettingKeys (GraphModule.cs:32-33), FileIndexingService skip (:75-80), appsettings.template.json:461-463. Production readers of ProcedureLibraryContainerId outside that plumbing: RuleSetService.cs:372 (CreateAsync upload) and :621 (draft source), RateCardImportService.cs:158 (workbook). The existing-document entry (050a, ExistingDocumentId) keeps reading its SPE document until 094 replaces it.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Finance/Submission/InvoiceSubmissionService.cs, InvoiceSubmissionContracts.cs (receipt DocumentId)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Finance/Submission/InvoiceSubmissionPersister.cs (row in the transaction; flip; resume)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Jobs/Handlers/InvoiceSubmissionProcessingJobHandler.cs (file-store branch of LoadDocumentAsync)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Finance/Submission/SubmissionReasonCodes.cs (FileUnservable = "ebilling.submission.file_unservable", FileMalicious = "ebilling.submission.file_malicious")</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Finance/InvoiceReviewReadService.cs and its DTO (invoicePdfFileId)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Configuration/FinanceOptions.cs, FinanceOptionsValidator.cs, Infrastructure/DI/GraphModule.cs, Services/Ai/FileIndexingService.cs, appsettings.template.json</file>
+      <file role="modify">tests: InvoiceSubmissionServiceTests, InvoiceSubmissionPersisterTests, InvoiceSubmissionProcessorTests and the job handler tests (tests/unit/Sprk.Bff.Api.Tests/Services/Finance/Submission/, Services/Jobs/), InvoiceReviewReadServiceTests, FinanceContainerIdOptionsTests, FileIndexingServiceTests, tests/integration/tenant/Spe/SpeAppOnlyContainerIsolationTests.cs:899-921, tests/Spaarke.ArchTests/SpeWriteSinkContainerProvenanceGuardTests.cs:931-954</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="root §10">BFF hygiene: placement unchanged (existing service and job); publish-size delta recorded; no package; no new HIGH CVE.</constraint>
+    <constraint source="ADR-002, project CLAUDE.md">The submission operation stays the only invoice creator; the Stored File row is written only inside the persister's existing ExecuteTransaction, never in a separate write.</constraint>
+    <constraint source="model 4.1, 9.1 step 2">Upload channels: before the submission row is created, stage the PDF through 090 under StoredFileIds.ForUpload(submissionId) with parent sprk_invoice / InvoiceIdFor(submissionId) and metadata submission id; the existing file checks stay first. If the submission create fails, delete the staged blob. No SpeFileStore upload and no sprk_document create on these channels; the submission row carries no sprk_document. The existing-document entry (050a) is unchanged.</constraint>
+    <constraint source="model 4.1, 9.1 step 4">The persister adds to its transaction 090's BuildRow: purpose Invoice PDF; Firm-visible Yes only for the SPA channel, No for internal; no source ids; owner = the invoice's owner resolution (ForParents of its core record); creator person = the submitter where one exists (K6: none for a contact). No sprk_document link for the upload path.</constraint>
+    <constraint source="model 9.1 steps 5-6">Immediately after commit and before totals, Signals, Decision Records, indexing or notification: 090's flip. A fault throws (the job retries; ResumeAsync runs the flip first when the row is Not yet servable). A definitive failure (blob missing, SHA mismatch) ends the submission Failed with reason FileUnservable, no after-step runs, the row stays Not yet servable for 090's detector.</constraint>
+    <constraint source="model 4.2, 9.2">Extraction: when the submission has a staged Invoice PDF (found through 090 under the invoice's prefix, purpose Invoice PDF), read it with OpenForProcessingAsync; Pending → transient (retry); Malicious → permanent Failed FileMalicious; Missing → permanent DocumentUnavailable. Bytes go inline to IInvoiceAi as today. The SPE branch stays only for existing-document submissions.</constraint>
+    <constraint source="model 9.2, 108">InvoiceReviewReadService returns invoicePdfFileId (nullable: the Servable Invoice PDF Stored File of the invoice, app-only read after the route's existing checks). The page (110) loads bytes through GET /api/finance/files/{fileId}/content; no client code changes here.</constraint>
+    <constraint source="model 9.2, D-44 second half">The indexing after-step takes no bytes from a Stored File; it stays the structured record. Record in notes that invoice PDFs leave the core record's Documents and the files index by design.</constraint>
+    <constraint source="model 12 (D-55, D-67, 028), O-13">Remove EbillingOutputContainerId and ProcedureLibraryContainerId from FinanceOptions, the validator, StampContainerSettingKeys, the FileIndexingService skip, the template and their tests. Never delete or change the owner-created dev containers or App Service settings (079 decides the settings). Record the DEF-013 / #1967 container hand-off as superseded by 091's storage hand-off through /project-defer-issue-tracking.</constraint>
+    <constraint source="project">No live writes, no deploy. A Stored File create under a Secure core record is refused by Dataverse until 086's role row is live; 079 deploys both.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ebilling-r1/notes/procedure-and-file-model.md (4.1-4.3, 9.1, 9.2, 12)</file>
+      <file>projects/ebilling-r1/notes/090-file-store-service.md (the file store API)</file>
+      <file>projects/ebilling-r1/notes/049-submission-processing-job.md, 044-submission-operation.md, 028-ebilling-containers.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/adr/ADR-002-thin-plugins.md</file>
+      <file>docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Declare FULL. Confirm 050a and 090 are ancestors of HEAD; read 090's notes. Grep every production reader of the two keys.</step>
+    <step order="1">Intake: stage instead of upload and document create; compensation; tests.</step>
+    <step order="2">Job: file-store branch of LoadDocumentAsync; tests.</step>
+    <step order="3">Persister: row in the transaction, flip before after-steps, resume, file_unservable; tests including the after-step order.</step>
+    <step order="4">Review read model: invoicePdfFileId; tests.</step>
+    <step order="5">Retire the 028 keys (escalation for the Procedure Library readers); tests and ArchTests.</step>
+    <step order="6">Build, filtered tests, full ArchTests, publish-size delta, /conflict-check; notes in projects/ebilling-r1/notes/092-submission-on-files.md; code-review, adr-check, one adversarial pass; TASK-INDEX.md status cell `✅ [done]`.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If RuleSetService (CreateAsync upload, draft source) or RateCardImportService still read ProcedureLibraryContainerId and no merged task has moved them to Procedure Version Stored Files, retire only EbillingOutputContainerId, leave the Procedure Library key and its readers untouched, and raise 🔔 Human Input Required naming the three readers (no task in the re-plan owns their move).</trigger>
+    <trigger>If the flip cannot run between commit and the first after-step without changing 049's transaction contract, STOP and report.</trigger>
+    <trigger>If a client outside this project reads the receipt's DocumentId or a submission's sprk_document for the upload channels, report it; do not edit another project's code.</trigger>
+    <trigger>If 090's API lacks a primitive this task needs, STOP and report to 090's owner rather than writing blobs directly.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>The submission service, persister, job, review read model and reason codes exist (044, 049, 100); the file store is 090's.</existing>
+    <extension>Only existing types are extended: two reason codes (SubmissionReasonCodes) and one nullable DTO field (invoicePdfFileId); no new service, route or registration.</extension>
+    <cost-of-doing-nothing>Without the reason codes a missing or malicious file fails as a generic error the admin cannot act on; without the file id the review page (110) cannot load the invoice PDF once no Document exists.</cost-of-doing-nothing>
+  </justification>
+
+  <outputs>
+    <output type="code">InvoiceSubmissionService.cs, InvoiceSubmissionContracts.cs, InvoiceSubmissionPersister.cs, InvoiceSubmissionProcessingJobHandler.cs, SubmissionReasonCodes.cs, InvoiceReviewReadService.cs, FinanceOptions.cs, FinanceOptionsValidator.cs, GraphModule.cs, FileIndexingService.cs, appsettings.template.json</output>
+    <output type="test">the tests in relevant-files</output>
+    <output type="docs">projects/ebilling-r1/notes/092-submission-on-files.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">SPA and internal upload submissions call 090's stage once under ForUpload(submissionId) and never call SpeFileStore or a document create; the submission row has no sprk_document; a failed submission create deletes the staged blob; a refused request (any existing 4xx) stages nothing.</criterion>
+    <criterion testable="true">The commit transaction contains exactly one Stored File create (Not yet servable, Invoice PDF, Firm-visible Yes for SPA and No for internal, parent = the invoice, owner from the invoice's core record); a transaction failure leaves no row.</criterion>
+    <criterion testable="true">After commit the flip runs before the first after-step (ordering test); a flip fault throws and the resumed run flips before any after-step; a definitive flip failure ends Failed with FileUnservable and runs no after-step.</criterion>
+    <criterion testable="true">Extraction reads the staged bytes; Pending retries; Malicious ends Failed FileMalicious; Missing ends Failed DocumentUnavailable; an existing-document submission still reads its SPE document.</criterion>
+    <criterion testable="true">GET /review returns invoicePdfFileId for an invoice with a Servable Invoice PDF and null when none is Servable.</criterion>
+    <criterion testable="true">The 028 keys are absent from options, validator, StampContainerSettingKeys, FileIndexingService and the template, their tests updated; or, under the escalation, only the output key is removed and the notes name the readers.</criterion>
+    <criterion testable="true">dotnet build exits 0; filtered Finance, submission, job and options tests pass; full ArchTests green; publish-size delta recorded; no package.</criterion>
+    <criterion testable="true">Cover the stated contract plus the edge cases named above. Anything beyond that needs a one-line justification in task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>094 turns the existing-document entry into Submit Invoice (a copy staged under ForSourceVersion) and reuses this task's extraction branch. Dev data is recreated, not migrated (O-13).</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load the knowledge files first. Follow task-execute for rigor, checkpoints and quality gates.</protocol>
+  </execution>
+</task>
