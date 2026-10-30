@@ -265,6 +265,11 @@ public sealed class RecordOwnerLookupCache
     /// one per refusal of the walk (the pass reports them); empty when no hard-deny row asked.</summary>
     public IReadOnlyList<Sprk.Bff.Api.Infrastructure.Dataverse.RestrictedContentOwnerTeamIdentity> RestrictedContentOwnerTeams =>
         RestrictedContentByAnswerBusinessUnit.Values.Distinct().ToList();
+
+    /// <summary>#2471 follow-up: whether each communication is filed under anything (the #2468 document rule), once read — so
+    /// a pass deciding N documents of one email reads the communication and its thread once, as it reads each row once. Only
+    /// a decided answer is kept: a communication or thread that does not come back is asked again (and refuses again).</summary>
+    internal Dictionary<Guid, bool> CommunicationFiled { get; } = new();
 }
 
 public sealed record RecordOwnershipContext
@@ -1427,6 +1432,16 @@ public static class RecordOwnerRefusal
     /// top business unit is missing, ambiguous or has a member
     /// (<see cref="Sprk.Bff.Api.Infrastructure.Dataverse.RestrictedContentOwnerTeamStatus"/>).</summary>
     public const string RestrictedContentOwnerTeamUnresolved = "record_owner_restricted_content_team_unresolved";
+
+    /// <summary>
+    /// #2468 / #2471 follow-up: a document's primary parent is a communication, and whether that communication is filed
+    /// under anything cannot be decided — the communication, or the thread it sits in, did not come back.
+    /// </summary>
+    /// <remarks>Component Justification (CLAUDE.md §11): (1) Existing — <see cref="ParentUnresolved"/>, which this case used
+    /// and which also covers a filed-to record that is missing. (2) Extension — one more code in this set, no new type. (3) Cost
+    /// of doing nothing — a caller cannot tell the two apart, so an unfiled Office save refused here was told to check its
+    /// business unit or the record it is filed to, neither of which is the cause.</remarks>
+    public const string CommunicationFilingUnresolved = "record_owner_communication_filing_unresolved";
 }
 
 /// <summary>
@@ -1943,11 +1958,11 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
             && string.Equals(context.ChildEntityLogicalName, DocumentEntity, StringComparison.OrdinalIgnoreCase)
             && string.Equals(parents[0].EntityLogicalName, RecordThreadFiling.CommunicationTable, StringComparison.OrdinalIgnoreCase))
         {
-            var filed = await IsCommunicationFiledAsync(parents[0], ct).ConfigureAwait(false);
+            var filed = await IsCommunicationFiledAsync(parents[0], context.LookupCache, ct).ConfigureAwait(false);
             if (filed is null)
             {
                 return RecordOwnerResolution.Refused(
-                    RecordOwnerRefusal.ParentUnresolved,
+                    RecordOwnerRefusal.CommunicationFilingUnresolved,
                     $"the parent {parents[0].EntityLogicalName} {parents[0].RecordId:D} or the thread it sits in could not be "
                     + "read, so whether it is filed cannot be decided");
             }
@@ -3960,9 +3975,23 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
     /// #2468: whether <paramref name="communication"/> is filed under anything — its own ownership-parent lookups (the
     /// parents its own question names, <see cref="RecordOwnershipContext.OrderedParentsOf"/>) or its record thread's filing
     /// (<see cref="RecordThreadFiling"/>: a Direct thread files nothing). Read committed. <c>null</c> when the communication or
-    /// its thread cannot be read (the caller refuses); a Dataverse fault propagates, as every resolver read does.
+    /// its thread does not come back (zero rows; the caller refuses); a Dataverse fault propagates, as every resolver read does.
+    /// With a pass's <paramref name="cache"/> (<see cref="RecordOwnerLookupCache.CommunicationFiled"/>) a decided answer is
+    /// read once for the pass.
     /// </summary>
-    private async Task<bool?> IsCommunicationFiledAsync(RecordOwnershipParent communication, CancellationToken ct)
+    private async Task<bool?> IsCommunicationFiledAsync(
+        RecordOwnershipParent communication, RecordOwnerLookupCache? cache, CancellationToken ct)
+    {
+        if (cache is not null && cache.CommunicationFiled.TryGetValue(communication.RecordId, out var known))
+            return known;
+        var filed = await ReadCommunicationFiledAsync(communication, ct).ConfigureAwait(false);
+        if (cache is not null && filed is { } decided)
+            cache.CommunicationFiled[communication.RecordId] = decided;
+        return filed;
+    }
+
+    /// <summary>The read behind <see cref="IsCommunicationFiledAsync"/>.</summary>
+    private async Task<bool?> ReadCommunicationFiledAsync(RecordOwnershipParent communication, CancellationToken ct)
     {
         var query = new QueryExpression(RecordThreadFiling.CommunicationTable)
         {
@@ -3979,17 +4008,17 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
         if (RecordThreadFiling.ThreadOf(row) is not { } threadId)
             return false;
 
-        try
+        // #2471 follow-up: a thread that is not there is decided from the zero-row result (fail closed: its filing is not known,
+        // so the caller refuses); a fault of any type propagates, never taken as a missing row.
+        var thread = await RecordThreadFiling.TryReadThreadAsync(_dataverse, threadId, ct).ConfigureAwait(false);
+        if (thread is null)
         {
-            var thread = await RecordThreadFiling.ReadThreadAsync(_dataverse, threadId, ct).ConfigureAwait(false);
-            return RecordThreadFiling.ParentsOf(thread).Count > 0;
-        }
-        catch (InvalidOperationException ex)
-        {
-            _logger.LogWarning(ex, "The thread {ThreadId} of communication {CommunicationId} could not be read (#2468).",
+            _logger.LogWarning("The thread {ThreadId} of communication {CommunicationId} could not be found (#2468).",
                 threadId, communication.RecordId);
             return null;
         }
+
+        return RecordThreadFiling.ParentsOf(thread).Count > 0;
     }
 
     /// <summary>
