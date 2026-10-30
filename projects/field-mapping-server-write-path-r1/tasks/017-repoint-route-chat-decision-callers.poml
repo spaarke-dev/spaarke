@@ -4,7 +4,7 @@
     <title>Re-point the child-records route, chat create / email.draft / budget inquiry and decision cores at RecordCreationService (FR-13 part 1)</title>
     <phase>2 W2 Unified RecordCreationService</phase>
     <gate>016 complete</gate>
-    <status>not-started</status>
+    <status>in-progress</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies .cs in Sprk.Bff.Api; tags include bff-api, ai-tools, security; removes the create half of a security-critical core (OwnedChildWrite); adds tests at KEEP paths (TEST-MODIFYING override).</rigor-reason>
     <model-tier>opus</model-tier>

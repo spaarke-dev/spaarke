@@ -17,9 +17,11 @@
 | **Waiting on** | UAC 195 → 040 (UAC 2026-10-29: 194b merged, 195 queued next after its two owner-ruling branches; UAC sends the wizard-write SHA and the dev-backfill notice). Provisioning's #2429 PR. ebilling #1911 merged → 017 unblocked. |
 | **Owner to do** | Leftover locked worktree agent-aec6d06ca99a5a9f6 (075): end of project. |
 
-## 017: unblocked (2026-10-30)
+## 017: IN PROGRESS (FULL, opus/high, directional) — started 2026-10-30
 
-ebilling #1911 merged 2026-10-29 21:35. All four owner decisions were made 2026-10-22/23 (2a-2c option a, 2d option c). The POML's BLOCKING criteria still apply in order: ebilling reconcile commit → DI-004 (#2188) → 015 K1/K3 → 014 R3-1 → re-point.
+Work branch merged up to master (cd8f0a58b5). /conflict-check: no open PR touches 017's files; #2471 (UAC, RecordOwnershipResolver) is adjacent only.
+BLOCKING status: ebilling reconcile = TODO (phase 1); DI-004/#2188 = done for Create (mask, issue closed); 015 K1/K3 = done in 018; 014 R3-1 = TODO (phase 2, route now sets ServerSetLookupColumns); UAC 013 items 2a-2d decided (decisions.md:260-302) = land with the re-point; 037 K2 = TODO (phase 2).
+Plan: phase 1 = Opus implementer on task/fm-017a (reconcile commit; ebilling reviews). Phase 2 = route+decision parity (017b) and chat/email/budget (017c) in parallel, then remove OwnedChildWrite create half, then adversarial review, quality gates, publish delta.
 
 ## How wave-2 agents are run (lessons)
 
@@ -47,8 +49,7 @@ Dev reads: 0 of 64 matters have an empty `sprk_issecure`; 40 active Copy rules (
 
 1. **016 Repair questions:** cross-BU re-own (skip for now); whether Repair re-owns roots; SYSTEM/INTEGRATION-owned
    unfiled rows.
-2. **017 decisions:** FR-06 step 10 (UAC-r2 text recommended); #1608 columns; the chat matter/project number (recommend
-   refusing it); SystemPrincipal.
+2. ~~017 decisions~~: all decided 2026-10-22/23 (decisions.md).
 3. **Live smoke of #2191 on dev** (Office Project-from-Matter quick-create, mapped values, a secured column stays empty).
 4. **005 `-Apply` on dev**, then `-Verify`.
 5. **014:** confirm the 403 for a mapped filing lookup that fails field security. **015:** index precedence notes.
