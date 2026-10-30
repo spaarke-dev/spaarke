@@ -3533,13 +3533,15 @@ public sealed partial class SecureRootInheritance
     /// <summary>
     /// #1630: the matters and projects each of <paramref name="ids"/> (rows of the intermediate <paramref name="table"/>)
     /// belongs to, by its <see cref="IntermediateParentColumns"/> — one query (one id, or an id list of at most
-    /// <see cref="IdsPerQuery"/>); a row that does not exist is absent. A fault propagates.
+    /// <see cref="IdsPerQuery"/>); a row that does not exist is absent. A fault propagates. <paramref name="committed"/>: a
+    /// committed read (the resolver's re-file path, #2143 round 3); otherwise <c>NoLock</c>, as every other read here.
     /// </summary>
     private static async Task<IReadOnlyDictionary<Guid, IReadOnlyList<(string Table, Guid Id)>>> ReadIntermediatesAsync(
-        IGenericEntityService dataverse, string table, Guid[] ids, CancellationToken ct)
+        IGenericEntityService dataverse, string table, Guid[] ids, CancellationToken ct, bool committed = false)
     {
         var columns = IntermediateParentColumns(table);
         var query = Query(table, columns.Select(c => c.Column).ToArray());
+        query.NoLock = !committed;
         IReadOnlyList<Entity> rows;
         if (ids.Length == 1)
         {
@@ -3570,10 +3572,11 @@ public sealed partial class SecureRootInheritance
 
     /// <summary>#1630: reads every intermediate in <paramref name="refs"/> not already in <paramref name="into"/> — per table,
     /// one row per query (<paramref name="batched"/> false) or in chunks of <see cref="IdsPerQuery"/>. Never throws a read
-    /// fault: a row (or chunk) that cannot be read is recorded as faulted.</summary>
+    /// fault: a row (or chunk) that cannot be read is recorded as faulted. <paramref name="committed"/>: see
+    /// <see cref="ReadIntermediatesAsync"/>.</summary>
     private static async Task ReadIntermediatesIntoAsync(
         IGenericEntityService dataverse, ILogger logger, IEnumerable<(string Table, Guid Id)> refs, IntermediateReads into,
-        bool batched, CancellationToken ct)
+        bool batched, CancellationToken ct, bool committed = false)
     {
         foreach (var group in refs.Where(r => !into.ContainsKey(r)).Distinct().GroupBy(r => r.Table))
         {
@@ -3581,7 +3584,7 @@ public sealed partial class SecureRootInheritance
             {
                 try
                 {
-                    var found = await ReadIntermediatesAsync(dataverse, group.Key, chunk.Select(r => r.Id).ToArray(), ct)
+                    var found = await ReadIntermediatesAsync(dataverse, group.Key, chunk.Select(r => r.Id).ToArray(), ct, committed)
                         .ConfigureAwait(false);
                     foreach (var row in chunk)
                         into[row] = new IntermediateRead(found.TryGetValue(row.Id, out var parents) ? parents : null, false);
@@ -3609,7 +3612,7 @@ public sealed partial class SecureRootInheritance
     /// <paramref name="intermediates"/>, its <see cref="IntermediateParentColumns"/> order), and why any could not be named —
     /// an intermediate whose read faulted is unknown; one the read did not return confers nothing, or (the read path's
     /// <paramref name="absentIsUnknown"/>) is unknown. The ONE rule both <see cref="NameParentsAsync"/> (the inheritance and
-    /// the un-secure cascade) and <see cref="OwnerLookupsThroughIntermediatesAsync(IGenericEntityService, ILogger, string, IReadOnlyList{ValueTuple{string, Guid}}, CancellationToken)"/>
+    /// the un-secure cascade) and <see cref="OwnerLookupsThroughIntermediatesAsync(IGenericEntityService, ILogger, string, IReadOnlyList{ValueTuple{string, Guid}}, CancellationToken, bool)"/>
     /// (a create's owner question) apply. Each parent carries the intermediate table that names it (<c>Via</c>), which
     /// <see cref="OwnerKeyedParents"/> keys it by.
     /// </summary>
@@ -3641,7 +3644,7 @@ public sealed partial class SecureRootInheritance
     /// <summary>
     /// Owner decision 2026-10-29: THE rule for which column a row's owner question keys each matter and project it is filed
     /// under by, so the one builder (<c>RecordOwnershipContext.ForRow</c>, <c>SecureChildLineage.RootLookupOrder</c>) ranks the
-    /// same parent first on every path — creation (<see cref="OwnerLookupsThroughIntermediatesAsync(IGenericEntityService, ILogger, string, IReadOnlyList{ValueTuple{string, Guid}}, CancellationToken)"/>)
+    /// same parent first on every path — creation (<see cref="OwnerLookupsThroughIntermediatesAsync(IGenericEntityService, ILogger, string, IReadOnlyList{ValueTuple{string, Guid}}, CancellationToken, bool)"/>)
     /// and the un-secure cascade (<see cref="UnsecureOwnerQuestionOf"/>) alike. A matter or project the row holds in a typed
     /// column (<paramref name="typed"/>) is keyed under that column. One named only through an invoice or event
     /// (<paramref name="throughIntermediates"/>) is keyed under the row's typed column for its table when the row holds no
@@ -3684,7 +3687,7 @@ public sealed partial class SecureRootInheritance
 
     /// <summary>
     /// What a row's owner question adds through its intermediates
-    /// (<see cref="OwnerLookupsThroughIntermediatesAsync(IGenericEntityService, ILogger, string, IReadOnlyList{ValueTuple{string, Guid}}, CancellationToken)"/>):
+    /// (<see cref="OwnerLookupsThroughIntermediatesAsync(IGenericEntityService, ILogger, string, IReadOnlyList{ValueTuple{string, Guid}}, CancellationToken, bool)"/>):
     /// the matters and projects, keyed under the typed column that files a row there; or why they could not be read.
     /// </summary>
     internal sealed record OwnerFilingThroughIntermediates(
@@ -3739,11 +3742,13 @@ public sealed partial class SecureRootInheritance
     /// holds no typed matter or project (<see cref="OwnerIntermediatesOf"/> answers the intermediates only then); the keys are
     /// <see cref="OwnerKeyedParents"/>', the rule the cascade keys by.
     /// </summary>
+    /// <param name="committed">A committed read of the intermediates (the resolver's re-file path, #2143 round 3: every parent
+    /// fact it reads is committed); otherwise <c>NoLock</c> (creation, the resolver's create paths).</param>
     /// <returns>An intermediate that cannot be read: <see cref="OwnerFilingThroughIntermediates.Unverifiable"/> (the caller
     /// refuses; never "under nothing"). One that does not exist confers nothing. Never throws a read fault.</returns>
     internal static async Task<OwnerFilingThroughIntermediates> OwnerLookupsThroughIntermediatesAsync(
         IGenericEntityService dataverse, ILogger logger, string table, IReadOnlyList<(string Table, Guid Id)> filedIntermediates,
-        CancellationToken ct)
+        CancellationToken ct, bool committed = false)
     {
         ArgumentNullException.ThrowIfNull(filedIntermediates);
         var logical = table.Trim().ToLowerInvariant();
@@ -3751,7 +3756,8 @@ public sealed partial class SecureRootInheritance
             return OwnerFilingThroughIntermediates.None;
 
         var reads = new IntermediateReads();
-        await ReadIntermediatesIntoAsync(dataverse, logger, filedIntermediates, reads, batched: false, ct).ConfigureAwait(false);
+        await ReadIntermediatesIntoAsync(dataverse, logger, filedIntermediates, reads, batched: false, ct, committed)
+            .ConfigureAwait(false);
         var (parents, unknown) = NameThroughIntermediates(filedIntermediates, reads, absentIsUnknown: false);
         if (unknown is not null)
             return new OwnerFilingThroughIntermediates(Array.Empty<KeyValuePair<string, RecordOwnershipParent?>>(), unknown);
@@ -3766,14 +3772,15 @@ public sealed partial class SecureRootInheritance
     /// <see cref="IGenericEntityService"/> (the resolver's read path, a writer) asks it for a row of any table: a table with no
     /// intermediate lookups, or a row holding a typed matter or project, answers <see cref="OwnerFilingThroughIntermediates.None"/>
     /// with nothing read. It then refuses on <see cref="OwnerFilingThroughIntermediates.Unverifiable"/> and otherwise asks
-    /// <c>RecordOwnershipContext.ForRow(table, result.Lookups.Concat(lookups), …)</c>.
+    /// <c>RecordOwnershipContext.ForRow(table, result.Lookups.Concat(lookups), …)</c>. <paramref name="committed"/>: the
+    /// resolver's re-file path reads the intermediates committed.
     /// </summary>
     internal static Task<OwnerFilingThroughIntermediates> OwnerLookupsThroughIntermediatesAsync(
         IGenericEntityService dataverse, ILogger logger, string table,
-        IEnumerable<KeyValuePair<string, RecordOwnershipParent?>> lookups, CancellationToken ct) =>
-        OwnerLookupsThroughIntermediatesAsync(dataverse, logger, table, OwnerIntermediatesOf(table, lookups), ct);
+        IEnumerable<KeyValuePair<string, RecordOwnershipParent?>> lookups, CancellationToken ct, bool committed = false) =>
+        OwnerLookupsThroughIntermediatesAsync(dataverse, logger, table, OwnerIntermediatesOf(table, lookups), ct, committed);
 
-    /// <summary><see cref="OwnerLookupsThroughIntermediatesAsync(IGenericEntityService, ILogger, string, IReadOnlyList{ValueTuple{string, Guid}}, CancellationToken)"/>
+    /// <summary><see cref="OwnerLookupsThroughIntermediatesAsync(IGenericEntityService, ILogger, string, IReadOnlyList{ValueTuple{string, Guid}}, CancellationToken, bool)"/>
     /// over this service's reader (<see cref="SecureRootFilingGate.OwnerLookupsThroughIntermediatesAsync"/>).</summary>
     internal Task<OwnerFilingThroughIntermediates> OwnerLookupsThroughIntermediatesAsync(
         string table, IReadOnlyList<(string Table, Guid Id)> filedIntermediates, CancellationToken ct) =>

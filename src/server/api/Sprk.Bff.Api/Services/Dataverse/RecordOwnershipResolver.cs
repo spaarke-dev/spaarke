@@ -3934,8 +3934,9 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
             return (null, null);
 
         var lookups = RecordOwnershipContext.LookupsOf(entity).ToList();
+        // #2143 round 3 (K1): on the re-file path what the invoice or event belongs to is a committed read too.
         var through = await Sprk.Bff.Api.Services.Access.SecureRootInheritance
-            .OwnerLookupsThroughIntermediatesAsync(_dataverse, _logger, row.EntityLogicalName, lookups, ct)
+            .OwnerLookupsThroughIntermediatesAsync(_dataverse, _logger, row.EntityLogicalName, lookups, ct, committedReads)
             .ConfigureAwait(false);
         if (through.Unverifiable is { } unverifiable)
             return (null, unverifiable);

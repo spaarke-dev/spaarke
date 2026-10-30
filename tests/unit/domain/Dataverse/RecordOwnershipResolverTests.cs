@@ -4793,6 +4793,59 @@ public class RecordOwnershipResolverTests
         }
     }
 
+    /// <summary>A person-owned work assignment filed only under an invoice of the matter (ChildBu), and an event about to be
+    /// filed under it (or asked about directly).</summary>
+    private static (FakeDirectory Directory, Guid InvoiceId, Guid EventId) AWorkAssignmentUnderAnInvoiceOfTheMatter()
+    {
+        var (invoiceId, eventId) = (Guid.NewGuid(), Guid.NewGuid());
+        var directory = WithWorkAssignment(
+            Directory()
+                .WithRecord("sprk_matter", MatterId, ChildBu, owningTeam: ChildTeam)
+                .WithRecord("sprk_invoice", invoiceId, FakeDirectory.CustomerChildBu, owningTeam: FakeDirectory.CustomerChildTeam,
+                    extra: new() { ["sprk_matter"] = new EntityReference("sprk_matter", MatterId) })
+                .WithRecord("sprk_event", eventId, GeneralBu, owningTeam: GeneralTeam),
+            new() { ["sprk_regardinginvoice"] = new EntityReference("sprk_invoice", invoiceId) });
+        return (directory, invoiceId, eventId);
+    }
+
+    /// <summary>The re-file of <paramref name="eventId"/> under the work assignment.</summary>
+    private static RecordReparent FileTheEventUnderTheWorkAssignment(Guid eventId) => new()
+    {
+        EntityLogicalName = "sprk_event",
+        RecordId = eventId,
+        ParentChanges = new Dictionary<string, EntityReference?>
+        {
+            ["sprk_regardingworkassignment"] = new EntityReference("sprk_workassignment", WorkAssignmentId),
+        },
+    };
+
+    [Theory(DisplayName = "#2143 round 3 (K1) must fire: what a person-owned work assignment's invoice belongs to is a committed read on the re-file path, and NoLock on a create path")]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task ResolveOwner_TheInvoiceAWorkAssignmentIsFiledUnder_IsReadCommittedOnlyOnTheRefilePath(bool refile)
+    {
+        var (directory, _, eventId) = AWorkAssignmentUnderAnInvoiceOfTheMatter();
+
+        RecordOwnerResolution resolution;
+        if (refile)
+        {
+            var request = FileTheEventUnderTheWorkAssignment(eventId);
+            resolution = await Build(directory).ReparentAsync(request, Applies(directory, request), CancellationToken.None);
+        }
+        else
+        {
+            resolution = await AskAboutTheWorkAssignment(directory, asContent: false);
+        }
+
+        resolution.OwningTeamId.Should().Be(ChildTeam, "the invoice's matter is the work assignment's core record");
+        var intermediateReads = directory.RecordQueries
+            .Where(q => q.EntityName == "sprk_invoice" && !q.ColumnSet.AllColumns && q.ColumnSet.Columns.Contains("sprk_matter"))
+            .ToList();
+        intermediateReads.Should().NotBeEmpty("what the invoice belongs to is read");
+        intermediateReads.Should().OnlyContain(q => q.NoLock == !refile,
+            refile ? "every parent fact on the re-file path is a committed read" : "the create paths keep their NoLock reads");
+    }
+
     private static RecordOwnershipResolver Build(FakeDirectory directory) => directory.Resolver();
 
     /// <summary>The standard world (<see cref="FakeDirectory.Standard"/>) — shared with SecureChildOwnershipTests.</summary>
