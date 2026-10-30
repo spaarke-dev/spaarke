@@ -98,7 +98,7 @@ To begin: `work on task 001`. Wave W0-1 (001, 002, 003) and W2-1 (040, 041) have
 | 095 | ✅ [done; on master eaa0d44f7f (#1911); dev after the BFF deploy + EB-D-173] | Submit Invoice from the Outlook add-in: POST /api/finance/invoice-submissions/from-email (email-only save + submission) | FULL | opus / high | P3-F (p-safe false) | 094, 088 |
 | 096 | 🔲 [open] | Remove the Office server legs for Invoice as a save target and invoice quick-create | FULL | sonnet / high | P3-F | 095 |
 | 097 | 🔄 [split into 097a–097e, EB-D-179] | Corrected invoice: the old invoice closes Superseded in step 4 (guarded) and its open Signals close Superseded | FULL | opus / high | P3-F (p-safe false) | 094, 104, 088 |
-| 097a | 🟡 [running] | Superseded lifecycle status (659490005), its transitions and every status reader; the duplicate rule ignores a superseded prior | FULL | opus / high | P3-F | 097 |
+| 097a | ✅ [done; on work, ontology-r1 OK on the loader change] | Superseded lifecycle status (659490005), its transitions and every status reader; the duplicate rule ignores a superseded prior | FULL | opus / high | P3-F | 097 |
 | 097b | 🟡 [running] | Correction intake on both routes: contract fields, guards (Write, firm, core record, status, same number), target in `sprk_resubmissionof`, job snapshot | FULL | opus / high | P3-F | 097 |
 | 097c | 🔲 [open] | Persister: the explicit target replaces the automatic lookup, guarded Superseded close in the commit transaction, compensation reopens the old invoice | FULL | opus / high | none | 097a, 097b |
 | 097d | 🔲 [open] | After-step closes the old invoice's open Signals as Superseded; resume and idempotency; notes; two adversarial passes | FULL | opus / high | none | 097c |
@@ -153,7 +153,7 @@ To begin: `work on task 001`. Wave W0-1 (001, 002, 003) and W2-1 (040, 041) have
 
 | ID | Status | Title | Rigor | Model / Effort | Group | Deps |
 |---|---|---|---|---|---|---|
-| 150 | 🟡 [on work 1e5d80eb75; adversarial review running] | AP export batch (CSV + JSON, D-56 default mapping, snapshot); files as internal-only Stored Files (EB-D-148) | FULL | sonnet / high | P6-A | 014, 023, 025, 028, 103, 090 |
+| 150 | ✅ [done; on work b3eaf99f9f, review fixes in; credit-memo batches need Deploy-EbillingInvoiceTotalsRange.ps1 per environment (owner OK)] | AP export batch (CSV + JSON, D-56 default mapping, snapshot); files as internal-only Stored Files (EB-D-148) | FULL | sonnet / high | P6-A | 014, 023, 025, 028, 103, 090 |
 | 151 | 🔲 [open] | Mark Paid and export UI | STANDARD | sonnet / high | none | 150 |
 | 152 | ✅ [done; on work 62039c6887, review fixes in] | Invoice index from structured records | STANDARD | sonnet / high | P6-A | 049, 103 |
 | 153 | 🔲 [open] | Deploy WP6 to dev | STANDARD | sonnet / high | none (deploy) | 150, 151, 152, 136 |
