@@ -93,3 +93,5 @@
 - uac-r2 deployed at 19:22:50Z. Router passed about 19:20Z. Package 39.07 MB; the 4 critical files match by SHA-256; healthz and CORS passed.
 - uac-r2's gate reports [OWNERSHIP-REFUSED] and 4xx/5xx on the external routes separately. Before each settings switch, uac-r2 sends R3 a notice with the time: `SecureRoot__Inheritance__RootOwnerWritesEnabled` first, then `SecureChild__Reconciliation__OrdinaryMovesWritesEnabled`. Ontology lifted its gate on the latter. Each switch restarts the app.
 - The previous build (`9f4afe82ac`) is the rollback target. Rollback is uac-r2's to run, with owner approval.
+- uac-r2 gate, 19:22:50–19:43Z: PASS. 0 failed requests and 0 internal 5xx. **The external routes had no traffic in the window**, so external writes through the changed ownership code are not yet exercised. Only the old warnings remain (SECURE-CENSUS, #2163).
+- About 19:45Z: uac-r2 set `SecureRoot__Inheritance__RootOwnerWritesEnabled=true`. The app restarted. It is report-only while the moves switch is off. `OrdinaryMovesWritesEnabled` is due about 10 minutes later, with its own notice.
