@@ -67,6 +67,9 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
     internal const string RowVersionMissingCode = "ebilling.submission.row_version_missing";
     internal const string IndexEnqueueFailedCode = "ebilling.submission.index_enqueue_failed";
 
+    /// <summary>Task 097d: a read or a close of the superseded invoice's Signal close step failed; the redelivery resumes it.</summary>
+    internal const string SupersedeSignalsFailedCode = "ebilling.submission.supersede_signals_failed";
+
     /// <summary>The automatic rejection's action code (074's billing catalog).</summary>
     internal const string RejectActionCode = "reject-invoice";
 
@@ -88,6 +91,8 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
         InvoiceSubmissionPersister.SubmissionFindingsJson, InvoiceSubmissionPersister.SubmissionInvoice, "sprk_channel", "sprk_document",
         InvoiceSubmissionPersister.SubmissionCorrelationId, InvoiceSubmissionPersister.SubmissionStatus, RowVersionColumn,
         InvoiceSubmissionPersister.SubmissionAdminAttention, StoredSignalSetCheck.ProcessingStartColumn,
+        // Task 097d: a Correction names the earlier submission; the superseded invoice's Signals are closed from it.
+        InvoiceSubmissionService.ResubmissionOfColumn,
     ];
 
     /// <summary>
@@ -104,6 +109,7 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
     private readonly IEbillingNotificationSink _sink;
     private readonly ILogger<InvoiceSubmissionAfterSteps> _logger;
     private readonly SignalEpisodeLifecycle _lifecycle;
+    private readonly Func<Guid, string, string, CancellationToken, Task<SignalCloseOutcome>> _supersedeSignal;
     private readonly Func<Guid, Guid, DateTime, string, CancellationToken, Task<SignalAutomatedCloseOutcome>> _closeActed;
     private readonly TimeProvider _time;
     private readonly Func<BillingDecision, CancellationToken, Task<BillingDecisionRecordResult>> _record;
@@ -130,7 +136,7 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
             sink,
             logger,
             (signals ?? throw new ArgumentNullException(nameof(signals))).WriteAsync,
-            (id, rowVersion, policyCode, ct) => signals.CloseAsync(id, rowVersion, SignalWriter.ResolutionSuperseded, policyCode, ct),
+            SupersedeClose(signals),
             // An automated decision: no person, so no sprk_resolvedby (decidedByUserId null).
             (id, recordId, setReadAtUtc, policyCode, ct) => signals.CloseActedByDecisionAsync(id, recordId, setReadAtUtc, policyCode, decidedByUserId: null, ct),
             (recorder ?? throw new ArgumentNullException(nameof(recorder))).RecordAsync,
@@ -139,6 +145,17 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
             refreshApprovers: (approvers ?? throw new ArgumentNullException(nameof(approvers))).RefreshInvoiceAsync,
             enqueueIndex: EnqueueAcceptedIndex(jobs))
     {
+    }
+
+    /// <summary>
+    /// The one Superseded close of the after-steps (the option-a lifecycle's episode n+1, and task 097d's close of a superseded invoice's
+    /// Signals): <see cref="SignalWriter.CloseAsync"/> with <see cref="SignalWriter.ResolutionSuperseded"/>, a system resolution (no person, no
+    /// Decision Record), conditional on the row version.
+    /// </summary>
+    internal static Func<Guid, string, string, CancellationToken, Task<SignalCloseOutcome>> SupersedeClose(SignalWriter signals)
+    {
+        ArgumentNullException.ThrowIfNull(signals);
+        return (id, rowVersion, policyCode, ct) => signals.CloseAsync(id, rowVersion, SignalWriter.ResolutionSuperseded, policyCode, ct);
     }
 
     /// <summary>The acceptance's index job (task 152): change key <see cref="InvoiceIndexingJobHandler.AcceptedChange"/>, submitted through the real queue.</summary>
@@ -176,6 +193,8 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
         _sink = sink ?? throw new ArgumentNullException(nameof(sink));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _lifecycle = new SignalEpisodeLifecycle(entities, writeSignal, supersedeSignal, logger);
+        // Task 097d: the same Superseded close (SignalWriter.CloseAsync with ResolutionSuperseded), for the invoice a correction superseded.
+        _supersedeSignal = supersedeSignal ?? throw new ArgumentNullException(nameof(supersedeSignal));
         _closeActed = closeActed ?? throw new ArgumentNullException(nameof(closeActed));
         _time = time ?? TimeProvider.System;
         _record = record ?? throw new ArgumentNullException(nameof(record));
@@ -465,6 +484,14 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
             {
                 return Stop(SubmissionAfterStepsStatus.Retry, submissionId, invoiceId, closeFailure) with { SignalsWritten = written, DecisionRecordId = recordId };
             }
+        }
+
+        // ── 2b. Task 097d (model 9.1 "Existing invoice"): a correction's commit superseded the old invoice; its open Signals close Superseded.
+        //    Runs only after the commit gate passed (the first run's persister ran it; a resume ran it above), so never for an undone commit.
+        //    Every failure is a Retry before the terminal status; a resume re-reads the open set, so nothing is closed twice. ──
+        if (await CloseSupersededInvoiceSignalsAsync(submission, submissionId, invoiceId, ct).ConfigureAwait(false) is { } supersedeFailure)
+        {
+            return Stop(SubmissionAfterStepsStatus.Retry, submissionId, invoiceId, supersedeFailure) with { SignalsWritten = written, DecisionRecordId = recordId };
         }
 
         if (totalsRetryCode is not null)
@@ -936,6 +963,129 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
             }
         }
 
+        return failure;
+    }
+
+    /// <summary>
+    /// Task 097d (model 9.1 "Existing invoice"; 097c "What 097d needs"): closes every Open or Acknowledged Signal on the invoice this
+    /// submission's correction superseded, and on its lines, as Superseded through the existing close (<see cref="SignalWriter.CloseAsync"/>
+    /// with <see cref="SignalWriter.ResolutionSuperseded"/>: no person, no Decision Record). Nothing to do, and done: a New submission (no
+    /// <c>sprk_resubmissionof</c>; 104's automatic link included); a target that no longer resolves or no longer exists; an old invoice that
+    /// is not Superseded; and one this submission's invoice does not supersede (its <c>sprk_supersedesinvoice</c> names another invoice or
+    /// none, e.g. an automatic rejection). The open set is read live (<see cref="ReadOpenSignalSetAsync"/>), then each Signal is re-read
+    /// before its close: one a person (or an earlier run) already closed, or one that no longer exists, is left as it is. A close answered
+    /// <see cref="SignalCloseOutcome.ChangedSinceRead"/> writes nothing and is a Retry, so the next delivery re-reads it. Every Signal is
+    /// attempted; any failure returns <see cref="SupersedeSignalsFailedCode"/> or <see cref="SignalChangedCode"/> (Retry), else null.
+    /// Logs carry ids, counts and codes only (ADR-015).
+    /// </summary>
+    private async Task<string?> CloseSupersededInvoiceSignalsAsync(Entity submission, Guid submissionId, Guid invoiceId, CancellationToken ct)
+    {
+        if (submission.GetAttributeValue<EntityReference>(InvoiceSubmissionService.ResubmissionOfColumn)?.Id is not { } earlier || earlier == Guid.Empty)
+        {
+            return null;
+        }
+
+        ResolvedSignalSet set;
+        Guid oldId;
+        try
+        {
+            var target = await SubmissionSnapshot.ReadCorrectedInvoiceAsync(_entities, earlier, ct).ConfigureAwait(false);
+            if (target.CorrectedInvoiceId is not { } resolved)
+            {
+                _logger.LogInformation("Invoice submission {SubmissionId}: the invoice its correction replaced no longer resolves from submission {Earlier}; no Signal is closed",
+                    submissionId, earlier);
+                return null;
+            }
+
+            oldId = resolved;
+            var own = await _entities.RetrieveAsync(InvoiceReviewService.InvoiceEntity, invoiceId, [InvoiceFamilyCoreRecordGuard.SupersedesInvoiceColumn], ct)
+                .ConfigureAwait(false);
+            if (own.GetAttributeValue<EntityReference>(InvoiceFamilyCoreRecordGuard.SupersedesInvoiceColumn)?.Id != oldId)
+            {
+                _logger.LogInformation("Invoice submission {SubmissionId}: invoice {InvoiceId} does not supersede invoice {OldInvoiceId}; no Signal is closed",
+                    submissionId, invoiceId, oldId);
+                return null;
+            }
+
+            Entity old;
+            try
+            {
+                old = await _entities.RetrieveAsync(InvoiceReviewService.InvoiceEntity, oldId, ["statuscode"], ct).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (IsRecordNotFound(ex))
+            {
+                _logger.LogInformation("Invoice submission {SubmissionId}: invoice {OldInvoiceId} no longer exists; no Signal is closed", submissionId, oldId);
+                return null;
+            }
+
+            var statusCode = old.GetAttributeValue<OptionSetValue>("statuscode")?.Value;
+            if (statusCode is not { } code || !InvoiceStatusCodes.TryFromStatusCode(code, out var status) || status != InvoiceLifecycleStatus.Superseded)
+            {
+                _logger.LogInformation("Invoice submission {SubmissionId}: invoice {OldInvoiceId} is not Superseded (statuscode {Status}); no Signal is closed",
+                    submissionId, oldId, statusCode);
+                return null;
+            }
+
+            set = await ReadOpenSignalSetAsync(_entities, _time, oldId, _logger, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            _logger.LogWarning("Invoice submission {SubmissionId}: the superseded invoice's Signals could not be read ({Fault}); it stays Processing for a retry",
+                submissionId, ex.GetType().Name);
+            return SupersedeSignalsFailedCode;
+        }
+
+        string? failure = null;
+        int closed = 0, left = 0;
+        foreach (var signal in set.Signals)
+        {
+            try
+            {
+                Entity row;
+                try
+                {
+                    row = await _entities.RetrieveAsync(SignalEntity, signal.Id, ["sprk_signalstatus", RowVersionColumn], ct).ConfigureAwait(false);
+                }
+                catch (Exception ex) when (IsRecordNotFound(ex))
+                {
+                    left++;
+                    continue;
+                }
+
+                if (row.GetAttributeValue<OptionSetValue>("sprk_signalstatus")?.Value is not (SignalWriter.SignalStatusOpen or SignalWriter.SignalStatusAcknowledged))
+                {
+                    left++;
+                    continue;
+                }
+
+                var rowVersion = row.RowVersion ?? (row.GetAttributeValue<long?>(RowVersionColumn) is { } v ? v.ToString(CultureInfo.InvariantCulture) : null);
+                if (string.IsNullOrWhiteSpace(rowVersion))
+                {
+                    _logger.LogWarning("Invoice submission {SubmissionId}: Signal {SignalId} was read without a row version; not closed", submissionId, signal.Id);
+                    failure ??= SignalChangedCode;
+                    continue;
+                }
+
+                if (await _supersedeSignal(signal.Id, rowVersion, signal.PolicyCode, ct).ConfigureAwait(false) == SignalCloseOutcome.Closed)
+                {
+                    closed++;
+                }
+                else
+                {
+                    // ChangedSinceRead: nothing written. The next delivery re-reads it: closed by a person → left; still open → closed.
+                    failure ??= SignalChangedCode;
+                }
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+            {
+                _logger.LogWarning("Invoice submission {SubmissionId}: Signal {SignalId} (policy {PolicyCode}) on superseded invoice {OldInvoiceId} could not be closed ({Fault})",
+                    submissionId, signal.Id, signal.PolicyCode, oldId, ex.GetType().Name);
+                failure ??= SupersedeSignalsFailedCode;
+            }
+        }
+
+        _logger.LogInformation("Invoice submission {SubmissionId}: superseded invoice {OldInvoiceId}: {Closed} of {Count} open Signals closed Superseded, {Left} already closed or gone ({Code})",
+            submissionId, oldId, closed, set.Signals.Count, left, failure ?? "complete");
         return failure;
     }
 

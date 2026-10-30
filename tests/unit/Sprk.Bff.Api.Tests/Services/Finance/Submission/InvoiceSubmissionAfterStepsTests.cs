@@ -29,7 +29,7 @@ namespace Sprk.Bff.Api.Tests.Services.Finance.Submission;
 /// the writer's dedupe key; the automatic rejection is recorded by the REAL <see cref="BillingDecisionRecorder"/> over the writer's test
 /// harness, so "one Decision Record" is the writer's own exactly-once, not a counter in this file.
 /// </summary>
-public class InvoiceSubmissionAfterStepsTests
+public partial class InvoiceSubmissionAfterStepsTests
 {
     private static readonly Guid Submission = Guid.Parse("04900000-0000-4000-8000-0000000000b1");
     private static readonly Guid Matter = Guid.Parse("04900000-0000-4000-8000-0000000000a1");
@@ -143,6 +143,8 @@ public class InvoiceSubmissionAfterStepsTests
         public HashSet<string> RealWriterPolicies { get; } = new(StringComparer.Ordinal);
         public SignalWriter? RealWriter { get; set; }
         public bool CloseChanges { get; set; }
+        /// <summary>Task 097d: a Superseded close that throws, per Signal (once: the entry is removed when it fires).</summary>
+        public Dictionary<Guid, Exception> SupersedeFaults { get; } = [];
 
         // ── D-122 (notes 13c) ──
         /// <summary>The invoice's line ids, as the line query returns them (the outcome's lines by default).</summary>
@@ -563,6 +565,11 @@ public class InvoiceSubmissionAfterStepsTests
 
         private Task<SignalCloseOutcome> SupersedeAsync(Guid id, string rowVersion, string policyCode, CancellationToken _)
         {
+            if (SupersedeFaults.Remove(id, out var fault))
+            {
+                return Task.FromException<SignalCloseOutcome>(fault);
+            }
+
             var row = Signals.Values.Single(s => s.Id == id);
             if (CloseChanges || row.RowVersion != rowVersion)
             {
