@@ -1584,6 +1584,12 @@ public sealed class SecureChildReconciler
                 // UAC task 194b R4b-2b (F1): a Decision Record is filed under the subject of every Signal it resolved too (its
                 // question (c)), which no lineage lookup names — so the records that resolved a Signal of this level join it.
                 await AddDecisionRecordsResolvingAsync(level, next, seen).ConfigureAwait(false);
+
+                // Owner decision 2026-10-29: a filed work assignment that is not team-owned belongs to its matter (then its
+                // project), and the rows filed under it take that record's business unit — so a matter's or project's move
+                // re-owns them too. Such a work assignment is a hop of the ordinary pass (never decided or written itself).
+                if (level == 1 && _ordinary is not null)
+                    next.AddRange(await WorkAssignmentsFollowingTheRootAsync(seen).ConfigureAwait(false));
                 frontier = next;
             }
 
@@ -1592,6 +1598,54 @@ public sealed class SecureChildReconciler
             if (_ordinary is null)
                 await LoadGrantRowsAsync().ConfigureAwait(false);
             await LoadThreadsOutsidePassAsync().ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// Owner decision 2026-10-29 (the ordinary pass only): the work assignments filed under this pass's root — a matter or
+        /// project — that are NOT team-owned, as the walk's next hop. Filed means typed, or through an invoice or event that
+        /// belongs to the root (<c>SecureRootInheritance.ListFiledRootsAsync</c>, the one child-direction listing; a pair alone
+        /// files nothing). The resolver answers such a work assignment's rows with
+        /// its filing's business unit, so they move with the root, by the ordinary rules (a default-team row moves, a user-owned
+        /// one is reported). A team-owned work assignment keeps its own business unit, and its rows are not reached this way.
+        /// The work assignment itself is never a row of the pass. An incomplete read throws, as every read of this walk does.
+        /// </summary>
+        private async Task<IReadOnlyList<(string, Guid)>> WorkAssignmentsFollowingTheRootAsync(HashSet<(string, Guid)> seen)
+        {
+            if (!SecureRootInheritance.IsParent(_root.EntityLogicalName))
+                return Array.Empty<(string, Guid)>();
+
+            var filed = await SecureRootInheritance.ListFiledRootsAsync(
+                    _owner._dataverse, Log, new[] { (_root.EntityLogicalName, _root.RecordId) }, _ct)
+                .ConfigureAwait(false);
+            var candidates = filed
+                .Where(r => r.Confirmed
+                            && string.Equals(r.Table, SecureRootInheritance.WorkAssignment, StringComparison.OrdinalIgnoreCase)
+                            && !seen.Contains((SecureRootInheritance.WorkAssignment, r.Id)))
+                .Select(r => r.Id)
+                .Distinct()
+                .ToArray();
+
+            var hops = new List<(string, Guid)>();
+            foreach (var chunk in candidates.Chunk(SecureChildShareSynchronizer.DescendantConditionsPerQuery))
+            {
+                var query = new QueryExpression(SecureRootInheritance.WorkAssignment)
+                {
+                    ColumnSet = new ColumnSet(OwningTeamColumn),
+                    NoLock = true,
+                };
+                query.Criteria.AddCondition(
+                    SecureRootInheritance.WorkAssignment + "id", ConditionOperator.In, chunk.Select(id => (object)id).ToArray());
+                foreach (var row in await ReadAllPagesAsync(SecureRootInheritance.WorkAssignment, query).ConfigureAwait(false))
+                {
+                    if (row.GetAttributeValue<EntityReference>(OwningTeamColumn)?.Id is { } team && team != Guid.Empty)
+                        continue;
+                    var key = (SecureRootInheritance.WorkAssignment, row.Id);
+                    if (seen.Add(key))
+                        hops.Add(key);
+                }
+            }
+
+            return hops;
         }
 
         /// <summary>

@@ -1800,15 +1800,40 @@ public class SecureChildOrdinaryParentMoveTests
 
     private static readonly Guid CatalogWorkAssignment = Guid.Parse("4b000000-0000-4000-8000-000000194c02");
 
-    [Fact(DisplayName = "Owner decision 2026-10-29 must fire: under a FILED person-owned work assignment, the ordinary pass moves a default-team-owned Decision Record and event to its matter's unit; a user-owned row is reported, not moved")]
-    public async Task ChildrenOfAFiledPersonOwnedWorkAssignment_FollowItsMatter_AUserOwnedRowIsReported()
+    /// <summary>A work assignment owned by <paramref name="owner"/>: filed under the matter by its typed lookup, through an
+    /// invoice of the matter (<paramref name="throughAnInvoice"/>), or (<paramref name="filed"/> false) under nothing.</summary>
+    private Guid WorkAssignmentUnderTheMatter(EntityReference owner, bool throughAnInvoice = false, bool filed = true)
+    {
+        var workAssignment = Guid.NewGuid();
+        var columns = new List<(string, object)>
+        {
+            (owner.LogicalName == "team" ? "owningteam" : "owninguser", owner), ("sprk_issecure", false),
+        };
+        if (filed && throughAnInvoice)
+        {
+            var invoice = Guid.NewGuid();
+            Row("sprk_invoice", invoice, TeamRef(GeneralTeam), ("sprk_matter", Matter, MatterId));
+            columns.Add(("sprk_regardinginvoice", new EntityReference("sprk_invoice", invoice)));
+        }
+        else if (filed)
+        {
+            columns.Add(("sprk_regardingmatter", new EntityReference(Matter, MatterId)));
+        }
+
+        _world.Add("sprk_workassignment", workAssignment, columns.ToArray());
+        return workAssignment;
+    }
+
+    [Theory(DisplayName = "Owner decision 2026-10-29 must fire: the MATTER's move re-owns the rows under a FILED person-owned work assignment (typed, or through an invoice) — a default-team-owned Decision Record and event move to its unit; a user-owned row is reported, not moved")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ChildrenOfAFiledPersonOwnedWorkAssignment_FollowItsMatter_AUserOwnedRowIsReported(bool throughAnInvoice)
     {
         MatterMovedToB();
         var someone = new EntityReference("systemuser", SecureChildShareWorld.SomeUser);
-        var (workAssignment, record, userEvent) = (Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid());
-        _world.Add("sprk_workassignment", workAssignment, ("owninguser", someone), ("sprk_issecure", false),
-                ("sprk_regardingmatter", new EntityReference(Matter, MatterId)))
-            .Add("sprk_recordtype_ref", CatalogWorkAssignment, ("sprk_recordlogicalname", "sprk_workassignment"));
+        var (record, userEvent) = (Guid.NewGuid(), Guid.NewGuid());
+        var workAssignment = WorkAssignmentUnderTheMatter(someone, throughAnInvoice);
+        _world.Add("sprk_recordtype_ref", CatalogWorkAssignment, ("sprk_recordlogicalname", "sprk_workassignment"));
         Row("sprk_event", EventId, TeamRef(GeneralTeam), ("sprk_regardingworkassignment", "sprk_workassignment", workAssignment));
         Row("sprk_event", userEvent, someone, ("sprk_regardingworkassignment", "sprk_workassignment", workAssignment));
         Row("sprk_decisionrecord", record, TeamRef(GeneralTeam),
@@ -1822,8 +1847,9 @@ public class SecureChildOrdinaryParentMoveTests
             reviewId = Guid.NewGuid().ToString("D"), resolvedSignalIds = Array.Empty<string>(), steps = Array.Empty<object>(),
         }));
 
+        // Driven from the MATTER's pass: the work assignment did not change, so its own pass never runs.
         var report = await Reconciler().ReconcileOrdinaryParentMoveAsync(
-            "sprk_workassignment", workAssignment, SecureChildReconcileMode.Apply, maxWrites: 200, CancellationToken.None);
+            Matter, MatterId, SecureChildReconcileMode.Apply, maxWrites: 200, CancellationToken.None);
 
         report.Status.Should().Be(SecureChildReconcileStatus.Completed, report.Detail);
         _world.OwnerOf("sprk_event", EventId).Should().Be(DataversePrincipalRef.Team(TeamB),
@@ -1832,7 +1858,30 @@ public class SecureChildOrdinaryParentMoveTests
             "a Decision Record whose core is the work assignment follows the matter too");
         _world.OwnerOf("sprk_event", userEvent).Should().Be(DataversePrincipalRef.User(SecureChildShareWorld.SomeUser));
         _world.OwnerWrites.Should().NotContain(w => w.Id == userEvent);
+        _world.OwnerWrites.Should().NotContain(w => w.Id == workAssignment, "the work assignment is a hop, never a row of the pass");
         report.Changes.Should().ContainSingle(c => c.Id == userEvent).Which.Should().Match<SecureChildRowChange>(c =>
             c.Outcome == SecureChildRowOutcome.Untouched && c.TargetTeamId == TeamB && c.Detail!.Contains("owned by a user"));
+    }
+
+    [Theory(DisplayName = "Owner decision 2026-10-29 must not fire: the matter's move never reaches the rows under a TEAM-owned work assignment (it keeps its own unit) or an UNFILED person-owned one")]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task ChildrenOfATeamOwnedOrUnfiledWorkAssignment_AreNotReachedByTheMattersMove(bool teamOwned)
+    {
+        MatterMovedToB();
+        var workAssignment = teamOwned
+            ? WorkAssignmentUnderTheMatter(TeamRef(GeneralTeam))
+            : WorkAssignmentUnderTheMatter(new EntityReference("systemuser", SecureChildShareWorld.SomeUser), filed: false);
+        Row("sprk_event", EventId, TeamRef(GeneralTeam), ("sprk_regardingworkassignment", "sprk_workassignment", workAssignment));
+
+        var report = await Reconciler().ReconcileOrdinaryParentMoveAsync(
+            Matter, MatterId, SecureChildReconcileMode.Apply, maxWrites: 200, CancellationToken.None);
+
+        report.Status.Should().Be(SecureChildReconcileStatus.Completed, report.Detail);
+        report.Tables.Where(t => t.Table == "sprk_event").Sum(t => t.Examined).Should().Be(0,
+            teamOwned ? "a team-owned work assignment keeps its own unit: its rows are not the matter's to move"
+                      : "a work assignment filed under nothing is not under the matter");
+        _world.OwnerOf("sprk_event", EventId).Should().Be(DataversePrincipalRef.Team(GeneralTeam));
+        _world.OwnerWrites.Should().BeEmpty();
     }
 }
