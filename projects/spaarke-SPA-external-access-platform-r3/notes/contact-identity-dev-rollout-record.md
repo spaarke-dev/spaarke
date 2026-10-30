@@ -86,3 +86,10 @@
   - Pre-existing, unchanged: [SECURE-CENSUS] root-BU reach until the BU1 move; #2163 FLS proof 403 and [ID-LINK-RECON] for spaarke-acme; 1 transient Redis lease renew.
 - About 15:13Z: R3 sent ebilling "gate passed, you can go".
 - 15:21:14Z: ebilling applied its EB-D-173 dev settings: `Ebilling__Enabled=true`, `Ebilling__StoredFileReconcileEnabled=false`, plus the three `Finance__FileStore__*` settings (blob endpoint, tenant id, malware scanning off). The app restarted. Afterwards, healthz returned 200 and an anonymous finance route returned 401. To roll back, ebilling removes the five settings.
+
+## 10. Dev BFF `9f4e3820b2` (2026-10-30, deployed by uac-r2)
+
+- Owner go given in uac-r2's session. R3 gave its OK for this exact SHA, on condition that Router passes. It contains the live `9f4afe82ac`, #2450 `929dc42d31` (the nine grid allow-list columns) and `e0df773395`. No non-comment `sprk_invoicestatus` in src/server. None of the 16 changed src/server files is an external endpoint, ExternalAccessModule, FetchService or the contact-identity code, but external writes do pass through the changed ownership code.
+- uac-r2 deployed at 19:22:50Z. Router passed about 19:20Z. Package 39.07 MB; the 4 critical files match by SHA-256; healthz and CORS passed.
+- uac-r2's gate reports [OWNERSHIP-REFUSED] and 4xx/5xx on the external routes separately. Before each settings switch, uac-r2 sends R3 a notice with the time: `SecureRoot__Inheritance__RootOwnerWritesEnabled` first, then `SecureChild__Reconciliation__OrdinaryMovesWritesEnabled`. Ontology lifted its gate on the latter. Each switch restarts the app.
+- The previous build (`9f4afe82ac`) is the rollback target. Rollback is uac-r2's to run, with owner approval.
