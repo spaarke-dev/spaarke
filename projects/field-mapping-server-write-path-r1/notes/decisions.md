@@ -458,3 +458,30 @@ spec amendment FR-38, the task, the TASK-INDEX entry and the owner's approval.
 **Chat tool error codes (017, ADR-019 + NFR-07; no owner question).** Chat follows task 018's Office precedent: each
 refusal kind maps to the handler's existing tool error code, and only the text comes from the shared map. Existing
 codes (`AccessDenied`, `VALIDATION_FAILED`, `INTERNAL_ERROR`) do not change.
+
+## 2026-10-30 — 017 phase 2d design answers (coordinator; within existing contracts)
+
+2d's implementer raised three questions while reading. Each is settled without changing an existing contract.
+
+1. **I-16 under decision 2a.** Only an I-1 derivation failure refuses the create.
+   - `CoreAncestorResolver`'s I-16 resolvers are documented "never throws … display only, never fails a write"
+     (`CoreAncestorResolver.cs` ~:1104-1110) and return null instead of failing.
+   - So I-16 is set before the create when it resolves, and re-derived after the create.
+   - That satisfies 2a ("refuses when the derivation fails") and keeps the I-16 contract.
+2. **Refusal for a failed I-1 derivation.** Two new codes, using the service's existing kinds:
+   - a permanent data condition (e.g. multiple roots): `Invalid` 400 `record_creation.stamp_underivable`;
+   - a transient read fault: `Unavailable` 503 `record_creation.stamp_unavailable`.
+
+   No existing code changes (NFR-07). UAC-r2 is pinged on refusal-code changes before merge.
+3. **The `email.draft` path choice: option (a).**
+   - The handler keeps deriving the ancestry, but only to choose owned vs run-as-user and the sender
+     (`IsFiledUnderAnOwnershipParent`).
+   - It no longer writes the stamp into the payload; the service's step 10 does that.
+   - This preserves today's owner and sender for a draft filed only through its stamp (under an event or
+     communication that is itself under a matter).
+   - Rejected: (b), moving the path choice into the service. It changes the service's contract for one caller.
+
+Split of the remaining 2d work:
+- 2d-1 (step 10) and 2d-2 (task/contact/account) run in parallel;
+- then 2d-3 (chat create + budget) and 2d-4 (email.draft);
+- then 2d-5 (delete the create half of OwnedChildWrite, publish delta, CVE, notes).
