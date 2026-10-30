@@ -818,9 +818,21 @@ public class ProvisionProjectTestFixture : WorkspaceTestFixture
     /// </summary>
     internal Func<Sprk.Bff.Api.Services.Documents.DocumentContainerRelocator>? RelocatorOverride { get; set; }
 
+    /// <summary>Owner decision 2026-10-29: every conditional (If-Match) root write, as sent: entity set, id, ETag.</summary>
+    public ConcurrentBag<(string EntitySet, Guid Id, string ETag)> ConditionalRootWrites { get; } = new();
+
+    /// <summary>Fix round (A-K6): runs when a conditional root PATCH arrives, before its If-Match is checked — a concurrent change
+    /// landing between the writer's guard read and its write.</summary>
+    internal Action<string, Guid>? BeforeConditionalRootWrite { get; set; }
+
+    /// <summary>Sets one setting of this host's configuration (read when a service reads it); <c>null</c> removes it.</summary>
+    public void SetConfiguration(string key, string? value) => Services.GetRequiredService<IConfiguration>()[key] = value;
+
     public void Reset()
     {
         RelocatorOverride = null;
+        ConditionalRootWrites.Clear();
+        BeforeConditionalRootWrite = null;
         _records.Clear();
         CreatedEntitySets.Clear();
         Updates.Clear();
@@ -1069,6 +1081,26 @@ public class ProvisionProjectTestFixture : WorkspaceTestFixture
                     {
                         await after(ct);
                     }
+                });
+
+            // Owner decision 2026-10-29: the conditional owner write of a ROOT (SecureChildReconciler.ReownFiledRootAsync) —
+            // If-Match on the child world's versionnumber (a stale version is Dataverse's 412, a missing row its 404), then
+            // this fixture's own PATCH, mirrored into the child world, and the version bumped.
+            client
+                .Setup(c => c.UpdateIfMatchAsync(
+                    It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<object>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                .Returns(async (string entitySet, Guid id, object payload, string etag, CancellationToken _) =>
+                {
+                    ConditionalRootWrites.Add((entitySet, id, etag));
+                    var logical = entitySet[..^1];
+                    BeforeConditionalRootWrite?.Invoke(logical, id);
+                    if (!_records.TryGetValue(id, out var seeded) || seeded.EntitySet != entitySet || !ChildWorld.Has(logical, id))
+                        throw new KeyNotFoundException($"{entitySet}({id}) was not found; nothing was created.");
+                    var version = ChildWorld.ValueOf<long?>(logical, id, "versionnumber") ?? 0L;
+                    if (etag != $"W/\"{version}\"")
+                        throw new System.Data.DBConcurrencyException($"{entitySet}({id}) changed since it was read.");
+                    await ApplyUpdate(entitySet, id, payload);
+                    ChildWorld.Set(logical, id, "versionnumber", version + 1);
                 });
 
             services.RemoveAll<DataverseWebApiClient>();
