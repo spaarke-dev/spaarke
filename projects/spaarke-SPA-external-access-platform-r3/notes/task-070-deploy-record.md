@@ -71,3 +71,4 @@ Owner direction 2026-10-20: "070-071-072 - yes proceed".
   - licensed user (Ralph): desktop ✅, web pending/confirm, mobile pending;
   - unlisted directory (Spaarke-tenant user): desktop pending, web pending (the earlier not-set-up run's client is uncertain), mobile pending.
 - **Broker pre-authorization:** desktop and web work with no `webApplicationInfo` and no pre-authorization change by R3. Before answering "not needed", check whether the BFF app's existing pre-authorized clients already include the Teams client ids. That is a read-only Graph read; show the command to the owner first.
+- **Teams web, Ralph Dewey: PASS (owner).** Same as Tracy: Teams' warning page, then "Show the app anyway" opens the app inside Teams web. Matrix: Tracy and Ralph pass on desktop and web; mobile and the unlisted-directory runs remain.
