@@ -196,6 +196,11 @@ public static class FinanceModule
 
         // Reject and Return to Firm of an invoice (ebilling-r1 task 104, FR-36): concrete (ADR-010), scoped like the approval service it follows.
         services.AddScoped<InvoiceRejectReturnService>();
+
+        // AP export batch (ebilling-r1 task 150, FR-41, EB-D-178): the service (claim, generate, store, send) and the one seam that decides who may export.
+        // Concrete (ADR-010), scoped like the Stored File service and the lifecycle service it uses. Unconditional (flag rule above); the routes read the kill switch.
+        services.AddScoped<ApExportAuthorization>();
+        services.AddScoped<ApExportService>();
         services.AddScheduledJob<EligibleApproverRefreshJob>(EligibleApproverRefreshJob.DefaultCronSchedule);
 
         // Invoice submission processing (ebilling-r1 task 049 parts B-E, FR-20 / FR-21, D-101; Processing Pipeline steps 1-9). The pipeline is
