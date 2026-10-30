@@ -374,10 +374,12 @@ public class BillingFactLoaderTests
     }
 
     // Task 097a (ontology-r1 088 gate F1): a corrected invoice keeps the firm's number (D-37) and supersedes the invoice it replaced, so that
-    // invoice must not count as an earlier use of the number. Like Cancelled, a Superseded invoice is no prior at all.
+    // invoice must not count as an earlier use of the number. Like Cancelled, a Superseded invoice is no prior at all. These tests cover an
+    // evaluation that runs once the replaced invoice IS Superseded (a re-evaluation, a later submission). The correction's own first
+    // evaluation runs before its commit supersedes the old invoice; excluding the replaced submission there belongs to task 097b.
 
     [Fact]
-    public async Task MustFire_ASupersededPredecessor_IsNoPrior_SoTheCorrectedInvoiceRaisesNoDuplicate_Task097a()
+    public async Task MustFire_ASupersededPrior_IsNoPrior_SoItRaisesNoDuplicate_Task097a()
     {
         DuplicateRule();
         _world.OrdinaryRoot("sprk_matter", OrdinaryMatter);

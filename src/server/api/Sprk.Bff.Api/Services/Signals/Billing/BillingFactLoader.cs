@@ -174,8 +174,9 @@ public sealed record BillingLoadedFacts
 /// (<see cref="RuleDomains.IsBillingRow"/>), as task 076 does. Rules are not narrowed by core record: the store (task 019) scopes a
 /// rule set to the client default or a firm only.</para>
 /// <para><b>Priors (D-112, FR-36).</b> Every submission of the firm except this one, from both sides of the secure wall. A Failed
-/// submission or a Cancelled invoice never reached the firm as a payable invoice and is not loaded. Status: the invoice's status when
-/// the submission has one (Rejected, Returned to Firm, otherwise Active), else the submission's (Rejected, otherwise Active).</para>
+/// submission or a Cancelled invoice never reached the firm as a payable invoice and is not loaded; nor is a Superseded invoice, which
+/// its correction replaced under the same firm number (task 097a). Status: the invoice's status when the submission has one (Rejected,
+/// Returned to Firm, otherwise Active), else the submission's (Rejected, otherwise Active).</para>
 /// <para><b>Secure roots (D-112; uac-r2's calling conditions on <c>SecureChildShareSynchronizer.cs:648-721</c>).</b> (1) Each prior row
 /// is read with every lineage lookup of its table plus the owner columns, so no lookup is silently absent (an absent lookup would
 /// shrink the prior's set and pass the subset test). (2) The rows walked are child rows, never a root table (the walk refuses
@@ -541,7 +542,7 @@ public sealed class BillingFactLoader
                 : null;
             if (StatusOf(submission, invoice) is { } status)
             {
-                kept.Add((submission, invoice, status)); // a Cancelled invoice never reached the firm as a payable one
+                kept.Add((submission, invoice, status)); // a Cancelled invoice never reached the firm as a payable one; a Superseded one was replaced
             }
         }
 

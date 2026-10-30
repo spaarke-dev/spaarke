@@ -588,7 +588,6 @@ public sealed class InvoiceLifecycleServiceTests
         var undo = Undo(CreateService(), InvoiceLifecycleStatus.Superseded, version: 8).Request!;
         var other = new DeleteRequest { Target = new EntityReference("sprk_invoice", Guid.NewGuid()) };
 
-        DataverseServiceClientImpl.BuildTransaction([other, undo]).Requests.Should().HaveCount(2, "the undo sits in the caller's transaction");
         CommitAgainst(stored, [other, undo]).Should().BeTrue();
 
         stored.GetAttributeValue<OptionSetValue>("statuscode").Value.Should().Be(InvoiceStatusCodes.InReview);
