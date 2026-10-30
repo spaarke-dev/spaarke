@@ -4569,27 +4569,97 @@ public class RecordOwnershipResolverTests
         resolution.OwningTeamId.Should().Be(ChildTeam);
     }
 
-    [Theory(DisplayName = "Owner decision 2026-10-29 must not fire: a person-owned PROJECT is a core record whose own business unit decides — never looked through, on the plain and the content path")]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task ResolveOwner_AUserOwnedProjectPrimary_IsNeverLookedThrough(bool asContent)
-    {
-        // Projects are out of the owner decision's scope: a user-owned project keeps its own unit even when it names a matter
-        // in another unit, and its filing is never read for its primary.
-        var projectId = Guid.NewGuid();
-        var directory = Directory()
-            .WithRecord("sprk_matter", MatterId, ChildBu, owningTeam: ChildTeam)
-            .WithRecord("sprk_project", projectId, GeneralBu, isSecure: false, owningTeam: null,
-                extra: new() { ["sprk_matter"] = new EntityReference("sprk_matter", MatterId) });
+    // ── Owner amendment 2026-10-29: a person-owned project filed by its BFF-managed pair belongs to the record it names ──
 
-        var resolution = await Build(directory).ResolveOwnerAsync(
+    /// <summary>A person-owned, ordinary project in the root unit (GeneralBu) whose ADR-024 pair names
+    /// <paramref name="pairId"/> (text) typed by <paramref name="typeRef"/>; no pair when <paramref name="pairId"/> is null.</summary>
+    private static FakeDirectory WithPersonOwnedProject(FakeDirectory directory, Guid projectId, string? pairId, Guid? typeRef)
+    {
+        var extra = new Dictionary<string, object>();
+        if (pairId is not null)
+            extra["sprk_regardingrecordid"] = pairId;
+        if (typeRef is { } type)
+            extra["sprk_regardingrecordtype"] = new EntityReference("sprk_recordtype_ref", type);
+        return directory.WithRecord("sprk_project", projectId, GeneralBu, isSecure: false, owningTeam: null, extra: extra);
+    }
+
+    /// <summary>A <c>sprk_recordtype_ref</c> row naming <paramref name="logicalName"/>.</summary>
+    private static FakeDirectory WithRecordType(FakeDirectory directory, Guid typeRef, string logicalName) =>
+        directory.WithRecord("sprk_recordtype_ref", typeRef, null,
+            extra: new() { ["sprk_recordlogicalname"] = logicalName });
+
+    private static Task<RecordOwnerResolution> AskAboutTheProject(FakeDirectory directory, Guid projectId, bool asContent) =>
+        Build(directory).ResolveOwnerAsync(
             RecordOwnershipContext.ForParents(new[] { new RecordOwnershipParent("sprk_project", projectId) })
                 with { KeepCreatorUnlessTargetIsTeamOwned = asContent },
             CancellationToken.None);
 
-        resolution.OwningTeamId.Should().Be(GeneralTeam, "a project is a root: its own business unit decides");
-        directory.RecordQueries.Should().NotContain(q => q.EntityName == "sprk_project" && q.ColumnSet.AllColumns,
-            "a project's filing is never read for its primary");
+    [Theory(DisplayName = "Owner amendment 2026-10-29 must fire: a person-owned project filed by its pair answers with the unit of the matter the pair names — as a plain parent and on the content path")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ResolveOwner_APersonOwnedProjectFiledByItsPair_TakesThePairMattersUnit(bool asContent)
+    {
+        var (projectId, typeRef) = (Guid.NewGuid(), Guid.NewGuid());
+        var directory = WithPersonOwnedProject(
+            WithRecordType(Directory().WithRecord("sprk_matter", MatterId, ChildBu, owningTeam: ChildTeam), typeRef, "sprk_matter"),
+            projectId, MatterId.ToString("D"), typeRef);
+
+        var resolution = await AskAboutTheProject(directory, projectId, asContent);
+
+        resolution.OwningTeamId.Should().Be(ChildTeam,
+            $"a project belongs to its core record: the unit of the matter its pair names, never its own ({GeneralTeam:D})");
+    }
+
+    [Theory(DisplayName = "Owner amendment 2026-10-29 must not fire: a person-owned project filed under nothing (no pair) keeps its own unit — on both paths")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ResolveOwner_AnUnfiledPersonOwnedProject_KeepsItsOwnUnit(bool asContent)
+    {
+        var projectId = Guid.NewGuid();
+        var directory = WithPersonOwnedProject(
+            Directory().WithRecord("sprk_matter", MatterId, ChildBu, owningTeam: ChildTeam), projectId, null, null);
+
+        var resolution = await AskAboutTheProject(directory, projectId, asContent);
+
+        resolution.IsOwned.Should().BeTrue("a core record is never content: it is never answered \"keep the creator\"");
+        resolution.OwningTeamId.Should().Be(GeneralTeam, "filed under nothing: its own business unit");
+    }
+
+    [Theory(DisplayName = "Owner amendment 2026-10-29 must fire: a person-owned project whose pair cannot be told is refused (ParentUnresolved) — never read as unfiled")]
+    [InlineData("not-a-guid", true, true)]
+    [InlineData("matter", false, true)]
+    [InlineData("matter", true, false)]
+    public async Task ResolveOwner_APersonOwnedProjectWithAnUnresolvablePair_Refuses(string pairText, bool withType, bool typeNamesATable)
+    {
+        var (projectId, typeRef) = (Guid.NewGuid(), Guid.NewGuid());
+        var directory = Directory().WithRecord("sprk_matter", MatterId, ChildBu, owningTeam: ChildTeam);
+        if (typeNamesATable)
+            directory = WithRecordType(directory, typeRef, "sprk_matter");
+        directory = WithPersonOwnedProject(directory, projectId, pairText == "matter" ? MatterId.ToString("D") : pairText,
+            withType ? typeRef : null);
+
+        var resolution = await AskAboutTheProject(directory, projectId, asContent: false);
+
+        resolution.IsRefused.Should().BeTrue("a pair that names a record that cannot be told is no answer (fail closed)");
+        resolution.RefusalCode.Should().Be(RecordOwnerRefusal.ParentUnresolved);
+    }
+
+    [Fact(DisplayName = "Owner amendment 2026-10-29 must not fire: a person-owned WORK ASSIGNMENT's pair is never followed — it keeps its own unit and its pair's type is never read")]
+    public async Task ResolveOwner_APersonOwnedWorkAssignmentsPair_IsNeverFollowed()
+    {
+        var typeRef = Guid.NewGuid();
+        var directory = WithWorkAssignment(
+            WithRecordType(Directory().WithRecord("sprk_matter", MatterId, ChildBu, owningTeam: ChildTeam), typeRef, "sprk_matter"),
+            new()
+            {
+                ["sprk_regardingrecordid"] = MatterId.ToString("D"),
+                ["sprk_regardingrecordtype"] = new EntityReference("sprk_recordtype_ref", typeRef),
+            });
+
+        var resolution = await AskAboutTheWorkAssignment(directory, asContent: false);
+
+        resolution.OwningTeamId.Should().Be(GeneralTeam, "a work assignment's pair is text any user with Write can set: never a filing");
+        directory.RecordQueries.Should().NotContain(q => q.EntityName == "sprk_recordtype_ref", "its pair's type is never read");
     }
 
     // ── Owner decision 2026-10-29: a person-owned work assignment that is filed belongs to its matter, then its project ──

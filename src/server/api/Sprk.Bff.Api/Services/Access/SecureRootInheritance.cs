@@ -503,6 +503,51 @@ public sealed partial class SecureRootInheritance
                "filed under a matter or project only through those lookups (the pair repeats one)";
     }
 
+    /// <summary>
+    /// FR-09 (task 015; moved here from <c>RecordCreationService</c> so the ownership resolver reads a project's pair by
+    /// the same rule, owner decision 2026-10-29): the record a row's ADR-024 pair files it under ON ITS OWN — only on a table whose pair is
+    /// BFF-managed (<see cref="PairNamesAParentOnItsOwn"/>: a project, whose only filing is the pair) —
+    /// as an ownership parent. Its record type is read app-only from the catalog, as the secure-root plan reads it before
+    /// this (one row, its <c>sprk_recordlogicalname</c>). Only a table the plan reads as a parent
+    /// (<see cref="IsParent"/>: a matter or project) is returned, so the owner and the secure-root plan
+    /// see the same filing.
+    /// </summary>
+    /// <returns>No parent: the table's pair files nothing on its own, the pair names nothing, or it names a table that is not
+    /// a secure-root parent (a document, an event: the plan reads such a pair as no filing). <c>Undetermined</c>: the pair
+    /// names a record that cannot be told — an id that is not one, no record type, or a type that names no table — which
+    /// the caller refuses (fail closed), never reads as "filed under nothing".</returns>
+    /// <remarks>A Dataverse fault propagates: the caller's owner step refuses it as the owner fault it is.</remarks>
+    internal static async Task<(RecordOwnershipParent? Parent, string? Undetermined)> PairParentAsync(
+        IGenericEntityService entities, string table, string? idText, Guid? typeId, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(entities);
+        if (!PairNamesAParentOnItsOwn(table) || string.IsNullOrWhiteSpace(idText))
+            return (null, null);
+
+        if (!Guid.TryParse(idText.Trim(), out var id) || id == Guid.Empty)
+            return (null, $"its {PairIdColumn} is not a record id");
+
+        if (typeId is not { } type || type == Guid.Empty)
+            return (null, $"its {PairIdColumn} names a record without its record type");
+
+        var query = new QueryExpression(RecordTypeRefEntity)
+        {
+            ColumnSet = new ColumnSet(RecordTypeLogicalNameColumn),
+            TopCount = 1,
+        };
+        query.Criteria.AddCondition(RecordTypeRefEntity + "id", ConditionOperator.Equal, type);
+        var row = (await entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false)).Entities.FirstOrDefault();
+        var named = row?.GetAttributeValue<string>(RecordTypeLogicalNameColumn)?.Trim().ToLowerInvariant();
+        if (string.IsNullOrEmpty(named))
+            return (null, "its record type names no table");
+
+        // Review F3: the plan files a project under its pair only when the pair names a matter or project; a pair typed to
+        // anything else files it under nothing, and the owner must agree (else a document's unit would own the project, or
+        // DecideOwnerAsync's consistency check would refuse, "Try again", a create the plan admitted).
+        return IsParent(named) ? (new RecordOwnershipParent(named, id), null) : (null, null);
+    }
+
+
     private static readonly AsyncLocal<int> NestedProvisioning = new();
 
     private readonly IGenericEntityService _dataverse;
