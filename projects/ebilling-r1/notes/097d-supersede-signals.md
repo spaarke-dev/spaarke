@@ -22,7 +22,7 @@ No new endpoint, schema change, package, DI registration or App Service setting.
 
 ## Decisions
 
-- **ChangedSinceRead is a Retry, not "left and done" (deviation from POML criterion `:115` and constraint `:46`).** The POML assumes ChangedSinceRead means "a person resolved it". The step now re-reads each Signal just before closing it. ChangedSinceRead therefore means a write landed in the few milliseconds between the re-read and the close. That write may have been an Acknowledge, which leaves the Signal open. Billing Signals have no sweep: `SignalReevaluationJob` covers Ontology policies only, and both the billing evaluation and 101's re-evaluation skip a Superseded invoice. So a Signal left open there would stay open for good. The step writes nothing and returns Retry. The next delivery re-reads: a person's close is left as it is, and a still-open Signal is closed. The cost is one extra delivery. The adversarial review agreed. **Owner/main session: amend POML `:115` and `:46` to match** (this agent does not edit the task file).
+- **ChangedSinceRead is a Retry, not "left and done" (deviation from POML criterion `:115` and constraint `:46`).** The POML assumes ChangedSinceRead means "a person resolved it". The step now re-reads each Signal just before closing it. ChangedSinceRead therefore means a write landed in the few milliseconds between the re-read and the close. That write may have been an Acknowledge, which leaves the Signal open. Billing Signals have no sweep: `SignalReevaluationJob` covers Ontology policies only, and both the billing evaluation and 101's re-evaluation skip a Superseded invoice. So a Signal left open there would stay open for good. The step writes nothing and returns Retry. The next delivery re-reads: a person's close is left as it is, and a still-open Signal is closed. The cost is one extra delivery. The adversarial review agreed. **ontology-r1 approved it on 2026-10-30 on two conditions, met in the follow-up below.** POML `:46` and `:115` are amended there ("(amended 2026-10-30, ontology-r1 OK)").
 - **Both ids are used.** `sprk_resubmissionof` finds the old invoice. The new invoice's `sprk_supersedesinvoice` shows that this submission's commit is the one that superseded it. An automatically rejected correction links nothing (persister `:532`), so it closes nothing even when another correction later supersedes the same invoice.
 - **Placement before the totals Retry.** The step's own failure returns before the totals code would. Both are Retry, and the resume recalculates the totals anyway.
 - **A missing old invoice or an unresolved target is done, not a Retry.** There is nothing to close, and a retry cannot change the answer (097c treats the undo the same way).
@@ -101,6 +101,60 @@ Measured on head `43ac7819af` (before the notes commit).
 - K1: an undo after this step ran (only possible when the invoice's files change outside the pipeline between two deliveries) reopens the old invoice but not its Signals. Fix candidate: the undo's reopen also reopens Signals the step closed Superseded at or after the commit. Sits beside 097c's K5.
 - K2: a field correction (101) in flight on the old invoice at the moment it is superseded can raise a new open episode after the close. Nothing closes it unless this submission resumes again.
 - K3: a persistent close or read failure holds the new submission at Processing (by design: any failure is Retry). On the final delivery the administrator's note names `supersede_signals_failed` or `signal_changed`.
+
+## Follow-up: ontology-r1's conditions for ChangedSinceRead → Retry (2026-10-30)
+
+Branch `task/ebill-097d-followup`, cut from `70f453942a`; `origin/work/ebilling-r1` did not yet contain 097d.
+
+### 1. Bounded and visible
+
+**What already happened.** A Retry from the after-steps maps to `TransientAsync` (`InvoiceSubmissionProcessingJobHandler.cs:445`, `:567-611`).
+- **Before the final delivery:** `Failure`, so the broker redelivers. The redelivery finds the submission Processing and linked, and resumes it (`:272`): gate first, then the after-steps, then this close.
+- **Bounded:** on the final delivery the job is `Poisoned` with the reason code as its error message (`:610`). That is the dead-letter, and it carries `signal_changed` or `supersede_signals_failed`.
+- **Logged:** a Warning names the job, the code and the submission id (`:587-589`).
+- **Visible:** because the invoice is linked, the submission is never written Failed. It stays Processing and gets the "Processing stopped: <code>; …" administrator note in `sprk_adminattention` (`:590-595`, R3 / D-133). It never sits at Processing silently.
+
+**What was missing, now added.** No Warning named the Signals left open. The `signal_changed` path logged no Signal id at all, and the handler cannot know the ids. The step now logs ONE Warning on every failing run, the final delivery included (`InvoiceSubmissionAfterSteps.cs:1090-1096`). It names the submission, the old invoice, the code and exactly the Signal ids not closed (ids and codes only, ADR-015). A read fault fails before any Signal id is known, so its existing Warning (`:1033`) names the submission and the fault type only.
+
+**Tests.**
+- `InvoiceSubmissionAfterStepsTests.Correction_FailingRun_WarnsWithTheSignalsLeftOpen` (`changed`, `fault`): one Warning with the submission id, the code and the stuck Signal's id, and not the id of the Signal that closed. Fail before: with the Warning removed, both rows fail; restored, both pass.
+- `InvoiceSubmissionProcessingJobHandlerTests.SupersedeCloseRetry_OnTheFinalDelivery_IsDeadLetteredAndVisible` (both codes): an earlier delivery is `Failed`, redelivered, and writes nothing. The final delivery is `Poisoned` with `ErrorMessage` = the code, no status write, still Processing, `sprk_adminattention` = `StoppedNote(code)`, and a Warning with the submission id and the code. This pins existing behaviour (the general pattern was pinned only for `signal_write_skipped`), so it passes before and after.
+
+### 2. Idempotent re-runs
+
+A Retry ends the delivery. The redelivery resumes through `ResumeAsync`, which re-runs every step before the supersede close (`InvoiceSubmissionAfterSteps.cs:492`):
+
+| Step (order on a resume) | Code | Why a re-run changes nothing | Test |
+|---|---|---|---|
+| Commit gate | `:285`; `SubmissionCommitGate` | Once a file is Servable the source re-run is skipped and nothing is flipped twice. A completed undo run again deletes and writes nothing. | `InvoiceSubmissionPersisterTests` "094 step 6 (must not fire): once a file is Servable the re-run is skipped…" and "094 (uac-r2 condition 3): the compensation is idempotent…"; `InvoiceSubmissionAfterStepsTests` "094 (model 9.1 step 6): a resume runs the commit gate FIRST…" |
+| Totals (016) | `:297`; `InvoiceTotalsService.RecalculateAsync` | Writes the totals computed from the lines (absolute values, conditional on the version read), never an increment. An adjustment line already right is left alone. | `InvoiceTotalsServiceTests.Recalculate_WritesTheFiveTotals_ConditionallyOnTheVersionRead_AndTheAdjustmentLineAmount`, `Recalculate_LeavesAnAdjustmentLineAlone_WhenItsStoredAmountIsAlreadyRight`; `InvoiceSubmissionAfterStepsTests` "049 13a A resume: a totals fault on resume … the next resume completes" |
+| Totals refusal record | `:368` | No write when the stored member already holds the same code. | "049 13a A: a totals refusal is recorded in the findings JSON once (idempotent across a resume)…" |
+| System Signals and the policy note | `:381` | The attention text is written only when it changes. | "049 R5: the policy note is idempotent - a redelivery that finds the same misconfiguration writes the attention column once" |
+| Signal writes (option-a lifecycle) | `:399` | Same fingerprint and open: refresh in place. Same fingerprint and resolved: skipped. The dedupe key makes a write exactly-once per episode. | "049 D lifecycle: a resolved Signal with the same fingerprint is skipped (a resume never re-raises it)"; "049 D resume: a crash at each step … the redelivery completes with no duplicate episode, one record, one notify, one terminal write" |
+| Signal write refusals record (F1-3, D-133) | `:423` | Recorded once; a resume that finds them stored writes nothing new. | "049 F1-3: a permanent refusal is recorded once across a resume (idempotent)…"; "049 D-133: a resume that finds the refusal stored writes nothing new…" |
+| Automatic rejection: the stored set, the Decision Record, the Acted closes | `:440-487` | AutoRejected only. The set is stored once and never re-read. The record id is deterministic (`RejectionDecisionIdFor`), so the writer's exactly-once applies. A close already made by this record is `AlreadyClosedByThisRecord`. An AutoRejected correction supersedes nothing, so it never reaches a supersede Retry. | "049 13c: the set is stored BEFORE the record; a crash between them resumes … with no fresh read…"; "049 13c: a resume after a partial close set re-closes from the stored set only; each Signal is written once"; "049 13c: ChangedSinceRead on a close is a Retry … the redelivery completes" |
+| The supersede close itself | `:492` | It re-reads the open set, so a Signal already closed is not in it. | `Correction_CloseFailsOnce_RetryThenResumeCompletes` (`OnlyHaveUniqueItems`), `Correction_ChangedSinceRead_LeftAsIs_RetryThenResumeCloses` |
+
+The steps after the close run only on the completing run, and are idempotent too: the index job by its key ("152: a redelivery (resume) queues the same index job again; it is idempotent by its key"), the notification by its marker ("049 D: the notification is sent once per submission…"), and the terminal status only while Processing ("049 R7: a redelivery after completion writes nothing more").
+
+**Result: every earlier step is idempotent on re-delivery; no new guard was needed.**
+
+### 3. POML
+
+`tasks/097-corrected-invoice.poml`: the constraint "model 9.1 (ontology-r1 v5.8)" and the criterion "Idempotent close" now read "ChangedSinceRead writes nothing and returns Retry; the next run re-reads (amended 2026-10-30, ontology-r1 OK)".
+
+### Gate (follow-up)
+
+Measured at `21533910b6` (code and tests); the POML and notes commits change no code.
+
+| Step | Result |
+|---|---|
+| Build Sprk.Bff.Api.Tests and Spaarke.ArchTests | 0 warnings, 0 errors |
+| Unit filter `Submission\|Signals\|Invoice` | 7628 passed, 0 failed, 6 skipped |
+| ArchTests (src touched) | 1858 passed, 0 failed |
+| Re-run of the two touched classes after the commit hook's `dotnet format` | 280 passed, 0 failed |
+
+Publish size is not re-measured: one log statement and a list, on top of the +2,517 B above.
 
 ## 097 summary (parts a to d)
 
