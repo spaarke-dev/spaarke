@@ -23,7 +23,9 @@ namespace Sprk.Bff.Api.Api.Finance;
 /// says which rule: <c>ebilling.code.not_in_set</c>, <c>ebilling.correction.field_unknown</c>, <c>field_not_applicable</c>,
 /// <c>timekeeper_mismatch</c>, <c>value_required</c>, <c>value_invalid</c>, <c>nothing_to_confirm</c>); 401; 403; 404 uniform (invoice or
 /// line absent or unreadable); 409 (not In Review, line Pending or already decided, no recorded AI source, no code set, the line or invoice
-/// changed); 503 <c>ebilling.disabled</c> or a transient failure (repeat the same request: it writes no second row); 503
+/// changed, <c>ebilling.invoice.totals_refused</c> when the invoice totals would be refused with the corrected value (detail: the refusal code; nothing is written),
+/// <c>ebilling.correction.too_large</c> when the line's stored extraction would exceed its column, <c>ebilling.correction.extraction_unavailable</c> when the line
+/// has no stored extraction); 503 <c>ebilling.disabled</c> or a transient failure (repeat the same request: it writes no second row); 503
 /// <c>ebilling.correction.incomplete</c> with <c>failedStep</c> <c>findings</c> (the re-evaluation and the findings patch), <c>status</c> (the line
 /// status) <c>signals</c> (the Signals and the coding hold), <c>totals</c> (the invoice totals) or <c>reevaluation</c> (any other step) when the value was saved but a step after it did not finish (repeat the same request: it writes no
 /// second row and runs the steps again). A code correction is also the re-code path of a Pending line of an uncoded invoice (D-126, B2b-1).</para>
@@ -169,7 +171,8 @@ public static class InvoiceCorrectionEndpoints
             => InvoiceLineReviewEndpoints.Refused(StatusCodes.Status400BadRequest, code, detail),
         CorrectionStatus.InvoiceNotFound or CorrectionStatus.LineNotFound => FinanceAuthorizationFilter.UniformRecordNotFound(httpContext),
         CorrectionStatus.NotInReview or CorrectionStatus.LineNotCorrectable or CorrectionStatus.NoProvenance
-            or CorrectionStatus.CodeSetUnavailable or CorrectionStatus.Changed => InvoiceLineReviewEndpoints.Refused(StatusCodes.Status409Conflict, code, detail),
+            or CorrectionStatus.CodeSetUnavailable or CorrectionStatus.Changed
+            or CorrectionStatus.TotalsRefused or CorrectionStatus.TooLarge or CorrectionStatus.ExtractionUnavailable => InvoiceLineReviewEndpoints.Refused(StatusCodes.Status409Conflict, code, detail),
         CorrectionStatus.OwnerUnresolved => InvoiceLineReviewEndpoints.Refused(StatusCodes.Status500InternalServerError, code, detail),
         _ => InvoiceLineReviewEndpoints.Refused(StatusCodes.Status503ServiceUnavailable, code, detail),
     };

@@ -22,6 +22,14 @@ internal sealed class CorrectionStepException(string step, Exception inner)
     public string Step { get; } = step;
 }
 
+/// <summary>The totals step found the invoice's totals refused (fix round, part 2: a concurrent adjustment changed them after the pre-write dry-run):
+/// the correction service answers 409 <see cref="CorrectionCodes.TotalsRefused"/>, not the 503 Incomplete that no repeat can clear.</summary>
+internal sealed class CorrectionTotalsRefusedException(string refusalCode)
+    : Exception($"The invoice totals were refused ({refusalCode}).")
+{
+    public string RefusalCode { get; } = refusalCode;
+}
+
 /// <summary>
 /// The follow-through of a saved correction (ebilling-r1 task 101 part B2b-1; FR-25, FR-31, D-126): re-runs 072's billing rules in memory on the
 /// invoice before and after the correction, patches the stored findings (<c>sprk_invoicesubmission.sprk_findingsjson</c>) with the difference, and
@@ -60,8 +68,11 @@ internal sealed class CorrectionStepException(string step, Exception inner)
 /// presented Blocked (the invoice is held) is never replaced or removed by a correction that would present it otherwise: it is kept and marked
 /// <see cref="CorrectionReviewMember"/>, and no Signal change is recorded for it. A replacement the writer would refuse is recorded in
 /// <see cref="InvoiceSubmissionPersister.SignalPlanRefusalsMember"/>.</para>
-/// <para><b>Not here.</b> Currency and TotalDue (B2c, the totals and the D-20 currency follow-through), timekeeper and date corrections (B2c), and
-/// 073 itself: a correction of an In Review invoice does not re-decide it (new entries carry the rule's consequence and do not reject).</para>
+/// <para><b>Currency (fix round, part 2).</b> A Currency correction is re-evaluated like any other header field: the rules re-run with the new currency
+/// (RequiredData's not-USD finding, and the D-20 / D-115 skip of the money rules), through the same diff. The correction service writes the new currency to
+/// the undecided lines in its value transaction (the persister copies the header currency onto every line), so no line carries a currency of its own and
+/// there is no per-line currency finding.</para>
+/// <para><b>Not here.</b> 073 itself: a correction of an In Review invoice does not re-decide it (new entries carry the rule's consequence and do not reject).</para>
 /// <para><b>Component justification (CLAUDE.md section 11).</b> Existing: <see cref="InvoiceSubmissionPersister"/> builds the findings JSON for a
 /// whole submission and <see cref="InvoiceSubmissionAfterSteps"/> writes its Signals; neither patches a stored copy. Extension: the persister's
 /// per-entry builders and status rule are reused (B2a); the patch is a different write (one invoice's stored copy after a reviewer's change), so it
@@ -100,7 +111,7 @@ public sealed class InvoiceCorrectionReevaluation
         ResolutionFieldNames.Hours, ResolutionFieldNames.Rate, ResolutionFieldNames.Amount, BillingFieldNames.Narrative,
         BillingFieldNames.TaskCode, BillingFieldNames.ActivityCode, BillingFieldNames.ExpenseCode,
         BillingFieldNames.FirmInvoiceNumber, BillingFieldNames.BillingPeriodStart, BillingFieldNames.BillingPeriodEnd,
-        ResolutionFieldNames.Date, ResolutionFieldNames.TimekeeperAsBilled, BillingFieldNames.InvoiceDate,
+        ResolutionFieldNames.Date, ResolutionFieldNames.TimekeeperAsBilled, BillingFieldNames.InvoiceDate, BillingFieldNames.Currency,
     };
 
     /// <summary>B2c: a correction of one of these changes a billed figure, so the invoice totals are recomputed (016).</summary>
@@ -178,21 +189,19 @@ public sealed class InvoiceCorrectionReevaluation
     {
         ArgumentNullException.ThrowIfNull(applied);
         var reevaluate = Reevaluated.Contains(applied.Field);
-        var currency = applied.Field == BillingFieldNames.Currency;
         var totals = TotalsFields.Contains(applied.Field);
-        if (!reevaluate && !currency && !totals)
+        if (!reevaluate && !totals)
         {
             _logger.LogInformation("Correction of {Field} on invoice {InvoiceId}: nothing follows it.", applied.Field, applied.InvoiceId);
             return;
         }
 
-        if (reevaluate || currency)
+        if (reevaluate)
         {
             Patched patched;
             try
             {
-                // A currency correction does not re-run the rules (the invoice currency only); it checks the lines' currency against it.
-                patched = reevaluate ? await PatchFindingsAsync(applied, ct).ConfigureAwait(false) : await PatchCurrencyAsync(applied, ct).ConfigureAwait(false);
+                patched = await PatchFindingsAsync(applied, ct).ConfigureAwait(false);
             }
             catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
             {
@@ -227,6 +236,10 @@ public sealed class InvoiceCorrectionReevaluation
             {
                 await RecalculateTotalsAsync(applied, ct).ConfigureAwait(false);
             }
+            catch (CorrectionTotalsRefusedException)
+            {
+                throw; // a refusal is not a failed step: no repeat clears it (409, not 503)
+            }
             catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
             {
                 throw new CorrectionStepException(CorrectionCodes.TotalsStep, ex);
@@ -239,7 +252,8 @@ public sealed class InvoiceCorrectionReevaluation
     /// <summary>
     /// Recomputes the invoice's totals through 016 (<see cref="IInvoiceTotalsService.RecalculateAsync"/>, the one owner of the totals). It re-reads the
     /// invoice and its lines, so it is idempotent: a repeat after a failure computes and stores the same figures. A refused calculation (for example an
-    /// approved total below zero) writes nothing and fails the step, as it does for a line decision.
+    /// approved total below zero) writes nothing and throws <see cref="CorrectionTotalsRefusedException"/> (409): the correction service dry-runs the
+    /// totals before it writes, so this is reached only when something else (a concurrent adjustment) changed the inputs since.
     /// </summary>
     private async Task RecalculateTotalsAsync(CorrectionApplied applied, CancellationToken ct)
     {
@@ -251,78 +265,10 @@ public sealed class InvoiceCorrectionReevaluation
         var calculation = await _recalculate(applied.InvoiceId, ct).ConfigureAwait(false);
         if (calculation.IsRefused)
         {
-            throw new InvalidOperationException($"The invoice totals were refused ({calculation.Refusal!.Code}).");
+            throw new CorrectionTotalsRefusedException(calculation.Refusal!.Code);
         }
 
         _logger.LogInformation("Correction of {Field} on invoice {InvoiceId}: totals recomputed.", applied.Field, applied.InvoiceId);
-    }
-
-    // ── The currency check (B2c) ──
-
-    /// <summary>
-    /// A currency correction updates the invoice currency only (D-20: the rules are not re-run). Each undecided fee or expense line that carries a currency
-    /// which disagrees with the invoice's (compared as <c>BillingCurrency</c> does, D-119) gets a <c>lineFindings[]</c> entry
-    /// <see cref="InvoiceSubmissionPersister.LineFindingCurrencyMismatch"/>, so the status step flags it like any other line finding; a line whose
-    /// currency agrees again loses the entry. No Signal is raised. Idempotent: the entries are a function of the stored currencies.
-    /// </summary>
-    private async Task<Patched> PatchCurrencyAsync(CorrectionApplied applied, CancellationToken ct)
-    {
-        var invoice = await ReadInvoiceAsync(applied.InvoiceId, ct).ConfigureAwait(false)
-            ?? throw new InvalidOperationException("The invoice was not found.");
-        var lines = await ReadLinesAsync(applied.InvoiceId, ct).ConfigureAwait(false);
-        var submission = await ReadSubmissionAsync(applied.InvoiceId, ct).ConfigureAwait(false)
-            ?? throw new InvalidOperationException("The invoice has no submission.");
-        var json = submission.GetAttributeValue<string>(InvoiceSubmissionPersister.SubmissionFindingsJson);
-        if (string.IsNullOrWhiteSpace(json) || JsonNode.Parse(json) is not JsonObject root)
-        {
-            throw new InvalidOperationException("The submission has no stored findings.");
-        }
-
-        if (!submission.TryGetAttributeValue<long>(InvoiceTotalsService.VersionNumber, out var submissionVersion) || submissionVersion <= 0)
-        {
-            throw new InvalidOperationException("The submission version could not be read.");
-        }
-
-        var invoiceCurrency = BillingCurrency.Normalise(invoice.GetAttributeValue<string>(InvoiceSubmissionPersister.InvoiceCurrency));
-        if (root[InvoiceSubmissionPersister.LineFindingsMember] is not JsonArray lineFindings)
-        {
-            root[InvoiceSubmissionPersister.LineFindingsMember] = lineFindings = [];
-        }
-
-        var original = root.ToJsonString();
-        var touched = new HashSet<int>();
-        foreach (var line in lines.Values.Where(l => !l.Decided).OrderBy(l => l.Index))
-        {
-            var lineCurrency = BillingCurrency.Normalise(line.Row.GetAttributeValue<string>(InvoiceSubmissionPersister.LineCurrency));
-            var mismatch = invoiceCurrency is not null && lineCurrency is not null && !string.Equals(lineCurrency, invoiceCurrency, StringComparison.Ordinal);
-            var stored = lineFindings.OfType<JsonObject>()
-                .Where(e => IntOf(e["line"]) == line.Index && Text(e, "code") == InvoiceSubmissionPersister.LineFindingCurrencyMismatch).ToList();
-            if (mismatch && stored.Count == 0)
-            {
-                lineFindings.Add(InvoiceSubmissionPersister.LineFindingEntryJson(
-                    line.Index, InvoiceSubmissionPersister.LineFindingCurrencyMismatch, "The line's currency differs from the invoice currency."));
-                touched.Add(line.Index);
-            }
-            else if (!mismatch && stored.Count > 0)
-            {
-                RemoveLineFinding(lineFindings, line.Index, InvoiceSubmissionPersister.LineFindingCurrencyMismatch);
-                touched.Add(line.Index);
-            }
-        }
-
-        if (!string.Equals(original, root.ToJsonString(), StringComparison.Ordinal))
-        {
-            var update = new Entity(InvoiceReviewReadService.SubmissionEntity, submission.Id)
-            {
-                RowVersion = submissionVersion.ToString(CultureInfo.InvariantCulture),
-                [InvoiceSubmissionPersister.SubmissionFindingsJson] = root.ToJsonString(),
-            };
-            await _entities.ExecuteTransactionAsync(
-                [new UpdateRequest { Target = update, ConcurrencyBehavior = ConcurrencyBehavior.IfRowVersionMatches }], ct).ConfigureAwait(false);
-            _logger.LogInformation("Correction of {Field} on invoice {InvoiceId}: currency findings patched ({Touched} lines touched).", applied.Field, applied.InvoiceId, touched.Count);
-        }
-
-        return new Patched(root, lines, touched);
     }
 
     /// <summary>
@@ -1350,7 +1296,7 @@ public sealed class InvoiceCorrectionReevaluation
     {
         var query = new QueryExpression(InvoiceReviewReadService.LineEntity)
         {
-            ColumnSet = new ColumnSet(InvoiceReviewReadService.LineColumns.Append(InvoiceSubmissionPersister.LineCurrency).ToArray()),
+            ColumnSet = new ColumnSet(InvoiceReviewReadService.LineColumns),
             Criteria = new FilterExpression(LogicalOperator.And),
         };
         query.Criteria.AddCondition(InvoiceFamilyCoreRecordGuard.LineInvoiceColumn, ConditionOperator.Equal, invoiceId);

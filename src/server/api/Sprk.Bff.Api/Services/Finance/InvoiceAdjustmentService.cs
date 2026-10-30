@@ -787,7 +787,7 @@ public sealed class InvoiceAdjustmentService
         [InvoiceReviewReadService.LineReviewedOn] = atUtc,
     };
 
-    private static InvoiceLineInput ToInput(Entity row)
+    internal static InvoiceLineInput ToInput(Entity row)
     {
         var type = row.GetAttributeValue<OptionSetValue>(InvoiceTotalsService.LineCostType)?.Value;
         var status = row.GetAttributeValue<OptionSetValue>(InvoiceTotalsService.LineStatus)?.Value;

@@ -35,6 +35,16 @@ public enum CorrectionStatus
     /// <summary>B2c: the roster entry a timekeeper correction names is not the timekeeper the resolution matches for the line; nothing was written.</summary>
     TimekeeperMismatch,
 
+    /// <summary>The invoice's totals would be refused with the corrected value (or were refused by a concurrent change after it): 409, no repeat of the same request clears it.
+    /// Before the write, nothing was written.</summary>
+    TotalsRefused,
+
+    /// <summary>The line's extraction JSON would exceed its column with this correction; nothing was written (409).</summary>
+    TooLarge,
+
+    /// <summary>The line has no stored extraction JSON (the persister leaves it out when it was over the column limit), so there is nothing to attribute or patch; nothing was written (409).</summary>
+    ExtractionUnavailable,
+
     /// <summary>A read or a write failed. The correction row may already be written; repeating the same request completes the value write
     /// without a second row.</summary>
     Unavailable,
@@ -72,6 +82,16 @@ public static class CorrectionCodes
     /// <summary>The <c>failedStep</c> of an <see cref="Incomplete"/> answer: the invoice totals recomputed after an amount, hours, rate or total-due correction (B2c).</summary>
     public const string TotalsStep = "totals";
     public const string ReviewerUnresolved = LineDecisionCodes.DeciderUnresolved;
+
+    /// <summary>The invoice totals would be refused (for example the adjustments exceed the corrected total due); 409, the detail is the calculator's refusal code.
+    /// The same code the line decision and the adjustments use.</summary>
+    public const string TotalsRefused = LineDecisionCodes.TotalsRefused;
+
+    /// <summary>The correction would push the line's extraction JSON over its column limit; 409, nothing was written.</summary>
+    public const string TooLarge = "ebilling.correction.too_large";
+
+    /// <summary>The line's extraction JSON is missing (it was over the column limit when the invoice was stored); 409, nothing was written.</summary>
+    public const string ExtractionUnavailable = "ebilling.correction.extraction_unavailable";
 
     /// <summary>FR-22: the code is not in the line's resolved code set; nothing was written.</summary>
     public const string CodeNotInSet = "ebilling.code.not_in_set";
@@ -155,7 +175,12 @@ public sealed record CorrectionApplied(Guid InvoiceId, Guid? LineId, string Fiel
 /// (<c>EligibleApproverResolver.SingleCoreOf</c>, #2455); otherwise <c>invoice-reviewer</c>, also when the lookup fails (logged).</para>
 /// <para><b>Follow-through (part B2).</b> B2b-1 wires <see cref="InvoiceCorrectionReevaluation"/> into <see cref="OnValueWrittenAsync"/>: the billing
 /// rules re-run, <c>findings[]</c> / <c>signalPlan[]</c> and the line findings of the stored copy patched, then the line status re-derived; B2b-2 adds
-/// the Signal reconcile and the D-125 coding hold; B2c adds the totals, the currency check and the timekeeper and date corrections. <b>Timekeeper and
+/// the Signal reconcile and the D-125 coding hold; B2c adds the totals and the timekeeper and date corrections. <b>Before the write (fix round, part 2).</b> A field that feeds
+/// the totals (TotalDue, Amount, Hours, Rate) dry-runs <see cref="InvoiceTotalsCalculator"/> with the proposed value first: a refusal is 409
+/// <see cref="CorrectionCodes.TotalsRefused"/> and nothing is written (a refusal after the write, from a concurrent change, is the same 409). A line whose
+/// extraction JSON would exceed its column is 409 <see cref="CorrectionCodes.TooLarge"/>, and a line with none stored is 409
+/// <see cref="CorrectionCodes.ExtractionUnavailable"/>. A Currency correction writes the new currency to the undecided lines in the same transaction (the
+/// persister copies the header currency onto every line) and re-runs the rules through the re-evaluation. <b>Timekeeper and
 /// date (B2c).</b> A timekeeper correction names a roster entry of the invoice's firm (its id); the line's approved rate is re-resolved through
 /// <see cref="IInvoiceResolutionService"/> with a one-line input, and an entry the resolution does not match for the line is refused
 /// (<see cref="CorrectionCodes.TimekeeperMismatch"/>, nothing written). A line-date correction re-resolves a fee line the same way. The roster match and the
@@ -398,6 +423,15 @@ public sealed class InvoiceCorrectionService
             {
                 extraction = null;
             }
+        }
+
+        // A line with no extraction JSON at all (the persister leaves it out when it was over the column limit) reads as uncoded and has no source to name:
+        // refuse it plainly, rather than re-derive it as Pending or answer with a misleading code.
+        if (string.IsNullOrWhiteSpace(extractionJson) && status is (int)InvoiceLineStatus.Pending or (int)InvoiceLineStatus.Clean or (int)InvoiceLineStatus.Flagged)
+        {
+            return new CorrectionResult(
+                CorrectionStatus.ExtractionUnavailable, CorrectionCodes.ExtractionUnavailable,
+                "This line's stored extraction is missing (it was too large to keep), so it cannot be corrected here; nothing was changed.");
         }
 
         // D-126 (B2b-1): a code correction is the re-code path of an UNCODED invoice, whose lines stay Pending. Any other Pending line is still refused.
@@ -756,6 +790,45 @@ public sealed class InvoiceCorrectionService
         // The correction row (when this request writes one) and the value update go in ONE transaction: row first, then the line / invoice update
         // conditioned on the row version read in this request. A stale version (409) rolls the row back, so no label is ever left for a value that
         // was not applied (D-64 rows are append-only). The row id is deterministic (field, version read, final value), so a repeat upserts the same row.
+        // Fix round, part 2 (F-1): a field that feeds the totals dry-runs 016's calculator with the proposed value BEFORE anything is written, as a line
+        // decision and an adjustment do. A refusal (for example TotalDue below the adjustments) is 409 with nothing written, not a saved value no repeat can finish.
+        if ((!rowExists || writeNeeded) && TotalsFields.Contains(spec.Name)
+            && await DryRunTotalsAsync(spec, invoice, lineId, finalText, ct).ConfigureAwait(false) is { } totalsRefused)
+        {
+            return totalsRefused;
+        }
+
+        // K-f: the value fields, built once. A line's extraction JSON that would exceed its column is refused before the write (409), not left to fail the transaction.
+        Dictionary<string, object>? valueFields = null;
+        if (writeNeeded)
+        {
+            valueFields = ValueFields(spec, finalText, extraction, derived, target);
+            if (valueFields.TryGetValue(InvoiceSubmissionPersister.LineExtractionConfidence, out var json)
+                && json is string text && text.Length > InvoiceSubmissionPersister.ExtractionConfidenceMaxLength)
+            {
+                _logger.LogInformation("Correction of {Field} on invoice {InvoiceId} line {LineId}: the line's extraction JSON would exceed its column; nothing changed.",
+                    spec.Name, command.InvoiceId, lineId);
+                return new CorrectionResult(
+                    CorrectionStatus.TooLarge, CorrectionCodes.TooLarge,
+                    "The correction would make the line's stored extraction too large to keep; nothing was changed.");
+            }
+        }
+
+        // Fix round, part 2 (F-3): the persister copies the header currency onto every line, so a Currency correction moves the undecided lines with it.
+        // Read now (also on a repeat: a chunk that failed last time is finished by the same request), written in the value transaction below. A confirm keeps the value as read.
+        var currencyUpdates = new List<UpdateRequest>();
+        if (spec.Header && spec.Name == BillingFieldNames.Currency && !command.Confirm)
+        {
+            try
+            {
+                currencyUpdates = await CurrencyUpdatesAsync(command.InvoiceId, finalText, ct).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+            {
+                return ReadFailed(command.InvoiceId, ex);
+            }
+        }
+
         var requests = new List<OrganizationRequest>(2);
         CorrectionDto dto;
         if (rowExists)
@@ -779,8 +852,12 @@ public sealed class InvoiceCorrectionService
 
         if (writeNeeded)
         {
-            requests.Add(ConditionalValueUpdate(targetEntity, target.Id, version, ValueFields(spec, finalText, extraction, derived, target)));
+            requests.Add(ConditionalValueUpdate(targetEntity, target.Id, version, valueFields!));
         }
+
+        // The lines ride in the same transaction as far as the per-transaction limit allows; the rest follows in chunks (recomputed from the stored lines on a repeat).
+        var inFirst = Math.Max(0, InvoiceSubmissionPersister.MaxRequestsPerTransaction - requests.Count);
+        requests.AddRange(currencyUpdates.Take(inFirst));
 
         if (requests.Count > 0)
         {
@@ -804,6 +881,21 @@ public sealed class InvoiceCorrectionService
             }
         }
 
+        foreach (var chunk in currencyUpdates.Skip(inFirst).Chunk(InvoiceSubmissionPersister.MaxRequestsPerTransaction))
+        {
+            try
+            {
+                await _entities.ExecuteTransactionAsync(chunk.Cast<OrganizationRequest>().ToList(), ct).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+            {
+                _logger.LogError("Correction of {Field} on invoice {InvoiceId}: the lines' currency could not be fully written ({ExceptionType}); the same request again finishes it.",
+                    spec.Name, command.InvoiceId, ex.GetType().Name);
+                return new CorrectionResult(
+                    CorrectionStatus.Unavailable, CorrectionCodes.Unavailable, "The correction could not be saved on every line. Repeat the same request.");
+            }
+        }
+
         _logger.LogInformation("Correction of {Field} on invoice {InvoiceId} line {LineId}: outcome {Outcome}, row written {RowWritten}, value changed {ValueChanged}.",
             spec.Name, command.InvoiceId, lineId, dto.Outcome, !rowExists, writeNeeded);
 
@@ -812,6 +904,12 @@ public sealed class InvoiceCorrectionService
         try
         {
             await OnValueWrittenAsync(new CorrectionApplied(command.InvoiceId, lineId, spec.Name, dto.Outcome, valueChanged), ct).ConfigureAwait(false);
+        }
+        catch (CorrectionTotalsRefusedException refused)
+        {
+            // The pre-write dry-run passed, so something else (a concurrent adjustment) moved the totals since: 409, as the dry-run answers, not a 503 no repeat clears.
+            _logger.LogInformation("Correction of {Field} on invoice {InvoiceId}: saved, but the totals are now refused ({ReasonCode}).", spec.Name, command.InvoiceId, refused.RefusalCode);
+            return new CorrectionResult(CorrectionStatus.TotalsRefused, CorrectionCodes.TotalsRefused, refused.RefusalCode);
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
@@ -827,6 +925,88 @@ public sealed class InvoiceCorrectionService
         }
 
         return new CorrectionResult(CorrectionStatus.Applied, "ok", Correction: dto, AlreadyApplied: rowExists && !writeNeeded);
+    }
+
+    // ── Totals dry-run and the lines' currency (fix round, part 2) ──
+
+    /// <summary>The fields whose correction changes a figure the invoice totals are computed from (016); the same set the follow-through's totals step runs for.</summary>
+    private static readonly HashSet<string> TotalsFields = new(StringComparer.Ordinal)
+    {
+        ResolutionFieldNames.Amount, ResolutionFieldNames.Hours, ResolutionFieldNames.Rate, ResolutionFieldNames.TotalDue,
+    };
+
+    /// <summary>
+    /// Dry-runs <see cref="InvoiceTotalsCalculator.Calculate"/> over the invoice's lines as stored with the proposed value (TotalDue: the billed total; Amount: the
+    /// corrected line's amount; Hours and Rate: no input changes, the totals as they stand), the way <see cref="InvoiceLineDecisionService"/> and
+    /// <see cref="InvoiceAdjustmentService"/> do. Null when the calculation would be accepted; otherwise the 409 answer (nothing was written).
+    /// </summary>
+    private async Task<CorrectionResult?> DryRunTotalsAsync(Spec spec, Entity invoice, Guid? lineId, string finalText, CancellationToken ct)
+    {
+        List<Entity> lineRows;
+        try
+        {
+            lineRows = await InvoiceReviewReadService.ReadPagedAsync(_entities, InvoiceReviewReadService.LineQuery(invoice.Id), ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            return ReadFailed(invoice.Id, ex);
+        }
+
+        var billed = invoice.GetAttributeValue<Money>(InvoiceTotalsService.InvoiceBilledTotal)?.Value;
+        if (spec.Name == ResolutionFieldNames.TotalDue)
+        {
+            billed = decimal.Parse(finalText, CultureInfo.InvariantCulture);
+        }
+
+        var inputs = lineRows
+            .Select(row => spec.Name == ResolutionFieldNames.Amount && row.Id == lineId
+                ? InvoiceAdjustmentService.ToInput(row) with { Amount = decimal.Parse(finalText, CultureInfo.InvariantCulture) }
+                : InvoiceAdjustmentService.ToInput(row))
+            .ToList();
+        var dryRun = InvoiceTotalsCalculator.Calculate(billed, inputs);
+        if (!dryRun.IsRefused)
+        {
+            return null;
+        }
+
+        _logger.LogInformation("Correction of {Field} on invoice {InvoiceId}: the totals would be refused ({ReasonCode}); nothing changed.", spec.Name, invoice.Id, dryRun.Refusal!.Code);
+        return new CorrectionResult(CorrectionStatus.TotalsRefused, CorrectionCodes.TotalsRefused, dryRun.Refusal.Code);
+    }
+
+    /// <summary>
+    /// The version-conditional updates that give each undecided fee or expense line the corrected invoice currency (only those whose stored currency differs, so a
+    /// repeat finds nothing left). A decided line keeps what it was decided with.
+    /// </summary>
+    private async Task<List<UpdateRequest>> CurrencyUpdatesAsync(Guid invoiceId, string currency, CancellationToken ct)
+    {
+        var query = InvoiceReviewReadService.LineQuery(invoiceId);
+        query.ColumnSet.AddColumn(InvoiceSubmissionPersister.LineCurrency);
+        var updates = new List<UpdateRequest>();
+        foreach (var row in await InvoiceReviewReadService.ReadPagedAsync(_entities, query, ct).ConfigureAwait(false))
+        {
+            var type = row.GetAttributeValue<OptionSetValue>(InvoiceTotalsService.LineCostType)?.Value;
+            var status = row.GetAttributeValue<OptionSetValue>(InvoiceTotalsService.LineStatus)?.Value;
+            if (type is not ((int)InvoiceLineCostType.Fee or (int)InvoiceLineCostType.Expense)
+                || status is not ((int)InvoiceLineStatus.Pending or (int)InvoiceLineStatus.Clean or (int)InvoiceLineStatus.Flagged))
+            {
+                continue;
+            }
+
+            if (string.Equals(row.GetAttributeValue<string>(InvoiceSubmissionPersister.LineCurrency)?.Trim(), currency, StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            if (!row.TryGetAttributeValue<long>(InvoiceTotalsService.VersionNumber, out var version) || version <= 0)
+            {
+                throw new InvalidOperationException("A line version could not be read.");
+            }
+
+            updates.Add(ConditionalValueUpdate(
+                InvoiceReviewReadService.LineEntity, row.Id, version, new Dictionary<string, object> { [InvoiceSubmissionPersister.LineCurrency] = currency }));
+        }
+
+        return updates;
     }
 
     // ── Values ──
