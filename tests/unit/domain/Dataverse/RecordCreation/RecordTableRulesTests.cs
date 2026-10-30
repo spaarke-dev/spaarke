@@ -284,11 +284,34 @@ public class RecordTableRulesTests
         rule.MappingExclusion!.Name.Should().Be("OntologyContentIsNotMapped");
     }
 
+    [Theory]
+    [InlineData("task")]
+    [InlineData("contact")]
+    [InlineData("account")]
+    public void ChatPlatformTables_DeclareOnlyWhatTheOwnedCreateAppliesToday(string table)
+    {
+        // Task 017-d2 (owner decision 2026-10-30, option b): registered for the chat create, keeping today's behaviour.
+        var rule = RecordTableRules.Get(table);
+
+        rule.Kind.Should().Be(RecordTableKind.Child);
+        rule.MappingApplies.Should().BeFalse("the chat create maps nothing today");
+        rule.MappingExclusion!.Name.Should().Be("ChatPlatformTableIsNotMapped");
+        rule.OwnershipException.Should().BeNull("the owner is the resolver's team, as today");
+        rule.TableServerOwnedColumns.Should().BeEmpty();
+        rule.MappingProtectedColumns.Should().BeEmpty();
+        rule.AutonumberColumn.Should().BeNull();
+        rule.ForPerson.Should().BeNull();
+        rule.ServerDefaults.Should().BeEmpty();
+        rule.SearchIndexed.Should().BeFalse();
+        rule.OptionalReferenceLookups.Should().BeEmpty();
+        rule.PreWriteRules.Should().BeEmpty();
+    }
+
     [Fact]
     public void MappingApplies_EveryOtherTable_IsTrue()
     {
         RecordTableRules.All.Where(r => !r.MappingApplies).Select(r => r.Table)
-            .Should().BeEquivalentTo("sprk_signal", "sprk_decisionrecord", "sprk_budgetrevision");
+            .Should().BeEquivalentTo("sprk_signal", "sprk_decisionrecord", "sprk_budgetrevision", "task", "contact", "account");
     }
 
     [Fact]

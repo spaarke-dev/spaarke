@@ -360,6 +360,21 @@ internal static class RecordTableRules
         // inquiry (an unregistered table is record_creation.table_unsupported).
         new RecordTableRule { Table = "sprk_servicerequest", Kind = RecordTableKind.Child },
 
+        // ── The chat create's offered platform tables (task 017, owner decision 2026-10-30, option b) ───────────────────
+        // dataverse.create_record offers a task, a person (contact) and a company (account), and creates each today through
+        // the owned create (OwnedChildWrite.PathFor → Owned: each is user-owned, none is per-user or a communication), so
+        // the service must accept them once the chat moves onto it. Each declares only what that create applies today:
+        // a CHILD (no root behaviour; RecordCreatorPerson stamps roots only); the common server-owned columns refused in
+        // the caller's row and nothing table-specific; no "for" person and no server default; not search-indexed; no
+        // ownership exception, so the owner is the resolver's team — a task's regarding (regardingobjectid, a lookup the
+        // resolver's one builder reads like any other) decides it, an unfiled row gets the caller's business-unit team;
+        // and refused under a secure owner (none is a reparentable child; the service's step 7 has the same rule). The
+        // chat create applies no field mapping, so mapping is excluded by a named rule rather than left to apply.
+
+        new RecordTableRule { Table = "task", Kind = RecordTableKind.Child, MappingExclusion = ChatPlatformTableIsNotMapped },
+        new RecordTableRule { Table = "contact", Kind = RecordTableKind.Child, MappingExclusion = ChatPlatformTableIsNotMapped },
+        new RecordTableRule { Table = "account", Kind = RecordTableKind.Child, MappingExclusion = ChatPlatformTableIsNotMapped },
+
         // ── Ontology writers' tables: never mapped (spaarke-ontology-platform-r1 §0.3) ──────────────────────────────
 
         new RecordTableRule
@@ -431,6 +446,12 @@ internal static class RecordTableRules
         "OntologyContentIsNotMapped",
         "spaarke-ontology-platform-r1 §0.3 binds a Signal's sprk_sentence and fact snapshot and a Decision Record's " +
         "content: no field mapping is applied to these rows (ontology-r1 answer, 2026-10-19; w2-coordination.md).");
+
+    private static NamedRule ChatPlatformTableIsNotMapped => new(
+        "ChatPlatformTableIsNotMapped",
+        "Task 017 (owner decision 2026-10-30, option b): the chat create of a task, contact or account is registered to keep " +
+        "today's behaviour, and today's create (OwnedChildWrite.CreateAsync) applies no field mapping to it. Mapping these " +
+        "platform tables would be new behaviour and needs its own decision.");
 
     private static IReadOnlySet<string> Columns(params string[] columns) =>
         new HashSet<string>(columns, StringComparer.OrdinalIgnoreCase);
