@@ -17,7 +17,7 @@ namespace Sprk.Bff.Api.Tests.Services.Finance;
 /// <summary>
 /// ebilling-r1 task 101 part B2c (FR-31, FR-25, D-126): timekeeper and date corrections re-resolve the roster match and the approved rate through the
 /// REAL <see cref="InvoiceResolutionService"/> (a one-line input) and feed the re-evaluation; the invoice totals are recomputed in their own step; a
-/// currency correction flags lines whose currency disagrees; a re-coded line reads as coded; a refused write sets the administrator's attention. Over
+/// currency correction moves the lines' currency and re-runs the rules; a re-coded line reads as coded; a refused write sets the administrator's attention. Over
 /// <see cref="CorrectionWorld"/>'s in-memory Dataverse and 072's real evaluator.
 /// </summary>
 public sealed class InvoiceCorrectionB2cTests
@@ -359,8 +359,93 @@ public sealed class InvoiceCorrectionB2cTests
         calls.Should().Be(2);
     }
 
-    [Fact(DisplayName = "101 B2c: a refused totals calculation is Incomplete at the totals step, like a line decision")]
-    public async Task ARefusedCalculation_IsIncomplete()
+    private static readonly Guid AdjustmentLineId = Guid.Parse("10100000-0000-4000-8000-0000000000b9");
+
+    /// <summary>An invoice-level Adjustment line (method Percent or Fixed) the totals calculator takes into account.</summary>
+    private static void AddAdjustment(CorrectionWorld world, InvoiceAdjustmentMethod method, decimal value) =>
+        world.Lines.Add(new Entity("sprk_billingevent", AdjustmentLineId)
+        {
+            ["sprk_invoice"] = new EntityReference("sprk_invoice", W.InvoiceId),
+            ["sprk_linesequence"] = 5,
+            ["sprk_costtype"] = new OptionSetValue((int)InvoiceLineCostType.Adjustment),
+            ["sprk_adjustmentmethod"] = new OptionSetValue((int)method),
+            ["sprk_adjustmentvalue"] = value,
+            ["sprk_amount"] = new Money(0m),
+            ["versionnumber"] = 30L,
+        });
+
+    private static void NothingWritten(CorrectionWorld world)
+    {
+        world.Corrections.Should().BeEmpty("no label may outlive a value that was not applied");
+        world.ValueWrites.Should().BeEmpty();
+        world.RowTransactions.Should().Be(0);
+    }
+
+    [Fact(DisplayName = "101 fix 2 F-1 SEEDED: TotalDue corrected below a fixed adjustment is 409 totals_refused BEFORE the write; nothing is written, and every repeat answers the same 409")]
+    public async Task TotalDueBelowAFixedAdjustment_IsRefusedBeforeTheWrite()
+    {
+        var world = new CorrectionWorld();
+        Store(world, Root());
+        AddAdjustment(world, InvoiceAdjustmentMethod.Fixed, 600m);
+        var recalcCalls = 0;
+        var service = Service(world, (_, _) =>
+        {
+            recalcCalls++;
+            return Task.FromResult(Totals());
+        });
+
+        var first = await service.CorrectAsync(Header("TotalDue", "500"), CancellationToken.None);
+        var repeat = await service.CorrectAsync(Header("TotalDue", "500"), CancellationToken.None);
+
+        first.Status.Should().Be(CorrectionStatus.TotalsRefused);
+        first.Code.Should().Be("ebilling.invoice.totals_refused");
+        first.Detail.Should().Be(InvoiceTotalsRefusalCodes.ApprovedTotalNegative);
+        repeat.Status.Should().Be(CorrectionStatus.TotalsRefused);
+        NothingWritten(world);
+        world.Invoice.GetAttributeValue<Money>("sprk_totalamount").Value.Should().Be(2500m);
+        recalcCalls.Should().Be(0, "the follow-through never ran: nothing was saved");
+
+        // A value the totals accept goes through (the reviewer is not stuck).
+        (await service.CorrectAsync(Header("TotalDue", "700"), CancellationToken.None)).IsApplied.Should().BeTrue();
+        world.Invoice.GetAttributeValue<Money>("sprk_totalamount").Value.Should().Be(700m);
+    }
+
+    [Fact(DisplayName = "101 fix 2 F-1: an Amount raised under a percent adjustment so the adjustment exceeds the total due is 409 totals_refused before the write")]
+    public async Task AnAmountRaiseUnderAPercentAdjustment_IsRefusedBeforeTheWrite()
+    {
+        var world = new CorrectionWorld();
+        Store(world, Root());
+        AddAdjustment(world, InvoiceAdjustmentMethod.Percent, 100m); // 100% of the fees: the approved total is exactly 0 now
+        var service = Service(world);
+
+        var result = await service.CorrectAsync(Line("Amount", "3000"), CancellationToken.None);
+
+        result.Status.Should().Be(CorrectionStatus.TotalsRefused);
+        result.Code.Should().Be(CorrectionCodes.TotalsRefused);
+        NothingWritten(world);
+        world.Line().GetAttributeValue<Money>("sprk_amount").Value.Should().Be(2500m);
+
+        (await service.CorrectAsync(Line("Amount", "2400"), CancellationToken.None)).IsApplied.Should().BeTrue("a lower amount keeps the approved total at or above zero");
+    }
+
+    [Theory(DisplayName = "101 fix 2 F-1: Hours and Rate corrections dry-run the totals too (the stored inputs), and a refusal writes nothing")]
+    [InlineData("Hours", "20")]
+    [InlineData("Rate", "120")]
+    public async Task HoursAndRate_AreRefusedBeforeTheWrite_WhenTheStoredTotalsAreRefused(string field, string value)
+    {
+        var world = new CorrectionWorld();
+        Store(world, Root());
+        AddAdjustment(world, InvoiceAdjustmentMethod.Fixed, 9000m); // already more than the 2,500 billed
+        var service = Service(world);
+
+        var result = await service.CorrectAsync(Line(field, value), CancellationToken.None);
+
+        result.Status.Should().Be(CorrectionStatus.TotalsRefused);
+        NothingWritten(world);
+    }
+
+    [Fact(DisplayName = "101 fix 2 F-1: a refusal AFTER the write (a concurrent adjustment moved the totals) is the same 409, not the 503 Incomplete no repeat clears")]
+    public async Task ARefusalAfterTheWrite_IsTheSame409()
     {
         var world = new CorrectionWorld();
         Store(world, Root());
@@ -368,8 +453,10 @@ public sealed class InvoiceCorrectionB2cTests
 
         var result = await service.CorrectAsync(Header("TotalDue", "10"), CancellationToken.None);
 
-        result.Status.Should().Be(CorrectionStatus.Incomplete);
-        result.FailedStep.Should().Be(CorrectionCodes.TotalsStep);
+        result.Status.Should().Be(CorrectionStatus.TotalsRefused);
+        result.Code.Should().Be("ebilling.invoice.totals_refused");
+        result.Detail.Should().Be(InvoiceTotalsRefusalCodes.ApprovedTotalNegative);
+        result.FailedStep.Should().BeNull();
     }
 
     [Fact(DisplayName = "101 B2c: the totals step runs after the status step")]
@@ -397,68 +484,98 @@ public sealed class InvoiceCorrectionB2cTests
     // Item 3 - currency
     // =========================================================================================
 
-    private static void GiveLinesACurrency(CorrectionWorld world)
+    /// <summary>The lines as the persister writes them: the header currency copied onto every line (<c>InvoiceSubmissionPersister</c>, <c>SetText(row, LineCurrency, ...)</c>).</summary>
+    private static void LinesCarryTheHeaderCurrency(CorrectionWorld world)
     {
-        world.Line()["sprk_currency"] = "USD";
-        world.Line(W.ExpenseLineId)["sprk_currency"] = "USD";
+        foreach (var line in world.Lines)
+        {
+            line["sprk_currency"] = world.Invoice.GetAttributeValue<string>("sprk_currency");
+        }
     }
 
-    [Fact(DisplayName = "101 B2c: a currency correction updates the invoice only; lines that now disagree get a currency.mismatch line finding, flagged, with no Signal; agreeing again clears them")]
-    public async Task CurrencyCorrection_FlagsDisagreeingLines_ThenClearsThem()
+    private static string CurrencyOf(CorrectionWorld world, Guid line) => world.Line(line).GetAttributeValue<string>("sprk_currency");
+
+    private static readonly BillingRuleCandidate RequiredData = Kit.Version("BILL-REQ", RuleType.RequiredData);
+
+    [Fact(DisplayName = "101 fix 2 F-3: a Currency correction moves the undecided lines' currency with it and raises no currency.mismatch; the money rules re-run through the diff")]
+    public async Task CurrencyCorrection_MovesTheLines_AndReRunsTheRules()
     {
         var world = new CorrectionWorld();
-        GiveLinesACurrency(world);
+        LinesCarryTheHeaderCurrency(world);
+        world.Line()["sprk_linestatus"] = new OptionSetValue((int)InvoiceLineStatus.Clean);
         Store(world, Root());
-        var service = Service(world);
+        var service = Service(world, null, RequiredData);
 
         (await service.CorrectAsync(Header("Currency", "EUR"), CancellationToken.None)).IsApplied.Should().BeTrue();
 
         world.Invoice.GetAttributeValue<string>("sprk_currency").Should().Be("EUR");
-        world.Line().GetAttributeValue<string>("sprk_currency").Should().Be("USD", "the line currencies are left as read");
-        var findings = Objects(Stored(world)["lineFindings"]).ToList();
-        findings.Should().HaveCount(2);
-        findings.Should().OnlyContain(f => f["code"]!.GetValue<string>() == InvoiceSubmissionPersister.LineFindingCurrencyMismatch);
-        findings.Select(f => f["line"]!.GetValue<int>()).Should().BeEquivalentTo([FeeIndex, ExpenseIndex]);
-        StatusOf(world, W.FeeLineId).Should().Be((int)InvoiceLineStatus.Flagged);
-        StatusOf(world, W.ExpenseLineId).Should().Be((int)InvoiceLineStatus.Flagged, "flagged like any other line finding");
-        world.Signals.Should().BeEmpty("a currency mismatch is a finding only");
-        world.SignalWrites.Should().BeEmpty();
-        Stored(world).ContainsKey(InvoiceCorrectionReevaluation.PendingSignalChangesMember).Should().BeFalse();
+        CurrencyOf(world, W.FeeLineId).Should().Be("EUR", "the persister copies the header currency onto every line, so the correction does too");
+        CurrencyOf(world, W.ExpenseLineId).Should().Be("EUR");
+        Objects(Stored(world)["lineFindings"]).Should().BeEmpty("no line carries a currency of its own, so nothing can disagree");
+        Reasons(Stored(world)).Should().Equal(BillingReasonCodes.CurrencyNotUsd);
+        StatusOf(world, W.FeeLineId).Should().Be((int)InvoiceLineStatus.Clean, "the not-USD finding is the invoice's, not a line's");
+        StatusOf(world, W.ExpenseLineId).Should().Be((int)InvoiceLineStatus.Clean);
 
         (await service.CorrectAsync(Header("Currency", "USD"), CancellationToken.None)).IsApplied.Should().BeTrue();
 
+        CurrencyOf(world, W.FeeLineId).Should().Be("USD");
+        CurrencyOf(world, W.ExpenseLineId).Should().Be("USD");
+        Reasons(Stored(world)).Should().BeEmpty("the rules re-ran with USD");
         Objects(Stored(world)["lineFindings"]).Should().BeEmpty();
-        StatusOf(world, W.FeeLineId).Should().Be((int)InvoiceLineStatus.Clean);
-        StatusOf(world, W.ExpenseLineId).Should().Be((int)InvoiceLineStatus.Clean);
     }
 
-    [Fact(DisplayName = "101 B2c: a decided line is not given a currency finding or a new status")]
+    [Fact(DisplayName = "101 fix 2 F-3: a decided line keeps the currency it was decided with")]
     public async Task CurrencyCorrection_LeavesADecidedLine()
     {
         var world = new CorrectionWorld();
-        GiveLinesACurrency(world);
+        LinesCarryTheHeaderCurrency(world);
         world.Line(W.ExpenseLineId)["sprk_linestatus"] = new OptionSetValue((int)InvoiceLineStatus.Accepted);
         Store(world, Root());
 
         (await Service(world).CorrectAsync(Header("Currency", "EUR"), CancellationToken.None)).IsApplied.Should().BeTrue();
 
-        Objects(Stored(world)["lineFindings"]).Select(f => f["line"]!.GetValue<int>()).Should().Equal(FeeIndex);
+        CurrencyOf(world, W.FeeLineId).Should().Be("EUR");
+        CurrencyOf(world, W.ExpenseLineId).Should().Be("USD");
         StatusOf(world, W.ExpenseLineId).Should().Be((int)InvoiceLineStatus.Accepted);
     }
 
-    [Fact(DisplayName = "101 B2c: lines with no currency, or the same one in another spelling, are not flagged; a repeat writes nothing more")]
-    public async Task CurrencyCorrection_DoesNotFlagAnAgreeingLine()
+    [Fact(DisplayName = "101 fix 2 F-3: the lines and the invoice change in ONE transaction; a stale line version rolls the label back")]
+    public async Task CurrencyCorrection_IsOneTransaction()
     {
         var world = new CorrectionWorld();
-        world.Line()["sprk_currency"] = "$"; // D-119: a bare dollar sign is USD
+        LinesCarryTheHeaderCurrency(world);
+        Store(world, Root());
+        world.BeforeValueWrite = () => world.Line(W.ExpenseLineId)["versionnumber"] = 99L; // a concurrent change to a line
+
+        var result = await Service(world).CorrectAsync(Header("Currency", "EUR"), CancellationToken.None);
+
+        result.Status.Should().Be(CorrectionStatus.Changed);
+        world.Corrections.Should().BeEmpty();
+        world.Invoice.GetAttributeValue<string>("sprk_currency").Should().Be("USD");
+        CurrencyOf(world, W.FeeLineId).Should().Be("USD");
+    }
+
+    [Fact(DisplayName = "101 fix 2 F-3: a repeat writes no second row and no further line update; a line left behind is finished by the repeat")]
+    public async Task CurrencyCorrection_Repeat_FinishesWhatIsLeft()
+    {
+        var world = new CorrectionWorld();
+        LinesCarryTheHeaderCurrency(world);
         Store(world, Root());
         var service = Service(world);
 
-        (await service.CorrectAsync(Header("Currency", "USD"), CancellationToken.None)).IsApplied.Should().BeTrue();
-        (await service.CorrectAsync(Header("Currency", "USD"), CancellationToken.None)).IsApplied.Should().BeTrue();
+        (await service.CorrectAsync(Header("Currency", "EUR"), CancellationToken.None)).IsApplied.Should().BeTrue();
+        var writes = world.ValueWrites.Count;
+        var repeat = await service.CorrectAsync(Header("Currency", "EUR"), CancellationToken.None);
 
-        Objects(Stored(world)["lineFindings"]).Should().BeEmpty();
-        world.ValueWrites.Count(w => w.Entity == "sprk_invoicesubmission").Should().Be(0, "nothing to patch, so the findings are not written");
+        repeat.IsApplied.Should().BeTrue();
+        repeat.AlreadyApplied.Should().BeTrue();
+        world.Corrections.Should().ContainSingle();
+        world.ValueWrites.Count.Should().Be(writes, "nothing was left to write");
+
+        world.Line(W.ExpenseLineId)["sprk_currency"] = "USD"; // a line the first request did not reach
+        (await service.CorrectAsync(Header("Currency", "EUR"), CancellationToken.None)).IsApplied.Should().BeTrue();
+        CurrencyOf(world, W.ExpenseLineId).Should().Be("EUR");
+        world.Corrections.Should().ContainSingle("still one label row");
     }
 
     // =========================================================================================
@@ -575,5 +692,70 @@ public sealed class InvoiceCorrectionB2cTests
 
         world.Submission!.Contains("sprk_adminattention").Should().BeFalse();
         world.ValueWrites.Where(w => w.Entity == "sprk_invoicesubmission").Should().OnlyContain(w => !w.Fields.ContainsKey("sprk_adminattention"));
+    }
+
+    // =========================================================================================
+    // Fix round, part 2 (K-f) - an extraction JSON that is too large, or missing
+    // =========================================================================================
+
+    private static string PaddedExtraction(int length)
+    {
+        var json = W.ExtractionJson();
+        var padded = json.Insert(json.Length - 1, ",\"pad\":\"" + new string('x', length - json.Length - 9) + "\"");
+        padded.Length.Should().Be(length);
+        return padded;
+    }
+
+    [Fact(DisplayName = "101 fix 2 K-f SEEDED: a correction that would push the line's extraction JSON over its column is 409 too_large and nothing is written")]
+    public async Task ACorrection_ThatWouldOverflowTheExtractionJson_IsRefusedBeforeTheWrite()
+    {
+        var world = new CorrectionWorld();
+        var lee = world.AddPerson("Alexandra Lee");
+        world.AddRate(lee.Id, 80m);
+        world.Line()["sprk_extractionconfidence"] = PaddedExtraction(InvoiceSubmissionPersister.ExtractionConfidenceMaxLength - 50);
+        Store(world, Root());
+
+        var result = await Service(world, null, Atk, Rate).CorrectAsync(Line("TimekeeperAsBilled", lee.Id.ToString("D")), CancellationToken.None);
+
+        result.Status.Should().Be(CorrectionStatus.TooLarge);
+        result.Code.Should().Be("ebilling.correction.too_large");
+        world.Corrections.Should().BeEmpty();
+        world.ValueWrites.Should().BeEmpty();
+        world.RowTransactions.Should().Be(0);
+    }
+
+    [Fact(DisplayName = "101 fix 2 K-f: the same correction on a line with room is applied (the size check refuses only an overflow)")]
+    public async Task ACorrection_ThatFits_IsApplied()
+    {
+        var world = new CorrectionWorld();
+        var lee = world.AddPerson("Alexandra Lee");
+        world.AddRate(lee.Id, 80m);
+        world.Line()["sprk_extractionconfidence"] = PaddedExtraction(InvoiceSubmissionPersister.ExtractionConfidenceMaxLength - 5_000);
+        Store(world, Root());
+
+        var result = await Service(world, null, Atk, Rate).CorrectAsync(Line("TimekeeperAsBilled", lee.Id.ToString("D")), CancellationToken.None);
+
+        result.IsApplied.Should().BeTrue();
+        Extraction(world).Length.Should().BeLessThanOrEqualTo(InvoiceSubmissionPersister.ExtractionConfidenceMaxLength);
+    }
+
+    [Theory(DisplayName = "101 fix 2 K-f: a line whose extraction JSON was never stored (it was over the limit) is a clear 409 extraction_unavailable, not re-derived as Pending")]
+    [InlineData("Narrative", "Prepared the brief", (int)InvoiceLineStatus.Clean)]
+    [InlineData("TaskCode", "L110", (int)InvoiceLineStatus.Flagged)]
+    [InlineData("TaskCode", "L110", (int)InvoiceLineStatus.Pending)]
+    public async Task ALineWithNoStoredExtraction_IsRefused(string field, string value, int status)
+    {
+        var world = new CorrectionWorld();
+        world.Line()["sprk_extractionconfidence"] = null;
+        world.Line()["sprk_linestatus"] = new OptionSetValue(status);
+        Store(world, Root());
+
+        var result = await Service(world).CorrectAsync(Line(field, value), CancellationToken.None);
+
+        result.Status.Should().Be(CorrectionStatus.ExtractionUnavailable);
+        result.Code.Should().Be("ebilling.correction.extraction_unavailable");
+        world.Corrections.Should().BeEmpty();
+        world.ValueWrites.Should().BeEmpty();
+        StatusOf(world, W.FeeLineId).Should().Be(status);
     }
 }

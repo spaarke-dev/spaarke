@@ -423,7 +423,8 @@ public sealed class InvoiceCorrectionEndpointsAuthorizationContractTests
         json["correction"]!["finalValue"]!.GetValue<string>().Should().Be(stored);
         json["correction"]!["lineId"].Should().BeNull();
         host.World.Corrections.Should().ContainSingle();
-        host.World.ValueWrites.Should().ContainSingle().Which.Entity.Should().Be("sprk_invoice");
+        host.World.ValueWrites.Where(w => w.Entity == "sprk_invoice").Should().ContainSingle(); // a Currency correction also moves the undecided lines
+        host.World.ValueWrites.Count(w => w.Entity != "sprk_invoice").Should().Be(field == "Currency" ? 2 : 0);
     }
 
     [Fact]

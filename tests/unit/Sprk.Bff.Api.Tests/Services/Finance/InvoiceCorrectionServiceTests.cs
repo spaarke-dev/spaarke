@@ -660,7 +660,7 @@ public sealed class InvoiceCorrectionServiceTests
         var result = await world.Service().CorrectAsync(Header(field, value), CancellationToken.None);
 
         result.IsApplied.Should().BeTrue();
-        world.ValueWrites.Should().ContainSingle().Which.Fields.Keys.Should().BeEquivalentTo([column]);
+        world.ValueWrites.Where(w => w.Entity == "sprk_invoice").Should().ContainSingle().Which.Fields.Keys.Should().BeEquivalentTo([column]); // a Currency correction also moves the undecided lines
     }
 
     [Fact]
