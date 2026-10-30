@@ -841,3 +841,12 @@ When the home token has no `email` claim, the form's prefill falls back to the u
 **Entry-points**
 
 - `src/server/api/Sprk.Bff.Api/Api/ExternalAccess/GrantAccessNotifier.cs` (`NotifyContactGrantAsync`, `EmailExternalContactGrantAsync` ~270-330)
+
+### ISS-025: Teams mobile layout not optimized (deferred to R4)
+
+| Field | Value |
+|---|---|
+| **Found** | 2026-10-29, task 071 (owner) |
+| **What** | The Teams tab loads in Teams mobile, but its layout is not adapted to the phone surface. |
+| **Decision** | Owner: not for this release; it loads. |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2466 |
