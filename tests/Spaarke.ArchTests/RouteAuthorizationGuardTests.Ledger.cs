@@ -427,7 +427,7 @@ public partial class RouteAuthorizationGuardTests
             "GET /api/finance/export-batches/candidates, POST /api/finance/export-batches and GET /api/finance/export-batches/{batchId} (ebilling-r1 "
             + "task 150, FR-41, EB-D-178, D-56) -- export a selection of Approved invoices to AP as one batch. Step 0 on the group, then "
             + "AddFinanceAuthorizationFilter on each route: the list and the export declare the caller's own Create privilege on sprk_billingexport "
-            + "(ApExportAuthorization.RouteTargets; 403 before the body is read), the batch read declares Read on the batch named in the path "
+            + "(ApExportAuthorization.RouteTargets; 403 before the handler runs), the batch read declares Read on the batch named in the path "
             + "(uniform 404); the eBilling kill switch runs after it. The per-invoice part of the rule (ebilling.invoice.decide: Write on EVERY "
             + "selected invoice, asked of Dataverse as the caller, fail closed) cannot be declared on the route because the ids are in the body; "
             + "ApExportService asks ApExportAuthorization.AuthorizeExportAsync, the ONE seam, before it reads or writes anything. The batch's "

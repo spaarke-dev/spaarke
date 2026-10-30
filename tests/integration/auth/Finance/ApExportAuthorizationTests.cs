@@ -244,7 +244,7 @@ public sealed class ApExportAuthorizationTests
         host.World.Access.Calls.Should().BeEmpty();
     }
 
-    [Theory(DisplayName = "150: without Create on the batch table, POST and candidates are 403 before the body is read; nothing is read or written")]
+    [Theory(DisplayName = "150: without Create on the batch table, POST and candidates are 403 before the handler runs; nothing is read or written")]
     [InlineData("POST")]
     [InlineData("GET")]
     public async Task WithoutCreate_Is403(string method)

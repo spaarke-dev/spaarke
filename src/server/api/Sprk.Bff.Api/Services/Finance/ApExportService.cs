@@ -241,8 +241,18 @@ public sealed class ApExportService
         // the invoices can see the batch (D-90).
         var batchId = Guid.NewGuid();
         var batchName = batchId.ToString("D");
-        var owner = await _owners.ResolveOwnerAsync(
-            new RecordOwnershipContext { CallerSystemUserId = callerSystemUserId, RequestedBy = RecordRequester.Of(systemUserId: callerSystemUserId) }, ct).ConfigureAwait(false);
+        RecordOwnerResolution owner;
+        try
+        {
+            owner = await _owners.ResolveOwnerAsync(
+                new RecordOwnershipContext { CallerSystemUserId = callerSystemUserId, RequestedBy = RecordRequester.Of(systemUserId: callerSystemUserId) }, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            _logger.LogError(ex, "AP export: the batch owner could not be resolved; nothing was created");
+            return ApExportResult.Refused(ApExportOutcome.Unavailable, ApExportCodes.Unavailable, "The export batch could not be created. Nothing was exported. Try again.");
+        }
+
         if (owner.IsRefused)
         {
             _logger.LogWarning("AP export: no owner for the batch ({Code}); nothing was created", owner.RefusalCode);
@@ -273,12 +283,14 @@ public sealed class ApExportService
             // (6) Claim, in id order, each under the version read in (4).
             foreach (var row in selected)
             {
+                // Recorded BEFORE the write: a write that commits and then faults (a lost response) must still be released. The release
+                // re-reads the row and does nothing when the claim is not this batch's.
+                progress.Claimed.Add(row.Id);
                 try
                 {
                     await _entities.UpdateIfRowVersionMatchesAsync(
                         InvoiceEntity, row.Id, VersionOf(row)!,
                         new Dictionary<string, object> { [BatchLookup] = new EntityReference(BatchEntity, batchId) }, ct).ConfigureAwait(false);
-                    progress.Claimed.Add(row.Id);
                 }
                 catch (DBConcurrencyException)
                 {
@@ -353,10 +365,18 @@ public sealed class ApExportService
             }
 
             // (9) The one irreversible step: every invoice to Sent to AP, through the lifecycle service.
+            // From here on the request's cancellation token is not honoured: the claims are held, the work is seconds, and a client that
+            // disconnects half way must not turn a healthy batch into a partly sent one.
             foreach (var row in selected)
             {
-                if (!await TrySendAsync(row.Id, ct).ConfigureAwait(false))
+                if (!await TrySendAsync(row.Id).ConfigureAwait(false))
                 {
+                    // A move that committed and then faulted (a lost response) is sent: it is counted, so its claim is kept and the answer is honest.
+                    if (await MaybeSentAsync(row.Id).ConfigureAwait(false))
+                    {
+                        progress.Sent.Add(row.Id);
+                    }
+
                     throw progress.Sent.Count == 0
                         ? new Stopped(ApExportOutcome.Failed, ApExportCodes.TransitionFailed, "An invoice could not be moved to Sent to AP. Nothing was exported. Try again.")
                         : new Stopped(ApExportOutcome.Incomplete, ApExportCodes.TransitionIncomplete,
@@ -451,8 +471,10 @@ public sealed class ApExportService
             TopCount = 10,
             Criteria = { Conditions = { new ConditionExpression(StoredFileSchema.BillingExportTable, ConditionOperator.Equal, batchId) } },
         };
+        var isCompleted = batch.GetAttributeValue<OptionSetValue>("sprk_exportstatus")?.Value == StatusCompleted;
         var files = (await _entities.RetrieveMultipleAsync(fileQuery, ct).ConfigureAwait(false)).Entities
-            .Where(f => f.GetAttributeValue<OptionSetValue>(StoredFileSchema.Status)?.Value == (int)StoredFileStatus.Servable
+            .Where(f => isCompleted // a file of a batch that did not complete is never advertised, even if its withdrawal failed
+                        && f.GetAttributeValue<OptionSetValue>(StoredFileSchema.Status)?.Value == (int)StoredFileStatus.Servable
                         && f.GetAttributeValue<OptionSetValue>(StoredFileSchema.Purpose)?.Value == (int)StoredFilePurpose.ExportFile)
             .Select(f =>
             {
@@ -579,8 +601,24 @@ public sealed class ApExportService
         throw new InvalidOperationException($"Invoice {invoiceId} kept changing; its claim by batch {batchId} could not be released.");
     }
 
-    private async Task<bool> TrySendAsync(Guid invoiceId, CancellationToken ct)
+    /// <summary>Whether the invoice is (or, when its status cannot be read, may be) Sent to AP. Unknown counts as sent: its claim is kept (fail safe).</summary>
+    private async Task<bool> MaybeSentAsync(Guid invoiceId)
     {
+        try
+        {
+            var row = await _entities.RetrieveAsync(InvoiceEntity, invoiceId, ["statuscode"], CancellationToken.None).ConfigureAwait(false);
+            return StatusOf(row) != InvoiceStatusCodes.Approved;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "AP export: the status of invoice {InvoiceId} could not be read after a failed move; its claim is kept", invoiceId);
+            return true;
+        }
+    }
+
+    private async Task<bool> TrySendAsync(Guid invoiceId)
+    {
+        var ct = CancellationToken.None;
         try
         {
             var result = await _lifecycle.TransitionAsync(invoiceId, InvoiceLifecycleStatus.SentToAp, ct).ConfigureAwait(false);
@@ -591,7 +629,7 @@ public sealed class ApExportService
 
             return result.Succeeded;
         }
-        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        catch (Exception ex)
         {
             _logger.LogError(ex, "AP export: the move of invoice {InvoiceId} to Sent to AP faulted", invoiceId);
             return false;

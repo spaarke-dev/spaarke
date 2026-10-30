@@ -432,6 +432,148 @@ public sealed class ApExportBatchTests
         world.Batches().Single().GetAttributeValue<string>("sprk_failurereason").Should().Contain(ApExportCodes.TransitionIncomplete);
     }
 
+    [Fact(DisplayName = "150 review: a claim that COMMITS and then faults (a lost response) is still released - a Failed batch blocks nothing")]
+    public async Task ClaimCommittedThenFaulted_IsStillReleased()
+    {
+        var world = new ApExportWorld();
+        var a = world.AddInvoice("INV-A");
+        var b = world.AddInvoice("INV-B");
+        world.GrantEverything();
+        var faulted = false;
+        world.Dataverse.FaultAfterCommit = (op, table, _) =>
+        {
+            if (op == "update-if" && table == "sprk_invoice" && !faulted)
+            {
+                faulted = true;
+                return new InvalidOperationException("response lost");
+            }
+
+            return null;
+        };
+
+        var result = await world.ExportAsync(a, b);
+
+        result.Outcome.Should().Be(ApExportOutcome.Failed);
+        world.InvoicesClaimedByANonCompletedBatch().Should().BeEmpty("the claim that committed was released");
+        world.BatchOfInvoice(a.Id).Should().BeNull();
+        world.BatchOfInvoice(b.Id).Should().BeNull();
+        world.Lifecycle.Sent.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "150 review: a move to Sent to AP that COMMITS and then faults is counted as sent - the claim is kept and the answer is transition_incomplete, not 'nothing was exported'")]
+    public async Task TransitionCommittedThenFaulted_IsCountedAsSent()
+    {
+        var world = new ApExportWorld();
+        var a = world.AddInvoice("INV-A");
+        var b = world.AddInvoice("INV-B");
+        world.GrantEverything();
+        var first = new[] { a, b }.OrderBy(i => i.Id).First();
+        var other = ReferenceEquals(first, a) ? b : a;
+        world.Lifecycle.FailsAfterMove.Add(first.Id);
+
+        var result = await world.ExportAsync(a, b);
+
+        result.Outcome.Should().Be(ApExportOutcome.Incomplete);
+        result.Code.Should().Be(ApExportCodes.TransitionIncomplete);
+        world.StatusOfInvoice(first.Id).Should().Be(InvoiceStatusCodes.SentToAp);
+        world.BatchOfInvoice(first.Id).Should().Be(result.BatchId, "an invoice that is Sent to AP keeps its claim");
+        world.BatchOfInvoice(other.Id).Should().BeNull();
+        world.StatusOfInvoice(other.Id).Should().Be(InvoiceStatusCodes.Approved);
+    }
+
+    [Fact(DisplayName = "150 review: a client that disconnects while the invoices are being sent does not leave a part-sent batch - the irreversible step ignores the request's cancellation")]
+    public async Task CancellationDuringTheSendStep_DoesNotSplitTheBatch()
+    {
+        var world = new ApExportWorld();
+        var a = world.AddInvoice("INV-A");
+        var b = world.AddInvoice("INV-B");
+        var c = world.AddInvoice("INV-C");
+        world.GrantEverything();
+        using var cts = new CancellationTokenSource();
+        world.Lifecycle.AfterMove = _ => cts.Cancel(); // the client goes away after the first invoice moved
+
+        var result = await world.Service.CreateBatchAsync(ApExportWorld.Select(a, b, c), world.Caller, ApExportWorld.CallerSystemUser, cts.Token);
+
+        result.Outcome.Should().Be(ApExportOutcome.Created);
+        world.Lifecycle.Sent.Should().HaveCount(3);
+        world.Batches().Single().GetAttributeValue<OptionSetValue>("sprk_exportstatus").Value.Should().Be(ApExportService.StatusCompleted);
+    }
+
+    [Fact(DisplayName = "150: when the batch cannot be marked Completed the invoices stay sent and the files stay, nothing is withdrawn or released, the answer is completion_incomplete, and the batch read advertises no file")]
+    public async Task CompletionFault_IsReportedAsIncomplete_AndWithdrawsNothing()
+    {
+        var world = new ApExportWorld();
+        var a = world.AddInvoice("INV-A");
+        world.GrantEverything();
+        world.Dataverse.FaultOn = (op, table, _) => op == "update" && table == "sprk_billingexport" ? new InvalidOperationException("down") : null;
+
+        var result = await world.ExportAsync(a);
+
+        result.Outcome.Should().Be(ApExportOutcome.Incomplete);
+        result.Code.Should().Be(ApExportCodes.CompletionIncomplete);
+        world.StatusOfInvoice(a.Id).Should().Be(InvoiceStatusCodes.SentToAp);
+        world.BatchOfInvoice(a.Id).Should().Be(result.BatchId);
+        world.StoredFiles().Should().OnlyContain(f => f.GetAttributeValue<OptionSetValue>(StoredFileSchema.Status).Value == (int)StoredFileStatus.Servable);
+        world.Batches().Single().GetAttributeValue<OptionSetValue>("sprk_exportstatus").Value.Should().Be(ApExportService.StatusGenerating);
+
+        world.Dataverse.FaultOn = null;
+        var read = await world.Service.GetBatchAsync(result.BatchId!.Value, CancellationToken.None);
+        read!.Status.Should().Be("Generating");
+        read.Files.Should().BeEmpty("a file of a batch that is not Completed is never advertised");
+    }
+
+    [Fact(DisplayName = "150: a compensation that cannot release a claim is reported as compensation_incomplete (the batch is still marked Failed; the invoice stays blocked for an operator)")]
+    public async Task CompensationThatCannotRelease_IsReportedAsIncomplete()
+    {
+        var world = new ApExportWorld();
+        var a = world.AddInvoice("INV-A");
+        world.GrantEverything();
+        world.Gateway.BeforeOp = (op, _) =>
+        {
+            if (op == "create")
+            {
+                // The store fails, and from now on a claim cannot be released.
+                world.Dataverse.FaultOn = (o, table, _) => o == "update-if" && table == "sprk_invoice" ? new InvalidOperationException("down") : null;
+                throw new InvalidOperationException("storage down");
+            }
+        };
+
+        var result = await world.ExportAsync(a);
+
+        result.Outcome.Should().Be(ApExportOutcome.Incomplete);
+        result.Code.Should().Be(ApExportCodes.CompensationIncomplete);
+        world.Batches().Single().GetAttributeValue<OptionSetValue>("sprk_exportstatus").Value.Should().Be(ApExportService.StatusFailed);
+        world.BatchOfInvoice(a.Id).Should().Be(result.BatchId, "the claim could not be released and is reported, not hidden");
+    }
+
+    [Fact(DisplayName = "150: a json-only request writes one JSON file and records json as the batch's only format")]
+    public async Task JsonOnly_WritesOneFile()
+    {
+        var world = new ApExportWorld();
+        var a = world.AddInvoice("INV-A");
+        world.GrantEverything();
+
+        var result = await world.Service.CreateBatchAsync(new ApExportRequest([a.Id], ["json"]), world.Caller, ApExportWorld.CallerSystemUser, CancellationToken.None);
+
+        result.Outcome.Should().Be(ApExportOutcome.Created);
+        world.StoredFiles().Should().ContainSingle().Which.GetAttributeValue<string>(StoredFileSchema.ContentType).Should().Be(Json);
+        world.Batches().Single().GetAttributeValue<OptionSetValueCollection>("sprk_formats").Select(o => o.Value).Should().Equal(ApExportService.FormatJson);
+    }
+
+    [Fact(DisplayName = "150: an owner resolver that throws is a clean 'unavailable' with nothing written, not an unhandled error")]
+    public async Task OwnerResolverThrowing_IsUnavailable()
+    {
+        var world = new ApExportWorld();
+        var a = world.AddInvoice("INV-A");
+        world.GrantEverything();
+        world.OwnerThrows = true;
+
+        var result = await world.ExportAsync(a);
+
+        result.Outcome.Should().Be(ApExportOutcome.Unavailable);
+        world.Dataverse.Writes.Should().Be(0);
+    }
+
     [Fact(DisplayName = "150: the batch row cannot be created - 503, nothing claimed or sent")]
     public async Task BatchCreateFault_WritesNothing()
     {
@@ -506,7 +648,7 @@ public sealed class ApExportBatchTests
         second.Outcome.Should().Be(ApExportOutcome.Created);
         var secondCsv = world.TextOf(world.FileOf(second.Batch!.BatchId, Csv));
         secondCsv.Should().StartWith("Invoice,Amount,Matter\r\nINV-B,900.00,\"Smith v. Jones, et al.\"");
-        world.Dataverse.Get("sprk_billingexport", second.Batch.BatchId).GetAttributeValue<string>("sprk_mappingsnapshot").Should().Contain("\"Amount\"");
+        world.Dataverse.Get("sprk_billingexport", second.Batch.BatchId).GetAttributeValue<string>("sprk_mappingsnapshot").Should().Be(world.MappingJson, "the snapshot is the settings text verbatim");
 
         world.TextOf(world.FileOf(firstBatch, Csv)).Should().Be(firstCsv, "a past batch file is never regenerated");
         world.TextOf(world.FileOf(firstBatch, Json)).Should().Be(firstJson);

@@ -46,7 +46,7 @@ public sealed class ApExportAuthorization
 
     /// <summary>
     /// The route-level declaration for the export routes: the table-level part of the rule, so a caller without Create on the batch table is refused
-    /// by the filter before the body is read. It is the same privilege <see cref="AuthorizeExportAsync"/> asks again (the service never trusts the
+    /// by the filter before the handler runs. It is the same privilege <see cref="AuthorizeExportAsync"/> asks again (the service never trusts the
     /// filter); the per-invoice part cannot be declared here because the invoice ids are in the request body.
     /// </summary>
     public static FinanceAuthorizationTargets RouteTargets() =>

@@ -15,7 +15,7 @@ namespace Sprk.Bff.Api.Api.Finance;
 /// <remarks>
 /// <para><b>Authorization (EB-D-178).</b> The decision lives in ONE place, <see cref="ApExportAuthorization"/>: the caller needs Create on
 /// <c>sprk_billingexport</c> and the decide right on every invoice of the batch. The POST and candidates routes declare the table-level part
-/// through <see cref="ApExportAuthorization.RouteTargets"/> (refused before the body is read); the per-invoice part is asked by the service on
+/// through <see cref="ApExportAuthorization.RouteTargets"/> (refused before the handler runs and nothing is read or written); the per-invoice part is asked by the service on
 /// every export. The batch read needs Read on the batch (Dataverse as the caller), uniform 404 otherwise. A later dedicated export right changes
 /// that class only.</para>
 /// <para><b>Answers.</b> 201 with the batch; 400 <c>ebilling.export.invalid_request</c> / <c>selection_refused</c> (per-invoice reasons, nothing claimed);

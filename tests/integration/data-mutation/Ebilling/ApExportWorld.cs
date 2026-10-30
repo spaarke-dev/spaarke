@@ -49,6 +49,8 @@ internal sealed class ApExportWorld
 
     public bool OwnerRefused { get; set; }
 
+    public bool OwnerThrows { get; set; }
+
     public InvoiceContextService.InvoiceCaller Caller { get; } = new("caller-oid", CallerToken);
 
     public ApExportWorld(bool fileStoreConfigured = true)
@@ -58,7 +60,7 @@ internal sealed class ApExportWorld
             NullLogger.Instance, timeProvider: new GatewayClock(Gateway));
         Owners.Setup(o => o.ResolveOwnerAsync(It.IsAny<RecordOwnershipContext>(), It.IsAny<CancellationToken>()))
             .Callback((RecordOwnershipContext context, CancellationToken _) => OwnerQuestions.Add(context))
-            .Returns(() => Task.FromResult(OwnerRefused ? RecordOwnerResolution.Refused("record_owner_test_refusal", "test refusal") : RecordOwnerResolution.Owned(TeamId)));
+            .Returns(() => OwnerThrows ? throw new InvalidOperationException("resolver down") : Task.FromResult(OwnerRefused ? RecordOwnerResolution.Refused("record_owner_test_refusal", "test refusal") : RecordOwnerResolution.Owned(TeamId)));
         Settings.Setup(s => s.GetAsync(It.IsAny<CancellationToken>()))
             .Returns(() => Task.FromResult(new EbillingSettings { ApExportMappingJson = MappingJson }));
         Lifecycle = new WorldLifecycle(Dataverse);
@@ -267,6 +269,9 @@ internal sealed class ExportDataverse
     /// <summary>Runs before a conditional update, outside the lock: lets a rival write between this caller's read and its claim.</summary>
     public Action<string, Guid>? BeforeConditionalUpdate { get; set; }
 
+    /// <summary>Returns a fault to throw AFTER the write for (op, table, id) was applied (the write committed, the answer was lost), or null.</summary>
+    public Func<string, string, Guid, Exception?>? FaultAfterCommit { get; set; }
+
     /// <summary>Returns a fault to throw for (op, table, id), or null.</summary>
     public Func<string, string, Guid, Exception?>? FaultOn { get; set; }
 
@@ -338,7 +343,9 @@ internal sealed class ExportDataverse
 
             try
             {
-                return Task.FromResult(body());
+                var result = body();
+                // The write COMMITTED and then the call faults (a lost response).
+                return FaultAfterCommit?.Invoke(op, table, id) is { } lost ? Task.FromException<T>(lost) : Task.FromResult(result);
             }
             catch (Exception ex)
             {
@@ -419,6 +426,12 @@ internal sealed class WorldLifecycle(ExportDataverse dataverse) : IInvoiceLifecy
 {
     public HashSet<Guid> Fails { get; } = [];
 
+    /// <summary>Invoices whose move COMMITS and then faults (a lost response).</summary>
+    public HashSet<Guid> FailsAfterMove { get; } = [];
+
+    /// <summary>Runs after an invoice has moved (a test cancels the request here).</summary>
+    public Action<Guid>? AfterMove { get; set; }
+
     public List<Guid> Sent { get; } = [];
 
     public Task<InvoiceTransitionResult> TransitionAsync(Guid invoiceId, InvoiceLifecycleStatus target, CancellationToken ct = default)
@@ -441,6 +454,12 @@ internal sealed class WorldLifecycle(ExportDataverse dataverse) : IInvoiceLifecy
             ["statecode"] = new OptionSetValue(InvoiceStatusCodes.StateActive),
         });
         Sent.Add(invoiceId);
+        AfterMove?.Invoke(invoiceId);
+        if (FailsAfterMove.Contains(invoiceId))
+        {
+            throw new InvalidOperationException("response lost");
+        }
+
         return Task.FromResult(InvoiceTransitionResultFactory.Moved());
     }
 
