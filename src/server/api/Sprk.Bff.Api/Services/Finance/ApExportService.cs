@@ -115,11 +115,11 @@ public sealed class ApExportService
 
     /// <summary>
     /// The range of <c>sprk_billingexport.sprk_totalamount</c> as configured (docs/data-model/sprk_billingexport.md): a batch whose total is outside it
-    /// is refused before any claim, because the write that completes the batch would fail AFTER the invoices were sent to AP. The minimum is 0 until
-    /// <c>scripts/ebilling/Deploy-EbillingInvoiceTotalsRange.ps1</c> has run on the environment (it lowers it to -922337203685477, D-129 (4)); once it
-    /// has, relax <see cref="BatchTotalMinimum"/> here, the only place the minimum is spelled.
+    /// is refused before any claim, because the write that completes the batch would fail AFTER the invoices were sent to AP. The minimum is the one
+    /// <c>scripts/ebilling/Deploy-EbillingInvoiceTotalsRange.ps1</c> sets (-922337203685477, D-129 (4); run on dev 2026-10-30, and a deploy prerequisite
+    /// of every other environment). This is the only place the range is spelled.
     /// </summary>
-    public const decimal BatchTotalMinimum = 0m, BatchTotalMaximum = 1_000_000_000m;
+    public const decimal BatchTotalMinimum = -922_337_203_685_477m, BatchTotalMaximum = 1_000_000_000m;
 
     private const int PortionApproved = 100000001;
 

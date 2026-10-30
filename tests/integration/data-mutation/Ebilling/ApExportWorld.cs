@@ -403,12 +403,13 @@ internal sealed class ExportDataverse
         _rows.TryGetValue((table, id), out var row) ? row : throw StoredFileDataverse.NotFound();
 
     /// <summary>
-    /// A Money column's range as configured on the live table: a write outside it fails, as Dataverse fails it. The batch total is 0 .. 1,000,000,000 until
-    /// <c>Deploy-EbillingInvoiceTotalsRange.ps1</c> has run (docs/data-model/sprk_billingexport.md); these literals are the environment, NOT the code under test.
+    /// A Money column's range as configured on the live table: a write outside it fails, as Dataverse fails it. The batch total is -922337203685477 ..
+    /// 1,000,000,000 once <c>Deploy-EbillingInvoiceTotalsRange.ps1</c> has run (docs/data-model/sprk_billingexport.md); these literals are the environment,
+    /// NOT the code under test.
     /// </summary>
     public Dictionary<(string Table, string Column), (decimal Min, decimal Max)> MoneyRanges { get; } = new()
     {
-        [("sprk_billingexport", "sprk_totalamount")] = (0m, 1_000_000_000m),
+        [("sprk_billingexport", "sprk_totalamount")] = (-922_337_203_685_477m, 1_000_000_000m),
     };
 
     private void Apply(Entity row, Dictionary<string, object> fields)

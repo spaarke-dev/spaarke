@@ -162,8 +162,7 @@ public sealed class ApExportReviewFixTests
 
     public static IEnumerable<object[]> OutOfRangeTotals() =>
     [
-        [new[] { -100m }],                    // a credit memo on its own (the minimum is 0 until the widening script has run)
-        [new[] { 900m, -1000m }],             // a credit memo that drags the sum below zero
+        [new[] { -922_337_203_685_477.01m }], // below the minimum
         [new[] { 1_000_000_000.01m }],        // above the maximum
         [new[] { 600_000_000m, 600_000_000m }],
     ];
@@ -195,7 +194,9 @@ public sealed class ApExportReviewFixTests
 
     public static IEnumerable<object[]> InRangeTotals() =>
     [
-        [new[] { 500m, -500m }],              // exactly the minimum
+        [new[] { -922_337_203_685_477m }],    // exactly the minimum
+        [new[] { -100m }],                    // a credit memo on its own (D-127, D-129 (4))
+        [new[] { 900m, -1000m }],             // a credit memo that drags the sum below zero
         [new[] { 1_000_000_000m }],           // exactly the maximum
         [new[] { 0m }],
     ];

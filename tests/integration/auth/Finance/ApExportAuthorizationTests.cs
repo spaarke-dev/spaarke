@@ -435,11 +435,11 @@ public sealed class ApExportAuthorizationTests
             "the file rows are owned through the acting user, resolved from the caller's token");
     }
 
-    [Fact(DisplayName = "150 review F4: a credit-memo batch whose total is below the batch total column's minimum is 400 ebilling.export.batch_total_out_of_range through the route, with nothing claimed or written")]
+    [Fact(DisplayName = "150 review F4: a batch whose total is below the batch total column's minimum is 400 ebilling.export.batch_total_out_of_range through the route, with nothing claimed or written")]
     public async Task BatchTotalOutOfRange_Is400_AndWritesNothing()
     {
         await using var host = await Host.StartAsync();
-        var credit = host.World.AddInvoice("INV-CREDIT", approved: -250m);
+        var credit = host.World.AddInvoice("INV-CREDIT", approved: -922_337_203_685_477.01m);
         host.World.GrantEverything();
         var writesBefore = host.World.Dataverse.Writes;
 
