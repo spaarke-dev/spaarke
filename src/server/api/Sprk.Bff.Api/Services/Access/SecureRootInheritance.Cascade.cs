@@ -1799,7 +1799,8 @@ public sealed partial class SecureRootInheritance
     /// that answer — the resolver over its filing, asked the question the un-secure step asks
     /// (<see cref="UnsecureOwnerQuestionOf"/>): its matter's unit, then its project's.</item>
     /// <item>UNFILED and owned by a person: re-owned to that person's business-unit team
-    /// (<c>RecordOwnershipContext.ForUserTeam</c>). An unfiled root owned by any team is left alone.</item>
+    /// (<c>RecordOwnershipContext.ForUserTeam</c>), the unit it already sits in. A project whose pair is empty is unfiled
+    /// and is not excluded (decision 2026-10-30). An unfiled root owned by any team is left alone.</item>
     /// <item>Never: a root owned in the Secure Record unit, under a secure parent, or whose family answer is the Secure team
     /// (the securing loop's); a root owned by a named (non-default) team is reported, not moved.</item>
     /// </list>

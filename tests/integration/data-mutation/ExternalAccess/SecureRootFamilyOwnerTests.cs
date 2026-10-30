@@ -201,6 +201,33 @@ public class SecureRootFamilyOwnerTests : IClassFixture<ProvisionProjectTestFixt
         Lines(pass).Select(l => l.GetProperty("id").GetGuid()).Should().Equal(new[] { project, wa }, "projects come first");
     }
 
+    [Fact(DisplayName = "Decision 2026-10-30 must fire: a person-owned project with an EMPTY pair goes to its person's unit default team, and a work assignment under it follows in the same run")]
+    public async Task APersonOwnedProjectWithAnEmptyPair_GoesToItsPersonsUnitTeam_AndItsWorkAssignmentFollows()
+    {
+        // Until task 195 writes the project pair every project's pair is empty, so a person-owned project counts as unfiled.
+        // Projects are not excluded: it goes to its person's unit default team, the unit it already sits in.
+        var personA = Guid.NewGuid();
+        World.User(personA, UnitA);
+        var project = Guid.NewGuid();
+        _fixture.SeedProject(project, isSecure: false, owningUserId: PersonB, owningBusinessUnitId: UnitB);
+        World.Set("sprk_project", project, "sprk_regardingrecordid", "");
+        var wa = WorkAssignment(person: personA, filing: ("sprk_regardingproject", "sprk_project", project));
+        WritesOn();
+
+        var pass = await PassAsync();
+
+        _fixture.OwningTeamOf(project).Should().Be(TeamB, "an unfiled person-owned project goes to its person's unit default team");
+        _fixture.OwningTeamOf(wa).Should().Be(TeamB, "the work assignment follows its project in the same run, not its own person's unit");
+        pass.RootOwners.Written.Should().Be(2);
+        Lines(pass).Select(l => l.GetProperty("id").GetGuid()).Should().Equal(new[] { project, wa }, "projects come first");
+        var projectLine = LineOf(pass, project);
+        projectLine.GetProperty("from").GetProperty("owner").GetString().Should().Be("user");
+        projectLine.GetProperty("from").GetProperty("unit").GetGuid().Should().Be(UnitB);
+        projectLine.GetProperty("to").GetProperty("unit").GetGuid().Should().Be(UnitB, "the same unit: visibility does not change");
+        projectLine.GetProperty("reason").GetString().Should().Be("follows its person's business unit");
+        LineOf(pass, wa).GetProperty("reason").GetString().Should().Be("follows its filing");
+    }
+
     [Fact(DisplayName = "Owner 2026-10-29 report-only: a work assignment under a project planned to move is planned to the project's planned team")]
     public async Task ReportOnly_AWorkAssignmentUnderAPlannedProject_IsPlannedWithIt()
     {

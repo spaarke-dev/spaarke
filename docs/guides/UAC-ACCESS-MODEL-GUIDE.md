@@ -527,7 +527,9 @@ Spaarke does not use plugins (ADR-002), so the re-own is the scheduled job's.
 **A work assignment's or project's own owner** (owner decision 2026-10-29: a family shares one ownership). The
 secure-root inheritance job (every 5 minutes) re-owns an ordinary work assignment or project whose owner is a person, or the
 default team of another business unit, to its family's team: filed, its matter's (then its project's) business-unit team;
-unfiled, its person's business-unit team. Secure records, records owned in the Secure Record business unit and records
+unfiled, its person's business-unit team. A project is filed only through its BFF-managed pair; a project whose pair is
+empty counts as unfiled and goes to its person's business-unit team, which is the unit it already sits in, so who can see it
+does not change (decision 2026-10-30; projects are not excluded). Secure records, records owned in the Secure Record business unit and records
 under a secure parent are never touched; a record owned by a named (non-default) team is reported, not moved; matters are
 not part of it; at most 25 a run. Report-only unless `SecureRoot:Inheritance:RootOwnerWritesEnabled` is `true` (the
 recent-changes emergency stop stops it too); each run's plan is `ResultJson.followParents.rootOwners`.
