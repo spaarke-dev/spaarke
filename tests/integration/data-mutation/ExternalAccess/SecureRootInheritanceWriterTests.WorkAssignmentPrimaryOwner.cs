@@ -6,6 +6,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Xrm.Sdk;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api;
+using Sprk.Bff.Api.Api.ExternalAccess;
 using Sprk.Bff.Api.Services.Access;
 using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Tests.Integration.DataMutation.CoreAncestorStamping;
@@ -357,5 +358,39 @@ public partial class SecureRootInheritanceWriterTests
             RecordOwnershipContext.ForParents(new[] { new RecordOwnershipParent(SecureRootInheritance.WorkAssignment, created) }),
             CancellationToken.None);
         lookedThrough.OwningTeamId.Should().Be(UnitBDefaultTeam, "the look-through follows the same primary: the project");
+    }
+
+    [Theory(DisplayName = "Owner decision 2026-10-29 must fire, through the cascade's entry point: a secure work assignment holding its own project (unit B) and an invoice or event of a matter in unit A follows its parents out of secure into unit B (FollowParentsAsync, as the job and the unsecure route call it)")]
+    [InlineData("sprk_invoice", "sprk_matter", "sprk_regardinginvoice")]
+    [InlineData("sprk_event", "sprk_regardingmatter", "sprk_regardingevent")]
+    public async Task WorkAssignmentPrimaryOwner_FollowingItsParentsOutOfSecure_ThroughTheCascadesEntryPoint_IsOwnedInItsOwnProjectsUnit(
+        string table, string matterColumn, string workAssignmentColumn)
+    {
+        // CascadeOwnerOf rebuilds the cascade's owner question itself; this drives the cascade's own call
+        // (FollowParentsAsync -> UnsecureFollowingParentsAsync), so the keys its filing read hands that step are what is asked.
+        TwoBusinessUnits();
+        var (matter, project, intermediate, workAssignment) = (Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid());
+        _fixture.SeedMatter(matter, owningTeamId: UnitAMatterTeam, isSecure: false);
+        World.Add("sprk_project", project, ("owningteam", new EntityReference("team", UnitBEventTeam)), ("sprk_issecure", false));
+        World.Add(table, intermediate,
+            ("owningteam", new EntityReference("team", UnitBEventTeam)),
+            (matterColumn, new EntityReference("sprk_matter", matter)));
+
+        // Secure by inheritance (its access record names its parents), and those parents are now all ordinary.
+        _fixture.SeedWorkAssignment(workAssignment, owningTeamId: SecureTeam, containerId: $"b!wa-{workAssignment:N}", isSecure: true);
+        _fixture.SeedShare(workAssignment, DataversePrincipalRef.User(Creator), ProvisionProjectEndpoint.CreatorAccessRights);
+        World.Set(SecureRootInheritance.WorkAssignment, workAssignment, "sprk_regardingproject", new EntityReference("sprk_project", project));
+        World.Set(SecureRootInheritance.WorkAssignment, workAssignment, workAssignmentColumn, new EntityReference(table, intermediate));
+        InheritedAccessRecord(_fixture, SecureRootInheritance.WorkAssignment, workAssignment, ("sprk_project", project), ("sprk_matter", matter));
+
+        using var scope = _fixture.Services.CreateScope();
+        var follow = await scope.ServiceProvider.GetRequiredService<SecureRootInheritance>()
+            .FollowParentsAsync(SecureRootInheritance.WorkAssignment, workAssignment, "trace-wa-primary-owner", CancellationToken.None);
+
+        follow.UnsecureOutcome.Should().Be(FollowParentsResult.Unsecured, $"{follow.Outcome} {follow.ReasonCode}: {follow.Detail}");
+        _fixture.IsSecureOf(workAssignment).Should().BeFalse("its parents are all ordinary now");
+        _fixture.OwningTeamOf(workAssignment).Should().Be(UnitBDefaultTeam,
+            $"the cascade asks with the keys its filing read made: the work assignment's own project first, the {table}'s matter "
+            + $"after it — never unit A ({UnitADefaultTeam:D})");
     }
 }
