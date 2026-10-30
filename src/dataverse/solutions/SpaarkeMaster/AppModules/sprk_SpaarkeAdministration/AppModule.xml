@@ -13,10 +13,12 @@
     <AppModuleComponent type="1" schemaName="contact" />
     <AppModuleComponent type="1" schemaName="documenttemplate" />
     <AppModuleComponent type="1" schemaName="sharepointdocumentlocation" />
+    <AppModuleComponent type="1" schemaName="sprk_billingcodeset" />
     <AppModuleComponent type="1" schemaName="sprk_contacttype_ref" />
     <AppModuleComponent type="1" schemaName="sprk_container" />
     <AppModuleComponent type="1" schemaName="sprk_documenttype" />
     <AppModuleComponent type="1" schemaName="sprk_documenttype_ref" />
+    <AppModuleComponent type="1" schemaName="sprk_ebillingsetting" />
     <AppModuleComponent type="1" schemaName="sprk_mattersubtype_ref" />
     <AppModuleComponent type="1" schemaName="sprk_mattertype_ref" />
     <AppModuleComponent type="1" schemaName="sprk_organization" />
@@ -24,8 +26,11 @@
     <AppModuleComponent type="1" schemaName="sprk_practicearea_documenttype" />
     <AppModuleComponent type="1" schemaName="sprk_practicearea_ref" />
     <AppModuleComponent type="1" schemaName="sprk_projecttype_ref" />
+    <AppModuleComponent type="1" schemaName="sprk_ratecard" />
     <AppModuleComponent type="1" schemaName="sprk_recordtype_ref" />
+    <AppModuleComponent type="1" schemaName="sprk_ruleset" />
     <AppModuleComponent type="1" schemaName="sprk_specontainertypeconfig" />
+    <AppModuleComponent type="1" schemaName="sprk_timekeeper" />
     <AppModuleComponent type="1" schemaName="sprk_usertype_ref" />
     <AppModuleComponent type="1" schemaName="systemuser" />
     <AppModuleComponent type="62" schemaName="sprk_SpaarkeAdministration" />

@@ -791,6 +791,76 @@ public sealed class ExternalRecordDocumentRoutesTests : IClassFixture<ExternalRe
     // refused, its documents are withheld, and an upload is refused too, before SPE or Dataverse is touched. (Without the
     // gate the upload answered 201 and wrote the file into X's container.)
 
+    // =====================================================================
+    // ebilling-r1 task 098 (model 9.1, (a')): an invoice the predicate hides has no documents for an external caller
+    // =====================================================================
+    //
+    // The invoice's rights are its parents' (option A); the (a') predicate then hides it outright when its Submit Invoice source
+    // is isolated. Every invoice-document route (list, download, versions, upload) answers exactly as for an invoice that does
+    // not exist, before any document, SPE or write is touched; a predicate that cannot decide answers the same (fail closed).
+
+    [Theory]
+    [InlineData("hidden")]
+    [InlineData("fault")]
+    public async Task Task098_AnInvoiceThePredicateHides_DeniesEveryDocumentRoute_AsAMissingInvoice_AndTouchesNothing(string kind)
+    {
+        _fixture.Data.InvoiceParents[RecordA] = (MatterM, null);
+        NonSecure("sprk_matter", MatterM);
+        _fixture.Principal = new CallerPrincipal
+        {
+            Plane = CallerPrincipalPlane.CiamContact,
+            ContactId = CallerContact,
+            Email = "external.user@example.test",
+            ProjectAccess = Array.Empty<CallerProjectAccess>(),
+            MatterAccess = new Dictionary<Guid, AccessRights> { [MatterM] = Collaborate },
+        };
+        var documentOnA = _fixture.Data.Seed(ExternalDataService.DocumentParentKind.Invoice, RecordA, "a.pdf", "b!c", "item-a");
+        _fixture.Data.DocumentReads.Clear();
+        _fixture.InvoiceHiding = kind == "hidden" ? InvoiceHidingStub.Hiding(RecordA) : InvoiceHidingStub.Faulting();
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        var basePath = $"/api/v1/external/invoices/{RecordA}/documents";
+        var hidden = new[]
+        {
+            await client.GetAsync(basePath),
+            await client.GetAsync($"{basePath}/{documentOnA}/content"),
+            await client.GetAsync($"{basePath}/{documentOnA}/versions"),
+            await client.PostAsync(basePath, FileForm()),
+        };
+        var missing = await client.GetAsync($"/api/v1/external/invoices/{OutsideRecord}/documents");
+
+        hidden.Should().OnlyContain(r => r.StatusCode == HttpStatusCode.Forbidden);
+        missing.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        (await hidden[0].Content.ReadAsStringAsync()).Should().Be(await missing.Content.ReadAsStringAsync(),
+            "a hidden invoice and one that does not exist are indistinguishable");
+        _fixture.Data.DocumentReads.Should().BeEmpty("the invoice gate runs before any document read");
+        _fixture.Downloads.Should().BeEmpty();
+        _fixture.Uploads.Should().BeEmpty();
+        _fixture.Data.Documents.Should().ContainSingle("nothing was written");
+        _fixture.InvoiceHiding.Calls.Should().OnlyContain(call => call.SequenceEqual(new[] { RecordA }));
+    }
+
+    [Fact]
+    public async Task Task098_AnInvoiceThePredicateLeavesVisible_ListsAndUploads_AsBefore()
+    {
+        _fixture.Data.InvoiceParents[RecordA] = (MatterM, null);
+        NonSecure("sprk_matter", MatterM);
+        _fixture.Principal = new CallerPrincipal
+        {
+            Plane = CallerPrincipalPlane.CiamContact,
+            ContactId = CallerContact,
+            Email = "external.user@example.test",
+            ProjectAccess = Array.Empty<CallerProjectAccess>(),
+            MatterAccess = new Dictionary<Guid, AccessRights> { [MatterM] = Collaborate },
+        };
+        _fixture.InvoiceHiding = InvoiceHidingStub.Hiding(RecordB);
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        (await client.GetAsync($"/api/v1/external/invoices/{RecordA}/documents")).StatusCode.Should().Be(HttpStatusCode.OK);
+        (await client.PostAsync($"/api/v1/external/invoices/{RecordA}/documents", FileForm())).StatusCode
+            .Should().Be(HttpStatusCode.Created);
+    }
+
     private static readonly Guid ProjectX = Guid.Parse("c0310000-0000-4000-8000-0000000000a7");
     private static readonly Guid AgreementG = Guid.Parse("c0310000-0000-4000-8000-0000000000a8");
 
@@ -1676,6 +1746,7 @@ public sealed class ExternalRecordDocumentRoutesTests : IClassFixture<ExternalRe
             Data.Reset();
             Probe.Reset();
             Principal = null;
+            InvoiceHiding = InvoiceHidingStub.NoneHidden();
             Ownership.TeamId = RecordOwnershipResolverDouble.DefaultTeamId;
             Ownership.Requests.Clear();
             Uploads.Clear();
@@ -1694,6 +1765,17 @@ public sealed class ExternalRecordDocumentRoutesTests : IClassFixture<ExternalRe
             Rows.Clear();
             RowFaults.Clear();
             VerifyPointers = false;
+        }
+
+        /// <summary>
+        /// Places <paramref name="bytes"/> in SPE as item <paramref name="itemId"/> of <paramref name="drive"/>, as if the BFF had
+        /// uploaded it there — so a pointer to it passes the item-exists half of the pointer check and only the container rule
+        /// can refuse it.
+        /// </summary>
+        public void StoreItem(string drive, string itemId, byte[] bytes)
+        {
+            _spe[itemId] = bytes;
+            _itemDrives[itemId] = drive;
         }
 
         /// <summary>The served request's <c>RequestAborted</c> token, or null when no request is in flight on this flow.</summary>

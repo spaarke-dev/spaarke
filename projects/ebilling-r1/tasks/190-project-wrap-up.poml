@@ -1,0 +1,117 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="190" project="ebilling-r1">
+  <metadata>
+    <title>Project wrap-up</title>
+    <phase>Wrap-up — wave W9</phase>
+    <gate>startable</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Project close: /test-diet over the project's tests (modifies tests/**), final code-review and adr-check over the whole diff with F-class fixes, cumulative NFR-12 check.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Prescriptive close-out checklist driven by existing skills; judgment calls (test classification, F-class fixes) follow those skills' rules.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Project close: runs after every other task and touches project-wide files (README, plan, TASK-INDEX, projects/INDEX.md).</parallel-reason>
+    <deps>001, 002, 003, 004, 005, 010, 011, 012, 013, 014, 015, 016, 017, 018, 019, 020, 021, 022, 023, 024, 025, 026, 027, 028, 029, 040, 041, 042, 043, 044, 045, 046, 047, 048, 049, 050, 051, 052, 053, 070, 071, 072, 073, 074, 075, 076, 077, 078, 079, 100, 101, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111, 112, 130, 131, 132, 133, 134, 135, 136, 150, 151, 152, 153, 160, 161, 162, 163</deps>
+    <tags>wrap-up, testing</tags>
+    <estimated-effort>1 day</estimated-effort>
+  </metadata>
+
+  <prompt>Close ebilling-r1: run /test-diet, a final code-review and adr-check over the project diff (fix every F-class finding), the cumulative NFR-12 publish-size check, repo-cleanup, lessons learned and gotcha promotion, then mark README, plan and projects/INDEX.md complete and archive with devops-project-archive.</prompt>
+
+  <role>SPAARKE delivery lead. Expert in the project-close skills (test-diet, code-review, adr-check, repo-cleanup, doc-drift-audit, devops-project-archive) and the ADR-038 test categories.</role>
+
+  <goal>Test diet report written and its required actions applied; no F-class finding remains; cumulative publish-size delta within NFR-12; notes cleaned; lessons-learned.md written; README and plan show Complete with Success Criteria 1-12 checked against evidence; projects/INDEX.md updated; every task in TASK-INDEX.md is ✅; the project is archived without renaming its folder.</goal>
+
+  <context>
+    <background>task-create Step 3.7 wrap-up requirements; root CLAUDE.md sections 7 (task-execute Steps 10-11 own completion and the /test-diet gate for wrap-up tasks), 8.5 (fix-now F1-F4 vs known-limit K1-K4) and 3 (sub-agents cannot write .claude/ — promotion edits are applied by the main session). Spec Success Criteria 1-12 and NFR-12 (one new NuGet package Azure.AI.ContentUnderstanding; BFF publish-size delta under 1 MB for the project excluding that package; no new npm package). Evidence for each criterion: 163's uat-script.md and uat-results.md map them. projects/INDEX.md row ebilling-r1 (line 50 at authoring). Exemplar (older format): projects/x-ui-dialog-shell-standardization/tasks/090-project-wrap-up.poml.</background>
+    <relevant-files>
+      <file role="output">projects/ebilling-r1/notes/test-diet-report.md</file>
+      <file role="output">projects/ebilling-r1/notes/lessons-learned.md</file>
+      <file role="modify">projects/ebilling-r1/README.md</file>
+      <file role="modify">projects/ebilling-r1/plan.md</file>
+      <file role="modify">projects/ebilling-r1/tasks/TASK-INDEX.md</file>
+      <file role="modify">projects/INDEX.md (ebilling-r1 row)</file>
+      <file role="modify">tests/** (only test-diet required actions and F-class fixes)</file>
+      <file role="read">projects/ebilling-r1/notes/uat-results.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="all" status="pending">Every other task in TASK-INDEX.md is ✅</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ISS-009 (task 043)">Merge gate: every BFF environment token set defines CONTENT_UNDERSTANDING_ENDPOINT (empty where eBilling is not deployed) before this branch reaches master.</constraint>
+    <constraint source="root CLAUDE.md section 7, ADR-038">/test-diet runs before close; its required actions (scaffolding deletions with same-PR replacement rule, KEEP-path moves) are applied, not just reported.</constraint>
+    <constraint source="root CLAUDE.md section 8.5">Every F-class finding from code-review and adr-check is fixed and re-checked on the fix diff; a known-limit class never holds a confirmed defect. Findings in other projects' code are filed and reported.</constraint>
+    <constraint source="root CLAUDE.md section 3">Edits under .claude/ (FAILURE-MODES.md, patterns, constraints) are proposed in notes and applied by the main session, never by a sub-agent.</constraint>
+    <constraint source="task-create Step 3.7">Do not rename or move the project folder (no x- prefix); devops-project-archive writes projects/ebilling-r1/.archived.</constraint>
+    <constraint source="NFR-12, .claude/constraints/bff-extensions.md">Cumulative publish-size delta of the branch against a fresh master build, reported with and without Azure.AI.ContentUnderstanding; no new HIGH CVE; no npm package added (git diff of package.json files).</constraint>
+    <constraint source="project">Never delete the owner-created containers or the evaluation-set source documents; repo-cleanup removes only ephemeral notes (debug, drafts, spikes harness only if 161 / 162 no longer need it).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/test-diet/SKILL.md</file>
+      <file>.claude/skills/code-review/SKILL.md</file>
+      <file>.claude/skills/adr-check/SKILL.md</file>
+      <file>.claude/skills/repo-cleanup/SKILL.md</file>
+      <file>.claude/skills/doc-drift-audit/SKILL.md</file>
+      <file>.claude/skills/devops-project-archive/SKILL.md</file>
+      <file>.claude/FAILURE-MODES.md</file>
+      <file>docs/standards/TEST-ARCHITECTURE.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="1">Verify every task except 190 shows ✅ in TASK-INDEX.md; list any that does not and STOP if one is open.</step>
+    <step order="2">Run /test-diet for ebilling-r1; write notes/test-diet-report.md; apply its required actions; dotnet test green.</step>
+    <step order="3">Run /code-review and /adr-check over the project diff (git diff master...work/ebilling-r1); classify findings per task-execute Step 9.5; fix every F-class finding and re-check the fix diff; record findings and resolutions in notes.</step>
+    <step order="4">NFR-12: fresh master publish vs branch publish of Sprk.Bff.Api; record total delta and delta excluding the Content Understanding package; dotnet list package --vulnerable; confirm no new npm dependency.</step>
+    <step order="5">Run /repo-cleanup projects/ebilling-r1; approve removals of notes/debug/, notes/drafts/ and obsolete spikes; archive notes/handoffs/ to .archive/; keep evaluation-set manifest, ground truth, generator and all result notes.</step>
+    <step order="6">Write notes/lessons-learned.md: one lesson per entry with a one-line summary, covering corrections and confirmed non-obvious approaches; scan the project CLAUDE.md gotchas and list durable ones proposed for .claude/FAILURE-MODES.md or a pattern (main session applies them); run /doc-drift-audit for the project's changed areas and file or fix drift.</step>
+    <step order="7">README.md: Status Complete, Phase Complete, Progress 100%, Last Updated and Completed Date, Graduation Criteria checked with evidence links (Success Criteria 1-12), changelog entry. plan.md: Status Complete, every milestone ✅.</step>
+    <step order="8">projects/INDEX.md: update the ebilling-r1 row to complete with the completion date and a one-line outcome.</step>
+    <step order="9">Run /devops-project-archive (closes the Issue, sets the board status, writes projects/ebilling-r1/.archived); do not rename the folder.</step>
+    <step order="10">Update TASK-INDEX.md: this task's status cell to "✅ [done]".</step>
+    <step order="11">Record deviations in projects/ebilling-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If an F-class fix does not converge or would change an API contract or schema, STOP and raise 🔔 Human Input Required (root CLAUDE.md section 6).</trigger>
+    <trigger>If the cumulative publish-size delta excluding the Content Understanding package is 1 MB or more, STOP: NFR-12 is breached; present the per-task contributions and options.</trigger>
+    <trigger>If any Success Criterion lacks evidence or an owner decision, STOP before marking the README complete.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">build, test, publish, list package</tool>
+    <tool name="git">diff (read-only)</tool>
+    <tool name="gh">issue and board updates via devops-project-archive</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/ebilling-r1/notes/test-diet-report.md</output>
+    <output type="docs">projects/ebilling-r1/notes/lessons-learned.md</output>
+    <output type="docs">projects/ebilling-r1/README.md, plan.md, tasks/TASK-INDEX.md, projects/INDEX.md</output>
+    <output type="config">projects/ebilling-r1/.archived</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">notes/test-diet-report.md exists and every required action in it is applied; dotnet test passes.</criterion>
+    <criterion testable="true">code-review and adr-check over the project diff report no open F-class finding; any K-class item is listed with its class and reason.</criterion>
+    <criterion testable="true">Cumulative publish-size delta excluding Azure.AI.ContentUnderstanding is under 1 MB against a fresh master build; no new HIGH CVE; no new npm package.</criterion>
+    <criterion testable="true">notes/lessons-learned.md exists with one-line-summary entries; durable gotchas are listed as proposals for the main session.</criterion>
+    <criterion testable="true">README shows Complete with Success Criteria 1-12 checked and each linked to evidence; plan.md shows Complete with every milestone ✅; projects/INDEX.md row updated.</criterion>
+    <criterion testable="true">Every task in TASK-INDEX.md is ✅; projects/ebilling-r1/.archived exists; the folder name is unchanged.</criterion>
+    <criterion testable="true">repo-cleanup removed no evaluation-set manifest, ground truth, generator or result note.</criterion>
+  </acceptance-criteria>
+
+  <notes>The deps list is every other task id in this project (77 tasks).</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load the knowledge files first. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

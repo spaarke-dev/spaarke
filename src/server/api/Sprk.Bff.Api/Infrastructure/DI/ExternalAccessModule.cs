@@ -120,6 +120,23 @@ public static class ExternalAccessModule
             (documentIds, ct) => sp.GetRequiredService<ExternalDataService>()
                 .ReadAndNarrowDocumentsAsync(documentIds, ct, ExternalDataService.InternalRoutesPlane));
 
+        // ebilling-r1 task 098 (procedure-and-file-model 9.1, (a′)): THE invoice predicate, read app-only through the reader
+        // above with the effective root flags. ExternalInvoiceHiding is the external plane's caller-aware seam (an internal
+        // systemuser hides nothing; a fault hides every asked invoice); AppOnlyInvoiceFamilyHiding is the assistant tools'
+        // hide-only seam for invoice-family rows (the tool has decided the caller is external; a fault throws). Both resolve
+        // their readers lazily, on the first call.
+        services.AddScoped<ExternalInvoiceHiding>(sp =>
+            (caller, invoiceIds, ct) => sp.GetRequiredService<ExternalDataService>().HideInvoicesForAsync(
+                caller, invoiceIds, sp.GetRequiredService<ExternalParticipationService>().GetEffectiveRootRecordFlagsAsync, ct));
+        // Review round 4b: the external submission routes' seam (list and single read): with an invoice, the predicate above;
+        // without one, the submission's own source. Same caller rule and fault rule as ExternalInvoiceHiding.
+        services.AddScoped<ExternalInvoiceSubmissionHiding>(sp =>
+            (caller, submissions, ct) => sp.GetRequiredService<ExternalDataService>().HideSubmissionsForAsync(
+                caller, submissions, sp.GetRequiredService<ExternalParticipationService>().GetEffectiveRootRecordFlagsAsync, ct));
+        services.AddScoped<AppOnlyInvoiceFamilyHiding>(sp =>
+            (table, rowIds, ct) => sp.GetRequiredService<ExternalDataService>().HideInvoiceFamilyRowsAsync(
+                table, rowIds, sp.GetRequiredService<ExternalParticipationService>().GetEffectiveRootRecordFlagsAsync, ct));
+
         // Per-customer external-access switches (external-access-platform-r3 task 011, spec FR-06 / FR-19, ADR-028
         // A8). PartnerServiceRequestsEnabled (default false) lets CIAM partners use the Service Requests module for
         // their own requests and adds legal-front-door to their default modules. Read by the entitlement resolver
@@ -502,6 +519,10 @@ public static class ExternalAccessModule
             },
             // Grid 3ff4102c. Primary name = sprk_name (on the grid since r3 task 002; also the /record default
             // projection). Task 157 dropped (rule (b) only): sprk_visibilitystate, modifiedon, statecode.
+            // ebilling-r1 task 015 (D-41): the invoice status is statuscode, and grid 3ff4102c's status column is moved to
+            // it. The retired status column was removed from this list on master in #2450 (r3 task 002); its dev column
+            // delete (015 -Delete, owner D-97) waits for the next dev BFF deploy. spaarke-SPA-external-access-platform-r3
+            // (owner Partner UAT 2026-10-17): the SPA record detail reads statuscode too.
             SavedQueryIds = NoSavedQueries, // grid source inline (live 2026-10-02): no registered view
             PrimaryNameAttribute = "sprk_name",
             ReadableColumns = new HashSet<string>
@@ -509,9 +530,9 @@ public static class ExternalAccessModule
                 "sprk_invoiceid", "sprk_name", "sprk_invoicenumber", "sprk_invoicedate",
                 "sprk_totalamount", "sprk_project", "sprk_matter",
                 // spaarke-SPA-external-access-platform-r3 (owner Partner UAT 2026-10-17, ebilling-r1 task 015 / D-41): NOT
-                // grid-derived. The invoice status is statuscode; the SPA record detail reads it. sprk_invoicestatus was
-                // removed from this list by r3 task 002 with ebilling's OK on 2026-10-29 (grid 3ff4102c moved to statuscode
-                // on 2026-10-18, so nothing external reads it any more).
+                // grid-derived. The invoice status is statuscode; the SPA record detail reads it. The retired invoice-status
+                // column was removed from this list by r3 task 002 (#2450) with ebilling's OK on 2026-10-29 (grid 3ff4102c moved
+                // to statuscode on 2026-10-18, so nothing external reads it any more).
                 "statuscode",
                 // spaarke-SPA-external-access-platform-r3 task 002 (owner 2026-10-29): grid column on grid 3ff4102c.
                 "sprk_totalamount_base",

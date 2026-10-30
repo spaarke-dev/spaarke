@@ -4,7 +4,7 @@
     <title>Teams live check: workforce contact, licensed user, unlisted directory; desktop, web, mobile (FR-21, ADR-028 A9)</title>
     <phase>7 Deploy and verify</phase>
     <gate>after 070, 075, 076 — owner-driven session</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Live verification with a written result</rigor-reason>
     <model-tier>sonnet</model-tier>

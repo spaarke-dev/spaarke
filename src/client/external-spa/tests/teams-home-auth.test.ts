@@ -988,6 +988,121 @@ describe('Teams bootstrap (main.tsx): the Teams context tid picks the backend', 
       expect(is(null, TID)).toBe(false);
       expect(is(undefined, TID)).toBe(false);
     });
+
+    // ----- task 071 (2026-10-29): Teams desktop showed members the guest screen -----
+
+    /** A token result whose access token is a JWT carrying `tid` = the Teams tid and the given `acct`. */
+    const tokenWithAcct = (acct: unknown, account: any) => ({
+      accessToken: jwtFor(acct === undefined ? { tid: TID } : { tid: TID, acct }),
+      tenantId: TID,
+      idTokenClaims: { tid: TID },
+      account,
+    });
+
+    it('the token says member (acct=0) while the host account looks like a guest: the app mounts (the token decides)', async () => {
+      h.naa[HOME_CLIENT_ID] = { sso: async () => tokenWithAcct(0, guestHostAccount) };
+      const { rtl } = await boot();
+      expect(await rtl.screen.findByTestId('app')).toBeTruthy();
+      expect(rtl.screen.queryByText(screenText)).toBeNull();
+      expect(h.notifyFailure).not.toHaveBeenCalled();
+    });
+
+    it('the token says not a member (acct=1) while the host account looks like a member: the guest screen, zero fetches', async () => {
+      h.naa[HOME_CLIENT_ID] = { sso: async () => tokenWithAcct(1, JANE) };
+      const { rtl } = await boot();
+      expect(await rtl.screen.findByText(screenText)).toBeTruthy();
+      expectGuestScreen(rtl);
+      expect(document.body.textContent).toContain('Diagnostic: path=naa acct=1 home=match ext=no');
+    });
+
+    it('an unrecognised acct value is not a member (fail closed)', async () => {
+      h.naa[HOME_CLIENT_ID] = { sso: async () => tokenWithAcct('2', JANE) };
+      const { rtl } = await boot();
+      expect(await rtl.screen.findByText(screenText)).toBeTruthy();
+      expect(document.body.textContent).toContain('acct=other');
+    });
+
+    it('no acct claim: the host account decides (must-fire guest, must-not-fire member)', async () => {
+      h.naa[HOME_CLIENT_ID] = { sso: async () => tokenWithAcct(undefined, guestHostAccount) };
+      let { rtl } = await boot();
+      expect(await rtl.screen.findByText(screenText)).toBeTruthy();
+      expect(document.body.textContent).toContain('Diagnostic: path=naa acct=missing home=differs ext=no');
+
+      h.naa[HOME_CLIENT_ID] = { sso: async () => tokenWithAcct(undefined, JANE) };
+      ({ rtl } = await boot());
+      expect(await rtl.screen.findByTestId('app')).toBeTruthy();
+    });
+
+    it('the diagnostic carries no tenant id, object id, username or name', async () => {
+      h.naa[HOME_CLIENT_ID] = { sso: async () => tokenWithAcct(1, guestHostAccount) };
+      const { rtl } = await boot();
+      await rtl.screen.findByText(screenText);
+      const text = document.body.textContent ?? '';
+      for (const secret of [TID, GUEST_HOME_TID, 'guest-oid', guestHostAccount.username]) {
+        expect(text).not.toContain(secret);
+      }
+      expect(text).toContain('home=differs');
+    });
+
+    it('the popup path (NAA failed) records path=popup in the diagnostic', async () => {
+      h.naa[HOME_CLIENT_ID] = {
+        sso: async () => {
+          throw new Error('NAA bridge error');
+        },
+      };
+      h.pca[HOME_CLIENT_ID] = { popup: async () => tokenWithAcct(1, JANE) };
+      const { rtl } = await boot();
+      expect(await rtl.screen.findByText(screenText)).toBeTruthy();
+      expect(document.body.textContent).toContain('Diagnostic: path=popup acct=1');
+    });
+
+    it('a later sign-in replaces the active account (an account an earlier sign-in left active never stands in)', async () => {
+      const STALE = { ...guestHostAccount, homeAccountId: `stale-oid.${GUEST_HOME_TID}` };
+      let call = 0;
+      h.naa[HOME_CLIENT_ID] = {
+        accounts: [STALE],
+        silent: async () => (call++ === 0 ? tokenWithAcct(1, STALE) : tokenWithAcct(0, JANE)),
+      };
+      const { msalAuth } = await load();
+      const cfg = { clientId: HOME_CLIENT_ID, tenantId: TID, bffScope: CONTOSO_SCOPE };
+      await msalAuth.acquireTeamsWorkforceBffToken(cfg);
+      expect(msalAuth.getTeamsWorkforceGuestVerdict()?.guest).toBe(true);
+      await msalAuth.acquireTeamsWorkforceBffToken(cfg, { forceRefresh: true });
+      const instance = msalAuth.getTeamsWorkforceSignedInInstance();
+      expect(instance?.getActiveAccount()).toBe(JANE);
+      expect(msalAuth.getTeamsWorkforceGuestVerdict()).toEqual({
+        guest: false,
+        detail: 'path=naa acct=0 home=match ext=no src=fresh',
+      });
+    });
+
+    it('a token served from the MSAL cache says src=cache in the diagnostic', async () => {
+      h.naa[HOME_CLIENT_ID] = { sso: async () => ({ ...tokenWithAcct(1, JANE), fromCache: true }) };
+      const { rtl } = await boot();
+      expect(await rtl.screen.findByText(screenText)).toBeTruthy();
+      expect(document.body.textContent).toContain('Diagnostic: path=naa acct=1 home=match ext=no src=cache');
+    });
+
+    it('recovery: the "Sign in" click returns a non-member token -> the guest screen carries the popup diagnostic', async () => {
+      let attempts = 0;
+      h.naa[HOME_CLIENT_ID] = {
+        sso: async () => {
+          throw new Error('NAA bridge error');
+        },
+      };
+      h.pca[HOME_CLIENT_ID] = {
+        popup: async () => {
+          attempts += 1;
+          if (attempts === 1) throw new Error('popup_window_error');
+          return tokenWithAcct(1, JANE);
+        },
+      };
+      const { rtl } = await boot();
+      rtl.fireEvent.click(await rtl.screen.findByRole('button', { name: 'Sign in' }));
+      expect(await rtl.screen.findByText(screenText)).toBeTruthy();
+      expectGuestScreen(rtl);
+      expect(document.body.textContent).toContain('Diagnostic: path=popup acct=1 home=match ext=no src=fresh');
+    });
   });
 
   // ----- review F2 (F): theme failure is not "not set up" -----

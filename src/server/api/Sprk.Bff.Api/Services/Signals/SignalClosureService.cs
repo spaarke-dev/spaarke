@@ -60,8 +60,11 @@ public sealed record SignalClosureOutcome(int Closed, int ChangedSinceRead, int 
 /// <i>Extension</i> — no existing component reads Signals by policy or state across the Off/Retire/publish triggers; the
 /// writer and job are reused, not extended with admin-triggered callers. <i>Cost of doing nothing</i> — tasks 100 and 101
 /// cannot close Signals immediately, and an Off or superseded policy's Signals stay Open in the worklist.</para>
+/// <para>Not sealed (ebilling-r1 task 081): <see cref="SelectOpenSignalsOfPolicyAsync"/> and <see cref="ClosePolicySignalsRetiredAsync"/> are
+/// virtual so the Procedure retire tests can run the real selection and observe the close without a full Signal writer. No other member is
+/// overridable and nothing in production derives from it (enforced by <c>SignalClosureServiceDerivationGuardTests</c>).</para>
 /// </remarks>
-public sealed class SignalClosureService
+public class SignalClosureService
 {
     private readonly SignalWriter _writer;
     private readonly IGenericEntityService _entities;
@@ -87,8 +90,29 @@ public sealed class SignalClosureService
         if (policyId == Guid.Empty) throw new ArgumentException("policyId must not be Guid.Empty.", nameof(policyId));
         var policy = await _entities.RetrieveAsync("sprk_policy", policyId, new[] { "sprk_policycode" }, ct).ConfigureAwait(false);
         var code = policy.GetAttributeValue<string>("sprk_policycode") ?? string.Empty;
-        var open = await ReadOpenSignalsAsync(policyId, ct).ConfigureAwait(false);
-        return await CloseAsync(code, open, SignalWriter.ResolutionPolicyRetired, ct).ConfigureAwait(false);
+        // No billing subject: this close serves every domain, and sprk_signal has the invoice columns only where ebilling is deployed.
+        return (await ClosePolicySignalsRetiredAsync(policyId, code, withBillingSubject: false, ct).ConfigureAwait(false)).Outcome;
+    }
+
+    /// <summary>
+    /// ebilling-r1 task 081 (model 3.1 I-P5, 15 answer 2): closes every open Signal of a policy that is now Off as <c>PolicyRetired</c>, exactly as
+    /// <see cref="ClosePolicyRetiredNowAsync"/> and the job's sweep (<see cref="ClosePoliciesNotInForceAsync"/>) do — the same selection
+    /// (<see cref="SelectOpenSignalsOfPolicyAsync"/>) and the same close — and returns the Signals it closed, with their regarding invoice and
+    /// line, so a caller can count what the close reached as ITS caller may see it (the Procedure retire result). The caller has already
+    /// switched the policy Off; this method does not check. A selection fault throws (nothing was closed); a per-Signal fault is counted in
+    /// the outcome, as everywhere else here.
+    /// </summary>
+    /// <param name="withBillingSubject">True only for the Procedure retire, which reads the closed Signals' invoice subjects back; see
+    /// <see cref="SelectOpenSignalsOfPolicyAsync"/>.</param>
+    internal virtual async Task<PolicySignalClosure> ClosePolicySignalsRetiredAsync(
+        Guid policyId, string policyCode, bool withBillingSubject, CancellationToken ct)
+    {
+        if (policyId == Guid.Empty) throw new ArgumentException("policyId must not be Guid.Empty.", nameof(policyId));
+        var open = await SelectOpenSignalsOfPolicyAsync(policyId, withBillingSubject, ct).ConfigureAwait(false);
+        var closedIds = new HashSet<Guid>();
+        var outcome = await CloseAsync(policyCode, open.Select(s => s.Signal).ToList(), SignalWriter.ResolutionPolicyRetired, ct, closedIds)
+            .ConfigureAwait(false);
+        return new PolicySignalClosure(outcome, open.Where(s => closedIds.Contains(s.Signal.Id)).ToList());
     }
 
     /// <summary>
@@ -124,11 +148,14 @@ public sealed class SignalClosureService
     /// <summary>
     /// The job's Off/Retired step: for every policy that is Off (<c>sprk_enabled = No</c>) or Inactive (Retired), closes its open
     /// Signals as <c>PolicyRetired</c>. Idempotent: a policy with no open Signal writes nothing (D-61). The Signals keep their
-    /// policy, subject and episode, so switching the policy On again re-raises from them (D-32).
+    /// policy, subject and episode, so switching an Ontology policy On again re-raises from them (D-32). A Billing-domain policy closes
+    /// the same way (D-170, owner 2026-10-19) but is never re-raised.
     /// </summary>
     internal async Task<SignalClosureOutcome> ClosePoliciesNotInForceAsync(CancellationToken ct)
     {
-        var policies = await PoliciesNotInForceAsync(ct).ConfigureAwait(false);
+        // D-170: the Off/Retired CLOSE reads Billing policies too (their open Signals close PolicyRetired). Re-enabling a Billing policy
+        // re-raises nothing, unlike an Ontology policy (D-32): Billing has no evaluator, so nothing ever re-raises its Signals.
+        var policies = await ReadPoliciesNotInForceAsync(includeBilling: true, ct).ConfigureAwait(false);
 
         var total = SignalClosureOutcome.None;
         foreach (var (policyId, code) in policies)
@@ -136,8 +163,11 @@ public sealed class SignalClosureService
             ct.ThrowIfCancellationRequested();
             try
             {
-                var open = await ReadOpenSignalsAsync(policyId, ct).ConfigureAwait(false);
-                total = total.Plus(await CloseAsync(code, open, SignalWriter.ResolutionPolicyRetired, ct).ConfigureAwait(false));
+                // No billing subject: the sweep reads every domain's policies (Ontology included), and sprk_signal has the invoice columns
+                // only where ebilling is deployed; selecting them elsewhere fails every per-policy read (ontology review F1, 2026-10-22).
+                var open = await SelectOpenSignalsOfPolicyAsync(policyId, withBillingSubject: false, ct).ConfigureAwait(false);
+                total = total.Plus(await CloseAsync(code, open.Select(s => s.Signal).ToList(), SignalWriter.ResolutionPolicyRetired, ct)
+                    .ConfigureAwait(false));
             }
             catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
             {
@@ -151,17 +181,30 @@ public sealed class SignalClosureService
         return total;
     }
 
-    /// <summary>Every policy that is Off (<c>sprk_enabled = No</c>) or Inactive (Retired), by id, with its code. The one query of
-    /// "not in force": the Off/Retired close above and the job's stored-evidence redaction of those policies' Signals (task 145).</summary>
-    internal async Task<IReadOnlyDictionary<Guid, string>> PoliciesNotInForceAsync(CancellationToken ct)
+    /// <summary>Every ONTOLOGY policy that is Off (<c>sprk_enabled = No</c>) or Inactive (Retired), by id, with its code. The job's
+    /// stored-evidence redaction of those policies' Signals (task 145) reads this; it stays Ontology-only (D-170 widens only the close,
+    /// <see cref="ClosePoliciesNotInForceAsync"/>).</summary>
+    internal Task<IReadOnlyDictionary<Guid, string>> PoliciesNotInForceAsync(CancellationToken ct) =>
+        ReadPoliciesNotInForceAsync(includeBilling: false, ct);
+
+    /// <summary>The one query of "not in force" (Off = <c>sprk_enabled</c> No, Retired = <c>statecode</c> Inactive), by id with its code.
+    /// <paramref name="includeBilling"/> adds Billing-domain policies (<see cref="RuleDomains.IsClosableOnRetirement"/>); false is the
+    /// Ontology allowlist every other reader uses.</summary>
+    private async Task<IReadOnlyDictionary<Guid, string>> ReadPoliciesNotInForceAsync(bool includeBilling, CancellationToken ct)
     {
         var policies = new Dictionary<Guid, string>();
         foreach (var (attribute, value) in new (string, object)[] { ("sprk_enabled", false), ("statecode", 1) })
         {
-            var query = new QueryExpression("sprk_policy") { ColumnSet = new ColumnSet("sprk_policycode") };
+            var query = new QueryExpression("sprk_policy") { ColumnSet = new ColumnSet("sprk_policycode", RuleDomains.PolicyDomainColumn) };
             query.Criteria.AddCondition(attribute, ConditionOperator.Equal, value);
+            // ebilling-r1 task 070: the same Ontology allowlist as the enabled-policies readers, kept consistent; D-170 adds Billing for the close.
+            if (includeBilling) RuleDomains.AddClosableOnRetirementAllowlist(query);
+            else RuleDomains.AddOntologyPolicyAllowlist(query);
             var rows = await _entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false);
-            foreach (var row in rows.Entities) policies[row.Id] = row.GetAttributeValue<string>("sprk_policycode") ?? string.Empty;
+            foreach (var row in rows.Entities.Where(includeBilling ? RuleDomains.IsClosableOnRetirement : RuleDomains.IsOntologyPolicy))
+            {
+                policies[row.Id] = row.GetAttributeValue<string>("sprk_policycode") ?? string.Empty;
+            }
         }
 
         return policies;
@@ -383,21 +426,63 @@ public sealed class SignalClosureService
         return new SignalClosureOutcome(closed, changed, failed, AccessDenied: denied);
     }
 
-    /// <summary>Every Open or Acknowledged Signal of the policy (by the policy lookup, so no dedupe-key parsing and no Resolved
-    /// row can be returned), with the row version the conditional close needs.</summary>
-    private async Task<IReadOnlyList<ExistingSignal>> ReadOpenSignalsAsync(Guid policyId, CancellationToken ct)
+    /// <summary>A billing Signal's invoice subject (<c>sprk_signal.sprk_regardinginvoice</c> → <c>sprk_invoice</c>).</summary>
+    internal const string RegardingInvoiceColumn = "sprk_regardinginvoice";
+
+    /// <summary>A billing Signal's invoice-line subject (<c>sprk_signal.sprk_regardinginvoiceline</c> → <c>sprk_billingevent</c>).</summary>
+    internal const string RegardingInvoiceLineColumn = "sprk_regardinginvoiceline";
+
+    /// <summary>The Signal columns every PolicyRetired selection reads: what the close needs. Every environment's <c>sprk_signal</c>
+    /// has them.</summary>
+    internal static readonly string[] OpenSignalColumns =
+    {
+        "sprk_signalstatus", "sprk_policyversion", "sprk_dedupekey", "versionnumber",
+    };
+
+    /// <summary>The billing subject lookups the Procedure retire count maps to invoices (ebilling-r1 task 081). They exist only where
+    /// ebilling's Signal schema is deployed, and Dataverse answers 400 to a ColumnSet naming a column the table lacks, so only a caller
+    /// that opts in (<c>withBillingSubject</c>) selects them (ontology review F1, 2026-10-22).</summary>
+    internal static readonly string[] BillingSubjectColumns = { RegardingInvoiceColumn, RegardingInvoiceLineColumn };
+
+    /// <summary>
+    /// THE criteria of "a policy's open Signals" (ebilling-r1 task 081, model 15 answer 2 "preview = sweep"): every Open or Acknowledged
+    /// Signal of the policy, by the policy lookup, paged and ordered by id. Every caller's query is built here; <paramref name="withBillingSubject"/>
+    /// changes only the ColumnSet (it adds <see cref="BillingSubjectColumns"/>), never which rows are selected.
+    /// </summary>
+    internal static QueryExpression OpenSignalsOfPolicyQuery(Guid policyId, bool withBillingSubject)
     {
         var query = new QueryExpression("sprk_signal")
         {
-            ColumnSet = new ColumnSet("sprk_signalstatus", "sprk_policyversion", "sprk_dedupekey", "versionnumber"),
+            ColumnSet = new ColumnSet(withBillingSubject ? OpenSignalColumns.Concat(BillingSubjectColumns).ToArray() : OpenSignalColumns),
             PageInfo = new PagingInfo { Count = SignalEvaluator.PageSize, PageNumber = 1 },
         };
         query.Criteria.AddCondition("sprk_policy", ConditionOperator.Equal, policyId);
         query.Criteria.AddCondition("sprk_signalstatus", ConditionOperator.In,
             new object[] { SignalWriter.SignalStatusOpen, SignalWriter.SignalStatusAcknowledged });
         query.AddOrder("sprk_signalid", OrderType.Ascending);
+        return query;
+    }
 
-        var signals = new List<ExistingSignal>();
+    /// <summary>
+    /// THE selection of a policy's open Signals (ebilling-r1 task 081, model 15 answer 2 "preview = sweep"): every Open or Acknowledged
+    /// Signal of the policy, by the policy lookup (so no dedupe-key parsing and no Resolved row can be returned), with the row version the
+    /// conditional close needs and, when <paramref name="withBillingSubject"/>, the billing subject (invoice or invoice line); the rows
+    /// selected are <see cref="OpenSignalsOfPolicyQuery"/>'s for every caller. The job's Off/Retired sweep
+    /// (<see cref="ClosePoliciesNotInForceAsync"/>), the immediate retire close (<see cref="ClosePolicyRetiredNowAsync"/>,
+    /// <see cref="ClosePolicySignalsRetiredAsync"/>) and the Procedure retire PREVIEW (<c>ProcedureService.PreviewRetireAsync</c>; task 089's
+    /// override-removal preview) all call this one method, so a preview never claims a set the close does not touch. No other BFF code
+    /// selects a policy's open Signals for a PolicyRetired close (<c>ProcedureRetireSelectionGuardTests</c>). Reads only; never writes.
+    /// </summary>
+    /// <param name="withBillingSubject">Select the invoice and invoice-line lookups too. Only the Procedure retire (its preview and its close)
+    /// passes true: those columns exist only where ebilling's Signal schema is deployed, while the sweep and the admin retire close run in
+    /// every environment (ontology review F1, 2026-10-22). False: both subject ids come back null.</param>
+    /// <exception cref="InvalidOperationException">The policy has more than <see cref="SignalEvaluator.MaxPages"/> pages of open Signals.</exception>
+    internal virtual async Task<IReadOnlyList<OpenPolicySignal>> SelectOpenSignalsOfPolicyAsync(
+        Guid policyId, bool withBillingSubject, CancellationToken ct)
+    {
+        var query = OpenSignalsOfPolicyQuery(policyId, withBillingSubject);
+
+        var signals = new List<OpenPolicySignal>();
         for (var page = 1; ; page++)
         {
             if (page > SignalEvaluator.MaxPages)
@@ -408,7 +493,10 @@ public sealed class SignalClosureService
             var result = await _entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false);
             foreach (var row in result.Entities)
             {
-                signals.Add(ToOpenSignal(row));
+                signals.Add(new OpenPolicySignal(
+                    ToOpenSignal(row),
+                    row.GetAttributeValue<EntityReference>(RegardingInvoiceColumn)?.Id,
+                    row.GetAttributeValue<EntityReference>(RegardingInvoiceLineColumn)?.Id));
             }
 
             if (!result.MoreRecords) return signals;
@@ -434,6 +522,16 @@ public sealed class SignalClosureService
         Owner: null,
         PolicyVersionId: row.GetAttributeValue<EntityReference>("sprk_policyversion")?.Id);
 }
+
+/// <summary>
+/// One open Signal of a policy as <see cref="SignalClosureService.SelectOpenSignalsOfPolicyAsync"/> selects it (ebilling-r1 task 081): what the
+/// close needs, and the billing subject a caller-scoped count maps to an invoice. Both subject ids are null for a non-billing Signal, and
+/// whenever the selection was made without <c>withBillingSubject</c>.
+/// </summary>
+internal sealed record OpenPolicySignal(ExistingSignal Signal, Guid? RegardingInvoiceId, Guid? RegardingInvoiceLineId);
+
+/// <summary>What <see cref="SignalClosureService.ClosePolicySignalsRetiredAsync"/> did: the outcome, and the Signals it closed (with their subject).</summary>
+internal sealed record PolicySignalClosure(SignalClosureOutcome Outcome, IReadOnlyList<OpenPolicySignal> Closed);
 
 /// <summary>What <see cref="SignalClosureService.CloseSignalsOfDeletedPoliciesAsync"/> did (task 102b fix round 3).</summary>
 /// <param name="Outcome">The closes, as for every system closure (callers add it to the run's counts).</param>

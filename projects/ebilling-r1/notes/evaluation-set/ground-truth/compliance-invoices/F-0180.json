@@ -1,0 +1,38 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0180",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0180","generator_id":"gen_eval_set.py@1 F-0180","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0180.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-06"},
+ "header":{"firm":"Ravenscroft and Zeller LLP","firm_invoice_number":"2025076647","invoice_date":"2026-03-12","billing_period_start":"2026-01-01","billing_period_end":"2026-01-31","firm_matter_reference":"49371-0003","po_number":"PO-4537492","fees_total":4296.5,"expenses_total":2574.53,"adjustments_total":0.0,"total_due":6871.03,"currency":"USD"},
+ "timekeepers":[{"name":"Katya Eriksen","title":"Paralegal","rate":100.0,"billed_as":"Katya Eriksen"},{"name":"Leila Abernathy","title":"Partner","rate":370.0,"billed_as":"Leila Abernathy"},{"name":"Leila Mbeki","title":"Associate","rate":195.0,"billed_as":"Leila Mbeki"},{"name":"Louis Eriksen","title":"Senior Associate","rate":290.0,"billed_as":"Louis Eriksen"},{"name":"Mei Voss","title":"Associate","rate":215.0,"billed_as":"Mei Voss"},{"name":"Sofia Zielinski","title":"Of Counsel","rate":295.0,"billed_as":"Sofia Zielinski"},{"name":"Tomas Dunleavy","title":"Associate","rate":220.0,"billed_as":"Tomas Dunleavy"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2026-01-02","timekeeper":"Leila Mbeki","timekeeper_name":"Leila Mbeki","timekeeper_title":"Associate","title":"Assoc","hours":2.3,"rate":195.0,"amount":448.5,"narrative":"Attend trial day in the customs audit","codes":["L450","A109"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2026-01-08","timekeeper":"Katya Eriksen","timekeeper_name":"Katya Eriksen","timekeeper_title":"Paralegal","title":"Para","hours":2.4,"rate":100.0,"amount":240.0,"narrative":"Review draft expert disclosure for the lease dispute","codes":["L420","A104"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2026-01-08","timekeeper":"Leila Mbeki","timekeeper_name":"Leila Mbeki","timekeeper_title":"Associate","title":"Assoc","hours":0.6,"rate":195.0,"amount":117.0,"narrative":"Prepare expert witness for testimony in the employment claim","codes":["L420","A101"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2026-01-15","timekeeper":"Leila Abernathy","timekeeper_name":"Leila Abernathy","timekeeper_title":"Partner","title":"Ptr","hours":2.1,"rate":370.0,"amount":777.0,"narrative":"Review draft expert disclosure for the licensing dispute","codes":["L420","A104"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2026-01-16","timekeeper":"Leila Abernathy","timekeeper_name":"Leila Abernathy","timekeeper_title":"Partner","title":"Ptr","hours":0.7,"rate":370.0,"amount":259.0,"narrative":"Draft witness list for trial in the regulatory inquiry","codes":["L430","A103"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2026-01-20","timekeeper":"Katya Eriksen","timekeeper_name":"Katya Eriksen","timekeeper_title":"Paralegal","title":"Para","hours":0.3,"rate":100.0,"amount":30.0,"narrative":"Prepare expert witness for testimony in the construction contract","codes":["L420","A101"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2026-01-22","timekeeper":"Leila Abernathy","timekeeper_name":"Leila Abernathy","timekeeper_title":"Partner","title":"Ptr","hours":0.3,"rate":370.0,"amount":111.0,"narrative":"Prepare monthly status report to client regarding the distribution agreement","codes":["L190","A111"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2026-01-22","timekeeper":"Sofia Zielinski","timekeeper_name":"Sofia Zielinski","timekeeper_title":"Of Counsel","title":"O/C","hours":2.0,"rate":295.0,"amount":590.0,"narrative":"Attend trial day in the vendor agreement","codes":["L450","A109"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"fee","date":"2026-01-27","timekeeper":"Leila Mbeki","timekeeper_name":"Leila Mbeki","timekeeper_title":"Associate","title":"Assoc","hours":0.5,"rate":195.0,"amount":97.5,"narrative":"Draft mediation statement for trial in the lease dispute","codes":[],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"fee","date":"2026-01-27","timekeeper":"Tomas Dunleavy","timekeeper_name":"Tomas Dunleavy","timekeeper_title":"Associate","title":"Assoc","hours":2.6,"rate":220.0,"amount":572.0,"narrative":"Review court docket and calendar of pending deadlines for the distribution agreement","codes":["L190","A104"],"page":1,"narrative_style":"clear"},
+  {"n":11,"line_type":"fee","date":"2026-01-28","timekeeper":"Leila Mbeki","timekeeper_name":"Leila Mbeki","timekeeper_title":"Associate","title":"Assoc","hours":0.3,"rate":195.0,"amount":58.5,"narrative":"Prepare examination outlines for trial in the insurance coverage issue","codes":["L440","A101"],"page":1,"narrative_style":"clear"},
+  {"n":12,"line_type":"fee","date":"2026-01-29","timekeeper":"Louis Eriksen","timekeeper_name":"Louis Eriksen","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":2.1,"rate":290.0,"amount":609.0,"narrative":"Research standard for new trial in the insurance coverage issue","codes":["L460","A102"],"page":1,"narrative_style":"clear"},
+  {"n":13,"line_type":"fee","date":"2026-05-08","timekeeper":"Mei Voss","timekeeper_name":"Mei Voss","timekeeper_title":"Associate","title":"Assoc","hours":1.8,"rate":215.0,"amount":387.0,"narrative":"Attend hearing on discovery plan in the data incident","codes":["L450","A109"],"page":1,"narrative_style":"clear"},
+  {"n":14,"line_type":"expense","date":"2026-01-09","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":2.0,"rate":24.31,"amount":48.62,"narrative":"Overnight courier to Alder & Finch Ltd counsel","codes":["E107"],"page":1,"narrative_style":"clear"},
+  {"n":15,"line_type":"expense","date":"2026-01-20","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":888.0,"rate":0.32,"amount":284.16,"narrative":"Photocopies - 888 pages","codes":["E101"],"page":1,"narrative_style":"clear"},
+  {"n":16,"line_type":"expense","date":"2026-01-30","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":2241.75,"amount":2241.75,"narrative":"Consulting expert fees","codes":["E119"],"page":1,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["442 Harbor Road","Chicago","Tax ID 64-6279535"],"template":"T02","pages":2},
+ "rule_set_id":"RS-06",
+ "context":{"matter_open":"2024-09-18","matter_close":"2026-05-01","matter_budget":52484.0,"approved_timekeepers":["Leila Abernathy","Louis Eriksen","Mei Voss","Katya Eriksen","Katya Dunleavy","Leila Mbeki","Tomas Dunleavy"],"invoice_received_date":"2026-03-13"},
+ "expected_findings":[
+  {"rule_id":"RS-06-R01","rule_type":"ApprovedTimekeeper","scope":"line","line_refs":[8],"consequence":"Reject"},
+  {"rule_id":"RS-06-R04","rule_type":"ExpenseRule","scope":"line","line_refs":[15],"consequence":"Reduce"},
+  {"rule_id":"RS-06-R05","rule_type":"CoreRecordWindow","scope":"line","line_refs":[13],"consequence":"Flag"},
+  {"rule_id":"RS-06-R06","rule_type":"InvoiceAge","scope":"invoice","line_refs":[],"consequence":"Flag"},
+  {"rule_id":"RS-06-R10","rule_type":"RequiredData","scope":"line","line_refs":[9],"consequence":"Reject"}
+ ],
+ "seeded_violations":5
+}

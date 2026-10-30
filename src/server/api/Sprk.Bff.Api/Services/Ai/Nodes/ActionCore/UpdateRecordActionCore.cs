@@ -195,12 +195,47 @@ internal sealed class UpdateRecordActionCore
             throw new RecordOwnerUnresolvedException(input.EntityLogicalName, documentRefusal);
         }
 
-        Task Patch(CancellationToken ct) => _fieldMappingService.UpdateRecordFieldsAsync(
-            input.EntityLogicalName,
-            input.RecordId,
-            updatePayload,
-            ct,
-            input.ImpersonateSystemUserId);
+        async Task Patch(CancellationToken ct)
+        {
+            // ebilling-r1 #2081: an invoice or line is written UPDATE-ONLY (If-Match: *, impersonation kept). The guard below
+            // checked that the row exists; a row deleted since must not be re-created by the upsert. Refused like the guard.
+            if (InvoiceFamilyCoreRecordGuard.IsUpdateOnlyTarget(input.EntityLogicalName))
+            {
+                if (await InvoiceFamilyCoreRecordGuard.UpdateExistingAsync(
+                        _fieldMappingService, input.EntityLogicalName, input.RecordId, updatePayload,
+                        input.ImpersonateSystemUserId, notFoundAsReadFailed: input.ImpersonateSystemUserId is not null, ct)
+                        .ConfigureAwait(false) is { } gone)
+                {
+                    throw InvoiceFamilyCoreRecordGuard.RefusalException(input.EntityLogicalName, gone);
+                }
+
+                return;
+            }
+
+            await _fieldMappingService.UpdateRecordFieldsAsync(
+                input.EntityLogicalName,
+                input.RecordId,
+                updatePayload,
+                ct,
+                input.ImpersonateSystemUserId).ConfigureAwait(false);
+        }
+
+        // ebilling-r1 DEF-022 (#2056): an invoice or invoice line names exactly one core record, a line regards its invoice's,
+        // and an invoice re-file keeps its lines (D-96) — decided BEFORE the PATCH on the stored lookups (read as the app)
+        // overlaid with this payload. A refusal writes nothing and throws the guard's stable code (as an owner refusal does).
+        if (InvoiceFamilyCoreRecordGuard.GuardedLookups(input.EntityLogicalName) is not null)
+        {
+            using var familyScope = _scopeFactory.CreateScope();
+            if (await InvoiceFamilyCoreRecordGuard.CheckGenericUpdateAsync(
+                    input.EntityLogicalName, input.RecordId, updatePayload,
+                    familyScope.ServiceProvider.GetService<IGenericEntityService>(), cancellationToken,
+                    writeIsImpersonated: input.ImpersonateSystemUserId is not null).ConfigureAwait(false)
+                is { RefusalCode: { } familyCode })
+            {
+                // Code only: the guard read as the app, so its reason can name records the caller has not read.
+                throw InvoiceFamilyCoreRecordGuard.RefusalException(input.EntityLogicalName, familyCode);
+            }
+        }
 
         // Task 146: a lookup that FILES a child table under a record (a document onto a matter, an event onto a
         // secure project) is a reparent — the child's owner is re-derived over every parent it will have

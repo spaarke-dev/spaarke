@@ -56,6 +56,31 @@ public static class OntologyWriterTelemetry
                      "only guaranteed observation point for an invalid policy version.");
 
     /// <summary>
+    /// <c>customMetrics/billing.rule.invalid</c> (ebilling-r1 task 070 fix-round-1, K3): one billing policy version refused by
+    /// <see cref="Sprk.Bff.Api.Services.Signals.PolicyVersionValidator.TryPrepareBillingRule"/>. A separate instrument so
+    /// <c>ontology.policy.invalid</c> (and any Ontology dashboard or alert built on it) counts Ontology policies only; it rides
+    /// the existing <see cref="MeterName"/> because that Meter is already registered with the exporter. Dimensioned by
+    /// <c>reason</c> (<see cref="OntologyWriterFailureReason"/>, the same vocabulary).
+    /// </summary>
+    private static readonly Counter<long> BillingRuleInvalidCounter = Meter.CreateCounter<long>(
+        name: "billing.rule.invalid",
+        unit: "{policyversion}",
+        description: "Count of billing sprk_policyversion rows refused by the fail-closed billing gate, by reason. " +
+                     "Kept off ontology.policy.invalid so Ontology dashboards do not count billing rows.");
+
+    /// <summary>
+    /// <c>customMetrics/billing.rule.consequence_downgraded</c> (ebilling-r1 072 part W, the 073 review's K2): one stored billing
+    /// version whose consequence its rule type may not carry, evaluated with Flag instead of being dropped, so the check survives.
+    /// Beside <see cref="BillingRuleInvalidCounter"/> on the same Meter. Dimensioned by <c>rule_type</c> (the closed
+    /// <see cref="Sprk.Bff.Api.Services.Signals.RuleType"/> name set).
+    /// </summary>
+    private static readonly Counter<long> BillingRuleConsequenceDowngradedCounter = Meter.CreateCounter<long>(
+        name: "billing.rule.consequence_downgraded",
+        unit: "{policyversion}",
+        description: "Count of stored billing sprk_policyversion rows evaluated with Flag because their sprk_consequence is one " +
+                     "their rule type may not carry (publish, accept and edit refuse such a row; one written around them still runs).");
+
+    /// <summary>
     /// <c>customMetrics/ontology.decisionplan.refused</c> (task 036): one decision plan refused at read time because it
     /// does not resolve against the closed action catalog. Same <see cref="MeterName"/> (CLAUDE.md section 11: extend,
     /// do not stand up a second Meter). Dimensioned by <c>reason</c> (<see cref="DecisionPlanRefusalReason"/>).
@@ -92,6 +117,17 @@ public static class OntologyWriterTelemetry
     /// </summary>
     public static void RecordPolicyInvalid(string reason) =>
         PolicyInvalidCounter.Add(1, new KeyValuePair<string, object?>("reason", reason));
+
+    /// <summary>Records one billing policy version refused by the billing gate (ebilling-r1 task 070, K3).
+    /// <paramref name="reason"/> MUST be one of <see cref="OntologyWriterFailureReason"/>'s bounded constants; never on
+    /// <c>ontology.policy.invalid</c>.</summary>
+    public static void RecordBillingRuleInvalid(string reason) =>
+        BillingRuleInvalidCounter.Add(1, new KeyValuePair<string, object?>("reason", reason));
+
+    /// <summary>Records one stored billing version evaluated with Flag in place of a consequence its type may not carry (072 part W).
+    /// <paramref name="ruleType"/> is a <see cref="Sprk.Bff.Api.Services.Signals.RuleType"/> name.</summary>
+    public static void RecordBillingRuleConsequenceDowngraded(string ruleType) =>
+        BillingRuleConsequenceDowngradedCounter.Add(1, new KeyValuePair<string, object?>("rule_type", ruleType));
 
     /// <summary>
     /// Records one refused decision plan (task 036). <paramref name="reason"/> MUST be one of
@@ -383,6 +419,31 @@ public static class OntologyWriterFailureReason
     /// authored schema yet (<see cref="Sprk.Bff.Api.Services.Signals.RuleType.Threshold"/> /
     /// <see cref="Sprk.Bff.Api.Services.Signals.RuleType.Switch"/>, task 020 scope).</summary>
     public const string RuleTypeUnsupported = "rule_type_unsupported";
+
+    /// <summary>ebilling-r1 task 070 fix-round-1: a save-time caller named an expected rule domain
+    /// (<see cref="Sprk.Bff.Api.Services.Signals.RuleDomain"/>) and the version's <c>sprk_ruletype</c> is a closed-set member of
+    /// ANOTHER domain (an Ontology policy carrying a billing type, or the reverse). Distinct from
+    /// <see cref="RuleTypeUnsupported"/>, which means the type is unknown or the consumer cannot evaluate it at all.</summary>
+    public const string RuleTypeWrongDomain = "rule_type_wrong_domain";
+
+    /// <summary>ebilling-r1 task 081 (procedure model 7.2, O-24): a policy version names a Procedure Version
+    /// (<c>sprk_policyversion.sprk_procedureversion</c>) but its policy is not Billing-domain. Ontology-area Procedures are document-only
+    /// in R1, so no Ontology (or domain-less) policy version is ever keyed to a Procedure Version. Returned by
+    /// <see cref="Sprk.Bff.Api.Services.Signals.PolicyVersionValidator.ValidateProcedureVersionLink"/>.</summary>
+    public const string ProcedureVersionWrongDomain = "procedure_version_wrong_domain";
+
+    /// <summary>ebilling-r1 task 073 (FR-26, I-5, D-89): a billing version's <c>sprk_consequence</c> is one its rule type may not carry
+    /// (Reject on a type that is not reject-eligible or holds only, or a value outside the defined three). Returned by
+    /// <see cref="Sprk.Bff.Api.Services.Signals.PolicyVersionValidator.ValidateForSave"/> when it is given the consequence (the
+    /// publish path), and by <see cref="Sprk.Bff.Api.Services.Signals.PolicyVersionValidator.TryPrepareBillingRule"/> for a stored row
+    /// (logged and metered on <c>billing.rule.invalid</c>).</summary>
+    public const string ConsequenceNotAllowed = "consequence_not_allowed";
+
+    /// <summary>ebilling-r1 task 115: a billing body is schema-valid but states a form its type cannot evaluate yet, because the facts it
+    /// needs are not extracted: an AddedFee allowance of <c>notAllowed</c> (no per-line fee kind) or <c>afterDays</c> (no per-line fee
+    /// kind and no due date). Returned at save and by the billing gate (<see cref="Sprk.Bff.Api.Services.Signals.PolicyVersionValidator.TryPrepareBillingRule"/>,
+    /// logged and metered on <c>billing.rule.invalid</c>), so such a rule is never stored as publishable nor evaluated as "holds".</summary>
+    public const string RuleFormNotSupported = "rule_form_not_supported";
 
     /// <summary>The <c>sprk_rulebody</c> exceeds
     /// <see cref="Sprk.Bff.Api.Services.Signals.RuleBodySchemaValidator.MaxRuleBodyLength"/> characters. Refused

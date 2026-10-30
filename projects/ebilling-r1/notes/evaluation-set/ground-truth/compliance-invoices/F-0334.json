@@ -1,0 +1,25 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0334",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0334","generator_id":"gen_eval_set.py@1 F-0334","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0334.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-04"},
+ "header":{"firm":"Garrison & Cranmer LLP","firm_invoice_number":"INV-2025-75077","invoice_date":"2025-05-02","billing_period_start":"2025-04-01","billing_period_end":"2025-04-30","firm_matter_reference":"75318-0002","po_number":"PO-4568464","fees_total":3017.5,"expenses_total":2715.8,"adjustments_total":0.0,"total_due":5733.3,"currency":"USD"},
+ "timekeepers":[{"name":"Dalia Marchetti","title":"Paralegal","rate":210.0,"billed_as":"DM"},{"name":"Imani Whitfield","title":"Associate","rate":315.0,"billed_as":"IW"},{"name":"Peter Brennan","title":"Of Counsel","rate":600.0,"billed_as":"PB"},{"name":"Rafael Ashdown","title":"Associate","rate":365.0,"billed_as":"RA"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2025-04-01","timekeeper":"RA","timekeeper_name":"Rafael Ashdown","timekeeper_title":"Associate","title":"Assoc","hours":1.5,"rate":365.0,"amount":547.5,"narrative":"Attend deposition of Caldera Energy corporate representative","codes":["L330","A109"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2025-04-03","timekeeper":"DM","timekeeper_name":"Dalia Marchetti","timekeeper_title":"Paralegal","title":"Para","hours":1.5,"rate":210.0,"amount":315.0,"narrative":"Draft interrogatory responses regarding deficiencies in Bluepine Holdings responses","codes":["L350","A103"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2025-04-08","timekeeper":"DM","timekeeper_name":"Dalia Marchetti","timekeeper_title":"Paralegal","title":"Para","hours":1.0,"rate":210.0,"amount":210.0,"narrative":"Draft requests for production in the licensing dispute","codes":["L250","A103"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2025-04-11","timekeeper":"DM","timekeeper_name":"Dalia Marchetti","timekeeper_title":"Paralegal","title":"Para","hours":3.0,"rate":210.0,"amount":630.0,"narrative":"Review documents produced by Redstone Mining for responsiveness","codes":["L320","A104"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2025-04-14","timekeeper":"IW","timekeeper_name":"Imani Whitfield","timekeeper_title":"Associate","title":"Assoc","hours":1.75,"rate":315.0,"amount":551.25,"narrative":"Analyze exposure and damages model for the supply agreement","codes":["L120","A104"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2025-04-15","timekeeper":"DM","timekeeper_name":"Dalia Marchetti","timekeeper_title":"Paralegal","title":"Para","hours":0.75,"rate":210.0,"amount":157.5,"narrative":"Draft motion to compel regarding deficiencies in Caldera Energy responses","codes":["L350","A103"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2025-04-16","timekeeper":"RA","timekeeper_name":"Rafael Ashdown","timekeeper_title":"Associate","title":"Assoc","hours":1.25,"rate":365.0,"amount":456.25,"narrative":"Meet and confer with counsel for Larkspur Medical regarding discovery dispute","codes":["L350","A107"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2025-04-17","timekeeper":"PB","timekeeper_name":"Peter Brennan","timekeeper_title":"Of Counsel","title":"O/C","hours":0.25,"rate":600.0,"amount":150.0,"narrative":"Review privilege log entries before service","codes":["L140","A104"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"expense","date":"2025-04-24","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":2715.8,"amount":2715.8,"narrative":"Consulting expert fees","codes":["E119"],"page":1,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["668 Harbor Road","Chicago","Tax ID 92-5682413"],"template":"T17","pages":2},
+ "rule_set_id":"RS-04",
+ "context":{"matter_open":"2024-06-17","matter_close":"2025-07-29","matter_budget":47933.0,"approved_timekeepers":["Dalia Marchetti","Nadia Esposito","Ingrid Lockhart","Imani Whitfield","Beatrix Brennan","Oliver Lockhart","Rafael Ashdown","Peter Brennan"],"invoice_received_date":"2025-05-13"},
+ "expected_findings":[],
+ "seeded_violations":0
+}

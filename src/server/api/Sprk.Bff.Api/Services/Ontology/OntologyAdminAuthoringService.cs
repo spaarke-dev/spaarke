@@ -67,6 +67,11 @@ public sealed partial class OntologyAdminAuthoringService
     /// <see cref="PolicyVersionValidator.AuthorableColumns"/> (task 102a, owner option 101(b)).</summary>
     internal const string ReasonColumnNotAuthorable = "ontology.admin.column_not_authorable";
 
+    /// <summary>The stable code every authoring route (validate, dry run, save, publish) returns when the rule type belongs to another
+    /// domain, e.g. a billing type (ebilling-r1 task 070, FR-24): the validator refuses it as
+    /// <see cref="OntologyWriterFailureReason.RuleTypeWrongDomain"/> before any body check.</summary>
+    internal const string ReasonRuleTypeWrongDomain = "ontology.admin.rule_type_wrong_domain";
+
     /// <summary>The stable code a plan refused for <see cref="DecisionPlanRefusalReason.DuplicateAction"/> carries: a code listed twice
     /// in one list, or in both <c>actions</c> and <c>nextSteps</c> (PR #2054 review). The catalog offers <c>assign-work</c> in both the
     /// Decide lane's actions and the next steps, so the wizard must pick one place for it.</summary>
@@ -224,14 +229,12 @@ public sealed partial class OntologyAdminAuthoringService
     /// this service carries <see cref="Filter"/>, and <see cref="Admits"/> re-checks the row it returns; a new policy is created with
     /// <see cref="Value"/>.
     /// </summary>
-    // Swap to RuleDomains (ebilling-r1 task 070, #1911) when it lands
     private static class OntologyDomain
     {
-        /// <summary>The live <c>sprk_policy.sprk_domain</c> option "Ontology" (spaarkedev1, 2026-10-16: Billing 100000000,
-        /// Ontology 100000001, Docketing 100000002).</summary>
-        public const int Value = 100000001;
+        /// <summary>The <c>sprk_policy.sprk_domain</c> option "Ontology", from <see cref="RuleDomains"/> (ebilling-r1 task 070).</summary>
+        public const int Value = RuleDomains.PolicyDomainOntology;
 
-        public const string Column = "sprk_domain";
+        public const string Column = RuleDomains.PolicyDomainColumn;
 
         public static string Filter => $"({Column} eq null or {Column} eq {Value.ToString(CultureInfo.InvariantCulture)})";
 
@@ -1584,16 +1587,21 @@ public sealed partial class OntologyAdminAuthoringService
         {
             var field = result.Reason switch
             {
-                OntologyWriterFailureReason.RuleTypeUnsupported => "ruleType",
+                OntologyWriterFailureReason.RuleTypeUnsupported or OntologyWriterFailureReason.RuleTypeWrongDomain => "ruleType",
                 OntologyWriterFailureReason.TemplateMalformed or OntologyWriterFailureReason.TemplateTokenOutsideReadSet => "messageTemplate",
                 _ => "ruleBody",
             };
             errors[field] = result.Errors.ToArray();
+            // A billing rule type (ebilling-r1 070) is refused by ValidateForAuthoring (RuleDomain.Ontology) as RuleTypeWrongDomain,
+            // reported on ruleType with ReasonRuleTypeWrongDomain as its code, before any body check: nothing is compiled or evaluated.
             return new RuleCheck(null, authoring.TemplateEligibleFields,
-                result.Reason == OntologyWriterFailureReason.ColumnNotAuthorable ? ReasonColumnNotAuthorable : null);
+                result.Reason == OntologyWriterFailureReason.ColumnNotAuthorable ? ReasonColumnNotAuthorable
+                : result.Reason == OntologyWriterFailureReason.RuleTypeWrongDomain ? ReasonRuleTypeWrongDomain
+                : null);
         }
 
-        // ValidateForAuthoring accepted it, so the type is Existence or Threshold (Switch is refused, D-16).
+        // ValidateForAuthoring accepted it, so the type is an Ontology type, Existence or Threshold: a billing type was refused above
+        // as RuleTypeWrongDomain, and Switch is refused (D-16).
         return new RuleCheck(RuleBodySchemaValidator.TryParseRuleType(ruleType, out var parsed) ? parsed.ToString() : null,
             authoring.TemplateEligibleFields, null);
     }

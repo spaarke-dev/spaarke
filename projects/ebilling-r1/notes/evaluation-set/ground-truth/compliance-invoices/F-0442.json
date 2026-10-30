@@ -1,0 +1,30 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0442",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0442","generator_id":"gen_eval_set.py@1 F-0442","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0442.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-04"},
+ "header":{"firm":"Kestrel and Whitcombe LLP","firm_invoice_number":"INV-2026-32631","invoice_date":"2025-04-01","billing_period_start":"2025-03-01","billing_period_end":"2025-03-31","firm_matter_reference":"59070-0003","po_number":"PO-4558215","fees_total":8328.75,"expenses_total":185.92,"adjustments_total":0.0,"total_due":8514.67,"currency":"USD"},
+ "timekeepers":[{"name":"Helena Abernathy","title":"Associate","rate":305.0,"billed_as":"HA"},{"name":"Jordan Okafor","title":"Paralegal","rate":170.0,"billed_as":"JO"},{"name":"Marcus Voss","title":"Associate","rate":305.0,"billed_as":"MV"},{"name":"Naomi Whitfield","title":"Partner","rate":715.0,"billed_as":"NW"},{"name":"Peter Brennan","title":"Partner","rate":575.0,"billed_as":"PB"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2025-03-06","timekeeper":"MV","timekeeper_name":"Marcus Voss","timekeeper_title":"Associate","title":"Assoc","hours":2.25,"rate":305.0,"amount":686.25,"narrative":"Prepare for oral argument in the warranty claim","codes":["L530","A101"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2025-03-13","timekeeper":"NW","timekeeper_name":"Naomi Whitfield","timekeeper_title":"Partner","title":"Ptr","hours":2.5,"rate":715.0,"amount":1787.5,"narrative":"Prepare for oral argument in the insurance coverage issue","codes":["L530","A101"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2025-03-13","timekeeper":"HA","timekeeper_name":"Helena Abernathy","timekeeper_title":"Associate","title":"Assoc","hours":2.75,"rate":305.0,"amount":838.75,"narrative":"Plan strategy for upcoming phase of the customs audit with team","codes":["L120","A101"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2025-03-17","timekeeper":"HA","timekeeper_name":"Helena Abernathy","timekeeper_title":"Associate","title":"Assoc","hours":1.0,"rate":305.0,"amount":305.0,"narrative":"Prepare case assessment memorandum regarding the supply agreement and recommended strategy","codes":["L120","A103"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2025-03-19","timekeeper":"PB","timekeeper_name":"Peter Brennan","timekeeper_title":"Partner","title":"Ptr","hours":1.25,"rate":575.0,"amount":718.75,"narrative":"Revise appellate brief after cite check","codes":["L520","A104"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2025-03-20","timekeeper":"JO","timekeeper_name":"Jordan Okafor","timekeeper_title":"Paralegal","title":"Para","hours":2.75,"rate":170.0,"amount":467.5,"narrative":"Review court docket and calendar of pending deadlines for the licensing dispute","codes":["L190","A104"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2025-03-21","timekeeper":"JO","timekeeper_name":"Jordan Okafor","timekeeper_title":"Paralegal","title":"Para","hours":1.25,"rate":170.0,"amount":212.5,"narrative":"Review court docket and calendar of pending deadlines for the construction contract","codes":["L190","A104"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2025-03-21","timekeeper":"NW","timekeeper_name":"Naomi Whitfield","timekeeper_title":"Partner","title":"Ptr","hours":2.5,"rate":715.0,"amount":1787.5,"narrative":"Plan strategy for upcoming phase of the regulatory inquiry with team","codes":["L120","A101"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"fee","date":"2025-03-24","timekeeper":"HA","timekeeper_name":"Helena Abernathy","timekeeper_title":"Associate","title":"Assoc","hours":0.25,"rate":305.0,"amount":76.25,"narrative":"Prepare for oral argument in the licensing dispute","codes":["L530","A101"],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"fee","date":"2025-03-25","timekeeper":"MV","timekeeper_name":"Marcus Voss","timekeeper_title":"Associate","title":"Assoc","hours":2.75,"rate":305.0,"amount":838.75,"narrative":"Draft appellate brief in the lease dispute","codes":["L520","A103"],"page":1,"narrative_style":"clear"},
+  {"n":11,"line_type":"fee","date":"2025-03-26","timekeeper":"HA","timekeeper_name":"Helena Abernathy","timekeeper_title":"Associate","title":"Assoc","hours":1.5,"rate":305.0,"amount":457.5,"narrative":"Plan strategy for upcoming phase of the vendor agreement with team","codes":["L120","A101"],"page":1,"narrative_style":"clear"},
+  {"n":12,"line_type":"fee","date":"2025-03-28","timekeeper":"HA","timekeeper_name":"Helena Abernathy","timekeeper_title":"Associate","title":"Assoc","hours":0.5,"rate":305.0,"amount":152.5,"narrative":"Plan strategy for upcoming phase of the data incident with team","codes":["L120","A101"],"page":1,"narrative_style":"clear"},
+  {"n":13,"line_type":"expense","date":"2025-03-20","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":56.0,"rate":0.65,"amount":36.4,"narrative":"Mileage to courthouse","codes":["E109"],"page":1,"narrative_style":"clear"},
+  {"n":14,"line_type":"expense","date":"2025-03-28","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":149.52,"amount":149.52,"narrative":"Court filing fee","codes":["E112"],"page":1,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["772 Congress Boulevard","Dallas","Tax ID 30-2077249"],"template":"T23","pages":2},
+ "rule_set_id":"RS-04",
+ "context":{"matter_open":"2024-05-08","matter_close":"2025-06-29","matter_budget":59058.0,"approved_timekeepers":["Peter Brennan","Marcus Voss","Helena Abernathy","Naomi Whitfield","Jordan Okafor","Gideon Blackwood"],"invoice_received_date":"2025-04-19"},
+ "expected_findings":[],
+ "seeded_violations":0
+}

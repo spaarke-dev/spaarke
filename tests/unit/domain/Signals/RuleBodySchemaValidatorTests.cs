@@ -245,7 +245,9 @@ public class RuleBodySchemaValidatorTests
     [Fact]
     public void RuleType_ClosedSet_ContainsExactlyThresholdSwitchExistence()
     {
-        var members = Enum.GetValues<RuleType>();
+        // ebilling-r1 task 070 (FR-24) added the eleven Billing members to the same enum; the Ontology domain is still
+        // exactly these three (the billing members are pinned in Billing/BillingRuleCatalogueTests).
+        var members = Enum.GetValues<RuleType>().Where(t => RuleDomains.DomainOf(t) == RuleDomain.Ontology);
 
         members.Should().BeEquivalentTo(new[] { RuleType.Threshold, RuleType.Switch, RuleType.Existence });
     }

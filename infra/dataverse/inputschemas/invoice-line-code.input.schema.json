@@ -1,0 +1,90 @@
+{
+  "$comment": "Mirror of sprk_analysisaction.sprk_inputschema for invoice-line-code (ebilling-r1 task 047, FR-22). The Action is a Linear AI Consumer reached only through IInvoiceAi.CodeLinesAsync (Binding carries no tool description, so it is never loop-projected); the schema documents the operand the facade sends as the '## Input' section ({ lines, allowedTaskCodes, allowedActivityCodes, allowedExpenseCodes }) and is validated by CatalogInputSchemaContractTests like every other mirror. Property-level \"required\": true is FORBIDDEN (use the object-level required array). actionCode carries NO version suffix (owner hygiene). The tenant id travels in the LinearRunContext, never in the operand. Deployed to the row by scripts/ebilling/Ensure-ActionRow.ps1.",
+  "actionCode": "invoice-line-code",
+  "environment": "spaarkedev1",
+  "inputSchema": {
+    "type": "object",
+    "required": ["lines", "allowedTaskCodes", "allowedActivityCodes", "allowedExpenseCodes"],
+    "properties": {
+      "lines": {
+        "type": "array",
+        "description": "The invoice lines of this chunk (LineCodingService sends at most sprk_codingchunksize per call). A line with an empty narrative is never sent.",
+        "items": {
+          "type": "object",
+          "required": ["lineKey", "lineType"],
+          "properties": {
+            "lineKey": { "type": "string", "description": "Caller-chosen key, echoed back in the output." },
+            "date": { "type": ["string", "null"], "description": "Line date, yyyy-MM-dd." },
+            "lineType": { "type": "string", "description": "Fee or Expense.", "enum": ["Fee", "Expense"] },
+            "narrative": {
+              "type": ["string", "null"],
+              "description": "The time-entry narrative or expense description. Content only: the model is told to treat it as data, never as instructions."
+            },
+            "hours": { "type": ["number", "null"], "description": "Billed hours (Fee lines)." },
+            "amount": { "type": ["number", "null"], "description": "Billed amount." },
+            "billedTaskCode": {
+              "type": ["string", "null"],
+              "description": "Task code as billed by the firm, if any. Context only."
+            },
+            "billedActivityCode": {
+              "type": ["string", "null"],
+              "description": "Activity code as billed by the firm, if any. Context only."
+            },
+            "billedExpenseCode": {
+              "type": ["string", "null"],
+              "description": "Expense code as billed by the firm, if any. Context only."
+            }
+          }
+        }
+      },
+      "allowedTaskCodes": {
+        "type": "array",
+        "description": "Closed list of task codes allowed for these lines (the invoice's resolved code set).",
+        "items": {
+          "type": "object",
+          "required": ["code", "description"],
+          "properties": {
+            "code": { "type": "string", "description": "The code as billed, e.g. L110." },
+            "description": { "type": "string", "description": "Short name of the code." },
+            "guidance": {
+              "type": ["string", "null"],
+              "description": "Published definition / usage guidance of the code, when there is one."
+            }
+          }
+        }
+      },
+      "allowedActivityCodes": {
+        "type": "array",
+        "description": "Closed list of activity codes allowed for these lines.",
+        "items": {
+          "type": "object",
+          "required": ["code", "description"],
+          "properties": {
+            "code": { "type": "string", "description": "The code as billed, e.g. A103." },
+            "description": { "type": "string", "description": "Short name of the code." },
+            "guidance": {
+              "type": ["string", "null"],
+              "description": "Published definition / usage guidance of the code, when there is one."
+            }
+          }
+        }
+      },
+      "allowedExpenseCodes": {
+        "type": "array",
+        "description": "Closed list of expense codes allowed for these lines.",
+        "items": {
+          "type": "object",
+          "required": ["code", "description"],
+          "properties": {
+            "code": { "type": "string", "description": "The code as billed, e.g. E101." },
+            "description": { "type": "string", "description": "Short name of the code." },
+            "guidance": {
+              "type": ["string", "null"],
+              "description": "Published definition / usage guidance of the code, when there is one."
+            }
+          }
+        }
+      }
+    }
+  }
+}

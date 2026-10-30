@@ -97,8 +97,10 @@ internal static class SecureChildLineage
             ("sprk_analysisid", "sprk_analysis")),
         T("sprk_attachmentartifact", "sprk_attachmentartifacts",
             ("sprk_document", "sprk_document"), ("sprk_emailartifact", "sprk_emailartifact")),
+        // ebilling-r1 task 013 (FR-05): + sprk_regardingworkassignment (ebilling-r1 task 010, live spaarkedev1 2026-10-15).
         T("sprk_billingevent", "sprk_billingevents",
-            ("sprk_invoice", "sprk_invoice"), ("sprk_matter", Matter), ("sprk_project", Project)),
+            ("sprk_invoice", "sprk_invoice"), ("sprk_matter", Matter), ("sprk_project", Project),
+            ("sprk_regardingworkassignment", WorkAssignment)),
         T("sprk_budget", "sprk_budgets",
             ("sprk_matter", Matter), ("sprk_project", Project)),
         // Ontology platform R1 task 044 (D-33/D-38): the revision a decision records is owned by the secure team under a Secure
@@ -138,8 +140,14 @@ internal static class SecureChildLineage
         // out, as on the Signal row (see the remarks). The typed core lookups STAY: they are the decision context (D-34, the
         // core the decision was made on) and a lineage parent, not a stamp awaiting retirement. Ontology task 144 K1 and 145
         // keep them; the stamp follows the subject, the typed core does not, so stamp == core is no reason to retire one.
+        // ebilling-r1 task 026 (FR-15, D-94): + the invoice-line subject, sprk_regardinginvoiceline -> sprk_billingevent (live
+        // spaarkedev1 2026-10-16). An explicit tuple: Regarding("sprk_billingevent") would build sprk_regardingbillingevent.
         T("sprk_decisionrecord", "sprk_decisionrecords",
-            new[] { ("sprk_matter", Matter), ("sprk_project", Project), ("sprk_workassignment", WorkAssignment) }
+            new[]
+                {
+                    ("sprk_matter", Matter), ("sprk_project", Project), ("sprk_workassignment", WorkAssignment),
+                    ("sprk_regardinginvoiceline", "sprk_billingevent"),
+                }
                 .Concat(Regarding("sprk_communication", "sprk_document", "sprk_event", "sprk_invoice", Matter, Project,
                     "sprk_todo", WorkAssignment))
                 .ToArray()),
@@ -169,9 +177,36 @@ internal static class SecureChildLineage
             ("sprk_event", "sprk_event")),
         T("sprk_fileversion", "sprk_fileversions",
             ("sprk_document", "sprk_document")),
+        // ebilling-r1 task 013 (FR-05): + sprk_regardingworkassignment (task 012, live spaarkedev1 2026-10-15). Two other task
+        // 012 lookups are left out pending unified-access-control-r2: sprk_supersedesinvoice (the invoice a resubmission
+        // replaces — not a filing; as a lineage parent it would also join ParentLineage and the external invoices module's
+        // live-parent rule) and sprk_billingexport (an export batch is not a codified table). Task 013 notes, section 10.
         T("sprk_invoice", "sprk_invoices",
             new[] { ("sprk_matter", Matter), ("sprk_project", Project) }
-                .Concat(Regarding("sprk_agreement")).ToArray()),
+                .Concat(Regarding("sprk_agreement", WorkAssignment)).ToArray()),
+        // ebilling-r1 task 013 (FR-05, D-82): the invoice family's new tables, lookups read live, spaarkedev1 2026-10-15
+        // (EntityDefinitions(<table>)/ManyToOneRelationships). Each names its core record through the CoreAncestorLookups
+        // trio; the vendor organization, the submitter / decider contact and the issuing organization are identities, not
+        // parents.
+        // A submission's core record comes first, then its submitted PDF, so a row read with these columns names its core
+        // record as its ownership primary; the invoice and the report it produced, and the submission it resubmits, follow
+        // (UAC-r2 ruling on RecordFamilyEdges, 2026-10-28: outputs and a peer, not its filing).
+        T("sprk_invoicesubmission", "sprk_invoicesubmissions",
+            Regarding(Matter, Project, WorkAssignment).Concat(new[]
+            {
+                ("sprk_document", "sprk_document"), ("sprk_invoice", "sprk_invoice"), ("sprk_reportdocument", "sprk_document"),
+                ("sprk_resubmissionof", "sprk_invoicesubmission"),
+            }).ToArray()),
+        // Its sprk_decisionrecord lookup is left out: a Decision Record is stamped outside the access taxonomy and nothing is
+        // filed under one but a Signal (CoreAncestorResolver.StampedOutsideAccessTaxonomy, uac-r2's condition 3).
+        T("sprk_invoiceapproval", "sprk_invoiceapprovals",
+            new[] { ("sprk_invoice", "sprk_invoice") }
+                .Concat(Regarding(Matter, Project, WorkAssignment)).ToArray()),
+        T("sprk_externalidentifier", "sprk_externalidentifiers",
+            Regarding("sprk_invoice", Matter, Project, WorkAssignment)),
+        T("sprk_invoicecorrection", "sprk_invoicecorrections",
+            new[] { ("sprk_invoice", "sprk_invoice"), ("sprk_invoiceline", "sprk_billingevent") }
+                .Concat(Regarding(Matter, Project, WorkAssignment)).ToArray()),
         T("sprk_kpiassessment", "sprk_kpiassessments",
             ("sprk_matter", Matter), ("sprk_project", Project), ("sprk_reportcard", "sprk_reportcard")),
         T("sprk_memo", "sprk_memos",
@@ -193,8 +228,13 @@ internal static class SecureChildLineage
         // Decision Record. sprk_regardingservicerequest is left out (see the remarks); sprk_policy, sprk_policyversion and
         // sprk_corerecordtype (a catalog row) are not filing parents. #2084: the rule and its version are family tables now, but a
         // Signal CITES the rule that raised it and is not filed under it (RecordOwnershipResolver.CitationLookups).
+        // ebilling-r1 task 026 (FR-15, D-94): + sprk_regardinginvoiceline -> sprk_billingevent, as on the Decision Record row.
         T("sprk_signal", "sprk_signals",
-            new[] { ("sprk_matter", Matter), ("sprk_decisionrecord", "sprk_decisionrecord") }
+            new[]
+                {
+                    ("sprk_matter", Matter), ("sprk_decisionrecord", "sprk_decisionrecord"),
+                    ("sprk_regardinginvoiceline", "sprk_billingevent"),
+                }
                 .Concat(Regarding("sprk_communication", "sprk_document", "sprk_event", "sprk_invoice", Matter, Project,
                     "sprk_todo", WorkAssignment))
                 .ToArray()),

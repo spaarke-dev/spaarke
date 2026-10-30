@@ -185,9 +185,13 @@ public sealed class ExternalLiveParentRuleTests
         var plain = new MessageRootLookups(null, M.ToString(), null);
         var carrier = new MessageRootLookups(null, M.ToString(), null, new Dictionary<string, JsonElement> { ["_sprk_regardinginvoice_value"] = JsonSerializer.SerializeToElement(C.ToString()) });
 
-        var mOnly = await ExternalMessageEndpoints.SecureRootsFilter(Reader(M), NothingOpen, NullLogger.Instance, FiledUnder(X))
+        // ebilling-r1 task 098: the carrier regards an invoice; the (a') predicate hides nothing here (this is the root rule).
+        var noneHidden = Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceHidingStub.NoneHidden().Seam;
+        var mOnly = await ExternalMessageEndpoints.SecureRootsFilter(
+                Reader(M), NothingOpen, NullLogger.Instance, FiledUnder(X), hideInvoices: noneHidden)
             (new[] { plain, carrier }, default);
-        var both = await ExternalMessageEndpoints.SecureRootsFilter(Reader(M, X), NothingOpen, NullLogger.Instance, FiledUnder(X))
+        var both = await ExternalMessageEndpoints.SecureRootsFilter(
+                Reader(M, X), NothingOpen, NullLogger.Instance, FiledUnder(X), hideInvoices: noneHidden)
             (new[] { plain, carrier }, default);
 
         mOnly(plain).Should().BeTrue();

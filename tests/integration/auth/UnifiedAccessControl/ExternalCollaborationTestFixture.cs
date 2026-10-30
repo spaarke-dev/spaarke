@@ -51,6 +51,14 @@ public class ExternalCollaborationTestFixture : WorkspaceTestFixture
     /// </summary>
     internal WorkforceCeilingDouble WorkforceCeiling { get; } = new();
 
+    /// <summary>
+    /// ebilling-r1 task 098: the (a') invoice predicate this host answers with. Defaults to hiding nothing, so a test written
+    /// before the predicate keeps its meaning; an (a') route test sets one that hides (the predicate itself is tested over
+    /// the real reads in <c>ExternalInvoiceVisibilityTests</c>).
+    /// </summary>
+    internal Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceHidingStub InvoiceHiding { get; set; } =
+        Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceHidingStub.NoneHidden();
+
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         base.ConfigureWebHost(builder);
@@ -65,6 +73,10 @@ public class ExternalCollaborationTestFixture : WorkspaceTestFixture
                 WorkforceCeiling.Inner = ActivatorUtilities.CreateInstance<UserPrivilegeChecker>(sp);
                 return WorkforceCeiling;
             });
+
+            services.RemoveAll<Sprk.Bff.Api.Infrastructure.ExternalAccess.ExternalInvoiceHiding>();
+            services.AddScoped<Sprk.Bff.Api.Infrastructure.ExternalAccess.ExternalInvoiceHiding>(
+                _ => (caller, invoiceIds, ct) => InvoiceHiding.Seam(caller, invoiceIds, ct));
 
             services.Configure<AuthorizationOptions>(options =>
             {
@@ -95,11 +107,12 @@ internal sealed class WorkforceCeilingDouble : IDataversePrivilegeChecker
     public static IReadOnlyDictionary<string, AccessRights> OwnerPrerequisite { get; } = new Dictionary<string, AccessRights>
     {
         ["sprk_servicerequest"] = AccessRights.Create | AccessRights.Read | AccessRights.AppendTo | AccessRights.Delete,
-        ["sprk_document"] = AccessRights.Create | AccessRights.Read | AccessRights.Delete,
+        ["sprk_document"] = AccessRights.Create | AccessRights.Read | AccessRights.AppendTo | AccessRights.Delete,
         ["sprk_project"] = AccessRights.Read | AccessRights.AppendTo,
         ["sprk_matter"] = AccessRights.Read | AccessRights.AppendTo,
         ["sprk_workassignment"] = AccessRights.Read | AccessRights.AppendTo,
         ["sprk_invoice"] = AccessRights.Read | AccessRights.AppendTo,
+        ["sprk_invoicesubmission"] = AccessRights.Create | AccessRights.Read,
         ["sprk_todo"] = AccessRights.Create | AccessRights.Read | AccessRights.Write | AccessRights.Delete,
         ["sprk_event"] = AccessRights.Create | AccessRights.Read | AccessRights.Delete,
         ["contact"] = AccessRights.Read,

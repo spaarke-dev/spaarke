@@ -4,7 +4,7 @@
     <title>Assign Task: "Send email notification" (ticked by default) emails the assignee and raises a model-driven bell notification (D-194, UAT round 2 item 2)</title>
     <phase>11 UAT</phase>
     <gate>startable after 167 merges (both change DecisionActionCatalog.cs, DecisionActionExecutors.cs and ParameterFields.tsx)</gate>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Adds a parameter kind, a post-commit side effect that sends email on the user's behalf, and an ADR-004 job in Sprk.Bff.Api (.cs); client rendering (.tsx); modifies tests.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -106,4 +106,27 @@
       <file>docs/adr/ADR-038-testing-strategy.md</file>
     </files>
   </knowledge>
+  <completion date="2026-10-29">
+    Delivered (PR #2418, merged to docs `7cb3c263c0`, final head `1eef127052`): Assign Task's "Send email notification" emails the assignee and, for an internal user, raises the bell (D-194). The owner's D-199 decides who receives it, through one gate (`AssignTaskRecipientGate`) on every send path: the in-request send, the system-mailbox fallback, and the job's send-time recheck.
+    - An eligible internal user: exactly one enabled user represents the contact; the No Access check (AsFlagged) is NotSecure or NotWalled; the user has Read on the task.
+    - An onboarded external contact: needs a grant with Read on the matter, the task must be one the portal's events list would show (the multi-root / secure-family rule, `CheckLiveParentsAsync`), and access is composed the way the contact's portal sign-in does it (CIAM, or WorkforceHome with derived-member terms). A home-linked licensed user gets no email. They get the portal link and the assigner's display name, and no bell.
+    - Nobody else, and nobody when the check can't be made (fail closed). The task is still created, and the wizard says why no email went.
+    Fixed from the reviews:
+    - the record name only through `InquiryRecordFacts`; the tracked email internal-only (read back);
+    - real DI-wiring tests; "Assigned by" plus `sprk_sentby`;
+    - Poisoned on a permanent 4xx, but 408/429 retry;
+    - Restricted fails closed on tables without flags; direct seam tests;
+    - the job uses the task's current filing.
+    The CIAM and workforce principal compositions are lifted into internal statics; R3 approved them as behaviour-preserving.
+    Known limits:
+    - K1: Graph can send twice after a timeout (no idempotency key).
+    - K3: the commit request is slower (D-194 sends in-request).
+    - K4: an old client shows a stray text box until it reloads.
+    - A row edited by hand outside the BFF.
+    Reviews: the first Opus adversarial review (2 F1, F3, K2s); a second Opus pass on fix round 1 (2 F1, F3, K2); uac-r2 on every round (the multi-root F, the stored home pair); R3 on the resolver lifts (the workforce-plane under-notify) and approved them. The main session re-checked each fix diff.
+    Final numbers: AssignTask 145/145, the wider filters green, ArchTests 1665/1665, every guard mutation-checked (18, then 15, 7 and 2 per round), publish delta +5.6 KB zipped in round 3 (+25.6 KB in round 2; 192 files).
+    Filed: DI-135 #2445 (the portal shows tasks as generic events; R4), DI-136 #2457 (swap in ContactUserRepresentation when uac-r2 193 merges), DI-137 #2458 (the GrantAccessNotifier home-link gap; external access).
+    Open: the owner question on the From address for external assignees (A: always the system mailbox; B: as built). The live dev proof (email + bell, and the external portal view) waits for the next dev BFF deploy (UAC's 194b hold).
+    rework: fix-round-4 task 168
+  </completion>
 </task>

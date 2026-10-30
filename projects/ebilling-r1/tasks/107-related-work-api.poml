@@ -1,0 +1,110 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="107" project="ebilling-r1">
+  <metadata>
+    <title>Related work product API</title>
+    <phase>4 Review and approval (WP4) — wave W4-1</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Read-only route over existing search and document authorization; the record-security requirement is met by reusing the existing per-document check, which this task must not weaken.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Composition of an existing Dataverse query, the existing document authorization and ISemanticSearchService with a fixed response contract.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P4-A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>029, 040</deps>
+    <tags>bff, api, ai-search, auth</tags>
+    <estimated-effort>1-2 days</estimated-effort>
+  </metadata>
+
+  <prompt>Add an on-demand, read-only route that, for one fee line, returns documents on the line's core record created within the line date plus or minus the settings window, authored by the line's timekeeper (through the timekeeper's linked external contact), ranked by semantic similarity to the line narrative using the files index — never a document from another core record and never one the caller cannot read; empty state when none match.</prompt>
+
+  <role>SPAARKE platform developer. Expert in Azure AI Search hybrid queries, Dataverse queries and record-level authorization.</role>
+
+  <goal>InvoiceRelatedWorkEndpoints.cs and InvoiceRelatedWorkService: candidate documents from Dataverse (core record, date window, author), filtered to those the caller can read, ranked by ISemanticSearchService in documentIds scope; unit and contract tests including the other-core-record and unreadable-document negatives.</goal>
+
+  <context>
+    <background>Spec FR-34 (acceptance: never returns documents from another core record; returns an empty state when none match), D-08, spec Assumptions (window plus or minus 7 days, configurable — 025 setting), NFR-02, NFR-11 / ADR-015 (minimum text; logs ids only). Prototype: SideTabs.tsx RelatedWorkTab (on demand per fee line, read-only, empty state). sprk_document carries sprk_matter, sprk_project, sprk_workassignment, sprk_containerid and sprk_createdbycontact (Entities/sprk_Document/Entity.xml; docs/data-model/sprk_createdbycontact.md); the line's roster timekeeper is 010 sprk_resolvedtimekeeper and its linked external contact is 017's column. Search: Services/Ai/SemanticSearch/ISemanticSearchService.cs:51 SearchAsync (tenant-isolated; scope "entity" or "documentIds", SearchFilterBuilder.BuildScopeFilter :83); the files index (infrastructure/ai-search/spaarke-files-index.json) has documentId, parentEntityType / Id, containerId, createdAt but no author field, so author and window come from Dataverse. Result-level enforcement precedent: Api/Filters/SemanticSearchAuthorizationFilter.cs:43 (SemanticSearchAuthorization — results outside the authorized document set are dropped) and :112; per-document read check: the "read" operation used by AddDocumentAuthorizationFilter (Api/FileAccessEndpoints.cs:232).</background>
+    <relevant-files>
+      <file role="new">src/server/api/Sprk.Bff.Api/Api/Finance/InvoiceRelatedWorkEndpoints.cs</file>
+      <file role="new">src/server/api/Sprk.Bff.Api/Services/Finance/InvoiceRelatedWorkService.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/DI/FinanceModule.cs (shared append point)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/DI/EndpointMappingExtensions.cs:376-377 (shared append point)</file>
+      <file role="new">tests/unit/Sprk.Bff.Api.Tests/Services/Finance/InvoiceRelatedWorkServiceTests.cs</file>
+      <file role="new">tests/integration/contract/Api/Finance/InvoiceRelatedWorkEndpointsAuthorizationContractTests.cs</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="029" status="pending">WP1 schema in dev (line timekeeper lookup, timekeeper linked contact, settings window)</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="FR-34">The candidate set is built server-side from the line's own core record (the line's lookup is authoritative) — no caller-supplied core id, container id or document id. Search runs only over those candidates (documentIds scope), so another core record's document cannot appear.</constraint>
+    <constraint source="FR-34, ADR-008, root CLAUDE.md section 6">Every candidate is checked for caller Read with the existing document authorization before it is searched or returned; an unreadable document is silently omitted. Route filter "finance.read" on sprk_invoices(route invoiceId); the line must belong to that invoice (uniform 404).</constraint>
+    <constraint source="FR-34">Fee lines only; a line with no matched timekeeper, a timekeeper with no linked contact, or no candidates returns 200 with an empty list and a reason code (no-timekeeper, no-linked-contact, none-in-window).</constraint>
+    <constraint source="NFR-11, ADR-015">Only the line narrative is sent as the query; logs carry ids, counts and timings, never narrative or document text.</constraint>
+    <constraint source="ADR-013, ADR-001, ADR-019, 040">Search through ISemanticSearchService (no direct SearchClient); own endpoints file; RequireEbillingEnabled().</constraint>
+    <constraint source=".claude/constraints/bff-extensions.md">Placement BFF (B4 live request); publish-size delta; no new HIGH CVE; no package.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ebilling-r1/spec.md (FR-34, NFR-02, NFR-11, Assumptions)</file>
+      <file>c:\code_files\spaarke-prototype\projects\ebilling.r1\src\review\SideTabs.tsx (RelatedWorkTab)</file>
+      <file>docs/architecture/AI-SEARCH-INDEX-CATALOG.md</file>
+      <file>docs/data-model/sprk_createdbycontact.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Read 010, 017 and 025 notes (timekeeper lookup, linked contact column, window setting); confirm how SemanticSearchService resolves the files index and groups chunks per document.</step>
+    <step order="1">GET /api/finance/invoices/{invoiceId}/lines/{lineId}/related-work (name directional): resolve line, core record, timekeeper contact, window.</step>
+    <step order="2">Dataverse candidates: sprk_document on that core record lookup, sprk_createdbycontact = linked contact, created on within the window (cap the count; state it).</step>
+    <step order="3">Caller read check per candidate (reuse the document authorization path; batch if the service offers it); search the narrative in documentIds scope over the readable set; return top N documents (name, date, score, document id) and the empty-state reason.</step>
+    <step order="4">Tests: a matching document on another core record is never returned; an unreadable candidate is omitted; window edges inclusive; expense line, no timekeeper, no linked contact and no candidates give the empty state with reason; ranking order follows search scores; contract tests 401 / 403 / disabled / foreign line 404.</step>
+    <step order="5">dotnet build and dotnet test green; publish-size delta and vulnerable-package check recorded.</step>
+    <step order="6">Update TASK-INDEX.md: this task's status cell to "✅ [done]".</step>
+    <step order="7">Record deviations (candidate cap, date column used) in projects/ebilling-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If 017 has no linked-external-contact column on sprk_timekeeper, or documents in dev never carry sprk_createdbycontact for firm-authored work, STOP and report: author matching cannot be met as specified.</trigger>
+    <trigger>If ISemanticSearchService cannot search the files index in documentIds scope without changing its contract, STOP and propose the smallest change instead of calling Azure AI Search directly.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>ISemanticSearchService and SemanticSearchAuthorizationFilter already search the files index with tenant isolation and drop unauthorized documents; no route finds documents by core record, author and date window.</existing>
+    <extension>Reuses both; the new service only builds the candidate set from Dataverse (author and window are not index fields) and calls the existing search in documentIds scope. Own endpoints file under the Finance group.</extension>
+    <cost-of-doing-nothing>Reviewers cannot check a fee narrative against the work product it describes, so FR-34 fails and the Related work pane has no data.</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="dotnet">build, test</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">Api/Finance/InvoiceRelatedWorkEndpoints.cs; Services/Finance/InvoiceRelatedWorkService.cs</output>
+    <output type="test">InvoiceRelatedWorkServiceTests.cs; InvoiceRelatedWorkEndpointsAuthorizationContractTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The route returns 401 unauthenticated, 403 without access to the invoice's core record, 503 ebilling.disabled when off, 404 for a line of another invoice.</criterion>
+    <criterion testable="true">A document by the same timekeeper inside the window but on another core record is never returned.</criterion>
+    <criterion testable="true">A candidate the caller cannot read is omitted from the results.</criterion>
+    <criterion testable="true">An expense line, a line with no matched timekeeper, a timekeeper with no linked contact, and no candidates each return 200 with an empty list and the stated reason code.</criterion>
+    <criterion testable="true">Results are ordered by search score and limited to N; the query sent to search is the narrative only; logs contain no narrative text.</criterion>
+    <criterion testable="true">dotnet build 0 errors; all tests green.</criterion>
+    <criterion testable="true">Publish-size delta measured against a fresh master build and recorded in task notes; no new HIGH CVE.</criterion>
+    <criterion testable="true">Cover the stated contract plus the edge cases named above. Anything beyond that needs a one-line justification in task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>The brief mentions a containerId filter; the files index does carry containerId, but FR-34 scopes by core record, and the documentIds scope built from the core-record query is narrower and already excludes other records — containerId adds nothing and is not used (recorded deviation). RequireEbillingEnabled() is 040's (wave W2-1, not a declared dependency): confirm at Step 0. Parallel group P4-A: own files; FinanceModule.cs and EndpointMappingExtensions.cs are shared append points. UI is 111's. COMPLETED 2026-10-16: see notes/107-related-work-api.md. Built GET /api/finance/invoices/{invoiceId}/lines/{lineId}/related-work (InvoiceRelatedWorkEndpoints + InvoiceRelatedWorkService); candidates from sprk_document (line's own core lookup, sprk_createdbycontact = the timekeeper's linked contact, createdon window +-settings days, cap 50), each put to the caller's own Read (GetCallerRecordAccessAsync on sprk_documents, fail closed), then ranked by ISemanticSearchService in documentIds scope (narrative only). Deviations: createdon (not sprk_createddatetime, null in dev); extra empty reasons no-core-record / no-line-date / no-narrative / none-indexed / not-a-fee-line; NullSemanticSearchService (ADR-032 P3) added so the unconditional service resolves with AI off; ledger 130 -> 131; ADR-010 count 164 (ceiling 165); publish +0.015 MB vs parent; no vulnerable packages. Dev has 0 sprk_timekeeper rows, so the path is not exercisable live yet. TASK-INDEX.md is updated by the main session.
+rework: fix-round-1 task 107</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load the knowledge files first. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

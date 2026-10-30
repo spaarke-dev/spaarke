@@ -2146,10 +2146,19 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
     }
 
     /// <inheritdoc />
+    public Task UpdateExistingRecordFieldsAsync(
+        string entityLogicalName,
+        Guid recordId,
+        Dictionary<string, object?> fields,
+        CancellationToken ct = default) =>
+        UpdateExistingRecordFieldsAsync(entityLogicalName, recordId, fields, impersonateSystemUserId: null, ct);
+
+    /// <inheritdoc />
     public async Task UpdateExistingRecordFieldsAsync(
         string entityLogicalName,
         Guid recordId,
         Dictionary<string, object?> fields,
+        Guid? impersonateSystemUserId,
         CancellationToken ct = default)
     {
         if (fields.Count == 0)
@@ -2161,10 +2170,13 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
         var entitySetName = await GetEntitySetNameAsync(entityLogicalName, ct);
 
         _logger.LogInformation(
-            "Updating EXISTING record fields (If-Match: *, no create): {Entity}({Id}), {FieldCount} fields",
-            entityLogicalName, recordId, fields.Count);
+            "Updating EXISTING record fields (If-Match: *, no create): {Entity}({Id}), {FieldCount} fields{Impersonation}",
+            entityLogicalName, recordId, fields.Count,
+            impersonateSystemUserId is { } imp && imp != Guid.Empty ? $" (impersonating {imp})" : string.Empty);
 
-        using var request = await CreateAuthenticatedRequestAsync(HttpMethod.Patch, $"{DataverseIdentifier.RequireTableName(entitySetName, nameof(entitySetName))}({recordId})", ct);
+        // An empty caller id is refused here, before the PATCH is sent (task 104); null = app-only.
+        using var request = await CreateAuthenticatedRequestAsync(
+            HttpMethod.Patch, $"{DataverseIdentifier.RequireTableName(entitySetName, nameof(entitySetName))}({recordId})", ct, impersonateSystemUserId);
 
         // "Prevent create in upsert": If-Match: * makes the PATCH apply only to a row that already exists.
         // Without it the Web API creates a row with this id (the behaviour UpdateRecordFieldsAsync keeps).

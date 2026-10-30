@@ -2,31 +2,20 @@
 
 > **Last Updated**: 2026-10-29 (main session, context-handoff at 85%). State only: history is in git log, task `<completion>` blocks and
 > `notes/handoff-history/2026-10.md`. Standing rules: [`CLAUDE.md`](CLAUDE.md) §3 and §6. Decisions: [`notes/decisions.md`](notes/decisions.md)
-> (D-1..D-198). Deferred work: one self-contained GitHub issue per item, label `ontology-deferred`, plus a DI-nn row in both tables of
-> `notes/defer-issues.md` (next free: **DI-135**). Sub-agents never edit this file.
+> (D-1..D-199). Deferred work: one self-contained GitHub issue per item, label `ontology-deferred`, plus a DI-nn row in both tables of
+> `notes/defer-issues.md` (next free: **DI-138**). Sub-agents never edit this file.
 
 ## Quick Recovery (READ THIS FIRST)
 
 | Field | Value |
 |---|---|
-| **Task** | **168** (#2418) is blocked on owner Q1/Q2. 171 and 172 are DONE (171: #2433 merged `3452d3017e` after fix round 1; 172: #2434 merged `fab8c91531`). |
-| **Status** | No lane is running. The worktrees `C:\wts-171` and `C:\wts-172` are removed. uac-r2 was sent the 171 fix-diff SHA `e025152e3b` after the merge; if they raise anything, handle it as a follow-up before docs→master. DI-124 (#2300) has the `-CustomerBusinessUnit` / `-WhatIf` comment. |
-| **Next Action** | 1) When the owner answers Q1/Q2: record D-199, then run the 168 fix round in `C:\wts-168` (plan below). 2) After the owner's next real decision commit: the task-170 App Insights check and the `BUD-` number (Lane facts). 3) Next docs→master (below). 4) Read any uac-r2 reply on the 171 fix diff. |
+| **Task** | No lane is running. **173 is DONE** (#2462 merged `f4a0fc6862`): an external assignee is emailed from the system mailbox. 168, 171 and 172 are done too. |
+| **Status** | No owner question is open (the From question was answered: A, system mailbox). **ebilling #1911:** ontology APPROVED the ontology surface after the F2/K1 re-check (PR comment 6503550108). It asked ebilling to make sure 105-override-server.md names the principal-change known limit. Other peer items: DI-137 (#2458) is with R3/uac-r2. |
+| **Next Action** | 1) Next docs→master: 168 + 173 + project docs. Before it: notices to R3, uac-r2 and word-add-in; merge master in; build + full ArchTests; open the PR with `--auto --merge`. 2) After the next dev BFF deploy (UAC's 194b hold): the 168/173 live proof (internal email + bell; an external email from the system mailbox; the portal view), the task-170 App Insights check and the `BUD-` number. 3) Owner re-checks for 114, 158-163 and 166. |
 
-## Open owner questions (task 168, asked 2026-10-28; explained in detail 2026-10-29)
+## Task 168 decisions: D-199 (owner, 2026-10-29)
 
-1. **Assignee is not an eligible internal user** (external, no linked user, several users). **A (rec.):** send nothing unless the contact holds an active onboarded External Access grant on the matter. B: a notice naming nothing. C: never.
-2. **System-mailbox fallback reach.** **A (rec.):** only for recipients who pass the gate; otherwise `assignee_email_not_sent`. B: everyone.
-- Q3/Q4 (171's no-parameter path; 194b vs D-197 for root-homed authors) were WITHDRAWN 2026-10-29. uac-r2 corrected itself, and the main session verified that `CheckVersionOwnerAsync` sets no `ChildEntityLogicalName`, so D-197 "author wins, root included" holds.
-
-## 168 fix plan (after Q1/Q2; uac-r2 agreed the plan and re-checks only the fix diff)
-
-Branch `task/168-assign-task-notify`, head `8064311c54`. First merge docs (it now contains master + 194b).
-- A gate copied from master `GrantAccessNotifier.cs:222-260`: one eligible internal user per contact; `SecureShareNoAccessGuard.CheckRecordAndSecureParentsAsync(core,user,AsFlagged)` = NotSecure/NotWalled; Read on the task; fail closed. It runs in both `NotifyAsync` and `SendFromSystemMailboxAsync`.
-- `InquiryRecordFacts.ResolveAsync` for the name and link lines; the fallback only after the gate.
-- The job re-reads `sprk_assignedto` + `statecode` + the gate at send time. An inactive contact gets no email.
-- `IsInternalOnly=true` (read-back test + mutation); the `DecisionCommitFollowUps` DI test; "Assigned by" + `sprk_sentby`; Poisoned on 4xx; log the exception type and Graph code, not the exception object.
-- Must-not-fire: walled; secure non-member; Restricted + flagged-external; unverifiable. Watch UAC 193 `ContactUserRepresentation` (K-1).
+Q1 = A (an eligible internal user, or an onboarded external contact with a grant on the matter and a portal link); Q2 = the system-mailbox fallback to the same recipients. Built and merged (see the 168 POML completion block).
 
 ## Lane facts to carry
 
@@ -41,7 +30,7 @@ Branch `task/168-assign-task-notify`, head `8064311c54`. First merge docs (it no
 
 ## Next docs→master
 
-Contents: #2414, #2422, the 194b repoint, 171 (`3452d3017e`), 172 (`fab8c91531`), and 168 when ready. Before notices to word-add-in, R3 and uac-r2; merge master in; full ArchTests.
+The last one was PR #2439, merged as master `f07ab2ef1f` (2026-10-29): 167b, 167c, 171, 172 and the 194b repoint; all checks passed. Docs was fast-forwarded to it. The next one carries 168 when it is ready. Before it: notices to word-add-in, R3 and uac-r2; merge master in; full ArchTests. The word-add-in session refuses held messages while the two sessions run in different permission modes.
 
 ## Blocked follow-ups (ours)
 
@@ -51,7 +40,7 @@ Contents: #2414, #2422, the 194b repoint, 171 (`3452d3017e`), 172 (`fab8c91531`)
 ## Dev state (spaarkedev1 / spaarke-bff-dev)
 
 - **BFF:** `136568cf70` (R3, 2026-10-29). **Console:** `a8314c2e0e`. **SpaarkeMaster:** 1.2.4.0. **POL-MATTER-NOBUDGET:** v3 `…6313`.
-- **Worktrees:** `C:\wts-168`. Remove only with `Remove-WorktreeSafe.ps1`, one path per call.
+- **Worktrees:** none for lanes. Remove only with `Remove-WorktreeSafe.ps1`, one path per call.
 - **Stash:** two old `lint-staged automatic backup` entries (20 and 30 h old) are not ours. Leave them.
 
 ## Peers (current session names)

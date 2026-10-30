@@ -9,6 +9,7 @@
  *   button once picked. Otherwise, the shared `LookupField` over the host's `lookup` search.
  *   A required Lookup that has exactly one candidate is pre-selected, without opening anything (D-18: a matter with one
  *   budget); with several the user picks.
+ * - Boolean: a checkbox, ticked unless its value is "false" (task 168, D-194: Assign Task's Send email notification).
  *
  * Fluent v9 tokens only (ADR-021). React 16/17-safe.
  */
@@ -17,6 +18,7 @@ import * as React from 'react';
 import {
   Button,
   Caption1,
+  Checkbox,
   Field,
   Input,
   MessageBar,
@@ -275,6 +277,25 @@ const ScalarParameter: React.FC<FieldProps> = ({ parameter, scope, action }) => 
   );
 };
 
+/** Task 168 (D-194): a yes/no as a checkbox (Assign Task's Send email notification). Ticked unless its value is "false"; an unset value
+ * shows its starting value (the catalog's default), so a box that is ticked by default reads ticked. */
+const BooleanParameter: React.FC<FieldProps> = ({ parameter, scope }) => {
+  const { draft, update, locked } = useDecisionItem();
+  const styles = useStyles();
+  const checked = fieldValue(draft, scope, parameter.code).trim().toLowerCase() !== 'false';
+  return (
+    <div data-testid={`field-${parameter.code}`}>
+      <Checkbox
+        label={parameter.label}
+        checked={checked}
+        disabled={locked}
+        onChange={(_e, data) => update(d => withValue(d, scope, parameter.code, data.checked === true ? 'true' : 'false'))}
+      />
+      {parameter.hint ? <Caption1 className={styles.prefilled}>{parameter.hint}</Caption1> : null}
+    </div>
+  );
+};
+
 /** The editable form of an action or Next step. */
 export const ParameterFields: React.FC<{ action: DecisionAction; scope: StepScope }> = ({ action, scope }) => {
   const styles = useStyles();
@@ -293,6 +314,8 @@ export const ParameterFields: React.FC<{ action: DecisionAction; scope: StepScop
       {fields.map(p =>
         p.kind === 'Person' || p.kind === 'Lookup' ? (
           <LookupParameter key={p.code} parameter={p} scope={scope} action={action} />
+        ) : p.kind === 'Boolean' ? (
+          <BooleanParameter key={p.code} parameter={p} scope={scope} action={action} />
         ) : (
           <ScalarParameter key={p.code} parameter={p} scope={scope} action={action} />
         )

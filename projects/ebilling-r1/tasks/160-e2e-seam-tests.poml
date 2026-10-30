@@ -1,0 +1,114 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="160" project="ebilling-r1">
+  <metadata>
+    <title>End-to-end integration and Action seam tests</title>
+    <phase>7 Evaluation and rollout (WP7) — wave W7-1</phase>
+    <gate>startable</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies tests/** (root CLAUDE.md section 8: code-review and adr-check regardless) and proves the project's security and all-or-nothing guarantees end to end.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Test authoring against fixed contracts with an inventory-first rule; breadth over depth.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P7-A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>079, 112, 136, 153</deps>
+    <tags>testing, integration-test, bff</tags>
+    <estimated-effort>2-3 days</estimated-effort>
+  </metadata>
+
+  <prompt>Close the project's integration-test gaps: inventory the tests WP1–WP6 already added, then add only what is missing for (1) the submission vertical slice — submission to processing to invoice, all-or-nothing and idempotent re-delivery; (2) every new Action through IActionRunner (ADR-043 seam); (3) the authorization 403 matrix; (4) fail-closed refusal of an unknown rule type in every consumer; and confirm the FR-15 schema-agreement and census tests are green.</prompt>
+
+  <role>SPAARKE test engineer. Expert in ADR-038 KEEP categories, WebApplicationFactory integration tests, seam tests across the AI execution spine, and mock-boundary rules.</role>
+
+  <goal>A coverage matrix in notes maps each required behaviour to one passing test (existing or new); new tests live under KEEP paths with allowed mock boundaries; the full suite is green; no duplicate of an existing test is added.</goal>
+
+  <context>
+    <background>Brief and spec: NFR-08 (idempotent handlers, persisted transitions), NFR-09, NFR-10, ADR-043 (seam test per Action dispatch), FR-15 acceptance (SignalPairTypeSchemaAgreementTests and census tests green), FR-17 / FR-19 / FR-35 / FR-37 (403 cases), FR-20 (all-or-nothing, idempotent), FR-24 (unknown rule type refused fail-closed in every consumer — 070 owns the seeded proof). Actions: invoice-classify (042), invoice-line-code (047), billing-rule-draft (075), invoice-firm-notice (131); seam tests from 041 / 042 / 075 / 131 live in tests/integration/seam/Finance/ and tests/integration/seam/Ai/PublicContracts/. Existing guards: tests/integration/data-mutation/Signals/SignalPairTypeSchemaAgreementTests.cs, tests/Spaarke.ArchTests/RecordOwnerAssignmentCensusTests.cs, tests/Spaarke.ArchTests/SecureFamilyConsistencyTests.cs. tests/integration/auth/** and tests/integration/seam/** compile into tests/unit/Sprk.Bff.Api.Tests/Sprk.Bff.Api.Tests.csproj (:113, :151). tests/integration/seam/README.md describes the seam bar.</background>
+    <relevant-files>
+      <file role="new">tests/integration/seam/Finance/InvoiceSubmissionSliceSeamTests.cs (only if no equivalent exists)</file>
+      <file role="new">tests/integration/auth/Finance/EbillingAuthorizationMatrixTests.cs (only the missing cases)</file>
+      <file role="new">tests/integration/data-mutation/Ebilling/ (all-or-nothing and re-delivery cases, only if missing)</file>
+      <file role="modify">existing eBilling test files from 041-153 (only to fix a defect found, with a note)</file>
+      <file role="output">projects/ebilling-r1/notes/160-coverage-matrix.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="079" status="pending">WP3 deployed</dependency>
+      <dependency task="112" status="pending">WP4 deployed</dependency>
+      <dependency task="136" status="pending">WP5 deployed</dependency>
+      <dependency task="153" status="pending">WP6 deployed</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-038, docs/standards/TEST-ARCHITECTURE.md">New tests only under the eight KEEP paths; banned mocks (section 5) never introduced; time-dependent tests use TimeProvider; no deletion under a KEEP path without a same-PR replacement.</constraint>
+    <constraint source="ADR-043">A seam test drives the production dispatch path (Binding resolution, IActionRunner, output handling) with only the LLM, catalog-data and side-effect transport boundaries doubled; a contract-shape test is not a substitute.</constraint>
+    <constraint source="project">Inventory first: list every test 013-153 added for the four areas; write a new test only for an uncovered behaviour and say why in the matrix. No numeric test target.</constraint>
+    <constraint source="NFR-10">The 403 matrix covers: SPA submission for another firm; SPA submission for an inaccessible core record; outcome / guidelines read by another firm (130, 135); approval by a non-eligible approver (103); override without the eBilling Override privilege (105); export and Mark Paid without the finance authorization (150, 151).</constraint>
+    <constraint source="project">Every defect found is fixed in scope (with code-review) or filed via /project-defer-issue-tracking and reported; a test is never weakened to pass.</constraint>
+    <constraint source=".claude/constraints/bff-extensions.md">If any src/server/api file changes to fix a defect, BFF hygiene applies (publish-size delta, no new HIGH CVE); otherwise record "no BFF change".</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>docs/standards/TEST-ARCHITECTURE.md</file>
+      <file>.claude/patterns/testing/integration-tests.md</file>
+      <file>.claude/patterns/testing/mocking-patterns.md</file>
+      <file>tests/integration/seam/README.md</file>
+      <file>tests/CLAUDE.md</file>
+      <file>.claude/adr/ADR-043-ai-capability-execution-spine.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Build the coverage matrix: rows = behaviours in the four areas plus FR-15 guards; columns = existing test (path::name), status, gap.</step>
+    <step order="1">Submission slice: SPA entry to 049 job to invoice, lines, approval portion and Signals; a failure injected after line creation leaves no invoice; re-delivery of the job message creates no duplicates; job status transitions persisted.</step>
+    <step order="2">Actions: confirm one seam test per Action through IActionRunner; add missing ones (Binding resolution, missing Binding fails closed).</step>
+    <step order="3">Authorization matrix per constraint 4: 403 with stable codes and no side effect for each case; positive control per route.</step>
+    <step order="4">Fail-closed rule type: in the submission slice, a published rule body with an unknown type is refused (no finding, logged refusal, submission not rejected on it); confirm 070's seeded proof covers the Ontology compiler, describer and save-time validation.</step>
+    <step order="5">Run SignalPairTypeSchemaAgreementTests, RecordOwnerAssignmentCensusTests, SecureFamilyConsistencyTests and the full dotnet test suite; all green.</step>
+    <step order="6">Record the matrix and any defects (fixed or filed) in notes/160-coverage-matrix.md.</step>
+    <step order="7">Update TASK-INDEX.md: this task's status cell to "✅ [done]".</step>
+    <step order="8">Record deviations in projects/ebilling-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If a required behaviour cannot be tested without a banned mock (TEST-ARCHITECTURE section 5), STOP and propose the seam change instead of adding the mock.</trigger>
+    <trigger>If a test exposes a security defect (a 200 where 403 is required), STOP, report it with the failing test, and fix only after the main session confirms scope.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>Per-task tests from 041-153 (seam/Finance, auth/Finance, data-mutation/Ebilling) and the FR-15 guards; step 0's inventory names them.</existing>
+    <extension>Yes by default: missing cases are added to an existing test class from the same task when one covers the area; a new class only when none does.</extension>
+    <cost-of-doing-nothing>NFR-08 – NFR-10 and ADR-043 have no cross-task proof: a slice that leaves a partial invoice, an Action dispatched outside the spine, or a 200 where a 403 is required would ship undetected.</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="dotnet">test</tool>
+  </tools>
+
+  <outputs>
+    <output type="test">tests/integration/seam/Finance/, tests/integration/auth/Finance/, tests/integration/data-mutation/Ebilling/ (missing cases only)</output>
+    <output type="docs">projects/ebilling-r1/notes/160-coverage-matrix.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The coverage matrix lists every behaviour in steps 1-5 with a passing test path and no gap.</criterion>
+    <criterion testable="true">A failure after line creation leaves no sprk_invoice, sprk_billingevent or sprk_invoiceapproval row; re-delivery of the processing message creates no duplicate (tests).</criterion>
+    <criterion testable="true">Each of invoice-classify, invoice-line-code, billing-rule-draft and invoice-firm-notice has a seam test through IActionRunner; a missing Binding fails closed.</criterion>
+    <criterion testable="true">Each 403 case in constraint 4 returns 403 with a stable code and causes no write; each has a positive control.</criterion>
+    <criterion testable="true">An unknown rule type in a published body is refused fail-closed in the submission slice and never produces a finding or a rejection.</criterion>
+    <criterion testable="true">SignalPairTypeSchemaAgreementTests, RecordOwnerAssignmentCensusTests, SecureFamilyConsistencyTests and the full suite pass.</criterion>
+    <criterion testable="true">New tests are under KEEP paths and introduce no banned mock (code-review check).</criterion>
+    <criterion testable="true">Publish-size delta measured against a fresh master build and recorded in task notes if any BFF file changed (otherwise "no BFF change"); no new HIGH CVE.</criterion>
+    <criterion testable="true">Cover the stated contract plus the edge cases named above. Anything beyond that needs a one-line justification in task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>P7-A runs with 161 (notes and harness only), so no file overlap. Tests added here are KEEP by category; 190's /test-diet classifies scaffolding from earlier tasks.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load the knowledge files first. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

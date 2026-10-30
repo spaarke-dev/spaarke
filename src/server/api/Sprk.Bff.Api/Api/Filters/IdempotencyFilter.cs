@@ -227,10 +227,14 @@ public class IdempotencyFilter : IEndpointFilter
         // response cache: it is neither answered from it nor written to it.
         var replayable = _mayReplayResponse is null || MayReplayResponse(context, _mayReplayResponse);
 
+        // Fail open on a CACHE fault only (095 review F5): the try below covers the cache read, never the handler. A handler
+        // exception used to land in the catch that "proceeded without idempotency", which ran the handler a SECOND time and
+        // surfaced only the second exception; the lock and cache-set helpers catch their own faults.
+        string? cachedResponse;
         try
         {
             // Check for cached response
-            var cachedResponse = replayable
+            cachedResponse = replayable
                 ? await _cache.GetAsync<string>(
                     tenantId,
                     resource: IdempotencyRequestResource,
@@ -238,65 +242,6 @@ public class IdempotencyFilter : IEndpointFilter
                     version: 1,
                     ct: httpContext.RequestAborted)
                 : null;
-            if (cachedResponse != null)
-            {
-                _logger.LogInformation(
-                    "Idempotent request detected: returning cached response for key {IdempotencyKey}, CorrelationId={CorrelationId}",
-                    idempotencyKey,
-                    correlationId);
-
-                // Add header to indicate this is a cached response
-                httpContext.Response.Headers[IdempotencyStatusHeader] = "cached";
-
-                return DeserializeCachedResponse(cachedResponse);
-            }
-
-            // Try to acquire lock to prevent race conditions
-            if (!await TryAcquireLockAsync(tenantId, idempotencyKey, httpContext.RequestAborted))
-            {
-                _logger.LogWarning(
-                    "Request already being processed: idempotency key {IdempotencyKey} is locked, CorrelationId={CorrelationId}",
-                    idempotencyKey,
-                    correlationId);
-
-                // Another request is processing with the same key
-                // Return 409 Conflict to indicate concurrent processing
-                return Results.Problem(
-                    title: "Request In Progress",
-                    detail: "A request with the same idempotency key is currently being processed. Please retry shortly.",
-                    statusCode: StatusCodes.Status409Conflict,
-                    extensions: new Dictionary<string, object?>
-                    {
-                        ["errorCode"] = "OFFICE_IDEMPOTENCY_CONFLICT",
-                        ["correlationId"] = correlationId
-                    });
-            }
-
-            try
-            {
-                // Execute the endpoint
-                var result = await next(context);
-
-                // Cache successful responses only — and never one the route marked non-replayable (task 047)
-                if (replayable && IsSuccessResponse(result))
-                {
-                    await CacheResponseAsync(tenantId, idempotencyKey, result, httpContext.RequestAborted);
-                    _logger.LogDebug(
-                        "Cached response for idempotency key {IdempotencyKey}, TTL={TtlHours}h",
-                        idempotencyKey,
-                        _ttl.TotalHours);
-                }
-
-                // Add header to indicate this is a new response
-                httpContext.Response.Headers[IdempotencyStatusHeader] = "new";
-
-                return result;
-            }
-            finally
-            {
-                // Release lock
-                await ReleaseLockAsync(tenantId, idempotencyKey, httpContext.RequestAborted);
-            }
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -305,8 +250,69 @@ public class IdempotencyFilter : IEndpointFilter
                 idempotencyKey,
                 correlationId);
 
-            // On cache failure, proceed without idempotency (fail open)
+            // On cache failure, proceed without idempotency (fail open). The handler has not run yet: this is its one run.
             return await next(context);
+        }
+
+        if (cachedResponse != null)
+        {
+            _logger.LogInformation(
+                "Idempotent request detected: returning cached response for key {IdempotencyKey}, CorrelationId={CorrelationId}",
+                idempotencyKey,
+                correlationId);
+
+            // Add header to indicate this is a cached response
+            httpContext.Response.Headers[IdempotencyStatusHeader] = "cached";
+
+            return DeserializeCachedResponse(cachedResponse);
+        }
+
+        // Try to acquire lock to prevent race conditions (fails open inside: a cache fault answers "acquired")
+        if (!await TryAcquireLockAsync(tenantId, idempotencyKey, httpContext.RequestAborted))
+        {
+            _logger.LogWarning(
+                "Request already being processed: idempotency key {IdempotencyKey} is locked, CorrelationId={CorrelationId}",
+                idempotencyKey,
+                correlationId);
+
+            // Another request is processing with the same key
+            // Return 409 Conflict to indicate concurrent processing
+            return Results.Problem(
+                title: "Request In Progress",
+                detail: "A request with the same idempotency key is currently being processed. Please retry shortly.",
+                statusCode: StatusCodes.Status409Conflict,
+                extensions: new Dictionary<string, object?>
+                {
+                    ["errorCode"] = "OFFICE_IDEMPOTENCY_CONFLICT",
+                    ["correlationId"] = correlationId
+                });
+        }
+
+        try
+        {
+            // Execute the endpoint, once. An exception it throws propagates to the caller unchanged.
+            var result = await next(context);
+
+            // Cache successful responses only — and never one the route marked non-replayable (task 047). A cache fault is
+            // caught inside CacheResponseAsync.
+            if (replayable && IsSuccessResponse(result))
+            {
+                await CacheResponseAsync(tenantId, idempotencyKey, result, httpContext.RequestAborted);
+                _logger.LogDebug(
+                    "Cached response for idempotency key {IdempotencyKey}, TTL={TtlHours}h",
+                    idempotencyKey,
+                    _ttl.TotalHours);
+            }
+
+            // Add header to indicate this is a new response
+            httpContext.Response.Headers[IdempotencyStatusHeader] = "new";
+
+            return result;
+        }
+        finally
+        {
+            // Release lock (a cache fault is caught inside ReleaseLockAsync; the lock then expires)
+            await ReleaseLockAsync(tenantId, idempotencyKey, httpContext.RequestAborted);
         }
     }
 

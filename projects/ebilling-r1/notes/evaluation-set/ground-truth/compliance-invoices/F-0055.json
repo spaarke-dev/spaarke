@@ -1,0 +1,34 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0055",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0055","generator_id":"gen_eval_set.py@1 F-0055","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0055.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-01"},
+ "header":{"firm":"Kingsley Dunmore PC","firm_invoice_number":"INV-2025-55279","invoice_date":"2026-01-16","billing_period_start":"2025-10-01","billing_period_end":"2025-10-31","firm_matter_reference":"46172-0039","po_number":"PO-4558392","fees_total":8004.5,"expenses_total":558.38,"adjustments_total":0.0,"total_due":8562.88,"currency":"USD"},
+ "timekeepers":[{"name":"Elena Rosenthal","title":"Associate","rate":380.0,"billed_as":"ER"},{"name":"Farah Kowalczyk","title":"Senior Associate","rate":445.0,"billed_as":"FK"},{"name":"Rafael Blackwood","title":"Partner","rate":670.0,"billed_as":"RB"},{"name":"Rafael Oyelaran","title":"Paralegal","rate":195.0,"billed_as":"RO"},{"name":"Samuel Sandoval","title":"Associate","rate":350.0,"billed_as":"SS"},{"name":"Sofia Lindqvist","title":"Associate","rate":365.0,"billed_as":"SL"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2025-10-01","timekeeper":"SS","timekeeper_name":"Samuel Sandoval","timekeeper_title":"Associate","title":"Assoc","hours":2.8,"rate":350.0,"amount":980.0,"narrative":"Update document review protocol and coding panel for the vendor agreement","codes":["L140","A110"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2025-10-02","timekeeper":"SL","timekeeper_name":"Sofia Lindqvist","timekeeper_title":"Associate","title":"Assoc","hours":2.4,"rate":365.0,"amount":876.0,"narrative":"Research public records concerning Redstone Mining and related entities","codes":["L110","A102"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2025-10-08","timekeeper":"RO","timekeeper_name":"Rafael Oyelaran","timekeeper_title":"Paralegal","title":"Para","hours":0.4,"rate":195.0,"amount":78.0,"narrative":"Review expert qualifications and prior testimony for the construction contract","codes":["L130","A104"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2025-10-08","timekeeper":"FK","timekeeper_name":"Farah Kowalczyk","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":2.8,"rate":445.0,"amount":1246.0,"narrative":"Conference with client regarding budget variance for the licensing dispute","codes":["L150","A106"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2025-10-09","timekeeper":"RB","timekeeper_name":"Rafael Blackwood","timekeeper_title":"Partner","title":"Ptr","hours":1.4,"rate":670.0,"amount":938.0,"narrative":"Draft motion for preliminary injunction in the regulatory inquiry","codes":["L220","A103"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2025-10-10","timekeeper":"ER","timekeeper_name":"Elena Rosenthal","timekeeper_title":"Associate","title":"Assoc","hours":1.6,"rate":380.0,"amount":608.0,"narrative":"Draft discovery plan in the warranty claim","codes":["L210","A103"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2025-10-16","timekeeper":"ER","timekeeper_name":"Elena Rosenthal","timekeeper_title":"Associate","title":"Assoc","hours":0.3,"rate":380.0,"amount":114.0,"narrative":"Draft motion for preliminary injunction in the distribution agreement","codes":["L220","A103"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2025-10-22","timekeeper":"RO","timekeeper_name":"Rafael Oyelaran","timekeeper_title":"Paralegal","title":"Para","hours":0.5,"rate":195.0,"amount":97.5,"narrative":"Prepare case assessment memorandum regarding the licensing dispute and recommended strategy","codes":["L120","A103"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"fee","date":"2025-10-22","timekeeper":"RB","timekeeper_name":"Rafael Blackwood","timekeeper_title":"Partner","title":"Ptr","hours":2.8,"rate":670.0,"amount":1876.0,"narrative":"Prepare for case management conference in the data incident; Conference with client regarding budget variance for the regulatory inquiry; Draft motion for preliminary injunction in the customs audit.","codes":["L220","A103"],"page":1,"narrative_style":"block_billed"},
+  {"n":10,"line_type":"expense","date":"2025-10-24","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":491.5,"amount":491.5,"narrative":"Airfare to Portland for deposition","codes":["E110"],"page":1,"narrative_style":"clear"},
+  {"n":11,"line_type":"fee","date":"2025-10-27","timekeeper":"ER","timekeeper_name":"Elena Rosenthal","timekeeper_title":"Associate","title":"Assoc","hours":0.7,"rate":380.0,"amount":266.0,"narrative":"Analyze exposure and damages model for the warranty claim","codes":["L120","A104"],"page":1,"narrative_style":"clear"},
+  {"n":12,"line_type":"fee","date":"2025-10-28","timekeeper":"ER","timekeeper_name":"Elena Rosenthal","timekeeper_title":"Associate","title":"Assoc","hours":1.1,"rate":380.0,"amount":418.0,"narrative":"Conference with client regarding settlement authority for the insurance coverage issue","codes":["L160","A106"],"page":1,"narrative_style":"clear"},
+  {"n":13,"line_type":"fee","date":"2025-10-29","timekeeper":"RO","timekeeper_name":"Rafael Oyelaran","timekeeper_title":"Paralegal","title":"Para","hours":2.6,"rate":195.0,"amount":507.0,"narrative":"Plan strategy for upcoming phase of the customs audit with team","codes":["L120","A101"],"page":1,"narrative_style":"clear"},
+  {"n":14,"line_type":"expense","date":"2025-10-29","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":304.0,"rate":0.22,"amount":66.88,"narrative":"Photocopies - 304 pages","codes":["E101"],"page":1,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["587 Harbor Road","Seattle","Tax ID 40-4739652"],"template":"T09","pages":2},
+ "rule_set_id":"RS-01",
+ "context":{"matter_open":"2024-07-19","matter_close":"2026-01-29","matter_budget":59251.0,"approved_timekeepers":["Farah Kowalczyk","Clara Carmichael","Elena Rosenthal","Samuel Sandoval","Anders Castellanos","Rafael Blackwood","Rafael Oyelaran","Ingrid Blackwood","Sofia Lindqvist"],"invoice_received_date":"2026-01-17"},
+ "expected_findings":[
+  {"rule_id":"RS-01-R02","rule_type":"AiObservation","scope":"line","line_refs":[9],"consequence":"Flag"},
+  {"rule_id":"RS-01-R05","rule_type":"ExpenseRule","scope":"line","line_refs":[14],"consequence":"Reduce"},
+  {"rule_id":"RS-01-R06","rule_type":"InvoiceAge","scope":"invoice","line_refs":[],"consequence":"Flag"}
+ ],
+ "seeded_violations":3
+}

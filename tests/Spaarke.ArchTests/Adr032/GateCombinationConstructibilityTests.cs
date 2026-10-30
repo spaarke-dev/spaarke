@@ -60,7 +60,7 @@ public class GateCombinationConstructibilityTests
     {
         // DEF-FIN — Finance job handlers registered outside the gate of the services they inject (FinanceModule).
         new Defect("DEF-FIN", "InvoiceExtractionJobHandler", "IInvoiceAnalysisService", c => !c.DocIntel),
-        new Defect("DEF-FIN", "AttachmentClassificationJobHandler", "IInvoiceAnalysisService", c => !c.DocIntel && c.RecordMatching),
+        new Defect("DEF-FIN", "AttachmentClassificationJobHandler", "TextExtractorService", c => !c.DocIntel && c.RecordMatching),
         new Defect("DEF-FIN", "InvoiceSearchService", "SearchIndexClient", c => c.DocIntel && !c.Analysis),
         new Defect("DEF-FIN", "InvoiceIndexingJobHandler", "SearchIndexClient", c => c.DocIntel && !c.Analysis),
 
@@ -95,7 +95,7 @@ public class GateCombinationConstructibilityTests
     /// <summary>Defect id → what is wrong and the filed row. The fix is ADR-032 per service; none was applied by task 204e (see the task report).</summary>
     internal static readonly IReadOnlyDictionary<string, string> DefectNotes = new Dictionary<string, string>
     {
-        ["DEF-FIN"] = "task-202 punch list row 204e-F1. FinanceModule: InvoiceExtractionJobHandler is registered unconditionally but injects IInvoiceAnalysisService (registered only under DocumentIntelligence:Enabled); AttachmentClassificationJobHandler is gated on RecordMatchingEnabled alone; InvoiceIndexingJobHandler/InvoiceSearchService are gated on DocIntel but need SearchIndexClient (analysis && docIntel && AiSearchEndpoint). IJobHandler enumeration (ServiceBusJobProcessor) then throws on the first job.",
+        ["DEF-FIN"] = "task-202 punch list row 204e-F1. FinanceModule: InvoiceExtractionJobHandler is registered unconditionally but injects IInvoiceAnalysisService (registered only under DocumentIntelligence:Enabled); AttachmentClassificationJobHandler is gated on RecordMatchingEnabled alone but injects TextExtractorService (DocIntel only; its AI dependency is IInvoiceAi, always registered, since task 042); InvoiceIndexingJobHandler/InvoiceSearchService are gated on DocIntel but need SearchIndexClient (analysis && docIntel && AiSearchEndpoint). IJobHandler enumeration (ServiceBusJobProcessor) then throws on the first job.",
         ["DEF-JOBS"] = "task-202 punch list row 204e-F2. JobProcessingModule: AppOnlyDocumentAnalysisJobHandler/EmailAnalysisJobHandler are registered unconditionally and ProfileSummaryJobHandler under DocIntel only, but IAppOnlyAnalysisService exists only under analysis && docIntel; EmbeddingMigrationService (a hosted service, so it crashes Host.StartAsync) injects IKnowledgeDeploymentService/IOpenAiClient.",
         ["DEF-INS"] = "task-202 punch list row 204e-F3. InsightsIngestModule/InsightsModule/session services inject SearchIndexClient (registered only under analysis && docIntel && AiSearchEndpoint) or IChatClient (AiModule, same gate) without a Null peer.",
         ["DEF-RAG"] = "task-202 punch list row 204e-F4. AddRagServices registers SearchIndexClient/IKnowledgeDeploymentService/IEmbeddingCache only when DocumentIntelligence:AiSearchEndpoint is non-empty and gives only IRagService/IFileIndexingService/IVisualizationService a Null peer; ~35 services on the wider analysis && docIntel gate (SemanticSearch, RecordSearch, PinnedContextRecall, ReferenceRetrieval, ActionRunner, the *Ai facades, ComposeService, OfficeService…) inject them, so a stamp with DocIntel on and AI Search unset cannot start.",

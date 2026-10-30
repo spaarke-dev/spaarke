@@ -1,0 +1,124 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="130" project="ebilling-r1">
+  <metadata>
+    <title>Firm-visible findings projection (clause quotes, visibility filtering)</title>
+    <phase>5 Firm feedback (WP5) — wave W5-1</phase>
+    <gate>startable</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Decides what a CIAM (law firm) caller may see; a wrong filter leaks another firm's invoice, internal findings or clause text from an internal procedure (NFR-10, D-66). Security-class guard with a seeding proof.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Read-only projection plus two external read routes following existing external-group and Finance patterns; the security rules are stated as a closed set below.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>019, 049, 100</deps>
+    <tags>bff, api, auth, external-access</tags>
+    <estimated-effort>2 days</estimated-effort>
+  </metadata>
+
+  <prompt>Build the ONE server-side projection of firm-visible outcome content (FR-38, D-66) — every Reduced / Disallowed line and invoice-level adjustment, or the rejection findings of a rejected submission, each with reason, rule set name and version, section reference and quoted clause text, filtered by the rule set's "visible to firms" flag and never carrying a Procedure Library link — and expose it to the SPA through firm-scoped external read routes. 131 (notice), 133 (PDF) and 134 (SPA) consume the same projection.</prompt>
+
+  <role>SPAARKE platform developer. Expert in ASP.NET Core Minimal APIs, the external-access CallerPrincipal model (ADR-028), ProblemDetails and fail-closed authorization tests.</role>
+
+  <goal>FirmFindingsProjection builds a typed firm outcome for an invoice or a submission; external GET routes return it only to a CIAM caller of the invoice's firm with access to its core record; internal callers (131, 133, 132) call the projection service directly; a seeded test proves another firm's caller gets 403 and no data.</goal>
+
+  <context>
+    <background>Spec FR-38 (acceptance: a firm user sees only its own firm's invoices; Pending findings never appear; internal findings not shown before a decision), FR-28 (flag off: findings show rule name and reason only), FR-18 (rejected-submission report per finding: line, values read, rule, clause), FR-40 (PDF has the same content), NFR-10, D-63, D-66. Inputs: invoice / line decisions and adjustments (100, 102), line status and sprk_adjustmentreason (010), sprk_adjustmentrule on Adjustment lines (010), rejection findings in sprk_invoicesubmission.sprk_findingsjson and sprk_reportdocument (020), firm-visible reason text on Signals (026), rule sets and the visible-to-firms flag (019), and 076's single clause-visibility helper in Services/Finance/RuleSetService.cs — reuse it, do not re-implement the flag rule. External routes live on the /api/v1/external group, which carries the ExternalCollaboration policy and CallerPrincipalAuthorizationFilter (Api/ExternalAccess/ExternalAccessEndpoints.cs:60-63; mount lines :100-132). Firm membership is the contact-to-organization junction sprk_contactorganization (read by ExternalParticipationService; see Infrastructure/ExternalAccess/ExternalOrganizationMembership.cs remarks); 044 builds the SPA submission firm / core-record scope check — reuse it. Discovered gap: the existing external "invoices" grid module scopes sprk_invoice by matter / project only, not by firm (Infrastructure/DI/ExternalAccessModule.cs:435-444).</background>
+    <relevant-files>
+      <file role="new">src/server/api/Sprk.Bff.Api/Services/Finance/FirmFindingsProjection.cs (service, DTOs FirmOutcome / FirmOutcomeItem)</file>
+      <file role="new">src/server/api/Sprk.Bff.Api/Api/Finance/FirmOutcomeEndpoints.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ExternalAccessEndpoints.cs (one mount line; shared append point)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/DI/FinanceModule.cs (shared append point)</file>
+      <file role="new">tests/unit/Sprk.Bff.Api.Tests/Services/Finance/FirmFindingsProjectionTests.cs</file>
+      <file role="new">tests/integration/auth/Finance/FirmOutcomeScopeTests.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ExternalNotificationFeedEndpoints.cs (external-group route shape, CallerPrincipal use, stable error codes)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="019" status="pending">sprk_ruleset with visible-to-firms flag</dependency>
+      <dependency task="049" status="pending">Rejection findings and accepted invoices written</dependency>
+      <dependency task="100" status="pending">Line decisions (Accept / Reduce / Disallow) and the review read model</dependency>
+      <dependency task="076" status="pending">Clause-visibility helper (merged earlier in WP3)</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="D-70">Firm scoping applies to every external invoice read surface eBilling touches (invoices module grid and record, submission status, findings, report, guidelines); the firm is resolved server-side from the caller identity, never from a client parameter.</constraint>
+    <constraint source="D-66, D-63">Clause quote and section reference appear only when 076's helper allows them for that rule's rule set. No item, field or link anywhere in the projection points at a Procedure Library document or container.</constraint>
+    <constraint source="spec FR-38">An invoice still In Review (or a submission still Received / Processing) projects status and billed total only: no findings, no line decisions, no approved total. Findings never adopted by a decision (Pending, Flagged, overridden, AI observations) never appear.</constraint>
+    <constraint source="NFR-10, ADR-015">Firm-visible text only: firm-visible reason text, reviewer reason, values read; never internal Signal messages, confidence scores, reviewer identity, internal notes or other firms' data.</constraint>
+    <constraint source="ADR-008, ADR-028">External routes: CIAM caller only; the invoice's firm (sprk_vendororg) must be one of the caller's active firm memberships AND its core record must be in the caller's accessible set; otherwise 403 with a stable code. One check shared with 044; no second copy of the rule.</constraint>
+    <constraint source="ADR-019, 040">ProblemDetails with stable codes; RequireEbillingEnabled() on every route (503 ebilling.disabled when off).</constraint>
+    <constraint source="ADR-010, ADR-002">Projection registered in AddFinanceModule; read-only, no writes.</constraint>
+    <constraint source=".claude/constraints/bff-extensions.md">BFF hygiene: placement BFF (B1 caller identity, B4 live request), no package, publish-size delta recorded, no new HIGH CVE.</constraint>
+    <constraint source="task 026 fix-round-2 (ontology-r1 note; D-95(2))">The firm-reason projection reads sprk_signal.sprk_firmreason as the BFF / app identity, never as the caller. The column is field-secured: a caller identity reads it only through the "Spaarke BFF-Managed Field Readers" profile, and a caller-identity read without that profile returns null silently (no error), so a firm would be shown an empty reason.</constraint>
+    <constraint source="076 review round 2 item 5 (notes/076-ruleset-endpoints.md section 8)">Clause text for firms comes only from RuleSetService.GetFirmClauseAsync(policyVersionId, invoiceFirmId, ct). invoiceFirmId is the firm of the INVOICE the finding belongs to: the invoice's sprk_vendororg, read server-side, and passed only after the route's own firm-membership check has established that the caller may see that invoice. Never pass a value from the request (body, query or route) and never the SPA identity's firm: a CIAM caller may belong to several firms, and internal callers have no SPA identity. Guid.Empty (the invoice has no firm) returns no text. Required test: a caller in two firms, viewing firm A's invoice, gets A's clause and never B's.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ebilling-r1/spec.md (FR-18, FR-28, FR-38, FR-40, NFR-10)</file>
+      <file>projects/ebilling-r1/notes/decisions-log.md (D-63, D-66)</file>
+      <file>docs/architecture/external-access-spa-architecture.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/patterns/auth/uac-access-control.md</file>
+      <file>.claude/patterns/api/endpoint-filters.md</file>
+      <file>docs/standards/TEST-ARCHITECTURE.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Read 076's helper, 100's decision storage (how a Reduce / Disallow links to the finding or rule it rests on) and 044's scope check. Resolve the escalation question on flag-off rule sets before writing the filter.</step>
+    <step order="1">Projection contract: outcome kind (SubmissionRejected, InvoiceInReview, Approved, ApprovedWithAdjustments, Rejected, ReturnedToFirm, SentToAp, Paid), tracking number, status label, billed total, approved total (decided states only), report-available flag (sprk_reportdocument set), items. Item: subject (line date, timekeeper as billed, description excerpt, billed amount, approved amount) or invoice-level adjustment (method, value, amount), decision (Reduced / Disallowed / Adjustment / Rejection finding), reason, values read (rejection findings only), and citation (rule name, rule set name, version, section reference, clause quote) subject to the visibility rule.</step>
+    <step order="2">Implement FirmFindingsProjection.GetForInvoiceAsync / GetForSubmissionAsync (no caller check — internal callers) and the firm-scope check (reuse or extract 044's).</step>
+    <step order="3">FirmOutcomeEndpoints: GET /api/v1/external/ebilling/invoices/{invoiceId}/outcome and GET /api/v1/external/ebilling/submissions/{submissionId}/outcome (names directional), mounted on the external group with one line in ExternalAccessEndpoints.cs.</step>
+    <step order="4">Verify the existing "invoices" grid module gap (other firm's invoices on a shared matter visible in the SPA list). Record it via /project-defer-issue-tracking and raise it to the main session (fix touches Infrastructure/DI/ExternalAccessModule.cs, shared with uac-r2 / SPA-r3).</step>
+    <step order="5">Tests: unit (In Review projects no findings; Pending / Flagged / overridden / AI-observation findings excluded; flag-off rule set shows no clause text and no section; flag-on shows quote and section; no item carries a document link; approved total absent before decision; rejected submission items carry values read); auth seeding proof (seed firms A and B on one shared matter: A's caller reading B's invoice or submission gets 403 and an empty body; A's caller without access to the core record gets 403; A's own invoice 200; 401 unauthenticated; 503 when flag off).</step>
+    <step order="6">dotnet build and dotnet test green; publish-size delta (scripts/Capture-BffBaseline.ps1 against a fresh master build) and vulnerable-package check recorded.</step>
+    <step order="7">Update TASK-INDEX.md: this task's status cell to "✅ [done]".</step>
+    <step order="8">Record deviations (route names, flag-off decision, the invoices-module finding) in projects/ebilling-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>Flag-off rule sets: FR-28 says such findings show "rule name and reason only"; D-66 forbids only the clause text; project CLAUDE.md says those rule sets are "never shown to CIAM users". Before coding, raise 🔔 Human Input Required with the three readings; recommended default: rule (policy) name and reason, no rule set name, version, section or clause. Record the owner's answer.</trigger>
+    <trigger>If 100 stores no link from a Reduce / Disallow decision to the finding or rule it rests on, STOP and propose the smallest addition (in 100's model) rather than guessing the citation from all findings on the line.</trigger>
+    <trigger>If the firm-scope check cannot be shared with 044 without editing Infrastructure/ExternalAccess/** (shared with uac-r2), STOP and ask before editing those files.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>Spec section 11 rows "SPA Billing Guidelines view + endpoint" and "Review / approval / export / rule endpoints" (overlap /api/finance/invoice-review/*); the generic external record read (Api/ExternalAccess/ExternalModuleDataEndpoints.cs) returns raw columns only; no projection of decisions with clause citations exists (grep "clausequote|FirmOutcome" in src finds none).</existing>
+    <extension>The generic module read cannot apply decision-state gating or the per-rule-set visibility rule without putting eBilling logic into the shared external-access layer; one Finance projection reused by SPA, PDF and email is the extension point.</extension>
+    <cost-of-doing-nothing>Firms cannot see why lines were reduced (FR-38 fails), and the PDF (FR-40) and email (FR-50) would each re-derive visibility, risking a clause leak from an internal procedure (D-66).</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="dotnet">build, test</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Finance/FirmFindingsProjection.cs; Api/Finance/FirmOutcomeEndpoints.cs</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Finance/FirmFindingsProjectionTests.cs; tests/integration/auth/Finance/FirmOutcomeScopeTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Per D-70, the external invoices module (the invoices ExternalModuleDescriptor in Infrastructure/DI/ExternalAccessModule.cs) also scopes by firm: a CIAM caller sees only sprk_invoice rows whose sprk_vendororg is the caller's firm, in addition to the existing matter / project and secure-root scoping. A test with two firms on one shared matter shows each firm sees only its own invoices, submissions and findings (seeding proof). uac-r2 reviews the descriptor change (it owns decision D2 for that module); record the review in notes.</criterion>
+    <criterion testable="true">Seeding proof: with firms A and B seeded on one shared matter, a firm-A CIAM caller requesting firm B's invoice or submission outcome gets 403 ProblemDetails with a stable code and no outcome data; the same test fails if the firm check is removed.</criterion>
+    <criterion testable="true">A caller of the right firm without access to the core record gets 403; 401 unauthenticated; 503 ebilling.disabled when the flag is off; 200 for the own firm with access.</criterion>
+    <criterion testable="true">An invoice In Review projects no findings, no line decisions and no approved total; Pending, Flagged, overridden and AI-observation findings never appear.</criterion>
+    <criterion testable="true">For a rule set with "visible to firms" off, no item carries clause text or section reference (per D-79 the item carries the reason and the rule set name only); with it on, items carry rule set name, version, section reference and clause quote.</criterion>
+    <criterion testable="true">No projection field contains a document link, container id or drive item id for a Procedure Library document (asserted over every field of a fully populated projection).</criterion>
+    <criterion testable="true">A rejected submission's projection lists each rejection finding with line, values read, rule and citation.</criterion>
+    <criterion testable="true">The invoices-module scoping finding is recorded in notes/defer-issues.md with its GitHub issue, or shown not to exist.</criterion>
+    <criterion testable="true">Publish-size delta measured against a fresh master build and recorded in task notes; no new HIGH CVE.</criterion>
+    <criterion testable="true">Cover the stated contract plus the edge cases named above. Anything beyond that needs a one-line justification in task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>Shared append points: FinanceModule.cs, and the external-group mount site in Api/ExternalAccess/ExternalAccessEndpoints.cs (also used by 133 and 135) — re-read immediately before editing and add only this task's line; run /conflict-check before the PR (SPA-r3 and uac-r2 edit that file). 403 (not 404) for another firm follows FR-17's wording. 131, 132 and 133 call the projection in-process; they never call the external route.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load the knowledge files first. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

@@ -51,7 +51,6 @@
     <RolePrivilege name="prvReadsprk_DecisionRecord" level="Global" />
     <RolePrivilege name="prvReadsprk_Event" level="Global" />
     <RolePrivilege name="prvReadsprk_Invoice" level="Global" />
-    <RolePrivilege name="prvReadsprk_InvoiceLineItem" level="Global" />
     <RolePrivilege name="prvReadsprk_KPIAssessment" level="Global" />
     <RolePrivilege name="prvReadsprk_Matter" level="Global" />
     <RolePrivilege name="prvReadsprk_Memo" level="Global" />

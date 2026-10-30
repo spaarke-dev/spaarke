@@ -27,7 +27,7 @@ public static class OntologyWriterEvents
     /// evaluator (task 031) re-validates every policy version's <c>sprk_rulebody</c> at evaluation time and
     /// must fail closed and loudly, never silently producing zero Signals. ONE EventId covers every
     /// policy-validation refusal; the structured <c>reason</c> property distinguishes WHICH. It is one of the
-    /// SEVEN bounded policy-validation sub-reasons on <see cref="Telemetry.OntologyWriterFailureReason"/>:
+    /// bounded set of policy-validation sub-reasons on <see cref="Telemetry.OntologyWriterFailureReason"/>, including
     /// <c>rule_type_unsupported</c>, <c>rule_body_too_large</c>, <c>schema_invalid</c>, <c>compile_refused</c>,
     /// <c>template_token_outside_read_set</c>, <c>template_malformed</c> and <c>internal_error</c> (task 022
     /// rework round 1 review finding #7; <c>rule_body_too_large</c> added in round 2). Structured properties: <c>policyVersionId</c>, <c>policyCode</c> and
@@ -83,6 +83,13 @@ public static class OntologyWriterEvents
     /// <summary>Task 033: a policy's CURRENT version has a passed <c>sprk_inforceto</c> (no version is in force). Nothing is
     /// evaluated, closed or raised for it; the run is failed. Structured properties: <c>policyCode</c>, <c>versionId</c>, <c>inForceTo</c>.</summary>
     public static readonly EventId PolicyVersionNotInForce = new(50309, nameof(PolicyVersionNotInForce));
+
+    /// <summary>ebilling-r1 task 072 (W review, ontology-r1 re-check): the billing evaluator found a policy version whose stored
+    /// consequence its type may not carry and evaluated it as Flag instead (<c>consequence_not_allowed</c>). Logged at Warning. Its own
+    /// id, not <see cref="PolicyVersionInvalid"/>: that one is an Error for a refused version, and an alert on it must not also count
+    /// a version that is still evaluated. Structured properties: <c>SubmissionId</c>, <c>PolicyCode</c>, <c>PolicyVersionId</c>,
+    /// <c>RuleType</c>, <c>Consequence</c>, <c>Reason</c>; never the rule body or template.</summary>
+    public static readonly EventId PolicyVersionConsequenceDowngraded = new(50318, nameof(PolicyVersionConsequenceDowngraded));
 
     /// <summary>Task 141 fix round 2 (K1): <c>TaskActionCore</c> could not build a task's regarding pair because Dataverse refused
     /// the BFF identity (the same detection <see cref="SignalWriter"/> uses). Logged at Error; the core still returns

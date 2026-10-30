@@ -82,6 +82,18 @@ public class DataverseUpdateHandler : IDataverseUpdateHandler
             throw new RecordOwnerUnresolvedException(entityLogicalName, documentRefusal);
         }
 
+        // ebilling-r1 DEF-022 (#2056): an invoice or invoice line names exactly one core record, a line regards its invoice's,
+        // and an invoice re-file keeps its lines (D-96). Decided on the stored lookups overlaid with this write, before it.
+        // #2257 (master merge): a person's write answers "not found" as "could not be read" (the guard reads as the app).
+        if (await InvoiceFamilyCoreRecordGuard.CheckGenericUpdateAsync(
+                    entityLogicalName, recordId, fields, _genericEntityService, ct,
+                    writeIsImpersonated: impersonateSystemUserId is not null)
+                .ConfigureAwait(false) is { RefusalCode: { } familyCode })
+        {
+            // Code only: the guard read as the app, so its reason can name records the caller has not read.
+            throw InvoiceFamilyCoreRecordGuard.RefusalException(entityLogicalName, familyCode);
+        }
+
         // Task 158 (owner round 6): a work assignment or project filed under a secure matter or project is secured. Whether
         // the record this write files it under is secure must be readable, or nothing is written (fail closed).
         if (await _rootFiling.CheckAsync(entityLogicalName, recordId, fields, ct).ConfigureAwait(false) is { } rootRefusal)
@@ -190,13 +202,37 @@ public class DataverseUpdateHandler : IDataverseUpdateHandler
         else
         {
             // Simple update - last write wins
-            await _fieldMappingService.UpdateRecordFieldsAsync(
-                entityLogicalName, recordId, fields, ct, impersonateSystemUserId);
+            await PatchAsync(entityLogicalName, recordId, fields, ct, impersonateSystemUserId);
 
             _logger.LogInformation(
                 "Updated {EntityType} {RecordId} with {FieldCount} fields (no concurrency control)",
                 entityLogicalName, recordId, fields.Count);
         }
+    }
+
+    /// <summary>
+    /// The write. An invoice or line is written UPDATE-ONLY (If-Match: *): the guard at the top of <see cref="UpdateAsync"/>
+    /// checked that the row exists, and a row deleted since must not be re-created by the upsert (ebilling-r1 #2081). It is
+    /// refused like the guard, nothing created. #2257 (master merge): every write runs as <paramref name="impersonateSystemUserId"/>
+    /// when the run has one (a person's run writes AS that person) and app-only otherwise; a person's "not found" is answered as
+    /// "could not be read", so it never tells them whether the id names a row they cannot read.
+    /// </summary>
+    private async Task PatchAsync(
+        string entityLogicalName, Guid recordId, Dictionary<string, object?> fields, CancellationToken ct, Guid? impersonateSystemUserId)
+    {
+        if (InvoiceFamilyCoreRecordGuard.IsUpdateOnlyTarget(entityLogicalName))
+        {
+            if (await InvoiceFamilyCoreRecordGuard.UpdateExistingAsync(
+                    _fieldMappingService, entityLogicalName, recordId, fields, impersonateSystemUserId,
+                    notFoundAsReadFailed: impersonateSystemUserId is not null, ct) is { } gone)
+            {
+                throw InvoiceFamilyCoreRecordGuard.RefusalException(entityLogicalName, gone);
+            }
+
+            return;
+        }
+
+        await _fieldMappingService.UpdateRecordFieldsAsync(entityLogicalName, recordId, fields, ct, impersonateSystemUserId);
     }
 
     /// <summary>
@@ -247,8 +283,7 @@ public class DataverseUpdateHandler : IDataverseUpdateHandler
                 };
 
                 // 3. Update with version check
-                await _fieldMappingService.UpdateRecordFieldsAsync(
-                    entityLogicalName, recordId, fieldsWithVersion, ct, impersonateSystemUserId);
+                await PatchAsync(entityLogicalName, recordId, fieldsWithVersion, ct, impersonateSystemUserId);
 
                 _logger.LogInformation(
                     "Updated {EntityType} {RecordId} with optimistic concurrency (version {Version}, {FieldCount} fields)",

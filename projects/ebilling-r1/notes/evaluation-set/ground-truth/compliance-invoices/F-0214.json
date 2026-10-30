@@ -1,0 +1,35 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0214",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0214","generator_id":"gen_eval_set.py@1 F-0214","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0214.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-04"},
+ "header":{"firm":"Ingersoll & Vance LLP","firm_invoice_number":"INV-2025-92523","invoice_date":"2026-01-27","billing_period_start":"2025-10-01","billing_period_end":"2025-10-31","firm_matter_reference":"74648-0011","po_number":"PO-4535999","fees_total":6881.25,"expenses_total":3810.93,"adjustments_total":0.0,"total_due":10692.18,"currency":"USD"},
+ "timekeepers":[{"name":"Anders Castellanos","title":"Associate","rate":375.0,"billed_as":"Castellanos, A."},{"name":"Ivan Nwosu","title":"Paralegal","rate":190.0,"billed_as":"Nwosu, I."},{"name":"Jordan Zielinski","title":"Paralegal","rate":175.0,"billed_as":"Zielinski, J."},{"name":"Rafael Mbeki","title":"Partner","rate":625.0,"billed_as":"Mbeki, R."},{"name":"Yusuf Hargrove","title":"Partner","rate":580.0,"billed_as":"Hargrove, Y."}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2025-10-01","timekeeper":"Nwosu, I.","timekeeper_name":"Ivan Nwosu","timekeeper_title":"Paralegal","title":"Paralegal","hours":0.25,"rate":190.0,"amount":47.5,"narrative":"Review documents produced by Quarry Lane Partners for responsiveness","codes":["L320","A104"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2025-10-02","timekeeper":"Zielinski, J.","timekeeper_name":"Jordan Zielinski","timekeeper_title":"Paralegal","title":"Paralegal","hours":1.3,"rate":175.0,"amount":227.5,"narrative":"Research authority for reply brief","codes":["L250","A102"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2025-10-07","timekeeper":"Hargrove, Y.","timekeeper_name":"Yusuf Hargrove","timekeeper_title":"Partner","title":"Partner","hours":0.75,"rate":580.0,"amount":435.0,"narrative":"Research case law supporting motion to dismiss","codes":["L240","A102"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2025-10-08","timekeeper":"Castellanos, A.","timekeeper_name":"Anders Castellanos","timekeeper_title":"Associate","title":"Associate","hours":1.25,"rate":375.0,"amount":468.75,"narrative":"Plan strategy for upcoming phase of the warranty claim with team","codes":["L120","A101"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2025-10-14","timekeeper":"Hargrove, Y.","timekeeper_name":"Yusuf Hargrove","timekeeper_title":"Partner","title":"Partner","hours":0.75,"rate":580.0,"amount":435.0,"narrative":"Plan strategy for upcoming phase of the licensing dispute with team","codes":["L120","A101"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2025-10-16","timekeeper":"Hargrove, Y.","timekeeper_name":"Yusuf Hargrove","timekeeper_title":"Partner","title":"Partner","hours":3.0,"rate":580.0,"amount":1740.0,"narrative":"Prepare monthly status report to client regarding the vendor agreement","codes":["L190","A111"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2025-10-20","timekeeper":"Hargrove, Y.","timekeeper_name":"Yusuf Hargrove","timekeeper_title":"Partner","title":"Partner","hours":2.5,"rate":580.0,"amount":1450.0,"narrative":"Conference with client expert regarding rebuttal report","codes":["L340","A106"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2025-10-23","timekeeper":"Nwosu, I.","timekeeper_name":"Ivan Nwosu","timekeeper_title":"Paralegal","title":"Paralegal","hours":3.0,"rate":190.0,"amount":570.0,"narrative":"Prepare outline for deposition of Caldera Energy witness","codes":["L330","A101"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"fee","date":"2025-10-28","timekeeper":"Zielinski, J.","timekeeper_name":"Jordan Zielinski","timekeeper_title":"Paralegal","title":"Paralegal","hours":2.75,"rate":175.0,"amount":481.25,"narrative":"Prepare case assessment memorandum regarding the warranty claim and recommended strategy","codes":["L120","A103"],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"fee","date":"2025-10-28","timekeeper":"Mbeki, R.","timekeeper_name":"Rafael Mbeki","timekeeper_title":"Partner","title":"Partner","hours":0.25,"rate":625.0,"amount":156.25,"narrative":"Prepare case assessment memorandum regarding the lease dispute and recommended strategy","codes":["L120","A103"],"page":1,"narrative_style":"clear"},
+  {"n":11,"line_type":"fee","date":"2025-10-29","timekeeper":"Hargrove, Y.","timekeeper_name":"Yusuf Hargrove","timekeeper_title":"Partner","title":"Partner","hours":0.25,"rate":580.0,"amount":145.0,"narrative":"Review court docket and calendar of pending deadlines for the data incident","codes":["L190","A104"],"page":1,"narrative_style":"clear"},
+  {"n":12,"line_type":"fee","date":"2025-10-30","timekeeper":"Hargrove, Y.","timekeeper_name":"Yusuf Hargrove","timekeeper_title":"Partner","title":"Partner","hours":1.25,"rate":580.0,"amount":725.0,"narrative":"Attend deposition of Tidewater Retail corporate representative","codes":["L330","A109"],"page":1,"narrative_style":"clear"},
+  {"n":13,"line_type":"expense","date":"2025-10-14","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":3.0,"rate":54.97,"amount":164.91,"narrative":"Working meal during deposition preparation","codes":["E111"],"page":1,"narrative_style":"clear"},
+  {"n":14,"line_type":"expense","date":"2025-10-15","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":3.0,"rate":47.03,"amount":141.09,"narrative":"Overnight courier to Pacifica Telecom counsel","codes":["E107"],"page":1,"narrative_style":"clear"},
+  {"n":15,"line_type":"expense","date":"2025-10-29","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":3468.75,"amount":3468.75,"narrative":"Consulting expert fees","codes":["E119"],"page":1,"narrative_style":"clear"},
+  {"n":16,"line_type":"expense","date":"2025-10-30","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":54.0,"rate":0.67,"amount":36.18,"narrative":"Mileage to courthouse","codes":["E109"],"page":1,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["755 Peachtree Way","Phoenix","Tax ID 14-8916556"],"template":"T06","pages":2},
+ "rule_set_id":"RS-04",
+ "context":{"matter_open":"2025-03-06","matter_close":"2026-01-29","matter_budget":67768.0,"approved_timekeepers":["Ivan Nwosu","Jordan Zielinski","Anders Castellanos","Rafael Mbeki","Yusuf Hargrove","Aisha Oyelaran"],"invoice_received_date":"2026-01-28"},
+ "expected_findings":[
+  {"rule_id":"RS-04-R03","rule_type":"TimeIncrement","scope":"line","line_refs":[2],"consequence":"Reduce"},
+  {"rule_id":"RS-04-R05","rule_type":"InvoiceAge","scope":"invoice","line_refs":[],"consequence":"Flag"}
+ ],
+ "seeded_violations":2
+}

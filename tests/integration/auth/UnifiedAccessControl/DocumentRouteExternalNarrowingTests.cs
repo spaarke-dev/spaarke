@@ -17,6 +17,7 @@ using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Services.Ai.Context;
 using Sprk.Bff.Api.Services.Identity;
 using Sprk.Bff.Api.Tests.Services.Ai.Handlers;
+using Sprk.Bff.Api.Tests.TestInfrastructure;
 using Xunit;
 
 namespace Sprk.Bff.Api.Tests.AccessControl;
@@ -316,17 +317,16 @@ public class DocumentRouteExternalNarrowingTests : IClassFixture<DocumentRouteNa
         dataverse.Setup(d => d.GetDocumentsByContainerAsync(containerId, It.IsAny<CancellationToken>()))
             .ReturnsAsync(rows.Select(id => new DocumentEntity { Id = id.ToString(), Name = $"doc-{id}" }).ToList());
 
-        var identity = new NarrowingStatedIdentityResolver(() => mode);
-        var services = new ServiceCollection()
-            .AddSingleton<ISystemUserIdentityResolver>(identity)
-            .AddSingleton<ICallerSystemUserResolver>(new CallerSystemUserResolver(identity, NullLogger<CallerSystemUserResolver>.Instance))
+        var registrations = new ServiceCollection();
+        var caller = StatedCaller.Register(registrations, StatedCaller.For(mode));
+        var services = registrations
             .AddSingleton<InternalRouteDocumentNarrowing>((ids, ct) => _fixture.World.Narrowing(ids, ct))
             .BuildServiceProvider();
         var context = new DefaultHttpContext
         {
             RequestServices = services,
             User = new ClaimsPrincipal(new ClaimsIdentity(
-                new[] { new Claim("http://schemas.microsoft.com/identity/claims/objectidentifier", Guid.NewGuid().ToString()) },
+                new[] { new Claim("http://schemas.microsoft.com/identity/claims/objectidentifier", caller.ExpectedOid.ToString()) },
                 "Test")),
         };
 
@@ -404,59 +404,6 @@ public class DocumentRouteExternalNarrowingTests : IClassFixture<DocumentRouteNa
     }
 }
 
-/// <summary>Who the caller is, as the systemuser lookup answers.</summary>
-public enum NarrowingCallerMode
-{
-    /// <summary>A resolved systemuser, not flagged external.</summary>
-    Internal,
-
-    /// <summary>A resolved systemuser flagged <c>sprk_isexternal</c>.</summary>
-    External,
-
-    /// <summary>The oid → systemuser lookup throws (the resolver reports <c>lookup-failed</c>).</summary>
-    LookupFault,
-
-    /// <summary>The systemuser resolves, but its external flag cannot be read.</summary>
-    ExternalFlagFault,
-}
-
-/// <summary>
-/// The real <see cref="CallerSystemUserResolver"/>, asked with the principal's oid claim replaced by a fixed GUID (the shared
-/// fixture's oid is not a GUID; production oids are).
-/// </summary>
-internal sealed class GuidOidCallerResolver(ICallerSystemUserResolver inner) : ICallerSystemUserResolver
-{
-    private const string OidClaim = "http://schemas.microsoft.com/identity/claims/objectidentifier";
-
-    public Task<CallerSystemUserResolution> ResolveAsync(ClaimsPrincipal? caller, CancellationToken ct) =>
-        inner.ResolveAsync(
-            caller is null
-                ? null
-                : new ClaimsPrincipal(new ClaimsIdentity(new[] { new Claim(OidClaim, "18800000-0000-0000-0000-00000000000a") }, "Test")),
-            ct);
-}
-
-/// <summary>An <see cref="ISystemUserIdentityResolver"/> that answers as <see cref="NarrowingCallerMode"/> says.</summary>
-internal sealed class NarrowingStatedIdentityResolver(Func<NarrowingCallerMode> mode) : ISystemUserIdentityResolver
-{
-    private static readonly Guid SystemUserId = Guid.Parse("18800000-0000-0000-0000-0000000000b0");
-
-    public Task<string?> ResolveOidAsync(Guid systemUserId, CancellationToken ct = default) =>
-        Task.FromResult<string?>(null);
-
-    public Task<Guid?> ResolveSystemUserIdAsync(string oid, CancellationToken ct = default) =>
-        mode() == NarrowingCallerMode.LookupFault
-            ? throw new InvalidOperationException("Simulated systemuser lookup failure (test).")
-            : Task.FromResult<Guid?>(SystemUserId);
-
-    public Task<bool> IsExternalAsync(Guid systemUserId, CancellationToken ct = default) => mode() switch
-    {
-        NarrowingCallerMode.External => Task.FromResult(true),
-        NarrowingCallerMode.ExternalFlagFault => throw new InvalidOperationException("Simulated external-flag read failure (test)."),
-        _ => Task.FromResult(false),
-    };
-}
-
 /// <summary>
 /// <see cref="DocumentDestroyAuthorizationTestFixture"/> (real routes, token-stated rights, recorded destroys and SPE
 /// downloads) plus: the caller's systemuser stated per request (header <see cref="CallerHeader"/>), and the app-only
@@ -491,26 +438,15 @@ public class DocumentRouteNarrowingTestFixture : DocumentDestroyAuthorizationTes
 
         builder.ConfigureTestServices(services =>
         {
-            // The shared fixture's oid ("test-user-…") is not a GUID, so the real CallerSystemUserResolver would answer
-            // no-oid-claim for every request. The caller resolver therefore delegates to the REAL one over the stated
-            // systemuser row, with the oid claim replaced by a GUID (production oids are GUIDs). LookupFault reaches the
-            // real resolver's own catch, which answers lookup-failed.
-            services.RemoveAll<ISystemUserIdentityResolver>();
-            services.AddSingleton<ISystemUserIdentityResolver>(sp =>
-            {
-                var accessor = sp.GetRequiredService<IHttpContextAccessor>();
-                return new NarrowingStatedIdentityResolver(() =>
-                    Enum.TryParse<NarrowingCallerMode>(accessor.HttpContext?.Request.Headers[CallerHeader].ToString(), out var mode)
-                        ? mode
-                        : NarrowingCallerMode.Internal);
-            });
-            services.RemoveAll<ICallerSystemUserResolver>();
-            services.AddScoped<ICallerSystemUserResolver>(sp => new GuidOidCallerResolver(
-                new CallerSystemUserResolver(
-                    sp.GetRequiredService<ISystemUserIdentityResolver>(), NullLogger<CallerSystemUserResolver>.Instance)));
-
-            services.RemoveAll<InternalRouteDocumentNarrowing>();
-            services.AddScoped<InternalRouteDocumentNarrowing>(_ => (ids, ct) => World.Narrowing(ids, ct));
+            // The one stated caller (StatedCaller): the REAL resolvers over the stated systemuser row, read per request from
+            // the caller header. The shared fixture's oid ("test-user-…") is not a GUID, so the oid claim is replaced by a
+            // GUID (production oids are GUIDs). LookupFault reaches the real resolver's own catch, which answers lookup-failed.
+            var accessor = new HttpContextAccessor();
+            services.AddStatedNarrowingCaller(
+                () => Enum.TryParse<NarrowingCallerMode>(accessor.HttpContext?.Request.Headers[CallerHeader].ToString(), out var mode)
+                    ? mode
+                    : NarrowingCallerMode.Internal,
+                () => World);
         });
     }
 }

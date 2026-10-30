@@ -821,5 +821,32 @@ When the home token has no `email` claim, the form's prefill falls back to the u
 **Entry-points**
 
 - `src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/CallerPrincipalResolver.cs` (~717-734)
-- `src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/WorkforceIdentityOptions.cs` (`TokenEmail`)
+- `src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/WorkforceIdentityOptions.cs` (`WorkforceCallerClaims.TokenEmail`, the form prefill, which falls back to the username); registration itself reads only the `email` claim (`ExternalRegistrationEndpoints.TokenEmail`). Corrected 2026-10-29.
 - `src/client/external-spa/src/pages/RegistrationPage.tsx`
+
+### ISS-024 — Grant notifier emails a home-linked workforce contact as an external person (DI-137)
+
+| Field | Value |
+|---|---|
+| **Status** | Open (owner decision: fix in R3 with uac-r2, or R4) |
+| **Urgency** | next-round |
+| **Filed** | 2026-10-29 (by ontology-r1 as DI-137) |
+| **Source** | Ontology task 168 fix round 3, after the R3 review |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2458 |
+
+**Description**
+
+`GrantAccessNotifier.NotifyContactGrantAsync` decides "an internal user represents this contact" from `sprk_primarycontact` and the Spaarke-tenant object id only. A WorkforceHome contact linked to a licensed user by the home pair alone (the link the portal reads first) is therefore emailed a portal notice as an external person, while the portal shows that person the user's view. The notice is the only content involved. Reference fix: read the home link before the external branch, as `AssignTaskRecipientGate.HomeLinkAsync` (commit `bd32be448f`) does. The natural home is uac-r2 193 `ContactUserRepresentation` (DI-136 #2457).
+
+**Entry-points**
+
+- `src/server/api/Sprk.Bff.Api/Api/ExternalAccess/GrantAccessNotifier.cs` (`NotifyContactGrantAsync`, `EmailExternalContactGrantAsync` ~270-330)
+
+### ISS-025: Teams mobile layout not optimized (deferred to R4)
+
+| Field | Value |
+|---|---|
+| **Found** | 2026-10-29, task 071 (owner) |
+| **What** | The Teams tab loads in Teams mobile, but its layout is not adapted to the phone surface. |
+| **Decision** | Owner: not for this release; it loads. |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2466 |

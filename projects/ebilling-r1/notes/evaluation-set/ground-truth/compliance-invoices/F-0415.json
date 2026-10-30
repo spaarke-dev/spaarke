@@ -1,0 +1,25 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0415",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0415","generator_id":"gen_eval_set.py@1 F-0415","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0415.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-01"},
+ "header":{"firm":"Garrison and Ellison LLP","firm_invoice_number":"INV-2025-04493","invoice_date":"2025-10-03","billing_period_start":"2025-09-01","billing_period_end":"2025-09-30","firm_matter_reference":"44917-0038","po_number":"PO-4555721","fees_total":3145.0,"expenses_total":5852.91,"adjustments_total":0.0,"total_due":8997.91,"currency":"USD"},
+ "timekeepers":[{"name":"Daniel Fairweather","title":"Associate","rate":350.0,"billed_as":"DF"},{"name":"Gregory Ashdown","title":"Paralegal","rate":210.0,"billed_as":"GA"},{"name":"Hannah Blackwood","title":"Senior Associate","rate":465.0,"billed_as":"HB"},{"name":"Ingrid Mbeki","title":"Partner","rate":675.0,"billed_as":"IM"},{"name":"Naomi Esposito","title":"Associate","rate":345.0,"billed_as":"NE"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2025-09-02","timekeeper":"DF","timekeeper_name":"Daniel Fairweather","timekeeper_title":"Associate","title":"Assoc","hours":0.5,"rate":350.0,"amount":175.0,"narrative":"Telephone conference with witness regarding the employment claim","codes":["L410","A106"],"page":2,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2025-09-04","timekeeper":"IM","timekeeper_name":"Ingrid Mbeki","timekeeper_title":"Partner","title":"Ptr","hours":0.5,"rate":675.0,"amount":337.5,"narrative":"Prepare examination outlines for trial in the warranty claim","codes":["L440","A101"],"page":2,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2025-09-05","timekeeper":"GA","timekeeper_name":"Gregory Ashdown","timekeeper_title":"Paralegal","title":"Para","hours":1.5,"rate":210.0,"amount":315.0,"narrative":"Review court docket and calendar of pending deadlines for the lease dispute","codes":["L190","A104"],"page":2,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2025-09-18","timekeeper":"NE","timekeeper_name":"Naomi Esposito","timekeeper_title":"Associate","title":"Assoc","hours":2.6,"rate":345.0,"amount":897.0,"narrative":"Draft post-trial motion in the supply agreement","codes":["L460","A103"],"page":2,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2025-09-19","timekeeper":"HB","timekeeper_name":"Hannah Blackwood","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":0.3,"rate":465.0,"amount":139.5,"narrative":"Prepare trial notebook and demonstrative exhibits for the warranty claim","codes":["L440","A101"],"page":2,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2025-09-22","timekeeper":"NE","timekeeper_name":"Naomi Esposito","timekeeper_title":"Associate","title":"Assoc","hours":2.8,"rate":345.0,"amount":966.0,"narrative":"Analyze exposure and damages model for the construction contract","codes":["L120","A104"],"page":2,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2025-09-24","timekeeper":"DF","timekeeper_name":"Daniel Fairweather","timekeeper_title":"Associate","title":"Assoc","hours":0.9,"rate":350.0,"amount":315.0,"narrative":"Attend trial day in the insurance coverage issue","codes":["L450","A109"],"page":2,"narrative_style":"clear"},
+  {"n":8,"line_type":"expense","date":"2025-09-01","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":243.0,"rate":0.12,"amount":29.16,"narrative":"Photocopies - 243 pages","codes":["E101"],"page":2,"narrative_style":"clear"},
+  {"n":9,"line_type":"expense","date":"2025-09-09","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":5823.75,"amount":5823.75,"narrative":"Consulting expert fees","codes":["E119"],"page":2,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["20 Federal Plaza","Chicago","Tax ID 67-6900872"],"template":"T21","pages":2},
+ "rule_set_id":"RS-01",
+ "context":{"matter_open":"2025-01-10","matter_close":"2025-12-29","matter_budget":60991.0,"approved_timekeepers":["Ingrid Fairweather","Hannah Blackwood","Daniel Fairweather","Gregory Ashdown","Ingrid Mbeki","Naomi Esposito"],"invoice_received_date":"2025-10-17"},
+ "expected_findings":[],
+ "seeded_violations":0
+}

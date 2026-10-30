@@ -192,6 +192,30 @@ public static class OperationAccessPolicy
         // lookup on the document instead — see "finance.link_invoice".)
         ["finance.attach_invoice"] = AccessRights.AppendTo,
 
+        // "finance.submit_invoice" — Read AND AppendTo on the CORE record (sprk_matters / sprk_projects /
+        // sprk_workassignments) named by the route of POST /api/finance/{core}/{id}/invoice-submissions (ebilling-r1
+        // task 044, FR-17 internal channel, D-24). The application then writes a new sprk_document and
+        // sprk_invoicesubmission whose lookups point AT the core record, so AppendTo is the "finance.attach_invoice"
+        // reasoning; Read because the receipt and the status route surface the record's submission to its submitter
+        // (the "analysis.attach" reasoning). A separate key so deny logs name the operation.
+        ["finance.submit_invoice"] = AccessRights.Read | AccessRights.AppendTo,
+
+        // "ebilling.invoice.decide" — Write on the INVOICE named by the route (sprk_invoices, route invoiceId) of the Invoice Review
+        // line-decision routes: POST /api/finance/invoices/{invoiceId}/lines/{lineId}/decision, .../lines/decisions and
+        // .../lines/accept-clean (ebilling-r1 task 100, FR-31, D-77: any user with Write on the invoice decides its lines, not only the
+        // eligible approvers). Deciding a line changes the invoice's lines and totals, which is a Write on the invoice (the
+        // "finance.confirm" reasoning); a Read-only viewer cannot decide. Tasks 101-104 (corrections, adjustments, approval, reject /
+        // return) reuse this one key for their invoice-level writes. A separate key from "finance.confirm" (which names a DOCUMENT) so a
+        // deny log names the act.
+        ["ebilling.invoice.decide"] = AccessRights.Write,
+        // "ebilling.submission.decide" — Read AND Write on the SUBMISSION (sprk_invoicesubmissions) named by the route of
+        // POST /api/finance/submissions/{submissionId}/override and /return (ebilling-r1 task 105, FR-19, FR-37, D-24, D-73). Both
+        // decide a blocked internal submission: the application then sets the submission's status and reason code and files a Decision
+        // Record under its invoice, so the caller must be able to change the submission (Write) and see it (Read). D-73: Return needs only
+        // this (no privilege); Override needs this AND the "eBilling Override" table privilege, which the service asks of the caller
+        // separately (EbillingOverridePrivilege). A separate key so deny logs name the act.
+        ["ebilling.submission.decide"] = AccessRights.Read | AccessRights.Write,
+
         // "analysis.attach" — Read AND AppendTo on each PARENT record a NEW app-created sprk_analysis will point
         // at: the document and the regarding matter/project of POST /api/ai/analysis/promote (body, or the
         // session's own document). Added by unified-access-control-r2 task 162 (G5, owner rounds 3b / 7 item 3 /

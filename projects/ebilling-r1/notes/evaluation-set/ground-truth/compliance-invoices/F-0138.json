@@ -1,0 +1,31 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0138",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0138","generator_id":"gen_eval_set.py@1 F-0138","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0138.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-06"},
+ "header":{"firm":"Fenwick & Yardley LLP","firm_invoice_number":"INV-2026-36904","invoice_date":"2025-06-01","billing_period_start":"2025-05-01","billing_period_end":"2025-05-31","firm_matter_reference":"58730-0029","po_number":"PO-4550475","fees_total":2157.0,"expenses_total":2130.13,"adjustments_total":0.0,"total_due":4287.13,"currency":"USD"},
+ "timekeepers":[{"name":"Cyrus Santoro","title":"Legal Assistant","rate":80.0,"billed_as":"Cyrus Santoro"},{"name":"Dmitri Voss","title":"Senior Associate","rate":235.0,"billed_as":"Dmitri Voss"},{"name":"Rafael Mbeki","title":"Associate","rate":220.0,"billed_as":"Rafael Mbeki"},{"name":"Yusuf Marchetti","title":"Paralegal","rate":110.0,"billed_as":"Yusuf Marchetti"},{"name":"Yusuf Tavares","title":"Associate","rate":210.0,"billed_as":"Yusuf Tavares"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2025-05-08","timekeeper":"Cyrus Santoro","timekeeper_name":"Cyrus Santoro","timekeeper_title":"Legal Assistant","title":"LA","hours":2.9,"rate":80.0,"amount":232.0,"narrative":"Prepare trial notebook and demonstrative exhibits for the lease dispute","codes":["L440","A101"],"page":2,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2025-05-27","timekeeper":"Dmitri Voss","timekeeper_name":"Dmitri Voss","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":1.8,"rate":235.0,"amount":423.0,"narrative":"Review draft expert disclosure for the data incident","codes":["L420","A104"],"page":2,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2025-05-12","timekeeper":"Rafael Mbeki","timekeeper_name":"Rafael Mbeki","timekeeper_title":"Associate","title":"Assoc","hours":0.9,"rate":220.0,"amount":198.0,"narrative":"Analyze exposure and damages model for the warranty claim","codes":["L120","A104"],"page":2,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2025-05-26","timekeeper":"Rafael Mbeki","timekeeper_name":"Rafael Mbeki","timekeeper_title":"Associate","title":"Assoc","hours":1.5,"rate":220.0,"amount":330.0,"narrative":"Prepare expert witness for testimony in the employment claim","codes":["L420","A101"],"page":2,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2025-05-29","timekeeper":"Rafael Mbeki","timekeeper_name":"Rafael Mbeki","timekeeper_title":"Associate","title":"Assoc","hours":0.7,"rate":220.0,"amount":154.0,"narrative":"Review court docket and calendar of pending deadlines for the data incident","codes":["L190","A104"],"page":2,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2025-05-29","timekeeper":"Rafael Mbeki","timekeeper_name":"Rafael Mbeki","timekeeper_title":"Associate","title":"Assoc","hours":0.7,"rate":220.0,"amount":154.0,"narrative":"Review court docket and calendar of pending deadlines for the data incident","codes":["L190","A104"],"page":2,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2025-05-07","timekeeper":"Yusuf Marchetti","timekeeper_name":"Yusuf Marchetti","timekeeper_title":"Paralegal","title":"Para","hours":0.9,"rate":110.0,"amount":99.0,"narrative":"Draft interrogatory responses for trial in the warranty claim","codes":["L430","A103"],"page":2,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2025-05-08","timekeeper":"Yusuf Tavares","timekeeper_name":"Yusuf Tavares","timekeeper_title":"Associate","title":"Assoc","hours":0.6,"rate":210.0,"amount":126.0,"narrative":"Attend trial day in the lease dispute","codes":["L450","A109"],"page":2,"narrative_style":"clear"},
+  {"n":9,"line_type":"fee","date":"2025-05-27","timekeeper":"Yusuf Tavares","timekeeper_name":"Yusuf Tavares","timekeeper_title":"Associate","title":"Assoc","hours":2.1,"rate":210.0,"amount":441.0,"narrative":"Review draft expert disclosure for the regulatory inquiry","codes":["L420","A104"],"page":2,"narrative_style":"clear"},
+  {"n":10,"line_type":"expense","date":"2025-05-05","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":645.08,"amount":645.08,"narrative":"Airfare to Minneapolis for deposition","codes":["E110"],"page":2,"narrative_style":"clear"},
+  {"n":11,"line_type":"expense","date":"2025-05-08","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":44.0,"rate":0.63,"amount":27.72,"narrative":"Mileage to courthouse","codes":["E109"],"page":2,"narrative_style":"clear"},
+  {"n":12,"line_type":"expense","date":"2025-05-21","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":749.61,"amount":749.61,"narrative":"Airfare to Phoenix for deposition","codes":["E110"],"page":2,"narrative_style":"clear"},
+  {"n":13,"line_type":"expense","date":"2025-05-21","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":707.72,"amount":707.72,"narrative":"Document hosting and processing vendor","codes":["E118"],"page":2,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["838 Federal Plaza","Seattle","Tax ID 72-9746457"],"template":"T10","pages":2},
+ "rule_set_id":"RS-06",
+ "context":{"matter_open":"2024-07-21","matter_close":"2025-08-29","matter_budget":42148.0,"approved_timekeepers":["Yusuf Marchetti","Yusuf Tavares","Dmitri Voss","Cyrus Santoro","Rafael Mbeki"],"invoice_received_date":"2025-06-07"},
+ "expected_findings":[
+  {"rule_id":"RS-06-R09","rule_type":"Duplicate","scope":"line","line_refs":[6],"consequence":"Disallow","related_line_refs":[5]}
+ ],
+ "seeded_violations":1
+}

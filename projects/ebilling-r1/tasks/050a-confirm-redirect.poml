@@ -1,0 +1,102 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="050a" project="ebilling-r1">
+  <metadata>
+    <title>Redirect the review-confirm route into the submission operation</title>
+    <phase>2 Submission and extraction (WP2)</phase>
+    <gate>startable</gate>
+    <status>in-progress</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Changes the write path of an authorized BFF route: the submission operation (the only invoice creator, ADR-002) gains an existing-document entry; the document is re-filed under the invoice with the secure-record isolation step (uac-r2 reviews); the response contract of POST /api/finance/invoice-review/confirm changes.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Owner decision D-134 (2026-10-20): idempotency design (dedupe key), the order and failure handling of the secure re-file, and a contract change; adversarial review follows.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <deps>042, 049</deps>
+    <tags>bff, bff-api, api, finance, write-path, secure-records</tags>
+    <estimated-effort>1-2 days</estimated-effort>
+  </metadata>
+
+  <prompt>Apply D-134 (which refines D-71): POST /api/finance/invoice-review/confirm stops creating sprk_invoice and enqueuing InvoiceExtraction. It calls the internal submission operation (044, InvoiceSubmissionService) through a new existing-document entry, which runs the same firm, firm-link (D-106 / D-110), core-record and owner checks as SubmitAsync, skips the file checks, the upload and the document create, creates the submission (channel Internal) that points at the existing document, and enqueues InvoiceSubmissionProcessing. A retry for the same document returns the earlier submission instead of creating a second one. The firm invoice number is required (D-91). When the job (049) links the existing document to the invoice it creates, it re-files the document under the invoice and runs the secure-record isolation step that confirm runs today (ReparentAsync + SecureChildReconciler.AfterRefileAsync). The confirm response becomes {submissionId, jobId, trackingNumber, statusUrl}. FR-17, FR-18 (D-91), FR-20, D-19, D-71, D-91, D-106, D-110, D-134.</prompt>
+
+  <role>SPAARKE platform developer. Expert in the Dataverse write path (ADR-002), record ownership and secure-record isolation (uac-r2), and idempotent intake. Follow ADRs strictly.</role>
+
+  <goal>A confirm produces exactly one submission per document (Internal channel) and one InvoiceSubmissionProcessing job; no confirm path creates sprk_invoice or enqueues InvoiceExtraction; the job re-files an existing document under its invoice with the same isolation step confirm ran; the confirm response and every client of it use the new shape.</goal>
+
+  <context>
+    <background>Today InvoiceReviewService.ConfirmInvoiceAsync creates sprk_invoice (owned by the matter's team), links sprk_document.sprk_invoice to it inside IRecordOwnershipResolver.ReparentAsync (InheritedParents = the matter), runs SecureChildReconciler.AfterRefileAsync after the reparent (#2095, #2091), marks the document ConfirmedInvoice, and enqueues InvoiceExtraction (the legacy path 050b deletes). InvoiceSubmissionService.SubmitAsync (044) validates number, file, firm (active), core-record fields (InvoiceFamilyCoreRecordGuard), firm link (CheckFirmLinkAsync, D-110) and owner, then uploads, creates the document and the submission (TrackingNumberAllocator) and enqueues the job. The job's persister (049) links sprk_document.sprk_invoice in its one transaction.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Finance/Submission/InvoiceSubmissionService.cs, InvoiceSubmissionContracts.cs (existing-document entry; dedupe by document)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Finance/InvoiceReviewService.cs and Api/Finance/InvoiceReviewEndpoints (confirm calls the submission service; new response shape)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Finance/Submission/InvoiceSubmissionPersister.cs or InvoiceSubmissionAfterSteps.cs (re-file + isolation step for an existing document)</file>
+      <file role="reference">src/server/api/Sprk.Bff.Api/Services/Finance/InvoiceReviewService.cs RefileDocumentUnderInvoiceAsync / ReadDocumentIsolationBeforeWriteAsync (the calls to reuse)</file>
+      <file role="modify">clients of the confirm route under src/client and src/solutions (grep), when in scope</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="042" status="required">Classification produces the documents confirm acts on.</dependency>
+      <dependency task="049" status="required">The submission job creates the invoice and links the document.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="CLAUDE.md §10">Every change under src/server/api/Sprk.Bff.Api follows .claude/constraints/bff-extensions.md: placement stated, publish-size delta against a fresh master build recorded.</constraint>
+    <constraint source="CLAUDE.md §11">Any new surface (method, type, error code) answers existing / extension / cost of doing nothing in one sentence each.</constraint>
+    <constraint source="ADR-002 / D-19">The submission operation stays the only invoice creator: after this task no confirm path creates sprk_invoice.</constraint>
+    <constraint source="D-91">The firm invoice number is required on confirm (400 when missing or blank); it is never defaulted from the classifier hint.</constraint>
+    <constraint source="D-106 / D-110">Confirm refuses a firm that is not one of the core record's assigned law firms (403 firm_not_linked), reusing CheckFirmLinkAsync.</constraint>
+    <constraint source="D-134 (1)">No second copy of the PDF: the existing-document entry performs no upload and no document create. A retry returns the earlier submission for the same document (idempotent by document).</constraint>
+    <constraint source="D-134 (3)">The re-file reuses today's calls (IRecordOwnershipResolver.ReparentAsync, SecureChildReconciler.AfterRefileAsync, RefileIsolationRead.BeforeWriteAsync); notes list the order and the outcome of each failure; uac-r2 reviews.</constraint>
+    <constraint source="scope">The legacy extraction code (InvoiceExtractionJobHandler, ExtractInvoiceFactsAsync, schemas, options, by-name AI methods) is deleted by 050b, not here.</constraint>
+    <constraint source="live data">No live Dataverse writes and no deploys.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/adr/ADR-002-thin-plugins.md</file>
+      <file>docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>docs/standards/TEST-ARCHITECTURE.md</file>
+      <file>projects/ebilling-r1/notes/decisions-log.md (D-71, D-91, D-106, D-110, D-134)</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context and rigor">Declare rigor FULL. Grep every client of /api/finance/invoice-review/confirm in src/client and src/solutions.</step>
+    <step order="1">Add the existing-document entry to InvoiceSubmissionService: the same validation of number, firm, firm link, core record and owner; no file checks, upload or document create; dedupe by document; create the submission (Internal) pointing at the document; enqueue the job.</step>
+    <step order="2">Redirect ConfirmInvoiceAsync into it; map refusals to the route's ProblemDetails; return {submissionId, jobId, trackingNumber, statusUrl}.</step>
+    <step order="3">In the job, re-file an existing document under the invoice with the isolation step, reusing today's calls; record the order and failure outcomes in notes.</step>
+    <step order="4">Tests (fail before, pass after): existing-document entry runs the checks and does no upload or document create; a retry returns the earlier submission; missing invoice number 400; firm_not_linked; secure re-file order and failure behaviour; confirm response shape. A negative case per refusal; a seeded mutation of the firm-link check.</step>
+    <step order="5">Build, the Finance / InvoiceSubmission / Confirm / Classification unit tests, the full ArchTests, publish-size delta; notes in projects/ebilling-r1/notes/050a-confirm-redirect.md; code-review and adr-check.</step>
+    <step order="6">Update TASK-INDEX.md: 050a stays 🟡 until the adversarial review and uac-r2's review; then `✅ [done]`.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the re-file cannot run in the job without changing 049's all-or-nothing transaction contract, STOP and report.</trigger>
+    <trigger>If a client of the confirm route outside this project's scope reads the old shape, report it rather than editing another project's code.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="code">InvoiceSubmissionService (existing-document entry), InvoiceReviewService confirm, the job's re-file step, confirm route response</output>
+    <output type="test">Unit tests listed in step 4</output>
+    <output type="docs">projects/ebilling-r1/notes/050a-confirm-redirect.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">A confirm creates one submission (channel Internal, sprk_document = the confirmed document) and enqueues InvoiceSubmissionProcessing; it never creates sprk_invoice and never enqueues InvoiceExtraction (test).</criterion>
+    <criterion testable="true">The existing-document entry performs no SPE upload and no document create (test).</criterion>
+    <criterion testable="true">A second confirm of the same document returns the earlier submission's id and tracking number and creates nothing (test).</criterion>
+    <criterion testable="true">Negative: missing or blank invoice number → 400 firm_invoice_number_required; a firm that is not an assigned law firm → 403 firm_not_linked; each before any write (tests).</criterion>
+    <criterion testable="true">The job re-files an existing document under its invoice: isolation read, ReparentAsync, then AfterRefileAsync, in that order; each failure behaves as the notes say (tests).</criterion>
+    <criterion testable="true">The confirm response is {submissionId, jobId, trackingNumber, statusUrl} (test); clients of the old shape are listed and fixed or reported.</criterion>
+    <criterion testable="true">dotnet build exits 0; the filtered unit tests pass; ArchTests pass except the known Task 186 F1 ceiling failure.</criterion>
+    <criterion testable="true">Publish-size delta recorded against a fresh master build; no new HIGH CVE.</criterion>
+  </acceptance-criteria>
+
+  <notes>Split from 050 by owner decision D-134 (2026-10-20). 050b deletes the legacy extraction code after this task. Reviews: adversarial review (FULL), uac-r2 for the re-file and isolation step, ontology-r1 for the 050 PR (D-71).</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load every file in knowledge/files before Step 1. Follow task-execute for rigor, checkpoints and quality gates.</protocol>
+  </execution>
+</task>

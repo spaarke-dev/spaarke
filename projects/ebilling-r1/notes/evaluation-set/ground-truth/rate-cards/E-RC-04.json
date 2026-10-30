@@ -1,0 +1,22 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"rate-card",
+ "id":"E-RC-04",
+ "set":"E",
+ "meta":{"title":"Florida Administrative Code 2-37.030 standard fee schedule for outside attorneys","source_url":"https://flrules.org/gateway/notice_Files.asp?ID=5583337","licence":"No licence stated. Government/public-institution publication posted on the open web; used only as a public document for internal evaluation, not redistributed.","licence_status":"public-record-no-licence","pii_note":"Public document from an agency or court; counts only, no matched text recorded. No pattern hits. Hits are agency contact details, addresses and generic role words, not private individuals.","pii_scan":{"file":"fl-rule-2-37-030.doc","tool":"pii_scan.py@1","scanned":"2026-10-15","chars":21216,"counts":{"email":0,"phone_us":0,"ssn":0,"card_number":0,"dob_label":0,"iban":0,"street_address":0,"case_party_marker":0},"disposition":"Business and agency contact details only; no private-person data expected. Safe for local evaluation use."},"storage":{"location":"local-only","path":"local/rate-cards/fl-rule-2-37-030.doc"},"spike":false,"label_method":"ai-drafted-pending-review"},
+ "document":{"issuer_type":"state","currency":"USD","retrieved":"2026-10-15","pages":null},
+ "rates":[
+  {"key":"Specialised attorney services (admiralty, IP, media, bond and securities)","amount":250,"unit":"hour","effective_from":null,"effective_to":null,"scope":"attorney, specialised"},
+  {"key":"All other attorney services","amount":200,"unit":"hour","effective_from":null,"effective_to":null,"scope":"attorney"},
+  {"key":"Paralegal, legal assistant, law clerk, research assistant","amount":40,"unit":"hour","effective_from":null,"effective_to":null,"scope":"support"}
+ ],
+ "rules":[
+  {"rule_id":"E-RC-04-R01","rule_type":"ApprovedRate","params":{"rates":{"specialised_attorney":250,"other_attorney":200,"paralegal_and_assistants":40},"kind":"maximum"},"consequence":"Reduce","clause_ref":{"section":"(1)-(3)","page":1},"paraphrase":"Maximum hourly rates for specialised attorneys, other attorneys and paralegals or research assistants.","expressible":true},
+  {"rule_id":"E-RC-04-R02","rule_type":"TimeIncrement","params":{"interval_minutes":[6,10],"actual_time_only":true},"consequence":null,"clause_ref":{"section":"(4)","page":1},"paraphrase":"A billable hour is actual time measured in intervals of six to ten minutes.","expressible":true},
+  {"rule_id":"E-RC-04-R03","rule_type":"ExpenseRule","params":{"overhead_included_in_rate":["local calls","routine postage","copying","local travel","library materials","courier","word processing","clerical"],"third_party_at_cost_no_surcharge":true,"travel":"section 112.061 Florida Statutes"},"consequence":"Disallow","clause_ref":{"section":"(4)","page":1},"paraphrase":"Routine overhead is part of the rate; non-routine third-party costs are reimbursed at cost with no surcharge.","expressible":true},
+  {"rule_id":"E-RC-04-R04","rule_type":"ApprovedRate","params":{"contingency_max_pct":{"through_trial":35,"through_appeal":40,"collections":30}},"consequence":"Reduce","clause_ref":{"section":"(5)(a)","page":1},"paraphrase":"Contingency fees may not exceed 35 percent through trial, 40 through appeal and 30 for collections.","expressible":true}
+ ],
+ "unmapped_provisions":[
+  {"clause_ref":{"section":"(6)","page":1},"paraphrase":"A schedule of partner and associate rates is provided at the start of the relationship.","reason":"not-billing"}
+ ]
+}

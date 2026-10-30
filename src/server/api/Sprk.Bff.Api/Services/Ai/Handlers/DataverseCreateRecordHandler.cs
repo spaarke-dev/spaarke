@@ -567,6 +567,12 @@ public sealed partial class DataverseCreateRecordHandler : IToolHandler
             return Error(tool, denied, DataverseUserClientErrorCodes.AccessDenied, startedAt);
         if (owned.Invalid is { } invalid)
             return Error(tool, invalid, ToolErrorCodes.ValidationFailed, startedAt);
+        // ebilling-r1 FR-05 (ISS-010): the invoice-family guard, run by the create core — its stable code.
+        if (owned.InvoiceFamilyRefusal is { } family)
+        {
+            return Error(tool, $"The record was NOT created: {family.Reason} ({family.RefusalCode}).",
+                family.RefusalCode ?? ToolErrorCodes.ValidationFailed, startedAt);
+        }
         if (owned.SecureFilingRefused is { } secureRefusal)
             return Error(tool, secureRefusal, ToolErrorCodes.ValidationFailed, startedAt);
         if (owned.OwnerRefusal is not null || owned.CreatedId is not { } createdId)

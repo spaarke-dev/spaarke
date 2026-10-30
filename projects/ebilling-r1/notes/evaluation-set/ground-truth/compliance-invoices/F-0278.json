@@ -1,0 +1,30 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0278",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0278","generator_id":"gen_eval_set.py@1 F-0278","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0278.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-02"},
+ "header":{"firm":"Holloway & Yardley LLP","firm_invoice_number":"LF0020881","invoice_date":"2025-12-01","billing_period_start":"2025-11-01","billing_period_end":"2025-11-30","firm_matter_reference":"90189-0027","po_number":"PO-4514360","fees_total":4905.0,"expenses_total":953.38,"adjustments_total":0.0,"total_due":5858.38,"currency":"USD"},
+ "timekeepers":[{"name":"Cyrus Galbraith","title":"Paralegal","rate":140.0,"billed_as":"CG"},{"name":"Katya Kowalczyk","title":"Associate","rate":280.0,"billed_as":"KK"},{"name":"Naomi Marchetti","title":"Legal Assistant","rate":120.0,"billed_as":"NM"},{"name":"Priya Esposito","title":"Partner","rate":570.0,"billed_as":"PE"},{"name":"Sofia Zielinski","title":"Associate","rate":315.0,"billed_as":"SZ"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2025-11-05","timekeeper":"PE","timekeeper_name":"Priya Esposito","timekeeper_title":"Partner","title":"Ptr","hours":2.6,"rate":570.0,"amount":1482.0,"narrative":"Draft appellate brief in the lease dispute","codes":["L520","A103"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2025-11-06","timekeeper":"KK","timekeeper_name":"Katya Kowalczyk","timekeeper_title":"Associate","title":"Assoc","hours":1.7,"rate":280.0,"amount":476.0,"narrative":"Analyze exposure and damages model for the insurance coverage issue","codes":["L120","A104"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2025-11-18","timekeeper":"SZ","timekeeper_name":"Sofia Zielinski","timekeeper_title":"Associate","title":"Assoc","hours":2.6,"rate":465.0,"amount":1209.0,"narrative":"Attend and present oral argument in the employment claim","codes":["L530","A109"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2025-11-18","timekeeper":"CG","timekeeper_name":"Cyrus Galbraith","timekeeper_title":"Paralegal","title":"Para","hours":1.7,"rate":140.0,"amount":238.0,"narrative":"Prepare for oral argument in the employment claim","codes":["L530","A101"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2025-11-19","timekeeper":"SZ","timekeeper_name":"Sofia Zielinski","timekeeper_title":"Associate","title":"Assoc","hours":1.8,"rate":315.0,"amount":567.0,"narrative":"Prepare for oral argument in the warranty claim","codes":["L530","A101"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2025-11-26","timekeeper":"PE","timekeeper_name":"Priya Esposito","timekeeper_title":"Partner","title":"Ptr","hours":0.6,"rate":570.0,"amount":342.0,"narrative":"Prepare monthly status report to client regarding the construction contract","codes":["L190","A111"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2025-11-26","timekeeper":"SZ","timekeeper_name":"Sofia Zielinski","timekeeper_title":"Associate","title":"Assoc","hours":1.0,"rate":315.0,"amount":315.0,"narrative":"Prepare monthly status report to client regarding the supply agreement","codes":["L190","A111"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2025-11-27","timekeeper":"NM","timekeeper_name":"Naomi Marchetti","timekeeper_title":"Legal Assistant","title":"LA","hours":2.3,"rate":120.0,"amount":276.0,"narrative":"Plan strategy for upcoming phase of the customs audit with team","codes":["L120","A101"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"expense","date":"2025-11-04","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":407.3,"amount":407.3,"narrative":"Court filing fee","codes":["E112"],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"expense","date":"2025-11-18","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":479.97,"amount":479.97,"narrative":"Airfare to Phoenix for deposition","codes":["E110"],"page":1,"narrative_style":"clear"},
+  {"n":11,"line_type":"expense","date":"2025-11-21","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":61.38,"amount":61.38,"narrative":"Overnight courier to Summit Ridge Homes counsel","codes":["E107"],"page":1,"narrative_style":"clear"},
+  {"n":12,"line_type":"expense","date":"2025-11-26","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":4.73,"amount":4.73,"narrative":"Long distance conference call charges","codes":["E105"],"page":1,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["967 Elm Court","Atlanta","Tax ID 23-9430143"],"template":"T19","pages":2},
+ "rule_set_id":"RS-02",
+ "context":{"matter_open":"2025-03-13","matter_close":"2026-02-28","matter_budget":48433.0,"approved_timekeepers":["Katya Kowalczyk","Priya Esposito","Cyrus Galbraith","Naomi Marchetti","Sofia Zielinski"],"invoice_received_date":"2025-12-06"},
+ "expected_findings":[
+  {"rule_id":"RS-02-R02","rule_type":"ApprovedRate","scope":"line","line_refs":[3],"consequence":"Reduce"}
+ ],
+ "seeded_violations":1
+}

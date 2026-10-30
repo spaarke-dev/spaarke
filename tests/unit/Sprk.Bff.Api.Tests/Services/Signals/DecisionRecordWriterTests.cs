@@ -1413,6 +1413,106 @@ public sealed partial class DecisionRecordWriterTests
         h.OwnerAsks.Should().BeEmpty();
     }
 
+    // ── ebilling-r1 task 026 (FR-05, FR-15, D-75, D-94 condition 3): an invoice or invoice-line subject ───────────────────
+
+    [Theory]
+    [InlineData("sprk_billingevent", "no-core")]
+    [InlineData("sprk_billingevent", "two-roots")]
+    [InlineData("sprk_invoice", "no-core")]
+    [InlineData("sprk_invoice", "two-roots")]
+    public async Task E026_AnInvoiceOrLineNotFiledUnderExactlyOneCore_IsUnfileable_AndNothingIsWritten(string table, string condition)
+    {
+        // Without the FR-05 check a line with no core lookup would be written with no stamp, and an invoice under a matter AND a
+        // project would be stamped with both. A line's sprk_invoice is set in both cases and must never supply the core (D-75).
+        var subjectId = Guid.NewGuid();
+        var h = new Harness();
+        var row = new Entity(table, subjectId);
+        if (table == "sprk_billingevent") row["sprk_invoice"] = new EntityReference("sprk_invoice", Guid.NewGuid());
+        if (condition == "two-roots")
+        {
+            row["sprk_matter"] = new EntityReference("sprk_matter", MatterId);
+            row["sprk_project"] = new EntityReference("sprk_project", Guid.NewGuid());
+        }
+
+        h.Rows[(table, subjectId)] = row;
+        var request = Request(core: Core("sprk_matter", MatterId), subject: new DecisionRecordRef(table, subjectId));
+
+        (await h.Writer.Invoking(w => w.ResolveOwnerAsync(request)).Should().ThrowAsync<DecisionRecordRefusedException>())
+            .Which.Reason.Should().Be(DecisionRecordRefusalReason.SubjectUnfileable);
+        var ex = (await h.Writer.Invoking(w => w.WriteAsync(request)).Should().ThrowAsync<DecisionRecordRefusedException>()).Which;
+        ex.Reason.Should().Be(DecisionRecordRefusalReason.SubjectUnfileable);
+        ex.Message.Should().NotContain(subjectId.ToString("D"), "the refusal names no record");
+        h.Created.Should().BeEmpty();
+        h.OwnerAsks.Should().BeEmpty();
+    }
+
+    [Theory]
+    [InlineData("other-matter")]
+    [InlineData("other-type")]
+    [InlineData("no-core")]
+    public async Task E026_ADecisionContextThatIsNotTheLinesOwnCore_IsUnfileable_AndNothingIsWritten(string condition)
+    {
+        // Fix-round-1 (ontology K3): the line is filed under a project; the request names its invoice's matter, another project's
+        // record type, or no core at all. sprk_corerecordid would name a record the line does not belong to.
+        var line = Guid.NewGuid();
+        var project = Guid.NewGuid();
+        var h = new Harness();
+        h.Rows[("sprk_billingevent", line)] = new Entity("sprk_billingevent", line)
+        {
+            ["sprk_project"] = new EntityReference("sprk_project", project),
+            ["sprk_invoice"] = new EntityReference("sprk_invoice", Guid.NewGuid()),
+        };
+        var subject = new DecisionRecordRef("sprk_billingevent", line);
+        var request = condition switch
+        {
+            "other-matter" => Request(core: Core("sprk_matter", MatterId), subject: subject),
+            "other-type" => Request(core: Core("sprk_matter", project), subject: subject),
+            _ => Request(noCore: true, subject: subject),
+        };
+
+        (await h.Writer.Invoking(w => w.ResolveOwnerAsync(request)).Should().ThrowAsync<DecisionRecordRefusedException>())
+            .Which.Reason.Should().Be(DecisionRecordRefusalReason.SubjectUnfileable);
+        (await h.Writer.Invoking(w => w.WriteAsync(request)).Should().ThrowAsync<DecisionRecordRefusedException>())
+            .Which.Reason.Should().Be(DecisionRecordRefusalReason.SubjectUnfileable);
+        h.Created.Should().BeEmpty();
+        h.OwnerAsks.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void E026_TheCoreCheck_LeavesEverySubjectOutsideTheInvoiceFamilyAlone()
+    {
+        var request = Request(core: Core("sprk_matter", MatterId));
+        var act = () => DecisionRecordWriter.RequireCoreIsTheInvoiceFamilySubjectsOwn(
+            request, new DecisionRecordRef("sprk_communication", CommunicationId),
+            [new CoreAncestorStamp("sprk_project", "sprk_regardingproject", Guid.NewGuid())]);
+
+        act.Should().NotThrow("a communication's decision context may differ from its filing (task 142, unchanged)");
+    }
+
+    [Fact]
+    public async Task E026_ALineOfAProject_IsFiledUnderTheLine_AndStampedWithItsOwnProject_NotItsInvoicesMatter()
+    {
+        var line = Guid.NewGuid();
+        var project = Guid.NewGuid();
+        var invoice = Guid.NewGuid();
+        var h = new Harness();
+        h.Rows[("sprk_invoice", invoice)] = new Entity("sprk_invoice", invoice) { ["sprk_matter"] = new EntityReference("sprk_matter", MatterId) };
+        h.Rows[("sprk_billingevent", line)] = new Entity("sprk_billingevent", line)
+        {
+            ["sprk_project"] = new EntityReference("sprk_project", project),
+            ["sprk_invoice"] = new EntityReference("sprk_invoice", invoice),
+        };
+
+        await h.Writer.WriteAsync(Request(core: Core("sprk_project", project), subject: new DecisionRecordRef("sprk_billingevent", line)));
+
+        h.Row.GetAttributeValue<EntityReference>("sprk_regardinginvoiceline").Should().BeEquivalentTo(new EntityReference("sprk_billingevent", line));
+        h.Row.GetAttributeValue<EntityReference>("sprk_regardingproject").Id.Should().Be(project, "stamped with the line's own core");
+        h.Row.Contains("sprk_regardingmatter").Should().BeFalse("the invoice's matter is never borrowed (D-75)");
+        h.Row.GetAttributeValue<EntityReference>("sprk_regardingrecordtype").Id
+            .Should().Be(Tests.TestInfrastructure.RecordTypeCatalogStub.SpaarkeDev1["sprk_billingevent"]);
+        h.Entities.Verify(e => e.RetrieveAsync("sprk_invoice", It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
     [Fact]
     public async Task A142_WhenTheRecordTypeCatalogFaults_ItFailsClosed_AndNothingIsWritten()
     {

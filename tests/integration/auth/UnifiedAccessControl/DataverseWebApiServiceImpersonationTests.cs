@@ -193,6 +193,160 @@ public class DataverseWebApiServiceImpersonationTests
         handler.Requests.Should().OnlyContain(r => !r.Headers.ContainsKey("MSCRMCallerID"));
     }
 
+    // ── ebilling-r1 #2081 round 3: the update-only write (UpdateExistingRecordFieldsAsync, impersonation overload) ─
+    //
+    // The invoice-family guard stops a generic write from CREATING a row (a PATCH without If-Match is an upsert) and
+    // keeps the write running as the caller. Every other test of that path mocks the service interface, so these pin
+    // what actually goes on the wire: dropping the If-Match line or the impersonation argument must fail here.
+
+    private static readonly Dictionary<string, object?> RenamedField = new() { ["sprk_name"] = "renamed" };
+
+    private static SentRequest PatchOf(RecordingHandler handler) =>
+        handler.Requests.Should().ContainSingle(r => r.Method == HttpMethod.Patch).Subject;
+
+    /// <summary>1. PATCH, aimed at the entity set and the row id (not a POST, not a collection URL).</summary>
+    [Fact]
+    public async Task UpdateExistingRecordFieldsAsync_SendsAPatchToTheEntitySetAndId()
+    {
+        var handler = new RecordingHandler(PatchOrEntitySetName);
+        var sut = new OfflineService(handler);
+        var recordId = Guid.NewGuid();
+
+        await sut.UpdateExistingRecordFieldsAsync("sprk_matter", recordId, RenamedField, CallerSystemUserId);
+
+        handler.Requests.Should().NotContain(r => r.Method == HttpMethod.Post);
+        var patch = PatchOf(handler);
+        patch.Target!.ToString().Should().EndWith($"sprk_matters({recordId})");
+    }
+
+    /// <summary>2. The update-only header: without it the Web API creates the row when it is missing.</summary>
+    [Fact]
+    public async Task UpdateExistingRecordFieldsAsync_SendsIfMatchStar()
+    {
+        var handler = new RecordingHandler(PatchOrEntitySetName);
+        var sut = new OfflineService(handler);
+
+        await sut.UpdateExistingRecordFieldsAsync("sprk_matter", Guid.NewGuid(), RenamedField, CallerSystemUserId);
+
+        PatchOf(handler).Values("If-Match").Should().ContainSingle().Which.Should().Be("*");
+    }
+
+    /// <summary>3a. The write runs as the caller: exactly one MSCRMCallerID, equal to the id.</summary>
+    [Fact]
+    public async Task UpdateExistingRecordFieldsAsync_WithCallerId_ImpersonatesTheWrite()
+    {
+        var handler = new RecordingHandler(PatchOrEntitySetName);
+        var sut = new OfflineService(handler);
+
+        await sut.UpdateExistingRecordFieldsAsync("sprk_matter", Guid.NewGuid(), RenamedField, CallerSystemUserId);
+
+        var patch = PatchOf(handler);
+        patch.Values("MSCRMCallerID").Should().ContainSingle().Which.Should().Be(CallerSystemUserId.ToString());
+        patch.Headers.Keys.Should().NotContain("CallerObjectId");
+        handler.Requests.Where(r => r.Method != HttpMethod.Patch)
+            .Should().OnlyContain(r => !r.Headers.ContainsKey("MSCRMCallerID"), "the metadata lookup stays app-only");
+    }
+
+    /// <summary>3b. The app-only call (null caller): no header names a user, and the write is still update-only.</summary>
+    [Fact]
+    public async Task UpdateExistingRecordFieldsAsync_WithNullCaller_IsAppOnlyButStillIfMatchStar()
+    {
+        var handler = new RecordingHandler(PatchOrEntitySetName);
+        var sut = new OfflineService(handler);
+
+        await sut.UpdateExistingRecordFieldsAsync("sprk_matter", Guid.NewGuid(), RenamedField, impersonateSystemUserId: null);
+
+        var patch = PatchOf(handler);
+        patch.Headers.Keys.Should().NotContain("MSCRMCallerID").And.NotContain("CallerObjectId");
+        patch.Values("If-Match").Should().ContainSingle().Which.Should().Be("*");
+    }
+
+    /// <summary>The no-caller convenience overload is the same app-only update-only write.</summary>
+    [Fact]
+    public async Task UpdateExistingRecordFieldsAsync_WithoutACallerOverload_IsAppOnlyAndIfMatchStar()
+    {
+        var handler = new RecordingHandler(PatchOrEntitySetName);
+        var sut = new OfflineService(handler);
+
+        await sut.UpdateExistingRecordFieldsAsync("sprk_matter", Guid.NewGuid(), RenamedField);
+
+        var patch = PatchOf(handler);
+        patch.Headers.Keys.Should().NotContain("MSCRMCallerID");
+        patch.Values("If-Match").Should().ContainSingle().Which.Should().Be("*");
+    }
+
+    /// <summary>
+    /// 4. An empty caller id is refused before the write is sent. Only the app-only metadata lookup runs first: the
+    /// builder is reached after it, so the assertion is "no PATCH, and no request names a user".
+    /// </summary>
+    [Fact]
+    public async Task UpdateExistingRecordFieldsAsync_WithEmptyCallerId_ThrowsAndSendsNoWrite()
+    {
+        var handler = new RecordingHandler(PatchOrEntitySetName);
+        var sut = new OfflineService(handler);
+
+        var act = () => sut.UpdateExistingRecordFieldsAsync("sprk_matter", Guid.NewGuid(), RenamedField, Guid.Empty);
+
+        (await act.Should().ThrowAsync<ArgumentException>().WithMessage("*fail closed*"))
+            .Which.ParamName.Should().Be("systemUserId");
+        handler.Requests.Should().NotContain(r => r.Method == HttpMethod.Patch);
+        handler.Requests.Should().OnlyContain(r => !r.Headers.ContainsKey("MSCRMCallerID"));
+    }
+
+    /// <summary>5. A missing row (404 under If-Match: *) is KeyNotFound, not a generic HTTP failure.</summary>
+    [Fact]
+    public async Task UpdateExistingRecordFieldsAsync_On404_ThrowsKeyNotFound()
+    {
+        var handler = new RecordingHandler(r => r.Method == HttpMethod.Patch
+            ? new HttpResponseMessage(HttpStatusCode.NotFound) : EntitySetNameResponse(r));
+        var sut = new OfflineService(handler);
+
+        var act = () => sut.UpdateExistingRecordFieldsAsync("sprk_matter", Guid.NewGuid(), RenamedField, CallerSystemUserId);
+
+        await act.Should().ThrowAsync<KeyNotFoundException>();
+    }
+
+    /// <summary>6. A precondition failure (412) is treated the same: never a silent success or a retry that creates.</summary>
+    [Fact]
+    public async Task UpdateExistingRecordFieldsAsync_On412_ThrowsKeyNotFound()
+    {
+        var handler = new RecordingHandler(r => r.Method == HttpMethod.Patch
+            ? new HttpResponseMessage(HttpStatusCode.PreconditionFailed) : EntitySetNameResponse(r));
+        var sut = new OfflineService(handler);
+
+        var act = () => sut.UpdateExistingRecordFieldsAsync("sprk_matter", Guid.NewGuid(), RenamedField, CallerSystemUserId);
+
+        await act.Should().ThrowAsync<KeyNotFoundException>();
+    }
+
+    /// <summary>7. A 204 succeeds.</summary>
+    [Fact]
+    public async Task UpdateExistingRecordFieldsAsync_On204_Succeeds()
+    {
+        var handler = new RecordingHandler(PatchOrEntitySetName);
+        var sut = new OfflineService(handler);
+
+        var act = () => sut.UpdateExistingRecordFieldsAsync("sprk_matter", Guid.NewGuid(), RenamedField, CallerSystemUserId);
+
+        await act.Should().NotThrowAsync();
+    }
+
+    /// <summary>Anything but 404/412 is still a failure the caller sees (a 400 or 403 is not "not found").</summary>
+    [Theory]
+    [InlineData(HttpStatusCode.BadRequest)]
+    [InlineData(HttpStatusCode.Forbidden)]
+    [InlineData(HttpStatusCode.InternalServerError)]
+    public async Task UpdateExistingRecordFieldsAsync_OnOtherFailures_ThrowsHttpRequestException(HttpStatusCode status)
+    {
+        var handler = new RecordingHandler(r => r.Method == HttpMethod.Patch
+            ? new HttpResponseMessage(status) : EntitySetNameResponse(r));
+        var sut = new OfflineService(handler);
+
+        var act = () => sut.UpdateExistingRecordFieldsAsync("sprk_matter", Guid.NewGuid(), RenamedField, CallerSystemUserId);
+
+        await act.Should().ThrowAsync<HttpRequestException>();
+    }
+
     // ── unified-access-control-r2 task 159 (#1098): the trimmed GET /api/v1/events ──────────────────────────────
 
     /// <summary>The caller-scoped event query runs AS the caller: exactly one MSCRMCallerID, and it still counts.</summary>

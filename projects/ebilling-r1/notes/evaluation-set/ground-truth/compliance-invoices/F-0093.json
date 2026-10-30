@@ -1,0 +1,35 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0093",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0093","generator_id":"gen_eval_set.py@1 F-0093","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0093.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-03"},
+ "header":{"firm":"Kingsley Ambrose PC","firm_invoice_number":"INV-2026-10040","invoice_date":"2025-09-01","billing_period_start":"2025-08-01","billing_period_end":"2025-08-31","firm_matter_reference":"14515-0025","po_number":"PO-4582467","fees_total":6173.25,"expenses_total":243.91,"adjustments_total":0.0,"total_due":6417.16,"currency":"USD"},
+ "timekeepers":[{"name":"Hector Ashdown","title":"Associate","rate":270.0,"billed_as":"Hector Ashdown"},{"name":"Ivan Brennan","title":"Paralegal","rate":145.0,"billed_as":"Ivan Brennan"},{"name":"Mei Hargrove","title":"Partner","rate":445.0,"billed_as":"Mei Hargrove"},{"name":"Oliver Sandoval","title":"Associate","rate":225.0,"billed_as":"Oliver Sandoval"},{"name":"Sofia Delacroix","title":"Associate","rate":245.0,"billed_as":"Sofia Delacroix"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2025-08-19","timekeeper":"Hector Ashdown","timekeeper_name":"Hector Ashdown","timekeeper_title":"Associate","title":"Associate","hours":1.9,"rate":270.0,"amount":513.0,"narrative":"Prepare examination outlines for trial in the regulatory inquiry","codes":["L440","A101"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2025-08-22","timekeeper":"Hector Ashdown","timekeeper_name":"Hector Ashdown","timekeeper_title":"Associate","title":"Associate","hours":2.3,"rate":270.0,"amount":621.0,"narrative":"Organized and indexed file materials","codes":["L440","A110"],"page":1,"narrative_style":"clerical"},
+  {"n":3,"line_type":"fee","date":"2025-08-15","timekeeper":"Ivan Brennan","timekeeper_name":"Ivan Brennan","timekeeper_title":"Paralegal","title":"Paralegal","hours":1.1,"rate":145.0,"amount":159.5,"narrative":"Review draft expert disclosure for the customs audit","codes":["L420","A104"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2025-08-19","timekeeper":"Ivan Brennan","timekeeper_name":"Ivan Brennan","timekeeper_title":"Paralegal","title":"Paralegal","hours":0.7,"rate":145.0,"amount":101.5,"narrative":"Prepare trial notebook and demonstrative exhibits for the vendor agreement","codes":["L440","A101"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2025-08-20","timekeeper":"Ivan Brennan","timekeeper_name":"Ivan Brennan","timekeeper_title":"Paralegal","title":"Paralegal","hours":1.1,"rate":145.0,"amount":159.5,"narrative":"Review draft expert disclosure for the data incident","codes":["L420","A104"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2025-08-04","timekeeper":"Mei Hargrove","timekeeper_name":"Mei Hargrove","timekeeper_title":"Partner","title":"Partner","hours":1.9,"rate":445.0,"amount":845.5,"narrative":"Revise interrogatory responses after review by lead counsel","codes":["L430","A104"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2025-08-08","timekeeper":"Mei Hargrove","timekeeper_name":"Mei Hargrove","timekeeper_title":"Partner","title":"Partner","hours":1.4,"rate":445.0,"amount":623.0,"narrative":"Draft post-trial motion in the distribution agreement","codes":["L460","A103"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2025-08-08","timekeeper":"Mei Hargrove","timekeeper_name":"Mei Hargrove","timekeeper_title":"Partner","title":"Partner","hours":2.4,"rate":445.0,"amount":1068.0,"narrative":"Prepare case assessment memorandum regarding the supply agreement and recommended strategy","codes":["L120","A103"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"fee","date":"2025-08-26","timekeeper":"Oliver Sandoval","timekeeper_name":"Oliver Sandoval","timekeeper_title":"Associate","title":"Associate","hours":1.85,"rate":225.0,"amount":416.25,"narrative":"Research standard for new trial in the lease dispute","codes":["L460","A102"],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"fee","date":"2025-08-14","timekeeper":"Sofia Delacroix","timekeeper_name":"Sofia Delacroix","timekeeper_title":"Associate","title":"Associate","hours":2.7,"rate":245.0,"amount":661.5,"narrative":"Prepare monthly status report to client regarding the data incident","codes":["L190","A111"],"page":1,"narrative_style":"clear"},
+  {"n":11,"line_type":"fee","date":"2025-08-25","timekeeper":"Sofia Delacroix","timekeeper_name":"Sofia Delacroix","timekeeper_title":"Associate","title":"Associate","hours":1.1,"rate":245.0,"amount":269.5,"narrative":"Plan strategy for upcoming phase of the distribution agreement with team","codes":["L120","A101"],"page":2,"narrative_style":"clear"},
+  {"n":12,"line_type":"fee","date":"2025-08-29","timekeeper":"Sofia Delacroix","timekeeper_name":"Sofia Delacroix","timekeeper_title":"Associate","title":"Associate","hours":3.0,"rate":245.0,"amount":735.0,"narrative":"Prepare expert witness for testimony in the lease dispute","codes":["L420","A101"],"page":2,"narrative_style":"clear"},
+  {"n":13,"line_type":"expense","date":"2025-08-04","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":651.0,"rate":0.08,"amount":52.08,"narrative":"Photocopies - 651 pages","codes":["E101"],"page":2,"narrative_style":"clear"},
+  {"n":14,"line_type":"expense","date":"2025-08-07","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":2.0,"rate":64.84,"amount":129.68,"narrative":"Overnight courier to Northwind Logistics counsel","codes":["E107"],"page":2,"narrative_style":"clear"},
+  {"n":15,"line_type":"expense","date":"2025-08-15","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":50.21,"amount":50.21,"narrative":"Overnight courier to Caldera Energy counsel","codes":["E107"],"page":2,"narrative_style":"clear"},
+  {"n":16,"line_type":"expense","date":"2025-08-22","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":11.94,"amount":11.94,"narrative":"Long distance conference call charges","codes":["E105"],"page":2,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["653 Commerce Avenue","Houston","Tax ID 63-3615403"],"template":"T13","pages":2},
+ "rule_set_id":"RS-03",
+ "context":{"matter_open":"2024-04-03","matter_close":"2025-11-29","matter_budget":50668.0,"approved_timekeepers":["Mei Hargrove","Hector Ashdown","Gideon Voss","Oliver Sandoval","Ivan Brennan","Sofia Delacroix"],"invoice_received_date":"2025-09-08"},
+ "expected_findings":[
+  {"rule_id":"RS-03-R02","rule_type":"TimeIncrement","scope":"line","line_refs":[9],"consequence":"Reduce"},
+  {"rule_id":"RS-03-R04","rule_type":"NonBillableActivity","scope":"line","line_refs":[2],"consequence":"Disallow"}
+ ],
+ "seeded_violations":2
+}
