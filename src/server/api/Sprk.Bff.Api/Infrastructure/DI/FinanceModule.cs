@@ -384,12 +384,11 @@ public static class FinanceModule
         // Index: spaarke-invoices-index (MVP single index; per-tenant fan-out is a future extension)
         // Embeddings: text-embedding-3-large (3072 dimensions)
         //
-        // Depends on IInvoiceAi + SearchIndexClient — SearchIndexClient is gated on DocumentIntelligence:Enabled. With the gate off no handler
-        // is registered and a queued InvoiceIndexing message is dead-lettered NoHandler (049 notes, map row 9).
-        if (documentIntelligenceEnabled)
-        {
-            services.AddScoped<IJobHandler, InvoiceIndexingJobHandler>();
-        }
+        // UNCONDITIONAL (flag rule above): every lifecycle move and line/adjustment/correction/override change queues this job, so a missing
+        // handler would dead-letter each message NoHandler. SearchIndexClient (registered only with DocumentIntelligence:Enabled) is an
+        // OPTIONAL constructor dependency (default null; IInvoiceAi already has its Null peer), and the handler reads Ebilling:Enabled itself
+        // (ADR-018): flag off = completes with nothing done; no search client = completes with one warning; no embedding = indexed without a vector.
+        services.AddScoped<IJobHandler, InvoiceIndexingJobHandler>();
 
         // ============================================================================
         // Spend Snapshot Generation Job Handler (deterministic aggregation, no AI)

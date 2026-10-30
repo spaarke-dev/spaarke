@@ -93,6 +93,45 @@ public sealed class InvoiceCorrectionB2cTests
     // Item 1 - timekeeper corrections
     // =========================================================================================
 
+    [Fact(DisplayName = "152 FR-43: a correction that is followed through queues the invoice's re-index once, keyed to the submission version of the final write; a failed enqueue never fails the correction")]
+    public async Task FollowedThroughCorrection_QueuesTheReindex_AndAFailedEnqueueNeverFailsIt()
+    {
+        static (CorrectionWorld World, IndexQueueDouble Queue, Guid Timekeeper) Arrange(Exception? queueFault)
+        {
+            var queue = new IndexQueueDouble { Fault = queueFault };
+            var world = new CorrectionWorld();
+            var lee = world.AddPerson("Alexandra Lee");
+            world.AddRate(lee.Id, 80m);
+            var root = Root();
+            root["findings"] = new JsonArray(
+                Finding(0, Atk, RuleType.ApprovedTimekeeper, FeeIndex, BillingReasonCodes.TimekeeperNotOnRoster),
+                Finding(1, Rate, RuleType.ApprovedRate, FeeIndex, BillingReasonCodes.RateTimekeeperUnmatched));
+            Store(world, root);
+            var loaded = Kit.Loaded(Atk, Rate);
+            var reevaluation = new InvoiceCorrectionReevaluation(
+                world.Entities.Object, (_, _) => Task.FromResult(loaded), Kit.Evaluator().Evaluate, world.WriteSignalAsync, world.CloseSignalAsync,
+                NullLogger<InvoiceCorrectionReevaluation>.Instance, jobs: queue.Submitter);
+            world.Seam = reevaluation.ApplyAsync;
+            return (world, queue, lee.Id);
+        }
+
+        var (world, queue, lee) = Arrange(queueFault: null);
+
+        var result = await world.Service().CorrectAsync(Line("TimekeeperAsBilled", lee.ToString("D")), CancellationToken.None);
+
+        result.IsApplied.Should().BeTrue();
+        var job = queue.Sent.Should().ContainSingle().Subject;
+        job.JobType.Should().Be("InvoiceIndexing");
+        job.SubjectId.Should().Be(W.InvoiceId.ToString());
+        job.IdempotencyKey.Should().MatchRegex($"^invoice-index-{W.InvoiceId:N}-c[1-9][0-9]*$");
+
+        // A queue outage is logged, not raised: the correction is still applied.
+        var (world2, queue2, lee2) = Arrange(new InvalidOperationException("service bus down"));
+        var faulted = await world2.Service().CorrectAsync(Line("TimekeeperAsBilled", lee2.ToString("D")), CancellationToken.None);
+        faulted.IsApplied.Should().BeTrue();
+        queue2.Sent.Should().BeEmpty();
+    }
+
     [Fact(DisplayName = "101 B2c: a timekeeper correction re-resolves the rate through 046 with a one-line input and feeds the re-evaluation")]
     public async Task TimekeeperCorrection_ThatMatches_ReResolvesTheRate_AndReEvaluates()
     {

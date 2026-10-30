@@ -4,7 +4,9 @@ using Azure;
 using Azure.Search.Documents;
 using Azure.Search.Documents.Indexes;
 using Azure.Search.Documents.Models;
+using Microsoft.Extensions.Options;
 using Spaarke.Dataverse;
+using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Services.Ai.PublicContracts;
 using Sprk.Bff.Api.Services.Finance;
 
@@ -22,15 +24,19 @@ namespace Sprk.Bff.Api.Services.Jobs.Handlers;
 /// <para><b>Enqueue keys carry the change.</b> <see cref="BuildJob"/> puts the change in the idempotency key, which
 /// <see cref="JobSubmissionService"/> uses as the Service Bus <c>MessageId</c> for duplicate detection. A fixed per-invoice key would drop
 /// every re-index after the first.</para>
+/// <para><b>Registered unconditionally</b> (FinanceModule flag-off rule), so a queued message never dead-letters <c>NoHandler</c>. It degrades by
+/// completing: <c>Ebilling:Enabled</c> off does nothing; no <see cref="SearchIndexClient"/> (search not configured) logs one warning; no
+/// <see cref="IInvoiceAi"/> embedding indexes the document without a vector.</para>
 /// <para>ADR-013: embeddings only through <see cref="IInvoiceAi"/>. ADR-015: logs carry ids, counts and timings, never narrative text.
 /// ADR-014: the document's <c>tenantId</c> is the BFF's <c>AzureAd:TenantId</c>, the value <see cref="InvoiceSearchService"/> filters on; with none
 /// configured the job is poisoned rather than written without one.</para>
 /// </remarks>
 public sealed class InvoiceIndexingJobHandler : IJobHandler
 {
-    private readonly SearchIndexClient _searchIndexClient;
+    private readonly SearchIndexClient? _searchIndexClient;
     private readonly IGenericEntityService _entities;
     private readonly IConfiguration _configuration;
+    private readonly IOptionsMonitor<EbillingOptions> _ebilling;
     private readonly IInvoiceAi? _invoiceAi;
     private readonly TimeProvider _time;
     private readonly ILogger<InvoiceIndexingJobHandler> _logger;
@@ -50,17 +56,19 @@ public sealed class InvoiceIndexingJobHandler : IJobHandler
     internal const string TenantSettingKey = "AzureAd:TenantId";
 
     public InvoiceIndexingJobHandler(
-        SearchIndexClient searchIndexClient,
         IGenericEntityService entities,
         IConfiguration configuration,
+        IOptionsMonitor<EbillingOptions> ebilling,
         ILogger<InvoiceIndexingJobHandler> logger,
+        SearchIndexClient? searchIndexClient = null,
         IInvoiceAi? invoiceAi = null,
         TimeProvider? time = null)
     {
-        _searchIndexClient = searchIndexClient ?? throw new ArgumentNullException(nameof(searchIndexClient));
         _entities = entities ?? throw new ArgumentNullException(nameof(entities));
         _configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));
+        _ebilling = ebilling ?? throw new ArgumentNullException(nameof(ebilling));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _searchIndexClient = searchIndexClient; // Nullable: SearchIndexClient is registered only when DocumentIntelligence:Enabled; without it the job completes with a warning (never dead-letters).
         _invoiceAi = invoiceAi; // Nullable: when AI is disabled the embedding step is skipped and the document is indexed without a new vector.
         _time = time ?? TimeProvider.System;
     }
@@ -98,6 +106,36 @@ public sealed class InvoiceIndexingJobHandler : IJobHandler
         };
     }
 
+    /// <summary>
+    /// The one best-effort producer of an invoice's re-index, shared by every service that changes what the document holds (the lifecycle
+    /// move, a line decision, an adjustment, a correction's follow-through, an override). The change is already committed when this runs, so
+    /// a missing submitter (a test seam) does nothing and a failed enqueue is logged (ids only, ADR-015) and never fails or undoes the change:
+    /// the index catches up at the next change. It ignores the caller's cancellation for the same reason (a caller that cancels now must not
+    /// leave the index stale).
+    /// </summary>
+    /// <param name="jobs">The job submitter; null does nothing.</param>
+    /// <param name="logger">The producer's logger.</param>
+    /// <param name="invoiceId">The invoice to re-index.</param>
+    /// <param name="change">Unique per change (see <see cref="BuildJob"/>): never a constant per invoice.</param>
+    internal static async Task TryEnqueueAsync(JobSubmissionService? jobs, ILogger logger, Guid invoiceId, string change)
+    {
+        if (jobs is null)
+        {
+            return;
+        }
+
+        try
+        {
+            await jobs.SubmitJobAsync(BuildJob(invoiceId, change, correlationId: null), CancellationToken.None).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(
+                "Invoice {InvoiceId}: the re-index could not be queued after change {Change} ({ExceptionType}); the index catches up at the next change",
+                invoiceId, change, ex.GetType().Name);
+        }
+    }
+
     public async Task<JobOutcome> ProcessAsync(JobContract job, CancellationToken ct)
     {
         var stopwatch = Stopwatch.StartNew();
@@ -107,6 +145,23 @@ public sealed class InvoiceIndexingJobHandler : IJobHandler
             _logger.LogInformation(
                 "Processing invoice indexing job {JobId} for subject {SubjectId}, Attempt {Attempt}, CorrelationId {CorrelationId}",
                 job.JobId, job.SubjectId, job.Attempt, job.CorrelationId);
+
+            // ADR-018: the same flag as the endpoints. Off: complete with nothing done (the handler is registered unconditionally, FinanceModule flag rule).
+            if (!_ebilling.CurrentValue.Enabled)
+            {
+                _logger.LogInformation("Invoice indexing job {JobId}: eBilling is disabled; nothing indexed", job.JobId);
+                return JobOutcome.Success(job.JobId, JobType, stopwatch.Elapsed);
+            }
+
+            // Search is not configured (SearchIndexClient is registered only with DocumentIntelligence:Enabled): nothing can be indexed here, and a
+            // retry or a dead letter would not change that. One warning, then complete.
+            if (_searchIndexClient is null)
+            {
+                _logger.LogWarning(
+                    "Invoice indexing job {JobId}: Azure AI Search is not configured (DocumentIntelligence:Enabled is off); subject {SubjectId} is not indexed",
+                    job.JobId, job.SubjectId);
+                return JobOutcome.Success(job.JobId, JobType, stopwatch.Elapsed);
+            }
 
             var payload = ParsePayload(job.Payload);
             if (payload == null || payload.InvoiceId == Guid.Empty)

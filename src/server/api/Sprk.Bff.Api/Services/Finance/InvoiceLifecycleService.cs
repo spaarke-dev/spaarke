@@ -404,27 +404,8 @@ public sealed class InvoiceLifecycleService : IInvoiceLifecycleService
     /// (a fixed key would let Service Bus duplicate detection drop every re-index after the first). Best effort: the move is already committed,
     /// so a failed enqueue is logged and never undoes or fails it; the next change re-indexes the invoice.
     /// </summary>
-    private async Task EnqueueIndexAsync(Guid invoiceId, long replacedVersion)
-    {
-        if (_jobs is null)
-        {
-            return;
-        }
-
-        try
-        {
-            // CancellationToken.None: the status is committed; a caller that cancels now must not leave the index stale.
-            await _jobs.SubmitJobAsync(
-                InvoiceIndexingJobHandler.BuildJob(invoiceId, $"v{replacedVersion.ToString(CultureInfo.InvariantCulture)}", correlationId: null),
-                CancellationToken.None).ConfigureAwait(false);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(
-                "Invoice {InvoiceId}: the re-index could not be queued after the status move ({ExceptionType}); the index catches up at the next change",
-                invoiceId, ex.GetType().Name);
-        }
-    }
+    private Task EnqueueIndexAsync(Guid invoiceId, long replacedVersion) =>
+        InvoiceIndexingJobHandler.TryEnqueueAsync(_jobs, _logger, invoiceId, $"v{replacedVersion.ToString(CultureInfo.InvariantCulture)}");
 
     private static bool TryReadLong(Dictionary<string, object?> row, string column, out long value)
     {

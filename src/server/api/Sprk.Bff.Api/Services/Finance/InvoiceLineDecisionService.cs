@@ -12,6 +12,7 @@ using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.Finance.Resolution;
 using Sprk.Bff.Api.Services.Finance.Submission;
 using Sprk.Bff.Api.Services.Jobs;
+using Sprk.Bff.Api.Services.Jobs.Handlers;
 using Sprk.Bff.Api.Services.Signals;
 using Sprk.Bff.Api.Services.Signals.Actions;
 using Sprk.Bff.Api.Services.Signals.Billing;
@@ -212,6 +213,7 @@ public sealed class InvoiceLineDecisionService
     private readonly HumanDecisionSignalClose.CloseActed _closeActed;
     private readonly ILogger<InvoiceLineDecisionService> _logger;
     private readonly TimeProvider _time;
+    private readonly JobSubmissionService? _jobs;
 
     public InvoiceLineDecisionService(
         IGenericEntityService entities,
@@ -221,11 +223,14 @@ public sealed class InvoiceLineDecisionService
         IRecordOwnershipResolver ownership,
         SignalWriter signals,
         CallerRecordAccessProbe probe,
-        ILogger<InvoiceLineDecisionService> logger)
+        ILogger<InvoiceLineDecisionService> logger,
+        JobSubmissionService? jobs = null)
         : this(
             entities, totals, recorder, locks, ownership, probe,
             (signals ?? throw new ArgumentNullException(nameof(signals))).CloseActedByDecisionAsync,
-            logger)
+            logger,
+            time: null,
+            jobs)
     {
     }
 
@@ -239,8 +244,10 @@ public sealed class InvoiceLineDecisionService
         CallerRecordAccessProbe probe,
         HumanDecisionSignalClose.CloseActed closeActed,
         ILogger<InvoiceLineDecisionService> logger,
-        TimeProvider? time = null)
+        TimeProvider? time = null,
+        JobSubmissionService? jobs = null)
     {
+        _jobs = jobs; // Task 152: null in a test seam; the DI path always supplies it (JobSubmissionService is a singleton).
         _entities = entities ?? throw new ArgumentNullException(nameof(entities));
         _totals = totals ?? throw new ArgumentNullException(nameof(totals));
         _recorder = recorder ?? throw new ArgumentNullException(nameof(recorder));
@@ -722,6 +729,11 @@ public sealed class InvoiceLineDecisionService
         {
             return Incomplete(command, committed, "totals", ex.GetType().Name);
         }
+
+        // ── 2b. Task 152 (FR-43): the approved total and the lines' statuses changed, so the invoice's index document is rebuilt. The change is the
+        //    decision id: a retry of the same decision reuses it (one re-index), a new decision has its own. Best effort; never fails the decision. ──
+        await InvoiceIndexingJobHandler.TryEnqueueAsync(
+            _jobs, _logger, command.InvoiceId, $"d{command.DecisionId.ToString("N", CultureInfo.InvariantCulture)}").ConfigureAwait(false);
 
         // ── 3. Correction rows: deterministic-id upserts, so a repeat rewrites the same rows. ──
         try

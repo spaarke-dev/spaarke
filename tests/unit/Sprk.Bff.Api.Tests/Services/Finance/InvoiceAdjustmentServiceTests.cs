@@ -241,6 +241,9 @@ public sealed class InvoiceAdjustmentServiceTests
                 && (!filtersInactive || InvoiceTotalsService.IsCounted(l)));
         }
 
+        /// <summary>Task 152: the queue the service's re-index is submitted to.</summary>
+        public IndexQueueDouble Queue { get; } = new();
+
         public InvoiceAdjustmentService Service()
         {
             var totals = new InvoiceTotalsService(Records.Object, Entities.Object, NullLogger<InvoiceTotalsService>.Instance);
@@ -252,7 +255,8 @@ public sealed class InvoiceAdjustmentServiceTests
                     return Task.FromResult<IReadOnlyList<BillingRuleCandidate>>(Candidates.ToList());
                 },
                 NullLogger<InvoiceAdjustmentService>.Instance,
-                new FixedTime(new DateTimeOffset(2026, 10, 20, 12, 0, 0, TimeSpan.Zero)));
+                new FixedTime(new DateTimeOffset(2026, 10, 20, 12, 0, 0, TimeSpan.Zero)),
+                Queue.Submitter);
         }
 
         public Entity Row(Guid id) => Lines.Single(l => l.Id == id);
@@ -834,6 +838,34 @@ public sealed class InvoiceAdjustmentServiceTests
         row.GetAttributeValue<EntityReference>("sprk_reviewedby").Should().Be(new EntityReference("systemuser", Remover));
         w.Lines.Should().Contain(l => l.Id == added.Adjustment.LineId, "never deleted");
         w.Entities.Verify(e => e.DeleteAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact(DisplayName = "152 FR-43: an add and a removal each queue the invoice's re-index under their own key (the adjustment id, the removed line id); a failed enqueue never fails either")]
+    public async Task AddAndRemove_QueueTheReindex_EachUnderItsOwnKey_AndAFailedEnqueueNeverFailsThem()
+    {
+        var w = new World();
+        var service = w.Service();
+        var command = Add(w, "percent", 10m);
+
+        var added = await service.AddAsync(command, CancellationToken.None);
+
+        added.Status.Should().Be(AdjustmentStatus.Applied);
+        var job = w.Queue.Sent.Should().ContainSingle().Subject;
+        job.JobType.Should().Be("InvoiceIndexing");
+        job.SubjectId.Should().Be(w.InvoiceId.ToString());
+        job.IdempotencyKey.Should().Be($"invoice-index-{w.InvoiceId:N}-a{command.AdjustmentId:N}");
+
+        var removed = await service.RemoveAsync(new RemoveAdjustmentCommand(w.InvoiceId, added.Adjustment!.LineId, Remover), CancellationToken.None);
+
+        removed.Status.Should().Be(AdjustmentStatus.Applied);
+        w.Queue.Sent.Select(j => j.IdempotencyKey).Should().Equal(
+            $"invoice-index-{w.InvoiceId:N}-a{command.AdjustmentId:N}", $"invoice-index-{w.InvoiceId:N}-r{added.Adjustment.LineId:N}");
+
+        // A queue outage is logged, not raised.
+        w.Queue.Fault = new InvalidOperationException("service bus down");
+        var faulted = await service.AddAsync(Add(w, "fixed", 50m), CancellationToken.None);
+        faulted.Status.Should().Be(AdjustmentStatus.Applied);
+        w.Queue.Sent.Should().HaveCount(2, "nothing more was queued, and the add still answered Applied");
     }
 
     [Fact]

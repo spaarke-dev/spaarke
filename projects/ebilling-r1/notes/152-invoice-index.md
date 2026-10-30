@@ -12,6 +12,9 @@ Rigor STANDARD (the POML's; the gate ran code-review and adr-check anyway, per t
 | `Deploy-AllIndexes.ps1` | `invoices-index` `RequiredFilterableFields` extended with `vendorOrgId`, `coreRecordType`, `coreRecordId`, `timekeeperIds`, `taskCodes`, `activityCodes`, `expenseCodes`, `statusCode`. |
 | `InvoiceLifecycleService` | After a successful move, queues the re-index (best effort). Change key = the row version the move replaced. |
 | `InvoiceSubmissionAfterSteps` | Step 3 (was "no indexing", task 094) queues the acceptance's index job for Accepted, AcceptedUncoded and Blocked; not for an automatic rejection. A queue fault is a Retry (the submission stays Processing). |
+| Handler registration (fix round) | `InvoiceIndexingJobHandler` is registered UNCONDITIONALLY (FinanceModule flag-off rule). `SearchIndexClient` (registered only with `DocumentIntelligence:Enabled`) is an optional constructor dependency; `Ebilling:Enabled` is read by the handler (ADR-018). Flag off: completes, nothing done. No search client: completes with one warning. No embedding (AI off, throttled, model error): indexed without a vector. None dead-letters `NoHandler`. |
+| ADR-032 ledger (fix round) | `GateCombinationConstructibilityTests.KnownDefects`: the `DEF-FIN InvoiceIndexingJobHandler <- SearchIndexClient` row is deleted. The ratchet failed in the two `DocIntel=true, Analysis=false` combinations because the defect no longer reproduces (the handler is constructible without a search client); the test's own maintenance rule says to delete a row when it is fixed. |
+| Producers beyond the status move (fix round) | One shared best-effort enqueue, `InvoiceIndexingJobHandler.TryEnqueueAsync` (the lifecycle service now uses it too). `InvoiceLineDecisionService` after the totals recalculation (change `d{decisionId}`); `InvoiceAdjustmentService` after an add (`a{adjustmentId}`) and a removal (`r{lineId}`); `InvoiceCorrectionReevaluation` after the final write (`c{submission row version}`); `SubmissionOverrideService` after an override releases a hold (`o{decisionId}`). Every key differs per change; a failed enqueue is logged (ids only) and never fails the change. |
 | `InvoiceSearchService` | `documentId` is optional (`Guid.Empty` when absent). The old `Guid.Parse(doc.DocumentId)` would have thrown on every structured document without one. |
 | `AI-SEARCH-INDEX-CATALOG.md` | Row 6 and the restoration-matrix row. |
 
@@ -35,15 +38,16 @@ Unit tests: `InvoiceIndexingJobHandlerTests` (document shape, core record types,
 
 ## 4. Known limits and found-not-fixed
 
-- **Totals-only changes do not re-index.** Line decisions, adjustments and corrections change `sprk_approvedtotal` and the line text without a status move. The task names status and approval changes only; the next move re-indexes. A producer in `InvoiceLineDecisionService` / `InvoiceAdjustmentService` would close this (not edited here).
-- **Override (105) does not re-index** a held invoice that it releases (no status move). The document is already indexed (Blocked is indexed at acceptance); only the "held" notion is not in it, so there is no wrong content, only none to update.
-- **A failed enqueue after a move** is logged and not retried; the index catches up at the next change. The acceptance step is stricter (Retry).
-- **Handler registration is still gated on `DocumentIntelligence:Enabled`** (`SearchIndexClient`; ADR-032 DEF-FIN). With the gate off a queued `InvoiceIndexing` message is dead-lettered `NoHandler`, now on every lifecycle move rather than only after extraction. Task 153 must run with the gate on.
+- **A failed enqueue is not retried.** After a lifecycle move, a line decision, an adjustment, a correction follow-through or an override, a failed enqueue is logged (ids only) and not retried; the index catches up at the next change of the invoice. The acceptance step is stricter (a Retry; the submission stays Processing). A correction whose earlier step failed enqueues only when the client repeats it and it reaches its final write.
+- **The search endpoint takes only `matterId` and a query.** The firm, core record, timekeeper, code and status filters exist on the index (and are in the deployer's invariants) but no endpoint parameter reads them yet; a consumer that needs them adds the parameters to `InvoiceSearchService`.
+- **Blocked invoices are indexed**, per the 049 plan (an internal invoice that is In Review and held, which an override or a return can still move). The owner may later read FR-43's "rejected submissions are not in the invoice index" as excluding them; the change is one line: drop `SubmissionEvaluationKind.Blocked` from the step-3 condition in `InvoiceSubmissionAfterSteps`.
+- **The index is eventually consistent by design.** A job indexes the invoice as it is when the job runs, so two changes that queue close together converge on the later state; a duplicate-detection drop of a repeated key (same decision, same adjustment) is correct because the document is rebuilt from current rows.
 - **Legacy `InvoiceExtractionJobHandler` still compiles** a fixed-key enqueue (`invoice-index-{invoiceId}`); unreachable, deleted by 050b.
+- **Resolved in the fix round (no longer limits):** totals-only changes (line decisions, adjustments, corrections), an override's release, and the `NoHandler` dead letter with `DocumentIntelligence:Enabled` off.
 
 ## 5. Live steps this task needs (not done)
 
 1. Task 153: `scripts/ai-search/Deploy-AllIndexes.ps1 -Environment dev -Indexes invoices-index` (after `-DryRun`), then `-VerifyOnly`.
 2. `AzureAd:TenantId` must be set on the dev BFF (it already is for the search filter).
-3. `DocumentIntelligence:Enabled=true` on any environment that runs eBilling, so the handler is registered.
+3. `DocumentIntelligence:Enabled=true` (so `SearchIndexClient` exists) on any environment that should actually index. Since the fix round the handler is registered either way: with it off, an eBilling invoice's messages complete with one warning and nothing is indexed.
 4. NFR-03 (5 minutes) is measured in dev by 153.

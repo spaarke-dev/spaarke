@@ -5,12 +5,16 @@ using Azure.Search.Documents.Indexes;
 using Azure.Search.Documents.Models;
 using FluentAssertions;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Time.Testing;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using Moq;
 using Spaarke.Dataverse;
+using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Services.Ai.PublicContracts;
 using Sprk.Bff.Api.Services.Finance;
 using Sprk.Bff.Api.Services.Jobs;
@@ -145,6 +149,9 @@ public sealed class InvoiceIndexingJobHandlerTests
         public Exception? SearchFault { get; set; }
         public FakeTimeProvider Clock { get; } = new(Now);
         public List<string> EmbeddingInputs { get; } = [];
+        public bool EbillingEnabled { get; set; } = true;
+        public bool UseSearch { get; set; } = true;
+        public CapturingLogger Log { get; } = new();
 
         public Harness()
         {
@@ -190,9 +197,10 @@ public sealed class InvoiceIndexingJobHandlerTests
             indexClient.Setup(c => c.GetSearchClient("spaarke-invoices-index")).Returns(searchClient.Object);
 
             var configuration = new ConfigurationBuilder().AddInMemoryCollection(Settings).Build();
+            var ebilling = Mock.Of<IOptionsMonitor<EbillingOptions>>(m => m.CurrentValue == new EbillingOptions { Enabled = EbillingEnabled });
             return new InvoiceIndexingJobHandler(
-                indexClient.Object, entities.Object, configuration, NullLogger<InvoiceIndexingJobHandler>.Instance,
-                UseAi ? Ai : null, Clock);
+                entities.Object, configuration, ebilling, Log,
+                UseSearch ? indexClient.Object : null, UseAi ? Ai : null, Clock);
         }
 
         public SearchDocument OnlyDocument()
@@ -201,6 +209,18 @@ public sealed class InvoiceIndexingJobHandlerTests
             action.ActionType.Should().Be(IndexActionType.MergeOrUpload);
             return action.Document;
         }
+    }
+
+    private sealed class CapturingLogger : ILogger<InvoiceIndexingJobHandler>
+    {
+        public List<LogLevel> Levels { get; } = [];
+
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter) =>
+            Levels.Add(logLevel);
     }
 
     private static JobContract Job(string change = "accepted") => InvoiceIndexingJobHandler.BuildJob(InvoiceId, change, "corr-152");
@@ -467,6 +487,66 @@ public sealed class InvoiceIndexingJobHandlerTests
 
         outcome.Status.Should().Be(JobStatus.Poisoned);
         h.Batches.Should().BeEmpty();
+    }
+
+    // ── Registered unconditionally: every degraded state completes, none dead-letters ──
+
+    [Fact(DisplayName = "152 ADR-018: with Ebilling:Enabled off the job completes with nothing done - no read, no write")]
+    public async Task EbillingDisabled_CompletesWithNothingDone()
+    {
+        var h = new Harness { EbillingEnabled = false };
+
+        var outcome = await h.Build().ProcessAsync(Job(), CancellationToken.None);
+
+        outcome.Status.Should().Be(JobStatus.Completed);
+        h.QueriedTables.Should().BeEmpty();
+        h.Batches.Should().BeEmpty();
+        h.EmbeddingInputs.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "152: with search not configured (no SearchIndexClient) the job completes with exactly one warning - not poisoned, not retried, nothing read or written")]
+    public async Task NoSearchClient_CompletesWithOneWarning()
+    {
+        var h = new Harness { UseSearch = false };
+
+        var outcome = await h.Build().ProcessAsync(Job(), CancellationToken.None);
+
+        outcome.Status.Should().Be(JobStatus.Completed);
+        h.Log.Levels.Count(l => l == LogLevel.Warning).Should().Be(1);
+        h.Log.Levels.Should().NotContain(LogLevel.Error);
+        h.QueriedTables.Should().BeEmpty("there is nowhere to write, so no Dataverse read is spent");
+        h.Batches.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "152: the handler is resolvable from DI with NO SearchIndexClient and NO IInvoiceAi registered (the flag-off shape)")]
+    public void Handler_ResolvesWithoutSearchOrAi()
+    {
+        var services = new ServiceCollection();
+        services.AddSingleton(Mock.Of<IGenericEntityService>());
+        services.AddSingleton<IConfiguration>(new ConfigurationBuilder().Build());
+        services.AddSingleton(Mock.Of<IOptionsMonitor<EbillingOptions>>(m => m.CurrentValue == new EbillingOptions()));
+        services.AddLogging();
+        services.AddScoped<IJobHandler, InvoiceIndexingJobHandler>();
+
+        using var provider = services.BuildServiceProvider(new ServiceProviderOptions { ValidateOnBuild = true, ValidateScopes = true });
+        using var scope = provider.CreateScope();
+
+        scope.ServiceProvider.GetServices<IJobHandler>().Should().ContainSingle(h => h.JobType == InvoiceIndexingJobHandler.JobTypeName);
+    }
+
+    [Fact(DisplayName = "152: FinanceModule registers the handler with DocumentIntelligence:Enabled OFF (the flag-off rule: every lifecycle move queues this job, so a missing handler would dead-letter each one NoHandler)")]
+    public void FinanceModule_RegistersTheHandler_WithDocumentIntelligenceOff()
+    {
+        var services = new ServiceCollection();
+        services.AddLogging();
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?> { ["DocumentIntelligence:Enabled"] = "false" })
+            .Build();
+
+        Sprk.Bff.Api.Infrastructure.DI.FinanceModule.AddFinanceModule(services, configuration);
+
+        services.Should().Contain(d =>
+            d.ServiceType == typeof(IJobHandler) && d.ImplementationType == typeof(InvoiceIndexingJobHandler) && d.Lifetime == ServiceLifetime.Scoped);
     }
 
     // ── The embedding ──
