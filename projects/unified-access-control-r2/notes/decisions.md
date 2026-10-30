@@ -124,4 +124,10 @@ CLAUDE.md fact 1 used to read "on the MDA, Dataverse enforces natively and we wr
   - Before: a work assignment, being a root, had no order entry, so its parents ranked by column name (event before matter). Found by field-mapping's 071 review.
   - Shipped in PR #2451 (3d54ac845d): `SecureChildLineage.RootLookupOrder` entry derived from `TypedLookupsOf`. Dev: 0 of 31 work assignments change primary.
   - Communication ranking last: CONFIRMED by the owner 2026-10-29 ("a work assignment's parent is the core record; it's important that we have this family structure").
-  - Open with the owner: how to track two older mismatches found in review (creation vs un-secure for a work assignment filed only under an invoice or event; the Decision Record gate writer vs the owner-check job).
+  - The two older mismatches (creation vs un-secure for a work assignment filed only under an invoice or event; the Decision Record gate writer vs the owner-check job): owner said FIX BOTH NOW in uac-r2 (2026-10-29); both resolve to the matter.
+  - Person-owned work assignment that is filed: owner chose the MATTER's unit on every path (2026-10-29). Shipped on `fix/uac-r2-wa-owner-paths` (creation through intermediates, resolver look-through, core never content, cascade order, matter-move hop).
+  - Dev row moves from that change (2 events to BU1; 1 document + 1 communication user-owned, reported only): owner GO (2026-10-29), after the report-only run confirms the list.
+
+- **A family shares one ownership; records are owned by business units/teams, not named users** (owner, 2026-10-29: "records are not owned by named users they are owned by business unit/teams. But whatever the ownership the family members have the same ownership").
+  - Consequence: a person-owned core record (a work assignment or project created from the app form) is an anomaly; its family follows its core record (matter, then project) like any other member. Projects follow their matter too.
+  - Follow-up (not yet built): re-own person-owned work assignments and projects to their family's team, and make person-owned projects follow their matter on every owner path.
