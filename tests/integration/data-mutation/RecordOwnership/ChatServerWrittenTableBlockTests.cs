@@ -56,6 +56,7 @@ public sealed class ChatServerWrittenTableBlockTests : TypedToolHandlerTestFixtu
     [InlineData("sprk_invoicesubmission")]
     [InlineData("sprk_invoiceapproval")]
     [InlineData("sprk_invoicecorrection")]
+    [InlineData("sprk_externalidentifier")] // ebilling-r1 2026-10-30 (task 017 2d-3)
     public async Task CreateRecord_AServerWrittenInvoiceFamilyTable_IsRefused_WithNoCreateCall(string table)
     {
         var result = await CreateRecord(table, Lookup("sprk_matter", "sprk_matter", OrdinaryMatter));
@@ -73,6 +74,7 @@ public sealed class ChatServerWrittenTableBlockTests : TypedToolHandlerTestFixtu
     [InlineData("sprk_invoicesubmission")]
     [InlineData("sprk_invoiceapproval")]
     [InlineData("sprk_invoicecorrection")]
+    [InlineData("sprk_externalidentifier")] // ebilling-r1 2026-10-30 (task 017 2d-3)
     public void ValidateChat_AServerWrittenInvoiceFamilyTable_IsRefusedBeforeTheConfirmation(string table)
     {
         // The pre-suspend leg: no confirm dialog is shown for a create that can never run.
@@ -99,8 +101,7 @@ public sealed class ChatServerWrittenTableBlockTests : TypedToolHandlerTestFixtu
 
     private DataverseCreateRecordHandler Handler() =>
         new(_user, CreateLogger<DataverseCreateRecordHandler>(), new HandoffUrlBuilder("https://spaarkedev1.crm.dynamics.com"),
-            _world.Resolver(), _appOnly.Object, IdentityNormalizationFixtures.NoLinkedContact(),
-            SecureRootFilingGateFixtures.NothingSecure());
+            _world.Resolver(), IdentityNormalizationFixtures.NoLinkedContact(), Sprk.Bff.Api.Tests.Integration.DataMutation.RecordOwnership.RouteRecordCreation.Default(_world.Resolver(), _appOnly.Object, SecureRootFilingGateFixtures.NothingSecure()));
 
     private Task<ToolResult> CreateRecord(string table, params (string Column, JsonElement Value)[] item) =>
         Handler().ExecuteChatAsync(CreateContext(table, item), BuildAnalysisTool(nameof(DataverseCreateRecordHandler)),

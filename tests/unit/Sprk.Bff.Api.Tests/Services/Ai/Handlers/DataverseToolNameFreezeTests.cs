@@ -140,8 +140,7 @@ public sealed class DataverseToolNameFreezeTests
             Microsoft.Extensions.Logging.Abstractions.NullLogger<DataverseCreateRecordHandler>.Instance,
             new Sprk.Bff.Api.Api.Agent.HandoffUrlBuilder("https://spaarkedev1.crm.dynamics.com"),
             new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(),
-            new Moq.Mock<Spaarke.Dataverse.IFieldMappingDataverseService>().Object,
-            Sprk.Bff.Api.Tests.TestInfrastructure.IdentityNormalizationFixtures.NoLinkedContact(), Sprk.Bff.Api.Tests.TestInfrastructure.SecureRootFilingGateFixtures.NothingSecure());
+            Sprk.Bff.Api.Tests.TestInfrastructure.IdentityNormalizationFixtures.NoLinkedContact(), Sprk.Bff.Api.Tests.Integration.DataMutation.RecordOwnership.RouteRecordCreation.Default(new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(), new Moq.Mock<Spaarke.Dataverse.IFieldMappingDataverseService>().Object, Sprk.Bff.Api.Tests.TestInfrastructure.SecureRootFilingGateFixtures.NothingSecure()));
 
         var parameters = handler.Metadata.Parameters;
         parameters.Should().HaveCount(2, because: "GA MCP create_record takes exactly two arguments");
@@ -192,8 +191,8 @@ public sealed class DataverseToolNameFreezeTests
         IToolHandler[] handlers =
         {
             new DataverseCreateRecordHandler(mock, Microsoft.Extensions.Logging.Abstractions.NullLogger<DataverseCreateRecordHandler>.Instance, new Sprk.Bff.Api.Api.Agent.HandoffUrlBuilder("https://spaarkedev1.crm.dynamics.com"),
-                new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(), new Moq.Mock<Spaarke.Dataverse.IFieldMappingDataverseService>().Object,
-                Sprk.Bff.Api.Tests.TestInfrastructure.IdentityNormalizationFixtures.NoLinkedContact(), Sprk.Bff.Api.Tests.TestInfrastructure.SecureRootFilingGateFixtures.NothingSecure()),
+                new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(),
+                Sprk.Bff.Api.Tests.TestInfrastructure.IdentityNormalizationFixtures.NoLinkedContact(), Sprk.Bff.Api.Tests.Integration.DataMutation.RecordOwnership.RouteRecordCreation.Default(new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(), new Moq.Mock<Spaarke.Dataverse.IFieldMappingDataverseService>().Object, Sprk.Bff.Api.Tests.TestInfrastructure.SecureRootFilingGateFixtures.NothingSecure())),
             new DataverseUpdateRecordHandler(mock, new Sprk.Bff.Api.Tests.Integration.DataMutation.CoreAncestorStamping.StampWorld().AfterWriteRestamp,
                 Microsoft.Extensions.Logging.Abstractions.NullLogger<DataverseUpdateRecordHandler>.Instance,
                 new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(), Sprk.Bff.Api.Tests.TestInfrastructure.SecureRootFilingGateFixtures.NothingSecure()),

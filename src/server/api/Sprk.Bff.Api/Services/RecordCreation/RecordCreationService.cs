@@ -250,11 +250,13 @@ internal sealed partial class RecordCreationService
         // ── Step 12: post-create, never thrown ────────────────────────────────────────────────────────────────────────
         trace.Begin(RecordCreationStep.PostCreate);
         var warnings = new List<string>();
-        var removed = await AfterCreateAsync(table, id, rule, decision, noun, correlationId, warnings).ConfigureAwait(false);
+        SecureRootInheritResult? isolatedCompletion = null;
+        var removed = await AfterCreateAsync(table, id, rule, decision, noun, correlationId, warnings, s => isolatedCompletion = s)
+            .ConfigureAwait(false);
         if (removed is not null)
         {
             trace.Record(RecordCreationStep.PostCreate, RecordCreationStepState.Refused, "the isolated row was removed again");
-            return trace.Outcome(removed, warnings);
+            return trace.Outcome(removed, warnings) with { IsolatedCompletion = isolatedCompletion };
         }
 
         trace.Record(RecordCreationStep.PostCreate, RecordCreationStepState.Ran, warnings.Count == 0 ? null : $"{warnings.Count} warning(s)");
@@ -266,7 +268,7 @@ internal sealed partial class RecordCreationService
         // The mapping step's warnings first (step 3 ran before the create), then step 8's, then the post-create ones.
         return trace.Created(id, decision.OwningTeamId, decision.IsolatedFor is not null,
             [.. decision.MappingWarnings.Select(w => w.Detail), .. decision.DefaultWarnings, .. warnings], decision.MappingWarnings,
-            writtenColumns);
+            writtenColumns) with { IsolatedCompletion = isolatedCompletion };
     }
 
     /// <summary>What steps 1 to 10 decided: a refusal, or the fields to create and the facts step 12 needs.</summary>
@@ -1625,7 +1627,8 @@ internal sealed partial class RecordCreationService
     /// event. Never throws; returns a refusal only when an isolated root had to be removed again.
     /// </summary>
     private async Task<RecordCreationRefusal?> AfterCreateAsync(
-        string table, Guid id, RecordTableRule rule, Decision decision, string noun, string correlationId, List<string> warnings)
+        string table, Guid id, RecordTableRule rule, Decision decision, string noun, string correlationId, List<string> warnings,
+        Action<SecureRootInheritResult> isolatedCompleted)
     {
         if (rule.AutonumberColumn is { } numberColumn)
             await WarnIfNumberMissingAsync(table, id, numberColumn, noun, warnings).ConfigureAwait(false);
@@ -1633,6 +1636,7 @@ internal sealed partial class RecordCreationService
         if (decision.IsolatedFor is { } isolatedFor)
         {
             var secured = await _rootFiling.CompleteIsolatedCreateAsync(table, id, isolatedFor, correlationId).ConfigureAwait(false);
+            isolatedCompleted(secured);
             if (secured.RowRemoved)
             {
                 _logger.LogWarning("[RECORD-CREATE] isolated {Table} {Id} removed again: its creator could not be shared ({Code})",
@@ -2072,6 +2076,16 @@ internal sealed record RecordCreationOutcome
 
     /// <summary>The row was created INTO isolation (a work assignment or project under a secure record).</summary>
     public bool Isolated { get; init; }
+
+    /// <summary>
+    /// Task 017 (2d-3, additive): with <see cref="Isolated"/>, provisioning's answer for the isolated root's completion (the
+    /// caller's share, its container, its parents' sharees) — its <see cref="SecureRootInheritResult.ReasonCode"/> included —
+    /// so an adapter whose contract reports a stranded or unfinished completion as a refusal (the chat create) keeps its code.
+    /// Set whenever the completion ran — on the created row, and on the refusal for a row removed again
+    /// (<see cref="SecureRootInheritResult.RowRemoved"/>); <c>null</c> when the row was not created into isolation and on every
+    /// refusal before the create.
+    /// </summary>
+    public SecureRootInheritResult? IsolatedCompletion { get; init; }
 
     /// <summary>The request's correlation id (the ProblemDetails <c>correlationId</c> of a refusal).</summary>
     public string CorrelationId { get; init; } = string.Empty;
