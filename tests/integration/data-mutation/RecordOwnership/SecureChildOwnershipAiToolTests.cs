@@ -758,6 +758,8 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
             {
                 ("sprk_regardingmatter", "sprk_matter", "sprk_RegardingMatter"),
                 ("sprk_regardingproject", "sprk_project", "sprk_RegardingProject"),
+                // Owner decision 2026-10-29: a To Do filed under a work assignment (live navigation property, as TodoRegardingUpdateBuilder binds it).
+                ("sprk_regardingworkassignment", "sprk_workassignment", "sprk_RegardingWorkAssignment"),
                 ("sprk_assignedto", "contact", "sprk_AssignedTo"),
                 ("ownerid", "systemuser", "ownerid"),
                 ("sprk_createdbyperson", "systemuser", "sprk_CreatedByPerson"), // task 146 c1-r1 schema step

@@ -1584,6 +1584,12 @@ public sealed class SecureChildReconciler
                 // UAC task 194b R4b-2b (F1): a Decision Record is filed under the subject of every Signal it resolved too (its
                 // question (c)), which no lineage lookup names — so the records that resolved a Signal of this level join it.
                 await AddDecisionRecordsResolvingAsync(level, next, seen).ConfigureAwait(false);
+
+                // Owner decision 2026-10-29: a filed work assignment that is not team-owned belongs to its matter (then its
+                // project), and the rows filed under it take that record's business unit — so a matter's or project's move
+                // re-owns them too. Such a work assignment is a hop of the ordinary pass (never decided or written itself).
+                if (level == 1 && _ordinary is not null)
+                    next.AddRange(await WorkAssignmentsFollowingTheRootAsync(seen).ConfigureAwait(false));
                 frontier = next;
             }
 
@@ -1592,6 +1598,54 @@ public sealed class SecureChildReconciler
             if (_ordinary is null)
                 await LoadGrantRowsAsync().ConfigureAwait(false);
             await LoadThreadsOutsidePassAsync().ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// Owner decision 2026-10-29 (the ordinary pass only): the work assignments filed under this pass's root — a matter or
+        /// project — that are NOT team-owned, as the walk's next hop. Filed means by its typed column for the root's table, or
+        /// through an invoice or event that belongs to the root: one of this walk's level-1 rows of those tables (the same
+        /// columns <c>SecureRootInheritance.IntermediateParentColumns</c> reads; a pair alone files nothing). Scoped to the root:
+        /// the query names the root and its own level-1 invoices and events only, never every work assignment filed under any
+        /// intermediate. The resolver answers such a work assignment's rows with its filing's business unit, so they move with
+        /// the root, by the ordinary rules (a default-team row moves, a user-owned one is reported). A team-owned work assignment
+        /// keeps its own business unit, and its rows are not reached this way. The work assignment itself is never a row of the
+        /// pass. Paged and chunked as the walk's levels are; an incomplete read throws, as every read of this walk does.
+        /// </summary>
+        private async Task<IReadOnlyList<(string, Guid)>> WorkAssignmentsFollowingTheRootAsync(HashSet<(string, Guid)> seen)
+        {
+            if (!SecureRootInheritance.IsParent(_root.EntityLogicalName))
+                return Array.Empty<(string, Guid)>();
+
+            var workAssignment = SecureRootInheritance.WorkAssignment;
+            var filing = SecureRootInheritance.TypedFilingColumns[workAssignment]
+                .Where(c => string.Equals(c.ParentTable, _root.EntityLogicalName, StringComparison.OrdinalIgnoreCase))
+                .Select(c => (c.Column, Id: _root.RecordId))
+                .ToList();
+            foreach (var (column, intermediate) in SecureRootInheritance.IntermediateFilingColumns[workAssignment])
+            {
+                filing.AddRange(_descendants
+                    .Where(d => d.Level == 1 && string.Equals(d.Row.LogicalName, intermediate, StringComparison.OrdinalIgnoreCase))
+                    .Select(d => (column, d.Row.Id)));
+            }
+
+            var hops = new List<(string, Guid)>();
+            foreach (var chunk in filing.Distinct().Chunk(SecureChildShareSynchronizer.DescendantConditionsPerQuery))
+            {
+                var query = new QueryExpression(workAssignment) { ColumnSet = new ColumnSet(OwningTeamColumn), NoLock = true };
+                var anyFiling = new FilterExpression(LogicalOperator.Or);
+                foreach (var column in chunk.GroupBy(p => p.Column, StringComparer.OrdinalIgnoreCase))
+                    anyFiling.AddCondition(column.Key, ConditionOperator.In, column.Select(p => (object)p.Id).ToArray());
+                query.Criteria.AddFilter(anyFiling);
+                query.Criteria.AddCondition(OwningTeamColumn, ConditionOperator.Null); // person-owned only
+                foreach (var row in await ReadAllPagesAsync(workAssignment, query).ConfigureAwait(false))
+                {
+                    var key = (workAssignment, row.Id);
+                    if (seen.Add(key))
+                        hops.Add(key);
+                }
+            }
+
+            return hops;
         }
 
         /// <summary>
