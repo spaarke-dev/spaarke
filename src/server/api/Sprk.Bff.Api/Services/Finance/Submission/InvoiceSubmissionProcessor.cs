@@ -1,6 +1,7 @@
 using System.Globalization;
 using Microsoft.Extensions.Options;
 using Microsoft.Xrm.Sdk;
+using Spaarke.Dataverse;
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Services.Ai.PublicContracts;
 using Sprk.Bff.Api.Services.Finance.Coding;
@@ -31,6 +32,10 @@ public sealed class InvoiceSubmissionProcessor : IInvoiceSubmissionProcessor
     private readonly IOptionsMonitor<EbillingOptions> _ebilling;
     private readonly ILogger<InvoiceSubmissionProcessor> _logger;
 
+    /// <summary>Task 097b: reads a Correction's replaced invoice (<see cref="SubmissionSnapshot.ReadCorrectedInvoiceAsync"/>). Null only in
+    /// tests built on the evaluation seam.</summary>
+    private readonly IGenericEntityService? _entities;
+
     public InvoiceSubmissionProcessor(
         IInvoiceAi ai,
         IInvoiceResolutionService resolution,
@@ -38,8 +43,10 @@ public sealed class InvoiceSubmissionProcessor : IInvoiceSubmissionProcessor
         InvoiceComplianceEvaluator evaluator,
         SubmissionRejectionRule decider,
         IOptionsMonitor<EbillingOptions> ebilling,
-        ILogger<InvoiceSubmissionProcessor> logger)
-        : this(ai, resolution, coding, EvaluateWith(evaluator), decider, ebilling, logger)
+        ILogger<InvoiceSubmissionProcessor> logger,
+        IGenericEntityService entities)
+        : this(ai, resolution, coding, EvaluateWith(evaluator), decider, ebilling, logger,
+            entities ?? throw new ArgumentNullException(nameof(entities)))
     {
     }
 
@@ -51,8 +58,10 @@ public sealed class InvoiceSubmissionProcessor : IInvoiceSubmissionProcessor
         Func<BillingEvaluationRequest, CancellationToken, Task<BillingEvaluationResult>> evaluate,
         SubmissionRejectionRule decider,
         IOptionsMonitor<EbillingOptions> ebilling,
-        ILogger<InvoiceSubmissionProcessor> logger)
+        ILogger<InvoiceSubmissionProcessor> logger,
+        IGenericEntityService? entities = null)
     {
+        _entities = entities;
         _ai = ai ?? throw new ArgumentNullException(nameof(ai));
         _resolution = resolution ?? throw new ArgumentNullException(nameof(resolution));
         _coding = coding ?? throw new ArgumentNullException(nameof(coding));
@@ -155,7 +164,10 @@ public sealed class InvoiceSubmissionProcessor : IInvoiceSubmissionProcessor
         }
 
         // Step 4: evaluate (072), on the core record and received date of this same submission read.
-        var request = BuildEvaluationRequest(snapshot, read, resolution, coding);
+        var request = BuildEvaluationRequest(snapshot, read, resolution, coding) with
+        {
+            ReplacedInvoiceId = await ReplacedInvoiceAsync(snapshot, ct).ConfigureAwait(false),
+        };
         var evaluation = await _evaluate(request, ct).ConfigureAwait(false);
 
         // Step 5: decide (073). The only source of a rejection.
@@ -277,6 +289,37 @@ public sealed class InvoiceSubmissionProcessor : IInvoiceSubmissionProcessor
             BilledExpenseCode = line.ExpenseCodeAsBilled.Value,
         }).ToList(),
     };
+
+    /// <summary>
+    /// Task 097b: the invoice a Correction replaces, derived here on the server only, from this submission's <c>sprk_resubmissionof</c> and
+    /// that submission's <c>sprk_invoice</c> (checked against <see cref="InvoiceSubmissionPersister.InvoiceIdFor"/>); the evaluation's
+    /// loader leaves it out of the priors (<see cref="BillingEvaluationRequest.ReplacedInvoiceId"/>). Null for New. A target that does not
+    /// resolve gives null (no exclusion: the correction is judged against every prior, fail closed) with a warning. A read fault propagates
+    /// (the job retries), as the other reference reads of the pipeline do.
+    /// </summary>
+    private async Task<Guid?> ReplacedInvoiceAsync(SubmissionSnapshot snapshot, CancellationToken ct)
+    {
+        if (snapshot.ResubmissionOfSubmissionId is not { } earlier)
+        {
+            return null;
+        }
+
+        if (_entities is null)
+        {
+            _logger.LogWarning("Submission {SubmissionId}: a Correction judged without the replaced invoice's read; no prior is excluded",
+                snapshot.SubmissionId);
+            return null;
+        }
+
+        var target = await snapshot.ReadCorrectedInvoiceAsync(_entities, ct).ConfigureAwait(false);
+        if (target.CorrectedInvoiceId is null)
+        {
+            _logger.LogWarning("Submission {SubmissionId}: the replaced submission {ResubmissionOf} names no invoice it created; no prior is excluded",
+                snapshot.SubmissionId, earlier);
+        }
+
+        return target.CorrectedInvoiceId;
+    }
 
     // ── 043 + 046 + 047 → 072 ──
 
