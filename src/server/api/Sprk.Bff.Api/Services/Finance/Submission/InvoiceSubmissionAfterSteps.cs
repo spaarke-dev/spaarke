@@ -1037,6 +1037,7 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
 
         string? failure = null;
         int closed = 0, left = 0;
+        var notClosed = new List<Guid>();
         foreach (var signal in set.Signals)
         {
             try
@@ -1063,6 +1064,7 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
                 {
                     _logger.LogWarning("Invoice submission {SubmissionId}: Signal {SignalId} was read without a row version; not closed", submissionId, signal.Id);
                     failure ??= SignalChangedCode;
+                    notClosed.Add(signal.Id);
                     continue;
                 }
 
@@ -1074,6 +1076,7 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
                 {
                     // ChangedSinceRead: nothing written. The next delivery re-reads it: closed by a person → left; still open → closed.
                     failure ??= SignalChangedCode;
+                    notClosed.Add(signal.Id);
                 }
             }
             catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
@@ -1081,7 +1084,16 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
                 _logger.LogWarning("Invoice submission {SubmissionId}: Signal {SignalId} (policy {PolicyCode}) on superseded invoice {OldInvoiceId} could not be closed ({Fault})",
                     submissionId, signal.Id, signal.PolicyCode, oldId, ex.GetType().Name);
                 failure ??= SupersedeSignalsFailedCode;
+                notClosed.Add(signal.Id);
             }
+        }
+
+        if (failure is not null)
+        {
+            // Bounded and visible (ontology-r1, 2026-10-30): every failing run, the final delivery included, names the submission and the Signals
+            // still open (ids only). On the final delivery the job dead-letters with this code and notes "Processing stopped" for the administrator.
+            _logger.LogWarning("Invoice submission {SubmissionId}: superseded invoice {OldInvoiceId}: Signals {SignalIds} not closed ({Code}); it stays Processing for a retry",
+                submissionId, oldId, string.Join(",", notClosed), failure);
         }
 
         _logger.LogInformation("Invoice submission {SubmissionId}: superseded invoice {OldInvoiceId}: {Closed} of {Count} open Signals closed Superseded, {Left} already closed or gone ({Code})",

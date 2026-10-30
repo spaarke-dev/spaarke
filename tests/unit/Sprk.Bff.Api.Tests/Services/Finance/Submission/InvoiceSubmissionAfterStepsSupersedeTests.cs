@@ -230,6 +230,48 @@ public partial class InvoiceSubmissionAfterStepsTests
         world.TerminalWrites.Should().ContainSingle();
     }
 
+    [Theory(DisplayName = "097d follow-up (ontology-r1, bounded and visible): a failing run logs ONE Warning naming the submission, the code and exactly the Signals left open (ids only)")]
+    [InlineData("changed")]
+    [InlineData("fault")]
+    public async Task Correction_FailingRun_WarnsWithTheSignalsLeftOpen(string why)
+    {
+        var (world, _) = await CorrectionWorldAsync();
+        var signals = new[]
+        {
+            world.Seed(OldInvoiceKey("BILL-RATE"), SignalWriter.SignalStatusOpen, "[]"),
+            world.Seed(OldInvoiceKey("BILL-HOURS"), SignalWriter.SignalStatusOpen, "[]"),
+        }.OrderBy(s => s.Id).ToArray();
+        var stuck = signals[1];
+        string code;
+        if (why == "changed")
+        {
+            // A write lands between the re-read and the close of the second Signal only.
+            code = InvoiceSubmissionAfterSteps.SignalChangedCode;
+            world.Entities.Setup(e => e.RetrieveAsync("sprk_signal", stuck.Id, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync((string _, Guid _, string[] columns, CancellationToken _) =>
+                {
+                    var copy = World.Copy(stuck, columns);
+                    stuck.RowVersion = "2"; // after the re-read: the close sees a moved version
+                    return copy;
+                });
+        }
+        else
+        {
+            world.SupersedeFaults[stuck.Id] = new TimeoutException("the close timed out");
+            code = InvoiceSubmissionAfterSteps.SupersedeSignalsFailedCode;
+        }
+
+        var result = await world.Build().RunAsync(Persisted(await Accepted()), null);
+
+        result.Status.Should().Be(SubmissionAfterStepsStatus.Retry);
+        result.ReasonCode.Should().Be(code);
+        var warning = world.Log.Entries.Where(e => e.Level == Microsoft.Extensions.Logging.LogLevel.Warning && e.Message.Contains("not closed (", StringComparison.Ordinal))
+            .Should().ContainSingle().Subject.Message;
+        warning.Should().Contain(Submission.ToString()).And.Contain(stuck.Id.ToString()).And.Contain(code);
+        warning.Should().NotContain(signals[0].Id.ToString(), "the closed Signal is not listed");
+        world.Superseded.Should().Equal(signals[0].Id);
+    }
+
     [Theory(DisplayName = "097d: a read fault (the old invoice, or its open Signal set) -> Retry with nothing closed; the resume completes")]
     [InlineData("old-invoice")]
     [InlineData("open-set")]
