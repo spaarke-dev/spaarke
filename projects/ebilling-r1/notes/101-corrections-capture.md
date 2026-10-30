@@ -262,3 +262,33 @@ Changed B2b-1 tests: the two that read `pendingSignalChanges` now read the findi
 3. A Signal a person resolved, whose group a later correction re-raises with the same fingerprint, reopens as episode n+1 (`ReopenAsNextEpisode`, the B2a rule).
 4. Reject / return (104) is not on this branch; only the approval half of item 5 is tested.
 5. The hold-refresh case (another invoice-level system reason left when the hold clears) has no test of its own; it is the same lifecycle write the line-refresh test covers.
+
+## B2c. Timekeeper and date corrections, totals, currency, re-coded read model, admin attention
+
+**Behaviour (before -> after).**
+1. Timekeeper-as-billed, line-date and invoice-date corrections: were 400 `field_not_supported_yet` -> enabled. The correction service builds a single-line `InvoiceResolutionInput` and calls the registered `IInvoiceResolutionService` (046 unchanged; its private `ReadRatesAsync` is not called). A timekeeper correction names the roster entry the reviewer picked; if the resolution matches a different timekeeper (not approved and active on the line date, or the name is ambiguous) the answer is 400 `ebilling.correction.timekeeper_mismatch` and nothing is written. On a match, the resolved timekeeper, the approved rate and the line's `resolutionChange` member (before pair; after reasons) are written in the same conditional transaction as the correction row. B2b's re-evaluation then diffs the line with the new facts; an invoice-date correction re-evaluates date-dependent rules through the same seam.
+2. Totals: an Amount, Hours, Rate or TotalDue correction recomputes the totals through `InvoiceTotalsService` (016) as its own idempotent seam step after status; a failure is the 503 Incomplete with `failedStep` `totals`, and the repeat converges.
+3. Currency: a Currency correction updates the invoice currency only. Lines whose currency disagrees get a `lineFindings[]` entry with code `currency.mismatch` (Flagged like the other line findings; no Signal, no new Signal kind); it is cleared when the currencies agree.
+4. Re-coded lines: the line's coding status is now `Coded` (was `NotCoded`) with a `recoded` marker and no `hold`, so the review read model shows it as coded. The hold rule is kept (it clears when no undecided line lacks a code set). Two follow-ups the new status needed: `LineSource` treats a re-coded line like an uncoded one (a retry of its correction had returned 409 `no_provenance`), and `InvoiceLineDecisionService.CorrectionRowsFor` skips `recoded` lines so the approval's bulk rows do not record a reviewer's code as an AI code accepted in bulk.
+5. Admin attention: a refused plan entry, or a permanently refused Signal write, during a correction sets `sprk_adminattention` through `AdminAttentionText.Merge` / `FromFindings` (the persister's and 049's helper and text). This closes B2b-2 known limit 1.
+
+**Files.** `Services/Finance/InvoiceCorrectionService.cs`, `InvoiceCorrectionReevaluation.cs`, `InvoiceLineDecisionService.cs`, `Submission/InvoiceSubmissionPersister.cs` (`LineFindingCurrencyMismatch` const), `Api/Finance/InvoiceCorrectionEndpoints.cs` (400 mapping, docs). No schema change, no new Signal kind, no new DI registration (the correction and re-evaluation services take two already-registered scoped services).
+
+**Placement / ADRs (section 10, section 11).** Existing: extends the correction service and its seam; Extension: nothing new is added. Cost of doing nothing: the 400 `field_not_supported_yet` stays and the totals/currency/read model stay wrong after a correction. ADR-002 (server-side owner of each invariant; no plugin), ADR-010 (no new interface), ADR-013 (the BFF finance code uses 046's service, not an AI client), ADR-015 (logs carry ids, field names and exception type only). adr-check: no violations.
+
+**Tests.** New `InvoiceCorrectionB2cTests` (28 cases): matching and mismatching timekeeper (pending, same-name-twice, other firm, repeat, stored name), date corrections (fee, still unmatched, expense, resolution fault), invoice date, totals (theory over Amount/Hours/Rate/TotalDue/Narrative, failure then repeat, refused calculation, order after status), currency (flag, clear, decided line, agreeing), re-coded line in the read model, status-step retry, re-correction of a re-coded code, admin attention (plan refusal, permanent write refusal, none). `CorrectionWorld` gains the roster, rate rows and a real `InvoiceResolutionService`. The end-to-end re-code test now also asserts no AI-accepted-in-bulk `TaskCode` row exists for the re-coded lines (and that bulk rows exist at all). Changed existing tests: two `field_not_supported_yet` tests removed; the re-code test expects `Coded` + `recoded`; the endpoint contract theories use value_invalid cases. The 046 and 049 suites are unchanged and green (inside the unit filter below).
+
+**Seeded proofs** (reverted, watched fail, restored):
+1. Mismatch check disabled (`if (false && ...)`): both `timekeeper_mismatch` scenarios (pending, same-name-twice) failed (2 failed, 26 passed in the B2c file).
+2. Totals step made a no-op: 7 failed (refused calculation, the four totals-theory rows, the failure/repeat test, the order test).
+
+**Gate (on the commit).** Builds clean (0 warnings, 0 errors): Sprk.Bff.Api.Tests, Spaarke.ArchTests, Sprk.Bff.Api.IntegrationTests, Spe.Integration.Tests, Sprk.Provisioning.ControlPlane.LoadTests. ArchTests 1858 passed, 0 failed. Unit filter `Finance|Ebilling|Billing|Signals|Approval|Invoice`: 9030 passed, 7 skipped, 0 failed (`InvoiceCorrection*` alone: 204 passed). Integration project: 199 passed, 8 skipped, 0 failed. `dotnet list package --vulnerable --include-transitive`: none; no package change.
+
+**Publish size** (`-c Release -r linux-x64 --self-contained false`, `git archive` of the commit, short path): 136,246,608 bytes. Master 132,727,804 -> whole 101 branch +3,518,804 (under the +5 MB bar); B1 tip 136,132,864 -> B2c +113,744. The absolute total is above 55 MB but master itself already is (132.7 MB), so the delta rule is the one that applies; no new package.
+
+**Known limits (K-class).**
+1. A date correction re-resolves without the invoice's timekeeper summary names, so it resolves with the resolved roster entry's name (the line's stored billed name when none).
+2. A Currency correction does not re-run the money rules (D-20); only the `currency.mismatch` finding is patched.
+3. A refused totals calculation (for example TotalDue lowered below the adjustments) leaves the correction Incomplete at `totals` until corrected again.
+4. `resolutionChange` holds only the latest timekeeper/date correction of a line; a retry of an earlier one has an imperfect "before" side.
+5. Reject / return (104) is still not on this branch.
