@@ -354,11 +354,21 @@ public sealed partial class SecureChildOwnershipAiToolTests
     }
 
     [Fact]
-    public void ChatCreate_TheToolDescription_NoLongerOffersTheMatterOrProjectNumber_OwnerDecision2c()
+    public void ChatCreate_TheToolDescription_SaysAllThreeNumbersAreServerSet_AndOffersNoneAsAWritableColumn_OwnerDecision2c()
     {
+        // Task 017 review F-8: the autonumber columns the service refuses as BlockedColumn are the matter's, the project's and
+        // the budget's — the description names all three as the server's and offers none as a column to send.
         var description = CreateRecordHandler().Metadata.Description;
 
-        description.Should().NotContain("sprk_matternumber").And.NotContain("sprk_projectnumber");
+        description.Should().Contain("set by the server, so NEVER send any of them");
+        foreach (var number in RecordTableRules.All.Select(r => r.AutonumberColumn).OfType<string>())
+        {
+            description.Should().Contain(number, "the platform's number is named as the server's");
+            description.Should().NotContain($"{number} (", "never offered as a writable column with a type, as sprk_mattername is");
+        }
+
+        RecordTableRules.All.Select(r => r.AutonumberColumn).OfType<string>()
+            .Should().BeEquivalentTo("sprk_matternumber", "sprk_projectnumber", "sprk_budgetnumber");
         description.Should().Contain("sprk_mattername (text, REQUIRED); sprk_matterdescription");
     }
 
