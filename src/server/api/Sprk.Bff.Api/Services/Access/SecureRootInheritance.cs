@@ -547,6 +547,30 @@ public sealed partial class SecureRootInheritance
         return IsParent(named) ? (new RecordOwnershipParent(named, id), null) : (null, null);
     }
 
+    /// <summary>
+    /// Fix round (B-K1): <see cref="PairParentAsync"/> for an EXISTING row, as the ownership resolver and the root-owner step
+    /// read it — a pair naming a record that no longer exists files the row under nothing (the parent is gone), as the
+    /// secure-root plan reads a missing parent ("a missing record confers nothing"). The named record is read by id
+    /// (<paramref name="committed"/>: a committed read, else <c>NoLock</c>). A Dataverse fault reading it propagates.
+    /// </summary>
+    internal static async Task<(RecordOwnershipParent? Parent, string? Undetermined)> ExistingPairParentAsync(
+        IGenericEntityService entities, string table, string? idText, Guid? typeId, bool committed, CancellationToken ct)
+    {
+        var pair = await PairParentAsync(entities, table, idText, typeId, ct).ConfigureAwait(false);
+        if (pair.Parent is not { } parent)
+            return pair;
+
+        var query = new QueryExpression(parent.EntityLogicalName)
+        {
+            ColumnSet = new ColumnSet(parent.EntityLogicalName + "id"),
+            TopCount = 1,
+            NoLock = !committed,
+        };
+        query.Criteria.AddCondition(parent.EntityLogicalName + "id", ConditionOperator.Equal, parent.RecordId);
+        var found = (await entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false)).Entities.Count > 0;
+        return found ? pair : (null, null);
+    }
+
 
     private static readonly AsyncLocal<int> NestedProvisioning = new();
 

@@ -4644,6 +4644,53 @@ public class RecordOwnershipResolverTests
         resolution.RefusalCode.Should().Be(RecordOwnerRefusal.ParentUnresolved);
     }
 
+    [Theory(DisplayName = "Fix round (B-K2/K3) must not fire: a person-owned project with NO pair is never looked through — its own unit decides and its filing is never read, on the plain and the content path")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ResolveOwner_APersonOwnedProjectWithNoPair_IsNeverLookedThrough(bool asContent)
+    {
+        // A project is filed only through its pair: another lookup (here a matter in another unit) never files it.
+        var projectId = Guid.NewGuid();
+        var directory = Directory()
+            .WithRecord("sprk_matter", MatterId, ChildBu, owningTeam: ChildTeam)
+            .WithRecord("sprk_project", projectId, GeneralBu, isSecure: false, owningTeam: null,
+                extra: new() { ["sprk_matter"] = new EntityReference("sprk_matter", MatterId) });
+
+        var resolution = await AskAboutTheProject(directory, projectId, asContent);
+
+        resolution.OwningTeamId.Should().Be(GeneralTeam, "a project with no pair is filed under nothing: its own business unit");
+        directory.RecordQueries.Should().NotContain(q => q.EntityName == "sprk_project" && q.ColumnSet.AllColumns,
+            "a project with no pair is never looked through, so its filing is never read");
+    }
+
+    [Theory(DisplayName = "Fix round (B-K1) must fire: a child write under a person-owned project whose pair names a DELETED record is owned with the project's own unit — the project is no longer filed")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ResolveOwner_UnderAProjectWhosePairNamesADeletedRecord_TakesTheProjectsOwnUnit(bool asContent)
+    {
+        var (projectId, typeRef, deleted) = (Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid());
+        var directory = WithPersonOwnedProject(WithRecordType(Directory(), typeRef, "sprk_matter"),
+            projectId, deleted.ToString("D"), typeRef);
+
+        var resolution = await AskAboutTheProject(directory, projectId, asContent);
+
+        resolution.IsOwned.Should().BeTrue($"the pair's record is gone, so the project is filed under nothing ({resolution.Reason})");
+        resolution.OwningTeamId.Should().Be(GeneralTeam, "the project's own business unit");
+    }
+
+    [Fact(DisplayName = "Fix round (B-K1) must not fire: a pair naming a record that exists but cannot be read propagates the fault — never read as unfiled")]
+    public async Task ResolveOwner_UnderAProjectWhosePairRecordFaults_PropagatesTheFault()
+    {
+        var (projectId, typeRef) = (Guid.NewGuid(), Guid.NewGuid());
+        var directory = WithPersonOwnedProject(
+            WithRecordType(Directory().WithRecord("sprk_matter", MatterId, ChildBu, owningTeam: ChildTeam), typeRef, "sprk_matter"),
+            projectId, MatterId.ToString("D"), typeRef).WithUnreadable("sprk_matter");
+
+        var act = () => AskAboutTheProject(directory, projectId, asContent: false);
+
+        await act.Should().ThrowAsync<InvalidOperationException>("a fault is not an answer");
+    }
+
     [Fact(DisplayName = "Owner amendment 2026-10-29 must not fire: a person-owned WORK ASSIGNMENT's pair is never followed — it keeps its own unit and its pair's type is never read")]
     public async Task ResolveOwner_APersonOwnedWorkAssignmentsPair_IsNeverFollowed()
     {
