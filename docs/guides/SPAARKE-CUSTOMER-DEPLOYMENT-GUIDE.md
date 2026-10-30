@@ -1851,6 +1851,11 @@ Run intake no longer takes `communicationGraphResource` / `emailGraphResource`. 
 > `ProductConfigurationReadRoleGuardTests` fails the build if the list gains a customer or restricted table or platform
 > service configuration (`sprk_externalserviceconfig`, `sprk_dataverseenvironment`, `sprk_aimodeldeployment`), if an
 > entry names any privilege other than the table's own Read, or if either role gains Create on `sprk_gridconfiguration`.
+> Nothing in the product reads `sprk_externalserviceconfig` as a user, so no end-user Spaarke role holds a privilege on
+> it, and its `sprk_clientsecret` column is field-secured with no Spaarke field security profile (only the platform's
+> System Administrator profile reads it); the same guard checks both. An environment imported before that change still
+> holds the old Read on the two roles: the same script's dry run lists it, `-Apply` removes it, and `-Verify` fails
+> until it is gone.
 > Because every user can read every playbook, **creating, cloning and sharing playbooks is for playbook administrators
 > only**: in the role XML only `Spaarke AI Analysis Admin` holds Create and Share on `sprk_analysisplaybook`, and the BFF
 > routes `POST /api/ai/playbooks`, `/{id}/clone`, `/{id}/share` and `/{id}/unshare` require the caller's own Create

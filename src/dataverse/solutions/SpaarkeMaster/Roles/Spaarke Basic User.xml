@@ -490,7 +490,6 @@
     <RolePrivilege name="prvReadsprk_EventType_Ref" level="Deep" />
     <RolePrivilege name="prvReadsprk_externalidentifier" level="Deep" />
     <RolePrivilege name="prvReadsprk_ExternalRecordAccess" level="Deep" />
-    <RolePrivilege name="prvReadsprk_ExternalServiceConfig" level="Global" />
     <RolePrivilege name="prvReadsprk_FieldMappingRule" level="Deep" />
     <RolePrivilege name="prvReadsprk_FileVersion" level="Deep" />
     <RolePrivilege name="prvReadsprk_GridConfiguration" level="Global" />

@@ -139,7 +139,7 @@
     },
     {
       "logicalName": "sprk_externalserviceconfig",
-      "reason": "Platform service configuration (external service connections), not product configuration. ProductConfigurationReadRoleGuardTests.PlatformServiceTables keeps it off this list."
+      "reason": "Platform service configuration (external service connections), not product configuration. ProductConfigurationReadRoleGuardTests.PlatformServiceTables keeps it off this list. Nothing reads it as a user, so no end-user Spaarke role holds a privilege on it (NoEndUserPrivilegeTables)."
     },
     {
       "logicalName": "sprk_dataverseenvironment",

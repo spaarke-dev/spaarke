@@ -1329,7 +1329,7 @@ $bff = '5967251e-171c-46fe-a6c2-ef843c90309d,1e40baad-e065-4aea-a8d4-4b7ab273458
 Detail: [`projects/spaarkeai-word-add-in-r1/notes/082-secure-owner-role.md`](../projects/spaarkeai-word-add-in-r1/notes/082-secure-owner-role.md).
 
 ### `Set-ProductConfigurationReadDepth.ps1`
-**Purpose:** Raises `Read` to Global on the Spaarke product configuration tables in [`config/product-configuration-read-role.json`](../config/product-configuration-read-role.json) for `Spaarke Core User` and `Spaarke Basic User`. Product data is owned in the root business unit, and a Read at Deep does not reach it from a customer unit (owner decision 2026-10-29). The solution role XML is the source of truth; this script brings one environment to it ahead of a SpaarkeMaster import, and verifies it.
+**Purpose:** Raises `Read` to Global on the Spaarke product configuration tables in [`config/product-configuration-read-role.json`](../config/product-configuration-read-role.json) for `Spaarke Core User` and `Spaarke Basic User`, and removes the two roles' privileges on `sprk_externalserviceconfig` (an unused read grant). Product data is owned in the root business unit, and a Read at Deep does not reach it from a customer unit (owner decision 2026-10-29). The solution role XML is the source of truth; this script brings one environment to it ahead of a SpaarkeMaster import, and verifies it.
 **Usage:** 🟡 Per environment that has not had the SpaarkeMaster import carrying the change; `-Verify` any time.
 **Lifecycle:** ✅ Maintained (added 2026-10-29 by `unified-access-control-r2`)
 **Dependencies:** Azure CLI (`az login`) with System Administrator in the environment, PowerShell 7+
@@ -1340,21 +1340,21 @@ Detail: [`projects/spaarkeai-word-add-in-r1/notes/082-secure-owner-role.md`](../
 # Dry run (default): each change, per business-unit copy of each role. Zero writes.
 .\Set-ProductConfigurationReadDepth.ps1 -EnvironmentUrl "https://spaarkedev1.crm.dynamics.com"
 
-# Raise the listed Reads to Global on both root roles, then read the root and every copy back.
+# Raise the listed Reads to Global and remove the unused grant on both root roles, then read the root and every copy back.
 .\Set-ProductConfigurationReadDepth.ps1 -EnvironmentUrl "https://spaarkedev1.crm.dynamics.com" -Apply
 
-# Check: exit 0 = every copy reads every listed table at Global; exit 1 names each gap.
+# Check: exit 0 = every copy reads every listed table at Global and holds no privilege on sprk_externalserviceconfig; exit 1 names each gap.
 .\Set-ProductConfigurationReadDepth.ps1 -EnvironmentUrl "https://spaarkedev1.crm.dynamics.com" -Verify
 ```
 
 **Safety model:**
-- Raises Read only; never lowers or removes a privilege, and touches no other privilege type.
+- Raises the listed Reads and removes the privileges on the tables in `$NoEndUserPrivilegeTables` (today `sprk_externalserviceconfig`, which nothing reads as a user); lowers nothing else, removes nothing else, and touches no other privilege. `ProductConfigurationReadRoleGuardTests` reads that list and fails the build if any end-user Spaarke role XML holds a privilege on one of its tables.
 - Refuses a config other than Read at Global for exactly those two roles, and any table in the restricted-content, customer-configuration or Secure Record owner role files.
 - Refuses, in every mode (dry run, `-Apply`, `-Verify`) and before it connects, any listed table that is platform service configuration: `sprk_externalserviceconfig`, `sprk_dataverseenvironment`, `sprk_aimodeldeployment`. The one list is `$PlatformServiceTables` in the script; `ProductConfigurationReadRoleGuardTests` reads it from there. Tested by `tests/scripts/Set-ProductConfigurationReadDepth.Tests.ps1` (Pester 3.4).
 - Playbook create, clone and share stay with playbook administrators: only `Spaarke AI Analysis Admin` holds Create and Share on `sprk_analysisplaybook`, and the BFF create, clone, share and unshare routes require the caller's own privilege.
-- Refuses to run until both role XML files hold each listed Read at Global.
+- Refuses to run until both role XML files hold each listed Read at Global and no privilege on a `$NoEndUserPrivilegeTables` table.
 - Resolves each role to exactly one root role and changes only that; every business-unit copy takes its privileges from it and is read back.
-- Takes privilege ids from entity metadata and refuses a name mismatch; names any privilege the platform added unasked, and fails if a privilege outside the list changed depth.
+- Takes privilege ids from entity metadata and refuses a name mismatch; names any privilege the platform added unasked, and fails if a privilege outside the lists changed depth or was removed.
 
 ### `Deploy-ExternalShareExpiryViews.ps1`
 **Purpose:** Creates two public views on `sprk_externalrecordaccess` in SpaarkeCore. "Active External Shares by Expiration" lists every active row, soonest expiry first. "External Shares Expiring in 30 Days" lists the same rows with an expiry on or before today + 30, using a relative filter that never goes stale. Together they answer what is about to lapse across all external shares, which the per-grant reminders (FR-33) cannot.

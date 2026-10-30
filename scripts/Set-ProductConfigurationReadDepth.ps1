@@ -2,8 +2,9 @@
 <#
 .SYNOPSIS
     Raises Read to Global (Organization) depth on the Spaarke product configuration tables in
-    config/product-configuration-read-role.json, for 'Spaarke Core User' and 'Spaarke Basic User'.
-    Dry run by default. Raises Read only; never touches any other privilege.
+    config/product-configuration-read-role.json, for 'Spaarke Core User' and 'Spaarke Basic User', and removes the
+    two roles' privileges on the tables in $NoEndUserPrivilegeTables (an unused read grant). Dry run by default. Touches
+    no other privilege.
 
 .DESCRIPTION
     Spaarke product data (playbooks and their building blocks, the AI type catalogs, grid configuration) is owned in the
@@ -26,6 +27,13 @@
       never on this list. This script refuses a config that lists one, in every mode (dry run, -Apply and -Verify),
       before it connects. The list is $PlatformServiceTables in this script; the build-time guard reads it from there.
 
+    UNUSED GRANT REMOVED
+      Nothing in the product reads sprk_externalserviceconfig as a user, so the two roles hold no privilege on it (the
+      role XML no longer grants its Read). $NoEndUserPrivilegeTables in this script is the one list; the build-time guard
+      reads it and checks every end-user Spaarke role XML. An environment imported before that change still holds the
+      grant on its root roles: the dry run lists it, -Apply removes it (RemovePrivilegeRole on the root role), and -Verify
+      fails while any copy still holds it. The script refuses to run while the role XML still holds one.
+
     BUSINESS-UNIT COPIES
       Dataverse keeps one copy of a role per business unit. The copies are not edited separately: each one takes its
       privileges from the ROOT role (its _parentrootroleid). The script changes the root role only, then reads EVERY copy
@@ -33,11 +41,14 @@
       reads today and the depth it would read after -Apply.
 
     MODES
-      (default)  Dry run. Prints every change as role, privilege, old depth -> Global, per role copy. Zero writes.
-      -Apply     Raises each listed Read below Global to Global on the root role (AddPrivilegesRole), then reads the root
-                 role and every copy back and confirms each one. Names any privilege the platform added unasked.
-                 Lowers nothing and removes nothing.
-      -Verify    Read-only. Exits 1 when any copy of either role reads a listed table below Global; 0 otherwise.
+      (default)  Dry run. Prints every change as role, privilege, old depth -> Global (or -> removed), per role copy.
+                 Zero writes.
+      -Apply     Raises each listed Read below Global to Global on the root role (AddPrivilegesRole), removes each
+                 privilege the root role holds on a $NoEndUserPrivilegeTables table (RemovePrivilegeRole), then reads the
+                 root role and every copy back and confirms each one. Names any privilege the platform added unasked.
+                 Lowers nothing else and removes nothing else.
+      -Verify    Read-only. Exits 1 when any copy of either role reads a listed table below Global or holds a privilege on
+                 a $NoEndUserPrivilegeTables table; 0 otherwise.
 
     WHAT IT CHECKS BEFORE WRITING
       - The environment is the one named (the org name is printed first).
@@ -46,7 +57,7 @@
         (config/customer-configuration-owner-role.json) or a table the Secure Record census guards
         (config/secure-record-owner-role.json) or platform service configuration ($PlatformServiceTables). The
         build-time guard checks the BFF's own sets too.
-      - Both role XML files hold each listed Read at Global.
+      - Both role XML files hold each listed Read at Global, and no privilege on a $NoEndUserPrivilegeTables table.
       - Each role name resolves to exactly one ROOT role.
       - Each table's Read privilege comes from entity METADATA and its name must equal the config's privilegeName.
 
@@ -160,7 +171,21 @@ if ($platformBad.Count -gt 0) {
     throw "Config lists platform service configuration, which never gets Global Read through this list (refused in every mode):`n  $($platformBad -join "`n  ")"
 }
 
-# The solution role XML is the source of truth: it must already hold each listed Read at Global.
+# Tables the two roles hold NO privilege on: nothing in the product reads them as a user (an unused read grant, removed).
+# This line is THE one list: the build guard (ProductConfigurationReadRoleGuardTests.NoEndUserPrivilegeTables) reads it.
+$NoEndUserPrivilegeTables = @('sprk_externalserviceconfig')
+# Each privilege name in $PrivilegeNames that is prv + a table verb + one of $Tables (exact, any letter case).
+function Get-NoPrivilegeXmlViolations([string[]]$PrivilegeNames, [string[]]$Tables) {
+    $verbs = @('Create', 'Read', 'Write', 'Delete', 'Append', 'AppendTo', 'Assign', 'Share')
+    @(foreach ($n in $PrivilegeNames) {
+            foreach ($t in $Tables) {
+                foreach ($v in $verbs) { if ($n -ieq "prv$v$t") { "$n (on $t)" } }
+            }
+        })
+}
+
+# The solution role XML is the source of truth: it must already hold each listed Read at Global, and no privilege on a
+# $NoEndUserPrivilegeTables table.
 $xmlGaps = @()
 foreach ($rn in $roleNames) {
     $file = Join-Path $RolesXmlDir "$rn.xml"
@@ -171,6 +196,7 @@ foreach ($rn in $roleNames) {
         $lvl = $levels[([string]$t.privilegeName).ToLowerInvariant()]
         if ($lvl -ne 'Global') { $xmlGaps += "$rn.xml: $($t.privilegeName) is '$(if ($lvl) { $lvl } else { 'absent' })', not Global" }
     }
+    foreach ($v in @(Get-NoPrivilegeXmlViolations @($levels.Keys) $NoEndUserPrivilegeTables)) { $xmlGaps += "$rn.xml: holds $v; the role holds no privilege on that table" }
 }
 if ($xmlGaps.Count -gt 0) {
     throw "The solution role XML does not hold the declared list yet. Edit the XML first (it ships the change to every environment):`n  $($xmlGaps -join "`n  ")"
@@ -202,7 +228,7 @@ function Invoke-DvGetAll([string]$RelativePath) {
 $orgName = (Invoke-DvGet 'organizations?$select=name').value[0].name
 Write-Host "Environment : $EnvironmentUrl (org '$orgName')"
 Write-Host "Config      : $ConfigPath ($($tables.Count) tables, Read at Global)"
-Write-Host ("Mode        : {0}" -f $(if ($Verify) { 'VERIFY (read-only)' } elseif ($IsDryRun) { 'DRY RUN (no writes)' } else { 'APPLY (raises Read only)' }))
+Write-Host ("Mode        : {0}" -f $(if ($Verify) { 'VERIFY (read-only)' } elseif ($IsDryRun) { 'DRY RUN (no writes)' } else { 'APPLY (raises the listed Reads; removes privileges on the no-privilege tables)' }))
 
 $buNames = @{}
 foreach ($b in (Invoke-DvGetAll 'businessunits?$select=businessunitid,name')) { $buNames[([string]$b.businessunitid).ToLowerInvariant()] = [string]$b.name }
@@ -218,6 +244,14 @@ $wanted = foreach ($t in $tables) {
     [pscustomobject]@{ Table = $t.logicalName; Name = $privs[0].Name; Id = $privs[0].PrivilegeId.ToString().ToLowerInvariant() }
 }
 $wantedIds = @($wanted | ForEach-Object Id)
+
+# Every privilege of each $NoEndUserPrivilegeTables table, from METADATA: none of them may stay on either role.
+$unwanted = foreach ($t in $NoEndUserPrivilegeTables) {
+    $privs = @((Invoke-DvGet "EntityDefinitions(LogicalName='$t')/Privileges").value)
+    if ($privs.Count -eq 0) { throw "Table '$t': metadata lists no privilege; refusing to report it clean." }
+    foreach ($p in $privs) { [pscustomobject]@{ Table = $t; Name = $p.Name; Id = $p.PrivilegeId.ToString().ToLowerInvariant() } }
+}
+$unwantedIds = @($unwanted | ForEach-Object Id)
 
 function Get-HeldMap([string]$RoleId) {
     $held = @{}
@@ -255,6 +289,7 @@ $roles = foreach ($rn in $roleNames) {
 
 # ── The plan (root role) and the per-copy view ──────────────────────────────────────────────────────────────
 $plan = [System.Collections.Generic.List[object]]::new()
+$removals = [System.Collections.Generic.List[object]]::new()
 $gaps = [System.Collections.Generic.List[string]]::new()
 Write-Host ''
 foreach ($r in $roles) {
@@ -263,39 +298,51 @@ foreach ($r in $roles) {
         $old = Get-Depth $rootCopy.Held $w.Id
         if ((Get-Rank $old) -lt (Get-Rank 'Global')) { $plan.Add([pscustomobject]@{ Role = $r; Privilege = $w; Old = $old }) }
     }
+    foreach ($u in $unwanted) {
+        if ($rootCopy.Held.ContainsKey($u.Id)) { $removals.Add([pscustomobject]@{ Role = $r; Privilege = $u; Old = (Get-Depth $rootCopy.Held $u.Id) }) }
+    }
     Write-Host "$($r.Name): root role $($r.RootId); $($r.Copies.Count) copies (root included)"
     foreach ($c in $r.Copies) {
         $now = @($wanted | ForEach-Object { Get-Depth $c.Held $_.Id })
         $below = @(for ($i = 0; $i -lt $wanted.Count; $i++) { if ($now[$i] -ne 'Global') { $wanted[$i] } })
         foreach ($b in $below) { $gaps.Add("$($r.Name) [$($c.BuName)] $($c.Id): $($b.Name) at $(Get-Depth $c.Held $b.Id)") }
+        $extra = @($unwanted | Where-Object { $c.Held.ContainsKey($_.Id) })
+        foreach ($x in $extra) { $gaps.Add("$($r.Name) [$($c.BuName)] $($c.Id): holds $($x.Name) at $(Get-Depth $c.Held $x.Id); expected none") }
         $summary = ($now | Group-Object | Sort-Object Name | ForEach-Object { "$($_.Count) at $($_.Name)" }) -join ', '
-        $after = if ($below.Count -eq 0) { 'no change' } else { "$($below.Count) -> Global" }
-        Write-Host ("  {0} {1,-36} {2,-28} users {3,-3} teams {4,-3} today: {5}; after -Apply: {6}" -f `
-                $(if ($c.IsRoot) { '*' } else { ' ' }), $c.Id, $c.BuName, $c.Users, $c.Teams, $summary, $after)
+        $afterParts = @()
+        if ($below.Count -gt 0) { $afterParts += "$($below.Count) -> Global" }
+        if ($extra.Count -gt 0) { $afterParts += "$($extra.Count) removed" }
+        $after = if ($afterParts.Count -eq 0) { 'no change' } else { $afterParts -join ', ' }
+        Write-Host ("  {0} {1,-36} {2,-28} users {3,-3} teams {4,-3} today: {5}; holds {6} to remove; after -Apply: {7}" -f `
+                $(if ($c.IsRoot) { '*' } else { ' ' }), $c.Id, $c.BuName, $c.Users, $c.Teams, $summary, $extra.Count, $after)
     }
 }
 Write-Host '  (* = the root role; every other copy takes its privileges from it)'
 
 Write-Host ''
-if ($plan.Count -eq 0) { Write-Host 'Changes     : none pending on the root roles.' -ForegroundColor Green }
+$pending = $plan.Count + $removals.Count
+if ($pending -eq 0) { Write-Host 'Changes     : none pending on the root roles.' -ForegroundColor Green }
 else {
-    Write-Host "Changes     : $($plan.Count) (root roles; copies follow)"
+    Write-Host "Changes     : $pending (root roles; copies follow)"
     foreach ($p in $plan | Sort-Object { $_.Role.Name }, { $_.Privilege.Table }) {
         Write-Host ("  {0,-20} {1,-36} {2,-6} -> Global" -f $p.Role.Name, $p.Privilege.Name, $p.Old) -ForegroundColor Cyan
+    }
+    foreach ($p in $removals | Sort-Object { $_.Role.Name }, { $_.Privilege.Name }) {
+        Write-Host ("  {0,-20} {1,-36} {2,-6} -> removed" -f $p.Role.Name, $p.Privilege.Name, $p.Old) -ForegroundColor Cyan
     }
 }
 
 # ── Verify ──────────────────────────────────────────────────────────────────────────────────────────────────
 if ($Verify) {
     if ($gaps.Count -eq 0) {
-        Write-Host "`nVERIFY PASS: every copy of both roles reads all $($wanted.Count) tables at Global." -ForegroundColor Green
+        Write-Host "`nVERIFY PASS: every copy of both roles reads all $($wanted.Count) tables at Global and holds no privilege on $($NoEndUserPrivilegeTables -join ', ')." -ForegroundColor Green
         exit 0
     }
     Write-Host "`nVERIFY FAIL: $($gaps.Count) gap(s):" -ForegroundColor Red
     foreach ($g in $gaps) { Write-Host "  $g" -ForegroundColor Red }
     exit 1
 }
-if ($plan.Count -eq 0) {
+if ($pending -eq 0) {
     if ($gaps.Count -gt 0) {
         Write-Host "`nThe root roles are complete but a copy is not: $($gaps -join '; '). Not a change this script makes; re-run -Verify (Dataverse may still be propagating)." -ForegroundColor Yellow
         exit 1
@@ -303,11 +350,12 @@ if ($plan.Count -eq 0) {
     Write-Host "`nNothing to change." -ForegroundColor Green; exit 0
 }
 if ($IsDryRun) {
-    Write-Host "`nDRY RUN: no writes. Re-run with -Apply to make the $($plan.Count) change(s) above." -ForegroundColor Cyan
+    Write-Host "`nDRY RUN: no writes. Re-run with -Apply to make the $pending change(s) above." -ForegroundColor Cyan
     exit 0
 }
 
-# ── Apply: raise Read to Global on each root role, then read the root and every copy back ───────────────────
+# ── Apply: raise Read to Global on each root role, remove each unwanted privilege from it, then read the root and
+#    every copy back ────────────────────────────────────────────────────────────────────────────────────────
 foreach ($group in $plan | Group-Object { $_.Role.RootId }) {
     $role = $group.Group[0].Role
     $body = @{
@@ -316,6 +364,11 @@ foreach ($group in $plan | Group-Object { $_.Role.RootId }) {
             })
     } | ConvertTo-Json -Depth 5
     Invoke-RestMethod -Method Post -Uri "$Api/roles($($role.RootId))/Microsoft.Dynamics.CRM.AddPrivilegesRole" -Headers $headers `
+        -Body ([Text.Encoding]::UTF8.GetBytes($body)) | Out-Null
+}
+foreach ($p in $removals) {
+    $body = @{ Privilege = @{ '@odata.type' = 'Microsoft.Dynamics.CRM.privilege'; privilegeid = $p.Privilege.Id } } | ConvertTo-Json -Depth 5
+    Invoke-RestMethod -Method Post -Uri "$Api/roles($($p.Role.RootId))/Microsoft.Dynamics.CRM.RemovePrivilegeRole" -Headers $headers `
         -Body ([Text.Encoding]::UTF8.GetBytes($body)) | Out-Null
 }
 
@@ -331,12 +384,22 @@ foreach ($r in $roles) {
                 else { $copyLag += "$($r.Name) [$($c.BuName)] $($w.Name): read back $now" }
             }
         }
+        foreach ($u in $unwanted) {
+            if ($after.ContainsKey($u.Id)) {
+                if ($c.IsRoot) { $failed += "$($r.Name) $($u.Name): expected removed, still held at $(Get-Depth $after $u.Id)" }
+                else { $copyLag += "$($r.Name) [$($c.BuName)] $($u.Name): still held" }
+            }
+        }
         if ($c.IsRoot) {
             $unrequested = @($after.Keys | Where-Object { -not $rootBefore.ContainsKey($_) -and ($wantedIds -notcontains $_) })
             if ($unrequested.Count -gt 0) {
                 Write-Host "WARNING: $($r.Name) also gained $($unrequested.Count) privilege(s) that were not requested: $(($unrequested | ForEach-Object { $after[$_].PrivilegeName }) -join ', '). Not removed here." -ForegroundColor Yellow
             }
-            $changed = @($after.Keys | Where-Object { $rootBefore.ContainsKey($_) -and ($wantedIds -notcontains $_) -and ([string]$after[$_].Depth -ne [string]$rootBefore[$_].Depth) })
+            $changed = @($after.Keys | Where-Object { $rootBefore.ContainsKey($_) -and ($wantedIds -notcontains $_) -and ($unwantedIds -notcontains $_) -and ([string]$after[$_].Depth -ne [string]$rootBefore[$_].Depth) })
+            $lost = @($rootBefore.Keys | Where-Object { -not $after.ContainsKey($_) -and ($unwantedIds -notcontains $_) })
+            if ($lost.Count -gt 0) {
+                $failed += "$($r.Name): $($lost.Count) privilege(s) outside the lists were removed: $(($lost | ForEach-Object { $rootBefore[$_].PrivilegeName }) -join ', ')"
+            }
             if ($changed.Count -gt 0) {
                 $failed += "$($r.Name): $($changed.Count) privilege(s) outside the list changed depth: $(($changed | ForEach-Object { "$($after[$_].PrivilegeName) $($rootBefore[$_].Depth)->$($after[$_].Depth)" }) -join ', ')"
             }
@@ -344,7 +407,7 @@ foreach ($r in $roles) {
     }
 }
 if ($failed.Count -gt 0) { throw "Read-back did not match:`n  $($failed -join "`n  ")" }
-Write-Host "`nAPPLIED and read back on the root roles: $($plan.Count) change(s)." -ForegroundColor Green
+Write-Host "`nAPPLIED and read back on the root roles: $($plan.Count) raised to Global, $($removals.Count) removed." -ForegroundColor Green
 if ($copyLag.Count -gt 0) {
     Write-Host "A business-unit copy does not show the change yet ($($copyLag.Count)): $($copyLag -join '; '). Re-run -Verify until it passes." -ForegroundColor Yellow
 }

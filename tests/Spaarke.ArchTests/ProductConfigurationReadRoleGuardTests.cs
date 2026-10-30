@@ -25,7 +25,9 @@ namespace Spaarke.ArchTests;
 /// no listed Read is one of <see cref="SecureBuRoleDepthAssertion.GuardedPrivileges"/>;</item>
 /// <item>each entry's privilege is exactly the table's own Read (<c>prvRead</c> + logical name, any letter case);</item>
 /// <item>both role XML files (the source of truth a SpaarkeMaster import ships) hold each listed table's own Read at Global,
-/// and no Create on a <see cref="NoCreateTables"/> table.</item>
+/// and no Create on a <see cref="NoCreateTables"/> table;</item>
+/// <item>no end-user Spaarke role holds any privilege on a <see cref="NoEndUserPrivilegeTables"/> table, and each
+/// <see cref="SecuredColumns"/> column stays field-secured.</item>
 /// </list>
 /// Enforced by: this guard (<c>Spaarke.ArchTests</c>, run by the <c>Stop</c> hook and CI).
 /// </summary>
@@ -75,19 +77,44 @@ public class ProductConfigurationReadRoleGuardTests
     /// The tables of the script's one <c>$PlatformServiceTables = @('a', 'b', ...)</c> assignment, lower case. Throws when
     /// there is not exactly one such assignment or it names no table, so a renamed or emptied list fails the build.
     /// </summary>
-    internal static string[] ParsePlatformServiceTables(string scriptText)
+    internal static string[] ParsePlatformServiceTables(string scriptText) => ParseScriptTableList(scriptText, "PlatformServiceTables");
+
+    /// <summary>
+    /// The tables of the script's one <c>$<paramref name="variable"/> = @('a', 'b', ...)</c> assignment, lower case. Throws
+    /// when there is not exactly one such assignment or it names no table.
+    /// </summary>
+    internal static string[] ParseScriptTableList(string scriptText, string variable)
     {
-        var matches = Regex.Matches(scriptText, @"(?m)^\s*\$PlatformServiceTables\s*=\s*@\(([^)]*)\)");
+        var matches = Regex.Matches(scriptText, $@"(?m)^\s*\${Regex.Escape(variable)}\s*=\s*@\(([^)]*)\)");
         if (matches.Count != 1)
-            throw new InvalidOperationException($"Set-ProductConfigurationReadDepth.ps1 must assign $PlatformServiceTables exactly once; found {matches.Count}.");
+            throw new InvalidOperationException($"Set-ProductConfigurationReadDepth.ps1 must assign ${variable} exactly once; found {matches.Count}.");
 
         var tables = Regex.Matches(matches[0].Groups[1].Value, @"'([^']+)'")
             .Select(m => m.Groups[1].Value.Trim().ToLowerInvariant())
             .ToArray();
         if (tables.Length == 0)
-            throw new InvalidOperationException("Set-ProductConfigurationReadDepth.ps1 assigns $PlatformServiceTables no table.");
+            throw new InvalidOperationException($"Set-ProductConfigurationReadDepth.ps1 assigns ${variable} no table.");
         return tables;
     }
+
+    /// <summary>
+    /// Tables on which NO end-user Spaarke role holds any privilege (<see cref="AnyPrivilegeFindings"/>): nothing in the
+    /// product reads them as a user. The ONE list is <c>$NoEndUserPrivilegeTables</c> in
+    /// <c>scripts/Set-ProductConfigurationReadDepth.ps1</c>, which removes such a privilege from an existing environment's
+    /// two roles; this guard reads it from there.
+    /// </summary>
+    internal static readonly string[] NoEndUserPrivilegeTables =
+        ParseScriptTableList(File.ReadAllText(Path.Combine(SourceScan.RepoRoot, "scripts", "Set-ProductConfigurationReadDepth.ps1")), "NoEndUserPrivilegeTables");
+
+    /// <summary>The table privilege verbs a role XML names as <c>prv</c> + verb + table.</summary>
+    internal static readonly string[] TablePrivilegeVerbs = ["Create", "Read", "Write", "Delete", "Append", "AppendTo", "Assign", "Share"];
+
+    /// <summary>
+    /// Columns that stay field-secured (<c>&lt;IsSecured&gt;1&lt;/IsSecured&gt;</c>) in their table's
+    /// <c>src/dataverse/solutions/SpaarkeMaster/Entities/&lt;folder&gt;/Entity.xml</c>, as (table folder, column logical name).
+    /// No Spaarke field security profile grants them; only the platform's System Administrator profile reads them.
+    /// </summary>
+    internal static readonly (string EntityFolder, string Column)[] SecuredColumns = [("sprk_ExternalServiceConfig", "sprk_clientsecret")];
 
     /// <summary>
     /// Tables the two roles read at Global through this list, on which NO end-user Spaarke role may hold Create at any
@@ -199,6 +226,89 @@ public class ProductConfigurationReadRoleGuardTests
 
         var finding = Assert.Single(findings);
         Assert.StartsWith("Spaarke Console User.xml:", finding, StringComparison.Ordinal);
+    }
+
+    /// <summary>Each end-user role in <paramref name="roles"/> that holds any privilege on a
+    /// <see cref="NoEndUserPrivilegeTables"/> table; an <see cref="AdminRoles"/> role is skipped.</summary>
+    internal static List<string> NoPrivilegeViolations(IEnumerable<(string Role, string Xml)> roles, IEnumerable<string> tables) =>
+        roles.Where(r => !AdminRoles.ContainsKey(r.Role))
+            .SelectMany(r => AnyPrivilegeFindings(r.Xml, tables).Select(v => $"{r.Role}.xml: {v}"))
+            .ToList();
+
+    [Fact(DisplayName = "Product configuration read list: no end-user Spaarke role holds any privilege on a table no user reads")]
+    public void EndUserRolesHoldNoPrivilegeOnNoPrivilegeTables()
+    {
+        // Non-vacuity: the script's list holds the table, and Core and Basic User are among the roles checked.
+        Assert.Contains("sprk_externalserviceconfig", NoEndUserPrivilegeTables);
+        var roles = EndUserRoleFiles();
+        foreach (var role in Roles)
+            Assert.Contains(roles, r => r.Role == role);
+
+        var violations = NoPrivilegeViolations(roles, NoEndUserPrivilegeTables);
+        Assert.True(violations.Count == 0,
+            "Nothing in the product reads these tables as a user, so an end-user role holds no privilege on them "
+            + "(scripts/Set-ProductConfigurationReadDepth.ps1 removes one from an existing environment):\n  " + string.Join("\n  ", violations));
+    }
+
+    [Fact(DisplayName = "Product configuration read guard control: any privilege on a no-privilege table is reported for a non-admin role; another table's is not")]
+    public void NoPrivilegeGuardFires()
+    {
+        const string holds = """
+            <Role id="{00000000-0000-0000-0000-000000000006}" name="x">
+              <RolePrivileges>
+                <RolePrivilege name="prvReadsprk_ExternalServiceConfig" level="Global" />
+                <RolePrivilege name="PRVAPPENDTOSPRK_EXTERNALSERVICECONFIG" level="Basic" />
+                <RolePrivilege name="prvReadsprk_ExternalServiceConfigArchive" level="Global" />
+                <RolePrivilege name="prvReadsprk_GridConfiguration" level="Global" />
+              </RolePrivileges>
+            </Role>
+            """;
+
+        var findings = NoPrivilegeViolations([("Spaarke Core User", holds), ("Spaarke AI Analysis Admin", holds)], ["sprk_externalserviceconfig"]);
+
+        Assert.Equal(2, findings.Count);
+        Assert.All(findings, f => Assert.StartsWith("Spaarke Core User.xml: sprk_externalserviceconfig:", f, StringComparison.Ordinal));
+        Assert.Contains(findings, f => f.Contains("prvReadsprk_ExternalServiceConfig is held at 'Global'", StringComparison.Ordinal));
+        Assert.Contains(findings, f => f.Contains("PRVAPPENDTOSPRK_EXTERNALSERVICECONFIG is held at 'Basic'", StringComparison.Ordinal));
+        // Must not fire: a table whose name only starts the same, and a role without the privilege.
+        Assert.Empty(AnyPrivilegeFindings(holds, ["sprk_externalserviceconfigarchive_other"]));
+        Assert.Empty(NoPrivilegeViolations([("Spaarke Core User", """<Role><RolePrivileges><RolePrivilege name="prvReadsprk_GridConfiguration" level="Global" /></RolePrivileges></Role>""")], ["sprk_externalserviceconfig"]));
+
+        // The script's one list parses the same way as the platform list.
+        Assert.Equal(new[] { "sprk_x" }, ParseScriptTableList("$NoEndUserPrivilegeTables = @('SPRK_X')", "NoEndUserPrivilegeTables"));
+        Assert.Throws<InvalidOperationException>(() => ParseScriptTableList("$PlatformServiceTables = @('sprk_x')", "NoEndUserPrivilegeTables"));
+    }
+
+    [Fact(DisplayName = "Product configuration read list: every listed credential column stays field-secured in its Entity.xml")]
+    public void SecuredColumnsStaySecured()
+    {
+        Assert.NotEmpty(SecuredColumns);
+        var findings = new List<string>();
+        foreach (var (folder, column) in SecuredColumns)
+        {
+            var path = Path.Combine(SourceScan.RepoRoot, "src", "dataverse", "solutions", "SpaarkeMaster", "Entities", folder, "Entity.xml");
+            Assert.True(File.Exists(path), $"Entity file not found: {path}. Repo root resolved to '{SourceScan.RepoRoot}'.");
+            findings.AddRange(SecuredColumnFindings(File.ReadAllText(path), column).Select(f => $"{folder}/Entity.xml: {f}"));
+        }
+
+        Assert.True(findings.Count == 0, "A credential column must stay field-secured:\n  " + string.Join("\n  ", findings));
+    }
+
+    [Fact(DisplayName = "Product configuration read guard control: an unsecured, missing or undeclared credential column is reported; a secured one passes")]
+    public void SecuredColumnGuardFires()
+    {
+        static string Entity(string isSecured) => $"""
+            <Entity><EntityInfo><entity Name="sprk_example"><attributes>
+              <attribute PhysicalName="sprk_ClientSecret"><LogicalName>sprk_clientsecret</LogicalName>{isSecured}</attribute>
+              <attribute PhysicalName="sprk_Name"><LogicalName>sprk_name</LogicalName><IsSecured>1</IsSecured></attribute>
+            </attributes></entity></EntityInfo></Entity>
+            """;
+
+        Assert.Contains("not field-secured", Assert.Single(SecuredColumnFindings(Entity("<IsSecured>0</IsSecured>"), "sprk_clientsecret")), StringComparison.Ordinal);
+        Assert.Contains("not field-secured", Assert.Single(SecuredColumnFindings(Entity(string.Empty), "sprk_clientsecret")), StringComparison.Ordinal);
+        Assert.Contains("not declared", Assert.Single(SecuredColumnFindings(Entity("<IsSecured>1</IsSecured>"), "sprk_othersecret")), StringComparison.Ordinal);
+        // Must not fire: the column secured.
+        Assert.Empty(SecuredColumnFindings(Entity("<IsSecured>1</IsSecured>"), "sprk_clientsecret"));
     }
 
     [Fact(DisplayName = "Product configuration read guard non-vacuity: every exclusion source contributes tables")]
@@ -479,6 +589,36 @@ public class ProductConfigurationReadRoleGuardTests
         return tables
             .Where(t => levels.ContainsKey("prvCreate" + t))
             .Select(t => $"{t}: prvCreate{t} is held at '{levels["prvCreate" + t]}'; this role reads the table at Global and must not create in it")
+            .ToList();
+    }
+
+    /// <summary>Each privilege the role XML holds on a table in <paramref name="tables"/> (<c>prv</c> + a
+    /// <see cref="TablePrivilegeVerbs"/> verb + the table's name, exact, case-insensitive), at any depth.</summary>
+    internal static List<string> AnyPrivilegeFindings(string roleXml, IEnumerable<string> tables)
+    {
+        var levels = PrivilegeLevels(roleXml);
+        return tables
+            .SelectMany(t => levels
+                .Where(l => TablePrivilegeVerbs.Any(v => string.Equals(l.Key, "prv" + v + t, StringComparison.OrdinalIgnoreCase)))
+                .OrderBy(l => l.Key, StringComparer.Ordinal)
+                .Select(l => $"{t}: {l.Key} is held at '{l.Value}'; no end-user role holds a privilege on this table"))
+            .ToList();
+    }
+
+    /// <summary>Empty when <paramref name="entityXml"/> declares <paramref name="column"/> (by LogicalName) with
+    /// <c>&lt;IsSecured&gt;1&lt;/IsSecured&gt;</c>; otherwise the reason. A missing column or element fails closed.</summary>
+    internal static List<string> SecuredColumnFindings(string entityXml, string column)
+    {
+        var declarations = XDocument.Parse(entityXml).Descendants()
+            .Where(e => e.Name.LocalName == "attribute"
+                        && string.Equals(e.Elements().FirstOrDefault(c => c.Name.LocalName == "LogicalName")?.Value.Trim(), column, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        if (declarations.Count == 0)
+            return [$"{column}: not declared"];
+
+        return declarations
+            .Where(d => d.Elements().FirstOrDefault(c => c.Name.LocalName == "IsSecured")?.Value.Trim() != "1")
+            .Select(_ => $"{column}: not field-secured (IsSecured is not 1)")
             .ToList();
     }
 

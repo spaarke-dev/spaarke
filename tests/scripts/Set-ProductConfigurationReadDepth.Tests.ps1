@@ -6,6 +6,10 @@
 #   1. Get-PlatformServiceViolations fires on each platform table in any letter case and not on a product table;
 #   2. the script refuses such a config in the dry run, with -Apply and with -Verify, before it connects;
 #   3. must not fire: the real config passes the check (the run then stops at the next, offline check: no role XML).
+# and, for $NoEndUserPrivilegeTables (the tables the two roles hold no privilege on; the guard reads it too):
+#   4. Get-NoPrivilegeXmlViolations fires on any table privilege there, in any letter case, and not on another table;
+#   5. the script refuses, in every mode and before it connects, while a role XML still holds one;
+#   6. must not fire: the real role XML holds none.
 #
 # Pester 3.4:  Import-Module Pester -RequiredVersion 3.4.0 ; Invoke-Pester tests/scripts/Set-ProductConfigurationReadDepth.Tests.ps1
 # ---------------------------------------------------------------------------
@@ -19,12 +23,19 @@ New-Item -ItemType Directory -Path $script:Work | Out-Null
 # Pull the function under test out of the script (it cannot be dot-sourced: it runs on load).
 $errs = $null; $tokens = $null
 $script:Ast = [System.Management.Automation.Language.Parser]::ParseFile($script:ScriptPath, [ref]$tokens, [ref]$errs)
-$fn = $script:Ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Get-PlatformServiceViolations' }, $true) | Select-Object -First 1
-Invoke-Expression $fn.Extent.Text
+foreach ($name in 'Get-PlatformServiceViolations', 'Get-NoPrivilegeXmlViolations') {
+    $fn = $script:Ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq $name }, $true) | Select-Object -First 1
+    Invoke-Expression $fn.Extent.Text
+}
 
-# The script's own list, read from its one assignment (the same line the ArchTest guard parses).
-$assign = $script:Ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.AssignmentStatementAst] -and $n.Left.Extent.Text -eq '$PlatformServiceTables' }, $true)
-$script:PlatformTables = @(Invoke-Expression $assign[0].Right.Extent.Text)
+# The script's own lists, read from their one assignment each (the same lines the ArchTest guard parses).
+function Get-ScriptList([string]$Variable) {
+    $assign = $script:Ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.AssignmentStatementAst] -and $n.Left.Extent.Text -eq $Variable }, $true)
+    @(Invoke-Expression $assign[0].Right.Extent.Text)
+}
+$script:PlatformTables = Get-ScriptList '$PlatformServiceTables'
+$script:NoPrivilegeTables = Get-ScriptList '$NoEndUserPrivilegeTables'
+$script:RealRolesDir = Join-Path $repoRoot 'src/dataverse/solutions/SpaarkeMaster/Roles'
 
 # A config directory: the given config plus the three exclusion sources the script reads beside it.
 function New-ConfigDir([string]$Name, [scriptblock]$Mutate) {
@@ -41,12 +52,30 @@ function New-ConfigDir([string]$Name, [scriptblock]$Mutate) {
 }
 
 # Runs the script in a child process; never reaches the network for any case below (the checks under test run first).
-function Invoke-Script([string]$ConfigPath, [string[]]$ModeArgs) {
-    $emptyRoles = Join-Path $script:Work ('no-roles-' + [guid]::NewGuid().ToString('N'))
-    New-Item -ItemType Directory -Path $emptyRoles | Out-Null
+function Invoke-Script([string]$ConfigPath, [string[]]$ModeArgs, [string]$RolesDir) {
+    if (-not $RolesDir) {
+        $RolesDir = Join-Path $script:Work ('no-roles-' + [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path $RolesDir | Out-Null
+    }
     $output = & pwsh -NoProfile -NonInteractive -File $script:ScriptPath -EnvironmentUrl 'https://example.invalid' `
-        -ConfigPath $ConfigPath -RolesXmlDir $emptyRoles @ModeArgs 2>&1 | Out-String
+        -ConfigPath $ConfigPath -RolesXmlDir $RolesDir @ModeArgs 2>&1 | Out-String
     [pscustomobject]@{ ExitCode = $LASTEXITCODE; Output = $output }
+}
+
+# A roles directory: copies of the real Core and Basic User XML, Core User with one privilege line added.
+function New-RolesDir([string]$Name, [string]$AddedPrivilege) {
+    $dir = Join-Path $script:Work $Name
+    New-Item -ItemType Directory -Path $dir | Out-Null
+    foreach ($r in 'Spaarke Core User', 'Spaarke Basic User') {
+        $xml = Get-Content -LiteralPath (Join-Path $script:RealRolesDir "$r.xml") -Raw
+        if ($r -eq 'Spaarke Core User') { $xml = $xml -replace '<RolePrivileges>', "<RolePrivileges>`n    <RolePrivilege name=`"$AddedPrivilege`" level=`"Global`" />" }
+        Set-Content -LiteralPath (Join-Path $dir "$r.xml") -Value $xml -Encoding UTF8
+    }
+    $dir
+}
+
+function Get-RealPrivilegeName([string]$Role) {
+    @(([xml](Get-Content -LiteralPath (Join-Path $script:RealRolesDir "$Role.xml") -Raw)).SelectNodes('//RolePrivilege') | ForEach-Object { $_.name })
 }
 
 Describe 'Set-ProductConfigurationReadDepth: platform service configuration' {
@@ -91,6 +120,40 @@ Describe 'Set-ProductConfigurationReadDepth: platform service configuration' {
         $run.ExitCode | Should Not Be 0
         $run.Output | Should Not Match 'platform service configuration'
         $run.Output | Should Match 'Role XML not found'
+    }
+}
+
+Describe 'Set-ProductConfigurationReadDepth: tables the two roles hold no privilege on' {
+
+    It 'holds sprk_externalserviceconfig' {
+        $script:NoPrivilegeTables | Should Be @('sprk_externalserviceconfig')
+    }
+
+    It 'Get-NoPrivilegeXmlViolations fires on any privilege on the table, in any letter case, and not on another table' {
+        $names = @('prvReadsprk_ExternalServiceConfig', 'PRVAPPENDTOSPRK_EXTERNALSERVICECONFIG', 'prvReadsprk_ExternalServiceConfigArchive', 'prvReadsprk_GridConfiguration')
+        $found = @(Get-NoPrivilegeXmlViolations $names $script:NoPrivilegeTables)
+        $found.Count | Should Be 2
+        ($found -join '|') | Should Match 'prvReadsprk_ExternalServiceConfig \(on'
+        ($found -join '|') | Should Match 'PRVAPPENDTOSPRK_EXTERNALSERVICECONFIG'
+    }
+
+    It 'the real Core and Basic User XML hold none (must not fire)' {
+        foreach ($r in 'Spaarke Core User', 'Spaarke Basic User') {
+            $names = Get-RealPrivilegeName $r
+            $names.Count | Should BeGreaterThan 0
+            @(Get-NoPrivilegeXmlViolations $names $script:NoPrivilegeTables).Count | Should Be 0
+        }
+    }
+
+    foreach ($mode in @(@{ Name = 'dry run'; Args = @() }, @{ Name = '-Apply'; Args = @('-Apply') }, @{ Name = '-Verify'; Args = @('-Verify') })) {
+        It "refuses while a role XML still holds a privilege on the table ($($mode.Name))" {
+            $config = New-ConfigDir ('noprivcfg-' + $mode.Name.Trim('-').Replace(' ', '')) $null
+            $roles = New-RolesDir ('noprivroles-' + $mode.Name.Trim('-').Replace(' ', '')) 'prvReadsprk_ExternalServiceConfig'
+            $run = Invoke-Script $config $mode.Args $roles
+            $run.ExitCode | Should Not Be 0
+            $run.Output | Should Match 'the role holds no privilege on that table'
+            $run.Output | Should Not Match 'No Dataverse token'
+        }
     }
 }
 
