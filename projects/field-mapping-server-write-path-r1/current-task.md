@@ -1,6 +1,6 @@
 # Current Task — field-mapping-server-write-path-r1
 
-> **Last updated**: 2026-10-29 (by context-handoff). Recovery: read Quick Recovery first.
+> **Last updated**: 2026-10-30 (by context-handoff). Recovery: read Quick Recovery first.
 > **Done on master**: 001–006, 010–016, 018, 037, 038, 070, 071, 072, 073, 074. The work branch was merged to master as #2435 (6b0c1e2fed); later doc commits are on the work branch.
 > **Live on dev:** BFF 136568cf70 (UAC gate passed). SpaarkeMaster 1.2.4.0 is published but not imported anywhere yet. Check that the BU→Matter index map is gone after the model1-prod upgrade or the next provisioning run (H6).
 
@@ -8,20 +8,13 @@
 
 | Field | Value |
 |---|---|
-| **Active** | **076 waiting on the dev BFF deploy.** We OK'd R3's candidate c91b99e575 (contains W7; Router green; 266 related tests + live dev schema check for the new ebilling family rows; full ArchTests 1857/1858, the 1 = flaky ISS-005 wall-clock guard, filed #2469). R3 has the deploy ON HOLD: word-add-in blocking finding #2468 (UAC 194b, unfiled Outlook save ownership); the owner is choosing hold-for-fix vs deploy. A new SHA needs our re-OK. |
-| **Next Action** | 1) **Start 017 via task-execute** (opus/high, FULL): ebilling #1911 MERGED 2026-10-29 21:35, so 017 is unblocked. First item of 017: the ebilling reconcile commit (invoice-family PreWriteRule in RecordTableRules for sprk_invoice/sprk_billingevent, F2 PreWriteRefusal kind, F4 test, retire the 013 ratchet baseline; ebilling reviews), then the other BLOCKING criteria in the POML (DI-004/#2188 field-security on mapped source columns; 015 K1/K3; 014 R3-1), then re-point the four callers. /conflict-check first. 2) In parallel (doc, main session): FR-38/W3 scope procedure (spec amendment → task-create → TASK-INDEX → owner approval). 3) 076 waits on R3 (deploy on hold for #2468; owner choosing); re-OK any new SHA. |
-| **Owner decisions today** | Q1 drop; Q2 (B), seeding the 7 canonical index rows per customer, team-owned, no BU defaults. Depth cap counted from the TOP (exception to UAC C4; design §12.11, quoted on #2442; UAC adopted it). WA owning unit follows its matter (UAC #2451). |
-| **#2399** | Live part FIXED: the owner re-tested the WA create as Test User 1 on 2026-10-29 (saves, with number and Assigned To). Open for the durable fix: FR-38/W3 still need the scope procedure (spec amendment → task-create → TASK-INDEX → owner approval); FR-39 and the index rows are provisioning's #2429. |
+| **Active** | **017 (FULL, opus/high), phase 2d running** as an Opus implementer on `task/fm-017` (= 017b 43b48f3249 + 017c 9cc37b415a, merged by the agent). 2d scope: owner decision 2a (step 10 pre-create stamp + post-create re-derivation); register task/contact/account (owner 2026-10-30, b); re-point chat create_record, email.draft, budget inquiry (Office-precedent codes); 2c tool description; chat refuses sprk_externalidentifier; delete the OwnedChildWrite create half; publish delta + CVE. **076** in progress: BFF 9f4afe82ac on dev (R3, 14:40Z), TrackingFieldTrio 1.0.55 imported (solution 1.0.55, importjob 100%); waiting on the owner's live pass (script: notes/task-076-live-check.md), then App Insights. |
+| **Next Action** | 1) When 2d reports: verify the counts and diff, launch ONE Opus adversarial-reviewer on `git diff origin/master...origin/task/fm-017` (twice? tags include security, so up to 2 full passes), run code-review + adr-check, triage F/K, then open the PR (cite ADR-008 path A, Placement Justification, publish delta, release note "chat-created children carry I-1/I-16/sharee mirror at create; route 'check faulted' is now a typed 503"). UAC-r2 reviews the 017 diff before merge (w2-coordination condition); ping ebilling-r1 with the SHA. 2) 076 after the owner's pass: App Insights for /api/records/*/family (0 5xx, p95), then close 076. 3) 039 (approved) after 017. |
+| **Phase branches** | 017a f758480f3c (ebilling OK, no findings). 017b 43b48f3249 (route, decision parity, R3-1, 037 K2 = copy after merge, #1608, documents, invoice-family protection from guard, sprk_servicerequest; NFR-07 table all same; 401 stays 401; traceId kept). 017c 9cc37b415a (chat refuses invoicesubmission/approval/correction; escalated 3 items, resolved 2026-10-30). R3-2 = K2 known limit. |
 | **Open PRs** | #2387 (075, HOLD, ships with 040). |
-| **Issues** | #2444 (UAC: shared reads-agnostic ordering helper). #2413 (known limit). #2429 (provisioning H7c team + H12b index-row seed + H4b allow-list; I review the PR). #2469 (flaky ISS-005 ArchTest, not ours). |
-| **Waiting on** | UAC 195 → 040 (UAC 2026-10-29: 194b merged, 195 queued next after its two owner-ruling branches; UAC sends the wizard-write SHA and the dev-backfill notice). Provisioning's #2429 PR. ebilling #1911 merged → 017 unblocked. |
-| **Owner to do** | Leftover locked worktree agent-aec6d06ca99a5a9f6 (075): end of project. |
-
-## 017: IN PROGRESS (FULL, opus/high, directional) — started 2026-10-30
-
-Work branch merged up to master (cd8f0a58b5). /conflict-check: no open PR touches 017's files; #2471 (UAC, RecordOwnershipResolver) is adjacent only.
-BLOCKING status: ebilling reconcile = TODO (phase 1); DI-004/#2188 = done for Create (mask, issue closed); 015 K1/K3 = done in 018; 014 R3-1 = TODO (phase 2, route now sets ServerSetLookupColumns); UAC 013 items 2a-2d decided (decisions.md:260-302) = land with the re-point; 037 K2 = TODO (phase 2).
-Plan: phase 1 = Opus implementer on task/fm-017a (reconcile commit; ebilling reviews). Phase 2 = route+decision parity (017b) and chat/email/budget (017c) in parallel, then remove OwnedChildWrite create half, then adversarial review, quality gates, publish delta.
+| **Issues** | #2444, #2413, #2429 (provisioning; I review), #2469 (flaky ISS-005), #1948 (lint-staged uses the shared stash; 017b re-found it). |
+| **Waiting on** | UAC 195 → 040 (+075). Provisioning's #2429 PR. Owner's 076 live pass. |
+| **Owner to do** | 076 live check (owner + narrower user). Leftover locked worktree agent-aec6d06ca99a5a9f6 (075): end of project. |
 
 ## How wave-2 agents are run (lessons)
 
