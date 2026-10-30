@@ -565,32 +565,6 @@ public sealed class InvoiceCorrectionServiceTests
     // =========================================================================================
 
     [Theory]
-    [InlineData("Date")]
-    [InlineData("TimekeeperAsBilled")]
-    [InlineData("timekeeperasbilled")]
-    public async Task TimekeeperAndDateCorrections_AreRefusedForNow_WithAStableCode(string field)
-    {
-        var world = new CorrectionWorld();
-
-        var result = await world.Service().CorrectAsync(Line(field, "2026-09-13"), CancellationToken.None);
-
-        result.Status.Should().Be(CorrectionStatus.InvalidRequest);
-        result.Code.Should().Be("ebilling.correction.field_not_supported_yet");
-        NothingWritten(world);
-    }
-
-    [Fact]
-    public async Task TheInvoiceDate_IsRefusedForNow_ForTheSameReason()
-    {
-        var world = new CorrectionWorld();
-
-        var result = await world.Service().CorrectAsync(Header("InvoiceDate", "2026-10-01"), CancellationToken.None);
-
-        result.Code.Should().Be("ebilling.correction.field_not_supported_yet");
-        NothingWritten(world);
-    }
-
-    [Theory]
     [InlineData("Quantity", true)]
     [InlineData("sprk_amount", true)]
     [InlineData("", true)]

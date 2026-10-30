@@ -32,6 +32,9 @@ public enum CorrectionStatus
     Changed,
     OwnerUnresolved,
 
+    /// <summary>B2c: the roster entry a timekeeper correction names is not the timekeeper the resolution matches for the line; nothing was written.</summary>
+    TimekeeperMismatch,
+
     /// <summary>A read or a write failed. The correction row may already be written; repeating the same request completes the value write
     /// without a second row.</summary>
     Unavailable,
@@ -65,6 +68,9 @@ public static class CorrectionCodes
 
     /// <summary>The <c>failedStep</c> of an <see cref="Incomplete"/> answer: the Signals closed or raised for the patched findings, and the D-125 coding hold (B2b-2).</summary>
     public const string SignalsStep = "signals";
+
+    /// <summary>The <c>failedStep</c> of an <see cref="Incomplete"/> answer: the invoice totals recomputed after an amount, hours, rate or total-due correction (B2c).</summary>
+    public const string TotalsStep = "totals";
     public const string ReviewerUnresolved = LineDecisionCodes.DeciderUnresolved;
 
     /// <summary>FR-22: the code is not in the line's resolved code set; nothing was written.</summary>
@@ -73,8 +79,9 @@ public static class CorrectionCodes
     public const string FieldUnknown = "ebilling.correction.field_unknown";
     public const string FieldNotApplicable = "ebilling.correction.field_not_applicable";
 
-    /// <summary>B2 item: a timekeeper or date correction needs the rate re-resolved, which a later task does. Refused with this stable code.</summary>
-    public const string FieldNotSupportedYet = "ebilling.correction.field_not_supported_yet";
+    /// <summary>B2c: the roster entry a timekeeper correction names is not the one the resolution matches for the line (it is not approved and active on
+    /// the line date, or the name fits more than one person). 400; nothing was written.</summary>
+    public const string TimekeeperMismatch = "ebilling.correction.timekeeper_mismatch";
 
     public const string ValueRequired = "ebilling.correction.value_required";
     public const string ValueInvalid = "ebilling.correction.value_invalid";
@@ -148,8 +155,12 @@ public sealed record CorrectionApplied(Guid InvoiceId, Guid? LineId, string Fiel
 /// (<c>EligibleApproverResolver.SingleCoreOf</c>, #2455); otherwise <c>invoice-reviewer</c>, also when the lookup fails (logged).</para>
 /// <para><b>Follow-through (part B2).</b> B2b-1 wires <see cref="InvoiceCorrectionReevaluation"/> into <see cref="OnValueWrittenAsync"/>: the billing
 /// rules re-run, <c>findings[]</c> / <c>signalPlan[]</c> and the line findings of the stored copy patched, then the line status re-derived; B2b-2 adds
-/// the Signal reconcile and the D-125 coding hold. Still not here: the totals follow-through (B2c). Timekeeper and date corrections (the rate must be re-resolved) are refused
-/// with <see cref="CorrectionCodes.FieldNotSupportedYet"/>. <b>Uncoded invoices (D-126).</b> A code correction of a Pending line whose coding says
+/// the Signal reconcile and the D-125 coding hold; B2c adds the totals, the currency check and the timekeeper and date corrections. <b>Timekeeper and
+/// date (B2c).</b> A timekeeper correction names a roster entry of the invoice's firm (its id); the line's approved rate is re-resolved through
+/// <see cref="IInvoiceResolutionService"/> with a one-line input, and an entry the resolution does not match for the line is refused
+/// (<see cref="CorrectionCodes.TimekeeperMismatch"/>, nothing written). A line-date correction re-resolves a fee line the same way. The roster match and the
+/// rate are written with the value; the pre-correction pair and the new pair's reasons are kept in the line's extraction JSON
+/// (<c>resolutionChange</c>) so the re-evaluation can diff the facts. <b>Uncoded invoices (D-126).</b> A code correction of a Pending line whose coding says
 /// <c>NotCoded</c> is the re-code path: its set is resolved through <see cref="CodeSetResolver.ResolveAsync"/> for the invoice's single core record
 /// and recorded on the line; no resolvable set is 409 <see cref="CorrectionCodes.CodeSetUnavailable"/>. Any other Pending line is still refused.</para>
 /// <para><b>Component justification (CLAUDE.md section 11).</b> Existing: <see cref="InvoiceLineDecisionService"/> writes the bulk / Unreviewed
@@ -173,7 +184,7 @@ public sealed class InvoiceCorrectionService
 
     internal delegate Task<EligibleApproverSet> ResolveApprovers(string coreEntity, Guid coreId, CancellationToken ct);
 
-    private enum Kind { Decimal, Money, Text, Date, Currency, Code }
+    private enum Kind { Decimal, Money, Text, Date, Currency, Code, Timekeeper }
 
     private sealed record Spec(
         string Name, Kind Kind, string? Column, bool Header, bool FeeOnly = false, bool ExpenseOnly = false, string? CodeMember = null,
@@ -184,27 +195,24 @@ public sealed class InvoiceCorrectionService
         new(ResolutionFieldNames.Hours, Kind.Decimal, InvoiceSubmissionPersister.LineQuantity, Header: false, FeeOnly: true),
         new(ResolutionFieldNames.Rate, Kind.Money, InvoiceSubmissionPersister.LineRate, Header: false, FeeOnly: true, NonNegative: true),
         new(ResolutionFieldNames.Amount, Kind.Money, InvoiceTotalsService.LineAmount, Header: false),
+        new(ResolutionFieldNames.Date, Kind.Date, InvoiceSubmissionPersister.LineEventDate, Header: false),
+        new(ResolutionFieldNames.TimekeeperAsBilled, Kind.Timekeeper, InvoiceSubmissionPersister.LineTimekeeper, Header: false, FeeOnly: true),
         new(BillingFieldNames.Narrative, Kind.Text, InvoiceSubmissionPersister.LineDescription, Header: false, MaxLength: 2000), // sprk_billingevent.sprk_description is Multiline Text 2000
         new(BillingFieldNames.TaskCode, Kind.Code, null, Header: false, FeeOnly: true, CodeMember: "task"),
         new(BillingFieldNames.ActivityCode, Kind.Code, null, Header: false, FeeOnly: true, CodeMember: "activity"),
         new(BillingFieldNames.ExpenseCode, Kind.Code, null, Header: false, ExpenseOnly: true, CodeMember: "expense"),
         new(BillingFieldNames.FirmInvoiceNumber, Kind.Text, InvoiceReviewService.InvInvoiceNumber, Header: true, MaxLength: 100),
+        new(BillingFieldNames.InvoiceDate, Kind.Date, InvoiceReviewService.InvInvoiceDate, Header: true),
         new(BillingFieldNames.BillingPeriodStart, Kind.Date, InvoiceSubmissionPersister.InvoiceBillingPeriodStart, Header: true),
         new(BillingFieldNames.BillingPeriodEnd, Kind.Date, InvoiceSubmissionPersister.InvoiceBillingPeriodEnd, Header: true),
         new(BillingFieldNames.Currency, Kind.Currency, InvoiceSubmissionPersister.InvoiceCurrency, Header: true),
         new(ResolutionFieldNames.TotalDue, Kind.Money, InvoiceReviewService.InvTotalAmount, Header: true),
     ];
 
-    /// <summary>Fields a later task corrects: the rate must be re-resolved from them (the roster timekeeper and the date drive the approved rate).</summary>
-    private static readonly HashSet<string> NotSupportedYet = new(StringComparer.OrdinalIgnoreCase)
-    {
-        ResolutionFieldNames.Date, ResolutionFieldNames.TimekeeperAsBilled, BillingFieldNames.InvoiceDate,
-    };
-
     private static readonly string[] InvoiceColumns =
     [
-        "statuscode", InvoiceTotalsService.VersionNumber,
-        InvoiceReviewService.InvInvoiceNumber, InvoiceSubmissionPersister.InvoiceBillingPeriodStart, InvoiceSubmissionPersister.InvoiceBillingPeriodEnd,
+        "statuscode", InvoiceTotalsService.VersionNumber, InvoiceSubmissionPersister.InvoiceVendorOrg,
+        InvoiceReviewService.InvInvoiceNumber, InvoiceReviewService.InvInvoiceDate, InvoiceSubmissionPersister.InvoiceBillingPeriodStart, InvoiceSubmissionPersister.InvoiceBillingPeriodEnd,
         InvoiceSubmissionPersister.InvoiceCurrency, InvoiceReviewService.InvTotalAmount,
         "sprk_matter", "sprk_project", "sprk_regardingworkassignment",
         CoreAncestorResolver.RegardingRecordTypeColumn, CoreAncestorResolver.RegardingRecordIdColumn,
@@ -224,6 +232,7 @@ public sealed class InvoiceCorrectionService
     private readonly ResolveApprovers _approvers;
     private readonly ILogger<InvoiceCorrectionService> _logger;
     private readonly TimeProvider _time;
+    private readonly Func<InvoiceResolutionInput, CancellationToken, Task<InvoiceResolutionResult>>? _resolve;
 
     public InvoiceCorrectionService(
         IGenericEntityService entities,
@@ -232,10 +241,12 @@ public sealed class InvoiceCorrectionService
         IIdentityNormalizationService identity,
         EligibleApproverResolver approvers,
         InvoiceCorrectionReevaluation reevaluation,
+        IInvoiceResolutionService resolution,
         ILogger<InvoiceCorrectionService> logger)
         : this(entities, codeSets, ownership, identity,
             (approvers ?? throw new ArgumentNullException(nameof(approvers))).ResolveAsync, logger,
-            onValueWritten: (reevaluation ?? throw new ArgumentNullException(nameof(reevaluation))).ApplyAsync)
+            onValueWritten: (reevaluation ?? throw new ArgumentNullException(nameof(reevaluation))).ApplyAsync,
+            resolve: (resolution ?? throw new ArgumentNullException(nameof(resolution))).ResolveAsync)
     {
     }
 
@@ -248,9 +259,11 @@ public sealed class InvoiceCorrectionService
         ResolveApprovers approvers,
         ILogger<InvoiceCorrectionService> logger,
         TimeProvider? time = null,
-        Func<CorrectionApplied, CancellationToken, Task>? onValueWritten = null)
+        Func<CorrectionApplied, CancellationToken, Task>? onValueWritten = null,
+        Func<InvoiceResolutionInput, CancellationToken, Task<InvoiceResolutionResult>>? resolve = null)
     {
         _onValueWritten = onValueWritten;
+        _resolve = resolve;
         _entities = entities ?? throw new ArgumentNullException(nameof(entities));
         _codeSets = codeSets ?? throw new ArgumentNullException(nameof(codeSets));
         _ownership = ownership ?? throw new ArgumentNullException(nameof(ownership));
@@ -304,11 +317,6 @@ public sealed class InvoiceCorrectionService
         if (string.IsNullOrEmpty(name))
         {
             return Bad(CorrectionCodes.FieldUnknown, "A field is required.");
-        }
-
-        if (NotSupportedYet.Contains(name))
-        {
-            return Bad(CorrectionCodes.FieldNotSupportedYet, "This field cannot be corrected yet.");
         }
 
         spec = Specs.FirstOrDefault(s => string.Equals(s.Name, name, StringComparison.OrdinalIgnoreCase));
@@ -393,7 +401,8 @@ public sealed class InvoiceCorrectionService
         }
 
         // D-126 (B2b-1): a code correction is the re-code path of an UNCODED invoice, whose lines stay Pending. Any other Pending line is still refused.
-        if (status == (int)InvoiceLineStatus.Pending && !(spec.Kind == Kind.Code && IsUncoded(extraction)))
+        // A line already re-coded (B2c: its coding says Coded, recoded) whose status step did not finish is still Pending: the repeat must pass.
+        if (status == (int)InvoiceLineStatus.Pending && !(spec.Kind == Kind.Code && (IsUncoded(extraction) || IsRecoded(extraction))))
         {
             return new CorrectionResult(CorrectionStatus.LineNotCorrectable, CorrectionCodes.LinePending, "A line still being processed cannot be corrected.");
         }
@@ -447,6 +456,20 @@ public sealed class InvoiceCorrectionService
             return Bad(CorrectionCodes.NothingToConfirm, "There is no stored value to confirm.");
         }
 
+        // B2c: a timekeeper or a fee line's date drives the roster match and the approved rate; both are re-resolved before anything is written.
+        Rederived? derived = null;
+        if (!command.Confirm && (spec.Kind == Kind.Timekeeper || (spec.Name == ResolutionFieldNames.Date && type == (int)InvoiceLineCostType.Fee)))
+        {
+            var rederived = await RederiveAsync(spec, invoice, core, line, current, finalText, ct).ConfigureAwait(false);
+            if (rederived.Failure is { } rederiveFailure)
+            {
+                return rederiveFailure;
+            }
+
+            derived = rederived.Derived;
+            finalText = rederived.Name ?? finalText;
+        }
+
         // Where the AI value came from (EB-D-170). The attributed source is required whenever the AI produced a value, or the analyzer read the field.
         var source = LineSource(spec, extraction, extractionJson, current);
         if (source is null)
@@ -458,8 +481,145 @@ public sealed class InvoiceCorrectionService
 
         return await ApplyAsync(
             command, spec, invoice, core, line.Id, LineName(spec, line), line, version, InvoiceReviewReadService.LineEntity,
-            current, finalText, source, prior, extraction, ct).ConfigureAwait(false);
+            current, finalText, source, prior, extraction, ct, derived: derived).ConfigureAwait(false);
     }
+
+    // ── Timekeeper and date: the roster match and the approved rate (B2c) ──
+
+    /// <summary>The roster match and the approved rate a timekeeper or line-date correction gives the line (null = none).</summary>
+    private sealed record Rederived(
+        Guid? TimekeeperId, decimal? ApprovedRate, TimekeeperUnmatchedReason TimekeeperReason, RateResolutionStatus RateStatus, RateNotFoundReason RateReason);
+
+    private sealed record RederiveOutcome(string? Name, Rederived? Derived, CorrectionResult? Failure);
+
+    /// <summary>
+    /// Re-resolves a fee line through <see cref="IInvoiceResolutionService"/> with a one-line input (the invoice's firm and single core record, an empty
+    /// header, the line as stored with the corrected name or date). A timekeeper correction (<paramref name="finalText"/> is the roster entry's id)
+    /// reads the entry from the invoice's firm, feeds its name to the resolution as the billed name and requires the match to be that entry
+    /// (<see cref="CorrectionCodes.TimekeeperMismatch"/> otherwise: nothing is written). A date correction resolves with the name of the line's
+    /// current roster entry when it has one (else the billed name), because the invoice's timekeeper summary, which the submission used to expand
+    /// initials, is not kept. When the stored line already holds the result, nothing is resolved or written (a repeat).
+    /// </summary>
+    private async Task<RederiveOutcome> RederiveAsync(
+        Spec spec, Entity invoice, (string Entity, Guid Id) core, Entity line, string? current, string finalText, CancellationToken ct)
+    {
+        static RederiveOutcome Refused(CorrectionResult failure) => new(null, null, failure);
+
+        if (invoice.GetAttributeValue<EntityReference>(InvoiceSubmissionPersister.InvoiceVendorOrg)?.Id is not { } firmId || firmId == Guid.Empty)
+        {
+            return Refused(new CorrectionResult(CorrectionStatus.Unavailable, CorrectionCodes.Unavailable, "The invoice names no firm, so the timekeeper cannot be resolved; nothing was changed."));
+        }
+
+        var resolvedId = line.GetAttributeValue<EntityReference>(InvoiceSubmissionPersister.LineResolvedTimekeeper)?.Id;
+        var lineDate = line.GetAttributeValue<DateTime?>(InvoiceSubmissionPersister.LineEventDate) is { } stored ? DateOnly.FromDateTime(stored) : (DateOnly?)null;
+        Guid? picked = null;
+        string billedName;
+        DateOnly? date;
+        string? name = null;
+        try
+        {
+            if (spec.Kind == Kind.Timekeeper)
+            {
+                picked = Guid.Parse(finalText);
+                if (await ReadRosterNameAsync(firmId, picked.Value, ct).ConfigureAwait(false) is not { } rosterName)
+                {
+                    return Refused(Bad(CorrectionCodes.ValueInvalid, "The timekeeper is not on this firm's roster."));
+                }
+
+                name = rosterName;
+                if (string.Equals(current?.Trim(), name, StringComparison.Ordinal) && resolvedId == picked)
+                {
+                    return new RederiveOutcome(name, null, null); // a repeat: the line already holds the roster entry
+                }
+
+                billedName = name;
+                date = lineDate;
+            }
+            else
+            {
+                if (current is not null && Same(Kind.Date, current, finalText))
+                {
+                    return new RederiveOutcome(null, null, null); // the date is already the stored one
+                }
+
+                date = DateOnly.ParseExact(finalText, "yyyy-MM-dd", CultureInfo.InvariantCulture);
+                billedName = (resolvedId is { } id ? await ReadRosterNameAsync(firmId, id, ct).ConfigureAwait(false) : null)
+                    ?? line.GetAttributeValue<string>(InvoiceSubmissionPersister.LineTimekeeper) ?? string.Empty;
+            }
+
+            if (_resolve is null)
+            {
+                throw new InvalidOperationException("No invoice resolution is available.");
+            }
+
+            var input = new InvoiceResolutionInput
+            {
+                FirmId = firmId,
+                CoreRecord = new CoreRecordReference(
+                    core.Entity switch { "sprk_matter" => CoreRecordKind.Matter, "sprk_project" => CoreRecordKind.Project, _ => CoreRecordKind.WorkAssignment },
+                    core.Id),
+                Header = new InvoiceResolutionHeader(),
+                Lines =
+                [
+                    new InvoiceResolutionLine
+                    {
+                        LineType = InvoiceLineType.Fee,
+                        Date = new ResolutionField<DateOnly?>(date),
+                        TimekeeperAsBilled = new ResolutionField<string?>(billedName),
+                        Hours = new ResolutionField<decimal?>(line.GetAttributeValue<decimal?>(InvoiceSubmissionPersister.LineQuantity)),
+                        Rate = new ResolutionField<decimal?>(line.GetAttributeValue<Money>(InvoiceSubmissionPersister.LineRate)?.Value),
+                        Amount = new ResolutionField<decimal?>(line.GetAttributeValue<Money>(InvoiceTotalsService.LineAmount)?.Value),
+                    },
+                ],
+            };
+            var result = await _resolve(input, ct).ConfigureAwait(false);
+            var resolved = result.Lines.Count == 1 ? result.Lines[0] : throw new InvalidOperationException("The resolution returned no result for the line.");
+            var matched = resolved.Timekeeper is { IsMatched: true } match ? match.TimekeeperId : null;
+            if (picked is { } want && matched != want)
+            {
+                _logger.LogInformation("Correction of {Field} on invoice {InvoiceId}: the roster entry is not the timekeeper the resolution matches for the line; nothing changed.",
+                    spec.Name, invoice.Id);
+                return Refused(new CorrectionResult(
+                    CorrectionStatus.TimekeeperMismatch, CorrectionCodes.TimekeeperMismatch,
+                    "The timekeeper is not approved and active on the line date, or the name fits more than one person; nothing was changed."));
+            }
+
+            return new RederiveOutcome(
+                name,
+                new Rederived(
+                    matched, resolved.Rate.Status == RateResolutionStatus.Found ? resolved.Rate.ApprovedRate : null,
+                    resolved.Timekeeper?.Reason ?? TimekeeperUnmatchedReason.None, resolved.Rate.Status, resolved.Rate.Reason),
+                null);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            _logger.LogWarning("Correction of {Field} on invoice {InvoiceId}: the timekeeper and rate could not be resolved ({ExceptionType}); nothing changed.",
+                spec.Name, invoice.Id, ex.GetType().Name);
+            return Refused(new CorrectionResult(CorrectionStatus.Unavailable, CorrectionCodes.Unavailable, "The timekeeper and rate could not be resolved; nothing was changed. Try again."));
+        }
+    }
+
+    /// <summary>The name of a roster entry of the firm, or null when the firm has no such entry.</summary>
+    private async Task<string?> ReadRosterNameAsync(Guid firmId, Guid timekeeperId, CancellationToken ct)
+    {
+        var query = new QueryExpression(InvoiceResolutionService.TimekeeperEntity)
+        {
+            ColumnSet = new ColumnSet("sprk_name", "sprk_firm"),
+            Criteria = new FilterExpression(LogicalOperator.And),
+            TopCount = 1,
+        };
+        query.Criteria.AddCondition($"{InvoiceResolutionService.TimekeeperEntity}id", ConditionOperator.Equal, timekeeperId);
+        query.Criteria.AddCondition("sprk_firm", ConditionOperator.Equal, firmId);
+        var row = (await _entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false)).Entities.FirstOrDefault();
+        return row is not null && row.GetAttributeValue<EntityReference>("sprk_firm")?.Id == firmId
+            && row.GetAttributeValue<string>("sprk_name") is { } text && !string.IsNullOrWhiteSpace(text)
+            ? text.Trim()
+            : null;
+    }
+
+    private static bool DerivedDiffers(Entity line, Rederived derived) =>
+        line.GetAttributeValue<EntityReference>(InvoiceSubmissionPersister.LineResolvedTimekeeper)?.Id != derived.TimekeeperId
+        || line.GetAttributeValue<Money>(InvoiceSubmissionPersister.LineApprovedRate)?.Value != derived.ApprovedRate;
 
     private async Task<CorrectionResult> CorrectHeaderAsync(CorrectionCommand command, Spec spec, CancellationToken ct)
     {
@@ -545,8 +705,9 @@ public sealed class InvoiceCorrectionService
         if (spec.Kind == Kind.Code)
         {
             var confidence = DecimalOf(extraction?["coding"]?["confidence"]);
-            if (currentCode is null)
+            if (currentCode is null || IsRecoded(extraction))
             {
+                // B2c: a code a reviewer recorded on an uncoded invoice's line (IsRecoded) was never the AI's, so a repeat or a later correction of it has no source to name.
                 // The AI offered no code: nothing to attribute.
                 return new Source(null, null, null);
             }
@@ -568,7 +729,7 @@ public sealed class InvoiceCorrectionService
     private async Task<CorrectionResult> ApplyAsync(
         CorrectionCommand command, Spec spec, Entity invoice, (string Entity, Guid Id) core, Guid? lineId, string rowName, Entity target, long version,
         string targetEntity, string? current, string finalText, Source source, List<Entity> prior, JsonNode? extraction, CancellationToken ct,
-        string? headerAiValue = null)
+        string? headerAiValue = null, Rederived? derived = null)
     {
         // The AI value: the earliest prior row's, else what the AI read (a header field: the stored header provenance), else the value stored now.
         var ordered = prior.OrderBy(WhenOf).ThenBy(r => r.GetAttributeValue<DateTime?>("createdon")).ToList();
@@ -584,6 +745,9 @@ public sealed class InvoiceCorrectionService
 
         var outcome = aiText is not null && Same(spec.Kind, aiText, finalText) ? OutcomeConfirmed : OutcomeCorrected;
         var valueChanged = current is null || !Same(spec.Kind, current, finalText);
+
+        // B2c: the re-resolved roster match and approved rate are part of the value write; a correction that leaves the name or date as stored can still change them.
+        var writeNeeded = valueChanged || (derived is not null && DerivedDiffers(target, derived));
 
         // A retry: the latest Corrected / Confirmed row of this field already has this final value, so no second row; a value write still missing is done.
         var latest = ordered.LastOrDefault(r => r.GetAttributeValue<OptionSetValue>("sprk_outcometype")?.Value is OutcomeCorrected or OutcomeConfirmed);
@@ -613,9 +777,9 @@ public sealed class InvoiceCorrectionService
             dto = ToDto(row);
         }
 
-        if (valueChanged)
+        if (writeNeeded)
         {
-            requests.Add(ConditionalValueUpdate(targetEntity, target.Id, version, ValueFields(spec, finalText, extraction)));
+            requests.Add(ConditionalValueUpdate(targetEntity, target.Id, version, ValueFields(spec, finalText, extraction, derived, target)));
         }
 
         if (requests.Count > 0)
@@ -624,7 +788,7 @@ public sealed class InvoiceCorrectionService
             {
                 await _entities.ExecuteTransactionAsync(requests, ct).ConfigureAwait(false);
             }
-            catch (Exception ex) when (valueChanged && DataverseServiceClientImpl.IsRowVersionMismatch(ex))
+            catch (Exception ex) when (writeNeeded && DataverseServiceClientImpl.IsRowVersionMismatch(ex))
             {
                 var changed = lineId is null ? CorrectionCodes.InvoiceChanged : CorrectionCodes.LineChanged;
                 return new CorrectionResult(
@@ -641,7 +805,7 @@ public sealed class InvoiceCorrectionService
         }
 
         _logger.LogInformation("Correction of {Field} on invoice {InvoiceId} line {LineId}: outcome {Outcome}, row written {RowWritten}, value changed {ValueChanged}.",
-            spec.Name, command.InvoiceId, lineId, dto.Outcome, !rowExists, valueChanged);
+            spec.Name, command.InvoiceId, lineId, dto.Outcome, !rowExists, writeNeeded);
 
         // The follow-through runs on EVERY successful pass, a repeat that wrote no second row included: a re-evaluation that failed after the first
         // attempt is run again by the same request. A failure is never reported as success (503 Incomplete); the repeat completes it.
@@ -662,7 +826,7 @@ public sealed class InvoiceCorrectionService
                 FailedStep: step);
         }
 
-        return new CorrectionResult(CorrectionStatus.Applied, "ok", Correction: dto, AlreadyApplied: rowExists && !valueChanged);
+        return new CorrectionResult(CorrectionStatus.Applied, "ok", Correction: dto, AlreadyApplied: rowExists && !writeNeeded);
     }
 
     // ── Values ──
@@ -701,6 +865,16 @@ public sealed class InvoiceCorrectionService
                 }
 
                 canonical = date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+                return true;
+
+            case Kind.Timekeeper:
+                if (!Guid.TryParse(text, out var timekeeper) || timekeeper == Guid.Empty)
+                {
+                    detail = "The timekeeper must be a roster entry of the firm (its id).";
+                    return false;
+                }
+
+                canonical = timekeeper.ToString("D");
                 return true;
 
             case Kind.Currency:
@@ -768,11 +942,40 @@ public sealed class InvoiceCorrectionService
     };
 
     /// <summary>The value fields of the write: the column, or (a code) the extraction JSON with the corrected code. Never status, approved amount or decision fields.</summary>
-    private static Dictionary<string, object> ValueFields(Spec spec, string finalText, JsonNode? extraction)
+    private static Dictionary<string, object> ValueFields(Spec spec, string finalText, JsonNode? extraction, Rederived? derived = null, Entity? target = null)
     {
         if (spec.Kind != Kind.Code)
         {
-            return new Dictionary<string, object> { [spec.Column!] = ColumnValue(spec, finalText) };
+            var fields = new Dictionary<string, object> { [spec.Column!] = ColumnValue(spec, finalText) };
+            if (derived is not null)
+            {
+                fields[InvoiceSubmissionPersister.LineResolvedTimekeeper] = derived.TimekeeperId is { } id ? new EntityReference("sprk_timekeeper", id) : DBNull.Value;
+                fields[InvoiceSubmissionPersister.LineApprovedRate] = derived.ApprovedRate is { } rate ? new Money(rate) : DBNull.Value;
+                if (extraction is JsonObject root && target is not null)
+                {
+                    // The pair as it was BEFORE this correction, and why the new pair is unmatched / not found (046's reasons), so the re-evaluation can
+                    // diff the line's facts: the stored columns hold only the new pair and no reason.
+                    root[InvoiceCorrectionReevaluation.ResolutionChangeMember] = new JsonObject
+                    {
+                        ["field"] = spec.Name,
+                        ["value"] = finalText,
+                        ["before"] = new JsonObject
+                        {
+                            ["timekeeperId"] = target.GetAttributeValue<EntityReference>(InvoiceSubmissionPersister.LineResolvedTimekeeper)?.Id.ToString("D"),
+                            ["approvedRate"] = target.GetAttributeValue<Money>(InvoiceSubmissionPersister.LineApprovedRate)?.Value,
+                        },
+                        ["after"] = new JsonObject
+                        {
+                            ["timekeeperReason"] = derived.TimekeeperReason.ToString(),
+                            ["rateStatus"] = derived.RateStatus.ToString(),
+                            ["rateReason"] = derived.RateReason.ToString(),
+                        },
+                    };
+                    fields[InvoiceSubmissionPersister.LineExtractionConfidence] = root.ToJsonString();
+                }
+            }
+
+            return fields;
         }
 
         var coding = extraction!["coding"]!.AsObject();
@@ -849,6 +1052,10 @@ public sealed class InvoiceCorrectionService
             : new CheckedCode(null, new CorrectionResult(CorrectionStatus.CodeNotInSet, CorrectionCodes.CodeNotInSet, "The code is not in this line's code set."));
     }
 
+    /// <summary>B2c: the line was coded by a reviewer's correction (<see cref="ResolveForUncodedAsync"/>), not by the AI.</summary>
+    internal static bool IsRecoded(JsonNode? extraction) =>
+        extraction?["coding"] is JsonObject coding && coding["recoded"] is JsonValue flag && flag.TryGetValue<bool>(out var recoded) && recoded;
+
     /// <summary>The line's coding block says the invoice was not coded (D-126: <c>status</c> <c>NotCoded</c>, written by the persister).</summary>
     internal static bool IsUncoded(JsonNode? extraction) =>
         extraction?["coding"] is JsonObject coding && coding["status"] is JsonValue status && status.TryGetValue<string>(out var text)
@@ -858,8 +1065,8 @@ public sealed class InvoiceCorrectionService
     /// D-126 (B2b-1): the code set of an uncoded invoice's line, resolved by <see cref="CodeSetResolver.ResolveAsync"/> for the invoice's single core
     /// record over the invoice's lines as stored (the same input the submission's coding step gives it). A resolution with no usable set is 409
     /// <see cref="CorrectionCodes.CodeSetUnavailable"/>. On success the set is recorded in the line's <c>coding</c> block (<c>codeSetId</c>,
-    /// <c>codeSetName</c>, <c>codeSetSource</c>, <c>needsReview</c>; <c>status</c> stays <c>NotCoded</c>, because no AI coded the line) and is written
-    /// with the corrected code.
+    /// <c>codeSetName</c>, <c>codeSetSource</c>, <c>needsReview</c>; <c>status</c> becomes <c>Coded</c> and <c>recoded</c> is set, because no AI coded the line) and is
+    /// written with the corrected code.
     /// </summary>
     private async Task<CheckedCode> ResolveForUncodedAsync(
         Spec spec, string raw, JsonObject coding, Guid invoiceId, (string Entity, Guid Id) core, CancellationToken ct)
@@ -885,6 +1092,11 @@ public sealed class InvoiceCorrectionService
         var checkedCode = InSet(spec, raw, set);
         if (checkedCode.Failure is null)
         {
+            // B2c: the line reads as coded from now on (the review read model shows NotCoded for the status text only). `recoded` marks that no AI coded
+            // it, so task 100's bulk label rows still skip it; the hold reason no longer applies.
+            coding["status"] = nameof(LineCodingStatus.Coded);
+            coding["recoded"] = true;
+            coding.Remove("hold");
             coding["codeSetId"] = set.CodeSetId.ToString("D");
             coding["codeSetName"] = set.CodeSetName;
             coding["codeSetSource"] = set.Source.ToString();

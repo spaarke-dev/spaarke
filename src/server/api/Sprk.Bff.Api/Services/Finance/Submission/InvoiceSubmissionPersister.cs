@@ -1153,6 +1153,10 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
     /// <summary>The finding code of a line a refused rule version should have checked (F2): the check did not run, so the line is not Clean.</summary>
     internal const string LineFindingRulesNotChecked = "rules.not_checked";
 
+    /// <summary>The finding code of a line whose currency disagrees with the invoice's after a reviewer corrected the invoice currency (101 B2c): a reviewer-facing
+    /// finding in <c>lineFindings[]</c> only, no Signal. Cleared when the currencies agree again.</summary>
+    internal const string LineFindingCurrencyMismatch = "currency.mismatch";
+
     /// <summary>
     /// The lines on which a refused rule version left a check unrun (F2), each with its reviewer-facing message naming the rule type(s), never a rule id.
     /// A refusal is tied to its lines through <see cref="BillingEvaluationResult.RefusalScopes"/>: the lines the version was selected for, or every line when

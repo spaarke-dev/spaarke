@@ -8,11 +8,13 @@ using Microsoft.Xrm.Sdk.Query;
 using Moq;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Services.Ai.Membership;
+using Sprk.Bff.Api.Services.Ai.PublicContracts;
 using Sprk.Bff.Api.Services.Ai.Membership.Models;
 using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.Finance;
 using Sprk.Bff.Api.Services.Finance.Coding;
 using Sprk.Bff.Api.Services.Finance.Models;
+using Sprk.Bff.Api.Services.Finance.Resolution;
 using Sprk.Bff.Api.Services.Finance.Submission;
 using Sprk.Bff.Api.Services.Signals;
 using Sprk.Bff.Api.Services.Signals.Billing;
@@ -69,6 +71,14 @@ internal sealed class CorrectionWorld
     public Entity? Submission { get; set; }
     public readonly List<Entity> CodeSets = [];
     public readonly List<Entity> Codes = [];
+
+    /// <summary>B2c: the firm's timekeeper roster and the rate card rows 046's real resolution reads.</summary>
+    public readonly List<Entity> Roster = [];
+    public readonly List<Entity> Rates = [];
+
+    /// <summary>B2c: every one-line input the correction service gave the (real) resolution service, and a fault for it (null = none).</summary>
+    public readonly List<InvoiceResolutionInput> ResolveInputs = [];
+    public Exception? ResolveFault;
 
     /// <summary>B2b-2: the Signals, as the writer files them (dedupe key, status, evidence with the reason-set fingerprint, row version).</summary>
     public readonly List<Entity> Signals = [];
@@ -183,6 +193,8 @@ internal sealed class CorrectionWorld
                         "sprk_billingcodeset" => CodeSets,
                         "sprk_billingcode" => Codes,
                         "sprk_signal" => Signals,
+                        "sprk_timekeeper" => Roster,
+                        "sprk_ratecardrate" => Rates,
                         _ => [],
                     };
                     var rows = source.Where(r => Matches(r, query.Criteria)).Select(Copy).ToList();
@@ -335,8 +347,58 @@ internal sealed class CorrectionWorld
         settings.Setup(s => s.GetAsync(It.IsAny<CancellationToken>())).ReturnsAsync(() => new EbillingSettings { DefaultCodeSetId = DefaultCodeSetId });
         var suggestions = new Mock<ICodeSetSuggestionProvider>();
         var resolver = new CodeSetResolver(Entities.Object, settings.Object, suggestions.Object, NullLogger<CodeSetResolver>.Instance);
+        var ai = new Mock<IInvoiceAi>();
+        ai.Setup(a => a.GenerateEmbeddingAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ReadOnlyMemory<float>([0f, 0f, 0f, 1f]));
+        var resolution = new InvoiceResolutionService(
+            Entities.Object, settings.Object, new TimekeeperMatcher(ai.Object, NullLogger<TimekeeperMatcher>.Instance), NullLogger<InvoiceResolutionService>.Instance);
         return new InvoiceCorrectionService(
-            Entities.Object, resolver, Ownership.Object, Identity.Object, ResolveApproversAsync, Log, Time, Seam);
+            Entities.Object, resolver, Ownership.Object, Identity.Object, ResolveApproversAsync, Log, Time, Seam,
+            (input, ct) =>
+            {
+                ResolveInputs.Add(input);
+                return ResolveFault is not null ? Task.FromException<InvoiceResolutionResult>(ResolveFault) : resolution.ResolveAsync(input, ct);
+            });
+    }
+
+    // ── B2c: the roster and the rate cards 046 reads ──
+
+    public const int ApprovedStatus = 1;
+    public const int PublishedCard = 659490000;
+
+    /// <summary>A roster entry of the firm (046's fixture shape: status 1 = Approved, active).</summary>
+    public Entity AddPerson(string name, Guid? id = null, Guid? firm = null, int status = ApprovedStatus, DateTime? from = null, DateTime? to = null)
+    {
+        var row = new Entity("sprk_timekeeper", id ?? Guid.NewGuid())
+        {
+            ["sprk_name"] = name,
+            ["sprk_firm"] = new EntityReference("sprk_organization", firm ?? Firm),
+            ["statecode"] = new OptionSetValue(0),
+            ["statuscode"] = new OptionSetValue(status),
+            ["sprk_classification"] = new OptionSetValue(1),
+        };
+        if (from is { } f) row["sprk_effectivefrom"] = f;
+        if (to is { } t) row["sprk_effectiveto"] = t;
+        Roster.Add(row);
+        return row;
+    }
+
+    /// <summary>A Published, firm-wide rate card row that names <paramref name="timekeeper"/> at <paramref name="approved"/>.</summary>
+    public Entity AddRate(Guid timekeeper, decimal approved)
+    {
+        var row = new Entity("sprk_ratecardrate", Guid.NewGuid())
+        {
+            ["sprk_ratecard"] = new EntityReference("sprk_ratecard", Guid.NewGuid()),
+            ["sprk_timekeeper"] = new EntityReference("sprk_timekeeper", timekeeper),
+            ["sprk_approvedrate"] = new Money(approved),
+            ["sprk_rackrate"] = new Money(approved + 100m),
+            ["statecode"] = new OptionSetValue(0),
+            ["card.sprk_firm"] = new AliasedValue("sprk_ratecard", "sprk_firm", new EntityReference("sprk_organization", Firm)),
+            ["card.statuscode"] = new AliasedValue("sprk_ratecard", "statuscode", new OptionSetValue(PublishedCard)),
+            ["card.statecode"] = new AliasedValue("sprk_ratecard", "statecode", new OptionSetValue(0)),
+        };
+        Rates.Add(row);
+        return row;
     }
 
     private Task<EligibleApproverSet> ResolveApproversAsync(string coreEntity, Guid coreId, CancellationToken ct)

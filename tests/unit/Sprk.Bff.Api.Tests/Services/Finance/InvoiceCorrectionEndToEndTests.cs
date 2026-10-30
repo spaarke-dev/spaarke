@@ -156,6 +156,14 @@ public sealed class InvoiceCorrectionEndToEndTests
 
         (await w.ApproveAs(AliceUser)).Outcome.Should().Be(ApprovalOutcome.Approved);
         w.InvoiceStatus.Should().Be(InvoiceStatusCodes.Approved);
+
+        // 101 B2c: a code the reviewer recorded is not an AI code, so the approval's bulk rows ("accepted in bulk") never claim it as one.
+        w.Rows.Values.Where(r => r.LogicalName == "sprk_invoicecorrection"
+                && r.GetAttributeValue<OptionSetValue>("sprk_outcometype")?.Value == 100000002
+                && r.GetAttributeValue<string>("sprk_fieldname") == "TaskCode")
+            .Should().BeEmpty();
+        w.Rows.Values.Count(r => r.LogicalName == "sprk_invoicecorrection" && r.GetAttributeValue<OptionSetValue>("sprk_outcometype")?.Value == 100000002)
+            .Should().BeGreaterThan(0, "the bulk rows of the AI-read fields of the Clean line are written, so the check above can fail");
     }
 
     [Fact(DisplayName = "101 B2b-2 item 5: a held (blocked) invoice is still refused approval after a correction removes its held group's reason")]

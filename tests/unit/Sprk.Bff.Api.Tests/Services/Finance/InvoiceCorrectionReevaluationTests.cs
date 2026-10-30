@@ -276,7 +276,8 @@ public sealed class InvoiceCorrectionReevaluationTests
         var coding = JsonNode.Parse(world.Line().GetAttributeValue<string>("sprk_extractionconfidence"))!["coding"]!;
         coding["codeSetId"]!.GetValue<string>().Should().Be(W.CodeSetId.ToString("D"));
         coding["codeSetSource"]!.GetValue<string>().Should().Be("SettingsDefault");
-        coding["status"]!.GetValue<string>().Should().Be("NotCoded", "no AI coded the line");
+        coding["status"]!.GetValue<string>().Should().Be("Coded", "101 B2c: the line reads as coded once a set is recorded and a code is corrected in");
+        coding["recoded"]!.GetValue<bool>().Should().BeTrue("no AI coded the line");
         coding["task"]!["code"]!.GetValue<string>().Should().Be("L120", "the code as the set spells it");
         StatusOf(world.Line()).Should().Be((int)InvoiceLineStatus.Clean);
     }

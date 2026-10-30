@@ -1132,7 +1132,8 @@ public sealed class InvoiceLineDecisionService
             }
 
             if (root.TryGetProperty("coding", out var coding) && coding.ValueKind == JsonValueKind.Object
-                && !string.Equals(LineExtraction.Text(coding, "status"), "NotCoded", StringComparison.Ordinal))
+                && !string.Equals(LineExtraction.Text(coding, "status"), "NotCoded", StringComparison.Ordinal)
+                && !(coding.TryGetProperty("recoded", out var recoded) && recoded.ValueKind == JsonValueKind.True)) // 101 B2c: a reviewer's re-code is not an AI code
             {
                 var codingConfidence = LineExtraction.Decimal(coding, "confidence");
                 foreach (var (member, name) in new[] { ("task", BillingFieldNames.TaskCode), ("activity", BillingFieldNames.ActivityCode), ("expense", BillingFieldNames.ExpenseCode) })

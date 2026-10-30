@@ -307,8 +307,8 @@ public sealed class InvoiceCorrectionEndpointsAuthorizationContractTests
     }
 
     [Theory]
-    [InlineData("Date", "2026-09-13", "ebilling.correction.field_not_supported_yet")]
-    [InlineData("TimekeeperAsBilled", "B. Chan", "ebilling.correction.field_not_supported_yet")]
+    [InlineData("Date", "13/09/2026", "ebilling.correction.value_invalid")]
+    [InlineData("TimekeeperAsBilled", "B. Chan", "ebilling.correction.value_invalid")] // the value is a roster entry id
     [InlineData("Bogus", "1", "ebilling.correction.field_unknown")]
     [InlineData("TotalDue", "1", "ebilling.correction.field_unknown")] // a header field on the line route
     [InlineData("Hours", null, "ebilling.correction.value_required")]
@@ -327,7 +327,7 @@ public sealed class InvoiceCorrectionEndpointsAuthorizationContractTests
     }
 
     [Theory]
-    [InlineData("InvoiceDate", "2026-10-01", "ebilling.correction.field_not_supported_yet")]
+    [InlineData("InvoiceDate", "01/10/2026", "ebilling.correction.value_invalid")]
     [InlineData("Hours", "1", "ebilling.correction.field_unknown")] // a line field on the header route
     [InlineData("BillingPeriodStart", "13/09/2026", "ebilling.correction.value_invalid")]
     [InlineData("Currency", "US", "ebilling.correction.value_invalid")]

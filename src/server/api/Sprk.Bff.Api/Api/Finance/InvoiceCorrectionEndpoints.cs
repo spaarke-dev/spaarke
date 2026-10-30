@@ -21,11 +21,11 @@ namespace Sprk.Bff.Api.Api.Finance;
 /// token. A correction is kept separate from Reduce (task 100): it writes a correction row and a value, never a line decision.</para>
 /// <para><b>Status codes.</b> 200 applied (<c>alreadyApplied</c> true when a repeat found everything written); 400 invalid (<c>errorCode</c>
 /// says which rule: <c>ebilling.code.not_in_set</c>, <c>ebilling.correction.field_unknown</c>, <c>field_not_applicable</c>,
-/// <c>field_not_supported_yet</c>, <c>value_required</c>, <c>value_invalid</c>, <c>nothing_to_confirm</c>); 401; 403; 404 uniform (invoice or
+/// <c>timekeeper_mismatch</c>, <c>value_required</c>, <c>value_invalid</c>, <c>nothing_to_confirm</c>); 401; 403; 404 uniform (invoice or
 /// line absent or unreadable); 409 (not In Review, line Pending or already decided, no recorded AI source, no code set, the line or invoice
 /// changed); 503 <c>ebilling.disabled</c> or a transient failure (repeat the same request: it writes no second row); 503
 /// <c>ebilling.correction.incomplete</c> with <c>failedStep</c> <c>findings</c> (the re-evaluation and the findings patch), <c>status</c> (the line
-/// status) or <c>reevaluation</c> (any other step) when the value was saved but a step after it did not finish (repeat the same request: it writes no
+/// status) <c>signals</c> (the Signals and the coding hold), <c>totals</c> (the invoice totals) or <c>reevaluation</c> (any other step) when the value was saved but a step after it did not finish (repeat the same request: it writes no
 /// second row and runs the steps again). A code correction is also the re-code path of a Pending line of an uncoded invoice (D-126, B2b-1).</para>
 /// </remarks>
 public static class InvoiceCorrectionEndpoints
@@ -44,11 +44,13 @@ public static class InvoiceCorrectionEndpoints
             .WithName("CorrectInvoiceLineField")
             .WithSummary("Correct or confirm one extracted value or AI code of an undecided invoice line")
             .WithDescription(
-                "Fields: Hours and Rate (fee lines), Amount, Narrative, TaskCode and ActivityCode (fee lines), ExpenseCode (expense lines). Send a value, " +
+                "Fields: Hours and Rate (fee lines), Amount, Date, Narrative, TaskCode and ActivityCode (fee lines), ExpenseCode (expense lines), " +
+                "TimekeeperAsBilled (fee lines; the value is the id of a roster entry of the invoice's firm). Send a value, " +
                 "or confirm to keep the value as read. Writes one Corrected or Confirmed individually row (both labels) and updates the value; a code " +
-                "must be in the line's resolved code set (400 ebilling.code.not_in_set). Date and timekeeper are refused for now " +
-                "(400 ebilling.correction.field_not_supported_yet). Only while the invoice is In Review and the line is Clean or Flagged. " +
-                "Never changes the line's status, approved amount or decision. Repeating the request writes no second row.")
+                "must be in the line's resolved code set (400 ebilling.code.not_in_set). A timekeeper or date correction re-resolves the approved rate; a " +
+                "timekeeper the resolution does not match for the line is refused (400 ebilling.correction.timekeeper_mismatch). Only while the invoice is " +
+                "In Review and the line is Clean or Flagged (a code of an uncoded invoice's Pending line is the re-code path). Never changes the line's " +
+                "approved amount or decision; its status follows the re-evaluation. Repeating the request writes no second row.")
             .Produces<CorrectionResponse>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status400BadRequest)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
@@ -65,9 +67,9 @@ public static class InvoiceCorrectionEndpoints
             .WithName("CorrectInvoiceHeaderField")
             .WithSummary("Correct or confirm one extracted header value of an invoice")
             .WithDescription(
-                "Fields: FirmInvoiceNumber, BillingPeriodStart, BillingPeriodEnd, Currency, TotalDue. Send a value, or confirm to keep the value as " +
-                "read. Writes one Corrected or Confirmed individually row and updates the invoice. The invoice date is refused for now " +
-                "(400 ebilling.correction.field_not_supported_yet). Only while the invoice is In Review. Repeating the request writes no second row.")
+                "Fields: FirmInvoiceNumber, InvoiceDate, BillingPeriodStart, BillingPeriodEnd, Currency, TotalDue. Send a value, or confirm to keep the value as " +
+                "read. Writes one Corrected or Confirmed individually row and updates the invoice. " +
+                "Only while the invoice is In Review. Repeating the request writes no second row.")
             .Produces<CorrectionResponse>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status400BadRequest)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
@@ -163,7 +165,8 @@ public static class InvoiceCorrectionEndpoints
 
     private static IResult ToProblem(CorrectionStatus status, string code, string? detail, HttpContext httpContext) => status switch
     {
-        CorrectionStatus.InvalidRequest or CorrectionStatus.CodeNotInSet => InvoiceLineReviewEndpoints.Refused(StatusCodes.Status400BadRequest, code, detail),
+        CorrectionStatus.InvalidRequest or CorrectionStatus.CodeNotInSet or CorrectionStatus.TimekeeperMismatch
+            => InvoiceLineReviewEndpoints.Refused(StatusCodes.Status400BadRequest, code, detail),
         CorrectionStatus.InvoiceNotFound or CorrectionStatus.LineNotFound => FinanceAuthorizationFilter.UniformRecordNotFound(httpContext),
         CorrectionStatus.NotInReview or CorrectionStatus.LineNotCorrectable or CorrectionStatus.NoProvenance
             or CorrectionStatus.CodeSetUnavailable or CorrectionStatus.Changed => InvoiceLineReviewEndpoints.Refused(StatusCodes.Status409Conflict, code, detail),
