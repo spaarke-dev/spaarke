@@ -534,6 +534,41 @@ public sealed class ExternalInvoiceVisibilityTests
         await ShouldBeVisible(caller, invoice);
     }
 
+    public static TheoryData<string, bool> ExternalCallersBothWays => new()
+    {
+        { "contact", true }, { "contact", false }, { "flagged-systemuser", true }, { "flagged-systemuser", false },
+    };
+
+    /// <summary>
+    /// ebilling-r1 task 097 (POML criterion (a′); model 9.1 "(a′) does not follow sprk_supersedesinvoice"), second review F4: a correction
+    /// pair as 097b/097c write it (the new submission's <c>sprk_resubmissionof</c> names the old one; the new invoice's
+    /// <c>sprk_supersedesinvoice</c> names the old invoice), both under the same record. Each invoice is judged by its own source: hiding
+    /// the old invoice's source does not hide the new invoice, and the reverse.
+    /// </summary>
+    [Theory, MemberData(nameof(ExternalCallersBothWays))]
+    public async Task Correction_EachInvoiceIsJudgedByItsOwnSource_NotThroughSupersedesInvoice(string caller, bool oldSourceRestricted)
+    {
+        var matter = CleanMatter();
+        var oldInvoice = Guid.NewGuid();
+        var newInvoice = Guid.NewGuid();
+        var oldSubmission = _world.FromDocument(oldInvoice,
+            _world.Document(Guid.NewGuid(), permission: oldSourceRestricted ? Restricted : Standard, matter: matter));
+        var newSubmission = _world.FromDocument(newInvoice,
+            _world.Document(Guid.NewGuid(), permission: oldSourceRestricted ? Standard : Restricted, matter: matter));
+        _world.SetRow("sprk_invoicesubmissions", "sprk_invoicesubmissionid", newSubmission, "_sprk_resubmissionof_value", oldSubmission.ToString());
+        _world.Invoice(oldInvoice);
+        _world.Invoice(newInvoice, supersedes: oldInvoice);
+        var (hiddenOne, visibleOne) = oldSourceRestricted ? (oldInvoice, newInvoice) : (newInvoice, oldInvoice);
+
+        var both = await Decide(caller, oldInvoice, newInvoice);
+
+        both.IsVisible(hiddenOne).Should().BeFalse("its own source is Restricted");
+        both.IsVisible(visibleOne).Should().BeTrue(both.HiddenSummary());
+        await ShouldBeHidden(caller, hiddenOne, InvoiceHiddenReason.SourceHidden);
+        await ShouldBeVisible(caller, visibleOne);
+        _world.Reads("sprk_invoices").Should().BeEmpty("the predicate never reads the invoice row, so it cannot follow sprk_supersedesinvoice");
+    }
+
     [Theory, MemberData(nameof(ExternalCallers))]
     public async Task WriterShape_FromEmail_AMarkedEml_IsVisibleToItsFirm(string caller)
     {
@@ -1655,6 +1690,18 @@ internal sealed class InvoiceWorld : HttpMessageHandler
     public Guid SubmissionEml(bool marked, Guid communication, Guid? matter = null) =>
         Document(Guid.NewGuid(), permission: RestrictedPermission, eml: true, marker: marked, communication: communication,
             matter: matter);
+
+    /// <summary>
+    /// Task 097 second review (F4): an invoice row, optionally linked to the invoice it supersedes (<c>sprk_supersedesinvoice</c>, as
+    /// 097c's commit writes it). The predicate is not expected to read it; it is seeded so a predicate that followed the link would find it.
+    /// </summary>
+    public void Invoice(Guid invoice, Guid? supersedes = null) =>
+        Seed("sprk_invoices", new Dictionary<string, object?>
+        {
+            ["sprk_invoiceid"] = invoice.ToString(),
+            ["_sprk_supersedesinvoice_value"] = supersedes?.ToString(),
+            ["sprk_name"] = "INV-7",
+        });
 
     /// <summary>A Stored File as the persister writes it (every source column the route sets); returns its id.</summary>
     public Guid WriterStoredFile(
