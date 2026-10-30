@@ -1079,7 +1079,8 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
     /// Task 097c: the commit-time re-check of a Correction's target (the intake's check, <see cref="InvoiceSubmissionService.CheckCorrectionAsync"/>,
     /// is not a lock). The target is resolved from the submission's <c>sprk_resubmissionof</c> (<see cref="SubmissionSnapshot.ReadCorrectedInvoiceAsync(IGenericEntityService, CancellationToken)"/>),
     /// then the old invoice is read ONCE (status, firm, core lookups, row version) and must still be In Review, this firm's and filed under
-    /// <paramref name="core"/> alone. The close is 097a's <see cref="IInvoiceLifecycleService.BuildSupersedeRequest"/> at that version; a refused
+    /// <paramref name="core"/> alone. Its own submission (the one <c>sprk_resubmissionof</c> names) is re-read too and must carry this
+    /// submission's firm invoice number and have finished (task 097 second review F2, F1). The close is 097a's <see cref="IInvoiceLifecycleService.BuildSupersedeRequest"/> at that version; a refused
     /// build is a stop, never a send. Refusals are permanent (Failed with the intake's reason as one stored code); a read fault is a Retry.
     /// Reads only; nothing is written.
     /// </summary>
@@ -1088,6 +1089,7 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
     {
         var submissionId = outcome.SubmissionId;
         Entity old;
+        Entity earlier;
         try
         {
             var target = await outcome.Submission!.ReadCorrectedInvoiceAsync(_entities, ct).ConfigureAwait(false);
@@ -1099,10 +1101,15 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
             }
 
             old = await _entities.RetrieveAsync(InvoiceReviewService.InvoiceEntity, oldId, SupersedeTargetColumns, ct).ConfigureAwait(false);
+
+            // Task 097 second review (F1, F2): the old invoice's own submission, re-read here because the intake's check is not a lock and
+            // sprk_resubmissionof is an ordinary column: it must have finished, and carry this submission's firm invoice number.
+            earlier = await _entities.RetrieveAsync(FinanceBaseValues.SubmissionEntity, target.ResubmissionOfSubmissionId!.Value,
+                InvoiceSubmissionService.CorrectionTargetSubmissionColumns, ct).ConfigureAwait(false);
         }
         catch (Exception ex) when (IsRecordNotFound(ex))
         {
-            _logger.LogWarning("Invoice submission {SubmissionId}: the invoice its correction replaces no longer exists; nothing persisted", submissionId);
+            _logger.LogWarning("Invoice submission {SubmissionId}: the invoice its correction replaces, or that invoice's submission, no longer exists; nothing persisted", submissionId);
             return (Result(SubmissionPersistStatus.Refused, submissionId, SubmissionReasonCodes.CorrectionTargetUnavailable), null);
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
@@ -1128,6 +1135,17 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
         {
             // Every status but In Review, as the intake refuses it (owner 2026-10-21: an Inactive invoice is not changeable either).
             refusal = SubmissionReasonCodes.CorrectionInvoiceStatus;
+        }
+        else if (!InvoiceSubmissionService.SameFirmInvoiceNumber(
+            earlier.GetAttributeValue<string>(TrackingNumberAllocator.FirmInvoiceNumberColumn), outcome.Submission!.FirmInvoiceNumber))
+        {
+            // Second review F2 (D-37, EB-D-179 item 3): an edited sprk_resubmissionof cannot point at an invoice of another number.
+            refusal = SubmissionReasonCodes.CorrectionDifferentInvoiceNumber;
+        }
+        else if (!InvoiceSubmissionService.CorrectionTargetSubmissionFinished(earlier))
+        {
+            // Second review F1: Failed, not Retry; the earlier submission may run for a long time (097c's refusals end the same way).
+            refusal = SubmissionReasonCodes.CorrectionSubmissionInProgress;
         }
 
         if (refusal is not null)

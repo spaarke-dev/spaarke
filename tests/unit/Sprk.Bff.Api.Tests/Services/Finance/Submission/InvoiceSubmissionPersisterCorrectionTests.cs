@@ -29,6 +29,9 @@ public partial class InvoiceSubmissionPersisterTests
         store.OtherSubmissions[EarlierSubmission] = new Entity("sprk_invoicesubmission", EarlierSubmission)
         {
             ["sprk_invoice"] = new EntityReference("sprk_invoice", OldInvoiceId),
+            // Second review F1, F2: the old invoice's own submission has finished and carries this submission's typed number.
+            ["sprk_processingstatus"] = new OptionSetValue((int)InvoiceSubmissionStatus.Accepted),
+            ["sprk_firminvoicenumber"] = "INV-100",
         };
         store.OldInvoice = new Entity("sprk_invoice", OldInvoiceId)
         {
@@ -199,6 +202,92 @@ public partial class InvoiceSubmissionPersisterTests
         result.Status.Should().Be(SubmissionPersistStatus.Refused);
         result.ReasonCode.Should().Be(SubmissionReasonCodes.CorrectionTargetUnavailable);
         store.Transactions.Should().BeEmpty();
+    }
+
+    // ── Second review: the old invoice's own submission at commit (F1 finished, F2 same number) ──
+
+    private static void EarlierIs(Store store, InvoiceSubmissionStatus? status, string? reasonCode = null)
+    {
+        var earlier = store.OtherSubmissions[EarlierSubmission];
+        earlier.Attributes.Remove("sprk_processingstatus");
+        if (status is { } s)
+        {
+            earlier["sprk_processingstatus"] = new OptionSetValue((int)s);
+        }
+
+        if (reasonCode is not null)
+        {
+            earlier["sprk_outcomereasoncode"] = reasonCode;
+        }
+    }
+
+    [Theory(DisplayName = "097 second review F1 SEEDED: the old invoice's own submission has not finished at commit (Processing, Received, Failed, unknown) - Failed with submission_in_progress, no transaction sent")]
+    [InlineData(InvoiceSubmissionStatus.Processing, null)]
+    [InlineData(InvoiceSubmissionStatus.Received, null)]
+    [InlineData(InvoiceSubmissionStatus.Processing, SubmissionReasonCodes.Blocked)]
+    [InlineData(InvoiceSubmissionStatus.Failed, SubmissionReasonCodes.SourceCheckFailed)]
+    [InlineData(null, null)]
+    public async Task EarlierSubmissionNotFinishedAtCommit_IsRefused_NothingSent(InvoiceSubmissionStatus? status, string? reasonCode)
+    {
+        var store = CorrectionStore();
+        EarlierIs(store, status, reasonCode);
+
+        var result = await store.Build().PersistAsync(await CorrectionOutcomeAsync(), null);
+
+        result.Status.Should().Be(SubmissionPersistStatus.Refused, "not a Retry: the earlier submission may run for a long time");
+        result.ReasonCode.Should().Be(SubmissionReasonCodes.CorrectionSubmissionInProgress);
+        result.ReasonCode.Should().Be("ebilling.submission.correction_not_allowed.submission_in_progress", "the intake's 409 code and reason, as one stored code");
+        store.Transactions.Should().BeEmpty();
+        store.OldInvoiceStatus.Should().Be(InvoiceStatusCodes.InReview, "the old invoice is not superseded under a running submission");
+        NothingWritten(store);
+    }
+
+    [Theory(DisplayName = "097 second review F1 (must not fire): the old invoice's own submission Accepted, or Rejected and held Blocked, commits the supersede")]
+    [InlineData(InvoiceSubmissionStatus.Accepted, null)]
+    [InlineData(InvoiceSubmissionStatus.Accepted, SubmissionReasonCodes.Overridden)]
+    [InlineData(InvoiceSubmissionStatus.Rejected, SubmissionReasonCodes.Blocked)]
+    public async Task EarlierSubmissionFinishedAtCommit_Commits(InvoiceSubmissionStatus status, string? reasonCode)
+    {
+        var store = CorrectionStore();
+        EarlierIs(store, status, reasonCode);
+
+        var result = await store.Build().PersistAsync(await CorrectionOutcomeAsync(), null);
+
+        result.Status.Should().Be(SubmissionPersistStatus.Committed, result.ReasonCode);
+        store.OldInvoiceStatus.Should().Be(InvoiceStatusCodes.Superseded);
+    }
+
+    [Fact(DisplayName = "097 second review F2 SEEDED: the submission sprk_resubmissionof names carries another firm invoice number at commit - Failed with different_invoice_number, no transaction sent")]
+    public async Task EarlierSubmissionAnotherNumberAtCommit_IsRefused_NothingSent()
+    {
+        var store = CorrectionStore();
+        store.OtherSubmissions[EarlierSubmission]["sprk_firminvoicenumber"] = "INV-200";
+
+        var result = await store.Build().PersistAsync(await CorrectionOutcomeAsync(), null);
+
+        result.Status.Should().Be(SubmissionPersistStatus.Refused);
+        result.ReasonCode.Should().Be(SubmissionReasonCodes.CorrectionDifferentInvoiceNumber);
+        result.ReasonCode.Should().Be("ebilling.submission.correction_not_allowed.different_invoice_number");
+        store.Transactions.Should().BeEmpty();
+        store.OldInvoiceStatus.Should().Be(InvoiceStatusCodes.InReview);
+        NothingWritten(store);
+    }
+
+    [Theory(DisplayName = "097 second review F2: the number is compared trimmed and ignoring case (D-37), and a missing one is not the same")]
+    [InlineData("  inv-100 ", true)]
+    [InlineData(null, false)]
+    public async Task EarlierSubmissionNumberAtCommit_ComparedAsTheIntakeDoes(string? earlierNumber, bool commits)
+    {
+        var store = CorrectionStore();
+        store.OtherSubmissions[EarlierSubmission]["sprk_firminvoicenumber"] = earlierNumber;
+
+        var result = await store.Build().PersistAsync(await CorrectionOutcomeAsync(), null);
+
+        result.Status.Should().Be(commits ? SubmissionPersistStatus.Committed : SubmissionPersistStatus.Refused, result.ReasonCode);
+        if (!commits)
+        {
+            result.ReasonCode.Should().Be(SubmissionReasonCodes.CorrectionDifferentInvoiceNumber);
+        }
     }
 
     [Fact(DisplayName = "097c: a fault reading the old invoice at commit is a Retry with nothing sent")]

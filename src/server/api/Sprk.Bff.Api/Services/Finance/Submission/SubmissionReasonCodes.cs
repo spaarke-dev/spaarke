@@ -194,6 +194,21 @@ public static class SubmissionReasonCodes
     public const string CorrectionDifferentCoreRecord = InvoiceSubmissionErrors.CorrectionNotAllowed + "." + FromEmailCorrectionReasons.DifferentCoreRecord;
 
     /// <summary>
+    /// Task 097 second review (F2): the earlier submission named by <c>sprk_resubmissionof</c> carries another firm invoice number than this
+    /// submission at commit (trimmed, ignoring case, as the intake compares; D-37). The intake's reason
+    /// <see cref="FromEmailCorrectionReasons.DifferentInvoiceNumber"/>. Permanent.
+    /// </summary>
+    public const string CorrectionDifferentInvoiceNumber = InvoiceSubmissionErrors.CorrectionNotAllowed + "." + FromEmailCorrectionReasons.DifferentInvoiceNumber;
+
+    /// <summary>
+    /// Task 097 second review (F1): the replaced invoice's own submission has not finished at commit (only Accepted, or Rejected and held
+    /// Blocked, may be superseded; <see cref="InvoiceSubmissionService.CorrectionTargetSubmissionFinished"/>). The intake's reason
+    /// <see cref="FromEmailCorrectionReasons.SubmissionInProgress"/>. Permanent, not a Retry: the earlier submission may run for a long time,
+    /// so the correction ends Failed and the firm submits it again once that one has finished.
+    /// </summary>
+    public const string CorrectionSubmissionInProgress = InvoiceSubmissionErrors.CorrectionNotAllowed + "." + FromEmailCorrectionReasons.SubmissionInProgress;
+
+    /// <summary>
     /// Task 097c: the Correction's target no longer resolves at commit: the earlier submission it names is gone, no longer links the invoice
     /// created from it (<see cref="SubmissionSnapshot.ReadCorrectedInvoiceAsync"/>), or that invoice is gone. Permanent (fail closed: the
     /// correction is never committed as a New invoice beside the one it was meant to replace).
