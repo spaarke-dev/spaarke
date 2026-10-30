@@ -821,7 +821,7 @@ When the home token has no `email` claim, the form's prefill falls back to the u
 **Entry-points**
 
 - `src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/CallerPrincipalResolver.cs` (~717-734)
-- `src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/WorkforceIdentityOptions.cs` (`TokenEmail`)
+- `src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/WorkforceIdentityOptions.cs` (`WorkforceCallerClaims.TokenEmail`, the form prefill, which falls back to the username); registration itself reads only the `email` claim (`ExternalRegistrationEndpoints.TokenEmail`). Corrected 2026-10-29.
 - `src/client/external-spa/src/pages/RegistrationPage.tsx`
 
 ### ISS-024 — Grant notifier emails a home-linked workforce contact as an external person (DI-137)
