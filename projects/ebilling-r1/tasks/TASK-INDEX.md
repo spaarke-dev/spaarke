@@ -59,7 +59,7 @@ To begin: `work on task 001`. Wave W0-1 (001, 002, 003) and W2-1 (040, 041) have
 | 047 | ✅ [done] | UTBMS coding Action `INVOICE-LINE-CODE@v1` and code-set resolution | STANDARD | sonnet / xhigh | P2-B | 041, 018, 025, 029 |
 | 048 | ✅ [done] | AI code-set mapping proposals (admin-confirmed) | STANDARD | sonnet / high | P2-C | 047 |
 | 049 | ✅ [done] | `InvoiceSubmissionProcessing` job | FULL | opus / high | none | 014, 016, 043, 044, 046, 047, 072, 073 |
-| 050a | 🟡 [wip] | Redirect the review-confirm route into the submission operation (D-134) | FULL | opus / high | none | 042, 049 |
+| 050a | 🟡 [implemented, on master; owner questions in notes §9 items 2–4 open] | Redirect the review-confirm route into the submission operation (D-134) | FULL | opus / high | none | 042, 049 |
 | 050b | 🔲 [open] | Retire the legacy extraction path (deletion) | STANDARD | sonnet / high | none | 042, 049, 050a |
 | 051 | ✅ [done] | SPA submission UI (shared wizard component) | STANDARD | sonnet / high | P2-D | 044 |
 | 052 | 🔲 [open] | `CreateInvoiceWizard` rewired to the internal entry point | STANDARD | sonnet / high | P4-C | 044, 051, 105 |
@@ -97,12 +97,17 @@ To begin: `work on task 001`. Wave W0-1 (001, 002, 003) and W2-1 (040, 041) have
 | 094 | ✅ [done; on master eaa0d44f7f (#1911)] | Submit Invoice from a source Document: all-or-nothing steps 1-6, file first (A), copy rule (B), 050a re-file retired | FULL | opus / high | P3-E | 086, 090, 092, 098 |
 | 095 | ✅ [done; on master eaa0d44f7f (#1911); dev after the BFF deploy + EB-D-173] | Submit Invoice from the Outlook add-in: POST /api/finance/invoice-submissions/from-email (email-only save + submission) | FULL | opus / high | P3-F (p-safe false) | 094, 088 |
 | 096 | 🔲 [open] | Remove the Office server legs for Invoice as a save target and invoice quick-create | FULL | sonnet / high | P3-F | 095 |
-| 097 | 🔲 [open] | Corrected invoice: the old invoice closes Superseded in step 4 (guarded) and its open Signals close Superseded | FULL | opus / high | P3-F (p-safe false) | 094, 104, 088 |
+| 097 | 🔄 [split into 097a–097e, EB-D-179] | Corrected invoice: the old invoice closes Superseded in step 4 (guarded) and its open Signals close Superseded | FULL | opus / high | P3-F (p-safe false) | 094, 104, 088 |
+| 097a | 🟡 [running] | Superseded lifecycle status (659490005), its transitions and every status reader; the duplicate rule ignores a superseded prior | FULL | opus / high | P3-F | 097 |
+| 097b | 🟡 [running] | Correction intake on both routes: contract fields, guards (Write, firm, core record, status, same number), target in `sprk_resubmissionof`, job snapshot | FULL | opus / high | P3-F | 097 |
+| 097c | 🔲 [open] | Persister: the explicit target replaces the automatic lookup, guarded Superseded close in the commit transaction, compensation reopens the old invoice | FULL | opus / high | none | 097a, 097b |
+| 097d | 🔲 [open] | After-step closes the old invoice's open Signals as Superseded; resume and idempotency; notes; two adversarial passes | FULL | opus / high | none | 097c |
+| 097e | 🔲 [open] | Correction prefill read for the add-in (firm, core record, status, tracking number; 095 contract item G3) | FULL | sonnet / high | none | 097b |
 | 098 | ✅ [merged 8b1aa1fa58; uac READY round 5] | (a′) on sprk_invoice: hide invoices with an isolated Submit Invoice source, and derived rows, from external callers | FULL | opus / high | P3-C (p-safe false) | 088, 090 |
 | 099 | ✅ [done] | Finance step 0: refuse flagged-external callers on every /api/finance route (5.3; owner 2026-10-21) | FULL | opus / high | P3-A | none |
 | 113 | 🔲 [open] | Read-time Procedure-change banner on /review: app-only comparison with the snapshot, internal callers only | FULL | sonnet / high | P3-F | 082, 100 |
 | 114 | 🔲 [open] | Override releases a no-version-in-force gap hold for that invoice only, recorded through WriteBillingDecisionAsync | FULL | sonnet / high | P3-F | 082, 105 |
-| 115 | 🟡 [wip] | AddedFee (100000015) and Discount (100000016) billing rule types: options, domain, schemas, validator refusals, handlers | FULL | opus / high | P3-A | none |
+| 115 | 🟡 [code on master; ontology PR review and the dev option run (owner OK) pending] | AddedFee (100000015) and Discount (100000016) billing rule types: options, domain, schemas, validator refusals, handlers | FULL | opus / high | P3-A | none |
 | 116 | 🔲 [open] | Procedure Version documents: drafting and readers keyed per version on its Stored File; sprk_sourcedocument retired | FULL | opus / high | P3-F (p-safe false) | 081, 085, 090 |
 | 117 | 🔲 [open] | Core-record delete and Procedures: retire sweep for unlinked record-scoped rule sets; delete lists agreed with uac-r2 | FULL | opus / high | P3-D (p-safe false) | 089 |
 | 118 | 🔲 [open] | Submit Invoice in the email UI: toolbar button (replaces Link Invoice), flagged attachments, Email Review Invoice tab | FULL | sonnet / high | P3-F | 094, 118a |
@@ -118,12 +123,12 @@ To begin: `work on task 001`. Wave W0-1 (001, 002, 003) and W2-1 (040, 041) have
 
 | ID | Status | Title | Rigor | Model / Effort | Group | Deps |
 |---|---|---|---|---|---|---|
-| 100 | 🟡 [wip] | Review read model and line decision endpoints | FULL | sonnet / high | P4-A | 014, 016, 049 |
+| 100 | ✅ [done; on master] | Review read model and line decision endpoints | FULL | sonnet / high | P4-A | 014, 016, 049 |
 | 101 | ✅ [done; on work de4e296242, review F-1..F-5 closed] | Value / code corrections, structured capture, re-evaluation | FULL | sonnet / xhigh | P4-B | 100, 027, 072 |
 | 102 | ✅ [done; on master eaa0d44f7f (#1911)] | Invoice-level adjustments | STANDARD | sonnet / high | P4-B | 100 |
 | 103 | ✅ [done; on master eaa0d44f7f (#1911)] | Approval: eligible approvers, worklist, approve | FULL | opus / high | P4-B | 100, 021, 024, 025, 074 |
 | 104 | ✅ [done; on work a4e0721bdc, adversarial F1-a/F1-b fixed] | Reject and Return to Firm; resubmission linkage | FULL | sonnet / high | P4-C | 103, 045 |
-| 105 | 🟡 [wip] | Override (server) | FULL | sonnet / high | P4-B | 044, 049, 074 |
+| 105 | ✅ [done; on master; §8 Q4 closed: 103 and 104 use its lock key] | Override (server) | FULL | sonnet / high | P4-B | 044, 049, 074 |
 | 106 | ✅ [done] | Context panel API | STANDARD | sonnet / high | P4-A | 029, 040 |
 | 107 | ✅ [done] | Related work product API | STANDARD | sonnet / high | P4-A | 029, 040 |
 | 108 | ✅ [done] | Bounding-box document viewer (shared component) | STANDARD | sonnet / high | P4-A | none |
@@ -148,9 +153,9 @@ To begin: `work on task 001`. Wave W0-1 (001, 002, 003) and W2-1 (040, 041) have
 
 | ID | Status | Title | Rigor | Model / Effort | Group | Deps |
 |---|---|---|---|---|---|---|
-| 150 | 🔲 [open] | AP export batch (CSV + JSON, D-56 default mapping, snapshot); files as internal-only Stored Files (EB-D-148) | FULL | sonnet / high | P6-A | 014, 023, 025, 028, 103, 090 |
+| 150 | 🟡 [on work 1e5d80eb75; adversarial review running] | AP export batch (CSV + JSON, D-56 default mapping, snapshot); files as internal-only Stored Files (EB-D-148) | FULL | sonnet / high | P6-A | 014, 023, 025, 028, 103, 090 |
 | 151 | 🔲 [open] | Mark Paid and export UI | STANDARD | sonnet / high | none | 150 |
-| 152 | 🔲 [open] | Invoice index from structured records | STANDARD | sonnet / high | P6-A | 049, 103 |
+| 152 | ✅ [done; on work 62039c6887, review fixes in] | Invoice index from structured records | STANDARD | sonnet / high | P6-A | 049, 103 |
 | 153 | 🔲 [open] | Deploy WP6 to dev | STANDARD | sonnet / high | none (deploy) | 150, 151, 152, 136 |
 
 ### Phase 7 — Evaluation and rollout (WP7) + wrap-up
