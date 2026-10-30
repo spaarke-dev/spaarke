@@ -1,50 +1,38 @@
 # Current Task State
 
-> **Last Updated**: 2026-10-30 (101 built; independent review running). #1911 is MERGED to master (eaa0d44f7f, 21:33Z). Next: dev enablement (EB-D-173), once R3 deploys; 101 B2 and the Part A review are running; 104 is on work.
+> **Last Updated**: 2026-10-30 (context-handoff). #1911 is on master (eaa0d44f7f). Task 101 has just been merged into work locally (de4e296242, NOT pushed, gate NOT run yet). Tasks 150 and 152 are running.
 
 ## Quick Recovery (READ THIS FIRST)
 
 | Field | Value |
 |-------|-------|
-| **Master** | eaa0d44f7f = #1911 merged (094, 095, 102, 103, storedfile-owner, reconcile switch, office test-host fix). CI at e5ca635042: 48 pass, 3 skipped, 0 fail. |
-| **Work branch** | work/ebilling-r1. After the merge: master merged in (8dde1822b9), then 104 merged (a4e0721bdc, ledger 147 → 148). Gate on a4e0721bdc was running (ArchTests + unit filter Finance\|Ebilling\|Billing\|Signals\|Approval\|Invoice); push when it passes. |
-| **Main checkout** | Its `pull --ff-only` was REFUSED: another session's uncommitted `.claude/agent-memory/researcher/MEMORY.md` (and an untracked file) is there. Not touched. Its local master stays at c36907571d until that is resolved. |
-| **Next action** | (1) Push work when the gate passes. (2) When R3 says "gate passed, you can go", set the dev app settings (below), then notify word-add-in and run the 015 dev column delete. (3) When the 101 review and B2 report back, fix any F findings, then merge task/ebill-101-corrections into work. |
+| **Work branch** | Local work/ebilling-r1 = **de4e296242** (merge of task/ebill-101-corrections @ 1d74ce97fd; the ledger conflict is resolved to **149**, a single count line). origin/work = b8912e5553. **Unpushed.** |
+| **Next action** | (1) Build the 5 test projects, then run ArchTests and the unit filter `Finance\|Ebilling\|Billing\|Signals\|Approval\|Invoice` on de4e296242. Full-unit runs time out locally under load; re-run failing classes alone. (2) Push work. (3) Add the 101×104 twin test on work: reject/return refused on a held invoice after a correction changes the held group. Also decide whether reject/return should honour `corrections_pending` (not required: a rejected invoice pays nothing). (4) Update TASK-INDEX: 101 ✅, plus the 050a/100/105/115 statuses (their notes show them implemented; verify). |
+| **Master** | eaa0d44f7f (#1911). Main checkout `C:\code_files\spaarke` NOT fast-forwarded: another session's uncommitted `.claude/agent-memory/researcher/*`. Left alone. |
 
 ## Running agents
-- **ebill-101b-review** (opus, adversarial): reviewing 33eba7f446..de3d8aa587 (101 B2a, B2d, the Part A F2/F3 fixes, B2b-1, B2b-2, B2c). Check first: the totals refusal dead end (B2c K3).
+- **ebill-150** (sonnet), branch task/ebill-150-ap-export from work f39d7f127b: AP export batch. The owner chose EB-D-178: Create on `sprk_billingexport` + `ebilling.invoice.decide` on every invoice, behind ONE seam (`AuthorizeExportAsync`) so a dedicated right can come later. Ledger: write it as 148 → 149; at the merge it becomes 149 → 150.
+- **ebill-152** (sonnet), branch task/ebill-152-invoice-index: invoice index from structured records. No live AI Search.
+- After a merge: build the 5 projects, then run ArchTests and the unit filter, then push. One independent adversarial review per change set (150 touches money, so review it).
 
-## 101 status
-- All parts are built on task/ebill-101-corrections @ de3d8aa587. B2c gate: 5 builds; ArchTests 1858/0; unit filter 9030/0/7; integration 199/0/8; publish +3.52 MB vs master for the whole branch.
-- After the review: fix the F findings, then merge into work. The ledger gets B1's endpoint file, 148 → 149. Then run the 104 twin test (reject/return refused on a held invoice after a correction), because 104 and 101 only meet on work.
-- Decisions made by the main session: alerts close with the record-free CloseAsync (as the POML says; not D-122); the hold clears when no undecided line lacks a code set; currency is a lineFindings entry only, with no Signal; legacy lines answer 409 (EB-D-170).
+## 101 (done, merged locally)
+- Branch tip 1d74ce97fd. Final gate: 5 builds; ArchTests 1858/0; unit filter 9061/0/7; integration 199/0/8; publish +0.12 MB.
+- Review F-1..F-5 closed (F-4 kept by EB-D-175).
+- Approval refuses 409 `ebilling.approval.corrections_pending`, and a line decision refuses 409 `ebilling.line.corrections_pending`, while a correction's whole follow-through hasn't finished. Accept all Clean refuses if any correction on the invoice is unfinished.
+- The approval GET carries no reason for `canApprove=false` (a contract addition for 110/111 to decide).
+- Main-session calls: alerts close with the record-free CloseAsync (POML); the hold clears when no undecided line lacks a code set; currency re-runs the money rules (no mismatch code); legacy lines answer 409 (EB-D-170); the diff starts from the last landed patch (`patchedCorrections`).
 
-## 101 branch state (task/ebill-101-corrections @ 33eba7f446)
-- Part A: 2e4eede999, dfdc3f3a09, b66b3b5230. EB-D-175/176: 8086bd39ef. B1: 33eba7f446 (adversarial review done, F fixed; B2 seam `InvoiceCorrectionService.OnValueWrittenAsync`).
-- Legacy lines (no provenance) answer 409 `ebilling.correction.no_provenance`. That follows the owner's EB-D-170; my brief had said otherwise, and EB-D-170 wins.
-- B1 adds an endpoint file. Its ledger entry says 146 → 147; at the merge into work it becomes 148 → 149.
+## Dev enablement (EB-D-173, owner approved)
+R3 deploys the dev BFF from master ≥ eaa0d44f7f (needs the owner's direct approval in R3's session, naming the sha). After R3's "gate passed, you can go" (uac's 30-minute check), WE set `Ebilling:Enabled=true`, the Finance file-store settings, and `Ebilling:StoredFileReconcileEnabled=false`. Rollback: remove them. Then notify word-add-in (waiting) and run the 015 dev column delete. No word from R3 yet.
 
-## Dev enablement (EB-D-173, owner approved 2026-10-29)
-R3 deploys the dev BFF. That needs the owner's direct approval in R3's session naming the sha; I told R3 the master sha is eaa0d44f7f. After R3's "gate passed, you can go" (uac's 30-minute check), WE set the dev app settings: `Ebilling:Enabled=true`, the Finance file-store settings, and `Ebilling:StoredFileReconcileEnabled=false`. Rollback: remove them. Then notify word-add-in that 095 is live on dev, and run the 015 column delete.
+## Next tasks (deps satisfied)
+097 (opus; corrected invoice supersedes; deps 094, 104, 088). 086 / 089 / 092 branches: merge work, then the content-team writers and the 086 fix round. 161 after 101. 151 after 150. 096 waits on word-add-in removing the add-in side.
 
-## Follow-ups on work (next ebilling PR)
-- ontology asks: (1) 105-override-server.md known limits must name the principal-change case; (2) SubmissionOverrideService runs RecordRefusal twice in its catch filter (double warning log).
-- #2455: InvoiceAdjustmentService.cs:458 and SubmissionOverrideService.cs:1275 still use first-found CoreOf.
-- 101 B2 notes: the review read model doesn't show `lineFindings` yet (B2 item 9).
-
-## Later
-- 086 / 092 / 089: merge work, then the content-team writers and the 086 fix round (uac F3-1, K1–K5; adversarial K2–K6).
-- 150 (its export writer must pass `requestedBy` to CreateForAppAsync), 152. After 101: 161.
-- uac: #2427 OutputLookups sha and the 194b dev-deploy notice, both to come.
-
-## Peers
-- R3: told the master sha; deploy needs the owner's approval in R3's session.
-- word-add-in-r1: confirmed eaa0d44f7f; waiting for the dev notice. Told that the owner's OK is EB-D-173.
-- ontology-r1, uac-r2: told #1911 merged and what went in after their approvals.
-- Filed: #2426, #2454, #2455, #2460 (Office test hosts).
+## Follow-ups / filed
+#2426, #2454, #2455 (now closed in code: line decisions via 101 Part A, adjustment and override via followups; close the issue after work → master), #2460. Task 110 POML has the lineFindings criterion.
 
 ## Owner decisions this session
-EB-D-169 to EB-D-176 are in notes/decisions-log.md.
+EB-D-169 to EB-D-178 are in notes/decisions-log.md (EB-D-177 came via ontology D-200; EB-D-178 is AP export).
 
 ## Standing rules (see project CLAUDE.md)
-No bare git stash, no --no-verify. Live writes and role changes need the owner's OK; schema runs need notices. StoredFileReconcileJob is not enabled anywhere before F4 merges and DEF-044 is fixed (`Ebilling:StoredFileReconcileEnabled` stays false). After merges: build the 5 test projects, then run the broad filter and ArchTests before pushing. Local full-unit runs time out under machine load: re-run failing classes alone, and treat CI as authoritative. Remove worktrees only with Remove-WorktreeSafe.ps1. Max 4 concurrent subagents. Every agent launch states a model.
+No bare git stash, no --no-verify. Live writes and role changes need the owner's OK; schema runs need notices. StoredFileReconcileJob stays off (`Ebilling:StoredFileReconcileEnabled=false`) until F4 merges and DEF-044 is fixed. After merges: build the 5 test projects, then run the broad filter and ArchTests before pushing. Remove worktrees only with Remove-WorktreeSafe.ps1. Max 4 concurrent subagents. Every agent launch states a model. No bare jq, no grep -P.
