@@ -187,4 +187,56 @@ Publish size is not re-measured: one log statement and a list, on top of the +2,
 - **Open owner question (unchanged):** what the old submission shows once its invoice is Superseded (097a finding 5, 097c item 6). Left as is.
 - **Release condition (097b, ontology-r1):** 097b reaches master only together with 097c (and now 097d). word-add-in-r1 keeps Correction off until 097b, 097c and 097e are on master.
 
+## Second review fixes (2026-10-30)
+
+Branch `task/ebill-097-review2-fixes`, cut from `7e6cd95787` (097a to 097d and the 097d follow-up). A second independent adversarial review of 097 found the items below. Each fix has a test that fails before it and passes after. The task is tagged auth; the fix diff and its direct callers were re-checked (no separate full review, as directed).
+
+| # | Finding | Fix | Test |
+|---|---|---|---|
+| F1 | A correction was accepted while the old invoice's own submission was still running. `CheckCorrectionAsync` found that submission but never read its status, and neither did the commit-time check. | `InvoiceSubmissionService.CorrectionTargetSubmissionFinished`: only Accepted (any reason: processing, an override, uncoded), or Rejected with `ebilling.submission.blocked` (held Blocked, D-101, the same model as `FinanceBaseValues.HeldSubmissionConditions`) has finished. Received, Processing (a Processing row carrying the Blocked code included: its after-steps still run), Failed, Rejected with any other code, and an unknown or unread status have not. The intake reads `sprk_processingstatus` and `sprk_outcomereasoncode` (`CorrectionSubmissionColumns`). If it has not finished, the intake answers 409 `correction_not_allowed` with the new reason `submission_in_progress`. That reason is checked last, after the number, and needs a distinct name: the invoice itself is In Review, so `invoice_status` would name the allowed status. At commit, `CheckCorrectionTargetAsync` re-reads the earlier submission (`CorrectionTargetSubmissionColumns`); if it has not finished, the result is Refused (the submission ends Failed) with `ebilling.submission.correction_not_allowed.submission_in_progress`, and no transaction is sent. That is 097c's commit-time refusal, not a Retry, because the old submission may run a long time; the same request after Failed makes a new attempt (095 contract section 5). | Intake: `Refused_TheInvoicesSubmissionHasNotFinished` (Processing, Received, Processing+Blocked, Failed+source_check_failed, Rejected+returned, none), `Allowed_TheInvoicesSubmissionHasFinished` (Accepted, Accepted+overridden, Rejected+blocked), `FromDocument_TheInvoicesSubmissionIsProcessing_IsRefused_NothingSaved`, contract row `submission_in_progress`. Commit: `EarlierSubmissionNotFinishedAtCommit_IsRefused_NothingSent` (5 rows), `EarlierSubmissionFinishedAtCommit_Commits` (3 rows). |
+| F2 | The commit trusted `sprk_resubmissionof`. | At commit the earlier submission's `sprk_firminvoicenumber` must equal this submission's typed number. The comparison is `InvoiceSubmissionService.SameFirmInvoiceNumber`: trimmed, ignoring case, and a missing number is never equal. The intake now uses the same helper. A mismatch is Refused `ebilling.submission.correction_not_allowed.different_invoice_number`, with nothing sent. 097b K6 is rewritten. | `EarlierSubmissionAnotherNumberAtCommit_IsRefused_NothingSent`, `EarlierSubmissionNumberAtCommit_ComparedAsTheIntakeDoes` (`"  inv-100 "` commits, none refused). |
+| F4 | The (a′) acceptance criterion (POML `:117`) had no test. | Test only. 098's predicate (`ExternalInvoiceVisibility.DecideAsync`, through `ExternalDataService.HideInvoicesForAsync`) reads each invoice's Stored Files and submissions by `sprk_invoice` and never reads the invoice row, so it cannot follow `sprk_supersedesinvoice`. No production change, and no stop. | `ExternalInvoiceVisibilityTests.Correction_EachInvoiceIsJudgedByItsOwnSource_NotThroughSupersedesInvoice`: a pair linked by `sprk_supersedesinvoice` and `sprk_resubmissionof`, under one record. Hiding the old invoice's source leaves the new invoice visible, and the reverse. Covered for a contact and a flagged-external systemuser, asked together and alone. `sprk_invoices` is never read. It passes before and after: it pins existing behaviour. |
+| K4 | The after-step retried forever if the submission's own invoice was gone. | `CloseSupersededInvoiceSignalsAsync`: a not-found read of the submission's own invoice is done, with one Information line (ids only), as the old invoice's read already was. | `Correction_TargetUnresolvedOrGone_ClosesNothing("own-gone")`: Completed, nothing closed, and the old invoice is not read. |
+| K5 | Contract note only. A from-document body with any other `mode` (for example lower-case `"correction"`) is now 400 `mode`; before 097b it was ignored. | Lines added to `094-submit-invoice.md` (118 body) and `095-from-email-contract.md` section 6. No code change. | — |
+
+Also: 097c K4 (an old invoice whose submission's undo is unfinished) is closed by F1, because a Failed submission has not finished. The 097c note is updated.
+
+**Harness change.** The intake harness (`InvoiceSubmissionServiceTests.Harness`) now returns the guard's submission query through its `ColumnSet`, as Dataverse does. A column dropped from the read therefore fails a test. `CorrectionSeed.Submission` defaults to Accepted, and the persister's `CorrectionStore` seeds the earlier submission Accepted with the typed number `INV-100`.
+
+**Fail before.** The three changed production files (`InvoiceSubmissionService.cs`, `InvoiceSubmissionPersister.cs`, `InvoiceSubmissionAfterSteps.cs`) were set back to `7e6cd95787`, keeping the new constants. Then 16 of the new or changed cases failed: every F1 must-fire row at intake and at commit, the from-document F1 case, the contract `submission_in_progress` row, both F2 refusals, and K4 `own-gone`. The controls passed: the allowed rows, the trimmed-number row and the (a′) test. Restored: all pass.
+
+**Seeding proof.**
+- F1 terminal check disabled (`CorrectionTargetSubmissionFinished` always true): 13 fail. These are the 6 intake rows, the 5 commit rows, the from-document case and the contract row. Restored: pass.
+- F2 number check at commit disabled: 2 fail (the mismatch and the missing-number row). Restored: pass.
+- `sprk_processingstatus` dropped from the commit read (`CorrectionTargetSubmissionColumns`): 12 persister tests fail, because every committing correction is then refused. Restored: pass.
+
+**Contract changes for word-add-in-r1** (095 contract section 6, 094 notes):
+- New 409 `correction_not_allowed` `reason` `submission_in_progress`. Show it as "the invoice is still being processed; try again later". Clients already accept unknown reasons.
+- New stored `outcomeReasonCode` values on a Failed correction: `ebilling.submission.correction_not_allowed.submission_in_progress` and `ebilling.submission.correction_not_allowed.different_invoice_number`. They join 097c's codes in the table above, and none has a client mapping yet (097c K1).
+- From-document `mode` is exact-case; any other value is 400 `mode` (K5).
+
+| Code | Where | Meaning |
+|---|---|---|
+| 409 `ebilling.submission.correction_not_allowed` `reason` = `submission_in_progress` | intake, both routes | the invoice's own submission has not finished; retry later |
+| stored `ebilling.submission.correction_not_allowed.submission_in_progress` | Failed (commit) | the old invoice's submission had not finished at commit |
+| stored `ebilling.submission.correction_not_allowed.different_invoice_number` | Failed (commit) | the submission `sprk_resubmissionof` names carries another firm invoice number |
+
+**Known limits (second review).**
+- K-R2-1: an old submission stuck at Processing for good (for example a poisoned after-step, 097d K3) makes its invoice uncorrectable until an administrator resolves it. This is intended: superseding an invoice whose own processing is unfinished is the defect F1 closes.
+- K-R2-2: the commit reads the earlier submission twice: once to resolve the target (`ReadCorrectedInvoiceAsync`), once for status and number. The check is not a lock, as at intake. A finished submission only moves on to another finished outcome (held Blocked to Overridden), or to Returned. Returned moves the old invoice to Returned to Firm, and the old invoice's row-version guard then faults the transaction.
+- K-R2-3: `sprk_resubmissionof` stays an ordinary column (097b K6). Field-securing it is an owner decision, pending; no schema change was made.
+
+### Gate (second review)
+
+Measured on head `1f2e865479` (code and tests; the notes commit changes no code).
+
+| Step | Result |
+|---|---|
+| Build, 5 test projects (Sprk.Bff.Api.Tests, Spaarke.ArchTests, Sprk.Bff.Api.IntegrationTests, Spe.Integration.Tests, Sprk.Provisioning.ControlPlane.LoadTests) | 0 warnings, 0 errors each |
+| Unit filter `Finance\|Ebilling\|Billing\|Signals\|Invoice\|Submission\|FromEmail\|Correction` | 9598 passed, 0 failed, 7 skipped |
+| ArchTests (full) | 1858 passed, 0 failed (ISS-005 did not flake) |
+| Sprk.Bff.Api.IntegrationTests | 199 passed, 0 failed, 8 skipped |
+
+No package, project file, endpoint, DI registration, schema or App Service setting changed. The Dataverse change is one more read of a row already read at commit. Publish size was not re-measured: two predicates, two constants and one catch.
+
 rework: fix-round-1 task 097
