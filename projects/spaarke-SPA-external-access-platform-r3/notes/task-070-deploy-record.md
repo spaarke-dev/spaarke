@@ -62,3 +62,4 @@ Owner direction 2026-10-20: "070-071-072 - yes proceed".
 - **Rollback:** dispatch the same workflow on tag `external-spa-dev-rollback-f07ab2ef1` with environment dev.
 - **Separate finding:** Tracy's first PC could not sign in to Teams desktop itself ("We can't connect you", HTTP 400 at login.microsoftonline.com; "No Network Connection [2603]"). That is the Teams client's own sign-in, before Spaarke loads, so it is not a Spaarke defect.
 - **Next:** Ralph and Tracy retest on Teams desktop. If the guest screen still shows, record its Diagnostic line.
+- **Retest after the deploy (owner):** Tracy Cheatham on Teams desktop: the tab now opens. Before the fix she got the guest screen. So the old host-account check was misjudging a member. Ralph Dewey on Teams desktop, Teams web (pop-out) and mobile are still to check.
