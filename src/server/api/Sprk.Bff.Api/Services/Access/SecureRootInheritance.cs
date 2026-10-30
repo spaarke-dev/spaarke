@@ -218,6 +218,14 @@ public sealed record SecureParentsAnswer(IReadOnlyList<SecureFilingParent> Secur
     /// Display names only these: a direct parent is already visible on the record's own lookup, a grandparent is not.
     /// </summary>
     public IReadOnlyList<FilingParentState> DirectParents { get; init; } = Array.Empty<FilingParentState>();
+
+    /// <summary>
+    /// Owner decision 2026-10-29: the matters and projects the record is filed under directly, keyed as its owner question keys
+    /// them (<see cref="SecureRootInheritance.OwnerKeyedParents"/>, the rule creation keys by) — what the un-secure cascade asks
+    /// (<see cref="SecureRootInheritance.UnsecureOwnerQuestionOf"/>). Read in the same filing read as the flags (no extra query).
+    /// </summary>
+    internal IReadOnlyList<KeyValuePair<string, RecordOwnershipParent?>> OwnerLookups { get; init; } =
+        Array.Empty<KeyValuePair<string, RecordOwnershipParent?>>();
 }
 
 /// <summary>Task 174: one DIRECT filing parent and what arrives through it — <see cref="EffectiveSecure"/> (it or anything
@@ -2890,6 +2898,9 @@ public sealed partial class SecureRootInheritance
                     ? own.FiledUnder.Select(p => new FilingParentState(
                         new SecureFilingParent(p.Table, p.Id, p.Name), effective.IsSecure(p), effective.Rank(p))).ToList()
                     : Array.Empty<FilingParentState>(),
+                OwnerLookups = decisions.TryGetValue(c.Start, out var start)
+                    ? start.Answer.OwnerLookups
+                    : Array.Empty<KeyValuePair<string, RecordOwnershipParent?>>(),
             });
     }
 
@@ -3503,7 +3514,12 @@ public sealed partial class SecureRootInheritance
     /// see the intermediate on the row, never the record it belongs to (task 174 verifier F1-d).</summary>
     private sealed record NamedParents(
         IReadOnlyList<(string Table, Guid Id)> Named, string? Unknown, string? Unrepeated,
-        IReadOnlySet<(string Table, Guid Id)> ViaIntermediateOnly);
+        IReadOnlySet<(string Table, Guid Id)> ViaIntermediateOnly)
+    {
+        /// <summary>The matters and projects keyed as the row's owner question keys them (<see cref="OwnerKeyedParents"/>).</summary>
+        public IReadOnlyList<KeyValuePair<string, RecordOwnershipParent?>> OwnerLookups { get; init; } =
+            Array.Empty<KeyValuePair<string, RecordOwnershipParent?>>();
+    }
 
     /// <summary>#1630: an intermediate as read — the matters and projects it belongs to (<c>null</c> = it does not exist), or a
     /// fault.</summary>
@@ -3594,12 +3610,13 @@ public sealed partial class SecureRootInheritance
     /// an intermediate whose read faulted is unknown; one the read did not return confers nothing, or (the read path's
     /// <paramref name="absentIsUnknown"/>) is unknown. The ONE rule both <see cref="NameParentsAsync"/> (the inheritance and
     /// the un-secure cascade) and <see cref="OwnerLookupsThroughIntermediatesAsync(IGenericEntityService, ILogger, string, IReadOnlyList{ValueTuple{string, Guid}}, CancellationToken)"/>
-    /// (a create's owner question) apply.
+    /// (a create's owner question) apply. Each parent carries the intermediate table that names it (<c>Via</c>), which
+    /// <see cref="OwnerKeyedParents"/> keys it by.
     /// </summary>
-    private static (List<(string Table, Guid Id)> Parents, string? Unknown) NameThroughIntermediates(
+    private static (List<(string Table, Guid Id, string Via)> Parents, string? Unknown) NameThroughIntermediates(
         IEnumerable<(string Table, Guid Id)> filedIntermediates, IntermediateReads intermediates, bool absentIsUnknown)
     {
-        var parents = new List<(string Table, Guid Id)>();
+        var parents = new List<(string Table, Guid Id, string Via)>();
         string? unknown = null;
         foreach (var intermediate in filedIntermediates)
         {
@@ -3615,10 +3632,54 @@ public sealed partial class SecureRootInheritance
             if (read.Parents is null && absentIsUnknown)
                 unknown ??= $"the {intermediate.Table} it is filed under was not returned (missing, or not visible to the reader)";
 
-            parents.AddRange(read.Parents ?? Array.Empty<(string Table, Guid Id)>());
+            parents.AddRange((read.Parents ?? Array.Empty<(string Table, Guid Id)>()).Select(p => (p.Table, p.Id, intermediate.Table)));
         }
 
         return (parents, unknown);
+    }
+
+    /// <summary>
+    /// Owner decision 2026-10-29: THE rule for which column a row's owner question keys each matter and project it is filed
+    /// under by, so the one builder (<c>RecordOwnershipContext.ForRow</c>, <c>SecureChildLineage.RootLookupOrder</c>) ranks the
+    /// same parent first on every path — creation (<see cref="OwnerLookupsThroughIntermediatesAsync(IGenericEntityService, ILogger, string, IReadOnlyList{ValueTuple{string, Guid}}, CancellationToken)"/>)
+    /// and the un-secure cascade (<see cref="UnsecureOwnerQuestionOf"/>) alike. A matter or project the row holds in a typed
+    /// column (<paramref name="typed"/>) is keyed under that column. One named only through an invoice or event
+    /// (<paramref name="throughIntermediates"/>) is keyed under the row's typed column for its table when the row holds no
+    /// typed matter or project (<see cref="OwnerIntermediatesOf"/>: then that record's matter is the row's core record), and
+    /// otherwise under the invoice's or event's own column, so it ranks after the row's own matter and project. A parent
+    /// named both ways is keyed once, under the typed column.
+    /// </summary>
+    internal static IReadOnlyList<KeyValuePair<string, RecordOwnershipParent?>> OwnerKeyedParents(
+        string table, IEnumerable<(string Column, string Table, Guid Id)> typed,
+        IEnumerable<(string Table, Guid Id, string Via)> throughIntermediates)
+    {
+        ArgumentNullException.ThrowIfNull(typed);
+        ArgumentNullException.ThrowIfNull(throughIntermediates);
+        var logical = table.Trim().ToLowerInvariant();
+        var typedColumns = TypedFilingColumns.TryGetValue(logical, out var t) ? t : Array.Empty<(string, string)>();
+        var intermediateColumns = IntermediateFilingColumns.TryGetValue(logical, out var i) ? i : Array.Empty<(string, string)>();
+
+        var keyed = new List<KeyValuePair<string, RecordOwnershipParent?>>();
+        var named = new HashSet<(string Table, Guid Id)>();
+        foreach (var (column, parentTable, id) in typed)
+        {
+            if (named.Add((parentTable.Trim().ToLowerInvariant(), id)))
+                keyed.Add(KeyValuePair.Create(column, (RecordOwnershipParent?)new RecordOwnershipParent(parentTable, id)));
+        }
+
+        var holdsTyped = named.Count > 0;
+        foreach (var (parentTable, id, via) in throughIntermediates)
+        {
+            if (!named.Add((parentTable.Trim().ToLowerInvariant(), id)))
+                continue;
+            var column = holdsTyped
+                ? intermediateColumns.FirstOrDefault(c => string.Equals(c.Item2, via, StringComparison.OrdinalIgnoreCase)).Item1
+                : typedColumns.FirstOrDefault(c => string.Equals(c.Item2, parentTable, StringComparison.OrdinalIgnoreCase)).Item1;
+            if (column is not null)
+                keyed.Add(KeyValuePair.Create(column, (RecordOwnershipParent?)new RecordOwnershipParent(parentTable, id)));
+        }
+
+        return keyed;
     }
 
     /// <summary>
@@ -3674,7 +3735,9 @@ public sealed partial class SecureRootInheritance
     /// (<c>UnsecureFollowingParentsAsync</c>) name the same parents. Each is returned keyed under the typed column that files a
     /// row under its table (<see cref="TypedFilingColumns"/>), so the one builder (<c>RecordOwnershipContext.ForRow</c>) ranks
     /// it first in the table's order (<c>SecureChildLineage.RootLookupOrder</c>: matter, then project), ahead of the
-    /// intermediate — which the caller keeps among the parents, so secure-if-any reads at least what it read before.
+    /// intermediate — which the caller keeps among the parents, so secure-if-any reads at least what it read before. The row
+    /// holds no typed matter or project (<see cref="OwnerIntermediatesOf"/> answers the intermediates only then); the keys are
+    /// <see cref="OwnerKeyedParents"/>', the rule the cascade keys by.
     /// </summary>
     /// <returns>An intermediate that cannot be read: <see cref="OwnerFilingThroughIntermediates.Unverifiable"/> (the caller
     /// refuses; never "under nothing"). One that does not exist confers nothing. Never throws a read fault.</returns>
@@ -3684,7 +3747,7 @@ public sealed partial class SecureRootInheritance
     {
         ArgumentNullException.ThrowIfNull(filedIntermediates);
         var logical = table.Trim().ToLowerInvariant();
-        if (filedIntermediates.Count == 0 || !TypedFilingColumns.TryGetValue(logical, out var typed))
+        if (filedIntermediates.Count == 0 || !TypedFilingColumns.ContainsKey(logical))
             return OwnerFilingThroughIntermediates.None;
 
         var reads = new IntermediateReads();
@@ -3693,15 +3756,8 @@ public sealed partial class SecureRootInheritance
         if (unknown is not null)
             return new OwnerFilingThroughIntermediates(Array.Empty<KeyValuePair<string, RecordOwnershipParent?>>(), unknown);
 
-        var keyed = new List<KeyValuePair<string, RecordOwnershipParent?>>();
-        foreach (var (parentTable, id) in parents.Distinct())
-        {
-            var column = typed.FirstOrDefault(t => string.Equals(t.ParentTable, parentTable, StringComparison.OrdinalIgnoreCase)).Column;
-            if (column is not null)
-                keyed.Add(KeyValuePair.Create(column, (RecordOwnershipParent?)new RecordOwnershipParent(parentTable, id)));
-        }
-
-        return new OwnerFilingThroughIntermediates(keyed, null);
+        return new OwnerFilingThroughIntermediates(
+            OwnerKeyedParents(logical, Array.Empty<(string, string, Guid)>(), parents), null);
     }
 
     /// <summary>
@@ -3739,12 +3795,16 @@ public sealed partial class SecureRootInheritance
         bool absentIsUnknown = false)
     {
         var named = new List<(string Table, Guid Id)>();
+        var typedHeld = new List<(string Column, string Table, Guid Id)>();
         string? unknown = null;
         string? unrepeated = null; // #1616: kept apart — see SecureParentsAnswer.UnknownOnlyThroughAnUnrepeatedPair
         foreach (var (column, parentTable) in TypedFilingColumns[facts.Table])
         {
             if (facts.Typed.TryGetValue(column, out var id) && id is { } parentId)
+            {
                 named.Add((parentTable, parentId));
+                typedHeld.Add((column, parentTable, parentId));
+            }
         }
 
         // #1630 (owner Option A): an invoice or event the row is filed under by its typed lookup files it under the matters and
@@ -3752,6 +3812,7 @@ public sealed partial class SecureRootInheritance
         // nothing, like a missing parent).
         var direct = named.ToHashSet();
         var viaIntermediate = new HashSet<(string Table, Guid Id)>();
+        var throughParents = new List<(string Table, Guid Id, string Via)>();
         var filedIntermediates = IntermediatesOf(facts).ToList();
         if (filedIntermediates.Count > 0)
         {
@@ -3760,11 +3821,12 @@ public sealed partial class SecureRootInheritance
                 .ConfigureAwait(false);
             var through = NameThroughIntermediates(filedIntermediates, intermediates, absentIsUnknown);
             unknown ??= through.Unknown;
-            foreach (var parent in through.Parents)
+            throughParents = through.Parents;
+            foreach (var (table, id, _) in through.Parents)
             {
-                named.Add(parent);
-                if (!direct.Contains(parent))
-                    viaIntermediate.Add(parent);
+                named.Add((table, id));
+                if (!direct.Contains((table, id)))
+                    viaIntermediate.Add((table, id));
             }
         }
 
@@ -3814,7 +3876,10 @@ public sealed partial class SecureRootInheritance
             }
         }
 
-        return new NamedParents(named, unknown, unrepeated, viaIntermediate);
+        return new NamedParents(named, unknown, unrepeated, viaIntermediate)
+        {
+            OwnerLookups = OwnerKeyedParents(facts.Table, typedHeld, throughParents),
+        };
     }
 
     /// <summary>The direct decision over <paramref name="named"/> as <paramref name="reads"/> read them (in order; the first
@@ -3872,6 +3937,7 @@ public sealed partial class SecureRootInheritance
         {
             UnknownOnlyThroughAnUnrepeatedPair = unknown is null && unrepeated is not null,
             StrictestPermission = strictest,
+            OwnerLookups = naming.OwnerLookups,
         }, existing);
     }
 

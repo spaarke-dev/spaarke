@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Xrm.Sdk;
+using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api;
 using Sprk.Bff.Api.Services.Access;
 using Sprk.Bff.Api.Services.Dataverse;
@@ -158,7 +159,8 @@ public partial class SecureRootInheritanceWriterTests
             maxDepth: SecureRootInheritance.MaxFilingDepth);
         ancestry.IsKnown.Should().BeTrue(ancestry.Unverifiable);
         var owner = await WorldResolver().ResolveOwnerAsync(
-            SecureRootInheritance.UnsecureOwnerQuestionOf(SecureRootInheritance.WorkAssignment, ancestry.DirectParents.Select(p => p.Parent)),
+            SecureRootInheritance.UnsecureOwnerQuestionOf(
+                SecureRootInheritance.WorkAssignment, ancestry.DirectParents.Select(p => p.Parent), ancestry.OwnerLookups),
             CancellationToken.None);
         return owner.OwningTeamId;
     }
@@ -310,5 +312,47 @@ public partial class SecureRootInheritanceWriterTests
         BoundId(fields, "ownerid@odata.bind").Should().Be(UnitADefaultTeam, "creation ranks the matter first (RootLookupOrder)");
         (await CascadeOwnerOf(created)).Should().Be(UnitADefaultTeam,
             $"the un-secure cascade ranks as creation does: the matter's unit, never the project's ({UnitBDefaultTeam:D})");
+    }
+
+    [Theory(DisplayName = "Owner decision 2026-10-29 must fire: a work assignment holding its own project (unit B) and an invoice or event whose matter is in unit A is owned in unit B — on creation, on the un-secure cascade and through the resolver's look-through alike")]
+    [InlineData("sprk_invoice", "sprk_matter", "sprk_project", "sprk_RegardingInvoice@odata.bind", "sprk_invoices")]
+    [InlineData("sprk_event", "sprk_regardingmatter", "sprk_regardingproject", "sprk_RegardingEvent@odata.bind", "sprk_events")]
+    public async Task WorkAssignmentPrimaryOwner_UnderItsOwnProjectInBAndAnIntermediateOfAMatterInA_IsOwnedInB_OnEveryPath(
+        string table, string matterColumn, string projectColumn, string bindKey, string entitySet)
+    {
+        // The intermediate belongs to the matter (unit A) and to the work assignment's own project (unit B). The work assignment
+        // holds the project in its typed column, so the project is its core record; the intermediate's matter ranks after it.
+        TwoBusinessUnits();
+        var (matter, project, intermediate) = (Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid());
+        _fixture.SeedMatter(matter, owningTeamId: UnitAMatterTeam, isSecure: false);
+        World.Add("sprk_project", project, ("owningteam", new EntityReference("team", UnitBEventTeam)), ("sprk_issecure", false));
+        World.Add(table, intermediate,
+            ("owningteam", new EntityReference("team", UnitBEventTeam)),
+            (matterColumn, new EntityReference("sprk_matter", matter)),
+            (projectColumn, new EntityReference("sprk_project", project)));
+
+        var result = await CreateFiledWorkAssignmentThroughTheRoute(
+            (bindKey, $"/{entitySet}({intermediate:D})"),
+            ("sprk_RegardingProject@odata.bind", $"/sprk_projects({project:D})"));
+
+        RouteStatus(result).Should().Be(StatusCodes.Status201Created, RouteDetail(result));
+        var (_, created, fields) = _writes.Should().ContainSingle().Subject;
+        BoundId(fields, "ownerid@odata.bind").Should().Be(UnitBDefaultTeam,
+            "creation: the work assignment's own project is its core record (OwnerIntermediatesOf reads nothing through the "
+            + $"{table} when a typed parent is held)");
+        (await CascadeOwnerOf(created)).Should().Be(UnitBDefaultTeam,
+            $"the un-secure cascade ranks the work assignment's own project first, the {table}'s matter after it — never unit A "
+            + $"({UnitADefaultTeam:D})");
+
+        // The resolver's look-through: a person-owned, filed work assignment answers with its filing's primary. (The route's
+        // create stores its lookups without their tables in this world; the resolver reads a row's parents by table.)
+        World.MoveOwner(SecureRootInheritance.WorkAssignment, created, DataversePrincipalRef.User(SecureChildShareWorld.SomeUser));
+        World.Set(SecureRootInheritance.WorkAssignment, created, "sprk_regardingproject", new EntityReference("sprk_project", project));
+        World.Set(SecureRootInheritance.WorkAssignment, created, bindKey[..bindKey.IndexOf('@')].ToLowerInvariant(),
+            new EntityReference(table, intermediate));
+        var lookedThrough = await WorldResolver().ResolveOwnerAsync(
+            RecordOwnershipContext.ForParents(new[] { new RecordOwnershipParent(SecureRootInheritance.WorkAssignment, created) }),
+            CancellationToken.None);
+        lookedThrough.OwningTeamId.Should().Be(UnitBDefaultTeam, "the look-through follows the same primary: the project");
     }
 }

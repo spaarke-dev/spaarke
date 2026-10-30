@@ -839,7 +839,8 @@ public sealed partial class SecureRootInheritance
         // (b) Un-secure: an inherited Secure whose parents are no longer secure (round 84, refined by round 87).
         if (d.Unsecure)
         {
-            var unsecure = await UnsecureFollowingParentsAsync(logical, recordId, d.Parents, traceId, ct).ConfigureAwait(false);
+            var unsecure = await UnsecureFollowingParentsAsync(logical, recordId, d.Parents, ancestry.OwnerLookups, traceId, ct)
+                .ConfigureAwait(false);
             result = result with
             {
                 UnsecureOutcome = unsecure.Outcome,
@@ -1208,22 +1209,28 @@ public sealed partial class SecureRootInheritance
 
     /// <summary>
     /// The owner question the un-secure step asks for a record of <paramref name="logical"/> filed under
-    /// <paramref name="parents"/> (the matters and projects it is filed under, as its read names them). Owner decision
-    /// 2026-10-29: a work assignment's parents are keyed under its own matter and project columns
-    /// (<see cref="TypedFilingColumns"/>) and asked through the one builder (<c>RecordOwnershipContext.ForRow</c>), so they rank
-    /// as creation ranks them — matter, then project (<c>SecureChildLineage.RootLookupOrder</c>) — also when they are named
-    /// through an invoice or event that belongs to a matter and a project in different business units. Any other table (a
-    /// project: its pair's matter or project) is asked in the order named.
+    /// <paramref name="parents"/> (the matters and projects it is filed under that exist, as its read names them). Owner
+    /// decision 2026-10-29: a work assignment's parents are keyed as its read keyed them (<paramref name="ownerLookups"/>,
+    /// <see cref="SecureParentsAnswer.OwnerLookups"/> — <see cref="OwnerKeyedParents"/>, the rule creation keys by) and asked
+    /// through the one builder (<c>RecordOwnershipContext.ForRow</c>), so they rank as creation ranks them: its own matter,
+    /// then its own project (<c>SecureChildLineage.RootLookupOrder</c>), then what an invoice or event it holds belongs to —
+    /// and, when it holds no matter or project, that record's matter, then its project. A parent the keys do not name ranks
+    /// last. Any other table (a project: its pair's matter or project) is asked in the order named.
     /// </summary>
-    internal static RecordOwnershipContext UnsecureOwnerQuestionOf(string logical, IEnumerable<SecureFilingParent> parents)
+    internal static RecordOwnershipContext UnsecureOwnerQuestionOf(
+        string logical, IEnumerable<SecureFilingParent> parents,
+        IReadOnlyList<KeyValuePair<string, RecordOwnershipParent?>> ownerLookups)
     {
         ArgumentNullException.ThrowIfNull(parents);
+        ArgumentNullException.ThrowIfNull(ownerLookups);
         var named = parents.ToArray();
         if (!TypedFilingColumns.TryGetValue(logical, out var typed) || typed.Count == 0)
             return RecordOwnershipContext.ForParents(named.Select(p => (RecordOwnershipParent?)new RecordOwnershipParent(p.Table, p.Id)));
 
         return RecordOwnershipContext.ForRow(logical, named.Select(p => KeyValuePair.Create(
-            typed.FirstOrDefault(t => string.Equals(t.ParentTable, p.Table, StringComparison.OrdinalIgnoreCase)).Column ?? p.Table,
+            ownerLookups.FirstOrDefault(k => k.Value is { } v && v.RecordId == p.Id
+                                             && string.Equals(v.EntityLogicalName, p.Table, StringComparison.OrdinalIgnoreCase)).Key
+            ?? p.Table,
             (RecordOwnershipParent?)new RecordOwnershipParent(p.Table, p.Id))));
     }
 
@@ -1234,13 +1241,14 @@ public sealed partial class SecureRootInheritance
     /// that, an unresolvable owner, or any refusal leaves it secure.
     /// </summary>
     private async Task<(string Outcome, string? Code, string? Detail)> UnsecureFollowingParentsAsync(
-        string logical, Guid recordId, IReadOnlyList<FilingParentState> parents, string traceId, CancellationToken ct)
+        string logical, Guid recordId, IReadOnlyList<FilingParentState> parents,
+        IReadOnlyList<KeyValuePair<string, RecordOwnershipParent?>> ownerLookups, string traceId, CancellationToken ct)
     {
         RecordOwnerResolution owner;
         try
         {
             owner = await _ownership.ResolveOwnerAsync(
-                UnsecureOwnerQuestionOf(logical, parents.Select(p => p.Parent)), ct).ConfigureAwait(false);
+                UnsecureOwnerQuestionOf(logical, parents.Select(p => p.Parent), ownerLookups), ct).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {

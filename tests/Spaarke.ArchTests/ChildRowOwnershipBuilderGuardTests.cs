@@ -41,7 +41,7 @@ public class ChildRowOwnershipBuilderGuardTests
         new(Bff("Services.Signals.GateDecisionRecordSharing"), "AskOwnerAsync",
             "Whether a Decision Record may be shared, not which owner a child row gets."),
         new(Bff("Services.Access.SecureRootInheritance"), "UnsecureOwnerQuestionOf",
-            "The secure-root cascade: a root that follows its parents as it un-secures (a work assignment's asked through ForRow under its own matter and project columns, owner decision 2026-10-29; a project's over its pair's parent)."),
+            "The secure-root cascade: a root that follows its parents as it un-secures (a work assignment's asked through ForRow, its parents keyed as creation keys them — SecureRootInheritance.OwnerKeyedParents, owner decision 2026-10-29; a project's over its pair's parent)."),
         new(Bff("Services.Signals.TodoAssigneeOwnerReconciliationJob"), "ParentsAnswerAsync",
             "The To Do job's own parent list (A6: the resolved Signals' subjects), not a row's lookups."),
         new(Bff("Services.Access.SecureChildReconciler"), "Pass.ContextFor",
