@@ -1,3 +1,4 @@
+using System.ServiceModel;
 using FluentAssertions;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
@@ -40,7 +41,16 @@ public partial class InvoiceSubmissionAfterStepsTests
 
         /// <summary>The old invoice's read throws this once (a transient fault).</summary>
         public Exception? OldInvoiceFault { get; set; }
+
+        /// <summary>The invoice the earlier submission links (097b accepts only the one the job created from it).</summary>
+        public Guid EarlierLinks { get; set; } = OldInvoice;
+
+        /// <summary>The old invoice no longer exists (Dataverse's ObjectDoesNotExist on its read).</summary>
+        public bool OldInvoiceGone { get; set; }
     }
+
+    private static FaultException<OrganizationServiceFault> NotFound() =>
+        new(new OrganizationServiceFault { ErrorCode = -2147220969, Message = "does not exist" }, "does not exist");
 
     /// <summary>A correction (sprk_resubmissionof = <see cref="Earlier"/>, unless <paramref name="correction"/> is false) over an accepted outcome.</summary>
     private static async Task<(World World, Invoices Invoices)> CorrectionWorldAsync(bool correction = true)
@@ -56,7 +66,7 @@ public partial class InvoiceSubmissionAfterStepsTests
         // The earlier submission links the invoice the job created from it (097b's fail-closed resolution).
         world.Entities.Setup(e => e.RetrieveAsync(FinanceBaseValues.SubmissionEntity, Earlier, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((string _, Guid _, string[] columns, CancellationToken _) => World.Copy(
-                new Entity(FinanceBaseValues.SubmissionEntity, Earlier) { [InvoiceSubmissionService.InvoiceColumn] = new EntityReference("sprk_invoice", OldInvoice) },
+                new Entity(FinanceBaseValues.SubmissionEntity, Earlier) { [InvoiceSubmissionService.InvoiceColumn] = new EntityReference("sprk_invoice", invoices.EarlierLinks) },
                 columns));
 
         world.Entities.Setup(e => e.RetrieveAsync(InvoiceReviewService.InvoiceEntity, It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
@@ -67,6 +77,11 @@ public partial class InvoiceSubmissionAfterStepsTests
                 {
                     invoices.OldInvoiceFault = null;
                     return Task.FromException<Entity>(fault);
+                }
+
+                if (id == OldInvoice && invoices.OldInvoiceGone)
+                {
+                    return Task.FromException<Entity>(NotFound());
                 }
 
                 return Task.FromResult(World.Copy(invoices.Rows[id], columns));
@@ -215,11 +230,29 @@ public partial class InvoiceSubmissionAfterStepsTests
         world.TerminalWrites.Should().ContainSingle();
     }
 
-    [Fact(DisplayName = "097d: a read fault (the old invoice) -> Retry with nothing closed; the resume completes")]
-    public async Task Correction_ReadFault_RetryThenResumeCompletes()
+    [Theory(DisplayName = "097d: a read fault (the old invoice, or its open Signal set) -> Retry with nothing closed; the resume completes")]
+    [InlineData("old-invoice")]
+    [InlineData("open-set")]
+    public async Task Correction_ReadFault_RetryThenResumeCompletes(string where)
     {
         var (world, invoices) = await CorrectionWorldAsync();
-        invoices.OldInvoiceFault = new TimeoutException("the read timed out");
+        if (where == "old-invoice")
+        {
+            invoices.OldInvoiceFault = new TimeoutException("the read timed out");
+        }
+        else
+        {
+            var faulted = false;
+            world.OnSetRead = () =>
+            {
+                if (!faulted)
+                {
+                    faulted = true;
+                    throw new TimeoutException("the read timed out");
+                }
+            };
+        }
+
         var open = world.Seed(OldInvoiceKey("BILL-RATE"), SignalWriter.SignalStatusOpen, "[]");
         var sut = world.Build();
 
@@ -257,6 +290,55 @@ public partial class InvoiceSubmissionAfterStepsTests
 
         resumed.Status.Should().Be(SubmissionAfterStepsStatus.Completed, resumed.ReasonCode);
         world.Superseded.Should().Equal(open.Id);
+    }
+
+    [Theory(DisplayName = "097d: a target that no longer resolves (the earlier submission links another invoice) or an old invoice that no longer exists closes nothing and completes")]
+    [InlineData("unresolved")]
+    [InlineData("gone")]
+    public async Task Correction_TargetUnresolvedOrGone_ClosesNothing(string why)
+    {
+        var (world, invoices) = await CorrectionWorldAsync();
+        if (why == "unresolved")
+        {
+            invoices.EarlierLinks = ThirdInvoice;
+        }
+        else
+        {
+            invoices.OldInvoiceGone = true;
+        }
+
+        var open = world.Seed(OldInvoiceKey("BILL-RATE"), SignalWriter.SignalStatusOpen, "[]");
+
+        var result = await world.Build().RunAsync(Persisted(await Accepted()), null);
+
+        result.Status.Should().Be(SubmissionAfterStepsStatus.Completed, result.ReasonCode);
+        world.Superseded.Should().BeEmpty();
+        StatusOf(open).Should().Be(SignalWriter.SignalStatusOpen);
+        world.TerminalWrites.Should().ContainSingle();
+    }
+
+    [Fact(DisplayName = "097d: the after-steps' Superseded close (the delegate the step calls) writes resolution Superseded, no person, no Decision Record, on the row version")]
+    public async Task SupersedeClose_WritesResolutionSuperseded_NoPerson()
+    {
+        var (writer, org) = RealWriterOverFakeDataverse();
+        var signalId = Guid.Parse("09700000-0000-4000-8000-0000000005d1");
+        org.Rows[signalId] = new Entity("sprk_signal", signalId)
+        {
+            ["sprk_signalstatus"] = new OptionSetValue(SignalWriter.SignalStatusAcknowledged),
+            RowVersion = "7",
+        };
+        var close = InvoiceSubmissionAfterSteps.SupersedeClose(writer);
+
+        var stale = await close(signalId, "6", "BILL-RATE", CancellationToken.None);
+        var outcome = await close(signalId, "7", "BILL-RATE", CancellationToken.None);
+
+        stale.Should().Be(SignalCloseOutcome.ChangedSinceRead, "conditional on the row version read");
+        outcome.Should().Be(SignalCloseOutcome.Closed);
+        var row = org.Rows[signalId];
+        StatusOf(row).Should().Be(SignalWriter.SignalStatusResolved);
+        row.GetAttributeValue<OptionSetValue>("sprk_resolutiontype").Value.Should().Be(SignalWriter.ResolutionSuperseded);
+        row.Contains("sprk_resolvedby").Should().BeFalse("a system resolution names no person");
+        row.Contains("sprk_decisionrecord").Should().BeFalse();
     }
 
     [Fact(DisplayName = "097d: a New submission - 104's automatic link included - runs no supersede close and reads no invoice")]

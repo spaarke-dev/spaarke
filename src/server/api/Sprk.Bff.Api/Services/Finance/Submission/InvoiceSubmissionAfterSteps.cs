@@ -136,7 +136,7 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
             sink,
             logger,
             (signals ?? throw new ArgumentNullException(nameof(signals))).WriteAsync,
-            (id, rowVersion, policyCode, ct) => signals.CloseAsync(id, rowVersion, SignalWriter.ResolutionSuperseded, policyCode, ct),
+            SupersedeClose(signals),
             // An automated decision: no person, so no sprk_resolvedby (decidedByUserId null).
             (id, recordId, setReadAtUtc, policyCode, ct) => signals.CloseActedByDecisionAsync(id, recordId, setReadAtUtc, policyCode, decidedByUserId: null, ct),
             (recorder ?? throw new ArgumentNullException(nameof(recorder))).RecordAsync,
@@ -145,6 +145,17 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
             refreshApprovers: (approvers ?? throw new ArgumentNullException(nameof(approvers))).RefreshInvoiceAsync,
             enqueueIndex: EnqueueAcceptedIndex(jobs))
     {
+    }
+
+    /// <summary>
+    /// The one Superseded close of the after-steps (the option-a lifecycle's episode n+1, and task 097d's close of a superseded invoice's
+    /// Signals): <see cref="SignalWriter.CloseAsync"/> with <see cref="SignalWriter.ResolutionSuperseded"/>, a system resolution (no person, no
+    /// Decision Record), conditional on the row version.
+    /// </summary>
+    internal static Func<Guid, string, string, CancellationToken, Task<SignalCloseOutcome>> SupersedeClose(SignalWriter signals)
+    {
+        ArgumentNullException.ThrowIfNull(signals);
+        return (id, rowVersion, policyCode, ct) => signals.CloseAsync(id, rowVersion, SignalWriter.ResolutionSuperseded, policyCode, ct);
     }
 
     /// <summary>The acceptance's index job (task 152): change key <see cref="InvoiceIndexingJobHandler.AcceptedChange"/>, submitted through the real queue.</summary>
