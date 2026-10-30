@@ -270,6 +270,45 @@ public class UnfiledCommunicationDocumentOwnerTests
         answer.Outcome.Should().Be(RecordOwnerOutcome.Refused, "a missing thread's filing is not known: never the unfiled answer");
     }
 
+    [Fact(DisplayName = "#2471 follow-up: N document questions for one communication, sharing a pass's cache, read its filing once")]
+    public async Task NDocumentQuestionsForOneCommunication_SharingAPassCache_ReadItsFilingOnce()
+    {
+        var thread = Guid.NewGuid();
+        var directory = WithCommunication(World(), RootBu, RootTeam, new()
+            {
+                ["sprk_communicationthread"] = new EntityReference("sprk_communicationthread", thread),
+            })
+            .WithRecord("sprk_communicationthread", thread, RootBu, owningTeam: RootTeam, extra: new()
+            {
+                ["sprk_threadtype"] = new OptionSetValue(RecordThreadFiling.DirectThreadType),
+            });
+        var resolver = directory.Resolver();
+        var cache = new RecordOwnerLookupCache(); // one pass (SecureChildReconciler) or one cascade run
+
+        var answers = new List<RecordOwnerResolution>();
+        for (var document = 0; document < 3; document++)
+            answers.Add(await resolver.ResolveOwnerAsync(SaveQuestion() with { LookupCache = cache }, CancellationToken.None));
+
+        answers.Should().OnlyContain(a => a.OwningTeamId == ChildTeam, "the cached answer is the answer: the email is unfiled");
+        directory.RecordQueries.Count(q => q.EntityName == "sprk_communication" && q.ColumnSet.AllColumns && !q.NoLock)
+            .Should().Be(1, "the communication's filing is read once for the pass, not once per document");
+        directory.RecordQueries.Count(q => q.EntityName == RecordThreadFiling.ThreadTable)
+            .Should().Be(1, "and so is its thread");
+    }
+
+    [Fact(DisplayName = "#2471 follow-up must-not-fire: without a pass cache every question reads the filing (a new save sees a new filing)")]
+    public async Task WithoutAPassCache_EveryQuestionReadsTheFiling()
+    {
+        var directory = WithUnfiledCommunication(World(), UnfiledOwner.RootTeam);
+        var resolver = directory.Resolver();
+
+        await resolver.ResolveOwnerAsync(SaveQuestion(), CancellationToken.None);
+        await resolver.ResolveOwnerAsync(SaveQuestion(), CancellationToken.None);
+
+        directory.RecordQueries.Count(q => q.EntityName == "sprk_communication" && q.ColumnSet.AllColumns && !q.NoLock)
+            .Should().Be(2);
+    }
+
     /// <summary>The real resolver over <paramref name="directory"/>; <paramref name="faultFor"/> may fault one query.</summary>
     private static RecordOwnershipResolver StrictResolverOver(
         FakeDirectory directory, Func<Microsoft.Xrm.Sdk.Query.QueryExpression, Exception?> faultFor)

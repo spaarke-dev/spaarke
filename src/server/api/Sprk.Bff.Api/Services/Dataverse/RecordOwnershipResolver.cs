@@ -265,6 +265,11 @@ public sealed class RecordOwnerLookupCache
     /// one per refusal of the walk (the pass reports them); empty when no hard-deny row asked.</summary>
     public IReadOnlyList<Sprk.Bff.Api.Infrastructure.Dataverse.RestrictedContentOwnerTeamIdentity> RestrictedContentOwnerTeams =>
         RestrictedContentByAnswerBusinessUnit.Values.Distinct().ToList();
+
+    /// <summary>#2471 follow-up: whether each communication is filed under anything (the #2468 document rule), once read — so
+    /// a pass deciding N documents of one email reads the communication and its thread once, as it reads each row once. Only
+    /// a decided answer is kept: a communication or thread that does not come back is asked again (and refuses again).</summary>
+    internal Dictionary<Guid, bool> CommunicationFiled { get; } = new();
 }
 
 public sealed record RecordOwnershipContext
@@ -1943,7 +1948,7 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
             && string.Equals(context.ChildEntityLogicalName, DocumentEntity, StringComparison.OrdinalIgnoreCase)
             && string.Equals(parents[0].EntityLogicalName, RecordThreadFiling.CommunicationTable, StringComparison.OrdinalIgnoreCase))
         {
-            var filed = await IsCommunicationFiledAsync(parents[0], ct).ConfigureAwait(false);
+            var filed = await IsCommunicationFiledAsync(parents[0], context.LookupCache, ct).ConfigureAwait(false);
             if (filed is null)
             {
                 return RecordOwnerResolution.Refused(
@@ -3961,8 +3966,22 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
     /// parents its own question names, <see cref="RecordOwnershipContext.OrderedParentsOf"/>) or its record thread's filing
     /// (<see cref="RecordThreadFiling"/>: a Direct thread files nothing). Read committed. <c>null</c> when the communication or
     /// its thread does not come back (zero rows; the caller refuses); a Dataverse fault propagates, as every resolver read does.
+    /// With a pass's <paramref name="cache"/> (<see cref="RecordOwnerLookupCache.CommunicationFiled"/>) a decided answer is
+    /// read once for the pass.
     /// </summary>
-    private async Task<bool?> IsCommunicationFiledAsync(RecordOwnershipParent communication, CancellationToken ct)
+    private async Task<bool?> IsCommunicationFiledAsync(
+        RecordOwnershipParent communication, RecordOwnerLookupCache? cache, CancellationToken ct)
+    {
+        if (cache is not null && cache.CommunicationFiled.TryGetValue(communication.RecordId, out var known))
+            return known;
+        var filed = await ReadCommunicationFiledAsync(communication, ct).ConfigureAwait(false);
+        if (cache is not null && filed is { } decided)
+            cache.CommunicationFiled[communication.RecordId] = decided;
+        return filed;
+    }
+
+    /// <summary>The read behind <see cref="IsCommunicationFiledAsync"/>.</summary>
+    private async Task<bool?> ReadCommunicationFiledAsync(RecordOwnershipParent communication, CancellationToken ct)
     {
         var query = new QueryExpression(RecordThreadFiling.CommunicationTable)
         {
