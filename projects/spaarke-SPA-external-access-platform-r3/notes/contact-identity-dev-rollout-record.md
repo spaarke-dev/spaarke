@@ -96,3 +96,9 @@
 - uac-r2 gate, 19:22:50–19:43Z: PASS. 0 failed requests and 0 internal 5xx. **The external routes had no traffic in the window**, so external writes through the changed ownership code are not yet exercised. Only the old warnings remain (SECURE-CENSUS, #2163).
 - About 19:45Z: uac-r2 set `SecureRoot__Inheritance__RootOwnerWritesEnabled=true`. The app restarted. It is report-only while the moves switch is off. `OrdinaryMovesWritesEnabled` is due about 10 minutes later, with its own notice.
 - About 19:53Z: uac-r2 set `SecureChild__Reconciliation__OrdinaryMovesWritesEnabled=true`. The app restarted. The 5-minute reconciler now writes owners: 10 WAs move from the root team to the BU1 team, with their rows and documents; 12 WAs and 6 projects move to their own unit's team; and the ordinary-moves plan is applied. It converges in about 2–3 runs. uac-r2 gates it afterwards, with the external routes split out. These are internal ownership changes. If portal row counts or record opens change after 19:53Z, check this first.
+- uac-r2 post-flip gate, 19:53:19–20:13Z: PASS.
+  - Requests: 0 5xx. The 4 failures are anonymous platform probes. 0 [OWNERSHIP-REFUSED] anywhere. External routes again had no traffic.
+  - Moves: all 28 roots were re-owned in 2 runs (19:55 and 20:00Z), as planned. The ordinary-moves pass is converging (about 21 rows plus 2 events so far), with refused=0 and failed=0. Documents are in place, with no container move.
+  - Only old warnings remain: SECURE-CENSUS, #2163, and the AI catalog drift at startup (since 10-22).
+  - uac-r2 has no more settings changes. The dev BFF is free for R3's next deploy, which needs fresh OKs and an owner go for its SHA.
+- Still unexercised: an external-user write through the new ownership code. The owner's portal check (task 002) is the first chance.
