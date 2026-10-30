@@ -38,8 +38,8 @@ internal sealed class CorrectionTotalsRefusedException(string refusalCode)
 /// <remarks>
 /// <para><b>Deterministic diff.</b> The facts are loaded once (<see cref="BillingFactLoader.LoadAsync"/>) and the evaluator, which is pure, runs twice:
 /// on the request rebuilt from the stored rows with the corrected field at its PRE-correction value, and with its final value. The pre-correction value
-/// is the <c>sprk_finalvalue</c> of the last Corrected / Confirmed row of the field whose findings step finished (listed in
-/// <see cref="AppliedCorrectionsMember"/>; fix round, part 3), else the first row's <c>sprk_aivalue</c>. A field that has a
+/// is the <c>sprk_finalvalue</c> of the last Corrected / Confirmed row of the field whose findings patch landed (listed in
+/// <see cref="PatchedCorrectionsMember"/>; fix round, part 3), else the first row's <c>sprk_aivalue</c>. A field that has a
 /// Corrected or Confirmed row counts as verified (confidence 1.0) on the side where the reviewer has seen it. Both sides are rebuilt the same way, so a
 /// fact the stored rows do not keep (a timekeeper's unmatched reason, an observation's quoted text) is the same on both sides and cannot make a
 /// difference; only findings that depend on the corrected field change.</para>
@@ -50,12 +50,18 @@ internal sealed class CorrectionTotalsRefusedException(string refusalCode)
 /// entry from <c>lineFindings[]</c>; a narrative that is no longer blank removes <c>line.no_description</c>; <c>rules.not_checked</c> is never removed.
 /// A line a reviewer has decided (Accepted, Reduced, Disallowed) is never touched: its entries are left as stored. The Signals are not written here
 /// (B2b-2): what B2b-2 must close or raise is recorded in <see cref="PendingSignalChangesMember"/>.</para>
-/// <para><b>Status step.</b> Each touched, undecided line takes <see cref="InvoiceSubmissionPersister.LineStatusFor"/> over the PATCHED findings: Flagged
-/// when any <c>findings[]</c>, <c>lineFindings[]</c> or <c>codingFindings[]</c> entry names it, else Clean when it has a code set, else Pending.</para>
-/// <para><b>Retry.</b> Both steps are idempotent: the diff depends on the stored correction rows only, a patch already applied produces the same JSON
-/// (no write), and a status already set is not written again. Each write is conditioned on the row version read in the step, so a concurrent change
-/// fails the step and the caller's repeat converges. A failure is <see cref="CorrectionStepException"/> with <see cref="CorrectionCodes.FindingsStep"/>
-/// or <see cref="CorrectionCodes.StatusStep"/>.</para>
+/// <para><b>Status step.</b> Each touched, undecided line, and each line an earlier landed patch left waiting (<see cref="PendingStatusLinesMember"/>),
+/// takes <see cref="InvoiceSubmissionPersister.LineStatusFor"/> over the PATCHED findings: Flagged when any <c>findings[]</c>, <c>lineFindings[]</c> or
+/// <c>codingFindings[]</c> entry names it, else Clean when it has a code set, else Pending.</para>
+/// <para><b>Retry.</b> Every step is idempotent: the diff depends on the stored correction rows only, a patch already applied produces the same JSON
+/// (no write; a plan entry already in place records no Signal change again), and a status already set is not written again. Each write is conditioned on
+/// the row version read in the step, so a concurrent change fails the step and the caller's repeat converges. A failure is
+/// <see cref="CorrectionStepException"/> naming the step.</para>
+/// <para><b>Followed through (fix round, part 3).</b> After the last step (findings, status, Signals, totals, as the field has them), a final
+/// row-version-conditional write lists the field's Corrected / Confirmed rows in <see cref="AppliedCorrectionsMember"/> and takes the lines its status step
+/// re-derived off <see cref="PendingStatusLinesMember"/>; a failure there is <see cref="CorrectionCodes.ReevaluationStep"/>. A row not listed holds the
+/// approval (<see cref="InvoiceApprovalService"/>) and the decision of its line (<see cref="InvoiceLineDecisionService"/>) until the correction is
+/// repeated.</para>
 /// <para><b>Signals step (B2b-2).</b> After the status step, <see cref="PendingSignalChangesMember"/> is reconciled: a <c>rule</c> entry closes the
 /// open Signal whose fingerprint is <c>closeFingerprint</c> as ConditionCleared (record-free, <see cref="SignalWriter.ResolutionConditionCleared"/>)
 /// and writes the current plan entry through <see cref="SignalEpisodeLifecycle"/> with <see cref="ResolvedEpisodeRule.ReopenAsNextEpisode"/> when
@@ -107,21 +113,38 @@ public sealed class InvoiceCorrectionReevaluation
     internal const string ResolutionChangeMember = "resolutionChange";
 
     /// <summary>
-    /// Fix round, part 3 (F-2): the findings JSON member listing the correction rows (ids, <c>D</c> format) whose findings step has finished: <c>[ "id", ... ]</c>.
-    /// The findings step adds every Corrected / Confirmed row of the corrected field (on its line) in the same row-version-conditional write as the patch,
-    /// also when the patch itself is empty. A Corrected / Confirmed row of a re-evaluated field that is not listed has not been followed through, and
-    /// <see cref="InvoiceApprovalService"/> refuses to approve the invoice until the correction is repeated (<see cref="ReadUnappliedAsync"/>).
+    /// Fix round, part 3 (F-2): the findings JSON member listing the correction rows (ids, <c>D</c> format) whose WHOLE follow-through has finished
+    /// (findings, status, Signals and totals, as the field has them): <c>[ "id", ... ]</c>. A final row-version-conditional write after the last step adds every
+    /// Corrected / Confirmed row of the corrected field (on its line); a repeat adds nothing. A Corrected / Confirmed row of a followed-through field that is not
+    /// listed has not been followed through: <see cref="InvoiceApprovalService"/> refuses to approve the invoice, and <see cref="InvoiceLineDecisionService"/>
+    /// to decide its line, until the correction is repeated (<see cref="ReadUnappliedAsync"/>).
     /// </summary>
     public const string AppliedCorrectionsMember = "appliedCorrections";
 
     /// <summary>
+    /// Fix round, part 3 (F-2): the findings JSON member listing the correction rows whose findings PATCH has landed: <c>[ "id", ... ]</c>, written in the same
+    /// row-version-conditional write as the patch. It says which value the stored findings reflect (the diff's "before" side); it is not the guard's list
+    /// (<see cref="AppliedCorrectionsMember"/>), because a patch can land while a later step fails.
+    /// </summary>
+    internal const string PatchedCorrectionsMember = "patchedCorrections";
+
+    /// <summary>
+    /// Fix round, part 3 (F-2): the findings JSON member listing the line indexes (<c>[ 2, 5 ]</c>) a landed findings patch touched whose status has not been
+    /// re-derived since. The patch adds its touched lines when it changes the findings; the status step of any later correction re-derives them as well, and
+    /// the final write of a correction removes the lines its status step re-derived. A correction diffed from a newer value than the one whose status step
+    /// failed would otherwise never re-derive the lines that earlier change touched.
+    /// </summary>
+    internal const string PendingStatusLinesMember = "pendingStatusLines";
+
+    /// <summary>
     /// Fix round, part 3 (F-2): the findings JSON member keeping, per fee line (key: the line index), the roster match, approved rate and reasons the stored
     /// findings were last patched with by a timekeeper or date correction: <c>{ "2": { timekeeperId, approvedRate, timekeeperReason, rateStatus, rateReason } }</c>.
-    /// The "before" side of the next timekeeper or date correction of that line starts from it, so a correction whose findings step never ran is still diffed.
+    /// Written with the patch (like <see cref="PatchedCorrectionsMember"/>, it says what the stored findings reflect). The "before" side of the next timekeeper
+    /// or date correction of that line starts from it, so a correction whose findings step never ran is still diffed.
     /// </summary>
     internal const string AppliedResolutionsMember = "appliedResolutions";
 
-    /// <summary>A Corrected / Confirmed correction row whose findings step has not finished (fix round, part 3).</summary>
+    /// <summary>A Corrected / Confirmed correction row whose follow-through has not finished (fix round, part 3).</summary>
     internal sealed record UnappliedCorrection(Guid RowId, Guid? LineId, string Field);
 
     private static readonly HashSet<string> Reevaluated = new(StringComparer.Ordinal)
@@ -202,7 +225,11 @@ public sealed class InvoiceCorrectionReevaluation
         _systemPolicy = systemPolicy ?? ((receivedOn, ct) => InvoiceSubmissionAfterSteps.ReadSystemPolicyAsync(entities, receivedOn, ct));
     }
 
-    /// <summary>The seam body: the findings step, then the status step. Throws <see cref="CorrectionStepException"/> naming the step that failed.</summary>
+    /// <summary>
+    /// The seam body: the findings step, the status step, the Signals step, the totals step (as the field has them), then the final write that records the
+    /// correction as followed through (<see cref="AppliedCorrectionsMember"/>). Throws <see cref="CorrectionStepException"/> naming the step that failed (the
+    /// final write is <see cref="CorrectionCodes.ReevaluationStep"/>).
+    /// </summary>
     internal async Task ApplyAsync(CorrectionApplied applied, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(applied);
@@ -214,6 +241,8 @@ public sealed class InvoiceCorrectionReevaluation
             return;
         }
 
+        IReadOnlyList<Guid>? followed = null; // the field's rows this run follows through, as read BEFORE its steps
+        IReadOnlySet<int>? derived = null;    // the lines the status step re-derived
         if (reevaluate)
         {
             Patched patched;
@@ -226,9 +255,10 @@ public sealed class InvoiceCorrectionReevaluation
                 throw new CorrectionStepException(CorrectionCodes.FindingsStep, ex);
             }
 
+            followed = patched.Followed;
             try
             {
-                await DeriveStatusAsync(applied, patched, ct).ConfigureAwait(false);
+                derived = await DeriveStatusAsync(applied, patched, ct).ConfigureAwait(false);
             }
             catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
             {
@@ -252,6 +282,9 @@ public sealed class InvoiceCorrectionReevaluation
         {
             try
             {
+                // A field with no findings step (TotalDue): its rows are read before the totals are recomputed, so a correction saved after this read is
+                // never recorded by this run.
+                followed ??= await ReadFollowedAsync(applied, ct).ConfigureAwait(false);
                 await RecalculateTotalsAsync(applied, ct).ConfigureAwait(false);
             }
             catch (CorrectionTotalsRefusedException)
@@ -263,6 +296,75 @@ public sealed class InvoiceCorrectionReevaluation
                 throw new CorrectionStepException(CorrectionCodes.TotalsStep, ex);
             }
         }
+
+        try
+        {
+            await RecordFollowedThroughAsync(applied, followed!, derived, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            throw new CorrectionStepException(CorrectionCodes.ReevaluationStep, ex);
+        }
+    }
+
+    // ── The final write (fix round, part 3) ──
+
+    /// <summary>The ids of the field's Corrected / Confirmed rows (on its line), for a field with no findings step.</summary>
+    private async Task<IReadOnlyList<Guid>> ReadFollowedAsync(CorrectionApplied applied, CancellationToken ct) =>
+        (await ReadCorrectionsAsync(applied.InvoiceId, ct).ConfigureAwait(false))
+            .Where(r => r.IsLabel && r.Field == applied.Field && r.LineId == applied.LineId)
+            .Select(r => r.Id)
+            .ToList();
+
+    /// <summary>
+    /// After the last step: lists <paramref name="followed"/> in <see cref="AppliedCorrectionsMember"/> and removes the lines the status step re-derived
+    /// (<paramref name="derived"/>) from <see cref="PendingStatusLinesMember"/>, in one row-version-conditional write of the latest submission. Nothing is
+    /// written when nothing changes (a repeat). Throws when the submission or its findings cannot be read (fail closed: the rows stay unapplied).
+    /// </summary>
+    private async Task RecordFollowedThroughAsync(CorrectionApplied applied, IReadOnlyList<Guid> followed, IReadOnlySet<int>? derived, CancellationToken ct)
+    {
+        var submission = await ReadSubmissionAsync(applied.InvoiceId, ct).ConfigureAwait(false)
+            ?? throw new InvalidOperationException("The invoice has no submission.");
+        if (!submission.TryGetAttributeValue<long>(InvoiceTotalsService.VersionNumber, out var version) || version <= 0)
+        {
+            throw new InvalidOperationException("The submission version could not be read.");
+        }
+
+        var json = submission.GetAttributeValue<string>(InvoiceSubmissionPersister.SubmissionFindingsJson);
+        if (string.IsNullOrWhiteSpace(json) || JsonNode.Parse(json) is not JsonObject root)
+        {
+            throw new InvalidOperationException("The submission has no stored findings.");
+        }
+
+        var original = root.ToJsonString();
+        MarkListed(root, AppliedCorrectionsMember, followed);
+        if (derived is { Count: > 0 } && root[PendingStatusLinesMember] is JsonArray pendingLines)
+        {
+            foreach (var node in pendingLines.Where(n => IntOf(n) is { } index && derived.Contains(index)).ToList())
+            {
+                pendingLines.Remove(node);
+            }
+
+            if (pendingLines.Count == 0)
+            {
+                root.Remove(PendingStatusLinesMember);
+            }
+        }
+
+        if (string.Equals(original, root.ToJsonString(), StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        var update = new Entity(InvoiceReviewReadService.SubmissionEntity, submission.Id)
+        {
+            RowVersion = version.ToString(CultureInfo.InvariantCulture),
+            [InvoiceSubmissionPersister.SubmissionFindingsJson] = root.ToJsonString(),
+        };
+        await _entities.ExecuteTransactionAsync(
+            [new UpdateRequest { Target = update, ConcurrencyBehavior = ConcurrencyBehavior.IfRowVersionMatches }], ct).ConfigureAwait(false);
+        _logger.LogInformation("Correction of {Field} on invoice {InvoiceId}: followed through ({Count} correction rows recorded).",
+            applied.Field, applied.InvoiceId, followed.Count);
     }
 
     // ── The totals step (B2c) ──
@@ -312,7 +414,7 @@ public sealed class InvoiceCorrectionReevaluation
 
     private sealed record StoredLine(int Index, Entity Row, JsonObject? Extraction, bool Decided);
 
-    private sealed record Patched(JsonObject Root, IReadOnlyDictionary<int, StoredLine> Lines, IReadOnlySet<int> Touched);
+    private sealed record Patched(JsonObject Root, IReadOnlyDictionary<int, StoredLine> Lines, IReadOnlySet<int> Touched, IReadOnlyList<Guid> Followed);
 
     private async Task<Patched> PatchFindingsAsync(CorrectionApplied applied, CancellationToken ct)
     {
@@ -344,8 +446,10 @@ public sealed class InvoiceCorrectionReevaluation
         }
 
         // The corrected field: its final value (the latest Corrected / Confirmed row) and its value as the stored findings last saw it. Fix round, part 3
-        // (F-2): that is the final value of the last row whose findings step FINISHED (listed in appliedCorrections), not simply the previous row: a row
-        // saved without its follow-through would otherwise be the "before" and its change would never be diffed.
+        // (F-2): that is the final value of the last row whose findings patch LANDED (listed in patchedCorrections), not simply the previous row: a row
+        // saved without its patch would otherwise be the "before" and its change would never be diffed. It is not the last FULLY followed-through row
+        // (appliedCorrections): when a patch landed and a later step failed, the stored findings reflect that patch, and a diff from an older value would
+        // leave the entries that only the newer value changed.
         var fieldRows = rows.Where(r => r.Field == applied.Field && r.LineId == applied.LineId).ToList();
         var labels = fieldRows.Where(r => r.IsLabel).ToList();
         if (labels.Count == 0)
@@ -353,9 +457,9 @@ public sealed class InvoiceCorrectionReevaluation
             throw new InvalidOperationException("The correction row of the field was not found.");
         }
 
-        var appliedIds = AppliedOf(root);
+        var patchedIds = ListedOf(root, PatchedCorrectionsMember);
         var latest = labels[^1];
-        var previous = labels.Take(labels.Count - 1).LastOrDefault(r => appliedIds.Contains(r.Id));
+        var previous = labels.Take(labels.Count - 1).LastOrDefault(r => patchedIds.Contains(r.Id));
         var preValue = previous is not null ? previous.Final : fieldRows[0].Ai;
         var verified = rows.Where(r => r.IsLabel).Select(r => (r.LineId, r.Field)).ToHashSet();
 
@@ -391,8 +495,14 @@ public sealed class InvoiceCorrectionReevaluation
             ClearLineFindings(root, applied.Field, index, latest.Final);
         }
 
-        // Fix round, part 3 (F-2): this field's rows are now followed through, and (a timekeeper or date correction) the pair the findings now reflect is
-        // kept. Both ride in the same conditional write as the patch, and are written even when the patch itself is empty; a repeat adds nothing.
+        // Fix round, part 3 (F-2): what the stored findings now reflect: this field's rows (patchedCorrections) and, for a timekeeper or date correction,
+        // the pair. When the patch changed the findings, the lines it touched wait for their status (pendingStatusLines) until a status step re-derives
+        // them. All ride in the same conditional write as the patch; a repeat whose patch changes nothing adds nothing and writes nothing.
+        if (!string.Equals(original, root.ToJsonString(), StringComparison.Ordinal))
+        {
+            MarkPendingStatus(root, touched);
+        }
+
         if (resolutionField && ResolutionNow(correctedLine!) is { } now)
         {
             if (root[AppliedResolutionsMember] is not JsonObject resolutions)
@@ -403,7 +513,7 @@ public sealed class InvoiceCorrectionReevaluation
             resolutions[correctedLine!.Index.ToString(CultureInfo.InvariantCulture)] = now;
         }
 
-        MarkApplied(root, appliedIds, labels.Select(l => l.Id));
+        MarkListed(root, PatchedCorrectionsMember, labels.Select(l => l.Id));
 
         if (!string.Equals(original, root.ToJsonString(), StringComparison.Ordinal))
         {
@@ -419,14 +529,15 @@ public sealed class InvoiceCorrectionReevaluation
                 applied.Field, applied.InvoiceId, beforeResult.Findings.Count, afterResult.Findings.Count, touched.Count);
         }
 
-        return new Patched(root, lines, touched);
+        return new Patched(root, lines, touched, labels.Select(l => l.Id).ToList());
     }
 
-    /// <summary>The correction row ids listed in <see cref="AppliedCorrectionsMember"/> (an entry that is not an id is ignored).</summary>
-    private static HashSet<Guid> AppliedOf(JsonObject root)
+    /// <summary>The correction row ids listed in <paramref name="member"/> (<see cref="AppliedCorrectionsMember"/> or <see cref="PatchedCorrectionsMember"/>;
+    /// an entry that is not an id is ignored).</summary>
+    private static HashSet<Guid> ListedOf(JsonObject root, string member)
     {
         var ids = new HashSet<Guid>();
-        foreach (var node in root[AppliedCorrectionsMember] as JsonArray ?? [])
+        foreach (var node in root[member] as JsonArray ?? [])
         {
             if (node is JsonValue value && value.TryGetValue<string>(out var text) && Guid.TryParse(text, out var id))
             {
@@ -437,9 +548,10 @@ public sealed class InvoiceCorrectionReevaluation
         return ids;
     }
 
-    /// <summary>Adds the ids not yet listed to <see cref="AppliedCorrectionsMember"/>, in order; nothing changes when all are listed (a repeat).</summary>
-    private static void MarkApplied(JsonObject root, HashSet<Guid> listed, IEnumerable<Guid> ids)
+    /// <summary>Adds the ids not yet listed to <paramref name="member"/>, in order; nothing changes when all are listed (a repeat).</summary>
+    private static void MarkListed(JsonObject root, string member, IEnumerable<Guid> ids)
     {
+        var listed = ListedOf(root, member);
         foreach (var id in ids)
         {
             if (!listed.Add(id))
@@ -447,14 +559,38 @@ public sealed class InvoiceCorrectionReevaluation
                 continue;
             }
 
-            if (root[AppliedCorrectionsMember] is not JsonArray array)
+            if (root[member] is not JsonArray array)
             {
-                root[AppliedCorrectionsMember] = array = [];
+                root[member] = array = [];
             }
 
             array.Add(id.ToString("D"));
         }
     }
+
+    /// <summary>Adds the lines not yet listed to <see cref="PendingStatusLinesMember"/>; nothing changes when all are listed.</summary>
+    private static void MarkPendingStatus(JsonObject root, IEnumerable<int> lines)
+    {
+        var listed = PendingStatusOf(root);
+        foreach (var line in lines.Order())
+        {
+            if (!listed.Add(line))
+            {
+                continue;
+            }
+
+            if (root[PendingStatusLinesMember] is not JsonArray array)
+            {
+                root[PendingStatusLinesMember] = array = [];
+            }
+
+            array.Add(line);
+        }
+    }
+
+    /// <summary>The line indexes listed in <see cref="PendingStatusLinesMember"/>.</summary>
+    private static HashSet<int> PendingStatusOf(JsonObject root) =>
+        (root[PendingStatusLinesMember] as JsonArray ?? []).Select(IntOf).Where(i => i is not null).Select(i => i!.Value).ToHashSet();
 
     /// <summary>The roster match, approved rate and reasons a timekeeper or date correction is diffed FROM.</summary>
     private sealed record ResolutionFacts(Guid? TimekeeperId, decimal? ApprovedRate, TimekeeperUnmatchedReason TimekeeperReason, RateResolutionStatus RateStatus, RateNotFoundReason RateReason);
@@ -691,6 +827,13 @@ public sealed class InvoiceCorrectionReevaluation
             }
 
             var stored = plan.OfType<JsonObject>().FirstOrDefault(e => PlanKey(Text(e, "policyCode"), Text(e, "subjectEntity"), Text(e, "subjectId")) == key);
+            if (stored is not null && current is { } already && JsonNode.DeepEquals(stored, already.Entry))
+            {
+                // Fix round, part 3: a repeat whose patch already landed. The plan holds the entry; its Signal change is either still recorded (the
+                // Signals step has not finished) or done; recording it again would only make the Signals step write the same entry once more.
+                continue;
+            }
+
             var storedFingerprint = stored is null ? null : Text(stored, "fingerprint");
 
             // A correction never drops a hold: a stored entry presented Blocked stays as stored (its Signal too) when the after side would not present
@@ -868,11 +1011,16 @@ public sealed class InvoiceCorrectionReevaluation
 
     // ── The status step ──
 
-    private async Task DeriveStatusAsync(CorrectionApplied applied, Patched patched, CancellationToken ct)
+    /// <summary>
+    /// Re-derives the lines this patch touched and the lines an earlier landed patch left waiting (<see cref="PendingStatusLinesMember"/>); returns every
+    /// line it considered, so the final write can take them off the waiting list.
+    /// </summary>
+    private async Task<IReadOnlySet<int>> DeriveStatusAsync(CorrectionApplied applied, Patched patched, CancellationToken ct)
     {
         var requests = new List<OrganizationRequest>();
         var noExtraction = 0;
-        foreach (var index in patched.Touched.Order())
+        var considered = patched.Touched.Union(PendingStatusOf(patched.Root)).ToHashSet();
+        foreach (var index in considered.Order())
         {
             if (!patched.Lines.TryGetValue(index, out var line) || line.Decided)
             {
@@ -918,6 +1066,8 @@ public sealed class InvoiceCorrectionReevaluation
             await _entities.ExecuteTransactionAsync(requests, ct).ConfigureAwait(false);
             _logger.LogInformation("Correction of {Field} on invoice {InvoiceId}: {Count} line statuses re-derived.", applied.Field, applied.InvoiceId, requests.Count);
         }
+
+        return considered;
     }
 
     /// <summary>The persister's rule (<see cref="InvoiceSubmissionPersister.LineStatusFor"/>) over the patched findings: any entry naming the line flags it; coded = a code set is recorded.</summary>
@@ -1524,13 +1674,13 @@ public sealed class InvoiceCorrectionReevaluation
     }
 
     /// <summary>
-    /// Fix round, part 3 (F-2): the Corrected / Confirmed correction rows of the invoice, of a field this follow-through re-evaluates, that are not listed in
-    /// the latest submission's <see cref="AppliedCorrectionsMember"/>: corrections whose value was saved but whose findings step has not finished (the client
-    /// stopped after a 503 Incomplete). A row of another field (TotalDue) has no findings step and is never listed here. A row of a line that
-    /// <paramref name="lines"/> shows a reviewer has since decided (Accepted, Reduced, Disallowed) is not listed either: the findings step never patches a
-    /// decided line, and the correction service refuses a decided line, so its repeat could never clear it. The submission is read only when a row is left; with no
-    /// findings JSON every such row is unapplied. A read fault throws (the caller refuses: fail closed). App-only (<see cref="IGenericEntityService"/>), as every
-    /// read of the findings JSON.
+    /// Fix round, part 3 (F-2): the Corrected / Confirmed correction rows of the invoice, of a field this follow-through handles (re-evaluated, or one that
+    /// feeds the totals, TotalDue included), that are not listed in the latest submission's <see cref="AppliedCorrectionsMember"/>: corrections whose value
+    /// was saved but whose follow-through (findings, status, Signals, totals) has not finished (the client stopped after a 503 Incomplete). A row of a line that
+    /// <paramref name="lines"/> shows a reviewer has decided (Accepted, Reduced, Disallowed) is not listed: <see cref="InvoiceLineDecisionService"/> refuses to
+    /// decide a line while one of its corrections is listed here, and the correction service refuses a decided line, so such a row was followed through before
+    /// the decision (or predates this rule). The submission is read only when a row is left; with no findings JSON every such row is unapplied. A read fault
+    /// throws (the caller refuses: fail closed). App-only (<see cref="IGenericEntityService"/>), as every read of the findings JSON.
     /// </summary>
     internal static async Task<IReadOnlyList<UnappliedCorrection>> ReadUnappliedAsync(
         IGenericEntityService entities, Guid invoiceId, IEnumerable<Entity> lines, CancellationToken ct)
@@ -1552,7 +1702,7 @@ public sealed class InvoiceCorrectionReevaluation
         query.AddOrder($"{InvoiceLineDecisionService.CorrectionEntity}id", OrderType.Ascending);
         var rows = (await InvoiceReviewReadService.ReadPagedAsync(entities, query, ct).ConfigureAwait(false))
             .Where(r => r.GetAttributeValue<OptionSetValue>("sprk_outcometype")?.Value is InvoiceCorrectionService.OutcomeCorrected or InvoiceCorrectionService.OutcomeConfirmed
-                && r.GetAttributeValue<string>("sprk_fieldname") is { } field && Reevaluated.Contains(field)
+                && r.GetAttributeValue<string>("sprk_fieldname") is { } field && (Reevaluated.Contains(field) || TotalsFields.Contains(field))
                 && !(r.GetAttributeValue<EntityReference>("sprk_invoiceline")?.Id is { } line && decidedLines.Contains(line)))
             .ToList();
         if (rows.Count == 0)
@@ -1562,11 +1712,27 @@ public sealed class InvoiceCorrectionReevaluation
 
         var submission = await ReadSubmissionAsync(entities, invoiceId, ct).ConfigureAwait(false);
         var json = submission?.GetAttributeValue<string>(InvoiceSubmissionPersister.SubmissionFindingsJson);
-        var appliedIds = !string.IsNullOrWhiteSpace(json) && JsonNode.Parse(json) is JsonObject root ? AppliedOf(root) : [];
+        var appliedIds = !string.IsNullOrWhiteSpace(json) && JsonNode.Parse(json) is JsonObject root ? ListedOf(root, AppliedCorrectionsMember) : [];
         return rows
             .Where(r => !appliedIds.Contains(r.Id))
             .Select(r => new UnappliedCorrection(r.Id, r.GetAttributeValue<EntityReference>("sprk_invoiceline")?.Id, r.GetAttributeValue<string>("sprk_fieldname")!))
             .ToList();
+    }
+
+    /// <summary>
+    /// The reviewer-facing refusal while corrections are unapplied (the approval and the line decisions): each correction by its field and where it is (the
+    /// line number, or the invoice), then what to do; no ids. <paramref name="then"/> ends the text, for example "approve again".
+    /// </summary>
+    internal static string UnappliedText(IReadOnlyList<UnappliedCorrection> unapplied, IEnumerable<Entity> lines, string then)
+    {
+        var sequence = lines.ToDictionary(l => l.Id, l => l.GetAttributeValue<int?>(InvoiceSubmissionPersister.LineSequence));
+        var named = unapplied
+            .Select(u => u.LineId is not { } lineId ? $"{u.Field} (invoice)"
+                : sequence.TryGetValue(lineId, out var number) && number is { } n ? $"{u.Field} (line {n.ToString(CultureInfo.InvariantCulture)})"
+                : $"{u.Field} (a line)")
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+        return $"These corrections were saved but did not finish: {string.Join("; ", named)}. Repeat each correction, then {then}.";
     }
 
     // ── JSON helpers ──

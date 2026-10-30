@@ -30,16 +30,25 @@ public sealed class InvoiceCorrectionEndToEndTests
     private static InvoiceCorrectionService Corrections(ApprovalWorld w, params BillingRuleCandidate[] rules) => Corrections(w, null, rules);
 
     private static InvoiceCorrectionService Corrections(
-        ApprovalWorld w, Func<SignalWriteRequest, CancellationToken, Task<SignalWriteResult>>? writeSignal, params BillingRuleCandidate[] rules)
+        ApprovalWorld w, Func<SignalWriteRequest, CancellationToken, Task<SignalWriteResult>>? writeSignal, params BillingRuleCandidate[] rules) =>
+        Corrections(w, rules, writeSignal);
+
+    private static InvoiceCorrectionService Corrections(
+        ApprovalWorld w,
+        BillingRuleCandidate[] rules,
+        Func<SignalWriteRequest, CancellationToken, Task<SignalWriteResult>>? writeSignal = null,
+        Func<Guid, string, int, string, CancellationToken, Task<SignalCloseOutcome>>? closeSignal = null,
+        Func<Guid, CancellationToken, Task<InvoiceTotalsCalculation>>? recalculate = null)
     {
         var resolver = new CodeSetResolver(w.Entities.Object, w.Settings.Object, new Mock<ICodeSetSuggestionProvider>().Object, NullLogger<CodeSetResolver>.Instance);
         var loaded = Kit.Loaded(rules);
         var reevaluation = new InvoiceCorrectionReevaluation(
             w.Entities.Object, (_, _) => Task.FromResult(loaded), Kit.Evaluator().Evaluate,
             writeSignal ?? ((request, _) => Task.FromException<SignalWriteResult>(new InvalidOperationException("no Signal is raised on this path"))),
-            (id, rowVersion, resolution, _, _) => Task.FromResult(Close(w, id, rowVersion, resolution)),
+            closeSignal ?? ((id, rowVersion, resolution, _, _) => Task.FromResult(Close(w, id, rowVersion, resolution))),
             NullLogger<InvoiceCorrectionReevaluation>.Instance,
-            (_, _) => Task.FromResult<(BillingRuleCandidate?, string)>((SystemPolicy, "in_force")));
+            (_, _) => Task.FromResult<(BillingRuleCandidate?, string)>((SystemPolicy, "in_force")),
+            recalculate);
         return new InvoiceCorrectionService(
             w.Entities.Object, resolver, w.Ownership.Object, w.Identity.Object, (entity, id, ct) => w.Resolver().ResolveAsync(entity, id, ct),
             NullLogger<InvoiceCorrectionService>.Instance, w.Clock, reevaluation.ApplyAsync);
@@ -301,5 +310,148 @@ public sealed class InvoiceCorrectionEndToEndTests
         refused.Code.Should().Be(InvoiceApprovalCodes.Unavailable);
         AssertApproveWroteNothing(w, writes, line);
         await FluentActions.Awaiting(() => w.GetAs(AliceUser)).Should().ThrowAsync<TimeoutException>("the GET throws on a read fault, as for the hold read");
+    }
+
+    // =========================================================================================
+    // Fix round, part 3, round 2: "applied" only after the WHOLE follow-through; no line decided past an unfinished correction
+    // =========================================================================================
+
+    private static readonly Func<SignalWriteRequest, CancellationToken, Task<SignalWriteResult>> SignalWritten =
+        (_, _) => Task.FromResult(new SignalWriteResult(Guid.NewGuid(), true, Guid.Empty, Guid.Empty));
+
+    private static bool WritesLineStatus(IReadOnlyList<Microsoft.Xrm.Sdk.OrganizationRequest> requests) =>
+        requests.OfType<Microsoft.Xrm.Sdk.Messages.UpdateRequest>().Any(u => u.Target.LogicalName == "sprk_billingevent" && u.Target.Contains("sprk_linestatus"));
+
+    /// <summary>The first transaction <paramref name="matches"/> picks fails once.</summary>
+    private static Func<IReadOnlyList<Microsoft.Xrm.Sdk.OrganizationRequest>, Exception?> FailOnce(Func<IReadOnlyList<Microsoft.Xrm.Sdk.OrganizationRequest>, bool> matches)
+    {
+        var failed = false;
+        return requests =>
+        {
+            if (failed || !matches(requests))
+            {
+                return null;
+            }
+
+            failed = true;
+            return new TimeoutException("simulated");
+        };
+    }
+
+    private static async Task<ApprovalResult> AssertRefusedForPendingCorrections(ApprovalWorld w, Entity line, string field)
+    {
+        (await w.GetAs(AliceUser))!.CanApprove.Should().BeFalse("a correction is waiting for its follow-through");
+        var writes = w.Writes;
+        var refused = await w.ApproveAs(AliceUser);
+        refused.Outcome.Should().Be(ApprovalOutcome.Conflict);
+        refused.Code.Should().Be(InvoiceApprovalCodes.CorrectionsPending);
+        refused.Detail.Should().Be($"These corrections were saved but did not finish: {field} (line 1). Repeat each correction, then approve again.");
+        w.Writes.Should().Be(writes, "a refused approve writes nothing");
+        w.Transitions.Should().Be(0);
+        w.InvoiceStatus.Should().Be(InvoiceStatusCodes.InReview);
+        w.Portion.Contains("sprk_decidedby").Should().BeFalse("nothing is claimed");
+        StatusOf(w.Row("sprk_billingevent", line.Id)).Should().NotBe((int)InvoiceLineStatus.Accepted, "the line is not accepted in bulk");
+        return refused;
+    }
+
+    [Fact(DisplayName = "101 fix 3 F-2 round 2 SEEDED: a correction whose findings patch landed but whose STATUS step failed (the line still Clean, a finding on it) blocks approval; after the repeat the line is Flagged, decided, and the invoice approved")]
+    public async Task AFailedStatusStep_BlocksApproval_UntilTheRepeat()
+    {
+        var w = new ApprovalWorld();
+        var (line, submission) = CleanInvoice(w);
+        var corrections = Corrections(w, [Cap], writeSignal: SignalWritten);
+        var command = new CorrectionCommand(w.InvoiceId, line.Id, "Hours", "25", false, AliceUser);
+        w.TransactionFault = FailOnce(WritesLineStatus);
+
+        var first = await corrections.CorrectAsync(command, CancellationToken.None);
+
+        first.Status.Should().Be(CorrectionStatus.Incomplete);
+        first.FailedStep.Should().Be(CorrectionCodes.StatusStep);
+        ((JsonArray)Stored(w.Row("sprk_invoicesubmission", submission.Id))["findings"]!).Should().ContainSingle("the findings patch landed");
+        StatusOf(w.Row("sprk_billingevent", line.Id)).Should().Be((int)InvoiceLineStatus.Clean, "an approve would otherwise accept it in bulk");
+
+        await AssertRefusedForPendingCorrections(w, line, "Hours");
+
+        (await corrections.CorrectAsync(command, CancellationToken.None)).IsApplied.Should().BeTrue();
+        StatusOf(w.Row("sprk_billingevent", line.Id)).Should().Be((int)InvoiceLineStatus.Flagged);
+        (await w.ApproveAs(AliceUser)).Outcome.Should().Be(ApprovalOutcome.LinesOpen);
+
+        (await w.LineService().DecideAsync(
+            new LineDecisionCommand(w.InvoiceId, Guid.NewGuid(), LineDecisionAction.Accept, null, [new LineDecisionLine(line.Id)], BobUser, Bulk: false, CallerToken),
+            CancellationToken.None)).IsApplied.Should().BeTrue("every correction of the line is followed through");
+        (await w.ApproveAs(AliceUser)).Outcome.Should().Be(ApprovalOutcome.Approved);
+        w.InvoiceStatus.Should().Be(InvoiceStatusCodes.Approved);
+    }
+
+    [Fact(DisplayName = "101 fix 3 F-2 round 2: a re-code whose SIGNALS step failed (the line Clean, the coding hold still open) blocks approval; after the repeat the hold closes and the invoice is approved")]
+    public async Task AFailedSignalsStep_BlocksApproval_UntilTheRepeat()
+    {
+        var w = new ApprovalWorld();
+        Prepare(w);
+        var line = w.AddLine(InvoiceLineStatus.Pending, extraction: W.ExtractionJson(coded: false));
+        var root = Root(nameof(SubmissionEvaluationKind.AcceptedUncoded));
+        root["reasonCode"] = SubmissionReasonCodes.CodingNoCodeSetHold;
+        root["pipelineFindings"] = new JsonArray(new JsonObject { ["reasonCode"] = SubmissionReasonCodes.CodingNoCodeSetHold, ["values"] = new JsonObject() });
+        Submission(w, root, InvoiceSubmissionStatus.Accepted, SubmissionReasonCodes.CodingNoCodeSetHold);
+        var hold = w.AddInvoiceSignal(BillingRuleCatalogue.SystemPolicyCode);
+        w.Row("sprk_signal", hold)["sprk_evidencerefs"] =
+            "[{\"kind\":\"" + BillingFindingSignalMapper.FingerprintEvidenceKind + "\",\"ref\":\"coding.no_code_set|Flag\"}]";
+        w.Row("sprk_signal", hold)["versionnumber"] = 1L;
+        w.Put(new Entity("sprk_billingcodeset", CodeSetId) { ["sprk_name"] = "UTBMS Litigation", ["statecode"] = new OptionSetValue(0) });
+        w.Put(new Entity("sprk_billingcode", Guid.NewGuid())
+        {
+            ["sprk_code"] = "L120", ["sprk_codetype"] = new OptionSetValue((int)BillingCodeKind.Task), ["sprk_description"] = "L120",
+            ["sprk_codeset"] = new EntityReference("sprk_billingcodeset", CodeSetId), ["statecode"] = new OptionSetValue(0),
+        });
+        w.SettingsValue = new EbillingSettings { DefaultCodeSetId = CodeSetId };
+        var closeFails = true;
+        var corrections = Corrections(w, [], closeSignal: (id, rowVersion, resolution, _, _) =>
+        {
+            if (closeFails)
+            {
+                closeFails = false;
+                return Task.FromException<SignalCloseOutcome>(new TimeoutException("simulated"));
+            }
+
+            return Task.FromResult(Close(w, id, rowVersion, resolution));
+        });
+        var command = new CorrectionCommand(w.InvoiceId, line.Id, "TaskCode", "L120", false, AliceUser);
+
+        var first = await corrections.CorrectAsync(command, CancellationToken.None);
+
+        first.Status.Should().Be(CorrectionStatus.Incomplete);
+        first.FailedStep.Should().Be(CorrectionCodes.SignalsStep);
+        StatusOf(w.Row("sprk_billingevent", line.Id)).Should().Be((int)InvoiceLineStatus.Clean, "the status step finished");
+        w.SignalStatus(hold).Should().Be(SignalWriter.SignalStatusOpen, "the hold's close did not finish");
+
+        await AssertRefusedForPendingCorrections(w, line, "TaskCode");
+
+        (await corrections.CorrectAsync(command, CancellationToken.None)).IsApplied.Should().BeTrue();
+        w.SignalStatus(hold).Should().Be(SignalWriter.SignalStatusResolved);
+        (await w.ApproveAs(AliceUser)).Outcome.Should().Be(ApprovalOutcome.Approved);
+        w.InvoiceStatus.Should().Be(InvoiceStatusCodes.Approved);
+    }
+
+    [Fact(DisplayName = "101 fix 3 F-2 round 2: an hours correction whose TOTALS step failed (the approved total stale) blocks approval; after the repeat the invoice is approved")]
+    public async Task AFailedTotalsStep_BlocksApproval_UntilTheRepeat()
+    {
+        var w = new ApprovalWorld();
+        var (line, _) = CleanInvoice(w);
+        var corrections = Corrections(w, [], recalculate: (id, ct) => w.Totals().RecalculateAsync(id, ct));
+        var command = new CorrectionCommand(w.InvoiceId, line.Id, "Hours", "3", false, AliceUser);
+        w.FaultsOnce["totals"] = new TimeoutException("simulated");
+
+        var first = await corrections.CorrectAsync(command, CancellationToken.None);
+
+        first.Status.Should().Be(CorrectionStatus.Incomplete);
+        first.FailedStep.Should().Be(CorrectionCodes.TotalsStep);
+        StatusOf(w.Row("sprk_billingevent", line.Id)).Should().Be((int)InvoiceLineStatus.Clean);
+
+        await AssertRefusedForPendingCorrections(w, line, "Hours");
+
+        (await corrections.CorrectAsync(command, CancellationToken.None)).IsApplied.Should().BeTrue();
+        (await w.GetAs(AliceUser))!.CanApprove.Should().BeTrue();
+        (await w.ApproveAs(AliceUser)).Outcome.Should().Be(ApprovalOutcome.Approved);
+        w.InvoiceStatus.Should().Be(InvoiceStatusCodes.Approved);
     }
 }

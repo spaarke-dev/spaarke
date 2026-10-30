@@ -14,10 +14,11 @@ using W = Sprk.Bff.Api.Tests.Services.Finance.CorrectionWorld;
 namespace Sprk.Bff.Api.Tests.Services.Finance;
 
 /// <summary>
-/// ebilling-r1 task 101 fix round, part 3 (F-2): a correction whose findings step never finished is recorded as such (<c>appliedCorrections</c>), the next
-/// correction of the field diffs from the last APPLIED value (and a timekeeper or date correction from the last applied roster match and rate), and a touched
-/// line with no stored extraction keeps its status. Over <see cref="CorrectionWorld"/>'s in-memory Dataverse and 072's real evaluator. The approval guard
-/// itself is in <see cref="InvoiceCorrectionEndToEndTests"/>.
+/// ebilling-r1 task 101 fix round, part 3 (F-2): a correction is recorded as followed through (<c>appliedCorrections</c>) only after its last step; the next
+/// correction of the field diffs from the value whose findings patch last LANDED (and a timekeeper or date correction from the roster match and rate it
+/// patched with); the lines a landed patch touched are re-derived by the next status step that runs (<c>pendingStatusLines</c>); a repeat converges to the
+/// state of an uninterrupted correction; and a touched line with no stored extraction keeps its status. Over <see cref="CorrectionWorld"/>'s in-memory
+/// Dataverse and 072's real evaluator. The approval guard and the line-decision refusal are in <see cref="InvoiceCorrectionEndToEndTests"/>.
 /// </summary>
 public sealed class InvoiceCorrectionDurabilityTests
 {
@@ -29,12 +30,19 @@ public sealed class InvoiceCorrectionDurabilityTests
 
     private static CorrectionCommand Line(string field, string? value) => new(W.InvoiceId, W.FeeLineId, field, value, false, W.Reviewer);
 
-    private static InvoiceCorrectionService Service(CorrectionWorld world, ILogger<InvoiceCorrectionReevaluation>? log = null, params BillingRuleCandidate[] rules)
+    private static CorrectionCommand Header(string field, string? value) => new(W.InvoiceId, null, field, value, false, W.Reviewer);
+
+    private static InvoiceCorrectionService Service(CorrectionWorld world, ILogger<InvoiceCorrectionReevaluation>? log = null, params BillingRuleCandidate[] rules) =>
+        Service(world, log, null, rules);
+
+    private static InvoiceCorrectionService Service(
+        CorrectionWorld world, ILogger<InvoiceCorrectionReevaluation>? log, Func<Guid, CancellationToken, Task<InvoiceTotalsCalculation>>? recalculate,
+        params BillingRuleCandidate[] rules)
     {
         var loaded = Kit.Loaded(rules);
         var reevaluation = new InvoiceCorrectionReevaluation(
             world.Entities.Object, (_, _) => Task.FromResult(loaded), Kit.Evaluator().Evaluate, world.WriteSignalAsync, world.CloseSignalAsync,
-            log ?? NullLogger<InvoiceCorrectionReevaluation>.Instance);
+            log ?? NullLogger<InvoiceCorrectionReevaluation>.Instance, recalculate: recalculate);
         world.Seam = reevaluation.ApplyAsync;
         return world.Service();
     }
@@ -79,6 +87,49 @@ public sealed class InvoiceCorrectionDurabilityTests
     private static List<Guid> Applied(JsonObject root) =>
         (root[InvoiceCorrectionReevaluation.AppliedCorrectionsMember] as JsonArray ?? []).Select(n => Guid.Parse(n!.GetValue<string>())).ToList();
 
+    private static List<Guid> Patched(JsonObject root) =>
+        (root[InvoiceCorrectionReevaluation.PatchedCorrectionsMember] as JsonArray ?? []).Select(n => Guid.Parse(n!.GetValue<string>())).ToList();
+
+    private static List<int> PendingStatus(JsonObject root) =>
+        (root[InvoiceCorrectionReevaluation.PendingStatusLinesMember] as JsonArray ?? []).Select(n => n!.GetValue<int>()).ToList();
+
+    private static Task<IReadOnlyList<InvoiceCorrectionReevaluation.UnappliedCorrection>> Unapplied(CorrectionWorld world) =>
+        InvoiceCorrectionReevaluation.ReadUnappliedAsync(world.Entities.Object, W.InvoiceId, world.Lines, CancellationToken.None);
+
+    private static InvoiceTotalsCalculation Totals() => new(0m, 0m, 0m, 0m, 0m, new Dictionary<Guid, decimal>(), null);
+
+    /// <summary>The totals step fails ONCE (the next recalculation goes through).</summary>
+    private static Func<Guid, CancellationToken, Task<InvoiceTotalsCalculation>> TotalsFailingOnce()
+    {
+        var failed = false;
+        return (_, _) =>
+        {
+            if (failed)
+            {
+                return Task.FromResult(Totals());
+            }
+
+            failed = true;
+            return Task.FromException<InvoiceTotalsCalculation>(new TimeoutException("simulated"));
+        };
+    }
+
+    /// <summary>The first line-status write fails ONCE: the findings patch has landed, the status step has not.</summary>
+    private static void FailNextStatusWrite(CorrectionWorld world)
+    {
+        var failed = false;
+        world.TransactionFault = r =>
+        {
+            if (failed || !r.OfType<UpdateRequest>().Any(u => u.Target.Contains("sprk_linestatus")))
+            {
+                return null;
+            }
+
+            failed = true;
+            return new TimeoutException("simulated");
+        };
+    }
+
     private static int StatusOf(CorrectionWorld world) => world.Line().GetAttributeValue<OptionSetValue>("sprk_linestatus").Value;
 
     private static bool WritesFindings(IReadOnlyList<OrganizationRequest> requests) =>
@@ -104,7 +155,7 @@ public sealed class InvoiceCorrectionDurabilityTests
     // Item 1 - appliedCorrections
     // =========================================================================================
 
-    [Fact(DisplayName = "101 fix 3 F-2: appliedCorrections is written even when the patch is empty, and a repeat writes nothing more")]
+    [Fact(DisplayName = "101 fix 3 F-2: an empty patch still records what the findings reflect, the final write records the row as followed through, and a repeat writes nothing more")]
     public async Task AppliedCorrections_AreWritten_OnAnEmptyPatch_AndARepeatAddsNothing()
     {
         var world = new CorrectionWorld();
@@ -116,14 +167,16 @@ public sealed class InvoiceCorrectionDurabilityTests
         result.IsApplied.Should().BeTrue();
         var row = world.Corrections.Should().ContainSingle().Subject;
         var stored = Stored(world);
+        Patched(stored).Should().Equal(row.Id);
         Applied(stored).Should().Equal(row.Id);
+        stored.ContainsKey(InvoiceCorrectionReevaluation.PendingStatusLinesMember).Should().BeFalse("the empty patch changed no finding");
         Reasons(stored).Should().BeEmpty("nothing in the findings changed");
-        world.ValueWrites.Count(w => w.Entity == "sprk_invoicesubmission").Should().Be(1, "the empty patch still records the row as followed through");
+        world.ValueWrites.Count(w => w.Entity == "sprk_invoicesubmission").Should().Be(2, "the patch (patchedCorrections), then the final write (appliedCorrections)");
 
         var repeat = await service.CorrectAsync(Line("Narrative", "Prepared the brief"), CancellationToken.None);
 
         repeat.IsApplied.Should().BeTrue();
-        world.ValueWrites.Count(w => w.Entity == "sprk_invoicesubmission").Should().Be(1, "a repeat finds the row already listed");
+        world.ValueWrites.Count(w => w.Entity == "sprk_invoicesubmission").Should().Be(2, "a repeat finds the row already listed in both");
         Applied(Stored(world)).Should().Equal(row.Id);
     }
 
@@ -243,6 +296,137 @@ public sealed class InvoiceCorrectionDurabilityTests
         Reasons(Stored(world)).Should().Equal(BillingReasonCodes.RateAboveApproved);
         (await InvoiceCorrectionReevaluation.ReadUnappliedAsync(world.Entities.Object, W.InvoiceId, world.Lines, CancellationToken.None)).Should().BeEmpty();
         StatusOf(world).Should().Be((int)InvoiceLineStatus.Flagged);
+    }
+
+    // =========================================================================================
+    // Round 2 - "applied" means the WHOLE follow-through finished
+    // =========================================================================================
+
+    /// <summary>A Clean fee line billed at 100 against an approved rate of 110, with the rate rule.</summary>
+    private static CorrectionWorld RateWorld()
+    {
+        var world = new CorrectionWorld();
+        var lee = world.AddPerson("Alexandra Lee");
+        var line = world.Line();
+        line["sprk_linestatus"] = new OptionSetValue((int)InvoiceLineStatus.Clean);
+        line["sprk_resolvedtimekeeper"] = new EntityReference("sprk_timekeeper", lee.Id);
+        line["sprk_approvedrate"] = new Money(110m);
+        Store(world, Root());
+        return world;
+    }
+
+    [Fact(DisplayName = "101 fix 3 F-2 round 2: a repeat after a failed totals step converges to the state of an uninterrupted correction; its findings step writes nothing and no Signal is written twice")]
+    public async Task ARepeatAfterAFailedTotalsStep_ConvergesToTheUninterruptedState()
+    {
+        var clean = RateWorld();
+        (await Service(clean, null, (_, _) => Task.FromResult(Totals()), Rate).CorrectAsync(Line("Rate", "150"), CancellationToken.None)).IsApplied.Should().BeTrue();
+
+        var world = RateWorld();
+        var service = Service(world, null, TotalsFailingOnce(), Rate);
+
+        var first = await service.CorrectAsync(Line("Rate", "150"), CancellationToken.None);
+
+        first.Status.Should().Be(CorrectionStatus.Incomplete);
+        first.FailedStep.Should().Be(CorrectionCodes.TotalsStep);
+        Reasons(Stored(world)).Should().Equal(BillingReasonCodes.RateAboveApproved);
+        StatusOf(world).Should().Be((int)InvoiceLineStatus.Flagged);
+        Applied(Stored(world)).Should().BeEmpty("the totals step did not finish");
+        (await Unapplied(world)).Should().ContainSingle().Which.Field.Should().Be("Rate");
+        var signalWrites = world.SignalWrites.Count;
+        var submissionWrites = world.ValueWrites.Count(w => w.Entity == "sprk_invoicesubmission");
+
+        var repeat = await service.CorrectAsync(Line("Rate", "150"), CancellationToken.None);
+
+        repeat.IsApplied.Should().BeTrue();
+        world.ValueWrites.Count(w => w.Entity == "sprk_invoicesubmission").Should().Be(submissionWrites + 1, "only the final write: the findings patch is idempotent");
+        world.SignalWrites.Count.Should().Be(signalWrites, "the plan entry already landed, so its Signal is not written again");
+        (await Unapplied(world)).Should().BeEmpty();
+
+        var converged = Stored(world);
+        var expected = Stored(clean);
+        Applied(converged).Should().Equal(world.Corrections.Single().Id);
+        Applied(expected).Should().Equal(clean.Corrections.Single().Id);
+        foreach (var member in new[] { InvoiceCorrectionReevaluation.AppliedCorrectionsMember, InvoiceCorrectionReevaluation.PatchedCorrectionsMember })
+        {
+            converged.Remove(member);
+            expected.Remove(member);
+        }
+
+        converged.ToJsonString().Should().Be(expected.ToJsonString(), "the repeat ends where an uninterrupted correction ends");
+        StatusOf(world).Should().Be(StatusOf(clean));
+        world.SignalWrites.Count.Should().Be(clean.SignalWrites.Count);
+    }
+
+    [Fact(DisplayName = "101 fix 3 F-2 round 2 SEEDED: rate 100 -> 150 whose patch landed but whose status step failed, then back to 100: the diff runs from 150 (what the findings reflect), so the finding is removed")]
+    public async Task ARateChain_WhoseMiddlePatchLandedButWhoseStatusFailed_ConvergesWhenCorrectedBack()
+    {
+        var world = RateWorld();
+        var service = Service(world, null, Rate);
+        FailNextStatusWrite(world);
+
+        var first = await service.CorrectAsync(Line("Rate", "150"), CancellationToken.None);
+
+        first.FailedStep.Should().Be(CorrectionCodes.StatusStep);
+        var stored = Stored(world);
+        Reasons(stored).Should().Equal(BillingReasonCodes.RateAboveApproved);
+        PendingStatus(stored).Should().Equal(FeeIndex);
+        StatusOf(world).Should().Be((int)InvoiceLineStatus.Clean, "the status step did not finish");
+        Applied(stored).Should().BeEmpty();
+
+        // Diffed from 100 (the last FULLY followed-through value) both sides agree and the 150 finding would stay; diffed from 150 it is removed.
+        var second = await service.CorrectAsync(Line("Rate", "100"), CancellationToken.None);
+
+        second.IsApplied.Should().BeTrue();
+        stored = Stored(world);
+        Reasons(stored).Should().BeEmpty();
+        StatusOf(world).Should().Be((int)InvoiceLineStatus.Clean);
+        stored.ContainsKey(InvoiceCorrectionReevaluation.PendingStatusLinesMember).Should().BeFalse();
+        Applied(stored).Should().BeEquivalentTo(world.Corrections.Select(c => c.Id), "both rows are followed through");
+    }
+
+    [Fact(DisplayName = "101 fix 3 F-2 round 2: a line left waiting by a status step that failed is re-derived by the next correction of any field; the unfinished row stays unapplied")]
+    public async Task ALineLeftWaitingForItsStatus_IsReDerivedByTheNextCorrection()
+    {
+        var world = new CorrectionWorld();
+        world.Line()["sprk_linestatus"] = new OptionSetValue((int)InvoiceLineStatus.Clean);
+        world.Invoice["sprk_invoicedate"] = new DateTime(2026, 10, 1, 0, 0, 0, DateTimeKind.Utc);
+        Store(world, Root());
+        var service = Service(world, null, Age);
+        FailNextStatusWrite(world);
+
+        var first = await service.CorrectAsync(Header("InvoiceDate", "2026-12-31"), CancellationToken.None); // too old for the line of 2026-09-12
+
+        first.FailedStep.Should().Be(CorrectionCodes.StatusStep);
+        Reasons(Stored(world)).Should().Equal(BillingReasonCodes.InvoiceTooOld);
+        PendingStatus(Stored(world)).Should().Equal(FeeIndex);
+        StatusOf(world).Should().Be((int)InvoiceLineStatus.Clean);
+
+        // The firm's invoice number touches no line, yet its status step re-derives the waiting line.
+        (await service.CorrectAsync(Header("FirmInvoiceNumber", "INV-1002"), CancellationToken.None)).IsApplied.Should().BeTrue();
+
+        StatusOf(world).Should().Be((int)InvoiceLineStatus.Flagged);
+        Stored(world).ContainsKey(InvoiceCorrectionReevaluation.PendingStatusLinesMember).Should().BeFalse();
+        (await Unapplied(world)).Should().ContainSingle().Which.Field.Should().Be("InvoiceDate", "the date correction itself still has to be repeated");
+    }
+
+    [Fact(DisplayName = "101 fix 3 F-2 round 2: a TotalDue correction (no findings step) is recorded after its totals step, and is unapplied while that step has not finished")]
+    public async Task ATotalDueCorrection_IsRecordedAfterItsTotalsStep()
+    {
+        var world = new CorrectionWorld();
+        Store(world, Root());
+        var service = Service(world, null, TotalsFailingOnce());
+
+        var first = await service.CorrectAsync(Header("TotalDue", "2400"), CancellationToken.None);
+
+        first.FailedStep.Should().Be(CorrectionCodes.TotalsStep);
+        var unapplied = (await Unapplied(world)).Should().ContainSingle().Subject;
+        unapplied.Field.Should().Be("TotalDue");
+        unapplied.LineId.Should().BeNull();
+
+        (await service.CorrectAsync(Header("TotalDue", "2400"), CancellationToken.None)).IsApplied.Should().BeTrue();
+
+        (await Unapplied(world)).Should().BeEmpty();
+        Applied(Stored(world)).Should().Equal(world.Corrections.Single().Id);
     }
 
     // =========================================================================================

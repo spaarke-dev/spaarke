@@ -78,7 +78,7 @@ public static class InvoiceApprovalCodes
     /// <summary>409 (F2): a line was decided by another person whose decision is not recorded yet; they repeat it, then approve.</summary>
     public const string LineDecisionIncomplete = "ebilling.approve.decision_incomplete";
 
-    /// <summary>409 (101 fix round, part 3): a correction's value was saved but its follow-through (the findings step) did not finish; the reviewer repeats it.</summary>
+    /// <summary>409 (101 fix round, part 3): a correction's value was saved but its follow-through (findings, status, Signals, totals) did not finish; the reviewer repeats it.</summary>
     public const string CorrectionsPending = "ebilling.approval.corrections_pending";
 
     /// <summary>403 (EB-D-172): closing the invoice's Signals needs the caller's rights, and the caller does not hold them.</summary>
@@ -523,7 +523,7 @@ public sealed class InvoiceApprovalService
         if (unapplied.Count > 0)
         {
             _logger.LogWarning("Approve of invoice {InvoiceId}: {Count} corrections have not been followed through; nothing changed.", invoiceId, unapplied.Count);
-            return new ApprovalResult(ApprovalOutcome.Conflict, InvoiceApprovalCodes.CorrectionsPending, PendingCorrectionsText(unapplied, lineRows));
+            return new ApprovalResult(ApprovalOutcome.Conflict, InvoiceApprovalCodes.CorrectionsPending, InvoiceCorrectionReevaluation.UnappliedText(unapplied, lineRows, "approve again"));
         }
 
         // ── I-2: no line Pending or Flagged (a line with no recognised status counts as Pending: fail closed). ──
@@ -1151,19 +1151,6 @@ public sealed class InvoiceApprovalService
             DecidedOn: decided ? portion!.GetAttributeValue<DateTime?>(PortionDecidedOn) : null,
             DecisionRecordId: portion?.GetAttributeValue<EntityReference>(PortionRecord)?.Id,
             EligibleResolvedOn: resolvedOn);
-    }
-
-    /// <summary>The reviewer-facing refusal of 101's guard: each unfinished correction by its field and where it is (the line number, or the invoice); no ids.</summary>
-    private static string PendingCorrectionsText(IReadOnlyList<InvoiceCorrectionReevaluation.UnappliedCorrection> unapplied, IReadOnlyList<Entity> lines)
-    {
-        var sequence = lines.ToDictionary(l => l.Id, l => l.GetAttributeValue<int?>(InvoiceSubmissionPersister.LineSequence));
-        var named = unapplied
-            .Select(u => u.LineId is not { } lineId ? $"{u.Field} (invoice)"
-                : sequence.TryGetValue(lineId, out var number) && number is { } n ? $"{u.Field} (line {n.ToString(CultureInfo.InvariantCulture)})"
-                : $"{u.Field} (a line)")
-            .Distinct(StringComparer.Ordinal)
-            .ToList();
-        return $"These corrections were saved but did not finish: {string.Join("; ", named)}. Repeat each correction, then approve again.";
     }
 
     private static ApprovalOpenLinesDto OpenLines(IEnumerable<Entity> lines)

@@ -244,7 +244,8 @@ public sealed class InvoiceCorrectionReevaluationTests
 
         result.IsApplied.Should().BeTrue();
         var patched = Stored(world);
-        patched.Remove(InvoiceCorrectionReevaluation.AppliedCorrectionsMember).Should().BeTrue("fix round, part 3: the empty patch still records the row as followed through");
+        patched.Remove(InvoiceCorrectionReevaluation.AppliedCorrectionsMember).Should().BeTrue("fix round, part 3: the row is recorded as followed through");
+        patched.Remove(InvoiceCorrectionReevaluation.PatchedCorrectionsMember).Should().BeTrue("fix round, part 3: the empty patch still records what the findings reflect");
         patched.ToJsonString().Should().Be(stored, "nothing on a decided line is patched");
         StatusOf(world.Line(decidedId)).Should().Be((int)InvoiceLineStatus.Accepted);
         world.ValueWrites.Should().NotContain(w => w.Id == decidedId);
@@ -366,8 +367,8 @@ public sealed class InvoiceCorrectionReevaluationTests
         repeat.IsApplied.Should().BeTrue();
         world.Corrections.Should().ContainSingle();
         // B2b-2: the first attempt stopped at the status step, so the Signals step (which removes pendingSignalChanges) first ran on the repeat; the
-        // findings patch itself was not written again.
-        world.ValueWrites.Count(w => w.Entity == "sprk_invoicesubmission").Should().Be(2, "the patch once, then the Signals step's clear");
+        // findings patch itself was not written again. Fix round, part 3: the final write then records the correction as followed through.
+        world.ValueWrites.Count(w => w.Entity == "sprk_invoicesubmission").Should().Be(3, "the patch once, then the Signals step's clear, then the final write");
         var final = Stored(world);
         final["findings"]!.ToJsonString().Should().Be(JsonNode.Parse(patched)!["findings"]!.ToJsonString());
         final.ContainsKey(InvoiceCorrectionReevaluation.PendingSignalChangesMember).Should().BeFalse();
