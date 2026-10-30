@@ -370,6 +370,14 @@ public partial class RouteAuthorizationGuardTests
             "GET /api/finance/invoices/{invoiceId}/context (ebilling-r1 task 106, FR-33) -- the Invoice Review context panel. The route carries "
             + "AddFinanceAuthorizationFilter(\"finance.read\", sprk_invoices, invoiceId): Read on the invoice as the caller, fail closed; the eBilling "
             + "kill switch runs after it. The firm and core record the sections are scoped to are read from that invoice, never from the request."),
+        new GovernedFile("Api/Finance/InvoiceCorrectionEndpoints.cs", Scope.RouteLevelGate,
+            "POST /api/finance/invoices/{invoiceId}/lines/{lineId}/corrections, POST .../header/corrections and GET .../corrections (ebilling-r1 task "
+            + "101 part B1, FR-31, FR-22, D-64) -- reviewer corrections of extracted values and AI codes. Every route carries "
+            + "AddFinanceAuthorizationFilter on sprk_invoices(invoiceId) as the caller, fail closed: the list with \"finance.read\" (Read), the two "
+            + "corrections with \"ebilling.invoice.decide\" (Write, D-77); invoice access reaches the caller through the core record (013, ADR-034). "
+            + "The eBilling kill switch runs after it. The line must belong to the route's invoice (uniform 404) and a code must be in the line's "
+            + "recorded code set before anything is written; the body carries no outcome, role or reviewer (the reviewer is the caller's systemuserid "
+            + "from their own token) and a correction never touches a line's status, approved amount or decision."),
         new GovernedFile("Api/Finance/InvoiceLineReviewEndpoints.cs", Scope.RouteLevelGate,
             "GET /api/finance/invoices/{invoiceId}/review and POST /api/finance/invoices/{invoiceId}/lines/{lineId}/decision, .../lines/decisions, "
             + ".../lines/accept-clean (ebilling-r1 task 100, FR-31) -- the Invoice Review read model and the line decisions. Every route carries "
@@ -1098,8 +1106,14 @@ public partial class RouteAuthorizationGuardTests
     // /api/finance/invoices/{invoiceId}/reject and POST .../return. Classified by GovernedFiles (RouteLevelGate: step 0 on the group, then
     // AddFinanceAuthorizationFilter as the caller on the route's invoice, ebilling.invoice.decide: Write; eligibility is asked inside the
     // service on every call); .RequireEbillingEnabled is already in NotAuthorizationForms.
-    private const int ExpectedEndpointFileCount = 148;
-
+    //
+    // 148 -> 149 (2026-10-30 at the merge into work; written on the branch as 146 -> 147), ebilling-r1 task 101 part B1, FR-31). Net +1: Api/Finance/InvoiceCorrectionEndpoints.cs ADDED -- POST
+    // /api/finance/invoices/{invoiceId}/lines/{lineId}/corrections, POST .../header/corrections and GET .../corrections. Classified by GovernedFiles
+    // (RouteLevelGate: step 0 on the group, then AddFinanceAuthorizationFilter as the caller on the route's invoice, finance.read /
+    // ebilling.invoice.decide); .RequireEbillingEnabled is already in NotAuthorizationForms. (Written on the branch as 146 -> 147; reconciled at
+    // the ebilling-r1 integration merge.)
+    private const int ExpectedEndpointFileCount = 149;
+    
     // =============================================================================================
     // THE CREDITED ALLOW-LIST — the only attachment forms Rule A credits as a per-resource decision
     // ---------------------------------------------------------------------------------------------

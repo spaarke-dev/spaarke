@@ -101,6 +101,10 @@ public static class LineDecisionCodes
     public const string Incomplete = "ebilling.decision.incomplete";
     public const string DeciderUnresolved = "ebilling.decider.unresolved";
     public const string NotAuthorized = "ebilling.decision.not_authorized";
+
+    /// <summary>101 fix round, part 3 (F-2): a correction of the line (for Accept all Clean, of the invoice) was saved but its follow-through has not
+    /// finished; 409, nothing was changed. The detail names each correction by field and line and says to repeat it.</summary>
+    public const string CorrectionsPending = "ebilling.line.corrections_pending";
 }
 
 /// <summary>A decided line as the caller needs it to update the screen without a second read.</summary>
@@ -289,7 +293,7 @@ public sealed class InvoiceLineDecisionService
 
         try
         {
-            return await ApplyAsync(command, acceptClean, ct).ConfigureAwait(false);
+            return await ApplyAsync(command, acceptClean, checkCorrections: true, ct).ConfigureAwait(false);
         }
         finally
         {
@@ -317,7 +321,7 @@ public sealed class InvoiceLineDecisionService
         Guid invoiceId, Guid decisionId, Guid deciderSystemUserId, string? callerBearerToken, CancellationToken ct)
     {
         var command = new LineDecisionCommand(invoiceId, decisionId, LineDecisionAction.Accept, null, [], deciderSystemUserId, Bulk: true, callerBearerToken);
-        return ShapeError(command, acceptClean: true) is { } invalid ? Task.FromResult(invalid) : ApplyAsync(command, acceptClean: true, ct);
+        return ShapeError(command, acceptClean: true) is { } invalid ? Task.FromResult(invalid) : ApplyAsync(command, acceptClean: true, checkCorrections: false, ct);
     }
 
     /// <summary>
@@ -330,7 +334,7 @@ public sealed class InvoiceLineDecisionService
     {
         var command = new LineDecisionCommand(
             invoiceId, decisionId, LineDecisionAction.Accept, null, lineIds.Select(id => new LineDecisionLine(id)).ToList(), deciderSystemUserId, Bulk: true, callerBearerToken);
-        return ShapeError(command, acceptClean: false) is { } invalid ? Task.FromResult(invalid) : ApplyAsync(command, acceptClean: false, ct);
+        return ShapeError(command, acceptClean: false) is { } invalid ? Task.FromResult(invalid) : ApplyAsync(command, acceptClean: false, checkCorrections: false, ct);
     }
 
     /// <summary>
@@ -362,9 +366,15 @@ public sealed class InvoiceLineDecisionService
             return ReadFailed(invoiceId, ex);
         }
 
+        // #2455: exactly one core record, before any row is built (none or several is refused, never the first one found, never a throw).
+        if (SingleCoreOf(invoice) is not { } singleCore)
+        {
+            return NoSingleCore(invoiceId);
+        }
+
         var kind = new CorrectionKind(
             invoiceId, (line, field) => IdOf($"ebilling-correction-unreviewed-{scopeId:D}-{line:D}-{field}"),
-            OutcomeUnreviewed, reviewerRole, reviewerSystemUserId);
+            OutcomeUnreviewed, reviewerRole, reviewerSystemUserId, singleCore);
         var rows = lineRows
             .Select(ToTarget)
             .Where(t => t.Type is InvoiceLineCostType.Fee or InvoiceLineCostType.Expense
@@ -495,7 +505,9 @@ public sealed class InvoiceLineDecisionService
 
     private sealed record Proposal(Target Line, InvoiceLineStatus Status, decimal Approved, string? Reason, string Action, string Outcome);
 
-    private async Task<LineDecisionResult> ApplyAsync(LineDecisionCommand command, bool acceptClean, CancellationToken ct)
+    /// <param name="checkCorrections">Refuse while a correction is unapplied (<see cref="RefuseUnappliedAsync"/>). False on the approval's held paths: the
+    /// approval's own guard has just refused on the same read (<see cref="InvoiceApprovalCodes.CorrectionsPending"/>).</param>
+    private async Task<LineDecisionResult> ApplyAsync(LineDecisionCommand command, bool acceptClean, bool checkCorrections, CancellationToken ct)
     {
         Entity? invoice;
         List<Entity> lineRows;
@@ -510,6 +522,13 @@ public sealed class InvoiceLineDecisionService
             if (invoice.GetAttributeValue<OptionSetValue>("statuscode")?.Value != InvoiceStatusCodes.InReview)
             {
                 return new LineDecisionResult(LineDecisionStatus.NotInReview, LineDecisionCodes.NotInReview, "Lines can be decided only while the invoice is In Review.");
+            }
+
+            // #2455: a decision is made on an invoice that names exactly ONE core record (013). None or several is refused here, before anything
+            // is chosen or written: the rights, the correction rows and the Decision Records all file under that one core.
+            if (SingleCoreOf(invoice) is null)
+            {
+                return NoSingleCore(command.InvoiceId);
             }
 
             lineRows = await InvoiceReviewReadService.ReadPagedAsync(_entities, InvoiceReviewReadService.LineQuery(command.InvoiceId), ct).ConfigureAwait(false);
@@ -600,6 +619,12 @@ public sealed class InvoiceLineDecisionService
                     proposals.Add(new Proposal(target, InvoiceLineStatus.Reduced, approved, reason, "reduce-line", "Reduced"));
                     break;
             }
+        }
+
+        // ── 101 fix round, part 3 (F-2): no line is decided while a correction of it has not been followed through. ──
+        if (checkCorrections && await RefuseUnappliedAsync(command.InvoiceId, acceptClean, chosen, lineRows, ct).ConfigureAwait(false) is { } pending)
+        {
+            return pending;
         }
 
         // ── Dry-run the totals (I-1 via 016's calculator): a refusal changes nothing. ──
@@ -748,6 +773,39 @@ public sealed class InvoiceLineDecisionService
         return signalsNotClosed > 0
             ? Incomplete(command, committed, SignalsStep, $"signals-not-closed:{signalsNotClosed}")
             : new LineDecisionResult(LineDecisionStatus.Applied, "ok", Lines: decided, Totals: TotalsOf(invoice, calculation));
+    }
+
+    /// <summary>
+    /// 101 fix round, part 3 (F-2): a decision is refused (409 <see cref="LineDecisionCodes.CorrectionsPending"/>, nothing changed) while a correction of a
+    /// chosen line was saved but not followed through (<see cref="InvoiceCorrectionReevaluation.ReadUnappliedAsync"/>): the line's findings and status may
+    /// not show the corrected value yet, and once decided its findings are never patched again. Accept all Clean is refused while ANY correction of the
+    /// invoice is unapplied (a header correction, or one of another line, can still place a finding on a Clean line), and names them all. A read fault
+    /// refuses (503 <see cref="LineDecisionCodes.Unavailable"/>): fail closed.
+    /// </summary>
+    private async Task<LineDecisionResult?> RefuseUnappliedAsync(
+        Guid invoiceId, bool acceptClean, IReadOnlyList<LineDecisionLine> chosen, IReadOnlyList<Entity> lineRows, CancellationToken ct)
+    {
+        IReadOnlyList<InvoiceCorrectionReevaluation.UnappliedCorrection> unapplied;
+        try
+        {
+            unapplied = await InvoiceCorrectionReevaluation.ReadUnappliedAsync(_entities, invoiceId, lineRows, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            return ReadFailed(invoiceId, ex);
+        }
+
+        var chosenIds = chosen.Select(l => l.LineId).ToHashSet();
+        var blocking = acceptClean ? unapplied : unapplied.Where(u => u.LineId is { } id && chosenIds.Contains(id)).ToList();
+        if (blocking.Count == 0)
+        {
+            return null;
+        }
+
+        _logger.LogWarning("Line decision on invoice {InvoiceId}: {Count} corrections have not been followed through; nothing changed.", invoiceId, blocking.Count);
+        return new LineDecisionResult(
+            LineDecisionStatus.LineNotDecidable, LineDecisionCodes.CorrectionsPending,
+            InvoiceCorrectionReevaluation.UnappliedText(blocking, lineRows, acceptClean ? "accept the Clean lines again" : "decide the line again"));
     }
 
     private LineDecisionResult ReadFailed(LineDecisionCommand command, Exception ex) => ReadFailed(command.InvoiceId, ex);
@@ -930,9 +988,9 @@ public sealed class InvoiceLineDecisionService
             return null;
         }
 
-        if (CoreOf(invoice) is not { } core)
+        if (SingleCoreOf(invoice) is not { } core)
         {
-            return new LineDecisionResult(LineDecisionStatus.OwnerUnresolved, LineDecisionCodes.OwnerUnresolved, "The invoice names no single core record.");
+            return NoSingleCore(command.InvoiceId);
         }
 
         var refusal = await HumanDecisionSignalClose.AuthorizeAsync(
@@ -955,9 +1013,14 @@ public sealed class InvoiceLineDecisionService
     private async Task<CorrectionBuild> BuildCorrectionsAsync(
         LineDecisionCommand command, Entity invoice, IReadOnlyList<Proposal> proposals, DateTime decidedOnUtc, CancellationToken ct)
     {
+        if (SingleCoreOf(invoice) is not { } singleCore)
+        {
+            return new CorrectionBuild([], NoSingleCore(command.InvoiceId));
+        }
+
         var kind = new CorrectionKind(
             command.InvoiceId, (line, field) => IdOf($"ebilling-correction-{command.DecisionId:D}-{line:D}-{field}"),
-            OutcomeAcceptedInBulk, DeciderRole, command.DeciderSystemUserId);
+            OutcomeAcceptedInBulk, DeciderRole, command.DeciderSystemUserId, singleCore);
         var rows = new List<Entity>();
         foreach (var proposal in proposals)
         {
@@ -978,10 +1041,9 @@ public sealed class InvoiceLineDecisionService
     /// </summary>
     private async Task<LineDecisionResult?> StampOwnerAsync(List<Entity> rows, Entity invoice, Guid invoiceId, Guid creatorSystemUserId, CancellationToken ct)
     {
-        var core = CoreOf(invoice);
-        if (core is null)
+        if (SingleCoreOf(invoice) is null)
         {
-            return new LineDecisionResult(LineDecisionStatus.OwnerUnresolved, LineDecisionCodes.OwnerUnresolved, "The invoice names no single core record.");
+            return NoSingleCore(invoiceId);
         }
 
         // UAC 194b R3b-2: each row's question is built from the row itself (RecordOwnershipContext.ForChild: its invoice, its line, its core
@@ -1030,9 +1092,27 @@ public sealed class InvoiceLineDecisionService
     }
 
     /// <summary>What a correction row records: its invoice, its deterministic id, the outcome type, and the reviewer and role.</summary>
-    private sealed record CorrectionKind(Guid InvoiceId, Func<Guid, string, Guid> IdFor, int Outcome, string Role, Guid Reviewer);
+    private sealed record CorrectionKind(Guid InvoiceId, Func<Guid, string, Guid> IdFor, int Outcome, string Role, Guid Reviewer, (string Entity, Guid Id) Core);
 
-    /// <summary>The invoice's one core record (matter, project, else work assignment); null when it names none.</summary>
+    /// <summary>
+    /// #2455: the invoice's ONE core record (013's lookups: exactly one of them is set). None or several is null: the callers refuse
+    /// (<see cref="NoSingleCore"/>), never the first one found.
+    /// </summary>
+    internal static (string Entity, Guid Id)? SingleCoreOf(Entity invoice) =>
+        EligibleApproverResolver.SingleCoreOf(InvoiceReviewReadService.InvoiceEntity, invoice);
+
+    /// <summary>The stable refusal when the invoice names no single core record (none, or several): nothing was written.</summary>
+    private LineDecisionResult NoSingleCore(Guid invoiceId)
+    {
+        _logger.LogWarning("Line decision on invoice {InvoiceId}: the invoice names no single core record; nothing changed.", invoiceId);
+        return new LineDecisionResult(LineDecisionStatus.OwnerUnresolved, LineDecisionCodes.OwnerUnresolved, "The invoice names no single core record.");
+    }
+
+    /// <summary>
+    /// The invoice's first core record found (matter, project, else work assignment); null when it names none. NOT the single-core rule: with
+    /// two lookups set it returns the first. The line decisions and corrections use <see cref="SingleCoreOf"/>; the remaining callers are
+    /// <c>InvoiceAdjustmentService</c> and <c>SubmissionOverrideService</c> (#2455 follow-up).
+    /// </summary>
     internal static (string Entity, Guid Id)? CoreOf(Entity invoice)
     {
         foreach (var (column, entity) in new[] { ("sprk_matter", "sprk_matter"), ("sprk_project", "sprk_project"), ("sprk_regardingworkassignment", "sprk_workassignment") })
@@ -1097,7 +1177,8 @@ public sealed class InvoiceLineDecisionService
             }
 
             if (root.TryGetProperty("coding", out var coding) && coding.ValueKind == JsonValueKind.Object
-                && !string.Equals(LineExtraction.Text(coding, "status"), "NotCoded", StringComparison.Ordinal))
+                && !string.Equals(LineExtraction.Text(coding, "status"), "NotCoded", StringComparison.Ordinal)
+                && !(coding.TryGetProperty("recoded", out var recoded) && recoded.ValueKind == JsonValueKind.True)) // 101 B2c: a reviewer's re-code is not an AI code
             {
                 var codingConfidence = LineExtraction.Decimal(coding, "confidence");
                 foreach (var (member, name) in new[] { ("task", BillingFieldNames.TaskCode), ("activity", BillingFieldNames.ActivityCode), ("expense", BillingFieldNames.ExpenseCode) })
@@ -1136,8 +1217,9 @@ public sealed class InvoiceLineDecisionService
             row["sprk_aiconfidence"] = Math.Round(c, 4, MidpointRounding.AwayFromZero);
         }
 
-        // 013: exactly one core-record lookup, plus the resolver fields, copied from the invoice (a line shares its invoice's core record).
-        var core = CoreOf(invoice)!.Value;
+        // 013: exactly one core-record lookup (the caller resolved it with SingleCoreOf, #2455), plus the resolver fields, copied from the
+        // invoice (a line shares its invoice's core record).
+        var core = kind.Core;
         row[CoreAncestorResolver.StampColumnFor(core.Entity)] = new EntityReference(core.Entity, core.Id);
         foreach (var column in new[]
         {

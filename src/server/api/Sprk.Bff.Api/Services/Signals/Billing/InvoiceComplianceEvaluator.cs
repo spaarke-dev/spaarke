@@ -32,6 +32,13 @@ public sealed record BillingRuleRefusal(Guid PolicyId, string PolicyCode, Guid P
 /// <param name="ReasonCode">One of the currency reasons of <see cref="BillingEvaluationReasons"/>.</param>
 public sealed record BillingRuleSkip(Guid PolicyId, string PolicyCode, Guid PolicyVersionId, RuleType RuleType, string ReasonCode);
 
+/// <summary>
+/// Where a refused rule version applied (101 B2a, F2): the check it stood for did NOT run on these subjects. <paramref name="RuleType"/> is null
+/// when the stored type could not be read. <paramref name="AppliesToInvoice"/> means the invoice subject selected the version, so every line is
+/// affected; otherwise <paramref name="LineIndexes"/> names the lines. Carries ids and a type, never a value.
+/// </summary>
+public sealed record BillingRuleRefusalScope(Guid PolicyVersionId, RuleType? RuleType, bool AppliesToInvoice, IReadOnlyList<int> LineIndexes);
+
 /// <summary>The outcome of one evaluation. Deterministic: the same request and facts give equal results in equal order.</summary>
 public sealed record BillingEvaluationResult
 {
@@ -45,6 +52,10 @@ public sealed record BillingEvaluationResult
 
     /// <summary>Selected versions refused by the gate or by their handler, in evaluation order. Each is logged and metered.</summary>
     public required IReadOnlyList<BillingRuleRefusal> Refusals { get; init; }
+
+    /// <summary>Where each of <see cref="Refusals"/> applied, in the same order (101 B2a: a check that did not run must not leave a line Clean).
+    /// A separate member so <see cref="BillingRuleRefusal"/> and its equality stay as 072 defined them.</summary>
+    public IReadOnlyList<BillingRuleRefusalScope> RefusalScopes { get; init; } = [];
 
     /// <summary>Money checks not judged because of the currency (D-20), in evaluation order. Each is logged.</summary>
     public required IReadOnlyList<BillingRuleSkip> Skips { get; init; }
@@ -369,6 +380,7 @@ public sealed class InvoiceComplianceEvaluator
             Findings = ordered,
             RulesByVersion = rulesByVersion,
             Refusals = refusals,
+            RefusalScopes = refusals.Select(r => RefusalScopeOf(r, candidates, selectedBySubject)).ToList(),
             Skips = skips,
             Facts = facts,
         };
@@ -394,6 +406,19 @@ public sealed class InvoiceComplianceEvaluator
     /// </summary>
     private static bool IsSystemRule(BillingRuleCandidate candidate) =>
         RuleBodySchemaValidator.TryParseRuleType(candidate.RuleType, out var type) && BillingRuleCatalogue.IsSystemType(type);
+
+    private static BillingRuleRefusalScope RefusalScopeOf(
+        BillingRuleRefusal refusal, IReadOnlyList<BillingRuleCandidate> candidates,
+        IReadOnlyList<(BillingSubject Subject, List<BillingRuleCandidate> Versions)> selectedBySubject)
+    {
+        var candidate = candidates.First(c => c.PolicyVersionId == refusal.PolicyVersionId);
+        var subjects = selectedBySubject.Where(s => s.Versions.Contains(candidate)).Select(s => s.Subject).ToList();
+        return new BillingRuleRefusalScope(
+            refusal.PolicyVersionId,
+            RuleBodySchemaValidator.TryParseRuleType(candidate.RuleType, out var type) ? type : null,
+            subjects.Any(s => s.Kind == BillingSubjectKind.Invoice),
+            subjects.Where(s => s.LineIndex is not null).Select(s => s.LineIndex!.Value).Distinct().Order().ToList());
+    }
 
     private static RuleType? DisallowedConsequenceType(BillingRuleCandidate candidate) =>
         candidate.Consequence is { } stated
