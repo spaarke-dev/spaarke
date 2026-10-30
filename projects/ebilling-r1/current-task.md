@@ -1,6 +1,6 @@
 # Current Task State
 
-> **Last Updated**: 2026-10-29 ~22:00Z. #1911 is MERGED to master (eaa0d44f7f, 21:33Z). Next: dev enablement (EB-D-173), once R3 deploys; 101 B2 and the Part A review are running; 104 is on work.
+> **Last Updated**: 2026-10-30 (101 built; independent review running). #1911 is MERGED to master (eaa0d44f7f, 21:33Z). Next: dev enablement (EB-D-173), once R3 deploys; 101 B2 and the Part A review are running; 104 is on work.
 
 ## Quick Recovery (READ THIS FIRST)
 
@@ -12,11 +12,12 @@
 | **Next action** | (1) Push work when the gate passes. (2) When R3 says "gate passed, you can go", set the dev app settings (below), then notify word-add-in and run the 015 dev column delete. (3) When the 101 review and B2 report back, fix any F findings, then merge task/ebill-101-corrections into work. |
 
 ## Running agents
-- **ebill-101-b2a** (sonnet): the shared Signal lifecycle helper, the per-entry findings builders, the seam running on a repeat (503 Incomplete). It also has the Part A review's F2 (refused rule version → lines Flagged `rules.not_checked`, the EB-D-175 principle) and F3 (no Action provenance on NoNarrative lines).
-- **ebill-101-b2d** (sonnet): `lineFindings[]` in the review read model (this also closes Part A review F1).
-- Then **B2b** (opus): re-evaluation before and after, Signals (D-122, episode n+1), the findings patch, line status. **Correction to my earlier brief (D-126):** a code correction on a Pending line of an uncoded invoice IS the re-code path. Re-derive that line's status, and close the invoice-level coding hold once no line is uncoded. Still never change a line a reviewer has already decided.
-- Then **B2c** (sonnet): timekeeper and date corrections (`timekeeper_mismatch` 400), totals, currency (a finding in `sprk_findingsjson` only, no Signal). Then the full gate on the combined tip.
-- Part A review: done. F1 → B2d, F2/F3 → B2a. K: the currency skip doc comment; the Action version is a hard-coded constant (D-64); #2455's two callers.
+- **ebill-101b-review** (opus, adversarial): reviewing 33eba7f446..de3d8aa587 (101 B2a, B2d, the Part A F2/F3 fixes, B2b-1, B2b-2, B2c). Check first: the totals refusal dead end (B2c K3).
+
+## 101 status
+- All parts are built on task/ebill-101-corrections @ de3d8aa587. B2c gate: 5 builds; ArchTests 1858/0; unit filter 9030/0/7; integration 199/0/8; publish +3.52 MB vs master for the whole branch.
+- After the review: fix the F findings, then merge into work. The ledger gets B1's endpoint file, 148 → 149. Then run the 104 twin test (reject/return refused on a held invoice after a correction), because 104 and 101 only meet on work.
+- Decisions made by the main session: alerts close with the record-free CloseAsync (as the POML says; not D-122); the hold clears when no undecided line lacks a code set; currency is a lineFindings entry only, with no Signal; legacy lines answer 409 (EB-D-170).
 
 ## 101 branch state (task/ebill-101-corrections @ 33eba7f446)
 - Part A: 2e4eede999, dfdc3f3a09, b66b3b5230. EB-D-175/176: 8086bd39ef. B1: 33eba7f446 (adversarial review done, F fixed; B2 seam `InvoiceCorrectionService.OnValueWrittenAsync`).
