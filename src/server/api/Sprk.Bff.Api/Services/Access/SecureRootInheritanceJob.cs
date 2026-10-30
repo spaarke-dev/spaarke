@@ -302,6 +302,9 @@ public sealed class SecureRootInheritanceJob : IScheduledJob
                     resumeAfter = follow.UnsecureResumeAfter is { } u ? $"{u.Table}:{u.Id:D}" : null,
                     problems = follow.Problems,
                     changes = follow.Changes,
+                    // Owner decision 2026-10-29: an ordinary filed root follows its family's owner (report-only unless
+                    // SecureRoot:Inheritance:RootOwnerWritesEnabled is true).
+                    rootOwners = follow.RootOwners,
                 },
                 incomplete = incomplete.Take(50).ToArray(),
                 records = sampled,
