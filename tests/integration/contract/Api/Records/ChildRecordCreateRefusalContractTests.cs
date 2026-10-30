@@ -199,7 +199,8 @@ public class ChildRecordCreateRefusalContractTests
         const string detail = "A 'sprk_todo' record cannot be filed under a secure record from chat, and was NOT created.";
         var refusal = new RecordCreationRefusal(RecordCreationRefusalKind.OwnerUnresolved, RecordOwnerRefusal.NoOwnerSource, detail)
         {
-            OwnerDecision = RecordOwnerResolution.Owned(Guid.NewGuid()),
+            // What the service passes (RecordCreationService.SecureFilingRefused): the resolver's secure-owner resolution.
+            OwnerDecision = RecordOwnerResolution.Owned(Guid.NewGuid()) with { IsSecureOwner = true },
         };
 
         (await WireOf(Render(refusal))).Should().Be(
