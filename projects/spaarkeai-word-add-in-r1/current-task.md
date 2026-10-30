@@ -11,6 +11,10 @@
   - NOT the add-in and NOT the Office cache: clearing Wef did not help, and Edge also gets the 400 on admin.microsoft.com and portal.azure.com.
   - Machine: Entra-joined to Helios IP, plus 3 registered work accounts (RightHub Groups, Spaarke Inc., Dewey Cheatham & Howe PC). Likely cause: the per-account Windows SSO cookies Edge and WebView2 send to login.microsoftonline.com are too large in total.
   - Owner steps: an InPrivate test, clear Edge's login.microsoftonline.com site data, then disconnect an unneeded work account (never Helios IP: that is the device join). No code change; nothing to file.
+- **Dev BFF candidate c91b99e575 (R3): BLOCKED by us, #2468.** UAC 194b (2cd0f62e2c; not in dev's 136568cf70) makes unfiled Office .eml and attachment documents owned by the ROOT BU team. The communication is now the primary ownership parent, and an unfiled one is root-owned. Basic and Core User read sprk_document at Parent:Child depth (4), so a child-BU saver loses access to their own unfiled save. Verified on dev (read-only).
+  - The rest is fine for the add-in: ebilling's /office/save changes are inert while it is off, and #2412/#2416 are intact.
+  - R3 told (the owner decides: hold for UAC's fix, which we recommend, or deploy accepting it). UAC told at session spaarke-wt-unified-access-control-r2-db (the old pipe is stale).
+  - The BFF test run at C:\wt2464 (detached at c91b99e575) is still running; report its result to R3, then remove C:\wt2464.
 - Offer to correct the owner's 10-28 test record (comm 12f1f3f8…, doc 536204ff…) only if they ask.
 - **ebilling 094 client: #2448 MERGED** at 5119519679 (2026-10-29 14:48Z; inert, `?action=submitInvoice` only). C:\wt133d removed.
   - Every 094 row in §6 and §9 has a sentence. `filingKept`: the top-level field first, then the pinned sentence. Code = `errorCode ?? reasonCode`, plus `extensions.code` on a 403 only.
