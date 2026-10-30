@@ -156,8 +156,9 @@ public sealed class InvoiceCorrectionIntakeTests
         { InvoiceStatusCodes.StateInactive, InvoiceStatusCodes.Rejected, "Rejected" },
         { InvoiceStatusCodes.StateInactive, InvoiceStatusCodes.ReturnedToFirm, "ReturnedToFirm" },
         { InvoiceStatusCodes.StateInactive, InvoiceStatusCodes.Cancelled, "Cancelled" },
-        // A status this lifecycle does not know (Superseded arrives with task 097a): refused, and no name is guessed.
-        { InvoiceStatusCodes.StateInactive, 659490005, null },
+        { InvoiceStatusCodes.StateInactive, InvoiceStatusCodes.Superseded, "Superseded" },
+        // A status this lifecycle does not know: refused, and no name is guessed.
+        { InvoiceStatusCodes.StateInactive, 659490099, null },
         // A pair Dataverse would not hold (In Review on an inactive row): refused.
         { InvoiceStatusCodes.StateInactive, InvoiceStatusCodes.InReview, "InReview" },
     };
