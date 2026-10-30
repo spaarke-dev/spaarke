@@ -386,6 +386,7 @@ Final test runs on `6c348fd86` (the notes commit changes no code): `dotnet test 
 | 2026-10-18 03:34:49 | R3 deployed the BFF admitting both columns (ProductVersion 1.0.0+ebc74b331…) | R3 message |
 | 2026-10-18 03:36:44 | R3 deployed the SPA reading statuscode (run 39094144398) | R3 message |
 | 2026-10-18 03:42:42 | `-GridConfig -BffDeployAttestation ebc74b331`, WhatIf first then live: grid 3ff4102c moved sprk_invoicestatus → statuscode (3 mentions, If-Match W/"21226563") | Read back: 0 old mentions, etag W/"28505656". Delete verdict is still BLOCKED until a BFF with 015's Finance readers is live (R3 merges 015) |
+| 2026-10-30 ~15:40 | `-Delete -WhatIf -BffDeployAttestation 9f4afe82ac -SpaDeployAttestation 96f1f6b675` | REFUSED (exit 2) before any Dataverse call: the SPA commit still names the column in a JSDoc example at `Spaarke.UI.Components/.../RecordHeader/fields/OptionSetField.tsx:64` (015's e0df773395 is on master, not in R3's SPA branch). The BFF attestation passed. Waits for R3's next dev SPA deploy from a commit containing e0df773395. Nothing written. |
 
 ## 13. ontology-r1 re-check of the follow-up (2026-10-18)
 
