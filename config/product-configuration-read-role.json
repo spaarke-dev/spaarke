@@ -1,0 +1,180 @@
+{
+  "schemaVersion": 1,
+  "description": "The Spaarke PRODUCT configuration tables that 'Spaarke Core User' and 'Spaarke Basic User' read at Global (Organization) depth (owner decision 2026-10-29, BU1 move plan Q1). Spaarke product data is owned in the root business unit (owner round 136), and people work in a customer business unit below it. A Read at Deep reaches only the user's own unit and its children, so a user outside the root reads none of the root's product rows (measured on spaarkedev1 with RetrievePrincipalAccess: a user in a child unit had no access to root-owned grid configuration, playbook and AI tool type rows). Read at Global on these tables only closes that gap. Nothing else changes: no Write, Create, Delete, Append, AppendTo, Assign or Share, and no other role. The source of truth is the solution role XML (src/dataverse/solutions/SpaarkeMaster/Roles/Spaarke Core User.xml and Spaarke Basic User.xml), which ships the change to every environment; this file is the ONE declared list of the tables. tests/Spaarke.ArchTests/ProductConfigurationReadRoleGuardTests.cs checks that both role files hold each listed Read at Global and that no listed table is customer data; scripts/Set-ProductConfigurationReadDepth.ps1 applies the list to one environment ahead of a solution import and verifies it.",
+  "howToExtend": [
+    "Add a table only when it holds Spaarke product configuration that every user must read wherever their business unit sits: a seeded catalog, playbook building block or UI configuration with no customer content and no per-user rows. Give it a reason and the read-only evidence that it is product configuration.",
+    "Never add a customer record table or anything holding customer content. ProductConfigurationReadRoleGuardTests fails the build for: a hard-deny table (RecordOwnershipResolver.RestrictedContentTables), an ownership parent (RecordOwnershipResolver.OwnershipParentEntities), a secure root or secure-child table (SecureChildLineage), a table in config/secure-record-owner-role.json (the census guards those), a customer configuration table (config/customer-configuration-owner-role.json), and a per-user table (OwnedChildWrite.PerUserTables).",
+    "Change the role XML in the same commit: both role files must hold the table's Read at Global, or the guard fails.",
+    "'privilegeName' is the Read privilege's name from metadata (EntityDefinitions(LogicalName='x')/Privileges, PrivilegeType eq 'Read'). The casing follows the schema name. The script checks it against metadata and refuses a mismatch.",
+    "A table considered and left out goes in 'excluded' with its reason, so the decision is not re-litigated. The guard keeps 'tables' and 'excluded' disjoint.",
+    "Then run scripts/Set-ProductConfigurationReadDepth.ps1 -EnvironmentUrl <url> (dry run), -Apply (owner go), then -Verify, on each environment that will not get the change from a SpaarkeMaster import first."
+  ],
+  "roles": ["Spaarke Core User", "Spaarke Basic User"],
+  "access": "Read",
+  "depth": "Global",
+  "decidedBy": "Owner decision 2026-10-29 (dev BU1 move plan, Q1); product data stays in the root (owner round 136).",
+  "tables": [
+    {
+      "logicalName": "sprk_analysisplaybook",
+      "privilegeName": "prvReadsprk_analysisplaybook",
+      "reason": "AI playbook definitions, seeded by the provisioning AI seed chain; the playbook pickers and the Assistant read them.",
+      "evidence": "Read-only, spaarkedev1, 2026-10-29: UserOwned; 34 rows, all owned in the root unit. Lookups only to sprk_aioutputtype and sprk_aipersona. A child-unit user had no access to root playbook 7b5a6ed3-0271-f111-ab0e-000d3a13a4cd."
+    },
+    {
+      "logicalName": "sprk_analysisaction",
+      "privilegeName": "prvReadsprk_analysisaction",
+      "reason": "AI action definitions, a playbook building block seeded with the playbooks.",
+      "evidence": "Read-only, spaarkedev1, 2026-10-29: UserOwned; 80 rows, all in the root unit. Its sprk_analysisid lookup is set on 0 rows and no BFF code writes it."
+    },
+    {
+      "logicalName": "sprk_analysisactiontype",
+      "privilegeName": "prvReadsprk_AnalysisActionType",
+      "reason": "Catalog of AI action types.",
+      "evidence": "Read-only, spaarkedev1, 2026-10-29: UserOwned; 21 rows, all in the root unit; no lookups."
+    },
+    {
+      "logicalName": "sprk_analysisskill",
+      "privilegeName": "prvReadsprk_analysisskill",
+      "reason": "AI skill definitions, a playbook building block seeded with the playbooks.",
+      "evidence": "Read-only, spaarkedev1, 2026-10-29: UserOwned; 31 rows, all in the root unit. Its sprk_analysisid lookup is set on 0 rows and no BFF code writes it."
+    },
+    {
+      "logicalName": "sprk_analysistool",
+      "privilegeName": "prvReadsprk_analysistool",
+      "reason": "AI tool definitions, a playbook building block seeded with the playbooks.",
+      "evidence": "Read-only, spaarkedev1, 2026-10-29: UserOwned; 51 rows, all in the root unit. Its sprk_analysisid lookup is set on 0 rows and no BFF code writes it."
+    },
+    {
+      "logicalName": "sprk_analysisknowledge",
+      "privilegeName": "prvReadsprk_analysisknowledge",
+      "reason": "AI knowledge entries that playbooks ground on, authored through playbook scope authoring (AnalysisKnowledgeService) and seeded with the playbooks; not filed under any customer record.",
+      "evidence": "Read-only, spaarkedev1, 2026-10-29: UserOwned; 33 rows, all in the root unit. Its sprk_analysisid and sprk_documentid lookups are set on 0 rows and no BFF code writes them."
+    },
+    {
+      "logicalName": "sprk_aiknowledgetype",
+      "privilegeName": "prvReadsprk_AIKnowledgeType",
+      "reason": "Catalog of AI knowledge types.",
+      "evidence": "Read-only, spaarkedev1, 2026-10-29: UserOwned; 5 rows, all in the root unit; no lookups."
+    },
+    {
+      "logicalName": "sprk_aioutputtype",
+      "privilegeName": "prvReadsprk_AIOutputType",
+      "reason": "Catalog of AI output types.",
+      "evidence": "Read-only, spaarkedev1, 2026-10-29: UserOwned; 6 rows, all in the root unit; no lookups."
+    },
+    {
+      "logicalName": "sprk_aiskilltype",
+      "privilegeName": "prvReadsprk_AISkillType",
+      "reason": "Catalog of AI skill types.",
+      "evidence": "Read-only, spaarkedev1, 2026-10-29: UserOwned; 5 rows, all in the root unit; no lookups."
+    },
+    {
+      "logicalName": "sprk_aitooltype",
+      "privilegeName": "prvReadsprk_AIToolType",
+      "reason": "Catalog of AI tool types.",
+      "evidence": "Read-only, spaarkedev1, 2026-10-29: UserOwned; 5 rows, all in the root unit; no lookups. A child-unit user had no access to root row 16960089-7c16-f111-8343-7c1e520aa4df."
+    },
+    {
+      "logicalName": "sprk_aichatcontextmap",
+      "privilegeName": "prvReadsprk_AIChatContextMap",
+      "reason": "Maps a page type to the playbook the Assistant opens with; UI configuration.",
+      "evidence": "Read-only, spaarkedev1, 2026-10-29: UserOwned; 3 rows, all in the root unit; one lookup, to sprk_analysisplaybook."
+    },
+    {
+      "logicalName": "sprk_gridconfiguration",
+      "privilegeName": "prvReadsprk_GridConfiguration",
+      "reason": "Data grid configuration (columns, views) that the shared DataGrid and ConfigurationService read as the user through Xrm.WebApi; seeded with fixed ids by scripts such as Apply-WorklistGridConfiguration.ps1.",
+      "evidence": "Read-only, spaarkedev1, 2026-10-29: UserOwned; 23 rows, all in the root unit; no lookups. A child-unit user had no access to root row 00000000-0000-4000-8000-000000005001."
+    }
+  ],
+  "excluded": [
+    {
+      "logicalName": "sprk_policy",
+      "reason": "Hard-deny restricted content (RecordOwnershipResolver.RestrictedContentTables); end-user roles hold no Read on it (PolicyReadRoleGuardTests)."
+    },
+    {
+      "logicalName": "sprk_policyversion",
+      "reason": "Hard-deny restricted content; end-user roles hold no Read on it (PolicyReadRoleGuardTests)."
+    },
+    {
+      "logicalName": "sprk_ruleset",
+      "reason": "Hard-deny restricted content; Core and Basic User hold no Read on it (D-185)."
+    },
+    {
+      "logicalName": "sprk_procedureassignment",
+      "reason": "Hard-deny restricted content."
+    },
+    {
+      "logicalName": "sprk_storedfile",
+      "reason": "Hard-deny restricted content."
+    },
+    {
+      "logicalName": "sprk_navitem",
+      "reason": "Mixed, and mostly per-user: 215 of 217 rows on spaarkedev1 are 'Captured' navigation history (a user's visited records, with display names and target ids). The BFF treats it as per-user (OwnedChildWrite.PerUserTables). Global Read would let every user read every other user's history."
+    },
+    {
+      "logicalName": "sprk_workspacelayout",
+      "reason": "Mixed: 16 system layouts and 5 personal layouts on spaarkedev1, and the BFF treats the table as per-user (OwnedChildWrite.PerUserTables). The BFF serves system layouts to every user without an owner filter, so a child-unit user is not cut off from them through the Console."
+    },
+    {
+      "logicalName": "sprk_container",
+      "reason": "Customer data: an SPE storage container holding customer documents (its row carries the drive id and a document count)."
+    },
+    {
+      "logicalName": "sprk_communicationaccount",
+      "reason": "Customer configuration: a customer's mailboxes (addresses, Graph subscriptions, security groups). Read stays Basic by design."
+    },
+    {
+      "logicalName": "sprk_communicationrule",
+      "reason": "Customer filing configuration with a matter lookup (sprk_matter); Core and Basic User hold no Read on it today."
+    },
+    {
+      "logicalName": "sprk_specontainertypeconfig",
+      "reason": "Platform infrastructure configuration per business unit (app ids, Key Vault secret references), read through the BFF by the SPE admin app only; no end-user read path needs it. Left for an owner decision rather than widened here."
+    },
+    {
+      "logicalName": "sprk_speenvironment",
+      "reason": "Platform infrastructure configuration (tenant id, root site URL), read through the BFF by the SPE admin app only; no end-user read path needs it. Left for an owner decision."
+    },
+    {
+      "logicalName": "sprk_aisearchindex",
+      "reason": "Customer configuration (config/customer-configuration-owner-role.json), owned in the customer's own business unit and read at Deep there."
+    },
+    {
+      "logicalName": "sprk_fieldmappingprofile",
+      "reason": "Customer configuration (config/customer-configuration-owner-role.json)."
+    },
+    {
+      "logicalName": "sprk_fieldmappingrule",
+      "reason": "Customer configuration (config/customer-configuration-owner-role.json)."
+    },
+    {
+      "logicalName": "sprk_eventtype_ref",
+      "reason": "Reference catalog whose rows on spaarkedev1 are owned in a child unit, not the root (#2401), and whose Read depth is pinned by config/core-user-wizard-linking-role.json (appendToAboveRead.readDepth). A separate decision."
+    },
+    {
+      "logicalName": "sprk_aiknowledgedeployment",
+      "reason": "No rows on spaarkedev1, so its content could not be classified from data. Add with evidence if it proves to be product configuration."
+    },
+    {
+      "logicalName": "sprk_aiknowledgesource",
+      "reason": "No rows on spaarkedev1; a knowledge source may point at customer content. Not classified."
+    },
+    {
+      "logicalName": "sprk_airetrievalmode",
+      "reason": "No rows on spaarkedev1. Add with evidence if needed."
+    },
+    {
+      "logicalName": "sprk_outputtypes",
+      "reason": "No rows on spaarkedev1. Add with evidence if needed."
+    },
+    {
+      "logicalName": "sprk_documenttype",
+      "reason": "No rows on spaarkedev1. Add with evidence if needed."
+    },
+    {
+      "logicalName": "sprk_emailsaverule",
+      "reason": "No rows on spaarkedev1; email filing rules may be customer configuration. Not classified."
+    }
+  ]
+}

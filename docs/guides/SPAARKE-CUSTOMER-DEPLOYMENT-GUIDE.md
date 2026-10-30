@@ -1838,6 +1838,17 @@ Run intake no longer takes `communicationGraphResource` / `emailGraphResource`. 
 > configuration rows to this team, so it must exist before either runs for the customer. Until they ship, no seeder does:
 > the rows stay with the seeding identity, and an operator re-owns them to this team after setup. Users keep reading the
 > rows through their own roles (`Spaarke Core User`, Deep).
+>
+> **Product configuration is read at Global (owner decision 2026-10-29).** Spaarke product data stays owned in the root
+> (owner round 136), and people work in the customer's business unit below it, where a Read at Deep does not reach the
+> root. So `Spaarke Core User` and `Spaarke Basic User` read the product configuration tables at Global: the playbooks and
+> their actions, skills, tools and knowledge, the AI type catalogs, the Assistant's context map, and grid configuration.
+> This is Read only, on those tables only. Restricted content (`sprk_policy`, `sprk_policyversion`, `sprk_ruleset`,
+> `sprk_procedureassignment`, `sprk_storedfile`), customer records, customer configuration and per-user tables keep their
+> depths. The one list is `config/product-configuration-read-role.json` (with the tables left out and why); the roles'
+> solution XML carries it, so a SpaarkeMaster import applies it. On an environment that has not had that import, run
+> `scripts/Set-ProductConfigurationReadDepth.ps1` (dry run, then `-Apply`, then `-Verify`, which must exit 0).
+> `ProductConfigurationReadRoleGuardTests` fails the build if the list gains a customer or restricted table.
 
 Secure projects, matters and work assignments (unified-access-control-r2) need Dataverse security configuration that
 no solution import can create. Since T256, **H7b creates it on every run**, after H6 and before H9:
