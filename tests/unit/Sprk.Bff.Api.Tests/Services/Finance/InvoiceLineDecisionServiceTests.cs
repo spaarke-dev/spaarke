@@ -257,11 +257,14 @@ public sealed class InvoiceLineDecisionServiceTests
                 });
         }
 
+        /// <summary>Task 152: the queue the service's re-index is submitted to.</summary>
+        public IndexQueueDouble Queue { get; } = new();
+
         public InvoiceLineDecisionService Service()
         {
             var recorder = new BillingDecisionRecorder(H.Writer, Identity.Object, NullLogger<BillingDecisionRecorder>.Instance);
             var totals = new InvoiceTotalsService(Records.Object, Entities.Object, NullLogger<InvoiceTotalsService>.Instance);
-            return new InvoiceLineDecisionService(Entities.Object, totals, recorder, Locks, Ownership.Object, Probe.Object, CloseAsync, Log);
+            return new InvoiceLineDecisionService(Entities.Object, totals, recorder, Locks, Ownership.Object, Probe.Object, CloseAsync, Log, jobs: Queue.Submitter);
         }
 
         /// <summary>The app-identity close as the Signal writer behaves: Open/Acknowledged → Resolved Acted by the record; a repeat by the
@@ -426,6 +429,38 @@ public sealed class InvoiceLineDecisionServiceTests
         record.GetAttributeValue<string>("sprk_actioncode").Should().Be("reduce-line");
         record.GetAttributeValue<EntityReference>("sprk_regardinginvoiceline").Id.Should().Be(line.Id, "D-75: the line is the subject");
         record.GetAttributeValue<EntityReference>("sprk_confirmedby").Id.Should().Be(Decider, "the decider is the authenticated user, passed by the endpoint");
+    }
+
+    [Fact(DisplayName = "152 FR-43: a decision queues the invoice's re-index once, keyed to the decision; a repeat reuses the key, a new decision has its own, and a failed enqueue never fails the decision")]
+    public async Task Decision_QueuesTheReindex_KeyedToTheDecision_AndAFailedEnqueueNeverFailsIt()
+    {
+        var w = new World(billedTotal: 1000m);
+        var line = w.AddLine(600m, InvoiceLineStatus.Flagged);
+        var second = w.AddLine(400m, InvoiceLineStatus.Flagged);
+        var command = Command(w, LineDecisionAction.Reduce, [new(line.Id, 450m)], Reason);
+
+        var result = await w.Service().DecideAsync(command, CancellationToken.None);
+
+        result.Status.Should().Be(LineDecisionStatus.Applied);
+        var job = w.Queue.Sent.Should().ContainSingle().Subject;
+        job.JobType.Should().Be("InvoiceIndexing");
+        job.SubjectId.Should().Be(w.InvoiceId.ToString());
+        job.IdempotencyKey.Should().Be($"invoice-index-{w.InvoiceId:N}-d{command.DecisionId:N}");
+
+        // Another decision on the invoice has its own key (a fixed per-invoice key would drop every re-index after the first).
+        var other = Command(w, LineDecisionAction.Disallow, [new(second.Id)], "Block billing");
+        (await w.Service().DecideAsync(other, CancellationToken.None)).Status.Should().Be(LineDecisionStatus.Applied);
+        w.Queue.Sent.Select(j => j.IdempotencyKey).Should().Equal(
+            $"invoice-index-{w.InvoiceId:N}-d{command.DecisionId:N}", $"invoice-index-{w.InvoiceId:N}-d{other.DecisionId:N}");
+
+        // A queue outage is logged, not raised: the decision still answers Applied.
+        var w2 = new World(billedTotal: 1000m);
+        var line2 = w2.AddLine(600m, InvoiceLineStatus.Flagged);
+        w2.AddLine(400m, InvoiceLineStatus.Clean);
+        w2.Queue.Fault = new InvalidOperationException("service bus down");
+        var faulted = await w2.Service().DecideAsync(Command(w2, LineDecisionAction.Reduce, [new(line2.Id, 450m)], Reason), CancellationToken.None);
+        faulted.Status.Should().Be(LineDecisionStatus.Applied);
+        w2.ApprovedTotal.Should().Be(850m);
     }
 
     [Fact(DisplayName = "100: an Accept sets approved = billed, clears an earlier reason, and writes no correction rows on the single-line path")]

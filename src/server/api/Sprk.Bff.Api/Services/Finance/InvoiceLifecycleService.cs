@@ -3,6 +3,8 @@ using System.Globalization;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Messages;
 using Spaarke.Dataverse;
+using Sprk.Bff.Api.Services.Jobs;
+using Sprk.Bff.Api.Services.Jobs.Handlers;
 
 namespace Sprk.Bff.Api.Services.Finance;
 
@@ -239,11 +241,20 @@ public sealed class InvoiceLifecycleService : IInvoiceLifecycleService
 
     private readonly IFieldMappingDataverseService _records;
     private readonly ILogger<InvoiceLifecycleService> _logger;
+    private readonly JobSubmissionService? _jobs;
 
-    public InvoiceLifecycleService(IFieldMappingDataverseService records, ILogger<InvoiceLifecycleService> logger)
+    /// <param name="records">The Dataverse boundary.</param>
+    /// <param name="logger">The logger.</param>
+    /// <param name="jobs">Task 152 (FR-43): enqueues the invoice's re-index after each status move. Registered in DI always; the unit-test
+    /// seam leaves it null, which enqueues nothing.</param>
+    public InvoiceLifecycleService(
+        IFieldMappingDataverseService records,
+        ILogger<InvoiceLifecycleService> logger,
+        JobSubmissionService? jobs = null)
     {
         _records = records ?? throw new ArgumentNullException(nameof(records));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _jobs = jobs;
     }
 
     /// <summary>True when FR-06 allows moving from <paramref name="from"/> to <paramref name="to"/> (never for from == to).</summary>
@@ -377,6 +388,7 @@ public sealed class InvoiceLifecycleService : IInvoiceLifecycleService
             }
 
             _logger.LogInformation("Invoice {InvoiceId} moved {From} to {Target} (version {Version})", invoiceId, current, target, version);
+            await EnqueueIndexAsync(invoiceId, version).ConfigureAwait(false);
             return InvoiceTransitionResult.Moved(current, target);
         }
 
@@ -385,6 +397,15 @@ public sealed class InvoiceLifecycleService : IInvoiceLifecycleService
             invoiceId, target, InvoiceReviewService.MaxConditionalWriteAttempts);
         return InvoiceTransitionResult.Refuse(target, lastSeen, InvoiceTransitionReasons.ConcurrentChange);
     }
+
+    /// <summary>
+    /// Task 152 (FR-43, NFR-03): after a status move, asks for the invoice's index document to be rebuilt. The change key is the row version the
+    /// move replaced: the write was conditional on it, so exactly one move owns each version and two moves never share an idempotency key
+    /// (a fixed key would let Service Bus duplicate detection drop every re-index after the first). Best effort: the move is already committed,
+    /// so a failed enqueue is logged and never undoes or fails it; the next change re-indexes the invoice.
+    /// </summary>
+    private Task EnqueueIndexAsync(Guid invoiceId, long replacedVersion) =>
+        InvoiceIndexingJobHandler.TryEnqueueAsync(_jobs, _logger, invoiceId, $"v{replacedVersion.ToString(CultureInfo.InvariantCulture)}");
 
     private static bool TryReadLong(Dictionary<string, object?> row, string column, out long value)
     {

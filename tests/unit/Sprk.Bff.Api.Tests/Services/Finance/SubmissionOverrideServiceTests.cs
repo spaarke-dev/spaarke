@@ -54,6 +54,9 @@ public class SubmissionOverrideServiceTests
         public Entity Submission { get; }
         public Entity? Invoice { get; set; }
 
+        /// <summary>Task 152: the queue the service's re-index is submitted to.</summary>
+        public IndexQueueDouble Queue { get; } = new();
+
         /// <summary>What happened, in order: lock, record, transition, update, notify, unlock.</summary>
         public List<string> Order { get; } = [];
 
@@ -297,7 +300,8 @@ public class SubmissionOverrideServiceTests
                         ? Task.FromException<DecisionRecordWriter.BillingStoredResolvedSet?>(fault)
                         : Recorder.FindStoredResolvedSetAsync(code, invoice, decisionId, ct);
                 },
-                Clock);
+                Clock,
+                Queue.Submitter);
 
             // The open-Signal read (049's ReadOpenSignalSetAsync): the invoice's lines, then the Signals on the invoice or a line.
             Entities.Setup(e => e.RetrieveMultipleAsync(It.IsAny<Microsoft.Xrm.Sdk.Query.QueryExpression>(), It.IsAny<CancellationToken>()))
@@ -621,6 +625,29 @@ public class SubmissionOverrideServiceTests
         {
             after[name]!.ToJsonString().Should().Be(value!.ToJsonString(), $"the stored member '{name}' is unchanged: an override never rewrites a finding");
         }
+    }
+
+    [Fact(DisplayName = "152 FR-43: an override that releases the hold queues the invoice's re-index (a Return does not: its status move does); a failed enqueue never fails the override")]
+    public async Task Override_QueuesTheReindex_AReturnDoesNot_AndAFailedEnqueueNeverFailsIt()
+    {
+        var w = await World.CreateAsync();
+
+        var result = await w.OverrideAsync();
+
+        result.Kind.Should().Be(BlockedDecisionKind.Decided);
+        var job = w.Queue.Sent.Should().ContainSingle().Subject;
+        job.JobType.Should().Be("InvoiceIndexing");
+        job.SubjectId.Should().Be(World.InvoiceId.ToString());
+        job.IdempotencyKey.Should().Be($"invoice-index-{World.InvoiceId:N}-o{SubmissionOverrideService.OverrideDecisionIdFor(World.SubmissionId):N}");
+
+        var returned = await World.CreateAsync();
+        (await returned.ReturnAsync()).Kind.Should().Be(BlockedDecisionKind.Decided);
+        returned.Queue.Sent.Should().BeEmpty("the Return's status move is queued by the lifecycle service, which is a double here");
+
+        var faulted = await World.CreateAsync();
+        faulted.Queue.Fault = new InvalidOperationException("service bus down");
+        (await faulted.OverrideAsync()).Kind.Should().Be(BlockedDecisionKind.Decided);
+        faulted.Queue.Sent.Should().BeEmpty();
     }
 
     [Fact]

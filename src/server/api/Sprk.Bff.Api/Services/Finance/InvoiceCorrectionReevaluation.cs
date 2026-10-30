@@ -9,6 +9,8 @@ using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.Ai.PublicContracts;
 using Sprk.Bff.Api.Services.Finance.Resolution;
 using Sprk.Bff.Api.Services.Finance.Submission;
+using Sprk.Bff.Api.Services.Jobs;
+using Sprk.Bff.Api.Services.Jobs.Handlers;
 using Sprk.Bff.Api.Services.Signals;
 using Sprk.Bff.Api.Services.Signals.Billing;
 using Sprk.Bff.Api.Services.Signals.Billing.Handlers;
@@ -186,10 +188,11 @@ public sealed class InvoiceCorrectionReevaluation
     private readonly Func<Guid, string, int, string, CancellationToken, Task<SignalCloseOutcome>> _closeSignal;
     private readonly Func<DateOnly?, CancellationToken, Task<(BillingRuleCandidate? Rule, string State)>> _systemPolicy;
     private readonly Func<Guid, CancellationToken, Task<InvoiceTotalsCalculation>>? _recalculate;
+    private readonly JobSubmissionService? _jobs;
 
     public InvoiceCorrectionReevaluation(
         IGenericEntityService entities, BillingFactLoader loader, InvoiceComplianceEvaluator evaluator, SignalWriter signals,
-        IInvoiceTotalsService totals, ILogger<InvoiceCorrectionReevaluation> logger)
+        IInvoiceTotalsService totals, ILogger<InvoiceCorrectionReevaluation> logger, JobSubmissionService? jobs = null)
         : this(
             entities,
             (loader ?? throw new ArgumentNullException(nameof(loader))).LoadAsync,
@@ -197,7 +200,8 @@ public sealed class InvoiceCorrectionReevaluation
             (signals ?? throw new ArgumentNullException(nameof(signals))).WriteAsync,
             (id, rowVersion, resolution, policyCode, ct) => signals.CloseAsync(id, rowVersion, resolution, policyCode, ct),
             logger,
-            recalculate: (totals ?? throw new ArgumentNullException(nameof(totals))).RecalculateAsync)
+            recalculate: (totals ?? throw new ArgumentNullException(nameof(totals))).RecalculateAsync,
+            jobs: jobs)
     {
     }
 
@@ -211,8 +215,10 @@ public sealed class InvoiceCorrectionReevaluation
         Func<Guid, string, int, string, CancellationToken, Task<SignalCloseOutcome>> closeSignal,
         ILogger<InvoiceCorrectionReevaluation> logger,
         Func<DateOnly?, CancellationToken, Task<(BillingRuleCandidate? Rule, string State)>>? systemPolicy = null,
-        Func<Guid, CancellationToken, Task<InvoiceTotalsCalculation>>? recalculate = null)
+        Func<Guid, CancellationToken, Task<InvoiceTotalsCalculation>>? recalculate = null,
+        JobSubmissionService? jobs = null)
     {
+        _jobs = jobs; // null (the test seam only): no re-index is queued
         _recalculate = recalculate; // null (the test seam only): the totals step does not run
         _entities = entities ?? throw new ArgumentNullException(nameof(entities));
         _load = load ?? throw new ArgumentNullException(nameof(load));
@@ -297,14 +303,21 @@ public sealed class InvoiceCorrectionReevaluation
             }
         }
 
+        long submissionVersion;
         try
         {
-            await RecordFollowedThroughAsync(applied, followed!, derived, ct).ConfigureAwait(false);
+            submissionVersion = await RecordFollowedThroughAsync(applied, followed!, derived, ct).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
             throw new CorrectionStepException(CorrectionCodes.ReevaluationStep, ex);
         }
+
+        // Task 152 (FR-43): the correction is followed through - its findings, status, Signals and totals are final - so the invoice's index
+        // document is rebuilt. The change is the submission row version the final write replaced (or, on a repeat that wrote nothing, the version it
+        // found): the write is conditional on it, so each followed-through correction has its own key. Best effort; never fails the correction.
+        await InvoiceIndexingJobHandler.TryEnqueueAsync(
+            _jobs, _logger, applied.InvoiceId, $"c{submissionVersion.ToString(CultureInfo.InvariantCulture)}").ConfigureAwait(false);
     }
 
     // ── The final write (fix round, part 3) ──
@@ -321,7 +334,7 @@ public sealed class InvoiceCorrectionReevaluation
     /// (<paramref name="derived"/>) from <see cref="PendingStatusLinesMember"/>, in one row-version-conditional write of the latest submission. Nothing is
     /// written when nothing changes (a repeat). Throws when the submission or its findings cannot be read (fail closed: the rows stay unapplied).
     /// </summary>
-    private async Task RecordFollowedThroughAsync(CorrectionApplied applied, IReadOnlyList<Guid> followed, IReadOnlySet<int>? derived, CancellationToken ct)
+    private async Task<long> RecordFollowedThroughAsync(CorrectionApplied applied, IReadOnlyList<Guid> followed, IReadOnlySet<int>? derived, CancellationToken ct)
     {
         var submission = await ReadSubmissionAsync(applied.InvoiceId, ct).ConfigureAwait(false)
             ?? throw new InvalidOperationException("The invoice has no submission.");
@@ -353,7 +366,7 @@ public sealed class InvoiceCorrectionReevaluation
 
         if (string.Equals(original, root.ToJsonString(), StringComparison.Ordinal))
         {
-            return;
+            return version;
         }
 
         var update = new Entity(InvoiceReviewReadService.SubmissionEntity, submission.Id)
@@ -365,6 +378,7 @@ public sealed class InvoiceCorrectionReevaluation
             [new UpdateRequest { Target = update, ConcurrencyBehavior = ConcurrencyBehavior.IfRowVersionMatches }], ct).ConfigureAwait(false);
         _logger.LogInformation("Correction of {Field} on invoice {InvoiceId}: followed through ({Count} correction rows recorded).",
             applied.Field, applied.InvoiceId, followed.Count);
+        return version;
     }
 
     // ── The totals step (B2c) ──

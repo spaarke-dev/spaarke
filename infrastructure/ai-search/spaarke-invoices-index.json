@@ -168,6 +168,149 @@
       "retrievable": true,
       "sortable": true,
       "facetable": false
+    },
+    {
+      "// ebilling-r1 task 152 (FR-43, D-44)": "fields below are built from the invoice's structured records. All are ADDITIVE: no existing field's attributes change, so the deployer's PUT updates the live index in place (no recreate). The firm is vendorOrgId / vendorName (the invoice's sprk_vendororg); the billed total is totalAmount.",
+      "name": "coreRecordType",
+      "type": "Edm.String",
+      "searchable": false,
+      "filterable": true,
+      "retrievable": true,
+      "sortable": true,
+      "facetable": true
+    },
+    {
+      "// core record id": "the id of the invoice's core record (matter, project or work assignment); matterId / projectId stay filled for those two types",
+      "name": "coreRecordId",
+      "type": "Edm.String",
+      "searchable": false,
+      "filterable": true,
+      "retrievable": true,
+      "sortable": true,
+      "facetable": true
+    },
+    {
+      "// searchable=true": "core record display name is text content (full-text query); sortable/facetable=true per policy",
+      "name": "coreRecordName",
+      "type": "Edm.String",
+      "searchable": true,
+      "filterable": true,
+      "retrievable": true,
+      "sortable": true,
+      "facetable": true,
+      "analyzer": "standard.lucene"
+    },
+    {
+      "// collection": "roster timekeeper ids of the invoice's fee lines; Azure forbids sortable on a collection",
+      "name": "timekeeperIds",
+      "type": "Collection(Edm.String)",
+      "searchable": false,
+      "filterable": true,
+      "retrievable": true,
+      "sortable": false,
+      "facetable": true
+    },
+    {
+      "// searchable=true": "timekeeper display names are text content; collection, so sortable=false",
+      "name": "timekeeperNames",
+      "type": "Collection(Edm.String)",
+      "searchable": true,
+      "filterable": true,
+      "retrievable": true,
+      "sortable": false,
+      "facetable": true,
+      "analyzer": "standard.lucene"
+    },
+    {
+      "// collection": "UTBMS task codes of the invoice's lines (the line's resolved code, else the code as billed)",
+      "name": "taskCodes",
+      "type": "Collection(Edm.String)",
+      "searchable": false,
+      "filterable": true,
+      "retrievable": true,
+      "sortable": false,
+      "facetable": true
+    },
+    {
+      "// collection": "UTBMS activity codes of the invoice's lines",
+      "name": "activityCodes",
+      "type": "Collection(Edm.String)",
+      "searchable": false,
+      "filterable": true,
+      "retrievable": true,
+      "sortable": false,
+      "facetable": true
+    },
+    {
+      "// collection": "UTBMS expense codes of the invoice's lines",
+      "name": "expenseCodes",
+      "type": "Collection(Edm.String)",
+      "searchable": false,
+      "filterable": true,
+      "retrievable": true,
+      "sortable": false,
+      "facetable": true
+    },
+    {
+      "// searchable=true": "tracking number {firm invoice number}.{n} (D-87) is searched as text, like invoiceNumber; sortable/facetable=true per policy",
+      "name": "trackingNumber",
+      "type": "Edm.String",
+      "searchable": true,
+      "filterable": true,
+      "retrievable": true,
+      "sortable": true,
+      "facetable": true,
+      "analyzer": "standard.lucene"
+    },
+    {
+      "// override-facetable": "datetime faceting is rarely useful (per catalog policy table)",
+      "name": "billingPeriodStart",
+      "type": "Edm.DateTimeOffset",
+      "searchable": false,
+      "filterable": true,
+      "retrievable": true,
+      "sortable": true,
+      "facetable": false
+    },
+    {
+      "// override-facetable": "datetime faceting is rarely useful (per catalog policy table)",
+      "name": "billingPeriodEnd",
+      "type": "Edm.DateTimeOffset",
+      "searchable": false,
+      "filterable": true,
+      "retrievable": true,
+      "sortable": true,
+      "facetable": false
+    },
+    {
+      "// override-facetable": "Edm.Double approvedTotal is a continuous numeric (high cardinality) — faceting not useful; same as totalAmount (the billed total)",
+      "name": "approvedTotal",
+      "type": "Edm.Double",
+      "searchable": false,
+      "filterable": true,
+      "retrievable": true,
+      "sortable": true,
+      "facetable": false
+    },
+    {
+      "// statusCode": "sprk_invoice statuscode (FR-06 / D-41); the number, so a filter does not depend on the label",
+      "name": "statusCode",
+      "type": "Edm.Int32",
+      "searchable": false,
+      "filterable": true,
+      "retrievable": true,
+      "sortable": true,
+      "facetable": true
+    },
+    {
+      "// status": "the lifecycle status name (InReview, Approved, SentToAp, Paid, Rejected, ReturnedToFirm, Cancelled)",
+      "name": "status",
+      "type": "Edm.String",
+      "searchable": false,
+      "filterable": true,
+      "retrievable": true,
+      "sortable": true,
+      "facetable": true
     }
   ],
   "vectorSearch": {

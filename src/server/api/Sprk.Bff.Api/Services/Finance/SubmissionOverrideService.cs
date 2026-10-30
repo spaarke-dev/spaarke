@@ -7,6 +7,7 @@ using Sprk.Bff.Api.Infrastructure.Exceptions;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Services.Finance.Submission;
 using Sprk.Bff.Api.Services.Jobs;
+using Sprk.Bff.Api.Services.Jobs.Handlers;
 using Sprk.Bff.Api.Services.Signals;
 using Sprk.Bff.Api.Services.Signals.Actions;
 using FindingGroup = Sprk.Bff.Api.Services.Finance.DuplicateDetailGate.FindingGroup;
@@ -287,6 +288,7 @@ public sealed class SubmissionOverrideService
     private readonly HumanDecisionSignalClose.CloseActed _closeActed;
     private readonly Func<string, Guid, Guid, CancellationToken, Task<DecisionRecordWriter.BillingStoredResolvedSet?>> _findStored;
     private readonly TimeProvider _time;
+    private readonly JobSubmissionService? _jobs;
     private readonly ILogger<SubmissionOverrideService> _logger;
 
     /// <param name="user">The CALLER's Dataverse client (OBO): the read's D-176 earlier-invoice check reads with it, never app-only (ADR-028).</param>
@@ -300,13 +302,16 @@ public sealed class SubmissionOverrideService
         IDataverseUserClient user,
         EarlierInvoiceReadability earlierInvoices,
         SignalWriter signals,
-        ILogger<SubmissionOverrideService> logger)
+        ILogger<SubmissionOverrideService> logger,
+        JobSubmissionService? jobs = null)
         : this(
             entities, lifecycle, idempotency, sink, probe, user, earlierInvoices, logger,
             (recorder ?? throw new ArgumentNullException(nameof(recorder))).RecordAsync,
             recorder.Preflight,
             (signals ?? throw new ArgumentNullException(nameof(signals))).CloseActedByDecisionAsync,
-            recorder.FindStoredResolvedSetAsync)
+            recorder.FindStoredResolvedSetAsync,
+            time: null,
+            jobs: jobs)
     {
     }
 
@@ -326,8 +331,10 @@ public sealed class SubmissionOverrideService
         Action<BillingDecision> preflight,
         HumanDecisionSignalClose.CloseActed closeActed,
         Func<string, Guid, Guid, CancellationToken, Task<DecisionRecordWriter.BillingStoredResolvedSet?>> findStored,
-        TimeProvider? time = null)
+        TimeProvider? time = null,
+        JobSubmissionService? jobs = null)
     {
+        _jobs = jobs; // Task 152: null in a test seam; the DI path always supplies it (JobSubmissionService is a singleton).
         _closeActed = closeActed ?? throw new ArgumentNullException(nameof(closeActed));
         _findStored = findStored ?? throw new ArgumentNullException(nameof(findStored));
         _entities = entities ?? throw new ArgumentNullException(nameof(entities));
@@ -910,6 +917,14 @@ public sealed class SubmissionOverrideService
 
         _logger.LogInformation("Submission {SubmissionId} {Outcome} by {Decider}; invoice {InvoiceId}, Decision Record {RecordId}, already recorded {AlreadyRecorded}, Signals not closed {SignalsNotClosed}",
             submissionId, verb == Verb.Override ? "overridden" : "returned", decider, invoiceId, recorded.RecordId, recorded.AlreadyRecorded, signalsNotClosed);
+
+        // Task 152 (FR-43): an override releases the hold without a status move (a Return moves the status, and the lifecycle service re-indexes
+        // that), so the index document is rebuilt here. The change is the override's decision id (one per submission). Best effort; never fails the decision.
+        if (verb == Verb.Override)
+        {
+            await InvoiceIndexingJobHandler.TryEnqueueAsync(
+                _jobs, _logger, invoiceId, $"o{decisionId.ToString("N", CultureInfo.InvariantCulture)}").ConfigureAwait(false);
+        }
 
         await NotifyDecidedAsync(verb, submissionId, invoiceId, ct).ConfigureAwait(false);
 
