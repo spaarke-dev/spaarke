@@ -9,18 +9,17 @@
 | Field | Value |
 |---|---|
 | **Active** | **076 waiting on the dev BFF deploy.** We OK'd R3's candidate c91b99e575 (contains W7; Router green; 266 related tests + live dev schema check for the new ebilling family rows; full ArchTests 1857/1858, the 1 = flaky ISS-005 wall-clock guard, filed #2469). R3 has the deploy ON HOLD: word-add-in blocking finding #2468 (UAC 194b, unfiled Outlook save ownership); the owner is choosing hold-for-fix vs deploy. A new SHA needs our re-OK. |
-| **Next Action** | 1) On R3's re-OK request: verify the new SHA (contains W7 + #2470 (merged 63a3daa576); related suites; ArchTests) and OK it. 2) After R3's readback: task-execute 076 (TrackingFieldTrio 1.0.55 via pcf-deploy; owner + narrow-user live checks; App Insights). |
+| **Next Action** | 1) **Start 017 via task-execute** (opus/high, FULL): ebilling #1911 MERGED 2026-10-29 21:35, so 017 is unblocked. First item of 017: the ebilling reconcile commit (invoice-family PreWriteRule in RecordTableRules for sprk_invoice/sprk_billingevent, F2 PreWriteRefusal kind, F4 test, retire the 013 ratchet baseline; ebilling reviews), then the other BLOCKING criteria in the POML (DI-004/#2188 field-security on mapped source columns; 015 K1/K3; 014 R3-1), then re-point the four callers. /conflict-check first. 2) In parallel (doc, main session): FR-38/W3 scope procedure (spec amendment → task-create → TASK-INDEX → owner approval). 3) 076 waits on R3 (deploy on hold for #2468; owner choosing); re-OK any new SHA. |
 | **Owner decisions today** | Q1 drop; Q2 (B), seeding the 7 canonical index rows per customer, team-owned, no BU defaults. Depth cap counted from the TOP (exception to UAC C4; design §12.11, quoted on #2442; UAC adopted it). WA owning unit follows its matter (UAC #2451). |
 | **#2399** | Live part FIXED: the owner re-tested the WA create as Test User 1 on 2026-10-29 (saves, with number and Assigned To). Open for the durable fix: FR-38/W3 still need the scope procedure (spec amendment → task-create → TASK-INDEX → owner approval); FR-39 and the index rows are provisioning's #2429. |
 | **Open PRs** | #2387 (075, HOLD, ships with 040). |
 | **Issues** | #2444 (UAC: shared reads-agnostic ordering helper). #2413 (known limit). #2429 (provisioning H7c team + H12b index-row seed + H4b allow-list; I review the PR). #2469 (flaky ISS-005 ArchTest, not ours). |
-| **Waiting on** | UAC 195 → 040 (UAC 2026-10-29: 194b merged, 195 queued next after its two owner-ruling branches; UAC sends the wizard-write SHA and the dev-backfill notice). Provisioning's #2429 PR. 017 blocked on ebilling #1911. |
+| **Waiting on** | UAC 195 → 040 (UAC 2026-10-29: 194b merged, 195 queued next after its two owner-ruling branches; UAC sends the wizard-write SHA and the dev-backfill notice). Provisioning's #2429 PR. ebilling #1911 merged → 017 unblocked. |
 | **Owner to do** | Leftover locked worktree agent-aec6d06ca99a5a9f6 (075): end of project. |
 
-## Blocked: 017
+## 017: unblocked (2026-10-30)
 
-Re-pointing the route and the chat create needs ebilling #1911 (still a draft) plus its reconcile, and these owner items:
-All four owner decisions are made (2026-10-22/23: 2a-2c option a, 2d option c); only ebilling #1911 remains.
+ebilling #1911 merged 2026-10-29 21:35. All four owner decisions were made 2026-10-22/23 (2a-2c option a, 2d option c). The POML's BLOCKING criteria still apply in order: ebilling reconcile commit → DI-004 (#2188) → 015 K1/K3 → 014 R3-1 → re-point.
 
 ## How wave-2 agents are run (lessons)
 
