@@ -371,12 +371,102 @@ Changed B2b-1 tests: the two that read `pendingSignalChanges` now read the findi
 7. **The approval GET** shows `canApprove: false` without a reason; the reason is in the approve's 409. A UI follow-up can call approve or add a member.
 8. `appliedCorrections` grows by about 40 characters per row; the column limit (1,048,576) allows about 26,000 rows.
 
+## Fix round, part 3, round 2: applied means the whole follow-through (K1, K2, K3, K7 of part 3)
+
+The coordinator accepted the decided-line exclusion and asked for three changes. This round makes them.
+
+**1. "Applied" now means the WHOLE follow-through finished (part 3 known limits 2 and 3).**
+
+| | Before | After |
+|---|---|---|
+| When a row is recorded | `appliedCorrections` was written in the findings patch. A status, Signals or totals step that failed after it left the row listed. The line stayed Clean with a new finding on it, or the approved total stayed stale, and approve passed (bulk-accepting the Clean line). | A final row-version-conditional write after the last step (findings, status, Signals, totals, as the field has them) adds the field's Corrected / Confirmed rows to `appliedCorrections`. A failure in that write is 503 `incomplete` with `failedStep` `reevaluation`, which the endpoint contract already defines as "any other step". A failure at any earlier step leaves the row unlisted, so approval refuses with 409 `corrections_pending` until the repeat. |
+| TotalDue | Not guarded: TotalDue has no findings step. | Guarded: its rows are read before the totals step, recorded after it, and `ReadUnappliedAsync` now covers every field that feeds the totals. |
+
+- **Diff base (a deviation from the brief, for the operator).** The "before" side of the diff does NOT move to "the last fully applied value". It stays at the value whose findings patch LANDED, now tracked in its own member, `patchedCorrections`, which is written with the patch as `appliedCorrections` was in part 3.
+  - Counterexample: rate 100 → 150 (the patch lands and the over-approved finding is added; the status step fails) → 100. Diffed from the last fully applied value (100), both sides agree, so the 150 finding is never removed. Diffed from 150, it is removed.
+  - Test `ARateChain_WhoseMiddlePatchLandedButWhoseStatusFailed_ConvergesWhenCorrectedBack` goes red when the base is switched to `appliedCorrections` (seed 3).
+  - `appliedResolutions` (the timekeeper/date pair the findings were patched with) stays with the patch for the same reason: it says what the stored findings reflect. It is not a done-marker.
+- **Status coverage.** `pendingStatusLines` holds the lines a landed patch touched whose status has not been re-derived yet.
+  - The patch adds its touched lines only when it changed the findings, so a repeat whose patch is a no-op writes nothing.
+  - Every status step re-derives its touched lines plus the waiting ones.
+  - The final write removes the lines its status step considered.
+  - A later correction of ANY field therefore completes the status work a failed one left behind. The unfinished row itself stays unapplied until it is repeated (or followed by a later correction of the same field).
+- **Idempotency.** Two parts make the patch idempotent:
+  - A repeat re-runs the same diff (from the last patched row before the latest), which rewrites the same entries: same index, same decision members.
+  - New in this round: a plan entry that already equals the after side records no Signal change again. Previously a repeat after a completed Signals step re-recorded `pendingSignalChanges` (close = raise), and the Signals step wrote the same entry once more.
+  - Proven by `ARepeatAfterAFailedTotalsStep_ConvergesToTheUninterruptedState`: the repeat's only submission write is the final write, no Signal is written twice, and the converged findings JSON equals an uninterrupted run's byte for byte (apart from the row-id lists). Seed 5 makes it red.
+
+**2. The decided-line gap is closed at the source (part 3 known limit 1).**
+- `InvoiceLineDecisionService` refuses a decision on a line that has a Corrected / Confirmed row not in `appliedCorrections`:
+  - code: 409 `ebilling.line.corrections_pending` (`LineDecisionStatus.LineNotDecidable`, already 409 on the endpoint and in the approval's mapping);
+  - detail: `These corrections were saved but did not finish: Narrative (line 2). Repeat each correction, then decide the line again.`
+  - nothing is written.
+- **Accept all Clean** refuses while ANY correction of the invoice is unapplied, and names every one: `... then accept the Clean lines again.`
+  - This is stricter than "the lines it would accept" (a decision for the operator): an unfinished header correction, or one on another line, can still place a finding on a Clean line (cross-line rules such as the daily cap, header rules on every line).
+- The read fails closed (503 `ebilling.decision.unavailable`, nothing written).
+- The approval's held paths (`AcceptCleanHeldAsync`, `CompleteBulkAcceptHeldAsync`) skip the check: the approval's own guard has just refused on the same read.
+- The refusal text is now one helper, `InvoiceCorrectionReevaluation.UnappliedText`, shared by approval and line decisions.
+- With this, a line can be decided only when every correction of it is applied, and the correction service refuses decided lines. So the guard's decided-line exclusion stays sound. 103's D-72 seed (a Corrected row on an Accepted line, with no findings JSON) stays valid, and 103's suite is unchanged and green.
+
+**3. Reason on the approval GET (part 3 known limit 7): skipped.** `InvoiceApprovalStateDto` carries no reason codes. It carries one flag or count per block (`Held`, `OpenLines`, `NoEligibleApprover`, `EligibilityUnavailable`), so the brief's condition is not met. Following that pattern, a `CorrectionsPending` flag would be a contract addition for the UI to decide on. The reason is in the approve's 409 detail.
+
+**Files.**
+- `Services/Finance/InvoiceCorrectionReevaluation.cs`: `PatchedCorrectionsMember`, `PendingStatusLinesMember`, the final write, the status step's waiting lines, the plan no-op, `ReadUnappliedAsync` covering the totals fields, `UnappliedText`.
+- `Services/Finance/InvoiceLineDecisionService.cs`: `CorrectionsPending`, `RefuseUnappliedAsync`.
+- `Services/Finance/InvoiceApprovalService.cs`: the shared text.
+- `Api/Finance/InvoiceLineReviewEndpoints.cs`: the 409 in the docs.
+- Tests:
+  - `InvoiceCorrectionDurabilityTests` (+4, 1 changed);
+  - `InvoiceCorrectionEndToEndTests` (+5);
+  - `InvoiceCorrectionReevaluationTests` (2 expectations: the final write is a third submission write, and the decided-line comparison drops `patchedCorrections` too);
+  - `ApprovalWorld` (an additive `TransactionFault` hook).
+- No schema change (two more members in the same JSON column), no new endpoint, interface, DI registration or package.
+
+**Component justification (section 11).**
+- `RefuseUnappliedAsync` is new surface in an existing service.
+  - Existing: the approval's guard, which uses the same read and the same text.
+  - Extension: the line decision is a separate owner that the approval does not run on its public routes, so the check has to sit in it. It reuses the read and the text.
+  - Cost of doing nothing: a reviewer can decide a line past an unfinished correction. The line then never gets the finding (decided lines are frozen), and the approval guard has to skip it.
+- `pendingStatusLines` and `patchedCorrections` extend the existing findings JSON and its existing write. Cost of doing nothing: a chained correction either leaves a stale finding (diff from the fully-applied value) or leaves a line's status underived.
+
+**Tests.**
+- New, durability:
+  - a repeat after a totals failure converges to the uninterrupted state;
+  - a rate chain whose middle patch landed but whose status failed converges when corrected back (SEEDED);
+  - a waiting line is re-derived by the next correction of any field;
+  - TotalDue is recorded after its totals step, and is unapplied while that step is unfinished.
+- New, end to end over `ApprovalWorld`:
+  - a failed status step blocks approval (409 with exact detail, nothing written, `canApprove` false); the repeat flags the line; it is decided, and the invoice approved (SEEDED);
+  - the same for a failed Signals step (the coding hold's close), with the invoice approved after the repeat;
+  - the same for a failed totals step;
+  - a line with an unfinished correction cannot be decided, Accept all Clean is refused while any correction is unfinished, a line with no unfinished correction can still be decided, and after the repeat the line is decided (SEEDED);
+  - the line decision's read fails closed.
+
+**Seeded proofs** (each change reverted, the tests watched fail, then restored):
+
+| Seed | Failed under the seed |
+|---|---|
+| 1. Record `appliedCorrections` in the findings patch again | The status, Signals and totals approval tests |
+| 2. Line decisions skip the check | The line-decision test |
+| 3. Diff base = `appliedCorrections` | The rate chain-back test |
+| 4. The status step ignores `pendingStatusLines` | The waiting-line test |
+| 5. The plan re-records a change that already landed | The convergence test |
+
+**Known limits after this round.**
+1. A single-line decision checks only that line's own corrections. A decision on line Y while an unfinished correction of line X would place a cross-line finding on Y is allowed. Approval still refuses until X is repeated, but X's repeat does not patch Y, because Y is now decided. Accept all Clean, the bulk path, refuses in that case.
+2. A correction committed between a decision's (or the approval's) read and its write is not seen; corrections take no invoice lock (unchanged).
+3. Rows saved before this round are listed in `appliedCorrections` if their findings patch landed under part 3; dev data only.
+4. The per-field diff (part 3 known limit 4) and TotalDue having no findings step are unchanged. TotalDue is now guarded.
+5. `appliedCorrections` and `patchedCorrections` together grow about 80 characters per row.
+
+**Gate (this round).** Builds clean (0 warnings, 0 errors): Sprk.Bff.Api.Tests, Spaarke.ArchTests (an MSBuild child-node crash, MSB4166, in the first build; rebuilt on one node, clean), Sprk.Bff.Api.IntegrationTests, Spe.Integration.Tests, Sprk.Provisioning.ControlPlane.LoadTests. ArchTests 1858 passed, 0 failed (the task 122 findings-JSON guard is green: the line-decision service reads through the reviewed type). Unit filter `Finance|Ebilling|Billing|Signals|Approval|Invoice`: 9061 passed, 7 skipped, 0 failed (part 3: 9052; +9 new tests). Integration project: 199 passed, 8 skipped, 0 failed. No vulnerable packages; no package change. Each commit's Finance suite was run on its own tree before it was committed. Publish size was not re-measured this round (no package or project change; part 3's whole branch measured +122,224 bytes against master).
+
 ## Review status (F-1 .. F-5)
 
 | Finding | Status | Where |
 |---|---|---|
 | F-1 refused totals left a saved value no repeat could clear | Fixed: dry-run before the write, 409 `totals_refused` | Fix round, part 2 |
-| F-2 fail-open: an unfinished correction approved past | Fixed: `appliedCorrections`, last-applied "before", approval guard 409 `corrections_pending` (known limits 1 and 2 above) | Fix round, part 3 |
+| F-2 fail-open: an unfinished correction approved past | Fixed: `appliedCorrections` written after the LAST step (TotalDue included), the diff from the last landed patch, approval guard 409 `corrections_pending`, line decisions refuse past an unfinished correction (round 2 known limit 1 remains) | Fix round, part 3 and round 2 |
 | F-3 false `currency.mismatch` on every line | Fixed: the lines move with the header currency; the rules re-run through the diff | Fix round, part 2 |
 | F-4 `coding.not_returned` cleared by a correction | No behaviour change: EB-D-175 allows it; code comment added | Fix round, part 1 |
 | F-5 Signal left open after its group is gone | Fixed: a null raise closes the latest open episode | Fix round, part 1 |
