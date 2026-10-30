@@ -63,7 +63,8 @@ namespace Sprk.Bff.Api.Services.Ai.Handlers;
 /// application creates records the PERSON who asked for it in the server-stamped, field-secured
 /// <c>sprk_createdbyperson</c> (<see cref="RecordCreatorPerson"/>) — IN THE CREATE PAYLOAD, through the owner decision
 /// (<c>RecordOwnershipContext.RequestedBy</c> → <c>RecordOwnerResolution.StampCreatorOn</c>, in
-/// <see cref="OwnedChildWrite.CreateAsync"/>). That supersedes task 133's interim shape (a user-OBO create followed by
+/// <see cref="Sprk.Bff.Api.Services.RecordCreation.RecordCreationService"/>'s step 11, since task 017 replaced the owned
+/// create that did it first). That supersedes task 133's interim shape (a user-OBO create followed by
 /// one app-only column update), which is removed: there is exactly one stamp. An item that names the column is refused
 /// before any Dataverse call (pre-suspend in <c>ValidateChat</c>, and again here): a caller never chooses who created a
 /// record. A run-as-user create (per-user tables, unfiled communications, organization-owned tables) needs no stamp — its

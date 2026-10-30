@@ -27,7 +27,7 @@ namespace Sprk.Bff.Api.Api;
 /// parent's business-unit team otherwise, the caller's business-unit team for an unfiled row (owner round 5) — and
 /// records the caller in <c>sprk_createdbyperson</c>. The core is the ONE server create,
 /// <see cref="RecordCreationService"/> (field-mapping-server-write-path-r1 task 017; it ported
-/// <c>OwnedChildWrite.CreateAsync</c>, the core the chat create tool used, owner round 7 item 3). The core-ancestor stamp is
+/// the owned create the chat create tool used, owner round 7 item 3, deleted in 017). The core-ancestor stamp is
 /// then derived by the server (<see cref="CoreAncestorRestamper"/>, WP-1): a stamp the client previewed is only a preview.</para>
 /// <para><b>Re-file.</b> The caller's own PATCH (as the caller — Dataverse authorizes it, field security included),
 /// inside <see cref="OwnedChildWrite.RefileAsync"/>: AppendTo on every record the row is moved under, F3 on a move out

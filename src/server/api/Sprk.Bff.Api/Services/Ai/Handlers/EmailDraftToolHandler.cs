@@ -1295,7 +1295,7 @@ internal sealed class EmailDraftToolHandler : IToolHandler
     /// <summary>
     /// Task 017 (2d-4, ADR-019, NFR-07): a <see cref="Sprk.Bff.Api.Services.RecordCreation.RecordCreationService"/> refusal
     /// in this tool's error contract — the Office precedent (<c>OfficeService.MapQuickCreateRefusal</c>): each refusal KIND
-    /// keeps the tool code the owned create (<c>OwnedChildWrite.CreateAsync</c>) gave for it; only the text comes from the
+    /// keeps the tool code the owned create (<c>OwnedChildWrite.CreateAsync</c>, deleted in 017) gave for it; only the text comes from the
     /// shared map (<see cref="Sprk.Bff.Api.Services.RecordCreation.RecordCreationProblemMap"/>), which never carries upstream
     /// text and renders a not-found or denied record as one uniform body.
     /// <list type="bullet">

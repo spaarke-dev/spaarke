@@ -89,32 +89,41 @@ public sealed partial class SecureChildOwnershipAiToolTests
         _user.Posts.Should().BeEmpty("never created as the caller");
     }
 
+    /// <summary>
+    /// What the owned create (the deleted <c>OwnedChildWrite.CreateAsync</c>) wrote for an event filed under
+    /// <see cref="Event"/> (item <c>{"sprk_regardingevent": Event}</c>), every column, recorded from a run of it before task 017
+    /// (2d-5) deleted it: the event's business-unit team as owner, the caller as creator person, the regarding event — and NO
+    /// I-1 stamp (<c>sprk_RegardingMatter</c>) and no I-16: the owned create wrote neither at create.
+    /// </summary>
+    private static IReadOnlyDictionary<string, string> OwnedCreateEventUnderAnEvent => new Dictionary<string, string>
+    {
+        ["ownerid@odata.bind"] = $"/teams({Directory.ChildTeam:D})",
+        ["sprk_CreatedByPerson@odata.bind"] = $"/systemusers({Caller:D})",
+        ["sprk_RegardingEvent@odata.bind"] = $"/sprk_events({Event:D})",
+    };
+
     [Fact]
     public async Task ChatCreate_AStampedEvent_IsOwnedAsTodaysCoreOwnsIt_TheStampChangesNoOwner()
     {
-        // Correction item 4: today's chat create writes no I-1 stamp into its item; step 10 adds it to the create BODY only, so
-        // the owner question (step 7, over the item) is unchanged.
+        // Correction item 4: the old chat create wrote no I-1 stamp into its item; step 10 adds it to the create BODY only, so
+        // the owner question (step 7, over the item) is unchanged. Task 017 (2d-5): the old core is deleted; its owner and
+        // creator are pinned (OwnedCreateEventUnderAnEvent), and it wrote NO stamp — the chat create through the service does.
         var stamps = TheEventUnderTheRestrictedOrdinaryMatter();
-        var item = JsonSerializer.SerializeToElement(new Dictionary<string, object>
-        {
-            ["sprk_regardingevent"] = new { relatedTable = "sprk_event", recordId = Event },
-        });
-        var mapped = await DataverseWriteItemMapper.MapAsync(_user, "sprk_event", item, CancellationToken.None);
 
-        var today = await OwnedChildWrite.CreateAsync(
-            _user, _world.Resolver(), _appOnly.Object, "sprk_event", mapped.Item!, serverSetLookupColumns: null, CallerOid,
-            CancellationToken.None);
         var viaChat = await Chat(ChatHandlerOver(stamps), "sprk_event", Lookup("sprk_regardingevent", "sprk_event", Event));
 
-        today.CreatedId.Should().NotBeNull(today.Denied ?? today.OwnerRefusal?.Reason);
         viaChat.Success.Should().BeTrue(viaChat.ErrorMessage);
-        _appCreates.Should().HaveCount(2);
-        var (todays, chats) = (_appCreates[0].Fields, _appCreates[1].Fields);
-        Owner(chats).Should().Be(Owner(todays), "the same owner as today's core gives the same row");
+        var (_, _, chats) = _appCreates.Should().ContainSingle().Subject;
+        OwnedCreateEventUnderAnEvent.Should().NotContainKey("sprk_RegardingMatter@odata.bind",
+            "the old core wrote no stamp at create");
         Owner(chats).Should().Be(Directory.ChildTeam, "record-first: the filed-under event's business-unit team");
-        chats["sprk_CreatedByPerson@odata.bind"].Should().Be(todays["sprk_CreatedByPerson@odata.bind"]);
-        todays.Should().NotContainKey("sprk_RegardingMatter@odata.bind", "today's core writes no stamp at create");
-        chats.Should().ContainKey("sprk_RegardingMatter@odata.bind");
+        chats["ownerid@odata.bind"].Should().Be(OwnedCreateEventUnderAnEvent["ownerid@odata.bind"],
+            "the same owner as the old core gave the same row");
+        chats["sprk_CreatedByPerson@odata.bind"].Should().Be(OwnedCreateEventUnderAnEvent["sprk_CreatedByPerson@odata.bind"]);
+        Bind(chats, "sprk_RegardingEvent@odata.bind").Should().Be(OwnedCreateEventUnderAnEvent["sprk_RegardingEvent@odata.bind"],
+            "the caller's own bind (a mapped body value)");
+        chats.Should().ContainKey("sprk_RegardingMatter@odata.bind")
+            .WhoseValue.Should().Be($"/sprk_matters({OrdinaryMatter:D})", "the service writes the stamp the old core did not");
     }
 
     [Fact]

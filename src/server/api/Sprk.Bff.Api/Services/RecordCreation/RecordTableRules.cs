@@ -78,8 +78,8 @@ internal static class RecordTableRules
     /// ebilling-r1 FR-05 (ISS-010, #1973; #1911, merged): the invoice-family core-record rule — an invoice-family row names
     /// exactly one core record, and an invoice supersedes (a line belongs to) only an invoice of that record. Registered on
     /// every <see cref="InvoiceFamilyCoreRecordGuard.CoreRecordLookups"/> table (task 017; task 012 notes,
-    /// "Invoice-family reconciliation recipe"). It asks the SAME check the owned create asks
-    /// (<see cref="OwnedChildWrite.CheckInvoiceFamilyAsync"/>, create shape: no stored row), as the caller
+    /// "Invoice-family reconciliation recipe"). It asks the SAME check the deleted owned create asked
+    /// and the re-file still asks (<see cref="OwnedChildWrite.CheckInvoiceFamilyAsync"/>, create shape: no stored row), as the caller
     /// (<see cref="PreWriteRow.Caller"/>), on the row as it will be written; the guard owns the rule, this only maps its answer
     /// (<see cref="InvoiceFamilyPreWrite"/>). Declared before <see cref="All"/>: static initialisers run in textual order.
     /// </summary>
@@ -212,7 +212,7 @@ internal static class RecordTableRules
                 // Task 037 (spec FR-36, owner 2026-10-27, #2354; UAC-r2 conditions 1-4): Assigned To takes the new row's own
                 // Assigned To Internal. Both are CONTACT lookups (live metadata, spaarkedev1, 2026-10-27), so the reference
                 // is copied as-is: no contact/user conversion, never a name or email match. The ONE declaration: the
-                // owned create (OwnedChildWrite.CreateAsync) and RecordCreationService read it through CopiedDefaultsFor.
+                // RecordCreationService reads it through CopiedDefaultsFor (the owned create that also read it was deleted in 017).
                 new ServerDefault(AssignedToDefaults.AssignedToAttribute,
                     "every user-initiated server create of a work assignment (the child-records route, the chat create, " +
                     "the record-creation service with a calling user)",
@@ -353,8 +353,8 @@ internal static class RecordTableRules
 
         // Task 017 (item 9): the budget inquiry's service request (BudgetInquiryExecutor, spec FR-36 of the ontology's task
         // 070), filed under sprk_regardingmatter with the typed ADR-024 pair and the outside firm (sprk_regardingorganization).
-        // It declares nothing beyond the defaults, which is what the owned create (OwnedChildWrite.CreateAsync) applies to it
-        // today: the common server-owned columns and the creator person refused in the caller's row, the resolver's owner
+        // It declares nothing beyond the defaults, which is what the owned create (OwnedChildWrite.CreateAsync, deleted in 017)
+        // applied to it: the common server-owned columns and the creator person refused in the caller's row, the resolver's owner
         // (its regarding matter's business-unit team), no create under a secure owner (it is no reparentable child), and the
         // regarding matter it carries as its own I-1 stamp. Registered so the service accepts it when 017c re-points the
         // inquiry (an unregistered table is record_creation.table_unsupported).
@@ -450,7 +450,7 @@ internal static class RecordTableRules
     private static NamedRule ChatPlatformTableIsNotMapped => new(
         "ChatPlatformTableIsNotMapped",
         "Task 017 (owner decision 2026-10-30, option b): the chat create of a task, contact or account is registered to keep " +
-        "today's behaviour, and today's create (OwnedChildWrite.CreateAsync) applies no field mapping to it. Mapping these " +
+        "the behaviour it had, and the owned create it had (OwnedChildWrite.CreateAsync, deleted in 017) applied no field mapping to it. Mapping these " +
         "platform tables would be new behaviour and needs its own decision.");
 
     private static IReadOnlySet<string> Columns(params string[] columns) =>

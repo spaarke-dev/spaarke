@@ -21,8 +21,8 @@ namespace Sprk.Bff.Api.Services.RecordCreation;
 /// a typed <see cref="RecordCreationRefusal"/> with nothing written.
 /// </summary>
 /// <remarks>
-/// <para><b>Ported, not redesigned.</b> Steps 1 and 5 to 7 and 11 are <see cref="OwnedChildWrite.CreateAsync"/>'s create
-/// half (G5: check AS THE CALLER, create AS THE APP owned by the resolver's team), with the same order, the same owner
+/// <para><b>Ported, not redesigned.</b> Steps 1 and 5 to 7 and 11 are <c>OwnedChildWrite.CreateAsync</c>'s create
+/// half (deleted in task 017 2d-5, once every caller was re-pointed here) (G5: check AS THE CALLER, create AS THE APP owned by the resolver's team), with the same order, the same owner
 /// rule and the same refusal codes; the post-create steps are <c>ChildRecordEndpoints.CreateAsync</c>'s
 /// (<c>CompleteRootCreateAsync</c>, the I-1 re-stamp, I-16, the sharee mirror) and the Office create's (the autonumber
 /// retry and its number read-back, the membership event), in their order. Existing callers still call those cores: tasks
@@ -53,8 +53,9 @@ namespace Sprk.Bff.Api.Services.RecordCreation;
 /// <para><b>ADR-008, path A</b> (spec "ADR Tensions"): the payload-dependent checks live in
 /// <see cref="CallerWriteAuthorization"/> and are called here, not written as endpoint filters. <b>ADR-010:</b> one
 /// concrete scoped registration, no interface.</para>
-/// <para><b>Component justification (CLAUDE.md §11).</b> Existing — two create cores, <see cref="OwnedChildWrite.CreateAsync"/>
-/// (children, strong authorization) and the Office creation core (roots, weaker authorization).
+/// <para><b>Component justification (CLAUDE.md §11).</b> Existing — two create cores, <c>OwnedChildWrite.CreateAsync</c>
+/// (children, strong authorization) and the Office creation core (roots, weaker authorization); both are now deleted
+/// (018c, 017 2d-5).
 /// Extension — this merges them (spec §11 "Yes: merges the two existing cores"); tasks 017/018 re-pointed their callers,
 /// and 018c deleted the Office core. Cost of doing nothing — the same row filed under the same parent gets a different owner, stamp and checks by
 /// surface, and field mapping reaches 2 of about 30 create paths (spec §11).</para>
@@ -500,7 +501,7 @@ internal sealed partial class RecordCreationService
         // so they take this same path — filled only where the row leaves the column unset, checked at step 5 like any
         // default, written in the create (step 11) and so read back by the "Assigned *" materialisation (step 12). A copy of a
         // SERVER-set source names the same server-chosen record, so it is server-set too (steps 5 and 6 read the request's
-        // set), exactly as on the owned create (OwnedChildWrite.CreateAsync).
+        // set), exactly as on the owned create this replaced (OwnedChildWrite.CreateAsync, deleted in 017).
         if (user is not null)
         {
             (defaults, var copied) = WithCopiedDefaults(table, rule, item, defaults);
@@ -903,7 +904,7 @@ internal sealed partial class RecordCreationService
 
     /// <summary>
     /// Step 7 (FR-09, task 015: record-first for every create, roots and children), ported from
-    /// <see cref="OwnedChildWrite.CreateAsync"/>: the resolver's owner over every parent the row is filed under — its
+    /// the owned create (<c>OwnedChildWrite.CreateAsync</c>, deleted in 017): the resolver's owner over every parent the row is filed under — its
     /// lookups, and on a table whose ADR-024 pair files it on its own (a project, <see cref="PairParentAsync"/>) the record
     /// the pair names — secure-if-any, then the filed-under record's business-unit team, then the acting user's, with the
     /// person who asked as <see cref="RecordOwnershipContext.RequestedBy"/>; then the two secure-filing refusals of that
@@ -1420,7 +1421,7 @@ internal sealed partial class RecordCreationService
 
     /// <summary>
     /// The create payload of an OWNED row: the item's body, owned by the resolver's team, with the person who asked as its
-    /// creator person (task 146 c1-r1) — <see cref="OwnedChildWrite.CreateAsync"/>'s, unchanged.
+    /// creator person (task 146 c1-r1) — the deleted owned create's (<c>OwnedChildWrite.CreateAsync</c>), unchanged.
     /// </summary>
     private static Dictionary<string, object?> OwnedCreateFields(
         RecordOwnerResolution owner, string table, DataverseWriteItemMapper.MappedItem item)
@@ -1438,7 +1439,7 @@ internal sealed partial class RecordCreationService
     /// <summary>
     /// The create payload of a ROOT created INTO isolation (task 158 r1, owner round 31 item 2): owned by the plan's named
     /// Secure Record Owners team, flagged in the create itself, with the person it is made for as its creator person —
-    /// <c>OwnedChildWrite.CreateIntoIsolationAsync</c>'s, unchanged. Provisioning's re-entry steps complete it (step 12).
+    /// the deleted <c>OwnedChildWrite.CreateIntoIsolationAsync</c>'s (017 2d-5), unchanged. Provisioning's re-entry steps complete it (step 12).
     /// </summary>
     private static Dictionary<string, object?> IsolatedCreateFields(
         string table, DataverseWriteItemMapper.MappedItem item, Guid secureTeam, Guid creatorPerson)
@@ -1487,7 +1488,7 @@ internal sealed partial class RecordCreationService
 
     /// <summary>
     /// The secure-create plan's own AppendTo check on the secure parents, as the caller — ported from
-    /// <see cref="OwnedChildWrite.CreateAsync"/>: a parent counts as checked only when a lookup step 5 ASKED about names the
+    /// the owned create (<c>OwnedChildWrite.CreateAsync</c>, deleted in 017): a parent counts as checked only when a lookup step 5 ASKED about names the
     /// same record (table and id); a parent the pair names is asked again.
     /// </summary>
     private static Func<IReadOnlyList<SecureFilingParent>, CancellationToken, Task<RecordOwnerResolution?>> CallerMayFileUnder(

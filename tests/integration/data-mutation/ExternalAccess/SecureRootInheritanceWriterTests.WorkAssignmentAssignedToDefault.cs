@@ -20,7 +20,7 @@ namespace Sprk.Bff.Api.Tests.DataMutation.ExternalAccess;
 /// field-mapping-server-write-path-r1 task 037 fix round 2 (UAC-r2's review, acceptance criterion 6): the copied Assigned To
 /// default on the SECURE-parent create — <c>POST /api/v1/child-records/sprk_workassignment</c> under a secure matter, where
 /// the REAL <see cref="Sprk.Bff.Api.Services.Access.SecureRootFilingGate"/> plans an isolated create and
-/// <c>OwnedChildWrite.CreateIntoIsolationAsync</c> writes the row. The default must be in THAT create body (flagged secure in
+/// <c>RecordCreationService</c>'s isolated create writes the row (task 017 replaced <c>OwnedChildWrite.CreateIntoIsolationAsync</c>, deleted in 2d-5). The default must be in THAT create body (flagged secure in
 /// the create itself), and the REAL "Assigned *" materialisation that runs after the completion must read it as a
 /// suggestion only.
 /// </summary>

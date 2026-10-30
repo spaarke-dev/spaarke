@@ -585,8 +585,8 @@ public sealed class DataverseCreateRecordHandlerTests : TypedToolHandlerTestFixt
     /// <summary>
     /// Batch 4 integration (task 133 x task 146): task 133's INTERIM shape — a run-as-user create of a secure root followed
     /// by one app-only <c>sprk_createdbyperson</c> update — is superseded by task 146's create-as-the-app, which stamps the
-    /// column IN THE CREATE PAYLOAD (<c>OwnedChildWrite.CreateAsync</c> → <c>RecordOwnerResolution.StampCreatorOn</c>;
-    /// pinned in <c>SecureChildOwnershipAiToolTests</c>). Exactly one stamp: a create that runs as the user (here: metadata
+    /// column IN THE CREATE PAYLOAD (today <c>RecordCreationService</c>'s step 11 → <c>RecordOwnerResolution.StampCreatorOn</c>;
+    /// the owned create that first did so was deleted in task 017; pinned in <c>SecureChildOwnershipAiToolTests</c>). Exactly one stamp: a create that runs as the user (here: metadata
     /// that declares no user/team ownership) makes no app-only follow-up write — its <c>createdby</c> is the person.
     /// </summary>
     [Theory]

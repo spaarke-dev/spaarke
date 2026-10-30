@@ -23,7 +23,8 @@ namespace Sprk.Bff.Api.Tests.Integration.DataMutation.RecordOwnership;
 /// both reach the ONE server create (<see cref="RecordCreationService"/>), so the same record under the same parent gets the
 /// same owner and the same I-1 stamp whichever asked; a refusal or a fault creates nothing and falls back to nothing; the
 /// route's create publishes its membership event once; and (item 9) a service request created by the service gets what the
-/// owned create (<see cref="OwnedChildWrite.CreateAsync"/>, the budget inquiry's create today) gives it.
+/// owned create (<c>OwnedChildWrite.CreateAsync</c>, the budget inquiry's create then) gave it. Task 017 (2d-5) deleted that
+/// owned create; its row and its secure-matter refusal are pinned as recorded constants, so item 9 still asserts the same facts.
 /// </summary>
 /// <remarks>
 /// A partial of <see cref="SecureChildOwnershipAiToolTests"/> on purpose: the route and the decision cores run over the SAME
@@ -223,7 +224,7 @@ public sealed partial class SecureChildOwnershipAiToolTests
     }
 
     // =====================================================================================
-    // Item 9: the budget inquiry's service request — the service gives what the owned create gives
+    // Item 9: the budget inquiry's service request — the service gives what the owned create gave (pinned in 2d-5)
     // =====================================================================================
 
     /// <summary>The row the budget inquiry builds (BudgetInquiryExecutor.BuildItem), for <paramref name="matter"/>.</summary>
@@ -253,49 +254,76 @@ public sealed partial class SecureChildOwnershipAiToolTests
         _user.Held.UnionWith(["prvCreatesprk_servicerequest", "prvAppendsprk_servicerequest"]);
     }
 
+    /// <summary>
+    /// Every column the owned create (the deleted <c>OwnedChildWrite.CreateAsync</c>) wrote for
+    /// <see cref="InquiryServiceRequest"/> under the ordinary matter, recorded from a run of it before task 017 (2d-5) deleted
+    /// it, in <see cref="Written"/>'s order: the matter's business-unit team as owner, NO creator person (a service request is
+    /// not a stamped root), the row's own regarding matter as its I-1 stamp, and the caller's values.
+    /// </summary>
+    private static string OwnedCreateServiceRequestUnderTheOrdinaryMatter => string.Join("; ",
+        $"ownerid@odata.bind=/teams({Directory.ChildTeam:D})",
+        $"sprk_RegardingMatter@odata.bind=/sprk_matters({OrdinaryMatter:D})",
+        $"sprk_RegardingOrganization@odata.bind=/sprk_organizations({PtyFirm:D})",
+        $"sprk_RegardingRecordType@odata.bind=/sprk_recordtype_refs({DcRecordTypeMatter:D})",
+        "sprk_direction=100000001",
+        "sprk_name=Budget question",
+        $"sprk_regardingrecordid={OrdinaryMatter:D}",
+        "sprk_regardingrecordtypelogicalname=sprk_matter");
+
+    /// <summary>
+    /// The owned create's refusal of <see cref="InquiryServiceRequest"/> under the secure matter (its
+    /// <c>SecureFilingRefused</c>), recorded before task 017 (2d-5) deleted it: a service request is no reparentable child, so
+    /// the Secure team may not own it.
+    /// </summary>
+    private const string OwnedCreateServiceRequestSecureFilingRefusal =
+        "A 'sprk_servicerequest' record cannot be created under a secure record from chat: it would itself have to be made "
+        + "secure (its own owner team, container and sharing — the record's Make Secure path). It was NOT created. Create it "
+        + "from the secure record itself.";
+
     [Fact]
     public async Task AServiceRequestUnderAMatter_ThroughTheService_GetsTheOwnerCreatorAndStampTheOwnedCreateGives()
     {
+        // Task 017 (2d-5): the owned create this compared against is deleted; what it wrote is pinned
+        // (OwnedCreateServiceRequestUnderTheOrdinaryMatter) and the service must write exactly that.
         InquiryCallerMayCreate();
 
-        var owned = await OwnedChildWrite.CreateAsync(
-            _user, _world.Resolver(), _appOnly.Object, BudgetInquiryExecutor.Table, InquiryServiceRequest(OrdinaryMatter),
-            serverSetLookupColumns: null, CallerOid, CancellationToken.None);
         var unified = await RouteRecordCreation
             .Over(_world.Resolver(), _appOnly.Object, Restamper(), Shares(), SecureRootFilingGateFixtures.NothingSecure())
             .CreateAsync(
                 new RecordCreationRequest(BudgetInquiryExecutor.Table, new RecordCreationPayload.Mapped(InquiryServiceRequest(OrdinaryMatter))),
                 RecordCreationPrincipal.ForCaller(_user, CallerOid), CancellationToken.None);
 
-        owned.CreatedId.Should().NotBeNull(owned.Denied ?? owned.OwnerRefusal?.Reason ?? owned.SecureFilingRefused);
         unified.Succeeded.Should().BeTrue(unified.Refusal?.Detail);
-        _appCreates.Should().HaveCount(2).And.OnlyContain(c => c.Table == "sprk_servicerequest");
-        var (viaOwned, viaService) = (Placement(_appCreates[0].Fields), Placement(_appCreates[1].Fields));
-        viaOwned.Owner.Should().Be(Directory.ChildTeam, "the regarding matter's business-unit team");
-        viaService.Should().BeEquivalentTo(viaOwned, "item 9: the registry entry reproduces the owned create");
-        Bind(_appCreates[1].Fields, "sprk_RegardingMatter@odata.bind").Should().Be($"/sprk_matters({OrdinaryMatter:D})",
-            "the I-1 stamp the row carries");
-        Bind(_appCreates[1].Fields, "sprk_RegardingOrganization@odata.bind").Should().Be($"/sprk_organizations({PtyFirm:D})");
+        var (table, _, fields) = _appCreates.Should().ContainSingle().Subject;
+        table.Should().Be("sprk_servicerequest");
+        var viaService = Placement(fields);
+        viaService.Owner.Should().Be(Directory.ChildTeam, "the regarding matter's business-unit team, as the owned create gave");
+        viaService.Creator.Should().BeNull("the owned create stamped no creator person on a service request");
+        viaService.Stamp.Should().Equal([$"/sprk_matters({OrdinaryMatter:D})", null],
+            "item 9: the registry entry reproduces the owned create's I-1 stamp");
+        Written(fields).Should().Be(OwnedCreateServiceRequestUnderTheOrdinaryMatter,
+            "the service writes the row the owned create wrote");
     }
 
     [Fact]
     public async Task AServiceRequestUnderASecureMatter_IsRefusedOnBothPaths_AndNothingIsCreated()
     {
+        // Task 017 (2d-5): the owned create refused this with OwnedCreateServiceRequestSecureFilingRefusal; the service
+        // refuses it at step 7 with the same words, as the secure owner's NoOwnerSource.
         InquiryCallerMayCreate();
 
-        var owned = await OwnedChildWrite.CreateAsync(
-            _user, _world.Resolver(), _appOnly.Object, BudgetInquiryExecutor.Table, InquiryServiceRequest(SecureMatter),
-            serverSetLookupColumns: null, CallerOid, CancellationToken.None);
         var unified = await RouteRecordCreation
             .Over(_world.Resolver(), _appOnly.Object, Restamper(), Shares(), SecureRootFilingGateFixtures.NothingSecure())
             .CreateAsync(
                 new RecordCreationRequest(BudgetInquiryExecutor.Table, new RecordCreationPayload.Mapped(InquiryServiceRequest(SecureMatter))),
                 RecordCreationPrincipal.ForCaller(_user, CallerOid), CancellationToken.None);
 
-        owned.CreatedId.Should().BeNull();
-        owned.SecureFilingRefused.Should().NotBeNull("a service request is no reparentable child");
         unified.Succeeded.Should().BeFalse();
         unified.Refusal!.Kind.Should().NotBe(RecordCreationRefusalKind.Invalid, "the table is registered (not table_unsupported)");
+        unified.Refusal.Kind.Should().Be(RecordCreationRefusalKind.OwnerUnresolved, "step 7's secure-filing refusal");
+        unified.Refusal.Code.Should().Be(RecordOwnerRefusal.NoOwnerSource);
+        unified.Refusal.OwnerDecision!.IsSecureOwner.Should().BeTrue("a service request is no reparentable child");
+        unified.Refusal.Detail.Should().Be(OwnedCreateServiceRequestSecureFilingRefusal, "the owned create's words");
         _appCreates.Should().BeEmpty();
     }
 }

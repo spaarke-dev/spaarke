@@ -161,8 +161,9 @@ public sealed class BudgetInquiryExecutor(
     /// <see cref="BudgetInquiryOutcome.Refused"/>, the same outcomes <see cref="ExecuteAsync"/> gives), or <c>null</c> when
     /// the inquiry would proceed. The commit route calls it before its first write so a refusal leaves nothing behind.
     /// </summary>
-    /// <remarks>The secure-matter test mirrors <see cref="OwnedChildWrite.CreateAsync"/> for this table (a non-child table
-    /// cannot be created under a secure record); if that core changes, change it here (pinned by a parity test).</remarks>
+    /// <remarks>The secure-matter test mirrors <see cref="Sprk.Bff.Api.Services.RecordCreation.RecordCreationService"/>'s step 7 for this table (a non-child table
+    /// cannot be created under a secure record), which ported the owned create's rule (<c>OwnedChildWrite.CreateAsync</c>,
+    /// deleted in 017); if step 7 changes, change it here (pinned by a parity test).</remarks>
     public async Task<BudgetInquiryResult?> PreflightAsync(BudgetInquiryRequest request, CancellationToken ct)
     {
         if (Validate(request) is { } invalid)

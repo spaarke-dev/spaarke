@@ -704,7 +704,8 @@ internal sealed partial class RecordCreationService
     /// (task 017, 037 review K2: the copy runs after the defaults merge), which is then copied, as the caller's own.
     /// </summary>
     /// <returns>The defaults, and each (column, source column) pair a copied default was added for — so a copy of a
-    /// SERVER-set source can be server-set too (the owned create's rule, <c>OwnedChildWrite.CreateAsync</c>).</returns>
+    /// SERVER-set source can be server-set too (the rule of the owned create this replaced, <c>OwnedChildWrite.CreateAsync</c>,
+    /// deleted in 017).</returns>
     private (IReadOnlyDictionary<string, PostMappingDefault> Defaults, IReadOnlyList<(string Column, string Source)> Copied) WithCopiedDefaults(
         string table, RecordTableRule rule, DataverseWriteItemMapper.MappedItem item,
         IReadOnlyDictionary<string, PostMappingDefault> defaults)

@@ -20,7 +20,7 @@ namespace Sprk.Bff.Api.Tests.Integration.DataMutation.RecordOwnership;
 /// create (<see cref="RecordCreationService"/>, as the caller) with today's owner, sender and refusal codes. Option (a′),
 /// coordinator 2026-10-30: the handler keeps its derived I-1 stamp in the create item, because the service decides the owner
 /// and asks AppendTo over the item — so the stamped root (the matter above a regarding invoice) takes part in both, exactly
-/// as it did in the owned create the handler used before (<c>OwnedChildWrite.CreateAsync</c>), and step 10 finds no stamp
+/// as it did in the owned create the handler used before (<c>OwnedChildWrite.CreateAsync</c>, deleted in 017 2d-5), and step 10 finds no stamp
 /// missing. Each case below is the answer the owned create gave (probed against it before the re-point, task 017 d4
 /// notes). A refusal or a fault creates nothing, and nothing falls back to a create as the user.
 /// </summary>

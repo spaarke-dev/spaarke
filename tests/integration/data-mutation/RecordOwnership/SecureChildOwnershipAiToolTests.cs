@@ -351,8 +351,9 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
 
     // ── Task 133 creator stamp, integrated with G5 (owner round 10: "superseded at integration by task 146's
     //    create-as-the-app, which writes the stamp in the create payload"). Batch 4 integration: the ONE stamp is task 146
-    //    c1-r1's (RecordOwnerResolution.StampCreatorOn in OwnedChildWrite.CreateAsync, a sprk_CreatedByPerson bind after
-    //    the caller's checks); task 149 r3's own WithCreatorPersonAsync re-map was dropped so the column is written once.
+    //    c1-r1's (RecordOwnerResolution.StampCreatorOn, a sprk_CreatedByPerson bind after the caller's checks — in the owned
+    //    create then, in RecordCreationService's create since task 017 deleted that one); task 149 r3's own
+    //    WithCreatorPersonAsync re-map was dropped so the column is written once.
 
     [Theory]
     [InlineData("sprk_matter", "sprk_mattername")]
