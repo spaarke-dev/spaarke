@@ -1,0 +1,92 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="039" project="field-mapping-server-write-path-r1">
+  <metadata>
+    <title>FR-38: the search index is server-owned on every BFF write path (#2399)</title>
+    <phase>2 W2 Unified RecordCreationService</phase>
+    <gate>017 complete (the child-records route runs RecordCreationService step 8)</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies .cs in Sprk.Bff.Api; changes what a client may bind on create and update (security, access-adjacent: the index decides which BU's search a record lands in); adds tests at KEEP paths.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Fully specified by design §13.3 and spec FR-38: one drop before step 5, one change to step 8's source, the same drop on the BFF update paths. No open design question.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits RecordCreationService.cs (one core file, W2 sequential) and the update paths 017 also touches.</parallel-reason>
+    <deps>017</deps>
+    <tags>bff-api, security, testing</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Make `sprk_ai_search_index` server-owned on every search-indexed table (`RecordTableRules` `SearchIndexed = true`). In `RecordCreationService`, drop a client-supplied value before step 5 (so no AppendTo is asked on the `sprk_aisearchindex` row), and have step 8 (`SearchIndexDefaultAsync`, ~:680/~:1131) apply the index of the record's FINAL owning BU, after the ownership step. An owning BU with no index leaves the column empty and logs `search_index_unset_for_owner_bu`. Apply the same drop on every BFF update/PATCH path that can write the column. Log `client_search_index_dropped` (ids only) when a dropped value differs from the applied one.</prompt>
+  <role>SPAARKE platform developer, .NET 10 BFF, Dataverse write-path security. Follow ADRs strictly.</role>
+  <goal>No BFF path lets a client choose a record's search index on a search-indexed table; creates get the final owning BU's index or none; the #2399 refusal (a child-BU caller without AppendTo on a root-owned catalog row) cannot recur through the index column.</goal>
+
+  <context>
+    <background>spec.md FR-38 (amends FR-10), design.md §13.1-§13.3b and §13.6 (component justification), notes/decisions.md 2026-10-29 (owner: drop, not refuse; Q2 = (B) canonical rows, no BU defaults). UAC-r2 reviewed the design (conditions 1-4, design §13.3/§13.3b). #2399's live part was fixed by re-owning dev's rows (§13.2 b); this is the durable fix. The wizard side (stop binding the index) is W3 tasks 021-029, not this task.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/RecordCreation/RecordCreationService.cs (the drop before step 5; step 8 SearchIndexDefaultAsync source = final owning BU; the K3 canonical-key handling from task 018 stays)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/RecordCreation/RecordTableRules.cs (only if the column needs declaring as server-owned per table; prefer the existing SearchIndexed flag)</file>
+      <file role="inventory-then-modify">Every BFF update/PATCH path that can write sprk_ai_search_index on a search-indexed table. Start from: Services/Ai/Handlers/DataverseUpdateRecordHandler.cs, Api/ChildRecordEndpoints.cs (any update route), Api/FieldMappings/FieldMappingEndpoints.cs (push; confirm mapping already protects the column), Api/Events/EventEndpoints.cs, Api/CommunicationEndpoints.cs. Record the inventory (path, table set, verdict) in the task notes.</file>
+      <file role="canonical-reference">tests/integration/data-mutation/RecordOwnership/SearchIndexDefaultTests.cs (task 015/018 world; extend or add a sibling class)</file>
+      <file role="canonical-reference">018's default_value_dropped log (OfficeService / RecordCreationService) for the log shape</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="017" status="required">The child-records route and chat create run RecordCreationService, so step 8 covers them.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="design §13.3 / owner 2026-10-29">Drop, never refuse, a client index. Never fall back to the caller's BU or walk up to the root.</constraint>
+    <constraint source="UAC-r2 condition 4">The drop log carries ids only (record, table, dropped index id, applied index id). No names, no emails.</constraint>
+    <constraint source="ADR-008 path A">Payload checks stay in the service / CallerWriteAuthorization; route filters unchanged.</constraint>
+    <constraint source="ADR-010">No new registration, interface or service.</constraint>
+    <constraint source="ADR-038">KEEP paths only (tests/integration/data-mutation/**, tests/unit/domain/**); never tests/unit/Sprk.Bff.Api.Tests/**; no Mock&lt;HttpMessageHandler&gt;.</constraint>
+    <constraint source="CLAUDE.md §10">Placement Justification, fresh-master publish-size delta, CVE check in the task notes.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/field-mapping-server-write-path-r1/design.md (§13)</file>
+      <file>projects/field-mapping-server-write-path-r1/spec.md (FR-10, FR-38)</file>
+      <file>docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/testing.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Inventory the BFF write paths that can set sprk_ai_search_index (see relevant-files); record it in notes/task-039-notes.md.</step>
+    <step order="2">Failing tests first (acceptance criteria below).</step>
+    <step order="3">Drop before step 5 in the service; step 8 from the final owning BU; logs.</step>
+    <step order="4">The same drop on each update path from step 1.</step>
+    <step order="5">Build; run the RecordCreation, SearchIndexDefault, CrossSurfaceOwner, SecureChildOwnership* suites (filtered; never the unfiltered Sprk.Bff.Api.Tests) and ArchTests. Publish-size delta; CVE check. Update TASK-INDEX.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">A create carrying a client sprk_ai_search_index on a search-indexed table writes the final owning BU's index (or none) and asks no AppendTo on the catalog row: a caller without AppendTo on it is not refused.</criterion>
+    <criterion testable="true">A secure record, and a record whose owning BU has no index, get an empty column and the search_index_unset_for_owner_bu log; no root walk, no caller-BU fallback.</criterion>
+    <criterion testable="true">Each BFF update path from the inventory drops a client sprk_ai_search_index on a search-indexed table (one test per path, or a shared helper with one test each).</criterion>
+    <criterion testable="true">client_search_index_dropped is logged only when the dropped value differs from the applied one, and carries ids only.</criterion>
+    <criterion testable="true">Negative (must-not-fire): on a table that is not search-indexed, a caller-supplied lookup of the same name keeps its AppendTo check and is written.</criterion>
+    <criterion testable="true">Task 018's K3 behaviour holds: an explicit null under the lower-case bind key never yields two case-variant keys.</criterion>
+    <criterion testable="true">BFF build 0 errors; listed suites and ArchTests pass; publish delta and CVE result recorded.</criterion>
+  </acceptance-criteria>
+
+  <justification>
+    <existing>FR-10's fill-only default at step 8 (RecordCreationService.SearchIndexDefaultAsync).</existing>
+    <extension>Yes: the same step owns the column, plus a drop before step 5 and on the update paths. No new service or file in src.</extension>
+    <cost-of-doing-nothing>Every child-BU user's create is refused whenever their BU names an index they cannot AppendTo (#2399), and a client can route a record into another BU's index.</cost-of-doing-nothing>
+  </justification>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/RecordCreation/RecordCreationService.cs</output>
+    <output type="code">the update paths from the step-1 inventory</output>
+    <output type="test">tests/integration/data-mutation/RecordOwnership/ (server-owned index tests)</output>
+    <output type="notes">projects/field-mapping-server-write-path-r1/notes/task-039-notes.md</output>
+  </outputs>
+
+  <notes>Added 2026-10-30 by the scope procedure (design §13 → UAC-r2 review → spec FR-38 → this task → TASK-INDEX → owner approval). Release note: a client can no longer choose a record's search index; records land in their owning BU's index. Wizard cleanup is 021-029 (design §13.2 e).</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>
