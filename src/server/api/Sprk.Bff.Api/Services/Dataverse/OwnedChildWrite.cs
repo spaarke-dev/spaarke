@@ -1283,9 +1283,11 @@ internal static class OwnedChildWrite
 
     // ── ebilling-r1 FR-05: the invoice-family guard, invoked by the write core (ISS-010 / #1973, unified-access-control-r2) ──
 
-    /// <summary>The uniform not-found of a record a write names that the caller cannot read, or that does not exist.</summary>
-    private const string NotAvailableToFileUnder =
-        "A record this row names was not found, or you do not have permission to use it. Nothing was written.";
+    /// <summary>
+    /// The uniform not-found of a record a write names that the caller cannot read, or that does not exist — the one copy,
+    /// <see cref="Sprk.Bff.Api.Services.RecordCreation.RecordCreationService.NotAvailableToFileUnder"/> (task 017).
+    /// </summary>
+    private const string NotAvailableToFileUnder = Sprk.Bff.Api.Services.RecordCreation.RecordCreationService.NotAvailableToFileUnder;
 
     /// <summary>
     /// What the invoice-family step refused: the guard's decision (its stable code), the caller's own Dataverse failure on a

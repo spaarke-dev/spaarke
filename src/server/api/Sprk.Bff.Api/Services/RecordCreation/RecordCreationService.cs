@@ -61,7 +61,8 @@ internal sealed partial class RecordCreationService
 
     /// <summary>
     /// ebilling-r1 correction (b), verbatim: what the chat create shows when a pre-write rule finds a record the row names
-    /// missing or not the caller's to use (<c>OwnedChildWrite.NotAvailableToFileUnder</c> on <c>work/ebilling-r1</c>).
+    /// missing or not the caller's to use. The ONE copy (task 017): <see cref="OwnedChildWrite"/>'s invoice-family step reads
+    /// it too.
     /// </summary>
     internal const string NotAvailableToFileUnder =
         "A record this row names was not found, or you do not have permission to use it. Nothing was written.";
@@ -1358,7 +1359,9 @@ internal sealed partial class RecordCreationService
 
     /// <summary>
     /// Step 5½: the table's pre-write rules in order; the first refusal wins, carried by reference (ebilling-r1 correction
-    /// (c)). A not-found is the uniform not-found with the chat create's words (correction (b)). A system principal has no
+    /// (c)). A not-found is the uniform not-found with the chat create's words (correction (b)); an undecided rule is
+    /// <see cref="RecordCreationRefusalKind.Undecided"/> (500) with its code; any other coded refusal is
+    /// <see cref="RecordCreationRefusalKind.Invalid"/> (400) with its code (task 017, F2). A system principal has no
     /// caller to ask as, so a table with rules refuses it (fail closed; task 012's open point).
     /// </summary>
     private static async Task<RecordCreationRefusal?> RunPreWriteRulesAsync(
@@ -1384,6 +1387,12 @@ internal sealed partial class RecordCreationService
                 { ParentUnavailable: true } => new RecordCreationRefusal(RecordCreationRefusalKind.NotFoundOrDenied,
                     RecordCreationRefusal.NotFoundCode, NotAvailableToFileUnder) { PreWrite = refusal },
                 { ClientFailure: { } failure } => Upstream(failure, noun) with { PreWrite = refusal },
+                // Task 017 (ebilling-r1 F2): a rule that could not decide is "not saved" (500) with its own code — never the
+                // uniform not-found, which only NotFound() reaches (the arm above).
+                { IsUndecided: true } => new RecordCreationRefusal(RecordCreationRefusalKind.Undecided, refusal.Code!, refusal.Detail!)
+                {
+                    PreWrite = refusal,
+                },
                 _ => new RecordCreationRefusal(RecordCreationRefusalKind.Invalid, refusal.Code!, refusal.Detail!) { PreWrite = refusal },
             };
         }

@@ -31,7 +31,7 @@ internal enum RecordCreationRefusalKind
     /// <summary>The create collided with existing data (the autonumber's alternate key, every attempt). 409.</summary>
     Conflict,
 
-    /// <summary>Whether the create may stand could not be decided, and nothing is left. 500.</summary>
+    /// <summary>Whether the create may stand could not be decided (or a pre-write rule could not decide), and nothing is left. 500.</summary>
     Undecided,
 
     /// <summary>A check or the owner decision faulted before anything was written (fail closed, NFR-01). 503.</summary>
