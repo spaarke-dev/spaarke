@@ -106,6 +106,11 @@ public class OfficeQuickCreateRefusalMapTests
         Add(RecordCreationRefusalKind.Unavailable, RecordCreationRefusal.CheckFailedCode, InternalError, ServerError);
         Add(RecordCreationRefusalKind.Unavailable, RecordCreationRefusal.OwnerUnavailableCode, InternalError, ServerError);
 
+        // Task 017 Phase 2d-1 (owner decision 2a): step 10's I-1 refusals. Office creates roots, which carry no I-1 stamp, so
+        // neither reaches it today; if one did, it is the generic 500 (fail closed), as every other service-only code.
+        Add(RecordCreationRefusalKind.Invalid, RecordCreationRefusal.StampUnderivableCode, InternalError, ServerError);
+        Add(RecordCreationRefusalKind.Unavailable, RecordCreationRefusal.StampUnavailableCode, InternalError, ServerError);
+
         // Upstream: a caller's Dataverse failure.
         Add(RecordCreationRefusalKind.Upstream, RecordCreationRefusal.UpstreamCode, InternalError, ServerError);
         foreach (var clientCode in ConstantsOf(typeof(DataverseUserClientErrorCodes)))

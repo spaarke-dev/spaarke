@@ -144,7 +144,7 @@ public sealed partial class RecordCreationServicePipelineSeamTests
             (RecordCreationStep.Owner, RecordCreationStepState.Ran),
             (RecordCreationStep.SearchIndexDefault, RecordCreationStepState.NoOp),
             (RecordCreationStep.CreatorAndDefaults, RecordCreationStepState.Ran),
-            (RecordCreationStep.StampAndInheritance, RecordCreationStepState.Deferred),
+            (RecordCreationStep.StampAndInheritance, RecordCreationStepState.Ran),
             (RecordCreationStep.Create, RecordCreationStepState.Ran),
             (RecordCreationStep.PostCreate, RecordCreationStepState.Ran));
         Journal().Should().Equal(
@@ -256,7 +256,7 @@ public sealed partial class RecordCreationServicePipelineSeamTests
             (RecordCreationStep.Owner, RecordCreationStepState.Ran),
             (RecordCreationStep.SearchIndexDefault, RecordCreationStepState.NoOp),
             (RecordCreationStep.CreatorAndDefaults, RecordCreationStepState.Ran),
-            (RecordCreationStep.StampAndInheritance, RecordCreationStepState.Deferred),
+            (RecordCreationStep.StampAndInheritance, RecordCreationStepState.Ran),
             (RecordCreationStep.Create, RecordCreationStepState.Ran),
             (RecordCreationStep.PostCreate, RecordCreationStepState.Ran));
         Journal().Should().Equal("owner", "create", "restamp", "mirror", "membership");

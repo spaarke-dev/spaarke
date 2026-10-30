@@ -97,6 +97,19 @@ internal sealed record RecordCreationRefusal
     /// </summary>
     internal const string ServerSetFilingLookupCode = "record_creation.server_set_filing_lookup";
 
+    /// <summary>
+    /// Task 017 (owner decision 2a, FR-06 step 10): the I-1 stamp of the new row cannot be derived from what it is filed
+    /// under, and a retry will not change that (its source names two roots, or no longer exists). Nothing written (400,
+    /// <see cref="RecordCreationRefusalKind.Invalid"/>).
+    /// </summary>
+    internal const string StampUnderivableCode = "record_creation.stamp_underivable";
+
+    /// <summary>
+    /// Task 017 (owner decision 2a, FR-06 step 10): the I-1 stamp of the new row could not be derived right now (a read
+    /// faulted). Nothing written (503, <see cref="RecordCreationRefusalKind.Unavailable"/>).
+    /// </summary>
+    internal const string StampUnavailableCode = "record_creation.stamp_unavailable";
+
     public RecordCreationRefusal(RecordCreationRefusalKind kind, string code, string detail)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(code);

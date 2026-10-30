@@ -889,6 +889,9 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
                 ("sprk_regardingrecordtype", "sprk_recordtype_ref", "sprk_RegardingRecordType"),
                 // A person the event is assigned to — not a column the pair's readers match the pair against.
                 ("sprk_assignedto", "contact", "sprk_AssignedTo"),
+                // Field mapping task 017 (Phase 2d-1): an event filed under another event, an intermediate, so its I-1 stamp
+                // is derived (live navigation property: Spaarke.Dataverse.Models GetEventNavigationProperty).
+                ("sprk_regardingevent", "sprk_event", "sprk_RegardingEvent"),
             },
             // #2084 round 2: a Signal's core matter (sprk_signal.sprk_matter) and the rule it CITES (sprk_signal.sprk_policy).
             ["sprk_signal"] = new[]

@@ -30,10 +30,15 @@ namespace Sprk.Bff.Api.Services.RecordCreation;
 /// the owner (step 7, <see cref="DecideOwnerAsync"/>) and the search-index default (step 8,
 /// <see cref="SearchIndexDefaultAsync"/>) are task 015's: record-first for every create, roots and children (FR-09), and
 /// the OWNING business unit's search index, fill-only (FR-10).</para>
-/// <para><b>Step 10 runs after the create.</b> Spec FR-06 places "I-1 stamp + I-16 derived into the payload" before the
-/// create; every existing path (the child-record route, the chat create's G5 core) derives both AFTER the create through
-/// <see cref="CoreAncestorRestamper"/>. Porting kept that order, so step 10 is recorded <see cref="RecordCreationStepState.Deferred"/>
-/// in its place and runs inside step 12, in the route's position (task 013 notes, "Step 10").</para>
+/// <para><b>Step 10 runs before the create, and again after it</b> (owner decision 2a, 2026-10-22; task 017). The I-1 stamp
+/// columns the row is missing are derived from what it is filed under (<see cref="CoreAncestorRestamper.PlanMissingStampAsync"/>,
+/// fill-only) and bound into the create payload; a derivation that fails refuses the create, nothing written
+/// (<see cref="RecordCreationRefusal.StampUnderivableCode"/> 400 for a data condition,
+/// <see cref="RecordCreationRefusal.StampUnavailableCode"/> 503 for a fault). I-16 (To Do, Event, Communication) is set in the
+/// payload when it resolves and never refuses (display only). A document gets neither before the create (#2169). The
+/// post-create re-derivation (<see cref="CoreAncestorRestamper.AfterWriteAsync"/>, then I-16) still runs inside step 12, in
+/// its place. A system principal derives and refuses the same way; it has no caller to read the table's navigation metadata
+/// as, so its derived stamp is bound by that post-create re-derivation (task 017 notes, Phase 2d-1).</para>
 /// <para><b>Principals (FR-07, ADR-028).</b> A caller is named by WhoAmI under their own token; one Dataverse cannot name
 /// is refused (403, <see cref="RecordCreationRefusalKind.PrincipalUnresolved"/>) before the payload is read. A system
 /// principal skips the as-caller steps 2 and 5 only and records <see cref="RecordRequester"/> when it has one; every other
@@ -718,9 +723,13 @@ internal sealed partial class RecordCreationService
                 ? "creator person stamped when the requester resolved; \"for\" person and table defaults stay with the adapters"
                 : "the table carries no creator person; \"for\" person and table defaults stay with the adapters");
 
-        // ── Step 10: the I-1 stamp and I-16 — derived after the create, in the route's position (see remarks) ───────────
-        trace.Record(RecordCreationStep.StampAndInheritance, RecordCreationStepState.Deferred,
-            "derived after the create (step 12), as every existing path does");
+        // ── Step 10: the I-1 stamp and I-16, derived into the payload before the create (owner decision 2a; see remarks) ──
+        trace.Begin(RecordCreationStep.StampAndInheritance);
+        var stamped = await StampBeforeCreateAsync(table, user, item, fields, noun, ct).ConfigureAwait(false);
+        if (stamped.Refusal is { } stampRefusal)
+            return Decision.Refuse(stampRefusal);
+
+        trace.Record(RecordCreationStep.StampAndInheritance, stamped.State, stamped.Note);
 
         return new Decision
         {
@@ -733,6 +742,162 @@ internal sealed partial class RecordCreationService
             DefaultWarnings = searchIndex.Warning is { } searchIndexWarning ? [searchIndexWarning] : [],
         };
     }
+
+    /// <summary>
+    /// Step 10 (owner decision 2a, task 017): the I-1 stamp columns the merged row is MISSING, derived from what it is filed
+    /// under (<see cref="CoreAncestorRestamper.PlanMissingStampAsync"/>, task 016's in-memory planner — fill-only, nothing
+    /// written), bound into <paramref name="fields"/>; then I-16 from every lookup the row now names. A derivation that fails
+    /// refuses: a data condition (<see cref="CoreAncestorStampUnderivableException.IsPermanent"/>) is
+    /// <see cref="RecordCreationRefusal.StampUnderivableCode"/> (400), anything else <see cref="RecordCreationRefusal.StampUnavailableCode"/>
+    /// (503). I-16 never refuses: it is display only, and a null is simply not set. A document gets neither (#2169).
+    /// </summary>
+    /// <remarks>Only <paramref name="fields"/> changes: the item (what the owner, the plan and step 12 read) is the row as the
+    /// earlier steps decided it. The stamp is bound under the table's navigation property, read as the caller through
+    /// <see cref="DataverseWriteItemMapper"/> (the read steps 1 and 4 make); a system principal has no caller, so its derived
+    /// stamp is left to the post-create re-derivation (step 12), which runs for every principal.</remarks>
+    private async Task<(RecordCreationRefusal? Refusal, RecordCreationStepState State, string? Note)> StampBeforeCreateAsync(
+        string table, IDataverseUserClient? user, DataverseWriteItemMapper.MappedItem item, Dictionary<string, object?> fields,
+        string noun, CancellationToken ct)
+    {
+        if (InheritedAccessPermission.RecordsOwnNarrowing(table))
+            return (null, RecordCreationStepState.Skipped, "a document is stamped after the create only (#2169)");
+
+        var stampsI1 = CoreAncestorResolver.IsStampedChildEntity(table);
+        var takesI16 = InheritedAccessPermission.AppliesTo(table);
+        if (!stampsI1 && !takesI16)
+            return (null, RecordCreationStepState.Skipped, "the table carries no I-1 stamp and no inherited Access Permission");
+
+        // The merged row in memory: every lookup it binds, and the ADR-024 pair id as written.
+        var row = new Entity(table);
+        foreach (var lookup in item.Lookups)
+            row[lookup.Column] = new EntityReference(lookup.RelatedTable, lookup.RecordId);
+        if (OwnedChildWrite.PairOf(item).IdText is { } pairId)
+            row[CoreAncestorResolver.RegardingRecordIdColumn] = pairId;
+
+        var notes = new List<string>();
+        if (stampsI1)
+        {
+            Dictionary<string, object>? missing;
+            try
+            {
+                missing = await _restamper.PlanMissingStampAsync(table, row, ct).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (CoreAncestorStampUnderivableException ex) when (ex.IsPermanent)
+            {
+                _logger.LogWarning(ex, "[RECORD-CREATE] the I-1 stamp of a new {Table} cannot be derived ({Kind}); nothing was created",
+                    table, ex.RefusalKind);
+                return (StampUnderivable(noun), RecordCreationStepState.Refused, null);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "[RECORD-CREATE] the I-1 stamp of a new {Table} could not be derived (fault); nothing was created",
+                    table);
+                return (StampUnavailable(noun), RecordCreationStepState.Refused, null);
+            }
+
+            if (missing is null)
+            {
+                notes.Add("no I-1 stamp missing");
+            }
+            else
+            {
+                foreach (var (column, value) in missing)
+                    row[column] = value; // I-16 below reads the row as it will be written
+
+                if (user is null)
+                {
+                    notes.Add($"I-1 stamp derived ({missing.Count} column(s)); a system principal's is bound after the create");
+                }
+                else
+                {
+                    var bound = await BindStampAsync(user, table, missing, ct).ConfigureAwait(false);
+                    if (bound is null)
+                    {
+                        _logger.LogError("[RECORD-CREATE] the I-1 stamp of a new {Table} was derived but could not be bound; " +
+                                         "nothing was created", table);
+                        return (StampUnavailable(noun), RecordCreationStepState.Refused, null);
+                    }
+
+                    foreach (var (key, value) in bound)
+                        PutServerValue(fields, key, value);
+                    notes.Add($"I-1 stamp derived into the payload ({missing.Count} column(s))");
+                }
+            }
+        }
+
+        if (takesI16)
+        {
+            var filed = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
+            foreach (var attribute in row.Attributes)
+            {
+                if (attribute.Value is EntityReference reference)
+                    filed[attribute.Key] = reference;
+            }
+
+            // Never throws (the resolver's contract): a null is simply not set, and step 12 refreshes it after the create.
+            if (await _restamper.ResolveInheritedAccessPermissionAsync(table, filed, ct).ConfigureAwait(false) is { } level)
+            {
+                PutServerValue(fields, InheritedAccessPermission.Column, level);
+                notes.Add("I-16 set");
+            }
+            else
+            {
+                notes.Add("no I-16 before the create");
+            }
+        }
+
+        return (null, RecordCreationStepState.Ran, string.Join("; ", notes));
+    }
+
+    /// <summary>
+    /// The derived stamp columns as the create body binds them (<c>sprk_RegardingMatter@odata.bind</c>), mapped AS THE CALLER
+    /// through <see cref="DataverseWriteItemMapper"/>, the one place a column's navigation property is read. <see langword="null"/>
+    /// when Dataverse did not answer or the table cannot bind a column.
+    /// </summary>
+    private static async Task<IReadOnlyList<KeyValuePair<string, string>>?> BindStampAsync(
+        IDataverseUserClient user, string table, IReadOnlyDictionary<string, object> stamp, CancellationToken ct)
+    {
+        var lookups = new Dictionary<string, object>(StringComparer.Ordinal);
+        foreach (var (column, value) in stamp)
+        {
+            if (value is not EntityReference reference)
+                return null;
+            lookups[column.ToLowerInvariant()] = new Dictionary<string, string>
+            {
+                ["relatedTable"] = reference.LogicalName,
+                ["recordId"] = reference.Id.ToString("D"),
+            };
+        }
+
+        var mapped = await DataverseWriteItemMapper.MapAsync(user, table, JsonSerializer.SerializeToElement(lookups), ct)
+            .ConfigureAwait(false);
+        if (mapped.Item is not { } item)
+            return null;
+
+        using var body = JsonDocument.Parse(item.JsonBody);
+        var binds = new List<KeyValuePair<string, string>>();
+        foreach (var property in body.RootElement.EnumerateObject())
+        {
+            if (property.Value.ValueKind != JsonValueKind.String)
+                return null;
+            binds.Add(KeyValuePair.Create(property.Name, property.Value.GetString()!));
+        }
+
+        return binds.Count == lookups.Count ? binds : null;
+    }
+
+    private static RecordCreationRefusal StampUnderivable(string noun) => new(RecordCreationRefusalKind.Invalid,
+        RecordCreationRefusal.StampUnderivableCode,
+        $"The {noun} was not saved: the core record it belongs to cannot be determined from the record it is filed under " +
+        "(that record names more than one, or no longer exists).");
+
+    private static RecordCreationRefusal StampUnavailable(string noun) => new(RecordCreationRefusalKind.Unavailable,
+        RecordCreationRefusal.StampUnavailableCode,
+        $"The core record the {noun} belongs to could not be determined right now, so it was not created.");
 
     /// <summary>
     /// Step 7 (FR-09, task 015: record-first for every create, roots and children), ported from
@@ -1835,7 +2000,7 @@ internal enum RecordCreationStep
     /// <summary>9 — the creator person, the "for" person and the table defaults.</summary>
     CreatorAndDefaults,
 
-    /// <summary>10 — the I-1 stamp and I-16 (derived after the create; see the service's remarks).</summary>
+    /// <summary>10 — the I-1 stamp and I-16, derived into the payload before the create (re-derived after it; see the service's remarks).</summary>
     StampAndInheritance,
 
     /// <summary>11 — the one app-only create.</summary>
