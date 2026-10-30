@@ -1021,6 +1021,36 @@ public sealed class RecordRepairModeTests
     }
 
     [Fact]
+    public async Task AWorkAssignmentFiledOnlyUnderAnEvent_IsReOwnedInTheUnitOfTheEventsMatter_NeverTheEventsOwn()
+    {
+        // Owner decision 2026-10-29: a work assignment belongs to its core record. Filed only under an event owned in the
+        // GENERAL unit whose matter is in the CHILD unit, it is owned with the matter (the parents the un-secure cascade names),
+        // so this user-owned row in the child unit is re-owned there — not escalated as a move to the event's general unit.
+        var @event = _world.RowOf("sprk_event", Directory.GeneralBu, new Dictionary<string, object>
+        {
+            ["ownerid"] = new EntityReference("team", Directory.GeneralTeam),
+            ["owningteam"] = new EntityReference("team", Directory.GeneralTeam),
+            ["sprk_regardingmatter"] = new EntityReference("sprk_matter", RepairWorld.Matter),
+        });
+        var id = _world.RowOf("sprk_workassignment", Directory.ChildBu, new Dictionary<string, object>
+        {
+            ["ownerid"] = new EntityReference("systemuser", RepairWorld.PersonInChild),
+            ["sprk_issecure"] = false,
+            ["sprk_regardingevent"] = new EntityReference("sprk_event", @event),
+        });
+
+        var outcome = await _world.RepairAsync("sprk_workassignment", id);
+
+        _world.OwnerContexts.Should().ContainSingle().Which.Parents.Should().Equal(
+            [new RecordOwnershipParent("sprk_matter", RepairWorld.Matter), new RecordOwnershipParent("sprk_event", @event)],
+            "the event's matter first, the event kept among the parents (secure-if-any)");
+        var write = _world.Writes.Should().ContainSingle().Subject;
+        write.Fields["ownerid"].Should().Be(new EntityReference("team", Directory.ChildTeam),
+            $"the matter's unit's team; never the event's ({Directory.GeneralTeam:D})");
+        Field(outcome, RecordRepairPart.Owner, "ownerid").State.Should().Be(RecordRepairFieldState.Repaired);
+    }
+
+    [Fact]
     public async Task AWorkAssignmentWithAnAssignedToInternalAndNoAssignedTo_IsNeverGivenTheCopiedDefault_CreateOnly()
     {
         // Task 037 (FR-36, UAC-r2 condition 1): the copied default (Assigned To from Assigned To Internal) is a create-time

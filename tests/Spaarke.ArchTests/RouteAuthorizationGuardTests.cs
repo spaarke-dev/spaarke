@@ -1820,6 +1820,13 @@ public partial class RouteAuthorizationGuardTests
 
     private static bool ConsultsAny(string code, IEnumerable<string> tokens) => tokens.Any(t => ContainsToken(code, t));
 
+    /// <summary>Record-level decisions the playbook table-privilege gates must not make (they decide by table privilege only).</summary>
+    private static readonly string[] PlaybookRecordDecisionCalls =
+    [
+        "GetCallerRightsAsync", "GetCallerRecordAccessAsync", "RetrievePrincipalAccess", "AuthorizeAsync",
+        "AuthorizationService", "IAccessDataSource", "BuildPlaybookUseCheckAsync",
+    ];
+
     private static string MethodBody(string code, string name)
     {
         var unit = new SourceUnit("pin", code);
@@ -1866,6 +1873,27 @@ public partial class RouteAuthorizationGuardTests
 
             case "AddReportingAuthorizationFilter":
                 return Regex.IsMatch(code, @"\.IsInRole\s*\(") && !ConsultsAny(code, decisions);
+
+            case "AddPlaybookTablePrivilegeFilter":
+            {
+                // Owner decision 2026-10-30: a table-privilege gate. Its method asks the caller's table privilege and
+                // then calls next; it asks nothing about a record. (The same FILE holds the per-record playbook modes, so
+                // the pin reads the one method, not the file.)
+                var body = MethodBody(code, "AuthorizeCallerTablePrivilegeAsync");
+                return Regex.IsMatch(body, @"\.CallerHoldsPrivilegeAsync\s*\(")
+                       && Regex.IsMatch(body, @"return\s+await\s+next\s*\(")
+                       && !ConsultsAny(body, PlaybookRecordDecisionCalls);
+            }
+
+            case "AddPlaybookPublicFlagShareFilter":
+            {
+                // Review fix round F1: a PUT that changes IsPublic also needs Share, asked through the same table-privilege
+                // method; an unchanged IsPublic goes to next. It reads the stored flag, never asks a record right.
+                var body = MethodBody(code, "AuthorizePublicFlagChangeAsync");
+                return Regex.IsMatch(body, @"AuthorizeCallerTablePrivilegeAsync\s*\(\s*context\s*,\s*next\s*,\s*SharePlaybookPrivilege\s*\)")
+                       && Regex.IsMatch(body, @":\s*await\s+next\s*\(\s*context\s*\)")
+                       && !ConsultsAny(body, PlaybookRecordDecisionCalls);
+            }
 
             case "AddEndpointFilter<CommunicationAuthorizationFilter>":
             case "AddEndpointFilter<WorkspaceAuthorizationFilter>":
@@ -6750,6 +6778,12 @@ public partial class RouteAuthorizationGuardTests
         "AddSpeAdminTenantScopeFilter" => Regex.Replace(raw,
             @"(if\s*\(\s*present\.Count\s*==\s*0\s*\)\s*\{\s*)return\s+await\s+next\s*\(\s*context\s*\)\s*;",
             "$1return Results.NotFound();"),
+        "AddPlaybookTablePrivilegeFilter" => Regex.Replace(raw,
+            @"\.CallerHoldsPrivilegeAsync\s*\(",
+            ".GetCallerRightsAsync("),
+        "AddPlaybookPublicFlagShareFilter" => Regex.Replace(raw,
+            @"AuthorizeCallerTablePrivilegeAsync\s*\(\s*context\s*,\s*next\s*,\s*SharePlaybookPrivilege\s*\)",
+            "AuthorizeRecordRightsAsync(context, next, GetCallerRecordAccessAsync)"),
         _ => raw + "\ninternal sealed class SeededDecision { private readonly CallerRecordAccessProbe _probe = null!; "
                  + "private readonly AuthorizationService _authorizationService = null!; void M() { _ = RetrievePrincipalAccess; } }",
     };

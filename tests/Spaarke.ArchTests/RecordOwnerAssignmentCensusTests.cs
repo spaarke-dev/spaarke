@@ -502,6 +502,17 @@ public class RecordOwnerAssignmentCensusTests
         OrdinaryReown,
 
         /// <summary>
+        /// Owner decision 2026-10-29 ("the family members have the same ownership"; amends <see cref="Root"/> for ORDINARY
+        /// roots): re-owns an ordinary work assignment or project to the team its family answers (the follow-parents pass of
+        /// <c>SecureRootInheritance</c> names it from the resolver) — never into or out of the Secure Record business unit, and
+        /// never a root whose <c>sprk_issecure</c> is not an explicit false (Make Secure / Remove Secure stay provisioning's).
+        /// Asserted (<see cref="EveryRootFollowsFilingWriteSitsBehindItsGuards"/>): before its owner write the member checks the
+        /// table against its two-table set, resolves the Secure Record business unit, returns <c>RefusedSecure</c> and refuses
+        /// a flag that is not false; the write is the conditional If-Match update through the shared read-back sequence.
+        /// </summary>
+        RootFollowsFiling,
+
+        /// <summary>
         /// Task 182: a write the contract forbids, listed only until the named ontology task removes it. Used only by
         /// <see cref="BusinessUnitWrites"/> (a direct <c>owningbusinessunit</c> write is never anything else).
         /// </summary>
@@ -624,6 +635,15 @@ public class RecordOwnerAssignmentCensusTests
             "read-back (WriteOwnerAndReadBackAsync). No identity gains Write on a Decision Record. UAC task 194 (#2339): the same " +
             "member re-owns a default-team-owned lineage child of a reassigned ORDINARY record to the team IRecordOwnershipResolver " +
             "answers for it (ReconcileOrdinaryParentMoveAsync), behind the same guards."),
+        new OwnerWriteEntry("SecureChildReconciler.cs", "ReownFiledRootAsync", 1, OwnerWriteKind.RootFollowsFiling,
+            "Owner decision 2026-10-29 (a family shares one ownership): an ORDINARY sprk_workassignment or sprk_project re-owned to " +
+            "the ordinary team SecureRootInheritance's follow-parents pass names from IRecordOwnershipResolver (the resolver over " +
+            "its filing; an unfiled person-owned root, its person's business-unit team) — refused when the root's owner, its " +
+            "business unit or the team is in the Secure Record business unit, its sprk_issecure is not an explicit false, or it " +
+            "is owned by a named (non-default) team. A conditional Web API PATCH (If-Match on the guard read's versionnumber) " +
+            "through WriteOwnerAndReadBackAsync (evict, read back). Report-only unless SecureRoot:Inheritance:RootOwnerWritesEnabled " +
+            "AND SecureChild:Reconciliation:OrdinaryMovesWritesEnabled are true (a cross-unit re-own moves where the root's " +
+            "documents are expected; the ordinary-moves pass moves them). Its callers: EveryRootReownCallerIsCensused."),
         // The Office quick-create of a MATTER or PROJECT (a root) writes its owner through the unified create below
         // (RecordCreationService.cs: OwnedCreateFields, IsolatedCreateFields) since field mapping task 018; task 018c deleted
         // the Office creation core and its three owner writes (CreateMatterAsync, CreateProjectAsync, IsolateProjectCreate).
@@ -760,6 +780,70 @@ public class RecordOwnerAssignmentCensusTests
         Assert.False(OrdinaryReownGuardsComeFirst("{ " + write + " " + guarded[1..]), "a write before the guards");
     }
 
+    // Owner decision 2026-10-29: a RootFollowsFiling owner write is not a resolver answer applied by the resolver — its team is
+    // the caller's — so it is allowed only behind its guards, in this order, before the write: the two-table check, the Secure
+    // Record business unit resolved, a RefusedSecure return, and the flag refused unless explicitly false. Its write is the
+    // conditional If-Match update through the shared write / evict / read-back sequence.
+    // Fix round (A-K6): the never-INTO-the-Secure-unit check on the TARGET's business unit is pinned too (between the
+    // never-out-of refusal and the flag), so a refactor that drops it fails here, not only in the writer's unit test.
+    private static readonly string[] RootFollowsFilingGuards =
+    {
+        "FiledRootReownTables.Contains(", "ResolveSecureBusinessUnitAsync(", "OrdinaryRowReownOutcome.RefusedSecure",
+        "targetBu == secureIn", "GetAttributeValue<bool?>(IsSecureColumn) != false",
+    };
+
+    private static readonly string[] RootFollowsFilingWriteShape = { "UpdateIfMatchAsync(", "WriteOwnerAndReadBackAsync(" };
+
+    [Fact(DisplayName = "Owner 2026-10-29: a RootFollowsFiling owner write sits behind the table, Secure-unit and flag guards and is If-Match")]
+    public void EveryRootFollowsFilingWriteSitsBehindItsGuards()
+    {
+        var files = ServerFiles();
+        var globalKeys = GlobalOwnerKeys(files);
+        var entries = OwnerWrites.Where(e => e.Kind == OwnerWriteKind.RootFollowsFiling).ToList();
+        Assert.NotEmpty(entries); // the root-follows-filing writer is censused
+        var problems = entries
+            .Select(e => CodeOf(files, e.FileName) is { } code && MethodBody(code, e.Member) is { } body
+                ? RootFollowsFilingGuardsComeFirst(body, globalKeys) ? null : $"{e.FileName}.{e.Member}: a guard is missing or after the owner write, or the write is not If-Match"
+                : $"{e.FileName}.{e.Member}: not found")
+            .Where(p => p is not null)
+            .ToList();
+        Assert.True(problems.Count == 0,
+            "RootFollowsFiling owner writes without their guards (owner decision 2026-10-29):" + Environment.NewLine +
+            string.Join(Environment.NewLine, problems));
+
+        // Must-fire control: the seeded member loses one guard (or the If-Match shape) at a time.
+        const string write = "var ownerBind = new Dictionary<string, object> { [\"ownerid@odata.bind\"] = $\"/teams({t:D})\" };";
+        const string tail = " await WriteOwnerAndReadBackAsync(n, id, e, c => _webApi.UpdateIfMatchAsync(s, id, ownerBind, etag, c)); }";
+        var guarded = "{ if (!FiledRootReownTables.Contains(name)) throw new ArgumentException(); "
+                      + "var bu = await SecureRecordOwnerTeam.ResolveSecureBusinessUnitAsync(d, c, ct); "
+                      + "if (bu.Id == x) return Result(OrdinaryRowReownOutcome.RefusedSecure); "
+                      + "if (secureBu is { } secureIn && targetBu == secureIn) return Result(OrdinaryRowReownOutcome.RefusedSecure); "
+                      + "if (row.GetAttributeValue<bool?>(IsSecureColumn) != false) return Result(OrdinaryRowReownOutcome.RefusedSecure); "
+                      + write + tail;
+        Assert.True(RootFollowsFilingGuardsComeFirst(guarded), "the seeded member passes");
+        foreach (var guard in RootFollowsFilingGuards.Concat(RootFollowsFilingWriteShape))
+            Assert.False(RootFollowsFilingGuardsComeFirst(guarded.Replace(guard, "Other(")), $"without {guard}");
+        Assert.False(RootFollowsFilingGuardsComeFirst("{ " + write + " " + guarded[1..]), "a write before the guards");
+    }
+
+    private static bool RootFollowsFilingGuardsComeFirst(string memberBody, IReadOnlySet<string>? globalKeys = null)
+    {
+        var writes = OwnerWritesIn(memberBody, globalKeys ?? new HashSet<string>()).Select(w => w.Index).ToList();
+        if (writes.Count == 0)
+            return false;
+
+        var at = 0;
+        foreach (var guard in RootFollowsFilingGuards)
+        {
+            var index = memberBody.IndexOf(guard, at, StringComparison.Ordinal);
+            if (index < 0 || index > writes.Min())
+                return false;
+            at = index + guard.Length;
+        }
+
+        return RootFollowsFilingWriteShape.All(shape => memberBody.IndexOf(shape, writes.Min(), StringComparison.Ordinal) > 0);
+    }
+
     /// <summary>
     /// Ontology task 148 (uac-r2 F3): every CALLER of <c>SecureChildReconciler.ReownOrdinaryRowAsync</c>, by member, with its
     /// count. The entry point's team is the caller's, so each caller must decide it from the resolver's answer (D-130/D-134)
@@ -780,6 +864,52 @@ public class RecordOwnerAssignmentCensusTests
     };
 
     private static readonly Regex OrdinaryReownCall = new(@"\.ReownOrdinaryRowAsync\s*\(", RegexOptions.Compiled);
+
+    /// <summary>
+    /// Fix round (A-K6): every CALLER of <c>SecureChildReconciler.ReownFiledRootAsync</c>, by member, with its count (the
+    /// <see cref="EveryOrdinaryReownCallerIsCensused"/> precedent). The writer's team is the caller's, so each caller must take
+    /// it from the resolver over the root's family, behind both write switches; a new caller is reviewed here.
+    /// </summary>
+    private static readonly IReadOnlyList<OrdinaryReownCaller> RootReownCallers = new[]
+    {
+        new OrdinaryReownCaller("SecureRootInheritance.Cascade.cs", "FollowFamilyOwnersAsync", 1,
+            "Owner decision 2026-10-29: the follow-parents pass's root-owner step re-owns an ordinary work assignment or project to " +
+            "the team IRecordOwnershipResolver answers for its family (the question creation asks for the row; an unfiled " +
+            "person-owned root, its person's business-unit team) — only when SecureRoot:Inheritance:RootOwnerWritesEnabled AND " +
+            "SecureChild:Reconciliation:OrdinaryMovesWritesEnabled are true and the recent-changes stop is not set."),
+    };
+
+    private static readonly Regex RootReownCall = new(@"\.ReownFiledRootAsync\s*\(", RegexOptions.Compiled);
+
+    [Fact(DisplayName = "Fix round (A-K6): every caller of ReownFiledRootAsync is censused, by member, with its count")]
+    public void EveryRootReownCallerIsCensused()
+    {
+        var actual = ScanCalls(ServerFiles(), RootReownCall);
+        var expected = RootReownCallers.ToDictionary(c => (c.FileName, c.Member), c => c.Calls);
+        var problems = new List<string>();
+        foreach (var ((file, member), lines) in actual.OrderBy(kv => kv.Key.File, StringComparer.Ordinal))
+        {
+            if (!expected.TryGetValue((file, member), out var count))
+                problems.Add($"UNLISTED root re-own caller {file}.{member}: lines {string.Join(", ", lines)}");
+            else if (count != lines.Count)
+                problems.Add($"COUNT CHANGED for {file}.{member}: census says {count}, source has {lines.Count}");
+        }
+
+        problems.AddRange(expected.Keys.Where(k => !actual.ContainsKey(k)).Select(k => $"STALE census entry {k.FileName}.{k.Member}"));
+        Assert.True(problems.Count == 0,
+            "The ReownFiledRootAsync caller census does not match the source (owner decision 2026-10-29, fix round A-K6). A caller " +
+            "names the team, so it must take it from the resolver over the root's family; list it with its reason:\n" +
+            string.Join("\n", problems));
+
+        // Negative control: the scan sees a call (and attributes it to its member) and ignores the declaration.
+        var seeded = new Dictionary<string, string>
+        {
+            ["Seed.cs"] = "public sealed class Seed {\n public async Task<int> Caller(Guid id) {\n" +
+                          "  var r = await reconciler.ReownFiledRootAsync(\"sprk_project\", id, team, ct);\n return 1; }\n" +
+                          " public async Task<OrdinaryRowReownResult> ReownFiledRootAsync(string table, Guid id, Guid teamId, CancellationToken ct) { return null; }\n}",
+        };
+        Assert.Equal(new[] { ("Seed.cs", "Caller") }, ScanCalls(seeded, RootReownCall).Keys.ToArray());
+    }
 
     [Fact(DisplayName = "Ontology 148: every caller of ReownOrdinaryRowAsync is censused, by member, with its count")]
     public void EveryOrdinaryReownCallerIsCensused()
