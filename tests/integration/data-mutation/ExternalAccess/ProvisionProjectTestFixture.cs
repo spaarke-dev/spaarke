@@ -821,6 +821,10 @@ public class ProvisionProjectTestFixture : WorkspaceTestFixture
     /// <summary>Owner decision 2026-10-29: every conditional (If-Match) root write, as sent: entity set, id, ETag.</summary>
     public ConcurrentBag<(string EntitySet, Guid Id, string ETag)> ConditionalRootWrites { get; } = new();
 
+    /// <summary>Fix round (A-K6): runs when a conditional root PATCH arrives, before its If-Match is checked — a concurrent change
+    /// landing between the writer's guard read and its write.</summary>
+    internal Action<string, Guid>? BeforeConditionalRootWrite { get; set; }
+
     /// <summary>Sets one setting of this host's configuration (read when a service reads it); <c>null</c> removes it.</summary>
     public void SetConfiguration(string key, string? value) => Services.GetRequiredService<IConfiguration>()[key] = value;
 
@@ -828,6 +832,7 @@ public class ProvisionProjectTestFixture : WorkspaceTestFixture
     {
         RelocatorOverride = null;
         ConditionalRootWrites.Clear();
+        BeforeConditionalRootWrite = null;
         _records.Clear();
         CreatedEntitySets.Clear();
         Updates.Clear();
@@ -1088,6 +1093,7 @@ public class ProvisionProjectTestFixture : WorkspaceTestFixture
                 {
                     ConditionalRootWrites.Add((entitySet, id, etag));
                     var logical = entitySet[..^1];
+                    BeforeConditionalRootWrite?.Invoke(logical, id);
                     if (!_records.TryGetValue(id, out var seeded) || seeded.EntitySet != entitySet || !ChildWorld.Has(logical, id))
                         throw new KeyNotFoundException($"{entitySet}({id}) was not found; nothing was created.");
                     var version = ChildWorld.ValueOf<long?>(logical, id, "versionnumber") ?? 0L;

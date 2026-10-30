@@ -637,7 +637,8 @@ public class RecordOwnerAssignmentCensusTests
             "business unit or the team is in the Secure Record business unit, its sprk_issecure is not an explicit false, or it " +
             "is owned by a named (non-default) team. A conditional Web API PATCH (If-Match on the guard read's versionnumber) " +
             "through WriteOwnerAndReadBackAsync (evict, read back). Report-only unless SecureRoot:Inheritance:RootOwnerWritesEnabled " +
-            "is true."),
+            "AND SecureChild:Reconciliation:OrdinaryMovesWritesEnabled are true (a cross-unit re-own moves where the root's " +
+            "documents are expected; the ordinary-moves pass moves them). Its callers: EveryRootReownCallerIsCensused."),
         // The Office quick-create of a MATTER or PROJECT (a root) writes its owner through the unified create below
         // (RecordCreationService.cs: OwnedCreateFields, IsolatedCreateFields) since field mapping task 018; task 018c deleted
         // the Office creation core and its three owner writes (CreateMatterAsync, CreateProjectAsync, IsolateProjectCreate).
@@ -780,10 +781,12 @@ public class RecordOwnerAssignmentCensusTests
     // the caller's — so it is allowed only behind its guards, in this order, before the write: the two-table check, the Secure
     // Record business unit resolved, a RefusedSecure return, and the flag refused unless explicitly false. Its write is the
     // conditional If-Match update through the shared write / evict / read-back sequence.
+    // Fix round (A-K6): the never-INTO-the-Secure-unit check on the TARGET's business unit is pinned too (between the
+    // never-out-of refusal and the flag), so a refactor that drops it fails here, not only in the writer's unit test.
     private static readonly string[] RootFollowsFilingGuards =
     {
         "FiledRootReownTables.Contains(", "ResolveSecureBusinessUnitAsync(", "OrdinaryRowReownOutcome.RefusedSecure",
-        "GetAttributeValue<bool?>(IsSecureColumn) != false",
+        "targetBu == secureIn", "GetAttributeValue<bool?>(IsSecureColumn) != false",
     };
 
     private static readonly string[] RootFollowsFilingWriteShape = { "UpdateIfMatchAsync(", "WriteOwnerAndReadBackAsync(" };
@@ -811,6 +814,7 @@ public class RecordOwnerAssignmentCensusTests
         var guarded = "{ if (!FiledRootReownTables.Contains(name)) throw new ArgumentException(); "
                       + "var bu = await SecureRecordOwnerTeam.ResolveSecureBusinessUnitAsync(d, c, ct); "
                       + "if (bu.Id == x) return Result(OrdinaryRowReownOutcome.RefusedSecure); "
+                      + "if (secureBu is { } secureIn && targetBu == secureIn) return Result(OrdinaryRowReownOutcome.RefusedSecure); "
                       + "if (row.GetAttributeValue<bool?>(IsSecureColumn) != false) return Result(OrdinaryRowReownOutcome.RefusedSecure); "
                       + write + tail;
         Assert.True(RootFollowsFilingGuardsComeFirst(guarded), "the seeded member passes");
@@ -857,6 +861,52 @@ public class RecordOwnerAssignmentCensusTests
     };
 
     private static readonly Regex OrdinaryReownCall = new(@"\.ReownOrdinaryRowAsync\s*\(", RegexOptions.Compiled);
+
+    /// <summary>
+    /// Fix round (A-K6): every CALLER of <c>SecureChildReconciler.ReownFiledRootAsync</c>, by member, with its count (the
+    /// <see cref="EveryOrdinaryReownCallerIsCensused"/> precedent). The writer's team is the caller's, so each caller must take
+    /// it from the resolver over the root's family, behind both write switches; a new caller is reviewed here.
+    /// </summary>
+    private static readonly IReadOnlyList<OrdinaryReownCaller> RootReownCallers = new[]
+    {
+        new OrdinaryReownCaller("SecureRootInheritance.Cascade.cs", "FollowFamilyOwnersAsync", 1,
+            "Owner decision 2026-10-29: the follow-parents pass's root-owner step re-owns an ordinary work assignment or project to " +
+            "the team IRecordOwnershipResolver answers for its family (the question creation asks for the row; an unfiled " +
+            "person-owned root, its person's business-unit team) — only when SecureRoot:Inheritance:RootOwnerWritesEnabled AND " +
+            "SecureChild:Reconciliation:OrdinaryMovesWritesEnabled are true and the recent-changes stop is not set."),
+    };
+
+    private static readonly Regex RootReownCall = new(@"\.ReownFiledRootAsync\s*\(", RegexOptions.Compiled);
+
+    [Fact(DisplayName = "Fix round (A-K6): every caller of ReownFiledRootAsync is censused, by member, with its count")]
+    public void EveryRootReownCallerIsCensused()
+    {
+        var actual = ScanCalls(ServerFiles(), RootReownCall);
+        var expected = RootReownCallers.ToDictionary(c => (c.FileName, c.Member), c => c.Calls);
+        var problems = new List<string>();
+        foreach (var ((file, member), lines) in actual.OrderBy(kv => kv.Key.File, StringComparer.Ordinal))
+        {
+            if (!expected.TryGetValue((file, member), out var count))
+                problems.Add($"UNLISTED root re-own caller {file}.{member}: lines {string.Join(", ", lines)}");
+            else if (count != lines.Count)
+                problems.Add($"COUNT CHANGED for {file}.{member}: census says {count}, source has {lines.Count}");
+        }
+
+        problems.AddRange(expected.Keys.Where(k => !actual.ContainsKey(k)).Select(k => $"STALE census entry {k.FileName}.{k.Member}"));
+        Assert.True(problems.Count == 0,
+            "The ReownFiledRootAsync caller census does not match the source (owner decision 2026-10-29, fix round A-K6). A caller " +
+            "names the team, so it must take it from the resolver over the root's family; list it with its reason:\n" +
+            string.Join("\n", problems));
+
+        // Negative control: the scan sees a call (and attributes it to its member) and ignores the declaration.
+        var seeded = new Dictionary<string, string>
+        {
+            ["Seed.cs"] = "public sealed class Seed {\n public async Task<int> Caller(Guid id) {\n" +
+                          "  var r = await reconciler.ReownFiledRootAsync(\"sprk_project\", id, team, ct);\n return 1; }\n" +
+                          " public async Task<OrdinaryRowReownResult> ReownFiledRootAsync(string table, Guid id, Guid teamId, CancellationToken ct) { return null; }\n}",
+        };
+        Assert.Equal(new[] { ("Seed.cs", "Caller") }, ScanCalls(seeded, RootReownCall).Keys.ToArray());
+    }
 
     [Fact(DisplayName = "Ontology 148: every caller of ReownOrdinaryRowAsync is censused, by member, with its count")]
     public void EveryOrdinaryReownCallerIsCensused()

@@ -921,11 +921,14 @@ public sealed class SecureChildReconciler
     /// and when the root, a team, or which business unit is the Secure Record one cannot be read or told
     /// (<see cref="OrdinaryRowReownOutcome.Failed"/>). A person-owned root is accepted. A root already owned by the team is
     /// <see cref="OrdinaryRowReownOutcome.AlreadyOwned"/>, unwritten.</para>
-    /// <para><b>Otherwise</b> the guards of <see cref="ReownOrdinaryRowCoreAsync"/>, then this class's one owner-write sequence
-    /// (<see cref="WriteOwnerAndReadBackAsync"/>: the write, the owner-change eviction, the read-back), CONDITIONAL on the
-    /// version the guard read (<c>If-Match</c>): a root changed in between is <see cref="OrdinaryRowReownOutcome.Conflict"/>,
-    /// one deleted in between <see cref="OrdinaryRowReownOutcome.NotFound"/>. Only the owner is written: the root's container
-    /// and its external access grants are not touched.</para>
+    /// <para><b>Otherwise</b>, after its own guards above (it does not call <see cref="ReownOrdinaryRowCoreAsync"/>; its
+    /// Secure, flag and default-team guards are this member's own, pinned by the census), this class's one owner-write
+    /// sequence (<see cref="WriteOwnerAndReadBackAsync"/>: the write, the owner-change eviction, the read-back), CONDITIONAL on
+    /// the version the guard read (<c>If-Match</c>): a root changed in between is <see cref="OrdinaryRowReownOutcome.Conflict"/>,
+    /// one deleted in between <see cref="OrdinaryRowReownOutcome.NotFound"/>. Only the owner is written: the root's
+    /// <c>sprk_containerid</c> and its external access grants are not touched. Its documents' EXPECTED container follows its
+    /// owning business unit, though, so a cross-unit re-own leaves them for the ordinary-moves pass to move (the caller writes
+    /// only when that pass writes too).</para>
     /// </remarks>
     /// <param name="table"><c>sprk_workassignment</c> or <c>sprk_project</c>; anything else throws.</param>
     /// <param name="id">The root (not <see cref="Guid.Empty"/>).</param>

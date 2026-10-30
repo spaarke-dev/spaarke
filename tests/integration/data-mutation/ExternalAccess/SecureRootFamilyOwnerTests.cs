@@ -34,6 +34,7 @@ public class SecureRootFamilyOwnerTests : IClassFixture<ProvisionProjectTestFixt
         _fixture.Reset();
         _fixture.UseChildWorldForRoots();
         _fixture.SetConfiguration(SecureRootInheritance.RootOwnerWritesEnabledConfigKey, null);
+        _fixture.SetConfiguration(SecureChildReconciliationJob.OrdinaryMovesWritesEnabledConfigKey, null);
         _fixture.SetConfiguration(SecureChildReconciliationJob.RecentChangesWritesEnabledConfigKey, null);
         World.Add("businessunit", UnitA, ("name", "Unit A"), ("parentbusinessunitid", new EntityReference("businessunit", SecureChildShareWorld.GeneralBu)));
         World.Team(TeamA, UnitA, "Unit A", isDefault: true, teamType: 0);
@@ -45,7 +46,13 @@ public class SecureRootFamilyOwnerTests : IClassFixture<ProvisionProjectTestFixt
 
     private SecureChildShareWorld World => _fixture.ChildWorld;
 
-    private void WritesOn() => _fixture.SetConfiguration(SecureRootInheritance.RootOwnerWritesEnabledConfigKey, "true");
+    /// <summary>Fix round (A-F1): the step writes only with BOTH switches — its own and the ordinary-moves pass's, which moves a
+    /// cross-unit root's documents to the container they now expect.</summary>
+    private void WritesOn()
+    {
+        _fixture.SetConfiguration(SecureRootInheritance.RootOwnerWritesEnabledConfigKey, "true");
+        _fixture.SetConfiguration(SecureChildReconciliationJob.OrdinaryMovesWritesEnabledConfigKey, "true");
+    }
 
     private async Task<FollowParentsPass> PassAsync()
     {
@@ -64,15 +71,15 @@ public class SecureRootFamilyOwnerTests : IClassFixture<ProvisionProjectTestFixt
 
     /// <summary>An ordinary work assignment owned by <paramref name="person"/> (or <paramref name="team"/>), holding
     /// <paramref name="filing"/>.</summary>
-    private Guid WorkAssignment(Guid? person = null, Guid? team = null, string? container = null,
+    private Guid WorkAssignment(Guid? person = null, Guid? team = null, string? container = null, Guid? id = null,
         params (string Column, string Table, Guid Id)[] filing)
     {
-        var id = Guid.NewGuid();
-        _fixture.SeedWorkAssignment(id, owningTeamId: team, containerId: container, isSecure: false,
+        var waId = id ?? Guid.NewGuid();
+        _fixture.SeedWorkAssignment(waId, owningTeamId: team, containerId: container, isSecure: false,
             owningUserId: team is null ? person ?? PersonB : null);
         foreach (var (column, table, parent) in filing)
-            World.Set("sprk_workassignment", id, column, new EntityReference(table, parent));
-        return id;
+            World.Set("sprk_workassignment", waId, column, new EntityReference(table, parent));
+        return waId;
     }
 
     private static IEnumerable<JsonElement> Lines(FollowParentsPass pass) =>
@@ -108,7 +115,7 @@ public class SecureRootFamilyOwnerTests : IClassFixture<ProvisionProjectTestFixt
         _fixture.ContainerIdOf(wa).Should().Be("b!wa-container", "the root's container is never changed");
         pass.RootOwners.WritesEnabled.Should().BeTrue();
         pass.RootOwners.Written.Should().Be(1);
-        pass.RootOwners.WithContainer.Should().Be(1);
+        pass.RootOwners.CrossUnit.Should().Be(1, "unit B to unit A: its documents now expect unit A's container");
         var line = LineOf(pass, wa);
         line.GetProperty("state").GetString().Should().Be("written");
         line.GetProperty("from").GetProperty("owner").GetString().Should().Be("user");
@@ -145,6 +152,41 @@ public class SecureRootFamilyOwnerTests : IClassFixture<ProvisionProjectTestFixt
         await PassAsync();
 
         _fixture.OwningTeamOf(wa).Should().Be(TeamA, "a work assignment filed under an invoice belongs to the invoice's matter");
+    }
+
+    [Theory(DisplayName = "Fix round (B-F3): a person-owned work assignment filed only under an invoice or event with no matter or project gets the answer creation gives — the intermediate's unit")]
+    [InlineData("sprk_regardinginvoice", "sprk_invoice")]
+    [InlineData("sprk_regardingevent", "sprk_event")]
+    public async Task AWorkAssignmentUnderAnIntermediateWithNoCore_GetsCreationsAnswer(string column, string table)
+    {
+        var intermediate = Guid.NewGuid();
+        World.Add(table, intermediate, ("owningteam", new EntityReference("team", TeamA)),
+            ("owningbusinessunit", new EntityReference("businessunit", UnitA)));
+        var wa = WorkAssignment(filing: (column, table, intermediate));
+        var creation = await AskCreationsQuestionAsync(column, table, intermediate);
+        WritesOn();
+
+        await PassAsync();
+
+        creation.IsOwned.Should().BeTrue($"{creation.RefusalCode}: {creation.Reason}");
+        creation.OwningTeamId.Should().Be(TeamA, "creation files it under the intermediate it names");
+        _fixture.OwningTeamOf(wa).Should().Be(creation.OwningTeamId, "the step asks the question creation asks for the same row");
+    }
+
+    /// <summary>The question a BFF create asks for a work assignment holding one typed lookup (its lookups, through what an
+    /// invoice or event belongs to: <c>RecordCreationService</c>'s derivation).</summary>
+    private async Task<Sprk.Bff.Api.Services.Dataverse.RecordOwnerResolution> AskCreationsQuestionAsync(string column, string table, Guid id)
+    {
+        using var scope = _fixture.Services.CreateScope();
+        var dataverse = SecureChildShareWorld.EntitiesOver(() => World).Object;
+        var lookups = new[] { KeyValuePair.Create(column, (Sprk.Bff.Api.Services.Dataverse.RecordOwnershipParent?)new Sprk.Bff.Api.Services.Dataverse.RecordOwnershipParent(table, id)) };
+        var through = await SecureRootInheritance.OwnerLookupsThroughIntermediatesAsync(
+            dataverse, Microsoft.Extensions.Logging.Abstractions.NullLogger.Instance, "sprk_workassignment", lookups, CancellationToken.None);
+        var question = Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext.ForRow("sprk_workassignment", through.Lookups.Concat(lookups), null);
+        return await new Sprk.Bff.Api.Services.Dataverse.RecordOwnershipResolver(
+                dataverse, scope.ServiceProvider.GetRequiredService<Microsoft.Extensions.Configuration.IConfiguration>(),
+                Microsoft.Extensions.Logging.Abstractions.NullLogger<Sprk.Bff.Api.Services.Dataverse.RecordOwnershipResolver>.Instance)
+            .ResolveOwnerAsync(question, CancellationToken.None);
     }
 
     [Fact(DisplayName = "Owner 2026-10-29 must fire: a work assignment owned by unit B's default team, filed under a matter in A, is re-owned to A")]
@@ -350,6 +392,122 @@ public class SecureRootFamilyOwnerTests : IClassFixture<ProvisionProjectTestFixt
         pass.RootOwners.Planned.Should().Be(1);
     }
 
+    // ── Fix round: switches, bounds and cursor, the If-Match race, a pair naming a deleted record ──────────────────────────
+
+    [Fact(DisplayName = "Fix round (A-F1) must not fire: RootOwnerWritesEnabled alone (no OrdinaryMovesWritesEnabled) stays report-only and warns, naming the missing switch")]
+    public async Task TheRootSwitchAlone_StaysReportOnly_AndWarns()
+    {
+        var matter = MatterInA();
+        var wa = WorkAssignment(filing: ("sprk_regardingmatter", "sprk_matter", matter));
+        _fixture.SetConfiguration(SecureRootInheritance.RootOwnerWritesEnabledConfigKey, "true");
+
+        var pass = await PassAsync();
+
+        ShouldBeUntouched(wa, pass);
+        pass.RootOwners.WritesEnabled.Should().BeFalse("a cross-unit re-own needs the ordinary-moves pass to move its documents");
+        pass.RootOwners.Planned.Should().Be(1);
+        pass.RootOwners.CrossUnit.Should().Be(1);
+        _fixture.Logs.Entries.Should().ContainSingle(e => e.Level == Microsoft.Extensions.Logging.LogLevel.Warning
+                                                          && e.Message.Contains(SecureChildReconciliationJob.OrdinaryMovesWritesEnabledConfigKey)
+                                                          && e.Message.Contains("REPORT-ONLY"));
+    }
+
+    /// <summary>A work assignment whose filing can never be told: a pair naming a matter none of its lookups repeats.</summary>
+    private Guid PermanentlyRefusingWorkAssignment(Guid id)
+    {
+        var wa = WorkAssignment(id: id, filing: ("sprk_regardingmatter", "sprk_matter", MatterInA()));
+        FilePair(_fixture, "sprk_workassignment", wa, MatterInA(), RecordTypeRef(_fixture, "sprk_matter"));
+        return wa;
+    }
+
+    private static Guid Ordered(int prefix, int n) => Guid.Parse($"{prefix:x8}-1030-4030-8030-{n:x12}");
+
+    [Fact(DisplayName = "Fix round (F2) must fire: 30 roots that always refuse, ordered first, never starve the 3 re-ownable roots after them")]
+    public async Task RefusingRootsFirst_NeverStarveTheRootsAfterThem()
+    {
+        foreach (var n in Enumerable.Range(0, 30))
+            PermanentlyRefusingWorkAssignment(Ordered(0x00000001, n));
+        var matter = MatterInA();
+        var reownable = Enumerable.Range(0, 3)
+            .Select(n => WorkAssignment(id: Ordered(0x7fffffff, n), filing: ("sprk_regardingmatter", "sprk_matter", matter)))
+            .ToList();
+        WritesOn();
+        var runner = new SecureRootInheritanceJobRunner(_fixture);
+
+        for (var run = 0; run < 3 && reownable.Any(id => _fixture.OwningTeamOf(id) != TeamA); run++)
+            await runner.RunAsync();
+
+        reownable.Should().OnlyContain(id => _fixture.OwningTeamOf(id) == TeamA,
+            "a refusal before the plan does not spend the run's bound, so the roots after it are reached");
+    }
+
+    [Fact(DisplayName = "Fix round (B-F2) must fire: past MaxRootResolvesPerRun the run stops, and its cursor carries the rest to the next run, which wraps round")]
+    public async Task TheResolveBound_StopsTheRun_AndTheCursorCarriesTheRest()
+    {
+        var matter = MatterInA();
+        foreach (var n in Enumerable.Range(0, SecureRootInheritance.MaxRootResolvesPerRun))
+            WorkAssignment(team: TeamA, id: Ordered(0x00000001, n), filing: ("sprk_regardingmatter", "sprk_matter", matter)); // in step
+        var last = WorkAssignment(id: Ordered(0x7fffffff, 0), filing: ("sprk_regardingmatter", "sprk_matter", matter));
+        WritesOn();
+        var runner = new SecureRootInheritanceJobRunner(_fixture);
+
+        var first = RootOwnersOf(await runner.RunAsync());
+        _fixture.OwningTeamOf(last).Should().NotBe(TeamA, "the first run stopped at its resolve bound before it");
+        first.GetProperty("resolved").GetInt32().Should().Be(SecureRootInheritance.MaxRootResolvesPerRun);
+        first.GetProperty("deferred").GetInt32().Should().Be(1);
+        first.GetProperty("resumeAfter").GetString().Should().Be($"sprk_workassignment:{Ordered(0x00000001, SecureRootInheritance.MaxRootResolvesPerRun - 1):D}");
+
+        var second = RootOwnersOf(await runner.RunAsync());
+        _fixture.OwningTeamOf(last).Should().Be(TeamA, "the second run continued after the cursor");
+        second.GetProperty("written").GetInt32().Should().Be(1);
+        second.GetProperty("resolved").GetInt32().Should().Be(SecureRootInheritance.MaxRootResolvesPerRun,
+            "it wrapped round to the start after the last root");
+        second.GetProperty("resumeAfter").GetString().Should().Be(
+            $"sprk_workassignment:{Ordered(0x00000001, SecureRootInheritance.MaxRootResolvesPerRun - 2):D}");
+    }
+
+    private static JsonElement RootOwnersOf(Spaarke.Scheduling.JobRunResult run)
+    {
+        using var json = JsonDocument.Parse(run.ResultJson!);
+        return json.RootElement.GetProperty("followParents").GetProperty("rootOwners").Clone();
+    }
+
+    [Fact(DisplayName = "Fix round (A-K6) must not fire: a root changed between the writer's guard read and its write is not written (If-Match), and is reported")]
+    public async Task ARootChangedBeforeTheWrite_IsNotWritten_AndIsReported()
+    {
+        var matter = MatterInA();
+        var wa = WorkAssignment(filing: ("sprk_regardingmatter", "sprk_matter", matter));
+        _fixture.BeforeConditionalRootWrite = (table, id) =>
+            World.Set(table, id, "versionnumber", (World.ValueOf<long?>(table, id, "versionnumber") ?? 0L) + 7);
+        WritesOn();
+
+        var pass = await PassAsync();
+
+        _fixture.OwningUserOf(wa).Should().Be(PersonB, "the conditional write was refused: nothing changed");
+        _fixture.ConditionalRootWrites.Should().ContainSingle(w => w.Id == wa, "the write was attempted once, If-Match");
+        pass.RootOwners.Written.Should().Be(0);
+        pass.RootOwners.Refused.Should().Be(1);
+        LineOf(pass, wa).GetProperty("state").GetString().Should().Be("refused");
+        LineOf(pass, wa).GetProperty("reason").GetString().Should().StartWith(nameof(OrdinaryRowReownOutcome.Conflict));
+        pass.Problems.Should().Contain(p => p.Contains(wa.ToString("D")) && p.Contains(SecureRootInheritance.ReasonRootOwnerNotWritten));
+    }
+
+    [Fact(DisplayName = "Fix round (B-K1) must fire: a person-owned project whose pair names a DELETED record is planned as unfiled — its person's (its own) unit, not refused")]
+    public async Task AProjectWhosePairNamesADeletedRecord_IsPlannedAsUnfiled()
+    {
+        var project = Guid.NewGuid();
+        _fixture.SeedProject(project, isSecure: false, owningUserId: PersonB, owningBusinessUnitId: UnitB);
+        FilePair(_fixture, "sprk_project", project, Guid.NewGuid(), RecordTypeRef(_fixture, "sprk_matter")); // no such matter
+
+        var pass = await PassAsync();
+
+        var line = LineOf(pass, project);
+        line.GetProperty("state").GetString().Should().Be("planned");
+        line.GetProperty("to").GetProperty("team").GetGuid().Should().Be(TeamB, "the pair's record is gone: filed under nothing");
+        line.GetProperty("reason").GetString().Should().Be("follows its person's business unit");
+        pass.RootOwners.Refused.Should().Be(0);
+    }
+
     // ── The writer's own guards (the pass filters these first; the writer refuses them on its own) ─────────────────────────
 
     private async Task<OrdinaryRowReownResult> ReownAsync(string table, Guid id, Guid team)
@@ -412,7 +570,7 @@ public class SecureRootFamilyOwnerTests : IClassFixture<ProvisionProjectTestFixt
         await act.Should().ThrowAsync<ArgumentException>();
     }
 
-    [Fact(DisplayName = "Owner 2026-10-29: the job's ResultJson carries followParents.rootOwners with the plan and the container count, no ids in the counts")]
+    [Fact(DisplayName = "Owner 2026-10-29: the job's ResultJson carries followParents.rootOwners with the plan and the cross-unit count, no ids in the counts")]
     public async Task TheJobsResultJson_CarriesTheRootOwners()
     {
         var matter = MatterInA();
@@ -424,7 +582,7 @@ public class SecureRootFamilyOwnerTests : IClassFixture<ProvisionProjectTestFixt
         var rootOwners = json.RootElement.GetProperty("followParents").GetProperty("rootOwners");
         rootOwners.GetProperty("writesEnabled").GetBoolean().Should().BeFalse();
         rootOwners.GetProperty("planned").GetInt32().Should().Be(1);
-        rootOwners.GetProperty("withContainer").GetInt32().Should().Be(1);
+        rootOwners.GetProperty("crossUnit").GetInt32().Should().Be(1, "unit B to unit A: the ordinary-moves pass moves its documents");
         rootOwners.GetProperty("withGrants").GetInt32().Should().Be(0);
         rootOwners.GetProperty("changes").GetArrayLength().Should().Be(1);
     }

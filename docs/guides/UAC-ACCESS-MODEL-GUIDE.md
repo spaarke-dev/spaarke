@@ -527,12 +527,18 @@ Spaarke does not use plugins (ADR-002), so the re-own is the scheduled job's.
 **A work assignment's or project's own owner** (owner decision 2026-10-29: a family shares one ownership). The
 secure-root inheritance job (every 5 minutes) re-owns an ordinary work assignment or project whose owner is a person, or the
 default team of another business unit, to its family's team: filed, its matter's (then its project's) business-unit team;
-unfiled, its person's business-unit team. A project is filed only through its BFF-managed pair; a project whose pair is
-empty counts as unfiled and goes to its person's business-unit team, which is the unit it already sits in, so who can see it
-does not change (decision 2026-10-30; projects are not excluded). Secure records, records owned in the Secure Record business unit and records
-under a secure parent are never touched; a record owned by a named (non-default) team is reported, not moved; matters are
-not part of it; at most 25 a run. Report-only unless `SecureRoot:Inheritance:RootOwnerWritesEnabled` is `true` (the
-recent-changes emergency stop stops it too); each run's plan is `ResultJson.followParents.rootOwners`.
+unfiled, its person's business-unit team. "Filed" is what a create of the same record would be filed under: a work
+assignment under only an invoice or event goes with that record's matter or project, else with the invoice or event itself.
+A project is filed only through its BFF-managed pair; a project whose pair is empty, or names a record that no longer
+exists, counts as unfiled and goes to its person's business-unit team, which is the unit it already sits in, so who can see
+it does not change (decision 2026-10-30; projects are not excluded). Secure records, records owned in the Secure Record
+business unit and records under a secure parent are never touched; a record owned by a named (non-default) team is
+reported, not moved; matters are not part of it; at most 200 records are resolved and 25 re-owned a run, and the next run
+continues after the last record this one reached. The record's own container column is not changed, but its documents'
+expected container follows its owning business unit, so a re-own into another unit (`crossUnit` in the run's report) leaves
+its documents for the ordinary-moves pass to move. Report-only unless `SecureRoot:Inheritance:RootOwnerWritesEnabled` AND
+`SecureChild:Reconciliation:OrdinaryMovesWritesEnabled` are `true` (the first alone stays report-only and logs a warning;
+the recent-changes emergency stop stops it too); each run's plan is `ResultJson.followParents.rootOwners`.
 
 **Switches** (app settings): `SecureChild:Reconciliation:OrdinaryMovesWritesEnabled` (default `false`, report-only;
 turned on only after UAC reads a report-only run and the owner gives the go), `SecureChild:Reconciliation:MaxOrdinaryMovesPerRun`
