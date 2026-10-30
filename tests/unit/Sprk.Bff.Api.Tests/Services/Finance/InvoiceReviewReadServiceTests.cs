@@ -620,6 +620,7 @@ public sealed class InvoiceReviewReadServiceTests
     [InlineData(true, InvoiceStatusCodes.InReview, true)]
     [InlineData(false, InvoiceStatusCodes.InReview, false)]
     [InlineData(true, InvoiceStatusCodes.Approved, false)]
+    [InlineData(true, InvoiceStatusCodes.Superseded, false)] // task 097a: closed by its correction
     public async Task CanDecide(bool write, int status, bool expected)
     {
         var w = new World(status);
@@ -630,6 +631,22 @@ public sealed class InvoiceReviewReadServiceTests
 
         flags.CanRead.Should().BeTrue();
         flags.CanDecide.Should().Be(expected);
+    }
+
+    [Fact(DisplayName = "097a: a Superseded invoice reads with status Superseded (not Unknown), its stored code, not held and not decidable")]
+    public async Task Superseded_ReadsAsSuperseded_NotHeld_NotDecidable()
+    {
+        var w = new World(InvoiceStatusCodes.Superseded);
+        w.Access.Granted = AccessRights.Read | AccessRights.Write;
+        w.AddLine(1, InvoiceLineStatus.Flagged);
+        w.Submission = SubmissionRow(FindingsJson(), blocked: true); // a blocked submission holds only an In Review invoice
+
+        var review = (await w.Service().GetAsync(InvoiceId, Caller, CancellationToken.None))!;
+
+        review.Header.Status.Should().Be("Superseded");
+        review.Header.StatusCode.Should().Be(InvoiceStatusCodes.Superseded);
+        review.Header.Held.Should().BeFalse();
+        review.Flags.CanDecide.Should().BeFalse();
     }
 
     [Fact(DisplayName = "100: a rights lookup that faults, a damaged findings column and unreadable settings do not fail the page")]

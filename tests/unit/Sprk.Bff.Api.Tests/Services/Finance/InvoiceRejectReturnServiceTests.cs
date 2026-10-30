@@ -288,6 +288,8 @@ public sealed class InvoiceRejectReturnServiceTests
     [InlineData(InvoiceDecisionKind.Reject, InvoiceStatusCodes.SentToAp)]
     [InlineData(InvoiceDecisionKind.Return, InvoiceStatusCodes.Paid)]
     [InlineData(InvoiceDecisionKind.Reject, InvoiceStatusCodes.Cancelled)]
+    [InlineData(InvoiceDecisionKind.Reject, InvoiceStatusCodes.Superseded)] // task 097a: closed by its correction
+    [InlineData(InvoiceDecisionKind.Return, InvoiceStatusCodes.Superseded)]
     public async Task NotInReview_Is409(InvoiceDecisionKind kind, int status)
     {
         var w = new ApprovalWorld(invoiceStatus: status);

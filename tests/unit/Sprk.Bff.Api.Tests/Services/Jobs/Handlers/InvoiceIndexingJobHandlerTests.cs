@@ -422,6 +422,19 @@ public sealed class InvoiceIndexingJobHandlerTests
         ((string)newDoc["content"]).Should().Contain("Status: Approved").And.NotContain("Status: InReview");
     }
 
+    [Fact(DisplayName = "097a: a Superseded invoice is indexed with its status (Superseded, not Unknown) and its stored code")]
+    public async Task Superseded_IsIndexedWithItsStatus()
+    {
+        var h = new Harness { InvoiceRow = Invoice(statusCode: InvoiceStatusCodes.Superseded) };
+
+        (await h.Build().ProcessAsync(Job("v7"), CancellationToken.None)).Status.Should().Be(JobStatus.Completed);
+
+        var doc = h.OnlyDocument();
+        doc["statusCode"].Should().Be(InvoiceStatusCodes.Superseded);
+        doc["status"].Should().Be("Superseded");
+        ((string)doc["content"]).Should().Contain("Status: Superseded");
+    }
+
     // ── Enqueue keys ──
 
     [Fact(DisplayName = "152 ADR-004: the enqueue key carries the change - two changes never share a key, one change always does")]

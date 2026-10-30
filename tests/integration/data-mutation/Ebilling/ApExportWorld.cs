@@ -465,6 +465,12 @@ internal sealed class WorldLifecycle(ExportDataverse dataverse) : IInvoiceLifecy
 
     public InvoiceCreateRequestResult BuildInvoiceCreateRequest(Entity invoice, InvoiceLifecycleStatus initialStatus) =>
         throw new NotSupportedException();
+
+    public InvoiceTransitionRequestResult BuildSupersedeRequest(Guid invoiceId, InvoiceLifecycleStatus current, long rowVersion) =>
+        throw new NotSupportedException();
+
+    public InvoiceTransitionRequestResult BuildSupersedeUndoRequest(Guid invoiceId, InvoiceLifecycleStatus current, long rowVersion) =>
+        throw new NotSupportedException();
 }
 
 /// <summary>The result record's factories are internal to the BFF; the BFF's own results are built here through the real service's contract.</summary>

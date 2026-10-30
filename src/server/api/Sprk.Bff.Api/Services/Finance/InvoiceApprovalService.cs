@@ -457,6 +457,7 @@ public sealed class InvoiceApprovalService
             return new ApprovalResult(ApprovalOutcome.Conflict, InvoiceApprovalCodes.StatusUnknown, "The approval record's status is not recognised.");
         }
 
+        // Task 097: a Superseded invoice (closed by its correction) is refused here like every other status but In Review.
         if (invoiceStatus != InvoiceStatusCodes.InReview)
         {
             return new ApprovalResult(ApprovalOutcome.NotInReview, InvoiceApprovalCodes.NotInReview, "Only an invoice In Review can be approved.");
