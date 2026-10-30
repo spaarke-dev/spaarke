@@ -1340,6 +1340,14 @@ public partial class RouteAuthorizationGuardTests
             "A module gate plus the sprk_ReportingAccess role claim — a module role by design, not per-resource and not an "
             + "operator surface (sweep S-70, S-71, S-81).",
             "decides from role claims (IsInRole) and references no decision service"),
+        // Owner decision 2026-10-30 (playbook create, clone, share and unshare are for playbook administrators): a TABLE
+        // privilege gate (the caller's own prvCreate / prvShare on sprk_analysisplaybook), never a record. It only narrows:
+        // the route's per-record decision, where one exists, is the owner or access filter after it.
+        new NonDecidingAttachment("AddPlaybookTablePrivilegeFilter", "Api/Filters/PlaybookAuthorizationFilter.cs", "-",
+            "A role-privilege precondition by design (table x operation, never a record): a caller holding the privilege goes "
+            + "to next, and the route's per-record decision is its owner or access filter, or none (POST /api/ai/playbooks).",
+            "holds = probe is not null && await probe.CallerHoldsPrivilegeAsync(...); ... return await next(context) "
+            + "(PlaybookAuthorizationFilter.cs, AuthorizeCallerTablePrivilegeAsync)"),
         new NonDecidingAttachment("AddSpeAdminTenantScopeFilter", "Api/Filters/SpeAdminTenantScopeFilter.cs", "165",
             "Since task 165 it decides per config (uniform 404; 503 when unverifiable — fail CLOSED), per container (its "
             + "business-unit binding; an unbound container reaches nobody) and per container type, and confines the "

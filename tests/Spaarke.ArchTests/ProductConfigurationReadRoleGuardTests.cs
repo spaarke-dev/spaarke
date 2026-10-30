@@ -20,9 +20,11 @@ namespace Spaarke.ArchTests;
 /// (<see cref="RecordOwnershipResolver.OwnershipParentEntities"/>), a secure root or secure-child table
 /// (<see cref="SecureChildLineage"/>), a per-user table (<see cref="OwnedChildWrite.PerUserTables"/>), a table the Secure
 /// Record census guards (<c>config/secure-record-owner-role.json</c>) or a customer configuration table
-/// (<c>config/customer-configuration-owner-role.json</c>); no listed Read is one of
-/// <see cref="SecureBuRoleDepthAssertion.GuardedPrivileges"/>;</item>
-/// <item>both role XML files (the source of truth a SpaarkeMaster import ships) hold each listed Read at Global.</item>
+/// (<c>config/customer-configuration-owner-role.json</c>) or platform service configuration (<see cref="PlatformServiceTables"/>);
+/// no listed Read is one of <see cref="SecureBuRoleDepthAssertion.GuardedPrivileges"/>;</item>
+/// <item>each entry's privilege is exactly the table's own Read (<c>prvRead</c> + logical name, any letter case);</item>
+/// <item>both role XML files (the source of truth a SpaarkeMaster import ships) hold each listed table's own Read at Global,
+/// and no Create on a <see cref="NoCreateTables"/> table.</item>
 /// </list>
 /// Enforced by: this guard (<c>Spaarke.ArchTests</c>, run by the <c>Stop</c> hook and CI).
 /// </summary>
@@ -55,8 +57,25 @@ public class ProductConfigurationReadRoleGuardTests
         Add(OwnedChildWrite.PerUserTables, "a per-user table (OwnedChildWrite.PerUserTables)");
         Add(DeclaredTables(ReadConfig("secure-record-owner-role.json")), "a table the Secure Record census guards (config/secure-record-owner-role.json)");
         Add(DeclaredTables(ReadConfig("customer-configuration-owner-role.json")), "a customer configuration table (config/customer-configuration-owner-role.json)");
+        Add(PlatformServiceTables, "platform service configuration (PlatformServiceTables), not product configuration");
         return forbidden;
     }
+
+    /// <summary>
+    /// Platform service configuration: external service connections, Dataverse environment registrations and AI model
+    /// deployments. Not product configuration, and never on this list.
+    /// </summary>
+    internal static readonly string[] PlatformServiceTables =
+        ["sprk_externalserviceconfig", "sprk_dataverseenvironment", "sprk_aimodeldeployment"];
+
+    /// <summary>
+    /// Tables the two roles read at Global through this list and must hold NO Create privilege on, at any depth: a row a
+    /// user created there would be readable by every user.
+    /// </summary>
+    internal static readonly string[] NoCreateTables = ["sprk_gridconfiguration"];
+
+    /// <summary>The Read privilege of <paramref name="table"/>: <c>prvRead</c> + the logical name (compared case-insensitively).</summary>
+    internal static string ReadPrivilegeOf(string table) => "prvRead" + table;
 
     private static IEnumerable<string> DeclaredTables(string json) =>
         (JsonNode.Parse(json)?["tables"] as JsonArray ?? [])
@@ -77,8 +96,8 @@ public class ProductConfigurationReadRoleGuardTests
     [Fact(DisplayName = "Product configuration read list: both role XML files hold every listed Read at Global")]
     public void RoleXmlHoldsEveryListedReadAtGlobal()
     {
-        var privileges = ListedPrivileges(ReadConfig(ConfigFile));
-        Assert.NotEmpty(privileges);
+        var tables = ListedTables(ReadConfig(ConfigFile));
+        Assert.NotEmpty(tables);
 
         var violations = new List<string>();
         foreach (var role in Roles)
@@ -88,12 +107,27 @@ public class ProductConfigurationReadRoleGuardTests
             var xml = File.ReadAllText(path);
             Assert.True(XDocument.Parse(xml).Descendants().Count(e => e.Name.LocalName == "RolePrivilege") > 0,
                 $"{role}.xml parsed but holds no RolePrivilege, so this guard would pass vacuously.");
-            violations.AddRange(XmlFindings(xml, privileges).Select(v => $"{role}.xml: {v}"));
+            violations.AddRange(XmlFindings(xml, tables).Select(v => $"{role}.xml: {v}"));
         }
 
         Assert.True(violations.Count == 0,
             $"config/{ConfigFile} lists a table the role XML does not read at Global. Change the XML in the same commit:\n  "
             + string.Join("\n  ", violations));
+    }
+
+    [Fact(DisplayName = "Product configuration read list: Core and Basic User hold no Create on a Global-read table that forbids it")]
+    public void RoleXmlHoldsNoCreateOnNoCreateTables()
+    {
+        var violations = new List<string>();
+        foreach (var role in Roles)
+        {
+            var path = Path.Combine(RolesRoot, $"{role}.xml");
+            Assert.True(File.Exists(path), $"Role file not found: {path}. Repo root resolved to '{SourceScan.RepoRoot}'.");
+            violations.AddRange(CreateFindings(File.ReadAllText(path), NoCreateTables).Select(v => $"{role}.xml: {v}"));
+        }
+
+        Assert.True(violations.Count == 0,
+            "A role reads these tables at Global, so it must not create rows in them:\n  " + string.Join("\n  ", violations));
     }
 
     [Fact(DisplayName = "Product configuration read guard non-vacuity: every exclusion source contributes tables")]
@@ -104,6 +138,7 @@ public class ProductConfigurationReadRoleGuardTests
                  {
                      "sprk_policy", "sprk_storedfile", "sprk_matter", "sprk_document", "sprk_analysisoutput", "sprk_navitem",
                      "sprk_externalrecordaccess", "sprk_fieldmappingrule",
+                     "sprk_externalserviceconfig", "sprk_dataverseenvironment", "sprk_aimodeldeployment",
                  })
         {
             Assert.True(forbidden.ContainsKey(table), $"The forbidden set lost '{table}'; a source it is built from is empty or renamed.");
@@ -123,13 +158,84 @@ public class ProductConfigurationReadRoleGuardTests
             "sprk_navitem",                // per-user
             "sprk_externalrecordaccess",   // census-guarded
             "sprk_fieldmappingrule",       // customer configuration
+            "sprk_externalserviceconfig",  // platform service configuration
+            "sprk_dataverseenvironment",   // platform service configuration
+            "SPRK_AIMODELDEPLOYMENT",      // platform service configuration, any letter case
         ];
         var json = Config(tables: seeded.Select(t => Table(t, $"prvRead{t}")).ToArray());
 
         var findings = ConfigFindings(json, ForbiddenTables());
 
         foreach (var table in seeded)
-            Assert.Contains(findings, f => f.StartsWith($"{table}:", StringComparison.Ordinal));
+            Assert.Contains(findings, f => f.StartsWith($"{table}:", StringComparison.Ordinal) && f.Contains("never gets Global Read", StringComparison.Ordinal));
+    }
+
+    [Fact(DisplayName = "Product configuration read guard control: a privilegeName that is not prvRead + the table's own name is reported")]
+    public void GuardFiresOnAnotherTablesOrANonReadPrivilege()
+    {
+        var none = new Dictionary<string, string>();
+
+        // Another table's Read.
+        Assert.Contains(ConfigFindings(Config(tables: [Table("sprk_aitooltype", "prvReadsprk_GridConfiguration")]), none),
+            f => f.StartsWith("sprk_aitooltype:", StringComparison.Ordinal) && f.Contains("not this table's Read privilege", StringComparison.Ordinal));
+        // A prefix of the table's name, or the name with a suffix, is not its Read.
+        Assert.Contains(ConfigFindings(Config(tables: [Table("sprk_aitooltype", "prvReadsprk_AIToolTypeX")]), none),
+            f => f.Contains("not this table's Read privilege", StringComparison.Ordinal));
+        // A non-Read privilege on the table itself.
+        Assert.Contains(ConfigFindings(Config(tables: [Table("sprk_aitooltype", "prvWritesprk_AIToolType")]), none),
+            f => f.Contains("not a Read privilege", StringComparison.Ordinal));
+        // Must not fire: the table's own Read in another letter case.
+        Assert.Empty(ConfigFindings(Config(tables: [Table("sprk_aitooltype", "PRVREADSPRK_AITOOLTYPE")]), none));
+    }
+
+    [Fact(DisplayName = "Product configuration read guard control: a Global Write, or another table's Global Read, does not satisfy a table's Read")]
+    public void XmlGuardIsNotSatisfiedByAnotherPrivilege()
+    {
+        const string role = """
+            <Role id="{00000000-0000-0000-0000-000000000002}" name="Spaarke Example">
+              <RolePrivileges>
+                <RolePrivilege name="prvWritesprk_AIToolType" level="Global" />
+                <RolePrivilege name="prvReadsprk_GridConfiguration" level="Global" />
+                <RolePrivilege name="prvReadsprk_AIOutputTypeArchive" level="Global" />
+              </RolePrivileges>
+            </Role>
+            """;
+
+        var findings = XmlFindings(role, ["sprk_aitooltype", "sprk_aioutputtype"]);
+
+        Assert.Equal(2, findings.Count);
+        Assert.Contains(findings, f => f.StartsWith("sprk_aitooltype:", StringComparison.Ordinal) && f.Contains("'absent'", StringComparison.Ordinal));
+        Assert.Contains(findings, f => f.StartsWith("sprk_aioutputtype:", StringComparison.Ordinal) && f.Contains("'absent'", StringComparison.Ordinal));
+        // Must not fire: the table whose own Read is at Global.
+        Assert.Empty(XmlFindings(role, ["sprk_gridconfiguration"]));
+    }
+
+    [Fact(DisplayName = "Product configuration read guard control: a Create on a no-create table is reported at any depth")]
+    public void CreateGuardFiresOnCreatePrivilege()
+    {
+        const string withCreate = """
+            <Role id="{00000000-0000-0000-0000-000000000003}" name="Spaarke Example">
+              <RolePrivileges>
+                <RolePrivilege name="prvReadsprk_GridConfiguration" level="Global" />
+                <RolePrivilege name="PRVCREATESPRK_GRIDCONFIGURATION" level="Basic" />
+              </RolePrivileges>
+            </Role>
+            """;
+        const string readOnly = """
+            <Role id="{00000000-0000-0000-0000-000000000004}" name="Spaarke Example">
+              <RolePrivileges>
+                <RolePrivilege name="prvReadsprk_GridConfiguration" level="Global" />
+                <RolePrivilege name="prvWritesprk_GridConfiguration" level="Basic" />
+                <RolePrivilege name="prvCreatesprk_GridConfigurationArchive" level="Global" />
+              </RolePrivileges>
+            </Role>
+            """;
+
+        var finding = Assert.Single(CreateFindings(withCreate, NoCreateTables));
+        Assert.Contains("sprk_gridconfiguration", finding, StringComparison.Ordinal);
+        Assert.Contains("'Basic'", finding, StringComparison.Ordinal);
+        // Must not fire: Read and Write only, and a Create on a different table whose name starts the same.
+        Assert.Empty(CreateFindings(readOnly, NoCreateTables));
     }
 
     [Fact(DisplayName = "Product configuration read guard control: a census-guarded Read privilege is reported")]
@@ -182,12 +288,12 @@ public class ProductConfigurationReadRoleGuardTests
             </Role>
             """;
 
-        var findings = XmlFindings(role, ["prvReadsprk_AIToolType", "prvReadsprk_GridConfiguration", "prvReadsprk_AIOutputType"]);
+        var findings = XmlFindings(role, ["sprk_aitooltype", "sprk_gridconfiguration", "sprk_aioutputtype"]);
 
         Assert.Equal(2, findings.Count);
-        Assert.Contains(findings, f => f.Contains("prvReadsprk_AIToolType is 'Deep'", StringComparison.Ordinal));
-        Assert.Contains(findings, f => f.Contains("prvReadsprk_AIOutputType is 'absent'", StringComparison.Ordinal));
-        Assert.Empty(XmlFindings(role, ["prvReadsprk_GridConfiguration"]));
+        Assert.Contains(findings, f => f.StartsWith("sprk_aitooltype:", StringComparison.Ordinal) && f.Contains("'Deep'", StringComparison.Ordinal));
+        Assert.Contains(findings, f => f.StartsWith("sprk_aioutputtype:", StringComparison.Ordinal) && f.Contains("'absent'", StringComparison.Ordinal));
+        Assert.Empty(XmlFindings(role, ["sprk_gridconfiguration"]));
     }
 
     /// <summary>Every way <paramref name="json"/> breaks the rule; empty when it holds.</summary>
@@ -243,8 +349,11 @@ public class ProductConfigurationReadRoleGuardTests
                     findings.Add($"{table}: no {field}");
             }
 
+            // The table's OWN Read, exactly: another table's Read or a non-Read privilege never stands in for it.
             if (!privilege.StartsWith("prvRead", StringComparison.OrdinalIgnoreCase))
                 findings.Add($"{table}: '{privilege}' is not a Read privilege");
+            else if (!string.Equals(privilege, ReadPrivilegeOf(table), StringComparison.OrdinalIgnoreCase))
+                findings.Add($"{table}: '{privilege}' is not this table's Read privilege ({ReadPrivilegeOf(table)})");
             if (forbidden.TryGetValue(table, out var why))
                 findings.Add($"{table}: {why}; it never gets Global Read");
             if (SecureBuRoleDepthAssertion.GuardedPrivileges.Contains(privilege, StringComparer.OrdinalIgnoreCase))
@@ -263,25 +372,42 @@ public class ProductConfigurationReadRoleGuardTests
         return findings;
     }
 
-    /// <summary>Each listed privilege the role XML does not hold at Global (exact, case-insensitive name).</summary>
-    internal static List<string> XmlFindings(string roleXml, IEnumerable<string> privileges)
+    /// <summary>
+    /// Each listed table whose OWN Read (<see cref="ReadPrivilegeOf"/>, exact name, case-insensitive) the role XML does not
+    /// hold at Global. Only that privilege counts: a Global Write on the table, or a Global Read on another table, does not.
+    /// </summary>
+    internal static List<string> XmlFindings(string roleXml, IEnumerable<string> tables)
     {
-        var levels = XDocument.Parse(roleXml).Descendants()
-            .Where(e => e.Name.LocalName == "RolePrivilege")
-            .GroupBy(e => (string?)e.Attribute("name") ?? string.Empty, StringComparer.OrdinalIgnoreCase)
-            .ToDictionary(g => g.Key, g => (string?)g.Last().Attribute("level") ?? "?", StringComparer.OrdinalIgnoreCase);
-        return privileges
-            .Select(p => (Name: p, Level: levels.TryGetValue(p, out var l) ? l : "absent"))
+        var levels = PrivilegeLevels(roleXml);
+        return tables
+            .Select(t => (Table: t, Read: ReadPrivilegeOf(t), Level: levels.TryGetValue(ReadPrivilegeOf(t), out var l) ? l : "absent"))
             .Where(p => p.Level != "Global")
-            .Select(p => $"{p.Name} is '{p.Level}', not Global")
+            .Select(p => $"{p.Table}: {p.Read} is '{p.Level}', not Global")
             .ToList();
     }
 
-    private static List<string> ListedPrivileges(string json) =>
+    /// <summary>Each table in <paramref name="tables"/> the role XML holds a Create privilege on (<c>prvCreate</c> + the
+    /// table's name, exact, case-insensitive), at any depth.</summary>
+    internal static List<string> CreateFindings(string roleXml, IEnumerable<string> tables)
+    {
+        var levels = PrivilegeLevels(roleXml);
+        return tables
+            .Where(t => levels.ContainsKey("prvCreate" + t))
+            .Select(t => $"{t}: prvCreate{t} is held at '{levels["prvCreate" + t]}'; this role reads the table at Global and must not create in it")
+            .ToList();
+    }
+
+    private static Dictionary<string, string> PrivilegeLevels(string roleXml) =>
+        XDocument.Parse(roleXml).Descendants()
+            .Where(e => e.Name.LocalName == "RolePrivilege")
+            .GroupBy(e => (string?)e.Attribute("name") ?? string.Empty, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(g => g.Key, g => (string?)g.Last().Attribute("level") ?? "?", StringComparer.OrdinalIgnoreCase);
+
+    private static List<string> ListedTables(string json) =>
         (JsonNode.Parse(json)?["tables"] as JsonArray ?? [])
-            .Select(n => (string?)n?["privilegeName"])
-            .Where(p => !string.IsNullOrWhiteSpace(p))
-            .Select(p => p!)
+            .Select(n => (string?)n?["logicalName"])
+            .Where(t => !string.IsNullOrWhiteSpace(t))
+            .Select(t => t!)
             .ToList();
 
     private static JsonObject Table(string table, string privilege, string reason = "a reason", string evidence = "evidence") =>

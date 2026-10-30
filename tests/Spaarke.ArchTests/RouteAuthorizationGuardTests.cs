@@ -1867,6 +1867,22 @@ public partial class RouteAuthorizationGuardTests
             case "AddReportingAuthorizationFilter":
                 return Regex.IsMatch(code, @"\.IsInRole\s*\(") && !ConsultsAny(code, decisions);
 
+            case "AddPlaybookTablePrivilegeFilter":
+            {
+                // Owner decision 2026-10-30: a table-privilege gate. Its method asks the caller's table privilege and
+                // then calls next; it asks nothing about a record. (The same FILE holds the per-record playbook modes, so
+                // the pin reads the one method, not the file.)
+                var body = MethodBody(code, "AuthorizeCallerTablePrivilegeAsync");
+                string[] recordCalls =
+                [
+                    "GetCallerRightsAsync", "GetCallerRecordAccessAsync", "RetrievePrincipalAccess", "AuthorizeAsync",
+                    "AuthorizationService", "IAccessDataSource", "BuildPlaybookUseCheckAsync",
+                ];
+                return Regex.IsMatch(body, @"\.CallerHoldsPrivilegeAsync\s*\(")
+                       && Regex.IsMatch(body, @"return\s+await\s+next\s*\(")
+                       && !ConsultsAny(body, recordCalls);
+            }
+
             case "AddEndpointFilter<CommunicationAuthorizationFilter>":
             case "AddEndpointFilter<WorkspaceAuthorizationFilter>":
             case "AddAgentAuthorizationFilter":
@@ -6750,6 +6766,9 @@ public partial class RouteAuthorizationGuardTests
         "AddSpeAdminTenantScopeFilter" => Regex.Replace(raw,
             @"(if\s*\(\s*present\.Count\s*==\s*0\s*\)\s*\{\s*)return\s+await\s+next\s*\(\s*context\s*\)\s*;",
             "$1return Results.NotFound();"),
+        "AddPlaybookTablePrivilegeFilter" => Regex.Replace(raw,
+            @"\.CallerHoldsPrivilegeAsync\s*\(",
+            ".GetCallerRightsAsync("),
         _ => raw + "\ninternal sealed class SeededDecision { private readonly CallerRecordAccessProbe _probe = null!; "
                  + "private readonly AuthorizationService _authorizationService = null!; void M() { _ = RetrievePrincipalAccess; } }",
     };

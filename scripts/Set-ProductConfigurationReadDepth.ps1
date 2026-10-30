@@ -16,6 +16,15 @@
     environment to the declared list ahead of that import, and verifies it afterwards. It refuses to run while either role
     file does not already hold each listed Read at Global, so the environment never runs ahead of the source.
 
+    PLAYBOOKS: READ ONLY FOR END USERS
+      Read at Global on sprk_analysisplaybook lets every user read every playbook row. Creating, cloning and sharing
+      playbooks is therefore for playbook administrators only: in the role XML only 'Spaarke AI Analysis Admin' holds
+      Create and Share on sprk_analysisplaybook, and the BFF routes POST /api/ai/playbooks, /{id}/clone, /{id}/share and
+      /{id}/unshare require the caller's own Create (create, clone) or Share (share, unshare) privilege on that table
+      before they read or write anything. Core and Basic User also hold no Create on sprk_gridconfiguration.
+      Platform service configuration (sprk_externalserviceconfig, sprk_dataverseenvironment, sprk_aimodeldeployment) is
+      never on this list; the build-time guard refuses it.
+
     BUSINESS-UNIT COPIES
       Dataverse keeps one copy of a role per business unit. The copies are not edited separately: each one takes its
       privileges from the ROOT role (its _parentrootroleid). The script changes the root role only, then reads EVERY copy

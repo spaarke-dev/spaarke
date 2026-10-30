@@ -1848,7 +1848,14 @@ Run intake no longer takes `communicationGraphResource` / `emailGraphResource`. 
 > depths. The one list is `config/product-configuration-read-role.json` (with the tables left out and why); the roles'
 > solution XML carries it, so a SpaarkeMaster import applies it. On an environment that has not had that import, run
 > `scripts/Set-ProductConfigurationReadDepth.ps1` (dry run, then `-Apply`, then `-Verify`, which must exit 0).
-> `ProductConfigurationReadRoleGuardTests` fails the build if the list gains a customer or restricted table.
+> `ProductConfigurationReadRoleGuardTests` fails the build if the list gains a customer or restricted table or platform
+> service configuration (`sprk_externalserviceconfig`, `sprk_dataverseenvironment`, `sprk_aimodeldeployment`), if an
+> entry names any privilege other than the table's own Read, or if either role gains Create on `sprk_gridconfiguration`.
+> Because every user can read every playbook, **creating, cloning and sharing playbooks is for playbook administrators
+> only**: in the role XML only `Spaarke AI Analysis Admin` holds Create and Share on `sprk_analysisplaybook`, and the BFF
+> routes `POST /api/ai/playbooks`, `/{id}/clone`, `/{id}/share` and `/{id}/unshare` require the caller's own Create
+> (create, clone) or Share (share, unshare) privilege on that table before anything is read or written. A user without
+> it gets 403. Give a person who builds playbooks the `Spaarke AI Analysis Admin` role.
 
 Secure projects, matters and work assignments (unified-access-control-r2) need Dataverse security configuration that
 no solution import can create. Since T256, **H7b creates it on every run**, after H6 and before H9:

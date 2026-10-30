@@ -137,6 +137,18 @@
       "reason": "Platform infrastructure configuration (tenant id, root site URL), read through the BFF by the SPE admin app only; no end-user read path needs it. Left for an owner decision."
     },
     {
+      "logicalName": "sprk_externalserviceconfig",
+      "reason": "Platform service configuration (external service connections), not product configuration. ProductConfigurationReadRoleGuardTests.PlatformServiceTables keeps it off this list."
+    },
+    {
+      "logicalName": "sprk_dataverseenvironment",
+      "reason": "Platform service configuration (Dataverse environment registrations), not product configuration. ProductConfigurationReadRoleGuardTests.PlatformServiceTables keeps it off this list."
+    },
+    {
+      "logicalName": "sprk_aimodeldeployment",
+      "reason": "Platform service configuration (AI model deployments), not product configuration. ProductConfigurationReadRoleGuardTests.PlatformServiceTables keeps it off this list."
+    },
+    {
       "logicalName": "sprk_aisearchindex",
       "reason": "Customer configuration (config/customer-configuration-owner-role.json), owned in the customer's own business unit and read at Deep there."
     },
