@@ -34,4 +34,12 @@ on dev) or by whatever team its WA now has; every other column above is unchange
 
 ## After the runs
 
-(to fill: time of uac-r2's notice, the re-read, pass or finding with ids)
+**PASS** (re-read 2026-10-30 after uac-r2's notice: both switches on since 19:53:19Z; the nine reassigned 19:59:13Z-20:02:31Z, each
+logged `[SECURE-CHILD-RECONCILE] reassign: sprk_signal <id> owner teams(09fbf21c...) -> team cf15f587... (ordinary parent move)`).
+
+- All nine: owner `cf15f587-baa0-f111-aaac-000d3a99d1d7`, owning unit BU1 `cb15f587`. Core id and type, policy version, empty
+  `sprk_matter`, status Open, no Decision Record, and the fact snapshot are identical to the table above.
+- The four root-owned WA-core Decision Records are unchanged (owner `09fbf21c`, `modifiedon` 2026-10-18/22/23, before the switch).
+- Open Signals by unit: Work Assignment core moved from 2 BU1 / 20 root to 11 / 11 (exactly the nine). Matter core (98 / 6), project core
+  (6 BU1) and no-core (15 root) are unchanged.
+- Out of our tables: uac-r2 reports sprk_budget `2a1b0d23` moved BU1 → root team to follow its root-unit matter.
