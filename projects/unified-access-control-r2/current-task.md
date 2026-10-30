@@ -4,30 +4,29 @@
 > - **Standing rules:** project `CLAUDE.md`. **Decisions:** `notes/decisions.md` (latest 2026-10-29: WA owner paths follow the matter; "a family shares one ownership; records are owned by BUs/teams").
 > - **Defer list:** `notes/defer-issues.md`. **Previous copy:** `notes/handoff-history/current-task-2026-10-22-cp60.md`.
 
-> **Last Updated**: 2026-10-30 (checkpoint #78: fix 3 merged as #2477).
+> **Last Updated**: 2026-10-30 ~20:20Z (checkpoint #79: 9f4e3820b2 deployed by me with the owner's go; both switches ON on dev).
 
 ## Deployed and gated
-- **Dev BFF = 9f4afe82ac** (R3 deployed it 14:40Z on 2026-10-30, with the owner's go). It contains #2471, the #2468 fix.
-- **App Insights gate PASS** (14:40–15:12Z, against a 7-day baseline). R3 was told, and ebilling can go. Pre-existing and unchanged: SECURE-CENSUS root-BU reach (until the BU1 move), and the acme FLS-proof/ID-LINK failures (#2163).
-- **Merged to master, NOT deployed:** #2474 (Q1 roles + playbook admin gate; roles already applied on dev), #2475 (WA owner paths, bf8c775ce2) and #2477 (fix 3, c30686bdfc). The next deploy needs the owner's go. #2475 moves dev rows: 2 events → BU1 (owner GO given). #2477 changes no data until both switches are on.
-- **#2471 follow-up PR** (K, non-blocking):
-  - EmailFiling on the early OFFICE_022 refusal (`OfficeService.cs` ~682);
-  - the refusal message chosen by RefusalCode;
-  - `IsCommunicationFiledAsync`: no InvalidOperationException catch, and `ReadThreadAsync` returns null when the row is missing;
-  - cache the filed answer per communication id.
+- **Dev BFF = 9f4e3820b2** (master, including #2474, #2475, #2477 and #2481).
+  - I deployed it at 19:22:50Z on 2026-10-30, with the owner's go in this session.
+  - R3 gave its OK on the condition Router passed on that SHA, and it did.
+  - `Set-ChildRecordCreatorPersonSchema -Verify` exited 0 before the deploy (it needs `-BffApplicationIds 5967251e…,1e40baad…` and `-OntologyWriterApplicationId 69040982…`).
+  - Deploy gate PASS (19:22–19:43Z).
+- **Dev app settings ON** (owner's go):
+  - `SecureRoot__Inheritance__RootOwnerWritesEnabled=true` at 19:45:36Z;
+  - `SecureChild__Reconciliation__OrdinaryMovesWritesEnabled=true` at 19:53:19Z.
 
-  Also file the OFFICE_022 leftover filing (not an access issue).
-
-## Fix 3: MERGED #2477 (c30686bdfc)
-- Two Opus reviews, one fix round, then a Sonnet re-check: ready, no F.
-- Root-owner writes need BOTH `SecureRoot__Inheritance__RootOwnerWritesEnabled` AND `SecureChild__Reconciliation__OrdinaryMovesWritesEnabled`. The expected document container follows the owning unit, and only the ordinary-moves pass relocates files. Per run: 25 re-owns and 200 resolves, with an in-memory cursor.
-- Dev plan (read-only): 28 roots.
-  - 6 projects stay in their own unit's team.
-  - 10 WAs move to the BU1 team (crossUnit).
-  - 12 go to the root team.
-  - It converges in 2 runs.
-- **After deploy (owner's go):** turning both switches on is an app-settings change, so it is an owner decision; the data move itself is approved. Then run an App Insights gate on [ORDINARY-REOWN] and [SECURE-CHILD-RECONCILE].
-- Known limits, in the PR: the cursor is in memory; an unfiled project's children keep the project's unit until the project moves; slow cycles at scale.
+  Ontology lifted its review gate first. R3 and ebilling were given notice before each change. ebilling's keys are unchanged.
+- **Post-change gate PASS** (19:53–20:13Z):
+  - All 28 roots re-owned in 2 runs, as planned: 10 WAs and project fb73b08c to the BU1 team cf15f587; the rest to the root team 09fbf21c. 0 person-owned WAs or projects remain.
+  - The 9 WA-core Signals moved to BU1. Ontology is re-reading and will send pass or findings.
+  - One budget, 2a1b0d23, moved BU1→root to follow its root-unit matter d14d79f4.
+  - refused=0 and failed=0 on every run; document relocations all in place; 0 5xx; 0 [OWNERSHIP-REFUSED]; external routes had no traffic.
+  - The ordinary-moves pass is still converging in time slices.
+- **Pre-existing warnings, unchanged:** SECURE-CENSUS root-BU reach, the acme readability/ID-LINK failures (#2163), and the AI catalog-drift health check at startup (since 10-22).
+- **Merged since checkpoint 78:**
+  - #2481 (9f4e3820b2): the #2471 follow-up. Thread reads fail closed, the refusal has its own code and message, there is a per-pass filed cache, and Submit Invoice step A answers 503 on a fault.
+  - Filed #2478: an Office filing is left behind after a refused save. Not an access issue.
 
 ## Quick Recovery (READ THIS FIRST)
 
@@ -36,15 +35,15 @@
 | **Mode** | Final push, round-90 rules. Merge only when Router + "Client lint (type-aware ratchet)" are green; `--squash --match-head-commit <COMMIT sha>`, no `--delete-branch`, after `git merge-tree`. Deploy via R3 (owner's go given in R3's session). Task closes on merge + deploy + server-side gate. |
 | **Fix bar** | Most technically correct fix. Every defect fixed or filed. PUBLIC repo: no exploit mechanism in issues/PRs/commits (neutral wording; owner decides tracking of access defects). |
 | **Agents** | Opus executors/verifiers; Sonnet high for scoped re-checks. Model always stated. Never `taskkill /IM`. No `jq`: use `python -I`. Session cwd keep uppercase `C:/code_files/...`. |
-| **Next action** | (1) Get the owner's go to deploy master ≥ c30686bdfc (#2474, #2475, #2477) via R3, then gate it; (2) the #2471 follow-up PR; (3) task 195 via task-execute; (4) BU1 Q2–Q12 recommendations for the owner. |
+| **Next action** | (1) Wait for ontology's pass or findings on the 9 Signals, then re-gate once the ordinary-moves pass has converged (heartbeat moved=0 and reported steady); (2) task 195 via task-execute; (3) BU1 Q2–Q12 recommendations for the owner. |
 
 ## In flight
 - Nothing running.
-- Parked worktrees to clean up with `Remove-WorktreeSafe.ps1`: C:/wt2468, C:/wtuacq1, C:/wtuacwo and C:/wtuacrf (all merged), and C:/wt194.
+- Parked worktrees to clean up with `Remove-WorktreeSafe.ps1`: C:/wt2468, C:/wtuacq1, C:/wtuacwo and C:/wtuacrf and C:/wt2471f (all merged), and C:/wt194. C:/wt2468 is the deploy checkout (detached at 9f4e3820b2).
 
 ## Next (mine, in order)
-1. Deploy #2474/#2475/#2477 (owner's go) → gate → both root switches on dev (owner) → gate.
-2. #2471 follow-up PR (see above).
+1. Ontology's re-read of the 9 Signals → act on any findings. Then the convergence re-gate for ordinary moves.
+2. (Done: the #2471 follow-up merged as #2481.)
 3. **Task 195** (#2352): the Create Project wizard writes the project pair, plus a dev backfill. Field-mapping task 040 waits on it. Run via task-execute.
 4. BU1 move: bring the owner recommended answers for Q2–Q12 (`$TEMP/uacmerge/uacg/rbu1/rbu1_plan.md` §6), including K4 (reassign product rows first).
 5. Parked (verify state):
@@ -64,7 +63,8 @@
   - #2382 UAT check 5.
 
 ## Done 2026-10-29/30
-- Merged: #2471 (9f4afe82ac, fixes #2468), #2474 (cd3f84662e), #2475 (bf8c775ce2), #2477 (c30686bdfc, fix 3), #2440, #2451.
+- Merged: #2471 (9f4afe82ac, fixes #2468), #2474 (cd3f84662e), #2475 (bf8c775ce2), #2477 (c30686bdfc, fix 3), #2481 (9f4e3820b2), #2440, #2451.
+- Deployed 9f4e3820b2 to dev; both switches ON; gates PASS.
 - 9f4afe82ac deployed to dev; gate PASS.
 - Q1 applied on dev, plus the externalserviceconfig grant removed (Verify PASS). Filed #2472 and #2473.
 - Peer reviews:
