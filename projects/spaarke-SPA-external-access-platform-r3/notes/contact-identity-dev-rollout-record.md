@@ -69,3 +69,15 @@
   - Pre-existing: ACME 0x80072560 (#2163); SECURE-CENSUS steady at 292 per 30 minutes; Redis lease renewal failures, filed by UAC as #2431.
   - No Office or identity traffic at night; UAC watches the next daytime window.
 - After-notices were sent about 03:00Z to ontology, word-add-in (which then releases #2420), field-mapping, ebilling and provisioning.
+
+## 9. Dev BFF `9f4afe82ac` (2026-10-30)
+
+- The first candidate, `c91b99e575`, was held for word-add-in's finding #2468 and never deployed. It was replaced by master `9f4afe82ac` (#2471, the #2468 fix, on top of #2470). Compared with `c91b99e575`, src/server changes only RecordOwnershipResolver.cs and RecordFamilyReader.cs.
+- 194b (`2cd0f62e2c`) never reached dev before this deploy: a live read at 12:38:47Z showed `136568cf70`. The Kudu list showed the previous deployment at 2026-10-29 02:20:34Z. UAC's Dataverse read found no affected document, so no repair was needed.
+- Owner go: "go BFF deploy of 9f4afe82ac". OKs for this exact SHA: UAC, word-add-in, ebilling, ontology (on condition that Router is green), field-mapping (filtered suites 6119 passed). Provisioning has a standing OK.
+- CI run 41064608665: Router green. The Release build in `C:\wtbffe-9f4` had 0 warnings.
+- Pre-deploy checks: no app setting matches `*OrdinaryMovesWritesEnabled*` (0 of 217 names, read-only). phaseA: live `136568cf70`, healthz 200.
+- Deploy: `scripts/Deploy-BffApi.ps1 -Environment dev` from `C:\wtbffe-9f4`. The 4 critical files were SHA-256 verified, health passed, and both CORS origins are present.
+- Readback 14:40:39Z: ProductVersion `1.0.0+9f4afe82ac9fef2aaf725464f46bae09eadf33db`, healthz 200, healthz/dataverse 200, `/api/me` anonymous 401.
+- Rollback (owner approval): `scripts/Deploy-BffApi.ps1 -SkipBuild -PublishPath deploy/rollback/wwwroot-20261030T143826Z` (222 files, `136568cf70`).
+- After-notices were sent about 14:42Z to UAC (App Insights gate), ontology (168/173 proof), field-mapping (task 076), word-add-in, ebilling (hold until "gate passed, you can go") and provisioning.
