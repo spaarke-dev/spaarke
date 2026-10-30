@@ -47,6 +47,9 @@ public partial class InvoiceSubmissionAfterStepsTests
 
         /// <summary>The old invoice no longer exists (Dataverse's ObjectDoesNotExist on its read).</summary>
         public bool OldInvoiceGone { get; set; }
+
+        /// <summary>Second review K4: this submission's own (new) invoice no longer exists.</summary>
+        public bool NewInvoiceGone { get; set; }
     }
 
     private static FaultException<OrganizationServiceFault> NotFound() =>
@@ -80,6 +83,11 @@ public partial class InvoiceSubmissionAfterStepsTests
                 }
 
                 if (id == OldInvoice && invoices.OldInvoiceGone)
+                {
+                    return Task.FromException<Entity>(NotFound());
+                }
+
+                if (id == InvoiceId && invoices.NewInvoiceGone)
                 {
                     return Task.FromException<Entity>(NotFound());
                 }
@@ -334,19 +342,24 @@ public partial class InvoiceSubmissionAfterStepsTests
         world.Superseded.Should().Equal(open.Id);
     }
 
-    [Theory(DisplayName = "097d: a target that no longer resolves (the earlier submission links another invoice) or an old invoice that no longer exists closes nothing and completes")]
+    [Theory(DisplayName = "097d: a target that no longer resolves (the earlier submission links another invoice), an old invoice that no longer exists, or (second review K4) this submission's own invoice that no longer exists closes nothing and completes")]
     [InlineData("unresolved")]
     [InlineData("gone")]
+    [InlineData("own-gone")]
     public async Task Correction_TargetUnresolvedOrGone_ClosesNothing(string why)
     {
         var (world, invoices) = await CorrectionWorldAsync();
-        if (why == "unresolved")
+        switch (why)
         {
-            invoices.EarlierLinks = ThirdInvoice;
-        }
-        else
-        {
-            invoices.OldInvoiceGone = true;
+            case "unresolved":
+                invoices.EarlierLinks = ThirdInvoice;
+                break;
+            case "gone":
+                invoices.OldInvoiceGone = true;
+                break;
+            default:
+                invoices.NewInvoiceGone = true;
+                break;
         }
 
         var open = world.Seed(OldInvoiceKey("BILL-RATE"), SignalWriter.SignalStatusOpen, "[]");
@@ -357,6 +370,10 @@ public partial class InvoiceSubmissionAfterStepsTests
         world.Superseded.Should().BeEmpty();
         StatusOf(open).Should().Be(SignalWriter.SignalStatusOpen);
         world.TerminalWrites.Should().ContainSingle();
+        if (why == "own-gone")
+        {
+            invoices.InvoiceReads.Should().NotContain(OldInvoice, "the step stops at its own invoice's read");
+        }
     }
 
     [Fact(DisplayName = "097d: the after-steps' Superseded close (the delegate the step calls) writes resolution Superseded, no person, no Decision Record, on the row version")]

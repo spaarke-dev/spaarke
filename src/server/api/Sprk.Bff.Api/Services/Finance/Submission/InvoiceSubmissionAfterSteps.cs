@@ -998,8 +998,20 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
             }
 
             oldId = resolved;
-            var own = await _entities.RetrieveAsync(InvoiceReviewService.InvoiceEntity, invoiceId, [InvoiceFamilyCoreRecordGuard.SupersedesInvoiceColumn], ct)
-                .ConfigureAwait(false);
+            Entity own;
+            try
+            {
+                own = await _entities.RetrieveAsync(InvoiceReviewService.InvoiceEntity, invoiceId, [InvoiceFamilyCoreRecordGuard.SupersedesInvoiceColumn], ct)
+                    .ConfigureAwait(false);
+            }
+            catch (Exception ex) when (IsRecordNotFound(ex))
+            {
+                // Task 097 second review (K4): this submission's own invoice is gone, so nothing it superseded is left to close; a Retry
+                // could never change that. Done, as for the old invoice below.
+                _logger.LogInformation("Invoice submission {SubmissionId}: invoice {InvoiceId} no longer exists; no Signal is closed", submissionId, invoiceId);
+                return null;
+            }
+
             if (own.GetAttributeValue<EntityReference>(InvoiceFamilyCoreRecordGuard.SupersedesInvoiceColumn)?.Id != oldId)
             {
                 _logger.LogInformation("Invoice submission {SubmissionId}: invoice {InvoiceId} does not supersede invoice {OldInvoiceId}; no Signal is closed",
