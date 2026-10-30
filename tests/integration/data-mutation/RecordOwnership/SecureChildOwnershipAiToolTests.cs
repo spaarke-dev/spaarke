@@ -480,7 +480,7 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
         var (visibility, visibilityAccessor) = new Sprk.Bff.Api.Tests.TestInfrastructure.CommunicationVisibilityFixtures().Build();
         var handler = new EmailDraftToolHandler(
             _user, Mock.Of<IEmailDraftAi>(), CoreAncestorResolverFixtures.Inert(), CreateLogger<EmailDraftToolHandler>(),
-            _world.Resolver(), _appOnly.Object, visibility, visibilityAccessor);
+            DraftCreation(), visibility, visibilityAccessor);
         var args = JsonSerializer.Serialize(new
         {
             subject = "Settlement",
@@ -511,7 +511,7 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
         var (visibility, visibilityAccessor) = new Sprk.Bff.Api.Tests.TestInfrastructure.CommunicationVisibilityFixtures().Build();
         var handler = new EmailDraftToolHandler(
             _user, Mock.Of<IEmailDraftAi>(), CoreAncestorResolverFixtures.Inert(), CreateLogger<EmailDraftToolHandler>(),
-            _world.Resolver(), _appOnly.Object, visibility, visibilityAccessor);
+            DraftCreation(), visibility, visibilityAccessor);
         var args = JsonSerializer.Serialize(new { subject = "Hello", body = "Draft.", to = new[] { "a@b.example" } });
 
         var result = await handler.ExecuteChatAsync(

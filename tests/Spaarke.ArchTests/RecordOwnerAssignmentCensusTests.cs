@@ -376,7 +376,8 @@ public class RecordOwnerAssignmentCensusTests
             + "owned by the resolver's team (OwnedChildWrite); any other table filed under a SECURE record is refused."),
         new UnscannedWriter("EmailDraftToolHandler.cs", "run-as-user POST of a sprk_communication draft",
             "Owner S1 (1) / G5: a draft filed under a record is created by the APPLICATION owned by the resolver's team, the "
-            + "drafter recorded as sprk_sentby; an unfiled draft is still created as the user (E1)."),
+            + "drafter recorded as sprk_sentby; an unfiled draft is still created as the user (E1). Since field-mapping task "
+            + "017 (2d-4) through RecordCreationService.CreateAsync (as the caller)."),
         new UnscannedWriter("OwnedChildWrite.cs", "app-only create-by-upsert of a filed child (S1 / G5)",
             "The one owned-create path of the chat tools: as-the-caller checks, the resolver's owner, the app-only create."),
         new UnscannedWriter("RecordCreationService.cs", "app-only create-by-upsert of any registered table (task 013, FR-06)",
@@ -1813,10 +1814,22 @@ public class RecordOwnerAssignmentCensusTests
 
 
     /// <summary>A resolver call — the ONE owner (task 146 constraint: no writer computes a team itself). r2: the chat tools'
-    /// one owned-create path (<c>OwnedChildWrite.CreateAsync</c>, itself an UnscannedWriter that calls the resolver).</summary>
+    /// one owned-create path (<c>OwnedChildWrite.CreateAsync</c>, itself an UnscannedWriter that calls the resolver).
+    /// Field-mapping task 017 (2d-4): the unified create through the scoped <c>RecordCreationService</c> held as
+    /// <c>recordCreation</c> / <c>_recordCreation</c> (itself an UnscannedWriter whose step 7 calls the resolver), which the
+    /// chat tools move onto from <c>OwnedChildWrite.CreateAsync</c>.</summary>
     private static readonly Regex ResolverCall = new(
-        @"\b(ResolveOwnerAsync|ResolveOwningTeamAsync|ReparentAsync|AssignToThreadReconcilingOwnerAsync|ResolveDocumentOwnerTeamAsync|OwnedChildWrite\.CreateAsync|OwnedChildWrite\.RefileAsync)\s*\(",
+        @"\b(ResolveOwnerAsync|ResolveOwningTeamAsync|ReparentAsync|AssignToThreadReconcilingOwnerAsync|ResolveDocumentOwnerTeamAsync|OwnedChildWrite\.CreateAsync|OwnedChildWrite\.RefileAsync|_?recordCreation\.CreateAsync)\s*\(",
         RegexOptions.Compiled);
+
+    [Fact(DisplayName = "Task 017: the unified create counts as routing the owner; another CreateAsync does not")]
+    public void TheUnifiedCreateCountsAsAResolverCall()
+    {
+        Assert.True(ResolverCall.IsMatch("var outcome = await _recordCreation.CreateAsync(request, principal, ct);"), "must fire");
+        Assert.True(ResolverCall.IsMatch("await recordCreation.CreateAsync(new RecordCreationRequest(t, p), principal, ct)"), "must fire");
+        Assert.False(ResolverCall.IsMatch("await _entities.CreateAsync(entity, ct);"), "must not fire: a raw create");
+        Assert.False(ResolverCall.IsMatch("await myrecordCreation.CreateAsync(x);"), "must not fire: another receiver");
+    }
 
     /// <summary>An owner write onto a row about to be created.</summary>
     private static readonly Regex OwnerWrite = new(
