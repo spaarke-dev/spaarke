@@ -134,12 +134,13 @@ public partial class SecureRootInheritanceWriterTests
         return await ChildRecordEndpoints.CreateAsync(
             "sprk_workassignment", JsonSerializer.SerializeToElement(body),
             new SecureChildOwnershipAiToolTests.ScriptedUserClient(Creator),
-            WorldResolver(),
-            AppCreatesIntoTheWorld().Object,
-            new StampWorld().Restamper,
-            scope.ServiceProvider.GetRequiredService<SecureChildShareSynchronizer>(),
-            _gate,
-            new ServiceCollection().BuildServiceProvider().GetRequiredService<IServiceScopeFactory>(),
+            Sprk.Bff.Api.Tests.Integration.DataMutation.RecordOwnership.RouteRecordCreation.Over(
+                WorldResolver(),
+                AppCreatesIntoTheWorld().Object,
+                new StampWorld().Restamper,
+                scope.ServiceProvider.GetRequiredService<SecureChildShareSynchronizer>(),
+                _gate,
+                new ServiceCollection().BuildServiceProvider().GetRequiredService<IServiceScopeFactory>()),
             new DefaultHttpContext(), NullLogger<Program>.Instance, CancellationToken.None);
     }
 
