@@ -231,3 +231,95 @@ Pinned by:
 - `RouteDecisionCreateParityTests.cs` is a partial of `SecureChildOwnershipAiToolTests`; the reason is under item 7.
 - System-principal step 2 records "Skipped" even though it now refuses two narrow sets; an existing pin is kept.
 - R3-2 was not done (see item 3).
+
+## Phase 2d-1
+
+Branch `task/fm-017-d1`, created from `task/fm-017` (14b801a53f). Owner decision 2a (2026-10-22): FR-06 step 10 in spec order.
+
+### What changed
+
+- **Step 10 runs before the create (step 11).** `RecordCreationService.StampBeforeCreateAsync`:
+  - builds the merged row in memory (every lookup the item binds, plus the ADR-024 pair id);
+  - asks task 016's planner, `CoreAncestorRestamper.PlanMissingStampAsync`, for the I-1 stamp columns the row is missing
+    (fill-only; no new deriver);
+  - binds them into the create body under the table's navigation property, mapped as the caller through
+    `DataverseWriteItemMapper` (the metadata read steps 1 and 4 already make).
+  - Only the create body (`fields`) changes. The item that the owner (step 7), the plan (step 6) and step 12 read is
+    unchanged, so no owner and no post-create input changes.
+- **An I-1 derivation failure refuses the create; nothing is written.** Two new codes, through the shared map:
+
+  | Failure | Kind | Status | Code |
+  |---|---|---|---|
+  | A data condition (`CoreAncestorResult.IsPermanent`: `MultipleRoots`, `NotFound`) | `Invalid` | 400 | `record_creation.stamp_underivable` |
+  | A fault (a read or metadata failure, or a derived stamp that could not be bound) | `Unavailable` | 503 | `record_creation.stamp_unavailable` |
+
+  - The planner now throws `CoreAncestorStampUnderivableException`, which derives from `InvalidOperationException`, so
+    Repair's catch is unchanged. It carries the derivation's `IsPermanent` and `RefusalKind`.
+  - No existing code or status changed.
+- **I-16 is set before the create when it resolves; it never refuses.** `CoreAncestorRestamper.ResolveInheritedAccessPermissionAsync`
+  is a one-line pass-through to the resolver's `ResolveInheritedAccessPermissionAsync` (the "never throws … display only"
+  contract is untouched). A null is simply not set.
+- **The post-create re-derivation stays.** `AfterWriteAsync`, then I-16, inside step 12, in the same place relative to the
+  other post-create steps (number read-back, isolated completion, Assigned grants, I-1, I-16, sharee mirror, membership).
+- **Documents** (`InheritedAccessPermission.RecordsOwnNarrowing`): step 10 is `Skipped`; post-create only (#2169).
+- **System principal:** the same derivation and the same refusals.
+  - **Deviation, needs a decision.** A system principal has no caller to read the table's navigation metadata as, so its
+    derived stamp is not bound into the body. The post-create re-derivation writes it (step 12, unchanged).
+  - Binding it before the create needs either an app-only metadata read of `ManyToOneRelationships` (a new read pattern with
+    no caller identity) or a static navigation map. That map is verified only for To Do and Event; the memo, communication,
+    analysis, Signal and Decision Record navigation properties are not in the code.
+  - No system-principal caller exists today (decision 2d), so nothing ships with this gap.
+- **Step record:** step 10 is `Ran` (a stamped or I-16 table) or `Skipped` (roots, documents, other tables). It is no longer
+  `Deferred`.
+
+### Route (`POST /api/v1/child-records/{table}`)
+
+`ChildRecordEndpoints.RefusalResult` is not edited. Both new codes fall through to the shared map, unchanged:
+
+| Refusal | Status | `errorCode` / `reasonCode` | Detail |
+|---|---|---|---|
+| `stamp_underivable` | 400 | `record_creation.stamp_underivable` | the service's words ("The event was not saved: the core record it belongs to cannot be determined …") |
+| `stamp_unavailable` | 503 | `record_creation.stamp_unavailable` | the map's fixed words ("The event could not be saved right now, so nothing was created. Try again in a few minutes.") |
+
+Every row of 017b's NFR-07 table is unchanged: `ChildRecordCreateRefusalContractTests` passes as before.
+
+### Tests (KEEP paths)
+
+- `tests/integration/seam/RecordCreation/RecordCreationServicePipelineSeamTests.PreCreateStamp.cs`:
+  - the stamp is in the create payload, and the post-create re-derivation still reads the created row: an event under an
+    event;
+  - a root under a parent (a work assignment under a matter) gets no derived stamp, and step 10 is `Skipped` (roots carry no
+    I-1 stamp columns);
+  - 400 `stamp_underivable` (`NotFound`) and 503 `stamp_unavailable` (a timeout), each with no create attempt;
+  - a system principal is refused the same way;
+  - a system principal's event is stamped by the post-create re-derivation;
+  - I-16 is in the payload under a Restricted matter, and an unresolvable I-16 lets the create proceed without it;
+  - a document under a Restricted matter gets neither, and step 10 is `Skipped`.
+- `RecordCreationServicePipelineSeamTests.cs`: the two step-order pins changed `Deferred` → `Ran`. The ordered step list
+  still pins step 10 between step 9 and the create.
+- `tests/integration/data-mutation/RecordOwnership/RouteCreatePreCreateStampTests.cs` (a partial of the route harness): the
+  route's create payload carries the stamp; the route's 400 and 503 bodies for the two new codes; nothing created and no
+  caller-side fallback.
+- Fixture additions (additive):
+  - the scripted caller's `sprk_event` metadata gains `sprk_regardingevent` / `sprk_RegardingEvent` (live navigation
+    property, `Models.GetEventNavigationProperty`);
+  - `StampWorld` answers a `QueryExpression` by primary id with `In`, as the parent-lineage walk reads live. Before this,
+    every I-16 walk over `StampWorld` answered "does not exist".
+  - `tests/integration/contract/Api/Office/OfficeQuickCreateRefusalMapTests.cs` gains two rows, because its registry guard
+    (`EveryCodeTheServiceDeclares_HasARow`) fails on any new service code. Both codes map to the Office generic 500 (fail
+    closed), and the row checks confirm that `OfficeService.MapQuickCreateRefusal` already does this. Office creates roots,
+    which are never stamped, so neither code reaches Office today. This file is outside the brief's two KEEP folders, but the
+    guard requires it.
+- Must-fire:
+  - the pre-change service fails all 13 new or changed tests;
+  - dropping the permanent/transient split fails the 400 tests (seam, system, route);
+  - removing the post-create `AfterWriteAsync` fails the re-derivation and system-principal tests (and existing journal
+    pins);
+  - removing the document skip fails the document test;
+  - not setting I-16 fails the I-16 payload test.
+
+### R3-2 (step 6's AppendTo before step 3)
+
+Not done; the K2 known limit stands. This change moves step 10 only, from after the create to between step 9 and step 11.
+The step-6 ask still needs the secure-root plan's filing columns of the merged row, which exist only after step 3. So
+nothing here makes the move natural.
