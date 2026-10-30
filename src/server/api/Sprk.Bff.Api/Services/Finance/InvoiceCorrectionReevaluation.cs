@@ -38,7 +38,8 @@ internal sealed class CorrectionTotalsRefusedException(string refusalCode)
 /// <remarks>
 /// <para><b>Deterministic diff.</b> The facts are loaded once (<see cref="BillingFactLoader.LoadAsync"/>) and the evaluator, which is pure, runs twice:
 /// on the request rebuilt from the stored rows with the corrected field at its PRE-correction value, and with its final value. The pre-correction value
-/// is the previous Corrected / Confirmed row's <c>sprk_finalvalue</c> for the field, else the first row's <c>sprk_aivalue</c>. A field that has a
+/// is the <c>sprk_finalvalue</c> of the last Corrected / Confirmed row of the field whose findings step finished (listed in
+/// <see cref="AppliedCorrectionsMember"/>; fix round, part 3), else the first row's <c>sprk_aivalue</c>. A field that has a
 /// Corrected or Confirmed row counts as verified (confidence 1.0) on the side where the reviewer has seen it. Both sides are rebuilt the same way, so a
 /// fact the stored rows do not keep (a timekeeper's unmatched reason, an observation's quoted text) is the same on both sides and cannot make a
 /// difference; only findings that depend on the corrected field change.</para>
@@ -97,10 +98,11 @@ public sealed class InvoiceCorrectionReevaluation
 
     /// <summary>
     /// B2c: the member of a fee line's extraction JSON written by its latest timekeeper or date correction:
-    /// <c>{ field, value, before: { timekeeperId, approvedRate }, after: { timekeeperReason, rateStatus, rateReason } }</c> (<c>value</c> is the
-    /// correction's final value). The stored columns hold the new roster match and rate but no reason, so the facts are rebuilt from this: the "before"
-    /// side of that correction's diff reads <c>before</c> (its reasons from the stored findings, which still hold the first evaluation's), and every
-    /// later rebuild of the line reads the reasons in <c>after</c>.
+    /// <c>{ field, value, before: { timekeeperId, approvedRate }, original: { timekeeperId, approvedRate }, after: { timekeeperReason, rateStatus, rateReason } }</c>
+    /// (<c>value</c> is the correction's final value; <c>original</c>, fix round part 3, is the pair before the line's FIRST timekeeper or date correction). The
+    /// stored columns hold the new roster match and rate but no reason, so the facts are rebuilt from this: every rebuild of the line reads the reasons in
+    /// <c>after</c>, and the "before" side of a timekeeper or date correction's diff starts from <see cref="AppliedResolutionsMember"/>, else <c>original</c>
+    /// with the reasons the first evaluation stored.
     /// </summary>
     internal const string ResolutionChangeMember = "resolutionChange";
 
