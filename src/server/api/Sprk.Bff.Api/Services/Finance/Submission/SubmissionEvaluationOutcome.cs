@@ -198,14 +198,21 @@ public sealed record SubmissionSnapshot
     /// <returns><see cref="CorrectedInvoiceRead.None"/> for a New submission; <see cref="CorrectedInvoiceRead.Resolved"/> with both ids; or
     /// <see cref="CorrectedInvoiceRead.Unresolved"/> (fail closed) when the earlier submission is gone, names no invoice or names another one.
     /// A read fault propagates (the caller's retry).</returns>
-    public async Task<CorrectedInvoiceRead> ReadCorrectedInvoiceAsync(IGenericEntityService entities, CancellationToken ct)
+    public Task<CorrectedInvoiceRead> ReadCorrectedInvoiceAsync(IGenericEntityService entities, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(entities);
-        if (ResubmissionOfSubmissionId is not { } earlier)
-        {
-            return CorrectedInvoiceRead.None;
-        }
+        return ResubmissionOfSubmissionId is { } earlier
+            ? ReadCorrectedInvoiceAsync(entities, earlier, ct)
+            : Task.FromResult(CorrectedInvoiceRead.None);
+    }
 
+    /// <summary>
+    /// The same resolution from the stored <c>sprk_resubmissionof</c> alone (<paramref name="earlier"/>), for a reader that has the submission
+    /// row but no snapshot: task 097c's undo (<see cref="SubmissionCommitGate.CompensateAsync"/>), which may run on a later delivery.
+    /// </summary>
+    internal static async Task<CorrectedInvoiceRead> ReadCorrectedInvoiceAsync(IGenericEntityService entities, Guid earlier, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(entities);
         Entity row;
         try
         {

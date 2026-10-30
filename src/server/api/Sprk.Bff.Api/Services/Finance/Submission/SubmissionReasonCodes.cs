@@ -175,6 +175,31 @@ public static class SubmissionReasonCodes
     /// </summary>
     public const string StoredStateMismatch = "ebilling.submission.stored_state_mismatch";
 
+    // ── A Correction at commit (ebilling-r1 task 097c; model 9.1 "Existing invoice", step 4) ──
+
+    /// <summary>
+    /// Task 097c: the invoice a Correction replaces is no longer In Review when the job commits (approved, sent to AP, paid, or otherwise moved
+    /// on since the intake checked it; the intake's check is not a lock). The intake's 409 <see cref="InvoiceSubmissionErrors.CorrectionNotAllowed"/>
+    /// with reason <see cref="FromEmailCorrectionReasons.InvoiceStatus"/>, as one stored code. Permanent: nothing is written.
+    /// </summary>
+    public const string CorrectionInvoiceStatus = InvoiceSubmissionErrors.CorrectionNotAllowed + "." + FromEmailCorrectionReasons.InvoiceStatus;
+
+    /// <summary>Task 097c: the replaced invoice is from another firm at commit (the intake's reason <see cref="FromEmailCorrectionReasons.DifferentFirm"/>). Permanent.</summary>
+    public const string CorrectionDifferentFirm = InvoiceSubmissionErrors.CorrectionNotAllowed + "." + FromEmailCorrectionReasons.DifferentFirm;
+
+    /// <summary>
+    /// Task 097c: the replaced invoice is filed under another core record, or under none or several, at commit (the intake's reason
+    /// <see cref="FromEmailCorrectionReasons.DifferentCoreRecord"/>). Permanent.
+    /// </summary>
+    public const string CorrectionDifferentCoreRecord = InvoiceSubmissionErrors.CorrectionNotAllowed + "." + FromEmailCorrectionReasons.DifferentCoreRecord;
+
+    /// <summary>
+    /// Task 097c: the Correction's target no longer resolves at commit: the earlier submission it names is gone, no longer links the invoice
+    /// created from it (<see cref="SubmissionSnapshot.ReadCorrectedInvoiceAsync"/>), or that invoice is gone. Permanent (fail closed: the
+    /// correction is never committed as a New invoice beside the one it was meant to replace).
+    /// </summary>
+    public const string CorrectionTargetUnavailable = "ebilling.submission.correction_target_unavailable";
+
     /// <summary>
     /// The document-level read failures (FR-21): the submission is Rejected with the code and no invoice is created. Every other read
     /// failure is retried.

@@ -267,6 +267,7 @@ public sealed class InvoiceSubmissionProcessingJobHandlerTests
                 Sprk.Bff.Api.Tests.DataMutation.ExternalAccess.SecureChildShareWorld.SynchronizerOver(
                     () => Sprk.Bff.Api.Tests.DataMutation.ExternalAccess.SecureChildShareWorld.Standard(),
                     new Sprk.Bff.Api.Tests.AccessControl.FakeRecordShareTable()),
+                new InvoiceLifecycleService(new Mock<Spaarke.Dataverse.IFieldMappingDataverseService>().Object, Microsoft.Extensions.Logging.Abstractions.NullLogger<InvoiceLifecycleService>.Instance),
                 Microsoft.Extensions.Logging.Abstractions.NullLogger<SubmissionCommitGate>.Instance)
         {
         }

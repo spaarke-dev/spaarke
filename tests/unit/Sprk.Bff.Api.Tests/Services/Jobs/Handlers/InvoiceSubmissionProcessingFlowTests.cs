@@ -255,6 +255,7 @@ public sealed class InvoiceSubmissionProcessingFlowTests
                 Sprk.Bff.Api.Tests.DataMutation.ExternalAccess.SecureChildShareWorld.Standard),
             Sprk.Bff.Api.Tests.DataMutation.ExternalAccess.SecureChildShareWorld.SynchronizerOver(
                 Sprk.Bff.Api.Tests.DataMutation.ExternalAccess.SecureChildShareWorld.Standard, new Sprk.Bff.Api.Tests.AccessControl.FakeRecordShareTable()),
+            new InvoiceLifecycleService(new Mock<IFieldMappingDataverseService>().Object, NullLogger<InvoiceLifecycleService>.Instance),
             NullLogger<SubmissionCommitGate>.Instance);
 
         private SubmissionCommitGate? _gate;

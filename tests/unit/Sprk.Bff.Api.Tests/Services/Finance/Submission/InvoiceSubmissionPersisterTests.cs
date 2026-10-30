@@ -29,7 +29,7 @@ namespace Sprk.Bff.Api.Tests.Services.Finance.Submission;
 /// (<see cref="StoredFileRig"/>); the committed transaction's Stored File create lands in that store's Dataverse, so the flip after the
 /// commit runs for real.
 /// </summary>
-public class InvoiceSubmissionPersisterTests
+public partial class InvoiceSubmissionPersisterTests
 {
     private static readonly Guid Submission = Guid.Parse("04900000-0000-4000-8000-0000000000b1");
     private static readonly Guid Matter = Guid.Parse("04900000-0000-4000-8000-0000000000a1");
@@ -3196,7 +3196,9 @@ public class InvoiceSubmissionPersisterTests
                 .ReturnsAsync((string entity, Guid id, string[] columns, CancellationToken _) => entity switch
                 {
                     "sprk_invoicesubmission" when SubmissionDeleted => throw new System.ServiceModel.FaultException<OrganizationServiceFault>(new OrganizationServiceFault { ErrorCode = -2147220969 }, "Does Not Exist"),
+                    "sprk_invoicesubmission" when OtherSubmissions.TryGetValue(id, out var other) => Project(columns, Copy(other)),
                     "sprk_invoicesubmission" => Capture(columns, Copy(Submission)),
+                    "sprk_invoice" when OldInvoice is { } old && old.Id == id => ReadOldInvoice(columns),
                     "sprk_document" when DocumentDeleted => throw new System.ServiceModel.FaultException<OrganizationServiceFault>(new OrganizationServiceFault { ErrorCode = -2147220969 }, "Does Not Exist"),
                     "sprk_document" => ReadDocument(id, columns),
                     _ => new Entity(entity, id) { [RegardingRecordType.GetPrimaryNameField(entity)!] = "Acme v. Roe", ["sprk_matternumber"] = MatterNumber },
@@ -3210,6 +3212,11 @@ public class InvoiceSubmissionPersisterTests
                         return EarlierInvoiceFault is { } approvalFault
                             ? Task.FromException<EntityCollection>(approvalFault)
                             : Task.FromResult(AnswerEarlierApprovals(q));
+                    }
+
+                    if (IsSupersededByQuery(q))
+                    {
+                        return Task.FromResult(AnswerSupersededBy(q));
                     }
 
                     if (IsEarlierInvoiceQuery(q))
@@ -3270,6 +3277,11 @@ public class InvoiceSubmissionPersisterTests
                         return UndoTransaction(requests.Cast<DeleteRequest>().ToList());
                     }
 
+                    if (requests is [UpdateRequest { Target.LogicalName: "sprk_invoice" } reopen])
+                    {
+                        return OldInvoiceTransaction(reopen);
+                    }
+
                     Transactions.Add(requests);
                     BeforeTransaction?.Invoke(this);
 
@@ -3280,6 +3292,14 @@ public class InvoiceSubmissionPersisterTests
                         if (requests[index] is UpdateRequest { ConcurrencyBehavior: ConcurrencyBehavior.IfRowVersionMatches } guard
                             && guard.Target.LogicalName == "sprk_document"
                             && (DocumentDeleted || guard.Target.RowVersion != DocumentVersion.ToString(System.Globalization.CultureInfo.InvariantCulture)))
+                        {
+                            return Task.FromException(new DataverseTransactionException(
+                                "ConcurrencyVersionMismatch", failedRequestIndex: index, outcomeUnknown: false, null));
+                        }
+
+                        // Task 097c: the old invoice's close, conditional on the version the persister read.
+                        if (requests[index] is UpdateRequest { ConcurrencyBehavior: ConcurrencyBehavior.IfRowVersionMatches } close
+                            && close.Target.LogicalName == "sprk_invoice" && !OldInvoiceMatches(close))
                         {
                             return Task.FromException(new DataverseTransactionException(
                                 "ConcurrencyVersionMismatch", failedRequestIndex: index, outcomeUnknown: false, null));
@@ -3330,7 +3350,9 @@ public class InvoiceSubmissionPersisterTests
                 InvoiceSubmissionServiceTests.IsolationOver(() => Isolation),
                 Sprk.Bff.Api.Tests.DataMutation.ExternalAccess.SecureChildShareWorld.SynchronizerOver(
                     () => Isolation, new Sprk.Bff.Api.Tests.AccessControl.FakeRecordShareTable()),
-                NullLogger<SubmissionCommitGate>.Instance);
+                new InvoiceLifecycleService(new Mock<IFieldMappingDataverseService>().Object, NullLogger<InvoiceLifecycleService>.Instance),
+                NullLogger<SubmissionCommitGate>.Instance,
+                Index.Submitter);
 
             return new InvoiceSubmissionPersister(
                 entities.Object,
@@ -3341,7 +3363,8 @@ public class InvoiceSubmissionPersisterTests
                 InvoiceSubmissionServiceTests.IsolationOver(() => Isolation),
                 Files.Service,
                 Gate,
-                Logger);
+                Logger,
+                Index.Submitter);
         }
 
         /// <summary>
@@ -3365,6 +3388,7 @@ public class InvoiceSubmissionPersisterTests
                         break;
                     case "sprk_invoice":
                         CreatedRows.Add(("sprk_invoice", create.Target.Id));
+                        CreatedInvoices[create.Target.Id] = Copy(create.Target);
                         if (create.Target.GetAttributeValue<EntityReference>("sprk_matter") is { } matter)
                         {
                             if (Isolation.ValueOf<bool>("sprk_matter", matter.Id, "sprk_issecure"))
@@ -3382,6 +3406,11 @@ public class InvoiceSubmissionPersisterTests
                         CreatedRows.Add((InvoiceSubmissionPersister.ApprovalEntity, create.Target.Id));
                         break;
                 }
+            }
+
+            foreach (var update in requests.OfType<UpdateRequest>().Where(u => u.Target.LogicalName == "sprk_invoice"))
+            {
+                ApplyToOldInvoice(update);
             }
 
             foreach (var update in requests.OfType<UpdateRequest>().Where(u => u.Target.LogicalName == "sprk_invoicesubmission"))
@@ -3464,6 +3493,124 @@ public class InvoiceSubmissionPersisterTests
         /// <summary>Fix round: whether the committed invoice row is still there.</summary>
         public bool InvoiceExists => CreatedRows.Any(r => r.Table == "sprk_invoice");
 
+        // ── Task 097c: the invoice a Correction replaces ──
+
+        /// <summary>Task 097c: re-index jobs queued by the persister and the gate.</summary>
+        public IndexQueueDouble Index { get; } = new();
+
+        /// <summary>
+        /// Task 097c (review F3): reads return only the columns asked for, as Dataverse does, so a column dropped from a read (the gate's
+        /// <c>sprk_resubmissionof</c>, the old invoice's status or version) fails the test instead of being answered anyway. Off by default:
+        /// the older tests were written against whole rows.
+        /// </summary>
+        public bool ProjectReads { get; set; }
+
+        /// <summary>Task 097c: other submission rows by id (the earlier submission a Correction names).</summary>
+        public Dictionary<Guid, Entity> OtherSubmissions { get; } = [];
+
+        /// <summary>Task 097c: the old invoice as Dataverse keeps it (statecode, statuscode, versionnumber, firm, core lookup); null: none.</summary>
+        public Entity? OldInvoice { get; set; }
+
+        /// <summary>Task 097c: the old invoice no longer exists.</summary>
+        public bool OldInvoiceDeleted { get; set; }
+
+        /// <summary>Task 097c: faults the next N reads of the old invoice.</summary>
+        public int OldInvoiceReadFaults { get; set; }
+
+        /// <summary>Task 097c: every read of the old invoice (columns).</summary>
+        public List<string[]> OldInvoiceReads { get; } = [];
+
+        /// <summary>Task 097c: every single-request transaction on the old invoice (the undo's reopen), applied or not.</summary>
+        public List<UpdateRequest> OldInvoiceWrites { get; } = [];
+
+        /// <summary>Task 097c: another writer's slot between the undo's read of the old invoice and its reopen.</summary>
+        public Action<Store>? BeforeOldInvoiceWrite { get; set; }
+
+        /// <summary>Task 097c: other live invoices that supersede the old invoice (another correction's).</summary>
+        public List<Guid> OtherSupersedingInvoices { get; } = [];
+
+        /// <summary>Task 097c: the invoices the committed transaction created, by id.</summary>
+        private Dictionary<Guid, Entity> CreatedInvoices { get; } = [];
+
+        public int OldInvoiceStatus => OldInvoice!.GetAttributeValue<OptionSetValue>("statuscode").Value;
+
+        public long OldInvoiceVersion => OldInvoice!.GetAttributeValue<long>("versionnumber");
+
+        /// <summary>Task 097c: another writer changes the old invoice (a status move or any edit): its version moves on.</summary>
+        public void ChangeOldInvoice(int? statusCode = null, int? stateCode = null)
+        {
+            if (statusCode is { } status)
+            {
+                OldInvoice!["statuscode"] = new OptionSetValue(status);
+            }
+
+            if (stateCode is { } state)
+            {
+                OldInvoice!["statecode"] = new OptionSetValue(state);
+            }
+
+            OldInvoice!["versionnumber"] = OldInvoiceVersion + 1;
+        }
+
+        private Entity ReadOldInvoice(string[] columns)
+        {
+            OldInvoiceReads.Add(columns);
+            if (OldInvoiceDeleted)
+            {
+                throw new System.ServiceModel.FaultException<OrganizationServiceFault>(new OrganizationServiceFault { ErrorCode = -2147220969 }, "Does Not Exist");
+            }
+
+            if (OldInvoiceReadFaults > 0)
+            {
+                OldInvoiceReadFaults--;
+                throw new HttpRequestException("Dataverse unavailable");
+            }
+
+            return Project(columns, Copy(OldInvoice!));
+        }
+
+        private bool OldInvoiceMatches(UpdateRequest update) =>
+            OldInvoice is { } old && !OldInvoiceDeleted && update.Target.Id == old.Id
+            && update.Target.RowVersion == OldInvoiceVersion.ToString(System.Globalization.CultureInfo.InvariantCulture);
+
+        private void ApplyToOldInvoice(UpdateRequest update)
+        {
+            foreach (var (column, value) in update.Target.Attributes)
+            {
+                OldInvoice![column] = value;
+            }
+
+            OldInvoice!["versionnumber"] = OldInvoiceVersion + 1;
+        }
+
+        private Task OldInvoiceTransaction(UpdateRequest update)
+        {
+            BeforeOldInvoiceWrite?.Invoke(this);
+            OldInvoiceWrites.Add(update);
+            // As Dataverse: only a conditional update is refused at a stale version; an unconditional one overwrites.
+            if (update.ConcurrencyBehavior == ConcurrencyBehavior.IfRowVersionMatches && !OldInvoiceMatches(update))
+            {
+                return Task.FromException(new DataverseTransactionException("ConcurrencyVersionMismatch", failedRequestIndex: 0, outcomeUnknown: false, null));
+            }
+
+            ApplyToOldInvoice(update);
+            return Task.CompletedTask;
+        }
+
+        private static bool IsSupersededByQuery(QueryExpression q) =>
+            q.EntityName == "sprk_invoice" && q.Criteria.Conditions.Any(c => c.AttributeName == "sprk_supersedesinvoice");
+
+        private EntityCollection AnswerSupersededBy(QueryExpression q)
+        {
+            var target = (Guid)q.Criteria.Conditions.Single(c => c.AttributeName == "sprk_supersedesinvoice").Values.Single();
+            var live = CreatedInvoices.Values
+                .Where(i => CreatedRows.Contains(("sprk_invoice", i.Id)) && i.GetAttributeValue<EntityReference>("sprk_supersedesinvoice")?.Id == target)
+                .Select(i => i.Id)
+                .Concat(OtherSupersedingInvoices)
+                .Select(id => new Entity("sprk_invoice", id));
+            return new EntityCollection(live.Take(q.TopCount ?? int.MaxValue).ToList());
+        }
+
         private Entity ReadDocument(Guid id, string[] columns)
         {
             DocumentReads.Add(columns);
@@ -3475,6 +3622,21 @@ public class InvoiceSubmissionPersisterTests
         private Entity Capture(string[] columns, Entity row)
         {
             SubmissionReadColumns.Add(columns);
+            return Project(columns, row);
+        }
+
+        private Entity Project(string[] columns, Entity row)
+        {
+            if (!ProjectReads)
+            {
+                return row;
+            }
+
+            foreach (var column in row.Attributes.Keys.Where(c => !columns.Contains(c)).ToList())
+            {
+                row.Attributes.Remove(column);
+            }
+
             return row;
         }
 
