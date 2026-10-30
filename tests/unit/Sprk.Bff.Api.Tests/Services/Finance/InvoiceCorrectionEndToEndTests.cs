@@ -178,10 +178,10 @@ public sealed class InvoiceCorrectionEndToEndTests
             .Should().BeGreaterThan(0, "the bulk rows of the AI-read fields of the Clean line are written, so the check above can fail");
     }
 
-    [Fact(DisplayName = "101 B2b-2 item 5: a held (blocked) invoice is still refused approval after a correction removes its held group's reason")]
-    public async Task HeldInvoice_AfterACorrectionThatChangesTheHeldGroup_IsStillRefusedApproval()
+    /// <summary>A Flagged line over the daily cap on a submission that holds the invoice (<paramref name="status"/> / <paramref name="reasonCode"/>), with the
+    /// Blocked findings and signal plan the held group is read from.</summary>
+    private static (Entity Line, Entity Submission) HeldByDailyCap(ApprovalWorld w, InvoiceSubmissionStatus status, string reasonCode)
     {
-        var w = new ApprovalWorld();
         Prepare(w);
         var line = w.AddLine(InvoiceLineStatus.Flagged, extraction: W.ExtractionJson());
         line["sprk_quantity"] = 25m; // over the daily cap
@@ -201,7 +201,15 @@ public sealed class InvoiceCorrectionEndToEndTests
             ["subjectEntity"] = BillingFindingSignalMapper.LineEntity, ["subjectId"] = line.Id.ToString("D"),
             ["fingerprint"] = BillingReasonCodes.DailyHoursOverCap + "|Flag", ["decision"] = nameof(BillingGroupDecision.Blocked),
         });
-        var submission = Submission(w, root, InvoiceSubmissionStatus.Rejected, SubmissionReasonCodes.Blocked);
+        var submission = Submission(w, root, status, reasonCode);
+        return (line, submission);
+    }
+
+    [Fact(DisplayName = "101 B2b-2 item 5: a held (blocked) invoice is still refused approval after a correction removes its held group's reason")]
+    public async Task HeldInvoice_AfterACorrectionThatChangesTheHeldGroup_IsStillRefusedApproval()
+    {
+        var w = new ApprovalWorld();
+        var (line, submission) = HeldByDailyCap(w, InvoiceSubmissionStatus.Rejected, SubmissionReasonCodes.Blocked);
 
         (await Corrections(w, Cap).CorrectAsync(new CorrectionCommand(w.InvoiceId, line.Id, "Hours", "2.5", false, AliceUser), CancellationToken.None))
             .IsApplied.Should().BeTrue();
@@ -217,6 +225,44 @@ public sealed class InvoiceCorrectionEndToEndTests
         approve.Outcome.Should().Be(ApprovalOutcome.Held);
         approve.Code.Should().Be(InvoiceApprovalCodes.Held);
         w.InvoiceStatus.Should().Be(InvoiceStatusCodes.InReview);
+    }
+
+    public static TheoryData<InvoiceDecisionKind, InvoiceSubmissionStatus, string> HeldReadsAndVerbs => new()
+    {
+        { InvoiceDecisionKind.Reject, InvoiceSubmissionStatus.Rejected, SubmissionReasonCodes.Blocked },
+        { InvoiceDecisionKind.Return, InvoiceSubmissionStatus.Rejected, SubmissionReasonCodes.Blocked },
+        { InvoiceDecisionKind.Reject, InvoiceSubmissionStatus.Processing, SubmissionReasonCodes.Blocked },
+        { InvoiceDecisionKind.Return, InvoiceSubmissionStatus.Processing, SubmissionReasonCodes.Blocked },
+    };
+
+    [Theory(DisplayName = "101 x 104 twin: a held invoice (submission Processing, or Rejected as Blocked) is still refused reject AND return (409 held, nothing written) after a correction changes its held group")]
+    [MemberData(nameof(HeldReadsAndVerbs))]
+    public async Task HeldInvoice_AfterACorrectionThatChangesTheHeldGroup_IsStillRefusedRejectAndReturn(
+        InvoiceDecisionKind kind, InvoiceSubmissionStatus status, string reasonCode)
+    {
+        var w = new ApprovalWorld();
+        var (line, submission) = HeldByDailyCap(w, status, reasonCode);
+
+        (await Corrections(w, Cap).CorrectAsync(new CorrectionCommand(w.InvoiceId, line.Id, "Hours", "2.5", false, AliceUser), CancellationToken.None))
+            .IsApplied.Should().BeTrue();
+        ((JsonArray)Stored(w.Row("sprk_invoicesubmission", submission.Id))["signalPlan"]!).OfType<JsonObject>().Should().ContainSingle().Subject
+            [InvoiceCorrectionReevaluation.CorrectionReviewMember]!.GetValue<bool>().Should().BeTrue("the correction changed the held group");
+        w.Row("sprk_invoicesubmission", submission.Id).GetAttributeValue<OptionSetValue>("sprk_processingstatus").Value
+            .Should().Be((int)status, "a correction never changes the submission that holds the invoice");
+        var writes = w.Writes;
+        var portionStatus = w.Portion.GetAttributeValue<OptionSetValue>("sprk_approvalstatus").Value;
+
+        var result = kind == InvoiceDecisionKind.Reject ? await w.RejectAs(AliceUser) : await w.ReturnAs(AliceUser);
+
+        result.Outcome.Should().Be(InvoiceDecisionOutcome.Held);
+        result.Code.Should().Be("ebilling.invoice.held");
+        w.Writes.Should().Be(writes, "a refused call writes nothing");
+        w.Transitions.Should().Be(0);
+        w.RecordsOf("reject-invoice").Should().BeEmpty();
+        w.RecordsOf("return-to-firm").Should().BeEmpty();
+        w.InvoiceStatus.Should().Be(InvoiceStatusCodes.InReview);
+        w.Portion.GetAttributeValue<OptionSetValue>("sprk_approvalstatus").Value.Should().Be(portionStatus);
+        w.Portion.Contains("sprk_decidedby").Should().BeFalse("nothing is claimed");
     }
 
     // =========================================================================================
@@ -272,6 +318,26 @@ public sealed class InvoiceCorrectionEndToEndTests
 
         (await w.ApproveAs(AliceUser)).Outcome.Should().Be(ApprovalOutcome.Approved);
         w.InvoiceStatus.Should().Be(InvoiceStatusCodes.Approved);
+    }
+
+    [Fact(DisplayName = "104 pin: a reject succeeds while a correction is unfinished - only approve and line decisions check for unfinished corrections")]
+    public async Task AnUnfinishedCorrection_DoesNotBlockReject()
+    {
+        // Intended: the corrections-pending guards are approve-only and decide-only; rejecting pays nothing, so a half-finished correction cannot lead to a wrong payment.
+        var w = new ApprovalWorld();
+        var (line, _) = CleanInvoice(w);
+        var corrections = Corrections(w);
+        w.FaultsOnce["tx:approvers"] = new TimeoutException("simulated");
+
+        (await corrections.CorrectAsync(new CorrectionCommand(w.InvoiceId, line.Id, "Narrative", "Prepared the brief", false, AliceUser), CancellationToken.None))
+            .FailedStep.Should().Be(CorrectionCodes.FindingsStep);
+        (await w.ApproveAs(AliceUser)).Code.Should().Be(InvoiceApprovalCodes.CorrectionsPending, "the correction is unfinished, as it blocks approval");
+
+        var rejected = await w.RejectAs(AliceUser);
+
+        rejected.Outcome.Should().Be(InvoiceDecisionOutcome.Decided);
+        w.InvoiceStatus.Should().Be(InvoiceStatusCodes.Rejected);
+        w.RecordsOf("reject-invoice").Should().ContainSingle();
     }
 
     [Fact(DisplayName = "101 fix 3 F-2: a Clean line corrected from 2.5 to 25 hours whose findings step failed is not accepted in bulk; the repeat flags it")]
