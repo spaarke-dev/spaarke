@@ -127,6 +127,25 @@ public sealed partial class DataverseCreateRecordHandler : IToolHandler
         return $"{SprkDocumentCreateBlockedMessage} Open the correct path now: [Document Upload wizard]({url})";
     }
 
+    /// <summary>
+    /// ebilling-r1 review of f758480f3c (2026-10-30): the e-billing rows the server writes as the record of a decision or a
+    /// correction — an invoice submission, approval or correction — that ebilling's services read as such. Never created
+    /// from chat: refused outright, with the <c>sprk_document</c> block's mechanism and shape
+    /// (<see cref="ToolErrorCodes.ValidationFailed"/>, before any Dataverse call, in both <see cref="ValidateChat"/> and
+    /// <see cref="ExecuteChatAsync"/>), whatever the record-creation registry accepts for the table.
+    /// </summary>
+    internal static readonly IReadOnlySet<string> ServerWrittenInvoiceFamilyTables = new HashSet<string>(StringComparer.Ordinal)
+    {
+        "sprk_invoicesubmission", "sprk_invoiceapproval", "sprk_invoicecorrection",
+    };
+
+    /// <summary>The single rejection message for a <see cref="ServerWrittenInvoiceFamilyTables"/> create (user- and model-facing).</summary>
+    internal static string ServerWrittenInvoiceFamilyCreateBlockedMessage(string tablename) =>
+        $"'{tablename}' records can't be created from chat — this create was REJECTED and nothing was written. They are " +
+        "written by Spaarke's e-billing services only, as the record of an invoice submission, approval or correction. " +
+        $"Do NOT retry this create — {tablename} is blocked on this tool unconditionally and no argument change makes it " +
+        "valid; submit, approve or correct the invoice from the invoice itself instead.";
+
     [GeneratedRegex(@"^[a-z][a-z0-9_]*\z")]
     private static partial Regex LogicalNameRegex();
 
@@ -254,6 +273,10 @@ public sealed partial class DataverseCreateRecordHandler : IToolHandler
         if (string.Equals(tablename, BlockedTableLogicalName, StringComparison.Ordinal))
             return ToolValidationResult.Failure(BuildBlockedMessageWithAffordance(context.MatterId));
 
+        // ebilling-r1 review of f758480f3c (2026-10-30): server-written e-billing rows, the same hard block.
+        if (ServerWrittenInvoiceFamilyTables.Contains(tablename))
+            return ToolValidationResult.Failure(ServerWrittenInvoiceFamilyCreateBlockedMessage(tablename));
+
         return ToolValidationResult.Success();
     }
 
@@ -286,6 +309,14 @@ public sealed partial class DataverseCreateRecordHandler : IToolHandler
         {
             return LogOutcome(context, tablename,
                 Error(tool, BuildBlockedMessageWithAffordance(context.MatterId), ToolErrorCodes.ValidationFailed, startedAt),
+                stopwatch);
+        }
+
+        // ebilling-r1 review of f758480f3c (defense in depth — ValidateChat already rejects): server-written e-billing rows.
+        if (ServerWrittenInvoiceFamilyTables.Contains(tablename))
+        {
+            return LogOutcome(context, tablename,
+                Error(tool, ServerWrittenInvoiceFamilyCreateBlockedMessage(tablename), ToolErrorCodes.ValidationFailed, startedAt),
                 stopwatch);
         }
 
