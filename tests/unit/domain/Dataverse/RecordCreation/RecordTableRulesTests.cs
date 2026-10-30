@@ -32,9 +32,11 @@ public class RecordTableRulesTests
     [Fact]
     public void RootServerOwnedColumns_View_EqualsThePreRegistryList()
     {
-        ChildRecordEndpoints.RootServerOwnedColumns.Should().BeEquivalentTo(
+        // Task 017: the route's view was deleted when the route moved onto the service; the registry entry it viewed is read.
+        var workAssignment = RecordTableRules.Get("sprk_workassignment").TableServerOwnedColumns;
+        workAssignment.Should().BeEquivalentTo(
             "sprk_containerid", "sprk_securitybu", "sprk_accesspermission");
-        ChildRecordEndpoints.RootServerOwnedColumns.Contains("SPRK_ContainerId").Should().BeTrue("the list was case-insensitive");
+        workAssignment.Contains("SPRK_ContainerId").Should().BeTrue("the list was case-insensitive");
     }
 
     // The pre-registry lists plus #2220: the secure flag and the access columns are the BFF's own on every secure root.

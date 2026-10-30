@@ -1177,6 +1177,23 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
             {
                 var table = definition.Groups["t"].Value;
                 var rest = definition.Groups["rest"].Value;
+                if (rest.StartsWith("/Attributes", StringComparison.Ordinal) && rest.Contains("AttributeType", StringComparison.Ordinal))
+                {
+                    // Task 017: the unified create's post-mapping default step asks each target column's type and
+                    // create-validity (its $filter escaped). A lookup this client knows is a Lookup; any other a String.
+                    var typed = AttributeNamed().Matches(Uri.UnescapeDataString(rest)).Select(m => m.Groups["c"].Value).Distinct();
+                    var tableLookups = Lookups.GetValueOrDefault(table, Array.Empty<(string Column, string Target, string Navigation)>());
+                    return Ok(new
+                    {
+                        value = typed.Select(c => new
+                        {
+                            LogicalName = c,
+                            AttributeType = tableLookups.Any(l => l.Column == c) ? "Lookup" : "String",
+                            IsValidForCreate = true,
+                        }),
+                    });
+                }
+
                 if (rest.StartsWith("/Attributes", StringComparison.Ordinal))
                 {
                     // Only the columns the question names — as Dataverse answers the $filter.

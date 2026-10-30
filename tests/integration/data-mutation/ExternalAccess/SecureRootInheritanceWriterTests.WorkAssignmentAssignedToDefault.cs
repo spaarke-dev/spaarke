@@ -65,14 +65,15 @@ public partial class SecureRootInheritanceWriterTests
             result = await ChildRecordEndpoints.CreateAsync(
                 "sprk_workassignment", payload,
                 new SecureChildOwnershipAiToolTests.ScriptedUserClient(Creator),
-                new RecordOwnershipResolver(
-                    SecureChildShareWorld.EntitiesOver(() => _fixture.ChildWorld).Object, SecureChildShareWorld.Configuration(),
-                    NullLogger<RecordOwnershipResolver>.Instance),
-                appOnly.Object,
-                new StampWorld().Restamper,
-                scope.ServiceProvider.GetRequiredService<SecureChildShareSynchronizer>(),
-                _gate,
-                services.BuildServiceProvider().GetRequiredService<IServiceScopeFactory>(),
+                Sprk.Bff.Api.Tests.Integration.DataMutation.RecordOwnership.RouteRecordCreation.Over(
+                    new RecordOwnershipResolver(
+                        SecureChildShareWorld.EntitiesOver(() => _fixture.ChildWorld).Object, SecureChildShareWorld.Configuration(),
+                        NullLogger<RecordOwnershipResolver>.Instance),
+                    appOnly.Object,
+                    new StampWorld().Restamper,
+                    scope.ServiceProvider.GetRequiredService<SecureChildShareSynchronizer>(),
+                    _gate,
+                    services.BuildServiceProvider().GetRequiredService<IServiceScopeFactory>()),
                 new DefaultHttpContext(), NullLogger<Program>.Instance, CancellationToken.None);
         }
 
