@@ -97,6 +97,9 @@ internal sealed class ApprovalWorld
     /// <summary>The 014 transition commits and THEN throws (a timeout after the commit).</summary>
     public bool TransitionThrowsAfterCommit { get; set; }
 
+    /// <summary>101 fix round, part 3: a fault chosen by a transaction's requests (null: none), checked before the keyed <c>tx:</c> faults.</summary>
+    public Func<IReadOnlyList<OrganizationRequest>, Exception?>? TransactionFault { get; set; }
+
     public int Transitions;
     private long _nextVersion = 100;
 
@@ -589,6 +592,8 @@ internal sealed class ApprovalWorld
             ConditionOperator.In => condition.Values.Any(v => Same(actual, v)),
             ConditionOperator.Null => actual is null,
             ConditionOperator.NotNull => actual is not null,
+            // Task 101 B2b-2: the Signal lifecycle finds a (policy, subject)'s latest episode by the dedupe-key prefix.
+            ConditionOperator.BeginsWith => actual is string text && text.StartsWith((string)condition.Values.Single(), StringComparison.Ordinal),
             _ => throw new NotSupportedException($"Test world: {condition.Operator} is not evaluated."),
         };
     }
@@ -628,6 +633,11 @@ internal sealed class ApprovalWorld
 
     private Task Transaction(IReadOnlyList<OrganizationRequest> requests)
     {
+        if (TransactionFault?.Invoke(requests) is { } chosen)
+        {
+            return Task.FromException(chosen);
+        }
+
         var key = requests.Any(r => r is AssociateRequest or DisassociateRequest) || requests.All(r => r is UpdateRequest) ? "tx:approvers" : "tx:corrections";
         if (TakeFault(key) is { } fault)
         {

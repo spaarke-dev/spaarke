@@ -133,6 +133,7 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
     internal const int CostTypeFee = 100000000;
     internal const int CostTypeExpense = 100000001;
     internal const int LineStatusPending = 100000000;
+    internal const int LineStatusClean = 100000001;
     internal const int LineStatusFlagged = 100000002;
     internal const int ApprovalStatusPending = 100000000;
 
@@ -1119,6 +1120,10 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
             .Select(f => f.Subject.LineIndex!.Value)
             .ToHashSet();
 
+        // F2: a rule version the gate or its handler refused produced no finding, but its check did not run on the lines it applies to: those lines are
+        // Flagged (the same principle as EB-D-175: a check that did not run is not Clean).
+        var notChecked = RulesNotChecked(outcome.Evaluation, read.Lines.Count);
+
         var rows = new List<Entity>(read.Lines.Count);
         for (var index = 0; index < read.Lines.Count; index++)
         {
@@ -1199,9 +1204,11 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
             }
 
             var flagged = flaggedByFinding.Contains(index)
+                || notChecked.ContainsKey(index)
                 || coding is { RefusedCodes.Count: > 0 }
-                || coding is { HasFirmCodeMismatch: true };
-            row[InvoiceTotalsService.LineStatus] = new OptionSetValue(flagged ? LineStatusFlagged : LineStatusPending);
+                || coding is { HasFirmCodeMismatch: true }
+                || LineFindingCodeFor(line.Narrative.Value, coding) is not null; // EB-D-175 / EB-D-176
+            row[InvoiceTotalsService.LineStatus] = new OptionSetValue(LineStatusFor(flagged, coded: coding is not null));
 
             var confidence = BuildExtractionConfidence(line, resolution, coding, outcome);
             if (confidence.Length <= ExtractionConfidenceMaxLength)
@@ -1221,6 +1228,93 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
 
         return rows;
     }
+
+    /// <summary>
+    /// The line status a persisted line starts in (103 Q2: nothing used to write Clean, so no invoice could ever be approved, I-2). A line a
+    /// finding, a refused code, a firm-code mismatch, a line the coding Action did not return (EB-D-175), a line with no description (EB-D-176) or a
+    /// line a refused rule version should have checked (F2) flagged is Flagged. Any other line of a CODED invoice is Clean: no check that can flag
+    /// a line was left unrun (a refused rule is flagged above, so it does not count as run). A line of an UNCODED invoice (D-126: coding was unavailable, so a hold finding stands) stays Pending, shown as
+    /// Processing (D-58): its codes are still owed, and a Pending line is neither decidable nor approvable.
+    /// </summary>
+    internal static int LineStatusFor(bool flagged, bool coded) => flagged ? LineStatusFlagged : coded ? LineStatusClean : LineStatusPending;
+
+    /// <summary>The finding code of a line the AI did not check because the coding Action returned nothing usable for it (EB-D-175).</summary>
+    internal const string LineFindingNotReturned = "coding.not_returned";
+
+    /// <summary>The finding code of a line with a blank narrative (EB-D-176): it has no description to code or to read.</summary>
+    internal const string LineFindingNoDescription = "line.no_description";
+
+    /// <summary>The finding code of a line a refused rule version should have checked (F2): the check did not run, so the line is not Clean.</summary>
+    internal const string LineFindingRulesNotChecked = "rules.not_checked";
+
+    /// <summary>
+    /// The lines on which a refused rule version left a check unrun (F2), each with its reviewer-facing message naming the rule type(s), never a rule id.
+    /// A refusal is tied to its lines through <see cref="BillingEvaluationResult.RefusalScopes"/>: the lines the version was selected for, or every line when
+    /// the invoice subject selected it. A refusal with no scope (it cannot be tied to particular lines) flags every line.
+    /// </summary>
+    internal static IReadOnlyDictionary<int, string> RulesNotChecked(BillingEvaluationResult? evaluation, int lineCount)
+    {
+        var result = new Dictionary<int, string>();
+        if (evaluation is null || evaluation.Refusals.Count == 0)
+        {
+            return result;
+        }
+
+        var typesByLine = new SortedDictionary<int, SortedSet<string>>();
+        var unnamedLines = new HashSet<int>();
+        foreach (var refusal in evaluation.Refusals)
+        {
+            var scope = evaluation.RefusalScopes.FirstOrDefault(s => s.PolicyVersionId == refusal.PolicyVersionId);
+            var lines = scope is null || scope.AppliesToInvoice
+                ? Enumerable.Range(0, lineCount)
+                : scope.LineIndexes.Where(i => i >= 0 && i < lineCount);
+            foreach (var line in lines)
+            {
+                if (scope?.RuleType is { } type)
+                {
+                    if (!typesByLine.TryGetValue(line, out var set))
+                    {
+                        typesByLine[line] = set = new SortedSet<string>(StringComparer.Ordinal);
+                    }
+
+                    set.Add(type.ToString());
+                }
+                else
+                {
+                    unnamedLines.Add(line);
+                }
+
+                typesByLine.TryAdd(line, new SortedSet<string>(StringComparer.Ordinal));
+            }
+        }
+
+        foreach (var (line, types) in typesByLine)
+        {
+            result[line] = types.Count switch
+            {
+                0 => "A billing rule could not be checked on this line.",
+                1 when !unnamedLines.Contains(line) => $"The {types.Min} rule could not be checked on this line.",
+                _ => $"These rules could not be checked on this line: {string.Join(", ", types)}{(unnamedLines.Contains(line) ? ", and another rule" : string.Empty)}.",
+            };
+        }
+
+        return result;
+    }
+
+    /// <summary>The findings JSON member listing the lines flagged for being unchecked or undescribed: <c>[{ line, code, message }]</c>, no values.</summary>
+    internal const string LineFindingsMember = "lineFindings";
+
+    /// <summary>
+    /// The finding a line carries for lacking a check, or null (owner decisions EB-D-175 and EB-D-176: such a line is Flagged, not Clean, so a
+    /// reviewer must accept or correct it before approval). A blank narrative (a coded line that was never sent, <see cref="LineCodingStatus.NoNarrative"/>,
+    /// or any line of an uncoded invoice) is <see cref="LineFindingNoDescription"/>; a line sent to the model that came back unusable
+    /// (<see cref="LineCodingStatus.NotReturned"/>) is <see cref="LineFindingNotReturned"/>. The firm's codes are kept either way. These are
+    /// reviewer-facing findings stored in <c>sprk_findingsjson</c>; they raise no Signal, and a Flagged line is decided by status alone.
+    /// </summary>
+    internal static string? LineFindingCodeFor(string? narrative, LineCodingResult? coding) =>
+        string.IsNullOrWhiteSpace(narrative) || coding is { Status: LineCodingStatus.NoNarrative } ? LineFindingNoDescription
+        : coding is { Status: LineCodingStatus.NotReturned } ? LineFindingNotReturned
+        : null;
 
     internal static Entity BuildApproval(
         SubmissionEvaluationOutcome outcome, Guid invoiceId, InvoiceCoreRecord core, IReadOnlyDictionary<string, object> resolverFields,
@@ -1358,7 +1452,13 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
             };
         }
 
-        return new JsonObject { ["fields"] = fields, ["coding"] = codingJson }.ToJsonString(Json);
+        // EB-D-170: the analyzer and API version that read the line, and the Action and version that coded it, so a correction names its source.
+        return new JsonObject
+        {
+            ["fields"] = fields,
+            ["coding"] = codingJson,
+            [ExtractionProvenance.Member] = ExtractionProvenance.ForLine(outcome.Read!, coding is { Status: not LineCodingStatus.NoNarrative }),
+        }.ToJsonString(Json);
     }
 
     private static JsonObject FieldJson<T>(ExtractedInvoiceField<T> field, ResolvedInvoiceLine resolution, string name)
@@ -1425,49 +1525,7 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
             var f = findings[i];
             var scrub = withheldGroups.Contains((f.PolicyId, f.Subject));
             decisions.TryGetValue(i, out var decided);
-            var entry = new JsonObject
-            {
-                ["index"] = i,
-                ["ruleType"] = f.RuleType.ToString(),
-                ["policyId"] = f.PolicyId.ToString("D"),
-                ["policyCode"] = f.PolicyCode,
-                ["policyVersionId"] = f.PolicyVersionId.ToString("D"),
-                ["clause"] = f.ClauseReference,
-                ["clauseLocation"] = f.ClauseLocation,
-                ["subject"] = f.Subject.Kind.ToString(),
-                ["line"] = f.Subject.LineIndex,
-                ["reasonCode"] = f.ReasonCode,
-                ["detailWithheld"] = f.DetailWithheld || scrub,
-                ["consequence"] = decided?.Consequence?.ToString(),
-                ["rejects"] = decided?.Rejects ?? false,
-                ["heldBecause"] = decided?.HeldBecause,
-            };
-            if (!scrub)
-            {
-                entry["valuesRead"] = new JsonArray(f.ValuesRead.Select(v => (JsonNode)new JsonObject
-                {
-                    ["name"] = v.Name,
-                    ["value"] = v.Value,
-                    ["line"] = v.ExtractedField?.LineIndex,
-                    ["field"] = v.ExtractedField?.Field,
-                    ["confidence"] = v.Confidence,
-                    ["belowReliabilityThreshold"] = v.BelowReliabilityThreshold,
-                }).ToArray());
-
-                // Task 100 (the Invoice Review read model, FR-31): the adjustment the rule suggests, for the reviewer's "apply suggestion"
-                // click. An additive member of the stored copy (schema 1 readers ignore it); a reviewer decision applies it, never a handler.
-                // Left out of a scrubbed group with the rest of the detail (D-112), and when the rule suggests none.
-                if (f.SuggestedAdjustment is { } suggestion)
-                {
-                    entry["suggestedAdjustment"] = new JsonObject
-                    {
-                        ["kind"] = suggestion.Kind.ToString(),
-                        ["amount"] = suggestion.Amount,
-                    };
-                }
-            }
-
-            findingsJson.Add(entry);
+            findingsJson.Add(FindingEntryJson(i, f, decided, scrub));
         }
 
         var pipeline = new JsonArray(outcome.PipelineFindings.Select(p =>
@@ -1504,6 +1562,27 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
             });
         }
 
+        // EB-D-175 / EB-D-176: the lines left Flagged for lacking a check or a description, each with a stable code. Additive (schema 1 readers
+        // ignore it); no Signal, no value: the reviewer decides the line from its Flagged status.
+        var codedByKey = outcome.Coding?.Lines.ToDictionary(l => l.LineKey, StringComparer.Ordinal);
+        var notChecked = RulesNotChecked(outcome.Evaluation, outcome.Read!.Lines.Count);
+        var lineFindings = new JsonArray();
+        for (var index = 0; index < outcome.Read!.Lines.Count; index++)
+        {
+            LineCodingResult? lineCoding = null;
+            codedByKey?.TryGetValue(index.ToString(CultureInfo.InvariantCulture), out lineCoding);
+            if (LineFindingCodeFor(outcome.Read.Lines[index].Narrative.Value, lineCoding) is { } lineCode)
+            {
+                lineFindings.Add(LineFindingEntryJson(index, lineCode));
+            }
+
+            // F2: a line a refused rule version should have checked (no rule id, no value: the type only).
+            if (notChecked.TryGetValue(index, out var notCheckedMessage))
+            {
+                lineFindings.Add(LineFindingEntryJson(index, LineFindingRulesNotChecked, notCheckedMessage));
+            }
+        }
+
         var root = new JsonObject
         {
             ["schema"] = 1,
@@ -1532,22 +1611,29 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
             ["findings"] = findingsJson,
             ["pipelineFindings"] = pipeline,
             ["codingFindings"] = coding,
+            [LineFindingsMember] = lineFindings,
             ["invoiceName"] = InvoiceNameFor(outcome),
             ["invoiceNumberReadConfidence"] = outcome.InvoiceNumber?.ReadConfidence,
             ["signalPlan"] = SignalPlanJson(outcome, invoiceId, out planRefusals),
+
+            // EB-D-170: the header's home for provenance: the pair, and the header fields as read (a correction of one still names what the AI read).
+            [ExtractionProvenance.Member] = ExtractionProvenance.ForSubmission(outcome.Read!, outcome.Coding is not null, outcome.Resolution),
         };
         if (planRefusals.Count > 0)
         {
-            root[SignalPlanRefusalsMember] = new JsonArray(planRefusals.Select(r => (JsonNode)new JsonObject
-            {
-                ["policyCode"] = r.PolicyCode,
-                ["subject"] = new JsonObject { ["entity"] = r.SubjectEntity, ["id"] = r.SubjectId.ToString("D") },
-                ["code"] = r.Code,
-            }).ToArray());
+            root[SignalPlanRefusalsMember] = new JsonArray(planRefusals.Select(r => (JsonNode)SignalPlanRefusalEntryJson(r)).ToArray());
         }
 
         return root.ToJsonString(Json);
     }
+
+    /// <summary>One <see cref="SignalPlanRefusalsMember"/> entry (task 101 B2b-2: the corrections re-evaluation records a refused replacement the same way).</summary>
+    internal static JsonObject SignalPlanRefusalEntryJson(SignalPlanRefusal r) => new()
+    {
+        ["policyCode"] = r.PolicyCode,
+        ["subject"] = new JsonObject { ["entity"] = r.SubjectEntity, ["id"] = r.SubjectId.ToString("D") },
+        ["code"] = r.Code,
+    };
 
     /// <summary>
     /// The Signal plan (notes section 5; part D): the billing findings mapped by <see cref="BillingFindingSignalMapper.MapAll(BillingEvaluationResult, BillingSignalSubjects, IReadOnlyList{FindingDecision}, SubmissionEvaluationKind?)"/>
@@ -1585,46 +1671,115 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
                 continue;
             }
 
-            var facts = new JsonObject();
-            foreach (var (name, value) in request.FactValues)
-            {
-                facts[name] = value?.ToString();
-            }
-
-            plan.Add(new JsonObject
-            {
-                ["policyId"] = request.PolicyId.ToString("D"),
-                ["policyCode"] = request.PolicyCode,
-                ["policyVersionId"] = request.PolicyVersionId.ToString("D"),
-                ["subjectEntity"] = request.SubjectEntityLogicalName,
-                ["subjectId"] = request.SubjectId.ToString("D"),
-                ["subjectName"] = request.SubjectDisplayName,
-                ["headline"] = request.ShortHeadline,
-                ["lane"] = request.Lane,
-                ["severity"] = request.Severity,
-                ["template"] = request.MessageTemplate,
-                ["facts"] = facts,
-                ["sentence"] = SignalWriter.RenderSentence(request.MessageTemplate, request.FactValues),
-                ["evidence"] = new JsonArray((request.EvidenceRefs ?? []).Select(e => (JsonNode)new JsonObject
-                {
-                    ["kind"] = e.Kind,
-                    ["ref"] = e.Ref,
-                    ["tier"] = e.Tier,
-                    ["confidence"] = e.Confidence,
-                    ["text"] = e.Text,
-                    ["source"] = e.Source,
-                    ["asOf"] = e.AsOf,
-                    ["clause"] = e.Clause,
-                }).ToArray()),
-                ["reasonCodes"] = new JsonArray(mapping.ReasonCodes.Select(c => (JsonNode)JsonValue.Create(c)!).ToArray()),
-                ["consequence"] = mapping.Consequence.ToString(),
-                ["fingerprint"] = mapping.Fingerprint,
-                ["decision"] = mapping.Decision.ToString(),
-            });
+            plan.Add(SignalPlanEntryJson(mapping));
         }
 
         return plan;
     }
+
+    /// <summary>
+    /// One <c>signalPlan[]</c> entry from a mapped (policy, subject) group (B2a: a per-entry builder so a correction's re-evaluation can replace ONE entry
+    /// of the stored plan). The caller has already passed the request through <see cref="SignalWriter.PreflightRefusal"/>.
+    /// </summary>
+    internal static JsonObject SignalPlanEntryJson(BillingSignalMapping mapping)
+    {
+        var request = mapping.Request;
+        var facts = new JsonObject();
+        foreach (var (name, value) in request.FactValues)
+        {
+            facts[name] = value?.ToString();
+        }
+
+        return new JsonObject
+        {
+            ["policyId"] = request.PolicyId.ToString("D"),
+            ["policyCode"] = request.PolicyCode,
+            ["policyVersionId"] = request.PolicyVersionId.ToString("D"),
+            ["subjectEntity"] = request.SubjectEntityLogicalName,
+            ["subjectId"] = request.SubjectId.ToString("D"),
+            ["subjectName"] = request.SubjectDisplayName,
+            ["headline"] = request.ShortHeadline,
+            ["lane"] = request.Lane,
+            ["severity"] = request.Severity,
+            ["template"] = request.MessageTemplate,
+            ["facts"] = facts,
+            ["sentence"] = SignalWriter.RenderSentence(request.MessageTemplate, request.FactValues),
+            ["evidence"] = new JsonArray((request.EvidenceRefs ?? []).Select(e => (JsonNode)new JsonObject
+            {
+                ["kind"] = e.Kind,
+                ["ref"] = e.Ref,
+                ["tier"] = e.Tier,
+                ["confidence"] = e.Confidence,
+                ["text"] = e.Text,
+                ["source"] = e.Source,
+                ["asOf"] = e.AsOf,
+                ["clause"] = e.Clause,
+            }).ToArray()),
+            ["reasonCodes"] = new JsonArray(mapping.ReasonCodes.Select(c => (JsonNode)JsonValue.Create(c)!).ToArray()),
+            ["consequence"] = mapping.Consequence.ToString(),
+            ["fingerprint"] = mapping.Fingerprint,
+            ["decision"] = mapping.Decision.ToString(),
+        };
+    }
+
+    /// <summary>
+    /// One <c>findings[]</c> entry (B2a: a per-entry builder so a correction's re-evaluation can patch ONE entry of the stored copy). <paramref name="scrub"/>
+    /// is D-112: the (policy, subject) group holds a withheld finding, so this entry carries no values read and no suggestion.
+    /// </summary>
+    internal static JsonObject FindingEntryJson(int index, BillingFinding f, FindingDecision? decided, bool scrub)
+    {
+        var entry = new JsonObject
+        {
+            ["index"] = index,
+            ["ruleType"] = f.RuleType.ToString(),
+            ["policyId"] = f.PolicyId.ToString("D"),
+            ["policyCode"] = f.PolicyCode,
+            ["policyVersionId"] = f.PolicyVersionId.ToString("D"),
+            ["clause"] = f.ClauseReference,
+            ["clauseLocation"] = f.ClauseLocation,
+            ["subject"] = f.Subject.Kind.ToString(),
+            ["line"] = f.Subject.LineIndex,
+            ["reasonCode"] = f.ReasonCode,
+            ["detailWithheld"] = f.DetailWithheld || scrub,
+            ["consequence"] = decided?.Consequence?.ToString(),
+            ["rejects"] = decided?.Rejects ?? false,
+            ["heldBecause"] = decided?.HeldBecause,
+        };
+        if (!scrub)
+        {
+            entry["valuesRead"] = new JsonArray(f.ValuesRead.Select(v => (JsonNode)new JsonObject
+            {
+                ["name"] = v.Name,
+                ["value"] = v.Value,
+                ["line"] = v.ExtractedField?.LineIndex,
+                ["field"] = v.ExtractedField?.Field,
+                ["confidence"] = v.Confidence,
+                ["belowReliabilityThreshold"] = v.BelowReliabilityThreshold,
+            }).ToArray());
+
+            // Task 100 (the Invoice Review read model, FR-31): the adjustment the rule suggests, for the reviewer's "apply suggestion"
+            // click. An additive member of the stored copy (schema 1 readers ignore it); a reviewer decision applies it, never a handler.
+            // Left out of a scrubbed group with the rest of the detail (D-112), and when the rule suggests none.
+            if (f.SuggestedAdjustment is { } suggestion)
+            {
+                entry["suggestedAdjustment"] = new JsonObject
+                {
+                    ["kind"] = suggestion.Kind.ToString(),
+                    ["amount"] = suggestion.Amount,
+                };
+            }
+        }
+
+        return entry;
+    }
+
+    /// <summary>One <c>lineFindings[]</c> entry (EB-D-175 / EB-D-176; B2a: a per-entry builder). <paramref name="code"/> is <see cref="LineFindingCodeFor"/>'s.</summary>
+    internal static JsonObject LineFindingEntryJson(int lineIndex, string code, string? message = null) => new()
+    {
+        ["line"] = lineIndex,
+        ["code"] = code,
+        ["message"] = message ?? (code == LineFindingNotReturned ? "The line was not checked by the AI." : "The line has no description."),
+    };
 
     // ── Helpers ──
 

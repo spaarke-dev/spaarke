@@ -78,6 +78,9 @@ public static class InvoiceApprovalCodes
     /// <summary>409 (F2): a line was decided by another person whose decision is not recorded yet; they repeat it, then approve.</summary>
     public const string LineDecisionIncomplete = "ebilling.approve.decision_incomplete";
 
+    /// <summary>409 (101 fix round, part 3): a correction's value was saved but its follow-through (findings, status, Signals, totals) did not finish; the reviewer repeats it.</summary>
+    public const string CorrectionsPending = "ebilling.approval.corrections_pending";
+
     /// <summary>403 (EB-D-172): closing the invoice's Signals needs the caller's rights, and the caller does not hold them.</summary>
     public const string NotAuthorized = LineDecisionCodes.NotAuthorized;
 
@@ -104,7 +107,7 @@ public sealed record ApprovalOpenLinesDto(int Pending, int Flagged)
 /// <param name="EligibilityUnavailable">The live resolution failed; <paramref name="CallerEligible"/> is false until it succeeds.</param>
 /// <param name="CallerEligible">The caller's OWN contact (EB-D-171) is one of the eligible approvers.</param>
 /// <param name="CanApprove">The caller is eligible and holds Write on the invoice, the invoice is In Review and not held, no line is Pending or
-/// Flagged, the portion is Pending.</param>
+/// Flagged, no correction is waiting for its follow-through (101), the portion is Pending.</param>
 /// <param name="UndecidedCleanLines">Clean lines an approve accepts in bulk (D-72).</param>
 public sealed record InvoiceApprovalStateDto(
     Guid InvoiceId,
@@ -304,6 +307,7 @@ public sealed class InvoiceApprovalService
         var portion = portions.Count == 1 ? portions[0] : null;
         var lines = await ReadLinesAsync(invoiceId, ct).ConfigureAwait(false);
         var held = await IsHeldAsync(invoiceId, ct).ConfigureAwait(false);
+        var correctionsPending = (await InvoiceCorrectionReevaluation.ReadUnappliedAsync(_entities, invoiceId, lines, ct).ConfigureAwait(false)).Count > 0;
 
         EligibleApproverSet? set = null;
         if (EligibleApproverResolver.SingleCoreOf(InvoiceReviewReadService.InvoiceEntity, invoice) is { } core)
@@ -358,7 +362,7 @@ public sealed class InvoiceApprovalService
             }
         }
 
-        return State(invoice, portion, lines, held, set, eligibilityUnavailable: set is null, callerEligible, canDecide, resolvedOn);
+        return State(invoice, portion, lines, held, correctionsPending, set, eligibilityUnavailable: set is null, callerEligible, canDecide, resolvedOn);
     }
 
     // ── POST approve ──
@@ -498,7 +502,9 @@ public sealed class InvoiceApprovalService
         }
 
         // ── FR-20: a blocked submission holds the invoice from approval until it is decided. ──
+        // ── 101 fix round, part 3 (F-2): a correction whose follow-through did not finish holds it until repeated. A read fault refuses (fail closed). ──
         List<Entity> lineRows;
+        IReadOnlyList<InvoiceCorrectionReevaluation.UnappliedCorrection> unapplied;
         try
         {
             if (await IsHeldAsync(invoiceId, ct).ConfigureAwait(false))
@@ -507,10 +513,17 @@ public sealed class InvoiceApprovalService
             }
 
             lineRows = await ReadLinesAsync(invoiceId, ct).ConfigureAwait(false);
+            unapplied = await InvoiceCorrectionReevaluation.ReadUnappliedAsync(_entities, invoiceId, lineRows, ct).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
             return Unavailable(invoiceId, "read", ex);
+        }
+
+        if (unapplied.Count > 0)
+        {
+            _logger.LogWarning("Approve of invoice {InvoiceId}: {Count} corrections have not been followed through; nothing changed.", invoiceId, unapplied.Count);
+            return new ApprovalResult(ApprovalOutcome.Conflict, InvoiceApprovalCodes.CorrectionsPending, InvoiceCorrectionReevaluation.UnappliedText(unapplied, lineRows, "approve again"));
         }
 
         // ── I-2: no line Pending or Flagged (a line with no recognised status counts as Pending: fail closed). ──
@@ -1106,7 +1119,7 @@ public sealed class InvoiceApprovalService
     private static DateTimeOffset Seconds(DateTimeOffset now) => new(now.Ticks - (now.Ticks % TimeSpan.TicksPerSecond), TimeSpan.Zero);
 
     private static InvoiceApprovalStateDto State(
-        Entity invoice, Entity? portion, IReadOnlyList<Entity> lines, bool held, EligibleApproverSet? set, bool eligibilityUnavailable,
+        Entity invoice, Entity? portion, IReadOnlyList<Entity> lines, bool held, bool correctionsPending, EligibleApproverSet? set, bool eligibilityUnavailable,
         bool callerEligible, bool canDecide, DateTime? resolvedOn)
     {
         var portionStatus = portion is null ? null : StatusOf(portion);
@@ -1129,7 +1142,7 @@ public sealed class InvoiceApprovalService
             EligibilityUnavailable: eligibilityUnavailable,
             CallerEligible: callerEligible,
             CanApprove: callerEligible && canDecide && portionStatus == PortionPending
-                && InvoiceStatus(invoice) == InvoiceStatusCodes.InReview && !held && open.Total == 0,
+                && InvoiceStatus(invoice) == InvoiceStatusCodes.InReview && !held && !correctionsPending && open.Total == 0,
             OpenLines: open,
             UndecidedCleanLines: CleanCount(lines),
             Held: held,

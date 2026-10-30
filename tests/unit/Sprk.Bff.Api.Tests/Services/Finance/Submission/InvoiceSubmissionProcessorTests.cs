@@ -869,6 +869,10 @@ public class InvoiceSubmissionProcessorTests
 
         public IReadOnlyList<InvoiceLineObservation> Observations { get; set; } = [];
 
+        /// <summary>Line keys the model returned nothing usable for (<see cref="LineCodingStatus.NotReturned"/>). A blank narrative is
+        /// <see cref="LineCodingStatus.NoNarrative"/>, as in the real service.</summary>
+        public IReadOnlySet<string> NotReturnedKeys { get; set; } = new HashSet<string>();
+
         public Task<InvoiceCodingResult> CodeLinesAsync(LineCodingRequest request, CancellationToken cancellationToken = default)
         {
             Request = request;
@@ -885,12 +889,14 @@ public class InvoiceSubmissionProcessorTests
                 Lines = request.Lines.Select(line => new LineCodingResult
                 {
                     LineKey = line.LineKey,
-                    Status = LineCodingStatus.Coded,
-                    Task = new LineCodeValue("L110", line.BilledTaskCode, false),
-                    Activity = new LineCodeValue("A103", line.BilledActivityCode, false),
+                    Status = string.IsNullOrWhiteSpace(line.Narrative) ? LineCodingStatus.NoNarrative
+                        : NotReturnedKeys.Contains(line.LineKey) ? LineCodingStatus.NotReturned
+                        : LineCodingStatus.Coded,
+                    Task = new LineCodeValue(Coded(line) ? "L110" : null, line.BilledTaskCode, false),
+                    Activity = new LineCodeValue(Coded(line) ? "A103" : null, line.BilledActivityCode, false),
                     Expense = new LineCodeValue(null, null, false),
-                    Confidence = 0.95m,
-                    Observations = Observations,
+                    Confidence = Coded(line) ? 0.95m : 0m,
+                    Observations = Coded(line) ? Observations : [],
                     RefusedCodes = [],
                     CodeSetId = codeSet.CodeSetId,
                     CodeSetName = codeSet.CodeSetName,
@@ -898,5 +904,7 @@ public class InvoiceSubmissionProcessorTests
                 }).ToList(),
             });
         }
+
+        private bool Coded(InvoiceLineToCode line) => !string.IsNullOrWhiteSpace(line.Narrative) && !NotReturnedKeys.Contains(line.LineKey);
     }
 }

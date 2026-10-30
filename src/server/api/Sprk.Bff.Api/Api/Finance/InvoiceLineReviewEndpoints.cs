@@ -23,7 +23,9 @@ namespace Sprk.Bff.Api.Api.Finance;
 /// service first asks, AS THE CALLER with the caller's own token, for AppendTo on the core record and Write on each such line; a missing right is
 /// 403 <c>ebilling.decision.not_authorized</c> and nothing is written.</para>
 /// <para><b>Status codes.</b> 200 applied; 400 invalid (<c>errorCode</c> says which rule); 401; 403; 404 uniform (invoice or line absent or
-/// unreadable); 409 (not In Review, line Pending or not decidable, totals refused, another decision in progress, a line changed); 503
+/// unreadable); 409 (not In Review, line Pending or not decidable, totals refused, another decision in progress, a line changed,
+/// <c>ebilling.line.corrections_pending</c> while a correction of a chosen line, or for Accept all Clean of the invoice, was saved but did not finish:
+/// the detail names each by field and line, to be repeated first); 503
 /// <c>ebilling.disabled</c> or a transient failure; 503 <c>ebilling.decision.incomplete</c> when the lines were written but a later step did not
 /// finish (the body names the committed lines to repeat the decision with). Its <c>failedStep</c> is <c>totals</c>, <c>corrections</c>,
 /// <c>record</c>, or <c>signals</c> (2026-10-29: a Signal close failed, so a Signal is still Open; the decision stands and the repeat
