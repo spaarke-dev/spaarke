@@ -56,6 +56,8 @@ public class ChildRowOwnershipBuilderGuardTests
             "A new service request is a root owned by its requester contact's business unit: no parent order."),
         new(Bff("Services.Dataverse.RecordOwnershipResolver"), "ResolveReparentOwnerAsync",
             "The resolver's own re-file: InPrimaryOrder over the row's columns after the change, then its thread filing and inherited parents."),
+        new(Bff("Services.Dataverse.RecordOwnershipResolver"), "ResolveOwnerOnlyAsync",
+            "#2468: a document's question whose primary is an unfiled communication drops that primary into SecureOnlyParents; the rest keep the order the question was built in (ForRow or the reconciler's), so it names no new order."),
         new(Bff("Services.Ontology.OntologyAdminAuthoringService"), "CheckVersionOwnerAsync",
             "A secure-if-any gate over the policy and the matters its rule names (stored and requested): an ordinary answer binds no owner (the version stays the caller's), so no table order decides anything, and the version's own columns would drop the matters the gate needs (R4-2)."),
     ];
