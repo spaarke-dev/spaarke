@@ -24,6 +24,16 @@ namespace Sprk.Bff.Api.Services.Finance.Submission;
 /// <summary>One Signal's step: written, a retryable <paramref name="FailureCode"/>, or a permanent <paramref name="RefusedCode"/> (F1-3).</summary>
 internal readonly record struct SignalStep(bool Wrote, string? FailureCode, string? RefusedCode = null);
 
+/// <summary>Who is writing: picks the log line's shape and id property (task 049's <c>SubmissionId</c>, or a correction's <c>InvoiceId</c>).</summary>
+internal enum SignalLogContext
+{
+    /// <summary>Task 049's after-commit steps; the id is the submission id.</summary>
+    Submission = 0,
+
+    /// <summary>Task 101's corrections re-evaluation; the id is the invoice id.</summary>
+    Correction = 1,
+}
+
 /// <summary>What the lifecycle does when the latest episode of a (policy, subject) is already resolved.</summary>
 internal enum ResolvedEpisodeRule
 {
@@ -85,13 +95,15 @@ internal sealed class SignalEpisodeLifecycle
     };
 
     /// <summary>
-    /// Writes <paramref name="request"/> through the lifecycle. <paramref name="contextLabel"/> and <paramref name="contextId"/> name the caller
-    /// (for example <c>"Invoice submission"</c> and the submission id) in the log lines only.
+    /// Writes <paramref name="request"/> through the lifecycle. <paramref name="context"/> and <paramref name="contextId"/> name the caller
+    /// (the submission id, or the invoice id of a correction) in the log lines only. Task 049's lines keep their original
+    /// <c>Invoice submission {SubmissionId}: ...</c> shape (queries on <c>SubmissionId</c> for <see cref="SignalWriteSkippedCode"/> /
+    /// <see cref="SignalChangedCode"/> keep working); a correction logs <c>Invoice correction {InvoiceId}: ...</c>.
     /// </summary>
     internal async Task<SignalStep> WriteAsync(
         SignalWriteRequest request,
         string fingerprint,
-        string contextLabel,
+        SignalLogContext context,
         Guid contextId,
         ResolvedEpisodeRule resolvedRule,
         CancellationToken ct)
@@ -118,7 +130,15 @@ internal sealed class SignalEpisodeLifecycle
             {
                 if (string.IsNullOrWhiteSpace(existing.RowVersion))
                 {
-                    _logger.LogWarning("{Context} {ContextId}: Signal {SignalId} was read without a row version; not superseded", contextLabel, contextId, existing.Id);
+                    if (context == SignalLogContext.Submission)
+                    {
+                        _logger.LogWarning("Invoice submission {SubmissionId}: Signal {SignalId} was read without a row version; not superseded", contextId, existing.Id);
+                    }
+                    else
+                    {
+                        _logger.LogWarning("Invoice correction {InvoiceId}: Signal {SignalId} was read without a row version; not superseded", contextId, existing.Id);
+                    }
+
                     return new SignalStep(false, SignalChangedCode);
                 }
 
@@ -140,8 +160,17 @@ internal sealed class SignalEpisodeLifecycle
                 return new SignalStep(false, null, result.SkippedRefusalCode);
             }
 
-            _logger.LogWarning("{Context} {ContextId}: the Signal of policy {PolicyCode} on {Subject} {SubjectId} was skipped ({Refusal})",
-                contextLabel, contextId, request.PolicyCode, request.SubjectEntityLogicalName, request.SubjectId, result.SkippedRefusalCode);
+            if (context == SignalLogContext.Submission)
+            {
+                _logger.LogWarning("Invoice submission {SubmissionId}: the Signal of policy {PolicyCode} on {Subject} {SubjectId} was skipped ({Refusal})",
+                    contextId, request.PolicyCode, request.SubjectEntityLogicalName, request.SubjectId, result.SkippedRefusalCode);
+            }
+            else
+            {
+                _logger.LogWarning("Invoice correction {InvoiceId}: the Signal of policy {PolicyCode} on {Subject} {SubjectId} was skipped ({Refusal})",
+                    contextId, request.PolicyCode, request.SubjectEntityLogicalName, request.SubjectId, result.SkippedRefusalCode);
+            }
+
             return new SignalStep(false, SignalWriteSkippedCode);
         }
 

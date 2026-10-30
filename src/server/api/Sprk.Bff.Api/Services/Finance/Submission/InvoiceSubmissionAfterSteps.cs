@@ -362,7 +362,7 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
             SignalStep step;
             try
             {
-                step = await _lifecycle.WriteAsync(request, fingerprint, "Invoice submission", submissionId, ResolvedEpisodeRule.SkipWhenSameFingerprint, ct).ConfigureAwait(false);
+                step = await _lifecycle.WriteAsync(request, fingerprint, SignalLogContext.Submission, submissionId, ResolvedEpisodeRule.SkipWhenSameFingerprint, ct).ConfigureAwait(false);
             }
             catch (Exception ex) when ((ex is not OperationCanceledException || !ct.IsCancellationRequested) && PermanentWriteRefusal(request, ex) is { } code)
             {

@@ -361,6 +361,35 @@ public sealed class InvoiceCorrectionSignalsTests
         Stored(world).ContainsKey(InvoiceCorrectionReevaluation.PendingSignalChangesMember).Should().BeFalse();
     }
 
+    [Fact(DisplayName = "101 fix 1 F-5: a group removed after a failed clear leaves close fp0 / raise null; the open episode of ANOTHER fingerprint is closed too")]
+    public async Task RemovedGroup_AfterAFailedClear_ClosesTheOpenEpisodeWhateverItsFingerprint()
+    {
+        // The state after: correction 1 changed the group fp0 -> fp1 (episode 1 closed, episode 2 raised, the clear failed), then correction 2 removed the
+        // group, so the stored member reads close fp0 / raise null while the open episode carries fp1.
+        const string Changed = BillingReasonCodes.DailyHoursOverCap + "|Hold";
+        var world = new CorrectionWorld();
+        var root = Root();
+        root[InvoiceCorrectionReevaluation.PendingSignalChangesMember] = new JsonObject
+        {
+            ["rule"] = new JsonArray(new JsonObject
+            {
+                ["policyCode"] = Cap.PolicyCode, ["subjectEntity"] = LineEntity, ["subjectId"] = W.FeeLineId.ToString("D"),
+                ["closeFingerprint"] = CapFingerprint, ["raiseFingerprint"] = null,
+            }),
+        };
+        Store(world, root);
+        world.AddSignal(Cap.PolicyCode, LineEntity, W.FeeLineId, 1, CapFingerprint, resolved: true);
+        world.AddSignal(Cap.PolicyCode, LineEntity, W.FeeLineId, 2, Changed);
+
+        (await Service(world).CorrectAsync(Line("Narrative", "Prepared the brief"), CancellationToken.None)).IsApplied.Should().BeTrue();
+
+        world.SignalsOf(Cap.PolicyCode, W.FeeLineId).Should().Equal(
+            (1, true, (int?)null, CapFingerprint),
+            (2, true, SignalWriter.ResolutionConditionCleared, Changed));
+        world.SignalWrites.Should().BeEmpty();
+        Stored(world).ContainsKey(InvoiceCorrectionReevaluation.PendingSignalChangesMember).Should().BeFalse();
+    }
+
     [Fact(DisplayName = "101 B2b-2: a half-cleared pendingSignalChanges (no system member, an entry already reconciled) converges without a second close")]
     public async Task AHalfClearedPendingMember_Converges()
     {

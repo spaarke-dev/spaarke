@@ -93,8 +93,6 @@ public sealed class InvoiceCorrectionReevaluation
     /// </summary>
     internal const string ResolutionChangeMember = "resolutionChange";
 
-    private const string ContextLabel = "Invoice correction";
-
     private static readonly HashSet<string> Reevaluated = new(StringComparer.Ordinal)
     {
         ResolutionFieldNames.Hours, ResolutionFieldNames.Rate, ResolutionFieldNames.Amount, BillingFieldNames.Narrative,
@@ -352,12 +350,15 @@ public sealed class InvoiceCorrectionReevaluation
 
     private async Task<Patched> PatchFindingsAsync(CorrectionApplied applied, CancellationToken ct)
     {
+        // The submission and its version are read FIRST. A concurrent correction whose findings patch lands after this read bumps the version, so our
+        // conditional write fails and is retried; read in the other order, lines older than the version could be paired with a version that already
+        // includes the other correction's patch, and the write would succeed on stale lines.
+        var submission = await ReadSubmissionAsync(applied.InvoiceId, ct).ConfigureAwait(false)
+            ?? throw new InvalidOperationException("The invoice has no submission.");
         var invoice = await ReadInvoiceAsync(applied.InvoiceId, ct).ConfigureAwait(false)
             ?? throw new InvalidOperationException("The invoice was not found.");
         var lines = await ReadLinesAsync(applied.InvoiceId, ct).ConfigureAwait(false);
         var rows = await ReadCorrectionsAsync(applied.InvoiceId, ct).ConfigureAwait(false);
-        var submission = await ReadSubmissionAsync(applied.InvoiceId, ct).ConfigureAwait(false)
-            ?? throw new InvalidOperationException("The invoice has no submission.");
         var json = submission.GetAttributeValue<string>(InvoiceSubmissionPersister.SubmissionFindingsJson);
         if (string.IsNullOrWhiteSpace(json) || JsonNode.Parse(json) is not JsonObject root)
         {
@@ -770,6 +771,7 @@ public sealed class InvoiceCorrectionReevaluation
                 }
             }
 
+            // EB-D-175: a coding.not_returned line must be "accepted or corrected" by a reviewer, so a code correction resolves it (it is removed here).
             RemoveLineFinding(lineFindings, line, InvoiceSubmissionPersister.LineFindingNotReturned);
         }
         else if (field == BillingFieldNames.Narrative && !string.IsNullOrWhiteSpace(finalValue))
@@ -928,7 +930,10 @@ public sealed class InvoiceCorrectionReevaluation
         var raise = Text(change, "raiseFingerprint");
         if (close is not null && !string.Equals(close, raise, StringComparison.Ordinal))
         {
-            await CloseClearedAsync(policyCode, entity, subjectId, close, ct).ConfigureAwait(false);
+            // Raise null: the group is gone, so the latest open episode is closed whatever its fingerprint. A member that survived a failed clear can
+            // read close fp0 / raise null while the open episode already carries fp1 (a repeat wrote it); matching fp0 would leave that episode open.
+            // Raise set: the close is of the stored fingerprint only, the raise below then writes the next episode.
+            await CloseClearedAsync(policyCode, entity, subjectId, raise is null ? null : close, ct).ConfigureAwait(false);
         }
 
         if (raise is null)
@@ -1028,7 +1033,7 @@ public sealed class InvoiceCorrectionReevaluation
         SignalStep step;
         try
         {
-            step = await _lifecycle.WriteAsync(request, fingerprint, ContextLabel, applied.InvoiceId, ResolvedEpisodeRule.ReopenAsNextEpisode, ct).ConfigureAwait(false);
+            step = await _lifecycle.WriteAsync(request, fingerprint, SignalLogContext.Correction, applied.InvoiceId, ResolvedEpisodeRule.ReopenAsNextEpisode, ct).ConfigureAwait(false);
         }
         catch (Exception ex) when ((ex is not OperationCanceledException || !ct.IsCancellationRequested)
             && InvoiceSubmissionAfterSteps.PermanentWriteRefusal(request, ex) is { } code)
