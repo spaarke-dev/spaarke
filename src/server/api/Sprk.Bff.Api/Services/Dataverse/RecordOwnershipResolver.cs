@@ -1432,6 +1432,16 @@ public static class RecordOwnerRefusal
     /// top business unit is missing, ambiguous or has a member
     /// (<see cref="Sprk.Bff.Api.Infrastructure.Dataverse.RestrictedContentOwnerTeamStatus"/>).</summary>
     public const string RestrictedContentOwnerTeamUnresolved = "record_owner_restricted_content_team_unresolved";
+
+    /// <summary>
+    /// #2468 / #2471 follow-up: a document's primary parent is a communication, and whether that communication is filed
+    /// under anything cannot be decided — the communication, or the thread it sits in, did not come back.
+    /// </summary>
+    /// <remarks>Component Justification (CLAUDE.md §11): (1) Existing — <see cref="ParentUnresolved"/>, which this case used
+    /// and which also covers a filed-to record that is missing. (2) Extension — one more code in this set, no new type. (3) Cost
+    /// of doing nothing — a caller cannot tell the two apart, so an unfiled Office save refused here was told to check its
+    /// business unit or the record it is filed to, neither of which is the cause.</remarks>
+    public const string CommunicationFilingUnresolved = "record_owner_communication_filing_unresolved";
 }
 
 /// <summary>
@@ -1952,7 +1962,7 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
             if (filed is null)
             {
                 return RecordOwnerResolution.Refused(
-                    RecordOwnerRefusal.ParentUnresolved,
+                    RecordOwnerRefusal.CommunicationFilingUnresolved,
                     $"the parent {parents[0].EntityLogicalName} {parents[0].RecordId:D} or the thread it sits in could not be "
                     + "read, so whether it is filed cannot be decided");
             }

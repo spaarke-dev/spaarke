@@ -160,7 +160,8 @@ public class UnfiledCommunicationDocumentOwnerTests
         var answer = await World().Resolver().ResolveOwnerAsync(SaveQuestion(), CancellationToken.None);
 
         answer.Outcome.Should().Be(RecordOwnerOutcome.Refused);
-        answer.RefusalCode.Should().Be(RecordOwnerRefusal.ParentUnresolved);
+        answer.RefusalCode.Should().Be(RecordOwnerRefusal.CommunicationFilingUnresolved,
+            "#2471 follow-up: its own code, so the save can say what could not be read");
     }
 
     [Fact(DisplayName = "#2468 must-not-fire: a communication whose thread cannot be read refuses, never the unfiled answer")]
@@ -174,7 +175,7 @@ public class UnfiledCommunicationDocumentOwnerTests
         var answer = await resolver.ResolveOwnerAsync(SaveQuestion(), CancellationToken.None);
 
         answer.Outcome.Should().Be(RecordOwnerOutcome.Refused);
-        answer.RefusalCode.Should().Be(RecordOwnerRefusal.ParentUnresolved);
+        answer.RefusalCode.Should().Be(RecordOwnerRefusal.CommunicationFilingUnresolved);
     }
 
     [Fact(DisplayName = "#2468 must-not-fire: a faulted filing read propagates; no owner is given")]
@@ -268,6 +269,7 @@ public class UnfiledCommunicationDocumentOwnerTests
 
         threadReads.Should().Be(1, "the thread was asked for and came back with no row");
         answer.Outcome.Should().Be(RecordOwnerOutcome.Refused, "a missing thread's filing is not known: never the unfiled answer");
+        answer.RefusalCode.Should().Be(RecordOwnerRefusal.CommunicationFilingUnresolved);
     }
 
     [Fact(DisplayName = "#2471 follow-up: N document questions for one communication, sharing a pass's cache, read its filing once")]
