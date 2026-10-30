@@ -84,7 +84,8 @@
       "logicalName": "sprk_gridconfiguration",
       "privilegeName": "prvReadsprk_GridConfiguration",
       "reason": "Data grid configuration (columns, views) that the shared DataGrid and ConfigurationService read as the user through Xrm.WebApi; seeded with fixed ids by scripts such as Apply-WorklistGridConfiguration.ps1.",
-      "evidence": "Read-only, spaarkedev1, 2026-10-29: UserOwned; 23 rows, all in the root unit; no lookups. A child-unit user had no access to root row 00000000-0000-4000-8000-000000005001."
+      "evidence": "Read-only, spaarkedev1, 2026-10-29: UserOwned; 23 rows, all in the root unit; no lookups. A child-unit user had no access to root row 00000000-0000-4000-8000-000000005001.",
+      "createStaysForbidden": "Read is Global, so a row a user creates here is readable by every user. The saved-search hook (src/client/code-pages/SemanticSearch/src/hooks/useSavedSearches.ts, saveSearch, lines 185-203) writes per-user rows to this table through the Web API. No end-user Spaarke role holds Create on it; ProductConfigurationReadRoleGuardTests (NoCreateTables, AdminRoles) keeps it that way."
     }
   ],
   "excluded": [

@@ -35,8 +35,12 @@ public static class PlaybookEndpoints
             .ProducesValidationProblem();
 
         // PUT /api/ai/playbooks/{id} - Update existing playbook
+        // Write routes: the caller's own Write privilege first, then ownership. An update that changes IsPublic also
+        // needs Share (the stored value is read only after the Write gate).
         group.MapPut("/{id:guid}", UpdatePlaybook)
+            .AddPlaybookTablePrivilegeFilter(PlaybookAuthorizationFilter.WritePlaybookPrivilege)
             .AddPlaybookOwnerAuthorizationFilter()
+            .AddPlaybookPublicFlagShareFilter()
             .WithName("UpdatePlaybook")
             .WithSummary("Update an existing playbook")
             .WithDescription("Updates playbook configuration. User must own the playbook.")
@@ -148,6 +152,7 @@ public static class PlaybookEndpoints
 
         // PUT /api/ai/playbooks/{id}/canvas - Save canvas layout
         group.MapPut("/{id:guid}/canvas", SaveCanvasLayout)
+            .AddPlaybookTablePrivilegeFilter(PlaybookAuthorizationFilter.WritePlaybookPrivilege)
             .AddPlaybookOwnerAuthorizationFilter()
             .WithName("SaveCanvasLayout")
             .WithSummary("Save canvas layout for playbook builder")

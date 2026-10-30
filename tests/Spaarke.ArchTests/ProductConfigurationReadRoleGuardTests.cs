@@ -90,8 +90,10 @@ public class ProductConfigurationReadRoleGuardTests
     }
 
     /// <summary>
-    /// Tables the two roles read at Global through this list and must hold NO Create privilege on, at any depth: a row a
-    /// user created there would be readable by every user.
+    /// Tables the two roles read at Global through this list, on which NO end-user Spaarke role may hold Create at any
+    /// depth (<see cref="NoCreateViolations"/>): a row a user created there would be readable by every user. For
+    /// <c>sprk_gridconfiguration</c> the per-user writer is the saved-search hook
+    /// (<c>src/client/code-pages/SemanticSearch/src/hooks/useSavedSearches.ts</c>, <c>saveSearch</c>).
     /// </summary>
     internal static readonly string[] NoCreateTables = ["sprk_gridconfiguration"];
 
@@ -136,19 +138,67 @@ public class ProductConfigurationReadRoleGuardTests
             + string.Join("\n  ", violations));
     }
 
-    [Fact(DisplayName = "Product configuration read list: Core and Basic User hold no Create on a Global-read table that forbids it")]
-    public void RoleXmlHoldsNoCreateOnNoCreateTables()
+    /// <summary>
+    /// The Spaarke roles the no-Create rule does NOT apply to, each with its reason: administrator roles, held by the
+    /// people who maintain product configuration. Every other <c>Spaarke *.xml</c> role is an end-user (or service) role
+    /// and is checked.
+    /// </summary>
+    internal static readonly IReadOnlyDictionary<string, string> AdminRoles = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
     {
-        var violations = new List<string>();
-        foreach (var role in Roles)
-        {
-            var path = Path.Combine(RolesRoot, $"{role}.xml");
-            Assert.True(File.Exists(path), $"Role file not found: {path}. Repo root resolved to '{SourceScan.RepoRoot}'.");
-            violations.AddRange(CreateFindings(File.ReadAllText(path), NoCreateTables).Select(v => $"{role}.xml: {v}"));
-        }
+        ["Spaarke Access Administrator"] = "administers external access and grants; an administrator role",
+        ["Spaarke AI Analysis Admin"] = "maintains playbooks and AI configuration; the one role meant to author product configuration",
+        ["Spaarke Billing Administrator"] = "administers billing configuration; an administrator role",
+        ["Spaarke Ontology Administrator"] = "administers the ontology and policies; an administrator role",
+        ["Spaarke Reporting Access Admin"] = "administers reporting access; an administrator role",
+    };
 
+    /// <summary>Every <c>Spaarke *.xml</c> role file that is not an <see cref="AdminRoles"/> role, as (role name, XML).</summary>
+    internal static IReadOnlyList<(string Role, string Xml)> EndUserRoleFiles() =>
+        Directory.GetFiles(RolesRoot, "Spaarke *.xml")
+            .Select(p => (Role: Path.GetFileNameWithoutExtension(p), Path: p))
+            .Where(r => !AdminRoles.ContainsKey(r.Role))
+            .OrderBy(r => r.Role, StringComparer.Ordinal)
+            .Select(r => (r.Role, File.ReadAllText(r.Path)))
+            .ToList();
+
+    /// <summary>Each end-user role in <paramref name="roles"/> that holds Create on a <see cref="NoCreateTables"/> table;
+    /// an <see cref="AdminRoles"/> role is skipped.</summary>
+    internal static List<string> NoCreateViolations(IEnumerable<(string Role, string Xml)> roles) =>
+        roles.Where(r => !AdminRoles.ContainsKey(r.Role))
+            .SelectMany(r => CreateFindings(r.Xml, NoCreateTables).Select(v => $"{r.Role}.xml: {v}"))
+            .ToList();
+
+    [Fact(DisplayName = "Product configuration read list: no end-user Spaarke role holds Create on a Global-read table that forbids it")]
+    public void EndUserRolesHoldNoCreateOnNoCreateTables()
+    {
+        var roles = EndUserRoleFiles();
+        // Non-vacuity: Core and Basic User are among the roles checked, and every named admin role exists.
+        foreach (var role in Roles)
+            Assert.Contains(roles, r => r.Role == role);
+        foreach (var admin in AdminRoles.Keys)
+            Assert.True(File.Exists(Path.Combine(RolesRoot, $"{admin}.xml")), $"AdminRoles names '{admin}', which has no role file; remove or fix the entry.");
+
+        var violations = NoCreateViolations(roles);
         Assert.True(violations.Count == 0,
-            "A role reads these tables at Global, so it must not create rows in them:\n  " + string.Join("\n  ", violations));
+            "Every user reads these tables at Global (per-user rows such as saved searches included), so an end-user role must "
+            + "not create rows in them:\n  " + string.Join("\n  ", violations));
+    }
+
+    [Fact(DisplayName = "Product configuration read guard control: a non-admin role with Create on a no-create table is reported; an admin role is not")]
+    public void NoCreateGuardFiresOnAnyEndUserRole()
+    {
+        const string withCreate = """
+            <Role id="{00000000-0000-0000-0000-000000000005}" name="x">
+              <RolePrivileges>
+                <RolePrivilege name="prvCreatesprk_GridConfiguration" level="Basic" />
+              </RolePrivileges>
+            </Role>
+            """;
+
+        var findings = NoCreateViolations([("Spaarke Console User", withCreate), ("Spaarke AI Analysis Admin", withCreate)]);
+
+        var finding = Assert.Single(findings);
+        Assert.StartsWith("Spaarke Console User.xml:", finding, StringComparison.Ordinal);
     }
 
     [Fact(DisplayName = "Product configuration read guard non-vacuity: every exclusion source contributes tables")]

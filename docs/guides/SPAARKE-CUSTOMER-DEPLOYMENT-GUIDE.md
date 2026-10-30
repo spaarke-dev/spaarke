@@ -1854,8 +1854,11 @@ Run intake no longer takes `communicationGraphResource` / `emailGraphResource`. 
 > Because every user can read every playbook, **creating, cloning and sharing playbooks is for playbook administrators
 > only**: in the role XML only `Spaarke AI Analysis Admin` holds Create and Share on `sprk_analysisplaybook`, and the BFF
 > routes `POST /api/ai/playbooks`, `/{id}/clone`, `/{id}/share` and `/{id}/unshare` require the caller's own Create
-> (create, clone) or Share (share, unshare) privilege on that table before anything is read or written. A user without
-> it gets 403. Give a person who builds playbooks the `Spaarke AI Analysis Admin` role.
+> (create, clone) or Share (share, unshare) privilege on that table before anything is read or written. Every playbook
+> write route (`PUT /api/ai/playbooks/{id}`, `PUT /{id}/canvas`, and the node create, update, delete and scopes routes)
+> requires the caller's own Write privilege first, and an update that changes whether the playbook is public also
+> requires Share. A user without the privilege gets 403. Give a person who builds playbooks the
+> `Spaarke AI Analysis Admin` role.
 
 Secure projects, matters and work assignments (unified-access-control-r2) need Dataverse security configuration that
 no solution import can create. Since T256, **H7b creates it on every run**, after H6 and before H9:

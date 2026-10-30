@@ -1348,6 +1348,13 @@ public partial class RouteAuthorizationGuardTests
             + "to next, and the route's per-record decision is its owner or access filter, or none (POST /api/ai/playbooks).",
             "holds = probe is not null && await probe.CallerHoldsPrivilegeAsync(...); ... return await next(context) "
             + "(PlaybookAuthorizationFilter.cs, AuthorizeCallerTablePrivilegeAsync)"),
+        // Review fix round F1: on PUT /api/ai/playbooks/{id:guid}, after the Write gate and the owner filter, a request that
+        // CHANGES the stored IsPublic also needs prvShare (the same table-privilege method). Not a record decision.
+        new NonDecidingAttachment("AddPlaybookPublicFlagShareFilter", "Api/Filters/PlaybookAuthorizationFilter.cs", "-",
+            "A role-privilege precondition by design: an update that leaves IsPublic as stored goes to next, and one that "
+            + "changes it is decided by the Share table privilege; the route's per-record decision is its owner filter.",
+            "changesPublicFlag ? await AuthorizeCallerTablePrivilegeAsync(context, next, SharePlaybookPrivilege) : await "
+            + "next(context) (PlaybookAuthorizationFilter.cs, AuthorizePublicFlagChangeAsync)"),
         new NonDecidingAttachment("AddSpeAdminTenantScopeFilter", "Api/Filters/SpeAdminTenantScopeFilter.cs", "165",
             "Since task 165 it decides per config (uniform 404; 503 when unverifiable — fail CLOSED), per container (its "
             + "business-unit binding; an unbound container reaches nobody) and per container type, and confines the "
