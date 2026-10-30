@@ -645,9 +645,12 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
         Sprk.Bff.Api.Services.Ai.Membership.IIdentityNormalizationService? identity = null,
         Sprk.Bff.Api.Services.Access.SecureRootFilingGate? rootFiling = null) =>
         new(_user, CreateLogger<DataverseCreateRecordHandler>(), new HandoffUrlBuilder("https://spaarkedev1.crm.dynamics.com"),
-            resolver ?? _world.Resolver(), _appOnly.Object,
+            resolver ?? _world.Resolver(),
             identity ?? IdentityNormalizationFixtures.WithContact(CallerContact).Object,
-            rootFiling ?? SecureRootFilingGateFixtures.NothingSecure());
+            // Task 017 (2d-3): the owned create is the ONE server create, over this harness's collaborators (its share world
+            // and stamp world, as the route's suites build it).
+            RouteRecordCreation.Over(resolver ?? _world.Resolver(), _appOnly.Object, Restamper(), Shares(),
+                rootFiling ?? SecureRootFilingGateFixtures.NothingSecure()));
 
     private Task<ToolResult> CreateRecord(string table, params (string Column, JsonElement Value)[] item) =>
         CreateRecordHandler().ExecuteChatAsync(
@@ -725,6 +728,8 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
             ["sprk_invoicesubmission"] = "sprk_invoicesubmissions",
             // Field mapping task 017 (item 9): the budget inquiry's service request.
             ["sprk_servicerequest"] = "sprk_servicerequests",
+            // Field mapping task 017 (2d-3): an Owned-path table with no registry entry (the chat create refuses it).
+            ["phonecall"] = "phonecalls",
             // Field mapping task 017-d2: the chat create's company table (contact and task are above).
             ["account"] = "accounts",
         };

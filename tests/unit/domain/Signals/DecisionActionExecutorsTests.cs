@@ -954,7 +954,7 @@ public class DecisionActionExecutorsTests
 
     /// <summary>070's executor, built only so the adapter can be constructed; these tests never run it.</summary>
     private static BudgetInquiryExecutor Inquiry() =>
-        new(new FakeUserClient(), Owner().Object, new Mock<IFieldMappingDataverseService>().Object,
+        new(new FakeUserClient(), Owner().Object,
             new InquiryEmailSender(null!, new HttpContextAccessor()), new HttpContextAccessor(), NullLogger<BudgetInquiryExecutor>.Instance);
 
     [Fact]
@@ -1605,7 +1605,7 @@ public class DecisionActionExecutorsTests
         var user = new FakeUserClient();
         var appOnly = new Mock<IFieldMappingDataverseService>(MockBehavior.Strict);
         var inquiry = new BudgetInquiryExecutor(
-            user, Owner().Object, appOnly.Object, new InquiryEmailSender(null!, new HttpContextAccessor()), new HttpContextAccessor(),
+            user, Owner().Object, new InquiryEmailSender(null!, new HttpContextAccessor()), new HttpContextAccessor(),
             NullLogger<BudgetInquiryExecutor>.Instance);
         var executor = new BudgetInquiryActionExecutor(inquiry);
         var request = Request(new() { ["to"] = to, ["subject"] = "s", ["body"] = "b", ["outsideFirm"] = FirmId.ToString("D") });

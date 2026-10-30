@@ -101,8 +101,7 @@ public sealed class ChatServerWrittenTableBlockTests : TypedToolHandlerTestFixtu
 
     private DataverseCreateRecordHandler Handler() =>
         new(_user, CreateLogger<DataverseCreateRecordHandler>(), new HandoffUrlBuilder("https://spaarkedev1.crm.dynamics.com"),
-            _world.Resolver(), _appOnly.Object, IdentityNormalizationFixtures.NoLinkedContact(),
-            SecureRootFilingGateFixtures.NothingSecure());
+            _world.Resolver(), IdentityNormalizationFixtures.NoLinkedContact(), Sprk.Bff.Api.Tests.Integration.DataMutation.RecordOwnership.RouteRecordCreation.Default(_world.Resolver(), _appOnly.Object, SecureRootFilingGateFixtures.NothingSecure()));
 
     private Task<ToolResult> CreateRecord(string table, params (string Column, JsonElement Value)[] item) =>
         Handler().ExecuteChatAsync(CreateContext(table, item), BuildAnalysisTool(nameof(DataverseCreateRecordHandler)),
