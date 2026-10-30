@@ -119,11 +119,13 @@ internal sealed partial class RecordCreationService
     /// </summary>
     internal Func<string, RecordTableRule?> TableRules { get; init; } = RecordTableRules.Find;
 
-    /// <summary>The user-facing noun for a table in refusal texts: the child-record route's, with the two Office roots named.</summary>
+    /// <summary>The user-facing noun for a table in refusal texts: the child-record route's, with the two Office roots and the
+    /// budget inquiry's service request (task 017, 2d-5) named.</summary>
     internal static string NounOf(string? table) => (table ?? string.Empty).Trim().ToLowerInvariant() switch
     {
         "sprk_matter" => "matter",
         "sprk_project" => "project",
+        "sprk_servicerequest" => "service request",
         var other => Sprk.Bff.Api.Api.ChildRecordEndpoints.Noun(other),
     };
 

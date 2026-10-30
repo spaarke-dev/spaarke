@@ -425,8 +425,8 @@ public sealed partial class SecureChildOwnershipAiToolTests
 
         result.Outcome.Should().Be(BudgetInquiryOutcome.Refused, "the outcome the old core's AppendTo denial gave");
         result.Error.Should().Be(
-            "A record this record is filed under was not found. The record was not saved.",
-            "the shared map's uniform not-found (NFR-01): missing and not-appendable answer alike; sprk_servicerequest has no noun of its own in NounOf, so the map says \"record\"");
+            "A record this service request is filed under was not found. The service request was not saved.",
+            "the shared map's uniform not-found (NFR-01): missing and not-appendable answer alike; sprk_servicerequest has its own noun in NounOf (2d-5)");
         _appCreates.Should().BeEmpty();
         email.Sent.Should().BeEmpty();
     }
@@ -440,7 +440,8 @@ public sealed partial class SecureChildOwnershipAiToolTests
 
         result.Outcome.Should().Be(BudgetInquiryOutcome.CreateFailed, "a fault: the outcome the old core's throw gave");
         result.Error.Should().Be(
-            "The record could not be saved right now, so nothing was created. Try again in a few minutes.");
+            "The service request could not be saved right now, so nothing was created. Try again in a few minutes.",
+            "the shared map's 503 words, with the service request's own noun (2d-5)");
         _appCreates.Should().BeEmpty();
         email.Sent.Should().BeEmpty();
     }
