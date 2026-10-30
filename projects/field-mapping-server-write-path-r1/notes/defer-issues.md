@@ -63,3 +63,23 @@ Two-write rule: every entry here has a GitHub issue, and every issue has an entr
 | **Class** | K: no caller sends a case variant today |
 | **Owner task** | 018b (optional; criterion added), else a follow-up |
 | **Failure** | Step 2 is skipped for system-principal items, so a case-variant `ownerid@odata.bind`, creator-person bind or `sprk_issecure` would sit beside the server's own key. The fix is the K3 approach |
+
+## DI-007 — A system-principal create gets its I-1 stamp only after the create
+
+| Field | Value |
+|---|---|
+| **Found** | 2026-10-30, task 017 part 2d-1 |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2479 |
+| **Class** | K: no system-principal creator exists (owner decision 2d) |
+| **Owner task** | 033 (first system creator) |
+| **Failure** | The caller principal gets the stamp in the create payload (decision 2a). The system principal still gets it from the post-create re-derivation, because binding needs nav-property names only a caller can read. Fix: app-only metadata read or a test-verified nav-property map |
+
+## DI-008 — The repair pass must not re-own task, contact and account
+
+| Field | Value |
+|---|---|
+| **Found** | 2026-10-30, task 017 part 2d-2 |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2480 |
+| **Class** | Deferred: RepairAsync has no production caller yet |
+| **Owner task** | 052 |
+| **Failure** | Registering the three chat tables (owner, 2026-10-30) makes RepairAsync accept them, so the scheduled pass would re-own user-created rows to a team. Exclude them in 052, or ask the owner |
