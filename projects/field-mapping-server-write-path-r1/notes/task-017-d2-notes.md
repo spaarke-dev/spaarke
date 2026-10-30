@@ -57,3 +57,15 @@ No service change was needed.
 - The contact, account and must-not-widen tests and the two existing task tests still pass.
 
 After the entry was restored, everything passes.
+
+## Finding: Repair now accepts these three tables (owner or coordinator to confirm)
+
+`RecordCreationService.RepairAsync` refuses only a table with no registry entry (`record_repair.table_unsupported`). So
+registering `task`, `contact` and `account` also makes Repair accept them.
+- On such a row, Repair would re-own it to the resolver's team if it is systemuser-owned.
+- It would not map it (the exclusion) and would not index it.
+
+Nothing calls `RepairAsync` in production yet. The scheduled pass will choose its tables, and it must not include
+these three unless the owner wants user-created contacts, accounts and tasks re-owned.
+`RecordRepairModeTests.ATableThisServiceDoesNotCreate_IsSkipped_WithNothingRead` used `account` as its example of an
+unregistered table. It now uses `phonecall`; the test means the same thing.
