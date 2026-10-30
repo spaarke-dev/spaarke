@@ -721,6 +721,10 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
             ["sprk_signal"] = "sprk_signals", ["sprk_policy"] = "sprk_policies",
             // #2110: a communication's thread.
             ["sprk_communicationthread"] = "sprk_communicationthreads",
+            // Field mapping task 017 (item 8): an invoice-family table filed by the regarding trio.
+            ["sprk_invoicesubmission"] = "sprk_invoicesubmissions",
+            // Field mapping task 017 (item 9): the budget inquiry's service request.
+            ["sprk_servicerequest"] = "sprk_servicerequests",
         };
 
         /// <summary>
@@ -842,6 +846,21 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
             {
                 ("sprk_matter", "sprk_matter", "sprk_Matter"),
                 ("sprk_project", "sprk_project", "sprk_Project"),
+            },
+            // Field mapping task 017 (item 8): the invoice submission's core lookups are the regarding trio
+            // (InvoiceFamilyCoreRecordGuard.CoreRecordLookups).
+            ["sprk_invoicesubmission"] = new[]
+            {
+                ("sprk_regardingmatter", "sprk_matter", "sprk_RegardingMatter"),
+                ("sprk_regardingproject", "sprk_project", "sprk_RegardingProject"),
+                ("sprk_regardingworkassignment", "sprk_workassignment", "sprk_RegardingWorkAssignment"),
+            },
+            // Field mapping task 017 (item 9): the budget inquiry's service request (BudgetInquiryExecutor.BuildBody's binds).
+            ["sprk_servicerequest"] = new[]
+            {
+                ("sprk_regardingmatter", "sprk_matter", "sprk_RegardingMatter"),
+                ("sprk_regardingrecordtype", "sprk_recordtype_ref", "sprk_RegardingRecordType"),
+                ("sprk_regardingorganization", "sprk_organization", "sprk_RegardingOrganization"),
             },
             ["sprk_billingevent"] = new[]
             {

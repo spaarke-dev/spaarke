@@ -352,6 +352,26 @@ internal sealed partial class RecordCreationService
         if (user is null)
         {
             item = ((RecordCreationPayload.Mapped)request.Payload).Item;
+
+            // Task 017 (owner decision 2b): a system principal's row is the server's, so the caller's column policy is not
+            // asked (FR-07) — except the table's own server-owned columns, which no principal names (a document's access
+            // record), and a document's access record and narrowing as the app-only refusal states them
+            // (InheritedAccessPermission.RefuseAppOnlyWrite: Access Permission, its record, the submission marker). A
+            // caller may still fill a document's Access Permission at create (UAC-r2 D7); an app-only create may not.
+            if (item.Columns.FirstOrDefault(c => rule.TableServerOwnedColumns.Contains(c)) is { } systemTableColumn)
+            {
+                return Decision.Refuse(new RecordCreationRefusal(RecordCreationRefusalKind.BlockedColumn,
+                    RecordCreationRefusal.BlockedColumnCode, $"Column '{systemTableColumn}' of a {noun} is set by Spaarke — omit it."));
+            }
+
+            if (InheritedAccessPermission.RefuseAppOnlyWrite(table, item.Columns) is
+                { RefusalCode: InheritedAccessPermission.AppOnlyDocumentWriteReasonCode } appOnlyRefusal)
+            {
+                return Decision.Refuse(new RecordCreationRefusal(RecordCreationRefusalKind.BlockedColumn,
+                    RecordCreationRefusal.BlockedColumnCode, $"The {noun} was not created: {appOnlyRefusal.Reason}."));
+            }
+
+            // Recorded as before: the caller's column policy is the step, and a system principal skips it.
             trace.Record(RecordCreationStep.TableRules, RecordCreationStepState.Skipped, "system principal (FR-07)");
         }
         else
@@ -1625,8 +1645,28 @@ internal sealed partial class RecordCreationService
 /// <summary>What to create: the table and the payload, and the request's facts the pipeline needs.</summary>
 internal sealed record RecordCreationRequest(string Table, RecordCreationPayload Payload)
 {
-    /// <summary>Lookups the SERVER added to the row (e.g. the email draft's sender): they name the caller and cost no AppendTo.</summary>
-    public IReadOnlySet<string>? ServerSetLookupColumns { get; init; }
+    private readonly IReadOnlySet<string>? _serverSetLookupColumns;
+
+    /// <summary>
+    /// Lookups the SERVER added to the row (e.g. the email draft's sender): they name the caller and cost no AppendTo.
+    /// Task 017 (014 review R3-1): normalised ONCE, here, as the request is built — each name trimmed and lower-cased, blanks
+    /// dropped, compared case-insensitively — so the K-2 / F-B guards (<c>ServerSetFilingColumn</c>,
+    /// <c>ServerSetRootFilingLookups</c>), the mapping protection (<c>ProtectedFromMapping</c>) and step 5's AppendTo skip
+    /// (<see cref="CallerWriteAuthorization.CheckCallerMayCreateAsync"/>) all read the one set: a padded or mixed-case name
+    /// can no longer be "server-set" to one reader and the caller's own to another.
+    /// </summary>
+    public IReadOnlySet<string>? ServerSetLookupColumns
+    {
+        get => _serverSetLookupColumns;
+        init => _serverSetLookupColumns = NormaliseColumns(value);
+    }
+
+    /// <summary>The one normalisation of <see cref="ServerSetLookupColumns"/>; <c>null</c> stays <c>null</c>.</summary>
+    internal static IReadOnlySet<string>? NormaliseColumns(IEnumerable<string>? columns) =>
+        columns?
+            .Where(c => !string.IsNullOrWhiteSpace(c))
+            .Select(c => c.Trim().ToLowerInvariant())
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>The request's trace id (the ProblemDetails <c>correlationId</c>); a fresh one when absent.</summary>
     public string? CorrelationId { get; init; }

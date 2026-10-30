@@ -17,6 +17,7 @@ namespace Spaarke.ArchTests;
 /// (<see cref="ChildRecordEndpoints.CreateTables"/>) and the Office quick-create's Matter and Project, as the adapter
 /// (<c>OfficeService.QuickCreateViaCreationServiceAsync</c>) names its table — <see cref="QuickCreateFieldRequirements.GetLogicalName"/>
 /// (field mapping task 018c; the deleted Office creation core's constants before it). Its Invoice is on the route's list.
+/// And the budget inquiry's service request (<c>BudgetInquiryExecutor.Table</c>, task 017 item 9).
 /// The chat <c>dataverse.create_record</c> tool has no accept-list (any table but <c>sprk_document</c>), so
 /// it is not covered. The unified create service (task 013) accepts exactly the registry's tables — an unregistered table
 /// is refused (<c>record_creation.table_unsupported</c>) — so its accepted set needs no entry here.</para>
@@ -34,6 +35,9 @@ public class RecordTableRulesRegistryGuardTests
         ChildRecordEndpoints.CreateTables
             .Append(QuickCreateFieldRequirements.GetLogicalName(QuickCreateEntityType.Matter))
             .Append(QuickCreateFieldRequirements.GetLogicalName(QuickCreateEntityType.Project))
+            // Field mapping task 017 (item 9): the budget inquiry's fixed table, which the service creates once 017c
+            // re-points the inquiry.
+            .Append(Sprk.Bff.Api.Services.Signals.Actions.BudgetInquiryExecutor.Table)
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .OrderBy(t => t, StringComparer.Ordinal)
             .ToList();

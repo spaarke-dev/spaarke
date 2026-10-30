@@ -212,7 +212,57 @@ public class RecordTableRulesTests
     public void MappingProtectedColumns_AreDeclaredOnlyOnTheTablesThatNeedThem()
     {
         RecordTableRules.All.Where(r => r.MappingProtectedColumns.Count > 0).Select(r => r.Table)
-            .Should().BeEquivalentTo("sprk_matter", "sprk_project", "sprk_invoice", "sprk_billingevent", "sprk_document", "sprk_budget");
+            .Should().BeEquivalentTo("sprk_matter", "sprk_project", "sprk_invoice", "sprk_billingevent", "sprk_document", "sprk_budget",
+                // Task 017 (coordinator item 8): the other four invoice-family tables protect their core lookups too.
+                "sprk_invoicesubmission", "sprk_invoiceapproval", "sprk_externalidentifier", "sprk_invoicecorrection");
+    }
+
+    // ── Task 017 (coordinator item 8): every invoice-family table's core lookups are mapping-protected ───────────────
+
+    public static TheoryData<string> InvoiceFamilyTables() => new(InvoiceFamilyCoreRecordGuard.CoreRecordLookups.Keys);
+
+    /// <summary>The guard's core lookups of <paramref name="table"/> that <paramref name="protectedColumns"/> leaves mappable.</summary>
+    private static IReadOnlyList<string> UnprotectedCoreLookups(string table, IReadOnlySet<string> protectedColumns) =>
+        InvoiceFamilyCoreRecordGuard.CoreRecordLookups[table].Select(l => l.Column).Where(c => !protectedColumns.Contains(c)).ToArray();
+
+    [Theory]
+    [MemberData(nameof(InvoiceFamilyTables))]
+    public void MappingProtectedColumns_EveryInvoiceFamilyTable_CoversEveryCoreLookupItsGuardReads(string table)
+    {
+        // A mapping that filled a SECOND core lookup would fail a valid create with invoice_family_multiple_core_records; the
+        // protected set is derived from the guard, so it covers every core lookup the guard reads, on every family table.
+        var rule = RecordTableRules.Find(table);
+        rule.Should().NotBeNull($"{table} is an invoice-family table, so the registry declares it");
+        UnprotectedCoreLookups(table, rule!.MappingProtectedColumns).Should().BeEmpty();
+        rule.PreWriteRules.Should().Contain(RecordTableRules.InvoiceFamilyRule);
+    }
+
+    [Fact]
+    public void MappingProtectedColumns_TheCoreLookupCheck_FiresOnASetMissingOne()
+    {
+        // Must fire: the check above finds a core lookup a protected set leaves mappable.
+        var missingProject = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "sprk_regardingmatter", "sprk_regardingworkassignment" };
+        UnprotectedCoreLookups("sprk_invoicesubmission", missingProject).Should().Equal("sprk_regardingproject");
+        UnprotectedCoreLookups("sprk_invoice", new HashSet<string>()).Should()
+            .BeEquivalentTo("sprk_matter", "sprk_project", "sprk_regardingworkassignment");
+    }
+
+    // ── Task 017 (#1608, decision 2b): one server-owned set on every secure root; a document's access record ─────────
+
+    [Theory]
+    [InlineData("sprk_matter")]
+    [InlineData("sprk_project")]
+    [InlineData("sprk_workassignment")]
+    public void TableServerOwnedColumns_EverySecureRoot_RefusesTheSameThreeColumns(string table) =>
+        RecordTableRules.Get(table).TableServerOwnedColumns.Should().BeEquivalentTo(
+            "sprk_containerid", "sprk_securitybu", "sprk_accesspermission");
+
+    [Fact]
+    public void TableServerOwnedColumns_ADocument_RefusesItsAccessInheritance_NotItsAccessPermission()
+    {
+        var document = RecordTableRules.Get("sprk_document").TableServerOwnedColumns;
+        document.Should().BeEquivalentTo(Sprk.Bff.Api.Services.Access.AccessInheritance.Column);
+        document.Should().NotContain(InheritedAccessPermission.Column, "UAC-r2 D7: a caller may fill it at create");
     }
 
     [Fact]
