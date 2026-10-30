@@ -25,7 +25,7 @@ Q1 = A (an eligible internal user, or an onboarded external contact with a grant
 - **uac-r2 dev move:** root-homed humans move to BU1 (owner approval pending, no writes yet; they give notice first). The seed policies likely stay root-owned (`DoNotMoveAllRecords=true`). After the move, BU1-homed Ontology Admins (Deep) can't read root-owned seed policies; uac-r2 is preparing an owner question and will copy us. **Hold the memo-LIKE proof** until they confirm placement.
 - **CI:** `ontology-script-tests` is pinned to Pester 5.7.1 (#2428). DI-134 (#2430) asks the CI owner to pin `verdict-script-tests`.
 - **Don't push to docs while a docs→master PR is open** (it moves the PR head and restarts CI).
-- `OrdinaryMovesWritesEnabled` stays OFF.
+- `OrdinaryMovesWritesEnabled` stays OFF until ontology has reviewed the report-only pass's planned lines for sprk_signal, sprk_decisionrecord and sprk_budgetrevision: owner only, to the moved root's team; core stamps and fact snapshot unchanged (D-34). uac-r2 asked 2026-10-30 (owner approved turning it on after their master deploy); they send the lines, then ontology re-reads the rows after the first write run. Dev before: root-owned 20 open WA-core Signals + 4 WA-core DRs, 1 project-core DR, 6 matter-core Signals, 5 matter-core DRs, 15 no-core Signals. No condition on `SecureRoot__Inheritance__RootOwnerWritesEnabled` (same unit).
 - **Commits in a fresh worktree:** lint-staged needs prettier: `export PATH="/c/code_files/spaarke-wt-spaarke-ontology-platform-r1/node_modules/.bin:$PATH"` (no junctions). Integration tests under `tests/integration/auth/**` compile into `tests/unit/Sprk.Bff.Api.Tests`; filter there.
 
 ## Next docs→master
