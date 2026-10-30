@@ -325,3 +325,58 @@ Changed B2b-1 tests: the two that read `pendingSignalChanges` now read the findi
 - **K-c:** the D-112 scrub covers only the entries a correction replaces; the review read model re-scrubs what it returns.
 - **K-d:** `sprk_reviewedon` has seconds resolution, so two corrections of one field in the same second can swap order when the latest is picked by that column.
 - **K-g:** a re-code calls `CodeSetResolver.ResolveAsync` again, with AI cost per correction, and can leave mixed code sets on one invoice (the corrected line on the newer resolution, others on the original).
+
+## Fix round, part 3: durability (F-2, the fail-open)
+
+**The defect.** A correction's value commits in its own transaction; the follow-through (findings, status, Signals, totals) runs after it. A findings step that failed, with no repeat, left nothing behind saying the correction was not followed through: a Clean line corrected from 2.5 to 25 hours stayed Clean with no daily-cap finding, and the approval accepted it in bulk (D-72). The same root cause broke chained corrections: the "before" side was the previous row's final value (`labels[^2]`), and a timekeeper then date correction on one line lost the first pair because `resolutionChange` was overwritten.
+
+**Behaviour (before -> after).**
+1. **Applied rows are recorded.** The findings step adds every Corrected / Confirmed row of the corrected field (on its line) to a new findings JSON member `appliedCorrections` (`[ "<row id>", ... ]`), in the same row-version-conditional write as the patch, also when the patch is empty. A repeat adds nothing and writes nothing.
+2. **The diff starts from the last applied value.** The "before" side is the final value of the last row of the field listed in `appliedCorrections` (else the first row's AI value), so a row saved without its findings step is diffed by the next correction of the field, or by its own repeat. Its confidence counts as verified only when such a row exists.
+3. **Timekeeper and date: the last applied pair.** The correction service now also writes `resolutionChange.original` (the roster match and rate before the line's FIRST timekeeper or date correction, carried over every later one). The findings step of a timekeeper or date correction of a fee line records the pair it patched with in a new member `appliedResolutions` (`{ "<line index>": { timekeeperId, approvedRate, timekeeperReason, rateStatus, rateReason } }`), in the same write. The "before" pair of such a correction is `appliedResolutions[line]`, else `original` (else `before`, for a line written before `original` existed) with the reasons the first evaluation stored, else the columns (the pair never changed). This also closes B2c known limit 4.
+4. **Approval guard.** `InvoiceApprovalService` approve, and `canApprove` on the approval GET, refuse while a Corrected or Confirmed row of a re-evaluated field is not in `appliedCorrections`: 409 `ebilling.approval.corrections_pending`, detail `These corrections were saved but did not finish: Hours (line 3); InvoiceDate (invoice). Repeat each correction, then approve again.` (field names and line numbers; no ids). The check sits with the other pre-claim checks (after the hold check, before the I-2 line check and the earlier-bulk-accept completion), so nothing is claimed or written when it refuses. Its read (`InvoiceCorrectionReevaluation.ReadUnappliedAsync`, static, app-only, inside the reviewed type so the task 122 guard is unchanged) fails closed: a fault is 503 `ebilling.approval.unavailable` at step `read` on approve, and the GET throws (as it does for the hold read). Reject and return (104) are not on this branch and are not guarded.
+5. **A line with no stored extraction.** The status step leaves a touched line that has no extraction JSON (or an unreadable one) as it is, never re-deriving it as Pending, and logs one warning with the count. This closes part 2 known limit (b).
+
+**Decision taken here (for the operator).** `ReadUnappliedAsync` skips the rows of a line a reviewer has since DECIDED (Accepted, Reduced, Disallowed). Two reasons: 103's D-72 test (`CleanLinesAcceptedInBulk_DecidedFieldsUnreviewed`) seeds a reviewer's Corrected row on an Accepted line with no findings JSON, and the brief requires 103's suite unchanged. Also, the correction service refuses a decided line, so such a row could never be repeated, and approval would be blocked with no way out but reject / return. Cost: the narrow case below (known limit 1). Reversing it means also letting a repeat run on a decided line (a correction-service change) and changing that 103 test.
+
+**Files.** `Services/Finance/InvoiceCorrectionReevaluation.cs`, `InvoiceCorrectionService.cs` (`original`), `InvoiceApprovalService.cs` (code, check, `canApprove`), `Api/Finance/InvoiceApprovalEndpoints.cs` (docs). No schema change (two new members in an existing JSON column), no new DI registration, interface, endpoint or package.
+
+**Component justification (section 11).** Existing: the findings JSON already carries the follow-through's own state (`pendingSignalChanges`), and the approval already refuses on pre-claim reads (held, I-2). Extension: both new members ride in the existing findings write; the guard is one more pre-claim read through a static method in the type that already owns the findings JSON read. Cost of doing nothing: an unfinished correction is approved past, and its line is accepted in bulk without the finding it should carry (F-2).
+
+**Tests.**
+- New `InvoiceCorrectionDurabilityTests` (6): `appliedCorrections` written on an empty patch, and the repeat adds nothing; a failed findings step leaves the row unlisted until its repeat; rate 150 -> 100 unapplied, then 105: the stale over-approved finding is removed (SEEDED); rate 100 -> 150 unapplied, then 160: the finding is added and both rows are listed; timekeeper (unapplied) then date on one line: the date diff starts from the original pair, then the timekeeper repeat clears the guard; a touched line with no extraction keeps its status, with one warning.
+- `InvoiceCorrectionEndToEndTests` (+3, over `ApprovalWorld`): an unfinished correction gives `canApprove` false and approve 409 `corrections_pending` with nothing written (no claim, no transition, the Clean line not accepted), then the repeat makes it approvable and it is approved (SEEDED); the 2.5 -> 25 hours case is not bulk-accepted, and the repeat flags the line (approve then answers lines open); a fault on the guard's read refuses approve (503, nothing written), and the GET throws.
+- Changed: `InvoiceCorrectionReevaluationTests.ALineAReviewerDecided_...` compares the stored JSON without `appliedCorrections` (the empty patch now records the row). The end-to-end file's `Corrections` helper gained an optional Signal writer. 103's approval suite and 049's suites are unchanged and green.
+
+**Seeded proofs** (each reverted, watched fail, restored):
+1. Guard off (the refusal skipped and `canApprove` ignoring it): both approval tests failed.
+2. "Before" back to `labels[^2]`: the rate 150 -> 100 -> 105 test failed. A first version of the test (100 -> 120 -> 130) stayed green under this seed: the over-approved finding carries the billed rate, so 120 and 130 differ and the entry is replaced either way. The seeded test uses the direction where both sides agree.
+3. Resolution "before" back to `resolutionChange.before` only: the timekeeper-then-date test failed.
+4. `MarkApplied` removed: 10 tests failed (the tests that read `appliedCorrections` or approve after a correction).
+5. The no-extraction skip removed: its test failed.
+
+**Gate.** Builds clean (0 warnings, 0 errors): Sprk.Bff.Api.Tests, Spaarke.ArchTests, Sprk.Bff.Api.IntegrationTests, Spe.Integration.Tests, Sprk.Provisioning.ControlPlane.LoadTests. ArchTests 1858 passed, 0 failed. Unit filter `Finance|Ebilling|Billing|Signals|Approval|Invoice`: 9052 passed, 7 skipped, 0 failed. Integration project: 199 passed, 8 skipped, 0 failed. `dotnet list package --vulnerable --include-transitive`: none; no package change.
+
+**Publish size** (`-c Release -r linux-x64 --self-contained false`, `git archive` of each commit, short path): master `c8bb55d0cd` 136,144,596 bytes; this branch 136,266,820; the whole 101 branch is +122,224 against current master (under the +5 MB bar; master already holds the rest of ebilling-r1). The absolute total is above 55 MB, as master's is.
+
+**code-review / adr-check.** No violations. ADR-002 (one server-side owner, fails closed), ADR-010 (no new interface or DI), ADR-013 (no AI), ADR-015 (logs carry ids, field names and counts only), ADR-019 (stable code), ADR-028 / task 122 (the findings JSON read stays in the reviewed app-only type; ArchTests green), ADR-044 (ids stored in `D` form, parsed tolerantly). ADR-038 warning: the new test file goes to test-diet at project close. Two class remarks that still described the old "before" were corrected.
+
+**Known limits (K-class).**
+1. **A row on a line decided since** is not guarded (the decision above). If its findings step never ran, a finding it would have placed on ANOTHER undecided line (a cross-line rule such as the daily cap) is missing, and that line can be accepted in bulk. Follow-up: have task 100's line decision refuse a line with an unapplied correction, which removes both this case and the reason to skip.
+2. **"Applied" means the findings step finished.** A status, Signals or totals step that failed after it, with no repeat, is not guarded: the line status, a Signal or the totals can stay stale while approval passes (this is the brief's closed set). `pendingSignalChanges` still marks an unfinished Signals step, if a stronger guard is wanted.
+3. **TotalDue** has no findings step, so its rows are never listed and never guarded (a failed totals step is the 503 the client repeats).
+4. **The diff is per field.** A correction diffs its own field from its last applied value with every other field at its current value. While another field's correction is unapplied, a finding that depends on both fields can be patched against the other field's unapplied value. The guard holds approval until that correction is repeated.
+5. **A concurrent correction** whose value commits after the approve's guard read is not seen by that approve (corrections do not take the invoice-decision lock).
+6. **Rows saved before this change** (no `appliedCorrections` yet) read as unapplied on undecided lines: the reviewer repeats them once. Only dev data exists on this branch.
+7. **The approval GET** shows `canApprove: false` without a reason; the reason is in the approve's 409. A UI follow-up can call approve or add a member.
+8. `appliedCorrections` grows by about 40 characters per row; the column limit (1,048,576) allows about 26,000 rows.
+
+## Review status (F-1 .. F-5)
+
+| Finding | Status | Where |
+|---|---|---|
+| F-1 refused totals left a saved value no repeat could clear | Fixed: dry-run before the write, 409 `totals_refused` | Fix round, part 2 |
+| F-2 fail-open: an unfinished correction approved past | Fixed: `appliedCorrections`, last-applied "before", approval guard 409 `corrections_pending` (known limits 1 and 2 above) | Fix round, part 3 |
+| F-3 false `currency.mismatch` on every line | Fixed: the lines move with the header currency; the rules re-run through the diff | Fix round, part 2 |
+| F-4 `coding.not_returned` cleared by a correction | No behaviour change: EB-D-175 allows it; code comment added | Fix round, part 1 |
+| F-5 Signal left open after its group is gone | Fixed: a null raise closes the latest open episode | Fix round, part 1 |
