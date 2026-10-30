@@ -85,7 +85,7 @@ public sealed record ApExportResult(
 /// <remarks>
 /// <para><b>Order.</b> (1) validate the request; (2) <see cref="ApExportAuthorization.AuthorizeExportAsync"/> (EB-D-178; the whole batch or nothing, before any read
 /// of the invoices' state); (3) read the mapping and check the file store (before any claim: a fault here writes nothing); (4) read and check the
-/// selection (each invoice Approved with an empty batch lookup, else 400 with per-invoice reasons, nothing claimed); (5) create the batch, status
+/// selection (each invoice Approved with an empty batch lookup, else 400 with per-invoice reasons, nothing claimed; and the batch total fits the batch total column, else 400 <c>batch_total_out_of_range</c>, nothing claimed); (5) create the batch, status
 /// Generating; (6) claim every invoice in id order with <c>IfRowVersionMatches</c> on the version read in (4): a conflict releases this batch's claims,
 /// marks the batch Failed and answers 409 (ordered claims make exactly one of two overlapping batches win); (7) re-check that every claimed invoice is
 /// still Approved; (8) read the values once, write the CSV and JSON; (9) move each invoice to Sent to AP; (10) mark the batch Completed.</para>
