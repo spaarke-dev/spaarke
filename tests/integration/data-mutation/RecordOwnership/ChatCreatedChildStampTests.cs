@@ -323,6 +323,36 @@ public sealed partial class SecureChildOwnershipAiToolTests
             DataverseCreateRecordHandler.RefusalErrorCode(Refusal(kind, "some.code")).Should().NotBeNullOrWhiteSpace(kind.ToString());
     }
 
+    [Theory]
+    [InlineData(403)]
+    [InlineData(404)]
+    [InlineData(400)]
+    [InlineData(500)]
+    public void ChatCreate_AnUpstreamFailureThatNamesNoCode_IsPassedThroughAsBefore_NotMadeIntoInternalError(int status)
+    {
+        // Task 017 review F-6 (NFR-07): MapClientError gave the result the failure's own ErrorCode, null included.
+        var failure = new DataverseUserResponse { IsSuccess = false, StatusCode = status, ErrorCode = null, ErrorMessage = "Test: words" };
+        var refusal = new RecordCreationRefusal(RecordCreationRefusalKind.Upstream, RecordCreationRefusal.UpstreamCode, "x")
+        {
+            ClientFailure = failure,
+        };
+
+        DataverseCreateRecordHandler.RefusalErrorCode(refusal).Should().BeNull($"as MapClientError gave it, for a {status}");
+        DataverseCreateRecordHandler.RefusalText(refusal, "sprk_todo", "corr").Should().NotContain("Test: words");
+    }
+
+    [Fact]
+    public void ChatCreate_AnUpstreamFailureThatNamesACode_KeepsItsOwnCode_MustNotFire()
+    {
+        var failure = DataverseUserResponse.Fail(403, DataverseUserClientErrorCodes.AccessDenied, "Test: words");
+        var refusal = new RecordCreationRefusal(RecordCreationRefusalKind.Upstream, RecordCreationRefusal.UpstreamCode, "x")
+        {
+            ClientFailure = failure,
+        };
+
+        DataverseCreateRecordHandler.RefusalErrorCode(refusal).Should().Be(DataverseUserClientErrorCodes.AccessDenied);
+    }
+
     [Fact]
     public void ChatCreate_TheToolDescription_NoLongerOffersTheMatterOrProjectNumber_OwnerDecision2c()
     {

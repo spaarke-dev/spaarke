@@ -1316,6 +1316,10 @@ internal sealed class EmailDraftToolHandler : IToolHandler
             .Detail ?? "The draft was NOT created.";
         var code = refusal switch
         {
+            // Task 017 review F-6 (NFR-07): a Dataverse failure asked as the caller is passed through as it was (MapClientError
+            // gave the result the failure's own ErrorCode, null included), never as a code of this tool's own.
+            { Kind: Sprk.Bff.Api.Services.RecordCreation.RecordCreationRefusalKind.Upstream, ClientFailure: { } upstream } =>
+                upstream.ErrorCode,
             { Kind: Sprk.Bff.Api.Services.RecordCreation.RecordCreationRefusalKind.PrincipalUnresolved
                 or Sprk.Bff.Api.Services.RecordCreation.RecordCreationRefusalKind.Upstream } =>
                 refusal.ClientFailure?.ErrorCode ?? ToolErrorCodes.InternalError,

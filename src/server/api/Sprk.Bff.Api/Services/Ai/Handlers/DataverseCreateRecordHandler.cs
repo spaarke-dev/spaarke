@@ -707,13 +707,16 @@ internal sealed partial class DataverseCreateRecordHandler : IToolHandler
     /// keep their own stable codes; a fault (<see cref="RecordCreationRefusalKind.Unavailable"/>, the I-1 stamp's included) and
     /// a create with no decision are <see cref="ToolErrorCodes.InternalError"/>, as the old core's throw was.
     /// </summary>
-    internal static string RefusalErrorCode(RecordCreationRefusal refusal)
+    internal static string? RefusalErrorCode(RecordCreationRefusal refusal)
     {
         ArgumentNullException.ThrowIfNull(refusal);
         return refusal switch
         {
             { Kind: RecordCreationRefusalKind.PrincipalUnresolved or RecordCreationRefusalKind.Upstream, ClientFailure.ErrorCode: { } own }
                 when !string.IsNullOrWhiteSpace(own) => own,
+            // Task 017 review F-6 (NFR-07): a Dataverse failure that names no code was passed through as it was (MapClientError
+            // gave the result the failure's own ErrorCode, null included), never as a code of this tool's own.
+            { Kind: RecordCreationRefusalKind.Upstream, ClientFailure: { } nameless } => nameless.ErrorCode,
             { Kind: RecordCreationRefusalKind.PrincipalUnresolved } => DataverseUserClientErrorCodes.AccessDenied,
             { Kind: RecordCreationRefusalKind.NotFoundOrDenied or RecordCreationRefusalKind.BlockedColumn } =>
                 DataverseUserClientErrorCodes.AccessDenied,
@@ -877,7 +880,7 @@ internal sealed partial class DataverseCreateRecordHandler : IToolHandler
             response.ErrorCode,
             Timed(startedAt));
 
-    private ToolResult Error(AnalysisTool tool, string message, string code, DateTimeOffset startedAt) =>
+    private ToolResult Error(AnalysisTool tool, string message, string? code, DateTimeOffset startedAt) =>
         ToolResult.Error(HandlerId, tool.Id, tool.Name, message, code, Timed(startedAt));
 
     private static ToolExecutionMetadata Timed(DateTimeOffset startedAt) =>

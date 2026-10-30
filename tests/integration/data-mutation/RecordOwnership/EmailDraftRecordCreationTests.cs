@@ -230,6 +230,26 @@ public sealed partial class SecureChildOwnershipAiToolTests
     }
 
     [Theory]
+    [InlineData(403)]
+    [InlineData(404)]
+    [InlineData(400)]
+    [InlineData(500)]
+    public void EmailDraft_AnUpstreamFailureThatNamesNoCode_IsPassedThroughAsBefore_NotMadeIntoInternalError(int status)
+    {
+        // Task 017 review F-6 (NFR-07): MapClientError gave the result the failure's own ErrorCode, null included.
+        var failure = new DataverseUserResponse { IsSuccess = false, StatusCode = status, ErrorCode = null, ErrorMessage = "Test: words" };
+        var refusal = new RecordCreationRefusal(RecordCreationRefusalKind.Upstream, "record_creation.dataverse", "x")
+        {
+            ClientFailure = failure,
+        };
+
+        var (code, message) = EmailDraftToolHandler.RefusalCodeAndText(refusal, "c0ffee");
+
+        code.Should().BeNull($"as MapClientError gave it, for a {status}");
+        message.Should().NotContain("Test: words");
+    }
+
+    [Theory]
     [InlineData(nameof(RecordCreationRefusalKind.PrincipalUnresolved))]
     [InlineData(nameof(RecordCreationRefusalKind.Upstream))]
     public void EmailDraft_AQuestionAskedAsTheCallerThatFailed_KeepsTheFailuresOwnCode_WithoutItsText(string kindName)
