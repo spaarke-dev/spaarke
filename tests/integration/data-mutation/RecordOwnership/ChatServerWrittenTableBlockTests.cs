@@ -56,6 +56,7 @@ public sealed class ChatServerWrittenTableBlockTests : TypedToolHandlerTestFixtu
     [InlineData("sprk_invoicesubmission")]
     [InlineData("sprk_invoiceapproval")]
     [InlineData("sprk_invoicecorrection")]
+    [InlineData("sprk_externalidentifier")] // ebilling-r1 2026-10-30 (task 017 2d-3)
     public async Task CreateRecord_AServerWrittenInvoiceFamilyTable_IsRefused_WithNoCreateCall(string table)
     {
         var result = await CreateRecord(table, Lookup("sprk_matter", "sprk_matter", OrdinaryMatter));
@@ -73,6 +74,7 @@ public sealed class ChatServerWrittenTableBlockTests : TypedToolHandlerTestFixtu
     [InlineData("sprk_invoicesubmission")]
     [InlineData("sprk_invoiceapproval")]
     [InlineData("sprk_invoicecorrection")]
+    [InlineData("sprk_externalidentifier")] // ebilling-r1 2026-10-30 (task 017 2d-3)
     public void ValidateChat_AServerWrittenInvoiceFamilyTable_IsRefusedBeforeTheConfirmation(string table)
     {
         // The pre-suspend leg: no confirm dialog is shown for a create that can never run.

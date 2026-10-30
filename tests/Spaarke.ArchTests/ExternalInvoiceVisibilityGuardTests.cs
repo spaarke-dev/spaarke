@@ -88,6 +88,8 @@ public class ExternalInvoiceVisibilityGuardTests
             "The regarding lookup map (initializer); configuration.",
         ["Sprk.Bff.Api.Services.Ai.Handlers.DataverseCreateRecordHandler::.cctor"] =
             "The chat create's blocked server-written invoice tables (ebilling-r1 review of f758480f3c); refuses a create, reads no row.",
+        ["Sprk.Bff.Api.Services.Ai.Handlers.DataverseCreateRecordHandler::ServerWrittenInvoiceFamilyCreateBlockedMessage"] =
+            "The refusal text for those tables (sprk_externalidentifier's own sentence, ebilling-r1 2026-10-30); reads no row.",
         // ── parts of the predicate's application (inputs and the decision's consequence) ──
         [$"{typeof(ExternalMessageEndpoints).FullName}::RegardingInvoicesOf"] =
             "Extracts a message page's regarding invoice ids FOR the predicate (SecureRootsFilter → RegardingInvoicesVisibleAsync).",

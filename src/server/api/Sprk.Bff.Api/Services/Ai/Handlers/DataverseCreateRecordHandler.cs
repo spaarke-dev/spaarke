@@ -133,18 +133,29 @@ public sealed partial class DataverseCreateRecordHandler : IToolHandler
     /// from chat: refused outright, with the <c>sprk_document</c> block's mechanism and shape
     /// (<see cref="ToolErrorCodes.ValidationFailed"/>, before any Dataverse call, in both <see cref="ValidateChat"/> and
     /// <see cref="ExecuteChatAsync"/>), whatever the record-creation registry accepts for the table.
+    /// <para>ebilling-r1 (2026-10-30, decisions.md): also <see cref="ExternalIdentifierTable"/>. Its only writer is ebilling's
+    /// resolution step (task 044), which normalises the value and fills the issuing organisation the alternate key needs; a
+    /// chat-created row could route later invoices to the wrong matter.</para>
     /// </summary>
     internal static readonly IReadOnlySet<string> ServerWrittenInvoiceFamilyTables = new HashSet<string>(StringComparer.Ordinal)
     {
-        "sprk_invoicesubmission", "sprk_invoiceapproval", "sprk_invoicecorrection",
+        "sprk_invoicesubmission", "sprk_invoiceapproval", "sprk_invoicecorrection", ExternalIdentifierTable,
     };
+
+    /// <summary>ebilling-r1 (2026-10-30): the external identifier e-billing resolves invoices to matters by.</summary>
+    internal const string ExternalIdentifierTable = "sprk_externalidentifier";
 
     /// <summary>The single rejection message for a <see cref="ServerWrittenInvoiceFamilyTables"/> create (user- and model-facing).</summary>
     internal static string ServerWrittenInvoiceFamilyCreateBlockedMessage(string tablename) =>
-        $"'{tablename}' records can't be created from chat — this create was REJECTED and nothing was written. They are " +
-        "written by Spaarke's e-billing services only, as the record of an invoice submission, approval or correction. " +
-        $"Do NOT retry this create — {tablename} is blocked on this tool unconditionally and no argument change makes it " +
-        "valid; submit, approve or correct the invoice from the invoice itself instead.";
+        string.Equals(tablename, ExternalIdentifierTable, StringComparison.Ordinal)
+            ? $"'{tablename}' records can't be created from chat — this create was REJECTED and nothing was written. They are " +
+              "written by Spaarke's e-billing services only, when an invoice is resolved to its matter. " +
+              $"Do NOT retry this create — {tablename} is blocked on this tool unconditionally and no argument change makes it " +
+              "valid; an external identifier is recorded when e-billing resolves an invoice."
+            : $"'{tablename}' records can't be created from chat — this create was REJECTED and nothing was written. They are " +
+              "written by Spaarke's e-billing services only, as the record of an invoice submission, approval or correction. " +
+              $"Do NOT retry this create — {tablename} is blocked on this tool unconditionally and no argument change makes it " +
+              "valid; submit, approve or correct the invoice from the invoice itself instead.";
 
     [GeneratedRegex(@"^[a-z][a-z0-9_]*\z")]
     private static partial Regex LogicalNameRegex();
