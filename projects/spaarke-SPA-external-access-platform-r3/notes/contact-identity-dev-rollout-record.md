@@ -85,3 +85,4 @@
   - Clean: 0 5xx (the 6 failures are anonymous 401 probes); 0 [OWNERSHIP-REFUSED]; 0 OFFICE_022/014; the SecureChild reconciler made no reassign or put-back writes, and ordinary moves ran report-only.
   - Pre-existing, unchanged: [SECURE-CENSUS] root-BU reach until the BU1 move; #2163 FLS proof 403 and [ID-LINK-RECON] for spaarke-acme; 1 transient Redis lease renew.
 - About 15:13Z: R3 sent ebilling "gate passed, you can go".
+- 15:21:14Z: ebilling applied its EB-D-173 dev settings: `Ebilling__Enabled=true`, `Ebilling__StoredFileReconcileEnabled=false`, plus the three `Finance__FileStore__*` settings (blob endpoint, tenant id, malware scanning off). The app restarted. Afterwards, healthz returned 200 and an anonymous finance route returned 401. To roll back, ebilling removes the five settings.
