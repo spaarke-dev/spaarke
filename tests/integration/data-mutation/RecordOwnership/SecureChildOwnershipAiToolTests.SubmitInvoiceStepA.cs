@@ -42,7 +42,8 @@ public sealed partial class SecureChildOwnershipAiToolTests
     /// filing (a regarding matter when <paramref name="communicationFiled"/>; the thread <paramref name="thread"/> when given) and the thread row
     /// (none: the thread cannot be found).
     /// </summary>
-    private static Mock<IGenericEntityService> SourceReads(bool communicationFiled, Entity? thread = null, bool inThread = false)
+    private static Mock<IGenericEntityService> SourceReads(
+        bool communicationFiled, Entity? thread = null, bool inThread = false, Exception? threadFault = null)
     {
         var entities = new Mock<IGenericEntityService>();
         entities.Setup(e => e.RetrieveAsync("sprk_document", SourceDocument, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
@@ -65,7 +66,9 @@ public sealed partial class SecureChildOwnershipAiToolTests
             .ReturnsAsync(communication);
         entities.Setup(e => e.RetrieveMultipleAsync(
                 It.Is<QueryExpression>(q => q.EntityName == "sprk_communicationthread"), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(() => thread is null ? new EntityCollection() : new EntityCollection(new List<Entity> { thread }));
+            .Returns(() => threadFault is not null
+                ? Task.FromException<EntityCollection>(threadFault)
+                : Task.FromResult(thread is null ? new EntityCollection() : new EntityCollection(new List<Entity> { thread })));
         return entities;
     }
 
@@ -221,6 +224,40 @@ public sealed partial class SecureChildOwnershipAiToolTests
         var filed = await StepOneThenA(SourceReads(communicationFiled: false, inThread: true).Object);
 
         filed.Should().BeFalse();
+        _user.Patches.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "#2471 follow-up (must not fire): a thread that is not there (zero rows) counts as filed")]
+    public async Task IsCommunicationFiled_ThreadNotThere_CountsAsFiled()
+    {
+        var filed = await InvoiceSubmissionService.IsCommunicationFiledAsync(
+            SourceReads(communicationFiled: false, inThread: true).Object, FiledCommunication, CancellationToken.None);
+
+        filed.Should().BeTrue("step A never files a message whose thread's filing it cannot see (fail closed)");
+    }
+
+    [Fact(DisplayName = "#2471 follow-up (must fire): a thread read that FAULTS propagates; it is not taken as a missing thread")]
+    public async Task IsCommunicationFiled_ThreadReadFaults_Propagates()
+    {
+        var act = () => InvoiceSubmissionService.IsCommunicationFiledAsync(
+            SourceReads(communicationFiled: false, inThread: true, threadFault: new InvalidOperationException("the thread read faulted"))
+                .Object,
+            FiledCommunication, CancellationToken.None);
+
+        await act.Should().ThrowAsync<InvalidOperationException>("a read fault is not an answer (the method's contract)");
+    }
+
+    [Fact(DisplayName = "#2471 follow-up (must fire): step A answers a faulted thread read with its 503, never 'already filed'")]
+    public async Task SubmitInvoice_StepA_ThreadReadFaults_Is503_NoWrite()
+    {
+        UnfiledCommunicationExists();
+        CallerCanReadTheSource(AccessRights.Read | AccessRights.Write);
+
+        var act = () => StepOneThenA(SourceReads(
+            communicationFiled: false, inThread: true, threadFault: new InvalidOperationException("the thread read faulted")).Object);
+
+        var refused = (await act.Should().ThrowAsync<InvoiceSubmissionEndpoints.SourceFilingRefusedException>()).Which.Answer;
+        Status(refused).Should().Be(StatusCodes.Status503ServiceUnavailable, "the filing could not be read: try again, nothing saved");
         _user.Patches.Should().BeEmpty();
     }
 
