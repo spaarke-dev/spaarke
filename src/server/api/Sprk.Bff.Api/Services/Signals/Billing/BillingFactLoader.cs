@@ -587,6 +587,9 @@ public sealed class BillingFactLoader
             return invoiceStatus switch
             {
                 InvoiceStatusCodes.Cancelled => null,
+                // Task 097 (ontology-r1 088 gate F1): a corrected invoice keeps the firm's number (D-37), so the invoice it replaced must not
+                // count as an earlier use of that number. Like Cancelled, it is no prior at all.
+                InvoiceStatusCodes.Superseded => null,
                 InvoiceStatusCodes.Rejected => BillingPriorStatus.Rejected,
                 InvoiceStatusCodes.ReturnedToFirm => BillingPriorStatus.ReturnedToFirm,
                 _ => BillingPriorStatus.Active,

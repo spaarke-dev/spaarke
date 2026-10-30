@@ -373,6 +373,40 @@ public class BillingFactLoaderTests
         AssertWroteNothing();
     }
 
+    // Task 097a (ontology-r1 088 gate F1): a corrected invoice keeps the firm's number (D-37) and supersedes the invoice it replaced, so that
+    // invoice must not count as an earlier use of the number. Like Cancelled, a Superseded invoice is no prior at all.
+
+    [Fact]
+    public async Task MustFire_ASupersededPredecessor_IsNoPrior_SoTheCorrectedInvoiceRaisesNoDuplicate_Task097a()
+    {
+        DuplicateRule();
+        _world.OrdinaryRoot("sprk_matter", OrdinaryMatter);
+        PriorWithInvoice("INV-100.1", ("sprk_matter", "sprk_matter", OrdinaryMatter), invoiceStatus: InvoiceStatusCodes.Superseded);
+
+        var loaded = await Loader().LoadAsync(Request(OrdinaryMatter), CancellationToken.None);
+        var result = await Evaluator().EvaluateAsync(Request(OrdinaryMatter), CancellationToken.None);
+
+        loaded.PriorSubmissions.Should().BeEmpty("the replaced invoice is not an earlier use of the firm's number");
+        result.Findings.Should().NotContain(f => f.RuleType == RuleType.Duplicate);
+        AssertWroteNothing();
+    }
+
+    [Theory]
+    [InlineData(InvoiceStatusCodes.InReview)]
+    [InlineData(InvoiceStatusCodes.Approved)]
+    public async Task MustNotFire_AnInReviewOrApprovedPrior_OfTheSameNumber_IsStillADuplicate_Task097a(int priorStatus)
+    {
+        DuplicateRule();
+        _world.OrdinaryRoot("sprk_matter", OrdinaryMatter);
+        var prior = PriorWithInvoice("INV-100.1", ("sprk_matter", "sprk_matter", OrdinaryMatter), invoiceStatus: priorStatus);
+
+        var loaded = await Loader().LoadAsync(Request(OrdinaryMatter), CancellationToken.None);
+        var finding = await TheDuplicateFindingAsync(OrdinaryMatter);
+
+        loaded.PriorSubmissions.Should().ContainSingle(p => p.SubmissionId == prior && p.Status == BillingPriorStatus.Active);
+        finding.ReasonCode.Should().Be(BillingReasonCodes.DuplicateInvoiceNumber);
+    }
+
     [Fact]
     public async Task TheReads_AreBounded_WhateverTheNumberOfLines()
     {
