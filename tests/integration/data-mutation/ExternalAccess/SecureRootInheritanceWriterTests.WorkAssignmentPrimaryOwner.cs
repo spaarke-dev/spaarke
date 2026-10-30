@@ -285,11 +285,14 @@ public partial class SecureRootInheritanceWriterTests
 
         var missing = await Ask(Guid.NewGuid());
         missing.Unverifiable.Should().BeNull("a record that does not exist confers nothing");
+        missing.Faulted.Should().BeFalse("not found is not a fault");
         missing.Lookups.Should().BeEmpty();
 
         World.FailingRowReadsOf("sprk_event", @event);
         var unreadable = await Ask(@event);
         unreadable.Unverifiable.Should().NotBeNull("an unreadable intermediate is unverifiable, never \"under nothing\"");
+        unreadable.Faulted.Should().BeTrue("a read that faulted is told apart from one that found nothing");
+        unreadable.Fault.Should().NotBeNull();
         unreadable.Lookups.Should().BeEmpty();
     }
 

@@ -3522,8 +3522,9 @@ public sealed partial class SecureRootInheritance
     }
 
     /// <summary>#1630: an intermediate as read — the matters and projects it belongs to (<c>null</c> = it does not exist), or a
-    /// fault.</summary>
-    private readonly record struct IntermediateRead(IReadOnlyList<(string Table, Guid Id)>? Parents, bool Faulted);
+    /// fault (<c>Fault</c>: what the read threw, for a caller that propagates it).</summary>
+    private readonly record struct IntermediateRead(
+        IReadOnlyList<(string Table, Guid Id)>? Parents, bool Faulted, Exception? Fault = null);
 
     /// <summary>#1630: the intermediate rows one call has read (a row reached by several records is read once).</summary>
     private sealed class IntermediateReads : Dictionary<(string Table, Guid Id), IntermediateRead>
@@ -3594,7 +3595,7 @@ public sealed partial class SecureRootInheritance
                     logger.LogWarning(ex, "[SECURE-INHERIT] {Count} {Table} row(s) a record is filed under could not be read.",
                         chunk.Length, group.Key);
                     foreach (var row in chunk)
-                        into[row] = new IntermediateRead(null, true);
+                        into[row] = new IntermediateRead(null, true, ex);
                 }
             }
         }
@@ -3693,6 +3694,17 @@ public sealed partial class SecureRootInheritance
     internal sealed record OwnerFilingThroughIntermediates(
         IReadOnlyList<KeyValuePair<string, RecordOwnershipParent?>> Lookups, string? Unverifiable)
     {
+        /// <summary>
+        /// Set when <see cref="Unverifiable"/> is because an intermediate's read FAULTED (a throttled or failed read), not
+        /// because it was not found: what that read threw. A writer refuses on <see cref="Unverifiable"/> either way (fail
+        /// closed); the resolver propagates this fault, as it does a fault reading the row itself, so a caller retries a
+        /// transient fault rather than reporting a refusal.
+        /// </summary>
+        internal Exception? Fault { get; init; }
+
+        /// <summary>An intermediate's read faulted (<see cref="Fault"/>).</summary>
+        internal bool Faulted => Fault is not null;
+
         /// <summary>Nothing to add: the row holds a typed parent, or no intermediate.</summary>
         internal static OwnerFilingThroughIntermediates None { get; } =
             new(Array.Empty<KeyValuePair<string, RecordOwnershipParent?>>(), null);
@@ -3745,7 +3757,8 @@ public sealed partial class SecureRootInheritance
     /// <param name="committed">A committed read of the intermediates (the resolver's re-file path, #2143 round 3: every parent
     /// fact it reads is committed); otherwise <c>NoLock</c> (creation, the resolver's create paths).</param>
     /// <returns>An intermediate that cannot be read: <see cref="OwnerFilingThroughIntermediates.Unverifiable"/> (the caller
-    /// refuses; never "under nothing"). One that does not exist confers nothing. Never throws a read fault.</returns>
+    /// refuses; never "under nothing"), with <see cref="OwnerFilingThroughIntermediates.Fault"/> when that read faulted. One
+    /// that does not exist confers nothing. Never throws a read fault.</returns>
     internal static async Task<OwnerFilingThroughIntermediates> OwnerLookupsThroughIntermediatesAsync(
         IGenericEntityService dataverse, ILogger logger, string table, IReadOnlyList<(string Table, Guid Id)> filedIntermediates,
         CancellationToken ct, bool committed = false)
@@ -3760,7 +3773,12 @@ public sealed partial class SecureRootInheritance
             .ConfigureAwait(false);
         var (parents, unknown) = NameThroughIntermediates(filedIntermediates, reads, absentIsUnknown: false);
         if (unknown is not null)
-            return new OwnerFilingThroughIntermediates(Array.Empty<KeyValuePair<string, RecordOwnershipParent?>>(), unknown);
+        {
+            return new OwnerFilingThroughIntermediates(Array.Empty<KeyValuePair<string, RecordOwnershipParent?>>(), unknown)
+            {
+                Fault = filedIntermediates.Select(i => reads[i]).FirstOrDefault(r => r.Faulted).Fault,
+            };
+        }
 
         return new OwnerFilingThroughIntermediates(
             OwnerKeyedParents(logical, Array.Empty<(string, string, Guid)>(), parents), null);

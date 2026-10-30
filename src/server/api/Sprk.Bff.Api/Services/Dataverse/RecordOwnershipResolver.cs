@@ -3923,8 +3923,8 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
     /// no matter or project) names the matters and projects that record belongs to FIRST, the invoice or event kept after
     /// them — <c>SecureRootInheritance.OwnerLookupsThroughIntermediatesAsync</c>, the derivation creation and the un-secure
     /// cascade ask, so every path ranks the same parent first. <c>Filing</c> is <c>null</c> when the row cannot be read, or
-    /// (with <c>Unverifiable</c>) when what its invoice or event belongs to cannot be read (fail closed); a Dataverse fault
-    /// reading the row itself propagates.
+    /// (with <c>Unverifiable</c>) when what its invoice or event belongs to cannot be told (fail closed); a Dataverse fault
+    /// reading the row itself, or reading its invoice or event, propagates.
     /// </summary>
     private async Task<(IReadOnlyList<RecordOwnershipParent>? Filing, string? Unverifiable)> ReadLookThroughFilingAsync(
         RecordOwnershipParent row, bool committedReads, CancellationToken ct)
@@ -3938,6 +3938,11 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
         var through = await Sprk.Bff.Api.Services.Access.SecureRootInheritance
             .OwnerLookupsThroughIntermediatesAsync(_dataverse, _logger, row.EntityLogicalName, lookups, ct, committedReads)
             .ConfigureAwait(false);
+        // A faulted read of the invoice or event (throttled, failed) is not an answer: it propagates, as a fault reading the row
+        // itself does (ReadFilingRowAsync), so the caller retries rather than reporting a refusal. Creation refuses on it
+        // instead (fail closed, OwnerFilingThroughIntermediates.Unverifiable).
+        if (through.Fault is { } fault)
+            System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(fault).Throw();
         if (through.Unverifiable is { } unverifiable)
             return (null, unverifiable);
         if (through.Lookups.Count == 0)

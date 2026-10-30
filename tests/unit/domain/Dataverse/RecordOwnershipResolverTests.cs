@@ -4665,17 +4665,16 @@ public class RecordOwnershipResolverTests
         resolution.RefusalCode.Should().Be(RecordOwnerRefusal.SecureParentNotIsolated);
     }
 
-    [Fact]
-    public async Task ResolveOwner_AUserOwnedWorkAssignmentUnderAnEventThatCannotBeRead_Refuses()
+    [Fact(DisplayName = "A faulted read of a person-owned work assignment's event propagates — never an answer, never a refusal (as a fault reading the row itself does)")]
+    public async Task ResolveOwner_AUserOwnedWorkAssignmentUnderAnEventThatCannotBeRead_PropagatesTheFault()
     {
         var directory = WithWorkAssignment(
             Directory().WithUnreadable("sprk_event"),
             new() { ["sprk_regardingevent"] = new EntityReference("sprk_event", Guid.NewGuid()) });
 
-        var resolution = await AskAboutTheWorkAssignment(directory, asContent: false);
+        var act = () => AskAboutTheWorkAssignment(directory, asContent: false);
 
-        resolution.IsRefused.Should().BeTrue("what the event belongs to cannot be read: never \"filed under nothing\"");
-        resolution.RefusalCode.Should().Be(RecordOwnerRefusal.ParentUnresolved);
+        await act.Should().ThrowAsync<InvalidOperationException>("a throttled or failed read is retried, not reported refused");
     }
 
     [Fact]
@@ -4844,6 +4843,36 @@ public class RecordOwnershipResolverTests
         intermediateReads.Should().NotBeEmpty("what the invoice belongs to is read");
         intermediateReads.Should().OnlyContain(q => q.NoLock == !refile,
             refile ? "every parent fact on the re-file path is a committed read" : "the create paths keep their NoLock reads");
+    }
+
+    [Theory(DisplayName = "A faulted read of what a person-owned work assignment's invoice belongs to propagates on the resolver's paths, as a fault reading the row itself does — never a ParentUnresolved refusal")]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task ResolveOwner_WhenTheInvoiceAWorkAssignmentIsFiledUnderFaults_PropagatesTheFault(bool refile)
+    {
+        var (directory, _, eventId) = AWorkAssignmentUnderAnInvoiceOfTheMatter();
+        directory.WithUnreadable("sprk_invoice");
+
+        Func<Task> act = refile
+            ? () =>
+            {
+                var request = FileTheEventUnderTheWorkAssignment(eventId);
+                return Build(directory).ReparentAsync(request, Applies(directory, request), CancellationToken.None);
+            }
+            : () => AskAboutTheWorkAssignment(directory, asContent: false);
+
+        await act.Should().ThrowAsync<InvalidOperationException>("a throttled or failed read is retried, not reported refused");
+    }
+
+    [Fact(DisplayName = "Control: an invoice a person-owned work assignment names that does NOT exist is not a fault — nothing is thrown")]
+    public async Task ResolveOwner_WhenTheInvoiceAWorkAssignmentIsFiledUnderDoesNotExist_DoesNotThrow()
+    {
+        var directory = WithWorkAssignment(
+            Directory(), new() { ["sprk_regardinginvoice"] = new EntityReference("sprk_invoice", Guid.NewGuid()) });
+
+        var resolution = await AskAboutTheWorkAssignment(directory, asContent: false);
+
+        resolution.IsOwned.Should().BeFalse("a parent that cannot be found never yields an ordinary owner");
     }
 
     private static RecordOwnershipResolver Build(FakeDirectory directory) => directory.Resolver();
