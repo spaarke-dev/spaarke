@@ -157,6 +157,6 @@ Findings of the adversarial review of the merged task, fixed in scope. Every fix
 
 ### Found while fixing, not changed
 
-- `InvoiceDate`, `DueDate`, billing period and line dates go through `DateOf` (the UTC date of the stored value). If those columns are user-local date-times the same one-day shift can occur; the review named `ApprovedOn` only. The owner decides whether those columns are date-only.
+- `InvoiceDate`, `DueDate`, billing period and line dates go through `DateOf` (the UTC date of the stored value). Checked by the main session (2026-10-30): `sprk_invoicedate` and `sprk_eventdate` are date-format, user-local columns in the solution (`Behavior` 1); the billing period columns are documented Date only (`docs/data-model/sprk_invoice.md`). The server writes these dates as midnight UTC, so `DateOf` returns the written date. Known limit: a date a user edits in the app from a time zone east of UTC is stored as the previous day's evening in UTC and exports one day early. Changing the columns to Date only is a schema change, not done here.
 
 rework: none task 150
