@@ -428,3 +428,33 @@ Sync-mode migration (UAC-r2 4a): class-aware. Assigned-To targets stay 0; filing
 
    Anything access-changing (bulk share/grant, Monitor if it shares) needs UAC review before it is built. "Email family members" takes recipients only from the people lookups on readable members, respects field security, and uses the existing communication send path.
 - **5c follow-up:** UAC filed #2343. Recommendation: retire the `sprk_securitybu` mechanism (remove `HasLegacyPerProjectBusinessUnit` and its 409, then delete the column). Interim: hide the BU-form navigation. UAC takes the schema delete to the owner.
+
+## 2026-10-30 — Owner: task 039 approved; chat create keeps task, contact and account
+
+**Task 039 (FR-38, server-owned search index): approved as written.** It is sequenced after 017 and before the 019
+W2 deploy, so the durable #2399 fix ships with W2. The procedure ran in full: design §13, then UAC-r2's review, the
+spec amendment FR-38, the task, the TASK-INDEX entry and the owner's approval.
+
+**Chat `dataverse.create_record` on the unified service: register `task`, `contact` and `account`** (option b).
+- 017c found that, today, the chat create sends every user- or team-owned table through `OwnedChildWrite`'s create
+  core, with a team owner from the resolver. The service creates only tables in `RecordTableRules`.
+- The owner chose to register the three tables the tool offers, keeping today's resolver team owner. `task` is also
+  pinned by an existing test.
+- Every other unregistered table is refused, as 017's criterion states.
+- Organization-owned and per-user tables, and unfiled communications, keep their run-as-user path
+  (`OwnedChildWrite.PathFor`).
+- Rejected:
+  - refusing every unregistered table (a chat task, contact or account create would stop working);
+  - keeping the old core for the rest (a second create core would remain).
+
+**ebilling-r1 (2026-10-30):**
+- The chat create also refuses `sprk_externalidentifier`. Its only writer is ebilling's resolution step (task 044),
+  which normalises the value and fills the issuing organisation the alternate key needs. A chat-created row could
+  route later invoices to the wrong matter.
+- The four new invoice-family registry entries derive their mapping-protected columns from the guard's per-table
+  `CoreRecordLookups`. This was done in 017b.
+- A system-principal create of an invoice-family table being refused (403) is OK as the interim.
+
+**Chat tool error codes (017, ADR-019 + NFR-07; no owner question).** Chat follows task 018's Office precedent: each
+refusal kind maps to the handler's existing tool error code, and only the text comes from the shared map. Existing
+codes (`AccessDenied`, `VALIDATION_FAILED`, `INTERNAL_ERROR`) do not change.
