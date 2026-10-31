@@ -390,7 +390,7 @@ public class RecordOwnerAssignmentCensusTests
             "A lookup change on a CHILD table is a re-file (ReparentAsync: the caller's PATCH, then the owner assigned and "
             + "read back); any other table moved under a SECURE record is refused. Since task 147 r1 through the shared "
             + "OwnedChildWrite.RefileAsync. #1616: a project's BFF-managed (field-secured) pair is written update-only by the "
-            + "application after the caller's AppendTo/Write/Append checks (OwnedChildWrite.PatchWithBffManagedPairAsync); "
+            + "application after the caller's AppendTo/Write/Append checks, conditioned on the row version (task 195: ProjectMatterFiling.FileAsync); "
             + "the owner is never written there."),
 
         // ── task 147 r1 (owner round 28 item 1): the browser's child writers, through the BFF ─────────────────────────
@@ -399,7 +399,8 @@ public class RecordOwnerAssignmentCensusTests
             + "server create: as-the-caller checks, the resolver's owner or the secure-create plan's named team, the app-only "
             + "create, then the post-create steps). PATCH /api/v1/child-records/{table}/{id}, /api/v1/events/{id}/filing and "
             + "/api/communications/{id}/filing: OwnedChildWrite.RefileAsync (ReparentAsync); a PATCH that files nothing is the "
-            + "caller's own update."),
+            + "caller's own update. Task 195: PATCH .../sprk_project/{id} takes the filing pair only, written by "
+            + "ProjectMatterFiling.FileAsync (the application, version-conditioned; the owner is never written there)."),
 
         // ── #2084 (owner round 102 item 4, option A3 agreed with spaarke-ontology-platform-r1) ─────────────────────────
         new UnscannedWriter("OntologyAdminAuthoringService.cs",

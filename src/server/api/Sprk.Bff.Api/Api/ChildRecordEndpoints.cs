@@ -86,6 +86,10 @@ public static class ChildRecordEndpoints
         "sprk_todo", "sprk_memo", "sprk_invoice", "sprk_reportcard", "sprk_analysis",
     };
 
+    // unified-access-control-r2 task 195 (#2352): the same route also files a PROJECT under its matter — a filing-only body
+    // (its regarding pair, nothing else), dispatched by RefileAsync to ProjectMatterFiling before this child set is asked,
+    // never to OwnedChildWrite.RefileAsync or the caller's own PATCH.
+
     /// <summary>The stable reason code of the uniform not-found (a record the payload binds, or the row itself).</summary>
     internal const string NotFoundCode = "child_record.not_found";
 
@@ -180,10 +184,13 @@ public static class ChildRecordEndpoints
         // PATCH /api/v1/child-records/{table}/{id} — re-file (the caller's own PATCH, owner decided and assigned).
         group.MapPatch("/{table}/{id:guid}", RefileAsync)
             .WithName("RefileChildRecord")
-            .WithSummary("Re-file a child record (to-do, memo, invoice, report card, analysis)")
+            .WithSummary("Re-file a child record (to-do, memo, invoice, report card, analysis), or file a project under its matter")
             .WithDescription("Applies the caller's own update (as the caller). When it changes what the row is filed " +
                 "under, the caller needs AppendTo on every record it is moved under and, to move it out of a secure " +
-                "record, Full Access on that record or to be its creator; the owner is re-derived and assigned.")
+                "record, Full Access on that record or to be its creator; the owner is re-derived and assigned. For " +
+                "sprk_project the body is the regarding pair only ({\"sprk_regardingrecordid\": \"<matter id>\", " +
+                "\"sprk_regardingrecordtype@odata.bind\": \"/sprk_recordtype_refs(<matter record type id>)\"}); the " +
+                "caller needs Write and Append on the project and AppendTo on the matter, and the application writes the pair.")
             .Produces(StatusCodes.Status204NoContent)
             .ProducesProblem(StatusCodes.Status400BadRequest)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
@@ -355,6 +362,28 @@ public static class ChildRecordEndpoints
             or DataverseUserClientErrorCodes.OboNotConfigured;
 
     /// <summary>PATCH /api/v1/child-records/{table}/{id}.</summary>
+    /// <remarks>
+    /// <para><b><c>sprk_project</c></b> (unified-access-control-r2 task 195, #2352): files the project under a matter through
+    /// its ADR-024 regarding pair — the shape <see cref="RecordCreationService"/> accepts on a project create, and the ONLY
+    /// body accepted here for a project:</para>
+    /// <code>
+    /// PATCH /api/v1/child-records/sprk_project/{projectId}
+    /// {
+    ///   "sprk_regardingrecordid": "&lt;matter id&gt;",
+    ///   "sprk_regardingrecordtype@odata.bind": "/sprk_recordtype_refs(&lt;the sprk_matter record type id&gt;)"
+    /// }
+    /// </code>
+    /// <para>Both properties as strings, nothing else (the navigation property's case is not significant; a clear is not
+    /// accepted). The core is <see cref="ProjectMatterFiling.FileAsync"/>, shared with the chat update tool: 204 when filed,
+    /// and when it was already filed under that matter (nothing written); 400 <see cref="NotFilingCode"/> for any other body,
+    /// <see cref="InvalidPayloadCode"/> for a pair that is not whole, <see cref="ProjectMatterFiling.NotAMatterCode"/> when the
+    /// pair names anything but a matter; 404 <see cref="NotFoundCode"/> for a project or matter the caller cannot use or that
+    /// does not exist (one answer); 403 <see cref="DeniedCode"/> without Write and Append on the project; 409
+    /// <see cref="ProjectMatterFiling.ChangedConcurrentlyCode"/> when the project changed while it was being filed,
+    /// <see cref="ProjectMatterFiling.SecureMatterCode"/> under a secure matter and
+    /// <see cref="ProjectMatterFiling.LeavesSecureCode"/> away from a secure record (neither is supported yet), and the
+    /// secure-root gate's refusals in their usual statuses. Nothing is written on any refusal.</para>
+    /// </remarks>
     internal static Task<IResult> RefileAsync(
         string table,
         Guid id,
@@ -366,14 +395,157 @@ public static class ChildRecordEndpoints
         [FromServices] IGenericEntityService appOnlyEntities,
         HttpContext httpContext,
         ILogger<Program> logger,
-        CancellationToken ct)
+        CancellationToken ct,
+        [FromServices] SecureRootFilingGate? rootFiling = null,
+        [FromServices] IFieldMappingDataverseService? appOnlyFields = null)
     {
         var entity = (table ?? string.Empty).Trim().ToLowerInvariant();
+        if (entity == ProjectMatterFiling.Table)
+            return FileProjectAsync(id, body, user, restamper, rootFiling, appOnlyFields, httpContext, logger, ct);
+
         return RefileTables.Contains(entity)
             ? UpdateAsync(entity, id, body, user, ownership, restamper, children, httpContext, logger, ct,
                 appOnlyEntities: appOnlyEntities)
             : Task.FromResult(Problem(StatusCodes.Status400BadRequest, UnsupportedTableCode,
                 $"'{table}' records are not re-filed here."));
+    }
+
+    /// <summary>
+    /// Task 195: the request-shape rule of a project's filing (no I/O): a JSON object with exactly the pair's id
+    /// (<c>sprk_regardingrecordid</c>, a string) and its record-type bind (<c>sprk_regardingrecordtype@odata.bind</c>, a
+    /// string). <c>null</c> when the body may proceed.
+    /// </summary>
+    internal static IResult? ProjectFilingShapeProblem(JsonElement body)
+    {
+        const string detail = "A project is filed here by its regarding pair only: 'sprk_regardingrecordid' (the matter's id) " +
+                              "and 'sprk_regardingrecordtype@odata.bind' (the matter record type). Nothing was saved.";
+        if (body.ValueKind != JsonValueKind.Object)
+            return Problem(StatusCodes.Status400BadRequest, NotFilingCode, detail);
+
+        bool id = false, type = false;
+        foreach (var property in body.EnumerateObject())
+        {
+            if (!id && property.Value.ValueKind == JsonValueKind.String
+                && string.Equals(property.Name, SecureRootInheritance.PairIdColumn, StringComparison.OrdinalIgnoreCase))
+            {
+                id = true;
+                continue;
+            }
+
+            if (!type && property.Value.ValueKind == JsonValueKind.String
+                && string.Equals(property.Name, SecureRootInheritance.PairTypeColumn + BindSuffix, StringComparison.OrdinalIgnoreCase))
+            {
+                type = true;
+                continue;
+            }
+
+            return Problem(StatusCodes.Status400BadRequest, NotFilingCode, detail);
+        }
+
+        return id && type ? null : Problem(StatusCodes.Status400BadRequest, NotFilingCode, detail);
+    }
+
+    /// <summary>
+    /// Task 195: <c>PATCH /api/v1/child-records/sprk_project/{id}</c> — the shape rule, the Web API payload mapped as the
+    /// caller, then the one core (<see cref="ProjectMatterFiling.FileAsync"/>) with the route's re-stamp as its after-write
+    /// step. See <see cref="RefileAsync"/> for the contract.
+    /// </summary>
+    internal static async Task<IResult> FileProjectAsync(
+        Guid id,
+        JsonElement body,
+        IDataverseUserClient user,
+        CoreAncestorRestamper restamper,
+        SecureRootFilingGate? rootFiling,
+        IFieldMappingDataverseService? appOnlyFields,
+        HttpContext httpContext,
+        ILogger logger,
+        CancellationToken ct)
+    {
+        const string entity = ProjectMatterFiling.Table;
+        if (ProjectFilingShapeProblem(body) is { } shape)
+            return shape;
+
+        if (rootFiling is null)
+        {
+            // Fail closed: without the gate nothing can tell whether the matter is secure.
+            return Problem(StatusCodes.Status500InternalServerError, NoDecisionCode, "The project was not filed.");
+        }
+
+        var mapped = await DataverseWriteItemMapper.MapWebApiPayloadAsync(user, entity, body, ct).ConfigureAwait(false);
+        if (mapped.ValidationError is { } invalid)
+            return Problem(StatusCodes.Status400BadRequest, InvalidPayloadCode, invalid);
+        if (mapped.ClientFailure is { } mapFailure)
+            return CallerFailure(mapFailure, entity);
+
+        var outcome = await ProjectMatterFiling.FileAsync(
+                user, appOnlyFields, rootFiling, id, mapped.Item!, logger, httpContext.TraceIdentifier, ct,
+                afterWrite: async () =>
+                {
+                    var restamp = await restamper.AfterWriteAsync(entity, id, mapped.Item!.Columns, CancellationToken.None)
+                        .ConfigureAwait(false);
+                    if (!restamp.Complete)
+                    {
+                        logger.LogWarning(
+                            "[CHILD-RECORD] filed {Entity} {Id}, but the core-ancestor re-stamp did not finish (failures={Failures}); " +
+                            "the stamp job completes it within one cycle", entity, id, restamp.Failures.Count);
+                    }
+                })
+            .ConfigureAwait(false);
+
+        if (outcome.Wrote)
+        {
+            if (outcome.Secured is { IsComplete: false } secured)
+            {
+                logger.LogWarning("[CHILD-RECORD] filed {Entity} {Id}, but securing it did not finish ({Code}); the job completes it.",
+                    entity, id, secured.ReasonCode);
+            }
+
+            return Results.NoContent();
+        }
+
+        logger.LogWarning("[CHILD-RECORD] filing of {Entity} {Id} refused: {Kind} {Code} (clientStatus={ClientStatus})",
+            entity, id, outcome.Kind, outcome.Refusal?.RefusalCode, outcome.ClientFailure?.StatusCode);
+        return ProjectFilingRefused(outcome, httpContext.TraceIdentifier);
+    }
+
+    /// <summary>Task 195: a refusal of <see cref="ProjectMatterFiling.FileAsync"/> in this route's contract.</summary>
+    internal static IResult ProjectFilingRefused(ProjectMatterFiling.Outcome outcome, string traceId)
+    {
+        const string entity = ProjectMatterFiling.Table;
+        const string notFound = "The project, or the matter it would be filed under, was not found. The project was not saved.";
+        return outcome switch
+        {
+            { Kind: ProjectMatterFiling.OutcomeKind.ClientFailure, ClientFailure: { } failure } => CallerFailure(failure, entity),
+            { Kind: ProjectMatterFiling.OutcomeKind.NotFound } => Problem(StatusCodes.Status404NotFound, NotFoundCode, notFound),
+            { Kind: ProjectMatterFiling.OutcomeKind.Denied } => Problem(StatusCodes.Status403Forbidden, DeniedCode,
+                outcome.Detail ?? "You do not have permission to change what this project is filed under."),
+            { Kind: ProjectMatterFiling.OutcomeKind.Invalid } => Problem(StatusCodes.Status400BadRequest, InvalidPayloadCode,
+                outcome.Detail ?? "The project was not saved."),
+            { Kind: ProjectMatterFiling.OutcomeKind.NotAMatter } => Problem(StatusCodes.Status400BadRequest,
+                ProjectMatterFiling.NotAMatterCode, outcome.Detail!),
+            { Kind: ProjectMatterFiling.OutcomeKind.SecureMatter } => Problem(StatusCodes.Status409Conflict,
+                ProjectMatterFiling.SecureMatterCode, outcome.Detail!),
+            { Kind: ProjectMatterFiling.OutcomeKind.LeavesSecure } => Problem(StatusCodes.Status409Conflict,
+                ProjectMatterFiling.LeavesSecureCode, outcome.Detail!),
+            { Kind: ProjectMatterFiling.OutcomeKind.Conflict } => Problem(StatusCodes.Status409Conflict,
+                ProjectMatterFiling.ChangedConcurrentlyCode, outcome.Detail!),
+            { Kind: ProjectMatterFiling.OutcomeKind.Refused, Refusal: { } refusal } => refusal.RefusalCode switch
+            {
+                // The secure-create plan's split (PlanRefused), in a filing's words.
+                DataverseUserClientErrorCodes.AccessDenied => Problem(StatusCodes.Status404NotFound, NotFoundCode, notFound),
+                Sprk.Bff.Api.Api.ExternalAccess.ProvisionProjectEndpoint.ReasonCreatorNoAccess
+                    or AccessFollowsParent.SecureFlagReasonCode
+                    or AccessInheritance.ServerOnlyReasonCode =>
+                    Problem(StatusCodes.Status403Forbidden, refusal.RefusalCode!,
+                        $"The project was not filed: {refusal.Reason ?? "it may not be filed there"}."),
+                Sprk.Bff.Api.Api.ExternalAccess.ProvisionProjectEndpoint.ReasonCreatorNoAccessUnverifiable
+                    or RecordOwnerRefusal.SecureOwnerTeamUnresolved =>
+                    Problem(StatusCodes.Status500InternalServerError, refusal.RefusalCode!,
+                        $"The project was not filed: {refusal.Reason ?? "whether it may be filed there could not be decided"}."),
+                _ => ProblemDetailsHelper.RecordOwnerRefused(refusal, Noun(entity), traceId),
+            },
+            _ => Problem(StatusCodes.Status500InternalServerError, NoDecisionCode, outcome.Detail ?? "The project was not filed."),
+        };
     }
 
     /// <summary>
@@ -556,6 +728,7 @@ public static class ChildRecordEndpoints
         "sprk_kpiassessment" => "KPI assessment",
         "sprk_billingevent" => "billing event",
         "sprk_workassignment" => "work assignment",
+        "sprk_project" => "project",
         _ => "record",
     };
 
