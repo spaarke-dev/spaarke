@@ -56,6 +56,8 @@ public class AccessTableReaderScanTests
             // UAC review F4 (on e371dce6bf): + its invoice and tracking number, which D-176's Duplicate withholding reads.
             ["sprk_invoicesubmission"] = "An invoice submission: its firm (sprk_vendororg) and core-record lookups, which scope the external submission reads, and its invoice (sprk_invoice), which names the invoice its stored findings belong to (InvoiceReviewReadService; SubmissionOverrideService judges a same-invoice repeat Duplicate by the caller's Read of it, #2294), and its tracking number (sprk_trackingnumber, typed-writer only; no longer looked up since #2294), are refused per column (AccessColumns).",
 
+            // uac-r2 task 195: the Project <-> Matter N:N intersect, read for the root-owner report's filing census.
+            ["sprk_project_sprk_matter"] = "The Project <-> Matter N:N association: it confers nothing (a project's filing is its regarding pair). The root-owner report only counts where it and the pair disagree (SecureRootInheritance.ProjectFilingCensusAsync); no access decision reads it.",
             // Not access, each read in the code:
             ["sprk_analysisskill"] = "A scope row /create associates; the check is the caller's own rights on the analysis, no column of it is read (AnalysisAuthorizationFilter).",
             ["sprk_analysisknowledge"] = "A scope row /create associates; the check is the caller's own rights on the analysis, no column of it is read (AnalysisAuthorizationFilter).",

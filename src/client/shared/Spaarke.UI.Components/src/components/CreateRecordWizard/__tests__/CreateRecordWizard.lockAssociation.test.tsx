@@ -80,3 +80,36 @@ describe('CreateRecordWizard — lockAssociation', () => {
     expect(screen.queryAllByText('Next Steps').length).toBeGreaterThan(0);
   });
 });
+
+describe('CreateRecordWizard — onAssociationChange (task 195)', () => {
+  it.each([true, false])('announces the launch-context association when the wizard opens (locked: %s)', locked => {
+    const onAssociationChange = jest.fn();
+    const config = buildConfig(locked);
+    config.associateToStep!.onAssociationChange = onAssociationChange;
+
+    renderWithProviders(<CreateRecordWizard open onClose={jest.fn()} webApi={noopWebApi} config={config} />);
+
+    expect(onAssociationChange).toHaveBeenCalledWith({
+      entityType: 'sprk_matter',
+      recordId: 'abc-123',
+      recordName: 'Smith v. Jones',
+    });
+  });
+
+  it('does not re-announce an unchanged association when the consumer passes a new config object', () => {
+    const onAssociationChange = jest.fn();
+    const make = () => {
+      const config = buildConfig(true);
+      config.associateToStep!.onAssociationChange = onAssociationChange;
+      return config;
+    };
+    const { rerender } = renderWithProviders(
+      <CreateRecordWizard open onClose={jest.fn()} webApi={noopWebApi} config={make()} />
+    );
+    const calls = onAssociationChange.mock.calls.length;
+
+    rerender(<CreateRecordWizard open onClose={jest.fn()} webApi={noopWebApi} config={make()} />);
+
+    expect(onAssociationChange.mock.calls.length).toBe(calls);
+  });
+});

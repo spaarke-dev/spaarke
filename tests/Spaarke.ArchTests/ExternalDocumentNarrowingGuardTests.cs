@@ -1129,9 +1129,11 @@ public class ExternalDocumentNarrowingGuardTests
             "Writes only ownerid on sprk_communication (UpdateRecordFieldsIfUnchangedAsync, the routed owning team).",
         // Field-mapping task 017 (2d-5): OwnedChildWrite::CreateAsync and ::CreateIntoIsolationAsync were deleted; the
         // service's create (RecordCreationService::CreateAsync, below) replaced both.
-        ["Sprk.Bff.Api.Services.Dataverse.OwnedChildWrite::PatchWithBffManagedPairAsync"] =
-            "Writes only the BFF-managed pair columns (PairColumns: sprk_regardingrecordid, sprk_regardingrecordtype), picked " +
-            "out of the body by name; every other column goes in the caller's own PATCH.",
+        // uac-r2 task 195: OwnedChildWrite::PatchWithBffManagedPairAsync was removed; its sequence is this core's.
+        ["Sprk.Bff.Api.Services.Dataverse.ProjectMatterFiling::FileAsync"] =
+            "Writes only the BFF-managed pair columns (sprk_regardingrecordid, sprk_regardingrecordtype) on sprk_project, picked " +
+            "out of the body by name and conditioned on the row version read (UpdateRecordFieldsIfUnchangedAsync); every other " +
+            "column goes in the caller's own PATCH.",
         // ebilling-r1 (#2081): the handler's one write member is PatchAsync (an invoice or line update-only, through
         // InvoiceFamilyCoreRecordGuard.UpdateExistingAsync); WriteAsync and UpdateWithOptimisticConcurrencyAsync reach it.
         ["Sprk.Bff.Api.Services.Dataverse.DataverseUpdateHandler::PatchAsync"] =
