@@ -445,10 +445,27 @@ internal static class OwnedChildWrite
             }
         }
 
+        // Owner decision 2026-10-29: a work assignment filed only under an invoice or event is owned with the matters and
+        // projects that record belongs to — the parents the un-secure cascade names for it — ranked first, the invoice or
+        // event kept among the parents (secure-if-any). One that cannot be read refuses (nothing created).
+        var throughIntermediates = planSecureCreate is null
+            ? Sprk.Bff.Api.Services.Access.SecureRootInheritance.OwnerFilingThroughIntermediates.None
+            : await planSecureCreate.OwnerLookupsThroughIntermediatesAsync(table, LookupsOf(item).ToList(), ct).ConfigureAwait(false);
+        if (throughIntermediates.Unverifiable is { } unread)
+        {
+            return new Outcome
+            {
+                OwnerRefusal = RecordOwnerResolution.Refused(RecordOwnerRefusal.ParentUndetermined,
+                    $"what it is filed under could not be told ({unread})"),
+            };
+        }
+
         // Task 146 c1-r1 (owner round 13 item 9): the caller asked for this row, so the app-only create records them as its
         // creator person — F3's "or the creator" branch can then admit them, as it admits a run-as-user row's createdby.
         var owner = await ownership.ResolveOwnerAsync(
-            OwnershipOf(table, item, callerObjectId, me.SystemUserId) with
+            RecordOwnershipContext.ForRow(
+                table, throughIntermediates.Lookups.Concat(LookupsOf(item)), PairIdOf(item.JsonBody), callerObjectId,
+                me.SystemUserId) with
             {
                 RequestedBy = RecordRequester.Of(me.SystemUserId),
             },

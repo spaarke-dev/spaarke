@@ -265,6 +265,24 @@ public sealed partial class SecureChildOwnershipAiToolTests
         _shareTable.WriteLog.Should().BeEmpty("an ordinary record's child is never mirrored or shared");
     }
 
+    [Fact(DisplayName = "Owner decision 2026-10-29 must fire: a child created through the route under a FILED person-owned work assignment is owned by its matter's business-unit team")]
+    public async Task ChildCreate_AToDoUnderAFiledPersonOwnedWorkAssignment_IsOwnedByItsMattersBusinessUnitTeam()
+    {
+        var workAssignment = Guid.NewGuid();
+        _world.WithRecord("sprk_workassignment", workAssignment, Directory.GeneralBu, owningTeam: null,
+            extra: new() { ["sprk_regardingmatter"] = new EntityReference("sprk_matter", OrdinaryMatter) });
+
+        var result = await CreateChild("sprk_todo", new()
+        {
+            ["sprk_name"] = "Call back",
+            ["sprk_RegardingWorkAssignment@odata.bind"] = $"/sprk_workassignments({workAssignment:D})",
+        });
+
+        Status(result).Should().Be(StatusCodes.Status201Created, Detail(result));
+        Owner(_appCreates.Should().ContainSingle().Subject.Fields).Should().Be(Directory.ChildTeam,
+            $"the work assignment belongs to its matter: the matter's unit, never the work assignment's own ({Directory.GeneralTeam:D})");
+    }
+
     [Fact]
     public async Task ChildCreate_AMemoUnderASecureMatter_IsOwnedByTheNamedTeam()
     {

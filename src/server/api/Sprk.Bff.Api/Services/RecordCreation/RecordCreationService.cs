@@ -794,8 +794,21 @@ internal sealed partial class RecordCreationService
                 refused.Reason!) { OwnerDecision = refused });
         }
 
+        // Owner decision 2026-10-29: a work assignment filed only under an invoice or event is owned with the matters and
+        // projects that record belongs to — the parents the un-secure cascade names for it — ranked first; the invoice or event
+        // stays among the parents (secure-if-any). One that cannot be read refuses, as the cascade's "unverifiable" does.
+        var throughIntermediates = await _rootFiling.OwnerLookupsThroughIntermediatesAsync(table, filed, ct).ConfigureAwait(false);
+        if (throughIntermediates.Unverifiable is { } unread)
+        {
+            var refused = RecordOwnerResolution.Refused(RecordOwnerRefusal.ParentUndetermined,
+                $"what it is filed under could not be told ({unread})");
+            return (null, new RecordCreationRefusal(RecordCreationRefusalKind.OwnerUnresolved, RecordOwnerRefusal.ParentUndetermined,
+                refused.Reason!) { OwnerDecision = refused });
+        }
+
         var owner = await _ownership.ResolveOwnerAsync(
-            OwnerQuestionOf(table, filed, pairParent.Parent, subjectPairId ?? pairIdText, callerObjectId, callerSystemUserId) with
+            OwnerQuestionOf(table, throughIntermediates.Lookups.Concat(filed), pairParent.Parent, subjectPairId ?? pairIdText,
+                callerObjectId, callerSystemUserId) with
             {
                 RequestedBy = requestedBy,
             },
@@ -1055,47 +1068,13 @@ internal sealed partial class RecordCreationService
     private const string RecordTypeTable = "sprk_recordtype_ref";
 
     /// <summary>
-    /// FR-09 (task 015): the record a row's ADR-024 pair files it under ON ITS OWN — only on a table whose pair is
-    /// BFF-managed (<see cref="SecureRootInheritance.PairNamesAParentOnItsOwn"/>: a project, whose only filing is the pair) —
-    /// as an ownership parent. Its record type is read app-only from the catalog, as the secure-root plan reads it before
-    /// this (one row, its <c>sprk_recordlogicalname</c>). Only a table the plan reads as a parent
-    /// (<see cref="SecureRootInheritance.IsParent"/>: a matter or project) is returned, so the owner and the secure-root plan
-    /// see the same filing.
+    /// FR-09 (task 015): the record a row's ADR-024 pair files it under ON ITS OWN, as an ownership parent —
+    /// <see cref="SecureRootInheritance.PairParentAsync"/> (moved there unchanged, so the ownership resolver's look-through
+    /// reads a project's pair by the same rule, owner decision 2026-10-29).
     /// </summary>
-    /// <returns>No parent: the table's pair files nothing on its own, the pair names nothing, or it names a table that is not
-    /// a secure-root parent (a document, an event: the plan reads such a pair as no filing). <c>Undetermined</c>: the pair
-    /// names a record that cannot be told — an id that is not one, no record type, or a type that names no table — which
-    /// the caller refuses (fail closed), never reads as "filed under nothing".</returns>
-    /// <remarks>A Dataverse fault propagates: the caller's owner step refuses it as the owner fault it is.</remarks>
-    internal static async Task<(RecordOwnershipParent? Parent, string? Undetermined)> PairParentAsync(
-        IGenericEntityService entities, string table, string? idText, Guid? typeId, CancellationToken ct)
-    {
-        ArgumentNullException.ThrowIfNull(entities);
-        if (!SecureRootInheritance.PairNamesAParentOnItsOwn(table) || string.IsNullOrWhiteSpace(idText))
-            return (null, null);
-
-        if (!Guid.TryParse(idText.Trim(), out var id) || id == Guid.Empty)
-            return (null, $"its {SecureRootInheritance.PairIdColumn} is not a record id");
-
-        if (typeId is not { } type || type == Guid.Empty)
-            return (null, $"its {SecureRootInheritance.PairIdColumn} names a record without its record type");
-
-        var query = new Microsoft.Xrm.Sdk.Query.QueryExpression(RecordTypeTable)
-        {
-            ColumnSet = new Microsoft.Xrm.Sdk.Query.ColumnSet(OwnedChildWrite.RecordTypeLogicalNameColumn),
-            TopCount = 1,
-        };
-        query.Criteria.AddCondition(RecordTypeTable + "id", Microsoft.Xrm.Sdk.Query.ConditionOperator.Equal, type);
-        var row = (await entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false)).Entities.FirstOrDefault();
-        var named = row?.GetAttributeValue<string>(OwnedChildWrite.RecordTypeLogicalNameColumn)?.Trim().ToLowerInvariant();
-        if (string.IsNullOrEmpty(named))
-            return (null, "its record type names no table");
-
-        // Review F3: the plan files a project under its pair only when the pair names a matter or project; a pair typed to
-        // anything else files it under nothing, and the owner must agree (else a document's unit would own the project, or
-        // DecideOwnerAsync's consistency check would refuse, "Try again", a create the plan admitted).
-        return SecureRootInheritance.IsParent(named) ? (new RecordOwnershipParent(named, id), null) : (null, null);
-    }
+    internal static Task<(RecordOwnershipParent? Parent, string? Undetermined)> PairParentAsync(
+        IGenericEntityService entities, string table, string? idText, Guid? typeId, CancellationToken ct) =>
+        SecureRootInheritance.PairParentAsync(entities, table, idText, typeId, ct);
 
     /// <summary>The search-index lookup's navigation property on the search-indexed tables (matter, project, document) —
     /// the bind every browser create already sends (<c>matterService.ts</c>, <c>DocumentRecordService.ts</c>: live).</summary>

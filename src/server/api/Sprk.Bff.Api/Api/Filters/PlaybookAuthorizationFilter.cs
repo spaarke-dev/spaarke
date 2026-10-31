@@ -53,6 +53,42 @@ public static class PlaybookAuthorizationFilterExtensions
         this TBuilder builder) where TBuilder : IEndpointConventionBuilder
         => builder.AddPlaybookAuthorizationFilter(PlaybookAuthorizationMode.Run);
 
+    /// <summary>
+    /// Requires the CALLER's own Dataverse table privilege <paramref name="privilegeName"/> on
+    /// <c>sprk_analysisplaybook</c> (<see cref="PlaybookAuthorizationFilter.CreatePlaybookPrivilege"/> or
+    /// <see cref="PlaybookAuthorizationFilter.SharePlaybookPrivilege"/>) before anything else runs. Register it BEFORE the
+    /// route's other playbook filter, so the privilege is decided before any playbook row is read.
+    /// </summary>
+    /// <remarks>
+    /// Owner decision 2026-10-30: only playbook administrators create, clone, share or unshare playbooks; in the role XML
+    /// only <c>Spaarke AI Analysis Admin</c> holds Create and Share on the table. <see cref="IPlaybookService"/> and
+    /// <see cref="IPlaybookSharingService"/> write app-only, so Dataverse never asks the caller's own role; this filter
+    /// does. CLAUDE.md §11: <b>Existing</b>: <see cref="CallerRecordAccessProbe.CallerHoldsPrivilegeAsync"/>, the
+    /// caller-privilege check the quick-create, finance and record-route filters use. <b>Extension</b>: this reuses it
+    /// unchanged; only the registration on these routes is new. <b>Cost of doing nothing</b>: any signed-in user could
+    /// create, copy or share a playbook that the roles reserve for administrators.
+    /// </remarks>
+    public static TBuilder AddPlaybookTablePrivilegeFilter<TBuilder>(
+        this TBuilder builder, string privilegeName) where TBuilder : IEndpointConventionBuilder
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(privilegeName);
+        return builder.AddEndpointFilter((context, next) =>
+            PlaybookAuthorizationFilter.AuthorizeCallerTablePrivilegeAsync(context, next, privilegeName));
+    }
+
+    /// <summary>
+    /// For <c>PUT /api/ai/playbooks/{id}</c>: a request that changes the stored <c>IsPublic</c> also requires
+    /// <see cref="PlaybookAuthorizationFilter.SharePlaybookPrivilege"/>
+    /// (<see cref="PlaybookAuthorizationFilter.AuthorizePublicFlagChangeAsync"/>). Register it AFTER the Write gate, so the
+    /// stored value is read only for a caller who may write playbooks.
+    /// </summary>
+    /// <remarks>CLAUDE.md §11: <b>Existing</b>: the table-privilege decision above, which it calls unchanged.
+    /// <b>Extension</b>: only the "does this request change IsPublic" question is new. <b>Cost of doing nothing</b>: the
+    /// update writes <c>sprk_ispublic</c> app-only, so a caller without Share could make a playbook public.</remarks>
+    public static TBuilder AddPlaybookPublicFlagShareFilter<TBuilder>(this TBuilder builder)
+        where TBuilder : IEndpointConventionBuilder
+        => builder.AddEndpointFilter(PlaybookAuthorizationFilter.AuthorizePublicFlagChangeAsync);
+
     private static TBuilder AddPlaybookAuthorizationFilter<TBuilder>(
         this TBuilder builder, PlaybookAuthorizationMode mode) where TBuilder : IEndpointConventionBuilder
     {
@@ -122,6 +158,132 @@ public class PlaybookAuthorizationFilter : IEndpointFilter
 
     /// <summary>The <see cref="Spaarke.Core.Auth.OperationAccessPolicy"/> key the playbook-use decision asks of a playbook row.</summary>
     public const string PlaybookUseOperation = "read";
+
+    /// <summary>
+    /// The Create privilege on <c>sprk_analysisplaybook</c>, by its name in the solution role XML. Create and clone require
+    /// the caller to hold it.
+    /// </summary>
+    public const string CreatePlaybookPrivilege = "prvCreatesprk_analysisplaybook";
+
+    /// <summary>
+    /// The Share privilege on <c>sprk_analysisplaybook</c>, by its name in the solution role XML. Share and unshare require
+    /// the caller to hold it, in addition to owning the playbook.
+    /// </summary>
+    public const string SharePlaybookPrivilege = "prvSharesprk_analysisplaybook";
+
+    /// <summary>
+    /// The Write privilege on <c>sprk_analysisplaybook</c>, by its name in the solution role XML. Every playbook write route
+    /// (update, canvas, node create / update / delete / scopes) requires the caller to hold it, in addition to owning the
+    /// playbook.
+    /// </summary>
+    public const string WritePlaybookPrivilege = "prvWritesprk_analysisplaybook";
+
+    /// <summary>The ONE detail of the playbook table-privilege 403.</summary>
+    internal const string PlaybookPrivilegeDeniedDetail =
+        "You do not have permission to create, change, copy or share playbooks.";
+
+    /// <summary>
+    /// <c>PUT /api/ai/playbooks/{id}</c>: a request that CHANGES <see cref="SavePlaybookRequest.IsPublic"/> from the stored
+    /// value makes the playbook readable by everyone (or stops that), so it also requires
+    /// <see cref="SharePlaybookPrivilege"/>, decided by <see cref="AuthorizeCallerTablePrivilegeAsync"/>. The stored value is
+    /// read here, after the route's Write gate. No request body, no route id, a playbook that cannot be read and a fault
+    /// in that read are one 403; nothing is written.
+    /// </summary>
+    internal static async ValueTask<object?> AuthorizePublicFlagChangeAsync(
+        EndpointFilterInvocationContext context, EndpointFilterDelegate next)
+    {
+        var httpContext = context.HttpContext;
+        var services = httpContext.RequestServices;
+        var logger = services.GetService<ILogger<PlaybookAuthorizationFilter>>();
+        var ct = httpContext.RequestAborted;
+
+        var request = context.Arguments.OfType<SavePlaybookRequest>().FirstOrDefault();
+        bool changesPublicFlag;
+        try
+        {
+            var playbookService = services.GetService<IPlaybookService>();
+            if (request is null || playbookService is null || !TryGetRouteGuid(httpContext, out var playbookId))
+            {
+                logger?.LogWarning("Playbook public-flag check cannot run (no request, service or route id); denying (fail closed)");
+                return PlaybookPrivilegeDenied(httpContext);
+            }
+
+            var stored = await playbookService.GetPlaybookAsync(playbookId, ct);
+            if (stored is null)
+            {
+                logger?.LogWarning("Playbook public-flag check: playbook {PlaybookId} could not be read; denying", playbookId);
+                return PlaybookPrivilegeDenied(httpContext);
+            }
+
+            changesPublicFlag = stored.IsPublic != request.IsPublic;
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            logger?.LogError(ex, "Playbook public-flag check faulted; denying (fail closed). CorrelationId: {CorrelationId}",
+                httpContext.TraceIdentifier);
+            return PlaybookPrivilegeDenied(httpContext);
+        }
+
+        return changesPublicFlag
+            ? await AuthorizeCallerTablePrivilegeAsync(context, next, SharePlaybookPrivilege)
+            : await next(context);
+    }
+
+    /// <summary>The ONE playbook table-privilege 403.</summary>
+    private static IResult PlaybookPrivilegeDenied(HttpContext httpContext) =>
+        ProblemDetailsHelper.Forbidden(
+            FinanceAuthorizationFilter.InsufficientPrivilegeReasonCode,
+            PlaybookPrivilegeDeniedDetail,
+            httpContext.TraceIdentifier);
+
+    /// <summary>
+    /// The table-privilege decision behind <see cref="PlaybookAuthorizationFilterExtensions.AddPlaybookTablePrivilegeFilter"/>:
+    /// the caller must hold <paramref name="privilegeName"/>, asked as the caller through
+    /// <see cref="CallerRecordAccessProbe.CallerHoldsPrivilegeAsync"/> (OBO, uncached). A missing probe, a missing token,
+    /// a fault and "not held" are one 403 (ADR-003); <c>next</c> runs only when the privilege is held.
+    /// </summary>
+    internal static async ValueTask<object?> AuthorizeCallerTablePrivilegeAsync(
+        EndpointFilterInvocationContext context, EndpointFilterDelegate next, string privilegeName)
+    {
+        var httpContext = context.HttpContext;
+        var services = httpContext.RequestServices;
+        var logger = services.GetService<ILogger<PlaybookAuthorizationFilter>>();
+        var ct = httpContext.RequestAborted;
+
+        bool holds;
+        try
+        {
+            var probe = services.GetService<CallerRecordAccessProbe>();
+            holds = probe is not null
+                && await probe.CallerHoldsPrivilegeAsync(TokenHelper.ExtractBearerTokenOrNull(httpContext), privilegeName, ct);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            // The DECISION only — never next().
+            logger?.LogError(ex,
+                "Playbook privilege check {Privilege} threw; denying (fail closed). CorrelationId: {CorrelationId}",
+                privilegeName, httpContext.TraceIdentifier);
+            holds = false;
+        }
+
+        if (!holds)
+        {
+            logger?.LogWarning(
+                "Playbook route denied: caller does not hold {Privilege}. CorrelationId: {CorrelationId}",
+                privilegeName, httpContext.TraceIdentifier);
+            return PlaybookPrivilegeDenied(httpContext);
+        }
+
+        return await next(context);
+    }
 
     /// <summary>
     /// The playbook-use decision — "may this caller run this playbook" — shared by every route that runs or binds a
