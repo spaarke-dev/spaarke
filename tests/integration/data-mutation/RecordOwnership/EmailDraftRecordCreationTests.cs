@@ -1,5 +1,6 @@
 using System.Text.Json;
 using FluentAssertions;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Xrm.Sdk;
 using Moq;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
@@ -32,9 +33,9 @@ public sealed partial class SecureChildOwnershipAiToolTests
     private static readonly Guid DraftMatter = Guid.Parse("d4d40000-0000-4000-8000-000000000002");
 
     /// <summary>The ONE server create over this harness's resolver, app-only seam and share world.</summary>
-    private RecordCreationService DraftCreation(CoreAncestorRestamper? restamper = null) =>
+    private RecordCreationService DraftCreation(CoreAncestorRestamper? restamper = null, IServiceScopeFactory? scopes = null) =>
         RouteRecordCreation.Over(
-            _world.Resolver(), _appOnly.Object, restamper ?? Restamper(), Shares(), SecureRootFilingGateFixtures.NothingSecure());
+            _world.Resolver(), _appOnly.Object, restamper ?? Restamper(), Shares(), SecureRootFilingGateFixtures.NothingSecure(), scopes);
 
     /// <summary>
     /// A draft regarding <see cref="DraftInvoice"/>, which is filed under <see cref="DraftMatter"/>: the invoice team-owned by
@@ -107,6 +108,26 @@ public sealed partial class SecureChildOwnershipAiToolTests
         DraftBind(fields, "sprk_RegardingMatter").Should().Be($"/sprk_matters({OrdinaryMatter:D})");
         DraftBind(fields, "sprk_SentBy").Should().Be($"/systemusers({Caller:D})", "the drafter is the sender (S1)");
         ((JsonElement)fields["statuscode"]!).GetInt32().Should().Be(1, "still a DRAFT");
+    }
+
+    /// <summary>
+    /// Task 017 r3 (UAC-r2 F1): the grantor the draft's create carries, pinned to master's. On master its owned create
+    /// (<c>OwnedChildWrite.CreateAsync</c>, a communication is a CHILD table) never ran the "Assigned *" step, so no grantor was
+    /// ever passed and nobody could be invited; the service runs that step for a ROOT only, so the request needs no override
+    /// and keeps the default. The materializer is never asked for, and no invitation goes out.
+    /// </summary>
+    [Fact]
+    public async Task EmailDraft_FiledDraft_NeverRunsTheAssignedAccessStep_SoNoGrantorIsPassedAndNobodyIsInvited()
+    {
+        var (scopes, harness) = Sprk.Bff.Api.Tests.DataMutation.ExternalAccess.AssignedAccessGrantorTests.CountingScopes();
+
+        var result = await Draft(CoreAncestorResolverFixtures.Inert(), DraftCreation(scopes: scopes), "sprk_matter", OrdinaryMatter);
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        TheDraftCreate();
+        scopes.Opened.Should().Be(0, "a child table's create never reaches the Assigned-access materializer (master: not called either)");
+        harness.Emails.InviteUrls.Should().BeEmpty();
+        harness.Ciam.Attempts.Should().BeEmpty();
     }
 
     [Fact]

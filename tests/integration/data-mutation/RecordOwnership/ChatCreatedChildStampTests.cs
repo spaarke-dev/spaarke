@@ -381,7 +381,7 @@ public sealed partial class SecureChildOwnershipAiToolTests
 
     /// <summary>The executor over this harness; the service is in the request's services unless <paramref name="withService"/> is false.</summary>
     private (BudgetInquiryExecutor Executor, RecordingInquirySender Email) InquiryExecutor(
-        IRecordOwnershipResolver? resolver = null, bool withService = true)
+        IRecordOwnershipResolver? resolver = null, bool withService = true, IServiceScopeFactory? scopes = null)
     {
         InquiryCallerMayCreate();
         // The matter's catalog row, read as the caller (the executor's own filter query).
@@ -395,7 +395,7 @@ public sealed partial class SecureChildOwnershipAiToolTests
         if (withService)
         {
             services.AddSingleton(RouteRecordCreation.Over(
-                ownership, _appOnly.Object, Restamper(), Shares(), SecureRootFilingGateFixtures.NothingSecure()));
+                ownership, _appOnly.Object, Restamper(), Shares(), SecureRootFilingGateFixtures.NothingSecure(), scopes));
         }
 
         var http = HttpContextOfCaller();
@@ -438,6 +438,27 @@ public sealed partial class SecureChildOwnershipAiToolTests
         result.ServiceRequestId.Should().Be(id);
         email.Sent.Should().Equal(id);
         _user.Posts.Should().BeEmpty("the row is never created as the caller");
+    }
+
+    /// <summary>
+    /// Task 017 r3 (UAC-r2 F1): the grantor the budget inquiry's create carries, pinned to master's. On master its owned create
+    /// (<c>OwnedChildWrite.CreateAsync</c>, a service request is a CHILD table) never ran the "Assigned *" step at all, so no
+    /// grantor was ever passed and nobody could be invited; the service runs that step for a ROOT only, so the request needs no
+    /// override and keeps the default. The materializer is never asked for, and no invitation goes out.
+    /// </summary>
+    [Fact]
+    public async Task BudgetInquiry_ThroughTheService_NeverRunsTheAssignedAccessStep_SoNoGrantorIsPassedAndNobodyIsInvited()
+    {
+        var (scopes, harness) = Sprk.Bff.Api.Tests.DataMutation.ExternalAccess.AssignedAccessGrantorTests.CountingScopes();
+        var (executor, _) = InquiryExecutor(scopes: scopes);
+
+        var result = await executor.ExecuteAsync(InquiryRequest(OrdinaryMatter), CancellationToken.None);
+
+        result.Outcome.Should().Be(BudgetInquiryOutcome.Sent, result.Error);
+        _appCreates.Should().ContainSingle(c => c.Table == BudgetInquiryExecutor.Table);
+        scopes.Opened.Should().Be(0, "a child table's create never reaches the Assigned-access materializer (master: not called either)");
+        harness.Emails.InviteUrls.Should().BeEmpty();
+        harness.Ciam.Attempts.Should().BeEmpty();
     }
 
     [Fact]

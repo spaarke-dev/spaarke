@@ -421,6 +421,9 @@ internal sealed partial class DataverseCreateRecordHandler : IToolHandler
                         {
                             ServerSetLookupColumns = serverSet,
                             CorrelationId = context.DecisionId.ToString("N"),
+                            // Task 017 r3 (UAC-r2 F1): as before the service and as every other AI-tool write - no grantor, so
+                            // an external "Assigned To" contact gets the grant but no invitation attributed to the confirming user.
+                            Grantor = AssignedAccessGrantor.None,
                         },
                         RecordCreationPrincipal.ForCaller(_dataverse, CallerObjectId(context)),
                         cancellationToken)

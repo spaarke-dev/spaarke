@@ -355,6 +355,11 @@ internal sealed partial class RecordCreationService
                 throw new ArgumentOutOfRangeException(nameof(principal), principal.GetType().Name, "Unknown principal.");
         }
 
+        // Task 017 r3 (UAC-r2 F1): a request that names no grantor hands the "Assigned *" step none (no invitation, no
+        // sprk_grantedby user) - what the chat create did before the service, and what every other AI-tool write still does.
+        if (request.Grantor == AssignedAccessGrantor.None)
+            grantorOid = null;
+
         // ── Step 2: the table's rules — refuse a server-owned column in the CALLER's payload ────────────────────────────
         trace.Begin(RecordCreationStep.TableRules);
         DataverseWriteItemMapper.MappedItem item;
@@ -1887,6 +1892,25 @@ internal sealed record RecordCreationRequest(string Table, RecordCreationPayload
     /// naming one column, a null or date value, or a table field mapping does not apply to, is an argument error.
     /// </summary>
     public IReadOnlyDictionary<string, object?>? PostMappingDefaults { get; init; }
+
+    /// <summary>
+    /// Task 017 r3 (UAC-r2 review of PR #2486, F1): who the "Assigned *" step (I-12 L1) records as the person behind a root's
+    /// create. The default, <see cref="AssignedAccessGrantor.Caller"/>, is the principal's own oid (the caller's, or a system
+    /// principal's requester): the "Assigned To" contacts are invited and <c>sprk_grantedby</c> names that person.
+    /// <see cref="AssignedAccessGrantor.None"/> hands the step no person: the grants and shares are still made, but no
+    /// invitation is sent and no user is recorded - the AI chat create's behaviour, as it was before the service.
+    /// </summary>
+    public AssignedAccessGrantor Grantor { get; init; } = AssignedAccessGrantor.Caller;
+}
+
+/// <summary>Who a create names as the person behind its "Assigned *" access (see <see cref="RecordCreationRequest.Grantor"/>).</summary>
+internal enum AssignedAccessGrantor
+{
+    /// <summary>The principal's own oid: the caller (or a system principal's requester). The default.</summary>
+    Caller = 0,
+
+    /// <summary>Nobody: no invitation is sent and no <c>sprk_grantedby</c> user is recorded.</summary>
+    None = 1,
 }
 
 /// <summary>
