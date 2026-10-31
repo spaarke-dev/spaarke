@@ -23,16 +23,24 @@
     -Apply files each FILE row through the BFF route the Create wizards use — PATCH /api/v1/child-records/sprk_project/{id}
     with only the pair — so the BFF is the setter: it checks the caller's access, runs the secure gate, writes the pair as
     the application and secures the project when the matter is secure. (Repair-RegardingPairFiling.ps1 -Verify then
-    reads the pair as set by the BFF.) Each filed row is read back. Ownership then follows within minutes through the
-    BFF's root-owner and ordinary-moves passes; this script changes no owner itself.
+    reads the pair as set by the BFF.) Ownership then follows within minutes through the BFF's root-owner and
+    ordinary-moves passes; this script changes no owner itself. Each FILE row ends as one of:
+      FILED            the BFF answered 2xx and the pair reads back naming the matter
+      SKIP-PAIR        the pair was re-read just before the PATCH and had been set since the report -> not filed
+      NOT-CHECKED      that re-read failed -> not filed (never a blind write)
+      REFUSED          the BFF refused the PATCH (its words are shown)
+      NOT-READ         the BFF answered 2xx but the pair reads back as something else
+      FILED-UNVERIFIED the BFF answered 2xx but the read-back itself failed -> check by hand (Repair-RegardingPairFiling.ps1 -Verify)
 
-    Exit code: 1 when -Apply could not file a FILE row; 0 otherwise. A dry run always exits 0.
+    Exit code: 1 when -Apply could not file a FILE row (NOT-CHECKED, REFUSED, NOT-READ); 0 otherwise. SKIP-PAIR and
+    FILED-UNVERIFIED are reported but do not fail the run. A dry run always exits 0.
 
 .PARAMETER EnvironmentUrl
     The Dataverse environment. Default: dev (https://spaarkedev1.crm.dynamics.com).
 
 .PARAMETER BffBaseUrl
-    The BFF that files the projects (-Apply only). Default: dev (https://spaarke-bff-dev.azurewebsites.net).
+    The BFF that files the projects (-Apply only). Default: dev (https://spaarke-bff-dev.azurewebsites.net). A trailing
+    '/' and a trailing '/api' are removed (the script adds '/api/v1/...').
 
 .PARAMETER ApiScope
     The scope of a token for the BFF API, minted with `az account get-access-token --scope` (-Apply only). The az login
@@ -64,7 +72,8 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $EnvironmentUrl = $EnvironmentUrl.TrimEnd('/')
-$BffBaseUrl = $BffBaseUrl.TrimEnd('/')
+# The route is appended as /api/v1/...; accept the base with or without a trailing '/' or '/api'.
+$BffBaseUrl = ($BffBaseUrl.TrimEnd('/') -replace '/api$', '').TrimEnd('/')
 $Api = "$EnvironmentUrl/api/data/v9.2"
 
 # ── Constants (the same names as SecureRootInheritance: PairIdColumn, PairTypeColumn) ─────────────────────────────
@@ -174,27 +183,52 @@ $bffToken = az account get-access-token --scope $ApiScope --query accessToken -o
 if ($LASTEXITCODE -ne 0 -or -not $bffToken) { throw "Could not get a token for $ApiScope. Run 'az login' and retry." }
 $bffHeaders = @{ Authorization = "Bearer $bffToken"; 'Content-Type' = 'application/json; charset=utf-8'; Accept = 'application/json' }
 
-$failed = 0
+$failed = 0; $filed = 0; $unverified = 0; $skipped = 0
 foreach ($d in $toFile) {
+    # Re-read the pair just before writing: a pair set since the report (by a person or another run) is left alone.
+    try {
+        $now = Invoke-DvGet "sprk_projects($($d.ProjectId))?`$select=$PairId,$PairTypeValue"
+    } catch {
+        $failed++
+        Write-Host "  NOT-CHECKED $($d.ProjectId)  $($d.Project)  the pair could not be re-read, so it was not filed: $($_.Exception.Message)" -ForegroundColor Red
+        continue
+    }
+    if ((ConvertTo-Id $now.$PairId) -or (ConvertTo-Id $now.$PairTypeValue)) {
+        $skipped++
+        Write-Host "  SKIP-PAIR  $($d.ProjectId)  $($d.Project)  a pair was set since the report ('$($now.$PairId)' / '$($now.$PairTypeValue)'); not filed" -ForegroundColor Yellow
+        continue
+    }
+
     $body = @{ $PairId = $d.MatterId; 'sprk_regardingrecordtype@odata.bind' = "/sprk_recordtype_refs($matterTypeId)" } | ConvertTo-Json -Compress
     try {
         Invoke-RestMethod -Uri "$BffBaseUrl/api/v1/child-records/sprk_project/$($d.ProjectId)" -Headers $bffHeaders -Method Patch -Body $body | Out-Null
-        $after = Invoke-DvGet "sprk_projects($($d.ProjectId))?`$select=$PairId,$PairTypeValue"
-        if ((ConvertTo-Id $after.$PairId) -eq $d.MatterId -and (ConvertTo-Id $after.$PairTypeValue) -eq $matterTypeId) {
-            Write-Host "  FILED      $($d.ProjectId)  $($d.Project)" -ForegroundColor Green
-        } else {
-            $failed++
-            Write-Host "  NOT-READ   $($d.ProjectId)  the BFF answered 2xx but the pair reads back as '$($after.$PairId)' / '$($after.$PairTypeValue)'" -ForegroundColor Red
-        }
     } catch {
         $failed++
         $detail = $_.ErrorDetails.Message
         if (-not $detail) { $detail = $_.Exception.Message }
         Write-Host "  REFUSED    $($d.ProjectId)  $($d.Project)  $detail" -ForegroundColor Red
+        continue
+    }
+
+    # The BFF answered 2xx: the write happened. A failed read-back is not a refusal.
+    try {
+        $after = Invoke-DvGet "sprk_projects($($d.ProjectId))?`$select=$PairId,$PairTypeValue"
+    } catch {
+        $unverified++
+        Write-Host "  FILED-UNVERIFIED $($d.ProjectId)  $($d.Project)  the BFF answered 2xx; the read-back failed: $($_.Exception.Message)" -ForegroundColor Yellow
+        continue
+    }
+    if ((ConvertTo-Id $after.$PairId) -eq $d.MatterId -and (ConvertTo-Id $after.$PairTypeValue) -eq $matterTypeId) {
+        $filed++
+        Write-Host "  FILED      $($d.ProjectId)  $($d.Project)" -ForegroundColor Green
+    } else {
+        $failed++
+        Write-Host "  NOT-READ   $($d.ProjectId)  the BFF answered 2xx but the pair reads back as '$($after.$PairId)' / '$($after.$PairTypeValue)'" -ForegroundColor Red
     }
 }
 
 Write-Host ''
-Write-Host ("Applied     : filed {0} of {1}; {2} failed. Owners follow through the BFF's root-owner pass (about 5 minutes) and children through ordinary moves (about 2 minutes)." -f ($toFile.Count - $failed), $toFile.Count, $failed)
+Write-Host ("Applied     : of {0}: filed {1}, filed but unverified {2}, skipped (pair set since the report) {3}, failed {4}." -f $toFile.Count, $filed, $unverified, $skipped, $failed)
+Write-Host ("Owners follow through the BFF's root-owner pass (about 5 minutes) and children through ordinary moves (about 2 minutes).")
 if ($failed -gt 0) { exit 1 }
 exit 0
