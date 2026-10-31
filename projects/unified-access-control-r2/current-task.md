@@ -4,7 +4,7 @@
 > - **Standing rules:** project `CLAUDE.md`. **Decisions:** `notes/decisions.md` (latest 2026-10-31: task 195 owner decisions).
 > - **Defer list:** `notes/defer-issues.md`. **Previous copy:** `notes/handoff-history/current-task-2026-10-22-cp60.md`.
 
-> **Last Updated**: 2026-10-31 ~20:05Z (checkpoint #82: b083d62183 deployed to dev; task 195 implementation running).
+> **Last Updated**: 2026-10-31 (checkpoint #83: task 195 merged as d0c1c5dc3c; deploy awaits owner go).
 
 ## Deployed and gated
 - **Dev BFF = b083d62183** (master, including #2486, field-mapping 017).
@@ -25,9 +25,9 @@
 | Field | Value |
 |---|---|
 | **Mode** | Final push, round-90 rules. Merge only when Router + "Client lint (type-aware ratchet)" are green; `--squash --match-head-commit <sha>`, no `--delete-branch`, after `git merge-tree`. Live actions, deploys and settings changes need the owner's go; shared-dev deploys go through the R3 protocol. |
-| **Task** | **195** (#2352): the project's regarding pair is its filing root. FULL rigor, Opus/high. Worktree C:/wt195, branch `fix/uac-r2-195-project-filing-root`. The design note `notes/task-195-project-filing-root.md` is updated with the owner's decisions (820aea7bfa, pushed). |
-| **Running** | Two Opus implementers in C:/wt195, on disjoint files. **A: server.** One core helper; `PATCH /api/v1/child-records/sprk_project/{id}`; the chat update tool on the same core; the container-ambiguity facts; census counts; .NET tests and gates. **B: client.** The shared file-under-matter function; both wizards; ribbon on the `sprk_Project_Matter_nn` subgrids ("New" opens the wizard, "Add Existing" hidden); `scripts/Set-ProjectFilingFromMatterLink.ps1`; jest and lint. |
-| **Next action** | When both report, check that the request body B sends matches the one A accepts, and decide A's container facts. Then one Opus adversarial review (twice: auth/tenant-isolation), fix, open the PR and merge. Deploy the BFF and the solution/web resources with the owner's go. Run the backfill report, then `-Apply` (accepted). Send field-mapping the merge SHA (its task 040 waits on 195). |
+| **Task** | **195** (#2352) **MERGED** as d0c1c5dc3c (#2496, 2026-10-31). Not deployed. The design note `notes/task-195-project-filing-root.md` §4 has the implementation. Field-mapping has the SHA. |
+| **What shipped** | **Core.** `ProjectMatterFiling` is the one core that writes the project pair. It does the caller checks, the secure gate, a version-conditioned app-only write and a read-back. Its two callers are `PATCH /api/v1/child-records/sprk_project/{id}` and the chat tool. **Rules.** `?move=true` is required to re-file a project that is already filed (otherwise 409 `project_filing.already_filed`; chat always sends move). A secure target is refused with 409 `secure_matter_unsupported` (#1506 interim). A project leaving a secure matter is filed and stays secure. **Census.** 3 report counts. **Wizards.** Create Matter offers Keep/Move. Create Project holds filing back while secure is blocked. The hosts lock on a partner-record launch. **Ribbon.** On the `sprk_Project_Matter_nn` subgrids, New opens the wizard and the platform New / Add Existing are hidden. **Backfill.** `scripts/Set-ProjectFilingFromMatterLink.ps1`, report-only by default. **Reviews.** Two Opus adversarial passes plus a Sonnet re-check; all F findings fixed; integration suites 199/8 and 353/23. **Filed.** #2493, #2494, #2495. |
+| **Next action** | **Owner go needed** for the dev deploy of master ≥ d0c1c5dc3c. Run the R3 protocol first: R3's OK on the SHA, notify ebilling, schema Verify. Order: (1) BFF via `Deploy-BffApi.ps1` from a fresh short-path worktree; (2) `Deploy-WizardCommandsJs.ps1`; (3) `Deploy-WizardCodePages.ps1`; (4) the ribbon import with `Import-SolutionScoped.ps1`, then a live click-test: N:N subgrid New opens the wizard and Add Existing is hidden; other matter and project subgrids keep their buttons; check the associated "Related" tab; (5) the gate; (6) the backfill report, then `-Apply` (accepted: FILE 7, 3 business-unit moves), then a gate on the root-owner moves. Then send field-mapping the deploy time and close task 195 (TASK-INDEX, POML). |
 
 ## Owner decisions for 195 (2026-10-31)
 1. Re-filing to another matter is allowed. Nothing is ever released from isolation.
