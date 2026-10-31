@@ -120,7 +120,40 @@ public class InvoiceSubmissionService
     [
         InvoiceColumn, TrackingNumberAllocator.FirmColumn, TrackingNumberAllocator.FirmInvoiceNumberColumn,
         "sprk_regardingmatter", "sprk_regardingproject", "sprk_regardingworkassignment",
+        // Task 097 second review (F1): whether that submission has finished (CorrectionTargetSubmissionFinished).
+        InvoiceSubmissionPersister.SubmissionStatus, InvoiceSubmissionPersister.SubmissionReasonCode,
     ];
+
+    /// <summary>
+    /// Task 097 second review (F1, F2): what the commit re-reads of the replaced invoice's own submission (the one <see cref="ResubmissionOfColumn"/>
+    /// names): whether it has finished, and its firm invoice number.
+    /// </summary>
+    internal static readonly string[] CorrectionTargetSubmissionColumns =
+    [
+        InvoiceSubmissionPersister.SubmissionStatus, InvoiceSubmissionPersister.SubmissionReasonCode, TrackingNumberAllocator.FirmInvoiceNumberColumn,
+    ];
+
+    /// <summary>
+    /// Task 097 second review (F1): has the replaced invoice's own <paramref name="submission"/> finished, so that a correction may supersede its
+    /// invoice? Only Accepted (by processing, by an override or uncoded) or Rejected and held Blocked (D-101: the invoice In Review awaiting
+    /// Override or Return; <see cref="FinanceBaseValues.HeldSubmissionConditions"/>). Received, Processing (a Blocked one included: its
+    /// after-steps are still running), Failed (its undo may be unfinished), Rejected with any other code, and an unknown or unread status are not.
+    /// </summary>
+    internal static bool CorrectionTargetSubmissionFinished(Entity submission)
+    {
+        ArgumentNullException.ThrowIfNull(submission);
+        var status = submission.GetAttributeValue<OptionSetValue>(InvoiceSubmissionPersister.SubmissionStatus)?.Value;
+        return status == (int)InvoiceSubmissionStatus.Accepted
+            || (status == (int)InvoiceSubmissionStatus.Rejected
+                && string.Equals(submission.GetAttributeValue<string>(InvoiceSubmissionPersister.SubmissionReasonCode), SubmissionReasonCodes.Blocked, StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// Task 097b / second review (F2), EB-D-179 item 3, D-37: the same firm invoice number, trimmed and ignoring case, as the tracking sequence
+    /// keys it. A missing number on either side is not the same.
+    /// </summary>
+    internal static bool SameFirmInvoiceNumber(string? earlier, string? submitted) =>
+        earlier is not null && submitted is not null && string.Equals(earlier.Trim(), submitted.Trim(), StringComparison.OrdinalIgnoreCase);
 
     private readonly ITrackingNumberAllocator _allocator;
     private readonly IGenericEntityService _entities;
@@ -1140,7 +1173,9 @@ public class InvoiceSubmissionService
     /// the invoice's submission (EB-D-179 item 1: the one whose <see cref="InvoiceColumn"/> is the invoice AND whose id derives it,
     /// <see cref="InvoiceSubmissionPersister.InvoiceIdFor"/>; none is <see cref="FromEmailCorrectionReasons.NoSubmission"/>), which must
     /// itself be of the same firm and core record; then the firm invoice number (EB-D-179 item 3, D-37: the submission's typed number, trimmed
-    /// and compared ignoring case as the tracking sequence does; else <see cref="FromEmailCorrectionReasons.DifferentInvoiceNumber"/>).</para>
+    /// and compared ignoring case as the tracking sequence does; else <see cref="FromEmailCorrectionReasons.DifferentInvoiceNumber"/>); then
+    /// that submission must have finished (<see cref="CorrectionTargetSubmissionFinished"/>; else
+    /// <see cref="FromEmailCorrectionReasons.SubmissionInProgress"/>, task 097 second review F1).</para>
     /// <para>A read fault is 503 <see cref="InvoiceSubmissionErrors.CoreRecordUnavailable"/>, never a guess. No answer names another firm,
     /// record or number. The answer's <c>ResubmissionOf</c> is the submission to record in <see cref="ResubmissionOfColumn"/>.</para>
     /// </remarks>
@@ -1215,10 +1250,18 @@ public class InvoiceSubmissionService
             return (DifferentCoreRecord(invoice.Id), null);
         }
 
-        if (!string.Equals(earlier.FirmInvoiceNumber?.Trim(), firmInvoiceNumber.Trim(), StringComparison.OrdinalIgnoreCase))
+        if (!SameFirmInvoiceNumber(earlier.FirmInvoiceNumber, firmInvoiceNumber))
         {
             return (CorrectionRefused(invoice.Id, FromEmailCorrectionReasons.DifferentInvoiceNumber,
                 "A corrected invoice keeps the firm invoice number of the invoice it replaces; this one has another number, so nothing was saved."), null);
+        }
+
+        // Task 097 second review (F1): the invoice's own processing must have finished, or the correction could supersede an invoice whose
+        // after-steps (or undo) are still running. Checked again at commit (InvoiceSubmissionPersister).
+        if (!CorrectionTargetSubmissionFinished(submission))
+        {
+            return (CorrectionRefused(invoice.Id, FromEmailCorrectionReasons.SubmissionInProgress,
+                "The invoice to correct is still being processed, so it cannot be replaced yet. Nothing was saved; try again once its processing has finished."), null);
         }
 
         return (null, submission.Id);

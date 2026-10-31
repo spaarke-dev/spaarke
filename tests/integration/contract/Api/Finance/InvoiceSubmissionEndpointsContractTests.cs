@@ -2053,7 +2053,7 @@ public sealed class InvoiceSubmissionEndpointsContractTests : IAsyncLifetime
         NothingWritten();
     }
 
-    public static TheoryData<string> CorrectionRefusals =>new() { "invoice_status", "different_firm", "different_core_record", "different_invoice_number", "no_submission" };
+    public static TheoryData<string> CorrectionRefusals =>new() { "invoice_status", "different_firm", "different_core_record", "different_invoice_number", "no_submission", "submission_in_progress" };
 
     [Theory(DisplayName = "097b (seed-proof, the firm and core-record guards; must fire): a Correction the guard refuses is 409 correction_not_allowed with its reason; nothing written")]
     [MemberData(nameof(CorrectionRefusals))]
@@ -2069,6 +2069,12 @@ public sealed class InvoiceSubmissionEndpointsContractTests : IAsyncLifetime
         if (reason == "no_submission")
         {
             _h.PriorSubmissions.Clear();
+        }
+
+        if (reason == "submission_in_progress")
+        {
+            // Task 097 second review F1: the invoice's own submission is still running.
+            _h.PriorSubmissions[0]["sprk_processingstatus"] = new OptionSetValue((int)InvoiceSubmissionStatus.Processing);
         }
 
         var response = await PostFromDocumentAsync(CorrectionBody(number: reason == "different_invoice_number" ? "INV-8" : CorrectionSeed.Number));

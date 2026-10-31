@@ -87,6 +87,12 @@ public static class FromEmailCorrectionReasons
 
     /// <summary>Task 097b (EB-D-179 item 1): the invoice has no submission record, so it cannot be corrected.</summary>
     public const string NoSubmission = "no_submission";
+
+    /// <summary>
+    /// Task 097 second review (F1): the invoice's own submission has not finished (Received, Processing, Failed, or Rejected other than
+    /// held Blocked), so a correction could supersede an invoice whose own processing is still running. Retry once it has finished.
+    /// </summary>
+    public const string SubmissionInProgress = "submission_in_progress";
 }
 
 /// <summary>The mark values (exact case, contract section 2).</summary>

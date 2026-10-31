@@ -29,14 +29,29 @@ internal static class CorrectionSeed
         ["statuscode"] = new OptionSetValue(status),
     };
 
-    public static Entity Submission(string number = Number, Guid? firm = null, Guid? matter = null, Guid? id = null) =>
-        new("sprk_invoicesubmission", id ?? OldSubmissionId)
+    /// <summary>The invoice's own submission; finished (Accepted) unless <paramref name="status"/> says otherwise (task 097 second review F1).</summary>
+    public static Entity Submission(string number = Number, Guid? firm = null, Guid? matter = null, Guid? id = null,
+        InvoiceSubmissionStatus? status = InvoiceSubmissionStatus.Accepted, string? reasonCode = null)
+    {
+        var row = new Entity("sprk_invoicesubmission", id ?? OldSubmissionId)
         {
             ["sprk_invoice"] = new EntityReference("sprk_invoice", OldInvoiceId),
             [TrackingNumberAllocator.FirmColumn] = new EntityReference("sprk_organization", firm ?? InvoiceSubmissionServiceTests.FirmId),
             [TrackingNumberAllocator.FirmInvoiceNumberColumn] = number,
             ["sprk_regardingmatter"] = new EntityReference("sprk_matter", matter ?? InvoiceSubmissionServiceTests.MatterId),
         };
+        if (status is { } s)
+        {
+            row["sprk_processingstatus"] = new OptionSetValue((int)s);
+        }
+
+        if (reasonCode is not null)
+        {
+            row["sprk_outcomereasoncode"] = reasonCode;
+        }
+
+        return row;
+    }
 
     /// <summary>A correctable old invoice (In Review) with its submission, in <paramref name="h"/>.</summary>
     public static Entity Seed(Harness h, Entity? invoice = null, Entity? submission = null)
@@ -222,6 +237,71 @@ public sealed class InvoiceCorrectionIntakeTests
         var invoice = CorrectionSeed.Seed(h);
 
         RefusedWith((await Check(h, invoice, number: "INV-8")).Refusal, "different_invoice_number");
+    }
+
+    // ── second review F1: the invoice's own submission must have finished ──────────────────────────────────────────
+
+    public static TheoryData<InvoiceSubmissionStatus?, string?> SubmissionNotFinished => new()
+    {
+        { InvoiceSubmissionStatus.Processing, null },
+        { InvoiceSubmissionStatus.Received, null },
+        // A held submission whose after-steps have not yet written Rejected (the Blocked code is written at commit): still running.
+        { InvoiceSubmissionStatus.Processing, SubmissionReasonCodes.Blocked },
+        // An undo may be unfinished (SubmissionCommitGate.UndoUnfinished); closes 097c K4.
+        { InvoiceSubmissionStatus.Failed, SubmissionReasonCodes.SourceCheckFailed },
+        // Rejected, but not held: not a finished outcome a correction may supersede.
+        { InvoiceSubmissionStatus.Rejected, SubmissionReasonCodes.Returned },
+        // Unread or unknown: fail closed.
+        { null, null },
+    };
+
+    [Theory(DisplayName = "097 second review F1 (must fire): an invoice whose own submission has not finished (Processing, Received, Failed, Rejected not held, unknown) is 409 submission_in_progress")]
+    [MemberData(nameof(SubmissionNotFinished))]
+    public async Task Refused_TheInvoicesSubmissionHasNotFinished(InvoiceSubmissionStatus? status, string? reasonCode)
+    {
+        var h = new Harness();
+        var invoice = CorrectionSeed.Seed(h, submission: CorrectionSeed.Submission(status: status, reasonCode: reasonCode));
+
+        var (refusal, target) = await Check(h, invoice);
+
+        RefusedWith(refusal, "submission_in_progress");
+        target.Should().BeNull();
+        h.Writes.Should().Be(0);
+    }
+
+    public static TheoryData<InvoiceSubmissionStatus, string?> SubmissionFinished => new()
+    {
+        { InvoiceSubmissionStatus.Accepted, null },
+        { InvoiceSubmissionStatus.Accepted, SubmissionReasonCodes.Overridden },
+        // Held Blocked (D-101, FinanceBaseValues.HeldSubmissionConditions): the invoice is In Review awaiting Override or Return.
+        { InvoiceSubmissionStatus.Rejected, SubmissionReasonCodes.Blocked },
+    };
+
+    [Theory(DisplayName = "097 second review F1 (must not fire): an invoice whose own submission is Accepted, or Rejected and held Blocked, may be corrected")]
+    [MemberData(nameof(SubmissionFinished))]
+    public async Task Allowed_TheInvoicesSubmissionHasFinished(InvoiceSubmissionStatus status, string? reasonCode)
+    {
+        var h = new Harness();
+        var invoice = CorrectionSeed.Seed(h, submission: CorrectionSeed.Submission(status: status, reasonCode: reasonCode));
+
+        var (refusal, target) = await Check(h, invoice);
+
+        refusal.Should().BeNull();
+        target.Should().Be(CorrectionSeed.OldSubmissionId);
+    }
+
+    [Fact(DisplayName = "097 second review F1: a from-document Correction of an invoice whose submission is still Processing is 409 submission_in_progress; nothing is filed or saved")]
+    public async Task FromDocument_TheInvoicesSubmissionIsProcessing_IsRefused_NothingSaved()
+    {
+        var h = DocumentHarness();
+        var invoice = CorrectionSeed.Seed(h, submission: CorrectionSeed.Submission(status: InvoiceSubmissionStatus.Processing));
+        var stepA = 0;
+
+        var outcome = await h.Build().SubmitExistingDocumentAsync(Request(invoice, stepA: _ => { stepA++; return Task.FromResult(true); }), CancellationToken.None);
+
+        RefusedWith(outcome, "submission_in_progress");
+        h.Allocations.Should().BeEmpty();
+        stepA.Should().Be(0, "the guard runs before step A, so nothing is filed");
     }
 
     // ── the from-document entry (SubmitExistingDocumentAsync) ──────────────────────────────────────────────────────

@@ -262,9 +262,21 @@ public sealed class InvoiceSubmissionServiceTests
                             throw failure;
                         }
 
+                        // Second review F1: only the columns asked for, as Dataverse does, so a column dropped from the guard's read
+                        // (the submission's status) fails a test instead of being answered anyway.
                         return new EntityCollection(PriorSubmissions
                             .Where(s => s.GetAttributeValue<EntityReference>("sprk_invoice")?.Id is { } invoiceId
                                 && byInvoice.Values.Contains(invoiceId))
+                            .Select(s =>
+                            {
+                                var row = new Entity(s.LogicalName, s.Id);
+                                foreach (var column in q.ColumnSet.Columns.Where(s.Attributes.ContainsKey))
+                                {
+                                    row[column] = s[column];
+                                }
+
+                                return row;
+                            })
                             .ToList());
                     }
 
