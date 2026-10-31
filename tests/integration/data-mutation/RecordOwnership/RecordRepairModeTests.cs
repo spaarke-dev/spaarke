@@ -346,7 +346,8 @@ public sealed class RecordRepairModeTests
     [Fact]
     public async Task ATableThisServiceDoesNotCreate_IsSkipped_WithNothingRead()
     {
-        var outcome = await _world.RepairAsync("account", Guid.NewGuid());
+        // Task 017-d2: "account" is now registered (the chat create's company table), so an unregistered platform table is used.
+        var outcome = await _world.RepairAsync("phonecall", Guid.NewGuid());
 
         outcome.Status.Should().Be(RecordRepairStatus.Skipped);
         outcome.ReasonCode.Should().Be(RecordRepairReason.TableUnsupported);

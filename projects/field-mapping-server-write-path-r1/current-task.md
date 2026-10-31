@@ -1,26 +1,27 @@
 # Current Task — field-mapping-server-write-path-r1
 
-> **Last updated**: 2026-10-29 ~02:15Z (by context-handoff). Recovery: read Quick Recovery first.
-> **Done on master**: 001–006, 010–016, 018, 037, 038, 070, 073. Work branch merged to master as #2392 (14b9335a6c); later doc commits are on the work branch (e2771ff315, 86dc5c1f92 and this one).
-> **Live on dev: 136568cf70** (R3, live 2026-10-29 02:23:53Z; UAC gate passed, no 5xx). SpaarkeMaster 1.2.4.0 published 02:24:48Z (run 40806065681, master a4b6459da3), not yet imported anywhere: map check follows model1-prod's upgrade or the next provisioning run (H6). #2408 merged a4b6459da3; C:\wt2400 removed.
+> **Last updated**: 2026-10-29 (by context-handoff). Recovery: read Quick Recovery first.
+> **Done on master**: 001–006, 010–016, 018, 037, 038, 070, 071, 072, 073, 074. The work branch was merged to master as #2435 (6b0c1e2fed); later doc commits are on the work branch.
+> **Live on dev:** BFF 136568cf70 (UAC gate passed). SpaarkeMaster 1.2.4.0 is published but not imported anywhere yet. Check that the BU→Matter index map is gone after the model1-prod upgrade or the next provisioning run (H6).
 
 ## Quick Recovery
 
 | Field | Value |
 |---|---|
-| **Active** | **Task 071 (RecordFamilyReader, FR-30) IN PROGRESS** — FULL, opus @ xhigh. Gate met: UAC 194b merged 2cd0f62e2c (#2432). Work branch synced with master (e4dbc0b6de). Step 8: implementer agent on branch task/fm-071 from 2cd0f62e2c (worktree). Then Step 9.5: two adversarial passes (auth-tagged), adr-check, publish delta, CVE. **#2399** live part: dev re-own done; waiting for the owner's UI re-test. |
-| **Plan (design §13, accepted by UAC-r2 at 86dc5c1f92)** | (a) UAC builds the memberless team "Spaarke Customer Configuration Owners" and the role "Customer Configuration Owner" (Read at Basic on sprk_aisearchindex, sprk_fieldmappingprofile, sprk_fieldmappingrule) in 194b R4b-3b. **Wait for their sha.** (b) After the owner's go: create the team and role in BU1 (cb15f587-baa0-f111-aaac-000d3a99d1d7) on dev, then re-own 10 index rows + 7 profiles + 40 rules with a read-back (nothing cascades; checked). (c) FR-38: the server drops a client index on every BFF write path and applies the FINAL owning BU's index (empty and logged if none). (d) FR-39: provisioning owns it (one PR, H10 team + H12b owner bind; I review). (e) W3 wizards stop binding the index. |
-| **Next Action** | 1) **Owner decided 2026-10-29:** §13.5 Q2 = **(B)**: seed the 7 canonical index rows per customer, team-owned, no BU defaults. (A) was withdrawn because the Semantic Search picker needs the rows. Q1 = drop. Correction sent to provisioning and UAC-r2. 2) **Dev re-own DONE 2026-10-29** (owner's go): 57 rows → team 2dae7e6e… in BU1, read-back 57/57; Test User 1 has Read+AppendTo on BU1's index. Owner to re-test the WA create in the UI; then close #2399's live part. Rollback list: session scratchpad `reown-2399-backup.json`. Provisioning creates the team in H7c (#2429); UAC 194b = c4fd7175cd. 3) Scope procedure for FR-38/FR-39: spec amendment → task-create → TASK-INDEX → owner approval. 4) R3: when 1.2.4.0 reaches model1-prod, check the BU→Matter index map is gone and how it was upgraded; stamp proof = the next new provisioning run (H6 StageAndUpgrade); don't check ACME. Dev is already clean (checked 2026-10-28). bafe310ca4 (#2382) doesn't change Core User depth on index/profile/rule; §13 (e) removes the index entry from `config/core-user-wizard-linking-role.json` (0e5904d4aa). |
-| **Open PRs** | #2383 (074, draft, HOLD until 072). #2387 (075, draft, HOLD, ships with 040; head ed1cf9b5d1). #2408 (#2400 error icon, auto-merge). |
-| **Issues filed today** | #2399 (above), #2400 (icon; PR #2408), #2410 (CLOSED, not planned: owner says Basic users need no profile access), #2411 (CLOSED: duplicate inactive index row deleted on dev with the owner's OK), #2413 (known limit: index not recomputed on a BU move; discoverability only). |
-| **Running** | Nothing. |
-| **Waiting on** | UAC 194b sha → 071 → 072 (then mark #2383 ready). UAC 195 → 040, 076. UAC R4b-3b sha → #2399 re-own. 017 blocked on ebilling #1911. |
-| **Owner to do** | Drop stash d5d17bcc7f (074 agent's lint-staged backup). Leftover agent worktree `C:\code_files\spaarke\.claude\worktrees\agent-aec6d06ca99a5a9f6` (locked by a claude.exe; contents on origin) and C:\wt2400 (fix/2400 worktree) to remove with Remove-WorktreeSafe at the end. |
+| **Active** | **076 waiting on the dev BFF deploy.** We OK'd R3's candidate c91b99e575 (contains W7; Router green; 266 related tests + live dev schema check for the new ebilling family rows; full ArchTests 1857/1858, the 1 = flaky ISS-005 wall-clock guard, filed #2469). R3 has the deploy ON HOLD: word-add-in blocking finding #2468 (UAC 194b, unfiled Outlook save ownership); the owner is choosing hold-for-fix vs deploy. A new SHA needs our re-OK. |
+| **Next Action** | 1) **Start 017 via task-execute** (opus/high, FULL): ebilling #1911 MERGED 2026-10-29 21:35, so 017 is unblocked. First item of 017: the ebilling reconcile commit (invoice-family PreWriteRule in RecordTableRules for sprk_invoice/sprk_billingevent, F2 PreWriteRefusal kind, F4 test, retire the 013 ratchet baseline; ebilling reviews), then the other BLOCKING criteria in the POML (DI-004/#2188 field-security on mapped source columns; 015 K1/K3; 014 R3-1), then re-point the four callers. /conflict-check first. 2) In parallel (doc, main session): FR-38/W3 scope procedure (spec amendment → task-create → TASK-INDEX → owner approval). 3) 076 waits on R3 (deploy on hold for #2468; owner choosing); re-OK any new SHA. |
+| **Owner decisions today** | Q1 drop; Q2 (B), seeding the 7 canonical index rows per customer, team-owned, no BU defaults. Depth cap counted from the TOP (exception to UAC C4; design §12.11, quoted on #2442; UAC adopted it). WA owning unit follows its matter (UAC #2451). |
+| **#2399** | Live part FIXED: the owner re-tested the WA create as Test User 1 on 2026-10-29 (saves, with number and Assigned To). Open for the durable fix: FR-38/W3 still need the scope procedure (spec amendment → task-create → TASK-INDEX → owner approval); FR-39 and the index rows are provisioning's #2429. |
+| **Open PRs** | #2387 (075, HOLD, ships with 040). |
+| **Issues** | #2444 (UAC: shared reads-agnostic ordering helper). #2413 (known limit). #2429 (provisioning H7c team + H12b index-row seed + H4b allow-list; I review the PR). #2469 (flaky ISS-005 ArchTest, not ours). |
+| **Waiting on** | UAC 195 → 040 (UAC 2026-10-29: 194b merged, 195 queued next after its two owner-ruling branches; UAC sends the wizard-write SHA and the dev-backfill notice). Provisioning's #2429 PR. ebilling #1911 merged → 017 unblocked. |
+| **Owner to do** | Leftover locked worktree agent-aec6d06ca99a5a9f6 (075): end of project. |
 
-## Blocked: 017
+## 017: IN PROGRESS (FULL, opus/high, directional) — started 2026-10-30
 
-Re-pointing the route and the chat create needs ebilling #1911 (still a draft) plus its reconcile, and these owner items:
-All four owner decisions are made (2026-10-22/23: 2a-2c option a, 2d option c); only ebilling #1911 remains.
+Work branch merged up to master (cd8f0a58b5). /conflict-check: no open PR touches 017's files; #2471 (UAC, RecordOwnershipResolver) is adjacent only.
+BLOCKING status: ebilling reconcile = TODO (phase 1); DI-004/#2188 = done for Create (mask, issue closed); 015 K1/K3 = done in 018; 014 R3-1 = TODO (phase 2, route now sets ServerSetLookupColumns); UAC 013 items 2a-2d decided (decisions.md:260-302) = land with the re-point; 037 K2 = TODO (phase 2).
+Plan: phase 1 = Opus implementer on task/fm-017a (reconcile commit; ebilling reviews). Phase 2 = route+decision parity (017b) and chat/email/budget (017c) in parallel, then remove OwnedChildWrite create half, then adversarial review, quality gates, publish delta.
 
 ## How wave-2 agents are run (lessons)
 
@@ -48,8 +49,7 @@ Dev reads: 0 of 64 matters have an empty `sprk_issecure`; 40 active Copy rules (
 
 1. **016 Repair questions:** cross-BU re-own (skip for now); whether Repair re-owns roots; SYSTEM/INTEGRATION-owned
    unfiled rows.
-2. **017 decisions:** FR-06 step 10 (UAC-r2 text recommended); #1608 columns; the chat matter/project number (recommend
-   refusing it); SystemPrincipal.
+2. ~~017 decisions~~: all decided 2026-10-22/23 (decisions.md).
 3. **Live smoke of #2191 on dev** (Office Project-from-Matter quick-create, mapped values, a secured column stays empty).
 4. **005 `-Apply` on dev**, then `-Verify`.
 5. **014:** confirm the 403 for a mapped filing lookup that fails field security. **015:** index precedence notes.

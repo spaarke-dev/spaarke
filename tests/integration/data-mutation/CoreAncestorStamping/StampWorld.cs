@@ -163,8 +163,12 @@ internal sealed class StampWorld
                 var matches = _rows.Values
                     .Where(r => r.LogicalName == query.EntityName)
                     .Where(r => query.Criteria.Conditions.All(c =>
-                        c.Operator == ConditionOperator.Equal
-                        && r.GetAttributeValue<EntityReference>(c.AttributeName)?.Id == (Guid)c.Values[0]))
+                        (c.Operator == ConditionOperator.Equal
+                         && r.GetAttributeValue<EntityReference>(c.AttributeName)?.Id == (Guid)c.Values[0])
+                        // Field mapping task 017 (Phase 2d-1): the parent-lineage walk reads rows by id (id IN (…)), as live.
+                        || (c.Operator == ConditionOperator.In
+                            && string.Equals(c.AttributeName, query.EntityName + "id", StringComparison.OrdinalIgnoreCase)
+                            && c.Values.OfType<Guid>().Contains(r.Id))))
                     .OrderBy(r => new SqlGuid(r.Id))
                     .Select(r => query.ColumnSet.AllColumns ? Clone(r) : Project(r, [.. query.ColumnSet.Columns]))
                     .ToList();

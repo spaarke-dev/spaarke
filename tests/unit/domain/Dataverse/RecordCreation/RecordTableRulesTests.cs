@@ -32,9 +32,11 @@ public class RecordTableRulesTests
     [Fact]
     public void RootServerOwnedColumns_View_EqualsThePreRegistryList()
     {
-        ChildRecordEndpoints.RootServerOwnedColumns.Should().BeEquivalentTo(
+        // Task 017: the route's view was deleted when the route moved onto the service; the registry entry it viewed is read.
+        var workAssignment = RecordTableRules.Get("sprk_workassignment").TableServerOwnedColumns;
+        workAssignment.Should().BeEquivalentTo(
             "sprk_containerid", "sprk_securitybu", "sprk_accesspermission");
-        ChildRecordEndpoints.RootServerOwnedColumns.Contains("SPRK_ContainerId").Should().BeTrue("the list was case-insensitive");
+        workAssignment.Contains("SPRK_ContainerId").Should().BeTrue("the list was case-insensitive");
     }
 
     // The pre-registry lists plus #2220: the secure flag and the access columns are the BFF's own on every secure root.
@@ -210,7 +212,57 @@ public class RecordTableRulesTests
     public void MappingProtectedColumns_AreDeclaredOnlyOnTheTablesThatNeedThem()
     {
         RecordTableRules.All.Where(r => r.MappingProtectedColumns.Count > 0).Select(r => r.Table)
-            .Should().BeEquivalentTo("sprk_matter", "sprk_project", "sprk_invoice", "sprk_billingevent", "sprk_document", "sprk_budget");
+            .Should().BeEquivalentTo("sprk_matter", "sprk_project", "sprk_invoice", "sprk_billingevent", "sprk_document", "sprk_budget",
+                // Task 017 (coordinator item 8): the other four invoice-family tables protect their core lookups too.
+                "sprk_invoicesubmission", "sprk_invoiceapproval", "sprk_externalidentifier", "sprk_invoicecorrection");
+    }
+
+    // ── Task 017 (coordinator item 8): every invoice-family table's core lookups are mapping-protected ───────────────
+
+    public static TheoryData<string> InvoiceFamilyTables() => new(InvoiceFamilyCoreRecordGuard.CoreRecordLookups.Keys);
+
+    /// <summary>The guard's core lookups of <paramref name="table"/> that <paramref name="protectedColumns"/> leaves mappable.</summary>
+    private static IReadOnlyList<string> UnprotectedCoreLookups(string table, IReadOnlySet<string> protectedColumns) =>
+        InvoiceFamilyCoreRecordGuard.CoreRecordLookups[table].Select(l => l.Column).Where(c => !protectedColumns.Contains(c)).ToArray();
+
+    [Theory]
+    [MemberData(nameof(InvoiceFamilyTables))]
+    public void MappingProtectedColumns_EveryInvoiceFamilyTable_CoversEveryCoreLookupItsGuardReads(string table)
+    {
+        // A mapping that filled a SECOND core lookup would fail a valid create with invoice_family_multiple_core_records; the
+        // protected set is derived from the guard, so it covers every core lookup the guard reads, on every family table.
+        var rule = RecordTableRules.Find(table);
+        rule.Should().NotBeNull($"{table} is an invoice-family table, so the registry declares it");
+        UnprotectedCoreLookups(table, rule!.MappingProtectedColumns).Should().BeEmpty();
+        rule.PreWriteRules.Should().Contain(RecordTableRules.InvoiceFamilyRule);
+    }
+
+    [Fact]
+    public void MappingProtectedColumns_TheCoreLookupCheck_FiresOnASetMissingOne()
+    {
+        // Must fire: the check above finds a core lookup a protected set leaves mappable.
+        var missingProject = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "sprk_regardingmatter", "sprk_regardingworkassignment" };
+        UnprotectedCoreLookups("sprk_invoicesubmission", missingProject).Should().Equal("sprk_regardingproject");
+        UnprotectedCoreLookups("sprk_invoice", new HashSet<string>()).Should()
+            .BeEquivalentTo("sprk_matter", "sprk_project", "sprk_regardingworkassignment");
+    }
+
+    // ── Task 017 (#1608, decision 2b): one server-owned set on every secure root; a document's access record ─────────
+
+    [Theory]
+    [InlineData("sprk_matter")]
+    [InlineData("sprk_project")]
+    [InlineData("sprk_workassignment")]
+    public void TableServerOwnedColumns_EverySecureRoot_RefusesTheSameThreeColumns(string table) =>
+        RecordTableRules.Get(table).TableServerOwnedColumns.Should().BeEquivalentTo(
+            "sprk_containerid", "sprk_securitybu", "sprk_accesspermission");
+
+    [Fact]
+    public void TableServerOwnedColumns_ADocument_RefusesItsAccessInheritance_NotItsAccessPermission()
+    {
+        var document = RecordTableRules.Get("sprk_document").TableServerOwnedColumns;
+        document.Should().BeEquivalentTo(Sprk.Bff.Api.Services.Access.AccessInheritance.Column);
+        document.Should().NotContain(InheritedAccessPermission.Column, "UAC-r2 D7: a caller may fill it at create");
     }
 
     [Fact]
@@ -232,11 +284,34 @@ public class RecordTableRulesTests
         rule.MappingExclusion!.Name.Should().Be("OntologyContentIsNotMapped");
     }
 
+    [Theory]
+    [InlineData("task")]
+    [InlineData("contact")]
+    [InlineData("account")]
+    public void ChatPlatformTables_DeclareOnlyWhatTheOwnedCreateAppliesToday(string table)
+    {
+        // Task 017-d2 (owner decision 2026-10-30, option b): registered for the chat create, keeping today's behaviour.
+        var rule = RecordTableRules.Get(table);
+
+        rule.Kind.Should().Be(RecordTableKind.Child);
+        rule.MappingApplies.Should().BeFalse("the chat create maps nothing today");
+        rule.MappingExclusion!.Name.Should().Be("ChatPlatformTableIsNotMapped");
+        rule.OwnershipException.Should().BeNull("the owner is the resolver's team, as today");
+        rule.TableServerOwnedColumns.Should().BeEmpty();
+        rule.MappingProtectedColumns.Should().BeEmpty();
+        rule.AutonumberColumn.Should().BeNull();
+        rule.ForPerson.Should().BeNull();
+        rule.ServerDefaults.Should().BeEmpty();
+        rule.SearchIndexed.Should().BeFalse();
+        rule.OptionalReferenceLookups.Should().BeEmpty();
+        rule.PreWriteRules.Should().BeEmpty();
+    }
+
     [Fact]
     public void MappingApplies_EveryOtherTable_IsTrue()
     {
         RecordTableRules.All.Where(r => !r.MappingApplies).Select(r => r.Table)
-            .Should().BeEquivalentTo("sprk_signal", "sprk_decisionrecord", "sprk_budgetrevision");
+            .Should().BeEquivalentTo("sprk_signal", "sprk_decisionrecord", "sprk_budgetrevision", "task", "contact", "account");
     }
 
     [Fact]

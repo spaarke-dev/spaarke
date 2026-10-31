@@ -21,8 +21,8 @@ namespace Sprk.Bff.Api.Services.RecordCreation;
 /// a typed <see cref="RecordCreationRefusal"/> with nothing written.
 /// </summary>
 /// <remarks>
-/// <para><b>Ported, not redesigned.</b> Steps 1 and 5 to 7 and 11 are <see cref="OwnedChildWrite.CreateAsync"/>'s create
-/// half (G5: check AS THE CALLER, create AS THE APP owned by the resolver's team), with the same order, the same owner
+/// <para><b>Ported, not redesigned.</b> Steps 1 and 5 to 7 and 11 are <c>OwnedChildWrite.CreateAsync</c>'s create
+/// half (deleted in task 017 2d-5, once every caller was re-pointed here) (G5: check AS THE CALLER, create AS THE APP owned by the resolver's team), with the same order, the same owner
 /// rule and the same refusal codes; the post-create steps are <c>ChildRecordEndpoints.CreateAsync</c>'s
 /// (<c>CompleteRootCreateAsync</c>, the I-1 re-stamp, I-16, the sharee mirror) and the Office create's (the autonumber
 /// retry and its number read-back, the membership event), in their order. Existing callers still call those cores: tasks
@@ -30,10 +30,15 @@ namespace Sprk.Bff.Api.Services.RecordCreation;
 /// the owner (step 7, <see cref="DecideOwnerAsync"/>) and the search-index default (step 8,
 /// <see cref="SearchIndexDefaultAsync"/>) are task 015's: record-first for every create, roots and children (FR-09), and
 /// the OWNING business unit's search index, fill-only (FR-10).</para>
-/// <para><b>Step 10 runs after the create.</b> Spec FR-06 places "I-1 stamp + I-16 derived into the payload" before the
-/// create; every existing path (the child-record route, the chat create's G5 core) derives both AFTER the create through
-/// <see cref="CoreAncestorRestamper"/>. Porting kept that order, so step 10 is recorded <see cref="RecordCreationStepState.Deferred"/>
-/// in its place and runs inside step 12, in the route's position (task 013 notes, "Step 10").</para>
+/// <para><b>Step 10 runs before the create, and again after it</b> (owner decision 2a, 2026-10-22; task 017). The I-1 stamp
+/// columns the row is missing are derived from what it is filed under (<see cref="CoreAncestorRestamper.PlanMissingStampAsync"/>,
+/// fill-only) and bound into the create payload; a derivation that fails refuses the create, nothing written
+/// (<see cref="RecordCreationRefusal.StampUnderivableCode"/> 400 for a data condition,
+/// <see cref="RecordCreationRefusal.StampUnavailableCode"/> 503 for a fault). I-16 (To Do, Event, Communication) is set in the
+/// payload when it resolves and never refuses (display only). A document gets neither before the create (#2169). The
+/// post-create re-derivation (<see cref="CoreAncestorRestamper.AfterWriteAsync"/>, then I-16) still runs inside step 12, in
+/// its place. A system principal derives and refuses the same way; it has no caller to read the table's navigation metadata
+/// as, so its derived stamp is bound by that post-create re-derivation (task 017 notes, Phase 2d-1).</para>
 /// <para><b>Principals (FR-07, ADR-028).</b> A caller is named by WhoAmI under their own token; one Dataverse cannot name
 /// is refused (403, <see cref="RecordCreationRefusalKind.PrincipalUnresolved"/>) before the payload is read. A system
 /// principal skips the as-caller steps 2 and 5 only and records <see cref="RecordRequester"/> when it has one; every other
@@ -48,8 +53,9 @@ namespace Sprk.Bff.Api.Services.RecordCreation;
 /// <para><b>ADR-008, path A</b> (spec "ADR Tensions"): the payload-dependent checks live in
 /// <see cref="CallerWriteAuthorization"/> and are called here, not written as endpoint filters. <b>ADR-010:</b> one
 /// concrete scoped registration, no interface.</para>
-/// <para><b>Component justification (CLAUDE.md §11).</b> Existing — two create cores, <see cref="OwnedChildWrite.CreateAsync"/>
-/// (children, strong authorization) and the Office creation core (roots, weaker authorization).
+/// <para><b>Component justification (CLAUDE.md §11).</b> Existing — two create cores, <c>OwnedChildWrite.CreateAsync</c>
+/// (children, strong authorization) and the Office creation core (roots, weaker authorization); both are now deleted
+/// (018c, 017 2d-5).
 /// Extension — this merges them (spec §11 "Yes: merges the two existing cores"); tasks 017/018 re-pointed their callers,
 /// and 018c deleted the Office core. Cost of doing nothing — the same row filed under the same parent gets a different owner, stamp and checks by
 /// surface, and field mapping reaches 2 of about 30 create paths (spec §11).</para>
@@ -61,7 +67,8 @@ internal sealed partial class RecordCreationService
 
     /// <summary>
     /// ebilling-r1 correction (b), verbatim: what the chat create shows when a pre-write rule finds a record the row names
-    /// missing or not the caller's to use (<c>OwnedChildWrite.NotAvailableToFileUnder</c> on <c>work/ebilling-r1</c>).
+    /// missing or not the caller's to use. The ONE copy (task 017): <see cref="OwnedChildWrite"/>'s invoice-family step reads
+    /// it too.
     /// </summary>
     internal const string NotAvailableToFileUnder =
         "A record this row names was not found, or you do not have permission to use it. Nothing was written.";
@@ -112,11 +119,13 @@ internal sealed partial class RecordCreationService
     /// </summary>
     internal Func<string, RecordTableRule?> TableRules { get; init; } = RecordTableRules.Find;
 
-    /// <summary>The user-facing noun for a table in refusal texts: the child-record route's, with the two Office roots named.</summary>
+    /// <summary>The user-facing noun for a table in refusal texts: the child-record route's, with the two Office roots and the
+    /// budget inquiry's service request (task 017, 2d-5) named.</summary>
     internal static string NounOf(string? table) => (table ?? string.Empty).Trim().ToLowerInvariant() switch
     {
         "sprk_matter" => "matter",
         "sprk_project" => "project",
+        "sprk_servicerequest" => "service request",
         var other => Sprk.Bff.Api.Api.ChildRecordEndpoints.Noun(other),
     };
 
@@ -244,11 +253,13 @@ internal sealed partial class RecordCreationService
         // ── Step 12: post-create, never thrown ────────────────────────────────────────────────────────────────────────
         trace.Begin(RecordCreationStep.PostCreate);
         var warnings = new List<string>();
-        var removed = await AfterCreateAsync(table, id, rule, decision, noun, correlationId, warnings).ConfigureAwait(false);
+        SecureRootInheritResult? isolatedCompletion = null;
+        var removed = await AfterCreateAsync(table, id, rule, decision, noun, correlationId, warnings, s => isolatedCompletion = s)
+            .ConfigureAwait(false);
         if (removed is not null)
         {
             trace.Record(RecordCreationStep.PostCreate, RecordCreationStepState.Refused, "the isolated row was removed again");
-            return trace.Outcome(removed, warnings);
+            return trace.Outcome(removed, warnings) with { IsolatedCompletion = isolatedCompletion };
         }
 
         trace.Record(RecordCreationStep.PostCreate, RecordCreationStepState.Ran, warnings.Count == 0 ? null : $"{warnings.Count} warning(s)");
@@ -260,7 +271,7 @@ internal sealed partial class RecordCreationService
         // The mapping step's warnings first (step 3 ran before the create), then step 8's, then the post-create ones.
         return trace.Created(id, decision.OwningTeamId, decision.IsolatedFor is not null,
             [.. decision.MappingWarnings.Select(w => w.Detail), .. decision.DefaultWarnings, .. warnings], decision.MappingWarnings,
-            writtenColumns);
+            writtenColumns) with { IsolatedCompletion = isolatedCompletion };
     }
 
     /// <summary>What steps 1 to 10 decided: a refusal, or the fields to create and the facts step 12 needs.</summary>
@@ -344,6 +355,11 @@ internal sealed partial class RecordCreationService
                 throw new ArgumentOutOfRangeException(nameof(principal), principal.GetType().Name, "Unknown principal.");
         }
 
+        // Task 017 r3 (UAC-r2 F1): a request that names no grantor hands the "Assigned *" step none (no invitation, no
+        // sprk_grantedby user) - what the chat create did before the service, and what every other AI-tool write still does.
+        if (request.Grantor == AssignedAccessGrantor.None)
+            grantorOid = null;
+
         // ── Step 2: the table's rules — refuse a server-owned column in the CALLER's payload ────────────────────────────
         trace.Begin(RecordCreationStep.TableRules);
         DataverseWriteItemMapper.MappedItem item;
@@ -351,6 +367,26 @@ internal sealed partial class RecordCreationService
         if (user is null)
         {
             item = ((RecordCreationPayload.Mapped)request.Payload).Item;
+
+            // Task 017 (owner decision 2b): a system principal's row is the server's, so the caller's column policy is not
+            // asked (FR-07) — except the table's own server-owned columns, which no principal names (a document's access
+            // record), and a document's access record and narrowing as the app-only refusal states them
+            // (InheritedAccessPermission.RefuseAppOnlyWrite: Access Permission, its record, the submission marker). A
+            // caller may still fill a document's Access Permission at create (UAC-r2 D7); an app-only create may not.
+            if (item.Columns.FirstOrDefault(c => rule.TableServerOwnedColumns.Contains(c)) is { } systemTableColumn)
+            {
+                return Decision.Refuse(new RecordCreationRefusal(RecordCreationRefusalKind.BlockedColumn,
+                    RecordCreationRefusal.BlockedColumnCode, $"Column '{systemTableColumn}' of a {noun} is set by Spaarke — omit it."));
+            }
+
+            if (InheritedAccessPermission.RefuseAppOnlyWrite(table, item.Columns) is
+                { RefusalCode: InheritedAccessPermission.AppOnlyDocumentWriteReasonCode } appOnlyRefusal)
+            {
+                return Decision.Refuse(new RecordCreationRefusal(RecordCreationRefusalKind.BlockedColumn,
+                    RecordCreationRefusal.BlockedColumnCode, $"The {noun} was not created: {appOnlyRefusal.Reason}."));
+            }
+
+            // Recorded as before: the caller's column policy is the step, and a system principal skips it.
             trace.Record(RecordCreationStep.TableRules, RecordCreationStepState.Skipped, "system principal (FR-07)");
         }
         else
@@ -378,19 +414,8 @@ internal sealed partial class RecordCreationService
             // The table's own server-owned columns first (the child-record route's order) — its autonumber among them: the
             // platform issues the number, as the Office create's protected list says — then the ones every app-only create
             // owns, with the creator person (the G5 core's first check, the same words).
-            if (item.Columns.FirstOrDefault(c => rule.TableServerOwnedColumns.Contains(c) || IsNumberColumn(rule, c)) is { } tableColumn)
-            {
-                return Decision.Refuse(new RecordCreationRefusal(RecordCreationRefusalKind.BlockedColumn,
-                    RecordCreationRefusal.BlockedColumnCode, $"Column '{tableColumn}' of a {noun} is set by Spaarke — omit it."));
-            }
-
-            if (item.Columns.FirstOrDefault(c => RecordTableRules.CommonServerOwnedColumns.Contains(c) || RecordCreatorPerson.NamesColumn(c))
-                is { } serverColumn)
-            {
-                return Decision.Refuse(new RecordCreationRefusal(RecordCreationRefusalKind.BlockedColumn,
-                    RecordCreationRefusal.BlockedColumnCode,
-                    $"Column '{serverColumn}' is set by the server on a record the application creates for you — omit it."));
-            }
+            if (CallerBlockedColumnRefusal(rule, noun, item.Columns) is { } blockedColumn)
+                return Decision.Refuse(blockedColumn);
 
             // Task 018a (K-3): the references the request names — optional values the caller chose — are asked alone, as the
             // caller; one the caller may not use is dropped with a warning (FR-08's mapped-value path), never refused. Before
@@ -472,7 +497,7 @@ internal sealed partial class RecordCreationService
         // so they take this same path — filled only where the row leaves the column unset, checked at step 5 like any
         // default, written in the create (step 11) and so read back by the "Assigned *" materialisation (step 12). A copy of a
         // SERVER-set source names the same server-chosen record, so it is server-set too (steps 5 and 6 read the request's
-        // set), exactly as on the owned create (OwnedChildWrite.CreateAsync).
+        // set), exactly as on the owned create this replaced (OwnedChildWrite.CreateAsync, deleted in 017).
         if (user is not null)
         {
             (defaults, var copied) = WithCopiedDefaults(table, rule, item, defaults);
@@ -697,9 +722,13 @@ internal sealed partial class RecordCreationService
                 ? "creator person stamped when the requester resolved; \"for\" person and table defaults stay with the adapters"
                 : "the table carries no creator person; \"for\" person and table defaults stay with the adapters");
 
-        // ── Step 10: the I-1 stamp and I-16 — derived after the create, in the route's position (see remarks) ───────────
-        trace.Record(RecordCreationStep.StampAndInheritance, RecordCreationStepState.Deferred,
-            "derived after the create (step 12), as every existing path does");
+        // ── Step 10: the I-1 stamp and I-16, derived into the payload before the create (owner decision 2a; see remarks) ──
+        trace.Begin(RecordCreationStep.StampAndInheritance);
+        var stamped = await StampBeforeCreateAsync(table, user, item, fields, noun, ct).ConfigureAwait(false);
+        if (stamped.Refusal is { } stampRefusal)
+            return Decision.Refuse(stampRefusal);
+
+        trace.Record(RecordCreationStep.StampAndInheritance, stamped.State, stamped.Note);
 
         return new Decision
         {
@@ -714,8 +743,181 @@ internal sealed partial class RecordCreationService
     }
 
     /// <summary>
+    /// Step 10 (owner decision 2a, task 017): the I-1 stamp columns the merged row is MISSING, derived from what it is filed
+    /// under (<see cref="CoreAncestorRestamper.PlanMissingStampAsync"/>, task 016's in-memory planner — fill-only, nothing
+    /// written), bound into <paramref name="fields"/>; then I-16 from every lookup the row now names. A derivation that fails
+    /// refuses: a data condition (<see cref="CoreAncestorStampUnderivableException.IsPermanent"/>) is
+    /// <see cref="RecordCreationRefusal.StampUnderivableCode"/> (400), a derived stamp the table's metadata cannot bind is the
+    /// non-retryable <see cref="RecordCreationRefusalKind.Undecided"/> (500, F-5), anything else
+    /// <see cref="RecordCreationRefusal.StampUnavailableCode"/> (503). I-16 never refuses: it is display only, and a null is simply not set. A document gets neither (#2169).
+    /// </summary>
+    /// <remarks>Only <paramref name="fields"/> changes: the item (what the owner, the plan and step 12 read) is the row as the
+    /// earlier steps decided it. The stamp is bound under the table's navigation property, read as the caller through
+    /// <see cref="DataverseWriteItemMapper"/> (the read steps 1 and 4 make); a system principal has no caller, so its derived
+    /// stamp is left to the post-create re-derivation (step 12), which runs for every principal.</remarks>
+    private async Task<(RecordCreationRefusal? Refusal, RecordCreationStepState State, string? Note)> StampBeforeCreateAsync(
+        string table, IDataverseUserClient? user, DataverseWriteItemMapper.MappedItem item, Dictionary<string, object?> fields,
+        string noun, CancellationToken ct)
+    {
+        if (InheritedAccessPermission.RecordsOwnNarrowing(table))
+            return (null, RecordCreationStepState.Skipped, "a document is stamped after the create only (#2169)");
+
+        var stampsI1 = CoreAncestorResolver.IsStampedChildEntity(table);
+        var takesI16 = InheritedAccessPermission.AppliesTo(table);
+        if (!stampsI1 && !takesI16)
+            return (null, RecordCreationStepState.Skipped, "the table carries no I-1 stamp and no inherited Access Permission");
+
+        // The merged row in memory: every lookup it binds, and the ADR-024 pair id as written.
+        var row = new Entity(table);
+        foreach (var lookup in item.Lookups)
+            row[lookup.Column] = new EntityReference(lookup.RelatedTable, lookup.RecordId);
+        if (OwnedChildWrite.PairOf(item).IdText is { } pairId)
+            row[CoreAncestorResolver.RegardingRecordIdColumn] = pairId;
+
+        var notes = new List<string>();
+        if (stampsI1)
+        {
+            Dictionary<string, object>? missing;
+            try
+            {
+                missing = await _restamper.PlanMissingStampAsync(table, row, ct).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (CoreAncestorStampUnderivableException ex) when (ex.IsPermanent)
+            {
+                _logger.LogWarning(ex, "[RECORD-CREATE] the I-1 stamp of a new {Table} cannot be derived ({Kind}); nothing was created",
+                    table, ex.RefusalKind);
+                return (StampUnderivable(noun), RecordCreationStepState.Refused, null);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "[RECORD-CREATE] the I-1 stamp of a new {Table} could not be derived (fault); nothing was created",
+                    table);
+                return (StampUnavailable(noun), RecordCreationStepState.Refused, null);
+            }
+
+            if (missing is null)
+            {
+                notes.Add("no I-1 stamp missing");
+            }
+            else
+            {
+                foreach (var (column, value) in missing)
+                    row[column] = value; // I-16 below reads the row as it will be written
+
+                if (user is null)
+                {
+                    notes.Add($"I-1 stamp derived ({missing.Count} column(s)); a system principal's is bound after the create");
+                }
+                else
+                {
+                    var (bound, permanent) = await BindStampAsync(user, table, missing, ct).ConfigureAwait(false);
+                    if (bound is null && permanent)
+                    {
+                        // Task 017 review F-5: the table's metadata cannot bind the derived stamp, and a retry will not change
+                        // that, so it is not "try again" (503) but the non-retryable Undecided (500). Ids only.
+                        _logger.LogError("[RECORD-CREATE] the I-1 stamp of a new {Table} was derived but the table's metadata " +
+                                         "cannot bind it (permanent); nothing was created", table);
+                        return (StampUnbindable(noun), RecordCreationStepState.Refused, null);
+                    }
+
+                    if (bound is null)
+                    {
+                        _logger.LogError("[RECORD-CREATE] the I-1 stamp of a new {Table} was derived but could not be bound " +
+                                         "(Dataverse did not answer); nothing was created", table);
+                        return (StampUnavailable(noun), RecordCreationStepState.Refused, null);
+                    }
+
+                    foreach (var (key, value) in bound)
+                        PutServerValue(fields, key, value);
+                    notes.Add($"I-1 stamp derived into the payload ({missing.Count} column(s))");
+                }
+            }
+        }
+
+        if (takesI16)
+        {
+            var filed = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
+            foreach (var attribute in row.Attributes)
+            {
+                if (attribute.Value is EntityReference reference)
+                    filed[attribute.Key] = reference;
+            }
+
+            // Never throws (the resolver's contract): a null is simply not set, and step 12 refreshes it after the create.
+            if (await _restamper.ResolveInheritedAccessPermissionAsync(table, filed, ct).ConfigureAwait(false) is { } level)
+            {
+                PutServerValue(fields, InheritedAccessPermission.Column, level);
+                notes.Add("I-16 set");
+            }
+            else
+            {
+                notes.Add("no I-16 before the create");
+            }
+        }
+
+        return (null, RecordCreationStepState.Ran, string.Join("; ", notes));
+    }
+
+    /// <summary>
+    /// The derived stamp columns as the create body binds them (<c>sprk_RegardingMatter@odata.bind</c>), mapped AS THE CALLER
+    /// through <see cref="DataverseWriteItemMapper"/>, the one place a column's navigation property is read. Binds are
+    /// <see langword="null"/> when the stamp could not be bound; <c>Permanent</c> says whether a retry would change that:
+    /// <see langword="false"/> only when Dataverse did not answer (the mapper's client failure), <see langword="true"/> when the
+    /// mapper refused the item or the table cannot bind a column (task 017 review F-5).
+    /// </summary>
+    private static async Task<(IReadOnlyList<KeyValuePair<string, string>>? Binds, bool Permanent)> BindStampAsync(
+        IDataverseUserClient user, string table, IReadOnlyDictionary<string, object> stamp, CancellationToken ct)
+    {
+        var lookups = new Dictionary<string, object>(StringComparer.Ordinal);
+        foreach (var (column, value) in stamp)
+        {
+            if (value is not EntityReference reference)
+                return (null, true);
+            lookups[column.ToLowerInvariant()] = new Dictionary<string, string>
+            {
+                ["relatedTable"] = reference.LogicalName,
+                ["recordId"] = reference.Id.ToString("D"),
+            };
+        }
+
+        var mapped = await DataverseWriteItemMapper.MapAsync(user, table, JsonSerializer.SerializeToElement(lookups), ct)
+            .ConfigureAwait(false);
+        if (mapped.Item is not { } item)
+            return (null, Permanent: mapped.ClientFailure is null);
+
+        using var body = JsonDocument.Parse(item.JsonBody);
+        var binds = new List<KeyValuePair<string, string>>();
+        foreach (var property in body.RootElement.EnumerateObject())
+        {
+            if (property.Value.ValueKind != JsonValueKind.String)
+                return (null, true);
+            binds.Add(KeyValuePair.Create(property.Name, property.Value.GetString()!));
+        }
+
+        return binds.Count == lookups.Count ? (binds, false) : (null, true);
+    }
+
+    /// <summary>Task 017 review F-5: the derived stamp cannot be bound by the table's metadata. Not retryable, so the
+    /// existing non-retryable <see cref="RecordCreationRefusalKind.Undecided"/> (500), not a "try again" 503.</summary>
+    private static RecordCreationRefusal StampUnbindable(string noun) => new(RecordCreationRefusalKind.Undecided,
+        RecordCreationRefusal.NoDecisionCode, $"The {noun} was not created.");
+
+    private static RecordCreationRefusal StampUnderivable(string noun) => new(RecordCreationRefusalKind.Invalid,
+        RecordCreationRefusal.StampUnderivableCode,
+        $"The {noun} was not saved: the core record it belongs to cannot be determined from the record it is filed under " +
+        "(that record names more than one, or no longer exists).");
+
+    private static RecordCreationRefusal StampUnavailable(string noun) => new(RecordCreationRefusalKind.Unavailable,
+        RecordCreationRefusal.StampUnavailableCode,
+        $"The core record the {noun} belongs to could not be determined right now, so it was not created.");
+
+    /// <summary>
     /// Step 7 (FR-09, task 015: record-first for every create, roots and children), ported from
-    /// <see cref="OwnedChildWrite.CreateAsync"/>: the resolver's owner over every parent the row is filed under — its
+    /// the owned create (<c>OwnedChildWrite.CreateAsync</c>, deleted in 017): the resolver's owner over every parent the row is filed under — its
     /// lookups, and on a table whose ADR-024 pair files it on its own (a project, <see cref="PairParentAsync"/>) the record
     /// the pair names — secure-if-any, then the filed-under record's business-unit team, then the acting user's, with the
     /// person who asked as <see cref="RecordOwnershipContext.RequestedBy"/>; then the two secure-filing refusals of that
@@ -1211,7 +1413,7 @@ internal sealed partial class RecordCreationService
 
     /// <summary>
     /// The create payload of an OWNED row: the item's body, owned by the resolver's team, with the person who asked as its
-    /// creator person (task 146 c1-r1) — <see cref="OwnedChildWrite.CreateAsync"/>'s, unchanged.
+    /// creator person (task 146 c1-r1) — the deleted owned create's (<c>OwnedChildWrite.CreateAsync</c>), unchanged.
     /// </summary>
     private static Dictionary<string, object?> OwnedCreateFields(
         RecordOwnerResolution owner, string table, DataverseWriteItemMapper.MappedItem item)
@@ -1229,7 +1431,7 @@ internal sealed partial class RecordCreationService
     /// <summary>
     /// The create payload of a ROOT created INTO isolation (task 158 r1, owner round 31 item 2): owned by the plan's named
     /// Secure Record Owners team, flagged in the create itself, with the person it is made for as its creator person —
-    /// <c>OwnedChildWrite.CreateIntoIsolationAsync</c>'s, unchanged. Provisioning's re-entry steps complete it (step 12).
+    /// the deleted <c>OwnedChildWrite.CreateIntoIsolationAsync</c>'s (017 2d-5), unchanged. Provisioning's re-entry steps complete it (step 12).
     /// </summary>
     private static Dictionary<string, object?> IsolatedCreateFields(
         string table, DataverseWriteItemMapper.MappedItem item, Guid secureTeam, Guid creatorPerson)
@@ -1278,7 +1480,7 @@ internal sealed partial class RecordCreationService
 
     /// <summary>
     /// The secure-create plan's own AppendTo check on the secure parents, as the caller — ported from
-    /// <see cref="OwnedChildWrite.CreateAsync"/>: a parent counts as checked only when a lookup step 5 ASKED about names the
+    /// the owned create (<c>OwnedChildWrite.CreateAsync</c>, deleted in 017): a parent counts as checked only when a lookup step 5 ASKED about names the
     /// same record (table and id); a parent the pair names is asked again.
     /// </summary>
     private static Func<IReadOnlyList<SecureFilingParent>, CancellationToken, Task<RecordOwnerResolution?>> CallerMayFileUnder(
@@ -1337,7 +1539,9 @@ internal sealed partial class RecordCreationService
 
     /// <summary>
     /// Step 5½: the table's pre-write rules in order; the first refusal wins, carried by reference (ebilling-r1 correction
-    /// (c)). A not-found is the uniform not-found with the chat create's words (correction (b)). A system principal has no
+    /// (c)). A not-found is the uniform not-found with the chat create's words (correction (b)); an undecided rule is
+    /// <see cref="RecordCreationRefusalKind.Undecided"/> (500) with its code; any other coded refusal is
+    /// <see cref="RecordCreationRefusalKind.Invalid"/> (400) with its code (task 017, F2). A system principal has no
     /// caller to ask as, so a table with rules refuses it (fail closed; task 012's open point).
     /// </summary>
     private static async Task<RecordCreationRefusal?> RunPreWriteRulesAsync(
@@ -1363,6 +1567,12 @@ internal sealed partial class RecordCreationService
                 { ParentUnavailable: true } => new RecordCreationRefusal(RecordCreationRefusalKind.NotFoundOrDenied,
                     RecordCreationRefusal.NotFoundCode, NotAvailableToFileUnder) { PreWrite = refusal },
                 { ClientFailure: { } failure } => Upstream(failure, noun) with { PreWrite = refusal },
+                // Task 017 (ebilling-r1 F2): a rule that could not decide is "not saved" (500) with its own code — never the
+                // uniform not-found, which only NotFound() reaches (the arm above).
+                { IsUndecided: true } => new RecordCreationRefusal(RecordCreationRefusalKind.Undecided, refusal.Code!, refusal.Detail!)
+                {
+                    PreWrite = refusal,
+                },
                 _ => new RecordCreationRefusal(RecordCreationRefusalKind.Invalid, refusal.Code!, refusal.Detail!) { PreWrite = refusal },
             };
         }
@@ -1389,6 +1599,32 @@ internal sealed partial class RecordCreationService
         ex is HttpRequestException { StatusCode: HttpStatusCode.PreconditionFailed }
         || DataverseServiceClientImpl.IsAlternateKeyDuplicate(ex);
 
+    /// <summary>
+    /// Step 2's column policy for a CALLER's payload, with no I/O (so a chat create can be refused before it suspends for
+    /// confirmation — task 017 review F-2 — from this rule, not a copy of it): the table's own server-owned columns and its
+    /// autonumber first (the child-record route's order), then the ones every app-only create owns and the creator person
+    /// (the G5 core's first check, the same words). Null when the payload names none.
+    /// </summary>
+    internal static RecordCreationRefusal? CallerBlockedColumnRefusal(RecordTableRule rule, string noun, IEnumerable<string> columns)
+    {
+        var named = columns as IReadOnlyCollection<string> ?? columns.ToList();
+        if (named.FirstOrDefault(c => rule.TableServerOwnedColumns.Contains(c) || IsNumberColumn(rule, c)) is { } tableColumn)
+        {
+            return new RecordCreationRefusal(RecordCreationRefusalKind.BlockedColumn,
+                RecordCreationRefusal.BlockedColumnCode, $"Column '{tableColumn}' of a {noun} is set by Spaarke — omit it.");
+        }
+
+        if (named.FirstOrDefault(c => RecordTableRules.CommonServerOwnedColumns.Contains(c) || RecordCreatorPerson.NamesColumn(c))
+            is { } serverColumn)
+        {
+            return new RecordCreationRefusal(RecordCreationRefusalKind.BlockedColumn,
+                RecordCreationRefusal.BlockedColumnCode,
+                $"Column '{serverColumn}' is set by the server on a record the application creates for you — omit it.");
+        }
+
+        return null;
+    }
+
     /// <summary>The table's autonumber column (<see cref="RecordTableRule.AutonumberColumn"/>), which the platform fills.</summary>
     private static bool IsNumberColumn(RecordTableRule rule, string column) =>
         rule.AutonumberColumn is { } number && string.Equals(column, number, StringComparison.OrdinalIgnoreCase);
@@ -1410,7 +1646,8 @@ internal sealed partial class RecordCreationService
     /// event. Never throws; returns a refusal only when an isolated root had to be removed again.
     /// </summary>
     private async Task<RecordCreationRefusal?> AfterCreateAsync(
-        string table, Guid id, RecordTableRule rule, Decision decision, string noun, string correlationId, List<string> warnings)
+        string table, Guid id, RecordTableRule rule, Decision decision, string noun, string correlationId, List<string> warnings,
+        Action<SecureRootInheritResult> isolatedCompleted)
     {
         if (rule.AutonumberColumn is { } numberColumn)
             await WarnIfNumberMissingAsync(table, id, numberColumn, noun, warnings).ConfigureAwait(false);
@@ -1418,6 +1655,7 @@ internal sealed partial class RecordCreationService
         if (decision.IsolatedFor is { } isolatedFor)
         {
             var secured = await _rootFiling.CompleteIsolatedCreateAsync(table, id, isolatedFor, correlationId).ConfigureAwait(false);
+            isolatedCompleted(secured);
             if (secured.RowRemoved)
             {
                 _logger.LogWarning("[RECORD-CREATE] isolated {Table} {Id} removed again: its creator could not be shared ({Code})",
@@ -1595,8 +1833,28 @@ internal sealed partial class RecordCreationService
 /// <summary>What to create: the table and the payload, and the request's facts the pipeline needs.</summary>
 internal sealed record RecordCreationRequest(string Table, RecordCreationPayload Payload)
 {
-    /// <summary>Lookups the SERVER added to the row (e.g. the email draft's sender): they name the caller and cost no AppendTo.</summary>
-    public IReadOnlySet<string>? ServerSetLookupColumns { get; init; }
+    private readonly IReadOnlySet<string>? _serverSetLookupColumns;
+
+    /// <summary>
+    /// Lookups the SERVER added to the row (e.g. the email draft's sender): they name the caller and cost no AppendTo.
+    /// Task 017 (014 review R3-1): normalised ONCE, here, as the request is built — each name trimmed and lower-cased, blanks
+    /// dropped, compared case-insensitively — so the K-2 / F-B guards (<c>ServerSetFilingColumn</c>,
+    /// <c>ServerSetRootFilingLookups</c>), the mapping protection (<c>ProtectedFromMapping</c>) and step 5's AppendTo skip
+    /// (<see cref="CallerWriteAuthorization.CheckCallerMayCreateAsync"/>) all read the one set: a padded or mixed-case name
+    /// can no longer be "server-set" to one reader and the caller's own to another.
+    /// </summary>
+    public IReadOnlySet<string>? ServerSetLookupColumns
+    {
+        get => _serverSetLookupColumns;
+        init => _serverSetLookupColumns = NormaliseColumns(value);
+    }
+
+    /// <summary>The one normalisation of <see cref="ServerSetLookupColumns"/>; <c>null</c> stays <c>null</c>.</summary>
+    internal static IReadOnlySet<string>? NormaliseColumns(IEnumerable<string>? columns) =>
+        columns?
+            .Where(c => !string.IsNullOrWhiteSpace(c))
+            .Select(c => c.Trim().ToLowerInvariant())
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>The request's trace id (the ProblemDetails <c>correlationId</c>); a fresh one when absent.</summary>
     public string? CorrelationId { get; init; }
@@ -1634,6 +1892,25 @@ internal sealed record RecordCreationRequest(string Table, RecordCreationPayload
     /// naming one column, a null or date value, or a table field mapping does not apply to, is an argument error.
     /// </summary>
     public IReadOnlyDictionary<string, object?>? PostMappingDefaults { get; init; }
+
+    /// <summary>
+    /// Task 017 r3 (UAC-r2 review of PR #2486, F1): who the "Assigned *" step (I-12 L1) records as the person behind a root's
+    /// create. The default, <see cref="AssignedAccessGrantor.Caller"/>, is the principal's own oid (the caller's, or a system
+    /// principal's requester): the "Assigned To" contacts are invited and <c>sprk_grantedby</c> names that person.
+    /// <see cref="AssignedAccessGrantor.None"/> hands the step no person: the grants and shares are still made, but no
+    /// invitation is sent and no user is recorded - the AI chat create's behaviour, as it was before the service.
+    /// </summary>
+    public AssignedAccessGrantor Grantor { get; init; } = AssignedAccessGrantor.Caller;
+}
+
+/// <summary>Who a create names as the person behind its "Assigned *" access (see <see cref="RecordCreationRequest.Grantor"/>).</summary>
+internal enum AssignedAccessGrantor
+{
+    /// <summary>The principal's own oid: the caller (or a system principal's requester). The default.</summary>
+    Caller = 0,
+
+    /// <summary>Nobody: no invitation is sent and no <c>sprk_grantedby</c> user is recorded.</summary>
+    None = 1,
 }
 
 /// <summary>
@@ -1765,7 +2042,7 @@ internal enum RecordCreationStep
     /// <summary>9 — the creator person, the "for" person and the table defaults.</summary>
     CreatorAndDefaults,
 
-    /// <summary>10 — the I-1 stamp and I-16 (derived after the create; see the service's remarks).</summary>
+    /// <summary>10 — the I-1 stamp and I-16, derived into the payload before the create (re-derived after it; see the service's remarks).</summary>
     StampAndInheritance,
 
     /// <summary>11 — the one app-only create.</summary>
@@ -1837,6 +2114,16 @@ internal sealed record RecordCreationOutcome
 
     /// <summary>The row was created INTO isolation (a work assignment or project under a secure record).</summary>
     public bool Isolated { get; init; }
+
+    /// <summary>
+    /// Task 017 (2d-3, additive): with <see cref="Isolated"/>, provisioning's answer for the isolated root's completion (the
+    /// caller's share, its container, its parents' sharees) — its <see cref="SecureRootInheritResult.ReasonCode"/> included —
+    /// so an adapter whose contract reports a stranded or unfinished completion as a refusal (the chat create) keeps its code.
+    /// Set whenever the completion ran — on the created row, and on the refusal for a row removed again
+    /// (<see cref="SecureRootInheritResult.RowRemoved"/>); <c>null</c> when the row was not created into isolation and on every
+    /// refusal before the create.
+    /// </summary>
+    public SecureRootInheritResult? IsolatedCompletion { get; init; }
 
     /// <summary>The request's correlation id (the ProblemDetails <c>correlationId</c> of a refusal).</summary>
     public string CorrelationId { get; init; } = string.Empty;

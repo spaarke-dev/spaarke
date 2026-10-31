@@ -1145,7 +1145,7 @@ internal static class InheritedAccessPermission
     /// acts for no person. A model or a configuration builds their payload, not the person running it. Only
     /// <see cref="DecideDocument"/>'s writers keep the value at max(own, inherited). A payload that lowered it, or rewrote
     /// the record, would show a user's Restricted document to partners (D7, task 188). This is the same refusal
-    /// <c>ChildRecordEndpoints.RootServerOwnedColumns</c> makes for a work assignment. A user's own write is not refused: the
+    /// the registry's <c>TableServerOwnedColumns</c> make for a work assignment. A user's own write is not refused: the
     /// form, the user-OBO chat tools, and the action seam's apply of a proposal its impersonated user confirmed
     /// (<c>UpdateRecordPayloadSource.ConfirmedProposal</c>) all run as that user. The field-mapping push also
     /// runs as its caller, but its rules are a configuration applied to every child it reaches, so it asks this too and

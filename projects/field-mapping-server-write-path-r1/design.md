@@ -776,6 +776,7 @@ Still open: classify `sprk_procedureassignment` and record-scoped ruleset rules 
 
 - **Query count:** the worst case is about (edges per level × 4 levels) batched reads per view, 100 or more for a big matter. Measure p95 on dev and record it. Narrow each level to the edges whose parent table is present only if it hurts in practice.
 - **Truncation favours the anchor:** in a truncated full-family view, the anchor's ancestor chain and its own subtree are filled first. Siblings' branches are the ones cut, and "load more" reaches them (UAC C4; tested).
+- **Depth cap counted from the top (owner decision 2026-10-29; exception to UAC C4):** the cap of 4 levels runs from the walk's top, the highest readable ancestor, not from the anchor. An anchor at depth 3 or 4 therefore shows one level or none of its own subtree, and "load more" cannot reach the rest. Opening that record from a shallower point, or on its own when it is the top, shows its subtree. (task 071 review B, finding 2)
 - **Permissiveness:** the view is exactly as permissive as Dataverse read for the caller, never more. Gaps Dataverse itself has today (e.g. the flagged-external systemuser reading Restricted rows, UAC task 191) show here as they do in the MDA.
 
 ### 12.12 The family abstraction contract (UAC-r2 round 130, 2026-10-28, owner decision; #2362)

@@ -1706,10 +1706,14 @@ public sealed partial class SecureChildOwnershipAiToolTests
         string table, Dictionary<string, object?> payload, SecureRootFilingGate? gate = null, IDataverseUserClient? user = null,
         IServiceScopeFactory? scopes = null) =>
         ChildRecordEndpoints.CreateAsync(
-            table, Payload(payload), user ?? _user, _world.Resolver(), _appOnly.Object, Restamper(), Shares(),
-            gate ?? SecureRootFilingGateFixtures.NothingSecure(),
-            scopes ?? new ServiceCollection().BuildServiceProvider().GetRequiredService<IServiceScopeFactory>(),
+            table, Payload(payload), user ?? _user,
+            RouteRecordCreation.Over(
+                _world.Resolver(), _appOnly.Object, Restamper(), Shares(), gate ?? SecureRootFilingGateFixtures.NothingSecure(),
+                scopes, _routeMembership.Object),
             HttpContextOfCaller(), NullLogger<Program>.Instance, CancellationToken.None);
+
+    /// <summary>Task 017: the membership publisher the route's create (through the service) publishes to.</summary>
+    private readonly Moq.Mock<Sprk.Bff.Api.Services.Ai.Membership.Events.IMembershipEventPublisher> _routeMembership = new();
 
     private Task<IResult> RefileChild(string table, Guid id, Dictionary<string, object?> payload) =>
         ChildRecordEndpoints.RefileAsync(

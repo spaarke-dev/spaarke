@@ -13,6 +13,13 @@ namespace Sprk.Bff.Api.Services.Dataverse;
 /// for a child of a secure record, the record's business-unit team otherwise — never the calling user.
 /// </summary>
 /// <remarks>
+/// <para><b>The create half is gone (field-mapping-server-write-path-r1 task 017, 2d-5).</b> Every owned create — the
+/// child-records route, the chat <c>dataverse.create_record</c> owned path, <c>email.draft</c>'s filed draft and the budget
+/// inquiry — runs through <see cref="Sprk.Bff.Api.Services.RecordCreation.RecordCreationService"/>, which ported this file's
+/// create (the as-the-caller checks, the resolver's owner, the isolated root create) step for step. What stays here is the
+/// re-file half (<see cref="RefileAsync"/>, unified-access-control-r2's) and the rules both halves read (the write path,
+/// the "for" columns, the regarding pair, the invoice-family step). The remarks below describe the G5 design those rules
+/// implement.</para>
 /// <para><b>Owner decision S1, option (1)</b> (session-27 round 3, accepted as recommended; it names "AI email draft, AI
 /// create-record" explicitly), <b>refined by G5</b> (round 3b): the BFF checks AS THE USER that they could make the row
 /// themselves, then the APPLICATION creates it OWNED BY THE TEAM — "same rule that assigned to the bu/team not
@@ -211,7 +218,7 @@ internal static class OwnedChildWrite
     /// matter/project precedent. Its extra <c>sprk_assignedto</c> is not a "for" column (b2-r2, verifier b2-r1 item 4; task
     /// note §15b); by owner decision 2026-10-27 (field-mapping-server-write-path-r1 task 037, FR-36, #2354) it is a copied
     /// default instead — the new row's own <c>sprk_assignedtointernal</c>, when the create leaves it unset
-    /// (<see cref="Sprk.Bff.Api.Services.RecordCreation.ServerDefault.CopiedFrom"/>, applied by <see cref="CreateAsync"/>).
+    /// (<see cref="Sprk.Bff.Api.Services.RecordCreation.ServerDefault.CopiedFrom"/>, applied by <see cref="Sprk.Bff.Api.Services.RecordCreation.RecordCreationService"/>).
     /// A table not listed has no "for" column.
     /// </summary>
     /// <remarks>Field-mapping-server-write-path-r1 task 012: a view over the registry's
@@ -259,18 +266,12 @@ internal static class OwnedChildWrite
         item.ValueKind == JsonValueKind.Object
         && item.EnumerateObject().Any(p => string.Equals(p.Name.Trim(), column, StringComparison.OrdinalIgnoreCase));
 
-    /// <summary>What the owned create (or a check) answered.</summary>
+    /// <summary>What a caller check (<see cref="CallerWriteAuthorization"/>) answered. Field-mapping-server-write-path-r1 task
+    /// 017 (2d-5): the owned create that also answered through this record (its created id, owner, plan, secure-filing and
+    /// invoice-family refusals) was deleted; <see cref="Sprk.Bff.Api.Services.RecordCreation.RecordCreationService"/> creates
+    /// and answers with its own outcome.</summary>
     internal sealed record Outcome
     {
-        public Guid? CreatedId { get; init; }
-
-        /// <summary>
-        /// Task 037 (fix round 1): with <see cref="CreatedId"/>, the columns the created row was written with — the
-        /// caller's own plus any copied default this create filled (a work assignment's Assigned To), so a caller reports
-        /// what was actually set rather than what it sent. <c>null</c> when nothing was created.
-        /// </summary>
-        public IReadOnlyList<string>? WrittenColumns { get; init; }
-
         /// <summary>Refused by the caller's own rights — surfaced as the user's access error.</summary>
         public string? Denied { get; init; }
 
@@ -288,9 +289,6 @@ internal static class OwnedChildWrite
         /// </summary>
         public string? RefusedColumn { get; init; }
 
-        /// <summary>Refused by the owner decision — the stable <see cref="RecordOwnerRefusal"/> code and its reason.</summary>
-        public RecordOwnerResolution? OwnerRefusal { get; init; }
-
         /// <summary>A question asked as the caller failed at Dataverse — the caller's own error.</summary>
         public DataverseUserResponse? ClientFailure { get; init; }
 
@@ -302,289 +300,9 @@ internal static class OwnedChildWrite
         /// </summary>
         public string? Invalid { get; init; }
 
-        /// <summary>
-        /// The row would be owned by the Secure team, but its table is not one that team may own from here — a matter (a
-        /// root, made secure only through its own Make Secure; a work assignment or project is instead created as an
-        /// ordinary row and secured by provisioning, task 158) or a table outside the ownership set (the Secure Record
-        /// Owner role holds no Read on it). Nothing is created.
-        /// </summary>
-        public string? SecureFilingRefused { get; init; }
-
-        /// <summary>
-        /// Task 158 r1 (owner round 31): the secure-create plan's refusal — the stable code (an unreadable parent flag, the
-        /// caller walled off a secure parent or the record, the named team unresolved) and its reason. Nothing is created.
-        /// </summary>
-        public RecordOwnerResolution? PlanRefusal { get; init; }
-
-        /// <summary>Task 158 r1: the row was created INTO isolation by this plan — the writer completes it.</summary>
-        public SecureRootCreatePlan? Isolated { get; init; }
-
-        /// <summary>
-        /// Task 158 r1: the person an isolated create was made for (the caller, by the WhoAmI this create made — its
-        /// <c>sprk_createdbyperson</c>), whom completing it shares the row to; never asked a second time.
-        /// </summary>
-        public Guid? IsolatedFor { get; init; }
-
-        /// <summary>
-        /// ebilling-r1 FR-05 (ISS-010, #1973): the invoice-family guard refused the row as it would be written — its stable
-        /// <c>invoice_family_*</c> code (<see cref="InvoiceFamilyCoreRecordGuard"/>). Nothing is created.
-        /// </summary>
-        public InvoiceFamilyCoreRecord? InvoiceFamilyRefusal { get; init; }
-
-        public bool Succeeded =>
-            CreatedId is not null
-            || (Denied is null && OwnerRefusal is null && ClientFailure is null && Invalid is null && SecureFilingRefused is null
-                && PlanRefusal is null && InvoiceFamilyRefusal is null);
+        public bool Succeeded => Denied is null && ClientFailure is null && Invalid is null;
 
         public static readonly Outcome Allowed = new();
-    }
-
-    /// <summary>
-    /// Creates a FILED child row (S1 / G5): as the caller, checks they could create it themselves; resolves its owner
-    /// through the one resolver (secure-if-any); then the application creates it owned by that team, by PATCHing a fresh
-    /// id — the create-by-upsert <c>InvoiceReviewService</c> uses for the G5 invoice. Nothing is written on any refusal; a
-    /// Dataverse fault propagates.
-    /// </summary>
-    /// <param name="serverSetLookupColumns">Lookups the SERVER added to the row (e.g. the email draft's sender) — they
-    /// name the caller themselves and cost no AppendTo check.</param>
-    /// <param name="planSecureCreate">Task 158 r1 (owner round 31): for a work assignment or project, the secure-create plan
-    /// (<see cref="SecureRootFilingGate.PlanCreateAsync"/>) — asked AFTER the caller's own G5 check above and given its
-    /// AppendTo check on the secure parents (the polymorphic pair is text, not a lookup the mapper checks), so a caller who
-    /// may not file under a secure record learns nothing more about it. A refusal creates nothing; an isolated plan creates
-    /// the row owned by the plan's named Secure Record Owners team with <c>sprk_issecure = true</c> in the create itself.
-    /// <c>null</c> for every other create.</param>
-    /// <param name="logger">Task 037: where a copied default that could not be applied is reported (a structured
-    /// warning); <c>null</c> reports nothing.</param>
-    internal static async Task<Outcome> CreateAsync(
-        IDataverseUserClient user,
-        IRecordOwnershipResolver ownership,
-        IFieldMappingDataverseService appOnly,
-        string table,
-        DataverseWriteItemMapper.MappedItem item,
-        IReadOnlySet<string>? serverSetLookupColumns,
-        Guid? callerObjectId,
-        CancellationToken ct,
-        SecureRootFilingGate? planSecureCreate = null,
-        ILogger? logger = null)
-    {
-        var me = await WhoAmIAsync(user, ct).ConfigureAwait(false);
-        if (me.Failure is not null)
-            return new Outcome { ClientFailure = me.Failure };
-
-        // Task 037 (FR-36): the table's copied defaults (a work assignment's Assigned To from its own Assigned To Internal),
-        // fill-only, on the row BEFORE anything is checked or written — so the value is checked as the caller exactly like
-        // a supplied one, written in the create itself, and read back by the "Assigned *" materialisation after it. A copy of
-        // a SERVER-set source (the chat create's "for" person, the caller's own contact) names the same server-chosen record,
-        // so it is server-set too: it costs no more AppendTo than its source did.
-        var defaulted = await WithCopiedDefaultsAsync(user, table, item, logger, ct).ConfigureAwait(false);
-        if (defaulted.ClientFailure is { } defaultFailure)
-            return new Outcome { ClientFailure = defaultFailure };
-        item = defaulted.Item;
-        var serverSetCopies = defaulted.Copied
-            .Where(c => serverSetLookupColumns?.Contains(c.Source) == true)
-            .Select(c => c.Column)
-            .ToArray();
-        if (serverSetCopies.Length > 0)
-        {
-            serverSetLookupColumns = new HashSet<string>(serverSetLookupColumns!.Concat(serverSetCopies), StringComparer.OrdinalIgnoreCase);
-        }
-
-        var check = await CheckCallerMayCreateAsync(user, me.SystemUserId, table, item, serverSetLookupColumns, ct)
-            .ConfigureAwait(false);
-        if (!check.Succeeded)
-            return check;
-
-        // ebilling-r1 FR-05 (ISS-010, #1973; unified-access-control-r2): an invoice-family row names exactly one core record,
-        // and an invoice supersedes only an invoice of that record — asked here, in the one create core, after AppendTo on
-        // every record the row binds, so every route that creates such a row is guarded.
-        if (await CheckInvoiceFamilyAsync(user, table, item, stored: null, ct).ConfigureAwait(false) is { } family)
-        {
-            return new Outcome
-            {
-                InvoiceFamilyRefusal = family.Refusal,
-                ClientFailure = family.ClientFailure,
-                Denied = family.ParentUnavailable ? NotAvailableToFileUnder : null,
-                ParentUnavailable = family.ParentUnavailable,
-            };
-        }
-
-        if (planSecureCreate is not null && SecureRootInheritance.Inherits(table))
-        {
-            // G5 for the secure parents themselves: AppendTo AS THE CALLER on each one the row will be filed under - asked by
-            // the plan before it says anything about them. Every record a typed lookup or the pair names was already
-            // checked above, secure or not (so this refuses nothing the check above let through: it is the plan's own
-            // guard, kept for any parent the plan names that the payload did not). A parent counts as checked only when a
-            // lookup the check above ASKED about names the same record — the same TABLE and id: a contact whose id was
-            // chosen equal to a matter's says nothing about that matter. A parent the pair names is asked again here.
-            var checkedRecords = item.Lookups
-                .Where(l => serverSetLookupColumns?.Contains(l.Column) != true)
-                .Select(l => (Table: l.RelatedTable.ToLowerInvariant(), l.RecordId))
-                .ToHashSet();
-            var plan = await planSecureCreate.PlanCreateAsync(table, WritesOf(item), me.SystemUserId, ct,
-                async (parents, token) =>
-                {
-                    var parentLookups = parents
-                        .Where(p => !checkedRecords.Contains((p.Table.ToLowerInvariant(), p.Id)))
-                        .Select(p => new DataverseWriteItemMapper.MappedLookup(
-                            "filed under", p.Table, SecureDesignationRemoval.EntitySetFor(p.Table), p.Id))
-                        .ToArray();
-                    var appendTo = await CheckCallerMayAppendToAsync(user, me.SystemUserId, parentLookups, token).ConfigureAwait(false);
-                    return appendTo.Succeeded
-                        ? null
-                        : RecordOwnerResolution.Refused(DataverseUserClientErrorCodes.AccessDenied,
-                            appendTo.Denied ?? "you do not have permission to file this record under the secure record it names");
-                }).ConfigureAwait(false);
-
-            if (plan.Refusal is { } refusal)
-                return new Outcome { PlanRefusal = refusal };
-
-            if (plan is { Isolated: true, SecureOwnerTeamId: { } secureTeam })
-            {
-                var created = await CreateIntoIsolationAsync(appOnly, table, item, secureTeam, me.SystemUserId, ct).ConfigureAwait(false);
-                return created with { Isolated = plan, IsolatedFor = me.SystemUserId };
-            }
-        }
-
-        // Owner decision 2026-10-29: a work assignment filed only under an invoice or event is owned with the matters and
-        // projects that record belongs to — the parents the un-secure cascade names for it — ranked first, the invoice or
-        // event kept among the parents (secure-if-any). One that cannot be read refuses (nothing created).
-        var throughIntermediates = planSecureCreate is null
-            ? Sprk.Bff.Api.Services.Access.SecureRootInheritance.OwnerFilingThroughIntermediates.None
-            : await planSecureCreate.OwnerLookupsThroughIntermediatesAsync(table, LookupsOf(item).ToList(), ct).ConfigureAwait(false);
-        if (throughIntermediates.Unverifiable is { } unread)
-        {
-            return new Outcome
-            {
-                OwnerRefusal = RecordOwnerResolution.Refused(RecordOwnerRefusal.ParentUndetermined,
-                    $"what it is filed under could not be told ({unread})"),
-            };
-        }
-
-        // Task 146 c1-r1 (owner round 13 item 9): the caller asked for this row, so the app-only create records them as its
-        // creator person — F3's "or the creator" branch can then admit them, as it admits a run-as-user row's createdby.
-        var owner = await ownership.ResolveOwnerAsync(
-            RecordOwnershipContext.ForRow(
-                table, throughIntermediates.Lookups.Concat(LookupsOf(item)), PairIdOf(item.JsonBody), callerObjectId,
-                me.SystemUserId) with
-            {
-                RequestedBy = RecordRequester.Of(me.SystemUserId),
-            },
-            ct).ConfigureAwait(false);
-        if (!owner.IsOwned)
-            return new Outcome { OwnerRefusal = owner.IsRefused ? owner : RecordOwnerResolution.Refused(RecordOwnerRefusal.NoOwnerSource, owner.Reason ?? "no owner was resolved") };
-
-        // The Secure team may own only the CHILD tables of the ownership set (each in the codified Secure Record Owner role
-        // set, config/secure-record-owner-role.json). A work assignment or project filed under a secure record is created
-        // into isolation above (task 158 r1, owner round 31 item 2) — reaching here with a Secure owner means the plan
-        // found no secure parent while the resolver did: the two cannot be reconciled now, so nothing is created (fail
-        // closed). Any other table would be refused by Dataverse (no Read).
-        if (owner.IsSecureOwner && SecureRootInheritance.Inherits(table))
-        {
-            return new Outcome
-            {
-                SecureFilingRefused = $"Whether this '{table}' is filed under a secure record could not be decided consistently " +
-                                      "(the records it names changed while it was being created). It was NOT created. Try again.",
-            };
-        }
-        else if (owner.IsSecureOwner && !RecordOwnershipResolver.IsReparentableChild(table))
-        {
-            return new Outcome
-            {
-                SecureFilingRefused = RecordOwnershipResolver.IsOwnershipParent(table)
-                    ? $"A '{table}' record cannot be created under a secure record from chat: it would itself have to be "
-                      + "made secure (its own owner team, container and sharing — the record's Make Secure path). It was "
-                      + "NOT created. Create it from the secure record itself."
-                    : $"A '{table}' record cannot be filed under a secure record from chat, and was NOT created. Create it "
-                      + "from the record itself.",
-            };
-        }
-
-        var fields = BodyFields(item.JsonBody);
-        fields["ownerid@odata.bind"] = $"/teams({owner.OwningTeamId!.Value})";
-        owner.StampCreatorOn(fields, table);
-
-        var id = Guid.NewGuid();
-        await appOnly.UpdateRecordFieldsAsync(table, id, fields, ct).ConfigureAwait(false);
-        return new Outcome { CreatedId = id, WrittenColumns = item.Columns };
-    }
-
-    /// <summary>
-    /// Task 158 r1 (owner round 31 item 2): the app-only create of a work assignment or project — a ROOT — INTO isolation:
-    /// owned by the named Secure Record Owners team provisioning's own topology names (resolved by
-    /// <see cref="SecureRootInheritance.PlanCreateAsync"/>), flagged in the create itself. A root's own ownership is
-    /// provisioning's (task 144), never a child's resolver answer; provisioning's re-entry steps then complete it.
-    /// </summary>
-    private static async Task<Outcome> CreateIntoIsolationAsync(
-        IFieldMappingDataverseService appOnly, string table, DataverseWriteItemMapper.MappedItem item, Guid secureTeam,
-        Guid creatorPerson, CancellationToken ct)
-    {
-        var fields = BodyFields(item.JsonBody);
-        fields["ownerid@odata.bind"] = $"/teams({secureTeam})";
-        fields["sprk_issecure"] = true;
-        // Batch-4 integration (146 c1-r1 x 158): the person who asked for it, stamped in the create itself as on every other
-        // app-only create (task 146 moved the stamp off the handlers into this writer), so provisioning's completion and any
-        // later resume share to that person.
-        if (RecordCreatorPerson.IsStamped(table))
-            RecordCreatorPerson.Bind(fields, creatorPerson);
-
-        var id = Guid.NewGuid();
-        await appOnly.UpdateRecordFieldsAsync(table, id, fields, ct).ConfigureAwait(false);
-        return new Outcome { CreatedId = id, WrittenColumns = item.Columns };
-    }
-
-    /// <summary>
-    /// Task 037 (FR-36): <paramref name="item"/> with the table's copied defaults
-    /// (<see cref="Sprk.Bff.Api.Services.RecordCreation.RecordTableRules.CopiedDefaultsFor"/>) filled — each lookup the row
-    /// binds in the source column, bound as-is in the target the row leaves unset, mapped as the caller (navigation property
-    /// from metadata, as every other lookup) and merged in. A target the row sets (an explicit null included) is never
-    /// touched. A source the row leaves unset leaves the target blank, with a structured warning. A default the table's
-    /// metadata cannot bind is left out with a warning (the create goes on); the caller's own failure reading that
-    /// metadata is returned, and nothing is written. A table with no copied default costs nothing.
-    /// </summary>
-    /// <returns>The item to check and write, each (column, source column) pair it filled, or the caller's own failure.</returns>
-    private static async Task<(DataverseWriteItemMapper.MappedItem Item, IReadOnlyList<(string Column, string Source)> Copied,
-        DataverseUserResponse? ClientFailure)> WithCopiedDefaultsAsync(
-        IDataverseUserClient user, string table, DataverseWriteItemMapper.MappedItem item, ILogger? logger, CancellationToken ct)
-    {
-        var fills = Sprk.Bff.Api.Services.RecordCreation.RecordTableRules.CopiedDefaultsFor(
-            Sprk.Bff.Api.Services.RecordCreation.RecordTableRules.Find(table), item);
-        if (fills.Count == 0)
-            return (item, [], null);
-
-        var extra = new Dictionary<string, object?>(StringComparer.Ordinal);
-        var copied = new List<(string Column, string Source)>();
-        foreach (var fill in fills)
-        {
-            if (fill.Source is { } source)
-            {
-                extra[fill.Default.Column] = new { relatedTable = source.RelatedTable, recordId = source.RecordId };
-                copied.Add((fill.Default.Column, source.Column));
-                continue;
-            }
-
-            logger?.LogWarning(
-                "copied_default_source_unset: entity={Entity} column={Column} source={Source} — the create leaves both unset, " +
-                "so the column stays blank (task 037, FR-36)",
-                table, fill.Default.Column, fill.Default.CopiedFrom);
-        }
-
-        if (extra.Count == 0)
-            return (item, [], null);
-
-        var mapped = await DataverseWriteItemMapper.MapAsync(user, table, JsonSerializer.SerializeToElement(extra), ct)
-            .ConfigureAwait(false);
-        if (mapped.ClientFailure is { } mapFailure)
-            return (item, [], mapFailure);
-        if (mapped.Item is not { } added)
-        {
-            logger?.LogWarning(
-                "copied_default_not_bound: entity={Entity} columns={Columns} — the table's metadata cannot bind them, so they " +
-                "are left blank: {Reason} (task 037, FR-36)",
-                table, string.Join(",", extra.Keys), mapped.ValidationError);
-            return (item, [], null);
-        }
-
-        return (Merge(item, added), copied, null);
     }
 
     // ── The ADR-024 regarding pair (sprk_regardingrecordid + sprk_regardingrecordtype) ─────────────────────────────
@@ -1300,9 +1018,11 @@ internal static class OwnedChildWrite
 
     // ── ebilling-r1 FR-05: the invoice-family guard, invoked by the write core (ISS-010 / #1973, unified-access-control-r2) ──
 
-    /// <summary>The uniform not-found of a record a write names that the caller cannot read, or that does not exist.</summary>
-    private const string NotAvailableToFileUnder =
-        "A record this row names was not found, or you do not have permission to use it. Nothing was written.";
+    /// <summary>
+    /// The uniform not-found of a record a write names that the caller cannot read, or that does not exist — the one copy,
+    /// <see cref="Sprk.Bff.Api.Services.RecordCreation.RecordCreationService.NotAvailableToFileUnder"/> (task 017).
+    /// </summary>
+    private const string NotAvailableToFileUnder = Sprk.Bff.Api.Services.RecordCreation.RecordCreationService.NotAvailableToFileUnder;
 
     /// <summary>
     /// What the invoice-family step refused: the guard's decision (its stable code), the caller's own Dataverse failure on a
@@ -1317,7 +1037,8 @@ internal static class OwnedChildWrite
 
     /// <summary>
     /// ebilling-r1 FR-05 (ISS-010, #1973), as unified-access-control-r2 answered it: the write core — the create
-    /// (<see cref="CreateAsync"/>) and the update / re-file (<see cref="RefileAsync"/>) — invokes
+    /// (<see cref="Sprk.Bff.Api.Services.RecordCreation.RecordCreationService"/>'s pre-write step, since task 017 replaced the
+    /// owned create that called it here) and the update / re-file (<see cref="RefileAsync"/>) — invokes
     /// <see cref="InvoiceFamilyCoreRecordGuard"/> for every write of an invoice-family table, keyed by table, so every route
     /// that writes one is guarded (the child-record routes and the chat create / update tools). The guard owns the rule;
     /// this only assembles the row as it will be and reads what the rule needs, AS THE CALLER.
