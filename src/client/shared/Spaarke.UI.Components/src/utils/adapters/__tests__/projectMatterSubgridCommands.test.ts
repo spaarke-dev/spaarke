@@ -9,6 +9,8 @@
  *     relationship cannot be read, keeps the platform commands;
  *   - "New" on that subgrid opens the matching wizard (project form → Create Matter, matter form → Create Project) with
  *     the form's record, and refreshes the subgrid when the dialog closes;
+ *   - the form-level "Create Matter" / "Create Project" launchers send the record's name too (the wizard pre-selects a
+ *     partner launch record and shows its name);
  *   - the solution copy of the script is the source copy;
  *   - in both ribbons, the platform "New" and both "Add Existing" commands carry the not-the-link-grid rule, and the
  *     wizard command carries the link-grid rule.
@@ -29,6 +31,8 @@ interface IWizards {
   isProjectMatterLinkGrid(selectedControl: unknown): boolean;
   isNotProjectMatterLinkGrid(selectedControl: unknown): boolean;
   openLinkedWizardFromSubGrid(primaryControl: unknown, selectedControl: unknown): void;
+  openCreateMatterWizard(primaryControl: unknown): void;
+  openCreateProjectWizard(primaryControl: unknown): void;
 }
 
 interface IHarness {
@@ -211,4 +215,25 @@ describe('the Project ↔ Matter ribbons (task 195)', () => {
       expect(button?.getAttribute('Location')).toBe(`Mscrm.SubGrid.${entity}.MainTab.Management.Controls._children`);
     }
   );
+});
+
+describe('sprk_wizard_commands.js — the form-level Create launchers send the record name (task 195)', () => {
+  it.each([
+    ['openCreateProjectWizard', 'sprk_matter', 'sprk_createprojectwizard', 'Create New Project'],
+    ['openCreateMatterWizard', 'sprk_project', 'sprk_creatematterwizard', 'Create New Matter'],
+  ] as const)('%s on a %s form sends entityType, entityId and recordName', async (command, host, page, title) => {
+    const h = harness();
+
+    h.wizards[command](formOf(host, 'Acme & Co'));
+    await flush();
+    await flush();
+
+    expect(h.pages).toHaveLength(1);
+    expect(h.pages[0].name).toBe(page);
+    expect(h.pages[0].title).toBe(title);
+    const sent = dataOf(h.pages[0].data);
+    expect(sent.entityType).toBe(host);
+    expect(sent.entityId.toLowerCase()).toBe(HOST_ID); // the host cleans case (launchAssociationFromParams)
+    expect(sent.recordName).toBe('Acme & Co');
+  });
 });

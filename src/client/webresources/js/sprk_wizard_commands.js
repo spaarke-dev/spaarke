@@ -268,13 +268,19 @@ Spaarke.Commands.Wizards = (function () {
 
     openCreateMatterWizard: function (primaryControl) {
       var ctx = getEntityContext(primaryControl);
-      var baseData = "entityType=" + ctx.entityType + "&entityId=" + ctx.entityId;
+      // Task 195: the record's name too, so a wizard that pre-selects the launch record (its partner table) shows it.
+      var baseData =
+        "entityType=" + ctx.entityType + "&entityId=" + ctx.entityId +
+        "&recordName=" + encodeURIComponent(primaryName(primaryControl));
       openWizardWithBff(primaryControl, "sprk_creatematterwizard", baseData, "Create New Matter");
     },
 
     openCreateProjectWizard: function (primaryControl) {
       var ctx = getEntityContext(primaryControl);
-      var baseData = "entityType=" + ctx.entityType + "&entityId=" + ctx.entityId;
+      // Task 195: the record's name too, so a wizard that pre-selects the launch record (its partner table) shows it.
+      var baseData =
+        "entityType=" + ctx.entityType + "&entityId=" + ctx.entityId +
+        "&recordName=" + encodeURIComponent(primaryName(primaryControl));
       openWizardWithBff(primaryControl, "sprk_createprojectwizard", baseData, "Create New Project");
     },
 
