@@ -14,7 +14,7 @@ import { ShareView } from './components/views/ShareView';
 import { StatusView } from './components/views/StatusView';
 import { SignInView } from './components/views/SignInView';
 import { CreateTodoView } from './components/views/CreateTodoView';
-import { InvoiceView } from './components/views/InvoiceView';
+import { InvoiceView, invoiceFiledRecord } from './components/views/InvoiceView';
 import {
   createInvoiceSubmitHandler,
   hostAdapterInvoiceEmailSource,
@@ -688,6 +688,8 @@ export const App: React.FC<AppProps> = ({
       loadInvoiceFirms(target, { apiBaseUrl, getAccessToken: getInvoiceAccessToken }),
     [apiBaseUrl, getInvoiceAccessToken]
   );
+  // The record the open email is already filed to (task 120's lookup — the Save tab's "Filed to"): the view starts there.
+  const invoiceFiledTo = useMemo(() => invoiceFiledRecord(documentIdentity), [documentIdentity]);
 
   // Task 113 (provisioning's guest sign-in test): "⋮ → Diagnostics" opens a panel above the tab content; the tabs
   // stay mounted underneath, so closing it loses nothing.
@@ -907,6 +909,7 @@ export const App: React.FC<AppProps> = ({
             onSubmit={submitInvoice}
             loadFirms={loadFirms}
             onBusyChange={setInvoiceBusy}
+            filedRecord={invoiceFiledTo}
           />
         )}
 
