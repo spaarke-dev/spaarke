@@ -65,12 +65,13 @@
    5. Write the pair app-only, conditional on the version read; a changed version answers 409.
    6. Read back and log the previous pair.
    7. Secure afterwards, inline. Ownership then follows through the existing root-owner and ordinary-moves passes, with no new owner code.
-3. **One root.**
+3. **One root; re-file allowed (owner, 2026-10-31).**
    - Same matter again: 204, nothing written.
-   - A pair already naming another record: 409 `child_record.project_already_filed`, nothing written.
-   - The chat update tool gets the same rule. Moving a project to another matter is out of scope here; it would be a separate, explicit re-file.
+   - A pair already naming another matter: the project is **re-filed** to the new matter through the same core (the version condition, read-back, and the previous pair logged). The earlier N:N row stays as an association and confers nothing.
+   - Filing under a secure matter secures the project. Leaving a secure matter never un-secures it (nothing releases isolation).
+   - The chat update tool gets the same rules through the same core.
 4. **The wizards** keep writing the N:N as today, then call the route for the selected matter. A failure shows as a visible warning; it is never skipped silently. The client never writes the pair.
-5. **N:N links added in the model-driven app subgrid** (no plugins, I-2) do not file the project. The root-owner step's report counts two cases, and the project stays unfiled until the pair is set:
+5. **One create path (owner, 2026-10-31).** Adding a matter to a project's matter list goes through the wizard only. The model-driven app's out-of-the-box "Add Existing" and quick-create/"New" commands on the Project ↔ Matter subgrids are replaced with a command that opens the wizard (ribbon change, `ribbon-edit`; no plugins, I-2). The root-owner step's report still counts the two drift cases, because a System Administrator can still associate through the platform:
    - projects with an N:N matter but no pair;
    - projects whose pair matter has no N:N row.
 6. **Backfill.**
@@ -81,10 +82,10 @@
    - In dev it would cause the 3 unit moves above over about 5–7 minutes, with no secure change and no file moves.
 7. **Known limit.** A System Administrator can still write the pair from a client, which is field-security behaviour of the platform. The re-file census and the secure gate on the BFF paths are unchanged.
 
-## 3. Decisions for the owner
+## 3. Owner decisions (2026-10-31, recorded in `notes/decisions.md`)
 
-1. Approve the design in §2: one shared core, the child-records route, and the one-root 409.
-2. N:N links added in the subgrid: report only (proposed), or also give staff a "file under this matter" action?
-3. Backfill: accept the 3 unit moves, including Project 6 moving to the root unit because its matter LITG-153116 is person-owned in the root unit?
+1. Re-filing to another matter is allowed (§2.3). Nothing is ever released from isolation.
+2. Adding a matter to a project's matter list goes through the wizard only; the out-of-the-box subgrid commands are replaced (§2.5).
+3. Backfill accepted with all 3 unit moves, applied after deploy, report first.
 
 The secure-matter container check (open check above) is engineering work. It is done and tested before the wizard path is enabled for secure matters.
