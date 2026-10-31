@@ -12,10 +12,13 @@
   - Schema Verify passed; the package was 39.07 MB; the 4 critical-file hashes matched; healthz passed.
   - App settings unchanged: ebilling's keys, and both UAC switches (RootOwnerWritesEnabled, OrdinaryMovesWritesEnabled) still true.
   - R3 and ebilling were told the deploy is done.
-- **Gate running:** background job bvwjb76pm writes `$TEMP/uacmerge/uacg/gate_b083.txt` (window 19:52:25Z → about 20:12Z).
-  - When it lands, check 5xx, [OWNERSHIP-REFUSED], and external routes separately (R3 asked: `OwnedChildWrite`/`ChildRecordEndpoints` sit on the external write path).
-  - Known pre-existing warnings: SECURE-CENSUS, acme ID-LINK #2163, AI catalog drift #1987.
-  - Then send the after-notices. Field-mapping gets the deploy time and the gate status, and runs the `SYS-Dataverse Create Record` re-seed in its own session with the owner's OK there. R3 and ebilling get the gate result.
+- **Gate PASS** (19:52:25Z → about 20:12Z; `$TEMP/uacmerge/uacg/gate_b083.txt`):
+  - 23 requests, 0 failed, 0 5xx, 0 [OWNERSHIP-REFUSED];
+  - the reconciler wrote nothing;
+  - external routes had 0 traffic;
+  - only the pre-existing warnings: SECURE-CENSUS, and acme ID-LINK #2163.
+
+  After-notices sent to field-mapping (the re-seed is theirs, with the owner's OK in their session), R3 and ebilling.
 
 ## Quick Recovery (READ THIS FIRST)
 
