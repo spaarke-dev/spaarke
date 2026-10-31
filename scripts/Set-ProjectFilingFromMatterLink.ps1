@@ -21,12 +21,14 @@
       SKIP-PAIR   a pair is already set (either half)                          -> reported, with whether it names the N:N matter
 
     -Apply files each FILE row through the BFF route the Create wizards use — PATCH /api/v1/child-records/sprk_project/{id}
-    with only the pair — so the BFF is the setter: it checks the caller's access, runs the secure gate, writes the pair as
+    with only the pair, never with ?move=true (a project the BFF finds filed elsewhere is left there) — so the BFF is
+    the setter: it checks the caller's access, runs the secure gate, writes the pair as
     the application and secures the project when the matter is secure. (Repair-RegardingPairFiling.ps1 -Verify then
     reads the pair as set by the BFF.) Ownership then follows within minutes through the BFF's root-owner and
     ordinary-moves passes; this script changes no owner itself. Each FILE row ends as one of:
       FILED            the BFF answered 2xx and the pair reads back naming the matter
-      SKIP-PAIR        the pair was re-read just before the PATCH and had been set since the report -> not filed
+      SKIP-PAIR        the pair was re-read just before the PATCH and had been set since the report, or the BFF found the
+                       project already filed under another record (409 project_filing.already_filed) -> not filed
       NOT-CHECKED      that re-read failed -> not filed (never a blind write)
       REFUSED          the BFF refused the PATCH (its words are shown)
       NOT-READ         the BFF answered 2xx but the pair reads back as something else
@@ -203,9 +205,20 @@ foreach ($d in $toFile) {
     try {
         Invoke-RestMethod -Uri "$BffBaseUrl/api/v1/child-records/sprk_project/$($d.ProjectId)" -Headers $bffHeaders -Method Patch -Body $body | Out-Null
     } catch {
+        $patchError = $_
+        $detail = $patchError.ErrorDetails.Message
+        $status = $null
+        if ($patchError.Exception.Response) { $status = [int] $patchError.Exception.Response.StatusCode }
+        $code = $null
+        if ($detail) { try { $code = ($detail | ConvertFrom-Json -ErrorAction Stop).reasonCode } catch { $code = $null } }
+        if ($status -eq 409 -and $code -eq 'project_filing.already_filed') {
+            # No move is ever asked: the BFF left a project it found filed under another record where it is.
+            $skipped++
+            Write-Host "  SKIP-PAIR  $($d.ProjectId)  $($d.Project)  the BFF found it already filed under another record; not filed" -ForegroundColor Yellow
+            continue
+        }
         $failed++
-        $detail = $_.ErrorDetails.Message
-        if (-not $detail) { $detail = $_.Exception.Message }
+        if (-not $detail) { $detail = $patchError.Exception.Message }
         Write-Host "  REFUSED    $($d.ProjectId)  $($d.Project)  $detail" -ForegroundColor Red
         continue
     }
@@ -228,7 +241,7 @@ foreach ($d in $toFile) {
 }
 
 Write-Host ''
-Write-Host ("Applied     : of {0}: filed {1}, filed but unverified {2}, skipped (pair set since the report) {3}, failed {4}." -f $toFile.Count, $filed, $unverified, $skipped, $failed)
+Write-Host ("Applied     : of {0}: filed {1}, filed but unverified {2}, skipped (filed elsewhere since the report) {3}, failed {4}." -f $toFile.Count, $filed, $unverified, $skipped, $failed)
 Write-Host ("Owners follow through the BFF's root-owner pass (about 5 minutes) and children through ordinary moves (about 2 minutes).")
 if ($failed -gt 0) { exit 1 }
 exit 0
