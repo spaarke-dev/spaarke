@@ -120,6 +120,8 @@ public class InvoiceSubmissionService
     [
         InvoiceColumn, TrackingNumberAllocator.FirmColumn, TrackingNumberAllocator.FirmInvoiceNumberColumn,
         "sprk_regardingmatter", "sprk_regardingproject", "sprk_regardingworkassignment",
+        // Task 097e: the tracking number the correction prefill shows (the guard itself does not read it).
+        TrackingNumberAllocator.TrackingNumberColumn,
         // Task 097 second review (F1): whether that submission has finished (CorrectionTargetSubmissionFinished).
         InvoiceSubmissionPersister.SubmissionStatus, InvoiceSubmissionPersister.SubmissionReasonCode,
     ];
@@ -308,7 +310,7 @@ public class InvoiceSubmissionService
             .Select(f => (f.LogicalName, CoreRecordKindOfTable(f.TargetEntityLogicalName)!.Value)),
     ];
 
-    private static InvoiceCoreRecordKind? CoreRecordKindOfTable(string table) => table switch
+    internal static InvoiceCoreRecordKind? CoreRecordKindOfTable(string table) => table switch
     {
         "sprk_matter" => InvoiceCoreRecordKind.Matter,
         "sprk_project" => InvoiceCoreRecordKind.Project,
@@ -1179,8 +1181,36 @@ public class InvoiceSubmissionService
     /// <para>A read fault is 503 <see cref="InvoiceSubmissionErrors.CoreRecordUnavailable"/>, never a guess. No answer names another firm,
     /// record or number. The answer's <c>ResubmissionOf</c> is the submission to record in <see cref="ResubmissionOfColumn"/>.</para>
     /// </remarks>
-    internal virtual async Task<(InvoiceSubmissionOutcome? Refusal, Guid? ResubmissionOf)> CheckCorrectionAsync(
-        InvoiceCoreRecord core, Guid firmId, string firmInvoiceNumber, Entity invoice, CancellationToken ct)
+    internal virtual Task<(InvoiceSubmissionOutcome? Refusal, Guid? ResubmissionOf)> CheckCorrectionAsync(
+        InvoiceCoreRecord core, Guid firmId, string firmInvoiceNumber, Entity invoice, CancellationToken ct) =>
+        JudgeCorrectionAsync(core, firmId, firmInvoiceNumber, invoice, readSubmission: null, ct);
+
+    /// <summary>
+    /// The invoice's OWN submission (EB-D-179 item 1): the one whose <see cref="InvoiceColumn"/> is <paramref name="invoiceId"/> AND whose id
+    /// derives the invoice's (<see cref="InvoiceSubmissionPersister.InvoiceIdFor"/>); null when there is none. One read, shared by the
+    /// intake's guard and by the correction prefill (task 097e), so the two cannot find different submissions. Throws on a read fault.
+    /// </summary>
+    internal async Task<Entity?> ReadOwnSubmissionAsync(Guid invoiceId, CancellationToken ct)
+    {
+        // No TopCount: a cap could leave the invoice's own submission out when other rows also point at the invoice.
+        var query = new QueryExpression(SubmissionEntity) { ColumnSet = new ColumnSet(CorrectionSubmissionColumns) };
+        query.Criteria.AddCondition(InvoiceColumn, ConditionOperator.Equal, invoiceId);
+        var found = await _entities.RetrieveMultipleAsync(query, ct);
+        // Only the submission the invoice was created from: its id derives the invoice's (the job's InvoiceIdFor). A row that merely points
+        // at the invoice is not its submission.
+        return found.Entities.SingleOrDefault(s => InvoiceSubmissionPersister.InvoiceIdFor(s.Id) == invoiceId);
+    }
+
+    /// <summary>The invoice's own submission as <see cref="ReadOwnSubmissionAsync"/> read it (<see cref="Row"/> null: it has none).</summary>
+    internal sealed record OwnSubmissionRead(Entity? Row);
+
+    /// <summary>
+    /// The guard of <see cref="CheckCorrectionAsync"/>, over the invoice's own submission as <paramref name="readSubmission"/> read it, or as
+    /// this method reads it (null). Task 097e: the correction prefill reads the submission once (it shows its tracking and firm invoice
+    /// numbers) and hands the SAME row here, so the answer it gives is the intake's, by the same code, over the same row.
+    /// </summary>
+    internal async Task<(InvoiceSubmissionOutcome? Refusal, Guid? ResubmissionOf)> JudgeCorrectionAsync(
+        InvoiceCoreRecord core, Guid firmId, string firmInvoiceNumber, Entity invoice, OwnSubmissionRead? readSubmission, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(core);
         ArgumentNullException.ThrowIfNull(invoice);
@@ -1215,13 +1245,7 @@ public class InvoiceSubmissionService
         Entity? submission;
         try
         {
-            // No TopCount: a cap could leave the invoice's own submission out when other rows also point at the invoice.
-            var query = new QueryExpression(SubmissionEntity) { ColumnSet = new ColumnSet(CorrectionSubmissionColumns) };
-            query.Criteria.AddCondition(InvoiceColumn, ConditionOperator.Equal, invoice.Id);
-            var found = await _entities.RetrieveMultipleAsync(query, ct);
-            // Only the submission the invoice was created from: its id derives the invoice's (the job's InvoiceIdFor). A row that merely points
-            // at the invoice is not its submission.
-            submission = found.Entities.SingleOrDefault(s => InvoiceSubmissionPersister.InvoiceIdFor(s.Id) == invoice.Id);
+            submission = readSubmission is { } already ? already.Row : await ReadOwnSubmissionAsync(invoice.Id, ct);
         }
         catch (Exception ex) when (!IsCallerCancellation(ex, ct))
         {
@@ -1265,6 +1289,57 @@ public class InvoiceSubmissionService
         }
 
         return (null, submission.Id);
+    }
+
+    /// <summary>The prefill's judgement (task 097e): the invoice's own submission as read, and whether a correction is allowed now.</summary>
+    /// <param name="Submission">The invoice's own submission, or null when it has none.</param>
+    /// <param name="CanCorrect">True when <see cref="JudgeCorrectionAsync"/> finds no refusal.</param>
+    /// <param name="Reason">When not <paramref name="CanCorrect"/>: one of <see cref="FromEmailCorrectionReasons.InvoiceStatus"/>,
+    /// <see cref="FromEmailCorrectionReasons.NoSubmission"/>, <see cref="FromEmailCorrectionReasons.SubmissionInProgress"/>.</param>
+    internal sealed record CorrectionPrefillJudgement(Entity? Submission, bool CanCorrect, string? Reason);
+
+    /// <summary>
+    /// Task 097e: may <paramref name="invoice"/> be corrected NOW, as the correction prefill reports it? The intake's own guard
+    /// (<see cref="JudgeCorrectionAsync"/>) is asked with the invoice's OWN firm, core record and firm invoice number (the last from its
+    /// submission), so the firm, record and number checks cannot refuse and the invoice-status, no-submission and in-progress checks decide,
+    /// in the intake's order and by the intake's code. The submission is read once (<see cref="ReadOwnSubmissionAsync"/>) and handed to
+    /// the guard, so the prefill shows the row the guard judged. A refusal outside the three prefill reasons (the invoice and its
+    /// submission disagree on firm, record or number: data the intake would also refuse) is reported as
+    /// <see cref="FromEmailCorrectionReasons.NoSubmission"/>, since the invoice then has no coherent submission of its own. Returns null
+    /// when the submission could not be read (the route answers 503; a fault is never a guess).
+    /// </summary>
+    internal async Task<CorrectionPrefillJudgement?> JudgeCorrectionPrefillAsync(
+        Entity invoice, InvoiceCoreRecord core, Guid firmId, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(invoice);
+        ArgumentNullException.ThrowIfNull(core);
+
+        Entity? submission;
+        try
+        {
+            submission = await ReadOwnSubmissionAsync(invoice.Id, ct);
+        }
+        catch (Exception ex) when (!IsCallerCancellation(ex, ct))
+        {
+            _logger.LogWarning(ex, "Correction prefill: the submission of invoice {InvoiceId} could not be read", invoice.Id);
+            return null;
+        }
+
+        var number = submission?.GetAttributeValue<string>(TrackingNumberAllocator.FirmInvoiceNumberColumn) ?? string.Empty;
+        var (refusal, _) = await JudgeCorrectionAsync(core, firmId, number, invoice, new OwnSubmissionRead(submission), ct);
+        if (refusal is null)
+        {
+            return new CorrectionPrefillJudgement(submission, true, null);
+        }
+
+        var reason = refusal.Extensions is { } extensions && extensions.TryGetValue("reason", out var value) ? value as string : null;
+        if (reason is not (FromEmailCorrectionReasons.InvoiceStatus or FromEmailCorrectionReasons.NoSubmission or FromEmailCorrectionReasons.SubmissionInProgress))
+        {
+            _logger.LogWarning("Correction prefill: invoice {InvoiceId} and its submission disagree ({Reason}); reported as no_submission", invoice.Id, reason);
+            reason = FromEmailCorrectionReasons.NoSubmission;
+        }
+
+        return new CorrectionPrefillJudgement(submission, false, reason);
     }
 
     private static bool IsCore((string Entity, Guid Id)? found, InvoiceCoreRecord core) =>

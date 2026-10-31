@@ -151,6 +151,19 @@ public static class InvoiceSubmissionEndpoints
             .ProducesProblem(StatusCodes.Status404NotFound)
             .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
 
+        // GET /api/finance/invoices/{invoiceId}/correction-prefill (task 097e, contract section 10): what the add-in prefills a correction from.
+        // Write on the route's invoice as the caller ("ebilling.invoice.decide", the key the invoice-level writes share), the same Write the
+        // Correction intake asks first (PrepareCorrectionAsync); uniform 404 for no Write, an unknown invoice, step 0 and a rights fault.
+        group.MapGet("/invoices/{invoiceId:guid}/correction-prefill", InvoiceSubmissionFromEmailHttp.GetCorrectionPrefillAsync)
+            .AddFinanceAuthorizationFilter("ebilling.invoice.decide", FinanceAuthorizationFilter.InvoiceEntitySet, "invoiceId", FinanceDenial.UniformNotFound)
+            .RequireEbillingEnabled()
+            .WithName("GetInvoiceCorrectionPrefill")
+            .WithSummary("What the add-in needs to prefill a correction of an invoice, and whether a correction is allowed now")
+            .Produces<CorrectionPrefillResponse>(StatusCodes.Status200OK)
+            .ProducesProblem(StatusCodes.Status401Unauthorized)
+            .ProducesProblem(StatusCodes.Status404NotFound)
+            .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
+
         // GET /api/finance/invoice-submissions/{id}
         group.MapGet("/invoice-submissions/{id:guid}", GetAsync)
             .AddFinanceAuthorizationFilter("finance.read", FinanceAuthorizationFilter.InvoiceSubmissionEntitySet, "id", FinanceDenial.UniformNotFound)
@@ -555,7 +568,7 @@ public static class InvoiceSubmissionEndpoints
         InvoiceSubmissionHttp.Refused(StatusCodes.Status503ServiceUnavailable, InvoiceSubmissionErrors.CoreRecordUnavailable,
             "The document could not be checked right now. Nothing was saved; try again shortly.");
 
-    private static bool IsNotFound(Exception ex)
+    internal static bool IsNotFound(Exception ex)
     {
         for (var e = ex; e is not null; e = e.InnerException)
         {

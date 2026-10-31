@@ -6,6 +6,8 @@ Changes 2026-10-28 (094 review round 5, for word-add-in-r1's agreement): 503 `ea
 
 Changes 2026-10-29 (095 contract fix, for word-add-in-r1): step A's 403 `COMMUNICATION_REFILE_FORBIDDEN` now carries a top-level `errorCode` (section 6); a refusal after step A filed the communication also carries the top-level boolean `filingKept: true`, additive, with the `detail` sentence unchanged (section 6, "Client rule" and "After step A").
 
+Changes 2026-10-31 (097e, agreed with word-add-in-r1): new section 10, the correction prefill read (G3), including its optional `replacedBy`; G3 in section 7 now points to it.
+
 Binding for 095 and word-add-in-r1; changes need word-add-in-r1's agreement first. Behaviour is model §9.1 (v5.9 FINAL); this pins names, statuses and codes only. Citations: `work/ebilling-r1` @ 786d1ea17a, under `src/server/api/Sprk.Bff.Api/` unless shown. NEW = no existing code to follow.
 
 ## 1. Route
@@ -172,7 +174,7 @@ Field names and codes in this file are binding once word-add-in-r1 agrees (095 P
 - **OP-7:** until task 097 merges, `mode: "Correction"` answers 409 `ebilling.submission.correction_not_allowed` with `reason: "not_available"` before any write. After 097 the reasons are `invoice_status`, `different_firm`, `different_core_record`. Changed 2026-10-30 (097b, EB-D-179), for word-add-in-r1's agreement: Correction is accepted (section 6, "Correction order"); the reasons also include `different_invoice_number` and `no_submission`, and `not_available` is no longer sent. The new submission records the replaced invoice's submission in `sprk_resubmissionof`; superseding the old invoice is task 097c.
 - **OP-8:** code is `errorCode ?? reasonCode` (route refusals carry `errorCode`, filter denials `reasonCode`), as the existing finance routes do.
 
-- **G3 (correction prefill):** deferred to task 097, which pins a read of an invoice's firm, core record, status and tracking number for the caller. Until then Correction is `not_available` (OP-7). Changed 2026-10-30 (097b): Correction is accepted without the prefill read, which is still to come (outside 097b); the client sends the invoice's own firm, record and number, and the 409 reasons above say which one differs.
+- **G3 (correction prefill):** built in task 097e (EB-D-179): `GET /api/finance/invoices/{invoiceId}/correction-prefill`, section 10. The client prefills a Correction from it and sends the invoice's own firm, record and number; the 409 reasons in section 6 still say which one differs. (Until 097b, Correction was `not_available`, OP-7.)
 
 **Not on this route:** adding supporting files to an existing invoice. No internal upload route exists today (090 built the service, no route); whether R1 gets one is an open owner question (2026-10-27).
 
@@ -216,3 +218,29 @@ Field names and codes in this file are binding once word-add-in-r1 agrees (095 P
 Replay after `Failed` or `Rejected` follows section 5: after `Failed` the same request makes a new attempt; after `Rejected` it is 409 `submission_already_ended` (EB-D-160).
 
 Added 2026-10-28 (094): after `Failed` with `ebilling.submission.source_check_failed` or `ebilling.submission.file_unservable`, the attempt's commit is removed in the background. Until that removal completes, the same request is a synchronous 503 `ebilling.submission.earlier_attempt_being_removed` (section 6): retryable, nothing written, never an `outcomeReasonCode`. After it completes, the request makes the new attempt.
+
+## 10. Correction prefill (G3, built in 097e)
+
+`GET /api/finance/invoices/{invoiceId}/correction-prefill`, in the /api/finance group with step 0, internal callers only, behind the eBilling kill switch (503 `ebilling.disabled`). Pinned with word-add-in-r1 on 2026-10-31 (the `replacedBy` field the same day). Input is the invoice Guid only.
+
+- Gate: the caller's own **Write** on the invoice (`ebilling.invoice.decide`, the Write the Correction intake asks first). No Write, an invoice that does not exist, a step-0 refusal and a rights-read fault are the identical **404** reasonCode `sdap.access.deny.record_unavailable` (the uniform answer, section 8); it reveals nothing about the invoice.
+- **200**:
+
+```json
+{
+  "invoiceId": "guid",
+  "firm": { "id": "guid", "name": "string" },
+  "coreRecord": { "entityType": "Matter | Project | WorkAssignment", "entityId": "guid", "name": "string" },
+  "invoiceStatus": "InReview | Approved | SentToAp | Paid | Rejected | ReturnedToFirm | Cancelled | Superseded | null",
+  "trackingNumber": "string | null",
+  "firmInvoiceNumber": "string",
+  "canCorrect": true,
+  "reason": "invoice_status | no_submission | submission_in_progress | null",
+  "replacedBy": { "invoiceId": "guid", "name": "string" }
+}
+```
+
+- `coreRecord.entityType` is the intake vocabulary (the invoice's `sprk_matter`, `sprk_project` or `sprk_regardingworkassignment`), never a logical name. `invoiceStatus` is the `InvoiceLifecycleStatus` name, a closed set, and null for a status code this lifecycle does not know (as the intake leaves it absent). `trackingNumber` and `firmInvoiceNumber` are those of the invoice's own submission (the one whose `sprk_invoice` is this invoice and whose id derives it); `trackingNumber` is null when it has none, and `firmInvoiceNumber` is `""` when the invoice has no submission. No date, total or currency.
+- `canCorrect` is the Correction intake's own guard (`InvoiceSubmissionService.JudgeCorrectionAsync`, the code `CheckCorrectionAsync` runs), asked of the same rows with the invoice's own firm, record and number, so a request the add-in builds from this body is judged by the same code. `reason` is null when `canCorrect` is true; otherwise it is the reason the intake would refuse with, in the intake's order: `invoice_status` (not In Review, or inactive), `no_submission`, `submission_in_progress`. The intake's `different_firm`, `different_core_record` and `different_invoice_number` cannot arise from the invoice's own values; if the invoice and its submission still disagree, the answer is `canCorrect: false`, `reason: "no_submission"`.
+- `replacedBy` is **always present** and is null unless `invoiceStatus` is `Superseded` and the caller has **Read** on the replacement invoice (checked as the caller, through the same Finance authorization seam as the gate). The replacement is the invoice of the submission whose `sprk_resubmissionof` is this invoice's own submission, the direct one only (no chain is followed). If several submissions name it, the one whose invoice is not itself Superseded; if that is still not exactly one, null. `name` is the replacement invoice's primary name (`sprk_name`). It is null, never an error, when the caller cannot read the replacement or the read of it fails (a Warning is logged), so the answer never names an invoice the caller cannot open and a fault there does not make the call a 503.
+- A read fault anywhere else (the invoice, its submission, the firm's or the record's name) is **503** `ebilling.submission.record_unavailable`; never a partial answer.

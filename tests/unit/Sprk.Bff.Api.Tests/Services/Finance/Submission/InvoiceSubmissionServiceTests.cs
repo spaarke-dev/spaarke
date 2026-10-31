@@ -123,6 +123,9 @@ public sealed class InvoiceSubmissionServiceTests
         /// <summary>Task 097b: non-null, the Correction guard's submission query throws this.</summary>
         public Exception? PriorSubmissionReadFailure;
 
+        /// <summary>Task 097e: non-null, the query for the submissions that name an earlier one (<c>sprk_resubmissionof</c>) throws this.</summary>
+        public Exception? ResubmissionReadFailure;
+
         /// <summary>050a: the <c>sprk_document</c> the existing-document entry reads (null: not found).</summary>
         public Entity? ExistingDocument;
 
@@ -277,6 +280,22 @@ public sealed class InvoiceSubmissionServiceTests
 
                                 return row;
                             })
+                            .ToList());
+                    }
+
+                    // Task 097e: the correction prefill's read of the submissions that name an earlier one (sprk_resubmissionof), among the same rows.
+                    if (q.EntityName == "sprk_invoicesubmission"
+                        && q.Criteria.Conditions.FirstOrDefault(c => c.AttributeName == "sprk_resubmissionof") is { } byEarlier)
+                    {
+                        if (ResubmissionReadFailure is { } failure)
+                        {
+                            throw failure;
+                        }
+
+                        return new EntityCollection(PriorSubmissions
+                            .Where(s => s.GetAttributeValue<EntityReference>("sprk_resubmissionof")?.Id is { } earlierId
+                                && byEarlier.Values.Contains(earlierId))
+                            .Select(s => OnlyColumns(s, q.ColumnSet.Columns.ToArray()))
                             .ToList());
                     }
 
