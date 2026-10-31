@@ -157,6 +157,15 @@ public sealed record FollowParentsRootOwners
     public int GrantsUnread { get; init; }
     public IReadOnlyList<object> Changes { get; init; } = Array.Empty<object>();
 
+    /// <summary>Task 195 (report only): projects linked to a matter through the Project ↔ Matter N:N
+    /// (<c>sprk_project_sprk_matter</c>) that have no regarding pair, so no filing. Null when the census could not be
+    /// read this run (a problem line says why).</summary>
+    public int? ProjectsWithMatterLinkButNoPair { get; init; }
+
+    /// <summary>Task 195 (report only): projects whose regarding pair names a matter with which they have no N:N row.
+    /// Null when the census could not be read this run (a problem line says why).</summary>
+    public int? ProjectsWhosePairMatterHasNoLink { get; init; }
+
     /// <summary>Fix round (B-F2): the last root this run reached when a bound stopped it — the next run continues after it
     /// (and wraps round); null when the run reached every root.</summary>
     [System.Text.Json.Serialization.JsonIgnore]
@@ -1129,6 +1138,14 @@ public sealed partial class SecureRootInheritance
         var rootOwners = await FollowFamilyOwnersAsync(listed, familyAnswers, changedParents, rootOwnerResumeAfter, Problem, ct)
             .ConfigureAwait(false);
 
+        // Task 195: how far the project filing (the pair) and the Project ↔ Matter N:N disagree. Report only.
+        var (linkNoPair, pairNoLink) = await ProjectFilingCensusAsync(listed, Problem, ct).ConfigureAwait(false);
+        rootOwners = rootOwners with
+        {
+            ProjectsWithMatterLinkButNoPair = linkNoPair,
+            ProjectsWhosePairMatterHasNoLink = pairNoLink,
+        };
+
         // Later rounds: what is filed under a project changed in this run, decided again now (its values just moved).
         for (var round = 2; changedParents.Count > 0 && round <= MaxFilingDepth + 1; round++)
         {
@@ -1740,6 +1757,10 @@ public sealed partial class SecureRootInheritance
         public Guid? OwningTeam { get; init; }
         public Guid? OwningUser { get; init; }
         public Guid? OwningBusinessUnit { get; init; }
+
+        /// <summary>Task 195: a project's regarding pair as listed (projects only; null on work assignments).</summary>
+        public string? PairId { get; init; }
+        public Guid? PairType { get; init; }
     }
 
     /// <summary>
@@ -1759,6 +1780,8 @@ public sealed partial class SecureRootInheritance
                 NoLock = true,
                 PageInfo = new PagingInfo { Count = FiledListPageSize, PageNumber = 1 },
             };
+            if (table == Project)
+                query.ColumnSet.AddColumns(PairIdColumn, PairTypeColumn); // task 195: the filing census
 
             for (var page = 1; ; page++)
             {
@@ -1774,6 +1797,8 @@ public sealed partial class SecureRootInheritance
                     OwningTeam = IdOf(e, OwningTeamColumn),
                     OwningUser = IdOf(e, OwningUserColumn),
                     OwningBusinessUnit = IdOf(e, OwningBusinessUnitColumn),
+                    PairId = table == Project ? e.GetAttributeValue<string>(PairIdColumn) : null,
+                    PairType = table == Project ? IdOf(e, PairTypeColumn) : null,
                 }));
                 if (!result.MoreRecords)
                     break;
@@ -1786,6 +1811,105 @@ public sealed partial class SecureRootInheritance
 
         static Guid? IdOf(Entity e, string column) =>
             e.GetAttributeValue<EntityReference>(column)?.Id is { } id && id != Guid.Empty ? id : null;
+    }
+
+    /// <summary>Task 195: the Project ↔ Matter N:N's intersect table and its two columns.</summary>
+    internal const string ProjectMatterLinkEntity = "sprk_project_sprk_matter";
+    private const string ProjectMatterLinkProjectColumn = "sprk_projectid";
+    private const string ProjectMatterLinkMatterColumn = "sprk_matterid";
+
+    /// <summary>
+    /// Task 195 (#2352), report only: a project's one filing is its regarding pair; the Project ↔ Matter N:N is an
+    /// association that confers nothing. This counts where the two disagree, so the backfill and any later drift are seen:
+    /// projects with an N:N matter but no pair, and projects whose pair names a matter they have no N:N row with. It writes
+    /// nothing and reads the N:N paged under the listing's own bound (<see cref="FiledListPageSize"/> ×
+    /// <see cref="FiledListMaxPages"/>). Never throws (cancellation aside): what cannot be read is null, with a problem line.
+    /// </summary>
+    private async Task<(int? LinkButNoPair, int? PairButNoLink)> ProjectFilingCensusAsync(
+        IReadOnlyList<ListedRecord> listed, Action<string> problem, CancellationToken ct)
+    {
+        HashSet<(Guid Project, Guid Matter)> links;
+        try
+        {
+            links = new HashSet<(Guid, Guid)>();
+            var query = new QueryExpression(ProjectMatterLinkEntity)
+            {
+                ColumnSet = new ColumnSet(ProjectMatterLinkProjectColumn, ProjectMatterLinkMatterColumn),
+                NoLock = true,
+                PageInfo = new PagingInfo { Count = FiledListPageSize, PageNumber = 1 },
+            };
+            for (var page = 1; ; page++)
+            {
+                if (page > FiledListMaxPages)
+                    throw new InvalidOperationException($"{ProjectMatterLinkEntity} still had rows after {FiledListMaxPages} pages.");
+
+                var result = await _dataverse.RetrieveMultipleAsync(query, ct).ConfigureAwait(false);
+                foreach (var e in result.Entities)
+                {
+                    if (GuidOf(e, ProjectMatterLinkProjectColumn) is { } p && GuidOf(e, ProjectMatterLinkMatterColumn) is { } m)
+                        links.Add((p, m));
+                }
+
+                if (!result.MoreRecords)
+                    break;
+                query.PageInfo.PageNumber++;
+                query.PageInfo.PagingCookie = result.PagingCookie;
+            }
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            _logger.LogWarning(ex, "[ROOT-OWNER] The project filing census could not read {Table}; its counts are not reported this run.",
+                ProjectMatterLinkEntity);
+            problem($"the project filing census could not read {ProjectMatterLinkEntity}");
+            return (null, null);
+        }
+
+        var projects = listed.Where(r => r.Table == Project).ToList();
+        var linkedProjects = links.Select(l => l.Project).ToHashSet();
+        var linkButNoPair = projects.Count(p =>
+            linkedProjects.Contains(p.Id) && (string.IsNullOrWhiteSpace(p.PairId) || p.PairType is null));
+
+        int? pairButNoLink = 0;
+        foreach (var p in projects)
+        {
+            if (string.IsNullOrWhiteSpace(p.PairId) || p.PairType is not { } typeRef)
+                continue;
+
+            string? pairTable;
+            try
+            {
+                pairTable = await ReadRecordTypeAsync(_dataverse, _recordTypes, typeRef, ct).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+            {
+                _logger.LogWarning(ex, "[ROOT-OWNER] The project filing census could not read the regarding type {TypeRef}.", typeRef);
+                problem("the project filing census could not read a project's regarding type");
+                pairButNoLink = null;
+                break;
+            }
+
+            if (pairTable != Matter)
+                continue;
+            if (!Guid.TryParse(p.PairId, out var matterId) || !links.Contains((p.Id, matterId)))
+                pairButNoLink++;
+        }
+
+        if (linkButNoPair > 0 || pairButNoLink > 0)
+        {
+            _logger.LogInformation("[ROOT-OWNER] Project filing census: {LinkButNoPair} project(s) linked to a matter with no " +
+                "filing pair; {PairButNoLink} project(s) filed under a matter with no link row.", linkButNoPair, pairButNoLink);
+        }
+
+        return (linkButNoPair, pairButNoLink);
+
+        static Guid? GuidOf(Entity e, string column) => e.Attributes.TryGetValue(column, out var value)
+            ? value switch
+            {
+                Guid g when g != Guid.Empty => g,
+                EntityReference r when r.Id != Guid.Empty => r.Id,
+                _ => null,
+            }
+            : null;
     }
 
     // ── Owner decision 2026-10-29: a root follows its family's ownership ─────────────────────────────────────────────────
