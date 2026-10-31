@@ -1,60 +1,53 @@
 # Current Task State — `unified-access-control-r2`
 
 > **Format:** CURRENT state only. Rewrite at each checkpoint (never prepend); keep ≤ 10 KB.
-> - **Standing rules:** project `CLAUDE.md`. **Decisions:** `notes/decisions.md` (latest 2026-10-29: WA owner paths follow the matter; "a family shares one ownership; records are owned by BUs/teams").
+> - **Standing rules:** project `CLAUDE.md`. **Decisions:** `notes/decisions.md` (latest 2026-10-31: task 195 owner decisions).
 > - **Defer list:** `notes/defer-issues.md`. **Previous copy:** `notes/handoff-history/current-task-2026-10-22-cp60.md`.
 
-> **Last Updated**: 2026-10-30 ~20:20Z (checkpoint #79: 9f4e3820b2 deployed by me with the owner's go; both switches ON on dev).
+> **Last Updated**: 2026-10-31 ~20:05Z (checkpoint #82: b083d62183 deployed to dev; task 195 implementation running).
 
 ## Deployed and gated
-- **Dev BFF = 9f4e3820b2** (master, including #2474, #2475, #2477 and #2481).
-  - I deployed it at 19:22:50Z on 2026-10-30, with the owner's go in this session.
-  - R3 gave its OK on the condition Router passed on that SHA, and it did.
-  - `Set-ChildRecordCreatorPersonSchema -Verify` exited 0 before the deploy (it needs `-BffApplicationIds 5967251e…,1e40baad…` and `-OntologyWriterApplicationId 69040982…`).
-  - Deploy gate PASS (19:22–19:43Z).
-- **Dev app settings ON** (owner's go):
-  - `SecureRoot__Inheritance__RootOwnerWritesEnabled=true` at 19:45:36Z;
-  - `SecureChild__Reconciliation__OrdinaryMovesWritesEnabled=true` at 19:53:19Z.
-
-  Ontology lifted its review gate first. R3 and ebilling were given notice before each change. ebilling's keys are unchanged.
-- **Post-change gate PASS** (19:53–20:13Z):
-  - All 28 roots re-owned in 2 runs, as planned: 10 WAs and project fb73b08c to the BU1 team cf15f587; the rest to the root team 09fbf21c. 0 person-owned WAs or projects remain.
-  - The 9 WA-core Signals moved to BU1. Ontology is re-reading and will send pass or findings.
-  - One budget, 2a1b0d23, moved BU1→root to follow its root-unit matter d14d79f4.
-  - refused=0 and failed=0 on every run; document relocations all in place; 0 5xx; 0 [OWNERSHIP-REFUSED]; external routes had no traffic.
-  - The ordinary-moves pass is still converging in time slices.
-- **Pre-existing warnings, unchanged:** SECURE-CENSUS root-BU reach, the acme readability/ID-LINK failures (#2163), and the AI catalog-drift health check at startup (since 10-22).
-- **Merged since checkpoint 78:**
-  - #2481 (9f4e3820b2): the #2471 follow-up. Thread reads fail closed, the refusal has its own code and message, there is a per-pass filed cache, and Submit Invoice step A answers 503 on a fault.
-  - Filed #2478: an Office filing is left behind after a refused save. Not an access issue.
+- **Dev BFF = b083d62183** (master, including #2486, field-mapping 017).
+  - I deployed it at 19:52:25Z on 2026-10-31, with the owner's go in this session and R3's OK for that SHA. Router passed.
+  - Schema Verify passed; the package was 39.07 MB; the 4 critical-file hashes matched; healthz passed.
+  - App settings unchanged: ebilling's keys, and both UAC switches (RootOwnerWritesEnabled, OrdinaryMovesWritesEnabled) still true.
+  - R3 and ebilling were told the deploy is done.
+- **Gate running:** background job bvwjb76pm writes `$TEMP/uacmerge/uacg/gate_b083.txt` (window 19:52:25Z → about 20:12Z).
+  - When it lands, check 5xx, [OWNERSHIP-REFUSED], and external routes separately (R3 asked: `OwnedChildWrite`/`ChildRecordEndpoints` sit on the external write path).
+  - Known pre-existing warnings: SECURE-CENSUS, acme ID-LINK #2163, AI catalog drift #1987.
+  - Then send the after-notices. Field-mapping gets the deploy time and the gate status, and runs the `SYS-Dataverse Create Record` re-seed in its own session with the owner's OK there. R3 and ebilling get the gate result.
 
 ## Quick Recovery (READ THIS FIRST)
 
 | Field | Value |
 |---|---|
-| **Mode** | Final push, round-90 rules. Merge only when Router + "Client lint (type-aware ratchet)" are green; `--squash --match-head-commit <COMMIT sha>`, no `--delete-branch`, after `git merge-tree`. Deploy via R3 (owner's go given in R3's session). Task closes on merge + deploy + server-side gate. |
-| **Fix bar** | Most technically correct fix. Every defect fixed or filed. PUBLIC repo: no exploit mechanism in issues/PRs/commits (neutral wording; owner decides tracking of access defects). |
-| **Agents** | Opus executors/verifiers; Sonnet high for scoped re-checks. Model always stated. Never `taskkill /IM`. No `jq`: use `python -I`. Session cwd keep uppercase `C:/code_files/...`. |
-| **Next action** | (1) **Task 195 IN PROGRESS** (task-execute; FULL; opus/high). Worktree C:/wt195, branch `fix/uac-r2-195-project-filing-root`, from origin/master b083d62183; nothing written yet. Step 1 is a DESIGN NOTE `notes/task-195-project-filing-root.md` with an owner checkpoint BEFORE code. Facts to gather: the wizard write paths today (CreateProjectWizard :62/:746 writes only the N:N); which server path can write the pair (RecordCreationService create or PATCH child-records re-file; the pair is field-secured and written only by RecordCreationService); the 7 dev projects' N:N rows. **Key consequence for the owner:** root-owner and ordinary moves are ON in dev, so setting a pair makes the root step re-own the project to the matter's unit, and a SECURE matter makes the project secure-if-any. (2) **Dev deploy of master ≥ b083d62183 (#2486) needs the owner's go.** R3 has none planned and says I own the next batched deploy. After it, send field-mapping an after-notice with the time; they re-seed `SYS-Dataverse Create Record` with the owner's OK. (3) BU1 Q2–Q12 recommendations for the owner; (4) review the #2483 follow-up when field-mapping sends it (its change 1 goes to the owner through them). Done: ontology PASS on the 9 Signals. Ordinary moves converged: 212 runs to about 03:05Z on 10-31, 28 moved, the last at 20:25Z, 0 refused or failed. Since then 0 5xx, 0 [OWNERSHIP-REFUSED] and no new errors. #2486 (field-mapping 017) approved by UAC at ff2f76e39e after the F1 fix (chat grantor None); carries #2483/#2484/#2485 and my #2487 (stale membership row until the nightly cleanup). |
+| **Mode** | Final push, round-90 rules. Merge only when Router + "Client lint (type-aware ratchet)" are green; `--squash --match-head-commit <sha>`, no `--delete-branch`, after `git merge-tree`. Live actions, deploys and settings changes need the owner's go; shared-dev deploys go through the R3 protocol. |
+| **Task** | **195** (#2352): the project's regarding pair is its filing root. FULL rigor, Opus/high. Worktree C:/wt195, branch `fix/uac-r2-195-project-filing-root`. The design note `notes/task-195-project-filing-root.md` is updated with the owner's decisions (820aea7bfa, pushed). |
+| **Running** | Two Opus implementers in C:/wt195, on disjoint files. **A: server.** One core helper; `PATCH /api/v1/child-records/sprk_project/{id}`; the chat update tool on the same core; the container-ambiguity facts; census counts; .NET tests and gates. **B: client.** The shared file-under-matter function; both wizards; ribbon on the `sprk_Project_Matter_nn` subgrids ("New" opens the wizard, "Add Existing" hidden); `scripts/Set-ProjectFilingFromMatterLink.ps1`; jest and lint. |
+| **Next action** | When both report, check that the request body B sends matches the one A accepts, and decide A's container facts. Then one Opus adversarial review (twice: auth/tenant-isolation), fix, open the PR and merge. Deploy the BFF and the solution/web resources with the owner's go. Run the backfill report, then `-Apply` (accepted). Send field-mapping the merge SHA (its task 040 waits on 195). |
 
-## In flight
-- Nothing running.
-- Parked worktrees to clean up with `Remove-WorktreeSafe.ps1`: C:/wt2468, C:/wtuacq1, C:/wtuacwo and C:/wtuacrf and C:/wt2471f (all merged), and C:/wt194. C:/wt2468 is the deploy checkout (detached at 9f4e3820b2).
+## Owner decisions for 195 (2026-10-31)
+1. Re-filing to another matter is allowed. Nothing is ever released from isolation.
+2. Adding a matter to a project's matter list goes only through the wizard. The model-driven app's out-of-the-box subgrid New/quick-create and Add Existing are replaced.
+3. The backfill is accepted with all 3 unit moves, applied after deploy, report first.
+   - Project 6 e42aa40d: BU1 → root.
+   - PRJ-000034 a8dbfb72: root → BU1.
+   - PRJ-000038 479c5a63: root → BU1.
 
 ## Next (mine, in order)
-1. Ontology's re-read of the 9 Signals → act on any findings. Then the convergence re-gate for ordinary moves.
-2. (Done: the #2471 follow-up merged as #2481.)
-3. **Task 195** (#2352): the Create Project wizard writes the project pair, plus a dev backfill. Field-mapping task 040 waits on it. Run via task-execute.
-4. BU1 move: bring the owner recommended answers for Q2–Q12 (`$TEMP/uacmerge/uacg/rbu1/rbu1_plan.md` §6), including K4 (reassign product rows first).
-5. Parked (verify state):
+1. Gate for b083 → after-notices (above).
+2. Task 195 (above).
+3. BU1 Q2–Q12 recommendations for the owner (`$TEMP/uacmerge/uacg/rbu1/rbu1_plan.md` §6), including K4.
+4. Review field-mapping's #2483 follow-up and its 039 diff when they arrive.
+5. Clean up these worktrees with `Remove-WorktreeSafe.ps1`, all merged: C:/wt2468 (deploy checkout, at b083d62183), C:/wtuacq1, C:/wtuacwo, C:/wtuacrf, C:/wt2471f, C:/wt2486, C:/wt194.
+6. Parked (verify state):
    - task 193 (C:/wt193), task 197 (C:/wt197);
    - #2427 output lookups (C:/wt2427; ebilling waits for its sha);
-   - 196a/196b;
-   - 194b close (remove C:/wt194 via Remove-WorktreeSafe.ps1).
+   - 196a/196b.
 
 ## Owner items outstanding
-- The owner-private items in `scratchpad/q1_owner_private.md` (how to track them; whether to scrub the checkpoint #75 wording from history).
-- Whether to apply the credential-column secure to dev's schema now or wait for the next import.
+- The owner-private items in `scratchpad/q1_owner_private.md`.
+- Whether chat should send invites, as its own change, through field-mapping.
 - BU1 Q2–Q12.
 - Older:
   - decisions #2343, #2245, #2250, #2260, K5/#2270 (via R3), #2262, #2396;
@@ -62,15 +55,9 @@
   - task 190 Apply;
   - #2382 UAT check 5.
 
-## Done 2026-10-29/30
-- Merged: #2471 (9f4afe82ac, fixes #2468), #2474 (cd3f84662e), #2475 (bf8c775ce2), #2477 (c30686bdfc, fix 3), #2481 (9f4e3820b2), #2440, #2451.
-- Deployed 9f4e3820b2 to dev; both switches ON; gates PASS.
-- 9f4afe82ac deployed to dev; gate PASS.
-- Q1 applied on dev, plus the externalserviceconfig grant removed (Verify PASS). Filed #2472 and #2473.
-- Peer reviews:
-  - ontology 168 PASS (#2463);
-  - ebilling #1911 and the Adjustment-line PASS;
-  - R3 SPA-only deploy OK.
+## Filed this stretch
+- #2478: a filing is left behind after a refused Office save. Not an access issue.
+- #2487: the membership junction owner row stays stale until the nightly cleanup after a reconciler re-own.
 
 ## Peers
 R3 `spaarke-wt-spa-external-access-platform-ce`; ebilling `spaarke-wt-ebilling-r1-0a`; field-mapping `spaarke-wt-field-mapping-server-write-pa-11`; ontology `spaarke-wt-spaarke-ontology-platform-r1-be`; word-add-in; provisioning.
