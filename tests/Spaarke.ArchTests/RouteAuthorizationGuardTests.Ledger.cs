@@ -460,7 +460,8 @@ public partial class RouteAuthorizationGuardTests
             + "on EVERY bound record (an unappendable and a missing record answer the same 404), no field-secured or "
             + "server-owned column; a re-file also needs the row readable (uniform 404) and F3 to leave a secure record. "
             + "uac-r2 task 195: PATCH .../sprk_project/{id} takes the filing pair only and is decided by ProjectMatterFiling.FileAsync "
-            + "(the caller's read, Write+Append and AppendTo first; then the app-only, version-conditioned pair write)."),
+            + "(the caller's read, Write+Append and AppendTo first; a move of an already filed project only with ?move=true; then the "
+            + "app-only, version-conditioned pair write)."),
 
         // ---- Office add-in ----
         new GovernedFile("Api/Office/OfficeEndpoints.cs", Scope.RouteLevelGate,
@@ -2304,15 +2305,16 @@ public partial class RouteAuthorizationGuardTests
             + "it replaced OwnedChildWrite.CreateAsync, deleted in 017) checks the table privilege and AppendTo on EVERY bound "
             + "record before the app-only create — for a work assignment (task 046, D-113) with the secure-create plan."),
         new HandlerDecision("PATCH /api/v1/child-records/{table}/{id:guid}", "RefileAsync", "IDataverseUserClient", Array.Empty<string>(),
-            "Task 147 r1: the re-file is the caller's own PATCH through IDataverseUserClient (ChildRecordEndpoints.cs:406-408 → "
-            + "UpdateAsync, :562): an unreadable row is the uniform 404, AppendTo on every new parent and F3 on a move out of a "
+            "Task 147 r1: the re-file is the caller's own PATCH through IDataverseUserClient (ChildRecordEndpoints.cs:410-412 → "
+            + "UpdateAsync, :569): an unreadable row is the uniform 404, AppendTo on every new parent and F3 on a move out of a "
             + "secure record are asked as the caller (OwnedChildWrite.RefileAsync, :756). uac-r2 task 195: sprk_project is "
-            + "dispatched first (ChildRecordEndpoints.cs:403-404 → FileProjectAsync) to ProjectMatterFiling.FileAsync: the shape "
-            + "rule (the pair only, ProjectFilingShapeProblem :418, checked at :465) is a 400 before any I/O; the caller's read of "
-            + "the project is the uniform 404 (ProjectMatterFiling.cs:196); the caller's Write+Append on the project (:220) and "
-            + "AppendTo on the matter and the record-type row (:224) are asked as the caller (a missing and an unappendable "
-            + "record answer alike); then the secure-root gate (:244) and the secure-matter refusal (:254); only then the "
-            + "app-only pair write, conditional on the version read (:301)."),
+            + "dispatched first (ChildRecordEndpoints.cs:407-408 → FileProjectAsync) to ProjectMatterFiling.FileAsync: the shape "
+            + "rule (the pair only, ProjectFilingShapeProblem :422, checked at :470) is a 400 before any I/O; the caller's read of "
+            + "the project is the uniform 404 (ProjectMatterFiling.cs:208); the caller's Write+Append on the project (:232) and "
+            + "AppendTo on the matter and the record-type row (:236) are asked as the caller (a missing and an unappendable "
+            + "record answer alike); then the secure-root gate (:256); a project already filed under another record is 409 "
+            + "project_filing.already_filed unless the request asks ?move=true (:264, the current record not named); the "
+            + "secure-matter refusal (:274); only then the app-only pair write, conditional on the version read (:321)."),
         new HandlerDecision("POST /api/memory/pins", "CreatePinAsync", "CallerRecordAccessProbe", Array.Empty<string>(),
             "Task 166 (sweep S-43): the matter a pin names is checked AppendTo (memory.pin_matter) AS THE CALLER through "
             + "CallerRecordAccessProbe before the repository write (PinnedMemoryEndpoints.cs:319-325, :725-760); unknown and "

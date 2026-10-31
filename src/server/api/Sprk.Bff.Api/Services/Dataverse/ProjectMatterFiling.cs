@@ -25,8 +25,10 @@ namespace Sprk.Bff.Api.Services.Dataverse;
 /// <see cref="ChangedConcurrentlyCode"/>, nothing written) → read back, the previous pair logged → the caller's after-write
 /// step (the core-ancestor re-stamp) → <see cref="SecureRootFilingGate.SecureAfterWriteAsync"/> inline. Ownership then
 /// follows through the root-owner step and the ordinary-moves pass of the existing jobs; nothing here writes an owner.</para>
-/// <para><b>Re-file</b> (owner decision 2026-10-31): a pair that already names ANOTHER matter is re-filed through the same
-/// steps. The N:N association (<c>sprk_Project_Matter_nn</c>) is never read or written here: it confers nothing.</para>
+/// <para><b>Re-file</b> (owner decision 2026-10-31: allowed, never a side effect): a pair that already names ANOTHER record
+/// is re-filed through the same steps only when the caller asks for the move (<c>move</c>; the chat tool's update names
+/// the matter explicitly, the route needs <c>?move=true</c>); otherwise it is <see cref="AlreadyFiledCode"/>, nothing
+/// written, and the current record is not named (the pair is field-secured). The N:N association (<c>sprk_Project_Matter_nn</c>) is never read or written here: it confers nothing.</para>
 /// <para><b>Secure records</b> (the design note's container check, §1).
 /// <list type="bullet">
 /// <item>Filing under a SECURE matter is refused before any write (<see cref="SecureMatterCode"/>, fail closed; #1506):
@@ -59,6 +61,10 @@ internal static class ProjectMatterFiling
 
     /// <summary>The pair names a record that is not a matter (400). Nothing read about that record; nothing written.</summary>
     internal const string NotAMatterCode = "project_filing.not_a_matter";
+
+    /// <summary>The project is already filed under another record and the caller did not ask to move it (409). Nothing
+    /// written; the current record is not named.</summary>
+    internal const string AlreadyFiledCode = "project_filing.already_filed";
 
     /// <summary>The matter is secure (409): see the class remarks (#1506). Nothing written.</summary>
     internal const string SecureMatterCode = "project_filing.secure_matter_unsupported";
@@ -97,6 +103,9 @@ internal static class ProjectMatterFiling
 
         /// <summary><see cref="SecureMatterCode"/>.</summary>
         SecureMatter,
+
+        /// <summary><see cref="AlreadyFiledCode"/>.</summary>
+        AlreadyFiled,
 
         /// <summary><see cref="ChangedConcurrentlyCode"/>.</summary>
         Conflict,
@@ -142,6 +151,8 @@ internal static class ProjectMatterFiling
     /// </summary>
     /// <param name="appOnly">The application's reader and conditional writer; null fails closed (nothing written).</param>
     /// <param name="afterWrite">Run after the write and its read-back, before the securing step (the caller's re-stamp).</param>
+    /// <param name="move">The caller asks to move a project that is already filed under another record. Without it such a
+    /// project is refused (<see cref="AlreadyFiledCode"/>); an unfiled project, or the same matter, is decided alike either way.</param>
     internal static async Task<Outcome> FileAsync(
         IDataverseUserClient user,
         IFieldMappingDataverseService? appOnly,
@@ -151,7 +162,8 @@ internal static class ProjectMatterFiling
         ILogger logger,
         string? traceId,
         CancellationToken ct,
-        Func<Task>? afterWrite = null)
+        Func<Task>? afterWrite = null,
+        bool move = false)
     {
         ArgumentNullException.ThrowIfNull(user);
         ArgumentNullException.ThrowIfNull(rootFiling);
@@ -246,6 +258,14 @@ internal static class ProjectMatterFiling
                 .ConfigureAwait(false) is { } gateRefusal)
         {
             return new Outcome(OutcomeKind.Refused, gateRefusal.Reason) { Refusal = gateRefusal };
+        }
+
+        // ── 7a. A re-file is never a side effect: filed under another record and no move asked → refused ──────────────
+        if (!same && !move && (!string.IsNullOrWhiteSpace(before.Id) || before.Type is not null))
+        {
+            logger.LogInformation("[PROJECT-FILING] {Table} {Id} is already filed and no move was asked; nothing written ({Code}).",
+                Table, projectId, AlreadyFiledCode);
+            return new Outcome(OutcomeKind.AlreadyFiled, "This project is already filed under another matter; it was not moved.");
         }
 
         // ── 7. A secure matter is not a target yet (class remarks, #1506) ───────────────────────────────────────────

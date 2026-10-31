@@ -374,7 +374,10 @@ public static class ChildRecordEndpoints
     /// }
     /// </code>
     /// <para>Both properties as strings, nothing else (the navigation property's case is not significant; a clear is not
-    /// accepted). The core is <see cref="ProjectMatterFiling.FileAsync"/>, shared with the chat update tool: 204 when filed,
+    /// accepted). The optional query parameter <c>move</c> (default <c>false</c>) asks to move a project that is already filed
+    /// under another record: without <c>?move=true</c> such a project is 409 <see cref="ProjectMatterFiling.AlreadyFiledCode"/>
+    /// and nothing is written (a re-file is never a side effect); an unfiled project, or the same matter, is decided alike
+    /// either way. The core is <see cref="ProjectMatterFiling.FileAsync"/>, shared with the chat update tool: 204 when filed,
     /// and when it was already filed under that matter (nothing written); 400 <see cref="NotFilingCode"/> for any other body,
     /// <see cref="InvalidPayloadCode"/> for a pair that is not whole, <see cref="ProjectMatterFiling.NotAMatterCode"/> when the
     /// pair names anything but a matter; 404 <see cref="NotFoundCode"/> for a project or matter the caller cannot use or that
@@ -397,11 +400,12 @@ public static class ChildRecordEndpoints
         ILogger<Program> logger,
         CancellationToken ct,
         [FromServices] SecureRootFilingGate? rootFiling = null,
-        [FromServices] IFieldMappingDataverseService? appOnlyFields = null)
+        [FromServices] IFieldMappingDataverseService? appOnlyFields = null,
+        [FromQuery] bool move = false)
     {
         var entity = (table ?? string.Empty).Trim().ToLowerInvariant();
         if (entity == ProjectMatterFiling.Table)
-            return FileProjectAsync(id, body, user, restamper, rootFiling, appOnlyFields, httpContext, logger, ct);
+            return FileProjectAsync(id, body, user, restamper, rootFiling, appOnlyFields, httpContext, logger, ct, move);
 
         return RefileTables.Contains(entity)
             ? UpdateAsync(entity, id, body, user, ownership, restamper, children, httpContext, logger, ct,
@@ -459,7 +463,8 @@ public static class ChildRecordEndpoints
         IFieldMappingDataverseService? appOnlyFields,
         HttpContext httpContext,
         ILogger logger,
-        CancellationToken ct)
+        CancellationToken ct,
+        bool move = false)
     {
         const string entity = ProjectMatterFiling.Table;
         if (ProjectFilingShapeProblem(body) is { } shape)
@@ -478,7 +483,7 @@ public static class ChildRecordEndpoints
             return CallerFailure(mapFailure, entity);
 
         var outcome = await ProjectMatterFiling.FileAsync(
-                user, appOnlyFields, rootFiling, id, mapped.Item!, logger, httpContext.TraceIdentifier, ct,
+                user, appOnlyFields, rootFiling, id, mapped.Item!, logger, httpContext.TraceIdentifier, ct, move: move,
                 afterWrite: async () =>
                 {
                     var restamp = await restamper.AfterWriteAsync(entity, id, mapped.Item!.Columns, CancellationToken.None)
@@ -525,6 +530,8 @@ public static class ChildRecordEndpoints
                 ProjectMatterFiling.NotAMatterCode, outcome.Detail!),
             { Kind: ProjectMatterFiling.OutcomeKind.SecureMatter } => Problem(StatusCodes.Status409Conflict,
                 ProjectMatterFiling.SecureMatterCode, outcome.Detail!),
+            { Kind: ProjectMatterFiling.OutcomeKind.AlreadyFiled } => Problem(StatusCodes.Status409Conflict,
+                ProjectMatterFiling.AlreadyFiledCode, outcome.Detail!),
             { Kind: ProjectMatterFiling.OutcomeKind.Conflict } => Problem(StatusCodes.Status409Conflict,
                 ProjectMatterFiling.ChangedConcurrentlyCode, outcome.Detail!),
             { Kind: ProjectMatterFiling.OutcomeKind.Refused, Refusal: { } refusal } => refusal.RefusalCode switch

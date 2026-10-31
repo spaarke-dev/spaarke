@@ -45,7 +45,7 @@ public partial class SecureRootInheritanceWriterTests
     /// <summary>The route's PATCH. The re-file's own collaborators are strict mocks: a project never reaches them.</summary>
     private Task<IResult> FileThroughTheRoute(
         Guid project, JsonElement body, IDataverseUserClient user,
-        IFieldMappingDataverseService? appOnly, Mock<IRecordOwnershipResolver>? ownership = null) =>
+        IFieldMappingDataverseService? appOnly, Mock<IRecordOwnershipResolver>? ownership = null, bool move = false) =>
         ChildRecordEndpoints.RefileAsync(
             "sprk_project", project, body, user,
             (ownership ?? new Mock<IRecordOwnershipResolver>(MockBehavior.Strict)).Object,
@@ -53,7 +53,7 @@ public partial class SecureRootInheritanceWriterTests
             null!, // SecureChildReconciler: the child re-file's, never reached for a project
             new Mock<IGenericEntityService>(MockBehavior.Strict).Object,
             new DefaultHttpContext(), NullLogger<Program>.Instance, CancellationToken.None,
-            _gate, appOnly);
+            _gate, appOnly, move);
 
     private string? PairIdOf(Guid project) => World.ValueOf<string>("sprk_project", project, SecureRootInheritance.PairIdColumn);
 
@@ -67,8 +67,11 @@ public partial class SecureRootInheritanceWriterTests
 
     // ── The route ───────────────────────────────────────────────────────────────────────────────────────────────────
 
-    [Fact]
-    public async Task ProjectFiling_Route_FirstFilingUnderAnOrdinaryMatter_Is204_ThePairIsWrittenAtTheVersionRead()
+    /// <summary>An unfiled project is filed whatever <c>move</c> says.</summary>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ProjectFiling_Route_FirstFilingUnderAnOrdinaryMatter_Is204_ThePairIsWrittenAtTheVersionRead(bool move)
     {
         var (_, ordinary) = Matters();
         var project = Project();
@@ -76,7 +79,7 @@ public partial class SecureRootInheritanceWriterTests
         var user = Scripted();
         var appOnly = AppUpdatesTheWorld();
 
-        var result = await FileThroughTheRoute(project, FilingBody(ordinary, typeRef), user, appOnly.Object);
+        var result = await FileThroughTheRoute(project, FilingBody(ordinary, typeRef), user, appOnly.Object, move: move);
 
         RouteStatus(result).Should().Be(StatusCodes.Status204NoContent, RouteDetail(result));
         PairIdOf(project).Should().Be(ordinary.ToString("D"));
@@ -89,15 +92,18 @@ public partial class SecureRootInheritanceWriterTests
         ShouldNotBeSecured(project, "filed under an ordinary matter");
     }
 
-    [Fact]
-    public async Task ProjectFiling_Route_TheSameMatterAgain_Is204_AndNothingIsWritten()
+    /// <summary>The same matter again is 204 with nothing written, whatever <c>move</c> says.</summary>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ProjectFiling_Route_TheSameMatterAgain_Is204_AndNothingIsWritten(bool move)
     {
         var (_, ordinary) = Matters();
         var project = Project(ordinary);
         var typeRef = World.ValueOf<Microsoft.Xrm.Sdk.EntityReference>("sprk_project", project, SecureRootInheritance.PairTypeColumn)!.Id;
         var appOnly = AppUpdatesTheWorld();
 
-        var result = await FileThroughTheRoute(project, FilingBody(ordinary, typeRef), Scripted(), appOnly.Object);
+        var result = await FileThroughTheRoute(project, FilingBody(ordinary, typeRef), Scripted(), appOnly.Object, move: move);
 
         RouteStatus(result).Should().Be(StatusCodes.Status204NoContent, RouteDetail(result));
         NoConditionalWrite(appOnly);
@@ -105,8 +111,11 @@ public partial class SecureRootInheritanceWriterTests
         _writes.Should().BeEmpty();
     }
 
+    /// <summary>A re-file is never a side effect: a project filed under matter A, filed to B WITHOUT <c>?move=true</c>, is
+    /// 409 <c>project_filing.already_filed</c> and nothing is written; the answer does not name A (the pair is
+    /// field-secured).</summary>
     [Fact]
-    public async Task ProjectFiling_Route_APairNamingAnotherMatter_IsReFiled()
+    public async Task ProjectFiling_Route_AlreadyFiledUnderAnotherMatter_WithoutMove_Is409_AndNothingIsWritten()
     {
         var (_, from) = Matters();
         var to = Guid.NewGuid();
@@ -116,6 +125,26 @@ public partial class SecureRootInheritanceWriterTests
 
         var result = await FileThroughTheRoute(project, FilingBody(to, RecordTypeRef(_fixture, "sprk_matter")), Scripted(),
             appOnly.Object);
+
+        RouteStatus(result).Should().Be(StatusCodes.Status409Conflict);
+        RouteReason(result).Should().Be(ProjectMatterFiling.AlreadyFiledCode);
+        RouteDetail(result).Should().NotContain(from.ToString("D")).And.NotContain(from.ToString("N"));
+        NoConditionalWrite(appOnly);
+        _writes.Should().BeEmpty();
+        PairIdOf(project).Should().Be(from.ToString("D"));
+    }
+
+    [Fact]
+    public async Task ProjectFiling_Route_APairNamingAnotherMatter_WithMove_IsReFiled()
+    {
+        var (_, from) = Matters();
+        var to = Guid.NewGuid();
+        _fixture.SeedMatter(to, isSecure: false);
+        var project = Project(from);
+        var appOnly = AppUpdatesTheWorld();
+
+        var result = await FileThroughTheRoute(project, FilingBody(to, RecordTypeRef(_fixture, "sprk_matter")), Scripted(),
+            appOnly.Object, move: true);
 
         RouteStatus(result).Should().Be(StatusCodes.Status204NoContent, RouteDetail(result));
         PairIdOf(project).Should().Be(to.ToString("D"));
@@ -269,7 +298,7 @@ public partial class SecureRootInheritanceWriterTests
         var project = InheritedSecureProject(secureA);
 
         var result = await FileThroughTheRoute(project, FilingBody(secureB, RecordTypeRef(_fixture, "sprk_matter")), Scripted(),
-            AppUpdatesTheWorld().Object);
+            AppUpdatesTheWorld().Object, move: true);
 
         RouteStatus(result).Should().Be(StatusCodes.Status409Conflict);
         RouteReason(result).Should().Be(ProjectMatterFiling.SecureMatterCode);
@@ -315,7 +344,7 @@ public partial class SecureRootInheritanceWriterTests
         var appOnly = AppUpdatesTheWorld();
 
         var result = await FileThroughTheRoute(project, FilingBody(ordinary, RecordTypeRef(_fixture, "sprk_matter")), Scripted(),
-            appOnly.Object);
+            appOnly.Object, move: true);
 
         RouteStatus(result).Should().Be(StatusCodes.Status204NoContent, RouteDetail(result));
         PairIdOf(project).Should().Be(ordinary.ToString("D"));

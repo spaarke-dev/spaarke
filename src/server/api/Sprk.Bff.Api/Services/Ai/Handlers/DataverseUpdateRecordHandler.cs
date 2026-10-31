@@ -445,6 +445,8 @@ public sealed partial class DataverseUpdateRecordHandler : IToolHandler
         var outcome = await ProjectMatterFiling.FileAsync(
                 _dataverse, scope?.ServiceProvider.GetService<Spaarke.Dataverse.IFieldMappingDataverseService>(), _rootFiling,
                 recordId, item, _logger, context.DecisionId.ToString("N"), ct,
+                // A chat update that names a matter is the user's explicit request to file (or move) the project there.
+                move: true,
                 afterWrite: async () =>
                 {
                     var restamp = await _restamp.AfterWriteAsync(tablename, recordId, item.Columns).ConfigureAwait(false);
