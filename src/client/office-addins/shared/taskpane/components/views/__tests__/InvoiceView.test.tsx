@@ -6,7 +6,8 @@
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { FluentProvider, webLightTheme } from '@fluentui/react-components';
-import { InvoiceView, INVOICE_UPLOAD_HINT, type InvoiceViewProps } from '../InvoiceView';
+import { InvoiceView, INVOICE_UPLOAD_HINT, invoiceFiledRecord, type InvoiceViewProps } from '../InvoiceView';
+import { fetchRelatedCandidates } from '../../../services/communicationSuggestionsService';
 import { searchOfficeEntities } from '../../../services/officeEntitySearch';
 import type { IHostAdapter } from '@shared/adapters';
 import type { AttachmentInfo } from '@shared/adapters/types';
@@ -15,6 +16,8 @@ import type { InvoiceSubmissionOutcome, InvoiceSubmitAttempt } from '../../../se
 
 jest.mock('../../../services/officeEntitySearch', () => ({ searchOfficeEntities: jest.fn() }));
 const mockSearch = searchOfficeEntities as jest.MockedFunction<typeof searchOfficeEntities>;
+jest.mock('../../../services/communicationSuggestionsService', () => ({ fetchRelatedCandidates: jest.fn() }));
+const mockCandidates = fetchRelatedCandidates as jest.MockedFunction<typeof fetchRelatedCandidates>;
 
 const TIMEOUT = 30000;
 const MATTER_ID = '6f1c0e8a-2b1d-4c7e-9a52-0d3f1b7e9c41';
@@ -85,6 +88,135 @@ const submitButton = () => screen.getByRole('button', { name: /^(Submit|Submitti
 
 beforeEach(() => {
   mockSearch.mockReset();
+  mockCandidates.mockReset();
+});
+
+describe('invoiceFiledRecord — the record the open email is filed to', () => {
+  const resolved = (entityType: string) =>
+    ({
+      kind: 'resolved',
+      documentId: 'doc-1',
+      relatedRecord: {
+        entityType,
+        id: MATTER_ID,
+        name: 'Smith v Jones',
+        displayName: 'Smith v Jones',
+        number: 'MAT-1',
+      },
+    }) as never;
+
+  it('maps a Matter, Project or Work Assignment filing to the picker record', () => {
+    expect(invoiceFiledRecord(resolved('sprk_matter'))).toEqual({
+      id: MATTER_ID,
+      entityType: 'Matter',
+      logicalName: 'sprk_matter',
+      name: 'Smith v Jones',
+      displayInfo: 'MAT-1',
+    });
+    expect(invoiceFiledRecord(resolved('sprk_project'))?.entityType).toBe('Project');
+    expect(invoiceFiledRecord(resolved('sprk_workassignment'))?.entityType).toBe('WorkAssignment');
+  });
+
+  it('must-not-fire: no filed record while checking, when not saved, record unknown, or not a core record', () => {
+    expect(invoiceFiledRecord(undefined)).toBeNull();
+    expect(invoiceFiledRecord('checking')).toBeNull();
+    expect(invoiceFiledRecord({ kind: 'new', reason: 'not_cloud_document' } as never)).toBeNull();
+    expect(invoiceFiledRecord({ kind: 'resolved', documentId: 'doc-1', relatedRecord: null } as never)).toBeNull();
+    expect(invoiceFiledRecord(resolved('sprk_invoice'))).toBeNull();
+  });
+});
+
+describe('InvoiceView — the core record starts where the email is filed', () => {
+  const PROJECT: EntitySearchResult = {
+    id: '2a7d4c1e-9b3f-4e8a-b6d2-7c5e1f0a9d33',
+    entityType: 'Project',
+    logicalName: 'sprk_project',
+    name: 'Project X',
+    displayInfo: 'PRJ-9',
+    canFile: true,
+  };
+
+  function view(props: Partial<InvoiceViewProps>) {
+    const all = {
+      hostAdapter: adapter(),
+      loadFirms: jest.fn(async () => [{ firmId: FIRM_ID, name: 'Firm F' }]),
+      onSubmit: jest.fn(),
+      ...props,
+    } as InvoiceViewProps;
+    return (
+      <FluentProvider theme={webLightTheme}>
+        <InvoiceView {...all} />
+      </FluentProvider>
+    );
+  }
+
+  it(
+    "must-fire: a filed email starts on its record, loads that record's firms and says it is filed there",
+    async () => {
+      const loadFirms = jest.fn(async () => [{ firmId: FIRM_ID, name: 'Firm F' }]);
+      render(view({ filedRecord: MATTER, loadFirms }));
+      expect(await screen.findByText('This email is filed to this record in Spaarke.')).toBeInTheDocument();
+      await waitFor(() => expect(loadFirms).toHaveBeenCalledWith({ entityType: 'Matter', entityId: MATTER_ID }));
+      // The only linked firm is chosen, so only the invoice number is still needed.
+      expect(await screen.findByText(/Still needed: the firm's invoice number\./)).toBeInTheDocument();
+    },
+    TIMEOUT
+  );
+
+  it(
+    'a filing learned after the view opens fills the empty picker',
+    async () => {
+      const { rerender } = render(view({ filedRecord: null }));
+      expect(screen.queryByTestId('invoice-filed-record-note')).toBeNull();
+      rerender(view({ filedRecord: MATTER }));
+      expect(await screen.findByText('This email is filed to this record in Spaarke.')).toBeInTheDocument();
+    },
+    TIMEOUT
+  );
+
+  it(
+    'must-not-fire: the filing never replaces a record the user picked, and the view names the filed record',
+    async () => {
+      const { rerender } = render(view({ filedRecord: null }));
+      mockSearch.mockResolvedValue([PROJECT]);
+      await userEvent.click(screen.getByRole('radio', { name: 'Project' }));
+      await userEvent.type(screen.getByLabelText('Search Project records'), 'X');
+      await userEvent.click(screen.getByRole('button', { name: 'Search' }));
+      await userEvent.click(await screen.findByRole('button', { name: 'Select this record' }));
+      rerender(view({ filedRecord: MATTER }));
+      expect(
+        await screen.findByText(
+          'This email is filed to MAT-1 Smith v Jones in Spaarke, so its invoice can only be submitted to that record.'
+        )
+      ).toBeInTheDocument();
+      expect(screen.getByText(/PRJ-9 : Project X/)).toBeInTheDocument();
+    },
+    TIMEOUT
+  );
+
+  it(
+    'an unfiled email shows the suggested Matters, Projects and Work Assignments as cards (never other kinds)',
+    async () => {
+      mockCandidates.mockResolvedValue([
+        { ...MATTER, confidence: 0.9 },
+        { id: 'inv-1', entityType: 'Invoice', logicalName: 'sprk_invoice', name: 'An invoice', confidence: 0.8 },
+      ]);
+      const suggesting = {
+        getCapabilities: () => ({
+          canGetAttachments: true,
+          canSuggestRelatedRecords: true,
+          canResolveEmailIdentity: true,
+        }),
+        getAttachments: jest.fn(async () => ATTACHMENTS),
+        getEmailIdentityKeys: jest.fn(async () => ({ internetMessageId: '<m1@x>' })),
+      } as unknown as IHostAdapter;
+      render(view({ hostAdapter: suggesting }));
+      await waitFor(() => expect(mockCandidates).toHaveBeenCalledWith('<m1@x>'));
+      expect(await screen.findByText(/Smith v Jones/)).toBeInTheDocument();
+      expect(screen.queryByText(/An invoice/)).toBeNull();
+    },
+    TIMEOUT
+  );
 });
 
 describe('InvoiceView — New invoice (task 133)', () => {
