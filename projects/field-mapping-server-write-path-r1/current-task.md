@@ -13,7 +13,7 @@
 | **Phase branches** | 2d-1 798936c47e (step 10 pre-create; new codes stamp_underivable 400 / stamp_unavailable 503; Office map rows added as generic 500; system principal still stamped post-create = known limit). 2d-2 e106b19d7c (task/contact/account Child + MappingExclusion; owner + row byte-identical vs today). 017a f758480f3c (ebilling OK, no findings). 017b 43b48f3249 (route, decision parity, R3-1, 037 K2 = copy after merge, #1608, documents, invoice-family protection from guard, sprk_servicerequest; NFR-07 table all same; 401 stays 401; traceId kept). 017c 9cc37b415a (chat refuses invoicesubmission/approval/correction; escalated 3 items, resolved 2026-10-30). R3-2 = K2 known limit. |
 | **Open PRs** | #2387 (075, HOLD, ships with 040). |
 | **Issues** | #2444, #2413, #2429 (provisioning; I review), #2469 (flaky ISS-005), #1948 (lint-staged uses the shared stash; 017b re-found it). |
-| **Waiting on** | UAC 195 → 040 (+075). Provisioning's #2429 PR. Owner's 076 live pass. |
+| **Waiting on** | UAC 195 is MERGED (d0c1c5dc3c, #2496, 2026-10-31; master merged into the work branch, 70567b4dff). Its contract for 040 is in `notes/decisions.md` 2026-10-31. 195 is not live yet: UAC-r2 will send the deploy time, after the owner's go there for the deploy, the ribbon import and the backfill. 040 (+075) still needs 005 and 019. Provisioning's #2429 PR. Owner's 076 live pass. Owner OK for the re-seed and the go for 039 (both asked, no answer yet). |
 | **Owner to do** | 076 live check (owner + narrower user). Leftover locked worktree agent-aec6d06ca99a5a9f6 (075): end of project. |
 
 ## How wave-2 agents are run (lessons)
