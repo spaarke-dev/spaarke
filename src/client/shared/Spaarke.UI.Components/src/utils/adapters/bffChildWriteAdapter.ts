@@ -26,6 +26,7 @@
 
 import type { IDataService } from '../../types/serviceInterfaces';
 import type { AuthenticatedFetch } from './bffDataServiceAdapter';
+import { resolveRecordType, type IPolymorphicWebApi } from '../../services/PolymorphicResolverService';
 
 /**
  * The tables a browser writer creates through the BFF (task 147's census). Lower-case logical names.
@@ -252,6 +253,58 @@ export async function updateChildRecordViaBff(
   });
   if (!response.ok) {
     throw await failureOf(response, 'The record could not be updated');
+  }
+}
+
+/**
+ * Files a project under a matter (unified-access-control-r2 task 195, #2352): sets the project's ADR-024 regarding pair
+ * (`sprk_regardingrecordid` + `sprk_regardingrecordtype`) to the matter through the BFF —
+ * `PATCH /api/v1/child-records/sprk_project/{projectId}` with a filing-only body. The pair is the project's one filing
+ * root; the Project ↔ Matter N:N (`sprk_Project_Matter_nn`) is an association and confers nothing, so a writer that links
+ * the two calls this after writing the N:N. The pair is field-secured so that only the BFF writes it: the client never
+ * writes it through `Xrm.WebApi`.
+ *
+ * `recordTypes` reads the ADR-024 record-type catalog (`sprk_recordtype_ref`) for the matter's record-type id — the
+ * wizard's own data service. Resolves when the server answered 2xx (204, including "already filed there"); rejects with
+ * the server's words otherwise ({@link ChildRecordWriteError}, or the error the host's fetch throws) — the caller shows
+ * them as a warning.
+ */
+export async function fileProjectUnderMatter(
+  authenticatedFetch: AuthenticatedFetch | undefined,
+  bffBaseUrl: string | undefined,
+  recordTypes: IPolymorphicWebApi,
+  projectId: string,
+  matterId: string
+): Promise<void> {
+  if (!authenticatedFetch || typeof bffBaseUrl !== 'string') {
+    throw new ChildRecordWriteError(
+      'The project was not filed under the matter: this screen is not connected to the Spaarke service, which must save it.',
+      0,
+      'child_record.bff_not_configured'
+    );
+  }
+
+  const matterType = await resolveRecordType(recordTypes, 'sprk_matter');
+  if (!matterType?.id) {
+    throw new ChildRecordWriteError(
+      'The project was not filed under the matter: the matter record type could not be read.',
+      0
+    );
+  }
+
+  const response = await authenticatedFetch(
+    joinUrl(bffBaseUrl, `/api/v1/child-records/sprk_project/${cleanId(projectId)}`),
+    {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        sprk_regardingrecordid: cleanId(matterId),
+        'sprk_regardingrecordtype@odata.bind': `/sprk_recordtype_refs(${cleanId(matterType.id)})`,
+      }),
+    }
+  );
+  if (!response.ok) {
+    throw await failureOf(response, 'The project could not be filed under the matter');
   }
 }
 

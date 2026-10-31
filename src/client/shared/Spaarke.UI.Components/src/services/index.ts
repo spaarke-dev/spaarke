@@ -277,6 +277,7 @@ export type {
 export {
   createChildRecordViaBff,
   updateChildRecordViaBff,
+  fileProjectUnderMatter,
   withBffChildWrites,
   routesChildWritesThroughBff,
   isBffChildCreateTable,

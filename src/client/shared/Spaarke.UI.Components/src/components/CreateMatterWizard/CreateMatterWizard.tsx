@@ -45,7 +45,7 @@ import {
 } from './matterService';
 import type { IDataService, INavigationService } from '../../types/serviceInterfaces';
 import { EventService } from '../CreateEventWizard/eventService';
-import { withBffChildWrites } from '../../utils/adapters/bffChildWriteAdapter';
+import { withBffChildWrites, fileProjectUnderMatter } from '../../utils/adapters/bffChildWriteAdapter';
 import { WorkAssignmentService } from '../CreateWorkAssignmentWizard/workAssignmentService';
 import type { ICreateWorkAssignmentFormState, IAssignWorkState } from '../CreateWorkAssignmentWizard/formTypes';
 import type { IUserBuCascadeDefaults } from '../../services/EntityCreationService';
@@ -279,6 +279,17 @@ export interface ICreateMatterWizardProps {
     readonly fileIds: ReadonlyArray<string>;
     readonly fileNames?: ReadonlyArray<string>;
   };
+  /**
+   * Launch-context pre-fill (unified-access-control-r2 task 195): the record the new matter is linked to, pre-selected
+   * in the Associate-To step — the project when the wizard is opened from a project's Matters subgrid (the
+   * `sprk_Project_Matter_nn` "New" command). `undefined` when opened directly — the step starts empty, as before.
+   */
+  initialAssociation?: AssociationResult;
+  /**
+   * With {@link initialAssociation}: hides the Associate-To step so the launch record is the fixed association
+   * (CreateRecordWizard's `lockAssociation`). Defaults to `false`.
+   */
+  lockAssociation?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -319,6 +330,8 @@ export const CreateMatterWizard: React.FC<ICreateMatterWizardProps> = ({
   initialFormValues,
   onComplete,
   initialFileRefs,
+  initialAssociation,
+  lockAssociation,
 }) => {
   // Assistant hand-off pre-seed (task 013): merge the drafted values over the empty
   // defaults so the wizard opens PRE-FILLED. Stable per `initialFormValues` identity
@@ -397,6 +410,8 @@ export const CreateMatterWizard: React.FC<ICreateMatterWizardProps> = ({
                 { label: 'Invoice', entityType: 'sprk_invoice' },
               ],
               navigationService,
+              initialAssociation,
+              lockAssociation,
             },
           }
         : {}),
@@ -634,6 +649,25 @@ export const CreateMatterWizard: React.FC<ICreateMatterWizardProps> = ({
               `Matter created, but could not link to "${context.association.recordName}". ` +
                 'You can associate them manually from the matter record.'
             );
+          } else if (context.association.entityType === 'sprk_project') {
+            // Task 195 (#2352): the N:N above is an association; it confers nothing. File the project under the new
+            // matter — its regarding pair, its one filing root, which the BFF writes. A refusal is its own warning: the
+            // link stands, the filing did not happen.
+            try {
+              await fileProjectUnderMatter(
+                authenticatedFetch,
+                bffBaseUrl,
+                dataService,
+                context.association.recordId,
+                matterId
+              );
+            } catch (fileErr) {
+              const fileMessage = fileErr instanceof Error ? fileErr.message : String(fileErr);
+              result.warnings.push(
+                `Matter created and linked to "${context.association.recordName}", but that project could not be ` +
+                  `filed under this matter: ${fileMessage} — Its access does not follow the matter until it is filed.`
+              );
+            }
           }
         }
 
@@ -694,6 +728,8 @@ export const CreateMatterWizard: React.FC<ICreateMatterWizardProps> = ({
       navigationService,
       resolveSpeContainerId,
       handoffFiles,
+      initialAssociation,
+      lockAssociation,
     ]
   );
 

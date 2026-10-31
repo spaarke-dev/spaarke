@@ -58,6 +58,7 @@ export {
   routesChildWritesThroughBff,
   createChildRecordViaBff,
   updateChildRecordViaBff,
+  fileProjectUnderMatter,
   isBffChildCreateTable,
   isBffChildRefileTable,
   ChildRecordWriteError,
