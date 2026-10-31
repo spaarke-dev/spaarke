@@ -9,9 +9,9 @@
 
 | Field | Value |
 |---|---|
-| **Task** | No lane is running. 168, 171, 172 and 173 are DONE and ON MASTER (#2463 → `c8bb55d0cd`; docs fast-forwarded to it). |
+| **Task** | No lane is running. Docs = master `04c03ef814` (#2488, notes only). Dev BFF `9f4e3820b2` (uac-r2, 19:22:50Z 2026-10-30; contains everything of ours). Next is the owner's UAT check. |
 | **Status** | No owner question is open. ebilling #1911 is merged (`eaa0d44f7f`). Their next PR (104, 101) brings our two asks: the principal-change known limit in 105-override-server.md and the double RecordRefusal log; review it when it arrives. The main checkout `C:\code_files\spaarke` refuses fast-forwards because of another session's uncommitted `.claude/agent-memory/researcher/MEMORY.md`; leave it alone. |
-| **Next Action** | 1) Dev BFF is `9f4afe82ac` (R3 readback 14:40:39Z 2026-10-30). Run the 168/173 live proof per `notes/168-173-live-proof.md`: the owner does runs A (internal), B (external) and C (unticked) in the Console; the main session runs the read-only checks and fills section 6; then the task-170 latency check and the `BUD-` number. 2) Owner re-checks for 114, 158-163 and 166 (163's live role change is already done: verified 2026-10-30), then close them. 3) Review ebilling 097b (BillingFactLoader replaced-invoice exclusion: the id must be derived on the server; same firm and number only) and their next PR into master. 4) Remaining: 111 (row 4 waits for the external SPA dev deploy), 105 (v4 UAT), 090 wrap-up (held by the owner until UAT is done). |
+| **Next Action** | 1) Owner UAT: the 168/173 runs A/B/C (`notes/168-173-live-proof.md`; main session runs the read-only checks and fills section 6), one Create budget (`BUD-`), the task-170 latency read, the 🔄 re-checks (158-163, 166), 114 and 111 row 4 (external SPA on dev is master `96f1f6b675`, contains the wizard change: R3 2026-10-30). Then 105 v4 UAT rounds; 090 after UAT (owner hold). 2) ebilling: b1054ada6a finding sent (RefusalScopes flags lines the client default covered, D-39); e205c93419 OK; their next PR into master (097b+097c together, after the sprk_resubmissionof field-security change and 097e) needs our review; asked which PR is their '115'. 3) #2486 (field-mapping 017) ontology files reviewed OK (PR comment 6537746257). |
 
 ## Task 168 decisions: D-199 (owner, 2026-10-29)
 
