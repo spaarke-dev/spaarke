@@ -35,7 +35,7 @@
 | **Mode** | Final push, round-90 rules. Merge only when Router + "Client lint (type-aware ratchet)" are green; `--squash --match-head-commit <COMMIT sha>`, no `--delete-branch`, after `git merge-tree`. Deploy via R3 (owner's go given in R3's session). Task closes on merge + deploy + server-side gate. |
 | **Fix bar** | Most technically correct fix. Every defect fixed or filed. PUBLIC repo: no exploit mechanism in issues/PRs/commits (neutral wording; owner decides tracking of access defects). |
 | **Agents** | Opus executors/verifiers; Sonnet high for scoped re-checks. Model always stated. Never `taskkill /IM`. No `jq`: use `python -I`. Session cwd keep uppercase `C:/code_files/...`. |
-| **Next action** | (1) Wait for ontology's pass or findings on the 9 Signals, then re-gate once the ordinary-moves pass has converged (heartbeat moved=0 and reported steady); (2) task 195 via task-execute; (3) BU1 Q2–Q12 recommendations for the owner. |
+| **Next action** | (1) Task 195 via task-execute; (2) BU1 Q2–Q12 recommendations for the owner; (3) review the #2483 follow-up when field-mapping sends it (its change 1 goes to the owner through them). Done: ontology PASS on the 9 Signals. Ordinary moves converged: 212 runs to about 03:05Z on 10-31, 28 moved, the last at 20:25Z, 0 refused or failed. Since then 0 5xx, 0 [OWNERSHIP-REFUSED] and no new errors. #2486 (field-mapping 017) approved by UAC at ff2f76e39e after the F1 fix (chat grantor None); carries #2483/#2484/#2485 and my #2487 (stale membership row until the nightly cleanup). |
 
 ## In flight
 - Nothing running.
