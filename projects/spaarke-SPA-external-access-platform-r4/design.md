@@ -167,6 +167,14 @@ The prototype contract (`src/template/types.ts`) is adopted with these changes:
 | **Invoice files** (ebilling, owner 2026-10-21) | Invoice "Files" section over `GET /invoices/{id}/files` and `.../{fileId}/content`. A pending scan shows "Checking file…" with no Download (content answers 409 `file_scan_pending`). No upload, no versions. Drop the invoice-document upload and versions in the SPA. Ships back to back with ebilling's BFF change (BFF first), because the old invoice-document routes are retired together. |
 | **Email-missing text** (#2155) | `RegistrationPage.tsx` `emailMissing`: tell the customer's IT admin to set the Email on the user's Entra account, then sign in again. |
 | **Licensed user's first sign-in** (#2192) | Skip the profile form when the token email is a licensed user's (the gate learns it before the form); review the 60 s link-popup timeout. Needs UAC/auth review. |
+| **Grid settings remembered** (#2489, owner 2026-10-31) | The grids remember each user's column widths and sort order. First step: per browser, through optional outputs on the shared `DataGrid`, keyed by grid configuration id, with a "Reset columns" command. Per user across devices is a later option (server store + external endpoint, §10/§11). Coordinate with the dataset-grid framework owners. |
+| **Money columns in grids** (#2446, #2447) | Shared `DataGrid`: Money columns sort by value, not text, and Export writes the formatted values. The invoice grid shows two Money columns since R3 task 002. |
+| **Profile email refused at registration** (#2449) | The profile form shows an email that registration then refuses; align the two checks. |
+| **Messages refresh and new-message indicator** (#2452) | A refresh button and a "New message" indicator on Messages. |
+| **Message threads** (#2453) | Show messages as threads, as the model-driven app does. |
+| **Matter events: task type and assignee** (#2445, ontology D-199) | Show the task type and assignee on a matter's events; optional event deep link. |
+| **Teams mobile layout** (#2466) | The Teams tab loads on phones but is not adapted to the surface (R3 071). |
+| **Grant email to a workforce contact** (#2458, ISS-024) | Only if the owner moves it out of R3: the grant notifier must not email a home-linked workforce contact as an external person. Owner decision pending. |
 
 ## 8. ADR touchpoints
 
@@ -190,7 +198,7 @@ The prototype contract (`src/template/types.ts`) is adopted with these changes:
 5. **Record toolbar:** SPA-local or a shared component?
 6. **Icon map** (§6): adopt, and propose it as a repo standard?
 7. **"Submit invoice" in the record toolbar** (Matter, Project, Work Assignment): yes or no?
-8. **Grid columns** (R3 task 002) decided together with §5, since they share the allow-list?
+8. **Grid columns** (R3 task 002) decided together with §5, since they share the allow-list? Update 2026-10-31: R3 shipped the owner's columns (nine added, number and type columns 200px); only §5's new fields remain.
 
 ## 10. Draft success criteria
 
