@@ -637,4 +637,21 @@ public class SecureRootFamilyOwnerTests : IClassFixture<ProvisionProjectTestFixt
         pass.RootOwners.ProjectsWhosePairMatterHasNoLink.Should().BeNull();
         pass.Problems.Should().Contain(p => p.Contains("project filing census"));
     }
+
+    [Fact(DisplayName = "Task 195 must fire: a project whose pair type is missing or not in the catalog is counted with a problem line, never skipped silently")]
+    public async Task TheFilingCensus_CountsAPairWhoseTypeIsUnknown()
+    {
+        var matterType = RecordTypeRef(_fixture, "sprk_matter");
+        var matter = MatterInA();
+        Linked(ProjectFiledUnder(matter, matterType), matter);  // agrees: no count
+        ProjectFiledUnder(matter, Guid.NewGuid());              // a type the catalog does not have
+        var noType = ProjectFiledUnder(null, matterType);
+        World.Set("sprk_project", noType, "sprk_regardingrecordid", matter.ToString("D")); // an id with no type
+
+        var pass = await PassAsync();
+
+        pass.RootOwners.ProjectsWhosePairTypeIsUnknown.Should().Be(2);
+        pass.RootOwners.ProjectsWhosePairMatterHasNoLink.Should().Be(0);
+        pass.Problems.Should().Contain(p => p.Contains("project filing census found 2 project(s)"));
+    }
 }

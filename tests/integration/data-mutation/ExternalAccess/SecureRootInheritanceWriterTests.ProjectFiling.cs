@@ -44,7 +44,7 @@ public partial class SecureRootInheritanceWriterTests
 
     /// <summary>The route's PATCH. The re-file's own collaborators are strict mocks: a project never reaches them.</summary>
     private Task<IResult> FileThroughTheRoute(
-        Guid project, JsonElement body, SecureChildOwnershipAiToolTests.ScriptedUserClient user,
+        Guid project, JsonElement body, IDataverseUserClient user,
         IFieldMappingDataverseService? appOnly, Mock<IRecordOwnershipResolver>? ownership = null) =>
         ChildRecordEndpoints.RefileAsync(
             "sprk_project", project, body, user,
@@ -463,5 +463,151 @@ public partial class SecureRootInheritanceWriterTests
         await FollowParentsOf(project);
 
         _fixture.IsSecureOf(project).Should().BeTrue("a parentless record keeps what it holds as its own");
+    }
+
+    // ── Review fixes (F3, F4) ───────────────────────────────────────────────────────────────────────────────────────
+
+    /// <summary>The caller's client, answering RetrievePrincipalAccess on <paramref name="row"/> with
+    /// <paramref name="rights"/> (the scripted client has no switch for a caller without Write).</summary>
+    private sealed class RightsOn(IDataverseUserClient inner, Guid row, string rights) : IDataverseUserClient
+    {
+        public Task<DataverseUserResponse> GetAsync(string relativePath, CancellationToken cancellationToken) =>
+            relativePath.Contains("RetrievePrincipalAccess", StringComparison.Ordinal)
+            && relativePath.Contains(row.ToString("D"), StringComparison.OrdinalIgnoreCase)
+                ? Task.FromResult(DataverseUserResponse.Ok(200, JsonSerializer.SerializeToElement(new { AccessRights = rights })))
+                : inner.GetAsync(relativePath, cancellationToken);
+
+        public Task<DataverseUserResponse> PostAsync(string absoluteApiPath, string jsonBody, CancellationToken cancellationToken) =>
+            inner.PostAsync(absoluteApiPath, jsonBody, cancellationToken);
+
+        public Task<DataverseUserResponse> PostAsync(
+            string absoluteApiPath, string jsonBody, bool preferRepresentation, CancellationToken cancellationToken) =>
+            inner.PostAsync(absoluteApiPath, jsonBody, preferRepresentation, cancellationToken);
+
+        public Task<DataverseUserResponse> PatchAsync(string relativePath, string jsonBody, CancellationToken cancellationToken) =>
+            inner.PatchAsync(relativePath, jsonBody, cancellationToken);
+
+        public Task<DataverseUserResponse> DeleteAsync(string relativePath, CancellationToken cancellationToken) =>
+            inner.DeleteAsync(relativePath, cancellationToken);
+    }
+
+    /// <summary>F3: the chat tool's other columns are PATCHed as the caller before the pair; when the pair write then
+    /// conflicts, the answer says the other columns were saved and the filing was not (never "nothing was saved").</summary>
+    [Fact]
+    public async Task ProjectFiling_ChatUpdate_WhenThePairConflictsAfterTheOtherColumns_SaysTheOtherColumnsWereSaved()
+    {
+        var (_, from) = Matters();
+        var to = Guid.NewGuid();
+        _fixture.SeedMatter(to, isSecure: false);
+        var project = Project(from);
+        var user = Scripted();
+        var appOnly = AppUpdatesTheWorld(beforeConditionalWrite: () =>
+            World.Set("sprk_project", project, "versionnumber", 99L));
+
+        var result = await ChatUpdateWith("sprk_project", project, user, new()
+        {
+            ["sprk_name"] = "Renamed",
+            ["sprk_regardingrecordid"] = to.ToString("D"),
+            ["sprk_regardingrecordtype"] = new { relatedTable = "sprk_recordtype_ref", recordId = RecordTypeRef(_fixture, "sprk_matter") },
+        }, appOnly: appOnly.Object);
+
+        user.Patches.Should().ContainSingle("the name was written as the caller").Which.Body.Should().Contain("Renamed");
+        result.Success.Should().BeFalse();
+        result.ErrorCode.Should().Be(SecureRootInheritance.ReasonChangedConcurrently);
+        result.ErrorMessage.Should().Contain("other changes were saved").And.NotContain("Nothing was saved");
+        PairIdOf(project).Should().Be(from.ToString("D"));
+    }
+
+    /// <summary>F3: any other fault of the pair write after the other columns were saved says so too (not "failed
+    /// unexpectedly", not "nothing was saved").</summary>
+    [Fact]
+    public async Task ProjectFiling_ChatUpdate_WhenThePairWriteFaultsAfterTheOtherColumns_SaysTheOtherColumnsWereSaved()
+    {
+        var (_, from) = Matters();
+        var to = Guid.NewGuid();
+        _fixture.SeedMatter(to, isSecure: false);
+        var project = Project(from);
+        var user = Scripted();
+        var appOnly = AppUpdatesTheWorld(beforeConditionalWrite: () => throw new HttpRequestException("Test: 503"));
+
+        var result = await ChatUpdateWith("sprk_project", project, user, new()
+        {
+            ["sprk_name"] = "Renamed",
+            ["sprk_regardingrecordid"] = to.ToString("D"),
+            ["sprk_regardingrecordtype"] = new { relatedTable = "sprk_recordtype_ref", recordId = RecordTypeRef(_fixture, "sprk_matter") },
+        }, appOnly: appOnly.Object);
+
+        user.Patches.Should().ContainSingle();
+        result.Success.Should().BeFalse();
+        result.ErrorMessage.Should().Contain("other changes were saved").And.NotContain("NOT written");
+        PairIdOf(project).Should().Be(from.ToString("D"));
+    }
+
+    /// <summary>F4: the matter's flag cannot be read by the application (the gate read it; the core's own read fails):
+    /// refused as undetermined, never "not secure"; nothing written.</summary>
+    [Fact]
+    public async Task ProjectFiling_Route_WhenTheMattersFlagCannotBeRead_IsRefused_AndNothingIsWritten()
+    {
+        var (_, ordinary) = Matters();
+        var project = Project();
+        var appOnly = AppUpdatesTheWorld();
+        appOnly.Setup(s => s.RetrieveRecordFieldsAsync("sprk_matter", ordinary, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new HttpRequestException("Test: the matter cannot be read."));
+
+        var result = await FileThroughTheRoute(project, FilingBody(ordinary, RecordTypeRef(_fixture, "sprk_matter")), Scripted(),
+            appOnly.Object);
+
+        RouteStatus(result).Should().Be(StatusCodes.Status409Conflict, RouteDetail(result));
+        RouteReason(result).Should().Be(RecordOwnerRefusal.ParentUndetermined);
+        NoConditionalWrite(appOnly);
+        _writes.Should().BeEmpty();
+        PairIdOf(project).Should().BeNull();
+    }
+
+    /// <summary>F4: a caller with Append but not Write on the project is refused; nothing written.</summary>
+    [Fact]
+    public async Task ProjectFiling_Route_WithoutWriteOnTheProject_Is403_AndNothingIsWritten()
+    {
+        var (_, ordinary) = Matters();
+        var project = Project();
+        var appOnly = AppUpdatesTheWorld();
+
+        var result = await FileThroughTheRoute(project, FilingBody(ordinary, RecordTypeRef(_fixture, "sprk_matter")),
+            new RightsOn(Scripted(), project, "ReadAccess,AppendAccess,AppendToAccess"), appOnly.Object);
+
+        RouteStatus(result).Should().Be(StatusCodes.Status403Forbidden);
+        RouteReason(result).Should().Be(ChildRecordEndpoints.DeniedCode);
+        NoConditionalWrite(appOnly);
+        _writes.Should().BeEmpty();
+    }
+
+    /// <summary>F4: a record-type row that does not exist (Dataverse's 404 on the caller's read, which is also what a row
+    /// the caller's read cannot reach answers) or that the caller may not read (403) is the same 404 as a missing matter;
+    /// nothing written.</summary>
+    [Theory]
+    [InlineData("missing")]
+    [InlineData("unreadable")]
+    public async Task ProjectFiling_Route_ARecordTypeRowTheCallerCannotUse_IsTheSame404AsAMissingMatter(string how)
+    {
+        var (_, ordinary) = Matters();
+        var absent = Guid.NewGuid();
+        var project = Project();
+        var typeRef = RecordTypeRef(_fixture, "sprk_matter");
+        var user = Scripted();
+        user.Missing.Add(absent);
+        var missingMatter = await FileThroughTheRoute(project, FilingBody(absent, RecordTypeRef(_fixture, "sprk_matter")), user,
+            AppUpdatesTheWorld().Object);
+        if (how == "missing")
+            user.InvisibleRows.Add(typeRef);
+        if (how == "unreadable")
+            user.UnreadableRows.Add(typeRef);
+        var appOnly = AppUpdatesTheWorld();
+
+        var result = await FileThroughTheRoute(project, FilingBody(ordinary, typeRef), user, appOnly.Object);
+
+        RouteStatus(result).Should().Be(StatusCodes.Status404NotFound, RouteDetail(result));
+        (RouteReason(result), RouteDetail(result)).Should().Be((RouteReason(missingMatter), RouteDetail(missingMatter)));
+        NoConditionalWrite(appOnly);
+        _writes.Should().BeEmpty();
     }
 }

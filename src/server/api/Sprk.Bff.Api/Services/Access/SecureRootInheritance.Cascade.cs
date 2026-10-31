@@ -166,6 +166,11 @@ public sealed record FollowParentsRootOwners
     /// Null when the census could not be read this run (a problem line says why).</summary>
     public int? ProjectsWhosePairMatterHasNoLink { get; init; }
 
+    /// <summary>Task 195 (report only): projects with a regarding id whose record type is missing or not in the ADR-024
+    /// catalog, so the census cannot tell what they are filed under (a problem line names the count). Null when the census
+    /// could not be read this run.</summary>
+    public int? ProjectsWhosePairTypeIsUnknown { get; init; }
+
     /// <summary>Fix round (B-F2): the last root this run reached when a bound stopped it — the next run continues after it
     /// (and wraps round); null when the run reached every root.</summary>
     [System.Text.Json.Serialization.JsonIgnore]
@@ -1139,11 +1144,12 @@ public sealed partial class SecureRootInheritance
             .ConfigureAwait(false);
 
         // Task 195: how far the project filing (the pair) and the Project ↔ Matter N:N disagree. Report only.
-        var (linkNoPair, pairNoLink) = await ProjectFilingCensusAsync(listed, Problem, ct).ConfigureAwait(false);
+        var (linkNoPair, pairNoLink, unknownType) = await ProjectFilingCensusAsync(listed, Problem, ct).ConfigureAwait(false);
         rootOwners = rootOwners with
         {
             ProjectsWithMatterLinkButNoPair = linkNoPair,
             ProjectsWhosePairMatterHasNoLink = pairNoLink,
+            ProjectsWhosePairTypeIsUnknown = unknownType,
         };
 
         // Later rounds: what is filed under a project changed in this run, decided again now (its values just moved).
@@ -1825,7 +1831,7 @@ public sealed partial class SecureRootInheritance
     /// nothing and reads the N:N paged under the listing's own bound (<see cref="FiledListPageSize"/> ×
     /// <see cref="FiledListMaxPages"/>). Never throws (cancellation aside): what cannot be read is null, with a problem line.
     /// </summary>
-    private async Task<(int? LinkButNoPair, int? PairButNoLink)> ProjectFilingCensusAsync(
+    private async Task<(int? LinkButNoPair, int? PairButNoLink, int? UnknownType)> ProjectFilingCensusAsync(
         IReadOnlyList<ListedRecord> listed, Action<string> problem, CancellationToken ct)
     {
         HashSet<(Guid Project, Guid Matter)> links;
@@ -1861,7 +1867,7 @@ public sealed partial class SecureRootInheritance
             _logger.LogWarning(ex, "[ROOT-OWNER] The project filing census could not read {Table}; its counts are not reported this run.",
                 ProjectMatterLinkEntity);
             problem($"the project filing census could not read {ProjectMatterLinkEntity}");
-            return (null, null);
+            return (null, null, null);
         }
 
         var projects = listed.Where(r => r.Table == Project).ToList();
@@ -1870,10 +1876,16 @@ public sealed partial class SecureRootInheritance
             linkedProjects.Contains(p.Id) && (string.IsNullOrWhiteSpace(p.PairId) || p.PairType is null));
 
         int? pairButNoLink = 0;
+        int? unknownType = 0;
         foreach (var p in projects)
         {
-            if (string.IsNullOrWhiteSpace(p.PairId) || p.PairType is not { } typeRef)
+            if (string.IsNullOrWhiteSpace(p.PairId))
                 continue;
+            if (p.PairType is not { } typeRef)
+            {
+                unknownType++; // an id with no record type: never skipped silently
+                continue;
+            }
 
             string? pairTable;
             try
@@ -1885,7 +1897,14 @@ public sealed partial class SecureRootInheritance
                 _logger.LogWarning(ex, "[ROOT-OWNER] The project filing census could not read the regarding type {TypeRef}.", typeRef);
                 problem("the project filing census could not read a project's regarding type");
                 pairButNoLink = null;
+                unknownType = null;
                 break;
+            }
+
+            if (pairTable is null)
+            {
+                unknownType++; // a record type the catalog does not have: never skipped silently
+                continue;
             }
 
             if (pairTable != Matter)
@@ -1894,13 +1913,19 @@ public sealed partial class SecureRootInheritance
                 pairButNoLink++;
         }
 
+        if (unknownType > 0)
+        {
+            problem($"the project filing census found {unknownType} project(s) whose regarding record type is missing or not in " +
+                    "the record-type catalog; what they are filed under cannot be told");
+        }
+
         if (linkButNoPair > 0 || pairButNoLink > 0)
         {
             _logger.LogInformation("[ROOT-OWNER] Project filing census: {LinkButNoPair} project(s) linked to a matter with no " +
                 "filing pair; {PairButNoLink} project(s) filed under a matter with no link row.", linkButNoPair, pairButNoLink);
         }
 
-        return (linkButNoPair, pairButNoLink);
+        return (linkButNoPair, pairButNoLink, unknownType);
 
         static Guid? GuidOf(Entity e, string column) => e.Attributes.TryGetValue(column, out var value)
             ? value switch

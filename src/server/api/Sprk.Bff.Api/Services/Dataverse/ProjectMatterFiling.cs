@@ -40,7 +40,9 @@ namespace Sprk.Bff.Api.Services.Dataverse;
 /// a root whose flag is not exactly false, the old parent's inherited shares end in the provenance pass, and the project
 /// keeps its own container (one secure root above its records, so nothing is ambiguous).</item>
 /// </list>
-/// A flag that cannot be read is never "not secure": refused with <see cref="RecordOwnerRefusal.ParentUndetermined"/>.</para>
+/// A flag that cannot be read is never "not secure": refused with <see cref="RecordOwnerRefusal.ParentUndetermined"/>.
+/// Known limit (#1506): a matter made secure between the flag read and the pair write leaves the same state as a matter made
+/// secure after its project was filed; the storage resolver refuses the ambiguous rows (fail closed) until #1506.</para>
 /// <para><b>Component justification (CLAUDE.md §11).</b> Existing — the chat update tool's project-pair sequence
 /// (<c>OwnedChildWrite.PatchWithBffManagedPairAsync</c>, now removed) and <see cref="OwnedChildWrite.RefileAsync"/>, which
 /// treats a root as "not a re-file". Extension — <c>RefileAsync</c> is the child re-file (owner re-derived through the
@@ -122,6 +124,10 @@ internal static class ProjectMatterFiling
 
         /// <summary>The pair read back after the write equals the pair written.</summary>
         public bool ReadBackMatches { get; init; }
+
+        /// <summary>A refusal AFTER the caller's own PATCH of the other columns (the chat tool): those columns were saved and
+        /// the filing was not; <see cref="Detail"/> says so.</summary>
+        public bool OtherColumnsSaved { get; init; }
 
         public bool Wrote => Kind is OutcomeKind.Filed or OutcomeKind.Unchanged;
     }
@@ -272,7 +278,10 @@ internal static class ProjectMatterFiling
                     || afterPatch.Type != before.Type)
                 {
                     return new Outcome(OutcomeKind.Conflict,
-                        "What this project is filed under changed while it was being saved; its other changes were saved. Reload it and try again.");
+                        "What this project is filed under changed while it was being saved; its other changes were saved. Reload it and try again.")
+                    {
+                        OtherColumnsSaved = true,
+                    };
                 }
 
                 version = patchedVersion;
@@ -282,6 +291,10 @@ internal static class ProjectMatterFiling
         // ── 9. The application writes the pair, only if the row is still at the version read ───────────────────────
         if (!same)
         {
+            // After the caller's own PATCH, every refusal from here says that the other columns were saved.
+            var otherSaved = restBody is not null;
+            const string otherSavedDetail =
+                "Its other changes were saved; what it is filed under was not. Reload it and try again.";
             var pairFields = PairFields(item.JsonBody);
             try
             {
@@ -289,14 +302,33 @@ internal static class ProjectMatterFiling
             }
             catch (System.Data.DBConcurrencyException)
             {
-                logger.LogWarning("[PROJECT-FILING] {Table} {Id} changed after it was read (version {Version}); nothing written ({Code}).",
+                logger.LogWarning("[PROJECT-FILING] {Table} {Id} changed after it was read (version {Version}); the pair was not written ({Code}).",
                     Table, projectId, version, ChangedConcurrentlyCode);
-                return new Outcome(OutcomeKind.Conflict,
-                    "This project was changed by someone else while it was being filed. Nothing was saved. Reload it and try again.");
+                return new Outcome(OutcomeKind.Conflict, otherSaved
+                    ? "This project was changed by someone else while it was being filed. " + otherSavedDetail
+                    : "This project was changed by someone else while it was being filed. Nothing was saved. Reload it and try again.")
+                {
+                    OtherColumnsSaved = otherSaved,
+                };
             }
             catch (KeyNotFoundException)
             {
-                return new Outcome(OutcomeKind.NotFound, "The project was not found.");
+                return new Outcome(OutcomeKind.NotFound, otherSaved
+                    ? "The project could not be found when it was being filed. " + otherSavedDetail
+                    : "The project was not found.")
+                {
+                    OtherColumnsSaved = otherSaved,
+                };
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+            {
+                logger.LogWarning(ex, "[PROJECT-FILING] {Table} {Id}: the pair could not be written.", Table, projectId);
+                return new Outcome(OutcomeKind.Unavailable, otherSaved
+                    ? "What this project is filed under could not be saved. " + otherSavedDetail
+                    : "What this project is filed under could not be saved, so nothing was saved.")
+                {
+                    OtherColumnsSaved = otherSaved,
+                };
             }
         }
 

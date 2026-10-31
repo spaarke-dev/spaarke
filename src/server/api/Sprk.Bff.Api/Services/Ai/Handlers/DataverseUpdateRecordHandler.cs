@@ -477,6 +477,9 @@ public sealed partial class DataverseUpdateRecordHandler : IToolHandler
                     Error(tool, outcome.Detail!, ProjectMatterFiling.ChangedConcurrentlyCode, startedAt),
                 { Kind: ProjectMatterFiling.OutcomeKind.Invalid } =>
                     Error(tool, $"The update was NOT written: {outcome.Detail}", ToolErrorCodes.ValidationFailed, startedAt),
+                // F3: after the caller's own PATCH of the other columns, the detail says those were saved.
+                { OtherColumnsSaved: true } =>
+                    Error(tool, outcome.Detail!, DataverseUserClientErrorCodes.ServiceError, startedAt),
                 _ => Error(tool, $"The update was NOT written: {outcome.Detail}", DataverseUserClientErrorCodes.ServiceError, startedAt),
             };
         }
