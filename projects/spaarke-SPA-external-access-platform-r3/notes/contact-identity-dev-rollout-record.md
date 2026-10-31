@@ -107,3 +107,4 @@
 
 - Owner go in uac-r2's session; R3 OK for this SHA. It contains #2450, e0df773395 and field-mapping #2486, whose analysistool re-seed field-mapping runs in its own session. Deployed at 19:52:25Z. The 4 critical files match by SHA-256 and healthz passed. Settings unchanged: both write switches are still on. uac-r2's gate splits out the external routes.
 - The dev SPA is the same SHA since 19:12:41Z (R3, owner go).
+- uac-r2 gate, 19:52:25Z → ~20:12Z: PASS. 23 requests, 0 failed, 0 5xx, 0 [OWNERSHIP-REFUSED]; the reconciler wrote nothing. **External routes again had no traffic.** Only the old warnings remain (SECURE-CENSUS, #2163). uac-r2 has no further deploy planned until its task 195 merges; it will send the SHA first.
