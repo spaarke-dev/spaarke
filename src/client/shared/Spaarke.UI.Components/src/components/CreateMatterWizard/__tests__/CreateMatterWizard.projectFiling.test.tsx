@@ -9,9 +9,12 @@
  *   - a refused filing is a visible warning carrying the server's words — never swallowed; the link stays;
  *   - a failed N:N write files nothing (its own warning, as before);
  *   - an invoice association files no project;
- *   - a launch-context association (the subgrid "New Matter" command) reaches the Associate-To step, locked.
+ *   - a launch-context association (the subgrid "New Matter" command) reaches the Associate-To step, locked;
+ *   - the project's pair is read first: a project already filed under another matter stays there unless the user
+ *     chooses "Move" (the link is still written); an unreadable pair files nothing and warns; the result says which.
  */
 import * as React from 'react';
+import { act, fireEvent, screen } from '@testing-library/react';
 import { renderWithProviders } from '../../../__mocks__/pcfMocks';
 import type { ICreateRecordWizardConfig, IFinishContext, IFollowOnState } from '../../CreateRecordWizard';
 import type { IDataService, INavigationService } from '../../../types/serviceInterfaces';
@@ -20,6 +23,8 @@ import { CreateMatterWizard } from '../CreateMatterWizard';
 import { throwingAuthenticatedFetch } from '../../../__tests__/helpers/authenticatedFetchDouble';
 
 const mockShell: { config?: ICreateRecordWizardConfig } = {};
+// The matter's details form is not under test here; the filing notice/choice rendered above it is.
+jest.mock('../CreateRecordStep', () => ({ CreateRecordStep: () => null }));
 jest.mock('../../CreateRecordWizard', () => ({
   CreateRecordWizard: (props: { config: ICreateRecordWizardConfig }) => {
     mockShell.config = props.config;
@@ -31,6 +36,7 @@ const MATTER_ID = 'e1950000-0000-4000-8000-000000000001';
 const PROJECT_ID = 'f1950000-0000-4000-8000-000000000002';
 const MATTER_TYPE_ID = 'e8547bb4-8600-f111-8407-7c1e520aa4df';
 const BFF = 'https://bff.example.test';
+const OTHER_MATTER_ID = 'a1950000-0000-4000-8000-000000000003';
 
 jest.mock('../matterService', () => {
   const actual = jest.requireActual('../matterService');
@@ -120,7 +126,28 @@ describe('CreateMatterWizard — the linked project is filed under the new matte
     nnStatus = 204;
     (global as unknown as { fetch: unknown }).fetch = dataverseFetch();
     spies = (['info', 'error', 'warn'] as const).map(m => jest.spyOn(console, m).mockImplementation(() => {}));
+    // Default: the project's pair is empty (not filed under anything).
+    (dataService.retrieveRecord as jest.Mock).mockReset().mockResolvedValue({});
   });
+
+  /** The project's pair names another matter. */
+  function projectFiledElsewhere() {
+    (dataService.retrieveRecord as jest.Mock).mockImplementation(async (entity: string) => {
+      calls.push(`read ${entity}`);
+      return entity === 'sprk_project'
+        ? {
+            sprk_regardingrecordid: OTHER_MATTER_ID,
+            sprk_regardingrecordname: 'MAT-OLD',
+            _sprk_regardingrecordtype_value: MATTER_TYPE_ID,
+          }
+        : {};
+    });
+  }
+
+  function bodyText(success: { body?: React.ReactNode }): string {
+    const { container } = renderWithProviders(<>{success.body}</>);
+    return container.textContent ?? '';
+  }
 
   afterEach(() => {
     spies.forEach(s => s.mockRestore());
@@ -139,6 +166,56 @@ describe('CreateMatterWizard — the linked project is filed under the new matte
     });
     expect(success.warnings ?? []).toEqual([]);
     expect(dataService.updateRecord).not.toHaveBeenCalled();
+    expect(bodyText(success)).toContain('"PRJ-1" is linked to this matter and filed under it.');
+  });
+
+  it('a project filed under another matter stays there by default: link written, no filing call, result says so', async () => {
+    projectFiledElsewhere();
+
+    const success = await render(bffFetch(noContent)).onFinish(contextWith(project));
+
+    expect(calls.filter(c => c.startsWith('dataverse '))).toHaveLength(1);
+    expect(calls.filter(c => c.startsWith('bff '))).toEqual([]);
+    expect(success.warnings ?? []).toEqual([]);
+    expect(bodyText(success)).toContain('"PRJ-1" is linked to this matter and stays filed under MAT-OLD.');
+  });
+
+  it('a project filed under another matter is moved when the user chooses "Move" before Finish', async () => {
+    projectFiledElsewhere();
+    const navigationService = { openRecord: jest.fn() } as unknown as INavigationService;
+    render(bffFetch(noContent), { navigationService });
+
+    await act(async () => {
+      mockShell.config!.associateToStep!.onAssociationChange!(project);
+    });
+    renderWithProviders(<>{mockShell.config!.infoStep.renderContent([])}</>);
+    expect(screen.getByText(/is filed under MAT-OLD\. Move it to the new matter\?/)).toBeTruthy();
+    expect((screen.getByLabelText('Keep it filed under MAT-OLD') as HTMLInputElement).checked).toBe(true);
+    await act(async () => {
+      fireEvent.click(screen.getByLabelText('Move it to the new matter'));
+    });
+
+    const success = await mockShell.config!.onFinish(contextWith(project));
+
+    const bff = calls.filter(c => c.startsWith('bff '));
+    expect(bff).toHaveLength(1);
+    expect(bff[0]).toMatch(new RegExp(`^bff PATCH /api/v1/child-records/sprk_project/${PROJECT_ID} `));
+    expect(JSON.parse(bff[0].slice(bff[0].indexOf('{'))).sprk_regardingrecordid).toBe(MATTER_ID);
+    expect(success.warnings ?? []).toEqual([]);
+    expect(bodyText(success)).toContain('"PRJ-1" was moved from MAT-OLD to this matter');
+  });
+
+  it('an unreadable pair files nothing and warns; the link is still written', async () => {
+    (dataService.retrieveRecord as jest.Mock).mockRejectedValue(new Error('read denied'));
+
+    const success = await render(bffFetch(noContent)).onFinish(contextWith(project));
+
+    expect(calls.filter(c => c.startsWith('dataverse '))).toHaveLength(1);
+    expect(calls.filter(c => c.startsWith('bff '))).toEqual([]);
+    const warnings = (success.warnings ?? []).join(' ');
+    expect(warnings).toContain('where that project is filed could not be read (read denied)');
+    expect(warnings).toContain('so it was not filed under this matter');
+    expect(success.title).toBe('Matter created with warnings');
   });
 
   it("a refused filing is a visible warning with the server's words; the link stays", async () => {

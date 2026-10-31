@@ -55,6 +55,7 @@ import { resolveCurrentUserAsContactAssignee } from '../../services/userLookup';
 import { completeOrClose } from '../../services/surfaceHandoff/readHandoff';
 import { cleanGuid } from '../../utils/guid';
 import { getXrm } from '../../utils/xrmContext';
+import { ProjectFilingChoice, readProjectFiling, type ProjectFiling } from './projectFilingChoice';
 
 // ---------------------------------------------------------------------------
 // Dataverse client URL helper
@@ -384,6 +385,48 @@ export const CreateMatterWizard: React.FC<ICreateMatterWizardProps> = ({
     [dataService]
   );
 
+  // -- Task 195 (#2352): where a picked project is filed, and whether the user moves it --
+  // Read once per project (the same answer is shown above the matter's details and used at Finish). A project already
+  // filed under another matter is moved only when the user chooses "Move" (default: keep).
+  const filingReadsRef = React.useRef(new Map<string, Promise<ProjectFiling>>());
+  const getProjectFiling = React.useCallback(
+    (projectId: string): Promise<ProjectFiling> => {
+      const id = cleanGuid(projectId);
+      let read = filingReadsRef.current.get(id);
+      if (!read) {
+        read = readProjectFiling(dataService, id);
+        filingReadsRef.current.set(id, read);
+      }
+      return read;
+    },
+    [dataService]
+  );
+  const [filingView, setFilingView] = React.useState<{
+    projectId: string;
+    projectName: string;
+    filing?: ProjectFiling;
+  } | null>(null);
+  const moveProjectRef = React.useRef<Record<string, boolean>>({});
+  const [moveProject, setMoveProject] = React.useState<Record<string, boolean>>({});
+  const handleMoveChange = React.useCallback((projectId: string, move: boolean) => {
+    moveProjectRef.current = { ...moveProjectRef.current, [projectId]: move };
+    setMoveProject(moveProjectRef.current);
+  }, []);
+  const handleAssociationChange = React.useCallback(
+    (association: AssociationResult | null) => {
+      if (association?.entityType !== 'sprk_project' || !association.recordId) {
+        setFilingView(null);
+        return;
+      }
+      const projectId = cleanGuid(association.recordId);
+      setFilingView({ projectId, projectName: association.recordName });
+      void getProjectFiling(projectId).then(filing =>
+        setFilingView(view => (view && view.projectId === projectId ? { ...view, filing } : view))
+      );
+    },
+    [getProjectFiling]
+  );
+
   // -- Wizard config --
   const config: ICreateRecordWizardConfig = React.useMemo(
     () => ({
@@ -412,6 +455,7 @@ export const CreateMatterWizard: React.FC<ICreateMatterWizardProps> = ({
               navigationService,
               initialAssociation,
               lockAssociation,
+              onAssociationChange: handleAssociationChange,
             },
           }
         : {}),
@@ -421,17 +465,27 @@ export const CreateMatterWizard: React.FC<ICreateMatterWizardProps> = ({
         label: 'Enter Info',
         canAdvance: () => step2Valid,
         renderContent: wizardFiles => (
-          <CreateRecordStep
-            dataService={dataService}
-            uploadedFileNames={wizardFiles.map(f => f.name)}
-            uploadedFiles={wizardFiles}
-            onValidChange={setStep2Valid}
-            onSubmit={values => setStep2FormValues(values)}
-            initialFormValues={step2FormValues}
-            authenticatedFetch={authenticatedFetch}
-            bffBaseUrl={bffBaseUrl}
-            navigationService={navigationService}
-          />
+          <>
+            {filingView && (
+              <ProjectFilingChoice
+                projectName={filingView.projectName}
+                filing={filingView.filing}
+                move={moveProject[filingView.projectId] === true}
+                onMoveChange={move => handleMoveChange(filingView.projectId, move)}
+              />
+            )}
+            <CreateRecordStep
+              dataService={dataService}
+              uploadedFileNames={wizardFiles.map(f => f.name)}
+              uploadedFiles={wizardFiles}
+              onValidChange={setStep2Valid}
+              onSubmit={values => setStep2FormValues(values)}
+              initialFormValues={step2FormValues}
+              authenticatedFetch={authenticatedFetch}
+              bffBaseUrl={bffBaseUrl}
+              navigationService={navigationService}
+            />
+          </>
         ),
       },
 
@@ -632,6 +686,9 @@ export const CreateMatterWizard: React.FC<ICreateMatterWizardProps> = ({
           }
         }
 
+        // Task 195: what happened to a linked project's filing, stated on the result screen.
+        let filingNote: string | undefined;
+
         // -- Wire N:N association (sprk_Project_Matter_nn) --
         // If the user selected an association in step 1, create the link now.
         // This is a non-blocking operation -- failure produces a warning, not an error.
@@ -650,23 +707,38 @@ export const CreateMatterWizard: React.FC<ICreateMatterWizardProps> = ({
                 'You can associate them manually from the matter record.'
             );
           } else if (context.association.entityType === 'sprk_project') {
-            // Task 195 (#2352): the N:N above is an association; it confers nothing. File the project under the new
-            // matter — its regarding pair, its one filing root, which the BFF writes. A refusal is its own warning: the
-            // link stands, the filing did not happen.
-            try {
-              await fileProjectUnderMatter(
-                authenticatedFetch,
-                bffBaseUrl,
-                dataService,
-                context.association.recordId,
-                matterId
-              );
-            } catch (fileErr) {
-              const fileMessage = fileErr instanceof Error ? fileErr.message : String(fileErr);
+            // Task 195 (#2352): the N:N above is an association; it confers nothing. The project's filing root is its
+            // regarding pair, which the BFF writes. Read where it is filed first (as the user):
+            //   - not filed: file it under the new matter;
+            //   - filed under another record: move it only when the user chose "Move" (default: keep, the link stays);
+            //   - unreadable: do not file (never a blind re-file); a visible warning.
+            // A refused filing is its own warning: the link stands, the filing did not happen.
+            const projectName = context.association.recordName;
+            const projectId = cleanGuid(context.association.recordId);
+            const filing = await getProjectFiling(projectId);
+            const moving = filing.kind === 'filed' && moveProjectRef.current[projectId] === true;
+            if (filing.kind === 'unreadable') {
               result.warnings.push(
-                `Matter created and linked to "${context.association.recordName}", but that project could not be ` +
-                  `filed under this matter: ${fileMessage} — Its access does not follow the matter until it is filed.`
+                `Matter created and linked to "${projectName}", but where that project is filed could not be read ` +
+                  `(${filing.message}), so it was not filed under this matter.`
               );
+            } else if (filing.kind === 'filed' && !moving) {
+              filingNote = `"${projectName}" is linked to this matter and stays filed under ${filing.label}.`;
+            } else {
+              try {
+                await fileProjectUnderMatter(authenticatedFetch, bffBaseUrl, dataService, projectId, matterId);
+                filingNote =
+                  filing.kind === 'filed'
+                    ? `"${projectName}" was moved from ${filing.label} to this matter; its owning team and the ` +
+                      'records under it follow the matter.'
+                    : `"${projectName}" is linked to this matter and filed under it.`;
+              } catch (fileErr) {
+                const fileMessage = fileErr instanceof Error ? fileErr.message : String(fileErr);
+                result.warnings.push(
+                  `Matter created and linked to "${projectName}", but that project could not be ` +
+                    `filed under this matter: ${fileMessage} — Its access does not follow the matter until it is filed.`
+                );
+              }
             }
           }
         }
@@ -690,13 +762,20 @@ export const CreateMatterWizard: React.FC<ICreateMatterWizardProps> = ({
           icon: <CheckmarkCircleFilled fontSize={64} style={{ color: tokens.colorPaletteGreenForeground1 }} />,
           title: hasWarnings ? 'Matter created with warnings' : 'Matter created!',
           body: (
-            <Text size={300} style={{ color: tokens.colorNeutralForeground2 }}>
-              <span style={{ color: tokens.colorBrandForeground1, fontWeight: 600 }}>&ldquo;{matterName}&rdquo;</span>{' '}
-              has been created
-              {hasWarnings
-                ? ', though some follow-on actions could not complete. See details below.'
-                : ' and is ready to use.'}
-            </Text>
+            <>
+              <Text size={300} style={{ color: tokens.colorNeutralForeground2 }}>
+                <span style={{ color: tokens.colorBrandForeground1, fontWeight: 600 }}>&ldquo;{matterName}&rdquo;</span>{' '}
+                has been created
+                {hasWarnings
+                  ? ', though some follow-on actions could not complete. See details below.'
+                  : ' and is ready to use.'}
+              </Text>
+              {filingNote && (
+                <Text block size={300} style={{ color: tokens.colorNeutralForeground2 }}>
+                  {filingNote}
+                </Text>
+              )}
+            </>
           ),
           actions: (
             <>
@@ -730,6 +809,11 @@ export const CreateMatterWizard: React.FC<ICreateMatterWizardProps> = ({
       handoffFiles,
       initialAssociation,
       lockAssociation,
+      handleAssociationChange,
+      filingView,
+      moveProject,
+      handleMoveChange,
+      getProjectFiling,
     ]
   );
 
