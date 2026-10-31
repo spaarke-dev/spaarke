@@ -10,7 +10,7 @@ Legend: Tier S = sonnet, O = opus · Effort h = high · status tokens `[open]` `
 | ID | Title | Phase | Status | Deps | Tier/Eff | Rigor | Parallel |
 |----|-------|-------|--------|------|----------|-------|----------|
 | 001 | ADR-028 amendment for R3 (A2, A3 :124, A1 :55) | P0 | ✅ [done] | none | O/h | FULL | — (.claude/, main session; owner approval) |
-| 002 | Grid columns per owner list (FR-09) | P0 | 🔄 [wip] step 1 live on dev 2026-10-29; step 2 (BFF allow-list PR #2450, deployed in 9f4afe82ac 2026-10-30) + the 9 grid columns applied on dev 2026-10-30 ~15:45Z; waiting for the owner's check of the six tabs | none (owner list) | S/h | STANDARD | Wave 1 when the list arrives |
+| 002 | Grid columns per owner list (FR-09) | P0 | 🔄 [wip] step 1 live on dev 2026-10-29; step 2 (BFF allow-list PR #2450, deployed in 9f4afe82ac 2026-10-30) + the 9 grid columns applied on dev 2026-10-30 16:35Z; number and type columns 200px 2026-10-31 14:13Z; waiting for the owner's check of the six tabs | none (owner list) | S/h | STANDARD | Wave 1 when the list arrives |
 | 003 | Spike: Entra B2B self-service sign-up vs custom join (FR-12) | P0 | ✅ [done] | none | O/h | STANDARD | Wave 1 |
 | 010 | Ciam audience forms + default-scheme CIAM guard (FR-22, FR-23) | P1 | ✅ [done] | none | O/h | FULL | Wave 1 |
 | 011 | Modules by user type + partner service-request switch (FR-19, FR-06) | P1 | ✅ [done] | 001 | O/h | FULL | Wave 2 |

@@ -850,3 +850,12 @@ When the home token has no `email` claim, the form's prefill falls back to the u
 | **What** | The Teams tab loads in Teams mobile, but its layout is not adapted to the phone surface. |
 | **Decision** | Owner: not for this release; it loads. |
 | **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2466 |
+
+### ISS-026: Grids do not remember a user's column widths or sort order (deferred to R4)
+
+| Field | Value |
+|---|---|
+| **Found** | 2026-10-31, task 002 (owner) |
+| **What** | Column widths and sort order reset to the grid configuration on every open. The shared `DataGrid` has no resize callback and keeps sort locally, so nothing is saved. |
+| **Decision** | R4. It needs a change to the shared `DataGrid`, which other surfaces also use. First step: per browser; per user across devices later. |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2489 |
