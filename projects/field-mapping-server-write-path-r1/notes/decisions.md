@@ -512,3 +512,19 @@ missing to add. Owners and refusals are unchanged, and the service needs no chan
 - **ebilling-r1 on PR #2486:** no findings. The chat-side invoice-family not-found surfacing as `AccessDenied` with the uniform text is right; it matches correction (b). `CheckInvoiceFamilyAsync` and the refile half are unchanged.
 - **UAC-r2 on PR #2486:** one F1 finding. Chat-created roots began sending external invitations (grantor = the caller), where master passed a null grantor. Fixed on `task/fm-017-r3` by restoring master's behaviour. Whether chat should invite is a separate product decision for the owner.
 - **UAC-r2 on `sprk_userentityassociation`:** a known limit, not access-bearing. The only reader that affects access is `ParticipantCorrelationRung`, which reads contacts only. A stale owner row from the #2483 window lasts until the nightly reconciliation; UAC-r2 filed the housekeeping on their side.
+
+### 2026-10-31 — UAC-r2 task 195 merged (d0c1c5dc3c, #2496): what task 040 builds on
+
+- **What changed.** A project's regarding pair (`sprk_regardingrecordid` + `sprk_regardingrecordtype`) is now its one filing root, and only the BFF writes it.
+  - **The writer:** one core, `Services/Dataverse/ProjectMatterFiling.cs`.
+  - **Its callers:** `PATCH /api/v1/child-records/sprk_project/{id}` and the chat update tool.
+  - **Unchanged:** W7's Matter → Project edge (`RecordFamilyEdges.cs:231-233`).
+- **The route's body.** It accepts exactly this, and nothing else: `{"sprk_regardingrecordid":"<matter>","sprk_regardingrecordtype@odata.bind":"/sprk_recordtype_refs(<matter type>)"}`.
+- **Moves.** A project already filed under another record answers 409 `project_filing.already_filed` and nothing is written, unless the call passes `?move=true`. The chat tool always passes `move`.
+- **Secure matters.** Filing under a secure matter is refused with 409 `project_filing.secure_matter_unsupported` until #1506 (task 178) is fixed. Moving a project from a secure matter to an ordinary one is allowed, and the project stays secure.
+- **Census.** The root-owner report gains three counts: `projectsWithMatterLinkButNoPair`, `projectsWhosePairMatterHasNoLink` and `projectsWhosePairTypeIsUnknown`.
+- **Owner decisions** (as UAC-r2 reports them):
+  - a project can be re-filed to another matter;
+  - matters are added to a project's list only through the wizard;
+  - the backfill is accepted.
+- **Not live yet.** The dev deploy, the ribbon import and the backfill all wait for the owner's go in UAC-r2's session. UAC-r2 will send the deploy time. Task 076's "projects pair-filed" check depends on that backfill.
