@@ -135,3 +135,20 @@ CLAUDE.md fact 1 used to read "on the MDA, Dataverse enforces natively and we wr
     - Until task 195 (#2352) writes the project pair, every project's pair is empty, so a person-owned project counts as unfiled. Projects are NOT excluded from that rule.
     - Why: the target is the default team of the unit the project already sits in, so the move changes no business-unit visibility, and it removes person ownership now, as the owner asked. When task 195 backfills the pairs, a project filed under a matter in another unit moves on to that unit's team through the same pass.
     - Dev on 2026-10-30: 6 person-owned projects (1 in BU1, 5 in the root unit). All of them stay in their current unit.
+
+## 2026-10-31: task 195, owner decisions on the design note (fix/uac-r2-195-project-filing-root, notes/task-195-project-filing-root.md)
+
+1. **A project can be moved to another matter** ("Allow moving to another matter"), so a second matter is not refused.
+   - There is one server step. It files a project under a matter and re-files it to another matter, writing the regarding pair app-only with If-Match and read-back. The client never writes the pair.
+   - A move is a re-file and follows the existing guards:
+     - nothing is ever released from isolation;
+     - filing under a secure matter secures the project;
+     - leaving a secure matter never un-secures it;
+     - the owner and the documents' expected container follow through the root-owner and ordinary-moves passes.
+   - The pair still names one root at a time.
+2. **Adding a matter to a project's matter list goes through the wizard only** ("we should move the add a matter to project's matter list to use the wizard so there are not alternative paths; we want consistent 'Create' paths and not e.g. using OOB quick create or form").
+   - Scope: replace the model-driven app's out-of-the-box "Add Existing" / quick-create path on the Project ↔ Matter subgrid with the wizard, which calls the server step. There must be no other way to add the link.
+3. **The dev backfill is accepted, including all 3 unit moves:**
+   - PRJ-000034 and PRJ-000038 move root → BU1;
+   - Project 6 moves BU1 → root, following its matter LITG-153116, which is person-owned in the root unit.
+   - It is applied after the feature is deployed, report first.
