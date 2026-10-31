@@ -420,3 +420,9 @@ Task 168, owner questions Q1 and Q2 (asked 2026-10-28, explained in detail 2026-
 - **Q2, fallback (owner: yes).** When the email can't be sent as the assigning user, it is sent from the system mailbox. The fallback covers the same recipients only: it never emails someone the Q1 gate refused.
 - **Implementation:** the task 168 fix round, `task/168-assign-task-notify` (#2418); plan in `current-task.md`.
 - **Amendment (owner, 2026-10-29): the sender for an external assignee.** Email to an external contact always comes from the system mailbox (`Communication:DefaultMailbox`), never from the assigning user's mailbox. Only the body names the assigner, as "Assigned by {display name}". This matches the portal-access email (`GrantAccessNotifier` → `SendPortalNotificationEmailAsync`) and keeps internal addresses out of external inboxes. An internal assignee is unchanged: the assigner's own mailbox, with the system mailbox as the fallback. Implemented as a 168 follow-up.
+
+## D-200 — A repeat of a blocked-submission decision by a different person answers 200 "already decided" (owner, 2026-10-29)
+
+- **Context:** ebilling 105 (`SubmissionOverrideService.RecloseAsync`). When an override or return was recorded but some Signal closes did not finish, a repeat finishes them in the original decider's name. A repeat by someone without Write on the Signal subjects cannot finish them.
+- **Decision (owner: agreed):** that repeat answers **200 `alreadyDecided`**, not 403 or 503. The decision stands, so a 403 would misreport it; the denial is permanent for that caller, so a 503 would invite repeats that never succeed. The open Signals stay open until the original decider repeats. A read fault during the repeat still answers 503 (F2). Recorded as a known limit in ebilling's `105-override-server.md` §9.
+- **Also agreed:** #2455, the adjustment and override services take the invoice's single core record (`SingleCoreOf`) and refuse zero or several before any write.
