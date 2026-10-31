@@ -741,9 +741,10 @@ VisualHost opens the page via `navigateTo({pageType:'webresource'})` with a form
    | Matter → KPI Assessments | `sprk_kpiassessment` | `sprk_matter` | `_sprk_matter_value` | `sprk_matter` |
    | Matter → Report Cards | `sprk_reportcard` | `sprk_regardingmatter` | `_sprk_regardingmatter_value` | `sprk_regardingmatter` |
    | Matter → Invoices | `sprk_invoice` | `sprk_matter` | `_sprk_matter_value` | `sprk_matter` |
-   | Invoice → Invoice Line Items | `sprk_invoicelineitem` | `sprk_invoice` | `_sprk_invoice_value` | `sprk_invoice` |
+   | Invoice → Invoice Lines | `sprk_billingevent` | `sprk_invoice` | `_sprk_invoice_value` | `sprk_invoice` |
+   | Matter → Invoice Lines | `sprk_billingevent` | `sprk_matter` | `_sprk_matter_value` | `sprk_matter` |
 
-   > ⚠ **Two-hop relationships aren't drop-in.** `sprk_invoicelineitem` has **no lookup to Matter** — only to `sprk_invoice`. `parentContextFilter` injects **one** condition on a **direct** attribute of the child, so you can filter line items by *invoice* (drill from an Invoice), but "line items for a Matter" needs a link-entity in inline FetchXML, which is outside the single-condition overlay.
+   > ⚠ **Two-hop relationships aren't drop-in.** `parentContextFilter` injects **one** condition on a **direct** attribute of the child, so a child can be filtered only by a parent it has its own lookup to. Invoice Lines are `sprk_billingevent` rows (the Invoice Line, eBilling D-18; the former invoice-line-item table is retired) and carry direct `sprk_invoice` and `sprk_matter` lookups, so both drill-throughs above are single-condition. A child that has a lookup only to an intermediate record ("line items for a Matter" through an invoice) needs a link-entity in inline FetchXML, which is outside the single-condition overlay.
 
 2. **Does a page shell already exist for that child entity?** Check the registry in [`scripts/Deploy-AllDataGridConsumers.ps1`](../../scripts/Deploy-AllDataGridConsumers.ps1). Current shells: `sprk_eventspage.html` (Event), `sprk_invoicespage.html` (Invoice), `sprk_kpiassessmentspage.html` (KPI Assessment). If yes → reuse it; skip to step 4.
 

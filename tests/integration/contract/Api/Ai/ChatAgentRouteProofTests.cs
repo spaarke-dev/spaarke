@@ -347,6 +347,10 @@ public sealed class ChatAgentRouteProofFixture : WebApplicationFactory<Program>
         {
             services.UseStubTokenCredential();
 
+            // Task 188 r4a (Option A): IAiAuthorizationService now applies THE external document narrowing, and this host's
+            // caller is not a resolved internal systemuser. The narrowing is covered by AiDocumentNarrowingTests.
+            Sprk.Bff.Api.Tests.TestInfrastructure.AllVisibleDocumentNarrowing.UseAllVisibleDocumentNarrowing(services);
+
             services.Configure<Microsoft.AspNetCore.Routing.RouteHandlerOptions>(options => options.ThrowOnBadRequest = false);
 
             services.AddAuthentication(options =>

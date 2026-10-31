@@ -506,8 +506,9 @@ legacy and caps at a few hundred policies per tenant). L2 does that through its 
    Worker reads the tenant's initial domain (`contoso.onmicrosoft.com`) there and the sidecar connects with
    `-Organization <initial domain>` — the only value Microsoft documents for app-only sign-in. With the tenant id, Exchange
    connects and reads but refuses every write with "doesn't have write permission to target DC" (2026-10-04).
-5. **Shared-mailbox roles for H14m (task 263) — owner decision D32 (2026-10-10); applied on Spaarke's tenant 2026-10-13** (M1–M5 and M7 passed the same day; RBAC changes
-   take 30 min – 2 h to propagate). Apply exactly this set on any other tenant; nothing wider.
+5. **Shared-mailbox roles for H14m (task 263) — owner decision D32 (2026-10-10); applied on Spaarke's tenant 2026-10-13;
+   common parameters added to the `New-Mailbox` entry 2026-10-20 (T186 L62)** (M1–M5 and M7 passed 2026-10-13; RBAC
+   changes take 30 min – 2 h to propagate). Apply exactly this set on any other tenant; nothing wider.
    H14m creates each customer's shared mailbox and adds it to the customer's scope group. `Spaarke App RBAC Admin` cannot
    (it holds no `New-Mailbox` or `Add-DistributionGroupMember`), and widening it is an owner decision. The narrowest set
    found is two custom roles plus one scope, assigned with `-App` (non-delegating). Run as an Organization Management
@@ -515,16 +516,26 @@ legacy and caps at a few hundred policies per tenant). L2 does that through its 
    `Get-ManagementRoleEntry '*\Add-DistributionGroupMember' -Parameters BypassSecurityGroupManagerCheck`:
    ```powershell
    New-ManagementRole -Name 'Spaarke Shared Mailbox Create' -Parent 'Mail Recipient Creation' -EnabledCmdlets New-Mailbox
-   Set-ManagementRoleEntry 'Spaarke Shared Mailbox Create\New-Mailbox' -Parameters Shared,Name,Alias,DisplayName,PrimarySmtpAddress
+   Set-ManagementRoleEntry 'Spaarke Shared Mailbox Create\New-Mailbox' -Parameters Shared,Name,Alias,DisplayName,PrimarySmtpAddress,ErrorAction,ErrorVariable,WarningAction,WarningVariable,OutVariable,OutBuffer,Confirm,WhatIf
    New-ManagementRole -Name 'Spaarke Scope Group Membership' -Parent 'Security Group Creation and Membership' -EnabledCmdlets Add-DistributionGroupMember
    Set-ManagementRoleEntry 'Spaarke Scope Group Membership\Add-DistributionGroupMember' -Parameters Identity,Member,BypassSecurityGroupManagerCheck
    New-ManagementScope -Name 'Spaarke Customer Scope Groups' -RecipientRestrictionFilter "RecipientTypeDetails -eq 'MailUniversalSecurityGroup' -and Name -like 'Spaarke-AppAccess-*'"
    New-ManagementRoleAssignment -Name 'sprk-exoadmin-sharedmbx-create' -App <app id> -Role 'Spaarke Shared Mailbox Create'
    New-ManagementRoleAssignment -Name 'sprk-exoadmin-scopegroup-member' -App <app id> -Role 'Spaarke Scope Group Membership' -CustomResourceScope 'Spaarke Customer Scope Groups'
    ```
-   Then run live checks M1–M7 (`projects/customer-provisioning-orchestration-r1/notes/t263-customer-shared-mailbox.md`
+   **Grant the PowerShell common parameters on the `New-Mailbox` entry (T186 L62).** `-Parameters` REPLACES the entry's
+   list, and Exchange checks the common parameters the module forwards like any other: without `ErrorAction`, the
+   sidecar's `New-Mailbox … -ErrorAction Stop` gets 403 `CmdletAccessDeniedException`, which the module reports only as
+   "A server side error has occurred … try again after some time". The `Add-DistributionGroupMember` entry **cannot**
+   take them — its parent role holds none for that cmdlet (Exchange refuses the `Set-ManagementRoleEntry`) — so the
+   sidecar calls it with no common parameter and reads its errors from the error stream. `Get-Command` in the app's
+   session lists every parameter either way, so the sidecar's PRQ-E-16 check calls both writes on an address that
+   can never be accepted (`…@authz-probe.invalid`): a validation error means authorized, anything else refused, and
+   nothing is created. Then run live checks M1–M8 (`projects/customer-provisioning-orchestration-r1/notes/t263-customer-shared-mailbox.md`
    §5). Without these roles H14m fails Resumable (`h14m-mailbox-ensure-failed`, naming PRQ-E-16) **before** creating
-   anything — Exchange Online only loads the cmdlets a caller's roles allow, and the sidecar checks for both first.
+   anything: the sidecar checks both cmdlets with `Get-Command`, then runs the probe above. Never use `-WhatIf` to test
+   these roles by hand: Exchange checks it against the role entry like any other parameter, so a 403 then says nothing
+   about the call itself.
    Not requested: `Remove-Mailbox` / `Remove-DistributionGroupMember` (decommission is manual in r1 — §7.9) and
    `Set-Mailbox`.
 
@@ -582,11 +593,11 @@ Every handler is idempotent, resumable, and has a verified post-condition. Full 
 | **H1** | Subscription readiness | ARM verification the customer's subscription is reachable **in the run's tenant** and holds **no other customer's** `rg-spaarke-*` resource group (T228, ADR-027 — checked before H1 registers resource providers); Lighthouse delegation (`CustomerOwned` only) | `subready-subscription-not-dedicated` / `-unreachable` are Resumable, nothing written | `subready-{customerId}` |
 | **H2a** | Per-customer Bicep infra | Deploy the CI-published `customer.bicep` ARM template: RG, KV, Storage, Service Bus, Cosmos, Redis (per customer since D-12; Azure Managed Redis with access keys disabled since T242 — the BFF connects with the stamp UAMI via `Redis__Endpoint`), OpenAI, AI Search, Doc Intelligence, Content Safety (T246), App Insights + Log Analytics, optional SignalR — all keyless (T244: local auth / shared key disabled; L2 gets Search Service Contributor + Search Index Data Reader on the stamp search service). Structural checks (pinned model versions, no `SystemAssigned` KV-reference identity) run on the same template bytes | — | `infra-{customerId}-{bicepVer}` — `bicepVer` = content version of the deployed template |
 | **H2b** | AI Search indexes | Provision the 7 canonical indexes (`files`, `discovery`, `records`, `rag-references`, `insights`, `session-files`, `invoices`) on the stamp's own AI Search service via the SDK (`SearchIndexClientProvisioner`, L2 identity), then verify them — same path for both models (T225b) | — | `aisearch-{customerId}-{indexVer}` — `indexVer` = content version of the schema set applied |
-| **H3** | Entra app registration | 🔴 **One BFF app-reg PER CUSTOMER, both models (D-13, BINDING)** — delegated permissions per `EntraAppRegPermissionCatalog` (H10 grants the application roles in `GraphAppRoles.cs`); sign-in audience `AzureADMultipleOrgs` (enables Model 2 consent). Exposes the application role `Provisioning.KeylessProof` and assigns it to the L2 Worker identity (T230b; Model 1 — a Model 2 app-reg is in the customer's tenant, where L2 has no service principal). **Client access (T240a):** sets the SPA redirect to exactly the customer's Dataverse origin (from intake `dataverseEnvUrl`; the code pages sign in through this registration) and pre-authorizes exactly the platform's shared clients on `user_impersonation` (Worker setting `EntraAppRegOptions__PreAuthorizedClientAppIds__N`; today the production Office add-in `1958aec2…` — never the dev client `c1258e2d…`, §7.3). The FIC issuer for Model 1 is `EntraAppRegOptions__SpaarkeTenantId` (set by the Worker Bicep). **Two FICs (ISS-015):** `spaarke-uami-trust` (stamp BFF UAMI) and `spaarke-l2-worker` (the L2 Worker UAMI's principalId, `ControlPlaneIdentity__PrincipalObjectId`) — the second is how H6/H7/H7b sign in as the registration secret-free. **`acct` optional claim (T255):** on the access tokens of every new and existing registration, read back (`appreg-acct-claim-failed`) — the BFF's workforce member test fails closed without it. ✅ Implemented by T222 (2026-09-29): the former `Model1Shared` branch is deleted; H3 creates one registration per customer, unconditionally. | Admin consent granted (Graph query) | `appreg-{customerId}-{tenantId}` |
+| **H3** | Entra app registration | 🔴 **One BFF app-reg PER CUSTOMER, both models (D-13, BINDING)** — delegated permissions per `EntraAppRegPermissionCatalog` (H10 grants the application roles in `GraphAppRoles.cs`); sign-in audience `AzureADMultipleOrgs` (enables Model 2 consent). Exposes the application role `Provisioning.KeylessProof` and assigns it to the L2 Worker identity (T230b; Model 1 — a Model 2 app-reg is in the customer's tenant, where L2 has no service principal). **Client access (T240a):** sets the SPA redirect to exactly the customer's Dataverse origin (from intake `dataverseEnvUrl`; the code pages sign in through this registration) and pre-authorizes exactly the platform's shared clients on `user_impersonation` (Worker setting `EntraAppRegOptions__PreAuthorizedClientAppIds__N`; today the production Office add-in `1958aec2…` — never the dev client `c1258e2d…`, §7.3). The FIC issuer for Model 1 is `EntraAppRegOptions__SpaarkeTenantId` (set by the Worker Bicep). **Two FICs (ISS-015):** `spaarke-uami-trust` (stamp BFF UAMI) and `spaarke-l2-worker` (the L2 Worker UAMI's principalId, `ControlPlaneIdentity__PrincipalObjectId`) — the second is how H6/H7/H7b sign in as the registration secret-free. **`acct` optional claim (T255):** on the access tokens of every new and existing registration, read back (`appreg-acct-claim-failed`) — the BFF's workforce member test fails closed without it. **`removeUnverifiedEmailClaim` (T264):** sets `authenticationBehaviors.removeUnverifiedEmailClaim = true` on every new and existing registration (other `authenticationBehaviors` values preserved), read back (`appreg-unverified-email-claim-failed`) — R3's email-bound contact registration is safe only when Entra strips an unverified-domain `email` claim (§7.3). ✅ Implemented by T222 (2026-09-29): the former `Model1Shared` branch is deleted; H3 creates one registration per customer, unconditionally. | Admin consent granted (Graph query) | `appreg-{customerId}-{tenantId}` |
 | **H4** | Key Vault secrets | Grant L2's own principal Secrets Officer on the customer vault; populate KV secrets per canonical catalog manifest; re-assert `keyVaultReferenceIdentity` = UAMI on both slots (idempotent PATCH — `customer.bicep` already sets it and H2a verifies **T1**, T186 L21) | — | `kv-{customerId}-{secretsVer}` — `secretsVer` = content version of the manifest |
-| **H4b** | BFF app settings | Writes every BFF app setting from the canonical secret-catalog manifest — each secret's `app_settings` as a Key Vault reference to the stamp vault, plus the `per_env_settings` values (intake values and H2a/H3/H5/H8 outputs) — to the **production site and the `staging` slot** through the ARM SDK (T253: no pwsh — the Worker host has none). **Merge, never replace**: settings already on a slot that H4b does not set stay (an optional `required: false` entry the run does not carry, e.g. `AiSpendLimit__MonthlyLimitUsd`, is not written — T254); one write per slot, none when a slot already matches. Exactly the settings `Configure-AppServiceSettings.generated.ps1` writes (parity test). Then polls `/healthz` (~8 min budget) and, on timeout, names the failing IOptions module from the container log | `/healthz` = 200; a timeout is QuarantineRequired `h4b-healthz-timeout` | `appsettings-{environmentName}-{secretsVer}` |
+| **H4b** | BFF app settings | Writes every BFF app setting from the canonical secret-catalog manifest — each secret's `app_settings` as a Key Vault reference to the stamp vault, plus the `per_env_settings` values (intake values and H2a/H3/H5/H8/H10 outputs) — to the **production site and the `staging` slot** through the ARM SDK (T253: no pwsh — the Worker host has none). **Merge, never replace**: settings already on a slot that H4b does not set stay (an optional `required: false` entry the run does not carry, e.g. `AiSpendLimit__MonthlyLimitUsd`, is not written — T254); one write per slot, none when a slot already matches. Exactly the settings `Configure-AppServiceSettings.generated.ps1` writes (parity test). Then polls `/healthz` (~8 min budget) and, on timeout, names the failing IOptions module from the container log | `/healthz` = 200; a timeout is QuarantineRequired `h4b-healthz-timeout` | `appsettings-{environmentName}-{secretsVer}` |
 | **H5** | Dataverse env **adoption** | Adopts the environment the **operator created** (intake `dataverseEnvUrl`; PRQ-C-09) — never creates one (T228). Checks the URL is this customer's (`spaarke-{customerId}[-{environmentName}]`, the rule POST /api/runs applies) and that `GET /WhoAmI` answers for the L2 Worker identity | `InterStepState.DataverseEnvUrl` = the canonical URL; `env-url-invalid` / `worker-not-app-user` / `env-health-check-failed` are Resumable | `dvenv-{customerId}` |
-| **H6** | Solution package import | **One solution, `SpaarkeMaster`** — **managed by default, unmanaged only on explicit instruction** (intake `solutionPackageType`; ADR-027 §3 amended 2026-10-07, owner D8). Refuses a managed↔unmanaged switch and a downgrade. Before the import it applies the org-settings contract (`organization.maxuploadfilesize` ≥ 25 MB — F14) with one Dataverse Web API PATCH as its importer identity (T253: no pac — the Worker host has none; `org-settings-contract-failed` is Resumable). It installs **no** application: the CI-built package needs none a fresh environment lacks (F13's Power BI dependency is gone; `SpaarkeMasterApplicationDependencyTests`). Runbook: [`SPAARKE-SOLUTION-RELEASE-PROCESS.md`](../procedures/SPAARKE-SOLUTION-RELEASE-PROCESS.md). ⚠️ *A real run fails here until the package is published in the one-package manifest format (T218c–e).* | SpaarkeMaster present at the package version, `ismanaged` = requested type | `solimport-{customerId}-{solutionVer}` |
+| **H6** | Solution package import | **One solution, `SpaarkeMaster`** — **managed by default, unmanaged only on explicit instruction** (intake `solutionPackageType`; ADR-027 §3 amended 2026-10-07, owner D8). Refuses a managed↔unmanaged switch and a downgrade. Before the import it applies the org-settings contract (`organization.maxuploadfilesize` ≥ 25 MB — F14; `isauditenabled` = true and `auditretentionperiodv2` = -1, audit kept Forever — #2027, owner decision 2026-10-18) with one Dataverse Web API PATCH as its importer identity, then reads the row back and fails the step on any setting that did not take (a PATCH of an ignored column still returns 204) (T253: no pac — the Worker host has none; `org-settings-contract-failed` is Resumable). It installs **no** application: the CI-built package needs none a fresh environment lacks (F13's Power BI dependency is gone; `SpaarkeMasterApplicationDependencyTests`). Runbook: [`SPAARKE-SOLUTION-RELEASE-PROCESS.md`](../procedures/SPAARKE-SOLUTION-RELEASE-PROCESS.md). ⚠️ *A real run fails here until the package is published in the one-package manifest format (T218c–e).* | SpaarkeMaster present at the package version, `ismanaged` = requested type | `solimport-{customerId}-{solutionVer}` |
 | **H7** | Dataverse env-var values | Set 7 per-customer env vars per §10.3 (`sprk_BffApiBaseUrl`, `sprk_BffApiAppId`, `sprk_MsalClientId`, `sprk_TenantId`, `sprk_AzureOpenAiEndpoint`, `sprk_ShareLinkBaseUrl`, `sprk_SharePointEmbeddedContainerId`). First links the environment's **root business unit** to H8's container (`businessunit.sprk_containerid` — unified-access-control-r2 task 076's non-secure default); a root unit already naming another container → Resumable `root-business-unit-container-conflict` naming both, never overwritten (task 227g). **T259:** then links the **customer's own unit** (H10's `customerBusinessUnitId`) to the same container with the same rules (`customer-business-unit-unresolved` / `customer-business-unit-container-conflict`) — every user owns its records there, and the BFF resolves a non-secure record's container from its owning unit | Client startup validates no hardcoded URL fallbacks; the root unit's container reads back | `envvars-{customerId}-{configVer}` |
 | **H7b** | Secure Record setup (T256 — unified-access-control-r2 INCOMING-145) | Read-then-write, as the BFF app registration (H6/H7's identity). **Checks** `sprk_noaccessentry` is readable with the BFF deny-list reader's columns (else Resumable `secure_setup.noaccessentry_missing` — the BFF is never deployed: H9 waits for H7b), `sharetopreviousowneronassign` is off, and the root unit's default team reaches no secure table at Deep/Global. **Creates what is missing**: the `Secure Record` unit (a direct child of the root, no users ever), the named memberless Owner team `Secure Record Owners`, and the `Secure Record Owner` role **inside that unit** (a child-unit role cannot ship in SpaarkeMaster) with exactly the Read-at-Basic set of `config/secure-record-owner-role.json` (metadata names, then the §5.4 strip of what Dataverse injects, every time). Puts the role on the named team only; removes it and System Administrator from the unit's default team. Adds every default team to `Spaarke BFF-Managed Field Readers` and `Spaarke Identity Link Readers`, and H10's two application users (the BFF's) to `Spaarke BFF-Managed Field Writers` and `Spaarke Identity Link Writers` — nobody else (profiles, the `sprk_issecure` lock and the contact identity-binding lock on `contact.sprk_externalobjectid` / `systemuser.sprk_primarycontact` ship in SpaarkeMaster — verified, never created; T255 / INCOMING-141); sets NULL `sprk_issecure` to false. Refusals that need an owner decision (users in the unit, team members, wrong parent, a stray member of either writer profile, another profile that may write a locked column) quarantine. Dry run: intake `secureRecordSetupDryRun=true` writes nothing, records the plan in gate `h7b-secure-setup-plan` and stops the run | **T259 (ISS-010, §6 T1/T3):** also refuses, QuarantineRequired, a customer business unit (H10's `customerBusinessUnitId`) that is missing (`secure_setup.customer_bu_missing`) or not a direct child of the root (`secure_setup.customer_bu_wrong_parent`), and a BFF application user outside it (`secure_setup.app_user_outside_customer_bu`); any user of any kind in the `Secure Record` unit is `secure_setup.bu_has_users` | Re-read: role privileges = the file exactly (all Basic), role held by the named team alone, no members/users, all four profiles' memberships exact, no NULL flag | `secure-setup-{customerId}-{setHash}` |
 | **H8** | SPE container | Creates ONE customer container in the pre-existing container type, then activates and verifies it, app-only as that type's **owning app** (signed in through the Worker UAMI's federated credential on the owning app named in `SpeContainerOptions:ContainerTypeOwners` — never the customer BFF app or the BFF's UAMI; **T6** trap — delegated 403s). **Binds the container to the new environment's ROOT business unit** (custom property `spaarkeBusinessUnitId`, read back, container removed if it did not land — unified-access-control-r2 task 165, owner round 35 item 1), so it needs **H5**. Before creating, grants the customer's BFF identities on the container-type registration (stamp UAMI application `full`, BFF app delegated `full` — task 227b). **Records what it created at once and RESUMES with it** (rounds 41 + 49): a recorded container is never created again, and one whose activation failed is re-activated. A create whose answer was lost is QuarantineRequired `spe-container-creation-in-doubt`: never repeated, never auto-adopted (§7.5). **A later run reuses the customer's existing container** — the one the environment records in `sprk_SharePointEmbeddedContainerId` — and never removes it; the run's record and the environment naming different containers stops the run naming both (task 227e). After the bind it writes the `spaarkeCustomerId` marker the BFF recognises its containers by (T227d) | Container GET succeeds; stamp reads back; container ID handed to H7 only once bound | `spe-{customerId}` |
@@ -612,7 +623,7 @@ Task 165 (rounds 35, 41) carries two of these edges: **H8 <- H5** (H8 binds the 
 ```
 H1   <- H0                 H2a  <- H1                 H2b  <- H2a
 H4   <- H2a                H5   <- H2a                H3   <- H4
-H4b  <- H4, H3, H5, H8     H6   <- H5, H3, H10        H8   <- H3, H5
+H4b  <- H4, H3, H5, H8, H10 H6   <- H5, H3, H10        H8   <- H3, H5
 H7b  <- H6                 H9   <- H3, H4b, H6, H7b   H7   <- H6, H8, H9
 H10  <- H3, H5             H11  <- H10, H7            H12a <- H11
 H12b <- H11                H12c <- H12a, H12b, H2a    H14  <- H12c
@@ -723,8 +734,18 @@ Client startup validates no hardcoded URL fallbacks (per task 024).
   and fails closed — nothing moves — until they exist; the field-security script grants the BFF-managed reader / writer
   profiles on them, and until it does, a BFF application user that does not hold System Administrator cannot write them,
   so relocations keep failing closed (retried) in between.
+- `ExternalAccess__ImpersonatedRootSets__Enabled` — **leave unset (false) at deployment** (unified-access-control-r2
+  task 036, FR-20). Off, an internal user's (systemuser's) access on the SPA and Teams comes from the BFF's membership
+  rules, exactly as before the setting existed. On, Dataverse decides it: the user sees what Dataverse lets them read, and
+  every write is checked against their own Dataverse rights on the record. Turn it on only through
+  [§12.8](#128-fr-20--let-dataverse-decide-internal-users-spateams-access), per environment, never in a checked-in
+  settings file (`ImpersonationNegativeCanaryTests` fails the build unless every checked-in value is literally `false`).
 - `PowerBi__AllowedWorkspaces__{n}__WorkspaceId` (+ optional `__CustomerBusinessUnitId`) when the Reporting module is
   enabled — the workspaces the catalog may act on; empty refuses every report ([reporting-admin.md](reporting-admin.md#environment-variables)).
+- `ExternalAccess__CustomerBusinessUnitId` — **REQUIRED on every stamp** ([§6.5.5](#655-customer-contact-owner-externalaccess__customerbusinessunitid--required-per-stamp),
+  ISS-005 / #1673). The customer's own business unit: a child of the root with exactly one default Owner team, never the Secure
+  Record business unit. When it is absent the BFF creates no customer contact and registration and first sign-in answer 500
+  `sdap.access.registration_owner_unconfigured`.
 
 #### 6.5.1 Customer identity (`Customer__Id`) — required per stamp
 
@@ -791,7 +812,7 @@ names those tenants.
 |---|---|
 | **Setting** | `WorkforceIdentity__CustomerTenantIds__0`, `__1`, … (configuration key `WorkforceIdentity:CustomerTenantIds`, a string array) |
 | **Value** | the customer's Entra **tenant id(s)** (GUIDs) whose employees use this stamp |
-| **Empty / absent** | **DENY** — nobody is ever email-bound or gets a contact created; a Type-2 first sign-in gets `sdap.access.deny.workforce_tenant_list_empty`. Existing oid bindings still resolve. |
+| **Empty / absent** | **DENY** — nobody is ever email-bound or gets a contact created; every contact-only Type-2 sign-in gets `sdap.access.deny.workforce_tenant_list_empty`, existing oid bindings included (#2128 round 1). Enabled systemusers are unaffected. |
 | **Never** | a fallback to `AzureAd:TenantId`, or `TenantRouting:Tenants[]` |
 | **Startup check** | a non-GUID, the all-zero GUID, or the CIAM tenant id **fails startup** (`ValidateOnStart`) |
 | **Written by** | provisioning — **H4b**, from intake `customerWorkforceTenantIds`, on both slots (T255; hand-off `projects/unified-access-control-r2/notes/handoffs/INCOMING-141-workforce-tenant-list.md`) |
@@ -823,24 +844,43 @@ and the two values coincide — list it anyway; nothing is inferred.
 
 Model 1 puts **Spaarke's side** (the stamp, its BFF app registration, its Dataverse environment) in Spaarke's
 tenant. It does **not** move the customer's people. A customer's employees keep their own company work accounts
-in **their company's own Entra tenant** — the customer's **home tenant** (e.g. Contoso's tenant). They reach the
-stamp as **B2B guests in Spaarke's tenant**, authenticating at home.
+in **their company's own Entra tenant** — the customer's **home tenant** (e.g. Contoso's tenant). They sign in at
+that **home directory** and self-register (ADR-028 A9). A B2B guest account in Spaarke's tenant with no enabled
+systemuser is refused `sdap.access.deny.workforce_guest_use_home_signin` (#2128 retired the R3 FR-15 guest admission).
+An enabled systemuser is resolved first and admitted, a licensed B2B guest included (item 1 below).
 
 | Where the home tenant appears | What it is |
 |---|---|
-| The guest's token from the stamp (Spaarke-pinned authority, ADR-028 A8; proven live 2026-10-08) | `tid` = **Spaarke's** tenant, `acct = 1` (guest), `idp` = `https://sts.windows.net/{home tenant id}/` |
+| A B2B guest's token from the stamp (Spaarke-pinned authority, ADR-028 A8; proven live 2026-10-08). Since #2128 it is refused when the guest has no enabled systemuser (the contact-only branch), and the `idp` home tenant only selects the deny code. A guest with an enabled systemuser (a licensed guest) is admitted by the systemuser branch, which runs first | `tid` = **Spaarke's** tenant, `acct = 1` (guest), `idp` = `https://sts.windows.net/{home tenant id}/` |
 | `WorkforceIdentity__CustomerTenantIds__N` (this setting) | The customer's home tenant id(s): "whose employees count as this customer's workforce" |
-| The Spaarke registry, next to `sprk_securitygroupid` (R3 task 060 for current customers; provisioning intake for new ones) | The same list per customer key, read by the shared workforce self-registration service |
+| The Spaarke registry, next to `sprk_securitygroupid` (R3 task 060 for current customers; provisioning intake for new ones) | The same list per customer key, meant for the R3 FR-14 workforce self-registration service. That service is superseded by A9 (item 2 below): the A9 route and the WorkforceHome scheme read this App Service setting, not the registry (`AuthorizationModule.cs:587`) |
 
 It is checked in two places:
 
-1. **Every request to the customer's BFF** (`WorkforceMembershipTest`). A Model 1 guest is a member only when
-   `acct = 1` **and** `tid` = the stamp tenant **and** the home tenant parsed from `idp` ∈ `CustomerTenantIds`
-   (R3 FR-15). A guest from any other home tenant is denied (`sdap.access.deny.workforce_tenant_not_customer`).
-   A direct member of the listed tenant (`tid` ∈ list, `acct = 0`) is the Model 2 / dev path.
-2. **Workforce self-registration** (R3 FR-14, task 060). The person signs in at home first; the service admits them
-   only if that home `tid` ∈ the customer's list **and** `acct = 0` (a member there, not someone else's guest),
-   and only then invites them into Spaarke's tenant and the customer's `sprk-{customerId}-users` group.
+1. **Every request to the customer's BFF** on the Workforce token plane **from a caller with no enabled systemuser**
+   (the contact-only branch). The resolver first looks the caller's `oid` up as a systemuser
+   (`WorkforcePrincipalResolver.cs:190`): an enabled systemuser is resolved and admitted there, before any member test
+   — a licensed B2B guest and a Model 1 Spaarke staff member included (`WorkforcePrincipalResolver.cs:207-251`); a
+   disabled one is denied (`:257`). Only the contact-only branch runs `WorkforceMembershipTest`, on every sign-in and
+   before any contact lookup — an existing binding does not override it (`ContactIdentityBinder.ResolveWorkforceCallerAsync`,
+   `ContactIdentityBinder.cs:337-345`). On that
+   branch only a direct member of a listed tenant (`tid` ∈ list, `acct = 0`) passes: the Model 2 / dev path. No guest
+   is admitted on that branch (ADR-028 A9): customer workforce users sign in at their home directory and register (2.
+   below). A Spaarke-tenant B2B guest whose home tenant (from `idp`) is listed still answers `Member` from the member
+   test, and the binder refuses it `sdap.access.deny.workforce_guest_use_home_signin` before any store call
+   (`ContactIdentityBinder.cs:313-328`; #2128 retired the R3 FR-15 guest admission). A guest from any other home tenant
+   gets its member-test deny: `sdap.access.deny.workforce_tenant_not_customer`, or `sdap.access.deny.workforce_guest`
+   where the stamp lists its own tenant (dev).
+2. ~~**Workforce self-registration** (R3 FR-14, task 060)~~ — **superseded by ADR-028 A9.** FR-14 invited the person
+   into Spaarke's tenant as a B2B guest, which is exactly the identity item 1 now refuses. Registration is the A9 route
+   `POST /api/v1/external/registration` (`ExternalRegistrationEndpoints.cs:78`). The person signs in at their home
+   directory; the WorkforceHome scheme accepts that token only if its `tid` ∈ the customer's list **and** `acct = 0`
+   (a member there, not someone else's guest; `AuthorizationModule.cs:673-700`). The route answers 200 with no write
+   for a caller who already resolves; otherwise, for the token's email, it refuses a licensed user's email
+   (`licensed_user_link_required`), answers 409 `existing_record_found` for one bindable existing contact and binds it
+   on the confirmed resubmit, refuses contacts it cannot bind (`registration_contact_conflict`), or creates one
+   WorkforceHome contact (`ContactIdentityBinder.RegisterHomeContactAsync`, `ContactIdentityBinder.cs:686`). Nothing
+   is invited into Spaarke's tenant.
 
 **Without the list**, anyone with any Microsoft work account could register as that customer's staff, and a guest
 from another company invited for an unrelated reason would be bound into the customer's environment.
@@ -858,10 +898,14 @@ az webapp config appsettings set --resource-group <rg> --name <app-service-name>
 ```
 
 **The member test also needs the `acct` claim** (§7.3): a member is a user token (`CallerIdentity`, never an
-app-only token) whose `tid` is listed here AND whose `acct` claim is `0` — or, on Model 1, the registered-guest
-branch above (`acct = 1`, `tid` = stamp tenant, `idp` home tenant listed here). A token with no `acct` claim fails
-closed (`sdap.access.deny.workforce_acct_claim_missing`) — membership is never inferred from an email domain or
-a `#EXT#` UPN.
+app-only token) whose `tid` is listed here AND whose `acct` claim is `0`. For a Model 1 B2B guest (`acct = 1`,
+`tid` = stamp tenant), `WorkforceMembershipTest.Evaluate` answers `Member` when its `idp` home tenant is listed here
+(the FR-15 conjunction) and `ForeignTenant` otherwise (`WorkforceIdentityOptions.cs:329`; where the stamp lists its own
+tenant, `Guest`, `:340`). With no enabled systemuser neither is admitted: the binder refuses the `Member` guest
+`sdap.access.deny.workforce_guest_use_home_signin` and that person signs in at their home directory instead (ADR-028
+A9); the others get their member-test deny. A token
+with no `acct` claim fails closed (`sdap.access.deny.workforce_acct_claim_missing`) — membership is never inferred
+from an email domain or a `#EXT#` UPN.
 
 **The identity-link reconciliation job** (`identity-link-reconciliation`, every 5 minutes) links every licensed
 user to their contact. It runs **report-only** until `IdentityLink__Reconciliation__WritesEnabled=true` — absent,
@@ -952,6 +996,80 @@ shares to when `createdby` is the BFF application user. Without the column, ever
 `-Verify` (must exit 0); re-run `-Apply` when a business unit is added. Details:
 `docs/guides/SECURE-PROJECT-ENVIRONMENT-SETUP.md` §7b.
 
+**Dataverse prerequisite — the child tables: `scripts/Set-ChildRecordCreatorPersonSchema.ps1 -Verify` must exit 0
+BEFORE deploying a BFF that stamps a NEW table** (one added to `RecordCreatorPerson.StampedTables` or
+`StampedChildTables`). Since #2273 the BFF trusts `sprk_createdbyperson` as "who created this row" ONLY on those
+tables — the secure-exit creator check and people-targeting both read it — and that trust holds only while the
+column there is field-secured so that only the BFF can write it. On an unsecured column any user with Write can
+name themselves as creator and move the row out of secure isolation. Run it with the same `-BffApplicationIds` and
+the stamp's `-OntologyWriterApplicationId` — dry run, then `-Apply`, then `-Verify` (must exit 0). In source, the
+ArchTest `CreatorPersonColumnSecuredGuardTests` fails a build where a stamped table's `Entity.xml` does not declare
+the column `<IsSecured>1</IsSecured>`; it cannot see the environment, so the `-Verify` run is the deploy gate.
+
+**Dataverse prerequisite — contact access-level and identity bookkeeping columns are field-secured.** Only the BFF and
+Standing Grant Administrators write them; every user keeps reading the ones a person needs to see.
+`scripts/Set-ExternalAccessContactSecuritySchema.ps1` secures `sprk_accesspermissiongrant`, `sprk_identityplane` and the
+five `sprk_identitycollision*` columns, and creates three BFF-only columns secured at creation:
+`sprk_externalinvitedemailhash`, `sprk_externalinvitedtenantid` and `sprk_externalaccessremovedon`.
+
+| Column | Read | Create / update |
+|---|---|---|
+| `sprk_accesspermissiongrant` | every user (BFF-Managed Field Readers) | Standing Grant Administrators (create, update); the BFF (update) |
+| `sprk_identityplane`, `sprk_identitycollision*` | every user (Identity Link Readers) | the BFF (Identity Link Writers) |
+| `sprk_externalaccessremovedon` | every user (BFF-Managed Field Readers) | the BFF (BFF-Managed Field Writers) |
+| `sprk_externalinvitedemailhash`, `sprk_externalinvitedtenantid` | the BFF only | the BFF only |
+
+No other profile (System Administrator excepted) may read, create or update these columns. Run it with the same
+`-BffApplicationIds` as above — dry run, then `-Apply`, then `-Verify`, which checks every column is secured and every
+profile x column pair, and **must exit 0** before a BFF that writes the new columns is deployed. `-Verify` also checks
+that each BFF application user is a direct member of Standing Grant Administrators, which H7b adds (§7.11), so run it
+after H7b completes. In an environment no provisioning run reaches (for example spaarkedev1), the operator adds each
+BFF application user to Standing Grant Administrators directly, with the owner's OK — the same association H7b's S20
+writes: `POST {org}/api/data/v9.2/fieldsecurityprofiles({Standing Grant Administrators id})/systemuserprofiles_association/$ref`
+with body `{"@odata.id": "{org}/api/data/v9.2/systemusers({BFF application user id})"}` — then runs `-Verify`. A new stamp receives
+the columns, the field security and the profile permissions through the SpaarkeMaster import (H6) — that path applies
+only once SpaarkeMaster 1.2.4.0 is published (1.2.3.1 and earlier do not secure these columns; until then run the
+script on a new stamp too). H7b's identity-link check (S18) covers the plane and collision columns, and its
+standing-grant check (S19) the access level (§7.11). The BFF trusts an EMPTY value of `sprk_accesspermissiongrant`, the
+binding, the plane or a collision column only after it has proven it can read the column (the System Administrator role,
+matched by its role template id, or a field security profile granting Read, directly or through a team; re-proven every
+10 minutes). Until then the standing grant confers no access, no contact is bound or created, no collision flag is
+written over, and a revoke of a grantee with no email and an empty
+binding is reported as not cleared. `-Verify` therefore also runs the proof's reads (systemuser, role, systemuserroles,
+fieldpermission, systemuserprofiles, teamprofiles, teammembership) as each BFF application user; the operator running
+it needs the act-on-behalf-of-another-user privilege.
+
+```powershell
+.\scripts\Set-ExternalAccessContactSecuritySchema.ps1 -EnvironmentUrl https://<org>.crm.dynamics.com `
+  -BffApplicationIds <bff-uami-client-id>[,<bff-app-registration-id>]            # dry run: read-only
+.\scripts\Set-ExternalAccessContactSecuritySchema.ps1 -EnvironmentUrl https://<org>.crm.dynamics.com `
+  -BffApplicationIds <bff-uami-client-id>[,<bff-app-registration-id>] -Apply
+.\scripts\Set-ExternalAccessContactSecuritySchema.ps1 -EnvironmentUrl https://<org>.crm.dynamics.com `
+  -BffApplicationIds <bff-uami-client-id>[,<bff-app-registration-id>] -Verify   # must exit 0
+```
+
+**Rollout order — schema first, on every environment.** Apply this script and pass `-Verify` (exit 0: the two stamp
+columns, their field security, and the proof reads) BEFORE deploying a BFF build that requires the invite stamp. An
+environment without the stamp columns refuses EVERY email bind, on the external (CIAM) plane as well as the Workforce
+plane and WorkforceHome registration, with `contact_not_invited`: the stamp is read in the same query as the invite
+marker, so a column that is not provisioned leaves no stamp to meet, and no bind is made without one. Nothing is bound
+or created while the columns are missing; contacts already bound by oid are not affected.
+
+**Rollout — an email bind needs a current invite stamp.** From the release that writes these two columns, every invite
+(`/invite` and `/invite-and-grant`) records the invited address (hashed) and, when the inviter names it, the person's
+Entra tenant id (`invitedTenantId`, a GUID; anything else is refused with 400). An unbound contact is bound to a sign-in
+by its email only when that stamp is current (the invite marker's 30-day window), records the sign-in's email and the
+contact's current `emailaddress1`, and — for a work account (the Workforce plane and WorkforceHome registration) —
+names the sign-in's tenant, unless the token carries `xms_edov` as boolean `true`. A successful bind clears the stamp.
+Otherwise the sign-in is refused with `contact_not_invited` ("invite again"); nothing is bound or created. Contacts
+already bound by oid are not affected. Plan for:
+
+- **Workforce contacts never invited through the BFF, or invited before this release, need a re-invite that names
+  their tenant** (unless their tokens carry `xms_edov`). Their first work-account sign-in is refused until then.
+- A pending invite from before this release has no stamp, so a grant to that contact sends a new invite instead of
+  answering "already pending".
+- The systemuser plane (licensed users) is unchanged: no stamp is needed there.
+
 #### 6.5.3 Identity collisions — the operator procedure
 
 A **collision** is any of: an email match on a contact bound to a different oid; an oid carried by more than one
@@ -993,8 +1111,12 @@ A repeated collision by the same identity does not write again; a different iden
    mirror and let that person's next sign-in, or the next reconciliation run, bind them again). Deactivating the
    contact does NOT free the slot — the unique index counts inactive rows — so the flag stays until the mirror is
    cleared.
-   Deactivating is how a person is removed: an oid on an inactive contact is denied, and no replacement is
-   created.
+   A person is removed by an administrator's **Remove person** (the contact stays as it is: its access is revoked and
+   it is marked removed). An oid on an inactive contact is also denied and no replacement is created; with the
+   removal sweep's write switch on, the reconciliation job marks such a contact removed and revokes its access the
+   same way. **Reinstate** applies only to an active contact: reactivate the contact first, then reinstate. It also
+   applies only once the removal has finished: while the person still holds an active grant, Reinstate is refused
+   (`sdap.access.person.grants_pending_revoke`); run **Remove person** again first, then reinstate.
    **Several identities on one contact** — read `sprk_identitycollisionparties` and resolve each party; the
    summary columns name only the first.
 3. **Do not clear the flag by hand.** The next `identity-link-reconciliation` run re-evaluates every recorded
@@ -1039,6 +1161,58 @@ that stands it up). It is a deployment setting, not a Dataverse column, because 
   marker.
 - A customer root-unit admin calling those routes gets `403 spe.admin.deny.platform_operator_required` — the same answer as
   a leaf admin anywhere.
+
+#### 6.5.5 Customer contact owner (`ExternalAccess__CustomerBusinessUnitId`) — required per stamp
+
+> Added 2026-10-22 by `spaarke-SPA-external-access-platform-r3` ISS-005 (#1673; owner wording of the rule pending). The write
+> rule it serves is invariant I-6 in [`DATAVERSE-WRITE-PATH-ARCHITECTURE.md`](../architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md).
+
+**Every contact the BFF creates for a customer's people is owned at creation by the default Owner team of one business unit —
+the customer's own.** A contact created with no owner team is owned by the BFF's own application user, in whatever
+business unit that user sits (the root business unit on dev), not by the customer's team. The BFF creates an **identity contact** (the contact a person signs in as) in four places, and all four read this one
+setting: **registration** (`POST /api/v1/external/registration`, a WorkforceHome contact), a Type-2 workforce user's **first
+sign-in** (a contact keyed by their `oid`; §6.5.2), and the **licensed-user link** (a contact for a licensed systemuser who has
+none — registration approval, the first resolution of a licensed user, and the identity-link reconciliation job), and the **invite** (`/invite`, `/invite-and-grant`): an email that matches no contact creates one, owned by the same team; an invite of an
+existing contact never re-owns it.
+The rule is plane-independent: every **identity** contact the BFF creates in its own environment gets this team.
+
+> **A fifth contact create is outside this rule.** The chat tool `dataverse.create_record` can create a `contact` row (a user asks the assistant to "add a person"). That create is app-only, runs after an as-the-caller check, and is owned by the **caller's own business-unit default team, record-first**, through the general record-ownership resolver (`OwnedChildWrite`); it does **not** read `ExternalAccess__CustomerBusinessUnitId`. It creates no sign-in identity (no `oid`, no plane) and is not refused when this setting is unset.
+
+| | |
+|---|---|
+| **Setting** | `ExternalAccess__CustomerBusinessUnitId` (configuration key `ExternalAccess:CustomerBusinessUnitId`) — **REQUIRED on every stamp**, on both slots |
+| **Value** | the GUID of the customer's own business unit: a **child of the root** business unit, with **exactly one default Owner team** (Dataverse creates one with the unit) **whose roles give it Read on `contact`: the BU's default team must hold a security role with contact Read (and Create/Append as needed)** (Dataverse refuses a contact owned by a team that cannot read it), and **never the Secure Record business unit** (the unit named by `SecureRecord__BusinessUnitName`). A value that is not a GUID **fails startup** |
+| **Absent, empty or the all-zero GUID** | **REFUSE, create nothing.** Registration answers `500 sdap.access.registration_owner_unconfigured`; a first sign-in that would create a contact answers `500` with the same code; an invite that would create a contact answers `500` with the same code and creates no contact, marker, CIAM account or email; the licensed-user link is not made (the reconciliation job reports the user `Denied` with the same code, report-only runs included, and the run is recorded **Partial**, never Ok). The job does **not** switch to a dry run: with the setting unset every create is refused while binds and links still write. Binding an **existing** contact (by `oid` or by email) and inviting an existing contact need no owner and still work. At startup the BFF logs one **Warning** (`[EXT-ACCESS] ExternalAccess:CustomerBusinessUnitId is not set to a non-zero GUID ...`); startup does not fail |
+| **Also refused with the same code** | the unit is the Secure Record business unit (decided by id) or the Secure Record name is ambiguous; the unit has no default Owner team, or more than one; **or Dataverse refuses the create itself because the default team cannot own a contact** (`0x80040299`, "Read Privilege Check For
+| **Unreadable owner lookup** | the owner lookup could not be answered (a failed read): nothing is created and the answer is **retryable**; each route answers with its own code, not one shared one. Registration: `503 sdap.access.registration_unavailable`. First sign-in: `sdap.access.deny.contact_lookup_failed` (its HTTP status is tracked in #2269). Invite and invite-and-grant: `503 sdap.access.invite.contact_lookup_failed`. Licensed-user link (registration approval, the reconciliation job): the user is `Denied` with `sdap.access.deny.contact_lookup_failed`, and the reconciliation run is recorded **Partial**, never Ok. The BFF logs a Warning naming the business unit (no email) | Owner failed": no role of the team holds Read on `contact`). That last case is mapped to the same `500 sdap.access.registration_owner_unconfigured` on **all four** creates (registration, first sign-in, licensed-user link, invite), with no id in the answer; the BFF log names the missing role at Error. On the invite the shared Web API client drops the error body, so any `403` on the owned create is read as this fault. A privilege fault of the BFF identity itself (`0x80040220`, e.g. no Create on contact) keeps its existing answer |
+| **Not checked today** | that the unit is a child of the root. The BFF accepts the root unit; refusing it is an open owner decision, so the operator must not set it |
+| **Written by** | provisioning — **H4b** writes it on both slots from the unit H10 creates, and **H13 trap T7** reads it back (T265), once `customer-provisioning-orchestration-r1` merges (issue #2265). Until then, and for Spaarke's own environments (dev), set it by hand on **both** slots |
+
+```bash
+az webapp config appsettings set --resource-group <rg> --name <app-service-name> \
+  --settings ExternalAccess__CustomerBusinessUnitId=<customer-business-unit-guid>
+az webapp config appsettings set --resource-group <rg> --name <app-service-name> --slot staging \
+  --settings ExternalAccess__CustomerBusinessUnitId=<customer-business-unit-guid>
+```
+
+⚠️ **Behaviour change for an existing stamp (ISS-005).** Before ISS-005 a first sign-in on a stamp without this setting created an
+**unowned** contact; it now **refuses** (a Type-2 user with no existing contact cannot sign in until the setting is set), and a
+licensed user with no contact is no longer given one, and an invite of an email with no contact (which created an unowned
+contact) now answers `500`. **The setting must be present on every slot (production and staging) BEFORE this build is deployed
+to it**; otherwise the first sign-in, registration or invite that needs a new contact returns `500
+sdap.access.registration_owner_unconfigured`. Check for the startup Warning above after the deploy.
+
+**Contacts created before this build stay app-owned in the root business unit.** Nothing re-owns them; a backfill is out of
+scope here and is tracked as #2278. **Who can read a new contact changes with it:** a contact owned by the
+customer business unit's team is readable by users with business-unit-scoped Read on contact in that unit, where an
+app-user-owned contact in the root unit was readable only by root-scoped readers.
+
+**Known limit — contacts created in a FOREIGN environment are ownerless (#2270).** The setting names a business unit of **this**
+BFF's Dataverse environment. When registration approval links a new systemuser's contact in a *different* environment (a demo or
+customer target environment the BFF provisions users into, built by `ContactIdentityBinderFactory`), that unit does not exist
+there, so the contact is created with no owner by design (`ContactCreateOwner.NoneForForeignEnvironment`, used by the factory
+alone). The BFF's own environment is never treated that way: `RegistrationDataverseService.ContactBinderFor` returns the
+owner-aware binder for it, however its URL is spelled (`IsSameEnvironment`).
 
 ---
 
@@ -1109,6 +1283,8 @@ their OWN app registrations (production add-in: `1958aec2…` "Spaarke Office Ad
 `https://<host>/auth-callback.html` are registered ONCE, on that client app, for the production site
 (`addins.spaarke.com`) — never per customer. A customer BFF only pre-authorizes the client (above) and lists its origin in
 CORS (H4b). Reference impl: [`src/client/shared/Spaarke.Auth/src/strategies/OfficeNaaStrategy.ts`](../../src/client/shared/Spaarke.Auth/src/strategies/OfficeNaaStrategy.ts).
+For the External Access Teams app (package build, customer-tenant install, Teams sign-in prerequisites and support), see
+[EXTERNAL-ACCESS-TEAMS-APP-GUIDE.md](EXTERNAL-ACCESS-TEAMS-APP-GUIDE.md).
 
 **The `acct` optional claim (access tokens) — REQUIRED on every per-customer BFF registration** (task 141).
 The BFF's first-sign-in identity binding admits only a MEMBER of a configured customer tenant (§6.5.2), and
@@ -1123,9 +1299,28 @@ it once by hand:
 ```
 
 Both are idempotent and keep every other optional claim. Optional claims on the resource registration apply to
-every access token issued FOR it — including the workforce tokens the External Access SPA and Teams tab acquire (the single-tenant Spaarke client, NAA then MSAL popup, scope `user_impersonation`; the Teams manifest declares no `webApplicationInfo` and there is no Teams-SSO path, ADR-028 A8) — see
+every access token issued FOR it — including the workforce tokens the External Access SPA and Teams tab acquire (the browser company-account sign-in and the Teams tab use the multitenant workforce client on the user's own tenant authority, NAA then MSAL popup in Teams, scope `user_impersonation`; the Teams manifest declares no `webApplicationInfo` and there is no Teams-SSO path, ADR-028 A9; the single-tenant Spaarke client is used only for a licensed user's account link — corrected 2026-10-29 against `src/client/external-spa/src/auth/msal-auth.ts`) — see
 Microsoft's [optional claims reference](https://learn.microsoft.com/en-us/entra/identity-platform/optional-claims-reference).
-Without it every Type-2 first sign-in is denied `sdap.access.deny.workforce_acct_claim_missing` (fail closed).
+Without it every contact-only Type-2 sign-in is denied `sdap.access.deny.workforce_acct_claim_missing` (fail closed).
+
+**`authenticationBehaviors.removeUnverifiedEmailClaim = true` — REQUIRED on every per-customer BFF registration** (T264, #2001).
+The BFF binds a workforce sign-in to an existing contact by the token `email` claim; that is safe only when Entra strips the
+claim for an unverified domain, otherwise a user in an allowed customer directory whose unverified-domain email equals a
+contact's can register as that contact. **H3 sets it** on new and existing registrations (read first, written only when it is
+not already `true`, read back; `appreg-unverified-email-claim-failed`, Resumable, if it cannot) and **H13 trap T7 verifies it**.
+H3 sets it only on a run that reaches H3 after T264; a run that finished H3 earlier (its idempotency key is recorded, so
+neither a resume nor H3 re-runs it) and a registration outside provisioning set it by hand, in the registration's own
+tenant — the run's tenant, Spaarke's for Model 1 (the PATCH replaces the whole `authenticationBehaviors` object, so include
+any other value already set there). The body goes in a file: PowerShell strips the inner quotes of an inline JSON argument
+to `az.cmd`.
+
+```powershell
+'{"authenticationBehaviors":{"removeUnverifiedEmailClaim":true}}' | Set-Content -Path body.json -Encoding utf8NoBOM
+az rest --method PATCH --uri "https://graph.microsoft.com/v1.0/applications/<object-id>" `
+  --headers "Content-Type=application/json" --body "@body.json"
+```
+
+The multitenant Spaarke Workforce SPA client carries the same flag as a one-time operator setting; H3 never touches it.
 
 **Escalation gate** (per FR-13 / H10): every `AppRoleId` in `GraphAppRoles.cs` must be populated from a live enumeration of the Microsoft Graph service principal's `appRoles` (all are; re-read 2026-10-09 by task 261). H10 refuses to run on a null.
 
@@ -1144,6 +1339,10 @@ intake `tenantId` (= `AzureAd__TenantId`), `Graph__Scopes__0` = `https://graph.m
 (`POST /api/onboarding/consent-callback`, Model 2) is **off** on a stamp — it is mapped only with `Onboarding__Enabled=true`,
 which no stamp sets — so a stamp carries no `Onboarding__*` setting and no HMAC signing key.
 
+**H4b external-registration owner (R3 073 / ADR-028 A9).** H4b also writes `ExternalAccess__CustomerBusinessUnitId` on both slots: the customer's own business unit, from H10's `InterStepState.CustomerBusinessUnitId` (so H4b follows H10 in the DAG). The BFF refuses to start on a non-GUID value, and without it the external registration route answers 500 `registration_owner_unconfigured`. **H13 trap T7 reads it back** (task 265): both slots must carry a GUID equal to H10's unit.
+
+**H4b session-file store (T186 follow-up).** H4b also writes `SessionFileStore__BlobEndpoint` on both slots: the stamp storage account's blob endpoint, from H2a's `storagePrimaryEndpoint` output (`InterStepState.StorageBlobEndpoint`). The container is not written — the BFF defaults to `ai-chunks`, which every stamp creates. Without it chat session-file uploads are refused (`StoreDisabled`).
+
 ### 7.4 Phase 4 — Dataverse Environment (H5, H6, H7)
 
 **H5** adopts the Dataverse environment the operator created (PRQ-C-09) — it never creates one (owner D4 / Q1;
@@ -1154,8 +1353,15 @@ System Administrator application user there. **H10** follows (before H6 — §5.
 only when the intake says `solutionPackageType = unmanaged` (ADR-027 §3, amended 2026-10-07). It refuses to switch an
 environment's type and refuses a downgrade; an upgrade is `StageAndUpgrade`. Package definition, release, IAM and
 upgrade: [`SPAARKE-SOLUTION-RELEASE-PROCESS.md`](../procedures/SPAARKE-SOLUTION-RELEASE-PROCESS.md). H6 side built
-2026-10-07 (T218b). ⚠️ A real run fails at H6 until the package is published in the new format (T218c–e: content,
-git source, CI publish) — the store still holds the hand-made 2026-08-21 manifest.
+2026-10-07 (T218b); the store holds CI-published packages (1.2.4.0 since 2026-10-29).
+
+**After any SpaarkeMaster upgrade of a stamp** (an H6 run or a manual `pac solution import --stage-and-upgrade`), check
+the security roles against the release:
+`scripts/provisioning/Test-RolePrivilegeExpectations.ps1 -EnvironmentUrl <stamp> -ExpectationsPath
+scripts/provisioning/role-privilege-expectations/spaarkemaster-<version>.json` (read-only; exit 0 = match). A managed
+role loses a privilege the release removed only on a stage-and-upgrade, so a leftover means the wrong import method or a
+privilege added by hand. A leftover Signal Write or Decision Record Create lets callers bypass the BFF commit route. Add
+an expectations file for every release that changes roles (the owning project supplies the list).
 
 **H7** sets the 7 per-customer env-var values (§6.4).
 
@@ -1174,6 +1380,55 @@ import — the script never customises a managed component (ADR-027); it then on
 .\scripts\Set-RecordNumberingSchema.ps1 -EnvironmentUrl https://<org>.crm.dynamics.com -Apply
 .\scripts\Set-RecordNumberingSchema.ps1 -EnvironmentUrl https://<org>.crm.dynamics.com -Verify   # must exit 0
 ```
+
+**After H6, and BEFORE the BFF: a document's Access Permission (`unified-access-control-r2` task 189, D7 T7a).** A
+document holds max(its own narrowing, the value its parents give it), and under D7 a document's Restricted hides it from
+partners (task 188). The BFF records which part is the document's own in `sprk_document.sprk_accessinheritance`
+(Multiple lines of text, NOT field-secured). `scripts/Set-DocumentAccessPermissionSchema.ps1` creates it and checks
+`sprk_document.sprk_accesspermission` too: dry run, then `-Apply`, then `-Verify` (must exit 0).
+
+```powershell
+.\scripts\Set-DocumentAccessPermissionSchema.ps1 -EnvironmentUrl https://<org>.crm.dynamics.com           # dry run
+.\scripts\Set-DocumentAccessPermissionSchema.ps1 -EnvironmentUrl https://<org>.crm.dynamics.com -Apply
+.\scripts\Set-DocumentAccessPermissionSchema.ps1 -EnvironmentUrl https://<org>.crm.dynamics.com -Verify   # must exit 0
+```
+
+🔴 **Deploy order: the schema first, then the BFF.** A BFF carrying task 189 cannot tell a document's own narrowing
+from its inherited value until the record column exists, so until then it only RAISES a document's Access Permission
+and never lowers it. The reconcile job reads the column list each run: while documents lack the column, it logs a
+warning and lists `sprk_document` under `tablesWithoutColumn` in its run report. A document below what its parents give
+is raised to it (the value alone, counted in `raisedOnly`); one at or above it is left as it is. The child-records
+create refresh does the same, and neither reads nor writes the missing column. To Do, Event and Communication are
+reconciled as before. A BFF deployed first therefore lowers no document and leaves none below its parents, **but what
+it raises stays.** A document raised while the column is missing, whose parents then widen again, keeps the stricter
+value. On the first run after the script, the job reads that value as the document's own narrowing (it is stricter than
+what its parents give, and the document has no record yet), records it so, and never widens it again.
+
+🔴 **A BFF carrying `spaarkeai-word-add-in-r1` task 130 (D7 T8) REQUIRES the column; it is not raise-only.** When the
+Outlook add-in saves a document from an email it cannot identify, the BFF creates that document Restricted and writes
+`sprk_accessinheritance` in the same create (write-path registry I-19). Without the column, that create fails:
+- a single `.eml` or single-attachment save returns a generic 500;
+- each Restricted attachment child fails inside `UploadFinalizationWorker`. The failure is logged only as a Warning and
+  the job still reports success, so the user sees a saved email whose attachments are missing.
+
+Nothing is exposed (it fails closed), but saves are lost. Run the script and `-Verify` before deploying such a BFF.
+
+**So deploy the schema BEFORE the BFF.** If the BFF went first, find and fix these documents after the script has run:
+
+1. From the window between the BFF deploy and the script, collect the documents the BFF raised: the job's
+   `[CHILD-ACCESS-PERMISSION] set: sprk_document …` log lines that say `own unknown` (each run counts them in
+   `raisedOnly`), and the child-records refresh's `[INHERITED-ACCESS-PERMISSION] sprk_document …` warnings that name
+   the missing `sprk_accessinheritance`.
+2. In the first runs after the script (until `sweep.complete` is `true`), the job counts every document held above its
+   parents by its own narrowing in `ownKept`; its `set:` line says `record written` with an `own` value stricter than
+   `inherited`. Unless a user narrowed it in that window, a document in both lists is stricter only because of the
+   raise.
+3. Widen each one by hand, as a user with Write on it: set its Access Permission to the value its parents give
+   (`inherited` in the line). The next run reads that edit as the own narrowing removed, and the document follows its
+   parents again.
+
+Work assignments and projects keep their own record (the same column name, field-secured there) through
+`scripts/Set-AccessInheritanceSchema.ps1` (task 175). The document script does not touch them.
 
 ### 7.5 Phase 5 — SharePoint Embedded (H8)
 
@@ -1341,6 +1596,17 @@ would read every secure record. Deep in the customer's unit stops at that unit. 
 another unit (an environment provisioned before T259) is QuarantineRequired, never moved: a business-unit change removes
 all of a user's roles, and H6/H7/H7b sign in as the BFF App User.
 
+**Both App Users must hold `prvActOnBehalfOfAnotherUser` and stay at Organization scope** (unified-access-control-r2
+tasks 034–036). The BFF reads some Dataverse data AS the signed-in internal user (the `MSCRMCallerID` header): the
+communication reads, the Office add-in picker, and — once [§12.8](#128-fr-20--let-dataverse-decide-internal-users-spateams-access)
+turns it on — the internal user's SPA/Teams record sets. Dataverse honours the header only for a caller holding
+`prvActOnBehalfOfAnotherUser`. No Spaarke role carries it: the App Users hold it through **System Administrator**
+(Global depth). In dev that is `# mi-bff-api-dev`, `SDAP-BFF-SPE-API` and `# Spaarke DMS-SPE Dev 1` — checked by role on
+2026-09-30, and proven live only by the task 034 canary (§12.8 step 3). Never grant it to a Spaarke role as a workaround.
+⚠️ **Do not narrow an App User** (register E-2 / E-3). An impersonated read returns what BOTH the App User and the user
+can read: an App User moved to a smaller role or a narrower depth silently returns FEWER records than the user can read —
+no error, an under-grant that looks like a correct answer.
+
 Then reconciles the stamp identity's Microsoft Graph app roles to exactly the evidence-backed set in `GraphAppRoles.cs`
 (task 261 / G31 — every app-only call the stamp BFF makes, its Microsoft Learn least-privileged permission, and the
 live evidence: `projects/customer-provisioning-orchestration-r1/notes/t261-stamp-graph-least-privilege.md`):
@@ -1380,8 +1646,13 @@ Model 1 run takes only `B2BGuest`):
    admin can see it. It also resolves the guests' security role(s) here, so a missing role sends no invitation.
 2. Each user becomes a guest: an existing guest with that address is **reused without a second invitation email**; an
    address that belongs to a member of the tenant is refused.
-3. It waits for every guest to redeem the invitation (`b2b-consent` gate → `WaitingOnGate`; re-run H11 to re-check).
-4. It adds each guest to the group, then reads the guest's Dataverse user through the `azureactivedirectoryobjectid`
+3. It waits for every guest to redeem the invitation (`b2b-consent` gate → `WaitingOnGate`). Microsoft sends the
+   invitation from `invites@microsoft.com` to the guest's own address; a demo-tenant user without an Exchange Online
+   mailbox never receives it (T186). A guest can redeem without the email: open
+   `https://myapps.microsoft.com/?tenantid=<Spaarke tenant id>` in a private window, sign in as the guest and accept the
+   permissions prompt. Then `POST /api/runs/{id}/gates/b2b-consent/advance?customerId={cid}` — it re-runs H11, which
+   reads each guest's `externalUserState` (`Accepted`).
+4. It adds each guest to the group, gives it the **Power Apps Plan 2 Trial** licence (below), then reads the guest's Dataverse user through the `azureactivedirectoryobjectid`
    alternate key — Dataverse adds a group member who is not yet a user on that read (Microsoft's documented app-only
    path; no Power Platform admin role). Dataverse adds the user to the **root** unit; H11 moves it to the customer's
    business unit (`customerBusinessUnitId`, T259) and reads the move back **before** it associates any role (a unit
@@ -1389,15 +1660,22 @@ Model 1 run takes only `B2BGuest`):
    User` — the copy in the customer's unit; resolved in step 1). A guest already in any other unit (for example
    `Secure Record`) is QuarantineRequired `userprov-guest-in-foreign-business-unit` and is never moved; a guest that
    holds a role of another unit (an organisation that keeps roles on a unit change) is QuarantineRequired
-   `userprov-guest-holds-role-outside-customer-unit` — no role is removed. A refusal right after the group add can be
-   membership propagation — resume. A guest who never redeems keeps the gate pending; resend the invitation from the
+   `userprov-guest-holds-role-outside-customer-unit` — no role is removed. Dataverse adds the guest only once its user
+   sync has seen the group membership **and** the licence, which takes minutes (T186: more than 4); H11 re-reads for up
+   to `DataverseUserSyncRetryCount × DataverseUserSyncRetryDelay` (5 min). A 404 after that is
+   `userprov-dataverse-user-failed` — check the group, guest access and the licence, then resume. A guest who never redeems keeps the gate pending; resend the invitation from the
    Entra admin center, then resume (H11 never re-invites — it would re-send mail on every re-check).
 
-**Licensing**: Model 1 guests get **no licence**. Spaarke pays for their access **pay-as-you-go** on the customer's
-stamp subscription (owner 2026-10-07): the operator links the environment to a billing policy on that subscription
-(`PRQ-C-11`, checked by the skill — L2 cannot see billing). Meter: Power Apps per app, **per active user per app per
-month**. `NativeAccount` (Model 2) still assigns the configured licence SKUs and refuses to create anyone when none is
-configured (`userprov-license-sku-not-configured`).
+**Licensing** (owner 2026-10-16, T186 L51): every Model 1 guest gets the **Microsoft Power Apps Plan 2 Trial** licence
+(`POWERAPPS_VIRAL`, skuId `dcb1a3ae-b33f-4487-846a-a640262fadf4`, the same id in every tenant) in Spaarke's tenant. H11
+sets the guest's usage location (`US`) when it has none and assigns the SKU (`H11UserProvisioningOptions:GuestLicenseSkuId`,
+defaulting to that id; blank refuses the run before any invitation, `userprov-license-sku-not-configured`). Dataverse
+does not add an unlicensed guest. Check that the tenant has free units before a run:
+`az rest --method get --url "https://graph.microsoft.com/v1.0/subscribedSkus" --query "value[?skuPartNumber=='POWERAPPS_VIRAL'].[prepaidUnits.enabled, consumedUnits]"`.
+The earlier design (owner 2026-10-07) had guests unlicensed, paid **pay-as-you-go**. That does not work as configured:
+the T186 billing policy (`PRQ-C-11`) had only the Dataverse storage meters on (`AppPass` off), so the guests were
+covered by nothing and Dataverse refused them. `PRQ-C-11` stays for Dataverse capacity. `NativeAccount` (Model 2)
+still assigns the configured licence SKUs and refuses to create anyone when none is configured.
 
 **B2B guests are flagged external** (unified-access-control-r2 task 114, owner round 67). A blank
 `systemuser.sprk_isexternal` means NOT external, so a B2B guest (`#EXT#` in its user name) that is genuinely external
@@ -1437,6 +1715,20 @@ Both consume the **declarative seed manifest** (resolves the `scripts/seed-data`
 
 **H12c** wires runtime references: `sprk_aimodeldeployment` rows point at customer's OpenAI deployment (dedicated per customer — both models). Runs AFTER H12a + H12b + H2a (OpenAI deployed).
 
+**Worklist grid configuration (ontology task 164, D-185).** The ontology worklist reads its membership and order from one `sprk_gridconfiguration` row (`00000000-0000-4000-8000-000000005010`, defined in `config/worklist.gridconfiguration.json`). H12b does not seed it. A **release** (`scripts/Deploy-Release.ps1`, Phase 2b) applies it for every target environment and verifies it (`-Verify -RequireRow`) after the BFF (Phase 2) and **before** the SpaarkeMaster import (Phase 3). The order is binding: the SpaarkeMaster import carries the D-185 role change that removes policy Read from Spaarke Basic User and Spaarke Console User, and with the old row that still joins `sprk_policy`, every user gets an empty worklist once policy Read is removed (HTTP 200, with a log warning only). An old BFF with the new row loses rule names and severity, so Phase 2b does not run if the BFF failed (a skipped BFF phase, `-SkipPhase BffApi`, is an explicit operator choice and still runs it). If Phase 2 (the BFF) or Phase 2b fails for an environment, Phase 3 does not run for that environment, even without `-StopOnFailure`. `-SkipPhase OntologyConfig` skips it as an explicit operator choice and does not block Phase 3, so use it only when the row is already in place and in sync. The step uses the operator's `az` sign-in (no service principal, no client secret), like Phase 3.
+
+**Fresh environments** have no old row, so the order does not matter there; Phase 2b still applies the row after the BFF. **On dev** (the authoring environment, which skips Phase 3), an unmanaged import does not remove privileges: the D-185 role change is applied with `RemovePrivilegesRole` (see `projects/spaarke-ontology-platform-r1/notes/security-roles.md` section 19).
+
+For an out-of-band fix (a row that is missing or drifted outside a release), run the same script by hand:
+
+```powershell
+pwsh scripts/Apply-WorklistGridConfiguration.ps1 -DataverseUrl https://<env>.crm.dynamics.com -WhatIf
+pwsh scripts/Apply-WorklistGridConfiguration.ps1 -DataverseUrl https://<env>.crm.dynamics.com
+pwsh scripts/Apply-WorklistGridConfiguration.ps1 -DataverseUrl https://<env>.crm.dynamics.com -Verify -RequireRow
+```
+
+Known gap: the Do-lane and know-promotion policies (`scripts/Apply-DoLanePolicies.ps1`) still reach a customer environment only by hand; no release phase applies them.
+
 ### 7.9 Phase 9 — Post-Deploy Integrations (H14)
 
 Two sub-steps, in order (H14m is not attempted when H14a fails — its authorization test needs H14a's assignments):
@@ -1458,7 +1750,9 @@ Two sub-steps, in order (H14m is not attempted when H14a fails — its authoriza
   - **A second run writes nothing** (mailbox `AlreadyCompliant`, row already Verified).
   - **Quarantine, nothing changed** (`h14m-mailbox-drift`): a recipient with that name, alias or address that is not a
     shared mailbox, has another name/address (another customer's or a person's), sits outside the scope group or in any
-    other group; or the scope group is not named `Spaarke-AppAccess-{customerId}`. `h14m-account-row-conflict`: the stamp
+    other group; or the scope group is not named `Spaarke-AppAccess-{customerId}` (optionally followed by exactly 14
+    digits: a group created in the admin center gets its Exchange Name from the alias plus its creation time, e.g.
+    `Spaarke-AppAccess-acme20261014194847` — T186 L59). `h14m-account-row-conflict`: the stamp
     has several rows for the address, an inactive one, or one of another type.
   - **Resumable**: `h14m-mailbox-ensure-failed` (sidecar / Exchange / **the T263 Exchange roles not applied — §4.2.1 step 5,
     pending owner decision D32**; nothing is created), `h14m-mailbox-unverified` (a role not yet in scope; no row written),
@@ -1519,6 +1813,60 @@ Run intake no longer takes `communicationGraphResource` / `emailGraphResource`. 
 
 ### 7.11 Phase 11 — Secure-record environment setup (H7b; the operator verifies it before telling the customer the environment is ready)
 
+> **Customer owner teams: a manual step until provisioning's H7c ships (#2429) (unified-access-control-r2 task 194b R4b-3, R4b-2c).**
+> A BFF that carries the hard-deny rule (owner rounds 131 and 136) owns every ORDINARY row of `sprk_storedfile`,
+> `sprk_procedureassignment`, `sprk_ruleset`, `sprk_policy` and `sprk_policyversion` by the memberless team
+> `Spaarke Restricted Content Owners` **in the customer's own business unit** — the direct child of the root that **H10**
+> creates (`customerBusinessUnitId`, a sibling of `Secure Record`), never in the root, which holds only Spaarke product data.
+> The BFF finds the team from the answer itself: it walks up from the answer's business unit to the root's direct child and
+> uses the team there. The team holds that unit's copy of the role `Restricted Content Owner` (created once in the root;
+> Read at Basic on exactly those five tables, `config/restricted-content-owner-role.json`). Every customer unit needs the team,
+> set up **after H10** (which creates the unit). Until this step's `-Verify` exits 0, a BFF that carries the rule refuses every
+> ordinary write to those tables (`record_owner_restricted_content_team_unresolved`, also when the team has a member or
+> there are two, when the answer is in the root itself, or when it sits under `Secure Record`), and Dataverse refuses the
+> team as an owner while the role lacks Read. In the interim sequence (§12.2) the BFF deployed in Phase 6 is already running
+> when Phase 7 (H10) creates the unit, so it refuses those writes until Phase 7a's `-Verify` exits 0. Provisioning's H7c
+> (#2429: after H7b, before H9 and both seeders) will create both teams from the same role files; until it ships, run `scripts/Set-CustomerOwnerTeams.ps1 -CustomerBusinessUnitId <H10's customerBusinessUnitId>`:
+> dry run, then `-Apply`, then `-Verify`, which must exit 0. The full sequence is §12.2, "Phase 7a". Secure rows of these
+> tables still go to `Secure Record Owners`.
+>
+> **The same run sets up the customer configuration owner team (R4b-3b, field-mapping #2399).** Customer configuration rows
+> (`sprk_aisearchindex`, `sprk_fieldmappingprofile`, `sprk_fieldmappingrule`: the one list is
+> `config/customer-configuration-owner-role.json`) are owned in the customer's own business unit by a second memberless team,
+> `Spaarke Customer Configuration Owners`, holding that unit's copy of the role `Customer Configuration Owner` (created once in
+> the root; Read at Basic on exactly those tables). Dataverse refuses to assign a row to a team without Read on its table
+> (`0x80040299`), and the unit's default team is not an acceptable owner (a role on it reaches every member). The BFF does not
+> resolve this team. Field-mapping's seeder (its task 004) and provisioning's H12b seeder (FR-39) **will** own new
+> configuration rows to this team, so it must exist before either runs for the customer. Until they ship, no seeder does:
+> the rows stay with the seeding identity, and an operator re-owns them to this team after setup. Users keep reading the
+> rows through their own roles (`Spaarke Core User`, Deep).
+>
+> **Product configuration is read at Global (owner decision 2026-10-29).** Spaarke product data stays owned in the root
+> (owner round 136), and people work in the customer's business unit below it, where a Read at Deep does not reach the
+> root. So `Spaarke Core User` and `Spaarke Basic User` read the product configuration tables at Global: the playbooks and
+> their actions, skills, tools and knowledge, the AI type catalogs, the Assistant's context map, and grid configuration.
+> This is Read only, on those tables only. Restricted content (`sprk_policy`, `sprk_policyversion`, `sprk_ruleset`,
+> `sprk_procedureassignment`, `sprk_storedfile`), customer records, customer configuration and per-user tables keep their
+> depths. The one list is `config/product-configuration-read-role.json` (with the tables left out and why); the roles'
+> solution XML carries it, so a SpaarkeMaster import applies it. On an environment that has not had that import, run
+> `scripts/Set-ProductConfigurationReadDepth.ps1` (dry run, then `-Apply`, then `-Verify`, which must exit 0).
+> `ProductConfigurationReadRoleGuardTests` fails the build if the list gains a customer or restricted table or platform
+> service configuration (`sprk_externalserviceconfig`, `sprk_dataverseenvironment`, `sprk_aimodeldeployment`), if an
+> entry names any privilege other than the table's own Read, or if either role gains Create on `sprk_gridconfiguration`.
+> Nothing in the product reads `sprk_externalserviceconfig` as a user, so no end-user Spaarke role holds a privilege on
+> it, and its `sprk_clientsecret` column is field-secured with no Spaarke field security profile (only the platform's
+> System Administrator profile reads it); the same guard checks both. An environment imported before that change still
+> holds the old Read on the two roles: the same script's dry run lists it, `-Apply` removes it, and `-Verify` fails
+> until it is gone.
+> Because every user can read every playbook, **creating, cloning and sharing playbooks is for playbook administrators
+> only**: in the role XML only `Spaarke AI Analysis Admin` holds Create and Share on `sprk_analysisplaybook`, and the BFF
+> routes `POST /api/ai/playbooks`, `/{id}/clone`, `/{id}/share` and `/{id}/unshare` require the caller's own Create
+> (create, clone) or Share (share, unshare) privilege on that table before anything is read or written. Every playbook
+> write route (`PUT /api/ai/playbooks/{id}`, `PUT /{id}/canvas`, and the node create, update, delete and scopes routes)
+> requires the caller's own Write privilege first, and an update that changes whether the playbook is public also
+> requires Share. A user without the privilege gets 403. Give a person who builds playbooks the
+> `Spaarke AI Analysis Admin` role.
+
 Secure projects, matters and work assignments (unified-access-control-r2) need Dataverse security configuration that
 no solution import can create. Since T256, **H7b creates it on every run**, after H6 and before H9:
 - the `Secure Record` business unit, which holds no users and **no container**;
@@ -1544,7 +1892,37 @@ no solution import can create. Since T256, **H7b creates it on every run**, afte
   `secure_setup.invite_code_hash_lock_other_access` (QuarantineRequired). While the column is absent that is the expected
   state: H7b does not fail, and records an "absent — ships in a later SpaarkeMaster release" note in the `notes` of gate
   `h7b-secure-record-setup`. Neither check writes a field-security row; auditing and Advanced Find on the hash column are
-  not verified by H7b.
+  not verified by H7b;
+- the identity-link lock check (S18) covers `contact.sprk_identityplane` and the five `sprk_identitycollision*` columns
+  as well as the binding columns: secured, `Identity Link Readers` 4/0/0, `Writers` 4/4/4, nobody else may create or
+  update (`secure_setup.identity_link_*`);
+- the standing-grant lock check (S19) covers two columns:
+  - `contact.sprk_standinggrant`: secured, `Standing Grant Administrators` 4/4/4, and no other profile (System
+    Administrator excepted; the Readers profile is not) may create or update it, else
+    `secure_setup.standing_grant_lock_incomplete` (Resumable: import SpaarkeMaster) or
+    `secure_setup.standing_grant_lock_other_writer` (QuarantineRequired);
+  - `contact.sprk_accesspermissiongrant` (#2317): secured, `Standing Grant Administrators` 4/4/4,
+    `BFF-Managed Field Readers` Read (4/0/0), `BFF-Managed Field Writers` Read and Update (4/0/4), and no other profile
+    (System Administrator excepted; the Readers profile is not) may create or update it, else
+    `secure_setup.access_level_lock_incomplete` (Resumable) or `secure_setup.access_level_lock_other_writer`
+    (QuarantineRequired);
+- read-only checks (S22, #2317) for the columns a later SpaarkeMaster release carries. `contact.sprk_externalinvitedemailhash`
+  and `contact.sprk_externalinvitedtenantid` follow the code-hash rule (secured, `Writers` 4/4/4, no access for anyone
+  else), else `secure_setup.bff_only_column_lock_incomplete` (Resumable) or
+  `secure_setup.bff_only_column_lock_other_access` (QuarantineRequired). `contact.sprk_externalaccessremovedon` follows
+  the invite-marker rule (secured, `Readers` Read, `Writers` 4/4/4, no other writer), else
+  `secure_setup.access_removed_on_lock_incomplete` (Resumable) or `secure_setup.access_removed_on_lock_other_writer`
+  (QuarantineRequired). While a column is absent that is the expected state: H7b records the same "absent" note and
+  does not fail. `scripts/Set-ExternalAccessContactSecuritySchema.ps1 -Verify` (exit 0, §6.5.2) remains the gate for
+  these columns before that release.
+
+**Release ordering (#2317).** An H7b carrying these checks requires SpaarkeMaster >= 1.2.4.0 published before the
+control plane is deployed. SpaarkeMaster 1.2.3.1 and earlier do not secure the identity plane, collision and access-level
+columns, so against such an environment S18 refuses `secure_setup.identity_link_lock_incomplete` and S19
+`secure_setup.access_level_lock_incomplete`, each naming 1.2.4.0. A new stamp imports 1.2.4.0 or later (H6) and the run
+is resumed; in an existing environment run `scripts/Set-ExternalAccessContactSecuritySchema.ps1 -Apply`, then resume.
+H7b re-checks the locks itself and adds the BFF to Standing Grant Administrators. Run `-Verify` (exit 0, §6.5.2) after
+H7b completes, before the BFF deploy.
 
 An intake `secureRecordSetupDryRun: true` makes H7b read only. It records its plan in gate `h7b-secure-setup-plan` and
 stops the run.
@@ -1640,9 +2018,23 @@ The package has no `permissions`, `webApplicationInfo`, bot or knowledge capabil
    - scope `api://{bffAppRegId}/user_impersonation offline_access`;
    - PKCE **on**.
 
-   Save, then copy the **OAuth client registration ID**. With the Agents Toolkit the same values go through
-   `oauth/register` (`isPKCEEnabled: true`, `targetAudience: AnyTenant`, `applicableToApps: AnyApp`, no
-   `clientSecret`).
+   **The portal form cannot save these values (T186 ACME, 2026-10-28):** it marks the client secret required, and the
+   Spaarke Copilot Agent client has no secret (SPA redirect + PKCE), so a dummy value would make every sign-in fail.
+   Use the Agents Toolkit `oauth/register` instead, which takes no secret when `isPKCEEnabled: true`. Copy
+   `provisioning-runs/acme-b6941254-ac1b-42a6-8b12-dec7587090fc/copilot-auth-config/m365agents.yml` into the
+   customer's run record, change the name, base URL and scope, then run (operator's own Microsoft 365 sign-in):
+   `npm install -g @microsoft/m365agentstoolkit-cli`, `atk auth login m365 --tenant {SpaarkeTenantId}`,
+   `atk provision --env {customerId} --folder {that folder}`. The id lands in `env/.env.{customerId}` as
+   `SPAARKE_COPILOT_AUTH_CONFIG_ID` — commit that file: the toolkit skips creation only while that variable has a
+   value, so a run from a fresh folder creates a second auth config. Scope is comma-separated there; `appId` is
+   required by the driver and unused with `AnyApp`. The portal's **Client password authentication method** does not
+   apply (no secret). The portal still shows, edits and deletes the auth config. **Sign in with the Spaarke work
+   account**, not a personal Microsoft account. The same address can be both (ACME: the operator's @spaarke.com
+   address also exists as a personal account); when Microsoft asks which one, pick **Work or school account**. The
+   browser also reuses an already signed-in account, and `--tenant` stops neither. A personal account fails `oauth/register` with `Request failed with status code 401`;
+   `~/.fx/account/homeId.cache.appStudio` then ends in the consumer tenant `9188040d-6c67-4c5b-b112-36a304b66dad`.
+   Fix: `atk auth logout m365`, sign in again choosing the work account, re-run `atk provision` (safe — nothing was
+   created).
 7. **Record the id** on the customer's registry row. PATCH `sprk_copilotauthconfigid` on `sprk_dataverseenvironment`
    with your own identity (`pac data update` or the Web API). The id is not a secret; re-renders and decommission read
    it from the row.
@@ -1719,7 +2111,7 @@ Seven known-issue guardrails baked into handler post-conditions. Each has been d
 | **T4** | Stamp identity missing its group-scoped Exchange mailbox roles (Mail.* calls 403), or holding one outside the group (reaches other customers' mailboxes) | H14(a) | H13 reads the identity's assignments via the sidecar: every `Application Mail.*` role in scope, none outside |
 | **T5** | Slot MI vs slot MI KV RBAC parity broken → cold-start KV-ref failure after slot swap | H4 (interim); H10 + Phase C UAMI (structural) | Both slot MIs have KV RBAC (interim); **structurally impossible post-Phase-C** |
 | **T6** | SPE container work uses a delegated token → 403 "public client not allowed" | H8 | H13 lists `GET /storage/fileStorage/containers?$filter=containerTypeId eq {id}` app-only as the owning app (through the Worker UAMI's federated credential) and passes only if the run's container (H8 output) is in the list. Container absent or a delegated-token refusal → Failed; other refusals / 404 / errors → InfraFault |
-| **T7** | `Customer__Id` missing, blank or another customer's id on either BFF slot → the BFF runs on the derived-from-resource-group path, or names the wrong customer (§6.5.1); **and (T255)** the workforce tenant list missing, stale or different on either slot → every customer employee's first sign-in is denied, or the wrong organisation is admitted (§6.5.2) | H4b (writes both slots, removes stale indices) | ARM read of both slots' app settings: `Customer__Id` == run customerId (T238); `WorkforceIdentity__CustomerTenantIds__*` == the run's `customerWorkforceTenantIds` as a set, none equal to `AzureAd__TenantId` on Model 1 (T255) |
+| **T7** | `Customer__Id` missing, blank or another customer's id on either BFF slot → the BFF runs on the derived-from-resource-group path, or names the wrong customer (§6.5.1); **and (T255)** the workforce tenant list missing, stale or different on either slot → every customer employee's contact-only sign-in is denied, or the wrong organisation is admitted (§6.5.2) | H4b (writes both slots, removes stale indices) | ARM read of both slots' app settings: `Customer__Id` == run customerId (T238); `WorkforceIdentity__CustomerTenantIds__*` == the run's `customerWorkforceTenantIds` as a set, none equal to `AzureAd__TenantId` on Model 1 (T255); **and (T264)** the BFF app registration lacks `authenticationBehaviors.removeUnverifiedEmailClaim = true` → an unverified-domain email can bind to a contact (§7.3) — Graph v1.0 read of `applications(appId='{BffAppRegId}')` in the run's tenant: the flag must be `true` (missing app, null or false fails; a Graph read error is an InfraFault, never a pass); **and (T265)** `ExternalAccess__CustomerBusinessUnitId` missing, blank, not a GUID or different from H10's customer business unit on either slot → the external registration answers 500 `registration_owner_unconfigured` and first-sign-in contact creates are refused — the same two slot reads: the setting must equal the run's `InterStepState.CustomerBusinessUnitId` as a GUID (a run with no H10 unit fails; H4b writes it) |
 
 H13 acceptance gate verifies all 7 traps cleared with 0-failure status.
 
@@ -1807,7 +2199,7 @@ Delete the column through the API, then import or recreate. Do this before impor
    `MSCRM.SolutionUniqueName`) and publish `sprk_signal` and `sprk_decisionrecord` only (`PublishXml`).
 7. **Verify** the metadata read now returns `Lookup` with `Targets = [sprk_recordtype_ref]`, then re-enable the writers
    (they must be on a build that writes the lookup, task 141) and clear the cached entity metadata
-   (`sdap:dv:entitymetadata:sprk_signal` and `sprk_decisionrecord`, up to 6 h in Redis) in the same window.
+   (`sdap:dv:entitymetadata:v2:sprk_signal` and `sprk_decisionrecord`, up to 6 h in Redis) in the same window.
 
 Between steps 5 and 6 the column is absent; keep that gap short and do not run Signal jobs inside it.
 
@@ -1834,7 +2226,7 @@ goes out in **two SpaarkeMaster versions**:
    `StageAndUpgrade`. Creating the lookup is then an ordinary additive change.
 6. **Verify** the metadata read returns `Lookup` with `Targets = [sprk_recordtype_ref]`, back-fill the lookup from the
    exported rows if there were any, then re-enable the writers (a build that writes the lookup, task 141) and clear the
-   cached entity metadata (`sdap:dv:entitymetadata:sprk_signal` and `sprk_decisionrecord`, up to 6 h in Redis).
+   cached entity metadata (`sdap:dv:entitymetadata:v2:sprk_signal` and `sprk_decisionrecord`, up to 6 h in Redis).
 
 Between steps 4 and 5 the column is absent; keep that gap short and do not run Signal jobs inside it. Both versions are
 cut at release time (`Assemble-SpaarkeMasterSolution.ps1 -Version`); this task did not bump the version, and the source
@@ -1963,6 +2355,34 @@ pac admin assign-user --environment "https://spaarke-acme.crm.dynamics.com/" `
 # Interim: PPAC UI + Graph SDK; see auth-deployment-setup stub for MI-first checklist
 # T2 verification MANDATORY: systemusers?$filter=applicationid eq {uami-app-id} returns 1
 
+# Phase 7a — Customer owner teams (unified-access-control-r2 task 194b R4b-3, R4b-2c, R4b-3b, R4b-4). AFTER Phase 7 (H10
+# creates the customer's business unit, which these teams live in) and BEFORE Phase 8 seeds the customer's configuration.
+# PRECONDITION: the Secure Record unit exists (H7b creates it in a provisioning run). This interim sequence has no step
+# that creates it: on an interim environment, set up Secure Record first by hand, SECURE-PROJECT-ENVIRONMENT-SETUP.md
+# §3-§5 (the unit, the named owner team, the role), and pass its name as -SecureBusinessUnitName when it is not
+# 'Secure Record'. The script refuses to run while no unit (or more than one) has that name.
+# The BFF deployed in Phase 6 carries the hard-deny rule: until this step's -Verify exits 0 it REFUSES every ordinary write
+# to the five hard-deny tables (record_owner_restricted_content_team_unresolved). One run sets up both declared teams.
+# (1) The memberless 'Spaarke Restricted Content Owners' team in the CUSTOMER's business unit (H10's customerBusinessUnitId,
+# a direct child of the root; never the root, never 'Secure Record'), holding that unit's copy of the role 'Restricted
+# Content Owner' (created once in the root; Read at Basic on exactly the five tables in
+# config/restricted-content-owner-role.json) and no other role. Run once per customer business unit. The script refuses the
+# root, the Secure Record unit, a unit that is not a direct child of the root, and a -SecureBusinessUnitName (default
+# 'Secure Record'; pass SecureRecord:BusinessUnitName when it differs) that names no unit or two. -Apply never removes a
+# member, moves a team or takes a role off another principal: it refuses that drift (owner decision), and a dry run with
+# such drift exits 1 with the OWNER DECISION NEEDED summary. -Verify lists other customer units that lack the team as
+# information only. (2) The memberless 'Spaarke Customer Configuration Owners' team in the same unit, holding that unit's
+# copy of the role 'Customer Configuration Owner' (Read at Basic on exactly the tables in
+# config/customer-configuration-owner-role.json: sprk_aisearchindex, sprk_fieldmappingprofile, sprk_fieldmappingrule). The
+# BFF does not resolve it. Field-mapping's seeder (task 004) and provisioning's H12b seeder (FR-39) WILL own new
+# configuration rows to this team; until they ship, the rows stay with the seeding identity and an operator re-owns them
+# to this team after setup.
+# Provisioning's H7c (#2429) replaces this step in a provisioning run: one handler for both teams, after H7b and before H9,
+# from the same config/*-owner-role.json files, with its own gate and an H13 re-check.
+.\scripts\Set-CustomerOwnerTeams.ps1 -EnvironmentUrl "<dv-org-url>" -CustomerBusinessUnitId "<customerBusinessUnitId>"            # dry run: the plan for both teams, no writes (exit 1 = an owner decision is needed first)
+.\scripts\Set-CustomerOwnerTeams.ps1 -EnvironmentUrl "<dv-org-url>" -CustomerBusinessUnitId "<customerBusinessUnitId>" -Apply     # create each team (and each role once), add its tables, strip the rest, assign
+.\scripts\Set-CustomerOwnerTeams.ps1 -EnvironmentUrl "<dv-org-url>" -CustomerBusinessUnitId "<customerBusinessUnitId>" -Verify    # MUST exit 0 (no drift in either team); the Phase 6 BFF writes hard-deny rows only from then on
+
 # Phase 7b — B2B guests who are outsiders are flagged external (unified-access-control-r2 task 114, owner round 67;
 # Model 1 rule: spaarkeai-word-add-in-r1 task 126, owner 2026-10-13 — per environment, after the users exist, and again
 # whenever B2B guests are added outside the product). A BLANK sprk_isexternal means NOT external: Manage Access "+ User"
@@ -2031,6 +2451,16 @@ az webapp config appsettings list --name spaarke-bff-{customer}-{env} --resource
     --query "[?starts_with(name, 'WorkforceIdentity__CustomerTenantIds')].[name,value]" -o tsv
 az webapp config appsettings list --name spaarke-bff-{customer}-{env} --resource-group rg-spaarke-{customer}-{env} `
     --slot staging --query "[?starts_with(name, 'WorkforceIdentity__CustomerTenantIds')].[name,value]" -o tsv
+# T7 (T265) — ExternalAccess__CustomerBusinessUnitId on BOTH slots == H10's customer business unit (the run's InterStepState.CustomerBusinessUnitId)
+az webapp config appsettings list --name spaarke-bff-{customer}-{env} --resource-group rg-spaarke-{customer}-{env} `
+    --query "[?name=='ExternalAccess__CustomerBusinessUnitId'].value" -o tsv
+az webapp config appsettings list --name spaarke-bff-{customer}-{env} --resource-group rg-spaarke-{customer}-{env} `
+    --slot staging --query "[?name=='ExternalAccess__CustomerBusinessUnitId'].value" -o tsv
+# T7 (T264) — the BFF app registration strips unverified emails (signed in to the run's tenant — Spaarke's for Model 1; expect true)
+# ($filter form: az.cmd's batch wrapper breaks on the bare ")" of applications(appId='…'); authenticationBehaviors is
+#  returned only when named in $select, so `az ad app show` does not show it)
+az rest --method GET --uri "https://graph.microsoft.com/v1.0/applications?`$filter=appId eq '{bffAppId}'&`$select=authenticationBehaviors" `
+    --query "value[0].authenticationBehaviors.removeUnverifiedEmailClaim"
 ```
 
 ### 12.4 Handoff report
@@ -2153,6 +2583,117 @@ If the repair PATCH itself 403s, the caller lacks the Dataverse privilege to upd
 
 **Scope note**: this section is purely about the `azureactivedirectoryobjectid` identity-matching trap. It does not concern, and does not reintroduce, any never-delete rationale for `Dataverse-ClientSecret` / `BFF-API-ClientSecret` — that credential-retention question was superseded 2026-08-24 when ADR-028 exception E-3 closed (see root `CLAUDE.md` §9 + this guide's credential sections); do not conflate the two.
 
+### 12.8 FR-20 — let Dataverse decide internal users' SPA/Teams access
+
+> Added by `unified-access-control-r2` task 036 (FR-20; owner rules C9 / D1, round 59, round 75). Setting:
+> `ExternalAccess__ImpersonatedRootSets__Enabled` (App Service). It ships **off**. Design and decisions:
+> `projects/unified-access-control-r2/notes/036-fr20-implementation.md`; ADR-034 Amendment A2.
+
+The owner rule: an internal user (a systemuser) who can open a record in the model-driven app can open it in the SPA and
+in Teams, with the same rights, and a user Dataverse does not admit cannot. The setting changes **systemusers only**; CIAM
+contacts and workforce contacts are decided exactly as before in both states.
+
+| | Off (the default; transitional) | On (the end state) |
+|---|---|---|
+| Records an internal user sees | The BFF's membership rules (ownership, owning team, owning business unit, the "Assigned *" contacts), each at Read / Write / Create | Dataverse's own answer, read AS the user — one id-only read per root type (project, matter, work assignment), cached 2 minutes — each at Read |
+| A write (create to-do, upload, create event, edit to-do, post a message, delete own) | Decided by the rights above | The BFF also asks Dataverse for the user's rights on the target record, app-only, impersonating the user's systemuser (one call per write, for every internal user however they signed in — precondition 3). A child (to-do, document, event, message) needs AppendTo on the parent **and** the user's Create privilege on the child table (`prvCreatesprk_Todo`, `prvCreatesprk_Document`, `prvCreatesprk_Event`, `prvCreatesprk_Communication`; a second call); an edit needs Write on the to-do; a delete-own needs Delete on the row as well as the creator stamp. A service request's writes stay the requester rule in both states (accepted, decision e) |
+| Contact grants of a user who is also a granted contact | Kept | Kept — Dataverse cannot see them |
+| No Access list, Restricted veto | In force | In force |
+| A root set over 5,000 records | Module data responses carry `"truncated": true` | Same; the 5,000 kept are the most recently modified (task 036 decision (f), owner 2026-10-18) |
+| A Dataverse read that fails | — | The request fails, or the write is refused. There is no fallback to the membership rules |
+
+**Off does not close the business-unit over-grant of the membership rules.** It is the transitional state; on is the end
+state.
+
+**Preconditions — every one, per environment, before turning it on:**
+
+1. Tasks **142** (Assigned-To access materialized as Dataverse shares) and **143** (the No Access list applied to internal
+   users in Dataverse) are complete and deployed to the environment. Without them, turning it on removes internal users'
+   "Assigned To *" access and the internal half of the No Access list.
+2. Both Dataverse App Users hold `prvActOnBehalfOfAnotherUser` and are not narrowed (§7.7).
+3. **How a write is confirmed — settled, task 036 decision (a), owner 2026-10-18, widened by option C, owner
+   2026-10-20; nothing to do beyond item 2.** The BFF never exchanges an SPA/Teams user's token on this plane (ADR-028
+   A1–A3), and a token issued by a customer's directory (WorkforceHome, ADR-028 A9) could not be exchanged for a
+   Dataverse token in Spaarke's tenant anyway. For **every** internal user — a Spaarke-tenant sign-in or one resolved
+   through the stored home link — the BFF asks app-only, as the Dataverse App User, naming the user's systemuser:
+   `RetrievePrincipalAccess` with `Principal = systemusers(<id>)` on the target record, and
+   `RetrieveUserSetOfPrivilegesByNames` on that systemuser for the child table's Create privilege (both impersonating the
+   user, like the read, so item 2's `prvActOnBehalfOfAnotherUser` covers them). Dataverse answers from the user's own
+   roles, teams and shares, so such a user is expected to write what the same user could write in the model-driven app,
+   and their lists' `canCreate` is the same answer. That parity is **not yet proven live** for roles the user holds only
+   through a team, or for disabled and unlicensed users: the task 036 live checks (Verify, (vi) and (vii)) cover them.
+   A record created seconds earlier that answers "not found" is asked again (twice, within about 1.6 s); a fault, an
+   impersonation failure (`0x8004A110`, or `0x80040220` whose message names `prvActOnBehalfOfAnotherUser`; logged as a
+   Warning, not as "no rights") or no answer within 15 seconds refuses the write.
+4. **Internal users who write in the SPA or Teams hold Spaarke Core User** (or a role with the same privileges). Under
+   "on", Dataverse decides writes from the user's own roles, as the model-driven app does. Spaarke Core User grants
+   Create, Write and Delete on `sprk_todo`, `sprk_document`, `sprk_event` and `sprk_communication`. **Spaarke Basic User**
+   grants them on `sprk_communication` only (Basic depth), and **Spaarke Office Add In User** grants only Create and Write
+   on `sprk_event`. A user whose only role is one of these two keeps reading. A Basic User can post messages but loses
+   the to-do, document and event writes; an Office Add In User keeps creating events (the role also grants AppendTo on
+   `sprk_project` and `sprk_matter`) but loses the to-do and document writes and delete-own on events — exactly as in the
+   model-driven app. Check the roles of SPA/Teams writers before turning it on.
+5. **The task 034 negative canary passes against the environment, in this rollout** (`tests/integration/auth/README.md`
+   § Provisioning the canary user, then § Running it):
+
+   ```bash
+   export SPAARKE_CANARY_DATAVERSE_URL="https://<env>.crm.dynamics.com"
+   export SPAARKE_CANARY_SYSTEMUSERID="<an existing non-admin test user's systemuserid>"
+   export SPAARKE_CANARY_SEEDED_MATTER_IDS="<the matters that user's role depth admits, derived app-only>"
+   export SPAARKE_CANARY_REQUIRED=true
+   export AZURE_TOKEN_CREDENTIALS=AzureCliCredential
+   export SPAARKE_TESTS_ALLOW_OUTBOUND=1
+   az login   # as an identity that maps to the BFF Dataverse App User
+
+   dotnet test tests/unit/Sprk.Bff.Api.Tests/Sprk.Bff.Api.Tests.csproj \
+     --filter "FullyQualifiedName~ImpersonationNegativeCanaryTests"
+   ```
+
+   🔴 **PASS means the impersonated set is STRICTLY SMALLER than the app-only set. Equal sets are a FAILURE**:
+   impersonation is inert and the read is returning every row the App User can read, which looks exactly like success.
+   A NOT RUN is not a pass. Record both set sizes, the user's roles and how the expected set was derived in
+   `projects/unified-access-control-r2/notes/task-034-negative-canary.md`. On a failure, stop: do not turn it on.
+6. **SPA affordances under "on" (settled, task 036 decision g).** `/me` reports such a user's levels at Read (the set
+   confers Read) and adds `writeAccessPerRecord: true`. The SPA then takes a record's create and upload controls from
+   that record's own list, which asks Dataverse once for the record in hand (`canCreate`: Add Task and Create Event on a
+   project, Upload Document on a project, matter, work assignment or invoice). Download and version history are offered
+   wherever a document list rendered (they need only Read), and a project to-do's status toggle is offered and decided by
+   the edit route itself (a refusal reverts it and says so). Remaining limits: Invite User and the issued-grants list stay
+   hidden for such a user (contact grants are a contact's action; the route refuses a systemuser); to-do and event create
+   is offered only on a project page, as before; each single-record list costs one extra Dataverse call for such a user.
+
+**Turn it on:**
+
+```bash
+az webapp config appsettings set --name <app> --resource-group <rg> \
+  --settings ExternalAccess__ImpersonatedRootSets__Enabled=true
+```
+
+App Service restarts the app on a settings change. Cached principals and root sets lapse within 2 minutes.
+
+**Verify:**
+
+- On an internal user's next request, the BFF logs `[WF-AUTHZ] Access source for systemuser … : ImpersonatedRootSet`
+  (Application Insights: `traces | where message has "Access source for systemuser"`). `Membership` there means the
+  setting did not apply.
+- Run the task 036 live checks with an existing non-admin test user in the right business unit, and record each record id
+  in the task notes: (ii) a record the user can Read but not Write in the model-driven app is listed and refuses a write
+  with 403; (iii) a record in the user's business unit (or owned by its default team) but outside the user's role depth is
+  not listed; (iv) a record whose "Assigned To *" names the user's linked contact is listed (task 142's share); (v) a
+  secure record with the user on its No Access list is refused in both the model-driven app and the SPA/Teams; (vi) in a
+  tenant whose internal users sign in through WorkforceHome, sign in to the SPA as such a user and repeat (ii): the
+  write the model-driven app refuses is refused with 403, the one it allows succeeds, and the BFF log for it says
+  `answered via app-only-named-principal`; (vii) with one disabled and one unlicensed test systemuser, a write is
+  refused (if Dataverse answers either with rights, stop: do not turn it on, and report it), and with a user whose only
+  role comes through a team, the SPA allows exactly the writes the model-driven app allows.
+- A Warning `[DELEGATION-RPA-UNAVAILABLE] App-only RetrievePrincipalAccess … answered a fault, not an access answer`
+  means the BFF App User lacks `prvActOnBehalfOfAnotherUser` (item 2): every write is refused until it is fixed. Microsoft
+  documents no error code for that fault, and a bare `0x80040220` can also carry it; so if EVERY systemuser's
+  confirmation logs `[DELEGATION] Rights … : None`, check the privilege before reading it as a roles problem.
+
+**Turn it off (the kill switch):** set `ExternalAccess__ImpersonatedRootSets__Enabled=false`, or delete the setting. The
+next composition uses the membership rules again. The "on" state writes nothing, so there is nothing to undo.
+
 ---
 
 ## 13. Troubleshooting
@@ -2269,6 +2810,13 @@ These are **module-scoped** deployment / build workflows — NOT customer-provis
 | 2026-10-05 | §6.5.4: a declared marker is bound to its registry entry's App Service / resource group (the deploy fails otherwise); the `demo` stand-up also adds `demo` to `Deploy-BffApi.ps1`'s `-Environment` `ValidateSet` | `unified-access-control-r2` task 165, round 62 (batch-4 integration) |
 | 2026-10-05 | §6.5.4: only `dev` carries the marker today — Spaarke's production operator environment (`demo`, declared `false`) adds it in the change that stands it up; the registry declaration must be a JSON boolean and the deploy fails on any other type (`[bool]"false"` is true in PowerShell) | `unified-access-control-r2` task 165, round 57 (`task/uac-r2-165-h`) |
 | 2026-10-08 | §5 handler table: **H4b** row added — the BFF app settings are written through the ARM SDK on both slots (merge, never replace), no longer by running the generated Configure script; **H6** row — the org-settings contract is one Dataverse Web API PATCH and H6 installs no application. The L2 Worker runs no shell tool (G38) | `customer-provisioning-orchestration-r1` T253 |
+| 2026-10-20 | §7.4: the document Access Permission schema — `scripts/Set-DocumentAccessPermissionSchema.ps1` (`sprk_document.sprk_accessinheritance`, not field-secured) runs BEFORE a BFF carrying task 189 is deployed; until it has, that BFF only raises a document's Access Permission to what its parents give and never lowers one (documents listed under `tablesWithoutColumn`, raises counted in `raisedOnly`). A raise kept in that window is recorded as the document's own on the first run after the script and is never widened again: the schema must go first, and §7.4 says how to find such documents and widen them by hand | `unified-access-control-r2` task 189 (D7 T7a, #2126; security pass 2) |
+| 2026-10-22 | §6.5.2: `scripts/Set-ChildRecordCreatorPersonSchema.ps1 -Verify` must exit 0 before deploying a BFF that stamps a new table — the BFF trusts `sprk_createdbyperson` only on stamped tables, and only a field-secured column makes that safe; source guard `CreatorPersonColumnSecuredGuardTests` | #2273 fix round 1 (PR #2277) |
+| 2026-10-22 | §5 H3 row + §7.3 + §9 T7 + §12.3: `authenticationBehaviors.removeUnverifiedEmailClaim = true` set by H3 on every BFF registration (`appreg-unverified-email-claim-failed`) and verified by H13 trap T7 | `customer-provisioning-orchestration-r1` task 264 (#2001 from SPA-r3 ISS-013) |
+| 2026-10-22 | §9 T7 + §12.3 + H4b external-registration owner note: H13 trap T7 reads back `ExternalAccess__CustomerBusinessUnitId` on both slots (equal to H10's customer business unit) | `customer-provisioning-orchestration-r1` task 265 (#2265) |
+| 2026-10-23 | §6.5.2: contact access-level and identity bookkeeping columns are field-secured — `scripts/Set-ExternalAccessContactSecuritySchema.ps1` (dry run, `-Apply`, `-Verify` exit 0) secures `sprk_accesspermissiongrant`, `sprk_identityplane` and the `sprk_identitycollision*` columns and adds three BFF-only columns; the H6 path for a new stamp applies once SpaarkeMaster 1.2.4.0 is published; §7.11: H7b S18 covers the plane and collision columns, S19 verifies the access-level lock and the whole standing-grant lock (Standing Grant Administrators 4/4/4; no other writer but System Administrator — `secure_setup.standing_grant_lock_other_writer`), S22 verifies the three BFF-only columns' locks once a release carries them; an H7b carrying these checks requires SpaarkeMaster >= 1.2.4.0 published before the control plane is deployed | `spaarke-SPA-external-access-platform-r3` (contact identity hardening, slice A) |
+| 2026-10-23 | §6.5.2 rollout note: rollout order — the contact security schema is applied and `-Verify` passes (stamp columns and proof reads) on every environment BEFORE a BFF build that requires the invite stamp is deployed; without the stamp columns every email bind (CIAM and Workforce) is refused; an email bind needs a current invite stamp (invited address and, for work accounts, the invited tenant unless `xms_edov` is boolean true); invites take an optional `invitedTenantId` (GUID); Workforce contacts never invited through the BFF, or invited before this release, need a re-invite naming their tenant | `spaarke-SPA-external-access-platform-r3` (contact identity hardening, slice B) |
+| 2026-10-28 | §7.11 + §12.2: the customer owner teams step is **Phase 7a**, after Phase 7 (H10 creates the unit) and before Phase 8 — no longer "Phase 5d" before Phase 6; the Phase 6 BFF refuses ordinary hard-deny writes until its `-Verify` exits 0. The configuration-team seeders are future work (field-mapping task 004, H12b FR-39); until then an operator re-owns the rows | `unified-access-control-r2` task 194b R4b-4 |
 
 ---
 

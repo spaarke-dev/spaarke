@@ -71,25 +71,120 @@ public class OfficeDocumentPersistence
     private readonly ContentDedupDetector _dedupDetector;
     private readonly ILogger<OfficeDocumentPersistence> _logger;
     // FR-C2 (task 022): the seams for the office-upload half — record the SAVING USER on the canonical
-    // sprk_communication (if the email was also captured inbound). Optional/null-tolerant so the existing bare
-    // test constructor keeps compiling; DI resolves both singletons in every host. Null → the uploader merge is
-    // a guarded no-op (best-effort by construction, NFR-04).
+    // sprk_communication (if the email was also captured inbound) — and, since task 130, the Message-ID lookup that
+    // finds the communication an email-derived document is created linked to when the save's capture returned none.
+    // Required in production (task 130): the public constructor below is the only one DI can choose, so a host without
+    // either seam fails at startup instead of creating every email document Restricted. Null only through the internal
+    // bare test constructor.
     private readonly ICommunicationDataverseService? _communicationService;
     private readonly IGenericEntityService? _genericEntityService;
 
+    /// <summary>The production constructor (the only public one, so the only one DI selects).</summary>
     public OfficeDocumentPersistence(
         IDocumentDataverseService documentService,
         ContentDedupDetector dedupDetector,
         ILogger<OfficeDocumentPersistence> logger,
-        ICommunicationDataverseService? communicationService = null,
-        IGenericEntityService? genericEntityService = null)
+        ICommunicationDataverseService communicationService,
+        IGenericEntityService genericEntityService)
+        : this(documentService, dedupDetector, logger)
+    {
+        _communicationService = communicationService ?? throw new ArgumentNullException(nameof(communicationService));
+        _genericEntityService = genericEntityService ?? throw new ArgumentNullException(nameof(genericEntityService));
+    }
+
+    /// <summary>
+    /// The bare test constructor: no communication seams. Task 130: an email or attachment save made through it can
+    /// look up no communication, so unless the save carries its captured one the document is created Restricted, and
+    /// that is logged as an Error (a host wired this way is a defect).
+    /// </summary>
+    internal OfficeDocumentPersistence(
+        IDocumentDataverseService documentService,
+        ContentDedupDetector dedupDetector,
+        ILogger<OfficeDocumentPersistence> logger)
     {
         _documentService = documentService;
         _dedupDetector = dedupDetector;
         _logger = logger;
-        _communicationService = communicationService;
-        _genericEntityService = genericEntityService;
     }
+
+    /// <summary>
+    /// Task 130 (#2126): the content types whose document is saved FROM an email — the <c>.eml</c> itself and an
+    /// attachment saved on its own. Every document created for one of them (here, and the attachment children
+    /// <c>UploadFinalizationWorker</c> creates) carries the email's communication link, or Restricted.
+    /// </summary>
+    internal static bool IsEmailDerived(SaveContentType contentType) =>
+        contentType is SaveContentType.Email or SaveContentType.Attachment;
+
+    /// <summary>
+    /// Task 130 (#2126, UAC D7 T8): THE rule for a document created from an email, in one place for every create site
+    /// (this class, and the worker's attachment children and fallback create). With the email's communication, the
+    /// document is created linked to it and keeps its default (Standard) Access Permission — the link alone hides
+    /// nothing; the communication's own rule decides. Without one (the email could not be identified), the document is
+    /// created with its own Access Permission = Restricted. Returns <see langword="true"/> when it chose Restricted, so
+    /// the caller logs it (<see cref="LogCreatedRestricted"/>) once the document id exists.
+    /// </summary>
+    /// <param name="create">The request this create sends.</param>
+    /// <param name="relatedCommunicationId">The email's communication, when one was identified.</param>
+    /// <param name="submissionNarrowing">
+    /// ebilling-r1 task 095 (model §9.1 own-Restricted, uac-r2 v5.7 change 1 and round 122): the <c>.eml</c> that the from-email
+    /// invoice submission creates. It is linked to its communication AND carries its own NON-provisional Restricted narrowing
+    /// (<see cref="Sprk.Bff.Api.Services.Access.AccessInheritance.OwnNarrowing"/>, so linking never releases it) and the
+    /// invoice-submission marker, all in the same create. A communication is required: the submission path refuses before any
+    /// write when none resolves (model §9.1 F1-c), so a missing one here is a defect and throws. Returns <see langword="false"/>
+    /// (this Restricted is chosen, not the unidentified-email fallback the caller logs as an Error). This is the ONLY writer
+    /// of the marker (SubmissionMarkerWriterGuardTests), and the one save-time owner of an own narrowing stays this method (I-19).
+    /// </param>
+    internal static bool ApplyEmailCommunicationOutcome(
+        CreateDocumentRequest create, Guid? relatedCommunicationId, bool submissionNarrowing = false)
+    {
+        ArgumentNullException.ThrowIfNull(create);
+
+        const int restricted = Sprk.Bff.Api.Services.Dataverse.InheritedAccessPermission.Restricted;
+        if (submissionNarrowing)
+        {
+            if (relatedCommunicationId is not { } submissionCommunicationId || submissionCommunicationId == Guid.Empty)
+            {
+                throw new InvalidOperationException(
+                    "A from-email submission .eml is created only linked to its communication (task 095, model 9.1 F1-c).");
+            }
+
+            create.RelatedCommunicationId = submissionCommunicationId;
+            create.AccessPermission = restricted;
+            create.AccessInheritanceRecord = Sprk.Bff.Api.Services.Access.AccessInheritance.OwnNarrowing(restricted).Serialize();
+            create.RestrictedBySubmission = true;
+            return false;
+        }
+
+        if (relatedCommunicationId is { } communicationId && communicationId != Guid.Empty)
+        {
+            create.RelatedCommunicationId = communicationId;
+            create.AccessPermission = null;
+            create.AccessInheritanceRecord = null;
+            return false;
+        }
+
+        // UAC-r2 task 189 (D7 T7a): the Restricted is recorded as the document's OWN narrowing in the same create, so the
+        // reconciler keeps it when the document's parents are wider. Owner round 122: it is marked provisional, so once the
+        // document is linked to a communication the reconciler releases it and the document follows that communication.
+        create.RelatedCommunicationId = null;
+        create.AccessPermission = restricted;
+        create.AccessInheritanceRecord =
+            Sprk.Bff.Api.Services.Access.AccessInheritance.OwnNarrowingUntilEmailIdentified(restricted).Serialize();
+        return true;
+    }
+
+    /// <summary>
+    /// Task 130: the Error a Restricted email-derived create logs. Ids only — the document, the job, and whether the save
+    /// carried a Message-ID at all; never the subject, the sender or the body. The save still succeeds.
+    /// </summary>
+    /// <param name="hadMessageId">Null when the caller cannot know (the worker's fallback for an Attachment payload, which
+    /// carries no Message-ID); logged as "unknown" rather than a false "False".</param>
+    internal static void LogCreatedRestricted(ILogger logger, Guid documentId, Guid? jobId, bool? hadMessageId)
+        => logger.LogError(
+            "Email-derived sprk_document {DocumentId} (job {JobId}) was created with Access Permission Restricted: no "
+            + "sprk_communication could be identified for its email after the capture and the Message-ID lookup "
+            + "(Message-ID present: {HadMessageId}). The save succeeded (task 130, #2126).",
+            documentId, jobId, hadMessageId?.ToString() ?? "unknown");
 
     /// <summary>
     /// Creates a Document record in Dataverse with SPE pointers. Returns the document id AND whether the content
@@ -97,8 +192,10 @@ public class OfficeDocumentPersistence
     /// <c>DocumentId</c> is the existing CANONICAL (no second document was created) — the caller MUST skip
     /// finalization (no redundant artifacts / AI), and deletes the upload only when
     /// <see cref="IsUploadUnreferencedAsync"/> proves no document points at it (task 046).
+    /// Task 130: <c>RelatedCommunicationId</c> is the communication an email-derived document was created linked to —
+    /// null for a Document save, and for an email-derived one that was created Restricted.
     /// </summary>
-    public Task<(Guid DocumentId, bool WasContentDuplicate)> CreateDocumentWithSpePointersAsync(
+    public Task<(Guid DocumentId, bool WasContentDuplicate, Guid? RelatedCommunicationId)> CreateDocumentWithSpePointersAsync(
         SaveRequest request,
         string driveId,
         string itemId,
@@ -109,10 +206,13 @@ public class OfficeDocumentPersistence
         CancellationToken cancellationToken,
         Guid? preAssignedDocumentId = null,
         Guid? owningTeamId = null,
-        Guid? createdByPersonId = null)
+        Guid? createdByPersonId = null,
+        Guid? emailCommunicationId = null,
+        Guid? jobId = null,
+        string? emailMessageIdFallback = null)
         => CreateDocumentWithSpePointersAsync(
             request, driveId, itemId, webUrl, fileName, fileName, fileSize, userId, cancellationToken,
-            preAssignedDocumentId, owningTeamId, createdByPersonId);
+            preAssignedDocumentId, owningTeamId, createdByPersonId, emailCommunicationId, jobId, emailMessageIdFallback);
 
     /// <summary>
     /// Task 046 (b): the same create, with the name the document is SHOWN under (<paramref name="documentName"/>,
@@ -121,7 +221,19 @@ public class OfficeDocumentPersistence
     /// Office email, whose stored name carries a unique suffix. Every other save passes the same value twice, which
     /// is exactly what the overload above does.
     /// </summary>
-    public async Task<(Guid DocumentId, bool WasContentDuplicate)> CreateDocumentWithSpePointersAsync(
+    /// <param name="emailCommunicationId">Task 130: the communication the save's own capture produced for the email (an
+    /// Email save's, or the parent email's for a single Attachment save). Authoritative when present; the Message-ID
+    /// lookup runs only when it is absent.</param>
+    /// <param name="jobId">Task 130: the save's job, for the Error a Restricted create logs.</param>
+    /// <param name="emailMessageIdFallback">Task 130: the RFC Message-ID of an Attachment save's PARENT email, as read from
+    /// the parent itself (Graph <c>internetMessageId</c>). The Message-ID lookup key for an Attachment save is this value
+    /// when present, else <see cref="AttachmentMetadata.ParentEmailId"/> only when that has the RFC shape; an Exchange
+    /// item id is never used as a lookup key. Ignored for an Email save, which names its own.</param>
+    /// <param name="emailCommunicationResolved">UAC task 194b R4-2: the caller already resolved the email's communication
+    /// (<see cref="ResolveEmailCommunicationAsync"/>) and asked the owner question over it, so
+    /// <paramref name="emailCommunicationId"/> is final: a null is "none", and no second lookup may link the document to a
+    /// communication the owner question did not include.</param>
+    public async Task<(Guid DocumentId, bool WasContentDuplicate, Guid? RelatedCommunicationId)> CreateDocumentWithSpePointersAsync(
         SaveRequest request,
         string driveId,
         string itemId,
@@ -133,8 +245,18 @@ public class OfficeDocumentPersistence
         CancellationToken cancellationToken,
         Guid? preAssignedDocumentId = null,
         Guid? owningTeamId = null,
-        Guid? createdByPersonId = null)
+        Guid? createdByPersonId = null,
+        Guid? emailCommunicationId = null,
+        Guid? jobId = null,
+        string? emailMessageIdFallback = null,
+        bool emailCommunicationResolved = false,
+        EditableContentIdentity? editableContentIdentity = null,
+        bool submissionNarrowing = false)
     {
+        // Task 095: only an Email save carries the submission narrowing (the from-email route's .eml).
+        if (submissionNarrowing && request.ContentType != SaveContentType.Email)
+            throw new InvalidOperationException("The submission narrowing applies only to an Email save's .eml (task 095).");
+
         // Task 080 (write-path invariant I-6): an Office document create is ALWAYS team-owned. The writers resolve the
         // team (or refuse) before calling; a null here is a writer that skipped that step, and creating the row anyway
         // would silently make it app-owned in the ROOT business unit — invisible to its own author. Checked before the
@@ -150,14 +272,17 @@ public class OfficeDocumentPersistence
             "Creating Document record with SPE pointers: DriveId={DriveId}, ItemId={ItemId}",
             driveId, itemId);
 
-        // ── FR-C2 (task 022) + FR-C4 (task 025): resolve the canonical communication ONCE ────
-        // If this is an email save AND the same email was captured inbound, a canonical sprk_communication exists
-        // for its internet-message-id. Resolve it once here and reuse it for BOTH: (a) FR-C2 — record THIS user as
-        // a saver on the canonical row (the "M uploaders" fact); and (b) FR-C4 — link the document created below to
-        // that canonical so capture + upload resolve to ONE email (done after the create, when the document id is
-        // known). Null when this is not an email, there is no message-id, or the email was never captured.
+        // ── FR-C2 (task 022) + FR-C4 (task 025) + task 130: resolve the email's communication ONCE ────
+        // For a document saved from an email (the .eml, or a single attachment), the communication is the one the
+        // save's own capture produced (emailCommunicationId), else the canonical found by the email's Message-ID. It is
+        // used for BOTH: (a) FR-C2 — record THIS user as a saver on it (Email saves, as before); and (b) task 130 — the
+        // document below is CREATED linked to it (sprk_relatedcommunication in the create itself, no second write).
+        // Null when this is not an email-derived save, or no communication can be identified — the document is then
+        // created Restricted (ApplyEmailCommunicationOutcome).
+        var messageIdLookupKey = EmailMessageIdOf(request, emailMessageIdFallback);
         var canonicalCommunicationId =
-            await MergeUploaderAndResolveCanonicalAsync(request, userId, cancellationToken);
+            await MergeUploaderAndResolveCanonicalAsync(
+                request, userId, emailCommunicationId, messageIdLookupKey, emailCommunicationResolved, cancellationToken);
 
         // ── FR-C3 content de-dup (gate-after-write, Tier-1 exact quickXorHash) ──────────────
         // The blob is already in SPE (upload happened upstream). Read its content identity and reconcile
@@ -188,45 +313,13 @@ public class OfficeDocumentPersistence
 
         if (IsEditableContent(request.ContentType))
         {
-            canonicalHash = null;
-
-            // Guarded for the same reason the Compose create branch is: the detector documents itself as
-            // never-throwing, but an editable save must not become the ONE path where a dedup hiccup fails
-            // a user's save. Worst case here is a document created without its dedup stamp — recoverable
-            // on the next save; a lost draft is not.
-            try
-            {
-                // The detector's EDITABLE seam: pure identity resolution — no notification, no suppression.
-                // (ContentDedupDetector.ResolveContentIdentityAsync already excludes hash-linked copies from
-                // the canonical lookup, so a link never points at a copy that is about to graduate.)
-                var (liveHash, existingCanonicalId) = await _dedupDetector
-                    .ResolveContentIdentityAsync(driveId, itemId, cancellationToken);
-                canonicalHash = liveHash;
-                linkedCanonicalId = existingCanonicalId;
-
-                // Graduate-on-divergence, evaluated BEFORE the create so the pre-existing row's metadata is
-                // honest regardless of what this save goes on to do. Reachable on the shipped Office path
-                // today because the SPE upload uses ConflictBehavior.Replace — a re-save under the same name
-                // lands on the SAME drive-item, so the row recorded for that item is exactly the one whose
-                // content just changed. It is also the seam FR-11's version-save (task 023) calls once it
-                // resolves an existing document row.
-                //
-                // Ordering, stated plainly: linkedCanonicalId was resolved BEFORE this graduation, so if the
-                // row graduating here would itself have become a valid link target, this save links to the
-                // older canonical (or to nothing) instead. That is deliberate — it is the CONSERVATIVE
-                // direction (a missing link, never a wrong one), and the case only arises from the D1
-                // same-drive-item collision that FR-11 (task 023) owns. Re-resolving after graduation would
-                // cost a second SPE round-trip to chase a state this path is not meant to create.
-                await GraduateLinkedCopyIfDivergedAsync(itemId, canonicalHash, cancellationToken);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex,
-                    "Editable content-dedup resolution failed (non-fatal) for DriveId={DriveId}, ItemId={ItemId}; " +
-                    "creating the document without a dedup stamp.",
-                    driveId, itemId);
-                linkedCanonicalId = null;
-            }
+            // UAC task 194b V-fix 3 (option a): the caller resolved the identity after the upload and asked its owner question
+            // with the canonical in it (OfficeDocumentPersistence.DocumentOwnershipOf), so the create links exactly that one.
+            // Without it (a caller that asked no such question), the identity is resolved here, as before.
+            var identity = editableContentIdentity
+                           ?? await ResolveEditableContentIdentityAsync(driveId, itemId, cancellationToken);
+            canonicalHash = identity.CanonicalHash;
+            linkedCanonicalId = identity.CanonicalDocumentId;
         }
         else
         {
@@ -237,7 +330,9 @@ public class OfficeDocumentPersistence
                 _logger.LogInformation(
                     "Skipping duplicate document create for {FileName} (DriveId={DriveId}, ItemId={ItemId}); content matches canonical sprk_document {CanonicalId}. Caller skips finalization and deletes the upload only if no document points at it (task 046).",
                     fileName, driveId, itemId, canonicalId);
-                return (canonicalId, true);
+                // Task 130: nothing is created here and nothing is written to the existing canonical — its own link (or
+                // its absence) stands.
+                return (canonicalId, true, canonicalCommunicationId);
             }
 
             canonicalHash = dedup.CanonicalHash;
@@ -280,8 +375,20 @@ public class OfficeDocumentPersistence
             }
         };
 
+        // Task 130 (#2126): an email-derived document is created linked to its email's communication, or — when none
+        // could be identified — Restricted. In the create itself, so no document exists, even briefly, with neither.
+        // A Document save is untouched: no link, its Access Permission left at the default.
+        // Task 095: the from-email submission's .eml instead carries its own non-provisional Restricted and the marker.
+        var createdRestricted = IsEmailDerived(request.ContentType)
+            && ApplyEmailCommunicationOutcome(createRequest, canonicalCommunicationId, submissionNarrowing);
+
         var documentIdString = await _documentService.CreateDocumentAsync(createRequest, cancellationToken);
         var documentId = Guid.Parse(documentIdString);
+
+        if (createdRestricted)
+        {
+            LogCreatedRestricted(_logger, documentId, jobId, HasUsableMessageId(messageIdLookupKey));
+        }
 
         // Update with SPE pointers and additional metadata
         var updateRequest = new UpdateDocumentRequest
@@ -329,13 +436,10 @@ public class OfficeDocumentPersistence
 
         await _documentService.UpdateDocumentAsync(documentIdString, updateRequest, cancellationToken);
 
-        // ── FR-C4 (task 025): link this email-archive document to its captured communication ──
-        // Capture-then-upload order: the canonical communication was resolved above; link the just-created document
-        // to it so the reconciliation surface shows ONE email (not the captured communication + this archive as two
-        // rows). Non-fatal / contract-first (NFR-04): the link is written via the generic seam onto the existing
-        // sprk_relatedcommunication lookup — it never fails the save. The reverse order (upload-then-
-        // capture) is linked from IncomingCommunicationProcessor when the communication is later created.
-        await LinkDocumentToCanonicalCommunicationAsync(documentId, canonicalCommunicationId, cancellationToken);
+        // FR-C4 (task 025)'s post-create link write (CrossPathLink, best-effort) was REMOVED by task 130: the link is now
+        // part of the create above, so it can no longer fail separately and leave the document unlinked. The reverse
+        // order (upload-then-capture) is still linked from IncomingCommunicationProcessor when the communication is
+        // later created.
 
         // ── NFR-08 (task 028): record the byte-identical EDITABLE copy as a hash-linked copy ──
         // No-op unless this was an editable save whose bytes matched an existing canonical. The document
@@ -347,7 +451,7 @@ public class OfficeDocumentPersistence
             "Document record created: DocumentId={DocumentId}, DriveId={DriveId}, ItemId={ItemId}",
             documentId, driveId, itemId);
 
-        return (documentId, false);
+        return (documentId, false, createdRestricted ? null : canonicalCommunicationId);
     }
 
     /// <summary>
@@ -632,6 +736,61 @@ public class OfficeDocumentPersistence
     };
 
     /// <summary>
+    /// UAC task 194b V-fix 3 (coordinator ruling, option a): the EDITABLE content's identity — its live hash and the
+    /// byte-identical canonical it will be linked to (<c>sprk_canonicaldocument</c>), if any — read from the uploaded item
+    /// BEFORE the document is created, so the save's owner question can hold the canonical as a Secure-only parent
+    /// (<see cref="DocumentOwnershipOf"/>): a copy of Secure content is created Secure, never re-owned afterwards. Runs the
+    /// graduate-on-divergence step first, as the create did. Non-fatal (NFR-04): a failure is logged and answers no canonical
+    /// (the document is created unlinked), keeping a hash already read.
+    /// </summary>
+    internal async Task<EditableContentIdentity> ResolveEditableContentIdentityAsync(
+        string driveId, string itemId, CancellationToken cancellationToken)
+    {
+        string? canonicalHash = null;
+        Guid? linkedCanonicalId = null;
+
+        // Guarded for the same reason the Compose create branch is: the detector documents itself as
+        // never-throwing, but an editable save must not become the ONE path where a dedup hiccup fails
+        // a user's save. Worst case here is a document created without its dedup stamp — recoverable
+        // on the next save; a lost draft is not.
+        try
+        {
+            // The detector's EDITABLE seam: pure identity resolution — no notification, no suppression.
+            // (ContentDedupDetector.ResolveContentIdentityAsync already excludes hash-linked copies from
+            // the canonical lookup, so a link never points at a copy that is about to graduate.)
+            var (liveHash, existingCanonicalId) = await _dedupDetector
+                .ResolveContentIdentityAsync(driveId, itemId, cancellationToken);
+            canonicalHash = liveHash;
+            linkedCanonicalId = existingCanonicalId;
+
+            // Graduate-on-divergence, evaluated BEFORE the create so the pre-existing row's metadata is
+            // honest regardless of what this save goes on to do. Reachable on the shipped Office path
+            // today because the SPE upload uses ConflictBehavior.Replace — a re-save under the same name
+            // lands on the SAME drive-item, so the row recorded for that item is exactly the one whose
+            // content just changed. It is also the seam FR-11's version-save (task 023) calls once it
+            // resolves an existing document row.
+            //
+            // Ordering, stated plainly: linkedCanonicalId was resolved BEFORE this graduation, so if the
+            // row graduating here would itself have become a valid link target, this save links to the
+            // older canonical (or to nothing) instead. That is deliberate — it is the CONSERVATIVE
+            // direction (a missing link, never a wrong one), and the case only arises from the D1
+            // same-drive-item collision that FR-11 (task 023) owns. Re-resolving after graduation would
+            // cost a second SPE round-trip to chase a state this path is not meant to create.
+            await GraduateLinkedCopyIfDivergedAsync(itemId, canonicalHash, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "Editable content-dedup resolution failed (non-fatal) for DriveId={DriveId}, ItemId={ItemId}; " +
+                "creating the document without a dedup stamp.",
+                driveId, itemId);
+            linkedCanonicalId = null;
+        }
+
+        return new EditableContentIdentity(canonicalHash, linkedCanonicalId);
+    }
+
+    /// <summary>
     /// NFR-08 link half (task 028), mirroring the Compose create-on-save branch: the just-created EDITABLE
     /// document is byte-identical to an existing canonical RIGHT NOW, so record that as a hash-linked copy
     /// (<c>sprk_canonicaldocument</c>) and NOTIFY the saver — never silent, and never a suppressed create.
@@ -779,65 +938,206 @@ public class OfficeDocumentPersistence
     }
 
     /// <summary>
-    /// FR-C2 (task 022) office-upload half + FR-C4 (task 025) resolve: when an email is saved and the SAME email was
-    /// also captured inbound (a canonical <c>sprk_communication</c> exists for its internet-message-id), record the
-    /// saving user on that canonical row's <see cref="DeliveryContextMerge.SavedByUsersAttribute"/> set — so no "who
-    /// saved it" fact is lost — AND return the canonical's id so the caller can cross-path-link the document it
-    /// creates (FR-C4). Returns <c>null</c> when the seams are unavailable (bare test ctor), the save is not an email,
-    /// there is no internet-message-id, or no canonical communication exists (the email was never captured).
-    /// Best-effort / non-fatal (NFR-04): never throws out of the save.
+    /// The Message-ID an email-derived save is looked up by (task 130): the <c>.eml</c>'s RFC Message-ID
+    /// (<see cref="OfficeEmailEnricher.ResolveRfcMessageId"/>: an older add-in sent the item id in
+    /// <see cref="EmailMetadata.InternetMessageId"/>); for a single attachment, the parent's RFC Message-ID read from the
+    /// parent itself (<paramref name="parentRfcMessageId"/>), else its <see cref="AttachmentMetadata.ParentEmailId"/> — but
+    /// only when that has the RFC shape. An Exchange item id (what Graph addresses a message by) is never a Message-ID, so it
+    /// is never a key: no communication carries it.
     /// </summary>
-    private async Task<Guid?> MergeUploaderAndResolveCanonicalAsync(
-        SaveRequest request, string userId, CancellationToken ct)
+    internal static string? EmailMessageIdOf(SaveRequest request, string? parentRfcMessageId = null) => request.ContentType switch
     {
-        if (_communicationService is null || _genericEntityService is null)
-            return null;
-        if (request.ContentType != SaveContentType.Email)
-            return null;
+        SaveContentType.Email => request.Email is { } email ? OfficeEmailEnricher.ResolveRfcMessageId(email) : null,
+        SaveContentType.Attachment => !string.IsNullOrWhiteSpace(parentRfcMessageId) ? parentRfcMessageId
+            : OfficeEmailEnricher.IsRfcMessageId(request.Attachment?.ParentEmailId) ? request.Attachment!.ParentEmailId
+            : null,
+        _ => null,
+    };
 
-        var internetMessageId = request.Email?.InternetMessageId;
-        if (string.IsNullOrWhiteSpace(internetMessageId))
-            return null;
+    /// <summary>
+    /// Task 130: whether a usable Message-ID existed for a save — an RFC Message-ID, never an Exchange item id (which no
+    /// communication carries, so it can identify nothing). What the Restricted Error logs as <c>Message-ID present</c>:
+    /// the key the lookup actually used, not merely a non-empty field.
+    /// </summary>
+    internal static bool HasUsableMessageId(string? messageId) => OfficeEmailEnricher.IsRfcMessageId(messageId);
+
+    /// <summary>
+    /// ebilling-r1 task 095 (model §9.1 F1-c): the email's communication by its RFC Message-ID, for the from-email submission's save,
+    /// which must refuse BEFORE the job row and the upload when none resolves. Unlike <see cref="MergeUploaderAndResolveCanonicalAsync"/>
+    /// (best-effort, a fault is "none") a fault here is reported as such, so the submission answers it retryable (503) rather than
+    /// permanently. <c>(id, false)</c> found; <c>(null, false)</c> no communication (or no usable Message-ID); <c>(null, true)</c> the
+    /// lookup faulted or no lookup seam exists.
+    /// </summary>
+    internal async Task<(Guid? CommunicationId, bool Unavailable)> FindCommunicationForSubmissionAsync(
+        string? internetMessageId, CancellationToken ct)
+    {
+        if (!HasUsableMessageId(internetMessageId))
+            return (null, false);
+
+        if (_communicationService is null)
+        {
+            _logger.LogError("No communication lookup is available to OfficeDocumentPersistence; the submission save cannot identify its email.");
+            return (null, true);
+        }
 
         try
         {
-            var canonical = await _communicationService
-                .GetCommunicationByInternetMessageIdAsync(internetMessageId, ct);
-            if (canonical is null)
-                return null; // email not captured inbound → no canonical communication
-
-            // FR-C2: record the saver (skipped when userId is absent, e.g. a system save).
-            if (!string.IsNullOrWhiteSpace(userId))
-            {
-                await DeliveryContextMerge.MergeAsync(
-                    _genericEntityService, canonical.Id,
-                    DeliveryContextMerge.SavedByUsersAttribute, userId, _logger, ct);
-            }
-
-            return canonical.Id; // FR-C4: the caller links the document it creates to this canonical.
+            var communication = await _communicationService.GetCommunicationByInternetMessageIdAsync(internetMessageId!, ct);
+            return (communication is { Id: var id } && id != Guid.Empty ? id : null, false);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
-            _logger.LogWarning(ex,
-                "FR-C2/C4 canonical resolve failed (non-fatal) for message {MessageId}.", internetMessageId);
-            return null;
+            // Ids only: the Message-ID is an email header (task 130).
+            _logger.LogWarning(ex, "The submission save's communication lookup by Message-ID failed (retryable).");
+            return (null, true);
         }
     }
 
     /// <summary>
-    /// FR-C4 (task 025): links a just-created email-archive document to the canonical <c>sprk_communication</c> that
-    /// captured the same email (resolved by <see cref="MergeUploaderAndResolveCanonicalAsync"/>). No-op when the
-    /// generic seam is unavailable (bare test ctor) or no canonical was found (upload-then-capture — the reverse path
-    /// links later from capture). Best-effort / non-fatal (NFR-04): the link is written via the generic seam so it
-    /// writes the existing <c>sprk_relatedcommunication</c> lookup; it never fails the save.
+    /// UAC task 194b R4-2: the communication an email-derived save's document will be created linked to, resolved BEFORE the
+    /// owner question so the question can include it: <paramref name="capturedCommunicationId"/> (the save's own capture,
+    /// authoritative) when present, else the canonical found by the email's Message-ID (<see cref="EmailMessageIdOf"/>): the
+    /// one Dataverse read, made only when the save holds no id. <c>Resolved = false</c> when that read failed (or no lookup
+    /// seam is wired): the caller must refuse, never ask about the association alone. <c>(true, null)</c> for a Document
+    /// save, and for an email with no usable Message-ID or no communication.
     /// </summary>
-    private async Task LinkDocumentToCanonicalCommunicationAsync(
-        Guid documentId, Guid? canonicalCommunicationId, CancellationToken ct)
+    internal async Task<(bool Resolved, Guid? CommunicationId)> ResolveEmailCommunicationAsync(
+        SaveRequest request, Guid? capturedCommunicationId, string? parentRfcMessageId, CancellationToken ct)
     {
-        if (_genericEntityService is null || canonicalCommunicationId is not { } communicationId)
-            return;
+        ArgumentNullException.ThrowIfNull(request);
+        if (!IsEmailDerived(request.ContentType))
+            return (true, null);
 
-        await CrossPathLink.LinkDocumentToCommunicationAsync(
-            _genericEntityService, documentId, communicationId, _logger, ct);
+        if (capturedCommunicationId is { } captured && captured != Guid.Empty)
+            return (true, captured);
+
+        return await LookUpCommunicationAsync(EmailMessageIdOf(request, parentRfcMessageId), ct);
+    }
+
+    /// <summary>
+    /// The canonical <c>sprk_communication</c> for <paramref name="internetMessageId"/>: <c>(true, id)</c> found, <c>(true,
+    /// null)</c> none (no usable key, or never captured), <c>(false, null)</c> the read failed or no lookup seam is wired.
+    /// Never throws.
+    /// </summary>
+    private async Task<(bool Resolved, Guid? CommunicationId)> LookUpCommunicationAsync(string? internetMessageId, CancellationToken ct)
+    {
+        if (_communicationService is null || _genericEntityService is null)
+        {
+            _logger.LogError(
+                "No communication lookup is available to OfficeDocumentPersistence (constructed without its "
+                + "communication seams — a wiring defect outside tests); the email-derived document cannot be linked "
+                + "by its Message-ID (task 130).");
+            return (false, null);
+        }
+
+        if (string.IsNullOrWhiteSpace(internetMessageId))
+            return (true, null);
+
+        try
+        {
+            var canonical = await _communicationService.GetCommunicationByInternetMessageIdAsync(internetMessageId, ct);
+            return (true, canonical?.Id); // null: the email was never captured
+        }
+        catch (Exception ex)
+        {
+            // Ids only: the Message-ID is an email header (task 130).
+            _logger.LogWarning(ex, "FR-C2/C4 canonical resolve by Message-ID failed.");
+            return (false, null);
+        }
+    }
+
+    /// <summary>The <c>sprk_document</c> column an email-derived document's communication is written to (task 130).</summary>
+    internal const string RelatedCommunicationColumn = "sprk_relatedcommunication";
+
+    /// <summary>
+    /// UAC task 194b R4-2: the owner question for a document an Office save creates, over the lookups the document is
+    /// WRITTEN with: its association (the column <see cref="DocumentAssociationMap"/> writes, as
+    /// <see cref="Sprk.Bff.Api.Services.Dataverse.RecordReparent.ParentChangesOf"/> names it) and its
+    /// <c>sprk_relatedcommunication</c>, through the one builder in <c>sprk_document</c>'s order. It is the question the
+    /// reconciler asks the written row, so a secure communication next to an ordinary association is seen at create, not at
+    /// the next sweep. Coordinator ruling (R4-2): a contact is never an ownership parent (people lookups are never family),
+    /// so a contact association contributes no filing column — the document is filed only by its communication, and is
+    /// unfiled (the resolver's unfiled answer, as the reconciler gives it) when it has none.
+    /// </summary>
+    internal static Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext DocumentOwnershipOf(
+        string? associationType, Guid? associationId, Guid? relatedCommunicationId, Guid? callerObjectId,
+        Guid? canonicalDocumentId = null)
+    {
+        var association = new UpdateDocumentRequest();
+        DocumentAssociationMap.TryApply(association, associationType, associationId);
+        var lookups = Sprk.Bff.Api.Services.Dataverse.RecordReparent.ParentChangesOf(association)
+            .Select(c => KeyValuePair.Create(
+                c.Key,
+                (Sprk.Bff.Api.Services.Dataverse.RecordOwnershipParent?)
+                    new Sprk.Bff.Api.Services.Dataverse.RecordOwnershipParent(c.Value!.LogicalName, c.Value.Id)))
+            .ToList();
+
+        var communication = relatedCommunicationId is { } communicationId && communicationId != Guid.Empty
+            ? new Sprk.Bff.Api.Services.Dataverse.RecordOwnershipParent("sprk_communication", communicationId)
+            : null;
+
+        if (communication is not null)
+            lookups.Add(KeyValuePair.Create(RelatedCommunicationColumn, (Sprk.Bff.Api.Services.Dataverse.RecordOwnershipParent?)communication));
+
+        // UAC task 194b V-fix 3: an editable copy's canonical, under its own column — ForRow holds it as a Secure-only parent
+        // (RecordOwnershipResolver.IsSecureOnlyParent): in secure-if-any, never the primary.
+        if (canonicalDocumentId is { } canonicalId && canonicalId != Guid.Empty)
+        {
+            lookups.Add(KeyValuePair.Create(
+                CanonicalDocumentAttribute,
+                (Sprk.Bff.Api.Services.Dataverse.RecordOwnershipParent?)
+                    new Sprk.Bff.Api.Services.Dataverse.RecordOwnershipParent(DocumentLogicalName, canonicalId)));
+        }
+
+        return Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext.ForRow(
+            DocumentLogicalName, lookups, callerObjectId: callerObjectId);
+    }
+
+    /// <summary>
+    /// FR-C2 (task 022) office-upload half + task 130 resolve: the communication of the email an email-derived save
+    /// came from — <paramref name="capturedCommunicationId"/> (the save's own capture outcome, authoritative) when
+    /// present, else the canonical <c>sprk_communication</c> found by the email's Message-ID. For an Email save the saving
+    /// user is then recorded on that row's <see cref="DeliveryContextMerge.SavedByUsersAttribute"/> set, as before, so no
+    /// "who saved it" fact is lost. Returns <c>null</c> for a Document save, and when no communication can be identified:
+    /// no capture outcome and no Message-ID, a lookup that misses or fails, or no lookup seam (the bare test constructor).
+    /// Best-effort / non-fatal (NFR-04): never throws out of the save. UAC task 194b R4-2: <paramref name="alreadyResolved"/>
+    /// — the caller resolved the communication for its owner question — skips the lookup (a null id is then "none").
+    /// </summary>
+    private async Task<Guid?> MergeUploaderAndResolveCanonicalAsync(
+        SaveRequest request, string userId, Guid? capturedCommunicationId, string? internetMessageId, bool alreadyResolved,
+        CancellationToken ct)
+    {
+        if (!IsEmailDerived(request.ContentType))
+            return null;
+
+        Guid? communicationId = capturedCommunicationId is { } captured && captured != Guid.Empty ? captured : null;
+
+        if (communicationId is null && !alreadyResolved)
+        {
+            // Best-effort here: a lookup that fails reads as "none", and the document is created Restricted.
+            communicationId = (await LookUpCommunicationAsync(internetMessageId, ct)).CommunicationId;
+        }
+
+        if (communicationId is null)
+            return null;
+
+        // FR-C2: record the saver on the email's communication (Email saves only, as before; skipped when userId is
+        // absent, e.g. a system save). DeliveryContextMerge never throws.
+        if (request.ContentType == SaveContentType.Email
+            && _genericEntityService is not null
+            && !string.IsNullOrWhiteSpace(userId))
+        {
+            await DeliveryContextMerge.MergeAsync(
+                _genericEntityService, communicationId.Value,
+                DeliveryContextMerge.SavedByUsersAttribute, userId, _logger, ct);
+        }
+
+        return communicationId;
     }
 }
+
+/// <summary>
+/// UAC task 194b V-fix 3: an editable Office save's content identity (<see cref="OfficeDocumentPersistence.ResolveEditableContentIdentityAsync"/>):
+/// its live hash and the canonical it is byte-identical to, if any.
+/// </summary>
+public sealed record EditableContentIdentity(string? CanonicalHash, Guid? CanonicalDocumentId);

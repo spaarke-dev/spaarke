@@ -141,18 +141,44 @@ public sealed class DagAdvancerTests
     }
 
     [Fact]
-    public void ComputeReadyHandlers_AfterH4H3H5AndH8_UnlocksH4b()
+    public void ComputeReadyHandlers_AfterH4H3H5H8AndH10_UnlocksH4b()
     {
-        var withoutH5 = MakeRun(RunStatus.Running, "H0", "H1", "H2a", "H4", "H3", "H8");
-        var withoutH8 = MakeRun(RunStatus.Running, "H0", "H1", "H2a", "H4", "H3", "H5");
-        var withAll = MakeRun(RunStatus.Running, "H0", "H1", "H2a", "H4", "H3", "H5", "H8");
+        var withoutH5 = MakeRun(RunStatus.Running, "H0", "H1", "H2a", "H2b", "H4", "H3", "H8", "H10");
+        var withoutH8 = MakeRun(RunStatus.Running, "H0", "H1", "H2a", "H2b", "H4", "H3", "H5", "H10");
+        var withoutH10 = MakeRun(RunStatus.Running, "H0", "H1", "H2a", "H2b", "H4", "H3", "H5", "H8");
+        var withoutH2b = MakeRun(RunStatus.Running, "H0", "H1", "H2a", "H4", "H3", "H5", "H8", "H10");
+        var withAll = MakeRun(RunStatus.Running, "H0", "H1", "H2a", "H2b", "H4", "H3", "H5", "H8", "H10");
 
+        _sut.ComputeReadyHandlers(withoutH2b).Should().NotContain("H4b",
+            "T186 follow-up: AiSearch__AllowedIndexes is H2b's AiSearchIndexNames");
         _sut.ComputeReadyHandlers(withoutH5).Should().NotContain("H4b",
             "T245b: Dataverse__ServiceUrl / __EnvironmentUrl are H5's DataverseEnvUrl");
         _sut.ComputeReadyHandlers(withoutH8).Should().NotContain("H4b",
             "T227c: EmailProcessing__DefaultContainerId / Communication__ArchiveContainerId are H8's SpeContainerId");
+        _sut.ComputeReadyHandlers(withoutH10).Should().NotContain("H4b",
+            "R3 073: ExternalAccess__CustomerBusinessUnitId is H10's CustomerBusinessUnitId");
         _sut.ComputeReadyHandlers(withAll).Should().Contain("H4b",
-            "H4b's producers (H4 for the populated KV, H3 for BffAppRegId, H5 for the Dataverse URL, H8 for the container) have all run.");
+            "H4b's producers (H4 for the populated KV, H3 for BffAppRegId, H5 for the Dataverse URL, H8 for the container, H10 for the customer business unit, H2b for the index names) have all run.");
+    }
+
+    [Fact]
+    public void HandlerDependencies_H4bDependsOnH2b_AndH2bDoesNotDependOnH4b()
+    {
+        // T186 follow-up (AiSearch allow-list): H4b reads InterStepState.AiSearchIndexNames (H2b's output), so the edge
+        // must exist and must not cycle.
+        DagAdvancer.HandlerDependencies[DagAdvancer.HandlerH4b].Should().Contain(DagAdvancer.HandlerH2b);
+        DagAdvancer.HandlerDependencies[DagAdvancer.HandlerH2b].Should().BeEquivalentTo(new[] { DagAdvancer.HandlerH2a },
+            "H2b stays upstream of H4b through H2a alone — a new H2b dependency must be checked for a cycle with H4b");
+    }
+
+    [Fact]
+    public void HandlerDependencies_H4bDependsOnH10_AndH10DoesNotDependOnH4b()
+    {
+        // R3 073: H4b reads InterStepState.CustomerBusinessUnitId (H10's output), so the edge must exist and must not cycle.
+        DagAdvancer.HandlerDependencies[DagAdvancer.HandlerH4b].Should().Contain(DagAdvancer.HandlerH10);
+        DagAdvancer.HandlerDependencies[DagAdvancer.HandlerH10].Should().NotContain(DagAdvancer.HandlerH4b);
+        DagAdvancer.HandlerDependencies[DagAdvancer.HandlerH10].Should().BeEquivalentTo(new[] { DagAdvancer.HandlerH3, DagAdvancer.HandlerH5 },
+            "H10 stays upstream of H4b only through H3 and H5 — a new H10 dependency must be checked for a cycle with H4b");
     }
 
     [Fact]
@@ -181,6 +207,19 @@ public sealed class DagAdvancerTests
         var ready = _sut.ComputeReadyHandlers(run);
 
         ready.Should().Contain("H8", "H8 needs H3 (ordering) AND H5 (the environment whose root unit owns the container)");
+    }
+
+    [Fact]
+    public void ComputeReadyHandlers_SkipsAHandlerWhoseLastAttemptFailed()
+    {
+        // T186 L41: re-sending a failed handler's processed attempt can never run it; only resume re-dispatches it.
+        var run = MakeRun(RunStatus.Running, "H0", "H1", "H2a", "H4", "H3", "H5");
+        run.FailedHandlers.Add("H8");
+
+        var ready = _sut.ComputeReadyHandlers(run);
+
+        ready.Should().NotContain("H8");
+        ready.Should().Contain("H10", "the sibling branches still fan out");
     }
 
     [Fact]

@@ -1,59 +1,51 @@
 # Current Task State — Spaarke Ontology Platform R1
 
-> **Last Updated**: 2026-10-19 ~04:30Z (main session; dev BFF live on ad0e9e1a7 with 102b; first nightly sweep on it checked). State only — history is in git log,
-> task `<completion>` blocks and `notes/handoff-history/2026-10.md`. Standing rules: [`CLAUDE.md`](CLAUDE.md) §3 (D-106 critical path;
-> D-123 secure family; D-126 deploys from master; D-127 MVP first; D-129/D-130 team ownership; D-138 owner approvals; D-139; D-140) and §6.
-> Decisions: [`notes/decisions.md`](notes/decisions.md) (D-1..D-169). Deferred work: one self-contained GitHub issue per item, label
-> `ontology-deferred`, plus a DI-nn row in both tables of `notes/defer-issues.md` (next free: **DI-119**). Sub-agents never edit this file.
+> **Last Updated**: 2026-10-29 (main session, context-handoff at 85%). State only: history is in git log, task `<completion>` blocks and
+> `notes/handoff-history/2026-10.md`. Standing rules: [`CLAUDE.md`](CLAUDE.md) §3 and §6. Decisions: [`notes/decisions.md`](notes/decisions.md)
+> (D-1..D-199). Deferred work: one self-contained GitHub issue per item, label `ontology-deferred`, plus a DI-nn row in both tables of
+> `notes/defer-issues.md` (next free: **DI-138**). Sub-agents never edit this file.
 
 ## Quick Recovery (READ THIS FIRST)
 
 | Field | Value |
 |---|---|
-| **Task** | No lane in flight. 042b ✅ (#2096 → docs `f66aa811a`; not yet on master). uac-r2 #2102 (#2084, D-168 final) merged to master `947d98e31`; DI-115 closed. Not yet on dev: needs R3 deploy (BFF before/with Console, owner approval in R3's session) + uac-r2 SRO Read apply (owner approval; before/after notices) |
-| **Next Action** | 1) #2102: await uac-r2's SRO Read notices and R3's deploy notice; after the deploy, smoke the Rule wizard publish on dev. 2) Next docs→master sync carries 042b (full ArchTests first; then R3 BFF deploy with fresh owner approval). 3) Re-check ebilling fix ranges when sent: 071/072 PASS (`3ce07e0e3`, EventId 50318). 049 D-102/D-104 Pending Spend (`be84b2a8f`, our FinanceRollupService/FinanceBaseValues) pass DONE at `bafa0cb9e`: F1 pending write coupled to the main rollup PATCH (schema-before-BFF breaks all rollups), F4 column max 1e9 on a sum; K1 seam test before 079 / our wiring; K2 call `ReadPendingSpendAsync` app-only -> PASS at `295aa332a`. D-125 SubmissionIntegrity PASS at `183c2cf47` (issues #2106-#2108 filed by ebilling); part D review must confirm: (a) MapAll hides D-91 mismatch behind code-set reason, (b) AI refused code unvalidated in sprk_sentence; `sprk_pendingspend` schema needs owner approval, schema before BFF. System billing policy shape sent (new flag-only billing RuleType as the marker, ebilling seed script, owner: option value + disable?); 071 r3, 073 (K1 guard + K2 comment), 074 follow-up (K1-K4 + ParentUndetermined). 5) After 074 reaches master, one small code lane: fix stale `OntologyAdminAuthoringService.cs:1487,1495` comments (system billing type now RuleTypeUnsupported) + immutability ArchTest entry + an ArchTest that every ontology `EventId` number under `Services/Signals/**` is unique (the 50316 ebilling/042b collision passed every suite) + 5 stale writer comments + a comment on `SignalClosureService.ExistingPolicyCodesAsync` (:278) that it must stay UNFILTERED (billing depends on it; ebilling pins it in c3d8616e2) |
+| **Task** | No lane is running. 168, 171, 172 and 173 are DONE and ON MASTER (#2463 → `c8bb55d0cd`; docs fast-forwarded to it). |
+| **Status** | No owner question is open. ebilling #1911 is merged (`eaa0d44f7f`). Their next PR (104, 101) brings our two asks: the principal-change known limit in 105-override-server.md and the double RecordRefusal log; review it when it arrives. The main checkout `C:\code_files\spaarke` refuses fast-forwards because of another session's uncommitted `.claude/agent-memory/researcher/MEMORY.md`; leave it alone. |
+| **Next Action** | 1) Dev BFF is `9f4afe82ac` (R3 readback 14:40:39Z 2026-10-30). Run the 168/173 live proof per `notes/168-173-live-proof.md`: the owner does runs A (internal), B (external) and C (unticked) in the Console; the main session runs the read-only checks and fills section 6; then the task-170 latency check and the `BUD-` number. 2) Owner re-checks for 114, 158-163 and 166 (163's live role change is already done: verified 2026-10-30), then close them. 3) Review ebilling 097b (BillingFactLoader replaced-invoice exclusion: the id must be derived on the server; same firm and number only) and their next PR into master. 4) Remaining: 111 (row 4 waits for the external SPA dev deploy), 105 (v4 UAT), 090 wrap-up (held by the owner until UAT is done). |
 
-## Open owner / peer items
+## Task 168 decisions: D-199 (owner, 2026-10-29)
 
-1. **#2084 / DI-115 ADOPTED (D-168):** UAC builds SecureChildLineage for `sprk_policy` + `sprk_policyversion` after 099b (#2063), with publish refusing (`ontology.admin.rule_held_secure`, before any write) when the resolver answers a Secure team (A3, D-168 amended; no ownerid bind: the admin lacks prvAssign); RuleWizard maps the code; we give the PR two adversarial passes. **UAC #2091:** three re-file writers will call `AfterRefileAsync` (then 042b's re-own follows).
-2. **111 row 4** (owner): `/upload?entityType=sprk_project&entityId=<GUID>`, with the GUID taken from `/project/<GUID>`. Then close 111 → 114.
-3. **CORS** on `/api/v1/external/notifications` (R3 owns): if it recurs, get the UTC time and the OPTIONS status. **Never dispatch `deploy-external-spa.yml` from master** while R3's SPA work is off master.
-4. **POL-MATTER-NOBUDGET** is on (D-163): the owner bulk-closes the dev Signals after the next evaluation.
-5. **Dev spend figure:** the seeded 25,000 on matter REAL-2026-123456.01 becomes 0 at the next rollup (all dev invoices are In Review; D-166). Offer the owner an Approved invoice seed (ebilling would add it); none until the owner asks.
+Q1 = A (an eligible internal user, or an onboarded external contact with a grant on the matter and a portal link); Q2 = the system-mailbox fallback to the same recipients. Built and merged (see the 168 POML completion block).
 
-## ebilling reviews (ontology owns DecisionRecordWriter, FinanceBaseValues, FinanceRollupService)
+## Lane facts to carry
 
-- **015** ✅ (ebilling; re-checks CLEAN through `ad338f34a`). The PR #1911 Q24 condition is met. The delete script requires `-BffDeployAttestation`/`-SpaDeployAttestation`. After the delete, every dev BFF must contain `e0df77339` (R3 agreed). **When 015 reaches master:** update `notes/102a-authoring-contract.md` residual row and D-161 to name `statuscode`.
-- **074** (`WriteBillingDecisionAsync`, D-100/D-101): pass done; all 7 conditions MET. ebilling is fixing F4-1 fully (resolved Signals' subjects in ownership), F3-1, K2 hash, K3 (no contactId), K4. Consumer obligations are in 049/100/103-105. **Re-check their fix range.** Ours after 074 reaches master: `DecisionRecordContextImmutabilityTests.CreateEntryPoints` + synthetic member + must-fire control; 5 stale writer comments (`DecisionRecordWriter.cs` :556 :1547 :1660 :2164 :2326).
-- **049** (held invoices D-102, Pending Spend D-104): review when sent. The held exclusion must be in both sum paths. Pending Spend needs §11 answers and owner schema approval. If it should be authorable as a Threshold, we add allow-list entries (`PolicyVersionValidator.AuthorableColumns`, `PredicateCompiler`, `RuleBodyDescriber`).
-- **071** (billing rule handlers): pass done; 4 fix-now items sent (read fields after IsCreditLine; D-123 cross-wall Duplicate evidence, with their owner + uac-r2; Describe text vs handler; stale hashes) and K4 purity guard, K1 currency, K1 SubmissionId, K2. Re-check their fix range when it arrives.
-- **070**: re-check CLEAN through `cc01731b3`. Their master PR and our 102b touch the same authoring files; whoever reaches master second resolves the conflict.
+- **Docs now contains master through 194b** (`2cd0f62e2c`, merge `4470c95b86`). 194b moved `ResolveSecureBusinessUnitAsync` to `SecureRecordOwnerTeam`; our call was repointed in `f1133d951b` (uac-r2 approved). ArchTests 1665/1665 on that state.
+- **Dev BFF** `136568cf70` (R3, live 02:23:53Z). Smoke PASS (deploy-log `83e3e409cb`). **Pending:** the task-170 commit-path check (before: 28 WhoAmI, 22.4 s per commit) and the `BUD-` number need the owner's next real decision commit. Then query App Insights `spe-insights-dev-67e2xz` (rg `spe-infrastructure-westus2`) for `POST /api/v1/signals/{id}/decision` after 02:23:53Z.
+- **SpaarkeMaster 1.2.4.0 stamp check:** customer-provisioning built `Test-RolePrivilegeExpectations.ps1` + `spaarkemaster-1.2.4.0.json` (`b6e94f4499`). Stamps run 1.2.3.1, so the upgrade REMOVES Basic User `prvReadsprk_Policy` (D-189 note `53c01465dc`). They will send ACME's result after its upgrade.
+- **uac-r2 dev move:** root-homed humans move to BU1 (owner approval pending, no writes yet; they give notice first). The seed policies likely stay root-owned (`DoNotMoveAllRecords=true`). After the move, BU1-homed Ontology Admins (Deep) can't read root-owned seed policies; uac-r2 is preparing an owner question and will copy us. **Hold the memo-LIKE proof** until they confirm placement.
+- **CI:** `ontology-script-tests` is pinned to Pester 5.7.1 (#2428). DI-134 (#2430) asks the CI owner to pin `verdict-script-tests`.
+- **Don't push to docs while a docs→master PR is open** (it moves the PR head and restarts CI).
+- **Ordinary moves on dev (uac-r2):** both switches on since 2026-10-30 19:53:19Z (owner approved in uac-r2's session). Ontology re-read: **PASS** (9 WA-core Signals root team → BU1, owner only; `notes/ordinary-moves-baseline-2026-10-30.md`).
+- **Commits in a fresh worktree:** lint-staged needs prettier: `export PATH="/c/code_files/spaarke-wt-spaarke-ontology-platform-r1/node_modules/.bin:$PATH"` (no junctions). Integration tests under `tests/integration/auth/**` compile into `tests/unit/Sprk.Bff.Api.Tests`; filter there.
 
-## Next, in order
+## Next docs→master
 
-1. docs→master sync (102b), then an R3 BFF deploy (owner approval). After the deploy: the nightly sweep closes and redacts deleted-rule Signals.
-2. 105 UAT with the owner: 102 wizard browser tests + keyboard/screen-reader; 064 §6.1 non-admin checks and UI tests (D-164); the 055 Next step To Do.
-3. Re-run `SignalReadRouteLiveTests` as the non-Console user (DI-83 #1882), then close #1882.
-4. 114 after 111; 090 wrap-up.
-5. Cleanup via `scripts/worktree/Remove-WorktreeSafe.ps1`: `C:\wts-102b`, `C:\wts-eb015`, `C:\wts-eb074`, `C:\wts-eb070`, `C:\wts-eb026`, `C:\wts-sync`, `C:\wts-di107`, `C:\wts-049b`, `C:\wts-064`, `C:\wts-102a`, `C:\wts-102`, `C:\wb126-pub`, `C:\wts-126-pub`.
+The last was PR #2463, merged as master `c8bb55d0cd` (2026-10-29): 168 and 173. Before the next: notices to R3, uac-r2 and word-add-in (current name `spaarke-wt-spaarkeai-word-add-in-r1-8a`); merge master in; build, the filtered Signals tests and the full ArchTests (1858 now).
+
+## Blocked follow-ups (ours)
+
+- `OntologyAdminClassificationService.cs:658/685/705` waits for `sprk_publishstate`. Five stale `DecisionRecordWriter.cs` comments wait for ebilling 074. Close #2212 when ebilling `f0884a175f` reaches master.
+- Owner re-checks still open: project create as a Core User (#2394), check 6 (the composer), then close 114, 158–163 and 166.
 
 ## Dev state (spaarkedev1 / spaarke-bff-dev)
 
-- **First nightly sweep on 102b BFF (2026-10-19 02:30Z) OK:** `[SIGNAL-EVALUATOR] heartbeat outcome=succeeded policies=6 hits=142 written=0 unchanged=142 closed=0 policyRetiredClosed=0 policyFailures=0` (36.7 s). 0 PolicyRetired is expected: the 102b live-check rows (S2) were deleted at cleanup. Rows are not re-stamped when unchanged (D-61). App Insights app `6a76b012-…` (spe-insights-dev-67e2xz), query via `az rest` to api.applicationinsights.io.
-- BFF `1.0.0+44f802a1d…` (R3, 2026-10-19 11:37Z) = `ad0e9e1a7` + master `d7eabba3b` (UAC 186 #2061, 099b #2063; no ontology code) + R3 state. Rollback `ad0e9e1a7`. Does NOT contain ebilling 015 (`e0df77339`), 042b, or #2102 (`947d98e31`, next R3 deploy). Console auto-deploying #2102's RuleWizard ahead of the BFF is safe: it only maps two codes the old BFF never returns.
-- Console from master `20fb86dc4` (04:36Z). Console and BFF aligned for 102b. **Landing tab = Worklist** (D-164; revert `Set-DefaultWorkspaceLayout.ps1 -To 'Daily Briefing'`).
-- **`sprk_policy_matter` CascadeDelete = Cascade** since 2026-10-18 ~03:35Z (D-167; Archive RemoveLink). Live facts: an admin delete removes only the rule; a Core User's matter delete also deletes the matter's rules (no privilege check on the child; audited). See notes/102b "Live on spaarkedev1".
-- Policies: six on, including POL-MATTER-NOBUDGET (D-163); none has a matter.
-- Roles: Ontology Service 58; Ontology Administrator 38 (keeps Signal Assign/Delete, D-162); Console User 21.
-
-## Promises to peers
-
-- **R3** owns the dev BFF line and the external SPA: message first for any BFF change.
-- **word-add-in**: before/after notices for any Console or BFF change (and before any landing-tab revert).
-- **uac-r2**: before/after notices for live role or schema changes; #2084 decision when the owner gives it.
-- **ebilling**: re-check 074 fix range; review 049.
+- **BFF:** `136568cf70` (R3, 2026-10-29). **Console:** `a8314c2e0e`. **SpaarkeMaster:** 1.2.4.0. **POL-MATTER-NOBUDGET:** v3 `…6313`.
+- **Worktrees:** none for lanes. Remove only with `Remove-WorktreeSafe.ps1`, one path per call.
+- **Stash:** two old `lint-staged automatic backup` entries (20 and 30 h old) are not ours. Leave them.
 
 ## Peers (current session names)
 
-uac-r2 `spaarke-wt-unified-access-control-r2-c8`; R3 `spaarke-wt-spa-external-access-platform-75`; ebilling `spaarke-wt-ebilling-r1-99`;
-word-add-in `spaarke-wt-spaarkeai-word-add-in-r1-54`; provisioning `spaarke-wt-customer-provisioning-orchest-bb`.
+ebilling `spaarke-wt-ebilling-r1-5b` · R3 `spaarke-wt-spa-external-access-platform-08` · uac-r2 `spaarke-wt-unified-access-control-r2-ac` ·
+word-add-in `spaarke-wt-spaarkeai-word-add-in-r1-c4` · field-mapping `spaarke-wt-field-mapping-server-write-pa-be` ·
+customer-provisioning `spaarke-wt-customer-provisioning-orchest-2f`. Send before and after notices to word-add-in, R3 and uac-r2 for any dev BFF,
+Console or landing change. word-add-in needs no after-notice for a Console-only change.

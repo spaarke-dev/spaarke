@@ -235,6 +235,31 @@ public class MembershipResolverPeopleTargetingTests
     }
 
     [Fact]
+    public async Task People_ACreatorPersonColumn_OnATableTheBffDoesNotStamp_IsNotACreatorTerm()
+    {
+        // #2273: a table can carry sprk_createdbyperson UNSECURED without the BFF stamping it (ebilling task 080's columns),
+        // so any Write holder could name anyone there. Only createdby binds on such a table; the stamped to-do above is the
+        // must-not-fire control. Master merge (ebilling-r1): not sprk_procedure, which ebilling task 081 now stamps.
+        const string unstamped = "sprk_agreement";
+        Sprk.Bff.Api.Services.Dataverse.RecordCreatorPerson.IsStamped(unstamped).Should().BeFalse("this case needs an unstamped table");
+        var harness = new Harness(TodoShapesWithCreatorPerson, FullIdentity(), human: true, cache: null, logger: null, entity: unstamped, callerId: CallerId);
+
+        await harness.Sut.ResolveAsync(CallerId, unstamped, MembershipResolveOptions.People, CancellationToken.None);
+
+        var fetch = harness.CapturedFetch.Should().ContainSingle().Subject;
+        fetch.Should().NotContain("sprk_createdbyperson");
+        fetch.Should().Contain(Condition("createdby", CallerId), "a human createdby still binds");
+    }
+
+    [Fact]
+    public void CacheVersion_IsBumpedForTheStampedOnlyCreatorTerm()
+    {
+        // #2273 changed what the people query answers under an unchanged options hash — the "bump REQUIRED" case — so a
+        // pre-deploy entry holding forged-creator matches must not be addressable after the deploy.
+        MembershipResolverService.CacheVersion.Should().BeGreaterThanOrEqualTo(7, "#2273 bumped it 6 → 7");
+    }
+
+    [Fact]
     public async Task People_ForAnApplicationUser_NeitherCreatorTermBinds()
     {
         var harness = new Harness(TodoShapesWithCreatorPerson, FullIdentity(), human: false, cache: null, logger: null, entity: Todo, callerId: CallerId);

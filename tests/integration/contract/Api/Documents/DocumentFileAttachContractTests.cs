@@ -185,6 +185,8 @@ public class DocumentFileAttachContractTests
             builder.Services.AddSingleton(access.Object);
             builder.Services.AddScoped<IAuthorizationRule, OperationAccessRule>();
             builder.Services.AddScoped<AuthorizationService>();
+            // Task 188 r3 slice B: the internal document routes' narrowing is not under test here (see DocumentRouteExternalNarrowingTests).
+            Sprk.Bff.Api.Tests.TestInfrastructure.AllVisibleDocumentNarrowing.UseAllVisibleDocumentNarrowing(builder.Services);
 
             builder.Services.AddSingleton(Rig.Relocator);
             builder.Services.AddSingleton(Rig.Resolver);

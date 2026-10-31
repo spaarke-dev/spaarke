@@ -13,13 +13,11 @@ using Sprk.Bff.Api.Api.FieldMappings;
 using Sprk.Bff.Api.Api.FieldMappings.Dtos;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Models.FieldMapping;
-using Sprk.Bff.Api.Models.Office;
 using Sprk.Bff.Api.Services.Access;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.Handlers;
 using Sprk.Bff.Api.Services.Ai.Nodes;
 using Sprk.Bff.Api.Services.Dataverse;
-using Sprk.Bff.Api.Services.Office;
 using Sprk.Bff.Api.Tests.Integration.DataMutation.CoreAncestorStamping;
 using Sprk.Bff.Api.Tests.Integration.DataMutation.RecordOwnership;
 using Sprk.Bff.Api.Tests.Services.Ai.Handlers;
@@ -42,8 +40,9 @@ namespace Sprk.Bff.Api.Tests.DataMutation.ExternalAccess;
 /// <remarks>
 /// The writers: <c>dataverse.create_record</c> and <c>dataverse.update_record</c> (chat), the playbook output
 /// orchestrator's <see cref="DataverseUpdateHandler"/>, the UpdateRecord node / ActionSeam core
-/// (<see cref="UpdateRecordActionCore"/>), the field-mapping push, and the Office quick-create of a project
-/// (<see cref="RecordCreationService"/>). <c>POST /api/v1/work-assignments</c> is not among them: task 166 deletes it
+/// (<see cref="UpdateRecordActionCore"/>) and the field-mapping push. The Office quick-create of a project is the unified
+/// create since field mapping task 018 (018c deleted its own creation core), pinned over its real route in
+/// <c>SecureRootCreateRouteTests</c>. <c>POST /api/v1/work-assignments</c> is not among them: task 166 deletes it
 /// (owner round 10 item 1), and it cannot file a work assignment under a matter at all (it writes a column the table does
 /// not have).
 /// </remarks>
@@ -162,13 +161,17 @@ public partial class SecureRootInheritanceWriterTests : TypedToolHandlerTestFixt
     private SecureChildOwnershipAiToolTests.ScriptedUserClient Scripted() =>
         new(Creator) { RecordTypeOf = id => World.ValueOf<string>("sprk_recordtype_ref", id, "sprk_recordlogicalname") };
 
-    private DataverseCreateRecordHandler ChatCreate(IFieldMappingDataverseService appOnly) =>
-        new(Scripted(), CreateLogger<DataverseCreateRecordHandler>(),
-            new HandoffUrlBuilder("https://spaarkedev1.crm.dynamics.com"),
-            new RecordOwnershipResolver(
-                SecureChildShareWorld.EntitiesOver(() => _fixture.ChildWorld).Object, SecureChildShareWorld.Configuration(),
-                NullLogger<RecordOwnershipResolver>.Instance),
-            appOnly, IdentityNormalizationFixtures.NoLinkedContact(), _gate);
+    private DataverseCreateRecordHandler ChatCreate(IFieldMappingDataverseService appOnly)
+    {
+        var resolver = new RecordOwnershipResolver(
+            SecureChildShareWorld.EntitiesOver(() => _fixture.ChildWorld).Object, SecureChildShareWorld.Configuration(),
+            NullLogger<RecordOwnershipResolver>.Instance);
+        // Task 017 (2d-3): the owned create is the ONE server create, over the same resolver, writer and gate.
+        return new(Scripted(), CreateLogger<DataverseCreateRecordHandler>(),
+            new HandoffUrlBuilder("https://spaarkedev1.crm.dynamics.com"), resolver,
+            IdentityNormalizationFixtures.NoLinkedContact(),
+            Sprk.Bff.Api.Tests.Integration.DataMutation.RecordOwnership.RouteRecordCreation.Default(resolver, appOnly, _gate));
+    }
 
     /// <summary>
     /// The app-only create seam: the row lands in the fixture as the application created it (createdby = app).
@@ -379,8 +382,9 @@ public partial class SecureRootInheritanceWriterTests : TypedToolHandlerTestFixt
             new HandoffUrlBuilder("https://spaarkedev1.crm.dynamics.com"),
             new RecordOwnershipResolver(
                 SecureChildShareWorld.EntitiesOver(() => _fixture.ChildWorld).Object, SecureChildShareWorld.Configuration(),
-                NullLogger<RecordOwnershipResolver>.Instance),
-            AppCreatesIntoTheWorld().Object, IdentityNormalizationFixtures.NoLinkedContact(), _gate);
+                NullLogger<RecordOwnershipResolver>.Instance), IdentityNormalizationFixtures.NoLinkedContact(), Sprk.Bff.Api.Tests.Integration.DataMutation.RecordOwnership.RouteRecordCreation.Default(new RecordOwnershipResolver(
+                SecureChildShareWorld.EntitiesOver(() => _fixture.ChildWorld).Object, SecureChildShareWorld.Configuration(),
+                NullLogger<RecordOwnershipResolver>.Instance), AppCreatesIntoTheWorld().Object, _gate));
 
         var result = await handler.ExecuteChatAsync(
             BuildChatInvocationContext(toolArgumentsJson: JsonSerializer.Serialize(new
@@ -527,8 +531,7 @@ public partial class SecureRootInheritanceWriterTests : TypedToolHandlerTestFixt
             .ReturnsAsync(RecordOwnerResolution.Owned(SecureTeam) with { IsSecureOwner = true });
         var handler = new DataverseCreateRecordHandler(
             Scripted(), CreateLogger<DataverseCreateRecordHandler>(),
-            new HandoffUrlBuilder("https://spaarkedev1.crm.dynamics.com"), resolver.Object,
-            AppCreatesIntoTheWorld().Object, IdentityNormalizationFixtures.NoLinkedContact(), _gate);
+            new HandoffUrlBuilder("https://spaarkedev1.crm.dynamics.com"), resolver.Object, IdentityNormalizationFixtures.NoLinkedContact(), Sprk.Bff.Api.Tests.Integration.DataMutation.RecordOwnership.RouteRecordCreation.Default(resolver.Object, AppCreatesIntoTheWorld().Object, _gate));
 
         var result = await handler.ExecuteChatAsync(
             BuildChatInvocationContext(toolArgumentsJson: JsonSerializer.Serialize(new
@@ -548,172 +551,13 @@ public partial class SecureRootInheritanceWriterTests : TypedToolHandlerTestFixt
         _writes.Should().BeEmpty();
     }
 
-    // ── (1) CREATE: the Office quick-create of a project (filed through the Field Mapping Framework's pair) ──────────
-
-    private readonly List<Entity> _officeCreates = new();
-
-    /// <summary>Task 158 r1c-v1: what changes right after the Office create — between its plan and its provisioning.</summary>
-    private Action<Guid>? _afterOfficeCreate;
-
-    private RecordCreationService OfficeCreator(
-        Guid sourceMatter, Guid typeRef, FieldMappingRuleEntity? extraRule = null, bool withBearerToken = true)
-    {
-        var entities = new Mock<IGenericEntityService>(MockBehavior.Loose);
-        entities
-            .Setup(e => e.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
-            .Returns((Entity row, CancellationToken _) =>
-            {
-                var id = Guid.NewGuid();
-                _officeCreates.Add(row);
-                _fixture.SeedProject(id, owningTeamId: row.GetAttributeValue<EntityReference>("ownerid").Id,
-                    isSecure: row.GetAttributeValue<bool?>("sprk_issecure") == true,
-                    createdBy: AppUser, createdByPerson: row.GetAttributeValue<EntityReference>(RecordCreatorPerson.Column)?.Id);
-                ApplyFiling("sprk_project", id, row.Attributes.ToDictionary(a => a.Key, a => (object?)a.Value));
-                _afterOfficeCreate?.Invoke(id);
-                return Task.FromResult(id);
-            });
-        entities
-            .Setup(e => e.RetrieveAsync("sprk_matter", sourceMatter, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new Entity("sprk_matter", sourceMatter)
-            {
-                ["sprk_matterid"] = sourceMatter,
-                ["sprk_recordtype"] = new EntityReference("sprk_recordtype_ref", typeRef),
-            });
-
-        // The maker's mapping profile files the new project under the matter it is created from (the polymorphic pair).
-        var fieldMappings = new Mock<IFieldMappingDataverseService>();
-        fieldMappings
-            .Setup(m => m.GetFieldMappingProfileWithRulesAsync("sprk_matter", "sprk_project", true, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new FieldMappingProfileEntity
-            {
-                Id = Guid.NewGuid(),
-                Name = "matter to project",
-                SourceEntity = "sprk_matter",
-                TargetEntity = "sprk_project",
-                IsActive = true,
-                Rules =
-                [
-                    new FieldMappingRuleEntity
-                    {
-                        Id = Guid.NewGuid(), Name = "regarding id", SourceField = "sprk_matterid", SourceFieldType = 0,
-                        TargetField = "sprk_regardingrecordid", TargetFieldType = 0, MappingType = 0, ExecutionOrder = 1,
-                        IsActive = true,
-                    },
-                    new FieldMappingRuleEntity
-                    {
-                        Id = Guid.NewGuid(), Name = "regarding type", SourceField = "sprk_recordtype", SourceFieldType = 1,
-                        TargetField = "sprk_regardingrecordtype", TargetFieldType = 1, MappingType = 0, ExecutionOrder = 2,
-                        IsActive = true,
-                    },
-                    .. (extraRule is null ? Array.Empty<FieldMappingRuleEntity>() : new[] { extraRule }),
-                ],
-            });
-
-        var ownership = new Mock<IRecordOwnershipResolver>();
-        ownership.Setup(o => o.ResolveOwningTeamAsync(It.IsAny<RecordOwnershipContext>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(SecureChildShareWorld.GeneralTeam);
-        return new RecordCreationService(entities.Object, fieldMappings.Object, ownership.Object,
-            IdentityNormalizationFixtures.NoLinkedContact(), _gate,
-            Sprk.Bff.Api.Tests.AccessControl.AssignedAccessTestDoubles.InertMaterializer(), NullLogger<RecordCreationService>.Instance,
-            _officeProbe.Object, new HttpContextAccessor { HttpContext = withBearerToken ? CallerRequest() : new DefaultHttpContext() });
-    }
-
-    /// <summary>
-    /// G5 for the Office create (owner round 31 item 2): the OBO probe's designated virtual seam — the caller's Create on
-    /// <c>sprk_project</c> and their rights on each secure parent. Default: both held.
-    /// </summary>
-    private readonly Mock<Sprk.Bff.Api.Infrastructure.ExternalAccess.CallerRecordAccessProbe> _officeProbe = OfficeProbe();
-
-    private static Mock<Sprk.Bff.Api.Infrastructure.ExternalAccess.CallerRecordAccessProbe> OfficeProbe()
-    {
-        var probe = new Mock<Sprk.Bff.Api.Infrastructure.ExternalAccess.CallerRecordAccessProbe>(
-            MockBehavior.Strict, new HttpClient(), new ConfigurationBuilder().Build(),
-            NullLogger<Sprk.Bff.Api.Infrastructure.ExternalAccess.CallerRecordAccessProbe>.Instance, null!);
-        probe.Setup(p => p.CallerHoldsPrivilegeAsync("caller-token", RecordCreationService.ProjectCreatePrivilege, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(true);
-        probe.Setup(p => p.GetCallerRightsAsync("caller-token", It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(AccessRights.Read | AccessRights.Write | AccessRights.Append | AccessRights.AppendTo);
-        return probe;
-    }
-
-    private static HttpContext CallerRequest()
-    {
-        var context = new DefaultHttpContext();
-        context.Request.Headers.Authorization = "Bearer caller-token";
-        return context;
-    }
-
-    private Task<RecordCreationResult> OfficeCreateProjectFrom(Guid matter) =>
-        OfficeCreator(matter, RecordTypeRef(_fixture, "sprk_matter")).CreateAsync(new RecordCreationRequest
-        {
-            EntityType = QuickCreateEntityType.Project,
-            Name = "Lease review",
-            CallerUserId = "oid",
-            OwnerSystemUserId = Creator.ToString("D"),
-            SourceEntityLogicalName = "sprk_matter",
-            SourceRecordId = matter,
-        });
-
-    /// <summary>
-    /// AC 1 + owner round 31 item 2, Office quick-create: a project the mapping files under a SECURE matter is created INTO
-    /// isolation (the named team and the flag in the create itself, the maker as <c>sprk_createdbyperson</c>), after the
-    /// caller's own rights were checked (G5), and comes out secure.
-    /// </summary>
-    [Fact]
-    public async Task OfficeCreate_AProjectFiledUnderASecureMatter_IsCreatedIntoIsolation_AndComesOutSecure()
-    {
-        var (secure, _) = Matters();
-
-        var result = await OfficeCreateProjectFrom(secure);
-
-        result.Succeeded.Should().BeTrue(result.Failure?.Detail);
-        result.Warnings.Should().NotContain(w => w.Contains("secur"), "securing completed in the same call");
-        var row = _officeCreates.Should().ContainSingle().Subject;
-        row.GetAttributeValue<EntityReference>("ownerid").Id.Should().Be(SecureTeam, "never the caller's unit first");
-        row.GetAttributeValue<bool?>("sprk_issecure").Should().BeTrue();
-        _fixture.Updates.Should().NotContain(u => u.RecordId == result.RecordId && u.Payload.ContainsKey("ownerid@odata.bind"));
-        ShouldBeSecure(result.RecordId, "filed under a secure matter by the mapping's pair");
-        _officeProbe.Verify(p => p.GetCallerRightsAsync("caller-token", "sprk_matters", secure, It.IsAny<CancellationToken>()),
-            Times.Once, "AppendTo on the secure matter is asked AS THE CALLER");
-    }
-
-    /// <summary>Owner round 31 item 2, Office: the maker cannot be shared — the project is removed again; nothing created.</summary>
-    [Fact]
-    public async Task OfficeCreate_WhenTheMakerCannotBeShared_TheProjectIsRemoved_AndTheCreateRefused()
-    {
-        var (secure, _) = Matters();
-        _fixture.FailShareForPrincipal = Creator;
-
-        var result = await OfficeCreateProjectFrom(secure);
-
-        result.Succeeded.Should().BeFalse();
-        result.Failure!.Kind.Should().Be(RecordCreationFailureKind.SecureFilingFailed);
-        result.Failure.Detail.Should().Contain("removed again").And.Contain("Try again in a few minutes", "a fault: a retry can succeed");
-        World.Deletes.Should().ContainSingle();
-        _fixture.IsSecureOf(World.Deletes.Single().Id).Should().BeNull("read back gone");
-    }
-
-    /// <summary>
-    /// Owner round 31 item 2, Office: the maker could not be shared AND the project could not be removed again — the warning
-    /// says exactly that (never "shared to you"); the project stays secure and team-owned, and the job shares it later.
-    /// </summary>
-    [Fact]
-    public async Task OfficeCreate_WhenTheMakerCannotBeSharedNorTheProjectRemoved_WarnsSo()
-    {
-        var (secure, _) = Matters();
-        _fixture.FailShareForPrincipal = Creator;
-        World.DeletesFail = true;
-
-        var result = await OfficeCreateProjectFrom(secure);
-
-        result.Succeeded.Should().BeTrue(result.Failure?.Detail);
-        result.Warnings.Should().ContainSingle(w => w.Contains("could not be shared to you and could not be removed")
-            && w.Contains("shared to you automatically once that step succeeds"), "a fault: the job's retry does share it");
-        result.Warnings.Should().NotContain(w => w.Contains("as a secure record shared to you"));
-        _fixture.IsSecureOf(result.RecordId).Should().BeTrue();
-        _fixture.OwningTeamOf(result.RecordId).Should().Be(SecureTeam);
-        _fixture.ShareMaskOf(result.RecordId, Creator).Should().Be(0);
-    }
+    // ── (1) CREATE: the Office quick-create of a project ───────────────────────────────────────────────────────────
+    //
+    // Field mapping task 018c deleted the Office creation core these tests drove. The Office quick-create is the unified
+    // RecordCreationService behind OfficeService's adapter, and its secure-root behaviour is pinned over the real route in
+    // SecureRootCreateRouteTests (and its OfficeSecureOwner and OfficeFiling parts), OfficeQuickCreateAdapterContractTests
+    // and the RecordCreation seam tests. The per-test disposition is in
+    // projects/field-mapping-server-write-path-r1/notes/task-018-notes.md, section "018c".
 
     // ══ Task 158 r1c-v1 — the verifier's items 2 and 7 ══════════════════════════════════════════════════════════════
 
@@ -745,23 +589,6 @@ public partial class SecureRootInheritanceWriterTests : TypedToolHandlerTestFixt
         ShouldBeSecure(created, "the job's re-entry shares it to the person who created it");
     }
 
-    /// <summary>Verifier item 2, Office: the delete answers success but the project survives — warned as existing, never refused as removed.</summary>
-    [Fact]
-    public async Task OfficeCreate_WhenTheCompensationDeleteAnswersSuccessButTheProjectSurvives_WarnsSo_NeverRefusedAsRemoved()
-    {
-        var (secure, _) = Matters();
-        _fixture.FailShareForPrincipal = Creator;
-        World.DeletesIgnored = true;
-
-        var result = await OfficeCreateProjectFrom(secure);
-
-        result.Succeeded.Should().BeTrue("the project exists: the delete did not remove it");
-        result.Warnings.Should().ContainSingle(w => w.Contains("could not be shared to you and could not be removed"));
-        World.Deletes.Should().ContainSingle(d => d.Id == result.RecordId);
-        World.Has("sprk_project", result.RecordId).Should().BeTrue();
-        _fixture.IsSecureOf(result.RecordId).Should().BeTrue();
-    }
-
     /// <summary>
     /// Verifier item 7: the creator is walled off the secure matter BETWEEN the create's plan and its provisioning (a race the
     /// plan's own check cannot close). Provisioning refuses the creator and the row cannot be removed. Every job run refuses it
@@ -787,154 +614,6 @@ public partial class SecureRootInheritanceWriterTests : TypedToolHandlerTestFixt
         var run = await new SecureRootInheritanceJobRunner(_fixture).RunAsync();
         run.Success.Should().BeFalse("the job refuses the walled creator on every run: no self-heal");
         _fixture.ShareMaskOf(created, Creator).Should().Be(0);
-    }
-
-    /// <summary>Verifier item 7, Office: a maker walled off after the plan, the project not removable — no self-heal promised.</summary>
-    [Fact]
-    public async Task OfficeCreate_WhenTheMakerIsWalledOffAfterThePlan_AndTheProjectCannotBeRemoved_PromisesNoSelfHeal()
-    {
-        var (secure, _) = Matters();
-        World.DeletesFail = true;
-        _afterOfficeCreate = _ => _fixture.NoAccessList.DenySystemUserOnRecord(Creator, secure);
-
-        var result = await OfficeCreateProjectFrom(secure);
-
-        result.Succeeded.Should().BeTrue(result.Failure?.Detail);
-        result.Warnings.Should().ContainSingle(w => w.Contains("could not be shared to you and could not be removed")
-            && w.Contains("will not be shared to you automatically"));
-        result.Warnings.Should().NotContain(w => w.Contains("automatically once"));
-    }
-
-    /// <summary>
-    /// Verifier item 7, Office, the removed case: a maker walled off after the plan — the project is removed again, and the
-    /// refusal is named instead of "try again in a few minutes" (a retry is refused the same way).
-    /// </summary>
-    [Fact]
-    public async Task OfficeCreate_WhenTheMakerIsWalledOffAfterThePlan_TheProjectIsRemoved_AndNoRetryIsSuggested()
-    {
-        var (secure, _) = Matters();
-        _afterOfficeCreate = _ => _fixture.NoAccessList.DenySystemUserOnRecord(Creator, secure);
-
-        var result = await OfficeCreateProjectFrom(secure);
-
-        result.Succeeded.Should().BeFalse();
-        result.Failure!.Kind.Should().Be(RecordCreationFailureKind.SecureFilingFailed);
-        result.Failure.Detail.Should().Contain("removed again").And.NotContain("Try again");
-        result.Failure.Code.Should().StartWith("sdap.provision.").And.Contain("no_access");
-        // Task 158 r1c-v2 (round 47 item 4): one sentence of its own — never provisioning's ProblemDetails text appended
-        // (a doubled period, and its "Nothing was changed." beside "Nothing was created.").
-        result.Failure.Detail.Should().NotContain("..").And.NotContain("Nothing was changed")
-            .And.EndWith("an administrator needs to review your access to the secure record it would be filed under.");
-    }
-
-    /// <summary>G5, Office: the caller lacks AppendTo on the secure matter — refused (403 kind), nothing created.</summary>
-    [Fact]
-    public async Task OfficeCreate_WhenTheCallerCannotFileUnderTheSecureMatter_IsRefused_AndNothingIsCreated()
-    {
-        var (secure, _) = Matters();
-        _officeProbe.Setup(p => p.GetCallerRightsAsync("caller-token", "sprk_matters", secure, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(AccessRights.Read);
-
-        var result = await OfficeCreateProjectFrom(secure);
-
-        result.Succeeded.Should().BeFalse();
-        result.Failure!.Kind.Should().Be(RecordCreationFailureKind.SecureFilingRefused);
-        result.Failure.Code.Should().Be("caller_cannot_file_under_parent");
-        _officeCreates.Should().BeEmpty();
-    }
-
-    /// <summary>
-    /// G5, Office: the request carries no bearer token, so the caller's own rights cannot be asked — refused (500 kind,
-    /// <c>caller_rights_unverifiable</c>), nothing created (ADR-003: never "allowed" because it could not be checked).
-    /// </summary>
-    [Fact]
-    public async Task OfficeCreate_WhenTheCallersRightsCannotBeChecked_IsRefused_AndNothingIsCreated()
-    {
-        var (secure, _) = Matters();
-
-        var result = await OfficeCreator(secure, RecordTypeRef(_fixture, "sprk_matter"), withBearerToken: false)
-            .CreateAsync(new RecordCreationRequest
-            {
-                EntityType = QuickCreateEntityType.Project, Name = "Lease review", CallerUserId = "oid",
-                OwnerSystemUserId = Creator.ToString("D"), SourceEntityLogicalName = "sprk_matter", SourceRecordId = secure,
-            });
-
-        result.Succeeded.Should().BeFalse();
-        result.Failure!.Kind.Should().Be(RecordCreationFailureKind.SecureFilingFailed);
-        result.Failure.Code.Should().Be(RecordCreationService.CallerRightsUnverifiable);
-        _officeCreates.Should().BeEmpty();
-    }
-
-    /// <summary>G5, Office: the caller holds no Create on projects — refused (403 kind), nothing created.</summary>
-    [Fact]
-    public async Task OfficeCreate_WhenTheCallerCannotCreateProjects_IsRefused_AndNothingIsCreated()
-    {
-        var (secure, _) = Matters();
-        _officeProbe.Setup(p => p.CallerHoldsPrivilegeAsync("caller-token", RecordCreationService.ProjectCreatePrivilege, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(false);
-
-        var result = await OfficeCreateProjectFrom(secure);
-
-        result.Succeeded.Should().BeFalse();
-        result.Failure!.Kind.Should().Be(RecordCreationFailureKind.SecureFilingRefused);
-        result.Failure.Code.Should().Be(RecordCreationService.CallerCannotCreate);
-        _officeCreates.Should().BeEmpty();
-    }
-
-    /// <summary>
-    /// Task 158 r1: <c>sprk_issecure</c> is the BFF's own column (task 150) — a mapping rule that would copy it onto a project
-    /// created under an ORDINARY matter is skipped; the project is created unflagged and ordinary.
-    /// </summary>
-    [Fact]
-    public async Task OfficeCreate_AMappingRuleTargetingTheSecureFlag_IsSkipped()
-    {
-        var (_, ordinary) = Matters();
-        var typeRef = RecordTypeRef(_fixture, "sprk_matter");
-        var creator = OfficeCreator(ordinary, typeRef, extraRule: new FieldMappingRuleEntity
-        {
-            Id = Guid.NewGuid(), Name = "flag", SourceField = "", SourceFieldType = 0, TargetField = "sprk_issecure",
-            TargetFieldType = 0, MappingType = 1, ExecutionOrder = 3, DefaultValue = "true", IsActive = true,
-        });
-
-        var result = await creator.CreateAsync(new RecordCreationRequest
-        {
-            EntityType = QuickCreateEntityType.Project, Name = "Lease review", CallerUserId = "oid",
-            OwnerSystemUserId = Creator.ToString("D"), SourceEntityLogicalName = "sprk_matter", SourceRecordId = ordinary,
-        });
-
-        result.Succeeded.Should().BeTrue(result.Failure?.Detail);
-        _officeCreates.Should().ContainSingle().Which.Contains("sprk_issecure").Should().BeFalse("never a value a mapping copies");
-        _fixture.IsSecureOf(result.RecordId).Should().BeFalse();
-    }
-
-    /// <summary>Owner round 31 item 1, Office: the maker is on the secure matter's No Access list — refused, nothing created.</summary>
-    [Fact]
-    public async Task OfficeCreate_WhenTheMakerIsOnTheSecureMattersNoAccessList_IsRefused_AndNothingIsCreated()
-    {
-        var (secure, _) = Matters();
-        _fixture.NoAccessList.DenySystemUserOnRecord(Creator, secure);
-
-        var result = await OfficeCreateProjectFrom(secure);
-
-        result.Succeeded.Should().BeFalse();
-        result.Failure!.Code.Should().Be(ProvisionProjectEndpoint.ReasonCreatorNoAccess);
-        result.Failure.Kind.Should().Be(RecordCreationFailureKind.SecureFilingRefused);
-        result.Failure.Detail.Should().Contain("the No Access list of the secure matter it would be filed under");
-        _officeCreates.Should().BeEmpty();
-    }
-
-    /// <summary>AC negative, Office quick-create: the matter's flag cannot be read — refused, nothing created.</summary>
-    [Fact]
-    public async Task OfficeCreate_UnderAMatterWhoseFlagCannotBeRead_IsRefused_AndNothingIsCreated()
-    {
-        var (secure, _) = Matters();
-        FlagUnreadable(secure);
-
-        var result = await OfficeCreateProjectFrom(secure);
-
-        result.Succeeded.Should().BeFalse();
-        result.Failure!.Code.Should().Be(RecordOwnerRefusal.ParentUndetermined);
-        _officeCreates.Should().BeEmpty();
     }
 
     // ── (2) RE-FILE: dataverse.update_record ────────────────────────────────────────────────────────────────────────
@@ -1175,8 +854,9 @@ public partial class SecureRootInheritanceWriterTests : TypedToolHandlerTestFixt
                 new HandoffUrlBuilder("https://spaarkedev1.crm.dynamics.com"),
                 new RecordOwnershipResolver(
                     SecureChildShareWorld.EntitiesOver(() => _fixture.ChildWorld).Object, SecureChildShareWorld.Configuration(),
-                    NullLogger<RecordOwnershipResolver>.Instance),
-                appOnly, IdentityNormalizationFixtures.NoLinkedContact(), _gate)
+                    NullLogger<RecordOwnershipResolver>.Instance), IdentityNormalizationFixtures.NoLinkedContact(), Sprk.Bff.Api.Tests.Integration.DataMutation.RecordOwnership.RouteRecordCreation.Default(new RecordOwnershipResolver(
+                    SecureChildShareWorld.EntitiesOver(() => _fixture.ChildWorld).Object, SecureChildShareWorld.Configuration(),
+                    NullLogger<RecordOwnershipResolver>.Instance), appOnly, _gate))
             .ExecuteChatAsync(
                 BuildChatInvocationContext(toolArgumentsJson: JsonSerializer.Serialize(new
                 {
@@ -1502,8 +1182,9 @@ public partial class SecureRootInheritanceWriterTests : TypedToolHandlerTestFixt
                 new HandoffUrlBuilder("https://spaarkedev1.crm.dynamics.com"),
                 new RecordOwnershipResolver(
                     SecureChildShareWorld.EntitiesOver(() => _fixture.ChildWorld).Object, SecureChildShareWorld.Configuration(),
-                    NullLogger<RecordOwnershipResolver>.Instance),
-                AppCreatesIntoTheWorld().Object, IdentityNormalizationFixtures.NoLinkedContact(), _gate)
+                    NullLogger<RecordOwnershipResolver>.Instance), IdentityNormalizationFixtures.NoLinkedContact(), Sprk.Bff.Api.Tests.Integration.DataMutation.RecordOwnership.RouteRecordCreation.Default(new RecordOwnershipResolver(
+                    SecureChildShareWorld.EntitiesOver(() => _fixture.ChildWorld).Object, SecureChildShareWorld.Configuration(),
+                    NullLogger<RecordOwnershipResolver>.Instance), AppCreatesIntoTheWorld().Object, _gate))
             .ExecuteChatAsync(
                 BuildChatInvocationContext(toolArgumentsJson: JsonSerializer.Serialize(new { tablename = table, item })) with
                 { UserId = Guid.NewGuid().ToString() },
@@ -1758,8 +1439,9 @@ public partial class SecureRootInheritanceWriterTests : TypedToolHandlerTestFixt
                 new HandoffUrlBuilder("https://spaarkedev1.crm.dynamics.com"),
                 new RecordOwnershipResolver(
                     SecureChildShareWorld.EntitiesOver(() => _fixture.ChildWorld).Object, SecureChildShareWorld.Configuration(),
-                    NullLogger<RecordOwnershipResolver>.Instance),
-                appOnly, IdentityNormalizationFixtures.NoLinkedContact(), _gate)
+                    NullLogger<RecordOwnershipResolver>.Instance), IdentityNormalizationFixtures.NoLinkedContact(), Sprk.Bff.Api.Tests.Integration.DataMutation.RecordOwnership.RouteRecordCreation.Default(new RecordOwnershipResolver(
+                    SecureChildShareWorld.EntitiesOver(() => _fixture.ChildWorld).Object, SecureChildShareWorld.Configuration(),
+                    NullLogger<RecordOwnershipResolver>.Instance), appOnly, _gate))
             .ExecuteChatAsync(
                 BuildChatInvocationContext(toolArgumentsJson: JsonSerializer.Serialize(new
                 {
@@ -1809,8 +1491,9 @@ public partial class SecureRootInheritanceWriterTests : TypedToolHandlerTestFixt
                 new HandoffUrlBuilder("https://spaarkedev1.crm.dynamics.com"),
                 new RecordOwnershipResolver(
                     SecureChildShareWorld.EntitiesOver(() => _fixture.ChildWorld).Object, SecureChildShareWorld.Configuration(),
-                    NullLogger<RecordOwnershipResolver>.Instance),
-                AppCreatesIntoTheWorld().Object, IdentityNormalizationFixtures.NoLinkedContact(), _gate)
+                    NullLogger<RecordOwnershipResolver>.Instance), IdentityNormalizationFixtures.NoLinkedContact(), Sprk.Bff.Api.Tests.Integration.DataMutation.RecordOwnership.RouteRecordCreation.Default(new RecordOwnershipResolver(
+                    SecureChildShareWorld.EntitiesOver(() => _fixture.ChildWorld).Object, SecureChildShareWorld.Configuration(),
+                    NullLogger<RecordOwnershipResolver>.Instance), AppCreatesIntoTheWorld().Object, _gate))
             .ExecuteChatAsync(
                 BuildChatInvocationContext(toolArgumentsJson: JsonSerializer.Serialize(new
                 {
@@ -2324,8 +2007,9 @@ public partial class SecureRootInheritanceWriterTests : TypedToolHandlerTestFixt
         var act = () => handler.UpdateAsync("sprk_workassignment", workAssignment,
             new Dictionary<string, object?> { ["sprk_issecure"] = value }, ConcurrencyMode.None, 1, CancellationToken.None);
 
+        // #2251: the app-only refusal (a secure root's secure flag) answers before the filing gate's K3 refusal.
         (await act.Should().ThrowAsync<RecordOwnerUnresolvedException>())
-            .Which.RefusalCode.Should().Be(AccessFollowsParent.SecureFlagReasonCode);
+            .Which.RefusalCode.Should().Be(InheritedAccessPermission.AppOnlySecureRootWriteReasonCode);
         _writes.Should().BeEmpty();
     }
 
@@ -2349,12 +2033,51 @@ public partial class SecureRootInheritanceWriterTests : TypedToolHandlerTestFixt
                 LegacyFields: new Dictionary<string, string?> { ["sprk_issecure"] = "false" }, Lookups: null),
             CancellationToken.None);
 
+        // #2251: the app-only refusal (a secure root's secure flag) answers before the filing gate's K3 refusal.
+        (await act.Should().ThrowAsync<RecordOwnerUnresolvedException>())
+            .Which.RefusalCode.Should().Be(InheritedAccessPermission.AppOnlySecureRootWriteReasonCode);
+        _writes.Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// #2253 fix round 1 (K4): an update that impersonates its user for a proposal that user confirmed (#2257: only
+    /// <c>UpdateRecordPayloadSource.ConfirmedProposal</c>) skips the app-only refusal, so the filing gate's K3
+    /// refusal still answers a <c>sprk_issecure</c> write on a project or a work assignment there, and nothing is written. The
+    /// gate's refusal stays pinned at the writer level, not only behind the app-only one.
+    /// </summary>
+    [Theory]
+    [InlineData("sprk_project")]
+    [InlineData("sprk_workassignment")]
+    public async Task ActionCore_AnImpersonatedSecureFlagWrite_IsRefusedByTheFilingGate_AndNothingIsWritten(string table)
+    {
+        var record = Guid.NewGuid();
+        _fixture.SeedWorkAssignment(record, isSecure: true);
+        var services = new ServiceCollection()
+            .AddSingleton(new StampWorld().Restamper)
+            .AddSingleton<IRecordOwnershipResolver>(new RecordOwnershipResolverDouble())
+            .AddSingleton(Sprk.Bff.Api.Tests.TestInfrastructure.EntitySetNameFixtures.Service())
+            .AddSingleton(_gate)
+            .BuildServiceProvider();
+        var core = new UpdateRecordActionCore(
+            FieldMappingWritingToTheWorld().Object, services.GetRequiredService<IServiceScopeFactory>(), NullLogger.Instance);
+
+        var act = () => core.UpdateAsync(
+            new UpdateRecordActionInput(table, record, FieldMappings: null,
+                LegacyFields: new Dictionary<string, string?> { ["sprk_issecure"] = "false" }, Lookups: null,
+                ImpersonateSystemUserId: Guid.Parse("0000c158-0000-0000-0000-0000000e2253"),
+                PayloadSource: UpdateRecordPayloadSource.ConfirmedProposal),
+            CancellationToken.None);
+
         (await act.Should().ThrowAsync<RecordOwnerUnresolvedException>())
             .Which.RefusalCode.Should().Be(AccessFollowsParent.SecureFlagReasonCode);
         _writes.Should().BeEmpty();
     }
 
-    /// <summary>K3, the field-mapping push: a rule onto <c>sprk_issecure</c> fails that record, nothing written.</summary>
+    /// <summary>
+    /// K3, the field-mapping push: a rule onto <c>sprk_issecure</c> fails that record, nothing written. #2253 fix round 1
+    /// (K2): the push runs as its caller and asks the refusal as <c>WriteIdentity.Caller</c>, which leaves a secure root's
+    /// columns alone, so the filing gate's K3 refusal answers it, as before #2251.
+    /// </summary>
     [Fact]
     public async Task FieldMappingPush_OntoTheSecureFlag_FailsThatRecord_AndWritesNothing()
     {

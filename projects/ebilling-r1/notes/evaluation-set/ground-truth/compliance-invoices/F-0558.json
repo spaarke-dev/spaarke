@@ -1,0 +1,26 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0558",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0558","generator_id":"gen_eval_set.py@1 F-0558","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0558.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-06"},
+ "header":{"firm":"Ingersoll Dunmore PC","firm_invoice_number":"A-87037/2026","invoice_date":"2026-06-02","billing_period_start":"2026-05-01","billing_period_end":"2026-05-31","firm_matter_reference":"48822-0021","po_number":"PO-4580447","fees_total":1731.0,"expenses_total":6144.93,"adjustments_total":0.0,"total_due":7875.93,"currency":"USD"},
+ "timekeepers":[{"name":"Emeka Rosenthal","title":"Of Counsel","rate":365.0,"billed_as":"ER"},{"name":"Samuel Lindqvist","title":"Paralegal","rate":105.0,"billed_as":"SL"},{"name":"Victor Voss","title":"Partner","rate":430.0,"billed_as":"VV"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2026-05-04","timekeeper":"VV","timekeeper_name":"Victor Voss","timekeeper_title":"Partner","title":"Ptr","hours":0.2,"rate":430.0,"amount":86.0,"narrative":"Prepare responses and objections to settlement proposal","codes":["L310","A103"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2026-05-04","timekeeper":"ER","timekeeper_name":"Emeka Rosenthal","timekeeper_title":"Of Counsel","title":"O/C","hours":0.6,"rate":365.0,"amount":219.0,"narrative":"Review opposing brief in response to motion to compel","codes":["L240","A104"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2026-05-12","timekeeper":"SL","timekeeper_name":"Samuel Lindqvist","timekeeper_title":"Paralegal","title":"Para","hours":1.7,"rate":105.0,"amount":178.5,"narrative":"Review court docket and calendar of pending deadlines for the warranty claim","codes":["L190","A104"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2026-05-20","timekeeper":"SL","timekeeper_name":"Samuel Lindqvist","timekeeper_title":"Paralegal","title":"Para","hours":2.7,"rate":105.0,"amount":283.5,"narrative":"Prepare production set and cover correspondence for service on Larkspur Medical","codes":["L320","A110"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2026-05-21","timekeeper":"VV","timekeeper_name":"Victor Voss","timekeeper_title":"Partner","title":"Ptr","hours":1.0,"rate":430.0,"amount":430.0,"narrative":"Research authority for interrogatory responses","codes":["L250","A102"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2026-05-25","timekeeper":"SL","timekeeper_name":"Samuel Lindqvist","timekeeper_title":"Paralegal","title":"Para","hours":1.4,"rate":105.0,"amount":147.0,"narrative":"Review court docket and calendar of pending deadlines for the vendor agreement","codes":["L190","A104"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2026-05-26","timekeeper":"VV","timekeeper_name":"Victor Voss","timekeeper_title":"Partner","title":"Ptr","hours":0.9,"rate":430.0,"amount":387.0,"narrative":"Prepare production set and cover correspondence for service on Solano Freight","codes":["L320","A110"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"expense","date":"2026-05-20","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":367.66,"amount":367.66,"narrative":"Court filing fee","codes":["E112"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"expense","date":"2026-05-25","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":5752.74,"amount":5752.74,"narrative":"Consulting expert fees","codes":["E119"],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"expense","date":"2026-05-27","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":223.0,"rate":0.11,"amount":24.53,"narrative":"Photocopies - 223 pages","codes":["E101"],"page":1,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["845 Market Street","Minneapolis","Tax ID 92-8536091"],"template":"T07","pages":1},
+ "rule_set_id":"RS-06",
+ "context":{"matter_open":"2025-04-04","matter_close":"2026-08-29","matter_budget":56503.0,"approved_timekeepers":["Samuel Lindqvist","Emeka Rosenthal","Katya Nakamura","Gideon Oyelaran","Victor Voss"],"invoice_received_date":"2026-06-13"},
+ "expected_findings":[],
+ "seeded_violations":0
+}

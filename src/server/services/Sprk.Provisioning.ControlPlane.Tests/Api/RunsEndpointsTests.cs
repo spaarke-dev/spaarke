@@ -811,7 +811,7 @@ public sealed class RunsEndpointsTests : IClassFixture<L2WebApplicationFactory>
     {
         using var factory = new L2WebApplicationFactory();
         var run = SeedGatedRun("run-g", "admin-consent", GateState.Pending, "H0.5");
-        run.Status = RunStatus.Running;
+        run.Status = RunStatus.Failed;
         factory.Repository.Seed(run);
         var client = factory.CreateClient();
 

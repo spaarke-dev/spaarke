@@ -1,0 +1,29 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0329",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0329","generator_id":"gen_eval_set.py@1 F-0329","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0329.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-05"},
+ "header":{"firm":"Aldridge & Ellison LLP","firm_invoice_number":"INV-2026-49911","invoice_date":"2026-02-02","billing_period_start":"2026-01-01","billing_period_end":"2026-01-31","firm_matter_reference":"78270-0017","po_number":"PO-4576478","fees_total":3994.0,"expenses_total":22.95,"adjustments_total":0.0,"total_due":4016.95,"currency":"USD"},
+ "timekeepers":[{"name":"Aisha Oyelaran","title":"Associate","rate":295.0,"billed_as":"AO"},{"name":"Daniel Rosenthal","title":"Paralegal","rate":165.0,"billed_as":"DR"},{"name":"Farah Dunleavy","title":"Of Counsel","rate":380.0,"billed_as":"FD"},{"name":"Hannah Oyelaran","title":"Paralegal","rate":140.0,"billed_as":"HO"},{"name":"Jordan Halloran","title":"Associate","rate":265.0,"billed_as":"JH"},{"name":"Marcus Okafor","title":"Associate","rate":290.0,"billed_as":"MO"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2026-01-08","timekeeper":"DR","timekeeper_name":"Daniel Rosenthal","timekeeper_title":"Paralegal","title":"Para","hours":2.1,"rate":165.0,"amount":346.5,"narrative":"Research standard for new trial in the warranty claim","codes":["L460","A102"],"page":2,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2026-01-14","timekeeper":"JH","timekeeper_name":"Jordan Halloran","timekeeper_title":"Associate","title":"Assoc","hours":2.1,"rate":265.0,"amount":556.5,"narrative":"Review court docket and calendar of pending deadlines for the data incident","codes":["L190","A104"],"page":2,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2026-01-14","timekeeper":"MO","timekeeper_name":"Marcus Okafor","timekeeper_title":"Associate","title":"Assoc","hours":2.7,"rate":290.0,"amount":783.0,"narrative":"Attend trial day in the customs audit","codes":["L450","A109"],"page":2,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2026-01-15","timekeeper":"MO","timekeeper_name":"Marcus Okafor","timekeeper_title":"Associate","title":"Assoc","hours":0.8,"rate":290.0,"amount":232.0,"narrative":"Prepare case assessment memorandum regarding the warranty claim and recommended strategy","codes":["L120","A103"],"page":2,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2026-01-16","timekeeper":"FD","timekeeper_name":"Farah Dunleavy","timekeeper_title":"Of Counsel","title":"O/C","hours":0.1,"rate":380.0,"amount":38.0,"narrative":"Review draft expert disclosure for the lease dispute","codes":["L420","A104"],"page":2,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2026-01-20","timekeeper":"DR","timekeeper_name":"Daniel Rosenthal","timekeeper_title":"Paralegal","title":"Para","hours":2.0,"rate":165.0,"amount":330.0,"narrative":"Analyze exposure and damages model for the construction contract","codes":["L120","A104"],"page":2,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2026-01-20","timekeeper":"HO","timekeeper_name":"Hannah Oyelaran","timekeeper_title":"Paralegal","title":"Para","hours":0.2,"rate":140.0,"amount":28.0,"narrative":"Analyze exposure and damages model for the lease dispute","codes":["L120","A104"],"page":2,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2026-01-22","timekeeper":"DR","timekeeper_name":"Daniel Rosenthal","timekeeper_title":"Paralegal","title":"Para","hours":2.5,"rate":165.0,"amount":412.5,"narrative":"Attend trial day in the construction contract","codes":["L450","A109"],"page":2,"narrative_style":"clear"},
+  {"n":9,"line_type":"fee","date":"2026-01-26","timekeeper":"AO","timekeeper_name":"Aisha Oyelaran","timekeeper_title":"Associate","title":"Assoc","hours":2.2,"rate":295.0,"amount":649.0,"narrative":"Revise mediation statement after review by lead counsel","codes":["L430","A104"],"page":2,"narrative_style":"clear"},
+  {"n":10,"line_type":"fee","date":"2026-01-27","timekeeper":"AO","timekeeper_name":"Aisha Oyelaran","timekeeper_title":"Associate","title":"Assoc","hours":1.9,"rate":295.0,"amount":560.5,"narrative":"Draft post-trial motion in the insurance coverage issue","codes":["L460","A103"],"page":2,"narrative_style":"clear"},
+  {"n":11,"line_type":"fee","date":"2026-01-27","timekeeper":"MO","timekeeper_name":"Marcus Okafor","timekeeper_title":"Associate","title":"Assoc","hours":0.2,"rate":290.0,"amount":58.0,"narrative":"Revise pretrial brief after review by lead counsel","codes":["L430","A104"],"page":2,"narrative_style":"clear"},
+  {"n":12,"line_type":"expense","date":"2026-01-16","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":7.2,"amount":7.2,"narrative":"Postage - certified mail","codes":["E108"],"page":2,"narrative_style":"clear"},
+  {"n":13,"line_type":"expense","date":"2026-01-30","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":25.0,"rate":0.63,"amount":15.75,"narrative":"Mileage to courthouse","codes":["E109"],"page":2,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["102 Market Street","Houston","Tax ID 45-7144909"],"template":"T21","pages":2},
+ "rule_set_id":"RS-05",
+ "context":{"matter_open":"2025-06-05","matter_close":"2026-05-01","matter_budget":41067.0,"approved_timekeepers":["Farah Dunleavy","Aisha Oyelaran","Sofia Zielinski","Jordan Halloran","Hannah Oyelaran","Daniel Rosenthal","Nadia Kowalczyk","Priya Tavares","Marcus Okafor"],"invoice_received_date":"2026-02-12"},
+ "expected_findings":[],
+ "seeded_violations":0
+}

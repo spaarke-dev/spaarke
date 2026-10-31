@@ -1,0 +1,23 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"ocg",
+ "id":"E-OCG-04",
+ "set":"E",
+ "meta":{"title":"Mississippi DFA Billing Guidelines for Defense Attorneys (amended 2022-10-17)","source_url":"https://www.dfa.ms.gov/sites/default/files/Tort%20Home/Contact%20-%20Services%20and%20Resources%20-%20Claims/Billing%20Guidelines%20for%20Defense%20Attorneys%20-%20amended%2010172022.pdf","licence":"No licence stated. Government/public-institution publication posted on the open web; used only as a public document for internal evaluation, not redistributed.","licence_status":"public-record-no-licence","pii_note":"Public document from an agency or court; counts only, no matched text recorded. No pattern hits. Hits are agency contact details, addresses and generic role words, not private individuals.","pii_scan":{"file":"ms-dfa.pdf","tool":"pii_scan.py@1","scanned":"2026-10-15","chars":3257,"counts":{"email":0,"phone_us":0,"ssn":0,"card_number":0,"dob_label":0,"iban":0,"street_address":0,"case_party_marker":0},"disposition":"Business and agency contact details only; no private-person data expected. Safe for local evaluation use."},"storage":{"location":"local-only","path":"local/ocg/ms-dfa.pdf"},"spike":false,"label_method":"ai-drafted-pending-review"},
+ "document":{"issuer_type":"state","pages":1,"retrieved":"2026-10-15"},
+ "rules":[
+  {"rule_id":"E-OCG-04-R01","rule_type":"ApprovedRate","params":{"rates":{"attorney":170,"medical_or_nursing_home_malpractice_attorney":200,"Paralegal":75},"unit":"USD per hour"},"consequence":null,"clause_ref":{"section":"1","page":1},"paraphrase":"Attorney rate is 170 dollars an hour, 200 for medical and nursing-home malpractice, and paralegals are capped at 75.","expressible":true},
+  {"rule_id":"E-OCG-04-R02","rule_type":"ApprovedTimekeeper","params":{"approved_names":"approved attorney register"},"consequence":"Disallow","clause_ref":{"section":"2","page":1},"paraphrase":"Time charged by any attorney not on the Approved Attorney Register is removed before payment.","expressible":true},
+  {"rule_id":"E-OCG-04-R03","rule_type":"NonBillableActivity","params":{"original_file_review_max_hours":2,"one_attorney_only":true},"consequence":"Reduce","clause_ref":{"section":"3","page":1},"paraphrase":"Only one approved attorney bills for reviewing the original file, capped at two hours.","expressible":true},
+  {"rule_id":"E-OCG-04-R04","rule_type":"Duplicate","params":{"match_on":["action_or_item"],"separate_bills_by_two_attorneys":false},"consequence":"Disallow","clause_ref":{"section":"4","page":1},"paraphrase":"Two approved attorneys may not bill separately for the same action or item.","expressible":true},
+  {"rule_id":"E-OCG-04-R05","rule_type":"InvoiceAge","params":{"billing_frequency":"quarterly from date of assignment","otherwise":"returned"},"consequence":"Reject","clause_ref":{"section":"8","page":1},"paraphrase":"Bills are submitted quarterly from assignment; any other bill is returned.","expressible":true},
+  {"rule_id":"E-OCG-04-R06","rule_type":"AiObservation","params":{"observations":["block_billing"]},"consequence":null,"clause_ref":{"section":"9","page":1},"paraphrase":"Items must be charged separately; a lumped entry with one total of hours is inappropriate.","expressible":true},
+  {"rule_id":"E-OCG-04-R07","rule_type":"RequiredData","params":{"fields":["claim_file_number","mileage_and_parking_itemised","copy_count"]},"consequence":null,"clause_ref":{"section":"7 / 10 / 13","page":1},"paraphrase":"The claim file number appears on every bill; travel and copy expenses are itemised with counts.","expressible":true},
+  {"rule_id":"E-OCG-04-R08","rule_type":"ExpenseRule","params":{"caps":{"photocopy_per_page":0.2},"meals_only_overnight":true,"receipt_over":100,"mileage":"federal rate"},"consequence":null,"clause_ref":{"section":"10-13","page":1},"paraphrase":"Copies at twenty cents; federal mileage rate; meals only for overnight travel; receipts for extraordinary expenses over 100 dollars.","expressible":true},
+  {"rule_id":"E-OCG-04-R09","rule_type":"AiObservation","params":{"observations":["long_phone_call"],"explain_over_hours":0.3},"consequence":"Flag","clause_ref":{"section":"12","page":1},"paraphrase":"A phone call charged above 0.3 hour must be explained in the next status letter.","expressible":true}
+ ],
+ "unmapped_provisions":[
+  {"clause_ref":{"section":"5","page":1},"paraphrase":"Status reports are due every 120 days on inactive files.","reason":"not-billing"},
+  {"clause_ref":{"section":"6","page":1},"paraphrase":"All settlement offers from plaintiffs must be reported.","reason":"not-billing"}
+ ]
+}

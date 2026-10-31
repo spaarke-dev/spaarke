@@ -1,0 +1,19 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"B-0131",
+ "set":"B",
+ "meta":{"title":"Synthetic invoice B-0131","generator_id":"gen_eval_set.py@1 B-0131","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/B-0131.pdf"},"spike":false,"label_method":"generator","profile":{"quality_mix":"mixed","hour_increment":0.2,"code_mode_requested":"none"}},
+ "header":{"firm":"Rutherford & Yardley LLP","firm_invoice_number":"INV-2025-13374","invoice_date":"2026-05-03","billing_period_start":"2026-04-01","billing_period_end":"2026-04-30","firm_matter_reference":"20306-0006","po_number":null,"fees_total":3923.0,"expenses_total":0.0,"adjustments_total":0.0,"total_due":3923.0,"currency":"EUR"},
+ "timekeepers":[{"name":"Clara Hargrove","title":"Senior Associate","rate":425.0,"billed_as":"CH"},{"name":"Farah Lindqvist","title":"Paralegal","rate":185.0,"billed_as":"FL"},{"name":"Ivan Eriksen","title":"Partner","rate":620.0,"billed_as":"IE"},{"name":"Leila Kowalczyk","title":"Associate","rate":335.0,"billed_as":"LK"},{"name":"Mei Hargrove","title":"Associate","rate":355.0,"billed_as":"MH"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2026-04-06","timekeeper":"IE","timekeeper_name":"Ivan Eriksen","timekeeper_title":"Partner","title":"Ptr","hours":2.6,"rate":620.0,"amount":1612.0,"narrative":"Invoice preparation and review of billing entries","codes":[],"page":1,"narrative_style":"clerical"},
+  {"n":2,"line_type":"fee","date":"2026-04-06","timekeeper":"LK","timekeeper_name":"Leila Kowalczyk","timekeeper_title":"Associate","title":"Assoc","hours":1.8,"rate":335.0,"amount":603.0,"narrative":"Review court docket and calendar of pending deadlines for the lease dispute","codes":[],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2026-04-10","timekeeper":"FL","timekeeper_name":"Farah Lindqvist","timekeeper_title":"Paralegal","title":"Para","hours":0.6,"rate":185.0,"amount":111.0,"narrative":"Draft appellate brief in the distribution agreement","codes":[],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2026-04-21","timekeeper":"FL","timekeeper_name":"Farah Lindqvist","timekeeper_title":"Paralegal","title":"Para","hours":1.2,"rate":185.0,"amount":222.0,"narrative":"Draft appellate brief in the warranty claim","codes":[],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2026-04-29","timekeeper":"MH","timekeeper_name":"Mei Hargrove","timekeeper_title":"Associate","title":"Assoc","hours":1.0,"rate":355.0,"amount":355.0,"narrative":"Docketed deadlines in case management system","codes":[],"page":1,"narrative_style":"clerical"},
+  {"n":6,"line_type":"fee","date":"2026-04-29","timekeeper":"CH","timekeeper_name":"Clara Hargrove","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":2.4,"rate":425.0,"amount":1020.0,"narrative":"Draft notice of appeal and docketing statement for the warranty claim","codes":[],"page":1,"narrative_style":"clear"}
+ ],
+ "intended_codes":{"1":["L520","A111"],"2":["L190","A104"],"3":["L520","A103"],"4":["L520","A103"],"5":["L520","A110"],"6":["L510","A103"]},
+ "document":{"letterhead":["467 Federal Plaza","Minneapolis","Tax ID 76-2611463"],"template":"T11","scan_noise":false,"scan":null,"bundled":false,"bundle":null,"timekeeper_source":"column","rate_source":"line","title_source":"legend","codes_printed":"full","grouping":"none","hours_format":"dec2","expenses_layout":"separate","page_total_rows":true,"summary_first":false,"orientation":"P","features":["non_usd","no_po"],"pages":1,"bundle_parts":[{"part":"invoice","pages":1}],"invoice_first_page":1,"invoice_pages":1}
+}

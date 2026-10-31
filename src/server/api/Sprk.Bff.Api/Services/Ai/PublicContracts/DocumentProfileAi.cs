@@ -167,7 +167,7 @@ public sealed class DocumentProfileAi : IDocumentProfileAi
             // 5) Map the structured output → sprk_document columns via the shared mapper (the SAME
             //    mapping the wizard pipeline uses — one source of truth, no drift).
             var fields = DocumentProfileOutputMapper.BuildFields(
-                aiOutput, docText.FileName, parentEntity: null, _logger);
+                documentId, aiOutput, docText.FileName, parentEntity: null, _logger);
 
             if (fields.Count == 0)
             {

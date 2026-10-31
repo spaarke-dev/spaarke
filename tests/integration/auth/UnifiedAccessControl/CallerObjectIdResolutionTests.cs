@@ -1,6 +1,7 @@
 using System.Security.Claims;
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Spaarke.Core.Auth;
 using Spaarke.Core.Auth.Rules;
@@ -195,7 +196,13 @@ public sealed class CallerObjectIdResolutionTests
 
     private static EndpointFilterInvocationContext InvocationContext(ClaimsPrincipal user)
     {
-        var http = new DefaultHttpContext { User = user };
+        var http = new DefaultHttpContext
+        {
+            User = user,
+            // Task 188 r3 slice B: the internal document routes' narrowing is not under test here (see DocumentRouteExternalNarrowingTests).
+            RequestServices = Sprk.Bff.Api.Tests.TestInfrastructure.AllVisibleDocumentNarrowing.UseAllVisibleDocumentNarrowing(new ServiceCollection())
+                .BuildServiceProvider(),
+        };
         http.Request.RouteValues["documentId"] = DocumentId;
         // REQUIRED, not incidental: AuthorizationService fails closed when the caller token is absent
         // (finding A-2 — a caller-scoped evaluation must never degrade to app-only). Without this the

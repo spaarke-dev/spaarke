@@ -313,6 +313,9 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
         // Task 146 c1-r1 (owner round 13 item 9): the person who asked — createdby is the application user here.
         RecordCreatorPersonColumn.StampIfKnown(document, request.CreatedByPersonId);
 
+        // spaarkeai-word-add-in-r1 task 130 (#2126): the email link and the Restricted fallback, in this one write.
+        StageDocumentCommunicationFields(document, request);
+
         document["statuscode"] = new OptionSetValue(1); // Draft
         document["statecode"] = new OptionSetValue(0);  // Active
 
@@ -320,6 +323,58 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
         _logger.LogInformation("Document created with ID: {DocumentId}", documentId);
         return documentId.ToString();
     }
+
+    /// <summary>
+    /// Stages <see cref="CreateDocumentRequest.RelatedCommunicationId"/> (the <c>sprk_relatedcommunication</c> lookup to
+    /// <c>sprk_communication</c>) and <see cref="CreateDocumentRequest.AccessPermission"/> (the <c>sprk_accesspermission</c>
+    /// choice) onto the document <see cref="CreateDocumentAsync"/> creates, so both are part of the ONE create write
+    /// (spaarkeai-word-add-in-r1 task 130). An Access Permission goes with its <see cref="CreateDocumentRequest.AccessInheritanceRecord"/>
+    /// (<c>sprk_accessinheritance</c>) in the same write (UAC-r2 task 189), and a value without one is refused. An unset value
+    /// writes nothing. Pure (no I/O) so the mapping is assertable, as <see cref="StageAnalysisRegardingFields"/> is.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">An Access Permission without its own-narrowing record.</exception>
+    internal static void StageDocumentCommunicationFields(Entity document, CreateDocumentRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(document);
+        ArgumentNullException.ThrowIfNull(request);
+
+        if (request.RelatedCommunicationId is { } communicationId && communicationId != Guid.Empty)
+            document[DocumentRelatedCommunicationColumn] = new EntityReference(CommunicationEntityName, communicationId);
+
+        if (request.AccessPermission is { } accessPermission)
+        {
+            // Task 189: a value alone reads as inherited when it equals the parents' value, and is widened when they widen.
+            if (string.IsNullOrWhiteSpace(request.AccessInheritanceRecord))
+                throw new InvalidOperationException(
+                    "A document's own Access Permission is created with its sprk_accessinheritance record in the same write (task 189).");
+
+            document[AccessPermissionColumn] = new OptionSetValue(accessPermission);
+            document[DocumentAccessInheritanceColumn] = request.AccessInheritanceRecord;
+        }
+
+        // ebilling-r1 task 095: the invoice-submission marker goes only with the own narrowing it records, in this one create.
+        if (request.RestrictedBySubmission)
+        {
+            if (request.AccessPermission != RestrictedAccessPermission || string.IsNullOrWhiteSpace(request.AccessInheritanceRecord))
+                throw new InvalidOperationException(
+                    "The invoice-submission marker is created only with the document's own Restricted Access Permission and its record (task 095).");
+
+            document[DocumentSubmissionMarkerColumn] = true;
+        }
+    }
+
+    // Task 130: sprk_document.sprk_relatedcommunication → sprk_communication (DocumentLinkFields), and the document's own
+    // Access Permission (docs/data-model/child-access-permission.md). The SDK writes by LOGICAL name.
+    private const string DocumentRelatedCommunicationColumn = "sprk_relatedcommunication";
+    private const string CommunicationEntityName = "sprk_communication";
+    private const string AccessPermissionColumn = "sprk_accesspermission";
+    private const string DocumentAccessInheritanceColumn = "sprk_accessinheritance";
+
+    // ebilling-r1 task 095: the submission marker (task 088, InheritedAccessPermission.SubmissionMarkerColumn in the BFF).
+    private const string DocumentSubmissionMarkerColumn = "sprk_restrictedbysubmission";
+
+    // sprk_accesspermission "Restricted" (InheritedAccessPermission.Restricted in the BFF; docs/data-model/child-access-permission.md).
+    private const int RestrictedAccessPermission = 100000002;
 
     public async Task<DocumentEntity?> GetDocumentAsync(string id, CancellationToken ct = default)
     {
@@ -1417,7 +1472,44 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
     // Metadata Operations (Phase 7)
     // ========================================
 
+    /// <summary>
+    /// Entity set names already resolved by this instance, each for at most <see cref="EntitySetNameLifetime"/> (ontology
+    /// task 170, D-196). Asked once per table per lifetime, not on every call (one decision commit asked for
+    /// <c>sprk_matter</c>'s six times, 0.08-0.8 s each). The same answer <c>DataverseWebApiService</c> keeps.
+    /// <para><b>ADR-009 exception.</b> This is an L1 in-process cache, permitted by ADR-009 "Allowed L1 Exceptions":
+    /// "Metadata (entity definitions) | TTL &lt;= 15 min | Document in code". It holds entity-definition metadata only (a table's
+    /// logical name to its entity set name), never data or an access decision, and it is caller-independent. An entry older than
+    /// the lifetime is asked again, so a renamed entity set is picked up within 15 minutes.</para>
+    /// Only a resolved name is kept: a failure, or an empty name, is asked again next time.
+    /// </summary>
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, (string Name, DateTimeOffset ExpiresAt)> _entitySetNameCache = new(StringComparer.Ordinal);
+
+    /// <summary>Longest an entity set name is kept: the ADR-009 metadata ceiling (15 minutes).</summary>
+    internal static readonly TimeSpan EntitySetNameLifetime = TimeSpan.FromMinutes(15);
+
+    /// <summary>The clock the entity-set-name lifetime is measured on. Settable by tests (InternalsVisibleTo); the constructor is
+    /// unchanged because this class is a DI singleton that test doubles construct.</summary>
+    internal TimeProvider EntitySetNameClock { get; set; } = TimeProvider.System;
+
     public async Task<string> GetEntitySetNameAsync(string entityLogicalName, CancellationToken ct = default)
+    {
+        if (entityLogicalName is not null
+            && _entitySetNameCache.TryGetValue(entityLogicalName, out var cached)
+            && EntitySetNameClock.GetUtcNow() < cached.ExpiresAt)
+        {
+            return cached.Name;
+        }
+
+        var entitySetName = await RetrieveEntitySetNameAsync(entityLogicalName!, ct).ConfigureAwait(false);
+        if (entityLogicalName is not null && !string.IsNullOrEmpty(entitySetName))
+            _entitySetNameCache[entityLogicalName] = (entitySetName, EntitySetNameClock.GetUtcNow() + EntitySetNameLifetime);
+
+        return entitySetName;
+    }
+
+    /// <summary>The metadata read behind <see cref="GetEntitySetNameAsync"/> (<c>RetrieveEntityRequest</c>), uncached; the seam a
+    /// test answers from memory and counts.</summary>
+    protected virtual async Task<string> RetrieveEntitySetNameAsync(string entityLogicalName, CancellationToken ct)
     {
         _logger.LogDebug("Querying entity set name for {EntityLogicalName}", entityLogicalName);
 
@@ -2460,6 +2552,18 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
         throw new NotImplementedException("UpdateExistingRecordFieldsAsync is implemented in DataverseWebApiService. Inject IFieldMappingDataverseService (not the composite IDataverseService).");
     }
 
+    /// <summary>Not implemented here by design — see the overload without the impersonation parameter.</summary>
+    public Task UpdateExistingRecordFieldsAsync(
+        string entityLogicalName,
+        Guid recordId,
+        Dictionary<string, object?> fields,
+        Guid? impersonateSystemUserId,
+        CancellationToken ct = default)
+    {
+        // RED-4 B: fail LOUD on mis-route. Inject IFieldMappingDataverseService, not the composite.
+        throw new NotImplementedException("UpdateExistingRecordFieldsAsync is implemented in DataverseWebApiService. Inject IFieldMappingDataverseService (not the composite IDataverseService).");
+    }
+
     /// <summary>
     /// Not implemented here by design — same single-live-implementation rule as
     /// <see cref="UpdateExistingRecordFieldsAsync"/>. <see cref="DataverseWebApiService"/> owns it.
@@ -2602,6 +2706,144 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
         }
     }
 
+    private System.Runtime.CompilerServices.StrongBox<Guid>? _currentIdentityId;
+
+    /// <summary>
+    /// <see cref="IGenericEntityService.GetCurrentIdentityIdAsync"/>: <c>WhoAmI</c> on this ServiceClient, cached after the first answer
+    /// (an identity does not change for a connection's life). A fault or an empty id is thrown and never cached.
+    /// </summary>
+    public async Task<Guid> GetCurrentIdentityIdAsync(CancellationToken ct = default)
+    {
+        if (Volatile.Read(ref _currentIdentityId) is { } cached)
+        {
+            return cached.Value;
+        }
+
+        var response = (Microsoft.Crm.Sdk.Messages.WhoAmIResponse)await _serviceClient.ExecuteAsync(new Microsoft.Crm.Sdk.Messages.WhoAmIRequest(), ct);
+        if (response.UserId == Guid.Empty)
+        {
+            throw new InvalidOperationException("WhoAmI named no user, so the identity of this Dataverse connection is unknown.");
+        }
+
+        Volatile.Write(ref _currentIdentityId, new System.Runtime.CompilerServices.StrongBox<Guid>(response.UserId));
+        return response.UserId;
+    }
+
+    /// <inheritdoc />
+    /// <remarks>The request is built by <see cref="BuildConditionalUpdate"/> and a failure is mapped by
+    /// <see cref="MapConditionalUpdateFailure"/> — pure functions, tested directly (the <c>ServiceClient</c> is built from
+    /// configuration inside this class and cannot be faked; precedent <see cref="BuildBulkUpdateTransaction"/>).</remarks>
+    public async Task UpdateIfRowVersionMatchesAsync(
+        string entityLogicalName, Guid id, string rowVersion, Dictionary<string, object> fields, CancellationToken ct = default)
+    {
+        var request = BuildConditionalUpdate(entityLogicalName, id, rowVersion, fields);
+
+        try
+        {
+            await _serviceClient.ExecuteAsync(request, ct);
+
+            _logger.LogInformation(
+                "[DATAVERSE] Updated {EntityLogicalName} record {EntityId} at version {RowVersion} with {FieldCount} fields",
+                entityLogicalName,
+                id,
+                rowVersion,
+                fields.Count);
+        }
+        catch (Exception ex)
+        {
+            var mapped = MapConditionalUpdateFailure(entityLogicalName, id, rowVersion, ex);
+            if (mapped is System.Data.DBConcurrencyException)
+            {
+                _logger.LogInformation(
+                    "[DATAVERSE] {EntityLogicalName} record {EntityId} changed since version {RowVersion}; the conditional "
+                    + "update was not applied",
+                    entityLogicalName,
+                    id,
+                    rowVersion);
+            }
+            else
+            {
+                _logger.LogError(
+                    exception: ex,
+                    message: "[DATAVERSE] Error updating {EntityLogicalName} record {EntityId} at version {RowVersion}. Fields: {FieldCount}",
+                    entityLogicalName,
+                    id,
+                    rowVersion,
+                    fields.Count);
+            }
+
+            throw mapped;
+        }
+    }
+
+    /// <summary>
+    /// The <see cref="Microsoft.Xrm.Sdk.Messages.UpdateRequest"/> <see cref="UpdateIfRowVersionMatchesAsync"/> sends: the row with
+    /// <see cref="Entity.RowVersion"/> set and <see cref="ConcurrencyBehavior.IfRowVersionMatches"/>, carrying
+    /// <see cref="UpdateAsync"/>'s field rules — a C# <c>null</c> value is SKIPPED, <see cref="DBNull.Value"/> becomes a
+    /// null attribute (the SDK's "clear the column / sever the lookup"), anything else (an <see cref="EntityReference"/>
+    /// lookup included) is written as given. Argument errors throw here, before any I/O.
+    /// </summary>
+    public static Microsoft.Xrm.Sdk.Messages.UpdateRequest BuildConditionalUpdate(
+        string entityLogicalName, Guid id, string rowVersion, Dictionary<string, object> fields)
+    {
+        if (string.IsNullOrEmpty(entityLogicalName))
+            throw new ArgumentNullException(nameof(entityLogicalName));
+
+        if (id == Guid.Empty)
+            throw new ArgumentException("Entity ID cannot be empty", nameof(id));
+
+        if (string.IsNullOrWhiteSpace(rowVersion))
+            throw new ArgumentException("A conditional update needs the row version it was read at", nameof(rowVersion));
+
+        if (fields == null || fields.Count == 0)
+            throw new ArgumentException("Fields dictionary cannot be null or empty", nameof(fields));
+
+        var entity = new Entity(entityLogicalName, id) { RowVersion = rowVersion };
+        foreach (var field in fields)
+        {
+            if (field.Value is null)
+                continue;
+            entity[field.Key] = field.Value is DBNull ? null : field.Value;
+        }
+
+        return new Microsoft.Xrm.Sdk.Messages.UpdateRequest { Target = entity, ConcurrencyBehavior = ConcurrencyBehavior.IfRowVersionMatches };
+    }
+
+    /// <summary>Dataverse <c>ConcurrencyVersionMismatch</c> as a signed 32-bit integer
+    /// (<see cref="OrganizationServiceFault.ErrorCode"/>): the row's version is not the one the update was conditioned on.
+    /// The code the Signals writers already type on (<c>SignalWriter.ConcurrencyVersionMismatch</c>).</summary>
+    private const int ConcurrencyVersionMismatchErrorCode = unchecked((int)0x80060882);
+
+    /// <summary><see cref="ConcurrencyVersionMismatchErrorCode"/> as the hex text a fault message carries.</summary>
+    private const string ConcurrencyVersionMismatchErrorText = "0x80060882";
+
+    /// <summary>
+    /// What <see cref="UpdateIfRowVersionMatchesAsync"/> throws for <paramref name="failure"/>: a
+    /// <see cref="System.Data.DBConcurrencyException"/> when Dataverse's <c>ConcurrencyVersionMismatch</c> fault (0x80060882)
+    /// is anywhere in the exception chain — nothing was written, the row changed since <paramref name="rowVersion"/> — and
+    /// otherwise the <see cref="InvalidOperationException"/> <see cref="UpdateAsync"/> throws for any failure. Typed on the
+    /// fault code; K1 (#2143): a link in the chain whose message carries the code's hex text (<c>0x80060882</c>) counts too,
+    /// for a fault the <see cref="ServiceClient"/> surfaces without its typed detail — the precedent
+    /// <c>DecisionCommitService.IsVersionMismatch</c> keeps. The hex code is not localized; the message around it is never
+    /// read.
+    /// </summary>
+    public static Exception MapConditionalUpdateFailure(string entityLogicalName, Guid id, string rowVersion, Exception failure)
+    {
+        for (var current = failure; current is not null; current = current.InnerException)
+        {
+            if ((current is FaultException<OrganizationServiceFault> fault
+                    && fault.Detail?.ErrorCode == ConcurrencyVersionMismatchErrorCode)
+                || current.Message?.Contains(ConcurrencyVersionMismatchErrorText, StringComparison.OrdinalIgnoreCase) == true)
+            {
+                return new System.Data.DBConcurrencyException(
+                    $"{entityLogicalName} {id:D} changed since version {rowVersion} was read; the update was not applied.",
+                    failure);
+            }
+        }
+
+        return new InvalidOperationException($"Failed to update {entityLogicalName} record {id}: {failure.Message}", failure);
+    }
+
     public async Task DeleteAsync(string entityLogicalName, Guid id, CancellationToken ct = default)
     {
         try
@@ -2727,10 +2969,256 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
     }
 
     /// <summary>
+    /// <see cref="BulkUpdateAsync"/> with every update conditional on its row version — see
+    /// <see cref="IGenericEntityService.BulkUpdateIfRowVersionsMatchAsync"/> for the contract.
+    /// </summary>
+    /// <remarks>
+    /// Sends the transaction <see cref="BuildBulkUpdateTransaction"/> builds with a row version per update. A mismatch is
+    /// recognised by <see cref="IsRowVersionMismatch"/> and thrown as <see cref="System.Data.DBConcurrencyException"/> (the
+    /// transaction rolled back: nothing applied), the precedent of <c>DataverseWebApiService.UpdateRecordFieldsIfUnchangedAsync</c>.
+    /// </remarks>
+    public async Task BulkUpdateIfRowVersionsMatchAsync(
+        string entityLogicalName,
+        List<(Guid id, Dictionary<string, object> fields, long rowVersion)> updates,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(updates);
+        var plain = updates.Select(u => (u.id, u.fields)).ToList();
+        var transaction = BuildBulkUpdateTransaction(entityLogicalName, plain, updates.Select(u => (long?)u.rowVersion).ToList());
+
+        try
+        {
+            await _serviceClient.ExecuteAsync(transaction, ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            var mapped = MapConditionalBulkFailure(entityLogicalName, plain, ex);
+            if (mapped is System.Data.DBConcurrencyException)
+            {
+                _logger.LogWarning(
+                    "[DATAVERSE] Conditional bulk update of {RecordCount} {EntityLogicalName} records refused: a row changed since it was read; nothing was applied",
+                    updates.Count,
+                    entityLogicalName);
+            }
+            else
+            {
+                _logger.LogError(
+                    ex,
+                    "[DATAVERSE] Conditional bulk update of {RecordCount} {EntityLogicalName} records failed: {BulkUpdateFailure}",
+                    updates.Count,
+                    entityLogicalName,
+                    mapped.Message);
+            }
+
+            throw mapped;
+        }
+
+        _logger.LogInformation(
+            "[DATAVERSE] Bulk updated {RecordCount} {EntityLogicalName} records in one transaction, each at its expected row version",
+            updates.Count,
+            entityLogicalName);
+    }
+
+    /// <summary>
+    /// Sends the requests as one <c>ExecuteTransactionRequest</c> — see <see cref="IGenericEntityService.ExecuteTransactionAsync"/>
+    /// for the contract. <see cref="BuildTransaction"/> builds it and <see cref="MapTransactionFailure"/> words a failure.
+    /// </summary>
+    public async Task ExecuteTransactionAsync(IReadOnlyList<OrganizationRequest> requests, CancellationToken ct = default)
+    {
+        // Argument validation lives in the builder and throws before any I/O, unwrapped.
+        var transaction = BuildTransaction(requests);
+
+        try
+        {
+            await _serviceClient.ExecuteAsync(transaction, ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            var mapped = MapTransactionFailure(requests, ex);
+            _logger.LogError(
+                ex,
+                "[DATAVERSE] Transaction of {RequestCount} requests failed (failed index {FailedRequestIndex}, outcome unknown {OutcomeUnknown}): {TransactionFailure}",
+                requests.Count,
+                mapped.FailedRequestIndex,
+                mapped.OutcomeUnknown,
+                mapped.Message);
+            throw mapped;
+        }
+
+        _logger.LogInformation("[DATAVERSE] Executed {RequestCount} requests in one transaction", requests.Count);
+    }
+
+    /// <summary>
+    /// Pure (no-I/O) builder for <see cref="ExecuteTransactionAsync"/>: ONE <c>ExecuteTransactionRequest</c> holding the
+    /// requests in input order, with no responses requested. Same shape as <see cref="BuildBulkUpdateTransaction"/>, which builds
+    /// one table's updates. Throws <see cref="ArgumentException"/> for a null or empty list, a null entry, or an
+    /// <c>ExecuteMultipleRequest</c> / <c>ExecuteTransactionRequest</c> entry (Dataverse cannot nest them). Public static for the
+    /// same testability reason as <see cref="BuildBulkUpdateTransaction"/> (ADR-038 B8 / B1).
+    /// </summary>
+    public static Microsoft.Xrm.Sdk.Messages.ExecuteTransactionRequest BuildTransaction(IReadOnlyList<OrganizationRequest> requests)
+    {
+        if (requests is null || requests.Count == 0)
+            throw new ArgumentException("Requests list cannot be null or empty", nameof(requests));
+
+        var transaction = new Microsoft.Xrm.Sdk.Messages.ExecuteTransactionRequest
+        {
+            Requests = new OrganizationRequestCollection(),
+            ReturnResponses = false // no caller reads per-request responses
+        };
+
+        for (var index = 0; index < requests.Count; index++)
+        {
+            var request = requests[index]
+                ?? throw new ArgumentException($"The request at index {index} is null.", nameof(requests));
+
+            if (request is Microsoft.Xrm.Sdk.Messages.ExecuteMultipleRequest or Microsoft.Xrm.Sdk.Messages.ExecuteTransactionRequest)
+                throw new ArgumentException(
+                    $"The request at index {index} is a {request.GetType().Name}; a transaction cannot contain ExecuteMultiple or ExecuteTransaction.",
+                    nameof(requests));
+
+            transaction.Requests.Add(request);
+        }
+
+        return transaction;
+    }
+
+    /// <summary>
+    /// Pure: the exception <see cref="ExecuteTransactionAsync"/> throws for a failed transaction.
+    /// <list type="bullet">
+    /// <item>An <see cref="ExecuteTransactionFault"/> naming an in-range request (found through the exception chain, since the SDK may
+    /// wrap it) can only come from a transaction that rolled back: the message names that request's index, kind, table and id and states
+    /// that NO request was applied.</item>
+    /// <item>Any other Dataverse fault carries the atomicity guarantee alone (the client-wide last error can surface a concurrent
+    /// request's fault, GitHub #971), with no index.</item>
+    /// <item>No Dataverse fault anywhere in the chain (a timeout can land after the commit): the outcome is unknown — all or none, never
+    /// partial — and <see cref="DataverseTransactionException.OutcomeUnknown"/> is true.</item>
+    /// </list>
+    /// The message adds no field value of its own (ADR-015); the appended fault text is Dataverse's.
+    /// </summary>
+    public static DataverseTransactionException MapTransactionFailure(IReadOnlyList<OrganizationRequest> requests, Exception failure)
+    {
+        ArgumentNullException.ThrowIfNull(requests);
+        ArgumentNullException.ThrowIfNull(failure);
+
+        OrganizationServiceFault? fault = null;
+        for (var current = failure; current is not null && fault is null; current = current.InnerException)
+        {
+            if (current is FaultException<OrganizationServiceFault> faultException)
+            {
+                fault = faultException.Detail;
+            }
+        }
+
+        if (fault is null)
+        {
+            return new DataverseTransactionException(
+                $"Transaction of {requests.Count} request(s) did not complete: {failure.Message}. " +
+                "Dataverse returned no fault, so the outcome is unknown — the requests were sent (if at all) as ONE transaction, " +
+                "so either all of them were applied or none were, never a partial set.",
+                failedRequestIndex: null,
+                outcomeUnknown: true,
+                failure);
+        }
+
+        if (fault is ExecuteTransactionFault transactionFault
+            && transactionFault.FaultedRequestIndex >= 0
+            && transactionFault.FaultedRequestIndex < requests.Count)
+        {
+            var index = transactionFault.FaultedRequestIndex;
+            return new DataverseTransactionException(
+                $"Transaction of {requests.Count} request(s) failed at request index {index} ({DescribeRequest(requests[index])}): {fault.Message}. " +
+                "The transaction was rolled back — NO requests were applied.",
+                failedRequestIndex: index,
+                outcomeUnknown: false,
+                failure);
+        }
+
+        return new DataverseTransactionException(
+            $"Transaction of {requests.Count} request(s) failed: {fault.Message}. " +
+            "Dataverse did not identify which request faulted. The requests were sent as ONE transaction, so " +
+            "either all of them were applied or none were, never a partial set.",
+            failedRequestIndex: null,
+            outcomeUnknown: false,
+            failure);
+    }
+
+    /// <summary>Pure: a request's kind, table and id for a failure message (never a field value).</summary>
+    private static string DescribeRequest(OrganizationRequest request)
+    {
+        var kind = request.GetType().Name;
+        return request switch
+        {
+            Microsoft.Xrm.Sdk.Messages.CreateRequest create => $"{kind} {create.Target?.LogicalName} {create.Target?.Id}",
+            Microsoft.Xrm.Sdk.Messages.UpdateRequest update => $"{kind} {update.Target?.LogicalName} {update.Target?.Id}",
+            Microsoft.Xrm.Sdk.Messages.DeleteRequest delete => $"{kind} {delete.Target?.LogicalName} {delete.Target?.Id}",
+            _ => kind,
+        };
+    }
+
+    /// <summary>
+    /// Pure: the exception <see cref="BulkUpdateIfRowVersionsMatchAsync"/> throws for a failed transaction. A row version mismatch
+    /// (<see cref="IsRowVersionMismatch"/>) is a <see cref="System.Data.DBConcurrencyException"/> — the transaction rolled back, nothing
+    /// was applied. Any other failure, a Dataverse fault or an exception with no fault at all (a timeout, whose outcome is unknown), is the
+    /// <see cref="InvalidOperationException"/> that <see cref="BulkUpdateAsync"/> throws, worded by <see cref="DescribeBulkUpdateFailure"/>;
+    /// the original is its inner exception in every case.
+    /// </summary>
+    public static Exception MapConditionalBulkFailure(
+        string entityLogicalName,
+        IReadOnlyList<(Guid id, Dictionary<string, object> fields)> updates,
+        Exception failure)
+    {
+        ArgumentNullException.ThrowIfNull(failure);
+
+        return IsRowVersionMismatch(failure)
+            ? new System.Data.DBConcurrencyException(
+                $"A {entityLogicalName} record changed since it was read; the transaction was rolled back and no update was applied.", failure)
+            : new InvalidOperationException(DescribeBulkUpdateFailure(entityLogicalName, updates, failure), failure);
+    }
+
+    /// <summary>Dataverse's <c>ConcurrencyVersionMismatch</c> error code (a conditional write found the row at another version).</summary>
+    public const int ConcurrencyVersionMismatch = unchecked((int)0x80060882);
+
+    /// <summary>
+    /// Pure: whether <paramref name="failure"/> is a row version mismatch — an <see cref="OrganizationServiceFault"/> anywhere in
+    /// the exception chain (or its inner faults) carrying <see cref="ConcurrencyVersionMismatch"/>, or, where the SDK surfaces only
+    /// text, a message naming it (the same text test as <c>DataverseUpdateHandler</c>).
+    /// </summary>
+    public static bool IsRowVersionMismatch(Exception failure)
+    {
+        for (var current = failure; current is not null; current = current.InnerException)
+        {
+            if (current is FaultException<OrganizationServiceFault> faultException)
+            {
+                for (var fault = faultException.Detail; fault is not null; fault = fault.InnerFault)
+                {
+                    if (fault.ErrorCode == ConcurrencyVersionMismatch)
+                    {
+                        return true;
+                    }
+                }
+            }
+
+            if (current.Message is { } message
+                && (message.Contains("0x80060882", StringComparison.OrdinalIgnoreCase)
+                    || message.Contains("ConcurrencyVersionMismatch", StringComparison.OrdinalIgnoreCase)))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
     /// Pure (no-I/O) builder for <see cref="BulkUpdateAsync"/>: ONE <c>ExecuteTransactionRequest</c> holding
     /// one <c>UpdateRequest</c> per row, in input order. A C# <c>null</c> field value is skipped, so only
     /// the fields supplied are written; <see cref="DBNull.Value"/> CLEARS the column (the attribute is set to null),
     /// exactly as <c>UpdateAsync</c> treats it (task 140, 2026-10-04 — it used to be rejected).
+    ///
+    /// <para><paramref name="rowVersions"/> (optional, one entry per update, in the same order): a non-null entry makes that
+    /// update conditional on the row's <c>versionnumber</c> (<c>Entity.RowVersion</c> plus
+    /// <c>ConcurrencyBehavior.IfRowVersionMatches</c>); a null entry, or no list, leaves it unconditional
+    /// (<see cref="BulkUpdateIfRowVersionsMatchAsync"/>, ebilling-r1 task 076).</para>
     ///
     /// <para>Exposed <c>public static</c> for direct testability — the <c>ServiceClient</c> is built from
     /// configuration inside this class and <c>ServiceClient.Execute</c> cannot be overridden, so the request
@@ -2739,13 +3227,17 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
     /// </summary>
     public static Microsoft.Xrm.Sdk.Messages.ExecuteTransactionRequest BuildBulkUpdateTransaction(
         string entityLogicalName,
-        IReadOnlyList<(Guid id, Dictionary<string, object> fields)> updates)
+        IReadOnlyList<(Guid id, Dictionary<string, object> fields)> updates,
+        IReadOnlyList<long?>? rowVersions = null)
     {
         if (string.IsNullOrEmpty(entityLogicalName))
             throw new ArgumentNullException(nameof(entityLogicalName));
 
         if (updates is null || updates.Count == 0)
             throw new ArgumentException("Updates list cannot be null or empty", nameof(updates));
+
+        if (rowVersions is not null && rowVersions.Count != updates.Count)
+            throw new ArgumentException("rowVersions must hold exactly one entry per update.", nameof(rowVersions));
 
         var transaction = new Microsoft.Xrm.Sdk.Messages.ExecuteTransactionRequest
         {
@@ -2772,7 +3264,14 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
                 entity[field.Key] = field.Value is DBNull ? null : field.Value;
             }
 
-            transaction.Requests.Add(new Microsoft.Xrm.Sdk.Messages.UpdateRequest { Target = entity });
+            var request = new Microsoft.Xrm.Sdk.Messages.UpdateRequest { Target = entity };
+            if (rowVersions?[index] is { } rowVersion)
+            {
+                entity.RowVersion = rowVersion.ToString(System.Globalization.CultureInfo.InvariantCulture);
+                request.ConcurrencyBehavior = ConcurrencyBehavior.IfRowVersionMatches;
+            }
+
+            transaction.Requests.Add(request);
         }
 
         return transaction;

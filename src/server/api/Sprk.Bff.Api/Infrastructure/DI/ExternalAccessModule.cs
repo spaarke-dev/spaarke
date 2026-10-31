@@ -105,15 +105,50 @@ public static class ExternalAccessModule
             client.Timeout = TimeSpan.FromSeconds(15);
         });
 
+        // unified-access-control-r2 task 188 (main-session decision 2026-10-20): the assistant's dataverse.* tools decide a
+        // document with THE external document narrowing APP-ONLY, through the reader above, so a link field security masks
+        // for the user never reads as "no link". A delegate, so the tools reach nothing else of the app-only reader (the
+        // narrow-by-construction shape of owner rounds 7/8). Registered here, unconditionally with the reader it binds
+        // (AddExternalAccess is unconditional in Program.cs); the tool handlers (AddToolFramework's assembly scan) resolve it.
+        // The reader is resolved on the first call, so a tool call that never narrows (an internal caller) builds no client.
+        services.AddScoped<AppOnlyDocumentNarrowing>(sp =>
+            (documentIds, ct) => sp.GetRequiredService<ExternalDataService>().ReadAndNarrowDocumentsAsync(documentIds, ct));
+
+        // unified-access-control-r2 task 188 round 3 slice B: the same app-only narrowing for the internal plane's document
+        // routes (document filter, bulk download, container lists), logged as plane=internal-routes. Resolved lazily, as above.
+        services.AddScoped<InternalRouteDocumentNarrowing>(sp =>
+            (documentIds, ct) => sp.GetRequiredService<ExternalDataService>()
+                .ReadAndNarrowDocumentsAsync(documentIds, ct, ExternalDataService.InternalRoutesPlane));
+
+        // ebilling-r1 task 098 (procedure-and-file-model 9.1, (a′)): THE invoice predicate, read app-only through the reader
+        // above with the effective root flags. ExternalInvoiceHiding is the external plane's caller-aware seam (an internal
+        // systemuser hides nothing; a fault hides every asked invoice); AppOnlyInvoiceFamilyHiding is the assistant tools'
+        // hide-only seam for invoice-family rows (the tool has decided the caller is external; a fault throws). Both resolve
+        // their readers lazily, on the first call.
+        services.AddScoped<ExternalInvoiceHiding>(sp =>
+            (caller, invoiceIds, ct) => sp.GetRequiredService<ExternalDataService>().HideInvoicesForAsync(
+                caller, invoiceIds, sp.GetRequiredService<ExternalParticipationService>().GetEffectiveRootRecordFlagsAsync, ct));
+        // Review round 4b: the external submission routes' seam (list and single read): with an invoice, the predicate above;
+        // without one, the submission's own source. Same caller rule and fault rule as ExternalInvoiceHiding.
+        services.AddScoped<ExternalInvoiceSubmissionHiding>(sp =>
+            (caller, submissions, ct) => sp.GetRequiredService<ExternalDataService>().HideSubmissionsForAsync(
+                caller, submissions, sp.GetRequiredService<ExternalParticipationService>().GetEffectiveRootRecordFlagsAsync, ct));
+        services.AddScoped<AppOnlyInvoiceFamilyHiding>(sp =>
+            (table, rowIds, ct) => sp.GetRequiredService<ExternalDataService>().HideInvoiceFamilyRowsAsync(
+                table, rowIds, sp.GetRequiredService<ExternalParticipationService>().GetEffectiveRootRecordFlagsAsync, ct));
+
         // Per-customer external-access switches (external-access-platform-r3 task 011, spec FR-06 / FR-19, ADR-028
         // A8). PartnerServiceRequestsEnabled (default false) lets CIAM partners use the Service Requests module for
         // their own requests and adds legal-front-door to their default modules. Read by the entitlement resolver
         // below and by the "service-requests" descriptor. ValidateOnStart so an invalid value fails startup rather
         // than the first external module read: ANY non-boolean value, INCLUDING EMPTY (""), fails startup - remove
-        // the setting to turn it off. No custom validator (a bound bool has no other invalid value).
+        // the setting to turn it off. The validator registered below (ExternalAccessOptionsValidator) never fails startup: it
+        // only logs a warning when CustomerBusinessUnitId is unset; a bound bool has no other invalid value.
         services.AddOptions<ExternalAccessOptions>()
             .BindConfiguration(ExternalAccessOptions.SectionName)
             .ValidateOnStart();
+        // ISS-005 (#1673 review K3): warns at startup, once, when CustomerBusinessUnitId is unset (never fails startup).
+        services.AddSingleton<IValidateOptions<ExternalAccessOptions>, ExternalAccessOptionsValidator>();
 
         // Module entitlement resolver (task 072; defaults by principal kind, r3 task 011 / A8) — resolves the
         // Tier-1 module-code set the external-spa widget registry gates tabs on (/api/v1/external/me/entitlements):
@@ -187,8 +222,36 @@ public static class ExternalAccessModule
         // The one binding writer, shared by the workforce resolver, the CIAM strategy, the invite endpoints and
         // the reconciliation job. Concrete (ADR-010). Its factory builds a binder over ANOTHER environment for
         // RegistrationDataverseService (a new systemuser's link goes to the environment it was created in).
-        services.AddSingleton<ContactIdentityBinder>();
+        // ISS-005 (#1673): this is the binder over THIS BFF's own environment, so its contacts are owned by the default
+        // owner team of ExternalAccess:CustomerBusinessUnitId (or not created). The owner policy is a required constructor
+        // argument, hence the explicit factory: the container cannot build a ContactCreateOwner on its own, and nothing but
+        // ContactIdentityBinderFactory may choose "no owner" (ContactCreateOwnerPolicyGuardTests).
+        services.AddSingleton(sp => new ContactIdentityBinder(
+            sp.GetRequiredService<IContactIdentityStore>(),
+            sp.GetRequiredService<IOptionsMonitor<WorkforceIdentityOptions>>(),
+            sp.GetRequiredService<TimeProvider>(),
+            sp.GetRequiredService<ILogger<ContactIdentityBinder>>(),
+            ContactCreateOwner.FromCustomerBusinessUnit(
+                sp.GetRequiredService<IOptionsMonitor<ExternalAccessOptions>>(),
+                sp.GetRequiredService<IConfiguration>())));
         services.AddSingleton<ContactIdentityBinderFactory>();
+
+        // Slice B2: the invite's organisation lookup (a work-account invite for a configured customer tenant, else a portal
+        // account). Its named client calls one public, unauthenticated host: no auth handler, no default headers, no cookies,
+        // no redirects followed, 5-second timeout. Singleton: its dependencies are singletons (IHttpClientFactory,
+        // ITenantCache, the options monitor, configuration).
+        services.AddHttpClient(InviteOrganizationResolver.HttpClientName, client =>
+            {
+                client.Timeout = InviteOrganizationResolver.DefaultLookupTimeout;
+            })
+            .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler
+            {
+                AllowAutoRedirect = false,
+                UseCookies = false,
+                Credentials = null,
+                PreAuthenticate = false,
+            });
+        services.AddSingleton<InviteOrganizationResolver>();
 
         // Workforce-token → principal resolver (ADR-028 Amendment A2 · teams-app-r1 FR-04, task 020).
         // Composes the existing AAD-oid→systemuser conversion (MembershipEndpoints.ResolveSystemUserIdAsync)
@@ -311,8 +374,9 @@ public static class ExternalAccessModule
         // contract — communication-specific in NAME only. Declaring an identical second interface is
         // the duplication CLAUDE.md §11 exists to prevent.
         //
-        // ⚠️ NOT consumed by AccessibleRecordSetService yet — that swap is task 036's obligation, and
-        // it is gated on the NFR-04 negative canary (task 034). Registering it here is inert until then.
+        // Consumed by AccessibleRecordSetService (task 036) only while ExternalAccess:ImpersonatedRootSets:Enabled
+        // is true (default false; enabling it is gated on the NFR-04 negative canary, task 034). Flag off, it is
+        // registered but never asked.
         // Scoped: it reads the caller's tenant claim off IHttpContextAccessor for the cache key.
         services.AddScoped<IImpersonatedRootSetSource, ImpersonatedRootSetSource>();
 
@@ -372,7 +436,9 @@ public static class ExternalAccessModule
         // savedquery source REQUIRES registering that view here, or its grid errors.
         //
         // sprk_project: grid 61711823. Primary name = sprk_projectnumber. Task 157 dropped (rule (b) only):
-        // statecode, createdon, ownerid, sprk_practicearea, sprk_projecttype_ref.
+        // statecode, createdon, ownerid, sprk_practicearea, sprk_projecttype_ref. r3 task 002 re-admitted
+        // sprk_projecttype_ref as a grid column (referenced by the grid configuration once the r3 task 002 grid update follows
+        // this deploy, rule (a)).
         services.AddExternalModule(new ExternalModuleDescriptor
         {
             Name = "collaboration",
@@ -384,6 +450,8 @@ public static class ExternalAccessModule
             ReadableColumns = new HashSet<string>
             {
                 "sprk_projectid", "sprk_projectname", "sprk_projectnumber", "statuscode", "modifiedon",
+                // spaarke-SPA-external-access-platform-r3 task 002 (owner 2026-10-29): grid column on grid 61711823.
+                "sprk_projecttype_ref",
             },
         });
 
@@ -428,6 +496,8 @@ public static class ExternalAccessModule
                 "sprk_documentid", "sprk_documentname", "sprk_documenttype", "createdon",
                 "sprk_project", "sprk_matter", "sprk_workassignment",
                 "sprk_createdbyperson", "sprk_createdbycontact",
+                // spaarke-SPA-external-access-platform-r3 task 002 (owner 2026-10-29): grid column on grid 3af4102c.
+                "sprk_filetype", "modifiedon",
             },
         });
 
@@ -447,18 +517,25 @@ public static class ExternalAccessModule
                 new ScopeDimension { Attribute = "sprk_matter", AccessibleIds = p => p.GetAccessibleMatterIds() },
                 new ScopeDimension { Attribute = "sprk_project", AccessibleIds = p => p.GetAccessibleProjectIds().ToHashSet() },
             },
-            // Grid 3ff4102c. Primary name = sprk_name (not on the grid; admitted for the /record default
+            // Grid 3ff4102c. Primary name = sprk_name (on the grid since r3 task 002; also the /record default
             // projection). Task 157 dropped (rule (b) only): sprk_visibilitystate, modifiedon, statecode.
+            // ebilling-r1 task 015 (D-41): the invoice status is statuscode, and grid 3ff4102c's status column is moved to
+            // it. The retired status column was removed from this list on master in #2450 (r3 task 002); its dev column
+            // delete (015 -Delete, owner D-97) waits for the next dev BFF deploy. spaarke-SPA-external-access-platform-r3
+            // (owner Partner UAT 2026-10-17): the SPA record detail reads statuscode too.
             SavedQueryIds = NoSavedQueries, // grid source inline (live 2026-10-02): no registered view
             PrimaryNameAttribute = "sprk_name",
             ReadableColumns = new HashSet<string>
             {
-                "sprk_invoiceid", "sprk_name", "sprk_invoicenumber", "sprk_invoicedate", "sprk_invoicestatus",
+                "sprk_invoiceid", "sprk_name", "sprk_invoicenumber", "sprk_invoicedate",
                 "sprk_totalamount", "sprk_project", "sprk_matter",
                 // spaarke-SPA-external-access-platform-r3 (owner Partner UAT 2026-10-17, ebilling-r1 task 015 / D-41): NOT
-                // grid-derived. The invoice status is statuscode; the SPA record detail reads it. Transitional:
-                // sprk_invoicestatus stays until ebilling removes it from grid 3ff4102c and from dev.
+                // grid-derived. The invoice status is statuscode; the SPA record detail reads it. The retired invoice-status
+                // column was removed from this list by r3 task 002 (#2450) with ebilling's OK on 2026-10-29 (grid 3ff4102c moved
+                // to statuscode on 2026-10-18, so nothing external reads it any more).
                 "statuscode",
+                // spaarke-SPA-external-access-platform-r3 task 002 (owner 2026-10-29): grid column on grid 3ff4102c.
+                "sprk_totalamount_base",
             },
         });
 
@@ -472,7 +549,7 @@ public static class ExternalAccessModule
             RecordEntity = "sprk_workassignment",
             RecordIdAttribute = "sprk_workassignmentid",
             AccessibleRecordIds = p => p.GetAccessibleWorkAssignmentIds(),
-            // Grid 42f4102c. Primary name = sprk_name (not on the grid; admitted for the /record default
+            // Grid 42f4102c. Primary name = sprk_name (on the grid since r3 task 002; also the /record default
             // projection). Task 157 dropped (rule (b) only): statecode, createdon, ownerid, sprk_assignedto.
             SavedQueryIds = NoSavedQueries, // grid source inline (live 2026-10-02): no registered view
             PrimaryNameAttribute = "sprk_name",
@@ -480,6 +557,8 @@ public static class ExternalAccessModule
             {
                 "sprk_workassignmentid", "sprk_name", "sprk_workassignmentnumber", "sprk_priority",
                 "sprk_responseduedate", "statuscode", "sprk_regardingproject",
+                // spaarke-SPA-external-access-platform-r3 task 002 (owner 2026-10-29): grid column on grid 42f4102c.
+                "sprk_mattertype", "modifiedon",
             },
         });
 
@@ -494,12 +573,15 @@ public static class ExternalAccessModule
             RecordIdAttribute = "sprk_matterid",
             AccessibleRecordIds = p => p.GetAccessibleMatterIds(),
             // Grid 583a2a33. Primary name = sprk_matternumber. Task 157 dropped (rule (b) only): statecode,
-            // createdon, sprk_mattertype, sprk_practicearea.
+            // createdon, sprk_mattertype, sprk_practicearea. r3 task 002 re-admitted sprk_mattertype as a grid
+            // column (referenced by the grid configuration once the r3 task 002 grid update follows this deploy, rule (a)).
             SavedQueryIds = NoSavedQueries, // grid source inline (live 2026-10-02): no registered view
             PrimaryNameAttribute = "sprk_matternumber",
             ReadableColumns = new HashSet<string>
             {
                 "sprk_matterid", "sprk_mattername", "sprk_matternumber", "statuscode",
+                // spaarke-SPA-external-access-platform-r3 task 002 (owner 2026-10-29): grid column on grid 583a2a33.
+                "sprk_mattertype", "modifiedon",
             },
         });
 
@@ -741,8 +823,8 @@ public static class ExternalAccessModule
                 || (partnerServiceRequestsEnabled && p.Plane == CallerPrincipalPlane.CiamContact))
                 ? new HashSet<Guid> { p.ContactId }
                 : EmptyRecordIds,
-        // Grid 403e5d37. Primary name = sprk_name. Unchanged by task 157 (task 134 already admitted no
-        // sibling-view column here).
+        // Grid 403e5d37. Primary name = sprk_name. Task 157 dropped nothing here (task 134 admitted no sibling-view
+        // column); r3 task 002 added modifiedon as a grid column.
         SavedQueryIds = NoSavedQueries, // grid source inline (live 2026-10-02): no registered view
         PrimaryNameAttribute = "sprk_name",
         ReadableColumns = new HashSet<string>
@@ -752,6 +834,8 @@ public static class ExternalAccessModule
             // Owner decision 2026-10-12: the SPA hides Delete on a closed request. statecode is the platform's own
             // open (0) / closed (1) flag; the delete route enforces it again server-side.
             "statecode",
+            // spaarke-SPA-external-access-platform-r3 task 002 (owner 2026-10-29): grid column on grid 403e5d37 ("Last Activity").
+            "modifiedon",
         },
     };
 }

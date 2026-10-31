@@ -1,0 +1,27 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0378",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0378","generator_id":"gen_eval_set.py@1 F-0378","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0378.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-06"},
+ "header":{"firm":"Montclair & Whitcombe LLP","firm_invoice_number":"INV-2025-12120","invoice_date":"2026-02-01","billing_period_start":"2026-01-01","billing_period_end":"2026-01-31","firm_matter_reference":"39954-0003","po_number":"PO-4509862","fees_total":2300.5,"expenses_total":413.17,"adjustments_total":0.0,"total_due":2713.67,"currency":"USD"},
+ "timekeepers":[{"name":"Hector Abernathy","title":"Paralegal","rate":120.0,"billed_as":"Hector Abernathy"},{"name":"Helena Carmichael","title":"Associate","rate":175.0,"billed_as":"Helena Carmichael"},{"name":"Helena Santoro","title":"Of Counsel","rate":375.0,"billed_as":"Helena Santoro"},{"name":"Marcus Ramanathan","title":"Partner","rate":390.0,"billed_as":"Marcus Ramanathan"},{"name":"Nadia Nwosu","title":"Paralegal","rate":110.0,"billed_as":"Nadia Nwosu"},{"name":"Oliver Voss","title":"Associate","rate":185.0,"billed_as":"Oliver Voss"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2026-01-20","timekeeper":"Hector Abernathy","timekeeper_name":"Hector Abernathy","timekeeper_title":"Paralegal","title":"Para","hours":0.2,"rate":120.0,"amount":24.0,"narrative":"Plan strategy for upcoming phase of the vendor agreement with team","codes":["L120","A101"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2026-01-16","timekeeper":"Helena Carmichael","timekeeper_name":"Helena Carmichael","timekeeper_title":"Associate","title":"Assoc","hours":2.6,"rate":175.0,"amount":455.0,"narrative":"Review court docket and calendar of pending deadlines for the warranty claim","codes":["L190","A104"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2026-01-22","timekeeper":"Helena Carmichael","timekeeper_name":"Helena Carmichael","timekeeper_title":"Associate","title":"Assoc","hours":1.1,"rate":175.0,"amount":192.5,"narrative":"Review court docket and calendar of pending deadlines for the distribution agreement","codes":["L190","A104"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2026-01-23","timekeeper":"Helena Carmichael","timekeeper_name":"Helena Carmichael","timekeeper_title":"Associate","title":"Assoc","hours":1.6,"rate":175.0,"amount":280.0,"narrative":"Draft notice of appeal and docketing statement for the employment claim","codes":["L510","A103"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2026-01-27","timekeeper":"Helena Carmichael","timekeeper_name":"Helena Carmichael","timekeeper_title":"Associate","title":"Assoc","hours":1.3,"rate":175.0,"amount":227.5,"narrative":"Revise appellate brief after cite check","codes":["L520","A104"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2026-01-07","timekeeper":"Helena Santoro","timekeeper_name":"Helena Santoro","timekeeper_title":"Of Counsel","title":"O/C","hours":1.1,"rate":375.0,"amount":412.5,"narrative":"Attend and present oral argument in the insurance coverage issue","codes":["L530","A109"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2026-01-20","timekeeper":"Marcus Ramanathan","timekeeper_name":"Marcus Ramanathan","timekeeper_title":"Partner","title":"Ptr","hours":0.5,"rate":390.0,"amount":195.0,"narrative":"Research appealability issues in the warranty claim","codes":["L510","A102"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2026-01-01","timekeeper":"Nadia Nwosu","timekeeper_name":"Nadia Nwosu","timekeeper_title":"Paralegal","title":"Para","hours":0.3,"rate":110.0,"amount":33.0,"narrative":"Review court docket and calendar of pending deadlines for the supply agreement","codes":["L190","A104"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"fee","date":"2026-01-14","timekeeper":"Oliver Voss","timekeeper_name":"Oliver Voss","timekeeper_title":"Associate","title":"Assoc","hours":2.6,"rate":185.0,"amount":481.0,"narrative":"Prepare for oral argument in the licensing dispute","codes":["L530","A101"],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"expense","date":"2026-01-22","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":8.49,"amount":8.49,"narrative":"Long distance conference call charges","codes":["E105"],"page":2,"narrative_style":"clear"},
+  {"n":11,"line_type":"expense","date":"2026-01-27","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":404.68,"amount":404.68,"narrative":"Court filing fee","codes":["E112"],"page":2,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["170 Elm Court","Seattle","Tax ID 88-1067383"],"template":"T03","pages":2},
+ "rule_set_id":"RS-06",
+ "context":{"matter_open":"2024-09-11","matter_close":"2026-05-01","matter_budget":35854.0,"approved_timekeepers":["Helena Carmichael","Priya Lindqvist","Victor Ramanathan","Oliver Voss","Nadia Nwosu","Hector Abernathy","Marcus Ramanathan","Helena Santoro"],"invoice_received_date":"2026-02-04"},
+ "expected_findings":[],
+ "seeded_violations":0
+}

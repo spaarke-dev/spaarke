@@ -1,0 +1,32 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0081",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0081","generator_id":"gen_eval_set.py@1 F-0081","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0081.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-03"},
+ "header":{"firm":"Rutherford Cranmer PC","firm_invoice_number":"INV-2026-91072","invoice_date":"2026-06-04","billing_period_start":"2026-05-01","billing_period_end":"2026-05-31","firm_matter_reference":"95433-0019","po_number":"PO-4573661","fees_total":3456.0,"expenses_total":7802.23,"adjustments_total":0.0,"total_due":11258.23,"currency":"USD"},
+ "timekeepers":[{"name":"Anders Halloran","title":"Paralegal","rate":140.0,"billed_as":"AH"},{"name":"Anders Pemberton","title":"Paralegal","rate":130.0,"billed_as":"AP"},{"name":"Louis Halloran","title":"Associate","rate":225.0,"billed_as":"LH"},{"name":"Oliver Tavares","title":"Associate","rate":265.0,"billed_as":"OT"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2026-05-01","timekeeper":"LH","timekeeper_name":"Louis Halloran","timekeeper_title":"Associate","title":"Assoc","hours":2.7,"rate":225.0,"amount":607.5,"narrative":"Prepare expert witness for testimony in the lease dispute","codes":["L420","A101"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2026-05-04","timekeeper":"AP","timekeeper_name":"Anders Pemberton","timekeeper_title":"Paralegal","title":"Para","hours":0.3,"rate":130.0,"amount":39.0,"narrative":"Prepare monthly status report to client regarding the construction contract","codes":["L190","A111"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2026-05-11","timekeeper":"OT","timekeeper_name":"Oliver Tavares","timekeeper_title":"Associate","title":"Assoc","hours":2.7,"rate":370.0,"amount":999.0,"narrative":"Prepare trial notebook and demonstrative exhibits for the customs audit","codes":["L440","A101"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2026-05-11","timekeeper":"AP","timekeeper_name":"Anders Pemberton","timekeeper_title":"Paralegal","title":"Para","hours":0.6,"rate":130.0,"amount":78.0,"narrative":"Prepare fact witness for testimony regarding the insurance coverage issue","codes":["L410","A101"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2026-05-18","timekeeper":"AP","timekeeper_name":"Anders Pemberton","timekeeper_title":"Paralegal","title":"Para","hours":1.4,"rate":130.0,"amount":182.0,"narrative":"Prepare examination outlines for trial in the construction contract","codes":["L440","A101"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2026-05-19","timekeeper":"OT","timekeeper_name":"Oliver Tavares","timekeeper_title":"Associate","title":"Assoc","hours":0.4,"rate":265.0,"amount":106.0,"narrative":"Attend hearing on motion for summary judgment in the lease dispute","codes":["L450","A109"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2026-05-19","timekeeper":"AP","timekeeper_name":"Anders Pemberton","timekeeper_title":"Paralegal","title":"Para","hours":0.8,"rate":130.0,"amount":104.0,"narrative":"Prepare fact witness for testimony regarding the insurance coverage issue","codes":["L410","A101"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2026-05-19","timekeeper":"AH","timekeeper_name":"Anders Halloran","timekeeper_title":"Paralegal","title":"Para","hours":0.3,"rate":140.0,"amount":42.0,"narrative":"Draft motion to compel for trial in the insurance coverage issue","codes":["L430","A103"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"fee","date":"2026-05-21","timekeeper":"OT","timekeeper_name":"Oliver Tavares","timekeeper_title":"Associate","title":"Assoc","hours":1.2,"rate":265.0,"amount":318.0,"narrative":"Prepare fact witness for testimony regarding the supply agreement","codes":["L410","A101"],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"fee","date":"2026-05-26","timekeeper":"OT","timekeeper_name":"Oliver Tavares","timekeeper_title":"Associate","title":"Assoc","hours":2.2,"rate":265.0,"amount":583.0,"narrative":"Prepare trial notebook and demonstrative exhibits for the data incident","codes":["L440","A101"],"page":1,"narrative_style":"clear"},
+  {"n":11,"line_type":"fee","date":"2026-05-27","timekeeper":"OT","timekeeper_name":"Oliver Tavares","timekeeper_title":"Associate","title":"Assoc","hours":1.5,"rate":265.0,"amount":397.5,"narrative":"Telephone conference with witness regarding the insurance coverage issue","codes":["L410","A106"],"page":1,"narrative_style":"clear"},
+  {"n":12,"line_type":"expense","date":"2026-05-11","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":1898.44,"amount":1898.44,"narrative":"Consulting expert fees","codes":["E119"],"page":1,"narrative_style":"clear"},
+  {"n":13,"line_type":"expense","date":"2026-05-19","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":5772.35,"amount":5772.35,"narrative":"Consulting expert fees","codes":["E119"],"page":1,"narrative_style":"clear"},
+  {"n":14,"line_type":"expense","date":"2026-05-29","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":4.0,"rate":32.86,"amount":131.44,"narrative":"Working meal during deposition preparation","codes":["E111"],"page":1,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["723 Pine Street","Boston","Tax ID 51-4855021"],"template":"T11","pages":2},
+ "rule_set_id":"RS-03",
+ "context":{"matter_open":"2025-01-30","matter_close":"2026-08-29","matter_budget":70032.0,"approved_timekeepers":["Oliver Tavares","Rafael Nwosu","Anders Pemberton","Anders Halloran","Louis Halloran","Emeka Pemberton"],"invoice_received_date":"2026-06-14"},
+ "expected_findings":[
+  {"rule_id":"RS-03-R01","rule_type":"ApprovedRate","scope":"line","line_refs":[3],"consequence":"Reduce"}
+ ],
+ "seeded_violations":1
+}

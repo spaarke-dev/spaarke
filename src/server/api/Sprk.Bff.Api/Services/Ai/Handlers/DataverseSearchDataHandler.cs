@@ -5,6 +5,7 @@ using Sprk.Bff.Api.Services.Ai.Context;
 using Sprk.Bff.Api.Services.Ai.Handlers.Dataverse;
 using Sprk.Bff.Api.Services.Identity;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
+using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 
 namespace Sprk.Bff.Api.Services.Ai.Handlers;
 
@@ -31,7 +32,25 @@ namespace Sprk.Bff.Api.Services.Ai.Handlers;
 /// <para>
 /// <b>User-OBO ONLY (spec MUST rule)</b>: the search executes through
 /// <see cref="IDataverseUserClient"/> — Dataverse Search applies the calling user's security
-/// roles + row-level security to results. No app-only client is reachable (task-012 audit).
+/// roles + row-level security to results. No app-only client is reachable (task-012 audit), except the one below.
+/// </para>
+/// <para>
+/// <b>The "User-OBO ONLY" rule is AMENDED for ONE dependency — unified-access-control-r2 task 188, main-session decision
+/// 2026-10-20 (CLAUDE.md §6.5 path B; APPROVED, owner round 111, 2026-10-21)</b>: an EXTERNAL caller's <c>sprk_document</c> rows
+/// are decided by THE external document narrowing through <see cref="AppOnlyDocumentNarrowing"/>, which re-reads those
+/// documents BY ID under the BFF's app-only identity (the external plane's reader) and returns ONLY a hide decision: a
+/// link field security masks for the user can never read as "no link". It can only HIDE a row the user's own read returned;
+/// no app-only data reaches the result, and nothing else of the app-only reader is reachable (a delegate). Every query whose
+/// rows reach the model still runs as the user.
+/// Task 188 round 3 slice C: an external caller's <c>sprk_analysis</c> and <c>sprk_analysisoutput</c> rows are hidden when
+/// their source document or an analysis's output file is (or cannot be decided), through the same seam's hide-only overload
+/// (<see cref="AppOnlyDocumentNarrowingExtensions.HiddenDocumentIdsAsync"/>); their source links are read as the user
+/// (<see cref="ExternalCallerCommunicationGuard.ReadSourceDocumentIdsAsync"/>).
+/// ebilling-r1 task 098 (procedure-and-file-model 9.1, (a')): a SECOND hide-only app-only seam,
+/// <see cref="AppOnlyInvoiceFamilyHiding"/>, drops an external caller's invoice-family hit (an invoice, or a row derived from
+/// one: line, approval, submission, correction, external identifier, Stored File, Signal, Decision Record) whose invoice the
+/// (a') predicate hides. Same shape as the narrowing seam: it reads by id app-only and returns only a hide decision, so it can
+/// only HIDE a row the user's own search returned. (Raised with uac-r2 as an amendment to the round-111 exception.)
 /// </para>
 /// <para>
 /// <b>ADR-015 / NFR-07</b>: telemetry carries query LENGTH + entity filter + result count +
@@ -53,7 +72,7 @@ public sealed partial class DataverseSearchDataHandler : IToolHandler
     /// <summary>Result cap sent to the Dataverse Search API (ADR-016 quota posture).</summary>
     internal const int SearchTop = 25;
 
-    [GeneratedRegex(@"^[a-z][a-z0-9_]*$")]
+    [GeneratedRegex(@"^[a-z][a-z0-9_]*\z")]
     private static partial Regex LogicalNameRegex();
 
     private readonly IDataverseUserClient _dataverse;
@@ -61,19 +80,27 @@ public sealed partial class DataverseSearchDataHandler : IToolHandler
     private readonly IHttpContextAccessor _httpContextAccessor;
     private readonly ICallerSystemUserResolver _callerResolver;
     private readonly ISystemUserIdentityResolver _identityResolver;
+    /// <summary>Task 188: THE document narrowing, app-only by id (see the remarks: the one amended dependency).</summary>
+    private readonly AppOnlyDocumentNarrowing _narrowDocuments;
+    /// <summary>Task 098: the (a') invoice-family hiding, app-only by id, hide-only (see the remarks).</summary>
+    private readonly AppOnlyInvoiceFamilyHiding _hideInvoiceFamily;
 
     public DataverseSearchDataHandler(
         IDataverseUserClient dataverse,
         ILogger<DataverseSearchDataHandler> logger,
         IHttpContextAccessor httpContextAccessor,
         ICallerSystemUserResolver callerResolver,
-        ISystemUserIdentityResolver identityResolver)
+        ISystemUserIdentityResolver identityResolver,
+        AppOnlyDocumentNarrowing narrowDocuments,
+        AppOnlyInvoiceFamilyHiding hideInvoiceFamily)
     {
         _dataverse = dataverse ?? throw new ArgumentNullException(nameof(dataverse));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _httpContextAccessor = httpContextAccessor ?? throw new ArgumentNullException(nameof(httpContextAccessor));
         _callerResolver = callerResolver ?? throw new ArgumentNullException(nameof(callerResolver));
         _identityResolver = identityResolver ?? throw new ArgumentNullException(nameof(identityResolver));
+        _narrowDocuments = narrowDocuments ?? throw new ArgumentNullException(nameof(narrowDocuments));
+        _hideInvoiceFamily = hideInvoiceFamily ?? throw new ArgumentNullException(nameof(hideInvoiceFamily));
     }
 
     /// <inheritdoc />
@@ -262,7 +289,10 @@ public sealed partial class DataverseSearchDataHandler : IToolHandler
             var results = new List<object>();
             var citations = new List<ToolResultCitation>();
             var droppedHits = 0;
-            var hiddenDocuments = 0;
+            var hiddenDocumentIds = new List<Guid>();
+            var hiddenDerivedSources = new List<Guid>();
+            var hiddenInvoiceFamilyRows = 0;
+            DocumentNarrowingResult? narrowing = null;
             var value = FindResultsArray(response.Body);
             if (value is { } resultsArray)
             {
@@ -288,34 +318,77 @@ public sealed partial class DataverseSearchDataHandler : IToolHandler
                     hits.Add((hit, entityName, recordId));
                 }
 
-                // ISS-010 review round 1 (F1): for an external caller, a sprk_document hit whose related communication fails
-                // the rule is dropped silently (same posture as family hits). One batched read of the documents' related
-                // communication, then the communication check; a document that does not come back is dropped; a fault
-                // throws into the error result below (no data).
-                HashSet<Guid>? hiddenDocumentIds = null;
+                // ISS-010 review round 1 (F1), task 188 (D7, #2126): for an external caller, a sprk_document hit THE external
+                // document predicate hides is dropped silently (same posture as family hits). The hit documents are read by id
+                // APP-ONLY (main-session decision 2026-10-20), then the predicate's own batched reads; a document that does
+                // not come back is dropped; a fault throws into the error result below (no data).
                 var documentIds = hits
                     .Where(h => ExternalCallerCommunicationGuard.IsDocumentTable(h.EntityName))
                     .Select(h => h.RecordId)
                     .ToList();
                 if (documentIds.Count > 0 && await IsExternalCallerAsync().ConfigureAwait(false))
                 {
-                    var relatedByDocument = await ExternalCallerCommunicationGuard.ReadRelatedCommunicationIdsAsync(
-                        _dataverse, documentIds, cancellationToken).ConfigureAwait(false);
-                    var visibleCommunications = await ExternalCallerCommunicationGuard.ReadVisibleCommunicationIdsAsync(
-                        _dataverse, relatedByDocument.Values, cancellationToken).ConfigureAwait(false);
-                    hiddenDocumentIds = documentIds
-                        .Where(id => !relatedByDocument.TryGetValue(id, out var related) ||
-                                     (related != Guid.Empty && !visibleCommunications.Contains(related)))
-                        .ToHashSet();
+                    narrowing = await _narrowDocuments(documentIds, cancellationToken).ConfigureAwait(false);
+                }
+
+                // Task 188 round 3 slice C: for an external caller, a hit on a table that derives from a document
+                // (sprk_analysis; sprk_analysisoutput through its analysis) is dropped silently when its source document is
+                // hidden or cannot be decided. The hits' source links are read BY ID as the user (one batched read per table
+                // and level), then the hide-only overload decides every source document of the page APP-ONLY in ONE call.
+                // A hit with no source document is unaffected. A fault throws into the error result below (no data).
+                var derivedSources = new Dictionary<string, IReadOnlyDictionary<Guid, IReadOnlyList<Guid>>>(StringComparer.OrdinalIgnoreCase);
+                IReadOnlySet<Guid>? hiddenSources = null;
+                var derivedHits = hits.Where(h => ExternalCallerCommunicationGuard.IsDocumentDerivedTable(h.EntityName)).ToList();
+                if (derivedHits.Count > 0 && await IsExternalCallerAsync().ConfigureAwait(false))
+                {
+                    foreach (var table in derivedHits.GroupBy(h => h.EntityName, StringComparer.OrdinalIgnoreCase))
+                    {
+                        derivedSources[table.Key] = await ExternalCallerCommunicationGuard.ReadSourceDocumentIdsAsync(
+                            _dataverse, table.Key, table.Select(h => h.RecordId).ToList(), cancellationToken).ConfigureAwait(false);
+                    }
+
+                    hiddenSources = await _narrowDocuments.HiddenDocumentIdsAsync(
+                        derivedSources.Values.SelectMany(sources => sources.Values.SelectMany(documents => documents)), cancellationToken)
+                        .ConfigureAwait(false);
+                }
+
+                // ebilling-r1 task 098 ((a')): for an external caller, an invoice-family hit whose invoice the predicate hides
+                // (or cannot decide) is dropped silently. One hide-only app-only call per family table on the page; a fault
+                // throws into the error result below (no data).
+                var hiddenFamily = new Dictionary<string, IReadOnlySet<Guid>>(StringComparer.OrdinalIgnoreCase);
+                var familyHits = hits.Where(h => ExternalInvoiceVisibility.IsInvoiceFamilyTable(h.EntityName)).ToList();
+                if (familyHits.Count > 0 && await IsExternalCallerAsync().ConfigureAwait(false))
+                {
+                    foreach (var table in familyHits.GroupBy(h => h.EntityName, StringComparer.OrdinalIgnoreCase))
+                    {
+                        hiddenFamily[table.Key] = await _hideInvoiceFamily(
+                            table.Key, table.Select(h => h.RecordId).Distinct().ToList(), cancellationToken).ConfigureAwait(false);
+                    }
                 }
 
                 foreach (var (hit, entityName, recordId) in hits)
                 {
-                    if (hiddenDocumentIds is not null &&
-                        ExternalCallerCommunicationGuard.IsDocumentTable(entityName) &&
-                        hiddenDocumentIds.Contains(recordId))
+                    if (hiddenFamily.TryGetValue(entityName, out var hiddenRows) && hiddenRows.Contains(recordId))
                     {
-                        hiddenDocuments++;
+                        hiddenInvoiceFamilyRows++;
+                        continue;
+                    }
+
+                    if (narrowing is not null &&
+                        ExternalCallerCommunicationGuard.IsDocumentTable(entityName) &&
+                        !narrowing.IsVisible(recordId))
+                    {
+                        hiddenDocumentIds.Add(recordId);
+                        continue;
+                    }
+
+                    if (hiddenSources is not null &&
+                        ExternalCallerCommunicationGuard.IsDocumentDerivedTable(entityName) &&
+                        ExternalCallerCommunicationGuard.IsDerivedRowHidden(
+                            recordId, derivedSources.GetValueOrDefault(entityName), hiddenSources,
+                            out var source))
+                    {
+                        hiddenDerivedSources.Add(source);
                         continue;
                     }
 
@@ -360,12 +433,28 @@ public sealed partial class DataverseSearchDataHandler : IToolHandler
                     "[dataverse.search_data] " + ExternalCallerCommunicationGuard.LogEvent + " entity={Entity} reason={Reason} decisionId={DecisionId}",
                     ExternalCallerCommunicationGuard.FamilyPrefix + "*", "family_hits_dropped", context.DecisionId);
             }
-            if (hiddenDocuments > 0)
+            if (hiddenDocumentIds.Count > 0)
             {
-                // ADR-015: entity + reason code only — never the query or hit content.
+                // ADR-015: entity + reason codes with counts only — never the query or hit content.
                 _logger.LogInformation(
                     "[dataverse.search_data] " + ExternalCallerCommunicationGuard.LogEvent + " entity={Entity} reason={Reason} decisionId={DecisionId}",
-                    ExternalCallerCommunicationGuard.DocumentTable, "related_communication_hidden", context.DecisionId);
+                    ExternalCallerCommunicationGuard.DocumentTable,
+                    narrowing!.HiddenSummary(hiddenDocumentIds), context.DecisionId);
+            }
+            if (hiddenInvoiceFamilyRows > 0)
+            {
+                // ADR-015: a reason code and a count only — never the query, ids or hit content.
+                _logger.LogInformation(
+                    "[dataverse.search_data] " + ExternalCallerCommunicationGuard.LogEvent + " entity={Entity} reason={Reason} decisionId={DecisionId}",
+                    "invoice-family", $"invoice_hidden={hiddenInvoiceFamilyRows}", context.DecisionId);
+            }
+            if (hiddenDerivedSources.Count > 0)
+            {
+                // ADR-015: reason codes with counts only — never the query, ids or hit content.
+                _logger.LogInformation(
+                    "[dataverse.search_data] " + ExternalCallerCommunicationGuard.LogEvent + " entity={Entity} reason={Reason} decisionId={DecisionId}",
+                    "document-derived",
+                    ExternalCallerCommunicationGuard.DerivedHiddenSummary(hiddenDerivedSources), context.DecisionId);
             }
 
             stopwatch.Stop();

@@ -1,0 +1,115 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="093" project="ebilling-r1">
+  <metadata>
+    <title>Firm file routes GET /api/v1/external/invoices/{id}/files and …/content; the four invoice-document routes retire</title>
+    <phase>3 Rules (WP3) — Procedures and files (EB-D-148), wave W3-D</phase>
+    <gate>090 and 098 merged; uac-r2 task 188 merged (its guard takes this route's entry); uac-r2 reviews the BFF diff before merge; dev deploy is paired through SPA-r3 (BFF, then SPA) in 079</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>New external endpoints that stream invoice files to firms (tenant isolation, firm match, uniform answers) and the removal of four external routes.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Security and tenant isolation on the external plane, over two caller kinds (CIAM contact, systemuser via 036) with a firm match, in files shared with uac-r2 and SPA-r3.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P3-D</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits Api/ExternalAccess/ExternalProjectDataEndpoints.cs, WorkforceRoleCeilingGate.cs and the route census and ledger ArchTests shared with uac-r2 and SPA-r3; /conflict-check before the PR. No file shared with 086.</parallel-reason>
+    <deps>090, 098</deps>
+    <tags>bff-api, api, endpoints, security, tenant-isolation, external-access, testing</tags>
+    <estimated-effort>2 days</estimated-effort>
+  </metadata>
+
+  <prompt>Build the firm file routes of notes/procedure-and-file-model.md section 9.3 as settled in notes/procedure-model-reviews.md section 6: GET /api/v1/external/invoices/{id}/files (list) and GET /api/v1/external/invoices/{id}/files/{fileId}/content (download), one gate method for both caller kinds that returns the visible file set, (a′) at invoice level (098), the file gate (Invoice PDF + Firm-visible + Servable + scan clean + parent matches), uniform 404 / 503 answers, the 090 audit event, and task 188's guard entry. In the same change retire the four /api/v1/external/invoices/{id}/documents routes. No upload route. No SPA change (R4's).</prompt>
+
+  <role>SPAARKE platform developer. Expert in the /api/v1/external plane (CallerPrincipal, AccessibleRecordSetService / task 036, task 187's invoice rule, workforce role ceilings) and the eBilling external submission filter.</role>
+
+  <goal>The two routes serve exactly the firm-visible, servable, clean Invoice PDFs of invoices the caller may see, and the same 404 for everything else; the four document routes and their exclusive handlers are gone; censuses, ledger and the 188 guard name the new gate; every criterion below passes.</goal>
+
+  <context>
+    <background>Model 9.3, 4.2 (scan states), 4.3 (audit), 9.1 ((a′)); reviews sections 5 (Q: "Checking file…"; Q2: no migration, the invoice-PDF-as-Document path is removed) and 6 (the settled rule). Code: the external group is MapGroup("/api/v1/external") (ExternalAccessEndpoints.cs:72). The four routes are at ExternalProjectDataEndpoints.cs:381-426 (list :384, content :393, upload :404, versions :418), with UploadInvoiceDocument at :1611, RightsForInvoiceAsync at :1365, and ceilings WorkforceRoleCeilingGate.ReadInvoiceDocuments / UploadInvoiceDocument (:104, :110). Census entries: tests/Spaarke.ArchTests/AuthenticationSchemeCensusTests.cs:78-80, :111; RouteAuthorizationGuardTests.Ledger.cs:1875-1884; tests/integration/auth/ExternalAccess/ExternalMultiRootSecureRootsTests.cs:217. DocumentParentKind.Invoice and GetDocumentParentBinding stay (ExternalMessageEndpoints.cs:197 uses them). CIAM firm match: DecideReadOneAsync (ExternalInvoiceSubmissionAuthorizationFilter.cs:265-300; ReadFirmsAsync). Task 187 invoice rule: ExternalMessageEndpoints.IsRootRecordReadableAsync and RootsReadableFor (:455-480). A systemuser's linked contact: SystemUserReference.LinkedContactId (ContactBindingDecision.cs:438).</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ExternalInvoiceSubmissionEndpoints.cs (map the two routes on the external group)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ExternalInvoiceSubmissionAuthorizationFilter.cs (a new access mode InvoiceFiles whose decision is the gate method)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ExternalProjectDataEndpoints.cs (remove the four invoice-document mappings and handlers used only by them)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/WorkforceRoleCeilingGate.cs (ReadInvoiceFiles; remove the two invoice-document ceilings if unused)</file>
+      <file role="modify">tests/Spaarke.ArchTests/AuthenticationSchemeCensusTests.cs, RouteAuthorizationGuardTests.Ledger.cs, ExternalDocumentNarrowingGuardTests.cs (188), tests/integration/auth/ExternalAccess/ExternalMultiRootSecureRootsTests.cs</file>
+      <file role="new">tests/unit/Sprk.Bff.Api.Tests/Api/ExternalAccess/ExternalInvoiceFileRoutesTests.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-001, ADR-008, bff-extensions C">Minimal API on the existing external group (its dual-scheme policy and CallerPrincipal filter), plus the InvoiceFiles filter mode and RequireWorkforceCeiling(ReadInvoiceFiles) on both routes; RequireEbillingEnabled as the sibling submission routes; ProblemDetails; no new policy.</constraint>
+    <constraint source="reviews 6, model 9.3 (uac-r2 F1-4, owner round 116)">One gate method decides the visible file set for both routes. Systemuser caller (036 path): the caller's Read on the invoice and its root from the existing 036 machinery (no second implementation), the I-14 Restricted veto, the task 187 invoice rule; unknown rights (0x8004d24d) fail closed as 036 does; for a flagged-external systemuser also sprk_invoice.sprk_vendororg = the organisation of the user's linked contact (no link or a read fault refuses). CIAM contact: sprk_vendororg in the caller's firms (ReadFirmsAsync) → RightsOn(core) ≥ Read after vetoes → the 187 rule. Then 098's ExternalInvoiceVisibility on the invoice. Then the file gate: purpose Invoice PDF, sprk_firmvisible true, Servable, parent = the route invoice, blob path parent matches.</constraint>
+    <constraint source="model 4.2, 9.3, reviews 5 Q">List: each visible file with id, file name, content type, size, created on and scanStatus (Clean, Checking, NotScanned); Pending is listed as Checking; Malicious is omitted. Content: Clean or NotScanned → stream through 090's service after the gate; Pending → 409 file_scan_pending; Malicious → 404. No blob path, source ids or storage URL in any response; no SAS.</constraint>
+    <constraint source="model 9.3 uniform answers">An invisible invoice, a file outside the visible set and a non-existent id get the same UniformRecordNotFound after the same work (never an empty 200 for an invisible invoice); a read fault → 503.</constraint>
+    <constraint source="model 4.3 (O-29)">Content writes 090's StoredFileDownloaded event (route kind firm) before the first byte.</constraint>
+    <constraint source="model 9.3, reviews 6 (ArchTest)">Add the gate method to task 188's external-surface guard in this PR with must-fire controls (a systemuser without Read → 404; a flagged-external systemuser on a Restricted root → 404) and a must-not-fire control (a CIAM contact of the invoice's firm with Read → 200).</constraint>
+    <constraint source="model 9.3 (retired in the same change)">Remove the four invoice-document route mappings, their handler wrappers, the two ceilings if nothing else uses them, and their census, ledger and test entries. Keep DocumentParentKind.Invoice, GetDocumentParentBinding and RightsForInvoiceAsync while any other caller uses them.</constraint>
+    <constraint source="R3 deploy pairing">No edit under src/client/external-spa (RecordDetailFields.tsx:149 documentsRoot 'invoices' is R4's or R3's). Notify SPA-r3 with the route contract; record in the notes that until the SPA ships, the old SPA's invoice-documents call returns 404, and that 079 deploys BFF then SPA back to back through R3.</constraint>
+    <constraint source="root §10">Publish-size delta recorded; no package; no new HIGH CVE.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ebilling-r1/notes/procedure-and-file-model.md (4.2, 4.3, 9.3)</file>
+      <file>projects/ebilling-r1/notes/procedure-model-reviews.md (sections 5, 6)</file>
+      <file>projects/ebilling-r1/notes/090-file-store-service.md, 098-external-marker-invoice.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>.claude/patterns/api/endpoint-filters.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+    <patterns>
+      <pattern name="External download, authz before stream" location="ExternalProjectDataEndpoints.DownloadDocumentForParent (:645)">Order of checks and the 503 / 404 shapes.</pattern>
+      <pattern name="Firm match and uniform 404" location="ExternalInvoiceSubmissionAuthorizationFilter.DecideReadOneAsync (:265-300)">CIAM firm path.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Declare FULL. Confirm 090, 098 and 188 are ancestors of HEAD; read their notes; grep every user of the four routes' handlers and ceilings.</step>
+    <step order="1">The gate method and the InvoiceFiles filter mode; unit tests for both caller kinds.</step>
+    <step order="2">The two routes, list DTO and content streaming with the audit event; route tests.</step>
+    <step order="3">Retire the four routes and their exclusive code; update censuses, ledger and tests.</step>
+    <step order="4">188 guard entry with controls; seeding proofs; build; full ArchTests; publish-size delta; /conflict-check; notes in projects/ebilling-r1/notes/093-firm-file-routes.md; notify SPA-r3.</step>
+    <step order="5">code-review, adr-check, two adversarial passes (tenant isolation), uac-r2 review; then TASK-INDEX.md status cell `✅ [done]`.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the 036 machinery cannot give a systemuser's Read on an invoice without a second implementation, STOP and ask uac-r2.</trigger>
+    <trigger>If 188's guard has no slot for a route-level gate method, STOP and ask uac-r2 for the entry shape; do not weaken the guard.</trigger>
+    <trigger>If removing a retired route's handler breaks a non-invoice route or the message threads, keep the shared code and record it.</trigger>
+    <trigger>If a client other than the external SPA calls a retired route, report it before removing.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>The four /invoices/{id}/documents routes serve SPE Documents (ExternalProjectDataEndpoints.cs:381-426); invoice PDFs are no longer Documents (092, reviews Q2); 090's route is internal-only.</existing>
+    <extension>The routes join the existing external group and the existing ebilling submission filter (a new mode) and reuse 090's service and audit helper, 098's predicate and the 036 / 187 machinery; they replace the four document routes rather than add beside them.</extension>
+    <cost-of-doing-nothing>A firm cannot see or download the PDF it submitted, and flagged-external users have no route to invoice files at all (O-27).</cost-of-doing-nothing>
+  </justification>
+
+  <outputs>
+    <output type="code">ExternalInvoiceSubmissionEndpoints.cs, ExternalInvoiceSubmissionAuthorizationFilter.cs, ExternalProjectDataEndpoints.cs, WorkforceRoleCeilingGate.cs</output>
+    <output type="test">the tests in relevant-files</output>
+    <output type="docs">projects/ebilling-r1/notes/093-firm-file-routes.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">CIAM contact of the invoice's firm with Read on the core record: the list returns exactly the Invoice PDF files with Firm-visible true, Servable and not Malicious, Pending shown as Checking; content of a Clean file streams with one audit event before the first byte.</criterion>
+    <criterion testable="true">Must fire, each the uniform 404 byte-identical to a non-existent invoice's: CIAM contact of another firm; contact without Read on the core; systemuser without Read; flagged-external systemuser on a Restricted root; flagged-external systemuser whose linked contact's organisation is not the invoice's vendor; flagged-external systemuser with no linked contact; invoice hidden by (a′); a file that is Firm-visible false, an Invoice supporting file, Not yet servable, Removed, Malicious, or of another invoice.</criterion>
+    <criterion testable="true">Content of a Pending file → 409 file_scan_pending; unknown rights (0x8004d24d) → fail closed as 036; any read fault → 503; no response carries a blob path, source id or URL.</criterion>
+    <criterion testable="true">Must not fire: an internal systemuser with Read on the invoice and its root gets the same list and content as a contact of the firm (no firm match for internal users).</criterion>
+    <criterion testable="true">The four /api/v1/external/invoices/{id}/documents routes no longer exist (the route table has none) and every other external document route is unchanged; censuses, ledger and the 188 guard name the new routes and gate.</criterion>
+    <criterion testable="true">Seeding proofs, one per guard, in the notes: removing the firm match fails the other-firm test; removing the (a′) call fails its test; removing the Firm-visible check fails its test; removing the 188 guard entry fails the guard.</criterion>
+    <criterion testable="true">dotnet build exits 0; filtered tests pass; full ArchTests green; publish-size delta recorded; no package; /conflict-check run; SPA-r3 notified (recorded).</criterion>
+    <criterion testable="true">Cover the stated contract plus the edge cases named above. Anything beyond that needs a one-line justification in task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>Flagged-external users get invoice files only here (O-27). The R3 deploy pairing runs in 079. The SPA reuses DocumentLibrary's list and download without upload (R4).</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load the knowledge files first. Follow task-execute for rigor, checkpoints and quality gates.</protocol>
+  </execution>
+</task>

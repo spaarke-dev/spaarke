@@ -1,0 +1,36 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0173",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0173","generator_id":"gen_eval_set.py@1 F-0173","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0173.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-05"},
+ "header":{"firm":"Ravenscroft & Vance LLP","firm_invoice_number":"INV-2026-33788","invoice_date":"2025-11-03","billing_period_start":"2025-10-01","billing_period_end":"2025-10-31","firm_matter_reference":"23353-0018","po_number":"PO-4502539","fees_total":10624.5,"expenses_total":1201.41,"adjustments_total":0.0,"total_due":11825.91,"currency":"USD"},
+ "timekeepers":[{"name":"Katya Sandoval","title":"Associate","rate":295.0,"billed_as":"KS"},{"name":"Leila Lockhart","title":"Associate","rate":250.0,"billed_as":"LL"},{"name":"Louis Zielinski","title":"Partner","rate":495.0,"billed_as":"LZ"},{"name":"Naomi Esposito","title":"Paralegal","rate":165.0,"billed_as":"NE"},{"name":"Tomas Mbeki","title":"Partner","rate":540.0,"billed_as":"TM"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2025-10-02","timekeeper":"LZ","timekeeper_name":"Louis Zielinski","timekeeper_title":"Partner","title":"Ptr","hours":0.6,"rate":495.0,"amount":297.0,"narrative":"Prepare for oral argument in the supply agreement","codes":["L530","A101"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2025-10-02","timekeeper":"KS","timekeeper_name":"Katya Sandoval","timekeeper_title":"Associate","title":"Assoc","hours":1.2,"rate":295.0,"amount":354.0,"narrative":"Analyze exposure and damages model for the lease dispute","codes":[],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2025-10-03","timekeeper":"LL","timekeeper_name":"Leila Lockhart","timekeeper_title":"Associate","title":"Assoc","hours":2.3,"rate":250.0,"amount":575.0,"narrative":"Prepare monthly status report to client regarding the customs audit","codes":["L190","A111"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2025-10-07","timekeeper":"NE","timekeeper_name":"Naomi Esposito","timekeeper_title":"Paralegal","title":"Para","hours":2.5,"rate":165.0,"amount":412.5,"narrative":"Internal conference with Naomi Esposito regarding strategy for the regulatory inquiry","codes":["L510","A105"],"page":1,"narrative_style":"clerical"},
+  {"n":5,"line_type":"fee","date":"2025-10-08","timekeeper":"LL","timekeeper_name":"Leila Lockhart","timekeeper_title":"Associate","title":"Assoc","hours":2.5,"rate":250.0,"amount":625.0,"narrative":"Prepare monthly status report to client regarding the supply agreement","codes":["L190","A111"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2025-10-09","timekeeper":"TM","timekeeper_name":"Tomas Mbeki","timekeeper_title":"Partner","title":"Ptr","hours":0.4,"rate":540.0,"amount":216.0,"narrative":"Prepare for oral argument in the supply agreement","codes":["L530","A101"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2025-10-09","timekeeper":"KS","timekeeper_name":"Katya Sandoval","timekeeper_title":"Associate","title":"Assoc","hours":0.7,"rate":295.0,"amount":206.5,"narrative":"Draft appellate brief in the insurance coverage issue","codes":["L520","A103"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2025-10-10","timekeeper":"LZ","timekeeper_name":"Louis Zielinski","timekeeper_title":"Partner","title":"Ptr","hours":4.0,"rate":495.0,"amount":1980.0,"narrative":"Plan strategy for upcoming phase of the distribution agreement with team","codes":["L120","A101"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"fee","date":"2025-10-10","timekeeper":"LZ","timekeeper_name":"Louis Zielinski","timekeeper_title":"Partner","title":"Ptr","hours":4.0,"rate":495.0,"amount":1980.0,"narrative":"Analyze exposure and damages model for the insurance coverage issue","codes":["L120","A104"],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"fee","date":"2025-10-10","timekeeper":"LZ","timekeeper_name":"Louis Zielinski","timekeeper_title":"Partner","title":"Ptr","hours":4.0,"rate":495.0,"amount":1980.0,"narrative":"Attend and present oral argument in the vendor agreement","codes":["L530","A109"],"page":1,"narrative_style":"clear"},
+  {"n":11,"line_type":"fee","date":"2025-10-10","timekeeper":"LZ","timekeeper_name":"Louis Zielinski","timekeeper_title":"Partner","title":"Ptr","hours":0.6,"rate":495.0,"amount":297.0,"narrative":"Prepare case assessment memorandum regarding the lease dispute and recommended strategy","codes":["L120","A103"],"page":1,"narrative_style":"clear"},
+  {"n":12,"line_type":"fee","date":"2025-10-10","timekeeper":"LZ","timekeeper_name":"Louis Zielinski","timekeeper_title":"Partner","title":"Ptr","hours":0.1,"rate":495.0,"amount":49.5,"narrative":"Revise appellate brief after cite check","codes":["L520","A104"],"page":1,"narrative_style":"clear"},
+  {"n":13,"line_type":"fee","date":"2025-10-31","timekeeper":"KS","timekeeper_name":"Katya Sandoval","timekeeper_title":"Associate","title":"Assoc","hours":2.9,"rate":295.0,"amount":855.5,"narrative":"Revise appellate brief after cite check","codes":["L520","A104"],"page":1,"narrative_style":"clear"},
+  {"n":14,"line_type":"fee","date":"2025-10-31","timekeeper":"KS","timekeeper_name":"Katya Sandoval","timekeeper_title":"Associate","title":"Assoc","hours":2.7,"rate":295.0,"amount":796.5,"narrative":"Attend and present oral argument in the licensing dispute","codes":["L530","A109"],"page":1,"narrative_style":"clear"},
+  {"n":15,"line_type":"expense","date":"2025-10-09","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":2.0,"rate":37.88,"amount":75.76,"narrative":"Working meal during deposition preparation","codes":["E111"],"page":2,"narrative_style":"clear"},
+  {"n":16,"line_type":"expense","date":"2025-10-31","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":1125.65,"amount":1125.65,"narrative":"Court reporter and transcript - deposition","codes":["E115"],"page":2,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["800 Market Street","Atlanta","Tax ID 40-7541239"],"template":"T15","pages":2},
+ "rule_set_id":"RS-05",
+ "context":{"matter_open":"2024-06-21","matter_close":"2026-01-29","matter_budget":72303.0,"approved_timekeepers":["Leila Lockhart","Katya Sandoval","Naomi Esposito","Anders Ashdown","Tomas Mbeki","Imani Marchetti","Louis Zielinski"],"invoice_received_date":"2025-11-14"},
+ "expected_findings":[
+  {"rule_id":"RS-05-R04","rule_type":"NonBillableActivity","scope":"line","line_refs":[4],"consequence":"Disallow"},
+  {"rule_id":"RS-05-R06","rule_type":"DailyHoursCap","scope":"line","line_refs":[11],"consequence":"Flag"},
+  {"rule_id":"RS-05-R07","rule_type":"RequiredData","scope":"line","line_refs":[2],"consequence":"Reject"}
+ ],
+ "seeded_violations":3
+}

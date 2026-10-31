@@ -1,0 +1,33 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0058",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0058","generator_id":"gen_eval_set.py@1 F-0058","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0058.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-04"},
+ "header":{"firm":"Eastlake Zeller PC","firm_invoice_number":"INV-2026-20324","invoice_date":"2026-01-01","billing_period_start":"2025-12-01","billing_period_end":"2025-12-31","firm_matter_reference":"22598-0027","po_number":"PO-4529777","fees_total":8044.75,"expenses_total":6971.14,"adjustments_total":0.0,"total_due":15015.89,"currency":"USD"},
+ "timekeepers":[{"name":"Beatrix Tavares","title":"Partner","rate":740.0,"billed_as":"BT"},{"name":"Elena Ramanathan","title":"Paralegal","rate":165.0,"billed_as":"ER"},{"name":"Farah Abernathy","title":"Partner","rate":710.0,"billed_as":"FA"},{"name":"Peter Ramanathan","title":"Associate","rate":290.0,"billed_as":"PR"},{"name":"Samuel Thornbury","title":"Of Counsel","rate":610.0,"billed_as":"ST"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2025-12-02","timekeeper":"ST","timekeeper_name":"Samuel Thornbury","timekeeper_title":"Of Counsel","title":"O/C","hours":1.25,"rate":610.0,"amount":762.5,"narrative":"Revise appellate brief after cite check","codes":["L520","A104"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2025-12-02","timekeeper":"BT","timekeeper_name":"Beatrix Tavares","timekeeper_title":"Partner","title":"Ptr","hours":1.65,"rate":740.0,"amount":1221.0,"narrative":"Attend and present oral argument in the lease dispute","codes":["L530","A109"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2025-12-02","timekeeper":"ER","timekeeper_name":"Elena Ramanathan","timekeeper_title":"Paralegal","title":"Para","hours":1.25,"rate":165.0,"amount":206.25,"narrative":"Photocopied exhibits and assembled binders","codes":["L510","A110"],"page":1,"narrative_style":"clerical"},
+  {"n":4,"line_type":"fee","date":"2025-12-08","timekeeper":"ER","timekeeper_name":"Elena Ramanathan","timekeeper_title":"Paralegal","title":"Para","hours":2.25,"rate":165.0,"amount":371.25,"narrative":"Photocopied exhibits and assembled binders","codes":["L530","A110"],"page":1,"narrative_style":"clerical"},
+  {"n":5,"line_type":"fee","date":"2025-12-11","timekeeper":"ST","timekeeper_name":"Samuel Thornbury","timekeeper_title":"Of Counsel","title":"O/C","hours":1.5,"rate":755.0,"amount":1132.5,"narrative":"Review court docket and calendar of pending deadlines for the data incident","codes":["L190","A104"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2025-12-18","timekeeper":"FA","timekeeper_name":"Farah Abernathy","timekeeper_title":"Partner","title":"Ptr","hours":2.5,"rate":710.0,"amount":1775.0,"narrative":"Review court docket and calendar of pending deadlines for the customs audit","codes":["L190","A104"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2025-12-18","timekeeper":"BT","timekeeper_name":"Beatrix Tavares","timekeeper_title":"Partner","title":"Ptr","hours":1.75,"rate":740.0,"amount":1295.0,"narrative":"Analyze exposure and damages model for the vendor agreement","codes":["L120","A104"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2025-12-24","timekeeper":"ER","timekeeper_name":"Elena Ramanathan","timekeeper_title":"Paralegal","title":"Para","hours":2.25,"rate":165.0,"amount":371.25,"narrative":"Draft appellate brief in the insurance coverage issue","codes":["L520","A103"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"fee","date":"2025-12-26","timekeeper":"BT","timekeeper_name":"Beatrix Tavares","timekeeper_title":"Partner","title":"Ptr","hours":0.25,"rate":740.0,"amount":185.0,"narrative":"Prepare monthly status report to client regarding the vendor agreement","codes":["L190","A111"],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"fee","date":"2025-12-30","timekeeper":"PR","timekeeper_name":"Peter Ramanathan","timekeeper_title":"Associate","title":"Assoc","hours":2.5,"rate":290.0,"amount":725.0,"narrative":"Attend and present oral argument in the customs audit","codes":["L530","A109"],"page":1,"narrative_style":"clear"},
+  {"n":11,"line_type":"expense","date":"2025-12-18","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":6287.03,"amount":6287.03,"narrative":"Consulting expert fees","codes":["E119"],"page":1,"narrative_style":"clear"},
+  {"n":12,"line_type":"expense","date":"2025-12-26","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":684.11,"amount":684.11,"narrative":"Airfare to Portland for deposition","codes":["E110"],"page":1,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["871 Congress Boulevard","Dallas","Tax ID 77-4881586"],"template":"T08","pages":2},
+ "rule_set_id":"RS-04",
+ "context":{"matter_open":"2024-09-22","matter_close":"2026-03-31","matter_budget":85063.0,"approved_timekeepers":["Samuel Thornbury","Dalia Ashdown","Beatrix Tavares","Elena Ramanathan","Peter Ramanathan","Helena Voss","Tomas Wickham","Farah Abernathy"],"invoice_received_date":"2026-01-07"},
+ "expected_findings":[
+  {"rule_id":"RS-04-R02","rule_type":"ApprovedRate","scope":"line","line_refs":[5],"consequence":"Reduce"},
+  {"rule_id":"RS-04-R03","rule_type":"TimeIncrement","scope":"line","line_refs":[2],"consequence":"Reduce"},
+  {"rule_id":"RS-04-R08","rule_type":"NonBillableActivity","scope":"line","line_refs":[3],"consequence":"Disallow"},
+  {"rule_id":"RS-04-R08","rule_type":"NonBillableActivity","scope":"line","line_refs":[4],"consequence":"Disallow"}
+ ],
+ "seeded_violations":4
+}

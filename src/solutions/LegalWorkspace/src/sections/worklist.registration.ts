@@ -33,6 +33,10 @@
  *     Assign Work (required Lookup / Person fields) cannot be completed. It queries contacts, `sprk_budget`
  *     and `sprk_organization` (allowed by D-15, which bars only Signal / Decision Record reads). Undefined
  *     when there is no Xrm (the wizard's searches then find nothing).
+ *   - `openLookup` / `openRecord` - task 158 (D-182): `createWorklistOpenLookup` / `createWorklistOpenRecord` over
+ *     `createXrmNavigationService()`. Every Person / Lookup field in the wizard then opens the platform side-pane
+ *     lookup (scoped as `lookup` is), and the subject in *What was found* opens in a modal above the wizard.
+ *     Undefined when there is no Xrm (the wizard keeps its inline type-ahead and shows the subject as text).
  *   - `aggregateRow` - task 054's `ReconciliationAggregateCard`; "Open Email Review" dispatches `widget_load`
  *     for the reconciliation tab on the PaneEventBus the Console mounts above the embedded workspace
  *     (a no-op where there is no bus, e.g. the standalone page, via `useOptionalDispatchPaneEvent`).
@@ -56,11 +60,14 @@ import {
   WorklistWidget,
   XrmDataverseClient,
   createWorklistService,
+  createXrmNavigationService,
   getXrm,
   launchDecisionWizard,
 } from "@spaarke/ui-components";
 import {
   createWorklistLookup,
+  createWorklistOpenLookup,
+  createWorklistOpenRecord,
   useOptionalDispatchPaneEvent,
   type WorklistLookupDataSource,
 } from "@spaarke/ai-widgets";
@@ -87,6 +94,15 @@ const WorklistSectionMount: React.FC = () => {
   const webApi = React.useMemo(() => getXrm()?.WebApi as WorklistLookupDataSource | undefined, []);
   const lookup = React.useMemo(() => (webApi ? createWorklistLookup(webApi) : undefined), [webApi]);
   const dataverseClient = React.useMemo(() => (webApi ? new XrmDataverseClient() : undefined), [webApi]);
+  // D-182: the wizard's Person / Lookup fields open the platform side-pane lookup and its subject opens in a modal; without Xrm
+  // the wizard keeps its inline type-ahead and shows the subject as text.
+  const navigation = React.useMemo(() => (webApi ? createXrmNavigationService() : undefined), [webApi]);
+  // Task 160: with Xrm.WebApi the pane also reads a picked contact's address (the inquiry's To lookup).
+  const openLookup = React.useMemo(
+    () => (navigation ? createWorklistOpenLookup(navigation, webApi ?? undefined) : undefined),
+    [navigation, webApi]
+  );
+  const openRecord = React.useMemo(() => (navigation ? createWorklistOpenRecord(navigation) : undefined), [navigation]);
 
   const openEmailReview = React.useCallback(() => {
     dispatch("workspace", { type: "widget_load", widgetType: RECONCILIATION_WIDGET_TYPE });
@@ -113,7 +129,14 @@ const WorklistSectionMount: React.FC = () => {
         paddingRight: tokens.spacingHorizontalL,
       },
     },
-    React.createElement(WorklistWidget, { service, lookup, aggregateRow, launchWizard: launchDecisionWizard }),
+    React.createElement(WorklistWidget, {
+      service,
+      lookup,
+      openLookup,
+      openRecord,
+      aggregateRow,
+      launchWizard: launchDecisionWizard,
+    }),
   );
 };
 

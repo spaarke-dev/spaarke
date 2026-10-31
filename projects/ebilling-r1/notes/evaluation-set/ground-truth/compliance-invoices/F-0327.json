@@ -1,0 +1,27 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0327",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0327","generator_id":"gen_eval_set.py@1 F-0327","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0327.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-03"},
+ "header":{"firm":"Draycott Beckett PC","firm_invoice_number":"LF0089691","invoice_date":"2026-03-04","billing_period_start":"2026-02-01","billing_period_end":"2026-02-28","firm_matter_reference":"55281-0008","po_number":"PO-4564281","fees_total":4156.0,"expenses_total":2403.96,"adjustments_total":0.0,"total_due":6559.96,"currency":"USD"},
+ "timekeepers":[{"name":"Anders Hargrove","title":"Partner","rate":415.0,"billed_as":"AH"},{"name":"Beatrix Ashdown","title":"Paralegal","rate":115.0,"billed_as":"BA"},{"name":"Farah Esposito","title":"Associate","rate":230.0,"billed_as":"FE"},{"name":"Imani Mbeki","title":"Associate","rate":270.0,"billed_as":"IM"},{"name":"Imani Rosenthal","title":"Of Counsel","rate":335.0,"billed_as":"IR"},{"name":"Sofia Nakamura","title":"Paralegal","rate":145.0,"billed_as":"SN"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2026-02-03","timekeeper":"FE","timekeeper_name":"Farah Esposito","timekeeper_title":"Associate","title":"Assoc","hours":2.3,"rate":230.0,"amount":529.0,"narrative":"Analyze exposure and damages model for the insurance coverage issue","codes":["L120","A104"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2026-02-05","timekeeper":"IR","timekeeper_name":"Imani Rosenthal","timekeeper_title":"Of Counsel","title":"O/C","hours":2.2,"rate":335.0,"amount":737.0,"narrative":"Prepare monthly status report to client regarding the licensing dispute","codes":["L190","A111"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2026-02-13","timekeeper":"SN","timekeeper_name":"Sofia Nakamura","timekeeper_title":"Paralegal","title":"Para","hours":2.4,"rate":145.0,"amount":348.0,"narrative":"Review court docket and calendar of pending deadlines for the warranty claim","codes":["L190","A104"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2026-02-13","timekeeper":"AH","timekeeper_name":"Anders Hargrove","timekeeper_title":"Partner","title":"Ptr","hours":2.9,"rate":415.0,"amount":1203.5,"narrative":"Revise appellate brief after cite check","codes":["L520","A104"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2026-02-16","timekeeper":"IM","timekeeper_name":"Imani Mbeki","timekeeper_title":"Associate","title":"Assoc","hours":1.8,"rate":270.0,"amount":486.0,"narrative":"Prepare for oral argument in the supply agreement","codes":["L530","A101"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2026-02-17","timekeeper":"IM","timekeeper_name":"Imani Mbeki","timekeeper_title":"Associate","title":"Assoc","hours":0.9,"rate":270.0,"amount":243.0,"narrative":"Analyze exposure and damages model for the distribution agreement","codes":["L120","A104"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2026-02-18","timekeeper":"FE","timekeeper_name":"Farah Esposito","timekeeper_title":"Associate","title":"Assoc","hours":2.1,"rate":230.0,"amount":483.0,"narrative":"Research appealability issues in the vendor agreement","codes":["L510","A102"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2026-02-24","timekeeper":"BA","timekeeper_name":"Beatrix Ashdown","timekeeper_title":"Paralegal","title":"Para","hours":1.1,"rate":115.0,"amount":126.5,"narrative":"Prepare for oral argument in the licensing dispute","codes":["L530","A101"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"expense","date":"2026-02-13","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":37.34,"amount":37.34,"narrative":"Working meal during deposition preparation","codes":["E111"],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"expense","date":"2026-02-17","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":2349.42,"amount":2349.42,"narrative":"Consulting expert fees","codes":["E119"],"page":1,"narrative_style":"clear"},
+  {"n":11,"line_type":"expense","date":"2026-02-26","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":17.2,"amount":17.2,"narrative":"Long distance conference call charges","codes":["E105"],"page":1,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["955 Union Square","Chicago","Tax ID 23-9181077"],"template":"T19","pages":2},
+ "rule_set_id":"RS-03",
+ "context":{"matter_open":"2025-03-24","matter_close":"2026-05-29","matter_budget":51239.0,"approved_timekeepers":["Sofia Nakamura","Farah Esposito","Imani Mbeki","Tomas Delacroix","Hannah Nakamura","Imani Rosenthal","Rafael Eriksen","Anders Hargrove","Beatrix Ashdown"],"invoice_received_date":"2026-03-04"},
+ "expected_findings":[],
+ "seeded_violations":0
+}

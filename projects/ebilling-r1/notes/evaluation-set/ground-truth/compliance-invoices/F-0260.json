@@ -1,0 +1,32 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0260",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0260","generator_id":"gen_eval_set.py@1 F-0260","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0260.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-02"},
+ "header":{"firm":"Montclair and Forsythe LLP","firm_invoice_number":"INV-2026-16610","invoice_date":"2026-06-04","billing_period_start":"2026-05-01","billing_period_end":"2026-05-31","firm_matter_reference":"11405-0002","po_number":"PO-4596695","fees_total":3280.0,"expenses_total":546.74,"adjustments_total":0.0,"total_due":3826.74,"currency":"USD"},
+ "timekeepers":[{"name":"Dmitri Ramanathan","title":"Associate","rate":325.0,"billed_as":"Dmitri Ramanathan"},{"name":"Hannah Oyelaran","title":"Senior Associate","rate":420.0,"billed_as":"Hannah Oyelaran"},{"name":"Helena Carmichael","title":"Associate","rate":340.0,"billed_as":"Helena Carmichael"},{"name":"Helena Voss","title":"Associate","rate":300.0,"billed_as":"Helena Voss"}],
+ "lines":[
+  {"n":1,"line_type":"expense","date":"2026-05-04","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":4.0,"rate":48.89,"amount":195.56,"narrative":"Working meal during deposition preparation","codes":["E111"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2026-05-05","timekeeper":"Helena Voss","timekeeper_name":"Helena Voss","timekeeper_title":"Associate","title":"Assoc","hours":0.9,"rate":300.0,"amount":270.0,"narrative":"Meet and confer with counsel for Redstone Mining regarding discovery dispute","codes":[],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2026-05-15","timekeeper":"Helena Voss","timekeeper_name":"Helena Voss","timekeeper_title":"Associate","title":"Assoc","hours":1.8,"rate":300.0,"amount":540.0,"narrative":"Plan strategy for upcoming phase of the regulatory inquiry with team","codes":["L120","A101"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2026-05-21","timekeeper":"Hannah Oyelaran","timekeeper_name":"Hannah Oyelaran","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":0.55,"rate":420.0,"amount":231.0,"narrative":"Attend deposition of Northwind Logistics corporate representative","codes":["L330","A109"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2026-05-21","timekeeper":"Helena Voss","timekeeper_name":"Helena Voss","timekeeper_title":"Associate","title":"Assoc","hours":3.0,"rate":300.0,"amount":900.0,"narrative":"Review expert report served by Solano Freight","codes":["L340","A104"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2026-05-22","timekeeper":"Dmitri Ramanathan","timekeeper_name":"Dmitri Ramanathan","timekeeper_title":"Associate","title":"Assoc","hours":1.1,"rate":325.0,"amount":357.5,"narrative":"Research authority for answer and affirmative defenses","codes":["L250","A102"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2026-05-22","timekeeper":"Dmitri Ramanathan","timekeeper_name":"Dmitri Ramanathan","timekeeper_title":"Associate","title":"Assoc","hours":1.1,"rate":325.0,"amount":357.5,"narrative":"Research authority for answer and affirmative defenses","codes":["L250","A102"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2026-05-26","timekeeper":"Helena Voss","timekeeper_name":"Helena Voss","timekeeper_title":"Associate","title":"Assoc","hours":0.7,"rate":300.0,"amount":210.0,"narrative":"Research authority for interrogatory responses","codes":["L250","A102"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"expense","date":"2026-05-27","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":351.18,"amount":351.18,"narrative":"Court filing fee","codes":["E112"],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"fee","date":"2026-05-28","timekeeper":"Helena Carmichael","timekeeper_name":"Helena Carmichael","timekeeper_title":"Associate","title":"Assoc","hours":0.6,"rate":340.0,"amount":204.0,"narrative":"Review opposing brief in response to interrogatory responses","codes":["L240","A104"],"page":1,"narrative_style":"clear"},
+  {"n":11,"line_type":"fee","date":"2026-09-08","timekeeper":"Helena Voss","timekeeper_name":"Helena Voss","timekeeper_title":"Associate","title":"Assoc","hours":0.7,"rate":300.0,"amount":210.0,"narrative":"Prepare responses and objections to motion for summary judgment","codes":["L310","A103"],"page":1,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["716 Union Square","Houston","Tax ID 79-7824792"],"template":"T18","pages":1},
+ "rule_set_id":"RS-02",
+ "context":{"matter_open":"2025-05-16","matter_close":"2026-08-29","matter_budget":40306.0,"approved_timekeepers":["Dmitri Marchetti","Tomas Castellanos","Helena Carmichael","Dmitri Ramanathan","Helena Voss","Hannah Oyelaran","Rafael Hargrove","Emeka Hargrove"],"invoice_received_date":"2026-06-16"},
+ "expected_findings":[
+  {"rule_id":"RS-02-R03","rule_type":"TimeIncrement","scope":"line","line_refs":[4],"consequence":"Reduce"},
+  {"rule_id":"RS-02-R05","rule_type":"RequiredData","scope":"line","line_refs":[2],"consequence":"Reject"},
+  {"rule_id":"RS-02-R06","rule_type":"CoreRecordWindow","scope":"line","line_refs":[11],"consequence":"Flag"},
+  {"rule_id":"RS-02-R07","rule_type":"Duplicate","scope":"line","line_refs":[7],"consequence":"Disallow","related_line_refs":[6]}
+ ],
+ "seeded_violations":4
+}

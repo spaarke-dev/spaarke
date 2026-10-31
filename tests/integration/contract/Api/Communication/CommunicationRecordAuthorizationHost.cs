@@ -29,6 +29,7 @@ using Sprk.Bff.Api.Services.Communication.Channels;
 using Sprk.Bff.Api.Services.Communication.Engine;
 using Sprk.Bff.Api.Services.Communication.Models;
 using Sprk.Bff.Api.Tests.TestInfrastructure;
+using Sprk.Bff.Api.Tests.Services.Ai.Handlers;
 using Sprk.Bff.Api.Services.Identity;
 using DataverseEntity = Microsoft.Xrm.Sdk.Entity;
 
@@ -75,6 +76,12 @@ public sealed class CommunicationRecordAuthorizationHost : WebApplicationFactory
 
     public List<(string DriveId, string ItemId)> Downloads { get; } = new();
 
+    /// <summary>
+    /// Task 188 round 4b: what the BFF's app-only identity reads for THE external document narrowing (the REAL predicate
+    /// behind the real seam). The caller is internal by default (<see cref="Identity"/>), so nothing is read.
+    /// </summary>
+    internal AppOnlyDocumentWorld World { get; private set; } = new();
+
     /// <summary>Restores every substitute to its defaults: a resolved internal caller, nothing granted, nothing visible.</summary>
     public void Reset()
     {
@@ -109,6 +116,7 @@ public sealed class CommunicationRecordAuthorizationHost : WebApplicationFactory
         Graph.Reset();
         FieldMapping.Reset();
         Downloads.Clear();
+        World = new AppOnlyDocumentWorld();
     }
 
     // ── Request helpers ───────────────────────────────────────────────────────────────────────
@@ -287,6 +295,8 @@ public sealed class CommunicationRecordAuthorizationHost : WebApplicationFactory
             services.AddSingleton<CallerRecordAccessProbe>(Probe);
             services.RemoveAll<IAccessDataSource>();
             services.AddSingleton<IAccessDataSource>(Access);
+            services.RemoveAll<InternalRouteDocumentNarrowing>();
+            services.AddScoped<InternalRouteDocumentNarrowing>(_ => (ids, ct) => World.Narrowing(ids, ct));
             services.RemoveAll<IDataverseUserClient>();
             services.AddSingleton(UserClient.Object);
             services.RemoveAll<ICommunicationChannelSender>();

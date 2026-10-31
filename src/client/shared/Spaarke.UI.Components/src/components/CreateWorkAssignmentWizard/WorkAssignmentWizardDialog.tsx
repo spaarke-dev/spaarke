@@ -22,7 +22,13 @@
  */
 import * as React from 'react';
 import { Button, Text, Spinner, tokens } from '@fluentui/react-components';
-import { CheckmarkCircleFilled, PersonRegular, MailRegular, CalendarRegular } from '@fluentui/react-icons';
+import {
+  CheckmarkCircleFilled,
+  ErrorCircleFilled,
+  PersonRegular,
+  MailRegular,
+  CalendarRegular,
+} from '@fluentui/react-icons';
 
 import { WizardShell } from '../Wizard/WizardShell';
 import type { IWizardShellHandle, IWizardStepConfig, IWizardSuccessConfig } from '../Wizard/wizardShellTypes';
@@ -201,6 +207,17 @@ const WorkAssignmentWizardDialog: React.FC<IWorkAssignmentWizardDialogProps> = (
   const prefillRef = React.useRef(prefillValues);
   prefillRef.current = prefillValues;
 
+  // Enter Info is rendered only while it is the current step, so Back to it REMOUNTS it. Once it has reported values
+  // (`enterInfoSeenRef`), a remount is seeded from them (not from the record pre-fill) so nothing the person entered,
+  // Assigned To included, is lost. Cleared when the selected record changes (its pre-fill applies afresh). A reopen needs
+  // no reset of its own: it empties the form, and the seed IS the form (and the record change above clears it too).
+  // AI pre-fill is skipped on a remount only when the form holds something (`formHoldsEntries`): an empty form (nothing
+  // reported yet, an unfinished or failed AI run, files added after an empty first visit) still gets its AI run.
+  const enterInfoSeenRef = React.useRef(false);
+  // The Send Email subject/body this dialog last pre-filled; while the body still equals it the person has not edited
+  // it, so a later change on Enter Info refreshes it (otherwise the summary would name a stale Assigned To).
+  const autoEmailRef = React.useRef<{ subject: string; body: string } | null>(null);
+
   // -- Service (re-created when containerId resolves) ------------------------
   const [resolvedContainerId, setResolvedContainerId] = React.useState(containerId ?? '');
   const serviceRef = React.useRef<WorkAssignmentService | null>(null);
@@ -259,6 +276,7 @@ const WorkAssignmentWizardDialog: React.FC<IWorkAssignmentWizardDialogProps> = (
       setEmailCc('');
       setEmailSubject('');
       setEmailBody('');
+      autoEmailRef.current = null;
       setPrefillValues(undefined);
       setIsPrefilling(false);
       selectWorkValidRef.current = false;
@@ -300,8 +318,11 @@ const WorkAssignmentWizardDialog: React.FC<IWorkAssignmentWizardDialogProps> = (
   // -- Pre-fill from selected record -----------------------------------------
   React.useEffect(() => {
     const { recordType, recordId } = formState;
+    // A different record means its pre-fill applies afresh: Enter Info is no longer seeded from its earlier values.
+    enterInfoSeenRef.current = false;
+    // Never leave the PREVIOUS record's values behind: if this record's read fails, Enter Info must not seed from them.
+    setPrefillValues(undefined);
     if (!recordId || !recordType) {
-      setPrefillValues(undefined);
       return;
     }
 
@@ -347,9 +368,23 @@ const WorkAssignmentWizardDialog: React.FC<IWorkAssignmentWizardDialogProps> = (
         | 'practiceAreaName'
         | 'priority'
         | 'responseDueDate'
+        | 'assignedToId'
+        | 'assignedToName'
       >
     ) => {
+      enterInfoSeenRef.current = true;
       setFormState(prev => ({ ...prev, ...values }));
+
+      // Refresh the Send Email summary while the person has not edited it.
+      const auto = autoEmailRef.current;
+      if (auto && values.name) {
+        const next = buildEmailPrefill({ ...formStateRef.current, ...values });
+        if (emailBodyRef.current === auto.body) {
+          setEmailBody(next.body);
+          if (emailSubjectRef.current === auto.subject) setEmailSubject(next.subject);
+          autoEmailRef.current = next;
+        }
+      }
     },
     []
   );
@@ -434,17 +469,15 @@ const WorkAssignmentWizardDialog: React.FC<IWorkAssignmentWizardDialogProps> = (
   );
 
   // -- Pre-fill email when entering Send Email step --------------------------
+  // Once per open (`autoEmailRef`): later the subject/body belong to the person, and only an UNEDITED body is refreshed
+  // (handleEnterInfoValues). Keying this on an empty subject rewrote the subject and overwrote an edited body whenever the
+  // person cleared the subject to retype it.
   React.useEffect(() => {
-    if (selectedActions.includes('send-email') && emailSubject === '' && formStateRef.current.name) {
-      const f = formStateRef.current;
-      setEmailSubject(`Work Assignment: ${f.name}`);
-      const lines = [`A new work assignment has been created:`, '', `Name: ${f.name}`];
-      if (f.description) lines.push(`Description: ${f.description}`);
-      if (f.matterTypeName) lines.push(`Matter Type: ${f.matterTypeName}`);
-      if (f.practiceAreaName) lines.push(`Practice Area: ${f.practiceAreaName}`);
-      if (f.responseDueDate) lines.push(`Response Due Date: ${f.responseDueDate}`);
-      lines.push(`Priority: ${getPriorityLabel(f.priority)}`);
-      setEmailBody(lines.join('\n'));
+    if (selectedActions.includes('send-email') && !autoEmailRef.current && formStateRef.current.name) {
+      const prefill = buildEmailPrefill(formStateRef.current);
+      autoEmailRef.current = prefill;
+      setEmailSubject(prefill.subject);
+      setEmailBody(prefill.body);
 
       // Auto-CC the current user
       if (!emailCc) {
@@ -455,7 +488,7 @@ const WorkAssignmentWizardDialog: React.FC<IWorkAssignmentWizardDialogProps> = (
           .catch(() => {});
       }
     }
-  }, [selectedActions, emailSubject, emailCc, dataService]);
+  }, [selectedActions, emailCc, dataService]);
 
   // -- Build base steps ------------------------------------------------------
   const steps = React.useMemo<IWizardStepConfig[]>(
@@ -505,9 +538,11 @@ const WorkAssignmentWizardDialog: React.FC<IWorkAssignmentWizardDialogProps> = (
               dataService={dataService}
               onValidChange={handleEnterInfoValid}
               onFormValues={handleEnterInfoValues}
-              initialValues={prefillRef.current}
+              initialValues={enterInfoSeenRef.current ? formStateRef.current : prefillRef.current}
               uploadedFiles={uploadedFilesRef.current}
-              hasInitialValues={!!prefillRef.current}
+              hasInitialValues={
+                (enterInfoSeenRef.current && formHoldsEntries(formStateRef.current)) || !!prefillRef.current
+              }
               authenticatedFetch={authenticatedFetch}
               bffBaseUrl={bffBaseUrl}
             />
@@ -565,7 +600,7 @@ const WorkAssignmentWizardDialog: React.FC<IWorkAssignmentWizardDialogProps> = (
 
     if (result.status === 'error') {
       return {
-        icon: <CheckmarkCircleFilled fontSize={64} style={{ color: tokens.colorPaletteRedForeground1 }} />,
+        icon: <ErrorCircleFilled fontSize={64} style={{ color: tokens.colorPaletteRedForeground1 }} />,
         title: 'Error',
         body: (
           <Text size={300} style={{ color: tokens.colorNeutralForeground2 }}>
@@ -683,6 +718,23 @@ async function resolveCurrentUserEmail(dataService: IDataService): Promise<strin
   } catch {
     return null;
   }
+}
+
+/** True when Enter Info holds something (entered or AI-filled) that a repeated AI run would overwrite. */
+function formHoldsEntries(f: ICreateWorkAssignmentFormState): boolean {
+  return !!(f.name.trim() || f.description.trim() || f.matterTypeId || f.practiceAreaId || f.assignedToId);
+}
+
+/** The Send Email subject and body this dialog pre-fills from the Enter Info values. */
+function buildEmailPrefill(f: ICreateWorkAssignmentFormState): { subject: string; body: string } {
+  const lines = [`A new work assignment has been created:`, '', `Name: ${f.name}`];
+  if (f.description) lines.push(`Description: ${f.description}`);
+  if (f.matterTypeName) lines.push(`Matter Type: ${f.matterTypeName}`);
+  if (f.practiceAreaName) lines.push(`Practice Area: ${f.practiceAreaName}`);
+  if (f.responseDueDate) lines.push(`Response Due Date: ${f.responseDueDate}`);
+  lines.push(`Priority: ${getPriorityLabel(f.priority)}`);
+  if (f.assignedToName) lines.push(`Assigned To: ${f.assignedToName}`);
+  return { subject: `Work Assignment: ${f.name}`, body: lines.join('\n') };
 }
 
 function getPriorityLabel(priority: number): string {

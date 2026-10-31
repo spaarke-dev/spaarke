@@ -1,3 +1,4 @@
+using System.Security.Claims;
 using System.Text.Json;
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
@@ -8,12 +9,14 @@ using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Models.Ai.Chat;
 using Sprk.Bff.Api.Models.Ai.SemanticSearch;
 using Sprk.Bff.Api.Services.Ai;
+using Sprk.Bff.Api.Services.Ai.Context;
 using Sprk.Bff.Api.Services.Ai.Handlers;
 using Sprk.Bff.Api.Services.Ai.Nodes;
 using Sprk.Bff.Api.Services.Ai.PublicContracts;
 using Sprk.Bff.Api.Services.Ai.RecordSearch;
 using Sprk.Bff.Api.Services.Ai.SemanticSearch;
 using Sprk.Bff.Api.Services.Ai.Tools;
+using Sprk.Bff.Api.Services.Identity;
 using Sprk.Bff.Api.Tests.Services.Ai.Handlers;
 using Xunit;
 
@@ -38,14 +41,46 @@ public sealed class Issue1511_AiRetrievalAccessTrimTests : TypedToolHandlerTestF
     private static readonly Guid SecureDoc = Guid.Parse("aaaaaaaa-1111-2222-3333-444444444444");
     private static readonly Guid ReadableDoc = Guid.Parse("bbbbbbbb-1111-2222-3333-444444444444");
 
+    private static readonly Guid CallerSystemUserId = Guid.Parse("0a0a0a0a-0000-0000-0000-000000001511");
+
     private readonly ReadableDocumentsUserClient _userClient = new(ReadableDoc);
     private readonly Mock<IRagService> _rag = new();
+    private readonly Mock<ICallerSystemUserResolver> _callerResolver = new();
+    private readonly Mock<ISystemUserIdentityResolver> _identityResolver = new();
+
+    /// <summary>Task 188 round 3: what the BFF reads APP-ONLY when it narrows an external caller's documents.</summary>
+    private readonly AppOnlyDocumentWorld _appOnly = new();
+
     private readonly RetrievalAccessTrim _trim;
 
     public Issue1511_AiRetrievalAccessTrimTests()
     {
+        // Default caller: a resolved INTERNAL systemuser (not narrowed), as every #1511 test assumes.
+        _callerResolver
+            .Setup(r => r.ResolveAsync(It.IsAny<ClaimsPrincipal?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(CallerSystemUserResolution.Resolved(CallerSystemUserId.ToString("D")));
+        _identityResolver
+            .Setup(r => r.IsExternalAsync(CallerSystemUserId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(false);
         var accessor = new HttpContextAccessor { HttpContext = TestHttpContexts.Authenticated(CallerOid) };
-        _trim = new RetrievalAccessTrim(accessor, _userClient, NullLogger<RetrievalAccessTrim>.Instance);
+        _trim = new RetrievalAccessTrim(
+            accessor, _userClient, _callerResolver.Object, _identityResolver.Object, _appOnly.Narrowing,
+            NullLogger<RetrievalAccessTrim>.Instance);
+    }
+
+    private void AsExternalCaller() =>
+        _identityResolver
+            .Setup(r => r.IsExternalAsync(CallerSystemUserId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
+
+    /// <summary>Task 188 round 3: <paramref name="document"/> is the .eml of an internal-only email, as the BFF reads it app-only.</summary>
+    private void InternalOnlyEmailDocument(Guid document)
+    {
+        var thread = Guid.NewGuid();
+        var communication = Guid.NewGuid();
+        _appOnly.Thread(thread, 100000000);
+        _appOnly.Communication(communication, internalOnly: true, thread);
+        _appOnly.Document(document, communication: communication);
     }
 
     private void IndexReturns(params RagSearchResult[] rows) =>
@@ -348,6 +383,84 @@ public sealed class Issue1511_AiRetrievalAccessTrimTests : TypedToolHandlerTestF
         Everything(result).Should().NotContain(Secret);
         JsonSerializer.Serialize(result.Data).Should().Contain(Visible[..20],
             because: "a readable document still comes back, trimmed");
+    }
+
+    // ── Task 188 round 3 (F1-A): an external systemuser's retrieval is narrowed ─────────────────
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task InternalOnlyEmailDocument_TheCallerCanRead_ReachesDocumentSearch_OnlyForAnInternalCaller(bool external)
+    {
+        if (external)
+        {
+            AsExternalCaller();
+        }
+
+        // The caller holds Read on both documents (a share on matter M); SecureDoc is the .eml of an internal-only email.
+        _userClient.Allow("sprk_documents", SecureDoc.ToString("D"));
+        InternalOnlyEmailDocument(SecureDoc);
+        _appOnly.Document(ReadableDoc);
+        IndexReturnsSecureThenReadable();
+        var tool = BuildAnalysisTool(nameof(DocumentSearchHandler), "{\"method\":\"SearchDocuments\"}");
+
+        var result = await DocumentSearch().ExecuteChatAsync(Chat(), tool, CancellationToken.None);
+
+        JsonSerializer.Serialize(result.Data).Should().Contain(Visible[..20]);
+        if (external)
+        {
+            Everything(result).Should().NotContain(Secret).And.NotContain("Secure merger memo");
+            _appOnly.Calls.Should().Be(1);
+        }
+        else
+        {
+            JsonSerializer.Serialize(result.Data).Should().Contain(Secret[..20],
+                because: "an internal user's results are unchanged");
+            _appOnly.Calls.Should().Be(0);
+        }
+    }
+
+    [Fact]
+    public async Task ExternalCaller_ObservationQuotingAnInternalOnlyEmailItem_DoesNotReachIndexRetrieve()
+    {
+        AsExternalCaller();
+        var readableMatter = Guid.NewGuid();
+        _userClient.Allow("sprk_matters", readableMatter.ToString("D"));
+        _userClient.AllowDocumentOnDriveItem("ITEM-EML", SecureDoc).AllowDocumentOnDriveItem("ITEM-LETTER", ReadableDoc);
+        InternalOnlyEmailDocument(SecureDoc);
+        _appOnly.Document(ReadableDoc);
+
+        static Azure.Search.Documents.Models.SearchResult<Azure.Search.Documents.Models.SearchDocument> Observation(
+            string id, string value, Guid matter, string itemId) =>
+            Azure.Search.Documents.Models.SearchModelFactory.SearchResult(new Azure.Search.Documents.Models.SearchDocument
+            {
+                ["id"] = id,
+                ["tenantId"] = "tenant-1",
+                ["artifactType"] = "observation",
+                ["subject"] = $"matter:{matter}",
+                ["predicate"] = "settlementAmount",
+                ["valueJson"] = value,
+                ["evidence"] = new object[]
+                {
+                    new Azure.Search.Documents.Models.SearchDocument
+                    {
+                        ["refType"] = "document", ["ref"] = $"spe://drive/b!x/item/{itemId}", ["quote"] = value,
+                    },
+                },
+                ["scope"] = new Azure.Search.Documents.Models.SearchDocument
+                {
+                    ["entityType"] = "matter", ["entityId"] = matter.ToString(),
+                },
+            }, 0.9, null);
+
+        var json = await RunIndexRetrieveAsync("{\"artifactType\":\"observation\",\"predicate\":\"settlementAmount\"}",
+            Observation("o-eml", Secret + "-EML", readableMatter, "ITEM-EML"),
+            Observation("o-letter", Visible + "-LETTER", readableMatter, "ITEM-LETTER"));
+
+        json.Should().NotContain(Secret, because: "the item's only readable row is an internal-only email's .eml");
+        json.Should().Contain(Visible + "-LETTER");
+        _userClient.Selects.Should().Contain("sprk_driveitemid,sprk_documentid");
+        _appOnly.Calls.Should().Be(1);
     }
 
     // ── Insights cohort retrieval (IndexRetrieveNode, verifier F1) ─────────────────────────────

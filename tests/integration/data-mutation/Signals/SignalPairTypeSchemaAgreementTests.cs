@@ -77,6 +77,25 @@ public class SignalPairTypeSchemaAgreementTests
         DeclaredType("sprk_DecisionRecord").Should().Be(new ColumnType("lookup", "sprk_recordtype_ref"));
     }
 
+    /// <summary>
+    /// ebilling-r1 task 026 (FR-15, D-94): every subject lookup the shared builder writes on a Signal or Decision Record (the
+    /// invoice line's <c>sprk_regardinginvoiceline</c> among them) is declared in the solution source as a lookup to that
+    /// subject's table. A subject added to the builder's map before its column is in the solution source fails here.
+    /// </summary>
+    [Theory]
+    [InlineData("sprk_signal", "sprk_Signal")]
+    [InlineData("sprk_decisionrecord", "sprk_DecisionRecord")]
+    public void EverySubjectLookupTheBuilderWrites_IsDeclaredAsALookupToTheSubjectsTable(string host, string entityFolder)
+    {
+        var lookups = TodoRegardingBuilder.RegardingLookupsByHostTable[host];
+        lookups.Should().Contain("sprk_billingevent", "sprk_regardinginvoiceline");
+
+        foreach (var (subject, column) in lookups)
+        {
+            DeclaredType(entityFolder, column).Should().Be(new ColumnType("lookup", subject), $"{host}.{column}");
+        }
+    }
+
     [Fact]
     public void Disagreement_FiresOnAStringOrAWrongTarget_AndPassesTheDeclaredShapes()
     {
@@ -126,19 +145,22 @@ public class SignalPairTypeSchemaAgreementTests
         _ => $"{value.GetType().Name} '{value}'",
     };
 
-    private static ColumnType DeclaredType(string entityFolder)
+    private static ColumnType DeclaredType(string entityFolder) => DeclaredType(entityFolder, PairTypeColumn);
+
+    private static ColumnType DeclaredType(string entityFolder, string column)
     {
         var solution = Path.Combine(RepoRoot(), "src", "dataverse", "solutions", "SpaarkeMaster");
         var entityXml = XDocument.Load(Path.Combine(solution, "Entities", entityFolder, "Entity.xml"));
         var relationships = Directory.GetFiles(Path.Combine(solution, "Other", "Relationships"), "*.xml")
             .Select(XDocument.Load).ToArray();
-        return DeclaredType(entityXml, entityFolder, relationships);
+        return DeclaredType(entityXml, entityFolder, relationships, column);
     }
 
-    private static ColumnType DeclaredType(XDocument entityXml, string entitySchemaName, IReadOnlyList<XDocument> relationships)
+    private static ColumnType DeclaredType(
+        XDocument entityXml, string entitySchemaName, IReadOnlyList<XDocument> relationships, string column = PairTypeColumn)
     {
         var attribute = entityXml.Descendants("attribute")
-            .Single(a => string.Equals((string?)a.Element("LogicalName"), PairTypeColumn, StringComparison.Ordinal));
+            .Single(a => string.Equals((string?)a.Element("LogicalName"), column, StringComparison.Ordinal));
         var type = ((string?)attribute.Element("Type"))?.Trim().ToLowerInvariant() ?? string.Empty;
         if (type != "lookup")
         {
@@ -148,9 +170,9 @@ public class SignalPairTypeSchemaAgreementTests
         var target = relationships
             .SelectMany(r => r.Descendants("EntityRelationship"))
             .Where(r => string.Equals((string?)r.Element("ReferencingEntityName"), entitySchemaName, StringComparison.OrdinalIgnoreCase)
-                && string.Equals((string?)r.Element("ReferencingAttributeName"), PairTypeColumn, StringComparison.OrdinalIgnoreCase))
+                && string.Equals((string?)r.Element("ReferencingAttributeName"), column, StringComparison.OrdinalIgnoreCase))
             .Select(r => ((string?)r.Element("ReferencedEntityName"))?.Trim().ToLowerInvariant())
-            .Should().ContainSingle($"{entitySchemaName}.{PairTypeColumn} is a lookup, so exactly one relationship names it").Subject;
+            .Should().ContainSingle($"{entitySchemaName}.{column} is a lookup, so exactly one relationship names it").Subject;
         return new ColumnType(type, target);
     }
 

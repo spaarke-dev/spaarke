@@ -148,7 +148,7 @@
     <ReferencingEntityName>sprk_Document</ReferencingEntityName>
     <ReferencedEntityName>sprk_Communication</ReferencedEntityName>
     <CascadeAssign>NoCascade</CascadeAssign>
-    <CascadeDelete>RemoveLink</CascadeDelete>
+    <CascadeDelete>Restrict</CascadeDelete>
     <CascadeArchive>RemoveLink</CascadeArchive>
     <CascadeReparent>NoCascade</CascadeReparent>
     <CascadeShare>NoCascade</CascadeShare>

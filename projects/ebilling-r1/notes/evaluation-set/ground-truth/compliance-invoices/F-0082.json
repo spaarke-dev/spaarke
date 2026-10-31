@@ -1,0 +1,29 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0082",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0082","generator_id":"gen_eval_set.py@1 F-0082","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0082.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-04"},
+ "header":{"firm":"Stanhope Forsythe PC","firm_invoice_number":"INV-2025-79355","invoice_date":"2026-06-04","billing_period_start":"2026-05-01","billing_period_end":"2026-05-31","firm_matter_reference":"29841-0023","po_number":"PO-4512000","fees_total":4221.25,"expenses_total":599.51,"adjustments_total":0.0,"total_due":4820.76,"currency":"USD"},
+ "timekeepers":[{"name":"Helena Nakamura","title":"Paralegal","rate":160.0,"billed_as":"HN"},{"name":"Ivan Fairweather","title":"Senior Associate","rate":485.0,"billed_as":"IF"},{"name":"Nadia Lockhart","title":"Associate","rate":340.0,"billed_as":"NL"},{"name":"Sofia Okafor","title":"Partner","rate":555.0,"billed_as":"SO"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2026-05-05","timekeeper":"IF","timekeeper_name":"Ivan Fairweather","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":1.25,"rate":485.0,"amount":606.25,"narrative":"Review and analyze requests for production received from Larkspur Medical","codes":["L310","A104"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2026-05-08","timekeeper":"NL","timekeeper_name":"Nadia Lockhart","timekeeper_title":"Associate","title":"Assoc","hours":1.75,"rate":340.0,"amount":595.0,"narrative":"Review and organize incoming production from Northwind Logistics for matter file","codes":["L140","A104"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2026-05-12","timekeeper":"SO","timekeeper_name":"Sofia Okafor","timekeeper_title":"Partner","title":"Ptr","hours":0.75,"rate":555.0,"amount":416.25,"narrative":"Review expert report served by Northwind Logistics","codes":["L340","A104"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2026-05-12","timekeeper":"NL","timekeeper_name":"Nadia Lockhart","timekeeper_title":"Associate","title":"Assoc","hours":1.0,"rate":340.0,"amount":340.0,"narrative":"Prepare monthly status report to client regarding the employment claim","codes":["L190","A111"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2026-05-13","timekeeper":"IF","timekeeper_name":"Ivan Fairweather","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":1.25,"rate":485.0,"amount":606.25,"narrative":"Review privilege log entries before service","codes":["L140","A104"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2026-05-25","timekeeper":"NL","timekeeper_name":"Nadia Lockhart","timekeeper_title":"Associate","title":"Assoc","hours":0.75,"rate":340.0,"amount":255.0,"narrative":"Prepare monthly status report to client regarding the data incident","codes":["L190","A111"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2026-05-28","timekeeper":"IF","timekeeper_name":"Ivan Fairweather","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":1.5,"rate":485.0,"amount":727.5,"narrative":"Prepare case assessment memorandum regarding the supply agreement and recommended strategy","codes":["L120","A103"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2026-05-29","timekeeper":"HN","timekeeper_name":"Helena Nakamura","timekeeper_title":"Paralegal","title":"Para","hours":2.25,"rate":300.0,"amount":675.0,"narrative":"Review court docket and calendar of pending deadlines for the supply agreement","codes":["L190","A104"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"expense","date":"2026-05-05","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":4.0,"rate":12.61,"amount":50.44,"narrative":"Postage - certified mail","codes":["E108"],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"expense","date":"2026-05-28","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":455.0,"rate":0.14,"amount":63.7,"narrative":"Photocopies - 455 pages","codes":["E101"],"page":1,"narrative_style":"clear"},
+  {"n":11,"line_type":"expense","date":"2026-05-29","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":485.37,"amount":485.37,"narrative":"Court reporter and transcript - deposition","codes":["E115"],"page":1,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["658 Union Square","Boston","Tax ID 44-1191995"],"template":"T08","pages":1},
+ "rule_set_id":"RS-04",
+ "context":{"matter_open":"2025-02-26","matter_close":"2026-08-29","matter_budget":44283.0,"approved_timekeepers":["Mei Carmichael","Nadia Lockhart","Ivan Fairweather","Aisha Zielinski","Helena Nakamura","Sofia Okafor","Beatrix Santoro"],"invoice_received_date":"2026-06-12"},
+ "expected_findings":[
+  {"rule_id":"RS-04-R02","rule_type":"ApprovedRate","scope":"line","line_refs":[8],"consequence":"Reduce"}
+ ],
+ "seeded_violations":1
+}

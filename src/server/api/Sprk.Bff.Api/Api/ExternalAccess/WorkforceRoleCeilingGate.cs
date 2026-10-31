@@ -58,6 +58,7 @@ internal static class WorkforceRoleCeilingGate
     internal const string AccountTable = "account";
     internal const string CommunicationTable = "sprk_communication";
     internal const string GrantTable = "sprk_externalrecordaccess";
+    internal const string InvoiceSubmissionTable = "sprk_invoicesubmission";
 
     // ── The route map (design note §0, owner round 101; review round 1 F1: every workforce-reachable route) ──────────
     // Each set is derived from what the route reads or writes: a read needs Read on every table whose rows it returns (the
@@ -170,6 +171,48 @@ internal static class WorkforceRoleCeilingGate
     /// </summary>
     internal static IReadOnlyList<WorkforceCeilingRequirement> PostMessageOn(string rootTable) =>
         Set((rootTable, AccessRights.Read | AccessRights.AppendTo), (CommunicationTable, AccessRights.Create));
+
+    /// <summary>
+    /// <c>POST /{matters|projects|workassignments}/{id}/invoice-submissions</c> (ebilling-r1 task 044): one set per core table
+    /// (<paramref name="coreTable"/>). Create on the new <c>sprk_invoicesubmission</c> row; the submission is filed under the
+    /// document and under the core record (<c>SecureChildLineage</c>), so Create + AppendTo on <c>sprk_document</c> (the route
+    /// creates the PDF's document row) and AppendTo on the core table. No AppendTo on <c>sprk_invoicesubmission</c>: nothing
+    /// points at it.
+    /// <para>
+    /// There is deliberately NO Write on <c>sprk_document</c>. <c>InvoiceSubmissionService.CompleteDocumentRowAsync</c> updates
+    /// the document's type and MIME type, but that update only finishes the server's own create, no upload set has Write, and
+    /// the dev Workforce role has no Write on <c>sprk_document</c>, so requiring it would refuse every submit.
+    /// </para>
+    /// <para>
+    /// Known limit: the ceiling filter runs on the group, before the route's <c>RequireEbillingEnabled</c>. With the flag off, a
+    /// workforce contact whose role lacks one of these privileges gets the ceiling's 403 instead of the flag's answer. The order
+    /// is not changed.
+    /// </para>
+    /// </summary>
+    internal static IReadOnlyList<WorkforceCeilingRequirement> SubmitInvoiceTo(string coreTable) =>
+        Set((InvoiceSubmissionTable, AccessRights.Create),
+            (DocumentTable, AccessRights.Create | AccessRights.AppendTo),
+            (coreTable, AccessRights.AppendTo));
+
+    internal static readonly IReadOnlyList<WorkforceCeilingRequirement> SubmitInvoiceToMatter = SubmitInvoiceTo(MatterTable);
+    internal static readonly IReadOnlyList<WorkforceCeilingRequirement> SubmitInvoiceToProject = SubmitInvoiceTo(ProjectTable);
+    internal static readonly IReadOnlyList<WorkforceCeilingRequirement> SubmitInvoiceToWorkAssignment = SubmitInvoiceTo(WorkAssignmentTable);
+
+    /// <summary>
+    /// <c>GET /invoice-submissions/{id}</c> and <c>GET /invoice-submissions</c>: Read on <c>sprk_invoicesubmission</c>. The view
+    /// returns only the ids of the document and the core record, so neither table is read for the caller.
+    /// </summary>
+    internal static readonly IReadOnlyList<WorkforceCeilingRequirement> ReadInvoiceSubmissions = Set(
+        (InvoiceSubmissionTable, AccessRights.Read));
+
+    /// <summary>
+    /// <c>GET /invoice-submissions/firm-records</c>: Read on the three core tables whose ids it returns, and Create on
+    /// <c>sprk_invoicesubmission</c>. The handler offers only the records the caller can submit on, so this mirrors
+    /// <c>/me/entitlements</c> offering a service-request type only when the role holds Create on it.
+    /// </summary>
+    internal static readonly IReadOnlyList<WorkforceCeilingRequirement> ListInvoiceFirmRecords = Set(
+        (MatterTable, AccessRights.Read), (ProjectTable, AccessRights.Read), (WorkAssignmentTable, AccessRights.Read),
+        (InvoiceSubmissionTable, AccessRights.Create));
 
     /// <summary>
     /// The table whose rows a <c>/me/entitlements</c> module code shows (review round 1 F2; design note §5: "never shows a

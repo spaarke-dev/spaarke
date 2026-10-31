@@ -1,0 +1,4 @@
+{"id": "sprk_invoice_v1p", "arm": "analyzer-create", "api": "2026-06-01-preview", "put_status": 201, "at": "2026-10-15T15:21:29Z", "op_status": "Succeeded", "get_status": 200, "workflow": "standard.2026-06-01-preview", "warnings": []}
+{"id": "sprk_invoice_v1_cls", "arm": "analyzer-create", "api": "2025-11-01", "put_status": 201, "at": "2026-10-15T15:21:32Z", "op_status": "Succeeded", "get_status": 200, "workflow": null, "warnings": []}
+{"id": "sprk_invoice_router", "arm": "analyzer-create", "api": "2025-11-01", "put_status": 201, "at": "2026-10-15T15:21:42Z", "op_status": "Succeeded", "get_status": 200, "workflow": null, "warnings": []}
+{"id": "sprk_invoice_router_p", "arm": "analyzer-create", "api": "2026-06-01-preview", "put_status": 201, "at": "2026-10-15T15:21:45Z", "op_status": "Succeeded", "get_status": 200, "workflow": "standard.2026-06-01-preview", "warnings": []}

@@ -327,8 +327,8 @@ public sealed class RefileWriterAfterRefileHookTests
     private void AssertTheWriteStoodAndNothingWasReleased()
     {
         _writes.Should().ContainSingle("an HttpClient timeout is not the caller cancelling the update");
-        _threads.Verify(t => t.ReconcileThreadForFilingAsync(Communication, It.IsAny<CancellationToken>()), Times.Once,
-            "the step after the re-file still ran, handed the faulted read");
+        ThreadReconciles().Where(i => (Guid)i.Arguments[0] == Communication).Should().ContainSingle(
+            "the step after the re-file still ran, handed the faulted read (any overload)");
         _world.OwnerOf("sprk_todo", TodoUnderCommunication).Should().Be(DataversePrincipalRef.Team(SecureChildShareWorld.SecureTeam),
             "whether the row WAS isolated is unknown, so nothing is released");
     }
@@ -344,14 +344,20 @@ public sealed class RefileWriterAfterRefileHookTests
             "the step's pass released the to-do isolated only through the communication — it may only when the row WAS isolated");
         _shares.MaskOf("sprk_todo", TodoUnderCommunication, DataversePrincipalRef.User(Sharee)).Should().BeNull(
             "the released to-do loses its mirror with it");
-        _threads.Verify(t => t.ReconcileThreadForFilingAsync(Communication, It.IsAny<CancellationToken>()), Times.Once,
-            "the step ran exactly once (it reconciles a communication's thread), and the writer did not reconcile it again");
-        _threads.Verify(t => t.ReconcileThreadForFilingAsync(It.Is<Guid>(id => id != Communication), It.IsAny<CancellationToken>()), Times.Never);
+        ThreadReconciles().Should().ContainSingle(
+                "the step ran exactly once (it reconciles a communication's thread), and the writer did not reconcile it "
+                + "again, through any overload")
+            .Which.Arguments[0].Should().Be(Communication);
     }
+
+    /// <summary>#2143 round 8: every thread reconcile the writer or its step asked for, through ANY overload.</summary>
+    private IReadOnlyList<Moq.IInvocation> ThreadReconciles() => _threads.Invocations
+        .Where(i => i.Method.Name == nameof(Sprk.Bff.Api.Services.Communication.IThreadResolver.ReconcileThreadForFilingAsync))
+        .ToList();
 
     private void AssertTheStepDidNotRun(bool readsAllowed)
     {
-        _threads.Verify(t => t.ReconcileThreadForFilingAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
+        ThreadReconciles().Should().BeEmpty("no thread reconcile, through any overload");
         _world.OwnerWrites.Should().BeEmpty("no pass ran over what is filed under the communication");
         _shares.MaskOf("sprk_communication", Communication, DataversePrincipalRef.User(Sharee)).Should().Be(CollaborateMask);
         _shares.MaskOf("sprk_todo", TodoUnderCommunication, DataversePrincipalRef.User(Sharee)).Should().Be(CollaborateMask);

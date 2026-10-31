@@ -903,6 +903,45 @@ carries `jobId` and `Location: /api/v1/documents/{id}`.
 
 ---
 
+## ISS-022 — Outlook: re-saving an email to the same record to add attachments is answered "already saved"
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | next-round |
+| **Filed** | 2026-10-21 (the owner asked for it to be filed) |
+| **Source** | Found while reviewing ebilling-r1's `from-email` contract against `/office/save` |
+| **GitHub Issue** | [#2209](https://github.com/spaarke-dev/spaarke/issues/2209) |
+
+**Description**
+
+The email save's server idempotency key is content type | target type | target id | stored Message-ID
+(`OfficeService.GenerateIdempotencyKey`). It does not include the attachment selection
+(`SelectedAttachmentFileNames`). A second save of the same email to the same record by the same user therefore
+finds the first save's job and is answered as its duplicate: it returns only the job id, creates no Documents
+and runs no filing. The pane says "already saved", so the user is told, but they have no way to add an attachment
+they did not tick the first time.
+
+**Concrete failure**: a user saves an email to Matter M with one of its three attachments ticked, notices they
+missed one, ticks it and saves again to M. No new attachment Document is created; the only route is to save the
+attachment on its own, or the email to another record.
+
+**Entry-points**
+- `src/server/api/Sprk.Bff.Api/Services/Office/OfficeService.cs:1239-1249` (`GenerateIdempotencyKey`, the Email leg)
+- `src/server/api/Sprk.Bff.Api/Services/Office/OfficeService.cs:413-450` (`SaveAsync`'s duplicate path)
+- `src/server/api/Sprk.Bff.Api/Workers/Office/UploadFinalizationWorker.cs` (`SelectedAttachmentFileNames`: null = all,
+  `[]` = none, names = only those)
+
+**Suggested fix** (hypothesis): treat a re-save whose selection names attachments not yet saved under that `.eml`
+as an "add attachments" operation. Create only the missing children under the existing `.eml`, linked to its
+communication as task 130 does, rather than adding the selection to the key, which would create a second `.eml`.
+
+**Estimated effort**: 1–2 days, with tests.
+**Blockers**: none. Coordinate with ebilling-r1's `from-email`, which forces `SelectedAttachmentFileNames = []`.
+**Related**: task 130 (#2177), ISS-006 (another pane re-save edge).
+
+---
+
 ## Deferrals
 
 ### ✅ D-032-1 — WITHDRAWN 2026-09-10 (final). The cascade setting was the wrong question.
@@ -1198,3 +1237,69 @@ text is also the reason the file's own header block argues that stale review met
 control.
 
 Detail: `notes/063-send-to-index-authz.md` §3b.
+
+## ISS-023 — Outlook email identity: the newest-copy rule can hide the caller's own readable saved copy
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | next-round |
+| **Filed** | 2026-10-23 (UAC-r2 deploy-gate review of #2304, their K1) |
+| **GitHub Issue** | [#2306](https://github.com/spaarke-dev/spaarke/issues/2306) |
+
+Only the newest saved copy is authorized (`ResolveByEmailMessageIdAsync`, `TopCount = 1`). Since task 132 that includes mailbox-captured and Spaarke-sent archives, so a newer copy under a record the caller can't read hides their own older readable copy, and the pane shows the save form. Nothing leaks. Fix: check candidates newest first and answer with the first readable one, else "not saved" (safe once 132b answers an unreadable match like no match).
+
+## ISS-024 — Outlook email identity: a communication filed to an unsupported record type reads as unfiled
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | next-round |
+| **Filed** | 2026-10-23 (UAC-r2 deploy-gate review of #2304, their K3) |
+| **GitHub Issue** | [#2307](https://github.com/spaarke-dev/spaarke/issues/2307) |
+
+A communication filed only to a type outside matter/project/invoice/work assignment (an event, a service request) gives the archive no derived record, so the pane offers "File to record". Harmless. Fix: treat a filled regarding outside the four as withheld (`ResolveDerivedRelatedRecordAsync`).
+
+
+## ISS-025 — Outlook add-in: inline images lose their cid link in the saved .eml
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | next-round |
+| **Filed** | 2026-10-27 (task 133 review, found in passing; pre-existing) |
+| **GitHub Issue** | [#2355](https://github.com/spaarke-dev/spaarke/issues/2355) |
+
+Capture never carries `contentId` (`emailContentCapture.ts`, `OutlookAdapter.ts:388`), and the enricher's light path does not read Graph's, so the .eml builder adds inline images as plain attachments and `cid:` references break. Affects /office/save and ebilling from-email. Fix: map Office.js `contentId` (preview API), with a server fallback to Graph `ContentId`.
+
+## ISS-026 — Office quick-create: entity type parsing accepts numbers and comma-joined names
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | next-round |
+| **Filed** | 2026-10-27 (task 133 review, found in passing; pre-existing) |
+| **GitHub Issue** | [#2356](https://github.com/spaarke-dev/spaarke/issues/2356) |
+
+`QuickCreateFieldRequirements.TryParse` uses `Enum.TryParse`. The filter and the endpoint share it, so they agree on the type, but undefined values are not refused at the boundary. Fix: exact name match, as in task 133's search fix. Kept out of task 133 because that task allows only one server change.
+## ISS-027 — Email association: a caller-supplied regarding loses to a conflicting 1.0 match
+
+| Field | Value |
+|---|---|
+| **Status** | Fixed, live on dev 2026-10-29 (BFF 136568cf70); owner re-test pending |
+| **Urgency** | now (owner go 2026-10-28) |
+| **Filed** | 2026-10-28 (owner's Outlook check on dev, found in passing; pre-existing) |
+| **GitHub Issue** | [#2412](https://github.com/spaarke-dev/spaarke/issues/2412) |
+
+The owner saved an email to CMRCL-464674 whose body carried a signed tracking token for another matter (PAT-942404). `AssociationStatusMapper` treated the save-pane choice (`ExplicitReferenceRung`, documented as authoritative) as one more 1.0 candidate. The result was Ambiguous, with no `sprk_regardingmatter` on the communication. The .eml Document was filed correctly. The communication is missing from the matter's Messages widget, and the pane shows no "Filed to" card. Fix: a caller-supplied regarding wins on its field; the conflicts stay in the provenance. Owner 2026-10-28: fix now in word-add-in-r1 (email-communication-intelligence is closed): PR #2417. Quick Save now saves unfiled when the engine declines to choose. Follow-up: #2421.
+
+## ISS-028 — Outlook Save: a typed Document Name replaced the email's subject
+
+| Field | Value |
+|---|---|
+| **Status** | Fixed, live on dev 2026-10-29 (BFF 136568cf70 + add-in 5398af46b4); owner re-test pending |
+| **Urgency** | now (found in the same owner check) |
+| **Filed** | 2026-10-28 (owner's Outlook check on dev; pre-existing since the pane sent the typed name as `email.subject`) |
+| **GitHub Issue** | [#2416](https://github.com/spaarke-dev/spaarke/issues/2416) |
+
+The typed name became the .eml Subject header, sprk_emailsubject and sprk_documentdescription, and the communication's subject, name and thread. Fix: the server takes an optional `email.documentName` for the file name only (PR #2419). The client then sends the real subject plus `documentName` (PR #2420). Release order: server first, then an R3 dev deploy, then the client merge. Review round 1 also fixed: a blank typed name gets the unique suffix; email Keep both stores a suffixed file and keeps the typed name; an id-less key includes the typed name.

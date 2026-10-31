@@ -166,6 +166,10 @@ public class ExternalDataService
         [JsonPropertyName("createdon")] public string? Createdon { get; set; }
         [JsonPropertyName(CreatedByPersonValueAttribute)] public string? CreatedByPersonValue { get; set; }
         [JsonPropertyName(CreatedByContactValueAttribute)] public string? CreatedByContactValue { get; set; }
+        // R3 ISS-011 (#1886): the SPE pointers, read ONLY to derive the wire DTO's boolean hasFile (MapDocument). The values
+        // themselves are never mapped onto the DTO: no Graph pointer reaches the client (ExternalModuleRegistry.PointerColumns).
+        [JsonPropertyName("sprk_graphdriveid")] public string? SprkGraphdriveid { get; set; }
+        [JsonPropertyName("sprk_graphitemid")] public string? SprkGraphitemid { get; set; }
         // Task 187: every other selected column, among them the row's live-parent lookups (ExternalMultiRootRule.LiveParentSelect),
         // read by name so the select and the rule share ONE list. Never mapped onto the wire DTO.
         [JsonExtensionData] public Dictionary<string, JsonElement>? Extra { get; set; }
@@ -290,13 +294,15 @@ public class ExternalDataService
         TokenCredential credential,
         ILogger<ExternalDataService> logger,
         IGenericEntityService? filing = null,
-        Sprk.Bff.Api.Services.Dataverse.CoreAncestorResolver? columns = null)
+        Sprk.Bff.Api.Services.Dataverse.CoreAncestorResolver? columns = null,
+        Sprk.Bff.Api.Services.Identity.ISystemUserIdentityResolver? identity = null)
     {
         _httpClient = httpClient;
         _configuration = configuration;
         _credential = credential;
         _logger = logger;
         _filing = filing;
+        _identity = identity;
         // Task 187: which lineage lookups a parent table has in this environment (the 6h-cached metadata probe the stamp path
         // uses), so the live-parent walk never selects a column a later schema adds. Without one (a test double), every
         // lookup of the lineage map is taken as present.
@@ -308,6 +314,14 @@ public class ExternalDataService
                     : Array.Empty<string>(),
                 StringComparer.OrdinalIgnoreCase));
     }
+
+    /// <summary>
+    /// Task 188: who is an internal systemuser (the 065 rule's own exemption, <c>CommunicationThreadReadService</c>), so the
+    /// document narrowing (<see cref="NarrowDocumentsAsync"/>) leaves them as the internal plane does. Registered as a
+    /// singleton (NotificationsModule), so the typed-client factory supplies it. Without one (a test double), every caller is
+    /// narrowed (fail closed).
+    /// </summary>
+    private readonly Sprk.Bff.Api.Services.Identity.ISystemUserIdentityResolver? _identity;
 
     /// <summary>Task 187: the column probe the live-parent walk reads parent tables through (see the constructor).</summary>
     private readonly Sprk.Bff.Api.Services.Dataverse.CoreAncestorResolver.EntityColumnProbe _columnProbe;
@@ -475,12 +489,30 @@ public class ExternalDataService
                 read.Rows.Count - readable.Count, read.Rows.Count, parentKind, parentId);
         }
 
+        // Task 188 (D7, #2126): THE document narrowing, after the root rule: own or ancestor Restricted, or an internal-only /
+        // non-Open communication on the bounded parent walk, hides a document from a caller who is not an internal systemuser.
+        var candidates = readable.Select(r => ExternalDocumentNarrowing.FromWebApi(DocumentIdOf(r), r.Extra)).ToList();
+        var narrowing = await NarrowDocumentsAsync(caller, candidates, ct);
+        var visible = readable.Where((_, i) => narrowing.IsVisible(candidates[i])).ToList();
+        if (visible.Count != readable.Count)
+        {
+            _logger.LogInformation(
+                "[EXT-DATA] documents: {Hidden} of {Total} document(s) of {ParentKind} {ParentId} hidden by the document narrowing ({Reasons})",
+                readable.Count - visible.Count, readable.Count, parentKind, parentId, narrowing.HiddenSummary(candidates));
+        }
+
         return new ExternalCollectionResponse<ExternalDocumentDto>
         {
-            Value = readable.Select(MapDocument).ToList(),
-            Truncated = read.Truncated || RuleReadCutListShort(flags, live, read.Rows.Count - readable.Count),
+            Value = visible.Select(MapDocument).ToList(),
+            Truncated = read.Truncated
+                        || RuleReadCutListShort(flags, live, read.Rows.Count - readable.Count)
+                        || (narrowing.Faulted && visible.Count < readable.Count),
         };
     }
+
+    /// <summary>A document row's id (<see cref="Guid.Empty"/> when it did not come back as a GUID: never visible).</summary>
+    private static Guid DocumentIdOf(DocumentRow row) =>
+        Guid.TryParse(row.SprkDocumentid, out var id) ? id : Guid.Empty;
 
     /// <summary>
     /// Review of 039 option B (K2): a list that withheld rows while the secure-flag read was INCOMPLETE (a failed chunk, a
@@ -637,8 +669,12 @@ public class ExternalDataService
         var select = "sprk_documentid,sprk_documentname,sprk_documenttype,sprk_filesummary,_sprk_project_value,"
                      + "_sprk_relatedproject_value,_sprk_matter_value,_sprk_relatedmatter_value,"
                      + "_sprk_workassignment_value,_sprk_relatedworkassignment_value,createdon,"
+                     + "sprk_graphdriveid,sprk_graphitemid," // R3 ISS-011 (#1886): read only to derive hasFile; never put on the wire
                      + CreatorStampSelect
                      + LiveParentSelectSuffix(DocumentTable); // task 187: the parents whose live roots the rule takes in
+        // Task 188: the columns the document narrowing reads (the two lookups are already lineage parents; the own Access
+        // Permission is not), each once.
+        select = string.Join(",", select.Split(',').Concat(ExternalDocumentNarrowing.SelectColumns).Distinct(StringComparer.Ordinal));
         var filter = Uri.EscapeDataString($"{binding.LookupValueAttribute} eq {parentId}");
         return $"{apiUrl}/sprk_documents?$filter={filter}&$select={select}&$orderby=createdon desc,sprk_documentid asc";
     }
@@ -770,7 +806,7 @@ public class ExternalDataService
     internal const string CreatedByContactBindKey = "sprk_CreatedByContact@odata.bind";
 
     /// <summary>Columns that name who created or requested a row. The server alone writes them (FR-11, FR-25).</summary>
-    private static readonly string[] CreatorColumns =
+    internal static readonly string[] CreatorColumns =
     {
         RecordCreatorPersonColumn.LogicalName, "sprk_createdbycontact", "sprk_requestedby", "createdby", "createdonbehalfby",
     };
@@ -904,6 +940,7 @@ public class ExternalDataService
         var columns = new[] { "sprk_documentname", binding.LookupValueAttribute }
             .Concat(DocumentRootLinks.SelectColumns)
             .Concat(ExternalMultiRootRule.LiveParentSelect(DocumentTable)) // task 187
+            .Concat(ExternalDocumentNarrowing.SelectColumns) // task 188: what the document narrowing reads
             .Distinct(StringComparer.Ordinal);
         var url = $"{GetApiUrl()}/sprk_documents({documentId})?$select={string.Join(",", columns)}";
 
@@ -1214,7 +1251,7 @@ public class ExternalDataService
 
     /// <summary>A Dataverse logical name (what <see cref="GetInvoiceLookupsAsync"/> puts in a <c>$select</c>).</summary>
     private static readonly System.Text.RegularExpressions.Regex LookupNamePattern =
-        new("^[a-z][a-z0-9_]*$", System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+        new(@"^[a-z][a-z0-9_]*\z", System.Text.RegularExpressions.RegexOptions.CultureInvariant);
 
     /// <summary>This service's logger, for the endpoint-side rule reads that run over its readers (task 187 F1).</summary>
     internal ILogger Logger => _logger;
@@ -1793,6 +1830,246 @@ public class ExternalDataService
     public Task<LiveParentRoots> ReadLiveParentRootsAsync(
         IEnumerable<IEnumerable<LiveParentLookup>> rowParents, CancellationToken ct = default) =>
         ExternalMultiRootRule.ReadLiveParentsAsync(GetLiveParentRootsAsync, rowParents, _logger, ct);
+
+    /// <summary>
+    /// Task 188 (D7, #2126): THE document narrowing (<see cref="ExternalDocumentNarrowing"/>) for document rows that passed
+    /// the root rule, read app-only. An internal systemuser (CallerPrincipal.SystemUserId set and
+    /// <see cref="Sprk.Bff.Api.Services.Identity.ISystemUserIdentityResolver.IsExternalAsync"/> false) is not narrowed, the
+    /// 065 rule's own exemption; every other caller is. A failed read hides every row (<see cref="DocumentNarrowingResult.Faulted"/>).
+    /// The one seam every external document surface narrows through (the list, the single-document routes and the documents
+    /// module).
+    /// </summary>
+    internal async Task<DocumentNarrowingResult> NarrowDocumentsAsync(
+        CallerPrincipal caller, IReadOnlyCollection<DocumentNarrowingRow> rows, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(caller);
+        ArgumentNullException.ThrowIfNull(rows);
+        if (rows.Count == 0)
+            return DocumentNarrowingResult.NotNarrowed(rows);
+        if (await IsInternalSystemUserAsync(caller, ct))
+            return DocumentNarrowingResult.NotNarrowed(rows);
+        var narrowing = await ExternalDocumentNarrowing.DecideOrFailClosedAsync(rows, QueryRowsOrThrowAsync, _logger, ct);
+        LogNarrowingCost("external", rows.Count, rows.Count(row => !narrowing.IsVisible(row)), narrowing);
+        return narrowing;
+    }
+
+    /// <summary>
+    /// Task 188 (main-session decision 2026-10-20): the assistant's <c>dataverse.*</c> tools' document narrowing
+    /// (<see cref="AppOnlyDocumentNarrowing"/>). The documents are re-read BY ID and decided APP-ONLY through the same reader as
+    /// the external plane, so a column field security masks for the user can never read as "no link". The tool has already
+    /// decided the caller is external. A failed read THROWS (the tool call fails with no data); a document that does not come
+    /// back is not visible. Returns the decision only.
+    /// <para>Task 188 round 3 slice B: <paramref name="plane"/> labels the cost line — <see cref="AssistantPlane"/> for
+    /// <see cref="AppOnlyDocumentNarrowing"/> (the assistant's tools and the AI retrieval trim), <see cref="InternalRoutesPlane"/>
+    /// for <see cref="InternalRouteDocumentNarrowing"/> (the internal plane's document routes).</para>
+    /// </summary>
+    internal async Task<DocumentNarrowingResult> ReadAndNarrowDocumentsAsync(
+        IReadOnlyCollection<Guid> documentIds, CancellationToken ct, string plane = AssistantPlane)
+    {
+        ArgumentNullException.ThrowIfNull(documentIds);
+        var narrowing = await ExternalDocumentNarrowing.ReadAndDecideAsync(documentIds, QueryRowsOrThrowAsync, ct);
+        var distinct = documentIds.Distinct().ToList();
+        LogNarrowingCost(plane, distinct.Count, distinct.Count(id => !narrowing.IsVisible(id)), narrowing);
+        return narrowing;
+    }
+
+    /// <summary>The cost line's plane for <see cref="AppOnlyDocumentNarrowing"/>.</summary>
+    internal const string AssistantPlane = "assistant";
+
+    /// <summary>The cost line's plane for <see cref="InternalRouteDocumentNarrowing"/> (task 188 round 3 slice B).</summary>
+    internal const string InternalRoutesPlane = "internal-routes";
+
+    /// <summary>Reads above which a request's narrowing cost line is logged at Information (Debug otherwise).</summary>
+    internal const int NarrowingCostInformationThreshold = 20;
+
+    /// <summary>
+    /// The ONE narrowing cost line per request (task 188): rows checked, rows hidden, hop levels read and requests per set.
+    /// Counts only (ADR-015). Information when the reads exceed <see cref="NarrowingCostInformationThreshold"/>.
+    /// </summary>
+    private void LogNarrowingCost(string plane, int rows, int hidden, DocumentNarrowingResult narrowing)
+    {
+        var cost = narrowing.Cost;
+        var level = cost.Reads > NarrowingCostInformationThreshold ? LogLevel.Information : LogLevel.Debug;
+        if (!_logger.IsEnabled(level))
+            return;
+        _logger.Log(level,
+            "[EXT-NARROWING] cost plane={Plane} rows={Rows} hidden={Hidden} faulted={Faulted} hopLevels={HopLevels} "
+            + "documentReads={DocumentReads} communicationReads={CommunicationReads} threadReads={ThreadReads}",
+            plane, rows, hidden, narrowing.Faulted, cost.HopLevels,
+            cost.DocumentReads, cost.CommunicationReads, cost.ThreadReads);
+    }
+
+    /// <summary>
+    /// Task 188: the single-document routes' narrowing (download, versions): whether <paramref name="document"/>, already
+    /// known to be readable under the route parent, survives <see cref="NarrowDocumentsAsync"/>. A <c>false</c> answers the
+    /// route's one "not part of this record" refusal, before any SPE pointer is resolved.
+    /// </summary>
+    public async Task<bool> IsDocumentVisibleAsync(
+        CallerPrincipal caller, Guid documentId, DocumentScopeRead document, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(document);
+        var row = ExternalDocumentNarrowing.FromWebApi(documentId, document.Roots.Row);
+        var narrowing = await NarrowDocumentsAsync(caller, new[] { row }, ct);
+        if (narrowing.IsVisible(row))
+            return true;
+
+        _logger.LogInformation(
+            "[EXT-DATA] document {DocumentId} hidden by the document narrowing ({Reasons})",
+            documentId, narrowing.HiddenSummary(new[] { row }));
+        return false;
+    }
+
+    /// <summary>
+    /// ebilling-r1 task 098: THE invoice (a′) predicate (<see cref="ExternalInvoiceVisibility"/>) for <paramref name="caller"/>,
+    /// read app-only. An internal systemuser (the same test as <see cref="NarrowDocumentsAsync"/>) hides nothing; every other
+    /// caller — a CIAM contact, a flagged systemuser, an unresolvable one, one whose lookup FAILED (unknown is never internal)
+    /// — gets the predicate. A failed read hides every asked invoice (<see cref="InvoiceVisibilityResult.Faulted"/>). Bound to
+    /// <see cref="ExternalInvoiceHiding"/> by <c>AddExternalAccess</c>, with the effective root flags it needs.
+    /// </summary>
+    internal async Task<InvoiceVisibilityResult> HideInvoicesForAsync(
+        CallerPrincipal caller, IReadOnlyCollection<Guid> invoiceIds, EffectiveRootFlagReader rootFlags, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(caller);
+        ArgumentNullException.ThrowIfNull(invoiceIds);
+        ArgumentNullException.ThrowIfNull(rootFlags);
+        var asked = invoiceIds.Where(id => id != Guid.Empty).Distinct().ToList();
+        if (asked.Count == 0 || await IsInternalSystemUserAsync(caller, ct))
+            return InvoiceVisibilityResult.NotHidden(asked);
+        try
+        {
+            var decision = await ExternalInvoiceVisibility.DecideAsync(asked, InvoiceVisibilityReadersOver(rootFlags), ct);
+            LogInvoiceVisibilityCost("external", asked.Count, decision);
+            return decision;
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex,
+                "[EXT-INVOICE-VISIBILITY] The (a') read for {Count} invoice(s) failed. Failing CLOSED: none of them is shown.",
+                asked.Count);
+            return InvoiceVisibilityResult.ReadFailed(asked);
+        }
+    }
+
+    /// <summary>
+    /// ebilling-r1 task 098 review round 4b: THE decision of the external submission routes (list and single read) for
+    /// <paramref name="caller"/>, read app-only (<see cref="ExternalInvoiceVisibility.DecideSubmissionsAsync"/>): with an
+    /// invoice, the invoice predicate; without one, the submission's own source. Keyed by submission id. An internal systemuser
+    /// (the same test as <see cref="HideInvoicesForAsync"/>) sees every one and causes no read; every other caller gets the
+    /// decision. A failed read withholds every asked submission (<see cref="InvoiceVisibilityResult.Faulted"/>). Bound to
+    /// <see cref="ExternalInvoiceSubmissionHiding"/> by <c>AddExternalAccess</c>, with the effective root flags it needs.
+    /// </summary>
+    internal async Task<InvoiceVisibilityResult> HideSubmissionsForAsync(
+        CallerPrincipal caller, IReadOnlyCollection<Sprk.Bff.Api.Services.Finance.Submission.InvoiceSubmissionView> submissions,
+        EffectiveRootFlagReader rootFlags, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(caller);
+        ArgumentNullException.ThrowIfNull(submissions);
+        ArgumentNullException.ThrowIfNull(rootFlags);
+        var asked = submissions.Where(s => s is not null && s.SubmissionId != Guid.Empty).Select(s => s.SubmissionId).Distinct().ToList();
+        if (asked.Count == 0 || await IsInternalSystemUserAsync(caller, ct))
+            return InvoiceVisibilityResult.NotHidden(asked);
+        try
+        {
+            var decision = await ExternalInvoiceVisibility.DecideSubmissionsAsync(submissions, InvoiceVisibilityReadersOver(rootFlags), ct);
+            LogInvoiceVisibilityCost("external-submissions", asked.Count, decision);
+            return decision;
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex,
+                "[EXT-INVOICE-VISIBILITY] The (a') read for {Count} submission(s) failed. Failing CLOSED: none of them is shown.",
+                asked.Count);
+            return InvoiceVisibilityResult.ReadFailed(asked);
+        }
+    }
+
+    /// <summary>
+    /// ebilling-r1 task 098 surface (d): the assistant tools' taint closure (<see cref="AppOnlyInvoiceFamilyHiding"/>): of
+    /// <paramref name="rowIds"/> (rows of an invoice-family table), the ids hidden because their invoice is. The caller is
+    /// already known to be external. Read app-only; a failed read THROWS (the tool call fails with no data).
+    /// </summary>
+    internal async Task<IReadOnlySet<Guid>> HideInvoiceFamilyRowsAsync(
+        string table, IReadOnlyCollection<Guid> rowIds, EffectiveRootFlagReader rootFlags, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(rowIds);
+        ArgumentNullException.ThrowIfNull(rootFlags);
+        var hidden = await ExternalInvoiceVisibility.HiddenFamilyRowsAsync(table, rowIds, InvoiceVisibilityReadersOver(rootFlags), ct);
+        _logger.LogDebug("[EXT-INVOICE-VISIBILITY] cost plane={Plane} table={Table} rows={Rows} hidden={Hidden}",
+            AssistantPlane, table, rowIds.Count, hidden.Count);
+        return hidden;
+    }
+
+    /// <summary>
+    /// The predicate's readers, every one app-only: this service's OData reader, 188's decision with the marker-aware rule 2
+    /// (the core decision is called only here and in <see cref="ExternalDocumentNarrowing"/>, the 188 guard's app-only rule),
+    /// the live-parent walk and <paramref name="rootFlags"/>.
+    /// </summary>
+    private InvoiceVisibilityReaders InvoiceVisibilityReadersOver(EffectiveRootFlagReader rootFlags) => new(
+        QueryRowsOrThrowAsync,
+        (rows, ct) => ExternalDocumentNarrowing.DecideAsync(rows, QueryRowsOrThrowAsync, ct, honourSubmissionMarker: true),
+        GetLiveParentRootsAsync,
+        rootFlags,
+        _logger);
+
+    /// <summary>The ONE (a′) cost line per request: invoices checked and hidden, reads per level. Counts only (ADR-015).</summary>
+    private void LogInvoiceVisibilityCost(string plane, int invoices, InvoiceVisibilityResult decision)
+    {
+        var cost = decision.Cost;
+        var level = cost.Reads > NarrowingCostInformationThreshold ? LogLevel.Information : LogLevel.Debug;
+        if (!_logger.IsEnabled(level))
+            return;
+        _logger.Log(level,
+            "[EXT-INVOICE-VISIBILITY] cost plane={Plane} invoices={Invoices} hidden={Hidden} ({Reasons}) sources={Sources} "
+            + "storedFileReads={StoredFileReads} submissionReads={SubmissionReads} sourceReads={SourceReads} "
+            + "narrowingReads={NarrowingReads} rootFlagReads={RootFlagReads}",
+            plane, invoices, decision.Hidden.Count, decision.HiddenSummary(), cost.Sources,
+            cost.StoredFileReads, cost.SubmissionReads, cost.SourceReads, cost.NarrowingReads, cost.RootFlagReads);
+    }
+
+    /// <summary>
+    /// Whether <paramref name="caller"/> is an internal systemuser. A contact, a systemuser flagged external, an unknown one
+    /// and a lookup that fails are all NOT internal (the narrowing applies: under-deliver, never leak).
+    /// </summary>
+    private async Task<bool> IsInternalSystemUserAsync(CallerPrincipal caller, CancellationToken ct)
+    {
+        if (_identity is null || caller.SystemUserId is not { } systemUserId || systemUserId == Guid.Empty)
+            return false;
+        try
+        {
+            return !await _identity.IsExternalAsync(systemUserId, ct);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "[EXT-DATA] The internal/external lookup for systemuser {SystemUserId} failed; the document narrowing applies.",
+                systemUserId);
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Task 188: the app-only OData reader the document narrowing (and the 065 rule inside it) reads through. A 404 or any
+    /// other failure THROWS (<see cref="DataverseUnavailableException"/>), so a fault never reads as "no rows".
+    /// </summary>
+    private async Task<IReadOnlyList<Dictionary<string, JsonElement>>> QueryRowsOrThrowAsync(
+        string entitySet, string odata, CancellationToken ct)
+    {
+        var page = await GetSingleOrThrowAsync<ODataResult<Dictionary<string, JsonElement>>>(
+            $"{GetApiUrl()}/{entitySet}?{odata}", ct);
+        return page?.Value ?? throw new DataverseUnavailableException($"The {entitySet} read returned no collection.");
+    }
 
     /// <summary>
     /// The walk's query count above which one request's live-parent read is logged at Information (task 187 fix round 2,
@@ -3426,6 +3703,9 @@ public class ExternalDataService
         Createdon = r.Createdon,
         SprkCreatedbypersonValue = r.CreatedByPersonValue,
         SprkCreatedbycontactValue = r.CreatedByContactValue,
+        // R3 ISS-011 (#1886): the same truth the download and versions routes use (DocumentStorageResolver.GetSpePointersAsync:
+        // a usable drive id AND item id; sprk_hasfile is a hint that can be stale). Only the boolean leaves the BFF.
+        HasFile = Sprk.Bff.Api.Infrastructure.Dataverse.DocumentStorageResolver.HasUsablePointers(r.SprkGraphdriveid, r.SprkGraphitemid),
     };
 
     private static ExternalTodoDto MapTodo(TodoRow r) => new()

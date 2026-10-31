@@ -27,8 +27,8 @@ This runbook produces a correctly scoped owner team. It does **not** by itself i
 because isolation also depends on a property this runbook cannot set: **no ordinary user role may hold
 `Deep` or `Global` depth on `sprk_project`.**
 
-In `spaarkedev1` as of 2026-08-25 that condition is **NOT met**, and secure projects are therefore
-readable by ordinary users. See [§6 Blocking prerequisite](#6-blocking-prerequisite--role-depth) —
+In `spaarkedev1` as of 2026-08-25 that condition was **NOT met** (historical; see §6 for Fix A and its validation). Today
+the condition is checked continuously by the isolation census (`[SECURE-CENSUS]`, every 15 minutes). See [§6 Blocking prerequisite](#6-blocking-prerequisite--role-depth) —
 **do not report an environment as "secure-project ready" until §6 passes.**
 
 ---
@@ -64,6 +64,7 @@ environment the acceptance gate (H13) runs the same census once more, synchronou
 | Rights | A System Administrator in the target environment |
 | Auth | `az login` to the tenant, then a token for the environment (below). `pac` is **not** used — its *active profile* may point at a different environment, which is an easy way to configure the wrong org |
 | Config | `SecureRecord:BusinessUnitName` and `SecureRecord:OwnerTeamName` in BFF app settings, **or** accept the compiled defaults (`Secure Record` / `Secure Record Owners`). Both are fail-closed lookup keys |
+| Config (hard-deny tables) | `RestrictedContent:OwnerTeamName` in BFF app settings, **or** the compiled default `Spaarke Restricted Content Owners`. A fail-closed lookup key: it must equal `teamName` in `config/restricted-content-owner-role.json` (the team `scripts/Set-CustomerOwnerTeams.ps1` creates), or no team is found and every ordinary hard-deny write is refused (`OwnerTeamNotFound`). Keep the default unless both change together. When `SecureRecord:BusinessUnitName` is not the default, pass it to that script as `-SecureBusinessUnitName` |
 
 ```powershell
 # Pin the environment explicitly. Never rely on an ambient/active profile.
@@ -521,7 +522,24 @@ configuration is shaped correctly.
 | 12 | The BFF's `secure-child-share-reconciliation` job (`/api/admin/jobs/secure-child-share-reconciliation/status`, task 149) | **enabled**, last run `Success = true`, heartbeat `[SECURE-CHILD-SHARES] heartbeat status=Completed`. `held > 0` names a child whose secure roots cannot be determined (see §7a); `notUpdated > 0` is retried every two minutes |
 | 13 | **🔴 Sharees see the children, nobody else does** (task 149) — with existing non-admin test users: share a secure project with user A, create a child under it, wait one reconcile tick (≤ 2 min) | A reads the child in MDA; a user NOT shared on the project is DENIED it; unsharing A (Manage Access, or the MDA Share dialog + one tick) removes A from the child. Delete the probes |
 | 14 | The BFF's `secure-child-reconciliation` job (`/api/admin/jobs/secure-child-reconciliation/status`, task 148) | **enabled every 2 minutes** (task 147, owner round 28 item 2): its recent-changes pass WRITES (`recentChanges.mode = write`; only `SecureChild__Reconciliation__RecentChangesWritesEnabled=false` stops it). The sweep stays REPORT-ONLY with `SecureChild__Reconciliation__WritesEnabled` unset — heartbeat `[SECURE-CHILD-RECONCILE] heartbeat mode=ReportOnly`, and `wouldChange` is the backfill still owed (0 once §7c.1 has run); a scheduled tick does not run (or move) the report-only sweep |
-| 15 | The BFF's `secure-root-inheritance` job (`/api/admin/jobs/secure-root-inheritance/status`, task 158) | **enabled** (writes on, every 5 minutes), last run `Success = true`, heartbeat `[SECURE-INHERIT] heartbeat`. It makes every work assignment / project FILED UNDER a secure matter or project secure itself (provisioning's own steps, for its recorded creator — refused when that person is on the No Access list of the record or of a secure parent) and gives it the parent's sharees, recording where each came from on the `sprk_assignedaccess` ledger (a parent's unshare ends only an unmodified inherited share). `unverifiable > 0` names a record whose parent's flag cannot be read or reads EMPTY (`emptyFlagParents` counts those parents — run `scripts/Repair-SecureFlagNulls.ps1`); `refused > 0` a record with no usable or a walled creator; `deferred > 0` means the run hit its bound of 25 provisionings — `Success = false`, `resumeAfter` names where the next run continues. `unfiledProvenance.notDone > 0` names inherited shares on records re-filed away from their parent that could not be checked (the run is not a success). Prerequisite: `scripts/Set-AssignedAccessLedgerSchema.ps1 -Apply` then `-Verify` (the `sprk_subjectteam` column) |
+| 15 | The BFF's `secure-root-inheritance` job (`/api/admin/jobs/secure-root-inheritance/status`, task 158) | **enabled** (writes on, every 5 minutes), last run `Success = true`, heartbeat `[SECURE-INHERIT] heartbeat`. It makes every work assignment / project FILED UNDER a secure matter or project secure itself (provisioning's own steps, for its recorded creator — refused when that person is on the No Access list of the record or of a secure parent) and gives it the parent's sharees, recording where each came from on the `sprk_assignedaccess` ledger (a parent's unshare ends only an unmodified inherited share). `unverifiable > 0` names a record whose parent's flag cannot be read or reads EMPTY (`emptyFlagParents` counts those parents — run `scripts/Repair-SecureFlagNulls.ps1`); `refused > 0` a record with no usable or a walled creator; `deferred > 0` means the run hit its bound of 25 provisionings — `Success = false`, `resumeAfter` names where the next run continues. `unfiledProvenance.notDone > 0` names inherited shares on records re-filed away from their parent that could not be checked (the run is not a success). Its follow-parents pass also re-owns an ORDINARY work assignment or project to its family's team (owner decision 2026-10-29: a filed one owned by a person or another unit's default team to its matter's, then project's, unit team; an unfiled person-owned one to its person's unit team; at most 200 resolves and 25 re-owns a run, the rest carried to the next run): REPORT-ONLY unless `SecureRoot:Inheritance:RootOwnerWritesEnabled` = `true` AND `SecureChild:Reconciliation:OrdinaryMovesWritesEnabled` = `true` — a re-owned root keeps its `sprk_containerid`, but its documents' expected container follows its new business unit, and only the ordinary-moves pass moves them (`rootOwners.crossUnit` counts those re-owns). Read `followParents.rootOwners` in a report-only run before turning it on. Prerequisite: `scripts/Set-AssignedAccessLedgerSchema.ps1 -Apply` then `-Verify` (the `sprk_subjectteam` column) |
+
+**Items 11, 12, 14 and 15 without an admin token** (T186, 2026-10-20). The `/api/admin/jobs/*/status` endpoints need a
+token for the environment's BFF API, and the Azure CLI client is not pre-authorized on it (`az account get-access-token
+--resource api://<bff app id>` fails with AADSTS65001). Read the same verdicts from the jobs' heartbeat lines in the
+stamp's Application Insights instead (read-only):
+
+```kusto
+traces | where timestamp > ago(1h) and message contains "] heartbeat"
+| extend job = extract(@"\[(SECURE-[A-Z-]+)\]", 1, message) | where job != ""
+| summarize arg_max(timestamp, message) by job
+```
+
+Expected: `[SECURE-CENSUS] … status=isolated findings=0` (11); `[SECURE-CHILD-SHARES] … status=Completed` with `held` and
+`notUpdated` explained (12); `[SECURE-CHILD-RECONCILE] … mode=ReportOnly` every two minutes (14);
+`[SECURE-INHERIT] … failed=0 deferred=0` every five minutes (15). A job with no heartbeat in the hour is not running.
+Run the query with `POST https://api.applicationinsights.io/v1/apps/<appId>/query` (`az rest --resource
+https://api.applicationinsights.io`); `az monitor app-insights query` on Windows breaks on the quotes.
 
 ### 7a. The children of a secure record — who can see them (task 149)
 

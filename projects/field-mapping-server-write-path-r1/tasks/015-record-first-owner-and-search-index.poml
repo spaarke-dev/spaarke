@@ -1,0 +1,128 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="015" project="field-mapping-server-write-path-r1">
+  <metadata>
+    <title>Record-first owner for roots and children, and search-index default from the owning business unit (FR-09, FR-10)</title>
+    <phase>2 W2 Unified RecordCreationService</phase>
+    <gate>014 complete</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies .cs in Sprk.Bff.Api; tags include bff-api, security, ownership; owner assignment is a security-sensitive invariant (NFR-01); adds tests at KEEP paths (TEST-MODIFYING override).</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Owner rule decides row visibility and business-unit placement; wrong choice breaks secure isolation. Needs judgment about exceptions.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits the RecordCreationService core shared with 014 and 016.</parallel-reason>
+    <deps>014</deps>
+    <tags>bff-api, security, ownership, dataverse, testing</tags>
+    <estimated-effort>6-9 hours</estimated-effort>
+  </metadata>
+
+  <prompt>In `RecordCreationService`, make step 7 resolve the owner with `ResolveOwnerAsync(ForParents(...), RequestedBy)` for EVERY create (roots and children), stop using `ResolveOwningTeamAsync` for creates, refuse with a typed refusal when the owner is unresolved, and make step 8 fill the search-index default (fill-only) from the OWNING business unit's `sprk_searchindexname` / `sprk_ai_search_index` for every registry table marked search-indexed.</prompt>
+  <role>SPAARKE platform developer, .NET 10 BFF, Dataverse ownership model (I-6). Follow ADRs strictly.</role>
+  <goal>The same Project filed under the same Matter gets the same owner via every surface; no create yields a user- or app-owned row except a listed registry exception; an unresolved owner refuses; an explicit search-index value wins and an unset one takes the owning BU default for Matter, Project and Document.</goal>
+
+  <context>
+    <background>spec.md FR-09, FR-10, FR-11 (registry exception column); I-5 and I-6 in DATAVERSE-WRITE-PATH-ARCHITECTURE.md. Today the Office core owns roots through `ResolveOwningTeamAsync` (RecordCreationService.cs ~:489), the child core uses `ResolveOwnerAsync`, so the Office Project-under-Matter owner differs from the child route. Owner order: secure ancestor then the named Secure Record Owners team; else the filed-under record's BU default Owner team; else the acting user's BU team; else refuse. Listed exceptions (unfiled communications `UnfiledOwnership.KeepCreator`, direct threads, notifications) live in `RecordTableRules` from task 012; this task reads them, it does not invent new ones.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/RecordCreation/RecordCreationService.cs (steps 7 and 8)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/RecordCreation/RecordTableRules.cs (read; add search-indexed flags only if task 012 left a TODO)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Dataverse/RecordOwnershipResolver.cs (ResolveOwnerAsync ~:1016, ResolveOwningTeamAsync ~:1008 - no longer used for creates, ForParents ~:346, UnfiledOwnership ~:162)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Ai/SearchIndexNameResolver.cs (lookup column sprk_ai_search_index ~:105; reuse its BU lookup logic rather than forking it)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Office/OfficeRecordCreationService.cs (only the ~:489 call site if still reachable before task 018 deletes the class)</file>
+      <file role="new">tests/integration/data-mutation/RecordOwnership/CrossSurfaceOwnerTests.cs (same Project under same Matter, same owner)</file>
+      <file role="new">tests/integration/data-mutation/RecordOwnership/SearchIndexDefaultTests.cs (Matter, Project, Document)</file>
+      <file role="canonical-reference">tests/integration/data-mutation/RecordOwnership/OfficeRecordOwnershipTests.cs (fixture style)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="014" status="required">Mapping and merged-payload authorization wired into the service.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-008 (path A, spec ADR Tensions)">Scope: payload-dependent checks. Owner resolution happens after the caller checks of step 5, inside the service; the checks themselves stay in `CallerWriteAuthorization`. No new endpoint filter.</constraint>
+    <constraint source="ADR-019">Scope: refusals. An unresolved owner returns the typed refusal Kind from task 013 mapped to ProblemDetails with a stable `errorCode`; no raw resolver or Dataverse text.</constraint>
+    <constraint source="ADR-028">Scope: identity. `RequestedBy` is the WhoAmI-resolved caller for the caller principal and the supplied requester (or none) for the system principal. The create stays app-only; ownerid is set explicitly to the resolved team.</constraint>
+    <constraint source="ADR-010">Scope: DI. Reuse the already-registered IRecordOwnershipResolver and the search-index resolver; add no registration.</constraint>
+    <constraint source="NFR-01 (spec)">Scope: owner resolution. Fail closed: an exception, a missing BU default team or a missing acting-user BU REFUSES the create; it never falls back to a user-owned or app-owned row. The only non-team owners are registry-listed exceptions with a recorded rationale.</constraint>
+    <constraint source="project">Scope: behaviour change. The Office Project-under-Matter owner changes (now the record-first owner). Add the release-note line to the task notes and to the PR description; do not hide it.</constraint>
+    <constraint source="CLAUDE.md §10">Scope: BFF publish. Placement Justification in the PR; fresh-master publish-size delta per §10.4; `dotnet list package --vulnerable --include-transitive`; no package.</constraint>
+    <constraint source="ADR-038">Scope: tests added by this task. KEEP paths under tests/integration/data-mutation/RecordOwnership/; no Mock&lt;HttpMessageHandler&gt;; no DI-registration tests. Cover the stated contract plus the named edge cases only.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Ownership invariant I-6 and search-index invariant I-5</topic>
+    <files>
+      <file>.claude/adr/ADR-002-thin-plugins.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+      <file>.claude/adr/ADR-019-problemdetails.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/constraints/data.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md</file>
+    </files>
+    <patterns>
+      <pattern name="relationship-navigation" location=".claude/patterns/dataverse/relationship-navigation.md">Reading the owning BU and its lookup columns.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare FULL rigor; read spec FR-09/FR-10/FR-11, I-5 and I-6 in the architecture doc; re-grep `ResolveOwningTeamAsync` and `ResolveOwnerAsync` callers.</step>
+    <step order="1">Run /conflict-check; record the result. Escalate if UAC-r2 PR #2110 changes RecordOwnershipResolver.cs.</step>
+    <step order="2">Write failing tests first: cross-surface owner (Office-style root create, browser-route-style child create, chat-style and decision-follow-on-style create under the same Matter produce the same owner); unresolved owner refuses; registry exception keeps creator; search-index explicit wins / unset takes owning BU default for Matter, Project, Document; non-search-indexed table untouched.</step>
+    <step order="3">Implement step 7 with `ResolveOwnerAsync(ForParents(table, merged payload parents), RequestedBy)`; map an unresolved resolution to the typed refusal. Remove every create-path use of `ResolveOwningTeamAsync` (leave the interface member if a non-create caller exists; grep before deleting).</step>
+    <step order="4">Implement step 8: read the OWNING BU's search-index values once per create (reuse SearchIndexNameResolver's column names), fill `sprk_searchindexname` / `sprk_ai_search_index` only when not already supplied, only for registry search-indexed tables.</step>
+    <step order="5">Build; run SecureChildOwnershipAiToolTests*, RefileWriterAfterRefileGuardTests, RouteAuthorizationGuardTests and RecordOwnerAssignmentCensusTests unchanged; publish-size delta; CVE check.</step>
+    <step order="6">Add the release-note line ("Office Project-under-Matter owner changes: now the Matter's BU default Owner team") to the task notes.</step>
+    <step order="7">Update TASK-INDEX.md: set this task's status to ✅.</step>
+    <step order="8">Document any deviation in projects/field-mapping-server-write-path-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If a create path has no parent and no acting user (a system principal with no RequestedBy and an unfiled record) and the table is not a registry exception, STOP and escalate per CLAUDE.md §6 with the table; do not invent an exception.</trigger>
+    <trigger>If the owning BU has more than one of the search-index lookup and text columns set with different values, escalate rather than choosing a precedence.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>Grep `ResolveOwnerAsync` / `ResolveOwningTeamAsync` in src/server/api/Sprk.Bff.Api/Services/Dataverse/RecordOwnershipResolver.cs (~:1008, ~:1016) and Services/Ai/SearchIndexNameResolver.cs (~:105). Existing neighbours for tests: tests/integration/data-mutation/RecordOwnership/OfficeRecordOwnershipTests.cs covers only the Office core.</existing>
+    <extension>Yes for production code: step 7 and 8 live in the existing service from task 013 and reuse the existing resolvers; no new production file. New files are test classes only, because the existing ownership suites must pass unchanged and none exercises a cross-surface comparison or the search-index default.</extension>
+    <cost-of-doing-nothing>The same Project under the same Matter gets different owners by surface, wizard Matter/Project rows stay user-owned, and Matter, Project and Document rows miss their I-5 search index (spec section 11 table, FR-09 and FR-10 acceptance).</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="dotnet">Build/test .NET</tool>
+    <tool name="skill:conflict-check">Detect overlap with UAC-r2 work</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/RecordCreation/RecordCreationService.cs (steps 7-8)</output>
+    <output type="test">tests/integration/data-mutation/RecordOwnership/CrossSurfaceOwnerTests.cs</output>
+    <output type="test">tests/integration/data-mutation/RecordOwnership/SearchIndexDefaultTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Every create (root and child) resolves its owner via `ResolveOwnerAsync(ForParents(...), RequestedBy)`; no create path calls `ResolveOwningTeamAsync`.</criterion>
+    <criterion testable="true">A test creates the same Project under the same Matter through the Office-style, browser-route-style, chat-style and decision-follow-on-style inputs and asserts an identical owner.</criterion>
+    <criterion testable="true">Owner order is covered by tests: secure ancestor gives the named Secure Record Owners team; else the filed-under record's BU default Owner team; else the acting user's BU team.</criterion>
+    <criterion testable="true">An explicit search-index value on Matter, Project and Document survives; an unset value takes the owning BU's `sprk_searchindexname` / `sprk_ai_search_index` default.</criterion>
+    <criterion testable="true">Negative: an unresolved owner (no filed-under BU team, no acting-user BU) returns the typed refusal and issues zero create calls; it never creates a user- or app-owned row.</criterion>
+    <criterion testable="true">Negative: a table listed as an ownership exception in the registry keeps its listed owner behaviour (unfiled communication keeps the creator); a table not marked search-indexed receives no search-index value.</criterion>
+    <criterion testable="true">The release-note line about the Office Project-under-Matter owner change is in the task notes.</criterion>
+    <criterion testable="true">BFF build 0 errors; SecureChildOwnershipAiToolTests*, RefileWriterAfterRefileGuardTests, RouteAuthorizationGuardTests and RecordOwnerAssignmentCensusTests pass unchanged; publish-size delta, CVE result and /conflict-check result recorded in the task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-09, FR-10, FR-11, NFR-01. Owner decision Q9: record-first everywhere. Exceptions (notifications, direct threads, unfiled communications) are assessed in task 060, not here.
+Completed 2026-10-21.
+- What landed: the unified create (RecordCreationService step 7) resolves the owner record-first through ResolveOwnerAsync(ForParents(...) with RequestedBy) for roots and children; a project's ADR-024 pair counts as a parent only when it names a matter or project, read the same way as the secure-root plan; an isolated create takes the plan's named Secure team (I-2). Step 8: a fill-only search-index default from the owning BU on matter, project and document. ArchTest CreateOwnerResolutionGuardTests bans ResolveOwningTeamAsync in server code; the Office file is allow-listed for exactly one use until 018. Write-path doc I-5/I-6 updated.
+- Deferred: the Office record-first owner and Office index moved to task 018 (they changed live Office behaviour before the AppendTo checks gate the filing; review pass 1 F1/F2). The Office root create is byte-identical to 58d1a3548d (UploadFinalizationWorker changed +4/-1, behaviour-equivalent).
+- Reviews: two opus passes. Pass 1 F1-F3 fixed (fix round 1); pass 2 found one doc clause (I-6 isolation exception) and the allow-list count, both fixed (ccd4fff6b9). K-limits: the guard matches the name, not the behaviour; the malformed-pair case under a system principal reaches the Dataverse write and fails closed (no live caller yet).
+- Tests: CrossSurfaceOwnerTests, SearchIndexDefaultTests (data-mutation/RecordOwnership), guard ArchTests 15; mutants killed: F3 gate, K2 gate, isolated search-index skip, a guard call in UploadFinalizationWorker, the allow-list count.
+- Verified after merging into the work branch: sln 0/0, ArchTests 1232/1232, targeted suites 2521 passed / 7 skipped.
+- Publish: +27 KB.
+- UAC-r2 condition (b): ACCEPT, no F items, (a)-(d) hold (2026-10-21). K1 (catalog-fault test) and K3 (search-index bind key case) are blocking criteria on 017/018. #2206 filed by UAC-r2 (stamped search index not re-derived on owner change; pre-existing).</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

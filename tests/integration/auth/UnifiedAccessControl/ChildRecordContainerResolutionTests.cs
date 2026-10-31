@@ -650,6 +650,10 @@ public partial class ChildRecordContainerResolutionTests
         + "sprk_regardingrecordtype>sprk_recordtype_ref;sprk_regardingreportcard>sprk_reportcard;"
         + "sprk_regardingservicerequest>sprk_servicerequest;sprk_regardingworkassignment>sprk_workassignment;"
         + "sprk_rescheduledby>contact;sprk_todoassigned>contact")]
+    // ebilling-r1 task 013: + sprk_regardingworkassignment (added by ebilling-r1 task 012, live spaarkedev1 2026-10-15).
+    // Task 012 also added sprk_supersedesinvoice > sprk_invoice and sprk_billingexport > sprk_billingexport; neither is
+    // a filing (a superseded invoice and an export batch confer no core record), and classifying them is a uac-r2
+    // decision reported by task 013, so they are not in this snapshot yet.
     [InlineData("sprk_invoice", "both",
         "createdby>systemuser;createdonbehalfby>systemuser;modifiedby>systemuser;modifiedonbehalfby>systemuser;"
         + "ownerid>systemuser|team;owningbusinessunit>businessunit;owningteam>team;owninguser>systemuser;"
@@ -657,6 +661,7 @@ public partial class ChildRecordContainerResolutionTests
         + "sprk_assignedtoattorney1>contact;sprk_assignedtoattorney2>contact;sprk_assignedtoparalegal1>contact;"
         + "sprk_assignedtoparalegal2>contact;sprk_matter>sprk_matter;sprk_project>sprk_project;"
         + "sprk_regardingagreement>sprk_agreement;sprk_regardingrecordtype>sprk_recordtype_ref;"
+        + "sprk_regardingworkassignment>sprk_workassignment;"
         + "sprk_securitybu>businessunit;sprk_vendororg>sprk_organization;transactioncurrencyid>transactioncurrency")]
     [InlineData("sprk_workassignment", "both",
         "createdby>systemuser;createdonbehalfby>systemuser;modifiedby>systemuser;modifiedonbehalfby>systemuser;"
@@ -1140,6 +1145,77 @@ public partial class ChildRecordContainerResolutionTests
 
         world.Reads("businessunit").Should().Be(0);
         world.RootReads().Should().Be(0);
+    }
+
+    // ebilling-r1 task 026 (FR-05, D-75, D-94 condition 4): the Invoice Line is an intermediate with ONE root, its own lookup.
+
+    private static readonly Guid InvoiceLineTypeRef = Guid.Parse("fb30d221-bbc9-f111-a05a-7c1e520a989f"); // spaarkedev1, 2026-10-16
+
+    [Fact(DisplayName = "ebilling-r1 task 026: an invoice line of a SECURE matter resolves the matter's own container; the BU is never read")]
+    public async Task InvoiceLine_OfASecureMatter_ResolvesTheMattersContainer()
+    {
+        var world = new World()
+            .WithChild("sprk_billingevent", typedMatter: MatterId)
+            .WithRoot("sprk_matter", MatterId, isSecure: true, RootContainer)
+            .WithBusinessUnit(BusinessUnitContainer);
+
+        var decision = await world.Resolver().ResolveForRecordAsync("sprk_billingevent", ChildId);
+
+        decision.ContainerId.Should().Be(RootContainer);
+        world.Reads("businessunit").Should().Be(0);
+    }
+
+    [Fact(DisplayName = "ebilling-r1 task 026: an invoice line of a SECURE project resolves the project's container (the typed sprk_project is followed)")]
+    public async Task InvoiceLine_OfASecureProject_ResolvesTheProjectsContainer()
+    {
+        var world = new World()
+            .WithChild("sprk_billingevent", typedProject: ProjectId)
+            .WithRoot("sprk_project", ProjectId, isSecure: true, RootContainer)
+            .WithBusinessUnit(BusinessUnitContainer);
+
+        var decision = await world.Resolver().ResolveForRecordAsync("sprk_billingevent", ChildId);
+
+        decision.ContainerId.Should().Be(RootContainer);
+    }
+
+    [Fact(DisplayName = "ebilling-r1 task 026 (D-94 condition 4): an invoice line naming a matter AND a project is refused (409) — never given the BU's or a fallback container")]
+    public async Task InvoiceLine_WithTwoRoots_IsRefused_NeverADefaultContainer()
+    {
+        // Both roots are ORDINARY: without the single-root rule the line would quietly take the business unit's container.
+        var world = new World()
+            .WithChild("sprk_billingevent", typedMatter: MatterId, typedProject: ProjectId)
+            .WithRoot("sprk_matter", MatterId, isSecure: false, containerId: null)
+            .WithRoot("sprk_project", ProjectId, isSecure: false, containerId: null)
+            .WithBusinessUnit(BusinessUnitContainer);
+
+        foreach (var fallback in new[] { null, ArchiveContainer })
+        {
+            var act = async () => await world.Resolver().ResolveForRecordAsync("sprk_billingevent", ChildId, fallback);
+
+            var ex = (await act.Should().ThrowAsync<SdapProblemException>()).Which;
+            ex.Code.Should().Be(RecordContainerResolver.AncestorUnresolvedCode);
+            ex.StatusCode.Should().Be(409);
+            ex.Message.Should().NotContain(ChildId.ToString("D"), "the refusal names no record");
+        }
+
+        world.Reads("businessunit").Should().Be(0);
+        world.RootReads().Should().Be(0, "refused before the secure walk");
+    }
+
+    [Fact(DisplayName = "ebilling-r1 task 026: a To Do whose pair alone names an invoice line takes the held path — container_ancestor_unverifiable")]
+    public async Task Todo_PairNamingAnInvoiceLine_IsRefusedAsUnverifiable()
+    {
+        var world = new World()
+            .WithChild("sprk_todo", pairId: Guid.NewGuid().ToString(), pairType: InvoiceLineTypeRef)
+            .WithRecordType(InvoiceLineTypeRef, "sprk_billingevent")
+            .WithBusinessUnit(BusinessUnitContainer);
+
+        var act = async () => await world.Resolver().ResolveForRecordAsync("sprk_todo", ChildId);
+
+        var ex = (await act.Should().ThrowAsync<SdapProblemException>()).Which;
+        ex.Code.Should().Be(RecordContainerResolver.AncestorUnverifiableCode);
+        ex.StatusCode.Should().Be(409);
+        world.Reads("businessunit").Should().Be(0);
     }
 
     // Task 031 (external-access-r3, owner decision 2026-10-11): a SERVICE REQUEST resolved AS ITSELF (a document filed to
@@ -1922,6 +1998,51 @@ public partial class ChildRecordContainerResolutionTests
         world.Reads("businessunit").Should().Be(0);
     }
 
+    [Fact(DisplayName = "ebilling-r1 (UAC-r2 ruling on RecordFamilyEdges): a work assignment filed under an invoice that is filed under that same work assignment refuses 409 (unverifiable) — the walk ends")]
+    public async Task WorkAssignment_FiledUnderAnInvoiceOfItself_Is409_AndTheWalkEnds()
+    {
+        // A row pair the BFF refuses at write (InvoiceFamilyCoreRecordGuard.WorkAssignmentCycleCode) but the model-driven app
+        // can still store: WA.sprk_regardinginvoice -> I and I.sprk_regardingworkassignment -> WA.
+        var invoice = Guid.Parse("eb1112ec-0000-0000-0000-0000000000a1");
+        var world = new World(securable: SecurableWithInvoice)
+            .WithChild("sprk_workassignment", intermediate: ("sprk_regardinginvoice", invoice), isSecure: false)
+            .WithRow("sprk_invoice", invoice,
+                lookups: [("sprk_regardingworkassignment", "sprk_workassignment", ChildId)])
+            .WithBusinessUnit(BusinessUnitContainer);
+
+        var act = async () => await world.Resolver().ResolveForRecordAsync("sprk_workassignment", ChildId);
+
+        // Observed (2026-10-28): from the work-assignment side the walk refuses as UNVERIFIABLE ("filed under another record
+        // (sprk_regardinginvoice) ... cannot be verified"), not as the filing loop the invoice side names. Both are 409 and fail
+        // closed. UAC-r2: decide whether this side should answer the filing loop too.
+        var ex = (await act.Should().ThrowAsync<SdapProblemException>()).Which;
+        ex.Code.Should().Be(RecordContainerResolver.AncestorUnverifiableCode);
+        ex.StatusCode.Should().Be(409);
+        world.Reads("sprk_invoice").Should().Be(1, "the invoice is read once, never followed round the loop");
+        world.Reads("sprk_workassignment").Should().Be(1, "the work assignment is read once, never followed round the loop");
+        world.Reads("businessunit").Should().Be(0);
+    }
+
+    [Fact(DisplayName = "ebilling-r1 (UAC-r2 ruling on RecordFamilyEdges): an invoice filed under a work assignment that is filed under that same invoice refuses 409 (filing loop) — the walk ends")]
+    public async Task Invoice_FiledUnderAWorkAssignmentOfItself_IsTheFilingLoop409()
+    {
+        var workAssignment = Guid.Parse("eb1112ec-0000-0000-0000-0000000000a2");
+        var world = new World(securable: SecurableWithInvoice)
+            .WithChild("sprk_invoice", regardingWorkAssignment: workAssignment)
+            .WithRoot("sprk_workassignment", workAssignment, isSecure: false, containerId: null,
+                intermediate: ("sprk_regardinginvoice", ChildId))
+            .WithBusinessUnit(BusinessUnitContainer);
+
+        var act = async () => await world.Resolver().ResolveForRecordAsync("sprk_invoice", ChildId);
+
+        var ex = (await act.Should().ThrowAsync<SdapProblemException>()).Which;
+        ex.Code.Should().Be(RecordContainerResolver.AncestorUnresolvedCode);
+        ex.StatusCode.Should().Be(409);
+        ex.Detail.Should().Contain("lead back to themselves", "the loop is named, not mistaken for a long chain");
+        world.Reads("sprk_workassignment").Should().BeLessThanOrEqualTo(1, "each record of the loop is read once, never followed round it");
+        world.Reads("businessunit").Should().Be(0);
+    }
+
     [Fact(DisplayName = "#1630 lock-step: every column the inheritance follows through an intermediate is one the storage resolver knows as that table's intermediate")]
     public void IntermediateFilingColumns_AreTheResolversIntermediateColumns()
     {
@@ -2509,6 +2630,8 @@ public partial class ChildRecordContainerResolutionTests
             "sprk_event", "sprk_todo", "sprk_document", "sprk_communication", "contact", "businessunit",
             "account", "sprk_organization", "sprk_agreement", "sprk_budget", "sprk_reportcard", "sprk_analysis",
             "sprk_recordtype_ref", "sprk_memo", "sprk_timekeeper",
+            // ebilling-r1 task 026: the Invoice Line (live; no sprk_issecure column).
+            "sprk_billingevent",
         };
 
         private readonly Dictionary<string, EntitySecurability> _classificationOverrides = new(StringComparer.Ordinal);

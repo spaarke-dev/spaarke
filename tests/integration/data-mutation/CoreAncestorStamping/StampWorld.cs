@@ -60,7 +60,8 @@ internal sealed class StampWorld
             "sprk_regardingdocument", "sprk_regardinginvoice", "sprk_regardingrecordid", "sprk_regardingrecordtype",
             "sprk_documentid",
         ],
-        ["sprk_invoice"] = ["sprk_project", "sprk_matter", "sprk_regardingagreement"],
+        // ebilling-r1 task 012 added sprk_regardingworkassignment to the invoice (live spaarkedev1, 2026-10-15).
+        ["sprk_invoice"] = ["sprk_project", "sprk_matter", "sprk_regardingworkassignment", "sprk_regardingagreement"],
         ["sprk_document"] =
         [
             "sprk_matter", "sprk_project", "sprk_workassignment", "sprk_relatedmatter", "sprk_relatedproject",
@@ -69,20 +70,29 @@ internal sealed class StampWorld
         ["sprk_agreement"] = ["sprk_regardingmatter", "sprk_regardingproject", "sprk_regardingdocument"],
         ["sprk_reportcard"] = ["sprk_regardingmatter", "sprk_regardingproject"],
         ["sprk_budget"] = ["sprk_matter", "sprk_project"],
+        // ebilling-r1 task 026 (D-94): the Invoice Line, an intermediate on its own core lookups (live spaarkedev1 2026-10-16;
+        // also its sprk_invoice, never a root column, and the pair).
+        ["sprk_billingevent"] =
+        [
+            "sprk_project", "sprk_matter", "sprk_regardingworkassignment", "sprk_invoice", "sprk_regardingrecordid",
+            "sprk_regardingrecordtype",
+        ],
         // Ontology task 144: the stamped children outside the access taxonomy (solution source sprk_Signal /
         // sprk_DecisionRecord: the eight subject lookups, the service-request lookup, the pair, the typed core lookups).
         ["sprk_signal"] =
         [
             "sprk_regardingproject", "sprk_regardingmatter", "sprk_regardingworkassignment",
             "sprk_regardingservicerequest", "sprk_regardingcommunication", "sprk_regardingdocument", "sprk_regardingevent",
-            "sprk_regardinginvoice", "sprk_regardingtodo", "sprk_regardingrecordid", "sprk_regardingrecordtype",
+            "sprk_regardinginvoice", "sprk_regardingtodo", "sprk_regardinginvoiceline", "sprk_regardingrecordid",
+            "sprk_regardingrecordtype",
             "sprk_matter", "sprk_decisionrecord",
         ],
         ["sprk_decisionrecord"] =
         [
             "sprk_regardingproject", "sprk_regardingmatter", "sprk_regardingworkassignment",
             "sprk_regardingservicerequest", "sprk_regardingcommunication", "sprk_regardingdocument", "sprk_regardingevent",
-            "sprk_regardinginvoice", "sprk_regardingtodo", "sprk_regardingrecordid", "sprk_regardingrecordtype",
+            "sprk_regardinginvoice", "sprk_regardingtodo", "sprk_regardinginvoiceline", "sprk_regardingrecordid",
+            "sprk_regardingrecordtype",
             "sprk_matter", "sprk_project", "sprk_workassignment",
         ],
     };
@@ -153,8 +163,12 @@ internal sealed class StampWorld
                 var matches = _rows.Values
                     .Where(r => r.LogicalName == query.EntityName)
                     .Where(r => query.Criteria.Conditions.All(c =>
-                        c.Operator == ConditionOperator.Equal
-                        && r.GetAttributeValue<EntityReference>(c.AttributeName)?.Id == (Guid)c.Values[0]))
+                        (c.Operator == ConditionOperator.Equal
+                         && r.GetAttributeValue<EntityReference>(c.AttributeName)?.Id == (Guid)c.Values[0])
+                        // Field mapping task 017 (Phase 2d-1): the parent-lineage walk reads rows by id (id IN (…)), as live.
+                        || (c.Operator == ConditionOperator.In
+                            && string.Equals(c.AttributeName, query.EntityName + "id", StringComparison.OrdinalIgnoreCase)
+                            && c.Values.OfType<Guid>().Contains(r.Id))))
                     .OrderBy(r => new SqlGuid(r.Id))
                     .Select(r => query.ColumnSet.AllColumns ? Clone(r) : Project(r, [.. query.ColumnSet.Columns]))
                     .ToList();

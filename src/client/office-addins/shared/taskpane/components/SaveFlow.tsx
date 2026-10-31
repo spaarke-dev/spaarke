@@ -42,6 +42,7 @@ import {
 import type { DocumentIdentityState, ResolvedRelatedRecord } from '../services/documentIdentityService';
 import { fileDocumentToRecord } from '../services/documentFilingService';
 import { useAnnounce } from '../hooks/useAnnounce';
+import { describeEmailFilingProblem, type EmailFilingProblem } from '../services/emailFilingNotice';
 import { fetchRelatedCandidates, type RelatedCandidate } from '../services/communicationSuggestionsService';
 import {
   clearReferenceListCache,
@@ -62,6 +63,7 @@ import {
 import { cleanGuid } from '@spaarke/ui-components/guid';
 import { describeFetchFailure } from '../utils/errorMessages';
 import { authenticatedJsonFetch } from '@shared/services/authenticatedJsonFetch';
+import { searchOfficeEntities } from '../services/officeEntitySearch';
 import type { AttachmentInfo, HostType } from '@shared/adapters/types';
 // Task 020 (FR-06) default-name rule; task 089 moved it to utils so the ribbon's Quick Save names files the same way.
 import { stripDocumentExtension } from '../utils/documentFileName';
@@ -361,6 +363,12 @@ export interface SavedDocumentState {
   filedTo: FiledTo;
   /** Whether the save that produced this state created the document or added a version to it. */
   lastSave: SaveTarget['mode'];
+  /**
+   * Task 131 (#2171): set when the save worked but the email it reconciled to could not be filed to the chosen record
+   * (the server's `SaveResponse.emailFiling` was `NotPermitted` / `Failed`). Absent otherwise. Held here, with the saved
+   * document, so the notice survives a tab switch like the confirmation bar does.
+   */
+  emailFilingProblem?: EmailFilingProblem;
 }
 
 /**
@@ -672,7 +680,7 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
     () => ({
       apiBaseUrl,
       getAccessToken,
-      onComplete: (docId, docUrl) => {
+      onComplete: (docId, docUrl, emailFilingProblem) => {
         const pending = pendingSaveRef.current;
         updateSavedState(prev => ({
           savedDocument: {
@@ -680,6 +688,7 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
             savedName: pending?.name ?? '',
             filedTo: pending?.filedTo,
             lastSave: pending?.mode ?? 'create',
+            ...(emailFilingProblem ? { emailFilingProblem } : {}),
           },
           profileRefreshSignal: prev.profileRefreshSignal + 1,
           // task 094: a fresh save always clears the re-enable trigger — this save IS the content as
@@ -1427,51 +1436,12 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
   // save demands AppendTo on the chosen record. So it asks the server for filing access (`access=file`,
   // opt-in — the To Do Contact search in App.tsx deliberately does NOT send it) and carries each row's
   // `canFile` into the picker, which shows a `canFile === false` row disabled with the reason.
+  //
+  // Task 133: the search body moved to `services/officeEntitySearch.ts`, unchanged, so the Invoice view runs the same
+  // search; this call keeps `access=file`.
   const relatedSearch = useCallback(
-    async (query: string, type: EntityType): Promise<EntitySearchResult[]> => {
-      if (!apiBaseUrl || !getAccessToken) {
-        throw new Error("Couldn't search: the pane isn't fully configured. Reload and try again.");
-      }
-
-      let res: Response;
-      try {
-        const token = await getAccessToken();
-        res = await authenticatedJsonFetch(
-          `${apiBaseUrl}/api/office/search/entities?q=${encodeURIComponent(query)}&type=${type}&top=10&access=file`,
-          { headers: { 'Content-Type': 'application/json' } },
-          token,
-          { getRetryToken: getAccessToken }
-        );
-      } catch {
-        // Network/token failure before any response existed — never silently "no matches".
-        throw new Error("Couldn't reach Spaarke to search. Check your connection and try again.");
-      }
-
-      if (!res.ok) {
-        const errorMsg = await describeFetchFailure(res);
-        throw new Error(errorMsg.message);
-      }
-
-      const data = await res.json();
-      const rows = (data.results ?? []) as Array<{
-        id: string;
-        entityType: string;
-        logicalName: string;
-        name: string;
-        displayInfo?: string;
-        canFile?: boolean | null;
-      }>;
-      // An EXPLICIT field map: any field not listed here is dropped. `canFile` must stay listed, or a
-      // record the save would refuse renders as selectable again (task 084 pins this with a test).
-      return rows.map(item => ({
-        id: item.id,
-        entityType: item.entityType as EntityType,
-        logicalName: item.logicalName,
-        name: item.name,
-        ...(item.displayInfo ? { displayInfo: item.displayInfo } : {}),
-        ...(item.canFile !== undefined ? { canFile: item.canFile } : {}),
-      }));
-    },
+    (query: string, type: EntityType): Promise<EntitySearchResult[]> =>
+      searchOfficeEntities(query, type, { apiBaseUrl, getAccessToken, access: 'file' }),
     [apiBaseUrl, getAccessToken]
   );
 
@@ -1732,6 +1702,17 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
       )}
     </div>
   );
+
+  // Task 131 (#2171): the save worked, but the email it reconciled to could not be filed to the chosen record. A
+  // non-blocking warning beside the confirmation — never an error (the save succeeded) and never naming the record.
+  // Fluent's MessageBar announces its own text to screen readers when it mounts (its aria-live announcer), so this notice
+  // is deliberately NOT also announce()d — one channel only.
+  const renderEmailFilingNotice = (problem: EmailFilingProblem | undefined) =>
+    problem ? (
+      <MessageBar intent="warning" layout="multiline">
+        <MessageBarBody>{describeEmailFilingProblem(problem)}</MessageBarBody>
+      </MessageBar>
+    ) : null;
 
   // Task 117 (O3/W1): what Copy Link copies — the document's Spaarke record link, built exactly like View Document's
   // (`buildOpenRecordUrl`, ORG_URL + SPAARKE_APP_NAME). `null` when ORG_URL is unset: Copy Link is then HIDDEN, never
@@ -2306,6 +2287,7 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
     return (
       <>
         {renderSavedBar(savedBarOf(saved))}
+        {renderEmailFilingNotice(saved.emailFilingProblem)}
         {renderDocumentHeader(canSaveNewVersion ? 'locked' : 'readonly', lockedName)}
         <div className={styles.section}>
           <DocumentProfileSection

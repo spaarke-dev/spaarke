@@ -179,7 +179,7 @@ public class OfficeEmailSaveMessageKeyTests
             .Callback<string, Guid, Dictionary<string, object>, CancellationToken>((_, _, f, _) => communicationWrites.Add(f))
             .Returns(Task.CompletedTask);
         var probe = new Mock<CallerRecordAccessProbe>(
-            new HttpClient(), new ConfigurationBuilder().Build(), NullLogger<CallerRecordAccessProbe>.Instance, null!)
+            new HttpClient(), new ConfigurationBuilder().Build(), NullLogger<CallerRecordAccessProbe>.Instance, null!, null!)
         { CallBase = false };
         probe.Setup(p => p.GetCallerRightsAsync(It.IsAny<string?>(), It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(AccessRights.None);

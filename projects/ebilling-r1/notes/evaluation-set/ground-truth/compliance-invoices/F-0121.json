@@ -1,0 +1,32 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0121",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0121","generator_id":"gen_eval_set.py@1 F-0121","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0121.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-01"},
+ "header":{"firm":"Aldridge & Ellison LLP","firm_invoice_number":"INV-2026-39814","invoice_date":"2026-06-18","billing_period_start":"2026-04-01","billing_period_end":"2026-04-30","firm_matter_reference":"98098-0011","po_number":null,"fees_total":5274.0,"expenses_total":462.03,"adjustments_total":0.0,"total_due":5736.03,"currency":"USD"},
+ "timekeepers":[{"name":"Clara Okafor","title":"Paralegal","rate":195.0,"billed_as":"CO"},{"name":"Elena Hargrove","title":"Of Counsel","rate":515.0,"billed_as":"EH"},{"name":"Farah Nwosu","title":"Legal Assistant","rate":145.0,"billed_as":"FN"},{"name":"Nadia Marchetti","title":"Senior Associate","rate":405.0,"billed_as":"NM"},{"name":"Nadia Sandoval","title":"Associate","rate":335.0,"billed_as":"NS"},{"name":"Naomi Oyelaran","title":"Associate","rate":340.0,"billed_as":"NO"},{"name":"Tomas Ramanathan","title":"Partner","rate":590.0,"billed_as":"TR"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2026-04-06","timekeeper":"NO","timekeeper_name":"Naomi Oyelaran","timekeeper_title":"Associate","title":"Assoc","hours":1.7,"rate":340.0,"amount":578.0,"narrative":"Research standard for provisional remedies concerning the licensing dispute","codes":["L220","A102"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2026-04-07","timekeeper":"NO","timekeeper_name":"Naomi Oyelaran","timekeeper_title":"Associate","title":"Assoc","hours":1.4,"rate":340.0,"amount":476.0,"narrative":"Research public records concerning Tidewater Retail and related entities","codes":["L110","A102"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2026-04-14","timekeeper":"NS","timekeeper_name":"Nadia Sandoval","timekeeper_title":"Associate","title":"Assoc","hours":1.8,"rate":335.0,"amount":603.0,"narrative":"Correspondence with consulting expert regarding scope of analysis","codes":["L130","A108"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2026-04-15","timekeeper":"NM","timekeeper_name":"Nadia Marchetti","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":1.55,"rate":405.0,"amount":627.75,"narrative":"Research pleading standards applicable to the supply agreement","codes":["L210","A102"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2026-04-15","timekeeper":"NO","timekeeper_name":"Naomi Oyelaran","timekeeper_title":"Associate","title":"Assoc","hours":2.3,"rate":340.0,"amount":782.0,"narrative":"Draft settlement term sheet for the lease dispute","codes":["L160","A103"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2026-04-15","timekeeper":"EH","timekeeper_name":"Elena Hargrove","timekeeper_title":"Of Counsel","title":"O/C","hours":0.7,"rate":515.0,"amount":360.5,"narrative":"Correspondence with consulting expert regarding scope of analysis","codes":["L130","A108"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2026-04-16","timekeeper":"NS","timekeeper_name":"Nadia Sandoval","timekeeper_title":"Associate","title":"Assoc","hours":2.2,"rate":335.0,"amount":737.0,"narrative":"Telephone conference with client representative regarding factual background of the supply agreement","codes":["L110","A106"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2026-04-17","timekeeper":"TR","timekeeper_name":"Tomas Ramanathan","timekeeper_title":"Partner","title":"Ptr","hours":1.7,"rate":590.0,"amount":1003.0,"narrative":"Draft settlement term sheet for the warranty claim","codes":["L160","A103"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"fee","date":"2026-04-20","timekeeper":"CO","timekeeper_name":"Clara Okafor","timekeeper_title":"Paralegal","title":"Para","hours":0.25,"rate":195.0,"amount":48.75,"narrative":"Prepare for case management conference in the construction contract","codes":["L230","A101"],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"fee","date":"2026-04-24","timekeeper":"FN","timekeeper_name":"Farah Nwosu","timekeeper_title":"Legal Assistant","title":"LA","hours":0.4,"rate":145.0,"amount":58.0,"narrative":"Prepare for case management conference in the construction contract","codes":["L230","A101"],"page":1,"narrative_style":"clear"},
+  {"n":11,"line_type":"expense","date":"2026-04-20","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":462.03,"amount":462.03,"narrative":"Airfare to Dallas for deposition","codes":["E110"],"page":1,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["196 Pine Street","Portland","Tax ID 30-2126551"],"template":"T01","pages":2},
+ "rule_set_id":"RS-01",
+ "context":{"matter_open":"2025-07-10","matter_close":"2026-07-29","matter_budget":47944.0,"approved_timekeepers":["Nadia Sandoval","Nadia Marchetti","Tomas Ramanathan","Clara Okafor","Anders Marchetti","Farah Nwosu","Elena Hargrove","Naomi Oyelaran","Katya Wickham"],"invoice_received_date":"2026-06-19"},
+ "expected_findings":[
+  {"rule_id":"RS-01-R01","rule_type":"TimeIncrement","scope":"line","line_refs":[4],"consequence":"Reduce"},
+  {"rule_id":"RS-01-R01","rule_type":"TimeIncrement","scope":"line","line_refs":[9],"consequence":"Reduce"},
+  {"rule_id":"RS-01-R06","rule_type":"InvoiceAge","scope":"invoice","line_refs":[],"consequence":"Flag"},
+  {"rule_id":"RS-01-R08","rule_type":"RequiredData","scope":"invoice","line_refs":[],"consequence":"Reject"}
+ ],
+ "seeded_violations":4
+}

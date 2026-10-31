@@ -28,6 +28,8 @@
           </Titles>
         </SubArea>
         <SubArea Id="subarea_fc9da905" VectorIcon="/WebResources/sprk_/icons/entity/invoice.svg" Icon="/WebResources/sprk_/icons/entity/invoice.svg" Entity="sprk_invoice" Client="All,Outlook,OutlookLaptopClient,OutlookWorkstationClient,Web" AvailableOffline="true" PassParams="false" Sku="All,OnPremise,Live,SPLA" />
+        <SubArea Id="subarea_eb_submission" Icon="/_imgs/imagestrips/transparent_spacer.gif" Entity="sprk_invoicesubmission" Client="All,Outlook,OutlookLaptopClient,OutlookWorkstationClient,Web" AvailableOffline="true" PassParams="false" Sku="All,OnPremise,Live,SPLA" />
+        <SubArea Id="subarea_eb_export" Icon="/_imgs/imagestrips/transparent_spacer.gif" Entity="sprk_billingexport" Client="All,Outlook,OutlookLaptopClient,OutlookWorkstationClient,Web" AvailableOffline="true" PassParams="false" Sku="All,OnPremise,Live,SPLA" />
         <SubArea Id="subarea_1476d52e" ResourceId="SitemapDesigner.NewSubArea" Icon="/_imgs/imagestrips/transparent_spacer.gif" Url="$webresource:sprk_smarttodo" Client="All,Outlook,OutlookLaptopClient,OutlookWorkstationClient,Web" AvailableOffline="true" PassParams="false" Sku="All,OnPremise,Live,SPLA">
           <Titles>
             <Title LCID="1033" Title="To Do List" />

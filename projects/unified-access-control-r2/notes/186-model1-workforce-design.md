@@ -2,6 +2,43 @@
 
 # Task 186: Model 1 workforce sign-in, registration and baseline access (design note)
 
+## 0. Baseline-access decision for the owner (2026-10-16; this is the only part UAC builds)
+
+**Scope.** This applies only to a workforce-contact caller: `Plane = Workforce` with no systemuser, as identified by SPA-r3's A9 principal. SPA-r3's `WorkforcePrincipalResolver` WorkforceHome guard stays first. Licensed systemusers and CIAM partner contacts are unchanged. Sign-in, registration and the stored link belong to SPA-r3.
+
+**Recommendation: option (a), the role is a ceiling** (full comparison in §5 below).
+- The BFF reads the role "Spaarke Internal Contact User (Workforce)" app-only, with `RetrieveRolePrivilegesRole`, and builds a table × operation map from it.
+- A workforce-contact operation is allowed only if that map holds the privilege at **any** depth **and** UAC's record scope allows it (grants, standing grants, participation and org expansion, after vetoes). Depth separates only "none" from "some", and never widens record scope.
+- **Fail closed:** a missing role, an unreadable one, or more than one root role with that name denies every workforce-contact operation (`workforce_baseline_unavailable`). A fault is never cached.
+- **Your later privilege edits** take effect within **5 minutes** (cached as data in `ITenantCache`).
+- **Rejected:** assigning the role to a just-in-time systemuser. On dev its Deep Read (`sprk_matter`, `sprk_project`, `sprk_document`, `sprk_invoice`) would let every self-registered employee read every matter in the BU, and it adds a per-person PAYG meter.
+
+**Live dev facts (re-read 2026-10-16).**
+- Root role `9deaac9c-02c7-f111-a05c-0022482913fc` has 5 BU copies and **653** privileges: Basic 309, Global 232, Deep 95, Local 17. That is 2 fewer Deep than on 10-13.
+- **No privilege on `sprk_servicerequest`.**
+- On `sprk_document`: Read (Deep) and AppendTo (Deep) only, so **no Create**.
+- On `sprk_matter`: Read and AppendTo.
+- On contact: CRUD, Append, AppendTo, Assign and Share at Basic (Read Deep).
+
+**Route → privilege map (what the ceiling checks), for the Legal Front Door surface on master:**
+
+| Route (`/api/v1/external`) | Requires on the Workforce role |
+|---|---|
+| `POST /servicerequests` (intake) | Create `sprk_servicerequest` |
+| Reading own service requests (module data) and `GET /servicerequests/{id}/documents` (+ content, versions) | Read `sprk_servicerequest`; Read `sprk_document` |
+| `POST /servicerequests/{id}/documents` (upload) | Create `sprk_document` + AppendTo `sprk_servicerequest` |
+| `DELETE /servicerequests/{id}` (delete own) | Delete `sprk_servicerequest` |
+
+**🔔 The ceiling question for you.** For workforce contacts to use the Legal Front Door under (a), the role needs these privileges added. Depth is irrelevant under (a); **Basic** is recommended so the role stays least-privilege if it is ever assigned directly.
+- `sprk_servicerequest`: **Create, Read, AppendTo, Delete**. Not Write, Assign, Share or Append: no workforce route updates, reassigns, shares or re-links a request.
+- `sprk_document`: **Create** (it already has Read). This is only needed if workforce contacts upload attachments to their requests.
+
+You edit the role; UAC does not. This is separate from SPA-r3's 2026-10-13 ask (Basic Read on `sprk_servicerequest` in **Spaarke Basic User**), which fixes the intake create's owner read-check (I-6), not this ceiling.
+
+**Other notes.**
+- **The role must ship in a solution** to reach customer stamps (SpaarkeCore). That is an owner or provisioning action: today it exists only unmanaged on dev.
+- **Build after your OK.** The ceiling reader extends `Services/Dataverse/Privileges/UserPrivilegeChecker.cs` (§11: no second privilege reader). One check sits at the module-data seam and on each `/api/v1/external` write route. There are mutation proofs for "ceiling dropped" and "unreadable = allow". The publish-size delta is measured.
+
 > **Status:** design for owner review. No code, config, Entra, Dataverse or tenant setting was changed.
 > **Code basis:** `origin/master` @ `cd07fd7c3` (this worktree's branch is 932 commits behind master; every `file:line` below is master). Task 184 (#1801) is not on master yet.
 > **Dev facts read (read-only, `az` login, spaarkedev1):** the Workforce role, its holders and privileges; `sprk_approlemodulemap`; guest systemusers. No Key Vault was read.
@@ -67,7 +104,7 @@ The sign-in path, in order (`WorkforcePrincipalResolver.cs:126-289`):
 
 | Token | Member-test result | Code (`sdap.access.deny.*`) |
 |---|---|---|
-| Guest: tid = stamp, `acct = 1`, `idp` home ∈ list | **Member** (FR-15) | — |
+| Guest: tid = stamp, `acct = 1`, `idp` home ∈ list | **Member** (FR-15), then refused by the binder since #2128 (2026-10-20): nothing created, bound or resolved | `workforce_guest_use_home_signin` |
 | Guest whose home is not listed, or whose `idp` is missing or unparsable | ForeignTenant | `workforce_tenant_not_customer` (on dev, where the list holds Spaarke's own tenant: `workforce_guest`) |
 | Spaarke staff, `acct = 0`, no systemuser (prod stamp) | ForeignTenant | `workforce_tenant_not_customer` |
 | List empty | TenantListEmpty | `workforce_tenant_list_empty` |

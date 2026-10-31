@@ -1,0 +1,127 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="028" project="field-mapping-server-write-path-r1">
+  <metadata>
+    <title>Migrate Create Analysis wizard and apply analysis-to-email mapping at send (FR-16, FR-17)</title>
+    <phase>3 W3 Product creators onto the service</phase>
+    <gate>027 complete</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies .tsx in Spaarke.AI.Widgets and .cs in Sprk.Bff.Api; tags include frontend, bff-api, communication, deploy, testing (TEST-MODIFYING override).</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Two scoped changes with explicit semantics (fill-only subject/body); xhigh effort for the cross-surface coordination (PR #1501, PR #2110).</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>W3-wizards</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Wizards migrate one at a time, each live-verified before the next (spec FR-16).</parallel-reason>
+    <deps>027</deps>
+    <tags>frontend, fluent-ui, bff-api, field-mapping, communication, deploy, testing</tags>
+    <estimated-effort>8-12 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Migrate the Create Analysis wizard (CreateAnalysisWizardWidget) to create sprk_analysis through the BFF child-records route with only user-entered values and no applyFieldMappings, and move the analysis to communication mapping (email subject/body) into the BFF send path, fill-only so a user-typed subject or body wins. Rebase onto PR #1501 first; run /conflict-check for CommunicationService.cs (UAC-r2 PR #2110 also edits it).</prompt>
+  <role>SPAARKE platform developer, React 18 / Fluent UI v9 code pages, Dataverse. Follow ADRs strictly.</role>
+  <goal>The widget has no applyFieldMappings call (create ~:906 and email ~:965); sprk_analysis is created via the route; CommunicationService.SendAsync fills an empty subject/body from the analysis to communication mapping and never overwrites a user-typed one; mapped fields on the new Analysis appear on first load.</goal>
+
+  <context>
+    <background>spec.md FR-16, FR-17. CreateAnalysisWizardWidget.tsx calls applyFieldMappings(parent to sprk_analysis) at ~:906, creates via childWrites.createRecord at ~:925, and on Send Email calls applyFieldMappings(sprk_analysis to sprk_communication) at ~:965 to derive subject/description. The server send path is CommunicationService.SendAsync (~:1490). PR #1501 overlaps the widget; PR #2110 overlaps CommunicationService.cs.</background>
+    <relevant-files>
+      <file role="modify">src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/CreateAnalysisWizardWidget.tsx (applyFieldMappings ~:906 and ~:965 REMOVED; create ~:925; email follow-on ~:957-985)</file>
+      <file role="modify">src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/__tests__/CreateAnalysisWizardWidget.test.tsx (payload = user-entered values; email request carries only typed subject/body)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationService.cs (SendAsync ~:1490: fill-only subject/body from the sprk_analysis to sprk_communication mapping when the analysis id is supplied)</file>
+      <file role="new">tests/unit/Sprk.Bff.Api.Tests/Services/Communication/CommunicationServiceSendMappingTests.cs (empty subject filled; typed subject survives; no mapping profile = unchanged)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Dataverse/FieldMapping/CreateTimeFieldMapping.cs (canonical engine (task 001); fill-only applier from task 002)</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/components/CreateMatterWizard/matterService.ts (reference migration (task 021))</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/RecordCreation/RecordTableRules.cs (created by task 012; Analysis and Communication rows)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="027" status="complete">Report Card migrated and live-verified.</dependency>
+      <dependency task="019" status="complete">W2 service and canonical engine are live.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Scope: this wizard only. One wizard per task, live-verified on dev before the next starts (spec FR-16). Do not edit another wizard's files or bffChildWriteAdapter.ts beyond what task 020 delivered; if the adapter needs a change, stop and escalate.</constraint>
+    <constraint source="project">Scope: the create payload. The wizard sends ONLY values the user entered or picked (plus the filing/regarding keys the route needs). It must not call applyFieldMappings, read a mapping profile or pre-fill mapped fields; mapping, owner, search-index and I-1 stamp are applied by the server (FR-02, FR-06, FR-09, FR-10).</constraint>
+    <constraint source="ADR-012">Scope: the shared UI library. Edits stay in Spaarke.UI.Components (or the named package) and the wizard's code-page host; no copy of shared logic into the host.</constraint>
+    <constraint source="ADR-021">Scope: any UI touched by this task. Fluent v9 tokens only, no hard-coded colors, dark mode must render correctly.</constraint>
+    <constraint source="project">Scope: deployment. Deploy through the code-page-deploy skill (build with the host's own npm script, never a hand-edited web resource). Rollback is redeploying the previous bundle; no runtime flag is added (spec rollout decision).</constraint>
+    <constraint source="CLAUDE.md §9">Scope: auth. The wizard sends no owner, owning-team or impersonation value; the BFF decides ownership from the caller (FR-09). The route stays authenticated (existing authenticatedFetch).</constraint>
+    <constraint source="CLAUDE.md §10">Scope: BFF publish. Placement Justification in the PR (extends the existing send path); publish-size delta against a fresh master build; CVE check.</constraint>
+    <constraint source="ADR-008">Scope: server mapping at send. Any payload check stays in CallerWriteAuthorization (path A); the send route filter is unchanged.</constraint>
+    <constraint source="project">Scope: shared files. Rebase on PR #1501 before editing the widget; run /conflict-check for CommunicationService.cs against PR #2110 and keep the send-path diff minimal (one fill-only step), recording the outcome in the notes.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Create Analysis wizard; analysis to communication mapping at send; fill-only semantics</topic>
+    <files>
+      <file>docs/architecture/SPAARKE-FIELD-MAPPING-FRAMEWORK.md</file>
+      <file>docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-024-polymorphic-resolver-pattern.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/constraints/webresource.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/skills/code-page-deploy/SKILL.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+    <patterns>
+      <pattern name="entity-operations" location=".claude/patterns/dataverse/entity-operations.md">Lookup bind / option-set value shapes the payload still uses for user-entered fields.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare FULL rigor; read spec FR-16 (and FR-16 and FR-17), the create-surface inventory in notes/design-review-2026-10-19.md, CreateAnalysisWizardWidget.tsx, and the existing tests listed in relevant-files. Re-grep the line numbers cited here before editing (they are approximate).</step>
+    <step order="1">Rebase on PR #1501 (widget) and run /conflict-check for CommunicationService.cs vs PR #2110; record both in the task notes before editing.</step>
+    <step order="2">Inventory keys on the sprk_analysis payload (~:818-905); classify user-entered vs client default; move defaults to the Analysis row of the task-012 registry or drop; list in task notes.</step>
+    <step order="3">Widget: delete the applyFieldMappings call and result handling at ~:906 and the email mapping block at ~:965-985 (mappedSubject/mappedBody) plus the import (~:112); create via childWrites.createRecord (~:925), passing mappingSource when the filed-under parent differs from the intended source.</step>
+    <step order="4">Widget email follow-on: send the user-typed subject/body (or empty) and the analysis id to the send route; do not compute mapped text on the client.</step>
+    <step order="5">Server: in CommunicationService.SendAsync, when the request carries an analysis id and subject or body is empty/whitespace, fill it from the sprk_analysis to sprk_communication mapping using the canonical fill-only engine; a user-typed value is never replaced; no profile or unreadable source = request unchanged (no error).</step>
+    <step order="6">Tests: widget test (payload user-entered only; email request has no mapped text); CommunicationServiceSendMappingTests (empty subject filled, typed subject survives, empty body filled, typed body survives, no profile unchanged, denied source Read = unchanged).</step>
+    <step order="7">Build the BFF and library; deploy the BFF (bff-deploy skill) and the host that embeds the widget (code-page-deploy; grep src/solutions for CreateAnalysisWizardWidget to find it); measure publish-size delta and run the CVE check; live check: analysis mapped fields on first load, user value kept, owner = team; Send Email with an empty subject gets the mapped subject, with a typed subject keeps it.</step>
+    <step order="8">Update TASK-INDEX.md: set this task's status to ✅.</step>
+    <step order="9">Document any deviation in projects/field-mapping-server-write-path-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If PR #2110 changes SendAsync's request shape or ordering so the fill-only step cannot be added minimally, STOP and escalate to coordinate with UAC-r2.</trigger>
+    <trigger>If PR #1501 is not merged and cannot be rebased onto cleanly, STOP and escalate before editing the widget.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>CommunicationService has send-path tests for dispatch and recipients, none for subject/body derivation from a mapping.</existing>
+    <extension>Extending an existing communication test class would mix transport and mapping concerns; the FR-17 proof is a named fill-only test set.</extension>
+    <cost-of-doing-nothing>Without it a user-typed subject could be overwritten by a mapping and nothing would catch it.</cost-of-doing-nothing>
+  </justification>
+
+  <ui-tests>
+    <test name="Analysis wizard renders"><steps><step>Open the Analysis wizard code page on dev from its launch command</step><step>Step through to the last step</step></steps><expected>All steps render with no console errors; Fluent v9 styling intact.</expected></test>
+    <test name="Analysis create flow"><steps><step>Fill the required fields and click Finish</step></steps><expected>The record is created through POST /api/v1/child-records/{table}; the success state shows the new record; no direct Xrm.WebApi create call for the table.</expected></test>
+    <test name="Mapped values visible on first load"><steps><step>Create the record under a parent that has an active field-mapping profile</step><step>Open the new record immediately (first load, no refresh or save)</step></steps><expected>Every field the active Mapping Profile maps from the parent is populated on the new record at first load; no client write filled them.</expected></test>
+    <test name="User value preserved"><steps><step>Type a value into a field the profile also maps</step><step>Finish and open the record</step></steps><expected>The user's own value is stored; the mapped value did not overwrite it (fill-only, FR-02). A user-typed email subject survives send; an empty subject is filled from the mapping.</expected></test>
+    <test name="ADR-021 dark mode"><steps><step>Switch the host to dark mode (theme toggle or prefers-color-scheme)</step><step>Open the wizard and step through every step</step></steps><expected>No unreadable text, no hard-coded light backgrounds, focus rings visible.</expected></test>
+  </ui-tests>
+
+  <tools><tool name="npm">Build/test the code page and shared library</tool><tool name="code-page-deploy">Deploy the wizard web resource to dev</tool><tool name="ui-test">Browser verification on dev</tool></tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/CreateAnalysisWizardWidget.tsx</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationService.cs</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Communication/CommunicationServiceSendMappingTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">CreateAnalysisWizardWidget.tsx has no applyFieldMappings call or import (grep).</criterion>
+    <criterion testable="true">Server test: a user-typed subject survives send; an empty subject is filled from the mapping (FR-17).</criterion>
+    <criterion testable="true">sprk_analysis is created through the BFF route with only user-entered values (widget test).</criterion>
+    <criterion testable="true">BFF build 0 errors; BFF unit tests green; publish-size delta and CVE result recorded; conflict-check outcomes (PR #1501, #2110) recorded.</criterion>
+    <criterion testable="true">Negative: with a user value and a mapped value for the same field, the user value is stored; a mapped field the user never touched is populated on first load of the new record; the wizard payload contains no key the user did not enter.</criterion>
+    <criterion testable="true">Deployed to dev via code-page-deploy; live check recorded in the task notes (mapped fields present on first load, user values kept, owner = owning team per FR-09); rollback bundle noted.</criterion>
+    <criterion testable="true">Widget jest and host build pass; no existing test outside the Analysis wizard and send path changes.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-16, FR-17. PR #1501 overlaps the widget; PR #2110 overlaps CommunicationService.cs.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

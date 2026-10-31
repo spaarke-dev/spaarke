@@ -1311,6 +1311,121 @@ public class CommunicationRecordAuthorizationContractTests : IClassFixture<Commu
                 : emptyAssociations ? Array.Empty<object>() : null,
         };
 
+    // =============================================================================================
+    // Task 188 round 4b (F1-2): send attachments go through THE external document narrowing
+    // =============================================================================================
+
+    private const int RestrictedPermission = 100000002;
+    private const int OpenThreadPrivacy = 100000000;
+
+    /// <summary>A Standard document with no link and no parent: visible to every caller.</summary>
+    private Guid VisibleAttachmentDocument() => _host.World.Document(Guid.NewGuid());
+
+    /// <summary>
+    /// Arranges a must-fire case and returns the attachment's document. The caller is a systemuser flagged external unless
+    /// the case states a lookup fault (which counts as external).
+    /// </summary>
+    private Guid ArrangeHiddenAttachment(string @case)
+    {
+        _host.Identity.Setup(i => i.IsExternalAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>())).ReturnsAsync(true);
+        switch (@case)
+        {
+            case "own-restricted":
+                return _host.World.Document(Guid.NewGuid(), permission: RestrictedPermission);
+            case "internal-only-communication":
+                var communication = Guid.NewGuid();
+                var thread = Guid.NewGuid();
+                _host.World.Thread(thread, OpenThreadPrivacy);
+                _host.World.Communication(communication, internalOnly: true, thread);
+                return _host.World.Document(Guid.NewGuid(), communication: communication);
+            case "restricted-parent":
+                return _host.World.Document(Guid.NewGuid(), parent: _host.World.Document(Guid.NewGuid(), permission: RestrictedPermission));
+            case "narrowing-fault":
+                _host.World.Faults["sprk_documents"] = System.Net.HttpStatusCode.ServiceUnavailable;
+                return VisibleAttachmentDocument();
+            case "lookup-fault":
+                _host.Identity.Setup(i => i.IsExternalAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+                    .ThrowsAsync(new InvalidOperationException("simulated external-flag read failure (test)"));
+                return _host.World.Document(Guid.NewGuid(), permission: RestrictedPermission);
+            default:
+                throw new ArgumentOutOfRangeException(nameof(@case), @case, null);
+        }
+    }
+
+    [Theory(DisplayName = "Task 188 r4b F1-2: send — an attachment the narrowing hides is the send's 403 for a caller who is not an internal systemuser; nothing is sent or downloaded")]
+    [InlineData("own-restricted")]
+    [InlineData("internal-only-communication")]
+    [InlineData("restricted-parent")]
+    [InlineData("narrowing-fault")]
+    [InlineData("lookup-fault")]
+    public async Task Send_ExternalCaller_HiddenAttachment_Is403_LikeAnUnreadableOne(string @case)
+    {
+        var document = ArrangeHiddenAttachment(@case);
+        var matter = Guid.NewGuid();
+        await _host.SeedAttachmentAsync(document, "b!drive-161", "item-r4b");
+        _host.Access.GrantDocument(document, AccessRights.Read);
+        _host.Probe.Grant(MatterSet, matter, AccessRights.Read | AccessRights.AppendTo);
+
+        var response = await _host.SendAsync(Request(HttpMethod.Post, "/api/communications/send",
+            SendBody(attachments: new[] { document.ToString() }, association: ("sprk_matter", matter))));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        await ShouldCarryReasonCode(response, CommunicationRecordAuthorizationFilter.SendDenyReasonCode);
+        AssertNothingSent();
+        _host.Downloads.Should().BeEmpty();
+        _host.World.Calls.Should().Be(1, "ONE narrowing call over every attachment of the send");
+    }
+
+    [Fact(DisplayName = "Task 188 r4b F1-2: send-bulk — a hidden attachment is the one 403 for the whole request")]
+    public async Task SendBulk_ExternalCaller_HiddenAttachment_Is403ForTheWholeRequest()
+    {
+        var document = ArrangeHiddenAttachment("own-restricted");
+        await _host.SeedAttachmentAsync(document, "b!drive-161", "item-r4b-bulk");
+        _host.Access.GrantDocument(document, AccessRights.Read);
+
+        var response = await _host.SendAsync(Request(HttpMethod.Post, "/api/communications/send-bulk",
+            BulkBody(attachments: new[] { document.ToString() })));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        await ShouldCarryReasonCode(response, CommunicationRecordAuthorizationFilter.SendBulkDenyReasonCode);
+        AssertNothingSent();
+    }
+
+    [Fact(DisplayName = "Task 188 r4b F1-2: must not fire — an external caller sends a VISIBLE attachment as today")]
+    public async Task Send_ExternalCaller_VisibleAttachment_IsSentAsToday()
+    {
+        _host.Identity.Setup(i => i.IsExternalAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>())).ReturnsAsync(true);
+        var document = VisibleAttachmentDocument();
+        var matter = Guid.NewGuid();
+        await _host.SeedAttachmentAsync(document, "b!drive-161", "item-r4b-ok");
+        _host.Access.GrantDocument(document, AccessRights.Read);
+        _host.Probe.Grant(MatterSet, matter, AccessRights.Read | AccessRights.AppendTo);
+
+        var response = await _host.SendAsync(Request(HttpMethod.Post, "/api/communications/send",
+            SendBody(attachments: new[] { document.ToString() }, association: ("sprk_matter", matter))));
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+        _host.EmailSender.Sent.Should().ContainSingle();
+        _host.World.Calls.Should().Be(1);
+    }
+
+    [Fact(DisplayName = "Task 188 r4b F1-2: must not fire — an internal caller sends a Restricted attachment with no narrowing call and no app-only read")]
+    public async Task Send_InternalCaller_RestrictedAttachment_IsNotNarrowed()
+    {
+        var document = _host.World.Document(Guid.NewGuid(), permission: RestrictedPermission);
+        var matter = Guid.NewGuid();
+        await _host.SeedAttachmentAsync(document, "b!drive-161", "item-r4b-internal");
+        _host.Access.GrantDocument(document, AccessRights.Read);
+        _host.Probe.Grant(MatterSet, matter, AccessRights.Read | AccessRights.AppendTo);
+
+        var response = await _host.SendAsync(Request(HttpMethod.Post, "/api/communications/send",
+            SendBody(attachments: new[] { document.ToString() }, association: ("sprk_matter", matter))));
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+        _host.World.Calls.Should().Be(0);
+        _host.World.AllReads.Should().BeEmpty();
+    }
+
     private static object BulkBody(string[]? attachments = null, (string Type, Guid Id)? association = null) => new
     {
         subject = "Quarterly update",

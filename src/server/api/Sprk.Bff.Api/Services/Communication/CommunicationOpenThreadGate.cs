@@ -52,6 +52,25 @@ internal static class CommunicationOpenThreadGate
     /// <summary>Runs an OData query on <see cref="ThreadSet"/> under the caller's identity (app-only or impersonated).</summary>
     internal delegate Task<IReadOnlyList<Dictionary<string, JsonElement>>> ThreadRowQuery(string odata, CancellationToken ct);
 
+    /// <summary>
+    /// Runs an OData query on <paramref name="entitySet"/> under the caller's identity (app-only on the external plane, the
+    /// caller's own user client in the assistant's tools). A read that fails THROWS, so a fault never reads as "no rows".
+    /// </summary>
+    internal delegate Task<IReadOnlyList<Dictionary<string, JsonElement>>> RowQuery(
+        string entitySet, string odata, CancellationToken ct);
+
+    /// <summary>The communication entity set the visibility read targets.</summary>
+    internal const string CommunicationSet = "sprk_communications";
+
+    /// <summary>The communication primary key.</summary>
+    internal const string CommunicationPkField = "sprk_communicationid";
+
+    /// <summary>
+    /// Stands for a communication link that is present but unreadable (not null, not a GUID). Never read and never in a
+    /// visible set, so whatever carries it stays hidden (fail closed).
+    /// </summary>
+    internal static readonly Guid UnreadableLink = Guid.AllBitsSet;
+
     /// <summary>The columns every privacy read selects (pinned by a test: a dropped column would hide every row).</summary>
     internal static string SelectClause => $"{ThreadPkField},{CommunicationInternalOnlyFloor.ThreadPrivacyField}";
 
@@ -93,6 +112,96 @@ internal static class CommunicationOpenThreadGate
         }
 
         return open;
+    }
+
+    /// <summary>
+    /// THE task 065 rule over a set of communications (moved here from the assistant's guard by unified-access-control-r2
+    /// task 188, so the external document predicate and the assistant's tools share ONE copy): the subset of
+    /// <paramref name="communicationIds"/> a NON-internal caller may see. A communication is visible only when its
+    /// <see cref="CommunicationInternalOnlyFloor.InternalOnlyField"/> reads JSON <c>false</c> (true, null, absent or any other
+    /// value hides it), its thread lookup (<see cref="MessageThreadLookupValue"/>) is set, and that thread reads EXPLICITLY
+    /// Open now (<see cref="ReadOpenThreadIdsAsync"/>).
+    /// </summary>
+    /// <remarks>
+    /// One batched read of the communications (chunks of <see cref="ChunkSize"/> in one OR filter), then one batched
+    /// thread-privacy read (<see cref="ReadOpenThreadIdsAsync"/>, one call per chunk of thread ids); the chunks of each read run
+    /// up to <see cref="MaxChunksInFlight"/> at once (<see cref="ReadChunksAsync{T}"/>). <see cref="Guid.Empty"/>,
+    /// <see cref="UnreadableLink"/> and an id that does not come back are not in the set (hidden, fail closed). A failed read
+    /// THROWS. An empty input makes no query.
+    /// </remarks>
+    internal static async Task<HashSet<Guid>> ReadVisibleCommunicationIdsAsync(
+        IEnumerable<Guid> communicationIds, RowQuery query, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(communicationIds);
+        ArgumentNullException.ThrowIfNull(query);
+
+        var distinct = communicationIds.Where(id => id != Guid.Empty && id != UnreadableLink).Distinct().ToList();
+        var threadOf = new Dictionary<Guid, Guid>();
+        var communicationChunks = await ReadChunksAsync(distinct, (chunk, c) => query(CommunicationSet,
+            $"$select={CommunicationPkField},{CommunicationInternalOnlyFloor.InternalOnlyField},{MessageThreadLookupValue}" +
+            $"&$filter={string.Join(" or ", chunk.Select(id => $"{CommunicationPkField} eq {id:D}"))}&$top={chunk.Length}", c),
+            ct).ConfigureAwait(false);
+        foreach (var (chunk, rows) in communicationChunks)
+        {
+            foreach (var row in rows)
+            {
+                if (TryGuid(row, CommunicationPkField) is not { } id || id == Guid.Empty || !chunk.Contains(id)) continue;
+                if (!(row.TryGetValue(CommunicationInternalOnlyFloor.InternalOnlyField, out var flag) && flag.ValueKind == JsonValueKind.False))
+                    continue;
+                if (TryGuid(row, MessageThreadLookupValue) is not { } threadId || threadId == Guid.Empty) continue;
+                threadOf[id] = threadId;
+            }
+        }
+
+        if (threadOf.Count == 0)
+        {
+            return new HashSet<Guid>();
+        }
+
+        // THE 065 thread read, unchanged, once per chunk of distinct thread ids (each call is one request).
+        var threadChunks = await ReadChunksAsync(threadOf.Values.Distinct().ToList(),
+            (chunk, c) => ReadOpenThreadIdsAsync(chunk, (odata, c2) => query(ThreadSet, odata, c2), c), ct).ConfigureAwait(false);
+        var openThreads = threadChunks.SelectMany(t => t.Result).ToHashSet();
+        return threadOf.Where(kv => openThreads.Contains(kv.Value)).Select(kv => kv.Key).ToHashSet();
+    }
+
+    /// <summary>
+    /// Chunks of one read level in flight at once (unified-access-control-r2 task 188, cost round): the
+    /// ⌈ids / <see cref="ChunkSize"/>⌉ requests of one level run this many at a time instead of one after another. Kept small
+    /// for Dataverse's per-identity concurrent-request limit.
+    /// </summary>
+    internal const int MaxChunksInFlight = 4;
+
+    /// <summary>
+    /// Reads <paramref name="ids"/> in chunks of <see cref="ChunkSize"/>, up to <see cref="MaxChunksInFlight"/> chunks at
+    /// once; the results come back in chunk order. A failed chunk THROWS (once the chunks in flight settle). An empty input
+    /// makes no request; a single chunk runs inline.
+    /// </summary>
+    internal static async Task<IReadOnlyList<(Guid[] Chunk, T Result)>> ReadChunksAsync<T>(
+        IReadOnlyList<Guid> ids, Func<Guid[], CancellationToken, Task<T>> read, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(ids);
+        ArgumentNullException.ThrowIfNull(read);
+        var chunks = ids.Chunk(ChunkSize).ToArray();
+        if (chunks.Length == 0)
+            return Array.Empty<(Guid[], T)>();
+        if (chunks.Length == 1)
+            return new[] { (chunks[0], await read(chunks[0], ct).ConfigureAwait(false)) };
+
+        using var gate = new SemaphoreSlim(MaxChunksInFlight);
+        var reads = chunks.Select(async chunk =>
+        {
+            await gate.WaitAsync(ct).ConfigureAwait(false);
+            try
+            {
+                return (chunk, await read(chunk, ct).ConfigureAwait(false));
+            }
+            finally
+            {
+                gate.Release();
+            }
+        }).ToArray();
+        return await Task.WhenAll(reads).ConfigureAwait(false);
     }
 
     private static Guid? TryGuid(Dictionary<string, JsonElement> row, string key) =>

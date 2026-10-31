@@ -60,8 +60,11 @@ namespace Sprk.Bff.Api.Infrastructure.Dataverse;
 /// </summary>
 public sealed partial class RecordContainerResolver
 {
-    /// <summary>The stamped container column, on both the securable records and the business unit.</summary>
-    private const string ContainerColumn = "sprk_containerid";
+    /// <summary>
+    /// The stamped container column, on both the securable records and the business unit. <c>internal</c> (#2251): the
+    /// app-only generic writers refuse it on a secure root (<c>InheritedAccessPermission.SecureRootColumns</c>).
+    /// </summary>
+    internal const string ContainerColumn = "sprk_containerid";
 
     /// <summary>
     /// The record's owning business unit. Dataverse populates this system column on every user- or
@@ -70,11 +73,17 @@ public sealed partial class RecordContainerResolver
     /// </summary>
     private const string OwningBusinessUnitColumn = "owningbusinessunit";
 
-    /// <summary>The business unit entity, whose <c>sprk_containerid</c> is the non-secure default.</summary>
-    private const string BusinessUnitEntity = "businessunit";
+    /// <summary>
+    /// The business unit entity, whose <c>sprk_containerid</c> is the non-secure default. <c>internal</c> (#2253 fix round
+    /// 1): the app-only generic writers refuse that column on it (<c>InheritedAccessPermission.AccessColumns</c>).
+    /// </summary>
+    internal const string BusinessUnitEntity = "businessunit";
 
-    /// <summary>The Dataverse user entity, for the no-record case (<see cref="ResolveForActingUserAsync"/>).</summary>
-    private const string SystemUserEntity = "systemuser";
+    /// <summary>
+    /// The Dataverse user entity, for the no-record case (<see cref="ResolveForActingUserAsync"/>). <c>internal</c> (#2253
+    /// fix round 1): <c>InheritedAccessPermission.AccessColumns</c> names its access columns.
+    /// </summary>
+    internal const string SystemUserEntity = "systemuser";
 
     /// <summary>
     /// The <c>systemuser</c> column carrying the user's Entra object id.
@@ -85,10 +94,22 @@ public sealed partial class RecordContainerResolver
     /// <c>CallerIdentityGuardTests.Rule2</c> exists to catch. Nothing here compares an <c>oid</c> to a
     /// <c>systemuserid</c>; the query TRANSLATES one into the other.
     /// </remarks>
-    private const string AzureAdObjectIdColumn = "azureactivedirectoryobjectid";
+    internal const string AzureAdObjectIdColumn = "azureactivedirectoryobjectid";
 
-    /// <summary>The <c>systemuser</c> column carrying the user's business unit.</summary>
-    private const string BusinessUnitLookupColumn = "businessunitid";
+    /// <summary>The <c>systemuser</c> column carrying the user's business unit. <c>internal</c> (#2253 fix round 2): <c>InheritedAccessPermission.AccessColumns</c> refuses it to app-only generic writers.</summary>
+    internal const string BusinessUnitLookupColumn = "businessunitid";
+
+    /// <summary>
+    /// <c>systemuser.domainname</c>, the user's UPN: the eligibility read below, and the container membership sync grants the
+    /// unit's container to it. <c>internal</c> (#2253 fix round 2): <c>InheritedAccessPermission.AccessColumns</c> refuses it to app-only generic writers.
+    /// </summary>
+    internal const string DomainNameColumn = "domainname";
+
+    /// <summary><c>systemuser.isdisabled</c>: a disabled user is not eligible (the read below, the sync, sign-in). <c>internal</c> (#2253 fix round 2): <c>InheritedAccessPermission.AccessColumns</c> refuses it to app-only generic writers.</summary>
+    internal const string IsDisabledColumn = "isdisabled";
+
+    /// <summary><c>systemuser.accessmode</c>: a non-interactive user is not eligible (the read below, the sync). <c>internal</c> (#2253 fix round 2): <c>InheritedAccessPermission.AccessColumns</c> refuses it to app-only generic writers.</summary>
+    internal const string AccessModeColumn = "accessmode";
 
     /// <summary>
     /// How many claimants of one container id to fetch when answering the reverse question. Only needs to be
@@ -147,6 +168,7 @@ public sealed partial class RecordContainerResolver
         _strictDerivedContainer = StrictDerivedContainerFrom(configuration);
         _itemIdBoundBackfillComplete = ItemIdBoundBackfillCompleteFrom(configuration);
         _unfiledDefaultContainerId = configuration?[UnfiledDefaultContainerKey];
+        _declaredUnfiledHomes = DeclaredUnfiledHomesFrom(configuration);
     }
 
     /// <summary>
@@ -410,6 +432,26 @@ public sealed partial class RecordContainerResolver
 
             isSecure = record.GetAttributeValue<bool>(SecurableEntityRegistry.SecureFlagAttribute);
             ownContainerId = record.GetAttributeValue<string>(ContainerColumn);
+        }
+
+        // ebilling-r1 task 026 (FR-05, D-94 condition 4): an invoice line names exactly ONE root (its own core lookup). A line
+        // naming two (a matter and a project, say) is the same derivation error CoreAncestorResolver refuses: it is refused
+        // here too, before any secure walk or business-unit fallback, so it is never given a default container.
+        if (ancestorLinks is not null && CoreAncestorResolver.SingleRootIntermediates.Contains(normalizedEntity))
+        {
+            var setRoots = ancestorLinks.FollowedLinks
+                .Where(l => record.GetAttributeValue<EntityReference>(l.LinkColumn) is { Id: var id } && id != Guid.Empty)
+                .Select(l => l.LinkColumn)
+                .ToList();
+            if (setRoots.Count > 1)
+            {
+                throw AncestorUnresolved(
+                    normalizedEntity, recordId,
+                    $"This {normalizedEntity} names more than one project, matter or work assignment, so the one it belongs "
+                    + "to cannot be determined.",
+                    statusCode: 409,
+                    logDetail: string.Join(", ", setRoots));
+            }
         }
 
         // A record that is not itself secure but hangs off a SECURE root takes the root's own container — or
@@ -1793,6 +1835,9 @@ public sealed partial class RecordContainerResolver
                 ["sprk_reportcard"] = RecordKind.Intermediate,
                 ["sprk_servicerequest"] = RecordKind.Intermediate,
                 ["email"] = RecordKind.Intermediate,
+                // ebilling-r1 task 026 (D-94): the Invoice Line names its root through its own typed sprk_matter /
+                // sprk_project and sprk_regardingworkassignment (live 2026-10-16).
+                ["sprk_billingevent"] = RecordKind.Intermediate,
 
                 ["contact"] = RecordKind.Party,
                 ["account"] = RecordKind.Party,
@@ -1852,11 +1897,28 @@ public sealed partial class RecordContainerResolver
                 // (f3). An invoice carries no copy, so a set sprk_regardingagreement stays HELD (task 156). Task 150 (owner
                 // round 10 item 11): these links are the ONLY thing that decides an invoice — its own sprk_issecure is not
                 // a security input (SecurableEntityRegistry.FlagIsNotASecurityInput), so it is never read for a flag or a
-                // container.
+                // container. ebilling-r1 task 013 (FR-05): an invoice may instead be filed under a work assignment through
+                // sprk_regardingworkassignment — its third core-record link, in lockstep with
+                // CoreAncestorResolver.IntermediateRootColumns["sprk_invoice"].
                 ["sprk_invoice"] = new(polymorphic: true,
                 [
                     ("sprk_project", "sprk_project"), ("sprk_matter", "sprk_matter"),
+                    ("sprk_regardingworkassignment", "sprk_workassignment"),
                     ("sprk_regardingagreement", "sprk_agreement"),
+                ]),
+                // ebilling-r1 task 026 (FR-15, D-94, uac-r2 option A): the Invoice Line, in lockstep with
+                // CoreAncestorResolver.IntermediateRootColumns["sprk_billingevent"]. Its OWN core lookups only (FR-05, D-75; live
+                // spaarkedev1 2026-10-16, EntityDefinitions(sprk_billingevent)/ManyToOneRelationships): typed sprk_project /
+                // sprk_matter and sprk_regardingworkassignment, all FOLLOWED. NOT sprk_invoice (a line is never resolved through its
+                // invoice; listed here it would also be HELD and refuse every line) and not sprk_resolvedtimekeeper (a party). It
+                // carries the pair and its type column (sprk_regardingrecordid / sprk_regardingrecordtype, live): the eBilling
+                // writers set it to the line's core record (InvoiceFamilyCoreRecordGuard.DeriveResolverFieldsAsync), which rule 3
+                // reads as agreement. A line naming more than one root is refused before the walk
+                // (CoreAncestorResolver.SingleRootIntermediates).
+                ["sprk_billingevent"] = new(polymorphic: true,
+                [
+                    ("sprk_project", "sprk_project"), ("sprk_matter", "sprk_matter"),
+                    ("sprk_regardingworkassignment", "sprk_workassignment"),
                 ]),
                 // A ROOT that is itself filed regarding a matter / project (live: 9 of 22 work assignments) or a
                 // communication / event / invoice (live: 1). A work assignment carries no copy, so a communication stays
@@ -2292,7 +2354,7 @@ public sealed partial class RecordContainerResolver
         {
             // Task 171 (adversarial finding 2): the eligibility columns ride on the same read.
             ColumnSet = new ColumnSet(
-                BusinessUnitLookupColumn, "domainname", "isdisabled", "accessmode", "applicationid", "sprk_isexternal"),
+                BusinessUnitLookupColumn, DomainNameColumn, IsDisabledColumn, AccessModeColumn, ApplicationIdColumn, "sprk_isexternal"),
             TopCount = 2,
             Criteria = new FilterExpression
             {

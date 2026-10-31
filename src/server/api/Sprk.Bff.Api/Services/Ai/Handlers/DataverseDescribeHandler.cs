@@ -6,6 +6,7 @@ using Sprk.Bff.Api.Services.Ai.Handlers.Dataverse;
 using Sprk.Bff.Api.Services.Communication;
 using Sprk.Bff.Api.Services.Identity;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
+using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 
 namespace Sprk.Bff.Api.Services.Ai.Handlers;
 
@@ -28,7 +29,20 @@ namespace Sprk.Bff.Api.Services.Ai.Handlers;
 /// <b>User-OBO ONLY (spec MUST rule)</b>: all Dataverse access goes through
 /// <see cref="IDataverseUserClient"/> — the caller's identity, exchanged OBO; metadata and
 /// record visibility are whatever Dataverse grants THAT user. No app-only client is
-/// reachable from this class (task-012 audit).
+/// reachable from this class (task-012 audit), except the one below.
+/// </para>
+/// <para>
+/// <b>The "User-OBO ONLY" rule is AMENDED for ONE dependency — unified-access-control-r2 task 188, main-session decision
+/// 2026-10-20 (CLAUDE.md §6.5 path B; APPROVED, owner round 111, 2026-10-21)</b>: an EXTERNAL caller's <c>sprk_document</c> rows
+/// are decided by THE external document narrowing through <see cref="AppOnlyDocumentNarrowing"/>, which re-reads those
+/// documents BY ID under the BFF's app-only identity (the external plane's reader) and returns ONLY a hide decision: a
+/// link field security masks for the user can never read as "no link". It can only HIDE a row the user's own read returned;
+/// no app-only data reaches the result, and nothing else of the app-only reader is reachable (a delegate). Every query whose
+/// rows reach the model still runs as the user.
+/// ebilling-r1 task 098 (procedure-and-file-model 9.1, (a')): a SECOND hide-only app-only seam,
+/// <see cref="AppOnlyInvoiceFamilyHiding"/>: an external caller's invoice-family record (an invoice, or a row derived from
+/// one) whose invoice the (a') predicate hides answers like a missing one. It can only HIDE a record the user's own read
+/// returned. (Raised with uac-r2 as an amendment to the round-111 exception.)
 /// </para>
 /// <para>
 /// <b>Registration</b>: <c>sprk_analysistool</c> row
@@ -49,7 +63,8 @@ namespace Sprk.Bff.Api.Services.Ai.Handlers;
 /// <c>sprk_communication</c>, before any Dataverse request; a <c>sprk_communication</c> record they may not see under the
 /// task 065 rule, or a <c>sprk_document</c> whose related communication they may not see, answers with the same code and
 /// message as a missing one (a guarded not-found is normalised to that answer). Table list and schema paths carry no
-/// row content and are unchanged.
+/// row content and are unchanged. Task 188 slice C (F-C1, OD-C1): an <c>sprk_analysis</c> whose source document or output
+/// file is hidden or undecidable, and an <c>sprk_analysisoutput</c> whose analysis is, answer the same way.
 /// See <see cref="ExternalCallerCommunicationGuard"/>. Internal callers are unchanged.
 /// </para>
 /// </remarks>
@@ -60,7 +75,7 @@ public sealed partial class DataverseDescribeHandler : IToolHandler
     /// <summary>Client-side cap on the number of tables returned for the <c>tables/</c> listing.</summary>
     internal const int MaxTableListEntries = 300;
 
-    [GeneratedRegex(@"^[a-z][a-z0-9_]*$")]
+    [GeneratedRegex(@"^[a-z][a-z0-9_]*\z")]
     private static partial Regex LogicalNameRegex();
 
     private readonly IDataverseUserClient _dataverse;
@@ -68,19 +83,27 @@ public sealed partial class DataverseDescribeHandler : IToolHandler
     private readonly IHttpContextAccessor _httpContextAccessor;
     private readonly ICallerSystemUserResolver _callerResolver;
     private readonly ISystemUserIdentityResolver _identityResolver;
+    /// <summary>Task 188: THE document narrowing, app-only by id (see the remarks: the one amended dependency).</summary>
+    private readonly AppOnlyDocumentNarrowing _narrowDocuments;
+    /// <summary>Task 098: the (a') invoice-family hiding, app-only by id, hide-only (see the remarks).</summary>
+    private readonly AppOnlyInvoiceFamilyHiding _hideInvoiceFamily;
 
     public DataverseDescribeHandler(
         IDataverseUserClient dataverse,
         ILogger<DataverseDescribeHandler> logger,
         IHttpContextAccessor httpContextAccessor,
         ICallerSystemUserResolver callerResolver,
-        ISystemUserIdentityResolver identityResolver)
+        ISystemUserIdentityResolver identityResolver,
+        AppOnlyDocumentNarrowing narrowDocuments,
+        AppOnlyInvoiceFamilyHiding hideInvoiceFamily)
     {
         _dataverse = dataverse ?? throw new ArgumentNullException(nameof(dataverse));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _httpContextAccessor = httpContextAccessor ?? throw new ArgumentNullException(nameof(httpContextAccessor));
         _callerResolver = callerResolver ?? throw new ArgumentNullException(nameof(callerResolver));
         _identityResolver = identityResolver ?? throw new ArgumentNullException(nameof(identityResolver));
+        _narrowDocuments = narrowDocuments ?? throw new ArgumentNullException(nameof(narrowDocuments));
+        _hideInvoiceFamily = hideInvoiceFamily ?? throw new ArgumentNullException(nameof(hideInvoiceFamily));
     }
 
     /// <inheritdoc />
@@ -345,20 +368,34 @@ public sealed partial class DataverseDescribeHandler : IToolHandler
             return Error(tool, $"'{recordIdRaw}' is not a valid record GUID.", ToolErrorCodes.ValidationFailed, startedAt);
         }
 
-        // ISS-010 (task 078): externality is decided ONLY for a communication-family or sprk_document record, so every
-        // other request is byte-identical. An external caller is refused any family table but sprk_communication BEFORE
-        // any Dataverse request (the metadata GET included); a sprk_document is checked by its related communication
-        // (review round 1, F1).
+        // ISS-010 (task 078): externality is decided ONLY for a communication-family, sprk_document or document-derived
+        // (task 188 slice C) record, so every other request is byte-identical. An external caller is refused any family
+        // table but sprk_communication BEFORE any Dataverse request (the metadata GET included); a sprk_document is checked
+        // by its related communication (review round 1, F1).
         var guardCommunication = false;
         var guardDocument = false;
+        var guardDerived = false;
+        var guardInvoice = false;
         if ((ExternalCallerCommunicationGuard.IsCommunicationFamily(logicalName) ||
-             ExternalCallerCommunicationGuard.IsDocumentTable(logicalName)) &&
+             ExternalCallerCommunicationGuard.IsDocumentTable(logicalName) ||
+             ExternalCallerCommunicationGuard.IsDocumentDerivedTable(logicalName) ||
+             ExternalInvoiceVisibility.IsInvoiceFamilyTable(logicalName)) &&
             await ExternalCallerCommunicationGuard.IsExternalCallerAsync(
                 _httpContextAccessor, _callerResolver, _identityResolver, ct).ConfigureAwait(false))
         {
             if (ExternalCallerCommunicationGuard.IsDocumentTable(logicalName))
             {
                 guardDocument = true;
+            }
+            else if (ExternalCallerCommunicationGuard.IsDocumentDerivedTable(logicalName))
+            {
+                // Task 188 slice C (F-C1): an analysis or analysis output follows the documents it derives from.
+                guardDerived = true;
+            }
+            else if (ExternalInvoiceVisibility.IsInvoiceFamilyTable(logicalName))
+            {
+                // ebilling-r1 task 098 ((a')): an invoice-family record follows its invoice.
+                guardInvoice = true;
             }
             else if (!ExternalCallerCommunicationGuard.IsCommunicationTable(logicalName))
             {
@@ -394,7 +431,7 @@ public sealed partial class DataverseDescribeHandler : IToolHandler
         {
             // ISS-010 review K4: on a guarded path a real not-found answers with the SAME code and message as a hidden
             // record below, so the answer never tells an external caller that a hidden record exists.
-            if ((guardCommunication || guardDocument) &&
+            if ((guardCommunication || guardDocument || guardDerived || guardInvoice) &&
                 recordResponse.ErrorCode == DataverseUserClientErrorCodes.NotFound)
             {
                 return RecordNotVisible(tool, startedAt);
@@ -403,13 +440,19 @@ public sealed partial class DataverseDescribeHandler : IToolHandler
         }
 
         // ISS-010 (task 078): the task 065 rule on the one record — flag explicitly false AND a thread that reads Open
-        // now; for a document, the same rule on its related communication (none: visible). A hidden record answers with
+        // now; for a document, THE external document predicate (task 188). A hidden record answers with
         // the same code and message as a guarded not-found above; a read fault throws (no data).
-        if (guardCommunication || guardDocument)
+        if (guardCommunication || guardDocument || guardDerived || guardInvoice)
         {
             var record = recordResponse.Body!.Value;
             bool visible;
-            if (guardCommunication)
+            if (guardInvoice)
+            {
+                // ebilling-r1 task 098 ((a')): hidden when its invoice (directly or through its invoice line) is hidden or
+                // undecidable; the hide-only seam reads the links and the predicate app-only by id. A read fault throws.
+                visible = !(await _hideInvoiceFamily(logicalName, new[] { recordId }, ct).ConfigureAwait(false)).Contains(recordId);
+            }
+            else if (guardCommunication)
             {
                 var threadId = ExternalCallerCommunicationGuard.ThreadIdOf(record);
                 visible = ExternalCallerCommunicationGuard.IsExplicitlyShareable(record) && threadId != Guid.Empty &&
@@ -417,13 +460,23 @@ public sealed partial class DataverseDescribeHandler : IToolHandler
                         new[] { threadId }, ExternalCallerCommunicationGuard.ThreadQueryOver(_dataverse), ct).ConfigureAwait(false))
                     .Contains(threadId);
             }
+            else if (guardDerived)
+            {
+                // Task 188 slice C (F-C1, OD-C1): an analysis is hidden when its source document OR its output file is
+                // hidden or undecidable; an output follows its analysis. The links are read as the user; only the hide
+                // decision on the documents runs app-only (the hide-only overload). A read fault throws (no data).
+                var sources = await ExternalCallerCommunicationGuard.ReadSourceDocumentIdsAsync(
+                    _dataverse, logicalName, new[] { recordId }, ct).ConfigureAwait(false);
+                var hidden = await _narrowDocuments.HiddenDocumentIdsAsync(
+                    sources.Values.SelectMany(documents => documents), ct).ConfigureAwait(false);
+                visible = !ExternalCallerCommunicationGuard.IsDerivedRowHidden(recordId, sources, hidden, out _);
+            }
             else
             {
-                var relatedCommunicationId = ExternalCallerCommunicationGuard.RelatedCommunicationIdOf(record);
-                visible = relatedCommunicationId == Guid.Empty ||
-                    (await ExternalCallerCommunicationGuard.ReadVisibleCommunicationIdsAsync(
-                        _dataverse, new[] { relatedCommunicationId }, ct).ConfigureAwait(false))
-                    .Contains(relatedCommunicationId);
+                // Task 188 (D7, #2126): THE external document predicate (own or ancestor Restricted; the related
+                // communication of the document or, on a bounded parent walk, of its ancestor, under the 065 rule), on the
+                // document re-read by id APP-ONLY (main-session decision 2026-10-20), never on the record the user read.
+                visible = (await _narrowDocuments(new[] { recordId }, ct).ConfigureAwait(false)).IsVisible(recordId);
             }
 
             if (!visible)

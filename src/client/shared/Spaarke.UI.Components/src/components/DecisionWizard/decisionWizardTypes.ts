@@ -29,7 +29,7 @@ export type DecisionLaneName = 'Decide' | 'Do';
 export type CatalogRecordClass = 'Routine' | 'Judgement';
 
 /** `DecisionParameterKind` of the catalog, serialised by name. */
-export type DecisionParameterKind = 'Text' | 'TextArea' | 'Choice' | 'Money' | 'Date' | 'Person' | 'Lookup';
+export type DecisionParameterKind = 'Text' | 'TextArea' | 'Choice' | 'Money' | 'Date' | 'Person' | 'Lookup' | 'Boolean';
 
 export interface DecisionOption {
   value: string;
@@ -45,6 +45,13 @@ export interface DecisionParameter {
   lookupEntity?: string | null;
   options?: DecisionOption[] | null;
   optionsSource?: string | null;
+  /** Task 167 (D-193): the server's starting value (a Choice's option value), shown as a prefilled default and never a choice. Task 168
+   * (D-194): a Boolean's fixed default ("true": Assign Task's Send email notification starts ticked). */
+  defaultValue?: string | null;
+  /** Task 167 (D-193): the code of a Date parameter of the same step this one must not be earlier than (End date after Start date). */
+  notBefore?: string | null;
+  /** Task 167 (D-193, review F4-4): for a Text, the most characters the target column holds; the step flags a longer value before Record decision. */
+  maxLength?: number | null;
 }
 
 /** One catalog action (or Next-step creator) as the plan route returns it. */
@@ -60,6 +67,20 @@ export interface DecisionAction {
   effectLines: string[];
   /** Codes that cannot be combined with this action (mutual). */
   excludes: string[];
+  /**
+   * Task 160 (D-179): `'email'` renders the step's `to`, `subject` and `body` in the shared EmailComposer, compose-only (the commit
+   * route sends at Record decision). Absent or null: one field per parameter.
+   */
+  composer?: 'email' | null;
+  /** Task 160 (D-179): the recipients To starts with (the outside firm's contact, read as the caller). Absent or null: To starts empty. */
+  prefillTo?: DecisionRecipient[] | null;
+}
+
+/** A recipient the plan pre-fills To with (task 160): a contact the caller can read, with an email address. */
+export interface DecisionRecipient {
+  contactId: string;
+  name?: string | null;
+  email: string;
 }
 
 export interface DismissalReason {
@@ -321,6 +342,38 @@ export interface DecisionLookupRequest {
 }
 
 export type DecisionLookupSearch = (request: DecisionLookupRequest) => Promise<ILookupItem[]>;
+
+/**
+ * What the host needs to open the platform's side-pane lookup for one Person / Lookup field (D-182). The host builds the row
+ * filter from this (a budget: active, on the item's own record), exactly as its inline search scopes today; the wizard never
+ * names a filter.
+ */
+export interface DecisionOpenLookupRequest {
+  kind: 'Person' | 'Lookup';
+  /** The table to pick from: `contact` for a Person, the catalog's `lookupEntity` for a Lookup. */
+  entity: string;
+  /** The parameter's code (for example `budget`), so a host may scope the pane. */
+  parameterCode: string;
+  /** The item's core record, for scoping (the matter's budgets). Null for a Not filed item. */
+  core: { recordType: string; recordId: string } | null;
+}
+
+/**
+ * The host's side-pane lookup (`INavigationService.openLookup`, single select). Resolves to the picked record, or null when the
+ * user cancelled or the host could not open the pane. The shared library has no Xrm (ADR-012), so only the host calls it.
+ */
+export type DecisionOpenLookup = ((
+  request: DecisionOpenLookupRequest
+) => Promise<{ id: string; name: string; email?: string | null } | null>) & {
+  /**
+   * The tables this host's pane can open (K2). The wizard uses the pane only for these and keeps the inline field for the rest,
+   * so a table the host cannot open is never a dead field. Absent: the pane is used for every table (the host handles all).
+   */
+  supportedEntities?: readonly string[];
+};
+
+/** The host's "open this record in a modal above the wizard" (`INavigationService.openRecordModal`). */
+export type DecisionOpenRecord = (entityName: string, entityId: string) => Promise<void> | void;
 
 /** The host's loader for one item. Rejects when the item cannot be read. */
 export type DecisionItemLoader = (signalId: string) => Promise<DecisionWizardItem>;

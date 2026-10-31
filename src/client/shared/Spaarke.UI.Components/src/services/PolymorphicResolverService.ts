@@ -404,6 +404,20 @@ export function buildRecordUrl(entityLogicalName: string, recordId: string): str
 
 /**
  * Find a navigation property by referenced entity and optional column hint.
+ *
+ * With several relationships to the same entity, the hint disambiguates in this order:
+ *  1. an entry whose `columnName` EQUALS the hint (case-insensitive);
+ *  2. otherwise the first entry whose `columnName` CONTAINS the hint (a fragment such as `'assignedto'`);
+ *  3. otherwise the first relationship to the entity.
+ *
+ * To bind a specific column, pass its FULL logical name (e.g. `'sprk_workassignment'`), not a fragment. That is what
+ * fixed the document-to-parent binds (task 162): `sprk_document` has both `sprk_workassignment` (the parent column the
+ * forms' Documents lists read) and `sprk_relatedworkassignment`, and the callers passed the fragment `'workassignment'`,
+ * which BOTH names contain, so the bind went to whichever Dataverse listed first.
+ *
+ * Step 1 on its own matters only when ANOTHER column also contains the full hint (e.g. `sprk_workassignment_x` listed
+ * before `sprk_workassignment`), or when the hint's casing differs. A single relationship to the entity is returned as
+ * is, whatever the hint.
  */
 export function findNavProp(
   entries: INavPropEntry[],
@@ -414,6 +428,9 @@ export function findNavProp(
   if (matches.length === 0) return undefined;
   if (matches.length === 1) return matches[0].navPropName;
   if (columnHint) {
+    const hint = columnHint.toLowerCase();
+    const exact = matches.find(e => e.columnName.toLowerCase() === hint);
+    if (exact) return exact.navPropName;
     const hinted = matches.find(e => e.columnName.includes(columnHint));
     if (hinted) return hinted.navPropName;
   }
@@ -930,6 +947,10 @@ export interface IIntermediateRootColumn {
  * - `sprk_communication`, `sprk_event`, `sprk_todo`, `sprk_analysis` — the four
  *   `sprk_regarding{core}` columns (the server's `StandardRootColumns()`).
  * - `sprk_invoice`, `sprk_budget` — typed `sprk_project` / `sprk_matter` lookups.
+ * - `sprk_billingevent` (the Invoice Line, ebilling-r1 task 026, D-94) — the
+ *   line's OWN core lookups only (typed `sprk_project` / `sprk_matter` and
+ *   `sprk_regardingworkassignment`), never its `sprk_invoice` (D-75). The server
+ *   refuses a line that names more than one; this preview derives what it names.
  * - `sprk_document` — the project / matter / work assignment links of the
  *   canonical document link vocabulary (`Spaarke.Dataverse.DocumentLinkFields`):
  *   the typed column and its `sprk_related*` twin. `sprk_relatedservicerequest`
@@ -972,6 +993,10 @@ export const INTERMEDIATE_ROOT_COLUMNS: ReadonlyArray<IIntermediateRootColumn> =
   { intermediate: 'sprk_memo', column: 'sprk_regardingservicerequest', rootEntity: 'sprk_servicerequest' },
   { intermediate: 'sprk_invoice', column: 'sprk_project', rootEntity: 'sprk_project' },
   { intermediate: 'sprk_invoice', column: 'sprk_matter', rootEntity: 'sprk_matter' },
+  { intermediate: 'sprk_invoice', column: 'sprk_regardingworkassignment', rootEntity: 'sprk_workassignment' },
+  { intermediate: 'sprk_billingevent', column: 'sprk_project', rootEntity: 'sprk_project' },
+  { intermediate: 'sprk_billingevent', column: 'sprk_matter', rootEntity: 'sprk_matter' },
+  { intermediate: 'sprk_billingevent', column: 'sprk_regardingworkassignment', rootEntity: 'sprk_workassignment' },
   { intermediate: 'sprk_document', column: 'sprk_matter', rootEntity: 'sprk_matter' },
   { intermediate: 'sprk_document', column: 'sprk_relatedmatter', rootEntity: 'sprk_matter' },
   { intermediate: 'sprk_document', column: 'sprk_project', rootEntity: 'sprk_project' },

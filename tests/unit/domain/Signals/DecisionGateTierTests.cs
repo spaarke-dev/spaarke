@@ -32,6 +32,7 @@ public class DecisionGateTierTests
     [InlineData("add-todo", GateRiskTier.Tier3)]
     [InlineData("create-event", GateRiskTier.Tier3)]
     [InlineData("assign-work", GateRiskTier.Tier3)]
+    [InlineData("assign-task", GateRiskTier.Tier3)]
     public void EachAction_ResolvesToItsTier(string code, GateRiskTier expected)
     {
         DecisionActionCatalog.TryGet(code, out var action).Should().BeTrue();

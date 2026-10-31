@@ -1,0 +1,151 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<forms xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <systemform>
+    <formid>{3975a905-259d-4a2a-bc33-9cf164dddb98}</formid>
+    <IntroducedVersion>1.0</IntroducedVersion>
+    <FormPresentation>1</FormPresentation>
+    <FormActivationState>1</FormActivationState>
+    <form>
+      <tabs>
+        <tab verticallayout="true" id="{2878D38A-1536-828A-5146-04D5FB18140E}" name="tab_general" IsUserDefined="1" expanded="true" showlabel="true">
+          <labels>
+            <label description="General" languagecode="1033" />
+          </labels>
+          <columns>
+            <column width="100%">
+              <sections>
+                <section name="section_general" id="{29141F9D-F4A9-507F-A8B4-6BAA11AEC1B0}" IsUserDefined="1" showlabel="true" showbar="false" columns="11" celllabelposition="Top" labelwidth="115" celllabelalignment="Left" layout="varwidth">
+                  <labels>
+                    <label description="Approval" languagecode="1033" />
+                  </labels>
+                  <rows>
+                    <row>
+                      <cell id="{012B66D4-E943-A0C6-969A-D5CA4A5000EC}">
+                        <labels>
+                          <label description="" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_name" classid="{4273EDBD-AC1D-40D3-9FB2-095C621B552D}" datafieldname="sprk_name" />
+                      </cell>
+                      <cell id="{F5393CEF-48C6-4AC4-F54A-57736013DD61}">
+                        <labels>
+                          <label description="" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_invoice" classid="{270BD3DB-D9AF-4782-9025-509E298DEC0A}" datafieldname="sprk_invoice" />
+                      </cell>
+                    </row>
+                    <row>
+                      <cell id="{D7105011-2577-C6FA-F39F-658481D8AADE}">
+                        <labels>
+                          <label description="" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_approvalstatus" classid="{3EF39988-22BB-4F0B-BBBE-64B5A3748AEE}" datafieldname="sprk_approvalstatus" />
+                      </cell>
+                      <cell id="{C4EF36FF-76A0-95DF-393F-D4D7CCB0FAC3}">
+                        <labels>
+                          <label description="" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_approvedamount" classid="{533B9E00-756B-4312-95A0-DC888637AC78}" datafieldname="sprk_approvedamount" />
+                      </cell>
+                    </row>
+                    <row>
+                      <cell id="{F384DECA-1282-5F74-C0E3-E17C0CC8E790}">
+                        <labels>
+                          <label description="Decided By" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_decidedby" classid="{270BD3DB-D9AF-4782-9025-509E298DEC0A}" datafieldname="sprk_decidedby" />
+                      </cell>
+                      <cell id="{C74676CA-8076-6F79-B2F7-8D037ABA69A9}">
+                        <labels>
+                          <label description="" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_decidedon" classid="{5B773807-9FB2-42DB-97C3-7A91EFF8ADFF}" datafieldname="sprk_decidedon" />
+                      </cell>
+                    </row>
+                    <row>
+                      <cell id="{F09B4BF0-243E-AFB0-2384-8DB2BE46FFF3}">
+                        <labels>
+                          <label description="" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_decisionrecord" classid="{270BD3DB-D9AF-4782-9025-509E298DEC0A}" datafieldname="sprk_decisionrecord" />
+                      </cell>
+                      <cell id="{6F97F41D-7177-5E8E-6577-A0A8B7A57AD2}">
+                        <labels>
+                          <label description="" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_eligibleresolvedon" classid="{5B773807-9FB2-42DB-97C3-7A91EFF8ADFF}" datafieldname="sprk_eligibleresolvedon" />
+                      </cell>
+                    </row>
+                    <row>
+                      <cell id="{57BF8C8F-EA21-C6D5-9F42-A303FF66C825}">
+                        <labels>
+                          <label description="" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_regardingmatter" classid="{270BD3DB-D9AF-4782-9025-509E298DEC0A}" datafieldname="sprk_regardingmatter" />
+                      </cell>
+                      <cell id="{4C2B215F-BDD8-0BB8-F3E1-EB3532D393CA}">
+                        <labels>
+                          <label description="" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_regardingproject" classid="{270BD3DB-D9AF-4782-9025-509E298DEC0A}" datafieldname="sprk_regardingproject" />
+                      </cell>
+                    </row>
+                    <row>
+                      <cell id="{50B2C543-9496-460A-436F-42739C6A3BB4}">
+                        <labels>
+                          <label description="" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_regardingworkassignment" classid="{270BD3DB-D9AF-4782-9025-509E298DEC0A}" datafieldname="sprk_regardingworkassignment" />
+                      </cell>
+                      <cell id="{3A29C921-2125-3D0F-EB90-F75EED4E40B1}">
+                        <labels>
+                          <label description="" languagecode="1033" />
+                        </labels>
+                        <control id="ownerid" classid="{270BD3DB-D9AF-4782-9025-509E298DEC0A}" datafieldname="ownerid" />
+                      </cell>
+                    </row>
+                  </rows>
+                </section>
+                <section name="section_sub_eligible" id="{4F66077F-3053-5A72-565B-F29B064A8718}" IsUserDefined="1" showlabel="true" showbar="false" columns="1" celllabelposition="Top" layout="varwidth">
+                  <labels>
+                    <label description="Eligible approvers" languagecode="1033" />
+                  </labels>
+                  <rows>
+                    <row>
+                      <cell id="{32A8F174-C1DC-19E6-F521-538C76DB5989}" rowspan="6" colspan="1" showlabel="false">
+                        <labels>
+                          <label description="Eligible approvers" languagecode="1033" />
+                        </labels>
+                        <control indicationOfSubgrid="true" id="subgrid_eligible" classid="{E7A81278-8635-4D9E-8D4D-59480B391C5B}">
+                          <parameters>
+                            <RecordsPerPage>10</RecordsPerPage>
+                            <AutoExpand>Fixed</AutoExpand>
+                            <EnableQuickFind>false</EnableQuickFind>
+                            <EnableViewPicker>false</EnableViewPicker>
+                            <EnableChartPicker>false</EnableChartPicker>
+                            <ChartGridMode>Grid</ChartGridMode>
+                            <RelationshipName>sprk_invoiceapproval_eligibleapprover_contact</RelationshipName>
+                            <TargetEntityType>contact</TargetEntityType>
+                            <ViewId>{00000000-0000-0000-00AA-000010001004}</ViewId>
+                            <ViewIds>{00000000-0000-0000-00AA-000010001004}</ViewIds>
+                          </parameters>
+                        </control>
+                      </cell>
+                    </row>
+                  </rows>
+                </section>
+              </sections>
+            </column>
+          </columns>
+        </tab>
+      </tabs>
+    </form>
+    <IsCustomizable>1</IsCustomizable>
+    <CanBeDeleted>1</CanBeDeleted>
+    <LocalizedNames>
+      <LocalizedName description="Information" languagecode="1033" />
+    </LocalizedNames>
+    <Descriptions>
+      <Description description="A form for this entity." languagecode="1033" />
+    </Descriptions>
+  </systemform>
+</forms>

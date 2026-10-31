@@ -247,6 +247,8 @@
   <!-- Registration email templates embedded as resources -->
   <ItemGroup>
     <EmbeddedResource Include="Services\Registration\EmailTemplates\*.html" />
+    <!-- Ontology Platform R1 task 168 (D-194): Assign Task's notification email (AssignTaskNotifier). -->
+    <EmbeddedResource Include="Services\Signals\EmailTemplates\*.html" />
   </ItemGroup>
 
   <!-- Ontology Platform R1 task 020 (spec FR-05): rule-type JSON Schemas embedded as resources so

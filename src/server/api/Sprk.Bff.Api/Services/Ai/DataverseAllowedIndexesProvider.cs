@@ -56,7 +56,7 @@ public sealed class DataverseAllowedIndexesProvider : IAllowedIndexesProvider
     internal static readonly TimeSpan CacheTtl = TimeSpan.FromMinutes(5);
 
     // FetchXml constants — kept close to the impl to make the wire contract obvious.
-    private const string CatalogEntity = "sprk_aisearchindex";
+    internal const string CatalogEntity = "sprk_aisearchindex";
     private const string CatalogNameColumn = "sprk_searchindexname";
     private const string FetchXml = """
         <fetch>

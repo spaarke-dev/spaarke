@@ -4,7 +4,7 @@
   xmlns:bt="http://schemas.microsoft.com/office/officeappbasictypes/1.0"
   xmlns:mailappor="http://schemas.microsoft.com/office/mailappversionoverrides/1.0" xsi:type="MailApp">
   <Id>5e4d66d0-2603-44ea-acbc-400d3b881c90</Id>
-  <Version>1.0.22.0</Version>
+  <Version>1.0.23.0</Version>
   <ProviderName>Spaarke</ProviderName>
   <DefaultLocale>en-US</DefaultLocale>
   <DisplayName DefaultValue="Spaarke Outlook"/>
@@ -88,6 +88,23 @@
                     <SourceLocation resid="CreateTodoTaskpane.Url"/>
                   </Action>
                 </Control>
+                <!-- word-add-in-r1 task 133: Submit Invoice. Opens the taskpane with ?action=submitInvoice so App routes to
+                     InvoiceView (no tab reaches it). Icons reuse the generic Spaarke icon: there is no invoice icon. -->
+                <Control xsi:type="Button" id="msgReadSubmitInvoice">
+                  <Label resid="SubmitInvoiceButton.Label"/>
+                  <Supertip>
+                    <Title resid="SubmitInvoiceButton.SupertipTitle"/>
+                    <Description resid="SubmitInvoiceButton.SupertipText"/>
+                  </Supertip>
+                  <Icon>
+                    <bt:Image size="16" resid="Icon.16x16"/>
+                    <bt:Image size="32" resid="Icon.32x32"/>
+                    <bt:Image size="80" resid="Icon.80x80"/>
+                  </Icon>
+                  <Action xsi:type="ShowTaskpane">
+                    <SourceLocation resid="SubmitInvoiceTaskpane.Url"/>
+                  </Action>
+                </Control>
               </Group>
             </OfficeTab>
           </ExtensionPoint>
@@ -129,6 +146,8 @@
         <!-- smart-todo-decoupling-r3 FR-27 / task 070: same taskpane HTML, ?action=createTodo routes
              the App.tsx to render CreateTodoView. -->
         <bt:Url id="CreateTodoTaskpane.Url" DefaultValue="https://icy-desert-0bfdbb61e.6.azurestaticapps.net/outlook/taskpane.html?action=createTodo"/>
+        <!-- task 133: same taskpane HTML, ?action=submitInvoice routes App.tsx to InvoiceView. -->
+        <bt:Url id="SubmitInvoiceTaskpane.Url" DefaultValue="https://icy-desert-0bfdbb61e.6.azurestaticapps.net/outlook/taskpane.html?action=submitInvoice"/>
       </bt:Urls>
       <bt:ShortStrings>
         <bt:String id="CommandsGroup.Label" DefaultValue="Spaarke"/>
@@ -136,10 +155,13 @@
         <bt:String id="TaskpaneButton.SupertipTitle" DefaultValue="Save to Spaarke"/>
         <bt:String id="CreateTodoButton.Label" DefaultValue="Create To Do"/>
         <bt:String id="CreateTodoButton.SupertipTitle" DefaultValue="Create Spaarke To Do"/>
+        <bt:String id="SubmitInvoiceButton.Label" DefaultValue="Submit Invoice"/>
+        <bt:String id="SubmitInvoiceButton.SupertipTitle" DefaultValue="Submit Invoice to Spaarke"/>
       </bt:ShortStrings>
       <bt:LongStrings>
         <bt:String id="TaskpaneButton.SupertipText" DefaultValue="Open Spaarke task pane to save emails"/>
         <bt:String id="CreateTodoButton.SupertipText" DefaultValue="Create a Spaarke To Do linked to this email"/>
+        <bt:String id="SubmitInvoiceButton.SupertipText" DefaultValue="Submit an invoice from this email to its matter, project or work assignment"/>
       </bt:LongStrings>
     </Resources>
 
@@ -191,6 +213,23 @@
                       <SupportsPinning>true</SupportsPinning>
                     </Action>
                   </Control>
+                  <!-- word-add-in-r1 task 133: Submit Invoice (V1.1 pinning variant). -->
+                  <Control xsi:type="Button" id="msgReadSubmitInvoiceV11">
+                    <Label resid="SubmitInvoiceButton.Label"/>
+                    <Supertip>
+                      <Title resid="SubmitInvoiceButton.SupertipTitle"/>
+                      <Description resid="SubmitInvoiceButton.SupertipText"/>
+                    </Supertip>
+                    <Icon>
+                      <bt:Image size="16" resid="Icon.16x16"/>
+                      <bt:Image size="32" resid="Icon.32x32"/>
+                      <bt:Image size="80" resid="Icon.80x80"/>
+                    </Icon>
+                    <Action xsi:type="ShowTaskpane">
+                      <SourceLocation resid="SubmitInvoiceTaskpane.Url"/>
+                      <SupportsPinning>true</SupportsPinning>
+                    </Action>
+                  </Control>
                 </Group>
               </OfficeTab>
             </ExtensionPoint>
@@ -232,6 +271,8 @@
           <bt:Url id="Taskpane.Url" DefaultValue="https://icy-desert-0bfdbb61e.6.azurestaticapps.net/outlook/taskpane.html"/>
           <!-- smart-todo-decoupling-r3 FR-27 / task 070 (V1.1 pinning variant). -->
           <bt:Url id="CreateTodoTaskpane.Url" DefaultValue="https://icy-desert-0bfdbb61e.6.azurestaticapps.net/outlook/taskpane.html?action=createTodo"/>
+          <!-- task 133 (V1.1 pinning variant). -->
+          <bt:Url id="SubmitInvoiceTaskpane.Url" DefaultValue="https://icy-desert-0bfdbb61e.6.azurestaticapps.net/outlook/taskpane.html?action=submitInvoice"/>
         </bt:Urls>
         <bt:ShortStrings>
           <bt:String id="CommandsGroup.Label" DefaultValue="Spaarke"/>
@@ -239,10 +280,13 @@
           <bt:String id="TaskpaneButton.SupertipTitle" DefaultValue="Save to Spaarke"/>
           <bt:String id="CreateTodoButton.Label" DefaultValue="Create To Do"/>
           <bt:String id="CreateTodoButton.SupertipTitle" DefaultValue="Create Spaarke To Do"/>
+          <bt:String id="SubmitInvoiceButton.Label" DefaultValue="Submit Invoice"/>
+          <bt:String id="SubmitInvoiceButton.SupertipTitle" DefaultValue="Submit Invoice to Spaarke"/>
         </bt:ShortStrings>
         <bt:LongStrings>
           <bt:String id="TaskpaneButton.SupertipText" DefaultValue="Open Spaarke task pane to save emails"/>
           <bt:String id="CreateTodoButton.SupertipText" DefaultValue="Create a Spaarke To Do linked to this email"/>
+          <bt:String id="SubmitInvoiceButton.SupertipText" DefaultValue="Submit an invoice from this email to its matter, project or work assignment"/>
         </bt:LongStrings>
       </Resources>
     </VersionOverrides>

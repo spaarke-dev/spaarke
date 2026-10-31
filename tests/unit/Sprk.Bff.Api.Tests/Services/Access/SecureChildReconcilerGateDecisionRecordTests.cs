@@ -60,7 +60,7 @@ public sealed class SecureChildReconcilerGateDecisionRecordTests
     public async Task AfterRefile_OfACommunication_ReownsItsGateDecisionRecord_AfterTheReconcilersOwnSteps_AndRevokesItsShares()
     {
         var gate = SharedGateRecord();
-        _threads.Setup(t => t.ReconcileThreadForFilingAsync(CommunicationId, It.IsAny<CancellationToken>()))
+        _threads.Setup(t => t.ReconcileThreadForFilingAsync(CommunicationId, It.IsAny<Sprk.Bff.Api.Services.Communication.FilingReconcileHost>(), It.IsAny<Sprk.Bff.Api.Services.Access.SecureRemovalCaller?>(), It.IsAny<Func<CancellationToken, Task>?>(), It.IsAny<CancellationToken>()))
             .Callback(() => gate.Calls.Add("thread-reconcile"))
             .Returns(Task.CompletedTask);
 
@@ -78,7 +78,7 @@ public sealed class SecureChildReconcilerGateDecisionRecordTests
         // #2110 (UAC F1): the thread reconcile runs BEFORE the row's own mirror (a join it makes can re-own the email into a
         // Secure record's isolation, so the mirror must see it), and the gate Decision Record step runs ONCE, after both.
         var gate = SharedGateRecord();
-        _threads.Setup(t => t.ReconcileThreadForFilingAsync(CommunicationId, It.IsAny<CancellationToken>()))
+        _threads.Setup(t => t.ReconcileThreadForFilingAsync(CommunicationId, It.IsAny<Sprk.Bff.Api.Services.Communication.FilingReconcileHost>(), It.IsAny<Sprk.Bff.Api.Services.Access.SecureRemovalCaller?>(), It.IsAny<Func<CancellationToken, Task>?>(), It.IsAny<CancellationToken>()))
             .Callback(() => gate.Calls.Add("thread-reconcile"))
             .Returns(Task.CompletedTask);
         var uac = new Mock<IGenericEntityService>();
@@ -105,7 +105,7 @@ public sealed class SecureChildReconcilerGateDecisionRecordTests
         // #2110 (ontology re-check K3): the thread reconcile runs first, so a fault in it must not skip the mirror, the pass or
         // the gate Decision Record step after it, and the re-file never fails.
         var gate = SharedGateRecord();
-        _threads.Setup(t => t.ReconcileThreadForFilingAsync(CommunicationId, It.IsAny<CancellationToken>()))
+        _threads.Setup(t => t.ReconcileThreadForFilingAsync(CommunicationId, It.IsAny<Sprk.Bff.Api.Services.Communication.FilingReconcileHost>(), It.IsAny<Sprk.Bff.Api.Services.Access.SecureRemovalCaller?>(), It.IsAny<Func<CancellationToken, Task>?>(), It.IsAny<CancellationToken>()))
             .Callback(() => gate.Calls.Add("thread-reconcile"))
             .ThrowsAsync(new InvalidOperationException("Test: the thread reconcile faulted."));
         var uac = new Mock<IGenericEntityService>();
@@ -135,7 +135,7 @@ public sealed class SecureChildReconcilerGateDecisionRecordTests
         await Reconciler(gate.Sharing).AfterRefileAsync(
             "sprk_communication", CommunicationId, NotIsolated, RefileThreadStep.PlacedByWriter, CancellationToken.None);
 
-        _threads.Verify(t => t.ReconcileThreadForFilingAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
+        _threads.Verify(t => t.ReconcileThreadForFilingAsync(It.IsAny<Guid>(), It.IsAny<Sprk.Bff.Api.Services.Communication.FilingReconcileHost>(), It.IsAny<Sprk.Bff.Api.Services.Access.SecureRemovalCaller?>(), It.IsAny<Func<CancellationToken, Task>?>(), It.IsAny<CancellationToken>()), Times.Never);
         gate.Rows[(GateSharingWorld.Record, RecordId)].GetAttributeValue<EntityReference>("owningteam").Id.Should().Be(MatterTeam);
         gate.RecordSharees(RecordId).Should().BeEmpty();
     }
@@ -166,7 +166,7 @@ public sealed class SecureChildReconcilerGateDecisionRecordTests
 
         await Reconciler(gate.Sharing).AfterRefileAsync("sprk_communication", CommunicationId, NotIsolated, CancellationToken.None);
 
-        _threads.Verify(t => t.ReconcileThreadForFilingAsync(CommunicationId, It.IsAny<CancellationToken>()), Times.Once);
+        _threads.Verify(t => t.ReconcileThreadForFilingAsync(CommunicationId, It.IsAny<Sprk.Bff.Api.Services.Communication.FilingReconcileHost>(), It.IsAny<Sprk.Bff.Api.Services.Access.SecureRemovalCaller?>(), It.IsAny<Func<CancellationToken, Task>?>(), It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Theory]

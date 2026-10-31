@@ -120,6 +120,7 @@ ADR-032's Null-Object pattern is the mechanism for kill-switch states. This sect
 |--------------|------|---------|---------|
 | `AnalysisOptions` | `Enabled` | `true` | Kill switch for analysis |
 | `DocumentIntelligenceOptions` | `Enabled` | `true` | Kill switch for doc intel |
+| `EbillingOptions` | `Enabled` | `false` | Kill switch for eBilling (invoice submission, extraction, review, AP export); flag off returns 503 `ebilling.disabled` via `RequireEbillingEnabled()` |
 
 ---
 

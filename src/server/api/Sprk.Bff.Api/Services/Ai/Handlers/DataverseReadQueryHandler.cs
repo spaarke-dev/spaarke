@@ -5,6 +5,7 @@ using Sprk.Bff.Api.Services.Ai.Handlers.Dataverse;
 using Sprk.Bff.Api.Services.Communication;
 using Sprk.Bff.Api.Services.Identity;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
+using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 
 namespace Sprk.Bff.Api.Services.Ai.Handlers;
 
@@ -26,7 +27,24 @@ namespace Sprk.Bff.Api.Services.Ai.Handlers;
 /// <b>User-OBO ONLY (spec MUST rule)</b>: every query executes through
 /// <see cref="IDataverseUserClient"/> under the calling user's Dataverse security roles +
 /// row-level security. Rows the user cannot read are absent from results — enforced by
-/// Dataverse, not by BFF filtering. No app-only client is reachable (task-012 audit).
+/// Dataverse, not by BFF filtering. No app-only client is reachable (task-012 audit), except the one below.
+/// </para>
+/// <para>
+/// <b>The "User-OBO ONLY" rule is AMENDED for ONE dependency — unified-access-control-r2 task 188, main-session decision
+/// 2026-10-20 (CLAUDE.md §6.5 path B; APPROVED, owner round 111, 2026-10-21)</b>: an EXTERNAL caller's <c>sprk_document</c> rows
+/// are decided by THE external document narrowing through <see cref="AppOnlyDocumentNarrowing"/>, which re-reads those
+/// documents BY ID under the BFF's app-only identity (the external plane's reader) and returns ONLY a hide decision: a
+/// link field security masks for the user can never read as "no link". It can only HIDE a row the user's own read returned;
+/// no app-only data reaches the result, and nothing else of the app-only reader is reachable (a delegate). Every query whose
+/// rows reach the model still runs as the user.
+/// Task 188 round 3 slice C: an external caller's <c>sprk_analysis</c> and <c>sprk_analysisoutput</c> rows are hidden when
+/// their source document or an analysis's output file is (or cannot be decided), through the same seam's hide-only overload
+/// (<see cref="AppOnlyDocumentNarrowingExtensions.HiddenDocumentIdsAsync"/>); their source links are read as the user
+/// (<see cref="ExternalCallerCommunicationGuard.ReadSourceDocumentIdsAsync"/>).
+/// ebilling-r1 task 098 (procedure-and-file-model 9.1, (a')): a SECOND hide-only app-only seam,
+/// <see cref="AppOnlyInvoiceFamilyHiding"/>, hides an external caller's invoice-family row (an invoice, or a row derived from
+/// one) whose invoice the (a') predicate hides, decided after the read by row id. It can only HIDE a row the user's own read
+/// returned. (Raised with uac-r2 as an amendment to the round-111 exception.)
 /// </para>
 /// <para>
 /// <b>Grounding (ADR-039)</b>: every returned row carries the table's primary id (added to
@@ -55,23 +73,38 @@ public sealed class DataverseReadQueryHandler : IToolHandler
     private readonly IHttpContextAccessor _httpContextAccessor;
     private readonly ICallerSystemUserResolver _callerResolver;
     private readonly ISystemUserIdentityResolver _identityResolver;
+    /// <summary>Task 188: THE document narrowing, app-only by id (see the remarks: the one amended dependency).</summary>
+    private readonly AppOnlyDocumentNarrowing _narrowDocuments;
+    /// <summary>Task 098: the (a') invoice-family hiding, app-only by id, hide-only (see the remarks).</summary>
+    private readonly AppOnlyInvoiceFamilyHiding _hideInvoiceFamily;
 
     public DataverseReadQueryHandler(
         IDataverseUserClient dataverse,
         ILogger<DataverseReadQueryHandler> logger,
         IHttpContextAccessor httpContextAccessor,
         ICallerSystemUserResolver callerResolver,
-        ISystemUserIdentityResolver identityResolver)
+        ISystemUserIdentityResolver identityResolver,
+        AppOnlyDocumentNarrowing narrowDocuments,
+        AppOnlyInvoiceFamilyHiding hideInvoiceFamily)
     {
         _dataverse = dataverse ?? throw new ArgumentNullException(nameof(dataverse));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _httpContextAccessor = httpContextAccessor ?? throw new ArgumentNullException(nameof(httpContextAccessor));
         _callerResolver = callerResolver ?? throw new ArgumentNullException(nameof(callerResolver));
         _identityResolver = identityResolver ?? throw new ArgumentNullException(nameof(identityResolver));
+        _narrowDocuments = narrowDocuments ?? throw new ArgumentNullException(nameof(narrowDocuments));
+        _hideInvoiceFamily = hideInvoiceFamily ?? throw new ArgumentNullException(nameof(hideInvoiceFamily));
     }
 
     /// <inheritdoc />
     public string HandlerId => HandlerIdValue;
+
+    /// <summary>Task 188: a row's primary id (<see cref="Guid.Empty"/> when it is absent or not a GUID: never visible).</summary>
+    private static Guid RecordIdOf(JsonElement record, string primaryIdAttribute) =>
+        record.ValueKind == JsonValueKind.Object && record.TryGetProperty(primaryIdAttribute, out var id) &&
+        id.ValueKind == JsonValueKind.String && Guid.TryParse(id.GetString(), out var parsed)
+            ? parsed
+            : Guid.Empty;
 
     /// <inheritdoc />
     public ToolHandlerMetadata Metadata { get; } = new(
@@ -154,14 +187,28 @@ public sealed class DataverseReadQueryHandler : IToolHandler
             // communication (review round 1, F1).
             var guardCommunications = false;
             var guardDocuments = false;
+            var guardDerived = false;
+            var guardInvoices = false;
             if ((ExternalCallerCommunicationGuard.IsCommunicationFamily(translation.EntityLogicalName) ||
-                 ExternalCallerCommunicationGuard.IsDocumentTable(translation.EntityLogicalName)) &&
+                 ExternalCallerCommunicationGuard.IsDocumentTable(translation.EntityLogicalName) ||
+                 ExternalCallerCommunicationGuard.IsDocumentDerivedTable(translation.EntityLogicalName) ||
+                 ExternalInvoiceVisibility.IsInvoiceFamilyTable(translation.EntityLogicalName)) &&
                 await ExternalCallerCommunicationGuard.IsExternalCallerAsync(
                     _httpContextAccessor, _callerResolver, _identityResolver, cancellationToken).ConfigureAwait(false))
             {
                 if (ExternalCallerCommunicationGuard.IsDocumentTable(translation.EntityLogicalName))
                 {
                     guardDocuments = true;
+                }
+                else if (ExternalCallerCommunicationGuard.IsDocumentDerivedTable(translation.EntityLogicalName))
+                {
+                    // Task 188 round 3 slice C: decided after the read by row id; nothing is injected into the query.
+                    guardDerived = true;
+                }
+                else if (ExternalInvoiceVisibility.IsInvoiceFamilyTable(translation.EntityLogicalName))
+                {
+                    // ebilling-r1 task 098 ((a')): decided after the read by row id; nothing is injected into the query.
+                    guardInvoices = true;
                 }
                 else if (!ExternalCallerCommunicationGuard.IsCommunicationTable(translation.EntityLogicalName))
                 {
@@ -210,13 +257,12 @@ public sealed class DataverseReadQueryHandler : IToolHandler
             string odataQuery;
             var threadColumnInjected = false;
             var internalOnlyColumnInjected = false;
-            var relatedCommunicationColumnInjected = false;
             if (guardCommunications || guardDocuments)
             {
                 // ISS-010 (task 078): on sprk_communication the task 065 rule rides in the query: the model's whole
                 // predicate in parentheses, ANDed with flag-false, thread-set and thread-Open (review K1). The thread and
-                // flag columns are selected so both are re-checked after the read (review K4). On sprk_document the
-                // related-communication lookup is selected so each row's communication can be checked after the read.
+                // flag columns are selected so both are re-checked after the read (review K4). A sprk_document row is decided
+                // after the read by its id alone (task 188: the predicate re-reads it app-only), so nothing is injected.
                 var guardedColumns = translation.Columns!
                     .Select(c => lookupAttributes.Contains(c) ? ToValueForm(c) : c)
                     .ToList();
@@ -224,11 +270,6 @@ public sealed class DataverseReadQueryHandler : IToolHandler
                 {
                     threadColumnInjected = AddColumnIfAbsent(guardedColumns, CommunicationOpenThreadGate.MessageThreadLookupValue);
                     internalOnlyColumnInjected = AddColumnIfAbsent(guardedColumns, CommunicationInternalOnlyFloor.InternalOnlyField);
-                }
-                else
-                {
-                    relatedCommunicationColumnInjected = AddColumnIfAbsent(
-                        guardedColumns, ExternalCallerCommunicationGuard.RelatedCommunicationLookupValue);
                 }
 
                 var rewrittenFilter = RewriteLookupReferences(translation.RawFilter, lookupAttributes);
@@ -282,26 +323,74 @@ public sealed class DataverseReadQueryHandler : IToolHandler
                     cancellationToken).ConfigureAwait(false);
             }
 
-            // ISS-010 review round 1 (F1): a document whose related communication the caller may not see is hidden. One
-            // batched read of the related communications, then one thread-privacy read; a communication that does not
-            // come back is hidden; a fault throws into the error result below (no rows).
-            HashSet<Guid>? visibleCommunications = null;
+            // Task 188 (D7, #2126): THE external document predicate decides each document row (own or ancestor Restricted;
+            // the related communication of the document or, on a bounded parent walk, of its ancestor, under the 065 rule).
+            // The rows are re-read BY ID APP-ONLY (main-session decision 2026-10-20), never decided on the columns the user's
+            // read returned, so a link field security masks for the user cannot read as "no link". Batched reads; a fault
+            // throws into the error result below (no rows). A row without a readable id is hidden.
+            DocumentNarrowingResult? narrowing = null;
             if (guardDocuments &&
                 response.Body is { } documentBody && documentBody.TryGetProperty("value", out var documentValue) &&
                 documentValue.ValueKind == JsonValueKind.Array)
             {
-                visibleCommunications = await ExternalCallerCommunicationGuard.ReadVisibleCommunicationIdsAsync(
-                    _dataverse,
-                    documentValue.EnumerateArray().Select(ExternalCallerCommunicationGuard.RelatedCommunicationIdOf).ToList(),
-                    cancellationToken).ConfigureAwait(false);
+                var documentIds = documentValue.EnumerateArray()
+                    .Select(record => RecordIdOf(record, primaryIdAttribute))
+                    .Where(id => id != Guid.Empty)
+                    .Distinct()
+                    .ToList();
+                narrowing = await _narrowDocuments(documentIds, cancellationToken).ConfigureAwait(false);
+            }
+
+            // Task 188 round 3 slice C: a row that derives from a document (sprk_analysis; sprk_analysisoutput through its
+            // analysis) is hidden when its source document is. The source links are read BY ROW ID as the user (one batched
+            // read per level), then the hide-only overload decides the documents APP-ONLY in ONE call for the page. A row that
+            // has a source the BFF cannot decide is hidden; a row with no source document is unaffected. Faults throw (no rows).
+            IReadOnlyDictionary<Guid, IReadOnlyList<Guid>>? derivedSources = null;
+            IReadOnlySet<Guid>? hiddenSources = null;
+            if (guardDerived &&
+                response.Body is { } derivedBody && derivedBody.TryGetProperty("value", out var derivedValue) &&
+                derivedValue.ValueKind == JsonValueKind.Array)
+            {
+                var rowIds = derivedValue.EnumerateArray()
+                    .Select(record => RecordIdOf(record, primaryIdAttribute))
+                    .Where(id => id != Guid.Empty)
+                    .Distinct()
+                    .ToList();
+                derivedSources = await ExternalCallerCommunicationGuard.ReadSourceDocumentIdsAsync(
+                    _dataverse, translation.EntityLogicalName!, rowIds, cancellationToken).ConfigureAwait(false);
+                hiddenSources = await _narrowDocuments.HiddenDocumentIdsAsync(derivedSources.Values.SelectMany(documents => documents), cancellationToken)
+                    .ConfigureAwait(false);
+            }
+
+            // ebilling-r1 task 098 ((a')): an invoice-family row whose invoice the predicate hides (or cannot decide) is
+            // hidden. One hide-only app-only call for the page (its own batched reads); a fault throws into the error result
+            // below (no rows). A row without a readable id is hidden.
+            IReadOnlySet<Guid>? hiddenInvoiceRows = null;
+            if (guardInvoices &&
+                response.Body is { } invoiceBody && invoiceBody.TryGetProperty("value", out var invoiceValue) &&
+                invoiceValue.ValueKind == JsonValueKind.Array)
+            {
+                var rowIds = invoiceValue.EnumerateArray()
+                    .Select(record => RecordIdOf(record, primaryIdAttribute))
+                    .Where(id => id != Guid.Empty)
+                    .Distinct()
+                    .ToList();
+                hiddenInvoiceRows = await _hideInvoiceFamily(translation.EntityLogicalName!, rowIds, cancellationToken)
+                    .ConfigureAwait(false);
             }
 
             var rows = new List<Dictionary<string, object?>>();
             var citations = new List<ToolResultCitation>();
             var hiddenRows = 0;
-            var hiddenDocuments = 0;
+            var hiddenInvoiceFamily = 0;
+            var hiddenDocuments = new List<Guid>();
+            var hiddenDerivedSources = new List<Guid>();
+            // Task 188 round 4a (F1-5): the row cap is measured on the RAW page Dataverse returned, before any row is
+            // hidden — a page that hit TOP stays reported as capped even when the narrowing removed rows from it.
+            var rawPageLength = 0;
             if (response.Body is { } body && body.TryGetProperty("value", out var value) && value.ValueKind == JsonValueKind.Array)
             {
+                rawPageLength = value.GetArrayLength();
                 foreach (var record in value.EnumerateArray())
                 {
                     if (guardCommunications &&
@@ -313,11 +402,26 @@ public sealed class DataverseReadQueryHandler : IToolHandler
                     }
 
                     if (guardDocuments &&
-                        ExternalCallerCommunicationGuard.RelatedCommunicationIdOf(record) is var relatedCommunicationId &&
-                        relatedCommunicationId != Guid.Empty &&
-                        (visibleCommunications is null || !visibleCommunications.Contains(relatedCommunicationId)))
+                        RecordIdOf(record, primaryIdAttribute) is var documentId &&
+                        (narrowing is null || !narrowing.IsVisible(documentId)))
                     {
-                        hiddenDocuments++;
+                        hiddenDocuments.Add(documentId);
+                        continue;
+                    }
+
+                    if (guardInvoices &&
+                        RecordIdOf(record, primaryIdAttribute) is var familyId &&
+                        (familyId == Guid.Empty || hiddenInvoiceRows is null || hiddenInvoiceRows.Contains(familyId)))
+                    {
+                        hiddenInvoiceFamily++;
+                        continue;
+                    }
+
+                    if (guardDerived &&
+                        RecordIdOf(record, primaryIdAttribute) is var derivedId &&
+                        ExternalCallerCommunicationGuard.IsDerivedRowHidden(derivedId, derivedSources, hiddenSources, out var source))
+                    {
+                        hiddenDerivedSources.Add(source);
                         continue;
                     }
 
@@ -355,10 +459,6 @@ public sealed class DataverseReadQueryHandler : IToolHandler
                     {
                         row.Remove(CommunicationInternalOnlyFloor.InternalOnlyField);
                     }
-                    if (relatedCommunicationColumnInjected)
-                    {
-                        row.Remove(FromValueForm(ExternalCallerCommunicationGuard.RelatedCommunicationLookupValue, lookupAttributes));
-                    }
 
                     if (recordId != Guid.Empty)
                     {
@@ -376,12 +476,30 @@ public sealed class DataverseReadQueryHandler : IToolHandler
                     "[dataverse.read_query] " + ExternalCallerCommunicationGuard.LogEvent + " entity={Entity} reason={Reason} decisionId={DecisionId}",
                     translation.EntityLogicalName, "thread_not_open", context.DecisionId);
             }
-            if (hiddenDocuments > 0)
+            if (hiddenDocuments.Count > 0)
             {
-                // ADR-015: entity + reason code only — never query text or row content.
+                // ADR-015: entity + reason codes with counts only — never query text or row content.
                 _logger.LogInformation(
                     "[dataverse.read_query] " + ExternalCallerCommunicationGuard.LogEvent + " entity={Entity} reason={Reason} decisionId={DecisionId}",
-                    translation.EntityLogicalName, "related_communication_hidden", context.DecisionId);
+                    translation.EntityLogicalName,
+                    narrowing?.HiddenSummary(hiddenDocuments) ?? DocumentNarrowingResult.CodeOf(DocumentNarrowingReason.ReadFailed),
+                    context.DecisionId);
+            }
+            if (hiddenInvoiceFamily > 0)
+            {
+                // ADR-015: entity + a reason code with a count only — never query text, ids or row content.
+                _logger.LogInformation(
+                    "[dataverse.read_query] " + ExternalCallerCommunicationGuard.LogEvent + " entity={Entity} reason={Reason} decisionId={DecisionId}",
+                    translation.EntityLogicalName, $"invoice_hidden={hiddenInvoiceFamily}", context.DecisionId);
+            }
+            if (hiddenDerivedSources.Count > 0)
+            {
+                // ADR-015: entity + reason codes with counts only — never query text, ids or row content.
+                _logger.LogInformation(
+                    "[dataverse.read_query] " + ExternalCallerCommunicationGuard.LogEvent + " entity={Entity} reason={Reason} decisionId={DecisionId}",
+                    translation.EntityLogicalName,
+                    ExternalCallerCommunicationGuard.DerivedHiddenSummary(hiddenDerivedSources),
+                    context.DecisionId);
             }
 
             stopwatch.Stop();
@@ -405,7 +523,7 @@ public sealed class DataverseReadQueryHandler : IToolHandler
                     "record's GUID. To map GUIDs to display names, query the referenced table " +
                     "(dataverse.describe shows the related table per lookup column).");
             }
-            if (rows.Count >= translation.Top)
+            if (rawPageLength >= translation.Top)
             {
                 warnings.Add($"Result set reached the row cap ({translation.Top}). Narrow the WHERE clause or raise TOP (max {DataverseSqlQueryTranslator.MaxTop}).");
             }

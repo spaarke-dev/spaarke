@@ -604,7 +604,7 @@ For an external caller, refuse a configuration whose target entity is in the `sp
 
 | Field | Value |
 |---|---|
-| **Status** | Open — owner decision needed |
+| **Status** | Open — D7 accepted by the owner (2026-10-20); fix = uac-r2 task 188 (T7 predicate) + word-add-in task 130 (T8 writer gaps); deploy via R3 |
 | **Urgency** | next-round |
 | **Filed** | 2026-10-20 |
 | **Source** | Task 078 review pass 1 (F1) plus a code map; not reproduced live |
@@ -634,6 +634,19 @@ Failure mode: a partner on the matter lists and downloads the `.eml` of an inter
 **Blockers**: owner decision.
 **Related**: ISS-010, ISS-014, ISS-016, tasks 065 and 078.
 
+
+**Update 2026-10-20 (owner direction + UAC).** The owner wants this handled with UAC's Manage Access on Documents (#2119), not an R3 column. UAC proposes **#2119 D7**, pending the owner's acceptance (it amends I-14):
+- A child can only narrow partner visibility. A document is hidden from partners when its own Access Permission is Restricted, or when it derives from an internal-only communication.
+- The derivation is computed at read time through `_sprk_relatedcommunication_value` and the 065 rule, and fails closed.
+- One shared predicate in UAC's external read path covers list, download, versions, preview, SPE and the AI tools.
+- Wiring happens after #2078. UAC owns the rule and the predicate; R3 reviews its routes.
+
+**Writer gaps found (R3 code map, master `c3ec5d6e5`).** Three paths save a document from an email without the link, so today's 078 guard and D7's derivation both miss it:
+1. Outlook add-in email-attachment child docs (`UploadFinalizationWorker.cs:1254/1294`: parent-document lookup only).
+2. The add-in single-attachment save (no capture; `OfficeService.cs:506`, `OfficeDocumentPersistence.cs:795`).
+3. The add-in `.eml` when the best-effort canonical link misses (`OfficeDocumentPersistence.cs:790-842`).
+
+Fix owners: Office and Communication. Options: set the link in those writers, and/or have the predicate follow `ParentDocumentLookup`.
 ---
 
 ### ISS-016 — RAG retrieval and chat archive ingest return internal-only email content to callers flagged external
@@ -668,6 +681,172 @@ Failure mode: a licensed user flagged external gets internal-only email content 
 ---
 
 
+### ISS-017 — "Could not read your email address" does not tell the customer admin what to fix
+
+| Field | Value |
+|---|---|
+| **Status** | Open (R4 backlog) |
+| **Urgency** | next-round |
+| **Filed** | 2026-10-20 |
+| **Source** | Owner live check on dev (Dewey Cheatham test user Tracy Cheatham, no Email in Entra) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2155 |
+
+**Description**
+
+A customer employee whose Entra user has no Email gets a token with no `email` claim, so registration answers `registration_email_missing`. The SPA says only "Contact your administrator". Owner fix on dev: set the user's Email in Entra; registration then completed and the contact was created.
+
+**Suggested fix**: R4 copy change in `RegistrationPage.tsx` (`emailMissing`): tell the IT admin to set the Email field on the user's Entra account, then sign in again; update the `registration_email_missing` test. Keep the token-only email rule.
+
+**Estimated effort**: under 0.5 day.
+**Blockers**: none.
+**Related**: task 047, task 074.
+
+### ISS-018 — Partner plane uses a cached company account → `authority_mismatch`
+
+| Field | Value |
+|---|---|
+| **Status** | Fixed: PR #2175 (`3531ed65e`), dev SPA run 39536100531 (2026-10-21); owner smoke pending |
+| **Urgency** | before 072 |
+| **Filed** | 2026-10-20 |
+| **Source** | Owner live check on dev SPA `28274e04e` (ralph.schroeder@spaarke.com) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2166 |
+
+**Description**
+
+MSAL's account list is shared across clients in the tab. The CIAM plane has no account filter, so `AuthGuard` treats a cached company account as signed in, and `acquireStandaloneBffToken` can pick it. msal-browser then refuses with `authority_mismatch`. One path: company-account sign-in → "not set up" → "choose a different sign-in" → Partner in the same tab (`handleResetRealm` does not clear cached accounts).
+
+**Suggested fix**: filter the CIAM plane to CIAM-tenant accounts (mirror of `isWorkforceHomeAccount`); tests for both planes. Two top-tier reviews (auth).
+
+**Estimated effort**: under 1 day.
+**Blockers**: none. Workaround: new InPrivate window.
+**Related**: task 058, task 074, task 070.
+
+### ISS-019 — A licensed user's first sign-in shows a profile form before the account link
+
+| Field | Value |
+|---|---|
+| **Status** | Open (R4 backlog) |
+| **Urgency** | next-round |
+| **Filed** | 2026-10-21 |
+| **Source** | Owner live check on dev (Ralph Dewey, licensed user, Dewey Cheatham home account) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2192 |
+
+**Description**
+
+1. In a fresh browser the silent link fails (AADSTS50058, no Spaarke session), so the profile form shows.
+2. Continue answers 403 `licensed_user_link_required`, and only then does "Link your Spaarke account" appear.
+3. The first link popup failed on an Entra page ("not in the Spaarke tenant"); the second worked. The cause is not captured.
+
+**Suggested fix**: tell the gate before the form that the token email belongs to a licensed user (registration already discloses it to the same caller), so the form is skipped. Review the 60 s popup timeout for first-time guest sign-ins. uac-r2 / auth review.
+
+**Estimated effort**: 1 day.
+**Blockers**: none.
+**Related**: task 074, ISS-017 (#2155).
+
+---
+
 ## Closed
 
 (none)
+
+### ISS-020 — Removal sweep leaves no telemetry on a pass with no candidates
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | next-round (before anyone turns `IdentityLink:Reconciliation:RemovalSweepWritesEnabled` on) |
+| **Filed** | 2026-10-28 |
+| **Source** | Dev rollout of the contact identity hardening, step 3 (`notes/contact-identity-dev-rollout-record.md`) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2415 |
+
+**Description**
+
+`ExternalAccessRemovalSweep` logs only per-contact lines and failures, and the `[ID-LINK-RECON] heartbeat` carries no sweep counts. A pass with no candidates therefore leaves no trace. After the `e56a3a51d4` deploy, about 6 hours of runs logged nothing, and only a direct Dataverse count of the two candidate queries (both 0) proved that the sweep had nothing to do. Add a per-pass summary (mode, skipped, candidates, would-mark/marked, deferred, failed), either as its own line or as heartbeat fields. Telemetry only.
+
+**Entry-points**
+
+- `src/server/api/Sprk.Bff.Api/Services/ExternalAccess/ExternalAccessRemovalSweep.cs` (`RunAsync`)
+- `src/server/api/Sprk.Bff.Api/Services/ExternalAccess/IdentityLinkReconciliationJob.cs` (`RunRemovalSweepAsync`, heartbeat)
+
+### ISS-021 — The shared DataGrid sorts Money columns as text
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | next-round |
+| **Filed** | 2026-10-29 |
+| **Source** | R3 task 002 adversarial review B (owner grid columns) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2446 |
+
+**Description**
+
+A Money value reaches the browser as `{ value: n }`, and `DataGrid` `compare` sorts on the formatted label as text ("$1,000.00" before "$200.00"). It affects the Invoices grid's `sprk_totalamount` today, and `sprk_totalamount_base` after task 002. Fix: compare `.value` numerically when both sides carry it. The code is shared UI, so it is filed rather than changed in R3.
+
+**Entry-points**
+
+- `src/client/shared/Spaarke.UI.Components/src/components/DataGrid/DataGrid.tsx` (`compare`, ~1160-1174)
+
+### ISS-022 — DataGrid Export to Excel writes Money and option-set cells as raw values
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | next-round |
+| **Filed** | 2026-10-29 |
+| **Source** | R3 task 002 adversarial review B (owner grid columns) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2447 |
+
+**Description**
+
+The CSV export uses the raw value, not `@formattedValues`. A Money cell is exported as `{"value":1234.5}`, and option-set and status cells are exported as raw values. It affects all six external SPA grids. Fix: use `formattedLabelOf` first, and unwrap `{ value }`. The code is shared UI, so it is filed rather than changed in R3.
+
+**Entry-points**
+
+- `src/client/shared/Spaarke.UI.Components/src/components/DataGrid/commandBar/csvExport.ts` (~64-78), `commandBar/defaults.ts:228`
+
+### ISS-023 — The profile form shows an email that registration then refuses
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | next-round |
+| **Filed** | 2026-10-29 |
+| **Source** | R3 task 074 probe 5 (Tony Howe, a Dewey Cheatham member with no email attribute) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2449 |
+
+**Description**
+
+When the home token has no `email` claim, the form's prefill falls back to the username, but registration accepts the `email` claim only. The person fills in a form that can never succeed and then sees "We could not read your email address". Registration refusing the username is correct. Fix: have the `registration_required` refusal on `/me` say whether the email is usable, and show the "contact your administrator" state instead of the form when it is not. Workaround: an administrator sets the account's email attribute.
+
+**Entry-points**
+
+- `src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/CallerPrincipalResolver.cs` (~717-734)
+- `src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/WorkforceIdentityOptions.cs` (`WorkforceCallerClaims.TokenEmail`, the form prefill, which falls back to the username); registration itself reads only the `email` claim (`ExternalRegistrationEndpoints.TokenEmail`). Corrected 2026-10-29.
+- `src/client/external-spa/src/pages/RegistrationPage.tsx`
+
+### ISS-024 — Grant notifier emails a home-linked workforce contact as an external person (DI-137)
+
+| Field | Value |
+|---|---|
+| **Status** | Open (owner decision: fix in R3 with uac-r2, or R4) |
+| **Urgency** | next-round |
+| **Filed** | 2026-10-29 (by ontology-r1 as DI-137) |
+| **Source** | Ontology task 168 fix round 3, after the R3 review |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2458 |
+
+**Description**
+
+`GrantAccessNotifier.NotifyContactGrantAsync` decides "an internal user represents this contact" from `sprk_primarycontact` and the Spaarke-tenant object id only. A WorkforceHome contact linked to a licensed user by the home pair alone (the link the portal reads first) is therefore emailed a portal notice as an external person, while the portal shows that person the user's view. The notice is the only content involved. Reference fix: read the home link before the external branch, as `AssignTaskRecipientGate.HomeLinkAsync` (commit `bd32be448f`) does. The natural home is uac-r2 193 `ContactUserRepresentation` (DI-136 #2457).
+
+**Entry-points**
+
+- `src/server/api/Sprk.Bff.Api/Api/ExternalAccess/GrantAccessNotifier.cs` (`NotifyContactGrantAsync`, `EmailExternalContactGrantAsync` ~270-330)
+
+### ISS-025: Teams mobile layout not optimized (deferred to R4)
+
+| Field | Value |
+|---|---|
+| **Found** | 2026-10-29, task 071 (owner) |
+| **What** | The Teams tab loads in Teams mobile, but its layout is not adapted to the phone surface. |
+| **Decision** | Owner: not for this release; it loads. |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2466 |

@@ -81,6 +81,170 @@ public sealed class ContainerCreationStampContractTests : IDisposable
     }
 
     [Fact]
+    public async Task AdminPlaneCreate_ActivatesTheNewContainer_BeforeStamping_AndReportsItActive()
+    {
+        // #2032: Graph creates a container inactive and deletes it after 24 hours unless it is activated. The admin
+        // create used to rely on the stamp PATCH activating it implicitly, which nothing had measured.
+        StubCreated();
+        _graph.StubPatch($"{ContainersPath}/c-new/customProperties", "{}");
+        _graph.StubGet($"{ContainersPath}/c-new", Container(Unit));
+
+        var created = await AdminGraph().CreateContainerAsync(
+            _graph.CreateGraphClient(), TypeId.ToString(), "New", null, Unit, CancellationToken.None);
+
+        ActivatePosts().Should().Be(1);
+        var order = _graph.AllRequests.Select(r => $"{r.Method} {r.Path}").ToList();
+        order.IndexOf($"POST {ActivatePath}").Should().BeLessThan(
+            order.IndexOf($"PATCH {ContainersPath}/c-new/customProperties"), "the container is activated before it is stamped");
+        created.Status.Should().Be("active", "the create response's 'inactive' predates the activation");
+    }
+
+    [Fact]
+    public async Task AdminPlaneCreate_WhoseActivationFails_RemovesTheContainer_AndNeverStampsIt()
+    {
+        StubCreated();
+        StubActivated(500);
+        _graph.StubDelete($"{ContainersPath}/c-new");
+
+        var act = () => AdminGraph().CreateContainerAsync(
+            _graph.CreateGraphClient(), TypeId.ToString(), "New", null, Unit, CancellationToken.None);
+
+        var ex = (await act.Should().ThrowAsync<SpeAdminGraphService.ContainerBindingException>()).Which;
+        ex.Removed.Should().BeTrue("an inactive container is not left behind for Graph to delete in 24 hours");
+        _graph.PatchRequestsFor($"{ContainersPath}/c-new").Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task AdminPlaneCreate_WhenGraphAnswers503AfterTheCreate_SendsItOnce_AndReportsTheOutcomeUnknown()
+    {
+        // #2032: through production's Graph resilience handler, which re-sends an unmarked request after a 503 — the
+        // duplicate-container defect. The admin create is marked, so it is sent once and the outcome reported unknown.
+        _graph.StubPostExact(ContainersPath, GraphError, 503);
+
+        var act = () => AdminGraph().CreateContainerAsync(
+            _graph.CreateGraphClient(ResilienceHandler()), TypeId.ToString(), "New", null, Unit, CancellationToken.None);
+
+        (await act.Should().ThrowAsync<ContainerCreateOutcomeUnknownException>()).Which.DisplayName.Should().Be("New");
+        CreatePosts().Should().Be(1, "a create Graph may have committed is never re-sent");
+    }
+
+    [Fact]
+    public async Task AdminPlaneCreate_WhenGraphAnswers429_RetriesTheCreate()
+    {
+        _graph.StubPostExactSequence(ContainersPath, (GraphError, 429), (CreatedBody, 201));
+        StubActivated();
+        _graph.StubPatch($"{ContainersPath}/c-new/customProperties", "{}");
+        _graph.StubGet($"{ContainersPath}/c-new", Container(Unit));
+
+        var created = await AdminGraph().CreateContainerAsync(
+            _graph.CreateGraphClient(ResilienceHandler()), TypeId.ToString(), "New", null, Unit, CancellationToken.None);
+
+        created.Id.Should().Be("c-new");
+        CreatePosts().Should().Be(2, "Graph did not process a throttled create, so it is sent again");
+    }
+
+    [Fact]
+    public async Task AdminPlaneCreate_WhenGraphRefusesTheCreate_IsNotAnUnknownOutcome()
+    {
+        _graph.StubPostExact(ContainersPath, GraphError, 400);
+
+        var act = () => AdminGraph().CreateContainerAsync(
+            _graph.CreateGraphClient(ResilienceHandler()), TypeId.ToString(), "New", null, Unit, CancellationToken.None);
+
+        (await act.Should().ThrowAsync<Exception>()).Which.Should().NotBeOfType<ContainerCreateOutcomeUnknownException>();
+        CreatePosts().Should().Be(1);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("{\"displayName\":\"New\",\"status\":\"inactive\"}")]
+    public async Task AdminPlaneCreate_WhenGraphAnswers201WithNoContainer_ReportsTheOutcomeUnknown(string body)
+    {
+        // #2032 review: a 2xx is Graph committing the create; one naming no container is not "nothing was created". It
+        // used to be an InvalidOperationException ("unexpected error") or a bind of container "" with an empty id.
+        _graph.StubPostExact(ContainersPath, body, 201);
+
+        var act = () => AdminGraph().CreateContainerAsync(
+            _graph.CreateGraphClient(ResilienceHandler()), TypeId.ToString(), "New", null, Unit, CancellationToken.None);
+
+        await act.Should().ThrowAsync<ContainerCreateOutcomeUnknownException>();
+        _graph.AllRequests.Should().OnlyContain(r => r.Method == "POST" && r.Path == ContainersPath,
+            "nothing is activated, bound or deleted for a container with no id");
+    }
+
+    [Fact]
+    public async Task AdminPlaneCreate_WhenTheCallerCancelsDuringTheCreatePost_StillReadsTheIdAndBindsIt()
+    {
+        // #2032 review, as ContainerOperations (#1735/#1755): a client disconnect mid-POST used to abort the read of the
+        // only answer that names the new container. The caller cancels when the POST reaches Graph: no timer to race.
+        using var caller = new CancellationTokenSource();
+        _graph.StubPostExact(ContainersPath, CreatedBody, 201, onReceived: caller.Cancel);
+        StubActivated();
+        _graph.StubPatch($"{ContainersPath}/c-new/customProperties", "{}");
+        _graph.StubGet($"{ContainersPath}/c-new", Container(Unit));
+
+        var created = await AdminGraph().CreateContainerAsync(
+            _graph.CreateGraphClient(), TypeId.ToString(), "New", null, Unit, caller.Token);
+
+        created.Id.Should().Be("c-new");
+        caller.IsCancellationRequested.Should().BeTrue("the caller gave up while the create POST was in flight");
+        _graph.RequestsFor($"{ContainersPath}/c-new").Select(r => r.Method).Should().Equal("POST", "PATCH", "GET");
+    }
+
+    [Fact]
+    public async Task AdminPlaneCreate_WhenTheCallerHasCancelledBeforeTheCreate_SendsNothing()
+    {
+        StubCreated();
+        using var caller = new CancellationTokenSource();
+        caller.Cancel();
+
+        var act = () => AdminGraph().CreateContainerAsync(
+            _graph.CreateGraphClient(), TypeId.ToString(), "New", null, Unit, caller.Token);
+
+        await act.Should().ThrowAsync<OperationCanceledException>();
+        _graph.AllRequests.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task AdminActivate_PostsTheActivateAction_NotAPatchOfTheReadOnlyStatus()
+    {
+        StubActivated();
+
+        var activated = await AdminGraph().ActivateContainerAsync(_graph.CreateGraphClient(), "c-new", CancellationToken.None);
+
+        activated.Should().BeTrue();
+        ActivatePosts().Should().Be(1);
+        _graph.AllRequests.Should().NotContain(r => r.Method == "PATCH");
+    }
+
+    [Fact]
+    public async Task AdminLock_PostsTheLockAction_ReadOnly_NotAPatchOfTheReadOnlyStatus()
+    {
+        _graph.StubPostExact($"{ContainersPath}/c-new/lock", "", 204);
+
+        var locked = await AdminGraph().LockContainerAsync(_graph.CreateGraphClient(), "c-new", CancellationToken.None);
+
+        locked.Should().BeTrue();
+        var post = _graph.AllRequests.Should().ContainSingle(r => r.Method == "POST").Subject;
+        post.Path.Should().Be($"{ContainersPath}/c-new/lock");
+        post.BodyAsJson().GetProperty("lockState").GetString().Should().Be("lockedReadOnly");
+        _graph.AllRequests.Should().NotContain(r => r.Method == "PATCH");
+    }
+
+    [Fact]
+    public async Task AdminUnlock_PostsTheUnlockAction_NotAPatchOfTheReadOnlyStatus()
+    {
+        _graph.StubPostExact($"{ContainersPath}/c-new/unlock", "", 204);
+
+        var unlocked = await AdminGraph().UnlockContainerAsync(_graph.CreateGraphClient(), "c-new", CancellationToken.None);
+
+        unlocked.Should().BeTrue();
+        _graph.AllRequests.Should().ContainSingle(r => r.Method == "POST")
+            .Which.Path.Should().Be($"{ContainersPath}/c-new/unlock");
+        _graph.AllRequests.Should().NotContain(r => r.Method == "PATCH");
+    }
+
+    [Fact]
     public async Task AdminPlaneCreate_RefusesToCreateWithoutAnOwningUnit()
     {
         var act = () => AdminGraph().CreateContainerAsync(

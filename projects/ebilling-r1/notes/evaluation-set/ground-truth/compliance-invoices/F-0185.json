@@ -1,0 +1,35 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0185",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0185","generator_id":"gen_eval_set.py@1 F-0185","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0185.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-05"},
+ "header":{"firm":"Northcott & Zeller LLP","firm_invoice_number":"INV-2026-07370","invoice_date":"2026-04-02","billing_period_start":"2026-03-01","billing_period_end":"2026-03-31","firm_matter_reference":"37148-0023","po_number":"PO-4514401","fees_total":4809.0,"expenses_total":2231.02,"adjustments_total":0.0,"total_due":7040.02,"currency":"USD"},
+ "timekeepers":[{"name":"Dmitri Santoro","title":"Associate","rate":265.0,"billed_as":"Dmitri Santoro"},{"name":"Elena Hargrove","title":"Paralegal","rate":130.0,"billed_as":"Elena Hargrove"},{"name":"Hannah Voss","title":"Associate","rate":310.0,"billed_as":"Hannah Voss"},{"name":"Imani Fairweather","title":"Senior Associate","rate":400.0,"billed_as":"Imani Fairweather"},{"name":"Mei Esposito","title":"Paralegal","rate":155.0,"billed_as":"Mei Esposito"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2026-03-10","timekeeper":"Dmitri Santoro","timekeeper_name":"Dmitri Santoro","timekeeper_title":"Associate","title":"Associate","hours":2.6,"rate":265.0,"amount":689.0,"narrative":"Analyze exposure and damages model for the employment claim","codes":["L120","A104"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2026-03-03","timekeeper":"Elena Hargrove","timekeeper_name":"Elena Hargrove","timekeeper_title":"Paralegal","title":"Paralegal","hours":2.1,"rate":200.0,"amount":420.0,"narrative":"Analyze exposure and damages model for the employment claim","codes":["L120","A104"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2026-03-17","timekeeper":"Elena Hargrove","timekeeper_name":"Elena Hargrove","timekeeper_title":"Paralegal","title":"Paralegal","hours":2.3,"rate":200.0,"amount":460.0,"narrative":"Attend and present oral argument in the customs audit","codes":["L530","A109"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2026-03-31","timekeeper":"Elena Hargrove","timekeeper_name":"Elena Hargrove","timekeeper_title":"Paralegal","title":"Paralegal","hours":4.0,"rate":130.0,"amount":520.0,"narrative":"Prepare for oral argument in the distribution agreement","codes":["L530","A101"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2026-03-31","timekeeper":"Elena Hargrove","timekeeper_name":"Elena Hargrove","timekeeper_title":"Paralegal","title":"Paralegal","hours":4.0,"rate":130.0,"amount":520.0,"narrative":"Prepare for oral argument in the regulatory inquiry","codes":["L530","A101"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2026-03-31","timekeeper":"Elena Hargrove","timekeeper_name":"Elena Hargrove","timekeeper_title":"Paralegal","title":"Paralegal","hours":4.0,"rate":130.0,"amount":520.0,"narrative":"Prepare monthly status report to client regarding the distribution agreement","codes":["L190","A111"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2026-03-31","timekeeper":"Elena Hargrove","timekeeper_name":"Elena Hargrove","timekeeper_title":"Paralegal","title":"Paralegal","hours":0.8,"rate":130.0,"amount":104.0,"narrative":"Analyze exposure and damages model for the customs audit","codes":["L120","A104"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2026-03-16","timekeeper":"Hannah Voss","timekeeper_name":"Hannah Voss","timekeeper_title":"Associate","title":"Associate","hours":0.8,"rate":310.0,"amount":248.0,"narrative":"Prepare monthly status report to client regarding the data incident","codes":["L190","A111"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"fee","date":"2026-03-13","timekeeper":"Imani Fairweather","timekeeper_name":"Imani Fairweather","timekeeper_title":"Senior Associate","title":"Senior Associate","hours":2.7,"rate":400.0,"amount":1080.0,"narrative":"Revise appellate brief after cite check","codes":["L520","A104"],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"fee","date":"2026-03-25","timekeeper":"Mei Esposito","timekeeper_name":"Mei Esposito","timekeeper_title":"Paralegal","title":"Paralegal","hours":0.5,"rate":155.0,"amount":77.5,"narrative":"Analyze exposure and damages model for the lease dispute","codes":["L120","A104"],"page":1,"narrative_style":"clear"},
+  {"n":11,"line_type":"fee","date":"2026-03-27","timekeeper":"Mei Esposito","timekeeper_name":"Mei Esposito","timekeeper_title":"Paralegal","title":"Paralegal","hours":1.1,"rate":155.0,"amount":170.5,"narrative":"Revise appellate brief after cite check","codes":["L520","A104"],"page":2,"narrative_style":"clear"},
+  {"n":12,"line_type":"expense","date":"2026-03-12","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":3.0,"rate":26.25,"amount":78.75,"narrative":"Working meal during deposition preparation","codes":["E111"],"page":2,"narrative_style":"clear"},
+  {"n":13,"line_type":"expense","date":"2026-03-20","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":2.0,"rate":7.96,"amount":15.92,"narrative":"Postage - certified mail","codes":["E108"],"page":2,"narrative_style":"clear"},
+  {"n":14,"line_type":"expense","date":"2026-03-26","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":1476.63,"amount":1476.63,"narrative":"Court reporter and transcript - deposition","codes":["E115"],"page":2,"narrative_style":"clear"},
+  {"n":15,"line_type":"expense","date":"2026-03-31","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":659.72,"amount":659.72,"narrative":"Airfare to Minneapolis for deposition","codes":["E110"],"page":2,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["435 Federal Plaza","Atlanta","Tax ID 14-8450701"],"template":"T13","pages":2},
+ "rule_set_id":"RS-05",
+ "context":{"matter_open":"2025-02-03","matter_close":"2026-06-29","matter_budget":53160.0,"approved_timekeepers":["Imani Fairweather","Sofia Tavares","Mei Esposito","Hannah Voss","Dmitri Santoro","Anders Dunleavy","Elena Hargrove","Gideon Rosenthal"],"invoice_received_date":"2026-04-10"},
+ "expected_findings":[
+  {"rule_id":"RS-05-R01","rule_type":"ApprovedRate","scope":"line","line_refs":[2],"consequence":"Reduce"},
+  {"rule_id":"RS-05-R01","rule_type":"ApprovedRate","scope":"line","line_refs":[3],"consequence":"Reduce"},
+  {"rule_id":"RS-05-R06","rule_type":"DailyHoursCap","scope":"line","line_refs":[7],"consequence":"Flag"}
+ ],
+ "seeded_violations":3
+}

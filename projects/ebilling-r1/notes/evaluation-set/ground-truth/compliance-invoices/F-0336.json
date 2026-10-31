@@ -1,0 +1,27 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0336",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0336","generator_id":"gen_eval_set.py@1 F-0336","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0336.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-06"},
+ "header":{"firm":"Kestrel and Whitcombe LLP","firm_invoice_number":"INV-2025-01170","invoice_date":"2025-07-04","billing_period_start":"2025-06-01","billing_period_end":"2025-06-30","firm_matter_reference":"38125-0036","po_number":"PO-4593496","fees_total":2585.0,"expenses_total":25.43,"adjustments_total":0.0,"total_due":2610.43,"currency":"USD"},
+ "timekeepers":[{"name":"Aisha Fairweather","title":"Paralegal","rate":105.0,"billed_as":"Aisha Fairweather"},{"name":"Cyrus Kowalczyk","title":"Legal Assistant","rate":100.0,"billed_as":"Cyrus Kowalczyk"},{"name":"Gideon Zielinski","title":"Associate","rate":195.0,"billed_as":"Gideon Zielinski"},{"name":"Victor Rosenthal","title":"Senior Associate","rate":230.0,"billed_as":"Victor Rosenthal"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2025-06-13","timekeeper":"Aisha Fairweather","timekeeper_name":"Aisha Fairweather","timekeeper_title":"Paralegal","title":"Paralegal","hours":2.6,"rate":105.0,"amount":273.0,"narrative":"Analyze exposure and damages model for the insurance coverage issue","codes":["L120","A104"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2025-06-20","timekeeper":"Cyrus Kowalczyk","timekeeper_name":"Cyrus Kowalczyk","timekeeper_title":"Legal Assistant","title":"Legal Assistant","hours":1.7,"rate":100.0,"amount":170.0,"narrative":"Draft reply brief and supporting memorandum","codes":["L240","A103"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2025-06-04","timekeeper":"Gideon Zielinski","timekeeper_name":"Gideon Zielinski","timekeeper_title":"Associate","title":"Associate","hours":2.7,"rate":195.0,"amount":526.5,"narrative":"Review and analyze notice of deposition received from Tidewater Retail","codes":["L310","A104"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2025-06-05","timekeeper":"Gideon Zielinski","timekeeper_name":"Gideon Zielinski","timekeeper_title":"Associate","title":"Associate","hours":0.8,"rate":195.0,"amount":156.0,"narrative":"Draft settlement proposal to Meridian Foods","codes":["L310","A103"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2025-06-19","timekeeper":"Gideon Zielinski","timekeeper_name":"Gideon Zielinski","timekeeper_title":"Associate","title":"Associate","hours":2.5,"rate":195.0,"amount":487.5,"narrative":"Plan strategy for upcoming phase of the warranty claim with team","codes":["L120","A101"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2025-06-25","timekeeper":"Gideon Zielinski","timekeeper_name":"Gideon Zielinski","timekeeper_title":"Associate","title":"Associate","hours":1.0,"rate":195.0,"amount":195.0,"narrative":"Prepare production set and cover correspondence for service on Harbor Point Capital","codes":["L320","A110"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2025-06-26","timekeeper":"Gideon Zielinski","timekeeper_name":"Gideon Zielinski","timekeeper_title":"Associate","title":"Associate","hours":0.8,"rate":195.0,"amount":156.0,"narrative":"Review opposing brief in response to exhibit list","codes":["L240","A104"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2025-06-11","timekeeper":"Victor Rosenthal","timekeeper_name":"Victor Rosenthal","timekeeper_title":"Senior Associate","title":"Senior Associate","hours":0.9,"rate":230.0,"amount":207.0,"narrative":"Prepare outline for deposition of Summit Ridge Homes witness","codes":["L330","A101"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"fee","date":"2025-06-17","timekeeper":"Victor Rosenthal","timekeeper_name":"Victor Rosenthal","timekeeper_title":"Senior Associate","title":"Senior Associate","hours":1.4,"rate":230.0,"amount":322.0,"narrative":"Analyze key documents for deposition preparation","codes":["L320","A104"],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"fee","date":"2025-06-27","timekeeper":"Victor Rosenthal","timekeeper_name":"Victor Rosenthal","timekeeper_title":"Senior Associate","title":"Senior Associate","hours":0.4,"rate":230.0,"amount":92.0,"narrative":"Review documents produced by Tidewater Retail for responsiveness","codes":["L320","A104"],"page":1,"narrative_style":"clear"},
+  {"n":11,"line_type":"expense","date":"2025-06-06","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":25.43,"amount":25.43,"narrative":"Overnight courier to Orchard Row Brands counsel","codes":["E107"],"page":2,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["980 Pine Street","Dallas","Tax ID 26-3054588"],"template":"T13","pages":2},
+ "rule_set_id":"RS-06",
+ "context":{"matter_open":"2024-07-22","matter_close":"2025-09-28","matter_budget":35441.0,"approved_timekeepers":["Anders Kowalczyk","Gideon Zielinski","Cyrus Kowalczyk","Aisha Fairweather","Hannah Kowalczyk","Victor Rosenthal"],"invoice_received_date":"2025-07-09"},
+ "expected_findings":[],
+ "seeded_violations":0
+}

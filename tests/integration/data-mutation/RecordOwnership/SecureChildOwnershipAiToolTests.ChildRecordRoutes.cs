@@ -97,7 +97,17 @@ public sealed partial class SecureChildOwnershipAiToolTests
     /// </summary>
     private SecureChildReconciler Children(Sprk.Bff.Api.Services.Communication.IThreadResolver? threads = null) =>
         SecureChildShareWorld.ReconcilerOver(
-            () => ShareWorld, _shareTable, null!, threads: threads, gateDecisionRecords: _gateOverShareWorld ?? _gate.Sharing);
+            () => ShareWorld, _shareTable, null!, threads: threads, gateDecisionRecords: _gateOverShareWorld ?? _gate.Sharing,
+            logger: _reconcilerLog, sharesLogger: _sharesLogger ?? _sharesLog);
+
+    /// <summary>#2143 round 10: what the reconciler's synchronizer logged (unless a test swaps in <see cref="_sharesLogger"/>).</summary>
+    private readonly Sprk.Bff.Api.Tests.Services.Communication.CapturingLogger<SecureChildShareSynchronizer> _sharesLog = new();
+
+    /// <summary>#2143 round 10 (K1 pin): a test's own logger for the reconciler's synchronizer, in place of <see cref="_sharesLog"/>.</summary>
+    private Microsoft.Extensions.Logging.ILogger<SecureChildShareSynchronizer>? _sharesLogger;
+
+    /// <summary>#2143 round 9: what the reconciler's step after a re-file logged.</summary>
+    private readonly Sprk.Bff.Api.Tests.Services.Communication.CapturingLogger<SecureChildReconciler> _reconcilerLog = new();
 
     /// <summary>Ontology task 042b round 2 (D-169): the gate Decision Records the reconciler's after-re-file step re-owns (empty unless a
     /// test seeds it).</summary>
@@ -253,6 +263,24 @@ public sealed partial class SecureChildOwnershipAiToolTests
         var created = _appCreates.Should().ContainSingle().Subject;
         Owner(created.Fields).Should().Be(Directory.ChildTeam);
         _shareTable.WriteLog.Should().BeEmpty("an ordinary record's child is never mirrored or shared");
+    }
+
+    [Fact(DisplayName = "Owner decision 2026-10-29 must fire: a child created through the route under a FILED person-owned work assignment is owned by its matter's business-unit team")]
+    public async Task ChildCreate_AToDoUnderAFiledPersonOwnedWorkAssignment_IsOwnedByItsMattersBusinessUnitTeam()
+    {
+        var workAssignment = Guid.NewGuid();
+        _world.WithRecord("sprk_workassignment", workAssignment, Directory.GeneralBu, owningTeam: null,
+            extra: new() { ["sprk_regardingmatter"] = new EntityReference("sprk_matter", OrdinaryMatter) });
+
+        var result = await CreateChild("sprk_todo", new()
+        {
+            ["sprk_name"] = "Call back",
+            ["sprk_RegardingWorkAssignment@odata.bind"] = $"/sprk_workassignments({workAssignment:D})",
+        });
+
+        Status(result).Should().Be(StatusCodes.Status201Created, Detail(result));
+        Owner(_appCreates.Should().ContainSingle().Subject.Fields).Should().Be(Directory.ChildTeam,
+            $"the work assignment belongs to its matter: the matter's unit, never the work assignment's own ({Directory.GeneralTeam:D})");
     }
 
     [Fact]
@@ -919,7 +947,7 @@ public sealed partial class SecureChildOwnershipAiToolTests
         ShareWorld.UserOwnedChild("sprk_communication", communication, ("sprk_regardingmatter", "sprk_matter", SecureMatter));
         var threads = new Moq.Mock<Sprk.Bff.Api.Services.Communication.IThreadResolver>();
         threads
-            .Setup(t => t.ReconcileThreadForFilingAsync(communication, Moq.It.IsAny<CancellationToken>()))
+            .Setup(t => t.ReconcileThreadForFilingAsync(communication, Moq.It.IsAny<Sprk.Bff.Api.Services.Communication.FilingReconcileHost>(), Moq.It.IsAny<Sprk.Bff.Api.Services.Access.SecureRemovalCaller?>(), Moq.It.IsAny<Func<CancellationToken, Task>?>(), Moq.It.IsAny<CancellationToken>()))
             .Callback(() => _world.Assignments.Should().NotBeEmpty("the reconcile runs after the filing and its owner are written"))
             .Returns(Task.CompletedTask);
 
@@ -927,7 +955,7 @@ public sealed partial class SecureChildOwnershipAiToolTests
             communication, new() { ["sprk_RegardingMatter@odata.bind"] = $"/sprk_matters({SecureMatter:D})" }, threads.Object);
 
         Status(result).Should().Be(StatusCodes.Status204NoContent, Detail(result));
-        threads.Verify(t => t.ReconcileThreadForFilingAsync(communication, Moq.It.IsAny<CancellationToken>()), Moq.Times.Once);
+        threads.Verify(t => t.ReconcileThreadForFilingAsync(communication, Moq.It.IsAny<Sprk.Bff.Api.Services.Communication.FilingReconcileHost>(), Moq.It.Is<Sprk.Bff.Api.Services.Access.SecureRemovalCaller?>(c => c != null), Moq.It.IsAny<Func<CancellationToken, Task>?>(), Moq.It.IsAny<CancellationToken>()), Moq.Times.Once);
     }
 
     [Fact]
@@ -942,7 +970,7 @@ public sealed partial class SecureChildOwnershipAiToolTests
             communication, new() { ["sprk_RegardingMatter@odata.bind"] = $"/sprk_matters({SecureMatter:D})" }, threads.Object);
 
         Status(result).Should().Be(StatusCodes.Status404NotFound);
-        threads.Verify(t => t.ReconcileThreadForFilingAsync(Moq.It.IsAny<Guid>(), Moq.It.IsAny<CancellationToken>()), Moq.Times.Never);
+        threads.Verify(t => t.ReconcileThreadForFilingAsync(Moq.It.IsAny<Guid>(), Moq.It.IsAny<Sprk.Bff.Api.Services.Communication.FilingReconcileHost>(), Moq.It.IsAny<Sprk.Bff.Api.Services.Access.SecureRemovalCaller?>(), Moq.It.IsAny<Func<CancellationToken, Task>?>(), Moq.It.IsAny<CancellationToken>()), Moq.Times.Never);
     }
 
     [Fact]
@@ -959,7 +987,7 @@ public sealed partial class SecureChildOwnershipAiToolTests
             "sprk_communication", communication, threads.Object, Lookup("sprk_regardingmatter", "sprk_matter", SecureMatter));
 
         result.Success.Should().BeTrue(result.ErrorMessage);
-        threads.Verify(t => t.ReconcileThreadForFilingAsync(communication, Moq.It.IsAny<CancellationToken>()), Moq.Times.Once);
+        threads.Verify(t => t.ReconcileThreadForFilingAsync(communication, Moq.It.IsAny<Sprk.Bff.Api.Services.Communication.FilingReconcileHost>(), Moq.It.Is<Sprk.Bff.Api.Services.Access.SecureRemovalCaller?>(c => c != null), Moq.It.IsAny<Func<CancellationToken, Task>?>(), Moq.It.IsAny<CancellationToken>()), Moq.Times.Once);
     }
 
     [Fact]
@@ -974,7 +1002,7 @@ public sealed partial class SecureChildOwnershipAiToolTests
             "sprk_communication", communication, threads.Object, Lookup("sprk_regardingmatter", "sprk_matter", SecureMatter));
 
         result.Success.Should().BeFalse();
-        threads.Verify(t => t.ReconcileThreadForFilingAsync(Moq.It.IsAny<Guid>(), Moq.It.IsAny<CancellationToken>()), Moq.Times.Never);
+        threads.Verify(t => t.ReconcileThreadForFilingAsync(Moq.It.IsAny<Guid>(), Moq.It.IsAny<Sprk.Bff.Api.Services.Communication.FilingReconcileHost>(), Moq.It.IsAny<Sprk.Bff.Api.Services.Access.SecureRemovalCaller?>(), Moq.It.IsAny<Func<CancellationToken, Task>?>(), Moq.It.IsAny<CancellationToken>()), Moq.Times.Never);
     }
 
     // ── Ontology task 042b round 2 (D-169, uac-r2 choice A): both re-file paths end in the gate record's re-own ──────────
@@ -1143,7 +1171,7 @@ public sealed partial class SecureChildOwnershipAiToolTests
         _shareTable.MaskOf(table, id, DataversePrincipalRef.User(Sharee)).Should().BeNull("the step's mirror did not run");
         ShareWorld.OwnerOf("sprk_todo", todo).Should().Be(DataversePrincipalRef.Team(SecureChildShareWorld.GeneralTeam),
             "the step's pass over what is filed under the row did not run");
-        threads.Verify(t => t.ReconcileThreadForFilingAsync(Moq.It.IsAny<Guid>(), Moq.It.IsAny<CancellationToken>()), Moq.Times.Never);
+        threads.Verify(t => t.ReconcileThreadForFilingAsync(Moq.It.IsAny<Guid>(), Moq.It.IsAny<Sprk.Bff.Api.Services.Communication.FilingReconcileHost>(), Moq.It.IsAny<Sprk.Bff.Api.Services.Access.SecureRemovalCaller?>(), Moq.It.IsAny<Func<CancellationToken, Task>?>(), Moq.It.IsAny<CancellationToken>()), Moq.Times.Never);
         _gate.Entities.Verify(
             e => e.RetrieveMultipleAsync(Moq.It.IsAny<Microsoft.Xrm.Sdk.Query.QueryExpression>(), Moq.It.IsAny<CancellationToken>()),
             Moq.Times.Never, "the step's gate Decision Record re-own did not run");
@@ -1180,7 +1208,7 @@ public sealed partial class SecureChildOwnershipAiToolTests
         _world.Assignments.Should().Equal(("sprk_communication", communication, Directory.SecureNamedTeam));
         _shareTable.MaskOf("sprk_communication", communication, DataversePrincipalRef.User(Sharee)).Should().Be(CollaborateMask,
             "the step's mirror ran: the secure project's sharee sees the message");
-        threads.Verify(t => t.ReconcileThreadForFilingAsync(communication, Moq.It.IsAny<CancellationToken>()), Moq.Times.Once,
+        threads.Verify(t => t.ReconcileThreadForFilingAsync(communication, Moq.It.IsAny<Sprk.Bff.Api.Services.Communication.FilingReconcileHost>(), Moq.It.Is<Sprk.Bff.Api.Services.Access.SecureRemovalCaller?>(c => c != null), Moq.It.IsAny<Func<CancellationToken, Task>?>(), Moq.It.IsAny<CancellationToken>()), Moq.Times.Once,
             "the step ran once (it reconciles a communication's thread)");
         TheGateRecordIsTeamOwnedAndUnshared();
     }
@@ -1593,13 +1621,35 @@ public sealed partial class SecureChildOwnershipAiToolTests
         using var document = JsonDocument.Parse(json);
 
         var result = await ChildRecordEndpoints.RefileAsync(
-            "sprk_todo", Todo, document.RootElement.Clone(), _user, _world.Resolver(), Restamper(), Children(),
+            "sprk_todo", Todo, document.RootElement.Clone(), _user, _world.Resolver(), Restamper(), Children(), AppEntities(),
             HttpContextOfCaller(), NullLogger<Program>.Instance, CancellationToken.None);
 
         Status(result).Should().Be(StatusCodes.Status400BadRequest);
         ReasonCode(result).Should().Be(ChildRecordEndpoints.InvalidPayloadCode);
         _user.Patches.Should().BeEmpty();
         _world.Assignments.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task ChildRefile_WhenTheOwnerCannotBeSettledAgainstConcurrentWriters_Answers409RecordOwnerUnsettled_NotA500()
+    {
+        // #2143 F2: the shared re-file core (child records, event filing, communication filing) answers the resolver's typed
+        // "owner unsettled" as a 409 with a stable reason code — reload and retry — never the global 500.
+        _world.WithRecord("sprk_todo", Todo, Directory.ChildBu, owningTeam: Directory.ChildTeam);
+        var ownership = new RecordOwnershipResolverDouble
+        {
+            FaultAfterChange = new RecordOwnerUnsettledException("sprk_todo", Todo, "test: unsettled"),
+        };
+
+        var result = await ChildRecordEndpoints.RefileAsync(
+            "sprk_todo", Todo, Payload(new() { ["sprk_RegardingMatter@odata.bind"] = $"/sprk_matters({OrdinaryMatter:D})" }),
+            _user, ownership, Restamper(), Children(), AppEntities(), HttpContextOfCaller(), NullLogger<Program>.Instance,
+            CancellationToken.None);
+
+        Status(result).Should().Be(StatusCodes.Status409Conflict, Detail(result));
+        ReasonCode(result).Should().Be(RecordOwnerUnsettledException.ReasonCode);
+        Detail(result).Should().Contain("Reload it and try again").And.NotContain(Todo.ToString("D"));
+        ownership.Reparents.Should().ContainSingle("the re-file reached the resolver");
     }
 
     // ── Task 147 r1c-v1 (verifier item 2, AC9): a row the caller may not READ answers exactly as a row that does not
@@ -1656,14 +1706,18 @@ public sealed partial class SecureChildOwnershipAiToolTests
         string table, Dictionary<string, object?> payload, SecureRootFilingGate? gate = null, IDataverseUserClient? user = null,
         IServiceScopeFactory? scopes = null) =>
         ChildRecordEndpoints.CreateAsync(
-            table, Payload(payload), user ?? _user, _world.Resolver(), _appOnly.Object, Restamper(), Shares(),
-            gate ?? SecureRootFilingGateFixtures.NothingSecure(),
-            scopes ?? new ServiceCollection().BuildServiceProvider().GetRequiredService<IServiceScopeFactory>(),
+            table, Payload(payload), user ?? _user,
+            RouteRecordCreation.Over(
+                _world.Resolver(), _appOnly.Object, Restamper(), Shares(), gate ?? SecureRootFilingGateFixtures.NothingSecure(),
+                scopes, _routeMembership.Object),
             HttpContextOfCaller(), NullLogger<Program>.Instance, CancellationToken.None);
+
+    /// <summary>Task 017: the membership publisher the route's create (through the service) publishes to.</summary>
+    private readonly Moq.Mock<Sprk.Bff.Api.Services.Ai.Membership.Events.IMembershipEventPublisher> _routeMembership = new();
 
     private Task<IResult> RefileChild(string table, Guid id, Dictionary<string, object?> payload) =>
         ChildRecordEndpoints.RefileAsync(
-            table, id, Payload(payload), _user, _world.Resolver(), Restamper(), Children(), HttpContextOfCaller(),
+            table, id, Payload(payload), _user, _world.Resolver(), Restamper(), Children(), AppEntities(), HttpContextOfCaller(),
             NullLogger<Program>.Instance, CancellationToken.None);
 
     /// <summary>PATCH /api/v1/events/{id}/filing's REAL handler (the route's filters are pinned through the real mapper by

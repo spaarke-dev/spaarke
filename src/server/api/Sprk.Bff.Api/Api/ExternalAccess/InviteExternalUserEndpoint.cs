@@ -66,7 +66,9 @@ public static class InviteExternalUserEndpoint
             // 503: the record's access settings could not be read (task 138, before any Contact or CIAM work), or
             // the contact lookup could not be read (task 141, sdap.access.invite.contact_lookup_failed), or the
             // pending-invite marker a contact needed did not land (task 184, sdap.access.invite.invite_marker_not_written;
-            // no email sent — retry, after the SpaarkeMaster import on a stamp still receiving the column).
+            // no email sent — retry, after the SpaarkeMaster import on a stamp still receiving the column), or the email's
+            // organisation could not be looked up (slice B2, sdap.access.invite.tenant_lookup_unavailable; nothing written —
+            // retry).
             .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
 
         return group;
@@ -83,21 +85,37 @@ public static class InviteExternalUserEndpoint
         CiamUserProvisioningService ciamProvisioner,
         RegistrationEmailService emailService,
         ContactIdentityBinder binder,
+        InviteOrganizationResolver organizations,
         IConfiguration configuration,
         Sprk.Bff.Api.Configuration.CustomerIdentity customer,
         HttpContext httpContext,
         ILogger<Program> logger,
         CancellationToken ct)
     {
-        // Task 185 slice F + §12 I-11: the CIAM provisioner constructs on a host without Ciam:* and validates at first use.
-        // This route needs CIAM for every request, so there it answers a 503 ProblemDetails with the same reason code /grant
-        // reports (ciam_not_configured), before anything is read or written.
-        if (!ciamProvisioner.IsConfigured)
-            return CiamNotConfiguredResult(httpContext);
-
         // ── Validation ───────────────────────────────────────────────────────
+        // C5: the request's own shape is validated first, on every host, before any lookup: a malformed request is a 400
+        // whether or not this host has a CIAM configuration.
         if (string.IsNullOrWhiteSpace(request.Email))
             return ProblemDetailsHelper.ValidationError("Email is required.");
+
+        if (ValidateInvitedTenant(request.InvitedTenantId) is { } tenantProblem)
+            return tenantProblem;
+
+        if (ValidateNoInviteKindChoice(request.SendAsPortalAccount) is { } kindProblem)
+            return kindProblem;
+
+        // Task 185 slice F + §12 I-11: the CIAM provisioner constructs on a host without Ciam:* and validates at first use.
+        // A portal-account invite needs CIAM, so there it answers a 503 ProblemDetails with the same reason code /grant
+        // reports (ciam_not_configured), before anything else is read or written. Slice B3: a work-account invite needs no
+        // CIAM, so on such a host the organisation is decided first and only a work-account invite goes on.
+        InviteOrganizationDecision? organizationWithoutCiam = null;
+        if (!ciamProvisioner.IsConfigured)
+        {
+            var (decided, withoutCiamProblem) = await DecideOrganizationWithoutCiamAsync(organizations, request, httpContext, ct);
+            if (withoutCiamProblem is not null)
+                return withoutCiamProblem;
+            organizationWithoutCiam = decided;
+        }
 
         // Note (task 070): /invite only onboards (resolve-or-create Contact + CIAM account); it writes NO grant.
         // The grant is created separately by /grant or /invite-and-grant.
@@ -124,6 +142,14 @@ public static class InviteExternalUserEndpoint
         if (!policy.IsAllowed)
             return GrantExternalAccessEndpoint.PolicyRefusalProblem(policy, httpContext);
 
+        // Slice B2: a work account (the email's organisation is a configured customer tenant) or a portal account, decided
+        // here before any contact is read or written. A malformed domain is a 400; a lookup with no definite answer a 503.
+        var (organization, organizationProblem) = organizationWithoutCiam is not null
+            ? (organizationWithoutCiam, null)
+            : await DecideOrganizationAsync(organizations, request, httpContext, ct);
+        if (organizationProblem is not null)
+            return organizationProblem;
+
         logger.LogInformation("[EXT-INVITE] Onboarding external user {Email}", request.Email);
 
         var portalUrl = configuration["ExternalAccess:PortalUrl"]
@@ -133,7 +159,7 @@ public static class InviteExternalUserEndpoint
         {
             var outcome = await ExternalInviteService.ProvisionAsync(
                 request, dataverseClient, ciamProvisioner, emailService, binder, portalUrl, InviteLinkCustomerKey(customer),
-                logger, resolution: null, ct);
+                logger, resolution: null, ct, organization!.WorkAccountTenantId);
             if (outcome.Failure is { } failure)
             {
                 return LookupFailureResult(failure, httpContext);
@@ -148,8 +174,29 @@ public static class InviteExternalUserEndpoint
             // §12 I-10: an existing CIAM account is answered as a new one (the operator log keeps the difference), and an
             // email that did not send is reported the same way on both branches (adversarial pass 2, F2).
             var (emailSent, emailErrorCode) = InviterVisibleEmail(outcome);
+            var status = InviterVisibleStatus(outcome.Status);
+
+            // Slice B3: a work-account stamp landed, so the notice goes to the stamped address. /invite writes no grant, so
+            // the notice is the fixed text and names no record. Slice C2b: a notice that did not send retracts the stamp
+            // ("email not sent"), so the next invite stamps and sends again. C5: that invite is then answered as not sent.
+            if (outcome.Status == WorkAccountInvitedStatus)
+            {
+                (status, emailSent, emailErrorCode) = await ExternalInviteService.SendWorkAccountNoticeAsync(
+                        emailService, request.Email, portalUrl, InviteLinkCustomerKey(customer), record: null, outcome.ContactId,
+                        logger, binder, outcome.WrittenInviteStamp)
+                    ? (status, true, (string?)null)
+                    : (InviteNotSentStatus, false, GrantInviteStatus.EmailNotSentReasonCode);
+            }
+
+            // Slice C2b: the person already has an account. No invite email is due, none is sent and nothing was written:
+            // emailSent is false (never null) with its own code, and staff are given the sign-in link to pass on.
+            if (outcome.Status == AlreadyProvisionedStatus)
+            {
+                return TypedResults.Ok(AlreadyHasAccountResponse(outcome.ContactId, portalUrl, InviteLinkCustomerKey(customer)));
+            }
+
             return TypedResults.Ok(new InviteExternalUserResponse(
-                outcome.ContactId, portalUrl, InviterVisibleStatus(outcome.Status), emailSent, emailErrorCode));
+                outcome.ContactId, portalUrl, status, emailSent, emailErrorCode));
         }
         catch (Exception ex)
         {
@@ -166,6 +213,114 @@ public static class InviteExternalUserEndpoint
     // Reusable core (shared with the invite-and-grant orchestration, task 029)
     // =========================================================================
 
+    /// <summary>
+    /// Slice B2: <see cref="InviteExternalUserRequest.InvitedTenantId"/> is not accepted. Null when absent or blank, else a
+    /// 400 in the route's validation shape: the organisation is resolved by the server from the email, never supplied by the
+    /// request. Pure. Shared by <c>/invite</c> and <c>/invite-and-grant</c>.
+    /// </summary>
+    internal static IResult? ValidateInvitedTenant(string? raw)
+        => string.IsNullOrWhiteSpace(raw)
+            ? null
+            : ProblemDetailsHelper.ValidationError(
+                "InvitedTenantId is not accepted: the person's organisation is resolved from the email address. Omit it.");
+
+    /// <summary>
+    /// Slice B3: <see cref="InviteExternalUserRequest.SendAsPortalAccount"/> is not accepted. Null when absent, else a 400 in
+    /// the route's validation shape, whatever the value (<c>false</c> included): the kind of sign-in an invite is for is
+    /// decided by the server from the email's domain, never chosen by the request. Pure. Shared by <c>/invite</c> and
+    /// <c>/invite-and-grant</c>.
+    /// </summary>
+    internal static IResult? ValidateNoInviteKindChoice(bool? sendAsPortalAccount)
+        => sendAsPortalAccount is null
+            ? null
+            : ProblemDetailsHelper.ValidationError(
+                "SendAsPortalAccount is not accepted: the kind of sign-in is decided from the email address. Omit it.");
+
+    /// <summary>
+    /// Slice B2: which sign-in the invite is for (<see cref="InviteOrganizationResolver"/>), or the problem that stops the
+    /// invite before anything is read or written: 400 for an email domain that is not a host name, 503
+    /// <see cref="ContactBindingDecision.InviteTenantLookupUnavailable"/> when the lookup gave no definite answer (retry). The
+    /// cache is scoped to the caller's tenant. Shared by <c>/invite</c> and
+    /// <c>/invite-and-grant</c>.
+    /// </summary>
+    internal static async Task<(InviteOrganizationDecision? Decision, IResult? Problem)> DecideOrganizationAsync(
+        InviteOrganizationResolver organizations, InviteExternalUserRequest request, HttpContext httpContext,
+        CancellationToken ct)
+    {
+        var callerTenant = httpContext.User.FindFirst("tid")?.Value
+            ?? httpContext.User.FindFirst("http://schemas.microsoft.com/identity/claims/tenantid")?.Value;
+        var decision = await organizations.DecideAsync(request.Email, callerTenant, ct);
+        return decision.Status switch
+        {
+            InviteOrganizationStatus.Decided => (decision, null),
+            InviteOrganizationStatus.MalformedDomain => (null, ProblemDetailsHelper.ValidationError(
+                "The email address's domain is not a valid domain name.")),
+            _ => (null, LookupFailureResult(new InviteLookupFailure(
+                ContactBindingDecision.InviteTenantLookupUnavailable,
+                ContactIdentityBinder.InviteMessage(ContactBindingDecision.InviteTenantLookupUnavailable)!,
+                Title: "Organisation lookup unavailable"), httpContext)),
+        };
+    }
+
+    /// <summary>
+    /// Slice B3: the organisation decision on a host without <c>Ciam:*</c>, where only a work-account invite can be sent. The
+    /// decision when it is a work account; otherwise the problem that stops the invite before anything else is read or
+    /// written: 503 <see cref="GrantInviteStatus.CiamNotConfiguredReasonCode"/> for a portal-account invite (or a request with
+    /// no email), 400 for a domain that is not a host name, 503 tenant_lookup_unavailable when the lookup gave no definite
+    /// answer (it may be a work account, so staff retry). Shared by <c>/invite</c> and <c>/invite-and-grant</c>.
+    /// </summary>
+    internal static async Task<(InviteOrganizationDecision? Decision, IResult? Problem)> DecideOrganizationWithoutCiamAsync(
+        InviteOrganizationResolver organizations, InviteExternalUserRequest request, HttpContext httpContext,
+        CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(request.Email))
+            return (null, CiamNotConfiguredResult(httpContext));
+
+        var (decision, problem) = await DecideOrganizationAsync(organizations, request, httpContext, ct);
+        if (problem is not null)
+            return (null, problem);
+
+        return decision!.IsWorkAccount ? (decision, null) : (null, CiamNotConfiguredResult(httpContext));
+    }
+
+    /// <summary>
+    /// Slice B2: the <see cref="ProvisionOutcome.Status"/> of a work-account invite. The contact is stamped for a Workforce
+    /// or WorkforceHome sign-in from its organisation's tenant; no CIAM account was created and no invite email was sent.
+    /// </summary>
+    internal const string WorkAccountInvitedStatus = "WorkAccountInvited";
+
+    /// <summary>
+    /// C5: the onboarding status <c>/invite</c> and <c>/invite-and-grant</c> answer for a work-account invite whose notice did
+    /// not send and was therefore retracted: an invite is reported as made only when its email went out. It is the value the
+    /// grant response's <c>invite</c> field reports for an invite that did not complete (<see cref="GrantInviteStatus.Failed"/>),
+    /// always with <c>emailSent: false</c> and <see cref="GrantInviteStatus.EmailNotSentReasonCode"/>. No new value: the
+    /// existing one, named for these routes.
+    /// </summary>
+    internal const string InviteNotSentStatus = GrantInviteStatus.Failed;
+
+    /// <summary>
+    /// Slice B2: a work-account invite whose contact already carries a sign-in is refused (409,
+    /// <see cref="ContactBindingDecision.InviteContactAlreadyBound"/>; nothing written, no flag): one contact carries one
+    /// sign-in. A contact bound on a workforce plane is already refused by the invite decision itself. <c>null</c> when the
+    /// resolution may receive a work-account invite.
+    /// </summary>
+    internal static ProvisionOutcome? WorkAccountNotProvisionable(InviteContactResolution resolution, string email, ILogger logger)
+    {
+        // A contact carrying the removed marker never reaches here: the invite decision refused it
+        // (ContactBindingDecision.InviteContactRemovedAdminReinstate, through NotProvisionable).
+        if (resolution.Action != InviteContactAction.AlreadyProvisioned)
+        {
+            return null;
+        }
+
+        logger.LogWarning(
+            "[EXT-INVITE] Refused work-account invite ({ReasonCode}): contact {ContactId} already signs in with a portal "
+            + "account — nothing written", ContactBindingDecision.InviteContactAlreadyBound, resolution.ContactId);
+        return new ProvisionOutcome(resolution.ContactId ?? Guid.Empty, "Refused",
+            new InviteRefusal(ContactBindingDecision.InviteContactAlreadyBound,
+                ContactIdentityBinder.InviteMessage(ContactBindingDecision.InviteContactAlreadyBound)!));
+    }
+
     /// <summary>A refused invite: HTTP 409 with a stable reason code and a human message.</summary>
     internal sealed record InviteRefusal(string ReasonCode, string Message);
 
@@ -173,9 +328,12 @@ public static class InviteExternalUserEndpoint
     /// An invite whose contact lookup could not be read (the decision's <c>Fail</c>): not a refusal and not a
     /// collision — nothing was decided, nothing was created or flagged. HTTP 503 with the decision's own reason
     /// code and message, so the client can tell "try again" from a refusal and from an unknown fault (task 141,
-    /// verifier finding 5: this used to be thrown into the generic 500 and the code was dropped).
+    /// verifier finding 5: this used to be thrown into the generic 500 and the code was dropped). ISS-005 (#1673): an
+    /// invite that cannot resolve the owner of the contact it would create is the same shape with
+    /// <paramref name="StatusCode"/> 500 (an operator fix, not a retry).
     /// </summary>
-    internal sealed record InviteLookupFailure(string ReasonCode, string Message, string? Title = null);
+    internal sealed record InviteLookupFailure(
+        string ReasonCode, string Message, string? Title = null, int StatusCode = StatusCodes.Status503ServiceUnavailable);
 
     /// <summary>The <see cref="ProvisionOutcome.Status"/> of a contact whose CIAM account already existed (no onboarding email sent).</summary>
     internal const string AlreadyProvisionedStatus = "AlreadyProvisioned";
@@ -214,6 +372,18 @@ public static class InviteExternalUserEndpoint
         return outcome.Status is ProvisionedStatus or ExistingAccountStatus ? (true, null) : (null, null);
     }
 
+    /// <summary>
+    /// Slice C2b: <c>/invite</c>'s answer for a contact that already has an account ("AlreadyProvisioned"): no email was
+    /// due or sent, so <c>emailSent</c> is <c>false</c> with <see cref="ContactBindingDecision.InviteContactAlreadyHasAccount"/>,
+    /// the staff text, and the portal sign-in link the work-account notice carries (no code). Pure.
+    /// </summary>
+    internal static InviteExternalUserResponse AlreadyHasAccountResponse(Guid contactId, string portalUrl, string? customerKey)
+        => new(
+            contactId, portalUrl, AlreadyProvisionedStatus, EmailSent: false,
+            EmailErrorCode: ContactBindingDecision.InviteContactAlreadyHasAccount,
+            StaffMessage: ContactIdentityBinder.InviteMessage(ContactBindingDecision.InviteContactAlreadyHasAccount),
+            SignInUrl: BuildInviteLink(portalUrl, customerKey, inviteCode: null));
+
     /// <summary>The provisioning outcome: a contact and a status, or a refusal, or a lookup failure.</summary>
     /// <param name="EmailFailed">
     /// Task 185 slice E: the invite email (onboarding or existing-account) was attempted and did not send, so nobody holds
@@ -222,7 +392,15 @@ public static class InviteExternalUserEndpoint
     /// </param>
     internal sealed record ProvisionOutcome(
         Guid ContactId, string Status, InviteRefusal? Refusal = null, InviteLookupFailure? Failure = null,
-        bool EmailFailed = false);
+        bool EmailFailed = false)
+    {
+        /// <summary>
+        /// Slice C2b: the invite stamp's email hash this invite wrote on the contact, set on a work-account invite, whose
+        /// notice the caller sends: when the notice does not send, the caller retracts the invite with it
+        /// (<see cref="ExternalInviteService.SendWorkAccountNoticeAsync"/>). Null otherwise.
+        /// </summary>
+        internal string? WrittenInviteStamp { get; init; }
+    }
 
     /// <summary>
     /// The invite core: resolve-or-create the contact, stamp the pending-invite marker (task 184), create the CIAM account
@@ -244,9 +422,11 @@ public static class InviteExternalUserEndpoint
         string? customerKey,
         ILogger logger,
         InviteContactResolution? resolution,
-        CancellationToken ct)
+        CancellationToken ct,
+        Guid? workAccountTenantId = null)
         => ExternalInviteService.ProvisionAsync(
-            request, dataverseClient, ciamProvisioner, emailService, binder, portalUrl, customerKey, logger, resolution, ct);
+            request, dataverseClient, ciamProvisioner, emailService, binder, portalUrl, customerKey, logger, resolution, ct,
+            workAccountTenantId);
 
     /// <summary>
     /// Task 185 (design note §1.1, §12 I-12) — the invite link: <c>{PortalUrl}/?customer={key}#invite={code}</c>, the code in
@@ -317,11 +497,17 @@ public static class InviteExternalUserEndpoint
         }
     }
 
-    /// <summary>The 409 ProblemDetails for a refused invite (both <c>/invite</c> and <c>/invite-and-grant</c>).</summary>
+    /// <summary>
+    /// The 409 ProblemDetails for a refused invite (both <c>/invite</c> and <c>/invite-and-grant</c>). C5: titled by reason
+    /// code, as the grant core titles its refusals: a person whose external access an administrator removed is "External
+    /// access removed", never an identity collision; every other refusal keeps "Identity collision".
+    /// </summary>
     internal static IResult RefusalResult(InviteRefusal refusal, HttpContext httpContext)
         => Results.Problem(
             statusCode: StatusCodes.Status409Conflict,
-            title: "Identity collision",
+            title: refusal.ReasonCode == ContactBindingDecision.InviteContactRemovedAdminReinstate
+                ? "External access removed"
+                : "Identity collision",
             detail: refusal.Message,
             extensions: new Dictionary<string, object?>
             {
@@ -353,7 +539,7 @@ public static class InviteExternalUserEndpoint
     /// </summary>
     internal static IResult LookupFailureResult(InviteLookupFailure failure, HttpContext httpContext)
         => Results.Problem(
-            statusCode: StatusCodes.Status503ServiceUnavailable,
+            statusCode: failure.StatusCode,
             title: failure.Title ?? "Contact lookup unavailable",
             detail: failure.Message,
             extensions: new Dictionary<string, object?>

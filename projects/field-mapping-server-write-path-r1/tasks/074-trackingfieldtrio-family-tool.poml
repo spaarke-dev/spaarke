@@ -1,0 +1,95 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="074" project="field-mapping-server-write-path-r1">
+  <metadata>
+    <title>TrackingFieldTrio Family tool — optional onOpenFamily callback, PCF wiring, Matter/Project/WA/Event forms (FR-33)</title>
+    <phase>7 W7 Record family service and Family tool</phase>
+    <gate>073 complete</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies a shared component and a PCF control (.tsx/.ts).</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Follows the existing onOpenGrantModal / onOpenEmailMembers callback pattern exactly.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>W7-C</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>073</deps>
+    <tags>pcf, react, fluent-ui, frontend, testing</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Add a Family icon to the TrackingFieldTrio toolbar via a new optional `onOpenFamily` callback (same pattern as `onOpenGrantModal` / `onOpenEmailMembers`), wire it in the PCF `index.ts` to render `RecordFamilyModal` for the form's record, and confirm the PCF is on the Matter, Project, Work Assignment and Event main forms.</prompt>
+  <role>SPAARKE front-end developer, PCF + shared Fluent v9 components.</role>
+  <goal>On all four forms the Family icon opens the Family modal for the current record; consumers that do not pass onOpenFamily render exactly as before.</goal>
+
+  <context>
+    <background>spec.md FR-33; design.md §12.3 F. The owner confirmed the PCF is already on the Work Assignment main form ({7e578eef-761d-f111-88b3-7c1e520aa4df}); verify the other three from the form XML or live metadata.</background>
+    <relevant-files>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/TrackingFieldTrio/TrackingFieldTrio.tsx (toolbar ~:339; props ~:314)</file>
+      <file role="modify">src/client/pcf/TrackingFieldTrio/index.ts</file>
+      <file role="modify">src/client/pcf/TrackingFieldTrio/ControlManifest.Input.xml (version bump only)</file>
+      <file role="modify">the TrackingFieldTrio component tests (snapshot / toolbar tests next to the component)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="FR-33">onOpenFamily is optional; absent → no icon, no layout change (existing snapshots unchanged).</constraint>
+    <constraint source="ADR-021 / ADR-022">Fluent v9 icon, semantic tokens, React version as bundled.</constraint>
+    <constraint source="PCF-DEPLOYMENT-GUIDE">Bump the version in every location the pcf-deploy skill's version table lists; production build `npm run build:prod` (FAILURE-MODES AP-1). Deployment is task 076.</constraint>
+    <constraint source="NFR-05">Measure and record the PCF bundle-size delta.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/patterns/pcf/control-initialization.md</file>
+      <file>.claude/patterns/pcf/theme-management.md</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+      <file>docs/guides/PCF-DEPLOYMENT-GUIDE.md</file>
+      <file>.claude/skills/ui-test/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Declare FULL rigor; confirm 073 is merged.</step>
+    <step order="1">Add the tests (icon shown only with the callback; click calls it; existing snapshots unchanged); confirm they fail.</step>
+    <step order="2">Add the prop and icon; wire the PCF; bump version; production build; record bundle delta.</step>
+    <step order="3">Verify the PCF's presence on the four main forms (read-only); record the form ids.</step>
+    <step order="4">Update TASK-INDEX.md to ✅ [done]; notes in notes/task-074-notes.md.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the PCF is not on one of the four main forms, STOP and ask the owner before any form change.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/TrackingFieldTrio/TrackingFieldTrio.tsx</output>
+    <output type="code">src/client/pcf/TrackingFieldTrio/index.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">With onOpenFamily the Family icon renders and clicking it calls the callback once.</criterion>
+    <criterion testable="true">Without onOpenFamily the component's existing snapshots and tests pass unchanged.</criterion>
+    <criterion testable="true">The PCF renders RecordFamilyModal for the form's entity logical name and id.</criterion>
+    <criterion testable="true">Production build succeeds; version bumped in every listed location; bundle delta recorded.</criterion>
+    <criterion testable="true">The four main forms' ids hosting the PCF are recorded in the notes.</criterion>
+  </acceptance-criteria>
+
+  <ui-tests>
+    <test name="Family icon on each form">
+      <steps><step>Open a Matter, Project, Work Assignment and Event record</step><step>Click the Family icon in the tracking toolbar</step><step>Check the console</step></steps>
+      <expected>The Family modal opens for that record; no console errors</expected>
+    </test>
+    <test name="Dark Mode Compliance (ADR-021)">
+      <steps><step>Toggle dark mode; view the toolbar and modal</step></steps>
+      <expected>Icon and modal use semantic tokens</expected>
+    </test>
+  </ui-tests>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+  <notes>
+    Completed 2026-10-29. PR #2383 (task/fm-074 @ 0e7444ec5b, auto-merge), held until 072 (#2459) merged, then updated from master 11c3739d7e and re-verified: 7 suites / 136 tests (17 new Family tests), Invoke-PcfBuildProd PASS, bundle 1,092,856 bytes (+16,662 vs 1.0.54). TrackingFieldTrio 1.0.54 → 1.0.55 in all five version locations; the committed Solution bundle is refreshed at deploy (076).
+    Optional onOpenFamily icon (not gated by canGrantAccess; only on a bound record) opens the shared RecordFamilyModal with the gated authenticatedFetch (ADR-028: no token). Push / Assigned To actions stay disabled until 040.
+    The To Do form also carries the control; sprk_todo is a Filing family table (RecordFamilyEdges), so the icon is correct there. Live icon-per-form and dark-mode checks: task 076. Notes: notes/task-074-notes.md.
+    rework: none task 074
+  </notes>
+</task>

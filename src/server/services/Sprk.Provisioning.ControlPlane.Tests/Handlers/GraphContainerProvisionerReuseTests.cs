@@ -140,7 +140,7 @@ public sealed class GraphContainerProvisionerReuseTests
 
     private static GraphContainerProvisioner Provisioner(RoutedGraph graph) => new(
         new SpeConfidentialClientGraphFactory((_, _) => new FixedCredential(), graph),
-        Options.Create(new SpeContainerOptions()),
+        Options.Create(new SpeContainerOptions { ReplicationRetryDelay = TimeSpan.FromMilliseconds(1) }),
         NullLogger<GraphContainerProvisioner>.Instance);
 
     private static (HttpStatusCode, string) Ok(string json) => (HttpStatusCode.OK, json);

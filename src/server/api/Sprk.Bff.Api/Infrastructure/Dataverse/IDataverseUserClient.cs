@@ -21,6 +21,15 @@ namespace Sprk.Bff.Api.Infrastructure.Dataverse;
 /// all authenticate app-only and are off-limits for the dataverse.* tool namespace).
 /// </para>
 /// <para>
+/// <b>The ONE exception</b> (unified-access-control-r2 task 188, D7; CLAUDE.md §6.5 path B, APPROVED in owner round 111,
+/// 2026-10-21): the injected app-only NARROWING seams — <c>AppOnlyDocumentNarrowing</c> (with its hide-only overload
+/// <c>AppOnlyDocumentNarrowingExtensions.HiddenDocumentIdsAsync</c>) and, off the tool namespace,
+/// <c>InternalRouteDocumentNarrowing</c>. They re-read documents by id under the BFF's app-only identity and return a HIDE
+/// DECISION ONLY: no app-only row or column reaches a tool result, and every row a tool returns still comes from a read
+/// through this interface. Their consumers are an allow-list (<c>ExternalDocumentNarrowingGuardTests</c>, K7). See
+/// <c>.claude/constraints/auth.md</c>, "External document narrowing — D7".
+/// </para>
+/// <para>
 /// This is a module boundary by design: handler unit tests mock this interface (allowed per
 /// <c>docs/standards/TEST-ARCHITECTURE.md</c> mock-boundary rules — it is NOT an
 /// <c>HttpMessageHandler</c> mock) and exercise handler behavior under simulated user security

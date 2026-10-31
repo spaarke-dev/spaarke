@@ -98,7 +98,12 @@ public static class ProjectClosureEndpoint
         RecordContainerResolver containerResolver,
         HttpContext httpContext,
         ILogger<Program> logger,
-        CancellationToken ct)
+        CancellationToken ct,
+        // The identity binding store for THIS environment (registered by ExternalAccessModule): a grantee whose binding read
+        // EMPTY and who has no email has "nothing to clear" only while the binding columns' read is proven
+        // (RevokeExternalAccessEndpoint.ResolveContactMembershipKeyAsync). Optional so direct callers keep compiling; without
+        // it that case fails closed.
+        IContactIdentityStore? identityStore = null)
     {
         if (request.ProjectId == Guid.Empty)
         {
@@ -240,7 +245,7 @@ public static class ProjectClosureEndpoint
             {
                 var sweep = GranteesToSweep(activeRecords, history?.Rows ?? [], logger);
                 var removal = await RemoveRevokedGranteesAsync(
-                    speContainerMembership, dataverseClient, closureContainerId, sweep, historyRead, logger, ct);
+                    speContainerMembership, dataverseClient, closureContainerId, sweep, historyRead, logger, ct, identityStore);
 
                 speRemovedCount = removal.Removed;
                 granteeRemoval = removal;
@@ -685,7 +690,8 @@ public static class ProjectClosureEndpoint
         IReadOnlyList<ExternalAccessRecord> revokedRecords,
         bool sweepComplete,
         ILogger logger,
-        CancellationToken ct)
+        CancellationToken ct,
+        IContactIdentityStore? identityStore = null)
     {
         var unresolved = 0;
         var noKey = 0;
@@ -756,7 +762,8 @@ public static class ProjectClosureEndpoint
             SpeMembershipKey key;
             try
             {
-                key = await RevokeExternalAccessEndpoint.ResolveContactMembershipKeyAsync(dataverseClient, contactId, ct)
+                key = await RevokeExternalAccessEndpoint.ResolveContactMembershipKeyAsync(
+                        dataverseClient, identityStore, contactId, ct)
                     .ConfigureAwait(false);
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested)

@@ -205,3 +205,35 @@ in the tens of kilobytes; not re-measured (the brief: re-measure only if the cod
 | 2 | the leftover pass ignores the Secure answer | `CommunicationFiling_IntoASecureMatter_…` (the round-3 version, over an empty world, did not see it) | 1 failed | pass |
 | 3 | `IsFiled` counts any lookup (a contact too) as filed | `GateRecordSharing_OverTheRealResolver_…` | 1 failed | pass |
 | 4 | the round-3 helper | `AnOwnerThatCannotBeRead_IsLoggedOnce_…` (both), `Filing_ALeftoverRevokeThatFailsAgain_…` | 3 failed | pass |
+
+## 042c: thread-filed communications at write (2026-10-19)
+
+**Defect (F1, #2110 review).** `ShareAtWriteAsync` re-owns a just-created gate record only when `ShareWithCommunicationShareesAsync` returns
+`true` ("filed"). A communication filed by a THREAD JOIN (uac-r2 `ThreadResolver.JoinCoreAsync`) carries only `sprk_communicationthread` plus a
+team owner and never its own parent lookups, so `IsFiled` is false and the team-owned branch returned `false`. Race: the gate job decides owner
+U while the email is unfiled; the join re-owns the email to the matter's team, and its `AfterRefileAsync` finds no record yet; the writer then
+creates the record owned by U; `ShareAtWriteAsync` sees "not filed" and returns. The record stays U-owned with no shares, so the matter's team
+reads the email but not its gate record.
+
+**Fix.** In `ShareWithCommunicationShareesAsync` the combined "team-owned or not a systemuser" condition is split. (a) A team-owned
+communication (`owningteam` set) logs that its gate records follow the communication's owner (no participant share, D-169) and returns `true`,
+so the caller at write re-owns through the resolver. (b) Any other non-user owner keeps the old log and `false`. `IsFiled` and its
+`ParentsOf(...)` call are untouched (master has a different overload there). `ReownAsync` is unchanged: it asks `RecordOwnershipResolver`, a
+Secure answer is left to `SecureChildReconciler`, and Unchanged leaves the record as it is. `MirrorCommunicationSharesAsync` ignores the return
+value; the only other caller of `ShareAtWriteAsync` is `DecisionRecordWriter`, which ignores it too.
+
+**Tests.** `AtWrite_ACommunicationFiledByAThreadJoin_ReownsTheRecordToTheResolversTeam_WithNoParticipantShare` and
+`AtWrite_ACommunicationFiledByAThreadJoin_UnderASecureTeam_LeavesTheRecordToTheReconciler`.
+
+**Known limit (from the #2110 review).** uac-r2's same-parent skip (`ChildRecordEndpoints.cs:542`, `DataverseDocumentsEndpoints.cs:225`, on their
+branch) removes one retry path for a gate record whose earlier re-own failed (EventId 50317). A real move still retries it.
+
+**Known limits (review round, 2026-10-19).**
+- (a) A thread join that lands AFTER the at-write read of the communication is covered only by uac-r2 PR #2110 (`JoinThreadAsync` -> `AfterRefileAsync` -> `ReownAfterFilingAsync`). That PR is not yet on master or on this branch. Until it merges, a late join leaves the record owned by the user who decided.
+- (b) For a team-owned communication the resolver answers either Secure or the communication BU's default team (`RecordOwnershipResolver.cs` ~:1529, ~:1615); it never answers Unchanged. A communication reassigned to a queue team or to another BU's team inside the window therefore re-owns the record to that BU's default team, and the decider can lose read. The same applies when FR-E7 category routing (`CommunicationEnrichmentService` ~:724-765) makes the communication unfiled-but-team-owned while it races the gate job. This is not a regression: the writer already does the same when the communication is team-owned at decision time (or routing landed first). It is consistent with D-169.
+- (e) uac-r2 #2113 review, 2026-10-19:
+  - A later owner-only change of the communication to an ordinary team (no re-file) leaves the record stale: user-owned, keeping its participant shares, and unreadable by the new team. Nothing over-shares. This is pre-existing and tracked as #2114. A move to Secure is covered by the reconciler's recent-changes pass plus the synchronizer trim.
+  - #2110 also closes a second window: an at-write read that falls between a join's lookup write and its owner write. That read grants participant shares, which the join's `AfterRefileAsync` → `ReownAfterFilingAsync` then revokes.
+  - Between the write and the reconciler pass, a Secure-family record stays readable by its user owner. That window is unchanged and was accepted by the owner (uac-r2 round 28 item 2).
+- (c) The Secure answer adds no participant share and keeps the record user-owned until the `SecureChildReconciler` recent-changes pass picks it up (`SecureChildLineage` covers `sprk_decisionrecord`). A Refused answer now logs `FilingReownFailed` (50317), where before it was skipped silently.
+- (d) The team-owned check reads only `owningteam`. A row with an `ownerid` of type team and no `owningteam` would fall through to "not owned by a user". Dataverse always populates `owningteam`, so this is not reachable today.

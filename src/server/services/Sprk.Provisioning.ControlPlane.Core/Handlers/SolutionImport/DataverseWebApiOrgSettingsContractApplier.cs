@@ -12,7 +12,10 @@
 // already at or above its target is left alone (numeric compare — an
 // environment at 30 MB is never lowered to 25 MB); the rest go in ONE PATCH
 // of `organizations({organizationid})` with `If-Match: *` (update only, never
-// an upsert).
+// an upsert). A target of -1 (Dataverse's "unlimited" — auditretentionperiodv2
+// = Forever) is met only by -1. After the PATCH a second GET reads the row back
+// and fails the step on any setting that did not take: Dataverse answers 204 to
+// a PATCH whose column it ignores (#2027).
 //
 // IDENTITY: the same as H6's importer and verifier — the FR-39 ordered
 // credential chain (WorkerDataverseCredentialFactory, MI-FIC first: the
@@ -48,9 +51,14 @@ public sealed partial class DataverseWebApiOrgSettingsContractApplier : IOrgSett
     private const string ODataVersion = "4.0";
     private const int DiagnosticTailBudget = 800;
 
+    /// <summary>Dataverse's "unlimited" value for a numeric organization setting (e.g. audit retention Forever).</summary>
+    private const long UnlimitedSetting = -1;
+
     private readonly HttpClient _httpClient;
     private readonly Func<string, string, string, TokenCredential> _credentialFactory;
     private readonly ILogger<DataverseWebApiOrgSettingsContractApplier> _logger;
+    private readonly WorkerCredentialSelectionOptions _propagation;
+    private readonly TimeProvider _timeProvider;
 
     /// <summary>
     /// Production constructor (typed-client registration in Worker/Program.cs). The credential is selected by the
@@ -60,7 +68,8 @@ public sealed partial class DataverseWebApiOrgSettingsContractApplier : IOrgSett
         HttpClient httpClient,
         IOptions<SolutionImportOptions> options,
         WorkerDataverseCredentialFactory credentialFactory,
-        ILogger<DataverseWebApiOrgSettingsContractApplier> logger)
+        ILogger<DataverseWebApiOrgSettingsContractApplier> logger,
+        TimeProvider? timeProvider = null)
         : this(
             httpClient,
             logger,
@@ -71,7 +80,9 @@ public sealed partial class DataverseWebApiOrgSettingsContractApplier : IOrgSett
                     tenantId,
                     clientId,
                     string.IsNullOrWhiteSpace(clientSecret) ? null : clientSecret)
-                .Credential)
+                .Credential,
+            options.Value.Credentials,
+            timeProvider)
     {
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(credentialFactory);
@@ -84,7 +95,9 @@ public sealed partial class DataverseWebApiOrgSettingsContractApplier : IOrgSett
     internal DataverseWebApiOrgSettingsContractApplier(
         HttpClient httpClient,
         ILogger<DataverseWebApiOrgSettingsContractApplier> logger,
-        Func<string, string, string, TokenCredential> credentialFactory)
+        Func<string, string, string, TokenCredential> credentialFactory,
+        WorkerCredentialSelectionOptions? propagation = null,
+        TimeProvider? timeProvider = null)
     {
         ArgumentNullException.ThrowIfNull(httpClient);
         ArgumentNullException.ThrowIfNull(logger);
@@ -92,6 +105,8 @@ public sealed partial class DataverseWebApiOrgSettingsContractApplier : IOrgSett
         _httpClient = httpClient;
         _logger = logger;
         _credentialFactory = credentialFactory;
+        _propagation = propagation ?? new WorkerCredentialSelectionOptions();
+        _timeProvider = timeProvider ?? TimeProvider.System;
     }
 
     /// <inheritdoc/>
@@ -130,8 +145,10 @@ public sealed partial class DataverseWebApiOrgSettingsContractApplier : IOrgSett
         {
             var credential = _credentialFactory(request.TenantId, request.ClientId, request.ClientSecret ?? string.Empty);
             var scope = new Uri(envUri, "/").ToString().TrimEnd('/') + "/.default";
-            token = await credential.GetTokenAsync(new TokenRequestContext(new[] { scope }), cancellationToken)
-                .ConfigureAwait(false);
+            // T186 audit: this is H6's FIRST token exchange for the just-created BFF app / FIC — wait out Entra propagation.
+            token = await EntraPropagationRetry.GetTokenAsync(
+                credential, new TokenRequestContext(new[] { scope }), _propagation, _timeProvider, _logger,
+                "H6 org settings", cancellationToken).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
         {
@@ -143,8 +160,13 @@ public sealed partial class DataverseWebApiOrgSettingsContractApplier : IOrgSett
         // (1) Read the organization row once.
         var names = request.OrgSettings.Keys.OrderBy(n => n, StringComparer.Ordinal).ToArray();
         var select = "organizationid," + string.Join(",", names);
-        using var get = NewRequest(HttpMethod.Get, new Uri(envUri, $"/api/data/v9.2/organizations?$select={select}"), token);
-        var read = await SendAsync(get, "organization GET", request.TargetDataverseUrl, cancellationToken).ConfigureAwait(false);
+        // T186 audit: H6's first Dataverse call — the H10 application user / role may not be effective yet, so a
+        // 401/403 is retried within the shared budget before it becomes the failure below.
+        var propagationGate = new DataverseAppUserPropagationGate(_propagation, _timeProvider, _logger, "H6 org settings");
+        var orgUri = new Uri(envUri, $"/api/data/v9.2/organizations?$select={select}");
+        var read = await SendAsync(
+            () => NewRequest(HttpMethod.Get, orgUri, token), "organization GET", request.TargetDataverseUrl,
+            propagationGate, cancellationToken).ConfigureAwait(false);
         if (read.Failure is not null)
         {
             return new OrgSettingsContractOutcome.Failure(read.Failure + " Nothing was applied.");
@@ -177,19 +199,55 @@ public sealed partial class DataverseWebApiOrgSettingsContractApplier : IOrgSett
             return new OrgSettingsContractOutcome.Success(appliedOrAlreadyCorrect);
         }
 
-        using var patch = NewRequest(HttpMethod.Patch, new Uri(envUri, $"/api/data/v9.2/organizations({organizationId})"), token);
-        patch.Headers.TryAddWithoutValidation("If-Match", "*");
-        patch.Content = new StringContent(BuildPatchBody(toWrite), Encoding.UTF8, "application/json");
-        var written = await SendAsync(patch, "organization PATCH", request.TargetDataverseUrl, cancellationToken).ConfigureAwait(false);
+        var patchBody = BuildPatchBody(toWrite);
+        var written = await SendAsync(
+            () =>
+            {
+                var patch = NewRequest(HttpMethod.Patch, new Uri(envUri, $"/api/data/v9.2/organizations({organizationId})"), token);
+                patch.Headers.TryAddWithoutValidation("If-Match", "*");
+                patch.Content = new StringContent(patchBody, Encoding.UTF8, "application/json");
+                return patch;
+            },
+            "organization PATCH", request.TargetDataverseUrl, propagationGate, cancellationToken).ConfigureAwait(false);
         if (written.Failure is not null)
         {
             return new OrgSettingsContractOutcome.Failure(
                 $"{written.Failure} Settings not applied: {string.Join(", ", toWrite.Select(kv => $"{kv.Key}={kv.Value}"))}.");
         }
 
+        // (3) Read the row back: a PATCH of a column Dataverse ignores still returns 204, so success is what the row
+        // now says, not what the PATCH answered (#2027).
+        var readBack = await SendAsync(
+            () => NewRequest(HttpMethod.Get, orgUri, token), "organization read-back GET", request.TargetDataverseUrl,
+            propagationGate, cancellationToken).ConfigureAwait(false);
+        var applied = string.Join(", ", toWrite.Select(kv => $"{kv.Key}={kv.Value}"));
+        if (readBack.Failure is not null)
+        {
+            return new OrgSettingsContractOutcome.Failure(
+                $"The PATCH of {applied} returned success, but reading it back failed: {readBack.Failure}");
+        }
+        if (!TryParseOrganization(readBack.Body, names, out _, out var after, out var readBackFailure))
+        {
+            return new OrgSettingsContractOutcome.Failure(
+                $"The PATCH of {applied} returned success, but the read-back is unusable: {readBackFailure}");
+        }
+        var didNotTake = toWrite
+            .Where(kv => !after.TryGetValue(kv.Key, out var value) || value is null
+                         || !SettingAlreadyAtOrAboveTarget(value, kv.Value))
+            .Select(kv => $"{kv.Key} (target {kv.Value}, reads back " +
+                          $"{(after.TryGetValue(kv.Key, out var value) ? value ?? "null" : "absent")})")
+            .ToArray();
+        if (didNotTake.Length > 0)
+        {
+            return new OrgSettingsContractOutcome.Failure(
+                $"The organization PATCH against '{request.TargetDataverseUrl}' returned success, but the environment " +
+                $"did not take: {string.Join("; ", didNotTake)}. Set it in the Power Platform admin center or find why " +
+                "the column is refused, then resume.");
+        }
+
         foreach (var (name, target) in toWrite)
         {
-            appliedOrAlreadyCorrect[name] = target;
+            appliedOrAlreadyCorrect[name] = after[name] ?? target;
         }
         _logger.LogInformation(
             "H6 org settings applied on env={EnvUrl}: {Applied} (was {Previous})",
@@ -201,13 +259,19 @@ public sealed partial class DataverseWebApiOrgSettingsContractApplier : IOrgSett
 
     /// <summary>
     /// Numeric-first idempotency check: prefer <see cref="long"/> compare (<c>maxuploadfilesize</c> and peers only ever
-    /// go up); otherwise case-insensitive equality. Internal for unit tests.
+    /// go up); otherwise case-insensitive equality. A target of -1 is Dataverse's "unlimited"
+    /// (<c>auditretentionperiodv2</c> = Forever), the top of the range, so only -1 meets it — a 30-day retention is
+    /// below Forever, not above it. Internal for unit tests.
     /// </summary>
     internal static bool SettingAlreadyAtOrAboveTarget(string current, string target)
     {
         if (long.TryParse(current, NumberStyles.Integer, CultureInfo.InvariantCulture, out var currentNumber)
             && long.TryParse(target, NumberStyles.Integer, CultureInfo.InvariantCulture, out var targetNumber))
         {
+            if (targetNumber == UnlimitedSetting || currentNumber == UnlimitedSetting)
+            {
+                return currentNumber == UnlimitedSetting;
+            }
             return currentNumber >= targetNumber;
         }
         return string.Equals(current, target, StringComparison.OrdinalIgnoreCase);
@@ -312,11 +376,13 @@ public sealed partial class DataverseWebApiOrgSettingsContractApplier : IOrgSett
     }
 
     private async Task<(string Body, string? Failure)> SendAsync(
-        HttpRequestMessage request, string what, string environmentUrl, CancellationToken cancellationToken)
+        Func<HttpRequestMessage> buildRequest, string what, string environmentUrl,
+        DataverseAppUserPropagationGate propagationGate, CancellationToken cancellationToken)
     {
         try
         {
-            using var response = await _httpClient.SendAsync(request, cancellationToken).ConfigureAwait(false);
+            using var response = await propagationGate.SendAsync(_httpClient, buildRequest, cancellationToken)
+                .ConfigureAwait(false);
             var body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
             if (!response.IsSuccessStatusCode)
             {
@@ -336,6 +402,6 @@ public sealed partial class DataverseWebApiOrgSettingsContractApplier : IOrgSett
     private static string Truncate(string s)
         => string.IsNullOrEmpty(s) || s.Length <= DiagnosticTailBudget ? s : s[..DiagnosticTailBudget] + "...[truncated]";
 
-    [GeneratedRegex("^[a-z][a-z0-9_]*$", RegexOptions.CultureInvariant)]
+    [GeneratedRegex(@"^[a-z][a-z0-9_]*\z", RegexOptions.CultureInvariant)]
     private static partial Regex ColumnName();
 }

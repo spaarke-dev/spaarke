@@ -386,6 +386,8 @@ function uploadOverride(
   context: ExternalUserContextResponse | null
 ): boolean | undefined {
   if (root !== 'projects') return undefined;
+  // Task 036 fix round 1: a per-record caller's level says only what they may see; the list's `canCreate` decides.
+  if (context?.writeAccessPerRecord === true) return undefined;
   const entry = context?.projects.find(p => p.projectId.toLowerCase() === id.toLowerCase());
   return levelCanUpload(mapAccessLevelString(entry?.accessLevel));
 }
@@ -410,6 +412,7 @@ const DocumentsSection: React.FC<{
         canUpload={uploadOverride(root, id, context)}
         canDownload
         caller={caller}
+        writeAccessPerRecord={context?.writeAccessPerRecord === true}
       />
     </section>
   );
@@ -427,6 +430,10 @@ const DocumentDownload: React.FC<{ record: DetailRecord; documentId: string }> =
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   if (parents.length === 0) return null;
+  // R3 ISS-011 (#1886): the BFF derives `hasFile` on a documents-module row. A document with no file is still shown (its
+  // fields above), but offers no Download: it could only answer 409 "No file attached". Only an explicit false hides it;
+  // absent (an older BFF) keeps today's behaviour.
+  if (record.hasFile === false) return null;
 
   const shownName = formatDetailValue(record, { attribute: 'sprk_documentname' });
   const name = shownName !== EMPTY_VALUE ? shownName : 'document';

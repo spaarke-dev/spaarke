@@ -124,7 +124,8 @@ public class SecureRecordIsolationCensusJobTests
     [Fact]
     public async Task Run_WhenAUserHasBeenMovedIntoTheSecureBusinessUnit_LogsCriticalNamingThem()
     {
-        _directory.User(Guid.NewGuid(), "Moved Attorney", SecureBu, accessMode: 0, isDisabled: false, isApplication: false);
+        var moved = Guid.NewGuid();
+        _directory.User(moved, "Moved Attorney", SecureBu, accessMode: 0, isDisabled: false, isApplication: false);
 
         var result = await RunAsync();
 
@@ -132,7 +133,9 @@ public class SecureRecordIsolationCensusJobTests
         result.ErrorMessage.Should().Contain(nameof(SecureBuVerdict.SecureBusinessUnitHasUsers));
         _log.Entries.Should().Contain(e => e.Level == LogLevel.Critical
                                            && e.Message.Contains(nameof(SecureBuVerdict.SecureBusinessUnitHasUsers))
-                                           && e.Message.Contains("Moved Attorney"));
+                                           && e.Message.Contains(moved.ToString()));
+        _log.Entries.Should().NotContain(e => e.Message.Contains("@example.test") || e.Message.Contains("Moved Attorney"),
+            "#2130: a user is named by systemuser id; the Critical line carries no UPN or display name");
     }
 
     [Fact]
@@ -145,14 +148,15 @@ public class SecureRecordIsolationCensusJobTests
         result.Success.Should().BeFalse();
         _log.Entries.Should().Contain(e => e.Level == LogLevel.Critical
                                            && e.Message.Contains(nameof(SecureBuVerdict.OwnerTeamHasMembers))
-                                           && e.Message.Contains("# mi-bff-api-dev"));
+                                           && e.Message.Contains(AppUser.ToString()));
     }
 
     [Fact]
     public async Task Run_WhenAHumanReachesTheSecureBusinessUnitByDepth_LogsCritical()
     {
         // Spaarke Basic User's ROOT copy, held directly by a user in root: Deep from an ancestor of the secure BU.
-        _directory.User(Guid.NewGuid(), "Root Paralegal", RootBu, accessMode: 0, isDisabled: false, isApplication: false,
+        var paralegal = Guid.NewGuid();
+        _directory.User(paralegal, "Root Paralegal", RootBu, accessMode: 0, isDisabled: false, isApplication: false,
             BasicUserRootCopy);
 
         var result = await RunAsync();
@@ -160,19 +164,71 @@ public class SecureRecordIsolationCensusJobTests
         result.Success.Should().BeFalse();
         _log.Entries.Should().Contain(e => e.Level == LogLevel.Critical
                                            && e.Message.Contains(nameof(SecureBuVerdict.HumanPrincipalReachesSecureBusinessUnit))
-                                           && e.Message.Contains("Root Paralegal"));
+                                           && e.Message.Contains(paralegal.ToString()));
+        _log.Entries.Should().NotContain(e => e.Message.Contains("@example.test") || e.Message.Contains("Root Paralegal"),
+            "#2130: the Critical line is logged every 15 minutes and names the principal by systemuser id only");
+        result.ResultJson.Should().NotContain("@example.test", "#2130: the same messages are returned in ResultJson");
+    }
+
+    /// <summary>
+    /// UAC 2026-10-26: an owner-accepted role exception (UAC owner round 127) is logged at Information under a fixed prefix, by
+    /// systemuser id only, and leaves the run isolated — never a Critical line.
+    /// </summary>
+    [Fact]
+    public async Task Run_WhenAHumanDirectlyHoldsAnAcceptedRoleException_LogsItAtInformation_AndStaysIsolated()
+    {
+        var analysisRole = Guid.NewGuid();
+        var analysisAdmin = Guid.NewGuid();
+        _directory.Role(analysisRole, "Spaarke AI Analysis Admin", RootBu, analysisRole);
+        _directory.Depth(analysisRole, _codifiedChildPrivileges["sprk_analysis"], PrivilegeDepth.Global);
+        _directory.Depth(analysisRole, _codifiedChildPrivileges["sprk_analysisoutput"], PrivilegeDepth.Global);
+        _directory.User(analysisAdmin, "Billing Person", RootBu, accessMode: 0, isDisabled: false, isApplication: false, analysisRole);
+
+        var result = await RunAsync();
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        _log.Entries.Should().NotContain(e => e.Level == LogLevel.Critical);
+        _log.Entries.Should().ContainSingle(e => e.Message.StartsWith("[SECURE-CENSUS] AcceptedException "))
+            .Which.Should().Match<(LogLevel Level, string Message)>(e =>
+                e.Level == LogLevel.Information
+                && e.Message.Contains($"systemuserId={analysisAdmin}")
+                && e.Message.Contains("privileges=prvReadsprk_analysis, prvReadsprk_analysisoutput")
+                && e.Message.Contains("UAC owner round 127"));
+        _log.Entries.Should().NotContain(e => e.Message.Contains("@example.test") || e.Message.Contains("Billing Person"),
+            "#2130: the line names the principal by systemuser id only");
+        _log.Entries.Should().ContainSingle(e => e.Message.Contains("heartbeat status=isolated"));
+    }
+
+    /// <summary>
+    /// #2131 round 1 must-fire, through the production reader: an interactive (access mode 0), enabled, non-application
+    /// user whose full name starts with <c>#</c> is human. The old reader also required <c>!name.StartsWith('#')</c> and
+    /// so skipped exactly this user.
+    /// </summary>
+    [Fact]
+    public async Task Run_WhenAnInteractiveUserNamedWithAHashReachesByDepth_LogsCritical()
+    {
+        var guest = Guid.NewGuid();
+        _directory.User(guest, "# Guest", RootBu, accessMode: 0, isDisabled: false, isApplication: false, BasicUserRootCopy);
+
+        var result = await RunAsync();
+
+        result.Success.Should().BeFalse();
+        _log.Entries.Should().Contain(e => e.Level == LogLevel.Critical
+                                           && e.Message.Contains(nameof(SecureBuVerdict.HumanPrincipalReachesSecureBusinessUnit))
+                                           && e.Message.Contains(guest.ToString()));
     }
 
     [Fact]
     public async Task Run_WhenTheOffendingUserIsOnTheSecondPage_StillFindsThem()
     {
-        _directory.User(Guid.NewGuid(), "Second Page User", SecureBu, accessMode: 0, isDisabled: true, isApplication: false);
+        var secondPage = Guid.NewGuid();
+        _directory.User(secondPage, "Second Page User", SecureBu, accessMode: 0, isDisabled: true, isApplication: false);
         _directory.SplitIntoTwoPages("systemuser");
 
         var result = await RunAsync();
 
         result.Success.Should().BeFalse("a census that stopped at page one would omit this user and report isolation");
-        _log.Entries.Should().Contain(e => e.Level == LogLevel.Critical && e.Message.Contains("Second Page User"));
+        _log.Entries.Should().Contain(e => e.Level == LogLevel.Critical && e.Message.Contains(secondPage.ToString()));
         _directory.PagesRequested("systemuser").Should().Be(2);
     }
 
@@ -236,13 +292,14 @@ public class SecureRecordIsolationCensusJobTests
     public async Task Run_WhenACodifiedPrivilegeDoesNotExistInTheEnvironment_ReportsIt_AndStillGradesTheExposureClauses()
     {
         _directory.RemovePrivilege(_codifiedChildPrivileges["sprk_memo"]);
-        _directory.User(Guid.NewGuid(), "Moved Attorney", SecureBu, accessMode: 0, isDisabled: false, isApplication: false);
+        var moved = Guid.NewGuid();
+        _directory.User(moved, "Moved Attorney", SecureBu, accessMode: 0, isDisabled: false, isApplication: false);
 
         var result = await RunAsync();
 
         result.Success.Should().BeFalse();
         _log.Entries.Should().Contain(e => e.Level == LogLevel.Error && e.Message.Contains("prvReadsprk_Memo"));
-        _log.Entries.Should().Contain(e => e.Level == LogLevel.Critical && e.Message.Contains("Moved Attorney"));
+        _log.Entries.Should().Contain(e => e.Level == LogLevel.Critical && e.Message.Contains(moved.ToString()));
     }
 
     /// <summary>A missing GUARDED privilege still stops the run: clause 1 cannot be graded without it.</summary>
@@ -389,7 +446,7 @@ public class SecureRecordIsolationCensusJobTests
             {
                 ["systemuserid"] = id,
                 ["fullname"] = name,
-                ["domainname"] = name.Replace(" ", ".", StringComparison.Ordinal) + "@spaarke.com",
+                ["domainname"] = name.Replace(" ", ".", StringComparison.Ordinal) + "@example.test",
                 ["accessmode"] = new OptionSetValue(accessMode),
                 ["isdisabled"] = isDisabled,
                 ["businessunitid"] = new EntityReference("businessunit", businessUnit)

@@ -1,5 +1,6 @@
 using Microsoft.Xrm.Sdk;
 using Spaarke.Dataverse;
+using Sprk.Bff.Api.Services.Access;
 using Sprk.Bff.Api.Services.Dataverse.Models;
 
 namespace Sprk.Bff.Api.Services.Dataverse;
@@ -106,8 +107,9 @@ public sealed class CoreAncestorResolver
     /// access edge.
     /// </summary>
     /// <remarks>
-    /// ⚠️ Not every child entity carries all four: <c>sprk_invoice</c> carries none of them (it links through
-    /// typed <c>sprk_matter</c> / <c>sprk_project</c> lookups), while <c>sprk_todo</c> and <c>sprk_event</c>
+    /// ⚠️ Not every child entity carries all four: <c>sprk_invoice</c> carries only
+    /// <c>sprk_regardingworkassignment</c> (ebilling-r1 task 012; it links a matter or project through typed
+    /// <c>sprk_matter</c> / <c>sprk_project</c> lookups), while <c>sprk_todo</c> and <c>sprk_event</c>
     /// carry all four (live spaarkedev1, read-only, 2026-10-01 — an earlier note here
     /// that <c>sprk_todo</c> lacks <c>sprk_regardingservicerequest</c> was stale). Presence is therefore always
     /// resolved against live metadata, never assumed — reading a non-existent column would fault and turn a
@@ -179,7 +181,27 @@ public sealed class CoreAncestorResolver
             // CHILD target, so C# and TypeScript agree for a memo target. Without this entry the C# side read a memo
             // target as Unclassified while the TypeScript side derived it (verifier item 1).
             ["sprk_memo"] = StandardRootColumns(),
-            ["sprk_invoice"] = [("sprk_project", "sprk_project"), ("sprk_matter", "sprk_matter")],
+            // ebilling-r1 task 013 (FR-05): task 012 gave the invoice sprk_regardingworkassignment (live spaarkedev1,
+            // 2026-10-15) beside its typed sprk_matter / sprk_project, so an invoice filed under a work assignment is a root
+            // column too. The TypeScript mirror and RecordContainerResolver.ChildAncestorLinks changed in the same change.
+            ["sprk_invoice"] =
+            [
+                ("sprk_project", "sprk_project"), ("sprk_matter", "sprk_matter"),
+                ("sprk_regardingworkassignment", "sprk_workassignment"),
+            ],
+            // ebilling-r1 task 026 (FR-15, D-94, uac-r2 option A): the Invoice Line, so a Signal or Decision Record about a line
+            // (sprk_regardinginvoiceline) is stamped with the line's root. Root columns are ONLY the line's own core lookups
+            // (FR-05, D-75), read live, spaarkedev1 2026-10-16 (EntityDefinitions(sprk_billingevent)/ManyToOneRelationships):
+            // sprk_project -> sprk_project, sprk_matter -> sprk_matter, sprk_regardingworkassignment -> sprk_workassignment.
+            // NEVER sprk_invoice (a line may in future not belong to exactly one invoice) and never sprk_resolvedtimekeeper
+            // (a timekeeper is a party). Not a CHILD (ChildRecordEntities unchanged): an intermediate only, like the budget.
+            // More than one of these set is a derivation error (SingleRootIntermediates). The TypeScript mirror and
+            // RecordContainerResolver.ChildAncestorLinks changed in the same change.
+            ["sprk_billingevent"] =
+            [
+                ("sprk_project", "sprk_project"), ("sprk_matter", "sprk_matter"),
+                ("sprk_regardingworkassignment", "sprk_workassignment"),
+            ],
             // The canonical document link vocabulary's (Spaarke.Dataverse.DocumentLinkFields — the one declaration)
             // links to a project / matter / work assignment: the typed column and its related twin. EXCLUDED, by name:
             // the related service request (a service request cannot carry sprk_issecure, and the storage resolver
@@ -263,13 +285,23 @@ public sealed class CoreAncestorResolver
             ["sprk_decisionrecord"] = OntologySubjectSources(),
         };
 
-    /// <summary>The subject lookups of a Signal / Decision Record that name an intermediate (task 144): the stamp's sources.</summary>
+    /// <summary>The subject lookups of a Signal / Decision Record that name an intermediate (task 144): the stamp's sources.
+    /// ebilling-r1 task 026 (FR-15, D-94): + the invoice-line subject, <c>sprk_regardinginvoiceline</c> → <c>sprk_billingevent</c>
+    /// (live spaarkedev1 2026-10-16, <c>scripts/ebilling/Deploy-EbillingSignalLineSubjectSchema.ps1</c>).</summary>
     private static IReadOnlyList<(string Column, string Intermediate)> OntologySubjectSources() =>
     [
         ("sprk_regardingcommunication", "sprk_communication"), ("sprk_regardingdocument", "sprk_document"),
         ("sprk_regardingevent", "sprk_event"), ("sprk_regardinginvoice", "sprk_invoice"),
-        ("sprk_regardingtodo", "sprk_todo"),
+        ("sprk_regardingtodo", "sprk_todo"), ("sprk_regardinginvoiceline", "sprk_billingevent"),
     ];
+
+    /// <summary>
+    /// ebilling-r1 task 026 (FR-05, D-94 condition 3): intermediates whose row names exactly ONE root. A line naming more than one
+    /// (a matter AND a project, say) is a derivation ERROR here, never two stamps: FR-05 refuses, never picks, and the D-75 rule
+    /// means nothing on the row can say which one it belongs to. (Every other intermediate may legitimately name several roots.)
+    /// </summary>
+    internal static readonly IReadOnlySet<string> SingleRootIntermediates =
+        new HashSet<string>(["sprk_billingevent"], StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
     /// The typed PARTY regarding lookups of each table that carries the polymorphic pair (task 155 f5, from the f3 / f4
@@ -506,6 +538,22 @@ public sealed class CoreAncestorResolver
         => _columnProbe(entityLogicalName, ct);
 
     /// <summary>
+    /// The CORE record table a <c>sprk_recordtype_ref</c> catalog row names (<c>sprk_recordlogicalname</c>), for a row that stores
+    /// its core as a pair (<c>sprk_corerecordtype</c> + <c>sprk_corerecordid</c>: a Signal, a Decision Record). <c>null</c> when the
+    /// row names a table that is not one of <see cref="CoreRecordEntities"/>. The catalog is configuration, read with the BFF's own
+    /// client. A fault (a missing row included) propagates: each caller maps it to its own contract.
+    /// </summary>
+    public static async Task<string?> CoreTableOfRecordTypeAsync(
+        IGenericEntityService entityService, Guid recordTypeRefId, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(entityService);
+        var row = await entityService.RetrieveAsync("sprk_recordtype_ref", recordTypeRefId, ["sprk_recordlogicalname"], ct)
+            .ConfigureAwait(false);
+        var table = row.GetAttributeValue<string>("sprk_recordlogicalname")?.Trim().ToLowerInvariant();
+        return table is not null && CoreRecordEntities.Contains(table, StringComparer.Ordinal) ? table : null;
+    }
+
+    /// <summary>
     /// Build an <see cref="EntityColumnProbe"/> backed by <see cref="MetadataService"/>. A metadata failure
     /// surfaces as an exception so the caller fails closed rather than reading an empty column set and
     /// concluding "no ancestor".
@@ -648,13 +696,16 @@ public sealed class CoreAncestorResolver
                 targetEntityLogicalName, targetRecordId);
             var failure = $"Failed to read core-ancestor lookups from {targetEntityLogicalName}({targetRecordId}): {ex.Message}";
             // Ontology task 142: a target that does not exist is a data condition, not a fault (still Error, still no write).
-            return IsRecordNotFound(ex) ? CoreAncestorResult.Refused(failure) : CoreAncestorResult.Failed(failure);
+            return IsRecordNotFound(ex)
+                ? CoreAncestorResult.Refused(failure, CoreAncestorRefusalKind.NotFound)
+                : CoreAncestorResult.Failed(failure);
         }
 
         if (row is null)
         {
             return CoreAncestorResult.Refused(
-                $"Core-ancestor read returned no row for {targetEntityLogicalName}({targetRecordId}).");
+                $"Core-ancestor read returned no row for {targetEntityLogicalName}({targetRecordId}).",
+                CoreAncestorRefusalKind.NotFound);
         }
 
         var stamps = new List<CoreAncestorStamp>();
@@ -679,7 +730,8 @@ public sealed class CoreAncestorResolver
                         targetEntityLogicalName, targetRecordId, rootEntity, already.RecordId, reference.Id);
                     return CoreAncestorResult.Refused(
                         $"{targetEntityLogicalName}({targetRecordId}) names two different {rootEntity} records, so its "
-                        + "root cannot be determined.");
+                        + "root cannot be determined.",
+                        CoreAncestorRefusalKind.MultipleRoots);
                 }
 
                 continue;
@@ -699,7 +751,90 @@ public sealed class CoreAncestorResolver
             return new CoreAncestorResult(CoreAncestorStatus.NoAncestor, [], null);
         }
 
+        if (stamps.Count > 1 && SingleRootIntermediates.Contains(targetEntityLogicalName))
+        {
+            // ebilling-r1 task 026 (FR-05, D-94): a line names exactly one core record. Two is not a choice this resolver makes.
+            _logger.LogError(
+                "{Entity}({Id}) names {Count} core records ({Roots}); FR-05 allows one, so no stamp is derived.",
+                targetEntityLogicalName, targetRecordId, stamps.Count, string.Join(", ", stamps.Select(s => s.EntityType)));
+            return CoreAncestorResult.Refused(
+                $"{targetEntityLogicalName}({targetRecordId}) names more than one core record, so its root cannot be determined.",
+                CoreAncestorRefusalKind.MultipleRoots);
+        }
+
         return new CoreAncestorResult(CoreAncestorStatus.Derived, stamps, null);
+    }
+
+    /// <summary>
+    /// ebilling-r1 task 013 (FR-05, D-75): the core record a STORED invoice-family row regards, read from the row's OWN
+    /// core-record lookups (<see cref="InvoiceFamilyCoreRecordGuard.ColumnsToRead"/>) and decided by
+    /// <see cref="InvoiceFamilyCoreRecordGuard.Check(string, Func{string, object?})"/>: exactly one, or a refusal.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>D-75.</b> A line (<c>sprk_billingevent</c>) is never resolved through its <c>sprk_invoice</c>: that column is
+    /// not read, and a line with no core lookup of its own is refused. A line may in future not belong to exactly one
+    /// invoice.</para>
+    /// <para><b>Fail closed (NFR-01).</b> A metadata failure, a table missing one of its lookup columns in this
+    /// environment (the "exactly one" rule cannot be checked on a partial read) or a read failure is
+    /// <see cref="InvoiceFamilyCoreRecordGuard.ReadFailedCode"/> — never <see cref="InvoiceFamilyCoreRecordGuard.NoCoreRecordCode"/>.
+    /// A row that does not exist is <see cref="InvoiceFamilyCoreRecordGuard.RecordNotFoundCode"/>. Does not throw.</para>
+    /// <para>This is NOT <see cref="ResolveStampsAsync"/>: it answers "which core record does this row name" for the family's
+    /// own writers and readers (tasks 026, 049, 100), and changes no stamp topology.</para>
+    /// </remarks>
+    public async Task<InvoiceFamilyCoreRecord> ResolveInvoiceFamilyCoreRecordAsync(
+        string entityLogicalName, Guid recordId, CancellationToken ct = default)
+    {
+        var entity = entityLogicalName?.Trim().ToLowerInvariant() ?? string.Empty;
+        var columns = InvoiceFamilyCoreRecordGuard.ColumnsToRead(entity);
+        if (columns is null)
+        {
+            return InvoiceFamilyCoreRecord.Refused(entity, InvoiceFamilyCoreRecordGuard.UnknownEntityCode,
+                $"'{entity}' is not an invoice-family table.");
+        }
+
+        if (recordId == Guid.Empty)
+        {
+            return InvoiceFamilyCoreRecord.Refused(entity, InvoiceFamilyCoreRecordGuard.ReadFailedCode,
+                $"The {entity} id is Guid.Empty; refusing to derive its core record.");
+        }
+
+        Entity? row;
+        try
+        {
+            var present = await _columnProbe(entity, ct).ConfigureAwait(false);
+            var missing = columns.Where(c => !present.Contains(c)).ToList();
+            if (missing.Count > 0)
+            {
+                _logger.LogError(
+                    "{Entity} lacks its core-record lookup column(s) {Columns} in this environment; refusing to derive its core record.",
+                    entity, string.Join(", ", missing));
+                return InvoiceFamilyCoreRecord.Refused(entity, InvoiceFamilyCoreRecordGuard.ReadFailedCode,
+                    $"{entity} lacks {string.Join(", ", missing)} in this environment, so its core record cannot be checked.");
+            }
+
+            row = await _entityService.RetrieveAsync(entity, recordId, columns.ToArray(), ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            if (IsRecordNotFound(ex))
+            {
+                return InvoiceFamilyCoreRecord.Refused(entity, InvoiceFamilyCoreRecordGuard.RecordNotFoundCode,
+                    $"{entity}({recordId:D}) does not exist.");
+            }
+
+            _logger.LogError(ex, "Reading the core-record lookups of {Entity}({Id}) failed; failing closed per NFR-01.",
+                entity, recordId);
+            return InvoiceFamilyCoreRecord.Refused(entity, InvoiceFamilyCoreRecordGuard.ReadFailedCode,
+                $"The core-record lookups of {entity}({recordId:D}) could not be read: {ex.Message}");
+        }
+
+        if (row is null)
+        {
+            return InvoiceFamilyCoreRecord.Refused(entity, InvoiceFamilyCoreRecordGuard.RecordNotFoundCode,
+                $"{entity}({recordId:D}) does not exist.");
+        }
+
+        return InvoiceFamilyCoreRecordGuard.Check(entity, column => row.Attributes.TryGetValue(column, out var value) ? value : null);
     }
 
     /// <summary>A read that failed because the row does not exist (<c>0x80040217</c> anywhere in the chain).</summary>
@@ -719,7 +854,8 @@ public sealed class CoreAncestorResolver
     /// </summary>
     /// <remarks>
     /// A derived ancestor the host has no column for (a child entity lacking the matching
-    /// <c>sprk_regarding{core}</c> column — e.g. <c>sprk_invoice</c>, which carries none of them; the earlier
+    /// <c>sprk_regarding{core}</c> column — e.g. <c>sprk_invoice</c>, which carries only
+    /// <c>sprk_regardingworkassignment</c> (ebilling-r1 task 012); the earlier
     /// example, <c>sprk_todo</c> lacking <c>sprk_regardingservicerequest</c>, was stale as of live metadata on
     /// 2026-10-01) is a genuine hole in child inheritance. It is
     /// RETURNED as <c>unstampable</c> and logged, never silently dropped: it is a schema finding for the owner,
@@ -965,7 +1101,8 @@ public sealed class CoreAncestorResolver
     /// <paramref name="parents"/> takes from them (<see cref="InheritedAccessPermission"/>), or <see langword="null"/> when
     /// it takes none — the host is not one of the four tables or lacks the column, the row names no parent (its own value
     /// stands), or the parents could not be read (logged as a warning; nothing is written, and the reconcile job corrects
-    /// it within its cycle). Never throws (cancellation aside): the value is display-only, so it never fails a write.
+    /// it within its cycle). Never throws (cancellation aside): on To Do, Event and Communication the value is display only,
+    /// so it never fails a write. A document gets none (task 189's fence, see <c>InheritedAccessPermissionAsync</c>).
     /// </summary>
     /// <remarks>
     /// For a writer that UPDATES an existing row with a field dictionary it did not hand to
@@ -979,8 +1116,9 @@ public sealed class CoreAncestorResolver
         CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(fields);
-        if (!InheritedAccessPermission.AppliesTo(hostEntityLogicalName))
-            return null;
+        if (!InheritedAccessPermission.AppliesTo(hostEntityLogicalName)
+            || InheritedAccessPermission.RecordsOwnNarrowing(hostEntityLogicalName))
+            return null; // task 189's fence: no document value from here, and no read of the document
 
         Entity? stored = null;
         if (existingRowId != Guid.Empty)
@@ -1039,9 +1177,15 @@ public sealed class CoreAncestorResolver
     /// when it differs. Reads the row as stored, so every filing parent counts. A parentless row is never written (its own
     /// value stands). Never throws (cancellation aside): a failure is logged and the reconcile job corrects it within its
     /// cycle.
+    /// <para>Task 189 (D7 T7a, #2126): a document holds max(own narrowing, inherited), decided by
+    /// <see cref="InheritedAccessPermission.DecideDocument"/> from its record (<see cref="AccessInheritance.Column"/>) — the
+    /// same decision as the reconcile job. A document created Restricted under a Standard matter stays Restricted, and its
+    /// narrowing is recorded as its own in the same update. A parentless document's value is never written; a narrowing on
+    /// it is recorded. Fail closed: an unknown level writes nothing; with no record column, or an unreadable record, its value
+    /// is only raised to what its parents give, never lowered, and no record is written (fix round C, K1+K2).</para>
     /// </summary>
-    /// <returns>The value the row now holds from its parents, or <see langword="null"/> when it takes none or it could not
-    /// be decided.</returns>
+    /// <returns>The value the row now holds (a document: max(own, inherited)), or <see langword="null"/> when it takes none
+    /// from parents or it could not be decided.</returns>
     public async Task<int?> RefreshInheritedAccessPermissionAsync(
         string entityLogicalName, Guid recordId, CancellationToken ct = default)
     {
@@ -1055,6 +1199,9 @@ public sealed class CoreAncestorResolver
             var columns = await walk.ColumnsForAsync(table!, ct).ConfigureAwait(false);
             if (!columns.Contains(InheritedAccessPermission.Column))
                 return null; // the environment lacks the column (the schema script adds it)
+
+            if (InheritedAccessPermission.RecordsOwnNarrowing(table))
+                return await RefreshDocumentAccessPermissionAsync(table!, recordId, walk, columns, ct).ConfigureAwait(false);
 
             var row = await _entityService.RetrieveAsync(table!, recordId, columns.ToArray(), ct).ConfigureAwait(false);
             var parents = await walk.ParentsOfAsync(row, ct).ConfigureAwait(false);
@@ -1088,6 +1235,73 @@ public sealed class CoreAncestorResolver
         }
     }
 
+    /// <summary>
+    /// Task 189 (D7 T7a, #2126): <see cref="RefreshInheritedAccessPermissionAsync"/> for a document. The row is read and
+    /// written in one step, as the To Do path is (no re-read: the read is the moment before the write, which is the window
+    /// the reconcile job's re-read leaves too). Value and record go in ONE update.
+    /// </summary>
+    private async Task<int?> RefreshDocumentAccessPermissionAsync(
+        string table, Guid recordId, ParentLineageWalk walk, IReadOnlyList<string> columns, CancellationToken ct)
+    {
+        // Fix round C (K2): without the record column the document's own narrowing cannot be known, so its value is only
+        // raised to what its parents give (never lowered), and the record column is neither read nor written.
+        var recordColumn = (await _columnProbe(table, ct).ConfigureAwait(false)).Contains(AccessInheritance.Column);
+        if (!recordColumn)
+        {
+            _logger.LogWarning(
+                "[INHERITED-ACCESS-PERMISSION] {Table} {Id}: this environment has no {Column} (the own-narrowing record), so " +
+                "its value is only raised to what its parents give, never lowered, and no record is written.",
+                table, recordId, AccessInheritance.Column);
+        }
+
+        var row = await _entityService.RetrieveAsync(
+                table, recordId, recordColumn ? [.. columns, AccessInheritance.Column] : [.. columns], ct)
+            .ConfigureAwait(false);
+        var parents = await walk.ParentsOfAsync(row, ct).ConfigureAwait(false);
+        InheritedAccessPermission.Answer? answer = null;
+        if (parents.Count > 0)
+        {
+            answer = await InheritedAccessPermission.ResolveAsync(walk, parents, ct, (table, recordId)).ConfigureAwait(false);
+            if (answer.Status != ParentTopsStatus.Found || answer.Value is null)
+            {
+                _logger.LogWarning(
+                    "[INHERITED-ACCESS-PERMISSION] {Table} {Id}: its inherited Access Permission cannot be decided ({Reason}); " +
+                    "left as it is, and the secure-child reconciliation job looks at it again.", table, recordId, answer.Reason);
+                return null;
+            }
+        }
+
+        var stored = row.GetAttributeValue<OptionSetValue>(InheritedAccessPermission.Column)?.Value;
+        var decision = recordColumn
+            ? InheritedAccessPermission.DecideDocument(
+                stored, row.GetAttributeValue<string>(AccessInheritance.Column), parents, answer?.Value)
+            : InheritedAccessPermission.DecideDocumentRaiseOnly(stored, parents, answer?.Value, undecided: null);
+        if (decision.Undetermined is { } why)
+        {
+            if (!decision.WriteValue)
+            {
+                _logger.LogWarning(
+                    "[INHERITED-ACCESS-PERMISSION] {Table} {Id}: {Reason}; nothing is written to it (fail closed), and the " +
+                    "secure-child reconciliation job looks at it again.", table, recordId, why);
+                return null;
+            }
+
+            _logger.LogWarning(
+                "[INHERITED-ACCESS-PERMISSION] {Table} {Id}: {Reason}; its record is left as it is, its value is only raised " +
+                "to what its parents give, and the secure-child reconciliation job looks at it again.", table, recordId, why);
+        }
+
+        var fields = new Dictionary<string, object>();
+        if (decision.WriteValue)
+            fields[InheritedAccessPermission.Column] = new OptionSetValue(decision.Target);
+        if (decision.Record is { } record)
+            fields[AccessInheritance.Column] = record.Serialize();
+        if (fields.Count > 0)
+            await _entityService.UpdateAsync(table, recordId, fields, ct).ConfigureAwait(false);
+
+        return parents.Count == 0 ? null : decision.Target;
+    }
+
     private async Task<int?> InheritedAccessPermissionAsync(
         string hostEntityLogicalName,
         IReadOnlyList<(string Table, Guid Id)> payloadParents,
@@ -1097,6 +1311,14 @@ public sealed class CoreAncestorResolver
         Guid self = default)
     {
         if (!InheritedAccessPermission.AppliesTo(hostEntityLogicalName))
+            return null;
+
+        // Task 189 (D7 T7a): the fence. A document holds max(own narrowing, inherited), and only
+        // InheritedAccessPermission.DecideDocument's writers write it (the reconcile job and
+        // RefreshInheritedAccessPermissionAsync), with its record in the same update. This path gives a bare inherited
+        // value, so a document gets none: StampAsync, DeriveForHostAsync, ApplyInheritedAccessPermissionAsync and
+        // ResolveInheritedAccessPermissionAsync never write one, whoever calls them for a document.
+        if (InheritedAccessPermission.RecordsOwnNarrowing(hostEntityLogicalName))
             return null;
 
         // The writer's target is a parent when the host can be filed under its table (a contact, an organization or a
@@ -1148,6 +1370,18 @@ public sealed class CoreAncestorResolver
         }
     }
 
+    /// <summary>
+    /// A failed derivation as a stamping outcome: its message, permanence and refusal kind. A failure that carries no kind is
+    /// <see cref="CoreAncestorRefusalKind.Transient"/> only when it is not permanent (ebilling-r1 task 026 fix-round-2, uac-r2
+    /// K4): a permanent error built with the public constructor is never labelled a transient fault.
+    /// </summary>
+    internal static CoreAncestorStampOutcome StampFailureOf(CoreAncestorResult result) =>
+        CoreAncestorStampOutcome.Failed(result.Error ?? "Core-ancestor derivation failed.") with
+        {
+            IsPermanent = result.IsPermanent,
+            RefusalKind = result.RefusalKind ?? (result.IsPermanent ? null : CoreAncestorRefusalKind.Transient),
+        };
+
     private async Task<(CoreAncestorResult? Result, IReadOnlySet<string>? HostColumns, CoreAncestorStampOutcome? Failure)>
         DeriveAndProbeAsync(
             string hostEntityLogicalName,
@@ -1167,10 +1401,7 @@ public sealed class CoreAncestorResolver
             : await ResolveStampsAsync(targetEntityLogicalName, targetRecordId, ct).ConfigureAwait(false);
         if (!result.Succeeded)
         {
-            return (null, null, CoreAncestorStampOutcome.Failed(result.Error ?? "Core-ancestor derivation failed.") with
-            {
-                IsPermanent = result.IsPermanent,
-            });
+            return (null, null, StampFailureOf(result));
         }
 
         if (result.Stamps.Count == 0)
@@ -1299,12 +1530,38 @@ public sealed record CoreAncestorResult(
     /// no target (built with the public constructor) is never reused by <c>StampAsync(..., alreadyDerived)</c> (ontology task 042).</summary>
     internal (string Entity, Guid Id)? For { get; init; }
 
+    /// <summary>
+    /// ebilling-r1 task 026 fix-round-1: on an <see cref="CoreAncestorStatus.Error"/>, WHY the derivation failed, so a writer can say
+    /// "ambiguous" for a target that names more than one root without reading the message. <see langword="null"/> on success.
+    /// Additive: <see cref="Status"/>, <see cref="Stamps"/>, <see cref="Error"/> and <see cref="IsPermanent"/> are unchanged for every
+    /// caller (<see cref="CoreAncestorRefusalKind.Transient"/> exactly when <see cref="IsPermanent"/> is false).
+    /// </summary>
+    public CoreAncestorRefusalKind? RefusalKind { get; init; }
+
     internal static CoreAncestorResult Failed(string error) =>
-        new(CoreAncestorStatus.Error, [], error);
+        new(CoreAncestorStatus.Error, [], error) { RefusalKind = CoreAncestorRefusalKind.Transient };
 
-    internal static CoreAncestorResult Refused(string error) =>
-        Failed(error) with { IsPermanent = true };
+    internal static CoreAncestorResult Refused(string error, CoreAncestorRefusalKind kind) =>
+        Failed(error) with { IsPermanent = true, RefusalKind = kind };
 
+}
+
+/// <summary>
+/// ebilling-r1 task 026 fix-round-1: why a core-ancestor derivation failed (<see cref="CoreAncestorResult.RefusalKind"/>).
+/// </summary>
+public enum CoreAncestorRefusalKind
+{
+    /// <summary>A fault (a read or metadata failure, a throttle, a caller error): a retry may succeed. Not permanent.</summary>
+    Transient,
+
+    /// <summary>The target row does not exist. Permanent.</summary>
+    NotFound,
+
+    /// <summary>
+    /// The target names more than one root: two different records of one root table, or, for a
+    /// <see cref="CoreAncestorResolver.SingleRootIntermediates"/> table, more than one core record. Permanent.
+    /// </summary>
+    MultipleRoots,
 }
 
 /// <summary>
@@ -1338,6 +1595,9 @@ public sealed record CoreAncestorStampOutcome(
     /// <summary>On a failure, true when it is a data condition, not a fault (<see cref="CoreAncestorResult.IsPermanent"/>).</summary>
     public bool IsPermanent { get; init; }
 
+    /// <summary>On a failure, why (<see cref="CoreAncestorResult.RefusalKind"/>); <see langword="null"/> on success.</summary>
+    public CoreAncestorRefusalKind? RefusalKind { get; init; }
+
     internal static CoreAncestorStampOutcome Failed(string error) =>
-        new(CoreAncestorStatus.Error, [], [], error);
+        new(CoreAncestorStatus.Error, [], [], error) { RefusalKind = CoreAncestorRefusalKind.Transient };
 }

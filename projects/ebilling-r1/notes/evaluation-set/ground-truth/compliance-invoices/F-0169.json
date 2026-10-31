@@ -1,0 +1,31 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0169",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0169","generator_id":"gen_eval_set.py@1 F-0169","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0169.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-01"},
+ "header":{"firm":"Fenwick and Yardley LLP","firm_invoice_number":"INV-2025-45406","invoice_date":"2026-08-01","billing_period_start":"2026-07-01","billing_period_end":"2026-07-31","firm_matter_reference":"20471-0001","po_number":"PO-4547427","fees_total":4011.5,"expenses_total":4425.11,"adjustments_total":0.0,"total_due":8436.61,"currency":"USD"},
+ "timekeepers":[{"name":"Aisha Mbeki","title":"Paralegal","rate":190.0,"billed_as":"AM"},{"name":"Aisha Oyelaran","title":"Associate","rate":330.0,"billed_as":"AO"},{"name":"Imani Dunleavy","title":"Associate","rate":365.0,"billed_as":"ID"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2026-07-01","timekeeper":"AM","timekeeper_name":"Aisha Mbeki","timekeeper_title":"Paralegal","title":"Para","hours":2.8,"rate":190.0,"amount":532.0,"narrative":"Plan strategy for upcoming phase of the regulatory inquiry with team","codes":["L120","A101"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2026-07-10","timekeeper":"ID","timekeeper_name":"Imani Dunleavy","timekeeper_title":"Associate","title":"Assoc","hours":0.5,"rate":365.0,"amount":182.5,"narrative":"Review expert report served by Northwind Logistics","codes":["L340","A104"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2026-07-10","timekeeper":"ID","timekeeper_name":"Imani Dunleavy","timekeeper_title":"Associate","title":"Assoc","hours":0.5,"rate":365.0,"amount":182.5,"narrative":"Review expert report served by Northwind Logistics","codes":["L340","A104"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2026-07-13","timekeeper":"AO","timekeeper_name":"Aisha Oyelaran","timekeeper_title":"Associate","title":"Assoc","hours":2.0,"rate":330.0,"amount":660.0,"narrative":"Review and organize incoming production from Ironbridge Steel for matter file","codes":["L140","A104"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2026-07-16","timekeeper":"AO","timekeeper_name":"Aisha Oyelaran","timekeeper_title":"Associate","title":"Assoc","hours":1.8,"rate":330.0,"amount":594.0,"narrative":"Draft complaint in the supply agreement","codes":["L250","A103"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2026-07-20","timekeeper":"AO","timekeeper_name":"Aisha Oyelaran","timekeeper_title":"Associate","title":"Assoc","hours":2.1,"rate":330.0,"amount":693.0,"narrative":"Research authority for pretrial brief","codes":["L250","A102"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2026-07-22","timekeeper":"AO","timekeeper_name":"Aisha Oyelaran","timekeeper_title":"Associate","title":"Assoc","hours":0.3,"rate":330.0,"amount":99.0,"narrative":"Review and organize incoming production from Northwind Logistics for matter file","codes":["L140","A104"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2026-07-27","timekeeper":"AO","timekeeper_name":"Aisha Oyelaran","timekeeper_title":"Associate","title":"Assoc","hours":1.8,"rate":330.0,"amount":594.0,"narrative":"Review and analyze answer and affirmative defenses received from Bluepine Holdings","codes":["L310","A104"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"fee","date":"2026-07-28","timekeeper":"ID","timekeeper_name":"Imani Dunleavy","timekeeper_title":"Associate","title":"Assoc","hours":1.3,"rate":365.0,"amount":474.5,"narrative":"Prepare monthly status report to client regarding the distribution agreement","codes":["L190","A111"],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"expense","date":"2026-07-03","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":3094.57,"amount":3094.57,"narrative":"Consulting expert fees","codes":["E119"],"page":1,"narrative_style":"clear"},
+  {"n":11,"line_type":"expense","date":"2026-07-07","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":542.52,"amount":542.52,"narrative":"Court reporter and transcript - deposition","codes":["E115"],"page":1,"narrative_style":"clear"},
+  {"n":12,"line_type":"expense","date":"2026-07-07","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":744.58,"amount":744.58,"narrative":"Court reporter and transcript - deposition","codes":["E115"],"page":1,"narrative_style":"clear"},
+  {"n":13,"line_type":"expense","date":"2026-07-07","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":4.0,"rate":10.86,"amount":43.44,"narrative":"Postage - certified mail","codes":["E108"],"page":1,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["735 Elm Court","Phoenix","Tax ID 36-7099743"],"template":"T23","pages":1},
+ "rule_set_id":"RS-01",
+ "context":{"matter_open":"2025-09-09","matter_close":"2026-10-29","matter_budget":58746.0,"approved_timekeepers":["Gregory Thornbury","Naomi Pemberton","Imani Dunleavy","Aisha Mbeki","Aisha Oyelaran","Oliver Lockhart"],"invoice_received_date":"2026-08-03"},
+ "expected_findings":[
+  {"rule_id":"RS-01-R07","rule_type":"Duplicate","scope":"line","line_refs":[3],"consequence":"Disallow","related_line_refs":[2]}
+ ],
+ "seeded_violations":1
+}

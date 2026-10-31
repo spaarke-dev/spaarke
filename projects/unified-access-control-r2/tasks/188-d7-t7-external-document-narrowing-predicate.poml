@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="188" project="unified-access-control-r2">
+  <metadata>
+    <title>D7 T7: one predicate hides internal-only and Restricted documents on every external document surface (#2126 / ISS-015)</title>
+    <phase>Session 28: UAC (owner round 110, 2026-10-20)</phase>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Security: the external plane reads app-only, so this predicate IS the wall that keeps internal-only email documents from partners.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Security and tenant isolation; fails closed; touches several external read surfaces and the AI chat tools.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Edits the external document read path and the AI chat tool guard. Task 189 edits ChildAccessPermissionReconciler only; no file overlap. Do not touch the shared collection-page reader in ExternalDataService (~:2926) or CollectionPrefer.</parallel-reason>
+    <deps>036 deployed with the flag on (done 2026-10-20, master 4f5f22694)</deps>
+    <tags>bff-api, security, access-control, tenant-isolation, testing</tags>
+    <estimated-effort>2-3 days</estimated-effort>
+    <origin>
+      #2126 (R3 ISS-015, word-add-in-r1 evidence). Owner direction 2026-10-20 (relayed by R3), accepted in round 110: "document access follows its parent (unless more restricted)".
+      Design: notes/2119-manage-access-all-forms-design.md §6.1-§6.4 (T7). Read §6 in full first.
+    </origin>
+  </metadata>
+
+  <goal>
+Partners reach documents through root grants and ExternalMultiRootRule only (I-14: a filed child's Access Permission is display only). Documents saved from an internal-only email, and documents a user marked Restricted, are therefore visible to partners today; only task 078 hides email documents, and only in the AI chat tools.
+
+Implement one UAC-owned predicate, applied on every external document surface. A document is visible to an external caller only when ALL hold:
+1. Root grants allow it (unchanged).
+2. Its own Access Permission (sprk_document) is not Restricted.
+3. It does not come from an internal-only or non-Open communication, derived at read time and never stamped: the communication is _sprk_relatedcommunication_value; when that is empty, the parent document's (sprk_parentdocument) communication, then the grandparent's. At most 3 hops; a cycle or a longer chain fails closed. The communication is visible only when ExternalCallerCommunicationGuard.ReadVisibleCommunicationIdsAsync says so (reuse it, do not copy the 065 rule).
+Fail closed: an unreadable flag, thread, own value or parent chain hides the document.
+
+Task 078's AI-tool rule moves onto this predicate so there is exactly one copy.
+  </goal>
+
+  <surfaces>
+    Confirm each against master first and record file:line in the task notes.
+    - External document list(s), download, versions, preview, every SPE file route reachable by an external caller, module /fetch documents.
+    - AI chat tools that read documents for an external caller (task 078's current rule; find its call sites).
+    - Classify any other external surface that returns document content or metadata (in scope, or SAFE with reason).
+  </surfaces>
+
+  <constraints>
+    - ADR-028 and the project CLAUDE.md binding rules apply. Every endpoint keeps its auth. No new endpoint or policy. Answer CLAUDE.md §11 in the notes for any new type, interface or DI registration; prefer extending ExternalMultiRootRule / the existing external document read path.
+    - Fail closed everywhere. Logs carry ids and counts only.
+    - Query cost bounded: batched reads per page (one read per hop level, plus the guard's own reads). State the measured worst case in the notes.
+    - Cache: state in the notes whether a document-set cache is in play. If one is, an own Access Permission change and a communication flag change (CommunicationInternalOnlyFloor.LowerWhenSafeAsync) must evict it; otherwise the read is uncached.
+    - Do not edit the shared collection-page reader (~:2926) or the CollectionPrefer line. Do not touch AnalysisServicesModule.cs or SpeAdminGraphService.cs. If WorkforcePrincipalResolver.ResolveAsync is touched (it should not be), SPA-r3's WorkforceHome guard stays first.
+    - Model-driven hole (§6.3): check whether sprk_document.sprk_relatedcommunication is on any form or editable by users. If it is, write the field-security script on the scripts/Set-ChildRecordCreatorPersonSchema.ps1 reader/writer pattern (Read for all, Create/Update for the BFF application user only, with read-back), run it -WhatIf only, and record the apply as an owner-approved step. Agents do not apply field security, roles or app settings.
+    - Re-file and set-regarding paths: confirm in the notes that none changes the communication link (expected: no gap, because the rule is computed at read time).
+    - No other Dataverse schema change. No live writes beyond the deploy and the live gate's allowed set.
+    - Amend I-14 in docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md and give the main session the concise ADR-034 / auth constraint text (sub-agents cannot write .claude/): "a child's Access Permission may narrow partner visibility (Restricted hides it); it never widens it. Enforced by: task 188's tests."
+  </constraints>
+
+  <acceptance-criteria>
+    <criterion>Must fire (hidden), each on list, download, versions, preview and the AI tools: own Restricted; linked to an internal-only communication; linked to a communication on a non-Open thread; an attachment whose parent .eml is linked to an internal-only communication; an unreadable flag; a 4-hop chain; a cycle.</criterion>
+    <criterion>Pinned current state: an attachment whose parent .eml has no link stays visible (T8 flips this test later); named so T8 can find it.</criterion>
+    <criterion>Must not fire (visible): linked to a visible communication; no link anywhere in the chain and own Standard (as today); own value wider than the root has no effect (root still decides).</criterion>
+    <criterion>Download, versions and preview of a hidden document are refused with the existing deny shape; nothing is streamed.</criterion>
+    <criterion>Task 078's rule is removed in favour of the predicate; its existing tests still pass against the predicate.</criterion>
+    <criterion>Negative control: each new test fails when its rule leg is removed (mutation table in the notes).</criterion>
+    <criterion>A source-scan guard or ArchTest fails if an external document surface returns rows or content without the predicate (must-fire and must-not-fire controls; ratchet baseline if existing violations remain).</criterion>
+    <criterion>BFF build 0 errors; targeted tests green; full ArchTests green; publish-size delta measured against a fresh master build.</criterion>
+    <criterion>Deployed to dev via R3; server-side live gate: an external caller's document list answers 200 with no new 5xx, and a document linked to an internal-only communication is absent (App Insights + read-only probes).</criterion>
+  </acceptance-criteria>
+
+  <outputs>
+    - Code and tests on branch uac/188-d7-document-narrowing (worktree C:/wt188), draft PR to master; R3 reviews the routes it owns.
+    - notes/task-188-d7-document-narrowing.md: surface table with file:line, §11 answers, query cost, cache statement, model-driven hole result, mutation table.
+  </outputs>
+</task>

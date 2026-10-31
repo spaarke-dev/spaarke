@@ -284,6 +284,21 @@ public class ActionSeamTests
     }
 
     [Fact]
+    public async Task CreateTaskAsync_RegardingAnOwnershipParentWithNoTaskColumn_IsRefusedWithItsCode_AndWritesNothing()
+    {
+        // UAC task 194b V-fix (verifier A F1): the ad-hoc and enrichment callers get the named reason (the ad-hoc route
+        // answers it as a 422), never a degraded success.
+        var result = await CreateSeam().CreateTaskAsync(
+            new CreateTaskRequest { Subject = "X", RegardingObjectId = Guid.NewGuid(), RegardingObjectType = "sprk_todo" },
+            CancellationToken.None);
+
+        result.Success.Should().BeFalse();
+        result.TaskId.Should().Be(Guid.Empty);
+        result.Error.Should().StartWith(Sprk.Bff.Api.Services.Ai.Nodes.TaskActionCore.RegardingNotFilableCode);
+        _entityServiceMock.Verify(s => s.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
     public async Task CreateTaskAsync_WhenCreateThrows_ReturnsDegradedSuccessWithEmptyTaskId()
     {
         _entityServiceMock
@@ -362,11 +377,142 @@ public class ActionSeamTests
             Times.Never);
     }
 
+    // ── Invoice-family refusal (ebilling-r1 #2081 follow-up): the stable code is printed ONCE ────────────────────────────
+
+    /// <summary>The refusal text the guard builds already carries its code in parentheses, so the seam must not prefix it again.</summary>
+    private const string ReadFailedMessage =
+        "The invoice-family core-record rule refused this write (invoice_family_read_failed); nothing was written.";
+
+    [Theory]
+    [InlineData(false)] // a plain rename: used to be let through unread, creating an orphan row when the id was stale
+    [InlineData(true)] // a lookup write: used to be refused, but with the code printed twice
+    public async Task UpdateRecordAsync_AnInvoiceFamilyRefusal_PrintsTheCodeOnce_AndPinsTheExactMessage(bool writesALookup)
+    {
+        // The guard cannot read the stored row, so it fails closed: a rename runs in a scope with no IGenericEntityService. A
+        // lookup write needs one for its entity set (uac-r2 #2091 round 4, merged 2026-10-18), so it gets one whose row read
+        // faults. A fresh scope per CreateScope: the core disposes each one it opens.
+        var services = new ServiceCollection();
+        if (writesALookup)
+        {
+            var unreadable = new Mock<IGenericEntityService>(MockBehavior.Strict);
+            unreadable.Setup(e => e.GetEntitySetNameAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync((string table, CancellationToken _) => table + "s");
+            unreadable.Setup(e => e.RetrieveAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+                .ThrowsAsync(new TimeoutException("socket"));
+            services.AddSingleton(unreadable.Object);
+        }
+
+        var provider = services.BuildServiceProvider();
+        _scopeFactoryMock.Setup(f => f.CreateScope()).Returns(() => provider.CreateScope());
+
+        var result = await CreateSeam().UpdateRecordAsync(new UpdateRecordRequest
+        {
+            EntityLogicalName = "sprk_invoice",
+            RecordId = Guid.NewGuid(),
+            LegacyFields = writesALookup ? null : new Dictionary<string, string?> { ["sprk_name"] = "Renamed" },
+            Lookups = writesALookup ? [new ActionLookup("sprk_matter", "sprk_matter", Guid.NewGuid().ToString())] : null,
+        }, CancellationToken.None);
+
+        result.Success.Should().BeFalse();
+        result.Error.Should().Be(ReadFailedMessage);
+        System.Text.RegularExpressions.Regex.Matches(result.Error!, "invoice_family_read_failed").Count.Should().Be(1);
+        _fieldMappingMock.Verify(
+            s => s.UpdateRecordFieldsAsync(
+                It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object?>>(), It.IsAny<CancellationToken>(), It.IsAny<Guid?>()),
+            Times.Never);
+    }
+
+    // ── UpdateRecord: a proposal a real person confirmed (#2257 with #2253) ───────────────────
+
+    private static readonly Guid ConfirmingUser = Guid.Parse("22570000-0000-4000-8000-00000000a0c1");
+
+    /// <summary>
+    /// The #2251 / #2253 sets a playbook run's write is refused even AS its person (the must-fire tests in
+    /// <c>UpdateRecordNodeExecutorRunIdentityTests</c> and <c>OutputMappingRunIdentityTests</c>): an access table, an access
+    /// column on a non-root table, a secure root's container.
+    /// </summary>
+    public static TheoryData<string, string, string, string> AccessSetWrites => new()
+    {
+        { "sprk_communicationaccount", "sprk_name", "x", InheritedAccessPermission.AppOnlyAccessTableWriteReasonCode },
+        { "sprk_communication", "sprk_isinternalonly", "false", InheritedAccessPermission.AppOnlyAccessColumnWriteReasonCode },
+        { "sprk_matter", "sprk_containerid", "b!confirmed", InheritedAccessPermission.AppOnlySecureRootWriteReasonCode },
+    };
+
+    private static UpdateRecordRequest ConfirmedProposal(string table, Guid recordId, string column, string value, Guid? user) => new()
+    {
+        EntityLogicalName = table,
+        RecordId = recordId,
+        LegacyFields = new Dictionary<string, string?> { [column] = value },
+        ImpersonateSystemUserId = user,
+    };
+
+    [Theory]
+    [MemberData(nameof(AccessSetWrites))]
+    public async Task UpdateRecordAsync_AConfirmedProposalOfARealPerson_OntoAnAccessTableOrColumn_IsWrittenAsThatPerson(
+        string table, string column, string value, string code)
+    {
+        // Must not fire: ActionSeam's apply is the person's own confirmed edit, so the deny-lists are not asked; the
+        // impersonated Dataverse write (MSCRMCallerID) decides it on that person's own privileges and field security.
+        var recordId = Guid.NewGuid();
+
+        var result = await CreateSeam().UpdateRecordAsync(
+            ConfirmedProposal(table, recordId, column, value, ConfirmingUser), CancellationToken.None);
+
+        result.Success.Should().BeTrue(result.Error);
+        result.Error.Should().BeNull($"{code} is for a payload no person confirmed");
+        _fieldMappingMock.Verify(s => s.UpdateRecordFieldsAsync(
+            table, recordId, It.Is<Dictionary<string, object?>>(f => f.ContainsKey(column)), It.IsAny<CancellationToken>(),
+            ConfirmingUser), Times.Once);
+        _fieldMappingMock.Verify(s => s.UpdateRecordFieldsAsync(
+            It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object?>>(), It.IsAny<CancellationToken>(), null),
+            Times.Never, "a confirmed proposal is written AS its person, never app-only");
+    }
+
+    [Theory]
+    [MemberData(nameof(AccessSetWrites))]
+    public async Task UpdateRecordAsync_AConfirmedProposal_ThePersonMayNotWrite_IsRefusedByDataverse_AndNeverAppOnly(
+        string table, string column, string value, string code)
+    {
+        // Skipping the deny-lists is not skipping the person's rights: Dataverse refuses the impersonated write.
+        _fieldMappingMock
+            .Setup(s => s.UpdateRecordFieldsAsync(
+                It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object?>>(), It.IsAny<CancellationToken>(),
+                ConfirmingUser))
+            .ThrowsAsync(new HttpRequestException("403 (Forbidden)", inner: null, System.Net.HttpStatusCode.Forbidden));
+
+        var act = () => CreateSeam().UpdateRecordAsync(
+            ConfirmedProposal(table, Guid.NewGuid(), column, value, ConfirmingUser), CancellationToken.None);
+
+        (await act.Should().ThrowAsync<HttpRequestException>()).Which.StatusCode.Should().Be(System.Net.HttpStatusCode.Forbidden);
+        _fieldMappingMock.Verify(s => s.UpdateRecordFieldsAsync(
+            It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object?>>(), It.IsAny<CancellationToken>(), null),
+            Times.Never, $"a refused person's write is never repeated app-only ({code} not asked)");
+    }
+
+    [Theory]
+    [MemberData(nameof(AccessSetWrites))]
+    public async Task UpdateRecordAsync_WithNoPerson_OntoAnAccessTableOrColumn_IsRefused_AndNeverPatches(
+        string table, string column, string value, string code)
+    {
+        // The bound: the same payload with no person to confirm it is asked every set (WriteIdentity.AppOnly).
+        var result = await CreateSeam().UpdateRecordAsync(
+            ConfirmedProposal(table, Guid.NewGuid(), column, value, user: null), CancellationToken.None);
+
+        result.Success.Should().BeFalse();
+        // Master merge: the seam prints the stable code once (ebilling-r1 #2081 follow-up); a refusal that already ends with
+        // "(code)" is not prefixed again, so the code is asserted by that form, exactly once.
+        result.Error.Should().Contain($"({code})");
+        System.Text.RegularExpressions.Regex.Matches(result.Error!, System.Text.RegularExpressions.Regex.Escape(code)).Count.Should().Be(1);
+        _fieldMappingMock.Verify(s => s.UpdateRecordFieldsAsync(
+            It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object?>>(), It.IsAny<CancellationToken>(),
+            It.IsAny<Guid?>()), Times.Never);
+    }
+
     // ── Helpers (metadata cache-HIT for the Choice fail-loud path) ────────────────────────────
 
     private void UseMetadataFor(string entityLogicalName, EntityMetadataDto dto)
     {
-        var cacheKey = $"sdap:dv:entitymetadata:{entityLogicalName.ToLowerInvariant()}";
+        var cacheKey = $"sdap:dv:entitymetadata:v2:{entityLogicalName.ToLowerInvariant()}";
         var cacheMock = new Mock<IDistributedCache>();
         var bytes = Encoding.UTF8.GetBytes(JsonSerializer.Serialize(dto, MetadataCacheJsonOptions));
         cacheMock

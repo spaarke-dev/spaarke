@@ -63,13 +63,26 @@ public sealed class WorkspaceAiSummaryAuthorizationContractTests : IClassFixture
     [InlineData("sprk_event", "sprk_events")]
     [InlineData("sprk_matter", "sprk_matters")]
     [InlineData("sprk_project", "sprk_projects")]
-    [InlineData("sprk_document", "sprk_documents")]
     public async Task TheRightsQuestionNamesTheRecordsEntitySet_AsTheCaller(string entityType, string entitySet)
     {
         await SummarizeAsync(entityType, Unreadable);
 
         _fixture.Access.RecordChecks.Should().ContainSingle()
             .Which.Should().Be((RouteSweepAuthorizationFixture.CallerObjectId, entitySet, Unreadable, RouteSweepAuthorizationFixture.BearerToken));
+    }
+
+    /// <summary>
+    /// Task 188 round 4c (F1): a document is decided on the DOCUMENT path (its rights, then THE external document
+    /// narrowing — DocumentSnapshotAndSummaryNarrowingTests), never the Record path, which asks the root grants only.
+    /// </summary>
+    [Fact]
+    public async Task ADocument_IsADocumentPathQuestion_AsTheCaller_NeverARecordPathOne()
+    {
+        await SummarizeAsync("sprk_document", Unreadable);
+
+        _fixture.Access.DocumentChecks.Should().ContainSingle()
+            .Which.Should().Be((RouteSweepAuthorizationFixture.CallerObjectId, Unreadable.ToString(), RouteSweepAuthorizationFixture.BearerToken));
+        _fixture.Access.RecordChecks.Should().BeEmpty();
     }
 
     [Theory]

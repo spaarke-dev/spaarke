@@ -54,6 +54,11 @@ public static class ExternalAccessEndpoints
         // every route, and the form banner (task 153) must answer callers who hold only Read. Each route carries the
         // route-record Read gate itself; the entries are added for a caller who also holds Write (owner O2).
         app.MapRecordNoAccessEndpoint();
+
+        // POST /api/v1/external-access/remove-person · /reinstate-person — person-level administration (slice C3). NOT on the
+        // management group: its delegation filter needs a record, and these routes name a person. Their own group carries the
+        // external-access administrator filter instead.
+        app.MapPersonAccessAdministrationEndpoints();
     }
 
     // =========================================================================
@@ -79,7 +84,7 @@ public static class ExternalAccessEndpoints
             .AddWorkforceCeilingFilter();
 
         // GET /api/v1/external/me — Returns the caller's project access context (either plane)
-        externalGroup.MapGet("/me", ExternalUserContextEndpoint.Handle)
+        externalGroup.MapGet("/me", ExternalUserContextEndpoint.HandleAsync)
             .WithName("GetExternalUserContext")
             .ExemptFromWorkforceCeiling("Identity: the caller's own access context, read to start the SPA; no table operation.")
             .WithSummary("Get the authenticated collaboration caller's project access context")
@@ -136,6 +141,7 @@ public static class ExternalAccessEndpoints
         // (the one ModuleEntitlementResolver check /me/entitlements reports), and creates the request app-only with the
         // caller's contact as sprk_requestedby.
         externalGroup.MapExternalIntakeEndpoints();
+        externalGroup.MapExternalInvoiceSubmissionEndpoints(); // ebilling-r1 task 044 (FR-17 SPA channel; firm + core-record filter)
 
         // GET /api/v1/external/notifications · POST /api/v1/external/notifications/seen — the derived in-portal feed (r3 task
         // 037, FR-08). Inherits this group's policy + CallerPrincipalAuthorizationFilter; grants are re-checked against the

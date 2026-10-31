@@ -84,7 +84,17 @@ param keyVaultSku string = 'standard'
 param serviceBusSku string = 'Standard'
 
 @description('Service Bus queue names to create')
-param serviceBusQueues array = ['sdap-jobs', 'document-indexing', 'ai-indexing', 'sdap-communication']
+// T186 L47: the BFF's Office workers hard-code office-upload-finalization / office-profile / office-indexing;
+// H4bBulkAppSettingsHandlerTests.T186_L47_… fails when a BFF queue constant is missing here.
+param serviceBusQueues array = [
+  'sdap-jobs'
+  'document-indexing'
+  'ai-indexing'
+  'sdap-communication'
+  'office-upload-finalization'
+  'office-profile'
+  'office-indexing'
+]
 
 @description('Principal ID of the platform BFF App Service Managed Identity (granted Sender on membership topic + Receiver on recon subscription per R3 D3 / FR-2P2.3). Leave empty to skip RBAC assignment — operator must grant manually.')
 param bffPrincipalId string = ''
@@ -208,9 +218,18 @@ var redisCacheName = 'sprk-${customerId}-${environmentName}-redis'
 // Dead-letter blob container for the ACS Event Grid subscription (task 012 / §8.3).
 var acsDeadLetterContainerName = 'acs-eventgrid-deadletter'
 
+// Containers the stamp UAMI is granted Storage Blob Data Contributor on, each at container scope
+// (owner 2026-10-21, ebilling-r1 re-plan Q5: no account-scope data role). Inventory in
+// projects/ebilling-r1/notes/091-storage-provisioning.md §2: the BFF's only blob consumer today is
+// SessionFileBlobStore (+ the H13 keyless probe), on SessionFileStore:ContainerName, default
+// 'ai-chunks'. A new BFF blob consumer adds its container here, or its calls fail 403.
+var bffBlobContainerNames = ['ai-chunks']
+
+// The granted containers always exist, even if a caller overrides storageContainers without them.
 // When messaging is enabled for the boundary, ensure the dead-letter container exists in the
 // customer Storage account (reuse — §11 default-to-reuse; no separate storage account).
-var effectiveStorageContainers = deployAcsMessaging ? union(storageContainers, [acsDeadLetterContainerName]) : storageContainers
+var baseStorageContainers = union(storageContainers, bffBlobContainerNames)
+var effectiveStorageContainers = deployAcsMessaging ? union(baseStorageContainers, [acsDeadLetterContainerName]) : baseStorageContainers
 
 // ============================================================================
 // RESOURCE GROUP
@@ -307,15 +326,16 @@ module storage 'modules/storage-account.bicep' = {
     containers: effectiveStorageContainers
     enableTestDocumentLifecycle: false
     // G-8 Batch 1 defect #13: grant the per-customer UAMI Storage Blob Data
-    // Contributor (ba92f5b4-2d11-453d-a403-e96b0029c9fe) on this account. The
-    // invocation previously passed neither principal param, so the module's
-    // RBAC blocks never fired and blob access relied solely on the KV
-    // account-key fallback. Same T5-stable UAMI pattern as openAi/aiSearch/
-    // docIntelligence below.
+    // Contributor (ba92f5b4-2d11-453d-a403-e96b0029c9fe). Same T5-stable UAMI
+    // pattern as openAi/aiSearch/docIntelligence below. Owner 2026-10-21
+    // (ebilling-r1 re-plan Q5): CONTAINER scope only, on bffBlobContainerNames —
+    // never on the account.
     userAssignedIdentityPrincipalId: uami.outputs.principalId
+    userAssignedIdentityContainerNames: bffBlobContainerNames
     // Keyless (owner D13, task 244): no shared-key access. Any caller uses the blob endpoint with an
-    // identity — the stamp UAMI holds Storage Blob Data Contributor (above); Event Grid dead-letters
-    // with its system topic's identity (acs-communication.bicep).
+    // identity — the stamp UAMI holds Storage Blob Data Contributor on its containers (above); Event
+    // Grid dead-letters with its system topic's identity, granted on the dead-letter container only
+    // (acs-communication.bicep).
     disableSharedKeyAccess: true
     tags: tags
   }
@@ -667,6 +687,11 @@ module bffApi 'modules/app-service.bicep' = {
       // Monitoring (per-customer App Insights, task 128b)
       APPLICATIONINSIGHTS_CONNECTION_STRING: monitoring.outputs.connectionString
       ApplicationInsightsAgent_EXTENSION_VERSION: '~3'
+
+      // T186 L48: on the stamp's S1 plan the BFF needs ~220 s from container start to listening (live, ACME);
+      // App Service's default startup limit is 230 s, so a slot deploy failed the startup probe. Non-sticky, so H9
+      // gives the staging slot the same value (L46).
+      WEBSITES_CONTAINER_START_TIME_LIMIT: '600'
     }
     tags: tags
   }

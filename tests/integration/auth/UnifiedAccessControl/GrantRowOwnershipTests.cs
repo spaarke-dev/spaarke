@@ -85,6 +85,7 @@ public class GrantRowOwnershipTests
                 "matter", _matter),
             _h.Grants, _h.Participations, _h.AccessibleRecords, _h.Ownership, _h.OwnerPrivileges, new EverythingProbe(),
             _h.Ciam, _h.Emails, IdentityBinding.IdentityBindingTestKit.Binder(_h.Identities),
+            IdentityBinding.InviteOrganizationTestKit.PortalOnly(),
             new ConfigurationBuilder()
                 .AddInMemoryCollection(new Dictionary<string, string?> { ["ExternalAccess:PortalUrl"] = "https://external.test" })
                 .Build(),

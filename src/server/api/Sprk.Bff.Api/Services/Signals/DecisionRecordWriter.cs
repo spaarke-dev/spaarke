@@ -225,6 +225,62 @@ public sealed record GateDecisionRecordRequest(
     Guid? DirectFiledUnderId = null,
     DateTimeOffset? DecidedOn = null);
 
+/// <summary>
+/// ebilling-r1 task 074 (D-100): the ONE idempotency key of a billing Decision Record, deterministic from the decision's subject and the
+/// caller's decision id. Stored as the record's review id in <c>sprk_steps</c>, as <see cref="GateDecisionKey"/> and
+/// <see cref="ConditionClearedRecordKey"/> are; its prefix (<c>billing-dr-</c>) differs from both, so no key can hash to another's value.
+/// </summary>
+public static class BillingDecisionKey
+{
+    /// <summary>The key as the log carries it: <c>billing-dr-{subjectEntity}-{subjectId}-{decisionId}</c>.</summary>
+    public static string Of(string subjectEntity, Guid subjectId, Guid decisionId) =>
+        $"billing-dr-{subjectEntity}-{subjectId.ToString("D", CultureInfo.InvariantCulture)}-{decisionId.ToString("D", CultureInfo.InvariantCulture)}";
+
+    /// <summary>The key as a <see cref="Guid"/> (the first 16 bytes of its SHA-256), the form <c>sprk_steps</c> keeps a review id in.</summary>
+    public static Guid IdOf(string subjectEntity, Guid subjectId, Guid decisionId) =>
+        new(SHA256.HashData(Encoding.UTF8.GetBytes(Of(subjectEntity, subjectId, decisionId))).AsSpan(0, 16));
+}
+
+/// <summary>
+/// ebilling-r1 task 074 (spec FR-30, FR-19, FR-35 to FR-37; D-75, D-100, D-101): ONE billing decision (a line accept / reduce / disallow,
+/// an invoice approve / reject / return, or an override), for <see cref="DecisionRecordWriter.WriteBillingDecisionAsync"/>. The review-shaped
+/// <see cref="DecisionRecordRequest"/> cannot carry it: a clean decision has no policy version and resolves no Signal, its code is not a
+/// Signals plan action, and an automatic rejection has no confirming human.
+/// </summary>
+/// <param name="DecisionId">The caller's decision id; with the subject, the record's idempotency key (<see cref="BillingDecisionKey"/>).</param>
+/// <param name="ActionCode">A billing code (<see cref="DecisionActionCatalog.TryGetBilling"/>); a Signals code is refused.</param>
+/// <param name="Subject">The line (<c>sprk_billingevent</c>) for a line code; the invoice (<c>sprk_invoice</c>) for every other code (D-75, D-101).
+/// The core record is derived from it, never passed.</param>
+/// <param name="ConfirmedByUserId">The deciding human (<c>systemuserid</c>); null ONLY for a system decision, whose
+/// <paramref name="DeciderRole"/> starts with <c>automated:</c>.</param>
+/// <param name="DeciderRole">The human's role, or <c>automated: &lt;what&gt;</c> for a system decision; recorded in the fact snapshot.</param>
+/// <param name="Values">The action's parameter values (<c>approvedAmount</c>, <c>note</c>); every required parameter but <c>reason</c> must be here.</param>
+/// <param name="Outcome">What the caller did, e.g. <c>Reduced</c> or <c>Approved</c>; listed in <c>sprk_steps</c>.</param>
+/// <param name="Facts">What the data said at decision time. MANDATORY and non-empty.</param>
+/// <param name="Reason">Stored in <c>sprk_reason</c>; required when the catalog marks the code's <c>reason</c> parameter required.</param>
+/// <param name="PolicyVersionId">The primary resolved finding's policy version; null when the decision resolves none.</param>
+/// <param name="ResolvedSignalIds">The findings this decision resolves (may be empty); the caller closes and links them.</param>
+/// <param name="Written">Rows the decision wrote (an approval portion, a correction record).</param>
+/// <param name="DeciderContactId">The decider's linked internal contact (D-129), written to <c>sprk_assignedtointernal</c>.</param>
+/// <param name="PrivilegeFlagged">Copied forward (ADR-015: flagged, never decided).</param>
+/// <param name="DecidedOn">When decided; the writer's clock when null.</param>
+public sealed record BillingDecisionRecordRequest(
+    Guid DecisionId,
+    string ActionCode,
+    DecisionRecordRef Subject,
+    Guid? ConfirmedByUserId,
+    string DeciderRole,
+    IReadOnlyDictionary<string, object?>? Values,
+    string Outcome,
+    IReadOnlyDictionary<string, object?> Facts,
+    string? Reason,
+    Guid? PolicyVersionId = null,
+    IReadOnlyList<Guid>? ResolvedSignalIds = null,
+    IReadOnlyList<DecisionRecordRef>? Written = null,
+    Guid? DeciderContactId = null,
+    bool PrivilegeFlagged = false,
+    DateTimeOffset? DecidedOn = null);
+
 /// <summary>Bounded-cardinality refusal reasons for the Decision Record writer (log and metric dimension).</summary>
 public static class DecisionRecordRefusalReason
 {
@@ -282,6 +338,12 @@ public static class DecisionRecordRefusalReason
     /// <summary>Task 142 (adversarial pass 1 F1): the subject cannot be filed for a reason a retry does not change (its lineage names
     /// two different records of one core table, or it no longer exists). A refusal, not an outage.</summary>
     public const string SubjectUnfileable = "decision_subject_unfileable";
+
+    /// <summary>ebilling-r1 task 074 (D-100): a read the billing entry needs before it writes faulted, so nothing was written: whether the
+    /// decision's Decision Record already exists (the lookup, or the writer identity it is narrowed by; guessing "none" would risk a second
+    /// record), the policy version it names, or (in the Finance recorder, before it calls this entry) the deciding user's linked contact. A
+    /// retry may succeed.</summary>
+    public const string BillingRecordLookupFailed = "decision_billing_lookup_failed";
 
     /// <summary>Task 042b (D-169): a read or a grant of an unfiled communication's gate record participant share failed. Not a refusal: the
     /// record is written and owner-visible; nothing is shared beyond the communication's sharees (<see cref="GateDecisionRecordSharing"/>).</summary>
@@ -1164,6 +1226,884 @@ public sealed class DecisionRecordWriter
         return (new DecisionRecordCore(core.EntityType, core.RecordId, type.Id), derived);
     }
 
+    // ── ebilling-r1 task 074 (D-100, owner-approved section 6.5 path B): the billing entry ─────────────────────────────
+
+    /// <summary>The line table: the subject of a line decision (D-75).</summary>
+    private const string BillingLineEntity = "sprk_billingevent";
+
+    /// <summary>The invoice table: the subject of an invoice decision and of an override (D-75, D-101).</summary>
+    private const string BillingInvoiceEntity = "sprk_invoice";
+
+    /// <summary>The prefix of a system decision's <see cref="BillingDecisionRecordRequest.DeciderRole"/>, as the gate's and the closure's
+    /// decider roles carry it. The only case a billing record may have no confirmer.</summary>
+    private const string AutomatedDeciderPrefix = "automated:";
+
+    /// <summary>The most rows the billing "already recorded" lookup reads (see <see cref="FindBillingRecordsAsync"/>).</summary>
+    private const int BillingLookupTop = 10;
+
+    /// <summary>
+    /// The billing entry's OWN allowed subjects, one table per billing code: the line for the three line codes, the invoice for every other
+    /// (D-75; D-101: an override and an automatic rejection file under the invoice the submission created). This list is consulted by
+    /// <see cref="WriteBillingDecisionAsync"/> only; <see cref="WriteAsync(DecisionRecordRequest, CancellationToken)"/> neither reads nor
+    /// changes it. Built from the catalog's billing set, so every billing code has a subject; but a NEW line-level code that is not named in
+    /// the literal below silently maps to the invoice. Nothing throws for that: the guard is the exact-set test
+    /// <c>DecisionRecordWriterTests.Billing_C2_TheBillingEntrysSubjects_AreTheLineForLineCodes_AndTheInvoiceForEveryOther</c>, which fails
+    /// when the billing set changes, so a new code's table is decided there.
+    /// </summary>
+    private static readonly FrozenDictionary<string, string> BillingSubjectByCode = DecisionActionCatalog.BillingActions
+        .ToFrozenDictionary(
+            d => d.Code,
+            d => d.Code is "accept-line" or "reduce-line" or "disallow-line" ? BillingLineEntity : BillingInvoiceEntity,
+            StringComparer.Ordinal);
+
+    /// <summary>K4 (ontology-r1): the billing codes, as the "already recorded" lookup's <c>sprk_actioncode In</c> values (ordinal order, so
+    /// the query is stable).</summary>
+    private static readonly object[] BillingLookupCodes = [.. BillingSubjectByCode.Keys.Order(StringComparer.Ordinal)];
+
+    /// <summary>The subject table a billing code's record is filed under, or null for a code that is not a billing code. The recorder uses
+    /// it so a caller names only the record id and can never pair a code with the wrong table.</summary>
+    internal static string? BillingSubjectEntityOf(string? actionCode) =>
+        actionCode is not null && BillingSubjectByCode.TryGetValue(actionCode, out var entity) ? entity : null;
+
+    /// <summary>
+    /// ebilling-r1 task 074 (spec FR-30, FR-19, FR-35 to FR-37; D-75, D-100, D-101): writes the ONE Decision Record of a billing decision,
+    /// human or system, exactly once per (subject, decision id) for retries made one after another: a second call with the same decision id
+    /// and the same content (<see cref="BillingDecisionHash"/>, stored in <c>sprk_steps</c> as the review path stores its review hash) returns
+    /// the first record; with the same decision id but ANOTHER billing code, or the same code with other content (reduce-line 800, then 700),
+    /// it is refused (<see cref="DecisionRecordRefusalReason.ReviewInvalid"/>). Two CONCURRENT calls can both write (lookup then create, no unique key, as on
+    /// the gate path), so a caller serialises its decisions per invoice (its status check-and-set). An additive entry point beside
+    /// <see cref="WriteGateDecisionAsync"/> and
+    /// <see cref="WriteConditionClearedAsync"/>: <see cref="WriteAsync(DecisionRecordRequest, CancellationToken)"/>, <see cref="Validate"/>
+    /// and the existing request shapes are unchanged, and below the request it is the SAME code: <see cref="Content"/> (D-34 context),
+    /// <see cref="FiledAndOwnedAsync"/> (the subject filed through the shared regarding builder, the core-ancestor stamp, the ebilling-r1 026
+    /// invoice-family checks, uac-r2's owner answer over every parent, secure-if-any) and the one <see cref="CreateAsync"/>.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Order.</b> (1) <see cref="ValidateBilling"/>, no I/O: the code is a billing code, the subject is the code's table, a null
+    /// confirmer only with an <c>automated:</c> decider, a required reason and the other required parameters present. (2) The "already
+    /// recorded" lookup (<see cref="FindBillingRecordsAsync"/>): a record is returned, nothing written; a fault writes nothing. (3) The
+    /// policy version, when given, exists (<see cref="RequireBillingPolicyVersionAsync"/>). (4) The subject of every resolved Signal, read
+    /// app-only (<see cref="BillingSignalSubjectsAsync"/>, the commit route's rule): each is a parent of the owner question beside the core
+    /// (D-123, secure-if-any), as <see cref="DecisionRecordRequest.SignalSubjects"/> is on the review path. (5) The core, derived from the
+    /// subject (<see cref="ResolveBillingCoreAsync"/>; never passed by a caller, so a line can never be given its invoice's matter). (6) The
+    /// shared create.</para>
+    /// <para><b>Closed field semantics.</b> Class: the catalog's <see cref="DecisionActionDefinition.RecordClass"/>. Outcome: Authorized (the
+    /// decision was taken; the code says which, reject and return included). One taken step: the code with its catalog label, values, outcome
+    /// and written rows. <c>sprk_gatetier</c>: the code's declared gate factors through <see cref="Ai.PublicContracts.DecisionGateTier"/> for a human decision;
+    /// null for a system decision, as on the gate path. <c>sprk_policyversion</c> only when given. <c>sprk_confirmedby</c> null for a system
+    /// decision, and then no person is the requester (<c>sprk_createdbyperson</c> stays empty, as for the condition-cleared record).</para>
+    /// </remarks>
+    /// <exception cref="DecisionRecordRefusedException">The only exception type (besides cancellation): the request is invalid (a policy
+    /// version that does not exist included), the lookup or the policy-version read faulted
+    /// (<see cref="DecisionRecordRefusalReason.BillingRecordLookupFailed"/>), a resolved Signal is missing or its subject cannot be determined
+    /// (<see cref="DecisionRecordRefusalReason.OwnerRefused"/>) or could not be read
+    /// (<see cref="DecisionRecordRefusalReason.OwnerResolutionFailed"/>), the subject cannot be filed, the owner was refused, or the create
+    /// failed. Nothing was written (after a create timeout the row may exist).</exception>
+    /// <exception cref="OperationCanceledException">The caller cancelled.</exception>
+    public Task<DecisionRecordWriteResult> WriteBillingDecisionAsync(BillingDecisionRecordRequest request, CancellationToken ct = default) =>
+        WriteBillingDecisionAsync(request, deciderContact: null, ct);
+
+    /// <summary>
+    /// <see cref="WriteBillingDecisionAsync(BillingDecisionRecordRequest, CancellationToken)"/> with the deciding contact supplied LAZILY:
+    /// <paramref name="deciderContact"/> runs only when a record is going to be written, after the "already recorded" check and before any
+    /// other read or the create. A true repeat is therefore answered without it, so a fault in the identity read cannot turn a retry of a
+    /// recorded decision into a refusal; a new decision whose contact read faults throws from the supplier (the supplier owns that refusal,
+    /// logged here with the other refusals) before anything is written. Used for a confirmed decision only (a system decision names no contact,
+    /// <see cref="ValidateBilling"/>); when the request already names a contact the supplier is not called.
+    /// </summary>
+    internal async Task<DecisionRecordWriteResult> WriteBillingDecisionAsync(
+        BillingDecisionRecordRequest request, Func<CancellationToken, Task<Guid?>>? deciderContact, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        try
+        {
+            var plan = ValidateBilling(request);
+            var key = BillingDecisionKey.IdOf(request.Subject.Entity, request.Subject.Id, request.DecisionId);
+            var recorded = await FindBillingRecordsAsync(request.Subject, key, ct).ConfigureAwait(false);
+            if (recorded.Count > 0 && !recorded.Any(r => string.Equals(r.Code, request.ActionCode, StringComparison.Ordinal)))
+            {
+                // The key carries no code, so one decision id can only ever be one billing decision on its subject: another code under
+                // it (a retry that changed its mind after a create timeout) would be a second, contradictory record. Refused; a retry
+                // does not change it.
+                throw new DecisionRecordRefusedException(
+                    DecisionRecordRefusalReason.ReviewInvalid,
+                    "This decision id is already recorded on its subject with another billing action; nothing was written.");
+            }
+
+            var hash = BillingDecisionHash(request);
+            // Of the rows with this code (two can exist after a concurrent pair, see above), the one with THIS decision's hash answers, whichever
+            // row the lookup returned first.
+            var sameCode = recorded.Where(r => string.Equals(r.Code, request.ActionCode, StringComparison.Ordinal)).ToList();
+            var existing = sameCode.FirstOrDefault(r => string.Equals(r.Hash, hash, StringComparison.Ordinal));
+            if (existing.Id == Guid.Empty && sameCode.Count > 0)
+            {
+                // K2 (ontology-r1): the same id and code with other content (reduce-line 800, then 700) is not a repeat of the recorded
+                // decision; answering AlreadyRecorded would tell the caller its 700 was recorded when 800 was. A record whose hash cannot
+                // be read proves nothing either, so it is refused the same way, never written over with a second record.
+                throw new DecisionRecordRefusedException(
+                    DecisionRecordRefusalReason.ReviewInvalid,
+                    "This decision id is already recorded on its subject with the same billing action but other content; nothing was written.");
+            }
+
+            if (existing.Id != Guid.Empty)
+            {
+                _logger.LogInformation(
+                    "Billing decision {DecisionId} ({ActionCode}) already recorded as Decision Record {RecordId}; nothing written.",
+                    request.DecisionId, request.ActionCode, existing.Id);
+                return new DecisionRecordWriteResult(existing.Id, plan.Class, request.ResolvedSignalIds ?? [])
+                {
+                    AlreadyRecorded = true,
+                    ConfirmedByUserId = existing.ConfirmedBy,
+                };
+            }
+
+            if (deciderContact is not null && NoneIfEmpty(request.ConfirmedByUserId) is not null && NoneIfEmpty(request.DeciderContactId) is null)
+            {
+                request = request with { DeciderContactId = await deciderContact(ct).ConfigureAwait(false) };
+            }
+
+            await RequireBillingPolicyVersionAsync(request.PolicyVersionId, ct).ConfigureAwait(false);
+            var signalSubjects = await BillingSignalSubjectsAsync(request.ResolvedSignalIds, ct).ConfigureAwait(false);
+            var (core, derived) = await ResolveBillingCoreAsync(request.Subject, ct).ConfigureAwait(false);
+            var written = await CreateAsync(
+                    BillingReview(request, plan, key, core) with { SignalSubjects = signalSubjects, ReviewHash = hash },
+                    plan with { AlreadyDerived = derived },
+                    resolvedOwner: null,
+                    ct)
+                .ConfigureAwait(false);
+            return written with { ConfirmedByUserId = NoneIfEmpty(request.ConfirmedByUserId) };
+        }
+        catch (DecisionRecordRefusedException ex)
+        {
+            LogRefusal(request.DecisionId, ex);
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// ebilling-r1 task 074: every refusal <see cref="WriteBillingDecisionAsync"/> can give WITHOUT I/O (validation, column sizes), so a
+    /// billing endpoint can refuse before its own first write (a missing reason is a 400 before the invoice changes status). Writes and reads
+    /// nothing; logs nothing.
+    /// </summary>
+    /// <exception cref="DecisionRecordRefusedException">The decision as given would be refused.</exception>
+    public void PreflightBillingDecision(BillingDecisionRecordRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        var plan = ValidateBilling(request);
+        _ = Content(BillingReview(request, plan, BillingDecisionKey.IdOf(request.Subject.Entity, request.Subject.Id, request.DecisionId), core: null), plan);
+    }
+
+    private static Guid? NoneIfEmpty(Guid? id) => id is { } value && value != Guid.Empty ? value : null;
+
+    /// <summary>
+    /// K2 (ontology-r1): a stable hash of what the billing decision IS, stored in <c>sprk_steps</c> beside the key (the review path's
+    /// <see cref="DecisionRecordRequest.ReviewHash"/> slot, task 043), so a repeat of the decision id can be told from a different decision
+    /// under the same id. The values are hashed in a canonical form (<see cref="CanonicalHashValue"/>): 800 and 800.00 are one amount, and
+    /// nested maps are in key order. Covered: the code, the subject, who decided (confirmer and role), the values (ordered by key), the outcome, the
+    /// reason, the policy version and the resolved Signals (ordered). Not covered, because an honest retry may differ in them: the fact
+    /// snapshot (re-read at retry time), the decision time (the clock when not given), the written rows (a caller may recreate them on a retry)
+    /// and the deciding contact and privilege flag (derived from the confirmer and the findings, not decided).
+    /// </summary>
+    internal static string BillingDecisionHash(BillingDecisionRecordRequest r)
+    {
+        ArgumentNullException.ThrowIfNull(r);
+        var canonical = new
+        {
+            code = r.ActionCode,
+            subject = r.Subject.Entity,
+            subjectId = r.Subject.Id,
+            confirmedBy = NoneIfEmpty(r.ConfirmedByUserId),
+            role = r.DeciderRole,
+            values = (r.Values ?? new Dictionary<string, object?>()).OrderBy(v => v.Key, StringComparer.Ordinal)
+                .Select(v => new object?[] { v.Key, CanonicalHashValue(v.Value) }).ToArray(),
+            outcome = r.Outcome,
+            reason = r.Reason,
+            policyVersion = NoneIfEmpty(r.PolicyVersionId),
+            signals = (r.ResolvedSignalIds ?? []).OrderBy(id => id).ToArray(),
+        };
+        return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(canonical))));
+    }
+
+    /// <summary>
+    /// The canonical form of one value in <see cref="BillingDecisionHash"/>, so the same amount or the same map hashes the same however a
+    /// caller built it: System.Text.Json writes <c>800m</c> as <c>800</c> and <c>800.00m</c> as <c>800.00</c>, and writes a map in insertion
+    /// order. A decimal (or a JSON number that fits one) has its trailing zeros removed; every map (a dictionary or a JSON object) is written
+    /// in ordinal key order, recursively; a list keeps its order (it is content). Culture never reaches the output: the serializer writes numbers
+    /// with the invariant culture. Anything else is left to the serializer as it was.
+    /// </summary>
+    private static object? CanonicalHashValue(object? value)
+    {
+        switch (value)
+        {
+            case null:
+            case string:
+            case byte[]:
+                return value;
+            case decimal d:
+                return NormalizedDecimal(d);
+            case System.Text.Json.Nodes.JsonNode node:
+                return CanonicalHashValue(JsonSerializer.SerializeToElement(node));
+            case JsonElement element:
+                return element.ValueKind switch
+                {
+                    JsonValueKind.Object => SortedMap(element.EnumerateObject().Select(p => KeyValuePair.Create<string, object?>(p.Name, p.Value))),
+                    JsonValueKind.Array => element.EnumerateArray().Select(e => CanonicalHashValue(e)).ToList(),
+                    JsonValueKind.Number => CanonicalJsonNumber(element),
+                    JsonValueKind.String => element.GetString(),
+                    JsonValueKind.True => true,
+                    JsonValueKind.False => false,
+                    _ => null,
+                };
+            case IReadOnlyDictionary<string, object?> map:
+                return SortedMap(map);
+            case System.Collections.IDictionary dictionary:
+                return SortedMap(dictionary.Cast<System.Collections.DictionaryEntry>()
+                    .Select(e => KeyValuePair.Create(Convert.ToString(e.Key, CultureInfo.InvariantCulture) ?? string.Empty, e.Value)));
+            case System.Collections.IEnumerable list:
+                return list.Cast<object?>().Select(CanonicalHashValue).ToList();
+            default:
+                return value;
+        }
+
+        static SortedDictionary<string, object?> SortedMap(IEnumerable<KeyValuePair<string, object?>> entries)
+        {
+            var sorted = new SortedDictionary<string, object?>(StringComparer.Ordinal);
+            foreach (var entry in entries)
+            {
+                sorted[entry.Key] = CanonicalHashValue(entry.Value);
+            }
+
+            return sorted;
+        }
+    }
+
+    /// <summary>The same number with its trailing zeros removed (<c>800.00</c> is <c>800</c>, <c>0.50</c> is <c>0.5</c>, <c>0.00</c> is <c>0</c>).</summary>
+    private static decimal NormalizedDecimal(decimal value) => value / 1.0000000000000000000000000000m;
+
+    /// <summary>
+    /// A JSON number as a hash value: the normalised decimal when it fits one without losing its non-zero value, otherwise its raw text under a
+    /// marker (so a value outside the decimal range neither throws, as <c>1e400</c> did through <c>GetDouble</c>, nor collapses to zero, as
+    /// <c>1e-30</c> did). Residual: a number with more than 28 significant digits is rounded by the decimal and can still equal its rounded
+    /// neighbour; callers pass decimals, so no such value reaches the hash today (ontology-r1 re-check of the 074 follow-up).
+    /// </summary>
+    private static object CanonicalJsonNumber(JsonElement element)
+    {
+        var raw = element.GetRawText();
+        if (element.TryGetDecimal(out var number) && (number != 0m || !MantissaHasNonZeroDigit(raw)))
+        {
+            return NormalizedDecimal(number);
+        }
+
+        return "json-number:" + raw;
+    }
+
+    private static bool MantissaHasNonZeroDigit(string raw)
+    {
+        var exponent = raw.IndexOfAny(['e', 'E']);
+        var mantissa = exponent >= 0 ? raw[..exponent] : raw;
+        return mantissa.Any(c => c is >= '1' and <= '9');
+    }
+
+    /// <summary>The review shape the shared builders read (<see cref="Content"/>, <see cref="FiledAndOwnedAsync"/>): <see cref="Guid.Empty"/>
+    /// means "none" for the policy version and the confirmer, as on the gate and closure paths.</summary>
+    private static DecisionRecordRequest BillingReview(BillingDecisionRecordRequest r, Plan plan, Guid key, DecisionRecordCore? core) => new(
+        ReviewId: key,
+        PolicyVersionId: NoneIfEmpty(r.PolicyVersionId) ?? Guid.Empty,
+        Core: core,
+        ItemSubject: r.Subject,
+        ConfirmedByUserId: NoneIfEmpty(r.ConfirmedByUserId) ?? Guid.Empty,
+        DecidedOn: r.DecidedOn,
+        Steps: plan.Steps.Select(s => s.Step).ToList(),
+        FollowOns: [],
+        GateTier: plan.NoRequester ? null : Ai.PublicContracts.DecisionGateTier.ToText(Ai.PublicContracts.DecisionGateTier.Resolve(plan.Steps[0].Def.Gate!)),
+        ResolvedSignalIds: r.ResolvedSignalIds ?? [],
+        FactValues: r.Facts,
+        DeciderRole: r.DeciderRole,
+        Because: null,
+        Reason: r.Reason,
+        PrivilegeFlagged: r.PrivilegeFlagged,
+        DeciderContactId: r.DeciderContactId);
+
+    /// <summary>ebilling-r1 task 074: the billing request's checks, with no I/O, and the plan its record is built from.</summary>
+    private static Plan ValidateBilling(BillingDecisionRecordRequest r)
+    {
+        static DecisionRecordRefusedException Invalid(string message) => new(DecisionRecordRefusalReason.ReviewInvalid, message);
+
+        if (r.Facts is null || r.Facts.Count == 0)
+        {
+            throw new DecisionRecordRefusedException(
+                DecisionRecordRefusalReason.FactSnapshotMissing,
+                "sprk_factsnapshot is mandatory: the billing decision carries no fact values, so no Decision Record was written.");
+        }
+
+        if (r.DecisionId == Guid.Empty) throw Invalid("DecisionId is required.");
+
+        // A Signals (ontology) code is not a billing decision, and a billing code is never a Signals review (WriteAsync refuses it): the
+        // two entries take disjoint code sets.
+        if (!DecisionActionCatalog.TryGetBilling(r.ActionCode, out var definition) || definition.Gate is null)
+        {
+            throw new DecisionRecordRefusedException(
+                DecisionRecordRefusalReason.RecordClassUnderivable,
+                "The action is not a billing action in the catalog, so the record class cannot be derived.");
+        }
+
+        if (r.Subject is null || string.IsNullOrWhiteSpace(r.Subject.Entity) || r.Subject.Id == Guid.Empty) throw Invalid("Subject is required.");
+        if (!string.Equals(r.Subject.Entity, BillingSubjectByCode[definition.Code], StringComparison.Ordinal))
+        {
+            throw new DecisionRecordRefusedException(
+                DecisionRecordRefusalReason.SubjectUnsupported,
+                "A billing decision is filed under its line (line decisions) or its invoice (every other); this subject is not that table, so nothing was written.");
+        }
+
+        if (string.IsNullOrWhiteSpace(r.DeciderRole)) throw Invalid("DeciderRole is required.");
+        var automated = r.DeciderRole.StartsWith(AutomatedDeciderPrefix, StringComparison.Ordinal);
+        var confirmed = NoneIfEmpty(r.ConfirmedByUserId) is not null;
+        if (!confirmed && !automated) throw Invalid("A billing decision with no confirming user must be a system decision (an 'automated:' decider).");
+        if (confirmed && automated) throw Invalid("A billing decision a user confirmed cannot carry an 'automated:' decider.");
+        // D-129: sprk_assignedtointernal names the individual who decided; a system decision has none.
+        if (!confirmed && NoneIfEmpty(r.DeciderContactId) is not null) throw Invalid("A system decision cannot name a deciding contact.");
+
+        if (string.IsNullOrWhiteSpace(r.Outcome)) throw Invalid("Outcome is required.");
+        if (r.Reason is { Length: > ReasonMaxLength }) throw Invalid("Reason is too long for sprk_reason.");
+        foreach (var parameter in definition.Parameters.Where(p => p.Required))
+        {
+            if (parameter.Code == "reason")
+            {
+                if (string.IsNullOrWhiteSpace(r.Reason)) throw Invalid($"'{definition.Code}' requires a reason.");
+                continue;
+            }
+
+            if (r.Values is null || !r.Values.TryGetValue(parameter.Code, out var value) || value is null || value is string text && string.IsNullOrWhiteSpace(text))
+            {
+                throw Invalid($"'{definition.Code}' requires '{parameter.Code}'.");
+            }
+        }
+
+        if (r.ResolvedSignalIds is { } signals && (signals.Any(id => id == Guid.Empty) || signals.Distinct().Count() != signals.Count))
+        {
+            throw Invalid("ResolvedSignalIds must be distinct Signal ids.");
+        }
+
+        var step = new DecisionRecordStep(definition.Code, Taken: true, r.Values, r.Outcome, r.Written);
+        var steps = new List<(DecisionRecordStep Step, DecisionActionDefinition Def)> { (step, definition) };
+        var recordClass = definition.RecordClass == DecisionRecordClass.Judgement ? RecordedDecisionClass.Judgement : RecordedDecisionClass.Routine;
+        return new Plan(recordClass, AuthorizedOutcome, steps, steps, NoRequester: !confirmed);
+    }
+
+    /// <summary>
+    /// ebilling-r1 task 074 (D-100): the billing records already written under this key, each with its code, <c>sprk_confirmedby</c> (empty
+    /// when none) and stored content hash (<see cref="BillingDecisionHash"/>, from <c>sprk_steps</c>; null when it cannot be read). Narrowed
+    /// by the subject's regarding lookup (indexed), then by the key in <c>sprk_steps</c>, only among records the writer itself created
+    /// (<c>createdby</c> = the writer identity: a row a person created with this key is not this record), and only among billing codes
+    /// (<c>sprk_actioncode</c> in <see cref="BillingLookupCodes"/>: a Signals review's record that reused the id never carries one, because
+    /// <see cref="Validate"/> refuses billing codes, and must not use up the row cap). The key carries no code, so the code is READ rather
+    /// than matched to the request's: the caller can then tell "this decision, already recorded" from "this decision id, recorded with
+    /// another billing code". The billing-code check is repeated on each row read, so a row outside the set is never matched. Read through
+    /// the shared sysadmin reader, so a record owned by any team is found (a re-owned record keeps its <c>createdby</c>).
+    /// </summary>
+    /// <exception cref="DecisionRecordRefusedException"><see cref="DecisionRecordRefusalReason.BillingRecordLookupFailed"/>: the lookup (or
+    /// the writer identity it is narrowed by) faulted, a timeout surfacing as a cancellation the caller did not ask for included. Nothing is
+    /// written: guessing "none" would risk a second record; a retry may succeed.</exception>
+    private async Task<IReadOnlyList<(Guid Id, Guid? ConfirmedBy, string Code, string? Hash)>> FindBillingRecordsAsync(
+        DecisionRecordRef subject, Guid key, CancellationToken ct)
+    {
+        try
+        {
+            var query = await BillingRecordsQueryAsync(subject, key, ["sprk_confirmedby", "sprk_actioncode", "sprk_steps"], ct).ConfigureAwait(false);
+            var rows = await _entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false);
+
+            var found = new List<(Guid Id, Guid? ConfirmedBy, string Code, string? Hash)>();
+            foreach (var row in rows?.Entities ?? Enumerable.Empty<Entity>())
+            {
+                if (row.Id != Guid.Empty
+                    && row.GetAttributeValue<string>("sprk_actioncode") is { } code
+                    && BillingSubjectByCode.ContainsKey(code))
+                {
+                    found.Add((row.Id, row.GetAttributeValue<EntityReference>("sprk_confirmedby")?.Id, code, StoredBillingHashOf(row)));
+                }
+            }
+
+            return found;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            throw new DecisionRecordRefusedException(
+                DecisionRecordRefusalReason.BillingRecordLookupFailed,
+                "Whether the billing decision's Decision Record already exists could not be checked, so nothing was written.",
+                innerException: ex);
+        }
+    }
+
+    /// <summary>The "already recorded" lookup's query (<see cref="FindBillingRecordsAsync"/>), shared UNCHANGED with
+    /// <see cref="FindBillingDecisionResolvedSetAsync"/>: the subject's regarding lookup, the key in <c>sprk_steps</c>, created by the writer
+    /// identity, billing codes only, at most <see cref="BillingLookupTop"/> rows. Only the columns differ.</summary>
+    private async Task<QueryExpression> BillingRecordsQueryAsync(DecisionRecordRef subject, Guid key, string[] columns, CancellationToken ct)
+    {
+        var query = new QueryExpression(Table)
+        {
+            ColumnSet = new ColumnSet(columns),
+            // Sequential use leaves at most one billing row per key; only a concurrent pair (see WriteBillingDecisionAsync) adds another.
+            // Bounded, never a scan.
+            TopCount = BillingLookupTop,
+            NoLock = true,
+        };
+        query.Criteria.AddCondition(SubjectLookupByEntity[subject.Entity], ConditionOperator.Equal, subject.Id);
+        query.Criteria.AddCondition("sprk_steps", ConditionOperator.Like, $"%\"reviewId\":\"{key:D}\"%");
+        await AddBillingWriterFilterAsync(query, ct).ConfigureAwait(false);
+        return query;
+    }
+
+    /// <summary>The part of the "already recorded" filter that says WHO wrote the row and WHAT it is, shared unchanged by
+    /// <see cref="BillingRecordsQueryAsync"/> and <see cref="FindBillingDecisionResolvedSetsAsync"/>: created by the writer identity (a row a
+    /// person created is never trusted), billing codes only.</summary>
+    private async Task AddBillingWriterFilterAsync(QueryExpression query, CancellationToken ct)
+    {
+        query.Criteria.AddCondition(CreatedByColumn, ConditionOperator.Equal, await WriterUserIdAsync(ct).ConfigureAwait(false));
+        // K4 (ontology-r1): only billing records count against the cap. Signals reviews that reused the id would otherwise fill the 10
+        // rows and hide this decision's record, and a second record would be written.
+        query.Criteria.AddCondition("sprk_actioncode", ConditionOperator.In, BillingLookupCodes);
+    }
+
+    /// <summary>
+    /// The fact (in <c>sprk_factsnapshot</c>'s <c>facts</c>) under which a human billing decision stores the D-122 set it read before its
+    /// record (ebilling-r1 tasks 100 and 105): <c>{ "setReadAtUtc": "...Z", "signals": [ { "id": ..., "policyCode": ... } ] }</c>. The ids
+    /// themselves are the record's <c>resolvedSignalIds</c> (covered by the hash); this fact adds only what the close needs.
+    /// </summary>
+    internal const string BillingResolvedSetFact = "resolvedSignalSet";
+
+    /// <summary>The D-122 set a recorded billing decision stored (<see cref="FindBillingDecisionResolvedSetAsync"/>): ids, the instant the
+    /// set was read and each Signal's policy code. Never record text.</summary>
+    /// <param name="SetReadAtUtc">Null when the record lists no Signal and stored no set (a record written before the set was stored).</param>
+    /// <param name="ConfirmedByUserId">The record's <c>sprk_confirmedby</c> (the deciding person's <c>systemuserid</c>, as the writer wrote
+    /// it); null for a system decision. A repeat names this decider, never one read from a column a person can edit.</param>
+    internal sealed record BillingStoredResolvedSet(
+        Guid RecordId, DateTime? SetReadAtUtc, IReadOnlyList<(Guid SignalId, string PolicyCode)> Signals, Guid? ConfirmedByUserId = null);
+
+    /// <summary>
+    /// ebilling-r1 tasks 100 and 105 (D-122, additive; ontology-r1 approved): the set the billing decision <paramref name="decisionId"/> on
+    /// <paramref name="subject"/> stored with its Decision Record, so a retry closes EXACTLY that set (the record's hash covers its
+    /// <c>resolvedSignalIds</c>; a fresh read would differ once the first attempt closed any). Read only, through
+    /// <see cref="BillingRecordsQueryAsync"/> (the "already recorded" lookup's query, unchanged: a row a person created with the key is never
+    /// trusted). Null: no record, so this is a first attempt. Writes nothing; <see cref="WriteBillingDecisionAsync"/> and its hash are unchanged.
+    /// </summary>
+    /// <exception cref="DecisionRecordRefusedException"><see cref="DecisionRecordRefusalReason.ReviewInvalid"/>: more than one record
+    /// matches the key (never one is picked), or the record lists Signals whose stored set cannot be read.
+    /// <see cref="DecisionRecordRefusalReason.BillingRecordLookupFailed"/>: the lookup faulted. Nothing is written.</exception>
+    internal async Task<BillingStoredResolvedSet?> FindBillingDecisionResolvedSetAsync(
+        DecisionRecordRef subject, Guid decisionId, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(subject);
+        if (!SubjectLookupByEntity.ContainsKey(subject.Entity) || subject.Id == Guid.Empty || decisionId == Guid.Empty)
+        {
+            throw new DecisionRecordRefusedException(DecisionRecordRefusalReason.ReviewInvalid, "A billing subject and a decision id are required.");
+        }
+
+        var key = BillingDecisionKey.IdOf(subject.Entity, subject.Id, decisionId);
+        List<Entity> rows;
+        try
+        {
+            var query = await BillingRecordsQueryAsync(subject, key, BillingStoredSetColumns, ct).ConfigureAwait(false);
+            rows = ((await _entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false))?.Entities ?? Enumerable.Empty<Entity>())
+                .Where(IsBillingRow)
+                .ToList();
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            throw new DecisionRecordRefusedException(
+                DecisionRecordRefusalReason.BillingRecordLookupFailed,
+                "Whether the billing decision's Decision Record already exists could not be checked, so nothing was written.",
+                innerException: ex);
+        }
+
+        if (rows.Count == 0)
+        {
+            return null;
+        }
+
+        return StoredSetOf(rows);
+    }
+
+    /// <summary>The columns <see cref="StoredSetOf"/> reads.</summary>
+    private static readonly string[] BillingStoredSetColumns = ["sprk_actioncode", "sprk_steps", "sprk_factsnapshot", "sprk_confirmedby"];
+
+    private static bool IsBillingRow(Entity r) =>
+        r.Id != Guid.Empty && r.GetAttributeValue<string>("sprk_actioncode") is { } code && BillingSubjectByCode.ContainsKey(code);
+
+    /// <summary>
+    /// ebilling-r1 task 100 (K2, ontology-r1 review): <see cref="FindBillingDecisionResolvedSetAsync"/> for MANY subjects of one table under
+    /// one decision id, in ONE paged query instead of one per subject: the subject lookup <c>In</c> the ids, then
+    /// <see cref="AddBillingWriterFilterAsync"/> (created by the writer identity, billing codes: the single lookup's filter, unchanged), and
+    /// each row's key (<c>sprk_steps.reviewId</c>) matched in memory against the subjects' keys. A row whose key is none of them is another
+    /// decision's and is ignored. Every subject is answered: its stored set, or null (no record, a first attempt). The writer's existing IN
+    /// lists are not chunked, so neither is this one (the caller sends at most 1,000 ids).
+    /// </summary>
+    /// <exception cref="DecisionRecordRefusedException"><see cref="DecisionRecordRefusalReason.ReviewInvalid"/>: a bad argument, more than one
+    /// record under one subject's key (fails closed, as the single lookup), or a record whose stored set cannot be read.
+    /// <see cref="DecisionRecordRefusalReason.BillingRecordLookupFailed"/>: the lookup faulted. Nothing is written.</exception>
+    internal async Task<IReadOnlyDictionary<Guid, BillingStoredResolvedSet?>> FindBillingDecisionResolvedSetsAsync(
+        string subjectEntity, IReadOnlyCollection<Guid> subjectIds, Guid decisionId, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(subjectIds);
+        if (subjectEntity is null || !SubjectLookupByEntity.TryGetValue(subjectEntity, out var lookup)
+            || decisionId == Guid.Empty || subjectIds.Any(id => id == Guid.Empty))
+        {
+            throw new DecisionRecordRefusedException(DecisionRecordRefusalReason.ReviewInvalid, "A billing subject and a decision id are required.");
+        }
+
+        var subjectByKey = subjectIds.Distinct().ToDictionary(id => BillingDecisionKey.IdOf(subjectEntity, id, decisionId));
+        var found = subjectByKey.Values.ToDictionary(id => id, _ => new List<Entity>());
+        if (found.Count == 0)
+        {
+            return new Dictionary<Guid, BillingStoredResolvedSet?>();
+        }
+
+        try
+        {
+            var query = new QueryExpression(Table)
+            {
+                ColumnSet = new ColumnSet(BillingStoredSetColumns),
+                NoLock = true,
+                PageInfo = new PagingInfo { Count = 5000, PageNumber = 1 },
+            };
+            query.Criteria.AddCondition(lookup, ConditionOperator.In, found.Keys.Cast<object>().ToArray());
+            await AddBillingWriterFilterAsync(query, ct).ConfigureAwait(false);
+            while (true)
+            {
+                var page = await _entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false);
+                foreach (var row in (page?.Entities ?? Enumerable.Empty<Entity>()).Where(IsBillingRow))
+                {
+                    if (StoredReviewIdOf(row) is { } key && subjectByKey.TryGetValue(key, out var subjectId))
+                    {
+                        found[subjectId].Add(row);
+                    }
+                }
+
+                if (page is not { MoreRecords: true })
+                {
+                    break;
+                }
+
+                query.PageInfo.PageNumber++;
+                query.PageInfo.PagingCookie = page.PagingCookie;
+            }
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            throw new DecisionRecordRefusedException(
+                DecisionRecordRefusalReason.BillingRecordLookupFailed,
+                "Whether the billing decision's Decision Records already exist could not be checked, so nothing was written.",
+                innerException: ex);
+        }
+
+        return found.ToDictionary(f => f.Key, f => f.Value.Count == 0 ? null : StoredSetOf(f.Value));
+    }
+
+    /// <summary>The record's key (<c>sprk_steps.reviewId</c>); null when unreadable.</summary>
+    private static Guid? StoredReviewIdOf(Entity row)
+    {
+        try
+        {
+            using var steps = JsonDocument.Parse(row.GetAttributeValue<string>("sprk_steps") ?? "{}");
+            return steps.RootElement.ValueKind == JsonValueKind.Object
+                && steps.RootElement.TryGetProperty("reviewId", out var id) && id.ValueKind == JsonValueKind.String
+                && Guid.TryParse(id.GetString(), out var key)
+                ? key
+                : null;
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>The stored set of the ONE record under a key; more than one fails closed. Throws <see cref="DecisionRecordRefusalReason.ReviewInvalid"/>.</summary>
+    private static BillingStoredResolvedSet StoredSetOf(IReadOnlyList<Entity> rows)
+    {
+        if (rows.Count > 1)
+        {
+            // Fail closed: two records under one key (a concurrent pair) may store different sets; picking one could close the wrong set.
+            throw new DecisionRecordRefusedException(
+                DecisionRecordRefusalReason.ReviewInvalid,
+                "More than one Decision Record matches this billing decision, so its stored Signal set is ambiguous; nothing was written.");
+        }
+
+        var row = rows[0];
+        var ids = StoredResolvedSignalIdsOf(row);
+        var stored = StoredResolvedSetFactOf(row);
+        if (ids is null || (ids.Count > 0 && (stored is null || ids.Any(id => !stored.Value.Codes.ContainsKey(id)))))
+        {
+            throw new DecisionRecordRefusedException(
+                DecisionRecordRefusalReason.ReviewInvalid,
+                "The recorded billing decision lists Signals whose stored set cannot be read; nothing was written.");
+        }
+
+        return new BillingStoredResolvedSet(
+            row.Id,
+            stored?.ReadAt,
+            ids.Select(id => (id, stored!.Value.Codes[id])).ToList(),
+            row.GetAttributeValue<EntityReference>("sprk_confirmedby")?.Id is { } by && by != Guid.Empty ? by : null);
+    }
+
+    /// <summary>The record's <c>resolvedSignalIds</c> from <c>sprk_steps</c>; null when unreadable.</summary>
+    private static IReadOnlyList<Guid>? StoredResolvedSignalIdsOf(Entity row)
+    {
+        try
+        {
+            using var steps = JsonDocument.Parse(row.GetAttributeValue<string>("sprk_steps") ?? "{}");
+            if (steps.RootElement.ValueKind != JsonValueKind.Object
+                || !steps.RootElement.TryGetProperty("resolvedSignalIds", out var list) || list.ValueKind != JsonValueKind.Array)
+            {
+                return null;
+            }
+
+            var ids = new List<Guid>();
+            foreach (var item in list.EnumerateArray())
+            {
+                if (item.ValueKind != JsonValueKind.String || !Guid.TryParse(item.GetString(), out var id) || id == Guid.Empty)
+                {
+                    return null;
+                }
+
+                ids.Add(id);
+            }
+
+            return ids;
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>The <see cref="BillingResolvedSetFact"/> fact from <c>sprk_factsnapshot</c>: when the set was read and each id's policy
+    /// code; null when absent or unreadable.</summary>
+    private static (DateTime ReadAt, Dictionary<Guid, string> Codes)? StoredResolvedSetFactOf(Entity row)
+    {
+        try
+        {
+            using var snapshot = JsonDocument.Parse(row.GetAttributeValue<string>("sprk_factsnapshot") ?? "{}");
+            if (snapshot.RootElement.ValueKind != JsonValueKind.Object
+                || !snapshot.RootElement.TryGetProperty("facts", out var facts) || facts.ValueKind != JsonValueKind.Object
+                || !facts.TryGetProperty(BillingResolvedSetFact, out var set) || set.ValueKind != JsonValueKind.Object
+                || !set.TryGetProperty("setReadAtUtc", out var at) || at.ValueKind != JsonValueKind.String
+                || !DateTime.TryParseExact(at.GetString(), "O", CultureInfo.InvariantCulture,
+                    DateTimeStyles.AdjustToUniversal | DateTimeStyles.AssumeUniversal, out var readAt)
+                || !set.TryGetProperty("signals", out var signals) || signals.ValueKind != JsonValueKind.Array)
+            {
+                return null;
+            }
+
+            var codes = new Dictionary<Guid, string>();
+            foreach (var signal in signals.EnumerateArray())
+            {
+                if (signal.ValueKind != JsonValueKind.Object
+                    || !signal.TryGetProperty("id", out var id) || id.ValueKind != JsonValueKind.String || !Guid.TryParse(id.GetString(), out var signalId)
+                    || !signal.TryGetProperty("policyCode", out var code) || code.ValueKind != JsonValueKind.String || code.GetString() is not { Length: > 0 } policyCode)
+                {
+                    return null;
+                }
+
+                codes[signalId] = policyCode;
+            }
+
+            return (DateTime.SpecifyKind(readAt, DateTimeKind.Utc), codes);
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>K2: the content hash a billing record stored in <c>sprk_steps</c> (<c>reviewHash</c>, right after the key); null when the
+    /// column is missing, not JSON, or carries none. A null never matches, so such a record refuses a repeat instead of answering it.</summary>
+    private static string? StoredBillingHashOf(Entity row)
+    {
+        try
+        {
+            using var steps = JsonDocument.Parse(row.GetAttributeValue<string>("sprk_steps") ?? "{}");
+            return steps.RootElement.ValueKind == JsonValueKind.Object
+                && steps.RootElement.TryGetProperty("reviewHash", out var hash) && hash.ValueKind == JsonValueKind.String
+                ? hash.GetString()
+                : null;
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>The columns a resolved Signal's subject is read from: the pair id and every subject lookup (the commit route reads the same
+    /// ones, task 141), so <see cref="DecisionCommitService.ToRow"/> derives the subject exactly as the commit route does.</summary>
+    private static readonly string[] BillingSignalSubjectColumns =
+        ["sprk_regardingrecordid", "sprk_corerecordtype", "sprk_corerecordid", .. SignalWriter.RegardingLookupByEntity.Values];
+
+    /// <summary>
+    /// ontology-r1 F4-1 (D-123, secure-if-any): the subject of every Signal a billing decision resolves, read app-only through the shared
+    /// sysadmin reader (one query by id; the writer may use that reader only for <c>RetrieveMultipleAsync</c>, D-34), as parents of the
+    /// record's owner question. The rule is the commit route's own, REUSED, not copied: <see cref="DecisionCommitService.ToRow"/> derives the
+    /// subject from the subject lookup that carries the pair id, and <see cref="DecisionCommitService.SignalSubjectsOf"/> keeps it (a Signal
+    /// with no pair id and no core adds none; one with a core but no pair id is refused here, because its core would never be asked; a pair
+    /// id no single lookup carries is refused). Without this, a finding about a line under a secure record
+    /// could be closed by an invoice decision whose record an ordinary team owns.
+    /// </summary>
+    /// <exception cref="DecisionRecordRefusedException"><see cref="DecisionRecordRefusalReason.OwnerRefused"/>
+    /// (<see cref="RecordOwnerRefusal.ParentUndetermined"/>): a Signal does not exist, or its subject cannot be determined.
+    /// <see cref="DecisionRecordRefusalReason.OwnerResolutionFailed"/>: the Signals could not be read (a retry may succeed). Nothing is
+    /// written.</exception>
+    private async Task<IReadOnlyList<DecisionRecordRef>> BillingSignalSubjectsAsync(IReadOnlyList<Guid>? signalIds, CancellationToken ct)
+    {
+        if (signalIds is not { Count: > 0 })
+        {
+            return [];
+        }
+
+        EntityCollection? found;
+        try
+        {
+            var query = new QueryExpression("sprk_signal")
+            {
+                ColumnSet = new ColumnSet(BillingSignalSubjectColumns),
+                TopCount = signalIds.Count,
+                NoLock = true,
+            };
+            query.Criteria.AddCondition("sprk_signalid", ConditionOperator.In, signalIds.Cast<object>().ToArray());
+            found = await _entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            throw new DecisionRecordRefusedException(
+                DecisionRecordRefusalReason.OwnerResolutionFailed,
+                "A Signal the decision resolves could not be read, so the Decision Record owner is unknown; nothing was written.",
+                RecordOwnerRefusal.ParentUndetermined,
+                ex);
+        }
+
+        var byId = new Dictionary<Guid, Entity>();
+        foreach (var entity in found?.Entities ?? Enumerable.Empty<Entity>())
+        {
+            if (entity.Id != Guid.Empty)
+            {
+                byId.TryAdd(entity.Id, entity);
+            }
+        }
+
+        var rows = new List<DecisionCommitService.SignalRow>(signalIds.Count);
+        foreach (var signalId in signalIds)
+        {
+            if (!byId.TryGetValue(signalId, out var row))
+            {
+                throw new DecisionRecordRefusedException(
+                    DecisionRecordRefusalReason.OwnerRefused,
+                    "A Signal the decision resolves does not exist, so the Decision Record owner is unknown; nothing was written.",
+                    RecordOwnerRefusal.ParentUndetermined);
+            }
+
+            var signal = DecisionCommitService.ToRow(signalId, row);
+            if ((signal.HasCore || signal.CoreMalformed) && signal.SubjectId is null)
+            {
+                // The commit route first requires every resolved Signal to sit on the request's own core, so a Signal's core is always one of the
+                // record's parents. The billing request's core is derived from its subject, so a Signal on some other core would add no parent
+                // here (SignalSubjectsOf skips a Signal with no pair id) and its core would never be asked. Unknown parent: refused, never dropped.
+                throw new DecisionRecordRefusedException(
+                    DecisionRecordRefusalReason.OwnerRefused,
+                    "A Signal the decision resolves sits on a core record but names no subject, so the Decision Record owner is unknown; nothing was written.",
+                    RecordOwnerRefusal.ParentUndetermined);
+            }
+
+            rows.Add(signal);
+        }
+
+        return DecisionCommitService.SignalSubjectsOf(rows);
+    }
+
+    /// <summary>ontology-r1 F4-1: a billing decision's policy version, when it names one, must exist; the record would otherwise reference a
+    /// version no rule ever had. Read app-only through the shared sysadmin reader (a query by id, D-34, as for the Signals).</summary>
+    /// <exception cref="DecisionRecordRefusedException"><see cref="DecisionRecordRefusalReason.ReviewInvalid"/>: no such policy version.
+    /// <see cref="DecisionRecordRefusalReason.BillingRecordLookupFailed"/>: the read faulted (a retry may succeed). Nothing is written.</exception>
+    private async Task RequireBillingPolicyVersionAsync(Guid? policyVersionId, CancellationToken ct)
+    {
+        if (NoneIfEmpty(policyVersionId) is not { } versionId)
+        {
+            return;
+        }
+
+        bool exists;
+        try
+        {
+            var query = new QueryExpression("sprk_policyversion")
+            {
+                ColumnSet = new ColumnSet("sprk_policyversionid"),
+                TopCount = 1,
+                NoLock = true,
+            };
+            query.Criteria.AddCondition("sprk_policyversionid", ConditionOperator.Equal, versionId);
+            var rows = await _entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false);
+            exists = rows?.Entities?.Any(e => e.Id == versionId) == true;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            throw new DecisionRecordRefusedException(
+                DecisionRecordRefusalReason.BillingRecordLookupFailed,
+                "The billing decision's policy version could not be read, so nothing was written.",
+                innerException: ex);
+        }
+
+        if (!exists)
+        {
+            throw new DecisionRecordRefusedException(
+                DecisionRecordRefusalReason.ReviewInvalid,
+                "PolicyVersionId names no policy version; nothing was written.");
+        }
+    }
+
+    /// <summary>
+    /// D-34 / D-75: the core record of a billing subject, derived from the subject's OWN core lookups by <see cref="CoreAncestorResolver"/> (a
+    /// line's core is never its invoice's). Only a single derived core is a core here; none or several is returned as no core, and the shared
+    /// filing step (<see cref="FileUnderSubjectAsync"/>, ebilling-r1 026) refuses it (SubjectUnfileable). The derivation is handed to that
+    /// step, so it is not paid for twice. A FAILED derivation is refused here with its own class: a fault is FilingFailed (a retry may
+    /// succeed), a data condition SubjectUnfileable.
+    /// </summary>
+    /// <exception cref="DecisionRecordRefusedException"><see cref="DecisionRecordRefusalReason.FilingFailed"/>: the record-type catalog read
+    /// faulted, or it has no row for the core (the record could not carry its core pair, which an invoice-family subject requires), or the
+    /// derivation faulted. <see cref="DecisionRecordRefusalReason.SubjectUnfileable"/>: the derivation failed on a data condition.</exception>
+    private async Task<(DecisionRecordCore? Core, CoreAncestorResult? Derived)> ResolveBillingCoreAsync(DecisionRecordRef subject, CancellationToken ct)
+    {
+        var derived = await _coreAncestors.ResolveStampsAsync(subject.Entity, subject.Id, ct).ConfigureAwait(false);
+        if (!derived.Succeeded)
+        {
+            // Classified HERE, as the filing step classifies its own (FileUnderSubjectAsync): handing no core on would let a second
+            // derivation that succeeds reach the 026 core check with no core, a permanent refusal for a transient fault (adversarial F1).
+            throw derived.IsPermanent
+                ? new DecisionRecordRefusedException(
+                    DecisionRecordRefusalReason.SubjectUnfileable,
+                    "The decision's subject cannot be filed: the records it sits under conflict, or it no longer exists; nothing was written.")
+                : FilingFailed(subject, derived.Error);
+        }
+
+        if (derived.Stamps is not [var own])
+        {
+            return (null, derived); // the filing step's invoice-family check refuses it (SubjectUnfileable)
+        }
+
+        (Guid Id, string DisplayName)? typeRow;
+        try
+        {
+            typeRow = await _regarding.ResolveRecordTypeRefAsync(own.EntityType, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            throw FilingFailed(subject, $"the record-type catalog could not be read ({ex.GetType().Name})", ex);
+        }
+
+        if (typeRow is not { } type || type.Id == Guid.Empty)
+        {
+            throw FilingFailed(subject, $"the record-type catalog has no row for {own.EntityType}");
+        }
+
+        return (new DecisionRecordCore(own.EntityType, own.RecordId, type.Id), derived);
+    }
+
     /// <summary>One logging/metering point for every refusal: reason only, never fact values, values or reasons text.</summary>
     private void LogRefusal(Guid reviewId, DecisionRecordRefusedException ex)
     {
@@ -1344,7 +2284,8 @@ public sealed class DecisionRecordWriter
             parents.Add(new RecordOwnershipParent(signalSubject.Entity, signalSubject.Id));
         }
 
-        return RecordOwnershipContext.ForParents(parents) with
+        // UAC task 194b fix round R (B3): the writer's own order IS sprk_decisionrecord's rule — the closed opt-out.
+        return RecordOwnershipContext.ForParentsInWriterOrder(parents) with
         {
             RequestedBy = noRequester ? null : RecordRequester.Of(request.ConfirmedByUserId),
         };
@@ -1419,6 +2360,8 @@ public sealed class DecisionRecordWriter
                 subject, entity.Attributes.ToDictionary(a => a.Key, a => a.Value, StringComparer.Ordinal), derivedCores);
         }
 
+        RequireCoreIsTheInvoiceFamilySubjectsOwn(request, subject, filing.DerivedCores);
+
         // D-33/D-34/D-39 as amended by D-129 (records are owned by TEAMS), uac-r2 F1 and contract C3: the owner is uac-r2's resolver
         // asked with EVERY parent the record sits under, exactly as returned (secure-if-any). owningbusinessunit is never set here (it
         // derives from the owner); a refusal writes nothing; KeepCreator is not requested, so an Unchanged answer is refused.
@@ -1429,8 +2372,11 @@ public sealed class DecisionRecordWriter
         {
             // Task 042 (security fails closed): the gate asks as the CONTENT of a communication (uac-r2's ContentOf shape). The resolver
             // applies KeepCreatorUnlessTargetIsTeamOwned to the FIRST parent it is asked about, which is the core when the communication has
-            // one: then the check is made against the CORE (team-owned, so the record resolves record-first over every parent, secure-if-any),
-            // not against the communication. With no core the first parent is the communication itself: if it is not team-owned the resolver
+            // one: then the check is made against the CORE, not against the communication. A core record is never content (owner decision
+            // 2026-10-29): it stays among the parents, the record resolves record-first over every parent (secure-if-any), and a work
+            // assignment with no owning team that is filed answers with its matter's (then project's) business unit, as every other path
+            // does; any other core record, and an unfiled work assignment, answers with its own business unit. The D-144 owner below never
+            // applies to a core. With no core the first parent is the communication itself: if it is not team-owned the resolver
             // reads ITS OWN filing (filed -> secure-if-any over what it is filed under; UNFILED -> E1, owner round 10 item 8: it keeps its
             // creator and its privacy rests on per-participant shares -> Unchanged). Task 149 / D-144 (owner decision): that Unchanged is
             // no longer a refusal. D-144 as amended (owner ruling on uac-r2 F1): a decision about an unfiled communication is owned by the
@@ -1517,7 +2463,57 @@ public sealed class DecisionRecordWriter
                 : FilingFailed(subject, stamp.Error);
         }
 
+        // ebilling-r1 task 026 (FR-05, FR-15, D-75): an invoice or invoice-line subject is filed under exactly ONE core record, its own
+        // (the resolver reads the subject's own core lookups, never a line's invoice). None (a NoAncestor derivation) or more than one is a
+        // data condition a retry does not change: refused, never written as a record with no core, or with two.
+        if (InvoiceFamilyCoreRecordGuard.CoreRecordLookups.ContainsKey(subject.Entity) && stamp.Stamps.Count != 1)
+        {
+            throw new DecisionRecordRefusedException(
+                DecisionRecordRefusalReason.SubjectUnfileable,
+                "The decision's subject is an invoice or invoice line that is not filed under exactly one core record; nothing was written.");
+        }
+
         return stamp.Stamps;
+    }
+
+    /// <summary>
+    /// ebilling-r1 task 026 fix-round-1 (FR-05, D-75; ontology K3): for an invoice or invoice-line subject the decision context
+    /// (<see cref="DecisionRecordRequest.Core"/>, written as <c>sprk_corerecordtype</c> / <c>sprk_corerecordid</c> and the typed
+    /// lineage lookup) must BE the one core record the subject is filed under, the single stamp its filing derived. A request naming
+    /// another core (a line's invoice's matter, say), or none, would record a decision against a record the subject does not belong to:
+    /// refused as <see cref="DecisionRecordRefusalReason.SubjectUnfileable"/>, a data condition a retry does not change. Applies to a
+    /// handed filing too (its derived cores are the ones it was computed with). Other subjects are untouched.
+    /// </summary>
+    internal static void RequireCoreIsTheInvoiceFamilySubjectsOwn(
+        DecisionRecordRequest request, DecisionRecordRef subject, IReadOnlyList<CoreAncestorStamp> derivedCores)
+    {
+        if (!InvoiceFamilyCoreRecordGuard.CoreRecordLookups.ContainsKey(subject.Entity))
+        {
+            return;
+        }
+
+        if (derivedCores is [var own] && request.Core is { } core
+            && string.Equals(core.EntityLogicalName, own.EntityType, StringComparison.OrdinalIgnoreCase)
+            && core.RecordId == own.RecordId)
+        {
+            return;
+        }
+
+        throw new DecisionRecordRefusedException(
+            DecisionRecordRefusalReason.SubjectUnfileable,
+            "The decision's core record is not the one core record its invoice or invoice-line subject is filed under; nothing was written.");
+    }
+
+    /// <summary>
+    /// UAC task 194b fix round (F3): the parents this writer asks the owner question over for <paramref name="request"/> — through
+    /// the write's own filing and owner step (<see cref="FiledAndOwnedAsync"/>: the shared regarding builder, the derived cores,
+    /// <see cref="DecisionRecordRequest.SignalSubjects"/>, then the resolver) — with no write. The parity seam: tests compare it
+    /// with the reconciler's question for the existing row.
+    /// </summary>
+    internal async Task<IReadOnlyList<RecordOwnershipParent>> OwnershipParentsForAsync(DecisionRecordRequest request, CancellationToken ct)
+    {
+        var (_, owner) = await FiledAndOwnedAsync(request, handed: null, ct, noRequester: true).ConfigureAwait(false);
+        return owner.Parents;
     }
 
     /// <summary>Fix round 2 (K1): a handed filing that does not answer the request. Logged at Error (a caller bug, not a data

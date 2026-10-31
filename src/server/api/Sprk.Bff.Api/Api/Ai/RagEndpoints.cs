@@ -632,7 +632,8 @@ public static class RagEndpoints
             // R3 FR-3H3.2 dual-write: set new sprk_searchindexcompletedon AND keep legacy
             // sprk_searchindexed=true + sprk_searchindexedon for the transition window
             // (R3 + one sprint per spec assumption line 366). Removal deferred to R4.
-            if (!string.IsNullOrEmpty(request.DocumentId))
+            // A skipped file (E-Billing Output Files container, ebilling-r1 FR-16) was not indexed: no stamp.
+            if (!string.IsNullOrEmpty(request.DocumentId) && !result.Skipped)
             {
                 var indexName = searchIndexNameResolver.GetDefaultIndexName();
                 var completedAt = DateTime.UtcNow;
@@ -827,6 +828,9 @@ public static class RagEndpoints
     /// <summary>
     /// /index-file: Write ("write") on sprk_documents(DocumentId) — the row is stamped app-only after indexing —
     /// and AppendTo ("entity.associate_document") on the named parent, whose id is written onto every chunk.
+    /// The document is decided on the Document path (its rights, then THE external document narrowing; task 188
+    /// round 4d, #2200), so a document the narrowing hides is the same uniform 404 as one the caller may not write;
+    /// the parent (never a document: the shared map holds no <c>sprk_document</c>) stays on the Record path.
     /// Both run when both are named. Any named target that cannot be resolved (non-GUID document id,
     /// unrecognized parent type, non-GUID parent id) declares NO check at all, so the whole request is denied
     /// with the uniform 404 rather than authorized on its other half.
@@ -848,9 +852,12 @@ public static class RagEndpoints
                 return FinanceAuthorizationTargets.Authorize();
             }
 
+            // Task 188 round 4d (#2200): the DOCUMENT path, so THE external document narrowing applies after the
+            // caller's Write (FinanceAuthorizationFilter → InternalPlaneDocumentNarrowing.AuthorizeDocumentsAsync). An
+            // internal systemuser makes no narrowing call; the Record path asked the root grants only.
             checks.Add(new FinanceAuthorizationCheck
             {
-                Path = FinanceCheckPath.Record,
+                Path = FinanceCheckPath.Document,
                 EntitySetName = DocumentEntitySetName,
                 RecordId = documentId,
                 Operation = "write",
@@ -1059,6 +1066,12 @@ public static class RagEndpoints
     /// stamped. One unauthorized id must not deny service to the rest of a legitimate batch.
     /// </para>
     /// <para>
+    /// <b>The external document narrowing (task 188 round 4d, #2200).</b> After the Write check, ONE
+    /// <see cref="InternalPlaneDocumentNarrowing.ForCallerAsync"/> call over the writable ids: for a caller who is not an
+    /// internal systemuser, a document the narrowing hides is refused in place exactly like one the caller may not write
+    /// (and all hidden is the same 403), so its governing parent, chunk count and file state are never answered.
+    /// </para>
+    /// <para>
     /// <b>Cost.</b> One extra Dataverse round trip per DISTINCT requested id, memoized within the
     /// request and absorbed across requests by <c>CachedAccessDataSource</c>'s 60 s key. This route
     /// already spends, per document, one Dataverse read + an SPE download + extraction + embedding +
@@ -1183,6 +1196,40 @@ public static class RagEndpoints
             writePermitted[i] = permitted;
         }
 
+        // Task 188 round 4d (#2200): THE external document narrowing over the ids the caller may write — ONE call, after
+        // the Write check (an id the caller may not write is never sent). A document it hides from a caller who is not an
+        // internal systemuser is refused in place exactly as one the caller may not write (same message, never read,
+        // indexed or stamped); a narrowing that faults hides every id, and a failed caller lookup counts as external. An
+        // internal systemuser makes no narrowing call and no read. Not AuthorizeDocumentsAsync: its first-deny answer
+        // cannot express this route's per-document result list (the BulkDownloadAuthorizationFilter precedent).
+        var visibility = await InternalPlaneDocumentNarrowing.ForCallerAsync(
+            httpContext,
+            decisions.Where(d => d.Value).Select(d => (string?)d.Key.ToString()),
+            "rag-send-to-index",
+            logger);
+
+        if (visibility.Narrowed)
+        {
+            var hidden = 0;
+            for (var i = 0; i < request.DocumentIds.Count; i++)
+            {
+                if (writePermitted[i]
+                    && Guid.TryParse(request.DocumentIds[i], out var recordId)
+                    && !visibility.IsShown(recordId.ToString()))
+                {
+                    writePermitted[i] = false;
+                    hidden++;
+                }
+            }
+
+            if (hidden > 0)
+            {
+                logger.LogInformation(
+                    "send-to-index: the external document narrowing withheld {Hidden} of {DocumentCount} requested documents",
+                    hidden, request.DocumentIds.Count);
+            }
+        }
+
         if (!writePermitted.Any(p => p))
         {
             logger.LogWarning(
@@ -1290,7 +1337,18 @@ public static class RagEndpoints
                 // Step 5: Index via OBO authentication
                 var indexResult = await fileIndexingService.IndexFileAsync(indexRequest, httpContext, cancellationToken);
 
-                if (indexResult.Success)
+                if (indexResult.Skipped)
+                {
+                    // Deliberately not indexed (E-Billing Output Files container, ebilling-r1 FR-16): no stamp, and the
+                    // caller is told it was not indexed rather than shown a success with zero chunks.
+                    results.Add(new SendToIndexDocumentResult
+                    {
+                        DocumentId = documentId,
+                        Success = false,
+                        ErrorMessage = "This document is stored in a container that is not indexed."
+                    });
+                }
+                else if (indexResult.Success)
                 {
                     // Step 6: Update Dataverse with search index fields.
                     // R3 FR-3H3.2 dual-write: set new sprk_searchindexcompletedon AND keep legacy

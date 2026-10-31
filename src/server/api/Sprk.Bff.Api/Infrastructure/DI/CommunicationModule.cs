@@ -128,6 +128,8 @@ public static class CommunicationModule
         services.AddSingleton<CommunicationService>();
         // Budget Inquiry executor (ontology task 070): called by the decision commit route; scoped because it holds the
         // caller's IDataverseUserClient. The sender delegates to the singleton CommunicationService above.
+        // Task 160 (D-181): the inquiry email's record link by recipient and the record's name for the footer, read at send time.
+        services.AddScoped<Sprk.Bff.Api.Services.Signals.Actions.InquiryRecordFacts>();
         services.AddScoped<Sprk.Bff.Api.Services.Signals.Actions.InquiryEmailSender>();
         services.AddScoped<Sprk.Bff.Api.Services.Signals.Actions.BudgetInquiryExecutor>();
         services.AddScoped<Sprk.Bff.Api.Services.Signals.Actions.InquiryDispositionService>();
@@ -621,6 +623,14 @@ public static class CommunicationModule
         // the resolver it calls, so it exists wherever the resolver does (bff-extensions.md §F.1).
         services.AddScheduledJob<CommunicationThreadFilingSweepJob>(
             CommunicationThreadFilingSweepJob.DefaultCronSchedule, enabled: false);
+
+        // unified-access-control-r2 task 190 (D7 T7b, #2126) — the backfill / safety-net sweep that links each unlinked .eml
+        // archive document to the ONE communication its recorded message id names exactly, so the document narrowing sees it
+        // (ADR-036 IScheduledJob, ADR-052 "BFF, schedule"). Registered DISABLED: it runs only when an admin triggers it
+        // (POST /api/admin/jobs/email-archive-communication-link-sweep/trigger, SystemAdmin) or enables the schedule, and
+        // writes only while EmailArchiveLinkSweep:Apply is true. Beside the capture-side link (CrossPathLink) it backfills.
+        services.AddScheduledJob<EmailArchiveCommunicationLinkSweepJob>(
+            EmailArchiveCommunicationLinkSweepJob.DefaultCronSchedule, enabled: false);
         services.TryAddSingleton(TimeProvider.System);
     }
 

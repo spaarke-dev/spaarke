@@ -600,6 +600,8 @@ describe('Browser silent renewal: CIAM requests are unchanged on the wire; the w
     bffScope: 'api://bbbbbbbb-0000-0000-0000-00000000000b/user_impersonation',
   } as const;
   const OTHER_TENANT = '7052feba-bfc4-43e0-b09e-65014b429131';
+  /** The CIAM tenant of the test build (vitest.config.ts VITE_MSAL_TENANT_ID). */
+  const CIAM_TENANT = '00000000-0000-0000-0000-000000000141';
   // A9: the browser workforce plane is the signed-in user's OWN directory (the home tenant), not the Spaarke tenant.
   const HOME_TENANT = 'c0c0c0c0-0000-4000-8000-000000000001';
   const HOME_AUTHORITY = `https://login.microsoftonline.com/${HOME_TENANT}`;
@@ -622,10 +624,13 @@ describe('Browser silent renewal: CIAM requests are unchanged on the wire; the w
   }
 
   describe('CIAM plane (acquireBffToken)', () => {
+    /** A partner account: its tenant is the CIAM tenant (vitest.config.ts VITE_MSAL_TENANT_ID). */
+    const ciamAccount = { homeAccountId: 'p', username: 'p@partner.test', tenantId: CIAM_TENANT };
+
     /** acquireBffToken() against the CIAM singleton, with its MSAL calls replaced by spies. */
-    async function ciam(silent: (req: any) => Promise<any>) {
+    async function ciam(silent: (req: any) => Promise<any>, accounts: any[] = [ciamAccount]) {
       const { msalAuth, msalConfig } = await loadAuth();
-      const stub = browserInstance(silent);
+      const stub = browserInstance(silent, accounts);
       Object.assign(msalConfig.msalInstance, stub);
       return { msalAuth, instance: msalConfig.msalInstance as any };
     }
@@ -636,9 +641,9 @@ describe('Browser silent renewal: CIAM requests are unchanged on the wire; the w
       expect(instance.acquireTokenSilent).toHaveBeenCalledTimes(1);
       expect(instance.acquireTokenSilent.mock.calls[0][0]).toStrictEqual({
         scopes: [import.meta.env.VITE_MSAL_BFF_SCOPE],
-        account,
+        account: ciamAccount,
       });
-      // The CIAM account list is not tenant-filtered either.
+      // MSAL is asked for every account (no tenant filter on the wire); the CIAM predicate is applied in the SPA.
       expect(instance.getAllAccounts).toHaveBeenCalledWith();
       expect(instance.acquireTokenRedirect).not.toHaveBeenCalled();
     });
@@ -654,7 +659,7 @@ describe('Browser silent renewal: CIAM requests are unchanged on the wire; the w
       expect(instance.acquireTokenRedirect).toHaveBeenCalledTimes(1);
       expect(instance.acquireTokenRedirect.mock.calls[0][0]).toMatchObject({
         scopes: [import.meta.env.VITE_MSAL_BFF_SCOPE],
-        account,
+        account: ciamAccount,
       });
       // The interactive redirect keeps the instance's own (origin) redirect URI: no per-request override.
       expect(instance.acquireTokenRedirect.mock.calls[0][0]).not.toHaveProperty('redirectUri');
@@ -684,18 +689,71 @@ describe('Browser silent renewal: CIAM requests are unchanged on the wire; the w
       await expect(msalAuth.acquireActiveBffToken(CIAM_BACKEND, { forceRefresh: true })).resolves.toBe('tok-fresh');
       expect(instance.acquireTokenSilent.mock.calls[0][0]).toStrictEqual({
         scopes: [CIAM_BACKEND.bffScope],
-        account,
+        account: ciamAccount,
         forceRefresh: true,
       });
       // ... and a normal call through the same seam sends no forceRefresh key at all.
       await msalAuth.acquireActiveBffToken(CIAM_BACKEND);
-      expect(instance.acquireTokenSilent.mock.calls[1][0]).toStrictEqual({ scopes: [CIAM_BACKEND.bffScope], account });
+      expect(instance.acquireTokenSilent.mock.calls[1][0]).toStrictEqual({
+        scopes: [CIAM_BACKEND.bffScope],
+        account: ciamAccount,
+      });
     });
 
-    it('the browser CIAM plane carries no acquire options (no tenant filter, no iframe redirect URI)', async () => {
+    it('the browser CIAM plane carries only the CIAM account filter (no tenant filter, no iframe redirect URI, no authority)', async () => {
       vi.resetModules();
       const plane = await import('../src/auth/standalone-plane');
-      expect(plane.resolveStandalonePlane('ciam').acquireOptions).toBeUndefined();
+      const msalAuth = await import('../src/auth/msal-auth');
+      const resolved = plane.resolveStandalonePlane('ciam');
+      expect(resolved.acquireOptions).toStrictEqual({ accountFilter: msalAuth.isCiamAccount });
+      expect(resolved.accountFilter).toBe(msalAuth.isCiamAccount);
+    });
+
+    // #2166: MSAL's account list is shared by every client in the tab. A company account left by the home plane
+    // ("Sign in with your company account" -> "not set up" -> "choose a different sign-in" -> Partner) was used for the
+    // CIAM token, and msal-browser refused it with authority_mismatch.
+    it('#2166: a cached company account alone is not a partner sign-in - no silent call with it; the CIAM sign-in redirect starts', async () => {
+      const { msalAuth, instance } = await ciam(async () => ({ accessToken: 'must-not-be-used' }), [account]);
+      await expect(msalAuth.acquireBffToken()).rejects.toThrow(/No authenticated account/);
+      expect(instance.acquireTokenSilent).not.toHaveBeenCalled();
+      expect(instance.acquireTokenRedirect).toHaveBeenCalledTimes(1);
+      expect(instance.acquireTokenRedirect.mock.calls[0][0]).toStrictEqual({
+        scopes: [import.meta.env.VITE_MSAL_BFF_SCOPE],
+      });
+    });
+
+    it('#2166: with a company account cached FIRST, the partner account is the one used', async () => {
+      const { msalAuth, instance } = await ciam(async () => ({ accessToken: 'tok' }), [account, ciamAccount]);
+      await expect(msalAuth.acquireBffToken()).resolves.toBe('tok');
+      expect(instance.acquireTokenSilent).toHaveBeenCalledTimes(1);
+      expect(instance.acquireTokenSilent.mock.calls[0][0].account).toBe(ciamAccount);
+    });
+
+    it('#2166: the plane seam (applyStandalonePlane) filters the same way, also on the 401 forced refresh', async () => {
+      const { msalAuth, instance } = await ciam(async () => ({ accessToken: 'tok' }), [account, ciamAccount]);
+      const plane = await import('../src/auth/standalone-plane');
+      plane.applyStandalonePlane(plane.resolveStandalonePlane('ciam'));
+      await expect(msalAuth.acquireActiveBffToken(CIAM_BACKEND)).resolves.toBe('tok');
+      await expect(msalAuth.acquireActiveBffToken(CIAM_BACKEND, { forceRefresh: true })).resolves.toBe('tok');
+      expect(instance.acquireTokenSilent.mock.calls.map((c: any[]) => c[0].account)).toEqual([
+        ciamAccount,
+        ciamAccount,
+      ]);
+      expect(instance.acquireTokenSilent.mock.calls[1][0]).toStrictEqual({
+        scopes: [CIAM_BACKEND.bffScope],
+        account: ciamAccount,
+        forceRefresh: true,
+      });
+    });
+
+    it('isCiamAccount: only the CIAM tenant (any case); another GUID, a non-GUID or no tenant is not a partner account', async () => {
+      const { msalAuth } = await loadAuth();
+      expect(msalAuth.isCiamAccount({ tenantId: CIAM_TENANT })).toBe(true);
+      expect(msalAuth.isCiamAccount({ tenantId: CIAM_TENANT.toUpperCase() })).toBe(true);
+      expect(msalAuth.isCiamAccount({ tenantId: HOME_TENANT })).toBe(false);
+      expect(msalAuth.isCiamAccount({ tenantId: OTHER_TENANT })).toBe(false);
+      expect(msalAuth.isCiamAccount({ tenantId: 'organizations' })).toBe(false);
+      expect(msalAuth.isCiamAccount({})).toBe(false);
     });
   });
 
@@ -884,12 +942,12 @@ describe('Browser silent renewal: CIAM requests are unchanged on the wire; the w
       expect(instance.acquireTokenSilent.mock.calls[0][0].account).toBe(account);
     });
 
-    it("AuthGuard / portal-user account lists are scoped to the plane: the home plane keeps only the signed-in tenant's accounts, CIAM keeps all", async () => {
+    it("AuthGuard / portal-user account lists are scoped to the plane: the home plane keeps only the signed-in tenant's accounts, CIAM only CIAM accounts (#2166)", async () => {
       stubWorkforceEnv();
       vi.resetModules();
       const plane = await import('../src/auth/standalone-plane');
       const msalAuth = await import('../src/auth/msal-auth');
-      const ciamAccount = { homeAccountId: 'c', tenantId: OTHER_TENANT };
+      const otherTenantAccount = { homeAccountId: 'c', tenantId: OTHER_TENANT };
       const homeAccount = { homeAccountId: 's', tenantId: HOME_TENANT.toUpperCase() };
 
       plane.applyStandalonePlane({
@@ -900,11 +958,16 @@ describe('Browser silent renewal: CIAM requests are unchanged on the wire; the w
         accountFilter: msalAuth.isWorkforceHomeAccount,
         acquireOptions: options(),
       } as any);
-      expect(msalAuth.accountsForActivePlane([ciamAccount, homeAccount])).toEqual([homeAccount]);
-      expect(msalAuth.accountsForActivePlane([ciamAccount])).toEqual([]);
+      expect(msalAuth.accountsForActivePlane([otherTenantAccount, homeAccount])).toEqual([homeAccount]);
+      expect(msalAuth.accountsForActivePlane([otherTenantAccount])).toEqual([]);
 
       plane.applyStandalonePlane(plane.resolveStandalonePlane('ciam'));
-      expect(msalAuth.accountsForActivePlane([ciamAccount, homeAccount])).toEqual([ciamAccount, homeAccount]);
+      const partnerAccount = { homeAccountId: 'p', tenantId: CIAM_TENANT };
+      expect(msalAuth.accountsForActivePlane([homeAccount, partnerAccount, otherTenantAccount])).toEqual([
+        partnerAccount,
+      ]);
+      // A company account alone does not count as signed in, so AuthGuard starts the CIAM sign-in.
+      expect(msalAuth.accountsForActivePlane([homeAccount])).toEqual([]);
     });
   });
 });

@@ -169,7 +169,8 @@ internal static class NoAccessEnforcementTestDoubles
         public static readonly Guid DefaultOwningUserId = Guid.Parse("99999999-0000-0000-0000-00000000f620");
 
         internal override Task<AccessRights> GetPrincipalRightsAsync(
-            Guid systemUserId, string entitySet, Guid recordId, CancellationToken ct)
+            Guid systemUserId, string entitySet, Guid recordId, CancellationToken ct,
+            Microsoft.Extensions.Logging.LogLevel failureLogLevel = Microsoft.Extensions.Logging.LogLevel.Error)
         {
             RightsReads.Add((systemUserId, recordId));
             if (FailRightsRead)

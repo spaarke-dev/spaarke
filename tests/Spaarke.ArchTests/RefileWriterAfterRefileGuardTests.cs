@@ -3,7 +3,6 @@ using Spaarke.Dataverse;
 using Sprk.Bff.Api.Services.Access;
 using Sprk.Bff.Api.Services.Communication;
 using Sprk.Bff.Api.Services.Dataverse;
-using Sprk.Bff.Api.Services.Finance;
 using Xunit;
 
 namespace Spaarke.ArchTests;
@@ -67,12 +66,10 @@ public class RefileWriterAfterRefileGuardTests
     /// <summary>The ratchet baseline: re-file writers that do not run the step yet, each with its reason.</summary>
     private sealed record KnownViolation(Type Type, string Reason);
 
-    private static readonly IReadOnlyList<KnownViolation> KnownViolations = new[]
-    {
-        new KnownViolation(typeof(InvoiceReviewService),
-            "Found by this guard (#2091 review): a document filed under an invoice is re-parented (ReparentAsync, inherited " +
-            "matter) without AfterRefileAsync. Not in #2091's scope; follow-up #2095."),
-    };
+    // Empty: ThreadResolver and CommunicationService run the step since #2110 (#2091). The invoice confirm's document re-file (#2095,
+    // InvoiceDocumentRefile since 050a / D-134) is retired by ebilling-r1 task 094: a Submit Invoice source is copied, never re-filed.
+    // A new entry needs a reason; an entry that no longer violates must be removed.
+    private static readonly IReadOnlyList<KnownViolation> KnownViolations = Array.Empty<KnownViolation>();
 
     private static readonly Lazy<IReadOnlyList<Type>> BffTypes = new(() => typeof(Program).Assembly.GetTypes());
 
@@ -127,6 +124,99 @@ public class RefileWriterAfterRefileGuardTests
             "A re-file writer must run SecureChildReconciler.AfterRefileAsync after a successful write that moved a filing " +
             "lookup, reading whether the row was isolated BEFORE the write (#2091). Call it, or list the type with its reason:\n" +
             string.Join("\n", problems));
+    }
+
+    /// <summary>
+    /// #2159 slice 2: re-file writers that run the hook WITHOUT the reparent's answer, each with its reason — none of them can
+    /// re-file a document out of one secure record into another with F3, so none has a release to record.
+    /// </summary>
+    private static readonly IReadOnlyList<KnownViolation> WithoutTheResolution = new[]
+    {
+        new KnownViolation(typeof(ThreadResolver),
+            "A message joining a record thread (sprk_communication): never a document, so never a file's F3 release."),
+    };
+
+    [Fact(DisplayName = "#2159 slice 2: every re-file writer that re-files through ReparentAsync or the re-file core passes the reparent's answer to AfterRefileAsync")]
+    public void EveryRefileWriterPassesTheReparentsAnswer()
+    {
+        var scan = ScanForTheResolution(BffTypes.Value);
+
+        // Non-vacuity: the document re-file writers are seen passing it.
+        foreach (var compliant in new[]
+                 {
+                     "Sprk.Bff.Api.Api.DataverseDocumentsEndpoints", "Sprk.Bff.Api.Api.ChildRecordEndpoints",
+                     "Sprk.Bff.Api.Services.Ai.Handlers.DataverseUpdateRecordHandler",
+                 })
+        {
+            Assert.True(scan.Any(s => s.Key.FullName == compliant && s.Value.Reparents && s.Value.PassesResolution),
+                $"{compliant} should be seen re-filing AND passing the reparent's answer to AfterRefileAsync — the scan lost its signal.");
+        }
+
+        var allowed = WithoutTheResolution.ToDictionary(k => k.Type);
+        var problems = new List<string>();
+        foreach (var (type, use) in scan.OrderBy(s => s.Key.FullName, StringComparer.Ordinal))
+        {
+            if (!use.Reparents || !use.CallsHook || use.PassesResolution || allowed.ContainsKey(type))
+                continue;
+            problems.Add($"{type.FullName} runs AfterRefileAsync without the reparent's answer (RecordOwnerResolution)");
+        }
+
+        foreach (var known in WithoutTheResolution)
+        {
+            if (scan.GetValueOrDefault(known.Type) is not { Reparents: true, CallsHook: true, PassesResolution: false })
+                problems.Add($"STALE entry {known.Type.FullName}: it no longer runs the hook without the answer — remove it.");
+        }
+
+        Assert.True(problems.Count == 0,
+            "A re-file writer passes the reparent's RecordOwnerResolution to SecureChildReconciler.AfterRefileAsync, so a " +
+            "document re-filed out of secure record S1 into S2 with F3 records its file's release (#2159 slice 2):\n" +
+            string.Join("\n", problems));
+    }
+
+    [Fact(DisplayName = "#2159 slice 2: control — a hook without the reparent's answer is found; one with it is not")]
+    public void ResolutionDetector_MustFireAndMustNotFire()
+    {
+        var scan = ScanForTheResolution(new[] { typeof(RefileGuardControlHookedReparentWriter), typeof(RefileGuardControlHookedWithTheAnswerWriter) }
+            .SelectMany(IlCallScan.WithNested));
+
+        Assert.True(scan.GetValueOrDefault(typeof(RefileGuardControlHookedReparentWriter)) is { Reparents: true, CallsHook: true, PassesResolution: false },
+            "must fire: re-files and runs the hook without the answer");
+        Assert.True(scan.GetValueOrDefault(typeof(RefileGuardControlHookedWithTheAnswerWriter)) is { Reparents: true, PassesResolution: true },
+            "must not fire: passes the answer");
+    }
+
+    private sealed class ResolutionUse
+    {
+        public bool Reparents { get; set; }
+        public bool CallsHook { get; set; }
+        public bool PassesResolution { get; set; }
+    }
+
+    private static Dictionary<Type, ResolutionUse> ScanForTheResolution(IEnumerable<Type> types)
+    {
+        var uses = new Dictionary<Type, ResolutionUse>();
+        foreach (var (caller, _, target) in IlCallScan.MethodReferences(types))
+        {
+            var owner = IlCallScan.Outermost(caller);
+            var reparents = target.DeclaringType != owner
+                && ((target.Name == nameof(IRecordOwnershipResolver.ReparentAsync) && target.DeclaringType is { } d
+                        && typeof(IRecordOwnershipResolver).IsAssignableFrom(d))
+                    || (target.DeclaringType == typeof(OwnedChildWrite) && target.Name == nameof(OwnedChildWrite.RefileAsync)));
+            var hook = IsTheHook(target);
+            if (!reparents && !hook)
+                continue;
+
+            if (!uses.TryGetValue(owner, out var use))
+                uses[owner] = use = new ResolutionUse();
+            use.Reparents |= reparents;
+            if (hook)
+            {
+                use.CallsHook = true;
+                use.PassesResolution |= target.GetParameters().Any(p => p.ParameterType == typeof(RecordOwnerResolution));
+            }
+        }
+
+        return uses;
     }
 
     [Fact(DisplayName = "#2091: negative control — an unhooked reparent or thread join is found; a hook inside a lambda, or no re-file, is not")]
@@ -234,6 +324,23 @@ internal sealed class RefileGuardControlHookedReparentWriter(IRecordOwnershipRes
             write, CancellationToken.None);
         Func<Task> after = () => children.AfterRefileAsync("sprk_todo", id, () => Task.FromResult(false), CancellationToken.None);
         await after();
+    }
+}
+
+/// <summary>#2159 slice 2 MUST NOT FIRE: re-parents, then runs the hook WITH the reparent's answer.</summary>
+internal sealed class RefileGuardControlHookedWithTheAnswerWriter(IRecordOwnershipResolver ownership, SecureChildReconciler children)
+{
+    internal async Task WriteAsync(Guid id, Func<CancellationToken, Task> write)
+    {
+        var reparent = await ownership.ReparentAsync(
+            new RecordReparent
+            {
+                EntityLogicalName = "sprk_document",
+                RecordId = id,
+                ParentChanges = new Dictionary<string, Microsoft.Xrm.Sdk.EntityReference?>(),
+            },
+            write, CancellationToken.None);
+        await children.AfterRefileAsync("sprk_document", id, () => Task.FromResult(false), reparent, CancellationToken.None);
     }
 }
 

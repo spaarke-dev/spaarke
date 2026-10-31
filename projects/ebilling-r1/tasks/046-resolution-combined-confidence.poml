@@ -1,0 +1,113 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="046" project="ebilling-r1">
+  <metadata>
+    <title>Resolution and combined confidence</title>
+    <phase>2 Submission and extraction (WP2)</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Deterministic resolvers and a scoring function with clear inputs; its output gates rejection, so the scoring rules are tested exhaustively, but no auth or write path.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Pure functions plus one embedding call through an existing facade member; precision matters more than design.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>P2-B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>025, 029</deps>
+    <tags>bff, ai, finance</tags>
+    <estimated-effort>1 day</estimated-effort>
+  </metadata>
+
+  <prompt>Implement Processing Pipeline step 2 (FR-23, D-47) as resolvers in Services/Finance: arithmetic checks, timekeeper roster matching (exact, then normalized, then AI-assisted with confidence), rate card in force on each line date, and a combined confidence per field from four signals weighted by the eBilling settings (025). An unmatched timekeeper never silently maps to another timekeeper below the reliability threshold.</prompt>
+
+  <role>SPAARKE platform developer. Expert in deterministic domain services and xUnit property-style tests. Follow ADRs strictly.</role>
+
+  <goal>IInvoiceResolutionService.ResolveAsync takes a resolution input (firm, core record, lines and header values each with analyzer confidence) and returns resolved lines (timekeeper id or unmatched, rate card rate in force, arithmetic results) plus a combined confidence per field; a pure CombinedConfidenceCalculator implements D-47 with settings weights and caps.</goal>
+
+  <context>
+    <background>Spec Processing Pipeline step 2; FR-23 acceptance; D-47 (four signals: analyzer confidence, arithmetic consistency, reference-data match, model self-report as minor input; only this score gates rejection, FR-26). Settings (025): sprk_ebillingsetting with sprk_reliabilitythreshold (0.90), weights sprk_weightanalyzer / sprk_weightarithmetic / sprk_weightreferencematch / sprk_weightselfreport and caps sprk_arithmeticfailcap / sprk_referencemissingcap, read through IEbillingSettingsReader (typed EbillingSettings). Reference data (017): sprk_timekeeper (firm, name, classification, status Approved / Pending / Inactive, effective dates), sprk_ratecard + sprk_ratecardrate (firm, optional core-record scope, Published, effective dates, rate per timekeeper or classification). 043 is not a dependency, so this task defines its own input record; 049 maps 043's extracted invoice into it.</background>
+    <relevant-files>
+      <file role="new">src/server/api/Sprk.Bff.Api/Services/Finance/Resolution/ (IInvoiceResolutionService, InvoiceResolutionService, TimekeeperMatcher, RateCardResolver, ArithmeticChecker, CombinedConfidenceCalculator, input / output records)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/DI/FinanceModule.cs (shared append point)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/IInvoiceAi.cs:81 (GenerateEmbeddingAsync — the AI-assisted match signal)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Finance/ (025's IEbillingSettingsReader and Models/EbillingSettings.cs)</file>
+      <file role="new">tests/unit/Sprk.Bff.Api.Tests/Services/Finance/Resolution/</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="025" status="required">IEbillingSettingsReader with threshold, weights and caps.</dependency>
+      <dependency task="029" status="required">Timekeeper and rate-card tables live in dev.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="CLAUDE.md §10">Every change under src/server/api/Sprk.Bff.Api follows .claude/constraints/bff-extensions.md.</constraint>
+    <constraint source="FR-23">Match order: exact (case-insensitive) on name for the firm's Approved timekeepers active on the line date; then normalized (punctuation, initials, "Last, First" versus "First Last", honorifics); then AI-assisted. An AI-assisted candidate is used only when its similarity is at or above the reliability threshold and the best candidate is clearly ahead of the second; otherwise the line is unmatched and produces an ApprovedTimekeeper finding input. Never pick a timekeeper of another firm.</constraint>
+    <constraint source="D-52 / ADR-013">The AI-assisted step uses IInvoiceAi.GenerateEmbeddingAsync only (no new Action, no prompt). If a prompted match turns out to be needed, that is an escalation, not an in-task addition.</constraint>
+    <constraint source="D-47">Combined confidence is a pure function of the four signals and settings; a failed arithmetic check caps the confidence of the fields involved at sprk_arithmeticfailcap; a missing reference match caps at sprk_referencemissingcap; self-report can never raise a score above the analyzer confidence. No hard-coded weights — defaults come only from EbillingSettings.</constraint>
+    <constraint source="determinism">Same input and settings give the same output; resolvers read reference data once per invoice (no per-line Dataverse queries).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Finance domain services</topic>
+    <files>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/data.md</file>
+      <file>.claude/patterns/api/service-registration.md</file>
+      <file>docs/architecture/finance-intelligence-architecture.md</file>
+      <file>docs/standards/TEST-ARCHITECTURE.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context and rigor">Declare rigor STANDARD. Read spec FR-23, D-47, 025's settings record and 017's columns (docs/data-model).</step>
+    <step order="1">Define input and output records (header fields and lines with value + analyzer confidence + optional self-report; firm id; core record; line date).</step>
+    <step order="2">ArithmeticChecker: hours times rate equals amount (rounding tolerance 0.01), lines to section totals, sections to total due; per-field pass / fail.</step>
+    <step order="3">TimekeeperMatcher (exact, normalized, embedding similarity) and RateCardResolver: Published rate card in force on the line date; precedence (record this as an assumption in notes) core-record-scoped card over firm card, timekeeper rate over classification rate; no card → reference-missing signal.</step>
+    <step order="4">CombinedConfidenceCalculator per D-47 with settings weights and caps.</step>
+    <step order="5">Tests: every match stage; ambiguous AI candidates → unmatched; another firm's timekeeper never matched; inactive or out-of-date timekeeper not matched; rate-card precedence and date boundaries; each arithmetic failure; each cap; self-report cannot raise; settings change changes the score.</step>
+    <step order="6">Build, test, publish-size delta.</step>
+    <step order="7">Update TASK-INDEX.md: change this task's status cell to `✅ [done]`.</step>
+    <step order="8">Record deviations and assumptions (rate-card precedence, normalization rules, similarity margin) in projects/ebilling-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If embedding similarity cannot separate correct from wrong timekeepers on the evaluation-set rosters (wrong matches at or above the threshold), STOP and propose a prompted matching Action instead of adding one silently.</trigger>
+    <trigger>If the spec and 025 settings disagree on a weight or cap, STOP and ask — these values gate rejection.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>No roster matcher, rate-card resolver or confidence combiner exists (grep -i "timekeeper|ratecard" in Services/Finance finds nothing); IInvoiceAi.GenerateEmbeddingAsync exists and is reused.</existing>
+    <extension>Finance services today stop at extraction; resolution is a new pipeline step with no host to extend, so it lands as one cohesive folder behind one interface.</extension>
+    <cost-of-doing-nothing>FR-23 and FR-26 fail: without combined confidence the rejection rule cannot distinguish reliable from unreliable reads, so NFR-06 (zero rejections from misreads) cannot be met.</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="dotnet">dotnet build src/server/api/Sprk.Bff.Api/ ; dotnet test</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Finance/Resolution/*, FinanceModule.cs registration</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Finance/Resolution/*</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Exact and normalized name matches resolve to the firm's Approved timekeeper active on the line date.</criterion>
+    <criterion testable="true">Negative (FR-23): a name whose best AI candidate is below the threshold, or not clearly ahead of the second, stays unmatched and yields an ApprovedTimekeeper finding input; it is never mapped to a different timekeeper.</criterion>
+    <criterion testable="true">Negative: a timekeeper of another firm, an Inactive one or one outside its effective dates is never matched.</criterion>
+    <criterion testable="true">The rate in force is chosen by line date with the recorded precedence; no Published card in force gives a reference-missing signal, not an exception.</criterion>
+    <criterion testable="true">Combined confidence equals the D-47 weighted formula with settings weights; arithmetic failure and missing reference cap the affected fields; self-report never raises a score; changing settings changes the result without code change.</criterion>
+    <criterion testable="true">Reference data is read a bounded number of times per invoice regardless of line count (asserted on the mocked entity service).</criterion>
+    <criterion testable="true">Cover the stated contract plus the edge cases named above. Anything beyond that needs a one-line justification in task notes.</criterion>
+    <criterion testable="true">Publish-size delta of Sprk.Bff.Api measured against a fresh master build and recorded in task notes; no new HIGH CVE.</criterion>
+    <criterion testable="true">dotnet build exits 0; dotnet test exits 0.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-23, D-47, Processing Pipeline step 2. Shared append point: FinanceModule.cs. Weights and caps seeded by 025 are provisional and calibrated by 161. Firm and core record come from the submission context (044), not from extracted text.
+    Completed 2026-10-16: see projects/ebilling-r1/notes/046-resolution-combined-confidence.md (assumptions A1-A15, embedding experiment, cap = ceiling confirmed, owner question on the ApprovedTimekeeper reject path, publish-size delta +42,813 B, ADR-010 ceiling 162 -> 163). TASK-INDEX.md is updated by the main session.
+    rework: fix-round-1 task 046</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load every file in knowledge/files before Step 1. Follow task-execute for rigor, checkpoints and quality gates.</protocol>
+  </execution>
+</task>

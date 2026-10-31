@@ -1,0 +1,97 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="072" project="field-mapping-server-write-path-r1">
+  <metadata>
+    <title>GET /api/v1/records/{table}/{id}/family — own endpoint file, ledger + census, uniform 404 (FR-31)</title>
+    <phase>7 W7 Record family service and Family tool</phase>
+    <gate>071 complete</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>New BFF endpoint (auth required); route-authorization ledger; existence-equalised 404.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Thin endpoint over 071's reader following the existing /api/v1/records group pattern; the security logic lives in 071.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>W7-B</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Builds on 071.</parallel-reason>
+    <deps>071</deps>
+    <tags>bff-api, api, endpoints, auth, testing</tags>
+    <estimated-effort>3-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Add `GET /api/v1/records/{table}/{id}/family` in a new file `Api/Records/RecordFamilyEndpoints.cs`, in the existing `/api/v1/records` group, calling `RecordFamilyReader`; register it in the route-authorization ledger and the governed-file census.</prompt>
+  <role>SPAARKE platform developer, ASP.NET Core Minimal APIs, ProblemDetails, route-authorization guards.</role>
+  <goal>A caller can fetch a record's Filing family as specified in FR-31; an unknown and an unreadable anchor are indistinguishable; the route is governed by the existing authorization guards.</goal>
+
+  <context>
+    <background>spec.md FR-31; design.md §12.3 C (UAC F2: own file, ledger, census; T2: the anchor in the 404). `RecordNoAccessEndpoint.cs` stays one cohesive No Access responsibility (§11.5) — do not add the route there.</background>
+    <relevant-files>
+      <file role="new">src/server/api/Sprk.Bff.Api/Api/Records/RecordFamilyEndpoints.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/RecordNoAccessEndpoint.cs (the /api/v1/records group and its auth)</file>
+      <file role="modify">tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.Ledger.cs (ledger entry with mechanism)</file>
+      <file role="modify">the governed-file census test that lists endpoint files (re-grep "census")</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Program.cs or the module that maps the records group (one Map call)</file>
+      <file role="new">tests/integration/contract/Api/Records/RecordFamilyEndpointsContractTests.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="FR-31">Query: kind (default Filing; any other value → 400 before any probe), direction (default full; `down` accepted; anything else → 400), continuation (opaque).</constraint>
+    <constraint source="FR-31">Response: anchor, optional root, truncated, continuation, members[] each with id, table, name, recordNumber, recordType, status, modifiedOn, kind, edgeKind, parentId, depth. No access metadata.</constraint>
+    <constraint source="UAC-r2 round 130 / design §12.12 (#2362)">This is the family abstraction: callers read families only through RecordFamilyReader / the family endpoint, never raw parent lookups; the public surface exposes no lookup names, edge internals or storage, so a future sprk_securefamily table can replace the implementation unchanged. No family column or table. Any isolation test uses UAC's shared Secure-Record-BU predicate, never a hard-coded team id.</constraint>
+    <constraint source="FR-31 (contract pinned 2026-10-27 for task 073)">`anchor` and `root` are `{ id, table, name }` (name nullable). `depth` is a non-negative integer counted down from the top of the view the caller can read (the highest readable ancestor = 0; the anchor's own depth follows from that). The client `RecordFamilyModal` (073, `recordFamilyService.ts` `asRef`) already parses exactly this; keep property names camelCase as listed. The FIRST page's `members` always include the anchor itself (073 treats a first page without it as malformed); a continuation page carries only further members. Every member has a non-empty id and table and an integer depth ≥ 0.</constraint>
+    <constraint source="FR-31 / #2137">Unknown and unreadable anchor → the same 404 ProblemDetails, via the equalised gate probe (timing equalised).</constraint>
+    <constraint source="ADR-008 / root §9">Auth required; route registered in RouteAuthorizationGuardTests.Ledger with its mechanism; census updated.</constraint>
+    <constraint source="ADR-019">Errors are ProblemDetails with fixed text; detail to logs.</constraint>
+    <constraint source="CLAUDE.md §10">Placement Justification; publish-size delta; CVE check.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>.claude/patterns/api/endpoint-filters.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+      <file>.claude/adr/ADR-019-problemdetails.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Declare FULL rigor; confirm 071 is merged.</step>
+    <step order="1">Write the contract tests first; confirm they fail.</step>
+    <step order="2">Add the endpoint file, map it in the records group, add the ledger and census entries.</step>
+    <step order="3">Run the filtered suites and ArchTests; publish size; CVE check.</step>
+    <step order="4">Update TASK-INDEX.md to ✅ [done]; notes in notes/task-072-notes.md.</step>
+  </steps>
+
+  <justification>
+    <existing>The /api/v1/records group (RecordNoAccessEndpoint.cs) — extended with a new route in its own file.</existing>
+    <extension>The group is extended; the route gets its own file so RecordNoAccessEndpoint.cs keeps one responsibility (§11.5).</extension>
+    <cost-of-doing-nothing>The TrackingFieldTrio Family tool and the ribbon have no way to list a record's family.</cost-of-doing-nothing>
+  </justification>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Records/RecordFamilyEndpoints.cs</output>
+    <output type="test">tests/integration/contract/Api/Records/RecordFamilyEndpointsContractTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">200 with the documented shape for a readable anchor; members carry kind and edgeKind; root omitted when not readable.</criterion>
+    <criterion testable="true">Unknown anchor and unreadable anchor return the identical 404 body via the equalised probe.</criterion>
+    <criterion testable="true">kind≠Filing and an invalid direction each return 400 before any probe or Dataverse call.</criterion>
+    <criterion testable="true">An unauthenticated call is 401; the route appears in the ledger with its mechanism and in the census (ArchTests green).</criterion>
+    <criterion testable="true">An invalid or tampered continuation returns the same 400 as a malformed one.</criterion>
+    <criterion testable="true">Test scope: the contract cases above only.</criterion>
+    <criterion testable="true">BFF build 0 errors; filtered suites and ArchTests green; publish-size delta and CVE recorded.</criterion>
+  </acceptance-criteria>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+  <notes>
+    Completed 2026-10-29. PR #2459 (task/fm-072 @ 8378b3ee1d, auto-merge). GET /api/v1/records/{table}/{id}/family in Api/Records/RecordFamilyEndpoints.cs. Gate order: query parse (400 before any probe) → caller → family-table gate → equalised Read probe (GetCallerRightsForAuthorizationGateAsync, #2137; uniform 404) → RecordFamilyReader. Ledger RouteLevelGate + HandlerDecision; census 133→134. Tests moved to the contract KEEP path (testing.md:45; the planned unit/domain path was wrong for an endpoint test).
+    recordType = the member table's display name from MetadataService's cached projection (new optional EntityMetadataDto.DisplayName; key versioned to v2), read 4 at a time under a 1.5 s budget; an abandoned read still warms the cache. root = the walk's top on full, omitted on down (no hint of a hidden ancestor; owner told).
+    Reviews: one Opus adversarial pass (no oracle/leak/contract mismatch; F2/F3/F4 fixed in round 2), one scoped Sonnet re-check (F3 fixed). Publish +6,766 bytes (37.98 MB) vs fresh master 7008180304; no vulnerable packages. Notes: notes/task-072-notes.md.
+    rework: fix-round-2 task 072
+  </notes>
+</task>

@@ -1,7 +1,6 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Security.Claims;
-using System.ServiceModel;
 using System.Text.Json;
 using FluentAssertions;
 using Microsoft.AspNetCore.Mvc.Testing;
@@ -12,6 +11,7 @@ using Microsoft.Xrm.Sdk;
 using Moq;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.Filters;
+using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Models.Office;
 using Sprk.Bff.Api.Services.Ai.Context;
@@ -46,9 +46,6 @@ public class OfficeQuickCreateFieldsContractTests
     private static readonly Guid MakersContact = Guid.Parse("eeeeeeee-1000-4000-8000-000000000100");
     private static readonly Guid CreatedId = Guid.Parse("00000000-0000-0000-0000-000000000100");
     private static readonly Guid BusinessUnitId = Guid.Parse("cb15f587-baa0-f111-aaac-000d3a990100");
-
-    /// <summary>Dataverse <c>0x80040217 ObjectDoesNotExist</c> as a signed int.</summary>
-    private const int ObjectDoesNotExist = -2147220969;
 
     // ── Matter ──────────────────────────────────────────────────────────────────────────────────────────
 
@@ -94,9 +91,7 @@ public class OfficeQuickCreateFieldsContractTests
         using var factory = new OfficeQuickCreateTestWebAppFactory();
         ArrangeResolvedCaller(factory);
         ArrangeExists(factory, "sprk_mattertype_ref", MatterTypeId);
-        factory.Entities
-            .Setup(e => e.RetrieveAsync("sprk_practicearea_ref", PracticeAreaId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
-            .ThrowsAsync(NotFound("sprk_practicearea_ref"));
+        factory.CallerDataverse.Missing.Add(("sprk_practicearea_ref", PracticeAreaId)); // the caller's read of the area: 404
         var created = CaptureCreate(factory, "sprk_matter", "sprk_matternumber", "MAT-000101");
 
         var response = await factory.CreateClient().PostAsJsonAsync("/api/office/quickcreate/matter", new QuickCreateRequest
@@ -108,7 +103,10 @@ public class OfficeQuickCreateFieldsContractTests
 
         response.StatusCode.Should().Be(HttpStatusCode.Created);
         var body = await response.Content.ReadFromJsonAsync<QuickCreateResponse>();
-        body!.Warnings.Should().ContainSingle(w => w.Contains("practice area was not found"));
+        // 018a K-3: the service's one reference-drop text (the same words for "not found" and "not permitted").
+        body!.Warnings.Should().ContainSingle(w => w ==
+            "The value you chose for 'sprk_practicearea' was not written: it was not found, or you do not have permission to "
+            + "use it; the matter was created without it.");
         created.Single().Contains("sprk_practicearea").Should().BeFalse("a dangling lookup would fault the whole create");
     }
 
@@ -292,6 +290,72 @@ public class OfficeQuickCreateFieldsContractTests
     }
 
     [Fact]
+    public async Task GetDefaults_WhenTheCallerMayAppendToTheirContact_AsksThatAsTheCaller_AndKeepsTheContact()
+    {
+        using var factory = new OfficeQuickCreateTestWebAppFactory();
+        ArrangeResolvedCaller(factory);
+        using var host = WithMakersContact(factory, MakersContact);
+        ArrangeMakersContactRow(factory);
+
+        var response = await host.CreateClient().GetAsync("/api/office/quickcreate/defaults");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        (await response.Content.ReadFromJsonAsync<QuickCreateDefaultsResponse>())!.AssignedTo!.Id.Should().Be(MakersContact);
+        factory.CallerDataverse.Requests.Should().Contain(r => r.Contains("RetrievePrincipalAccess") && r.Contains(MakersContact.ToString("D")),
+            "the AppendTo check is asked of Dataverse as the caller (018b fix round 2, K1)");
+    }
+
+    [Fact]
+    public async Task GetDefaults_WhenTheCallerHasNoAppendToOnTheirContact_ReturnsNoPrefill_SoTheCreateDropsTheMakerDefault()
+    {
+        // K1: the pane echoes the prefill back as assignedToContactId, which the create REFUSES when it cannot be appended to
+        // (assignee_inaccessible) - whereas the maker default is dropped with a warning. So the default is not offered.
+        using var factory = new OfficeQuickCreateTestWebAppFactory();
+        ArrangeResolvedCaller(factory);
+        using var host = WithMakersContact(factory, MakersContact);
+        ArrangeMakersContactRow(factory);
+        factory.CallerDataverse.NoAppendTo.Add(("contact", MakersContact));
+
+        var response = await host.CreateClient().GetAsync("/api/office/quickcreate/defaults");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        (await ReadJsonAsync(response)).GetProperty("assignedTo").ValueKind.Should().Be(JsonValueKind.Null);
+    }
+
+    [Theory]
+    [InlineData("throws")]
+    [InlineData("answers500")]
+    public async Task GetDefaults_WhenTheAppendToCheckCannotComplete_ReturnsNoPrefill_FailClosed(string how)
+    {
+        using var factory = new OfficeQuickCreateTestWebAppFactory();
+        ArrangeResolvedCaller(factory);
+        using var host = WithMakersContact(factory, MakersContact);
+        ArrangeMakersContactRow(factory);
+        if (how == "throws")
+        {
+            factory.CallerDataverse.Fault = path =>
+                path.Contains("RetrievePrincipalAccess", StringComparison.Ordinal) ? new HttpRequestException("Dataverse is down") : null;
+        }
+        else
+        {
+            factory.CallerDataverse.Respond = path =>
+                path.Contains("RetrievePrincipalAccess", StringComparison.Ordinal)
+                    ? DataverseUserResponse.Fail(500, DataverseUserClientErrorCodes.ServiceError, "Dataverse could not answer.")
+                    : null;
+        }
+
+        var response = await host.CreateClient().GetAsync("/api/office/quickcreate/defaults");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        (await ReadJsonAsync(response)).GetProperty("assignedTo").ValueKind.Should().Be(JsonValueKind.Null);
+    }
+
+    private static void ArrangeMakersContactRow(OfficeQuickCreateTestWebAppFactory factory) =>
+        factory.Entities
+            .Setup(e => e.RetrieveAsync("contact", MakersContact, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Entity("contact", MakersContact) { ["fullname"] = "Ralph Schroeder", ["emailaddress1"] = "ralph@spaarke.test" });
+
+    [Fact]
     public async Task GetDefaults_WhenTheCallerHasNoLinkedContact_ReturnsNoPrefill()
     {
         using var factory = new OfficeQuickCreateTestWebAppFactory();
@@ -361,11 +425,16 @@ public class OfficeQuickCreateFieldsContractTests
         problem.Should().ContainKey("reasonCode").WhoseValue.Should().Be(QuickCreateSourceAccessFilter.AssigneeDeniedReasonCode);
         factory.Entities.Verify(e => e.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()), Times.Never,
             "a refused assignee writes nothing");
+        factory.FieldMappings.Verify(
+            m => m.UpdateRecordFieldsAsync(
+                It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object?>>(), It.IsAny<CancellationToken>(),
+                It.IsAny<Guid?>()),
+            Times.Never, "a refused assignee writes nothing (task 018b: the matter's and project's write)");
     }
 
     /// <summary>
-    /// A resolved caller whose business unit answers (so no "business-unit defaults" warning muddies a test that
-    /// asserts the create had nothing to warn about).
+    /// A resolved caller whose owning team's business unit answers (so no "business-unit defaults" warning muddies a test
+    /// that asserts the create had nothing to warn about; the service reads team → business unit, task 015).
     /// </summary>
     private static void ArrangeResolvedCaller(OfficeQuickCreateTestWebAppFactory factory)
     {
@@ -373,17 +442,19 @@ public class OfficeQuickCreateFieldsContractTests
             .Setup(r => r.ResolveAsync(It.IsAny<ClaimsPrincipal>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(CallerSystemUserResolution.Resolved(CallerId.ToString("D")));
         factory.Entities
-            .Setup(e => e.RetrieveAsync("systemuser", CallerId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new Entity("systemuser", CallerId) { ["businessunitid"] = new EntityReference("businessunit", BusinessUnitId) });
+            .Setup(e => e.RetrieveAsync("team", RecordOwnershipResolverDouble.DefaultTeamId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Entity("team", RecordOwnershipResolverDouble.DefaultTeamId)
+            {
+                ["businessunitid"] = new EntityReference("businessunit", BusinessUnitId),
+            });
         factory.Entities
             .Setup(e => e.RetrieveAsync("businessunit", BusinessUnitId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new Entity("businessunit", BusinessUnitId) { ["sprk_searchindexname"] = "spaarke-files-index" });
     }
 
+    /// <summary>A reference row the caller reads (task 018b: the references are checked as the caller).</summary>
     private static void ArrangeExists(OfficeQuickCreateTestWebAppFactory factory, string entity, Guid id)
-        => factory.Entities
-            .Setup(e => e.RetrieveAsync(entity, id, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new Entity(entity, id));
+        => factory.CallerDataverse.WithRow(entity, id);
 
     private static void ArrangeContactRights(OfficeQuickCreateTestWebAppFactory factory, Guid contactId, AccessRights rights)
         => factory.AccessProbe
@@ -404,8 +475,11 @@ public class OfficeQuickCreateFieldsContractTests
         }));
     }
 
-    /// <summary>Captures every create payload; arranges the number read-back for numbered entities (task 076).</summary>
-    private static List<Entity> CaptureCreate(
+    /// <summary>
+    /// Captures every create payload — the invoice's app-only create, and the matter's or project's creation-service write
+    /// (task 018b) — and arranges the number read-back for numbered entities (task 076; any id: the service picks it).
+    /// </summary>
+    private static CreatedRows CaptureCreate(
         OfficeQuickCreateTestWebAppFactory factory, string? numberEntity, string? numberAttribute, string? number)
     {
         var created = new List<Entity>();
@@ -413,23 +487,28 @@ public class OfficeQuickCreateFieldsContractTests
             .Setup(e => e.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
             .Callback<Entity, CancellationToken>((entity, _) => created.Add(entity))
             .ReturnsAsync(CreatedId);
+        var written = factory.CaptureRecordCreationWrite();
 
         if (numberEntity is not null && numberAttribute is not null)
         {
             factory.Entities
                 .Setup(e => e.RetrieveAsync(
-                    numberEntity, CreatedId,
+                    numberEntity, It.IsAny<Guid>(),
                     It.Is<string[]>(columns => columns.Length == 1 && columns[0] == numberAttribute),
                     It.IsAny<CancellationToken>()))
-                .ReturnsAsync(new Entity(numberEntity, CreatedId) { [numberAttribute] = number });
+                .ReturnsAsync((string _, Guid id, string[] _, CancellationToken _) =>
+                    new Entity(numberEntity, id) { [numberAttribute] = number });
         }
 
-        return created;
+        return new CreatedRows(created, written);
     }
 
-    private static FaultException<OrganizationServiceFault> NotFound(string entity) => new(
-        new OrganizationServiceFault { ErrorCode = ObjectDoesNotExist, Message = $"{entity} Does Not Exist" },
-        new FaultReason("Does Not Exist"));
+    /// <summary>The rows a request created, by either path.</summary>
+    private sealed class CreatedRows(List<Entity> appOnlyCreates, RecordCreationWriteCapture serviceWrites)
+    {
+        /// <summary>The one row created (throws unless exactly one was).</summary>
+        public Entity Single() => appOnlyCreates.Concat(serviceWrites.Entities).Single();
+    }
 
     private static async Task<JsonElement> ReadJsonAsync(HttpResponseMessage response)
     {

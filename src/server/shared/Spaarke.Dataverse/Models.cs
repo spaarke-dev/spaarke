@@ -37,7 +37,7 @@ public class CreateDocumentRequest
 
     /// <summary>
     /// OPTIONAL caller-supplied primary key for the new <c>sprk_document</c>. When null (every caller except
-    /// the Office document-create save path) Dataverse mints the id exactly as before.
+    /// the Office document-create save path and the invoice submission intake) Dataverse mints the id exactly as before.
     /// </summary>
     /// <remarks>
     /// <para><b>Why a shared contract gained this</b> (FR-02, spaarkeai-word-add-in-r1 task 014). The Office
@@ -54,8 +54,9 @@ public class CreateDocumentRequest
     /// a performance note, not a correctness one.</para>
     /// <para>🔒 <b>Never bound from a request body</b> (<see cref="JsonIgnoreAttribute"/>), for the same reason as
     /// <see cref="OwningTeamId"/>: <c>POST /api/v1/documents</c> binds this class directly, and a client-chosen primary
-    /// key lets a caller probe for, or collide with, the id of a row it cannot see. Only the Office save path sets
-    /// it, in server code (task 080 found both properties bindable; neither was intended as a wire field).</para>
+    /// key lets a caller probe for, or collide with, the id of a row it cannot see. Only server code sets
+    /// it: the Office save path, and the invoice submission intake (ebilling-r1 task 044, so a create whose reply is lost is
+    /// still deleted by its id) (task 080 found both properties bindable; neither was intended as a wire field).</para>
     /// </remarks>
     [JsonIgnore]
     public Guid? Id { get; set; }
@@ -68,6 +69,49 @@ public class CreateDocumentRequest
     /// </summary>
     [JsonIgnore]
     public Guid? CreatedByPersonId { get; set; }
+
+    /// <summary>
+    /// The <c>sprk_communication</c> the new document belongs to, written as <c>sprk_relatedcommunication</c> IN the
+    /// create (spaarkeai-word-add-in-r1 task 130, #2126). The Office save sets it for every document it creates from an
+    /// email — the <c>.eml</c>, each attachment of it, and a single attachment saved on its own — so the document's
+    /// visibility follows its email's communication from its first write. Null for every other caller.
+    /// </summary>
+    /// <remarks>
+    /// 🔒 <b>Never bound from a request body</b> (<see cref="JsonIgnoreAttribute"/>), for the same reason as
+    /// <see cref="OwningTeamId"/>: <c>POST /api/v1/documents</c> binds this class directly, and a client-chosen link would let
+    /// a caller attach a document to a communication it cannot see, or detach one from an internal-only email.
+    /// </remarks>
+    [JsonIgnore]
+    public Guid? RelatedCommunicationId { get; set; }
+
+    /// <summary>
+    /// The document's own <c>sprk_accesspermission</c> option value, written IN the create when set (task 130). The Office
+    /// save sets Restricted only for a document saved from an email that cannot be identified (no communication to link);
+    /// null leaves the column at its default (Standard). 🔒 Never bound from a request body, as <see cref="OwningTeamId"/>.
+    /// </summary>
+    [JsonIgnore]
+    public int? AccessPermission { get; set; }
+
+    /// <summary>
+    /// The document's own-narrowing record (<c>sprk_accessinheritance</c>, the task 175 / 189 JSON), written IN the same create
+    /// as <see cref="AccessPermission"/> (unified-access-control-r2 task 189, D7 T7a). Without it, a Restricted that equals the
+    /// parents' value reads as inherited and is widened when they widen. Set together with <see cref="AccessPermission"/>,
+    /// never alone; the create refuses a value without its record. 🔒 Never bound from a request body, as
+    /// <see cref="OwningTeamId"/>.
+    /// </summary>
+    [JsonIgnore]
+    public string? AccessInheritanceRecord { get; set; }
+
+    /// <summary>
+    /// ebilling-r1 task 095 (procedure-and-file-model.md 9.1): the invoice-submission marker
+    /// (<c>sprk_restrictedbysubmission</c>, task 088), written IN the create of an <c>.eml</c> Document the Outlook add-in's
+    /// Submit Invoice (<c>POST /api/finance/invoice-submissions/from-email</c>) saves. Set only together with an own
+    /// <see cref="AccessPermission"/> and its <see cref="AccessInheritanceRecord"/> (the submission's own Restricted narrowing);
+    /// the create refuses a marker without them. Written in no update payload (<c>SubmissionMarkerWriterGuardTests</c>).
+    /// 🔒 Never bound from a request body, as <see cref="OwningTeamId"/>.
+    /// </summary>
+    [JsonIgnore]
+    public bool RestrictedBySubmission { get; set; }
 }
 
 /// <summary>
@@ -1334,6 +1378,12 @@ public class FieldMappingRuleEntity
 
     /// <summary>Is active</summary>
     public bool IsActive { get; set; }
+
+    /// <summary>
+    /// Sync mode of this rule (sprk_syncmode): OneTime (0) or ManualRefresh (1). An empty column reads as OneTime.
+    /// /push re-applies only Copy rules at ManualRefresh (field-mapping-server-write-path-r1 FR-05d).
+    /// </summary>
+    public int SyncMode { get; set; }
 }
 
 /// <summary>

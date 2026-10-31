@@ -497,7 +497,10 @@ public sealed class RagEndpointsAuthorizationContractTests : IClassFixture<Route
 
         response.StatusCode.Should().Be(HttpStatusCode.OK);
         _fixture.IndexedFiles.Should().ContainSingle().Which.ParentEntity.Should().Be(parent);
-        _fixture.Access.RecordChecks.Select(c => c.EntitySetName).Should().BeEquivalentTo("sprk_documents", "sprk_workassignments");
+        // Task 188 round 4d (#2200): the document is decided on the Document path (its rights, then THE external document
+        // narrowing); the parent stays on the Record path.
+        _fixture.Access.RecordChecks.Select(c => c.EntitySetName).Should().BeEquivalentTo("sprk_workassignments");
+        _fixture.Access.DocumentChecks.Select(c => c.ResourceId).Should().BeEquivalentTo(WritableDocument.ToString());
     }
 
     [Theory]
@@ -554,6 +557,30 @@ public sealed class RagEndpointsAuthorizationContractTests : IClassFixture<Route
             WritableDocument.ToString(),
             It.Is<UpdateDocumentRequest>(u => u.SearchIndexed == true && u.SearchIndexCompletedOn != null),
             It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task IndexFile_FileInANonIndexedContainer_Is200Skipped_AndDoesNotStampTheDocument()
+    {
+        // ebilling-r1 task 028 (FR-16): indexing skips a file in the E-Billing Output Files container; the
+        // route must not then stamp the document row as indexed.
+        GrantWriteAndParent();
+        ArrangeRow(new DocumentEntity
+        {
+            Id = WritableDocument.ToString(), Name = "invoice.ledes", GraphDriveId = Drive, GraphItemId = Item,
+            MatterId = ParentMatter.ToString(), MatterName = "Acme v. Zenith",
+        });
+        _fixture.FileIndexing
+            .Setup(f => f.IndexFileAsync(It.IsAny<FileIndexRequest>(), It.IsAny<HttpContext>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(FileIndexingResult.Skip(FileIndexingService.NonIndexedContainerReason, WritableDocument.ToString(), Item));
+
+        var response = await PostIndexFileAsync(IndexFile(
+            documentId: WritableDocument.ToString(),
+            parent: new ParentEntityContext("matter", ParentMatter.ToString(), "Acme v. Zenith")));
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        (await response.Content.ReadAsStringAsync()).Should().Contain(FileIndexingService.NonIndexedContainerReason);
+        VerifyNoStamp();
     }
 
     [Fact]

@@ -36,6 +36,7 @@ function formatValue(
     const option = parameter.options?.find(o => o.value === value);
     if (option) return option.label;
   }
+  if (parameter?.kind === 'Boolean') return value === true || String(value).toLowerCase() === 'true' ? 'Yes' : 'No';
   if (parameter?.kind === 'Money' && typeof value === 'number')
     return value.toLocaleString(undefined, { minimumFractionDigits: 2 });
   if (parameter?.kind === 'Date' && typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value)) {
@@ -189,6 +190,16 @@ const WARNING_TEXT: Record<string, string> = {
   signal_changed: 'An item kept changing while it was being closed, so it was left as it is.',
   signal_close_failed: 'An item could not be closed and was left open.',
   signal_subject_missing: 'An item refers to a record that no longer exists, so it was left open.',
+  // Task 168 (D-194): the task was created and the decision recorded; only the email did not go.
+  assignee_email_not_sent: 'The task was assigned, but the email to the assignee could not be sent.',
+  assignee_email_missing: 'The task was assigned, but the assignee has no email address, so no email was sent.',
+  // Task 168 fix round (D-199): the assignee is emailed only when they can see the record.
+  assignee_email_not_sent_no_access:
+    'The task was assigned, but no email was sent: the assignee does not have access to this record.',
+  assignee_email_not_sent_several_users:
+    "The task was assigned, but no email was sent: the assignee's contact is linked to more than one user.",
+  assignee_email_not_sent_unverified:
+    'The task was assigned, but no email was sent: whether the assignee can see this record could not be checked.',
 };
 
 /** A warning from the commit answer as a sentence; a code this build does not know reads generically. */

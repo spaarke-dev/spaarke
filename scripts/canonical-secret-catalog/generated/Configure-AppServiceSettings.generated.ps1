@@ -45,6 +45,9 @@ param(
     [string]$VaultName,
 
     [Parameter(Mandatory = $true)]
+    [string[]]$AiSearchIndexNames,
+
+    [Parameter(Mandatory = $true)]
     [string]$BffAppClientId,
 
     [Parameter(Mandatory = $true)]
@@ -58,6 +61,9 @@ param(
 
     [Parameter(Mandatory = $true)]
     [string]$CosmosEndpoint,
+
+    [Parameter(Mandatory = $true)]
+    [string]$CustomerBusinessUnitId,
 
     [Parameter(Mandatory = $true)]
     [string]$CustomerId,
@@ -82,6 +88,9 @@ param(
 
     [Parameter(Mandatory = $true)]
     [string]$SpeContainerId,
+
+    [Parameter(Mandatory = $true)]
+    [string]$StorageBlobEndpoint,
 
     [Parameter(Mandatory = $true)]
     [string]$TenantId,
@@ -114,6 +123,7 @@ $settings = @(
     "AzureAd__Audience=$(Format-KvRef 'BFF-API-Audience')",
     "AzureAd__ClientId=$(Format-KvRef 'BFF-API-ClientId')",
     "AzureAd__ClientId=$BffAppClientId",
+    "AzureAd__Instance=https://login.microsoftonline.com/",
     "AzureAd__TenantId=$(Format-KvRef 'TenantId')",
     "AzureAd__TenantId=$TenantId",
     "AzureOpenAI__ChatModelName=gpt-4o-mini",
@@ -130,6 +140,7 @@ $settings = @(
     "Compose__Webhook__SigningKey=$(Format-KvRef 'Compose-Webhook-SigningKey')",
     "Cors__AllowedOrigins__0=https://addins.spaarke.com",
     "Cors__AllowedOrigins__1=https://external.spaarke.com",
+    "CosmosPersistence__DatabaseName=spaarke-ai",
     "CosmosPersistence__Endpoint=$CosmosEndpoint",
     "Customer__Id=$CustomerId",
     "Dataverse__ClientId=$(Format-KvRef 'BFF-API-ClientId')",
@@ -143,6 +154,7 @@ $settings = @(
     "Email__WebhookSecret=$(Format-KvRef 'Email-WebhookSecret')",
     "Email__WebhookSigningKey=$(Format-KvRef 'Email-WebhookSigningKey')",
     "EmailProcessing__DefaultContainerId=$SpeContainerId",
+    "ExternalAccess__CustomerBusinessUnitId=$CustomerBusinessUnitId",
     "Graph__ClientId=$(Format-KvRef 'BFF-API-ClientId')",
     "Graph__Credentials__Order__0=ManagedIdentityFederated",
     "Graph__Credentials__RequireSecretFreeIdentity=true",
@@ -160,6 +172,7 @@ $settings = @(
     "ScheduledRagIndexing__TenantId=$(Format-KvRef 'TenantId')",
     "ServiceBus__FullyQualifiedNamespace=$ServiceBusFqns",
     "ServiceBus__QueueName=sdap-jobs",
+    "SessionFileStore__BlobEndpoint=$StorageBlobEndpoint",
     "SharePointEmbedded__ContainerTypeId=$ContainerTypeId",
     "SpeAdmin__KeyVaultUri=$KvVaultUri",
     "TENANT_ID=$(Format-KvRef 'TenantId')"
@@ -167,9 +180,11 @@ $settings = @(
 
 if (-not [string]::IsNullOrWhiteSpace($OpenaiMonthlyLimitUsd)) { $settings += "AiSpendLimit__MonthlyLimitUsd=$OpenaiMonthlyLimitUsd" }
 
+for ($i = 0; $i -lt $AiSearchIndexNames.Count; $i++) { $settings += "AiSearch__AllowedIndexes__$i=$($AiSearchIndexNames[$i])" }
+
 for ($i = 0; $i -lt $CustomerWorkforceTenantIds.Count; $i++) { $settings += "WorkforceIdentity__CustomerTenantIds__$i=$($CustomerWorkforceTenantIds[$i])" }
 
-$exclusiveListKeys = @('WorkforceIdentity__CustomerTenantIds')
+$exclusiveListKeys = @('AiSearch__AllowedIndexes', 'WorkforceIdentity__CustomerTenantIds')
 
 function Remove-StaleListSettings {
     # Task 255: removes every setting under an exclusive list key that $settings does not name — the bare key or

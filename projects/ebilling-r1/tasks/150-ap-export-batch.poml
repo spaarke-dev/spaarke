@@ -1,0 +1,125 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="150" project="ebilling-r1">
+  <metadata>
+    <title>AP export batch (CSV + JSON, D-56 default mapping, snapshot)</title>
+    <phase>6 Export and index (WP6) — wave W6-1</phase>
+    <gate>startable</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Moves invoices to Sent to AP and hands a payment file to AP; a double export or a wrong selection is a double-payment risk (FR-41); concurrency and authorization must be proven.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Service plus endpoints over existing components (014 lifecycle, 023 schema, 025 mapping, 090 file store) with an explicit claim-then-generate algorithm below.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P6-A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>014, 023, 025, 028, 103, 090</deps>
+    <tags>bff, api, finance, files</tags>
+    <estimated-effort>2-3 days</estimated-effort>
+  </metadata>
+
+  <prompt>Implement the AP export batch (FR-41): a finance user lists Approved, not-yet-exported invoices and exports a selection; the server claims each invoice for exactly one sprk_billingexport batch, snapshots the configurable mapping (settings, D-56 default), writes CSV (one row per invoice) and JSON (adds lines[]) as Stored Files (purpose Export file, parent the sprk_billingexport, Firm-visible No; internal-only, ExternalMarker Never) through 090's file store service, and moves the invoices to Sent to AP through the lifecycle service.</prompt>
+
+  <role>SPAARKE platform developer. Expert in ASP.NET Core Minimal APIs, Dataverse optimistic concurrency, the BFF file store (090, Stored Files) and deterministic file generation.</role>
+
+  <goal>ApExportService and ApExportEndpoints create batches all-or-nothing; an invoice can never be in two batches (concurrency test); non-Approved invoices are refused; a mapping change needs no code change; the batch keeps its mapping snapshot and files; finance-only authorization.</goal>
+
+  <context>
+    <background>Spec FR-41 (acceptance: an invoice cannot be in two batches; Returned / Rejected / In Review invoices cannot be selected; mapping change needs no code change; a later edit to the core record or firm does not change a past batch file), FR-06 (Approved to Sent to AP only through the lifecycle service), D-21, D-56 (default columns: projects/ebilling-r1/notes/decisions-log.md D-56), Export files (EB-D-148, projects/ebilling-r1/notes/procedure-and-file-model.md sections 4, 5.1, 5.2 and 10, section 15 answer 4): each file is a sprk_storedfile row (purpose Export file) whose parent is the sprk_billingexport, written through 090's file store service; not a secure child (D-85, #1974, uac-r2 F4-c), it follows the export's ownership; Firm-visible always No and ExternalMarker Never, so it never appears on the firm route; not indexed. The E-Billing Output Files container and key (D-55, D-67, 028) retire from code (092). 023: sprk_billingexport (sprk_invoicecount, sprk_totalamount, sprk_formats, sprk_exportstatus Generating / Completed / Failed, sprk_mappingsnapshot, sprk_failurereason, sprk_csvdocument, sprk_jsondocument) and sprk_invoice.sprk_billingexport. 025: sprk_ebillingsetting.sprk_apexportmapping (JSON) read through IEbillingSettingsReader. 014: InvoiceLifecycleService (Services/Finance/InvoiceLifecycleService.cs). 090: the file store service (staged blob, Stored File row, If-Match flip to Servable) and the internal download route (refuses flagged-external callers, Read on the parent). Authorization building blocks: FinanceAuthorizationCheck.CallerPrivilege and the Record path (Api/Filters/FinanceAuthorizationFilter.cs:105-160); Finance route group /api/finance (Api/Finance/FinanceEndpoints.cs:30-34).</background>
+    <relevant-files>
+      <file role="new">src/server/api/Sprk.Bff.Api/Services/Finance/ApExportService.cs (selection, claim, generate, store, transition, compensation)</file>
+      <file role="new">src/server/api/Sprk.Bff.Api/Services/Finance/ApExportMapping.cs (mapping model, D-56 default, CSV / JSON writers)</file>
+      <file role="new">src/server/api/Sprk.Bff.Api/Api/Finance/ApExportEndpoints.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/DI/FinanceModule.cs and the Finance endpoint-mapping call site (shared append points)</file>
+      <file role="new">tests/unit/Sprk.Bff.Api.Tests/Services/Finance/ApExportMappingTests.cs</file>
+      <file role="new">tests/integration/data-mutation/Ebilling/ApExportBatchTests.cs</file>
+      <file role="new">tests/integration/auth/Finance/ApExportAuthorizationTests.cs</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="014" status="pending">InvoiceLifecycleService (Approved to Sent to AP)</dependency>
+      <dependency task="023" status="pending">sprk_billingexport and the invoice batch lookup</dependency>
+      <dependency task="025" status="pending">AP mapping in settings</dependency>
+      <dependency task="028" status="pending">Superseded for export files by 090 (EB-D-148); kept as a dep, nothing of it is used here</dependency>
+      <dependency task="090" status="pending">File store service and internal download route for the export's Stored Files</dependency>
+      <dependency task="103" status="pending">Approved invoices and approver / approved-on data</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="D-85 (owner, 2026-10-15)">The export batch stays one sprk_billingexport record outside the secure-record family; no export-line child table. Accepted: secure invoices in a batch are visible to anyone who can see the batch. Record this in the PR.</constraint>
+    <constraint source="D-85 / uac-r2 (2026-10-15)">The batch build adds only invoices the exporting caller can read, checked with the caller's own OBO read (not app-only), and fails closed on a read fault, so a batch can never pull in a secure invoice its creator cannot see. No new record or model. Test: a secure invoice the caller cannot read is excluded; a read fault refuses the export.</constraint>
+    <constraint source="FR-41, ADR-002">Server-side owner: only this service sets sprk_invoice.sprk_billingexport and moves invoices to Sent to AP (through 014). Selection accepts only statuscode Approved with an empty batch lookup; anything else refuses the whole request (400, per-invoice reason codes).</constraint>
+    <constraint source="FR-41">Claim before generate: create the batch (Generating), then set each invoice's batch lookup with an If-Match concurrency check on the row version; any conflict releases this batch's claims, marks the batch Failed and returns 409. A failure after claiming (file write, upload, transition) releases claims or leaves a Failed batch that blocks nothing — state the compensation in notes; never a half-exported invoice.</constraint>
+    <constraint source="FR-41, D-56">Mapping read from settings at export time and stored verbatim in sprk_mappingsnapshot; values are read once and written into the files; past files are never regenerated. A mapping column with no source value is written empty (listed in notes: for example VendorApId, VendorTaxId, DueDate when absent).</constraint>
+    <constraint source="EB-D-148 (model sections 4, 10; section 15 answer 4)">Files only through 090's file store service as Stored Files: purpose Export file, parent the batch's sprk_billingexport, Firm-visible No, ExternalMarker Never (internal-only), not a secure child (follows the export's ownership, uac-r2 F4-c). No SpeFileStore write, no sprk_document row and no E-Billing Output Files container key in this task. A file store fault before any claim fails with a stable code; after a claim it takes the compensation path.</constraint>
+    <constraint source="ADR-008, ADR-019, 040">Every route: endpoint-filter authorization (finance role — see escalation), ProblemDetails with stable codes, RequireEbillingEnabled().</constraint>
+    <constraint source=".claude/constraints/bff-extensions.md">BFF hygiene: placement BFF (B1 caller identity, B4 live request), no package, publish-size delta recorded, no new HIGH CVE.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ebilling-r1/spec.md (FR-06, FR-16, FR-41)</file>
+      <file>projects/ebilling-r1/notes/decisions-log.md (D-21, D-55, D-56)</file>
+      <file>projects/ebilling-r1/notes/research/accruals-po-ap.md (section 3)</file>
+      <file>docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md</file>
+      <file>.claude/patterns/api/endpoint-filters.md</file>
+      <file>.claude/patterns/testing/integration-tests.md</file>
+      <file>docs/standards/TEST-ARCHITECTURE.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+    <patterns>
+      <pattern name="Finance route with own filter" location="src/server/api/Sprk.Bff.Api/Api/Finance/FinanceEndpoints.cs">Group /api/finance, per-route AddFinanceAuthorizationFilter, Produces / ProducesProblem metadata.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Read 014's transition API, 023's columns, 025's mapping JSON shape and 090's file store API and notes; decide the finance-role check (escalation if unclear).</step>
+    <step order="1">Mapping: model (column name, source path, format), D-56 default, CSV writer (RFC 4180 quoting, invariant culture, ISO dates, decimal amounts), JSON writer (invoices[] with lines[]).</step>
+    <step order="2">Routes (directional): GET /api/finance/export-batches/candidates; POST /api/finance/export-batches (invoice ids, formats); GET /api/finance/export-batches/{id} (status, counts, document ids).</step>
+    <step order="3">Service: validate selection, create batch, claim with concurrency check, read values, write the CSV and JSON as Stored Files through 090 (parent = the batch), set batch Completed with count and total, transition each invoice via 014; compensation path (a written Stored File of a failed batch is removed through 090).</step>
+    <step order="4">Tests: mapping (default columns and order, custom mapping JSON changes output, empty source columns, quoting); data-mutation (happy path; In Review / Rejected / Returned / already-exported refused; two concurrent batches over one invoice — exactly one wins, the other gets 409 and leaves no claim; upload failure leaves no Sent to AP invoice; past batch file unchanged after the core record name changes); auth (401; 403 without the finance privilege; 503 when off).</step>
+    <step order="5">dotnet build and dotnet test green; publish-size delta and vulnerable-package check recorded.</step>
+    <step order="6">Update TASK-INDEX.md: this task's status cell to "✅ [done]".</step>
+    <step order="7">Record deviations (routes, compensation design, empty D-56 columns, any App Service setting name for 153) in projects/ebilling-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If 023's sprk_csvdocument / sprk_jsondocument lookups to sprk_document still exist in the schema, leave them unset and list them for the owner; do not write a sprk_document to fill them.</trigger>
+    <trigger>"Finance role" is not defined in code. Proposed: FinanceAuthorizationCheck.CallerPrivilege for Create on sprk_billingexport plus Write on each selected invoice. Auth is security-sensitive (root CLAUDE.md section 6): raise 🔔 Human Input Required with this proposal and the alternative (a dedicated security role check) before coding, and record the answer for 151.</trigger>
+    <trigger>If a D-56 column has no source field anywhere in the schema (for example VendorTaxId), do not add a column: write it empty and list it for the owner.</trigger>
+    <trigger>If Dataverse optimistic concurrency cannot be used on sprk_invoice through the existing data-access facade, STOP and propose the alternative (for example an alternate key) instead of an unguarded update.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>Spec section 11 rows "sprk_billingexport" and "Review / approval / export / rule endpoints" (overlap /api/finance/invoice-review/*); no export service exists (grep "billingexport" in src finds none).</existing>
+    <extension>Same Finance module and route group; a new endpoints file and service because no existing operation produces files for AP or claims invoices into a batch.</extension>
+    <cost-of-doing-nothing>Approved invoices never reach AP, there is no record of what was sent, and double payment is possible (FR-41; success criterion 7 fails).</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="dotnet">build, test</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Finance/ApExportService.cs; Services/Finance/ApExportMapping.cs; Api/Finance/ApExportEndpoints.cs</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Finance/ApExportMappingTests.cs; tests/integration/data-mutation/Ebilling/ApExportBatchTests.cs; tests/integration/auth/Finance/ApExportAuthorizationTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Two concurrent export requests containing the same invoice: exactly one batch contains it; the other returns 409 and leaves no claim on any invoice.</criterion>
+    <criterion testable="true">Selecting an In Review, Rejected, Returned to Firm or already-exported invoice refuses the whole request with 400 and a per-invoice reason code; nothing is claimed.</criterion>
+    <criterion testable="true">A successful batch has a CSV (one row per invoice, D-56 columns by default) and a JSON (with lines[]) stored as Stored Files (purpose Export file, parent the batch, Firm-visible No, Servable), sprk_mappingsnapshot equal to the mapping used, count and total set, status Completed, and every invoice Sent to AP via the lifecycle service; no sprk_document is created.</criterion>
+    <criterion testable="true">Export files are internal-only: a flagged-external caller is refused on 090's internal download route; the firm file route never lists them; a caller with Read on the batch can download them (tests).</criterion>
+    <criterion testable="true">Changing the settings mapping changes the next batch's columns with no code change; the earlier batch's files and snapshot are unchanged, also after the core record or firm is renamed.</criterion>
+    <criterion testable="true">An upload or transition failure leaves no invoice in Sent to AP and no invoice claimed by a non-Completed batch.</criterion>
+    <criterion testable="true">Routes: 401 unauthenticated; 403 without the agreed finance authorization; 503 ebilling.disabled when off.</criterion>
+    <criterion testable="true">Publish-size delta measured against a fresh master build and recorded in task notes; no new HIGH CVE.</criterion>
+    <criterion testable="true">Cover the stated contract plus the edge cases named above. Anything beyond that needs a one-line justification in task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>Amended for EB-D-148 (2026-10-21): export files moved from SPE Documents to Stored Files (model section 10, section 15 answer 4); dep 090 added. Shared append points: FinanceModule.cs and the Finance endpoint-mapping call site — re-read before editing. P6-A runs with 152; 152 adds an index enqueue inside the lifecycle service, this task only calls it, so no file overlap. Stored Files are not indexed; 153 verifies the export file is absent from search. No schema change expected (023 covers FR-13); if one is needed, write an idempotent script under scripts/ebilling/ and list it for 153. 088 retype 2026-10-22 (uac-r2): sprk_storedfile.sprk_sizebytes is a whole number (max 2,147,483,647). An export file larger than that is refused with a clear code before any write, through 090's checked conversion; never cast or clamp. Point uac-r2 at the test in the review.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load the knowledge files first. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

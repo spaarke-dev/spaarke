@@ -581,6 +581,29 @@ per_env_settings:
       fails fast at boot when Cosmos endpoint is unset. Value is the per-env
       Cosmos account URI (e.g. https://sprk-prod-cosmos.documents.azure.com/).
 
+  - key: 'CosmosPersistence__DatabaseName'
+    per_env_source: 'literal'
+    literal_value: 'spaarke-ai'
+    iOptionsModule: 'AiPersistenceModule'
+    required: true
+    notes: >-
+      T186 L50. Paired with CosmosPersistence__Endpoint (docs/procedures/test-fixture-contracts.md
+      §2.1): SessionPersistenceService, FeedbackService, PinnedContextRepository and
+      WorkspaceStateService throw "CosmosPersistence:DatabaseName is not configured" on first
+      resolve. The BFF artifact ships no appsettings.json (appsettings.template.json is
+      CopyToPublishDirectory=Never), so the template's 'spaarke-ai' never reaches a stamp.
+
+  - key: 'AzureAd__Instance'
+    per_env_source: 'literal'
+    literal_value: 'https://login.microsoftonline.com/'
+    iOptionsModule: 'AzureAdOptions'
+    required: true
+    notes: >-
+      T186 L50. Microsoft.Identity.Web (AuthorizationModule, section AzureAd) throws IDW10106
+      "The 'Instance' option must be provided" on EVERY request, /healthz included — the staging
+      slot answered HTTP 500 to all 120 H9 probes on ACME. Same artifact gap as
+      CosmosPersistence__DatabaseName: the template's value never reaches a stamp.
+
   - key: 'AzureAd__TenantId'
     per_env_source: 'from-intake-parameter:tenant_id'
     iOptionsModule: 'AzureAdOptions'
@@ -624,6 +647,18 @@ per_env_settings:
       Intake customerWorkforceTenantIds, checked by CustomerWorkforceTenantsRule
       at POST /api/runs and again by H4b; H13 T7 fails a stamp whose slots do
       not carry exactly this list. Indices the list no longer has are removed.
+
+  - key: 'ExternalAccess__CustomerBusinessUnitId'
+    per_env_source: 'from-h10-output:customer_business_unit_id'
+    iOptionsModule: 'ExternalAccessModule (ExternalAccessOptions)'
+    required: true
+    notes: >-
+      R3 073 / ADR-028 A9 (SPA-external-access-platform-r3). The customer's own Dataverse
+      business unit id (H10's InterStepState.CustomerBusinessUnitId, "D"-format GUID; H4b <- H10 in
+      the DAG), written on BOTH slots. Its DEFAULT team owns every contact the external
+      registration route (POST /api/v1/external/registration) creates. The BFF refuses a value
+      that is not a GUID at startup, and without the setting the registration route answers
+      500 registration_owner_unconfigured and creates nothing, so every stamp needs it.
 
   - key: 'Dataverse__EnvironmentUrl'
     per_env_source: 'from-h5-output:dataverse_env_url'
@@ -900,6 +935,21 @@ per_env_settings:
       BFF refuses to start without it. customer.bicep sets the same value on
       deploy; H4b keeps it on upgrades.
 
+  - key: 'SessionFileStore__BlobEndpoint'
+    per_env_source: 'from-h2a-output:storage_blob_endpoint'
+    iOptionsModule: 'AiPersistenceModule (SessionFileBlobStore)'
+    required: true
+    notes: >-
+      T186 follow-up. The stamp storage account's blob endpoint (customer.bicep
+      output `storagePrimaryEndpoint`, https://{account}.blob.core.windows.net/)
+      for the chat session-file store. Not a secret: managed identity only (the
+      BFF refuses an endpoint carrying AccountKey/SAS). The container
+      `SessionFileStore:ContainerName` is NOT written, so the BFF uses its
+      default `ai-chunks`, which every stamp creates and on which the stamp
+      UAMI must hold Storage Blob Data Contributor. Without this setting chat
+      uploads are refused (StoreDisabled) and the blob probe reports
+      NotConfigured.
+
   - key: 'DocumentIntelligence__Enabled'
     per_env_source: 'literal'
     literal_value: 'true'
@@ -921,6 +971,23 @@ per_env_settings:
       data-plane calls; pairs with A37 RBAC (Search Index Data Contributor +
       Search Service Contributor) already granted to the BFF runtime UAMI.
       Global literal -- every deployed env sets this to true.
+
+  - key: 'AiSearch__AllowedIndexes'
+    per_env_source: 'from-h2b-output:ai_search_index_names'
+    indexed: true
+    iOptionsModule: 'AiSearchOptions'
+    required: true
+    notes: >-
+      T186 follow-up (AiSearch allow-list). The AI Search indexes the BFF may be asked to
+      query, written as AiSearch__AllowedIndexes__0, __1, … on BOTH slots. The BFF's
+      DataverseAllowedIndexesProvider reads sprk_aisearchindex rows first (H12b seeds them,
+      #2429) and falls back to this configured list when there are none -- before the rows
+      exist, or if they are missing. AiSearchOptions.AllowedIndexes defaults to empty, so
+      without this setting and without rows every call that names an index (record search,
+      semantic search, RAG, visualization) answers 400 INDEX_NOT_ALLOWED. The value is exactly the indexes H2b built and verified
+      on the stamp's OWN search service (InterStepState.AiSearchIndexNames, canonical-catalog
+      order; H4b <- H2b in the DAG) -- never a hand-kept list. Indices the list no longer has
+      are removed.
 
   - key: 'AiSafety__ContentSafety__ManagedIdentity__Enabled'
     per_env_source: 'literal'

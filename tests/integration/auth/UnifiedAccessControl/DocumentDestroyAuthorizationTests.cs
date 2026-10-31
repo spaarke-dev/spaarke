@@ -141,6 +141,208 @@ public class DocumentDestroyAuthorizationTests
     }
 
     // ─────────────────────────────────────────────────────────────────────────────
+    // Task 188 slice D — sprk_document_ParentDocument is Delete = Restrict: a document other documents name as their
+    // parent is refused with the ONE 409 shape on both internal routes, never a raw Dataverse refusal as a 500.
+    // ─────────────────────────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task DeleteDocument_OfAParentWithChildDocuments_Is409_WithTheCount_AndDestroysNothing()
+    {
+        _fixture.ChildDocumentCounts[DocumentId] = 3;
+        using var client = _fixture.CreateClientWithRights("ReadAccess,DeleteAccess");
+
+        var response = await client.DeleteAsync($"/api/documents/{DocumentId}");
+
+        await ShouldBeHasChildDocuments(response, expectedCount: 3);
+        _fixture.DeletedDocumentIds.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task DeleteDataverseDocument_OfAParentWithChildDocuments_Is409_WithTheCount_AndDestroysNothing()
+    {
+        _fixture.ChildDocumentCounts[DocumentId] = 2;
+        using var client = _fixture.CreateClientWithRights("ReadAccess,DeleteAccess");
+
+        var response = await client.DeleteAsync($"/api/v1/documents/{DocumentId}");
+
+        await ShouldBeHasChildDocuments(response, expectedCount: 2);
+        _fixture.DeletedDataverseDocumentIds.Should().BeEmpty(
+            "the refusal comes before IDocumentDataverseService.DeleteDocumentAsync, so Dataverse's Restrict never fires");
+    }
+
+    [Fact(DisplayName = "094 F1-c (must fire): the Dataverse document delete of a document Stored Files were copied from (sprk_sourcedocument, Restrict) is 409 document_is_invoice_source, no count; nothing destroyed")]
+    public async Task DeleteDataverseDocument_WithStoredFileCopies_Is409_AsAnInvoiceSource_AndDestroysNothing()
+    {
+        _fixture.StoredFileCopyCounts[DocumentId] = 2;
+        using var client = _fixture.CreateClientWithRights("ReadAccess,DeleteAccess");
+
+        var response = await client.DeleteAsync($"/api/v1/documents/{DocumentId}");
+
+        var body = await response.Content.ReadAsStringAsync();
+        response.StatusCode.Should().Be(HttpStatusCode.Conflict, body);
+        using var problem = System.Text.Json.JsonDocument.Parse(body);
+        problem.RootElement.GetProperty("reasonCode").GetString()
+            .Should().Be(Sprk.Bff.Api.Services.DocumentCheckoutService.InvoiceSourceCode);
+        problem.RootElement.GetProperty("detail").GetString()
+            .Should().Be("An invoice was submitted from this document, so it can't be deleted. Nothing was deleted.");
+        problem.RootElement.TryGetProperty("childCount", out _).Should().BeFalse("the copies are not child documents");
+        _fixture.DeletedDataverseDocumentIds.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "094 F1-c: the Dataverse document delete of a document with children AND copies is refused for its children first, with their count only")]
+    public async Task DeleteDataverseDocument_WithChildrenAndStoredFileCopies_Is409_ForTheChildren()
+    {
+        _fixture.ChildDocumentCounts[DocumentId] = 1;
+        _fixture.StoredFileCopyCounts[DocumentId] = 2;
+        using var client = _fixture.CreateClientWithRights("ReadAccess,DeleteAccess");
+
+        var response = await client.DeleteAsync($"/api/v1/documents/{DocumentId}");
+
+        await ShouldBeHasChildDocuments(response, expectedCount: 1);
+        _fixture.DeletedDataverseDocumentIds.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "094 (must not fire): a Stored File copied from another document does not refuse this one")]
+    public async Task DeleteDataverseDocument_WhenOnlyAnotherDocumentHasCopies_IsAllowed()
+    {
+        _fixture.StoredFileCopyCounts[Guid.NewGuid()] = 1;
+        using var client = _fixture.CreateClientWithRights("ReadAccess,DeleteAccess");
+
+        var response = await client.DeleteAsync($"/api/v1/documents/{DocumentId}");
+
+        response.StatusCode.Should().Be(HttpStatusCode.NoContent);
+        _fixture.DeletedDataverseDocumentIds.Should().ContainSingle();
+    }
+
+    // Security pass 2: a child created AFTER the count makes Dataverse's Restrict refuse the row itself. That refusal is the
+    // same 409 on both routes, never a 500.
+
+    private const int CannotDeleteDueToAssociation = unchecked((int)0x80040227);
+
+    [Fact]
+    public async Task DeleteDocument_WhenRestrictRefusesTheRowAfterTheFile_Is409_WithoutACount_NotA500()
+    {
+        _fixture.RowDeleteFaultCodes[DocumentId] = CannotDeleteDueToAssociation;
+        using var client = _fixture.CreateClientWithRights("ReadAccess,DeleteAccess");
+
+        var response = await client.DeleteAsync($"/api/documents/{DocumentId}");
+
+        using var problem = await ShouldBeHasChildDocumentsWithoutACount(response);
+        problem.RootElement.GetProperty("detail").GetString().Should().Contain("file was deleted",
+            "the file step ran before the refusal; the detail must not say nothing was deleted");
+    }
+
+    // R3 ISS-004 (#1650): a file delete that is not done keeps the row; the internal route answers the same problem body
+    // as the external route (status from the result, reasonCode = the result's code), never a 500 and never a 200.
+
+    [Fact]
+    public async Task DeleteDocument_WhenTheFileDeleteFails_Is503_WithAReasonCodeAndARetryHint_AndTheRowIsKept()
+    {
+        _fixture.FileNotDeletedStatuses[DocumentId] = 503;
+        using var client = _fixture.CreateClientWithRights("ReadAccess,DeleteAccess");
+
+        var response = await client.DeleteAsync($"/api/documents/{DocumentId}");
+
+        var body = await response.Content.ReadAsStringAsync();
+        response.StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable, body);
+        using var problem = System.Text.Json.JsonDocument.Parse(body);
+        problem.RootElement.GetProperty("reasonCode").GetString()
+            .Should().Be(Sprk.Bff.Api.Services.DocumentCheckoutService.FileNotDeletedCode);
+        problem.RootElement.GetProperty("detail").GetString()
+            .Should().Contain("Nothing was deleted").And.Contain("Try again");
+        problem.RootElement.TryGetProperty("correlationId", out _).Should().BeTrue();
+        _fixture.DeletedDocumentIds.Should().BeEmpty("the row is kept");
+    }
+
+    [Fact]
+    public async Task DeleteDocument_WhenTheFilePointerIsRefused_Is409_NotA503_AndTheRowIsKept()
+    {
+        _fixture.FileNotDeletedStatuses[DocumentId] = 409;
+        using var client = _fixture.CreateClientWithRights("ReadAccess,DeleteAccess");
+
+        var response = await client.DeleteAsync($"/api/documents/{DocumentId}");
+
+        var body = await response.Content.ReadAsStringAsync();
+        response.StatusCode.Should().Be(HttpStatusCode.Conflict, body);
+        System.Text.Json.JsonDocument.Parse(body).RootElement.GetProperty("detail").GetString()
+            .Should().NotContain("Try again", "a refused pointer is not retryable");
+        _fixture.DeletedDocumentIds.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task DeleteDocument_WhenTheFileDeleteSucceeds_StillDeletesTheRow_Is200()
+    {
+        using var client = _fixture.CreateClientWithRights("ReadAccess,DeleteAccess");
+
+        var response = await client.DeleteAsync($"/api/documents/{DocumentId}");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+        _fixture.DeletedDocumentIds.Should().ContainSingle().Which.Should().Be(DocumentId);
+    }
+
+    [Fact]
+    public async Task DeleteDataverseDocument_WhenRestrictRefusesTheRow_Is409_WithoutACount_NotA500()
+    {
+        _fixture.RowDeleteFaultCodes[DocumentId] = CannotDeleteDueToAssociation;
+        using var client = _fixture.CreateClientWithRights("ReadAccess,DeleteAccess");
+
+        var response = await client.DeleteAsync($"/api/v1/documents/{DocumentId}");
+
+        using var problem = await ShouldBeHasChildDocumentsWithoutACount(response);
+        problem.RootElement.GetProperty("detail").GetString().Should().Contain("Nothing was deleted",
+            "this route deletes no file");
+        _fixture.DeletedDataverseDocumentIds.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task DeleteDataverseDocument_Retry_AfterTheChildrenAreDeleted_Is204()
+    {
+        _fixture.RowDeleteFaultCodes[DocumentId] = CannotDeleteDueToAssociation;
+        using var client = _fixture.CreateClientWithRights("ReadAccess,DeleteAccess");
+        (await client.DeleteAsync($"/api/v1/documents/{DocumentId}")).StatusCode.Should().Be(HttpStatusCode.Conflict);
+
+        _fixture.RowDeleteFaultCodes.TryRemove(DocumentId, out _); // the attachments are deleted
+        var retry = await client.DeleteAsync($"/api/v1/documents/{DocumentId}");
+
+        retry.StatusCode.Should().Be(HttpStatusCode.NoContent, await retry.Content.ReadAsStringAsync());
+        _fixture.DeletedDataverseDocumentIds.Should().ContainSingle().Which.Should().Be(DocumentId.ToString());
+    }
+
+    [Fact]
+    public async Task DeleteDataverseDocument_WhenTheRowDeleteFailsWithAnotherFaultCode_IsStill500()
+    {
+        // Must-not-fire: only 0x80040227 is the Restrict refusal (0x80040220 is a privilege fault).
+        _fixture.RowDeleteFaultCodes[DocumentId] = unchecked((int)0x80040220);
+        using var client = _fixture.CreateClientWithRights("ReadAccess,DeleteAccess");
+
+        var response = await client.DeleteAsync($"/api/v1/documents/{DocumentId}");
+
+        response.StatusCode.Should().Be(HttpStatusCode.InternalServerError);
+        _fixture.DeletedDataverseDocumentIds.Should().BeEmpty();
+    }
+
+    private static async Task<System.Text.Json.JsonDocument> ShouldBeHasChildDocumentsWithoutACount(HttpResponseMessage response)
+    {
+        var body = await response.Content.ReadAsStringAsync();
+        response.StatusCode.Should().Be(HttpStatusCode.Conflict, body);
+        var problem = System.Text.Json.JsonDocument.Parse(body);
+        problem.RootElement.GetProperty("reasonCode").GetString()
+            .Should().Be(Sprk.Bff.Api.Services.DocumentCheckoutService.HasChildDocumentsCode);
+        problem.RootElement.TryGetProperty("childCount", out _).Should().BeFalse("Dataverse's refusal names no count");
+        return problem;
+    }
+
+    private static async Task ShouldBeHasChildDocuments(HttpResponseMessage response, int expectedCount)
+    {
+        var body = await response.Content.ReadAsStringAsync();
+        response.StatusCode.Should().Be(HttpStatusCode.Conflict, body);
+        using var problem = System.Text.Json.JsonDocument.Parse(body);
+        problem.RootElement.GetProperty("reasonCode").GetString()
+            .Should().Be(Sprk.Bff.Api.Services.DocumentCheckoutService.HasChildDocumentsCode);
+        problem.RootElement.GetProperty("childCount").GetInt32().Should().Be(expectedCount);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────────
     // The two destroy routes must AGREE — the C3 finding was an asymmetry, not a URL
     // ─────────────────────────────────────────────────────────────────────────────
 

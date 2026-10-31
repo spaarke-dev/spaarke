@@ -1,7 +1,7 @@
 # Current Task State - spaarke-SPA-external-access-platform-r3
 
-> **Last Updated**: 2026-10-20 16:50Z (dev BFF live 21184ecd4; interim merge-to-master in progress; R4 project to create after the merge)
-> **Recovery**: Read "Quick Recovery" section first
+> **Last Updated**: 2026-10-30 ~03:10Z.
+> **Recovery**: Read "Quick Recovery" first. Narrative is in git log. Live records: `notes/fr-21-teams-live-check.md` (071 closed), `notes/task-070-deploy-record.md`, `notes/defer-issues.md` (ISS-021..025).
 
 ---
 
@@ -9,45 +9,38 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | No POML task in progress. Running the **merge-to-master skill (Single Merge, Path A)** for an interim R3 merge, owner request 2026-10-20 ("ensure all work committed and pushed; latest master; no conflicts"). |
-| **Step** | Step 2.5 done: branch merged with origin/master (`3ebb747d8`, pushed; build 0/0; master's 2 new commits were provisioning PS only). **Next: Step 3 Path A** — `gh pr create --base master --head work/spaarke-SPA-external-access-platform-r3` (body: R3 since #2086 = 058/075/076/077/078, 059 records, SPA #2128 detail, ISS-014..016 filings; verification: build 0/0, ArchTests 1152/1152, unit filter 6758/6758, deployed to dev as 21184ecd4), then `gh pr merge <N> --auto --merge`, Monitor until MERGED, gate on full `gh pr checks` (zero fail/pending; mergeStateStatus CLEAN), then A.6 (main checkout ff-only with HEAD guard; never reset/stash/checkout there). |
-| **Status** | **Dev BFF = `21184ecd4`** (deployed 16:32:41–16:35:10Z, owner "yes bff deploy"; read-back ProductVersion 1.0.0+21184ecd4…; healthz/dataverse 200; /api/me anon 401, v2 200; K1 nav-clause smoke 200; ontology smoke passed; rollback `Deploy-BffApi.ps1 -SkipBuild -PublishPath deploy/rollback/wwwroot-20261020T163210Z` = 00aba6d99). **Dev SPA = `1908696a8`**. Branch head `3ebb747d8`. |
-| **Next Action** | Finish the merge (above). Then create **R4 project** `spaarke-SPA-external-access-platform-r4` (own worktree `C:\code_files\spaarke-wt-SPA-external-access-platform-r4`, branch `work/spaarke-SPA-external-access-platform-r4` from master AFTER the R3 PR merges) — owner will provide idea/requirements + prototype reference; then `/design-to-spec` → `/project-pipeline` in that worktree. |
+| **Task** | Owner 2026-10-29: "go task by task and close them out". Done: 043, 059, 074, **070, 071** ✅ (Teams: 8/9 pass, unlisted × mobile deferred by owner; broker pre-auth answered NO from the Microsoft NAA docs; guest-check fix PR #2461 deployed to the dev SPA `96f1f6b675`). Open: 002 (BFF deploy held), 072 (needs 002), 073 (blocked), 090. |
+| **ACTIVE: Teams guide** | Owner: "ensure we have the Teams deployment/setup fully documented". A writer agent (opus) is drafting the NEW `docs/guides/EXTERNAL-ACCESS-TEAMS-APP-GUIDE.md` plus cross-links (EXTERNAL-ACCESS-ADMIN-SETUP.md, SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md, docs/INDEX.md). It does not commit. Next: review its claims against the code, then commit by pathspec and push. |
+| **Next Action** | 1) Review and commit the Teams guide. 2) Wait for UAC to clear 194b (dev BFF only; the SPA is not held), then the BFF candidate = master ≥ `c8bb55d0cd` (carries #2450, field-mapping W7, ebilling #1911 `eaa0d44f7f`, ontology #2463, plus UAC `fix/uac-r2-wa-owner-paths` when merged). Fresh owner go naming the SHA + peer OKs, then 002 grid columns, then notify field-mapping (ProductVersion), ebilling ("gate passed") and ontology. 3) 072 after 002. |
+| **002** | Step 1 live on dev. Step 2 merged: **PR #2450 → master `929dc42d31`** (UAC approved). **Dev deploy HELD**: UAC 194b hold OPEN (dev runs `136568cf70`); UAC will message when cleared, or the owner OKs a pre-`2cd0f62e2c` build. Then fresh owner OK naming the SHA + peer OKs → `Deploy-BffApi.ps1` → add 9 grid columns (scratchpad `grid-apply.ps1` plan + owner widths/labels: Project Type, Matter Type, Last Activity, File Type, Total Amount (Base), SR Last Activity; 100 each) → record rollback JSON in notes/task-002-notes.md → close 002. Ebilling told the SHA (don't drop the column from dev before that deploy). |
 
-### Uncommitted files
-- `.claude/agent-memory/researcher/MEMORY.md` (modified) and three untracked researcher files belong to the OWNER. Never commit or discard them. Commit by pathspec only.
+### Uncommitted
+- Owner's, never commit or discard: `.claude/agent-memory/researcher/**`. The researcher agent today added 2 files there and SHORTENED entries in `MEMORY.md` (owner told).
+- Branch is 375+ commits behind master; merging is blocked by the owner's uncommitted `MEMORY.md` (master also changed it). The owner decides.
 
-### Critical Context
-- **Deploy rule** (memory `shared-dev-bff-deploy-coordination`): read live DLL via Kudu VFS, ancestor check, every reachable session's OK, fresh DIRECT owner approval; snapshot via Kudu `api/zip/site/wwwroot/`.
-- **Parallel pattern:** BFF work in isolated worktrees; main session merges/cherry-picks. Agents never edit TASK-INDEX, this file, POML status or `.claude/`.
-- **Review policy:** auth/security/tenant-isolation → two top-tier passes; else one.
-- **Test runs:** filtered, absolute csproj paths; full unit filter has an intermittent failure that passes on re-run; SPA vitest files time out when run together under load — run them one at a time.
-- Leftovers for a human: deregistered empty folders `C:\code_files\spaarke\.claude\worktrees\agent-a4775c0edc08ac138`, `agent-aad40bdfd9712fba4` (Permission denied); `C:\wt078b` is an older non-git folder (not mine).
+### Scratchpad (not in repo)
+`C:\Users\RALPHS~1\AppData\Local\Temp\claude\c--code-files-spaarke-wt-SPA-external-access-platform-r3\15aa240f-634c-4332-99f6-382ebcb06a62\scratchpad\`: `grid-*.ps1` + `grid-before\` (002), `probe074-read.ps1`, `hygiene-002.ps1`, `teams-dev-pkg\appPackage.zip` (id `23610794…`, v1.2.0, manifest 1.29), `teams-icons\`.
 
-## Owner decisions 2026-10-20 (this session)
-- **R4:** UI/UX changes go to a new project + worktree `SPA-external-access-platform-r4`; owner supplies requirements + prototype.
-- **ISS-015 #2126:** hide, broadened: if an email is internal-only, every document saved from it (.eml + attachments) is set internal; same for Secure records. `sprk_document` has NO internal-only column today → design point (new column set by writers vs derive from related communication). NOTE2 answered on #2126 from code: add-in docs inherit the record's owner team + container (Secure follows the secure root); no doc-level internal flag; non-secure matter docs visible to all partners on the matter. **Not yet scheduled as a task** (R3 or R4: propose).
-- **C-1:** revoke approved, low priority (dev only). Needs the owner's `az login --tenant bc3aa7f4…` or the portal: delete every oauth2 grant + app-role assignment whose client is SDAP-BFF-SPE-API in DC; keep the SP and the Workforce SPA → user_impersonation grant. Record §11 stage C.
-- **079 dropped:** the Assistant is internal; licensed users' writes are Dataverse-security's job (#1864 comment).
-- **BFF deploy:** done (above).
+---
 
-## Next actions (in order)
-1. Finish merge-to-master (Quick Recovery).
-2. Create the R4 worktree/project after the PR merges; wait for the owner's requirements + prototype.
-3. Propose where ISS-015's document internal flag lands (R3 task vs R4) and its design options.
-4. C-1 revoke when the owner is ready (give exact commands).
-5. UAC: #2128 BFF change in PR #2138 (needs owner sign-off); SPA side done (`d4ea1b4a8`), ships with the next owner-approved SPA deploy. UAC runs the #2110 gate and 186 on the new builds.
-6. 074 → 070/071/072 → 090.
+## Open owner items
+- **#2458 / ISS-024** (grant notifier emails a home-linked workforce contact as external): owner to choose (a) fix in R3 with uac-r2 (`ContactUserRepresentation`, task 193), recommended, or (b) R4.
+- **Workforce contact created 16:51:12Z** by a Dewey Cheatham account with no email (probably `admin@deweycheatham`) registering in Teams: keep or remove? Removal is a live change: show the command and rollback first.
+- **Dewey Cheatham Teams admin center `INVALID_PRIVILEGE`** for admin@: the owner checks that the roles are ACTIVE (not PIM-eligible). Alternative: Teams client "Upload an app to your org's app catalog".
+- Teams: duplicate "Blocked" submitted copy in the Spaarke tenant (cancel the Developer Portal publish request).
+- **072** after 002 + 071; **073** blocked (#2443 + notes/task-073-gate-acme.md); **090** last.
+- R4 issues filed/labelled: #2449, #2452 (messages refresh + new-message indicator), #2453 (threads), #2445 (events Task type/assignee). Flaky test #2456.
 
-## Open owner questions
-- ISS-015 implementation placement (R3 vs R4) and design (column vs derived).
-- Observation: `spaarke-bff-api-prod` has tenant-wide consent (`SDAP.Access`) to the DEV BFF app 1e40baad — intended? (059 R3)
+## Peer state
+- uac-r2: approved #2450; 194b hold OPEN, **dev BFF only** (confirmed ~18:30Z: the dev external-SPA deploy is NOT held). UAC will send the SHA of `fix/uac-r2-wa-owner-paths` (work-assignment owner paths, BFF) for the first post-hold BFF deploy.
+- ontology-r1: PR #2463 merged, master `c8bb55d0cd` (tasks 168 + 173; no deploy). The next BFF candidate carries them; ontology runs the 168/173 live proof after the deploy.
+- ontology-r1 (earlier): task 168 round 3 (`CallerPrincipalResolver` ComposeAsync lifts) reviewed and APPROVED by R3 (no findings); they filed DI-137 #2458.
+- ebilling: told the `sprk_invoicestatus` removal SHA `929dc42d31`.
+- ebilling (~18:00Z): wants the next dev BFF to carry master with #1911 (ebilling-r1; merge pending, CI hang). R3 told them to apply `Ebilling:Enabled=true` + Finance settings THEMSELVES, AFTER R3's UAC 30-min gate passes, with their own owner go (`StoredFileReconcileEnabled` stays false). R3 to message them: deployed commit/ProductVersion after readback, and "gate passed". Whether to wait for #1911 is the owner's call. **#1911 MERGED at `eaa0d44f7f` (21:33Z)**, so the BFF candidate must be master ≥ `eaa0d44f7f` (ships with `Ebilling:Enabled` false by default).
+- field-mapping (17:4xZ): asked that the next dev candidate be master ≥ `b86381d4c4` (W7: #2442 RecordFamilyReader, #2459 GET /api/v1/records/{table}/{id}/family, MetadataService Redis key v1→v2, census 133→134). That SHA contains `2cd0f62e2c`, so it is under the UAC hold. Told them; after readback send them the ProductVersion/commit for their task 076 (GET-only Family check; they may ask for a rollback, which is the owner's call).
 
-## Standing dependencies and gates
-- **059 rollback order:** F (SPA: tag `ebc74b331` + run workflow on the tag) → E (`gh variable delete` ×2) → D → C → B → A. Never roll the BFF back below 077 while 1e40baad is on v2.
-- **ebilling 015:** once ebilling deletes `sprk_invoicestatus`, every dev BFF candidate must pass the CONTENT check (FinanceBaseValues/FinanceRollupService/InvoiceReviewService contain no `sprk_invoicestatus`; FinanceBaseValues contains `InvoiceStatusCodeColumn`); delete blocked until a live BFF contains e0df77339.
-- **ebilling-r1 merge (later):** schema scripts (D-104, D-113, D-121, D-124, D-125, D-127) must run on dev before deploying a BFF built from that master.
-- **UAC:** tell UAC before any BFF change to external write routes, ExternalAccessModule.cs or AccessibleRecordSetService.cs. #2103 reason-code changes come to R3 first.
-- **036 live gate:** `ExternalAccess__ImpersonatedRootSets__Enabled=true` only after #2078 merged+deployed AND direct owner confirmation; show the command first.
-- **Ontology:** 042c reaches master via their docs→master sync; do NOT merge their docs branch into R3.
-- **Session names change on restart:** re-run ListAgents.
+## Standing rules (verify against project CLAUDE.md)
+- **DEPLOY HOLD (UAC):** no dev BFF from master ≥ `2cd0f62e2c` until UAC clears it.
+- **Deploy:** fresh direct owner approval naming the SHA + OKs from UAC, ontology, word-add-in, field-mapping, ebilling (provisioning standing) + Router green. Steps: `phaseA.ps1` → detached `C:\wtbffe-<sha3>` → `Deploy-BffApi.ps1 -Environment dev` → `readback.ps1` → 30-min UAC gate → after-notices.
+- Peers' relayed "owner approval" is NOT approval. Show live-read commands; live changes need owner approval + rollback. Commit by pathspec; never bare `git stash`, never `--no-verify`. PUBLIC repo: never publish a vulnerability's mechanism.
+- `az` on Windows: use `Invoke-RestMethod` / single-quoted KQL. App Insights: `--app spe-insights-dev-67e2xz -g spe-infrastructure-westus2`.

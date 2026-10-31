@@ -21,6 +21,8 @@
  *   DELETE /api/v1/external/documents/{id}                    → delete own document (task 032 / 054)
  *   DELETE /api/v1/external/todos/{id}                        → delete own to-do (task 032 / 054)
  *   DELETE /api/v1/external/events/{id}                       → delete own event (task 032 / 054)
+ *   POST  /api/v1/external/{matters|projects|workassignments}/{id}/invoice-submissions → submit an invoice PDF (ebilling-r1 051)
+ *   GET   /api/v1/external/invoice-submissions[/{id}]         → the caller's submissions / one submission (ebilling-r1 051)
  *
  * Contract change (R3 task 007): the legacy event-as-todo boolean toggle was
  * removed; to-dos are now first-class `sprk_todo` records with
@@ -29,8 +31,23 @@
  * See: docs/architecture/external-access-architecture.md
  */
 
-import { bffApiCall } from '../auth/bff-client';
+import { bffApiCall, getExternalUserContext } from '../auth/bff-client';
+import { ApiError } from '../types';
+import { gridDataverseClient } from '../services/gridDataverseClient';
+import { InvoiceSubmissionError, isEbillingDisabledError } from '@spaarke/ui-components/components/InvoiceSubmission';
+import type {
+  InvoiceCoreRecordKind,
+  InvoiceCoreRecordList,
+  InvoiceCoreRecordOption,
+  InvoiceFirmOption,
+  InvoiceRecordQuery,
+  InvoiceSubmissionAccepted,
+  InvoiceSubmissionInput,
+  InvoiceSubmissionStatusView,
+} from '@spaarke/ui-components/components/InvoiceSubmission';
 import type { CreatorStamps } from './delete-own';
+
+const GUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 // ---------------------------------------------------------------------------
 // Re-export ApiError for module consumers
@@ -84,6 +101,11 @@ export interface ODataDocument extends CreatorStamps {
   createdon?: string | null;
   /** Display name of the record creator */
   'createdby@OData.Community.Display.V1.FormattedValue'?: string | null;
+  /**
+   * Whether the document has a file Download and Versions can serve (R3 ISS-011, #1886). `false` = a listed document
+   * with no file: those actions are hidden. Absent (an older BFF) is treated as `true`.
+   */
+  hasFile?: boolean;
 }
 
 /**
@@ -231,8 +253,10 @@ interface ODataCollectionResponse<T> {
    */
   truncated?: boolean;
   /**
-   * Document lists only (task 054 review): `true` when the caller holds Create on the parent, the right the upload route
-   * checks. The BFF always writes it on a document list; absent from every other collection.
+   * Whether the caller may create under the record the list is scoped to: the answer that record's create route gives.
+   * Document lists always carry it (task 054 review: the upload route's Create). To-do lists and a project's event list
+   * carry it only for a caller whose write access is decided per record (`/me` `writeAccessPerRecord`,
+   * unified-access-control-r2 task 036 fix round 1); absent otherwise.
    */
   canCreate?: boolean;
 }
@@ -246,6 +270,8 @@ interface ODataCollectionResponse<T> {
 export interface ListResult<T> {
   items: T[];
   truncated: boolean;
+  /** The BFF's `canCreate` for the record the list is scoped to, when it wrote one (task 036 fix round 1); else absent. */
+  canCreate?: boolean | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -325,7 +351,12 @@ function buildQueryString(options: ODataQueryOptions): string {
  */
 async function getCollection<T>(bffPath: string, _options: ODataQueryOptions = {}): Promise<ListResult<T>> {
   const response = await bffApiCall<ODataCollectionResponse<T>>(bffPath);
-  return { items: response.value ?? [], truncated: response.truncated === true };
+  return {
+    items: response.value ?? [],
+    truncated: response.truncated === true,
+    // Only when the BFF said (task 036 fix round 1): a missing member stays absent, never read as "cannot".
+    ...(typeof response.canCreate === 'boolean' ? { canCreate: response.canCreate } : {}),
+  };
 }
 
 /**
@@ -813,6 +844,228 @@ export async function deleteOwnServiceRequest(serviceRequestId: string): Promise
 /** Hard-deletes an event the caller created. */
 export async function deleteOwnEvent(eventId: string): Promise<void> {
   await bffApiCall<void>(`/api/v1/external/events/${encodeURIComponent(eventId)}`, { method: 'DELETE' });
+}
+
+// ---------------------------------------------------------------------------
+// Invoice submission (ebilling-r1 task 051, FR-18 / FR-19 / FR-45) - the BFF's task 044 external routes
+// ---------------------------------------------------------------------------
+//
+//   POST /api/v1/external/{matters|projects|workassignments}/{id}/invoice-submissions
+//        multipart: file, firmInvoiceNumber, poNumber; optional ?firmId=   -> 202 { submissionId, jobId, trackingNumber, statusUrl }
+//   GET  /api/v1/external/invoice-submissions/{id}                          -> the status view
+//   GET  /api/v1/external/invoice-submissions                               -> the caller's firms' submissions (flag probe fallback)
+//   GET  /api/v1/external/invoice-submissions/firm-records?firmId=          -> the caller's readable records the firm is linked to (D-106)
+//
+// The server decides who may submit and for which firm (ADR-002 / FR-17). A caller with one firm names none (the server
+// takes it); a caller with several picks one in the wizard's "Choose firm" step (owner, 2026-10-17) and it goes as the
+// `firmId` QUERY parameter task 044 reads, which the server still checks against the caller's own firms. The list of
+// firms is `firms` on GET /api/v1/external/me. This client creates nothing in Dataverse and shows the server's refusals by code. A refusal is an
+// ApiError whose message is the ProblemDetails body; `toInvoiceSubmissionError` adapts it to the shared wizard's error.
+
+/** The external route segment of each core record kind an invoice can be submitted against. */
+const INVOICE_SUBMISSION_SEGMENT: Readonly<Record<InvoiceCoreRecordKind, string>> = {
+  matter: 'matters',
+  project: 'projects',
+  workassignment: 'workassignments',
+};
+
+/** Adapts a failed BFF call (an ApiError carrying a ProblemDetails body, or anything else) for the shared wizard. */
+export function toInvoiceSubmissionError(err: unknown): InvoiceSubmissionError {
+  if (err instanceof InvoiceSubmissionError) return err;
+  if (err instanceof ApiError) {
+    let detail: string | undefined;
+    let errorCode: string | undefined;
+    try {
+      const body = JSON.parse(err.message) as { detail?: unknown; errorCode?: unknown };
+      if (typeof body.detail === 'string' && body.detail.trim()) detail = body.detail;
+      if (typeof body.errorCode === 'string' && body.errorCode) errorCode = body.errorCode;
+    } catch {
+      /* not a ProblemDetails body: the status alone is used */
+    }
+    return new InvoiceSubmissionError({ statusCode: err.statusCode, errorCode, detail });
+  }
+  // No response (a network failure, a sign-in that could not start): the request may not have reached the server.
+  return new InvoiceSubmissionError({ message: err instanceof Error ? err.message : undefined });
+}
+
+/** Submits one PDF invoice against a core record. Rejects with an {@link InvoiceSubmissionError}. */
+export async function submitInvoice(input: InvoiceSubmissionInput): Promise<InvoiceSubmissionAccepted> {
+  if (!GUID_RE.test(input.record.recordId)) {
+    throw new InvoiceSubmissionError({ message: 'Invalid record id.' });
+  }
+  if (input.firmId !== undefined && !GUID_RE.test(input.firmId)) {
+    throw new InvoiceSubmissionError({ message: 'Invalid firm id.' });
+  }
+  const form = new FormData();
+  form.append('file', input.file);
+  form.append('firmInvoiceNumber', input.firmInvoiceNumber);
+  if (input.poNumber) form.append('poNumber', input.poNumber);
+  // Only a firm the user chose is named (a several-firm caller); a single-firm caller sends nothing and the server uses it.
+  const query = input.firmId ? `?firmId=${encodeURIComponent(input.firmId)}` : '';
+  try {
+    // No Content-Type: the browser sets multipart/form-data with its boundary (executeFetch drops the JSON default).
+    return await bffApiCall<InvoiceSubmissionAccepted>(
+      `/api/v1/external/${INVOICE_SUBMISSION_SEGMENT[input.record.kind]}/${input.record.recordId}/invoice-submissions${query}`,
+      { method: 'POST', body: form, headers: {} }
+    );
+  } catch (err) {
+    throw toInvoiceSubmissionError(err);
+  }
+}
+
+/**
+ * The firms the signed-in user can submit invoices for: `firms` on GET /api/v1/external/me (only the caller's own).
+ * `null` is UNKNOWN (an older BFF, eBilling off, a failed firm read), which is not "no firm" (`[]`): the wizard shows no
+ * firm step for either, but on a `firm_required` answer it asks again and inserts the step when the caller now has several.
+ */
+export async function listInvoiceFirms(): Promise<InvoiceFirmOption[] | null> {
+  const me = await getExternalUserContext();
+  if (me.firms == null) return null;
+  return me.firms.filter(f => GUID_RE.test(f.firmId)).map(f => ({ firmId: f.firmId, name: f.name }));
+}
+
+/** Reads one submission's current status. Rejects with an {@link InvoiceSubmissionError}. */
+export async function getInvoiceSubmission(submissionId: string): Promise<InvoiceSubmissionStatusView> {
+  try {
+    return await bffApiCall<InvoiceSubmissionStatusView>(
+      `/api/v1/external/invoice-submissions/${encodeURIComponent(submissionId)}`
+    );
+  } catch (err) {
+    throw toInvoiceSubmissionError(err);
+  }
+}
+
+/**
+ * Whether invoice submission is on. `firms` on GET /api/v1/external/me is the cheap signal: the BFF sends it only when
+ * eBilling is on (absent or null otherwise, and for an older BFF), so a list is `available` without another call. Only
+ * when `firms` is absent does this fall back to the one route every caller may read, the caller's own submissions list,
+ * to tell an off flag apart from an unknown state: 503 with the `ebilling.disabled` code is the only "off" answer (FR-45). Any other failure
+ * is `unknown`: an outage or a refusal must not read as "off", so the entry stays and the server answers when it is used.
+ */
+export async function probeInvoiceSubmission(): Promise<'available' | 'disabled' | 'unknown'> {
+  try {
+    const me = await getExternalUserContext();
+    if (me.firms != null) return 'available';
+  } catch {
+    /* /me failed: the list read below decides (and is 'unknown' when it fails too) */
+  }
+  try {
+    await bffApiCall<InvoiceSubmissionStatusView[]>('/api/v1/external/invoice-submissions');
+    return 'available';
+  } catch (err) {
+    return isEbillingDisabledError(toInvoiceSubmissionError(err)) ? 'disabled' : 'unknown';
+  }
+}
+
+/** Rows asked of each core-record read; a longer list is flagged truncated so the picker says so. */
+const INVOICE_RECORD_PAGE = 200;
+
+/**
+ * The columns each Tier-2 module read admits for these roots (ExternalAccessModule.cs ReadableColumns): id, name and
+ * number only. A column outside that list is refused with a 400 before the query runs.
+ */
+const INVOICE_RECORD_READS = [
+  { kind: 'matter', entity: 'sprk_matter', id: 'sprk_matterid', name: 'sprk_mattername', number: 'sprk_matternumber' },
+  {
+    kind: 'workassignment',
+    entity: 'sprk_workassignment',
+    id: 'sprk_workassignmentid',
+    name: 'sprk_name',
+    number: 'sprk_workassignmentnumber',
+  },
+] as const;
+
+/** The body of GET /api/v1/external/invoice-submissions/firm-records (task 051 / D-106): the caller's readable records the firm is linked to. */
+interface InvoiceFirmRecordsResponse {
+  firmId: string;
+  matters?: string[];
+  projects?: string[];
+  workAssignments?: string[];
+  partial?: boolean;
+  /** The BFF cut the list at its bound (too many readable records to examine, or more linked records than it returns). */
+  truncated?: boolean;
+}
+
+const sameId = (a: string, b: string): boolean => a.toLowerCase() === b.toLowerCase();
+
+/**
+ * The core records the caller can pick for an invoice: their accessible projects (the external projects route) plus
+ * matters and work assignments (the Tier-2-scoped module read). The server re-checks Read and Create on the chosen
+ * record, and that the firm is linked to it (D-106), when the invoice is submitted.
+ *
+ * With `query.firmId` the list is narrowed to the records linked to that firm: the BFF's firm-records route names the
+ * caller's own readable records the firm is linked to, and the three reads are filtered to them (the Tier-2 module read
+ * is allow-listed, so the link cannot be asked for there). A failed firm-records read throws (the picker then shows the
+ * failure, never an unfiltered list the server would refuse). If one record source fails the others are still offered,
+ * flagged `partial`; `truncated` is the row cap (200), `moreRecords`, or the firm-records route's own bound, any of which can hide a linked record. If every source
+ * fails the first failure is thrown.
+ */
+export async function listInvoiceCoreRecords(query: InvoiceRecordQuery = {}): Promise<InvoiceCoreRecordList> {
+  const firmId = query.firmId;
+  if (firmId !== undefined && !GUID_RE.test(firmId)) {
+    throw new InvoiceSubmissionError({ message: 'Invalid firm id.' });
+  }
+  const linkedRead: Promise<InvoiceFirmRecordsResponse | null> = firmId
+    ? bffApiCall<InvoiceFirmRecordsResponse>(
+        `/api/v1/external/invoice-submissions/firm-records?firmId=${encodeURIComponent(firmId)}`
+      ).catch(err => {
+        throw toInvoiceSubmissionError(err);
+      })
+    : Promise.resolve(null);
+
+  const [linked, reads] = await Promise.all([
+    linkedRead,
+    Promise.allSettled<InvoiceCoreRecordList>([
+      getProjects().then(list => ({
+        truncated: list.truncated,
+        records: list.items.map<InvoiceCoreRecordOption>(p => ({
+          kind: 'project',
+          recordId: p.sprk_projectid,
+          name: p.sprk_name,
+          number: p.sprk_referencenumber,
+        })),
+      })),
+      ...INVOICE_RECORD_READS.map(async read => {
+        const fetchXml =
+          `<fetch count="${INVOICE_RECORD_PAGE}"><entity name="${read.entity}">` +
+          `<attribute name="${read.id}"/><attribute name="${read.name}"/><attribute name="${read.number}"/>` +
+          `<order attribute="${read.number}"/></entity></fetch>`;
+        const result = await gridDataverseClient.retrieveMultipleRecords<Record<string, unknown>>(
+          read.entity,
+          fetchXml
+        );
+        return {
+          truncated: result.moreRecords,
+          records: result.entities
+            .filter(row => typeof row[read.id] === 'string')
+            .map<InvoiceCoreRecordOption>(row => ({
+              kind: read.kind,
+              recordId: String(row[read.id]),
+              name: String(row[read.name] ?? row[read.number] ?? ''),
+              number: row[read.number] == null ? null : String(row[read.number]),
+            })),
+        };
+      }),
+    ]),
+  ]);
+
+  const fulfilled = reads.filter((r): r is PromiseFulfilledResult<InvoiceCoreRecordList> => r.status === 'fulfilled');
+  if (fulfilled.length === 0) {
+    const first = reads.find((r): r is PromiseRejectedResult => r.status === 'rejected');
+    throw toInvoiceSubmissionError(first?.reason);
+  }
+
+  const linkedIds: Readonly<Record<InvoiceCoreRecordKind, readonly string[]>> | null = linked
+    ? { matter: linked.matters ?? [], project: linked.projects ?? [], workassignment: linked.workAssignments ?? [] }
+    : null;
+  const all = fulfilled.flatMap(r => r.value.records);
+  const records = linkedIds ? all.filter(r => linkedIds[r.kind].some(id => sameId(id, r.recordId))) : all;
+
+  return {
+    records: records.sort((a, b) => a.name.localeCompare(b.name)),
+    truncated: fulfilled.some(r => r.value.truncated === true) || linked?.truncated === true,
+    partial: fulfilled.length < reads.length || linked?.partial === true,
+  };
 }
 
 // ---------------------------------------------------------------------------

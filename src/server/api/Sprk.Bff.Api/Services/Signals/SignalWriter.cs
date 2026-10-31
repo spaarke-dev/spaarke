@@ -52,7 +52,7 @@ public sealed record SignalEvidenceRef(string Kind, string Ref, string Tier, dou
 /// <param name="PolicyVersionId">The immutable version that fired (<c>sprk_signal.sprk_policyversion</c>).</param>
 /// <param name="SubjectEntityLogicalName">The subject's Dataverse logical name, e.g. <c>sprk_matter</c> or
 /// <c>sprk_communication</c>. MUST be one of <see cref="SignalWriter.VerifiedSubjects"/> (a subset of
-/// <see cref="SignalWriter.RegardingLookupByEntity"/>'s 9 keys). It is also the subject segment of the dedupe key.</param>
+/// <see cref="SignalWriter.RegardingLookupByEntity"/>'s 10 keys). It is also the subject segment of the dedupe key.</param>
 /// <param name="SubjectId">The subject record's id.</param>
 /// <param name="SubjectDisplayName">For the denormalized <c>sprk_regardingrecordname</c> — display only.</param>
 /// <param name="ShortHeadline">The Signal's <c>sprk_name</c> (required, NOT NULL). Max 200 chars (schema
@@ -165,6 +165,23 @@ public enum SignalCloseOutcome
     ChangedSinceRead,
 }
 
+/// <summary>What <see cref="SignalWriter.CloseActedByDecisionAsync"/> did (ebilling-r1 tasks 049, 100 and 105; D-122).</summary>
+public enum SignalAutomatedCloseOutcome
+{
+    /// <summary>The Signal was closed as Acted and linked to the Decision Record.</summary>
+    Closed,
+
+    /// <summary>The Signal is already Resolved and names this Decision Record (a resumed run); nothing was written.</summary>
+    AlreadyClosedByThisRecord,
+
+    /// <summary>A person resolved the Signal, another record closed it, or the system closed it before the set was read; nothing was
+    /// written. A person's resolution is never overwritten.</summary>
+    LeftAsIs,
+
+    /// <summary>The Signal changed between the read and the write twice (its row version moved); nothing was written. The caller retries.</summary>
+    ChangedSinceRead,
+}
+
 /// <summary>What <see cref="SignalWriter.LinkConditionClearedRecordAsync"/> did (task 153).</summary>
 public enum SignalRecordLinkOutcome
 {
@@ -223,6 +240,63 @@ public sealed class SignalSentenceTemplateException : Exception
     public SignalSentenceTemplateException(string message) : base(message)
     {
     }
+}
+
+/// <summary>
+/// The stable refusal codes of <see cref="SignalWriter.PreflightRefusal"/> (ebilling-r1 task 049): one per distinct request check
+/// <see cref="SignalWriter.WriteAsync"/> makes before its first Dataverse call, in the order it makes them. Snake_case and bounded,
+/// like <see cref="OntologyWriterFailureReason"/>; the two checks that already have a writer reason there
+/// (<see cref="SentenceTemplateInvalid"/>, <see cref="SubjectNotVerified"/>) use that exact value, so a preflight code and the
+/// <c>reason</c> a refused write logs and meters agree.
+/// </summary>
+public static class SignalWriteRefusal
+{
+    /// <summary>The request is null.</summary>
+    public const string RequestMissing = "request_missing";
+
+    /// <summary><c>SubjectEntityLogicalName</c> is blank or not a Dataverse logical name (<c>^[a-z][a-z0-9_]*$</c>).</summary>
+    public const string SubjectEntityInvalid = "subject_entity_invalid";
+
+    /// <summary><c>SubjectId</c> is <see cref="Guid.Empty"/>.</summary>
+    public const string SubjectIdEmpty = "subject_id_empty";
+
+    /// <summary><c>PolicyCode</c> is blank (it is part of the dedupe key).</summary>
+    public const string PolicyCodeMissing = "policy_code_missing";
+
+    /// <summary><c>PolicyCode</c> exceeds <c>sprk_signal.sprk_policycode</c>'s 50 characters.</summary>
+    public const string PolicyCodeTooLong = "policy_code_too_long";
+
+    /// <summary><c>ShortHeadline</c> is blank (<c>sprk_name</c> is NOT NULL).</summary>
+    public const string HeadlineMissing = "headline_missing";
+
+    /// <summary><c>ShortHeadline</c> exceeds <c>sprk_signal.sprk_name</c>'s 200 characters.</summary>
+    public const string HeadlineTooLong = "headline_too_long";
+
+    /// <summary><c>Lane</c> is not a <c>sprk_signal.sprk_lane</c> option value.</summary>
+    public const string LaneInvalid = "lane_invalid";
+
+    /// <summary><c>Severity</c> is set and is not a <c>sprk_signal.sprk_severity</c> option value.</summary>
+    public const string SeverityInvalid = "severity_invalid";
+
+    /// <summary><c>Episode</c> is not a whole number from 1 (D-13).</summary>
+    public const string EpisodeInvalid = "episode_invalid";
+
+    /// <summary><c>MessageTemplate</c> is null or blank.</summary>
+    public const string TemplateMissing = "template_missing";
+
+    /// <summary><c>FactValues</c> is null.</summary>
+    public const string FactValuesMissing = "fact_values_missing";
+
+    /// <summary>The template cannot be rendered strictly from the fact snapshot (a malformed placeholder, a token that is not a key, a
+    /// null fact, or a leftover placeholder; §0.3). The value of <see cref="OntologyWriterFailureReason.SentenceTemplateInvalid"/>.</summary>
+    public const string SentenceTemplateInvalid = OntologyWriterFailureReason.SentenceTemplateInvalid;
+
+    /// <summary>The rendered sentence exceeds <c>sprk_signal.sprk_sentence</c>'s 2000 characters.</summary>
+    public const string SentenceTooLong = "sentence_too_long";
+
+    /// <summary>The subject table is not in <see cref="SignalWriter.VerifiedSubjects"/>. The value of
+    /// <see cref="OntologyWriterFailureReason.MatterDerivationUnverified"/>.</summary>
+    public const string SubjectNotVerified = OntologyWriterFailureReason.MatterDerivationUnverified;
 }
 
 /// <summary>
@@ -293,7 +367,7 @@ public sealed class SignalSentenceTemplateException : Exception
 /// emits stops matching the type the SpaarkeMaster solution declares.</para>
 /// <para><b>Core record (task 037; D-34, D-36, D-37, D-35).</b> <see cref="VerifiedSubjects"/> is the closed set of
 /// subjects the writer accepts (matter, communication, and the Do-lane event, To Do and work assignment); it is a
-/// subset of <see cref="RegardingLookupByEntity"/>'s 9 schema keys. The grouping CORE record (any type
+/// subset of <see cref="RegardingLookupByEntity"/>'s 10 schema keys. The grouping CORE record (any type
 /// <c>CoreAncestorResolver</c> knows) comes only from <c>CoreAncestorResolver.ResolveStampsAsync</c>: the subject itself
 /// for a core subject, its single stamp, or, for several stamps, the record the subject is directly filed under, then
 /// matter over project, else a refusal. It is written as <c>sprk_corerecordtype</c> (catalog row) +
@@ -354,7 +428,7 @@ public sealed partial class SignalWriter
         new[] { SeverityInfo, SeverityWarning, SeverityCritical }.ToFrozenSet();
 
     /// <summary>
-    /// The 9 entity-specific regarding lookups on <c>sprk_signal</c>: the shared regarding builder's own map for this host
+    /// The 10 entity-specific regarding lookups on <c>sprk_signal</c>: the shared regarding builder's own map for this host
     /// table (<c>TodoRegardingBuilder.RegardingLookupsByHostTable["sprk_signal"]</c>, task 141), not a copy. ADR-024: AT MOST
     /// ONE is populated per row.
     /// </summary>
@@ -378,16 +452,25 @@ public sealed partial class SignalWriter
     /// same agreement rule uac-r2 applies to an untyped pair (a lookup carrying the pair id). A later core-ancestor stamp in
     /// another <c>sprk_regarding*</c> column (task 144) carries a different id and so never matches.
     /// </remarks>
-    internal static string? SubjectEntityOf(Guid pairId, Func<string, Guid?> lookupIdOf)
+    internal static string? SubjectEntityOf(Guid pairId, Func<string, Guid?> lookupIdOf) =>
+        SubjectEntityOf(SignalEntity, pairId, lookupIdOf);
+
+    /// <summary>
+    /// UAC task 194b: <see cref="SubjectEntityOf(Guid, Func{string, Guid?})"/> for any host table of the shared regarding builder
+    /// (<c>TodoRegardingBuilder.RegardingLookupsByHostTable</c>): a Decision Record is filed under its subject by the same builder,
+    /// so the same agreement rule names it. <c>null</c> for a host table the builder does not file.
+    /// </summary>
+    internal static string? SubjectEntityOf(string hostTable, Guid pairId, Func<string, Guid?> lookupIdOf)
     {
         ArgumentNullException.ThrowIfNull(lookupIdOf);
-        if (pairId == Guid.Empty)
+        if (pairId == Guid.Empty
+            || !TodoRegardingBuilder.RegardingLookupsByHostTable.TryGetValue(hostTable ?? string.Empty, out var lookupByEntity))
         {
             return null;
         }
 
         string? subject = null;
-        foreach (var (entity, lookup) in RegardingLookupByEntity)
+        foreach (var (entity, lookup) in lookupByEntity)
         {
             if (lookupIdOf(lookup) != pairId)
             {
@@ -410,12 +493,17 @@ public sealed partial class SignalWriter
     /// <see cref="RegardingLookupByEntity"/>'s keys. Task 037 (D-16/D-36) adds the three Do-lane subjects to matter and
     /// communication. Task 025b (owner decision D-122) adds <c>sprk_project</c>: a Threshold rule on a project's spend, budget or
     /// utilization raises a Signal about the project, which is a core record and groups under itself like a matter.
-    /// <c>sprk_servicerequest</c> (and invoice, document) stay refused as a SUBJECT: no rule reads them in R1. Each subject's core
-    /// record comes from <see cref="CoreAncestorResolver"/>, never from a lookup walk here.
+    /// ebilling-r1 task 026 (FR-15, D-31) adds <c>sprk_invoice</c> and <c>sprk_billingevent</c> (the Invoice Line): a billing
+    /// finding is about an invoice or one of its lines. Their core record is the subject's OWN core lookup, derived by
+    /// <see cref="CoreAncestorResolver"/> (a line is never resolved through its invoice, D-75), and exactly one is required
+    /// (<see cref="RequireSingleInvoiceFamilyCore"/>). <c>sprk_servicerequest</c> and <c>sprk_document</c> stay refused as a
+    /// SUBJECT: no rule reads them in R1. Each subject's core record comes from <see cref="CoreAncestorResolver"/>, never from a
+    /// lookup walk here.
     /// </summary>
     public static readonly FrozenSet<string> VerifiedSubjects = new[]
     {
         "sprk_matter", "sprk_project", "sprk_communication", "sprk_event", "sprk_todo", "sprk_workassignment",
+        "sprk_invoice", "sprk_billingevent",
     }.ToFrozenSet(StringComparer.Ordinal);
 
     /// <summary>The subject column the Signal's <c>sprk_duedate</c> copies (task 037, D-27): an event's
@@ -484,45 +572,27 @@ public sealed partial class SignalWriter
     /// be rendered strictly from the detection-time snapshot (§0.3).</exception>
     public async Task<SignalWriteResult> WriteAsync(SignalWriteRequest request, CancellationToken ct = default)
     {
-        ArgumentNullException.ThrowIfNull(request);
-        var subjectEntity = RequireSubjectEntity(request.SubjectEntityLogicalName);
+        // Every check the writer makes before its first Dataverse call is ONE definition (CheckRequest), shared with PreflightRefusal.
+        // An argument refusal is thrown as it always was, unlogged (a caller bug). The two refusals the writer logs and meters
+        // (an unrenderable template, an unverified subject) are thrown inside the try, so the clauses below see them.
+        var refusal = CheckRequest(request, out var renderedSentence);
+        if (refusal is { Error: not (SignalSentenceTemplateException or SignalWriterEscalationException) })
+        {
+            throw refusal.Error;
+        }
 
-        if (request.SubjectId == Guid.Empty)
-            throw new ArgumentException("SubjectId must not be Guid.Empty.", nameof(request));
-        if (string.IsNullOrWhiteSpace(request.PolicyCode))
-            throw new ArgumentException("PolicyCode is required (part of the dedupe key).", nameof(request));
-        if (request.PolicyCode.Length > PolicyCodeMaxLength)
-            throw new ArgumentException(
-                $"PolicyCode is {request.PolicyCode.Length} characters; sprk_signal.sprk_policycode's limit is {PolicyCodeMaxLength}.",
-                nameof(request));
-        if (string.IsNullOrWhiteSpace(request.ShortHeadline))
-            throw new ArgumentException("ShortHeadline is required (sprk_name is NOT NULL on sprk_signal).", nameof(request));
-        if (request.ShortHeadline.Length > NameMaxLength)
-            throw new ArgumentException(
-                $"ShortHeadline is {request.ShortHeadline.Length} characters; sprk_signal.sprk_name's limit is {NameMaxLength}.",
-                nameof(request));
-        if (!ValidLanes.Contains(request.Lane))
-            throw new ArgumentException($"Lane {request.Lane} is not a valid sprk_signal.sprk_lane option value.", nameof(request));
-        if (request.Severity is { } sev && !ValidSeverities.Contains(sev))
-            throw new ArgumentException($"Severity {sev} is not a valid sprk_signal.sprk_severity option value.", nameof(request));
-        if (request.Episode < 1)
-            throw new ArgumentException($"Episode {request.Episode} is not a whole number from 1 (D-13).", nameof(request));
-
+        var subjectEntity = request.SubjectEntityLogicalName;
         var cleanSubjectId = request.SubjectId.ToString("D", CultureInfo.InvariantCulture).ToLowerInvariant();
         Guid? ownerTeamId = null; // named on the privilege refusal below: the team whose role lacks Read on sprk_signal
 
         try
         {
-            // R2 (second independent review): rendering moved INSIDE the try so a SignalSentenceTemplateException
-            // is caught by the dedicated clause below and logged/metered like every other refusal -- the owner's
-            // no-silent-failure rule does not carve out an exception for a template authoring mistake.
-            var sentence = RenderSentence(request.MessageTemplate, request.FactValues);
-            if (sentence.Length > SentenceMaxLength)
+            if (refusal is not null)
             {
-                throw new ArgumentException(
-                    $"The rendered sentence is {sentence.Length} characters; sprk_signal.sprk_sentence's limit is {SentenceMaxLength}.",
-                    nameof(request));
+                throw refusal.Error;
             }
+
+            var sentence = renderedSentence!;
 
             var core = await ResolveCoreAsync(subjectEntity, request.SubjectId, request.Lane, ct).ConfigureAwait(false);
             var matterId = core.Entity == "sprk_matter" ? core.Id : Guid.Empty;
@@ -927,6 +997,154 @@ public sealed partial class SignalWriter
         }
     }
 
+    private static readonly string[] AutomatedCloseColumns =
+        ["sprk_signalstatus", "sprk_resolutiontype", "sprk_resolvedon", "sprk_decisionrecord", "versionnumber"];
+
+    /// <summary>
+    /// ebilling-r1 task 049 (D-122): closes ONE Signal as <see cref="ResolutionActed"/>, resolved by the Decision Record
+    /// <paramref name="decisionRecordId"/> of a billing decision: an AUTOMATED one (the automatic rejection of an invoice resolves every open
+    /// Signal on it), or, with <paramref name="decidedByUserId"/>, a HUMAN one (a line accept / reduce / disallow, task 100; an override or a
+    /// return of a blocked submission, task 105). A separate entry from <see cref="CloseAsync"/>, whose system-only guard stays (FR-16). The
+    /// writer (app identity) does the close, with no impersonation, so a human decision's caller is authorized BEFORE any write (AppendTo on
+    /// the core record and Write on each Signal's subject: the commit route's rule, <see cref="DecisionCallerRights"/>). An automated decider
+    /// has no person, so <c>sprk_resolvedby</c> is written only when <paramref name="decidedByUserId"/> is given (none is invented);
+    /// <c>sprk_resolutionnotes</c> is never written.
+    /// <para><b>Reads, then decides</b> (the commit route's rule, as <c>DecisionCommitService.CloseSignalAsync</c> applies it):
+    /// already Resolved and naming this record → <see cref="SignalAutomatedCloseOutcome.AlreadyClosedByThisRecord"/>, no write; Open or
+    /// Acknowledged → closed; closed by the SYSTEM (ConditionCleared, Superseded, PolicyRetired) at or after <paramref name="setReadAtUtc"/>,
+    /// the moment the caller read the set it decided against, and linked to no Decision Record → re-closed, so the Signal and the record
+    /// agree; anything else (a person's Acted or Dismissed, another record, a system close before the set was read, a system close already
+    /// linked to a record) → <see cref="SignalAutomatedCloseOutcome.LeftAsIs"/> and one
+    /// Information line (ids and the policy code only).</para>
+    /// <para><b>One write</b>, conditional on the row version just read: status Resolved, resolution Acted, <c>sprk_resolvedon</c> and
+    /// <c>sprk_lastevaluated</c> the same instant (D-120), <c>sprk_decisionrecord</c>, and <c>sprk_resolvedby</c> (the systemuser
+    /// <paramref name="decidedByUserId"/>) only when it is given. A version mismatch re-reads once and decides again; a
+    /// second one is <see cref="SignalAutomatedCloseOutcome.ChangedSinceRead"/>. A Signal that no longer exists (ObjectDoesNotExist) is
+    /// rethrown unchanged, logged at Debug only and not metered: the caller treats it as "nothing to close". Any other failure is logged
+    /// at Error (<see cref="OntologyWriterEvents.WriteRefused"/>), metered and rethrown, as <see cref="CloseAsync"/> does.</para>
+    /// </summary>
+    /// <param name="decidedByUserId">The deciding person's <c>systemuserid</c> for a human decision, resolved by the caller from the
+    /// on-behalf-of identity (never from request input); null for an automated decision, which writes no <c>sprk_resolvedby</c>.</param>
+    /// <exception cref="ArgumentException">An id is empty (<paramref name="decidedByUserId"/> included, when given), or
+    /// <paramref name="setReadAtUtc"/> is not UTC.</exception>
+    internal async Task<SignalAutomatedCloseOutcome> CloseActedByDecisionAsync(
+        Guid signalId, Guid decisionRecordId, DateTime setReadAtUtc, string policyCode, Guid? decidedByUserId = null, CancellationToken ct = default)
+    {
+        if (signalId == Guid.Empty)
+            throw new ArgumentException("signalId must not be Guid.Empty.", nameof(signalId));
+        if (decisionRecordId == Guid.Empty)
+            throw new ArgumentException("decisionRecordId must not be Guid.Empty.", nameof(decisionRecordId));
+        if (setReadAtUtc.Kind != DateTimeKind.Utc)
+            throw new ArgumentException("setReadAtUtc must be a UTC time (DateTimeKind.Utc).", nameof(setReadAtUtc));
+        if (decidedByUserId == Guid.Empty)
+            throw new ArgumentException("decidedByUserId must be null (an automated decision) or a user id, never Guid.Empty.", nameof(decidedByUserId));
+
+        try
+        {
+            for (var attempt = 0; ; attempt++)
+            {
+                var row = await _writerClient.RetrieveAsync(SignalEntity, signalId, AutomatedCloseColumns, ct).ConfigureAwait(false);
+                var status = row.GetAttributeValue<OptionSetValue>("sprk_signalstatus")?.Value;
+                var resolution = row.GetAttributeValue<OptionSetValue>("sprk_resolutiontype")?.Value;
+                if (status == SignalStatusResolved && row.GetAttributeValue<EntityReference>("sprk_decisionrecord")?.Id == decisionRecordId)
+                {
+                    return SignalAutomatedCloseOutcome.AlreadyClosedByThisRecord;
+                }
+
+                var open = status is SignalStatusOpen or SignalStatusAcknowledged;
+                // K1 (ontology-r1 review of #1911): a system close that already carries a Decision Record link (another record's) is not
+                // re-closed: the write would replace that link. Only a record-free system close is ours to re-close.
+                var systemClosedSinceRead = status == SignalStatusResolved
+                    && row.GetAttributeValue<EntityReference>("sprk_decisionrecord") is null
+                    && resolution is { } r && SystemResolutions.Contains(r)
+                    && row.GetAttributeValue<DateTime?>("sprk_resolvedon") is { } resolvedOn
+                    && DateTime.SpecifyKind(resolvedOn, DateTimeKind.Utc) >= setReadAtUtc;
+                if (!open && !systemClosedSinceRead)
+                {
+                    _logger.LogInformation(
+                        "Signal {SignalId} (policy {PolicyCode}) was resolved otherwise before Decision Record {RecordId} could close it; left as it is.",
+                        signalId, policyCode, decisionRecordId);
+                    return SignalAutomatedCloseOutcome.LeftAsIs;
+                }
+
+                var version = row.RowVersion ?? (row.GetAttributeValue<long?>("versionnumber") is { } v ? v.ToString(CultureInfo.InvariantCulture) : null);
+                if (string.IsNullOrWhiteSpace(version))
+                {
+                    throw new InvalidOperationException($"Signal {signalId:D} was read without a row version, so it cannot be closed conditionally.");
+                }
+
+                var nowUtc = _timeProvider.GetUtcNow().UtcDateTime;
+                var fields = new Dictionary<string, object>
+                {
+                    ["sprk_signalstatus"] = new OptionSetValue(SignalStatusResolved),
+                    ["sprk_resolutiontype"] = new OptionSetValue(ResolutionActed),
+                    ["sprk_resolvedon"] = nowUtc,
+                    ["sprk_lastevaluated"] = nowUtc,
+                    ["sprk_decisionrecord"] = new EntityReference("sprk_decisionrecord", decisionRecordId),
+                };
+                if (decidedByUserId is { } person)
+                {
+                    // A human decision names its decider in the SAME conditional write; an automated one never does.
+                    fields["sprk_resolvedby"] = new EntityReference("systemuser", person);
+                }
+
+                try
+                {
+                    await _writerClient.UpdateIfRowVersionMatchesAsync(SignalEntity, signalId, version, fields, ct).ConfigureAwait(false);
+                    _logger.LogInformation(
+                        "Signal {SignalId} closed as Acted for policy {PolicyCode} by {Decider} Decision Record {RecordId}{Reclosed}.",
+                        signalId, policyCode, decidedByUserId is null ? "automated" : "human", decisionRecordId,
+                        open ? string.Empty : " (re-closed after a system resolution)");
+                    return SignalAutomatedCloseOutcome.Closed;
+                }
+                catch (Exception ex) when (IsConcurrencyVersionMismatch(ex))
+                {
+                    if (attempt > 0)
+                    {
+                        _logger.LogInformation(
+                            "Signal {SignalId} kept changing while Decision Record {RecordId} closed it; NOT closed (policy {PolicyCode}). The caller retries.",
+                            signalId, decisionRecordId, policyCode);
+                        return SignalAutomatedCloseOutcome.ChangedSinceRead;
+                    }
+                }
+            }
+        }
+        catch (Exception ex) when (IsSignalGone(ex))
+        {
+            // The Signal row no longer exists (deleted after the Decision Record listed it). That is not a write failure: the caller
+            // treats it as "nothing to close" (one Warning, then on), so it is neither logged at Error nor metered as signal_close_failed.
+            // Rethrown unchanged so the caller keeps its behaviour.
+            _logger.LogDebug(
+                "Signal {SignalId} (policy {PolicyCode}) no longer exists; Decision Record {RecordId} has nothing to close. Rethrown for the caller.",
+                signalId, policyCode, decisionRecordId);
+            throw;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            var reason = IsDataverseAccessDenied(ex) ? OntologyWriterFailureReason.DataverseAccessDenied : OntologyWriterFailureReason.SignalCloseFailed;
+            _logger.LogError(OntologyWriterEvents.WriteRefused, ex,
+                "Signal close refused for policy {PolicyCode}, signal {SignalId} (reason={Reason}).", policyCode, signalId, reason);
+            OntologyWriterTelemetry.RecordFailure(reason);
+            throw;
+        }
+    }
+
+    /// <summary>Whether a Dataverse failure means the row does not exist (<c>0x80040217 ObjectDoesNotExist</c>) anywhere in the inner
+    /// chain: the same test the caller applies (<c>InvoiceSubmissionAfterSteps.IsRecordNotFound</c>), so every exception the caller treats
+    /// as "the Signal is gone" is also one this writer does not report as a failure.</summary>
+    private static bool IsSignalGone(Exception ex)
+    {
+        for (var e = ex; e is not null; e = e.InnerException)
+        {
+            if (Sprk.Bff.Api.Infrastructure.Dataverse.RecordContainerResolver.IsRecordNotFound(e))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     /// <summary>
     /// Task 153 (D-145b): links a Do-lane Signal the job closed as ConditionCleared to its Routine Decision Record: <c>sprk_decisionrecord</c>
     /// and, when the record names the person who did the work, <c>sprk_resolvedby</c>. Nothing else. Reads the Signal first and writes only
@@ -1205,16 +1423,13 @@ public sealed partial class SignalWriter
     /// </summary>
     private async Task<CorePlan> ResolveCoreAsync(string subjectEntity, Guid subjectId, int lane, CancellationToken ct)
     {
-        if (!VerifiedSubjects.Contains(subjectEntity))
+        if (UnverifiedSubject(subjectEntity) is { } unverified)
         {
-            throw new SignalWriterEscalationException(
-                $"Cannot group a Signal for subject type '{subjectEntity}': it is not a verified subject " +
-                "(SignalWriter.VerifiedSubjects). Refusing to write a Signal with no derivable core record " +
-                "(task 030/037 escalation trigger). Widening this set is a schema check plus a code change with review.",
-                OntologyWriterFailureReason.MatterDerivationUnverified);
+            throw unverified;
         }
 
         var result = await _coreAncestors.ResolveStampsAsync(subjectEntity, subjectId, ct).ConfigureAwait(false);
+        RequireSingleInvoiceFamilyCore(subjectEntity, subjectId, result);
         switch (result.Status)
         {
             case CoreAncestorStatus.CoreTarget:
@@ -1226,9 +1441,17 @@ public sealed partial class SignalWriter
                 return new CorePlan(stamp.EntityType, stamp.RecordId, result.Stamps);
 
             case CoreAncestorStatus.Error:
-                throw new SignalWriterEscalationException(
-                    $"Cannot derive the core record of {subjectEntity} {subjectId:D}: {result.Error}",
-                    OntologyWriterFailureReason.CoreRecordUnresolved);
+                // ebilling-r1 task 049 (ontology F1-3 re-check F2): a FAULT (a throttle, a 503, a metadata or row read that failed;
+                // CoreAncestorResult.IsPermanent false) is not a refusal of the subject, so the escalation wraps it. A caller that
+                // classifies by the inner exception (InvoiceSubmissionAfterSteps.PermanentWriteRefusal) then retries instead of
+                // dropping the Signal for good. A permanent Error (the row is gone, it names two roots) carries none. The reason,
+                // the log and the metric are the same either way; the evaluator, the re-evaluation job and WriteAsync's catch read
+                // only the type and Reason.
+                var unresolvedMessage = $"Cannot derive the core record of {subjectEntity} {subjectId:D}: {result.Error}";
+                throw result.IsPermanent
+                    ? new SignalWriterEscalationException(unresolvedMessage, OntologyWriterFailureReason.CoreRecordUnresolved)
+                    : new SignalWriterEscalationException(
+                        unresolvedMessage, OntologyWriterFailureReason.CoreRecordUnresolved, new InvalidOperationException(result.Error));
 
             case CoreAncestorStatus.NoAncestor:
                 return NoCorePlan(subjectEntity, subjectId, lane);
@@ -1241,6 +1464,70 @@ public sealed partial class SignalWriter
                     "this writer does not map to a core record. Refusing to write.",
                     OntologyWriterFailureReason.CoreRecordUnresolved);
         }
+    }
+
+    /// <summary>
+    /// ebilling-r1 task 026 (FR-05, FR-15, D-75): an invoice or invoice-line subject (a table of
+    /// <see cref="InvoiceFamilyCoreRecordGuard.CoreRecordLookups"/>) is filed under exactly ONE core record, its own. The
+    /// resolver's answer for it is used only when it names one: no core record is refused here, never written as a no-core Do
+    /// item (D-35), and more than one is refused, never picked by D-37's matter-over-project rule. "More than one" arrives two
+    /// ways, and both give <see cref="OntologyWriterFailureReason.CoreRecordAmbiguous"/>: an invoice naming several core
+    /// records is <see cref="CoreAncestorStatus.Derived"/> with several stamps; a line naming several is a permanent
+    /// <see cref="CoreAncestorStatus.Error"/> with <see cref="CoreAncestorRefusalKind.MultipleRoots"/> (the resolver refuses a
+    /// line, <see cref="CoreAncestorResolver.SingleRootIntermediates"/>), as is either one naming two records of one table. A
+    /// subject that no longer exists (<see cref="CoreAncestorRefusalKind.NotFound"/>) or a fault
+    /// (<see cref="CoreAncestorRefusalKind.Transient"/>) is left to the caller's Error case
+    /// (<see cref="OntologyWriterFailureReason.CoreRecordUnresolved"/>), as before. Other subjects are untouched.
+    /// </summary>
+    /// <exception cref="SignalWriterEscalationException">The invoice-family subject names no core record
+    /// (<see cref="OntologyWriterFailureReason.CoreRecordUnresolved"/>) or more than one
+    /// (<see cref="OntologyWriterFailureReason.CoreRecordAmbiguous"/>).</exception>
+    internal static void RequireSingleInvoiceFamilyCore(string subjectEntity, Guid subjectId, CoreAncestorResult result)
+    {
+        ArgumentNullException.ThrowIfNull(result);
+        if (!InvoiceFamilyCoreRecordGuard.CoreRecordLookups.ContainsKey(subjectEntity))
+        {
+            return;
+        }
+
+        if (result.Status == CoreAncestorStatus.NoAncestor)
+        {
+            throw new SignalWriterEscalationException(
+                $"{subjectEntity} {subjectId:D} names no core record of its own (FR-05); an invoice or invoice-line Signal is " +
+                "never written without one. Refusing to write.",
+                OntologyWriterFailureReason.CoreRecordUnresolved);
+        }
+
+        if (result.Status == CoreAncestorStatus.Derived && result.Stamps.Count != 1)
+        {
+            throw new SignalWriterEscalationException(
+                $"{subjectEntity} {subjectId:D} names {result.Stamps.Count} core records " +
+                $"({string.Join(", ", result.Stamps.Select(s => s.EntityType))}); FR-05 allows exactly one, so none is picked.",
+                OntologyWriterFailureReason.CoreRecordAmbiguous);
+        }
+
+        if (result.Status == CoreAncestorStatus.Error && result.IsPermanent
+            && result.RefusalKind == CoreAncestorRefusalKind.MultipleRoots)
+        {
+            throw new SignalWriterEscalationException(
+                $"{subjectEntity} {subjectId:D} names more than one core record ({result.Error}); FR-05 allows exactly one, so " +
+                "none is picked.",
+                OntologyWriterFailureReason.CoreRecordAmbiguous);
+        }
+    }
+
+    /// <summary>
+    /// UAC task 194b fix round (F3): the ownership question this writer asks for a Signal about the subject — its core record
+    /// derived as a write derives it (<see cref="ResolveCoreAsync"/>, <see cref="PickStampAsync"/> included), the list
+    /// <see cref="OwnershipContextOf"/> builds — and the owner it resolves (<see cref="ResolveOwnerAsync"/>), with no write. The
+    /// parity seam: tests compare it with the reconciler's question for the existing row.
+    /// </summary>
+    internal async Task<(RecordOwnershipContext Question, RecordOwnerResolution Owner)> OwnershipOfAsync(
+        string subjectEntity, Guid subjectId, int lane, CancellationToken ct)
+    {
+        var core = await ResolveCoreAsync(subjectEntity, subjectId, lane, ct).ConfigureAwait(false);
+        var question = OwnershipContextOf(core.Entity, core.Id, core.Stamps, subjectEntity, subjectId, requestedBy: null);
+        return (question, await ResolveOwnerAsync(core, subjectEntity, subjectId, requestedBy: null, ct).ConfigureAwait(false));
     }
 
     /// <summary>True when the existing Signal's core record (or, for a no-core Signal, its owner team) is not the one planned
@@ -1334,7 +1621,8 @@ public sealed partial class SignalWriter
 
         parents.Add(new RecordOwnershipParent(subjectEntity, subjectId));
         parents.AddRange(stamps.Select(stamp => new RecordOwnershipParent(stamp.EntityType, stamp.RecordId)));
-        return RecordOwnershipContext.ForParents(parents) with { RequestedBy = requestedBy };
+        // UAC task 194b fix round R (B3): the writer's own order IS sprk_signal's rule (core, subject, stamps) — the closed opt-out.
+        return RecordOwnershipContext.ForParentsInWriterOrder(parents) with { RequestedBy = requestedBy };
     }
 
     /// <summary>
@@ -1664,16 +1952,115 @@ public sealed partial class SignalWriter
     /// <summary>Dividing by 1.000...0 (28 places) drops a decimal's trailing zeros without changing its value.</summary>
     private static decimal Normalize(decimal value) => value / 1.0000000000000000000000000000m;
 
-    private static string RequireSubjectEntity(string? subjectEntityLogicalName)
-    {
-        if (string.IsNullOrWhiteSpace(subjectEntityLogicalName) || !LogicalName().IsMatch(subjectEntityLogicalName))
-        {
-            throw new ArgumentException(
+    private static string RequireSubjectEntity(string? subjectEntityLogicalName) =>
+        InvalidSubjectEntity(subjectEntityLogicalName) is { } invalid ? throw invalid : subjectEntityLogicalName!;
+
+    /// <summary>The refusal for a subject name that is not a Dataverse logical name, or null when it is one. The one definition
+    /// <see cref="RequireSubjectEntity"/> throws and <see cref="CheckRequest"/> returns.</summary>
+    private static ArgumentException? InvalidSubjectEntity(string? subjectEntityLogicalName) =>
+        string.IsNullOrWhiteSpace(subjectEntityLogicalName) || !LogicalName().IsMatch(subjectEntityLogicalName)
+            ? new ArgumentException(
                 $"SubjectEntityLogicalName '{subjectEntityLogicalName}' is not a Dataverse logical name " +
-                "(expected ^[a-z][a-z0-9_]*$).", nameof(subjectEntityLogicalName));
+                "(expected ^[a-z][a-z0-9_]*$).", nameof(subjectEntityLogicalName))
+            : null;
+
+    /// <summary>The escalation for a subject table that is not in <see cref="VerifiedSubjects"/>, or null when it is. The one definition
+    /// <see cref="ResolveCoreAsync"/> throws and <see cref="CheckRequest"/> returns.</summary>
+    private static SignalWriterEscalationException? UnverifiedSubject(string subjectEntity) =>
+        VerifiedSubjects.Contains(subjectEntity)
+            ? null
+            : new SignalWriterEscalationException(
+                $"Cannot group a Signal for subject type '{subjectEntity}': it is not a verified subject " +
+                "(SignalWriter.VerifiedSubjects). Refusing to write a Signal with no derivable core record " +
+                "(task 030/037 escalation trigger). Widening this set is a schema check plus a code change with review.",
+                OntologyWriterFailureReason.MatterDerivationUnverified);
+
+    /// <summary>One request refusal: the stable <see cref="SignalWriteRefusal"/> code and the exception <see cref="WriteAsync"/> throws for it.</summary>
+    private sealed record RequestRefusal(string Code, Exception Error);
+
+    /// <summary>
+    /// Whether <see cref="WriteAsync"/> would refuse <paramref name="request"/> before any Dataverse call: null when it would not,
+    /// otherwise the stable <see cref="SignalWriteRefusal"/> code. Pure: no I/O, no logging, no metering, never throws for an invalid
+    /// request (an invalid request is the answer). A caller that must not act on a Signal the writer would refuse (an automated
+    /// decision) calls this instead of copying the checks.
+    /// </summary>
+    /// <remarks>
+    /// It runs <see cref="CheckRequest"/>, the SAME method <see cref="WriteAsync"/> runs first, so the two cannot drift. Checked, in
+    /// <see cref="WriteAsync"/>'s order: the request is not null; the subject name is a logical name; <c>SubjectId</c> is set;
+    /// <c>PolicyCode</c> is set and at most 50 characters; <c>ShortHeadline</c> is set and at most 200; <c>Lane</c>, <c>Severity</c>
+    /// and <c>Episode</c> are valid; the template is set, <c>FactValues</c> is set, the template renders strictly from the snapshot
+    /// (§0.3), and the rendered sentence is at most 2000 characters; the subject table is in <see cref="VerifiedSubjects"/>.
+    /// <para><b>Not checked here, because each needs I/O:</b> the core record is derivable and unambiguous (the core-ancestor
+    /// resolver reads Dataverse); the subject has an owner (the ownership resolver); the core record's table has a catalog row; the
+    /// subject lookup and regarding pair can be built (the catalog read); the owner reads back on the created row; the create or
+    /// reconcile succeeds. A request this returns null for can still be refused by <see cref="WriteAsync"/> for one of those.</para>
+    /// </remarks>
+    internal static string? PreflightRefusal(SignalWriteRequest request) => CheckRequest(request, out _)?.Code;
+
+    /// <summary>
+    /// The writer's I/O-free request checks, the ONE definition <see cref="WriteAsync"/> throws from and
+    /// <see cref="PreflightRefusal"/> maps to a code. Returns the first failing check in order, or null. On null,
+    /// <paramref name="renderedSentence"/> is the rendered <c>sprk_sentence</c> (so the write does not render twice).
+    /// </summary>
+    private static RequestRefusal? CheckRequest(SignalWriteRequest? request, out string? renderedSentence)
+    {
+        renderedSentence = null;
+        if (request is null)
+            return new(SignalWriteRefusal.RequestMissing, new ArgumentNullException(nameof(request)));
+        if (InvalidSubjectEntity(request.SubjectEntityLogicalName) is { } invalidSubject)
+            return new(SignalWriteRefusal.SubjectEntityInvalid, invalidSubject);
+        if (request.SubjectId == Guid.Empty)
+            return new(SignalWriteRefusal.SubjectIdEmpty, new ArgumentException("SubjectId must not be Guid.Empty.", nameof(request)));
+        if (string.IsNullOrWhiteSpace(request.PolicyCode))
+            return new(SignalWriteRefusal.PolicyCodeMissing,
+                new ArgumentException("PolicyCode is required (part of the dedupe key).", nameof(request)));
+        if (request.PolicyCode.Length > PolicyCodeMaxLength)
+            return new(SignalWriteRefusal.PolicyCodeTooLong, new ArgumentException(
+                $"PolicyCode is {request.PolicyCode.Length} characters; sprk_signal.sprk_policycode's limit is {PolicyCodeMaxLength}.",
+                nameof(request)));
+        if (string.IsNullOrWhiteSpace(request.ShortHeadline))
+            return new(SignalWriteRefusal.HeadlineMissing,
+                new ArgumentException("ShortHeadline is required (sprk_name is NOT NULL on sprk_signal).", nameof(request)));
+        if (request.ShortHeadline.Length > NameMaxLength)
+            return new(SignalWriteRefusal.HeadlineTooLong, new ArgumentException(
+                $"ShortHeadline is {request.ShortHeadline.Length} characters; sprk_signal.sprk_name's limit is {NameMaxLength}.",
+                nameof(request)));
+        if (!ValidLanes.Contains(request.Lane))
+            return new(SignalWriteRefusal.LaneInvalid,
+                new ArgumentException($"Lane {request.Lane} is not a valid sprk_signal.sprk_lane option value.", nameof(request)));
+        if (request.Severity is { } sev && !ValidSeverities.Contains(sev))
+            return new(SignalWriteRefusal.SeverityInvalid,
+                new ArgumentException($"Severity {sev} is not a valid sprk_signal.sprk_severity option value.", nameof(request)));
+        if (request.Episode < 1)
+            return new(SignalWriteRefusal.EpisodeInvalid,
+                new ArgumentException($"Episode {request.Episode} is not a whole number from 1 (D-13).", nameof(request)));
+
+        // R2 (second independent review): an unrenderable template is a logged, metered refusal in WriteAsync, so it is returned here
+        // as the exception the write's catch clause reads. RenderSentence's own blank-template / null-snapshot guards are argument
+        // errors (ParamName names which).
+        string sentence;
+        try
+        {
+            sentence = RenderSentence(request.MessageTemplate, request.FactValues);
+        }
+        catch (SignalSentenceTemplateException ex)
+        {
+            return new(SignalWriteRefusal.SentenceTemplateInvalid, ex);
+        }
+        catch (ArgumentException ex)
+        {
+            return new(ex.ParamName == "factValues" ? SignalWriteRefusal.FactValuesMissing : SignalWriteRefusal.TemplateMissing, ex);
         }
 
-        return subjectEntityLogicalName;
+        if (sentence.Length > SentenceMaxLength)
+            return new(SignalWriteRefusal.SentenceTooLong, new ArgumentException(
+                $"The rendered sentence is {sentence.Length} characters; sprk_signal.sprk_sentence's limit is {SentenceMaxLength}.",
+                nameof(request)));
+        if (UnverifiedSubject(request.SubjectEntityLogicalName) is { } unverified)
+            return new(SignalWriteRefusal.SubjectNotVerified, unverified);
+
+        renderedSentence = sentence;
+        return null;
     }
 
     [GeneratedRegex(@"\{\{\s*([A-Za-z0-9_.]+)\s*\}\}")]

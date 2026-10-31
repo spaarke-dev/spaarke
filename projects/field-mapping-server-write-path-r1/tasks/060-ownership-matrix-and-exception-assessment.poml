@@ -1,0 +1,94 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="060" project="field-mapping-server-write-path-r1">
+  <metadata>
+    <title>Per-table ownership matrix next to I-6 + assessment of the notification outbox and DecisionRecordWriter communication-owner exceptions (FR-26)</title>
+    <phase>6 W6 Standard, guards, docs, retirement</phase>
+    <gate>033+034 complete</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Documentation task with a security-relevant assessment; no code. Verified against the registry by reading, not by tests.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Judging whether each exception is justified by access rationale is a security-architecture call.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>W6</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>033, 034</deps>
+    <tags>docs, security, ownership, architecture</tags>
+    <estimated-effort>5-7 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Add a per-table ownership matrix next to invariant I-6 in `DATAVERSE-WRITE-PATH-ARCHITECTURE.md`. For every table in the rules registry give the owner rule, the role depths that reach it (Spaarke Basic User, Core User, Office Add In User, AI Analysis User) and each exception with its access rationale. Assess and record the notification outbox and the `DecisionRecordWriter` communication-owner case.</prompt>
+  <role>SPAARKE platform architect, Dataverse security model, record ownership.</role>
+  <goal>Every table in the registry has a matrix row, no exception lacks a rationale, and the two open exceptions have a recorded keep/convert decision with reasons (any conversion becomes a filed follow-up or an FR-21 note).</goal>
+
+  <context>
+    <background>spec.md FR-26 and Unresolved Q3 (exception assessment). The registry (task 012, RecordTableRules.cs) is the source of truth for which tables exist and which carry ownership exceptions; tasks 033/034 turned existing exceptions into named registry rules. DATAVERSE-WRITE-PATH-ARCHITECTURE.md is ALSO edited by PR #1911 and UAC-r2 PR #2110: be merge-aware (re-read the file on the latest master merge just before editing, keep the edit to a self-contained section, run /conflict-check, and rebase rather than overwrite).</background>
+    <relevant-files>
+      <file role="modify">docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md (add the matrix next to I-6; touch nothing else in the file)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/RecordCreation/RecordTableRules.cs (task 012 registry; every row here needs a matrix row)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Dataverse/RecordOwnershipResolver.cs (owner rule behaviour)</file>
+      <file role="canonical-reference">grep for DecisionRecordWriter and the notification outbox writer in src/server (communication-owner case and outbox owner)</file>
+      <file role="canonical-reference">docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md I-6 and role-definition tables; role depths from UAC-r2 role definitions (grep for Spaarke Basic User, Core User, Office Add In User, AI Analysis User)</file>
+      <file role="modify">projects/field-mapping-server-write-path-r1/notes/decisions.md (record the exception assessment)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="033" status="pending">System creators routed; their ownership exceptions named in the registry.</dependency>
+      <dependency task="034" status="pending">Inbound ingestion routed; unfiled-communication exceptions named.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Scope: matrix content. One row per registry table with: owner rule, role depths that reach it, exceptions, rationale, registry rule name. Derive rows from the registry, not from memory; a row naming a table absent from the registry, or a registry table without a row, is a defect.</constraint>
+    <constraint source="ADR-002">Scope: invariants. Document the server as the single owner of ownership; do not propose a plugin, flow or business rule for any exception.</constraint>
+    <constraint source="project">Scope: assessment. For the notification outbox and the DecisionRecordWriter communication-owner case, state keep-as-exception (with access rationale) or convert-to-standard (file a follow-up via /project-defer-issue-tracking); do not change code in this task.</constraint>
+    <constraint source="project (merge-aware)">Scope: shared doc. PR #1911 and UAC-r2 PR #2110 also edit this document. Re-read the latest merged file immediately before editing, confine changes to the matrix section and I-6 pointer, and run /conflict-check; never overwrite their sections.</constraint>
+    <constraint source="NFR-01">Scope: security. Where role depths are uncertain, mark "unverified" and escalate rather than assert.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Record ownership standard; role depths; write-path invariants</topic>
+    <files>
+      <file>.claude/adr/ADR-002-thin-plugins.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/constraints/data.md</file>
+      <file>docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md</file>
+      <file>docs/architecture/SPAARKE-FIELD-MAPPING-FRAMEWORK.md</file>
+      <file>.claude/skills/conflict-check/SKILL.md</file>
+    </files>
+    <patterns>
+      <pattern name="relationship-navigation" location=".claude/patterns/dataverse/relationship-navigation.md">Owning team / BU navigation for owner rules.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare STANDARD rigor; read spec FR-26, the registry, I-6 and the role tables; run /conflict-check for the doc.</step>
+    <step order="1">Enumerate registry tables; for each, read the owner rule and exceptions from the registry and role depths from the role definitions.</step>
+    <step order="2">Assess the notification outbox and the DecisionRecordWriter communication-owner case against access rationale; record the decision and reasons in the matrix and in decisions.md.</step>
+    <step order="3">Edit the doc (matrix next to I-6) on top of the latest merge; self-check row count equals registry table count.</step>
+    <step order="4">Update TASK-INDEX.md: set this task's status to ✅.</step>
+    <step order="5">Document any deviation in projects/field-mapping-server-write-path-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If an exception cannot be justified by an access rationale (a record would be owned by a user or app that should not see it), STOP and escalate per CLAUDE.md §6 instead of documenting it as accepted.</trigger>
+    <trigger>If PR #1911 or #2110 restructures I-6 so the matrix has no stable anchor, stop and ask where to place it.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="docs">docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md (ownership matrix)</output>
+    <output type="docs">projects/field-mapping-server-write-path-r1/notes/decisions.md (exception assessment)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The matrix has one row per table in the rules registry (count matches; list reconciled in the task notes), each with owner rule, role depths (Spaarke Basic User, Core User, Office Add In User, AI Analysis User) and registry rule name.</criterion>
+    <criterion testable="true">Every exception row carries an access rationale; the notification outbox and the DecisionRecordWriter communication-owner case each have a recorded keep/convert decision with reasons.</criterion>
+    <criterion testable="true">Negative: no table appears in the matrix that is absent from the registry, and no row has an empty rationale cell (checked and noted).</criterion>
+    <criterion testable="true">The doc edit is a confined addition on the latest master merge; no content from PR #1911 or #2110 was removed or reworded.</criterion>
+    <criterion testable="true">Docs merged to the working branch cleanly (no conflict markers) and the doc renders; follow-up issues for any convert decision are filed.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-26, Unresolved Q3. Feeds task 062 (I-6 update) and may add exceptions to FR-21.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

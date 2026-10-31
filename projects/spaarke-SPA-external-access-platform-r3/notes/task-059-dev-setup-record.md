@@ -346,6 +346,12 @@ R3 shows **`spaarke-bff-api-prod` with tenant-wide consent to the DEV BFF app** 
   2. `gh workflow run deploy-external-spa.yml --ref external-spa-dev-rollback-ebc74b331 -f environment=dev`.
   3. Then roll back stage E if needed. With `VITE_WORKFORCE_HOME_MSAL_CLIENT_ID` set, the old build ignores it.
 
+### SPA redeploy from master — 2026-10-20 17:40:47Z (owner: "yes can deploy SPA")
+
+- **Deploy:** `deploy-external-spa.yml` run `39468172374`, ref `master` at **`28274e04e`** (PR #2141; contains `d4ea1b4a8`, the UAC #2128 guidance mapping). Conclusion: success. Only SPA change since `1908696a8`: `BffAccessState.tsx` and its test.
+- **Live check:** `/assets/app.js` contains `workforce_guest_use_home_signin`; `/auth-callback.html` returns 200. UAC was told (precondition for #2138).
+- **Rollback:** tag `external-spa-dev-rollback-1908696a8` (pushed); `gh workflow run deploy-external-spa.yml --ref external-spa-dev-rollback-1908696a8 -f environment=dev`.
+
 ### Side finding (owner-approved App Insights read, 2026-10-19): `IDX10214` and `IDX40001` on dev are log noise, not failures
 
 - App Insights `spe-insights-dev-67e2xz`, last 6 h.
@@ -365,3 +371,15 @@ Saved in the researcher's memory as `entra-multitenant-api-a9-dev-setup-2026-10-
 5. **`brk-multihub` (V for the portal; not documented for Graph).** Teams NAA needs an SPA-type redirect `brk-multihub://{fqdn}`, origin only; the portal fallback is in stage A.
 6. **Audience change (V/I).** The documented refusal is a non-unique App ID URI. `api://{appId}` is unique, so it is expected to pass (I). Same-tenant token `iss`/`aud` are not changed by the audience change itself (I).
 7. **OIDC scopes (I).** Not declared; implicit, and not admin-restricted.
+
+### C-1 revoke: 2026-10-29, owner approval ("I run a script")
+
+- The owner signed in to Dewey Cheatham as its admin, in an isolated Azure CLI profile.
+- **Read before:**
+  - The dev BFF service principal (SDAP-BFF-SPE-API) held 3 delegated grants (AllPrincipals): Microsoft Graph (15 scopes, write scopes among them), Office 365 SharePoint Online `Container.Selected`, and Dataverse `user_impersonation`.
+  - It also held 11 application permissions: 10 on Microsoft Graph, `User.ReadWrite.All` and `Directory.ReadWrite.All` among them, and 1 on SharePoint Online.
+  - The workforce SPA client (Spaarke Workforce SPA) held 3 grants: Graph `openid profile offline_access` (AllPrincipals and Principal) and SDAP-BFF-SPE-API `user_impersonation`.
+- **Revoked:** every grant whose client is the dev BFF: 3 delegated grants and 11 app-role assignments. The service principals and the workforce SPA client's grants were not touched.
+- **Read after:** BFF delegated grants 0; BFF app-role assignments 0; workforce SPA grants 3 (unchanged); the BFF service principal is still present as a resource.
+- **Rollback:** recreate the grants from the private snapshot (`oauth2PermissionGrants` with the same `clientId`/`resourceId`/`scope`, and `appRoleAssignedTo`). It is not expected to be needed, because the BFF uses none of these grants in a customer directory.
+- Finding C-1 is closed on dev. The production rule (no combined consent on a stamp) stays in `task-073-gate-acme.md`.

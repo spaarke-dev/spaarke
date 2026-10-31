@@ -31,6 +31,13 @@ name: CI Standalone Checks
 #                                                                 it ran after `prettier --write`, so it could
 #                                                                 never fail. Tier 2 `lint` runs the real check.)
 #   verdict-script-tests    (new)                                  Must-fire controls for master-ci-verdict.ps1.
+#   ontology-script-tests   (new)                                  Pester controls for Apply-DoLanePolicies.ps1 (the
+#                                                                 policy lint and apply order),
+#                                                                 Invoke-OntologyStampBackfill.ps1 and the
+#                                                                 Deploy-Release.ps1 worklist-configuration phase.
+#   owner-teams-script-tests (new)                                 Pester controls for Set-CustomerOwnerTeams.ps1 (the
+#                                                                 Secure Record unit refusal, the owner-decision
+#                                                                 dry-run exit code).
 #   agent-guard-tests       (new)                                  Must-fire/must-not-fire controls for the agent
 #                                                                 hooks (scripts/quality/*.py) and
 #                                                                 Remove-WorktreeSafe.ps1. Windows: junctions.
@@ -461,6 +468,67 @@ jobs:
           if ($r.FailedCount -gt 0 -or $r.TotalCount -eq 0) { exit 1 }
 
   # --------------------------------------------------------------------------
+  # ontology-script-tests: the Pester controls for scripts/Apply-DoLanePolicies.ps1 (policy lint, the
+  # order of the apply, what -Verify calls drift), scripts/Invoke-OntologyStampBackfill.ps1 and the
+  # Phase 2b gate in scripts/Deploy-Release.ps1 (task 164). The first two did not run in CI before
+  # (ontology task 159, K3). The tests read the shipped functions out of the
+  # scripts' own syntax trees and the checked-in config/*.policies.json; nothing talks to Dataverse. The directory holding the two owner-team C#
+  # classes (cone mode takes directories, not files) is checked out too: Apply-DoLanePolicies.Tests.ps1 pins the script's team rule to their source text (task 171, D-197).
+  # Pester pinned to 5.7.1 (2026-10-29), the same pin as owner-teams-script-tests: under Pester 6.x a container can fail
+  # with "Export-ModuleMember ... can only be called from inside a module" (seen in uac-r2's 194b review).
+  # --------------------------------------------------------------------------
+  ontology-script-tests:
+    name: Ontology script tests (Pester)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          sparse-checkout: |
+            scripts
+            config
+            tests/scripts
+            src/server/api/Sprk.Bff.Api/Infrastructure/Dataverse
+
+      - name: Pester
+        shell: pwsh
+        run: |
+          Install-Module Pester -RequiredVersion 5.7.1 -Scope CurrentUser -Force -SkipPublisherCheck
+          Import-Module Pester -RequiredVersion 5.7.1
+          $r = Invoke-Pester -Path tests/scripts/Apply-DoLanePolicies.Tests.ps1, tests/scripts/Invoke-OntologyStampBackfill.Tests.ps1, tests/scripts/Deploy-Release.OntologyConfig.Tests.ps1 -Output Detailed -PassThru
+          if ($r.FailedCount -gt 0 -or $r.TotalCount -eq 0) { exit 1 }
+
+  # --------------------------------------------------------------------------
+  # owner-teams-script-tests: the Pester controls for scripts/Set-CustomerOwnerTeams.ps1 (unified-access-control-r2
+  # task 194b R4b-4): no business unit named -SecureBusinessUnitName refuses (Secure Record is never accepted as a
+  # customer unit), Secure Record is refused by its name, and a dry run whose drift is an owner decision exits 1.
+  # The script runs over a mocked Invoke-RestMethod and az (any write fails the test) and reads the checked-in
+  # config/*-owner-role.json; nothing talks to Dataverse. Pester is pinned to 5.7.1: under 6.x a container can fail
+  # with "Export-ModuleMember ... can only be called from inside a module", which would turn this job red on a release.
+  # --------------------------------------------------------------------------
+  owner-teams-script-tests:
+    name: Owner teams script tests (Pester)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          sparse-checkout: |
+            scripts
+            config
+            tests/scripts
+
+      - name: Pester
+        shell: pwsh
+        run: |
+          Install-Module Pester -RequiredVersion 5.7.1 -Scope CurrentUser -Force -SkipPublisherCheck
+          Import-Module Pester -RequiredVersion 5.7.1
+          $r = Invoke-Pester -Path tests/scripts/Set-CustomerOwnerTeams.Tests.ps1 -Output Detailed -PassThru
+          if ($r.FailedCount -gt 0 -or $r.TotalCount -eq 0) { exit 1 }
+
+  # --------------------------------------------------------------------------
   # agent-guard-tests: the controls for the Claude Code hooks in scripts/quality/ (unittest) and
   # scripts/worktree/Remove-WorktreeSafe.ps1 (Pester). Windows, because the worktree guards are
   # about NTFS junctions. Added after the 2026-10-13 incident (FAILURE-MODES G-20).
@@ -558,7 +626,7 @@ jobs:
   # --------------------------------------------------------------------------
   summary:
     name: Summary
-    needs: [dependency-audit, release-build, compose-client-gate, client-typecheck, pcf-eslint, verdict-script-tests, agent-guard-tests, trivy-fs]
+    needs: [dependency-audit, release-build, compose-client-gate, client-typecheck, pcf-eslint, verdict-script-tests, ontology-script-tests, owner-teams-script-tests, agent-guard-tests, trivy-fs]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -574,7 +642,7 @@ jobs:
             echo
             echo "| Check | Result |"
             echo "|---|---|"
-            for j in dependency-audit release-build compose-client-gate client-typecheck pcf-eslint verdict-script-tests agent-guard-tests trivy-fs; do
+            for j in dependency-audit release-build compose-client-gate client-typecheck pcf-eslint verdict-script-tests ontology-script-tests owner-teams-script-tests agent-guard-tests trivy-fs; do
               r="$(jq -r --arg j "$j" '.[$j].result' <<<"$NEEDS_JSON")"
               case "$r" in success) icon="✅" ;; *) icon="❌" ;; esac
               echo "| \`${j}\` | ${icon} ${r} |"
@@ -592,7 +660,7 @@ jobs:
   # --------------------------------------------------------------------------
   alerts:
     name: Alert ${{ matrix.check }}
-    needs: [dependency-audit, release-build, compose-client-gate, client-typecheck, pcf-eslint, verdict-script-tests, agent-guard-tests, trivy-fs]
+    needs: [dependency-audit, release-build, compose-client-gate, client-typecheck, pcf-eslint, verdict-script-tests, ontology-script-tests, owner-teams-script-tests, agent-guard-tests, trivy-fs]
     if: always() && github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -621,6 +689,10 @@ jobs:
             job: pcf-eslint
           - check: ci-standalone/verdict-script-tests
             job: verdict-script-tests
+          - check: ci-standalone/ontology-script-tests
+            job: ontology-script-tests
+          - check: ci-standalone/owner-teams-script-tests
+            job: owner-teams-script-tests
           - check: ci-standalone/agent-guard-tests
             job: agent-guard-tests
           # Alerts only when the SCAN errors (the job is red); findings never turn it red.

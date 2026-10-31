@@ -249,7 +249,7 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
         // 2. Archive any attachments that lack a Document — run INDEPENDENTLY of the .eml
         // gate so an attachment added after a prior archive is still picked up on a later
         // call (code-review W3/S5). Each created Document is linked back onto its attachment.
-        var attachmentsCreated = await ArchiveExistingAttachmentsAsync(communicationId, ct, requestedBy);
+        var (attachmentsCreated, attachmentsRefused) = await ArchiveExistingAttachmentsAsync(communicationId, ct, requestedBy);
 
         // 3. Idempotency for the .eml archive — already archived? Return the existing archive
         // Document (plus any newly-archived attachments above), no .eml duplicate.
@@ -265,6 +265,7 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
                 ArchiveDocumentId = existingArchiveId,
                 AlreadyArchived = true,
                 AttachmentDocumentsCreated = attachmentsCreated,
+                AttachmentsRefusedUnverified = attachmentsRefused,
             };
         }
 
@@ -343,6 +344,7 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
             ArchiveDocumentId = archiveDocumentId,
             AlreadyArchived = false,
             AttachmentDocumentsCreated = attachmentsCreated,
+            AttachmentsRefusedUnverified = attachmentsRefused,
         };
     }
 
@@ -459,13 +461,46 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
     }
 
     /// <summary>
+    /// The reason code of an attachment the on-demand archive refused because its item could not be verified as one the
+    /// archive wrote for this communication (#2246). Logged per refusal and counted in
+    /// <see cref="ArchiveCommunicationResult.AttachmentsRefusedUnverified"/>.
+    /// </summary>
+    public const string AttachmentItemUnverifiedCode = "sdap.communication.attachment_item_unverified";
+
+    /// <summary>
+    /// The reason code of an attachment the on-demand archive refused because a <c>sprk_document</c> already names its item
+    /// in <c>sprk_graphitemid</c> (PR #2248 fix round 1, K3): two documents on one file means deleting either one deletes the
+    /// file under the other. Logged per refusal and counted, like <see cref="AttachmentItemUnverifiedCode"/>, in
+    /// <see cref="ArchiveCommunicationResult.AttachmentsRefusedUnverified"/>.
+    /// </summary>
+    public const string AttachmentItemAlreadyBoundCode = "sdap.communication.attachment_item_already_bound";
+
+    /// <summary>
     /// Creates a <c>sprk_document</c> for each attachment of the communication that lacks one (has an SPE
     /// item id but no linked document), using the attachment's OWN drive id (code-review W2), links the
     /// created Document back onto the attachment so a later archive skips it (idempotency, code-review W3),
-    /// and enqueues AI analysis for parity with the send path. Returns the number archived. Per-attachment
-    /// failures are non-fatal.
+    /// and enqueues AI analysis for parity with the send path. Returns the number archived and the number refused
+    /// because the item was not verified (#2246). Per-attachment failures are non-fatal.
     /// </summary>
-    private async Task<int> ArchiveExistingAttachmentsAsync(
+    /// <remarks>
+    /// <b>#2246: the item is verified before a document is bound to it.</b> The row's <c>sprk_graphitemid</c> /
+    /// <c>sprk_graphdriveid</c> are columns a user with Write on the row, or an app-only generic writer, can set, so they
+    /// are not evidence that the item belongs to this communication. Copying them unverified into the new document's
+    /// pointer AND its field-secured bound copy would launder a foreign item through the binding check. Each item is
+    /// therefore checked against server-trusted facts (Graph's own record of the item, read app-only, and the
+    /// communication's derived container) by <see cref="RecordContainerResolver.CommunicationAttachmentItemRefusalAsync"/>,
+    /// which states what the check proves. An item a <c>sprk_document</c> already names is refused too
+    /// (<see cref="AttachmentItemAlreadyBoundCode"/>): a second document on the same file would delete it from under the
+    /// first. A refusal, including a failed verification or lookup read, creates nothing, is logged with its code, and is
+    /// counted: never a silent success. The communication's container is derived once per call, on the first candidate.
+    /// The caller's cancellation stops the loop; any other per-attachment fault is non-fatal.
+    /// <para>
+    /// Fix round 2: the row's ids are trimmed once and only the trimmed values are used. A document this archive created
+    /// whose link-back failed is linked on the next archive, not refused (see <c>ItemAlreadyBoundAsync</c>), and the
+    /// link-back after a create is not cancellable by the caller.
+    /// </para>
+    /// </remarks>
+    private async Task<(int Created, int RefusedUnverified)> ArchiveExistingAttachmentsAsync(
         Guid communicationId, CancellationToken ct, Sprk.Bff.Api.Services.Dataverse.RecordRequester? requestedBy = null)
     {
         var query = new QueryExpression("sprk_communicationattachment")
@@ -480,6 +515,7 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
         var attachments = await _genericEntityService.RetrieveMultipleAsync(query, ct);
         var correlationId = Guid.NewGuid().ToString();
         var created = 0;
+        var refusedUnverified = 0;
 
         // Task 146: attachment documents are owned like their communication. A refusal creates none of them (logged;
         // the .eml archive below refuses the same way and that is what the caller reports).
@@ -491,25 +527,105 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
             _logger.LogWarning(
                 "On-demand attachment documents NOT created for communication {CommunicationId}: {Reason} ({Code}) (task 146)",
                 communicationId, docOwner.Reason, docOwner.RefusalCode);
-            return 0;
+            return (0, 0);
         }
+
+        // #2246: the item verifier is task 166's resolver (Scoped, so resolved per operation, R9). When none is available
+        // every candidate is refused below (fail closed), never archived unverified.
+        using var verifyScope = attachments.Entities.Count == 0 ? null : _scopeFactory?.CreateScope();
+        var itemVerifier = verifyScope?.ServiceProvider.GetService<RecordContainerResolver>();
+
+        // Fix round 1 (K4): the communication's container is the same for every attachment. It is derived once, on the
+        // first candidate, so a call with nothing to archive reads nothing.
+        DocumentContainerDerivation? communicationContainer = null;
+
+        // Fix round 2: the documents an attachment row of this communication already links to (loaded, or linked by this
+        // call). A partial archive is repaired only onto a document no row links to, so a sibling row re-pointed at an
+        // archived item is still refused, not linked to its sibling's document.
+        var linkedDocuments = attachments.Entities
+            .Select(a => a.GetAttributeValue<EntityReference>("sprk_document")?.Id)
+            .OfType<Guid>()
+            .ToHashSet();
 
         foreach (var att in attachments.Entities)
         {
             // Skip attachments that already have a Document, or that were never uploaded to SPE.
             if (att.GetAttributeValue<EntityReference>("sprk_document") is not null) continue;
-            var itemId = att.GetAttributeValue<string>("sprk_graphitemid");
-            if (string.IsNullOrEmpty(itemId)) continue;
+            var rawItemId = att.GetAttributeValue<string>("sprk_graphitemid");
+            if (string.IsNullOrEmpty(rawItemId)) continue;
+
+            // Fix round 2 (F1): the ids are normalised ONCE, trimmed, and only these values are used below: the
+            // verification, the already-bound lookup, the new document's pointer, its bound copy and its drive. The
+            // verifier compares trimmed ids, so a padded raw id would pass verification on X yet miss the lookup on X.
+            var itemId = rawItemId.Trim();
 
             // Prefer the attachment's own drive id; fall back to the archive container.
-            var driveId = att.GetAttributeValue<string>("sprk_graphdriveid");
-            if (string.IsNullOrEmpty(driveId)) driveId = _options.ArchiveContainerId;
+            var driveId = att.GetAttributeValue<string>("sprk_graphdriveid")?.Trim();
+            if (string.IsNullOrEmpty(driveId)) driveId = _options.ArchiveContainerId?.Trim();
             if (string.IsNullOrEmpty(driveId)) continue;
 
             var fileName = att.GetAttributeValue<string>("sprk_name") ?? "Attachment";
 
             try
             {
+                // #2246: verify the item BEFORE binding a document to it (see remarks). A failed read refuses.
+                string? refusal;
+                if (itemId.Length == 0)
+                {
+                    // Fix round 2 (F1): a row whose item id is only whitespace names no item; it is refused, not skipped.
+                    refusal = "the item id is blank";
+                }
+                else if (itemVerifier is null)
+                {
+                    refusal = "no item verifier is available";
+                }
+                else
+                {
+                    communicationContainer ??= await itemVerifier.DeriveCommunicationContainersAsync(communicationId, ct);
+                    refusal = await itemVerifier.CommunicationAttachmentItemRefusalAsync(
+                        communicationId, communicationContainer, driveId, itemId, ct);
+                }
+
+                var refusalCode = AttachmentItemUnverifiedCode;
+                if (refusal is null)
+                {
+                    // Fix round 1 (K3): never a second document on a file another document already names.
+                    Guid? repairDocumentId;
+                    (refusal, repairDocumentId) = await ItemAlreadyBoundAsync(communicationId, itemId, linkedDocuments, ct);
+                    refusalCode = AttachmentItemAlreadyBoundCode;
+
+                    if (repairDocumentId is Guid repairId)
+                    {
+                        // Fix round 2 (F1): an earlier archive created this row's document but did not link it back. Link
+                        // it now and count it as archived; nothing new is created.
+                        await _genericEntityService.UpdateAsync(
+                            "sprk_communicationattachment",
+                            att.Id,
+                            new Dictionary<string, object> { ["sprk_document"] = new EntityReference("sprk_document", repairId) },
+                            ct);
+                        linkedDocuments.Add(repairId);
+                        created++;
+                        _logger.LogInformation(
+                            "Attachment {AttachmentId} of communication {CommunicationId} linked to its existing document {DocumentId} (an earlier archive did not link it back)",
+                            att.Id, communicationId, repairId);
+
+                        // The earlier archive stopped before its enqueue, so the document was never profiled. The job's
+                        // idempotency key (DocAnalysis:{documentId}) makes a second enqueue a no-op if one did run. Not
+                        // cancellable by the caller: the row is linked now, so no later archive would repair a lost enqueue.
+                        await EnqueueDocumentAnalysisAsync(repairId, correlationId, CancellationToken.None);
+                        continue;
+                    }
+                }
+
+                if (refusal is not null)
+                {
+                    refusedUnverified++;
+                    _logger.LogWarning(
+                        "Attachment {AttachmentId} of communication {CommunicationId} NOT archived: {Reason} ({Code}) | Drive: {DriveId}, Item: {ItemId}",
+                        att.Id, communicationId, refusal, refusalCode, driveId, itemId);
+                    continue;
+                }
+
                 var attachmentDoc = new DataverseEntity("sprk_document")
                 {
                     ["sprk_documentname"] = TruncateTo(fileName, 200),
@@ -525,19 +641,25 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
 
                 var documentId = await _genericEntityService.CreateAsync(attachmentDoc, ct);
 
-                // Link the Document back onto the attachment so a later archive skips it (W3).
+                // Link the Document back onto the attachment so a later archive skips it (W3). Fix round 2 (F1): once the
+                // document exists the link-back is not cancellable by the caller, so a cancellation cannot orphan it; the
+                // caller's cancellation is still observed by the next attachment.
                 await _genericEntityService.UpdateAsync(
                     "sprk_communicationattachment",
                     att.Id,
                     new Dictionary<string, object> { ["sprk_document"] = new EntityReference("sprk_document", documentId) },
-                    ct);
+                    CancellationToken.None);
+                linkedDocuments.Add(documentId);
 
-                // Enqueue AI analysis (parity with the send-side attachment archival).
-                await EnqueueDocumentAnalysisAsync(documentId, correlationId, ct);
+                // Enqueue AI analysis (parity with the send-side attachment archival). Not cancellable by the caller, for
+                // the reason the link-back is not: the row is linked, so no later archive would enqueue it.
+                await EnqueueDocumentAnalysisAsync(documentId, correlationId, CancellationToken.None);
                 created++;
             }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
             {
+                // Fix round 1 (K4): the CALLER's cancellation is not a per-attachment failure. It propagates and stops the
+                // loop; anything else (including a timeout the caller did not ask for) stays non-fatal.
                 _logger.LogWarning(
                     ex,
                     "Failed to archive attachment '{FileName}' for communication {CommunicationId} (non-fatal)",
@@ -545,7 +667,95 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
             }
         }
 
-        return created;
+        if (refusedUnverified > 0)
+        {
+            _logger.LogWarning(
+                "On-demand archive of communication {CommunicationId}: {Refused} attachment(s) refused ({Code} / {AlreadyBoundCode}); {Created} archived",
+                communicationId, refusedUnverified, AttachmentItemUnverifiedCode, AttachmentItemAlreadyBoundCode, created);
+        }
+
+        return (created, refusedUnverified);
+    }
+
+    /// <summary>
+    /// PR #2248 fix round 1 (K3): does a <c>sprk_document</c> already name <paramref name="itemId"/> in
+    /// <c>sprk_graphitemid</c>, or (fix round 2, K) in its field-secured bound copy <c>sprk_graphitemidbound</c>? Neither a
+    /// refusal nor a repair when none does. A plain column query, not the <c>sprk_graphitemid_uk</c> alternate key, so it
+    /// still answers when that key is not Active or the value is already duplicated (the reason
+    /// <c>ComposeRecordResolution</c> falls back to a column query).
+    /// <para>
+    /// Fix round 2 (F1): a partial archive is repaired, not refused. When exactly one document matches and it is this
+    /// row's own unlinked attachment document (related to <paramref name="communicationId"/>, Active, source type Email Attachment,
+    /// pointer and bound copy both equal to the item, and no attachment row of the communication links to it), its id is
+    /// returned for the row to be linked to. The source-type condition keeps a row pointed at the <c>.eml</c> from being
+    /// linked to the <c>.eml</c> document. Any other match refuses.
+    /// </para>
+    /// Fail closed: a lookup fault refuses; the caller's cancellation propagates.
+    /// </summary>
+    private async Task<(string? Refusal, Guid? RepairDocumentId)> ItemAlreadyBoundAsync(
+        Guid communicationId, string itemId, IReadOnlySet<Guid> linkedDocuments, CancellationToken ct)
+    {
+        var query = new QueryExpression("sprk_document")
+        {
+            ColumnSet = new ColumnSet(
+                "sprk_documentid",
+                "sprk_graphitemid",
+                Spaarke.Dataverse.DocumentPointerBinding.BoundItemIdColumn,
+                "sprk_relatedcommunication",
+                "sprk_sourcetype",
+                "statecode"),
+            // The normalised (trimmed) item id: sprk_graphitemid is an opaque SPE drive-item id (a string), matched
+            // exactly. Fix round 2 (K): the bound copy too, so a document whose pointer was re-pointed but whose bound
+            // copy still names the item is caught.
+            Criteria = new FilterExpression(LogicalOperator.Or)
+            {
+                Conditions =
+                {
+                    new ConditionExpression("sprk_graphitemid", ConditionOperator.Equal, itemId),
+                    new ConditionExpression(
+                        Spaarke.Dataverse.DocumentPointerBinding.BoundItemIdColumn, ConditionOperator.Equal, itemId),
+                },
+            },
+            // Two, so that "exactly one match" is known.
+            TopCount = 2,
+        };
+
+        try
+        {
+            var bound = await _genericEntityService.RetrieveMultipleAsync(query, ct);
+            if (bound.Entities.Count == 0)
+            {
+                return (null, null);
+            }
+
+            if (bound.Entities.Count == 1)
+            {
+                var existing = bound.Entities[0];
+                var isThisRowsUnlinkedAttachmentDocument =
+                    existing.GetAttributeValue<EntityReference>("sprk_relatedcommunication")?.Id == communicationId
+                    && existing.GetAttributeValue<OptionSetValue>("statecode")?.Value == 0 // Active: never re-link a deactivated document
+                    && existing.GetAttributeValue<OptionSetValue>("sprk_sourcetype")?.Value == 659490004 // Email Attachment
+                    && string.Equals(existing.GetAttributeValue<string>("sprk_graphitemid"), itemId, StringComparison.Ordinal)
+                    && string.Equals(
+                        existing.GetAttributeValue<string>(Spaarke.Dataverse.DocumentPointerBinding.BoundItemIdColumn),
+                        itemId,
+                        StringComparison.Ordinal)
+                    && !linkedDocuments.Contains(existing.Id);
+                if (isThisRowsUnlinkedAttachmentDocument)
+                {
+                    return (null, existing.Id);
+                }
+            }
+
+            return (
+                $"the item is already the file of document {bound.Entities[0].Id}; a second document on it would delete it from under the first",
+                null);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            _logger.LogInformation(ex, "Whether a document already names attachment item {ItemId} could not be read.", itemId);
+            return ($"whether a document already names the item could not be read ({ex.GetType().Name})", null);
+        }
     }
 
     /// <summary>
@@ -2958,6 +3168,25 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
     /// container fault propagates to the caller's non-fatal catch; a per-attachment upload or row failure is logged
     /// and the next attachment continues. An upload that returns no item creates no row.</para>
     /// </remarks>
+    /// <summary>
+    /// The ownership question for the copy of a SECURE source (owner decision 2026-10-06): <paramref name="secureLinks"/> —
+    /// the source's record links that put it in its secure container — are written onto <paramref name="copy"/>, so its own
+    /// derived container, task 166's pointer check and task 146's secure-if-any owner all see the secure record, not just
+    /// the communication; then the copy is asked about in sprk_document's primary order (UAC task 194b fix round R, B3:
+    /// <c>ForChild</c> → <c>ForRow</c>, the order the reconciler asks the written copy in — never the first link named first).
+    /// </summary>
+    internal static Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext SecureCopyOwnershipOf(
+        DataverseEntity copy, IReadOnlyList<(string Column, EntityReference Record)> secureLinks,
+        Sprk.Bff.Api.Services.Dataverse.RecordRequester? requestedBy)
+    {
+        foreach (var (column, record) in secureLinks)
+        {
+            copy[column] = record;
+        }
+
+        return Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext.ForChild(copy) with { RequestedBy = requestedBy };
+    }
+
     private async Task ArchiveOutboundAttachmentsAsync(
         Guid communicationId,
         IReadOnlyList<ChannelAttachment> attachments,
@@ -3026,20 +3255,8 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
                     // A SECURE source: the copy goes to the source's secure container and carries the record links that
                     // put the source there, so its own derived container, task 166's pointer check and task 146's
                     // secure-if-any owner all see the secure record — not just the communication.
-                    foreach (var (column, record) in placement.SecureLinks)
-                    {
-                        attachmentDoc[column] = record;
-                    }
-
-                    var primary = placement.SecureLinks[0].Record;
                     copyOwner = await _ownership.ResolveOwnerAsync(
-                        Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext.ForChild(
-                            attachmentDoc,
-                            new Sprk.Bff.Api.Services.Dataverse.RecordOwnershipParent(primary.LogicalName, primary.Id)) with
-                        {
-                            RequestedBy = requestedBy,
-                        },
-                        ct);
+                        SecureCopyOwnershipOf(attachmentDoc, placement.SecureLinks, requestedBy), ct);
                     if (copyOwner.IsRefused)
                     {
                         _logger.LogWarning(

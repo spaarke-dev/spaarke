@@ -143,6 +143,15 @@ public class SecureRecordOwnerRoleSetParityTests
         Assert.Equal(NoAccessListReader.RowSelect, Const(webApi, "NoAccessEntryRowSelect"));
     }
 
+    [Fact]
+    public void SystemAdministratorRole_IsMatchedByTheSameRoleTemplateId()
+    {
+        // H7b S8/S9 and the BFF's readability proof both identify the System Administrator role by its role template id.
+        var procedure = L2Core.Value.GetType(L2ProcedureType, throwOnError: true)!;
+        var l2 = (Guid)procedure.GetField("SystemAdministratorRoleTemplateId", BindingFlags.Public | BindingFlags.Static)!.GetValue(null)!;
+        Assert.Equal(SecuredColumnReadProof.SystemAdministratorRoleTemplateId, l2);
+    }
+
     // ------------------------------------------------------------ helpers
 
     private static object L2Parse(string json)

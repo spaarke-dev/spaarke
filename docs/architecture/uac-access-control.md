@@ -31,11 +31,13 @@
 
 | Plane | What It Controls | Internal Mechanism | External Mechanism |
 |-------|-----------------|-------------------|-------------------|
-| **Plane 1: Dataverse Records** | CRUD access to Dataverse rows | Security roles, teams, BU, record sharing | `sprk_externalrecordaccess` grant rows, read by the BFF (`Infrastructure/ExternalAccess/ExternalParticipationService.cs`). External callers are Static Web Apps + Entra External ID (CIAM) — Power Pages is retired |
+| **Plane 1: Dataverse Records** | CRUD access to Dataverse rows | Security roles, teams, BU, record sharing (in the MDA; on the SPA/Teams systemuser plane shares count only when `ExternalAccess:ImpersonatedRootSets:Enabled` is on) | `sprk_externalrecordaccess` grant rows, read by the BFF (`Infrastructure/ExternalAccess/ExternalParticipationService.cs`). External callers are Static Web Apps + Entra External ID (CIAM) — Power Pages is retired |
 | **Plane 2: SPE Files** | Read/write/delete files in SharePoint Embedded containers | BFF `AuthorizationService` → `OperationAccessPolicy` | Broker-only (ADR-028 A1): external users never authenticate to SPE; all external file access is app-only via the BFF. Contacts are NOT added to containers |
 | **Plane 3: AI Search** | Query results from Azure AI Search | BFF constructs filter from user's accessible entities | NOT IMPLEMENTED — no CIAM/external route reaches AI Search |
 
-**What a grant actually does** (corrected 2026-08-20 — the old "three-plane orchestration" was never built): granting external access = (1) create ONE `sprk_externalrecordaccess` record + (2) invalidate the contact's Redis participation cache (`Api/ExternalAccess/GrantExternalAccessEndpoint.cs:13-23, 98-117`). No web role is assigned (Power Pages retired), and no SPE container membership is written — `SpeContainerMembershipService.GrantMembershipAsync` exists but has NO production callers. Revoking = deactivate the record + invalidate the cache, plus a defensive removal of any stray SPE container permission when a `ContainerId` is supplied (`Api/ExternalAccess/RevokeExternalAccessEndpoint.cs:93-147`).
+**What a grant actually does** (corrected 2026-08-20 — the old "three-plane orchestration" was never built): granting external access = (1) create ONE `sprk_externalrecordaccess` record + (2) invalidate the contact's Redis participation cache (`Api/ExternalAccess/GrantExternalAccessEndpoint.cs:13-23, 98-117`). No web role is assigned (Power Pages retired), and no SPE container membership is written for the grantee — external contacts are never added to containers. *(Corrected 2026-10-27: `SpeContainerMembershipSyncJob` does grant marked writer roles, to internal users only — standing writers on business-unit containers and just-in-time writers on a secure record's own container.)* Revoking = deactivate the record + invalidate the cache, plus a defensive removal of any stray SPE container permission when a `ContainerId` is supplied (`Api/ExternalAccess/RevokeExternalAccessEndpoint.cs:93-147`).
+
+**Known limit: person removal** (`POST /api/v1/external-access/remove-person`, `Api/ExternalAccess/ExternalPersonRemovalService.cs`): its cleanup of the person's own permission on the containers of their organizations' grants covers their ACTIVE organization memberships only, so a container permission created outside the BFF, on a root granted to an organization whose membership of that person is already inactive, is not removed.
 
 ---
 
@@ -109,7 +111,7 @@ Deny codes follow pattern `{domain}.{area}.{action}.{reason}` (e.g., `sdap.acces
 
 ## External Caller Access Levels
 
-Actual level → effective-rights mapping per `Infrastructure/ExternalAccess/CallerPrincipalResolver.cs:126-134` (corrected 2026-08-20). The former "SPE Container Role" column reflected `SpeContainerMembershipService`'s role map, which is NOT wired — external SPE access is broker-only and no container role is ever assigned:
+Actual level → effective-rights mapping per `ExternalCallerContext.ToAccessRights` (`Infrastructure/ExternalAccess/ExternalCallerContext.cs`; corrected 2026-10-27). The former "SPE Container Role" column reflected `SpeContainerMembershipService`'s role map, which is NOT wired — external SPE access is broker-only and no container role is ever assigned:
 
 | Access Level | Effective `AccessRights` (BFF) | SPE Container Role |
 |-------------|-------------------------------|--------------------|
@@ -183,8 +185,9 @@ constraint. Round 87 refines round 84: the parent is a FLOOR, not an equality.
   no caller (no F3) and a TEAM owner — the business-unit team the ownership rule (`RecordOwnershipResolver`, record-first,
   D-11) gives a record filed under its now-ordinary parents; never the Secure Record Owners team. It runs only for an
   INHERITED Secure. Ownership is moved and read back first, related records leave isolation, the shares are revoked, the
-  flag is cleared LAST. Existing documents stay in the record's former container (as for `/unsecure-project` on a parent);
-  reads are broker-only either way.
+  flag is cleared LAST. The un-secure call moves no file; once a document has been re-owned out of the Secure Record
+  business unit, `SecureChildReconciliationJob`'s re-file pass (every 2 minutes) moves its file out of the secure
+  container (corrected 2026-10-27; `DocumentContainerRelocator`). Reads are broker-only either way.
 - **Fail closed.** Order inside one record: a STRICTER Access Permission first, then the un-secure, then a LOOSER Access
   Permission, then the access record. A step that does not complete leaves the record at the more restrictive state (still
   flagged secure, permission not loosened, the access record still saying "secure applied"), reports it, and the next call
@@ -275,6 +278,19 @@ A person who is not yet a colleague in the system is refused, never created, onb
 
 ---
 
+## Known Gap — Attestation (FR-32)
+
+UAC does not yet answer "who could see record X on date D" in-product. The access-event log, evaluator replay and attestation seam (spec FR-32; tasks 087–089) are deferred to [#1303](https://github.com/spaarke-dev/spaarke/issues/1303). `sprk_accessevent` and `scripts/Deploy-AccessEventEntity.ps1` are superseded: the table was never deployed, and the script refuses to run without `-Force`.
+
+**Interim answer:** a manual review of the Dataverse audit log. It records:
+- grant-row changes on `sprk_externalrecordaccess`;
+- No Access entries;
+- record Share / Modify Share / Unshare (audit actions 14 / 48 / 49), with the principal and the before/after rights;
+- Assign;
+- changes to `sprk_issecure` and `sprk_accesspermission`.
+
+This works only when **org-level** auditing is on (`organization.isauditenabled`). The table and column flags shipped in SpaarkeMaster record nothing without it. On dev it was verified on 2026-10-16. Provisioning must set it, with an explicit retention, for customer environments: [#2027](https://github.com/spaarke-dev/spaarke/issues/2027).
+
 ## Troubleshooting
 
 | Issue | Cause | Solution |
@@ -290,6 +306,7 @@ A person who is not yet a colleague in the system is refused, never created, onb
 
 | Document | Purpose |
 |----------|---------|
+| [UAC-ACCESS-MODEL-GUIDE.md](../guides/UAC-ACCESS-MODEL-GUIDE.md) | How access is decided and set, per user type, record family and setting (start here) |
 | [sdap-auth-patterns.md](sdap-auth-patterns.md) | OBO patterns including Pattern 5 (direct query fix) |
 | [external-access-spa-architecture.md](external-access-spa-architecture.md) | External SPA three-plane access detail |
 | `.claude/patterns/auth/uac-access-control.md` | Concise implementation guide |

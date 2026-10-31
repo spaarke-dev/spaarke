@@ -533,6 +533,11 @@ export interface EventsCalendarProps {
   root?: EventsTodosRoot;
   /** The authenticated user's access level — determines create visibility */
   accessLevel: AccessLevel;
+  /**
+   * The caller's write access is decided per record (`/me` `writeAccessPerRecord`, task 036 fix round 1): "create" then
+   * follows the BFF's `canCreate` on the project's event list instead of `accessLevel`.
+   */
+  writeAccessPerRecord?: boolean;
   /** The signed-in principal. With it, events the caller created show Delete (task 054); without it, none do. */
   caller?: CallerIdentity | null;
 }
@@ -554,6 +559,7 @@ export const EventsCalendar: React.FC<EventsCalendarProps> = ({
   root = 'projects',
   accessLevel,
   caller,
+  writeAccessPerRecord = false,
 }) => {
   const styles = useStyles();
 
@@ -576,9 +582,14 @@ export const EventsCalendar: React.FC<EventsCalendarProps> = ({
   // Access level check
   // -------------------------------------------------------------------------
 
-  // Creating an event is a project-only route (the matter and work assignment routes are read-only).
+  // Creating an event is a project-only route (the matter and work assignment routes are read-only). Task 036 fix round
+  // 1: with per-record write access the project's list `canCreate` decides (null = not said, read as "cannot").
+  const [listCanCreate, setListCanCreate] = React.useState<boolean | null>(null);
   const canCreate =
-    root === 'projects' && (accessLevel === AccessLevel.Collaborate || accessLevel === AccessLevel.FullAccess);
+    root === 'projects' &&
+    (writeAccessPerRecord
+      ? listCanCreate === true
+      : accessLevel === AccessLevel.Collaborate || accessLevel === AccessLevel.FullAccess);
 
   // Delete-own (task 054): the event leaves the list on the server's 204; any refusal keeps it and is shown.
   const del = useDeleteOwn<ODataEvent>({
@@ -610,6 +621,7 @@ export const EventsCalendar: React.FC<EventsCalendarProps> = ({
         if (!cancelled) {
           setEvents(data.items);
           setTruncated(data.truncated);
+          setListCanCreate(data.canCreate ?? null);
         }
       } catch (err) {
         if (!cancelled) {

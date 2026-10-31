@@ -82,7 +82,7 @@ namespace Sprk.Bff.Api.Services.Ai.Handlers;
 /// and the created record id — never subject/body text or email addresses.
 /// </para>
 /// </remarks>
-public sealed class EmailDraftToolHandler : IToolHandler
+internal sealed class EmailDraftToolHandler : IToolHandler
 {
     private const string HandlerIdValue = nameof(EmailDraftToolHandler);
 
@@ -158,11 +158,11 @@ public sealed class EmailDraftToolHandler : IToolHandler
 
     private readonly ILogger<EmailDraftToolHandler> _logger;
 
-    /// <summary>Task 146 r2 (S1 / G5): the owner of a FILED draft.</summary>
-    private readonly Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver _ownership;
-
-    /// <summary>Task 146 r2 (S1 / G5): the app-only create of a FILED draft, after the as-the-caller check.</summary>
-    private readonly Spaarke.Dataverse.IFieldMappingDataverseService _appOnly;
+    /// <summary>
+    /// Field-mapping-server-write-path-r1 task 017 (2d-4): the ONE server create a FILED draft takes, as the caller — the
+    /// as-the-caller checks, the resolver's owner and the app-only create of task 146 r2 (S1 / G5), now in one place.
+    /// </summary>
+    private readonly Sprk.Bff.Api.Services.RecordCreation.RecordCreationService _recordCreation;
 
     /// <summary>
     /// Task 065 fix round 6 (F1, defensive): the one communication-visibility decision (the flag rule and, for an external
@@ -179,17 +179,16 @@ public sealed class EmailDraftToolHandler : IToolHandler
         IEmailDraftAi emailDraftAi,
         Sprk.Bff.Api.Services.Dataverse.CoreAncestorResolver coreAncestors,
         ILogger<EmailDraftToolHandler> logger,
-        Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver ownership,
-        Spaarke.Dataverse.IFieldMappingDataverseService appOnly,
+        Sprk.Bff.Api.Services.RecordCreation.RecordCreationService recordCreation,
         CommunicationThreadReadService communicationVisibility,
         IHttpContextAccessor httpContextAccessor)
     {
         // Registered unconditionally (CommunicationModule scoped; the accessor by AddHttpContextAccessor): no asymmetric registration (§10 F.1).
         _communicationVisibility = communicationVisibility ?? throw new ArgumentNullException(nameof(communicationVisibility));
         _httpContextAccessor = httpContextAccessor ?? throw new ArgumentNullException(nameof(httpContextAccessor));
-        // Both unconditionally registered (MetadataServiceExtensions / GraphModule): no asymmetric registration (§10 F.1).
-        _ownership = ownership ?? throw new ArgumentNullException(nameof(ownership));
-        _appOnly = appOnly ?? throw new ArgumentNullException(nameof(appOnly));
+        // Scoped and registered unconditionally (OfficeModule, Program.cs), as the child-records route takes it: no asymmetric
+        // registration (§10 F.1).
+        _recordCreation = recordCreation ?? throw new ArgumentNullException(nameof(recordCreation));
         _dataverse = dataverse ?? throw new ArgumentNullException(nameof(dataverse));
         // ADR-013 / BFF §10: AI text generation is consumed through the PublicContracts facade
         // (never IChatClient/IOpenAiClient injected into this handler). Always resolvable — a
@@ -363,14 +362,14 @@ public sealed class EmailDraftToolHandler : IToolHandler
                 // resolved" for a missing record, a stamp for an existing one) would otherwise tell a caller who may not
                 // file under it that it exists. A missing record, one they cannot see and one they may not append to are
                 // the same denial.
-                var me = await OwnedChildWrite.WhoAmIAsync(_dataverse, cancellationToken).ConfigureAwait(false);
+                var me = await CallerWriteAuthorization.WhoAmIAsync(_dataverse, cancellationToken).ConfigureAwait(false);
                 if (me.Failure is { } whoAmIFailure)
                 {
                     return LogOutcome(context, args, MapClientError(tool, whoAmIFailure, startedAt), stopwatch);
                 }
 
                 caller = me.SystemUserId;
-                var regardingAccess = await OwnedChildWrite.CheckCallerMayAppendToRecordAsync(
+                var regardingAccess = await CallerWriteAuthorization.CheckCallerMayAppendToRecordAsync(
                     _dataverse, me.SystemUserId, args.RegardingTable, ancestorTargetId, cancellationToken).ConfigureAwait(false);
                 if (regardingAccess.ClientFailure is { } accessFailure)
                 {
@@ -412,21 +411,14 @@ public sealed class EmailDraftToolHandler : IToolHandler
             // Task 146 r2 (S1 / G5): a draft FILED under a project, matter or work assignment — its regarding, or the
             // FR-26 stamp of one — is created by the application owned by that record's team, so the drafting user is
             // recorded as its sender (S1's "for" person; Created By is then the application).
+            // Task 017 (2d-4): the sender is the caller the AppendTo check above identified. "Filed" needs a regarding, so that
+            // check always ran here; the second WhoAmI this block used to fall back on was unreachable and is gone. Should a
+            // future change break that, nothing is created (the catch below: INTERNAL_ERROR), never a draft without its sender.
             Guid? sender = null;
             if (IsFiledUnderAnOwnershipParent(args, ancestorStamps))
             {
-                if (caller is null)
-                {
-                    var me = await OwnedChildWrite.WhoAmIAsync(_dataverse, cancellationToken).ConfigureAwait(false);
-                    if (me.Failure is { } whoAmIFailure)
-                    {
-                        return LogOutcome(context, args, MapClientError(tool, whoAmIFailure, startedAt), stopwatch);
-                    }
-
-                    caller = me.SystemUserId;
-                }
-
-                sender = caller;
+                sender = caller ?? throw new InvalidOperationException(
+                    "A filed draft reached its sender without the caller the regarding AppendTo check identified.");
             }
 
             // Build the record ITEM server-side (Communication-service column contract).
@@ -450,40 +442,36 @@ public sealed class EmailDraftToolHandler : IToolHandler
 
             if (OwnedChildWrite.AppliesTo(CommunicationTable, mapped.Item!))
             {
-                // S1 / G5 (task 146 r2): as the caller → owner from the one resolver → the application creates it owned
-                // by that team. Refusals write nothing; a Dataverse fault propagates to the catch below.
-                var owned = await OwnedChildWrite.CreateAsync(
-                    _dataverse, _ownership, _appOnly, CommunicationTable, mapped.Item!,
-                    serverSetLookupColumns: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { SenderLookupColumn },
-                    Guid.TryParse(context.UserId, out var oid) && oid != Guid.Empty ? oid : null,
+                // S1 / G5 (task 146 r2) through the ONE server create (task 017, 2d-4), as the caller: the as-the-caller checks,
+                // the resolver's owner and the app-only create. The item keeps the derived I-1 stamp (option a', coordinator
+                // 2026-10-30): the service decides the owner and asks AppendTo over the item, so the stamped root takes part in
+                // both exactly as before, and its step 10 finds no stamp missing. The sender is a server-set lookup, as before.
+                // A refusal writes nothing; a fault propagates to the catch below. No fallback create (NFR-01).
+                var outcome = await _recordCreation.CreateAsync(
+                    new Sprk.Bff.Api.Services.RecordCreation.RecordCreationRequest(
+                        CommunicationTable, new Sprk.Bff.Api.Services.RecordCreation.RecordCreationPayload.Mapped(mapped.Item!))
+                    {
+                        ServerSetLookupColumns = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { SenderLookupColumn },
+                        CorrelationId = context.DecisionId.ToString("N"),
+                    },
+                    Sprk.Bff.Api.Services.RecordCreation.RecordCreationPrincipal.ForCaller(
+                        _dataverse, Guid.TryParse(context.UserId, out var oid) && oid != Guid.Empty ? oid : null),
                     cancellationToken).ConfigureAwait(false);
 
-                if (owned.ClientFailure is { } ownedFailure)
+                if (outcome.Refusal is { } refusal)
                 {
-                    return LogOutcome(context, args, MapClientError(tool, ownedFailure, startedAt), stopwatch);
+                    return LogOutcome(context, args, RefusalError(tool, refusal, outcome.CorrelationId, startedAt), stopwatch);
                 }
 
-                if (owned.Denied is { } denied)
+                if (outcome.CreatedId is not { } ownedId)
                 {
-                    return LogOutcome(context, args, Error(tool, denied, DataverseUserClientErrorCodes.AccessDenied, startedAt), stopwatch);
-                }
-
-                if (owned.Invalid is { } invalid)
-                {
-                    return LogOutcome(context, args, Error(tool, invalid, ToolErrorCodes.ValidationFailed, startedAt), stopwatch);
-                }
-
-                if (owned.CreatedId is not { } ownedId)
-                {
-                    var refusal = owned.OwnerRefusal;
+                    // Neither a row nor a refusal: never a success (fail closed).
                     return LogOutcome(context, args,
-                        Error(tool,
-                            $"The draft was NOT created: its owner could not be decided — {refusal?.Reason} ({refusal?.RefusalCode}).",
-                            refusal?.RefusalCode ?? ToolErrorCodes.InternalError, startedAt),
-                        stopwatch);
+                        Error(tool, "The draft was NOT created.", ToolErrorCodes.InternalError, startedAt), stopwatch);
                 }
 
                 communicationId = ownedId;
+                warnings.AddRange(outcome.Warnings);
             }
             else
             {
@@ -1303,6 +1291,61 @@ public sealed class EmailDraftToolHandler : IToolHandler
             response.ErrorMessage ?? "Dataverse request failed.",
             response.ErrorCode,
             Timed(startedAt));
+
+    /// <summary>
+    /// Task 017 (2d-4, ADR-019, NFR-07): a <see cref="Sprk.Bff.Api.Services.RecordCreation.RecordCreationService"/> refusal
+    /// in this tool's error contract — the Office precedent (<c>OfficeService.MapQuickCreateRefusal</c>): each refusal KIND
+    /// keeps the tool code the owned create (<c>OwnedChildWrite.CreateAsync</c>, deleted in 017) gave for it; only the text comes from the
+    /// shared map (<see cref="Sprk.Bff.Api.Services.RecordCreation.RecordCreationProblemMap"/>), which never carries upstream
+    /// text and renders a not-found or denied record as one uniform body.
+    /// <list type="bullet">
+    /// <item>a question asked as the caller that failed (WhoAmI, a check, the mapper): the failure's own code;</item>
+    /// <item>a record the caller may not use, their own rights, a server-owned column: <c>AccessDenied</c>;</item>
+    /// <item>a payload the service refuses (including <c>record_creation.stamp_underivable</c>): <c>VALIDATION_FAILED</c>;</item>
+    /// <item>no owner (the resolver's refusal) and any other coded refusal: that code, carried;</item>
+    /// <item>a check or a read that could not be made (including <c>record_creation.stamp_unavailable</c>), a refusal with no
+    /// decision, a conflict: <c>INTERNAL_ERROR</c>, as a fault in the owned create surfaced before.</item>
+    /// </list>
+    /// </summary>
+    internal static (string? Code, string Message) RefusalCodeAndText(
+        Sprk.Bff.Api.Services.RecordCreation.RecordCreationRefusal refusal, string correlationId)
+    {
+        ArgumentNullException.ThrowIfNull(refusal);
+        var text = Sprk.Bff.Api.Services.RecordCreation.RecordCreationProblemMap.ToProblemDetails(
+            refusal, CommunicationTable, string.IsNullOrWhiteSpace(correlationId) ? Guid.NewGuid().ToString("N") : correlationId)
+            .Detail ?? "The draft was NOT created.";
+        var code = refusal switch
+        {
+            // Task 017 review F-6 (NFR-07): a Dataverse failure asked as the caller is passed through as it was (MapClientError
+            // gave the result the failure's own ErrorCode, null included), never as a code of this tool's own.
+            { Kind: Sprk.Bff.Api.Services.RecordCreation.RecordCreationRefusalKind.Upstream, ClientFailure: { } upstream } =>
+                upstream.ErrorCode,
+            { Kind: Sprk.Bff.Api.Services.RecordCreation.RecordCreationRefusalKind.PrincipalUnresolved
+                or Sprk.Bff.Api.Services.RecordCreation.RecordCreationRefusalKind.Upstream } =>
+                refusal.ClientFailure?.ErrorCode ?? ToolErrorCodes.InternalError,
+            { Kind: Sprk.Bff.Api.Services.RecordCreation.RecordCreationRefusalKind.NotFoundOrDenied
+                or Sprk.Bff.Api.Services.RecordCreation.RecordCreationRefusalKind.BlockedColumn } =>
+                DataverseUserClientErrorCodes.AccessDenied,
+            { Kind: Sprk.Bff.Api.Services.RecordCreation.RecordCreationRefusalKind.Forbidden,
+                Code: Sprk.Bff.Api.Services.RecordCreation.RecordCreationRefusal.DeniedCode } =>
+                DataverseUserClientErrorCodes.AccessDenied,
+            { Kind: Sprk.Bff.Api.Services.RecordCreation.RecordCreationRefusalKind.Invalid } => ToolErrorCodes.ValidationFailed,
+            { Kind: Sprk.Bff.Api.Services.RecordCreation.RecordCreationRefusalKind.OwnerUnresolved
+                or Sprk.Bff.Api.Services.RecordCreation.RecordCreationRefusalKind.Forbidden } => refusal.Code,
+            _ => ToolErrorCodes.InternalError,
+        };
+        return (code, text);
+    }
+
+    private ToolResult RefusalError(
+        AnalysisTool tool, Sprk.Bff.Api.Services.RecordCreation.RecordCreationRefusal refusal, string correlationId,
+        DateTimeOffset startedAt)
+    {
+        var (code, message) = RefusalCodeAndText(refusal, correlationId);
+        _logger.LogWarning("[email.draft] the draft was refused: {Kind} {Code} (correlationId={CorrelationId})",
+            refusal.Kind, refusal.Code, correlationId);
+        return ToolResult.Error(HandlerId, tool.Id, tool.Name, message, code, Timed(startedAt));
+    }
 
     private ToolResult Error(AnalysisTool tool, string message, string code, DateTimeOffset startedAt) =>
         ToolResult.Error(HandlerId, tool.Id, tool.Name, message, code, Timed(startedAt));

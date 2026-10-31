@@ -27,10 +27,13 @@ using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Models;
 using Sprk.Bff.Api.Models.Office;
 using Sprk.Bff.Api.Services.Office;
+using Sprk.Bff.Api.Tests.Mocks;
 using Sprk.Bff.Api.Tests.Services.Compose;
 using Sprk.Bff.Api.Tests.Shared.Office;
 using Sprk.Bff.Api.Tests.TestInfrastructure;
 using Xunit;
+// Services.Jobs also declares a JobStatus, which collides with Models.Office.JobStatus this file uses throughout.
+using JobSubmissionService = Sprk.Bff.Api.Services.Jobs.JobSubmissionService;
 
 namespace Sprk.Bff.Api.Tests.Api.Office;
 
@@ -599,8 +602,24 @@ public class OfficeTestWebAppFactory : WebApplicationFactory<Program>
 
         builder.ConfigureTestServices(services =>
         {
+            // Task 188 r3 slice B: the internal document routes' narrowing is not under test here (see DocumentRouteExternalNarrowingTests).
+            Sprk.Bff.Api.Tests.TestInfrastructure.AllVisibleDocumentNarrowing.UseAllVisibleDocumentNarrowing(services);
+
             // Test hosts must not authenticate for real — see TestTokenCredential.
             services.UseStubTokenCredential();
+
+            // Nor may they exchange a token for real. The REAL IGraphClientFactory does an MSAL on-behalf-of exchange of the
+            // caller's bearer token ("test-caller-token" is not a JWT) through the ordered-credential provider: it probes
+            // IMDS for the managed-identity assertion (169.254.169.254 — a network timeout, not a refusal, off Azure), then
+            // calls login.microsoftonline.com, which answers AADSTS50027. Both escape TestOutboundNetworkGuard (MSAL owns
+            // its transport, not IHttpClientFactory). Every EMAIL save hits it, because OfficeEmailEnricher reads the
+            // message's sent time from the caller's mailbox whenever the request names an Exchange item id (task 132) —
+            // ~22 s per save request measured, and the 33-test OfficeEmailDocumentCommunicationLinkTests class runs its
+            // tests one after another, so it alone outlasted the office-scope CI leg's 20-minute cap. CustomWebAppFactory
+            // swaps in the same fake for the same reason. A test that is ABOUT the Graph read builds its own
+            // OfficeEmailEnricher over its own Graph double and is unaffected.
+            services.RemoveAll<IGraphClientFactory>();
+            services.AddSingleton<IGraphClientFactory, FakeGraphClientFactory>();
 
             services.RemoveAll<Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver>();
             services.AddSingleton<Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver>(Ownership);
@@ -755,6 +774,20 @@ public class OfficeTestWebAppFactory : WebApplicationFactory<Program>
                 serviceBusClientMock.Object,
                 Options.Create(new ServiceBusOptions()),
                 sp.GetRequiredService<ILogger<OfficeJobQueue>>()));
+
+            // The main-queue submitter is a SECOND Service Bus path the Office save reaches: an email save's association gate
+            // enqueues one GateDecisionRecord job (CommunicationRuleGate → GateDecisionRecordEnqueuer, task 149), and the
+            // registered JobSubmissionService opens a REAL ServiceBusClient to test.servicebus.windows.net. Off Azure that
+            // never connects, so the enqueue sits in the SDK's retry back-off until the enqueuer's own EnqueueTimeout (5 s)
+            // abandons it — 5 s of every email save, in every test class that saves one (and these run serially within a
+            // class). The double records nothing and returns at once, as the Service Bus client above does for OfficeJobQueue;
+            // a fixture that is ABOUT queued jobs registers its own (OfficeGenerateProfileTestWebAppFactory).
+            services.RemoveAll<JobSubmissionService>();
+            services.AddSingleton(new Mock<JobSubmissionService>(
+                MockBehavior.Loose,
+                Options.Create(new ServiceBusOptions { QueueName = "sdap-jobs" }),
+                Mock.Of<ILogger<JobSubmissionService>>(),
+                serviceBusClientMock.Object).Object);
 
             // task 016 (§F.2 / §F.3 — discovered empirically, not from the recorded skip reason): the save
             // route ALSO carries EntityAccessFilter ("entity.associate_document"), which is a SEPARATE
@@ -1285,6 +1318,18 @@ public sealed class OfficeVersionSaveWorld
     public List<Guid?> CreatedDocumentPersons { get; } = new();
 
     /// <summary>
+    /// Every <c>CreateDocumentAsync</c> request, in order (spaarkeai-word-add-in-r1 task 130): the communication link and
+    /// the Access Permission an email-derived document is created with are fields of the create itself.
+    /// </summary>
+    public List<CreateDocumentRequest> CreatedDocumentRequests { get; } = new();
+
+    /// <summary>
+    /// The communications the Message-ID lookup (<c>GetCommunicationByInternetMessageIdAsync</c>) finds, by RFC Message-ID (ebilling-r1
+    /// task 095). Empty by default, so the lookup answers null as the loose mock always did.
+    /// </summary>
+    public Dictionary<string, Guid> CommunicationsByMessageId { get; } = new(StringComparer.Ordinal);
+
+    /// <summary>
     /// SECURE records by LOGICAL name + id → the record's own SPE container (task 080 review, F1). Empty by default,
     /// which keeps every other test's registry answer "nothing is securable", exactly as before. When populated, the
     /// factory's <see cref="ISecurableEntityRegistry"/> double reports those LOGICAL names securable — and only the
@@ -1390,6 +1435,7 @@ public sealed class OfficeVersionSaveWorld
             CreatedDocumentDescriptions.Add(request.Description);
             CreatedDocumentOwningTeams.Add(request.OwningTeamId);
             CreatedDocumentPersons.Add(request.CreatedByPersonId);
+            CreatedDocumentRequests.Add(request);
             // FR-02 (task 014): Dataverse accepts a caller-supplied primary key on Create, and the Office
             // document-create path now supplies one so the row's id matches the id stamped into the bytes it
             // uploaded. Honouring it here is what lets a test read the stamp out of the stored item and compare
@@ -2101,6 +2147,12 @@ public sealed class OfficeVersionSaveTestWebAppFactory : OfficeTestWebAppFactory
                     "sprk_document", It.IsAny<Microsoft.Xrm.Sdk.KeyAttributeCollection>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync((string _, Microsoft.Xrm.Sdk.KeyAttributeCollection keys, string[] _, CancellationToken _) =>
                     world.RetrieveDocumentByItemId((string)keys["sprk_graphitemid"]));
+            // ebilling-r1 task 095: the communication found by Message-ID (none unless a test registers one, as before).
+            dataverse
+                .Setup(d => d.GetCommunicationByInternetMessageIdAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync((string messageId, CancellationToken _) => world.CommunicationsByMessageId.TryGetValue(messageId, out var id)
+                    ? new Microsoft.Xrm.Sdk.Entity("sprk_communication", id)
+                    : null);
             dataverse
                 .Setup(d => d.UpdateAsync("sprk_document", It.IsAny<Guid>(), It.IsAny<Dictionary<string, object>>(), It.IsAny<CancellationToken>()))
                 .Callback((string _, Guid id, Dictionary<string, object> fields, CancellationToken _) => world.ApplyGenericUpdate(id, fields))

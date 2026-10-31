@@ -90,9 +90,10 @@ public class SpeContainerMembershipService
         ExternalAccessLevel accessLevel,
         CancellationToken ct = default)
     {
+        // #2111: the contact's email is the Graph identity here but never a log field (CODE-QUALITY-RUBRIC D9).
         _logger.LogInformation(
-            "Granting SPE container membership: containerId={ContainerId}, email={Email}, accessLevel={AccessLevel}",
-            containerId, contactEmail, accessLevel);
+            "Granting SPE container membership: containerId={ContainerId}, accessLevel={AccessLevel}",
+            containerId, accessLevel);
 
         // Ownership outside the try: a container this stamp does not own is refused (404 spe_container_not_owned) before Graph (task 227d).
         var graphClient = await _ownership.ForOwnedContainerAsync(containerId, ct);
@@ -126,29 +127,29 @@ public class SpeContainerMembershipService
             if (createdPermission?.Id == null)
             {
                 _logger.LogError(
-                    "Graph API returned null or missing ID when granting membership: containerId={ContainerId}, email={Email}",
-                    containerId, contactEmail);
+                    "Graph API returned null or missing ID when granting membership: containerId={ContainerId}",
+                    containerId);
                 return new SpeContainerMembershipResult(false, null, "Graph API returned null permission after grant.");
             }
 
             _logger.LogInformation(
-                "Successfully granted SPE membership: containerId={ContainerId}, email={Email}, permissionId={PermissionId}",
-                containerId, contactEmail, createdPermission.Id);
+                "Successfully granted SPE membership: containerId={ContainerId}, permissionId={PermissionId}",
+                containerId, createdPermission.Id);
 
             return new SpeContainerMembershipResult(true, createdPermission.Id, null);
         }
         catch (ServiceException ex)
         {
             _logger.LogError(ex,
-                "Graph API error granting SPE membership: containerId={ContainerId}, email={Email}, status={StatusCode}",
-                containerId, contactEmail, ex.ResponseStatusCode);
+                "Graph API error granting SPE membership: containerId={ContainerId}, status={StatusCode}",
+                containerId, ex.ResponseStatusCode);
             return new SpeContainerMembershipResult(false, null, $"Graph API error ({ex.ResponseStatusCode}): {ex.Message}");
         }
         catch (Exception ex)
         {
             _logger.LogError(ex,
-                "Unexpected error granting SPE membership: containerId={ContainerId}, email={Email}",
-                containerId, contactEmail);
+                "Unexpected error granting SPE membership: containerId={ContainerId}",
+                containerId);
             return new SpeContainerMembershipResult(false, null, $"Unexpected error: {ex.Message}");
         }
     }
@@ -753,6 +754,28 @@ public class SpeContainerMembershipService
         return await ReadMarkersCoreAsync(graphClient, containerId, ct).ConfigureAwait(false);
     }
 
+    /// <summary>
+    /// Whether <paramref name="ex"/>, propagated by the container read of <see cref="ReadMarkersAsync"/>, is Graph saying
+    /// the container id does not RESOLVE in this tenancy (<c>400 invalidRequest</c>, e.g. "Invalid hostname for this
+    /// tenancy" when the container's SharePoint site is gone) — an answer that will not change on retry — rather than a
+    /// failure to answer.
+    /// </summary>
+    /// <remarks>
+    /// <para>The one shared rule, <see cref="SpeAdminGraphService.IsUnresolvableContainerId"/> (measured on dev 2026-10-06,
+    /// for the single-container GET only): only the <c>invalidRequest</c> code counts; a malformed query answers
+    /// <c>400 BadRequest</c> and stays a fault, as do 429, 5xx and anything that is not a Graph <c>ODataError</c>. It is
+    /// not a verdict on a later read of a container whose id has already resolved (the permission collection and its
+    /// <c>@odata.nextLink</c> pages): a 400 there is a fault. The ownership guard's own read maps every 400 to "not owned"
+    /// (a refusal the JIT sweep also reports without counting a failure), so in the JIT sweep both paths give the same
+    /// outcome for an id that does not resolve.</para>
+    /// <para><b>Deliberately NOT mapped to <see langword="null"/> in the reads</b> (#1830, task 192): their other callers treat
+    /// null as "the container does not exist, nothing to revoke" (<c>DemoExpirationJob</c>), which would fail OPEN on an id
+    /// Graph merely cannot resolve. Only the just-in-time removal sweep classifies it, only for a fault from its FIRST read
+    /// of a container, and only to report it rather than count it failed — it still touches nothing there.</para>
+    /// </remarks>
+    internal static bool IsUnresolvableContainer(Exception ex)
+        => ex is Microsoft.Graph.Models.ODataErrors.ODataError odata && SpeAdminGraphService.IsUnresolvableContainerId(odata);
+
     private static async Task<IReadOnlyDictionary<string, string>?> ReadMarkersCoreAsync(
         GraphServiceClient graphClient, string containerId, CancellationToken ct)
     {
@@ -892,10 +915,14 @@ public class SpeContainerMembershipService
         ContainerAccess access,
         CancellationToken ct = default)
     {
-        // Ownership before the try: a container this stamp does not own is refused (404), not reported as Failed (task 227d).
-        var graphClient = await _ownership.ForOwnedContainerAsync(containerId, ct).ConfigureAwait(false);
         try
         {
+            // Inside the try (#1830, task 192): a guard that cannot answer (SpaarkeStorageException on a throttled or failed
+            // ownership read, an unresolved customer identity) fails THIS grant closed — Failed, its marker kept — instead of
+            // throwing out of the caller's loop and skipping the container's remaining grants until the next run. A refusal
+            // (404 spe_container_not_owned) still propagates, not reported as Failed (task 227d): see the catch filter.
+            var graphClient = await _ownership.ForOwnedContainerAsync(containerId, ct).ConfigureAwait(false);
+
             var current = access.Roles.FirstOrDefault(r => string.Equals(r.PermissionId, permissionId, StringComparison.Ordinal));
             if (current is null && !access.RolesComplete)
             {
@@ -920,7 +947,11 @@ public class SpeContainerMembershipService
             await WriteMarkerAsync(graphClient, containerId, markerKey, value: null, ct).ConfigureAwait(false);
             return outcome;
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        catch (Exception ex) when (ex is not OperationCanceledException
+                                   && ex is not Sprk.Bff.Api.Infrastructure.Exceptions.SdapProblemException
+                                   {
+                                       Code: SpeContainerOwnershipGuard.NotOwnedErrorCode,
+                                   })
         {
             _logger.LogError(ex,
                 "[SPE-MEMBERSHIP] Removing marked grant {MarkerKey} (permission {PermissionId}) from container {ContainerId} failed.",
@@ -1506,12 +1537,16 @@ public sealed record SpeMembershipKey
     public override int GetHashCode() =>
         HashCode.Combine(ObjectId, Email is null ? 0 : StringComparer.OrdinalIgnoreCase.GetHashCode(Email));
 
-    /// <summary>Log form: the email, the object id, or both.</summary>
+    /// <summary>
+    /// Log form (#2111): the object id, and only WHETHER an email key is present — never the address. This text goes into
+    /// <see cref="SpeContainerMembershipService"/>'s log lines and into the result <c>Error</c> text the revoke and the
+    /// closure log, so it carries no PII (CODE-QUALITY-RUBRIC D9). Callers log the contact id beside it.
+    /// </summary>
     public override string ToString() => (ObjectId, Email) switch
     {
-        ({ } oid, { } email) => $"{email} (oid {oid})",
+        ({ } oid, not null) => $"oid {oid} (email key set)",
         ({ } oid, null) => $"oid {oid}",
-        (null, { } email) => email,
+        (null, not null) => "email key only (no bound oid)",
         _ => "(no key)",
     };
 }

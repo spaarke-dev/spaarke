@@ -87,7 +87,7 @@ public sealed partial class DataverseUpdateRecordHandler : IToolHandler
 {
     private const string HandlerIdValue = nameof(DataverseUpdateRecordHandler);
 
-    [GeneratedRegex(@"^[a-z][a-z0-9_]*$")]
+    [GeneratedRegex(@"^[a-z][a-z0-9_]*\z")]
     private static partial Regex LogicalNameRegex();
 
     private readonly IDataverseUserClient _dataverse;
@@ -96,16 +96,21 @@ public sealed partial class DataverseUpdateRecordHandler : IToolHandler
     private readonly IServiceScopeFactory? _scopes;
     private readonly Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver _ownership;
     private readonly Sprk.Bff.Api.Services.Access.SecureRootFilingGate _rootFiling;
+    private readonly Spaarke.Dataverse.IGenericEntityService? _appOnlyEntities;
 
     /// <param name="scopes">Task 142 (L1): the scope the Assigned-To materializer is resolved from after an update that
     /// wrote a root's "Assigned *" column. Optional for the same reason as on <c>DataverseCreateRecordHandler</c>.</param>
+    /// <param name="appOnlyEntities">ebilling-r1 D-96: the app-only reader an invoice's lines are counted with when this tool
+    /// moves an invoice to another core record (<c>OwnedChildWrite.RefileAsync</c>). Registered unconditionally by the host;
+    /// optional so the test compositions keep compiling — absent, such a move fails closed.</param>
     public DataverseUpdateRecordHandler(
         IDataverseUserClient dataverse,
         Sprk.Bff.Api.Services.Dataverse.CoreAncestorAfterWriteRestamp restamp,
         ILogger<DataverseUpdateRecordHandler> logger,
         Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver ownership,
         Sprk.Bff.Api.Services.Access.SecureRootFilingGate rootFiling,
-        IServiceScopeFactory? scopes = null)
+        IServiceScopeFactory? scopes = null,
+        Spaarke.Dataverse.IGenericEntityService? appOnlyEntities = null)
     {
         _dataverse = dataverse ?? throw new ArgumentNullException(nameof(dataverse));
         // Owner round 8 item 1: unconditionally registered beside the restamper (AddCoreAncestorResolver, which
@@ -118,6 +123,7 @@ public sealed partial class DataverseUpdateRecordHandler : IToolHandler
         // call. Registered beside the restamper (AddCoreAncestorResolver, which AddToolFramework calls) — §10 F.1.
         _rootFiling = rootFiling ?? throw new ArgumentNullException(nameof(rootFiling));
         _scopes = scopes;
+        _appOnlyEntities = appOnlyEntities;
     }
 
     /// <inheritdoc />
@@ -244,7 +250,7 @@ public sealed partial class DataverseUpdateRecordHandler : IToolHandler
             // the gate reads app-only, so a refusal of its own (an unreadable flag, a walled creator) would otherwise tell a
             // caller who may not file under the record that it exists and is secure.
             if (Sprk.Bff.Api.Services.Access.SecureRootInheritance.Inherits(tablename)
-                && await OwnedChildWrite.CheckCallerMayFileRootUnderAsync(
+                && await CallerWriteAuthorization.CheckCallerMayFileRootUnderAsync(
                         _dataverse, tablename, entitySetName, recordId, mapped.Item!, cancellationToken)
                     .ConfigureAwait(false) is { } filingRefusal)
             {
@@ -339,7 +345,11 @@ public sealed partial class DataverseUpdateRecordHandler : IToolHandler
             // reads): the re-filed row's mirror and task 148's pass over everything filed under it.
             if (refile.Written && children is not null && wasIsolated is not null)
             {
-                await children.AfterRefileAsync(tablename, recordId, wasIsolated, CancellationToken.None).ConfigureAwait(false);
+                // #2143 round 7 (F1): with the caller the re-file's F3 check acted for, so the thread that follows moves on it.
+                // #2159 slice 2: with the reparent's answer (its F3 permission), so a re-filed document's file release is recorded.
+                await children.AfterRefileAsync(
+                    tablename, recordId, wasIsolated, Sprk.Bff.Api.Services.Access.RefileThreadStep.Reconcile,
+                    refile.SecureExitCaller, refile.Resolution, CancellationToken.None).ConfigureAwait(false);
             }
 
             // Ontology D-48 / #1659 (owner decision D-125, every server-side filing path): a communication this tool re-filed
@@ -423,7 +433,9 @@ public sealed partial class DataverseUpdateRecordHandler : IToolHandler
 
     /// <summary>What the re-file step decided: a finished tool <c>Result</c> (a refusal or the caller's own error), or
     /// <c>Written</c> when the caller's PATCH already ran inside the re-file. Neither = an ordinary update.</summary>
-    private readonly record struct RefileStep(ToolResult? Result, bool Written);
+    private readonly record struct RefileStep(
+        ToolResult? Result, bool Written, Sprk.Bff.Api.Services.Access.SecureRemovalCaller? SecureExitCaller = null,
+        RecordOwnerResolution? Resolution = null);
 
     /// <summary>
     /// Task 146 r2 (verifier item 2). The re-file itself is <see cref="OwnedChildWrite.RefileAsync"/> — since task 147 r1
@@ -436,13 +448,13 @@ public sealed partial class DataverseUpdateRecordHandler : IToolHandler
     {
         var callerOid = Guid.TryParse(context.UserId, out var oid) && oid != Guid.Empty ? oid : (Guid?)null;
         var outcome = await OwnedChildWrite.RefileAsync(
-            _dataverse, _ownership, tablename, recordId, entitySetName, primaryIdAttribute, item, callerOid, ct)
+            _dataverse, _ownership, tablename, recordId, entitySetName, primaryIdAttribute, item, callerOid, ct, _appOnlyEntities)
             .ConfigureAwait(false);
 
         return outcome switch
         {
             { NotARefile: true } => default,
-            { Written: true } => new RefileStep(null, true),
+            { Written: true } => new RefileStep(null, true, outcome.SecureExitCaller, outcome.Resolution),
             _ => new RefileStep(RefileRefusal(tool, tablename, outcome, startedAt), false),
         };
     }
@@ -517,6 +529,9 @@ public sealed partial class DataverseUpdateRecordHandler : IToolHandler
         {
             { ClientFailure: { } failure } => MapClientError(tool, failure, startedAt),
             { Invalid: { } invalid } => Error(tool, $"The update was NOT written: {invalid}", ToolErrorCodes.ValidationFailed, startedAt),
+            // ebilling-r1 FR-05 (ISS-010): the invoice-family guard, run by the re-file core — its stable code.
+            { InvoiceFamilyRefusal: { } family } => Error(tool, $"The update was NOT written: {family.Reason} ({family.RefusalCode}).",
+                family.RefusalCode ?? ToolErrorCodes.ValidationFailed, startedAt),
             { Denied: { } denied } => Error(tool, denied, DataverseUserClientErrorCodes.AccessDenied, startedAt),
             { SecureFilingRefused: { } owner } => Error(tool,
                 $"A '{tablename}' record cannot be filed under a secure record from chat; the update was NOT written" +

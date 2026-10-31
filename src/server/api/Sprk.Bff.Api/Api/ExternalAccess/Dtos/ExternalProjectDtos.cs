@@ -24,6 +24,18 @@ public sealed class ExternalCollectionResponse<T>
     [JsonPropertyName("truncated")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     public bool Truncated { get; init; }
+
+    /// <summary>
+    /// Whether the caller may create a child of this list's kind (a to-do; an event on a project) under the record the
+    /// list is scoped to: the answer that record's create route would give. Written ONLY for a caller whose access
+    /// Dataverse decides (<c>CallerPrincipal.DataverseConfirmsWrites</c>, unified-access-control-r2 task 036 fix round 1,
+    /// F4): their <c>/me</c> level reflects only what they may SEE, so the client asks the record instead. Omitted
+    /// (<c>null</c>) for every other caller and on every other list, so those responses are byte-for-byte what they were;
+    /// a client reads a missing field as "not said" and keeps its access-level rule. The route still decides every create.
+    /// </summary>
+    [JsonPropertyName("canCreate")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? CanCreate { get; init; }
 }
 
 // ---------------------------------------------------------------------------
@@ -120,6 +132,15 @@ public sealed class ExternalDocumentDto
     /// <see cref="SprkCreatedbypersonValue"/>.</summary>
     [JsonPropertyName("_sprk_createdbycontact_value")]
     public string? SprkCreatedbycontactValue { get; init; }
+
+    /// <summary>
+    /// <c>true</c> when the document has a file the download and versions routes can serve; <c>false</c> when it has none
+    /// (no usable SPE pointers), so the SPA lists the row without Download or Versions (R3 ISS-011, #1886, owner decision
+    /// 2026-10-14). Always written. A boolean only: the pointers themselves never leave the BFF. The routes still refuse
+    /// a no-file request on their own (409 <c>no_file_attached</c>).
+    /// </summary>
+    [JsonPropertyName("hasFile")]
+    public bool HasFile { get; init; }
 }
 
 // ---------------------------------------------------------------------------

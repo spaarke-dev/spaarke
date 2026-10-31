@@ -309,6 +309,11 @@ public sealed class DocumentRefileOwnershipTestFixture : DocumentDestroyAuthoriz
         ShareTable.Seed("sprk_document", CallersSecureDocument, DataversePrincipalRef.User(Sharee), CollaborateMask);
         var shareWorld = ShareWorld;
         World.OnAssign = (entity, id, team) => shareWorld.MoveOwner(entity, id, DataversePrincipalRef.Team(team));
+
+        // #2143: the PUT's update lands on the directory's row — the resolver reads the row after the change.
+        var world = World;
+        OnDocumentUpdated = (id, request) => world.Write("sprk_document", Guid.Parse(id),
+            RecordReparent.ParentChangesOf(request).ToDictionary(change => change.Key, change => (object?)change.Value));
     }
 
     private static Directory NewWorld() => Directory.Standard()

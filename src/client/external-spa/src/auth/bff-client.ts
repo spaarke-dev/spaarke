@@ -154,6 +154,18 @@ export interface ExternalUserContextResponse {
    * (task 054); the server's delete check stays the authority.
    */
   systemUserId?: string | null;
+  /**
+   * The firms the caller can submit invoices for (ebilling-r1 task 051): only the caller's own, id and name. `[]` means
+   * the caller belongs to no firm; `null` or absent (a BFF that predates it, eBilling off, or a read that failed) means
+   * unknown, never "no firm". Read only by the invoice submission firm step.
+   */
+  firms?: Array<{ firmId: string; name: string }> | null;
+  /**
+   * `true` when the caller's write access is decided per record, as Dataverse decides it (a licensed systemuser under
+   * unified-access-control-r2 task 036, fix round 1). The `projects` levels then say only what the caller may SEE; create
+   * and upload controls follow the record's own list (`canCreate`) instead. Absent for every other caller.
+   */
+  writeAccessPerRecord?: boolean;
   /** List of projects the user can access, with their current access level */
   projects: Array<{
     /** Secure Project record ID */

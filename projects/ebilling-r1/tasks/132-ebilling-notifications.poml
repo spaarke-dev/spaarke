@@ -1,0 +1,122 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="132" project="ebilling-r1">
+  <metadata>
+    <title>Notifications: email, SPA feed, approver in-app</title>
+    <phase>5 Firm feedback (WP5) — wave W5-3</phase>
+    <gate>startable</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Wires existing delivery components (CommunicationService, the external notification feed, IActionSeam) to eBilling events; recipient targeting is security-relevant and gets negative tests, but no new auth model.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Integration of existing components with explicit event, recipient and idempotency rules below.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>131, 133, 024, 103, 104</deps>
+    <tags>bff, notifications, email</tags>
+    <estimated-effort>2 days</estimated-effort>
+  </metadata>
+
+  <prompt>Deliver eBilling notifications (FR-39): email from the shared mailbox through CommunicationService to the submitter and the firm's billing contact, with the 131 notice and the 133 PDF attached, on submission rejection, Return to Firm, whole-invoice Reject and approval with adjustments; the same events in the SPA notification feed; and an in-app notification to every eligible approver when an invoice is accepted — as one idempotent IJobHandler enqueued by 049, 103 and 104.</prompt>
+
+  <role>SPAARKE platform developer. Expert in the BFF job contract (ADR-004), CommunicationService, the external notification feed and the notification spine (ADR-047).</role>
+
+  <goal>EbillingNotificationJobHandler handles the five events idempotently; 049's no-op notification seam and the 103 / 104 hooks enqueue it; the external feed shows eBilling outcome items to the submitter and billing contact; eligible approvers receive an appnotification on acceptance; tests cover recipients, the no-email-without-adjustments rule, missing billing contact and re-delivery.</goal>
+
+  <context>
+    <background>Spec FR-39 (acceptance: no email when approved with no adjustments — SPA status only; missing billing contact → submitter only, logged), FR-35 (in-app notification to eligible approvers), FR-50 (reviewer edits the draft for Return / Reject; in-session rejections send the draft; sent text stored), D-45, ADR-047. Email: CommunicationService.SendAsync (Services/Communication/CommunicationService.cs:1234) with SendMode.SharedMailbox and AttachmentDocumentIds (Services/Communication/Models/SendCommunicationRequest.cs:88). Firm billing contact: sprk_organization.sprk_billingcontact (024). Notice body: 131's FirmNoticeComposer. PDF: 133's report service (sprk_reportdocument). Sent text: sprk_invoicesubmission.sprk_firmnoticetext (020). SPA feed: the external feed is DERIVED, not outbox-based — Api/ExternalAccess/ExternalNotificationFeedEndpoints.cs:1-30 (sources: grants and messages; "appnotification targets systemusers only"; recordType route segments already include invoices). Approvers (internal systemusers): Layer-A seam IActionSeam.CreateNotificationAsync (Services/Ai/PublicContracts/IActionSeam.cs:35) creates an appnotification. Spine outbox kinds are a closed set (Services/Notifications/Envelopes/NotificationKind.cs; ADR-047).</background>
+    <relevant-files>
+      <file role="new">src/server/api/Sprk.Bff.Api/Services/Jobs/Handlers/EbillingNotificationJobHandler.cs</file>
+      <file role="new">src/server/api/Sprk.Bff.Api/Services/Finance/EbillingNotificationRecipients.cs (recipient resolution)</file>
+      <file role="modify">049's notification seam in the InvoiceSubmissionProcessing handler, and the 103 / 104 approval, reject and return paths (enqueue only)</file>
+      <file role="modify">104's Reject / Return request DTO (optional reviewer-edited subject and prose, if 104 did not add them)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ExternalNotificationFeedEndpoints.cs (third derived source: eBilling outcomes)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/DI/FinanceModule.cs (shared append point)</file>
+      <file role="new">tests/unit/Sprk.Bff.Api.Tests/Services/Jobs/Handlers/EbillingNotificationJobHandlerTests.cs</file>
+      <file role="new">tests/integration/seam/Notifications/EbillingNotificationSeamTests.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Jobs/Handlers/InvoiceExtractionJobHandler.cs:28-80 (JobTypeName, outcomes)</file>
+      <file role="canonical-reference">.claude/patterns/api/send-email-integration.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="131" status="pending">FirmNoticeComposer and draft route</dependency>
+      <dependency task="133" status="pending">Adjustment report PDF</dependency>
+      <dependency task="024" status="pending">Firm billing-contact lookup</dependency>
+      <dependency task="103" status="pending">Eligible approvers, approval</dependency>
+      <dependency task="104" status="pending">Reject and Return to Firm</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="FR-39">Firm email events: SubmissionRejected, ReturnedToFirm, InvoiceRejected, ApprovedWithAdjustments. A 105 Return of a blocked internal submission arrives at the seam as SubmissionDecisionOutcome.Returned (reason code ebilling.submission.returned) and is a ReturnedToFirm firm notice (D-143); a 105 Override arrives as Accepted. Approved with no adjustment: no email, no feed item beyond status. Recipients: submitter contact plus the firm billing contact (deduplicated); missing or emailless billing contact → submitter only plus a warning log with ids.</constraint>
+    <constraint source="FR-50, D-60">Return / Reject send the reviewer-edited subject and prose when supplied (re-composed through 131 so data is still inserted by the template); in-session rejections send the composed draft unchanged. The sent subject and HTML are stored on the submission (invoice outcomes: the invoice's originating submission).</constraint>
+    <constraint source="ADR-004, NFR-08">One IJobHandler, idempotent per (subject id, event kind): a re-delivered message never sends a second email or creates a second appnotification; state the at-most-once marker used (written before sending) in notes. Enqueue happens after the triggering decision is persisted.</constraint>
+    <constraint source="ADR-047">No second push or delivery path: approvers through IActionSeam.CreateNotificationAsync (appnotification); no new NotificationKind; the external feed gains a derived source, not an outbox. Test the negative-access case.</constraint>
+    <constraint source="NFR-10, ADR-028">Feed items reach only the submitter or the firm's billing contact, and only for a record in the caller's accessible set (same fail-closed re-check the feed applies to grants); appnotifications only to eligible approvers resolved by 103.</constraint>
+    <constraint source="ADR-015">Emails carry only the 131 notice; logs carry ids, recipient counts and outcome codes, never addresses or text.</constraint>
+    <constraint source=".claude/constraints/bff-extensions.md">BFF hygiene: placement BFF IJobHandler (spec placement table), no package, publish-size delta recorded, no new HIGH CVE.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/patterns/api/send-email-integration.md</file>
+      <file>docs/architecture/SPAARKE-NOTIFICATION-SPINE-ARCHITECTURE.md</file>
+      <file>.claude/adr/ADR-047-notification-action-spine.md</file>
+      <file>.claude/adr/ADR-004-job-contract.md</file>
+      <file>docs/architecture/external-access-spa-architecture.md</file>
+      <file>docs/standards/TEST-ARCHITECTURE.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Read 049's notification seam, 103's eligible-approver resolver and 104's Reject / Return handlers; check whether 111's decision wizard shows the 131 draft for editing before Return / Reject (see escalation).</step>
+    <step order="1">Job payload: event kind, subject (submission or invoice id), optional reviewer-edited subject and prose, correlation id. Wire enqueue calls into 049 (SubmissionRejected; InvoiceAccepted for approvers), 103 (ApprovedWithAdjustments when any line or invoice adjustment exists) and 104 (InvoiceRejected, ReturnedToFirm).</step>
+    <step order="2">Firm events: resolve recipients, ensure 133's report exists (generate if missing), compose with 131, send via CommunicationService (shared mailbox, associations to the invoice / submission and core record, report attached), store sent text.</step>
+    <step order="3">InvoiceAccepted: one appnotification per eligible approver through IActionSeam (title and body with tracking number and firm name only; action URL opens the Invoice Review page).</step>
+    <step order="4">External feed: add an eBilling source to GetFeedAsync (ExternalNotificationFeedEndpoints.cs:125) — outcome events of the last 30 days on submissions / invoices where the caller's contact is the submitter or the firm's billing contact, re-checked against the accessible set; recordType invoices (or the submission route 134 uses).</step>
+    <step order="5">Tests: recipients (both, deduplicated, billing contact missing → submitter only and logged); approved without adjustments → no email; re-delivery → no second email or appnotification; edited prose used for Return / Reject; non-eligible user gets no appnotification; feed item not shown to another firm's contact or to a contact without access; seam test drives the job through CommunicationService with only the Graph boundary doubled.</step>
+    <step order="6">dotnet build and dotnet test green; publish-size delta and vulnerable-package check recorded.</step>
+    <step order="7">Update TASK-INDEX.md: this task's status cell to "✅ [done]".</step>
+    <step order="8">Record deviations (feed source design, idempotency marker, any new App Service setting name for 136) in projects/ebilling-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If 111's Reject / Return step does not let the reviewer see and edit the 131 draft (FR-50, D-60), STOP and ask the main session whether this task adds that UI step or a new task does; never send Return / Reject emails without the reviewer review step.</trigger>
+    <trigger>If approver notification needs a spine outbox kind (closed taxonomy, ADR-047) rather than IActionSeam, STOP and raise 🔔 ADR Conflict — Resolution Required; do not add a NotificationKind.</trigger>
+    <trigger>If the derived external feed cannot take an eBilling source without changing its contract with SPA-r3 (route segments, item shape), STOP and coordinate before editing.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>CommunicationService (email), ExternalNotificationFeedEndpoints (SPA feed, derived), IActionSeam.CreateNotificationAsync (appnotification); spec section 11 row "Notifications — Existing spine — Reuse"; grep "EbillingNotification" in src finds none.</existing>
+    <extension>All three delivery paths are reused unchanged; the job handler is new because no existing job owns eBilling event fan-out with per-event idempotency, and the feed is extended with one derived source.</extension>
+    <cost-of-doing-nothing>Firms are not told of rejections, returns or adjustments and approvers are not told an invoice awaits them (FR-39, FR-35 fail; success criterion 6 fails).</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="dotnet">build, test</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Jobs/Handlers/EbillingNotificationJobHandler.cs; Services/Finance/EbillingNotificationRecipients.cs; external feed source</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Jobs/Handlers/EbillingNotificationJobHandlerTests.cs; tests/integration/seam/Notifications/EbillingNotificationSeamTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Each of SubmissionRejected, ReturnedToFirm, InvoiceRejected and ApprovedWithAdjustments sends one email from the shared mailbox to submitter and billing contact with the 131 notice and the 133 PDF attached, and stores the sent text on the submission.</criterion>
+    <criterion testable="true">An invoice approved with no adjustments sends no email.</criterion>
+    <criterion testable="true">A firm without a billing contact (or a contact without email) results in an email to the submitter only and a warning log carrying ids only.</criterion>
+    <criterion testable="true">Re-delivering any job message sends no second email and creates no second appnotification.</criterion>
+    <criterion testable="true">On acceptance every eligible approver gets one appnotification; a non-eligible user gets none.</criterion>
+    <criterion testable="true">The SPA feed shows the eBilling item to the submitter and the billing contact and never to another firm's contact or a contact without access to the core record.</criterion>
+    <criterion testable="true">For Return / Reject, reviewer-edited prose is sent; amounts and citations still come from the template.</criterion>
+    <criterion testable="true">Publish-size delta measured against a fresh master build and recorded in task notes; no new HIGH CVE.</criterion>
+    <criterion testable="true">Cover the stated contract plus the edge cases named above. Anything beyond that needs a one-line justification in task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>Discrepancy recorded at authoring: spec FR-39 says the SPA feed goes through the notification spine (ADR-047), but the spine outbox targets systemusers only and the SPA feed is derived (ExternalNotificationFeedEndpoints header); this task extends the derived feed. ExternalNotificationFeedEndpoints.cs is SPA-r3's file — run /conflict-check before the PR. FinanceModule.cs is a shared append point. Any App Service setting this task needs (for example a dedicated sender mailbox) is recorded by name in notes for 136; none is expected (default shared mailbox).</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load the knowledge files first. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

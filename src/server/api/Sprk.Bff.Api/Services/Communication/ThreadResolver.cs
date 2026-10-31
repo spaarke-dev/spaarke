@@ -280,12 +280,17 @@ public sealed class ThreadResolver : IThreadResolver
             || !Sprk.Bff.Api.Services.Dataverse.RecordOwnershipResolver.IsOwnershipParent(anchor.RecordType))
             return null; // no anchor, or a party anchor (account / contact / organization): keeps its creator
 
+        // UAC task 194b R3b-2: through the one builder, keyed by the typed regarding lookup the thread holds (its one parent).
         var owner = await _ownership.ResolveOwnerAsync(
-            new Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext
-            {
-                TargetEntityLogicalName = anchor.RecordType,
-                TargetRecordId = recordId,
-            },
+            Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext.ForRow(
+                "sprk_communicationthread",
+                new[]
+                {
+                    KeyValuePair.Create(
+                        RegardingFieldMap.FieldFor(anchor.RecordType) ?? anchor.RecordType,
+                        (Sprk.Bff.Api.Services.Dataverse.RecordOwnershipParent?)new Sprk.Bff.Api.Services.Dataverse.RecordOwnershipParent(
+                            anchor.RecordType, recordId)),
+                }),
             ct);
 
         if (!owner.IsOwned)
@@ -301,10 +306,12 @@ public sealed class ThreadResolver : IThreadResolver
     /// (logged) rather than joining a secure record's thread while owned elsewhere. Direct / master threads (no
     /// regarding) are assigned as before.
     /// </summary>
-    private Task<ThreadAssignment> AssignThreadReconcilingOwnerAsync(Guid communicationId, Guid threadId, CancellationToken ct) =>
+    private Task<ThreadAssignment> AssignThreadReconcilingOwnerAsync(
+        Guid communicationId, Guid threadId, Sprk.Bff.Api.Services.Access.SecureRemovalCaller? secureExitCaller,
+        CancellationToken ct) =>
         AssignToThreadReconcilingOwnerAsync(
             _entityService, _ownership, communicationId, threadId,
-            token => AssignThreadAsync(communicationId, threadId, token), ct);
+            token => AssignThreadAsync(communicationId, threadId, token), secureExitCaller, ct);
 
     /// <summary>
     /// The ONE "a message joins an existing thread" ownership step, shared by this resolver's JOIN path and
@@ -320,14 +327,29 @@ public sealed class ThreadResolver : IThreadResolver
     /// lookup, nobody otherwise (or when the thread could not be read) — so the grant never re-reads a type or lookup the
     /// thread's owner can rewrite in between.</para>
     /// </summary>
-    internal static async Task<ThreadAssignment> AssignToThreadReconcilingOwnerAsync(
+    internal static Task<ThreadAssignment> AssignToThreadReconcilingOwnerAsync(
         IGenericEntityService entityService,
         Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver ownership,
         Guid communicationId,
         Guid threadId,
         Func<CancellationToken, Task> assign,
         CancellationToken ct) =>
-        (await JoinCoreAsync(entityService, ownership, communicationId, threadId, assign, beforeRefileWrite: null, ct)
+        AssignToThreadReconcilingOwnerAsync(entityService, ownership, communicationId, threadId, assign, secureExitCaller: null, ct);
+
+    /// <summary>
+    /// <see cref="AssignToThreadReconcilingOwnerAsync(IGenericEntityService, Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver, Guid, Guid, Func{CancellationToken, Task}, CancellationToken)"/>
+    /// acting for <paramref name="secureExitCaller"/> (#2143 round 7, F1): the person whose re-file this join follows — its
+    /// reparent asks that person's F3 rights for a move off a secure record's thread. <c>null</c>: nobody (refused).
+    /// </summary>
+    internal static async Task<ThreadAssignment> AssignToThreadReconcilingOwnerAsync(
+        IGenericEntityService entityService,
+        Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver ownership,
+        Guid communicationId,
+        Guid threadId,
+        Func<CancellationToken, Task> assign,
+        Sprk.Bff.Api.Services.Access.SecureRemovalCaller? secureExitCaller,
+        CancellationToken ct) =>
+        (await JoinCoreAsync(entityService, ownership, communicationId, threadId, assign, beforeRefileWrite: null, secureExitCaller, ct)
             .ConfigureAwait(false)).Assignment;
 
     /// <summary>
@@ -400,6 +422,7 @@ public sealed class ThreadResolver : IThreadResolver
                             .BeforeWriteAsync(children, CommunicationTable, communicationId, token).ConfigureAwait(false);
                     }
                 },
+                secureExitCaller: null,
                 ct).ConfigureAwait(false);
 
             if (!refiled || !runsStep)
@@ -443,6 +466,7 @@ public sealed class ThreadResolver : IThreadResolver
         Guid threadId,
         Func<CancellationToken, Task> assign,
         Func<Sprk.Bff.Api.Services.Dataverse.RecordOwnershipParent, CancellationToken, Task>? beforeRefileWrite,
+        Sprk.Bff.Api.Services.Access.SecureRemovalCaller? secureExitCaller,
         CancellationToken ct)
     {
         var threadRow = await entityService.RetrieveAsync(
@@ -473,12 +497,24 @@ public sealed class ThreadResolver : IThreadResolver
             {
                 EntityLogicalName = "sprk_communication",
                 RecordId = communicationId,
-                ParentChanges = new Dictionary<string, EntityReference?>(),
-                InheritedParents = new[] { filedUnder },
+                // #2143 round 5 (F1): the thread lookup this join writes, WITH the row it writes, so the resolver reads it as
+                // this call's own change and not another writer's (its lineage overlay). A lineage-only lookup decides no owner
+                // and names nothing to put back; the put-back still comes from AttachColumns. Enforced by:
+                // RecordOwnershipResolverTests.Reparent_WhenAnAttachColumnIsALineageOnlyLookupNotNamedInParentChanges_ThrowsArgumentException_BeforeAnyReadOrWrite.
+                ParentChanges = new Dictionary<string, EntityReference?>
+                {
+                    [ThreadLookupOnCommunication] = new EntityReference("sprk_communicationthread", threadId),
+                },
+                // #2143 round 6: no InheritedParents — the resolver reads the thread this join names in ParentChanges and files
+                // the message under the thread's own filing (RecordThreadFiling), the ONE source of a message's thread parents.
+                // The anchor read above only gates this reparent, picks the audience and is told to beforeRefileWrite.
                 // Task 146 b2: the column the JOIN writes — put back if the owner assignment that must follow it fails, so
                 // the message is never left in a secure record's thread while owned elsewhere.
                 AttachColumns = new[] { ThreadLookupOnCommunication },
                 WhenUnfiled = Sprk.Bff.Api.Services.Dataverse.UnfiledOwnership.KeepCreator,
+                // #2143 round 7 (F1): the person whose re-file this join follows, when it does (the filing reconcile's move
+                // to the record's thread); a capture or send join acts for nobody — it never leaves a secure record.
+                SecureExitCaller = secureExitCaller,
             },
             async token =>
             {
@@ -691,7 +727,16 @@ public sealed class ThreadResolver : IThreadResolver
         ReconcileThreadForFilingAsync(communicationId, FilingReconcileHost.AfterRefileStep, ct);
 
     /// <inheritdoc />
-    public async Task ReconcileThreadForFilingAsync(Guid communicationId, FilingReconcileHost host, CancellationToken ct = default)
+    public Task ReconcileThreadForFilingAsync(Guid communicationId, FilingReconcileHost host, CancellationToken ct = default) =>
+        ReconcileThreadForFilingAsync(communicationId, host, secureExitCaller: null, beforeMessageGrant: null, ct);
+
+    /// <inheritdoc />
+    public async Task ReconcileThreadForFilingAsync(
+        Guid communicationId,
+        FilingReconcileHost host,
+        Sprk.Bff.Api.Services.Access.SecureRemovalCaller? secureExitCaller,
+        Func<CancellationToken, Task>? beforeMessageGrant,
+        CancellationToken ct = default)
     {
         try
         {
@@ -727,7 +772,7 @@ public sealed class ThreadResolver : IThreadResolver
                 // whose thread resolution failed) never shows on a record's panel. Resolve its thread now, through the same
                 // join→grant sequence as the capture paths; an unfiled email without a thread is left as it is.
                 if (regarding is not null)
-                    await ResolveMissingThreadAsync(email, communicationId, host, ct);
+                    await ResolveMissingThreadAsync(email, communicationId, host, beforeMessageGrant, ct);
                 else
                     _logger.LogDebug("Filing reconcile skipped: {CommunicationId} is unfiled and has no thread", communicationId);
                 return;
@@ -806,12 +851,14 @@ public sealed class ThreadResolver : IThreadResolver
             // false, and only the email moves).
             if (!isDefaultThread && isActive
                 && await FiledToOnlyAsync(threadId, communicationId, regarding, recordId, ct) is { } filedToRecord
-                && await AnchorThreadForFilingAsync(threadId, thread, communicationId, regarding, recordId, filedToRecord, ct))
+                && await AnchorThreadForFilingAsync(
+                    threadId, thread, communicationId, regarding, recordId, filedToRecord, beforeMessageGrant, ct))
             {
                 return;
             }
 
-            if (await MoveToRecordDefaultThreadAsync(threadId, communicationId, regarding, ct) && retireIfEmpty)
+            if (await MoveToRecordDefaultThreadAsync(
+                    threadId, communicationId, regarding, secureExitCaller, beforeMessageGrant, ct) && retireIfEmpty)
                 await RetireIfEmptyAsync(threadId, ct);
         }
         catch (Exception ex)
@@ -993,7 +1040,9 @@ public sealed class ThreadResolver : IThreadResolver
     /// Rule 2: anchors the thread to R — the fields <see cref="CreateThreadAsync"/> writes for an anchored thread, owned by
     /// R's team (S6) — re-derives its name, and grants R's members every message in it filed to R. A thread anchored to a
     /// previous record loses that record's typed lookup (and its display fields when R has none), so the thread's one anchor
-    /// (<see cref="ThreadAnchorOf"/>) is R.
+    /// (<see cref="ThreadAnchorOf"/>) is R. #2143 round 10 (F2-a): <paramref name="beforeMessageGrant"/> runs once, after the
+    /// anchor and before the grants — as on rule 3's move — so the step after a re-file takes the email's mirror off before
+    /// this grant, never after it (the removal revokes every direct share).
     /// </summary>
     /// <returns>
     /// <c>false</c> when the thread may not follow whole because its owner or R's is the Secure team (F1-b) — nothing is
@@ -1003,7 +1052,7 @@ public sealed class ThreadResolver : IThreadResolver
     /// </returns>
     private async Task<bool> AnchorThreadForFilingAsync(
         Guid threadId, DataverseEntity thread, Guid communicationId, RegardingAnchor regarding, Guid recordId,
-        IReadOnlyList<Guid> filedToRecord, CancellationToken ct)
+        IReadOnlyList<Guid> filedToRecord, Func<CancellationToken, Task>? beforeMessageGrant, CancellationToken ct)
     {
         Sprk.Bff.Api.Services.Dataverse.RecordOwnerResolution? ownership;
         try
@@ -1083,6 +1132,9 @@ public sealed class ThreadResolver : IThreadResolver
 
         await ReDeriveThreadNameAsync(threadId, ct); // marker-gated; a user-renamed thread keeps its name
 
+        if (beforeMessageGrant is not null)
+            await beforeMessageGrant(ct);
+
         var assignment = ThreadAssignment.Anchored(threadId, regarding.RecordType, recordId);
         foreach (var messageId in filedToRecord)
             await GrantAsync(messageId, assignment, ct);
@@ -1160,10 +1212,15 @@ public sealed class ThreadResolver : IThreadResolver
     /// <summary>
     /// Rule 3: moves the email to R's per-record default thread (Tier 2) through the S6 join, then grants it to R's
     /// members — the Tier-2 audience, from the email's own regarding (#1629 F-C), never a re-read of the thread. Answers
-    /// whether the email left <paramref name="fromThreadId"/>.
+    /// whether the email left <paramref name="fromThreadId"/>. #2143 round 7 (F1): the join acts for
+    /// <paramref name="secureExitCaller"/>, the person whose re-file this move follows (<c>null</c>: nobody). Round 8 (F1-A):
+    /// <paramref name="beforeMessageGrant"/> runs between the join and the grant (the step after a re-file takes the email's
+    /// mirror off there when the join took it out of isolation, so the removal never revokes this grant).
     /// </summary>
     private async Task<bool> MoveToRecordDefaultThreadAsync(
-        Guid fromThreadId, Guid communicationId, RegardingAnchor regarding, CancellationToken ct)
+        Guid fromThreadId, Guid communicationId, RegardingAnchor regarding,
+        Sprk.Bff.Api.Services.Access.SecureRemovalCaller? secureExitCaller,
+        Func<CancellationToken, Task>? beforeMessageGrant, CancellationToken ct)
     {
         var recordThreadId = await FindOrCreateDefaultThreadAsync(
             regarding.RecordType, regarding.RecordId, regarding, requireOpen: false, ct);
@@ -1172,10 +1229,32 @@ public sealed class ThreadResolver : IThreadResolver
 
         // #2091: the S6 join without the step after a re-file — inside that step this IS its thread reconcile, and from the sweep
         // (#2110) it adds no parent either: the default thread is R's, the record the email is already filed to.
-        await AssignThreadReconcilingOwnerAsync(communicationId, recordThreadId, ct);
+        try
+        {
+            await AssignThreadReconcilingOwnerAsync(communicationId, recordThreadId, secureExitCaller, ct);
+        }
+        catch (Sprk.Bff.Api.Services.Dataverse.RecordOwnerUnresolvedException refused)
+        {
+            // #2143 round 7b: the re-file this move follows asked F3 about every secure record the move leaves (the resolver,
+            // before the re-file wrote), so a refusal here is only a race — the thread was re-filed between that check and this
+            // move — or a reconcile no person's re-file started. Fail-safe: the email keeps the thread and its owner (an
+            // isolated email stays isolated), named here for an operator; the filing sweep retries it. Round 8: an Error only
+            // for the race (a person's pre-checked re-file); a person-less reconcile (the sweep, on every run, for each legacy
+            // row it cannot move) is a Warning.
+            _logger.Log(
+                secureExitCaller is null ? LogLevel.Warning : LogLevel.Error,
+                "Filing reconcile could not move {CommunicationId} from thread {FromThreadId} to the default thread {ThreadId} of " +
+                "{RecordType}:{RecordId}: the move was refused ({Code}). The email keeps its thread and its owner (#2143).",
+                communicationId, fromThreadId, recordThreadId, regarding.RecordType, regarding.RecordId, refused.RefusalCode);
+            throw;
+        }
+
         _logger.LogInformation(
             "Filing reconcile moved {CommunicationId} from thread {FromThreadId} to the default thread {ThreadId} of " +
             "{RecordType}:{RecordId}", communicationId, fromThreadId, recordThreadId, regarding.RecordType, regarding.RecordId);
+
+        if (beforeMessageGrant is not null)
+            await beforeMessageGrant(ct);
 
         if (AssignmentFor(recordThreadId, regarding) is { } assignment)
             await GrantAsync(communicationId, assignment, ct);
@@ -1230,10 +1309,12 @@ public sealed class ThreadResolver : IThreadResolver
     /// the step's mirror, its pass and its gate step run after this reconcile and see that join, so the join runs none of its
     /// own. On its own (<see cref="FilingReconcileHost.Standalone"/>, the backfill sweep) nothing else follows it: a join under a
     /// record the email is NOT filed to runs the step once for that join; a join under a record it is filed to adds no parent
-    /// and runs none.
+    /// and runs none. #2143 round 10 (F2-a): <paramref name="beforeMessageGrant"/> runs between that join and the grant, as on
+    /// rule 3's move.
     /// </remarks>
     private async Task ResolveMissingThreadAsync(
-        DataverseEntity email, Guid communicationId, FilingReconcileHost host, CancellationToken ct)
+        DataverseEntity email, Guid communicationId, FilingReconcileHost host,
+        Func<CancellationToken, Task>? beforeMessageGrant, CancellationToken ct)
     {
         var joinRunsAfterRefileFor = host == FilingReconcileHost.Standalone
             ? (Func<Sprk.Bff.Api.Services.Dataverse.RecordOwnershipParent, bool>)(filedUnder =>
@@ -1258,6 +1339,8 @@ public sealed class ThreadResolver : IThreadResolver
 
         _logger.LogInformation(
             "Filing reconcile gave the threadless email {CommunicationId} thread {ThreadId}", communicationId, assignment.ThreadId);
+        if (beforeMessageGrant is not null)
+            await beforeMessageGrant(ct);
         await GrantAsync(communicationId, assignment, ct);
 
         // Task 065 fix round 4 (K1): a RECEIVED email is written internal-only until its thread is known; this sweep is the
@@ -1435,12 +1518,19 @@ public sealed class ThreadResolver : IThreadResolver
         Sprk.Bff.Api.Services.Dataverse.RecordOwnerResolution? recordOwner = null;
         if (Sprk.Bff.Api.Services.Dataverse.RecordOwnershipResolver.IsOwnershipParent(entityType))
         {
+            // UAC task 194b R3b-2: through the one builder, keyed by the typed regarding lookup written below (its one parent).
             var owner = await _ownership.ResolveOwnerAsync(
-                new Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext
+                Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext.ForRow(
+                    "sprk_communicationthread",
+                    new[]
+                    {
+                        KeyValuePair.Create(
+                            regardingField,
+                            (Sprk.Bff.Api.Services.Dataverse.RecordOwnershipParent?)new Sprk.Bff.Api.Services.Dataverse.RecordOwnershipParent(
+                                entityType, regardingId)),
+                    },
+                    callerSystemUserId: ownerSystemUserId) with
                 {
-                    TargetEntityLogicalName = entityType,
-                    TargetRecordId = regardingId,
-                    CallerSystemUserId = ownerSystemUserId,
                     // Task 146 c1-r1 (owner round 13 item 9): the caller asked for this app-created record thread.
                     RequestedBy = Sprk.Bff.Api.Services.Dataverse.RecordRequester.Of(ownerSystemUserId),
                 },

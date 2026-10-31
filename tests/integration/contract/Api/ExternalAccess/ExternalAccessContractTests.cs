@@ -1760,6 +1760,16 @@ internal sealed class HeaderDrivenIdentityStore : IContactIdentityStore
     public Task<ContactLookup> FindActiveContactsByEmailAsync(string email, CancellationToken ct) => _inner.FindActiveContactsByEmailAsync(email, ct);
     public Task<ContactLookup> FindInactiveContactsByEmailAsync(string email, CancellationToken ct) => _inner.FindInactiveContactsByEmailAsync(email, ct);
     public Task<ContactLookup> GetContactAsync(Guid contactId, CancellationToken ct) => _inner.GetContactAsync(contactId, ct);
+    // Slice C: a contact this double synthesizes from the header is active, bound and NOT removed (as described above); a
+    // contact the shared in-memory store holds answers as that store does.
+    public Task<RemovedMarkerRead> ReadRemovedMarkerAsync(Guid contactId, CancellationToken ct)
+        => _inner.Contacts.ContainsKey(contactId)
+            ? _inner.ReadRemovedMarkerAsync(contactId, ct)
+            : Task.FromResult(RemovedMarkerRead.NotRemoved);
+    public Task<StoreWriteResult> WriteRemovedMarkerAsync(Guid contactId, DateTimeOffset? removedOn, CancellationToken ct) => _inner.WriteRemovedMarkerAsync(contactId, removedOn, ct);
+    public Task<StoreWriteResult> WriteRemovedMarkerIfUnchangedAsync(Guid contactId, string? etag, DateTimeOffset? removedOn, CancellationToken ct) => _inner.WriteRemovedMarkerIfUnchangedAsync(contactId, etag, removedOn, ct);
+    public Task<StoreWriteResult> ClearRemovedPersonAccessStateAsync(Guid contactId, CancellationToken ct) => _inner.ClearRemovedPersonAccessStateAsync(contactId, ct);
+    public Task<StoreWriteResult> ClearStandingGrantAsync(Guid contactId, CancellationToken ct) => _inner.ClearStandingGrantAsync(contactId, ct);
     public Task<ReferenceLookup> FindSystemUsersLinkingAsync(IReadOnlyCollection<Guid> contactIds, CancellationToken ct) => _inner.FindSystemUsersLinkingAsync(contactIds, ct);
     public Task<SystemUserLookup> GetSystemUserAsync(Guid systemUserId, CancellationToken ct) => _inner.GetSystemUserAsync(systemUserId, ct);
     public Task<BindingReadability> ProbeBindingReadabilityAsync(CancellationToken ct) => _inner.ProbeBindingReadabilityAsync(ct);
@@ -1773,7 +1783,8 @@ internal sealed class HeaderDrivenIdentityStore : IContactIdentityStore
     public Task<BindingReadability> ProbeHomeReadabilityAsync(CancellationToken ct) => _inner.ProbeHomeReadabilityAsync(ct);
     public Task<StoreWriteResult> BindHomeOidAsync(Guid contactId, string? etag, Guid homeTenantId, Guid oid, CancellationToken ct) => _inner.BindHomeOidAsync(contactId, etag, homeTenantId, oid, ct);
     public Task<BindIntentLookup> FindBindIntentAsync(Guid contactId, CancellationToken ct) => _inner.FindBindIntentAsync(contactId, ct);
-    public Task<StoreWriteResult> MarkInvitedAsync(Guid contactId, string? etag, DateTimeOffset invitedOn, string inviteCodeHash, CancellationToken ct) => _inner.MarkInvitedAsync(contactId, etag, invitedOn, inviteCodeHash, ct);
+    public Task<StoreWriteResult> MarkInvitedAsync(Guid contactId, string? etag, DateTimeOffset invitedOn, string? inviteCodeHash, InviteStamp stamp, CancellationToken ct) => _inner.MarkInvitedAsync(contactId, etag, invitedOn, inviteCodeHash, stamp, ct);
+    public Task<StoreWriteResult> ClearPendingInviteAsync(Guid contactId, string? etag, CancellationToken ct) => _inner.ClearPendingInviteAsync(contactId, etag, ct);
     public Task<StoreWriteResult> BindOidAsync(Guid contactId, string? etag, Guid oid, IdentityPlaneMarker plane, CancellationToken ct) => _inner.BindOidAsync(contactId, etag, oid, plane, ct);
     public Task<StoreWriteResult> BindOidAndConsumeInviteAsync(Guid contactId, string? etag, Guid oid, IdentityPlaneMarker plane, CancellationToken ct) => _inner.BindOidAndConsumeInviteAsync(contactId, etag, oid, plane, ct);
     public Task<StoreWriteResult> CreateContactForOidAsync(Guid oid, IdentityPlaneMarker plane, NewContactDetails details, CancellationToken ct) => _inner.CreateContactForOidAsync(oid, plane, details, ct);

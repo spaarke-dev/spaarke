@@ -192,7 +192,7 @@ public class UpdateRecordNodeExecutorSeamTests
     /// </summary>
     private void UseMetadataFor(string entityLogicalName, EntityMetadataDto dto)
     {
-        var cacheKey = $"sdap:dv:entitymetadata:{entityLogicalName.ToLowerInvariant()}";
+        var cacheKey = $"sdap:dv:entitymetadata:v2:{entityLogicalName.ToLowerInvariant()}";
         var cacheMock = new Mock<IDistributedCache>();
         var bytes = Encoding.UTF8.GetBytes(JsonSerializer.Serialize(dto, MetadataCacheJsonOptions));
         cacheMock
@@ -264,7 +264,9 @@ public class UpdateRecordNodeExecutorSeamTests
             Action = new AnalysisAction { Id = actionId, Name = "Update Record" },
             ExecutorType = ExecutorType.UpdateRecord,
             Scopes = new ResolvedScopes([], [], []),
-            TenantId = "test-tenant"
+            TenantId = "test-tenant",
+            // #2257: these pin the app-only node write (a system run); the run-identity rule has its own tests.
+            StartedBy = PlaybookRunStartedBy.System
         };
     }
 }

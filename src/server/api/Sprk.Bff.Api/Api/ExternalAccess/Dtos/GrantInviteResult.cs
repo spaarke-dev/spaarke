@@ -49,6 +49,12 @@ public static class GrantInviteStatus
     /// </summary>
     public const string NeedsInternalInvite = "NeedsInternalInvite";
 
+    /// <summary>
+    /// Slice B3: the grantee's email belongs to one of this deployment's customer tenants, so the contact was stamped for a
+    /// work-account sign-in from that tenant (no CIAM account, no code). The person signs in with their work account.
+    /// </summary>
+    public const string WorkAccountInvited = "WorkAccountInvited";
+
     /// <summary>The invite failed for a reason the invite core has no code for (an unexpected fault, or no usable portal URL).</summary>
     public const string InviteFailedReasonCode = "sdap.access.invite.failed";
 

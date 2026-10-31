@@ -1,0 +1,26 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0461",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0461","generator_id":"gen_eval_set.py@1 F-0461","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0461.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-05"},
+ "header":{"firm":"Lindenmeyer Ellison PC","firm_invoice_number":"INV-2026-53532","invoice_date":"2026-01-03","billing_period_start":"2025-12-01","billing_period_end":"2025-12-31","firm_matter_reference":"18960-0020","po_number":"PO-4509121","fees_total":3552.5,"expenses_total":1187.98,"adjustments_total":0.0,"total_due":4740.48,"currency":"USD"},
+ "timekeepers":[{"name":"Anders Oyelaran","title":"Associate","rate":270.0,"billed_as":"AO"},{"name":"Clara Dunleavy","title":"Partner","rate":560.0,"billed_as":"CD"},{"name":"Farah Hargrove","title":"Partner","rate":515.0,"billed_as":"FH"},{"name":"Ingrid Tavares","title":"Paralegal","rate":120.0,"billed_as":"IT"},{"name":"Ivan Marchetti","title":"Associate","rate":275.0,"billed_as":"IM"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2025-12-05","timekeeper":"IM","timekeeper_name":"Ivan Marchetti","timekeeper_title":"Associate","title":"Assoc","hours":0.2,"rate":275.0,"amount":55.0,"narrative":"Prepare expert witness for testimony in the construction contract","codes":["L420","A101"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2025-12-12","timekeeper":"CD","timekeeper_name":"Clara Dunleavy","timekeeper_title":"Partner","title":"Ptr","hours":1.8,"rate":560.0,"amount":1008.0,"narrative":"Prepare trial notebook and demonstrative exhibits for the vendor agreement","codes":["L440","A101"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"expense","date":"2025-12-12","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":749.58,"amount":749.58,"narrative":"Airfare to Phoenix for deposition","codes":["E110"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2025-12-15","timekeeper":"FH","timekeeper_name":"Farah Hargrove","timekeeper_title":"Partner","title":"Ptr","hours":1.4,"rate":515.0,"amount":721.0,"narrative":"Plan strategy for upcoming phase of the licensing dispute with team","codes":["L120","A101"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2025-12-16","timekeeper":"IM","timekeeper_name":"Ivan Marchetti","timekeeper_title":"Associate","title":"Assoc","hours":2.0,"rate":275.0,"amount":550.0,"narrative":"Research standard for new trial in the supply agreement","codes":["L460","A102"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"expense","date":"2025-12-18","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":331.3,"amount":331.3,"narrative":"Airfare to Dallas for deposition","codes":["E110"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"expense","date":"2025-12-18","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":3.0,"rate":35.7,"amount":107.1,"narrative":"Overnight courier to Northwind Logistics counsel","codes":["E107"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2025-12-22","timekeeper":"AO","timekeeper_name":"Anders Oyelaran","timekeeper_title":"Associate","title":"Assoc","hours":0.8,"rate":270.0,"amount":216.0,"narrative":"Research standard for new trial in the insurance coverage issue","codes":["L460","A102"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"fee","date":"2025-12-22","timekeeper":"IT","timekeeper_name":"Ingrid Tavares","timekeeper_title":"Paralegal","title":"Para","hours":0.2,"rate":120.0,"amount":24.0,"narrative":"Prepare monthly status report to client regarding the customs audit","codes":["L190","A111"],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"fee","date":"2025-12-30","timekeeper":"FH","timekeeper_name":"Farah Hargrove","timekeeper_title":"Partner","title":"Ptr","hours":1.9,"rate":515.0,"amount":978.5,"narrative":"Analyze exposure and damages model for the licensing dispute","codes":["L120","A104"],"page":1,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["917 Elm Court","Seattle","Tax ID 64-2255942"],"template":"T09","pages":1},
+ "rule_set_id":"RS-05",
+ "context":{"matter_open":"2024-11-06","matter_close":"2026-03-31","matter_budget":43961.0,"approved_timekeepers":["Ingrid Tavares","Clara Dunleavy","Ingrid Oyelaran","Ivan Ashdown","Ivan Marchetti","Farah Hargrove","Anders Oyelaran","Aisha Tavares"],"invoice_received_date":"2026-01-05"},
+ "expected_findings":[],
+ "seeded_violations":0
+}

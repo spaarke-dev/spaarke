@@ -97,7 +97,8 @@ public static class ChatDocumentEndpoints
     /// ADR-019 stable errorCode for "the durable byte copy could not be written" (compose-r8 FR-B01).
     /// Distinguishes this 500 from every other 500 on the upload routes — a client seeing this knows the
     /// file was NOT stored and a retry is meaningful, and an operator knows to check
-    /// <c>SessionFileStore:BlobEndpoint</c> + the Storage Blob Data Contributor assignment.
+    /// <c>SessionFileStore:BlobEndpoint</c> + the container-scoped Storage Blob Data Contributor assignment on
+    /// <c>SessionFileStore:ContainerName</c>.
     /// </summary>
     private const string DurableStoreFailedErrorCode = "session.durable-store-failed";
 
@@ -1016,19 +1017,23 @@ public static class ChatDocumentEndpoints
         {
             return Results.Problem(statusCode: 401, title: "Unauthorized", detail: "User identity not found in token claims");
         }
-        var authz = await authorizationService.AuthorizeAsync(new AuthorizationContext
+        // 3a'. uac-r2 task 188 round 4a/4b: the Read check and THE external document narrowing in ONE helper
+        //      (InternalPlaneDocumentNarrowing.AuthorizeDocumentsAsync). A caller who is not a resolved internal
+        //      systemuser is refused an archive the narrowing hides (an internal-only email's .eml, a Restricted
+        //      document) with the SAME deny shape as no Read; a narrowing fault refuses (fail closed).
+        if (!Guid.TryParse(document.Id, out var archiveDocumentId))
         {
-            UserId = callerUserId,
-            ResourceId = document.Id,
-            Operation = "read",
-            CorrelationId = httpContext.TraceIdentifier,
-            UserAccessToken = TokenHelper.ExtractBearerTokenOrNull(httpContext)
-        }, ct);
+            return ProblemDetailsHelper.Forbidden(InternalPlaneDocumentNarrowing.HiddenReasonCode);
+        }
+
+        var authz = await InternalPlaneDocumentNarrowing.AuthorizeDocumentsAsync(
+            httpContext, authorizationService, callerUserId, new[] { archiveDocumentId }, "read",
+            TokenHelper.ExtractBearerTokenOrNull(httpContext), "chat-archive-ingest", logger, ct);
         if (!authz.IsAllowed)
         {
             logger.LogWarning(
-                "Archive ingest denied: caller {UserId} lacks read access to document {DocumentId} (session {SessionId}).",
-                callerUserId, document.Id, sessionId);
+                "Archive ingest denied: caller {UserId} may not read document {DocumentId} (session {SessionId}, reason {Reason}).",
+                callerUserId, document.Id, sessionId, authz.ReasonCode);
             return ProblemDetailsHelper.Forbidden(authz.ReasonCode);
         }
 

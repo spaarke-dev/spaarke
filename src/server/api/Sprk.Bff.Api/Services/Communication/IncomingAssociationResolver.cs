@@ -129,7 +129,7 @@ public sealed class IncomingAssociationResolver
         var decision = await EvaluateInternalAsync(message, context, communicationId, admitTargets: null, ct);
 
         // An EXISTING row being filed: a reparent (task 146) — the owner is re-derived before the write.
-        var refiled = await ApplyDecisionAsync(communicationId, decision, ownerAlreadyResolved: false, ct);
+        var refiled = await ApplyDecisionAsync(communicationId, decision, ownerAlreadyResolved: false, secureExitCaller: null, ct);
 
         // Spaarkeai-word-add-in-r1 task 129: the filing was written — the email's thread follows it (best-effort; never
         // throws). Here, not in ApplyDecisionAsync: ApplyToExistingRecordAsync's caller (the Office reconciled-email filing)
@@ -148,7 +148,7 @@ public sealed class IncomingAssociationResolver
     public Task ApplyToNewRecordAsync(Guid communicationId, AssociationDecision decision, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(decision);
-        return ApplyDecisionAsync(communicationId, decision, ownerAlreadyResolved: true, ct);
+        return ApplyDecisionAsync(communicationId, decision, ownerAlreadyResolved: true, secureExitCaller: null, ct);
     }
 
     /// <summary>
@@ -161,15 +161,19 @@ public sealed class IncomingAssociationResolver
     /// <remarks>Only the record <paramref name="onlyRecordId"/> is filed: the decision is narrowed to it first
     /// (<see cref="NarrowToRecord"/>), so the writes AND the provenance say the same thing. The thread is NOT reconciled
     /// here: the caller runs <c>SecureChildReconciler.AfterRefileAsync</c>, the one step after a re-file, which does it.</remarks>
+    /// <param name="secureExitCaller">#2143 round 8 (F1-B): the person whose act this filing is (the Office save's user), asked
+    /// F3 by the reparent when the filing takes the communication out of a secure record — the thread it sits in included
+    /// (round 7b). <c>null</c> acts for nobody: such a filing is refused.</param>
     /// <returns><c>false</c> (nothing written) when the decision does not write <paramref name="onlyRecordId"/>.</returns>
     public async Task<bool> ApplyToExistingRecordAsync(
-        Guid communicationId, AssociationDecision decision, Guid onlyRecordId, CancellationToken ct)
+        Guid communicationId, AssociationDecision decision, Guid onlyRecordId,
+        Sprk.Bff.Api.Services.Access.SecureRemovalCaller? secureExitCaller, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(decision);
         if (NarrowToRecord(decision, onlyRecordId) is not { } narrowed)
             return false;
 
-        await ApplyDecisionAsync(communicationId, narrowed, ownerAlreadyResolved: false, ct).ConfigureAwait(false);
+        await ApplyDecisionAsync(communicationId, narrowed, ownerAlreadyResolved: false, secureExitCaller, ct).ConfigureAwait(false);
         return true;
     }
 
@@ -237,16 +241,31 @@ public sealed class IncomingAssociationResolver
         WithholdIntermediateTheRowCannotPlace(row);
 
         var stamps = await DeriveCoreAncestorStampsAsync(Guid.Empty, row, decision, ct).ConfigureAwait(false);
-        var parents = decision.RegardingWrites.Values
-            .OfType<EntityReference>()
-            .Concat(stamps.Values)
-            .Select(r => new Sprk.Bff.Api.Services.Dataverse.RecordOwnershipParent(r.LogicalName, r.Id));
+        return OwnershipContextOf(decision.RegardingWrites, stamps);
+    }
 
-        return Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext.ForParents(parents) with
+    /// <summary>
+    /// The ownership question for a new communication filed through <paramref name="regardingWrites"/> with the core-ancestor
+    /// <paramref name="stamps"/> derived from them (each keyed by the lookup it is written to): every one a parent
+    /// (secure-if-any); with none it keeps its creator (E1). UAC task 194b fix round, slice 3: the static tail of
+    /// <see cref="OwnershipContextForNewRecordAsync"/>, which the .eml parity test calls (the archive is owned as its
+    /// communication is). Fix round R (B1): in <c>sprk_communication</c>'s primary order over every lookup the row will hold
+    /// (<see cref="Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext.InPrimaryOrder{TValue}"/>), the order the reconciler
+    /// asks the written row in — never the order the rungs wrote, so the PRIMARY (an ordinary row's business unit) is the
+    /// same for both. A stamp never shares a lookup with a regarding write (the derivation skips those).
+    /// </summary>
+    internal static Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext OwnershipContextOf(
+        IEnumerable<KeyValuePair<string, EntityReference>> regardingWrites, IEnumerable<KeyValuePair<string, EntityReference>> stamps) =>
+        Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext.ForRow(
+            CommunicationEntity,
+            regardingWrites.Concat(stamps).Select(w => KeyValuePair.Create(
+                w.Key,
+                w.Value is { } r
+                    ? new Sprk.Bff.Api.Services.Dataverse.RecordOwnershipParent(r.LogicalName, r.Id)
+                    : (Sprk.Bff.Api.Services.Dataverse.RecordOwnershipParent?)null))) with
         {
             WhenUnfiled = Sprk.Bff.Api.Services.Dataverse.UnfiledOwnership.KeepCreator,
         };
-    }
 
     /// <summary>
     /// Evaluate-only path (task 074, Path C): runs the deterministic + (cost-gated) AI rungs and applies the
@@ -491,6 +510,7 @@ public sealed class IncomingAssociationResolver
         Guid communicationId,
         AssociationDecision decision,
         bool ownerAlreadyResolved,
+        Sprk.Bff.Api.Services.Access.SecureRemovalCaller? secureExitCaller,
         CancellationToken ct)
     {
         var fields = await BuildDecisionFieldsAsync(communicationId, decision, ct);
@@ -515,6 +535,7 @@ public sealed class IncomingAssociationResolver
                     RecordId = communicationId,
                     ParentChanges = parentChanges,
                     WhenUnfiled = Sprk.Bff.Api.Services.Dataverse.UnfiledOwnership.KeepCreator,
+                    SecureExitCaller = secureExitCaller,
                 },
                 token => _genericEntityService.UpdateAsync("sprk_communication", communicationId, fields, token),
                 ct);

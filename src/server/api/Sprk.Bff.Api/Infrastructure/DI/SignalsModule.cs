@@ -87,13 +87,20 @@ public static class SignalsModule
         // Signal read route (task 038, FR-54): the worklist's only Signal reader. Scoped (every read is the request caller's
         // through the caller-identity client); unconditional, like the route that uses it (bff-extensions.md F.1).
         services.AddScoped<SignalReadService>();
+        // D-176 (task 157): the earlier-invoice readability check of a billing Duplicate, as the caller (the caller's client is passed
+        // in). Shared with ebilling task 119's invoice-review read; scoped like SignalReadService, which takes it.
+        services.AddScoped<EarlierInvoiceReadability>();
 
         // Decision action executors (task 044, FR-52): one per catalog action the commit route (task 043) calls, except the
         // inquiry (070) and Assign Work (046). Internal services, not routes; scoped because every write is the request
         // caller's. DecisionRouteCores adapts the shipped event, child-record and communications cores. Unconditional:
         // nothing here is feature-gated (bff-extensions.md F.1).
         services.AddScoped<DecisionRouteCores>();
+        // Task 167 (D-193): the one resolver of a catalog parameter's named option lists (live picklist metadata, active currencies) and of a
+        // budget's currency, used by the plan route and the Create budget executor. Scoped: it holds the caller's IDataverseUserClient.
+        services.AddScoped<DecisionParameterSources>();
         services.AddScoped<IDecisionActionExecutor, ReviseBudgetExecutor>();
+        services.AddScoped<IDecisionActionExecutor, CreateBudgetExecutor>();
         services.AddScoped<IDecisionActionExecutor, ApproveVarianceExecutor>();
         services.AddScoped<IDecisionActionExecutor, MarkCompleteExecutor>();
         services.AddScoped<IDecisionActionExecutor, RescheduleExecutor>();
@@ -106,10 +113,20 @@ public static class SignalsModule
         services.AddScoped<IDecisionActionExecutor, SendEmailExecutor>();
         // Task 043: the last two catalog actions (Assign Work through the 046 create; the inquiry adapting 070).
         services.AddScoped<IDecisionActionExecutor, AssignWorkExecutor>();
+        // Task 159 (D-178): Assign Task, the no-budget decision's action (a sprk_event of type Task) through the same child-records create.
+        services.AddScoped<IDecisionActionExecutor, AssignTaskExecutor>();
         services.AddScoped<IDecisionActionExecutor, BudgetInquiryActionExecutor>();
         services.AddScoped<DecisionActionExecutors>();
         // Task 043: the decision commit route's service and its after-record step (032 trigger, 034 suppression).
         services.AddScoped<DecisionCommitFollowUps>();
+        // Task 168 (D-194): Assign Task's email (as the assigner, else the system mailbox from an ADR-004 job) and bell, after the record.
+        // Scoped like AssignedAccessStore, which it takes; the handler is scoped because IIdempotencyService is. Unconditional (F.1): its
+        // dependencies (CommunicationService, NotificationService, JobSubmissionService) are.
+        // Fix round (D-199): the ONE recipient gate the notifier and its job both ask. Scoped like AssignedAccessStore and
+        // SecureShareNoAccessGuard, which it takes; unconditional because they all are (AddExternalAccess).
+        services.AddScoped<AssignTaskRecipientGate>();
+        services.AddScoped<AssignTaskNotifier>();
+        services.AddScoped<IJobHandler, AssignTaskEmailJobHandler>();
         services.AddScoped<DecisionCommitService>();
         // Task 043 (K4): the server-side plan-read time the commit route uses as the review start (ITenantCache, a singleton).
         services.AddSingleton<DecisionPlanReadStamp>();

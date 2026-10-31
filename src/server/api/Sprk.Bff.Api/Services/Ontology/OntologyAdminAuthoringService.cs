@@ -67,6 +67,11 @@ public sealed partial class OntologyAdminAuthoringService
     /// <see cref="PolicyVersionValidator.AuthorableColumns"/> (task 102a, owner option 101(b)).</summary>
     internal const string ReasonColumnNotAuthorable = "ontology.admin.column_not_authorable";
 
+    /// <summary>The stable code every authoring route (validate, dry run, save, publish) returns when the rule type belongs to another
+    /// domain, e.g. a billing type (ebilling-r1 task 070, FR-24): the validator refuses it as
+    /// <see cref="OntologyWriterFailureReason.RuleTypeWrongDomain"/> before any body check.</summary>
+    internal const string ReasonRuleTypeWrongDomain = "ontology.admin.rule_type_wrong_domain";
+
     /// <summary>The stable code a plan refused for <see cref="DecisionPlanRefusalReason.DuplicateAction"/> carries: a code listed twice
     /// in one list, or in both <c>actions</c> and <c>nextSteps</c> (PR #2054 review). The catalog offers <c>assign-work</c> in both the
     /// Decide lane's actions and the next steps, so the wizard must pick one place for it.</summary>
@@ -224,14 +229,12 @@ public sealed partial class OntologyAdminAuthoringService
     /// this service carries <see cref="Filter"/>, and <see cref="Admits"/> re-checks the row it returns; a new policy is created with
     /// <see cref="Value"/>.
     /// </summary>
-    // Swap to RuleDomains (ebilling-r1 task 070, #1911) when it lands
     private static class OntologyDomain
     {
-        /// <summary>The live <c>sprk_policy.sprk_domain</c> option "Ontology" (spaarkedev1, 2026-10-16: Billing 100000000,
-        /// Ontology 100000001, Docketing 100000002).</summary>
-        public const int Value = 100000001;
+        /// <summary>The <c>sprk_policy.sprk_domain</c> option "Ontology", from <see cref="RuleDomains"/> (ebilling-r1 task 070).</summary>
+        public const int Value = RuleDomains.PolicyDomainOntology;
 
-        public const string Column = "sprk_domain";
+        public const string Column = RuleDomains.PolicyDomainColumn;
 
         public static string Filter => $"({Column} eq null or {Column} eq {Value.ToString(CultureInfo.InvariantCulture)})";
 
@@ -331,7 +334,8 @@ public sealed partial class OntologyAdminAuthoringService
     /// One lane's authoring lists (task 102a, owner option A), each read from its server source:
     /// <list type="bullet">
     /// <item>actions: <see cref="DecisionActionCatalog"/> codes whose plan lane is this one, the same test as
-    /// <see cref="DecisionPlanService.Resolve"/>;</item>
+    /// <see cref="DecisionPlanService.Resolve"/> (which also refuses a substitution-only action, task 161, so none is listed, nor named
+    /// as an exclusion);</item>
     /// <item>next steps: its <c>IsNextStep</c> codes;</item>
     /// <item>dismissal reasons: <see cref="DecisionActionCatalog.DismissalReasons"/>;</item>
     /// <item>severities and work types: the <c>sprk_policy</c> option labels of <see cref="OntologyAdminRulesService"/>, which
@@ -341,13 +345,14 @@ public sealed partial class OntologyAdminAuthoringService
     /// </summary>
     internal static OntologyCatalogLane LaneCatalog(DecisionLane lane)
     {
-        static OntologyCatalogAction ActionOf(DecisionActionDefinition a) => new(a.Code, a.Label, a.Excludes.ToList());
+        static OntologyCatalogAction ActionOf(DecisionActionDefinition a) => new(a.Code, a.Label,
+            a.Excludes.Where(code => !(DecisionActionCatalog.TryGet(code, out var excluded) && excluded.SubstitutionOnly)).ToList());
         static IReadOnlyList<OntologyCatalogOption> OptionsOf(IReadOnlyDictionary<int, string> labels) =>
             labels.OrderBy(kv => kv.Key).Select(kv => new OntologyCatalogOption(kv.Key, kv.Value)).ToList();
 
         return new OntologyCatalogLane(
             lane.ToString(),
-            DecisionActionCatalog.All.Where(a => a.PlanLane == lane).Select(ActionOf).ToList(),
+            DecisionActionCatalog.All.Where(a => a.PlanLane == lane && !a.SubstitutionOnly).Select(ActionOf).ToList(),
             DecisionActionCatalog.All.Where(a => a.IsNextStep).Select(ActionOf).ToList(),
             DecisionActionCatalog.DismissalReasons(lane).Select(r => new OntologyCatalogChoice(r.Code, r.Label)).ToList(),
             OptionsOf(OntologyAdminRulesService.SeverityLabels),
@@ -1270,6 +1275,7 @@ public sealed partial class OntologyAdminAuthoringService
             }
         }
 
+        // D-197 / UAC round 137: author wins, including the root; a child table here would make 194b refuse root-homed authors.
         RecordOwnerResolution owner;
         try
         {
@@ -1581,16 +1587,21 @@ public sealed partial class OntologyAdminAuthoringService
         {
             var field = result.Reason switch
             {
-                OntologyWriterFailureReason.RuleTypeUnsupported => "ruleType",
+                OntologyWriterFailureReason.RuleTypeUnsupported or OntologyWriterFailureReason.RuleTypeWrongDomain => "ruleType",
                 OntologyWriterFailureReason.TemplateMalformed or OntologyWriterFailureReason.TemplateTokenOutsideReadSet => "messageTemplate",
                 _ => "ruleBody",
             };
             errors[field] = result.Errors.ToArray();
+            // A billing rule type (ebilling-r1 070) is refused by ValidateForAuthoring (RuleDomain.Ontology) as RuleTypeWrongDomain,
+            // reported on ruleType with ReasonRuleTypeWrongDomain as its code, before any body check: nothing is compiled or evaluated.
             return new RuleCheck(null, authoring.TemplateEligibleFields,
-                result.Reason == OntologyWriterFailureReason.ColumnNotAuthorable ? ReasonColumnNotAuthorable : null);
+                result.Reason == OntologyWriterFailureReason.ColumnNotAuthorable ? ReasonColumnNotAuthorable
+                : result.Reason == OntologyWriterFailureReason.RuleTypeWrongDomain ? ReasonRuleTypeWrongDomain
+                : null);
         }
 
-        // ValidateForAuthoring accepted it, so the type is Existence or Threshold (Switch is refused, D-16).
+        // ValidateForAuthoring accepted it, so the type is an Ontology type, Existence or Threshold: a billing type was refused above
+        // as RuleTypeWrongDomain, and Switch is refused (D-16).
         return new RuleCheck(RuleBodySchemaValidator.TryParseRuleType(ruleType, out var parsed) ? parsed.ToString() : null,
             authoring.TemplateEligibleFields, null);
     }
@@ -1747,7 +1758,8 @@ public sealed partial class OntologyAdminAuthoringService
             return default;
         }
 
-        // Fix round 4 (uac-r2 E, D-123): the rule row is not a secure-family record and Console User reads sprk_policy at Deep depth, so a
+        // Fix round 4 (uac-r2 E, D-123): the rule row is not a secure-family record and a reader of sprk_policy (Console User held Read at Deep depth
+        // until D-185, task 163; Ontology Administrator still does) sees every Ontology rule, so a
         // limit on a Secure or Restricted matter would show a non-member the matter link and what is watched on it. Refused; an access
         // level the caller's read did not return (a masked sprk_issecure) is refused the same way, never read as ordinary.
         if (flags.IsUnreadable || flags.IsSecure || flags.IsRestricted)

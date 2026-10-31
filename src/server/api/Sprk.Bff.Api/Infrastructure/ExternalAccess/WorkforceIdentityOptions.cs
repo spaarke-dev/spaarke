@@ -8,10 +8,11 @@
 // on AzureAd:TenantId would refuse every Model-1 Type-2 employee AND auto-bind Spaarke's own staff into that
 // customer's environment. In Model 2 the two happen to coincide — and the setting then lists it explicitly.
 //
-// The ONE use of AzureAd:TenantId on this plane (R3 FR-15, #1563): a registered workforce-contact guest — a B2B
-// guest (acct = 1) of the stamp's own tenant whose home tenant (idp) is on this list — is a member too. A
-// registered guest therefore additionally requires tid = AzureAd:TenantId; the member test itself still never
-// defaults the list from it.
+// The ONE use of AzureAd:TenantId on this plane (R3 FR-15, #1563): a customer-tenant guest — a B2B guest (acct = 1)
+// of the stamp's own tenant whose home tenant (idp) is on this list — answers Member, which additionally requires
+// tid = AzureAd:TenantId; the member test itself still never defaults the list from it. Since #2128 (owner
+// 2026-10-20) that Member is NOT admitted: ContactIdentityBinder refuses it workforce_guest_use_home_signin and
+// creates, binds and resolves nothing (ADR-028 A9: customer staff sign in at their home directory).
 //
 // Provisioning writes the value (customer-provisioning-orchestration-r1); the contract for that is in
 // projects/unified-access-control-r2/notes/handoffs/INCOMING-141-workforce-tenant-list.md.
@@ -23,8 +24,10 @@ using Spaarke.Core.Auth;
 namespace Sprk.Bff.Api.Infrastructure.ExternalAccess;
 
 /// <summary>
-/// Options bound from <c>WorkforceIdentity</c>: which workforce tenants' MEMBERS may be email-bound to, or
-/// have created for them, a contact on first sign-in.
+/// Options bound from <c>WorkforceIdentity</c>: which workforce tenants' MEMBERS pass the member test that gates the
+/// contact-only branch of the Workforce token plane (a caller with no enabled systemuser) on EVERY sign-in — the first
+/// one email-binds or creates their contact, later ones resolve through that binding — and which home directories the
+/// WorkforceHome scheme (ADR-028 A9) accepts. An enabled systemuser is resolved before the member test runs.
 /// </summary>
 public sealed class WorkforceIdentityOptions
 {
@@ -32,9 +35,11 @@ public sealed class WorkforceIdentityOptions
     public const string SectionName = "WorkforceIdentity";
 
     /// <summary>
-    /// The customer workforce tenant ids (GUID strings) this deployment serves. Empty or absent means NO
-    /// caller is ever email-bound or gets a contact created — every Type-2 first sign-in is denied. App
-    /// Service form: <c>WorkforceIdentity__CustomerTenantIds__0</c>, <c>__1</c>, …
+    /// The customer workforce tenant ids (GUID strings) this deployment serves. Empty or absent denies every
+    /// contact-only sign-in on the Workforce token plane, the first and every later one (#2128 round 1: an existing
+    /// binding does not outlive the member test), and every WorkforceHome token. It does not affect a caller resolved
+    /// to an enabled systemuser, which runs before the member test. App Service form:
+    /// <c>WorkforceIdentity__CustomerTenantIds__0</c>, <c>__1</c>, …
     /// </summary>
     public List<string> CustomerTenantIds { get; set; } = new();
 
@@ -62,20 +67,21 @@ public sealed class WorkforceIdentityOptionsValidator : IValidateOptions<Workfor
         ArgumentNullException.ThrowIfNull(logger);
         _ciamTenantId = configuration["Ciam:TenantId"];
 
-        // R3 FR-15: a registered guest is admitted only when tid = AzureAd:TenantId, so a deployment whose stamp
-        // tenant is missing or not a non-zero GUID silently refuses every guest. That is the safe failure, but an
-        // operator must be able to see it. Warn once (this validator is a singleton, built at startup); never fail
-        // startup on it — most deployments have no guests.
+        // R3 FR-15: the guest branch applies only when tid = AzureAd:TenantId, so a deployment whose stamp tenant is
+        // missing or not a non-zero GUID gives every guest its plain member-test deny instead of the #2128 "use home
+        // sign-in" refusal. Both refuse; the warning tells an operator which one a guest will see. Warn once (this
+        // validator is a singleton, built at startup); never fail startup on it — most deployments have no guests.
         if (!IsUsableStampTenant(configuration[WorkforcePrincipalResolver.StampTenantConfigKey]))
         {
             logger.LogWarning(
-                "[WF-AUTH] {Key} is not a non-zero GUID — FR-15 registered-guest admission disabled " +
-                "(every acct=1 workforce caller will be denied on the guest branch)",
+                "[WF-AUTH] {Key} is not a non-zero GUID — a customer-tenant B2B guest gets its plain member-test deny, " +
+                "not workforce_guest_use_home_signin (FR-15 guest admission is retired: an acct=1 workforce caller with " +
+                "no enabled systemuser is denied either way)",
                 WorkforcePrincipalResolver.StampTenantConfigKey);
         }
     }
 
-    /// <summary>True when the stamp tenant is a non-zero GUID — the precondition of the FR-15 guest branch.</summary>
+    /// <summary>True when the stamp tenant is a non-zero GUID — the precondition of the FR-15 conjunction (refused since #2128).</summary>
     internal static bool IsUsableStampTenant(string? stampTenantId)
         => Guid.TryParse(stampTenantId?.Trim(), out var stamp) && stamp != Guid.Empty;
 
@@ -114,9 +120,9 @@ public sealed class WorkforceIdentityOptionsValidator : IValidateOptions<Workfor
 public enum WorkforceMembership
 {
     /// <summary>
-    /// A user token from a configured customer tenant with <c>acct = 0</c> — or (R3 FR-15) a registered
-    /// workforce-contact guest: <c>acct = 1</c> in the stamp's own tenant whose home tenant (<c>idp</c>) is a
-    /// configured customer tenant.
+    /// A user token from a configured customer tenant with <c>acct = 0</c> — or (R3 FR-15) a customer-tenant guest:
+    /// <c>acct = 1</c> in the stamp's own tenant whose home tenant (<c>idp</c>) is a configured customer tenant. Since
+    /// #2128 the guest form is refused by the binder (<see cref="WorkforceMembershipTest.DenyGuestUseHomeSignin"/>).
     /// </summary>
     Member,
 
@@ -163,6 +169,18 @@ public sealed record WorkforceCallerClaims(
     public const string IdpClaimUri = "http://schemas.microsoft.com/identity/claims/identityprovider";
 
     /// <summary>
+    /// The <c>xms_edov</c> optional claim: the email's domain is verified by the tenant that owns it. Only a boolean
+    /// <c>true</c> counts (<see cref="EmailDomainOwnerVerifiedOf"/>).
+    /// </summary>
+    public const string EmailDomainOwnerVerifiedClaim = "xms_edov";
+
+    /// <summary>
+    /// The token's <c>xms_edov</c> (<see cref="EmailDomainOwnerVerifiedOf"/>): true only for a single boolean <c>true</c>
+    /// claim. Null or false is "not verified" — an email bind on the Workforce planes then needs the invited tenant.
+    /// </summary>
+    public bool? EmailDomainOwnerVerified { get; init; }
+
+    /// <summary>
     /// Reads the claims from a validated workforce principal. The caller kind comes from
     /// <see cref="CallerIdentity.FromPrincipal"/> — the repo's one classifier — never from <c>idtyp</c> alone,
     /// which is optional and expected absent.
@@ -180,7 +198,28 @@ public sealed record WorkforceCallerClaims(
             First(user, "given_name", ClaimTypes.GivenName),
             First(user, "family_name", ClaimTypes.Surname),
             First(user, "name"),
-            Single(user, IdpClaim, IdpClaimUri));
+            Single(user, IdpClaim, IdpClaimUri))
+        {
+            EmailDomainOwnerVerified = EmailDomainOwnerVerifiedOf(user),
+        };
+    }
+
+    /// <summary>
+    /// The <c>xms_edov</c> claim as the email bind reads it: <c>true</c> ONLY when the principal carries exactly one
+    /// <c>xms_edov</c> claim whose value type is <see cref="ClaimValueTypes.Boolean"/> and whose value is true (a JSON
+    /// boolean in the token). A string <c>"true"</c>, any other value, a repeated claim or no claim is <c>null</c> (not
+    /// verified, fail closed). Pure.
+    /// </summary>
+    public static bool? EmailDomainOwnerVerifiedOf(ClaimsPrincipal user)
+    {
+        ArgumentNullException.ThrowIfNull(user);
+        var claims = user.FindAll(EmailDomainOwnerVerifiedClaim).ToList();
+        return claims.Count == 1
+               && claims[0].ValueType == ClaimValueTypes.Boolean
+               && bool.TryParse(claims[0].Value?.Trim(), out var verified)
+               && verified
+            ? true
+            : null;
     }
 
     /// <summary>
@@ -212,8 +251,8 @@ public sealed record WorkforceCallerClaims(
     /// <remarks>
     /// For a guest (<c>acct = 1</c>) a value containing <c>#EXT#</c> is NOT an email: it is the guest object's UPN in
     /// the tenant signed in to, an address that is neither deliverable nor the person's. It is skipped, so a guest
-    /// with no real <c>email</c> claim carries no email (a contact is then created without one, never bound to or
-    /// named after the UPN). <c>acct = 0</c> tokens are unchanged.
+    /// with no real <c>email</c> claim carries no email (never bound to or named after the UPN; since #2128 no contact
+    /// is created for a customer-tenant guest at all). <c>acct = 0</c> tokens are unchanged.
     /// </remarks>
     public static string? TokenEmail(ClaimsPrincipal user)
     {
@@ -264,18 +303,28 @@ public static class WorkforceMembershipTest
     public const string DenyAcctUnrecognized = "sdap.access.deny.workforce_acct_unrecognized";
 
     /// <summary>
+    /// Deny code (#2128): a customer-tenant guest — the FR-15 conjunction, which <see cref="Evaluate"/> still answers
+    /// <see cref="WorkforceMembership.Member"/> — is refused by <c>ContactIdentityBinder</c> and pointed at home
+    /// sign-in (ADR-028 A9). Not a member-test outcome, so <see cref="DenyCodeFor"/> never returns it.
+    /// </summary>
+    public const string DenyGuestUseHomeSignin = "sdap.access.deny.workforce_guest_use_home_signin";
+
+    /// <summary>
     /// Is this caller a MEMBER of a configured customer workforce tenant? Order is deliberate: the caller kind
     /// first (an app-only token is never bound, whatever else it carries), then the setting (empty denies
     /// everyone), then the tenant, then <c>acct</c>. Membership is never inferred from an email domain or a
     /// <c>#EXT#</c> UPN.
     /// </summary>
     /// <remarks>
-    /// R3 FR-15 (#1563) adds ONE branch, the registered workforce-contact guest: an exact conjunction of a user
+    /// R3 FR-15 (#1563) adds ONE branch, the customer-tenant guest: an exact conjunction of a user
     /// token, <c>acct = 1</c>, <c>tid</c> = <paramref name="stampTenantId"/> (the stamp's own tenant,
     /// <c>AzureAd:TenantId</c>) and the home tenant parsed from <paramref name="idp"/> ∈
     /// <paramref name="customerTenantIds"/>. It yields <see cref="WorkforceMembership.Member"/>; when any part
     /// fails the result is exactly what it was before the branch existed (and so is its deny code). With no
-    /// stamp tenant or no <c>idp</c> supplied the branch never applies — a guest is never admitted by default.
+    /// stamp tenant or no <c>idp</c> supplied the branch never applies. Since #2128 the binder refuses that Member
+    /// (<see cref="DenyGuestUseHomeSignin"/>): a customer-tenant guest with no enabled systemuser (the contact-only
+    /// branch) is never admitted on this plane. An enabled systemuser — a licensed B2B guest included — is resolved by
+    /// <c>WorkforcePrincipalResolver</c>'s systemuser branch before the binder, and this test, run.
     /// Both parameters are REQUIRED (no defaults) so that a caller cannot silently skip FR-15 by omission; pass
     /// <c>null</c> to say "no stamp tenant / no idp" explicitly.
     /// </remarks>

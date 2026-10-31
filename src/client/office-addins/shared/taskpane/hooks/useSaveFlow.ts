@@ -14,6 +14,11 @@ import { cleanGuid } from '@spaarke/ui-components/guid';
 import { toDocxFileName } from '../utils/documentFileName';
 import { EmailContentCaptureContext } from './emailContentCaptureContext';
 import type { EmailContentCapture } from '../services/emailContentCapture';
+import {
+  readEmailFilingProblem,
+  type EmailFilingOutcome,
+  type EmailFilingProblem,
+} from '../services/emailFilingNotice';
 
 /** A canonical (bare-lowercase, ADR-044) Dataverse GUID. */
 const CANONICAL_GUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
@@ -123,6 +128,12 @@ export interface SaveResponse {
   duplicate: boolean;
   message?: string;
   correlationId: string;
+  /**
+   * Task 131 (#2171): what the save did about filing the email it reconciled to. OMITTED when there is nothing to report
+   * (and on a duplicate replay). Only `NotPermitted` / `Failed` are shown to the user. A value this build does not know
+   * is ignored — see {@link readEmailFilingProblem}.
+   */
+  emailFiling?: EmailFilingOutcome;
 }
 
 /**
@@ -257,8 +268,11 @@ export interface UseSaveFlowOptions {
   pollingIntervalMs?: number;
   /** SSE timeout (ms, default: 30000) */
   sseTimeoutMs?: number;
-  /** Callback when save is complete */
-  onComplete?: (documentId: string, documentUrl: string) => void;
+  /**
+   * Callback when save is complete. The third argument is passed ONLY when the save succeeded but the email it reconciled
+   * to could not be filed to the chosen record (task 131) — otherwise the call has exactly two arguments, as before.
+   */
+  onComplete?: (documentId: string, documentUrl: string, emailFilingProblem?: EmailFilingProblem) => void;
   /** Callback on error */
   onError?: (error: ErrorMessage) => void;
   /** Callback on duplicate detected */
@@ -543,6 +557,17 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
   // document IS that document, so completion can name it even when the job record carries no artifact — which
   // the synchronous save path never sets (only the AI workers do, later, over SSE).
   const activeVersionDocumentIdRef = useRef<string | null>(null);
+  // Task 131 (#2171): the refused / failed email filing the CURRENT save's 202 reported, handed to onComplete when the job
+  // completes. Null = nothing to tell the user. Cleared when a save starts and on reset.
+  const emailFilingProblemRef = useRef<EmailFilingProblem | null>(null);
+  const notifyComplete = useCallback(
+    (documentId: string, documentUrl: string) => {
+      const problem = emailFilingProblemRef.current;
+      if (problem) onComplete?.(documentId, documentUrl, problem);
+      else onComplete?.(documentId, documentUrl);
+    },
+    [onComplete]
+  );
 
   // Computed values
   const isSaving = flowState === 'uploading' || flowState === 'processing';
@@ -602,6 +627,7 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
     setDuplicateInfo(null);
     setSavedDocumentId(null);
     setSavedDocumentUrl(null);
+    emailFilingProblemRef.current = null;
     savedContextRef.current = null;
   }, [cleanup]);
 
@@ -683,7 +709,7 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
           setSavedDocumentId(documentId);
           setSavedDocumentUrl(documentUrl || null);
           setFlowState('complete');
-          onComplete?.(documentId, documentUrl || '');
+          notifyComplete(documentId, documentUrl || '');
         } else {
           failUnconfirmedCompletion();
         }
@@ -708,7 +734,7 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
       }
       // Ignore heartbeat events
     },
-    [claimTerminalOutcome, cleanup, failUnconfirmedCompletion, onComplete, onError]
+    [claimTerminalOutcome, cleanup, failUnconfirmedCompletion, notifyComplete, onError]
   );
 
   // Poll for job status
@@ -822,7 +848,7 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
             setSavedDocumentId(documentId);
             setSavedDocumentUrl(documentUrl || null);
             setFlowState('complete');
-            onComplete?.(documentId, documentUrl || '');
+            notifyComplete(documentId, documentUrl || '');
           } else if (status.status === 'Completed') {
             failUnconfirmedCompletion();
           } else if (status.status === 'Failed') {
@@ -864,7 +890,7 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
         }
       }
     },
-    [apiBaseUrl, claimTerminalOutcome, cleanup, failUnconfirmedCompletion, getAccessToken, onComplete, onError]
+    [apiBaseUrl, claimTerminalOutcome, cleanup, failUnconfirmedCompletion, getAccessToken, notifyComplete, onError]
   );
 
   // Start SSE connection with polling fallback.
@@ -956,6 +982,7 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
       let isVersionAttempt = false;
       activeVersionSaveRef.current = false;
       activeVersionDocumentIdRef.current = null;
+      emailFilingProblemRef.current = null;
 
       try {
         // Auth v2 (D-AUTH-7 / task 082): no top-level token snapshot.
@@ -1021,7 +1048,7 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
         // is REMOVED — `SaveRequest` (server) has no such member, so System.Text.Json silently dropped it on
         // every prior request (dead weight on the wire). The user-facing name already travels correctly per
         // content type: `document.title` (Document, mapped server-side to sprk_documentname as of task 020)
-        // and `email.subject` (Email, unchanged — task 046 (b)). No replacement field is needed.
+        // and `email.documentName` (Email, #2416; `email.subject` stays the email's own). No replacement field is needed.
         const serverRequest: Record<string, unknown> = {
           contentType,
           triggerAiProcessing:
@@ -1077,13 +1104,19 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
                   .filter((name): name is string => !!name)
               : undefined;
 
+          const typedEmailName = context.documentName?.trim();
           serverRequest.email = {
-            subject: effectiveDocumentName || 'Untitled Email',
-            // Task 046 (b): says whether that subject, which becomes the .eml name, is the email's own
-            // (system-derived) or the Document Name the user TYPED. The server stores a system-derived name
-            // with a short unique suffix, so two same-subject, same-date emails never share a file. A typed
-            // name is stored exactly as typed; it is never changed.
-            isNameSystemDerived: !context.documentName,
+            // #2416: always the email's own subject — it is the saved .eml's Subject header, sprk_emailsubject and the
+            // communication's subject. Before #2416 the typed Document Name travelled here and replaced all three.
+            subject: context.itemName || 'Untitled Email',
+            // #2416: the Document Name the user typed names the .eml file only. Whitespace alone is no name.
+            ...(typedEmailName ? { documentName: typedEmailName } : {}),
+            // Task 046 (b): says whether the .eml name is the email's own subject (system-derived) or the Document
+            // Name the user TYPED. The server stores a system-derived name with a short unique suffix, so two
+            // same-subject, same-date emails never share a file. A typed name is stored exactly as typed.
+            // #2416: "Keep both" after a typed-name collision asks for the suffix too. The server stores the file
+            // under a unique name and sprk_documentname keeps the typed name: the email's form of a rename.
+            isNameSystemDerived: !typedEmailName || context.allowRename === true,
             senderEmail: context.senderEmail || 'unknown@placeholder.com',
             senderName: context.senderDisplayName,
             recipients,
@@ -1267,6 +1300,8 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
         // closes over `getAccessToken` (function) so polls + SSE always pull
         // a fresh token from the provider cache.
         const saveResponse = responseData as SaveResponse;
+        // Task 131 (#2171): the save worked, but its email may not have been filed to the record — kept for onComplete.
+        emailFilingProblemRef.current = readEmailFilingProblem(saveResponse?.emailFiling);
         await startJobTracking(saveResponse.jobId, saveResponse.streamUrl);
       } catch (err) {
         if (err instanceof Error && err.name === 'AbortError') {

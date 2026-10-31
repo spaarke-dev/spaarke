@@ -1,0 +1,37 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0022",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0022","generator_id":"gen_eval_set.py@1 F-0022","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0022.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-04"},
+ "header":{"firm":"Kingsley Yardley PC","firm_invoice_number":"A-42494/2025","invoice_date":"2026-05-01","billing_period_start":"2026-04-01","billing_period_end":"2026-04-30","firm_matter_reference":"63940-0022","po_number":"PO-4593004","fees_total":7007.25,"expenses_total":676.45,"adjustments_total":0.0,"total_due":7683.7,"currency":"USD"},
+ "timekeepers":[{"name":"Dalia Sandoval","title":"Associate","rate":325.0,"billed_as":"DS"},{"name":"Elena Quillen","title":"Partner","rate":665.0,"billed_as":"EQ"},{"name":"Farah Blackwood","title":"Paralegal","rate":185.0,"billed_as":"FB"},{"name":"Gideon Lindqvist","title":"Partner","rate":545.0,"billed_as":"GL"},{"name":"Ingrid Whitfield","title":"Associate","rate":345.0,"billed_as":"IW"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2026-04-07","timekeeper":"IW","timekeeper_name":"Ingrid Whitfield","timekeeper_title":"Associate","title":"Assoc","hours":2.0,"rate":345.0,"amount":690.0,"narrative":"Attend trial day in the supply agreement","codes":["L450","A109"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2026-04-08","timekeeper":"IW","timekeeper_name":"Ingrid Whitfield","timekeeper_title":"Associate","title":"Assoc","hours":0.25,"rate":345.0,"amount":86.25,"narrative":"Telephone conference with witness regarding the construction contract","codes":["L410","A106"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2026-04-10","timekeeper":"IW","timekeeper_name":"Ingrid Whitfield","timekeeper_title":"Associate","title":"Assoc","hours":1.5,"rate":345.0,"amount":517.5,"narrative":"Draft answer and affirmative defenses for trial in the insurance coverage issue","codes":["L430","A103"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2026-04-13","timekeeper":"FB","timekeeper_name":"Farah Blackwood","timekeeper_title":"Paralegal","title":"Para","hours":1.25,"rate":185.0,"amount":231.25,"narrative":"Review draft expert disclosure for the lease dispute","codes":["L420","A104"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2026-04-14","timekeeper":"EQ","timekeeper_name":"Elena Quillen","timekeeper_title":"Partner","title":"Ptr","hours":1.25,"rate":665.0,"amount":831.25,"narrative":"Review draft expert disclosure for the licensing dispute","codes":["L420","A104"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2026-04-20","timekeeper":"IW","timekeeper_name":"Ingrid Whitfield","timekeeper_title":"Associate","title":"Assoc","hours":2.25,"rate":345.0,"amount":776.25,"narrative":"Draft post-trial motion in the employment claim","codes":["L460","A103"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2026-04-22","timekeeper":"FB","timekeeper_name":"Farah Blackwood","timekeeper_title":"Paralegal","title":"Para","hours":2.5,"rate":185.0,"amount":462.5,"narrative":"Prepare expert witness for testimony in the insurance coverage issue","codes":["L420","A101"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2026-04-22","timekeeper":"IW","timekeeper_name":"Ingrid Whitfield","timekeeper_title":"Associate","title":"Assoc","hours":0.25,"rate":345.0,"amount":86.25,"narrative":"Research standard for new trial in the employment claim","codes":["L460","A102"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"fee","date":"2026-04-22","timekeeper":"FB","timekeeper_name":"Farah Blackwood","timekeeper_title":"Paralegal","title":"Para","hours":2.5,"rate":185.0,"amount":462.5,"narrative":"Prepare expert witness for testimony in the insurance coverage issue","codes":["L420","A101"],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"fee","date":"2026-04-24","timekeeper":"DS","timekeeper_name":"Dalia Sandoval","timekeeper_title":"Associate","title":"Assoc","hours":2.25,"rate":325.0,"amount":731.25,"narrative":"Prepare examination outlines for trial in the licensing dispute","codes":["L440","A101"],"page":1,"narrative_style":"clear"},
+  {"n":11,"line_type":"fee","date":"2026-04-27","timekeeper":"FB","timekeeper_name":"Farah Blackwood","timekeeper_title":"Paralegal","title":"Para","hours":1.25,"rate":185.0,"amount":231.25,"narrative":"Research standard for new trial in the vendor agreement","codes":["L460","A102"],"page":1,"narrative_style":"clear"},
+  {"n":12,"line_type":"fee","date":"2026-04-27","timekeeper":"DS","timekeeper_name":"Dalia Sandoval","timekeeper_title":"Associate","title":"Assoc","hours":0.75,"rate":325.0,"amount":243.75,"narrative":"Draft post-trial motion in the warranty claim","codes":["L460","A103"],"page":1,"narrative_style":"clear"},
+  {"n":13,"line_type":"fee","date":"2026-04-27","timekeeper":"DS","timekeeper_name":"Dalia Sandoval","timekeeper_title":"Associate","title":"Assoc","hours":2.5,"rate":325.0,"amount":812.5,"narrative":"Attend hearing on mediation statement in the lease dispute","codes":["L450","A109"],"page":1,"narrative_style":"clear"},
+  {"n":14,"line_type":"fee","date":"2026-04-28","timekeeper":"GL","timekeeper_name":"Gideon Lindqvist","timekeeper_title":"Partner","title":"Ptr","hours":1.55,"rate":545.0,"amount":844.75,"narrative":"Attend hearing on protective order in the regulatory inquiry","codes":["L450","A109"],"page":1,"narrative_style":"clear"},
+  {"n":15,"line_type":"expense","date":"2026-04-02","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":148.17,"amount":148.17,"narrative":"Court filing fee","codes":["E112"],"page":1,"narrative_style":"clear"},
+  {"n":16,"line_type":"expense","date":"2026-04-13","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":512.68,"amount":512.68,"narrative":"Airfare to Portland for deposition","codes":["E110"],"page":1,"narrative_style":"clear"},
+  {"n":17,"line_type":"expense","date":"2026-04-14","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":15.0,"rate":1.04,"amount":15.6,"narrative":"Facsimile charges","codes":["E104"],"page":1,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["751 Congress Boulevard","Dallas","Tax ID 18-2920482"],"template":"T07","pages":2},
+ "rule_set_id":"RS-04",
+ "context":{"matter_open":"2025-08-17","matter_close":"2026-07-29","matter_budget":55734.0,"approved_timekeepers":["Ingrid Whitfield","Farah Blackwood","Dalia Sandoval","Elena Quillen","Oliver Okafor","Gideon Lindqvist","Nadia Pemberton"],"invoice_received_date":"2026-05-05"},
+ "expected_findings":[
+  {"rule_id":"RS-04-R03","rule_type":"TimeIncrement","scope":"line","line_refs":[14],"consequence":"Reduce"},
+  {"rule_id":"RS-04-R06","rule_type":"Duplicate","scope":"line","line_refs":[9],"consequence":"Disallow","related_line_refs":[7]},
+  {"rule_id":"RS-04-R07","rule_type":"ExpenseRule","scope":"line","line_refs":[17],"consequence":"Disallow"}
+ ],
+ "seeded_violations":3
+}

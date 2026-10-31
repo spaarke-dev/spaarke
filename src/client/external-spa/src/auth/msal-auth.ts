@@ -132,8 +132,8 @@ export function captureTeamsDeepLink(subPageId: string | undefined | null): void
 }
 
 /**
- * Options only the workforce browser plane supplies (standalone-plane.ts). The CIAM plane passes none,
- * so the token REQUEST it sends is unchanged from before task 040 (`{ scopes, account }`, no redirect URI,
+ * Options for a standalone acquisition. The CIAM plane passes `accountFilter` (#2166), which is never sent to MSAL, and
+ * `forceRefresh` / `noInteraction` only when set, so the token REQUEST it sends is unchanged from before task 040 (`{ scopes, account }`, no redirect URI,
  * no cache policy). Its error routing differs in one deliberate way: a `timed_out` silent renewal now
  * falls back to the interactive redirect (see {@link isInteractionNeeded}).
  */
@@ -170,11 +170,23 @@ export interface StandaloneAcquireOptions {
    * redirects, only when set, so the CIAM requests and the Teams requests are unchanged.
    */
   authority?: string;
+  /**
+   * Only the accounts this predicate accepts are considered (applied after `tenantId`). The CIAM paths pass
+   * {@link isCiamAccount}: MSAL's account list is shared by every client in the tab, so without it a company account
+   * cached by the home plane was chosen for the CIAM token and msal-browser refused it with `authority_mismatch` (#2166).
+   * Never sent to MSAL: the token request is unchanged.
+   */
+  accountFilter?: (account: { tenantId?: string }) => boolean;
 }
 
-/** The accounts of one instance, optionally scoped to a tenant (case-insensitive GUID). */
-function accountsFor(instance: IPublicClientApplication, tenantId?: string): AccountInfo[] {
-  return tenantId ? instance.getAllAccounts({ tenantId: tenantId.toLowerCase() }) : instance.getAllAccounts();
+/** The accounts of one instance, optionally scoped to a tenant (case-insensitive GUID) and a predicate. */
+function accountsFor(
+  instance: IPublicClientApplication,
+  tenantId?: string,
+  filter?: (account: { tenantId?: string }) => boolean
+): AccountInfo[] {
+  const accounts = tenantId ? instance.getAllAccounts({ tenantId: tenantId.toLowerCase() }) : instance.getAllAccounts();
+  return filter ? accounts.filter(filter) : accounts;
 }
 
 /**
@@ -362,7 +374,7 @@ function assertRedirectAllowed(instance: IPublicClientApplication): void {
  *
  * @param instance The standalone `PublicClientApplication` (from msal-config.ts) to acquire against.
  * @param bffScope The BFF API OAuth scope for the instance's authority.
- * @param options Workforce-browser-only options (tenant account filter, iframe redirect URI).
+ * @param options Account scoping (CIAM: `accountFilter` only; workforce: tenant, iframe redirect URI, authority).
  * @returns Access token string, ready for `Authorization: Bearer {token}` header.
  * @throws If silent acquisition fails for a non-interaction reason (network error, etc.).
  */
@@ -371,7 +383,7 @@ export async function acquireStandaloneBffToken(
   bffScope: string,
   options: StandaloneAcquireOptions = {}
 ): Promise<string> {
-  const accounts = accountsFor(instance, options.tenantId);
+  const accounts = accountsFor(instance, options.tenantId, options.accountFilter);
   // The home plane's per-request authority (A9), added to a request only when set.
   const authority = options.authority ? { authority: options.authority } : {};
 
@@ -521,14 +533,12 @@ export async function acquireBffToken(): Promise<string> {
 /** The default (CIAM) acquirer: `scope` is the active backend's, passed by bff-client.ts; else the active CIAM scope. */
 function acquireCiamBffToken(scope?: string, options?: BffTokenAcquireOptions): Promise<string> {
   const resolved = scope ?? activeBffScope('ciam');
-  // Options are passed only when set, so the default call shape is `acquireStandaloneBffToken(instance, scope)` as before.
-  if (options?.forceRefresh || options?.noInteraction) {
-    return acquireStandaloneBffToken(msalInstance, resolved, {
-      ...(options.forceRefresh ? { forceRefresh: true } : {}),
-      ...(options.noInteraction ? { noInteraction: true } : {}),
-    });
-  }
-  return acquireStandaloneBffToken(msalInstance, resolved);
+  // Only CIAM accounts are considered (#2166); the flags are added only when set, so the MSAL request is as before.
+  return acquireStandaloneBffToken(msalInstance, resolved, {
+    accountFilter: isCiamAccount,
+    ...(options?.forceRefresh ? { forceRefresh: true } : {}),
+    ...(options?.noInteraction ? { noInteraction: true } : {}),
+  });
 }
 
 /**
@@ -632,8 +642,8 @@ export function getActiveLoginScope(): string {
 }
 
 /**
- * Active account TENANT seam (same shape as the login-scope seam). Null for CIAM (every cached account
- * belongs to the CIAM instance's authority, behaviour unchanged). The workforce browser plane sets
+ * Active account TENANT seam (same shape as the login-scope seam). Null for CIAM, whose accounts are scoped by the
+ * {@link isCiamAccount} predicate instead (#2166: a company account cached in the tab is not a partner sign-in). The workforce browser plane sets
  * Spaarke's tenant id so a CIAM account cached in the same tab's sessionStorage is never treated as a
  * workforce sign-in by `AuthGuard` or the portal-user lookup.
  */
@@ -644,9 +654,10 @@ export function setActiveAccountTenantId(tenantId: string | null): void {
 }
 
 /**
- * Active account PREDICATE seam (ADR-028 A9, task 058). Null for CIAM. The workforce HOME plane sets
- * {@link isWorkforceHomeAccount} so that, BEFORE the signed-in tenant is known, a CIAM account cached in the same tab's
- * sessionStorage is still not counted as a workforce sign-in. Applied after the tenant filter.
+ * Active account PREDICATE seam (ADR-028 A9, task 058). The workforce HOME plane sets {@link isWorkforceHomeAccount} so
+ * that, BEFORE the signed-in tenant is known, a CIAM account cached in the same tab's sessionStorage is still not counted
+ * as a workforce sign-in; the CIAM plane sets {@link isCiamAccount}, the mirror (#2166). Null until a plane is applied.
+ * Applied after the tenant filter.
  */
 let activeAccountFilter: ((account: { tenantId?: string }) => boolean) | null = null;
 
@@ -665,6 +676,17 @@ export function isWorkforceHomeAccount(account: { tenantId?: string }): boolean 
   return isTenantId(tid) && tid.toLowerCase() !== MSAL_TENANT_ID.toLowerCase();
 }
 
+/**
+ * True for an account signed in on the CIAM (partner) plane: its tenant is the CIAM tenant. The CIAM plane's account
+ * filter, the mirror of {@link isWorkforceHomeAccount}: a company account cached in the same tab (the home plane, then
+ * "choose a different sign-in", then Partner) is not a partner sign-in, so it neither counts as signed in nor is used for
+ * the CIAM token (#2166: msal-browser refused it with `authority_mismatch`).
+ */
+export function isCiamAccount(account: { tenantId?: string }): boolean {
+  const tid = account.tenantId;
+  return isTenantId(tid) && tid.toLowerCase() === MSAL_TENANT_ID.toLowerCase();
+}
+
 /** Whether the workforce HOME plane (A9) is the mounted browser plane; read by the registration gate. */
 let workforceHomePlaneActive = false;
 
@@ -676,7 +698,7 @@ export function isWorkforceHomePlaneActive(): boolean {
   return workforceHomePlaneActive;
 }
 
-/** The accounts that belong to the currently-selected browser plane (all of them for CIAM). */
+/** The accounts that belong to the currently-selected browser plane (CIAM: CIAM-tenant accounts only, #2166). */
 export function accountsForActivePlane<T extends { tenantId?: string }>(accounts: readonly T[]): T[] {
   let result = [...accounts];
   if (activeAccountTenantId) {
@@ -768,18 +790,27 @@ function teamsTokenAuthority(cfg: TeamsWorkforceAuthConfig): string {
   }
 }
 
-/** Decode a base64url JWT payload's `tid` WITHOUT verifying the token: only ever used for a fail-closed tenant check. */
-function accessTokenTenantId(accessToken: string | undefined): string {
+/**
+ * Decode a base64url JWT payload WITHOUT verifying the token (null when it is not a JWT). Only ever used for fail-closed
+ * checks (the tenant) and the guest verdict; the BFF verifies the token.
+ */
+function accessTokenPayload(accessToken: string | undefined): Record<string, unknown> | null {
   try {
     const payload = accessToken?.split('.')[1];
-    if (!payload) return '';
+    if (!payload) return null;
     const base64 = payload.replace(/-/g, '+').replace(/_/g, '/');
     const json = atob(base64 + '='.repeat((4 - (base64.length % 4)) % 4));
-    const tid = (JSON.parse(json) as { tid?: unknown } | null)?.tid;
-    return typeof tid === 'string' ? tid.toLowerCase() : '';
+    const parsed: unknown = JSON.parse(json);
+    return parsed && typeof parsed === 'object' ? (parsed as Record<string, unknown>) : null;
   } catch {
-    return '';
+    return null;
   }
+}
+
+/** The access token payload's `tid` (lower-case; '' when it cannot be read). */
+function accessTokenTenantId(accessToken: string | undefined): string {
+  const tid = accessTokenPayload(accessToken)?.tid;
+  return typeof tid === 'string' ? tid.toLowerCase() : '';
 }
 
 /**
@@ -813,10 +844,83 @@ function assertTeamsResultTenant(result: AuthenticationResult | null | undefined
  * again would reload into the same 401. The caller shows the guest screen and makes NO BFF call.
  */
 export class TeamsGuestAccountError extends Error {
-  constructor() {
+  constructor(
+    /** Masked diagnostic for the guest screen ({@link TeamsGuestVerdict.detail}): no ids, names or addresses. */
+    public readonly detail?: string
+  ) {
     super('This Teams tab cannot be used with a guest account.');
     this.name = 'TeamsGuestAccountError';
   }
+}
+
+/**
+ * Whether the last successful Teams sign-in was a guest of the Teams tenant, and a masked `detail` saying why:
+ * `path=naa|popup acct=0|1|other|missing home=match|differs|unreadable|none ext=yes|no src=cache|fresh` (no ids, names or addresses).
+ */
+export interface TeamsGuestVerdict {
+  guest: boolean;
+  detail: string;
+}
+
+/**
+ * The guest verdict for a Teams token result. The token's own `acct` claim decides when it is present (`0` = a member of
+ * the issuing tenant; anything else = not a member): it is the claim the BFF's WorkforceHome scheme requires to be `0`, so
+ * the tab and the BFF agree. The host's account description (`homeAccountId`, `#EXT#`; {@link isTeamsGuestAccount}) decides
+ * only when the token carries no `acct`. On Teams desktop, members were shown the guest screen when the host-account check
+ * decided alone (task 071, 2026-10-29; cause not yet confirmed, `detail` is there to confirm it).
+ */
+function teamsGuestVerdict(
+  result: AuthenticationResult,
+  cfg: TeamsWorkforceAuthConfig,
+  path: 'naa' | 'popup'
+): TeamsGuestVerdict {
+  const raw = accessTokenPayload(result.accessToken)?.acct;
+  const acct =
+    raw === undefined || raw === null
+      ? 'missing'
+      : String(raw).trim() === '0'
+        ? '0'
+        : String(raw).trim() === '1'
+          ? '1'
+          : 'other';
+  const account = result.account;
+  const homePart = account?.homeAccountId?.split('.').pop();
+  const home = !account
+    ? 'none'
+    : !isTenantId(homePart)
+      ? 'unreadable'
+      : homePart.toLowerCase() === cfg.tenantId.toLowerCase()
+        ? 'match'
+        : 'differs';
+  const ext = typeof account?.username === 'string' && account.username.toUpperCase().includes('#EXT#') ? 'yes' : 'no';
+  const guest = acct === 'missing' ? isTeamsGuestAccount(account, cfg.tenantId) : acct !== '0';
+  return {
+    guest,
+    detail: `path=${path} acct=${acct} home=${home} ext=${ext} src=${result.fromCache ? 'cache' : 'fresh'}`,
+  };
+}
+
+/** The verdict of the last successful Teams token acquisition (null before the first). */
+let teamsWorkforceGuestVerdict: TeamsGuestVerdict | null = null;
+
+/** The guest verdict of the last successful Teams sign-in, or null before the first. Read by the host adapter's guest check. */
+export function getTeamsWorkforceGuestVerdict(): TeamsGuestVerdict | null {
+  return teamsWorkforceGuestVerdict;
+}
+
+/**
+ * A successful Teams token result: make ITS account the active one (always, so an account an earlier sign-in left active
+ * in the shared cache never stands in for this one) and record its guest verdict. Returns the access token.
+ */
+function recordTeamsSignIn(
+  instance: IPublicClientApplication,
+  result: AuthenticationResult,
+  cfg: TeamsWorkforceAuthConfig,
+  path: 'naa' | 'popup'
+): string {
+  if (result.account) instance.setActiveAccount(result.account);
+  teamsWorkforceGuestVerdict = teamsGuestVerdict(result, cfg, path);
+  return result.accessToken;
 }
 
 /**
@@ -942,13 +1046,9 @@ async function acquireBffTokenViaNaa(
       ? await instance.acquireTokenSilent({ ...request, account, ...(forceRefresh ? { forceRefresh: true } : {}) })
       : await instance.ssoSilent(request);
     assertTeamsResultTenant(result, cfg);
-    // Establish the active account once so useMsal()/useIsAuthenticated() (host adapter's
-    // MsalProvider) reflect the signed-in user immediately, and so the NEXT call above takes the
-    // fast acquireTokenSilent(account) branch instead of ssoSilent again.
-    if (!instance.getActiveAccount() && result.account) {
-      instance.setActiveAccount(result.account);
-    }
-    return result.accessToken;
+    // The result's account becomes the active one, so useMsal()/useIsAuthenticated() (host adapter's MsalProvider)
+    // reflect the signed-in user and the NEXT call above takes the fast acquireTokenSilent(account) branch.
+    return recordTeamsSignIn(instance, result, cfg, 'naa');
   } catch (err) {
     if (err instanceof InteractionRequiredAuthError) {
       // A background caller (the bell's poll) opens no popup.
@@ -956,10 +1056,7 @@ async function acquireBffTokenViaNaa(
       // Broker popup - Teams resolves this without a visible second login for a consented user.
       const result = await instance.acquireTokenPopup(request);
       assertTeamsResultTenant(result, cfg);
-      if (!instance.getActiveAccount() && result.account) {
-        instance.setActiveAccount(result.account);
-      }
-      return result.accessToken;
+      return recordTeamsSignIn(instance, result, cfg, 'naa');
     }
     throw err;
   }
@@ -993,7 +1090,7 @@ async function acquireBffTokenViaPopup(
       });
       // A token for another tenant is not used: it falls through to the popup, whose result is checked again.
       assertTeamsResultTenant(result, cfg);
-      if (result.accessToken) return result.accessToken;
+      if (result.accessToken) return recordTeamsSignIn(instance, result, cfg, 'popup');
     } catch {
       // Fall through to the popup, as OfficeNaaStrategy._tryAcquireWith does.
     }
@@ -1011,10 +1108,7 @@ async function acquireBffTokenViaPopup(
   if (!result.accessToken) {
     throw new TeamsWorkforceAuthError('The MSAL popup returned no access token.');
   }
-  if (!instance.getActiveAccount() && result.account) {
-    instance.setActiveAccount(result.account);
-  }
-  return result.accessToken;
+  return recordTeamsSignIn(instance, result, cfg, 'popup');
 }
 
 /**

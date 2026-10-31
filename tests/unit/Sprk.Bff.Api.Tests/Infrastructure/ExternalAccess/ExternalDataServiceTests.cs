@@ -760,6 +760,59 @@ public class ExternalDataServiceTests
         list.Value.Should().ContainSingle().Which.SprkDocumenttype.Should().BeNull("the number is never shown as a label");
     }
 
+    // =========================================================================
+    // R3 ISS-011 (#1886, owner decision 2026-10-14): the document list says whether each row has a file, so the SPA can
+    // list a file-less document without Download or Versions. Derived from the SPE pointers the list now selects, by the
+    // same checks the download route applies; only the boolean is on the wire.
+    // =========================================================================
+
+    private const string UsableDriveId = "b!OWdlYTJhZGUtYWFkZC00NDkxLWE1NjctMTIzNDU2Nzg5MGFi";
+    private const string UsableItemId = "01LBYCMX76QPLGITR47BB355T4G2CVDL2B";
+
+    [Fact]
+    public async Task DocumentList_HasFile_IsTrueForARowWithPointers_AndFalseForARowWithNone()
+    {
+        var (service, handler) = NewService();
+        var withFile = Guid.NewGuid().ToString();
+        var noPointers = Guid.NewGuid().ToString();
+        var blankPointers = Guid.NewGuid().ToString();
+        handler.GetResponder = url => DocumentsOnly(url, "{\"value\":["
+            + DocumentRowJson(withFile, $"\"sprk_graphdriveid\":\"{UsableDriveId}\",\"sprk_graphitemid\":\"{UsableItemId}\"") + ","
+            + DocumentRowJson(noPointers, "") + ","
+            + DocumentRowJson(blankPointers, "\"sprk_graphdriveid\":null,\"sprk_graphitemid\":\"\"") + "]}");
+
+        var list = await service.GetDocumentsAsync(ExternalDataService.DocumentParentKind.Project, DocumentRoot, DocumentReader);
+
+        list.Value.Should().HaveCount(3, "a document with no file is still SHOWN (owner decision); only its actions are withheld");
+        list.Value.Single(d => d.SprkDocumentid == withFile).HasFile.Should().BeTrue();
+        list.Value.Single(d => d.SprkDocumentid == noPointers).HasFile.Should().BeFalse();
+        list.Value.Single(d => d.SprkDocumentid == blankPointers).HasFile.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task DocumentList_HasFile_IsOnTheWireAsABoolean_AndNoPointerIs()
+    {
+        var (service, handler) = NewService();
+        var id = Guid.NewGuid().ToString();
+        handler.GetResponder = url => DocumentsOnly(url, "{\"value\":["
+            + DocumentRowJson(id, $"\"sprk_graphdriveid\":\"{UsableDriveId}\",\"sprk_graphitemid\":\"{UsableItemId}\"") + "]}");
+
+        var list = await service.GetDocumentsAsync(ExternalDataService.DocumentParentKind.Project, DocumentRoot, DocumentReader);
+
+        var json = JsonSerializer.Serialize(list.Value);
+        json.Should().Contain("\"hasFile\":true");
+        json.Should().NotContain("graph").And.NotContain(UsableItemId).And.NotContain(UsableDriveId, "no Graph pointer reaches the client");
+    }
+
+    [Fact]
+    public void BuildDocumentListUrl_SelectsTheSpePointers_ThatHasFileIsDerivedFrom()
+    {
+        var select = Uri.UnescapeDataString(ExternalDataService.BuildDocumentListUrl(
+            "https://org.test/api/data/v9.2", ExternalDataService.DocumentParentKind.Project, DocumentRoot)).Split(',');
+
+        select.Should().Contain(new[] { "sprk_graphdriveid", "sprk_graphitemid" });
+    }
+
     [Fact]
     public async Task EveryCollectionPage_AsksForServerPaging_AndTheFormattedValueAnnotations()
     {

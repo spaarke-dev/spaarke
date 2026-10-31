@@ -6,6 +6,7 @@ using Spaarke.Dataverse;
 using Sprk.Bff.Api.Services.Ai.Handlers.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Services.Dataverse;
+using Sprk.Bff.Api.Services.RecordCreation;
 
 namespace Sprk.Bff.Api.Services.Ai.Handlers;
 
@@ -62,7 +63,8 @@ namespace Sprk.Bff.Api.Services.Ai.Handlers;
 /// application creates records the PERSON who asked for it in the server-stamped, field-secured
 /// <c>sprk_createdbyperson</c> (<see cref="RecordCreatorPerson"/>) — IN THE CREATE PAYLOAD, through the owner decision
 /// (<c>RecordOwnershipContext.RequestedBy</c> → <c>RecordOwnerResolution.StampCreatorOn</c>, in
-/// <see cref="OwnedChildWrite.CreateAsync"/>). That supersedes task 133's interim shape (a user-OBO create followed by
+/// <see cref="Sprk.Bff.Api.Services.RecordCreation.RecordCreationService"/>'s step 11, since task 017 replaced the owned
+/// create that did it first). That supersedes task 133's interim shape (a user-OBO create followed by
 /// one app-only column update), which is removed: there is exactly one stamp. An item that names the column is refused
 /// before any Dataverse call (pre-suspend in <c>ValidateChat</c>, and again here): a caller never chooses who created a
 /// record. A run-as-user create (per-user tables, unfiled communications, organization-owned tables) needs no stamp — its
@@ -73,7 +75,7 @@ namespace Sprk.Bff.Api.Services.Ai.Handlers;
 /// duration, and the created record id — never column values.
 /// </para>
 /// </remarks>
-public sealed partial class DataverseCreateRecordHandler : IToolHandler
+internal sealed partial class DataverseCreateRecordHandler : IToolHandler
 {
     private const string HandlerIdValue = nameof(DataverseCreateRecordHandler);
 
@@ -127,7 +129,37 @@ public sealed partial class DataverseCreateRecordHandler : IToolHandler
         return $"{SprkDocumentCreateBlockedMessage} Open the correct path now: [Document Upload wizard]({url})";
     }
 
-    [GeneratedRegex(@"^[a-z][a-z0-9_]*$")]
+    /// <summary>
+    /// ebilling-r1 review of f758480f3c (2026-10-30): the e-billing rows the server writes as the record of a decision or a
+    /// correction — an invoice submission, approval or correction — that ebilling's services read as such. Never created
+    /// from chat: refused outright, with the <c>sprk_document</c> block's mechanism and shape
+    /// (<see cref="ToolErrorCodes.ValidationFailed"/>, before any Dataverse call, in both <see cref="ValidateChat"/> and
+    /// <see cref="ExecuteChatAsync"/>), whatever the record-creation registry accepts for the table.
+    /// <para>ebilling-r1 (2026-10-30, decisions.md): also <see cref="ExternalIdentifierTable"/>. Its only writer is ebilling's
+    /// resolution step (task 044), which normalises the value and fills the issuing organisation the alternate key needs; a
+    /// chat-created row could route later invoices to the wrong matter.</para>
+    /// </summary>
+    internal static readonly IReadOnlySet<string> ServerWrittenInvoiceFamilyTables = new HashSet<string>(StringComparer.Ordinal)
+    {
+        "sprk_invoicesubmission", "sprk_invoiceapproval", "sprk_invoicecorrection", ExternalIdentifierTable,
+    };
+
+    /// <summary>ebilling-r1 (2026-10-30): the external identifier e-billing resolves invoices to matters by.</summary>
+    internal const string ExternalIdentifierTable = "sprk_externalidentifier";
+
+    /// <summary>The single rejection message for a <see cref="ServerWrittenInvoiceFamilyTables"/> create (user- and model-facing).</summary>
+    internal static string ServerWrittenInvoiceFamilyCreateBlockedMessage(string tablename) =>
+        string.Equals(tablename, ExternalIdentifierTable, StringComparison.Ordinal)
+            ? $"'{tablename}' records can't be created from chat — this create was REJECTED and nothing was written. They are " +
+              "written by Spaarke's e-billing services only, when an invoice is resolved to its matter. " +
+              $"Do NOT retry this create — {tablename} is blocked on this tool unconditionally and no argument change makes it " +
+              "valid; an external identifier is recorded when e-billing resolves an invoice."
+            : $"'{tablename}' records can't be created from chat — this create was REJECTED and nothing was written. They are " +
+              "written by Spaarke's e-billing services only, as the record of an invoice submission, approval or correction. " +
+              $"Do NOT retry this create — {tablename} is blocked on this tool unconditionally and no argument change makes it " +
+              "valid; submit, approve or correct the invoice from the invoice itself instead.";
+
+    [GeneratedRegex(@"^[a-z][a-z0-9_]*\z")]
     private static partial Regex LogicalNameRegex();
 
     /// <summary>
@@ -143,22 +175,22 @@ public sealed partial class DataverseCreateRecordHandler : IToolHandler
     private readonly ILogger<DataverseCreateRecordHandler> _logger;
     private readonly HandoffUrlBuilder _handoffUrlBuilder;
     private readonly Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver _ownership;
-    private readonly Spaarke.Dataverse.IFieldMappingDataverseService _appOnly;
     private readonly Sprk.Bff.Api.Services.Ai.Membership.IIdentityNormalizationService _identity;
     private readonly IServiceScopeFactory? _scopes;
-    private readonly Sprk.Bff.Api.Services.Access.SecureRootFilingGate _rootFiling;
+    private readonly RecordCreationService _recordCreation;
 
     /// <param name="scopes">Task 142 (L1): the scope the Assigned-To materializer is resolved from after a root is
     /// created. Optional so a host composing the tool framework without the external-access module still resolves this
     /// handler (CLAUDE.md §10 F.1); the materializer itself is looked up with GetService and skipped when absent.</param>
+    /// <param name="recordCreation">Field-mapping-server-write-path-r1 task 017 (2d-3): the ONE server create every owned
+    /// create goes through, as the caller. Scoped and registered unconditionally (OfficeModule); this handler is scoped too.</param>
     public DataverseCreateRecordHandler(
         IDataverseUserClient dataverse,
         ILogger<DataverseCreateRecordHandler> logger,
         HandoffUrlBuilder handoffUrlBuilder,
         Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver ownership,
-        Spaarke.Dataverse.IFieldMappingDataverseService appOnly,
         Sprk.Bff.Api.Services.Ai.Membership.IIdentityNormalizationService identity,
-        Sprk.Bff.Api.Services.Access.SecureRootFilingGate rootFiling,
+        RecordCreationService recordCreation,
         IServiceScopeFactory? scopes = null)
     {
         _scopes = scopes;
@@ -168,14 +200,11 @@ public sealed partial class DataverseCreateRecordHandler : IToolHandler
         // Task 146 r2 (S1 / G5): both unconditionally registered (MetadataServiceExtensions / GraphModule), so this
         // handler's tool-framework registration gains no asymmetric dependency (CLAUDE.md §10 F.1).
         _ownership = ownership ?? throw new ArgumentNullException(nameof(ownership));
-        _appOnly = appOnly ?? throw new ArgumentNullException(nameof(appOnly));
         // Owner round 7 item 3: the caller's LINKED contact (task 141) names them in a contact-typed "for" column.
         // Unconditionally registered (MembershipModule), so no asymmetric registration (CLAUDE.md §10 F.1).
         _identity = identity ?? throw new ArgumentNullException(nameof(identity));
-        // Task 158 (owner round 6): a work assignment or project created under a secure matter or project is secured
-        // through provisioning's own steps. Registered beside the restamper by AddCoreAncestorResolver, which
-        // AddToolFramework calls too — no asymmetric registration (CLAUDE.md §10 F.1).
-        _rootFiling = rootFiling ?? throw new ArgumentNullException(nameof(rootFiling));
+        // Task 017 (2d-3): the plan, the owner, the isolated root's completion and every post-create step are the service's.
+        _recordCreation = recordCreation ?? throw new ArgumentNullException(nameof(recordCreation));
     }
 
     /// <inheritdoc />
@@ -185,7 +214,7 @@ public sealed partial class DataverseCreateRecordHandler : IToolHandler
     public ToolHandlerMetadata Metadata { get; } = new(
         Name: "Dataverse Create Record",
         // FR-A-01 (AIR2-020): mirror of the authored sprk_description in infra/dataverse/sprk_analysistool-dataverse-create-record-row.json — keep byte-equal; edit the JSON, not this literal.
-        Description: @"Inserts one row into a Dataverse table under the calling user's permissions and returns the created record id as a citable path (tables/{table}/records/{guid}). Call dataverse.describe first if the table's schema is unknown — do NOT guess column logical names from display names. Values: strings/numbers/booleans for simple fields; numeric option values for choice columns (NEVER labels — use dataverse.describe to find the numeric values); comma-separated numeric values for multi-select choice; lookup fields as {""relatedTable"": ""..."", ""recordId"": ""guid""} — recordId is REQUIRED: resolve the target record's GUID FIRST via dataverse.search_data or dataverse.read_query IN THE SAME TURN you draft the proposal, BEFORE asking the user to confirm; a lookup without recordId is rejected. NEVER use OData annotations as item keys — no '@odata.bind', no '@' or '.' in any key: the ONLY way to set a lookup on this transport is the {relatedTable, recordId} object form, and choice columns take plain numeric values. If you cannot resolve a GUID for an optional lookup or the numeric value for an optional choice, OMIT that column and mention the value in a text column instead — never guess. sprk_matter write contract (from live metadata — verify anything else with dataverse.describe): sprk_mattername (text, REQUIRED); sprk_matternumber (text); sprk_matterdescription (multiline text); sprk_mattertype is a LOOKUP to sprk_mattertype_ref and sprk_practicearea is a LOOKUP to sprk_practicearea_ref — resolve the reference row's GUID via dataverse.read_query first and send {""relatedTable"":""sprk_mattertype_ref"",""recordId"":""guid""} (same pattern for practice area with sprk_practicearea_ref), or OMIT the column and put the value in sprk_matterdescription. Records you create belong to the calling user automatically — never set owner/assignee columns for the requesting user themselves. HARD RULE — sprk_document creates are BLOCKED: this tool REJECTS any create on the sprk_document table before anything is written (VALIDATION_FAILED). Spaarke document records require the full ingestion pipeline (file upload → SharePoint Embedded storage → document profile → indexing) that only the Document Upload wizard drives; no chat tool can upload file content. Never attempt or retry a sprk_document create — no argument change makes it valid. If asked to create a document or save chat output 'to documents', say honestly that documents can't be created from chat and point the user to the Document Upload wizard (or offer an alternative: work with a file uploaded into this chat, create a task, draft an email, or open a workspace tab). WRITE tool: executes with the user's own privileges; if the user cannot create rows in the table, the call fails with their access error. Spaarke entity map: 'matter' = sprk_matter (name column sprk_mattername), 'project' = sprk_project (sprk_projectname), 'document' = sprk_document (sprk_documentname — creation BLOCKED on this tool, Document Upload wizard only); people = contact, companies = account.",
+        Description: @"Inserts one row into a Dataverse table under the calling user's permissions and returns the created record id as a citable path (tables/{table}/records/{guid}). Call dataverse.describe first if the table's schema is unknown — do NOT guess column logical names from display names. Values: strings/numbers/booleans for simple fields; numeric option values for choice columns (NEVER labels — use dataverse.describe to find the numeric values); comma-separated numeric values for multi-select choice; lookup fields as {""relatedTable"": ""..."", ""recordId"": ""guid""} — recordId is REQUIRED: resolve the target record's GUID FIRST via dataverse.search_data or dataverse.read_query IN THE SAME TURN you draft the proposal, BEFORE asking the user to confirm; a lookup without recordId is rejected. NEVER use OData annotations as item keys — no '@odata.bind', no '@' or '.' in any key: the ONLY way to set a lookup on this transport is the {relatedTable, recordId} object form, and choice columns take plain numeric values. If you cannot resolve a GUID for an optional lookup or the numeric value for an optional choice, OMIT that column and mention the value in a text column instead — never guess. sprk_matter write contract (from live metadata — verify anything else with dataverse.describe): sprk_mattername (text, REQUIRED); sprk_matterdescription (multiline text); sprk_mattertype is a LOOKUP to sprk_mattertype_ref and sprk_practicearea is a LOOKUP to sprk_practicearea_ref — resolve the reference row's GUID via dataverse.read_query first and send {""relatedTable"":""sprk_mattertype_ref"",""recordId"":""guid""} (same pattern for practice area with sprk_practicearea_ref), or OMIT the column and put the value in sprk_matterdescription. Records you create belong to the calling user automatically — never set owner/assignee columns for the requesting user themselves. The platform numbers matters, projects and budgets itself: sprk_matternumber, sprk_projectnumber and sprk_budgetnumber are set by the server, so NEVER send any of them (a create that names one is refused before anything is written). HARD RULE — sprk_document creates are BLOCKED: this tool REJECTS any create on the sprk_document table before anything is written (VALIDATION_FAILED). Spaarke document records require the full ingestion pipeline (file upload → SharePoint Embedded storage → document profile → indexing) that only the Document Upload wizard drives; no chat tool can upload file content. Never attempt or retry a sprk_document create — no argument change makes it valid. If asked to create a document or save chat output 'to documents', say honestly that documents can't be created from chat and point the user to the Document Upload wizard (or offer an alternative: work with a file uploaded into this chat, create a task, draft an email, or open a workspace tab). WRITE tool: executes with the user's own privileges; if the user cannot create rows in the table, the call fails with their access error. Spaarke entity map: 'matter' = sprk_matter (name column sprk_mattername), 'project' = sprk_project (sprk_projectname), 'document' = sprk_document (sprk_documentname — creation BLOCKED on this tool, Document Upload wizard only); people = contact, companies = account.",
         Version: "1.0.0",
         SupportedInputTypes: new[] { "text/plain" },
         Parameters: new[]
@@ -254,7 +283,47 @@ public sealed partial class DataverseCreateRecordHandler : IToolHandler
         if (string.Equals(tablename, BlockedTableLogicalName, StringComparison.Ordinal))
             return ToolValidationResult.Failure(BuildBlockedMessageWithAffordance(context.MatterId));
 
+        // ebilling-r1 review of f758480f3c (2026-10-30): server-written e-billing rows, the same hard block.
+        if (ServerWrittenInvoiceFamilyTables.Contains(tablename))
+            return ToolValidationResult.Failure(ServerWrittenInvoiceFamilyCreateBlockedMessage(tablename));
+
+        // Task 017 review F-2 (AIR2-034): a column the service refuses at step 2 is refused before the dialog, not after the
+        // user confirms it.
+        if (BlockedColumnBeforeSuspend(tablename, item) is { } blocked)
+            return ToolValidationResult.Failure(blocked);
+
         return ToolValidationResult.Success();
+    }
+
+    /// <summary>
+    /// Task 017 review F-2 (AIR2-034: a create that can never succeed is refused before it suspends): the text of the refusal
+    /// <see cref="RecordCreationService"/> gives at step 2 for a column the server owns (the autonumber, a root's container /
+    /// secure business unit / Access Permission, the owner and audit columns), or null when the pre-check cannot PROVE the
+    /// refusal. It asks the service's own pure rule (<see cref="RecordCreationService.CallerBlockedColumnRefusal"/>) and words
+    /// it as the post-confirm refusal is (<see cref="RefusalText"/>) — only the timing changes.
+    /// </summary>
+    /// <remarks>
+    /// <para>Proof is limited to what needs no I/O. A registered table (<see cref="RecordTableRules.Find"/>) is the service's;
+    /// a table outside the registry is refused post-confirm as <c>table_unsupported</c> only if it is team- or user-owned, which
+    /// is table metadata and not known here, so it is NOT pre-refused (an organisation-owned table is a valid run-as-user
+    /// create). A per-user table and a communication or thread (unfiled, it keeps its creator) may take the run-as-user path
+    /// (<see cref="OwnedChildWrite.PathFor"/>), where the service is not asked, so they are not pre-refused either.</para>
+    /// </remarks>
+    internal static string? BlockedColumnBeforeSuspend(string tablename, JsonElement item)
+    {
+        if (item.ValueKind != JsonValueKind.Object
+            || RecordTableRules.Find(tablename) is not { } rule
+            || OwnedChildWrite.PerUserTables.Contains(tablename)
+            || OwnedChildWrite.KeepsItsCreatorWhenUnfiled(tablename))
+        {
+            return null;
+        }
+
+        // The mapper's own spelling of a column name (DataverseWriteItemMapper: trimmed, lower-cased).
+        var columns = item.EnumerateObject().Select(p => p.Name.Trim().ToLowerInvariant()).ToList();
+        return RecordCreationService.CallerBlockedColumnRefusal(rule, RecordCreationService.NounOf(tablename), columns) is { } refusal
+            ? RefusalText(refusal, tablename, correlationId: string.Empty)
+            : null;
     }
 
     /// <inheritdoc />
@@ -286,6 +355,14 @@ public sealed partial class DataverseCreateRecordHandler : IToolHandler
         {
             return LogOutcome(context, tablename,
                 Error(tool, BuildBlockedMessageWithAffordance(context.MatterId), ToolErrorCodes.ValidationFailed, startedAt),
+                stopwatch);
+        }
+
+        // ebilling-r1 review of f758480f3c (defense in depth — ValidateChat already rejects): server-written e-billing rows.
+        if (ServerWrittenInvoiceFamilyTables.Contains(tablename))
+        {
+            return LogOutcome(context, tablename,
+                Error(tool, ServerWrittenInvoiceFamilyCreateBlockedMessage(tablename), ToolErrorCodes.ValidationFailed, startedAt),
                 stopwatch);
         }
 
@@ -332,48 +409,28 @@ public sealed partial class DataverseCreateRecordHandler : IToolHandler
                     return LogOutcome(context, tablename, MapClientError(tool, forFailure, startedAt), stopwatch);
                 }
 
-                // Task 158 r1 (owner round 31): a work assignment or project filed under a SECURE matter or project is
-                // created INTO isolation - owned by the named Secure Record Owners team, flagged in the create, for the
-                // caller (sprk_createdbyperson) - never as an ordinary row of the caller's business unit first. Decided
-                // before any write and after the caller's own G5 check: an unreadable parent flag, a caller without
-                // AppendTo on a secure parent, or a caller walled off (or not checkable against) the No Access list of a
-                // secure parent or of the record itself, refuses with nothing created.
-                var owned = await OwnedChildWrite.CreateAsync(
-                    _dataverse, _ownership, _appOnly, tablename, forMapped, serverSet,
-                    CallerObjectId(context), cancellationToken, _rootFiling).ConfigureAwait(false);
-
-                if (owned.PlanRefusal is { } rootRefusal)
-                {
-                    return LogOutcome(context, tablename,
-                        Error(tool, $"The record was NOT created: {rootRefusal.Reason} ({rootRefusal.RefusalCode}).",
-                            rootRefusal.RefusalCode ?? ToolErrorCodes.ValidationFailed, startedAt),
-                        stopwatch);
-                }
-
-                // Created into isolation -> completed now: the caller's share (read back; a share that fails deletes the row
-                // again), its own container, its secure parents' sharees.
-                Sprk.Bff.Api.Services.Access.SecureRootInheritResult? secured = null;
-                if (owned.Isolated is not null && owned.CreatedId is { } isolatedRoot)
-                {
-                    // The same person the plan checked and the create stamped (sprk_createdbyperson; set with Isolated) —
-                    // never a second WhoAmI, whose failure would name nobody and remove a row its creator can open.
-                    secured = await _rootFiling.CompleteIsolatedCreateAsync(
-                            tablename, isolatedRoot, owned.IsolatedFor!.Value, context.DecisionId.ToString("N"))
-                        .ConfigureAwait(false);
-                }
-
-                // Task 142 (L1, owner Q5 + R3) on the owned path too (batch 4 integration): a project / matter / work
-                // assignment the application created gets its "Assigned *" contacts' grant or share now. After the create
-                // committed; never throws, never fails this create (a non-root table is a no-op).
-                if (owned.CreatedId is { } ownedId && secured is not { RowRemoved: true })
-                {
-                    await Sprk.Bff.Api.Services.ExternalAccess.AssignedAccessMaterializer.RunAfterWriteAsync(
-                        _scopes, tablename, ownedId, writtenColumns: null, grantorOid: null, _logger, cancellationToken)
-                        .ConfigureAwait(false);
-                }
+                // Field-mapping-server-write-path-r1 task 017 (2d-3): the ONE server create, as the caller (ADR-028). Every
+                // payload check (AppendTo on every record the row names, the invoice-family rule), the secure-create plan
+                // (task 158: a work assignment or project under a secure record is created INTO isolation), the owner, the
+                // I-1 stamp and I-16 in the create body (step 10), the isolated root's completion, the "Assigned *" grants and
+                // the sharee mirror run there, once. The "for" person stays here (the service writes no "for" column): the
+                // caller named in it is SERVER-set, so it costs no AppendTo — the request's ServerSetLookupColumns, as before.
+                // A refusal or a fault creates nothing; there is no fallback create (NFR-01).
+                var outcome = await _recordCreation.CreateAsync(
+                        new RecordCreationRequest(tablename, new RecordCreationPayload.Mapped(forMapped))
+                        {
+                            ServerSetLookupColumns = serverSet,
+                            CorrelationId = context.DecisionId.ToString("N"),
+                            // Task 017 r3 (UAC-r2 F1): as before the service and as every other AI-tool write - no grantor, so
+                            // an external "Assigned To" contact gets the grant but no invitation attributed to the confirming user.
+                            Grantor = AssignedAccessGrantor.None,
+                        },
+                        RecordCreationPrincipal.ForCaller(_dataverse, CallerObjectId(context)),
+                        cancellationToken)
+                    .ConfigureAwait(false);
 
                 return LogOutcome(context, tablename,
-                    OwnedCreateResult(tool, tablename, forMapped, owned, startedAt, secured), stopwatch);
+                    OwnedCreateResult(tool, tablename, forMapped, outcome, startedAt), stopwatch);
             }
 
             // A create that keeps its creator (per-user / unfiled communication / no user-team ownership) filed under a
@@ -499,7 +556,7 @@ public sealed partial class DataverseCreateRecordHandler : IToolHandler
             return (mapped, null, null);
         }
 
-        var me = await OwnedChildWrite.WhoAmIAsync(_dataverse, ct).ConfigureAwait(false);
+        var me = await CallerWriteAuthorization.WhoAmIAsync(_dataverse, ct).ConfigureAwait(false);
         if (me.Failure is { } failure)
             return (mapped, null, failure);
 
@@ -554,70 +611,67 @@ public sealed partial class DataverseCreateRecordHandler : IToolHandler
         }
     }
 
-    /// <summary>The tool result of an owned (G5) create: the same success shape as a run-as-user create, or the
-    /// caller's denial, the owner refusal (its stable code and reason — reached only after AppendTo on every record the
-    /// row names), a secure-filing refusal, or the caller's own Dataverse error.</summary>
-    private ToolResult OwnedCreateResult(
-        AnalysisTool tool, string tablename, DataverseWriteItemMapper.MappedItem item, OwnedChildWrite.Outcome owned,
-        DateTimeOffset startedAt, Sprk.Bff.Api.Services.Access.SecureRootInheritResult? secured = null)
+    /// <summary>The tool result of an owned (G5) create through <see cref="RecordCreationService"/>: the same success shape as a
+    /// run-as-user create, or the service's refusal in this tool's EXISTING error codes (<see cref="RefusalErrorCode"/>) with
+    /// the shared map's text, or — an isolated root whose securing did not finish — today's error with its reason code.</summary>
+    internal ToolResult OwnedCreateResult(
+        AnalysisTool tool, string tablename, DataverseWriteItemMapper.MappedItem item, RecordCreationOutcome outcome,
+        DateTimeOffset startedAt)
     {
-        if (owned.ClientFailure is { } failure)
-            return MapClientError(tool, failure, startedAt);
-        if (owned.Denied is { } denied)
-            return Error(tool, denied, DataverseUserClientErrorCodes.AccessDenied, startedAt);
-        if (owned.Invalid is { } invalid)
-            return Error(tool, invalid, ToolErrorCodes.ValidationFailed, startedAt);
-        if (owned.SecureFilingRefused is { } secureRefusal)
-            return Error(tool, secureRefusal, ToolErrorCodes.ValidationFailed, startedAt);
-        if (owned.OwnerRefusal is not null || owned.CreatedId is not { } createdId)
-        {
-            var reason = owned.OwnerRefusal;
-            return Error(tool,
-                $"The record was NOT created: its owner could not be decided — {reason?.Reason} ({reason?.RefusalCode}).",
-                reason?.RefusalCode ?? ToolErrorCodes.InternalError, startedAt);
-        }
-
-        // Task 158 r1 (owner round 31 item 2): created into isolation, but it could not be shared to the caller — the row
-        // was deleted again, so the create is refused (never a row nobody can open).
-        if (secured is { RowRemoved: true })
+        // Task 158 r1 (owner round 31 item 2): created into isolation, but it could not be shared to the caller — the row was
+        // deleted again, so the create is refused (never a row nobody can open), with provisioning's reason code as before.
+        if (outcome.Refusal is not null && outcome.IsolatedCompletion is { RowRemoved: true } removed)
         {
             return Error(tool,
                 $"The record was NOT created: a '{tablename}' filed under a secure record is created secure and shared to you, " +
-                $"and that share could not be made ({secured.ReasonCode}), so the new record was removed again. " +
+                $"and that share could not be made ({removed.ReasonCode}), so the new record was removed again. " +
                 "Nothing was created.",
-                secured.ReasonCode ?? ToolErrorCodes.InternalError, startedAt);
+                removed.ReasonCode ?? ToolErrorCodes.InternalError, startedAt);
         }
 
-        // Created secure and shared to the caller, but a later step (its own container, its parents' sharees) did not
-        // complete — never reported as a plain success (ADR-003). Nobody outside its sharing sees it meanwhile; the
-        // secure-root inheritance job completes it within minutes.
-        // Created into isolation, NOT shared to the caller, and the delete failed too: say exactly that (task 158 r1).
+        if (outcome.Refusal is { } refusal)
+        {
+            return Error(tool, RefusalText(refusal, tablename, outcome.CorrelationId), RefusalErrorCode(refusal), startedAt);
+        }
+
+        if (outcome.CreatedId is not { } createdId)
+        {
+            // Neither a row nor a refusal: never a success (fail closed).
+            return Error(tool, "The record was NOT created.", ToolErrorCodes.InternalError, startedAt);
+        }
+
+        // Created into isolation, NOT shared to the caller, and the delete failed too: say exactly that (task 158 r1; the
+        // service reports provisioning's answer on IsolatedCompletion, task 017 2d-3).
         // Task 158 r1c-v1 (verifier item 7): a self-heal is promised only when the job can deliver it — never after
         // provisioning REFUSED (e.g. the caller walled off between the plan and the provisioning), which every run refuses again.
-        if (secured is { RowStranded: true })
+        if (outcome.IsolatedCompletion is { RowStranded: true } stranded)
         {
             return Error(tool,
                 $"Record {createdId:D} was created in '{tablename}' as a secure record, but it could not be shared to you and " +
-                $"could not be removed again ({secured.ReasonCode}). " +
-                (secured.CompletesAutomatically
+                $"could not be removed again ({stranded.ReasonCode}). " +
+                (stranded.CompletesAutomatically
                     ? "It is shared to you automatically once that step succeeds (it is retried every few minutes); until then " +
                       "only an administrator can open it."
                     : "It will not be shared to you automatically: only an administrator can open it, and an administrator needs " +
                       "to review and remove it."),
-                secured.ReasonCode ?? ToolErrorCodes.InternalError, startedAt);
+                stranded.ReasonCode ?? ToolErrorCodes.InternalError, startedAt);
         }
 
-        // (Shared to the caller means provisioning got past its refusals — every refusal comes before the creator's share — so
-        // what is left is a fault the job retries: the promise below holds.)
-        if (secured is { IsComplete: false })
+        // Created secure and shared to the caller, but a later step (its own container, its parents' sharees) did not complete
+        // — never reported as a plain success (ADR-003). (Shared to the caller means provisioning got past its refusals — every
+        // refusal comes before the creator's share — so what is left is a fault the job retries: the promise below holds.)
+        if (outcome.IsolatedCompletion is { IsComplete: false } unfinished)
         {
             return Error(tool,
                 $"Record {createdId:D} was created in '{tablename}' as a secure record shared to you, but securing it could not " +
-                $"be finished yet ({secured.ReasonCode}). It is completed automatically within a few minutes; " +
+                $"be finished yet ({unfinished.ReasonCode}). It is completed automatically within a few minutes; " +
                 "until then only you (and the people already given access) can open it.",
-                secured.ReasonCode ?? ToolErrorCodes.InternalError, startedAt);
+                unfinished.ReasonCode ?? ToolErrorCodes.InternalError, startedAt);
         }
 
+        // Task 037 (fix round 1): what the row was WRITTEN with — a copied default the create filled (a work assignment's
+        // Assigned To) is reported as set, never as left blank.
+        var written = WrittenColumnsOf(item, outcome.WrittenColumns);
         return ToolResult.Ok(
             HandlerId, tool.Id, tool.Name,
             data: new
@@ -626,14 +680,15 @@ public sealed partial class DataverseCreateRecordHandler : IToolHandler
                 tablename,
                 recordId = createdId.ToString("D"),
                 path = DataverseRecordCitations.RecordPath(tablename, createdId),
-                columnsSet = item.Columns,
-                columnCount = item.Columns.Count
+                columnsSet = written,
+                columnCount = written.Count
             },
-            summary: $"Created record {createdId:D} in '{tablename}' ({item.Columns.Count} columns set). It is owned by the " +
+            summary: $"Created record {createdId:D} in '{tablename}' ({written.Count} columns set). It is owned by the " +
                      "team of the record it is filed under (or the calling user's own team), checked against the calling " +
                      "user's permissions.",
             confidence: 1.0,
-            execution: Timed(startedAt)) with
+            execution: Timed(startedAt),
+            warnings: outcome.Warnings.Count > 0 ? outcome.Warnings : null) with
         {
             Metadata = new Dictionary<string, object?>
             {
@@ -645,11 +700,109 @@ public sealed partial class DataverseCreateRecordHandler : IToolHandler
     }
 
     /// <summary>
+    /// Task 017 (2d-3; ADR-019, NFR-07): the tool error code of a <see cref="RecordCreationService"/> refusal — by KIND, each
+    /// to the code this tool gave the same refusal before it moved onto the service (the Office precedent,
+    /// <c>OfficeService.MapQuickCreateRefusal</c>). A Dataverse failure asked as the caller keeps its own code (as
+    /// <see cref="MapClientError"/> did); the caller's rights, a server-owned column and a record they may not file under are
+    /// <see cref="DataverseUserClientErrorCodes.AccessDenied"/> (<c>CallerWriteAuthorization</c>'s <c>Denied</c>); a payload
+    /// the service refuses, a secure filing this path may not make, and an I-1 stamp that cannot be derived are
+    /// <see cref="ToolErrorCodes.ValidationFailed"/>; a pre-write rule, the secure-create plan, the resolver and provisioning
+    /// keep their own stable codes; a fault (<see cref="RecordCreationRefusalKind.Unavailable"/>, the I-1 stamp's included) and
+    /// a create with no decision are <see cref="ToolErrorCodes.InternalError"/>, as the old core's throw was.
+    /// </summary>
+    internal static string? RefusalErrorCode(RecordCreationRefusal refusal)
+    {
+        ArgumentNullException.ThrowIfNull(refusal);
+        return refusal switch
+        {
+            { Kind: RecordCreationRefusalKind.PrincipalUnresolved or RecordCreationRefusalKind.Upstream, ClientFailure.ErrorCode: { } own }
+                when !string.IsNullOrWhiteSpace(own) => own,
+            // Task 017 review F-6 (NFR-07): a Dataverse failure that names no code was passed through as it was (MapClientError
+            // gave the result the failure's own ErrorCode, null included), never as a code of this tool's own.
+            { Kind: RecordCreationRefusalKind.Upstream, ClientFailure: { } nameless } => nameless.ErrorCode,
+            { Kind: RecordCreationRefusalKind.PrincipalUnresolved } => DataverseUserClientErrorCodes.AccessDenied,
+            { Kind: RecordCreationRefusalKind.NotFoundOrDenied or RecordCreationRefusalKind.BlockedColumn } =>
+                DataverseUserClientErrorCodes.AccessDenied,
+            { Kind: RecordCreationRefusalKind.Forbidden, Code: RecordCreationRefusal.DeniedCode } => DataverseUserClientErrorCodes.AccessDenied,
+            { Kind: RecordCreationRefusalKind.Forbidden } => refusal.Code,
+            { Kind: RecordCreationRefusalKind.Invalid or RecordCreationRefusalKind.Undecided, PreWrite.Code: not null } => refusal.Code,
+            { Kind: RecordCreationRefusalKind.Invalid } => ToolErrorCodes.ValidationFailed,
+            { Kind: RecordCreationRefusalKind.OwnerUnresolved, OwnerDecision.IsSecureOwner: true } => ToolErrorCodes.ValidationFailed,
+            { Kind: RecordCreationRefusalKind.OwnerUnresolved } => refusal.Code,
+            { Kind: RecordCreationRefusalKind.Undecided, Code: RecordCreationRefusal.NoDecisionCode } => ToolErrorCodes.InternalError,
+            { Kind: RecordCreationRefusalKind.Undecided or RecordCreationRefusalKind.Conflict } => refusal.Code,
+            _ => ToolErrorCodes.InternalError,
+        };
+    }
+
+    /// <summary>
+    /// Task 017 (2d-3): the refusal's text. A refusal that carries its own stable code to the model (a pre-write rule, the
+    /// secure-create plan, the resolver) keeps today's shape — "The record was NOT created: {reason} ({code})." — from the
+    /// decided object's own reason (the old core's <c>PlanRefusal</c> / <c>OwnerRefusal</c> / <c>InvoiceFamilyRefusal</c>), and
+    /// a secure filing this path may not make keeps the service's sentence (the old core's, verbatim). Every other refusal
+    /// takes the shared map's text (<see cref="RecordCreationProblemMap"/>: the uniform not-found, fixed words for a fault or
+    /// an upstream failure, otherwise the service's detail) — never Dataverse's.
+    /// </summary>
+    internal static string RefusalText(RecordCreationRefusal refusal, string tablename, string correlationId)
+    {
+        ArgumentNullException.ThrowIfNull(refusal);
+        var code = RefusalErrorCode(refusal);
+        var ownCode = string.Equals(code, refusal.Code, StringComparison.Ordinal);
+        return refusal switch
+        {
+            { Kind: RecordCreationRefusalKind.OwnerUnresolved, OwnerDecision.IsSecureOwner: true } => refusal.Detail,
+            { PreWrite: { Code: not null, Detail: { } reason } } when ownCode =>
+                $"The record was NOT created: {reason} ({code}).",
+            { Kind: RecordCreationRefusalKind.OwnerUnresolved, OwnerDecision.Reason: { } reason } when ownCode =>
+                $"The record was NOT created: its owner could not be decided — {reason} ({code}).",
+            { OwnerDecision.Reason: { } reason } when ownCode => $"The record was NOT created: {reason} ({code}).",
+            _ => RecordCreationProblemMap.ToProblemDetails(
+                    refusal, tablename, string.IsNullOrWhiteSpace(correlationId) ? Guid.NewGuid().ToString("N") : correlationId)
+                .Detail ?? "The record was NOT created.",
+        };
+    }
+
+    /// <summary>
+    /// Task 017 (2d-3): the columns the created row was written with, as LOGICAL names (the tool's <c>columnsSet</c>): the
+    /// item's own columns, plus a copied default the create body carries and the item did not (a work assignment's Assigned
+    /// To, task 037), translated back from its bind key. The server's own columns (the owner, the creator person, the I-1
+    /// stamp, I-16, the search index) are not the caller's and are not reported, as before.
+    /// </summary>
+    internal static IReadOnlyList<string> WrittenColumnsOf(
+        DataverseWriteItemMapper.MappedItem item, IReadOnlyCollection<string> writtenBodyKeys)
+    {
+        const string BindSuffix = "@odata.bind";
+        var columns = item.Columns.ToList();
+        foreach (var key in writtenBodyKeys)
+        {
+            var name = key.EndsWith(BindSuffix, StringComparison.OrdinalIgnoreCase) ? key[..^BindSuffix.Length] : key;
+            if (columns.Contains(name, StringComparer.OrdinalIgnoreCase)
+                || item.Lookups.Any(l => string.Equals(l.Column, name, StringComparison.OrdinalIgnoreCase)))
+            {
+                continue;
+            }
+
+            // A copied default's navigation property is its column's schema spelling, so it compares case-insensitively.
+            if (CopiedDefaultColumns.FirstOrDefault(c => string.Equals(c, name, StringComparison.OrdinalIgnoreCase)) is { } copied)
+                columns.Add(copied);
+        }
+
+        return columns;
+    }
+
+    /// <summary>The target columns of every copied default the registry declares (task 037, FR-36).</summary>
+    private static readonly IReadOnlySet<string> CopiedDefaultColumns = RecordTableRules.All
+        .SelectMany(rule => rule.ServerDefaults)
+        .Where(d => d.CopiedFrom is not null)
+        .Select(d => d.Column)
+        .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
     /// For a row this handler cannot re-own (a table outside the ownership set, or a root) that names a project, matter
     /// or work assignment: AppendTo on each named record AS THE CALLER, then the one resolver's answer — refused when it
     /// is the Secure team (or a refusal), so the row never sits in the caller's ordinary business unit under a secure
     /// record (task 146 r2). A row that sets the ADR-024 regarding pair also needs AppendTo on the record the pair names
-    /// (<see cref="OwnedChildWrite.PairTargetAsync"/>), as the owned path asks it. <c>null</c> = proceed as a run-as-user create.
+    /// (<see cref="CallerWriteAuthorization.PairTargetAsync"/>), as the owned path asks it. <c>null</c> = proceed as a run-as-user create.
     /// </summary>
     private async Task<ToolResult?> RefuseSecureFilingAsync(
         AnalysisTool tool, string tablename, DataverseWriteItemMapper.MappedItem item, ChatInvocationContext context,
@@ -660,7 +813,7 @@ public sealed partial class DataverseCreateRecordHandler : IToolHandler
         if (parents.Count == 0 && !pair.SetsId)
             return null;
 
-        var me = await OwnedChildWrite.WhoAmIAsync(_dataverse, ct).ConfigureAwait(false);
+        var me = await CallerWriteAuthorization.WhoAmIAsync(_dataverse, ct).ConfigureAwait(false);
         if (me.Failure is { } failure)
             return MapClientError(tool, failure, startedAt);
 
@@ -674,11 +827,11 @@ public sealed partial class DataverseCreateRecordHandler : IToolHandler
                                    "the record this row is filed under.", ToolErrorCodes.ValidationFailed, startedAt);
             }
 
-            var target = await OwnedChildWrite.PairTargetAsync(
+            var target = await CallerWriteAuthorization.PairTargetAsync(
                 _dataverse, tablename, pair.IdText, pair.TypeId, pair.TypeEntitySet, item.Lookups, ct).ConfigureAwait(false);
             var pairOutcome = target.Refusal
                 ?? (target.Lookup is { } named
-                    ? await OwnedChildWrite.CheckCallerMayAppendToAsync(_dataverse, me.SystemUserId, new[] { named }, ct).ConfigureAwait(false)
+                    ? await CallerWriteAuthorization.CheckCallerMayAppendToAsync(_dataverse, me.SystemUserId, new[] { named }, ct).ConfigureAwait(false)
                     : OwnedChildWrite.Outcome.Allowed);
             if (pairOutcome.ClientFailure is { } pairFailure)
                 return MapClientError(tool, pairFailure, startedAt);
@@ -691,7 +844,7 @@ public sealed partial class DataverseCreateRecordHandler : IToolHandler
         if (parents.Count == 0)
             return null;
 
-        var appendTo = await OwnedChildWrite.CheckCallerMayAppendToAsync(
+        var appendTo = await CallerWriteAuthorization.CheckCallerMayAppendToAsync(
             _dataverse, me.SystemUserId,
             item.Lookups.Where(l => Sprk.Bff.Api.Services.Dataverse.RecordOwnershipResolver.IsOwnershipParent(l.RelatedTable)),
             ct).ConfigureAwait(false);
@@ -699,7 +852,7 @@ public sealed partial class DataverseCreateRecordHandler : IToolHandler
             return Error(tool, denied, DataverseUserClientErrorCodes.AccessDenied, startedAt);
 
         var owner = await _ownership.ResolveOwnerAsync(
-            Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext.ForParents(parents, CallerObjectId(context), me.SystemUserId),
+            OwnedChildWrite.OwnershipOf(tablename, item, CallerObjectId(context), me.SystemUserId), // 194b R (B3): the one builder
             ct).ConfigureAwait(false);
         if (owner.IsRefused || owner.IsSecureOwner)
         {
@@ -730,7 +883,7 @@ public sealed partial class DataverseCreateRecordHandler : IToolHandler
             response.ErrorCode,
             Timed(startedAt));
 
-    private ToolResult Error(AnalysisTool tool, string message, string code, DateTimeOffset startedAt) =>
+    private ToolResult Error(AnalysisTool tool, string message, string? code, DateTimeOffset startedAt) =>
         ToolResult.Error(HandlerId, tool.Id, tool.Name, message, code, Timed(startedAt));
 
     private static ToolExecutionMetadata Timed(DateTimeOffset startedAt) =>

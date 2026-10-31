@@ -196,6 +196,7 @@ public static class ExternalModuleDataEndpoints
         IFetchXmlEntityExtractor entityExtractor,
         ExternalDataService dataService,
         IDataversePrivilegeChecker privileges,
+        [Microsoft.AspNetCore.Mvc.FromServices] ExternalInvoiceHiding? hideInvoices,
         ILogger<Program> logger,
         CancellationToken ct)
     {
@@ -210,7 +211,7 @@ public static class ExternalModuleDataEndpoints
 
         return await ExecuteScopedFetchCoreAsync(
             request, principal, registry, entityExtractor, fetchService.ExecuteAsync, dataService.GetNonSecureRootsAsync,
-            logger, ct, dataService.GetLiveParentRootsAsync).ConfigureAwait(false);
+            dataService.NarrowDocumentsAsync, logger, ct, dataService.GetLiveParentRootsAsync, hideInvoices).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -238,11 +239,15 @@ public static class ExternalModuleDataEndpoints
 
     /// <summary>
     /// The module fetch pipeline: module lookup → FetchXML guard (entity, join, COLUMN) → Tier-2 scope
-    /// injection → app-only execution → <c>ScopeRows</c> → column strip. Separated from the route handler
-    /// only so the pipeline can be driven with a test double for <paramref name="executeFetch"/> (the
+    /// injection → app-only execution → <c>ScopeRows</c> → (task 188) document narrowing → column strip. Separated from
+    /// the route handler only so the pipeline can be driven with a test double for <paramref name="executeFetch"/> (the
     /// shared <see cref="FetchService"/> needs a live ServiceClient). The handler passes
     /// <c>FetchService.ExecuteAsync</c> unchanged; there is no other caller.
     /// </summary>
+    /// <param name="narrowDocuments">Task 188: the document narrowing a documents module's rows go through
+    /// (<see cref="ExternalDataService.NarrowDocumentsAsync"/>). Required, so a caller cannot leave it out.</param>
+    /// <param name="hideInvoices">ebilling-r1 task 098: the invoice (a′) predicate an invoice-family module's rows go through.
+    /// None given hides every such row and says truncated (fail closed).</param>
     internal static async Task<IResult> ExecuteScopedFetchCoreAsync(
         FetchRequestDto? request,
         CallerPrincipal principal,
@@ -250,11 +255,14 @@ public static class ExternalModuleDataEndpoints
         IFetchXmlEntityExtractor entityExtractor,
         Func<FetchRequestDto, CancellationToken, Task<FetchResponseDto>> executeFetch,
         NonSecureRootReader readNonSecureRoots,
+        DocumentNarrower narrowDocuments,
         ILogger logger,
         CancellationToken ct,
-        LiveParentRootReader? readLiveParents = null)
+        LiveParentRootReader? readLiveParents = null,
+        ExternalInvoiceHiding? hideInvoices = null)
     {
         ArgumentNullException.ThrowIfNull(readNonSecureRoots);
+        ArgumentNullException.ThrowIfNull(narrowDocuments);
         if (request is null || string.IsNullOrWhiteSpace(request.EntityName) ||
             string.IsNullOrWhiteSpace(request.FetchXml))
         {
@@ -293,13 +301,30 @@ public static class ExternalModuleDataEndpoints
             .Select(d => new Tier2ScopeFilterInjector.ScopeFilterDimension(d.Attribute, d.AccessibleIds(principal)))
             .Where(d => d.AccessibleIds.Count > 0)
             .ToList();
+
+        // NFR-03 (task 036): rows scoped through an accessible set known to be incomplete may be missing records the caller
+        // can read, so the response says so. A dimension is a lambda over the principal, so which root types this module's
+        // scope reads is not knowable here: ANY truncated root set marks the response (over-reporting "may be incomplete" is
+        // the safe direction; a silent cap is not).
+        var scopeTruncated = principal.TruncatedRootEntityTypes.Count > 0;
+        if (scopeTruncated)
+        {
+            logger.LogWarning(
+                "[EXT-MODULE] Fetch module={Module} entity={Entity}: the caller's accessible set is truncated on {RootTypes}; " +
+                "the response is flagged truncated (NFR-03).",
+                module.Name, module.RecordEntity, string.Join(",", principal.TruncatedRootEntityTypes));
+        }
+
         if (scopeDimensions.Count == 0)
         {
             logger.LogInformation(
                 "[EXT-MODULE] Fetch module={Module} entity={Entity}: caller has empty accessible set (all dimensions) — 0 rows (no query).",
                 module.Name, module.RecordEntity);
             return Results.Ok(new FetchResponseDto(
-                Array.Empty<IReadOnlyDictionary<string, object?>>(), MoreRecords: false, PagingCookie: null));
+                Array.Empty<IReadOnlyDictionary<string, object?>>(), MoreRecords: false, PagingCookie: null)
+            {
+                Truncated = scopeTruncated,
+            });
         }
 
         try
@@ -318,10 +343,18 @@ public static class ExternalModuleDataEndpoints
             // AFTER the column guard. Dataverse omits a null attribute, so a link the query did not read looks "not filed"
             // and ScopeRows would let a row filed to a hidden root through: the projection must cover every attribute the
             // rule reads (RootRuleAttributes). The ones the caller did not ask for are removed from the response below.
+            // Task 188: a documents module also projects what the document narrowing reads (NarrowingAttributes), for the
+            // same reason, and strips them the same way.
             IReadOnlyList<string> serverProjected = Array.Empty<string>();
-            if (module.RequireReadOnSecureRoots)
+            var ruleAttributes = (module.RequireReadOnSecureRoots ? module.RootRuleAttributes : Enumerable.Empty<string>())
+                .Concat(module.NarrowingAttributes)
+                .Concat(module.FileStateAttributes) // R3 ISS-011: read to derive hasFile, never returned (not readable columns)
+                .Concat(InvoiceFamilyKeyAttributes(module)) // task 098: the row id the (a′) predicate is keyed on
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            if (ruleAttributes.Count > 0)
                 scopedFetchXml = Tier2ScopeFilterInjector.EnsureProjected(
-                    scopedFetchXml, module.RootRuleAttributes, out serverProjected);
+                    scopedFetchXml, ruleAttributes, out serverProjected);
             var scopedRequest = request with { FetchXml = scopedFetchXml };
 
             // App-only execution (broker-only, no OBO), then Tier-2 scope the rows to the caller's set
@@ -343,11 +376,58 @@ public static class ExternalModuleDataEndpoints
                     logger, ct).ConfigureAwait(false)
                 : SecureRootFlags.None;
             var scoped = module.ScopeRows(principal, result.Entities, secureRootFlags, liveParents);
+            // Task 188 (D7, #2126): THE document narrowing, after the root rule (own or ancestor Restricted, or an
+            // internal-only / non-Open communication on the bounded parent walk). A failed read hides every row and the
+            // response says truncated.
+            var narrowingTruncated = false;
+            if (module.NarrowsDocuments && scoped.Count > 0)
+            {
+                var candidates = scoped.Select(ExternalDocumentNarrowing.FromFetch).ToList();
+                var narrowing = await narrowDocuments(principal, candidates, ct).ConfigureAwait(false);
+                var narrowed = scoped.Where((_, i) => narrowing.IsVisible(candidates[i])).ToList();
+                if (narrowed.Count != scoped.Count)
+                {
+                    logger.LogInformation(
+                        "[EXT-MODULE] Fetch module={Module}: {Hidden} of {Total} document(s) hidden by the document narrowing ({Reasons}).",
+                        module.Name, scoped.Count - narrowed.Count, scoped.Count,
+                        narrowing.HiddenSummary(candidates));
+                    narrowingTruncated = narrowing.Faulted;
+                }
+
+                scoped = narrowed;
+            }
+
+            // ebilling-r1 task 098 (model 9.1, (a′)): an invoice whose Submit Invoice source is isolated is hidden from a caller
+            // who is not an internal systemuser. Applied after the root rule and before the strip; a fault hides every row and
+            // the response says truncated.
+            var invoiceTruncated = false;
+            if (ExternalInvoiceVisibility.IsInvoiceFamilyTable(module.RecordEntity) && scoped.Count > 0)
+            {
+                (scoped, invoiceTruncated) = await HideInvoiceRowsAsync(module, scoped, principal, hideInvoices, logger, ct)
+                    .ConfigureAwait(false);
+            }
+
             // The response carries the readable columns the CALLER requested: a root column the server projected only for
-            // the rule (serverProjected) is not one of them, even when it is on the module's readable list.
+            // the rule (serverProjected) is not one of them, even when it is on the module's readable list. The documents
+            // module also carries the derived key `hasFile` (R3 ISS-011), added below after the strip; the record route
+            // (GetScopedRecordCoreAsync) does not add it, and the SPA reads a missing value as "has a file".
             var returnable = new HashSet<string>(module.ReadableColumns, StringComparer.OrdinalIgnoreCase);
             returnable.ExceptWith(serverProjected);
             var projected = StripRowsToReadableColumns(scoped, module, returnable, logger);
+
+            // R3 ISS-011 (#1886): a documents module row says whether it has a file. Derived from the pointers read above and
+            // already stripped from `projected`; only the boolean is added (the strip keeps the rows' order and count).
+            if (module.NarrowsDocuments)
+            {
+                projected = projected
+                    .Select((row, i) =>
+                    {
+                        var withFlag = row.ToDictionary(kv => kv.Key, kv => kv.Value, StringComparer.OrdinalIgnoreCase);
+                        withFlag[ExternalModuleDescriptor.HasFileKey] = ExternalModuleDescriptor.HasFileOf(scoped[i]);
+                        return (IReadOnlyDictionary<string, object?>)withFlag;
+                    })
+                    .ToList();
+            }
 
             logger.LogInformation(
                 "[EXT-MODULE] Fetch module={Module} entity={Entity}: {Returned}/{Total} rows after Tier-2 scope (server-side filtered).",
@@ -358,7 +438,10 @@ public static class ExternalModuleDataEndpoints
             // holds only accessible rows; per-module config `behavior.pageSize` is sized to cover a
             // realistic per-caller accessible set in one page. Documented in
             // notes/grid-widget-empty-diagnosis.md.
-            return Results.Ok(new FetchResponseDto(projected, MoreRecords: false, PagingCookie: null));
+            return Results.Ok(new FetchResponseDto(projected, MoreRecords: false, PagingCookie: null)
+            {
+                Truncated = scopeTruncated || narrowingTruncated || invoiceTruncated,
+            });
         }
         catch (FetchXmlParseException)
         {
@@ -379,6 +462,51 @@ public static class ExternalModuleDataEndpoints
                 detail: "An unexpected error occurred executing the module read.",
                 extensions: new Dictionary<string, object?> { ["errorCode"] = "DV_FETCH_INTERNAL_ERROR" });
         }
+    }
+
+    /// <summary>Task 098: the primary id of an <c>sprk_invoice</c> module, projected server-side so the (a′) predicate can key
+    /// every row (none for any other module).</summary>
+    private static IEnumerable<string> InvoiceFamilyKeyAttributes(ExternalModuleDescriptor module) =>
+        string.Equals(module.RecordEntity, ExternalInvoiceVisibility.InvoiceTable, StringComparison.OrdinalIgnoreCase)
+            ? new[] { ExternalInvoiceVisibility.InvoiceIdField }
+            : Array.Empty<string>();
+
+    /// <summary>
+    /// Task 098 (model 9.1, (a′)): the rows of an invoice-family module that the invoice predicate leaves visible to
+    /// <paramref name="principal"/>, and whether the answer may be missing rows because a read failed. Fail closed: no
+    /// predicate, a row without a readable id, a family module other than the invoices module (none is registered; the taint
+    /// closure would need the row's invoice) and a failed read all hide the row. Logs carry counts only.
+    /// </summary>
+    private static async Task<(IReadOnlyList<IReadOnlyDictionary<string, object?>> Rows, bool Truncated)> HideInvoiceRowsAsync(
+        ExternalModuleDescriptor module,
+        IReadOnlyList<IReadOnlyDictionary<string, object?>> rows,
+        CallerPrincipal principal,
+        ExternalInvoiceHiding? hideInvoices,
+        ILogger logger,
+        CancellationToken ct)
+    {
+        if (hideInvoices is null
+            || !string.Equals(module.RecordEntity, ExternalInvoiceVisibility.InvoiceTable, StringComparison.OrdinalIgnoreCase))
+        {
+            logger.LogError(
+                "[EXT-MODULE] Fetch module={Module}: the invoice (a') predicate is not available for {Entity}; hiding all {Count} row(s) "
+                + "(fail closed).", module.Name, module.RecordEntity, rows.Count);
+            return (Array.Empty<IReadOnlyDictionary<string, object?>>(), true);
+        }
+
+        var ids = rows
+            .Select(row => ExternalModuleDescriptor.TryGetAttributeId(row, ExternalInvoiceVisibility.InvoiceIdField, out var id) ? id : Guid.Empty)
+            .ToList();
+        var decision = await hideInvoices(principal, ids.Where(id => id != Guid.Empty).Distinct().ToList(), ct).ConfigureAwait(false);
+        var visible = rows.Where((_, i) => decision.IsVisible(ids[i])).ToList();
+        if (visible.Count != rows.Count)
+        {
+            logger.LogInformation(
+                "[EXT-MODULE] Fetch module={Module}: {Hidden} of {Total} invoice(s) hidden by the (a') predicate ({Reasons}).",
+                module.Name, rows.Count - visible.Count, rows.Count, decision.HiddenSummary());
+        }
+
+        return (visible, decision.Faulted && visible.Count != rows.Count);
     }
 
     private static async Task<IResult> GetScopedRecordAsync(

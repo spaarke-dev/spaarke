@@ -208,7 +208,9 @@ public partial class OntologyAdminAuthoringEndpointTests : IClassFixture<Ontolog
             list.EnumerateArray().Select(a => (a.GetProperty("code").GetString()!, a.GetProperty("label").GetString()!,
                 a.GetProperty("excludes").EnumerateArray().Select(e => e.GetString()!).ToArray()));
         static IEnumerable<(string Code, string Label, string[] Excludes)> Expected(IEnumerable<DecisionActionDefinition> defs) =>
-            defs.Select(d => (d.Code, d.Label, d.Excludes.ToArray()));
+            // Task 161 (D-180): a substitution-only action (create-budget) is never authorable, nor named as an exclusion.
+            defs.Where(d => !d.SubstitutionOnly).Select(d => (d.Code, d.Label,
+                d.Excludes.Where(e => !(DecisionActionCatalog.TryGet(e, out var excluded) && excluded.SubstitutionOnly)).ToArray()));
         static IEnumerable<(int, string)> Options(JsonElement list) =>
             list.EnumerateArray().Select(o => (o.GetProperty("value").GetInt32(), o.GetProperty("label").GetString()!));
 
@@ -228,7 +230,7 @@ public partial class OntologyAdminAuthoringEndpointTests : IClassFixture<Ontolog
 
         // Spot checks against the catalog's declared shape, so a test that only mirrors the source cannot hide a broken source.
         var decide = Actions(lanes[0].GetProperty("actions")).ToDictionary(a => a.Code);
-        decide.Keys.Should().Equal("send-budget-inquiry", "revise-budget", "approve-variance", "assign-work");
+        decide.Keys.Should().Equal("send-budget-inquiry", "revise-budget", "approve-variance", "assign-task", "assign-work");
         decide["revise-budget"].Excludes.Should().Equal("approve-variance");
         decide["approve-variance"].Excludes.Should().Equal("revise-budget");
         var doActions = Actions(lanes[1].GetProperty("actions")).ToDictionary(a => a.Code);
@@ -370,6 +372,23 @@ public partial class OntologyAdminAuthoringEndpointTests : IClassFixture<Ontolog
     }
 
     [Fact]
+    public async Task Validate_AndSave_RefuseADraftThatNamesCreateBudget_ItIsOnlyEverSubstituted_D180()
+    {
+        // Task 161 (D-180): create-budget replaces revise-budget when the server builds the plan for a matter with no budget; a rule author
+        // can never name it, so a published plan is never edited by it (D-14).
+        var draft = Draft(plan: """{"actions":["send-budget-inquiry","create-budget","approve-variance"]}""");
+
+        var validate = await Json(await Validate(draft));
+        var save = await Save(draft: draft);
+
+        validate.GetProperty("valid").GetBoolean().Should().BeFalse();
+        ValidateErrors(validate)["decisionPlan"].Single().Should().Contain("action_not_allowed").And.Contain("Decide lane's catalog");
+        save.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        (await Json(save)).GetProperty("errors").GetProperty("decisionPlan")[0].GetString().Should().Be(ValidateErrors(validate)["decisionPlan"].Single());
+        _fixture.World.Writes.Should().BeEmpty();
+    }
+
+    [Fact]
     public async Task Validate_ACodeInBothActionsAndNextSteps_GetsTheDuplicateMessageAndCode_AsTheSaveDoes()
     {
         // The catalog offers assign-work as a Decide action AND as a next step; the plan resolver refuses a code in both lists. The
@@ -466,6 +485,52 @@ public partial class OntologyAdminAuthoringEndpointTests : IClassFixture<Ontolog
         }
 
         _fixture.Engine.Evaluated.Should().BeEmpty("a refused body is never evaluated");
+        _fixture.World.Writes.Should().BeEmpty();
+    }
+
+    /// <summary>ebilling-r1 070 fix-round-2 (ontology-r1's paired change): a billing rule type is refused by the one shared
+    /// validation on <c>ruleType</c> with code <c>ontology.admin.rule_type_wrong_domain</c>, identically on every authoring route, never as a
+    /// <c>ruleBody</c> error, and nothing is evaluated or written. The body is a valid Ontology body, so only the type is wrong.</summary>
+    [Theory]
+    [InlineData("ApprovedTimekeeper")]
+    [InlineData("100000003")]
+    [InlineData("AiObservation")]
+    public async Task ABillingRuleType_IsRefusedOnRuleType_WithTheWrongDomainCode_ByValidateDryRunSaveAndPublish(string ruleType)
+    {
+        const string code = "ontology.admin.rule_type_wrong_domain";
+        var draft = new
+        {
+            ruleType,
+            ruleBody = Body,
+            messageTemplate = Template,
+            shortHeadline = "Needs a look",
+            proposedAction = "Review the matter",
+            decisionPlan = DecidePlan,
+        };
+
+        var validate = await Json(await Validate(draft));
+        var dryRunExisting = await _client.PostAsJsonAsync($"{Root}/dry-run",
+            new { policyId = (Guid?)PolicyId, lane = (string?)null, ruleType, ruleBody = Body, messageTemplate = Template });
+        var dryRunNew = await _client.PostAsJsonAsync($"{Root}/dry-run",
+            new { policyId = (Guid?)null, lane = "Decide", ruleType, ruleBody = Body, messageTemplate = Template });
+        var save = await Save(draft: draft);
+        var publish = await Publish(PolicyId, draft);
+
+        validate.GetProperty("valid").GetBoolean().Should().BeFalse();
+        validate.GetProperty("reasonCode").GetString().Should().Be(code);
+        ValidateErrors(validate).Keys.Should().Equal("ruleType");
+        validate.GetProperty("templateEligibleFields").GetArrayLength().Should().Be(0, "nothing was compiled");
+        foreach (var (route, response) in new[] { ("dry run", dryRunExisting), ("dry run (new)", dryRunNew), ("save", save), ("publish", publish) })
+        {
+            response.StatusCode.Should().Be(HttpStatusCode.BadRequest, $"{route}: {await response.Content.ReadAsStringAsync()}");
+            (await ReasonOf(response)).Should().Be(code, route);
+            var errors = (await Json(response)).GetProperty("errors");
+            errors.EnumerateObject().Select(p => p.Name).Should().Equal(new[] { "ruleType" }, route);
+            errors.GetProperty("ruleType")[0].GetString()
+                .Should().Be(ValidateErrors(validate)["ruleType"][0], $"{route} and validate give the same message");
+        }
+
+        _fixture.Engine.Evaluated.Should().BeEmpty("a billing rule type is never evaluated by the Ontology dry run");
         _fixture.World.Writes.Should().BeEmpty();
     }
 

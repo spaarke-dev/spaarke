@@ -64,13 +64,15 @@ public static class OfficeModule
         // every document-creating upload path (email-attachment today; Compose next). Non-fatal by design.
         services.AddScoped<ContentDedupDetector>();
 
-        // FR-13 (spaarkeai-word-add-in-r1 task 030): shared server-side creation service — load-bearing owner, BU
-        // defaults, matter-type lookup, Field Mapping Framework (no numbering: left to a planned separate
-        // component, notes/030-numbering-handoff.md). Concrete (ADR-010: one
-        // implementation, no seam) and UNCONDITIONAL: its consumer, OfficeService.QuickCreateAsync, serves an
-        // unconditionally-mapped route, and its deps (IGenericEntityService, IFieldMappingDataverseService) are
-        // unconditional GraphModule singletons — no §10 F.1 asymmetry.
-        services.AddScoped<RecordCreationService>();
+        // field-mapping-server-write-path-r1 task 013: the ONE server create pipeline (FR-06), merging the Office creation
+        // core and the owned create (OwnedChildWrite's create half); task 018 re-pointed the Office quick-create (OfficeService's
+        // adapter) to it, and 018c deleted the Office core and its registration; task 017 re-pointed the route and the chat,
+        // email.draft and budget-inquiry creates and deleted the owned create. Concrete (ADR-010: one implementation, no seam), SCOPED because
+        // SecureChildShareSynchronizer is (ExternalAccessModule; the caller's client arrives as an argument) and UNCONDITIONAL:
+        // every dependency (IRecordOwnershipResolver, IFieldMappingDataverseService, IGenericEntityService,
+        // SecureRootFilingGate, CoreAncestorRestamper, SecureChildShareSynchronizer, IMembershipEventPublisher) is
+        // registered unconditionally — no §10 F.1 asymmetry. §11 answers: notes/task-013-notes.md.
+        services.AddScoped<Sprk.Bff.Api.Services.RecordCreation.RecordCreationService>();
 
         // spaarkeai-word-add-in-r1 task 121 (owner 2026-10-09, "file it if unfiled"): an email save that reconciles to an
         // existing, unfiled communication files it to the save's record through the association engine's existing-row
@@ -84,6 +86,12 @@ public static class OfficeModule
         // ============================================================================
         // Scoped lifetime - new instance per request for proper auth context
         services.AddScoped<IOfficeService, OfficeService>();
+
+        // ebilling-r1 task 095: the from-email submission's in-process save, the SAME scoped OfficeService instance (no second
+        // pipeline). A host that replaced IOfficeService with something that is not the save pipeline fails resolution loudly.
+        services.AddScoped<IOfficeSubmissionEmailSave>(sp =>
+            sp.GetRequiredService<IOfficeService>() as IOfficeSubmissionEmailSave
+            ?? throw new InvalidOperationException("IOfficeService is not the Office save pipeline; the from-email submission cannot save its email."));
 
         // ============================================================================
         // Rate Limiting Configuration and Service (Task 031)

@@ -3,6 +3,7 @@ using Spaarke.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Auth;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Models.Office;
+using Sprk.Bff.Api.Services.Dataverse.FieldMapping;
 
 namespace Sprk.Bff.Api.Api.Filters;
 
@@ -48,7 +49,10 @@ public static class QuickCreateSourceAccessFilterExtensions
 /// which the task pane's error map keys on. This is a variant filter in the
 /// <see cref="RecordRouteAccessAuthorizationFilter"/> sense, because both existing filters are wrong here:
 /// <see cref="EntityAccessFilter"/> demands AppendTo with a "file documents" message and reads a <c>SaveRequest</c>;
-/// the route filter reads route values. Copying fields FROM a record costs Read.</para>
+/// the route filter reads route values. Copying fields FROM a record costs Read. Since
+/// field-mapping-server-write-path-r1 task 003 the Read DECISION itself (entity-set resolve → probe →
+/// <c>HasRequiredRights</c>, with its exception handling) is <see cref="MappingSourceReadProbe.CheckCallerReadAsync"/>,
+/// shared with the server-side mapping-source read; this filter keeps every response, code and the ordering.</para>
 ///
 /// <para><b>Fail-open only where nothing is read.</b> No source context → pass (the service reads nothing, so there is
 /// nothing to authorize). A half-supplied context → pass to the handler, whose validation returns 400 before the
@@ -64,8 +68,9 @@ public static class QuickCreateSourceAccessFilterExtensions
 /// <c>GET /api/office/search/{list}</c>, so they carry no per-record access, and the creation service verifies each
 /// one exists (an unknown id is dropped with a warning).</para>
 ///
-/// <para><b>Residual</b> (notes/030 §9): Read is a RECORD-level check. An app-only read does not apply column-level
-/// (field-level security) masking, so a secured column named in an admin-authored profile would still be copied.</para>
+/// <para><b>Column level</b> (notes/030 §9 residual, closed by #2188): Read is a RECORD-level check, and the app-only read does
+/// not apply field-level security. The creation service therefore masks the app read to what the caller can read
+/// (<see cref="MappingSourceCallerMask"/>) before any rule is applied; this filter is unchanged.</para>
 ///
 /// <para><b>The TARGET table's Create privilege (unified-access-control-r2 task 166, sweep finding S-69; owner G5).</b>
 /// Matter, project and invoice are created APP-ONLY and team-owned (the server invariant G5 keeps), so until this
@@ -81,8 +86,9 @@ public static class QuickCreateSourceAccessFilterExtensions
 /// </remarks>
 public sealed class QuickCreateSourceAccessFilter : IEndpointFilter
 {
-    /// <summary>The existing <see cref="OperationAccessPolicy"/> key for reading a record (<see cref="AccessRights.Read"/>).</summary>
-    internal const string ReadOperation = "read";
+    /// <summary>The existing <see cref="OperationAccessPolicy"/> key for reading a record (<see cref="AccessRights.Read"/>) —
+    /// the one the shared Read decision (<see cref="MappingSourceReadProbe.CheckCallerReadAsync"/>) asks under.</summary>
+    internal const string ReadOperation = MappingSourceReadProbe.ReadOperation;
 
     /// <summary>The route value naming the entity type to create.</summary>
     internal const string EntityTypeRouteValue = "entityType";
@@ -239,62 +245,56 @@ public sealed class QuickCreateSourceAccessFilter : IEndpointFilter
 
         var sourceEntityType = request.SourceEntityType.Trim();
 
-        // A MISS DENIES (the RecordRouteAccessAuthorizationFilter posture): a type whose per-record access this
-        // codebase cannot evaluate is a type whose fields it must not copy. The caller's value is logged, not echoed.
-        if (!EntityAccessFilter.TryResolveEntitySet(sourceEntityType, out var entitySet))
+        // The shared Read decision (field-mapping-server-write-path-r1 task 003): the same sequence the server-side mapping
+        // source read uses. Each decision keeps its own 403 here; the try inside covers the DECISION only — never next(),
+        // so downstream faults are not relabelled.
+        var check = await MappingSourceReadProbe.CheckCallerReadAsync(
+            _probe,
+            TokenHelper.ExtractBearerTokenOrNull(httpContext),
+            sourceEntityType,
+            sourceRecordId,
+            httpContext.RequestAborted);
+
+        switch (check.Decision)
         {
-            _logger?.LogWarning(
-                "[QUICKCREATE-SOURCE-AUTH] Denying: source entity type '{EntityType}' is not in EntityAccessFilter's "
-                + "logical-name -> entity-set table. CorrelationId: {CorrelationId}",
-                sourceEntityType, httpContext.TraceIdentifier);
+            case CallerReadDecision.Allowed:
+                return null;
 
-            return Deny(
-                httpContext,
-                "entity_type_not_authorizable",
-                "Access to the related record cannot be evaluated for its record type, so this request is refused.");
+            case CallerReadDecision.EntityTypeNotAuthorizable:
+                // A MISS DENIES (the RecordRouteAccessAuthorizationFilter posture): a type whose per-record access this
+                // codebase cannot evaluate is a type whose fields it must not copy. The caller's value is logged, not echoed.
+                _logger?.LogWarning(
+                    "[QUICKCREATE-SOURCE-AUTH] Denying: source entity type '{EntityType}' is not in EntityAccessFilter's "
+                    + "logical-name -> entity-set table. CorrelationId: {CorrelationId}",
+                    sourceEntityType, httpContext.TraceIdentifier);
+
+                return Deny(
+                    httpContext,
+                    "entity_type_not_authorizable",
+                    "Access to the related record cannot be evaluated for its record type, so this request is refused.");
+
+            case CallerReadDecision.ProbeFailed:
+                _logger?.LogError(check.Failure,
+                    "[QUICKCREATE-SOURCE-AUTH] The caller-rights probe threw for {EntitySet}({RecordId}). Denying. "
+                    + "CorrelationId: {CorrelationId}",
+                    check.EntitySet, sourceRecordId, httpContext.TraceIdentifier);
+
+                return Deny(
+                    httpContext,
+                    "access_check_failed",
+                    "Access to the related record could not be verified, so this request is refused.");
+
+            default:
+                _logger?.LogWarning(
+                    "[QUICKCREATE-SOURCE-AUTH] Denied: caller cannot read {EntitySet}({RecordId}). Holds {Rights}. "
+                    + "CorrelationId: {CorrelationId}",
+                    check.EntitySet, sourceRecordId, check.Rights, httpContext.TraceIdentifier);
+
+                return Deny(
+                    httpContext,
+                    "insufficient_rights",
+                    "You do not have permission to read the related record this new record would be created from.");
         }
-
-        AccessRights rights;
-        try
-        {
-            rights = await _probe.GetCallerRightsAsync(
-                TokenHelper.ExtractBearerTokenOrNull(httpContext),
-                entitySet,
-                sourceRecordId,
-                httpContext.RequestAborted);
-        }
-        catch (OperationCanceledException) when (httpContext.RequestAborted.IsCancellationRequested)
-        {
-            throw;
-        }
-        catch (Exception ex)
-        {
-            // Covers the AUTHORIZATION DECISION only — never next(), so downstream faults are not relabelled.
-            _logger?.LogError(ex,
-                "[QUICKCREATE-SOURCE-AUTH] The caller-rights probe threw for {EntitySet}({RecordId}). Denying. "
-                + "CorrelationId: {CorrelationId}",
-                entitySet, sourceRecordId, httpContext.TraceIdentifier);
-
-            return Deny(
-                httpContext,
-                "access_check_failed",
-                "Access to the related record could not be verified, so this request is refused.");
-        }
-
-        if (!OperationAccessPolicy.HasRequiredRights(rights, ReadOperation))
-        {
-            _logger?.LogWarning(
-                "[QUICKCREATE-SOURCE-AUTH] Denied: caller cannot read {EntitySet}({RecordId}). Holds {Rights}. "
-                + "CorrelationId: {CorrelationId}",
-                entitySet, sourceRecordId, rights, httpContext.TraceIdentifier);
-
-            return Deny(
-                httpContext,
-                "insufficient_rights",
-                "You do not have permission to read the related record this new record would be created from.");
-        }
-
-        return null;
     }
 
     /// <summary>
@@ -317,47 +317,40 @@ public sealed class QuickCreateSourceAccessFilter : IEndpointFilter
             return null;
         }
 
-        // The shared logical-name → entity-set table (the same one /office/todo resolves its contact through).
-        if (!EntityAccessFilter.TryResolveEntitySet(AssigneeLogicalName, out var entitySet))
-        {
-            _logger?.LogError(
-                "[QUICKCREATE-ASSIGNEE-AUTH] Denying: '{EntityType}' has no entity-set mapping. CorrelationId: {CorrelationId}",
-                AssigneeLogicalName, httpContext.TraceIdentifier);
-            return DenyAssignee(httpContext);
-        }
+        // The shared Read decision (task 003) over the shared logical-name → entity-set table (the same one /office/todo
+        // resolves its contact through). Every non-Read decision is the ONE assignee refusal.
+        var check = await MappingSourceReadProbe.CheckCallerReadAsync(
+            _probe,
+            TokenHelper.ExtractBearerTokenOrNull(httpContext),
+            AssigneeLogicalName,
+            contactId,
+            httpContext.RequestAborted);
 
-        AccessRights rights;
-        try
+        switch (check.Decision)
         {
-            rights = await _probe.GetCallerRightsAsync(
-                TokenHelper.ExtractBearerTokenOrNull(httpContext),
-                entitySet,
-                contactId,
-                httpContext.RequestAborted);
-        }
-        catch (OperationCanceledException) when (httpContext.RequestAborted.IsCancellationRequested)
-        {
-            throw;
-        }
-        catch (Exception ex)
-        {
-            _logger?.LogError(ex,
-                "[QUICKCREATE-ASSIGNEE-AUTH] The caller-rights probe threw for {EntitySet}({RecordId}). Denying. "
-                + "CorrelationId: {CorrelationId}",
-                entitySet, contactId, httpContext.TraceIdentifier);
-            return DenyAssignee(httpContext);
-        }
+            case CallerReadDecision.Allowed:
+                return null;
 
-        if (!OperationAccessPolicy.HasRequiredRights(rights, ReadOperation))
-        {
-            _logger?.LogWarning(
-                "[QUICKCREATE-ASSIGNEE-AUTH] Denied: caller cannot read {EntitySet}({RecordId}). Holds {Rights}. "
-                + "CorrelationId: {CorrelationId}",
-                entitySet, contactId, rights, httpContext.TraceIdentifier);
-            return DenyAssignee(httpContext);
-        }
+            case CallerReadDecision.EntityTypeNotAuthorizable:
+                _logger?.LogError(
+                    "[QUICKCREATE-ASSIGNEE-AUTH] Denying: '{EntityType}' has no entity-set mapping. CorrelationId: {CorrelationId}",
+                    AssigneeLogicalName, httpContext.TraceIdentifier);
+                return DenyAssignee(httpContext);
 
-        return null;
+            case CallerReadDecision.ProbeFailed:
+                _logger?.LogError(check.Failure,
+                    "[QUICKCREATE-ASSIGNEE-AUTH] The caller-rights probe threw for {EntitySet}({RecordId}). Denying. "
+                    + "CorrelationId: {CorrelationId}",
+                    check.EntitySet, contactId, httpContext.TraceIdentifier);
+                return DenyAssignee(httpContext);
+
+            default:
+                _logger?.LogWarning(
+                    "[QUICKCREATE-ASSIGNEE-AUTH] Denied: caller cannot read {EntitySet}({RecordId}). Holds {Rights}. "
+                    + "CorrelationId: {CorrelationId}",
+                    check.EntitySet, contactId, check.Rights, httpContext.TraceIdentifier);
+                return DenyAssignee(httpContext);
+        }
     }
 
     /// <summary>The ONE refusal for the assignee gate — no reason varies with the contact (see <see cref="AuthorizeAssigneeAsync"/>).</summary>
@@ -365,7 +358,7 @@ public sealed class QuickCreateSourceAccessFilter : IEndpointFilter
         => Deny(httpContext, AssigneeDeniedReasonCode, AssigneeDeniedDetail);
 
     /// <summary>A 403 in the Office ProblemDetails shape (<see cref="EntityAccessFilter"/>'s: errorCode + reasonCode + correlationId).</summary>
-    private static IResult Deny(HttpContext httpContext, string reasonCode, string detail)
+    internal static IResult Deny(HttpContext httpContext, string reasonCode, string detail)
         => Results.Problem(
             statusCode: StatusCodes.Status403Forbidden,
             title: "Forbidden",

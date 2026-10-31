@@ -1,3 +1,6 @@
+using Sprk.Bff.Api.Tests.AccessControl;
+using Sprk.Bff.Api.Tests.Services.Ai.Handlers;
+using Sprk.Bff.Api.Tests.TestInfrastructure;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
@@ -62,6 +65,12 @@ public class PlaybookRouteAuthorizationContractTests
     private const string Matters = "sprk_matters";
     private const string CallerOid = "6f0c1a52-0000-4000-8000-000000000164";
     private const string OtherOid = "6f0c1a52-0000-4000-8000-0000000001ff";
+
+    /// <summary>The live Create privilege on <c>sprk_analysisplaybook</c> (role XML: only Spaarke AI Analysis Admin holds it).</summary>
+    private const string CreatePlaybookPrivilege = "prvCreatesprk_analysisplaybook";
+
+    /// <summary>The live Share privilege on <c>sprk_analysisplaybook</c> (role XML: only Spaarke AI Analysis Admin holds it).</summary>
+    private const string SharePlaybookPrivilege = "prvSharesprk_analysisplaybook";
 
     [Fact]
     public void PlaybookEntitySet_IsTheOneTheServiceUses()
@@ -261,6 +270,104 @@ public class PlaybookRouteAuthorizationContractTests
         unknownBody.Should().Be(Normalize(await denied.Content.ReadAsStringAsync()));
         unknownBody.Should().Be(Normalize(await fault.Content.ReadAsStringAsync()));
         host.VerifyNothingRan();
+    }
+
+    // ── Task 188 round 4b (F1-2): the run's documents go through THE external document narrowing ────────────────
+
+    private const int RestrictedPermission = 100000002;
+
+    /// <summary>Arranges a must-fire case and returns a run document the caller can Read (only the narrowing can deny).</summary>
+    private static Guid ArrangeHiddenRunDocument(PlaybookAuthHost host, string @case)
+    {
+        host.NarrowingMode = NarrowingCallerMode.External;
+        var world = host.World;
+        Guid documentId;
+        switch (@case)
+        {
+            case "own-restricted":
+                documentId = world.Document(Guid.NewGuid(), permission: RestrictedPermission);
+                break;
+            case "internal-only-communication":
+                var communication = Guid.NewGuid();
+                var thread = Guid.NewGuid();
+                world.Thread(thread, 100000000);
+                world.Communication(communication, internalOnly: true, thread);
+                documentId = world.Document(Guid.NewGuid(), communication: communication);
+                break;
+            case "restricted-parent":
+                documentId = world.Document(Guid.NewGuid(), parent: world.Document(Guid.NewGuid(), permission: RestrictedPermission));
+                break;
+            case "narrowing-fault":
+                documentId = world.Document(Guid.NewGuid());
+                world.Faults["sprk_documents"] = HttpStatusCode.ServiceUnavailable;
+                break;
+            case "lookup-fault":
+                host.NarrowingMode = NarrowingCallerMode.LookupFault;
+                documentId = world.Document(Guid.NewGuid(), permission: RestrictedPermission);
+                break;
+            default:
+                throw new ArgumentOutOfRangeException(nameof(@case), @case, null);
+        }
+
+        host.Access.Grant(Documents, documentId, AccessRights.Read);
+        return documentId;
+    }
+
+    [Theory(DisplayName = "Task 188 r4b F1-2: playbook run — a document the narrowing hides is the run's uniform 403 for a caller who is not an internal systemuser; nothing runs")]
+    [InlineData("own-restricted")]
+    [InlineData("internal-only-communication")]
+    [InlineData("restricted-parent")]
+    [InlineData("narrowing-fault")]
+    [InlineData("lookup-fault")]
+    public async Task Execute_ExternalCaller_HiddenDocument_IsTheUniform403_AndNothingRuns(string @case)
+    {
+        await using var host = await PlaybookAuthHost.StartAsync();
+        var playbookId = host.ReadOnlyPublicPlaybook();
+        var visible = host.World.Document(Guid.NewGuid());
+        host.Access.Grant(Documents, visible, AccessRights.Read);
+        var hidden = ArrangeHiddenRunDocument(host, @case);
+
+        var response = await host.SendAsync(Execute(playbookId, visible, hidden));
+        var unknown = await host.SendAsync(Execute(playbookId, Guid.NewGuid()));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        Normalize(await response.Content.ReadAsStringAsync()).Should().Be(Normalize(await unknown.Content.ReadAsStringAsync()),
+            "a hidden document cannot be told from an unreadable one");
+        host.VerifyNothingRan();
+        host.World.Calls.Should().Be(1, "ONE narrowing call over every document of the run");
+    }
+
+    [Fact(DisplayName = "Task 188 r4b F1-2: must not fire — an external caller runs over a VISIBLE document as today")]
+    public async Task Execute_ExternalCaller_VisibleDocument_GetsTheSseStream()
+    {
+        await using var host = await PlaybookAuthHost.StartAsync();
+        host.NarrowingMode = NarrowingCallerMode.External;
+        var playbookId = host.ReadOnlyPublicPlaybook();
+        var documentId = host.World.Document(Guid.NewGuid());
+        host.Access.Grant(Documents, documentId, AccessRights.Read);
+        host.RunSucceeds();
+
+        var response = await host.SendAsync(Execute(playbookId, documentId));
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        response.Content.Headers.ContentType!.MediaType.Should().Be("text/event-stream");
+        host.World.Calls.Should().Be(1);
+    }
+
+    [Fact(DisplayName = "Task 188 r4b F1-2: must not fire — an internal caller runs over a Restricted document with no narrowing call and no app-only read")]
+    public async Task Execute_InternalCaller_RestrictedDocument_IsNotNarrowed()
+    {
+        await using var host = await PlaybookAuthHost.StartAsync();
+        var playbookId = host.ReadOnlyPublicPlaybook();
+        var documentId = host.World.Document(Guid.NewGuid(), permission: RestrictedPermission);
+        host.Access.Grant(Documents, documentId, AccessRights.Read);
+        host.RunSucceeds();
+
+        var response = await host.SendAsync(Execute(playbookId, documentId));
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        host.World.Calls.Should().Be(0);
+        host.World.AllReads.Should().BeEmpty();
     }
 
     [Fact]
@@ -515,6 +622,7 @@ public class PlaybookRouteAuthorizationContractTests
         await using var host = await PlaybookAuthHost.StartAsync();
         var systemUserId = Guid.NewGuid();
         host.Probe.SystemUserId = systemUserId;
+        host.Probe.HeldPrivileges.Add(CreatePlaybookPrivilege);
         host.CreateIsValid();
         host.Playbooks.Setup(p => p.CreatePlaybookAsync(It.IsAny<SavePlaybookRequest>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((SavePlaybookRequest r, Guid owner, CancellationToken _) =>
@@ -532,6 +640,7 @@ public class PlaybookRouteAuthorizationContractTests
     {
         await using var host = await PlaybookAuthHost.StartAsync();
         host.Probe.SystemUserId = null;
+        host.Probe.HeldPrivileges.Add(CreatePlaybookPrivilege);
         host.CreateIsValid();
 
         var response = await host.SendAsync(CreatePlaybook());
@@ -546,6 +655,7 @@ public class PlaybookRouteAuthorizationContractTests
         await using var host = await PlaybookAuthHost.StartAsync();
         var systemUserId = Guid.NewGuid();
         host.Probe.SystemUserId = systemUserId;
+        host.Probe.HeldPrivileges.Add(CreatePlaybookPrivilege);
         var sourceId = Guid.NewGuid();
         host.PublicPlaybook(sourceId);
         host.Playbooks.Setup(p => p.ClonePlaybookAsync(sourceId, It.IsAny<Guid>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
@@ -564,6 +674,7 @@ public class PlaybookRouteAuthorizationContractTests
     {
         await using var host = await PlaybookAuthHost.StartAsync();
         host.Probe.SystemUserId = null;
+        host.Probe.HeldPrivileges.Add(CreatePlaybookPrivilege);
         var sourceId = Guid.NewGuid();
         host.PublicPlaybook(sourceId);
 
@@ -804,6 +915,7 @@ public class PlaybookRouteAuthorizationContractTests
         await using var host = await PlaybookAuthHost.StartAsync();
         var systemUserId = Guid.NewGuid();
         host.Probe.SystemUserId = systemUserId;
+        host.Probe.HeldPrivileges.Add(SharePlaybookPrivilege);
         var playbookId = Guid.NewGuid();
         host.Playbooks.Setup(p => p.GetPlaybookAsync(playbookId, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new PlaybookResponse { Id = playbookId, Name = "Owned", IsPublic = false, OwnerId = systemUserId });
@@ -825,6 +937,361 @@ public class PlaybookRouteAuthorizationContractTests
         host.Sharing.Verify(s => s.RevokeShareAsync(playbookId, It.IsAny<RevokeShareRequest>(), systemUserId), Times.Once());
         host.Sharing.Verify(s => s.SharePlaybookAsync(It.IsAny<Guid>(), It.IsAny<SharePlaybookRequest>(), Guid.Parse(CallerOid)), Times.Never());
         host.Sharing.Verify(s => s.RevokeShareAsync(It.IsAny<Guid>(), It.IsAny<RevokeShareRequest>(), Guid.Parse(CallerOid)), Times.Never());
+    }
+
+    // =========================================================================================
+    // Create, clone, share and unshare are for playbook administrators only (owner decision 2026-10-30): the caller's
+    // OWN prvCreate (create, clone) or prvShare (share, unshare) on sprk_analysisplaybook, asked before any read or
+    // write. The service writes app-only, so without this the route, not Dataverse, decides.
+    // =========================================================================================
+
+    public enum AuthoringRoute { Create, Clone, Share, Unshare }
+
+    [Theory]
+    [InlineData(AuthoringRoute.Create)]
+    [InlineData(AuthoringRoute.Clone)]
+    [InlineData(AuthoringRoute.Share)]
+    [InlineData(AuthoringRoute.Unshare)]
+    public async Task Authoring_CallerWithoutThePrivilege_Is403_BeforeAnyReadOrWrite(AuthoringRoute route)
+    {
+        await using var host = await PlaybookAuthHost.StartAsync();
+        var request = ArrangeAuthoringRoute(host, route);
+        // The OTHER playbook privilege does not stand in for the one the route needs.
+        host.Probe.HeldPrivileges.Add(route is AuthoringRoute.Create or AuthoringRoute.Clone ? SharePlaybookPrivilege : CreatePlaybookPrivilege);
+        host.Probe.HeldPrivileges.Add("prvReadsprk_analysisplaybook");
+
+        var response = await host.SendAsync(request);
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        JsonNode.Parse(await response.Content.ReadAsStringAsync())!["reasonCode"]!.GetValue<string>()
+            .Should().Be("sdap.access.deny.insufficient_privilege");
+        host.Probe.PrivilegeQuestions.Should().Equal(RequiredPrivilege(route));
+        host.Playbooks.VerifyNoOtherCalls(); // no read, no validate, no create, no clone
+        host.Sharing.VerifyNoOtherCalls();   // no share, no revoke
+        host.Access.Calls.Should().BeEmpty();
+    }
+
+    [Theory]
+    [InlineData(AuthoringRoute.Create, HttpStatusCode.Created)]
+    [InlineData(AuthoringRoute.Clone, HttpStatusCode.Created)]
+    [InlineData(AuthoringRoute.Share, HttpStatusCode.OK)]
+    [InlineData(AuthoringRoute.Unshare, HttpStatusCode.OK)]
+    public async Task Authoring_CallerWithThePrivilege_Succeeds(AuthoringRoute route, HttpStatusCode expected)
+    {
+        await using var host = await PlaybookAuthHost.StartAsync();
+        var request = ArrangeAuthoringRoute(host, route);
+        host.Probe.HeldPrivileges.Add(RequiredPrivilege(route));
+
+        var response = await host.SendAsync(request);
+
+        response.StatusCode.Should().Be(expected, await response.Content.ReadAsStringAsync());
+        host.Probe.PrivilegeQuestions.Should().Equal(RequiredPrivilege(route));
+        switch (route)
+        {
+            case AuthoringRoute.Create:
+                host.Playbooks.Verify(p => p.CreatePlaybookAsync(It.IsAny<SavePlaybookRequest>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Once());
+                break;
+            case AuthoringRoute.Clone:
+                host.Playbooks.Verify(p => p.ClonePlaybookAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Once());
+                break;
+            case AuthoringRoute.Share:
+                host.Sharing.Verify(s => s.SharePlaybookAsync(It.IsAny<Guid>(), It.IsAny<SharePlaybookRequest>(), It.IsAny<Guid>()), Times.Once());
+                break;
+            default:
+                host.Sharing.Verify(s => s.RevokeShareAsync(It.IsAny<Guid>(), It.IsAny<RevokeShareRequest>(), It.IsAny<Guid>()), Times.Once());
+                break;
+        }
+    }
+
+    [Theory]
+    [InlineData(AuthoringRoute.Create)]
+    [InlineData(AuthoringRoute.Clone)]
+    [InlineData(AuthoringRoute.Share)]
+    [InlineData(AuthoringRoute.Unshare)]
+    public async Task Authoring_PrivilegeCheckFault_IsRefused_AndNothingIsReadOrWritten(AuthoringRoute route)
+    {
+        await using var host = await PlaybookAuthHost.StartAsync();
+        var request = ArrangeAuthoringRoute(host, route);
+        host.Probe.HeldPrivileges.Add(RequiredPrivilege(route));
+        host.Probe.ThrowOnPrivilegeCheck = new HttpRequestException("dataverse down");
+
+        var response = await host.SendAsync(request);
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        host.Playbooks.VerifyNoOtherCalls();
+        host.Sharing.VerifyNoOtherCalls();
+        host.Access.Calls.Should().BeEmpty();
+    }
+
+    [Theory]
+    [InlineData(AuthoringRoute.Create)]
+    [InlineData(AuthoringRoute.Clone)]
+    [InlineData(AuthoringRoute.Share)]
+    [InlineData(AuthoringRoute.Unshare)]
+    public async Task Authoring_NoCallerToken_IsRefused_AndNothingIsReadOrWritten(AuthoringRoute route)
+    {
+        await using var host = await PlaybookAuthHost.StartAsync();
+        var request = ArrangeAuthoringRoute(host, route);
+        host.Probe.HeldPrivileges.Add(RequiredPrivilege(route));
+        request.Headers.Authorization = null; // authenticated by the test scheme, but no token to ask Dataverse with
+
+        var response = await host.SendAsync(request);
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        host.Playbooks.Verify(p => p.CreatePlaybookAsync(It.IsAny<SavePlaybookRequest>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never());
+        host.Playbooks.Verify(p => p.ClonePlaybookAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Never());
+        host.Sharing.VerifyNoOtherCalls();
+    }
+
+    // =========================================================================================
+    // Every playbook WRITE route requires the caller's own prvWrite on sprk_analysisplaybook, asked FIRST (review fix
+    // round, F1): update, canvas, and node create / update / delete / scopes. A PUT that changes IsPublic also requires
+    // prvShare. The services write app-only.
+    // =========================================================================================
+
+    private const string WritePlaybookPrivilege = "prvWritesprk_analysisplaybook";
+
+    public enum WriteRoute { Update, Canvas, NodeCreate, NodeUpdate, NodeDelete, NodeScopes }
+
+    [Theory]
+    [InlineData(WriteRoute.Update)]
+    [InlineData(WriteRoute.Canvas)]
+    [InlineData(WriteRoute.NodeCreate)]
+    [InlineData(WriteRoute.NodeUpdate)]
+    [InlineData(WriteRoute.NodeDelete)]
+    [InlineData(WriteRoute.NodeScopes)]
+    public async Task Write_CallerWithoutWrite_Is403_BeforeAnyReadOrWrite(WriteRoute route)
+    {
+        await using var host = await PlaybookAuthHost.StartAsync();
+        var request = ArrangeWriteRoute(host, route, storedIsPublic: false, requestIsPublic: false);
+        // Every OTHER playbook privilege, none of which stands in for Write.
+        host.Probe.HeldPrivileges.UnionWith([CreatePlaybookPrivilege, SharePlaybookPrivilege, "prvReadsprk_analysisplaybook"]);
+
+        var response = await host.SendAsync(request);
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        JsonNode.Parse(await response.Content.ReadAsStringAsync())!["reasonCode"]!.GetValue<string>()
+            .Should().Be("sdap.access.deny.insufficient_privilege");
+        host.Probe.PrivilegeQuestions.Should().Equal(WritePlaybookPrivilege);
+        host.Playbooks.VerifyNoOtherCalls(); // no read (not even the owner check), no write
+        host.Nodes.VerifyNoOtherCalls();
+        host.Access.Calls.Should().BeEmpty();
+    }
+
+    [Theory]
+    [InlineData(WriteRoute.Update, HttpStatusCode.OK)]
+    [InlineData(WriteRoute.Canvas, HttpStatusCode.OK)]
+    [InlineData(WriteRoute.NodeCreate, HttpStatusCode.Created)]
+    [InlineData(WriteRoute.NodeUpdate, HttpStatusCode.OK)]
+    [InlineData(WriteRoute.NodeDelete, HttpStatusCode.NoContent)]
+    [InlineData(WriteRoute.NodeScopes, HttpStatusCode.OK)]
+    public async Task Write_CallerWithWrite_Succeeds(WriteRoute route, HttpStatusCode expected)
+    {
+        await using var host = await PlaybookAuthHost.StartAsync();
+        var request = ArrangeWriteRoute(host, route, storedIsPublic: false, requestIsPublic: false);
+        host.Probe.HeldPrivileges.Add(WritePlaybookPrivilege);
+
+        var response = await host.SendAsync(request);
+
+        response.StatusCode.Should().Be(expected, await response.Content.ReadAsStringAsync());
+        host.Probe.PrivilegeQuestions.Should().Equal(WritePlaybookPrivilege); // an unchanged IsPublic asks no Share
+        switch (route)
+        {
+            case WriteRoute.Update:
+                host.Playbooks.Verify(p => p.UpdatePlaybookAsync(It.IsAny<Guid>(), It.IsAny<SavePlaybookRequest>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Once());
+                break;
+            case WriteRoute.Canvas:
+                host.Playbooks.Verify(p => p.SaveCanvasLayoutAsync(It.IsAny<Guid>(), It.IsAny<CanvasLayoutDto>(), It.IsAny<CancellationToken>()), Times.Once());
+                break;
+            case WriteRoute.NodeCreate:
+                host.Nodes.Verify(n => n.CreateNodeAsync(It.IsAny<Guid>(), It.IsAny<CreateNodeRequest>(), It.IsAny<CancellationToken>()), Times.Once());
+                break;
+            case WriteRoute.NodeUpdate:
+                host.Nodes.Verify(n => n.UpdateNodeAsync(It.IsAny<Guid>(), It.IsAny<UpdateNodeRequest>(), It.IsAny<CancellationToken>()), Times.Once());
+                break;
+            case WriteRoute.NodeDelete:
+                host.Nodes.Verify(n => n.DeleteNodeAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Once());
+                break;
+            default:
+                host.Nodes.Verify(n => n.UpdateNodeScopesAsync(It.IsAny<Guid>(), It.IsAny<NodeScopesRequest>(), It.IsAny<CancellationToken>()), Times.Once());
+                break;
+        }
+    }
+
+    [Theory]
+    [InlineData(WriteRoute.Update)]
+    [InlineData(WriteRoute.Canvas)]
+    [InlineData(WriteRoute.NodeCreate)]
+    [InlineData(WriteRoute.NodeUpdate)]
+    [InlineData(WriteRoute.NodeDelete)]
+    [InlineData(WriteRoute.NodeScopes)]
+    public async Task Write_PrivilegeCheckFault_IsRefused_AndNothingIsReadOrWritten(WriteRoute route)
+    {
+        await using var host = await PlaybookAuthHost.StartAsync();
+        var request = ArrangeWriteRoute(host, route, storedIsPublic: false, requestIsPublic: false);
+        host.Probe.HeldPrivileges.Add(WritePlaybookPrivilege);
+        host.Probe.ThrowOnPrivilegeCheck = new HttpRequestException("dataverse down");
+
+        var response = await host.SendAsync(request);
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        host.Playbooks.VerifyNoOtherCalls();
+        host.Nodes.VerifyNoOtherCalls();
+        host.Access.Calls.Should().BeEmpty();
+    }
+
+    [Theory]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    public async Task Update_ChangingIsPublic_WithoutShare_Is403_AndNothingIsWritten(bool storedIsPublic, bool requestIsPublic)
+    {
+        await using var host = await PlaybookAuthHost.StartAsync();
+        var request = ArrangeWriteRoute(host, WriteRoute.Update, storedIsPublic, requestIsPublic);
+        host.Probe.HeldPrivileges.UnionWith([WritePlaybookPrivilege, CreatePlaybookPrivilege]);
+
+        var response = await host.SendAsync(request);
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        JsonNode.Parse(await response.Content.ReadAsStringAsync())!["reasonCode"]!.GetValue<string>()
+            .Should().Be("sdap.access.deny.insufficient_privilege");
+        host.Probe.PrivilegeQuestions.Should().Equal(WritePlaybookPrivilege, SharePlaybookPrivilege);
+        host.Playbooks.Verify(p => p.UpdatePlaybookAsync(It.IsAny<Guid>(), It.IsAny<SavePlaybookRequest>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never());
+        host.Playbooks.Verify(p => p.ValidateAsync(It.IsAny<SavePlaybookRequest>(), It.IsAny<CancellationToken>()), Times.Never());
+    }
+
+    [Fact]
+    public async Task Update_ChangingIsPublic_WithShare_Succeeds()
+    {
+        await using var host = await PlaybookAuthHost.StartAsync();
+        var request = ArrangeWriteRoute(host, WriteRoute.Update, storedIsPublic: false, requestIsPublic: true);
+        host.Probe.HeldPrivileges.UnionWith([WritePlaybookPrivilege, SharePlaybookPrivilege]);
+
+        var response = await host.SendAsync(request);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+        host.Probe.PrivilegeQuestions.Should().Equal(WritePlaybookPrivilege, SharePlaybookPrivilege);
+        host.Playbooks.Verify(p => p.UpdatePlaybookAsync(It.IsAny<Guid>(), It.Is<SavePlaybookRequest>(r => r.IsPublic), It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Once());
+    }
+
+    [Fact]
+    public async Task Update_StoredPlaybookReadFault_AfterWrite_IsRefused_AndNothingIsWritten()
+    {
+        await using var host = await PlaybookAuthHost.StartAsync();
+        var request = ArrangeWriteRoute(host, WriteRoute.Update, storedIsPublic: false, requestIsPublic: true);
+        host.Probe.HeldPrivileges.UnionWith([WritePlaybookPrivilege, SharePlaybookPrivilege]);
+        var playbookId = Guid.Parse(request.RequestUri!.OriginalString.Split('/').Last());
+        // The owner check reads first and passes; the public-flag read then faults.
+        host.Playbooks.SetupSequence(p => p.GetPlaybookAsync(playbookId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new PlaybookResponse { Id = playbookId, Name = "Owned", IsPublic = false, OwnerId = host.Probe.SystemUserId!.Value })
+            .ThrowsAsync(new HttpRequestException("dataverse down"));
+
+        var response = await host.SendAsync(request);
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        host.Playbooks.Verify(p => p.UpdatePlaybookAsync(It.IsAny<Guid>(), It.IsAny<SavePlaybookRequest>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never());
+    }
+
+    /// <summary>Arranges <paramref name="route"/> on a playbook the caller owns so it succeeds when allowed; returns the request.</summary>
+    private static HttpRequestMessage ArrangeWriteRoute(PlaybookAuthHost host, WriteRoute route, bool storedIsPublic, bool requestIsPublic)
+    {
+        var systemUserId = Guid.NewGuid();
+        host.Probe.SystemUserId = systemUserId;
+        var playbookId = Guid.NewGuid();
+        var nodeId = Guid.NewGuid();
+        host.Playbooks.Setup(p => p.GetPlaybookAsync(playbookId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new PlaybookResponse { Id = playbookId, Name = "Owned", IsPublic = storedIsPublic, OwnerId = systemUserId });
+        var node = new PlaybookNodeDto { Id = nodeId, PlaybookId = playbookId, Name = "Node" };
+        host.Nodes.Setup(n => n.GetNodeAsync(nodeId, It.IsAny<CancellationToken>())).ReturnsAsync(node);
+
+        HttpRequestMessage request;
+        switch (route)
+        {
+            case WriteRoute.Update:
+                host.CreateIsValid();
+                host.Playbooks.Setup(p => p.UpdatePlaybookAsync(playbookId, It.IsAny<SavePlaybookRequest>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+                    .ReturnsAsync(new PlaybookResponse { Id = playbookId, Name = "Owned", IsPublic = requestIsPublic, OwnerId = systemUserId });
+                request = Authenticated(HttpMethod.Put, $"/api/ai/playbooks/{playbookId}", CallerOid);
+                request.Content = JsonContent.Create(new { name = "Owned", actionIds = new[] { Guid.NewGuid() }, isPublic = requestIsPublic });
+                return request;
+
+            case WriteRoute.Canvas:
+                host.Playbooks.Setup(p => p.SaveCanvasLayoutAsync(playbookId, It.IsAny<CanvasLayoutDto>(), It.IsAny<CancellationToken>()))
+                    .ReturnsAsync(new CanvasLayoutResponse { PlaybookId = playbookId });
+                host.Nodes.Setup(n => n.SyncCanvasToNodesAsync(playbookId, It.IsAny<CanvasLayoutDto>(), It.IsAny<CancellationToken>()))
+                    .Returns(Task.CompletedTask);
+                request = Authenticated(HttpMethod.Put, $"/api/ai/playbooks/{playbookId}/canvas", CallerOid);
+                request.Content = JsonContent.Create(new { layout = new { } });
+                return request;
+
+            case WriteRoute.NodeCreate:
+                host.Nodes.Setup(n => n.ValidateAsync(It.IsAny<CreateNodeRequest>(), It.IsAny<CancellationToken>()))
+                    .ReturnsAsync(NodeValidationResult.Success());
+                host.Nodes.Setup(n => n.CreateNodeAsync(playbookId, It.IsAny<CreateNodeRequest>(), It.IsAny<CancellationToken>()))
+                    .ReturnsAsync(node);
+                request = Authenticated(HttpMethod.Post, $"/api/ai/playbooks/{playbookId}/nodes", CallerOid);
+                request.Content = JsonContent.Create(new { name = "Node", actionId = Guid.NewGuid(), outputVariable = "out" });
+                return request;
+
+            case WriteRoute.NodeUpdate:
+                host.Nodes.Setup(n => n.UpdateNodeAsync(nodeId, It.IsAny<UpdateNodeRequest>(), It.IsAny<CancellationToken>()))
+                    .ReturnsAsync(node);
+                request = Authenticated(HttpMethod.Put, $"/api/ai/playbooks/{playbookId}/nodes/{nodeId}", CallerOid);
+                request.Content = JsonContent.Create(new { name = "Renamed" });
+                return request;
+
+            case WriteRoute.NodeDelete:
+                host.Nodes.Setup(n => n.DeleteNodeAsync(nodeId, It.IsAny<CancellationToken>())).ReturnsAsync(true);
+                return Authenticated(HttpMethod.Delete, $"/api/ai/playbooks/{playbookId}/nodes/{nodeId}", CallerOid);
+
+            default:
+                host.Nodes.Setup(n => n.UpdateNodeScopesAsync(nodeId, It.IsAny<NodeScopesRequest>(), It.IsAny<CancellationToken>()))
+                    .ReturnsAsync(node);
+                request = Authenticated(HttpMethod.Put, $"/api/ai/playbooks/{playbookId}/nodes/{nodeId}/scopes", CallerOid);
+                request.Content = JsonContent.Create(new { skillIds = Array.Empty<Guid>(), knowledgeIds = Array.Empty<Guid>() });
+                return request;
+        }
+    }
+
+    private static string RequiredPrivilege(AuthoringRoute route) =>
+        route is AuthoringRoute.Create or AuthoringRoute.Clone ? CreatePlaybookPrivilege : SharePlaybookPrivilege;
+
+    /// <summary>Arranges <paramref name="route"/> so it succeeds for a caller the route allows; returns the request.</summary>
+    private static HttpRequestMessage ArrangeAuthoringRoute(PlaybookAuthHost host, AuthoringRoute route)
+    {
+        var systemUserId = Guid.NewGuid();
+        host.Probe.SystemUserId = systemUserId;
+        var playbookId = Guid.NewGuid();
+
+        switch (route)
+        {
+            case AuthoringRoute.Create:
+                host.CreateIsValid();
+                host.Playbooks.Setup(p => p.CreatePlaybookAsync(It.IsAny<SavePlaybookRequest>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+                    .ReturnsAsync((SavePlaybookRequest r, Guid owner, CancellationToken _) =>
+                        new PlaybookResponse { Id = Guid.NewGuid(), Name = r.Name, OwnerId = owner });
+                return CreatePlaybook();
+
+            case AuthoringRoute.Clone:
+                host.PublicPlaybook(playbookId);
+                host.Playbooks.Setup(p => p.ClonePlaybookAsync(playbookId, It.IsAny<Guid>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+                    .ReturnsAsync((Guid _, Guid owner, string? name, CancellationToken _) =>
+                        new PlaybookResponse { Id = Guid.NewGuid(), Name = name ?? "Copy", OwnerId = owner });
+                return Authenticated(HttpMethod.Post, $"/api/ai/playbooks/{playbookId}/clone", CallerOid);
+
+            default:
+                host.Playbooks.Setup(p => p.GetPlaybookAsync(playbookId, It.IsAny<CancellationToken>()))
+                    .ReturnsAsync(new PlaybookResponse { Id = playbookId, Name = "Owned", IsPublic = false, OwnerId = systemUserId });
+                host.Sharing.Setup(s => s.SharePlaybookAsync(playbookId, It.IsAny<SharePlaybookRequest>(), It.IsAny<Guid>()))
+                    .ReturnsAsync(new ShareOperationResult { Success = true });
+                host.Sharing.Setup(s => s.RevokeShareAsync(playbookId, It.IsAny<RevokeShareRequest>(), It.IsAny<Guid>()))
+                    .ReturnsAsync(new ShareOperationResult { Success = true });
+                var request = Authenticated(
+                    HttpMethod.Post,
+                    $"/api/ai/playbooks/{playbookId}/{(route == AuthoringRoute.Share ? "share" : "unshare")}",
+                    CallerOid);
+                request.Content = JsonContent.Create(new { teamIds = new[] { Guid.NewGuid() } });
+                return request;
+        }
     }
 
     // =========================================================================================
@@ -988,9 +1455,20 @@ public class PlaybookRouteAuthorizationContractTests
         /// </summary>
         public HashSet<string> HeldPrivileges { get; } = new(StringComparer.Ordinal);
 
+        /// <summary>When set, every table-privilege question throws it (a fault in the privilege check).</summary>
+        public Exception? ThrowOnPrivilegeCheck { get; set; }
+
+        /// <summary>Every table privilege asked about, in order.</summary>
+        public List<string> PrivilegeQuestions { get; } = new();
+
         public override Task<bool> CallerHoldsPrivilegeAsync(
-            string? callerBearerToken, string privilegeName, CancellationToken ct = default) =>
-            Task.FromResult(!string.IsNullOrEmpty(callerBearerToken) && HeldPrivileges.Contains(privilegeName));
+            string? callerBearerToken, string privilegeName, CancellationToken ct = default)
+        {
+            PrivilegeQuestions.Add(privilegeName);
+            return ThrowOnPrivilegeCheck is not null
+                ? Task.FromException<bool>(ThrowOnPrivilegeCheck)
+                : Task.FromResult(!string.IsNullOrEmpty(callerBearerToken) && HeldPrivileges.Contains(privilegeName));
+        }
     }
 
     /// <summary>A minimal host over the three REAL endpoint mappers.</summary>
@@ -1001,6 +1479,12 @@ public class PlaybookRouteAuthorizationContractTests
 
         public RecordingAccessDataSource Access { get; } = new();
         public RecordingSystemUserProbe Probe { get; } = new();
+
+        /// <summary>Task 188 round 4b: who the caller is for the narrowing (Internal unless a test says otherwise).</summary>
+        public NarrowingCallerMode NarrowingMode { get; set; } = NarrowingCallerMode.Internal;
+
+        /// <summary>Task 188 round 4b: what the BFF's app-only identity reads (the REAL predicate behind the real seam).</summary>
+        internal AppOnlyDocumentWorld World { get; } = new();
         public Mock<IPlaybookService> Playbooks { get; } = new(MockBehavior.Strict);
         public Mock<IPlaybookLookupService> Lookup { get; } = new(MockBehavior.Strict);
         public Mock<INodeService> Nodes { get; } = new(MockBehavior.Strict);
@@ -1040,6 +1524,10 @@ public class PlaybookRouteAuthorizationContractTests
             builder.Services.AddSingleton<IAccessDataSource>(Access);
             builder.Services.AddScoped<IAuthorizationRule, OperationAccessRule>();
             builder.Services.AddScoped<AuthorizationService>();
+            // Task 188 round 4b: WHO the caller is for THE external document narrowing and what the app-only identity
+            // reads (StatedNarrowingCaller). Internal by default (no narrowing call, no read); the round 4b must-fire
+            // tests state an external caller and seed the world.
+            builder.Services.AddStatedNarrowingCaller(() => NarrowingMode, () => World);
             builder.Services.AddSingleton<CallerRecordAccessProbe>(Probe);
 
             builder.Services.AddSingleton(Playbooks.Object);
@@ -1067,6 +1555,7 @@ public class PlaybookRouteAuthorizationContractTests
             _app.UseRateLimiter();
 
             _app.MapPlaybookEndpoints();
+            _app.MapNodeEndpoints();
             _app.MapPlaybookRunEndpoints();
             _app.MapAgentEndpoints();
 

@@ -385,9 +385,23 @@ public class AssignedAccessStore
         "_sprk_subjectsystemuser_value,_sprk_externalrecordaccess_value,sprk_state,sprk_reason,sprk_grantedlevel," +
         "sprk_grantedexpiry";
 
+    /// <summary>
+    /// <c>systemuser.sprk_primarycontact</c>: the task-141 link from a user to the contact it represents. The link
+    /// candidates (<see cref="ReadLinkCandidatesAsync"/>) decide which users an Assigned-To contact is materialized as, so
+    /// only the BFF writes it (#2253 fix round 1: <c>InheritedAccessPermission.AccessColumns</c>).
+    /// </summary>
+    internal const string PrimaryContactColumn = "sprk_primarycontact";
+
+    /// <summary>
+    /// <c>systemuser.sprk_isexternal</c>: an external user, never materialized as an internal one and kept out of a
+    /// Restricted root's container and shares (also read by <c>SpeContainerMembershipSync</c>,
+    /// <c>SecureChildShareSynchronizer</c> and <c>OfficeEditAccessService</c>; #2253 fix round 1).
+    /// </summary>
+    internal const string IsExternalColumn = "sprk_isexternal";
+
     private const string LinkCandidateSelect =
-        "systemuserid,_sprk_primarycontact_value,azureactivedirectoryobjectid,isdisabled,accessmode,applicationid," +
-        "sprk_isexternal";
+        "systemuserid,_" + PrimaryContactColumn + "_value,azureactivedirectoryobjectid,isdisabled,accessmode,applicationid," +
+        IsExternalColumn;
 
     private readonly DataverseWebApiClient _dataverse;
     private readonly ILogger<AssignedAccessStore> _logger;

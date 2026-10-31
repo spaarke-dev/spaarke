@@ -102,7 +102,7 @@ public sealed partial class SecureChildOwnershipAiToolTests
             "its participant share is revoked once the team owner reads back");
         gateOrg.Verify(o => o.ExecuteAsync(It.IsAny<Microsoft.Crm.Sdk.Messages.AssignRequest>(), It.IsAny<CancellationToken>()), Times.Once);
         gateLog.Entries.Should().NotContain(e => e.Level >= LogLevel.Warning);
-        _stepThreads.Verify(t => t.ReconcileThreadForFilingAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never,
+        _stepThreads.Verify(t => t.ReconcileThreadForFilingAsync(It.IsAny<Guid>(), It.IsAny<Sprk.Bff.Api.Services.Communication.FilingReconcileHost>(), It.IsAny<Sprk.Bff.Api.Services.Access.SecureRemovalCaller?>(), It.IsAny<Func<CancellationToken, Task>?>(), It.IsAny<CancellationToken>()), Times.Never,
             "the join IS the message's thread placement");
     }
 
@@ -261,7 +261,7 @@ public sealed partial class SecureChildOwnershipAiToolTests
         int? oldMirrorAtTheReconcile = -1;
         var threads = new Mock<IThreadResolver>();
         threads
-            .Setup(t => t.ReconcileThreadForFilingAsync(JoiningMessage, It.IsAny<CancellationToken>()))
+            .Setup(t => t.ReconcileThreadForFilingAsync(JoiningMessage, It.IsAny<Sprk.Bff.Api.Services.Communication.FilingReconcileHost>(), It.IsAny<Sprk.Bff.Api.Services.Access.SecureRemovalCaller?>(), It.IsAny<Func<CancellationToken, Task>?>(), It.IsAny<CancellationToken>()))
             .Callback(() =>
             {
                 oldMirrorAtTheReconcile = _shareTable.MaskOf("sprk_communication", JoiningMessage, DataversePrincipalRef.User(Sharee));
@@ -273,7 +273,7 @@ public sealed partial class SecureChildOwnershipAiToolTests
         await Children(threads.Object).AfterRefileAsync(
             "sprk_communication", JoiningMessage, () => Task.FromResult(true), CancellationToken.None);
 
-        threads.Verify(t => t.ReconcileThreadForFilingAsync(JoiningMessage, It.IsAny<CancellationToken>()), Times.Once);
+        threads.Verify(t => t.ReconcileThreadForFilingAsync(JoiningMessage, It.IsAny<Sprk.Bff.Api.Services.Communication.FilingReconcileHost>(), It.IsAny<Sprk.Bff.Api.Services.Access.SecureRemovalCaller?>(), It.IsAny<Func<CancellationToken, Task>?>(), It.IsAny<CancellationToken>()), Times.Once);
         oldMirrorAtTheReconcile.Should().BeNull("the old mirror came off before the reconcile ran");
         _shareTable.MaskOf("sprk_communication", JoiningMessage, DataversePrincipalRef.User(Sharee)).Should().BeNull();
         _shareTable.MaskOf("sprk_communication", JoiningMessage, DataversePrincipalRef.User(GrantSharee)).Should().Be(1,
@@ -287,6 +287,9 @@ public sealed partial class SecureChildOwnershipAiToolTests
     {
         var heldThread = Guid.Parse("a2110000-0000-4000-8000-0000000000e5");
         var otherThread = Guid.Parse("a2110000-0000-4000-8000-0000000000e6");
+        // #2143 round 6: the resolver reads both threads (RecordThreadFiling); Direct threads, so they file the message under nothing.
+        _world.WithRecord("sprk_communicationthread", heldThread, Directory.ChildBu, extra: new() { ["sprk_threadtype"] = new OptionSetValue(100000001) }) // #2143 r7d: Direct
+            .WithRecord("sprk_communicationthread", otherThread, Directory.ChildBu, extra: new() { ["sprk_threadtype"] = new OptionSetValue(100000001) }); // #2143 r7d: Direct
         _world.WithRecord("sprk_communication", JoiningMessage, Directory.ChildBu, owningTeam: Directory.ChildTeam, extra: new()
         {
             ["sprk_regardingmatter"] = new EntityReference("sprk_matter", OrdinaryMatter),
@@ -309,7 +312,7 @@ public sealed partial class SecureChildOwnershipAiToolTests
 
         Status(result).Should().Be(Microsoft.AspNetCore.Http.StatusCodes.Status204NoContent, Detail(result));
         _world.Assignments.Should().BeEmpty("the thread decides no owner, and the matter is the one held");
-        threads.Verify(t => t.ReconcileThreadForFilingAsync(JoiningMessage, It.IsAny<CancellationToken>()),
+        threads.Verify(t => t.ReconcileThreadForFilingAsync(JoiningMessage, It.IsAny<Sprk.Bff.Api.Services.Communication.FilingReconcileHost>(), It.IsAny<Sprk.Bff.Api.Services.Access.SecureRemovalCaller?>(), It.IsAny<Func<CancellationToken, Task>?>(), It.IsAny<CancellationToken>()),
             movesTheThread ? Times.Once() : Times.Never(),
             movesTheThread ? "the thread moved: the step after a re-file ran once" : "nothing moved: no step");
     }
@@ -357,7 +360,7 @@ public sealed partial class SecureChildOwnershipAiToolTests
             "the gate Decision Record step ran after the join, asked the real resolver and left the Secure record to the engine");
         gateOrg.Verify(o => o.ExecuteAsync(It.IsAny<Microsoft.Crm.Sdk.Messages.AssignRequest>(), It.IsAny<CancellationToken>()), Times.Never);
 
-        _stepThreads.Verify(t => t.ReconcileThreadForFilingAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never,
+        _stepThreads.Verify(t => t.ReconcileThreadForFilingAsync(It.IsAny<Guid>(), It.IsAny<Sprk.Bff.Api.Services.Communication.FilingReconcileHost>(), It.IsAny<Sprk.Bff.Api.Services.Access.SecureRemovalCaller?>(), It.IsAny<Func<CancellationToken, Task>?>(), It.IsAny<CancellationToken>()), Times.Never,
             "the join IS the message's thread placement: the step's thread reconcile does not run (it could move the message back out)");
     }
 
@@ -387,12 +390,25 @@ public sealed partial class SecureChildOwnershipAiToolTests
         {
             _joinedThreadRow["sprk_regardingmatter"] = new EntityReference("sprk_matter", matter);
             ShareWorld.Add("sprk_communicationthread", JoinedThread,
+                ("sprk_threadtype", new OptionSetValue(100000000)), // #2143 r7d: a record thread
                 ("owningteam", new EntityReference("team", matter == SecureMatter ? Directory.SecureNamedTeam : SecureChildShareWorld.GeneralTeam)),
                 ("sprk_regardingmatter", new EntityReference("sprk_matter", matter)));
         }
 
         if (regardingProject is { } project)
             _joinedThreadRow["sprk_regardingproject"] = new EntityReference("sprk_project", project);
+
+        // #2143 round 6: the resolver reads the thread a join names (RecordThreadFiling) from its own Dataverse — the same row.
+        var threadColumns = new Dictionary<string, object>
+        {
+            // #2143 r7d: the thread's type, as the join reads it.
+            ["sprk_threadtype"] = new OptionSetValue(regardingMatter is null && regardingProject is null ? 100000001 : 100000000),
+        };
+        if (regardingMatter is { } threadMatter)
+            threadColumns["sprk_regardingmatter"] = new EntityReference("sprk_matter", threadMatter);
+        if (regardingProject is { } threadProject)
+            threadColumns["sprk_regardingproject"] = new EntityReference("sprk_project", threadProject);
+        _world.WithRecord("sprk_communicationthread", JoinedThread, Directory.ChildBu, extra: threadColumns);
     }
 
     private Entity? _joinedThreadRow;

@@ -104,20 +104,20 @@ public class ExternalMessageSendTests
         Guid? workAssignment = null,
         AccessRights workAssignmentRights = AccessRights.Read | AccessRights.Create | AccessRights.Write,
         Guid? contactId = null) => new()
-    {
-        Plane = CallerPrincipalPlane.CiamContact,
-        ContactId = contactId ?? Guid.NewGuid(),
-        Email = "partner@outside.test",
-        ProjectAccess = project is { } p
+        {
+            Plane = CallerPrincipalPlane.CiamContact,
+            ContactId = contactId ?? Guid.NewGuid(),
+            Email = "partner@outside.test",
+            ProjectAccess = project is { } p
             ? new[] { CallerProjectAccess.FromLevel(p, projectLevel) }
             : Array.Empty<CallerProjectAccess>(),
-        MatterAccess = matter is { } m
+            MatterAccess = matter is { } m
             ? new Dictionary<Guid, AccessRights> { [m] = matterRights }
             : new Dictionary<Guid, AccessRights>(),
-        WorkAssignmentAccess = workAssignment is { } w
+            WorkAssignmentAccess = workAssignment is { } w
             ? new Dictionary<Guid, AccessRights> { [w] = workAssignmentRights }
             : new Dictionary<Guid, AccessRights>(),
-    };
+        };
 
     private static CallerPrincipal WorkforceContact(Guid? project = null, Guid? contactId = null) => new()
     {
@@ -209,7 +209,26 @@ public class ExternalMessageSendTests
         var data = _roots.NewService();
         return ExternalMessageEndpoints.PostMessageCoreAsync(
             root, id, request, caller, registry ?? ProductionRegistry(), ReadRecord, Service(), NullLogger.Instance,
-            CancellationToken.None, data.GetNonSecureRootsAsync, data.GetLiveParentRootsAsync);
+            CancellationToken.None, data.GetNonSecureRootsAsync, data.GetLiveParentRootsAsync,
+            hideInvoices: _invoiceHiding.Seam);
+    }
+
+    /// <summary>ebilling-r1 task 098: the (a') predicate the route passes; hides nothing unless a test says so.</summary>
+    private InvoiceHidingStub _invoiceHiding = InvoiceHidingStub.NoneHidden();
+
+    /// <summary>Task 036: a post with the Dataverse rights reader the route passes (the probe, as the caller), and (fix
+    /// round 1, F1) its privilege reader.</summary>
+    private Task<IResult> Post(
+        string root, Guid id, CallerPrincipal caller,
+        Func<string, Guid, CancellationToken, Task<AccessRights?>>? readCallerRights,
+        Func<string, CancellationToken, Task<bool?>>? readCallerPrivilege = null)
+    {
+        var data = _roots.NewService();
+        return ExternalMessageEndpoints.PostMessageCoreAsync(
+            root, id, new PostExternalMessageRequest { SprkBody = "Can you confirm the filing date?" }, caller,
+            ProductionRegistry(), ReadRecord, Service(), NullLogger.Instance, CancellationToken.None,
+            data.GetNonSecureRootsAsync, data.GetLiveParentRootsAsync, readCallerRights, readCallerPrivilege,
+            _invoiceHiding.Seam);
     }
 
     /// <summary>A request body bound exactly as the route binds it (System.Text.Json, web defaults).</summary>
@@ -537,6 +556,48 @@ public class ExternalMessageSendTests
         ShouldHaveWrittenNothing();
     }
 
+    // ebilling-r1 task 098 surface (b): the post gate is the read gate, so an invoice the (a') predicate hides (or cannot
+    // decide) is refused exactly as an invoice that does not exist, and nothing is written.
+    [Theory]
+    [InlineData("hidden")]
+    [InlineData("fault")]
+    public async Task Task098_AnInvoiceThePredicateHides_IsRefusedAsANonexistentInvoice_AndCreatesNoRow(string kind)
+    {
+        var matter = Guid.NewGuid();
+        var invoice = Guid.NewGuid();
+        _records[("sprk_invoice", invoice)] = new Dictionary<string, object?>
+        {
+            ["id"] = invoice,
+            ["sprk_matter"] = Lookup(matter, "sprk_matter"),
+        };
+        _invoiceHiding = kind == "hidden" ? InvoiceHidingStub.Hiding(invoice) : InvoiceHidingStub.Faulting();
+
+        var hidden = await Post("invoices", invoice, Ciam(matter: matter));
+        var missing = await Post("invoices", Guid.NewGuid(), Ciam(matter: matter));
+
+        ShouldBeForbidden(hidden, ExternalMessageEndpoints.DenyRecordNotAccessible);
+        ShouldBeForbidden(missing, ExternalMessageEndpoints.DenyRecordNotAccessible);
+        ((ProblemHttpResult)hidden).ProblemDetails.Detail.Should().Be(((ProblemHttpResult)missing).ProblemDetails.Detail);
+        ((ProblemHttpResult)hidden).ProblemDetails.Title.Should().Be(((ProblemHttpResult)missing).ProblemDetails.Title);
+        ShouldHaveWrittenNothing();
+    }
+
+    [Fact]
+    public async Task Task098_AnInvoiceThePredicateLeavesVisible_IsPosted_AsBefore()
+    {
+        var matter = Guid.NewGuid();
+        var invoice = Guid.NewGuid();
+        _records[("sprk_invoice", invoice)] = new Dictionary<string, object?>
+        {
+            ["id"] = invoice,
+            ["sprk_matter"] = Lookup(matter, "sprk_matter"),
+        };
+        _invoiceHiding = InvoiceHidingStub.Hiding(Guid.NewGuid());
+
+        Created(await Post("invoices", invoice, Ciam(matter: matter)));
+        _invoiceHiding.Calls.Should().Contain(call => call.Contains(invoice));
+    }
+
     [Theory]
     [InlineData("projects")]
     [InlineData("matters")]
@@ -609,6 +670,301 @@ public class ExternalMessageSendTests
 
         ShouldBeForbidden(result, ExternalMessageEndpoints.DenyInsufficientRights);
         ShouldHaveWrittenNothing();
+    }
+
+    // ── Task 036 (FR-20, owner round 59 item 2): a caller whose access Dataverse decided posts only where Dataverse, asked
+    //    as the caller, lets it attach to the record (AppendTo) ─────────────────────────────────────────────────────────
+
+    public static TheoryData<string> DataverseConfirmedRoots => new() { "projects", "matters", "workassignments", "invoices" };
+
+    [Theory]
+    [MemberData(nameof(DataverseConfirmedRoots))]
+    public async Task Fr20_ReadAndWriteButNoAppendToInDataverse_Is403InsufficientRights_AndCreatesNoRow(string root)
+    {
+        var (caller, record) = SystemUserReading(root, dataverseDecides: true);
+        var asked = new List<(string EntitySet, Guid RecordId)>();
+
+        var result = await Post(root, record, caller, Dataverse(AccessRights.Read | AccessRights.Write, asked));
+
+        ShouldBeForbidden(result, ExternalMessageEndpoints.DenyInsufficientRights);
+        ShouldHaveWrittenNothing();
+        asked.Should().ContainSingle().Which.Should().Be((ConfirmedSetOf(root), record),
+            "Dataverse is asked about the record the message is posted on");
+    }
+
+    [Theory]
+    [MemberData(nameof(DataverseConfirmedRoots))]
+    public async Task Fr20_AppendToInDataverse_Is201(string root)
+    {
+        var (caller, record) = SystemUserReading(root, dataverseDecides: true);
+        var asked = new List<(string EntitySet, Guid RecordId)>();
+        var privileges = new List<string>();
+
+        Created(await Post(root, record, caller, Dataverse(AccessRights.Read | AccessRights.AppendTo, asked),
+            Holds(privileges, ExternalMessageEndpoints.CreateMessagePrivilege)));
+
+        TheRow();
+        asked.Should().ContainSingle();
+        privileges.Should().Equal(new[] { "prvCreatesprk_Communication" }, "the message row's own table privilege is asked");
+    }
+
+    // ── Task 036 fix round 1 (F1): AppendTo on the record is not enough — the message row is written app-only, so the
+    //    caller must also hold Create on sprk_communication, as MDA would require of them ───────────────────────────
+
+    [Theory]
+    [MemberData(nameof(DataverseConfirmedRoots))]
+    public async Task Fr20_AppendToButNoCreatePrivilegeOnTheMessageTable_Is403InsufficientRights_AndCreatesNoRow(string root)
+    {
+        var (caller, record) = SystemUserReading(root, dataverseDecides: true);
+        var asked = new List<(string EntitySet, Guid RecordId)>();
+        var privileges = new List<string>();
+
+        var result = await Post(root, record, caller, Dataverse(AccessRights.Read | AccessRights.AppendTo, asked),
+            Holds(privileges /* holds nothing */));
+
+        ShouldBeForbidden(result, ExternalMessageEndpoints.DenyInsufficientRights);
+        ShouldHaveWrittenNothing();
+        privileges.Should().Equal(new[] { ExternalMessageEndpoints.CreateMessagePrivilege });
+    }
+
+    [Fact]
+    public async Task Fr20_APrivilegeReaderThatThrows_OrAnswersNothing_Is503_AndCreatesNoRow()
+    {
+        // Fix round 4 (F1): a privilege read that could not run is not "not held" — the post is unavailable, not refused.
+        var (caller, record) = SystemUserReading("projects", dataverseDecides: true);
+        var asked = new List<(string EntitySet, Guid RecordId)>();
+
+        ShouldBeUnavailable(
+            await Post("projects", record, caller, Dataverse(AccessRights.Read | AccessRights.AppendTo, asked),
+                (_, _) => throw new HttpRequestException("RetrieveUserSetOfPrivilegesByNames failed")));
+        ShouldBeUnavailable(
+            await Post("projects", record, caller, Dataverse(AccessRights.Read | AccessRights.AppendTo, asked),
+                (_, _) => Task.FromResult<bool?>(null)));
+        ShouldHaveWrittenNothing();
+    }
+
+    [Fact]
+    public async Task Fr20_NoPrivilegeReader_Is403_AndCreatesNoRow()
+    {
+        var (caller, record) = SystemUserReading("projects", dataverseDecides: true);
+        var asked = new List<(string EntitySet, Guid RecordId)>();
+
+        ShouldBeForbidden(
+            await Post("projects", record, caller, Dataverse(AccessRights.Read | AccessRights.AppendTo, asked)),
+            ExternalMessageEndpoints.DenyInsufficientRights);
+        ShouldHaveWrittenNothing();
+    }
+
+    [Fact]
+    public void Fr20_TheMessageCreatePrivilege_IsTheLiveName() =>
+        ExternalMessageEndpoints.CreateMessagePrivilege.Should().Be("prvCreatesprk_Communication",
+            "the name the SpaarkeMaster roles carry; a wrong name is never held, so every post would deny");
+
+    [Fact]
+    public async Task Fr20_AReaderThatThrows_OrAnswersNothing_Is503_AndCreatesNoRow()
+    {
+        // Fix round 4 (F1): a rights read that could not run is a retry-able 503, never "you may not post here".
+        var (caller, record) = SystemUserReading("projects", dataverseDecides: true);
+        var asked = new List<(string EntitySet, Guid RecordId)>();
+
+        ShouldBeUnavailable(
+            await Post("projects", record, caller, (_, _, _) => throw new HttpRequestException("Dataverse unreachable")));
+        ShouldBeUnavailable(await Post("projects", record, caller, Dataverse(null, asked)));
+        ShouldHaveWrittenNothing();
+    }
+
+    [Fact]
+    public async Task Fr20_NoReader_Is403_AndCreatesNoRow()
+    {
+        var (caller, record) = SystemUserReading("projects", dataverseDecides: true);
+
+        ShouldBeForbidden(await Post("projects", record, caller, readCallerRights: null),
+            ExternalMessageEndpoints.DenyInsufficientRights);
+        ShouldHaveWrittenNothing();
+    }
+
+    // ── Task 036 fix round 4 (F1): over the production probe and a scripted Dataverse, a question Dataverse gives no answer
+    //    to (a timeout, an UNKNOWN 403, a 5xx) is a 503 and writes nothing; a real denial stays a 403 ─────────────────────
+
+    public static TheoryData<string, string, string> WireCases()
+    {
+        var data = new TheoryData<string, string, string>();
+        foreach (var root in new[] { "projects", "matters", "workassignments", "invoices" })
+        {
+            data.Add(root, CallerRecordAccessProbeDouble.WireShape.Timeout, CallerRecordAccessProbeDouble.WireShape.Held);
+            data.Add(root, CallerRecordAccessProbeDouble.WireShape.Unknown, CallerRecordAccessProbeDouble.WireShape.Held);
+            data.Add(root, CallerRecordAccessProbeDouble.WireShape.ServerFault, CallerRecordAccessProbeDouble.WireShape.Held);
+        }
+
+        // The child-create privilege question, after Dataverse answered AppendTo on the record.
+        data.Add("projects", CallerRecordAccessProbeDouble.WireShape.AppendTo, CallerRecordAccessProbeDouble.WireShape.Timeout);
+        data.Add("projects", CallerRecordAccessProbeDouble.WireShape.AppendTo, CallerRecordAccessProbeDouble.WireShape.Unknown);
+        data.Add("projects", CallerRecordAccessProbeDouble.WireShape.AppendTo, CallerRecordAccessProbeDouble.WireShape.ServerFault);
+        return data;
+    }
+
+    [Theory]
+    [MemberData(nameof(WireCases))]
+    public async Task Fr20_DataverseGivesNoAnswer_OverTheWire_Is503_AndCreatesNoRow(string root, string rights, string privilege)
+    {
+        var (caller, record) = SystemUserReading(root, dataverseDecides: true);
+        var probe = new CallerRecordAccessProbeDouble().UseAppOnlyWire(rights, privilege);
+
+        ShouldBeUnavailable(await PostOverTheWire(root, record, caller, probe));
+        ShouldHaveWrittenNothing();
+    }
+
+    [Theory]
+    [InlineData("projects", CallerRecordAccessProbeDouble.WireShape.Denial, CallerRecordAccessProbeDouble.WireShape.Held)]
+    [InlineData("invoices", CallerRecordAccessProbeDouble.WireShape.Denial, CallerRecordAccessProbeDouble.WireShape.Held)]
+    [InlineData("projects", CallerRecordAccessProbeDouble.WireShape.AppendTo, CallerRecordAccessProbeDouble.WireShape.NotHeld)]
+    public async Task Fr20_ARealDenial_OverTheWire_StaysA403_AndCreatesNoRow(string root, string rights, string privilege)
+    {
+        var (caller, record) = SystemUserReading(root, dataverseDecides: true);
+        var probe = new CallerRecordAccessProbeDouble().UseAppOnlyWire(rights, privilege);
+
+        ShouldBeForbidden(await PostOverTheWire(root, record, caller, probe), ExternalMessageEndpoints.DenyInsufficientRights);
+        ShouldHaveWrittenNothing();
+    }
+
+    [Fact]
+    public async Task Fr20_AppendToAndTheCreatePrivilege_OverTheWire_Is201()
+    {
+        var (caller, record) = SystemUserReading("projects", dataverseDecides: true);
+        var probe = new CallerRecordAccessProbeDouble().UseAppOnlyWire(
+            CallerRecordAccessProbeDouble.WireShape.AppendTo, CallerRecordAccessProbeDouble.WireShape.Held);
+
+        Created(await PostOverTheWire("projects", record, caller, probe));
+        TheRow();
+    }
+
+    [Fact]
+    public async Task Fr20_ARecordOutsideTheSet_IsNotAccessible_AndAsksDataverseNothing()
+    {
+        var (caller, _) = SystemUserReading("projects", dataverseDecides: true);
+        var asked = new List<(string EntitySet, Guid RecordId)>();
+
+        var result = await Post("projects", Guid.NewGuid(), caller, Dataverse(AccessRights.Read | AccessRights.AppendTo, asked));
+
+        ShouldBeForbidden(result, ExternalMessageEndpoints.DenyRecordNotAccessible);
+        ShouldHaveWrittenNothing();
+        asked.Should().BeEmpty("the scope check runs first; Dataverse never widens a record outside the set");
+    }
+
+    [Theory]
+    [MemberData(nameof(DataverseConfirmedRoots))]
+    public async Task Fr20_FlagOff_TheComposedRightsDecide_AndDataverseIsNeverAsked(string root)
+    {
+        // The same Read-only systemuser with the flag off: Dataverse would say AppendTo, but nobody asks.
+        var (caller, record) = SystemUserReading(root, dataverseDecides: false);
+        var asked = new List<(string EntitySet, Guid RecordId)>();
+
+        var result = await Post(root, record, caller, Dataverse(AccessRights.Read | AccessRights.AppendTo, asked));
+
+        ShouldBeForbidden(result, ExternalMessageEndpoints.DenyInsufficientRights);
+        ShouldHaveWrittenNothing();
+        asked.Should().BeEmpty("flag off is byte-equivalent: no Dataverse confirmation");
+    }
+
+    [Fact]
+    public async Task Fr20_FlagOff_AFullAccessSystemUserPosts_AndDataverseIsNeverAsked()
+    {
+        var project = Guid.NewGuid();
+        var asked = new List<(string EntitySet, Guid RecordId)>();
+
+        Created(await Post("projects", project, SystemUser(Guid.NewGuid(), project),
+            Dataverse(AccessRights.None, asked)));
+
+        asked.Should().BeEmpty();
+    }
+
+    /// <summary>Task 036: a systemuser holding Read only on a fresh record of <paramref name="root"/> (for an invoice, on
+    /// its matter) — the own term a flag-on composition gives — and that record. <paramref name="dataverseDecides"/> is the
+    /// flag.</summary>
+    private (CallerPrincipal Caller, Guid Record) SystemUserReading(string root, bool dataverseDecides)
+    {
+        var record = Guid.NewGuid();
+        IReadOnlyList<CallerProjectAccess> projects = Array.Empty<CallerProjectAccess>();
+        var matters = new Dictionary<Guid, AccessRights>();
+        var workAssignments = new Dictionary<Guid, AccessRights>();
+        switch (root)
+        {
+            case "projects":
+                projects = new[] { CallerProjectAccess.FromLevel(record, ExternalAccessLevel.ViewOnly) };
+                break;
+            case "matters":
+                matters[record] = AccessRights.Read;
+                break;
+            case "workassignments":
+                workAssignments[record] = AccessRights.Read;
+                break;
+            default:
+                var matter = Guid.NewGuid();
+                _records[("sprk_invoice", record)] = new Dictionary<string, object?>
+                {
+                    ["id"] = record,
+                    ["sprk_matter"] = Lookup(matter, "sprk_matter"),
+                };
+                matters[matter] = AccessRights.Read;
+                break;
+        }
+
+        return (new CallerPrincipal
+        {
+            Plane = CallerPrincipalPlane.Workforce,
+            ContactId = Guid.NewGuid(),
+            SystemUserId = Guid.NewGuid(),
+            Email = "lawyer@spaarke.test",
+            ProjectAccess = projects,
+            MatterAccess = matters,
+            WorkAssignmentAccess = workAssignments,
+            DataverseConfirmsWrites = dataverseDecides,
+        }, record);
+    }
+
+    private static string ConfirmedSetOf(string root) => root switch
+    {
+        "projects" => "sprk_projects",
+        "matters" => "sprk_matters",
+        "workassignments" => "sprk_workassignments",
+        _ => "sprk_invoices",
+    };
+
+    /// <summary>Task 036 fix round 1 (F1): the caller holds exactly <paramref name="held"/>; every question is recorded.</summary>
+    private static Func<string, CancellationToken, Task<bool?>> Holds(List<string> asked, params string[] held) =>
+        (privilege, _) =>
+        {
+            asked.Add(privilege);
+            return Task.FromResult<bool?>(held.Contains(privilege, StringComparer.Ordinal));
+        };
+
+    /// <summary>Dataverse's answer for the caller, recording every question; <see langword="null"/> is "no answer".</summary>
+    private static Func<string, Guid, CancellationToken, Task<AccessRights?>> Dataverse(
+        AccessRights? answer, List<(string EntitySet, Guid RecordId)> asked) =>
+        (entitySet, recordId, _) =>
+        {
+            asked.Add((entitySet, recordId));
+            return Task.FromResult(answer);
+        };
+
+    /// <summary>Task 036 fix round 4 (F1): the route's own readers (<see cref="ExternalProjectDataEndpoints.CallerRightsReader"/>,
+    /// <see cref="ExternalProjectDataEndpoints.CallerPrivilegeReader"/>) over the production probe and a scripted Dataverse.</summary>
+    private Task<IResult> PostOverTheWire(string root, Guid record, CallerPrincipal caller, CallerRecordAccessProbeDouble probe)
+    {
+        var httpContext = new DefaultHttpContext();
+        httpContext.Items[CallerPrincipal.HttpContextItemsKey] = caller;
+        return Post(root, record, caller,
+            ExternalProjectDataEndpoints.CallerRightsReader(probe, httpContext),
+            ExternalProjectDataEndpoints.CallerPrivilegeReader(probe, httpContext));
+    }
+
+    private static void ShouldBeUnavailable(IResult result)
+    {
+        var problem = result.Should().BeOfType<ProblemHttpResult>().Subject;
+        problem.StatusCode.Should().Be(StatusCodes.Status503ServiceUnavailable,
+            "Dataverse gave no answer: a retry-able fault, never shown as a permission denial");
+        problem.ProblemDetails.Extensions["reasonCode"].Should().Be(ExternalProjectDataEndpoints.DataverseUnavailableReasonCode);
+        problem.ProblemDetails.Detail.Should().Contain("nothing was written").And.Contain("Try again");
     }
 
     // ── AC 3: the stored sender is the caller, whatever the request names ────────────────────────────────────────

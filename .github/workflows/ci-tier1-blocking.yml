@@ -388,7 +388,10 @@ jobs:
   arch-tests:
     name: Arch Tests (full suite, blocking)
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    # 5 -> 10 (2026-10-22, GATE REPAIR; #2009): at 1355 tests the job measures 3m50s-4m10s when it
+    # passes (build ~1m40s + test ~2m), and slower runners crossed 5m and read `cancelled` on master
+    # (runs 39702128977, 39710479837, 39777076810) and on PR #2233 twice. Same headroom rule as #813.
+    timeout-minutes: 10
     steps:
       - name: Checkout
         uses: actions/checkout@v6

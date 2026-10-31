@@ -169,6 +169,9 @@ public class CustomWebAppFactory : WebApplicationFactory<Program>
         // This ensures our fakes override the real implementations registered in Program.cs.
         builder.ConfigureTestServices(services =>
         {
+            // Task 188 r3 slice B: the internal document routes' narrowing is not under test here (see DocumentRouteExternalNarrowingTests).
+            Sprk.Bff.Api.Tests.TestInfrastructure.AllVisibleDocumentNarrowing.UseAllVisibleDocumentNarrowing(services);
+
             // spaarke-redis-cache-remediation-r1 task 003 follow-up: under "Development" the
             // minimal-API binder defaults to ThrowOnBadRequest=true (vs false in other envs);
             // missing-required-query-param then surfaces as BadHttpRequestException → our

@@ -81,14 +81,21 @@
 //           no-op. indexVer is the content version of the embedded schema
 //           bodies H2b applies (IndexSchemaSet — task 245b) — NOT an attempt
 //           counter.
+//           T186 follow-up (AiSearch allow-list): a match whose run already
+//           carries InterStepState.AiSearchIndexNames equal to the catalog is a
+//           pure no-op. A match WITHOUT it (the phase completed before H2b
+//           recorded its verified set) is re-verified read-only — no provisioner
+//           call — and the verified names are persisted; a failed re-verify
+//           fails exactly as a fresh run's verifier does.
 //
 // DOWNSTREAM ENQUEUE (Wave C4 note):
 //   H2b does NOT enqueue H3 (sibling task 046) directly. The downstream DAG
 //   per design.md §4.1 fans H3 out from H4 (KV secrets), not from H2b.
 //   H2b + H3 are Wave 3C parallel siblings; the wave-C5 reconciler owns
 //   fan-out based on Cosmos state. H2b's job is to mutate the run row
-//   (CurrentPhase + CompletedPhases + no InterStepState writes — H2a already
-//   populated AiSearchEndpoint) and return Success.
+//   (CurrentPhase + CompletedPhases + InterStepState.AiSearchIndexNames — the
+//   names its verifier confirmed, which H4b writes as AiSearch__AllowedIndexes;
+//   H2a already populated AiSearchEndpoint) and return Success.
 // -----------------------------------------------------------------------------
 
 using System.Collections.Immutable;
@@ -255,10 +262,18 @@ public sealed class H2bAiSearchIndexHandler : IProvisioningHandler
                 string.Equals(cp.Phase, HandlerIdentifier, StringComparison.Ordinal)
                 && string.Equals(cp.IdempotencyKey, idempotencyKey, StringComparison.Ordinal)))
         {
-            _logger.LogInformation(
-                "H2b idempotent no-op: runId={RunId} idempotencyKey={IdempotencyKey}",
-                envelope.RunId, idempotencyKey);
-            return new HandlerResult.Success(idempotencyKey);
+            if (RecordsVerifiedCatalog(run))
+            {
+                _logger.LogInformation(
+                    "H2b idempotent no-op: runId={RunId} idempotencyKey={IdempotencyKey}",
+                    envelope.RunId, idempotencyKey);
+                return new HandlerResult.Success(idempotencyKey);
+            }
+
+            // T186 follow-up (AiSearch allow-list): H2b completed before it recorded what its verifier
+            // confirmed. H4b needs that set, so re-verify (read-only) and record it.
+            return await BackfillVerifiedIndexNamesAsync(run, etag, envelope, idempotencyKey, cancellationToken)
+                .ConfigureAwait(false);
         }
 
         // (6) Task 223 (D-12): an unparseable tenancy model is a corrupted run — reject it rather
@@ -286,10 +301,10 @@ public sealed class H2bAiSearchIndexHandler : IProvisioningHandler
             return provisionResult;
         }
 
-        // (7) All post-conditions cleared — advance Cosmos state. H2b writes
-        //     no interStepState (H2a populated AiSearchEndpoint; H2b's
-        //     side effects are on the AI Search service itself, not on the
-        //     Cosmos run doc). The wave-C5 reconciler observes CurrentPhase
+        // (7) All post-conditions cleared — advance Cosmos state. H2b's only
+        //     interStepState write is AiSearchIndexNames (the set its verifier
+        //     confirmed; H4b's AiSearch__AllowedIndexes) — H2a populated
+        //     AiSearchEndpoint. The wave-C5 reconciler observes CurrentPhase
         //     + CompletedPhases + fans H3 out from H4 per design.md §4.1.
         stopwatch.Stop();
         _logger.LogInformation(
@@ -532,8 +547,7 @@ public sealed class H2bAiSearchIndexHandler : IProvisioningHandler
         var completedAt = DateTimeOffset.UtcNow;
         var startedAt = completedAt - TimeSpan.FromMilliseconds(1);
 
-        run.Status = RunStatus.Running;
-        run.CurrentPhase = HandlerIdentifier; // Reconciler observes + fans out (H2b + H3 are wave-C parallel siblings).
+        run.MarkPhaseSucceeded(HandlerIdentifier); // Reconciler observes + fans out (H2b + H3 are wave-C parallel siblings).
         run.CompletedPhases.Add(new CompletedPhase
         {
             Phase = HandlerIdentifier,
@@ -544,6 +558,61 @@ public sealed class H2bAiSearchIndexHandler : IProvisioningHandler
         });
         run.ErrorDetail = null;
 
+        // T186 follow-up (AiSearch allow-list): the verifier confirmed the FULL canonical set (RunVerifierAsync),
+        // so that is what is recorded — on this success path only, never on a failure.
+        run.InterStepState.AiSearchIndexNames = _catalog.CanonicalIndexNames.ToList();
+
+        return await WriteSuccessStateAsync(run, etag, idempotencyKey, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// T186 follow-up (AiSearch allow-list): the completed-phase path for a run whose H2b finished before it
+    /// recorded <c>AiSearchIndexNames</c>. Re-runs the read-only verifier against the stamp's endpoint (no
+    /// provisioner call, no phase bookkeeping change) and persists the names it confirms.
+    /// </summary>
+    private async Task<HandlerResult> BackfillVerifiedIndexNamesAsync(
+        ProvisioningRun run,
+        string etag,
+        HandlerEnvelope envelope,
+        string idempotencyKey,
+        CancellationToken cancellationToken)
+    {
+        var endpoint = run.InterStepState.AiSearchEndpoint;
+        if (string.IsNullOrWhiteSpace(endpoint))
+        {
+            var diagnostic =
+                "H2b completed earlier but ProvisioningRun.InterStepState.AiSearchEndpoint (H2a output) is blank, " +
+                "so the indexes cannot be re-verified to record AiSearchIndexNames.";
+            return await FailAsync(run, etag, FailureClass.Resumable,
+                AiSearchIndexRejectionCodes.MissingSearchEndpoint, diagnostic, cancellationToken).ConfigureAwait(false);
+        }
+
+        _logger.LogInformation(
+            "H2b already complete without AiSearchIndexNames — re-verifying to record it: runId={RunId} customerId={CustomerId}",
+            envelope.RunId, envelope.CustomerId);
+
+        var verified = await RunVerifierAsync(run, etag, endpoint, envelope, idempotencyKey, cancellationToken)
+            .ConfigureAwait(false);
+        if (verified is HandlerResult.Failure)
+        {
+            return verified;
+        }
+
+        run.InterStepState.AiSearchIndexNames = _catalog.CanonicalIndexNames.ToList();
+        return await WriteSuccessStateAsync(run, etag, idempotencyKey, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>True when the run already records exactly the catalog's canonical names as verified.</summary>
+    private bool RecordsVerifiedCatalog(ProvisioningRun run)
+        => run.InterStepState.AiSearchIndexNames is { } names
+           && names.SequenceEqual(_catalog.CanonicalIndexNames, StringComparer.Ordinal);
+
+    private async Task<HandlerResult> WriteSuccessStateAsync(
+        ProvisioningRun run,
+        string etag,
+        string idempotencyKey,
+        CancellationToken cancellationToken)
+    {
         var replace = await _repository.ReplaceRunAsync(run, etag, cancellationToken).ConfigureAwait(false);
         if (replace is ReplaceRunResult.Conflict conflict)
         {

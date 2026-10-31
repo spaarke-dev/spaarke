@@ -4,7 +4,7 @@
     <title>Dev Entra + settings setup for A9 (multitenant SPA client, dev BFF app, Dewey Cheatham consent, BFF settings) — live, owner-gated</title>
     <phase>4b A9 workforce home sign-in</phase>
     <gate>after 044; every live step needs the owner's approval of the exact command and its rollback</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Live configuration with a written record; no code</rigor-reason>
     <model-tier>sonnet</model-tier>

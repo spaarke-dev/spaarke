@@ -107,7 +107,7 @@ public partial class SignalReevaluationJobTests
         var update = h.Org.ConditionalUpdates.Should().ContainSingle().Subject;
         update.Id.Should().Be(signalId);
         update.Fields["sprk_resolutiontype"].Should().BeEquivalentTo(new OptionSetValue(SignalWriter.ResolutionConditionCleared));
-        h.Sysadmin.AggregateFetches.Should().HaveCount(2).And.OnlyContain(f => f.Contains(MatterId.ToString("D")) && !f.Contains(OtherMatterId.ToString("D")),
+        h.Sysadmin.AggregateFetches.Should().HaveCount(4, "three invoice reads (D-130: billed, approved, billed re-check) and one budget query").And.OnlyContain(f => f.Contains(MatterId.ToString("D")) && !f.Contains(OtherMatterId.ToString("D")),
             "the trigger reads the base rows of the ONE matter");
     }
 
@@ -726,6 +726,7 @@ public partial class SignalReevaluationJobTests
         public Task<EntityCollection> RetrieveMultipleAsync(Microsoft.Xrm.Sdk.Query.FetchExpression fetch, CancellationToken ct = default) => throw Boom();
         public Task<Guid> CreateAsync(Entity entity, CancellationToken ct = default) => throw Boom();
         public Task<(Guid Id, bool Created)> UpsertAsync(Entity entity, CancellationToken ct = default) => throw Boom();
+        public Task UpdateIfRowVersionMatchesAsync(string entityLogicalName, Guid id, string rowVersion, Dictionary<string, object> fields, CancellationToken ct = default) => throw Boom();
         public Task UpdateAsync(string entityLogicalName, Guid id, Dictionary<string, object> fields, CancellationToken ct = default) => throw Boom();
         public Task BulkUpdateAsync(string entityLogicalName, List<(Guid id, Dictionary<string, object> fields)> updates, CancellationToken ct = default) => throw Boom();
         public Task DeleteAsync(string entityLogicalName, Guid id, CancellationToken ct = default) => throw Boom();

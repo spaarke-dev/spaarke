@@ -99,6 +99,11 @@ public sealed class ActionSeam : IActionSeam
         if (string.IsNullOrWhiteSpace(request.Subject))
             return new CreateTaskResult(false, Guid.Empty, "subject is required");
 
+        // UAC task 194b V-fix (verifier A F1): a regarding ownership parent the task table cannot file is refused with its
+        // named code before anything is written (the core refuses it too, but only as a bare Guid.Empty).
+        if (TaskActionCore.RegardingRefusalOf(request.RegardingObjectType, request.RegardingObjectId) is { } refusal)
+            return new CreateTaskResult(false, Guid.Empty, refusal);
+
         var core = new TaskActionCore(_entityService, _coreAncestors, _ownership, _identity, _recordTypes, _logger);
         var taskId = await core.CreateAsync(
             new TaskActionInput(
@@ -146,7 +151,11 @@ public sealed class ActionSeam : IActionSeam
                     renderedMappings,
                     request.LegacyFields,
                     renderedLookups,
-                    request.ImpersonateSystemUserId),
+                    request.ImpersonateSystemUserId,
+                    // #2257 fix round 1: every caller of this seam applies a proposal the impersonated user confirmed (the
+                    // Job B apply), so it keeps its behaviour: written AS that user, it is not asked the app-only refusal;
+                    // with no user it still is.
+                    UpdateRecordPayloadSource.ConfirmedProposal),
                 cancellationToken);
 
             return new UpdateRecordResult(true, fieldsUpdated.ToArray(), null);
@@ -160,7 +169,10 @@ public sealed class ActionSeam : IActionSeam
         {
             // Task 146: the update re-files a child record whose new owner cannot be resolved — no PATCH was issued.
             // A typed failure carrying the stable code (a Dataverse fault still propagates).
-            return new UpdateRecordResult(false, Array.Empty<string>(), $"{ex.RefusalCode}: {ex.Message}");
+            // The code leads the message unless the message already carries it (the owner and invoice-family refusals both end
+            // with "(code)"), so it is printed once.
+            var message = ex.Message.Contains(ex.RefusalCode, StringComparison.Ordinal) ? ex.Message : $"{ex.RefusalCode}: {ex.Message}";
+            return new UpdateRecordResult(false, Array.Empty<string>(), message);
         }
     }
 

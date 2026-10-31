@@ -78,6 +78,7 @@ public class WorkforceEmailNoHijackTests
     public async Task FirstSignIn_OfAMember_BindsTheOneUnboundMatch_InDFormat_PlaneWorkforce()
     {
         _store.AddContact(ContactA, email: Email);
+        _store.StampInvite(ContactA, Email, CustomerTenant);
 
         var result = await Resolve(WorkforceUser(Caller, CustomerTenant, email: Email.ToUpperInvariant()));
 
@@ -91,6 +92,7 @@ public class WorkforceEmailNoHijackTests
     public async Task TheNextSignIn_ResolvesByOid_EvenWhenTheEmailClaimDiffers()
     {
         _store.AddContact(ContactA, email: Email);
+        _store.StampInvite(ContactA, Email, CustomerTenant);
         await Resolve(WorkforceUser(Caller, CustomerTenant, email: Email));
         _store.Reads.Clear();
 
@@ -171,6 +173,7 @@ public class WorkforceEmailNoHijackTests
     public async Task ASquattedMirror_DeniesTheEmailBind_TheMatchedContactStaysUnbound()
     {
         _store.AddContact(ContactA, email: Email);                                     // the bind target
+        _store.StampInvite(ContactA, Email, CustomerTenant);
         _store.AddContact(ContactB, email: "squatter@customer.example", keyMirror: Caller.ToString("D"));
 
         var result = await Resolve(WorkforceUser(Caller, CustomerTenant, email: Email));
@@ -336,13 +339,19 @@ public class WorkforceEmailNoHijackTests
 
     [Theory]
     [MemberData(nameof(NonMembersWithAUserToken))]
-    public async Task ANonMember_StillResolvesThroughAnExistingOidBinding(string who, ClaimsPrincipal token, string _)
+    public async Task ANonMember_WithAnExistingOidBinding_IsRefusedWithItsMemberTestCode(
+        string who, ClaimsPrincipal token, string code)
     {
+        // #2128 round 1 (was "a non-member still resolves through an existing oid binding"): the member test gates every
+        // sign-in on this plane, so a stored binding never admits a caller who fails it today. Nothing read or written.
         _store.AddContact(ContactA, oid: Caller.ToString("D"), plane: IdentityPlaneMarker.Workforce);
 
         var result = await Resolve(token);
 
-        result.Principal!.ContactId.Should().Be(ContactA, $"a {who} caller resolves only through an existing oid binding");
+        result.IsResolved.Should().BeFalse($"a {who} caller is refused even with an existing oid binding");
+        result.DenyCode.Should().Be(code);
+        _store.Reads.Should().NotContain("oid", "the refusal comes before the oid lookup");
+        _store.Writes.Should().BeEmpty();
     }
 
     [Fact]
@@ -362,7 +371,8 @@ public class WorkforceEmailNoHijackTests
     public async Task AnEmptyCustomerTenantSetting_BindsAndCreatesForNobody()
     {
         _store.AddContact(ContactA, email: Email);
-        var binder = new ContactIdentityBinder(_store, Tenants(), new Microsoft.Extensions.Time.Testing.FakeTimeProvider(Now), _log);
+        var binder = new ContactIdentityBinder(_store, Tenants(), new Microsoft.Extensions.Time.Testing.FakeTimeProvider(Now), _log,
+            IdentityBinding.IdentityBindingTestKit.NoOwnerUnderTest);
 
         var result = await Resolver(binder).ResolveAsync(WorkforceUser(Caller, CustomerTenant, email: Email), CancellationToken.None);
 

@@ -44,17 +44,20 @@ public class RegistrationContactLinkTests
     // own Dataverse:ServiceUrl and every active registry environment (third fix round), so the service itself no
     // longer reads Dataverse:ServiceUrl.
     private static RegistrationDataverseService NewService(
-        ContactIdentityBinderFactory factory, ILogger<RegistrationDataverseService> logger)
+        ContactIdentityBinderFactory factory, ILogger<RegistrationDataverseService> logger,
+        ContactIdentityBinder? ownEnvironmentBinder = null, string dataverseUrl = DefaultEnvironment, string? serviceUrl = null)
         => new(
             new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
             {
-                ["DATAVERSE_URL"] = DefaultEnvironment,
+                ["DATAVERSE_URL"] = dataverseUrl,
+                ["Dataverse:ServiceUrl"] = serviceUrl,
             }).Build(),
             new TrackingIdGenerator(),
             Mock.Of<TokenCredential>(),
             Mock.Of<IHttpClientFactory>(f => f.CreateClient(It.IsAny<string>()) == new HttpClient()),
             logger,
             factory,
+            ownEnvironmentBinder ?? InertOwnEnvironmentBinder(),
             // Task 132: the BU-bind eviction hook — inert here; its behaviour is pinned in AccessCacheFaultCachingTests.
             new Sprk.Bff.Api.Services.Ai.Membership.NullMembershipCacheInvalidator(
                 NullLogger<Sprk.Bff.Api.Services.Ai.Membership.NullMembershipCacheInvalidator>.Instance));
@@ -152,6 +155,121 @@ public class RegistrationContactLinkTests
         _factory.Environments.Should().Equal(DemoEnvironment);
     }
 
+    // ── ISS-005 (#1673 review F1): a registration approval whose target is THIS BFF's own environment - the default
+    //    target (DATAVERSE_URL) naming the same environment as Dataverse:ServiceUrl, in any spelling - links through the
+    //    owner-aware (DI) binder, so the licensed-user contact it creates is owned, or refused. Never an ownerless
+    //    contact from a factory binder. A genuinely different environment is unchanged (the control). ──
+
+    private const string OwnerBind = "ownerid@odata.bind";
+    private const string ServiceEnvironment = "https://spaarkedev1.crm.dynamics.com";
+    private const string ServiceEnvironmentApi = "https://spaarkedev1.api.crm.dynamics.com";
+    private static readonly Guid CustomerBu = Guid.Parse("cb15f587-1111-4111-8111-00000000000a");
+    private static readonly Guid CustomerTeam = Guid.Parse("7ea70000-2222-4222-8222-00000000000b");
+
+    private (RegistrationDataverseService Sut, InMemoryContactIdentityStore Own, Guid UserId, Guid Oid) OwnEnvironmentService(
+        string serviceUrl, string dataverseUrl, Guid? customerBusinessUnit)
+    {
+        var own = new InMemoryContactIdentityStore();
+        own.DefaultTeams[CustomerBu] = new List<Guid> { CustomerTeam };
+        var userId = Guid.NewGuid();
+        var oid = Guid.NewGuid();
+        own.AddSystemUser(userId, oid, "new.user@customer.example");
+        return (NewService(_factory, _log, OwnerAwareBinder(own, customerBusinessUnit), dataverseUrl, serviceUrl), own, userId, oid);
+    }
+
+    [Theory]
+    [InlineData(ServiceEnvironment, ServiceEnvironment)]
+    [InlineData(ServiceEnvironment, ServiceEnvironment + "/")]
+    [InlineData(ServiceEnvironment, ServiceEnvironmentApi)]
+    [InlineData(ServiceEnvironmentApi, ServiceEnvironment)]
+    [InlineData(ServiceEnvironment, "HTTPS://SpaarkeDev1.API.CRM.Dynamics.com/")]
+    public async Task ApprovingWithNoTarget_WhenDataverseUrlIsTheOwnEnvironment_OwnsTheNewContact(string serviceUrl, string dataverseUrl)
+    {
+        var (sut, own, userId, oid) = OwnEnvironmentService(serviceUrl, dataverseUrl, CustomerBu);
+
+        // The approve endpoint with no target: the contact link goes to ContactLinkEnvironment(null) = DATAVERSE_URL.
+        var result = await sut.LinkContactForNewSystemUserAsync(
+            userId, oid.ToString(), "New", "User", "new.user@customer.example",
+            sut.ContactLinkEnvironment(null), CancellationToken.None);
+
+        result!.Outcome.Should().Be(SystemUserLinkOutcome.CreatedAndLinked);
+        own.CreatePayloads.Should().ContainSingle().Which[OwnerBind].Should().Be($"/teams({CustomerTeam:D})");
+        own.ContactsBoundTo(oid).Should().ContainSingle().Which.OwnerTeamId.Should().Be(CustomerTeam);
+        _factory.Environments.Should().BeEmpty("the own environment is never served by a factory (ownerless) binder");
+    }
+
+    [Theory]
+    [InlineData(ServiceEnvironment, ServiceEnvironment)]
+    [InlineData(ServiceEnvironment, ServiceEnvironmentApi)]
+    public async Task ApprovingWithNoTarget_InTheOwnEnvironment_WithTheCustomerBusinessUnitUnset_IsRefused_AndCreatesNothing(
+        string serviceUrl, string dataverseUrl)
+    {
+        var (sut, own, userId, oid) = OwnEnvironmentService(serviceUrl, dataverseUrl, customerBusinessUnit: null);
+
+        var result = await sut.LinkContactForNewSystemUserAsync(
+            userId, oid.ToString(), "New", "User", "new.user@customer.example",
+            sut.ContactLinkEnvironment(null), CancellationToken.None);
+
+        result!.Outcome.Should().Be(SystemUserLinkOutcome.Denied);
+        result.DenyCode.Should().Be("sdap.access.registration_owner_unconfigured");
+        result.IsLinked.Should().BeFalse();
+        own.Contacts.Should().BeEmpty();
+        own.CreatePayloads.Should().BeEmpty();
+        own.Writes.Should().BeEmpty();
+        own.SystemUsers[userId].PrimaryContactId.Should().BeNull("no contact, so no link");
+        _factory.Environments.Should().BeEmpty();
+    }
+
+    [Theory]
+    [InlineData("https://spaarke-demo.crm.dynamics.com")]
+    [InlineData("https://spaarkedev10.crm.dynamics.com")] // a longer name sharing the own environment's prefix
+    [InlineData("https://spaarkedev1.crm4.dynamics.com")] // the same name in another region
+    public async Task ADifferentEnvironment_StillUsesTheFactoryBinder_AndStaysOwnerless(string target)
+    {
+        var (sut, own, _, _) = OwnEnvironmentService(ServiceEnvironment, ServiceEnvironment, CustomerBu);
+        var userId = Guid.NewGuid();
+        var oid = Guid.NewGuid();
+        _demoStore.AddSystemUser(userId, oid, "new.user@demo.spaarke.com");
+
+        var result = await sut.LinkContactForNewSystemUserAsync(
+            userId, oid.ToString(), "New", "User", "new.user@demo.spaarke.com",
+            sut.ContactLinkEnvironment(target), CancellationToken.None);
+
+        result!.Outcome.Should().Be(SystemUserLinkOutcome.CreatedAndLinked);
+        _factory.Environments.Should().Equal(target);
+        _demoStore.CreatePayloads.Should().ContainSingle().Which.Should().NotContainKey(OwnerBind);
+        own.CreatePayloads.Should().BeEmpty("the owner-aware binder is for the own environment only");
+    }
+
+    [Theory]
+    [InlineData(ServiceEnvironment, ServiceEnvironment)]
+    [InlineData(ServiceEnvironment, ServiceEnvironment + "/")]
+    [InlineData(ServiceEnvironment, ServiceEnvironmentApi)]
+    [InlineData(ServiceEnvironmentApi, ServiceEnvironment)]
+    public void TheBinderForTheOwnEnvironment_IsTheDiRegisteredOne_InEveryUrlSpelling(string serviceUrl, string spelling)
+    {
+        var ownBinder = OwnerAwareBinder(new InMemoryContactIdentityStore(), CustomerBu);
+        var sut = NewService(_factory, _log, ownBinder, DefaultEnvironment, serviceUrl);
+
+        sut.ContactBinderFor(spelling).Should().BeSameAs(ownBinder);
+        _factory.Environments.Should().BeEmpty();
+    }
+
+    // Eviction (task 132) shares the one comparison: the `.api.` spelling of the own environment is the own environment.
+    [Theory]
+    [InlineData(ServiceEnvironment, ServiceEnvironmentApi, true)]
+    [InlineData(ServiceEnvironmentApi, ServiceEnvironment, true)]
+    [InlineData(ServiceEnvironment, "https://spaarke-demo.crm.dynamics.com", false)]
+    [InlineData(ServiceEnvironment, null, true)] // unknown evicts: an unnecessary eviction costs a re-read
+    [InlineData(ServiceEnvironment, "  ", true)]
+    [InlineData(null, "https://spaarke-demo.crm.dynamics.com", true)]
+    public void IsThisBffsEnvironment_UsesTheSharedComparison_AndTreatsAnUnknownUrlAsYes(string? serviceUrl, string? target, bool expected)
+    {
+        var sut = NewService(_factory, _log, serviceUrl: serviceUrl);
+
+        sut.IsThisBffsEnvironment(target).Should().Be(expected);
+    }
+
     // The just-created user was linked by something else between its creation and this link (the
     // ALinkMadeMeanwhile_IsNeverRePointed shape): the link does not land, so the outcome is Failed.
     private (Guid UserId, Guid Oid) GivenAUserLinkedMeanwhile()
@@ -200,14 +318,14 @@ public class RegistrationContactLinkTests
     }
 
     private sealed class ThrowingBinderFactory() : ContactIdentityBinderFactory(
-        Mock.Of<IHttpClientFactory>(), NullLoggerFactory.Instance, Tenants(CustomerTenant), new FakeTimeProvider(Now))
+        Mock.Of<IHttpClientFactory>(), NullLoggerFactory.Instance, Tenants(CustomerTenant), new FakeTimeProvider(Now), FactoryConfiguration())
     {
         public override IContactIdentityStore CreateStore(string dataverseBaseUrl, Func<CancellationToken, Task<string>> getToken)
             => throw new InvalidOperationException("the target environment could not be reached");
     }
 
     private sealed class RecordingBinderFactory(IContactIdentityStore store) : ContactIdentityBinderFactory(
-        Mock.Of<IHttpClientFactory>(), NullLoggerFactory.Instance, Tenants(CustomerTenant), new FakeTimeProvider(Now))
+        Mock.Of<IHttpClientFactory>(), NullLoggerFactory.Instance, Tenants(CustomerTenant), new FakeTimeProvider(Now), FactoryConfiguration())
     {
         public List<string> Environments { get; } = new();
 

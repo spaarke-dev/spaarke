@@ -67,6 +67,8 @@ import {
   fetchSourceAttachments,
   launchCreate,
   type CreateKind,
+  archiveStatus,
+  type IArchiveResult,
 } from '@spaarke/communication-components/logic/actions';
 import { getMsalClientId, getBffApiAppId, getApiBaseUrl, getTenantId } from '../../shared/utils/environmentVariables';
 
@@ -268,6 +270,8 @@ export const CommunicationActionsApp: React.FC<ICommunicationActionsAppProps> = 
   const [bffBaseUrl, setBffBaseUrl] = React.useState('');
   const [error, setError] = React.useState<string | null>(null);
   const [status, setStatus] = React.useState<string | null>(null);
+  // PR #2248: a Save to SharePoint that refused an attachment is a warning, not a success.
+  const [statusIntent, setStatusIntent] = React.useState<'success' | 'warning'>('success');
   const [busy, setBusy] = React.useState(false);
   const [composerMode, setComposerMode] = React.useState<ComposerMode | null>(null);
   const [prefill, setPrefill] = React.useState<IRecordPrefill | null>(null);
@@ -516,12 +520,9 @@ export const CommunicationActionsApp: React.FC<ICommunicationActionsAppProps> = 
           setError(`Save to SharePoint failed (${resp.status}).`);
           return;
         }
-        const result = (await resp.json()) as { alreadyArchived?: boolean; attachmentDocumentsCreated?: number };
-        setStatus(
-          result.alreadyArchived
-            ? 'Already saved to SharePoint.'
-            : `Saved to SharePoint${result.attachmentDocumentsCreated ? ` (+${result.attachmentDocumentsCreated} attachment${result.attachmentDocumentsCreated === 1 ? '' : 's'})` : ''}.`
-        );
+        const archived = archiveStatus((await resp.json()) as IArchiveResult);
+        setStatusIntent(archived.intent);
+        setStatus(archived.message);
         await refreshHostForm();
       } catch (err) {
         setError(archiveFailureMessage(err));
@@ -560,6 +561,7 @@ export const CommunicationActionsApp: React.FC<ICommunicationActionsAppProps> = 
       initialAttachments: carryAttachments && carryAttachments.length > 0 ? carryAttachments : undefined,
       onSent: () => {
         setComposerMode(null);
+        setStatusIntent('success');
         setStatus('Sent.');
         void refreshHostForm();
       },
@@ -710,7 +712,7 @@ export const CommunicationActionsApp: React.FC<ICommunicationActionsAppProps> = 
 
       {status && (
         <div className={s.notice}>
-          <MessageBar intent="success">
+          <MessageBar intent={statusIntent}>
             <MessageBarBody>{status}</MessageBarBody>
           </MessageBar>
         </div>

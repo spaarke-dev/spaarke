@@ -171,6 +171,24 @@ public class DemoSpeGrantLifecycleTests
         _graph.Deletes.Should().BeEmpty();
     }
 
+    /// <summary>
+    /// #1830 (task 192) must-not-fire, MUTATION: mapping Graph's "does not resolve" 400 to null inside the membership
+    /// service's reads — expiry would read "the container does not exist; nothing to revoke" and report a clean expiry.
+    /// Only the JIT removal sweep classifies that 400; here it must stay a fault.
+    /// </summary>
+    [Fact(DisplayName = "#1830: a Graph 400 'Invalid hostname for this tenancy' on the container read still THROWS at expiry — never 'nothing to revoke'")]
+    public async Task Expire_UnresolvableContainer_StillThrows()
+    {
+        var graph = new SpeContainerGraphStub { ContainerReadError = SpeContainerGraphStub.InvalidHostname() };
+        var membership = new Membership(
+            TestSpeOwnership.AllowAll(Mock.Of<IGraphClientFactory>(f => f.ForApp() == graph.Client)), NullLogger<Membership>.Instance);
+
+        var act = () => Expiration(membership).RevokeSpeContainerAccessAsync(DemoContainer, EntraObjectId.ToString(), DemoUpn, CancellationToken.None);
+
+        await act.Should().ThrowAsync<Microsoft.Graph.Models.ODataErrors.ODataError>();
+        graph.Requests.Should().ContainSingle().Which.Should().StartWith("GET ");
+    }
+
     /// <summary>MUTATION: reading "not in a partial list" as "holds nothing" reports a clean expiry while access may remain.</summary>
     [Fact(DisplayName = "#1363: no marker and no role in a PARTIAL role list throws — the absence is unproven")]
     public async Task Expire_NoMarkerAndNoRole_InAPartialList_Throws()
@@ -272,7 +290,7 @@ public class DemoSpeGrantLifecycleTests
             NullLogger<DemoProvisioningService>.Instance);
     }
 
-    private DemoExpirationJob Expiration()
+    private DemoExpirationJob Expiration(Membership? membership = null)
     {
         var options = Options.Create(new DemoProvisioningOptions { DemoUsersGroupId = "group-1" });
         var factory = new Mock<IGraphClientFactory>();
@@ -285,7 +303,7 @@ public class DemoSpeGrantLifecycleTests
             RegistrationDataverse(),
             new RegistrationEmailService(null!, Options.Create(new CommunicationOptions()), NullLogger<RegistrationEmailService>.Instance),
             TestSpeOwnership.AllowAll(factory.Object),
-            _container,
+            membership ?? _container,
             new DataverseEnvironmentService(
                 configuration,
                 new StaticTokenCredential(),
@@ -317,7 +335,8 @@ public class DemoSpeGrantLifecycleTests
             Mock.Of<IHttpClientFactory>(f => f.CreateClient(It.IsAny<string>()) == new HttpClient()),
             NullLogger<RegistrationDataverseService>.Instance,
             new ContactIdentityBinderFactory(
-                Mock.Of<IHttpClientFactory>(), NullLoggerFactory.Instance, Tenants(CustomerTenant), new FakeTimeProvider(Now)),
+                Mock.Of<IHttpClientFactory>(), NullLoggerFactory.Instance, Tenants(CustomerTenant), new FakeTimeProvider(Now), FactoryConfiguration()),
+            InertOwnEnvironmentBinder(),
             new NullMembershipCacheInvalidator(NullLogger<NullMembershipCacheInvalidator>.Instance));
 
     /// <summary>

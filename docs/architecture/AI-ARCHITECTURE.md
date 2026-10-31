@@ -371,7 +371,7 @@ Located in `src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/`:
 | `IConsumerRoutingService` | **The Binding-table catalog reader** — resolves `sprk_playbookconsumer` rows (full routing contract) for all three entry paths; boot-reconciled by `RoutingConsumerTypeHealthCheck` |
 | `IBriefingAi` | `IOpenAiClient.GetCompletionAsync` (narrative generation) |
 | `IInsightsAi` | Insights family Zone-A facade (frozen-engine cluster) |
-| `IInvoiceAi` | `IPlaybookService.GetByNameAsync` + `IOpenAiClient.GetStructuredCompletionAsync<T>` + `IOpenAiClient.GenerateEmbeddingAsync` |
+| `IInvoiceAi` | `IActionResolver` + `IActionRunner` for the Action-backed capabilities (`ClassifyAsync` = `invoice-classify`), plus legacy `IPlaybookService.GetByNameAsync` + `IOpenAiClient.GetStructuredCompletionAsync<T>` (extraction) + `IOpenAiClient.GenerateEmbeddingAsync` |
 | `IRecordMatchingAi` | `IRecordSearchService.SearchAsync` |
 | `IWorkspacePrefillAi` | Matter/project prefill |
 | `IObservationMirror` | Insights observation mirroring |
@@ -558,7 +558,7 @@ All queries are tenant-scoped (partition key = `/tenantId`). Aggregation queries
 - **MUST** route every AI invocation through Event / Click / Text — no second intent-detection mechanism anywhere (ADR-039)
 - **MUST** write every output + tool chain to the session ledger BEFORE rendering (ADR-040)
 - **MUST** gate side effects via the ONE confirmation gate by declared `side_effect_class` — never by tool-name lists (ADR-039)
-- **MUST** keep both catalogs closed; user-OBO for all Dataverse tool access; **MUST NOT** land new capability on the frozen engine (OQ-2/D11)
+- **MUST** keep both catalogs closed; user-OBO for all Dataverse tool access — with exactly ONE exception: the injected app-only narrowing seams (`AppOnlyDocumentNarrowing` and its hide-only overload), which return a hide decision only (unified-access-control-r2 task 188, D7; CLAUDE.md §6.5 path B, approved owner round 111; `.claude/constraints/auth.md` "External document narrowing — D7"); **MUST NOT** land new capability on the frozen engine (OQ-2/D11)
 - **MUST NOT** add routing config outside the Binding table (`sprk_playbookconsumer`)
 
 ---

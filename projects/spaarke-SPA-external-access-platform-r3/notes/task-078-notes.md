@@ -249,3 +249,273 @@ Verification after the fix: `dotnet build` 0 warnings, 0 errors. Handler classes
   - Private-state control → 200, 0 rows.
 - Ontology smoke passed on the new build.
 - **Rollback:** `scripts/Deploy-BffApi.ps1 -SkipBuild -PublishPath deploy/rollback/wwwroot-20261020T163210Z` (= `00aba6d99`, which contains 077).
+
+## Dev redeploy from master c3ec5d6e5 (2026-10-20, owner "approved bff deploy"; requested by UAC)
+
+- **Candidate** master `c3ec5d6e5`. It adds UAC #2138 (#2128, guest auto-create retired) and #2133 (#2130/#2131, PII logs and census) to the live `21184ecd4`, which is an ancestor. Both PRs' CI was green with nothing failing.
+- **Coordination:** OK from UAC (requester), ontology, ebilling (`sprk_invoicestatus` still exists; `e0df77339` is not in the candidate), provisioning, field-mapping, word-add-in and spe-admin. The SPA precondition for #2138 was met (dev SPA `28274e04e`). No data step was needed (UAC: the 3 guest-bound contacts are licensed guests).
+- **Pre-checks:** the live DLL read `21184ecd4`; the last Kudu deployment was this project's 16:34Z deploy; healthz 200.
+- **Rollback snapshot:** `deploy/rollback/wwwroot-20261020T180912Z` (222 files, DLL `21184ecd4`).
+- **Deploy:** `scripts/Deploy-BffApi.ps1` from a detached worktree `C:\wtbffc` at `c3ec5d6e5`. Package 37.47 MB; 4 critical files SHA-256 verified.
+- **Read-back** (18:12:51Z): ProductVersion `1.0.0+c3ec5d6e56f0074cf238b84bccf202cb1c0c84b7`; `/healthz` 200; `/healthz/dataverse` 200; `/api/me` anonymous 401.
+- **Rollback:** `scripts/Deploy-BffApi.ps1 -SkipBuild -PublishPath deploy/rollback/wwwroot-20261020T180912Z` (= `21184ecd4`).
+
+## Dev redeploy from master 0b976628e (2026-10-20, owner "yes deploy"; requested by UAC for #2121)
+
+- **Candidate:** master `0b976628e` = the live `c3ec5d6e5` + UAC #2122 (#2121: Secure suppresses a systemuser's lookup-derived membership on the SPA/Teams plane). #2122 CI was green, with nothing failing or pending. The ebilling content check matched the live build.
+- **Coordination:** OK from ontology, provisioning, field-mapping, word-add-in and spe-admin. ebilling did not answer; per the owner's 2026-10-16 rule a session that does not answer does not block, and its content was unchanged.
+- **Pre-checks:** the live DLL read `c3ec5d6e5`, which is an ancestor of the candidate; healthz 200.
+- **Rollback snapshot:** `deploy/rollback/wwwroot-20261020T203441Z` (222 files, DLL `c3ec5d6e5`).
+- **Deploy:** `scripts/Deploy-BffApi.ps1` from a detached worktree `C:\wtbffd`. Package 37.48 MB; 4 critical files SHA-256 verified.
+- **Read-back** (20:37:26Z): ProductVersion `1.0.0+0b976628e48b0082c6235a40e9e3508603f5cd81`; `/healthz` and `/healthz/dataverse` 200; `/api/me` anonymous 401.
+- **Rollback:** `scripts/Deploy-BffApi.ps1 -SkipBuild -PublishPath deploy/rollback/wwwroot-20261020T203441Z` (= `c3ec5d6e5`).
+
+## Dev redeploy from master 4f5f22694 (2026-10-20, owner "deploy approved"; UAC #2078 / task 036, flag OFF)
+
+- **Candidate:** master `4f5f22694` = the live `0b976628e` + UAC #2078 (FR-20 flag-gated swap; 15 server files, including the shared `Spaarke.Dataverse/DataverseWebApiService.cs` +163, which only adds surface per spe-admin and ontology). #2078 CI was green.
+- **Flag:** `ExternalAccess__ImpersonatedRootSets__Enabled` is absent on dev (= OFF), re-checked right before the deploy. The deploy changes no app settings.
+- **Coordination:** OK from word-add-in, spe-admin, ontology and ebilling (`sprk_invoicestatus` exists; `e0df77339` not included), plus the standing OKs from provisioning and field-mapping.
+- **Pre-checks:** the live DLL read `0b976628e`, which is an ancestor; healthz 200. A `git fetch` failed once on DNS, so the local commit was used (it was already verified on origin/master).
+- **Rollback snapshot:** `deploy/rollback/wwwroot-20261020T233210Z` (222 files, DLL `0b976628e`).
+- **Deploy:** `Deploy-BffApi.ps1` from a detached worktree `C:/wtbffe`. Package 37.49 MB; 4 critical files SHA-256 verified.
+- **Read-back** (23:34:36Z): ProductVersion `1.0.0+4f5f22694c2965f4f0d6c78f9f322d3d5dfe1775`; `/healthz` and `/healthz/dataverse` 200; `/api/me` anonymous 401.
+- **Rollback:** `scripts/Deploy-BffApi.ps1 -SkipBuild -PublishPath deploy/rollback/wwwroot-20261020T233210Z` (= `0b976628e`).
+- **Next (UAC):** a flag-off sanity check and the 034 canary. The flip needs a direct owner yes in this session, with the command shown first.
+
+## UAC 036 flag ON on dev (2026-10-20 23:51Z, owner: "yes can turn on. i ran the command you provided")
+
+- **Preconditions:**
+  - UAC tasks 142 and 143 are in the live build (`d254d7166` is an ancestor of `4f5f22694`, verified here).
+  - The 034 canary passed on `4f5f22694`: impersonated 58 ⊂ app-only 62, strictly fewer, and equal to the role-derived expected set; 2×20/20.
+  - `prvActOnBehalfOfAnotherUser` is Global on both BFF app users (UAC read live).
+  - UAC's flag-off sanity check was clean.
+- **Change** (run by the owner): `az webapp config appsettings set -g rg-spaarke-dev -n spaarke-bff-dev --settings ExternalAccess__ImpersonatedRootSets__Enabled=true`.
+- **Read-back:** the setting = `true`; the site was modified at 23:51:26Z. At 23:52:36Z: ProductVersion `4f5f22694` (unchanged), `/healthz` and `/healthz/dataverse` 200, `/api/me` anonymous 401.
+- **Rollback:** `az webapp config appsettings delete -g rg-spaarke-dev -n spaarke-bff-dev --setting-names ExternalAccess__ImpersonatedRootSets__Enabled`. Never set it to an empty value; that fails startup.
+- **Next:** UAC gates (i)–(v) and the disabled/unlicensed check.
+
+## 036 flag-on live gates (UAC, 2026-10-20 23:55Z–00:13Z)
+
+- Result from uac-r2 (record `projects/unified-access-control-r2/notes/batch7-live-gates-2026-10-17.md`, commit 0a4fbaa38): passed, no STOP, no rollback. (i) negative canary 20/20 ×2; (vii) disabled / unlicensed / team-only users refused or limited exactly by their roles; access source `ImpersonatedRootSet` ×12, 0 `Membership`; 96 requests since the flip, 0 5xx, 0 403.
+- Not run: (iii)–(vi) (dev has no fixture that avoids a write); (ii) passed server-side. UAC's note gives the owner setup + SPA steps.
+- Filed by UAC, non-blocking: #2167 (privilege answer for unlicensed users lists Create; safe because asked after RPA), #2168 (disabled/unlicensed refusal reported as a fault, not 403; fails closed). #1567 closed.
+- Flag stays ON. Rollback unchanged: delete `ExternalAccess__ImpersonatedRootSets__Enabled`.
+
+
+## Dev BFF deploy of master a10e814d02 (2026-10-21 14:34Z; owner: "yes approved to deploy a10e814d0")
+
+- **Requested by** UAC, for #2169 (task 189) and #2150. The build also contains 3531ed65e (#2166, SPA-only), 44063b347 (ontology 042c) and 2a38e6ce6 (field-mapping #2184).
+- **Peer OKs:** ontology, field-mapping, word-add-in, sdap-spe-admin and ebilling. Provisioning has a standing OK (dev BFF only). UAC passed on the owner's "yes deploy" from its session; it was not used as approval, and the owner approved directly in this session.
+- **Pre-checks:**
+  - Live DLL `4f5f22694`, an ancestor of a10e814d02. healthz 200.
+  - Does NOT contain e0df77339 (ebilling 015), so the `sprk_invoicestatus` delete stays blocked.
+  - Pre-existing exposure, not changed by this build: #2188 (fix #2191 is in UAC review).
+- **Rollback snapshot:** `deploy/rollback/wwwroot-20261021T143151Z` (222 files, DLL `4f5f22694`).
+- **Deploy:** `Deploy-BffApi.ps1` from a detached worktree `C:/wtbffe-a10`. Package 37.56 MB; 4 critical files SHA-256 verified; CORS OK.
+- **Read-back** (14:35:33Z):
+  - ProductVersion `1.0.0+a10e814d0200c4f20019647a17074219bb8161f9`.
+  - `/healthz` and `/healthz/dataverse` 200; `/api/me` anonymous 401.
+  - App settings unchanged (036 ON).
+- **secure-child-reconciliation:**
+  - Run 14:36:00–14:37:58Z: recordsWritten 279, failed 0, sweep incomplete (1000 rows).
+  - Run 14:38:00–14:38:43Z: the first complete sweep (66 rows). changed 0, failed 0, writeCapReached false, carriedRows 0, tablesWithoutColumn [], failure null.
+  - #2161 can start no earlier than 15:48:43Z.
+- **Exceptions after the deploy** (spe-insights-dev-67e2xz) at 14:43Z: no new exception class.
+  - BadImageFormatException: 2 at the 14:35 restart. One problemId was seen at earlier deploys.
+  - Graph ODataError "Invalid hostname for this tenancy": existing background noise.
+- **Rollback:** `scripts/Deploy-BffApi.ps1 -SkipBuild -PublishPath deploy/rollback/wwwroot-20261021T143151Z` (= `4f5f22694`). The 059 floor still holds; 4f5f22694 contains 077.
+- **Final 30-minute reading** (15:05:38Z): no new exception class; the same three groups (ODataError n=7, noise). Reconciliation runs from 14:58 to 15:04Z succeeded with nothing to do. Sent to UAC; tasks 189 and #2143 close on it. Ontology smoke PASS. SPE admin verified the live version.
+
+## Dev BFF deploy of master 84291ecea8 (2026-10-21 16:41Z; owner: "yes, deploy 84291ecea8")
+
+- **Requested by** UAC for #2161. The build also contains #2177 (word-add-in task 130) and #2205 (SPE admin #2032; the owner had said it could wait, but it sits below #2161 on master).
+- **Peer OKs:** ebilling, word-add-in, ontology, SPE admin and field-mapping. Provisioning has a standing OK. UAC passed on the owner's "yes" from its session; it was not used, and the owner approved directly here.
+- **Pre-checks:**
+  - Live DLL `a10e814d02`, an ancestor. healthz 200.
+  - `sprk_document.sprk_accessinheritance` present (Memo), which #2177 needs.
+  - No e0df77339 (ebilling 015 stays blocked).
+  - #2188 is still open on dev (#2191 not merged).
+- **Rollback snapshot:** `deploy/rollback/wwwroot-20261021T164028Z` (222 files, DLL `a10e814d02`).
+- **Deploy:** `Deploy-BffApi.ps1` from detached `C:/wtbffe-842`. Package 37.61 MB; 4 critical files SHA-256 verified; CORS OK. No settings changed.
+- **Read-back** (16:42:49Z): `1.0.0+84291ecea8fa9c5148df04ae5ede2f185301a19e`. healthz and healthz/dataverse 200; `/api/me` anonymous 401.
+- **Reconciliation, 16:44–17:12Z:**
+  - Every run Succeeded.
+  - Re-file pass: listed and examined 0, heldIsolated, terminal and failed 0, windowDrained true, watermarkHeld false. No re-file has happened yet, so the move logic hasn't been exercised live.
+  - Access sweep complete at 16:46:08Z, nothing written.
+- **Exceptions to 17:12Z:** no new class. Only the Graph "Invalid hostname" noise (6, ISS-006). There were no restart BadImageFormat errors this time.
+  - T8 stager refusals: 0.
+  - DocumentRelocationReleaseRetry log lines: none.
+- **Ontology:** smoke PASS. SPE admin and ebilling were told the version.
+- **Open:** whether the owner does UAC gate item 4 (two .eml saves, read back by word-add-in) or it relies on the first real saves.
+- **Rollback:** `scripts/Deploy-BffApi.ps1 -SkipBuild -PublishPath deploy/rollback/wwwroot-20261021T164028Z` (= `a10e814d02`).
+
+## Dev BFF deploy of master 583f90c1d9 (2026-10-21 18:03Z; owner: "yes, deploy 583f90c1d9")
+
+- **Contents:** #2191 (the field-mapping fix for the #2188 Office quick-create source-read leak; the source is now read as the caller), #2182 (word-add-in task 131, "email not filed" notice) and word-add-in docs (#2210, #2211).
+- **Peer OKs:** field-mapping, word-add-in, UAC, ebilling, ontology and SPE admin. Provisioning has a standing OK.
+- **Pre-checks:** live DLL `84291ecea8`, an ancestor. No e0df77339.
+- **Rollback snapshot:** `deploy/rollback/wwwroot-20261021T180216Z` (222 files, DLL `84291ecea8`).
+- **Deploy:** detached `C:/wtbffe-583`. Package 37.62 MB; 4 critical files SHA-256 verified; CORS OK. No settings changed.
+- **Read-back** (18:04:37Z): `1.0.0+583f90c1d91198f810b18d60c86f86c130c751d1`. healthz and healthz/dataverse 200; `/api/me` anonymous 401.
+- **30 minutes** (to 18:34Z): no new exception class (only the Graph "Invalid hostname" noise ×6). T8 refusals 0; #2191 refusal codes 0, because no Office quick-create has run yet. Reconciliation runs 18:16–18:34Z Succeeded. Ontology smoke PASS.
+- **Rollback:** `scripts/Deploy-BffApi.ps1 -SkipBuild -PublishPath deploy/rollback/wwwroot-20261021T180216Z` (= `84291ecea8`).
+
+## Dev BFF deploy of master f1b3dadcf5 (2026-10-21 21:44Z; owner: "yes, deploy f1b3dadcf5")
+
+- **Contents:** UAC task 188, D7 T7 (#2170: one predicate narrows external document reads; this is the fix for ISS-015 together with word-add-in T8 #2177, live since 84291ecea8). Slice D (#2186: document links Delete=Restrict; a parent's delete is refused with 409 `document_has_child_documents`). Field-mapping #2214 (inert on dev).
+- **Peer OKs:** UAC, field-mapping, ontology, SPE admin, ebilling and word-add-in. Provisioning has a standing OK. No dev prerequisites (UAC).
+- **Effect UAC measured:** 11 partner-reachable documents disappear for partners, all own-Restricted, all on matter b68299c6. Internal users still see them.
+- **Partner baseline:** no one can sign in as the partner contacts, R3 or UAC. UAC recorded the pre-swap state from Dataverse data instead (grants and reachable documents on b68299c6 and 86335ce3).
+- **Pre-checks:** live DLL `583f90c1d9`, an ancestor. No e0df77339.
+- **Rollback snapshot:** `deploy/rollback/wwwroot-20261021T214302Z` (222 files, DLL `583f90c1d9`).
+- **Deploy:** detached `C:/wtbffe-f1b`. Package 37.68 MB; 4 critical files SHA-256 verified; CORS OK. No settings changed.
+- **Read-back** (21:45:37Z): `1.0.0+f1b3dadcf59fae5ff5142ac670a3860391c57c46`. healthz and healthz/dataverse 200; `/api/me` anonymous 401.
+- **UAC's post-swap steps** (owner-approved in UAC's session), all verified:
+  - `Set-DocumentLinkDeleteRestrict.ps1 -Apply`.
+  - `Set-DocumentNarrowingFieldSecurity.ps1 -Apply` (columns masked about 17 s each around 21:5xZ; BFF reads are app-only).
+  - `sprk_DocumentOperations.js` 1.28.2 published.
+- **30 minutes (to 22:16Z):**
+  - No new exception class (only the Graph "Invalid hostname" noise ×7).
+  - No narrowing exceptions; 0x80040227 / `document_has_child_documents` 0; no 409s or 403s; no field-security errors.
+  - Reconciliation runs Succeeded.
+  - Ontology smoke PASS.
+- **Not exercised:** no partner document reads and no document creates in the window. D7 narrowing and the BFF-writer path under the new field security are unproven live until real traffic, or the owner's optional partner check (a contact 8e9918a9/2e419a4f sign-in: b68299c6 lists empty, 86335ce3 lists its 3, aadbb740 download refused as not-under-parent).
+- **Rollback:** `scripts/Deploy-BffApi.ps1 -SkipBuild -PublishPath deploy/rollback/wwwroot-20261021T214302Z` (= `583f90c1d9`). Rolling back the BFF does NOT undo UAC's Restrict, field-security or web-resource changes; those are UAC's to reverse.
+
+## Dev BFF deploy of master a7b956fb55 (2026-10-22 02:17Z; owner: "yes go ahead", in reply to the a7b956fb55 request)
+
+- **Contents:**
+  - #2223: field-mapping never writes the secure flag or access columns on matter/project; Office quick-create skips them with a warning. A no-op on dev, which has 0 such rules.
+  - #2228 / fm-016: Repair mode, dormant.
+  - #2221 / UAC task 190: `email-archive-communication-link-sweep`, registered disabled, a dry run unless `EmailArchiveLinkSweep:Apply` (not set).
+- **Peer OKs:** UAC (requested it), ebilling, SPE admin, field-mapping, word-add-in and ontology.
+- **Pre-checks:** live DLL `f1b3dadcf5`, an ancestor. No e0df77339. No external-access files changed.
+- **Rollback snapshot:** `deploy/rollback/wwwroot-20261022T021635Z` (222 files, DLL `f1b3dadcf5`).
+- **Deploy:** `Deploy-BffApi.ps1 -Environment dev` from detached `C:/wtbffe-a7b`. Package 37.71 MB; 4 critical files SHA-256 verified; CORS OK. No settings changed.
+- **Read-back** (02:18:52Z):
+  - `1.0.0+a7b956fb55d682e679cda007bea258a53bb76aa5`.
+  - healthz and healthz/dataverse 200; `/api/me` anonymous 401.
+  - Sweep job enabled=False, cron `45 3 * * *`, 0 runs.
+- **UAC task 190 gate:** PASS. The sweep dry run at 02:21Z found 120 examined, 29 would link, 0 written, 0 failed. The container-migration report found 0 newly refused. Apply stays an owner item. Ontology smoke PASS.
+- **30 minutes** (to 02:48Z): no new exception class (Graph noise ×6); all zero counts; reconciliation runs Succeeded.
+- **Owner decision (UAC round 122), "the access should match the 'parent'":** a linked own-Restricted email archive follows its communication. UAC builds it (a provisional own-narrowing marker); word-add-in reviews. Known limit: a single attachment save stays Restricted.
+- **Rollback:** `scripts/Deploy-BffApi.ps1 -SkipBuild -PublishPath deploy/rollback/wwwroot-20261022T021635Z` (= `f1b3dadcf5`).
+
+## Dev BFF deploy of master 1283c41817 (2026-10-22 12:49Z; owner: "yes, deploy 1283c41817")
+
+- **Contents since a7b956fb55:**
+  - UAC #2234 (round 122): a provisional own-Restricted email document is released to its communication by the reconciler.
+  - UAC #2239: the AI profile writer is limited to the 6 ACT-011 columns.
+  - Field-mapping 018a: dormant.
+  - UAC #2244 and #2249: the app-only refusal covers BFF-owned document, owner and creator columns.
+  - UAC #2248: archive verifies the attachment item before binding.
+  - The candidate moved 6b3f35c79f → fa1de47276 → 1283c41817; each move was re-confirmed by the peers.
+- **ExternalDocumentNarrowing.cs refactor (#2234):** UAC confirmed D7's decision is unchanged.
+  - The test file is additions only (+172/−0).
+  - R3 ran the narrowing and reconcile tests at 6b3f35c79f: 150 passed, 0 failed.
+  - Later commits don't touch the narrowing.
+- **Peer OKs:** UAC, ebilling, word-add-in, field-mapping (dev has no rules on the refused document, owner or creator columns), SPE admin and ontology.
+- **Pre-checks:** live `a7b956fb55`, an ancestor. No e0df77339. No settings or schema change.
+- **Rollback snapshot:** `deploy/rollback/wwwroot-20261022T124709Z` (222 files, DLL `a7b956fb55`).
+- **Deploy:** detached `C:/wtbffe-128`. Package 37.73 MB; 4 critical files SHA-256 verified; CORS OK.
+- **Read-back** (12:50:18Z): `1.0.0+1283c41817cefab38063486105d59ddd199b08b9`. healthz and healthz/dataverse 200; `/api/me` anonymous 401.
+- **Ontology smoke:** PASS.
+- **30 minutes (to 13:20Z):**
+  - No new exception class (Graph noise ×6).
+  - DOC-PROFILE warnings 0; `document_bff_column_server_only` 0; `releaseRefusedLinkColumnsNotSecured` 17 lines, all value 0.
+  - No 409s; reconciliation runs Succeeded.
+  - UAC's first gate reading is also clean.
+  - Client redeploys (CommunicationActions, EmailPage, LegalWorkspace, Console) are UAC's, in its session.
+- **Rollback:** `scripts/Deploy-BffApi.ps1 -SkipBuild -PublishPath deploy/rollback/wwwroot-20261022T124709Z` (= `a7b956fb55`).
+
+## Deploy 2026-10-22/23: dev BFF 1fa0cf5cb8 + #1830 container + external SPA (owner-approved)
+
+**Owner approval.** Given directly in this session: "BFF deploy of 1fa0cf5cb8 is approved"; later "re-provisioning the 65a3fab2 container--yes approved", "the ISS-007 re-index--yes proceed" and "the SPA deploy - yes proceed".
+
+**Peer OKs for 1fa0cf5cb8:**
+- UAC, ontology, field-mapping, word-add-in, SPE admin;
+- ebilling: a fresh OK, needed because #2258 touches InvoiceExtractionJobHandler and ontology 157 adds EarlierInvoiceReadability;
+- provisioning: standing OK.
+
+**Range 1283c41817..1fa0cf5cb8:**
+- UAC #2253, #2268, #2258, #2277;
+- R3 #2279 (ISS-001/003/004/007/011/012);
+- field-mapping #2261, #2266, #2282;
+- ontology #2233;
+- CI #2252.
+
+### BFF deploy
+| Step | Result |
+|---|---|
+| A, live read | Live was 1283c41817 (23:56Z). Snapshot `deploy/rollback/wwwroot-20261022T235642Z` (222 files). healthz 200. |
+| B, setting read | `SharePointEmbedded__OwnedContainerIds` held 2 ids, comma-separated. No slots. |
+| C, setting change | Kept `b!vzGD…` only and removed `b!MVasATu…`. Read back: 1 id. Rollback: re-add the id. |
+| D, deploy | `Deploy-BffApi.ps1 -Environment dev` from detached worktree `C:\wtbffe-1fa`. The script verified 4 file hashes, health and CORS. Live ProductVersion `1.0.0+1fa0cf5cb8…`, first read 2026-10-23 00:00:36Z. healthz 200, healthz/dataverse 200, anonymous /api/me 401. |
+| E, server gate | UAC, window 00:00–00:30:36Z. The early read for 00:00–00:05Z was 0 exceptions, 0 "Invalid hostname", 0 deny-list refusals, 0 5xx. |
+
+**Rollback:** `scripts/Deploy-BffApi.ps1 -SkipBuild -PublishPath deploy/rollback/wwwroot-20261022T235642Z` (restores 1283c41817).
+
+### #1830 Steps 0–2: project 65a3fab2
+Run as the owner's delegated az login.
+
+- **Step 0.** Matched the recorded state:
+  - etag `W/"27392369"`;
+  - container id was the dead `b!MVasATu…`;
+  - owner team 6eabc7f9 (Secure Record Owners);
+  - issecure true;
+  - one share, to 1d02f31c with mask 262167.
+- **Step 1.** PATCH container id to null with If-Match. Read back: null. New etag `W/"28862494"`.
+- **Step 2.** POST provision-project returned 200 at 00:22:42Z.
+  - `resumed=true`, with new container `b!euxXOoXL…`.
+  - The share was not rewritten.
+  - Children and filed records Completed.
+- **Read-back.** The new id is held by exactly 1 project. No matter, work assignment or BU holds it. Owner and share unchanged.
+
+### ISS-007 re-index: none needed on dev
+- Read-only query: 5 documents are linked only to a service request; 2 are indexed (85585c76, cba17a34 in `spaarke-files-index`).
+- None of the 4 service requests regards a matter, project or work assignment. Re-indexing would still give no parent (fail closed), so send-to-index was not run.
+
+### External SPA: 3531ed65e → 1fa0cf5cb8
+- Rollback tag `external-spa-dev-rollback-3531ed65e`; build tag `external-spa-dev-1fa0cf5cb8`.
+- `gh workflow run deploy-external-spa.yml --ref external-spa-dev-1fa0cf5cb8 -f environment=dev`: run 39878122856, success.
+- Verified: `/` 200, `auth-callback.html` 200. `assets/app.js` contains `hasFile` (ISS-011), `allowRemoteImages` and `contain:"paint` (ISS-003).
+- **Rollback:** `gh workflow run deploy-external-spa.yml --ref external-spa-dev-rollback-3531ed65e -f environment=dev`.
+
+## Dev BFF deploy of master 58ffc37da3 (2026-10-23 11:18Z; owner: "ok to deploy build 58ffc37da3")
+
+Contents beyond the previous live build 1fa0cf5cb8: ontology 159/161/163 (#2303, 0317579272), word-add-in 132 (#2304) with fixes #2308 and #2309, and ontology 160 (#2313) with fix #2314. R3's `ContactBindingDecision.cs` change in #2314 is a pure extraction (`MatchingEnabledSystemUserIds`); `DecideLicensedUserEmail` keeps its guards and its result.
+
+| Step | Result |
+|---|---|
+| Gates | Router and Client lint green on 58ffc37da3. OKs: UAC (after its reviews of #2304/#2308/#2309 and #2313/#2314), ontology, word-add-in, field-mapping, ebilling; provisioning standing OK. SPE admin session not running. |
+| A, live read and snapshot | Live ProductVersion `1.0.0+1fa0cf5cb8…`, healthz 200. Snapshot `deploy/rollback/wwwroot-20261023T111635Z` (222 files, 148.07 MB). |
+| D, deploy | `Deploy-BffApi.ps1 -Environment dev` from detached worktree `C:\wtbffe-58f`. 4 file hashes, health and CORS verified. OneDeploy ended 11:18:12Z. Read-back 11:19:20Z: ProductVersion `1.0.0+58ffc37da3…`, healthz 200, healthz/dataverse 200, anonymous /api/me 401. |
+| E, server gate | R3 read 11:18–11:49Z (`gate58.ps1`): 75 requests, 0 5xx, 0 403, 0 "Invalid hostname", 0 worklist_unavailable, 0 signal_unreadable, 0 registration_owner_unconfigured. One `RedisConnectionException` (scheduler lease renew, 11:21:20Z, at startup); 15 Redis/lease warnings earlier the same day before the deploy, and scheduler traces continue to 11:50Z, so not deploy-caused. 21 deny-code log lines (`contact_bound_to_different_oid` 14, `linked_contact_bound_to_different_oid` 7) against 18 in the same 31 minutes the day before: the reconciliation job's known collisions. UAC runs its own gate. |
+
+**Rollback:** `scripts/Deploy-BffApi.ps1 -SkipBuild -PublishPath deploy/rollback/wwwroot-20261023T111635Z` (restores 1fa0cf5cb8).
+
+## Dev BFF deploy of master bc99fc3e6b (2026-10-26 22:03Z; owner: "yes proceed to deploy", answering the request for bc99fc3e6b)
+
+Contents beyond the previous live build 58ffc37da3: UAC #2318 (secure-isolation census covers every codified child table; read-only) and UAC #2321 (access-record readability is proven only by the platform). UAC confirmed live (read-only) that the dev BFF identity passes the #2321 proof on the marker column.
+
+| Step | Result |
+|---|---|
+| Gates | CI, CI Standalone Checks and the Office add-in gate green on bc99fc3e6b; Client lint not triggered (server-only change). OKs: UAC (requester), ontology, word-add-in, field-mapping, ebilling; provisioning standing OK. |
+| A, live read and snapshot | Live ProductVersion `1.0.0+58ffc37da3…`, healthz 200. Snapshot `deploy/rollback/wwwroot-20261026T220116Z` (222 files, 148.13 MB). |
+| D, deploy | `Deploy-BffApi.ps1 -Environment dev` from detached worktree `C:\wtbffe-bc9`. 4 file hashes, health and CORS verified. OneDeploy ended 22:03:10Z. Read-back 22:04:15Z: ProductVersion `1.0.0+bc99fc3e6b…`, healthz 503 once (warm-up), then 200 from 22:04:30Z; healthz/dataverse 200; anonymous /api/me 401. |
+| E, server gate | PASS. R3 read 22:03–22:36Z (`gatebc9.ps1`): 36 requests, 0 403. One 5xx: the single warm-up `/healthz` 503 at read-back. `access_record_hidden` 0 (#2321). 0 Invalid hostname, 0 worklist_unavailable, 0 signal_unreadable, 0 registration_owner_unconfigured. Exceptions are known classes only: 4 Redis scheduler-lease timeouts and 1 TaskCanceled. 21 deny-code lines, the reconciliation job's known collisions. `[SECURE-CENSUS]`: the "secure projects not isolated" critical lines were already present before the deploy (891 in 20:00–22:03Z, 198 after). New with #2318: 94 critical "codified child tables" lines, expected per UAC, forwarded to UAC and ebilling for triage. |
+
+**Rollback:** `scripts/Deploy-BffApi.ps1 -SkipBuild -PublishPath deploy/rollback/wwwroot-20261026T220116Z` (restores 58ffc37da3).
+
+## Dev BFF deploy of master 3ff2c04bf5 (2026-10-27 01:29Z; owner: "approve deploy 3ff2c04bf5")
+
+Contents beyond the previous live build bc99fc3e6b, all UAC: #2322 (the census reports owner-accepted role exceptions as AcceptedException), #2323 (the access-record proof sees team-held System Administrator and profiles, and matches System Administrator by template id; closes #2320), #2324 (the team join moves server-side, so a request does not grow with team count). On dev the outcome is unchanged: the BFF app user holds System Administrator directly.
+
+| Step | Result |
+|---|---|
+| Gates | CI (Router and every Tier 1 job), CI Standalone Checks and the Office add-in gate green on 3ff2c04bf5. OKs: UAC (requester), ontology, word-add-in, field-mapping, ebilling; provisioning standing OK. |
+| A, live read and snapshot | Live ProductVersion `1.0.0+bc99fc3e6b…`, healthz 200. Snapshot `deploy/rollback/wwwroot-20261027T012731Z` (222 files, 148.14 MB). |
+| D, deploy | `Deploy-BffApi.ps1 -Environment dev` from detached worktree `C:\wtbffe-3ff`. 4 file hashes, health and CORS verified. OneDeploy ended 01:29:15Z. Read-back 01:30:10Z: ProductVersion `1.0.0+3ff2c04bf5…`, healthz 200, healthz/dataverse 200, anonymous /api/me 401. |
+| E, server gate | PASS. R3 read 01:29–02:01Z (`gate3ff.ps1`): 52 requests, 0 5xx, 0 403. `access_record_hidden` 0. 0 Invalid hostname, 0 worklist_unavailable, 0 signal_unreadable, 0 registration_owner_unconfigured. 18 deny-code lines (the reconciliation job's known collisions). Exceptions: 1,862 `sprk_userentityassociation` alternate-key "does not exist" faults in the 02:00Z hour, from a daily job; the same 1,862 occurred in the 02:00Z hour on 2026-10-26, before either deploy, so not deploy-caused. 2 `sprk_task` metadata misses (known class). `[SECURE-CENSUS]`: projects 198 and child tables 94 critical, unchanged from bc99fc3e6b, as expected. |
+
+**Rollback:** `scripts/Deploy-BffApi.ps1 -SkipBuild -PublishPath deploy/rollback/wwwroot-20261027T012731Z` (restores bc99fc3e6b).

@@ -117,6 +117,8 @@ public static class DataverseDocumentsEndpoints
 
             // Task 147 r1c: set when this update re-filed the document (the reparent wrote) — the after-re-file step below.
             Func<Task<bool>>? refiledFromIsolation = null;
+            Sprk.Bff.Api.Services.Dataverse.RecordOwnerResolution? refiledBy = null;
+            Sprk.Bff.Api.Services.Access.SecureRemovalCaller? secureExitCaller = null;
 
             try
             {
@@ -145,7 +147,6 @@ public static class DataverseDocumentsEndpoints
                             ["traceId"] = traceId,
                         });
                 }
-
 
                 // Check if document exists
                 var existingDocument = await dataverseService.GetDocumentAsync(id);
@@ -211,7 +212,8 @@ public static class DataverseDocumentsEndpoints
                             // secure root — an un-secure. The resolver asks THIS caller's F3 rights (Full Access on the
                             // root, or the document's creator) before anything is written; a refusal is the unsecure
                             // endpoint's 403 ProblemDetails.
-                            SecureExitCaller = Sprk.Bff.Api.Services.Access.SecureRemovalCaller.ForRequest(callerAccessProbe, context),
+                            SecureExitCaller = secureExitCaller =
+                                Sprk.Bff.Api.Services.Access.SecureRemovalCaller.ForRequest(callerAccessProbe, context),
                         },
                         token => dataverseService.UpdateDocumentAsync(id, request, token),
                         context.RequestAborted);
@@ -224,6 +226,7 @@ public static class DataverseDocumentsEndpoints
                     // record a column already holds) is written, but is no re-file: no step after one.
                     if (!reparent.ParentsUnchanged)
                     {
+                        refiledBy = reparent;
                         refiledFromIsolation = () => isolationReadFault is null
                             ? Task.FromResult(isolatedBefore)
                             : Task.FromException<bool>(isolationReadFault);
@@ -243,7 +246,11 @@ public static class DataverseDocumentsEndpoints
                 // moved out of every secure record → the mirror goes — and task 148's pass over everything filed under it.
                 if (refiledFromIsolation is not null)
                 {
-                    await children.AfterRefileAsync("sprk_document", Guid.Parse(id), refiledFromIsolation, CancellationToken.None);
+                    // #2143 round 7 (F1): every person's re-file hands the step its caller (a document has no thread to move).
+                    // #2159 slice 2: with the reparent's answer, so an F3 move from S1 to S2 records its file's release.
+                    await children.AfterRefileAsync(
+                        "sprk_document", Guid.Parse(id), refiledFromIsolation,
+                        Sprk.Bff.Api.Services.Access.RefileThreadStep.Reconcile, secureExitCaller, refiledBy, CancellationToken.None);
                 }
 
                 var updatedDocument = await dataverseService.GetDocumentAsync(id);
@@ -265,6 +272,13 @@ public static class DataverseDocumentsEndpoints
             {
                 logger.LogWarning(ex, "Invalid document update request");
                 return ProblemDetailsHelper.ValidationError(ex.Message);
+            }
+            catch (Sprk.Bff.Api.Services.Dataverse.RecordOwnerUnsettledException)
+            {
+                // #2143: a concurrent writer kept the re-filed document's owner from settling. The change was written and its
+                // filing put back or superseded (RecordOwnerUnsettledException remarks) — reload and retry, never a 500.
+                logger.LogWarning("Document {DocumentId} re-file: its owner could not be settled against concurrent writers", id);
+                return ProblemDetailsHelper.RecordOwnerUnsettled("document", traceId);
             }
             catch (Exception ex)
             {
@@ -311,6 +325,7 @@ public static class DataverseDocumentsEndpoints
         documentsGroup.MapDelete("/{id}", async (
             string id,
             IDocumentDataverseService dataverseService,
+            Spaarke.Dataverse.IGenericEntityService entities,
             ILogger<Program> logger,
             HttpContext context) =>
         {
@@ -339,7 +354,46 @@ public static class DataverseDocumentsEndpoints
                     });
                 }
 
-                await dataverseService.DeleteDocumentAsync(id);
+                // Task 188 slice D (owner round 111 item 3): sprk_document_ParentDocument is Delete = Restrict, so a
+                // document other documents name as their parent is refused here with the one 409 shape, never a raw
+                // Dataverse refusal as a 500. A failed read throws before the delete (the 500 below; nothing deleted).
+                var childCount = (await dataverseService.GetDocumentsByParentAsync(Guid.Parse(id), context.RequestAborted)).Count();
+                if (childCount > 0)
+                {
+                    logger.LogInformation(
+                        "Delete refused for document {DocumentId}: {ChildCount} child document(s) still name it as parent",
+                        id, childCount);
+                    return ProblemDetailsHelper.DocumentHasChildDocuments(childCount, traceId);
+                }
+
+                // ebilling-r1 task 094 (ontology-r1 088 gate F1; owner EB-D-166): a Stored File copied from the document
+                // (sprk_sourcedocument, Delete = Restrict) refuses the row the same way, so it is checked too - with its own code
+                // (fix round F1-c): the document is an invoice's source, not a parent of child documents.
+                var copyCount = await Sprk.Bff.Api.Services.Finance.Files.StoredFileService.CountCopiesOfDocumentAsync(
+                    entities, Guid.Parse(id), context.RequestAborted);
+                if (copyCount > 0)
+                {
+                    logger.LogInformation(
+                        "Delete refused for document {DocumentId}: {CopyCount} Stored File copies name it as their source",
+                        id, copyCount);
+                    return ProblemDetailsHelper.DocumentIsInvoiceSource(traceId);
+                }
+
+                try
+                {
+                    await dataverseService.DeleteDocumentAsync(id);
+                }
+                catch (Exception ex) when (Sprk.Bff.Api.Services.DocumentCheckoutService.IsCannotDeleteDueToAssociation(ex))
+                {
+                    // Task 188 slice D: a child document created after the count above (the email pipeline writing
+                    // attachments) makes Dataverse's Restrict refuse the row (0x80040227). This route deletes no file, so
+                    // nothing was deleted: the same 409, without a count.
+                    logger.LogWarning(
+                        "Delete refused by Dataverse for document {DocumentId} ({ErrorCode} CannotDeleteDueToAssociation): a "
+                        + "child document was created after the child check. Nothing was deleted (this route deletes no file)",
+                        id, Sprk.Bff.Api.Services.DocumentCheckoutService.CannotDeleteDueToAssociationCode);
+                    return ProblemDetailsHelper.DocumentHasChildDocuments(childCount: null, traceId);
+                }
 
                 logger.LogInformation("Document deleted successfully: {DocumentId}", id);
 
@@ -547,76 +601,7 @@ public static class DataverseDocumentsEndpoints
         .RequireAuthorization();
 
         // GET /api/v1/documents - List documents (optionally filtered by container)
-        documentsGroup.MapGet("/", async (
-            string? containerId,
-            int? skip,
-            int? take,
-            IDocumentDataverseService dataverseService,
-            ILogger<Program> logger,
-            HttpContext context) =>
-        {
-            var traceId = context.TraceIdentifier;
-
-            try
-            {
-                // Apply defaults
-                var skipValue = skip ?? 0;
-                var takeValue = Math.Min(take ?? 50, 100); // Max 100 items per page
-
-                logger.LogDebug("Listing documents - ContainerId: {ContainerId}, Skip: {Skip}, Take: {Take}",
-                    containerId, skipValue, takeValue);
-
-                IEnumerable<DocumentEntity> documents;
-
-                if (!string.IsNullOrWhiteSpace(containerId))
-                {
-                    if (!Guid.TryParse(containerId, out _))
-                    {
-                        return ProblemDetailsHelper.ValidationError("Container ID must be a valid GUID");
-                    }
-
-                    documents = await dataverseService.GetDocumentsByContainerAsync(containerId);
-                }
-                else
-                {
-                    // See backlog item SDAP-401 for paging implementation (get all documents with pagination)
-                    return ProblemDetailsHelper.ValidationError("ContainerId is required for listing documents");
-                }
-
-                var pagedDocuments = documents.Skip(skipValue).Take(takeValue).ToList();
-                var totalCount = documents.Count();
-
-                logger.LogDebug("Retrieved {Count} of {TotalCount} documents", pagedDocuments.Count, totalCount);
-
-                return TypedResults.Ok(new
-                {
-                    data = new
-                    {
-                        items = pagedDocuments,
-                        totalCount,
-                        skip = skipValue,
-                        take = takeValue,
-                        hasNextPage = (skipValue + takeValue) < totalCount,
-                        hasPreviousPage = skipValue > 0
-                    },
-                    metadata = new
-                    {
-                        requestId = traceId,
-                        timestamp = DateTime.UtcNow,
-                        version = "v1"
-                    }
-                });
-            }
-            catch (Exception ex)
-            {
-                logger.LogError(ex, "Failed to list documents");
-                return TypedResults.Problem(
-                    statusCode: 500,
-                    title: "Internal Server Error",
-                    detail: "An unexpected error occurred while listing documents",
-                    extensions: new Dictionary<string, object?> { ["traceId"] = traceId });
-            }
-        })
+        documentsGroup.MapGet("/", ListDocumentsAsync)
         // GATED 2026-10-03 by unified-access-control-r2 task 166 (sweep finding S-66). This is the twin of
         // GET /api/v1/containers/{containerId}/documents below — same app-only GetDocumentsByContainerAsync,
         // same SPE pointers in the result — and it was hidden from task 074's guard by a Permanent
@@ -643,68 +628,169 @@ public static class DataverseDocumentsEndpoints
         // Guid.Parse — so a real container id 400s and a GUID-shaped one matches no row. Fixing that type
         // mismatch is one line, and doing it WITHOUT this filter would make the disclosure live. See
         // projects/unified-access-control-r2/notes/task-078-container-document-list-gate.md §4.
-        app.MapGet("/api/v1/containers/{containerId}/documents", async (
-            string containerId,
-            int? skip,
-            int? take,
-            IDocumentDataverseService dataverseService,
-            ILogger<Program> logger,
-            HttpContext context) =>
-        {
-            var traceId = context.TraceIdentifier;
-
-            try
-            {
-                if (string.IsNullOrWhiteSpace(containerId) || !Guid.TryParse(containerId, out _))
-                {
-                    return ProblemDetailsHelper.ValidationError("Container ID must be a valid GUID");
-                }
-
-                var skipValue = skip ?? 0;
-                var takeValue = Math.Min(take ?? 50, 100);
-
-                logger.LogInformation("Listing documents for container {ContainerId}", containerId);
-
-                var documents = await dataverseService.GetDocumentsByContainerAsync(containerId);
-                var pagedDocuments = documents.Skip(skipValue).Take(takeValue).ToList();
-                var totalCount = documents.Count();
-
-                return TypedResults.Ok(new
-                {
-                    data = new
-                    {
-                        containerId,
-                        items = pagedDocuments,
-                        totalCount,
-                        skip = skipValue,
-                        take = takeValue,
-                        hasNextPage = (skipValue + takeValue) < totalCount,
-                        hasPreviousPage = skipValue > 0
-                    },
-                    metadata = new
-                    {
-                        requestId = traceId,
-                        timestamp = DateTime.UtcNow,
-                        version = "v1"
-                    }
-                });
-            }
-            catch (Exception ex)
-            {
-                logger.LogError(ex, "Failed to list documents for container {ContainerId}", containerId);
-                return TypedResults.Problem(
-                    statusCode: 500,
-                    title: "Internal Server Error",
-                    detail: "An unexpected error occurred while listing documents",
-                    extensions: new Dictionary<string, object?> { ["traceId"] = traceId });
-            }
-        })
+        app.MapGet("/api/v1/containers/{containerId}/documents", ListContainerDocumentsAsync)
         .WithTags("Containers")
         .RequireRateLimiting("dataverse-query")
         .AddContainerDocumentAuthorizationFilter()
         .RequireAuthorization();
 
         return app;
+    }
+
+    /// <summary>
+    /// GET /api/v1/documents?containerId= — list the documents of one container (the handler of the route mapped above;
+    /// extracted from its lambda by unified-access-control-r2 task 188 round 3 slice B, so the narrowing ArchTest sees this
+    /// route on its own). For a caller who is not an internal systemuser the rows THE external document narrowing hides
+    /// are removed BEFORE paging, so <c>totalCount</c> and <c>hasNextPage</c> count only rows the caller may see.
+    /// </summary>
+    internal static async Task<IResult> ListDocumentsAsync(
+        string? containerId,
+        int? skip,
+        int? take,
+        IDocumentDataverseService dataverseService,
+        ILogger<Program> logger,
+        HttpContext context)
+    {
+        var traceId = context.TraceIdentifier;
+
+        try
+        {
+            // Apply defaults
+            var skipValue = skip ?? 0;
+            var takeValue = Math.Min(take ?? 50, 100); // Max 100 items per page
+
+            logger.LogDebug("Listing documents - ContainerId: {ContainerId}, Skip: {Skip}, Take: {Take}",
+                containerId, skipValue, takeValue);
+
+            IEnumerable<DocumentEntity> documents;
+
+            if (!string.IsNullOrWhiteSpace(containerId))
+            {
+                if (!Guid.TryParse(containerId, out _))
+                {
+                    return ProblemDetailsHelper.ValidationError("Container ID must be a valid GUID");
+                }
+
+                documents = await dataverseService.GetDocumentsByContainerAsync(containerId);
+            }
+            else
+            {
+                // See backlog item SDAP-401 for paging implementation (get all documents with pagination)
+                return ProblemDetailsHelper.ValidationError("ContainerId is required for listing documents");
+            }
+
+            // Task 188 round 3 slice B: narrowed before paging, so the page, the total and hasNextPage see visible rows only.
+            var visible = await NarrowContainerListAsync(documents, "document-list", logger, context);
+            var pagedDocuments = visible.Skip(skipValue).Take(takeValue).ToList();
+            var totalCount = visible.Count;
+
+            logger.LogDebug("Retrieved {Count} of {TotalCount} documents", pagedDocuments.Count, totalCount);
+
+            return TypedResults.Ok(new
+            {
+                data = new
+                {
+                    items = pagedDocuments,
+                    totalCount,
+                    skip = skipValue,
+                    take = takeValue,
+                    hasNextPage = (skipValue + takeValue) < totalCount,
+                    hasPreviousPage = skipValue > 0
+                },
+                metadata = new
+                {
+                    requestId = traceId,
+                    timestamp = DateTime.UtcNow,
+                    version = "v1"
+                }
+            });
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Failed to list documents");
+            return TypedResults.Problem(
+                statusCode: 500,
+                title: "Internal Server Error",
+                detail: "An unexpected error occurred while listing documents",
+                extensions: new Dictionary<string, object?> { ["traceId"] = traceId });
+        }
+    }
+
+    /// <summary>
+    /// GET /api/v1/containers/{containerId}/documents — the twin of <see cref="ListDocumentsAsync"/> (extracted from its
+    /// lambda by task 188 round 3 slice B). Narrowed the same way, before paging.
+    /// </summary>
+    internal static async Task<IResult> ListContainerDocumentsAsync(
+        string containerId,
+        int? skip,
+        int? take,
+        IDocumentDataverseService dataverseService,
+        ILogger<Program> logger,
+        HttpContext context)
+    {
+        var traceId = context.TraceIdentifier;
+
+        try
+        {
+            if (string.IsNullOrWhiteSpace(containerId) || !Guid.TryParse(containerId, out _))
+            {
+                return ProblemDetailsHelper.ValidationError("Container ID must be a valid GUID");
+            }
+
+            var skipValue = skip ?? 0;
+            var takeValue = Math.Min(take ?? 50, 100);
+
+            logger.LogInformation("Listing documents for container {ContainerId}", containerId);
+
+            var documents = await dataverseService.GetDocumentsByContainerAsync(containerId);
+            // Task 188 round 3 slice B: narrowed before paging, so the page, the total and hasNextPage see visible rows only.
+            var visible = await NarrowContainerListAsync(documents, "container-document-list", logger, context);
+            var pagedDocuments = visible.Skip(skipValue).Take(takeValue).ToList();
+            var totalCount = visible.Count;
+
+            return TypedResults.Ok(new
+            {
+                data = new
+                {
+                    containerId,
+                    items = pagedDocuments,
+                    totalCount,
+                    skip = skipValue,
+                    take = takeValue,
+                    hasNextPage = (skipValue + takeValue) < totalCount,
+                    hasPreviousPage = skipValue > 0
+                },
+                metadata = new
+                {
+                    requestId = traceId,
+                    timestamp = DateTime.UtcNow,
+                    version = "v1"
+                }
+            });
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Failed to list documents for container {ContainerId}", containerId);
+            return TypedResults.Problem(
+                statusCode: 500,
+                title: "Internal Server Error",
+                detail: "An unexpected error occurred while listing documents",
+                extensions: new Dictionary<string, object?> { ["traceId"] = traceId });
+        }
+    }
+
+    /// <summary>
+    /// Task 188 round 3 slice B: the container list as the caller may see it. One <see cref="InternalPlaneDocumentNarrowing"/>
+    /// call over the whole list (not one per row, and not only the page, so paging never counts or skips a hidden row). An
+    /// internal systemuser gets the list unchanged; for any other caller a row the narrowing hides is removed, and a
+    /// narrowing that faults removes every row.
+    /// </summary>
+    private static async Task<IReadOnlyList<DocumentEntity>> NarrowContainerListAsync(
+        IEnumerable<DocumentEntity> documents, string surface, ILogger logger, HttpContext context)
+    {
+        var all = documents.ToList();
+        var visibility = await InternalPlaneDocumentNarrowing.ForCallerAsync(context, all.Select(d => d.Id), surface, logger);
+        return visibility.Narrowed ? all.Where(d => visibility.IsShown(d.Id)).ToList() : all;
     }
 
     /// <summary>The right filing a document under a record costs on that record: AppendTo (the key the record-keyed
@@ -719,6 +805,8 @@ public static class DataverseDocumentsEndpoints
     /// route's filter. <c>null</c> when allowed; otherwise a 403 ProblemDetails that names no target and no reason about
     /// it — a caller without AppendTo learns nothing about the record (the owner refusal's detail is reached only by a
     /// caller authorized on every target). Fails closed: an unsupported type, an unanswerable question or a fault denies.
+    /// A parent that is itself a document takes the document path (task 188 round 4d, #2200): AppendTo, then THE external
+    /// document narrowing, so a caller who is not an internal systemuser cannot file under a document it hides.
     /// </summary>
     private static async Task<IResult?> AuthorizeRefileTargetsAsync(
         Spaarke.Core.Auth.AuthorizationService authorization,
@@ -751,10 +839,24 @@ public static class DataverseDocumentsEndpoints
             {
                 try
                 {
-                    var snapshot = await authorization.GetCallerRecordAccessAsync(userId, entitySet, target.Id, token, ct);
-                    denyReason = Spaarke.Core.Auth.OperationAccessPolicy.HasRequiredRights(snapshot.AccessRights, RefileTargetOperation)
-                        ? null
-                        : FinanceAuthorizationFilter.InsufficientRightsReasonCode;
+                    if (string.Equals(entitySet, FinanceAuthorizationFilter.DocumentEntitySet, StringComparison.Ordinal))
+                    {
+                        // Task 188 round 4d (#2200): a parent DOCUMENT is decided on the document path — the caller's
+                        // AppendTo, then THE external document narrowing (one call; none for an internal systemuser). A
+                        // parent the narrowing hides denies with the reason a caller without AppendTo gets, so filing
+                        // under it (which would hide this document too, a Restricted ancestor) answers nothing about it.
+                        var decision = await InternalPlaneDocumentNarrowing.AuthorizeDocumentsAsync(
+                            httpContext, authorization, userId, new[] { target.Id }, RefileTargetOperation, token,
+                            "document-refile-target", logger, ct);
+                        denyReason = decision.IsAllowed ? null : decision.ReasonCode;
+                    }
+                    else
+                    {
+                        var snapshot = await authorization.GetCallerRecordAccessAsync(userId, entitySet, target.Id, token, ct);
+                        denyReason = Spaarke.Core.Auth.OperationAccessPolicy.HasRequiredRights(snapshot.AccessRights, RefileTargetOperation)
+                            ? null
+                            : FinanceAuthorizationFilter.InsufficientRightsReasonCode;
+                    }
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException)
                 {

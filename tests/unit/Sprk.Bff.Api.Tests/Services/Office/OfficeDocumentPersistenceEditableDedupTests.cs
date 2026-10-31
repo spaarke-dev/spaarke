@@ -91,11 +91,14 @@ public class OfficeDocumentPersistenceEditableDedupTests
 
     private static OfficeDocumentPersistence Sut(
         Mock<IDocumentDataverseService> docs, Mock<ContentDedupDetector> detector, Mock<IGenericEntityService>? generic) =>
-        new(docs.Object,
-            detector.Object,
-            NullLogger<OfficeDocumentPersistence>.Instance,
-            Mock.Of<ICommunicationDataverseService>(),
-            generic?.Object);
+        // Task 130: the production constructor requires both seams; "no generic seam" is the bare test constructor.
+        generic is null
+            ? new(docs.Object, detector.Object, NullLogger<OfficeDocumentPersistence>.Instance)
+            : new(docs.Object,
+                detector.Object,
+                NullLogger<OfficeDocumentPersistence>.Instance,
+                Mock.Of<ICommunicationDataverseService>(),
+                generic.Object);
 
     private static SaveRequest DocumentSave() => new()
     {

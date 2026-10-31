@@ -406,6 +406,33 @@ public class DataverseRecordShareWireTests
         sent.Url.Should().Contain($"systemusers({UserId})/Microsoft.Dynamics.CRM.RetrievePrincipalAccess");
     }
 
+    [Theory(DisplayName = "Task 036 K5: an access-check 403 (0x80040220) whose message names prvActOnBehalfOfAnotherUser is the app user's fault — UNKNOWN, not 'no rights'")]
+    [InlineData("Principal user (Id=8793f4b0-0000-0000-0000-000000000000, type=8, roleCount=1, privilegeCount=0, accessMode=4), is missing prvActOnBehalfOfAnotherUser privilege (Id=00000000-0000-0000-0000-000000000000) on OTC=8 for entity 'systemuser'", "unknown")]
+    [InlineData("SecLib::CheckPrivilege failed. PrivilegeName: PRVACTONBEHALFOFANOTHERUSER", "unknown")]
+    [InlineData("Principal user (Id=1, type=8) is missing prvReadsprk_Matter privilege (Id=2)", "None")]   // about the user
+    [InlineData("SecLib::AccessCheckEx failed", "None")]
+    // Fix round 4: the privilege must be named as a whole token — a longer name that merely contains it is about the user.
+    [InlineData("Principal user (Id=1, type=8) is missing prvActOnBehalfOfAnotherUserTeam privilege (Id=2)", "None")]
+    [InlineData("Principal user (Id=1, type=8) is missing xprvActOnBehalfOfAnotherUser privilege (Id=2)", "None")]
+    [InlineData("missing privilege 'prvActOnBehalfOfAnotherUser'.", "unknown")]
+    public async Task RetrievePrincipalRightsOrUnknownAsync_AnAccessCheckCodeNamingTheImpersonationPrivilege_IsUnknown(
+        string message, string expected)
+    {
+        var handler = new ScriptedHandler(_ => new HttpResponseMessage(HttpStatusCode.Forbidden)
+        {
+            Content = new StringContent(
+                System.Text.Json.JsonSerializer.Serialize(new { error = new { code = "0x80040220", message } }),
+                Encoding.UTF8, "application/json"),
+        });
+
+        var rights = await new OfflineService(handler).RetrievePrincipalRightsOrUnknownAsync(UserId, "sprk_matters", MatterId);
+
+        if (expected == "unknown")
+            rights.Should().BeNull("a deployment fault must not read as every user losing their rights");
+        else
+            rights.Should().Be(AccessRights.None);
+    }
+
     [Theory(DisplayName = "Live regression fix: a 5xx or throttled rights read is never an answer — it THROWS, and the revoking caller keeps the grant")]
     [InlineData(HttpStatusCode.InternalServerError)]
     [InlineData(HttpStatusCode.ServiceUnavailable)]
@@ -436,7 +463,8 @@ public class DataverseRecordShareWireTests
         rows.Setup(r => r.GetEntitySetNameAsync("sprk_project", Moq.It.IsAny<CancellationToken>())).ReturnsAsync("sprk_projects");
         rows.Setup(r => r.RetrieveMultipleAsync(Moq.It.IsAny<Microsoft.Xrm.Sdk.Query.QueryExpression>(), Moq.It.IsAny<CancellationToken>()))
             .ReturnsAsync(new Microsoft.Xrm.Sdk.EntityCollection(
-                [new Microsoft.Xrm.Sdk.Entity("sprk_project", project) { ["sprk_containerid"] = container }]) { MoreRecords = false });
+                [new Microsoft.Xrm.Sdk.Entity("sprk_project", project) { ["sprk_containerid"] = container }])
+            { MoreRecords = false });
         rows.Setup(r => r.RetrieveAsync("sprk_project", project, Moq.It.IsAny<string[]>(), Moq.It.IsAny<CancellationToken>()))
             .ReturnsAsync(new Microsoft.Xrm.Sdk.Entity("sprk_project", project)
             {

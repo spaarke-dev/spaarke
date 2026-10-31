@@ -4,7 +4,7 @@ import { authenticatedJsonFetch } from '@shared/services/authenticatedJsonFetch'
  * quickCreateDefaultsService.ts — `GET /api/office/quickcreate/defaults` (task 100, owner decision B).
  *
  * The "+ New" form prefills Assigned To with the signed-in user's OWN linked contact. The server states it
- * (`RecordCreationService.ResolveDefaultAssigneeAsync`), so the prefill is exactly the contact the server assigns a
+ * (`OfficeService.ResolveDefaultAssigneeAsync`), so the prefill is exactly the contact the server assigns a
  * Matter or Project when the request names none — the pane never guesses it from the signed-in email.
  *
  * @see src/server/api/Sprk.Bff.Api/Api/Office/OfficeEndpoints.cs (GetQuickCreateDefaultsAsync)

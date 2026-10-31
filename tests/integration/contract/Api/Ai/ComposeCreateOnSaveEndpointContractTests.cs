@@ -1155,7 +1155,7 @@ public sealed class ComposeCreateOnSaveFixture : WebApplicationFactory<Program>
             new HttpClient(),
             new ConfigurationBuilder().Build(),
             Microsoft.Extensions.Logging.Abstractions.NullLogger<Sprk.Bff.Api.Infrastructure.ExternalAccess.CallerRecordAccessProbe>.Instance,
-            null!)
+            null!, null!)
         { CallBase = false };
 
     /// <summary>Resets the boundary mocks between tests (xUnit runs a class's tests sequentially).</summary>
@@ -1257,6 +1257,9 @@ public sealed class ComposeCreateOnSaveFixture : WebApplicationFactory<Program>
 
         builder.ConfigureTestServices(services =>
         {
+            // Task 188 r3 slice B: the internal document routes' narrowing is not under test here (see DocumentRouteExternalNarrowingTests).
+            Sprk.Bff.Api.Tests.TestInfrastructure.AllVisibleDocumentNarrowing.UseAllVisibleDocumentNarrowing(services);
+
             // Test hosts must not authenticate for real — see TestTokenCredential.
             services.UseStubTokenCredential();
 

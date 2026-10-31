@@ -93,6 +93,10 @@ export * from './CreateEventWizard';
 // CreateInvoiceWizard - Create New Invoice wizard (IDataService abstraction, task 030)
 export * from './CreateInvoiceWizard';
 
+// InvoiceSubmission - shared "submit an invoice PDF" wizard + Processing/Result screen (ebilling-r1 task 051;
+// callbacks injected, so the external SPA and the internal entry point (task 052) both use it)
+export * from './InvoiceSubmission';
+
 // CreateReportCardWizard - Create New Report Card wizard (IDataService abstraction, task 040)
 export * from './CreateReportCardWizard';
 
@@ -315,6 +319,11 @@ export * from './StatusBadge';
 // (/grant, /invite-and-grant, /revoke) — context-agnostic (ADR-012), no Xrm
 // dependency in the shared core.
 export * from './AccessGrantModal';
+
+// RecordFamilyModal - lists a record's Family (GET /api/v1/records/{table}/{id}/family, FR-31) on the
+// BrowseModal preset and hands the rows the person ticked to a caller-supplied action handler
+// (field-mapping-server-write-path-r1 task 073, FR-32). Opened from TrackingFieldTrio's onOpenFamily (task 074).
+export * from './RecordFamilyModal';
 
 // StatusBadge - generic status/severity badge (label + tone), no domain
 // vocabulary. The ONE legitimately-new UI primitive added by

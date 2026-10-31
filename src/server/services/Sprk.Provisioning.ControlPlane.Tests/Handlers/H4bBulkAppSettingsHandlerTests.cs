@@ -58,6 +58,9 @@
 //   AC-21 A run whose stored list breaks CustomerWorkforceTenantsRule (missing, CIAM, Spaarke, Model 1 run tenant)
 //         fails Resumable with the rule's code BEFORE any write.
 //   AC-22 An indexed entry fed by a scalar source (hand-built manifest) fails before any write.
+//   T186 follow-up (AiSearch allow-list): AiSearch__AllowedIndexes from H2b's AiSearchIndexNames.
+//   AC-23 The 7 verified index names are written as AiSearch__AllowedIndexes__0..6 in order; the base key is exclusive.
+//   AC-24 Names missing or empty fails Resumable (PerEnvInputMissing) BEFORE any write.
 //   AC-19 FIC-flap tolerance budget guard — HttpHealthzProbe's shipped
 //         DefaultBackoffSchedule total budget must stay comfortably above
 //         the measured ~130s AADSTS70025 propagation-flap window (regression
@@ -90,6 +93,15 @@ public sealed class H4bBulkAppSettingsHandlerTests
     private const string AppServiceName = "sprk-prod-api";
     private const string EnvironmentName = "prod";
     private const string SecretsVer = "manifest-hash-h4b-xyz";
+    private const string StorageBlobEndpoint = "https://sprkacmeprod.blob.core.windows.net/";   // T186 follow-up: H2a StorageBlobEndpoint
+    private const string CustomerBusinessUnitId = "7c1b2a40-5d6e-4f80-9a1b-2c3d4e5f6a7b";   // R3 073: H10's InterStepState.CustomerBusinessUnitId ("D" GUID)
+
+    // T186 follow-up (AiSearch allow-list): the indexes H2b built and verified (InterStepState.AiSearchIndexNames), in catalog order.
+    private static readonly string[] AiSearchIndexNames =
+    [
+        "spaarke-files-index", "spaarke-discovery-index", "spaarke-records-index", "spaarke-rag-references",
+        "spaarke-insights-index", "spaarke-session-files", "spaarke-invoices-index",
+    ];
 
     // T255: the Worker's reserved tenants and the run's customer workforce tenants.
     private const string SpaarkeTenantId = "5a5a5a5a-0000-4000-8000-000000000001";
@@ -104,6 +116,7 @@ public sealed class H4bBulkAppSettingsHandlerTests
     public async Task AC1_HappyPath_WritesKeyVaultReferencesAndPerEnvValues_AndAdvancesCosmos()
     {
         var run = BuildRun();
+        run.Parameters.NonSecret[H4bBulkAppSettingsHandler.ProvisionedOnParameterKey] = "2026-10-01T00:00:00Z";   // upgrade run: a BFF is running (T186 L28)
         var repo = new FakeRepository(run, "etag-1");
         var manifest = FakePerEnvManifest.Success(BuildStandardEntries());
         var writer = FakeSettingsWriter.Succeeds();
@@ -177,12 +190,15 @@ public sealed class H4bBulkAppSettingsHandlerTests
             ["customer_id"] = CustomerId,   // T238: the run's own customerId, verbatim
             ["dataverse_env_url"] = "https://acme.crm.dynamics.com/",   // T245b: H5's DataverseEnvUrl
             ["spe_container_id"] = "b!h8-created-customer-container",   // T227c: H8's SpeContainerId
+            ["storage_blob_endpoint"] = StorageBlobEndpoint,   // T186 follow-up: H2a StorageBlobEndpoint
+            ["customer_business_unit_id"] = CustomerBusinessUnitId,   // R3 073: H10's CustomerBusinessUnitId
             ["openai_monthly_limit_usd"] = "500",   // T254: the optional OpenAI spend limit (intake)
         };
         // T255: list sources write {key}__0..__{n-1}.
         var expectedLists = new Dictionary<string, string[]>(StringComparer.Ordinal)
         {
             ["customer_workforce_tenant_ids"] = [WorkforceTenantA, WorkforceTenantB],
+            ["ai_search_index_names"] = AiSearchIndexNames,   // T186 follow-up: H2b's AiSearchIndexNames
         };
         expected.Keys.Concat(expectedLists.Keys).Should().BeEquivalentTo(PerEnvSourceCatalog.BySourceKey.Keys,
             "a source added to PerEnvSourceCatalog needs a row here");
@@ -256,6 +272,107 @@ public sealed class H4bBulkAppSettingsHandlerTests
 
         result.Should().BeOfType<HandlerResult.Success>();
         writer.LastRequest!.Settings["AiSpendLimit__MonthlyLimitUsd"].Should().Be("500");
+    }
+
+    // ---------- R3 073: ExternalAccess__CustomerBusinessUnitId (H10's customer business unit) ----------
+
+    [Fact]
+    public async Task R3_073_RealManifest_WritesExternalAccessCustomerBusinessUnitId_FromH10()
+    {
+        // The SHIPPED manifest entry (not a hand-built one) drives H4b: the BFF fails startup on a non-GUID and its
+        // registration route answers 500 registration_owner_unconfigured without the setting. The writer applies one
+        // Settings map to production AND staging, so a key in it is on both slots.
+        var entries = await RealCustomerBusinessUnitEntryAsync();
+        var writer = FakeSettingsWriter.Succeeds();
+        var handler = Build(new FakeRepository(BuildRun(), "etag-r3-073"), FakePerEnvManifest.Success(entries),
+            writer, FakeHealthzProbe.Success(), new FakeContainerLogFetcher());
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        result.Should().BeOfType<HandlerResult.Success>();
+        writer.LastRequest!.Settings["ExternalAccess__CustomerBusinessUnitId"].Should().Be(CustomerBusinessUnitId);
+        Guid.TryParseExact(writer.LastRequest.Settings["ExternalAccess__CustomerBusinessUnitId"], "D", out _).Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task R3_073_RunWithoutCustomerBusinessUnitId_ResumableFailure_BeforeAnyWrite()
+    {
+        // H10 has not recorded the unit: same behaviour as any other missing required upstream output (AC2).
+        var run = BuildRun();
+        run.InterStepState.CustomerBusinessUnitId = null;
+        var writer = FakeSettingsWriter.Succeeds();
+        var probe = FakeHealthzProbe.Success();
+        var handler = Build(new FakeRepository(run, "etag-r3-073b"),
+            FakePerEnvManifest.Success(await RealCustomerBusinessUnitEntryAsync()), writer, probe, new FakeContainerLogFetcher());
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
+        failure.Class.Should().Be(FailureClass.Resumable);
+        failure.RejectionCode.Should().Be(BulkAppSettingsRejectionCodes.PerEnvInputMissing);
+        failure.Diagnostic.Should().Contain("customer_business_unit_id");
+        failure.Diagnostic.Should().Contain("ExternalAccess__CustomerBusinessUnitId");
+        failure.Diagnostic.Should().Contain("InterStepState.CustomerBusinessUnitId");
+        failure.Diagnostic.Should().Contain("H10 must complete");
+        writer.CallCount.Should().Be(0);
+        probe.CallCount.Should().Be(0);
+    }
+
+    // ---------- T186 follow-up: SessionFileStore__BlobEndpoint (H2a's storage blob endpoint) ----------
+
+    [Fact]
+    public async Task RealManifest_WritesSessionFileStoreBlobEndpoint_FromH2a()
+    {
+        // The SHIPPED manifest entry drives H4b. Without the setting the stamp BFF's session-file store is
+        // StoreDisabled; the container is not written (BFF default ai-chunks).
+        var entries = await RealManifestEntryAsync("SessionFileStore__BlobEndpoint");
+        var writer = FakeSettingsWriter.Succeeds();
+        var handler = Build(new FakeRepository(BuildRun(), "etag-sfs"), FakePerEnvManifest.Success(entries),
+            writer, FakeHealthzProbe.Success(), new FakeContainerLogFetcher());
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        result.Should().BeOfType<HandlerResult.Success>();
+        writer.LastRequest!.Settings["SessionFileStore__BlobEndpoint"].Should().Be(StorageBlobEndpoint);
+        writer.LastRequest.Settings.Should().NotContainKey("SessionFileStore__ContainerName");
+    }
+
+    [Fact]
+    public async Task RunWithoutStorageBlobEndpoint_ResumableFailure_BeforeAnyWrite()
+    {
+        var run = BuildRun();
+        run.InterStepState.StorageBlobEndpoint = null;
+        var writer = FakeSettingsWriter.Succeeds();
+        var probe = FakeHealthzProbe.Success();
+        var handler = Build(new FakeRepository(run, "etag-sfs-b"),
+            FakePerEnvManifest.Success(await RealManifestEntryAsync("SessionFileStore__BlobEndpoint")), writer, probe, new FakeContainerLogFetcher());
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
+        failure.Class.Should().Be(FailureClass.Resumable);
+        failure.RejectionCode.Should().Be(BulkAppSettingsRejectionCodes.PerEnvInputMissing);
+        failure.Diagnostic.Should().Contain("storage_blob_endpoint");
+        failure.Diagnostic.Should().Contain("SessionFileStore__BlobEndpoint");
+        failure.Diagnostic.Should().Contain("InterStepState.StorageBlobEndpoint");
+        writer.CallCount.Should().Be(0);
+        probe.CallCount.Should().Be(0);
+    }
+
+    private static async Task<IReadOnlyList<PerEnvSettingEntry>> RealManifestEntryAsync(string key)
+    {
+        var read = await new FilePerEnvSettingsManifest(NullLogger<FilePerEnvSettingsManifest>.Instance)
+            .ReadAsync(CancellationToken.None);
+        return [((PerEnvSettingsManifestReadResult.Success)read).Entries.Single(e => e.Key == key)];
+    }
+
+    private static async Task<IReadOnlyList<PerEnvSettingEntry>> RealCustomerBusinessUnitEntryAsync()
+    {
+        var read = await new FilePerEnvSettingsManifest(NullLogger<FilePerEnvSettingsManifest>.Instance)
+            .ReadAsync(CancellationToken.None);
+        var entry = ((PerEnvSettingsManifestReadResult.Success)read).Entries
+            .Single(e => e.Key == "ExternalAccess__CustomerBusinessUnitId");
+        return [entry];
     }
 
     // ---------- AC-2 per-env-input missing ----------
@@ -388,9 +505,30 @@ public sealed class H4bBulkAppSettingsHandlerTests
     // ---------- AC-4 healthz timeout with parseable module ----------
 
     [Fact]
+    public async Task L28_FreshStamp_WritesSettingsAndCompletes_WithoutPollingHealthz()
+    {
+        // T186 L28: before H9 deploys the BFF, the stamp's site serves only the platform default page (/healthz → 404),
+        // so a fresh run's poll could only time out and quarantine. H9 verifies boot with these settings.
+        var run = BuildRun();
+        var repo = new FakeRepository(run, "etag-l28");
+        var writer = FakeSettingsWriter.Succeeds();
+        var probe = FakeHealthzProbe.Timeout("HTTP 404 (elapsed 480s across 5 attempts)");
+        var fetcher = new FakeContainerLogFetcher();
+        var handler = Build(repo, FakePerEnvManifest.Success(BuildStandardEntries()), writer, probe, fetcher);
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        result.Should().BeOfType<HandlerResult.Success>();
+        writer.CallCount.Should().Be(1);
+        probe.CallCount.Should().Be(0, "a fresh stamp has no BFF code to answer /healthz");
+        repo.LastWrittenRun!.CompletedPhases.Should().ContainSingle().Which.Phase.Should().Be(HandlerIds.H4b);
+    }
+
+    [Fact]
     public async Task AC4_HealthzTimeoutWithParseableModule_QuarantineRequired_WithModuleDiagnostic()
     {
         var run = BuildRun();
+        run.Parameters.NonSecret[H4bBulkAppSettingsHandler.ProvisionedOnParameterKey] = "2026-10-01T00:00:00Z";   // upgrade run: a BFF is running (T186 L28)
         var repo = new FakeRepository(run, "etag-4");
         var manifest = FakePerEnvManifest.Success(BuildStandardEntries());
         var writer = FakeSettingsWriter.Succeeds();
@@ -419,6 +557,7 @@ public sealed class H4bBulkAppSettingsHandlerTests
     public async Task AC5_HealthzTimeoutWithUnparseableLog_QuarantineRequired_WithGenericDiagnostic()
     {
         var run = BuildRun();
+        run.Parameters.NonSecret[H4bBulkAppSettingsHandler.ProvisionedOnParameterKey] = "2026-10-01T00:00:00Z";   // upgrade run: a BFF is running (T186 L28)
         var repo = new FakeRepository(run, "etag-5");
         var manifest = FakePerEnvManifest.Success(BuildStandardEntries());
         var writer = FakeSettingsWriter.Succeeds();
@@ -926,6 +1065,57 @@ public sealed class H4bBulkAppSettingsHandlerTests
         writer.CallCount.Should().Be(0);
     }
 
+    // ---------- T186 follow-up (AiSearch allow-list): AiSearch__AllowedIndexes from H2b's verified index names ----------
+
+    private static PerEnvSettingEntry AiSearchAllowedIndexesEntry() =>
+        new("AiSearch__AllowedIndexes", PerEnvSettingSource.FromHandlerOutput,
+            LiteralValue: null, ParameterKey: "ai_search_index_names", Required: true,
+            IOptionsModuleName: "AiSearchOptions", Indexed: true);
+
+    [Fact]
+    public async Task AC23_AiSearchAllowedIndexes_WritesEveryIndexH2bVerifiedInOrder_AndOwnsTheListKey()
+    {
+        var writer = FakeSettingsWriter.Succeeds();
+        var handler = Build(new FakeRepository(BuildRun(), "etag-23"),
+            FakePerEnvManifest.Success([.. BuildStandardEntries(), AiSearchAllowedIndexesEntry()]),
+            writer, FakeHealthzProbe.Success(), new FakeContainerLogFetcher());
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        result.Should().BeOfType<HandlerResult.Success>();
+        var request = writer.LastRequest!;
+        for (var i = 0; i < AiSearchIndexNames.Length; i++)
+        {
+            request.Settings[$"AiSearch__AllowedIndexes__{i}"].Should().Be(AiSearchIndexNames[i], $"index {i}, in H2b's catalog order");
+        }
+        request.Settings.Keys.Where(k => k.StartsWith("AiSearch__AllowedIndexes", StringComparison.Ordinal))
+            .Should().HaveCount(7, "one setting per verified index, no bare key");
+        request.ExclusiveListKeys.Should().Contain("AiSearch__AllowedIndexes",
+            "the writer removes any other AiSearch__AllowedIndexes__* on both slots, so a dropped index cannot linger");
+    }
+
+    [Theory]
+    [InlineData(false)]   // H2b has not recorded anything
+    [InlineData(true)]    // an empty list is as useless as none: the BFF would refuse every index
+    public async Task AC24_AiSearchIndexNamesMissing_FailsResumable_BeforeAnyWrite(bool empty)
+    {
+        var run = BuildRun();
+        run.InterStepState.AiSearchIndexNames = empty ? new List<string>() : null;
+        var writer = FakeSettingsWriter.Succeeds();
+        var handler = Build(new FakeRepository(run, "etag-24"),
+            FakePerEnvManifest.Success([.. BuildStandardEntries(), AiSearchAllowedIndexesEntry()]),
+            writer, FakeHealthzProbe.Success(), new FakeContainerLogFetcher());
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
+        failure.Class.Should().Be(FailureClass.Resumable);
+        failure.RejectionCode.Should().Be(BulkAppSettingsRejectionCodes.PerEnvInputMissing);
+        failure.Diagnostic.Should().Contain("ai_search_index_names").And.Contain("AiSearch__AllowedIndexes")
+            .And.Contain("InterStepState.AiSearchIndexNames");
+        writer.CallCount.Should().Be(0);
+    }
+
     // ---------- task 253: parity with the generated Configure-AppServiceSettings script ----------
     //
     // H4b used to run scripts/canonical-secret-catalog/generated/Configure-AppServiceSettings.generated.ps1. It now
@@ -951,6 +1141,8 @@ public sealed class H4bBulkAppSettingsHandlerTests
         ["CustomerId"] = CustomerId,
         ["DataverseEnvUrl"] = "https://acme.crm.dynamics.com/",
         ["SpeContainerId"] = "b!h8-created-customer-container",
+        ["CustomerBusinessUnitId"] = CustomerBusinessUnitId,
+        ["StorageBlobEndpoint"] = StorageBlobEndpoint,
         ["OpenaiMonthlyLimitUsd"] = "500",
     };
 
@@ -958,6 +1150,7 @@ public sealed class H4bBulkAppSettingsHandlerTests
     private static readonly IReadOnlyDictionary<string, string[]> ScriptListArguments = new Dictionary<string, string[]>(StringComparer.Ordinal)
     {
         ["CustomerWorkforceTenantIds"] = [WorkforceTenantA, WorkforceTenantB],
+        ["AiSearchIndexNames"] = AiSearchIndexNames,   // T186 follow-up
     };
 
     [Theory]
@@ -986,7 +1179,9 @@ public sealed class H4bBulkAppSettingsHandlerTests
             "same Key Vault references (re-run Invoke-CatalogGenerator.ps1 if the manifest changed)");
         // T255: and own (remove stale indices of) exactly the lists the script owns.
         writer.LastRequest.ExclusiveListKeys.Should().BeEquivalentTo(scriptListKeys);
-        scriptListKeys.Should().Equal(["WorkforceIdentity__CustomerTenantIds"]);
+        scriptListKeys.Should().BeEquivalentTo(["AiSearch__AllowedIndexes", "WorkforceIdentity__CustomerTenantIds"]);
+        scriptSettings["AiSearch__AllowedIndexes__0"].Should().Be(AiSearchIndexNames[0]);   // T186 follow-up
+        scriptSettings["AiSearch__AllowedIndexes__6"].Should().Be(AiSearchIndexNames[6]);
         scriptSettings["WorkforceIdentity__CustomerTenantIds__0"].Should().Be(WorkforceTenantA);
         scriptSettings["WorkforceIdentity__CustomerTenantIds__1"].Should().Be(WorkforceTenantB);
 
@@ -1050,6 +1245,51 @@ public sealed class H4bBulkAppSettingsHandlerTests
             .GetProperty("defaultValue").EnumerateArray().Select(q => q.GetString()).ToList();
 
         queues.Should().Contain(queueName, "the BFF receives jobs from ServiceBus:QueueName; a queue the stamp never created fails every job");
+    }
+
+    [Fact]
+    public void T186_L47_EveryQueueTheBffHardCodes_IsAQueueTheStampTemplateCreates()
+    {
+        // T186 L47 — live, the BFF's Office workers (office-upload-finalization, office-profile, office-indexing)
+        // looped on "messaging entity could not be found" on the ACME stamp: customer.bicep never created them.
+        var bffRoot = LocateRepoFile(Path.Combine("src", "server", "api", "Sprk.Bff.Api", "Sprk.Bff.Api.csproj"));
+        var queueConstant = new System.Text.RegularExpressions.Regex(
+            "const string \\w*QueueName\\s*=\\s*\"(?<name>[a-z0-9\\-]+)\"");
+        var hardCoded = Directory.EnumerateFiles(Path.GetDirectoryName(bffRoot)!, "*.cs", SearchOption.AllDirectories)
+            .Where(f => !f.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}", StringComparison.Ordinal)
+                        && !f.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}", StringComparison.Ordinal))
+            .SelectMany(f => queueConstant.Matches(File.ReadAllText(f)).Select(m => m.Groups["name"].Value))
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+
+        using var template = System.Text.Json.JsonDocument.Parse(
+            File.ReadAllText(LocateRepoFile(Path.Combine("infrastructure", "bicep", "customer.json"))));
+        var queues = template.RootElement.GetProperty("parameters").GetProperty("serviceBusQueues")
+            .GetProperty("defaultValue").EnumerateArray().Select(q => q.GetString()).ToList();
+
+        hardCoded.Should().Contain(new[] { "office-upload-finalization", "office-profile", "office-indexing" },
+            "must-fire control: the scan finds the Office workers' queue constants");
+        queueConstant.IsMatch("private const string QueueName = \"sdap-jobs\";").Should().BeTrue("must-fire control");
+        queueConstant.IsMatch("public string QueueName { get; set; } = \"x\";").Should().BeFalse("must-not-fire control: options defaults are config, not constants");
+        queues.Should().Contain(hardCoded, "a hard-coded queue the stamp never created fails every message on it");
+    }
+
+    [Fact]
+    public void T186_L48_H9HealthProbeWindow_CoversTheStampContainerStartLimit()
+    {
+        // T186 L48 — on S1 the BFF took ~220 s to listen; the platform's 230 s default start limit and H9's
+        // 24-attempt probe both gave up first. The stamp now allows 600 s; H9 must wait at least that long.
+        var bicep = File.ReadAllText(LocateRepoFile(Path.Combine("infrastructure", "bicep", "customer.bicep")));
+        var match = System.Text.RegularExpressions.Regex.Match(bicep, "WEBSITES_CONTAINER_START_TIME_LIMIT:\\s*'(?<s>\\d+)'");
+        match.Success.Should().BeTrue("customer.bicep sets the BFF container start-time limit (L48)");
+        var startLimit = TimeSpan.FromSeconds(int.Parse(match.Groups["s"].Value, System.Globalization.CultureInfo.InvariantCulture));
+
+        var options = new Sprk.Provisioning.ControlPlane.Handlers.BffDeploy.BffDeployOptions();
+        var minimumWindow = options.HealthProbeInterval * options.HealthProbeMaxRetries;   // every attempt failing fast
+
+        startLimit.Should().BeGreaterThan(TimeSpan.FromSeconds(230), "the platform default (230 s) is shorter than an S1 BFF start");
+        minimumWindow.Should().BeGreaterThanOrEqualTo(startLimit,
+            "H9 must not declare staging unhealthy while App Service is still allowed to be starting it");
     }
 
     /// <summary>
@@ -1195,6 +1435,9 @@ public sealed class H4bBulkAppSettingsHandlerTests
         s.BffAppRegId = "00000000-aaaa-bbbb-cccc-999999999999";
         s.DataverseEnvUrl = "https://acme.crm.dynamics.com/";   // H5 output (task 245b — Dataverse__ServiceUrl)
         s.SpeContainerId = "b!h8-created-customer-container";   // H8 output (task 227c — EmailProcessing__DefaultContainerId)
+        s.StorageBlobEndpoint = StorageBlobEndpoint;   // H2a output (T186 follow-up - SessionFileStore__BlobEndpoint)
+        s.CustomerBusinessUnitId = CustomerBusinessUnitId;   // H10 output (R3 073 — ExternalAccess__CustomerBusinessUnitId)
+        s.AiSearchIndexNames = [.. AiSearchIndexNames];   // H2b output (T186 follow-up — AiSearch__AllowedIndexes)
         return run;
     }
 

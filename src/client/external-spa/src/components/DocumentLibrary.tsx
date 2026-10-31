@@ -9,7 +9,10 @@
  * RIGHTS (task 054). Upload needs Create and download needs Read on the record. A host that knows better passes
  * `canUpload` / `canDownload`; otherwise download follows `accessLevel` (Collaborate / Full Access), and Upload follows
  * the BFF's `canCreate` on the record's document list (a matter, work assignment or service request) or `accessLevel`
- * (a project). This is only what is SHOWN: the server decides, and a refused upload shows its 403 as an error.
+ * (a project). For a caller whose write access is decided per record (`writeAccessPerRecord`, task 036), download and
+ * version history are offered wherever the list rendered (the list already passed the Read the download routes need), and
+ * a project's Upload follows its list's `canCreate`. This is only what is SHOWN: the server decides, and a refused upload
+ * shows its 403 as an error.
  *
  * DELETE-OWN (task 054, FR-26). With a `caller` identity, a row the caller created (creator stamp = the signed-in
  * principal) shows Delete, which asks first (shared ConfirmModal). 204 removes the row; a 403 / 409 / 503 / 500 shows a
@@ -682,10 +685,20 @@ export type DocumentLibraryProps = DocumentLibraryTarget & {
    * `accessLevel`. The server enforces Create either way.
    */
   canUpload?: boolean;
-  /** Show Download and Version history. Default: Collaborate / Full Access. The server enforces Read either way. */
+  /**
+   * Show Download and Version history. Default: Collaborate / Full Access, or — for a per-record caller
+   * (`writeAccessPerRecord`) — wherever the list rendered. The server enforces Read either way.
+   */
   canDownload?: boolean;
   /** The signed-in principal. With it, rows the caller created show Delete; without it, no row does (task 054). */
   caller?: CallerIdentity | null;
+  /**
+   * The caller's write access is decided per record (`/me` `writeAccessPerRecord`, task 036 fix round 1): a project's
+   * Upload then follows the BFF's `canCreate` on its document list, like every other record, instead of `accessLevel`;
+   * Download and Version history are offered wherever the list rendered (fix round 2), since the list read already passed
+   * the Read those routes check.
+   */
+  writeAccessPerRecord?: boolean;
 };
 
 // ---------------------------------------------------------------------------
@@ -717,6 +730,7 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
   canUpload,
   canDownload,
   caller,
+  writeAccessPerRecord = false,
 }) => {
   const styles = useStyles();
   // The props type refuses a call with neither; an empty id that still arrives (a caller that casts, or a blank id from
@@ -731,7 +745,9 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
   const [documents, setDocuments] = React.useState<ODataDocument[]>([]);
   // Task 105: the BFF said the list was cut short — shown, never presented as the whole list.
   const [truncated, setTruncated] = React.useState<boolean>(false);
-  // The BFF's `canCreate` for this record (null = not said; projects never use it, they follow the access level).
+  // The BFF's raw `canCreate` on this record's document list (null = not said, or not loaded yet). How it is read depends
+  // on `writeAccessPerRecord`, which is applied at render (below), never baked in by the fetch: `/me` may answer after the
+  // list did, and a stored, already-interpreted value would then be stale (task 036 fix round 2).
   const [listCanCreate, setListCanCreate] = React.useState<boolean | null>(null);
   const [loading, setLoading] = React.useState<boolean>(true);
   const [error, setError] = React.useState<string | null>(null);
@@ -741,8 +757,13 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
   // Task 066: why the last download failed (null = none); cleared when the next download starts.
   const [downloadError, setDownloadError] = React.useState<string | null>(null);
 
-  const showUpload = canUpload ?? listCanCreate ?? canUploadOrDownload(accessLevel);
-  const canActOnDocuments = canDownload ?? canUploadOrDownload(accessLevel);
+  // A project follows the access level unless the caller's write access is per record (task 036 fix round 1); then it
+  // follows `canCreate` like every other record, and a missing one reads as "cannot".
+  const uploadFromList = root === 'projects' ? (writeAccessPerRecord ? (listCanCreate ?? false) : null) : listCanCreate;
+  const showUpload = canUpload ?? uploadFromList ?? canUploadOrDownload(accessLevel);
+  // Download / version history need only Read on the record (the server checks it). A per-record caller's level says only
+  // what they may SEE, and the list rendering at all proves that Read, so they are offered (task 036 fix round 2).
+  const canActOnDocuments = canDownload ?? (writeAccessPerRecord || canUploadOrDownload(accessLevel));
 
   // Delete-own (task 054): the row leaves the list on the server's 204; any refusal keeps it and is shown.
   const del = useDeleteOwn<ODataDocument>({
@@ -773,12 +794,12 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
         const data = await getDocuments(recordId);
         setDocuments(data.items);
         setTruncated(data.truncated);
-        setListCanCreate(null);
+        setListCanCreate(data.canCreate ?? null);
       } else {
         const data = await getRecordDocuments(root, recordId);
         setDocuments(data.items);
         setTruncated(data.truncated);
-        setListCanCreate(data.canCreate);
+        setListCanCreate(data.canCreate ?? null);
       }
     } catch (err) {
       console.error('[DocumentLibrary] Failed to load documents:', err);
@@ -905,7 +926,10 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
               renderHeaderCell: () => '',
               renderCell: item => (
                 <div className={styles.actionButtons}>
-                  {canActOnDocuments && (
+                  {/* R3 ISS-011 (#1886): a document with no file stays listed but offers neither action (both would answer
+                      409 no_file_attached). Only an explicit false hides them: a BFF that does not send hasFile is an old
+                      BFF, and its rows keep today's behaviour. */}
+                  {canActOnDocuments && item.hasFile !== false && (
                     <>
                       <Tooltip content="Download" relationship="label">
                         <Button
