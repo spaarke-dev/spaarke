@@ -6,6 +6,13 @@ their text is kept, with headings one level down.
 
 ## Deviations for the PR
 
+- **An invoice-family `invoice_family_record_not_found` refusal is now the uniform not-found in chat.** The pre-write rule
+  maps the guard's `invoice_family_record_not_found` to `PreWriteRefusal.NotFound()` (`RecordTableRules.InvoiceFamilyPreWrite`),
+  which the service renders as `NotFoundOrDenied`; `DataverseCreateRecordHandler.RefusalErrorCode` gives that
+  `AccessDenied` and `RefusalText` the shared map's uniform not-found text. Before (master, `OwnedCreateResult`) the tool
+  returned the guard's own code and its reason ("`{entity}({id})` does not exist; nothing was written") — an existence
+  tell. It now matches the child-records route (`ChildRecordEndpoints.InvoiceFamilyRefused` → `ParentNotFound`) and the
+  ebilling correction (b). Every other invoice-family code keeps its own code and reason in chat.
 - **Chat and `email.draft` each keep one WhoAmI.** Chat keeps `WithForPersonAsync` (one WhoAmI plus the linked
   contact) for the "for" person (2d-3); `email.draft` keeps the WhoAmI for its pre-derivation AppendTo check, which is
   also the sender (2d-4). Both deviate from "adapters no longer resolve WhoAmI": the service leaves the "for" person to
