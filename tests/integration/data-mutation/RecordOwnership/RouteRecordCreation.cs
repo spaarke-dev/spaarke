@@ -41,12 +41,6 @@ internal static class RouteRecordCreation
             logger ?? NullLogger<RecordCreationService>.Instance);
 
     /// <summary>
-    /// The service's own app-only reads, answered so they add nothing a route suite did not see before: a team's business
-    /// unit (step 8 on a search-indexed table), a business unit with no search-index defaults (so nothing is filled), and any
-    /// other row read back with each asked column holding a number (step 12's autonumber read-back on a budget). Queries
-    /// return nothing (the project pair's catalog read is never asked on these tables).
-    /// </summary>
-    /// <summary>
     /// Task 017 (2d-3): the service over an owner resolver and an app-only writer, with an empty stamp world, an empty share
     /// world and (unless given) a secure-root gate that finds nothing secure — for the suites that construct a caller of the
     /// service (the chat create, the budget inquiry) and assert on the resolver and the app-only create only.
@@ -62,6 +56,12 @@ internal static class RouteRecordCreation
                 .Synchronizer(new Sprk.Bff.Api.Tests.AccessControl.FakeRecordShareTable()),
             gate ?? SecureRootFilingGateFixtures.NothingSecure(), scopes);
 
+    /// <summary>
+    /// The service's own app-only reads, answered so they add nothing a route suite did not see before: a team's business
+    /// unit (step 8 on a search-indexed table), a business unit with no search-index defaults (so nothing is filled), and any
+    /// other row read back with each asked column holding a number (step 12's autonumber read-back on a budget). Queries
+    /// return nothing (the project pair's catalog read is never asked on these tables).
+    /// </summary>
     internal static Mock<IGenericEntityService> Entities()
     {
         var entities = new Mock<IGenericEntityService>();
