@@ -859,3 +859,12 @@ When the home token has no `email` claim, the form's prefill falls back to the u
 | **What** | Column widths and sort order reset to the grid configuration on every open. The shared `DataGrid` has no resize callback and keeps sort locally, so nothing is saved. |
 | **Decision** | R4. It needs a change to the shared `DataGrid`, which other surfaces also use. First step: per browser; per user across devices later. |
 | **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2489 |
+
+### ISS-027: The record Documents list's columns cannot be resized and overlap (deferred to R4)
+
+| Field | Value |
+|---|---|
+| **Found** | 2026-10-31, task 072 (owner UAT) |
+| **What** | `components/DocumentLibrary.tsx` renders the record Documents list (record modal, project page) with its own Fluent `DataGrid`. It sets no widths and no `resizableColumns`, so its columns cannot be resized and they overlap. The Documents tab uses the shared grid and does not have this problem. |
+| **Decision** | Owner: R4. The preferred fix moves the list onto the shared `DataGrid`. |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2490 |

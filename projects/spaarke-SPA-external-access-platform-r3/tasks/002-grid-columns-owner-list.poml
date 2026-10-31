@@ -4,7 +4,7 @@
     <title>Grid columns per owner list (C4, FR-09)</title>
     <phase>0 Governance and inputs</phase>
     <gate>blocked until the owner supplies the per-tab column list</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Data-only configuration change with explicit acceptance; no code</rigor-reason>
     <model-tier>sonnet</model-tier>

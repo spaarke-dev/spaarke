@@ -10,7 +10,7 @@ Legend: Tier S = sonnet, O = opus · Effort h = high · status tokens `[open]` `
 | ID | Title | Phase | Status | Deps | Tier/Eff | Rigor | Parallel |
 |----|-------|-------|--------|------|----------|-------|----------|
 | 001 | ADR-028 amendment for R3 (A2, A3 :124, A1 :55) | P0 | ✅ [done] | none | O/h | FULL | — (.claude/, main session; owner approval) |
-| 002 | Grid columns per owner list (FR-09) | P0 | 🔄 [wip] step 1 live on dev 2026-10-29; step 2 (BFF allow-list PR #2450, deployed in 9f4afe82ac 2026-10-30) + the 9 grid columns applied on dev 2026-10-30 16:35Z; number and type columns 200px 2026-10-31 14:13Z; waiting for the owner's check of the six tabs | none (owner list) | S/h | STANDARD | Wave 1 when the list arrives |
+| 002 | Grid columns per owner list (FR-09) | P0 | ✅ [done] 2026-10-31 owner OK: owner's columns, labels and widths in all six dev grids (9 added via #2450; number and type columns 200px); rollback JSON in notes/task-002-notes.md | none (owner list) | S/h | STANDARD | Wave 1 when the list arrives |
 | 003 | Spike: Entra B2B self-service sign-up vs custom join (FR-12) | P0 | ✅ [done] | none | O/h | STANDARD | Wave 1 |
 | 010 | Ciam audience forms + default-scheme CIAM guard (FR-22, FR-23) | P1 | ✅ [done] | none | O/h | FULL | Wave 1 |
 | 011 | Modules by user type + partner service-request switch (FR-19, FR-06) | P1 | ✅ [done] | 001 | O/h | FULL | Wave 2 |
@@ -56,7 +56,7 @@ Legend: Tier S = sonnet, O = opus · Effort h = high · status tokens `[open]` `
 | 068 | "Internal Only" switch on message and email compose surfaces; column and form label "Internal Only" | P5b | ✅ [done] on dev and owner-checked 2026-10-15; "External / Internal Only" tags in the Messages modal and New Email (7419e8637, 247ce6a6e) | 065 | S/h | FULL | CHK3 |
 | 070 | Deploy SPA + dev Teams package to dev | P7 | ✅ [done] 2026-10-29: dev SPA at master `96f1f6b675` (run 40989384010); dev Teams package installed in Dewey Cheatham; smoke done in 071 (notes/task-070-deploy-record.md) | 038, 042, 043, 053, 055, 056, 057 | S/h | STANDARD | — (live, owner-gated) |
 | 071 | Teams live check: contact, licensed user, unlisted directory × desktop/web/mobile (FR-21, A9) | P7 | ✅ [done] 2026-10-29: 8/9 runs pass (unlisted × mobile deferred by owner); guest-check fix PR #2461; broker pre-auth answered no (notes/fr-21-teams-live-check.md) | 070, 075, 076 | S/h | STANDARD | — (owner-driven) |
-| 072 | Both-plane E2E on dev, success criteria 1–12 + FR-10 | P7 | 🔲 [open] needs 002 + 071 | 002, 070, 071 | S/h | STANDARD | — (live) |
+| 072 | Both-plane E2E on dev, success criteria 1–12 + FR-10 | P7 | 🔄 [wip] owner E2E on dev 2026-10-31: works; UAT feedback filed (#2490, R4); open: owner approval of the grant email copy (notes/task-072-e2e-record.md) | 002, 070, 071 | S/h | STANDARD | — (live) |
 | 073 | Production deploy to external.spaarke.com (gated) | P7 | 🔲 [open] BLOCKED — ACME gate items missing (notes/task-073-gate-acme.md): stamp v2/pre-auth/BU setting/removeUnverifiedEmailClaim, T240c/T240d, consent design, DNS, prod environment | 072 + T240c, T240d, DNS, owner go | S/h | STANDARD | — (blocked until gates) |
 | 074 | A9 live probes on dev | P7 | ✅ [done] 2026-10-29: all 8 probes pass (notes/task-074-a9-probes.md); follow-ups #2449 (R4) | 058, 059, 075 | S/h | STANDARD | — (live, owner-gated) |
 | 075 | SPA Teams strategy → multitenant NAA (Teams context tid), registration + link in Teams | P4b | ✅ [done] 2026-10-19 | 058 | S/h | FULL | A9 Wave 6 |
