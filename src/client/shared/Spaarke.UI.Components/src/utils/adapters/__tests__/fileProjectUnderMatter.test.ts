@@ -4,7 +4,9 @@
  * A project is filed under its matter through its ADR-024 regarding pair, which only the BFF writes. Pinned: the call is
  * `PATCH /api/v1/child-records/sprk_project/{projectId}` with ONLY the pair (the matter's id and the matter record type
  * read from the catalog); a refusal surfaces the server's words (thrown by the host's fetch, or returned); nothing is sent
- * when the screen has no BFF connection or the matter record type cannot be read.
+ * when the screen has no BFF connection or the matter record type cannot be read. The server judges a re-file: `?move=true`
+ * is sent only when asked; its 409 `project_filing.already_filed` (thrown or returned) resolves 'already-filed', not an
+ * error; any other 409 is still a refusal.
  *
  * Each test loads a fresh module: `resolveRecordType` caches the record type per page.
  */
@@ -49,7 +51,7 @@ describe('fileProjectUnderMatter (task 195)', () => {
     const fetchMock = jest.fn().mockResolvedValue(noContent);
     const types = catalog();
 
-    await fileProjectUnderMatter(fetchMock, BFF, types, PROJECT_ID, MATTER_ID);
+    await expect(fileProjectUnderMatter(fetchMock, BFF, types, PROJECT_ID, MATTER_ID)).resolves.toBe('filed');
 
     expect(types.retrieveMultipleRecords).toHaveBeenCalledWith(
       'sprk_recordtype_ref',
@@ -138,5 +140,67 @@ describe('fileProjectUnderMatter (task 195)', () => {
       /matter record type could not be read/
     );
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['no options', undefined, ''],
+    ['move: false', { move: false }, ''],
+    ['move: true', { move: true }, '?move=true'],
+  ])('%s -> the route %s', async (_label, options, query) => {
+    const { fileProjectUnderMatter } = load();
+    const fetchMock = jest.fn().mockResolvedValue(noContent);
+
+    await fileProjectUnderMatter(fetchMock, BFF, catalog(), PROJECT_ID, MATTER_ID, options);
+
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe(`${BFF}/api/v1/child-records/sprk_project/${PROJECT_ID}${query}`);
+    expect(Object.keys(JSON.parse(init.body)).sort()).toEqual([
+      'sprk_regardingrecordid',
+      'sprk_regardingrecordtype@odata.bind',
+    ]);
+  });
+
+  const alreadyFiled = {
+    title: 'Conflict',
+    status: 409,
+    detail: 'The project is already filed under another record.',
+    reasonCode: 'project_filing.already_filed',
+  };
+
+  it("409 already_filed thrown by the host's fetch resolves 'already-filed' (kept where it is, not an error)", async () => {
+    const { fileProjectUnderMatter } = load();
+    const fetchMock = jest.fn().mockRejectedValue(apiErrorFor(409, alreadyFiled));
+
+    await expect(fileProjectUnderMatter(fetchMock, BFF, catalog(), PROJECT_ID, MATTER_ID)).resolves.toBe(
+      'already-filed'
+    );
+  });
+
+  it("409 already_filed returned as a response resolves 'already-filed'", async () => {
+    const { fileProjectUnderMatter } = load();
+    const fetchMock = jest.fn().mockResolvedValue({
+      ok: false,
+      status: 409,
+      text: async () => JSON.stringify(alreadyFiled),
+    } as unknown as Response);
+
+    await expect(fileProjectUnderMatter(fetchMock, BFF, catalog(), PROJECT_ID, MATTER_ID)).resolves.toBe(
+      'already-filed'
+    );
+  });
+
+  it('any other 409 (e.g. secure matter) is still a refusal', async () => {
+    const { fileProjectUnderMatter } = load();
+    const fetchMock = jest.fn().mockRejectedValue(
+      apiErrorFor(409, {
+        title: 'Conflict',
+        detail: 'Projects cannot yet be filed under a secure matter.',
+        reasonCode: 'project_filing.secure_matter_unsupported',
+      })
+    );
+
+    await expect(fileProjectUnderMatter(fetchMock, BFF, catalog(), PROJECT_ID, MATTER_ID)).rejects.toThrow(
+      'Projects cannot yet be filed under a secure matter.'
+    );
   });
 });

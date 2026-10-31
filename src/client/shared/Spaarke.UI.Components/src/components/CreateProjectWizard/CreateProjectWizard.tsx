@@ -755,6 +755,9 @@ const CreateProjectWizard: React.FC<ICreateProjectWizardProps> = ({
         }
 
         // 1c. Wire association from AssociateToStep (if the user made a selection)
+        // Task 195: a project the server found already filed under another matter is said on the result screen (a note,
+        // not a warning: nothing failed, the project stays where it is).
+        let filingNote: string | undefined;
         const association = context.association;
         if (association?.recordId) {
           try {
@@ -769,7 +772,19 @@ const CreateProjectWizard: React.FC<ICreateProjectWizardProps> = ({
                 skippedForSecure.push('filing it under the matter');
               } else {
                 try {
-                  await fileProjectUnderMatter(authFetch, bffBaseUrl, dataService, projectId, association.recordId);
+                  // A new project is not filed: never a move. Should the server find it filed elsewhere, it leaves it.
+                  const filed = await fileProjectUnderMatter(
+                    authFetch,
+                    bffBaseUrl,
+                    dataService,
+                    projectId,
+                    association.recordId
+                  );
+                  if (filed === 'already-filed') {
+                    filingNote =
+                      `The project is linked to "${association.recordName}". It is already filed under another ` +
+                      'matter, so it stays filed there; it was not moved.';
+                  }
                 } catch (fileErr) {
                   const fileMessage = fileErr instanceof Error ? fileErr.message : String(fileErr);
                   warnings.push(
@@ -935,6 +950,11 @@ const CreateProjectWizard: React.FC<ICreateProjectWizardProps> = ({
                       ? '.'
                       : ' and is ready to use.'}
               </Text>
+              {filingNote && (
+                <Text block size={300} style={{ color: tokens.colorNeutralForeground2 }}>
+                  {filingNote}
+                </Text>
+              )}
               {retryableProvisioning && authFetch && bffBaseUrl && (
                 <SecureProvisioningOutcome
                   projectId={projectId}

@@ -4,7 +4,8 @@
  * The Create Matter wizard links the new matter to a picked project and, when the project is not filed under anything,
  * files it under the new matter through the BFF. A project ALREADY filed under another matter is moved only when the
  * user chooses to (owner, 2026-10-31: re-filing is allowed, but never as a side effect): the default keeps it where it
- * is, and the link is still written.
+ * is, and the link is still written. This read only shapes the choice: the server is the judge (a filing without `move`
+ * never moves a project it finds filed under another matter).
  */
 import * as React from 'react';
 import { MessageBar, MessageBarBody, Radio, RadioGroup, Text, tokens } from '@fluentui/react-components';
@@ -17,7 +18,7 @@ export type ProjectFiling =
   | { kind: 'unfiled' }
   /** The pair names a record; `label` is its name or number when one could be read ('another matter' otherwise). */
   | { kind: 'filed'; recordId: string; label: string }
-  /** The pair could not be read: the project is linked but not filed (fail closed — never a blind re-file). */
+  /** The pair could not be read: the wizard files without asking to move, so the server leaves a filed project where it is. */
   | { kind: 'unreadable'; message: string };
 
 const PAIR_SELECT = '?$select=sprk_regardingrecordid,sprk_regardingrecordname,_sprk_regardingrecordtype_value';
@@ -82,10 +83,10 @@ export const ProjectFilingChoice: React.FC<IProjectFilingChoiceProps> = ({
   if (filing.kind === 'unfiled') return null;
   if (filing.kind === 'unreadable') {
     return (
-      <MessageBar intent="warning">
+      <MessageBar intent="info">
         <MessageBarBody>
-          Where &ldquo;{projectName}&rdquo; is filed could not be read, so it will be linked to the new matter but not
-          filed under it.
+          Where &ldquo;{projectName}&rdquo; is filed could not be checked. It will be filed under the new matter only if
+          it is not already filed under another matter; otherwise it stays where it is.
         </MessageBarBody>
       </MessageBar>
     );

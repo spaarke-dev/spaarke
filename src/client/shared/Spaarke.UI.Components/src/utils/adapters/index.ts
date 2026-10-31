@@ -47,6 +47,7 @@ export { createXrmNavigationService } from './xrmNavigationServiceAdapter';
 // BFF API adapters (Power Pages SPA context)
 export { createBffDataService } from './bffDataServiceAdapter';
 export type { AuthenticatedFetch } from './bffDataServiceAdapter';
+export type { ProjectFilingResult } from './bffChildWriteAdapter';
 export { createBffUploadService } from './bffUploadServiceAdapter';
 export type { GetBearerToken } from './bffUploadServiceAdapter';
 export { createBffNavigationService } from './bffNavigationServiceAdapter';
@@ -59,6 +60,7 @@ export {
   createChildRecordViaBff,
   updateChildRecordViaBff,
   fileProjectUnderMatter,
+  PROJECT_ALREADY_FILED_CODE,
   isBffChildCreateTable,
   isBffChildRefileTable,
   ChildRecordWriteError,

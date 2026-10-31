@@ -9,7 +9,8 @@
  *   - a failed N:N write files nothing (its own warning, as before);
  *   - an account association files nothing;
  *   - a launch-context association (the subgrid "New Project" command) reaches the Associate-To step, locked;
- *   - a secure-requested project whose securing did not finish is not filed: it is named in the held-back warning.
+ *   - a secure-requested project whose securing did not finish is not filed: it is named in the held-back warning;
+ *   - a new project is never filed with `move`; a 409 `project_filing.already_filed` is a "kept" note, not a warning.
  */
 import * as React from 'react';
 import { renderWithProviders } from '../../../__mocks__/pcfMocks';
@@ -131,6 +132,7 @@ describe('CreateProjectWizard — the linked matter becomes the filing root (tas
     expect(calls).toHaveLength(2);
     expect(calls[0]).toBe(`dataverse /api/data/v9.0/sprk_projects(${PROJECT_ID})/sprk_Project_Matter_nn/$ref`);
     expect(calls[1]).toMatch(new RegExp(`^bff PATCH /api/v1/child-records/sprk_project/${PROJECT_ID} `));
+    expect(calls[1]).not.toContain('move=');
     expect(JSON.parse(calls[1].slice(calls[1].indexOf('{')))).toEqual({
       sprk_regardingrecordid: MATTER_ID,
       'sprk_regardingrecordtype@odata.bind': `/sprk_recordtype_refs(${MATTER_TYPE_ID})`,
@@ -153,6 +155,28 @@ describe('CreateProjectWizard — the linked matter becomes the filing root (tas
     expect(warnings).toContain('linked to "MAT-1", but it could not be filed under that matter');
     expect(warnings).toContain('You cannot file records under this matter.');
     expect(success.title).toBe('Project created with warnings');
+  });
+
+  it('a 409 already_filed leaves the project where it is: a note on the result screen, no warning', async () => {
+    const alreadyFiled = {
+      ok: false,
+      status: 409,
+      json: async () => ({
+        title: 'Conflict',
+        status: 409,
+        detail: 'The project is already filed under another record.',
+        reasonCode: 'project_filing.already_filed',
+      }),
+    } as unknown as Response;
+
+    const success = await render(bffFetch(alreadyFiled)).onFinish(contextWith(matter));
+
+    expect(success.warnings ?? []).toEqual([]);
+    expect(success.title).not.toBe('Project created with warnings');
+    const { container } = renderWithProviders(<>{success.body}</>);
+    expect(container.textContent).toContain(
+      'The project is linked to "MAT-1". It is already filed under another matter, so it stays filed there'
+    );
   });
 
   it('a failed N:N write files nothing and keeps its own warning', async () => {

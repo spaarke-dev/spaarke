@@ -11,7 +11,10 @@
  *   - an invoice association files no project;
  *   - a launch-context association (the subgrid "New Matter" command) reaches the Associate-To step, locked;
  *   - the project's pair is read first: a project already filed under another matter stays there unless the user
- *     chooses "Move" (the link is still written); an unreadable pair files nothing and warns; the result says which.
+ *     chooses "Move" (no filing call; the link is still written); "Move" sends `?move=true`;
+ *   - otherwise (not filed, or unreadable) the filing goes WITHOUT move and the server judges: its 409
+ *     `project_filing.already_filed` is a "kept" note on the result screen, not a warning and not "filed";
+ *   - the result says which.
  */
 import * as React from 'react';
 import { act, fireEvent, screen } from '@testing-library/react';
@@ -84,6 +87,18 @@ function bffFetch(filingResponse: Response) {
 }
 
 const noContent = { ok: true, status: 204, json: async () => ({}), text: async () => '' } as unknown as Response;
+/** The server found the project filed under another matter and no move was asked (nothing written). */
+const alreadyFiled = {
+  ok: false,
+  status: 409,
+  json: async () => ({
+    title: 'Conflict',
+    status: 409,
+    detail: 'The project is already filed under another record.',
+    reasonCode: 'project_filing.already_filed',
+  }),
+} as unknown as Response;
+const KEPT = '"PRJ-1" is linked to this matter. It is already filed under another matter, so it stays filed there';
 
 function contextWith(association: AssociationResult | null): IFinishContext {
   return {
@@ -159,7 +174,9 @@ describe('CreateMatterWizard — the linked project is filed under the new matte
 
     expect(calls).toHaveLength(2);
     expect(calls[0]).toBe(`dataverse /api/data/v9.0/sprk_projects(${PROJECT_ID})/sprk_Project_Matter_nn/$ref`);
+    // An unfiled read sends no move: the server alone may find it filed elsewhere.
     expect(calls[1]).toMatch(new RegExp(`^bff PATCH /api/v1/child-records/sprk_project/${PROJECT_ID} `));
+    expect(calls[1]).not.toContain('move=');
     expect(JSON.parse(calls[1].slice(calls[1].indexOf('{')))).toEqual({
       sprk_regardingrecordid: MATTER_ID,
       'sprk_regardingrecordtype@odata.bind': `/sprk_recordtype_refs(${MATTER_TYPE_ID})`,
@@ -167,6 +184,19 @@ describe('CreateMatterWizard — the linked project is filed under the new matte
     expect(success.warnings ?? []).toEqual([]);
     expect(dataService.updateRecord).not.toHaveBeenCalled();
     expect(bodyText(success)).toContain('"PRJ-1" is linked to this matter and filed under it.');
+  });
+
+  it('read as unfiled, but the server finds it filed elsewhere (409 already_filed): a "kept" note, not filed, no warning', async () => {
+    const success = await render(bffFetch(alreadyFiled)).onFinish(contextWith(project));
+
+    const bff = calls.filter(c => c.startsWith('bff '));
+    expect(bff).toHaveLength(1);
+    expect(bff[0]).not.toContain('move=');
+    expect(success.warnings ?? []).toEqual([]);
+    expect(success.title).not.toBe('Matter created with warnings');
+    const text = bodyText(success);
+    expect(text).toContain(KEPT);
+    expect(text).not.toContain('filed under it.');
   });
 
   it('a project filed under another matter stays there by default: link written, no filing call, result says so', async () => {
@@ -199,23 +229,36 @@ describe('CreateMatterWizard — the linked project is filed under the new matte
 
     const bff = calls.filter(c => c.startsWith('bff '));
     expect(bff).toHaveLength(1);
-    expect(bff[0]).toMatch(new RegExp(`^bff PATCH /api/v1/child-records/sprk_project/${PROJECT_ID} `));
+    expect(bff[0]).toMatch(new RegExp(`^bff PATCH /api/v1/child-records/sprk_project/${PROJECT_ID}\\?move=true `));
     expect(JSON.parse(bff[0].slice(bff[0].indexOf('{'))).sprk_regardingrecordid).toBe(MATTER_ID);
     expect(success.warnings ?? []).toEqual([]);
     expect(bodyText(success)).toContain('"PRJ-1" was moved from MAT-OLD to this matter');
   });
 
-  it('an unreadable pair files nothing and warns; the link is still written', async () => {
+  it('an unreadable pair: filed WITHOUT move, and the server files it when it is not filed elsewhere', async () => {
     (dataService.retrieveRecord as jest.Mock).mockRejectedValue(new Error('read denied'));
 
     const success = await render(bffFetch(noContent)).onFinish(contextWith(project));
 
     expect(calls.filter(c => c.startsWith('dataverse '))).toHaveLength(1);
-    expect(calls.filter(c => c.startsWith('bff '))).toEqual([]);
-    const warnings = (success.warnings ?? []).join(' ');
-    expect(warnings).toContain('where that project is filed could not be read (read denied)');
-    expect(warnings).toContain('so it was not filed under this matter');
-    expect(success.title).toBe('Matter created with warnings');
+    const bff = calls.filter(c => c.startsWith('bff '));
+    expect(bff).toHaveLength(1);
+    expect(bff[0]).toMatch(new RegExp(`^bff PATCH /api/v1/child-records/sprk_project/${PROJECT_ID} `));
+    expect(bff[0]).not.toContain('move=');
+    expect(success.warnings ?? []).toEqual([]);
+    expect(bodyText(success)).toContain('"PRJ-1" is linked to this matter and filed under it.');
+  });
+
+  it('an unreadable pair: filed WITHOUT move, and a 409 already_filed leaves it where it is, said as a note', async () => {
+    (dataService.retrieveRecord as jest.Mock).mockRejectedValue(new Error('read denied'));
+
+    const success = await render(bffFetch(alreadyFiled)).onFinish(contextWith(project));
+
+    const bff = calls.filter(c => c.startsWith('bff '));
+    expect(bff).toHaveLength(1);
+    expect(bff[0]).not.toContain('move=');
+    expect(success.warnings ?? []).toEqual([]);
+    expect(bodyText(success)).toContain(KEPT);
   });
 
   it("a refused filing is a visible warning with the server's words; the link stays", async () => {

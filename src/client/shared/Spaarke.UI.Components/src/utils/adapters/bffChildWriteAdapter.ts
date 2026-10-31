@@ -27,6 +27,7 @@
 import type { IDataService } from '../../types/serviceInterfaces';
 import type { AuthenticatedFetch } from './bffDataServiceAdapter';
 import { resolveRecordType, type IPolymorphicWebApi } from '../../services/PolymorphicResolverService';
+import { isApiError, problemOf } from '../thrownFetchError';
 
 /**
  * The tables a browser writer creates through the BFF (task 147's census). Lower-case logical names.
@@ -265,17 +266,24 @@ export async function updateChildRecordViaBff(
  * writes it through `Xrm.WebApi`.
  *
  * `recordTypes` reads the ADR-024 record-type catalog (`sprk_recordtype_ref`) for the matter's record-type id — the
- * wizard's own data service. Resolves when the server answered 2xx (204, including "already filed there"); rejects with
- * the server's words otherwise ({@link ChildRecordWriteError}, or the error the host's fetch throws) — the caller shows
- * them as a warning.
+ * wizard's own data service.
+ *
+ * The server is the judge of a re-file: a project already filed under a DIFFERENT matter is moved only with
+ * `options.move` (`?move=true`, sent only when the user chose to move it). Without it the server answers 409
+ * {@link PROJECT_ALREADY_FILED_CODE} and writes nothing — resolved here as `'already-filed'` (the project stays where it
+ * is; the caller says so, it is not an error).
+ *
+ * Resolves `'filed'` when the server answered 2xx (204, including "already filed there"); rejects with the server's words
+ * otherwise ({@link ChildRecordWriteError}, or the error the host's fetch throws) — the caller shows them as a warning.
  */
 export async function fileProjectUnderMatter(
   authenticatedFetch: AuthenticatedFetch | undefined,
   bffBaseUrl: string | undefined,
   recordTypes: IPolymorphicWebApi,
   projectId: string,
-  matterId: string
-): Promise<void> {
+  matterId: string,
+  options: { move?: boolean } = {}
+): Promise<ProjectFilingResult> {
   if (!authenticatedFetch || typeof bffBaseUrl !== 'string') {
     throw new ChildRecordWriteError(
       'The project was not filed under the matter: this screen is not connected to the Spaarke service, which must save it.',
@@ -292,20 +300,42 @@ export async function fileProjectUnderMatter(
     );
   }
 
-  const response = await authenticatedFetch(
-    joinUrl(bffBaseUrl, `/api/v1/child-records/sprk_project/${cleanId(projectId)}`),
-    {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        sprk_regardingrecordid: cleanId(matterId),
-        'sprk_regardingrecordtype@odata.bind': `/sprk_recordtype_refs(${cleanId(matterType.id)})`,
-      }),
-    }
-  );
-  if (!response.ok) {
-    throw await failureOf(response, 'The project could not be filed under the matter');
+  const query = options.move === true ? '?move=true' : '';
+  let response: Response;
+  try {
+    response = await authenticatedFetch(
+      joinUrl(bffBaseUrl, `/api/v1/child-records/sprk_project/${cleanId(projectId)}${query}`),
+      {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          sprk_regardingrecordid: cleanId(matterId),
+          'sprk_regardingrecordtype@odata.bind': `/sprk_recordtype_refs(${cleanId(matterType.id)})`,
+        }),
+      }
+    );
+  } catch (err) {
+    // The host's fetch throws ApiError for a non-2xx: "already filed elsewhere" is an answer, not a failure.
+    if (isApiError(err, 409) && reasonCodeOf(problemOf(err)) === PROJECT_ALREADY_FILED_CODE) return 'already-filed';
+    throw err;
   }
+  if (!response.ok) {
+    const failure = await failureOf(response, 'The project could not be filed under the matter');
+    if (failure.status === 409 && failure.reasonCode === PROJECT_ALREADY_FILED_CODE) return 'already-filed';
+    throw failure;
+  }
+  return 'filed';
+}
+
+/** The server's code for "the project is already filed under another matter and no move was asked" (409, nothing written). */
+export const PROJECT_ALREADY_FILED_CODE = 'project_filing.already_filed';
+
+/** {@link fileProjectUnderMatter}'s answer: filed under the matter, or left under the other matter it is filed under. */
+export type ProjectFilingResult = 'filed' | 'already-filed';
+
+function reasonCodeOf(problem: Record<string, unknown> | null): string | undefined {
+  const code = problem?.['reasonCode'] ?? problem?.['errorCode'];
+  return typeof code === 'string' ? code : undefined;
 }
 
 /**

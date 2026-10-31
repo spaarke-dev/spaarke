@@ -708,30 +708,40 @@ export const CreateMatterWizard: React.FC<ICreateMatterWizardProps> = ({
             );
           } else if (context.association.entityType === 'sprk_project') {
             // Task 195 (#2352): the N:N above is an association; it confers nothing. The project's filing root is its
-            // regarding pair, which the BFF writes. Read where it is filed first (as the user):
-            //   - not filed: file it under the new matter;
-            //   - filed under another record: move it only when the user chose "Move" (default: keep, the link stays);
-            //   - unreadable: do not file (never a blind re-file); a visible warning.
+            // regarding pair, which the BFF writes. The pair read when the project was picked drives the choice shown:
+            //   - filed under another matter and the user kept it (the default): no filing call; the link stays;
+            //   - filed under another matter and the user chose "Move": filed with move (the server re-files it);
+            //   - otherwise (not filed, or the read gave nothing): filed WITHOUT move. The server is the judge: a project
+            //     it finds filed elsewhere (a pair this user cannot read, or one set since the pick) is left there and
+            //     answered 'already-filed', said on the result screen — never a silent move.
             // A refused filing is its own warning: the link stands, the filing did not happen.
             const projectName = context.association.recordName;
             const projectId = cleanGuid(context.association.recordId);
             const filing = await getProjectFiling(projectId);
             const moving = filing.kind === 'filed' && moveProjectRef.current[projectId] === true;
-            if (filing.kind === 'unreadable') {
-              result.warnings.push(
-                `Matter created and linked to "${projectName}", but where that project is filed could not be read ` +
-                  `(${filing.message}), so it was not filed under this matter.`
-              );
-            } else if (filing.kind === 'filed' && !moving) {
+            if (filing.kind === 'filed' && !moving) {
               filingNote = `"${projectName}" is linked to this matter and stays filed under ${filing.label}.`;
             } else {
               try {
-                await fileProjectUnderMatter(authenticatedFetch, bffBaseUrl, dataService, projectId, matterId);
-                filingNote =
-                  filing.kind === 'filed'
-                    ? `"${projectName}" was moved from ${filing.label} to this matter; its owning team and the ` +
-                      'records under it follow the matter.'
-                    : `"${projectName}" is linked to this matter and filed under it.`;
+                const filed = await fileProjectUnderMatter(
+                  authenticatedFetch,
+                  bffBaseUrl,
+                  dataService,
+                  projectId,
+                  matterId,
+                  { move: moving }
+                );
+                if (filed === 'already-filed') {
+                  filingNote =
+                    `"${projectName}" is linked to this matter. It is already filed under another matter, so it ` +
+                    'stays filed there; it was not moved.';
+                } else if (filing.kind === 'filed') {
+                  filingNote =
+                    `"${projectName}" was moved from ${filing.label} to this matter; its owning team and the ` +
+                    'records under it follow the matter.';
+                } else {
+                  filingNote = `"${projectName}" is linked to this matter and filed under it.`;
+                }
               } catch (fileErr) {
                 const fileMessage = fileErr instanceof Error ? fileErr.message : String(fileErr);
                 result.warnings.push(
