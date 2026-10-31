@@ -367,3 +367,33 @@ public sealed record InvoiceSubmissionFromEmailAccepted(Guid SubmissionId, Guid 
 
 /// <summary>One firm of a core record (contract section 8).</summary>
 public sealed record CoreRecordFirm(Guid FirmId, string Name);
+
+/// <summary>The 200 body of <c>GET /api/finance/invoices/{invoiceId}/correction-prefill</c> (ebilling-r1 task 097e; contract section 10).</summary>
+/// <param name="InvoiceId">The invoice asked about.</param>
+/// <param name="Firm">The invoice's firm.</param>
+/// <param name="CoreRecord">The invoice's one core record.</param>
+/// <param name="InvoiceStatus">The <c>InvoiceLifecycleStatus</c> name; null for a status this lifecycle does not know.</param>
+/// <param name="TrackingNumber">The invoice's own submission's tracking number; null when it has none.</param>
+/// <param name="FirmInvoiceNumber">The firm invoice number the invoice was submitted with.</param>
+/// <param name="CanCorrect">The intake's answer now (<see cref="InvoiceSubmissionService.JudgeCorrectionAsync"/>).</param>
+/// <param name="Reason">When not <paramref name="CanCorrect"/>: <c>invoice_status</c>, <c>no_submission</c> or <c>submission_in_progress</c>; else null.</param>
+/// <param name="ReplacedBy">When the invoice is Superseded: its direct replacement, if the caller can read it; else null.</param>
+public sealed record CorrectionPrefillResponse(
+    Guid InvoiceId,
+    CorrectionPrefillFirm Firm,
+    CorrectionPrefillCoreRecord CoreRecord,
+    string? InvoiceStatus,
+    string? TrackingNumber,
+    string FirmInvoiceNumber,
+    bool CanCorrect,
+    string? Reason,
+    CorrectionPrefillReplacement? ReplacedBy);
+
+/// <summary>The prefill's firm (<c>sprk_organization</c> id and name).</summary>
+public sealed record CorrectionPrefillFirm(Guid Id, string Name);
+
+/// <summary>The prefill's core record: <c>entityType</c> is <c>Matter</c>, <c>Project</c> or <c>WorkAssignment</c> (the intake vocabulary).</summary>
+public sealed record CorrectionPrefillCoreRecord(string EntityType, Guid EntityId, string Name);
+
+/// <summary>The invoice that replaced a Superseded one, as the caller may see it (id and the invoice's primary name).</summary>
+public sealed record CorrectionPrefillReplacement(Guid InvoiceId, string Name);
