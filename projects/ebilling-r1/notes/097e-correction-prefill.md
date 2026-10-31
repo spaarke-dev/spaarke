@@ -39,7 +39,17 @@ New surface: one route, one handler with two helpers, four small response record
 
 ## BFF hygiene (§10)
 
-Placement: `Sprk.Bff.Api`, `Api/Finance` and `Services/Finance/Submission`, where the Correction intake already lives (the BFF is the single backend for the add-in; ADR-008 filter, ADR-001). No new DI registration, package or background work; no AI facade involved. Publish size: see the report of the task (measured against a fresh master build at short paths). No package change, so no new CVE.
+Placement: `Sprk.Bff.Api`, `Api/Finance` and `Services/Finance/Submission`, where the Correction intake already lives (the BFF is the single backend for the add-in; ADR-008 filter, ADR-001). No new DI registration, package or background work; no AI facade involved. No package or project file changed; `dotnet list package --vulnerable --include-transitive` on `Sprk.Bff.Api`: no vulnerable packages.
+
+**Publish size.** Command `dotnet publish -c Release -r linux-x64 --self-contained false src/server/api/Sprk.Bff.Api/ -o <dir>\deploy\api-publish`, framework-dependent linux-x64, Release, each side exported with `git archive` to a short path (`C:\w97em` master `04c03ef814`, `C:\w97ep` task base `2ef3ee971c`, `C:\w97eb` this head), zipped with `Compress-Archive -CompressionLevel Optimal` over `api-publish\*`, PDBs included, 192 files on every side. The three folders were deleted afterwards.
+
+| Side | Zipped | `Sprk.Bff.Api.dll` |
+|---|---|---|
+| master `04c03ef814` | 40,963,903 B (39.07 MiB) | 24,204,800 B |
+| task base `2ef3ee971c` | 41,080,767 B (39.18 MiB) | 24,493,056 B |
+| this head | 41,090,374 B (39.19 MiB) | 24,518,656 B |
+
+Delta against the fresh master build: **+126,471 B (+0.12 MB)**, of which the ebilling base itself is +116,864 B; this task adds **+9,607 B** (dll +25,600 B). Well under the +5 MB trigger and the 55 MB review line.
 
 ## Tests (34 in `InvoiceCorrectionPrefillContractTests`)
 
