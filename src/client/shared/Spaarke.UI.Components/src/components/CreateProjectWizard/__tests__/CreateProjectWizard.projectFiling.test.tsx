@@ -8,7 +8,8 @@
  *   - a refused filing is a visible warning carrying the server's words — never swallowed; the link stays;
  *   - a failed N:N write files nothing (its own warning, as before);
  *   - an account association files nothing;
- *   - a launch-context association (the subgrid "New Project" command) reaches the Associate-To step, locked.
+ *   - a launch-context association (the subgrid "New Project" command) reaches the Associate-To step, locked;
+ *   - a secure-requested project whose securing did not finish is not filed: it is named in the held-back warning.
  */
 import * as React from 'react';
 import { renderWithProviders } from '../../../__mocks__/pcfMocks';
@@ -16,6 +17,7 @@ import type { ICreateRecordWizardConfig, IFinishContext, IFollowOnState } from '
 import type { IDataService, INavigationService } from '../../../types/serviceInterfaces';
 import type { AssociationResult } from '../../AssociateToStep/types';
 import { CreateProjectWizard } from '../CreateProjectWizard';
+import { describeHeldBackForSecure } from '../provisioningService';
 import { throwingAuthenticatedFetch } from '../../../__tests__/helpers/authenticatedFetchDouble';
 
 const mockShell: { config?: ICreateRecordWizardConfig } = {};
@@ -169,6 +171,25 @@ describe('CreateProjectWizard — the linked matter becomes the filing root (tas
 
     expect(calls.filter(c => c.startsWith('bff '))).toEqual([]);
     expect(success.warnings ?? []).toEqual([]);
+  });
+
+  it('secure requested and securing refused: the link is written, the project is NOT filed, and that is said', async () => {
+    const refusedProvision = {
+      ok: false,
+      status: 500,
+      json: async () => ({ reasonCode: 'sdap.provision.secure_bu_not_found', detail: 'operator text' }),
+    } as unknown as Response;
+
+    const success = await render(bffFetch(refusedProvision), {
+      initialFormValues: { projectName: 'Acme', isSecure: true },
+    }).onFinish(contextWith(matter));
+
+    expect(calls.some(c => c.startsWith('bff ') && c.includes('/provision'))).toBe(true);
+    expect(calls.filter(c => c.includes('/api/v1/child-records/sprk_project/'))).toEqual([]);
+    expect(calls.filter(c => c.startsWith('dataverse '))).toEqual([
+      `dataverse /api/data/v9.0/sprk_projects(${PROJECT_ID})/sprk_Project_Matter_nn/$ref`,
+    ]);
+    expect(success.warnings).toContain(describeHeldBackForSecure(['filing it under the matter']));
   });
 
   it('a launch-context association (subgrid "New Project") reaches the Associate-To step, locked', () => {

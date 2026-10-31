@@ -763,14 +763,20 @@ const CreateProjectWizard: React.FC<ICreateProjectWizardProps> = ({
               await associateProjectWithMatter(projectId, association.recordId);
               // Task 195 (#2352): then file the project under the matter — its regarding pair, its one filing root,
               // which the BFF writes. A refusal is its own warning: the link above stands, the filing did not happen.
-              try {
-                await fileProjectUnderMatter(authFetch, bffBaseUrl, dataService, projectId, association.recordId);
-              } catch (fileErr) {
-                const fileMessage = fileErr instanceof Error ? fileErr.message : String(fileErr);
-                warnings.push(
-                  `The project is linked to "${association.recordName}", but it could not be filed under that ` +
-                    `matter: ${fileMessage} — Its access does not follow the matter until it is filed.`
-                );
+              // A secure-requested project whose securing did not finish is not filed (like the other adds above):
+              // it is said in the held-back warning.
+              if (secureBlocked) {
+                skippedForSecure.push('filing it under the matter');
+              } else {
+                try {
+                  await fileProjectUnderMatter(authFetch, bffBaseUrl, dataService, projectId, association.recordId);
+                } catch (fileErr) {
+                  const fileMessage = fileErr instanceof Error ? fileErr.message : String(fileErr);
+                  warnings.push(
+                    `The project is linked to "${association.recordName}", but it could not be filed under that ` +
+                      `matter: ${fileMessage} — Its access does not follow the matter until it is filed.`
+                  );
+                }
               }
             } else if (association.entityType === 'account') {
               // N:1 account lookup on the project record
