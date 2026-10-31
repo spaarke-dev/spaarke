@@ -1032,7 +1032,12 @@ public partial class SecureRootInheritanceWriterTests : TypedToolHandlerTestFixt
     /// #1616: the application's update-only writer the update tool uses for a project's BFF-managed pair — applying the write
     /// to the fixture's Dataverse.
     /// </summary>
-    private Mock<IFieldMappingDataverseService> AppUpdatesTheWorld()
+    /// <remarks>Task 195: the project's pair is written by <c>ProjectMatterFiling</c> — read (pair, version, flags, the
+    /// record-type catalog) and written ONLY while the row is still at the version read (<c>If-Match</c>); a changed version
+    /// is Dataverse's 412 (<see cref="System.Data.DBConcurrencyException"/>), nothing written. The unconditional
+    /// <c>UpdateExistingRecordFieldsAsync</c> stays set up so a test can prove it is no longer called.</remarks>
+    /// <param name="beforeConditionalWrite">What changes between the core's read and its conditional write.</param>
+    private Mock<IFieldMappingDataverseService> AppUpdatesTheWorld(Action? beforeConditionalWrite = null)
     {
         var service = new Mock<IFieldMappingDataverseService>(MockBehavior.Strict);
         service
@@ -1040,17 +1045,50 @@ public partial class SecureRootInheritanceWriterTests : TypedToolHandlerTestFixt
                 It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object?>>(), It.IsAny<CancellationToken>()))
             .Callback<string, Guid, Dictionary<string, object?>, CancellationToken>((t, id, f, _) => ApplyFiling(t, id, f))
             .Returns(Task.CompletedTask);
+        service
+            .Setup(s => s.RetrieveRecordFieldsAsync(
+                It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((string table, Guid id, string[] fields, CancellationToken _) =>
+            {
+                var row = new Dictionary<string, object?>();
+                if (!World.Has(table, id))
+                    return row; // the Web API's 404: an empty row
+                foreach (var field in fields)
+                {
+                    row[field] = field.StartsWith('_') && field.EndsWith("_value", StringComparison.Ordinal)
+                        ? World.ValueOf<EntityReference>(table, id, field[1..^"_value".Length])?.Id.ToString("D")
+                        : World.ValueOf<object>(table, id, field);
+                }
+
+                return row;
+            });
+        service
+            .Setup(s => s.UpdateRecordFieldsIfUnchangedAsync(
+                It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object?>>(), It.IsAny<long>(),
+                It.IsAny<CancellationToken>()))
+            .Callback<string, Guid, Dictionary<string, object?>, long, CancellationToken>((t, id, f, version, _) =>
+            {
+                beforeConditionalWrite?.Invoke();
+                if (!World.Has(t, id))
+                    throw new KeyNotFoundException($"Test: {t} {id} does not exist.");
+                if (World.ValueOf<long?>(t, id, "versionnumber") != version)
+                    throw new System.Data.DBConcurrencyException($"Test: {t} {id} is not at version {version}.");
+                ApplyFiling(t, id, f);
+                World.Set(t, id, "versionnumber", version + 1);
+            })
+            .Returns(Task.CompletedTask);
         return service;
     }
 
     /// <summary>
-    /// The control, and #1616's update path: a project re-filed by the pair under a secure matter the caller may append to
-    /// is secured after the write. The pair columns are field-secured, so the caller's own PATCH of them is refused (403) —
-    /// the tool sends the caller's PATCH of every OTHER column and the application writes the pair, after the AppendTo check
-    /// AS THE CALLER. Before the fix the caller's PATCH carried the pair and was refused.
+    /// Task 195 (item 6), replacing #1616's "secured after the write": a project re-filed by the pair under a secure matter
+    /// the caller may append to is now REFUSED before anything is written (<c>project_filing.secure_matter_unsupported</c>).
+    /// Securing it would give the project a container of its own under a secure matter, and every record filed under the
+    /// project would then have two secure roots above it, which the storage resolver refuses (task 178 lifts this). Neither
+    /// the caller's PATCH of the other columns nor the application's pair write is sent.
     /// </summary>
     [Fact]
-    public async Task ChatUpdate_AProjectReFiledByThePairUnderAnAppendableSecureMatter_WritesThePairAsTheApplication_AndSecuresIt()
+    public async Task ChatUpdate_AProjectReFiledByThePairUnderAnAppendableSecureMatter_IsRefused_AndNothingIsWritten()
     {
         var (secure, ordinary) = Matters();
         var project = Guid.NewGuid();
@@ -1068,13 +1106,14 @@ public partial class SecureRootInheritanceWriterTests : TypedToolHandlerTestFixt
             ["sprk_regardingrecordtype"] = new { relatedTable = "sprk_recordtype_ref", recordId = RecordTypeRef(_fixture, "sprk_matter") },
         }, appOnly: appOnly.Object);
 
-        result.Success.Should().BeTrue(result.ErrorMessage);
-        user.Patches.Should().ContainSingle("the caller's own PATCH carries the other columns")
-            .Which.Body.Should().Contain("sprk_name").And.NotContain(SecureRootInheritance.PairIdColumn);
-        appOnly.Verify(s => s.UpdateExistingRecordFieldsAsync("sprk_project", project,
-            It.Is<Dictionary<string, object?>>(f => f.Count == 2 && f.ContainsKey(SecureRootInheritance.PairIdColumn)),
-            It.IsAny<CancellationToken>()), Times.Once);
-        ShouldBeSecure(project, "re-filed by the pair under a secure matter");
+        result.Success.Should().BeFalse();
+        result.ErrorCode.Should().Be(ProjectMatterFiling.SecureMatterCode);
+        user.Patches.Should().BeEmpty("nothing is written before the refusal");
+        _writes.Should().BeEmpty();
+        appOnly.Verify(s => s.UpdateRecordFieldsIfUnchangedAsync(It.IsAny<string>(), It.IsAny<Guid>(),
+            It.IsAny<Dictionary<string, object?>>(), It.IsAny<long>(), It.IsAny<CancellationToken>()), Times.Never);
+        World.ValueOf<string>("sprk_project", project, SecureRootInheritance.PairIdColumn).Should().Be(ordinary.ToString("D"));
+        _fixture.IsSecureOf(project).Should().BeFalse();
     }
 
     /// <summary>
@@ -1126,7 +1165,9 @@ public partial class SecureRootInheritanceWriterTests : TypedToolHandlerTestFixt
 
         result.Success.Should().BeFalse();
         result.ErrorCode.Should().Be(DataverseUserClientErrorCodes.AccessDenied);
-        appOnly.VerifyNoOtherCalls();
+        // Task 195: the core reads the project's pair and version first (the brief's order); it writes nothing.
+        appOnly.Invocations.Where(i => i.Method.Name != nameof(IFieldMappingDataverseService.RetrieveRecordFieldsAsync))
+            .Should().BeEmpty();
         user.Patches.Should().BeEmpty();
         _writes.Should().BeEmpty();
     }
@@ -1354,7 +1395,9 @@ public partial class SecureRootInheritanceWriterTests : TypedToolHandlerTestFixt
     [Fact]
     public async Task ChatUpdate_AProjectsPairIdAlone_TheApplicationWritesTheFullCheckedPair()
     {
-        var (secure, ordinary) = Matters();
+        var (_, ordinary) = Matters();
+        var other = Guid.NewGuid(); // task 195: a project is not filed under a secure matter here, so another ordinary one
+        _fixture.SeedMatter(other, isSecure: false);
         var project = Guid.NewGuid();
         var matterType = RecordTypeRef(_fixture, "sprk_matter");
         _fixture.SeedProject(project, isSecure: false);
@@ -1371,17 +1414,17 @@ public partial class SecureRootInheritanceWriterTests : TypedToolHandlerTestFixt
 
         var result = await ChatUpdateWith("sprk_project", project, user, new()
         {
-            ["sprk_regardingrecordid"] = secure.ToString("D"),
+            ["sprk_regardingrecordid"] = other.ToString("D"),
         }, appOnly: appOnly.Object);
 
         result.Success.Should().BeTrue(result.ErrorMessage);
-        appOnly.Verify(s => s.UpdateExistingRecordFieldsAsync("sprk_project", project,
+        appOnly.Verify(s => s.UpdateRecordFieldsIfUnchangedAsync("sprk_project", project,
             It.Is<Dictionary<string, object?>>(f => f.Count == 2
                 && f.ContainsKey(SecureRootInheritance.PairIdColumn)
                 && f.Keys.Any(k => SecureRootInheritance.NormalizeColumn(k) == SecureRootInheritance.PairTypeColumn
                                    && f[k]!.ToString()!.Contains(matterType.ToString("D")))),
-            It.IsAny<CancellationToken>()), Times.Once);
-        ShouldBeSecure(project, "re-filed by its pair id under a secure matter, its type kept");
+            It.IsAny<long>(), It.IsAny<CancellationToken>()), Times.Once);
+        World.ValueOf<string>("sprk_project", project, SecureRootInheritance.PairIdColumn).Should().Be(other.ToString("D"));
     }
 
     /// <summary>
@@ -1392,7 +1435,9 @@ public partial class SecureRootInheritanceWriterTests : TypedToolHandlerTestFixt
     [Fact]
     public async Task ChatUpdate_AProjectsPairIdAlone_WritesTheTypeThatWasChecked_NotALaterRead()
     {
-        var (secure, ordinary) = Matters();
+        var (_, ordinary) = Matters();
+        var other = Guid.NewGuid(); // task 195: a project is not filed under a secure matter here, so another ordinary one
+        _fixture.SeedMatter(other, isSecure: false);
         var project = Guid.NewGuid();
         var matterType = RecordTypeRef(_fixture, "sprk_matter");
         var laterType = RecordTypeRef(_fixture, "sprk_matter");
@@ -1410,7 +1455,7 @@ public partial class SecureRootInheritanceWriterTests : TypedToolHandlerTestFixt
 
         var result = await ChatUpdateWith("sprk_project", project, user, new()
         {
-            ["sprk_regardingrecordid"] = secure.ToString("D"),
+            ["sprk_regardingrecordid"] = other.ToString("D"),
         }, appOnly: appOnly.Object, afterGet: path =>
         {
             if (path.StartsWith($"sprk_projects({project:D})", StringComparison.OrdinalIgnoreCase))
@@ -1418,11 +1463,11 @@ public partial class SecureRootInheritanceWriterTests : TypedToolHandlerTestFixt
         });
 
         result.Success.Should().BeTrue(result.ErrorMessage);
-        appOnly.Verify(s => s.UpdateExistingRecordFieldsAsync("sprk_project", project,
+        appOnly.Verify(s => s.UpdateRecordFieldsIfUnchangedAsync("sprk_project", project,
             It.Is<Dictionary<string, object?>>(f => f.Keys.Any(k =>
                 SecureRootInheritance.NormalizeColumn(k) == SecureRootInheritance.PairTypeColumn
                 && f[k]!.ToString()!.Contains(matterType.ToString("D")))),
-            It.IsAny<CancellationToken>()), Times.Once);
+            It.IsAny<long>(), It.IsAny<CancellationToken>()), Times.Once);
     }
 
     // ── Verifier round on #1612 (F1/F2): a lookup with the same id in ANOTHER table never stands in for the pair's record ──

@@ -366,118 +366,12 @@ internal static class OwnedChildWrite
         SecureRootInheritance.PairNamesAParentOnItsOwn(table) ? PairColumns : NoColumns;
 
     /// <summary>
-    /// #1616: the update tool's write of a row whose ADR-024 pair is BFF-managed (<see cref="BffManagedPairColumnsOf"/>): the
-    /// pair columns are field-secured so that no user can set them through the Web API, so the caller's own PATCH of them
-    /// would be refused. The pair rule has already been asked AS THE CALLER (<see cref="CheckCallerMayFileRootUnderAsync"/>:
-    /// AppendTo on the record the pair will name); this asks, as the caller too, what a run-as-user PATCH of the pair would
-    /// otherwise have had Dataverse check — Write on the row, and Append on it plus AppendTo on the record-type catalog row
-    /// when the type is set — then sends the caller's own PATCH of every OTHER column (Dataverse authorizes it, field
-    /// security included), and last the application writes the pair (update-only, never a create).
-    /// </summary>
-    /// <returns><c>null</c> when <paramref name="item"/> writes no BFF-managed pair column (the caller's own PATCH, as
-    /// before); otherwise <see cref="RefileOutcome.Written"/> or the refusal. A refusal before the caller's PATCH writes nothing;
-    /// a fault of the application's write after it propagates (the caller's other columns are then written).</returns>
-    internal static async Task<RefileOutcome?> PatchWithBffManagedPairAsync(
-        IDataverseUserClient user, IFieldMappingDataverseService? appOnly, string table, string entitySetName, Guid recordId,
-        DataverseWriteItemMapper.MappedItem item, CancellationToken ct)
-    {
-        var managed = BffManagedPairColumnsOf(table);
-        if (managed.Count == 0)
-            return null;
-
-        var pairFields = new Dictionary<string, object?>(StringComparer.Ordinal);
-        string? callerBody = null;
-        using (var body = JsonDocument.Parse(item.JsonBody))
-        {
-            using var stream = new MemoryStream();
-            var rest = 0;
-            using (var writer = new Utf8JsonWriter(stream))
-            {
-                writer.WriteStartObject();
-                foreach (var property in body.RootElement.EnumerateObject())
-                {
-                    if (managed.Contains(SecureRootInheritance.NormalizeColumn(property.Name)))
-                    {
-                        pairFields[property.Name] = property.Value.Clone();
-                        continue;
-                    }
-
-                    property.WriteTo(writer);
-                    rest++;
-                }
-
-                writer.WriteEndObject();
-            }
-
-            if (rest > 0)
-                callerBody = System.Text.Encoding.UTF8.GetString(stream.ToArray());
-        }
-
-        if (pairFields.Count == 0)
-            return null; // no pair column in the body: the caller's own PATCH, as before
-
-        if (appOnly is null)
-        {
-            return new RefileOutcome
-            {
-                ClientFailure = DataverseUserResponse.Fail(0, DataverseUserClientErrorCodes.ServiceError,
-                    $"What this {table} is filed under is written only by Spaarke, which cannot write it here, so nothing was written."),
-            };
-        }
-
-        var me = await WhoAmIAsync(user, ct).ConfigureAwait(false);
-        if (me.Failure is { } failure)
-            return new RefileOutcome { ClientFailure = failure };
-
-        var typeLookups = item.Lookups.Where(l => IsPairType(l.Column)).ToArray();
-        var needed = typeLookups.Length > 0 ? AccessRights.Write | AccessRights.Append : AccessRights.Write;
-        var rights = await RightsOnAsync(user, me.SystemUserId, entitySetName, recordId, ct).ConfigureAwait(false);
-        if ((rights & needed) != needed)
-            return new RefileOutcome { Denied = $"You do not have permission to change what this {table} is filed under." };
-
-        var typeAppendTo = await CheckCallerMayAppendToAsync(user, me.SystemUserId, typeLookups, ct).ConfigureAwait(false);
-        if (typeAppendTo.ClientFailure is { } typeFailure)
-            return new RefileOutcome { ClientFailure = typeFailure };
-        if (!typeAppendTo.Succeeded)
-        {
-            return new RefileOutcome
-            {
-                Denied = typeAppendTo.Denied ?? "You do not have permission to file this record under the record type it names.",
-                ParentUnavailable = typeAppendTo.ParentUnavailable,
-            };
-        }
-
-        // The FULL pair the rule checked: the update tool completes a half-pair write from the row BEFORE anything is
-        // checked (KeepPairInStepAsync), so the item carries both halves, the rule (CheckCallerMayRefileByPairAsync) and the
-        // gate decided exactly them, and exactly them is what the application writes. An item that still sets one half was
-        // not prepared that way: refused (fail closed), never completed from a second read.
-        if (PairOf(item) is not { SetsId: true, SetsType: true })
-        {
-            return new RefileOutcome
-            {
-                Invalid = $"What this {table} is filed under is written as a whole (its record and its record type), so nothing was written.",
-            };
-        }
-
-        if (callerBody is not null)
-        {
-            // If-Match: * (update-only), AS THE CALLER — every column but the pair, authorized by Dataverse itself.
-            var response = await user.PatchAsync($"{entitySetName}({recordId:D})", callerBody, ct).ConfigureAwait(false);
-            if (!response.IsSuccess)
-                return new RefileOutcome { ClientFailure = response };
-        }
-
-        await appOnly.UpdateExistingRecordFieldsAsync(table, recordId, pairFields, ct).ConfigureAwait(false);
-        return new RefileOutcome { Written = true };
-    }
-
-    /// <summary>
     /// #1616: prepares an update's ADR-024 pair BEFORE anything is checked or written, AS THE CALLER (one read of the row,
     /// only when it applies), so the checks and the write see one and the same pair:
     /// <list type="bullet">
     /// <item><b>A BFF-managed pair</b> (a project, <see cref="BffManagedPairColumnsOf"/>) written by one half: the other half is
     /// added as the row holds it, so the pair rule, the secure-root gate and the application's write
-    /// (<see cref="PatchWithBffManagedPairAsync"/>) all act on exactly the same (record, type).</item>
+    /// (<see cref="ProjectMatterFiling.FileAsync"/>) all act on exactly the same (record, type).</item>
     /// <item><b>A work assignment</b> (its pair is not BFF-managed) whose update changes or clears a typed filing lookup
     /// (<see cref="SecureRootInheritance.TypedLookupsOf"/>: a matter or project, or #1630 an invoice or event) the pair was IN
     /// STEP with — same id, a type naming that

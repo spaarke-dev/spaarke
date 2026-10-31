@@ -48,6 +48,8 @@ import { SecureProvisioningOutcome } from './SecureProvisioningOutcome';
 import { EventService } from '../CreateEventWizard/eventService';
 import { WorkAssignmentService } from '../CreateWorkAssignmentWizard/workAssignmentService';
 import type { ICreateWorkAssignmentFormState, IAssignWorkState } from '../CreateWorkAssignmentWizard/formTypes';
+import type { AssociationResult } from '../AssociateToStep/types';
+import { fileProjectUnderMatter } from '../../utils/adapters/bffChildWriteAdapter';
 
 // ---------------------------------------------------------------------------
 // Association wiring helpers
@@ -286,6 +288,17 @@ export interface ICreateProjectWizardProps {
    * path always uses {@link onClose}.
    */
   onComplete?: (recordId: string) => void;
+  /**
+   * Launch-context pre-fill (unified-access-control-r2 task 195): the record the new project is linked to, pre-selected
+   * in the Associate-To step — the matter when the wizard is opened from a matter's Projects subgrid (the
+   * `sprk_Project_Matter_nn` "New" command). `undefined` when opened directly — the step starts empty, as before.
+   */
+  initialAssociation?: AssociationResult;
+  /**
+   * With {@link initialAssociation}: hides the Associate-To step so the launch record is the fixed association
+   * (CreateRecordWizard's `lockAssociation`). Defaults to `false`.
+   */
+  lockAssociation?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -357,6 +370,8 @@ const CreateProjectWizard: React.FC<ICreateProjectWizardProps> = ({
   initialFormValues,
   initialFileRefs,
   onComplete,
+  initialAssociation,
+  lockAssociation,
 }) => {
   // Assistant hand-off pre-seed (UAT #1): merge the drafted values over the empty
   // defaults so the wizard opens PRE-FILLED. Stable per `initialFormValues` identity
@@ -478,6 +493,8 @@ const CreateProjectWizard: React.FC<ICreateProjectWizardProps> = ({
                 { label: 'Matter', entityType: 'sprk_matter' },
               ],
               navigationService,
+              initialAssociation,
+              lockAssociation,
             },
           }
         : {}),
@@ -738,12 +755,44 @@ const CreateProjectWizard: React.FC<ICreateProjectWizardProps> = ({
         }
 
         // 1c. Wire association from AssociateToStep (if the user made a selection)
+        // Task 195: a project the server found already filed under another matter is said on the result screen (a note,
+        // not a warning: nothing failed, the project stays where it is).
+        let filingNote: string | undefined;
         const association = context.association;
         if (association?.recordId) {
           try {
             if (association.entityType === 'sprk_matter') {
-              // N:N via sprk_Project_Matter_nn intersect
+              // N:N via sprk_Project_Matter_nn intersect — an association; it confers nothing.
               await associateProjectWithMatter(projectId, association.recordId);
+              // Task 195 (#2352): then file the project under the matter — its regarding pair, its one filing root,
+              // which the BFF writes. A refusal is its own warning: the link above stands, the filing did not happen.
+              // A secure-requested project whose securing did not finish is not filed (like the other adds above):
+              // it is said in the held-back warning.
+              if (secureBlocked) {
+                skippedForSecure.push('filing it under the matter');
+              } else {
+                try {
+                  // A new project is not filed: never a move. Should the server find it filed elsewhere, it leaves it.
+                  const filed = await fileProjectUnderMatter(
+                    authFetch,
+                    bffBaseUrl,
+                    dataService,
+                    projectId,
+                    association.recordId
+                  );
+                  if (filed === 'already-filed') {
+                    filingNote =
+                      `The project is linked to "${association.recordName}". It is already filed under another ` +
+                      'matter, so it stays filed there; it was not moved.';
+                  }
+                } catch (fileErr) {
+                  const fileMessage = fileErr instanceof Error ? fileErr.message : String(fileErr);
+                  warnings.push(
+                    `The project is linked to "${association.recordName}", but it could not be filed under that ` +
+                      `matter: ${fileMessage} — Its access does not follow the matter until it is filed.`
+                  );
+                }
+              }
             } else if (association.entityType === 'account') {
               // N:1 account lookup on the project record
               await associateProjectWithAccount(dataService, projectId, association.recordId);
@@ -901,6 +950,11 @@ const CreateProjectWizard: React.FC<ICreateProjectWizardProps> = ({
                       ? '.'
                       : ' and is ready to use.'}
               </Text>
+              {filingNote && (
+                <Text block size={300} style={{ color: tokens.colorNeutralForeground2 }}>
+                  {filingNote}
+                </Text>
+              )}
               {retryableProvisioning && authFetch && bffBaseUrl && (
                 <SecureProvisioningOutcome
                   projectId={projectId}
@@ -944,6 +998,8 @@ const CreateProjectWizard: React.FC<ICreateProjectWizardProps> = ({
       resolveUserBuDefaults,
       webApiAdapter,
       handoffFiles,
+      initialAssociation,
+      lockAssociation,
     ]
   );
 
