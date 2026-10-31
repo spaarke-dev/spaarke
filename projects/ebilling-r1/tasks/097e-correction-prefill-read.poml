@@ -44,7 +44,7 @@
   </constraints>
 
   <steps mode="directional">
-    <step>Agree the response shape with the 095 contract style: firmId, firm name, core record (entityType, entityId, name), status, tracking number, firm invoice number, and canCorrect with a stable reason code when false (the same codes 097b intake returns).</step>
+    <step>Response shape agreed with word-add-in-r1 (2026-10-31): route GET /api/finance/invoices/{invoiceId}/correction-prefill; body { invoiceId, firm { id, name }, coreRecord { entityType, entityId, name }, invoiceStatus, trackingNumber (null when none), firmInvoiceNumber, canCorrect, reason }. coreRecord.entityType uses the intake vocabulary "Matter" | "Project" | "WorkAssignment" (InvoiceCoreRecordKind; the invoice's sprk_matter / sprk_project / sprk_regardingworkassignment), never logical names. invoiceStatus is the InvoiceLifecycleStatus name, a closed set: InReview, Approved, SentToAp, Paid, Rejected, ReturnedToFirm, Cancelled, Superseded; absent (null) for an unknown statuscode, as the intake does. reason, when canCorrect is false, is one of invoice_status, no_submission, submission_in_progress (the different_* reasons are judged only by the intake). No date, total or currency. Input is the invoice Guid only.</step>
     <step>Implement the route using the 097b guard code for canCorrect.</step>
     <step>Update the route ledger in tests/Spaarke.ArchTests if a new endpoint file is added.</step>
     <step>Update the 095 contract notes and write notes/097e-correction-prefill-read.md.</step>
