@@ -2103,6 +2103,10 @@ public class RecordOwnerAssignmentCensusTests
     /// are <see cref="UnscannedWriters"/>; so is the update tool, whose re-file the r1 census never saw (verifier item 2).</remarks>
     private static readonly IReadOnlyDictionary<string, string> RunAsUserWritesThatFileNothing = new Dictionary<string, string>
     {
+        ["ProjectMatterFiling.cs"] = "uac-r2 task 195: the chat update tool's other columns of a project, PATCHed as the caller AFTER the "
+                                     + "pair is stripped from the body. A project's only filing is its regarding pair, which the application "
+                                     + "writes (version-conditioned, an ExternalDocumentNarrowingGuard writer); the caller's PATCH writes no pair "
+                                     + "and no owner, and the root-owner step owns the project's ownership.",
         ["DataverseSearchDataHandler.cs"] = "POSTs to the Dataverse search action (searchquery) — a READ; writes no row.",
         ["InquiryDispositionService.cs"] = "Ontology task 071 (D-111): the caller's own PATCHes of scalar columns only (the inquiry's "
                                            + "disposition and state, the reply's association status, the outcome To Do's state): no lookup "
