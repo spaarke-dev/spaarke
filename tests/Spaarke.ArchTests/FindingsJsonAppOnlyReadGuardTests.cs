@@ -135,7 +135,7 @@ public sealed class FindingsJsonAppOnlyReadGuardTests
             .Select(r => $"{IlCallScan.Outermost(r.Caller).Name}.{IlCallScan.SourceMethodName(r.Caller, r.CallerMethod)} -> {IlCallScan.Describe(r.Target)} ({r.Why})")
             .Distinct();
 
-    private static string? CallerIdentityReason(MethodBase target)
+    internal static string? CallerIdentityReason(MethodBase target)
     {
         var declaring = target.DeclaringType;
         if (declaring is not null && typeof(IDataverseUserClient).IsAssignableFrom(declaring))
@@ -160,7 +160,7 @@ public sealed class FindingsJsonAppOnlyReadGuardTests
             : null;
     }
 
-    private static bool IsAsync(MethodBase method) =>
+    internal static bool IsAsync(MethodBase method) =>
         method is MethodInfo { ReturnType: var r }
         && (r == typeof(Task) || r == typeof(ValueTask)
             || (r.IsGenericType && (r.GetGenericTypeDefinition() == typeof(Task<>) || r.GetGenericTypeDefinition() == typeof(ValueTask<>))));

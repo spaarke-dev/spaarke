@@ -224,7 +224,7 @@ Also: 097c K4 (an old invoice whose submission's undo is unfinished) is closed b
 **Known limits (second review).**
 - K-R2-1: an old submission stuck at Processing for good (for example a poisoned after-step, 097d K3) makes its invoice uncorrectable until an administrator resolves it. This is intended: superseding an invoice whose own processing is unfinished is the defect F1 closes.
 - K-R2-2: the commit reads the earlier submission twice: once to resolve the target (`ReadCorrectedInvoiceAsync`), once for status and number. The check is not a lock, as at intake. A finished submission only moves on to another finished outcome (held Blocked to Overridden), or to Returned. Returned moves the old invoice to Returned to Firm, and the old invoice's row-version guard then faults the transaction.
-- K-R2-3: `sprk_resubmissionof` stays an ordinary column (097b K6). Field-securing it is an owner decision, pending; no schema change was made.
+- K-R2-3: `sprk_resubmissionof` is an ordinary column until `scripts/ebilling/Set-EbillingResubmissionOfFieldSecurity.ps1` has run; once it has, K-R2-3 and 097b K6 are closed. Owner decision 2026-10-30: only the server may set the column. The script, the guard and the SpaarkeMaster source are written (section "Field security for sprk_resubmissionof" below); the live run is the main session's step.
 
 ### Gate (second review)
 
@@ -240,3 +240,150 @@ Measured on head `1f2e865479` (code and tests; the notes commit changes no code)
 No package, project file, endpoint, DI registration, schema or App Service setting changed. The Dataverse change is one more read of a row already read at commit. Publish size was not re-measured: two predicates, two constants and one catch.
 
 rework: fix-round-1 task 097
+
+## Field security for sprk_resubmissionof
+
+Owner decision 2026-10-30 (from the 097 second review F2): only the server may set `sprk_invoicesubmission.sprk_resubmissionof`. Branch `task/ebill-resubmissionof-fls`, cut from `169c55a498` on `work/ebilling-r1`. The live run is NOT done by this task; it is the main session's step (command at the end of this section).
+
+**What is secured, and for whom.** The column is field-secured with the two existing profiles (never created or re-membered here):
+
+| Profile | read | create | update | Who |
+|---|---|---|---|---|
+| "Spaarke BFF-Managed Field Writers" | 4 | 4 | 4 | the BFF application users only |
+| "Spaarke BFF-Managed Field Readers" | 4 | 0 | 0 | every user (it is on every business unit's default team) |
+| any other profile | read only is allowed | FAIL if it can create or update | | the platform System Administrator profile (`572329c1-a042-4e22-be47-367c6374ea45`) is excepted, by id |
+
+Unlike `sprk_findingsjson` (task 122), users READ the column: it is shown on the submission and the 097b-d code may read it under the caller, so the Readers profile is granted read.
+
+### 1. Write inventory: every write of `sprk_resubmissionof` in `src/`
+
+Searched: `sprk_resubmissionof`, `ResubmissionOfColumn` and `ResubmissionOf` (case-insensitive) over the whole repository except `projects/` and `docs/`, the SpaarkeMaster source included. **Identity.** `IGenericEntityService` is the BFF's application identity: `Infrastructure/DI/GraphModule.cs:145` maps it to `IDataverseService` (`DataverseServiceClientImpl`), whose `CreateAsync(Entity, ct)` (`Spaarke.Dataverse/DataverseServiceClientImpl.cs:2585`) is a plain `_serviceClient.CreateAsync`; no `CallerId` is set (the impersonation branch at `:2522` is a different method, and neither writer below uses it). On dev the BFF application users are `# mi-bff-api-dev` and `SDAP-BFF-SPE-API`; both are members of the Writers profile and both hold System Administrator.
+
+There are exactly two writers, and both are creates. No code updates the column.
+
+| # | Writer | file:line (`src/server/api/Sprk.Bff.Api/Services/Finance/Submission/`) | Identity | Runs from |
+|---|---|---|---|---|
+| W1 | `InvoiceSubmissionService.SubmitExistingDocumentAsync`: `row[ResubmissionOfColumn] = new EntityReference(SubmissionEntity, earlierSubmission)` | `InvoiceSubmissionService.cs:525`; the row is sent at `:551` (`_allocator.CreateSubmissionAsync(..., row.Attributes.ToDictionary(), write)`) | **as the app**: `ITrackingNumberAllocator` -> `TrackingNumberAllocator.CreateSubmissionAsync` -> `_entities.CreateAsync(BuildRow(...))` (`TrackingNumberAllocator.cs:122`; `BuildRow` copies the fields at `:256-259`; `_entities` is `IGenericEntityService`) | the from-document route with `mode=correction`, after `CheckCorrectionAsync` (`:499`) |
+| W2 | `SubmitInvoiceFromEmailOperation.SubmitAsync`: `row[InvoiceSubmissionService.ResubmissionOfColumn] = new EntityReference(...)` | `SubmitInvoiceFromEmailOperation.cs:230`; sent at `:252` (`_allocator.CreateSubmissionAsync`). Its target is `input.ResubmissionOf`, set by `FromEmailSubmissionService.cs:237` from `CheckCorrectionAsync` (`:227-274`) | **as the app** (the same allocator) | the from-email route with `mode=correction` |
+
+**104 / EB-D-174's automatic link is not a writer of this column.** It writes `sprk_supersedesinvoice` on the INVOICE (`InvoiceSubmissionPersister.cs:541` for a Correction's explicit target, `:563` for 104's automatic lookup, both on the invoice row inside the persister's app-only transaction). `FindSupersededInvoiceAsync` (`:1012`) only reads. `sprk_resubmissionof` is set by the intake alone (097b), before the job runs.
+
+**No write is made as the caller, so no production code changes.** The upload route (`SubmitAsync`, `:201`) has no Correction and never sets the column. The filing routes of `ChildRecordEndpoints` accept `sprk_regarding*` columns only (`FilingShapeProblem`, `IsFilingColumn`), which `sprk_resubmissionof` does not match. No code page, PCF, external SPA or Office add-in names the column (`src/client`, `src/solutions`: none). The one other writer is a user editing the field on the form or through the Web API, which is exactly what the field security refuses.
+
+### 2. Read inventory: every read of `sprk_resubmissionof`
+
+| # | Reader | file:line | Identity |
+|---|---|---|---|
+| R1 | `InvoiceSubmissionService`: `ViewColumns` (`:94`), read at `:1690` (`_entities.RetrieveAsync`) and `:1743` (`RetrieveMultipleAsync`), value mapped at `:1813` (`ResubmissionOfId`, used to match a retry on its Correction target, never serialized) | `InvoiceSubmissionService.cs` | app-only (`IGenericEntityService`) |
+| R2 | `SubmissionSnapshot.Columns` (`SubmissionEvaluationOutcome.cs:64`): the submission read for the evaluation; the persister (`InvoiceSubmissionPersister.SubmissionColumns`, `:214`) and the job handler (`InvoiceSubmissionProcessingJobHandler.cs:630`) read with it; consumers `InvoiceSubmissionProcessor.cs:303-315`, `InvoiceSubmissionPersister.cs:532,547,1095` | several | app-only (`IGenericEntityService`) |
+| R3 | `SubmissionCommitGate`: `SubmissionColumns` (`:106`), value at `:510` (`ReopenSupersededAsync`, the undo) | `SubmissionCommitGate.cs` | app-only |
+| R4 | `InvoiceSubmissionAfterSteps`: `SubmissionColumns` (`:95`), value at `:983` (`CloseSupersededInvoiceSignalsAsync`) | `InvoiceSubmissionAfterSteps.cs` | app-only |
+| R5 | `SecureChildLineage` lists the lookup (`Services/Access/SecureChildLineage.cs:198`) so the family walks (the reconcilers, the external-access multi-root rule, `ParentLineage`, `RecordFamilyReader`) know the submission's lookups. A data table: it reaches no Dataverse client. Its consumers are app-only, or run under the caller or an impersonated caller; either way the value comes back through the Readers profile | `SecureChildLineage.cs` | data only |
+| R6 | The `Information` form binds the column (`FormXml/main/{c412f942-...}.xml:132`; `Deploy-EbillingFormsViews.ps1:127`). It stays on the form: users read it through the Readers profile, and it shows read-only to everyone but the writer profile | form | the viewing user |
+
+Comment-only mentions (no read): `BillingFactLoader.cs:61`, `SubmissionReasonCodes.cs:197`, `RecordFamilyEdges.cs:332` (the baselined peer-reference disagreement). `ExternalInvoiceVisibility` reads submissions by `sprk_invoice` only.
+
+A read made as the caller gets the value through the Readers profile (on every business unit's default team: the script's (p8) checks all six dev teams), so none of these breaks. The BFF's own reads are app-only (the Writers profile, read=4) and, on dev, both application users also hold System Administrator.
+
+**Maker configuration.** No `sprk_fieldmappingrule`, `sprk_aitopicregistry` or `sprk_emailupdatefield` row targets the column: the script's (p4) says so live on dev (below), and the repository has no seed that names it.
+
+**Escalation triggers.** (1) A write as the caller: none, so nothing to stop for. (2) A BFF application user missing from the Writers profile, or the Writers profile on a default team: neither (the dev -WhatIf below; the script's (p2) and (p3) refuse a write run otherwise). (3) A business unit's default team missing from the Readers profile: none on dev (the script's (p8)).
+
+### 3. The guard
+
+`tests/Spaarke.ArchTests/ResubmissionOfAppOnlyWriteGuardTests.cs`, over the compiled IL (`IlCallScan`), modelled on `FindingsJsonAppOnlyReadGuardTests` and sharing its definition of a caller-identity seam (`CallerIdentityReason` and `IsAsync` there are now `internal`; no other change to that file).
+
+- **C1:** the types that load a string naming the column (Sprk.Bff.Api and Spaarke.Dataverse) are exactly `InvoiceSubmissionService`, `SubmitInvoiceFromEmailOperation`, `SubmissionSnapshot`, `SubmissionCommitGate`, `InvoiceSubmissionAfterSteps` and `SecureChildLineage`. A new writer or reader fails until it is reviewed and listed; a reviewed type that stops naming the column also fails.
+- **C2:** no reviewed type calls a caller-identity seam (an `IDataverseUserClient` member, an `Impersonated*` type, an `*AsCaller*` method, a task-returning method with an `impersonat*` / `callerSystemUserId` parameter). One exact method is exempt, with its reason in the test: `InvoiceSubmissionService.DecideForFromEmailAsync` takes `callerSystemUserId` as a VALUE (the new row's creator person, OP-5) and reads app-only; its body belongs to a reviewed type, so an impersonating call added inside it is still seen.
+- **C3:** every reviewed type except the data-only `SecureChildLineage` reaches Dataverse through `IGenericEntityService` or `ITrackingNumberAllocator`; the data-only type reaches no Dataverse client at all.
+- **C4:** the two writers hand the row to `ITrackingNumberAllocator` and never name a client themselves, so the guard also checks every implementation of that interface in the scanned assemblies: it must create through `IGenericEntityService` and call no caller-identity seam.
+- **Controls:** C1 must-fire (a type naming the column) and must-not-fire (another column); C2 must-fire for a write through the OBO client and for an impersonating overload, must-not-fire for an app-only write and for a write through the allocator; C3 flags a data-only type that reaches a client and not one that reaches none; C4 must-fire on an allocator that creates through the OBO client and must-not-fire on the real one.
+- **Seeding proof (2026-10-30).** An `IDataverseUserClient.PatchAsync` write of the column added to `InvoiceSubmissionService`, and a `PostAsync` added to `TrackingNumberAllocator`: 3 of the 11 new tests failed. C2 named `InvoiceSubmissionService.SeedCallerWrite -> IDataverseUserClient.PatchAsync`; C4 named `TrackingNumberAllocator.SeedCallerCreate -> IDataverseUserClient.PostAsync`; the third is C4's control, which expects the real allocator to pass. Restored (`git checkout` of both files): 11 of 11 pass.
+- **Not covered** (in the class remarks): C2 is not transitive; a column name built at run time; a generic writer that copies caller-supplied column names into a row (the field-mapping framework and the AI record-update tools: (p4) covers the mapping rows, and the platform refuses any caller-side write once the column is secured); a caller seam named outside the C2 rules.
+
+`tests/integration/data-mutation/FinanceSubmission/ResubmissionOfFieldSecurityAgreementTests.cs` pins the script's constants and grants to the SpaarkeMaster source (section 4), with the parser exercised on six seeded drifts.
+
+### 4. The script and the source
+
+`scripts/ebilling/Set-EbillingResubmissionOfFieldSecurity.ps1` (-WhatIf / plain / -Verify / -Revert), shaped on `Set-EbillingFindingsJsonFieldSecurity.ps1` (preconditions p0-p6, the steps, the modes, the revert after a failed grant, the publish only after a write, the reused Writers profile) and `Set-EbillingFirmReasonFieldSecurity.ps1` (the reader grant). The one difference from 122: the Readers profile is granted read=4 create=0 update=0, and a Readers row with anything else is FAIL.
+
+- Preconditions: (p0) the column exists and can be secured for read, create and update; (p1) the Writers profile exists once and is in SpaarkeMaster; (p2) its members are exactly the `-BffApplicationIds` application users (no human, no team); (p3) no default team holds it; (p4) no field-mapping rule, AI topic-registry row or email update field targets the column; (p5) the column is in SpaarkeMaster; (p6) information (rows naming an earlier submission, the form that binds the column, whether each BFF user holds System Administrator); (p7) the Readers profile exists once and is in SpaarkeMaster; (p8) the Readers profile is on every default team. A write run refuses unless all pass.
+- Step (a) secures the column and at once grants Writers read=4 create=4 update=4, then Readers read=4 create=0 update=0 (12 retries on 0x8004f508 each); a failed grant reverts the secure and publishes, and if that fails too it prints "RECOVERY REQUIRED NOW". (b) the two permissions are exactly those. (c) any other profile that can create or update the column is FAIL, the platform System Administrator profile excepted by id; profiles that only read are listed. (d) publish `sprk_invoicesubmission`, only when a write happened. A second run writes nothing. `-Verify` passes only on the full state. `-Revert` un-secures, deletes the two profile rows and publishes; `-Revert -WhatIf` is its dry run (not run here).
+- SpaarkeMaster source, so the secured state travels with the solution: `Entities/sprk_invoicesubmission/Entity.xml` `IsSecured` 1; `Other/FieldSecurityProfiles.xml` has the Writers row (4/4/4) and the Readers row (4/0/0). The form is unchanged (the column stays on it).
+- `docs/data-model/sprk_invoicesubmission.md` updated: who writes it and who reads it.
+- One property of the column worth knowing: it is a Lookup. Lookups can be field-secured (p0 checks `CanBeSecuredFor*` live, OK on dev) and the typed GET-then-PUT the script uses is the one `Set-RegardingPairFieldSecurity.ps1` proved live on lookup columns.
+
+**Dev -WhatIf (2026-10-30, read-only, exit 0).** Every precondition OK; nothing written.
+
+```
+Environment : https://spaarkedev1.crm.dynamics.com (org 'spaarkedev1')
+Column      : sprk_invoicesubmission.sprk_resubmissionof (only the server sets it: BFF writer profile writes, reader profile reads)
+Mode        : DRY RUN (-WhatIf, no writes)
+
+Preconditions
+  OK       (p0) sprk_invoicesubmission.sprk_resubmissionof exists and can be secured for read, create and update
+  OK       (p1) profile 'Spaarke BFF-Managed Field Writers' exists (917b64c5-47bf-f111-a05b-3833c5e9614d)
+  OK       (p7) profile 'Spaarke BFF-Managed Field Readers' exists (42e542c8-47bf-f111-aaaf-0022482913fc)
+  OK       (p1) 'Spaarke BFF-Managed Field Writers' is in SpaarkeMaster
+  OK       (p7) 'Spaarke BFF-Managed Field Readers' is in SpaarkeMaster
+  OK       (p2) BFF app user '# mi-bff-api-dev' is a member of Spaarke BFF-Managed Field Writers
+  OK       (p2) BFF app user 'SDAP-BFF-SPE-API' is a member of Spaarke BFF-Managed Field Writers
+  OK       (p3) no business-unit default team holds Spaarke BFF-Managed Field Writers
+  OK       (p4) no field-mapping rule, AI topic-registry row or email update field targets sprk_resubmissionof
+  OK       (p5) sprk_invoicesubmission.sprk_resubmissionof is in SpaarkeMaster (ViaTable)
+  INFO     (p6) 0 sprk_invoicesubmission row(s) name an earlier submission now (securing a column does not change what was written)
+  INFO     (p6) form 'Information' (type 2) binds sprk_resubmissionof - it stays on the form, shown read-only to users outside Spaarke BFF-Managed Field Writers
+  INFO     (p6) BFF app user '# mi-bff-api-dev' holds System Administrator (full field access; no masked window for it)
+  INFO     (p6) BFF app user 'SDAP-BFF-SPE-API' holds System Administrator (full field access; no masked window for it)
+  OK       (p8) reader profile on default team 'Secure Record' (BU 'Secure Record')
+  OK       (p8) reader profile on default team 'Spaarke Business Unit 1' (BU 'Spaarke Business Unit 1')
+  OK       (p8) reader profile on default team 'Spaarke Demo' (BU 'Spaarke Demo')
+  OK       (p8) reader profile on default team 'Spaarke Dev 1' (BU 'Spaarke Dev 1')
+  OK       (p8) reader profile on default team 'Spaarke Test 1' (BU 'Spaarke Test 1')
+  OK       (p8) reader profile on default team 'Spaarke' (BU 'Spaarke')
+
+(a) Field-level security
+  WOULD    secure sprk_invoicesubmission.sprk_resubmissionof, then at once grant Spaarke BFF-Managed Field Writers read/create/update and Spaarke BFF-Managed Field Readers read only
+
+(b) Permissions on sprk_invoicesubmission.sprk_resubmissionof
+  WOULD    grant Spaarke BFF-Managed Field Writers on sprk_invoicesubmission.sprk_resubmissionof (read=4 create=4 update=4)
+  WOULD    grant Spaarke BFF-Managed Field Readers on sprk_invoicesubmission.sprk_resubmissionof (read=4 create=0 update=0)
+
+(c) Other profiles
+  OK       no profile besides 'Spaarke BFF-Managed Field Writers' and the System Administrator profile (572329c1-a042-4e22-be47-367c6374ea45) can create or update sprk_invoicesubmission.sprk_resubmissionof ('Spaarke BFF-Managed Field Readers' is checked in (b): read only)
+  INFO     System Administrator TEAM 'Spaarke Demo' - every member
+  INFO     System Administrator '# mi-bff-api-dev' (application user) (full field access by platform rule)
+  INFO     System Administrator '# spaarke-bff-api-prod' (application user) (full field access by platform rule)
+  INFO     System Administrator 'SDAP-BFF-SPE-API' (application user) (full field access by platform rule)
+  INFO     System Administrator '# spe-api-dev-67e2xz' (application user) (full field access by platform rule)
+  INFO     System Administrator 'Ralph Schroeder' (full field access by platform rule)
+  INFO     System Administrator '# JobsServiceProd' (application user) (full field access by platform rule)
+  INFO     System Administrator '# CCADataAnalyticsML' (application user) (full field access by platform rule)
+  INFO     System Administrator '# CDSUserManagement' (application user) (full field access by platform rule)
+  INFO     System Administrator '# CDSUserManagementApi' (application user) (full field access by platform rule)
+  INFO     System Administrator '# PowerPlatformEnvironmentManagement' (application user) (full field access by platform rule)
+  INFO     System Administrator '# Omnichannel' (application user) (full field access by platform rule)
+  INFO     System Administrator '# DynamicsInstaller' (application user) (full field access by platform rule)
+  INFO     System Administrator '# SSSAdminProd' (application user) (full field access by platform rule)
+  INFO     System Administrator '# CatalogServiceNam' (application user) (full field access by platform rule)
+  INFO     System Administrator 'Delegated Admin' (full field access by platform rule)
+
+DRY RUN complete - nothing was written.
+```
+
+Reading it: the run WOULD secure the column and grant Writers read=4 create=4 update=4 and Readers read=4 create=0 update=0. Both BFF application users are members of the Writers profile and hold System Administrator, so the BFF has no masked window. The Readers profile is on all six default teams. No other profile can create or update the column. The form `Information` binds the column and keeps it. No row names an earlier submission yet (0 on dev).
+
+### 5. Live run (the main session's step): runbook
+
+Prerequisites: the owner's OK (given 2026-10-30 for the decision; confirm for the run), notices to ontology-r1 and uac-r2 before and after, as for 122. Run from the repository root as an operator signed in with `az login` (System Administrator on spaarkedev1).
+
+```
+pwsh scripts/ebilling/Set-EbillingResubmissionOfFieldSecurity.ps1 -BffApplicationIds 5967251e-171c-46fe-a6c2-ef843c90309d,1e40baad-e065-4aea-a8d4-4b7ab273458c -WhatIf
+pwsh scripts/ebilling/Set-EbillingResubmissionOfFieldSecurity.ps1 -BffApplicationIds 5967251e-171c-46fe-a6c2-ef843c90309d,1e40baad-e065-4aea-a8d4-4b7ab273458c
+pwsh scripts/ebilling/Set-EbillingResubmissionOfFieldSecurity.ps1 -BffApplicationIds 5967251e-171c-46fe-a6c2-ef843c90309d,1e40baad-e065-4aea-a8d4-4b7ab273458c   # second run: "Nothing written; no publish."
+pwsh scripts/ebilling/Set-EbillingResubmissionOfFieldSecurity.ps1 -BffApplicationIds 5967251e-171c-46fe-a6c2-ef843c90309d,1e40baad-e065-4aea-a8d4-4b7ab273458c -Verify   # exit 0
+```
+
+Rollback: the same command with `-Revert` (and `-Revert -WhatIf` first). Then revert the SpaarkeMaster source by a commit.
+
+After the run: 097b K6 is closed (rewritten in `097b-correction-intake.md`); K-R2-3 above is closed with it. Until the script has run, the exposure those notes describe still stands.
