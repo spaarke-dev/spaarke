@@ -53,14 +53,69 @@ internal static class RecordTableRules
         "overriddencreatedon", "importsequencenumber");
 
     /// <summary>
-    /// The invoice family's core-record lookups on <c>sprk_invoice</c> and <c>sprk_billingevent</c> — ebilling-r1's
-    /// <c>InvoiceFamilyCoreRecordGuard.CoreRecordLookups</c> (<c>TypedMatterProjectPlusRegardingWorkAssignment</c>, on
-    /// <c>work/ebilling-r1</c>): a row of either names exactly ONE core record, so a field-mapping rule may not fill one
-    /// (ebilling-r1's review of task 013, 2026-10-21, item 3). Declared before <see cref="All"/>: static initialisers run
-    /// in textual order.
+    /// The invoice family's core-record lookups on <paramref name="table"/>: a family row names exactly ONE core record, so
+    /// a field-mapping rule may not fill one (ebilling-r1's review of task 013, 2026-10-21, item 3).
     /// </summary>
-    private static readonly IReadOnlySet<string> InvoiceFamilyCoreLookups =
-        Columns("sprk_matter", "sprk_project", CoreAncestorResolver.StampColumnFor("sprk_workassignment"));
+    /// <remarks>
+    /// Task 017 (coordinator item 8): derived from the guard itself (<see cref="InvoiceFamilyCoreRecordGuard.CoreRecordLookups"/>),
+    /// per table, on all six family tables — so a mapping that fills a SECOND core lookup is skipped with a warning, never
+    /// the create refused as <c>invoice_family_multiple_core_records</c>, and the two lists cannot drift. Was a hand-written
+    /// (matter, project, regarding work assignment) set on sprk_invoice and sprk_billingevent only.
+    /// </remarks>
+    private static IReadOnlySet<string> InvoiceFamilyCoreLookupsOf(string table) =>
+        Columns(InvoiceFamilyCoreRecordGuard.CoreRecordLookups[table].Select(l => l.Column).ToArray());
+
+    /// <summary>
+    /// Task 017 (#1608, owner decision 2b, 2026-10-22): the columns a caller's payload may never name on a secure ROOT — its
+    /// own SPE container, the secure business unit it is isolated in, and its Access Permission. Was the child-records
+    /// route's own list for a work assignment (ontology task 046, D-113 / task 175); now the ONE set, refused at step 2 of
+    /// every create path, on a matter, a project and a work assignment alike.
+    /// </summary>
+    private static readonly IReadOnlySet<string> RootServerOwnedColumns = Columns(
+        "sprk_containerid", SecurableEntityRegistry.SecurityBusinessUnitAttribute, InheritedAccessPermission.Column);
+
+    /// <summary>
+    /// ebilling-r1 FR-05 (ISS-010, #1973; #1911, merged): the invoice-family core-record rule — an invoice-family row names
+    /// exactly one core record, and an invoice supersedes (a line belongs to) only an invoice of that record. Registered on
+    /// every <see cref="InvoiceFamilyCoreRecordGuard.CoreRecordLookups"/> table (task 017; task 012 notes,
+    /// "Invoice-family reconciliation recipe"). It asks the SAME check the deleted owned create asked
+    /// and the re-file still asks (<see cref="OwnedChildWrite.CheckInvoiceFamilyAsync"/>, create shape: no stored row), as the caller
+    /// (<see cref="PreWriteRow.Caller"/>), on the row as it will be written; the guard owns the rule, this only maps its answer
+    /// (<see cref="InvoiceFamilyPreWrite"/>). Declared before <see cref="All"/>: static initialisers run in textual order.
+    /// </summary>
+    internal static readonly PreWriteRule InvoiceFamilyRule = new(
+        new NamedRule("InvoiceFamilyCoreRecord",
+            "ebilling-r1 FR-05 (ISS-010, #1973): an invoice-family row names exactly one core record, and an invoice " +
+            "supersedes only an invoice of that record; asked as the caller after AppendTo on every record the row binds."),
+        async (row, ct) => InvoiceFamilyPreWrite(
+            await OwnedChildWrite.CheckInvoiceFamilyAsync(row.Caller, row.Table, row.Item, stored: null, ct).ConfigureAwait(false)));
+
+    /// <summary>
+    /// The invoice-family check's answer as a pre-write refusal, in the child-record route's contract
+    /// (<c>ChildRecordEndpoints.InvoiceFamilyRefused</c>): a record the row names that the caller cannot see, or the guard's
+    /// <see cref="InvoiceFamilyCoreRecordGuard.RecordNotFoundCode"/>, is the uniform not-found (<see cref="PreWriteRefusal.NotFound"/>,
+    /// the ONLY way to it); a read the guard needed that failed or a table it does not know
+    /// (<see cref="InvoiceFamilyCoreRecordGuard.ReadFailedCode"/>, <see cref="InvoiceFamilyCoreRecordGuard.UnknownEntityCode"/>)
+    /// is <see cref="PreWriteRefusal.Undecided"/> (500, fail closed); the caller's own Dataverse failure is carried; every
+    /// other code is what the row names wrong (400), with the guard's own code and reason. A step that refuses nothing it can
+    /// name is undecided, never "proceed". <c>null</c> only when the guard admits the row. Pure.
+    /// </summary>
+    internal static PreWriteRefusal? InvoiceFamilyPreWrite(OwnedChildWrite.InvoiceFamilyStep? step) => step switch
+    {
+        null => null,
+        { ParentUnavailable: true } => PreWriteRefusal.NotFound(),
+        { ClientFailure: { } failure } => PreWriteRefusal.Failed(failure),
+        { Refusal.RefusalCode: InvoiceFamilyCoreRecordGuard.RecordNotFoundCode } => PreWriteRefusal.NotFound(),
+        { Refusal: { RefusalCode: InvoiceFamilyCoreRecordGuard.ReadFailedCode or InvoiceFamilyCoreRecordGuard.UnknownEntityCode } refused } =>
+            PreWriteRefusal.Undecided(refused.RefusalCode!, ReasonOf(refused)),
+        { Refusal: { RefusalCode: { } code } refused } => PreWriteRefusal.Refused(code, ReasonOf(refused)),
+        _ => PreWriteRefusal.Undecided(InvoiceFamilyCoreRecordGuard.ReadFailedCode,
+            "The invoice-family check gave no answer; nothing was written."),
+    };
+
+    /// <summary>The guard's reason, or its code-only message when it gave none (<see cref="PreWriteRefusal"/> needs one).</summary>
+    private static string ReasonOf(InvoiceFamilyCoreRecord refused) =>
+        string.IsNullOrWhiteSpace(refused.Reason) ? InvoiceFamilyCoreRecordGuard.CodeOnlyRefusalMessage(refused.RefusalCode!) : refused.Reason;
 
     /// <summary>
     /// The secure flag and the access columns of a secure root (matter, project): the BFF's own, written only through the
@@ -105,6 +160,8 @@ internal static class RecordTableRules
                 ChatCallerIsTheForPerson("sprk_assignedtointernal"),
             ],
             // Office RecordCreationService.ApplyBusinessUnitDefaultsAsync fills sprk_searchindexname / sprk_ai_search_index.
+            // Task 017 (#1608, decision 2b): refused in a caller's payload on every path, as on a work assignment.
+            TableServerOwnedColumns = RootServerOwnedColumns,
             SearchIndexed = true,
             // Task 018a (F4-1): Office RecordCreationService.ApplyReferenceAsync — the matter type and practice area are
             // dropped with a warning when they cannot be used, never refused.
@@ -132,6 +189,8 @@ internal static class RecordTableRules
                     "RecordCreationService, tasks 100 and 152)."),
                 ChatCallerIsTheForPerson("sprk_assignedtointernal"),
             ],
+            // Task 017 (#1608, decision 2b): refused in a caller's payload on every path, as on a work assignment.
+            TableServerOwnedColumns = RootServerOwnedColumns,
             SearchIndexed = true,
             // Task 018a (F4-1): Office RecordCreationService.ApplyReferenceAsync — the project type (live column name
             // sprk_projecttype_ref, the lookup carries the table's name).
@@ -143,10 +202,9 @@ internal static class RecordTableRules
             Kind = RecordTableKind.Root,
             // Was ChildRecordEndpoints.RootServerOwnedColumns (ontology task 046, D-113 / task 175): its own SPE
             // container, the secure business unit it is isolated in, and its Access Permission. None is field-secured.
-            // Enforced today ONLY by POST /api/v1/child-records/{table} for a root; the chat create tool does not refuse
-            // them (#1608; task 012 notes, "Pre-existing path difference"). Which paths enforce them is task 013's decision.
-            TableServerOwnedColumns = Columns(
-                "sprk_containerid", SecurableEntityRegistry.SecurityBusinessUnitAttribute, InheritedAccessPermission.Column),
+            // Task 017 (#1608, decision 2b): refused at step 2 of RecordCreationService on every path, the same set as a
+            // matter and a project (RootServerOwnedColumns).
+            TableServerOwnedColumns = RootServerOwnedColumns,
             ForPerson = new ForPersonLookup("sprk_assignedtointernal", "contact"),
             ServerDefaults =
             [
@@ -154,7 +212,7 @@ internal static class RecordTableRules
                 // Task 037 (spec FR-36, owner 2026-10-27, #2354; UAC-r2 conditions 1-4): Assigned To takes the new row's own
                 // Assigned To Internal. Both are CONTACT lookups (live metadata, spaarkedev1, 2026-10-27), so the reference
                 // is copied as-is: no contact/user conversion, never a name or email match. The ONE declaration: the
-                // owned create (OwnedChildWrite.CreateAsync) and RecordCreationService read it through CopiedDefaultsFor.
+                // RecordCreationService reads it through CopiedDefaultsFor (the owned create that also read it was deleted in 017).
                 new ServerDefault(AssignedToDefaults.AssignedToAttribute,
                     "every user-initiated server create of a work assignment (the child-records route, the chat create, " +
                     "the record-creation service with a calling user)",
@@ -195,15 +253,17 @@ internal static class RecordTableRules
             ],
         },
         new RecordTableRule { Table = "sprk_memo", Kind = RecordTableKind.Child },
-        // ebilling-r1 #1911 (not on master): the invoice-family pre-write rule registers on this table, sprk_billingevent
-        // and the other four invoice-family tables (task 012 notes, "Invoice-family reconciliation recipe").
+        // ebilling-r1 #1911 (merged): the invoice-family pre-write rule (InvoiceFamilyRule) is registered on this table,
+        // sprk_billingevent and the other four invoice-family tables (task 017; task 012 notes, "Invoice-family
+        // reconciliation recipe").
         new RecordTableRule
         {
             Table = "sprk_invoice",
             Kind = RecordTableKind.Child,
             // Task 014 (ebilling-r1's review of 013, item 3): a fill-only mapping that filled a second core lookup would fail
             // a valid create with multiple_core_records. The core record is the caller's to name.
-            MappingProtectedColumns = InvoiceFamilyCoreLookups,
+            MappingProtectedColumns = InvoiceFamilyCoreLookupsOf("sprk_invoice"),
+            PreWriteRules = [InvoiceFamilyRule],
         },
         new RecordTableRule { Table = "sprk_reportcard", Kind = RecordTableKind.Child },
         new RecordTableRule { Table = "sprk_analysis", Kind = RecordTableKind.Child },
@@ -218,6 +278,10 @@ internal static class RecordTableRules
             // floor and the document's own narrowing — is written by the BFF only, never by a field-mapping rule (the push
             // skips it too, task 040). sprk_accesspermission is NOT here: it stays fill-only at create.
             MappingProtectedColumns = Columns(Sprk.Bff.Api.Services.Access.AccessInheritance.Column),
+            // Task 017 (owner decision 2b): and refused in a caller's payload — the access record is never a caller's to
+            // name, for any principal (a system principal is refused it at step 2 too, with every other column an app-only
+            // write is refused: InheritedAccessPermission.RefuseAppOnlyWrite). sprk_accesspermission stays the caller's.
+            TableServerOwnedColumns = Columns(Sprk.Bff.Api.Services.Access.AccessInheritance.Column),
         },
         new RecordTableRule
         {
@@ -234,7 +298,42 @@ internal static class RecordTableRules
             Table = "sprk_billingevent",
             Kind = RecordTableKind.Child,
             // Task 014 (ebilling-r1's review of 013, item 3): as sprk_invoice.
-            MappingProtectedColumns = InvoiceFamilyCoreLookups,
+            MappingProtectedColumns = InvoiceFamilyCoreLookupsOf("sprk_billingevent"),
+            PreWriteRules = [InvoiceFamilyRule],
+        },
+
+        // ── The rest of the invoice family (task 017): InvoiceFamilyCoreRecordGuard.CoreRecordLookups keys ──────────
+        // Registered so the invoice-family rule guards every family table a server create path can write (the chat create
+        // accepts any table but sprk_document; task 012 notes, recipe step 2). Their core lookups (the regarding trio) are
+        // mapping-protected, as on an invoice (coordinator item 8).
+
+        new RecordTableRule
+        {
+            Table = "sprk_invoicesubmission",
+            Kind = RecordTableKind.Child,
+            MappingProtectedColumns = InvoiceFamilyCoreLookupsOf("sprk_invoicesubmission"),
+            PreWriteRules = [InvoiceFamilyRule],
+        },
+        new RecordTableRule
+        {
+            Table = "sprk_invoiceapproval",
+            Kind = RecordTableKind.Child,
+            MappingProtectedColumns = InvoiceFamilyCoreLookupsOf("sprk_invoiceapproval"),
+            PreWriteRules = [InvoiceFamilyRule],
+        },
+        new RecordTableRule
+        {
+            Table = "sprk_externalidentifier",
+            Kind = RecordTableKind.Child,
+            MappingProtectedColumns = InvoiceFamilyCoreLookupsOf("sprk_externalidentifier"),
+            PreWriteRules = [InvoiceFamilyRule],
+        },
+        new RecordTableRule
+        {
+            Table = "sprk_invoicecorrection",
+            Kind = RecordTableKind.Child,
+            MappingProtectedColumns = InvoiceFamilyCoreLookupsOf("sprk_invoicecorrection"),
+            PreWriteRules = [InvoiceFamilyRule],
         },
 
         // ── Other server create tables named by the old lists ────────────────────────────────────────────────────────
@@ -251,6 +350,30 @@ internal static class RecordTableRules
                 "OwnedChildWrite.PathFor / KeepsItsCreatorWhenUnfiled). The per-user master thread and Direct-thread " +
                 "privacy rest on it; a team owner would show one person's mail to their whole business unit."),
         },
+
+        // Task 017 (item 9): the budget inquiry's service request (BudgetInquiryExecutor, spec FR-36 of the ontology's task
+        // 070), filed under sprk_regardingmatter with the typed ADR-024 pair and the outside firm (sprk_regardingorganization).
+        // It declares nothing beyond the defaults, which is what the owned create (OwnedChildWrite.CreateAsync, deleted in 017)
+        // applied to it: the common server-owned columns and the creator person refused in the caller's row, the resolver's owner
+        // (its regarding matter's business-unit team), no create under a secure owner (it is no reparentable child), and the
+        // regarding matter it carries as its own I-1 stamp. Registered so the service accepts it when 017c re-points the
+        // inquiry (an unregistered table is record_creation.table_unsupported).
+        new RecordTableRule { Table = "sprk_servicerequest", Kind = RecordTableKind.Child },
+
+        // ── The chat create's offered platform tables (task 017, owner decision 2026-10-30, option b) ───────────────────
+        // dataverse.create_record offers a task, a person (contact) and a company (account), and creates each today through
+        // the owned create (OwnedChildWrite.PathFor → Owned: each is user-owned, none is per-user or a communication), so
+        // the service must accept them once the chat moves onto it. Each declares only what that create applies today:
+        // a CHILD (no root behaviour; RecordCreatorPerson stamps roots only); the common server-owned columns refused in
+        // the caller's row and nothing table-specific; no "for" person and no server default; not search-indexed; no
+        // ownership exception, so the owner is the resolver's team — a task's regarding (regardingobjectid, a lookup the
+        // resolver's one builder reads like any other) decides it, an unfiled row gets the caller's business-unit team;
+        // and refused under a secure owner (none is a reparentable child; the service's step 7 has the same rule). The
+        // chat create applies no field mapping, so mapping is excluded by a named rule rather than left to apply.
+
+        new RecordTableRule { Table = "task", Kind = RecordTableKind.Child, MappingExclusion = ChatPlatformTableIsNotMapped },
+        new RecordTableRule { Table = "contact", Kind = RecordTableKind.Child, MappingExclusion = ChatPlatformTableIsNotMapped },
+        new RecordTableRule { Table = "account", Kind = RecordTableKind.Child, MappingExclusion = ChatPlatformTableIsNotMapped },
 
         // ── Ontology writers' tables: never mapped (spaarke-ontology-platform-r1 §0.3) ──────────────────────────────
 
@@ -324,6 +447,12 @@ internal static class RecordTableRules
         "spaarke-ontology-platform-r1 §0.3 binds a Signal's sprk_sentence and fact snapshot and a Decision Record's " +
         "content: no field mapping is applied to these rows (ontology-r1 answer, 2026-10-19; w2-coordination.md).");
 
+    private static NamedRule ChatPlatformTableIsNotMapped => new(
+        "ChatPlatformTableIsNotMapped",
+        "Task 017 (owner decision 2026-10-30, option b): the chat create of a task, contact or account is registered to keep " +
+        "the behaviour it had, and the owned create it had (OwnedChildWrite.CreateAsync, deleted in 017) applied no field mapping to it. Mapping these " +
+        "platform tables would be new behaviour and needs its own decision.");
+
     private static IReadOnlySet<string> Columns(params string[] columns) =>
         new HashSet<string>(columns, StringComparer.OrdinalIgnoreCase);
 }
@@ -386,21 +515,24 @@ internal sealed record PreWriteRow(IDataverseUserClient Caller, string Table, Da
 
 /// <summary>
 /// A pre-write rule's refusal. Nothing is created. Exactly one of: a stable refusal <see cref="Code"/> with its
-/// <see cref="Detail"/> (<see cref="Refused"/>); the caller's own Dataverse failure (<see cref="Failed"/>); or a record
-/// the row names that the caller cannot see (<see cref="NotFound"/>, answered as the uniform not-found). The factories
-/// are the only way to make one, so a refusal with no reason cannot exist.
+/// <see cref="Detail"/> — what the row names wrong (<see cref="Refused"/>), or a question the rule could not decide
+/// (<see cref="Undecided"/>, task 017); the caller's own Dataverse failure (<see cref="Failed"/>); or a record the row names
+/// that the caller cannot see (<see cref="NotFound"/>, answered as the uniform not-found — the only refusal that is). The
+/// factories are the only way to make one, so a refusal with no reason cannot exist.
 /// </summary>
 internal sealed record PreWriteRefusal
 {
-    private PreWriteRefusal(string? code, string? detail, DataverseUserResponse? clientFailure, bool parentUnavailable)
+    private PreWriteRefusal(
+        string? code, string? detail, DataverseUserResponse? clientFailure, bool parentUnavailable, bool isUndecided = false)
     {
         Code = code;
         Detail = detail;
         ClientFailure = clientFailure;
         ParentUnavailable = parentUnavailable;
+        IsUndecided = isUndecided;
     }
 
-    /// <summary>The rule's stable refusal code; <c>null</c> for a client failure or a not-found.</summary>
+    /// <summary>The rule's stable refusal code (<see cref="Refused"/>, <see cref="Undecided"/>); <c>null</c> for a client failure or a not-found.</summary>
     public string? Code { get; }
 
     /// <summary>Why, in words the caller can act on; set with <see cref="Code"/>.</summary>
@@ -427,8 +559,22 @@ internal sealed record PreWriteRefusal
         return new(null, null, clientFailure, false);
     }
 
+    /// <summary>
+    /// Task 017 (ebilling-r1 F2): the rule could not decide whether the row may be written (a read it needed failed, a table it
+    /// does not know), with a stable code; fail closed. Answered as "not saved" (500), never as the uniform not-found.
+    /// </summary>
+    public bool IsUndecided { get; }
+
     /// <summary>A record the row names cannot be seen by the caller (or does not exist).</summary>
     public static PreWriteRefusal NotFound() => new(null, null, null, true);
+
+    /// <summary>The rule could not decide, with a stable code (see <see cref="IsUndecided"/>).</summary>
+    public static PreWriteRefusal Undecided(string code, string detail)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(code);
+        ArgumentException.ThrowIfNullOrWhiteSpace(detail);
+        return new(code, detail, null, false, isUndecided: true);
+    }
 }
 
 /// <summary>A pre-write check: <c>null</c> when the row may be written.</summary>

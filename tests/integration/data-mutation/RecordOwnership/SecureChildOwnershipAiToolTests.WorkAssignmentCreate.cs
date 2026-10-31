@@ -502,11 +502,9 @@ public sealed partial class SecureChildOwnershipAiToolTests
         var services = new ServiceCollection();
         services.AddLogging();
         services.AddSingleton<IDataverseUserClient>(_user);
-        services.AddSingleton<IRecordOwnershipResolver>(_world.Resolver());
-        services.AddSingleton(_appOnly.Object);
-        services.AddSingleton(Restamper());
-        services.AddSingleton(Shares());
-        services.AddSingleton(SecureRootFilingGateFixtures.NothingSecure());
+        // Task 017: the route's create takes the ONE server create, built over this harness's collaborators.
+        services.AddSingleton(RouteRecordCreation.Over(
+            _world.Resolver(), _appOnly.Object, Restamper(), Shares(), SecureRootFilingGateFixtures.NothingSecure()));
         var http = HttpContextOfCaller();
         http.RequestServices = services.BuildServiceProvider();
 

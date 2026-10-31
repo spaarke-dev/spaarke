@@ -161,13 +161,17 @@ public partial class SecureRootInheritanceWriterTests : TypedToolHandlerTestFixt
     private SecureChildOwnershipAiToolTests.ScriptedUserClient Scripted() =>
         new(Creator) { RecordTypeOf = id => World.ValueOf<string>("sprk_recordtype_ref", id, "sprk_recordlogicalname") };
 
-    private DataverseCreateRecordHandler ChatCreate(IFieldMappingDataverseService appOnly) =>
-        new(Scripted(), CreateLogger<DataverseCreateRecordHandler>(),
-            new HandoffUrlBuilder("https://spaarkedev1.crm.dynamics.com"),
-            new RecordOwnershipResolver(
-                SecureChildShareWorld.EntitiesOver(() => _fixture.ChildWorld).Object, SecureChildShareWorld.Configuration(),
-                NullLogger<RecordOwnershipResolver>.Instance),
-            appOnly, IdentityNormalizationFixtures.NoLinkedContact(), _gate);
+    private DataverseCreateRecordHandler ChatCreate(IFieldMappingDataverseService appOnly)
+    {
+        var resolver = new RecordOwnershipResolver(
+            SecureChildShareWorld.EntitiesOver(() => _fixture.ChildWorld).Object, SecureChildShareWorld.Configuration(),
+            NullLogger<RecordOwnershipResolver>.Instance);
+        // Task 017 (2d-3): the owned create is the ONE server create, over the same resolver, writer and gate.
+        return new(Scripted(), CreateLogger<DataverseCreateRecordHandler>(),
+            new HandoffUrlBuilder("https://spaarkedev1.crm.dynamics.com"), resolver,
+            IdentityNormalizationFixtures.NoLinkedContact(),
+            Sprk.Bff.Api.Tests.Integration.DataMutation.RecordOwnership.RouteRecordCreation.Default(resolver, appOnly, _gate));
+    }
 
     /// <summary>
     /// The app-only create seam: the row lands in the fixture as the application created it (createdby = app).
@@ -378,8 +382,9 @@ public partial class SecureRootInheritanceWriterTests : TypedToolHandlerTestFixt
             new HandoffUrlBuilder("https://spaarkedev1.crm.dynamics.com"),
             new RecordOwnershipResolver(
                 SecureChildShareWorld.EntitiesOver(() => _fixture.ChildWorld).Object, SecureChildShareWorld.Configuration(),
-                NullLogger<RecordOwnershipResolver>.Instance),
-            AppCreatesIntoTheWorld().Object, IdentityNormalizationFixtures.NoLinkedContact(), _gate);
+                NullLogger<RecordOwnershipResolver>.Instance), IdentityNormalizationFixtures.NoLinkedContact(), Sprk.Bff.Api.Tests.Integration.DataMutation.RecordOwnership.RouteRecordCreation.Default(new RecordOwnershipResolver(
+                SecureChildShareWorld.EntitiesOver(() => _fixture.ChildWorld).Object, SecureChildShareWorld.Configuration(),
+                NullLogger<RecordOwnershipResolver>.Instance), AppCreatesIntoTheWorld().Object, _gate));
 
         var result = await handler.ExecuteChatAsync(
             BuildChatInvocationContext(toolArgumentsJson: JsonSerializer.Serialize(new
@@ -526,8 +531,7 @@ public partial class SecureRootInheritanceWriterTests : TypedToolHandlerTestFixt
             .ReturnsAsync(RecordOwnerResolution.Owned(SecureTeam) with { IsSecureOwner = true });
         var handler = new DataverseCreateRecordHandler(
             Scripted(), CreateLogger<DataverseCreateRecordHandler>(),
-            new HandoffUrlBuilder("https://spaarkedev1.crm.dynamics.com"), resolver.Object,
-            AppCreatesIntoTheWorld().Object, IdentityNormalizationFixtures.NoLinkedContact(), _gate);
+            new HandoffUrlBuilder("https://spaarkedev1.crm.dynamics.com"), resolver.Object, IdentityNormalizationFixtures.NoLinkedContact(), Sprk.Bff.Api.Tests.Integration.DataMutation.RecordOwnership.RouteRecordCreation.Default(resolver.Object, AppCreatesIntoTheWorld().Object, _gate));
 
         var result = await handler.ExecuteChatAsync(
             BuildChatInvocationContext(toolArgumentsJson: JsonSerializer.Serialize(new
@@ -850,8 +854,9 @@ public partial class SecureRootInheritanceWriterTests : TypedToolHandlerTestFixt
                 new HandoffUrlBuilder("https://spaarkedev1.crm.dynamics.com"),
                 new RecordOwnershipResolver(
                     SecureChildShareWorld.EntitiesOver(() => _fixture.ChildWorld).Object, SecureChildShareWorld.Configuration(),
-                    NullLogger<RecordOwnershipResolver>.Instance),
-                appOnly, IdentityNormalizationFixtures.NoLinkedContact(), _gate)
+                    NullLogger<RecordOwnershipResolver>.Instance), IdentityNormalizationFixtures.NoLinkedContact(), Sprk.Bff.Api.Tests.Integration.DataMutation.RecordOwnership.RouteRecordCreation.Default(new RecordOwnershipResolver(
+                    SecureChildShareWorld.EntitiesOver(() => _fixture.ChildWorld).Object, SecureChildShareWorld.Configuration(),
+                    NullLogger<RecordOwnershipResolver>.Instance), appOnly, _gate))
             .ExecuteChatAsync(
                 BuildChatInvocationContext(toolArgumentsJson: JsonSerializer.Serialize(new
                 {
@@ -1177,8 +1182,9 @@ public partial class SecureRootInheritanceWriterTests : TypedToolHandlerTestFixt
                 new HandoffUrlBuilder("https://spaarkedev1.crm.dynamics.com"),
                 new RecordOwnershipResolver(
                     SecureChildShareWorld.EntitiesOver(() => _fixture.ChildWorld).Object, SecureChildShareWorld.Configuration(),
-                    NullLogger<RecordOwnershipResolver>.Instance),
-                AppCreatesIntoTheWorld().Object, IdentityNormalizationFixtures.NoLinkedContact(), _gate)
+                    NullLogger<RecordOwnershipResolver>.Instance), IdentityNormalizationFixtures.NoLinkedContact(), Sprk.Bff.Api.Tests.Integration.DataMutation.RecordOwnership.RouteRecordCreation.Default(new RecordOwnershipResolver(
+                    SecureChildShareWorld.EntitiesOver(() => _fixture.ChildWorld).Object, SecureChildShareWorld.Configuration(),
+                    NullLogger<RecordOwnershipResolver>.Instance), AppCreatesIntoTheWorld().Object, _gate))
             .ExecuteChatAsync(
                 BuildChatInvocationContext(toolArgumentsJson: JsonSerializer.Serialize(new { tablename = table, item })) with
                 { UserId = Guid.NewGuid().ToString() },
@@ -1433,8 +1439,9 @@ public partial class SecureRootInheritanceWriterTests : TypedToolHandlerTestFixt
                 new HandoffUrlBuilder("https://spaarkedev1.crm.dynamics.com"),
                 new RecordOwnershipResolver(
                     SecureChildShareWorld.EntitiesOver(() => _fixture.ChildWorld).Object, SecureChildShareWorld.Configuration(),
-                    NullLogger<RecordOwnershipResolver>.Instance),
-                appOnly, IdentityNormalizationFixtures.NoLinkedContact(), _gate)
+                    NullLogger<RecordOwnershipResolver>.Instance), IdentityNormalizationFixtures.NoLinkedContact(), Sprk.Bff.Api.Tests.Integration.DataMutation.RecordOwnership.RouteRecordCreation.Default(new RecordOwnershipResolver(
+                    SecureChildShareWorld.EntitiesOver(() => _fixture.ChildWorld).Object, SecureChildShareWorld.Configuration(),
+                    NullLogger<RecordOwnershipResolver>.Instance), appOnly, _gate))
             .ExecuteChatAsync(
                 BuildChatInvocationContext(toolArgumentsJson: JsonSerializer.Serialize(new
                 {
@@ -1484,8 +1491,9 @@ public partial class SecureRootInheritanceWriterTests : TypedToolHandlerTestFixt
                 new HandoffUrlBuilder("https://spaarkedev1.crm.dynamics.com"),
                 new RecordOwnershipResolver(
                     SecureChildShareWorld.EntitiesOver(() => _fixture.ChildWorld).Object, SecureChildShareWorld.Configuration(),
-                    NullLogger<RecordOwnershipResolver>.Instance),
-                AppCreatesIntoTheWorld().Object, IdentityNormalizationFixtures.NoLinkedContact(), _gate)
+                    NullLogger<RecordOwnershipResolver>.Instance), IdentityNormalizationFixtures.NoLinkedContact(), Sprk.Bff.Api.Tests.Integration.DataMutation.RecordOwnership.RouteRecordCreation.Default(new RecordOwnershipResolver(
+                    SecureChildShareWorld.EntitiesOver(() => _fixture.ChildWorld).Object, SecureChildShareWorld.Configuration(),
+                    NullLogger<RecordOwnershipResolver>.Instance), AppCreatesIntoTheWorld().Object, _gate))
             .ExecuteChatAsync(
                 BuildChatInvocationContext(toolArgumentsJson: JsonSerializer.Serialize(new
                 {

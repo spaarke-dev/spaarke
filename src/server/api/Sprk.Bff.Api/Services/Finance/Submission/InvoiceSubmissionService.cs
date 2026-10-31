@@ -818,14 +818,9 @@ public class InvoiceSubmissionService
 
         // The thread with every column (its ownership parents are whatever lookups it carries, not only the core ones D-140 compares).
         // A thread that cannot be found counts as filed: step A never files a message whose thread's filing it cannot see (fail closed).
-        try
-        {
-            return RecordThreadFiling.ParentsOf(await RecordThreadFiling.ReadThreadAsync(entities, threadId, ct).ConfigureAwait(false)).Count > 0;
-        }
-        catch (InvalidOperationException)
-        {
-            return true;
-        }
+        // #2471 follow-up: "cannot be found" is the zero-row result, never a caught exception, so a read fault propagates.
+        return await RecordThreadFiling.TryReadThreadAsync(entities, threadId, ct).ConfigureAwait(false) is not { } thread
+            || RecordThreadFiling.ParentsOf(thread).Count > 0;
     }
 
     /// <summary>A row of the filing chain, or null when it no longer exists. A read fault propagates.</summary>

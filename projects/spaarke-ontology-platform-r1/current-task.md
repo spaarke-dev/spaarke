@@ -9,9 +9,9 @@
 
 | Field | Value |
 |---|---|
-| **Task** | No lane is running. **173 is DONE** (#2462 merged `f4a0fc6862`): an external assignee is emailed from the system mailbox. 168, 171 and 172 are done too. |
-| **Status** | No owner question is open (the From question was answered: A, system mailbox). **ebilling #1911:** ontology APPROVED the ontology surface after the F2/K1 re-check (PR comment 6503550108). It asked ebilling to make sure 105-override-server.md names the principal-change known limit. Other peer items: DI-137 (#2458) is with R3/uac-r2. |
-| **Next Action** | 1) Next docs→master: 168 + 173 + project docs. Before it: notices to R3, uac-r2 and word-add-in; merge master in; build + full ArchTests; open the PR with `--auto --merge`. 2) After the next dev BFF deploy (UAC's 194b hold): the 168/173 live proof (internal email + bell; an external email from the system mailbox; the portal view), the task-170 App Insights check and the `BUD-` number. 3) Owner re-checks for 114, 158-163 and 166. |
+| **Task** | No lane is running. 168, 171, 172 and 173 are DONE and ON MASTER (#2463 → `c8bb55d0cd`; docs fast-forwarded to it). |
+| **Status** | No owner question is open. ebilling #1911 is merged (`eaa0d44f7f`). Their next PR (104, 101) brings our two asks: the principal-change known limit in 105-override-server.md and the double RecordRefusal log; review it when it arrives. The main checkout `C:\code_files\spaarke` refuses fast-forwards because of another session's uncommitted `.claude/agent-memory/researcher/MEMORY.md`; leave it alone. |
+| **Next Action** | 1) Dev BFF is `9f4afe82ac` (R3 readback 14:40:39Z 2026-10-30). Run the 168/173 live proof per `notes/168-173-live-proof.md`: the owner does runs A (internal), B (external) and C (unticked) in the Console; the main session runs the read-only checks and fills section 6; then the task-170 latency check and the `BUD-` number. 2) Owner re-checks for 114, 158-163 and 166 (163's live role change is already done: verified 2026-10-30), then close them. 3) Review ebilling 097b (BillingFactLoader replaced-invoice exclusion: the id must be derived on the server; same firm and number only) and their next PR into master. 4) Remaining: 111 (row 4 waits for the external SPA dev deploy), 105 (v4 UAT), 090 wrap-up (held by the owner until UAT is done). |
 
 ## Task 168 decisions: D-199 (owner, 2026-10-29)
 
@@ -25,12 +25,12 @@ Q1 = A (an eligible internal user, or an onboarded external contact with a grant
 - **uac-r2 dev move:** root-homed humans move to BU1 (owner approval pending, no writes yet; they give notice first). The seed policies likely stay root-owned (`DoNotMoveAllRecords=true`). After the move, BU1-homed Ontology Admins (Deep) can't read root-owned seed policies; uac-r2 is preparing an owner question and will copy us. **Hold the memo-LIKE proof** until they confirm placement.
 - **CI:** `ontology-script-tests` is pinned to Pester 5.7.1 (#2428). DI-134 (#2430) asks the CI owner to pin `verdict-script-tests`.
 - **Don't push to docs while a docs→master PR is open** (it moves the PR head and restarts CI).
-- `OrdinaryMovesWritesEnabled` stays OFF.
+- **Ordinary moves on dev (uac-r2):** both switches on since 2026-10-30 19:53:19Z (owner approved in uac-r2's session). Ontology re-read: **PASS** (9 WA-core Signals root team → BU1, owner only; `notes/ordinary-moves-baseline-2026-10-30.md`).
 - **Commits in a fresh worktree:** lint-staged needs prettier: `export PATH="/c/code_files/spaarke-wt-spaarke-ontology-platform-r1/node_modules/.bin:$PATH"` (no junctions). Integration tests under `tests/integration/auth/**` compile into `tests/unit/Sprk.Bff.Api.Tests`; filter there.
 
 ## Next docs→master
 
-The last one was PR #2439, merged as master `f07ab2ef1f` (2026-10-29): 167b, 167c, 171, 172 and the 194b repoint; all checks passed. Docs was fast-forwarded to it. The next one carries 168 when it is ready. Before it: notices to word-add-in, R3 and uac-r2; merge master in; full ArchTests. The word-add-in session refuses held messages while the two sessions run in different permission modes.
+The last was PR #2463, merged as master `c8bb55d0cd` (2026-10-29): 168 and 173. Before the next: notices to R3, uac-r2 and word-add-in (current name `spaarke-wt-spaarkeai-word-add-in-r1-8a`); merge master in; build, the filtered Signals tests and the full ArchTests (1858 now).
 
 ## Blocked follow-ups (ours)
 

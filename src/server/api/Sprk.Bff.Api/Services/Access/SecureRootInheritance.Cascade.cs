@@ -128,6 +128,44 @@ public sealed record FiledCascadePass(
 /// </summary>
 public sealed record RecordBelowResult(int Recorded, int? NotRecorded);
 
+/// <summary>
+/// Owner decision 2026-10-29 ("records are not owned by named users; they are owned by business units/teams; the family
+/// members have the same ownership"): what the follow-parents pass's root-owner step planned or wrote this run. Report-only
+/// unless <c>SecureRoot:Inheritance:RootOwnerWritesEnabled</c> AND <c>SecureChild:Reconciliation:OrdinaryMovesWritesEnabled</c>
+/// are <c>true</c> (and the recent-changes emergency stop is not set). <see cref="Changes"/> holds up to 200 lines: table, id, from (owner type, unit), to (team, unit), and planned /
+/// written / refused / reported with the reason. The cross-unit and grant counts are of the roots planned or re-owned (no
+/// ids). The step changes neither a root's container column nor its grants, but a cross-unit re-own moves where the root's
+/// documents are expected (they follow its owning unit), which the ordinary-moves pass acts on.
+/// </summary>
+public sealed record FollowParentsRootOwners
+{
+    public bool WritesEnabled { get; init; }
+    public int Planned { get; init; }
+    public int Written { get; init; }
+    public int Refused { get; init; }
+    public int Reported { get; init; }
+    public int Deferred { get; init; }
+
+    /// <summary>Fix round (A-F1): roots planned or re-owned into ANOTHER business unit. The root's own container column is
+    /// not changed, but its documents' expected container follows its owning unit: the ordinary-moves pass moves them.</summary>
+    public int CrossUnit { get; init; }
+
+    /// <summary>Fix round (B-F2): roots whose family owner was resolved this run (at most
+    /// <c>SecureRootInheritance.MaxRootResolvesPerRun</c>).</summary>
+    public int Resolved { get; init; }
+    public int WithGrants { get; init; }
+    public int GrantsUnread { get; init; }
+    public IReadOnlyList<object> Changes { get; init; } = Array.Empty<object>();
+
+    /// <summary>Fix round (B-F2): the last root this run reached when a bound stopped it — the next run continues after it
+    /// (and wraps round); null when the run reached every root.</summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public (string Table, Guid Id)? Cursor { get; init; }
+
+    /// <summary><see cref="Cursor"/> as "table:id" for the job's ResultJson.</summary>
+    public string? ResumeAfter => Cursor is { } c ? $"{c.Table}:{c.Id:D}" : null;
+}
+
 /// <summary>One run of the job's follow-parents pass (task 175).</summary>
 public sealed record FollowParentsPass
 {
@@ -158,6 +196,9 @@ public sealed record FollowParentsPass
     /// BFF's read of it is not proven while records read empty, F1) — the run fails; null when they were trusted.
     /// </summary>
     public string? Untrusted { get; init; }
+
+    /// <summary>Owner decision 2026-10-29: the root-owner step of this run (a filed root follows its family's owner).</summary>
+    public FollowParentsRootOwners RootOwners { get; init; } = new();
 
     /// <summary>
     /// Nothing is left that a run can do. Undetermined records are reported, not counted here (task 173's precedent): a record
@@ -839,7 +880,8 @@ public sealed partial class SecureRootInheritance
         // (b) Un-secure: an inherited Secure whose parents are no longer secure (round 84, refined by round 87).
         if (d.Unsecure)
         {
-            var unsecure = await UnsecureFollowingParentsAsync(logical, recordId, d.Parents, traceId, ct).ConfigureAwait(false);
+            var unsecure = await UnsecureFollowingParentsAsync(logical, recordId, d.Parents, ancestry.OwnerLookups, traceId, ct)
+                .ConfigureAwait(false);
             result = result with
             {
                 UnsecureOutcome = unsecure.Outcome,
@@ -943,8 +985,11 @@ public sealed partial class SecureRootInheritance
     /// (an Access Permission or an access record, one column each); the rest are deferred to the next run.
     /// </summary>
     /// <exception cref="InvalidOperationException">The listing could not be completed (ADR-036 A1 rule 4: a failed run).</exception>
+    /// <param name="rootOwnerResumeAfter">Fix round (B-F2): where the root-owner step continues — the previous run's
+    /// <see cref="FollowParentsRootOwners.Cursor"/> (null: from the start).</param>
     public async Task<FollowParentsPass> FollowParentsPassAsync(
-        string traceId, (string Table, Guid Id)? unsecureResumeAfter, int maxUnsecures, int maxRecordWrites, CancellationToken ct)
+        string traceId, (string Table, Guid Id)? unsecureResumeAfter, int maxUnsecures, int maxRecordWrites, CancellationToken ct,
+        (string Table, Guid Id)? rootOwnerResumeAfter = null)
     {
         var listed = await ListRecordsAsync(ct).ConfigureAwait(false);
 
@@ -984,6 +1029,7 @@ public sealed partial class SecureRootInheritance
 
         // Round 1: the batched decision over every record; follow only those with something to write.
         var needs = new List<(ListedRecord Row, bool Unsecure, bool RecordOnly, bool InheritedSecureFirst)>();
+        var familyAnswers = new Dictionary<(string Table, Guid Id), SecureParentsAnswer>();
         foreach (var group in listed.GroupBy(r => r.Table))
         {
             var answers = await ReadSecureParentsOfManyAsync(_dataverse, _logger, group.Key, group.Select(r => r.Id).ToList(), ct,
@@ -991,6 +1037,8 @@ public sealed partial class SecureRootInheritance
             foreach (var row in group)
             {
                 seen.Add((row.Table, row.Id));
+                if (answers.TryGetValue(row.Id, out var familyAnswer))
+                    familyAnswers[(row.Table, row.Id)] = familyAnswer;
                 if (string.IsNullOrEmpty(row.Marker) && !readable[row.Table])
                 {
                     unproven++; // never decided on an empty read the BFF cannot vouch for (F1): nothing written
@@ -1073,6 +1121,14 @@ public sealed partial class SecureRootInheritance
             Tally(await FollowParentsAsync(row.Table, row.Id, traceId, ct).ConfigureAwait(false), counted: false);
         }
 
+        // Owner decision 2026-10-29: an ordinary filed root follows its family's owner (projects first, so a work assignment
+        // under a project re-owned here follows it in this run); a re-owned project is decided again below with what is
+        // filed under it.
+        // Its refusals are reported (problems, rootOwners), not counted as not completed (task 173's precedent: one bad row
+        // must not keep the job failed on every run).
+        var rootOwners = await FollowFamilyOwnersAsync(listed, familyAnswers, changedParents, rootOwnerResumeAfter, Problem, ct)
+            .ConfigureAwait(false);
+
         // Later rounds: what is filed under a project changed in this run, decided again now (its values just moved).
         for (var round = 2; changedParents.Count > 0 && round <= MaxFilingDepth + 1; round++)
         {
@@ -1138,6 +1194,7 @@ public sealed partial class SecureRootInheritance
             UnsecureResumeAfter = deferred > 0 ? lastUnsecureTried : null,
             Problems = problems,
             Changes = changes,
+            RootOwners = rootOwners,
         };
 
         void Problem(string line)
@@ -1207,20 +1264,47 @@ public sealed partial class SecureRootInheritance
     }
 
     /// <summary>
+    /// The owner question the un-secure step asks for a record of <paramref name="logical"/> filed under
+    /// <paramref name="parents"/> (the matters and projects it is filed under that exist, as its read names them). Owner
+    /// decision 2026-10-29: a work assignment's parents are keyed as its read keyed them (<paramref name="ownerLookups"/>,
+    /// <see cref="SecureParentsAnswer.OwnerLookups"/> — <see cref="OwnerKeyedParents"/>, the rule creation keys by) and asked
+    /// through the one builder (<c>RecordOwnershipContext.ForRow</c>), so they rank as creation ranks them: its own matter,
+    /// then its own project (<c>SecureChildLineage.RootLookupOrder</c>), then what an invoice or event it holds belongs to —
+    /// and, when it holds no matter or project, that record's matter, then its project. A parent the keys do not name ranks
+    /// last. Any other table (a project: its pair's matter or project) is asked in the order named.
+    /// </summary>
+    internal static RecordOwnershipContext UnsecureOwnerQuestionOf(
+        string logical, IEnumerable<SecureFilingParent> parents,
+        IReadOnlyList<KeyValuePair<string, RecordOwnershipParent?>> ownerLookups)
+    {
+        ArgumentNullException.ThrowIfNull(parents);
+        ArgumentNullException.ThrowIfNull(ownerLookups);
+        var named = parents.ToArray();
+        if (!TypedFilingColumns.TryGetValue(logical, out var typed) || typed.Count == 0)
+            return RecordOwnershipContext.ForParents(named.Select(p => (RecordOwnershipParent?)new RecordOwnershipParent(p.Table, p.Id)));
+
+        return RecordOwnershipContext.ForRow(logical, named.Select(p => KeyValuePair.Create(
+            ownerLookups.FirstOrDefault(k => k.Value is { } v && v.RecordId == p.Id
+                                             && string.Equals(v.EntityLogicalName, p.Table, StringComparison.OrdinalIgnoreCase)).Key
+            ?? p.Table,
+            (RecordOwnershipParent?)new RecordOwnershipParent(p.Table, p.Id))));
+    }
+
+    /// <summary>
     /// The un-secure step for one record: the owner the ownership rule gives a record filed under its (now ordinary) parents —
     /// their business unit's team (D-11, record-first) — and then the unsecure endpoint's own steps. Never the Secure Record
     /// Owners team (a parent still isolated would hand it to a memberless team with its shares gone — reachable by nobody):
     /// that, an unresolvable owner, or any refusal leaves it secure.
     /// </summary>
     private async Task<(string Outcome, string? Code, string? Detail)> UnsecureFollowingParentsAsync(
-        string logical, Guid recordId, IReadOnlyList<FilingParentState> parents, string traceId, CancellationToken ct)
+        string logical, Guid recordId, IReadOnlyList<FilingParentState> parents,
+        IReadOnlyList<KeyValuePair<string, RecordOwnershipParent?>> ownerLookups, string traceId, CancellationToken ct)
     {
         RecordOwnerResolution owner;
         try
         {
             owner = await _ownership.ResolveOwnerAsync(
-                RecordOwnershipContext.ForParents(parents.Select(p => (RecordOwnershipParent?)new RecordOwnershipParent(p.Parent.Table, p.Parent.Id))),
-                ct).ConfigureAwait(false);
+                UnsecureOwnerQuestionOf(logical, parents.Select(p => p.Parent), ownerLookups), ct).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
@@ -1649,8 +1733,14 @@ public sealed partial class SecureRootInheritance
             ? value switch { OptionSetValue o => o.Value, int i => i, _ => null }
             : null;
 
-    /// <summary>One work assignment or project as the job's listing reads it.</summary>
-    private sealed record ListedRecord(string Table, Guid Id, bool? Secure, int? Permission, string? Marker);
+    /// <summary>One work assignment or project as the job's listing reads it — with its owner (owner decision 2026-10-29: the
+    /// root-owner step).</summary>
+    private sealed record ListedRecord(string Table, Guid Id, bool? Secure, int? Permission, string? Marker)
+    {
+        public Guid? OwningTeam { get; init; }
+        public Guid? OwningUser { get; init; }
+        public Guid? OwningBusinessUnit { get; init; }
+    }
 
     /// <summary>
     /// Every work assignment and project, with its own flag, Access Permission and access record — paged; past the page
@@ -1664,7 +1754,8 @@ public sealed partial class SecureRootInheritance
         {
             var query = new QueryExpression(table)
             {
-                ColumnSet = new ColumnSet(table + "id", IsSecureColumn, AccessPermissionColumn, AccessInheritance.Column),
+                ColumnSet = new ColumnSet(table + "id", IsSecureColumn, AccessPermissionColumn, AccessInheritance.Column,
+                    OwningTeamColumn, OwningUserColumn, OwningBusinessUnitColumn),
                 NoLock = true,
                 PageInfo = new PagingInfo { Count = FiledListPageSize, PageNumber = 1 },
             };
@@ -1678,7 +1769,12 @@ public sealed partial class SecureRootInheritance
                 var result = await _dataverse.RetrieveMultipleAsync(query, ct).ConfigureAwait(false);
                 rows.AddRange(result.Entities.Select(e => new ListedRecord(
                     table, e.Id, e.GetAttributeValue<bool?>(IsSecureColumn), PermissionOfRow(e),
-                    e.GetAttributeValue<string>(AccessInheritance.Column))));
+                    e.GetAttributeValue<string>(AccessInheritance.Column))
+                {
+                    OwningTeam = IdOf(e, OwningTeamColumn),
+                    OwningUser = IdOf(e, OwningUserColumn),
+                    OwningBusinessUnit = IdOf(e, OwningBusinessUnitColumn),
+                }));
                 if (!result.MoreRecords)
                     break;
                 query.PageInfo.PageNumber++;
@@ -1687,5 +1783,422 @@ public sealed partial class SecureRootInheritance
         }
 
         return rows;
+
+        static Guid? IdOf(Entity e, string column) =>
+            e.GetAttributeValue<EntityReference>(column)?.Id is { } id && id != Guid.Empty ? id : null;
+    }
+
+    // ── Owner decision 2026-10-29: a root follows its family's ownership ─────────────────────────────────────────────────
+
+    /// <summary>
+    /// Owner decision 2026-10-29: the switch that turns the root-owner step from report-only into writes. Absent, empty or
+    /// unparseable = report-only (an opt-in, set only after a report-only run has been read and the owner gives the go). It
+    /// writes only together with <see cref="SecureChildReconciliationJob.OrdinaryMovesWritesEnabledConfigKey"/> (fix round,
+    /// A-F1): a root's documents expect the container of the root's OWNING business unit, so a cross-unit re-own moves where
+    /// the family's files are expected, and only the ordinary-moves pass moves them. With this switch alone the step stays
+    /// report-only and warns. The recent-changes emergency stop
+    /// (<see cref="SecureChildReconciliationJob.RecentChangesWritesEnabledConfigKey"/> = false) stops it too.
+    /// </summary>
+    internal const string RootOwnerWritesEnabledConfigKey = "SecureRoot:Inheritance:RootOwnerWritesEnabled";
+
+    /// <summary>The most roots the root-owner step plans or re-owns a run (only roots that reach a plan or a write count);
+    /// the rest are deferred, and the run's cursor carries them to the next run.</summary>
+    internal const int MaxRootReownsPerRun = 25;
+
+    /// <summary>
+    /// Fix round (B-F2): the most roots whose family owner the step RESOLVES a run; the rest are deferred, and the cursor
+    /// carries them. One resolve reads the root's row, what an invoice or event it names belongs to, its parents, and a team
+    /// or two: about six requests, so a little over 1,200 a run at this bound (fewer with the per-run lookup cache). The job
+    /// runs every 5 minutes, and Dataverse's service-protection limit is 6,000 requests per user in a 5-minute window, so
+    /// this step stays near a fifth of it and leaves the rest for the job's other passes and the BFF's other app-only traffic.
+    /// </summary>
+    internal const int MaxRootResolvesPerRun = 200;
+
+    /// <summary>The root-owner step's reason codes (its <c>rootOwners</c> lines and problems).</summary>
+    internal const string ReasonRootOwnerUnresolved = "sdap.inherit.root_owner_unresolved";
+    internal const string ReasonRootOwnerNamedTeam = "sdap.inherit.root_owner_named_team";
+    internal const string ReasonRootOwnerNotWritten = "sdap.inherit.root_owner_not_written";
+
+    private const string OwningBusinessUnitColumn = "owningbusinessunit";
+
+    /// <summary>
+    /// Owner decision 2026-10-29 ("whatever the ownership, the family members have the same ownership"; amends "a root's own
+    /// ownership is provisioning's" for ORDINARY roots — Make Secure and Remove Secure stay provisioning's): every listed work
+    /// assignment and project whose <c>sprk_issecure</c> is exactly <c>false</c>, projects first, starting after
+    /// <paramref name="resumeAfter"/> and wrapping round —
+    /// <list type="bullet">
+    /// <item>FILED, owned by a person or by the default team of a business unit other than its family's answer: re-owned to
+    /// that answer — the question a BFF create asks for the same row (<see cref="ExistingRootOwnerQuestionAsync"/>: a work
+    /// assignment's lookups, an invoice's or event's matter and project first; a project's pair): its matter's unit, then its
+    /// project's, else the invoice's or event's.</item>
+    /// <item>UNFILED and owned by a person: re-owned to that person's business-unit team
+    /// (<c>RecordOwnershipContext.ForUserTeam</c>), the unit it already sits in. A project whose pair is empty, or names a
+    /// record that no longer exists, is unfiled and is not excluded (decision 2026-10-30). An unfiled root owned by any team
+    /// is left alone.</item>
+    /// <item>Never: a root owned in the Secure Record unit, under a secure parent, or whose family answer is the Secure team
+    /// (the securing loop's); a root owned by a named (non-default) team is reported, not moved; a root already owned by its
+    /// family's team is in step (decided before anything about its owner is read or refused).</item>
+    /// </list>
+    /// A refusal or an unreadable filing writes nothing and is reported. Writes go through
+    /// <see cref="SecureChildReconciler.ReownFiledRootAsync"/> (its own Secure, flag and If-Match guards). Bounded: at most
+    /// <see cref="MaxRootResolvesPerRun"/> resolves and <see cref="MaxRootReownsPerRun"/> plans or writes a run (a refusal
+    /// before the plan does not count); past either bound the run stops, and its cursor (the last root it reached) is where the
+    /// next run continues. Report-only plans are passed to the resolver as planned owners, so a work assignment under a
+    /// project planned here is planned as it would be written. Never throws (cancellation aside).
+    /// </summary>
+    /// <remarks>The root's own <c>sprk_containerid</c> is never changed, but its documents' EXPECTED container follows its
+    /// owning business unit (<c>RecordContainerResolver</c>), so a cross-unit re-own (<c>crossUnit</c>) leaves its documents for
+    /// the ordinary-moves pass to move: why writes need both switches (<see cref="RootOwnerWritesEnabledConfigKey"/>).
+    /// External access grants are not changed.</remarks>
+    private async Task<FollowParentsRootOwners> FollowFamilyOwnersAsync(
+        IReadOnlyList<ListedRecord> listed, IReadOnlyDictionary<(string Table, Guid Id), SecureParentsAnswer> answers,
+        List<(string Table, Guid Id)> changedParents, (string Table, Guid Id)? resumeAfter, Action<string> problem,
+        CancellationToken ct)
+    {
+        var stopped = bool.TryParse(_configuration[SecureChildReconciliationJob.RecentChangesWritesEnabledConfigKey], out var recent)
+                      && !recent;
+        var rootSwitch = bool.TryParse(_configuration[RootOwnerWritesEnabledConfigKey], out var enabled) && enabled;
+        var movesSwitch = bool.TryParse(_configuration[SecureChildReconciliationJob.OrdinaryMovesWritesEnabledConfigKey], out var moves)
+                          && moves;
+        var writes = !stopped && rootSwitch && movesSwitch;
+        if (!stopped && rootSwitch && !movesSwitch)
+        {
+            _logger.LogWarning(
+                "[ROOT-OWNER] {RootSwitch} is true but {MovesSwitch} is not, so the root-owner step stays REPORT-ONLY: a re-owned " +
+                "root's documents expect the container of its new business unit, and only the ordinary-moves pass moves them. " +
+                "Set {MovesSwitchAgain} to true as well for the step to write.",
+                RootOwnerWritesEnabledConfigKey, SecureChildReconciliationJob.OrdinaryMovesWritesEnabledConfigKey,
+                SecureChildReconciliationJob.OrdinaryMovesWritesEnabledConfigKey);
+        }
+
+        int planned = 0, written = 0, refused = 0, reported = 0, deferred = 0, crossUnit = 0, withGrants = 0, grantsUnread = 0;
+        int resolves = 0, attempts = 0;
+        (string Table, Guid Id)? cursor = null;
+        var lines = new List<object>();
+        FollowParentsRootOwners Summary() => new()
+        {
+            WritesEnabled = writes, Planned = planned, Written = written, Refused = refused, Reported = reported,
+            Deferred = deferred, CrossUnit = crossUnit, WithGrants = withGrants, GrantsUnread = grantsUnread,
+            Resolved = resolves, Cursor = cursor, Changes = lines,
+        };
+
+        var ordinary = listed.Where(r => r.Secure == false)
+            .OrderBy(r => RootRank(r.Table)).ThenBy(r => r.Id).ToList();
+        if (ordinary.Count == 0)
+            return Summary();
+
+        // Fix round (B-F2): continue after the last root the previous run reached, and wrap round.
+        var start = resumeAfter is { } after ? ordinary.FindIndex(r => CompareRootKey((r.Table, r.Id), after) > 0) : 0;
+        if (start < 0)
+            start = 0;
+        var ordered = ordinary.Skip(start).Concat(ordinary.Take(start)).ToList();
+
+        Guid? secureBu;
+        try
+        {
+            var bu = await Sprk.Bff.Api.Infrastructure.Dataverse.SecureRecordOwnerTeam.ResolveSecureBusinessUnitAsync(_dataverse, _configuration, ct)
+                .ConfigureAwait(false);
+            if (bu.Ambiguous)
+            {
+                problem($"no root was re-owned to its family: more than one business unit carries the Secure Record name ({ReasonRootOwnerUnresolved})");
+                return Summary();
+            }
+
+            secureBu = bu.Id;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            _logger.LogError(ex, "[ROOT-OWNER] The Secure Record business unit could not be read; no root is re-owned this run.");
+            problem($"no root was re-owned to its family: the Secure Record business unit could not be read ({ReasonRootOwnerUnresolved})");
+            return Summary();
+        }
+
+        var teams = new Dictionary<Guid, (Guid? BusinessUnit, bool IsDefault)>();
+        var plannedTeams = new Dictionary<RecordOwnershipParent, Guid>();
+        var lookupCache = new RecordOwnerLookupCache(); // fix round (B-F2 cost): one per run, handed to every question
+        for (var index = 0; index < ordered.Count; index++)
+        {
+            var row = ordered[index];
+            if (!answers.TryGetValue((row.Table, row.Id), out var answer))
+                continue;
+            // Under a secure parent (or one above it): the securing loop's, never this step's.
+            if (answer.HasSecureParent || answer.DirectParents.Any(p => p.EffectiveSecure))
+                continue;
+            if (secureBu is { } owned && row.OwningBusinessUnit == owned)
+                continue;
+            if (!answer.IsKnown)
+            {
+                Refuse(row, row.OwningTeam is null ? "user" : "team", row.OwningBusinessUnit,
+                    $"what it is filed under could not be told ({answer.Unverifiable})");
+                continue;
+            }
+
+            if (row.OwningTeam is null && row.OwningUser is null)
+            {
+                Refuse(row, null, row.OwningBusinessUnit, "its owner could not be read");
+                continue;
+            }
+
+            if (resolves >= MaxRootResolvesPerRun)
+            {
+                Stop(index);
+                break;
+            }
+
+            resolves++;
+            var from = row.OwningTeam is null ? "user" : "team";
+            Guid? fromUnit = row.OwningBusinessUnit;
+            RecordOwnerResolution owner;
+            bool filed;
+            try
+            {
+                // B-F3: the question a BFF create asks for this row, as it is filed now.
+                var asked = await ExistingRootOwnerQuestionAsync(row.Table, row.Id, ct).ConfigureAwait(false);
+                if (asked.Undetermined is { } undetermined)
+                {
+                    Refuse(row, from, fromUnit, $"what it is filed under could not be told ({undetermined})");
+                    continue;
+                }
+
+                filed = asked.Question!.Parents.Count > 0;
+                if (!filed && row.OwningTeam is not null)
+                    continue; // an unfiled root owned by a team is left alone
+
+                var question = (filed ? asked.Question : RecordOwnershipContext.ForUserTeam(row.OwningUser!.Value))
+                    with { LookupCache = lookupCache };
+                if (!writes && plannedTeams.Count > 0)
+                    question = question with { PlannedOwningTeams = new Dictionary<RecordOwnershipParent, Guid>(plannedTeams) };
+                owner = await _ownership.ResolveOwnerAsync(question, ct).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+            {
+                _logger.LogWarning(ex, "[ROOT-OWNER] {Table} {Id}: its family's owner could not be resolved.", row.Table, row.Id);
+                Refuse(row, from, fromUnit, "its family's owner could not be read");
+                continue;
+            }
+
+            if (owner.IsSecureOwner)
+                continue; // the securing loop's
+            if (!owner.IsOwned || owner.OwningTeamId is not { } target)
+            {
+                Refuse(row, from, fromUnit, $"{owner.Reason ?? "no team was resolved for its family"} ({owner.RefusalCode})");
+                continue;
+            }
+
+            // In step BEFORE anything about its current owner is read or refused (fix round, F2).
+            if (row.OwningTeam == target)
+                continue;
+
+            try
+            {
+                if (row.OwningTeam is { } team)
+                {
+                    var facts = await TeamFactsAsync(team).ConfigureAwait(false);
+                    fromUnit = facts.BusinessUnit;
+                    if (secureBu is { } secure && facts.BusinessUnit == secure)
+                        continue;
+                    if (!facts.IsDefault)
+                    {
+                        reported++;
+                        Line(row, "team", fromUnit, null, null, "reported", ReasonRootOwnerNamedTeam,
+                            "owned by a team that is not a business unit's default team; not moved");
+                        continue;
+                    }
+
+                    from = "defaultTeam";
+                }
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+            {
+                _logger.LogWarning(ex, "[ROOT-OWNER] {Table} {Id}: its owning team could not be read.", row.Table, row.Id);
+                Refuse(row, "team", fromUnit, "its owning team could not be read");
+                continue;
+            }
+
+            Guid? toUnit;
+            try
+            {
+                toUnit = (await TeamFactsAsync(target).ConfigureAwait(false)).BusinessUnit;
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+            {
+                _logger.LogWarning(ex, "[ROOT-OWNER] Team {Team} could not be read.", target);
+                Refuse(row, from, fromUnit, $"team {target:D} could not be read");
+                continue;
+            }
+
+            if (toUnit is null || (secureBu is { } secureTarget && toUnit == secureTarget))
+                continue; // never into the Secure Record unit (and a team with no unit is no answer)
+            if (row.OwningTeam is not null && fromUnit == toUnit)
+                continue; // the default team of its family's own unit: in step
+
+            if (attempts >= MaxRootReownsPerRun)
+            {
+                Stop(index);
+                break;
+            }
+
+            attempts++;
+            // A-F1: a re-own into another unit moves where its documents are expected; the ordinary-moves pass moves them.
+            if (fromUnit != toUnit)
+                crossUnit++;
+            await CountGrantsAsync(row).ConfigureAwait(false);
+            var reason = filed ? "follows its filing" : "follows its person's business unit";
+            if (!writes)
+            {
+                planned++;
+                if (row.Table == Project)
+                    plannedTeams[new RecordOwnershipParent(Project, row.Id)] = target;
+                Line(row, from, fromUnit, target, toUnit, "planned", null, reason);
+                continue;
+            }
+
+            var result = await _secureChildren.ReownFiledRootAsync(row.Table, row.Id, target, ct).ConfigureAwait(false);
+            switch (result.Outcome)
+            {
+                case OrdinaryRowReownOutcome.Reowned:
+                    written++;
+                    _logger.LogInformation("[ROOT-OWNER] {Table} {Id} re-owned to team {Team} (its family's owner).",
+                        row.Table, row.Id, target);
+                    Line(row, from, fromUnit, target, toUnit, "written", null, reason);
+                    if (row.Table == Project && !changedParents.Contains((Project, row.Id)))
+                        changedParents.Add((Project, row.Id));
+                    break;
+                case OrdinaryRowReownOutcome.AlreadyOwned:
+                    break;
+                default:
+                    refused++;
+                    Line(row, from, fromUnit, target, toUnit, "refused", ReasonRootOwnerNotWritten, $"{result.Outcome}: {result.Detail}");
+                    problem($"{row.Table}:{row.Id:D}: not re-owned to its family's team {target:D}: {result.Outcome} {result.Detail} ({ReasonRootOwnerNotWritten})");
+                    break;
+            }
+        }
+
+        if (deferred > 0)
+        {
+            _logger.LogInformation("[ROOT-OWNER] {Deferred} root(s) past this run's bounds ({MaxResolves} resolves, {MaxReowns} " +
+                "re-owns); the next run continues after {Cursor}.", deferred, MaxRootResolvesPerRun, MaxRootReownsPerRun,
+                cursor is { } c ? $"{c.Table}:{c.Id:D}" : "the start");
+        }
+
+        return Summary();
+
+        // The bound stops the run at ordered[at]: it and every root after it are deferred, and the next run continues after
+        // the last root this one reached.
+        void Stop(int at)
+        {
+            deferred = ordered.Count - at;
+            cursor = at > 0 ? (ordered[at - 1].Table, ordered[at - 1].Id) : resumeAfter;
+        }
+
+        void Line(ListedRecord row, string? fromType, Guid? fromUnitId, Guid? toTeam, Guid? toUnitId, string state, string? code, string reason)
+        {
+            if (lines.Count < MaxChangeLines)
+            {
+                lines.Add(new
+                {
+                    table = row.Table,
+                    id = row.Id,
+                    from = new { owner = fromType, unit = fromUnitId },
+                    to = toTeam is null ? null : new { team = toTeam, unit = toUnitId },
+                    state,
+                    reasonCode = code,
+                    reason,
+                });
+            }
+        }
+
+        void Refuse(ListedRecord row, string? fromType, Guid? fromUnitId, string reason)
+        {
+            refused++;
+            Line(row, fromType, fromUnitId, null, null, "refused", ReasonRootOwnerUnresolved, reason);
+            problem($"{row.Table}:{row.Id:D}: not re-owned to its family: {reason} ({ReasonRootOwnerUnresolved})");
+        }
+
+        async Task<(Guid? BusinessUnit, bool IsDefault)> TeamFactsAsync(Guid team)
+        {
+            if (teams.TryGetValue(team, out var known))
+                return known;
+            var query = new QueryExpression("team") { ColumnSet = new ColumnSet("businessunitid", "isdefault"), TopCount = 1, NoLock = true };
+            query.Criteria.AddCondition("teamid", ConditionOperator.Equal, team);
+            var found = (await _dataverse.RetrieveMultipleAsync(query, ct).ConfigureAwait(false)).Entities.FirstOrDefault();
+            var facts = (found?.GetAttributeValue<EntityReference>("businessunitid")?.Id is { } unit && unit != Guid.Empty ? unit : (Guid?)null,
+                found?.GetAttributeValue<bool?>("isdefault") == true);
+            teams[team] = facts;
+            return facts;
+        }
+
+        // Reported only (counts, no ids): this step does not change a root's external access grants.
+        async Task CountGrantsAsync(ListedRecord row)
+        {
+            try
+            {
+                var query = new QueryExpression(SecureChildReconciler.GrantTable)
+                {
+                    ColumnSet = new ColumnSet(SecureChildReconciler.GrantTable + "id"),
+                    TopCount = 1,
+                    NoLock = true,
+                };
+                query.Criteria.AddCondition(row.Table, ConditionOperator.Equal, row.Id);
+                if ((await _dataverse.RetrieveMultipleAsync(query, ct).ConfigureAwait(false)).Entities.Count > 0)
+                    withGrants++;
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+            {
+                _logger.LogWarning(ex, "[ROOT-OWNER] The external access grants of {Table} {Id} could not be counted.", row.Table, row.Id);
+                grantsUnread++;
+            }
+        }
+    }
+
+    /// <summary>The root-owner step's order: projects first (a work assignment under a project re-owned here follows it in the
+    /// same run), then by id.</summary>
+    private static int RootRank(string table) => table == Project ? 0 : 1;
+
+    private static int CompareRootKey((string Table, Guid Id) left, (string Table, Guid Id) right)
+    {
+        var rank = RootRank(left.Table).CompareTo(RootRank(right.Table));
+        return rank != 0 ? rank : left.Id.CompareTo(right.Id);
+    }
+
+    /// <summary>
+    /// Fix round (B-F3): the owner question a BFF create asks for an EXISTING root, read from its row as it is filed now — a work
+    /// assignment's ownership lookups, the matters and projects its invoice or event belongs to ranked first
+    /// (<see cref="OwnerLookupsThroughIntermediatesAsync(IGenericEntityService, ILogger, string, IEnumerable{KeyValuePair{string, RecordOwnershipParent}}, CancellationToken, bool)"/>,
+    /// as <c>RecordCreationService</c> and the resolver's look-through derive it); a project's pair alone
+    /// (<see cref="ExistingPairParentAsync"/>: a project is filed only through its pair, and one naming a deleted record is
+    /// filed under nothing). A question with no parents is "unfiled". <c>Undetermined</c>: the row is gone, its pair names a
+    /// record that cannot be told, or what its invoice or event belongs to cannot be read. A Dataverse fault reading the row
+    /// itself propagates.
+    /// </summary>
+    private async Task<(RecordOwnershipContext? Question, string? Undetermined)> ExistingRootOwnerQuestionAsync(
+        string table, Guid id, CancellationToken ct)
+    {
+        var query = new QueryExpression(table) { ColumnSet = new ColumnSet(true), TopCount = 1, NoLock = true };
+        query.Criteria.AddCondition(table + "id", ConditionOperator.Equal, id);
+        var row = (await _dataverse.RetrieveMultipleAsync(query, ct).ConfigureAwait(false)).Entities.FirstOrDefault();
+        if (row is null)
+            return (null, "the record could not be read");
+
+        var pairId = RecordOwnershipContext.PairIdOf(row);
+        if (PairNamesAParentOnItsOwn(table))
+        {
+            var pair = await ExistingPairParentAsync(_dataverse, table, pairId,
+                row.GetAttributeValue<EntityReference>(PairTypeColumn)?.Id, committed: false, ct).ConfigureAwait(false);
+            if (pair.Undetermined is { } undetermined)
+                return (null, undetermined);
+            var pairLookups = pair.Parent is { } parent
+                ? new[] { KeyValuePair.Create(PairIdColumn, (RecordOwnershipParent?)parent) }
+                : Array.Empty<KeyValuePair<string, RecordOwnershipParent?>>();
+            return (RecordOwnershipContext.ForRow(table, pairLookups, pairId), null);
+        }
+
+        var lookups = RecordOwnershipContext.LookupsOf(row).ToList();
+        var through = await OwnerLookupsThroughIntermediatesAsync(_dataverse, _logger, table, lookups, ct).ConfigureAwait(false);
+        if (through.Fault is { } fault)
+            System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(fault).Throw();
+        if (through.Unverifiable is { } unverifiable)
+            return (null, unverifiable);
+        return (RecordOwnershipContext.ForRow(table, through.Lookups.Concat(lookups), pairId), null);
     }
 }

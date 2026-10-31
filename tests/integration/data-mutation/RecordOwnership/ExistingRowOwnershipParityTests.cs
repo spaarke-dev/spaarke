@@ -174,7 +174,77 @@ public class ExistingRowOwnershipParityTests
         (await ExistingParentsAsync(reversed)).Should().Equal(writer.Parents);
         writer.Parents[0].Should().Be(new RecordOwnershipParent("sprk_workassignment", workAssignment));
         writerOwner.OwningTeamId.Should().Be(GeneralTeam,
-            "a user-owned core is a root: its own unit, never looked through (ontology: SignalWriter's nightly owner check)");
+            "a user-owned work assignment filed under nothing keeps its own unit (owner decision 2026-10-29)");
+    }
+
+    // ── Owner decision 2026-10-29: a person-owned work assignment that is filed answers with its matter's unit ─────────
+
+    /// <summary>A person-owned work assignment (the general unit) filed under an ordinary matter in BuB, and an event about it
+    /// owned in the general unit — so the matter's team (TeamB) is reached only through the work assignment's filing.</summary>
+    private (Guid WorkAssignment, Guid Matter, Guid Event) AFiledPersonOwnedWorkAssignment()
+    {
+        var (workAssignment, matter, @event) = (Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid());
+        _world.Add("sprk_matter", matter, ("owningteam", Ref("team", TeamB)), ("sprk_issecure", false))
+            .Add("sprk_workassignment", workAssignment, ("owninguser", Ref("systemuser", SecureChildShareWorld.SomeUser)),
+                ("sprk_issecure", false), ("sprk_regardingmatter", Ref("sprk_matter", matter)))
+            .Add("sprk_event", @event, ("owningteam", Ref("team", GeneralTeam)),
+                ("sprk_regardingworkassignment", Ref("sprk_workassignment", workAssignment)));
+        return (workAssignment, matter, @event);
+    }
+
+    [Fact(DisplayName = "Owner decision 2026-10-29 must fire: a Signal whose core is a FILED person-owned work assignment gets its matter's team — from SignalWriter and from the existing-row question alike")]
+    public async Task ASignalAboutAFiledPersonOwnedWorkAssignment_GetsItsMattersTeam_OnBothPaths()
+    {
+        var (workAssignment, _, @event) = AFiledPersonOwnedWorkAssignment();
+        var (writer, writerOwner) = await SignalWriter().OwnershipOfAsync("sprk_event", @event, Sprk.Bff.Api.Services.Signals.SignalWriter.LaneDecide, CancellationToken.None);
+        var (row, reversed) = RowBothWays("sprk_signal",
+            ("sprk_regardingevent", Ref("sprk_event", @event)),
+            ("sprk_regardingworkassignment", Ref("sprk_workassignment", workAssignment)),
+            ("sprk_corerecordtype", Ref("sprk_recordtype_ref", CatalogWorkAssignment)),
+            ("sprk_corerecordid", workAssignment.ToString("D")),
+            ("sprk_regardingrecordid", @event.ToString("D")));
+
+        writer.Parents[0].Should().Be(new RecordOwnershipParent("sprk_workassignment", workAssignment));
+        writerOwner.OwningTeamId.Should().Be(TeamB, "the work assignment belongs to its matter: the matter's unit, never its own");
+        foreach (var shape in new[] { row, reversed })
+        {
+            (await ExistingParentsAsync(shape)).Should().Equal(writer.Parents);
+            (await Resolver.ResolveOwnerAsync((await QuestionAsync(shape)).Context, CancellationToken.None))
+                .OwningTeamId.Should().Be(TeamB, "the reconciler's answer is the writer's");
+        }
+    }
+
+    [Fact(DisplayName = "Owner decision 2026-10-29 must fire: a Decision Record whose core is a FILED person-owned work assignment gets its matter's team — from the review writer and from the existing-row question alike")]
+    public async Task ADecisionRecordAboutAFiledPersonOwnedWorkAssignment_GetsItsMattersTeam_OnBothPaths()
+    {
+        var (workAssignment, _, @event) = AFiledPersonOwnedWorkAssignment();
+        var request = new DecisionRecordRequest(
+            Guid.NewGuid(), Guid.NewGuid(), new DecisionRecordCore("sprk_workassignment", workAssignment, CatalogWorkAssignment),
+            new DecisionRecordRef("sprk_event", @event), Guid.NewGuid(), null, [], [], null, [], new Dictionary<string, object?>(),
+            null, null, null);
+        var reviewOwner = await DecisionRecordWriter().ResolveOwnerAsync(request, CancellationToken.None);
+        var record = new Entity("sprk_decisionrecord", Guid.NewGuid())
+        {
+            ["sprk_regardingevent"] = Ref("sprk_event", @event),
+            ["sprk_regardingworkassignment"] = Ref("sprk_workassignment", workAssignment),
+            ["sprk_workassignment"] = Ref("sprk_workassignment", workAssignment),
+            ["sprk_corerecordtype"] = Ref("sprk_recordtype_ref", CatalogWorkAssignment),
+            ["sprk_corerecordid"] = workAssignment.ToString("D"),
+            ["sprk_regardingrecordid"] = @event.ToString("D"),
+            ["sprk_steps"] = Steps(),
+        };
+
+        reviewOwner.Parents[0].Should().Be(new RecordOwnershipParent("sprk_workassignment", workAssignment));
+        reviewOwner.Resolution.OwningTeamId.Should().Be(TeamB, "the work assignment belongs to its matter: the matter's unit");
+        (await ExistingParentsAsync(record)).Should().Equal(reviewOwner.Parents);
+        (await Resolver.ResolveOwnerAsync((await QuestionAsync(record)).Context, CancellationToken.None))
+            .OwningTeamId.Should().Be(TeamB, "the reconciler's answer is the review writer's");
+        // The gate writer asks the same parents on the content path (DecisionRecordWriter: KeepCreatorUnlessTargetIsTeamOwned);
+        // its full write is pinned in DecisionRecordWriterTests.GateDecision.
+        (await Resolver.ResolveOwnerAsync(
+                RecordOwnershipContext.ForParents(reviewOwner.Parents) with { KeepCreatorUnlessTargetIsTeamOwned = true },
+                CancellationToken.None))
+            .OwningTeamId.Should().Be(TeamB, "the gate's content-path question answers the same");
     }
 
     [Fact(DisplayName = "194b F1-c must fire: a no-core Signal about a PERSONAL To Do the To Do job keeps names its subject first and says its owner is the assignee rule's")]

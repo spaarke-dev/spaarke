@@ -17,8 +17,10 @@ namespace Spaarke.ArchTests;
 /// (<see cref="ChildRecordEndpoints.CreateTables"/>) and the Office quick-create's Matter and Project, as the adapter
 /// (<c>OfficeService.QuickCreateViaCreationServiceAsync</c>) names its table — <see cref="QuickCreateFieldRequirements.GetLogicalName"/>
 /// (field mapping task 018c; the deleted Office creation core's constants before it). Its Invoice is on the route's list.
-/// The chat <c>dataverse.create_record</c> tool has no accept-list (any table but <c>sprk_document</c>), so
-/// it is not covered. The unified create service (task 013) accepts exactly the registry's tables — an unregistered table
+/// And the budget inquiry's service request (<c>BudgetInquiryExecutor.Table</c>, task 017 item 9).
+/// The chat <c>dataverse.create_record</c> tool has no compiled accept-list (any table but <c>sprk_document</c>); the
+/// platform tables it offers and the owner kept (task 017-d2: <c>task</c>, <c>contact</c>, <c>account</c>) are named
+/// here instead. The unified create service (task 013) accepts exactly the registry's tables — an unregistered table
 /// is refused (<c>record_creation.table_unsupported</c>) — so its accepted set needs no entry here.</para>
 /// <para><b>Controls.</b> <see cref="Guard_MustFire_ACreateTableWithNoEntry_IsReported"/> adds a fixture table the registry
 /// does not hold and requires the guard to report it, against the real registry and against a fixture lookup;
@@ -29,11 +31,21 @@ public class RecordTableRulesRegistryGuardTests
 {
     private const string FixtureTableWithNoEntry = "sprk_registryguardfixture_noentry";
 
+    /// <summary>Task 017-d2: the chat create's offered platform tables the owner kept (decision 2026-10-30, option b).</summary>
+    private static readonly string[] ChatOfferedPlatformTables = ["task", "contact", "account"];
+
     /// <summary>Every table on a server create path's fixed accept-list today.</summary>
     private static IReadOnlyList<string> CreateTables() =>
         ChildRecordEndpoints.CreateTables
             .Append(QuickCreateFieldRequirements.GetLogicalName(QuickCreateEntityType.Matter))
             .Append(QuickCreateFieldRequirements.GetLogicalName(QuickCreateEntityType.Project))
+            // Field mapping task 017 (item 9): the budget inquiry's fixed table, which the service creates once 017c
+            // re-points the inquiry.
+            .Append(Sprk.Bff.Api.Services.Signals.Actions.BudgetInquiryExecutor.Table)
+            // Field mapping task 017-d2 (owner decision 2026-10-30, option b): the platform tables the chat
+            // dataverse.create_record tool offers (a task, people = contact, companies = account). The tool has no compiled
+            // accept-list, so the owner's list is named here; any other chat table stays record_creation.table_unsupported.
+            .Concat(ChatOfferedPlatformTables)
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .OrderBy(t => t, StringComparer.Ordinal)
             .ToList();
