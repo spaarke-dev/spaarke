@@ -1,0 +1,98 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="079" project="spaarke-SPA-external-access-platform-r3">
+  <metadata>
+    <title>#2458 / ISS-024: the grant notifier does not email a home-linked WorkforceHome contact as an external person</title>
+    <phase>R3 hardening (ISS-024)</phase>
+    <status>in-progress</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Tags bff-api, security; decides who is emailed a portal link after a grant, from an identity link</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Identity-link decision on the external notification path (security-adjacent, fail-closed rules)</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>BFF hot path; one branch off master</parallel-reason>
+    <deps>036</deps>
+    <tags>bff-api, security, testing</tags>
+    <estimated-effort>0.5 day</estimated-effort>
+  </metadata>
+
+  <prompt>In GrantAccessNotifier.NotifyContactGrantAsync, before a contact is emailed as an external person, read the contact's home link the way the portal does, and do not send the external email when the contact is a WorkforceHome contact whose home pair a licensed user carries (or when that cannot be told). Copy ontology task 168's AssignTaskRecipientGate.HomeLinkAsync.</prompt>
+  <role>SPAARKE platform developer. ASP.NET Core, Dataverse, the external-access identity model. Follow ADRs strictly.</role>
+  <goal>Owner 2026-10-31: fix #2458 in R3. A contact who signs in with their own work account (sprk_identityplane = WorkforceHome) and whose home tenant + oid a licensed systemuser carries is resolved by the portal as that user (WorkforcePrincipalResolver.ResolveHomeAsync → HomeLinkOutcome.Enabled → ForSystemUser). The notifier today never reads that link, so it emails such a contact "you were given access" with a portal link the person's actual portal view may not honour. After this task it does not.</goal>
+
+  <context>
+    <background>Issue #2458 (DI-137), notes/defer-issues.md ISS-024. Notifier entry: src/server/api/Sprk.Bff.Api/Api/ExternalAccess/GrantAccessNotifier.cs NotifyContactGrantAsync (~:116-275); the external branch is the `people.Count == 0` block that calls EmailExternalContactGrantAsync. Reference fix: ontology PR #2418 (bd32be448f), src/server/api/Sprk.Bff.Api/Services/Signals/AssignTaskRecipientGate.cs: plane detection (~:434-441, Binding Kind Bound + Plane WorkforceHome) and HomeLinkAsync (~:444-470: home pair from sprk_externaltenantid + bound oid; IContactIdentityStore.FindHomeLinkedSystemUsersAsync + ContactBindingDecision.DecideHomeLink; an unparsable pair or a throwing read is Denied). uac-r2 task 193 (ContactUserRepresentation) is parked; when it resumes it absorbs this rule (#2457). uac-r2 confirmed 2026-10-31 that it is not touching GrantAccessNotifier.cs.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/GrantAccessNotifier.cs</file>
+      <file role="modify">tests/unit/Sprk.Bff.Api.Tests/Api/ExternalAccess/GrantAccessNotifierExternalTests.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Signals/AssignTaskRecipientGate.cs (plane detection, HomeLinkAsync)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/WorkforcePrincipalResolver.cs (ResolveHomeAsync: what the portal does)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ContactBindingDecision.cs DecideHomeLink; ContactIdentityStore.cs FindHomeLinkedSystemUsersAsync</file>
+    </relevant-files>
+  </context>
+
+  <justification>
+    <existing>The home-link read and decision exist (IContactIdentityStore.FindHomeLinkedSystemUsersAsync, ContactBindingDecision.DecideHomeLink), and AssignTaskRecipientGate already applies them for the same question.</existing>
+    <extension>This calls them from the notifier before its external branch; no new service, interface, endpoint, setting or DI registration (the notifier already holds IContactIdentityStore as _identities).</extension>
+    <cost-of-doing-nothing>A home-linked workforce contact is emailed a portal link for an access their portal view (the licensed user's) may not have (#2458).</cost-of-doing-nothing>
+  </justification>
+
+  <constraints>
+    <constraint source="#2458 / ontology 168">Only for a contact whose binding reads as WorkforceHome. NotLinked → behaviour unchanged (external email as today). Enabled → no external email. Disabled → no email. Ambiguous, an unparsable home pair, or a read that fails/throws → no email (fail closed). Return the outcome the notifier already uses for "told nobody" (NotApplicable) for Enabled/Disabled, and Failed for could-not-tell, unless the existing outcome semantics say otherwise; record the choice.</constraint>
+    <constraint source="design">Non-WorkforceHome contacts (CIAM, guest, unbound): byte-identical behaviour. The internal-user notification path (people.Count > 0) is unchanged.</constraint>
+    <constraint source="design">Do not route an Enabled contact to the internal-user notice: the user's own rights, not the contact grant, apply in the portal, so telling the user "you were given access" would be just as wrong.</constraint>
+    <constraint source="ADR-015">Log lines carry ids and an outcome code only; no email address, name or UPN.</constraint>
+    <constraint source="CLAUDE.md §10">BFF hygiene: placement statement, no new package, publish-size delta against a fresh master build, tests.</constraint>
+    <constraint source="owner">No live change in this task. It ships in a later dev BFF deploy with fresh OKs and an owner go naming the SHA.</constraint>
+    <constraint source="public repo">PR, commit and notes describe the behaviour and the fix; no exploitation narrative.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-SPA-external-access-platform-r3/CLAUDE.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r3/notes/defer-issues.md (ISS-024)</file>
+      <file>projects/spaarke-SPA-external-access-platform-r3/notes/task-036-notes.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/constraints/testing.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load knowledge; /conflict-check (BFF hot path); declare rigor/tier.</step>
+    <step order="1">Write the acceptance tests; confirm Enabled/Disabled/Ambiguous/failed-read fail before the change.</step>
+    <step order="2">Implement in NotifyContactGrantAsync before EmailExternalContactGrantAsync.</step>
+    <step order="3">Seeding proof: remove the new check → the Enabled test fails. Restore; record.</step>
+    <step order="4">Build, tests (GrantAccessNotifier* unit + integration GrantExternalContactEmailTests, ArchTests), publish-size delta, notes/task-079-notes.md; one adversarial pass (two: security tag); fix F-class; ISS-024 updated; status, TASK-INDEX.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the contact row the notifier reads does not carry the plane or the home tenant (so the home pair cannot be formed without a new read), STOP and report what is missing.</trigger>
+    <trigger>If another grant notice path (e.g. /contact-grants, invite-and-grant) emails contacts through a different method that skips this check, report it; fix in scope if it is the same method.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/GrantAccessNotifier.cs</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Api/ExternalAccess/GrantAccessNotifierExternalTests.cs</output>
+    <output type="docs">projects/spaarke-SPA-external-access-platform-r3/notes/task-079-notes.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">WorkforceHome contact, home pair carried by exactly one enabled licensed user (Enabled): no email is sent; outcome is not Sent.</criterion>
+    <criterion testable="true">WorkforceHome contact, NotLinked: emailed exactly as today (same template, same deep link).</criterion>
+    <criterion testable="true">WorkforceHome contact, Disabled: no email.</criterion>
+    <criterion testable="true">WorkforceHome contact, Ambiguous (two users carry the pair): no email.</criterion>
+    <criterion testable="true">WorkforceHome contact, home-link read throws or the pair is unparsable: no email; the grant still stands (the notifier's failure is logged, not thrown).</criterion>
+    <criterion testable="true">CIAM (non-WorkforceHome) contact: unchanged; the home-link read is not called.</criterion>
+    <criterion testable="true">The internal-user notice path (a contact represented by a linked internal user) is unchanged.</criterion>
+    <criterion testable="true">No email address, name or UPN appears in any new log line.</criterion>
+  </acceptance-criteria>
+
+  <notes>Owner decision 2026-10-31: "#2458 - we should fix it here".</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow the task-execute skill for the mandatory pre-execution checklist.</protocol>
+  </execution>
+</task>
