@@ -473,8 +473,6 @@ public sealed partial class DataverseUpdateRecordHandler : IToolHandler
                     Error(tool, $"The update was NOT written: {outcome.Detail}", ProjectMatterFiling.NotAMatterCode, startedAt),
                 { Kind: ProjectMatterFiling.OutcomeKind.SecureMatter } =>
                     Error(tool, $"The update was NOT written: {outcome.Detail}", ProjectMatterFiling.SecureMatterCode, startedAt),
-                { Kind: ProjectMatterFiling.OutcomeKind.LeavesSecure } =>
-                    Error(tool, $"The update was NOT written: {outcome.Detail}", ProjectMatterFiling.LeavesSecureCode, startedAt),
                 { Kind: ProjectMatterFiling.OutcomeKind.Conflict } =>
                     Error(tool, outcome.Detail!, ProjectMatterFiling.ChangedConcurrentlyCode, startedAt),
                 { Kind: ProjectMatterFiling.OutcomeKind.Invalid } =>

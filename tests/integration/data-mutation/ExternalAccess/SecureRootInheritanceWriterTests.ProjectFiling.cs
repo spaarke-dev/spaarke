@@ -1,6 +1,7 @@
 using System.Text.Json;
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Spaarke.Dataverse;
@@ -258,22 +259,86 @@ public partial class SecureRootInheritanceWriterTests
         _writes.Should().BeEmpty();
     }
 
-    /// <summary>Item 2 and case (c): a project filed under a secure matter is never moved out from under it here (leaving
-    /// a secure matter must not take it out of isolation).</summary>
+    /// <summary>Secure matter A → secure matter B (case c): refused like any secure target (#1506).</summary>
     [Fact]
-    public async Task ProjectFiling_Route_AwayFromASecureMatter_Is409_LeavesSecureRecord_AndNothingIsWritten()
+    public async Task ProjectFiling_Route_FromOneSecureMatterToAnother_Is409_SecureMatterUnsupported()
     {
-        var (secure, ordinary) = Matters();
-        var project = Project(secure, isSecure: true);
+        var (secureA, _) = Matters();
+        var secureB = Guid.NewGuid();
+        SecureMatter(_fixture, secureB);
+        var project = InheritedSecureProject(secureA);
 
-        var result = await FileThroughTheRoute(project, FilingBody(ordinary, RecordTypeRef(_fixture, "sprk_matter")), Scripted(),
+        var result = await FileThroughTheRoute(project, FilingBody(secureB, RecordTypeRef(_fixture, "sprk_matter")), Scripted(),
             AppUpdatesTheWorld().Object);
 
-        RouteStatus(result).Should().Be(StatusCodes.Status409Conflict, RouteDetail(result));
-        RouteReason(result).Should().Be(ProjectMatterFiling.LeavesSecureCode);
-        PairIdOf(project).Should().Be(secure.ToString("D"));
+        RouteStatus(result).Should().Be(StatusCodes.Status409Conflict);
+        RouteReason(result).Should().Be(ProjectMatterFiling.SecureMatterCode);
+        PairIdOf(project).Should().Be(secureA.ToString("D"));
         _writes.Should().BeEmpty();
+    }
+
+    /// <summary>A secure project filed under a secure matter, its access record written by the follow-parents step (its
+    /// secure flag inherited, not its own).</summary>
+    private Guid InheritedSecureProject(Guid secureMatter)
+    {
+        var project = Guid.NewGuid();
+        SecureProject(_fixture, project);
+        FilePair(_fixture, "sprk_project", project, secureMatter, RecordTypeRef(_fixture, "sprk_matter"));
+        return project;
+    }
+
+    private async Task<FollowParentsResult> FollowParentsOf(Guid project)
+    {
+        using var scope = _fixture.Services.CreateScope();
+        return await scope.ServiceProvider.GetRequiredService<SecureRootInheritance>()
+            .FollowParentsAsync("sprk_project", project, "trace-195", CancellationToken.None);
+    }
+
+    private AccessInheritance? AccessRecordOf(Guid project) =>
+        AccessInheritance.Parse(World.ValueOf<string>("sprk_project", project, AccessInheritance.Column)).Value;
+
+    /// <summary>
+    /// Coordinator F1 (owner decision 2026-10-31: "re-file allowed; leaving a secure matter never un-secures the project"): an
+    /// inherited-secure project re-filed from a secure matter to an ORDINARY one is filed — the pair written by the
+    /// application at the version read, and read back — and nothing in the core writes <c>sprk_issecure</c> or the owner.
+    /// The follow-parents step then keeps it secure as its own (a re-file never loosens). Before the fix it was refused.
+    /// </summary>
+    [Fact]
+    public async Task ProjectFiling_Route_AnInheritedSecureProject_ReFiledToAnOrdinaryMatter_IsFiled_AndStaysSecure()
+    {
+        var (secure, ordinary) = Matters();
+        var project = InheritedSecureProject(secure);
+        await FollowParentsOf(project); // its access record: secure through the matter
+        AccessRecordOf(project)!.OwnSecure.Should().BeFalse("secure through its matter before the re-file");
+        var version = World.ValueOf<long?>("sprk_project", project, "versionnumber")!.Value;
+        var (updates, owners) = (_fixture.Updates.Count, World.OwnerWrites.Count);
+        var appOnly = AppUpdatesTheWorld();
+
+        var result = await FileThroughTheRoute(project, FilingBody(ordinary, RecordTypeRef(_fixture, "sprk_matter")), Scripted(),
+            appOnly.Object);
+
+        RouteStatus(result).Should().Be(StatusCodes.Status204NoContent, RouteDetail(result));
+        PairIdOf(project).Should().Be(ordinary.ToString("D"));
+        appOnly.Verify(s => s.UpdateRecordFieldsIfUnchangedAsync("sprk_project", project,
+            It.Is<Dictionary<string, object?>>(f => f.Keys.All(k =>
+                SecureRootInheritance.NormalizeColumn(k) == SecureRootInheritance.PairIdColumn
+                || SecureRootInheritance.NormalizeColumn(k) == SecureRootInheritance.PairTypeColumn)),
+            version, It.IsAny<CancellationToken>()), Times.Once);
+        appOnly.Verify(s => s.RetrieveRecordFieldsAsync("sprk_project", project, It.IsAny<string[]>(), It.IsAny<CancellationToken>()),
+            Times.AtLeast(2), "read before the write, and read back after it");
+        _writes.Should().ContainSingle().Which.Fields.Keys.Select(SecureRootInheritance.NormalizeColumn)
+            .Should().BeEquivalentTo(new[] { SecureRootInheritance.PairIdColumn, SecureRootInheritance.PairTypeColumn },
+                "the core writes the pair only: never sprk_issecure, never the owner");
+        _fixture.Updates.Should().HaveCount(updates, "no securing or un-securing step wrote the project");
+        World.OwnerWrites.Should().HaveCount(owners);
         _fixture.IsSecureOf(project).Should().BeTrue();
+        _fixture.OwningTeamOf(project).Should().Be(SecureTeam);
+
+        await FollowParentsOf(project);
+
+        _fixture.IsSecureOf(project).Should().BeTrue("a re-file never loosens");
+        _fixture.OwningTeamOf(project).Should().Be(SecureTeam);
+        AccessRecordOf(project)!.OwnSecure.Should().BeTrue("what it held beyond the new floor is its own now");
     }
 
     /// <summary>Item 4: a project takes the filing body only — never the child re-file, never the caller's own PATCH.</summary>
@@ -366,5 +431,37 @@ public partial class SecureRootInheritanceWriterTests
         result.ErrorCode.Should().Be(SecureRootInheritance.ReasonChangedConcurrently);
         PairIdOf(project).Should().Be(from.ToString("D"));
         NoUnconditionalWrite(appOnly);
+    }
+
+    /// <summary>
+    /// Coordinator F1: the chat tool's clear of a project's pair (both columns null) under a secure matter is allowed, and
+    /// nothing is un-secured. Before the fix it was refused (leaving a secure record).
+    /// </summary>
+    [Fact]
+    public async Task ProjectFiling_ChatUpdate_ClearingThePairOfAProjectUnderASecureMatter_IsAllowed_AndNothingIsUnsecured()
+    {
+        var (secure, _) = Matters();
+        var project = InheritedSecureProject(secure);
+        var (updates, owners) = (_fixture.Updates.Count, World.OwnerWrites.Count);
+        var appOnly = AppUpdatesTheWorld();
+
+        var result = await ChatUpdateWith("sprk_project", project, Scripted(), new()
+        {
+            ["sprk_regardingrecordid"] = null!,
+            ["sprk_regardingrecordtype"] = null!,
+        }, appOnly: appOnly.Object);
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        PairIdOf(project).Should().BeNull();
+        appOnly.Verify(s => s.UpdateRecordFieldsIfUnchangedAsync("sprk_project", project,
+            It.IsAny<Dictionary<string, object?>>(), It.IsAny<long>(), It.IsAny<CancellationToken>()), Times.Once);
+        _fixture.Updates.Should().HaveCount(updates);
+        World.OwnerWrites.Should().HaveCount(owners);
+        _fixture.IsSecureOf(project).Should().BeTrue("leaving a secure matter never un-secures the project");
+        _fixture.OwningTeamOf(project).Should().Be(SecureTeam);
+
+        await FollowParentsOf(project);
+
+        _fixture.IsSecureOf(project).Should().BeTrue("a parentless record keeps what it holds as its own");
     }
 }

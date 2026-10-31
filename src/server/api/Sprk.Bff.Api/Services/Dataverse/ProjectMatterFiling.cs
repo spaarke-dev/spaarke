@@ -20,23 +20,25 @@ namespace Sprk.Bff.Api.Services.Dataverse;
 /// version, read by the application → AS THE CALLER: Write (and Append) on the project, AppendTo on the matter and on the
 /// record-type row (a matter the caller cannot use and one that does not exist answer alike) → the same pair already
 /// there: nothing written → the secure-root gate (<see cref="SecureRootFilingGate.CheckAsync"/>, fail closed) → the
-/// secure-record rule below → the caller's own PATCH of any other column (the chat tool only) → the application writes the
+/// secure-matter rule below → the caller's own PATCH of any other column (the chat tool only) → the application writes the
 /// pair ONLY IF the row is still at the version read (<c>If-Match</c>; a changed row is
 /// <see cref="ChangedConcurrentlyCode"/>, nothing written) → read back, the previous pair logged → the caller's after-write
 /// step (the core-ancestor re-stamp) → <see cref="SecureRootFilingGate.SecureAfterWriteAsync"/> inline. Ownership then
 /// follows through the root-owner step and the ordinary-moves pass of the existing jobs; nothing here writes an owner.</para>
 /// <para><b>Re-file</b> (owner decision 2026-10-31): a pair that already names ANOTHER matter is re-filed through the same
 /// steps. The N:N association (<c>sprk_Project_Matter_nn</c>) is never read or written here: it confers nothing.</para>
-/// <para><b>Secure records</b> (the design note's open check, answered in its §1). Two rules, both refused BEFORE any
-/// write with their own codes (fail closed), and both lifted only by a later decision:
+/// <para><b>Secure records</b> (the design note's container check, §1).
 /// <list type="bullet">
-/// <item>Filing under a SECURE matter (<see cref="SecureMatterCode"/>): secure-if-any would make the project secure with a
-/// container of its own (<c>ProvisionInheritedAsync</c>), and the storage resolver then sees two different secure roots
-/// above every record filed under the project and refuses their content (<c>container_ancestor_ambiguous</c>, the
-/// "stacked" case pinned by <c>ChildRecordContainerResolutionTests</c>). One container per secure family is task 178.</item>
-/// <item>Re-filing AWAY from a secure matter or project (<see cref="LeavesSecureCode"/>): the owner's rule for this task is
-/// that nothing is released from isolation, while the follow-parents step (task 175, "both ways") would take an
-/// inherited-secure project out of isolation once its pair names an ordinary record. Refusing keeps both true.</item>
+/// <item>Filing under a SECURE matter is refused before any write (<see cref="SecureMatterCode"/>, fail closed; #1506):
+/// secure-if-any would make the project secure with a container of its own (<c>ProvisionInheritedAsync</c>), and the
+/// storage resolver then sees two different secure roots above every record filed under the project and refuses their
+/// content (<c>container_ancestor_ambiguous</c>, the "stacked" case pinned by <c>ChildRecordContainerResolutionTests</c>).
+/// One container per secure family (#1506) lifts this. A secure matter A → secure matter B is refused the same way.</item>
+/// <item>Re-filing AWAY from a secure matter to an ordinary one is filed. Nothing here writes <c>sprk_issecure</c> or the
+/// owner, and the project stays secure: the follow-parents step never loosens on a re-file (a stored value beyond the new
+/// floor becomes the record's own, <see cref="SecureRootInheritance"/>'s <c>Decide</c>), the root-owner step never touches
+/// a root whose flag is not exactly false, the old parent's inherited shares end in the provenance pass, and the project
+/// keeps its own container (one secure root above its records, so nothing is ambiguous).</item>
 /// </list>
 /// A flag that cannot be read is never "not secure": refused with <see cref="RecordOwnerRefusal.ParentUndetermined"/>.</para>
 /// <para><b>Component justification (CLAUDE.md §11).</b> Existing — the chat update tool's project-pair sequence
@@ -56,11 +58,8 @@ internal static class ProjectMatterFiling
     /// <summary>The pair names a record that is not a matter (400). Nothing read about that record; nothing written.</summary>
     internal const string NotAMatterCode = "project_filing.not_a_matter";
 
-    /// <summary>The matter is secure (409): see the class remarks. Nothing written.</summary>
+    /// <summary>The matter is secure (409): see the class remarks (#1506). Nothing written.</summary>
     internal const string SecureMatterCode = "project_filing.secure_matter_unsupported";
-
-    /// <summary>The project is filed under a secure record now (409): see the class remarks. Nothing written.</summary>
-    internal const string LeavesSecureCode = "project_filing.leaves_secure_record";
 
     /// <summary>The row changed between the read and the conditional write (409, nothing written) — the existing code of the
     /// same condition in the follow-parents step.</summary>
@@ -96,9 +95,6 @@ internal static class ProjectMatterFiling
 
         /// <summary><see cref="SecureMatterCode"/>.</summary>
         SecureMatter,
-
-        /// <summary><see cref="LeavesSecureCode"/>.</summary>
-        LeavesSecure,
 
         /// <summary><see cref="ChangedConcurrentlyCode"/>.</summary>
         Conflict,
@@ -246,31 +242,16 @@ internal static class ProjectMatterFiling
             return new Outcome(OutcomeKind.Refused, gateRefusal.Reason) { Refusal = gateRefusal };
         }
 
-        // ── 7. The secure-record rules (class remarks) ─────────────────────────────────────────────────────────────
-        if (!same)
+        // ── 7. A secure matter is not a target yet (class remarks, #1506) ───────────────────────────────────────────
+        if (!same && matter is not null)
         {
-            if (matter is not null)
+            switch (await ReadSecureFlagAsync(appOnly, MatterTable, matter.RecordId, logger, ct).ConfigureAwait(false))
             {
-                switch (await ReadSecureFlagAsync(appOnly, MatterTable, matter.RecordId, logger, ct).ConfigureAwait(false))
-                {
-                    case true:
-                        return new Outcome(OutcomeKind.SecureMatter,
-                            "This matter is secure, and a project cannot be filed under a secure matter here yet. Nothing was saved.");
-                    case null:
-                        return Undetermined("whether the matter is secure could not be read");
-                }
-            }
-
-            if (!string.IsNullOrWhiteSpace(before.Id))
-            {
-                var leaves = await CurrentParentIsSecureAsync(appOnly, before, logger, ct).ConfigureAwait(false);
-                if (leaves is null)
-                    return Undetermined("whether the record it is filed under now is secure could not be read");
-                if (leaves == true)
-                {
-                    return new Outcome(OutcomeKind.LeavesSecure,
-                        "This project is filed under a secure record, and it cannot be moved away from it here. Nothing was saved.");
-                }
+                case true:
+                    return new Outcome(OutcomeKind.SecureMatter,
+                        "This matter is secure, and a project cannot be filed under a secure matter here yet. Nothing was saved.");
+                case null:
+                    return Undetermined("whether the matter is secure could not be read");
             }
         }
 
@@ -429,36 +410,6 @@ internal static class ProjectMatterFiling
             logger.LogWarning(ex, "[PROJECT-FILING] The secure flag of {Table} {Id} could not be read.", table, id);
             return null;
         }
-    }
-
-    /// <summary>Whether the record the project's CURRENT pair names is secure — <c>false</c> when it names nothing a project
-    /// inherits from, or a record that no longer exists; <c>null</c> when that cannot be told.</summary>
-    private static async Task<bool?> CurrentParentIsSecureAsync(
-        IFieldMappingDataverseService appOnly, PairRead before, ILogger logger, CancellationToken ct)
-    {
-        if (!Guid.TryParse(before.Id?.Trim(), out var parentId) || parentId == Guid.Empty || before.Type is not { } type)
-            return null; // a pair the inheritance reads as undetermined: never "not secure"
-
-        string? parentTable;
-        try
-        {
-            var typeRow = await appOnly.RetrieveRecordFieldsAsync(
-                    "sprk_recordtype_ref", type, [OwnedChildWrite.RecordTypeLogicalNameColumn], ct)
-                .ConfigureAwait(false);
-            parentTable = (typeRow.GetValueOrDefault(OwnedChildWrite.RecordTypeLogicalNameColumn) as string)?.Trim().ToLowerInvariant();
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
-        {
-            logger.LogWarning(ex, "[PROJECT-FILING] The record type {Type} could not be read.", type);
-            return null;
-        }
-
-        if (string.IsNullOrEmpty(parentTable))
-            return null;
-        if (!SecureRootInheritance.IsParent(parentTable))
-            return false;
-
-        return await ReadSecureFlagAsync(appOnly, parentTable, parentId, logger, ct).ConfigureAwait(false);
     }
 
     /// <summary>The pair columns of the body, as the application's PATCH sends them (values kept as JSON).</summary>

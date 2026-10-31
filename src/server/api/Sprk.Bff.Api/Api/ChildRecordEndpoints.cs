@@ -380,9 +380,9 @@ public static class ChildRecordEndpoints
     /// pair names anything but a matter; 404 <see cref="NotFoundCode"/> for a project or matter the caller cannot use or that
     /// does not exist (one answer); 403 <see cref="DeniedCode"/> without Write and Append on the project; 409
     /// <see cref="ProjectMatterFiling.ChangedConcurrentlyCode"/> when the project changed while it was being filed,
-    /// <see cref="ProjectMatterFiling.SecureMatterCode"/> under a secure matter and
-    /// <see cref="ProjectMatterFiling.LeavesSecureCode"/> away from a secure record (neither is supported yet), and the
-    /// secure-root gate's refusals in their usual statuses. Nothing is written on any refusal.</para>
+    /// <see cref="ProjectMatterFiling.SecureMatterCode"/> under a secure matter (not supported yet, #1506), and the
+    /// secure-root gate's refusals in their usual statuses. Nothing is written on any refusal. A project moved from a secure
+    /// matter to an ordinary one is filed and stays secure.</para>
     /// </remarks>
     internal static Task<IResult> RefileAsync(
         string table,
@@ -525,8 +525,6 @@ public static class ChildRecordEndpoints
                 ProjectMatterFiling.NotAMatterCode, outcome.Detail!),
             { Kind: ProjectMatterFiling.OutcomeKind.SecureMatter } => Problem(StatusCodes.Status409Conflict,
                 ProjectMatterFiling.SecureMatterCode, outcome.Detail!),
-            { Kind: ProjectMatterFiling.OutcomeKind.LeavesSecure } => Problem(StatusCodes.Status409Conflict,
-                ProjectMatterFiling.LeavesSecureCode, outcome.Detail!),
             { Kind: ProjectMatterFiling.OutcomeKind.Conflict } => Problem(StatusCodes.Status409Conflict,
                 ProjectMatterFiling.ChangedConcurrentlyCode, outcome.Detail!),
             { Kind: ProjectMatterFiling.OutcomeKind.Refused, Refusal: { } refusal } => refusal.RefusalCode switch
