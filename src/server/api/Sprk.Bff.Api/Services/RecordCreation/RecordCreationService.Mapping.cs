@@ -601,7 +601,7 @@ internal sealed partial class RecordCreationService
     };
 
     /// <summary>A post-mapping default: the SDK value the adapter gave (its type is its FR-02 kind) and its item form.</summary>
-    private sealed record PostMappingDefault(object Value, JsonElement ItemValue);
+    internal sealed record PostMappingDefault(object Value, JsonElement ItemValue);
 
     /// <summary>
     /// Task 018a fix round (F4-1): whether <paramref name="column"/> of <paramref name="table"/> may NEVER be an optional
@@ -706,7 +706,7 @@ internal sealed partial class RecordCreationService
     /// <returns>The defaults, and each (column, source column) pair a copied default was added for — so a copy of a
     /// SERVER-set source can be server-set too (the rule of the owned create this replaced, <c>OwnedChildWrite.CreateAsync</c>,
     /// deleted in 017).</returns>
-    private (IReadOnlyDictionary<string, PostMappingDefault> Defaults, IReadOnlyList<(string Column, string Source)> Copied) WithCopiedDefaults(
+    internal (IReadOnlyDictionary<string, PostMappingDefault> Defaults, IReadOnlyList<(string Column, string Source)> Copied) WithCopiedDefaults(
         string table, RecordTableRule rule, DataverseWriteItemMapper.MappedItem item,
         IReadOnlyDictionary<string, PostMappingDefault> defaults)
     {
@@ -731,7 +731,17 @@ internal sealed partial class RecordCreationService
                 // is not added to the copies the request's server-set set is widened by; step 5 asks it as the caller's own.
                 var copy = new EntityReference(defaultSource.LogicalName, defaultId);
                 if (ToItemValue(copy, dateBehaviour: null) is { } copyValue)
+                {
                     merged.TryAdd(column, new PostMappingDefault(copy, copyValue));
+                }
+                else
+                {
+                    _logger.LogWarning(
+                        "copied_default_value_unconvertible: entity={Entity} column={Column} source={Source} — the source's default " +
+                        "has no Web API form, so the column stays blank (task 017, 037 review K2)",
+                        table, column, fill.Default.CopiedFrom);
+                }
+
                 continue;
             }
 
