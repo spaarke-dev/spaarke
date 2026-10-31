@@ -103,3 +103,13 @@ Two-write rule: every entry here has a GitHub issue, and every issue has an entr
 | **Class** | K3: rare (a service request is filed directly under a matter); not a regression |
 | **Owner task** | Follow-up (a decide-only mode on RecordCreationService) |
 | **Failure** | `PreflightAsync` asks through `OwnedChildWrite.OwnershipOf` (no pair parent, intermediates or stamp). The service can then refuse at step 7 or 10 after the decision is committed, so the decision is recorded with no service request |
+
+## DI-011 — An unregistered owned table is refused only after the chat user confirms
+
+| Field | Value |
+|---|---|
+| **Found** | 2026-10-30, task 017 adversarial review (finding 2, the part the round-1 fix left) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2485 |
+| **Class** | Deferred: it fails closed (nothing is created); the fix needs new interface surface beyond 017's scope |
+| **Owner task** | Follow-up (chat / AIR2-034 owner) |
+| **Failure** | `ValidateChat` is sync with no I/O, and only a metadata read tells an Owned table from an org-owned (RunAsUser) one, so `table_unsupported` comes after confirmation. Fix: an async pre-suspend hook on `IToolHandler` that reads `OwnershipType`, or a tool description that names the creatable tables |
