@@ -490,3 +490,4 @@ The coordinator accepted the decided-line exclusion and asked for three changes.
 - Persister (`InvoiceSubmissionPersisterTests`), through the real evaluator: firm ApprovedRate refused + client default -> lines Clean, no `rules.not_checked`; firm ApprovedRate refused, no default -> lines Flagged with the entries. Justification for the second persister test: it is the must-fire pair of the first through the same path.
 - Seed proof: with the covered-subject check disabled, the three must-not-fire tests fail (2 evaluator, 1 persister); restored, they pass.
 - Targeted run (`InvoiceComplianceEvaluator`, `InvoiceSubmissionPersisterTests`): 377 passed. Unit filter `Signals|Billing|Submission|Invoice`: 8006 passed, 6 skipped, 0 failed.
+- Full ArchTests: 1858 passed, 0 failed. The five test projects build with 0 warnings and 0 errors.
