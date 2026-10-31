@@ -102,3 +102,8 @@
   - Only old warnings remain: SECURE-CENSUS, #2163, and the AI catalog drift at startup (since 10-22).
   - uac-r2 has no more settings changes. The dev BFF is free for R3's next deploy, which needs fresh OKs and an owner go for its SHA.
 - Still unexercised: an external-user write through the new ownership code. The owner's portal check (task 002) is the first chance.
+
+## 11. Dev BFF `b083d62183` (2026-10-31, deployed by uac-r2)
+
+- Owner go in uac-r2's session; R3 OK for this SHA. It contains #2450, e0df773395 and field-mapping #2486, whose analysistool re-seed field-mapping runs in its own session. Deployed at 19:52:25Z. The 4 critical files match by SHA-256 and healthz passed. Settings unchanged: both write switches are still on. uac-r2's gate splits out the external routes.
+- The dev SPA is the same SHA since 19:12:41Z (R3, owner go).
