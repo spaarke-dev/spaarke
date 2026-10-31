@@ -4,6 +4,7 @@ import { FluentProvider } from "@fluentui/react-components";
 import { resolveCodePageTheme, setupCodePageThemeListener } from "@spaarke/ui-components/utils/themeStorage";
 import { parseDataParams } from "@spaarke/ui-components/utils/parseDataParams";
 import { getXrm } from "@spaarke/ui-components/utils/xrmContext";
+import { cleanGuid } from "@spaarke/ui-components/utils/guid";
 import { createXrmDataService } from "@spaarke/ui-components/utils/adapters/xrmDataServiceAdapter";
 import { createXrmUploadService } from "@spaarke/ui-components/utils/adapters/xrmUploadServiceAdapter";
 import { createXrmNavigationService } from "@spaarke/ui-components/utils/adapters/xrmNavigationServiceAdapter";
@@ -76,6 +77,14 @@ function App() {
     return { sessionId: seed.sessionId, fileIds: seed.fileIds, fileNames: seed.fileNames };
   }, [handoff]);
 
+  // Task 195 (#2352): opened from a project's "New" on the Project <-> Matter subgrid (sprk_wizard_commands
+  // openLinkedWizardFromSubGrid), the launch envelope names that project — pre-select it and hide the Associate-To step.
+  // Only the project table is taken; any other launch record leaves the step as it was.
+  const initialAssociation = React.useMemo(() => {
+    if (params.entityType !== "sprk_project" || !params.entityId) return undefined;
+    return { entityType: "sprk_project", recordId: cleanGuid(params.entityId), recordName: params.recordName ?? "" };
+  }, [params]);
+
   const handleClose = React.useCallback(() => {
     navigationService.closeDialog({ confirmed: true });
   }, [navigationService]);
@@ -146,6 +155,8 @@ function App() {
         tenantId={resolvedTenantId}
         initialFormValues={initialFormValues}
         initialFileRefs={initialFileRefs}
+        initialAssociation={initialAssociation}
+        lockAssociation={initialAssociation !== undefined}
       />
     </FluentProvider>
   );
