@@ -2297,10 +2297,10 @@ public partial class RouteAuthorizationGuardTests
             + "(CloseOpenSignalsAsync, :361): a refused write returns before the closure (:351-358)."),
         new HandlerDecision("POST /api/v1/child-records/{table}", "CreateAsync", "IDataverseUserClient", Array.Empty<string>(),
             "Task 147 r1 (G5): every check is asked AS THE CALLER through IDataverseUserClient — WhoAmI first (a caller it "
-            + "cannot name is the single 403, ontology task 046; ChildRecordEndpoints.cs:229), the payload mapped with the "
-            + "caller's client (:243), then the ONE server create (RecordCreationService.CreateAsync, since field-mapping task 017; "
+            + "cannot name is the single 403, ontology task 046; ChildRecordEndpoints.RefusalResult, reached from ChildRecordEndpoints.cs:205 CreateAsync), the payload mapped with the "
+            + "caller's client, then the ONE server create (RecordCreationService.CreateAsync, since field-mapping task 017; "
             + "it replaced OwnedChildWrite.CreateAsync, deleted in 017) checks the table privilege and AppendTo on EVERY bound "
-            + "record before the app-only create (:258) — for a work assignment (task 046, D-113) with the secure-create plan."),
+            + "record before the app-only create — for a work assignment (task 046, D-113) with the secure-create plan."),
         new HandlerDecision("PATCH /api/v1/child-records/{table}/{id:guid}", "RefileAsync", "IDataverseUserClient", Array.Empty<string>(),
             "Task 147 r1: the re-file is the caller's own PATCH through IDataverseUserClient (ChildRecordEndpoints.cs:432-433 → "
             + "UpdateAsync, :448): an unreadable row is the uniform 404, AppendTo on every new parent and F3 on a move out of a "
