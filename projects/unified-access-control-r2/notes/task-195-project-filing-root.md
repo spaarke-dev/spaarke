@@ -33,7 +33,16 @@
 **What setting a pair does in dev today (both root-owner switches on)**
 - **Owner.** It is not changed inline. Within about 5 minutes, the root-owner step re-owns the project to the default team of the matter's unit (`SecureRootInheritance.Cascade.cs:1853-2080`). If the matter is person-owned, the matter's own unit decides (`RecordOwnershipResolver.cs:3796-3798`). The project's children follow through the ordinary-moves pass, which runs every 2 minutes.
 - **Secure matter.** The project becomes secure-if-any (`ProvisionInheritedAsync`). Its children are secured and its documents move into its own container. Nothing releases it.
-  - Open check: `RecordContainerResolver.cs:705` and :874-891 refuse `container_ancestor_ambiguous` when two different secure roots sit above a row. A secure project filed under a secure matter must be checked against this rule before the wizard can file under a secure matter.
+  - Container check (done at implementation, 2026-10-31; was the open check). How `RecordContainerResolver` decides:
+    - A record that is secure itself resolves to its own container and skips the ancestor walk (:705).
+    - Any other record walks its ancestors transitively, past a secure hop. Two different secure ROOTS anywhere above it answer `container_ancestor_ambiguous` (409, :874-891); the count is of roots, not of containers. `ChildRecordContainerResolutionTests.TwoDifferentSecureRoots_AnywhereInTheChain_AreAmbiguous("stacked")` pins this.
+    - `ProvisionInheritedAsync` gives an inherited-secure project a container of its own; one container per secure family is task 178 (#1506), not done.
+  - The three cases:
+    - **(a) Ordinary project filed under a secure matter.** Secure-if-any secures the project with its own container. The project's own content resolves to that container. Every record filed under the project (documents, to-dos, and so on) then sees two secure roots (the project and the matter): its content is refused with `container_ancestor_ambiguous`.
+    - **(b) Secure project (own container) filed under a secure matter.** The same: the project's own content resolves, everything filed under it is refused.
+    - **(c) Inherited-secure project re-filed from secure matter A to secure matter B.** Records under it were already ambiguous under A and stay so under B. Re-filing it to an ORDINARY matter instead would let the follow-parents step (task 175, "both ways") take it out of isolation, against the owner's rule that nothing is released.
+  - What the core does: it refuses every case that leaves such rows, before any write, with its own code (409): filing under a secure matter → `project_filing.secure_matter_unsupported` (cases a, b and the B half of c); re-filing away from a secure parent → `project_filing.leaves_secure_record` (the ordinary half of c, and item 2's "never un-secure"). A flag that cannot be read is refused as undetermined, never "not secure". The resolver is unchanged. Lifting the first refusal needs task 178.
+  - The same condition already exists, outside this task, for a project CREATED under a secure matter (`RecordCreationService`) and for work assignments under secure matters: to be filed as a finding, not changed here.
 - **Matter in another unit.** Visibility follows the new owning unit, and the expected document container follows that unit. In dev, BU1 and the root unit share one container, so no files move.
 
 **Dev data**
@@ -89,3 +98,34 @@
 3. Backfill accepted with all 3 unit moves, applied after deploy, report first.
 
 The secure-matter container check (open check above) is engineering work. It is done and tested before the wizard path is enabled for secure matters.
+
+## 4. Implementation (server half, 2026-10-31)
+
+**What was built**
+- `Services/Dataverse/ProjectMatterFiling.cs`: the one core, `FileAsync`, beside `OwnedChildWrite.RefileAsync`. The chat update tool's project-pair sequence (`OwnedChildWrite.PatchWithBffManagedPairAsync`, with `If-Match: *` and no read-back) is removed; the tool calls the core.
+- `PATCH /api/v1/child-records/sprk_project/{id}` dispatches to the core before the child re-file. It accepts exactly this body, and nothing else (400 `child_record.not_filing`):
+
+  ```json
+  {
+    "sprk_regardingrecordid": "<matter id>",
+    "sprk_regardingrecordtype@odata.bind": "/sprk_recordtype_refs(<the sprk_matter record type id>)"
+  }
+  ```
+
+  204 when filed, and when already filed under that matter. 404 `child_record.not_found` for a project or matter the caller cannot use or that does not exist (one answer). 403 `child_record.denied` without Write and Append on the project. 400 `project_filing.not_a_matter`. 409 `sdap.inherit.changed_concurrently`, `project_filing.secure_matter_unsupported`, `project_filing.leaves_secure_record`. The secure-root gate's refusals keep their usual statuses.
+- The core's order: the pair must be whole and name a matter (from the payload and the catalog, read as the caller) → the caller can read the project → the application reads the pair and `versionnumber` → as the caller, Write (+Append) on the project and AppendTo on the matter and the record-type row → same pair: nothing written → the secure-root gate (fail closed) → the secure-record rules (§1) → the chat tool's other columns as the caller's PATCH → the pair written by the application only if the version is unchanged → read back, previous pair logged → re-stamp → `SecureAfterWriteAsync`. No owner is written; the root-owner step and ordinary-moves pass move ownership as before.
+- The root-owner report (`rootOwners` in the job's ResultJson) has two new counts, report only: `projectsWithMatterLinkButNoPair` and `projectsWhosePairMatterHasNoLink`. The N:N is read paged under the listing's bound (5,000 × 20); an unreadable read reports null and a problem line.
+
+**Deviations from §2 (for the owner)**
+1. §2.3 said filing under a secure matter secures the project. The container check (§1) shows that leaves every record under the project refused by the storage resolver, so the core refuses it (`project_filing.secure_matter_unsupported`) until task 178. This also changes the chat update tool: filing a project under a secure matter by chat was allowed before and is now refused.
+2. Re-filing away from a secure parent is refused (`project_filing.leaves_secure_record`). This keeps "nothing is released", but conflicts with task 175's "both ways" for this one path; the owner decides whether that stays.
+3. "Same matter → 204" is decided after the caller checks, not before them, so that a 204 never tells a caller who cannot file the project what it is filed under. The row and version are still read first.
+4. The chat tool may still clear a project's pair (both columns null) through the core; the route never accepts a clear.
+
+**Component justification (CLAUDE.md §11)**
+
+| New surface | Existing | Extension | Cost of doing nothing |
+|---|---|---|---|
+| `ProjectMatterFiling.FileAsync` (static helper, no DI registration) | The chat tool's pair sequence (removed) and `OwnedChildWrite.RefileAsync` | `RefileAsync` is the child re-file, which treats a root as "not a re-file" and re-derives an owner; a root's version-conditioned pair write is a different sequence, so it sits beside it | The wizards cannot file a project (the pair is field-secured) and the chat tool keeps writing it with `If-Match: *` and no read-back |
+| Codes `project_filing.not_a_matter`, `.secure_matter_unsupported`, `.leaves_secure_record` (the conflict reuses `sdap.inherit.changed_concurrently`) | `child_record.*` and the `sdap.inherit.*` codes | No existing code says "not a matter" or names the two secure-record refusals; the conflict code is reused | Clients and the backfill script cannot tell these refusals apart from a generic 400/409 |
+| `sprk_project` on the existing PATCH route (a dispatch, no new endpoint) | `PATCH /api/v1/child-records/{table}/{id}` | It is the extension: the same route and handler, a table-specific branch | The browser has no BFF path to file a project |
