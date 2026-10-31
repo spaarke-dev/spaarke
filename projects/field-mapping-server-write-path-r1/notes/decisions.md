@@ -504,3 +504,11 @@ missing to add. Owners and refusals are unchanged, and the service needs no chan
   PR.
 - Option (b) is rejected for now: making steps 5 and 7 read step 10's stamp changes the contract for every caller and
   needs owner and UAC-r2 review.
+
+### 2026-10-30 — Task 017: keep the three invoice-family registry entries (ebilling-r1)
+
+- **Question** (from the 017 code-review gate): `RecordTableRules` registers `sprk_invoicesubmission`, `sprk_invoiceapproval` and `sprk_invoicecorrection`, each with an `InvoiceFamilyRule` and the mapping-protected core lookups. No create path reaches them through the service today: ebilling's persister writes them directly, and chat blocks them.
+- **Answer** (ebilling-r1, 2026-10-30): keep them. With the entries already registered, ebilling's single creator can move onto the service later without the reconcile recipe. The 017-r2 drift test pins the registry's set to the guard's `CoreRecordLookups` keys.
+- **ebilling-r1 on PR #2486:** no findings. The chat-side invoice-family not-found surfacing as `AccessDenied` with the uniform text is right; it matches correction (b). `CheckInvoiceFamilyAsync` and the refile half are unchanged.
+- **UAC-r2 on PR #2486:** one F1 finding. Chat-created roots began sending external invitations (grantor = the caller), where master passed a null grantor. Fixed on `task/fm-017-r3` by restoring master's behaviour. Whether chat should invite is a separate product decision for the owner.
+- **UAC-r2 on `sprk_userentityassociation`:** a known limit, not access-bearing. The only reader that affects access is `ParticipantCorrelationRung`, which reads contacts only. A stale owner row from the #2483 window lasts until the nightly reconciliation; UAC-r2 filed the housekeeping on their side.
