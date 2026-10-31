@@ -470,3 +470,24 @@ The coordinator accepted the decided-line exclusion and asked for three changes.
 | F-3 false `currency.mismatch` on every line | Fixed: the lines move with the header currency; the rules re-run through the diff | Fix round, part 2 |
 | F-4 `coding.not_returned` cleared by a correction | No behaviour change: EB-D-175 allows it; code comment added | Fix round, part 1 |
 | F-5 Signal left open after its group is gone | Fixed: a null raise closes the latest open episode | Fix round, part 1 |
+
+## ontology-r1 review of b1054ada6a (task 101 Part A review F2): refusal scope and the client default
+
+**Finding (F-class).** `RefusalScopeOf` named every subject a refused version was selected for. D-39 (owner, 2026-10-18; evaluator step 4) leaves the client default in force when a firm version cannot be evaluated, and the two are different policies, so both sit in `selectedBySubject`. When the firm version was refused and the client default judged that rule type on the line, the line still got a `rules.not_checked` entry and went Flagged, although the rule type had been checked.
+
+**Fix (option a), `InvoiceComplianceEvaluator`.**
+- The evaluator now records, per subject, the D-39 precedence keys judged on it in this evaluation (step 4's survivors; `BillingRuleDefinition.PrecedenceKey`: the rule type, plus the fee kind for AddedFee, plus the exact fee-code set for kind `other`). `RefusalScopeOf` drops a subject when a version with the refused version's key judged it. "Covered" means the same key, not the same RuleType.
+- A rate comparison skipped for the currency (step 5) judged nothing, so it covers nothing.
+- The key of a handler-refused version is read from its accepted definition. A gate-refused version has no definition: a non-AddedFee type keys on the type alone; an AddedFee one keeps its whole scope, because its fee kind and codes are in the body the gate refused (fail closed). An unreadable rule type (`RuleType` null) also keeps its whole scope.
+- Known over-flag: a gate-refused AddedFee firm cap flags its lines even when the client default caps the same fee kind. That is the failing-closed side; reading a kind out of a refused body was not attempted.
+- Known edge: the consumer reads `AppliesToInvoice` as "every line". If the invoice subject is not covered but some lines are, every line is still flagged (fail closed). It does not arise when the same-key default is selected for all subjects, which is the normal case.
+
+**An emptied scope.** `RefusalScopes` stays aligned 1:1 with `Refusals`; a fully covered refusal keeps its scope with `AppliesToInvoice` false and an empty `LineIndexes`. `InvoiceSubmissionPersister.RulesNotChecked` already distinguishes the two cases: an untied refusal is one with NO matching scope (`scope is null`, flags every line); a present scope flags only the invoice (all lines) or its `LineIndexes`, so an empty scope flags nothing. A refusal always has a scope from the evaluator, and the scope was never empty before this change (a version is refused only for subjects that selected it), so no explicit marker was needed and none was added. A persister test pins this end to end.
+
+**Tests.**
+- Evaluator (`InvoiceComplianceEvaluatorTests`): refused firm version with no default of its key -> scope whole (must fire); with a client default of the same type that judged the line -> scope emptied, scopes 1:1 (must not fire).
+- AddedFee (`InvoiceComplianceEvaluatorFeeKindTests`): firm lateFee refused by its handler, default lateFee -> emptied; firm administrativeFee refused, default lateFee -> still whole; gate-refused firm cap, default of the same kind -> still whole (pins the fail-closed side).
+- Persister (`InvoiceSubmissionPersisterTests`), through the real evaluator: firm ApprovedRate refused + client default -> lines Clean, no `rules.not_checked`; firm ApprovedRate refused, no default -> lines Flagged with the entries. Justification for the second persister test: it is the must-fire pair of the first through the same path.
+- Seed proof: with the covered-subject check disabled, the three must-not-fire tests fail (2 evaluator, 1 persister); restored, they pass.
+- Targeted run (`InvoiceComplianceEvaluator`, `InvoiceSubmissionPersisterTests`): 377 passed. Unit filter `Signals|Billing|Submission|Invoice`: 8006 passed, 6 skipped, 0 failed.
+- Full ArchTests: 1858 passed, 0 failed. The five test projects build with 0 warnings and 0 errors.

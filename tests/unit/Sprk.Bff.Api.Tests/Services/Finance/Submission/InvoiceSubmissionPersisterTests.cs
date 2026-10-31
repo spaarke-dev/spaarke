@@ -1138,6 +1138,40 @@ public partial class InvoiceSubmissionPersisterTests
         }
     }
 
+    [Fact(DisplayName = "101 B2a F2 review (must-not-fire): a refusal whose client default of the same key judged the lines flags nothing; an emptied scope is not an untied refusal")]
+    public async Task ARefusal_WhoseClientDefaultJudgedTheLines_FlagsNothing_AnEmptiedScopeIsNotUntied()
+    {
+        var outcome = await TwoLineHarness(
+            Version("CD-RATE", RuleType.ApprovedRate),
+            Version("FIRM-RATE", RuleType.ApprovedRate, body: "{\"type\":\"ApprovedRate\",\"unknownMember\":1}", scope: RuleSetScope.Firm)).RunAsync();
+        outcome.Evaluation!.Refusals.Should().ContainSingle("the setup: the firm version is refused");
+        var scope = outcome.Evaluation.RefusalScopes.Should().ContainSingle().Which;
+        scope.AppliesToInvoice.Should().BeFalse("the setup: the client default judged every subject, so the scope is emptied");
+        scope.LineIndexes.Should().BeEmpty();
+        outcome.Evaluation.Findings.Should().BeEmpty("the setup: the lines are otherwise clean");
+
+        var (lines, findings) = await PersistLinesAsync(outcome);
+        using (findings)
+        {
+            lines.Select(StatusOf).Should().OnlyContain(s => s == InvoiceSubmissionPersister.LineStatusClean);
+            NotChecked(findings).Should().BeEmpty();
+        }
+    }
+
+    [Fact(DisplayName = "101 B2a F2 review (must-fire): the same refusal with no client default of its key flags every line")]
+    public async Task ARefusal_WithNoClientDefaultOfItsKey_StillFlagsTheLines()
+    {
+        var outcome = await TwoLineHarness(
+            Version("FIRM-RATE", RuleType.ApprovedRate, body: "{\"type\":\"ApprovedRate\",\"unknownMember\":1}", scope: RuleSetScope.Firm)).RunAsync();
+
+        var (lines, findings) = await PersistLinesAsync(outcome);
+        using (findings)
+        {
+            lines.Select(StatusOf).Should().OnlyContain(s => s == InvoiceSubmissionPersister.LineStatusFlagged);
+            NotChecked(findings).Select(e => e.GetProperty("line").GetInt32()).Should().Equal(0, 1);
+        }
+    }
+
     [Fact(DisplayName = "101 B2a F2 (must-not-fire): with no refusal the lines are Clean and no rules.not_checked finding is stored")]
     public async Task WithNoRefusal_TheLinesStayClean_AndNoRulesNotCheckedFinding()
     {
