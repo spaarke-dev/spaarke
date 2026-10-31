@@ -1,6 +1,7 @@
 using System.Reflection;
 using FluentAssertions;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
+using Sprk.Bff.Api.Services.Ai.Handlers;
 using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.RecordCreation;
 using Xunit;
@@ -154,5 +155,41 @@ public class RecordTableRulesInvoiceFamilyRuleTests
     {
         RecordTableRules.InvoiceFamilyRule.Rule.Name.Should().Be("InvoiceFamilyCoreRecord");
         RecordTableRules.InvoiceFamilyRule.Rule.Rationale.Should().Contain("FR-05");
+    }
+
+    // ── Drift guard: the chat handler's blocked list, the registry and the guard's tables ─────────────────────────────
+
+    /// <summary>
+    /// The invoice-family tables a user creates from the product (the wizard / child route), so the chat create is NOT
+    /// blocked for them. Every other table the guard covers is server-written and must be in the handler's blocked set.
+    /// </summary>
+    private static readonly string[] UserCreatableInvoiceFamilyTables = ["sprk_invoice", "sprk_billingevent"];
+
+    private static List<string> RegistryInvoiceFamilyTables() =>
+        RecordTableRules.All
+            .Where(r => r.PreWriteRules.Any(p => ReferenceEquals(p, RecordTableRules.InvoiceFamilyRule)))
+            .Select(r => r.Table)
+            .ToList();
+
+    [Fact]
+    public void TheRegistrysInvoiceFamilyTables_AreTheGuardsTables()
+    {
+        RegistryInvoiceFamilyTables().Should().BeEquivalentTo(InvoiceFamilyCoreRecordGuard.CoreRecordLookups.Keys,
+            "a table the guard covers must carry the rule, and a table with the rule must be one the guard can check");
+    }
+
+    [Fact]
+    public void EveryServerWrittenInvoiceFamilyTable_IsInTheChatHandlersBlockedSet_AndNothingElseIs()
+    {
+        var serverWritten = RegistryInvoiceFamilyTables()
+            .Except(UserCreatableInvoiceFamilyTables, StringComparer.Ordinal)
+            .ToList();
+
+        serverWritten.Should().NotBeEmpty();
+        DataverseCreateRecordHandler.ServerWrittenInvoiceFamilyTables.Should().BeEquivalentTo(serverWritten,
+            "a server-written invoice-family table in the registry/guard but not in " +
+            "DataverseCreateRecordHandler.ServerWrittenInvoiceFamilyTables (or the reverse) leaves the chat create open or over-blocked; " +
+            "a user-creatable table goes in UserCreatableInvoiceFamilyTables above");
+        DataverseCreateRecordHandler.ServerWrittenInvoiceFamilyTables.Should().NotContain(UserCreatableInvoiceFamilyTables);
     }
 }
