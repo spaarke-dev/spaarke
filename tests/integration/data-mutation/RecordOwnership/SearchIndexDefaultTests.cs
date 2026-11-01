@@ -447,6 +447,37 @@ public sealed class SearchIndexDefaultTests
         _world.Creates.Should().BeEmpty();
     }
 
+    /// <summary>
+    /// Review R5, must-not-fire on the lookup itself: on a table that is NOT search-indexed, a bind of the index lookup is still
+    /// the caller's own value — refused when the caller cannot AppendTo the catalog row (as before 039), written when they can.
+    /// </summary>
+    [Fact]
+    public async Task ATableNotMarkedSearchIndexed_KeepsTheCallersSearchIndexLookup_AndItsAppendToCheck()
+    {
+        UnifiedCreateRequest Todo() => CreateWorld.Mapped("sprk_todo",
+            new Dictionary<string, object?>
+            {
+                ["sprk_name"] = "Call the client",
+                [LookupBind] = $"/sprk_aisearchindexes({ExplicitIndex:D})",
+            },
+            new DataverseWriteItemMapper.MappedLookup("sprk_ai_search_index", "sprk_aisearchindex", "sprk_aisearchindexes", ExplicitIndex));
+
+        _world.Caller.NoAppendToIn.Add(("sprk_aisearchindexes", ExplicitIndex));
+        var denied = await _world.CreateAsync(Todo());
+
+        denied.Succeeded.Should().BeFalse("AppendTo on the lookup is still the caller's check on a table that is not search-indexed");
+        _world.Creates.Should().BeEmpty();
+        _world.Log.Messages.Should().NotContain(m => m.Contains("client_search_index_dropped"));
+
+        _world.Caller.NoAppendToIn.Clear();
+        var allowed = await _world.CreateAsync(Todo());
+
+        allowed.Succeeded.Should().BeTrue(allowed.Refusal?.Detail);
+        var fields = _world.Creates.Should().ContainSingle().Subject.Fields;
+        Text(fields, LookupBind).Should().Be($"/sprk_aisearchindexes({ExplicitIndex:D})", "the caller's own lookup is written as given");
+        _world.Log.Messages.Should().NotContain(m => m.Contains("client_search_index_dropped"));
+    }
+
     [Fact]
     public async Task ATableNotMarkedSearchIndexed_PassesAClientsIndexNamedColumnThroughUntouched()
     {
