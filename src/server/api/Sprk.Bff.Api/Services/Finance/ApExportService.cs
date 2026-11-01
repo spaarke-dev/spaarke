@@ -26,11 +26,26 @@ public static class ApExportCodes
     public const string CompletionIncomplete = "ebilling.export.completion_incomplete";
     public const string BatchTotalOutOfRange = "ebilling.export.batch_total_out_of_range";
 
+    /// <summary>Task 151a: <c>GET export-batches/{batchId}/files/{format}</c> with a format other than csv or json.</summary>
+    public const string InvalidFormat = "ebilling.export.invalid_format";
+
+    /// <summary>Task 151a: the batch has no servable file of that format (it did not complete, or the format was not requested).</summary>
+    public const string FileNotAvailable = "ebilling.export.file_not_available";
+
     /// <summary>Per-invoice reasons of <see cref="SelectionRefused"/>.</summary>
     public const string ReasonNotApproved = "invoice_not_approved";
     public const string ReasonAlreadyExported = "invoice_already_exported";
     public const string ReasonNotFound = "invoice_not_found";
 }
+
+/// <summary>Stable codes of <c>POST /api/finance/invoices/{invoiceId}/mark-paid</c> (task 151a). A refused move carries the lifecycle's own <see cref="InvoiceTransitionReasons"/> code.</summary>
+public static class InvoicePaymentCodes
+{
+    public const string Unavailable = "ebilling.invoice.payment_unavailable";
+}
+
+/// <summary>200 body of Mark Paid: the invoice and its new status (<c>Paid</c>).</summary>
+public sealed record InvoiceMarkPaidResponse(Guid InvoiceId, string Status);
 
 /// <summary>Body of <c>POST /api/finance/export-batches</c>: the invoices to export and the formats (csv, json; both when omitted).</summary>
 public sealed record ApExportRequest(IReadOnlyList<Guid>? InvoiceIds, IReadOnlyList<string>? Formats);

@@ -65,6 +65,24 @@ public sealed class ApExportAuthorization
             FinanceAuthorizationCheck.CallerPrivilege(CreateBatchPrivilege, BatchEntitySet, "ap export: create a batch"));
 
     /// <summary>
+    /// The route-level declaration for Mark Paid (ebilling-r1 task 151a, FR-42): the SAME two per-invoice rights an export asks (the decide right,
+    /// Write, then <c>finance.read</c>, Read), on the invoice in the path and asked of Dataverse as the caller. It does not ask for Create on
+    /// the batch table: there is no batch to create when an invoice is paid. A route value that is not a usable id declares no check, which the
+    /// filter denies (never a pass-through). Kept here so a later dedicated export or payment right changes this class only.
+    /// </summary>
+    public static FinanceAuthorizationTargets PaymentRouteTargets(EndpointFilterInvocationContext context, string routeKey)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        var checks = RequiredInvoiceOperations
+            .Select(operation => FinanceAuthorizationTargets.FromRoute(context, routeKey, FinanceAuthorizationFilter.InvoiceEntitySet, operation).Checks)
+            .ToList();
+
+        return checks.Any(c => c.Count == 0)
+            ? FinanceAuthorizationTargets.Authorize()
+            : FinanceAuthorizationTargets.Authorize(checks.SelectMany(c => c).ToArray());
+    }
+
+    /// <summary>
     /// May <paramref name="caller"/> export <paramref name="invoiceIds"/> in one batch? Fails closed: a missing token, an unanswered or faulted
     /// probe and a throwing check all refuse (<see cref="ApExportAuthorizationOutcome.Undetermined"/> for "no answer", never an allow).
     /// </summary>

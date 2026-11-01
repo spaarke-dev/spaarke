@@ -435,7 +435,11 @@ public partial class RouteAuthorizationGuardTests
             + "never grants. The decider and the decision id are derived server-side, never taken from the request."),
         new GovernedFile("Api/Finance/ApExportEndpoints.cs", Scope.RouteLevelGate,
             "GET /api/finance/export-batches/candidates, POST /api/finance/export-batches and GET /api/finance/export-batches/{batchId} (ebilling-r1 "
-            + "task 150, FR-41, EB-D-178, D-56) -- export a selection of Approved invoices to AP as one batch. Step 0 on the group, then "
+            + "task 150, FR-41, EB-D-178, D-56) -- export a selection of Approved invoices to AP as one batch; plus, from task 151a (EB-D-181), "
+            + "GET /api/finance/export-batches/{batchId}/files/{format} (the stored CSV or JSON, Read on the batch in the path, uniform 404, served "
+            + "through 090's download pipeline) and POST /api/finance/invoices/{invoiceId}/mark-paid (FR-42: Sent to AP to Paid through "
+            + "InvoiceLifecycleService only; ApExportAuthorization.PaymentRouteTargets declares the decide right and finance.read on the invoice in "
+            + "the path, uniform 404). Step 0 on the group, then "
             + "AddFinanceAuthorizationFilter on each route: the list and the export declare the caller's own Create privilege on sprk_billingexport "
             + "(ApExportAuthorization.RouteTargets; 403 before the handler runs), the batch read declares Read on the batch named in the path "
             + "(uniform 404); the eBilling kill switch runs after it. The per-invoice part of the rule (ebilling.invoice.decide: Write on EVERY "
