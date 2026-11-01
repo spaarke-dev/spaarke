@@ -1,48 +1,55 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <task id="079" project="spaarke-SPA-external-access-platform-r3">
   <metadata>
-    <title>#2458 / ISS-024: the grant notifier does not email a home-linked WorkforceHome contact as an external person</title>
+    <title>#2458 / ISS-024 + #2491: a shared one-contact home-tenant read; the grant notifier and AssignTaskRecipientGate decide the home link from it</title>
     <phase>R3 hardening (ISS-024)</phase>
     <status>in-progress</status>
     <rigor>FULL</rigor>
-    <rigor-reason>Tags bff-api, security; decides who is emailed a portal link after a grant, from an identity link</rigor-reason>
+    <rigor-reason>Tags bff-api, security; decides who is emailed a portal link after a grant, from an identity link; adds a store read</rigor-reason>
     <model-tier>opus</model-tier>
-    <model-tier-reason>Identity-link decision on the external notification path (security-adjacent, fail-closed rules)</model-tier-reason>
+    <model-tier-reason>Identity-link decision on the external notification path (security-adjacent, fail-closed rules); two call sites, one owned by ontology</model-tier-reason>
     <effort>high</effort>
     <parallel-group>none</parallel-group>
     <parallel-safe>false</parallel-safe>
     <parallel-reason>BFF hot path; one branch off master</parallel-reason>
     <deps>036</deps>
     <tags>bff-api, security, testing</tags>
-    <estimated-effort>0.5 day</estimated-effort>
+    <estimated-effort>1 day</estimated-effort>
   </metadata>
 
-  <prompt>In GrantAccessNotifier.NotifyContactGrantAsync, before a contact is emailed as an external person, read the contact's home link the way the portal does, and do not send the external email when the contact is a WorkforceHome contact whose home pair a licensed user carries (or when that cannot be told). Copy ontology task 168's AssignTaskRecipientGate.HomeLinkAsync.</prompt>
+  <prompt>Add one read to IContactIdentityStore that returns one contact's stored home tenant (sprk_externaltenantid) in a query of its own. Use it in GrantAccessNotifier.NotifyContactGrantAsync (before the external email) and in AssignTaskRecipientGate.HomeLinkAsync (instead of the GetContactAsync row's RawExternalTenantId, which ContactSelect never carries), so both decide the WorkforceHome home link from the stored pair.</prompt>
   <role>SPAARKE platform developer. ASP.NET Core, Dataverse, the external-access identity model. Follow ADRs strictly.</role>
-  <goal>Owner 2026-10-31: fix #2458 in R3. A contact who signs in with their own work account (sprk_identityplane = WorkforceHome) and whose home tenant + oid a licensed systemuser carries is resolved by the portal as that user (WorkforcePrincipalResolver.ResolveHomeAsync → HomeLinkOutcome.Enabled → ForSystemUser). The notifier today never reads that link, so it emails such a contact "you were given access" with a portal link the person's actual portal view may not honour. After this task it does not.</goal>
+  <goal>Owner 2026-10-31: fix #2458 in R3, option 2. A contact who signs in with their own work account (Binding Kind Bound, Plane WorkforceHome) and whose home tenant + oid a licensed systemuser carries is resolved by the portal as that user (WorkforcePrincipalResolver.ResolveHomeAsync → HomeLinkOutcome.Enabled). Today: (a) the notifier never reads the link and emails such a contact "you were given access"; (b) AssignTaskRecipientGate reads the tenant from GetContactAsync's row, whose select (ContactSelect, ContactIdentityStore.cs:440) excludes sprk_externaltenantid by design (ContactBindingDecision.cs:268-272), so on the real store every WorkforceHome contact is treated as could-not-tell (#2491); its tests pass only because InMemoryContactIdentityStore returns the tenant. After this task both read the stored tenant through the new read.</goal>
 
   <context>
-    <background>Issue #2458 (DI-137), notes/defer-issues.md ISS-024. Notifier entry: src/server/api/Sprk.Bff.Api/Api/ExternalAccess/GrantAccessNotifier.cs NotifyContactGrantAsync (~:116-275); the external branch is the `people.Count == 0` block that calls EmailExternalContactGrantAsync. Reference fix: ontology PR #2418 (bd32be448f), src/server/api/Sprk.Bff.Api/Services/Signals/AssignTaskRecipientGate.cs: plane detection (~:434-441, Binding Kind Bound + Plane WorkforceHome) and HomeLinkAsync (~:444-470: home pair from sprk_externaltenantid + bound oid; IContactIdentityStore.FindHomeLinkedSystemUsersAsync + ContactBindingDecision.DecideHomeLink; an unparsable pair or a throwing read is Denied). uac-r2 task 193 (ContactUserRepresentation) is parked; when it resumes it absorbs this rule (#2457). uac-r2 confirmed 2026-10-31 that it is not touching GrantAccessNotifier.cs.</background>
+    <background>Issues #2458 (DI-137, notes/defer-issues.md ISS-024) and #2491 (ontology's AssignTaskRecipientGate). Owner chose option 2 on 2026-10-31 ("#2458 - yes option 2"): a new one-contact read, not widening ContactSelect (that would reverse the isolation in ContactBindingDecision.cs:268-272), and not "never email WorkforceHome" (reverses 036/047). Ontology asked that R3 fix both call sites in one PR off master; ontology reviews its file in the PR and re-checks on dev afterwards. Reference for a read "in a query of its own": FindBindIntentAsync (interface ~:328-337), BuildInviteMarkerPath (~:605-612) and InterpretStampLeg (~:614-632) in ContactIdentityStore.cs; HomeContactSelect (:944) shows the tenant column is readable where it is selected. Notifier entry: GrantAccessNotifier.cs NotifyContactGrantAsync (~:116-275), external branch = the `people.Count == 0` block calling EmailExternalContactGrantAsync. Gate: AssignTaskRecipientGate.cs :180 (GetContactAsync), :336 (HomeLinkAsync switch), :449-490 (HomeLinkAsync). uac-r2 task 193 (ContactUserRepresentation) is parked and will absorb the rule later (#2457); uac-r2 is not touching GrantAccessNotifier.cs.</background>
     <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ContactIdentityStore.cs (interface + Dataverse store: new read, its path builder and parse)</file>
+      <file role="modify">the InMemoryContactIdentityStore and any other IContactIdentityStore implementation or test double (find with Grep)</file>
       <file role="modify">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/GrantAccessNotifier.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Signals/AssignTaskRecipientGate.cs (HomeLinkAsync only: where the tenant comes from)</file>
       <file role="modify">tests/unit/Sprk.Bff.Api.Tests/Api/ExternalAccess/GrantAccessNotifierExternalTests.cs</file>
-      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Signals/AssignTaskRecipientGate.cs (plane detection, HomeLinkAsync)</file>
-      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/WorkforcePrincipalResolver.cs (ResolveHomeAsync: what the portal does)</file>
-      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ContactBindingDecision.cs DecideHomeLink; ContactIdentityStore.cs FindHomeLinkedSystemUsersAsync</file>
+      <file role="modify">tests/unit/Sprk.Bff.Api.Tests/Infrastructure/ExternalAccess/DataverseContactIdentityStoreTests.cs (real-store path + parse)</file>
+      <file role="modify">the AssignTaskRecipientGate unit tests (add real-store-shaped cases; AssignTaskRecipientGatePlaneTests stay green)</file>
+      <file role="canonical-reference">ContactIdentityStore.cs FindBindIntentAsync / BuildInviteMarkerPath / InterpretStampLeg (own-query read pattern, ColumnMissing handling)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/WorkforcePrincipalResolver.cs ResolveHomeAsync (what the portal does)</file>
+      <file role="canonical-reference">ContactBindingDecision.cs DecideHomeLink (:~1963); ContactIdentityStore.cs FindHomeLinkedSystemUsersAsync</file>
     </relevant-files>
   </context>
 
   <justification>
-    <existing>The home-link read and decision exist (IContactIdentityStore.FindHomeLinkedSystemUsersAsync, ContactBindingDecision.DecideHomeLink), and AssignTaskRecipientGate already applies them for the same question.</existing>
-    <extension>This calls them from the notifier before its external branch; no new service, interface, endpoint, setting or DI registration (the notifier already holds IContactIdentityStore as _identities).</extension>
-    <cost-of-doing-nothing>A home-linked workforce contact is emailed a portal link for an access their portal view (the licensed user's) may not have (#2458).</cost-of-doing-nothing>
+    <existing>GetContactAsync (ContactSelect, no tenant), HomeContactSelect (tenant, used only by the sign-in home lookup) and FindBindIntentAsync (own-query read of other field-secured columns) overlap; none returns one contact's stored tenant to a caller that already has the contact.</existing>
+    <extension>Adding the tenant to ContactSelect would put it on every contact read, which ContactBindingDecision.cs:268-272 forbids by design; reusing the HomeContactSelect query means a by-tenant search, not a by-id read. So: one new method on the existing interface and store, following the FindBindIntentAsync pattern; no new service, endpoint, setting, package or DI registration.</extension>
+    <cost-of-doing-nothing>A home-linked workforce contact is emailed a portal link for access their portal view (the licensed user's) may not have (#2458), and on the real store every WorkforceHome contact is refused the Assign Task email because the gate never sees the tenant (#2491).</cost-of-doing-nothing>
   </justification>
 
   <constraints>
-    <constraint source="#2458 / ontology 168">Only for a contact whose binding reads as WorkforceHome. NotLinked → behaviour unchanged (external email as today). Enabled → no external email. Disabled → no email. Ambiguous, an unparsable home pair, or a read that fails/throws → no email (fail closed). Return the outcome the notifier already uses for "told nobody" (NotApplicable) for Enabled/Disabled, and Failed for could-not-tell, unless the existing outcome semantics say otherwise; record the choice.</constraint>
-    <constraint source="design">Non-WorkforceHome contacts (CIAM, guest, unbound): byte-identical behaviour. The internal-user notification path (people.Count > 0) is unchanged.</constraint>
-    <constraint source="design">Do not route an Enabled contact to the internal-user notice: the user's own rights, not the contact grant, apply in the portal, so telling the user "you were given access" would be just as wrong.</constraint>
-    <constraint source="ADR-015">Log lines carry ids and an outcome code only; no email address, name or UPN.</constraint>
+    <constraint source="owner option 2">The new read selects contactid and sprk_externaltenantid only, in its own query (never added to ContactSelect). The answer is checked to be about this contact. A missing column → ColumnMissing; an absent/null/unparsable tenant (masked or empty) → "could not tell", never "no tenant, so NotLinked". A read failure is surfaced as a status, not swallowed into NotLinked.</constraint>
+    <constraint source="#2458">Notifier, only for a contact whose binding reads Bound + WorkforceHome: NotLinked → behaviour unchanged (external email as today). Enabled → no external email. Disabled → no email. Ambiguous, could-not-tell, ColumnMissing, an unparsable pair, or a read that throws → no email (fail closed). Use NotApplicable for Enabled/Disabled and Failed for could-not-tell, unless the existing outcome semantics say otherwise; record the choice.</constraint>
+    <constraint source="ontology #2491">AssignTaskRecipientGate: the decision is unchanged apart from where the stored pair comes from. An unreadable tenant stays Unverified, never NotLinked. Do not change any other branch of the gate.</constraint>
+    <constraint source="design">Non-WorkforceHome contacts (CIAM, guest, unbound): byte-identical behaviour in both call sites, and the new read is not called. The internal-user notification path (people.Count > 0) is unchanged.</constraint>
+    <constraint source="design">Do not route an Enabled contact to the internal-user notice: the user's own rights, not the contact grant, apply in the portal.</constraint>
+    <constraint source="ADR-015">Log lines carry ids and an outcome code only; no email address, name, UPN or tenant value.</constraint>
     <constraint source="CLAUDE.md §10">BFF hygiene: placement statement, no new package, publish-size delta against a fresh master build, tests.</constraint>
     <constraint source="owner">No live change in this task. It ships in a later dev BFF deploy with fresh OKs and an owner go naming the SHA.</constraint>
     <constraint source="public repo">PR, commit and notes describe the behaviour and the fix; no exploitation narrative.</constraint>
@@ -61,35 +68,43 @@
 
   <steps mode="directional">
     <step order="0" name="Context + rigor declaration">Load knowledge; /conflict-check (BFF hot path); declare rigor/tier.</step>
-    <step order="1">Write the acceptance tests; confirm Enabled/Disabled/Ambiguous/failed-read fail before the change.</step>
-    <step order="2">Implement in NotifyContactGrantAsync before EmailExternalContactGrantAsync.</step>
-    <step order="3">Seeding proof: remove the new check → the Enabled test fails. Restore; record.</step>
-    <step order="4">Build, tests (GrantAccessNotifier* unit + integration GrantExternalContactEmailTests, ArchTests), publish-size delta, notes/task-079-notes.md; one adversarial pass (two: security tag); fix F-class; ISS-024 updated; status, TASK-INDEX.</step>
+    <step order="1">Write the tests first: the store's path and parse over real Dataverse-shaped bodies; the notifier cases; the gate's real-store cases. Confirm the notifier Enabled/Disabled/Ambiguous/could-not-tell tests and the gate's NotLinked-with-grant test fail before the change.</step>
+    <step order="2">Add the read to IContactIdentityStore, the Dataverse store and every implementation/double.</step>
+    <step order="3">Use it in NotifyContactGrantAsync before EmailExternalContactGrantAsync, and in AssignTaskRecipientGate.HomeLinkAsync for the tenant.</step>
+    <step order="4">Seeding proofs: remove the notifier check → the Enabled test fails; make the gate read the row's tenant again → the real-store NotLinked test fails. Restore; record.</step>
+    <step order="5">Build, tests (GrantAccessNotifier*, AssignTaskRecipientGate* incl. PlaneTests, DataverseContactIdentityStore*, integration GrantExternalContactEmailTests, ArchTests), publish-size delta, notes/task-079-notes.md; two adversarial passes (security tag); fix F-class; ISS-024 updated.</step>
   </steps>
 
   <escalation>
-    <trigger>If the contact row the notifier reads does not carry the plane or the home tenant (so the home pair cannot be formed without a new read), STOP and report what is missing.</trigger>
+    <trigger>If sprk_externaltenantid cannot be read by the BFF's identity on a by-id contact query (field security), STOP and report: the read would always be could-not-tell.</trigger>
     <trigger>If another grant notice path (e.g. /contact-grants, invite-and-grant) emails contacts through a different method that skips this check, report it; fix in scope if it is the same method.</trigger>
+    <trigger>If fixing the gate needs any change beyond where the tenant comes from, STOP and report (ontology owns that decision).</trigger>
   </escalation>
 
   <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ContactIdentityStore.cs</output>
     <output type="code">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/GrantAccessNotifier.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Signals/AssignTaskRecipientGate.cs</output>
     <output type="test">tests/unit/Sprk.Bff.Api.Tests/Api/ExternalAccess/GrantAccessNotifierExternalTests.cs</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Infrastructure/ExternalAccess/DataverseContactIdentityStoreTests.cs</output>
     <output type="docs">projects/spaarke-SPA-external-access-platform-r3/notes/task-079-notes.md</output>
   </outputs>
 
   <acceptance-criteria>
-    <criterion testable="true">WorkforceHome contact, home pair carried by exactly one enabled licensed user (Enabled): no email is sent; outcome is not Sent.</criterion>
-    <criterion testable="true">WorkforceHome contact, NotLinked: emailed exactly as today (same template, same deep link).</criterion>
-    <criterion testable="true">WorkforceHome contact, Disabled: no email.</criterion>
-    <criterion testable="true">WorkforceHome contact, Ambiguous (two users carry the pair): no email.</criterion>
-    <criterion testable="true">WorkforceHome contact, home-link read throws or the pair is unparsable: no email; the grant still stands (the notifier's failure is logged, not thrown).</criterion>
-    <criterion testable="true">CIAM (non-WorkforceHome) contact: unchanged; the home-link read is not called.</criterion>
-    <criterion testable="true">The internal-user notice path (a contact represented by a linked internal user) is unchanged.</criterion>
-    <criterion testable="true">No email address, name or UPN appears in any new log line.</criterion>
+    <criterion testable="true">Store: the new read's path selects contactid and sprk_externaltenantid only, by contact id; ContactSelect is unchanged.</criterion>
+    <criterion testable="true">Store parse: a body with this contact's id and a GUID tenant → that tenant; null/absent/empty/non-GUID tenant → could not tell; a body for another contact id → could not tell; 400 missing-column → ColumnMissing; other failure → a failure status.</criterion>
+    <criterion testable="true">Notifier, WorkforceHome, Enabled (exactly one enabled licensed user carries the pair): no email; outcome is not Sent.</criterion>
+    <criterion testable="true">Notifier, WorkforceHome, NotLinked: emailed exactly as today (same template, same deep link).</criterion>
+    <criterion testable="true">Notifier, WorkforceHome, Disabled: no email. Ambiguous: no email.</criterion>
+    <criterion testable="true">Notifier, WorkforceHome, tenant could-not-tell / ColumnMissing / read throws / home-link read throws: no email; the grant still stands (logged, not thrown).</criterion>
+    <criterion testable="true">Gate, real-store-shaped (GetContactAsync row has no tenant; the new read has it): NotLinked with a grant → one email; Linked (Enabled) → Unverified; tenant unreadable → Unverified (never NotLinked).</criterion>
+    <criterion testable="true">AssignTaskRecipientGatePlaneTests and every existing AssignTaskRecipientGate test stay green unchanged.</criterion>
+    <criterion testable="true">CIAM / non-WorkforceHome contact in either call site: unchanged; the new read and the home-link read are not called.</criterion>
+    <criterion testable="true">The internal-user notice path is unchanged.</criterion>
+    <criterion testable="true">No email address, name, UPN or tenant value appears in any new log line.</criterion>
   </acceptance-criteria>
 
-  <notes>Owner decision 2026-10-31: "#2458 - we should fix it here".</notes>
+  <notes>Owner decisions 2026-10-31: "#2458 - we should fix it here"; "#2458 - yes option 2". Ontology's conditions are in the gate constraint and criteria above.</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
