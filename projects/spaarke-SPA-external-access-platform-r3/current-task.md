@@ -1,17 +1,17 @@
 # Current Task State - spaarke-SPA-external-access-platform-r3
 
-> **Last Updated**: 2026-10-31 ~20:00Z (context-handoff at 85%).
+> **Last Updated**: 2026-11-01 ~03:25Z.
 > **Recovery**: Read "Quick Recovery" first. Narrative is in git log. Records: `notes/contact-identity-dev-rollout-record.md` §9–10 (dev BFF deploys), `notes/task-002-notes.md` (grid rollback JSON), `notes/task-072-e2e-record.md`, `notes/defer-issues.md` (ISS-021..027).
 
 ## Quick Recovery (READ THIS FIRST)
 
 | Field | Value |
 |-------|-------|
-| **Done** | 043, 059, 074, 070, 071, **002** (owner OK 2026-10-31) ✅. 060 cancelled. |
-| **Open** | **072** (owner E2E passed 2026-10-31; only open item: owner approval of the grant email copy, see below), **079** (#2458, ESCALATED, see below), 073 (on hold until demo production is deployed: owner 2026-10-31), 090 last. |
+| **Done** | 043, 059, 074, 070, 071, 002, **072** (owner E2E pass; email copy approved as drafted, 2026-10-31) ✅. 060 cancelled. |
+| **Open** | **079** (#2458 + #2491, option 2, implementer running), 073 (on hold until demo production is deployed: owner 2026-10-31), 090 last. |
+| **079 now** | Owner 2026-10-31: "yes option 2". POML re-scoped (b0e6707da9): a new one-contact read on IContactIdentityStore (contactid + sprk_externaltenantid, own query, ContactSelect unchanged; ColumnMissing/null/unparsable/other contact = could not tell), used by GrantAccessNotifier and AssignTaskRecipientGate.HomeLinkAsync (tenant source only). Ontology told 2026-11-01. Implementer (opus/high) running in `C:\wt2458n`, now at master d0c1c5dc3c; it commits locally, no push. NEXT: review its diff → two adversarial reviews (security) → fix F-class → push + PR → send ontology the PR number. Deploy later with OKs + an owner go naming the SHA; ontology re-checks with Tony Howe (CMRCL-479772). The row below is background. |
 | **079 #2458 (ACTIVE, escalated to owner)** | Owner 2026-10-31: "fix it here". Worktree `C:\wt2458n`, branch `fix/r3-2458-grant-notifier-home-link` from master b083d62183, **no commits yet**. The implementer stopped on the POML escalation trigger, and R3 verified it in code: `GetContactAsync` selects `ContactSelect` (ContactIdentityStore.cs:440), which does NOT include `sprk_externaltenantid`. Only `HomeContactSelect` (:944) adds it, by design (ContactBindingDecision.cs:268-272). So the home pair cannot be formed from the notifier's row, and copying AssignTaskRecipientGate.HomeLinkAsync would stop emailing every WorkforceHome contact. **The same defect is live in ontology's AssignTaskRecipientGate** (:180 then :449-457): every WorkforceHome contact is likely refused the Assign Task email; its tests use InMemoryContactIdentityStore, which returns the tenant. Options: (1) add the tenant to ContactSelect (reverses the isolation); (2) **recommended**: a new one-contact tenant read on IContactIdentityStore (own select, ColumnMissing/masked = could not tell), used by both the notifier and AssignTaskRecipientGate, plus a test over the real store's parse; needs the §11 answers and an owner OK; (3) never email WorkforceHome contacts (reverses 036/047). Ontology was told; filed as **#2491**. Ontology prefers that R3 fix both call sites in one PR off master if the owner picks option 2. Its conditions: the gate's decision is unchanged apart from seeing the pair; an unreadable tenant stays Unverified, never NotLinked; real-store parse tests (NotLinked with a grant → one email (173); Linked → Unverified; tenant unreadable → Unverified); AssignTaskRecipientGatePlaneTests stay green. Ontology reviews its file in the PR, then re-checks on dev with Tony Howe (grant on CMRCL-479772). NEXT: the owner's choice. |
-| **072 email copy (owner)** | Draft in notes/task-036-notes.md "Email copy" + "Updated email copy". Three choices: name the granter (currently yes), record name in the subject (yes), state the access level (no). Approval closes 072. |
-| **Dev state** | BFF: uac-r2 is deploying master **b083d62183** (owner go in UAC's session; R3 OK'd; includes field-mapping #2486, whose analysistool re-seed field-mapping runs in its own session after UAC's after-notice). Before that: `9f4e3820b2` (UAC, 2026-10-30 19:22:50Z; SecureRoot/SecureChild write switches on since 19:45/19:53Z, 28 roots re-owned). SPA: **b083d62183** since 2026-10-31 19:12:41Z (run 41233021759; rollback tag `external-spa-dev-rollback-96f1f6b675`); ebilling was told it can re-run its 015 -WhatIf. Grids: six dev grid configs carry the owner's columns; number and type columns 200px since 2026-10-31 14:13Z (rollback: scratchpad `grid-before3\`, also in task-002-notes). |
+| **Dev state** | BFF: **d0c1c5dc3c** per uac-r2 (ebilling's attestation 2026-11-01; R3 had OK'd it; await UAC's after-notice/gate). ebilling 015 ran on dev 2026-11-01 03:14:51Z: `sprk_invoicestatus` column + option set deleted (R3 no objection). Earlier: b083d62183 (UAC 2026-10-31 19:52:25Z, gate passed), then `9f4e3820b2` (UAC, 2026-10-30 19:22:50Z; SecureRoot/SecureChild write switches on since 19:45/19:53Z, 28 roots re-owned). SPA: **b083d62183** since 2026-10-31 19:12:41Z (run 41233021759; rollback tag `external-spa-dev-rollback-96f1f6b675`); ebilling was told it can re-run its 015 -WhatIf. Grids: six dev grid configs carry the owner's columns; number and type columns 200px since 2026-10-31 14:13Z (rollback: scratchpad `grid-before3\`, also in task-002-notes). |
 
 ### Uncommitted
 - Owner's, never commit or discard: `.claude/agent-memory/researcher/**`.
@@ -25,7 +25,6 @@
 ---
 
 ## Open owner items
-- 079 option choice (above). 072 email copy (above).
 - The Teams admin items were explained 2026-10-31; owner action only: activate the admin role (INVALID_PRIVILEGE); reject the duplicate Blocked/Submitted app.
 - Workforce contact 2026-10-29 16:51:12Z: owner decided to keep it.
 
