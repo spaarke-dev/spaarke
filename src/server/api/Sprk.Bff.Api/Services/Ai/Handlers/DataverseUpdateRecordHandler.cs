@@ -239,6 +239,16 @@ public sealed partial class DataverseUpdateRecordHandler : IToolHandler
                         _logger, tablename, recordId, droppedIndex, applied: null, correlationId: context.DecisionId.ToString("N"));
                     if (item.ValueKind == JsonValueKind.Object && !item.EnumerateObject().Any())
                     {
+                        // Round 2 (S1): no PATCH is sent, so the row is read as the caller first — a missing or unreadable row
+                        // gets the tool error a normal update of that id gets, never "nothing to update".
+                        var rowRead = await _dataverse.GetAsync(
+                            $"{entitySetName}({recordId:D})" + (primaryIdAttribute is null ? string.Empty : $"?$select={primaryIdAttribute}"),
+                            cancellationToken).ConfigureAwait(false);
+                        if (!rowRead.IsSuccess)
+                        {
+                            return LogOutcome(context, tablename, recordId, MapClientError(tool, rowRead, startedAt), stopwatch);
+                        }
+
                         return LogOutcome(context, tablename, recordId, NothingToWrite(tool, tablename, recordId, startedAt), stopwatch);
                     }
                 }

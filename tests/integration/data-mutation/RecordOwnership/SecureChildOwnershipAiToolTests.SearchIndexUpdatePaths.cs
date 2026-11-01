@@ -190,6 +190,44 @@ public sealed partial class SecureChildOwnershipAiToolTests
         log.Messages.Where(m => m.Contains("client_search_index_dropped")).Should().HaveCount(1);
     }
 
+    /// <summary>
+    /// Round 2 (S1): an index-only item sends no PATCH, so the handler reads the row as the caller first. A missing row gets the
+    /// error a one-column update of that id gets (master's: Dataverse's 404, its code and text, passed through the tool error),
+    /// never "nothing to update".
+    /// </summary>
+    [Fact]
+    public async Task ChatUpdate_AnIndexOnlyItem_AgainstAMissingRecord_GivesTheSameErrorAsAOneColumnUpdate()
+    {
+        _user.MissingRows.Add(UpdatedRow);
+        var log = new CapturingLog<DataverseUpdateRecordHandler>();
+
+        var oneColumn = await ChatUpdate("sprk_event", log, ("sprk_description", Text("Corrected")));
+        var indexOnly = await ChatUpdate("sprk_event", log, Lookup("sprk_ai_search_index", "sprk_aisearchindex", ClientsIndex));
+
+        oneColumn.Success.Should().BeFalse();
+        oneColumn.ErrorMessage.Should().Be("Record does not exist.", "master's answer for a missing row is Dataverse's own 404");
+        indexOnly.Success.Should().BeFalse("the row does not exist, so there is nothing to leave as it is");
+        (indexOnly.ErrorCode, indexOnly.ErrorMessage).Should().Be((oneColumn.ErrorCode, oneColumn.ErrorMessage));
+        _user.Patches.Should().BeEmpty();
+    }
+
+    /// <summary>Round 2 (S1): a row the caller cannot read is Dataverse's refusal too, not "nothing to update".</summary>
+    [Fact]
+    public async Task ChatUpdate_AnIndexOnlyItem_AgainstARecordTheCallerCannotRead_GivesDataversesRefusal()
+    {
+        _user.GetOverride = path => path.StartsWith("sprk_events(", StringComparison.Ordinal)
+            ? Sprk.Bff.Api.Infrastructure.Dataverse.DataverseUserResponse.Fail(
+                403, Sprk.Bff.Api.Infrastructure.Dataverse.DataverseUserClientErrorCodes.AccessDenied, "Principal lacks read access.")
+            : null;
+
+        var result = await ChatUpdate("sprk_event", new CapturingLog<DataverseUpdateRecordHandler>(),
+            Lookup("sprk_ai_search_index", "sprk_aisearchindex", ClientsIndex));
+
+        result.Success.Should().BeFalse();
+        result.ErrorMessage.Should().Be("Principal lacks read access.");
+        _user.Patches.Should().BeEmpty();
+    }
+
     /// <summary>Review R2 control: an item that was empty BEFORE any drop keeps the mapper's empty-update refusal.</summary>
     [Theory]
     [InlineData("sprk_event")]

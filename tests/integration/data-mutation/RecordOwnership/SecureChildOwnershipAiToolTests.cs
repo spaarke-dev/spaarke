@@ -994,6 +994,9 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
         /// <summary>Task 147 r1: records that do not exist — RetrievePrincipalAccess on one fails (404).</summary>
         public HashSet<Guid> Missing { get; } = new();
 
+        /// <summary>Round 2 (S1): rows that do not exist — a GET or PATCH of the row itself answers 404 (RetrievePrincipalAccess keeps <see cref="Missing"/>).</summary>
+        public HashSet<Guid> MissingRows { get; } = new();
+
         /// <summary>
         /// Per TABLE (entity set, id): a record the caller may not append to, where another table's record with the same id
         /// is untouched — a contact whose id was chosen equal to a matter's (a client may choose a new row's id).
@@ -1141,6 +1144,9 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
         {
             if (GetOverride?.Invoke(path) is { } overridden)
                 return overridden;
+
+            if (MissingRow(path) is { } absent)
+                return absent;
 
             if (path == "WhoAmI()")
                 return Ok(new { UserId = me });
@@ -1337,6 +1343,8 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
 
         public Task<DataverseUserResponse> PatchAsync(string relativePath, string jsonBody, CancellationToken cancellationToken)
         {
+            if (MissingRow(Uri.UnescapeDataString(relativePath)) is { } absent)
+                return Task.FromResult(absent);
             if (PatchStatus >= 400)
                 return Task.FromResult(DataverseUserResponse.Fail(PatchStatus, DataverseUserClientErrorCodes.AccessDenied, "Denied."));
             if (RefuseUndeclared(relativePath, jsonBody) is { } refused)
@@ -1348,6 +1356,11 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
             OnPatch?.Invoke(relativePath, jsonBody);
             return Task.FromResult(DataverseUserResponse.Ok(204, null));
         }
+
+        private DataverseUserResponse? MissingRow(string path) =>
+            !path.Contains("RetrievePrincipalAccess", StringComparison.Ordinal) && MissingRows.Any(id => path.Contains($"({id:D})", StringComparison.Ordinal))
+                ? DataverseUserResponse.Fail(404, DataverseUserClientErrorCodes.NotFound, "Record does not exist.")
+                : null;
 
         public Task<DataverseUserResponse> DeleteAsync(string relativePath, CancellationToken cancellationToken) =>
             throw new NotSupportedException();
