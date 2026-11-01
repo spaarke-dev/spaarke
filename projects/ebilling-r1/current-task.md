@@ -15,6 +15,7 @@
 - 192 filedUnder approved; 191 reader preflight approved; dev reader setting, 049 seed, resubmissionof field security, 015 delete: all done on dev.
 
 ## Dev state
+- **Hold:** uac-r2 is moving the dev users and both BFF application users into BU1 (owner-approved). Hold the 151c schema runs until uac-r2 sends "move done", or agree a time with them first. After "move done", run the -Verify scripts: `Set-EbillingFindingsJsonFieldSecurity`, `Set-EbillingFirmReasonFieldSecurity`, `Set-EbillingResubmissionOfFieldSecurity`, and `Seed-BillingSystemPolicy -Verify -RequireRows -CustomerBusinessUnit 'Spaarke Business Unit 1'`.
 - BFF fcf01480f4 (R3, 14:03Z), our six keys intact. The ApExport code page and the 151b ribbons/views are NOT deployed.
 
 ## Peer state
