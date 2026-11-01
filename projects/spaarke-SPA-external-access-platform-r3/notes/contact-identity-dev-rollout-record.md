@@ -117,3 +117,17 @@
 - External effect (uac-r2 live read ~03:20Z): none of the 7 matters is secure, and there are 0 No Access rows on the 7 projects or 7 matters, so the three projects with active grants (PRJT.10008.01, PRJT.10006.01, PRJ-000038) are unchanged for partners. PRJT.10001.01 inherits Restricted from REAL-2026-123456.02; it has no active project grants, so no grantee loses it (uac-r2 reports it to the owner).
 - ebilling 015 ran at 03:14:51Z (R3 no objection): `sprk_invoice.sprk_invoicestatus` and its option set were deleted on dev. 20 `Sql Number: 207` faults on `SecureChildReconciler` descendant reads fell inside that delete window (03:14:36Z → 03:15:18Z); none since.
 - uac-r2 gate, 03:09:00Z → ~03:31Z: PASS. 41 requests; the 4 non-2xx are anonymous 401s; 0 5xx, 0 [OWNERSHIP-REFUSED]; ownership passes refused 0, failed 0, converged since 03:28Z. **External routes again had no traffic.** The dev SPA stays `b083d62183`.
+
+## 13. Dev BFF `fcf01480f4` (2026-11-01, deployed by R3)
+
+- Content: master after PR #2500 (R3 task 079: #2458 + #2491). The src/server delta from `d0c1c5dc3c` is 3 files: `GrantAccessNotifier.cs`, `ContactIdentityStore.cs` and `AssignTaskRecipientGate.cs`. The build contains #2450, ebilling 015 (no non-comment `sprk_invoicestatus`) and ontology 077 (283466d40).
+- Go: the owner in R3's session ("go BFF deploy of fcf01480f4"). OKs: uac-r2, ontology, word-add-in, field-mapping (no re-seed needed) and ebilling; provisioning standing. Router green on #2500.
+- Pre-deploy checks:
+  - The two write switches (`SecureRoot__Inheritance__RootOwnerWritesEnabled`, `SecureChild__Reconciliation__OrdinaryMovesWritesEnabled`) are present and `true`, as they have been since §10. The §9-era "no such setting" check no longer applies.
+  - ebilling's `Set-ChildRecordCreatorPersonSchema.ps1 -Verify` exited 0 (272 OK).
+  - phaseA: live `d0c1c5dc3c`, healthz 200. Rollback snapshot `deploy/rollback/wwwroot-20261101T140218Z` (197 files).
+- Deploy: `scripts/Deploy-BffApi.ps1 -Environment dev`, run from a detached worktree at `fcf01480f4`. Package 39.09 MB. Received at 14:03:20Z. The 4 critical files match by SHA-256; health and CORS checks passed.
+- Readback at 14:04:42Z: ProductVersion `+fcf01480f4…`; /healthz 200, /healthz/dataverse 200, anonymous /api/me 401. 225 app settings, unchanged. ebilling's six keys are present.
+- `sprk_externaltenantid` is field-secured (`IsSecured` true). Both BFF app users (5967251e…, 1e40baad…) are members of "Spaarke Identity Link Writers" (canread 4), so the new by-id home-tenant read can see the column.
+- Rollback: redeploy `d0c1c5dc3c`, or restore the snapshot above.
+- Next: uac-r2's 30-minute gate (external split). Ontology's CMRCL-479772 re-check with Tony Howe; the owner runs it. Expected: one email from the system mailbox, no bell, no wizard warning.
