@@ -109,3 +109,11 @@
 - The dev SPA is the same SHA since 19:12:41Z (R3, owner go).
 - uac-r2 gate, 19:52:25Z → ~20:12Z: PASS. 23 requests, 0 failed, 0 5xx, 0 [OWNERSHIP-REFUSED]; the reconciler wrote nothing. **External routes again had no traffic.** Only the old warnings remain (SECURE-CENSUS, #2163). uac-r2 has no further deploy planned until its task 195 merges; it will send the SHA first.
 - 2026-10-31: R3 OK'd uac-r2's next dev BFF candidate **d0c1c5dc3c** (task 195 #2496, project filing; owner go in uac-r2's session). Its src/server delta from b083d62183 is 5 files and touches no external endpoint. Non-BFF changes in the same window: the wizard web resource, two code pages, a ribbon import, and a backfill filing 7 projects under their matter (3 change BU). R3 asked uac-r2 to list any external grants on those projects or their matters.
+
+## 12. Dev BFF `d0c1c5dc3c` (2026-11-01, deployed by uac-r2)
+
+- Owner go in uac-r2's session; R3 OK for this SHA (§11). Deploy started at 02:56:14Z; the app started on the new build at 03:09:00Z (one platform deploy-status timeout, recovered automatically). The 4 critical hashes match, healthz is 200 and settings are intact. The 02:55:00Z restart was ebilling's setting change.
+- Same window: wizard web resources (03:12Z), the Project ↔ Matter subgrid ribbon (~03:27Z, matter and project only), and the backfill (03:14:07Z → 03:14:58Z) filing 7 projects under their matter, with the 3 planned unit moves.
+- External effect (uac-r2 live read ~03:20Z): none of the 7 matters is secure, and there are 0 No Access rows on the 7 projects or 7 matters, so the three projects with active grants (PRJT.10008.01, PRJT.10006.01, PRJ-000038) are unchanged for partners. PRJT.10001.01 inherits Restricted from REAL-2026-123456.02; it has no active project grants, so no grantee loses it (uac-r2 reports it to the owner).
+- ebilling 015 ran at 03:14:51Z (R3 no objection): `sprk_invoice.sprk_invoicestatus` and its option set were deleted on dev. 20 `Sql Number: 207` faults on `SecureChildReconciler` descendant reads fell inside that delete window (03:14:36Z → 03:15:18Z); none since.
+- uac-r2 gate, 03:09:00Z → ~03:31Z: PASS. 41 requests; the 4 non-2xx are anonymous 401s; 0 5xx, 0 [OWNERSHIP-REFUSED]; ownership passes refused 0, failed 0, converged since 03:28Z. **External routes again had no traffic.** The dev SPA stays `b083d62183`.
