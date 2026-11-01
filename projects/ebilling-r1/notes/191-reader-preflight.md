@@ -50,7 +50,7 @@ New surface: one error-code constant and one check. No new endpoint, service or 
 
 ## BFF §10
 
-Placement: `Services/Finance/Submission` beside the intake it extends; in-request work; no background work, package, endpoint or DI registration. One added constructor dependency on an existing singleton options registration. Publish-size delta and the CVE check: see the task report.
+Placement: `Services/Finance/Submission` beside the intake it extends; in-request work; no background work, package, endpoint or DI registration. One added constructor dependency on an existing singleton options registration. Publish size, 2026-10-31, measured as `azure-deployment.md` prescribes: fresh `git archive` exports at short paths (`C:\w191b` branch @ `fdd3c79b7f`, `C:\w191m` `origin/master` @ `081f6f0a7e`), `dotnet publish -c Release -r linux-x64 --self-contained false`, PDBs included, `Compress-Archive -CompressionLevel Optimal` over `deploy/api-publish/*`. Master 39.08 MB (40,980,978 bytes), branch 39.19 MB (41,093,123 bytes), delta +0.11 MB, 192 files on both sides. The delta is branch against master, so it includes everything `work/ebilling-r1` holds beyond master; this task adds one constant, one method pair and two small branches, with no package or file added. `dotnet list package --vulnerable --include-transitive` on `Sprk.Bff.Api`: no vulnerable packages. Folders deleted.
 
 ## Tests
 
