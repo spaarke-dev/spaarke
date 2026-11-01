@@ -186,6 +186,11 @@ internal sealed class UpdateRecordActionCore
                 droppedIndex);
             RecordTableRules.LogSearchIndexDropped(
                 _logger, input.EntityLogicalName.Trim().ToLowerInvariant(), input.RecordId, droppedIndex, applied: null);
+
+            // Round 2 (S5): nothing is left to write, so no write is asked of Dataverse (not even an empty one) and none of the
+            // reads or after-write steps run. A payload that was empty before the drop is not affected.
+            if (droppedIndex.Count > 0 && updatePayload.Count == 0)
+                return [];
         }
 
         // unified-access-control-r2 task 189 fix round C (K5): a payload that is not a confirmed proposal written AS its

@@ -79,6 +79,20 @@ public sealed class SearchIndexGenericUpdatePathTests
             && m.Contains("origin=mapping") && m.Contains("unchanged"));
     }
 
+    /// <summary>Round 2 (S5): a mapping left with only the index writes nothing: the writer is never asked for an empty update.</summary>
+    [Theory]
+    [MemberData(nameof(IndexedTables))]
+    public async Task DataverseUpdateHandler_AnOutputMappingNamingOnlyTheSearchIndex_AsksForNoWrite(string table)
+    {
+        var log = new CapturingLog<DataverseUpdateHandler>();
+        var fields = new Dictionary<string, object?> { [NameColumn] = "client-index", [LookupColumn] = new EntityReference("sprk_aisearchindex", Index) };
+
+        await Handler(log).UpdateAsync(table, Row, fields, ConcurrencyMode.None, maxRetries: 1, CancellationToken.None);
+
+        Written().Should().BeEmpty("nothing is left to write, so no write (not even an empty one) is asked of Dataverse");
+        Drops(log.Messages).Should().HaveCount(2);
+    }
+
     [Fact]
     public async Task DataverseUpdateHandler_ATableThatIsNotSearchIndexed_KeepsAColumnOfThatName()
     {
@@ -131,6 +145,27 @@ public sealed class SearchIndexGenericUpdatePathTests
         written.Should().ContainKey("sprk_description");
         NoIndexColumn(written);
         Drops(log.Messages).Should().HaveCount(2).And.OnlyContain(m => m.Contains($"table={table}") && m.Contains(origin) && m.Contains("unchanged"));
+    }
+
+    /// <summary>Round 2 (S5): a node or proposal left with only the index writes nothing: the writer is never asked for an empty update.</summary>
+    [Theory]
+    [InlineData("sprk_event", false)]
+    [InlineData("sprk_matter", false)]
+    [InlineData("sprk_event", true)]
+    public async Task UpdateRecordActionCore_AnUpdateNamingOnlyTheSearchIndex_AsksForNoWrite(string table, bool confirmedProposal)
+    {
+        var log = new CapturingLog<UpdateRecordActionCore>();
+
+        await Core(log).UpdateAsync(
+            new UpdateRecordActionInput(table, Row, FieldMappings: null,
+                LegacyFields: new Dictionary<string, string?> { [NameColumn] = "client-index" },
+                Lookups: [new RenderedLookup(LookupColumn, "sprk_aisearchindex", Index.ToString())],
+                ImpersonateSystemUserId: confirmedProposal ? Caller : null,
+                PayloadSource: confirmedProposal ? UpdateRecordPayloadSource.ConfirmedProposal : UpdateRecordPayloadSource.Configuration),
+            CancellationToken.None);
+
+        Written().Should().BeEmpty("nothing is left to write, so no write (not even an empty one) is asked of Dataverse");
+        Drops(log.Messages).Should().HaveCount(2);
     }
 
     [Fact]
@@ -193,6 +228,28 @@ public sealed class SearchIndexGenericUpdatePathTests
         results.Where(r => r.TargetField is NameColumn or LookupColumn).Should().OnlyContain(r => r.Status == FieldMappingStatus.Skipped);
         Drops(log.Messages).Should().HaveCount(2).And.OnlyContain(m => m.Contains($"table={table}") && m.Contains($"record={Row}")
             && m.Contains("origin=mapping") && m.Contains("unchanged"));
+    }
+
+    /// <summary>Round 2 (S5): a push whose only rules aim at the index asks for no write (the push already writes only a non-empty payload).</summary>
+    [Fact]
+    public async Task FieldMappingPush_RulesAimedOnlyAtTheSearchIndex_AskForNoWrite()
+    {
+        var world = new StampWorld().Row("sprk_event", Row, [("sprk_regardingmatter", "sprk_matter", Matter)]);
+
+        var (_, failed, _, errors, results) = await FieldMappingEndpoints.ApplyMappingsToChildRecordsAsync(
+            _writes.Object, world.Restamper, [TextRule("sprk_indexname", NameColumn), IndexLookupRule],
+            new Dictionary<string, object?> { ["sprk_indexname"] = "source-index", ["sprk_sourceindex"] = Index },
+            "sprk_event", [Row], Caller, new CapturingLog<object>(), CancellationToken.None,
+            lookupBinds: new Dictionary<FieldMappingRuleDto, LookupBindPlan>
+            {
+                [IndexLookupRule] = new("sprk_AI_Search_Index@odata.bind", $"/sprk_aisearchindexes({Index:D})", null),
+            },
+            appOnlyEntities: new Mock<IGenericEntityService>(MockBehavior.Strict).Object);
+
+        failed.Should().Be(0);
+        errors.Should().BeEmpty();
+        Written().Should().BeEmpty();
+        results.Should().OnlyContain(r => r.Status == FieldMappingStatus.Skipped);
     }
 
     [Fact]
