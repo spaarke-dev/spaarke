@@ -1170,7 +1170,7 @@ public sealed class InvoiceCorrectionReevaluation
     private static bool IsCoded(JsonObject? extraction) =>
         extraction?["coding"] is JsonObject coding && Text(coding, "codeSetId") is { Length: > 0 };
 
-    /// <summary>One <c>rule</c> entry: close the open Signal of <c>closeFingerprint</c> (unless it equals <c>raiseFingerprint</c>: a refresh), then write the plan entry of <c>raiseFingerprint</c>.</summary>
+    /// <summary>One <c>rule</c> entry: no raise → close the latest open episode (ConditionCleared); a raise → write the plan entry of <c>raiseFingerprint</c>, which the lifecycle refreshes (same fingerprint) or supersedes (another). A raise with no matching plan entry closes the old episode instead.</summary>
     private async Task ReconcileRuleAsync(
         CorrectionApplied applied, JsonObject root, JsonObject change, List<(SignalWriteRequest, string)> refused, CancellationToken ct)
     {
@@ -1183,12 +1183,13 @@ public sealed class InvoiceCorrectionReevaluation
 
         var close = Text(change, "closeFingerprint");
         var raise = Text(change, "raiseFingerprint");
-        if (close is not null && !string.Equals(close, raise, StringComparison.Ordinal))
+        if (close is not null && raise is null)
         {
             // Raise null: the group is gone, so the latest open episode is closed whatever its fingerprint. A member that survived a failed clear can
             // read close fp0 / raise null while the open episode already carries fp1 (a repeat wrote it); matching fp0 would leave that episode open.
-            // Raise set: the close is of the stored fingerprint only, the raise below then writes the next episode.
-            await CloseClearedAsync(policyCode, entity, subjectId, raise is null ? null : close, ct).ConfigureAwait(false);
+            // Raise set (fp0 -> fp1 while it still fires): nothing is cleared here; the lifecycle write below supersedes the open fp0 episode and opens
+            // the next, as SignalEpisodeLifecycle and the system path do (#2507 F1).
+            await CloseClearedAsync(policyCode, entity, subjectId, fingerprint: null, ct).ConfigureAwait(false);
         }
 
         if (raise is null)
@@ -1204,6 +1205,13 @@ public sealed class InvoiceCorrectionReevaluation
             // By construction the plan holds the entry B2b-1 recorded; anything else is not raised (nothing to raise it from).
             _logger.LogWarning("Correction of {Field} on invoice {InvoiceId}: no plan entry of policy {PolicyCode} on {Subject} {SubjectId} matches the change; not raised.",
                 applied.Field, applied.InvoiceId, policyCode, entity, subjectId);
+
+            // Nothing will supersede the old episode, so it is closed here (of the stored fingerprint only).
+            if (close is not null && !string.Equals(close, raise, StringComparison.Ordinal))
+            {
+                await CloseClearedAsync(policyCode, entity, subjectId, close, ct).ConfigureAwait(false);
+            }
+
             return;
         }
 
