@@ -3,15 +3,18 @@ using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.RecordCreation;
 using Xunit;
 using Directory = Sprk.Bff.Api.Tests.TestInfrastructure.OwnershipDirectory;
+using UnifiedCreateRequest = Sprk.Bff.Api.Services.RecordCreation.RecordCreationRequest;
 
 namespace Sprk.Bff.Api.Tests.Integration.DataMutation.RecordOwnership;
 
 /// <summary>
-/// field-mapping-server-write-path-r1 task 015 (spec FR-10, write-path invariant I-5) — step 8 of the unified create: on a
-/// table the rules registry marks search-indexed (matter, project, document), the OWNING business unit's
-/// <c>sprk_searchindexname</c> and <c>sprk_ai_search_index</c>, each filled only when the row carries no value for it; an
-/// explicit value wins; a table not marked search-indexed is untouched; a unit that cannot be read fills nothing and says
-/// so, and the create stands.
+/// field-mapping-server-write-path-r1 task 015 (spec FR-10, write-path invariant I-5) and task 039 (FR-38, #2399) — step 8 of
+/// the unified create: on a table the rules registry marks search-indexed (matter, project, document, work assignment, event,
+/// invoice), step 8 is the ONLY writer of the OWNING business unit's <c>sprk_searchindexname</c> and
+/// <c>sprk_ai_search_index</c>: whatever a client sent for either column is dropped (never refused, never asked AppendTo,
+/// logged as <c>client_search_index_dropped</c> when it differs), and the final owning team's unit supplies its two values or
+/// nothing; a table not marked search-indexed is untouched; a unit that cannot be read fills nothing and says so, and the
+/// create stands.
 /// </summary>
 /// <remarks>
 /// The caller sits in the GENERAL business unit and the ordinary matter in the CHILD one, each unit with its own defaults,
@@ -38,6 +41,71 @@ public sealed class SearchIndexDefaultTests
     }
 
     public static TheoryData<string> SearchIndexedTables => new() { "sprk_matter", "sprk_project", "sprk_document" };
+
+    /// <summary>The six search-indexed tables (task 039: work assignment, event and invoice joined matter, project, document).</summary>
+    public static TheoryData<string> AllSearchIndexedTables => new()
+    {
+        "sprk_matter", "sprk_project", "sprk_document", "sprk_workassignment", "sprk_event", "sprk_invoice",
+    };
+
+    private static readonly Guid UserBusinessUnitIndex = GeneralIndex;
+
+    /// <summary>
+    /// A minimal create of <paramref name="table"/> carrying the client's own search index (both columns), as a server-built
+    /// mapped item. The matter and the project file under nothing (the caller's general unit owns them); the other four are
+    /// filed under the ordinary matter, so the child unit's team owns them.
+    /// </summary>
+    private static (UnifiedCreateRequest Request, Guid ExpectedBusinessUnit) WithClientIndex(
+        string table, Guid clientIndex, string? clientName, string bindKey = LookupBind)
+    {
+        var body = new Dictionary<string, object?>();
+        var lookups = new List<DataverseWriteItemMapper.MappedLookup>();
+        var filed = true;
+        switch (table)
+        {
+            case "sprk_matter":
+                body["sprk_mattername"] = "Acme v. Widget";
+                filed = false;
+                break;
+            case "sprk_project":
+                body["sprk_projectname"] = "Phase 2";
+                filed = false;
+                break;
+            case "sprk_document":
+                body["sprk_documentname"] = "Lease.docx";
+                body["sprk_Matter@odata.bind"] = $"/sprk_matters({CreateWorld.OrdinaryMatter:D})";
+                lookups.Add(new("sprk_matter", "sprk_matter", "sprk_matters", CreateWorld.OrdinaryMatter));
+                break;
+            case "sprk_workassignment":
+                body["sprk_name"] = "Review the lease";
+                body["sprk_RegardingMatter@odata.bind"] = $"/sprk_matters({CreateWorld.OrdinaryMatter:D})";
+                lookups.Add(new("sprk_regardingmatter", "sprk_matter", "sprk_matters", CreateWorld.OrdinaryMatter));
+                break;
+            case "sprk_event":
+                body["sprk_eventname"] = "Hearing";
+                body["sprk_RegardingMatter@odata.bind"] = $"/sprk_matters({CreateWorld.OrdinaryMatter:D})";
+                lookups.Add(new("sprk_regardingmatter", "sprk_matter", "sprk_matters", CreateWorld.OrdinaryMatter));
+                break;
+            default:
+                body["sprk_name"] = "INV-1";
+                body["sprk_Matter@odata.bind"] = $"/sprk_matters({CreateWorld.OrdinaryMatter:D})";
+                lookups.Add(new("sprk_matter", "sprk_matter", "sprk_matters", CreateWorld.OrdinaryMatter));
+                break;
+        }
+
+        if (clientName is not null)
+            body[NameColumn] = clientName;
+        if (clientIndex != Guid.Empty)
+        {
+            body[bindKey] = $"/sprk_aisearchindexes({clientIndex:D})";
+            lookups.Add(new("sprk_ai_search_index", "sprk_aisearchindex", "sprk_aisearchindexes", clientIndex));
+        }
+
+        return (CreateWorld.Mapped(table, body, [.. lookups]), filed ? Directory.ChildBu : Directory.GeneralBu);
+    }
+
+    private static (string Name, Guid Index) DefaultsOf(Guid businessUnit) =>
+        businessUnit == Directory.ChildBu ? (ChildIndexName, ChildIndex) : (GeneralIndexName, GeneralIndex);
 
     // =====================================================================================
     // Unset → the owning business unit's default
@@ -78,35 +146,218 @@ public sealed class SearchIndexDefaultTests
     // the provisioning fixture's plan, which this world does not carry).
 
     // =====================================================================================
-    // Explicit → kept (fill-only)
+    // Task 039 (FR-38, #2399): whatever the client sent for either column is dropped; step 8 writes the owning unit's
     // =====================================================================================
 
     [Theory]
-    [MemberData(nameof(SearchIndexedTables))]
-    public async Task AnExplicitSearchIndex_IsKept_OnEverySearchIndexedTable(string table)
+    [MemberData(nameof(AllSearchIndexedTables))]
+    public async Task AClientsSearchIndex_IsDropped_AndTheOwningUnitsIsWritten_OnEverySearchIndexedTable(string table)
     {
-        var fields = await CreatedFieldsAsync(CreateWorld.Mapped(table,
-            new Dictionary<string, object?>
-            {
-                [NameColumn] = "explicit-index",
-                [LookupBind] = $"/sprk_aisearchindexes({ExplicitIndex:D})",
-            },
-            new DataverseWriteItemMapper.MappedLookup("sprk_ai_search_index", "sprk_aisearchindex", "sprk_aisearchindexes", ExplicitIndex)));
+        var (request, unit) = WithClientIndex(table, ExplicitIndex, "explicit-index");
 
-        Text(fields, NameColumn).Should().Be("explicit-index");
-        Text(fields, LookupBind).Should().Be($"/sprk_aisearchindexes({ExplicitIndex:D})");
-        _world.BusinessUnitReads.Should().BeEmpty("both values were supplied, so nothing is read");
+        var fields = await CreatedFieldsAsync(request);
+
+        var (name, index) = DefaultsOf(unit);
+        Text(fields, NameColumn).Should().Be(name, "the client's name is dropped; the owning unit's is written");
+        Text(fields, LookupBind).Should().Be($"/sprk_aisearchindexes({index:D})", "the client's index is dropped; the owning unit's is written");
+        fields.Keys.Where(k => k.StartsWith("sprk_ai_search_index", StringComparison.OrdinalIgnoreCase)).Should().ContainSingle(
+            "the body carries the server's bind only, never the client's spelling of it").Which.Should().Be(LookupBind);
+    }
+
+    /// <summary>The drop, proved where the overwrite cannot hide it: the owning unit has no index, so nothing replaces the client's.</summary>
+    [Theory]
+    [MemberData(nameof(AllSearchIndexedTables))]
+    public async Task AClientsSearchIndex_IsNeverPassedOn_WhenTheOwningUnitHasNone(string table)
+    {
+        _world.SearchIndexDefaults.Clear();
+        var (request, _) = WithClientIndex(table, ExplicitIndex, "explicit-index");
+
+        var fields = await CreatedFieldsAsync(request);
+
+        fields.Should().NotContainKey(NameColumn);
+        fields.Keys.Should().NotContain(k => k.StartsWith("sprk_ai_search_index", StringComparison.OrdinalIgnoreCase));
+        _world.Log.Messages.Should().Contain(m => m.Contains("search_index_unset_for_owner_bu"));
+    }
+
+    [Theory]
+    [MemberData(nameof(AllSearchIndexedTables))]
+    public async Task AClientsSearchIndex_InTheLowerCaseSpelling_IsDroppedToo_AndTheBodyHasOneBindKey(string table)
+    {
+        var (request, unit) = WithClientIndex(table, ExplicitIndex, clientName: null, bindKey: "sprk_ai_search_index@odata.bind");
+
+        var fields = await CreatedFieldsAsync(request);
+
+        fields.Keys.Where(k => string.Equals(k, LookupBind, StringComparison.OrdinalIgnoreCase)).Should().ContainSingle()
+            .Which.Should().Be(LookupBind);
+        Text(fields, LookupBind).Should().Be($"/sprk_aisearchindexes({DefaultsOf(unit).Index:D})");
     }
 
     [Theory]
     [MemberData(nameof(SearchIndexedTables))]
-    public async Task AnExplicitName_IsKept_AndOnlyTheUnsetLookupIsFilled(string table)
+    public async Task AnExplicitName_IsDropped_AndTheOwningUnitsNameAndIndexAreWritten(string table)
     {
         var fields = await CreatedFieldsAsync(CreateWorld.Mapped(table,
             new Dictionary<string, object?> { [NameColumn] = "explicit-index" }));
 
-        Text(fields, NameColumn).Should().Be("explicit-index");
-        Text(fields, LookupBind).Should().Be($"/sprk_aisearchindexes({GeneralIndex:D})", "the unset lookup takes the owning unit's");
+        Text(fields, NameColumn).Should().Be(GeneralIndexName, "the name column is the server's too (the legacy text column)");
+        Text(fields, LookupBind).Should().Be($"/sprk_aisearchindexes({GeneralIndex:D})");
+    }
+
+    [Fact]
+    public async Task TheClientsNameAlone_IsReplacedByTheOwningUnitsName_OrByNothing_WhenTheUnitHasNone()
+    {
+        var (request, _) = WithClientIndex("sprk_workassignment", Guid.Empty, "client-name");
+        var named = await CreatedFieldsAsync(request);
+        Text(named, NameColumn).Should().Be(ChildIndexName);
+
+        _world.Creates.Clear();
+        _world.SearchIndexDefaults[Directory.ChildBu] = (null, ChildIndex);
+        var (again, _) = WithClientIndex("sprk_workassignment", Guid.Empty, "client-name");
+        var unnamed = await CreatedFieldsAsync(again);
+        unnamed.Should().NotContainKey(NameColumn, "the unit has no name, so none is sent (never the client's)");
+        Text(unnamed, LookupBind).Should().Be($"/sprk_aisearchindexes({ChildIndex:D})");
+    }
+
+    /// <summary>
+    /// The #2399 repro: a work assignment created by a caller of the GENERAL unit under a matter owned by the CHILD unit, the
+    /// client binding the user's own unit's index, a catalog row the caller cannot AppendTo. It used to be refused (the caller
+    /// has no AppendTo on the row); the bind is dropped before the caller's checks, so no AppendTo is asked on the catalog and the
+    /// row takes the final owning unit's index.
+    /// </summary>
+    [Fact]
+    public async Task Issue2399_AWorkAssignmentBindingTheUsersUnitIndexTheCallerCannotAppendTo_IsNotRefused_AndAsksNoAppendToOnTheCatalog()
+    {
+        _world.Caller.NoAppendToIn.Add(("sprk_aisearchindexes", UserBusinessUnitIndex));
+        var asked = new List<string>();
+        _world.Caller.GetOverride = path =>
+        {
+            if (path.Contains("sprk_aisearchindexes(", StringComparison.Ordinal))
+                asked.Add(path);
+            return null;
+        };
+        var (request, _) = WithClientIndex("sprk_workassignment", UserBusinessUnitIndex, GeneralIndexName);
+
+        var outcome = await _world.CreateAsync(request);
+
+        outcome.Succeeded.Should().BeTrue(outcome.Refusal?.Detail);
+        outcome.Warnings.Should().BeEmpty();
+        asked.Should().BeEmpty("the bind is dropped before step 5, so AppendTo is never asked on a catalog row (#2399)");
+        var fields = _world.Creates.Should().ContainSingle().Subject.Fields;
+        CreateWorld.Owner(fields).Should().Be(Directory.ChildTeam);
+        Text(fields, LookupBind).Should().Be($"/sprk_aisearchindexes({ChildIndex:D})", "the final owning unit's index, not the user's");
+        Text(fields, NameColumn).Should().Be(ChildIndexName);
+    }
+
+    [Fact]
+    public async Task AClientsSearchIndex_IsNotRefused_EvenWhenTheCatalogRowDoesNotExistForTheCaller()
+    {
+        _world.Caller.Missing.Add(ExplicitIndex);
+        var (request, _) = WithClientIndex("sprk_event", ExplicitIndex, "explicit-index");
+
+        var outcome = await _world.CreateAsync(request);
+
+        outcome.Succeeded.Should().BeTrue("a dropped value is never a refusal (step 2's blocked-column refusal does not fire)");
+        outcome.MappingWarnings.Should().BeEmpty();
+    }
+
+    // =====================================================================================
+    // Step 8 uses the FINAL owning team's unit: the Secure team's, and nothing when that unit has no index
+    // =====================================================================================
+
+    [Fact]
+    public async Task AnEventUnderASecureMatter_TakesTheSecureTeamsBusinessUnitsIndex()
+    {
+        _world.SearchIndexDefaults[Directory.SecureBu] = ("spaarke-secure-index", Guid.Parse("a0150000-0000-4000-8000-0000000000a9"));
+
+        var fields = await CreatedFieldsAsync(EventUnder(CreateWorld.SecureMatter, ExplicitIndex, "client-name"));
+
+        CreateWorld.Owner(fields).Should().Be(Directory.SecureNamedTeam, "isolated: the named Secure Record Owners team");
+        Text(fields, NameColumn).Should().Be("spaarke-secure-index", "the secure team's unit, never the caller's or the root's");
+        Text(fields, LookupBind).Should().Be("/sprk_aisearchindexes(a0150000-0000-4000-8000-0000000000a9)");
+    }
+
+    [Fact]
+    public async Task AnEventUnderASecureMatter_WhoseUnitHasNoIndex_GetsNone_NotTheCallersNorTheRoots_AndLogsIt()
+    {
+        // The caller's (general) and the matter's (child) units HAVE an index; the secure unit has none: nothing falls back.
+        var fields = await CreatedFieldsAsync(EventUnder(CreateWorld.SecureMatter, ExplicitIndex, "client-name"));
+
+        CreateWorld.Owner(fields).Should().Be(Directory.SecureNamedTeam);
+        fields.Should().NotContainKey(NameColumn).And.NotContainKey(LookupBind);
+        var line = _world.Log.Entries.Should().ContainSingle(e => e.Message.Contains("search_index_unset_for_owner_bu")).Subject;
+        line.Message.Should().Contain(Directory.SecureNamedTeam.ToString()).And.Contain(Directory.SecureBu.ToString());
+        line.Message.Should().Contain("sprk_event");
+        line.Message.Should().NotContain("client-name").And.NotContain("@");
+    }
+
+    private static UnifiedCreateRequest EventUnder(Guid matter, Guid clientIndex, string clientName) =>
+        CreateWorld.Mapped("sprk_event",
+            new Dictionary<string, object?>
+            {
+                ["sprk_eventname"] = "Hearing",
+                ["sprk_RegardingMatter@odata.bind"] = $"/sprk_matters({matter:D})",
+                [NameColumn] = clientName,
+                [LookupBind] = $"/sprk_aisearchindexes({clientIndex:D})",
+            },
+            new DataverseWriteItemMapper.MappedLookup("sprk_regardingmatter", "sprk_matter", "sprk_matters", matter),
+            new DataverseWriteItemMapper.MappedLookup("sprk_ai_search_index", "sprk_aisearchindex", "sprk_aisearchindexes", clientIndex));
+
+    // =====================================================================================
+    // client_search_index_dropped: logged when the dropped value differs from the applied one; absent when equal; ids only
+    // =====================================================================================
+
+    [Fact]
+    public async Task ADroppedIndexThatDiffers_IsLogged_WithIds_Origin_AndTheTable_AndNoNamesOrEmail()
+    {
+        var (request, _) = WithClientIndex("sprk_workassignment", UserBusinessUnitIndex, GeneralIndexName);
+
+        var outcome = await _world.CreateAsync(request);
+
+        outcome.Succeeded.Should().BeTrue(outcome.Refusal?.Detail);
+        var lines = _world.Log.Entries.Where(e => e.Message.Contains("client_search_index_dropped")).ToList();
+        lines.Should().HaveCount(2, "one for the lookup, one for the name column");
+        lines.Should().OnlyContain(l => l.Level == Microsoft.Extensions.Logging.LogLevel.Warning);
+        var lookup = lines.Single(l => l.Message.Contains("column=sprk_ai_search_index"));
+        lookup.Message.Should().Contain("table=sprk_workassignment").And.Contain($"record={outcome.CreatedId}")
+            .And.Contain("origin=caller")
+            .And.Contain($"droppedIndexId={UserBusinessUnitIndex}").And.Contain($"appliedIndexId={ChildIndex}");
+        var name = lines.Single(l => l.Message.Contains("column=sprk_searchindexname"));
+        name.Message.Should().Contain("droppedIndexName=" + GeneralIndexName).And.Contain("appliedIndexName=" + ChildIndexName);
+        lines.Should().OnlyContain(l => !l.Message.Contains("Review the lease") && !l.Message.Contains('@'),
+            "ids and catalog names only: no record name, no person, no email");
+    }
+
+    [Fact]
+    public async Task ADroppedIndexThatEqualsTheApplied_IsNotLogged_NameComparedTrimmedAndIgnoringCase()
+    {
+        var (request, _) = WithClientIndex("sprk_workassignment", ChildIndex, "  " + ChildIndexName.ToUpperInvariant() + " ");
+
+        var outcome = await _world.CreateAsync(request);
+
+        outcome.Succeeded.Should().BeTrue(outcome.Refusal?.Detail);
+        _world.Log.Messages.Should().NotContain(m => m.Contains("client_search_index_dropped"),
+            "the same id, and the same name trimmed and ordinal-ignore-case, is nothing to report");
+    }
+
+    [Fact]
+    public async Task ANullBindAndABlankName_AgainstAUnitWithNoIndex_AreBothNone_AndNotLogged()
+    {
+        _world.SearchIndexDefaults.Clear();
+        var request = CreateWorld.Mapped("sprk_event",
+            new Dictionary<string, object?>
+            {
+                ["sprk_eventname"] = "Hearing",
+                ["sprk_RegardingMatter@odata.bind"] = $"/sprk_matters({CreateWorld.OrdinaryMatter:D})",
+                ["sprk_ai_search_index@odata.bind"] = null,
+                [NameColumn] = "   ",
+            },
+            new DataverseWriteItemMapper.MappedLookup("sprk_regardingmatter", "sprk_matter", "sprk_matters", CreateWorld.OrdinaryMatter));
+
+        var outcome = await _world.CreateAsync(request);
+
+        outcome.Succeeded.Should().BeTrue(outcome.Refusal?.Detail);
+        _world.Log.Messages.Should().NotContain(m => m.Contains("client_search_index_dropped"), "both none is equal");
+        _world.Creates.Should().ContainSingle().Subject.Fields.Should().NotContainKey(NameColumn).And.NotContainKey(LookupBind);
     }
 
     [Theory]
@@ -140,17 +391,50 @@ public sealed class SearchIndexDefaultTests
     // Not search-indexed → untouched; unreadable → nothing filled, said so, created
     // =====================================================================================
 
+    /// <summary>
+    /// Must-not-fire (task 039): a table the registry does not mark search-indexed (a To Do, which carries a lookup) keeps the
+    /// caller's AppendTo check and writes its lookup; step 8 is a no-op and reads no business unit.
+    /// </summary>
     [Fact]
-    public async Task ATableNotMarkedSearchIndexed_ReceivesNoSearchIndexValue()
+    public async Task ATableNotMarkedSearchIndexed_ReceivesNoSearchIndexValue_KeepsTheCallersAppendToCheck_AndWritesItsLookup()
     {
-        var outcome = await _world.CreateAsync(await _world.MappedAsync("sprk_event",
-            new { sprk_eventname = "Hearing", sprk_regardingmatter = CreateWorld.Lookup("sprk_matter", CreateWorld.OrdinaryMatter) }));
+        var todo = await _world.MappedAsync("sprk_todo",
+            new { sprk_name = "Call the client", sprk_regardingmatter = CreateWorld.Lookup("sprk_matter", CreateWorld.OrdinaryMatter) });
+
+        var outcome = await _world.CreateAsync(todo);
 
         outcome.Succeeded.Should().BeTrue(outcome.Refusal?.Detail);
         var fields = _world.Creates.Should().ContainSingle().Subject.Fields;
         fields.Should().NotContainKey(NameColumn).And.NotContainKey(LookupBind);
+        fields.Should().ContainKey("sprk_RegardingMatter@odata.bind", "the lookup is written");
         _world.BusinessUnitReads.Should().BeEmpty();
         outcome.Steps.Single(s => s.Step == RecordCreationStep.SearchIndexDefault).State.Should().Be(RecordCreationStepState.NoOp);
+
+        // The caller's AppendTo check is unchanged: a matter the caller cannot append to is the same refusal as before.
+        _world.Caller.NoAppendTo.Add(CreateWorld.OrdinaryMatter);
+        _world.Creates.Clear();
+        var denied = await _world.CreateAsync(await _world.MappedAsync("sprk_todo",
+            new { sprk_name = "Call the client", sprk_regardingmatter = CreateWorld.Lookup("sprk_matter", CreateWorld.OrdinaryMatter) }));
+        denied.Succeeded.Should().BeFalse("AppendTo on the filing lookup is still the caller's check on a table that is not search-indexed");
+        _world.Creates.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task ATableNotMarkedSearchIndexed_PassesAClientsIndexNamedColumnThroughUntouched()
+    {
+        var request = CreateWorld.Mapped("sprk_todo",
+            new Dictionary<string, object?>
+            {
+                ["sprk_name"] = "Call the client",
+                [NameColumn] = "kept-because-the-table-is-not-indexed",
+            });
+
+        var outcome = await _world.CreateAsync(request);
+
+        outcome.Succeeded.Should().BeTrue(outcome.Refusal?.Detail);
+        Text(_world.Creates.Should().ContainSingle().Subject.Fields, NameColumn).Should().Be("kept-because-the-table-is-not-indexed",
+            "the drop is scoped by the registry: only a search-indexed table's index is the server's");
+        _world.Log.Messages.Should().NotContain(m => m.Contains("client_search_index_dropped"));
     }
 
     [Fact]

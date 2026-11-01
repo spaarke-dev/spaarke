@@ -315,10 +315,11 @@ public class RecordTableRulesTests
     }
 
     [Fact]
-    public void SearchIndexed_IsMatterProjectAndDocumentOnly()
+    public void SearchIndexed_IsTheSixIndexedTablesOnly()
     {
+        // Task 039 (FR-38): work assignment, event and invoice join matter, project and document (was: the last three only).
         RecordTableRules.All.Where(r => r.SearchIndexed).Select(r => r.Table)
-            .Should().BeEquivalentTo("sprk_matter", "sprk_project", "sprk_document");
+            .Should().BeEquivalentTo("sprk_matter", "sprk_project", "sprk_document", "sprk_workassignment", "sprk_event", "sprk_invoice");
     }
 
     // ── Named rules carry a rationale ────────────────────────────────────────────────────────────────────────────────

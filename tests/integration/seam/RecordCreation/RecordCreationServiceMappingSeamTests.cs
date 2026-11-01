@@ -53,6 +53,7 @@ public sealed partial class RecordCreationServiceMappingSeamTests
     private static readonly Guid OrdinaryMatter = Guid.Parse("a0140000-0000-4000-8000-000000000001");
     private static readonly Guid MissingMatter = Guid.Parse("a0140000-0000-4000-8000-000000000002");
     private static readonly Guid SecureMatter = Guid.Parse("a0140000-0000-4000-8000-000000000003");
+    private static readonly Guid BusinessUnitOfEveryTeam = Guid.Parse("a0140000-0000-4000-8000-0000000000bb");
     private static readonly Guid DeniedMatter = Guid.Parse("a0140000-0000-4000-8000-000000000004");
     private static readonly Guid SourceProject = Guid.Parse("a0140000-0000-4000-8000-000000000005");
     private static readonly Guid OtherProject = Guid.Parse("a0140000-0000-4000-8000-000000000006");
@@ -154,6 +155,19 @@ public sealed partial class RecordCreationServiceMappingSeamTests
             .Setup(e => e.RetrieveAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
             .Returns((string table, Guid id, string[] columns, CancellationToken _) =>
             {
+                // Task 039 (FR-38): step 8 now runs on event / work assignment / invoice too and reads the owning team's business
+                // unit (and that unit's index defaults) through the same app reader. Those two reads are not mapping-source reads:
+                // answer them, unjournaled, with a unit that has no default index (the usual customer state).
+                if (table == "team")
+                {
+                    var team = new Entity(table, id);
+                    team["businessunitid"] = new EntityReference("businessunit", BusinessUnitOfEveryTeam);
+                    return Task.FromResult(team);
+                }
+
+                if (table == "businessunit")
+                    return Task.FromResult(new Entity(table, id));
+
                 _journal.Add("source-read");
                 _sourceReads.Add((table, id, columns));
                 if (!_sources.TryGetValue((table, id), out var row))

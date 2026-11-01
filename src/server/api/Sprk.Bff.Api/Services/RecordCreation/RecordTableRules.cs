@@ -1,5 +1,8 @@
+using System.Text.Json;
+using Microsoft.Xrm.Sdk;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Services.Dataverse;
+using SearchIndexColumns = Sprk.Bff.Api.Services.Ai.SearchIndexNameResolver;
 
 namespace Sprk.Bff.Api.Services.RecordCreation;
 
@@ -200,6 +203,8 @@ internal static class RecordTableRules
         {
             Table = "sprk_workassignment",
             Kind = RecordTableKind.Root,
+            // FR-38 (owner, 2026-10-31, before task 039): server-owned search index. #2399 was a Work Assignment create.
+            SearchIndexed = true,
             // Was ChildRecordEndpoints.RootServerOwnedColumns (ontology task 046, D-113 / task 175): its own SPE
             // container, the secure business unit it is isolated in, and its Access Permission. None is field-secured.
             // Task 017 (#1608, decision 2b): refused at step 2 of RecordCreationService on every path, the same set as a
@@ -243,6 +248,8 @@ internal static class RecordTableRules
         {
             Table = "sprk_event",
             Kind = RecordTableKind.Child,
+            // FR-38 (owner, 2026-10-31, before task 039): server-owned search index.
+            SearchIndexed = true,
             ForPerson = new ForPersonLookup(AssignedToDefaults.AssignedToAttribute, "contact"),
             ServerDefaults =
             [
@@ -260,6 +267,8 @@ internal static class RecordTableRules
         {
             Table = "sprk_invoice",
             Kind = RecordTableKind.Child,
+            // FR-38 (owner, 2026-10-31, before task 039): server-owned search index (ebilling-r1 reviews this flag).
+            SearchIndexed = true,
             // Task 014 (ebilling-r1's review of 013, item 3): a fill-only mapping that filled a second core lookup would fail
             // a valid create with multiple_core_records. The core record is the caller's to name.
             MappingProtectedColumns = InvoiceFamilyCoreLookupsOf("sprk_invoice"),
@@ -453,6 +462,235 @@ internal static class RecordTableRules
         "the behaviour it had, and the owned create it had (OwnedChildWrite.CreateAsync, deleted in 017) applied no field mapping to it. Mapping these " +
         "platform tables would be new behaviour and needs its own decision.");
 
+    // ── FR-38: the search index is server-owned (task 039) ──────────────────────────────────────────────────────────
+    // ONE column check and ONE removal, shared by the unified create (RecordCreationService) and every BFF update path, so
+    // they cannot drift. A drop, never a refusal; step 8 of the create is the only writer of either column.
+
+    /// <summary>Where a dropped search-index value came from: the caller's payload (or a server writer's item).</summary>
+    internal const string SearchIndexOriginCaller = "caller";
+
+    /// <summary>Where a dropped search-index value came from: a field-mapping rule (step 3, or a push).</summary>
+    internal const string SearchIndexOriginMapping = "mapping";
+
+    /// <summary>Where a dropped search-index value came from: an adapter's post-mapping default (step 3½).</summary>
+    internal const string SearchIndexOriginDefault = "default";
+
+    private const string BindSuffix = "@odata.bind";
+
+    /// <summary>
+    /// FR-38: whether <paramref name="table"/> has a SERVER-OWNED search index, i.e. its registry entry is
+    /// <see cref="RecordTableRule.SearchIndexed"/>. The one question every create and update path asks before it drops.
+    /// </summary>
+    internal static bool OwnsSearchIndex(string? table) => Find(table)?.SearchIndexed == true;
+
+    /// <summary>
+    /// FR-38: the index column a payload key names, or <c>null</c> for any other key. Matches the lookup
+    /// (<c>sprk_ai_search_index</c>, its navigation property <c>sprk_AI_Search_Index</c> and either one's
+    /// <c>@odata.bind</c>, in any case) and the legacy text column (<c>sprk_searchindexname</c>). The canonical logical
+    /// name is returned.
+    /// </summary>
+    internal static string? SearchIndexColumnOf(string? key)
+    {
+        if (string.IsNullOrWhiteSpace(key))
+            return null;
+
+        var name = key.Trim();
+        if (name.EndsWith(BindSuffix, StringComparison.OrdinalIgnoreCase))
+            name = name[..^BindSuffix.Length].TrimEnd();
+
+        if (string.Equals(name, SearchIndexColumns.LookupColumn, StringComparison.OrdinalIgnoreCase))
+            return SearchIndexColumns.LookupColumn;
+        return string.Equals(name, SearchIndexColumns.LegacyTextColumn, StringComparison.OrdinalIgnoreCase)
+            ? SearchIndexColumns.LegacyTextColumn
+            : null;
+    }
+
+    /// <summary>
+    /// FR-38: removes the server-owned search-index columns from a Web API body or a chat tool's <c>item</c> (a JSON object
+    /// keyed by column or <c>{nav}@odata.bind</c>), whatever the key's case, and records what was dropped. Returns
+    /// <paramref name="body"/> itself when it names neither. Never a refusal: a malformed value is dropped like any other.
+    /// </summary>
+    internal static JsonElement WithoutSearchIndex(JsonElement body, string origin, ICollection<DroppedSearchIndexValue> dropped)
+    {
+        if (body.ValueKind != JsonValueKind.Object || !body.EnumerateObject().Any(p => SearchIndexColumnOf(p.Name) is not null))
+            return body;
+
+        using var stream = new MemoryStream();
+        using (var writer = new Utf8JsonWriter(stream))
+        {
+            writer.WriteStartObject();
+            foreach (var property in body.EnumerateObject())
+            {
+                if (SearchIndexColumnOf(property.Name) is { } column)
+                    RecordDropped(dropped, column, origin, property.Value);
+                else
+                    property.WriteTo(writer);
+            }
+
+            writer.WriteEndObject();
+        }
+
+        using var document = JsonDocument.Parse(stream.ToArray());
+        return document.RootElement.Clone();
+    }
+
+    /// <summary>
+    /// FR-38: the same removal on a mapped item (<see cref="DataverseWriteItemMapper.MappedItem"/>): its body keys, its
+    /// columns, its lookups and its clears. Returns <paramref name="item"/> itself when it names neither column.
+    /// </summary>
+    internal static DataverseWriteItemMapper.MappedItem WithoutSearchIndex(
+        DataverseWriteItemMapper.MappedItem item, string origin, ICollection<DroppedSearchIndexValue> dropped)
+    {
+        ArgumentNullException.ThrowIfNull(item);
+        using var body = JsonDocument.Parse(item.JsonBody);
+        var bodyNamesIt = body.RootElement.ValueKind == JsonValueKind.Object
+                          && body.RootElement.EnumerateObject().Any(p => SearchIndexColumnOf(p.Name) is not null);
+        if (!bodyNamesIt
+            && !item.Columns.Any(c => SearchIndexColumnOf(c) is not null)
+            && !item.Lookups.Any(l => SearchIndexColumnOf(l.Column) is not null)
+            && !item.ClearedColumns.Any(c => SearchIndexColumnOf(c) is not null))
+        {
+            return item;
+        }
+
+        // The body first (it holds the value as sent); a lookup it does not carry in a readable form is read from the item's lookups.
+        var json = bodyNamesIt ? WithoutSearchIndex(body.RootElement, origin, dropped).GetRawText() : item.JsonBody;
+        foreach (var lookup in item.Lookups.Where(l => SearchIndexColumnOf(l.Column) is not null))
+            RecordDropped(dropped, SearchIndexColumns.LookupColumn, origin, lookup.RecordId);
+
+        foreach (var column in item.Columns.Concat(item.ClearedColumns).Select(SearchIndexColumnOf).OfType<string>())
+            RecordDropped(dropped, column, origin, null);
+
+        return item with
+        {
+            JsonBody = json,
+            Columns = item.Columns.Where(c => SearchIndexColumnOf(c) is null).ToList(),
+            Lookups = item.Lookups.Where(l => SearchIndexColumnOf(l.Column) is null).ToList(),
+            ClearedColumns = item.ClearedColumns.Where(c => SearchIndexColumnOf(c) is null).ToList(),
+        };
+    }
+
+    /// <summary>
+    /// FR-38: the same removal, in place, on an update payload that is a dictionary of column (or <c>{nav}@odata.bind</c>) to
+    /// value (a playbook output mapping, a confirmed proposal, a field-mapping push). Returns how many keys were removed.
+    /// </summary>
+    internal static int RemoveSearchIndex(IDictionary<string, object?> fields, string origin, ICollection<DroppedSearchIndexValue> dropped)
+    {
+        ArgumentNullException.ThrowIfNull(fields);
+        var keys = fields.Keys.Where(k => SearchIndexColumnOf(k) is not null).ToArray();
+        foreach (var key in keys)
+        {
+            RecordDropped(dropped, SearchIndexColumnOf(key)!, origin, fields[key]);
+            fields.Remove(key);
+        }
+
+        return keys.Length;
+    }
+
+    /// <summary>One dropped value: the column, where it came from, and the index it named (the id for the lookup, the name for the text column).</summary>
+    internal sealed record DroppedSearchIndexValue(string Column, string Origin, Guid? IndexId, string? IndexName);
+
+    private static void RecordDropped(ICollection<DroppedSearchIndexValue> dropped, string column, string origin, object? value)
+    {
+        var isLookup = string.Equals(column, SearchIndexColumns.LookupColumn, StringComparison.Ordinal);
+        var id = isLookup ? IndexIdOf(value) : null;
+        var name = isLookup ? null : IndexNameOf(value);
+
+        var existing = dropped.FirstOrDefault(d => d.Column == column && d.Origin == origin);
+        if (existing is null)
+        {
+            dropped.Add(new DroppedSearchIndexValue(column, origin, id, name));
+        }
+        else if ((id is not null && existing.IndexId is null) || (name is not null && existing.IndexName is null))
+        {
+            // The same column named twice (two spellings): keep whichever carried a value.
+            dropped.Remove(existing);
+            dropped.Add(existing with { IndexId = existing.IndexId ?? id, IndexName = existing.IndexName ?? name });
+        }
+    }
+
+    /// <summary>The catalog row a dropped lookup value named: a bind string, a lookup object, an <see cref="EntityReference"/> or a Guid.</summary>
+    private static Guid? IndexIdOf(object? value)
+    {
+        static Guid? FromText(string? text)
+        {
+            if (string.IsNullOrWhiteSpace(text))
+                return null;
+
+            var trimmed = text.Trim();
+            var open = trimmed.LastIndexOf('(');
+            var close = trimmed.LastIndexOf(')');
+            var candidate = open >= 0 && close > open ? trimmed[(open + 1)..close] : trimmed;
+            return Guid.TryParse(candidate, out var id) && id != Guid.Empty ? id : null;
+        }
+
+        return value switch
+        {
+            Guid guid => guid == Guid.Empty ? null : guid,
+            EntityReference reference => reference.Id == Guid.Empty ? null : reference.Id,
+            string text => FromText(text),
+            JsonElement { ValueKind: JsonValueKind.String } json => FromText(json.GetString()),
+            JsonElement { ValueKind: JsonValueKind.Object } json
+                when json.TryGetProperty("recordId", out var recordId) && recordId.ValueKind == JsonValueKind.String =>
+                FromText(recordId.GetString()),
+            _ => null,
+        };
+    }
+
+    /// <summary>The index name a dropped text value named (trimmed; none when blank or not text).</summary>
+    private static string? IndexNameOf(object? value)
+    {
+        var text = value switch
+        {
+            string s => s,
+            JsonElement { ValueKind: JsonValueKind.String } json => json.GetString(),
+            _ => null,
+        };
+        return string.IsNullOrWhiteSpace(text) ? null : text.Trim();
+    }
+
+    /// <summary>
+    /// FR-38 (UAC-r2 condition 4): logs <c>client_search_index_dropped</c>, ids only, for each dropped value that differs from
+    /// what was applied. <paramref name="applied"/> is what step 8 applied to a new record (the id for the lookup, the name
+    /// for the text column), or <c>null</c> on an update, where the value is "unchanged" and so never equal. Equal means:
+    /// both none, the same id, or the same name compared trimmed and ordinal-ignore-case. The text column's entry also carries
+    /// the dropped and applied index NAME (catalog configuration, not personal data); nothing else textual is logged.
+    /// Warning level, as 018's default_value_dropped is a warning.
+    /// </summary>
+    internal static void LogSearchIndexDropped(
+        ILogger logger, string table, Guid? recordId, IEnumerable<DroppedSearchIndexValue> dropped,
+        (Guid? IndexId, string? IndexName)? applied, string? correlationId = null)
+    {
+        foreach (var drop in dropped)
+        {
+            var isLookup = string.Equals(drop.Column, SearchIndexColumns.LookupColumn, StringComparison.Ordinal);
+            if (applied is { } now
+                && (isLookup
+                    ? drop.IndexId == now.IndexId
+                    : string.Equals(drop.IndexName ?? string.Empty, now.IndexName?.Trim() ?? string.Empty,
+                        StringComparison.OrdinalIgnoreCase)))
+            {
+                continue;
+            }
+
+            const string unchanged = "unchanged";
+            if (isLookup)
+            {
+                logger.LogWarning(
+                    "[RECORD-WRITE] client_search_index_dropped: table={Table} record={RecordId} column={Column} origin={Origin} " +
+                    "droppedIndexId={DroppedIndexId} appliedIndexId={AppliedIndexId} correlationId={CorrelationId}",
+                    table, recordId, drop.Column, drop.Origin, drop.IndexId, applied is { } a ? a.IndexId : unchanged, correlationId);
+            }
+            else
+            {
+                logger.LogWarning(
+                    "[RECORD-WRITE] client_search_index_dropped: table={Table} record={RecordId} column={Column} origin={Origin} " +
+                    "droppedIndexName={DroppedIndexName} appliedIndexName={AppliedIndexName} correlationId={CorrelationId}",
+                    table, recordId, drop.Column, drop.Origin, drop.IndexName, applied is { } b ? b.IndexName : unchanged, correlationId);
+            }
+        }
+    }
+
     private static IReadOnlySet<string> Columns(params string[] columns) =>
         new HashSet<string>(columns, StringComparer.OrdinalIgnoreCase);
 }
@@ -620,7 +858,12 @@ internal sealed record RecordTableRule
     /// <summary>Values the server fills on create when the request leaves them empty (fill-only).</summary>
     public IReadOnlyList<ServerDefault> ServerDefaults { get; init; } = [];
 
-    /// <summary>Whether the owning business unit's search-index default is filled on create (FR-10, I-5).</summary>
+    /// <summary>
+    /// Whether the table's search index is SERVER-OWNED (FR-38, amending FR-10, I-5): both columns
+    /// (<c>sprk_ai_search_index</c> and the legacy text <c>sprk_searchindexname</c>) are written by step 8 alone, from the
+    /// record's final owning business unit, and a client value is dropped on every BFF write path
+    /// (<see cref="RecordTableRules.SearchIndexColumnOf"/>, <see cref="RecordTableRules.OwnsSearchIndex"/>).
+    /// </summary>
     public bool SearchIndexed { get; init; }
 
     /// <summary>

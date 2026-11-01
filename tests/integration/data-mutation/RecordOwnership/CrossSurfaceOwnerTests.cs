@@ -425,8 +425,11 @@ internal sealed class CreateWorld
             new CoreAncestorRestamper(stamps.Service, stamps.Resolver, NullLogger<CoreAncestorRestamper>.Instance),
             SecureChildShareWorld.SynchronizerOver(SecureChildShareWorld.Standard, new FakeRecordShareTable()),
             new ServiceCollection().BuildServiceProvider().GetRequiredService<IServiceScopeFactory>(),
-            new Mock<IMembershipEventPublisher>().Object, NullLogger<RecordCreationService>.Instance);
+            new Mock<IMembershipEventPublisher>().Object, Log);
     }
+
+    /// <summary>Task 039: every line the unified create logged (level and formatted message), for the FR-38 log assertions.</summary>
+    public CapturingLog<RecordCreationService> Log { get; } = new();
 
     // ── The app-only Dataverse every service here reads ───────────────────────────────────────────────────────────
 
@@ -531,4 +534,24 @@ internal sealed class CreateWorld
             RecordReparent reparent, Func<CancellationToken, Task> applyChange, CancellationToken ct) =>
             inner.ReparentAsync(reparent, applyChange, ct);
     }
+}
+
+/// <summary>
+/// Task 039 (FR-38): a logger that keeps what it was asked to write, level and formatted message, so a test can say what a
+/// create logged and what it left out. Not a mock: the formatter runs, as it does in the host.
+/// </summary>
+internal sealed class CapturingLog<T> : Microsoft.Extensions.Logging.ILogger<T>
+{
+    public List<(Microsoft.Extensions.Logging.LogLevel Level, string Message)> Entries { get; } = [];
+
+    public IEnumerable<string> Messages => Entries.Select(e => e.Message);
+
+    public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+    public bool IsEnabled(Microsoft.Extensions.Logging.LogLevel logLevel) => true;
+
+    public void Log<TState>(
+        Microsoft.Extensions.Logging.LogLevel logLevel, Microsoft.Extensions.Logging.EventId eventId, TState state,
+        Exception? exception, Func<TState, Exception?, string> formatter) =>
+        Entries.Add((logLevel, formatter(state, exception)));
 }
