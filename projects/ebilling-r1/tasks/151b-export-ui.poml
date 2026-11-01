@@ -1,0 +1,82 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="151b" project="ebilling-r1">
+  <metadata>
+    <title>AP export and Mark Paid UI: views, ribbons, dialog</title>
+    <phase>6 Export and index (WP6) — wave W6-2 (split from 151, EB-D-181)</phase>
+    <gate>startable after 151a</gate>
+    <status>completed</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Model-driven UI over existing routes: three views, ribbon commands, one dialog code page. No BFF change, no schema change; the server enforces every rule.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Pattern-following: views copied from an existing sprk_invoice view, ribbon commands in the repo's navigateTo / Spaarke.BffAuth idiom, the code page bootstrap copied from RuleReview.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>150, 151a</deps>
+    <tags>frontend, dataverse, ribbon, ebilling</tags>
+    <estimated-effort>1 day</estimated-effort>
+  </metadata>
+
+  <prompt>Build the model-driven UI for AP export and Mark Paid (EB-D-181): three sprk_invoice system views by status, Export to AP and Mark Paid ribbon buttons on the views and the invoice form, a dialog code page that exports a selection through 150's route and marks invoices Paid through 151a's route, and Download CSV / Download JSON on the Billing Export form. Commit to source; deploy nothing.</prompt>
+
+  <role>SPAARKE frontend developer. Expert in Dataverse ribbons and views, Fluent v9 code pages and the @spaarke/auth code-page pattern.</role>
+
+  <goal>A finance user finds Approved, Sent to AP and Paid invoices in their own views; exports a selection and sees the batch (count, total, files) or each invoice's refusal; marks Sent to AP invoices Paid and sees each invoice's outcome, including the 409 with the current status; downloads a batch's CSV and JSON from the dialog and from the Billing Export form; in light and dark mode.</goal>
+
+  <context>
+    <background>
+      Read first: EB-D-181 (notes/decisions-log.md), tasks/151-mark-paid-export-ui.poml (parent: ui-tests, dark mode), notes/151a-mark-paid-download.md (Mark Paid one invoice per call; GET export-batches/{id}/files/{csv|json}; answers and codes), notes/150-ap-export-batch.md (create batch, per-invoice refusals, EB-D-178: show Export to users who can export; 403 names no invoice).
+      Standards: docs/standards/MODAL-DECISION-CRITERIA.md, docs/standards/MODAL-DESIGN-SYSTEM.md, .claude/patterns/ui/record-modal-selection.md (ADR-050: navigateTo from hostless ribbon scripts), docs/architecture/SPAARKE-SIDE-PANE-NAVIGATION.md (ensureNavigatorSidePane on a new code page).
+      statuscode values (sprk_invoice Entity.xml): Approved 659490000, Sent to AP 659490001, Paid 659490002 (inactive state). sprk_billingexport.sprk_exportstatus Completed 100000001.
+    </background>
+    <relevant-files>
+      <file role="new">src/dataverse/solutions/SpaarkeMaster/Entities/sprk_Invoice/SavedQueries/{467cbd98-eb63-4f05-b7fb-3bc71f14bac9}.xml, {cd153641-74d9-4a9f-9318-3cb7caf4fccf}.xml, {b0feb580-dbb5-464f-bb07-3ce64fb5e21d}.xml</file>
+      <file role="modify">src/dataverse/solutions/SpaarkeMaster/Entities/sprk_Invoice/RibbonDiff.xml, Entities/sprk_billingexport/RibbonDiff.xml, Other/Solution.xml (one web resource root component)</file>
+      <file role="new">src/client/webresources/js/sprk_apexport_ribbon.js and its mirror WebResources/sprk_/scripts/apexport_ribbon.js (+ .data.xml)</file>
+      <file role="new">src/solutions/ApExport/ (code page, web resource sprk_apexport, with jest tests)</file>
+      <file role="canonical-reference">src/dataverse/solutions/SpaarkeMaster/Entities/sprk_Invoice/SavedQueries/{0c7694d8-14c9-f111-a05a-7c1e520a989f}.xml (view XML)</file>
+      <file role="canonical-reference">src/client/webresources/js/sprk_secure_child_ribbon.js, sprk_wizard_commands.js (navigateTo and Spaarke.BffAuth ribbon idiom)</file>
+      <file role="canonical-reference">src/solutions/RuleReview/ (code page bootstrap, auth, API client, jest config)</file>
+      <file role="new">projects/ebilling-r1/notes/151b-export-ui.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="FR-41, FR-42">Ribbon rules are display only; the dialog shows the server's per-invoice refusals and outcomes and never filters for correctness on the client.</constraint>
+    <constraint source="ADR-050">Launch from the ribbon with navigateTo; no nested SprkModal inside the platform dialog (single title source); footer contract Cancel left, actions right.</constraint>
+    <constraint source="ADR-028">BFF calls through createCodePageAuthInitializer's authenticatedFetch (requireSilentOnly); the ribbon download through Spaarke.BffAuth.</constraint>
+    <constraint source="ADR-021">Fluent v9 semantic tokens only; works in dark mode.</constraint>
+    <constraint source="CLAUDE.md section 11">Section 11 answers for each view, button and page in the notes.</constraint>
+    <constraint source="scope">No BFF change, no deploy or import, no edit of TASK-INDEX.md, current-task.md or .claude/.</constraint>
+  </constraints>
+
+  <steps mode="directional">
+    <step order="1">Three views copied from "Invoices to review", filtered by statuscode (Approved also on an empty sprk_billingexport), with firm, record, invoice and tracking numbers, date, approved total, currency, and the batch on Sent to AP and Paid.</step>
+    <step order="2">Ribbon: Export to AP (grid: 1 to 200 selected, Create on sprk_billingexport; form: Approved) and Mark Paid (grid: all selected Sent to AP; form: Sent to AP) opening the dialog; Download CSV / JSON on the Billing Export form (Completed batch).</step>
+    <step order="3">Dialog code page: selection with count and total; export with per-invoice refusals, count and total, Download CSV / JSON, Email to AP disabled; Mark Paid confirm and per-invoice outcomes.</step>
+    <step order="4">Jest tests for the state logic (refusals, partial Mark Paid, download URL) and the ribbon script in a vm sandbox; production build; pack SpaarkeMaster locally to check the source; the affected ArchTests.</step>
+    <step order="5">Notes: section 11 answers, files, deviations, deploy steps and manual UI test steps for the main session.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">The three views exist in SpaarkeMaster source with the stated filters and columns; the solution packs.</criterion>
+    <criterion testable="true">Export to AP and Mark Paid are on the sprk_invoice home grid and main form with the stated enable and display rules; Download CSV / JSON on the sprk_billingexport form, enabled for a Completed batch.</criterion>
+    <criterion testable="true">The dialog creates a batch only through 150's POST and shows its per-invoice refusals, the count and the total; on success it offers the downloads of the formats the batch has and a disabled Email to AP.</criterion>
+    <criterion testable="true">Mark Paid calls 151a once per invoice, in order, and shows each outcome; a 409 names the current status; a refusal of one invoice does not stop the others (except sign-in failure and ebilling.disabled).</criterion>
+    <criterion testable="true">No hard-coded colour; the page uses the code-page theme and works in dark mode (ui-test after deploy).</criterion>
+    <criterion testable="true">Jest suites pass; the type gate has no surface-owned error; the production build succeeds.</criterion>
+  </acceptance-criteria>
+
+  <outputs>
+    <output type="code">src/solutions/ApExport/; src/client/webresources/js/sprk_apexport_ribbon.js; SpaarkeMaster views, RibbonDiffs and web resource</output>
+    <output type="test">src/solutions/ApExport/src/__tests__/</output>
+    <output type="docs">projects/ebilling-r1/notes/151b-export-ui.md</output>
+  </outputs>
+
+  <notes>Deviations recorded in the notes: this task edits SpaarkeMaster source (the brief asked for it; the project rule reserves it for serial tasks and 153); the views select sprk_invoice.sprk_trackingnumber, which SpaarkeMaster's Entity.xml does not carry yet (053), so the column must exist on an environment before this source is imported there; the code page HTML is deployed as a web resource and brought into source by 153.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load the knowledge files first. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>
