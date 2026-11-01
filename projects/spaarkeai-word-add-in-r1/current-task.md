@@ -9,8 +9,8 @@
 | Field | Value |
 |---|---|
 | **Task** | **133 🔄 Outlook Submit Invoice view** (FULL, opus/high). Live on dev in unified package 1.1.3; first owner UATs done. |
-| **Status** | Waiting on the owner's retest (INV-012.2) and on ebilling's **#2507** (097b/c/e/f, 191, 192; ontology-r1 reviewing; ebilling will say when it merges). #2501 and #2503 are merged. Open PR: **#2510** (correction sentences; branch fix/invoice-correction-sentences in worktree C:\wt133q). |
-| **Next Action** | 1. When the #2510 gated jest check passes, `gh pr merge 2510 --auto --merge`. After it merges, remove C:\wt133q via Remove-WorktreeSafe. 2. Act on the owner's retest result. 3. When #2507 is on master AND dev: build the 097e prefill and enable Correction (`correctionAvailable`). Reuse `describeUncorrectableStatus` for the prefill's `reason: invoice_status`. |
+| **Status** | Waiting on the owner's retest (INV-012.2) and on ebilling's **#2507** (097b/c/e/f, 191, 192; ontology-r1 reviewing; ebilling will say when it merges). #2501, #2503 and #2510 (correction sentences) are merged; their worktrees are removed. No open PRs. |
+| **Next Action** | 1. Act on the owner's retest result. 2. When #2507 is on master AND dev: build the 097e prefill and enable Correction (`correctionAvailable`). Reuse `describeUncorrectableStatus` for the prefill's `reason: invoice_status`. |
 
 ## Submit Invoice (task 133): state
 - **Dev:** eBilling is ON (since 2026-10-30 15:21Z). The invoice reader is configured (`ContentUnderstanding__Endpoint`, 2026-11-01 02:54:30Z, ebilling, owner go in both sessions; analyzers sprk_invoice_v2p and sprk_invoice_v2 deployed). The owner updated Integrated apps to package **1.1.3** (#2476); the Submit Invoice ribbon button works in Outlook on the web.
@@ -28,7 +28,7 @@
 ## ebilling contract items (peer: ebilling, pipe cc-msg-c961e15ec4fa4e62d8bf9706a34c677d)
 - **Task 191** (work fdd3c79b7f, d4849acbe6; not on master or dev): intake 422 `reader_not_configured`, §9 `ai.invoice.*` codes. The client side is merged (#2498).
 - **Task 192 `filedUnder`** (work 25778a59b7): optional `filedUnder {entityType: Matter|Project|WorkAssignment, entityId, name}` on 409 `document_core_record_mismatch`, only when the caller can Read it. Client side is merged (#2503): the sentence names the record, and the view offers "Use {name}". ebilling has been told.
-- **097b/097c Correction** (in #2507). All four client sentence items are in PR #2510: the intake reasons, the stored outcomes, the record_unavailable addition, and `not_available` retired.
+- **097b/097c Correction** (in #2507). All four client sentence items are merged (#2510): the intake reasons, the stored outcomes, the record_unavailable addition, and `not_available` retired.
 - **097e prefill** (work 8b49cb2432): `GET /api/finance/invoices/{invoiceId}/correction-prefill` → `{invoiceId, firm{id,name}, coreRecord{entityType Matter|Project|WorkAssignment, entityId, name}, invoiceStatus, trackingNumber, firmInvoiceNumber, canCorrect, reason, replacedBy{invoiceId,name}|null}`.
   - `reason` ∈ invoice_status, no_submission, submission_in_progress.
   - Errors: uniform 404 `record_unavailable`, 503, 503 `ebilling.disabled`.
