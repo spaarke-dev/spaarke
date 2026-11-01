@@ -14,7 +14,7 @@
 | **Open PRs** | #2387 (075, HOLD, ships with 040). |
 | **Issues** | #2444, #2413, #2429 (provisioning; I review), #2469 (flaky ISS-005), #1948 (lint-staged uses the shared stash; 017b re-found it). |
 | **Waiting on** | UAC 195 is MERGED (d0c1c5dc3c, #2496, 2026-10-31; master merged into the work branch, 70567b4dff). Its contract for 040 is in `notes/decisions.md` 2026-10-31. 195 is not live yet: UAC-r2 will send the deploy time, after the owner's go there for the deploy, the ribbon import and the backfill. 040 (+075) still needs 005 and 019. Provisioning's #2429 PR. Owner's 076 live pass. Owner OK'd the re-seed (done) and the go for 039 (started 2026-10-31). |
-| **Owner to do** | 076 live check (owner + narrower user). Leftover locked worktree agent-aec6d06ca99a5a9f6 (075): end of project. |
+| **Owner to do** | 076 live check (owner + narrower user). Leftover locked worktrees agent-aec6d06ca99a5a9f6 (075) and agent-a7ed21b81867c4e2e (039, merged; locked by its agent process): end of project, via Remove-WorktreeSafe after unlock. |
 
 ## How wave-2 agents are run (lessons)
 
