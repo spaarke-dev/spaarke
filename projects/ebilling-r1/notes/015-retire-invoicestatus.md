@@ -391,6 +391,8 @@ Final test runs on `6c348fd86` (the notes commit changes no code): `dotnet test 
 | 2026-11-01 03:14:51 | `-Delete -OwnerApproval 'D-97 2026-10-17 owner' -BffDeployAttestation d0c1c5dc3c -SpaDeployAttestation b083d62183` | Deleted the aiskillconfig a32ae5a7 (form-fill opt-out), the column (attribute 150d244b; dependents 0 first), the global option set dfeedd70 (dependents 0), published sprk_invoice. Verify: the column 404; the option set still read once (exit 1, propagation) |
 | 2026-11-01 03:15:20 | The same command again | "sprk_invoice.sprk_invoicestatus does not exist (already retired). Option set: gone." exit 0. **015 complete on dev.** |
 
+**Observed side effect (uac-r2, 2026-11-01):** for the time the drop took to run (03:14:36Z–03:15:18Z), other services' queries that touched `sprk_invoice` failed with `Sql Number: 207` (invalid column name). There were 20 such faults on uac-r2's reconciler descendant reads; later passes did the work, and none have occurred since. For any future column delete, expect about a minute of these from any query on that table, and give peers the exact time window in the notice.
+
 ## 13. ontology-r1 re-check of the follow-up (2026-10-18)
 
 Clean apart from these, fixed in the main session:

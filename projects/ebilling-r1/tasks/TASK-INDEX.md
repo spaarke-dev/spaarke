@@ -169,7 +169,7 @@ To begin: `work on task 001`. Wave W0-1 (001, 002, 003) and W2-1 (040, 041) have
 | 163 | 🔲 [open] | UAT with the owner and dev rollout | STANDARD | sonnet / high | none | 162 |
 | 189 | 🔲 [open] | Docs: retire "Procedure Library"; data-model docs for the Procedure and Stored File tables; file-store architecture note | STANDARD | sonnet / high | none | 079 |
 | 190 | 🔲 [open] | Project wrap-up | FULL | sonnet / high | none | all |
-| 191 | 🔄 [running] | Invoice reader preflight at intake (422 `ebilling.submission.reader_not_configured` before anything is written) and the `ai.invoice.*` outcome codes in contract §9 (owner OK 2026-10-31, after the first dev UAT) | FULL | sonnet / high | none | 095 |
+| 191 | ✅ [done; on work e657bfda4c] | Invoice reader preflight at intake (422 `ebilling.submission.reader_not_configured` before anything is written) and the `ai.invoice.*` outcome codes in contract §9 (owner OK 2026-10-31, after the first dev UAT) | FULL | sonnet / high | none | 095 |
 | 192 | 🔲 [open; owner OK 2026-10-31; after 191] | Optional `filedUnder` on the from-email 409 `document_core_record_mismatch`: the record the email is filed under, only when the caller can Read it, never for a secure record | FULL | sonnet / high | none | 191 |
 
 ## Parallel Execution Plan
