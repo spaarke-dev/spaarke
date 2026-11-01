@@ -191,6 +191,8 @@ export const SUBMISSION_ERROR_MESSAGES: Readonly<Record<string, Entry>> = {
     "This email's saved copy in Spaarke doesn't belong to its email record, so it can't be submitted from Outlook.",
   COMMUNICATION_REFILE_FORBIDDEN: `This email isn't filed yet, and you don't have permission to file it under this record. ${NOTHING}`,
   'ebilling.submission.storage_not_configured': `Invoice file storage isn't set up in Spaarke. ${NOTHING} Ask an administrator.`,
+  // ebilling task 191 (2026-11-01): checked before anything is written or filed, after the storage check.
+  'ebilling.submission.reader_not_configured': `Invoice reading isn't set up in Spaarke yet. ${NOTHING} Ask an administrator.`,
   'ebilling.tracking.unavailable': f =>
     `Spaarke couldn't give the invoice a tracking number right now. ${NOTHING} ${tryAgain(f)}`,
   'ebilling.submission.email_save_failed':
@@ -243,6 +245,18 @@ export const INVOICE_OUTCOME_MESSAGES: Readonly<Record<string, Entry>> = {
   // Task 094 (2026-10-28): a re-attempt is allowed (EB-D-160).
   'ebilling.submission.source_changed':
     "The email's saved copy in Spaarke changed while the invoice was being processed, so it was not processed. Submit it again.",
+  // ebilling task 191 (2026-11-01): the AI reading and line coding. The first two are permanent; the job retries the
+  // other three and stores the code on its last attempt, so a later re-submission can work.
+  'ai.invoice.read.not_configured':
+    "Invoice reading isn't set up in Spaarke yet, so the invoice was not processed. Ask an administrator.",
+  'ai.invoice.disabled':
+    'Invoice reading is turned off in Spaarke, so the invoice was not processed. Ask an administrator.',
+  'ai.invoice.binding_missing':
+    "Spaarke's invoice line coding isn't fully set up, so the invoice was not processed. Ask an administrator.",
+  'ai.invoice.completion_failed':
+    "Spaarke's AI service failed while coding the invoice lines, so the invoice was not processed. Submit it again later.",
+  'ai.invoice.output_invalid':
+    "Spaarke couldn't code the invoice lines, so the invoice was not processed. Submit it again later.",
   'ebilling.submission.blocked': 'The invoice was rejected by a billing rule.',
   'ebilling.submission.returned': 'The invoice was returned to the firm.',
 };
