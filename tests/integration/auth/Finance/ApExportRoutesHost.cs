@@ -16,6 +16,7 @@ using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.Finance;
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
+using Sprk.Bff.Api.Services.Communication.Models;
 using Sprk.Bff.Api.Services.Finance;
 using Sprk.Bff.Api.Services.Finance.Files;
 using Sprk.Bff.Api.Tests.Api.Finance;
@@ -54,6 +55,34 @@ internal sealed class ApExportRoutesHost : IAsyncDisposable
     /// <summary>When true, a rival writer touches the invoice before every conditional status write (the version never matches).</summary>
     public bool RivalWriterOnEveryAttempt { get; set; }
 
+    /// <summary>The mail seam Email to AP sends through (task 151c-1a): a recording stand-in by default; a test may swap in a real one.</summary>
+    public ApExportMailer Mailer { get; set; } = new RecordingApMailer();
+
+    /// <summary>The stand-in <see cref="Mailer"/> (null when a test swapped in another).</summary>
+    public RecordingApMailer? FakeMailer => Mailer as RecordingApMailer;
+
+    /// <summary>The clock Email to AP and Mark Sent to AP stamp the date with.</summary>
+    public FixedClock Clock { get; } = new(new DateTimeOffset(2026, 11, 2, 9, 30, 0, TimeSpan.Zero));
+
+    /// <summary>What the delivery service logged.</summary>
+    public CapturingLogger<ApExportDeliveryService> DeliveryLog { get; } = new();
+
+    /// <summary>Puts (or replaces) the active eBilling settings row with this AP export email (null: the row has none).</summary>
+    public void SetApEmail(string? address)
+    {
+        var row = new Entity("sprk_ebillingsetting", Guid.Parse("15100000-0000-4000-8000-0000000000e5"))
+        {
+            ["statecode"] = new OptionSetValue(0),
+            ["createdon"] = new DateTime(2026, 10, 1, 0, 0, 0, DateTimeKind.Utc),
+        };
+        if (address is not null)
+        {
+            row["sprk_apexportemail"] = address;
+        }
+
+        World.Dataverse.Put(row);
+    }
+
     public static async Task<ApExportRoutesHost> StartAsync(bool ebillingEnabled = true, bool holdCreate = true)
     {
         var host = new ApExportRoutesHost();
@@ -87,6 +116,9 @@ internal sealed class ApExportRoutesHost : IAsyncDisposable
         // The REAL export service and Stored File service over the in-memory Dataverse and blob store; the REAL lifecycle over the same rows.
         builder.Services.AddScoped(_ => host.World.Service);
         builder.Services.AddScoped(_ => host.World.Files);
+        builder.Services.AddScoped(_ => host.Mailer);
+        builder.Services.AddScoped(_ => new ApExportDeliveryService(
+            host.World.Service, host.World.Dataverse.Service, host.World.Files, host.Mailer, host.DeliveryLog, host.Clock));
         builder.Services.AddScoped<IInvoiceLifecycleService>(_ => new InvoiceLifecycleService(
             host.LifecycleRecords(), Microsoft.Extensions.Logging.Abstractions.NullLogger<InvoiceLifecycleService>.Instance));
 
@@ -205,6 +237,51 @@ internal sealed class ApExportRoutesHost : IAsyncDisposable
             await _app.DisposeAsync();
         }
     }
+}
+
+/// <summary>The stand-in for the communication send: records each request (with its server-only options) and answers a new communication id; can be told to fail.</summary>
+internal sealed class RecordingApMailer : ApExportMailer
+{
+    public RecordingApMailer() : base(null!)
+    {
+    }
+
+    public List<SendCommunicationRequest> Sent { get; } = [];
+
+    /// <summary>When set, a send throws it (a Graph fault or a refusal).</summary>
+    public Exception? Fault { get; set; }
+
+    public override Task<Guid?> SendAsync(SendCommunicationRequest request, Microsoft.AspNetCore.Http.HttpContext httpContext, CancellationToken ct)
+    {
+        if (Fault is { } fault)
+        {
+            return Task.FromException<Guid?>(fault);
+        }
+
+        Sent.Add(request);
+        return Task.FromResult<Guid?>(Guid.NewGuid());
+    }
+}
+
+/// <summary>A clock that reads a settable instant.</summary>
+internal sealed class FixedClock(DateTimeOffset now) : TimeProvider
+{
+    public DateTimeOffset Now { get; set; } = now;
+
+    public override DateTimeOffset GetUtcNow() => Now;
+}
+
+/// <summary>A logger that keeps what it was given, for a test to assert an Error was written.</summary>
+internal sealed class CapturingLogger<T> : ILogger<T>
+{
+    public List<(LogLevel Level, string Message)> Entries { get; } = [];
+
+    public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+    public bool IsEnabled(LogLevel logLevel) => true;
+
+    public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter) =>
+        Entries.Add((logLevel, formatter(state, exception)));
 }
 
 /// <summary>The kill switch's options, read per request from the host's <see cref="ApExportRoutesHost.EbillingEnabled"/>.</summary>

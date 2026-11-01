@@ -32,6 +32,12 @@ public static class ApExportCodes
     /// <summary>Task 151a: the batch has no servable file of that format (it did not complete, or the format was not requested).</summary>
     public const string FileNotAvailable = "ebilling.export.file_not_available";
 
+    /// <summary>Email to AP and Mark Sent to AP (task 151c-1a, EB-D-181 / EB-D-182).</summary>
+    public const string ApEmailNotConfigured = "ebilling.export.ap_email_not_configured";
+    public const string AttachmentsTooLarge = "ebilling.export.attachments_too_large";
+    public const string EmailSendFailed = "ebilling.export.email_send_failed";
+    public const string BatchNotCompleted = "ebilling.export.batch_not_completed";
+
     /// <summary>Per-invoice reasons of <see cref="SelectionRefused"/>.</summary>
     public const string ReasonNotApproved = "invoice_not_approved";
     public const string ReasonAlreadyExported = "invoice_already_exported";
