@@ -113,3 +113,13 @@ Two-write rule: every entry here has a GitHub issue, and every issue has an entr
 | **Class** | Deferred: it fails closed (nothing is created); the fix needs new interface surface beyond 017's scope |
 | **Owner task** | Follow-up (chat / AIR2-034 owner) |
 | **Failure** | `ValidateChat` is sync with no I/O, and only a metadata read tells an Owned table from an org-owned (RunAsUser) one, so `table_unsupported` comes after confirmation. Fix: an async pre-suspend hook on `IToolHandler` that reads `OwnershipType`, or a tool description that names the creatable tables |
+
+## DI-012 — `rag/index-file` lets a client choose a document's search index
+
+| Field | Value |
+|---|---|
+| **Found** | 2026-11-01, task 039 adversarial review (finding 10) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2502 |
+| **Class** | Out of scope, pre-existing: 039 covers record create/update payloads; search trims by live Read (design §13.3b), so routing, not disclosure |
+| **Owner task** | Owner decision: does FR-38 cover where a document is indexed? |
+| **Failure** | `POST /api/ai/rag/index-file` passes a client, allow-listed `searchIndexName` to `FileIndexingService` (`:140`, `:224`, `:272`), so the chunks land in the index the client named, not the record's server-owned one |
