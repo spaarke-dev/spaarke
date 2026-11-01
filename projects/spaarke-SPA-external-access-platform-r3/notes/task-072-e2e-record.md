@@ -27,7 +27,8 @@
 
 - **The record Documents list** (record modal and project page) is a separate hand-built grid. Its columns cannot be resized and they overlap (Type runs into Name). Filed for R4 as #2490 (ISS-027). The Documents tab itself uses the shared grid.
 
-## Still open
+## Closed 2026-10-31
 
-- **Owner approval of the grant email copy** (072 criterion "owner review of grid columns and notification copy"). The draft is in `notes/task-036-notes.md` ("Email copy" and "Updated email copy"). It has three open questions: name the granter, put the record name in the subject, and state the access level.
-- 2026-10-31: the owner decided to fix #2458 (ISS-024) in R3; that is separate from this test.
+- **Grant email copy: approved by the owner as drafted** ("072 yes approved"). The three open choices stay as drafted: the granter is named, the record name is in the subject, and the access level is not stated. This closes 072.
+- Previously open: **Owner approval of the grant email copy** (072 criterion "owner review of grid columns and notification copy"). The draft is in `notes/task-036-notes.md` ("Email copy" and "Updated email copy"). It has three open questions: name the granter, put the record name in the subject, and state the access level.
+- 2026-10-31: the owner decided to fix #2458 (ISS-024) in R3 (task 079, option 2: a shared home-tenant read); that is separate from this test.

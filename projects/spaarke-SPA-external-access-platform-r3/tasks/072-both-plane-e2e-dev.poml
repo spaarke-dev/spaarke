@@ -4,7 +4,7 @@
     <title>Both-plane E2E on dev against success criteria 1–12 (incl. FR-10 Teams parity)</title>
     <phase>7 Deploy and verify</phase>
     <gate>after 070, 071 and 002</gate>
-    <status>in-progress</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Integration/E2E verification (tags e2e-test)</rigor-reason>
     <model-tier>sonnet</model-tier>
