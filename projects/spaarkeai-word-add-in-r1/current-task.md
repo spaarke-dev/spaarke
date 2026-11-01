@@ -9,8 +9,8 @@
 | Field | Value |
 |---|---|
 | **Task** | **133 🔄 Outlook Submit Invoice view** (FULL, opus/high). Live on dev in unified package 1.1.3; first owner UATs done. |
-| **Status** | Waiting on the owner's retest (INV-012.2) and on ebilling's work reaching master. #2501 (097f) merged. Open PR: **#2503** (task 192 filedUnder; branch fix/invoice-filed-under in C:\wt133p, cherry-pick of work d776e9277d). |
-| **Next Action** | 1. When the #2503 "Gated jest suites (office-addins)" check passes, `gh pr merge 2503 --auto --merge`. 2. After #2503 merges, remove C:\wt133p with `pwsh -NoProfile -Command "& ./scripts/worktree/Remove-WorktreeSafe.ps1 -Path 'C:\wt133p'"`. 3. Act on the owner's retest result. 4. When ebilling sends its combined master PR number, do the correction client items below. |
+| **Status** | Waiting on the owner's retest (INV-012.2) and on ebilling's work reaching master. #2501 (097f) and #2503 (task 192 filedUnder) are merged; C:\wt133p is removed. No open PRs. |
+| **Next Action** | 1. Act on the owner's retest result. 2. When ebilling sends its combined master PR number, do the correction client items below. |
 
 ## Submit Invoice (task 133): state
 - **Dev:** eBilling is ON (since 2026-10-30 15:21Z). The invoice reader is configured (`ContentUnderstanding__Endpoint`, 2026-11-01 02:54:30Z, ebilling, owner go in both sessions; analyzers sprk_invoice_v2p and sprk_invoice_v2 deployed). The owner updated Integrated apps to package **1.1.3** (#2476); the Submit Invoice ribbon button works in Outlook on the web.
@@ -27,7 +27,7 @@
 
 ## ebilling contract items (peer: ebilling, pipe cc-msg-c961e15ec4fa4e62d8bf9706a34c677d)
 - **Task 191** (work fdd3c79b7f, d4849acbe6; not on master or dev): intake 422 `reader_not_configured`, §9 `ai.invoice.*` codes. The client side is merged (#2498).
-- **Task 192 `filedUnder`** (work 25778a59b7): optional `filedUnder {entityType: Matter|Project|WorkAssignment, entityId, name}` on 409 `document_core_record_mismatch`, only when the caller can Read it. Client side is PR #2503: the sentence names the record, and the view offers "Use {name}". ebilling has been told.
+- **Task 192 `filedUnder`** (work 25778a59b7): optional `filedUnder {entityType: Matter|Project|WorkAssignment, entityId, name}` on 409 `document_core_record_mismatch`, only when the caller can Read it. Client side is merged (#2503): the sentence names the record, and the view offers "Use {name}". ebilling has been told.
 - **097b/097c Correction** (agreed 2026-10-30; work only). Client to-do when they reach master:
   - sentences for intake reasons `different_invoice_number`, `no_submission`, `submission_in_progress` ("wait, then submit the correction again");
   - stored permanent outcomes `correction_not_allowed.{invoice_status,different_firm,different_core_record,different_invoice_number,submission_in_progress}` and `correction_target_unavailable`;
@@ -58,4 +58,4 @@
 - UAT 042, 080, 121, 127, 078; PCF re-sync; A9 guest sign-in; the Ralph Dewey retest (pass the result to R3); then 090 wrap-up (`/test-diet`).
 - Post-deploy check (UAC #2468 fix): a child-BU user's unfiled Outlook save; read back the sprk_document owner and BU (expect the saver's BU team).
 - Main checkout `C:\code_files\spaarke`: leave its uncommitted files alone. C:\wtqa1906 is the owner's.
-- Cleanup later (Remove-WorktreeSafe): C:\wt2412, C:\wt2412m, C:\wt2416, C:\wt2416c, and C:\wt133p after #2501.
+- Cleanup later (Remove-WorktreeSafe): C:\wt2412, C:\wt2412m, C:\wt2416, C:\wt2416c.
