@@ -578,16 +578,18 @@ public sealed class InvoiceRejectReturnService
         _logger.LogInformation("{Verb} of invoice {InvoiceId}: completing the caller's interrupted decision.", Label(verb), invoiceId);
         // F1-a: once a record exists the request's reason no longer matters. The record the writer holds (found through the stored set) is
         // finished as it is: its stored set is closed and the portion is linked to it; RecordAsync is never asked again with new content.
-        return await FinishAsync(verb, invoiceId, portion.Id, decision, portionStatus, recordId ?? signals.StoredRecordId, decidedBy!.Id, signals.Set, ct)
+        return await FinishAsync(verb, invoiceId, portion.Id, decision, portionStatus, recordId ?? signals.StoredRecordId, decidedBy!.Id, signals.Set, ct, storedDeciderUserId: signals.StoredDeciderUserId)
             .ConfigureAwait(false);
     }
 
     /// <summary>After the transition: the portion as decided (re-asserting the decider), the record, the Signals, the link. Each step is idempotent.</summary>
     private async Task<InvoiceDecisionResult> FinishAsync(
         Verb verb, Guid invoiceId, Guid approvalId, BillingDecision decision, int? portionStatus, Guid? recordId, Guid deciderContactId,
-        InvoiceSubmissionAfterSteps.ResolvedSignalSet signals, CancellationToken ct)
+        InvoiceSubmissionAfterSteps.ResolvedSignalSet signals, CancellationToken ct, Guid? storedDeciderUserId = null)
     {
-        var decider = decision.Decider.SystemUserId ?? Guid.Empty;
+        // #2507 K1: a repeat names the closes for the decider the stored record names (as 105 does), never for whoever repeats; a first
+        // attempt (no stored record) is the caller's own decision.
+        var decider = storedDeciderUserId ?? decision.Decider.SystemUserId ?? Guid.Empty;
         if (portionStatus != verb.PortionStatus)
         {
             try
@@ -731,7 +733,7 @@ public sealed class InvoiceRejectReturnService
     // ── D-122: the invoice's Signals ──
 
     private sealed record SignalRead(
-        InvoiceSubmissionAfterSteps.ResolvedSignalSet Set, IReadOnlyList<(string Entity, Guid Id)> Subjects, InvoiceDecisionResult? Failure, Guid? StoredRecordId = null);
+        InvoiceSubmissionAfterSteps.ResolvedSignalSet Set, IReadOnlyList<(string Entity, Guid Id)> Subjects, InvoiceDecisionResult? Failure, Guid? StoredRecordId = null, Guid? StoredDeciderUserId = null);
 
     /// <summary>The Open or Acknowledged Signals on the invoice and its lines, created at or before <paramref name="decidedOnUtc"/>, ordered by id (the record's hash).</summary>
     private async Task<SignalRead> ReadSignalsAsync(Verb verb, Guid invoiceId, DateTime decidedOnUtc, CancellationToken ct)
@@ -789,7 +791,8 @@ public sealed class InvoiceRejectReturnService
                     stored.Signals.Select(s => new InvoiceSubmissionAfterSteps.ResolvedSignal(s.SignalId, s.PolicyCode)).ToList()),
                 stored.Signals.Count > 0 ? [(InvoiceReviewReadService.InvoiceEntity, invoiceId)] : [],
                 null,
-                StoredRecordId: stored.RecordId);
+                StoredRecordId: stored.RecordId,
+                StoredDeciderUserId: stored.ConfirmedByUserId);
         }
 
         return await ReadSignalsAsync(verb, invoiceId, decidedOnUtc, ct).ConfigureAwait(false);

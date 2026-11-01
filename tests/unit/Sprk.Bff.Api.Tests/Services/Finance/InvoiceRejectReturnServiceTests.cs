@@ -798,4 +798,57 @@ public sealed class InvoiceRejectReturnServiceTests
         (await Decide(w, kind, AliceUser, "Yet another reason")).Outcome.Should().Be(InvoiceDecisionOutcome.AlreadyDecided);
         w.RecordsOf(ActionOf(kind)).Should().ContainSingle();
     }
+
+    [Theory(DisplayName = "104 #2507 K1 SEEDED: the claimant's repeat names the closes for the decider the STORED record names, not for the caller's systemuser")]
+    [MemberData(nameof(Kinds))]
+    public async Task Repeat_ClosesAreNamedForTheStoredDecider_NotTheCaller(InvoiceDecisionKind kind)
+    {
+        var w = new ApprovalWorld();
+        var closes = w.AddInvoiceSignal("EB-DUP");
+        var fails = w.AddInvoiceSignal("EB-TOTAL");
+        w.CloseFailsOnce[fails] = SignalAutomatedCloseOutcome.ChangedSinceRead;
+        (await Decide(w, kind, AliceUser)).Outcome.Should().Be(InvoiceDecisionOutcome.Incomplete);
+        w.CloseDeciders.Should().OnlyContain(d => d == AliceUser, "the first attempt names the caller, who is the decider");
+
+        // The same person (the claimant's contact) repeating from another systemuser.
+        var otherUser = Guid.Parse("03000000-0000-4000-8000-0000000000f1");
+        w.ContactOfUser[otherUser] = Alice;
+        w.CloseDeciders.Clear();
+
+        var repeat = await Decide(w, kind, otherUser);
+
+        repeat.Outcome.Should().Be(InvoiceDecisionOutcome.Decided);
+        w.CloseDeciders.Should().NotBeEmpty().And.OnlyContain(d => d == AliceUser, "named for the stored record's ConfirmedByUserId, never for the repeating caller");
+        w.SignalStatus(fails).Should().Be(SignalWriter.SignalStatusResolved);
+        w.SignalStatus(closes).Should().Be(SignalWriter.SignalStatusResolved);
+    }
+
+    [Theory(DisplayName = "104 #2507 K2 (EB-D-177 / ontology D-200): another approver's repeat after the claimant stopped Incomplete at 'signals' is 200 alreadyDecided - no rights asked, no close, the Signal stays Open")]
+    [MemberData(nameof(Kinds))]
+    public async Task OtherApproverRepeat_AfterTheClaimantStoppedAtSignals_IsAlreadyDecided_AndTheSignalStaysOpen(InvoiceDecisionKind kind)
+    {
+        var w = new ApprovalWorld();
+        var signal = w.AddInvoiceSignal("EB-DUP");
+        w.CloseFailsOnce[signal] = SignalAutomatedCloseOutcome.ChangedSinceRead;
+        (await Decide(w, kind, AliceUser)).FailedStep.Should().Be("signals");
+        var records = w.RecordsOf(ActionOf(kind)).Count;
+        var closes = w.Closes.Count;
+        var probes = w.Probe.Invocations.Count;
+
+        // The repeating approver lacks Write on the Signal subjects.
+        w.Rights = (_, _) => AccessRights.Read;
+        var other = await Decide(w, kind, BobUser, "A different reason");
+
+        other.Outcome.Should().Be(InvoiceDecisionOutcome.AlreadyDecided, "the decision stands: not a 403, not a 503");
+        other.DecisionRecordId.Should().BeNull();
+        w.SignalStatus(signal).Should().Be(SignalWriter.SignalStatusOpen, "open until the claimant repeats");
+        w.Closes.Should().HaveCount(closes, "the other approver closes nothing");
+        w.Probe.Invocations.Should().HaveCount(probes, "no rights are asked for a call that closes nothing");
+        w.RecordsOf(ActionOf(kind)).Should().HaveCount(records);
+        w.Portion.GetAttributeValue<EntityReference>("sprk_decidedby").Id.Should().Be(Alice, "the attribution stays the claimant's");
+
+        w.Rights = (_, _) => AccessRights.Read | AccessRights.Write | AccessRights.Append | AccessRights.AppendTo;
+        (await Decide(w, kind, AliceUser)).Outcome.Should().Be(InvoiceDecisionOutcome.Decided);
+        w.SignalStatus(signal).Should().Be(SignalWriter.SignalStatusResolved, "the claimant's repeat finishes the close");
+    }
 }
