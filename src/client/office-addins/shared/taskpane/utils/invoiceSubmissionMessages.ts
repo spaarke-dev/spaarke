@@ -74,6 +74,29 @@ export const GENERIC_FAILED_OUTCOME_MESSAGE = "Spaarke couldn't process the invo
 export const HELD_FOR_REVIEW_MESSAGE =
   'Spaarke accepted it and is holding it for review. You can follow it in Spaarke with the tracking number.';
 
+/**
+ * §3 / §9 (ebilling 097f, EB-D-180): an Accepted submission whose invoice a correction has superseded. It is NOT a hold;
+ * the status read may also carry `replacedBy.trackingNumber` (absent when the caller can't read the correcting one).
+ */
+export const REPLACED_BY_CORRECTION_CODE = 'ebilling.submission.replaced_by_correction';
+
+/**
+ * The sentence for an Accepted submission: none without a code, the replaced-by-correction sentence for
+ * {@link REPLACED_BY_CORRECTION_CODE}, and {@link HELD_FOR_REVIEW_MESSAGE} for any other code.
+ */
+export function describeAcceptedOutcome(
+  code: string | null | undefined,
+  replacedByTrackingNumber?: string
+): string | undefined {
+  if (!code) return undefined;
+  if (code === REPLACED_BY_CORRECTION_CODE) {
+    return replacedByTrackingNumber
+      ? `This invoice was replaced by a correction (tracking ${replacedByTrackingNumber}).`
+      : 'This invoice was replaced by a correction.';
+  }
+  return HELD_FOR_REVIEW_MESSAGE;
+}
+
 const NOTHING = 'Nothing was submitted.';
 
 function tryAgain(facts: Facts): string {
