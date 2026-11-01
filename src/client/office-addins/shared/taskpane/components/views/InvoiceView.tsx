@@ -17,12 +17,11 @@ import {
 } from '@fluentui/react-components';
 import { ReceiptRegular } from '@fluentui/react-icons';
 import type { IHostAdapter } from '@shared/adapters';
-import { ENTITY_LOGICAL_NAMES, type EntitySearchResult, type EntityType } from '../../hooks/useEntitySearch';
+import type { EntitySearchResult, EntityType } from '../../hooks/useEntitySearch';
 import { useAnnounce } from '../../hooks/useAnnounce';
 import { RelatedToPicker } from '../RelatedToPicker';
 import { searchOfficeEntities } from '../../services/officeEntitySearch';
 import { fetchRelatedCandidates, type RelatedCandidate } from '../../services/communicationSuggestionsService';
-import type { DocumentIdentityState } from '../../services/documentIdentityService';
 import {
   INVOICE_CORE_RECORD_TYPES,
   buildInvoiceSubmissionInput,
@@ -107,30 +106,6 @@ export interface InvoiceViewProps {
    * to another kind of record.
    */
   filedRecord?: EntitySearchResult | null;
-}
-
-const CORE_TYPE_BY_LOGICAL_NAME: Readonly<Record<string, InvoiceCoreRecordType>> = Object.fromEntries(
-  INVOICE_CORE_RECORD_TYPES.map(type => [ENTITY_LOGICAL_NAMES[type], type])
-);
-
-/**
- * The core record the open email is filed to, from the pane's email identity (task 120): the same answer the Save tab's
- * "Filed to" card shows. Null when the email is not saved, its record is unknown, or it is filed to a record that is not
- * a Matter, Project or Work Assignment.
- */
-export function invoiceFiledRecord(identity: DocumentIdentityState | undefined): EntitySearchResult | null {
-  if (identity === undefined || identity === 'checking' || identity.kind !== 'resolved') return null;
-  const record = identity.relatedRecord;
-  const entityType = record ? CORE_TYPE_BY_LOGICAL_NAME[record.entityType] : undefined;
-  if (!record || !entityType) return null;
-  const name = record.displayName || record.name || record.number || '';
-  return {
-    id: record.id,
-    entityType,
-    logicalName: record.entityType,
-    name,
-    ...(record.number && record.number !== name ? { displayInfo: record.number } : {}),
-  };
 }
 
 function sameRecordId(a: string, b: string): boolean {

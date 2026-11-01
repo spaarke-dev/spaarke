@@ -12,7 +12,8 @@
 
 import type { AttachmentInfo } from '@shared/adapters/types';
 import { cleanGuid } from '@spaarke/ui-components/guid';
-import type { EntityType } from '../hooks/useEntitySearch';
+import type { EntitySearchResult, EntityType } from '../hooks/useEntitySearch';
+import type { DocumentIdentityState } from './documentIdentityService';
 import {
   EMAIL_CONTENT_BUDGET_BYTES,
   MAX_ATTACHMENT_BYTES,
@@ -28,6 +29,32 @@ import type {
 /** The core records an invoice is submitted against (owner decision 2026-10-21 item 5; the contract's targetEntity). */
 export type InvoiceCoreRecordType = Extract<EntityType, 'Matter' | 'Project' | 'WorkAssignment'>;
 export const INVOICE_CORE_RECORD_TYPES: InvoiceCoreRecordType[] = ['Matter', 'Project', 'WorkAssignment'];
+
+const CORE_TYPE_BY_LOGICAL_NAME: Readonly<Record<string, InvoiceCoreRecordType>> = {
+  sprk_matter: 'Matter',
+  sprk_project: 'Project',
+  sprk_workassignment: 'WorkAssignment',
+};
+
+/**
+ * The core record the open email is filed to, from the pane's email identity (task 120): the same answer the Save tab's
+ * "Filed to" card shows. Null when the email is not saved, its record is unknown, or it is filed to a record that is not
+ * a Matter, Project or Work Assignment. The Invoice view starts on it (`InvoiceViewProps.filedRecord`).
+ */
+export function invoiceFiledRecord(identity: DocumentIdentityState | undefined): EntitySearchResult | null {
+  if (identity === undefined || identity === 'checking' || identity.kind !== 'resolved') return null;
+  const record = identity.relatedRecord;
+  const entityType = record ? CORE_TYPE_BY_LOGICAL_NAME[record.entityType] : undefined;
+  if (!record || !entityType) return null;
+  const name = record.displayName || record.name || record.number || '';
+  return {
+    id: record.id,
+    entityType,
+    logicalName: record.entityType,
+    name,
+    ...(record.number && record.number !== name ? { displayInfo: record.number } : {}),
+  };
+}
 
 /** A mark as the contract spells it (exact case). */
 export type InvoiceWireMark = 'Invoice' | 'Supporting' | 'DontSave';

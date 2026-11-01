@@ -6,7 +6,8 @@
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { FluentProvider, webLightTheme } from '@fluentui/react-components';
-import { InvoiceView, INVOICE_UPLOAD_HINT, invoiceFiledRecord, type InvoiceViewProps } from '../InvoiceView';
+import { InvoiceView, INVOICE_UPLOAD_HINT, type InvoiceViewProps } from '../InvoiceView';
+import { invoiceFiledRecord } from '../../../services/invoiceSubmissionSeam';
 import { fetchRelatedCandidates } from '../../../services/communicationSuggestionsService';
 import { searchOfficeEntities } from '../../../services/officeEntitySearch';
 import type { IHostAdapter } from '@shared/adapters';
