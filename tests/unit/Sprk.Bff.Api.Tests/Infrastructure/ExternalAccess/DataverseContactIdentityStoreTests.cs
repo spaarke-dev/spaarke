@@ -247,6 +247,110 @@ public class DataverseContactIdentityStoreTests
             "bbbbbbbb-0000-4000-8000-000000000002", "aaaaaaaa-0000-4000-8000-000000000001"));
     }
 
+    // ── r3 task 079 (#2458, #2491): one contact's stored home directory, in a read of its own ─────────────────────────
+
+    private static readonly Guid TenantContact = Guid.Parse("CCCCCCCC-0000-4000-8000-000000000079");
+    private static readonly Guid OtherTenantContact = Guid.Parse("DDDDDDDD-0000-4000-8000-000000000079");
+
+    [Fact]
+    public void TheHomeTenantRead_SelectsTheContactIdAndTheHomeDirectoryOnly_ById_AndContactSelectIsUnchanged()
+    {
+        DataverseContactIdentityStore.BuildHomeTenantReadPath(TenantContact)
+            .Should().Be("contacts(cccccccc-0000-4000-8000-000000000079)?$select=contactid,sprk_externaltenantid");
+
+        // ContactSelect is pinned exactly: the tenant is read only where it is selected on its own (ContactBindingDecision's
+        // isolation of the A9 column), never added to every contact read.
+        DataverseContactIdentityStore.ContactSelect.Should().Be(
+            "contactid,statecode,emailaddress1,sprk_externalobjectid,sprk_identityplane,sprk_externalobjectidkey,"
+            + "sprk_identitycollisionon,sprk_identitycollisionoid,sprk_identitycollisionplane,sprk_identitycollisionreason,"
+            + "sprk_identitycollisionparties,sprk_externalaccessremovedon");
+    }
+
+    /// <summary>
+    /// The home-tenant read over Dataverse-shaped answers: a tenant only from this contact's readable GUID. A null, absent,
+    /// empty or non-GUID value (a masked column reads null) is no tenant, could not tell; an answer about another contact, or
+    /// one that cannot be read, is Failed. Neither is ever a tenant.
+    /// </summary>
+    [Theory]
+    [InlineData("tenant", LookupStatus.Read, true)]
+    [InlineData("tenant-upper-case", LookupStatus.Read, true)]
+    [InlineData("tenant-with-etag", LookupStatus.Read, true)]
+    [InlineData("null", LookupStatus.Read, false)]
+    [InlineData("absent", LookupStatus.Read, false)]
+    [InlineData("empty", LookupStatus.Read, false)]
+    [InlineData("white-space", LookupStatus.Read, false)]
+    [InlineData("not-a-guid", LookupStatus.Read, false)]
+    [InlineData("empty-guid", LookupStatus.Read, false)]
+    [InlineData("a-number", LookupStatus.Read, false)]
+    [InlineData("not-found", LookupStatus.Read, false)]
+    [InlineData("another-contact", LookupStatus.Failed, false)]
+    [InlineData("no-contact-id", LookupStatus.Failed, false)]
+    [InlineData("not-json", LookupStatus.Failed, false)]
+    [InlineData("no-body", LookupStatus.Failed, false)]
+    [InlineData("json-not-an-object", LookupStatus.Failed, false)]
+    public void TheHomeTenantRead_IsATenant_OnlyForThisContactsReadableGuid(
+        string scenario, LookupStatus expectedStatus, bool expectedTenant)
+    {
+        var id = $"\"contactid\":\"{TenantContact:D}\"";
+        var (code, body) = scenario switch
+        {
+            "tenant" => (HttpStatusCode.OK, $"{{{id},\"sprk_externaltenantid\":\"{HomeTenant:D}\"}}"),
+            "tenant-upper-case" => (HttpStatusCode.OK, $"{{{id},\"sprk_externaltenantid\":\"{HomeTenant.ToString("D").ToUpperInvariant()}\"}}"),
+            "tenant-with-etag" => (HttpStatusCode.OK,
+                $"{{\"@odata.context\":\"https://org.crm.dynamics.com/api/data/v9.2/$metadata#contacts(contactid,sprk_externaltenantid)/$entity\","
+                + $"\"@odata.etag\":\"W/\\\"4242\\\"\",{id},\"sprk_externaltenantid\":\"{HomeTenant:D}\"}}"),
+            "null" => (HttpStatusCode.OK, $"{{{id},\"sprk_externaltenantid\":null}}"),
+            "absent" => (HttpStatusCode.OK, $"{{{id}}}"),
+            "empty" => (HttpStatusCode.OK, $"{{{id},\"sprk_externaltenantid\":\"\"}}"),
+            "white-space" => (HttpStatusCode.OK, $"{{{id},\"sprk_externaltenantid\":\"   \"}}"),
+            "not-a-guid" => (HttpStatusCode.OK, $"{{{id},\"sprk_externaltenantid\":\"contoso.example\"}}"),
+            "empty-guid" => (HttpStatusCode.OK, $"{{{id},\"sprk_externaltenantid\":\"{Guid.Empty:D}\"}}"),
+            "a-number" => (HttpStatusCode.OK, $"{{{id},\"sprk_externaltenantid\":42}}"),
+            "not-found" => (HttpStatusCode.NotFound, (string?)null),
+            "another-contact" => (HttpStatusCode.OK, $"{{\"contactid\":\"{OtherTenantContact:D}\",\"sprk_externaltenantid\":\"{HomeTenant:D}\"}}"),
+            "no-contact-id" => (HttpStatusCode.OK, $"{{\"sprk_externaltenantid\":\"{HomeTenant:D}\"}}"),
+            "not-json" => (HttpStatusCode.OK, "<html>gateway timeout</html>"),
+            "no-body" => (HttpStatusCode.OK, null),
+            "json-not-an-object" => (HttpStatusCode.OK, "[]"),
+            _ => throw new ArgumentOutOfRangeException(nameof(scenario)),
+        };
+
+        var read = DataverseContactIdentityStore.InterpretHomeTenantRead(LookupStatus.Read, code, body, TenantContact);
+
+        read.Status.Should().Be(expectedStatus, scenario);
+        read.HomeTenantId.Should().Be(expectedTenant ? HomeTenant : null, scenario);
+    }
+
+    [Theory]
+    [InlineData(LookupStatus.ColumnMissing)]
+    [InlineData(LookupStatus.Failed)]
+    public void TheHomeTenantRead_KeepsAFaultedRead_AndIgnoresItsBody(LookupStatus fault)
+        => DataverseContactIdentityStore.InterpretHomeTenantRead(fault, HttpStatusCode.BadRequest,
+                $"{{\"contactid\":\"{TenantContact:D}\",\"sprk_externaltenantid\":\"{HomeTenant:D}\"}}", TenantContact)
+            .Should().Be(new HomeTenantLookup(fault, null));
+
+    /// <summary>
+    /// The store's two steps over Dataverse's real error bodies: the 400 for a column this environment lacks classifies
+    /// ColumnMissing (and stays that), any other error classifies Failed. Neither carries a tenant.
+    /// </summary>
+    [Theory]
+    [InlineData("{\"error\":{\"code\":\"0x80060888\",\"message\":\"Could not find a property named 'sprk_externaltenantid' on type 'Microsoft.Dynamics.CRM.contact'.\"}}", LookupStatus.ColumnMissing)]
+    [InlineData("{\"error\":{\"code\":\"0x80072321\",\"message\":\"Number of requests exceeded the limit of 6000 over time window of 300 seconds.\"}}", LookupStatus.Failed)]
+    [InlineData("{\"error\":{\"code\":\"0x80040220\",\"message\":\"Principal user is missing prvReadContact privilege.\"}}", LookupStatus.Failed)]
+    public void TheHomeTenantRead_OfAnErrorBody_IsColumnMissingOnlyForAMissingColumn(string errorBody, LookupStatus expected)
+    {
+        var classified = DataverseContactIdentityStore.ClassifyError(errorBody);
+
+        classified.Should().Be(expected);
+        DataverseContactIdentityStore.InterpretHomeTenantRead(classified, HttpStatusCode.BadRequest, null, TenantContact)
+            .Should().Be(new HomeTenantLookup(expected, null));
+    }
+
+    [Fact]
+    public void AHomeTenantLookup_NeverPrintsTheTenant()
+        => HomeTenantLookup.FromStored(HomeTenant.ToString("D")).ToString()
+            .Should().NotContain(HomeTenant.ToString("D")).And.Contain("HasTenant = True");
+
     [Fact]
     public void EveryContactRead_SelectsTheBindingAndTheMirror_SoASquatCanBeToldApart()
         => DataverseContactIdentityStore.ContactSelect.Split(',')

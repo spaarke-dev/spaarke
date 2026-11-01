@@ -46,6 +46,7 @@ public class GrantAccessNotifierExternalTests
     private readonly FakeLinks _links = new();
     private readonly RecordingEmails _emails = new();
     private readonly ListLogger _log = new();
+    private readonly Mock<IGenericEntityService> _bell = new();
 
     public GrantAccessNotifierExternalTests()
     {
@@ -67,7 +68,7 @@ public class GrantAccessNotifierExternalTests
             Mock.Of<IGenericEntityService>(), NullLogger<SecureShareNoAccessGuard>.Instance);
 
         return new GrantAccessNotifier(
-            new NotificationService(Mock.Of<IGenericEntityService>(), NullLogger<NotificationService>.Instance),
+            new NotificationService(_bell.Object, NullLogger<NotificationService>.Instance),
             _dataverse, _identities.Object, _links, guard, participations, _emails,
             new CustomerIdentity(
                 Options.Create(new CustomerOptions { Id = customerId ?? string.Empty }), config,
@@ -317,9 +318,10 @@ public class GrantAccessNotifierExternalTests
         _emails.Sent.Should().BeEmpty("a workforce binding is not a CIAM account");
     }
 
+    // r3 047: a home-registered (WorkforceHome) contact signs in to the same portal and is emailed too, when no licensed user
+    // carries its home pair (task 079: AWorkforceHomeContact_NotLinked_IsEmailedExactlyAsACiamContactIs).
     [Theory]
     [InlineData(IdentityPlaneMarker.External)]
-    [InlineData(IdentityPlaneMarker.WorkforceHome)] // r3 047: a home-registered contact signs in to the same portal
     public async Task ContactBoundOnAPortalPlane_IsEmailed(IdentityPlaneMarker plane)
     {
         var contact = Contact(oid: Guid.NewGuid(), plane: (int)plane);
@@ -328,6 +330,190 @@ public class GrantAccessNotifierExternalTests
             ExternalGrantRootType.Matter, _matter, contact, ExternalAccessLevel.Collaborate, Granter());
 
         _emails.Sent.Should().ContainSingle();
+    }
+
+    // ── r3 task 079 (#2458): a WorkforceHome contact whose home sign-in resolves as a licensed user is not emailed ────────
+
+    private static readonly Guid HomeTenant = Guid.Parse("b2b2b2b2-0000-4000-8000-000000000079");
+    private static readonly Guid HomeOid = Guid.Parse("a3a3a3a3-0000-4000-8000-000000000079");
+    private static readonly Guid LicensedUser = Guid.Parse("c4c4c4c4-0000-4000-8000-000000000079");
+    private const string HomeAddress = "sam.employee@customer.test";
+
+    private static HomeLinkRow LinkRow(Guid user, bool disabled) =>
+        new(user, disabled, HomeTenant.ToString("D"), HomeOid.ToString("D"));
+
+    /// <summary>
+    /// An active WorkforceHome contact AS THE REAL STORE READS IT: <c>GetContactAsync</c> selects <c>ContactSelect</c>, which
+    /// carries no <c>sprk_externaltenantid</c>, so the row has no tenant; the home directory comes only from the home-tenant
+    /// read (<paramref name="tenant"/>, the stored tenant by default). The stored-link read answers <paramref name="link"/>
+    /// (no licensed user by default).
+    /// </summary>
+    private Guid HomeContact(HomeTenantLookup? tenant = null, HomeLinkLookup? link = null)
+    {
+        var id = Guid.NewGuid();
+        _identities.Setup(i => i.GetContactAsync(id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(ContactLookup.Of(new ContactBindingRow(
+                id, 0, HomeOid.ToString("D"), (int)IdentityPlaneMarker.WorkforceHome, Email: HomeAddress)));
+        _identities.Setup(i => i.ReadHomeTenantAsync(id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(tenant ?? HomeTenantLookup.FromStored(HomeTenant.ToString("D")));
+        _identities.Setup(i => i.FindHomeLinkedSystemUsersAsync(HomeTenant, HomeOid, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(link ?? HomeLinkLookup.Of());
+        return id;
+    }
+
+    /// <summary>No log line names the person: no email address, no name, no tenant value (ADR-015).</summary>
+    private void NoIdentityValueWasLogged()
+        => _log.All.Should().NotContain(line => line.Contains(HomeAddress) || line.Contains(HomeTenant.ToString("D"))
+                                                 || line.Contains(HomeTenant.ToString("N")) || line.Contains("Gina Granter"));
+
+    [Fact]
+    public async Task AWorkforceHomeContact_NotLinked_IsEmailedExactlyAsACiamContactIs()
+    {
+        var home = HomeContact();
+        var ciam = Contact(oid: Guid.NewGuid(), plane: (int)IdentityPlaneMarker.External);
+
+        var outcome = await Notifier().NotifyContactGrantAsync(
+            ExternalGrantRootType.Matter, _matter, home, ExternalAccessLevel.Collaborate, Granter());
+        await Notifier().NotifyContactGrantAsync(
+            ExternalGrantRootType.Matter, _matter, ciam, ExternalAccessLevel.Collaborate, Granter());
+
+        outcome.Should().Be(GrantNotificationOutcome.Sent);
+        _emails.Sent.Should().HaveCount(2);
+        var (homeSent, ciamSent) = (_emails.Sent[0], _emails.Sent[1]);
+        homeSent.To.Should().Be(HomeAddress);
+        homeSent.LinkUrl.Should().Be(Link(_matter)).And.Be(ciamSent.LinkUrl, "the same deep link");
+        homeSent.Subject.Should().Contain(RecordName).And.Be(ciamSent.Subject, "the same template");
+        homeSent.Message.Should().Be(ciamSent.Message);
+        _identities.Verify(i => i.ReadHomeTenantAsync(home, It.IsAny<CancellationToken>()), Times.Once);
+        _identities.Verify(i => i.FindHomeLinkedSystemUsersAsync(HomeTenant, HomeOid, It.IsAny<CancellationToken>()), Times.Once,
+            "the stored-link read is asked with the stored home tenant and the bound oid, as the portal's home sign-in asks it");
+        NoIdentityValueWasLogged();
+    }
+
+    [Fact]
+    public async Task AWorkforceHomeContact_WhoseHomePairAnEnabledLicensedUserCarries_IsNotEmailed_NorToldInApp()
+    {
+        var contact = HomeContact(link: HomeLinkLookup.Of(LinkRow(LicensedUser, disabled: false)));
+
+        var outcome = await Notifier().NotifyContactGrantAsync(
+            ExternalGrantRootType.Matter, _matter, contact, ExternalAccessLevel.Collaborate, Granter());
+
+        outcome.Should().Be(GrantNotificationOutcome.NotApplicable,
+            "the home sign-in resolves in the portal as the licensed user, whose own rights apply there");
+        outcome.Should().NotBe(GrantNotificationOutcome.Sent);
+        _emails.Sent.Should().BeEmpty();
+        _bell.Invocations.Should().BeEmpty("the licensed user is not sent the internal notice for a contact grant either");
+        NoIdentityValueWasLogged();
+    }
+
+    [Fact]
+    public async Task AWorkforceHomeContact_WhoseHomePairOnlyADisabledUserCarries_IsNotEmailed()
+    {
+        var contact = HomeContact(link: HomeLinkLookup.Of(LinkRow(LicensedUser, disabled: true)));
+
+        var outcome = await Notifier().NotifyContactGrantAsync(
+            ExternalGrantRootType.Matter, _matter, contact, ExternalAccessLevel.Collaborate, Granter());
+
+        outcome.Should().Be(GrantNotificationOutcome.NotApplicable, "the portal admits that home sign-in nowhere");
+        _emails.Sent.Should().BeEmpty();
+        _bell.Invocations.Should().BeEmpty();
+        NoIdentityValueWasLogged();
+    }
+
+    public static TheoryData<string, HomeTenantLookup?, HomeLinkLookup?, string?> CouldNotTell => new()
+    {
+        { "two enabled users carry the pair (ambiguous)", null,
+            HomeLinkLookup.Of(LinkRow(LicensedUser, disabled: false), LinkRow(Guid.Parse("c5c5c5c5-0000-4000-8000-000000000079"), disabled: false)), null },
+        { "the stored tenant reads empty (null, masked or unparsable)", HomeTenantLookup.FromStored(null), null, null },
+        { "the stored tenant is not a GUID", HomeTenantLookup.FromStored("contoso.example"), null, null },
+        { "the tenant read failed", HomeTenantLookup.Failed, null, null },
+        { "the tenant column is not provisioned", HomeTenantLookup.ColumnMissing, null, null },
+        { "the tenant read throws", null, null, "tenant" },
+        { "the stored-link read failed", null, HomeLinkLookup.Failed, null },
+        { "the stored-link columns are not provisioned", null, HomeLinkLookup.ColumnMissing, null },
+        { "the stored-link read throws", null, null, "link" },
+    };
+
+    [Theory]
+    [MemberData(nameof(CouldNotTell))]
+    public async Task AWorkforceHomeContact_WhoseHomeLinkCannotBeTold_IsNotEmailed_AndTheGrantStands_FailClosed(
+        string because, HomeTenantLookup? tenant, HomeLinkLookup? link, string? throws)
+    {
+        var contact = HomeContact(tenant, link);
+        if (throws == "tenant")
+        {
+            _identities.Setup(i => i.ReadHomeTenantAsync(contact, It.IsAny<CancellationToken>()))
+                .ThrowsAsync(new HttpRequestException("tenant read down"));
+        }
+        else if (throws == "link")
+        {
+            _identities.Setup(i => i.FindHomeLinkedSystemUsersAsync(HomeTenant, HomeOid, It.IsAny<CancellationToken>()))
+                .ThrowsAsync(new HttpRequestException("link read down"));
+        }
+
+        var act = () => Notifier().NotifyContactGrantAsync(
+            ExternalGrantRootType.Matter, _matter, contact, ExternalAccessLevel.Collaborate, Granter());
+
+        (await act.Should().NotThrowAsync(because)).Subject.Should().Be(GrantNotificationOutcome.Failed, because);
+        _emails.Sent.Should().BeEmpty(because);
+        _bell.Invocations.Should().BeEmpty(because);
+        _log.Warnings.Should().Contain(w => w.Contains("[GRANT-NOTIFY]") && w.Contains(contact.ToString()), because);
+        if ((tenant is not null && tenant.HomeTenantId is null) || throws == "tenant")
+        {
+            _identities.Verify(i => i.FindHomeLinkedSystemUsersAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()),
+                Times.Never, "no stored-link read without a stored tenant");
+        }
+
+        NoIdentityValueWasLogged();
+    }
+
+    [Theory]
+    [InlineData((int)IdentityPlaneMarker.External)]
+    [InlineData(null)] // a pre-141 CIAM binding (no plane marker)
+    public async Task ANonWorkforceHomeContact_IsEmailedAsToday_WithoutTheHomeReads(int? plane)
+    {
+        var contact = Contact(oid: Guid.NewGuid(), plane: plane);
+
+        var outcome = await Notifier().NotifyContactGrantAsync(
+            ExternalGrantRootType.Matter, _matter, contact, ExternalAccessLevel.Collaborate, Granter());
+
+        outcome.Should().Be(GrantNotificationOutcome.Sent);
+        _emails.Sent.Should().ContainSingle();
+        _identities.Verify(i => i.ReadHomeTenantAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
+        _identities.Verify(i => i.FindHomeLinkedSystemUsersAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Theory]
+    [InlineData((int)IdentityPlaneMarker.Workforce)] // a Spaarke-tenant workforce binding is never emailed
+    [InlineData(null)] // never onboarded
+    public async Task AContactNotEmailedToday_StaysUnemailed_WithoutTheHomeReads(int? plane)
+    {
+        var contact = plane is null ? Contact(oid: null) : Contact(oid: Guid.NewGuid(), plane: plane);
+
+        var outcome = await Notifier().NotifyContactGrantAsync(
+            ExternalGrantRootType.Matter, _matter, contact, ExternalAccessLevel.Collaborate, Granter());
+
+        outcome.Should().Be(GrantNotificationOutcome.NotApplicable);
+        _emails.Sent.Should().BeEmpty();
+        _identities.Verify(i => i.ReadHomeTenantAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task AWorkforceHomeContact_ThatAnInternalUserRepresents_NeverReachesTheHomeCheck()
+    {
+        var contact = HomeContact();
+        _links.ByContact[contact] = new[]
+        {
+            new AssignedLinkCandidate(Guid.NewGuid(), contact, HomeOid, IsDisabled: true, AccessMode: 0, ApplicationId: null, IsExternal: false),
+        };
+
+        var outcome = await Notifier().NotifyContactGrantAsync(
+            ExternalGrantRootType.Matter, _matter, contact, ExternalAccessLevel.Collaborate, Granter());
+
+        outcome.Should().Be(GrantNotificationOutcome.NotApplicable, "the internal-user path decides it, unchanged");
+        _emails.Sent.Should().BeEmpty();
+        _identities.Verify(i => i.ReadHomeTenantAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
+        _identities.Verify(i => i.FindHomeLinkedSystemUsersAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     // ── review K3: the granter's UPN is never shown to an external party ────────────────────────────────────────────────
@@ -560,6 +746,9 @@ public class GrantAccessNotifierExternalTests
     {
         public List<string> Warnings { get; } = new();
 
+        /// <summary>Every line logged, at any level.</summary>
+        public List<string> All { get; } = new();
+
         public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
 
         public bool IsEnabled(LogLevel logLevel) => true;
@@ -567,8 +756,10 @@ public class GrantAccessNotifierExternalTests
         public void Log<TState>(
             LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
         {
+            var text = formatter(state, exception);
+            All.Add(text);
             if (logLevel >= LogLevel.Warning)
-                Warnings.Add(formatter(state, exception));
+                Warnings.Add(text);
         }
     }
 }
