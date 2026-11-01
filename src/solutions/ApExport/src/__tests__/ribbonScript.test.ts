@@ -202,6 +202,91 @@ describe('enable rules (display only)', () => {
   });
 });
 
+/**
+ * The two rules the coordinator added (151b review): the grid Export to AP is enabled only when every selected invoice is
+ * Approved (the enable rule runs selectionHasStatus "approved"), and Mark Paid is shown only to a user with Write on
+ * sprk_invoice (the decide right is Write), on the grid and the form. The script half runs in the sandbox; the wiring
+ * half reads the committed RibbonDiff, since an EntityPrivilegeRule is evaluated by the platform, not by the script.
+ */
+const RIBBON = fs
+  .readFileSync(
+    path.join(__dirname, '..', '..', '..', '..', 'dataverse', 'solutions', 'SpaarkeMaster', 'Entities', 'sprk_Invoice', 'RibbonDiff.xml'),
+    'utf8'
+  )
+  .replace(/^﻿/, '');
+
+/** The inner XML of the element `<tag Id="id">...</tag>` in the RibbonDiff ('' when absent). */
+function block(tag: string, id: string): string {
+  const match = new RegExp(`<${tag} Id="${id.replace(/\./g, '\\.')}">([\\s\\S]*?)</${tag}>`).exec(RIBBON);
+  return match ? match[1] : '';
+}
+
+/** The rule ids a command lists under EnableRules or DisplayRules. */
+function rulesOf(commandId: string, kind: 'EnableRule' | 'DisplayRule'): string[] {
+  const command = block('CommandDefinition', commandId);
+  return Array.from(command.matchAll(new RegExp(`<${kind} Id="([^"]+)" />`, 'g')), m => m[1]);
+}
+
+const GRID_EXPORT = 'sprk.ApExport.Invoice.Grid.Export.Command';
+const FORM_EXPORT = 'sprk.ApExport.Invoice.Form.Export.Command';
+const GRID_MARKPAID = 'sprk.ApExport.Invoice.Grid.MarkPaid.Command';
+const FORM_MARKPAID = 'sprk.ApExport.Invoice.Form.MarkPaid.Command';
+const SELECTION_APPROVED = 'sprk.ApExport.Invoice.SelectionApproved.EnableRule';
+const WRITE_PRIVILEGE = 'sprk.ApExport.InvoiceWritePrivilege.DisplayRule';
+const CREATE_BATCH_PRIVILEGE = 'sprk.ApExport.CreateBatchPrivilege.DisplayRule';
+
+describe('grid Export to AP: every selected invoice is Approved', () => {
+  it('fires when every selected invoice is Approved', async () => {
+    const h = harness({ rows: [{ statuscode: 659490000 }, { statuscode: 659490000 }] });
+    expect(await h.ribbon.selectionHasStatus([INV_A, INV_B], 'approved')).toBe(true);
+  });
+
+  it('does not fire when one is Sent to AP, all are Paid, or one is not returned', async () => {
+    expect(
+      await harness({ rows: [{ statuscode: 659490000 }, { statuscode: 659490001 }] }).ribbon.selectionHasStatus([INV_A, INV_B], 'approved')
+    ).toBe(false);
+    expect(
+      await harness({ rows: [{ statuscode: 659490002 }, { statuscode: 659490002 }] }).ribbon.selectionHasStatus([INV_A, INV_B], 'approved')
+    ).toBe(false);
+    expect(await harness({ rows: [{ statuscode: 659490000 }] }).ribbon.selectionHasStatus([INV_A, INV_B], 'approved')).toBe(false);
+  });
+
+  it('the grid command carries the rule, which asks for "approved" on the selected ids', () => {
+    expect(rulesOf(GRID_EXPORT, 'EnableRule')).toEqual(['sprk.ApExport.Invoice.SelectionInRange.EnableRule', SELECTION_APPROVED]);
+    const rule = block('EnableRule', SELECTION_APPROVED);
+    expect(rule).toContain('FunctionName="Spaarke.ApExport.Ribbon.selectionHasStatus"');
+    expect(rule).toContain('<CrmParameter Value="SelectedControlSelectedItemIds" />');
+    expect(rule).toContain('<StringParameter Value="approved" />');
+    expect(rule).toContain('Default="false"');
+  });
+
+  it('keeps the create-privilege display rule; the form and Mark Paid commands do not carry the selection rule', () => {
+    expect(rulesOf(GRID_EXPORT, 'DisplayRule')).toEqual([CREATE_BATCH_PRIVILEGE]);
+    expect(rulesOf(FORM_EXPORT, 'EnableRule')).not.toContain(SELECTION_APPROVED);
+    expect(rulesOf(GRID_MARKPAID, 'EnableRule')).not.toContain(SELECTION_APPROVED);
+  });
+});
+
+describe('Mark Paid: shown only with Write on sprk_invoice', () => {
+  it('the rule is the Write privilege on sprk_invoice', () => {
+    expect(block('DisplayRule', WRITE_PRIVILEGE).trim()).toBe(
+      '<EntityPrivilegeRule EntityName="sprk_invoice" PrivilegeType="Write" PrivilegeDepth="Basic" />'
+    );
+  });
+
+  it('fires on the grid and the form Mark Paid commands, which keep their status enable rules', () => {
+    expect(rulesOf(GRID_MARKPAID, 'DisplayRule')).toEqual([WRITE_PRIVILEGE]);
+    expect(rulesOf(FORM_MARKPAID, 'DisplayRule')).toEqual(['sprk.ApExport.Invoice.FormExisting.DisplayRule', WRITE_PRIVILEGE]);
+    expect(rulesOf(GRID_MARKPAID, 'EnableRule')).toContain('sprk.ApExport.Invoice.SelectionSentToAp.EnableRule');
+    expect(rulesOf(FORM_MARKPAID, 'EnableRule')).toEqual(['sprk.ApExport.Invoice.FormSentToAp.EnableRule']);
+  });
+
+  it('does not fire on the Export commands', () => {
+    expect(rulesOf(GRID_EXPORT, 'DisplayRule')).not.toContain(WRITE_PRIVILEGE);
+    expect(rulesOf(FORM_EXPORT, 'DisplayRule')).not.toContain(WRITE_PRIVILEGE);
+  });
+});
+
 describe('dialog commands', () => {
   it('openFromGrid opens the page with the mode and the ids, then refreshes the grid', async () => {
     const h = harness({});

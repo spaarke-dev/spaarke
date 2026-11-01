@@ -113,6 +113,7 @@
       </EnableRules>
       <DisplayRules>
         <DisplayRule Id="sprk.ApExport.Invoice.FormExisting.DisplayRule" />
+        <DisplayRule Id="sprk.ApExport.InvoiceWritePrivilege.DisplayRule" />
       </DisplayRules>
       <Actions>
         <JavaScriptFunction Library="$webresource:sprk_/scripts/apexport_ribbon.js" FunctionName="Spaarke.ApExport.Ribbon.openFromForm">
@@ -124,6 +125,7 @@
     <CommandDefinition Id="sprk.ApExport.Invoice.Grid.Export.Command">
       <EnableRules>
         <EnableRule Id="sprk.ApExport.Invoice.SelectionInRange.EnableRule" />
+        <EnableRule Id="sprk.ApExport.Invoice.SelectionApproved.EnableRule" />
       </EnableRules>
       <DisplayRules>
         <DisplayRule Id="sprk.ApExport.CreateBatchPrivilege.DisplayRule" />
@@ -141,7 +143,9 @@
         <EnableRule Id="sprk.ApExport.Invoice.SelectionInRange.EnableRule" />
         <EnableRule Id="sprk.ApExport.Invoice.SelectionSentToAp.EnableRule" />
       </EnableRules>
-      <DisplayRules />
+      <DisplayRules>
+        <DisplayRule Id="sprk.ApExport.InvoiceWritePrivilege.DisplayRule" />
+      </DisplayRules>
       <Actions>
         <JavaScriptFunction Library="$webresource:sprk_/scripts/apexport_ribbon.js" FunctionName="Spaarke.ApExport.Ribbon.openFromGrid">
           <CrmParameter Value="SelectedControlSelectedItemIds" />
@@ -211,6 +215,9 @@
       <DisplayRule Id="sprk.ApExport.Invoice.FormExisting.DisplayRule">
         <FormStateRule State="Existing" />
       </DisplayRule>
+      <DisplayRule Id="sprk.ApExport.InvoiceWritePrivilege.DisplayRule">
+        <EntityPrivilegeRule EntityName="sprk_invoice" PrivilegeType="Write" PrivilegeDepth="Basic" />
+      </DisplayRule>
     </DisplayRules>
     <EnableRules>
       <EnableRule Id="sprk.ApExport.Invoice.FormApproved.EnableRule">
@@ -223,6 +230,12 @@
         <CustomRule Library="$webresource:sprk_/scripts/apexport_ribbon.js" FunctionName="Spaarke.ApExport.Ribbon.formStatusIs" Default="false">
           <CrmParameter Value="PrimaryControl" />
           <StringParameter Value="sentToAp" />
+        </CustomRule>
+      </EnableRule>
+      <EnableRule Id="sprk.ApExport.Invoice.SelectionApproved.EnableRule">
+        <CustomRule Library="$webresource:sprk_/scripts/apexport_ribbon.js" FunctionName="Spaarke.ApExport.Ribbon.selectionHasStatus" Default="false">
+          <CrmParameter Value="SelectedControlSelectedItemIds" />
+          <StringParameter Value="approved" />
         </CustomRule>
       </EnableRule>
       <EnableRule Id="sprk.ApExport.Invoice.SelectionInRange.EnableRule">

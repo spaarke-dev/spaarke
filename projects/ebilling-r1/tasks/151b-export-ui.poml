@@ -52,7 +52,7 @@
 
   <steps mode="directional">
     <step order="1">Three views copied from "Invoices to review", filtered by statuscode (Approved also on an empty sprk_billingexport), with firm, record, invoice and tracking numbers, date, approved total, currency, and the batch on Sent to AP and Paid.</step>
-    <step order="2">Ribbon: Export to AP (grid: 1 to 200 selected, Create on sprk_billingexport; form: Approved) and Mark Paid (grid: all selected Sent to AP; form: Sent to AP) opening the dialog; Download CSV / JSON on the Billing Export form (Completed batch).</step>
+    <step order="2">Ribbon: Export to AP (grid: 1 to 200 selected, all selected Approved, Create on sprk_billingexport; form: Approved) and Mark Paid (Write on sprk_invoice; grid: all selected Sent to AP; form: Sent to AP) opening the dialog; Download CSV / JSON on the Billing Export form (Completed batch).</step>
     <step order="3">Dialog code page: selection with count and total; export with per-invoice refusals, count and total, Download CSV / JSON, Email to AP disabled; Mark Paid confirm and per-invoice outcomes.</step>
     <step order="4">Jest tests for the state logic (refusals, partial Mark Paid, download URL) and the ribbon script in a vm sandbox; production build; pack SpaarkeMaster locally to check the source; the affected ArchTests.</step>
     <step order="5">Notes: section 11 answers, files, deviations, deploy steps and manual UI test steps for the main session.</step>
