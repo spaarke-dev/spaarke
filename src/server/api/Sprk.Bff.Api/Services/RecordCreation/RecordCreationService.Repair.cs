@@ -336,6 +336,11 @@ internal sealed partial class RecordCreationService
             var protectedColumns = new HashSet<string>(ProtectedFromMapping(table, rule, serverSetLookupColumns: null),
                 StringComparer.OrdinalIgnoreCase);
             protectedColumns.UnionWith(neverMapped.Keys);
+            // Review R3 (FR-38): on a search-indexed table both index columns are the owning unit's (Repair's own search-index step
+            // writes them), so a rule that targets either never copies the parent's index. Kept here, not in ProtectedFromMapping:
+            // create's step 3 drops a mapped index itself (and logs it, origin=mapping), so its behaviour stays as it is.
+            if (rule.SearchIndexed)
+                protectedColumns.UnionWith([SearchIndexColumns.LookupColumn, SearchIndexColumns.LegacyTextColumn]);
 
             var written = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             CreateTimeFieldMapping.ApplyFillOnly(
