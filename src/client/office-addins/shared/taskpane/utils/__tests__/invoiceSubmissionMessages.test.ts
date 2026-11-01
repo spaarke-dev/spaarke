@@ -243,10 +243,22 @@ describe('invoice submission messages — task 094', () => {
     expect(PERMANENT_SUBMISSION_CODES.has('ebilling.submission.storage_not_configured')).toBe(false);
   });
 
-  it("document_core_record_mismatch (409) is true for step A's unfiled-but-restricted case: it names no record to use", () => {
+  it("document_core_record_mismatch (409) without filedUnder is true for step A's unfiled-but-restricted case: it names no record to use", () => {
     const message = refusal('ebilling.submission.document_core_record_mismatch');
     expect(message).toMatch(/can't be submitted to this record/);
     expect(message).not.toMatch(/is filed under|that record/i);
+  });
+
+  it('document_core_record_mismatch with filedUnder (ebilling task 192) names the record the email is filed under', () => {
+    const message = describeSubmissionRefusal({
+      kind: 'refused',
+      status: 409,
+      code: 'ebilling.submission.document_core_record_mismatch',
+      filedUnder: { name: 'PAT-897705' },
+    });
+    expect(message).toBe(
+      'This email is filed under PAT-897705, so its invoice can only be submitted to that record. Nothing was submitted.'
+    );
   });
 
   it('earlier_attempt_being_removed says to try again, with Retry-After when given', () => {

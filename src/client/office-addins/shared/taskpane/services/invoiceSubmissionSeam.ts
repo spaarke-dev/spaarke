@@ -30,6 +30,16 @@ import type {
 export type InvoiceCoreRecordType = Extract<EntityType, 'Matter' | 'Project' | 'WorkAssignment'>;
 export const INVOICE_CORE_RECORD_TYPES: InvoiceCoreRecordType[] = ['Matter', 'Project', 'WorkAssignment'];
 
+/**
+ * §6 (ebilling task 192): the one other core record a 409 `document_core_record_mismatch` says the email is filed under.
+ * The server sends it only when the caller can Read that record and it is not secure.
+ */
+export interface InvoiceFiledUnder {
+  entityType: InvoiceCoreRecordType;
+  entityId: string;
+  name: string;
+}
+
 const CORE_TYPE_BY_LOGICAL_NAME: Readonly<Record<string, InvoiceCoreRecordType>> = {
   sprk_matter: 'Matter',
   sprk_project: 'Project',
@@ -53,6 +63,22 @@ export function invoiceFiledRecord(identity: DocumentIdentityState | undefined):
     logicalName: record.entityType,
     name,
     ...(record.number && record.number !== name ? { displayInfo: record.number } : {}),
+  };
+}
+
+const LOGICAL_NAME_BY_CORE_TYPE: Readonly<Record<InvoiceCoreRecordType, string>> = {
+  Matter: 'sprk_matter',
+  Project: 'sprk_project',
+  WorkAssignment: 'sprk_workassignment',
+};
+
+/** The record a refusal's `filedUnder` names, as the core record picker holds it (the view's "Use {name}" switch). */
+export function filedUnderRecord(filedUnder: InvoiceFiledUnder): EntitySearchResult {
+  return {
+    id: filedUnder.entityId,
+    entityType: filedUnder.entityType,
+    logicalName: LOGICAL_NAME_BY_CORE_TYPE[filedUnder.entityType],
+    name: filedUnder.name,
   };
 }
 
@@ -119,7 +145,8 @@ export interface InvoiceSubmitAttempt {
  */
 export type InvoiceSubmissionOutcome = (
   | { kind: 'success'; message?: string; trackingNumber?: string }
-  | { kind: 'refused'; message: string }
+  /** `filedUnder`: the record the email is filed under (task 192), which the view offers to switch to. */
+  | { kind: 'refused'; message: string; filedUnder?: InvoiceFiledUnder }
   | { kind: 'retryable'; message: string }
   | { kind: 'permanent'; message: string }
   | { kind: 'ended'; status: 'Rejected' | 'Failed'; message: string; trackingNumber?: string }
