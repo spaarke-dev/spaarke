@@ -574,6 +574,9 @@ public sealed class ApExportAuthorizationTests
 
             // The REAL export service over the in-memory Dataverse and file store.
             builder.Services.AddScoped(_ => host.World.Service);
+            // The routes added by task 151a take these (Mark Paid, the file download); the 150 tests never call them.
+            builder.Services.AddScoped<IInvoiceLifecycleService>(_ => host.World.Lifecycle);
+            builder.Services.AddScoped(_ => host.World.Files);
 
             builder.WebHost.UseTestServer();
             host._app = builder.Build();

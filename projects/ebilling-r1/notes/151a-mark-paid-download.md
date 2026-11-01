@@ -53,7 +53,8 @@ The file is never regenerated (a test changes the invoices after export and the 
 ## Placement, publish size, CVE (CLAUDE.md section 10)
 
 - **Placement:** the BFF, `Api/Finance`: both routes answer a user action as the caller (bff-extensions criteria B1 caller identity, B4 live request). ADRs: 001 (Minimal API), 008 (endpoint filters), 019 (ProblemDetails with stable codes), 002 (the lifecycle service owns status), 018 (kill switch after authorization). No background work, no AI, no package.
-- **Publish size and CVE:** see the final section (filled in after the measurement).
+- **Publish size.** `dotnet publish -c Release -r linux-x64 --self-contained false src/server/api/Sprk.Bff.Api/ -o deploy/api-publish`, `Compress-Archive -CompressionLevel Optimal` over `deploy/api-publish/*`, both from fresh worktrees at short paths: `origin/master` at `081f6f0a7e` (`C:\w151m`) and this branch at `f9011c34a9` (`C:\w151b`); file counts match (192 and 192). Master 40,985,172 bytes (39.09 MB); branch 41,100,964 bytes (39.20 MB). **Delta +115,792 bytes (+0.11 MB).** This is against master, so it also carries the rest of `work/ebilling-r1` that master does not have yet; the two routes themselves are about 200 lines of code, no package. Far under the +5 MB trigger. Both folders deleted after.
+- **CVE.** `dotnet list package --vulnerable --include-transitive` on `Sprk.Bff.Api`: no vulnerable packages. No package added or changed.
 
 ## Tests
 
@@ -74,6 +75,19 @@ Why `InvoiceLifecycleService` is real and not the world's `WorldLifecycle`: that
 | Authorization filter removed from the download route | 6: `NoReadOnTheBatch_Is404_AndNoBytes`, the four step-0 cases, the kill-switch case (an unauthorized caller got the 503) |
 
 "Fails before the change" for the new routes is by construction (they do not exist before this task); the seeds show each guard has teeth.
+
+## Gate
+
+| Check | Result |
+|---|---|
+| 5 test projects build (`Sprk.Bff.Api.Tests`, `Spaarke.ArchTests`, `Sprk.Bff.Api.IntegrationTests`, `Spe.Integration.Tests`, `Sprk.Provisioning.ControlPlane.LoadTests`) | 0 errors |
+| New tests (`MarkPaidAuthorizationTests`, `ApExportDownloadTests`) | 39 passed (24 + 15), 0 failed |
+| Unit filter `ApExport / Finance / Invoice` | 6,122 passed, 0 failed, 5 skipped |
+| Full ArchTests | 1,868 passed, 1 failed (ISS-005 bounded-time guard, flaky, #2469); ISS filter re-run alone 187 / 0 |
+| `Sprk.Bff.Api.IntegrationTests` | 199 passed, 0 failed, 8 skipped |
+| `Spe.Integration.Tests` | 353 passed, 0 failed, 23 skipped |
+
+The first unit-filter run had 19 failures in 150's `ApExportAuthorizationTests` route tests: its test host did not register `IInvoiceLifecycleService` and `StoredFileService`, which the two new routes take as handler parameters. Fixed by registering the world's two instances in that host (3 lines); all pass.
 
 ## Not done / for the owner
 
