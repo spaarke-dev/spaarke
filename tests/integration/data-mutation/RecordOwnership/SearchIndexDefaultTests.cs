@@ -327,6 +327,34 @@ public sealed class SearchIndexDefaultTests
             "ids and catalog names only: no record name, no person, no email");
     }
 
+    /// <summary>Review R1 (UAC-r2 condition 4): a client's free text in the name column never reaches the log.</summary>
+    [Theory]
+    [InlineData("jane.doe@contoso.com")]
+    [InlineData("Jane Doe, Acme Corp: privileged and confidential strategy memo for the Widget matter, do not forward")]
+    public async Task ADroppedNameThatIsNotAnIndexName_NeverReachesTheLog_OnlyItsLength(string freeText)
+    {
+        var (request, _) = WithClientIndex("sprk_workassignment", Guid.Empty, freeText);
+
+        var outcome = await _world.CreateAsync(request);
+
+        outcome.Succeeded.Should().BeTrue(outcome.Refusal?.Detail);
+        var line = _world.Log.Messages.Should().ContainSingle(m => m.Contains("client_search_index_dropped")).Subject;
+        line.Should().NotContain("jane").And.NotContain("contoso").And.NotContain("Acme").And.NotContain("memo").And.NotContain("@");
+        line.Should().Contain("<not an index name>").And.Contain($"length {freeText.Length}");
+        line.Should().Contain("appliedIndexName=" + ChildIndexName, "the catalog's own name is an index name and is logged");
+    }
+
+    [Fact]
+    public async Task ADroppedNameThatIsAnIndexName_IsLoggedAsIs()
+    {
+        var (request, _) = WithClientIndex("sprk_workassignment", Guid.Empty, "client-made-index");
+
+        await _world.CreateAsync(request);
+
+        _world.Log.Messages.Should().ContainSingle(m => m.Contains("client_search_index_dropped"))
+            .Which.Should().Contain("droppedIndexName=client-made-index");
+    }
+
     [Fact]
     public async Task ADroppedIndexThatEqualsTheApplied_IsNotLogged_NameComparedTrimmedAndIgnoringCase()
     {

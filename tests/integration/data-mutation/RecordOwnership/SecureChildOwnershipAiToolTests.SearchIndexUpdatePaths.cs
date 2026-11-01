@@ -67,6 +67,23 @@ public sealed partial class SecureChildOwnershipAiToolTests
         lines.Should().OnlyContain(m => !m.Contains('@'), "ids and catalog names only");
     }
 
+    /// <summary>Review R1: the update paths share the one log site, so free text in the name never reaches their log either.</summary>
+    [Fact]
+    public async Task ChildRecordPatch_ADroppedNameThatIsFreeText_NeverReachesTheLog()
+    {
+        var log = new CapturingLog<Program>();
+        var result = await ChildRecordEndpoints.UpdateAsync(
+            "sprk_invoice", UpdatedRow,
+            Payload(new() { ["sprk_description"] = "Corrected", [IndexName] = "jane.doe@contoso.com" }),
+            _user, _world.Resolver(), Restamper(), Children(), HttpContextOfCaller(), log, CancellationToken.None,
+            appOnlyEntities: AppEntities());
+
+        Status(result).Should().Be(StatusCodes.Status204NoContent, Detail(result));
+        var line = log.Messages.Should().ContainSingle(m => m.Contains("client_search_index_dropped")).Subject;
+        line.Should().NotContain("jane").And.NotContain("contoso").And.NotContain("@");
+        line.Should().Contain("<not an index name> (length 20)");
+    }
+
     [Fact]
     public async Task ChildRecordPatch_AnInvoiceNamingOnlyTheSearchIndex_WritesNothing()
     {

@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using Microsoft.Xrm.Sdk;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Services.Dataverse;
@@ -649,6 +650,29 @@ internal static class RecordTableRules
         return string.IsNullOrWhiteSpace(text) ? null : text.Trim();
     }
 
+    private static readonly Regex IndexNameShape = new(
+        "^[a-z0-9](?:[a-z0-9-]{0,126}[a-z0-9])?$", RegexOptions.CultureInvariant, TimeSpan.FromMilliseconds(100));
+
+    /// <summary>
+    /// Review R1 (UAC-r2 condition 4): the ONE way an index name reaches a log. A name is logged only when it has the shape of
+    /// an Azure AI Search index name (<c>^[a-z0-9](?:[a-z0-9-]{0,126}[a-z0-9])?$</c>); anything else is a client's free text
+    /// (an email, a sentence) and is logged as <c>&lt;not an index name&gt; (length N)</c>. <c>null</c> stays none.
+    /// </summary>
+    internal static string? LoggableIndexName(string? name)
+    {
+        if (name is null)
+            return null;
+
+        try
+        {
+            return IndexNameShape.IsMatch(name) ? name : $"<not an index name> (length {name.Length})";
+        }
+        catch (RegexMatchTimeoutException)
+        {
+            return $"<not an index name> (length {name.Length})";
+        }
+    }
+
     /// <summary>
     /// FR-38 (UAC-r2 condition 4): logs <c>client_search_index_dropped</c>, ids only, for each dropped value that differs from
     /// what was applied. <paramref name="applied"/> is what step 8 applied to a new record (the id for the lookup, the name
@@ -686,7 +710,8 @@ internal static class RecordTableRules
                 logger.LogWarning(
                     "[RECORD-WRITE] client_search_index_dropped: table={Table} record={RecordId} column={Column} origin={Origin} " +
                     "droppedIndexName={DroppedIndexName} appliedIndexName={AppliedIndexName} correlationId={CorrelationId}",
-                    table, recordId, drop.Column, drop.Origin, drop.IndexName, applied is { } b ? b.IndexName : unchanged, correlationId);
+                    table, recordId, drop.Column, drop.Origin, LoggableIndexName(drop.IndexName),
+                    applied is { } b ? LoggableIndexName(b.IndexName) : unchanged, correlationId);
             }
         }
     }
