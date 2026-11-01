@@ -6,6 +6,8 @@
 import {
   describeInvoiceOutcome,
   describeSubmissionRefusal,
+  describeUncorrectableStatus,
+  SUPERSEDED_INVOICE_MESSAGE,
   GENERIC_FAILED_OUTCOME_MESSAGE,
   GENERIC_OUTCOME_MESSAGE,
   FILING_KEPT_MESSAGE,
@@ -82,7 +84,16 @@ const EMAIL_UNIDENTIFIABLE_REASONS = [
   'no_communication',
   'eml_ambiguous',
 ];
-const CORRECTION_REASONS = ['not_available', 'invoice_status', 'different_firm', 'different_core_record'];
+// 097b (2026-10-30): `not_available` is no longer sent; `different_invoice_number`, `no_submission` and
+// `submission_in_progress` were added.
+const CORRECTION_REASONS = [
+  'invoice_status',
+  'different_firm',
+  'different_core_record',
+  'different_invoice_number',
+  'no_submission',
+  'submission_in_progress',
+];
 
 const PINNED_OUTCOME_CODES = [
   'invoice.read.no_invoice',
@@ -108,6 +119,13 @@ const PINNED_OUTCOME_CODES = [
   'ai.invoice.binding_missing',
   'ai.invoice.completion_failed',
   'ai.invoice.output_invalid',
+  // 097c (2026-10-30): the correction re-checked at commit
+  'ebilling.submission.correction_not_allowed.invoice_status',
+  'ebilling.submission.correction_not_allowed.different_firm',
+  'ebilling.submission.correction_not_allowed.different_core_record',
+  'ebilling.submission.correction_not_allowed.different_invoice_number',
+  'ebilling.submission.correction_not_allowed.submission_in_progress',
+  'ebilling.submission.correction_target_unavailable',
   'ebilling.submission.blocked',
   'ebilling.submission.returned',
 ];
@@ -179,6 +197,57 @@ describe('invoice submission messages — specifics', () => {
     expect(
       describeSubmissionRefusal({ kind: 'retryable', status: 429, code: 'OFFICE_015', retryAfterSeconds: 30 })
     ).toMatch(/Try again in 30 seconds\./);
+  });
+
+  it('correction_not_allowed / invoice_status says the status in words; Superseded points to the newer invoice', () => {
+    const status = (invoiceStatus?: string) =>
+      refusal('ebilling.submission.correction_not_allowed', {
+        reason: 'invoice_status',
+        ...(invoiceStatus ? { invoiceStatus } : {}),
+      });
+    expect(status('SentToAp')).toBe("This invoice can't be corrected while it is Sent to AP. Nothing was submitted.");
+    expect(status('ReturnedToFirm')).toMatch(/while it is Returned to Firm\./);
+    expect(status('InReview')).toMatch(/while it is In Review\./);
+    expect(status('Superseded')).toBe(`${SUPERSEDED_INVOICE_MESSAGE} Nothing was submitted.`);
+    // must-not-fire: an absent or unknown status is not named
+    expect(status()).toMatch(/can't be corrected in its current state\./);
+    expect(status('Archived')).toMatch(/can't be corrected in its current state\./);
+    expect(status('Archived')).not.toMatch(/Archived/);
+    expect(describeUncorrectableStatus(null)).toBe("This invoice can't be corrected in its current state.");
+  });
+
+  it('correction_not_allowed / submission_in_progress says to wait and submit the correction again', () => {
+    expect(refusal('ebilling.submission.correction_not_allowed', { reason: 'submission_in_progress' })).toMatch(
+      /still being processed\. Nothing was submitted\. Wait until it has finished, then submit the correction again\.$/
+    );
+  });
+
+  it('must-not-fire: the retired not_available reason gets the plain fallback, not "not available yet"', () => {
+    const message = refusal('ebilling.submission.correction_not_allowed', { reason: 'not_available' });
+    expect(message).toBe(refusal('ebilling.submission.correction_not_allowed'));
+    expect(message).not.toMatch(/not available yet/);
+  });
+
+  it('the Correction 404 record_unavailable suggests trying again when the invoice opens in Spaarke', () => {
+    expect(refusal('sdap.access.deny.record_unavailable')).toMatch(
+      /Nothing was submitted\. If you can open this invoice in Spaarke, try again\.$/
+    );
+  });
+
+  it('a correction refused at commit (097c) says the correction was not processed', () => {
+    for (const code of [
+      'ebilling.submission.correction_not_allowed.invoice_status',
+      'ebilling.submission.correction_not_allowed.different_firm',
+      'ebilling.submission.correction_not_allowed.different_core_record',
+      'ebilling.submission.correction_not_allowed.different_invoice_number',
+      'ebilling.submission.correction_not_allowed.submission_in_progress',
+      'ebilling.submission.correction_target_unavailable',
+    ]) {
+      expect(describeInvoiceOutcome(code, {}, 'Failed')).toMatch(/the correction was not processed/);
+    }
+    expect(describeInvoiceOutcome('ebilling.submission.correction_not_allowed.submission_in_progress')).toMatch(
+      /Submit the correction again once it has finished\.$/
+    );
   });
 
   it('marks_invalid / invoice_not_pdf names the file and says the invoice must be a PDF', () => {
