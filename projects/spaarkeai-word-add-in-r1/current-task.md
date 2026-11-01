@@ -42,7 +42,7 @@
 
 ## Peer duties
 - Answer cross-session BFF/Console/deploy notices; for a deploy request verify ancestry, OK on content only, record it here, commit and push.
-- **Last OK: R3 dev BFF master fcf01480f4** (2026-11-01; from live d0c1c5dc3c: 3 external-access notification files). I asked R3 to confirm `ContentUnderstanding__Endpoint` survives the deploy.
+- **Last OK: R3 dev BFF master fcf01480f4** (2026-11-01; from live d0c1c5dc3c: 3 external-access notification files). **Live on dev** (R3 after-notice: deploy 14:03:20Z, readback 14:04:42Z, healthz 200). `ContentUnderstanding__Endpoint` is still set; app settings are unchanged at 225.
 - Peers: R3 `cc-msg-481466c0265b87ddd1bb000bf672a69d`; UAC session name `spaarke-wt-unified-access-control-r2-db`; ontology `cc-msg-12a5ac7fc59e21f736827730b8d44c8a`.
 
 ## Gotchas found this session
