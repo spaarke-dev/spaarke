@@ -131,3 +131,11 @@
 - `sprk_externaltenantid` is field-secured (`IsSecured` true). Both BFF app users (5967251e…, 1e40baad…) are members of "Spaarke Identity Link Writers" (canread 4), so the new by-id home-tenant read can see the column.
 - Rollback: redeploy `d0c1c5dc3c`, or restore the snapshot above.
 - Next: uac-r2's 30-minute gate (external split). Ontology's CMRCL-479772 re-check with Tony Howe; the owner runs it. Expected: one email from the system mailbox, no bell, no wizard warning.
+- uac-r2 gate, 14:03:20Z → 14:35:00Z: **PASS**.
+  - 52 requests. The 6 non-2xx are anonymous 401s. 0 5xx and 0 [OWNERSHIP-REFUSED].
+  - Ordinary-moves runs: moved 0, refused 0, failed 0. No [ROOT-OWNER] moves.
+  - **External routes had no traffic.**
+  - No [GRANT-NOTIFY] or [ASSIGN-TASK-NOTIFY] lines in the window.
+  - The census findings are the expected ones for the users still in the root.
+  - 6 `ReadProofAsync` exceptions come from the identity-link reconciler's **spaarke-acme** pass ("not a member of the organization", tracked as #2163). They started at 13:40:02Z, before this deploy. The spaarkedev1 pass reads 11 of 11.
+- uac-r2's owner-approved move of the dev users to BU1 waits for R3's "done" on the CMRCL-479772 re-check.
