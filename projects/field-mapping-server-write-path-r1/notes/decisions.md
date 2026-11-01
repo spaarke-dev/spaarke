@@ -535,3 +535,18 @@ missing to add. Owners and refusals are unchanged, and the service needs no chan
 - **Columns.** The legacy text column `sprk_searchindexname` is a second way to choose a record's index. `SearchIndexNameResolver` reads the lookup first and then the name, and where no BU has an index lookup (every customer environment, Q2 = (B)), the name decides. **Owner: both columns are server-owned.** A client value in either is dropped, before step 5 and on every BFF update path. Step 8 is the **only writer** of both columns on these tables: a value from field mapping or an adapter's post-mapping default is removed too, because an explicit `mappingSource` would otherwise let a client pick a parent whose index gets copied. No dev mapping rule targets either column (checked 2026-10-31, `sprk_fieldmappingrule` source/target LIKE '%search%': 0 rows). A server writer that sets an index on purpose escalates; it is not silently dropped.
 - **The drop log** covers both columns. It carries ids only: record, table and the dropped and applied index id, plus, for the name column, the dropped and applied index NAME. An index name is catalog configuration, not personal data. UAC-r2 condition 4 is kept (no user names, no emails).
 - **Reviews.** UAC-r2 reviewed FR-38 (conditions 1-4); ebilling-r1 reviews registry rules (the `sprk_invoice` flag). Both are told; the amendment ships in 039's PR for their review there.
+
+### 2026-11-01 — UAC-r2 task 195 is live on dev
+
+- **What's live** (UAC-r2's after-notice):
+  - BFF d0c1c5dc3c since 2026-11-01T03:09:00Z;
+  - the wizard commands script and the two Create wizard pages since 03:12Z;
+  - the Project ↔ Matter subgrid ribbon since about 03:27Z.
+- **Backfill:**
+  - applied 03:14Z: all 7 N:N-linked projects are now pair-filed;
+  - 3 of them re-owned to their root's owner at 03:15Z;
+  - their children followed at 03:21Z and 03:24Z.
+- **Gate:** PASS. 0 5xx, 0 ownership refusals, and the reconciler has converged.
+- **Visible change:** PRJT.10001.01 now inherits Restricted from its matter REAL-2026-123456.02.
+- **Facts for 040:** on dev, every project with a matter link has a pair, and none is filed under a secure matter. 195 no longer blocks 040, but 040 still needs 005 (`-Apply` on hold, owner) and 019.
+- **For 076:** the "projects pair-filed" check can now be run.
