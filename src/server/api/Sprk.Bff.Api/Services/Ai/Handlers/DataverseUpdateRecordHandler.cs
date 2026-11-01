@@ -4,6 +4,7 @@ using System.Text.RegularExpressions;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Services.Ai.Handlers.Dataverse;
 using Sprk.Bff.Api.Services.Dataverse;
+using Sprk.Bff.Api.Services.RecordCreation;
 
 namespace Sprk.Bff.Api.Services.Ai.Handlers;
 
@@ -221,6 +222,20 @@ public sealed partial class DataverseUpdateRecordHandler : IToolHandler
                 return LogOutcome(context, tablename, recordId,
                     Error(tool, $"Table '{tablename}' has no entity-set name.", ToolErrorCodes.InternalError, startedAt),
                     stopwatch);
+            }
+
+            // Task 039 (FR-38): on a search-indexed table both index columns are the SERVER's (step 8 of the create writes them from
+            // the owning business unit), so an item that names either has it dropped — never refused — and the row's index stays
+            // as it is. An item left empty is answered as any empty update is (the mapper's).
+            if (RecordTableRules.OwnsSearchIndex(tablename))
+            {
+                var droppedIndex = new List<RecordTableRules.DroppedSearchIndexValue>();
+                item = RecordTableRules.WithoutSearchIndex(item, RecordTableRules.SearchIndexOriginCaller, droppedIndex);
+                if (droppedIndex.Count > 0)
+                {
+                    RecordTableRules.LogSearchIndexDropped(
+                        _logger, tablename, recordId, droppedIndex, applied: null, correlationId: context.DecisionId.ToString("N"));
+                }
             }
 
             var mapped = await DataverseWriteItemMapper.MapAsync(_dataverse, tablename, item, cancellationToken).ConfigureAwait(false);

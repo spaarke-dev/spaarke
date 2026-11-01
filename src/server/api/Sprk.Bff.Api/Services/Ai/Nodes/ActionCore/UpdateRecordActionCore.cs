@@ -2,6 +2,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.Dataverse.Models;
+using Sprk.Bff.Api.Services.RecordCreation;
 
 namespace Sprk.Bff.Api.Services.Ai.Nodes;
 
@@ -168,6 +169,23 @@ internal sealed class UpdateRecordActionCore
                     updatePayload[$"{lookup.Field}@odata.bind"] = $"/{entitySetName}({targetGuid})";
                 }
             }
+        }
+
+        // Task 039 (FR-38): on a search-indexed table both index columns are the SERVER's (step 8 of the create writes them from
+        // the owning business unit). A mapping, default or confirmed proposal that names either has it dropped — never refused,
+        // and not written — so the row's index stays as it is (and fieldsUpdated does not list it).
+        if (RecordTableRules.OwnsSearchIndex(input.EntityLogicalName)
+            && updatePayload.Keys.Any(k => RecordTableRules.SearchIndexColumnOf(k) is not null))
+        {
+            var droppedIndex = new List<RecordTableRules.DroppedSearchIndexValue>();
+            RecordTableRules.RemoveSearchIndex(
+                updatePayload,
+                input.PayloadSource == UpdateRecordPayloadSource.ConfirmedProposal
+                    ? RecordTableRules.SearchIndexOriginCaller
+                    : RecordTableRules.SearchIndexOriginMapping,
+                droppedIndex);
+            RecordTableRules.LogSearchIndexDropped(
+                _logger, input.EntityLogicalName.Trim().ToLowerInvariant(), input.RecordId, droppedIndex, applied: null);
         }
 
         // unified-access-control-r2 task 189 fix round C (K5): a payload that is not a confirmed proposal written AS its

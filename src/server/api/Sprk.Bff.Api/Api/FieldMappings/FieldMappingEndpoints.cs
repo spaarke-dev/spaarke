@@ -1072,8 +1072,43 @@ public static class FieldMappingEndpoints
                         continue;
                     }
 
+                    // Task 039 (FR-38): on a search-indexed table both index columns are the SERVER's (step 8 of the create writes
+                    // them from the owning business unit), so a rule aimed at either is skipped — never written, never an error —
+                    // and the dropped value is logged, ids only (the rule is applied to a scratch payload to read it).
+                    if (Sprk.Bff.Api.Services.RecordCreation.RecordTableRules.OwnsSearchIndex(targetEntity)
+                        && Sprk.Bff.Api.Services.RecordCreation.RecordTableRules.SearchIndexColumnOf(rule.TargetField) is not null)
+                    {
+                        var scratch = new Dictionary<string, object?>();
+                        ApplyMappingRule(rule, sourceValues, scratch, lookupBinds);
+                        var droppedIndex = new List<Sprk.Bff.Api.Services.RecordCreation.RecordTableRules.DroppedSearchIndexValue>();
+                        Sprk.Bff.Api.Services.RecordCreation.RecordTableRules.RemoveSearchIndex(
+                            scratch, Sprk.Bff.Api.Services.RecordCreation.RecordTableRules.SearchIndexOriginMapping, droppedIndex);
+                        Sprk.Bff.Api.Services.RecordCreation.RecordTableRules.LogSearchIndexDropped(
+                            logger, targetEntity.Trim().ToLowerInvariant(), childRecordId, droppedIndex, applied: null);
+                        recordFieldResults.Add(new FieldMappingResultDto
+                        {
+                            SourceField = rule.SourceField,
+                            TargetField = rule.TargetField,
+                            Status = FieldMappingStatus.Skipped,
+                            ErrorMessage = "The search index is set by the server and cannot be copied.",
+                        });
+                        continue;
+                    }
+
                     var fieldResult = ApplyMappingRule(rule, sourceValues, updatePayload, lookupBinds);
                     recordFieldResults.Add(fieldResult);
+                }
+
+                // Task 039 (FR-38) safety net: whatever a rule's bind plan wrote under either index column's key is removed too.
+                if (Sprk.Bff.Api.Services.RecordCreation.RecordTableRules.OwnsSearchIndex(targetEntity))
+                {
+                    var droppedLate = new List<Sprk.Bff.Api.Services.RecordCreation.RecordTableRules.DroppedSearchIndexValue>();
+                    if (Sprk.Bff.Api.Services.RecordCreation.RecordTableRules.RemoveSearchIndex(
+                            updatePayload, Sprk.Bff.Api.Services.RecordCreation.RecordTableRules.SearchIndexOriginMapping, droppedLate) > 0)
+                    {
+                        Sprk.Bff.Api.Services.RecordCreation.RecordTableRules.LogSearchIndexDropped(
+                            logger, targetEntity.Trim().ToLowerInvariant(), childRecordId, droppedLate, applied: null);
+                    }
                 }
 
                 if (updatePayload.Count > 0)
