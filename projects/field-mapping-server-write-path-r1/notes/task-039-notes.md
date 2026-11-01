@@ -145,8 +145,8 @@ Paths the helper does not fit, and why:
 
 Known limits added to the K-list (items 4, 5, 7, 9, 10 and 11 of the round 3 review; wording follows the review's headings):
 
-- **K7 re-parse per create (item 4).** The client's index value is parsed again for each create that carries one (no cache). Only a create that drops a value pays for it, so it is accepted.
-- **K8 Dropped record shape (item 5).** `DroppedSearchIndexValue` is an internal record (`Column`, `Origin`, `IndexId`, `IndexName`); its shape is the log's shape, so a change to it changes the `client_search_index_dropped` line that operators filter on.
+- **K7 re-parse per create (item 4).** `WithoutSearchIndex(MappedItem)` parses `item.JsonBody` and the `JsonElement` overload re-serialises it, and a create can pass through it up to three times (step 2, the late drop, and the chat create handler). Only the early `return item` (no index column) is cheap. This is a minor allocation on the create path, accepted.
+- **K8 Dropped record shape (item 5).** `RecordDropped` merges two spellings of one column by Remove-then-Add, so it reorders the list. When both spellings carry different ids, it keeps the first. Each record also carries a field that is always null for its kind (`IndexName` for the lookup, `IndexId` for the name). This is harmless for the log, accepted.
 - **K9 default labelled mapping (item 7).** Same as K2: a value that arrives through the default is labelled by the strip that caught it, not by who wrote it.
 - **K10 PUT /documents logs before the existence check (item 9).** A PUT naming an index column on a document that does not exist logs `client_search_index_dropped` and then answers 404; the drop is logged before the row is known to exist.
 - **K11 unit-less environments (item 10).** `search_index_unset_for_owner_bu` is logged at Information; an environment whose business units have no index defaults logs it on every create of an indexed table. That is the expected state there, not an error.
