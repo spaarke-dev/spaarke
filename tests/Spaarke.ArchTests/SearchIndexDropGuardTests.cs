@@ -7,7 +7,7 @@ namespace Spaarke.ArchTests;
 /// field-mapping-server-write-path-r1 task 039, review R6 (FR-38, #2399): on a search-indexed table both index columns
 /// (<c>sprk_ai_search_index</c>, <c>sprk_searchindexname</c>) are the SERVER's, written only by step 8 of the unified create. So
 /// every BFF code path that turns a client-, model- or playbook-shaped body into a Dataverse write must either drop the index
-/// from that body (<c>RecordTableRules.OwnsSearchIndex</c> / <c>WithoutSearchIndex</c> / <c>RemoveSearchIndex</c> / the
+/// from that body (<c>RecordTableRules.OwnsSearchIndex</c> / <c>WithoutSearchIndex</c> / <c>RemoveSearchIndex</c> / <c>DropSearchIndexFromUpdate</c> / the
 /// registry's <c>SearchIndexed</c> flag) or be listed here with a one-line reason it cannot carry one.
 /// </summary>
 /// <remarks>
@@ -60,7 +60,7 @@ public class SearchIndexDropGuardTests
         RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
     private static readonly Regex DropsTheSearchIndex = new(
-        @"\b(?:OwnsSearchIndex|WithoutSearchIndex|RemoveSearchIndex)\s*\(|\brule\s*\.\s*SearchIndexed\b",
+        @"\b(?:OwnsSearchIndex|WithoutSearchIndex|RemoveSearchIndex|DropSearchIndexFromUpdate)\s*\(|\brule\s*\.\s*SearchIndexed\b",
         RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
     /// <summary>Whether <paramref name="source"/> calls a signal entry point, and whether it also has the drop.</summary>
@@ -129,6 +129,12 @@ public class SearchIndexDropGuardTests
         Assert.True(fields);
         Assert.False(fieldsDrops);
 
+        // Round 3 (G3): the shared update-path helper only named in a comment, or a lookalike name, is not the drop.
+        var (_, helperInComment) = Classify("// DropSearchIndexFromUpdate(table, id, fields, origin, logger);\nawait _records.UpdateRecordFieldsAsync(t, id, f, ct);");
+        Assert.False(helperInComment);
+        var (_, lookalike) = Classify("await DropSearchIndexFromUpdateLater(x);\nawait DataverseWriteItemMapper.MapAsync(d, t, item, ct);");
+        Assert.False(lookalike);
+
         // A drop that only appears in a comment is not a drop.
         var (_, commentOnly) = Classify("// OwnsSearchIndex(table) is handled elsewhere\nawait DataverseWriteItemMapper.MapAsync(d, t, item, ct);");
         Assert.False(commentOnly);
@@ -142,6 +148,12 @@ public class SearchIndexDropGuardTests
             + "var mapped = await DataverseWriteItemMapper.MapWebApiPayloadAsync(user, entity, body, ct);");
         Assert.True(writes);
         Assert.True(drops);
+
+        // Round 3 (G3): the shared update-path helper is a drop.
+        var (helperWrites, helperDrops) = Classify(
+            "var d = RecordTableRules.DropSearchIndexFromUpdate(table, id, fields, origin, logger);\nawait _records.UpdateRecordFieldsAsync(table, id, fields, ct);");
+        Assert.True(helperWrites);
+        Assert.True(helperDrops);
 
         var (registry, registryDrops) = Classify("if (rule.SearchIndexed) { /* fill */ }\nawait _records.UpdateRecordFieldsAsync(t, id, f, ct);");
         Assert.True(registry);

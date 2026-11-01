@@ -74,15 +74,14 @@ public class DataverseUpdateHandler : IDataverseUpdateHandler
             && fields.Keys.Any(k => RecordTableRules.SearchIndexColumnOf(k) is not null))
         {
             fields = new Dictionary<string, object?>(fields, fields.Comparer);
-            var droppedIndex = new List<RecordTableRules.DroppedSearchIndexValue>();
-            RecordTableRules.RemoveSearchIndex(fields, RecordTableRules.SearchIndexOriginMapping, droppedIndex);
-            RecordTableRules.LogSearchIndexDropped(
-                _logger, entityLogicalName.Trim().ToLowerInvariant(), recordId, droppedIndex, applied: null);
+        }
 
-            // Round 2 (S5): nothing is left to write, so no write is asked of Dataverse (not even an empty one) and none of the
-            // reads or after-write steps run. A mapping that was empty before the drop is not affected.
-            if (droppedIndex.Count > 0 && fields.Count == 0)
-                return;
+        // Round 2 (S5): nothing left to write means no write is asked of Dataverse (not even an empty one) and none of the reads
+        // or after-write steps run; a mapping that was empty before the drop is not affected (DropSearchIndexFromUpdate).
+        if (RecordTableRules.DropSearchIndexFromUpdate(
+                entityLogicalName, recordId, fields, RecordTableRules.SearchIndexOriginMapping, _logger).Emptied)
+        {
+            return;
         }
 
         // unified-access-control-r2 task 189 fix round C (K5): this handler writes a playbook's output mapping (the output

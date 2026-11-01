@@ -391,16 +391,8 @@ internal sealed partial class DataverseCreateRecordHandler : IToolHandler
             // writes them), so the model's item has them dropped BEFORE it is mapped — never refused, as the chat UPDATE does. The
             // service strips the same columns from the mapped item, but by then a lookup the mapper cannot read (a malformed
             // recordId) has already failed the whole create.
-            if (RecordTableRules.OwnsSearchIndex(tablename))
-            {
-                var droppedIndex = new List<RecordTableRules.DroppedSearchIndexValue>();
-                item = RecordTableRules.WithoutSearchIndex(item, RecordTableRules.SearchIndexOriginCaller, droppedIndex);
-                if (droppedIndex.Count > 0)
-                {
-                    RecordTableRules.LogSearchIndexDropped(
-                        _logger, tablename, recordId: null, droppedIndex, applied: null, correlationId: context.DecisionId.ToString("N"));
-                }
-            }
+            item = RecordTableRules.DropSearchIndexFromUpdate(
+                tablename, recordId: null, item, RecordTableRules.SearchIndexOriginCaller, _logger, context.DecisionId.ToString("N")).Body;
 
             var mapped = await DataverseWriteItemMapper.MapAsync(_dataverse, tablename, item, cancellationToken).ConfigureAwait(false);
             if (mapped.ValidationError is not null)

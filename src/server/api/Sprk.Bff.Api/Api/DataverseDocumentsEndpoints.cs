@@ -148,9 +148,11 @@ public static class DataverseDocumentsEndpoints
                         });
                 }
 
-                // Task 039 (FR-38): a document's search index is the SERVER's (step 8 of the create writes it from the owning
-                // business unit; the indexing pipeline stamps where it landed). A body that names one has it dropped — never
-                // refused — and the row's index stays as it is.
+                // Task 039 (FR-38): a document's search index is the SERVER's: step 8 of the create is the only writer on the create
+                // and client paths (from the owning business unit). The indexing pipeline's own stamps (RagEndpoints and the RAG
+                // indexing jobs) record where a file was indexed and are deliberately left alone. A body that names one has it
+                // dropped — never refused — and the row's index stays as it is. This typed request does not use
+                // DropSearchIndexFromUpdate (it has no dictionary or JSON body to drop from: one nullable property).
                 if (request.SearchIndexName is not null
                     && Sprk.Bff.Api.Services.RecordCreation.RecordTableRules.OwnsSearchIndex("sprk_document"))
                 {

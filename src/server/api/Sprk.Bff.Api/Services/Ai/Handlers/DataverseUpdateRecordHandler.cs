@@ -229,29 +229,22 @@ public sealed partial class DataverseUpdateRecordHandler : IToolHandler
             // as it is. Review R2 (NFR-07: drop, never refuse): an item that held ONLY the index is left with nothing to write and
             // answers a success that says so, with nothing written; an item that was empty to begin with keeps the mapper's
             // empty-update refusal.
-            if (RecordTableRules.OwnsSearchIndex(tablename))
+            var indexDrop = RecordTableRules.DropSearchIndexFromUpdate(
+                tablename, recordId, item, RecordTableRules.SearchIndexOriginCaller, _logger, context.DecisionId.ToString("N"));
+            item = indexDrop.Body;
+            if (indexDrop.Emptied)
             {
-                var droppedIndex = new List<RecordTableRules.DroppedSearchIndexValue>();
-                item = RecordTableRules.WithoutSearchIndex(item, RecordTableRules.SearchIndexOriginCaller, droppedIndex);
-                if (droppedIndex.Count > 0)
+                // Round 2 (S1): no PATCH is sent, so the row is read as the caller first — a missing or unreadable row
+                // gets the tool error a normal update of that id gets, never "nothing to update".
+                var rowRead = await _dataverse.GetAsync(
+                    $"{entitySetName}({recordId:D})" + (primaryIdAttribute is null ? string.Empty : $"?$select={primaryIdAttribute}"),
+                    cancellationToken).ConfigureAwait(false);
+                if (!rowRead.IsSuccess)
                 {
-                    RecordTableRules.LogSearchIndexDropped(
-                        _logger, tablename, recordId, droppedIndex, applied: null, correlationId: context.DecisionId.ToString("N"));
-                    if (item.ValueKind == JsonValueKind.Object && !item.EnumerateObject().Any())
-                    {
-                        // Round 2 (S1): no PATCH is sent, so the row is read as the caller first — a missing or unreadable row
-                        // gets the tool error a normal update of that id gets, never "nothing to update".
-                        var rowRead = await _dataverse.GetAsync(
-                            $"{entitySetName}({recordId:D})" + (primaryIdAttribute is null ? string.Empty : $"?$select={primaryIdAttribute}"),
-                            cancellationToken).ConfigureAwait(false);
-                        if (!rowRead.IsSuccess)
-                        {
-                            return LogOutcome(context, tablename, recordId, MapClientError(tool, rowRead, startedAt), stopwatch);
-                        }
-
-                        return LogOutcome(context, tablename, recordId, NothingToWrite(tool, tablename, recordId, startedAt), stopwatch);
-                    }
+                    return LogOutcome(context, tablename, recordId, MapClientError(tool, rowRead, startedAt), stopwatch);
                 }
+
+                return LogOutcome(context, tablename, recordId, NothingToWrite(tool, tablename, recordId, startedAt), stopwatch);
             }
 
             var mapped = await DataverseWriteItemMapper.MapAsync(_dataverse, tablename, item, cancellationToken).ConfigureAwait(false);

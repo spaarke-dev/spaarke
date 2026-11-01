@@ -174,23 +174,16 @@ internal sealed class UpdateRecordActionCore
         // Task 039 (FR-38): on a search-indexed table both index columns are the SERVER's (step 8 of the create writes them from
         // the owning business unit). A mapping, default or confirmed proposal that names either has it dropped — never refused,
         // and not written — so the row's index stays as it is (and fieldsUpdated does not list it).
-        if (RecordTableRules.OwnsSearchIndex(input.EntityLogicalName)
-            && updatePayload.Keys.Any(k => RecordTableRules.SearchIndexColumnOf(k) is not null))
-        {
-            var droppedIndex = new List<RecordTableRules.DroppedSearchIndexValue>();
-            RecordTableRules.RemoveSearchIndex(
-                updatePayload,
+        // Round 2 (S5): nothing left to write means no write is asked of Dataverse (not even an empty one) and none of the reads
+        // or after-write steps run; a payload that was empty before the drop is not affected (DropSearchIndexFromUpdate).
+        if (RecordTableRules.DropSearchIndexFromUpdate(
+                input.EntityLogicalName, input.RecordId, updatePayload,
                 input.PayloadSource == UpdateRecordPayloadSource.ConfirmedProposal
                     ? RecordTableRules.SearchIndexOriginCaller
                     : RecordTableRules.SearchIndexOriginMapping,
-                droppedIndex);
-            RecordTableRules.LogSearchIndexDropped(
-                _logger, input.EntityLogicalName.Trim().ToLowerInvariant(), input.RecordId, droppedIndex, applied: null);
-
-            // Round 2 (S5): nothing is left to write, so no write is asked of Dataverse (not even an empty one) and none of the
-            // reads or after-write steps run. A payload that was empty before the drop is not affected.
-            if (droppedIndex.Count > 0 && updatePayload.Count == 0)
-                return [];
+                _logger).Emptied)
+        {
+            return [];
         }
 
         // unified-access-control-r2 task 189 fix round C (K5): a payload that is not a confirmed proposal written AS its

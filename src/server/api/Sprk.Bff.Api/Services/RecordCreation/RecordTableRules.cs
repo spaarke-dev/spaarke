@@ -20,7 +20,10 @@ namespace Sprk.Bff.Api.Services.RecordCreation;
 /// <see cref="OwnedChildWrite.ServerOwnedColumns"/> and <see cref="OwnedChildWrite.ForPersonColumns"/>,
 /// <c>ChildRecordEndpoints.RootServerOwnedColumns</c>, and the Office <c>RecordCreationService</c>'s
 /// <c>MatterProtectedAttributes</c> / <c>ProjectProtectedAttributes</c>. Tasks 013, 014 and 018 switch the consumers to
-/// the registry and delete the views.</para>
+/// the registry and delete the views. The one exception to "data plus lookups" is the FR-38 search-index drop toolkit (task 039):
+/// the registry also owns the helpers that answer "does this table own its search index" and that remove and log a client
+/// value for it, in one clearly marked block at the end of this file (a second <c>partial</c> declaration), because the
+/// <see cref="RecordTableRule.SearchIndexed"/> flag and the one drop every path shares must not be able to drift apart.</para>
 /// <para><b>Per-table differences are kept, not merged.</b> Each value is what the old list held for that table, scoped
 /// as the old list was scoped. "Protected columns" (FR-11) are two different policies today and stay two properties:
 /// <see cref="RecordTableRule.TableServerOwnedColumns"/> (a CALLER's payload naming one is refused) and
@@ -42,7 +45,7 @@ namespace Sprk.Bff.Api.Services.RecordCreation;
 /// protected and server-owned columns keep drifting between create paths (they already differ per core), and task 013
 /// has no single place to read per-table policy, search-index and mapping applicability.</para>
 /// </remarks>
-internal static class RecordTableRules
+internal static partial class RecordTableRules
 {
     /// <summary>
     /// Columns the server owns on EVERY app-only create, whatever the table: a caller's payload that sets one is refused,
@@ -163,9 +166,10 @@ internal static class RecordTableRules
                     "RecordCreationService, tasks 100 and 152)."),
                 ChatCallerIsTheForPerson("sprk_assignedtointernal"),
             ],
-            // Step 8 of the unified create (RecordCreationService.SearchIndexDefaultAsync) writes sprk_searchindexname /
-            // sprk_ai_search_index from the owning business unit, and nothing else does: SearchIndexed makes both columns the
-            // server's (FR-38, task 039). The Office core's ApplyBusinessUnitDefaultsAsync that used to fill them is deleted (018c).
+            // Step 8 of the unified create (RecordCreationService.SearchIndexDefaultAsync) is the only writer of sprk_searchindexname /
+            // sprk_ai_search_index on the create and client paths: SearchIndexed makes both columns the server's (FR-38, task 039).
+            // The indexing pipeline's stamps (RagEndpoints, the RAG indexing jobs) record where a file was indexed and are left
+            // alone. The Office core's ApplyBusinessUnitDefaultsAsync that used to fill them is deleted (018c).
             // Task 017 (#1608, decision 2b): refused in a caller's payload on every path, as on a work assignment.
             TableServerOwnedColumns = RootServerOwnedColumns,
             SearchIndexed = true,
@@ -465,9 +469,22 @@ internal static class RecordTableRules
         "the behaviour it had, and the owned create it had (OwnedChildWrite.CreateAsync, deleted in 017) applied no field mapping to it. Mapping these " +
         "platform tables would be new behaviour and needs its own decision.");
 
+    private static IReadOnlySet<string> Columns(params string[] columns) =>
+        new HashSet<string>(columns, StringComparer.OrdinalIgnoreCase);
+}
+
+/// <summary>
+/// The FR-38 search-index drop toolkit (field-mapping-server-write-path-r1 task 039): ONE block, in the registry's own file, that
+/// owns the answer to "does this table own its search index" and the removal and log of a client value for it. A second
+/// declaration of the same static class (<c>partial</c>), so every call site keeps its <c>RecordTableRules.X</c> name and no
+/// new file or type is added (ADR-010). Everything the create and every BFF update path shares about the index lives here.
+/// </summary>
+internal static partial class RecordTableRules
+{
     // ── FR-38: the search index is server-owned (task 039) ──────────────────────────────────────────────────────────
     // ONE column check and ONE removal, shared by the unified create (RecordCreationService) and every BFF update path, so
-    // they cannot drift. A drop, never a refusal; step 8 of the create is the only writer of either column.
+    // they cannot drift. A drop, never a refusal; step 8 of the create is the only writer of either column on the create and
+    // client paths (the indexing pipeline's own stamps record where a file was indexed and are left alone).
 
     /// <summary>Where a dropped search-index value came from: the caller's payload (or a server writer's item).</summary>
     internal const string SearchIndexOriginCaller = "caller";
@@ -588,6 +605,57 @@ internal static class RecordTableRules
         }
 
         return keys.Length;
+    }
+
+    /// <summary>
+    /// FR-38, round 3 (G3): the ONE sequence the BFF UPDATE paths run on a payload that is a dictionary of column to value (a
+    /// playbook output mapping, the Update Record node and a confirmed proposal, the field-mapping push's final payload): on a
+    /// search-indexed table, remove both index columns IN PLACE, log what was dropped (<see cref="LogSearchIndexDropped"/>, the
+    /// table name lower-cased, no applied value because an update leaves the row's index as it is), and say whether the drop
+    /// left nothing to write. <c>DroppedAny</c> is false, and <c>Emptied</c> is false, for a table that does not own its index,
+    /// for a payload that never named an index column, and for a payload that was already empty before any drop: such a payload
+    /// keeps whatever its caller did with it before 039 (an empty update is the mapper's refusal, not this helper's).
+    /// <c>Emptied</c> is true only when the drop itself removed the last column, so the caller can skip the write.
+    /// </summary>
+    internal static (bool DroppedAny, bool Emptied) DropSearchIndexFromUpdate(
+        string? table, Guid? recordId, IDictionary<string, object?> fields, string origin, ILogger logger, string? correlationId = null)
+    {
+        ArgumentNullException.ThrowIfNull(fields);
+        ArgumentNullException.ThrowIfNull(logger);
+        if (!OwnsSearchIndex(table))
+            return (false, false);
+
+        var dropped = new List<DroppedSearchIndexValue>();
+        RemoveSearchIndex(fields, origin, dropped);
+        return LogUpdateDrop(table!, recordId, dropped, fields.Count == 0, logger, correlationId);
+    }
+
+    /// <summary>
+    /// The same sequence for an update payload that is a JSON object (a Web API PATCH body, a chat tool's <c>item</c>): returns
+    /// the body without the index columns (the same element when it named none), and the same two flags.
+    /// </summary>
+    internal static (JsonElement Body, bool DroppedAny, bool Emptied) DropSearchIndexFromUpdate(
+        string? table, Guid? recordId, JsonElement body, string origin, ILogger logger, string? correlationId = null)
+    {
+        ArgumentNullException.ThrowIfNull(logger);
+        if (!OwnsSearchIndex(table))
+            return (body, false, false);
+
+        var dropped = new List<DroppedSearchIndexValue>();
+        var rest = WithoutSearchIndex(body, origin, dropped);
+        var (droppedAny, emptied) = LogUpdateDrop(
+            table!, recordId, dropped, rest.ValueKind == JsonValueKind.Object && !rest.EnumerateObject().Any(), logger, correlationId);
+        return (rest, droppedAny, emptied);
+    }
+
+    private static (bool DroppedAny, bool Emptied) LogUpdateDrop(
+        string table, Guid? recordId, List<DroppedSearchIndexValue> dropped, bool nothingLeft, ILogger logger, string? correlationId)
+    {
+        if (dropped.Count == 0)
+            return (false, false);
+
+        LogSearchIndexDropped(logger, table.Trim().ToLowerInvariant(), recordId, dropped, applied: null, correlationId);
+        return (true, nothingLeft);
     }
 
     /// <summary>One dropped value: the column, where it came from, and the index it named (the id for the lookup, the name for the text column).</summary>
@@ -717,9 +785,6 @@ internal static class RecordTableRules
             }
         }
     }
-
-    private static IReadOnlySet<string> Columns(params string[] columns) =>
-        new HashSet<string>(columns, StringComparer.OrdinalIgnoreCase);
 }
 
 /// <summary>Whether a table's rows are roots (filed under nothing they inherit security from) or children.</summary>
@@ -887,9 +952,12 @@ internal sealed record RecordTableRule
 
     /// <summary>
     /// Whether the table's search index is SERVER-OWNED (FR-38, amending FR-10, I-5): both columns
-    /// (<c>sprk_ai_search_index</c> and the legacy text <c>sprk_searchindexname</c>) are written by step 8 alone, from the
-    /// record's final owning business unit, and a client value is dropped on every BFF write path
-    /// (<see cref="RecordTableRules.SearchIndexColumnOf"/>, <see cref="RecordTableRules.OwnsSearchIndex"/>).
+    /// (<c>sprk_ai_search_index</c> and the legacy text <c>sprk_searchindexname</c>) are written by step 8 alone on the create
+    /// and client paths, from the record's final owning business unit, and a client value is dropped on every BFF create and
+    /// update path that takes a client-, model- or playbook-shaped body
+    /// (<see cref="RecordTableRules.SearchIndexColumnOf"/>, <see cref="RecordTableRules.OwnsSearchIndex"/>). The indexing
+    /// pipeline's own stamps (<c>RagEndpoints</c> and the RAG indexing jobs) record WHERE a file was indexed and are deliberately
+    /// left alone.
     /// </summary>
     public bool SearchIndexed { get; init; }
 

@@ -1078,13 +1078,12 @@ public static class FieldMappingEndpoints
                     if (Sprk.Bff.Api.Services.RecordCreation.RecordTableRules.OwnsSearchIndex(targetEntity)
                         && Sprk.Bff.Api.Services.RecordCreation.RecordTableRules.SearchIndexColumnOf(rule.TargetField) is not null)
                     {
+                        // Round 3 (G6): ApplyMappingRule only READS lookupBinds (an IReadOnlyDictionary: TryGetValue) and writes only to the
+                        // payload it is given, so this call adds nothing to the shared lookupBinds and the scratch payload is never written.
                         var scratch = new Dictionary<string, object?>();
                         ApplyMappingRule(rule, sourceValues, scratch, lookupBinds);
-                        var droppedIndex = new List<Sprk.Bff.Api.Services.RecordCreation.RecordTableRules.DroppedSearchIndexValue>();
-                        Sprk.Bff.Api.Services.RecordCreation.RecordTableRules.RemoveSearchIndex(
-                            scratch, Sprk.Bff.Api.Services.RecordCreation.RecordTableRules.SearchIndexOriginMapping, droppedIndex);
-                        Sprk.Bff.Api.Services.RecordCreation.RecordTableRules.LogSearchIndexDropped(
-                            logger, targetEntity.Trim().ToLowerInvariant(), childRecordId, droppedIndex, applied: null);
+                        Sprk.Bff.Api.Services.RecordCreation.RecordTableRules.DropSearchIndexFromUpdate(
+                            targetEntity, childRecordId, scratch, Sprk.Bff.Api.Services.RecordCreation.RecordTableRules.SearchIndexOriginMapping, logger);
                         recordFieldResults.Add(new FieldMappingResultDto
                         {
                             SourceField = rule.SourceField,
@@ -1099,17 +1098,13 @@ public static class FieldMappingEndpoints
                     recordFieldResults.Add(fieldResult);
                 }
 
-                // Task 039 (FR-38) safety net: whatever a rule's bind plan wrote under either index column's key is removed too.
-                if (Sprk.Bff.Api.Services.RecordCreation.RecordTableRules.OwnsSearchIndex(targetEntity))
-                {
-                    var droppedLate = new List<Sprk.Bff.Api.Services.RecordCreation.RecordTableRules.DroppedSearchIndexValue>();
-                    if (Sprk.Bff.Api.Services.RecordCreation.RecordTableRules.RemoveSearchIndex(
-                            updatePayload, Sprk.Bff.Api.Services.RecordCreation.RecordTableRules.SearchIndexOriginMapping, droppedLate) > 0)
-                    {
-                        Sprk.Bff.Api.Services.RecordCreation.RecordTableRules.LogSearchIndexDropped(
-                            logger, targetEntity.Trim().ToLowerInvariant(), childRecordId, droppedLate, applied: null);
-                    }
-                }
+                // Task 039 (FR-38) safety net: the bind plans (lookupBinds) are built from the target's metadata, apart from the rule's
+                // TargetField, so a plan can name an index key under a rule whose TargetField does not (an alias of the navigation
+                // property). Whatever sits under either index column's key is removed from the final payload too, and logged.
+                // Round 3 (G3): both drops here use the shared update-path sequence (DropSearchIndexFromUpdate).
+                Sprk.Bff.Api.Services.RecordCreation.RecordTableRules.DropSearchIndexFromUpdate(
+                    targetEntity, childRecordId, updatePayload,
+                    Sprk.Bff.Api.Services.RecordCreation.RecordTableRules.SearchIndexOriginMapping, logger);
 
                 if (updatePayload.Count > 0)
                 {

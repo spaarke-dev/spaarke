@@ -607,18 +607,11 @@ public static class ChildRecordEndpoints
         // row's index stays as it is. Review R2 (NFR-07: drop, never refuse): a body that held ONLY the index is left with nothing to
         // write, and answers its normal success with nothing written (as it did before 039); a body that was empty to begin with
         // keeps the mapper's empty-update refusal.
-        if (RecordTableRules.OwnsSearchIndex(entity))
-        {
-            var droppedIndex = new List<RecordTableRules.DroppedSearchIndexValue>();
-            body = RecordTableRules.WithoutSearchIndex(body, RecordTableRules.SearchIndexOriginCaller, droppedIndex);
-            if (droppedIndex.Count > 0)
-            {
-                RecordTableRules.LogSearchIndexDropped(
-                    logger, entity, id, droppedIndex, applied: null, correlationId: httpContext.TraceIdentifier);
-                if (body.ValueKind == JsonValueKind.Object && !body.EnumerateObject().Any())
-                    return Results.NoContent();
-            }
-        }
+        var indexDrop = RecordTableRules.DropSearchIndexFromUpdate(
+            entity, id, body, RecordTableRules.SearchIndexOriginCaller, logger, httpContext.TraceIdentifier);
+        body = indexDrop.Body;
+        if (indexDrop.Emptied)
+            return Results.NoContent();
 
         var mapped = await DataverseWriteItemMapper.MapWebApiPayloadAsync(user, entity, body, ct).ConfigureAwait(false);
         if (mapped.ValidationError is { } invalid)
