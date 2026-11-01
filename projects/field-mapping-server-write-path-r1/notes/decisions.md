@@ -528,3 +528,10 @@ missing to add. Owners and refusals are unchanged, and the service needs no chan
   - matters are added to a project's list only through the wizard;
   - the backfill is accepted.
 - **Not live yet.** The dev deploy, the ribbon import and the backfill all wait for the owner's go in UAC-r2's session. UAC-r2 will send the deploy time. Task 076's "projects pair-filed" check depends on that backfill.
+
+### 2026-10-31 — FR-38 widened before task 039 (owner, in this session)
+
+- **Tables.** FR-38 named only the registry's search-indexed tables (matter, project, document). Work assignment, event and invoice also carry `sprk_ai_search_index`, and their wizards bind the user's BU index on it (`workAssignmentService.ts:405-414`, `eventService.ts:233-267`, `invoiceService.ts:204-213`). #2399 itself was a Work Assignment create, so FR-38 as written left it able to recur. **Owner: mark `sprk_workassignment`, `sprk_event` and `sprk_invoice` `SearchIndexed = true`.** All six tables then get the drop, and step 8 fills the final owning BU's index (often none). Repair's step 8 (`RepairSearchIndexAsync`) follows the same flag.
+- **Columns.** The legacy text column `sprk_searchindexname` is a second way to choose a record's index. `SearchIndexNameResolver` reads the lookup first and then the name, and where no BU has an index lookup (every customer environment, Q2 = (B)), the name decides. **Owner: both columns are server-owned.** A client value in either is dropped, before step 5 and on every BFF update path. Step 8 fills both from the final owning BU (fill-only over the SERVER's own values: field mapping and the adapters' post-mapping defaults are not the client).
+- **The drop log** covers both columns. It carries ids only: record, table and the dropped and applied index id, plus, for the name column, the dropped and applied index NAME. An index name is catalog configuration, not personal data. UAC-r2 condition 4 is kept (no user names, no emails).
+- **Reviews.** UAC-r2 reviewed FR-38 (conditions 1-4); ebilling-r1 reviews registry rules (the `sprk_invoice` flag). Both are told; the amendment ships in 039's PR for their review there.

@@ -509,6 +509,10 @@ design §13.3)
       `sprk_ai_search_index` gets the same drop. Native form edits are out of scope (Dataverse role checks, as W5).
     - A dropped value that differs from the applied one is logged as `client_search_index_dropped`, ids only: record,
       table, dropped index id, applied index id (UAC-r2 condition 4). Precedent: 018's `default_value_dropped`.
+    - *Amended 2026-10-31 (owner, before task 039):* the drop and the step-8 fill cover **both** index columns
+      (`sprk_ai_search_index` and the legacy text `sprk_searchindexname`) on **six** tables: matter, project, document,
+      and now work assignment, event and invoice (registry `SearchIndexed = true`). #2399 was a Work Assignment create.
+      The drop log adds the dropped and applied index name for the name column (catalog data, not personal data).
     - Business-unit moves are a known limit (#2413): the index affects discoverability only; search trims by live
       Read (design §13.3b).
     - Wizards stop binding the index (`applyUserBuDefaults` / `bindLookup('sprk_aisearchindex', …)`) in their W3
