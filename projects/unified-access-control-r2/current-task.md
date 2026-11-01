@@ -4,30 +4,49 @@
 > - **Standing rules:** project `CLAUDE.md`. **Decisions:** `notes/decisions.md` (latest 2026-10-31: task 195 owner decisions).
 > - **Defer list:** `notes/defer-issues.md`. **Previous copy:** `notes/handoff-history/current-task-2026-10-22-cp60.md`.
 
-> **Last Updated**: 2026-10-31 (checkpoint #83: task 195 merged as d0c1c5dc3c; deploy awaits owner go).
+> **Last Updated**: 2026-11-01 ~03:22Z (checkpoint #84: task 195 deployed to dev with the owner's go; backfill applied; ribbon import and gate running).
 
-## Deployed and gated
-- **Dev BFF = b083d62183** (master, including #2486, field-mapping 017).
-  - I deployed it at 19:52:25Z on 2026-10-31, with the owner's go in this session and R3's OK for that SHA. Router passed.
-  - Schema Verify passed; the package was 39.07 MB; the 4 critical-file hashes matched; healthz passed.
-  - App settings unchanged: ebilling's keys, and both UAC switches (RootOwnerWritesEnabled, OrdinaryMovesWritesEnabled) still true.
-  - R3 and ebilling were told the deploy is done.
-- **Gate PASS** (19:52:25Z → about 20:12Z; `$TEMP/uacmerge/uacg/gate_b083.txt`):
-  - 23 requests, 0 failed, 0 5xx, 0 [OWNERSHIP-REFUSED];
-  - the reconciler wrote nothing;
-  - external routes had 0 traffic;
-  - only the pre-existing warnings: SECURE-CENSUS, and acme ID-LINK #2163.
+## Task 195 live on dev (owner go "Deploy all + backfill", 2026-10-31)
 
-  After-notices sent to field-mapping (the re-seed is theirs, with the owner's OK in their session), R3 and ebilling.
+R3's OK was for d0c1c5dc3c only. Ebilling was notified. Schema Verify PASS.
+
+**BFF = d0c1c5dc3c**
+- Deploy started 02:56:14Z from C:/wt2468 (detached at d0c1c5dc3c).
+- The first try hit the platform's 10-minute deploy-status timeout and recovered automatically.
+- The new build started at 03:09:00Z. 4 hashes match; healthz 200.
+- All settings intact, including ebilling's new `ContentUnderstanding__Endpoint` (set at 02:54:30Z; the 02:55Z restart was theirs).
+- **Gate window starts 03:09Z.**
+
+**Web resources** (03:12Z, read back by SHA-256)
+- `sprk_wizard_commands`, `sprk_createprojectwizard`, `sprk_creatematterwizard`.
+- Live `sprk_wizard_commands` was byte-identical to b083 before the overwrite.
+- Pages built with vite in C:/wt2468. Not `Deploy-WizardCodePages.ps1`, which republishes about 12 pages.
+
+**Backfill `-Apply`** (03:14:07Z → 03:14:58Z)
+- Filed 7, unverified 0, skipped 0, failed 0 (`$TEMP/uacmerge/uacg/bf195_apply.txt`).
+- Root-owner moves already done: PRJT.10006.01 BU1→root; PRJ-000034 root→BU1; PRJ-000038 root→BU1.
+- **PRJT.10001.01 inherited Restricted** from REAL-2026-123456.02 (round 84). It has no active project-level external grants, so no partner loss. Tell the owner.
+- None of the 7 matters is secure.
+- 0 No Access entries on the 14 records (R3's parent-rule check, answered).
+- External grants on the 7 projects and their matters were sent to R3.
+
+**Running**
+- **Ribbon import agent (Opus).**
+  - Dedicated ribbon-only solution for sprk_matter and sprk_project. Fresh export, `Test-RibbonExportCurrent`, platform-drift check, then merge only the 195 delta.
+  - Then `Import-SolutionScoped` and verify with RetrieveEntityRibbon.
+  - It STOPS without importing if the platform command definitions have drifted.
+- **Gate job bb9ihq6me** runs at about 03:30Z: `gate9f4e.sh 03:09:00Z → now` into `$TEMP/uacmerge/uacg/gate_d0c1.txt`.
+  - Split the external routes.
+  - Ebilling's column delete (`sprk_invoice.sprk_invoicestatus`, 03:14:51Z) and its field-security change (about 03:05Z) fall in the window.
 
 ## Quick Recovery (READ THIS FIRST)
 
 | Field | Value |
 |---|---|
 | **Mode** | Final push, round-90 rules. Merge only when Router + "Client lint (type-aware ratchet)" are green; `--squash --match-head-commit <sha>`, no `--delete-branch`, after `git merge-tree`. Live actions, deploys and settings changes need the owner's go; shared-dev deploys go through the R3 protocol. |
-| **Task** | **195** (#2352) **MERGED** as d0c1c5dc3c (#2496, 2026-10-31). Not deployed. The design note `notes/task-195-project-filing-root.md` §4 has the implementation. Field-mapping has the SHA. |
+| **Task** | **195** (#2352) **MERGED** as d0c1c5dc3c (#2496, 2026-10-31). **DEPLOYED to dev** (see the section above); the ribbon import and the gate are running. The design note `notes/task-195-project-filing-root.md` §4 has the implementation. Field-mapping has the SHA. |
 | **What shipped** | **Core.** `ProjectMatterFiling` is the one core that writes the project pair. It does the caller checks, the secure gate, a version-conditioned app-only write and a read-back. Its two callers are `PATCH /api/v1/child-records/sprk_project/{id}` and the chat tool. **Rules.** `?move=true` is required to re-file a project that is already filed (otherwise 409 `project_filing.already_filed`; chat always sends move). A secure target is refused with 409 `secure_matter_unsupported` (#1506 interim). A project leaving a secure matter is filed and stays secure. **Census.** 3 report counts. **Wizards.** Create Matter offers Keep/Move. Create Project holds filing back while secure is blocked. The hosts lock on a partner-record launch. **Ribbon.** On the `sprk_Project_Matter_nn` subgrids, New opens the wizard and the platform New / Add Existing are hidden. **Backfill.** `scripts/Set-ProjectFilingFromMatterLink.ps1`, report-only by default. **Reviews.** Two Opus adversarial passes plus a Sonnet re-check; all F findings fixed; integration suites 199/8 and 353/23. **Filed.** #2493, #2494, #2495. |
-| **Next action** | **Owner go needed** for the dev deploy of master ≥ d0c1c5dc3c. Run the R3 protocol first: R3's OK on the SHA, notify ebilling, schema Verify. Order: (1) BFF via `Deploy-BffApi.ps1` from a fresh short-path worktree; (2) `Deploy-WizardCommandsJs.ps1`; (3) `Deploy-WizardCodePages.ps1`; (4) the ribbon import with `Import-SolutionScoped.ps1`, then a live click-test: N:N subgrid New opens the wizard and Add Existing is hidden; other matter and project subgrids keep their buttons; check the associated "Related" tab; (5) the gate; (6) the backfill report, then `-Apply` (accepted: FILE 7, 3 business-unit moves), then a gate on the root-owner moves. Then send field-mapping the deploy time and close task 195 (TASK-INDEX, POML). |
+| **Next action** | (1) Read the ribbon agent's report. On drift or failure, fix or escalate. (2) Read `gate_d0c1.txt`: 5xx, [OWNERSHIP-REFUSED], [ROOT-OWNER]/[ORDINARY-REOWN] moves for the 3 projects and their children, the new census counts (expect projectsWithMatterLinkButNoPair = 0), and the external split. (3) Send after-notices: R3 and ebilling (gate result), field-mapping (deploy time 03:09Z; their task 040 can proceed). (4) Owner browser click-test on the checklist (it doesn't hold the task open, round 90): N:N subgrid New opens the wizard; Add Existing hidden; other subgrids unchanged; the Related tab. (5) Close task 195: POML status, TASK-INDEX ✅, design note §5 live result; commit to work/unified-access-control-r2. (6) Clean up worktrees C:/wt195 and C:/wt2486 with Remove-WorktreeSafe. |
 
 ## Owner decisions for 195 (2026-10-31)
 1. Re-filing to another matter is allowed. Nothing is ever released from isolation.
