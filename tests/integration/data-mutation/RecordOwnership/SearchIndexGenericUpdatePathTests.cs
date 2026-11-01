@@ -230,6 +230,39 @@ public sealed class SearchIndexGenericUpdatePathTests
             && m.Contains("origin=mapping") && m.Contains("unchanged"));
     }
 
+    /// <summary>
+    /// Round 3 (G6): the final-payload drop is not redundant. A bind plan is built from the target's metadata apart from the
+    /// rule's TargetField, so a plan can carry an index key under a rule whose TargetField is another column; that key is removed
+    /// and the rule's other (description) write stands. (The per-rule skip's scratch call adds nothing to the shared plan map:
+    /// <c>FieldMappingPush_ARuleAimedAtEitherIndexColumn_IsSkipped_NotWritten_AndLogged</c> shows the shared map unchanged and no
+    /// index written.)
+    /// </summary>
+    [Fact]
+    public async Task FieldMappingPush_ABindPlanNamingTheIndexUnderAnotherTargetField_IsDroppedFromTheFinalPayload()
+    {
+        var world = new StampWorld().Row("sprk_matter", Row, []);
+        var log = new CapturingLog<object>();
+        var aliasRule = new FieldMappingRuleDto
+        {
+            SourceField = "sprk_sourceindex", TargetField = "sprk_alias", SourceFieldType = "Lookup", TargetFieldType = "Lookup", Priority = 2,
+        };
+
+        await FieldMappingEndpoints.ApplyMappingsToChildRecordsAsync(
+            _writes.Object, world.Restamper, [TextRule("sprk_note", "sprk_description"), aliasRule],
+            new Dictionary<string, object?> { ["sprk_note"] = "From the source", ["sprk_sourceindex"] = Index },
+            "sprk_matter", [Row], Caller, log, CancellationToken.None,
+            lookupBinds: new Dictionary<FieldMappingRuleDto, LookupBindPlan>
+            {
+                [aliasRule] = new("sprk_AI_Search_Index@odata.bind", $"/sprk_aisearchindexes({Index:D})", null),
+            },
+            appOnlyEntities: new Mock<IGenericEntityService>(MockBehavior.Strict).Object);
+
+        var written = Written().Should().ContainSingle().Subject;
+        written.Should().ContainKey("sprk_description");
+        NoIndexColumn(written);
+        Drops(log.Messages).Should().ContainSingle().Which.Should().Contain("column=" + LookupColumn);
+    }
+
     /// <summary>Round 2 (S5): a push whose only rules aim at the index asks for no write (the push already writes only a non-empty payload).</summary>
     [Fact]
     public async Task FieldMappingPush_RulesAimedOnlyAtTheSearchIndex_AskForNoWrite()
