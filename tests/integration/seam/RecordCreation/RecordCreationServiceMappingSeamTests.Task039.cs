@@ -68,6 +68,25 @@ public sealed partial class RecordCreationServiceMappingSeamTests
             && m.Contains("column=" + IndexLookupColumn));
     }
 
+    /// <summary>
+    /// Round 3 (G8): the late drop removes the mapping warnings ABOUT an index column (matched on the warning's column), not every
+    /// warning whose text merely mentions one. A profile named after the column and holding no rules gets its own warning, which stays.
+    /// </summary>
+    [Fact]
+    public async Task SearchIndex_AnUnrelatedWarningThatMentionsAnIndexColumn_IsKept()
+    {
+        EventIndexColumns();
+        Profile("sprk_matter", "sprk_event");
+        _profiles[("sprk_matter", "sprk_event")].Name = "Copy sprk_ai_search_index defaults";
+
+        var outcome = await Service().CreateAsync(
+            EventUnder(OrdinaryMatter, mappingSource: ("sprk_matter", OrdinaryMatter)), AsCaller(), CancellationToken.None);
+
+        outcome.Succeeded.Should().BeTrue(outcome.Refusal?.Detail);
+        outcome.MappingWarnings.Should().ContainSingle(w => w.Detail.Contains("has no rules") && w.Detail.Contains(IndexLookupColumn),
+            "the warning is about the profile, not about a dropped index value");
+    }
+
     [Fact]
     public async Task SearchIndex_APostMappingDefaultForTheNameColumn_IsDropped_WithNoWarning_AndLoggedAsADefault()
     {

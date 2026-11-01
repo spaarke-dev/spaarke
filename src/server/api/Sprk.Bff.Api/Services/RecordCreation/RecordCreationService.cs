@@ -612,10 +612,9 @@ internal sealed partial class RecordCreationService
             if (defaultColumns.Any(c => RecordTableRules.SearchIndexColumnOf(c) is not null))
                 defaultColumns = defaultColumns.Where(c => RecordTableRules.SearchIndexColumnOf(c) is null).ToHashSet(StringComparer.OrdinalIgnoreCase);
 
-            mappingWarnings.RemoveAll(w =>
-                RecordTableRules.SearchIndexColumnOf(w.Column) is not null
-                || w.Detail.Contains(SearchIndexColumns.LookupColumn, StringComparison.OrdinalIgnoreCase)
-                || w.Detail.Contains(SearchIndexColumns.LegacyTextColumn, StringComparison.OrdinalIgnoreCase));
+            // Matched on the warning's column, never on its text: a warning that merely mentions a column (a profile named
+            // after it) is about something else and stays (round 3, G8).
+            mappingWarnings.RemoveAll(w => RecordTableRules.SearchIndexColumnOf(w.Column) is not null);
         }
 
         // ── Step 4: the merged payload, mapped (the caller's or the server's item, with the mapped values merged in) ────
