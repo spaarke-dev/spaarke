@@ -379,9 +379,12 @@ public sealed class InvoiceSubmissionServiceTests
 
         public IOptionsMonitor<EbillingOptions> Monitor => Mock.Of<IOptionsMonitor<EbillingOptions>>(m => m.CurrentValue == Options);
 
+        /// <summary>Task 191: the invoice reader's options the intake checks (configured by default, so every other test takes the normal path).</summary>
+        public ContentUnderstandingOptions Reader { get; } = new() { Endpoint = "https://invoice-reader.test/" };
+
         public InvoiceSubmissionService Build() =>
             new(Allocator.Object, Entities.Object, RecordTypes.Object, Participations, Files.Service, Ownership.Object,
-                IsolationOver(() => Isolation), Jobs.Object, Monitor, NullLogger<InvoiceSubmissionService>.Instance);
+                IsolationOver(() => Isolation), Jobs.Object, Monitor, Microsoft.Extensions.Options.Options.Create(Reader), NullLogger<InvoiceSubmissionService>.Instance);
 
         /// <summary>The container and name the upload of <paramref name="submissionId"/> is staged under (the job derives the same).</summary>
         public (string Container, string Name) StagedName(Guid submissionId)
@@ -729,6 +732,60 @@ public sealed class InvoiceSubmissionServiceTests
         h.Writes.Should().Be(0);
         h.Files.Gateway.StorageCalls.Should().Be(0);
         h.Deleted.Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// Task 191, upload route: the reader that is not set up is a 422 before the stage, so no blob, no tracking number, no row and no job;
+    /// set up, the same request takes the normal path. Where the store is not configured either, the store's code wins (the from-email order).
+    /// </summary>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Upload_TheReaderIsNotConfigured_Is422ReaderNotConfigured_NothingStagedTrackedOrCreated(bool storeUnconfiguredToo)
+    {
+        var h = new Harness { Reader = { Endpoint = "" } };
+        if (storeUnconfiguredToo)
+        {
+            h.Files = new StoredFileRig(configured: false);
+        }
+
+        var outcome = await h.Build().SubmitAsync(Spa(), CancellationToken.None);
+
+        outcome.Should().Match<InvoiceSubmissionOutcome>(o => o.StatusCode == 422
+            && o.ErrorCode == (storeUnconfiguredToo ? InvoiceSubmissionErrors.StorageNotConfigured : InvoiceSubmissionErrors.ReaderNotConfigured));
+        h.Writes.Should().Be(0);
+        h.Allocations.Should().BeEmpty("no tracking number is allocated and no row is created");
+        h.JobsSent.Should().BeEmpty();
+        h.Files.Gateway.StorageCalls.Should().Be(0, "nothing is staged");
+        h.Deleted.Should().BeEmpty();
+
+        if (!storeUnconfiguredToo)
+        {
+            h.Reader.Endpoint = "https://invoice-reader.test/";
+            (await h.Build().SubmitAsync(Spa(), CancellationToken.None)).Kind.Should().Be(InvoiceSubmissionOutcomeKind.Received);
+        }
+    }
+
+    /// <summary>
+    /// Task 191: the intake's check and the reader's are the same test (<see cref="ContentUnderstandingOptions.IsConfigured"/>) over the same
+    /// bound options, so they cannot disagree: pinned for an empty, a blank and a set endpoint.
+    /// </summary>
+    [Theory]
+    [InlineData("", false)]
+    [InlineData("   ", false)]
+    [InlineData(null, false)]
+    [InlineData("https://invoice-reader.test/", true)]
+    public void The_intakes_reader_check_and_the_readers_own_agree(string? endpoint, bool configured)
+    {
+        var h = new Harness { Reader = { Endpoint = endpoint } };
+        var reader = new Sprk.Bff.Api.Services.Ai.ContentUnderstanding.ContentUnderstandingClient(
+            Mock.Of<IHttpClientFactory>(), Mock.Of<TokenCredential>(), Microsoft.Extensions.Options.Options.Create(h.Reader), TimeProvider.System,
+            NullLogger<Sprk.Bff.Api.Services.Ai.ContentUnderstanding.ContentUnderstandingClient>.Instance);
+
+        var intake = h.Build();
+
+        intake.ReaderIsConfigured.Should().Be(reader.IsConfigured).And.Be(configured);
+        (intake.ReaderNotConfiguredRefusal() is null).Should().Be(configured);
     }
 
     [Fact]

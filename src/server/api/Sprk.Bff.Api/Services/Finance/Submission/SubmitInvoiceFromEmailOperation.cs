@@ -37,6 +37,8 @@ namespace Sprk.Bff.Api.Services.Finance.Submission;
 /// EB-D-165: whoever made an earlier attempt).</item>
 /// <item>The file store's configuration (<see cref="StoredFileService.CanStageAsync"/>), read-only, so a store that is not configured is
 /// a 422 that files nothing (review round 5).</item>
+/// <item>The invoice reader's configuration (<see cref="InvoiceSubmissionService.ReaderNotConfiguredRefusal"/>, task 191), read-only and
+/// after the store's: a reader that is not set up is a 422 that files and writes nothing.</item>
 /// <item>The marked parts, read out of the saved <c>.eml</c> (<see cref="EmlMarkedPartReader"/>: ordinal, name and SHA-256 must match;
 /// its <c>versionnumber</c> is the source version). Read-only, so before step A (review round 5): a <c>.eml</c> that is gone, holds no
 /// file or no longer carries a part as marked is a permanent 422, a read fault a 503, and neither leaves a filing behind.</item>
@@ -131,6 +133,13 @@ internal class SubmitInvoiceFromEmailOperation : ISubmitInvoiceFromEmail
         {
             return Refused(StatusCodes.Status422UnprocessableEntity, InvoiceSubmissionErrors.StorageNotConfigured,
                 "Invoice file storage is not configured, so the invoice cannot be stored. Nothing was submitted.", filed: false);
+        }
+
+        // ── 2c. Task 191: the invoice reader, read-only and after the file store (the store's code wins when both are missing), so a
+        //        reader that is not set up is a 422 that files nothing and tracks nothing, not a submission that fails in the job. ──
+        if (_submissions.ReaderNotConfiguredRefusal() is { } readerRefusal)
+        {
+            return Refused(readerRefusal.StatusCode, readerRefusal.ErrorCode!, readerRefusal.Detail!, filed: false);
         }
 
         // ── 3. The marked parts, out of the saved .eml: read-only, so before step A (review round 5, pass-2 F1-2 / uac-r2 K2-b: a refused

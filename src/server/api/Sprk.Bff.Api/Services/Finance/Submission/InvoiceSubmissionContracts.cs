@@ -390,6 +390,14 @@ public static class InvoiceSubmissionErrors
     public const string CorrectionNotAllowed = "ebilling.submission.correction_not_allowed";
 
     public const string StorageNotConfigured = "ebilling.submission.storage_not_configured";
+
+    /// <summary>
+    /// ebilling-r1 task 191: the invoice reader is not configured in this environment (<c>ContentUnderstanding:Endpoint</c> empty; the same
+    /// check the reader makes, <see cref="InvoiceSubmissionService.ReaderNotConfiguredRefusal"/>). 422, checked on all three routes beside the file
+    /// store's check and before anything is written or filed, so nothing is tracked, created or filed. The job keeps
+    /// <see cref="SubmissionReasonCodes.ReadNotConfigured"/> as the backstop when the setting is removed after intake.
+    /// </summary>
+    public const string ReaderNotConfigured = "ebilling.submission.reader_not_configured";
     public const string CoreRecordUnavailable = "ebilling.submission.record_unavailable";
     public const string Failed = "ebilling.submission.failed";
 }

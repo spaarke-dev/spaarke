@@ -166,6 +166,7 @@ public class InvoiceSubmissionService
     private readonly ExistingDocumentIsolationCheck _isolation;
     private readonly JobSubmissionService _jobs;
     private readonly IOptionsMonitor<EbillingOptions> _ebilling;
+    private readonly ContentUnderstandingOptions _reader;
     private readonly ILogger<InvoiceSubmissionService> _logger;
 
     public InvoiceSubmissionService(
@@ -178,6 +179,7 @@ public class InvoiceSubmissionService
         ExistingDocumentIsolationCheck isolation,
         JobSubmissionService jobs,
         IOptionsMonitor<EbillingOptions> ebilling,
+        IOptions<ContentUnderstandingOptions> reader,
         ILogger<InvoiceSubmissionService> logger)
     {
         _allocator = allocator ?? throw new ArgumentNullException(nameof(allocator));
@@ -189,11 +191,29 @@ public class InvoiceSubmissionService
         _isolation = isolation ?? throw new ArgumentNullException(nameof(isolation));
         _jobs = jobs ?? throw new ArgumentNullException(nameof(jobs));
         _ebilling = ebilling ?? throw new ArgumentNullException(nameof(ebilling));
+        _reader = reader?.Value ?? throw new ArgumentNullException(nameof(reader));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
     /// <summary>The configured file limit in bytes (<see cref="EbillingOptions.MaxSubmissionFileSizeMb"/>).</summary>
     public long MaxFileBytes => (long)_ebilling.CurrentValue.MaxSubmissionFileSizeMb * 1024 * 1024;
+
+    /// <summary>
+    /// ebilling-r1 task 191: whether the invoice reader is set up in this environment. The reader's own test
+    /// (<see cref="ContentUnderstandingOptions.IsConfigured"/>, which <c>ContentUnderstandingClient.IsConfigured</c> returns, so the two cannot
+    /// disagree), read from the same bound options the reader is built with.
+    /// </summary>
+    internal bool ReaderIsConfigured => _reader.IsConfigured;
+
+    /// <summary>
+    /// ebilling-r1 task 191: the 422 every intake route answers, beside the file store's check and before anything is written or filed, when the
+    /// invoice reader is not configured (the job would end the submission Failed with <see cref="SubmissionReasonCodes.ReadNotConfigured"/>
+    /// after a tracking number, a row and a filing). <c>null</c> when the reader is configured. The job keeps its code as the backstop.
+    /// </summary>
+    internal InvoiceSubmissionOutcome? ReaderNotConfiguredRefusal() => ReaderIsConfigured
+        ? null
+        : InvoiceSubmissionOutcome.Refused(StatusCodes.Status422UnprocessableEntity, InvoiceSubmissionErrors.ReaderNotConfigured,
+            "Invoice reading is not set up in this environment, so the invoice cannot be submitted. Nothing was submitted.");
 
     // ═══════════════════════════════════════════════════════════════════════════════════════════════
     // Submit
@@ -236,6 +256,28 @@ public class InvoiceSubmissionService
         if (decision.Refusal is { } refused)
         {
             return refused;
+        }
+
+        // ── 2b. Task 191: the invoice reader, read-only, before the first write. The file store's own check is the stage inside the write,
+        //        so when both are missing the store's code must still win (as on the from-email route): the store is asked only here. ──
+        if (ReaderNotConfiguredRefusal() is { } readerRefusal)
+        {
+            bool storeReady;
+            try
+            {
+                storeReady = await _files.CanStageAsync(ct).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (!IsCallerCancellation(ex, ct))
+            {
+                _logger.LogWarning("Invoice submission: the file store's environment could not be confirmed ({Fault})", ex.GetType().Name);
+                return InvoiceSubmissionOutcome.Refused(StatusCodes.Status503ServiceUnavailable, InvoiceSubmissionErrors.Failed,
+                    "The invoice could not be submitted right now. Nothing was saved; try again shortly.");
+            }
+
+            return storeReady
+                ? readerRefusal
+                : InvoiceSubmissionOutcome.Refused(StatusCodes.Status422UnprocessableEntity, InvoiceSubmissionErrors.StorageNotConfigured,
+                    "Invoice file storage is not configured, so the invoice cannot be stored. Nothing was saved.");
         }
 
         return await WriteAsync(request, number, file, decision.Row!, decision.ResolverFields!, ct);
@@ -491,6 +533,14 @@ public class InvoiceSubmissionService
         if (decision.Refusal is { } refused)
         {
             return refused;
+        }
+
+        // ── 4-reader. Task 191: the invoice reader, read-only, before a Correction's checks, step A and the create. This route stages no
+        //        file, so there is no store check beside it. ──
+        if (ReaderNotConfiguredRefusal() is { } readerRefusal)
+        {
+            _logger.LogInformation("Invoice submission: the confirm of document {DocumentId} refused (422), the invoice reader is not configured", documentId);
+            return readerRefusal;
         }
 
         // ── 4a. Task 097b: a Correction's own checks (the invoice's firm, core record, status, submission and number), read-only, before

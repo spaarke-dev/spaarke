@@ -648,6 +648,45 @@ public sealed class SubmitInvoiceFromEmailOperationTests
         H.Writes.Should().Be(0);
     }
 
+    /// <summary>
+    /// Task 191: a reader that is not set up is a 422 beside the store's check, before step A and before anything is staged or created;
+    /// where the store is not configured either, the store's code wins; set up, the same request takes the normal path.
+    /// </summary>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Submit_TheReaderIsNotConfigured_Is422ReaderNotConfigured_BeforeStepA_NothingFiledOrWritten(bool storeUnconfiguredToo)
+    {
+        H.Reader.Endpoint = "";
+        if (storeUnconfiguredToo)
+        {
+            H.Files = new StoredFileRig(configured: false);
+        }
+
+        var stepA = 0;
+        var operation = Build();
+        operation.StepA = _ => { stepA++; return Task.FromResult(true); };
+
+        var result = await operation.SubmitAsync(Input(), CancellationToken.None);
+
+        result.Outcome.Should().Be(FromEmailSubmitOutcome.Refused);
+        (result.Status, result.ErrorCode).Should().Be((StatusCodes.Status422UnprocessableEntity,
+            storeUnconfiguredToo ? InvoiceSubmissionErrors.StorageNotConfigured : InvoiceSubmissionErrors.ReaderNotConfigured));
+        result.Detail.Should().NotContain(InvoiceSubmissionService.FilingKeptSentence);
+        stepA.Should().Be(0, "a refused submission never leaves a filing behind");
+        H.Stages.Should().BeEmpty();
+        H.Allocations.Should().BeEmpty();
+        H.JobsSent.Should().BeEmpty();
+        H.Writes.Should().Be(0);
+
+        if (!storeUnconfiguredToo)
+        {
+            H.Reader.Endpoint = "https://invoice-reader.test/";
+            (await operation.SubmitAsync(Input(), CancellationToken.None)).Outcome.Should().Be(FromEmailSubmitOutcome.Received);
+            stepA.Should().Be(1);
+        }
+    }
+
     [Fact]
     public async Task Submit_AnInconsistentInput_IsAWiringDefect()
     {

@@ -8,6 +8,8 @@ Changes 2026-10-29 (095 contract fix, for word-add-in-r1): step A's 403 `COMMUNI
 
 Changes 2026-10-31 (097e, agreed with word-add-in-r1): new section 10, the correction prefill read (G3), including its optional `replacedBy`; G3 in section 7 now points to it.
 
+Changes 2026-10-31 (191, owner-approved 2026-10-31 after the first dev UAT, for word-add-in-r1): new synchronous 422 `ebilling.submission.reader_not_configured` (section 6), answered before anything is written or filed on the from-email, from-document (confirm) and upload routes; section 9 now lists every `ai.invoice.*` outcome code the job can store (`ai.invoice.read.not_configured`, `ai.invoice.disabled`, `ai.invoice.binding_missing`, `ai.invoice.completion_failed`, `ai.invoice.output_invalid`), each marked permanent or retried.
+
 Binding for 095 and word-add-in-r1; changes need word-add-in-r1's agreement first. Behaviour is model §9.1 (v5.9 FINAL); this pins names, statuses and codes only. Citations: `work/ebilling-r1` @ 786d1ea17a, under `src/server/api/Sprk.Bff.Api/` unless shown. NEW = no existing code to follow.
 
 ## 1. Route
@@ -141,6 +143,7 @@ ProblemDetails (ADR-019). Own refusals carry `errorCode` (submission routes, Inv
 | 409 | `ebilling.submission.document_core_record_mismatch` | Also from step A (task 094): the unfiled communication is held under a secure record and cannot be filed here. Added 2026-10-28 (094) | – | no | InvoiceSubmissionEndpoints.SourceFiling |
 | 409 | `ebilling.submission.document_already_submitted` | Also (task 094): other bytes are already staged under this attempt (the same email, record and marking submitted with other Invoice or Supporting files). Added 2026-10-28 (094) | – | no | SubmitInvoiceFromEmailOperation |
 | 422 | `ebilling.submission.storage_not_configured` | Task 094: the Finance file store is not configured. Added 2026-10-28 (094). Checked before step A, so nothing is filed. Changed 2026-10-28 (094) | – | no | as above |
+| 422 | `ebilling.submission.reader_not_configured` | Task 191: invoice reading is not set up in this environment (`ContentUnderstanding:Endpoint` is empty or blank; the same test the reader makes). Synchronous and permanent until the environment is set up: nothing is submitted, no tracking number is allocated, no submission is created and nothing is filed. Checked on the from-email, from-document (confirm) and upload routes beside `storage_not_configured` and before step A; where both are missing, the answer is `storage_not_configured`. If the setting is removed after intake, the job ends the submission Failed with `ai.invoice.read.not_configured` (section 9). Added 2026-10-31 (191) | – | no | SubmitInvoiceFromEmailOperation |
 | 503 | `ebilling.tracking.unavailable` | Task 094: no tracking number could be allocated. Added 2026-10-28 (094) | – | yes | as above |
 | 422 | `ebilling.submission.email_save_failed` | Task 094: the saved `.eml` is gone or holds no file when the submission reads its marked files. Nothing is submitted and nothing is filed; `detail` names the internal upload route. The same code is the section 9 outcome when the job finds it. Added 2026-10-28 (094) | – | no | SubmitInvoiceFromEmailOperation |
 | 422 | `ebilling.submission.document_unavailable` | Task 094: a marked file is not in the saved `.eml` as marked (missing, or another name or content at its position). Nothing is submitted and nothing is filed; `detail` names the internal upload route. The same code is the section 9 outcome. Added 2026-10-28 (094) | – | no | as above |
@@ -198,6 +201,11 @@ Field names and codes in this file are binding once word-add-in-r1 agrees (095 P
 | Failed | `invoice.read.unreadable` | The Invoice file could not be read (damaged or protected PDF) |
 | Failed | `invoice.read.page_limit` | The Invoice file has too many pages |
 | Failed | `invoice.read.service_failed` | Extraction failed after retries |
+| Failed | `ai.invoice.read.not_configured` | Permanent. Added 2026-10-31 (191). Invoice reading isn't set up in this environment. The submit refuses this synchronously (section 6, `reader_not_configured`); this outcome appears only when the setting is removed between the submit and the job |
+| Failed | `ai.invoice.disabled` | Permanent. Added 2026-10-31 (191). Invoice AI is switched off in this environment (the AI kill switch), so the invoice could not be read |
+| Failed | `ai.invoice.binding_missing` | Retried, then stored on the last attempt. Added 2026-10-31 (191). Line coding could not find its configured action; the invoice was read but not processed |
+| Failed | `ai.invoice.completion_failed` | Retried, then stored on the last attempt. Added 2026-10-31 (191). The AI service failed while coding the invoice lines |
+| Failed | `ai.invoice.output_invalid` | Retried, then stored on the last attempt. Added 2026-10-31 (191). The AI service's answer for the invoice lines was not in the expected form |
 | Failed | `ebilling.submission.email_save_failed` | NEW (095/094): the .eml save did not finish |
 | Failed | `ebilling.submission.document_unavailable` | The marked parts could not be read from the saved .eml |
 | Failed | `ebilling.submission.file_malicious` | A marked file failed the malware scan (task 092) |
