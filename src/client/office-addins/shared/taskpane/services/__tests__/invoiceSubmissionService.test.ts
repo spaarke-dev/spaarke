@@ -383,6 +383,28 @@ describe('submitInvoiceFromEmail — the answer', () => {
     expect(await submit()).not.toHaveProperty('filingKept');
   });
 
+  it('ebilling task 192: a well-formed filedUnder on the 409 is read; a malformed one is ignored', async () => {
+    const filedUnder = { entityType: 'Matter', entityId: 'b1a2c3d4-0000-0000-0000-000000000001', name: 'PAT-897705' };
+    mockFetch.mockResolvedValueOnce(
+      res(409, { errorCode: 'ebilling.submission.document_core_record_mismatch', filedUnder })
+    );
+    expect(await submit()).toMatchObject({ kind: 'refused', status: 409, filedUnder });
+
+    // must-not-fire: absent, a non-core type, a missing name or id, or not an object
+    for (const bad of [
+      undefined,
+      { ...filedUnder, entityType: 'Account' },
+      { entityType: 'Matter', entityId: filedUnder.entityId },
+      { entityType: 'Project', name: 'P-1' },
+      'PAT-897705',
+    ]) {
+      mockFetch.mockResolvedValueOnce(
+        res(409, { errorCode: 'ebilling.submission.document_core_record_mismatch', filedUnder: bad })
+      );
+      expect(await submit()).not.toHaveProperty('filedUnder');
+    }
+  });
+
   it('no response at all → retryable (the same key makes the retry safe)', async () => {
     mockFetch.mockRejectedValueOnce(new TypeError('network'));
     expect(await submit()).toEqual({ kind: 'retryable', status: 0, code: undefined });
@@ -554,6 +576,33 @@ describe('createInvoiceSubmitHandler — submit, then follow the status', () => 
     );
     const outcome = await createInvoiceSubmitHandler({ config, email: emailSource(), poll })(INPUT, { actionId: 'a' });
     expect(outcome).toMatchObject({ kind: 'refused', message: expect.stringMatching(/stays filed there\.$/) });
+  });
+
+  it('ebilling task 192: the mismatch refusal names the filed-under record and carries it for the view', async () => {
+    const filedUnder = {
+      entityType: 'Project',
+      entityId: 'b1a2c3d4-0000-0000-0000-000000000002',
+      name: 'Harbor Lease',
+    };
+    mockFetch.mockResolvedValueOnce(
+      res(409, { errorCode: 'ebilling.submission.document_core_record_mismatch', filedUnder })
+    );
+    const handler = createInvoiceSubmitHandler({ config, email: emailSource(), poll });
+    expect(await handler(INPUT, { actionId: 'a' })).toEqual({
+      kind: 'refused',
+      message:
+        'This email is filed under Harbor Lease, so its invoice can only be submitted to that record. Nothing was submitted.',
+      filedUnder,
+    });
+
+    // must-not-fire: without filedUnder the refusal names no record and offers none
+    mockFetch.mockResolvedValueOnce(res(409, { errorCode: 'ebilling.submission.document_core_record_mismatch' }));
+    const plain = await handler(INPUT, { actionId: 'b' });
+    expect(plain).not.toHaveProperty('filedUnder');
+    expect(plain).toMatchObject({
+      kind: 'refused',
+      message: expect.stringMatching(/can't be submitted to this record/),
+    });
   });
 
   it('OFFICE_AUTH_ERROR (500, 2026-10-28) is retryable', async () => {
