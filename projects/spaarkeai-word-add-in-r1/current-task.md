@@ -9,7 +9,7 @@
 | Field | Value |
 |---|---|
 | **Task** | **133 🔄 Outlook Submit Invoice view** (FULL, opus/high). Live on dev in unified package 1.1.3; first owner UATs done. |
-| **Status** | Waiting on the owner's retest (INV-012.2) and on ebilling's **#2507** (097b/c/e/f, 191, 192; ontology-r1 reviewing; ebilling will say when it merges). #2501, #2503 and #2510 (correction sentences) are merged; their worktrees are removed. No open PRs. |
+| **Status** | Waiting on the owner's retest (INV-012.2) and on ebilling's **#2507** (097b/c/e/f, 191, 192; ebilling is running the fix round ontology-r1 asked for and will say when it merges, then when a dev BFF deploy (SPA-r3 or another team, with the owner's go) includes it). #2501, #2503 and #2510 (correction sentences) are merged; their worktrees are removed. No open PRs. |
 | **Next Action** | 1. Act on the owner's retest result. 2. When #2507 is on master AND dev: build the 097e prefill and enable Correction (`correctionAvailable`). Reuse `describeUncorrectableStatus` for the prefill's `reason: invoice_status`. |
 
 ## Submit Invoice (task 133): state
