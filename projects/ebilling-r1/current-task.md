@@ -7,7 +7,7 @@
 | Field | Value |
 |-------|-------|
 | **Running** | Implementer (sonnet/high) on `task/ebill-191-reader-preflight`: 422 `ebilling.submission.reader_not_configured` on all three intake routes before any write; `ai.invoice.*` codes in 095 contract §9. |
-| **Next action** | (1) 015: column and option set DELETED on dev 03:14:51Z, re-run confirms (notes/015 §12). 
+| **Next action** | (1) 015 done: the column and option set were deleted on dev at 03:14:51Z, and a re-run confirms it (notes/015 §12). (2) When 191 reports: review, merge, gate, push, then send word-add-in the commit. (3) Task 192 `filedUnder` (owner OK), after 191. (4) 097f, then 151a/b/c (EB-D-181). |
 | **Master PR (later)** | Must carry 097b AND 097c together (ontology-r1 condition), full integration counts, ontology-r1 review. |
 
 ## Done on dev 2026-11-01 (owner OK each)
