@@ -1726,6 +1726,20 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
                 "A system-mail send must be a shared-mailbox email that is not archived to SharePoint Embedded.");
         }
 
+        // Ebilling-r1 task 151c-1a (EB-D-182 (1)): the server-only send options (attachments from memory, the owner a record decides,
+        // no enrichment) are defined for the send-as-user EMAIL path only, and never with an archive or system mail. Any other path
+        // would ignore them and either drop the attachments or copy them into a container the unit can read. Refused before anything is
+        // sent or written.
+        if (request.ServerSend is not null
+            && (request.CommunicationType != CommunicationType.Email
+                || request.SendMode != SendMode.User
+                || request.ArchiveToSpe
+                || request.SystemMail is not null))
+        {
+            throw new InvalidOperationException(
+                "A server-only send must be a send-as-user email that is not archived to SharePoint Embedded and is not system mail.");
+        }
+
         // Branch: MESSAGE (ACS Chat) sends take the persist-on-send + echo-dedup path (task 051 / FR-04).
         // Dispatch still flows through the SAME CommunicationChannelDispatcher (ADR-045 — no second send path);
         // this branch only supplies the messaging-specific sender-identity + persistence shape (participant, not
@@ -2121,6 +2135,13 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
             attachmentSources = prepared.Sources;
         }
 
+        // Step 1d (ebilling-r1 task 151c-1a): files a server caller holds in memory join the document attachments, under the same count
+        // and total-size limits applied to the combined list. They go to the mail channel only: no document, attachment row or archived copy.
+        if (request.ServerSend is { Attachments.Count: > 0 } serverSend)
+        {
+            fileAttachments = MergeServerAttachments(fileAttachments, serverSend.Attachments, correlationId);
+        }
+
         // Step 2: Resolve user email from claims (no ApprovedSenderValidator for user mode)
         // Check multiple claim types: v2.0 tokens use preferred_username/email,
         // v1.0 tokens use upn/unique_name, ClaimTypes.Email maps to xmlsoap email claim
@@ -2297,7 +2318,9 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
             string? attachmentRecordWarning = null;
             if (request.AttachmentDocumentIds is { Length: > 0 } && communicationId.HasValue)
             {
+                // Document attachments come first in the list; a server-only attachment (task 151c-1a) has no row.
                 var attachmentNames = fileAttachments?
+                    .Take(request.AttachmentDocumentIds.Length)
                     .Select(fa => fa.Name ?? "Unknown")
                     .ToArray() ?? Array.Empty<string>();
 
@@ -2332,7 +2355,7 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
             // Step 8: Direction-agnostic enrichment (ADR-045 / FR-08) — best-effort, non-fatal (NFR-06).
             // Closes the previously-missing OUTBOUND RAG-indexing half; full association/analysis
             // direction-symmetry lands in task 011. EnrichAsync is itself non-fatal; the guard is defense-in-depth.
-            if (communicationId.HasValue)
+            if (communicationId.HasValue && request.ServerSend?.SkipEnrichment != true) // task 151c-1a: a server-only send may skip enrichment
             {
                 try
                 {
@@ -2510,16 +2533,23 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
         // Map primary association (regarding lookup + FR-26 stamp + denormalized fields)
         await MapAssociationFieldsAsync(communication, request.Associations, correlationId, ct);
 
-        var owner = await _ownership.ResolveOwnerAsync(
-            Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext.ForChild(communication) with
+        // Ebilling-r1 task 151c-1a: a server-only send names the record its communication's owner follows (the AP export batch), asked as
+        // a content row of it. The default owner is never kept: an answer that is not a team refuses, like any other refusal.
+        var follows = request.ServerSend?.OwnerFollows;
+        var ownershipContext = follows is { } record
+            ? Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext.ContentOf(record.EntityLogicalName, record.RecordId) with
+            {
+                RequestedBy = requestedBy,
+            }
+            : Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext.ForChild(communication) with
             {
                 WhenUnfiled = Sprk.Bff.Api.Services.Dataverse.UnfiledOwnership.KeepCreator,
                 // Task 146 c1-r1 (owner round 13 item 9): the sender asked for this app-created record.
                 RequestedBy = requestedBy,
-            },
-            ct);
+            };
+        var owner = await _ownership.ResolveOwnerAsync(ownershipContext, ct);
 
-        if (owner.IsRefused)
+        if (owner.IsRefused || (follows is not null && !owner.IsOwned))
         {
             _logger.LogWarning(
                 "Outbound communication REFUSED before the send: no owner ({Code}: {Reason}) | CorrelationId: {CorrelationId}",
@@ -3502,12 +3532,60 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
     /// <summary>
     /// Maximum number of attachments allowed per email (Graph API limit).
     /// </summary>
-    private const int MaxAttachmentCount = 150;
+    internal const int MaxAttachmentCount = 150;
 
     /// <summary>
     /// Maximum total size of all attachments in bytes (35 MB).
     /// </summary>
-    private const long MaxTotalAttachmentSizeBytes = 36_700_160;
+    internal const long MaxTotalAttachmentSizeBytes = 36_700_160;
+
+    /// <summary>
+    /// Adds the files a server caller holds in memory (<see cref="ServerSendOptions.Attachments"/>) after the document attachments and
+    /// applies the path's own limits (<see cref="MaxAttachmentCount"/>, <see cref="MaxTotalAttachmentSizeBytes"/>) to the combined list,
+    /// with the same <c>ATTACHMENT_LIMIT_EXCEEDED</c> refusal as the document download.
+    /// </summary>
+    private static List<ChannelAttachment> MergeServerAttachments(
+        List<ChannelAttachment>? documentAttachments, IReadOnlyList<ServerAttachment> serverAttachments, string correlationId)
+    {
+        var merged = documentAttachments ?? new List<ChannelAttachment>(serverAttachments.Count);
+        foreach (var attachment in serverAttachments)
+        {
+            merged.Add(new ChannelAttachment { Name = attachment.Name, ContentType = attachment.ContentType, Content = attachment.Content });
+        }
+
+        if (merged.Count > MaxAttachmentCount)
+        {
+            throw new SdapProblemException(
+                code: "ATTACHMENT_LIMIT_EXCEEDED",
+                title: "Too Many Attachments",
+                detail: $"Maximum {MaxAttachmentCount} attachments allowed. Received {merged.Count}.",
+                statusCode: 400,
+                extensions: new Dictionary<string, object>
+                {
+                    ["correlationId"] = correlationId,
+                    ["maxAttachments"] = MaxAttachmentCount,
+                    ["requestedAttachments"] = merged.Count
+                });
+        }
+
+        var total = merged.Sum(a => (long)a.Content.Length);
+        if (total > MaxTotalAttachmentSizeBytes)
+        {
+            throw new SdapProblemException(
+                code: "ATTACHMENT_LIMIT_EXCEEDED",
+                title: "Attachments Too Large",
+                detail: $"Total attachment size exceeds {MaxTotalAttachmentSizeBytes / (1024 * 1024)}MB limit. Total size: {total} bytes.",
+                statusCode: 400,
+                extensions: new Dictionary<string, object>
+                {
+                    ["correlationId"] = correlationId,
+                    ["maxTotalSizeBytes"] = MaxTotalAttachmentSizeBytes,
+                    ["currentTotalSizeBytes"] = total
+                });
+        }
+
+        return merged;
+    }
 
     /// <summary>
     /// Downloads files from SPE, validates attachment count and total size limits,
