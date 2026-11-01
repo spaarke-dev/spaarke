@@ -379,6 +379,7 @@ internal static class InvoiceSubmissionFromEmailHttp
         HttpContext http,
         FromEmailSubmissionService service,
         Spaarke.Core.Auth.AuthorizationService authorization,
+        Spaarke.Dataverse.IGenericEntityService entities,
         ILogger<FromEmailSubmissionService> logger,
         CancellationToken ct)
     {
@@ -434,7 +435,65 @@ internal static class InvoiceSubmissionFromEmailHttp
             extensions[key] = value;
         }
 
+        // Task 192: the optional `filedUnder` of the "filed under another core record" 409, only for a record the caller can open.
+        if (outcome.FiledUnder is { } candidate
+            && await FiledUnderAsync(candidate, http, entities, authorization, logger, ct) is { } filedUnder)
+        {
+            extensions[FiledUnderField] = filedUnder;
+        }
+
         return Results.Problem(statusCode: outcome.Status, detail: outcome.Detail, extensions: extensions);
+    }
+
+    /// <summary>The top-level field of the "filed under another core record" 409 (contract section 6; additive and optional to read).</summary>
+    internal const string FiledUnderField = "filedUnder";
+
+    /// <summary>
+    /// <c>filedUnder</c> of the "filed under another core record" 409 (task 192): the record's type in the intake vocabulary, id and primary
+    /// name, only when the caller has Read on it, checked as the caller through the Finance filter's own rights decision
+    /// (<see cref="FinanceAuthorizationFilter.CallerHoldsRightsAsync"/>, operation <c>finance.read</c>, as <c>replacedBy</c> does). The record
+    /// is read app-only for its name AFTER that check passes, so one the caller cannot open is never named or read. DELIBERATE: the field is
+    /// optional, so a refusal OR a fault (the rights, the name, an unmapped type) leaves it out, a Warning for a fault; it never changes the
+    /// 409's status, code or detail and is never a 503. The candidate is already a non-secure record (<see cref="FromEmailSubmissionOutcome.FiledUnder"/>).
+    /// </summary>
+    private static async Task<FromEmailFiledUnder?> FiledUnderAsync(
+        InvoiceCoreRecord record,
+        HttpContext http,
+        Spaarke.Dataverse.IGenericEntityService entities,
+        Spaarke.Core.Auth.AuthorizationService authorization,
+        ILogger logger,
+        CancellationToken ct)
+    {
+        try
+        {
+            var typeName = record.Kind switch
+            {
+                InvoiceCoreRecordKind.Matter => "Matter",
+                InvoiceCoreRecordKind.Project => "Project",
+                InvoiceCoreRecordKind.WorkAssignment => "WorkAssignment",
+                _ => null,
+            };
+            if (typeName is null || CallerResolution.ResolveObjectId(http.User) is not { Length: > 0 } userId)
+            {
+                return null;
+            }
+
+            var mayRead = await FinanceAuthorizationFilter.CallerHoldsRightsAsync(
+                authorization, userId, InvoiceSubmissionEndpoints.CoreEntitySet(record.Kind), record.RecordId, "finance.read",
+                TokenHelper.ExtractBearerTokenOrNull(http), ct);
+            if (!mayRead)
+            {
+                return null;
+            }
+
+            var name = await ReadNameAsync(entities, record.EntityLogicalName, record.RecordId, logger, ct, "From-email 409");
+            return name is null ? null : new FromEmailFiledUnder(typeName, record.RecordId, name);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            logger.LogWarning(ex, "From-email 409: the record the email is filed under could not be checked or read; filedUnder is left out");
+            return null;
+        }
     }
 
     /// <summary>
@@ -586,12 +645,13 @@ internal static class InvoiceSubmissionFromEmailHttp
 
     /// <summary>The record's primary name, read app-only (an id for a blank name, as the firm list does); null when it could not be read.</summary>
     private static async Task<string?> ReadNameAsync(
-        Spaarke.Dataverse.IGenericEntityService entities, string table, Guid id, ILogger logger, CancellationToken ct)
+        Spaarke.Dataverse.IGenericEntityService entities, string table, Guid id, ILogger logger, CancellationToken ct,
+        string route = "Correction prefill")
     {
         var nameColumn = Services.Communication.RegardingNameFields.PrimaryNameField(table);
         if (nameColumn is null)
         {
-            logger.LogWarning("Correction prefill: no primary name column is known for {Entity}", table);
+            logger.LogWarning("{Route}: no primary name column is known for {Entity}", route, table);
             return null;
         }
 
@@ -600,7 +660,7 @@ internal static class InvoiceSubmissionFromEmailHttp
             var row = await entities.RetrieveAsync(table, id, [nameColumn], ct);
             if (row is null)
             {
-                logger.LogWarning("Correction prefill: {Entity} {RecordId} was not found", table, id);
+                logger.LogWarning("{Route}: {Entity} {RecordId} was not found", route, table, id);
                 return null;
             }
 
@@ -609,7 +669,7 @@ internal static class InvoiceSubmissionFromEmailHttp
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
-            logger.LogWarning(ex, "Correction prefill: the name of {Entity} {RecordId} could not be read", table, id);
+            logger.LogWarning(ex, "{Route}: the name of {Entity} {RecordId} could not be read", route, table, id);
             return null;
         }
     }

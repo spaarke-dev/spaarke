@@ -34,6 +34,14 @@ internal sealed record FromEmailSubmissionOutcome
     /// </summary>
     public bool FilingKept { get; init; }
 
+    /// <summary>
+    /// Task 192: on the 409 <c>document_core_record_mismatch</c> of "the communication is filed under another core record" only, the ONE
+    /// record it is filed under, when it may be a candidate to name: it is not isolated under a secure record (the test step A files by,
+    /// <see cref="ExistingDocumentIsolationCheck"/>) and exactly one other record is involved. The route names it (<c>filedUnder</c>) only
+    /// when the caller can also open it (the caller's own Read) and its name could be read. Null in every other case and on every other refusal.
+    /// </summary>
+    public InvoiceCoreRecord? FiledUnder { get; init; }
+
     public static FromEmailSubmissionOutcome Accepted(FromEmailReceipt receipt) => new() { Receipt = receipt, Status = StatusCodes.Status202Accepted };
 
     public static FromEmailSubmissionOutcome Refused(int status, string errorCode, string detail, IReadOnlyDictionary<string, object?>? extensions = null) =>
@@ -76,6 +84,7 @@ internal sealed class FromEmailSubmissionService
     private const string DocumentParentDocument = "sprk_parentdocument";
 
     private readonly InvoiceSubmissionService _submissions;
+    private readonly ExistingDocumentIsolationCheck _isolation;
     private readonly ISubmitInvoiceFromEmail _operation;
     private readonly IOfficeSubmissionEmailSave _save;
     private readonly IGenericEntityService _entities;
@@ -86,6 +95,7 @@ internal sealed class FromEmailSubmissionService
 
     public FromEmailSubmissionService(
         InvoiceSubmissionService submissions,
+        ExistingDocumentIsolationCheck isolation,
         ISubmitInvoiceFromEmail operation,
         IOfficeSubmissionEmailSave save,
         IGenericEntityService entities,
@@ -95,6 +105,7 @@ internal sealed class FromEmailSubmissionService
         ILogger<FromEmailSubmissionService> logger)
     {
         _submissions = submissions ?? throw new ArgumentNullException(nameof(submissions));
+        _isolation = isolation ?? throw new ArgumentNullException(nameof(isolation));
         _operation = operation ?? throw new ArgumentNullException(nameof(operation));
         _save = save ?? throw new ArgumentNullException(nameof(save));
         _entities = entities ?? throw new ArgumentNullException(nameof(entities));
@@ -518,15 +529,43 @@ internal sealed class FromEmailSubmissionService
             return Unavailable("The record the email is filed under could not be read right now. Nothing was saved; try again shortly.");
         }
 
-        if (filed.Any(f => f.Kind != core.Kind || f.Id != core.RecordId))
+        var others = filed.Where(f => f.Kind != core.Kind || f.Id != core.RecordId).Select(f => (f.Kind, f.Id)).Distinct().ToList();
+        if (others.Count > 0)
         {
-            // The other record is never named: the caller was authorized against this record, not that one.
+            // The detail never names the other record (the caller was authorized against this record, not that one). Task 192: the route may
+            // add the optional `filedUnder` field, only for the candidate below and only when the caller can open that record.
             _logger.LogInformation("From-email submission refused: communication {CommunicationId} is filed under another core record", communicationId);
             return FromEmailSubmissionOutcome.Refused(StatusCodes.Status409Conflict, InvoiceSubmissionErrors.DocumentCoreRecordMismatch,
-                "The email is filed under a different record than the one named, so it cannot be submitted for this record. Nothing was saved.");
+                "The email is filed under a different record than the one named, so it cannot be submitted for this record. Nothing was saved.")
+                with { FiledUnder = await FiledUnderCandidateAsync(communicationId, others, ct) };
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// Task 192: the record the 409 may name. Exactly one other record is involved, and the communication is not isolated under a secure
+    /// record by the very test step A files by (<see cref="ExistingDocumentIsolationCheck.CheckCommunicationForFilingAsync"/>): any verdict
+    /// but Allowed, a fault included, leaves no candidate. A fault is a Warning and no candidate; it never changes the 409.
+    /// </summary>
+    private async Task<InvoiceCoreRecord?> FiledUnderCandidateAsync(
+        Guid communicationId, IReadOnlyList<(InvoiceCoreRecordKind Kind, Guid Id)> others, CancellationToken ct)
+    {
+        if (others.Count != 1)
+        {
+            return null;
+        }
+
+        try
+        {
+            var isolation = await _isolation.CheckCommunicationForFilingAsync(communicationId, ct);
+            return isolation.Verdict == ExistingDocumentIsolationVerdict.Allowed ? new InvoiceCoreRecord(others[0].Kind, others[0].Id) : null;
+        }
+        catch (Exception ex) when (!IsCallerCancellation(ex, ct))
+        {
+            _logger.LogWarning(ex, "From-email submission: the isolation of communication {CommunicationId} could not be read; the 409 names no record", communicationId);
+            return null;
+        }
     }
 
     private sealed record ResolvedEml(Guid EmlDocumentId, Guid CommunicationId, IReadOnlyList<FromEmailMarkedPart> Parts, FromEmailSubmissionOutcome? Refusal)
