@@ -1,0 +1,36 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0170",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0170","generator_id":"gen_eval_set.py@1 F-0170","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0170.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-02"},
+ "header":{"firm":"Quimby and Yardley LLP","firm_invoice_number":"INV-2026-81844","invoice_date":"2026-04-02","billing_period_start":"2026-03-01","billing_period_end":"2026-03-31","firm_matter_reference":"51850-0023","po_number":"PO-4505639","fees_total":7361.0,"expenses_total":379.24,"adjustments_total":0.0,"total_due":7740.24,"currency":"USD"},
+ "timekeepers":[{"name":"Anders Voss","title":"Associate","rate":330.0,"billed_as":"Anders Voss"},{"name":"Dalia Wickham","title":"Paralegal","rate":145.0,"billed_as":"Dalia Wickham"},{"name":"Emeka Voss","title":"Legal Assistant","rate":135.0,"billed_as":"Emeka Voss"},{"name":"Jordan Delacroix","title":"Paralegal","rate":135.0,"billed_as":"Jordan Delacroix"},{"name":"Sofia Santoro","title":"Partner","rate":615.0,"billed_as":"Sofia Santoro"},{"name":"Yusuf Voss","title":"Associate","rate":280.0,"billed_as":"Yusuf Voss"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2026-03-17","timekeeper":"Anders Voss","timekeeper_name":"Anders Voss","timekeeper_title":"Associate","title":"Associate","hours":2.8,"rate":330.0,"amount":924.0,"narrative":"Review and organize incoming production from Ironbridge Steel for matter file","codes":["L140","A104"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2026-03-04","timekeeper":"Dalia Wickham","timekeeper_name":"Dalia Wickham","timekeeper_title":"Paralegal","title":"Paralegal","hours":2.9,"rate":145.0,"amount":420.5,"narrative":"Review privilege log entries before service","codes":["L140","A104"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2026-03-16","timekeeper":"Dalia Wickham","timekeeper_name":"Dalia Wickham","timekeeper_title":"Paralegal","title":"Paralegal","hours":0.2,"rate":145.0,"amount":29.0,"narrative":"Prepare case assessment memorandum regarding the insurance coverage issue and recommended strategy","codes":["L120","A103"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2026-03-27","timekeeper":"Dalia Wickham","timekeeper_name":"Dalia Wickham","timekeeper_title":"Paralegal","title":"Paralegal","hours":4.0,"rate":145.0,"amount":580.0,"narrative":"Analyze exposure and damages model for the vendor agreement","codes":["L120","A104"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2026-03-27","timekeeper":"Dalia Wickham","timekeeper_name":"Dalia Wickham","timekeeper_title":"Paralegal","title":"Paralegal","hours":4.0,"rate":145.0,"amount":580.0,"narrative":"Telephone conference with opposing counsel regarding settlement terms","codes":["L160","A107"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2026-03-27","timekeeper":"Dalia Wickham","timekeeper_name":"Dalia Wickham","timekeeper_title":"Paralegal","title":"Paralegal","hours":3.3,"rate":145.0,"amount":478.5,"narrative":"Conference with client regarding budget variance for the supply agreement","codes":["L150","A106"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2026-03-02","timekeeper":"Emeka Voss","timekeeper_name":"Emeka Voss","timekeeper_title":"Legal Assistant","title":"Legal Assistant","hours":1.2,"rate":135.0,"amount":162.0,"narrative":"Analyze exposure and damages model for the customs audit","codes":["L120","A104"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2026-03-05","timekeeper":"Jordan Delacroix","timekeeper_name":"Jordan Delacroix","timekeeper_title":"Paralegal","title":"Paralegal","hours":1.6,"rate":135.0,"amount":216.0,"narrative":"Review and revise mediation statement based on client comments","codes":["L210","A104"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"fee","date":"2026-03-31","timekeeper":"Sofia Santoro","timekeeper_name":"Sofia Santoro","timekeeper_title":"Partner","title":"Partner","hours":2.5,"rate":615.0,"amount":1537.5,"narrative":"Conference with client regarding settlement authority for the licensing dispute","codes":["L160","A106"],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"fee","date":"2026-03-31","timekeeper":"Sofia Santoro","timekeeper_name":"Sofia Santoro","timekeeper_title":"Partner","title":"Partner","hours":2.5,"rate":615.0,"amount":1537.5,"narrative":"Conference with client regarding settlement authority for the licensing dispute","codes":["L160","A106"],"page":1,"narrative_style":"clear"},
+  {"n":11,"line_type":"fee","date":"2025-12-09","timekeeper":"Yusuf Voss","timekeeper_name":"Yusuf Voss","timekeeper_title":"Associate","title":"Associate","hours":2.8,"rate":280.0,"amount":784.0,"narrative":"Research standard for provisional remedies concerning the employment claim","codes":["L220","A102"],"page":2,"narrative_style":"clear"},
+  {"n":12,"line_type":"fee","date":"2026-03-13","timekeeper":"Yusuf Voss","timekeeper_name":"Yusuf Voss","timekeeper_title":"Associate","title":"Associate","hours":0.4,"rate":280.0,"amount":112.0,"narrative":"Plan strategy for upcoming phase of the supply agreement with team","codes":["L120","A101"],"page":2,"narrative_style":"clear"},
+  {"n":13,"line_type":"expense","date":"2026-03-20","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":44.0,"rate":0.61,"amount":26.84,"narrative":"Mileage to courthouse","codes":["E109"],"page":2,"narrative_style":"clear"},
+  {"n":14,"line_type":"expense","date":"2026-03-27","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":321.26,"amount":321.26,"narrative":"Court filing fee","codes":["E112"],"page":2,"narrative_style":"clear"},
+  {"n":15,"line_type":"expense","date":"2026-03-31","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":3.0,"rate":10.38,"amount":31.14,"narrative":"Postage - certified mail","codes":["E108"],"page":2,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["455 Federal Plaza","Seattle","Tax ID 64-6934134"],"template":"T13","pages":2},
+ "rule_set_id":"RS-02",
+ "context":{"matter_open":"2025-01-08","matter_close":"2026-06-29","matter_budget":6192.0,"approved_timekeepers":["Sofia Santoro","Emeka Voss","Yusuf Voss","Sofia Tavares","Sofia Fairweather","Anders Voss","Jordan Delacroix","Dalia Wickham"],"invoice_received_date":"2026-04-07"},
+ "expected_findings":[
+  {"rule_id":"RS-02-R04","rule_type":"DailyHoursCap","scope":"line","line_refs":[6],"consequence":"Reduce"},
+  {"rule_id":"RS-02-R06","rule_type":"CoreRecordWindow","scope":"invoice","line_refs":[],"consequence":"Flag"},
+  {"rule_id":"RS-02-R07","rule_type":"Duplicate","scope":"line","line_refs":[10],"consequence":"Disallow","related_line_refs":[9]},
+  {"rule_id":"RS-02-R08","rule_type":"InvoiceAge","scope":"line","line_refs":[11],"consequence":"Flag"}
+ ],
+ "seeded_violations":4
+}

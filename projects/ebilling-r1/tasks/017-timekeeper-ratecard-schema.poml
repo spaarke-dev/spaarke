@@ -1,0 +1,107 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="017" project="ebilling-r1">
+  <metadata>
+    <title>Timekeeper (extend stub) and rate card schema</title>
+    <phase>1 Data model (WP1)</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>New idempotent schema script; extends one table and adds two; no BFF code.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Column lists fixed by spec FR-08 and the existing-column map below; exemplar script to copy.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P1-A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>none</deps>
+    <tags>dataverse, schema</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Extend the existing sprk_timekeeper stub into the firm timekeeper roster and add the rate card tables sprk_ratecard and sprk_ratecardrate (FR-08), via scripts/ebilling/Deploy-EbillingTimekeeperRateCardSchema.ps1 run against dev; review the stub's obsolete lookups and record the decision. Do not create a new timekeeper table.</prompt>
+
+  <role>SPAARKE platform developer. Expert in Dataverse metadata Web API and PowerShell.</role>
+
+  <goal>In dev, sprk_timekeeper carries firm, classification, status, effective dates and linked contact; sprk_ratecard and sprk_ratecardrate exist with the FR-08 columns; a second script run makes no change; docs record every column; task notes record the obsolete-lookup decision.</goal>
+
+  <context>
+    <background>sprk_timekeeper today (solution source 2026-10-15): sprk_name, sprk_contact (lookup → contact), sprk_invoice (lookup → sprk_invoice), sprk_invoicelineitem (lookup → sprk_invoicelineitem), statecode / statuscode. The global choice sprk_timekeeperrole (Senior Partner … Associate General Counsel, 14 values) already classifies timekeepers on sprk_billingevent and is also used by sprk_contactorganization and sprk_userprofile. Firms are sprk_organization rows (sprk_invoice.sprk_vendororg). The ApprovedTimekeeper and ApprovedRate rules (071) and resolution (046) read these tables; the rate import (078) writes them and enforces the overlap rule.</background>
+    <relevant-files>
+      <file role="new">scripts/ebilling/Deploy-EbillingTimekeeperRateCardSchema.ps1</file>
+      <file role="modify">docs/data-model/sprk_financial-related-entities.md (Timekeeper section only)</file>
+      <file role="new">docs/data-model/sprk_ratecard.md (rate card and rate)</file>
+      <file role="modify">docs/data-model/INDEX.md (one row for the new doc)</file>
+      <file role="read">src/dataverse/solutions/SpaarkeMaster/Entities/sprk_Timekeeper/Entity.xml</file>
+      <file role="read">src/dataverse/solutions/SpaarkeMaster/OptionSets/sprk_timekeeperrole.xml</file>
+      <file role="read">scripts/Deploy-ChartDefinitionEntity.ps1 (exemplar: new-entity creation)</file>
+    </relevant-files>
+    <dependencies>none</dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">sprk_timekeeper additions: sprk_firm (lookup → sprk_organization); classification = a column using the EXISTING global choice sprk_timekeeperrole (add a value only for a LEDES classification with no equivalent, and record the mapping LEDES code → value in docs); sprk_effectivefrom, sprk_effectiveto (date-only); status on statuscode — statecode 0: Approved, Pending; statecode 1: Inactive (relabel value 1 "Active" → "Approved" only if the dev row count makes that safe — see escalation). Reuse the existing sprk_contact lookup as the linked external contact (display name "Linked contact"); sprk_name stays the name.</constraint>
+    <constraint source="project">sprk_ratecard (new, user / team owned): sprk_name, sprk_firm (→ sprk_organization), optional core-record scope sprk_matter / sprk_project / sprk_workassignment (typed lookups; at most one is enforced by the writer, task 078), sprk_sourcedocument (→ sprk_document), sprk_effectivefrom, sprk_effectiveto, status on statuscode — statecode 0: Draft, Published; statecode 1: Inactive. sprk_ratecardrate (new): sprk_ratecard (→ sprk_ratecard, parental cascade delete), sprk_timekeeper (→ sprk_timekeeper, optional), sprk_classification (sprk_timekeeperrole, optional), sprk_approvedrate (money), sprk_rackrate (money), sprk_effectivefrom, sprk_effectiveto.</constraint>
+    <constraint source="project">Obsolete lookups: review sprk_timekeeper.sprk_invoice and .sprk_invoicelineitem (row counts that use them, any reader by grep). Record the decision in task notes. Do not delete either here: the invoice-line-item lookup goes with its table in task 011; deleting sprk_invoice needs the owner's OK (destructive) — ask, and delete only with an explicit OK.</constraint>
+    <constraint source="project">Additive only otherwise. Do NOT edit src/dataverse/solutions/SpaarkeMaster/** (029 syncs, including forms, views and security-role privileges for the new tables). No plugins, business rules or calculated columns (ADR-002); overlap validation is server-side in 078.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/dataverse-create-schema/SKILL.md</file>
+      <file>.claude/constraints/plugins.md</file>
+      <file>.claude/constraints/data.md</file>
+      <file>.claude/adr/ADR-002-thin-plugins.md</file>
+      <file>projects/ebilling-r1/notes/research/ledes-utbms-ocg-reference.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="1">Read dev metadata for sprk_timekeeper; count rows, rows using sprk_invoice / sprk_invoicelineitem, rows per statuscode; grep the repo for readers of those two lookups; record.</step>
+    <step order="2">Map LEDES timekeeper classifications to sprk_timekeeperrole values (from the LEDES reference note); list any gap.</step>
+    <step order="3">Write the script (check-then-create; entity creation for the two new tables; statuscode inserts / relabels; -WhatIf; summary; publish), modelled on scripts/Deploy-ChartDefinitionEntity.ps1 and the dataverse-create-schema skill.</step>
+    <step order="4">Run with -WhatIf, then for real, then again (no change); record output.</step>
+    <step order="5">Verify by metadata read; record logical names and statuscode values in task notes.</step>
+    <step order="6">Present the sprk_invoice-lookup decision to the owner; delete only on explicit OK (record the OK and the call).</step>
+    <step order="7">Update the docs (timekeeper section, new sprk_ratecard.md, INDEX.md row).</step>
+    <step order="8">Update TASK-INDEX.md: change this task's status cell to ✅ [done].</step>
+    <step order="9">If any deviations from plan, document in projects/ebilling-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If dev has timekeeper rows at statuscode 1 whose meaning is not "approved", STOP before relabelling and ask how to migrate them.</trigger>
+    <trigger>If more than two LEDES classifications have no sprk_timekeeperrole equivalent, STOP and present reuse vs a new choice (it is shared with contact-organization and user-profile pickers).</trigger>
+    <trigger>Any delete (column, relationship, data): only with explicit owner OK (project CLAUDE.md §5).</trigger>
+  </escalation>
+
+  <justification>
+    <existing>sprk_timekeeper exists as a stub (Entity.xml: name, contact, invoice and invoice-line-item lookups) — extended, not recreated; grep of SpaarkeMaster/Entities finds no rate card, rate or approved-rate table (spec §11 rows "sprk_timekeeper (extend existing stub)" and "sprk_ratecard, sprk_ratecardrate — none found").</existing>
+    <extension>Yes for the timekeeper (extended) and for classification (reuses sprk_timekeeperrole). Rate cards cannot extend an existing table: a card carries provenance and effective periods for many rates.</extension>
+    <cost-of-doing-nothing>ApprovedTimekeeper and ApprovedRate (rule types 1 and 2, the main reject-eligible rules) cannot run, roster resolution (046) has no roster, and rate import (078) has no target.</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="pwsh">Run the schema script</tool>
+    <tool name="dataverse-mcp">Metadata and row-count reads</tool>
+  </tools>
+
+  <outputs>
+    <output type="script">scripts/ebilling/Deploy-EbillingTimekeeperRateCardSchema.ps1</output>
+    <output type="docs">docs/data-model/sprk_financial-related-entities.md, docs/data-model/sprk_ratecard.md, docs/data-model/INDEX.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">A dev metadata read shows the sprk_timekeeper additions, both new tables with every listed column and target, and the statuscode values listed in the constraints.</criterion>
+    <criterion testable="true">No new timekeeper table exists; the classification columns use the global choice sprk_timekeeperrole; the LEDES mapping is documented.</criterion>
+    <criterion testable="true">A second script run reports no created item and makes no write.</criterion>
+    <criterion testable="true">Task notes record row counts and readers for sprk_timekeeper.sprk_invoice and .sprk_invoicelineitem and the decision; nothing was deleted without a recorded owner OK; no file under src/dataverse/solutions/SpaarkeMaster/ changed.</criterion>
+    <criterion testable="true">docs list every new column with logical name, type and option values.</criterion>
+  </acceptance-criteria>
+
+  <notes>2026-10-15 COMPLETE. Schema applied to dev and verified; second run no-change. Owner decisions 2026-10-15 applied: (1) the shared global choice sprk_timekeeperrole was revised and extended to the 20 LEDES classifications (label = LEDES name, ExternalValue = LEDES code, existing integer values unchanged; Partner, Associate, Paralegal, Other matched, 16 options added; 10 non-LEDES options kept, not deleted) and sprk_classification created on sprk_timekeeper and sprk_ratecardrate bound to it; (2) the stub lookup sprk_timekeeper.sprk_invoice was deleted (0 rows, 0 dependencies). Details and evidence: notes/017-timekeeper-ratecard-schema.md section 8; LEDES list and kept options: docs/data-model/sprk_ratecard.md. FR-08's overlap refusal is implemented by 078 at import / publish, not by schema. Task 011 depends on this task's lookup review (sprk_invoicelineitem remains for 011).
+Owner follow-up 2026-10-15 (D-83): sprk_timekeeperrole is LEDES-only for timekeeper classification. Senior Partner contact-organization row remapped to Partner. The 10 non-LEDES options are deleted after #1954 moves sprk_userprofile.sprk_primaryrole to a sprk_contacttype_ref lookup.
+</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in knowledge files. Follow the task-execute skill for the mandatory pre-execution checklist.</protocol>
+  </execution>
+</task>

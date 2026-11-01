@@ -1,7 +1,9 @@
+using System.Collections.Frozen;
 using System.Globalization;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Json.Schema;
+using Sprk.Bff.Api.Services.Signals.Billing;
 
 namespace Sprk.Bff.Api.Services.Signals;
 
@@ -55,6 +57,15 @@ public sealed class RuleBodySchemaValidator
 
     private static readonly Lazy<JsonSchema> ExistenceSchema = new(() => LoadSchema(ExistenceSchemaResourceSuffix));
     private static readonly Lazy<JsonSchema> ThresholdSchema = new(() => LoadSchema(ThresholdSchemaResourceSuffix));
+
+    /// <summary>ebilling-r1 task 070: one schema per billing type, loaded on first use from the flat
+    /// <c>Services/Signals/Schemas/billing-*.schema.json</c> resources (<see cref="BillingRuleCatalogue.SchemaResourceSuffix"/>).</summary>
+    private static readonly FrozenDictionary<RuleType, Lazy<JsonSchema>> BillingSchemas = BillingRuleCatalogue.Types
+        .Append(RuleType.SubmissionIntegrity) // D-125: a system type is schema-backed (the strict empty body) though it is not in Types
+        .ToFrozenDictionary(t => t, t => new Lazy<JsonSchema>(() => LoadSchema(BillingRuleCatalogue.SchemaResourceSuffix(t))));
+
+    /// <summary>The closed set, named for a refusal message (every <see cref="RuleType"/> member, in declaration order).</summary>
+    public static string ClosedSetDescription { get; } = string.Join(", ", Enum.GetNames<RuleType>());
 
     /// <summary>Serializes every call into <c>JsonSchema.Evaluate</c> against the shared
     /// <see cref="ExistenceSchema"/> instance — see <see cref="Validate"/>'s own remarks for the measured
@@ -252,15 +263,15 @@ public sealed class RuleBodySchemaValidator
         if (!TryParseRuleType(ruleTypeRaw, out var ruleType))
         {
             return RuleBodyValidationResult.Failure(
-                $"Unknown sprk_ruletype '{ruleTypeRaw}'. The closed set is Threshold, Switch, Existence " +
-                "(design.md CM-7); adding a type is a code change with review, not a data value.");
+                $"Unknown sprk_ruletype '{ruleTypeRaw}'. The closed set is {ClosedSetDescription} " +
+                "(design.md CM-7; ebilling-r1 FR-24); adding a type is a code change with review, not a data value.");
         }
 
         return Validate(ruleType, ruleBodyJson);
     }
 
     /// <summary>
-    /// True only for the three closed <see cref="RuleType"/> members, by EXACT name (case-insensitive) or by
+    /// True only for the closed <see cref="RuleType"/> members, by EXACT name (case-insensitive) or by
     /// their Dataverse option-set numeric value as a string. Deliberately does NOT use <see cref="Enum.TryParse"/>
     /// on the string directly — task 022 review finding #8: <c>Enum.TryParse</c> accepts a comma-separated list
     /// of names (e.g. <c>"Threshold,Switch"</c>) and OR's their underlying values together even though
@@ -356,6 +367,10 @@ public sealed class RuleBodySchemaValidator
     {
         RuleType.Existence => ExistenceSchema.Value,
         RuleType.Threshold => ThresholdSchema.Value,
+        RuleType.ApprovedTimekeeper or RuleType.ApprovedRate or RuleType.TimeIncrement or RuleType.DailyHoursCap
+            or RuleType.NonBillableActivity or RuleType.ExpenseRule or RuleType.InvoiceAge or RuleType.CoreRecordWindow
+            or RuleType.Duplicate or RuleType.RequiredData or RuleType.AiObservation or RuleType.SubmissionIntegrity
+            or RuleType.AddedFee or RuleType.Discount => BillingSchemas[ruleType].Value,
         RuleType.Switch => throw new NotSupportedException(
             $"Schema validation for rule type '{ruleType}' has not been authored: Switch is deferred (D-16); " +
             "the shipped types are Existence and Threshold."),

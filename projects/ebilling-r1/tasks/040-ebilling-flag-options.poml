@@ -1,0 +1,126 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="040" project="ebilling-r1">
+  <metadata>
+    <title>eBilling feature flag, options and null-object fallbacks</title>
+    <phase>2 Submission and extraction (WP2)</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>New options class and one endpoint filter with a clear reference (FeatureDisabledResults); no business logic, no auth decision.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Single-component config wiring with an existing 503 helper to reuse.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P2-A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>none</deps>
+    <tags>bff, feature-flag, config</tags>
+    <estimated-effort>2-3 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Add the eBilling capability flag (spec FR-45, ADR-018, ADR-032): an EbillingOptions class bound with ValidateOnStart, a shared endpoint filter that returns the stable 503 ProblemDetails code ebilling.disabled when the flag is off, and the registration rule every later eBilling task follows. SPA hiding is task 051's, not this task's.</prompt>
+
+  <role>SPAARKE platform developer. Expert in ASP.NET Core Minimal API endpoint filters and typed options. Follow ADRs strictly.</role>
+
+  <goal>Configuration/EbillingOptions.cs exists (section "Ebilling", Enabled default false, MaxSubmissionFileSizeMb default 25 with range validation), is registered inside AddFinanceModule with ValidateOnStart, and a RequireEbillingEnabled() endpoint-filter extension returns 503 with errorCode ebilling.disabled when Enabled is false. The template config documents the flag. The service-registration rule for flag-off is written down in FinanceModule.</goal>
+
+  <context>
+    <background>FR-45: eBilling ships behind a flag, enabled in dev first; flag off means every eBilling endpoint returns a stable disabled code and the SPA hides submission. ADR-018 "Flag Scope Discipline" rule 2: a new standalone capability gets ONE flag. ADR-018 MUST return 503 ProblemDetails and check the same flag in async handlers (task 049 applies it in the job handler). The spec assumption "submission file size limit 25 MB, configurable" (spec Assumptions) is owned here so 044 reads one options class.</background>
+    <relevant-files>
+      <file role="new">src/server/api/Sprk.Bff.Api/Configuration/EbillingOptions.cs</file>
+      <file role="new">src/server/api/Sprk.Bff.Api/Api/Finance/EbillingEnabledFilter.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/DI/FinanceModule.cs (shared append point: options registration + registration-rule comment only)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/appsettings.template.json (shared append point: new "Ebilling" section only)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Configuration/FeatureDisabledResults.cs (AsFeatureDisabled503 at :29, TypeUri at :19)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Configuration/FeatureDisabledException.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Infrastructure/DI/FinanceModule.cs:27-30 (AddOptions + ValidateOnStart chain to copy)</file>
+      <file role="new">tests/unit/Sprk.Bff.Api.Tests/Api/Finance/EbillingEnabledFilterTests.cs</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="none" status="complete">No prerequisites.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="CLAUDE.md §10">Every change under src/server/api/Sprk.Bff.Api follows .claude/constraints/bff-extensions.md (stated placement, publish-size delta against a fresh master build, no new HIGH CVE, tests updated).</constraint>
+    <constraint source="ADR-018">The disabled response for every eBilling route is 503 ProblemDetails, title "Feature Disabled", type FeatureDisabledResults.TypeUri, extensions.errorCode "ebilling.disabled" — produced by reusing FeatureDisabledException + AsFeatureDisabled503, not a new response builder. The flag never bypasses or replaces authorization: the filter is added IN ADDITION to each route's authorization filter.</constraint>
+    <constraint source="ADR-018 Flag Scope Discipline">Exactly one new flag (Ebilling:Enabled). Do not add per-service flags.</constraint>
+    <constraint source="ADR-032">State the flag-off registration rule in a FinanceModule comment: eBilling services register unconditionally and the kill switch is the endpoint filter plus the job-handler check (ADR-018 rule 2, first option). A Null-Object peer is required only where an eBilling service depends on something that is itself conditionally registered (the AI facade IInvoiceAi already has NullInvoiceAi). Later tasks follow this rule.</constraint>
+    <constraint source="ADR-010">Options are registered inside AddFinanceModule with AddOptions, Bind, ValidateDataAnnotations, ValidateOnStart. No new DI module.</constraint>
+    <constraint source="project">Do not edit .claude/** (main-session-only). The ADR-018 "Current Flags" row for Ebilling:Enabled is listed in task notes for the main session to add.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Feature flags and kill switches</topic>
+    <files>
+      <file>.claude/adr/ADR-018-feature-flags.md</file>
+      <file>.claude/adr/ADR-032-bff-nullobject-kill-switch.md</file>
+      <file>.claude/adr/ADR-019-problemdetails.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/config.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/patterns/api/endpoint-filters.md</file>
+      <file>.claude/patterns/api/service-registration.md</file>
+    </files>
+    <patterns>
+      <pattern name="503 conversion" location="src/server/api/Sprk.Bff.Api/Configuration/FeatureDisabledResults.cs">Throw or construct FeatureDisabledException("ebilling.disabled", detail) and return ex.AsFeatureDisabled503() from the filter.</pattern>
+      <pattern name="Endpoint-filter extension" location="src/server/api/Sprk.Bff.Api/Api/Filters/FinanceAuthorizationFilter.cs">Static TBuilder extension over IEndpointConventionBuilder calling AddEndpointFilter; copy the shape, not the authorization logic.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context and rigor">Declare rigor STANDARD. Re-read FinanceModule.cs and appsettings.template.json immediately before editing (shared append points).</step>
+    <step order="1">Create EbillingOptions (SectionName "Ebilling"; bool Enabled = false; int MaxSubmissionFileSizeMb = 25 with Range 1..100; XML docs stating default and per-environment behaviour).</step>
+    <step order="2">Register the options in AddFinanceModule with ValidateOnStart and add the flag-off registration-rule comment.</step>
+    <step order="3">Create EbillingEnabledFilter with extension RequireEbillingEnabled(): reads IOptionsMonitor of EbillingOptions per request (so a config change applies without restart where the host reloads config); off returns the 503 via AsFeatureDisabled503; on calls next.</step>
+    <step order="4">Add the "Ebilling" section with a _comment to appsettings.template.json (Enabled false; the dev value is set by task 053).</step>
+    <step order="5">Write unit tests for the filter and the options validation.</step>
+    <step order="6">Build and test; measure the publish-size delta.</step>
+    <step order="7">Update TASK-INDEX.md: change this task's status cell to `✅ [done]`.</step>
+    <step order="8">Record deviations and the ADR-018 Current Flags row (for the main session) in projects/ebilling-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If an existing capability flag already covers Finance endpoints such that ADR-018 rule 1 (inherit, no new flag) applies, STOP and escalate per root CLAUDE.md §6.5 rather than adding a second flag.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>FeatureDisabledResults.cs:29 (503 builder) and FeatureDisabledException are reused. No feature-gate endpoint filter exists (grep "FeatureGate|RequireFeature|EnabledFilter" in src/server/api returns nothing); AnalysisOptions.Enabled gates analysis only; FinanceOptions has no Enabled flag.</existing>
+    <extension>FinanceOptions cannot carry the flag: it also governs the existing Finance pipeline (classification threshold, rollups) that must keep running when eBilling is off. ADR-018 rule 2 calls for one new flag for a new standalone capability.</extension>
+    <cost-of-doing-nothing>FR-45 acceptance fails: with no flag, eBilling endpoints cannot return a stable disabled code and the SPA has no server signal to hide submission; 044 has no configured upload size limit for its 413.</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="dotnet">dotnet build src/server/api/Sprk.Bff.Api/ ; dotnet test tests/unit/Sprk.Bff.Api.Tests</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Configuration/EbillingOptions.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Finance/EbillingEnabledFilter.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/DI/FinanceModule.cs</output>
+    <output type="config">src/server/api/Sprk.Bff.Api/appsettings.template.json</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Api/Finance/EbillingEnabledFilterTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given Ebilling:Enabled=false, when a request reaches an endpoint carrying RequireEbillingEnabled(), then the response is 503 ProblemDetails with type https://errors.spaarke.com/feature-disabled and extensions.errorCode "ebilling.disabled", and the endpoint handler is not invoked.</criterion>
+    <criterion testable="true">Given Ebilling:Enabled=true, the filter invokes the next delegate and adds nothing to the response.</criterion>
+    <criterion testable="true">Given Ebilling:MaxSubmissionFileSizeMb outside 1..100, the host fails at startup (ValidateOnStart), not at first request.</criterion>
+    <criterion testable="true">With no "Ebilling" section in configuration, the host starts and Enabled reads false.</criterion>
+    <criterion testable="true">FinanceModule contains the flag-off registration-rule comment; appsettings.template.json contains the Ebilling section with a comment stating the default and the dev behaviour; no secret or environment value is committed.</criterion>
+    <criterion testable="true">Existing Finance routes (/api/finance/invoice-review/*, rollups) are unchanged and their tests stay green.</criterion>
+    <criterion testable="true">Cover the stated contract plus the edge cases named above. Anything beyond that needs a one-line justification in task notes.</criterion>
+    <criterion testable="true">Publish-size delta of Sprk.Bff.Api measured against a fresh master build (procedure: .claude/constraints/azure-deployment.md "BFF Publish-Size Per-Task Verification Rule") and recorded in task notes; no new HIGH CVE.</criterion>
+    <criterion testable="true">dotnet build exits 0; dotnet test exits 0.</criterion>
+  </acceptance-criteria>
+
+  <notes>Shared append points touched: FinanceModule.cs (options + comment) and appsettings.template.json ("Ebilling" section) — re-read immediately before editing, add only these lines. Every later eBilling route (044, 048 and WP3–WP6) chains RequireEbillingEnabled() after its authorization filter; job handlers (049) check EbillingOptions.Enabled themselves (ADR-018 MUST). The SPA learns the flag state from the 503 on a read route (task 051 decides the probe). Spec: FR-45, Assumptions (25 MB).
+
+COMPLETION 2026-10-15: EbillingOptions, EbillingEnabledFilter (+ RequireEbillingEnabled), options registration and flag-off registration-rule comment in FinanceModule, "Ebilling" template section, 13 tests. Escalation trigger checked and did not fire (no existing flag covers the Finance route family). Publish delta +0.001 MB (Release linux-x64 framework-dependent, Compress-Archive Optimal, incl. PDBs: 37.098 -> 37.099 MB vs base 5ebd41523); no vulnerable packages. ADR-018 Current Flags row for the main session and full evidence: notes/040-ebilling-flag.md. TASK-INDEX.md left to the main session.
+rework: none task 040</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load every file in knowledge/files before Step 1. Follow task-execute for rigor, checkpoints and quality gates.</protocol>
+  </execution>
+</task>

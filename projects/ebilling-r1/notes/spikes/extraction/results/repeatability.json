@@ -1,0 +1,88 @@
+{
+  "items": ["B-0002", "B-0008", "B-0015", "B-0021", "B-0023", "B-0115"],
+  "note": "arms c and c-prime re-run once on the items where they differed; printed = values as returned, repaired = after score.complete()",
+  "c": {
+    "printed": {
+      "expense.amount": 100.0,
+      "expense.date": 86.2,
+      "fee.amount": 100.0,
+      "fee.date": 86.1,
+      "fee.hours": 52.7,
+      "fee.rate": 100.0,
+      "fee.timekeeper": 99.1
+    },
+    "repaired": {
+      "expense.amount": 100.0,
+      "expense.date": 86.2,
+      "fee.amount": 100.0,
+      "fee.date": 86.1,
+      "fee.hours": 100.0,
+      "fee.rate": 100.0,
+      "fee.timekeeper": 99.1
+    },
+    "header": 93.1
+  },
+  "crep": {
+    "printed": {
+      "expense.amount": 100.0,
+      "expense.date": 93.1,
+      "fee.amount": 99.1,
+      "fee.date": 93.5,
+      "fee.hours": 52.7,
+      "fee.rate": 100.0,
+      "fee.timekeeper": 99.1
+    },
+    "repaired": {
+      "expense.amount": 100.0,
+      "expense.date": 93.1,
+      "fee.amount": 99.1,
+      "fee.date": 93.5,
+      "fee.hours": 100.0,
+      "fee.rate": 100.0,
+      "fee.timekeeper": 99.1
+    },
+    "header": 95.8
+  },
+  "cp": {
+    "printed": {
+      "expense.amount": 100.0,
+      "expense.date": 100.0,
+      "fee.amount": 99.1,
+      "fee.date": 100.0,
+      "fee.hours": 87.9,
+      "fee.rate": 100.0,
+      "fee.timekeeper": 99.1
+    },
+    "repaired": {
+      "expense.amount": 100.0,
+      "expense.date": 100.0,
+      "fee.amount": 99.1,
+      "fee.date": 100.0,
+      "fee.hours": 100.0,
+      "fee.rate": 100.0,
+      "fee.timekeeper": 99.1
+    },
+    "header": 97.2
+  },
+  "cprep": {
+    "printed": {
+      "expense.amount": 100.0,
+      "expense.date": 100.0,
+      "fee.amount": 99.1,
+      "fee.date": 100.0,
+      "fee.hours": 100.0,
+      "fee.rate": 100.0,
+      "fee.timekeeper": 99.1
+    },
+    "repaired": {
+      "expense.amount": 100.0,
+      "expense.date": 100.0,
+      "fee.amount": 99.1,
+      "fee.date": 100.0,
+      "fee.hours": 100.0,
+      "fee.rate": 100.0,
+      "fee.timekeeper": 99.1
+    },
+    "header": 98.6
+  }
+}

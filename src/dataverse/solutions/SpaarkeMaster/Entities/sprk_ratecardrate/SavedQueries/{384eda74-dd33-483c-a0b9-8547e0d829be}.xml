@@ -1,0 +1,49 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<savedqueries xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <savedquery>
+    <IsCustomizable>1</IsCustomizable>
+    <CanBeDeleted>0</CanBeDeleted>
+    <isquickfindquery>0</isquickfindquery>
+    <isprivate>0</isprivate>
+    <isdefault>1</isdefault>
+    <savedqueryid>{384eda74-dd33-483c-a0b9-8547e0d829be}</savedqueryid>
+    <layoutxml>
+      <grid name="resultset" jump="sprk_name" select="1" icon="1" preview="1">
+        <row name="result" id="sprk_ratecardrateid">
+          <cell name="sprk_name" width="220" />
+          <cell name="sprk_ratecard" width="150" />
+          <cell name="sprk_timekeeper" width="150" />
+          <cell name="sprk_classification" width="150" />
+          <cell name="sprk_rackrate" width="150" />
+          <cell name="sprk_approvedrate" width="150" />
+          <cell name="sprk_effectivefrom" width="150" />
+          <cell name="sprk_effectiveto" width="150" />
+        </row>
+      </grid>
+    </layoutxml>
+    <querytype>0</querytype>
+    <fetchxml>
+      <fetch version="1.0" mapping="logical">
+        <entity name="sprk_ratecardrate">
+          <attribute name="sprk_ratecardrateid" />
+          <attribute name="sprk_name" />
+          <attribute name="sprk_ratecard" />
+          <attribute name="sprk_timekeeper" />
+          <attribute name="sprk_classification" />
+          <attribute name="sprk_rackrate" />
+          <attribute name="sprk_approvedrate" />
+          <attribute name="sprk_effectivefrom" />
+          <attribute name="sprk_effectiveto" />
+          <order attribute="sprk_name" descending="false" />
+          <filter type="and">
+            <condition attribute="statecode" operator="eq" value="0" />
+          </filter>
+        </entity>
+      </fetch>
+    </fetchxml>
+    <IntroducedVersion>1.0</IntroducedVersion>
+    <LocalizedNames>
+      <LocalizedName description="Active Rate Card Rates" languagecode="1033" />
+    </LocalizedNames>
+  </savedquery>
+</savedqueries>

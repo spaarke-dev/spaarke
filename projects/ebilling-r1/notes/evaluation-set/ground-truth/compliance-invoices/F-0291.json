@@ -1,0 +1,32 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0291",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0291","generator_id":"gen_eval_set.py@1 F-0291","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0291.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-03"},
+ "header":{"firm":"Draycott and Ellison LLP","firm_invoice_number":"A-95485/2025","invoice_date":"2025-12-03","billing_period_start":"2025-11-01","billing_period_end":"2025-11-30","firm_matter_reference":"13400-0027","po_number":null,"fees_total":4043.0,"expenses_total":5014.42,"adjustments_total":0.0,"total_due":9057.42,"currency":"USD"},
+ "timekeepers":[{"name":"Clara Wickham","title":"Associate","rate":205.0,"billed_as":"CW"},{"name":"Priya Nwosu","title":"Senior Associate","rate":340.0,"billed_as":"PN"},{"name":"Samuel Brennan","title":"Partner","rate":490.0,"billed_as":"SB"},{"name":"Sofia Zielinski","title":"Paralegal","rate":120.0,"billed_as":"SZ"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2025-11-06","timekeeper":"CW","timekeeper_name":"Clara Wickham","timekeeper_title":"Associate","title":"Assoc","hours":0.2,"rate":205.0,"amount":41.0,"narrative":"Review and organize incoming production from Harbor Point Capital for matter file","codes":["L140","A104"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2025-11-07","timekeeper":"PN","timekeeper_name":"Priya Nwosu","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":2.1,"rate":340.0,"amount":714.0,"narrative":"Review privilege log entries before service","codes":["L140","A104"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2025-11-12","timekeeper":"SZ","timekeeper_name":"Sofia Zielinski","timekeeper_title":"Paralegal","title":"Para","hours":1.0,"rate":120.0,"amount":120.0,"narrative":"Review and analyze motion for summary judgment received from Solano Freight","codes":["L310","A104"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2025-11-12","timekeeper":"SB","timekeeper_name":"Samuel Brennan","timekeeper_title":"Partner","title":"Ptr","hours":2.2,"rate":490.0,"amount":1078.0,"narrative":"Update document review protocol and coding panel for the licensing dispute","codes":["L140","A110"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2025-11-17","timekeeper":"PN","timekeeper_name":"Priya Nwosu","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":2.1,"rate":340.0,"amount":714.0,"narrative":"Review and summarize deposition transcript of Harbor Point Capital witness","codes":["L330","A104"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2025-11-19","timekeeper":"SZ","timekeeper_name":"Sofia Zielinski","timekeeper_title":"Paralegal","title":"Para","hours":0.3,"rate":175.0,"amount":52.5,"narrative":"Review opposing brief in response to notice of deposition","codes":["L240","A104"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2025-11-20","timekeeper":"CW","timekeeper_name":"Clara Wickham","timekeeper_title":"Associate","title":"Assoc","hours":2.5,"rate":205.0,"amount":512.5,"narrative":"Analyze key documents for deposition preparation","codes":["L320","A104"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2025-11-27","timekeeper":"CW","timekeeper_name":"Clara Wickham","timekeeper_title":"Associate","title":"Assoc","hours":1.8,"rate":205.0,"amount":369.0,"narrative":"Analyze key documents for deposition preparation","codes":["L320","A104"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"fee","date":"2025-11-28","timekeeper":"PN","timekeeper_name":"Priya Nwosu","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":1.3,"rate":340.0,"amount":442.0,"narrative":"Prepare responses and objections to interrogatory responses","codes":["L310","A103"],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"expense","date":"2025-11-03","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":626.74,"amount":626.74,"narrative":"Airfare to Boston for deposition","codes":["E110"],"page":1,"narrative_style":"clear"},
+  {"n":11,"line_type":"expense","date":"2025-11-05","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":4156.75,"amount":4156.75,"narrative":"Consulting expert fees","codes":["E119"],"page":1,"narrative_style":"clear"},
+  {"n":12,"line_type":"expense","date":"2025-11-21","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":3.0,"rate":62.71,"amount":188.13,"narrative":"Overnight courier to Quarry Lane Partners counsel","codes":["E107"],"page":1,"narrative_style":"clear"},
+  {"n":13,"line_type":"expense","date":"2025-11-27","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":2.0,"rate":21.4,"amount":42.8,"narrative":"Overnight courier to Meridian Foods counsel","codes":["E107"],"page":1,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["615 Congress Boulevard","Boston","Tax ID 88-6511812"],"template":"T07","pages":1},
+ "rule_set_id":"RS-03",
+ "context":{"matter_open":"2024-09-13","matter_close":"2026-02-28","matter_budget":61229.0,"approved_timekeepers":["Clara Wickham","Priya Nwosu","Samuel Brennan","Sofia Zielinski","Emeka Nwosu","Victor Delacroix","Mei Marchetti","Helena Thornbury"],"invoice_received_date":"2025-12-07"},
+ "expected_findings":[
+  {"rule_id":"RS-03-R01","rule_type":"ApprovedRate","scope":"line","line_refs":[6],"consequence":"Reduce"},
+  {"rule_id":"RS-03-R08","rule_type":"RequiredData","scope":"invoice","line_refs":[],"consequence":"Reject"}
+ ],
+ "seeded_violations":2
+}

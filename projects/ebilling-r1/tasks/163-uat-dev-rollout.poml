@@ -1,0 +1,102 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="163" project="ebilling-r1">
+  <metadata>
+    <title>UAT with the owner and dev rollout</title>
+    <phase>7 Evaluation and rollout (WP7) — wave W7-3</phase>
+    <gate>startable</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Owner acceptance session and flag verification in dev; no code. Defects found are filed or fixed by their owning task.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Prescriptive script authoring and evidence capture; decisions belong to the owner.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Owner session in the shared dev environment; the FR-45 flag-off check toggles a shared App Service setting.</parallel-reason>
+    <deps>162</deps>
+    <tags>deploy, uat</tags>
+    <estimated-effort>1-2 days plus owner time</estimated-effort>
+  </metadata>
+
+  <prompt>Write the UAT script covering the spec Success Criteria, run it with the owner in dev with eBilling enabled, verify the FR-45 flag-off behaviour in a coordinated window, file every issue found, and record the owner's sign-off (or the conditions attached to it).</prompt>
+
+  <role>SPAARKE delivery lead. Expert in acceptance testing, dev environment coordination and evidence capture.</role>
+
+  <goal>notes/uat-script.md exists and maps every Success Criterion to a script section or to its recorded evidence; the UAT run results and the owner's sign-off are recorded in notes/uat-results.md; Ebilling__Enabled is true in dev; the flag-off check passed; every issue is filed via /project-defer-issue-tracking or fixed.</goal>
+
+  <context>
+    <background>Spec FR-44 (UAT with the owner), FR-45 (flag; enabled in dev first; flag off → stable disabled code and the SPA hides submission), Success Criteria 1-12 (spec.md "Success Criteria"). UAT-verified criteria: 1 (SPA submission and result within NFR-01, timing log), 3 (admin uploads an OCG and publishes a rule set citing clauses — at least 3 real OCGs from the evaluation set), 4 (review, invoice-level adjustment, approval, one Decision Record), 6 (firm sees adjustments on screen, in the PDF report and by email). Evidence-verified criteria: 2 (FR-26 tests and NFR-06), 5 and 7 (integration tests, 160 matrix), 8 (162's evaluation-results.md), 9 (CI census and schema-agreement), 10 (grep and notification record from 015), 11 (per-task publish-size records), 12 (grep and 160 seam tests). Flag: App Service setting Ebilling__Enabled on spaarke-bff-dev (040; 503 ProblemDetails errorCode ebilling.disabled via RequireEbillingEnabled()); the SPA hides submission on the 503 probe (051). Deploy evidence: notes/053-*, 079-*, 112-*, 136-wp5-deploy.md, 153-wp6-deploy.md.</background>
+    <relevant-files>
+      <file role="output">projects/ebilling-r1/notes/uat-script.md</file>
+      <file role="output">projects/ebilling-r1/notes/uat-results.md</file>
+      <file role="read">projects/ebilling-r1/spec.md (Success Criteria, FR-44, FR-45)</file>
+      <file role="read">projects/ebilling-r1/notes/evaluation-results.md</file>
+      <file role="read">projects/ebilling-r1/notes/160-coverage-matrix.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="162" status="pending">Evaluation complete; tuned versions deployed in dev</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project CLAUDE.md section 5">Dev only. No secrets in notes; setting names only. Never delete the owner-created containers or the evaluation-set source documents.</constraint>
+    <constraint source="FR-45">The flag-off check runs in a window agreed with the other projects using spaarke-bff-dev; the flag is restored to true at the end and the restore is verified.</constraint>
+    <constraint source="project">UAT data is dev test data, recorded by id; real OCGs and invoices come from the evaluation set's local store and are not committed.</constraint>
+    <constraint source="project">Sign-off is the owner's statement, recorded verbatim with date; the agent never records sign-off on the owner's behalf.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ebilling-r1/spec.md</file>
+      <file>projects/ebilling-r1/README.md (Graduation Criteria)</file>
+      <file>.claude/skills/project-defer-issue-tracking/SKILL.md</file>
+      <file>.claude/skills/ui-test/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="1">Preconditions: 162 is ✅; read the deploy evidence notes and evaluation-results.md; confirm dev runs the current branch SHA (healthz and deployed version).</step>
+    <step order="2">Write notes/uat-script.md: one section per UAT-verified criterion (1, 3, 4, 6) with actors (firm user, rules admin, eligible approver, finance user), test data ids, steps and expected results; a table mapping criteria 2, 5, 7-12 to their evidence file and test names; a phone-width and dark-mode pass for the SPA and the review page.</step>
+    <step order="3">Verify Ebilling__Enabled=true on spaarke-bff-dev (az webapp config appsettings list); record the name and value.</step>
+    <step order="4">Run the script with the owner; record per step: pass / fail, timings (criterion 1 timing log), record ids, screenshot paths, owner comments in notes/uat-results.md.</step>
+    <step order="5">File every failure or owner request via /project-defer-issue-tracking (or fix through the owning task when in scope and agreed); link each in uat-results.md.</step>
+    <step order="6">FR-45 flag-off check in the agreed window: set Ebilling__Enabled=false; probe one internal and one external eBilling route (expect 503 errorCode ebilling.disabled); confirm the SPA hides Submit invoice; set the flag back to true; probe again (expect normal status) and confirm the SPA shows it. Record times and status codes.</step>
+    <step order="7">Present the results summary to the owner and request sign-off (escalation).</step>
+    <step order="8">Record the owner's sign-off verbatim with date in uat-results.md and as a D-entry in notes/decisions-log.md.</step>
+    <step order="9">Update TASK-INDEX.md: this task's status cell to "✅ [done]".</step>
+    <step order="10">Record deviations in projects/ebilling-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>Always: after the UAT run and the flag check, raise 🔔 Human Input Required with the pass / fail summary per criterion, open issues and a recommendation, and STOP for the owner's sign-off. Do not mark the task done without a recorded sign-off or a recorded owner decision on each open item.</trigger>
+    <trigger>If the flag cannot be restored to true or the restore probe fails, STOP immediately and report to the main session (shared environment).</trigger>
+    <trigger>If a UAT failure is a security or data-integrity defect (wrong firm sees data, totals break I-1, a duplicate invoice), STOP the session and escalate before continuing.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="az">App Service settings</tool>
+    <tool name="ui-test">browser checks</tool>
+    <tool name="dataverse-mcp">read_query verification</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/ebilling-r1/notes/uat-script.md</output>
+    <output type="docs">projects/ebilling-r1/notes/uat-results.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Per D-69, the UAT script includes an explicit check of the provisional confidence weights and caps (sprk_ebillingsetting) against the 161 / 162 results; the owner confirms or changes them and the outcome is recorded.</criterion>
+    <criterion testable="true">uat-script.md covers every Success Criterion 1-12, either as a script section (1, 3, 4, 6) or as a mapped evidence file and test name (2, 5, 7-12).</criterion>
+    <criterion testable="true">uat-results.md records pass / fail per step with record ids and the criterion 1 timing within NFR-01 (or the linked owner decision).</criterion>
+    <criterion testable="true">The flag-off check recorded 503 ebilling.disabled on both probed routes and a hidden SPA entry, then normal status after restore; Ebilling__Enabled is true at task end.</criterion>
+    <criterion testable="true">Every UAT failure has a filed issue or a fix reference.</criterion>
+    <criterion testable="true">The owner's sign-off (or conditional sign-off with listed conditions) is recorded verbatim with date in uat-results.md and notes/decisions-log.md.</criterion>
+  </acceptance-criteria>
+
+  <notes>Production enablement is not part of this task (FR-45 enables dev first). README Graduation Criterion "feature flag in place, dev enabled and UAT signed off" is verified here.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load the knowledge files first. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

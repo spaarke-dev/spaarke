@@ -1,0 +1,37 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0267",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0267","generator_id":"gen_eval_set.py@1 F-0267","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0267.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-03"},
+ "header":{"firm":"Draycott Beckett PC","firm_invoice_number":"INV-2025-71734","invoice_date":"2025-05-01","billing_period_start":"2025-04-01","billing_period_end":"2025-04-30","firm_matter_reference":"93773-0011","po_number":"PO-4574912","fees_total":7753.5,"expenses_total":877.79,"adjustments_total":0.0,"total_due":8631.29,"currency":"USD"},
+ "timekeepers":[{"name":"Ingrid Tavares","title":"Associate","rate":205.0,"billed_as":"IT"},{"name":"Naomi Rosenthal","title":"Associate","rate":245.0,"billed_as":"NR"},{"name":"Victor Carmichael","title":"Of Counsel","rate":415.0,"billed_as":"VC"},{"name":"Victor Kowalczyk","title":"Partner","rate":490.0,"billed_as":"VK"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2025-04-02","timekeeper":"IT","timekeeper_name":"Ingrid Tavares","timekeeper_title":"Associate","title":"Assoc","hours":2.8,"rate":205.0,"amount":574.0,"narrative":"Prepare trial notebook and demonstrative exhibits for the customs audit","codes":["L440","A101"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2025-04-03","timekeeper":"IT","timekeeper_name":"Ingrid Tavares","timekeeper_title":"Associate","title":"Assoc","hours":2.4,"rate":205.0,"amount":492.0,"narrative":"Prepare trial notebook and demonstrative exhibits for the lease dispute","codes":["L440","A101"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2025-04-04","timekeeper":"VK","timekeeper_name":"Victor Kowalczyk","timekeeper_title":"Partner","title":"Ptr","hours":0.6,"rate":490.0,"amount":294.0,"narrative":"Attend trial day in the vendor agreement","codes":["L450","A109"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2025-04-08","timekeeper":"VK","timekeeper_name":"Victor Kowalczyk","timekeeper_title":"Partner","title":"Ptr","hours":2.2,"rate":490.0,"amount":1078.0,"narrative":"Prepare case assessment memorandum regarding the distribution agreement and recommended strategy","codes":["L120","A103"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2025-04-10","timekeeper":"VC","timekeeper_name":"Victor Carmichael","timekeeper_title":"Of Counsel","title":"O/C","hours":0.8,"rate":415.0,"amount":332.0,"narrative":"Review draft expert disclosure for the regulatory inquiry","codes":["L420","A104"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2025-04-11","timekeeper":"VC","timekeeper_name":"Victor Carmichael","timekeeper_title":"Of Counsel","title":"O/C","hours":1.5,"rate":415.0,"amount":622.5,"narrative":"Draft interrogatory responses for trial in the warranty claim","codes":["L430","A103"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2025-04-17","timekeeper":"NR","timekeeper_name":"Naomi Rosenthal","timekeeper_title":"Associate","title":"Assoc","hours":4.4,"rate":245.0,"amount":1078.0,"narrative":"Research standard for new trial in the licensing dispute; Prepare expert witness for testimony in the regulatory inquiry; Prepare examination outlines for trial in the warranty claim.","codes":["L120","A101"],"page":1,"narrative_style":"block_billed"},
+  {"n":8,"line_type":"fee","date":"2025-04-18","timekeeper":"NR","timekeeper_name":"Naomi Rosenthal","timekeeper_title":"Associate","title":"Assoc","hours":1.6,"rate":245.0,"amount":392.0,"narrative":"Prepare fact witness for testimony regarding the licensing dispute","codes":["L410","A101"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"fee","date":"2025-04-22","timekeeper":"VK","timekeeper_name":"Victor Kowalczyk","timekeeper_title":"Partner","title":"Ptr","hours":1.9,"rate":490.0,"amount":931.0,"narrative":"Review draft expert disclosure for the customs audit","codes":["L420","A104"],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"fee","date":"2025-04-23","timekeeper":"NR","timekeeper_name":"Naomi Rosenthal","timekeeper_title":"Associate","title":"Assoc","hours":3.0,"rate":245.0,"amount":735.0,"narrative":"Revise notice of deposition after review by lead counsel","codes":["L430","A104"],"page":2,"narrative_style":"clear"},
+  {"n":11,"line_type":"fee","date":"2025-04-23","timekeeper":"NR","timekeeper_name":"Naomi Rosenthal","timekeeper_title":"Associate","title":"Assoc","hours":0.3,"rate":245.0,"amount":73.5,"narrative":"Draft notice of deposition for trial in the supply agreement","codes":["L430","A103"],"page":2,"narrative_style":"clear"},
+  {"n":12,"line_type":"fee","date":"2025-04-28","timekeeper":"NR","timekeeper_name":"Naomi Rosenthal","timekeeper_title":"Associate","title":"Assoc","hours":2.8,"rate":245.0,"amount":686.0,"narrative":"Review court docket and calendar of pending deadlines for the data incident","codes":["L190","A104"],"page":2,"narrative_style":"clear"},
+  {"n":13,"line_type":"fee","date":"2025-04-30","timekeeper":"NR","timekeeper_name":"Naomi Rosenthal","timekeeper_title":"Associate","title":"Assoc","hours":1.9,"rate":245.0,"amount":465.5,"narrative":"Research standard for new trial in the construction contract","codes":["L460","A102"],"page":2,"narrative_style":"clear"},
+  {"n":14,"line_type":"expense","date":"2025-04-04","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":2.0,"rate":53.41,"amount":106.82,"narrative":"Overnight courier to Alder & Finch Ltd counsel","codes":["E107"],"page":2,"narrative_style":"clear"},
+  {"n":15,"line_type":"expense","date":"2025-04-08","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":152.03,"amount":152.03,"narrative":"Online legal research charges","codes":["E106"],"page":2,"narrative_style":"clear"},
+  {"n":16,"line_type":"expense","date":"2025-04-11","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":826.0,"rate":0.14,"amount":115.64,"narrative":"Photocopies - 826 pages","codes":["E101"],"page":2,"narrative_style":"clear"},
+  {"n":17,"line_type":"expense","date":"2025-04-18","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":503.3,"amount":503.3,"narrative":"Document hosting and processing vendor","codes":["E118"],"page":2,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["383 Peachtree Way","Chicago","Tax ID 60-6236544"],"template":"T15","pages":2},
+ "rule_set_id":"RS-03",
+ "context":{"matter_open":"2024-02-05","matter_close":"2025-07-29","matter_budget":59525.0,"approved_timekeepers":["Ingrid Tavares","Victor Carmichael","Cyrus Mbeki","Victor Kowalczyk","Naomi Rosenthal","Aisha Brennan"],"invoice_received_date":"2025-05-04"},
+ "expected_findings":[
+  {"rule_id":"RS-03-R05","rule_type":"ExpenseRule","scope":"line","line_refs":[15],"consequence":"Disallow"},
+  {"rule_id":"RS-03-R06","rule_type":"ExpenseRule","scope":"line","line_refs":[16],"consequence":"Reduce"},
+  {"rule_id":"RS-03-R07","rule_type":"AiObservation","scope":"line","line_refs":[7],"consequence":"Flag"}
+ ],
+ "seeded_violations":3
+}

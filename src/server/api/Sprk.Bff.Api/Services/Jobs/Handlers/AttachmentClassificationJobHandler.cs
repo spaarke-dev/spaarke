@@ -1,9 +1,11 @@
 using System.Diagnostics;
 using System.Text.Json;
 using Spaarke.Dataverse;
+using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Services.Ai;
+using Sprk.Bff.Api.Services.Ai.PublicContracts;
 using Sprk.Bff.Api.Services.Finance;
 using Sprk.Bff.Api.Services.Finance.Models;
 using Sprk.Bff.Api.Services.RecordMatching;
@@ -13,16 +15,19 @@ namespace Sprk.Bff.Api.Services.Jobs.Handlers;
 
 /// <summary>
 /// Job handler for classifying email attachments as invoice candidates.
-/// Downloads attachment from SPE, extracts text, then runs AI classification (Playbook A).
+/// Downloads attachment from SPE, extracts text, then classifies it through
+/// <see cref="IInvoiceAi.ClassifyAsync"/> (consumer type <c>invoice-classify</c>, Action INVOICE-CLASSIFY@v1;
+/// ebilling-r1 task 042). The prompt, output schema and model tier live in the Action / Binding rows; this
+/// handler holds none, and never falls back to a prompt when the Binding cannot be resolved (FR-46).
 ///
 /// Follows ADR-004 for job contract patterns and idempotency requirements.
 /// Follows ADR-013 for AI via BFF extension.
-/// Follows ADR-014 for playbook-based prompts.
+/// Follows ADR-039 / ADR-043 for the Action + Binding model.
 /// Follows ADR-015: NEVER log document content, extracted text, or AI prompts.
 /// </summary>
 public class AttachmentClassificationJobHandler : IJobHandler
 {
-    private readonly IInvoiceAnalysisService _invoiceAnalysisService;
+    private readonly IInvoiceAi _invoiceAi;
     private readonly ISpeFileOperations _speFileOperations;
     private readonly TextExtractorService _textExtractorService;
     private readonly IDocumentDataverseService _documentService;
@@ -41,7 +46,7 @@ public class AttachmentClassificationJobHandler : IJobHandler
     private const int ReviewStatusToReview = 100000000;
 
     public AttachmentClassificationJobHandler(
-        IInvoiceAnalysisService invoiceAnalysisService,
+        IInvoiceAi invoiceAi,
         ISpeFileOperations speFileOperations,
         TextExtractorService textExtractorService,
         IDocumentDataverseService documentService,
@@ -51,7 +56,7 @@ public class AttachmentClassificationJobHandler : IJobHandler
         ILogger<AttachmentClassificationJobHandler> logger,
         RecordContainerResolver containerResolver)
     {
-        _invoiceAnalysisService = invoiceAnalysisService ?? throw new ArgumentNullException(nameof(invoiceAnalysisService));
+        _invoiceAi = invoiceAi ?? throw new ArgumentNullException(nameof(invoiceAi));
         _speFileOperations = speFileOperations ?? throw new ArgumentNullException(nameof(speFileOperations));
         _textExtractorService = textExtractorService ?? throw new ArgumentNullException(nameof(textExtractorService));
         _documentService = documentService ?? throw new ArgumentNullException(nameof(documentService));
@@ -213,9 +218,18 @@ public class AttachmentClassificationJobHandler : IJobHandler
                     "Text extraction succeeded for document {DocumentId}: {CharCount} characters",
                     documentId, extractedText.Length);
 
-                // Step 6: Call AI classification via IInvoiceAnalysisService
+                // Step 6: Classify through the IInvoiceAi facade (Action INVOICE-CLASSIFY@v1 via its Binding).
+                // Fail closed (FR-46): an InvoiceAiException / FeatureDisabledException is handled below and
+                // never becomes a default classification or a hard-coded prompt.
                 // ADR-015: Do NOT log the extracted text or AI prompts
-                var classificationResult = await _invoiceAnalysisService.ClassifyAttachmentAsync(extractedText, ct);
+                var aiResult = await _invoiceAi.ClassifyAsync(
+                    new InvoiceClassifyRequest { DocumentText = extractedText },
+                    ct);
+
+                var classificationResult = (
+                    Classification: MapClassification(aiResult.Classification),
+                    Confidence: aiResult.Confidence,
+                    Hints: MapHints(aiResult.Hints));
 
                 _logger.LogInformation(
                     "Classification result for document {DocumentId}: {Classification} (confidence: {Confidence})",
@@ -271,6 +285,31 @@ public class AttachmentClassificationJobHandler : IJobHandler
                 // Always release the lock
                 await _idempotencyService.ReleaseProcessingLockAsync(idempotencyKey, ct);
             }
+        }
+        catch (FeatureDisabledException ex)
+        {
+            // ADR-032 kill switch: the AI stack is off. Permanent for this delivery; nothing was written and
+            // the idempotency key was not marked, so the document can be reclassified once AI is enabled.
+            _logger.LogWarning(
+                "Attachment classification job {JobId} not run: AI is disabled ({ErrorCode})", job.JobId, ex.ErrorCode);
+            _telemetry.RecordClassificationFailure(stopwatch, documentId ?? "unknown", "ai_disabled");
+            return JobOutcome.Poisoned(job.JobId, JobType, $"AI disabled: {ex.ErrorCode}", job.Attempt, stopwatch.Elapsed);
+        }
+        catch (InvoiceAiException ex)
+        {
+            // The reason code classifies WHERE the failure happened, not whether a retry helps (IInvoiceAi notes).
+            // binding_missing (can be a transient routing-table read, platform issue #1936) and completion_failed
+            // (transport / model) are retried a bounded number of times; output_invalid is permanent.
+            // The message never carries document text or model output.
+            var retryable = ex.ReasonCode is InvoiceAiException.BindingMissing or InvoiceAiException.CompletionFailed;
+            _logger.LogError(
+                "Attachment classification job {JobId} failed for document {DocumentId}: {ReasonCode} (consumer type {ConsumerType}, attempt {Attempt}/{MaxAttempts}, retryable {Retryable})",
+                job.JobId, documentId, ex.ReasonCode, ex.ConsumerType, job.Attempt, job.MaxAttempts, retryable);
+            _telemetry.RecordClassificationFailure(stopwatch, documentId ?? "unknown", ex.ReasonCode);
+
+            return retryable && job.Attempt < job.MaxAttempts
+                ? JobOutcome.Failure(job.JobId, JobType, ex.ReasonCode, job.Attempt, stopwatch.Elapsed)
+                : JobOutcome.Poisoned(job.JobId, JobType, ex.ReasonCode, job.Attempt, stopwatch.Elapsed);
         }
         catch (Exception ex)
         {
@@ -531,6 +570,30 @@ public class AttachmentClassificationJobHandler : IJobHandler
             "Classification written to Dataverse for document {DocumentId}: {Classification} (confidence: {Confidence})",
             documentId, classification, confidence);
     }
+
+    // The facade's enum names are the Finance enum names verbatim (output JSON values), so the map is by name and
+    // an unknown value fails loudly instead of silently becoming a different verdict.
+    private static DocumentClassification MapClassification(InvoiceClassification classification)
+        => classification switch
+        {
+            InvoiceClassification.InvoiceCandidate => DocumentClassification.InvoiceCandidate,
+            InvoiceClassification.NotInvoice => DocumentClassification.NotInvoice,
+            InvoiceClassification.Unknown => DocumentClassification.Unknown,
+            _ => throw new ArgumentOutOfRangeException(nameof(classification), classification, "Unmapped invoice classification."),
+        };
+
+    private static InvoiceHints? MapHints(InvoiceClassifyHints? hints)
+        => hints is null
+            ? null
+            : new InvoiceHints
+            {
+                VendorName = hints.VendorName,
+                InvoiceNumber = hints.InvoiceNumber,
+                InvoiceDate = hints.InvoiceDate,
+                TotalAmount = hints.TotalAmount,
+                Currency = hints.Currency,
+                MatterReference = hints.MatterReference,
+            };
 
     private AttachmentClassificationPayload? ParsePayload(JsonDocument? payload)
     {

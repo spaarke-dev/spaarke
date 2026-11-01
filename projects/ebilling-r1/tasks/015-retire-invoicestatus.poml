@@ -1,0 +1,145 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="015" project="ebilling-r1">
+  <metadata>
+    <title>Retire sprk_invoicestatus — data, readers, forms, views, docs; notify ontology-r1</title>
+    <phase>1 Data model (WP1)</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Cross-cutting migration across BFF, tests, external SPA, solution source and an ontology-owned file; tagged deletion.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Migration touching 3+ consumers in three projects' code (ontology-r1, uac-r2, SPA-r3) with a destructive data step; high blast radius.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits .claude/skills/jps-action-create/examples/ACT-004.json (main-session-only) and ontology-owned FinanceBaseValues.cs; edits solution source after 029.</parallel-reason>
+    <deps>014, 029, #1111</deps>
+    <tags>bff, dataverse, deletion, finance, coordination</tags>
+    <estimated-effort>1-2 days</estimated-effort>
+  </metadata>
+
+  <prompt>Retire sprk_invoicestatus (D-41, FR-06): migrate its values to statuscode, move every reader and writer to statuscode (counted spend = In Review, Approved, Sent to AP, Paid, filtered on statuscode), remove it from forms, views and docs, then — with owner OK — drop the column and the global option set in dev. Notify ontology-r1 when the PR opens; ontology-r1 reviews the ontology-owned files. Runs in the main session (one .claude/ edit).</prompt>
+
+  <role>SPAARKE platform developer. Expert in BFF Finance code, FetchXML, Dataverse solution source and cross-project coordination.</role>
+
+  <goal>grep -ri sprk_invoicestatus over src, tests, scripts, config, docs and .claude finds nothing (except history notes under projects/); FinanceBaseValues.CountedInvoiceStatuses holds the four statuscode values and its FetchXML / QueryExpression filter on statuscode; all listed tests pass; the column and option set no longer exist in dev; ontology-r1 has been notified and has reviewed the ontology-owned files.</goal>
+
+  <context>
+    <background>Step 0: run git merge-base --is-ancestor f292ad119 HEAD (ontology #1111 present); if it fails, merge origin/master first. Reader inventory (grep 2026-10-15; spec FR-06 plus readers the spec missed — marked *):
+- Ontology-owned: Services/Finance/FinanceBaseValues.cs :39, :49-56, :173-174; Services/Finance/FinanceRollupService.cs :47, :235-248; tests/unit/domain/Signals/SignalReevaluationJobTests.cs :1676-1679, :2586-2592, :3086-3092 (spec's :2200 / :2664-2670 are stale); tests/integration/seam/Signals/FinanceBaseValuesSeamTests.cs :36, :59-77, :106; tests/unit/Sprk.Bff.Api.Tests/Services/Finance/FinanceBaseValuesTests.cs :22-42; *tests/Spaarke.ArchTests/FinanceBaseValuesSingleDefinitionGuardTests.cs :19, :26 (literal regex 10000000[123] must follow the new values).
+- BFF: Services/Finance/FinanceSummaryService.cs :95, :386, :410; Services/Finance/InvoiceReviewService.cs :324, :335-336, :843 (writes ToReview on create — drop it; default statuscode is In Review); *Services/Finance/Tools/FinancialCalculationToolHandler.cs :32, :43-45, :145-150 (also uses values 100000002 / 100000003 that the option set never had — pre-existing defect, fix here); *Infrastructure/DI/ExternalAccessModule.cs :451 (external column allow-list); *Services/Insights/LiveFacts/InvoiceLiveFactResolver.cs :32, :75, :143, :310-314 (reads sprk_status, which sprk_invoice does not have — map invoiceStatus to statuscode; its sprk_total → sprk_totalamount is the same defect class in the same file, fix it too; tracked as ISS-001 / GitHub #1904, and the handler values as a comment on #1771 — close / reference both in the PR).
+- Tests: tests/integration/data-mutation/FinanceInvoiceReview/InvoiceReviewWritePathTests.cs :43-44, :172; *tests/integration/auth/UnifiedAccessControl/ExternalModuleColumnAllowListTests.cs :674, :756, :794.
+- *External SPA: src/client/external-spa/src/components/detail/RecordDetailFields.tsx:144, RecordDetailModal.tsx:363, :425, tests/RecordDetailModal.test.tsx:180, :204, :613, :673; doc-comment example src/client/shared/Spaarke.UI.Components/src/components/RecordHeader/fields/OptionSetField.tsx:64.
+- Solution source (SpaarkeMaster): OptionSets/sprk_invoicestatus.xml; Entities/sprk_Invoice/Entity.xml; SavedQueries {b9f6d045-9a5e-f111-ab0c-7c1e521545d7}, {1ad5e8f3-4408-f111-8406-7c1e525abd8b}; quick-create form {c5e5807d-e20c-f111-8342-7c1e520aa4df}; main form {93aa1c69-0406-f111-8406-7c1e525abd8b} (and their _managed twins); Other/Solution.xml.
+- Docs: docs/data-model/field-mapping-reference.md:156, sprk_invoice-matter-project.md:15-16, sprk_financial-related-entities.md:183-184, schema-corrections.md:68; .claude/skills/jps-action-create/examples/ACT-004.json:95 (main session).
+Statuscode numbers: task 012's notes / docs/data-model/sprk_invoice.md. The spec's change supersedes ontology D-137 Q24 ("spend counts only Reviewed").</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Finance/FinanceBaseValues.cs (ontology-owned)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Finance/FinanceRollupService.cs (ontology-owned)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Finance/FinanceSummaryService.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Finance/InvoiceReviewService.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Finance/Tools/FinancialCalculationToolHandler.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/DI/ExternalAccessModule.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Insights/LiveFacts/InvoiceLiveFactResolver.cs</file>
+      <file role="modify">every test, SPA, solution-source and doc file in the background inventory</file>
+      <file role="modify">.claude/skills/jps-action-create/examples/ACT-004.json (main session only)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="014" status="pending">Lifecycle service and its statuscode constants</dependency>
+      <dependency task="029" status="pending">WP1 applied to dev and solution source synced</dependency>
+      <dependency task="#1111" status="merged">Ontology code on master at f292ad119 (Step-0 check)</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="owner D-97 (2026-10-17)">The owner approved 015 in full, including deleting the sprk_invoicestatus column and the sprk_invoicestatus option set from spaarkedev1, once nothing references them. Quote D-97 in the task notes.</constraint>
+    <constraint source="main-session code check 2026-10-17 (owner: 'ensure you do a code check that the sprk_invoicestatus field is not used -- it may be used in the ontology-r1 code')">The background inventory is not complete on its own. The check on work/ebilling-r1 at 49acd2f78 (after the origin/master 1df4ee12d merge) found:
+(1) **Indirect readers.** A literal grep for the name misses code that reads the column through FinanceBaseValues.InvoiceStatus / InvoiceStatusReviewed / CountedInvoiceStatuses: FinanceRollupService.cs :47, :241, :246-248 (ontology-owned); FinanceBaseValues.BuildGroupedSumFetchXml :173-174; tests SignalReevaluationJobTests :1677-1679, :2647 and FinanceBaseValuesSeamTests :60-68. Find readers by the constant names as well as the literal, and update every one.
+(2) **Missing from the inventory.**
+  - scripts/ebilling/Deploy-EbillingInvoiceHeaderSchema.ps1
+  - docs/data-model/sprk_invoice.md
+  - the PolicyVersionValidator.AuthorableColumns remarks (master, task 102a), which name sprk_invoice.sprk_invoicestatus as a base column of the derived Thresholds
+  - docs/architecture/multi-environment-portability-strategy.md:141 (an InvoiceStatus example)
+(3) **Live-only dependent on dev.** aiskillconfig a32ae5a7-3908-f111-8407-7c1e520aa4df, "ais_FormFillFieldOptOut_sprk_invoice_sprk_invoicestatus", the platform's Copilot form-fill opt-out row. It is NOT in SpaarkeMaster source. It blocks the attribute delete, so delete that row first.
+  - The other dependents are the two forms and two views already listed.
+  - RetrieveDependenciesForDelete on the attribute (MetadataId 150d244b-9a07-f111-8407-7c1e520aa4df) must return 0 before the delete. Record its output before and after in the notes.
+(4) **Live data.** There are 3 rows with a value, all 100000000 (ToReview) with statuscode 1. Re-check the count at migration time.
+(5) **No workflows or flows.** No workflow or flow definition (clientdata or xaml) mentions the column.
+(6) **Stale ontology branches.** Several older unmerged ontology-r1 branches still carry the pre-master FinanceRollupService that reads the column, e.g. task/ontology-070-inquiry, -131b, -044, -039-gate-notes and ontology/081-cleanup. Name them in the ontology-r1 notice, so a later merge of one of them does not bring a reader back.
+(7) **Enforcement ladder** (root CLAUDE.md §16). Add an ArchTest source-scan guard that fails on "sprk_invoicestatus" anywhere under src/, tests/ and scripts/, and on the FinanceBaseValues.InvoiceStatus constant name, with must-fire and must-not-fire controls. Excluded: projects/** history, and this guard's own file. Record it as "Enforced by:" in the notes.</constraint>
+    <constraint source="spec FR-06">CountedInvoiceStatuses = the statuscode values In Review, Approved, Sent to AP, Paid; the filter attribute is statuscode, never statecode (Paid is Inactive). FinanceBaseValues stays the single definition (FinanceBaseValuesSingleDefinitionGuardTests keeps passing, with its literal regex and control updated to the new values).</constraint>
+    <constraint source="project">Use 014's constants for statuscode values in Finance code; do not spell them again outside FinanceBaseValues and the lifecycle service.</constraint>
+    <constraint source="project CLAUDE.md §5">Data migration first (rows with a value → the In Review statuscode where not already; record counts), then readers, forms, views; dropping the column and the option set in dev is destructive and waits for an explicit owner OK quoted in task notes.</constraint>
+    <constraint source="project CLAUDE.md §4">Ontology-owned files (FinanceBaseValues.cs, FinanceRollupService.cs, the Signals tests, the ArchTest) change only as listed; ontology-r1 reviews them before merge. uac-r2 / SPA-r3 share ExternalAccessModule.cs, its allow-list test and src/client/external-spa — run /conflict-check before the PR.</constraint>
+    <constraint source=".claude/constraints/bff-extensions.md">Measure publish-size delta against a fresh master build; no new HIGH CVE; tests updated.</constraint>
+    <constraint source="root CLAUDE.md §3">The ACT-004.json edit under .claude/ is done by the main session; a sub-agent executing this task stops at that step and hands it back.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/plugins.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/adr/ADR-002-thin-plugins.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+      <file>.claude/skills/conflict-check/SKILL.md</file>
+      <file>docs/architecture/finance-intelligence-architecture.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="0">git merge-base --is-ancestor f292ad119 HEAD; if it fails, merge origin/master first.</step>
+    <step order="1">Re-run grep -ri for sprk_invoicestatus, InvoiceStatusReviewed, CountedInvoiceStatuses, InvoiceStatusToReview, InvInvoiceStatus and invoiceStatus over src, tests, scripts, config, docs, .claude, .github; reconcile with the inventory; record differences.</step>
+    <step order="2">Dev data: count invoices by sprk_invoicestatus and statecode / statuscode; migrate any row not already In Review per FR-06 (ToReview → In Review, Reviewed → In Review) through a script that logs ids; record counts.</step>
+    <step order="3">Change FinanceBaseValues, FinanceRollupService and their tests / seam test / ArchTest; then FinanceSummaryService, InvoiceReviewService, FinancialCalculationToolHandler, InvoiceLiveFactResolver, ExternalAccessModule and their tests; then the SPA files and tests.</step>
+    <step order="4">dotnet build; dotnet test (unit, ArchTests, the listed integration tests); npm test in src/client/external-spa.</step>
+    <step order="5">Dev: remove the column from the main and quick-create forms and the two views; publish. Present the drop plan to the owner and STOP for an explicit OK.</step>
+    <step order="6">After the OK: delete the sprk_invoicestatus column, then the global option set, in dev; publish; verify 404 on both.</step>
+    <step order="7">Update solution source to match dev (the listed SpaarkeMaster files; delete OptionSets/sprk_invoicestatus.xml) and round-trip with scripts/Import-SolutionScoped.ps1 against dev.</step>
+    <step order="8">Update the docs; main session updates ACT-004.json.</step>
+    <step order="9">Measure publish-size delta. Open the PR listing every reader above; notify ontology-r1 (PR link) and record the notification and their review in task notes.</step>
+    <step order="10">Update TASK-INDEX.md: change this task's status cell to ✅ [done].</step>
+    <step order="11">If any deviations from plan, document in projects/ebilling-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>No explicit owner OK: do not run step 6; leave the task in progress with evidence.</trigger>
+    <trigger>If ontology-r1 objects to the counted-status change (it supersedes their D-137 Q24), STOP and bring both positions to the owner.</trigger>
+    <trigger>If a reader is found outside the inventory in another project's actively changing code, STOP and coordinate before editing it.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">Build and test</tool>
+    <tool name="npm">External SPA tests</tool>
+    <tool name="pwsh">Data migration script, Import-SolutionScoped.ps1</tool>
+    <tool name="gh">PR and notification</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">Finance services, ExternalAccessModule, InvoiceLiveFactResolver, external SPA detail components</output>
+    <output type="test">The listed unit, seam, data-mutation, auth and ArchTests; RecordDetailModal.test.tsx</output>
+    <output type="solution">SpaarkeMaster sprk_Invoice forms / views / Entity.xml, Solution.xml; OptionSets/sprk_invoicestatus.xml removed</output>
+    <output type="docs">docs/data-model/*.md listed; ACT-004.json</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">grep -ri sprk_invoicestatus over src, tests, scripts, config, docs, .claude and .github returns nothing.</criterion>
+    <criterion testable="true">FinanceBaseValues.CountedInvoiceStatuses equals the four statuscode values In Review, Approved, Sent to AP, Paid; the rollup query and FetchXML filter on statuscode; a Paid (Inactive) invoice is counted and a Rejected / Returned to Firm / Cancelled one is not (unit test and the live seam test).</criterion>
+    <criterion testable="true">FinanceBaseValuesSingleDefinitionGuardTests passes and its control still fires on a private copy of the new values.</criterion>
+    <criterion testable="true">FinancialCalculationToolHandler and InvoiceLiveFactResolver read statuscode (and sprk_totalamount) — tests show a real status value reaches their output.</criterion>
+    <criterion testable="true">A newly created invoice gets statuscode In Review and no sprk_invoicestatus write (InvoiceReviewWritePathTests updated and passing).</criterion>
+    <criterion testable="true">In dev, the sprk_invoicestatus column and option set return 404, after an owner OK recorded with date; data-migration counts recorded.</criterion>
+    <criterion testable="true">Import-SolutionScoped.ps1 round trip against dev succeeds with the updated solution source.</criterion>
+    <criterion testable="true">ontology-r1 notified at PR open and its review of the ontology-owned files recorded; PR lists every reader in the inventory.</criterion>
+    <criterion testable="true">Publish-size delta measured against a fresh master build and recorded; no new HIGH CVE; dotnet test and the external SPA tests pass.</criterion>
+    <criterion testable="true">Cover the stated contract plus the edge cases named above. Anything beyond that needs a one-line justification in task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>An ArchTest that only InvoiceLifecycleService writes sprk_invoice statecode / statuscode is a candidate enforcement (root CLAUDE.md §16 ladder) — record it as a follow-up proposal, do not add it here. Two of the readers fixed here carried pre-existing defects (non-existent option values / columns); list them in the PR.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in knowledge files. Follow the task-execute skill for the mandatory pre-execution checklist.</protocol>
+  </execution>
+</task>

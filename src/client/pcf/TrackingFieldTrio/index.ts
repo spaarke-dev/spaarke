@@ -123,6 +123,14 @@
  * - The dead `onSetStandingGrant` wiring is removed (the modal has had no
  *   standing-grant control since task 073 UAT v1.0.24 #5).
  *
+ * v1.0.55 (field-mapping-server-write-path-r1 task 074, FR-33): the Family tool. The shared toolbar gains an opt-in
+ *   Family icon (`onOpenFamily`, same pattern as `onOpenGrantModal` / `onOpenEmailMembers`); clicking it opens the shared
+ *   `RecordFamilyModal` for this form's record (`context.page.entityTypeName` + `entityId`, the same host reads the
+ *   grant modal uses), reading `GET /api/v1/records/{table}/{id}/family` through `authenticatedFetchGated` (ADR-028: the
+ *   modal receives the fetch, never a token). No `onAction` is passed: the modal's push / Assigned To actions stay
+ *   disabled ("Available after the push update") until the push preview (task 040) is wired. The icon is not gated by the
+ *   Manage Access check - the Family lists only records the caller may already read, as the server returns them.
+ *
  * v1.0.54 (task 099c review round 2, PR #2062): no change in this file's logic. In the bundled modal's Expiration:
  *   when shares end on different dates and the earliest has already passed, no disabled Apply is offered - the line says
  *   to choose the UTC minimum date or later, and picking a valid date offers Apply; the "choose an Expiration before
@@ -329,6 +337,8 @@ import { createXrmEmailComposeHandlers } from '@spaarke/ui-components/dist/compo
 // instead of blanking the whole PCF (defense-in-depth alongside the
 // react/jsx-runtime dedupe in ../webpack.config.js).
 import { WidgetErrorBoundary } from '@spaarke/ui-components/dist/components/WidgetErrorBoundary';
+// Shared Family modal (field-mapping-server-write-path-r1 task 073/074, FR-32/FR-33) - lists the record's Filing family.
+import { RecordFamilyModal } from '@spaarke/ui-components/dist/components/RecordFamilyModal';
 import { cleanGuid } from '@spaarke/ui-components/dist/services/PolymorphicResolverService';
 import { getXrm } from '@spaarke/ui-components/dist/utils/xrmContext';
 import { initializeAuth } from './authInit';
@@ -473,6 +483,9 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
   // bootstrap completes still succeeds (awaits, doesn't fail) rather than
   // racing `@spaarke/auth`'s "not initialized" guard.
   private isGrantModalOpen = false;
+
+  /** Whether the Family modal (task 074, FR-33) is open for the bound record. */
+  private isFamilyModalOpen = false;
 
   /** Whether the CALLER may change who can access the bound record, per the server
    * (`GET /api/v1/external-access/can-manage-access`, task 118).
@@ -1525,6 +1538,11 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
     this.renderControl();
   };
 
+  private closeFamilyModal = (): void => {
+    this.isFamilyModalOpen = false;
+    this.renderControl();
+  };
+
   private renderControl(): void {
     // `!== false` treats unset / null / undefined as "not explicitly false"
     // so the manifest default (showTitle=true) wins. Same pattern as
@@ -1550,7 +1568,7 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
       title: (this.context.parameters.title?.raw as string) || undefined,
       showTitle,
       showVersion,
-      versionText: 'v1.0.54 • Built 2026-10-17',
+      versionText: 'v1.0.55 • Built 2026-10-28',
       // Task 175 (owner round 87): only the options at or above the parent's floor.
       accessPermissionOptions: accessPermissionPill.options,
       // Labels pulled from each bound field's Dataverse metadata so they
@@ -1603,6 +1621,14 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
           this.renderControl();
         })();
       },
+      // Family icon (task 074, FR-33) - opens RecordFamilyModal for this record. Offered only on a bound record: with
+      // no id (a harness, an unsaved form) there is no family to list, so no icon is drawn.
+      onOpenFamily: this.getRecordId()
+        ? () => {
+            this.isFamilyModalOpen = true;
+            this.renderControl();
+          }
+        : undefined,
       // The SERVER's answer to "may this caller change who can access this record" (task 118) — see
       // evaluateGrantGate(). `false` until the server says otherwise, including while the answer is in
       // flight and on every failure to obtain one.
@@ -1647,7 +1673,7 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
           // eslint-disable-next-line react/no-children-prop
           React.createElement(WidgetErrorBoundary, {
             widgetType: 'tracking-field-trio-dialogs',
-            displayName: 'Access & Email',
+            displayName: 'Access, Email & Family',
             surface: 'TrackingFieldTrio',
             // Children via the `children` prop (not createElement rest-args):
             // WidgetErrorBoundaryProps types `children` as required, which the
@@ -1713,6 +1739,18 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
                       this.accessPermissionValue,
                       ACCESS_PERMISSION_VALUES
                     ),
+                  })
+                : null,
+              // Family modal (task 074, FR-33) - the shared RecordFamilyModal for the bound record. The host passes the
+              // gated authenticated fetch (never a token, ADR-028) and no `onAction`, so the push / Assigned To actions
+              // stay disabled until the push preview is wired (task 040). It reads the family only while open.
+              recordId
+                ? React.createElement(RecordFamilyModal, {
+                    open: this.isFamilyModalOpen,
+                    onClose: this.closeFamilyModal,
+                    table: this.getHostEntity(),
+                    recordId,
+                    authenticatedFetch: this.authenticatedFetchGated,
                   })
                 : null,
               // Canonical SendEmailDialog (task 042) — pre-populated with the

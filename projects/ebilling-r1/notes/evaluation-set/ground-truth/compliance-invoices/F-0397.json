@@ -1,0 +1,27 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0397",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0397","generator_id":"gen_eval_set.py@1 F-0397","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0397.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-01"},
+ "header":{"firm":"Hartwell and Zeller LLP","firm_invoice_number":"INV-2025-95688","invoice_date":"2026-05-02","billing_period_start":"2026-04-01","billing_period_end":"2026-04-30","firm_matter_reference":"46804-0019","po_number":"PO-4518143","fees_total":4828.0,"expenses_total":5418.15,"adjustments_total":0.0,"total_due":10246.15,"currency":"USD"},
+ "timekeepers":[{"name":"Gideon Fairweather","title":"Of Counsel","rate":510.0,"billed_as":"GF"},{"name":"Ivan Santoro","title":"Partner","rate":590.0,"billed_as":"IS"},{"name":"Leila Sandoval","title":"Paralegal","rate":170.0,"billed_as":"LS"},{"name":"Priya Esposito","title":"Paralegal","rate":160.0,"billed_as":"PE"},{"name":"Tomas Brennan","title":"Senior Associate","rate":385.0,"billed_as":"TB"},{"name":"Tomas Ramanathan","title":"Partner","rate":595.0,"billed_as":"TR"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2026-04-02","timekeeper":"TB","timekeeper_name":"Tomas Brennan","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":2.4,"rate":385.0,"amount":924.0,"narrative":"Telephone conference with client regarding selection of expert for the customs audit","codes":["L130","A106"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2026-04-03","timekeeper":"TR","timekeeper_name":"Tomas Ramanathan","timekeeper_title":"Partner","title":"Ptr","hours":0.3,"rate":595.0,"amount":178.5,"narrative":"Review and revise answer and affirmative defenses based on client comments","codes":["L210","A104"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2026-04-06","timekeeper":"LS","timekeeper_name":"Leila Sandoval","timekeeper_title":"Paralegal","title":"Para","hours":2.0,"rate":170.0,"amount":340.0,"narrative":"Telephone conference with client representative regarding factual background of the warranty claim","codes":["L110","A106"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2026-04-10","timekeeper":"TB","timekeeper_name":"Tomas Brennan","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":1.5,"rate":385.0,"amount":577.5,"narrative":"Prepare for case management conference in the licensing dispute","codes":["L230","A101"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2026-04-14","timekeeper":"GF","timekeeper_name":"Gideon Fairweather","timekeeper_title":"Of Counsel","title":"O/C","hours":2.5,"rate":510.0,"amount":1275.0,"narrative":"Plan strategy for upcoming phase of the licensing dispute with team","codes":["L120","A101"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2026-04-20","timekeeper":"PE","timekeeper_name":"Priya Esposito","timekeeper_title":"Paralegal","title":"Para","hours":1.1,"rate":160.0,"amount":176.0,"narrative":"Conference with client regarding budget variance for the regulatory inquiry","codes":["L150","A106"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2026-04-30","timekeeper":"IS","timekeeper_name":"Ivan Santoro","timekeeper_title":"Partner","title":"Ptr","hours":2.3,"rate":590.0,"amount":1357.0,"narrative":"Review and organize incoming production from Alder & Finch Ltd for matter file","codes":["L140","A104"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"expense","date":"2026-04-01","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":272.0,"rate":0.09,"amount":24.48,"narrative":"Photocopies - 272 pages","codes":["E101"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"expense","date":"2026-04-01","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":1420.01,"amount":1420.01,"narrative":"Court reporter and transcript - deposition","codes":["E115"],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"expense","date":"2026-04-03","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":2391.12,"amount":2391.12,"narrative":"Consulting expert fees","codes":["E119"],"page":1,"narrative_style":"clear"},
+  {"n":11,"line_type":"expense","date":"2026-04-22","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":1582.54,"amount":1582.54,"narrative":"Court reporter and transcript - deposition","codes":["E115"],"page":1,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["862 Market Street","Seattle","Tax ID 29-7966368"],"template":"T11","pages":2},
+ "rule_set_id":"RS-01",
+ "context":{"matter_open":"2024-11-22","matter_close":"2026-07-29","matter_budget":65984.0,"approved_timekeepers":["Gregory Eriksen","Tomas Ramanathan","Tomas Brennan","Tomas Eriksen","Leila Sandoval","Gideon Fairweather","Priya Esposito","Ivan Santoro"],"invoice_received_date":"2026-05-20"},
+ "expected_findings":[],
+ "seeded_violations":0
+}

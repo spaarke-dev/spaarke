@@ -17,6 +17,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Xrm.Sdk;
+using Microsoft.Xrm.Sdk.Query;
 using Spaarke.Dataverse;
 using Spaarke.Scheduling;
 using Sprk.Bff.Api.Services.Access;
@@ -223,6 +224,38 @@ public class SecureChildOrdinaryParentMoveTests
         report.Status.Should().Be(SecureChildReconcileStatus.Completed, report.Detail);
         _world.OwnerOf("sprk_budget", budget).Should().Be(DataversePrincipalRef.Team(TeamB));
         _world.OwnerOf("sprk_budgetbucket", bucket).Should().Be(DataversePrincipalRef.Team(TeamB));
+    }
+
+    [Fact(DisplayName = "194 must fire (ebilling-r1): an invoice and every invoice-family row filed only under it follow its matter to B")]
+    public async Task TheInvoiceFamily_FollowsAnOrdinaryMove_ThroughTheInvoice()
+    {
+        var (invoice, line, submission, approval) = (Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid());
+        var (externalIdentifier, correction) = (Guid.NewGuid(), Guid.NewGuid());
+        MatterMovedToB();
+        Row("sprk_invoice", invoice, TeamRef(GeneralTeam), ("sprk_matter", Matter, MatterId));
+        // No core lookup on any family row: the walk reaches them only through the invoice (the correction also through its line).
+        Row("sprk_billingevent", line, TeamRef(GeneralTeam), ("sprk_invoice", "sprk_invoice", invoice));
+        Row("sprk_invoicesubmission", submission, TeamRef(GeneralTeam), ("sprk_invoice", "sprk_invoice", invoice));
+        Row("sprk_invoiceapproval", approval, TeamRef(GeneralTeam), ("sprk_invoice", "sprk_invoice", invoice));
+        Row("sprk_externalidentifier", externalIdentifier, TeamRef(GeneralTeam), ("sprk_regardinginvoice", "sprk_invoice", invoice));
+        Row("sprk_invoicecorrection", correction, TeamRef(GeneralTeam),
+            ("sprk_invoice", "sprk_invoice", invoice), ("sprk_invoiceline", "sprk_billingevent", line));
+
+        var report = await Reconciler().ReconcileOrdinaryParentMoveAsync(
+            Matter, MatterId, SecureChildReconcileMode.Apply, maxWrites: 200, CancellationToken.None);
+
+        report.Status.Should().Be(SecureChildReconcileStatus.Completed, report.Detail);
+        foreach (var (table, id) in new[]
+                 {
+                     ("sprk_invoice", invoice), ("sprk_billingevent", line), ("sprk_invoicesubmission", submission),
+                     ("sprk_invoiceapproval", approval), ("sprk_externalidentifier", externalIdentifier),
+                     ("sprk_invoicecorrection", correction),
+                 })
+        {
+            _world.OwnerOf(table, id).Should().Be(DataversePrincipalRef.Team(TeamB), $"{table} follows its invoice's matter to B");
+        }
+
+        report.ChildrenReowned.Should().Be(6);
     }
 
     [Fact(DisplayName = "194 must fire: report-only plans every move, the grandchild through its planned parent, and writes nothing")]
@@ -1794,5 +1827,289 @@ public class SecureChildOrdinaryParentMoveTests
 
         public override ValueTask<AccessToken> GetTokenAsync(TokenRequestContext requestContext, CancellationToken cancellationToken)
             => throw new NotSupportedException("This double issues no HTTP.");
+    }
+
+    // ── Owner decision 2026-10-29: the children of a FILED person-owned work assignment follow its matter ──────────────
+
+    private static readonly Guid CatalogWorkAssignment = Guid.Parse("4b000000-0000-4000-8000-000000194c02");
+
+    /// <summary>A work assignment owned by <paramref name="owner"/>: filed under the root (the matter by default,
+    /// <paramref name="rootTable"/> otherwise) by its typed lookup, through an invoice (<paramref name="throughAnInvoice"/>) or an
+    /// event (<paramref name="throughAnEvent"/>) of the root, or (<paramref name="filed"/> false) under nothing.</summary>
+    private Guid WorkAssignmentUnderTheMatter(
+        EntityReference owner, bool throughAnInvoice = false, bool filed = true,
+        string rootTable = Matter, Guid? rootId = null, bool throughAnEvent = false)
+    {
+        var root = rootId ?? MatterId;
+        var workAssignment = Guid.NewGuid();
+        var columns = new List<(string, object)>
+        {
+            (owner.LogicalName == "team" ? "owningteam" : "owninguser", owner), ("sprk_issecure", false),
+        };
+        if (filed && throughAnInvoice)
+        {
+            var invoice = Guid.NewGuid();
+            Row("sprk_invoice", invoice, TeamRef(GeneralTeam), (rootTable, rootTable, root));
+            columns.Add(("sprk_regardinginvoice", new EntityReference("sprk_invoice", invoice)));
+        }
+        else if (filed && throughAnEvent)
+        {
+            var intermediateEvent = Guid.NewGuid();
+            Row("sprk_event", intermediateEvent, TeamRef(GeneralTeam), ("sprk_regarding" + rootTable["sprk_".Length..], rootTable, root));
+            columns.Add(("sprk_regardingevent", new EntityReference("sprk_event", intermediateEvent)));
+        }
+        else if (filed)
+        {
+            columns.Add(("sprk_regarding" + rootTable["sprk_".Length..], new EntityReference(rootTable, root)));
+        }
+
+        _world.Add("sprk_workassignment", workAssignment, columns.ToArray());
+        return workAssignment;
+    }
+
+    /// <summary>The root (<see cref="Matter"/> or <see cref="Project"/>), ordinary, reassigned to business unit B.</summary>
+    private Guid RootMovedToB(string rootTable)
+    {
+        var id = rootTable == Matter ? MatterId : Guid.NewGuid();
+        _world.Add(rootTable, id, ("owningteam", new EntityReference("team", TeamB)), ("sprk_issecure", false));
+        return id;
+    }
+
+    [Theory(DisplayName = "Owner decision 2026-10-29 must fire: the MATTER's or PROJECT's move re-owns the rows under a FILED person-owned work assignment (typed, or through an invoice or an event of the root) — a default-team-owned Decision Record and event move to its unit; a user-owned row is reported, not moved")]
+    [InlineData(Matter, "typed")]
+    [InlineData(Matter, "invoice")]
+    [InlineData(Matter, "event")]
+    [InlineData(Project, "typed")]
+    [InlineData(Project, "invoice")]
+    [InlineData(Project, "event")]
+    public async Task ChildrenOfAFiledPersonOwnedWorkAssignment_FollowItsRoot_AUserOwnedRowIsReported(string rootTable, string filing)
+    {
+        var rootId = RootMovedToB(rootTable);
+        var someone = new EntityReference("systemuser", SecureChildShareWorld.SomeUser);
+        var (record, userEvent) = (Guid.NewGuid(), Guid.NewGuid());
+        var workAssignment = WorkAssignmentUnderTheMatter(someone,
+            throughAnInvoice: filing == "invoice", throughAnEvent: filing == "event", rootTable: rootTable, rootId: rootId);
+        _world.Add("sprk_recordtype_ref", CatalogWorkAssignment, ("sprk_recordlogicalname", "sprk_workassignment"));
+        Row("sprk_event", EventId, TeamRef(GeneralTeam), ("sprk_regardingworkassignment", "sprk_workassignment", workAssignment));
+        Row("sprk_event", userEvent, someone, ("sprk_regardingworkassignment", "sprk_workassignment", workAssignment));
+        Row("sprk_decisionrecord", record, TeamRef(GeneralTeam),
+            ("sprk_workassignment", "sprk_workassignment", workAssignment),
+            ("sprk_regardingworkassignment", "sprk_workassignment", workAssignment),
+            ("sprk_corerecordtype", "sprk_recordtype_ref", CatalogWorkAssignment));
+        _world.Set("sprk_decisionrecord", record, "sprk_corerecordid", workAssignment.ToString("D"));
+        _world.Set("sprk_decisionrecord", record, "sprk_regardingrecordid", workAssignment.ToString("D"));
+        _world.Set("sprk_decisionrecord", record, "sprk_steps", JsonSerializer.Serialize(new
+        {
+            reviewId = Guid.NewGuid().ToString("D"), resolvedSignalIds = Array.Empty<string>(), steps = Array.Empty<object>(),
+        }));
+
+        // Driven from the ROOT's pass: the work assignment did not change, so its own pass never runs.
+        var report = await Reconciler().ReconcileOrdinaryParentMoveAsync(
+            rootTable, rootId, SecureChildReconcileMode.Apply, maxWrites: 200, CancellationToken.None);
+
+        report.Status.Should().Be(SecureChildReconcileStatus.Completed, report.Detail);
+        _world.OwnerOf("sprk_event", EventId).Should().Be(DataversePrincipalRef.Team(TeamB),
+            "the work assignment belongs to its matter: its default-team child follows the matter to B");
+        _world.OwnerOf("sprk_decisionrecord", record).Should().Be(DataversePrincipalRef.Team(TeamB),
+            "a Decision Record whose core is the work assignment follows the matter too");
+        _world.OwnerOf("sprk_event", userEvent).Should().Be(DataversePrincipalRef.User(SecureChildShareWorld.SomeUser));
+        _world.OwnerWrites.Should().NotContain(w => w.Id == userEvent);
+        _world.OwnerWrites.Should().NotContain(w => w.Id == workAssignment, "the work assignment is a hop, never a row of the pass");
+        report.Changes.Should().ContainSingle(c => c.Id == userEvent).Which.Should().Match<SecureChildRowChange>(c =>
+            c.Outcome == SecureChildRowOutcome.Untouched && c.TargetTeamId == TeamB && c.Detail!.Contains("owned by a user"));
+    }
+
+    [Theory(DisplayName = "Owner decision 2026-10-29 must not fire: the matter's move never reaches the rows under a TEAM-owned work assignment (it keeps its own unit) or an UNFILED person-owned one")]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task ChildrenOfATeamOwnedOrUnfiledWorkAssignment_AreNotReachedByTheMattersMove(bool teamOwned)
+    {
+        MatterMovedToB();
+        var workAssignment = teamOwned
+            ? WorkAssignmentUnderTheMatter(TeamRef(GeneralTeam))
+            : WorkAssignmentUnderTheMatter(new EntityReference("systemuser", SecureChildShareWorld.SomeUser), filed: false);
+        Row("sprk_event", EventId, TeamRef(GeneralTeam), ("sprk_regardingworkassignment", "sprk_workassignment", workAssignment));
+
+        var report = await Reconciler().ReconcileOrdinaryParentMoveAsync(
+            Matter, MatterId, SecureChildReconcileMode.Apply, maxWrites: 200, CancellationToken.None);
+
+        report.Status.Should().Be(SecureChildReconcileStatus.Completed, report.Detail);
+        report.Tables.Where(t => t.Table == "sprk_event").Sum(t => t.Examined).Should().Be(0,
+            teamOwned ? "a team-owned work assignment keeps its own unit: its rows are not the matter's to move"
+                      : "a work assignment filed under nothing is not under the matter");
+        _world.OwnerOf("sprk_event", EventId).Should().Be(DataversePrincipalRef.Team(GeneralTeam));
+        _world.OwnerWrites.Should().BeEmpty();
+    }
+
+    /// <summary>An ordinary matter owned by <paramref name="team"/> (its business unit's default team).</summary>
+    private Guid OrdinaryMatterOwnedBy(Guid team)
+    {
+        var matter = Guid.NewGuid();
+        _world.Add(Matter, matter, ("owningteam", TeamRef(team)), ("sprk_issecure", false));
+        return matter;
+    }
+
+    /// <summary>A person-owned work assignment with the filing lookups given (none typed when no matter or project is named).</summary>
+    private Guid PersonOwnedWorkAssignment(params (string Column, string Target, Guid TargetId)[] filing)
+    {
+        var workAssignment = Guid.NewGuid();
+        Row("sprk_workassignment", workAssignment, new EntityReference("systemuser", SecureChildShareWorld.SomeUser), filing);
+        _world.Set("sprk_workassignment", workAssignment, "sprk_issecure", false);
+        return workAssignment;
+    }
+
+    [Fact(DisplayName = "Owner decision 2026-10-29 must not fire: a work assignment whose OWN matter is M2 (unit B) and that is also filed through an invoice of M1 — M1's pass leaves its default-team row in B (already correct, no write), never M1's unit")]
+    public async Task ARowUnderAWorkAssignmentOfAnotherMatter_ReachedThroughAnInvoiceOfTheMovedMatter_StaysWithItsOwnMatter()
+    {
+        // M1 (the walked root) is in the general unit; M2, the work assignment's own (typed) matter, is in B.
+        var m1 = OrdinaryMatterOwnedBy(GeneralTeam);
+        var m2 = OrdinaryMatterOwnedBy(TeamB);
+        var invoice = Guid.NewGuid();
+        Row("sprk_invoice", invoice, TeamRef(GeneralTeam), ("sprk_matter", Matter, m1));
+        var workAssignment = PersonOwnedWorkAssignment(
+            ("sprk_regardingmatter", Matter, m2), ("sprk_regardinginvoice", "sprk_invoice", invoice));
+        Row("sprk_event", EventId, TeamRef(TeamB), ("sprk_regardingworkassignment", "sprk_workassignment", workAssignment));
+
+        var report = await Reconciler().ReconcileOrdinaryParentMoveAsync(
+            Matter, m1, SecureChildReconcileMode.Apply, maxWrites: 200, CancellationToken.None);
+
+        report.Status.Should().Be(SecureChildReconcileStatus.Completed, report.Detail);
+        var events = report.Tables.Should().ContainSingle(t => t.Table == "sprk_event").Subject;
+        events.Examined.Should().Be(1, "the work assignment is reached through M1's invoice, so its row is decided");
+        events.AlreadyCorrect.Should().Be(1,
+            "the row asks its own question: the work assignment's own matter M2 is its primary, so B is already right");
+        _world.OwnerOf("sprk_event", EventId).Should().Be(DataversePrincipalRef.Team(TeamB),
+            $"never M1's unit ({GeneralTeam:D}): the walked root does not decide a hop's rows");
+        _world.OwnerWrites.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "Owner decision 2026-10-29 must not fire: a work assignment with no typed parent, filed through an invoice of M1 (general unit) and an event of M2 (moved to B) — M2's pass gives its rows the resolver's primary (the invoice's matter M1), never M2's unit")]
+    public async Task RowsUnderAWorkAssignmentFiledThroughTwoIntermediates_FollowTheResolversPrimary_NotTheWalkedRoot()
+    {
+        // The resolver's look-through names the invoice's matter before the event's (IntermediateFilingColumns: invoice, then
+        // event), both under the work assignment's matter column: M1 is its primary.
+        var m1 = OrdinaryMatterOwnedBy(GeneralTeam);
+        var m2 = OrdinaryMatterOwnedBy(TeamB);
+        var (invoice, intermediateEvent) = (Guid.NewGuid(), Guid.NewGuid());
+        Row("sprk_invoice", invoice, TeamRef(GeneralTeam), ("sprk_matter", Matter, m1));
+        Row("sprk_event", intermediateEvent, TeamRef(TeamB), ("sprk_regardingmatter", Matter, m2));
+        var workAssignment = PersonOwnedWorkAssignment(
+            ("sprk_regardinginvoice", "sprk_invoice", invoice), ("sprk_regardingevent", "sprk_event", intermediateEvent));
+        var (inA, inB) = (Guid.NewGuid(), Guid.NewGuid());
+        Row("sprk_todo", inA, TeamRef(GeneralTeam), ("sprk_regardingworkassignment", "sprk_workassignment", workAssignment));
+        Row("sprk_todo", inB, TeamRef(TeamB), ("sprk_regardingworkassignment", "sprk_workassignment", workAssignment));
+
+        var report = await Reconciler().ReconcileOrdinaryParentMoveAsync(
+            Matter, m2, SecureChildReconcileMode.Apply, maxWrites: 200, CancellationToken.None);
+
+        report.Status.Should().Be(SecureChildReconcileStatus.Completed, report.Detail);
+        report.Tables.Should().ContainSingle(t => t.Table == "sprk_todo").Which.Examined.Should().Be(2,
+            "the work assignment is reached through M2's event, so both its rows are decided");
+        _world.OwnerOf("sprk_todo", inA).Should().Be(DataversePrincipalRef.Team(GeneralTeam),
+            $"its primary is M1 (the invoice's matter): already right, never moved to M2's unit ({TeamB:D})");
+        _world.OwnerWrites.Should().NotContain(w => w.Id == inA);
+        _world.OwnerOf("sprk_todo", inB).Should().Be(DataversePrincipalRef.Team(GeneralTeam),
+            "a default-team row out of step with its primary follows the primary, not the walked root");
+        _world.OwnerWrites.Should().NotContain(w => w.Id == workAssignment, "the work assignment is a hop, never a row of the pass");
+    }
+
+    private static IEnumerable<object> ConditionValuesOf(FilterExpression filter) =>
+        filter.Conditions.SelectMany(c => c.Values).Concat(filter.Filters.SelectMany(ConditionValuesOf));
+
+    [Fact(DisplayName = "Owner decision 2026-10-29: the work-assignment hop reads only the root's own — a person-owned work assignment filed under an UNRELATED matter's invoice is never listed and that invoice never read; a team-owned one under the root is not listed either")]
+    public async Task TheWorkAssignmentHop_ReadsNoWorkAssignmentOrIntermediateOutsideTheRoot()
+    {
+        MatterMovedToB();
+        var someone = new EntityReference("systemuser", SecureChildShareWorld.SomeUser);
+        var related = WorkAssignmentUnderTheMatter(someone, throughAnInvoice: true);
+        Row("sprk_event", EventId, TeamRef(GeneralTeam), ("sprk_regardingworkassignment", "sprk_workassignment", related));
+        var teamOwned = WorkAssignmentUnderTheMatter(TeamRef(GeneralTeam), throughAnInvoice: true);
+
+        var unrelatedMatter = OrdinaryMatterOwnedBy(GeneralTeam);
+        var unrelatedInvoice = Guid.NewGuid();
+        Row("sprk_invoice", unrelatedInvoice, TeamRef(GeneralTeam), ("sprk_matter", Matter, unrelatedMatter));
+        var unrelated = PersonOwnedWorkAssignment(("sprk_regardinginvoice", "sprk_invoice", unrelatedInvoice));
+        var before = _world.Queries.Count;
+
+        var report = await Reconciler().ReconcileOrdinaryParentMoveAsync(
+            Matter, MatterId, SecureChildReconcileMode.Apply, maxWrites: 200, CancellationToken.None);
+
+        report.Status.Should().Be(SecureChildReconcileStatus.Completed, report.Detail);
+        _world.OwnerOf("sprk_event", EventId).Should().Be(DataversePrincipalRef.Team(TeamB),
+            "the root's own person-owned work assignment is still reached through its invoice");
+
+        var pass = _world.Queries.Skip(before).ToList();
+        pass.Where(q => q.EntityName == "sprk_invoice").SelectMany(q => ConditionValuesOf(q.Criteria))
+            .Should().NotContain(unrelatedInvoice, "an invoice outside the root is never read");
+        var hopQueries = pass.Where(q => q.EntityName == "sprk_workassignment").ToList();
+        hopQueries.Should().NotBeEmpty();
+        foreach (var query in hopQueries)
+        {
+            query.PageInfo = null; // replayed whole: every row the query names
+            _world.Answer(query).Entities.Select(e => e.Id).Should()
+                .NotContain(unrelated, "a work assignment filed under another matter's invoice is not the root's to list")
+                .And.NotContain(teamOwned, "a team-owned work assignment is left out by the query itself");
+        }
+    }
+
+    [Theory(DisplayName = "Owner decision 2026-10-29 must not fire: a person-owned work assignment linked to the root ONLY through its polymorphic pair (no typed or intermediate lookup) is not the root's — its default-team row is not examined and nothing is written")]
+    [InlineData(Matter)]
+    [InlineData(Project)]
+    public async Task APersonOwnedWorkAssignment_LinkedToTheRootOnlyByItsPair_IsNotVisited(string rootTable)
+    {
+        var rootId = RootMovedToB(rootTable);
+        var catalogRoot = Guid.NewGuid();
+        _world.Add("sprk_recordtype_ref", catalogRoot, ("sprk_recordlogicalname", rootTable));
+        var workAssignment = PersonOwnedWorkAssignment(("sprk_regardingrecordtype", "sprk_recordtype_ref", catalogRoot));
+        _world.Set("sprk_workassignment", workAssignment, "sprk_regardingrecordid", rootId.ToString("D"));
+        Row("sprk_event", EventId, TeamRef(GeneralTeam), ("sprk_regardingworkassignment", "sprk_workassignment", workAssignment));
+        var before = _world.Queries.Count;
+
+        var report = await Reconciler().ReconcileOrdinaryParentMoveAsync(
+            rootTable, rootId, SecureChildReconcileMode.Apply, maxWrites: 200, CancellationToken.None);
+
+        report.Status.Should().Be(SecureChildReconcileStatus.Completed, report.Detail);
+        report.Tables.Where(t => t.Table == "sprk_event").Sum(t => t.Examined).Should().Be(0,
+            "a pair alone files nothing: the work assignment is not a hop, so its row is not examined");
+        _world.OwnerOf("sprk_event", EventId).Should().Be(DataversePrincipalRef.Team(GeneralTeam));
+        _world.OwnerWrites.Should().BeEmpty();
+        foreach (var query in _world.Queries.Skip(before).Where(q => q.EntityName == "sprk_workassignment").ToList())
+        {
+            query.PageInfo = null; // replayed whole: every row the query names
+            _world.Answer(query).Entities.Select(e => e.Id).Should()
+                .NotContain(workAssignment, "the hop lists work assignments by their typed columns only, never by the pair");
+        }
+    }
+
+    [Fact(DisplayName = "Owner decision 2026-10-29: more than 200 level-1 invoices and events under the root — a person-owned work assignment filed through EACH of them (so through one in the last chunk of the hop's filing conditions) is found, and its default-team row moves")]
+    public async Task TheWorkAssignmentHop_ChunksTheLevelOneInvoicesAndEvents_AndFindsOneInTheLastChunk()
+    {
+        MatterMovedToB();
+        // 120 invoices + 130 events + the typed column = 251 filing conditions: two chunks of DescendantConditionsPerQuery (200).
+        // The order the walk reads the level-1 rows in is the data source's, so a work assignment is filed through EVERY
+        // intermediate: whichever lies in the last chunk, its row is the one a loop that stops after the first chunk misses.
+        // The intermediates are already owned by B (the pass writes nothing for them); only the work assignments' rows move.
+        var intermediates = new List<(string Table, string Column, Guid Id)>();
+        for (var i = 0; i < 120; i++)
+            intermediates.Add(("sprk_invoice", "sprk_regardinginvoice", Guid.NewGuid()));
+        for (var i = 0; i < 130; i++)
+            intermediates.Add(("sprk_event", "sprk_regardingevent", Guid.NewGuid()));
+        var todos = new List<Guid>();
+        foreach (var (table, column, id) in intermediates)
+        {
+            Row(table, id, TeamRef(TeamB), (table == "sprk_invoice" ? "sprk_matter" : "sprk_regardingmatter", Matter, MatterId));
+            var workAssignment = PersonOwnedWorkAssignment((column, table, id));
+            var todo = Guid.NewGuid();
+            todos.Add(todo);
+            Row("sprk_todo", todo, TeamRef(GeneralTeam), ("sprk_regardingworkassignment", "sprk_workassignment", workAssignment));
+        }
+
+        var report = await Reconciler().ReconcileOrdinaryParentMoveAsync(
+            Matter, MatterId, SecureChildReconcileMode.Apply, maxWrites: 2000, CancellationToken.None);
+
+        report.Status.Should().Be(SecureChildReconcileStatus.Completed, report.Detail);
+        todos.Where(t => _world.OwnerOf("sprk_todo", t) != DataversePrincipalRef.Team(TeamB)).Should().BeEmpty(
+            "every work assignment is found, including those filed through an intermediate past the first 200 filing conditions");
+        _world.OwnerWrites.Should().HaveCount(todos.Count);
     }
 }

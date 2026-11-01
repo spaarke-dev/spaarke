@@ -1,0 +1,97 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="189" project="ebilling-r1">
+  <metadata>
+    <title>Docs: retire "Procedure Library"; data-model docs for the Procedure and Stored File tables; file-store architecture note</title>
+    <phase>3 Procedures and files (WP3, EB-D-148) — wave W3-G</phase>
+    <gate>blocked until 079 (WP3 deploy to dev) is done</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Documentation only, but it creates new doc files (task-create Step 3.5.5: new files → STANDARD); no code.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Documentation from a deployed schema and a final model note, following the docs-data-model and docs-architecture skills.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>079</deps>
+    <tags>docs, data-model, architecture, dataverse</tags>
+    <estimated-effort>0.5-1 day</estimated-effort>
+  </metadata>
+
+  <prompt>Bring the docs in line with EB-D-148 once WP3 is on dev: remove "Procedure Library" wording (model section 3.4), document the new tables and columns in docs/data-model with the docs-data-model skill, and write one architecture note on the file store with the docs-architecture skill. Describe what is deployed and in code; where the model and the deployed schema differ, the schema wins and the difference is listed.</prompt>
+
+  <role>SPAARKE platform documentation author. Expert in Dataverse schema documentation. Follow the docs skills' templates.</role>
+
+  <goal>docs/data-model has current pages for sprk_procedure, sprk_procedureversion, sprk_procedureassignment and sprk_storedfile and updated pages for the changed tables; docs/architecture has a file-store note; no doc under docs/ or the project CLAUDE.md presents "Procedure Library" as current; both INDEX.md files list the new pages.</goal>
+
+  <context>
+    <background>Source of truth, in this order: the deployed dev schema and the schema scripts of 080, 088 and 115 (scripts/ebilling/, task notes), the code of 090, 092, 093, 094, 098, then projects/ebilling-r1/notes/procedure-and-file-model.md v5.9 (sections 3, 4, 5.1, 5.2, 9, 10, 12). "Procedure Library" in docs today (verified 2026-10-21): docs/data-model/sprk_ratecard.md:21, docs/data-model/sprk_ruleset.md:28 and :50; projects/ebilling-r1/CLAUDE.md:78, :109-111 (D-44 / D-55), :128 (D-67), :177 (dev containers). It also appears in 11 code and solution files under src/ (RuleSetService.cs, BillingRuleDraftJobHandler.cs, RateCardImportService.cs, RateCardImportEndpoints.cs, FinanceOptions.cs, FinanceOptionsValidator.cs, GraphModule.cs, RuleReview NewRuleSetModal.tsx, three SpaarkeMaster XML files); those belong to the tasks that change that code (092 and the 080/081 rewrites), not to this task.</background>
+    <relevant-files>
+      <file role="new">docs/data-model/sprk_procedure.md (sprk_procedure, sprk_procedureversion, sprk_procedureassignment; one page, like sprk_ratecard.md covers several tables)</file>
+      <file role="new">docs/data-model/sprk_storedfile.md</file>
+      <file role="modify">docs/data-model/sprk_ruleset.md (scope values Record 100000002 / Firm record 100000003, record lookups, sprk_procedure, retired sprk_sourcedocument; policy version sprk_procedureversion, published marker, sprk_publishstate)</file>
+      <file role="modify">docs/data-model/sprk_ratecard.md (sprk_procedureversion; line 21)</file>
+      <file role="modify">docs/data-model/sprk_billingexport.md (files are Stored Files, internal-only)</file>
+      <file role="modify">docs/data-model/sprk_invoice.md (status reason Superseded; the Submit Invoice source and (a′)) and docs/data-model/sprk_invoicesubmission.md</file>
+      <file role="modify">docs/data-model/sprk_matter-related-tables.md and docs/data-model/sprk_workassignment.md (sprk_billingfirm, sprk_billingresponsible on every FilingCores table: not access-conferring); the project table's page if one exists</file>
+      <file role="modify">docs/data-model/child-access-permission.md (the sprk_document submission marker next to the own Restricted narrowing it records); no sprk_document page exists, do not create one</file>
+      <file role="new">docs/architecture/EBILLING-FILE-STORE.md (name directional)</file>
+      <file role="modify">docs/data-model/INDEX.md and docs/architecture/INDEX.md</file>
+      <file role="modify">projects/ebilling-r1/CLAUDE.md (:78, :109-111, :128, :177)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="model 3.4">After this task no file under docs/ and no line of projects/ebilling-r1/CLAUDE.md presents "Procedure Library" as a current store or name. Historical decision text (decisions-log.md, notes/) is not edited; a superseded standing decision in the project CLAUDE.md keeps its date and id and is marked "superseded by EB-D-148" with the new rule in one line.</constraint>
+    <constraint source="docs-data-model skill">Every new table page has Purpose, Fields (display name, logical name, type, required, description), Relationships with cascade/delete behaviour, field security, the secure-child and ExternalMarker classification from model 5.2, and Last Updated. Values (option values, delete behaviours, depth) are copied from the deployed schema, not from the model.</constraint>
+    <constraint source="docs-architecture skill">The architecture note covers: one table, one service, one control (4.1); blob layout and protection (4.2); upload and download sequences (4.3); the copy rule (B); Submit Invoice all-or-nothing steps 1-6 as a sequence; the firm file route gate (9.3); export files (10); known limits. It cites code by file path, links the model note for rationale, and restates no decision log.</constraint>
+    <constraint source="scope">No code, schema or solution file is edited. Code mentions of "Procedure Library" are listed in task notes with the owning task, not changed.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/docs-data-model/SKILL.md</file>
+      <file>.claude/skills/docs-architecture/SKILL.md</file>
+      <file>projects/ebilling-r1/notes/procedure-and-file-model.md (sections 3, 4, 5, 9, 10, 12)</file>
+      <file>docs/data-model/sprk_ratecard.md (multi-table page to mirror)</file>
+      <file>docs/data-model/sprk_ruleset.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Read 079's deploy notes and the 080, 088, 115 schema scripts and notes; list each table and column as deployed.</step>
+    <step order="1">Grep docs/ and projects/ebilling-r1/CLAUDE.md for "Procedure Library"; fix each hit per the constraint. Grep src/ and list code hits in notes.</step>
+    <step order="2">Write sprk_procedure.md and sprk_storedfile.md; update the changed table pages; update docs/data-model/INDEX.md.</step>
+    <step order="3">Write the architecture note; update docs/architecture/INDEX.md.</step>
+    <step order="4">Notes in projects/ebilling-r1/notes/189-docs.md: model-vs-schema differences found, remaining code mentions with owners.</step>
+    <step order="5">Update TASK-INDEX.md: this task's status cell to `✅ [done]`.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the deployed schema differs from the model in a way that changes access (a delete behaviour, field security, a secure-child or ExternalMarker classification), STOP and report it to the owner instead of documenting either version.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>docs/data-model has no page for the four new tables; docs/architecture has no file-store page (grep "storedfile" docs/ finds none).</existing>
+    <extension>The changed tables extend their existing pages; the new tables get pages because no existing page covers them (the ratecard page shows one page may hold several related tables, which sprk_procedure.md follows).</extension>
+    <cost-of-doing-nothing>docs describe a SharePoint Embedded "Procedure Library" that no longer exists and omit the tables that hold invoice files and Procedure assignments, so the next schema or access change starts from wrong docs.</cost-of-doing-nothing>
+  </justification>
+
+  <outputs>
+    <output type="docs">docs/data-model/sprk_procedure.md; docs/data-model/sprk_storedfile.md; updated data-model pages and INDEX.md; docs/architecture/EBILLING-FILE-STORE.md and INDEX.md; projects/ebilling-r1/CLAUDE.md; projects/ebilling-r1/notes/189-docs.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">grep -rn "Procedure Library" docs/ returns no line presenting it as current; projects/ebilling-r1/CLAUDE.md has none except superseded-marked decision lines.</criterion>
+    <criterion testable="true">sprk_procedure.md and sprk_storedfile.md exist with the sections the constraint names; every option value and delete behaviour in them matches the deployed schema (spot-check list in notes).</criterion>
+    <criterion testable="true">sprk_ruleset.md, sprk_ratecard.md, sprk_billingexport.md sprk_invoice.md, sprk_invoicesubmission.md, sprk_matter-related-tables.md, sprk_workassignment.md and child-access-permission.md reflect the deployed columns of 080, 088 and 115.</criterion>
+    <criterion testable="true">The architecture note exists, covers each topic the constraint lists, and is linked from docs/architecture/INDEX.md; both new data-model pages are linked from docs/data-model/INDEX.md.</criterion>
+    <criterion testable="true">No file under src/, scripts/ or src/dataverse/ is changed (git diff --stat).</criterion>
+  </acceptance-criteria>
+
+  <notes>Runs after 079 so the docs describe deployed schema. The dev SPE containers (D-55) stay for the owner to remove (O-13); the project CLAUDE.md line 177 says so instead of listing them as current.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load the knowledge files first, then invoke docs-data-model and docs-architecture for their templates.</protocol>
+  </execution>
+</task>

@@ -1,0 +1,27 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0586",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0586","generator_id":"gen_eval_set.py@1 F-0586","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0586.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-04"},
+ "header":{"firm":"Hartwell and Ellison LLP","firm_invoice_number":"INV-2026-21952","invoice_date":"2025-08-03","billing_period_start":"2025-07-01","billing_period_end":"2025-07-31","firm_matter_reference":"12288-0019","po_number":"PO-4543098","fees_total":6817.5,"expenses_total":1650.76,"adjustments_total":0.0,"total_due":8468.26,"currency":"USD"},
+ "timekeepers":[{"name":"Gideon Kowalczyk","title":"Senior Associate","rate":435.0,"billed_as":"Kowalczyk, G."},{"name":"Hannah Santoro","title":"Associate","rate":370.0,"billed_as":"Santoro, H."},{"name":"Naomi Voss","title":"Of Counsel","rate":525.0,"billed_as":"Voss, N."},{"name":"Samuel Quillen","title":"Associate","rate":395.0,"billed_as":"Quillen, S."}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2025-07-28","timekeeper":"Kowalczyk, G.","timekeeper_name":"Gideon Kowalczyk","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":1.75,"rate":435.0,"amount":761.25,"narrative":"Review court docket and calendar of pending deadlines for the data incident","codes":["L190","A104"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2025-07-03","timekeeper":"Santoro, H.","timekeeper_name":"Hannah Santoro","timekeeper_title":"Associate","title":"Assoc","hours":0.5,"rate":370.0,"amount":185.0,"narrative":"Plan strategy for upcoming phase of the regulatory inquiry with team","codes":["L120","A101"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2025-07-29","timekeeper":"Santoro, H.","timekeeper_name":"Hannah Santoro","timekeeper_title":"Associate","title":"Assoc","hours":3.0,"rate":370.0,"amount":1110.0,"narrative":"Draft appellate brief in the vendor agreement","codes":["L520","A103"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2025-07-01","timekeeper":"Voss, N.","timekeeper_name":"Naomi Voss","timekeeper_title":"Of Counsel","title":"O/C","hours":2.75,"rate":525.0,"amount":1443.75,"narrative":"Attend and present oral argument in the employment claim","codes":["L530","A109"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2025-07-09","timekeeper":"Voss, N.","timekeeper_name":"Naomi Voss","timekeeper_title":"Of Counsel","title":"O/C","hours":2.25,"rate":525.0,"amount":1181.25,"narrative":"Revise appellate brief after cite check","codes":["L520","A104"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2025-07-16","timekeeper":"Voss, N.","timekeeper_name":"Naomi Voss","timekeeper_title":"Of Counsel","title":"O/C","hours":2.0,"rate":525.0,"amount":1050.0,"narrative":"Prepare for oral argument in the lease dispute","codes":["L530","A101"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2025-07-01","timekeeper":"Quillen, S.","timekeeper_name":"Samuel Quillen","timekeeper_title":"Associate","title":"Assoc","hours":1.75,"rate":395.0,"amount":691.25,"narrative":"Review court docket and calendar of pending deadlines for the lease dispute","codes":["L190","A104"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2025-07-03","timekeeper":"Quillen, S.","timekeeper_name":"Samuel Quillen","timekeeper_title":"Associate","title":"Assoc","hours":0.75,"rate":395.0,"amount":296.25,"narrative":"Draft appellate brief in the supply agreement","codes":["L520","A103"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"fee","date":"2025-07-23","timekeeper":"Quillen, S.","timekeeper_name":"Samuel Quillen","timekeeper_title":"Associate","title":"Assoc","hours":0.25,"rate":395.0,"amount":98.75,"narrative":"Prepare case assessment memorandum regarding the vendor agreement and recommended strategy","codes":["L120","A103"],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"expense","date":"2025-07-08","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":359.8,"amount":359.8,"narrative":"Airfare to Minneapolis for deposition","codes":["E110"],"page":1,"narrative_style":"clear"},
+  {"n":11,"line_type":"expense","date":"2025-07-21","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":1290.96,"amount":1290.96,"narrative":"Consulting expert fees","codes":["E119"],"page":1,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["729 Harbor Road","Atlanta","Tax ID 57-6007404"],"template":"T24","pages":2},
+ "rule_set_id":"RS-04",
+ "context":{"matter_open":"2024-07-23","matter_close":"2025-10-29","matter_budget":58873.0,"approved_timekeepers":["Gideon Kowalczyk","Mei Voss","Priya Hargrove","Katya Marchetti","Naomi Voss","Hannah Santoro","Samuel Quillen"],"invoice_received_date":"2025-08-10"},
+ "expected_findings":[],
+ "seeded_violations":0
+}

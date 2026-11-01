@@ -362,6 +362,51 @@ public static class ConsumerTypes
     /// </summary>
     public const string AssistantSuggest = "assistant-suggest";
 
+    // ── eBilling (ebilling-r1 task 041, D-52) ─────────────────────────────────────────────────────
+    // Linear AI Consumers invoked only through the IInvoiceAi facade (never chat/loop-projected).
+    // A constant joins All in the same change that seeds its Binding row. RoutingConsumerTypeHealthCheck reports an
+    // All entry with no Binding row as Degraded (forward-declared) and a Binding row with no All entry as
+    // Unhealthy (the admin-typo class), so the row must never be seeded on an environment whose BFF lacks the constant.
+
+    /// <summary>
+    /// <see cref="IInvoiceAi.ClassifyAsync"/> — Finance attachment classification (spec
+    /// <c>INVOICE-CLASSIFY@v1</c>, FR-46). Action <c>invoice-classify</c> + Binding seeded by ebilling-r1 task 042
+    /// (<c>infra/dataverse/actions/invoice-classify.action.json</c>, <c>sprk_playbookconsumer-rows.json</c>); this
+    /// constant is in <see cref="All"/> from the same change.
+    /// </summary>
+    public const string InvoiceClassify = "invoice-classify";
+
+    /// <summary>
+    /// <see cref="IInvoiceAi.CodeLinesAsync"/> — UTBMS line coding and observations (spec
+    /// <c>INVOICE-LINE-CODE@v1</c>, FR-22). Action <c>invoice-line-code</c> + Binding seeded by ebilling-r1 task 047
+    /// (<c>infra/dataverse/actions/invoice-line-code.action.json</c>, <c>sprk_playbookconsumer-rows.json</c>); this
+    /// constant is in <see cref="All"/> from the same change.
+    /// </summary>
+    public const string InvoiceLineCode = "invoice-line-code";
+
+    /// <summary>
+    /// <see cref="IInvoiceAi.MatchCodeSetAsync"/> — decides which pre-ranked code set a matter type or practice area maps to, or
+    /// that none fits (spec <c>INVOICE-CODESET-MATCH@v1</c>, FR-22, D-93). Action <c>invoice-codeset-match</c> + Binding mirrored by
+    /// ebilling-r1 task 054 (<c>infra/dataverse/actions/invoice-codeset-match.action.json</c>, <c>sprk_playbookconsumer-rows.json</c>;
+    /// live seeding in task 053's deploy order); this constant is in <see cref="All"/> from the same change.
+    /// </summary>
+    public const string InvoiceCodeSetMatch = "invoice-codeset-match";
+
+    /// <summary>
+    /// <see cref="IInvoiceAi.DraftRulesAsync"/> — billing-rule drafting from a guideline document (spec
+    /// <c>BILLING-RULE-DRAFT@v1</c>, FR-27). Action <c>billing-rule-draft</c> + Binding mirrored by ebilling-r1 task 075
+    /// (<c>infra/dataverse/actions/billing-rule-draft.action.json</c>, <c>sprk_playbookconsumer-rows.json</c>; live seeding in
+    /// task 053's deploy order); this constant is in <see cref="All"/> from the same change.
+    /// </summary>
+    public const string BillingRuleDraft = "billing-rule-draft";
+
+    /// <summary>
+    /// <see cref="IInvoiceAi.DraftFirmNoticeAsync"/> — firm-notice prose drafting (spec
+    /// <c>INVOICE-FIRM-NOTICE@v1</c>, FR-50). Binding + Action seeded by ebilling-r1 task 131, which also adds
+    /// this constant to <see cref="All"/>.
+    /// </summary>
+    public const string InvoiceFirmNotice = "invoice-firm-notice";
+
     /// <summary>
     /// Read-only list of all consumer-type constants. Intended for startup
     /// health-log diffing against Dataverse (chat-routing-redesign-r1 task
@@ -396,5 +441,9 @@ public static class ConsumerTypes
         CreateMatter,
         ComposeReviseDocument,
         AssistantSuggest,
+        InvoiceClassify,
+        InvoiceLineCode,
+        InvoiceCodeSetMatch,
+        BillingRuleDraft,
     };
 }

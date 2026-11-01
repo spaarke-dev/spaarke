@@ -1251,7 +1251,17 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
             HttpMethod.Get, url, ct, impersonateSystemUserId);
         request.Headers.TryAddWithoutValidation(
             "Prefer", "odata.include-annotations=\"OData.Community.Display.V1.FormattedValue\"");
-        var response = await _httpClient.SendAsync(request, ct);
+        // Headers first: the body of a 403 is read by TryReadErrorAsync, which tolerates one that cannot be read or decoded.
+        // Buffering it inside SendAsync would let a bad charset or a stream fault replace the 403 with another exception.
+        using var response = await _httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct);
+        if (response.StatusCode == System.Net.HttpStatusCode.Forbidden)
+        {
+            // Task 071 fix round 1: a 403 keeps Dataverse's code and message, so a caller can tell a missing table privilege
+            // from every other refusal (DataverseForbiddenException). Still an HttpRequestException with StatusCode 403.
+            var (code, message) = await TryReadErrorAsync(response, ct).ConfigureAwait(false);
+            throw new DataverseForbiddenException(code, message);
+        }
+
         response.EnsureSuccessStatusCode();
 
         var data = await response.Content.ReadFromJsonAsync<ODataCollectionResponse>(cancellationToken: ct);
@@ -1882,8 +1892,12 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
 
             return (StringOf(error, "code"), StringOf(error, "message"));
         }
-        catch (JsonException)
+        catch (Exception ex) when (ex is JsonException or HttpRequestException or IOException or InvalidOperationException
+                                       or NotSupportedException)
         {
+            // An undecodable body (a bad charset, a stream fault) or a non-JSON one leaves code and message null; the 403 still
+            // identifies the failure. The same tolerated set as DataverseWebApiClient.CreateFailureAsync. Both callers treat
+            // (null, null) as "not an answer about the principal / not a missing privilege", never as success.
             return (null, null);
         }
     }
@@ -2132,10 +2146,19 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
     }
 
     /// <inheritdoc />
+    public Task UpdateExistingRecordFieldsAsync(
+        string entityLogicalName,
+        Guid recordId,
+        Dictionary<string, object?> fields,
+        CancellationToken ct = default) =>
+        UpdateExistingRecordFieldsAsync(entityLogicalName, recordId, fields, impersonateSystemUserId: null, ct);
+
+    /// <inheritdoc />
     public async Task UpdateExistingRecordFieldsAsync(
         string entityLogicalName,
         Guid recordId,
         Dictionary<string, object?> fields,
+        Guid? impersonateSystemUserId,
         CancellationToken ct = default)
     {
         if (fields.Count == 0)
@@ -2147,10 +2170,13 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
         var entitySetName = await GetEntitySetNameAsync(entityLogicalName, ct);
 
         _logger.LogInformation(
-            "Updating EXISTING record fields (If-Match: *, no create): {Entity}({Id}), {FieldCount} fields",
-            entityLogicalName, recordId, fields.Count);
+            "Updating EXISTING record fields (If-Match: *, no create): {Entity}({Id}), {FieldCount} fields{Impersonation}",
+            entityLogicalName, recordId, fields.Count,
+            impersonateSystemUserId is { } imp && imp != Guid.Empty ? $" (impersonating {imp})" : string.Empty);
 
-        using var request = await CreateAuthenticatedRequestAsync(HttpMethod.Patch, $"{DataverseIdentifier.RequireTableName(entitySetName, nameof(entitySetName))}({recordId})", ct);
+        // An empty caller id is refused here, before the PATCH is sent (task 104); null = app-only.
+        using var request = await CreateAuthenticatedRequestAsync(
+            HttpMethod.Patch, $"{DataverseIdentifier.RequireTableName(entitySetName, nameof(entitySetName))}({recordId})", ct, impersonateSystemUserId);
 
         // "Prevent create in upsert": If-Match: * makes the PATCH apply only to a row that already exists.
         // Without it the Web API creates a row with this id (the behaviour UpdateRecordFieldsAsync keeps).

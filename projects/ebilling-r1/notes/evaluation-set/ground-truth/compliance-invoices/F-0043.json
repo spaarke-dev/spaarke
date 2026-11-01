@@ -1,0 +1,38 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0043",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0043","generator_id":"gen_eval_set.py@1 F-0043","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0043.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-01"},
+ "header":{"firm":"Pryce and Vance LLP","firm_invoice_number":"INV-2025-51392","invoice_date":"2025-10-02","billing_period_start":"2025-09-01","billing_period_end":"2025-09-30","firm_matter_reference":"14035-0036","po_number":null,"fees_total":10225.5,"expenses_total":5703.31,"adjustments_total":0.0,"total_due":15928.81,"currency":"USD"},
+ "timekeepers":[{"name":"Beatrix Delacroix","title":"Paralegal","rate":280.0,"billed_as":"BD"},{"name":"Clara Okafor","title":"Associate","rate":530.0,"billed_as":"CO"},{"name":"Cyrus Ramanathan","title":"Associate","rate":475.0,"billed_as":"CR"},{"name":"Helena Esposito","title":"Legal Assistant","rate":205.0,"billed_as":"HE"},{"name":"Victor Marchetti","title":"Paralegal","rate":280.0,"billed_as":"VM"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2025-09-04","timekeeper":"BD","timekeeper_name":"Beatrix Delacroix","timekeeper_title":"Paralegal","title":"Para","hours":0.8,"rate":280.0,"amount":224.0,"narrative":"Review draft expert disclosure for the vendor agreement","codes":["L420","A104"],"page":2,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2025-09-08","timekeeper":"VM","timekeeper_name":"Victor Marchetti","timekeeper_title":"Paralegal","title":"Para","hours":2.9,"rate":280.0,"amount":812.0,"narrative":"Invoice preparation and review of billing entries","codes":["L420","A111"],"page":2,"narrative_style":"clerical"},
+  {"n":3,"line_type":"fee","date":"2025-09-10","timekeeper":"CR","timekeeper_name":"Cyrus Ramanathan","timekeeper_title":"Associate","title":"Assoc","hours":1.1,"rate":475.0,"amount":522.5,"narrative":"Draft exhibit list for trial in the insurance coverage issue","codes":["L430","A103"],"page":2,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2025-09-15","timekeeper":"CR","timekeeper_name":"Cyrus Ramanathan","timekeeper_title":"Associate","title":"Assoc","hours":1.8,"rate":475.0,"amount":855.0,"narrative":"Revise interrogatory responses after review by lead counsel","codes":["L430","A104"],"page":2,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2025-09-16","timekeeper":"VM","timekeeper_name":"Victor Marchetti","timekeeper_title":"Paralegal","title":"Para","hours":2.3,"rate":280.0,"amount":644.0,"narrative":"Draft motion to compel for trial in the lease dispute","codes":["L430","A103"],"page":2,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2025-09-16","timekeeper":"BD","timekeeper_name":"Beatrix Delacroix","timekeeper_title":"Paralegal","title":"Para","hours":2.4,"rate":280.0,"amount":672.0,"narrative":"Revise exhibit list after review by lead counsel","codes":["L430","A104"],"page":2,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2025-09-18","timekeeper":"CO","timekeeper_name":"Clara Okafor","timekeeper_title":"Associate","title":"Assoc","hours":2.0,"rate":530.0,"amount":1060.0,"narrative":"Draft post-trial motion in the distribution agreement","codes":["L460","A103"],"page":2,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2025-09-19","timekeeper":"CO","timekeeper_name":"Clara Okafor","timekeeper_title":"Associate","title":"Assoc","hours":2.3,"rate":530.0,"amount":1219.0,"narrative":"Analyze exposure and damages model for the licensing dispute","codes":["L120","A104"],"page":2,"narrative_style":"clear"},
+  {"n":9,"line_type":"fee","date":"2025-09-22","timekeeper":"CR","timekeeper_name":"Cyrus Ramanathan","timekeeper_title":"Associate","title":"Assoc","hours":1.1,"rate":475.0,"amount":522.5,"narrative":"Draft post-trial motion in the insurance coverage issue","codes":["L460","A103"],"page":2,"narrative_style":"clear"},
+  {"n":10,"line_type":"fee","date":"2025-09-24","timekeeper":"CR","timekeeper_name":"Cyrus Ramanathan","timekeeper_title":"Associate","title":"Assoc","hours":2.0,"rate":475.0,"amount":950.0,"narrative":"Review draft expert disclosure for the employment claim","codes":["L420","A104"],"page":2,"narrative_style":"clear"},
+  {"n":11,"line_type":"fee","date":"2025-09-24","timekeeper":"CR","timekeeper_name":"Cyrus Ramanathan","timekeeper_title":"Associate","title":"Assoc","hours":2.0,"rate":475.0,"amount":950.0,"narrative":"Review draft expert disclosure for the employment claim","codes":["L420","A104"],"page":2,"narrative_style":"clear"},
+  {"n":12,"line_type":"fee","date":"2025-09-26","timekeeper":"CR","timekeeper_name":"Cyrus Ramanathan","timekeeper_title":"Associate","title":"Assoc","hours":1.7,"rate":475.0,"amount":807.5,"narrative":"Telephone conference with witness regarding the regulatory inquiry","codes":["L410","A106"],"page":2,"narrative_style":"clear"},
+  {"n":13,"line_type":"fee","date":"2025-09-30","timekeeper":"HE","timekeeper_name":"Helena Esposito","timekeeper_title":"Legal Assistant","title":"LA","hours":1.4,"rate":205.0,"amount":287.0,"narrative":"Attend hearing on motion to compel in the vendor agreement","codes":["L450","A109"],"page":2,"narrative_style":"clear"},
+  {"n":14,"line_type":"fee","date":"2025-09-30","timekeeper":"BD","timekeeper_name":"Beatrix Delacroix","timekeeper_title":"Paralegal","title":"Para","hours":2.5,"rate":280.0,"amount":700.0,"narrative":"Prepare trial notebook and demonstrative exhibits for the supply agreement","codes":["L440","A101"],"page":2,"narrative_style":"clear"},
+  {"n":15,"line_type":"expense","date":"2025-09-04","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":5652.63,"amount":5652.63,"narrative":"Consulting expert fees","codes":["E119"],"page":2,"narrative_style":"clear"},
+  {"n":16,"line_type":"expense","date":"2025-09-18","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":15.26,"amount":15.26,"narrative":"Long distance conference call charges","codes":["E105"],"page":2,"narrative_style":"clear"},
+  {"n":17,"line_type":"expense","date":"2025-09-19","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":2.0,"rate":5.31,"amount":10.62,"narrative":"Postage - certified mail","codes":["E108"],"page":2,"narrative_style":"clear"},
+  {"n":18,"line_type":"expense","date":"2025-09-24","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":40.0,"rate":0.62,"amount":24.8,"narrative":"Mileage to courthouse","codes":["E109"],"page":2,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["411 Commerce Avenue","Phoenix","Tax ID 64-9488453"],"template":"T21","pages":2},
+ "rule_set_id":"RS-01",
+ "context":{"matter_open":"2024-07-03","matter_close":"2025-12-29","matter_budget":88715.0,"approved_timekeepers":["Beatrix Delacroix","Cyrus Ramanathan","Peter Brennan","Helena Esposito","Victor Marchetti","Clara Okafor"],"invoice_received_date":"2025-10-13"},
+ "expected_findings":[
+  {"rule_id":"RS-01-R03","rule_type":"NonBillableActivity","scope":"line","line_refs":[2],"consequence":"Disallow"},
+  {"rule_id":"RS-01-R07","rule_type":"Duplicate","scope":"line","line_refs":[11],"consequence":"Disallow","related_line_refs":[10]},
+  {"rule_id":"RS-01-R08","rule_type":"RequiredData","scope":"invoice","line_refs":[],"consequence":"Reject"}
+ ],
+ "seeded_violations":3
+}

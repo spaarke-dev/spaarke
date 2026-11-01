@@ -31,7 +31,7 @@ internal enum RecordCreationRefusalKind
     /// <summary>The create collided with existing data (the autonumber's alternate key, every attempt). 409.</summary>
     Conflict,
 
-    /// <summary>Whether the create may stand could not be decided, and nothing is left. 500.</summary>
+    /// <summary>Whether the create may stand could not be decided (or a pre-write rule could not decide), and nothing is left. 500.</summary>
     Undecided,
 
     /// <summary>A check or the owner decision faulted before anything was written (fail closed, NFR-01). 503.</summary>
@@ -96,6 +96,19 @@ internal sealed record RecordCreationRefusal
     /// (500: the writer's defect, not the caller's input).
     /// </summary>
     internal const string ServerSetFilingLookupCode = "record_creation.server_set_filing_lookup";
+
+    /// <summary>
+    /// Task 017 (owner decision 2a, FR-06 step 10): the I-1 stamp of the new row cannot be derived from what it is filed
+    /// under, and a retry will not change that (its source names two roots, or no longer exists). Nothing written (400,
+    /// <see cref="RecordCreationRefusalKind.Invalid"/>).
+    /// </summary>
+    internal const string StampUnderivableCode = "record_creation.stamp_underivable";
+
+    /// <summary>
+    /// Task 017 (owner decision 2a, FR-06 step 10): the I-1 stamp of the new row could not be derived right now (a read
+    /// faulted). Nothing written (503, <see cref="RecordCreationRefusalKind.Unavailable"/>).
+    /// </summary>
+    internal const string StampUnavailableCode = "record_creation.stamp_unavailable";
 
     public RecordCreationRefusal(RecordCreationRefusalKind kind, string code, string detail)
     {

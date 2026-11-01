@@ -1,0 +1,27 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0522",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0522","generator_id":"gen_eval_set.py@1 F-0522","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0522.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-06"},
+ "header":{"firm":"Ravenscroft & Cranmer LLP","firm_invoice_number":"INV-2026-05755","invoice_date":"2025-05-01","billing_period_start":"2025-04-01","billing_period_end":"2025-04-30","firm_matter_reference":"68194-0039","po_number":"PO-4515724","fees_total":3878.5,"expenses_total":2067.52,"adjustments_total":0.0,"total_due":5946.02,"currency":"USD"},
+ "timekeepers":[{"name":"Gideon Dunleavy","title":"Partner","rate":400.0,"billed_as":"GD"},{"name":"Jordan Pemberton","title":"Associate","rate":230.0,"billed_as":"JP"},{"name":"Jordan Rosenthal","title":"Associate","rate":190.0,"billed_as":"JR"},{"name":"Louis Nakamura","title":"Partner","rate":365.0,"billed_as":"LN"},{"name":"Tomas Hargrove","title":"Paralegal","rate":105.0,"billed_as":"TH"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2025-04-01","timekeeper":"JP","timekeeper_name":"Jordan Pemberton","timekeeper_title":"Associate","title":"Assoc","hours":2.6,"rate":230.0,"amount":598.0,"narrative":"Review expert report served by Ironbridge Steel","codes":["L340","A104"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2025-04-07","timekeeper":"JR","timekeeper_name":"Jordan Rosenthal","timekeeper_title":"Associate","title":"Assoc","hours":2.9,"rate":190.0,"amount":551.0,"narrative":"Review court docket and calendar of pending deadlines for the supply agreement","codes":["L190","A104"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2025-04-07","timekeeper":"JR","timekeeper_name":"Jordan Rosenthal","timekeeper_title":"Associate","title":"Assoc","hours":0.4,"rate":190.0,"amount":76.0,"narrative":"Conference with client expert regarding rebuttal report","codes":["L340","A106"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2025-04-17","timekeeper":"GD","timekeeper_name":"Gideon Dunleavy","timekeeper_title":"Partner","title":"Ptr","hours":0.8,"rate":400.0,"amount":320.0,"narrative":"Analyze key documents for deposition preparation","codes":["L320","A104"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2025-04-18","timekeeper":"GD","timekeeper_name":"Gideon Dunleavy","timekeeper_title":"Partner","title":"Ptr","hours":2.7,"rate":400.0,"amount":1080.0,"narrative":"Review expert report served by Meridian Foods","codes":["L340","A104"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2025-04-18","timekeeper":"TH","timekeeper_name":"Tomas Hargrove","timekeeper_title":"Paralegal","title":"Para","hours":2.9,"rate":105.0,"amount":304.5,"narrative":"Update document review protocol and coding panel for the employment claim","codes":["L140","A110"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2025-04-18","timekeeper":"LN","timekeeper_name":"Louis Nakamura","timekeeper_title":"Partner","title":"Ptr","hours":2.6,"rate":365.0,"amount":949.0,"narrative":"Conference with client expert regarding rebuttal report","codes":["L340","A106"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"expense","date":"2025-04-11","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":1941.74,"amount":1941.74,"narrative":"Court reporter and transcript - deposition","codes":["E115"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"expense","date":"2025-04-22","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":361.0,"rate":0.11,"amount":39.71,"narrative":"Photocopies - 361 pages","codes":["E101"],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"expense","date":"2025-04-23","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":516.0,"rate":0.11,"amount":56.76,"narrative":"Photocopies - 516 pages","codes":["E101"],"page":1,"narrative_style":"clear"},
+  {"n":11,"line_type":"expense","date":"2025-04-28","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":3.0,"rate":9.77,"amount":29.31,"narrative":"Postage - certified mail","codes":["E108"],"page":1,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["599 Lakeshore Drive","Seattle","Tax ID 99-3158056"],"template":"T22","pages":2},
+ "rule_set_id":"RS-06",
+ "context":{"matter_open":"2024-04-29","matter_close":"2025-07-29","matter_budget":48784.0,"approved_timekeepers":["Samuel Voss","Tomas Hargrove","Gideon Dunleavy","Jordan Pemberton","Daniel Santoro","Louis Dunleavy","Louis Nakamura","Jordan Rosenthal"],"invoice_received_date":"2025-05-12"},
+ "expected_findings":[],
+ "seeded_violations":0
+}

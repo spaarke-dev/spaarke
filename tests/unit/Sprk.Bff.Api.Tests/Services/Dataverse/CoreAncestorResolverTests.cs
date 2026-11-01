@@ -220,8 +220,10 @@ public class CoreAncestorResolverTests
 
         tsRows.Should().OnlyHaveUniqueItems("a duplicated TypeScript row hides a missing one from a count check");
         tsRows.Should().HaveCount(csRows.Count);
-        tsRows.Should().BeEquivalentTo(csRows,
-            "the TypeScript stamp derivation must read exactly the server's intermediate table");
+        tsRows.Should().BeEquivalentTo(csRows, options => options.WithStrictOrdering(),
+            "the TypeScript stamp derivation must read exactly the server's intermediate table, in the same order "
+            + "(ebilling-r1 026 fix-round-1 item 6: each intermediate's root columns are read and reported in this order "
+            + "on both sides, so a reordering on one side is a drift too)");
     }
 
     /// <summary>
@@ -490,6 +492,238 @@ public class CoreAncestorResolverTests
         result.Stamps.Should().ContainSingle()
             .Which.Should().Be(new CoreAncestorStamp("sprk_matter", "sprk_regardingmatter", MatterId),
                 "the stamp lands on the CHILD's sprk_regardingmatter, whatever the intermediate's own column is called");
+    }
+
+    [Fact(DisplayName = "ebilling-r1 task 013: an invoice filed under a work assignment (sprk_regardingworkassignment) is an intermediate root column")]
+    public async Task InvoiceFiledUnderAWorkAssignment_DerivesTheWorkAssignment()
+    {
+        // Task 012 added sprk_invoice.sprk_regardingworkassignment (FR-05). Without it in the invoice's root columns a to-do
+        // filed under a work-assignment invoice carries no stamp (a silent FR-26 under-grant).
+        var waId = Guid.Parse("33333333-3333-3333-3333-333333333333");
+        var row = new Entity("sprk_invoice", CommId)
+        {
+            ["sprk_regardingworkassignment"] = new EntityReference("sprk_workassignment", waId),
+        };
+
+        CoreAncestorResolver.IntermediateRootColumns["sprk_invoice"].Should().BeEquivalentTo(
+            new[]
+            {
+                ("sprk_project", "sprk_project"), ("sprk_matter", "sprk_matter"),
+                ("sprk_regardingworkassignment", "sprk_workassignment"),
+            });
+
+        var result = await Build(EntityServiceReturning(row), Probe("sprk_project", "sprk_matter", "sprk_regardingworkassignment"))
+            .ResolveStampsAsync("sprk_invoice", CommId);
+
+        result.Status.Should().Be(CoreAncestorStatus.Derived);
+        result.Stamps.Should().ContainSingle()
+            .Which.Should().Be(new CoreAncestorStamp("sprk_workassignment", "sprk_regardingworkassignment", waId));
+    }
+
+    // ---------------------------------------------------------------------
+    // ebilling-r1 task 026 (FR-05, FR-15, D-75, D-94) — the Invoice Line is an intermediate with ONE root
+    // ---------------------------------------------------------------------
+
+    private static readonly Guid LineId = Guid.Parse("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb");
+
+    private static readonly string[] LineColumns =
+        ["sprk_project", "sprk_matter", "sprk_regardingworkassignment", "sprk_invoice", "sprk_resolvedtimekeeper"];
+
+    [Fact(DisplayName = "ebilling-r1 task 026 (D-94): the line's root columns are exactly the guard's core lookups, never sprk_invoice")]
+    public void InvoiceLine_RootColumns_AreItsOwnCoreLookups()
+    {
+        CoreAncestorResolver.IntermediateRootColumns["sprk_billingevent"].Should().BeEquivalentTo(
+            InvoiceFamilyCoreRecordGuard.CoreRecordLookups["sprk_billingevent"].Select(l => (l.Column, l.CoreEntity)),
+            "the stamp and the FR-05 guard read the same columns, so a line's Signal groups under the core record the guard accepted");
+        CoreAncestorResolver.IntermediateRootColumns["sprk_billingevent"].Select(c => c.Column)
+            .Should().NotContain(["sprk_invoice", "sprk_resolvedtimekeeper"]);
+        CoreAncestorResolver.SingleRootIntermediates.Should().BeEquivalentTo(["sprk_billingevent"]);
+        CoreAncestorResolver.IsChildRecordEntity("sprk_billingevent").Should().BeFalse("the access taxonomy is untouched");
+    }
+
+    [Theory(DisplayName = "ebilling-r1 task 026: a line derives the root its OWN lookup names (project, matter or work assignment)")]
+    [InlineData("sprk_project", "sprk_project", "sprk_regardingproject")]
+    [InlineData("sprk_matter", "sprk_matter", "sprk_regardingmatter")]
+    [InlineData("sprk_regardingworkassignment", "sprk_workassignment", "sprk_regardingworkassignment")]
+    public async Task InvoiceLine_DerivesItsOwnRoot(string column, string target, string stampColumn)
+    {
+        var rootId = Guid.NewGuid();
+        var row = new Entity("sprk_billingevent", LineId) { [column] = new EntityReference(target, rootId) };
+        var service = EntityServiceReturning(row);
+
+        var result = await Build(service, Probe(LineColumns)).ResolveStampsAsync("sprk_billingevent", LineId);
+
+        result.Status.Should().Be(CoreAncestorStatus.Derived);
+        result.Stamps.Should().ContainSingle().Which.Should().Be(new CoreAncestorStamp(target, stampColumn, rootId));
+        service.Verify(s => s.RetrieveAsync("sprk_billingevent", LineId,
+            It.Is<string[]>(c => !c.Contains("sprk_invoice") && !c.Contains("sprk_resolvedtimekeeper")),
+            It.IsAny<CancellationToken>()), Times.Once, "the line's invoice is never read for its root (D-75)");
+    }
+
+    [Fact(DisplayName = "ebilling-r1 task 026: a line whose only lookup is its invoice has NO ancestor (the invoice's matter is never borrowed)")]
+    public async Task InvoiceLine_WithOnlyItsInvoice_IsNoAncestor()
+    {
+        var row = new Entity("sprk_billingevent", LineId) { ["sprk_invoice"] = new EntityReference("sprk_invoice", CommId) };
+
+        var result = await Build(EntityServiceReturning(row), Probe(LineColumns)).ResolveStampsAsync("sprk_billingevent", LineId);
+
+        result.Status.Should().Be(CoreAncestorStatus.NoAncestor);
+        result.Stamps.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "ebilling-r1 task 026 (D-94 condition 3): a line naming a matter AND a project is a permanent derivation error, never two stamps")]
+    public async Task InvoiceLine_WithTwoRoots_IsRefused()
+    {
+        var row = new Entity("sprk_billingevent", LineId)
+        {
+            ["sprk_matter"] = new EntityReference("sprk_matter", MatterId),
+            ["sprk_project"] = new EntityReference("sprk_project", ProjectId),
+        };
+
+        var result = await Build(EntityServiceReturning(row), Probe(LineColumns)).ResolveStampsAsync("sprk_billingevent", LineId);
+
+        result.Status.Should().Be(CoreAncestorStatus.Error);
+        result.IsPermanent.Should().BeTrue("a two-root line is a data condition, not a fault to retry");
+        result.Stamps.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "ebilling-r1 task 026: the single-root rule is the line's only; an invoice naming a matter and a project still derives both")]
+    public async Task Invoice_WithTwoRoots_StillDerivesBoth()
+    {
+        var row = new Entity("sprk_invoice", CommId)
+        {
+            ["sprk_matter"] = new EntityReference("sprk_matter", MatterId),
+            ["sprk_project"] = new EntityReference("sprk_project", ProjectId),
+        };
+
+        var result = await Build(EntityServiceReturning(row), Probe("sprk_project", "sprk_matter", "sprk_regardingworkassignment"))
+            .ResolveStampsAsync("sprk_invoice", CommId);
+
+        result.Status.Should().Be(CoreAncestorStatus.Derived);
+        result.Stamps.Should().HaveCount(2);
+    }
+
+    [Fact(DisplayName = "ebilling-r1 task 026: a Signal / Decision Record filed under a line takes its stamp from sprk_regardinginvoiceline")]
+    public void InvoiceLine_IsAStampSourceOfTheOntologyRecords()
+    {
+        foreach (var host in new[] { "sprk_signal", "sprk_decisionrecord" })
+        {
+            CoreAncestorResolver.StampSourceColumns[host]
+                .Should().Contain(("sprk_regardinginvoiceline", "sprk_billingevent"), host);
+        }
+    }
+
+    // ── ebilling-r1 task 026 fix-round-1: the refusal kind (additive; every existing caller's result is unchanged) ──
+
+    private static Mock<IGenericEntityService> EntityServiceThrowing(Exception ex)
+    {
+        var mock = new Mock<IGenericEntityService>(MockBehavior.Loose);
+        mock.Setup(s => s.RetrieveAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(ex);
+        return mock;
+    }
+
+    private static Exception NotFoundFault() =>
+        new System.ServiceModel.FaultException<OrganizationServiceFault>(
+            new OrganizationServiceFault { ErrorCode = unchecked((int)0x80040217) }, "Does Not Exist");
+
+    [Fact(DisplayName = "ebilling-r1 task 026 fix-round-1: each refusal names its kind — MultipleRoots / NotFound permanent, Transient not")]
+    public async Task Refusals_CarryTheirKind_AndTheSamePermanenceAsBefore()
+    {
+        var lineTwoRoots = new Entity("sprk_billingevent", LineId)
+        {
+            ["sprk_matter"] = new EntityReference("sprk_matter", MatterId),
+            ["sprk_project"] = new EntityReference("sprk_project", ProjectId),
+        };
+        var documentTwoMatters = new Entity("sprk_document", CommId)
+        {
+            ["sprk_matter"] = new EntityReference("sprk_matter", MatterId),
+            ["sprk_relatedmatter"] = new EntityReference("sprk_matter", Guid.NewGuid()),
+        };
+
+        var cases = new (string Name, CoreAncestorResult Result, CoreAncestorRefusalKind Kind, bool Permanent)[]
+        {
+            ("line two roots", await Build(EntityServiceReturning(lineTwoRoots), Probe(LineColumns)).ResolveStampsAsync("sprk_billingevent", LineId),
+                CoreAncestorRefusalKind.MultipleRoots, true),
+            ("document two matters", await Build(EntityServiceReturning(documentTwoMatters), Probe("sprk_matter", "sprk_relatedmatter"))
+                .ResolveStampsAsync("sprk_document", CommId), CoreAncestorRefusalKind.MultipleRoots, true),
+            ("not found", await Build(EntityServiceThrowing(NotFoundFault()), Probe(CommunicationColumns)).ResolveStampsAsync("sprk_communication", CommId),
+                CoreAncestorRefusalKind.NotFound, true),
+            ("null row", await Build(EntityServiceReturning(null), Probe(CommunicationColumns)).ResolveStampsAsync("sprk_communication", CommId),
+                CoreAncestorRefusalKind.NotFound, true),
+            ("read fault", await Build(EntityServiceThrowing(new InvalidOperationException("Dataverse 503")), Probe(CommunicationColumns))
+                .ResolveStampsAsync("sprk_communication", CommId), CoreAncestorRefusalKind.Transient, false),
+            ("metadata fault", await Build(EntityServiceReturning(null), ThrowingProbe()).ResolveStampsAsync("sprk_communication", CommId),
+                CoreAncestorRefusalKind.Transient, false),
+            ("empty id", await Build(EntityServiceReturning(null), Probe(CommunicationColumns)).ResolveStampsAsync("sprk_communication", Guid.Empty),
+                CoreAncestorRefusalKind.Transient, false),
+        };
+
+        foreach (var (name, result, kind, permanent) in cases)
+        {
+            result.Status.Should().Be(CoreAncestorStatus.Error, name);
+            result.Stamps.Should().BeEmpty(name);
+            result.IsPermanent.Should().Be(permanent, name);
+            result.RefusalKind.Should().Be(kind, name);
+        }
+    }
+
+    [Theory(DisplayName = "ebilling-r1 task 026 fix-round-1: a successful derivation carries no refusal kind (core, intermediate, no-ancestor, unclassified)")]
+    [InlineData("sprk_matter", CoreAncestorStatus.CoreTarget)]
+    [InlineData("sprk_project", CoreAncestorStatus.CoreTarget)]
+    [InlineData("sprk_workassignment", CoreAncestorStatus.CoreTarget)]
+    [InlineData("sprk_communication", CoreAncestorStatus.Derived)]
+    [InlineData("sprk_todo", CoreAncestorStatus.NoAncestor)]
+    [InlineData("contact", CoreAncestorStatus.Unclassified)]
+    public async Task Successes_CarryNoRefusalKind(string target, CoreAncestorStatus status)
+    {
+        var row = new Entity(target, CommId);
+        if (status == CoreAncestorStatus.Derived) row["sprk_regardingmatter"] = new EntityReference("sprk_matter", MatterId);
+
+        var result = await Build(EntityServiceReturning(row), Probe(CommunicationColumns)).ResolveStampsAsync(target, CommId);
+
+        result.Status.Should().Be(status);
+        result.IsPermanent.Should().BeFalse();
+        result.RefusalKind.Should().BeNull();
+    }
+
+    [Fact(DisplayName = "ebilling-r1 task 026 fix-round-2 (uac-r2 K4): a permanent error with no kind is never labelled Transient")]
+    public void StampFailureOf_APermanentErrorWithNoKind_IsNeverTransient_ATransientOneIs_AKindIsKept()
+    {
+        // Built with the public constructor: no RefusalKind. Permanent means a retry does not change it.
+        var permanent = CoreAncestorResolver.StampFailureOf(
+            new CoreAncestorResult(CoreAncestorStatus.Error, [], "gone") { IsPermanent = true });
+        var transient = CoreAncestorResolver.StampFailureOf(new CoreAncestorResult(CoreAncestorStatus.Error, [], "timeout"));
+        var kinded = CoreAncestorResolver.StampFailureOf(CoreAncestorResult.Refused("two roots", CoreAncestorRefusalKind.MultipleRoots));
+
+        permanent.IsPermanent.Should().BeTrue();
+        permanent.RefusalKind.Should().BeNull("a permanent failure is not a transient fault; its kind is unknown");
+        permanent.Error.Should().Be("gone");
+        transient.IsPermanent.Should().BeFalse();
+        transient.RefusalKind.Should().Be(CoreAncestorRefusalKind.Transient);
+        kinded.RefusalKind.Should().Be(CoreAncestorRefusalKind.MultipleRoots);
+        kinded.IsPermanent.Should().BeTrue();
+    }
+
+    [Fact(DisplayName = "ebilling-r1 task 026 fix-round-1: StampAsync carries the refusal kind and permanence through to the writer")]
+    public async Task StampAsync_CarriesTheRefusalKind()
+    {
+        var lineTwoRoots = new Entity("sprk_billingevent", LineId)
+        {
+            ["sprk_matter"] = new EntityReference("sprk_matter", MatterId),
+            ["sprk_regardingworkassignment"] = new EntityReference("sprk_workassignment", Guid.NewGuid()),
+        };
+
+        var outcome = await Build(EntityServiceReturning(lineTwoRoots), Probe(LineColumns))
+            .StampAsync(new Entity("sprk_signal"), "sprk_billingevent", LineId, default);
+        var fault = await Build(EntityServiceThrowing(new InvalidOperationException("503")), Probe(LineColumns))
+            .StampAsync(new Entity("sprk_signal"), "sprk_billingevent", LineId, default);
+
+        outcome.Succeeded.Should().BeFalse();
+        outcome.IsPermanent.Should().BeTrue();
+        outcome.RefusalKind.Should().Be(CoreAncestorRefusalKind.MultipleRoots);
+        fault.IsPermanent.Should().BeFalse();
+        fault.RefusalKind.Should().Be(CoreAncestorRefusalKind.Transient);
     }
 
     [Theory(DisplayName = "Task 156: agreement and report card derive from their own sprk_regardingmatter / sprk_regardingproject (they were Unclassified)")]

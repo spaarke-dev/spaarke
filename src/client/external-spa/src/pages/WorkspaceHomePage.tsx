@@ -79,9 +79,11 @@ const useStyles = makeStyles({
 export interface WorkspaceHomePageProps {
   /** Whether the app is running inside the Teams host (workforce SSO) — threaded from App.tsx. */
   teamsHost?: boolean;
+  /** In-app navigation from the router (App.tsx) handed to the widget bodies, so a widget action never needs a router hook (task 051). */
+  onNavigate?: (path: string) => void;
 }
 
-export const WorkspaceHomePage: React.FC<WorkspaceHomePageProps> = ({ teamsHost = false }) => {
+export const WorkspaceHomePage: React.FC<WorkspaceHomePageProps> = ({ teamsHost = false, onNavigate }) => {
   const s = useStyles();
   // Destructure so callbacks depend on the STABLE hook functions (not the
   // per-render result object), keeping useCallback memoization effective.
@@ -194,11 +196,11 @@ export const WorkspaceHomePage: React.FC<WorkspaceHomePageProps> = ({ teamsHost 
             </div>
           }
         >
-          <Comp title={def.title} description={def.description} />
+          <Comp title={def.title} description={def.description} onNavigate={onNavigate} />
         </React.Suspense>
       );
     },
-    [s.widgetFallback]
+    [s.widgetFallback, onNavigate]
   );
 
   if (meAccessFailure) {

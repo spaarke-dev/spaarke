@@ -1,0 +1,47 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<savedqueries xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <savedquery>
+    <IsCustomizable>1</IsCustomizable>
+    <CanBeDeleted>0</CanBeDeleted>
+    <isquickfindquery>0</isquickfindquery>
+    <isprivate>0</isprivate>
+    <isdefault>1</isdefault>
+    <savedqueryid>{41ae0d21-c5c3-4945-af68-9e8cac702c29}</savedqueryid>
+    <layoutxml>
+      <grid name="resultset" jump="sprk_name" select="1" icon="1" preview="1">
+        <row name="result" id="sprk_externalidentifierid">
+          <cell name="sprk_name" width="220" />
+          <cell name="sprk_identifiertype" width="150" />
+          <cell name="sprk_identifiervalue" width="150" />
+          <cell name="sprk_issuingorganization" width="150" />
+          <cell name="sprk_regardinginvoice" width="150" />
+          <cell name="sprk_regardingmatter" width="150" />
+          <cell name="sprk_regardingproject" width="150" />
+        </row>
+      </grid>
+    </layoutxml>
+    <querytype>0</querytype>
+    <fetchxml>
+      <fetch version="1.0" mapping="logical">
+        <entity name="sprk_externalidentifier">
+          <attribute name="sprk_externalidentifierid" />
+          <attribute name="sprk_name" />
+          <attribute name="sprk_identifiertype" />
+          <attribute name="sprk_identifiervalue" />
+          <attribute name="sprk_issuingorganization" />
+          <attribute name="sprk_regardinginvoice" />
+          <attribute name="sprk_regardingmatter" />
+          <attribute name="sprk_regardingproject" />
+          <order attribute="sprk_name" descending="false" />
+          <filter type="and">
+            <condition attribute="statecode" operator="eq" value="0" />
+          </filter>
+        </entity>
+      </fetch>
+    </fetchxml>
+    <IntroducedVersion>1.0</IntroducedVersion>
+    <LocalizedNames>
+      <LocalizedName description="Active External Identifiers" languagecode="1033" />
+    </LocalizedNames>
+  </savedquery>
+</savedqueries>

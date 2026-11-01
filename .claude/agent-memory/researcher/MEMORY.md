@@ -105,6 +105,7 @@
 - [EXO app-only DC-write error (2026-10-04)](exo-apponly-dc-write-error-2026-10-04.md) — -Organization must be primary .onmicrosoft.com, not tenant GUID; Q&A accepted fixes; App-RBAC: apps not in role groups
 
 ## AI platform / models / competitors
+- [CU vs DocIntel for law-firm invoices + gpt-4o successor (2026-10-14)](content-understanding-vs-docintel-invoices-2026-10-14.md) — CU GA 2025-11-01 custom analyzer w/ per-subfield grounding; coding stays AOAI; gpt-4o/4.1 retire 2027-04-14; GPT-6 exists
 - [Copilot agent for B2B guests (2026-10-08)](m365-copilot-agent-guest-crosstenant-2026-10-08.md) — guests can't use agents in resource tenant → home-tenant install; OAuth+PKCE AnyTenant; publish delegated-only
 - [Foundry IQ + Work IQ state (2026-09-21)](foundry-iq-work-iq-state-2026-09-21.md) — Foundry IQ GA extractive-only; SPE source not ISV-viable; supersedes 07-14 Work IQ memo
 - [Fabric IQ vs Dataverse ontology (2026-09-21)](fabric-iq-vs-dataverse-ontology-2026-09-21.md) — ontology still preview, read-only over OneLake; complements, not replaces

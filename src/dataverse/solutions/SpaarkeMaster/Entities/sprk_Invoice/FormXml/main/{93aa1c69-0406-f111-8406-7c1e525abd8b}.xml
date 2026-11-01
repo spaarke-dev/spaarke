@@ -111,45 +111,134 @@
                         </labels>
                         <control id="sprk_totalamount" classid="{533B9E00-756B-4312-95A0-DC888637AC78}" datafieldname="sprk_totalamount" disabled="false" />
                       </cell>
-                      <cell id="{981398e4-1e74-4374-a119-2a8a1b8a1245}" locklevel="0" colspan="1" rowspan="1">
-                        <labels>
-                          <label description="Invoice Status" languagecode="1033" />
-                        </labels>
-                        <control id="sprk_invoicestatus" classid="{3EF39988-22BB-4F0B-BBBE-64B5A3748AEE}" datafieldname="sprk_invoicestatus" disabled="false" />
-                      </cell>
                     </row>
                   </rows>
                 </section>
-                <section name="overview_section_invoicelineitems" id="a128eaa7-a09a-47fe-8d23-67d42a5c8cb7" IsUserDefined="0" locklevel="0" showlabel="true" showbar="false" layout="varwidth" celllabelalignment="Left" celllabelposition="Left" columns="1" labelwidth="115">
+                <section name="section_ebilling" id="{881F8438-D747-9174-F6A6-5DE947BF7F93}" IsUserDefined="1" showlabel="true" showbar="false" columns="11" celllabelposition="Top" labelwidth="115" celllabelalignment="Left" layout="varwidth">
                   <labels>
-                    <label description="INVOICE LINE ITEMS" languagecode="1033" />
+                    <label description="eBilling" languagecode="1033" />
                   </labels>
                   <rows>
-                    <row />
                     <row>
-                      <cell locklevel="0" id="{1e2eee19-3b7b-4d3b-8fa6-9aefb6220f0f}" rowspan="4" colspan="1" auto="true" showlabel="false">
+                      <cell id="{125A966D-992E-3DB0-61F4-0CF38B76356F}">
                         <labels>
-                          <label description="Invoice Line Items Subgrid" languagecode="1033" />
+                          <label description="Matter" languagecode="1033" />
                         </labels>
-                        <control indicationOfSubgrid="true" id="Subgrid_invoicelineitmes" classid="{E7A81278-8635-4D9E-8D4D-59480B391C5B}">
-                          <parameters>
-                            <RecordsPerPage>5</RecordsPerPage>
-                            <AutoExpand>Auto</AutoExpand>
-                            <EnableQuickFind>false</EnableQuickFind>
-                            <EnableViewPicker>false</EnableViewPicker>
-                            <EnableChartPicker>false</EnableChartPicker>
-                            <ChartGridMode>Grid</ChartGridMode>
-                            <RelationshipName>sprk_Invoice_InvoiceLineItem_1n</RelationshipName>
-                            <TargetEntityType>sprk_invoicelineitem</TargetEntityType>
-                            <ViewId>{1C27EE1E-A4B3-4848-A824-B22B4DE869EC}</ViewId>
-                            <ViewIds>{1C27EE1E-A4B3-4848-A824-B22B4DE869EC}</ViewIds>
-                          </parameters>
-                        </control>
+                        <control id="sprk_matter" classid="{270BD3DB-D9AF-4782-9025-509E298DEC0A}" datafieldname="sprk_matter" />
+                      </cell>
+                      <cell id="{769B4776-958D-F8EB-7057-2C050C2E4CD3}">
+                        <labels>
+                          <label description="Project" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_project" classid="{270BD3DB-D9AF-4782-9025-509E298DEC0A}" datafieldname="sprk_project" />
                       </cell>
                     </row>
-                    <row />
-                    <row />
-                    <row />
+                    <row>
+                      <cell id="{E17B2D90-CCB7-516A-C440-2DD3B7421E83}">
+                        <labels>
+                          <label description="Regarding Work Assignment" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_regardingworkassignment" classid="{270BD3DB-D9AF-4782-9025-509E298DEC0A}" datafieldname="sprk_regardingworkassignment" />
+                      </cell>
+                      <cell id="{BFCFFC5E-CEF7-F774-BBE0-F1816ECBA2FB}">
+                        <labels>
+                          <label description="Supersedes Invoice" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_supersedesinvoice" classid="{270BD3DB-D9AF-4782-9025-509E298DEC0A}" datafieldname="sprk_supersedesinvoice" />
+                      </cell>
+                    </row>
+                    <row>
+                      <cell id="{FF7113FA-9D4B-795D-02F9-23A494CC02FC}">
+                        <labels>
+                          <label description="Billing Period Start" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_billingperiodstart" classid="{5B773807-9FB2-42DB-97C3-7A91EFF8ADFF}" datafieldname="sprk_billingperiodstart" />
+                      </cell>
+                      <cell id="{23549AE3-A39A-8F90-CDE7-ED2CDD4BED21}">
+                        <labels>
+                          <label description="Billing Period End" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_billingperiodend" classid="{5B773807-9FB2-42DB-97C3-7A91EFF8ADFF}" datafieldname="sprk_billingperiodend" />
+                      </cell>
+                    </row>
+                    <row>
+                      <cell id="{5960FADC-861D-9026-BC65-DF0F584CD368}">
+                        <labels>
+                          <label description="Invoice Due Date" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_invoiceduedate" classid="{5B773807-9FB2-42DB-97C3-7A91EFF8ADFF}" datafieldname="sprk_invoiceduedate" />
+                      </cell>
+                      <cell id="{656DC345-DA82-9D51-C9EA-B2E9EC9E5597}">
+                        <labels>
+                          <label description="Currency" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_currency" classid="{4273EDBD-AC1D-40D3-9FB2-095C621B552D}" datafieldname="sprk_currency" />
+                      </cell>
+                    </row>
+                    <row>
+                      <cell id="{1F8668B7-C67F-8088-D1B1-9690F68E3ACE}">
+                        <labels>
+                          <label description="Extraction Status" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_extractionstatus" classid="{3EF39988-22BB-4F0B-BBBE-64B5A3748AEE}" datafieldname="sprk_extractionstatus" />
+                      </cell>
+                      <cell id="{FCBA7CB6-8CD7-9E38-E510-99898E0BE6EC}">
+                        <labels>
+                          <label description="Confidence" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_confidence" classid="{C3EFE0C3-0EC6-42BE-8349-CBD9079DFD8E}" datafieldname="sprk_confidence" />
+                      </cell>
+                    </row>
+                    <row>
+                      <cell id="{360631D7-2EA2-8517-9109-FAC351F30C0C}">
+                        <labels>
+                          <label description="Billing Approver Role" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_billingapproverrole" classid="{4AA28AB7-9C13-4F57-A73D-AD894D048B5F}" datafieldname="sprk_billingapproverrole" />
+                      </cell>
+                      <cell id="{136E3E69-6D37-ED94-7E27-C2629234F5FC}">
+                        <labels>
+                          <label description="Export Batch" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_billingexport" classid="{270BD3DB-D9AF-4782-9025-509E298DEC0A}" datafieldname="sprk_billingexport" />
+                      </cell>
+                    </row>
+                    <row>
+                      <cell id="{0818E6A7-4E43-1F6F-5DB0-43E0644C5A23}">
+                        <labels>
+                          <label description="Fees Total" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_feestotal" classid="{533B9E00-756B-4312-95A0-DC888637AC78}" datafieldname="sprk_feestotal" disabled="true" />
+                      </cell>
+                      <cell id="{DF98821E-A13A-4BE9-C50D-8FAB04F3BC6A}">
+                        <labels>
+                          <label description="Expenses Total" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_expensestotal" classid="{533B9E00-756B-4312-95A0-DC888637AC78}" datafieldname="sprk_expensestotal" disabled="true" />
+                      </cell>
+                    </row>
+                    <row>
+                      <cell id="{683EF5BC-C07E-3600-4091-C78C4B95C4D3}">
+                        <labels>
+                          <label description="Line Adjustments Total" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_lineadjustmentstotal" classid="{533B9E00-756B-4312-95A0-DC888637AC78}" datafieldname="sprk_lineadjustmentstotal" disabled="true" />
+                      </cell>
+                      <cell id="{42FC3C29-AC7A-8EA0-F3DB-BA32BFD04148}">
+                        <labels>
+                          <label description="Invoice Adjustments Total" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_invoiceadjustmentstotal" classid="{533B9E00-756B-4312-95A0-DC888637AC78}" datafieldname="sprk_invoiceadjustmentstotal" disabled="true" />
+                      </cell>
+                    </row>
+                    <row>
+                      <cell id="{2309AED0-4A9B-CE1C-B811-5EB423BABC32}">
+                        <labels>
+                          <label description="Approved Total" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_approvedtotal" classid="{533B9E00-756B-4312-95A0-DC888637AC78}" datafieldname="sprk_approvedtotal" disabled="true" />
+                      </cell>
+                    </row>
                   </rows>
                 </section>
               </sections>
@@ -616,19 +705,9 @@
               <Title Text="Memos" LCID="1033" />
             </Titles>
           </NavBarByRelationshipItem>
-          <NavBarByRelationshipItem Area="Info" Show="false" RelationshipName="sprk_Invoice_InvoiceLineItem_1n" Id="nav_sprk_Invoice_InvoiceLineItem_1n" Sequence="10000">
-            <Titles>
-              <Title Text="Invoice Line Items" LCID="1033" />
-            </Titles>
-          </NavBarByRelationshipItem>
           <NavBarByRelationshipItem Area="Info" Show="false" RelationshipName="sprk_Invoice_Organization_1n" Id="nav_sprk_Invoice_Organization_1n" Sequence="10000">
             <Titles>
               <Title Text="Organizations" LCID="1033" />
-            </Titles>
-          </NavBarByRelationshipItem>
-          <NavBarByRelationshipItem Area="Info" Show="false" RelationshipName="sprk_Invoice_Timekeeper_1n" Id="nav_sprk_Invoice_Timekeeper_1n" Sequence="10000">
-            <Titles>
-              <Title Text="Timekeepers" LCID="1033" />
             </Titles>
           </NavBarByRelationshipItem>
           <NavBarByRelationshipItem Area="Info" Show="false" RelationshipName="sprk_Invoice_Contact_1n" Id="nav_sprk_Invoice_Contact_1n" Sequence="10000">
@@ -705,7 +784,7 @@
               <boundField type="SingleLine.Text">sprk_invoicenumber</boundField>
               <title type="SingleLine.Text" static="true">INVOICE INFORMATION</title>
               <showVersion type="TwoOptions" static="true">true</showVersion>
-              <layoutJson type="Multiple" static="true">{"_version":"1.0","title":"Invoice","columns":3,"summaryField":"sprk_recordsummary","fields":[{"name":"sprk_invoicenumber","span":1},{"name":"sprk_name","span":2,"required":true},{"name":"sprk_totalamount","span":1},{"name":"sprk_invoicedate","span":1},{"name":"sprk_invoicestatus","span":1},{"name":"sprk_highpriority","span":1},{"name":"sprk_description","span":3,"renderer":"textarea"}]}</layoutJson>
+              <layoutJson type="Multiple" static="true">{"_version":"1.0","title":"Invoice","columns":3,"summaryField":"sprk_recordsummary","fields":[{"name":"sprk_invoicenumber","span":1},{"name":"sprk_name","span":2,"required":true},{"name":"sprk_totalamount","span":1},{"name":"sprk_invoicedate","span":1},{"name":"sprk_highpriority","span":1},{"name":"sprk_description","span":3,"renderer":"textarea"}]}</layoutJson>
             </parameters>
           </customControl>
           <customControl formFactor="2" name="sprk_Spaarke.Records.RecordHeader">
@@ -713,7 +792,7 @@
               <boundField type="SingleLine.Text">sprk_invoicenumber</boundField>
               <title type="SingleLine.Text" static="true">INVOICE INFORMATION</title>
               <showVersion type="TwoOptions" static="true">true</showVersion>
-              <layoutJson type="Multiple" static="true">{"_version":"1.0","title":"Invoice","columns":3,"summaryField":"sprk_recordsummary","fields":[{"name":"sprk_invoicenumber","span":1},{"name":"sprk_name","span":2,"required":true},{"name":"sprk_totalamount","span":1},{"name":"sprk_invoicedate","span":1},{"name":"sprk_invoicestatus","span":1},{"name":"sprk_highpriority","span":1},{"name":"sprk_description","span":3,"renderer":"textarea"}]}</layoutJson>
+              <layoutJson type="Multiple" static="true">{"_version":"1.0","title":"Invoice","columns":3,"summaryField":"sprk_recordsummary","fields":[{"name":"sprk_invoicenumber","span":1},{"name":"sprk_name","span":2,"required":true},{"name":"sprk_totalamount","span":1},{"name":"sprk_invoicedate","span":1},{"name":"sprk_highpriority","span":1},{"name":"sprk_description","span":3,"renderer":"textarea"}]}</layoutJson>
             </parameters>
           </customControl>
           <customControl formFactor="1" name="sprk_Spaarke.Records.RecordHeader">
@@ -721,7 +800,7 @@
               <boundField type="SingleLine.Text">sprk_invoicenumber</boundField>
               <title type="SingleLine.Text" static="true">INVOICE INFORMATION</title>
               <showVersion type="TwoOptions" static="true">true</showVersion>
-              <layoutJson type="Multiple" static="true">{"_version":"1.0","title":"Invoice","columns":3,"summaryField":"sprk_recordsummary","fields":[{"name":"sprk_invoicenumber","span":1},{"name":"sprk_name","span":2,"required":true},{"name":"sprk_totalamount","span":1},{"name":"sprk_invoicedate","span":1},{"name":"sprk_invoicestatus","span":1},{"name":"sprk_highpriority","span":1},{"name":"sprk_description","span":3,"renderer":"textarea"}]}</layoutJson>
+              <layoutJson type="Multiple" static="true">{"_version":"1.0","title":"Invoice","columns":3,"summaryField":"sprk_recordsummary","fields":[{"name":"sprk_invoicenumber","span":1},{"name":"sprk_name","span":2,"required":true},{"name":"sprk_totalamount","span":1},{"name":"sprk_invoicedate","span":1},{"name":"sprk_highpriority","span":1},{"name":"sprk_description","span":3,"renderer":"textarea"}]}</layoutJson>
             </parameters>
           </customControl>
         </controlDescription>

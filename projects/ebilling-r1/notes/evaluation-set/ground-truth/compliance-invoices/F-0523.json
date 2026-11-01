@@ -1,0 +1,28 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0523",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0523","generator_id":"gen_eval_set.py@1 F-0523","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0523.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-01"},
+ "header":{"firm":"Northcott and Yardley LLP","firm_invoice_number":"A-81046/2026","invoice_date":"2025-07-04","billing_period_start":"2025-06-01","billing_period_end":"2025-06-30","firm_matter_reference":"37272-0029","po_number":"PO-4542635","fees_total":5893.0,"expenses_total":744.13,"adjustments_total":0.0,"total_due":6637.13,"currency":"USD"},
+ "timekeepers":[{"name":"Beatrix Castellanos","title":"Legal Assistant","rate":195.0,"billed_as":"BC"},{"name":"Emeka Wickham","title":"Associate","rate":445.0,"billed_as":"EW"},{"name":"Gregory Lindqvist","title":"Senior Associate","rate":560.0,"billed_as":"GL"},{"name":"Leila Nwosu","title":"Partner","rate":805.0,"billed_as":"LN"},{"name":"Samuel Delacroix","title":"Associate","rate":405.0,"billed_as":"SD"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2025-06-04","timekeeper":"SD","timekeeper_name":"Samuel Delacroix","timekeeper_title":"Associate","title":"Assoc","hours":0.9,"rate":405.0,"amount":364.5,"narrative":"Plan strategy for upcoming phase of the customs audit with team","codes":["L120","A101"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2025-06-11","timekeeper":"SD","timekeeper_name":"Samuel Delacroix","timekeeper_title":"Associate","title":"Assoc","hours":1.0,"rate":405.0,"amount":405.0,"narrative":"Draft exhibit list for trial in the construction contract","codes":["L430","A103"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2025-06-12","timekeeper":"BC","timekeeper_name":"Beatrix Castellanos","timekeeper_title":"Legal Assistant","title":"LA","hours":2.3,"rate":195.0,"amount":448.5,"narrative":"Revise pretrial brief after review by lead counsel","codes":["L430","A104"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2025-06-16","timekeeper":"BC","timekeeper_name":"Beatrix Castellanos","timekeeper_title":"Legal Assistant","title":"LA","hours":2.2,"rate":195.0,"amount":429.0,"narrative":"Attend trial day in the customs audit","codes":["L450","A109"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2025-06-16","timekeeper":"EW","timekeeper_name":"Emeka Wickham","timekeeper_title":"Associate","title":"Assoc","hours":2.3,"rate":445.0,"amount":1023.5,"narrative":"Attend hearing on motion for summary judgment in the customs audit","codes":["L450","A109"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2025-06-17","timekeeper":"GL","timekeeper_name":"Gregory Lindqvist","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":1.6,"rate":560.0,"amount":896.0,"narrative":"Revise reply brief after review by lead counsel","codes":["L430","A104"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2025-06-19","timekeeper":"GL","timekeeper_name":"Gregory Lindqvist","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":0.7,"rate":560.0,"amount":392.0,"narrative":"Review draft expert disclosure for the distribution agreement","codes":["L420","A104"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2025-06-26","timekeeper":"SD","timekeeper_name":"Samuel Delacroix","timekeeper_title":"Associate","title":"Assoc","hours":1.0,"rate":405.0,"amount":405.0,"narrative":"Prepare fact witness for testimony regarding the regulatory inquiry","codes":["L410","A101"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"fee","date":"2025-06-30","timekeeper":"LN","timekeeper_name":"Leila Nwosu","timekeeper_title":"Partner","title":"Ptr","hours":1.9,"rate":805.0,"amount":1529.5,"narrative":"Telephone conference with witness regarding the licensing dispute","codes":["L410","A106"],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"expense","date":"2025-06-02","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":47.0,"rate":0.67,"amount":31.49,"narrative":"Mileage to courthouse","codes":["E109"],"page":1,"narrative_style":"clear"},
+  {"n":11,"line_type":"expense","date":"2025-06-06","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":57.02,"amount":57.02,"narrative":"Working meal during deposition preparation","codes":["E111"],"page":1,"narrative_style":"clear"},
+  {"n":12,"line_type":"expense","date":"2025-06-27","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":655.62,"amount":655.62,"narrative":"Document hosting and processing vendor","codes":["E118"],"page":1,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["540 Harbor Road","Chicago","Tax ID 83-3249264"],"template":"T07","pages":1},
+ "rule_set_id":"RS-01",
+ "context":{"matter_open":"2024-08-09","matter_close":"2025-09-28","matter_budget":51548.0,"approved_timekeepers":["Samuel Delacroix","Gregory Lindqvist","Leila Nwosu","Beatrix Castellanos","Oliver Marchetti","Peter Fairweather","Emeka Wickham"],"invoice_received_date":"2025-07-08"},
+ "expected_findings":[],
+ "seeded_violations":0
+}

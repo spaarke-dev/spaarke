@@ -25,6 +25,7 @@ import { RecordDeepLink } from './components/detail/RecordDeepLink';
 import { WorkspaceHomePage } from './pages/WorkspaceHomePage';
 import { ProjectPage } from './pages/ProjectPage';
 import { DocumentUploadPage } from './pages/DocumentUploadPage';
+import { InvoiceSubmitPage, INVOICE_SUBMIT_PATH } from './pages/InvoiceSubmitPage';
 import { SettingsPage } from './pages/SettingsPage';
 import { TeamsHostProvider } from './components/auth/TeamsHostContext';
 import { WorkforceHomeGate, isHomeGateActive } from './components/auth/WorkforceHomeGate';
@@ -161,9 +162,10 @@ const AppShell: React.FC<{
               {/* Opens the record a `?record={type}:{id}` link names, once signed in (task 055, FR-07). */}
               <RecordDeepLink teamsHost={teamsHost} />
               <Routes>
-                <Route path="/" element={<WorkspaceHomePage teamsHost={teamsHost} />} />
+                <Route path="/" element={<WorkspaceHomePage teamsHost={teamsHost} onNavigate={navigate} />} />
                 <Route path="/project/:id" element={<ProjectPage />} />
                 <Route path="/upload" element={<DocumentUploadPage teamsHost={teamsHost} />} />
+                <Route path={INVOICE_SUBMIT_PATH} element={<InvoiceSubmitPage />} />
                 <Route
                   path="/settings"
                   element={<SettingsPage isDark={isDark} onToggleDark={onToggleDark} portalUser={portalUser} />}

@@ -4,7 +4,7 @@
     <title>GET /api/v1/records/{table}/{id}/family — own endpoint file, ledger + census, uniform 404 (FR-31)</title>
     <phase>7 W7 Record family service and Family tool</phase>
     <gate>071 complete</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>New BFF endpoint (auth required); route-authorization ledger; existence-equalised 404.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -30,7 +30,7 @@
       <file role="modify">tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.Ledger.cs (ledger entry with mechanism)</file>
       <file role="modify">the governed-file census test that lists endpoint files (re-grep "census")</file>
       <file role="modify">src/server/api/Sprk.Bff.Api/Program.cs or the module that maps the records group (one Map call)</file>
-      <file role="new">tests/unit/domain/Api/Records/RecordFamilyEndpointsTests.cs</file>
+      <file role="new">tests/integration/contract/Api/Records/RecordFamilyEndpointsContractTests.cs</file>
     </relevant-files>
   </context>
 
@@ -74,7 +74,7 @@
 
   <outputs>
     <output type="code">src/server/api/Sprk.Bff.Api/Api/Records/RecordFamilyEndpoints.cs</output>
-    <output type="test">tests/unit/domain/Api/Records/RecordFamilyEndpointsTests.cs</output>
+    <output type="test">tests/integration/contract/Api/Records/RecordFamilyEndpointsContractTests.cs</output>
   </outputs>
 
   <acceptance-criteria>
@@ -88,4 +88,10 @@
   </acceptance-criteria>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+  <notes>
+    Completed 2026-10-29. PR #2459 (task/fm-072 @ 8378b3ee1d, auto-merge). GET /api/v1/records/{table}/{id}/family in Api/Records/RecordFamilyEndpoints.cs. Gate order: query parse (400 before any probe) → caller → family-table gate → equalised Read probe (GetCallerRightsForAuthorizationGateAsync, #2137; uniform 404) → RecordFamilyReader. Ledger RouteLevelGate + HandlerDecision; census 133→134. Tests moved to the contract KEEP path (testing.md:45; the planned unit/domain path was wrong for an endpoint test).
+    recordType = the member table's display name from MetadataService's cached projection (new optional EntityMetadataDto.DisplayName; key versioned to v2), read 4 at a time under a 1.5 s budget; an abandoned read still warms the cache. root = the walk's top on full, omitted on down (no hint of a hidden ancestor; owner told).
+    Reviews: one Opus adversarial pass (no oracle/leak/contract mismatch; F2/F3/F4 fixed in round 2), one scoped Sonnet re-check (F3 fixed). Publish +6,766 bytes (37.98 MB) vs fresh master 7008180304; no vulnerable packages. Notes: notes/task-072-notes.md.
+    rework: fix-round-2 task 072
+  </notes>
 </task>

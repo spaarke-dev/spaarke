@@ -1,0 +1,25 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0447",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0447","generator_id":"gen_eval_set.py@1 F-0447","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0447.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-03"},
+ "header":{"firm":"Northcott & Dunmore LLP","firm_invoice_number":"INV-2026-63144","invoice_date":"2025-07-03","billing_period_start":"2025-06-01","billing_period_end":"2025-06-30","firm_matter_reference":"18385-0030","po_number":"PO-4512909","fees_total":3042.0,"expenses_total":59.07,"adjustments_total":0.0,"total_due":3101.07,"currency":"USD"},
+ "timekeepers":[{"name":"Anders Oyelaran","title":"Paralegal","rate":125.0,"billed_as":"A. Oyelaran"},{"name":"Gregory Ashdown","title":"Associate","rate":200.0,"billed_as":"G. Ashdown"},{"name":"Helena Voss","title":"Partner","rate":450.0,"billed_as":"H. Voss"},{"name":"Sofia Santoro","title":"Partner","rate":470.0,"billed_as":"S. Santoro"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2025-06-18","timekeeper":"A. Oyelaran","timekeeper_name":"Anders Oyelaran","timekeeper_title":"Paralegal","title":"Para","hours":2.5,"rate":125.0,"amount":312.5,"narrative":"Review opposing brief in response to motion to dismiss","codes":["L240","A104"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2025-06-20","timekeeper":"A. Oyelaran","timekeeper_name":"Anders Oyelaran","timekeeper_title":"Paralegal","title":"Para","hours":0.5,"rate":125.0,"amount":62.5,"narrative":"Attend deposition of Alder & Finch Ltd corporate representative","codes":["L330","A109"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2025-06-04","timekeeper":"G. Ashdown","timekeeper_name":"Gregory Ashdown","timekeeper_title":"Associate","title":"Assoc","hours":1.8,"rate":200.0,"amount":360.0,"narrative":"Draft notice of deposition regarding deficiencies in Harbor Point Capital responses","codes":["L350","A103"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2025-06-17","timekeeper":"G. Ashdown","timekeeper_name":"Gregory Ashdown","timekeeper_title":"Associate","title":"Assoc","hours":0.7,"rate":200.0,"amount":140.0,"narrative":"Prepare production set and cover correspondence for service on Larkspur Medical","codes":["L320","A110"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2025-06-02","timekeeper":"H. Voss","timekeeper_name":"Helena Voss","timekeeper_title":"Partner","title":"Ptr","hours":2.1,"rate":450.0,"amount":945.0,"narrative":"Draft witness list regarding deficiencies in Tidewater Retail responses","codes":["L350","A103"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2025-06-05","timekeeper":"S. Santoro","timekeeper_name":"Sofia Santoro","timekeeper_title":"Partner","title":"Ptr","hours":1.5,"rate":470.0,"amount":705.0,"narrative":"Conference with client expert regarding rebuttal report","codes":["L340","A106"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2025-06-24","timekeeper":"S. Santoro","timekeeper_name":"Sofia Santoro","timekeeper_title":"Partner","title":"Ptr","hours":1.1,"rate":470.0,"amount":517.0,"narrative":"Conference with client expert regarding rebuttal report","codes":["L340","A106"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"expense","date":"2025-06-25","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":411.0,"rate":0.09,"amount":36.99,"narrative":"Photocopies - 411 pages","codes":["E101"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"expense","date":"2025-06-26","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":32.0,"rate":0.69,"amount":22.08,"narrative":"Mileage to courthouse","codes":["E109"],"page":1,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["91 Congress Boulevard","Dallas","Tax ID 36-2113236"],"template":"T16","pages":2},
+ "rule_set_id":"RS-03",
+ "context":{"matter_open":"2024-02-19","matter_close":"2025-09-28","matter_budget":37404.0,"approved_timekeepers":["Anders Oyelaran","Gregory Ashdown","Beatrix Brennan","Helena Voss","Daniel Nwosu","Priya Voss","Sofia Santoro"],"invoice_received_date":"2025-07-08"},
+ "expected_findings":[],
+ "seeded_violations":0
+}

@@ -1,0 +1,31 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0026",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0026","generator_id":"gen_eval_set.py@1 F-0026","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0026.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-02"},
+ "header":{"firm":"Northcott and Whitcombe LLP","firm_invoice_number":"INV-2026-55954","invoice_date":"2025-06-02","billing_period_start":"2025-05-01","billing_period_end":"2025-05-31","firm_matter_reference":"91667-0008","po_number":"PO-4582478","fees_total":5229.5,"expenses_total":68.28,"adjustments_total":0.0,"total_due":5297.78,"currency":"USD"},
+ "timekeepers":[{"name":"Clara Lockhart","title":"Paralegal","rate":150.0,"billed_as":"Clara Lockhart"},{"name":"Dalia Kowalczyk","title":"Paralegal","rate":165.0,"billed_as":"Dalia Kowalczyk"},{"name":"Gideon Eriksen","title":"Associate","rate":345.0,"billed_as":"Gideon Eriksen"},{"name":"Ivan Esposito","title":"Partner","rate":510.0,"billed_as":"Ivan Esposito"},{"name":"Katya Yilmaz","title":"Associate","rate":250.0,"billed_as":"Katya Yilmaz"},{"name":"Mei Blackwood","title":"Associate","rate":280.0,"billed_as":"Mei Blackwood"},{"name":"Sofia Quillen","title":"Partner","rate":635.0,"billed_as":"Sofia Quillen"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2025-05-01","timekeeper":"Gideon Eriksen","timekeeper_name":"Gideon Eriksen","timekeeper_title":"Associate","title":"Assoc","hours":0.5,"rate":345.0,"amount":172.5,"narrative":"Research pleading standards applicable to the data incident","codes":["L210","A102"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"expense","date":"2025-05-01","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":38.17,"amount":38.17,"narrative":"Long distance conference call charges","codes":["E105"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"expense","date":"2025-05-05","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":30.11,"amount":30.11,"narrative":"Overnight courier to Larkspur Medical counsel","codes":["E107"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2025-05-06","timekeeper":"Clara Lockhart","timekeeper_name":"Clara Lockhart","timekeeper_title":"Paralegal","title":"Para","hours":1.8,"rate":150.0,"amount":270.0,"narrative":"Research standard for provisional remedies concerning the licensing dispute","codes":["L220","A102"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2025-05-09","timekeeper":"Mei Blackwood","timekeeper_name":"Mei Blackwood","timekeeper_title":"Associate","title":"Assoc","hours":2.0,"rate":280.0,"amount":560.0,"narrative":"Telephone conference with opposing counsel regarding settlement terms","codes":["L160","A107"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2025-05-09","timekeeper":"Mei Blackwood","timekeeper_name":"Mei Blackwood","timekeeper_title":"Associate","title":"Assoc","hours":2.0,"rate":280.0,"amount":560.0,"narrative":"Telephone conference with opposing counsel regarding settlement terms","codes":["L160","A107"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2025-05-13","timekeeper":"Gideon Eriksen","timekeeper_name":"Gideon Eriksen","timekeeper_title":"Associate","title":"Assoc","hours":2.8,"rate":345.0,"amount":966.0,"narrative":"Conference with client regarding settlement authority for the regulatory inquiry","codes":["L160","A106"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2025-05-15","timekeeper":"Gideon Eriksen","timekeeper_name":"Gideon Eriksen","timekeeper_title":"Associate","title":"Assoc","hours":0.3,"rate":345.0,"amount":103.5,"narrative":"Review court docket and calendar of pending deadlines for the distribution agreement","codes":["L190","A104"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"fee","date":"2025-05-26","timekeeper":"Mei Blackwood","timekeeper_name":"Mei Blackwood","timekeeper_title":"Associate","title":"Assoc","hours":0.3,"rate":280.0,"amount":84.0,"narrative":"Review and analyze client documents concerning the customs audit to identify key facts","codes":["L110","A104"],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"fee","date":"2025-05-26","timekeeper":"Ivan Esposito","timekeeper_name":"Ivan Esposito","timekeeper_title":"Partner","title":"Ptr","hours":2.1,"rate":510.0,"amount":1071.0,"narrative":"Conference with client regarding budget variance for the construction contract","codes":["L150","A106"],"page":1,"narrative_style":"clear"},
+  {"n":11,"line_type":"fee","date":"2025-05-26","timekeeper":"Sofia Quillen","timekeeper_name":"Sofia Quillen","timekeeper_title":"Partner","title":"Ptr","hours":1.7,"rate":635.0,"amount":1079.5,"narrative":"Prepare case assessment memorandum regarding the warranty claim and recommended strategy","codes":["L120","A103"],"page":1,"narrative_style":"clear"},
+  {"n":12,"line_type":"fee","date":"2025-05-27","timekeeper":"Dalia Kowalczyk","timekeeper_name":"Dalia Kowalczyk","timekeeper_title":"Paralegal","title":"Para","hours":2.2,"rate":165.0,"amount":363.0,"narrative":"Draft motion for preliminary injunction in the vendor agreement","codes":["L220","A103"],"page":1,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["41 Congress Boulevard","Seattle","Tax ID 15-4490041"],"template":"T18","pages":2},
+ "rule_set_id":"RS-02",
+ "context":{"matter_open":"2023-12-27","matter_close":"2025-08-29","matter_budget":46191.0,"approved_timekeepers":["Mei Blackwood","Katya Yilmaz","Dalia Kowalczyk","Beatrix Kowalczyk","Daniel Rosenthal","Gideon Eriksen","Ivan Esposito","Clara Lockhart"],"invoice_received_date":"2025-06-07"},
+ "expected_findings":[
+  {"rule_id":"RS-02-R01","rule_type":"ApprovedTimekeeper","scope":"line","line_refs":[11],"consequence":"Reject"},
+  {"rule_id":"RS-02-R07","rule_type":"Duplicate","scope":"line","line_refs":[6],"consequence":"Disallow","related_line_refs":[5]}
+ ],
+ "seeded_violations":2
+}

@@ -1,0 +1,29 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0287",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0287","generator_id":"gen_eval_set.py@1 F-0287","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0287.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-05"},
+ "header":{"firm":"Penhallow and Ellison LLP","firm_invoice_number":"INV-2026-43883","invoice_date":"2025-12-03","billing_period_start":"2025-11-01","billing_period_end":"2025-11-30","firm_matter_reference":"23709-0005","po_number":"PO-4578234","fees_total":3726.25,"expenses_total":46.42,"adjustments_total":0.0,"total_due":3772.67,"currency":"USD"},
+ "timekeepers":[{"name":"Aisha Eriksen","title":"Paralegal","rate":165.0,"billed_as":"AE"},{"name":"Helena Wickham","title":"Associate","rate":250.0,"billed_as":"HW"},{"name":"Mei Esposito","title":"Partner","rate":535.0,"billed_as":"ME"},{"name":"Priya Pemberton","title":"Associate","rate":240.0,"billed_as":"PP"},{"name":"Sofia Okafor","title":"Senior Associate","rate":365.0,"billed_as":"SO"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2025-11-04","timekeeper":"ME","timekeeper_name":"Mei Esposito","timekeeper_title":"Partner","title":"Ptr","hours":1.0,"rate":535.0,"amount":535.0,"narrative":"Draft protective order regarding deficiencies in Redstone Mining responses","codes":["L350","A103"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2025-11-04","timekeeper":"ME","timekeeper_name":"Mei Esposito","timekeeper_title":"Partner","title":"Ptr","hours":2.0,"rate":535.0,"amount":1070.0,"narrative":"Research case law supporting witness list","codes":["L240","A102"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2025-11-10","timekeeper":"PP","timekeeper_name":"Priya Pemberton","timekeeper_title":"Associate","title":"Assoc","hours":1.35,"rate":240.0,"amount":324.0,"narrative":"Research authority for settlement proposal","codes":["L250","A102"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2025-11-13","timekeeper":"HW","timekeeper_name":"Helena Wickham","timekeeper_title":"Associate","title":"Assoc","hours":0.3,"rate":250.0,"amount":75.0,"narrative":"Update document review protocol and coding panel for the customs audit","codes":["L140","A110"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2025-11-13","timekeeper":"AE","timekeeper_name":"Aisha Eriksen","timekeeper_title":"Paralegal","title":"Para","hours":1.9,"rate":165.0,"amount":313.5,"narrative":"Analyze exposure and damages model for the licensing dispute","codes":["L120","A104"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2025-11-14","timekeeper":"AE","timekeeper_name":"Aisha Eriksen","timekeeper_title":"Paralegal","title":"Para","hours":1.9,"rate":165.0,"amount":313.5,"narrative":"Review court docket and calendar of pending deadlines for the construction contract","codes":["L190","A104"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2025-11-17","timekeeper":"SO","timekeeper_name":"Sofia Okafor","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":0.45,"rate":365.0,"amount":164.25,"narrative":"Analyze exposure and damages model for the insurance coverage issue","codes":["L120","A104"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2025-11-18","timekeeper":"SO","timekeeper_name":"Sofia Okafor","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":1.9,"rate":490.0,"amount":931.0,"narrative":"Research authority for mediation statement","codes":["L250","A102"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"expense","date":"2025-11-06","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":2.0,"rate":23.21,"amount":46.42,"narrative":"Overnight courier to Quarry Lane Partners counsel","codes":["E107"],"page":1,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["872 Pine Street","Houston","Tax ID 91-8474888"],"template":"T08","pages":1},
+ "rule_set_id":"RS-05",
+ "context":{"matter_open":"2024-10-14","matter_close":"2026-02-28","matter_budget":40090.0,"approved_timekeepers":["Aisha Eriksen","Nadia Tavares","Helena Wickham","Katya Lindqvist","Priya Pemberton","Sofia Okafor","Naomi Abernathy","Mei Esposito"],"invoice_received_date":"2025-12-10"},
+ "expected_findings":[
+  {"rule_id":"RS-05-R01","rule_type":"ApprovedRate","scope":"line","line_refs":[8],"consequence":"Reduce"},
+  {"rule_id":"RS-05-R02","rule_type":"TimeIncrement","scope":"line","line_refs":[3],"consequence":"Reduce"},
+  {"rule_id":"RS-05-R02","rule_type":"TimeIncrement","scope":"line","line_refs":[7],"consequence":"Reduce"}
+ ],
+ "seeded_violations":3
+}

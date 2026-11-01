@@ -21,6 +21,7 @@ import type { EntitySearchResult, EntityType } from '../../hooks/useEntitySearch
 import { useAnnounce } from '../../hooks/useAnnounce';
 import { RelatedToPicker } from '../RelatedToPicker';
 import { searchOfficeEntities } from '../../services/officeEntitySearch';
+import { fetchRelatedCandidates, type RelatedCandidate } from '../../services/communicationSuggestionsService';
 import {
   INVOICE_CORE_RECORD_TYPES,
   buildInvoiceSubmissionInput,
@@ -71,6 +72,11 @@ import {
  * The attachment marking is ebilling's shared `InvoiceAttachmentMarking` (`value` always holds every listed id, seeded
  * from `defaultInvoiceMarking`; `validateInvoiceMarking` always gets the attachments).
  *
+ * The core record starts as the record the email is already filed to ({@link InvoiceViewProps.filedRecord}, the Save
+ * tab's "Filed to"): the server files the email under the chosen record, and refuses a record other than the one it is
+ * filed under (contract §6 `document_core_record_mismatch`), so the view names the filed record when the user picks
+ * another. An email that is not filed gets the Save picker's suggested-record cards (`fetchRelatedCandidates`).
+ *
  * Search reuses the Save picker's component (`RelatedToPicker`) and search (`searchOfficeEntities`); the attachment
  * list comes from the host adapter as Save's does, and the content is captured at submit by A1 (no second capture).
  * Fluent UI v9 + Griffel + semantic tokens only (ADR-021).
@@ -94,6 +100,16 @@ export interface InvoiceViewProps {
    * true, so the user cannot walk away from a running submission or its tracking number.
    */
   onBusyChange?: (busy: boolean) => void;
+  /**
+   * The Matter, Project or Work Assignment the open email is already filed to ({@link invoiceFiledRecord} of the pane's
+   * email identity). Seeds the core record until the user picks one. Null or absent: not filed, not known yet, or filed
+   * to another kind of record.
+   */
+  filedRecord?: EntitySearchResult | null;
+}
+
+function sameRecordId(a: string, b: string): boolean {
+  return a.replace(/[{}]/g, '').toLowerCase() === b.replace(/[{}]/g, '').toLowerCase();
 }
 
 /** The hint when Outlook cannot submit this invoice (permanent failure, or a retry that keeps failing). */
@@ -180,6 +196,7 @@ export const InvoiceView: React.FC<InvoiceViewProps> = ({
   loadFirms,
   correctionAvailable = false,
   onBusyChange,
+  filedRecord = null,
 }) => {
   const styles = useStyles();
   const { announce, liveRegion } = useAnnounce();
@@ -209,6 +226,49 @@ export const InvoiceView: React.FC<InvoiceViewProps> = ({
   const abortRef = useRef<AbortController | null>(null);
   const onBusyChangeRef = useRef(onBusyChange);
   onBusyChangeRef.current = onBusyChange;
+  /** Set once the user picks or clears the core record: the filed record no longer replaces their choice. */
+  const userPickedRef = useRef(false);
+  const [candidates, setCandidates] = useState<RelatedCandidate[]>(NO_CANDIDATES);
+  const [candidatesLoading, setCandidatesLoading] = useState(false);
+
+  const chooseCoreRecord = useCallback((record: EntitySearchResult | null) => {
+    userPickedRef.current = true;
+    setCoreRecord(record);
+  }, []);
+
+  // The email's filing can be known after the view opens (the pane's lookup runs once signed in): seed it then.
+  useEffect(() => {
+    if (filedRecord && !userPickedRef.current) setCoreRecord(prev => prev ?? filedRecord);
+  }, [filedRecord]);
+
+  // The Save picker's suggested records for this email, as cards (best-effort: none on any failure; the user
+  // searches). Capability-gated (NFR-10), keyed by the RFC Message-ID like Save's (task 121).
+  useEffect(() => {
+    const capabilities = hostAdapter.getCapabilities();
+    if (
+      !capabilities.canSuggestRelatedRecords ||
+      !capabilities.canResolveEmailIdentity ||
+      !hostAdapter.getEmailIdentityKeys
+    ) {
+      return;
+    }
+    let active = true;
+    setCandidatesLoading(true);
+    void (async () => {
+      try {
+        const keys = await hostAdapter.getEmailIdentityKeys?.();
+        const found = keys?.internetMessageId ? await fetchRelatedCandidates(keys.internetMessageId) : [];
+        if (active) setCandidates(found.filter(c => isCoreRecordType(c.entityType)));
+      } catch (err) {
+        console.warn('[InvoiceView] No suggested records; the user searches.', err);
+      } finally {
+        if (active) setCandidatesLoading(false);
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  }, [hostAdapter]);
 
   // Leaving the view (unmount) stops a running submission's status polling.
   useEffect(
@@ -414,7 +474,8 @@ export const InvoiceView: React.FC<InvoiceViewProps> = ({
       lastAttemptRef.current = null;
       setMode('new');
       setCorrectionChosen(false);
-      setCoreRecord(null);
+      userPickedRef.current = false;
+      setCoreRecord(filedRecord);
       setInvoice(null);
       setFirmId('');
       setFirmInvoiceNumber('');
@@ -605,13 +666,21 @@ export const InvoiceView: React.FC<InvoiceViewProps> = ({
         <RelatedToPicker
           key={formKey}
           value={coreRecord}
-          onChange={setCoreRecord}
-          candidates={NO_CANDIDATES}
+          onChange={chooseCoreRecord}
+          candidates={candidates}
+          candidatesLoading={candidatesLoading}
           onSearch={searchCoreRecords}
           allowedTypes={INVOICE_CORE_RECORD_TYPES}
-          defaultType="Matter"
+          defaultType={filedRecord && isCoreRecordType(filedRecord.entityType) ? filedRecord.entityType : 'Matter'}
           disabled={locked}
         />
+        {filedRecord && coreRecord && (
+          <Text size={200} className={styles.note} data-testid="invoice-filed-record-note">
+            {sameRecordId(coreRecord.id, filedRecord.id)
+              ? 'This email is filed to this record in Spaarke.'
+              : `This email is filed to ${filedRecord.displayInfo ? `${filedRecord.displayInfo} ` : ''}${filedRecord.name} in Spaarke, so its invoice can only be submitted to that record.`}
+          </Text>
+        )}
       </div>
 
       {renderFirmField()}

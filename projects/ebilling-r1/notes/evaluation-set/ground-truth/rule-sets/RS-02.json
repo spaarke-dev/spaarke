@@ -1,0 +1,19 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"rule-set",
+ "id":"RS-02",
+ "set":"F",
+ "meta":{"title":"University-style guideline","generator_id":"gen_eval_set.py@1","licence":"Synthetic - authored for this evaluation set","licence_status":"synthetic","pii_note":"No personal data.","pii_scan":null,"storage":{"location":"committed","path":"ground-truth/rule-sets/RS-02.json"},"spike":false,"label_method":"generator"},
+ "modelled_on":["E-OCG-10","E-OCG-16"],
+ "rules":[
+  {"rule_id":"RS-02-R01","rule_type":"ApprovedTimekeeper","params":{"approved_names":"context.approved_timekeepers"},"consequence":"Reject","expressible":true},
+  {"rule_id":"RS-02-R02","rule_type":"ApprovedRate","params":{"rates":{"Partner":650,"Of Counsel":575,"Senior Associate":450,"Associate":350,"Paralegal":185,"Legal Assistant":150}},"consequence":"Reduce","expressible":true},
+  {"rule_id":"RS-02-R03","rule_type":"TimeIncrement","params":{"increment_hours":0.1},"consequence":"Reduce","expressible":true},
+  {"rule_id":"RS-02-R04","rule_type":"DailyHoursCap","params":{"max_hours_per_timekeeper_per_day":10},"consequence":"Reduce","expressible":true},
+  {"rule_id":"RS-02-R05","rule_type":"RequiredData","params":{"codes_required":true},"consequence":"Reject","expressible":true},
+  {"rule_id":"RS-02-R06","rule_type":"CoreRecordWindow","params":{"require_within_matter_dates":true,"budget_cap":true},"consequence":"Flag","expressible":true},
+  {"rule_id":"RS-02-R07","rule_type":"Duplicate","params":{"match_on":["timekeeper","date","hours","narrative"]},"consequence":"Disallow","expressible":true},
+  {"rule_id":"RS-02-R08","rule_type":"InvoiceAge","params":{"max_days_after_period_end":30,"max_days_work_age":90},"consequence":"Flag","expressible":true}
+ ],
+ "unmapped_provisions":[]
+}

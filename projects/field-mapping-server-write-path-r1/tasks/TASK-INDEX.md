@@ -25,7 +25,7 @@
 | 014 | [Mapping step + merged-payload authorization](014-mapping-step-and-merged-payload-authz.poml) | FR-06, FR-08 | opus / xhigh | FULL | none | 002, 003, 013 | ✅ |
 | 015 | [Record-first owner + search-index default](015-record-first-owner-and-search-index.poml) | FR-09, FR-10 | opus / high | FULL | none | 014 | ✅ |
 | 016 | [Repair mode](016-repair-mode.poml) | FR-14 | opus / high | FULL | none | 015 | ✅ |
-| 017 | [Re-point route, chat and decision callers](017-repoint-route-chat-decision-callers.poml) | FR-13 | opus / high | FULL | none | 016 | 🔲 |
+| 017 | [Re-point route, chat and decision callers](017-repoint-route-chat-decision-callers.poml) | FR-13 | opus / high | FULL | none | 016 | 🔄 |
 | 018 | [Office quick-create adapter; delete Office service](018-office-quick-create-adapter.poml) | FR-13, FR-12 | opus / high | FULL | none | 016 | ✅ |
 | 019 | [W2 deploy, live checks, adversarial review](019-w2-deploy-and-adversarial-review.poml) | NFR-01, NFR-05 | sonnet / high | FULL | none | 017, 018 | 🔲 |
 
@@ -82,10 +82,10 @@
 | ID | Task | FRs | Tier / effort | Rigor | Group | Deps | Status |
 |---|---|---|---|---|---|---|---|
 | 070 | [RecordFamilyEdges registry + guards](070-record-family-edge-registry.poml) | FR-29 | opus / high | FULL | W7-A | none (UAC 194 merged) | ✅ [done] #2367 |
-| 071 | [RecordFamilyReader (OBO walk)](071-record-family-reader.poml) | FR-30 | opus / xhigh | FULL | W7-B | 070; UAC 194b | 🔲 [open] |
-| 072 | [GET /records/{table}/{id}/family](072-record-family-endpoint.poml) | FR-31 | sonnet / high | FULL | W7-B | 071 | 🔲 [open] |
+| 071 | [RecordFamilyReader (OBO walk)](071-record-family-reader.poml) | FR-30 | opus / xhigh | FULL | W7-B | 070; UAC 194b | ✅ [done] #2442 |
+| 072 | [GET /records/{table}/{id}/family](072-record-family-endpoint.poml) | FR-31 | sonnet / high | FULL | W7-B | 071 | ✅ [done] #2459 |
 | 073 | [RecordFamilyModal (shared UI)](073-record-family-modal.poml) | FR-32 | sonnet / high | FULL | W7-A | none | ✅ [done] #2366 |
-| 074 | [TrackingFieldTrio Family tool](074-trackingfieldtrio-family-tool.poml) | FR-33 | sonnet / high | FULL | W7-C | 073 | 🔲 [open] |
+| 074 | [TrackingFieldTrio Family tool](074-trackingfieldtrio-family-tool.poml) | FR-33 | sonnet / high | FULL | W7-C | 073 | ✅ [done] #2383 |
 | 075 | [Push Updates ribbon opens the Family view](075-push-ribbon-opens-family-view.poml) | FR-35 | sonnet / high | FULL | W7-C | 073 (build); merges with 040 | 🔲 [open] |
 | 076 | [W7 deploy + live Family check](076-w7-deploy-and-live-check.poml) | FR-29–FR-33, FR-35 | sonnet / high | FULL | none | 072, 074, 038 | 🔲 [open] |
 
