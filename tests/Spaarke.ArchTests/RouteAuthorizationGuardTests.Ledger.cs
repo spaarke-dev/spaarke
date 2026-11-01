@@ -488,7 +488,10 @@ public partial class RouteAuthorizationGuardTests
             + "creates and re-files (task 147 r1). The decision is in the handler, AS THE CALLER (IDataverseUserClient), because "
             + "the records to authorize are whatever the Web API payload binds: the table's Create/Append privilege, AppendTo "
             + "on EVERY bound record (an unappendable and a missing record answer the same 404), no field-secured or "
-            + "server-owned column; a re-file also needs the row readable (uniform 404) and F3 to leave a secure record."),
+            + "server-owned column; a re-file also needs the row readable (uniform 404) and F3 to leave a secure record. "
+            + "uac-r2 task 195: PATCH .../sprk_project/{id} takes the filing pair only and is decided by ProjectMatterFiling.FileAsync "
+            + "(the caller's read, Write+Append and AppendTo first; a move of an already filed project only with ?move=true; then the "
+            + "app-only, version-conditioned pair write)."),
 
         // ---- Office add-in ----
         new GovernedFile("Api/Office/OfficeEndpoints.cs", Scope.RouteLevelGate,
@@ -1386,6 +1389,21 @@ public partial class RouteAuthorizationGuardTests
             "A module gate plus the sprk_ReportingAccess role claim — a module role by design, not per-resource and not an "
             + "operator surface (sweep S-70, S-71, S-81).",
             "decides from role claims (IsInRole) and references no decision service"),
+        // Owner decision 2026-10-30 (playbook create, clone, share and unshare are for playbook administrators): a TABLE
+        // privilege gate (the caller's own prvCreate / prvShare on sprk_analysisplaybook), never a record. It only narrows:
+        // the route's per-record decision, where one exists, is the owner or access filter after it.
+        new NonDecidingAttachment("AddPlaybookTablePrivilegeFilter", "Api/Filters/PlaybookAuthorizationFilter.cs", "-",
+            "A role-privilege precondition by design (table x operation, never a record): a caller holding the privilege goes "
+            + "to next, and the route's per-record decision is its owner or access filter, or none (POST /api/ai/playbooks).",
+            "holds = probe is not null && await probe.CallerHoldsPrivilegeAsync(...); ... return await next(context) "
+            + "(PlaybookAuthorizationFilter.cs, AuthorizeCallerTablePrivilegeAsync)"),
+        // Review fix round F1: on PUT /api/ai/playbooks/{id:guid}, after the Write gate and the owner filter, a request that
+        // CHANGES the stored IsPublic also needs prvShare (the same table-privilege method). Not a record decision.
+        new NonDecidingAttachment("AddPlaybookPublicFlagShareFilter", "Api/Filters/PlaybookAuthorizationFilter.cs", "-",
+            "A role-privilege precondition by design: an update that leaves IsPublic as stored goes to next, and one that "
+            + "changes it is decided by the Share table privilege; the route's per-record decision is its owner filter.",
+            "changesPublicFlag ? await AuthorizeCallerTablePrivilegeAsync(context, next, SharePlaybookPrivilege) : await "
+            + "next(context) (PlaybookAuthorizationFilter.cs, AuthorizePublicFlagChangeAsync)"),
         new NonDecidingAttachment("AddSpeAdminTenantScopeFilter", "Api/Filters/SpeAdminTenantScopeFilter.cs", "165",
             "Since task 165 it decides per config (uniform 404; 503 when unverifiable — fail CLOSED), per container (its "
             + "business-unit binding; an unbound container reaches nobody) and per container type, and confines the "
@@ -2328,13 +2346,21 @@ public partial class RouteAuthorizationGuardTests
             + "(CloseOpenSignalsAsync, :361): a refused write returns before the closure (:351-358)."),
         new HandlerDecision("POST /api/v1/child-records/{table}", "CreateAsync", "IDataverseUserClient", Array.Empty<string>(),
             "Task 147 r1 (G5): every check is asked AS THE CALLER through IDataverseUserClient — WhoAmI first (a caller it "
-            + "cannot name is the single 403, ontology task 046; ChildRecordEndpoints.cs:229), the payload mapped with the "
-            + "caller's client (:243), then OwnedChildWrite.CreateAsync checks the table privilege and AppendTo on EVERY bound "
-            + "record before the app-only create (:258) — for a work assignment (task 046, D-113) with the secure-create plan."),
+            + "cannot name is the single 403, ontology task 046; ChildRecordEndpoints.RefusalResult, reached from ChildRecordEndpoints.cs:205 CreateAsync), the payload mapped with the "
+            + "caller's client, then the ONE server create (RecordCreationService.CreateAsync, since field-mapping task 017; "
+            + "it replaced OwnedChildWrite.CreateAsync, deleted in 017) checks the table privilege and AppendTo on EVERY bound "
+            + "record before the app-only create — for a work assignment (task 046, D-113) with the secure-create plan."),
         new HandlerDecision("PATCH /api/v1/child-records/{table}/{id:guid}", "RefileAsync", "IDataverseUserClient", Array.Empty<string>(),
-            "Task 147 r1: the re-file is the caller's own PATCH through IDataverseUserClient (ChildRecordEndpoints.cs:432-433 → "
-            + "UpdateAsync, :448): an unreadable row is the uniform 404, AppendTo on every new parent and F3 on a move out of a "
-            + "secure record are asked as the caller (OwnedChildWrite.RefileAsync, :988)."),
+            "Task 147 r1: the re-file is the caller's own PATCH through IDataverseUserClient (ChildRecordEndpoints.cs:410-412 → "
+            + "UpdateAsync, :569): an unreadable row is the uniform 404, AppendTo on every new parent and F3 on a move out of a "
+            + "secure record are asked as the caller (OwnedChildWrite.RefileAsync, :756). uac-r2 task 195: sprk_project is "
+            + "dispatched first (ChildRecordEndpoints.cs:407-408 → FileProjectAsync) to ProjectMatterFiling.FileAsync: the shape "
+            + "rule (the pair only, ProjectFilingShapeProblem :422, checked at :470) is a 400 before any I/O; the caller's read of "
+            + "the project is the uniform 404 (ProjectMatterFiling.cs:208); the caller's Write+Append on the project (:232) and "
+            + "AppendTo on the matter and the record-type row (:236) are asked as the caller (a missing and an unappendable "
+            + "record answer alike); then the secure-root gate (:256); a project already filed under another record is 409 "
+            + "project_filing.already_filed unless the request asks ?move=true (:264, the current record not named); the "
+            + "secure-matter refusal (:274); only then the app-only pair write, conditional on the version read (:321)."),
         new HandlerDecision("POST /api/memory/pins", "CreatePinAsync", "CallerRecordAccessProbe", Array.Empty<string>(),
             "Task 166 (sweep S-43): the matter a pin names is checked AppendTo (memory.pin_matter) AS THE CALLER through "
             + "CallerRecordAccessProbe before the repository write (PinnedMemoryEndpoints.cs:319-325, :725-760); unknown and "

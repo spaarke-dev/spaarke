@@ -55,6 +55,7 @@ const PINNED_REFUSAL_CODES = [
   'ebilling.submission.source_communication_mismatch',
   'COMMUNICATION_REFILE_FORBIDDEN',
   'ebilling.submission.storage_not_configured',
+  'ebilling.submission.reader_not_configured', // ebilling task 191 (fdd3c79b7f)
   'ebilling.tracking.unavailable',
   'ebilling.submission.email_save_failed',
   'ebilling.submission.document_unavailable',
@@ -101,6 +102,12 @@ const PINNED_OUTCOME_CODES = [
   'ebilling.submission.document_rejected',
   'ebilling.submission.document_core_record_mismatch',
   'ebilling.submission.document_not_found',
+  // ebilling task 191 (fdd3c79b7f): AI reading and line coding
+  'ai.invoice.read.not_configured',
+  'ai.invoice.disabled',
+  'ai.invoice.binding_missing',
+  'ai.invoice.completion_failed',
+  'ai.invoice.output_invalid',
   'ebilling.submission.blocked',
   'ebilling.submission.returned',
 ];
@@ -251,6 +258,23 @@ describe('invoice submission messages — task 094', () => {
         retryAfterSeconds: 20,
       })
     ).toMatch(/earlier attempt .* failed.*Nothing was submitted\. Try again in 20 seconds\.$/);
+  });
+
+  it('task 191: reader_not_configured is a refusal (nothing saved, ask an administrator), neither retried nor upload-in-Spaarke', () => {
+    expect(refusal('ebilling.submission.reader_not_configured')).toBe(
+      "Invoice reading isn't set up in Spaarke yet. Nothing was submitted. Ask an administrator."
+    );
+    expect(isRetryableSubmissionRefusal(422, 'ebilling.submission.reader_not_configured')).toBe(false);
+    expect(PERMANENT_SUBMISSION_CODES.has('ebilling.submission.reader_not_configured')).toBe(false);
+  });
+
+  it('task 191: a configuration outcome asks an administrator; a retried AI failure says to submit again later', () => {
+    for (const code of ['ai.invoice.read.not_configured', 'ai.invoice.disabled', 'ai.invoice.binding_missing']) {
+      expect(describeInvoiceOutcome(code, {}, 'Failed')).toMatch(/Ask an administrator\.$/);
+    }
+    for (const code of ['ai.invoice.completion_failed', 'ai.invoice.output_invalid']) {
+      expect(describeInvoiceOutcome(code, {}, 'Failed')).toMatch(/Submit it again later\.$/);
+    }
   });
 
   it('source_changed (Failed) says to submit again', () => {

@@ -27,8 +27,11 @@ public static class NodeEndpoints
             .ProducesProblem(403)
             .ProducesProblem(404);
 
+        // Node write routes: the caller's own Write privilege on sprk_analysisplaybook first (the node service writes
+        // app-only), then ownership of the playbook.
         // POST /api/ai/playbooks/{id}/nodes - Create a new node
         group.MapPost("/", CreateNode)
+            .AddPlaybookTablePrivilegeFilter(PlaybookAuthorizationFilter.WritePlaybookPrivilege)
             .AddPlaybookOwnerAuthorizationFilter()
             .WithName("CreatePlaybookNode")
             .WithSummary("Create a new node in the playbook")
@@ -53,6 +56,7 @@ public static class NodeEndpoints
 
         // PUT /api/ai/playbooks/{id}/nodes/{nodeId} - Update a node
         group.MapPut("/{nodeId:guid}", UpdateNode)
+            .AddPlaybookTablePrivilegeFilter(PlaybookAuthorizationFilter.WritePlaybookPrivilege)
             .AddPlaybookOwnerAuthorizationFilter()
             .WithName("UpdatePlaybookNode")
             .WithSummary("Update an existing node")
@@ -66,6 +70,7 @@ public static class NodeEndpoints
 
         // DELETE /api/ai/playbooks/{id}/nodes/{nodeId} - Delete a node
         group.MapDelete("/{nodeId:guid}", DeleteNode)
+            .AddPlaybookTablePrivilegeFilter(PlaybookAuthorizationFilter.WritePlaybookPrivilege)
             .AddPlaybookOwnerAuthorizationFilter()
             .WithName("DeletePlaybookNode")
             .WithSummary("Delete a node from the playbook")
@@ -81,6 +86,7 @@ public static class NodeEndpoints
 
         // PUT /api/ai/playbooks/{id}/nodes/{nodeId}/scopes - Update node scopes
         group.MapPut("/{nodeId:guid}/scopes", UpdateNodeScopes)
+            .AddPlaybookTablePrivilegeFilter(PlaybookAuthorizationFilter.WritePlaybookPrivilege)
             .AddPlaybookOwnerAuthorizationFilter()
             .WithName("UpdatePlaybookNodeScopes")
             .WithSummary("Update node scopes (skills and knowledge)")

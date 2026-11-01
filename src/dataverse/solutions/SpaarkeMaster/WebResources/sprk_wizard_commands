@@ -148,24 +148,29 @@ Spaarke.Commands.Wizards = (function () {
   }
 
   /**
-   * Helper: open a webresource dialog and refresh form on close
+   * Helper: open a webresource dialog and refresh form on close (and the launching subgrid, when given)
    */
-  function openWizardDialog(primaryControl, webresourceName, data, title, options) {
+  function openWizardDialog(primaryControl, webresourceName, data, title, options, gridControl) {
     var dialogOptions = Object.assign({}, options || DIALOG_OPTIONS, { title: title });
+
+    function refreshAfterClose() {
+      if (primaryControl && primaryControl.data) {
+        primaryControl.data.refresh();
+      }
+      if (gridControl && typeof gridControl.refresh === "function") {
+        gridControl.refresh();
+      }
+    }
 
     Xrm.Navigation.navigateTo(
       { pageType: "webresource", webresourceName: webresourceName, data: data },
       dialogOptions
     ).then(function () {
       // Refresh form data after dialog closes
-      if (primaryControl && primaryControl.data) {
-        primaryControl.data.refresh();
-      }
+      refreshAfterClose();
     }).catch(function () {
       // User cancelled or error — still try to refresh
-      if (primaryControl && primaryControl.data) {
-        primaryControl.data.refresh();
-      }
+      refreshAfterClose();
     });
   }
 
@@ -178,27 +183,104 @@ Spaarke.Commands.Wizards = (function () {
    * @param {string} baseData - Query string params without bffBaseUrl (e.g. "entityType=sprk_matter&entityId=...").
    * @param {string} title - Dialog title bar text.
    * @param {object} [options] - Optional dialog size options (defaults to DIALOG_OPTIONS).
+   * @param {object} [gridControl] - Optional subgrid control, refreshed after the dialog closes.
    */
-  function openWizardWithBff(primaryControl, webresourceName, baseData, title, options) {
+  function openWizardWithBff(primaryControl, webresourceName, baseData, title, options, gridControl) {
     getBffBaseUrl().then(function (bffBaseUrl) {
       var data = (baseData ? baseData + "&" : "") + "bffBaseUrl=" + encodeURIComponent(bffBaseUrl);
-      openWizardDialog(primaryControl, webresourceName, data, title, options);
+      openWizardDialog(primaryControl, webresourceName, data, title, options, gridControl);
     }).catch(function (err) {
       console.error("[WizardCommands] Failed to resolve BFF base URL, opening wizard without it:", err);
-      openWizardDialog(primaryControl, webresourceName, baseData, title, options);
+      openWizardDialog(primaryControl, webresourceName, baseData, title, options, gridControl);
     });
   }
 
+  // ---------------------------------------------------------------------------
+  // Project <-> Matter subgrids (unified-access-control-r2 task 195, #2352)
+  // ---------------------------------------------------------------------------
+  //
+  // Owner decision 2026-10-31: a matter is added to a project's matter list (and a project to a matter's) through the
+  // Create wizards only, which link the two AND file the project under the matter through the BFF. On a subgrid of the
+  // N:N relationship sprk_Project_Matter_nn, the platform "New" / quick create and "Add Existing" commands are therefore
+  // turned off (isNotProjectMatterLinkGrid, an extra enable rule on those commands in the sprk_matter and sprk_project
+  // ribbons) and a "New Matter" / "New Project" command opens the matching wizard pre-filled with the form's record
+  // (isProjectMatterLinkGrid + openLinkedWizardFromSubGrid). Every other subgrid of those tables is unchanged.
+
+  /** The N:N relationship's schema name, lower-cased for comparison. */
+  var PROJECT_MATTER_RELATIONSHIP = "sprk_project_matter_nn";
+
+  /** The form's table -> the wizard that creates the other side of the link. */
+  var LINKED_WIZARDS = {
+    sprk_project: { webresourceName: "sprk_creatematterwizard", title: "Create New Matter" },
+    sprk_matter: { webresourceName: "sprk_createprojectwizard", title: "Create New Project" }
+  };
+
+  /**
+   * True when the subgrid shows the Project <-> Matter N:N (its relationship is sprk_Project_Matter_nn). False when the
+   * relationship is another one, or cannot be read: the platform commands then stay as they are.
+   */
+  function isProjectMatterLinkGrid(selectedControl) {
+    try {
+      var relationship = selectedControl && selectedControl.getRelationship && selectedControl.getRelationship();
+      var name = relationship && relationship.name;
+      return typeof name === "string" && name.toLowerCase() === PROJECT_MATTER_RELATIONSHIP;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  /** The form record's display name ('' when none). */
+  function primaryName(primaryControl) {
+    try {
+      var entity = primaryControl.data.entity;
+      return (entity.getPrimaryAttributeValue && entity.getPrimaryAttributeValue()) || "";
+    } catch (e) {
+      return "";
+    }
+  }
+
+  /**
+   * "New Matter" on a project's Matters subgrid / "New Project" on a matter's Projects subgrid: opens the matching Create
+   * wizard with the form's record as its fixed association (entityType, entityId, recordName). The wizard writes the
+   * link and files the project under the matter; the subgrid is refreshed when the dialog closes.
+   */
+  function openLinkedWizardFromSubGrid(primaryControl, selectedControl) {
+    var ctx = getEntityContext(primaryControl);
+    var target = LINKED_WIZARDS[ctx.entityType];
+    if (!target || !ctx.entityId) {
+      console.error("[WizardCommands] openLinkedWizardFromSubGrid: no saved project or matter on this form");
+      return;
+    }
+    var baseData =
+      "entityType=" + encodeURIComponent(ctx.entityType) +
+      "&entityId=" + encodeURIComponent(ctx.entityId) +
+      "&recordName=" + encodeURIComponent(primaryName(primaryControl));
+    openWizardWithBff(primaryControl, target.webresourceName, baseData, target.title, undefined, selectedControl);
+  }
+
   return {
+    // Task 195: the Project <-> Matter subgrid commands (see above).
+    isProjectMatterLinkGrid: isProjectMatterLinkGrid,
+    isNotProjectMatterLinkGrid: function (selectedControl) {
+      return !isProjectMatterLinkGrid(selectedControl);
+    },
+    openLinkedWizardFromSubGrid: openLinkedWizardFromSubGrid,
+
     openCreateMatterWizard: function (primaryControl) {
       var ctx = getEntityContext(primaryControl);
-      var baseData = "entityType=" + ctx.entityType + "&entityId=" + ctx.entityId;
+      // Task 195: the record's name too, so a wizard that pre-selects the launch record (its partner table) shows it.
+      var baseData =
+        "entityType=" + ctx.entityType + "&entityId=" + ctx.entityId +
+        "&recordName=" + encodeURIComponent(primaryName(primaryControl));
       openWizardWithBff(primaryControl, "sprk_creatematterwizard", baseData, "Create New Matter");
     },
 
     openCreateProjectWizard: function (primaryControl) {
       var ctx = getEntityContext(primaryControl);
-      var baseData = "entityType=" + ctx.entityType + "&entityId=" + ctx.entityId;
+      // Task 195: the record's name too, so a wizard that pre-selects the launch record (its partner table) shows it.
+      var baseData =
+        "entityType=" + ctx.entityType + "&entityId=" + ctx.entityId +
+        "&recordName=" + encodeURIComponent(primaryName(primaryControl));
       openWizardWithBff(primaryControl, "sprk_createprojectwizard", baseData, "Create New Project");
     },
 

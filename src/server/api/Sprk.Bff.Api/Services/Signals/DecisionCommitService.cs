@@ -1186,6 +1186,20 @@ public sealed class DecisionCommitService
         warnings.AddRange(await _followUps.AfterRecordedAsync(p.MatterId, executed, p.Resolution == Resolution.Dismissed ? p.Resolved : [], writeCt).ConfigureAwait(false));
         progress.FollowUpsRan = true;
 
+        // ---- (7) Task 168 (D-194): tell Assign Task's assignee, AFTER the record (D-17). Never fails or changes the decision. ------
+        try
+        {
+            var notices = AssignTaskNotices(p.Steps, executed, p.Core);
+            if (notices.Count > 0 && await _followUps.NotifyAssigneesAsync(http, notices, writeCt).ConfigureAwait(false) is { } notified)
+                warnings.AddRange(notified);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(DecisionCommitEvents.AfterRecordFailed, ex,
+                "Decision commit: review {ReviewId} recorded as {RecordId}; notifying the assignee stopped.", reviewId, recordId);
+            warnings.Add(AssignTaskNotifier.EmailNotSentWarning);
+        }
+
         _logger.LogInformation(DecisionCommitEvents.Recorded,
             "Decision commit: review {ReviewId} recorded as {RecordId} ({Steps} step(s), {Signals} Signal(s), {Warnings} warning(s)).",
             reviewId, recordId, executed.Count, signals.Count, warnings.Count);
@@ -1469,6 +1483,23 @@ public sealed class DecisionCommitService
         return (null, new Prepared(primary, rows, lane, plan, offered, steps, core, recordCore, gateTier, dismissalText, outcome));
     }
 
+    /// <summary>Task 168 (D-194): one notice per Assign Task step that is Done with Send email notification on (omitted is on), from the
+    /// step's own values and the task it wrote.</summary>
+    private static List<AssignTaskNotice> AssignTaskNotices(
+        IReadOnlyList<ExecStep> steps, IReadOnlyList<DecisionCommitStep> executed, DecisionCoreRecord? core)
+    {
+        var notices = new List<AssignTaskNotice>();
+        foreach (var step in steps.Where(s => s.Def.Code == AssignTaskNotifier.ActionCode))
+        {
+            if (executed.FirstOrDefault(e => e.Key == step.Key) is not { } done || done.Status != nameof(DecisionActionStatus.Done))
+                continue;
+            if (AssignTaskNotice.From(step.Values, done.Written, core) is { } notice)
+                notices.Add(notice);
+        }
+
+        return notices;
+    }
+
     /// <summary>The wizard's values as the executors take them. Unknown codes and non-scalar values are refused; a required
     /// parameter must be present.</summary>
     internal static (IReadOnlyDictionary<string, string?>? Values, string? Invalid) ReadValues(
@@ -1490,6 +1521,14 @@ public sealed class DecisionCommitService
             };
             if (text == "\u0000")
                 return (null, $"'{def.Label}': '{key}' must be a single value.");
+            // Task 168 (D-194): a yes/no is true or false (or omitted, its default); anything else is refused, not guessed at.
+            if (def.Parameters.First(p => p.Code == key).Kind == DecisionParameterKind.Boolean && !string.IsNullOrWhiteSpace(text))
+            {
+                if (!bool.TryParse(text.Trim(), out var flag))
+                    return (null, $"'{def.Label}': '{key}' must be true or false.");
+                text = flag ? "true" : "false";
+            }
+
             values[key] = text;
         }
 

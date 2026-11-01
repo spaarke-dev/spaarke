@@ -1283,6 +1283,8 @@ their OWN app registrations (production add-in: `1958aec2…` "Spaarke Office Ad
 `https://<host>/auth-callback.html` are registered ONCE, on that client app, for the production site
 (`addins.spaarke.com`) — never per customer. A customer BFF only pre-authorizes the client (above) and lists its origin in
 CORS (H4b). Reference impl: [`src/client/shared/Spaarke.Auth/src/strategies/OfficeNaaStrategy.ts`](../../src/client/shared/Spaarke.Auth/src/strategies/OfficeNaaStrategy.ts).
+For the External Access Teams app (package build, customer-tenant install, Teams sign-in prerequisites and support), see
+[EXTERNAL-ACCESS-TEAMS-APP-GUIDE.md](EXTERNAL-ACCESS-TEAMS-APP-GUIDE.md).
 
 **The `acct` optional claim (access tokens) — REQUIRED on every per-customer BFF registration** (task 141).
 The BFF's first-sign-in identity binding admits only a MEMBER of a configured customer tenant (§6.5.2), and
@@ -1297,7 +1299,7 @@ it once by hand:
 ```
 
 Both are idempotent and keep every other optional claim. Optional claims on the resource registration apply to
-every access token issued FOR it — including the workforce tokens the External Access SPA and Teams tab acquire (the single-tenant Spaarke client, NAA then MSAL popup, scope `user_impersonation`; the Teams manifest declares no `webApplicationInfo` and there is no Teams-SSO path, ADR-028 A8) — see
+every access token issued FOR it — including the workforce tokens the External Access SPA and Teams tab acquire (the browser company-account sign-in and the Teams tab use the multitenant workforce client on the user's own tenant authority, NAA then MSAL popup in Teams, scope `user_impersonation`; the Teams manifest declares no `webApplicationInfo` and there is no Teams-SSO path, ADR-028 A9; the single-tenant Spaarke client is used only for a licensed user's account link — corrected 2026-10-29 against `src/client/external-spa/src/auth/msal-auth.ts`) — see
 Microsoft's [optional claims reference](https://learn.microsoft.com/en-us/entra/identity-platform/optional-claims-reference).
 Without it every contact-only Type-2 sign-in is denied `sdap.access.deny.workforce_acct_claim_missing` (fail closed).
 
@@ -1838,6 +1840,32 @@ Run intake no longer takes `communicationGraphResource` / `emailGraphResource`. 
 > configuration rows to this team, so it must exist before either runs for the customer. Until they ship, no seeder does:
 > the rows stay with the seeding identity, and an operator re-owns them to this team after setup. Users keep reading the
 > rows through their own roles (`Spaarke Core User`, Deep).
+>
+> **Product configuration is read at Global (owner decision 2026-10-29).** Spaarke product data stays owned in the root
+> (owner round 136), and people work in the customer's business unit below it, where a Read at Deep does not reach the
+> root. So `Spaarke Core User` and `Spaarke Basic User` read the product configuration tables at Global: the playbooks and
+> their actions, skills, tools and knowledge, the AI type catalogs, the Assistant's context map, and grid configuration.
+> This is Read only, on those tables only. Restricted content (`sprk_policy`, `sprk_policyversion`, `sprk_ruleset`,
+> `sprk_procedureassignment`, `sprk_storedfile`), customer records, customer configuration and per-user tables keep their
+> depths. The one list is `config/product-configuration-read-role.json` (with the tables left out and why); the roles'
+> solution XML carries it, so a SpaarkeMaster import applies it. On an environment that has not had that import, run
+> `scripts/Set-ProductConfigurationReadDepth.ps1` (dry run, then `-Apply`, then `-Verify`, which must exit 0).
+> `ProductConfigurationReadRoleGuardTests` fails the build if the list gains a customer or restricted table or platform
+> service configuration (`sprk_externalserviceconfig`, `sprk_dataverseenvironment`, `sprk_aimodeldeployment`), if an
+> entry names any privilege other than the table's own Read, or if either role gains Create on `sprk_gridconfiguration`.
+> Nothing in the product reads `sprk_externalserviceconfig` as a user, so no end-user Spaarke role holds a privilege on
+> it, and its `sprk_clientsecret` column is field-secured with no Spaarke field security profile (only the platform's
+> System Administrator profile reads it); the same guard checks both. An environment imported before that change still
+> holds the old Read on the two roles: the same script's dry run lists it, `-Apply` removes it, and `-Verify` fails
+> until it is gone.
+> Because every user can read every playbook, **creating, cloning and sharing playbooks is for playbook administrators
+> only**: in the role XML only `Spaarke AI Analysis Admin` holds Create and Share on `sprk_analysisplaybook`, and the BFF
+> routes `POST /api/ai/playbooks`, `/{id}/clone`, `/{id}/share` and `/{id}/unshare` require the caller's own Create
+> (create, clone) or Share (share, unshare) privilege on that table before anything is read or written. Every playbook
+> write route (`PUT /api/ai/playbooks/{id}`, `PUT /{id}/canvas`, and the node create, update, delete and scopes routes)
+> requires the caller's own Write privilege first, and an update that changes whether the playbook is public also
+> requires Share. A user without the privilege gets 403. Give a person who builds playbooks the
+> `Spaarke AI Analysis Admin` role.
 
 Secure projects, matters and work assignments (unified-access-control-r2) need Dataverse security configuration that
 no solution import can create. Since T256, **H7b creates it on every run**, after H6 and before H9:

@@ -74,6 +74,29 @@ export const GENERIC_FAILED_OUTCOME_MESSAGE = "Spaarke couldn't process the invo
 export const HELD_FOR_REVIEW_MESSAGE =
   'Spaarke accepted it and is holding it for review. You can follow it in Spaarke with the tracking number.';
 
+/**
+ * §3 / §9 (ebilling 097f, EB-D-180): an Accepted submission whose invoice a correction has superseded. It is NOT a hold;
+ * the status read may also carry `replacedBy.trackingNumber` (absent when the caller can't read the correcting one).
+ */
+export const REPLACED_BY_CORRECTION_CODE = 'ebilling.submission.replaced_by_correction';
+
+/**
+ * The sentence for an Accepted submission: none without a code, the replaced-by-correction sentence for
+ * {@link REPLACED_BY_CORRECTION_CODE}, and {@link HELD_FOR_REVIEW_MESSAGE} for any other code.
+ */
+export function describeAcceptedOutcome(
+  code: string | null | undefined,
+  replacedByTrackingNumber?: string
+): string | undefined {
+  if (!code) return undefined;
+  if (code === REPLACED_BY_CORRECTION_CODE) {
+    return replacedByTrackingNumber
+      ? `This invoice was replaced by a correction (tracking ${replacedByTrackingNumber}).`
+      : 'This invoice was replaced by a correction.';
+  }
+  return HELD_FOR_REVIEW_MESSAGE;
+}
+
 const NOTHING = 'Nothing was submitted.';
 
 function tryAgain(facts: Facts): string {
@@ -191,6 +214,8 @@ export const SUBMISSION_ERROR_MESSAGES: Readonly<Record<string, Entry>> = {
     "This email's saved copy in Spaarke doesn't belong to its email record, so it can't be submitted from Outlook.",
   COMMUNICATION_REFILE_FORBIDDEN: `This email isn't filed yet, and you don't have permission to file it under this record. ${NOTHING}`,
   'ebilling.submission.storage_not_configured': `Invoice file storage isn't set up in Spaarke. ${NOTHING} Ask an administrator.`,
+  // ebilling task 191 (2026-11-01): checked before anything is written or filed, after the storage check.
+  'ebilling.submission.reader_not_configured': `Invoice reading isn't set up in Spaarke yet. ${NOTHING} Ask an administrator.`,
   'ebilling.tracking.unavailable': f =>
     `Spaarke couldn't give the invoice a tracking number right now. ${NOTHING} ${tryAgain(f)}`,
   'ebilling.submission.email_save_failed':
@@ -243,6 +268,18 @@ export const INVOICE_OUTCOME_MESSAGES: Readonly<Record<string, Entry>> = {
   // Task 094 (2026-10-28): a re-attempt is allowed (EB-D-160).
   'ebilling.submission.source_changed':
     "The email's saved copy in Spaarke changed while the invoice was being processed, so it was not processed. Submit it again.",
+  // ebilling task 191 (2026-11-01): the AI reading and line coding. The first two are permanent; the job retries the
+  // other three and stores the code on its last attempt, so a later re-submission can work.
+  'ai.invoice.read.not_configured':
+    "Invoice reading isn't set up in Spaarke yet, so the invoice was not processed. Ask an administrator.",
+  'ai.invoice.disabled':
+    'Invoice reading is turned off in Spaarke, so the invoice was not processed. Ask an administrator.',
+  'ai.invoice.binding_missing':
+    "Spaarke's invoice line coding isn't fully set up, so the invoice was not processed. Ask an administrator.",
+  'ai.invoice.completion_failed':
+    "Spaarke's AI service failed while coding the invoice lines, so the invoice was not processed. Submit it again later.",
+  'ai.invoice.output_invalid':
+    "Spaarke couldn't code the invoice lines, so the invoice was not processed. Submit it again later.",
   'ebilling.submission.blocked': 'The invoice was rejected by a billing rule.',
   'ebilling.submission.returned': 'The invoice was returned to the firm.',
 };

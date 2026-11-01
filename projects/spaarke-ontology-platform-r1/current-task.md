@@ -2,31 +2,20 @@
 
 > **Last Updated**: 2026-10-29 (main session, context-handoff at 85%). State only: history is in git log, task `<completion>` blocks and
 > `notes/handoff-history/2026-10.md`. Standing rules: [`CLAUDE.md`](CLAUDE.md) §3 and §6. Decisions: [`notes/decisions.md`](notes/decisions.md)
-> (D-1..D-198). Deferred work: one self-contained GitHub issue per item, label `ontology-deferred`, plus a DI-nn row in both tables of
-> `notes/defer-issues.md` (next free: **DI-135**). Sub-agents never edit this file.
+> (D-1..D-199). Deferred work: one self-contained GitHub issue per item, label `ontology-deferred`, plus a DI-nn row in both tables of
+> `notes/defer-issues.md` (next free: **DI-138**). Sub-agents never edit this file.
 
 ## Quick Recovery (READ THIS FIRST)
 
 | Field | Value |
 |---|---|
-| **Task** | **168** (#2418) is blocked on owner Q1/Q2. 171 and 172 are DONE (171: #2433 merged `3452d3017e` after fix round 1; 172: #2434 merged `fab8c91531`). |
-| **Status** | No lane is running. The worktrees `C:\wts-171` and `C:\wts-172` are removed. uac-r2 was sent the 171 fix-diff SHA `e025152e3b` after the merge; if they raise anything, handle it as a follow-up before docs→master. DI-124 (#2300) has the `-CustomerBusinessUnit` / `-WhatIf` comment. |
-| **Next Action** | 1) When the owner answers Q1/Q2: record D-199, then run the 168 fix round in `C:\wts-168` (plan below). 2) After the owner's next real decision commit: the task-170 App Insights check and the `BUD-` number (Lane facts). 3) Next docs→master (below). 4) Read any uac-r2 reply on the 171 fix diff. |
+| **Task** | No lane is running. 168, 171, 172 and 173 are DONE and ON MASTER (#2463 → `c8bb55d0cd`; docs fast-forwarded to it). |
+| **Status** | No owner question is open. ebilling #1911 is merged (`eaa0d44f7f`). Their next PR (104, 101) brings our two asks: the principal-change known limit in 105-override-server.md and the double RecordRefusal log; review it when it arrives. The main checkout `C:\code_files\spaarke` refuses fast-forwards because of another session's uncommitted `.claude/agent-memory/researcher/MEMORY.md`; leave it alone. |
+| **Next Action** | 1) Dev BFF is `9f4afe82ac` (R3 readback 14:40:39Z 2026-10-30). Run the 168/173 live proof per `notes/168-173-live-proof.md`: the owner does runs A (internal), B (external) and C (unticked) in the Console; the main session runs the read-only checks and fills section 6; then the task-170 latency check and the `BUD-` number. 2) Owner re-checks for 114, 158-163 and 166 (163's live role change is already done: verified 2026-10-30), then close them. 3) Review ebilling 097b (BillingFactLoader replaced-invoice exclusion: the id must be derived on the server; same firm and number only) and their next PR into master. 4) Remaining: 111 (row 4 waits for the external SPA dev deploy), 105 (v4 UAT), 090 wrap-up (held by the owner until UAT is done). |
 
-## Open owner questions (task 168, asked 2026-10-28; explained in detail 2026-10-29)
+## Task 168 decisions: D-199 (owner, 2026-10-29)
 
-1. **Assignee is not an eligible internal user** (external, no linked user, several users). **A (rec.):** send nothing unless the contact holds an active onboarded External Access grant on the matter. B: a notice naming nothing. C: never.
-2. **System-mailbox fallback reach.** **A (rec.):** only for recipients who pass the gate; otherwise `assignee_email_not_sent`. B: everyone.
-- Q3/Q4 (171's no-parameter path; 194b vs D-197 for root-homed authors) were WITHDRAWN 2026-10-29. uac-r2 corrected itself, and the main session verified that `CheckVersionOwnerAsync` sets no `ChildEntityLogicalName`, so D-197 "author wins, root included" holds.
-
-## 168 fix plan (after Q1/Q2; uac-r2 agreed the plan and re-checks only the fix diff)
-
-Branch `task/168-assign-task-notify`, head `8064311c54`. First merge docs (it now contains master + 194b).
-- A gate copied from master `GrantAccessNotifier.cs:222-260`: one eligible internal user per contact; `SecureShareNoAccessGuard.CheckRecordAndSecureParentsAsync(core,user,AsFlagged)` = NotSecure/NotWalled; Read on the task; fail closed. It runs in both `NotifyAsync` and `SendFromSystemMailboxAsync`.
-- `InquiryRecordFacts.ResolveAsync` for the name and link lines; the fallback only after the gate.
-- The job re-reads `sprk_assignedto` + `statecode` + the gate at send time. An inactive contact gets no email.
-- `IsInternalOnly=true` (read-back test + mutation); the `DecisionCommitFollowUps` DI test; "Assigned by" + `sprk_sentby`; Poisoned on 4xx; log the exception type and Graph code, not the exception object.
-- Must-not-fire: walled; secure non-member; Restricted + flagged-external; unverifiable. Watch UAC 193 `ContactUserRepresentation` (K-1).
+Q1 = A (an eligible internal user, or an onboarded external contact with a grant on the matter and a portal link); Q2 = the system-mailbox fallback to the same recipients. Built and merged (see the 168 POML completion block).
 
 ## Lane facts to carry
 
@@ -36,12 +25,12 @@ Branch `task/168-assign-task-notify`, head `8064311c54`. First merge docs (it no
 - **uac-r2 dev move:** root-homed humans move to BU1 (owner approval pending, no writes yet; they give notice first). The seed policies likely stay root-owned (`DoNotMoveAllRecords=true`). After the move, BU1-homed Ontology Admins (Deep) can't read root-owned seed policies; uac-r2 is preparing an owner question and will copy us. **Hold the memo-LIKE proof** until they confirm placement.
 - **CI:** `ontology-script-tests` is pinned to Pester 5.7.1 (#2428). DI-134 (#2430) asks the CI owner to pin `verdict-script-tests`.
 - **Don't push to docs while a docs→master PR is open** (it moves the PR head and restarts CI).
-- `OrdinaryMovesWritesEnabled` stays OFF.
+- **Ordinary moves on dev (uac-r2):** both switches on since 2026-10-30 19:53:19Z (owner approved in uac-r2's session). Ontology re-read: **PASS** (9 WA-core Signals root team → BU1, owner only; `notes/ordinary-moves-baseline-2026-10-30.md`).
 - **Commits in a fresh worktree:** lint-staged needs prettier: `export PATH="/c/code_files/spaarke-wt-spaarke-ontology-platform-r1/node_modules/.bin:$PATH"` (no junctions). Integration tests under `tests/integration/auth/**` compile into `tests/unit/Sprk.Bff.Api.Tests`; filter there.
 
 ## Next docs→master
 
-Contents: #2414, #2422, the 194b repoint, 171 (`3452d3017e`), 172 (`fab8c91531`), and 168 when ready. Before notices to word-add-in, R3 and uac-r2; merge master in; full ArchTests.
+The last was PR #2463, merged as master `c8bb55d0cd` (2026-10-29): 168 and 173. Before the next: notices to R3, uac-r2 and word-add-in (current name `spaarke-wt-spaarkeai-word-add-in-r1-8a`); merge master in; build, the filtered Signals tests and the full ArchTests (1858 now).
 
 ## Blocked follow-ups (ours)
 
@@ -51,7 +40,7 @@ Contents: #2414, #2422, the 194b repoint, 171 (`3452d3017e`), 172 (`fab8c91531`)
 ## Dev state (spaarkedev1 / spaarke-bff-dev)
 
 - **BFF:** `136568cf70` (R3, 2026-10-29). **Console:** `a8314c2e0e`. **SpaarkeMaster:** 1.2.4.0. **POL-MATTER-NOBUDGET:** v3 `…6313`.
-- **Worktrees:** `C:\wts-168`. Remove only with `Remove-WorktreeSafe.ps1`, one path per call.
+- **Worktrees:** none for lanes. Remove only with `Remove-WorktreeSafe.ps1`, one path per call.
 - **Stash:** two old `lint-staged automatic backup` entries (20 and 30 h old) are not ours. Leave them.
 
 ## Peers (current session names)

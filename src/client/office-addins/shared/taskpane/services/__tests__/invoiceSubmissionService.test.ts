@@ -770,6 +770,34 @@ describe('review fixes (task 133) — what the handler says after the 202', () =
     expect(outcome).toMatchObject({ kind: 'success', message: HELD_FOR_REVIEW_MESSAGE });
   });
 
+  it('097f must-fire: Accepted and replaced by a correction is not "held"; it names the correcting tracking number', async () => {
+    const outcome = await run({
+      status: 'Accepted',
+      outcomeReasonCode: 'ebilling.submission.replaced_by_correction',
+      replacedBy: { submissionId: 'sub-2', trackingNumber: 'INV-4711.2' },
+    });
+    expect(outcome).toEqual({
+      kind: 'success',
+      trackingNumber: 'INV-4711.1',
+      message: 'This invoice was replaced by a correction (tracking INV-4711.2).',
+    });
+    expect(JSON.stringify(outcome)).not.toContain(HELD_FOR_REVIEW_MESSAGE);
+  });
+
+  it('097f: replacedBy absent (unreadable, ambiguous or a lookup fault) still says replaced, without a number', async () => {
+    const outcome = await run({ status: 'Accepted', outcomeReasonCode: 'ebilling.submission.replaced_by_correction' });
+    expect(outcome).toMatchObject({ kind: 'success', message: 'This invoice was replaced by a correction.' });
+  });
+
+  it('097f must-not-fire: replacedBy on another code changes nothing (still held)', async () => {
+    const outcome = await run({
+      status: 'Accepted',
+      outcomeReasonCode: 'ebilling.submission.held_for_review',
+      replacedBy: { trackingNumber: 'INV-4711.2' },
+    });
+    expect(outcome).toMatchObject({ kind: 'success', message: HELD_FOR_REVIEW_MESSAGE });
+  });
+
   it('must-not-fire: Accepted with no code has no message', async () => {
     expect(await run({ status: 'Accepted', outcomeReasonCode: null })).toEqual({
       kind: 'success',

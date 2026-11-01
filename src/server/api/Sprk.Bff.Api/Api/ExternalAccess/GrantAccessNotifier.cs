@@ -268,6 +268,79 @@ public sealed class GrantAccessNotifier
     // =========================================================================
 
     /// <summary>
+    /// r3 task 079 (#2458): whether the stored home link bars the external email for <paramref name="contact"/>, and the
+    /// outcome if it does; <c>null</c> to go on to the email. Only a binding that reads Bound on plane WorkforceHome is asked
+    /// (every other contact is decided exactly as before, and nothing is read for it). The portal's home sign-in asks the
+    /// stored link first (<c>WorkforcePrincipalResolver.ResolveHomeAsync</c>), over the STORED pair: the home directory
+    /// (<see cref="IContactIdentityStore.ReadHomeTenantAsync"/>; the contact row carries none) and the bound oid.
+    /// <list type="bullet">
+    ///   <item>No licensed user carries the pair (<see cref="HomeLinkOutcome.NotLinked"/>): <c>null</c>, emailed as today.</item>
+    ///   <item>Exactly one enabled user carries it (<see cref="HomeLinkOutcome.Enabled"/>): that sign-in is the user's, whose
+    ///   own rights apply in the portal, so nobody is told about the contact grant: <see cref="GrantNotificationOutcome.NotApplicable"/>.
+    ///   Never routed to the internal notice either.</item>
+    ///   <item>Only disabled users carry it (<see cref="HomeLinkOutcome.Disabled"/>): the portal admits that sign-in nowhere:
+    ///   <see cref="GrantNotificationOutcome.NotApplicable"/>.</item>
+    ///   <item>Could not tell — no readable stored tenant, a missing column, an ambiguous or failed link read, a read that
+    ///   throws: no email, <see cref="GrantNotificationOutcome.Failed"/> (fail closed; the grant stands).</item>
+    /// </list>
+    /// </summary>
+    private async Task<GrantNotificationOutcome?> HomeLinkBarsExternalEmailAsync(
+        ExternalGrantRootType rootType, Guid rootId, ContactBindingRow contact)
+    {
+        var binding = contact.Binding;
+        if (binding is not { Kind: BindingKind.Bound, Plane: IdentityPlaneMarker.WorkforceHome })
+            return null;
+
+        try
+        {
+            var tenant = binding.Oid is null
+                ? HomeTenantLookup.Failed
+                : await _identities.ReadHomeTenantAsync(contact.ContactId, CancellationToken.None);
+            if (binding.Oid is not { } homeOid || tenant.HomeTenantId is not { } homeTenant)
+            {
+                _logger.LogWarning(
+                    "[GRANT-NOTIFY] WorkforceHome contact {ContactId} carries no readable home pair ({Status}); no email for the " +
+                    "grant on {RootType} {RootId} (fail closed). The grant stands.",
+                    contact.ContactId, tenant.Status, rootType, rootId);
+                return GrantNotificationOutcome.Failed;
+            }
+
+            var link = ContactBindingDecision.DecideHomeLink(
+                await _identities.FindHomeLinkedSystemUsersAsync(homeTenant, homeOid, CancellationToken.None), homeTenant, homeOid);
+            switch (link.Outcome)
+            {
+                case HomeLinkOutcome.NotLinked:
+                    return null;
+                case HomeLinkOutcome.Enabled:
+                    _logger.LogInformation(
+                        "[GRANT-NOTIFY] WorkforceHome contact {ContactId}'s home sign-in resolves in the portal as user " +
+                        "{SystemUserId}, whose own rights apply there; no email for the grant on {RootType} {RootId}.",
+                        contact.ContactId, link.SystemUserId, rootType, rootId);
+                    return GrantNotificationOutcome.NotApplicable;
+                case HomeLinkOutcome.Disabled:
+                    _logger.LogInformation(
+                        "[GRANT-NOTIFY] WorkforceHome contact {ContactId}'s home sign-in is linked to a disabled user, so the " +
+                        "portal admits it nowhere; no email for the grant on {RootType} {RootId}.", contact.ContactId, rootType, rootId);
+                    return GrantNotificationOutcome.NotApplicable;
+                default:
+                    _logger.LogWarning(
+                        "[GRANT-NOTIFY] Whether a licensed user carries WorkforceHome contact {ContactId}'s home sign-in could not " +
+                        "be read ({DenyCode}); no email for the grant on {RootType} {RootId} (fail closed). The grant stands.",
+                        contact.ContactId, link.DenyCode ?? "denied", rootType, rootId);
+                    return GrantNotificationOutcome.Failed;
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(
+                "[GRANT-NOTIFY] The home link of WorkforceHome contact {ContactId} could not be read ({ExceptionType}); no email " +
+                "for the grant on {RootType} {RootId} (fail closed). The grant stands.",
+                contact.ContactId, ex.GetType().Name, rootType, rootId);
+            return GrantNotificationOutcome.Failed;
+        }
+    }
+
+    /// <summary>
     /// The grant gave the already-read, active, ONLY-external contact <paramref name="contact"/> access to a record: emails
     /// it, once, when it is already onboarded (a readable identity binding) and has an email address. Never the granter
     /// (a grantee whose sign-in oid is the caller's own is skipped). Best effort: nothing throws.
@@ -295,6 +368,13 @@ public sealed class GrantAccessNotifier
                     contact.ContactId, rootType, rootId);
                 return GrantNotificationOutcome.NotApplicable;
             }
+
+            // r3 task 079 (#2458): asked only now, after the checks above that already decide nobody is emailed (so a contact
+            // that is never emailed costs no extra read and keeps its outcome), and before the link is built or anything sent.
+            // A WorkforceHome contact's home sign-in resolves in the portal as the licensed user who carries its home pair,
+            // when one does; that user's own rights apply there, not this grant.
+            if (await HomeLinkBarsExternalEmailAsync(rootType, rootId, contact) is { } barred)
+                return barred;
 
             var link = TryBuildLink(rootType, rootId);
             if (link is null)
@@ -334,10 +414,12 @@ public sealed class GrantAccessNotifier
     /// <remarks>
     /// A binding on the WORKFORCE plane is an employee's work identity, not an external contact's CIAM account: it is never
     /// emailed as one (task 036 review K4). An oid with no plane marker is a pre-141 CIAM binding (<see cref="ContactBindingDecision.ReadBinding"/>).
-    /// A WorkforceHome binding (ADR-028 A9, r3 task 047) IS emailed: that contact registered through, and signs in to, the
-    /// same external portal the email links to.
+    /// A WorkforceHome binding (ADR-028 A9, r3 task 047) is emailed only when no licensed user carries its home pair (r3 task
+    /// 079, <see cref="HomeLinkBarsExternalEmailAsync"/>, asked after this test): that contact registered through, and signs in
+    /// to, the same external portal the email links to.
+    /// Ontology task 168 (D-199) asks the same test before an Assign Task email to an external contact (<c>AssignTaskRecipientGate</c>).
     /// </remarks>
-    private static bool IsOnboardedWithEmail(ContactBindingRow contact)
+    internal static bool IsOnboardedWithEmail(ContactBindingRow contact)
     {
         var binding = contact.Binding;
         return binding.Kind == BindingKind.Bound

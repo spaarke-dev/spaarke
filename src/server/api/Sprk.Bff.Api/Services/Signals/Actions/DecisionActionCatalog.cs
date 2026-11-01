@@ -31,6 +31,10 @@ public enum DecisionParameterKind
     Date,
     Person,
     Lookup,
+
+    /// <summary>Task 168 (D-194): a yes/no checkbox. The value is <c>true</c> or <c>false</c>; an omitted value is the parameter's
+    /// <see cref="DecisionActionParameter.DefaultValue"/>.</summary>
+    Boolean,
 }
 
 /// <summary>
@@ -47,6 +51,9 @@ public enum DecisionParameterKind
 /// The wizard flags it and the executor refuses it; equal dates are fine.</param>
 /// <param name="MaxLength">Task 167 (D-193 review F4-4): for a Text, the most characters the target column holds. The wizard step flags a longer
 /// value before Record decision, and the executor refuses it too. Null (every other parameter) means no declared limit.</param>
+/// <param name="DefaultValue">Task 168 (D-194): a fixed starting value (Assign Task's Send email notification is <c>true</c>). The plan
+/// route sends it as the parameter's default when no <see cref="DefaultSource"/> resolves one, and the action treats an omitted value the
+/// same way.</param>
 public sealed record DecisionActionParameter(
     string Code,
     string Label,
@@ -58,7 +65,8 @@ public sealed record DecisionActionParameter(
     string? OptionsSource = null,
     string? DefaultSource = null,
     string? NotBefore = null,
-    int? MaxLength = null);
+    int? MaxLength = null,
+    string? DefaultValue = null);
 
 /// <summary>One fixed choice: the stable <see cref="Value"/> the commit route receives and the <see cref="Label"/> the
 /// user sees.</summary>
@@ -240,8 +248,14 @@ public static class DecisionActionCatalog
                 new("assignee", "Assign to", DecisionParameterKind.Person, Required: true),
                 new("description", "What to do", DecisionParameterKind.TextArea, Required: true),
                 new("dueDate", "Due", DecisionParameterKind.Date, Required: false),
+                // Task 168 (D-194): ticked by default; an omitted value is on (AssignTaskNotice.From).
+                new("notify", "Send email notification", DecisionParameterKind.Boolean, Required: false,
+                    Hint: "Emails the person the task, and notifies them in Spaarke", DefaultValue: "true"),
             ],
-            ["Creates a task (an event of type Task) linked to the record, assigned to the person above, when the decision is recorded"],
+            [
+                "Creates a task (an event of type Task) linked to the record, assigned to the person above, when the decision is recorded",
+                "With Send email notification on, emails the person the task and notifies them in Spaarke",
+            ],
             Excludes: [],
             DecisionRecordClass.Judgement)
         { Gate = new DecisionGateFactors(GateRiskTier.Tier3, Reversible: true, RecordOfTruthImpact: true) },

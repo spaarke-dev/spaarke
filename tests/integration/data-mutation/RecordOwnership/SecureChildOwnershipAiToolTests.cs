@@ -351,8 +351,9 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
 
     // ── Task 133 creator stamp, integrated with G5 (owner round 10: "superseded at integration by task 146's
     //    create-as-the-app, which writes the stamp in the create payload"). Batch 4 integration: the ONE stamp is task 146
-    //    c1-r1's (RecordOwnerResolution.StampCreatorOn in OwnedChildWrite.CreateAsync, a sprk_CreatedByPerson bind after
-    //    the caller's checks); task 149 r3's own WithCreatorPersonAsync re-map was dropped so the column is written once.
+    //    c1-r1's (RecordOwnerResolution.StampCreatorOn, a sprk_CreatedByPerson bind after the caller's checks — in the owned
+    //    create then, in RecordCreationService's create since task 017 deleted that one); task 149 r3's own
+    //    WithCreatorPersonAsync re-map was dropped so the column is written once.
 
     [Theory]
     [InlineData("sprk_matter", "sprk_mattername")]
@@ -480,7 +481,7 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
         var (visibility, visibilityAccessor) = new Sprk.Bff.Api.Tests.TestInfrastructure.CommunicationVisibilityFixtures().Build();
         var handler = new EmailDraftToolHandler(
             _user, Mock.Of<IEmailDraftAi>(), CoreAncestorResolverFixtures.Inert(), CreateLogger<EmailDraftToolHandler>(),
-            _world.Resolver(), _appOnly.Object, visibility, visibilityAccessor);
+            DraftCreation(), visibility, visibilityAccessor);
         var args = JsonSerializer.Serialize(new
         {
             subject = "Settlement",
@@ -511,7 +512,7 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
         var (visibility, visibilityAccessor) = new Sprk.Bff.Api.Tests.TestInfrastructure.CommunicationVisibilityFixtures().Build();
         var handler = new EmailDraftToolHandler(
             _user, Mock.Of<IEmailDraftAi>(), CoreAncestorResolverFixtures.Inert(), CreateLogger<EmailDraftToolHandler>(),
-            _world.Resolver(), _appOnly.Object, visibility, visibilityAccessor);
+            DraftCreation(), visibility, visibilityAccessor);
         var args = JsonSerializer.Serialize(new { subject = "Hello", body = "Draft.", to = new[] { "a@b.example" } });
 
         var result = await handler.ExecuteChatAsync(
@@ -645,9 +646,12 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
         Sprk.Bff.Api.Services.Ai.Membership.IIdentityNormalizationService? identity = null,
         Sprk.Bff.Api.Services.Access.SecureRootFilingGate? rootFiling = null) =>
         new(_user, CreateLogger<DataverseCreateRecordHandler>(), new HandoffUrlBuilder("https://spaarkedev1.crm.dynamics.com"),
-            resolver ?? _world.Resolver(), _appOnly.Object,
+            resolver ?? _world.Resolver(),
             identity ?? IdentityNormalizationFixtures.WithContact(CallerContact).Object,
-            rootFiling ?? SecureRootFilingGateFixtures.NothingSecure());
+            // Task 017 (2d-3): the owned create is the ONE server create, over this harness's collaborators (its share world
+            // and stamp world, as the route's suites build it).
+            RouteRecordCreation.Over(resolver ?? _world.Resolver(), _appOnly.Object, Restamper(), Shares(),
+                rootFiling ?? SecureRootFilingGateFixtures.NothingSecure()));
 
     private Task<ToolResult> CreateRecord(string table, params (string Column, JsonElement Value)[] item) =>
         CreateRecordHandler().ExecuteChatAsync(
@@ -721,6 +725,14 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
             ["sprk_signal"] = "sprk_signals", ["sprk_policy"] = "sprk_policies",
             // #2110: a communication's thread.
             ["sprk_communicationthread"] = "sprk_communicationthreads",
+            // Field mapping task 017 (item 8): an invoice-family table filed by the regarding trio.
+            ["sprk_invoicesubmission"] = "sprk_invoicesubmissions",
+            // Field mapping task 017 (item 9): the budget inquiry's service request.
+            ["sprk_servicerequest"] = "sprk_servicerequests",
+            // Field mapping task 017 (2d-3): an Owned-path table with no registry entry (the chat create refuses it).
+            ["phonecall"] = "phonecalls",
+            // Field mapping task 017-d2: the chat create's company table (contact and task are above).
+            ["account"] = "accounts",
         };
 
         /// <summary>
@@ -758,6 +770,8 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
             {
                 ("sprk_regardingmatter", "sprk_matter", "sprk_RegardingMatter"),
                 ("sprk_regardingproject", "sprk_project", "sprk_RegardingProject"),
+                // Owner decision 2026-10-29: a To Do filed under a work assignment (live navigation property, as TodoRegardingUpdateBuilder binds it).
+                ("sprk_regardingworkassignment", "sprk_workassignment", "sprk_RegardingWorkAssignment"),
                 ("sprk_assignedto", "contact", "sprk_AssignedTo"),
                 ("ownerid", "systemuser", "ownerid"),
                 ("sprk_createdbyperson", "systemuser", "sprk_CreatedByPerson"), // task 146 c1-r1 schema step
@@ -843,6 +857,21 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
                 ("sprk_matter", "sprk_matter", "sprk_Matter"),
                 ("sprk_project", "sprk_project", "sprk_Project"),
             },
+            // Field mapping task 017 (item 8): the invoice submission's core lookups are the regarding trio
+            // (InvoiceFamilyCoreRecordGuard.CoreRecordLookups).
+            ["sprk_invoicesubmission"] = new[]
+            {
+                ("sprk_regardingmatter", "sprk_matter", "sprk_RegardingMatter"),
+                ("sprk_regardingproject", "sprk_project", "sprk_RegardingProject"),
+                ("sprk_regardingworkassignment", "sprk_workassignment", "sprk_RegardingWorkAssignment"),
+            },
+            // Field mapping task 017 (item 9): the budget inquiry's service request (BudgetInquiryExecutor.BuildBody's binds).
+            ["sprk_servicerequest"] = new[]
+            {
+                ("sprk_regardingmatter", "sprk_matter", "sprk_RegardingMatter"),
+                ("sprk_regardingrecordtype", "sprk_recordtype_ref", "sprk_RegardingRecordType"),
+                ("sprk_regardingorganization", "sprk_organization", "sprk_RegardingOrganization"),
+            },
             ["sprk_billingevent"] = new[]
             {
                 ("sprk_matter", "sprk_matter", "sprk_matter"),
@@ -870,6 +899,9 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
                 ("sprk_regardingrecordtype", "sprk_recordtype_ref", "sprk_RegardingRecordType"),
                 // A person the event is assigned to — not a column the pair's readers match the pair against.
                 ("sprk_assignedto", "contact", "sprk_AssignedTo"),
+                // Field mapping task 017 (Phase 2d-1): an event filed under another event, an intermediate, so its I-1 stamp
+                // is derived (live navigation property: Spaarke.Dataverse.Models GetEventNavigationProperty).
+                ("sprk_regardingevent", "sprk_event", "sprk_RegardingEvent"),
             },
             // #2084 round 2: a Signal's core matter (sprk_signal.sprk_matter) and the rule it CITES (sprk_signal.sprk_policy).
             ["sprk_signal"] = new[]
@@ -1177,6 +1209,23 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
             {
                 var table = definition.Groups["t"].Value;
                 var rest = definition.Groups["rest"].Value;
+                if (rest.StartsWith("/Attributes", StringComparison.Ordinal) && rest.Contains("AttributeType", StringComparison.Ordinal))
+                {
+                    // Task 017: the unified create's post-mapping default step asks each target column's type and
+                    // create-validity (its $filter escaped). A lookup this client knows is a Lookup; any other a String.
+                    var typed = AttributeNamed().Matches(Uri.UnescapeDataString(rest)).Select(m => m.Groups["c"].Value).Distinct();
+                    var tableLookups = Lookups.GetValueOrDefault(table, Array.Empty<(string Column, string Target, string Navigation)>());
+                    return Ok(new
+                    {
+                        value = typed.Select(c => new
+                        {
+                            LogicalName = c,
+                            AttributeType = tableLookups.Any(l => l.Column == c) ? "Lookup" : "String",
+                            IsValidForCreate = true,
+                        }),
+                    });
+                }
+
                 if (rest.StartsWith("/Attributes", StringComparison.Ordinal))
                 {
                     // Only the columns the question names — as Dataverse answers the $filter.

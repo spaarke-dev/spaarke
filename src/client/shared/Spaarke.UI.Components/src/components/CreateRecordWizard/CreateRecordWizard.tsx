@@ -292,6 +292,14 @@ export const CreateRecordWizard: React.FC<ICreateRecordWizardProps> = ({
   // -- Refs for stale closure prevention in dynamic step renderContent --
   const associationRef = React.useRef(association);
   associationRef.current = association;
+
+  // Task 195: tell the consumer the current association (pre-fill, pick or skip). Read through a ref so a new config
+  // object on every consumer render does not re-announce an unchanged association.
+  const onAssociationChangeRef = React.useRef(config.associateToStep?.onAssociationChange);
+  onAssociationChangeRef.current = config.associateToStep?.onAssociationChange;
+  React.useEffect(() => {
+    onAssociationChangeRef.current?.(association);
+  }, [association]);
   const selectedExistingRecordRef = React.useRef(selectedExistingRecord);
   selectedExistingRecordRef.current = selectedExistingRecord;
   const createEventNameRef = React.useRef(createEventName);

@@ -408,3 +408,21 @@ Sources: **design** = [`design.md`](../design.md) §8 (D-1..D-12, §8.0c) and §
 - **Implementation:** a separate small PR into docs after #2414 (the as-caller business-unit read) merges, task 167c, in `DecisionParameterSources.DefaultCurrencyAsync`.
 - **Dev fact (2026-10-28):** Secure Record, Spaarke Demo, Spaarke Dev 1 and Spaarke Test 1 have no currency; root (Spaarke) and Spaarke Business Unit 1 are USD. An ordinary unit with no currency still falls back to the base currency (D-193 unchanged).
 
+
+## D-199 — Who gets the Assign Task email, and the system-mailbox fallback (owner, 2026-10-29)
+
+Task 168, owner questions Q1 and Q2 (asked 2026-10-28, explained in detail 2026-10-29).
+- **Q1, recipients (owner: A).** The Assign Task email goes to the assignee only when they can see the matter:
+  - **An eligible internal user**, by the same gate as master `GrantAccessNotifier` (`Api/ExternalAccess/GrantAccessNotifier.cs:200-260`): exactly one eligible user represents the contact, the No Access check on the record and its secure parents (`AsFlagged`) is NotSecure or NotWalled, and they have Read on the task.
+  - **An external contact** with an active External Access grant on the matter who is onboarded (a portal identity binding and an email address). They get the portal link, never a model-driven link, and the assigner is named by display name only, as in `EmailExternalContactGrantAsync` (`GrantAccessNotifier.cs:270-330`).
+  - **Nobody else.** Not a contact with no grant, not one that isn't onboarded, not anyone on the No Access list, not when the contact maps to several users, and not when the check can't be made (fail closed, ADR-003). The task is still created. The outcome records why no email was sent, so the assigner sees it.
+- **Owner requirement (Q1):** the matter, or whatever record the task belongs to, shows its related tasks to a user who has access to them, including in the external portal. Task 168 verifies this for the portal. A gap goes to the owner and becomes a filed issue, not a silent link to a page that doesn't show the task.
+- **Q2, fallback (owner: yes).** When the email can't be sent as the assigning user, it is sent from the system mailbox. The fallback covers the same recipients only: it never emails someone the Q1 gate refused.
+- **Implementation:** the task 168 fix round, `task/168-assign-task-notify` (#2418); plan in `current-task.md`.
+- **Amendment (owner, 2026-10-29): the sender for an external assignee.** Email to an external contact always comes from the system mailbox (`Communication:DefaultMailbox`), never from the assigning user's mailbox. Only the body names the assigner, as "Assigned by {display name}". This matches the portal-access email (`GrantAccessNotifier` → `SendPortalNotificationEmailAsync`) and keeps internal addresses out of external inboxes. An internal assignee is unchanged: the assigner's own mailbox, with the system mailbox as the fallback. Implemented as a 168 follow-up.
+
+## D-200 — A repeat of a blocked-submission decision by a different person answers 200 "already decided" (owner, 2026-10-29)
+
+- **Context:** ebilling 105 (`SubmissionOverrideService.RecloseAsync`). When an override or return was recorded but some Signal closes did not finish, a repeat finishes them in the original decider's name. A repeat by someone without Write on the Signal subjects cannot finish them.
+- **Decision (owner: agreed):** that repeat answers **200 `alreadyDecided`**, not 403 or 503. The decision stands, so a 403 would misreport it; the denial is permanent for that caller, so a 503 would invite repeats that never succeed. The open Signals stay open until the original decider repeats. A read fault during the repeat still answers 503 (F2). Recorded as a known limit in ebilling's `105-override-server.md` §9.
+- **Also agreed:** #2455, the adjustment and override services take the invoice's single core record (`SingleCoreOf`) and refuse zero or several before any write.

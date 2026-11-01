@@ -65,8 +65,9 @@ public static class OfficeModule
         services.AddScoped<ContentDedupDetector>();
 
         // field-mapping-server-write-path-r1 task 013: the ONE server create pipeline (FR-06), merging the Office creation
-        // core and OwnedChildWrite.CreateAsync; task 018 re-pointed the Office quick-create (OfficeService's adapter) to it,
-        // and 018c deleted the Office core and its registration. Concrete (ADR-010: one implementation, no seam), SCOPED because
+        // core and the owned create (OwnedChildWrite's create half); task 018 re-pointed the Office quick-create (OfficeService's
+        // adapter) to it, and 018c deleted the Office core and its registration; task 017 re-pointed the route and the chat,
+        // email.draft and budget-inquiry creates and deleted the owned create. Concrete (ADR-010: one implementation, no seam), SCOPED because
         // SecureChildShareSynchronizer is (ExternalAccessModule; the caller's client arrives as an argument) and UNCONDITIONAL:
         // every dependency (IRecordOwnershipResolver, IFieldMappingDataverseService, IGenericEntityService,
         // SecureRootFilingGate, CoreAncestorRestamper, SecureChildShareSynchronizer, IMembershipEventPublisher) is
