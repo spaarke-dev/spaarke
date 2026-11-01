@@ -397,3 +397,11 @@ public sealed record CorrectionPrefillCoreRecord(string EntityType, Guid EntityI
 
 /// <summary>The invoice that replaced a Superseded one, as the caller may see it (id and the invoice's primary name).</summary>
 public sealed record CorrectionPrefillReplacement(Guid InvoiceId, string Name);
+
+/// <summary>
+/// Task 192: the optional <c>filedUnder</c> extension of the from-email 409 <c>document_core_record_mismatch</c> ("the communication is
+/// filed under another core record"): the record the email is filed under. <c>entityType</c> is <c>Matter</c>, <c>Project</c> or
+/// <c>WorkAssignment</c> (the intake vocabulary, never a logical name); <c>name</c> is the record's primary name. Sent only when the caller can
+/// open the record; otherwise the 409 is exactly what it was without the field.
+/// </summary>
+public sealed record FromEmailFiledUnder(string EntityType, Guid EntityId, string Name);
