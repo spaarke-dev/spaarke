@@ -103,7 +103,7 @@ To begin: `work on task 001`. Wave W0-1 (001, 002, 003) and W2-1 (040, 041) have
 | 097c | ✅ [done; on work] | Persister: the explicit target replaces the automatic lookup, guarded Superseded close in the commit transaction, compensation reopens the old invoice | FULL | opus / high | none | 097a, 097b |
 | 097d | ✅ [done; on work 169c55a498 with the follow-up and the second-review fixes; ontology-r1 OK on ChangedSinceRead→Retry; field security for `sprk_resubmissionof` pending (owner OK)] | After-step closes the old invoice's open Signals as Superseded; resume and idempotency; notes; two adversarial passes | FULL | opus / high | none | 097c |
 | 097e | ✅ [done; on work 8b49cb2432; shape agreed with word-add-in incl. replacedBy] | Correction prefill read for the add-in (firm, core record, status, tracking number; 095 contract item G3) | FULL | sonnet / high | none | 097b |
-| 097f | 🔲 [open] | Superseded invoice's submission view: stays Accepted with a 'replaced by a correction' outcome reason and the correcting tracking number (EB-D-180) | FULL | sonnet / high | none | 097d |
+| 097f | ✅ [done; on work; word-add-in client condition built] | Superseded invoice's submission view: stays Accepted with a 'replaced by a correction' outcome reason and the correcting tracking number (EB-D-180) | FULL | sonnet / high | none | 097d |
 | 098 | ✅ [merged 8b1aa1fa58; uac READY round 5] | (a′) on sprk_invoice: hide invoices with an isolated Submit Invoice source, and derived rows, from external callers | FULL | opus / high | P3-C (p-safe false) | 088, 090 |
 | 099 | ✅ [done] | Finance step 0: refuse flagged-external callers on every /api/finance route (5.3; owner 2026-10-21) | FULL | opus / high | P3-A | none |
 | 113 | 🔲 [open] | Read-time Procedure-change banner on /review: app-only comparison with the snapshot, internal callers only | FULL | sonnet / high | P3-F | 082, 100 |
@@ -157,7 +157,7 @@ To begin: `work on task 001`. Wave W0-1 (001, 002, 003) and W2-1 (040, 041) have
 | 150 | ✅ [done; on work b3eaf99f9f, review fixes in; credit-memo batches need Deploy-EbillingInvoiceTotalsRange.ps1 per environment (owner OK)] | AP export batch (CSV + JSON, D-56 default mapping, snapshot); files as internal-only Stored Files (EB-D-148) | FULL | sonnet / high | P6-A | 014, 023, 025, 028, 103, 090 |
 | 151 | 🔄 [split into 151a/b/c, EB-D-181] | Mark Paid and export UI | STANDARD | sonnet / high | none | 150 |
 | 151a | ✅ [done; on work 06c72f5571] | Mark Paid route (Sent to AP → Paid) and the export batch file download (CSV / JSON, stored bytes) | FULL | sonnet / high | none | 150 |
-| 151b | 🔲 [open] | Invoice views by status, Export to AP and Mark Paid ribbon buttons on views and form, the export modal (ADR-050) with Download, the Billing Export form's Download | FULL | sonnet / high | none | 151a |
+| 151b | ✅ [done; on work 40d3505ac8; not deployed: dev import needs owner OK; 053 must add sprk_trackingnumber to source] | Invoice views by status, Export to AP and Mark Paid ribbon buttons on views and form, the export modal (ADR-050) with Download, the Billing Export form's Download | FULL | sonnet / high | none | 151a |
 | 151c | 🔲 [open] | Email to AP: the AP export email column on the eBilling settings record (owner OK), CSV + JSON attached, sent from the user's mailbox through the communication send path, recorded against the batch | FULL | sonnet / high | none | 151a |
 | 152 | ✅ [done; on work 62039c6887, review fixes in] | Invoice index from structured records | STANDARD | sonnet / high | P6-A | 049, 103 |
 | 153 | 🔲 [open] | Deploy WP6 to dev | STANDARD | sonnet / high | none (deploy) | 150, 151, 152, 136 |
@@ -173,7 +173,7 @@ To begin: `work on task 001`. Wave W0-1 (001, 002, 003) and W2-1 (040, 041) have
 | 189 | 🔲 [open] | Docs: retire "Procedure Library"; data-model docs for the Procedure and Stored File tables; file-store architecture note | STANDARD | sonnet / high | none | 079 |
 | 190 | 🔲 [open] | Project wrap-up | FULL | sonnet / high | none | all |
 | 191 | ✅ [done; on work e657bfda4c] | Invoice reader preflight at intake (422 `ebilling.submission.reader_not_configured` before anything is written) and the `ai.invoice.*` outcome codes in contract §9 (owner OK 2026-10-31, after the first dev UAT) | FULL | sonnet / high | none | 095 |
-| 192 | 🔲 [open; owner OK 2026-10-31; after 191] | Optional `filedUnder` on the from-email 409 `document_core_record_mismatch`: the record the email is filed under, only when the caller can Read it, never for a secure record | FULL | sonnet / high | none | 191 |
+| 192 | ✅ [done; on work 25778a59b7] | Optional `filedUnder` on the from-email 409 `document_core_record_mismatch`: the record the email is filed under, only when the caller can Read it, never for a secure record | FULL | sonnet / high | none | 191 |
 
 ## Parallel Execution Plan
 
