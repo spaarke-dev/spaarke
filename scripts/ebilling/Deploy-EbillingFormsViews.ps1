@@ -82,7 +82,7 @@ $Spec = [ordered]@{
             @{ Name = 'approvers'; Label = 'Approver defaults (used when a record has no approver role)'; Cols = 'sprk_matterapproverroles', 'sprk_projectapproverroles', 'sprk_workassignmentapproverroles' }
             @{ Name = 'reliability'; Label = 'Reliability and confidence weights'; Cols = 'sprk_reliabilitythreshold', 'sprk_weightanalyzer', 'sprk_weightarithmetic', 'sprk_weightreferencematch', 'sprk_weightselfreport', 'sprk_arithmeticfailcap', 'sprk_referencemissingcap' }
             @{ Name = 'processing'; Label = 'Processing'; Cols = 'sprk_codingchunksize', 'sprk_relatedwindowdays', 'sprk_firmnoticeaienabled' }
-            @{ Name = 'apexport'; Label = 'AP export'; Cols = 'sprk_apexportmapping' }
+            @{ Name = 'apexport'; Label = 'AP export'; Cols = 'sprk_apexportemail', 'sprk_apexportmapping' }
         )
         View = 'sprk_name', 'sprk_defaultcodeset', 'sprk_reliabilitythreshold', 'sprk_codingchunksize', 'sprk_relatedwindowdays', 'modifiedon'
     }
@@ -143,7 +143,7 @@ $Spec = [ordered]@{
     }
     sprk_billingexport     = @{
         Form = 'Replace'; FormName = 'Information'
-        Sections = @(@{ Name = 'general'; Label = 'Export batch'; Cols = 'sprk_name', 'sprk_exportstatus', 'sprk_invoicecount', 'sprk_totalamount', 'sprk_formats', 'sprk_failurereason', 'sprk_csvdocument', 'sprk_jsondocument', 'ownerid' }
+        Sections = @(@{ Name = 'general'; Label = 'Export batch'; Cols = 'sprk_name', 'sprk_exportstatus', 'sprk_invoicecount', 'sprk_totalamount', 'sprk_formats', 'sprk_failurereason', 'sprk_senttoapdate', 'sprk_csvdocument', 'sprk_jsondocument', 'ownerid' }
             @{ Name = 'mapping'; Label = 'Mapping snapshot'; Cols = 'sprk_mappingsnapshot' })
         View = 'sprk_name', 'sprk_exportstatus', 'sprk_invoicecount', 'sprk_totalamount', 'createdon'
     }
