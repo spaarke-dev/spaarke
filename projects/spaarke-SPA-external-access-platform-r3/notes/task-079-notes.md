@@ -102,7 +102,7 @@ The full BFF unit suite was not run (project gotcha 2026-10-11).
 3. **Store HTTP wiring.** `TheRealStore_ReadHomeTenant_DecidesFromTheContactReadsAnswer` runs the real store's `ReadHomeTenantAsync` over the HTTP harness: 200 with this contact's GUID tenant, 200 masked (null), 404, 400 missing-column, 403 and 500. It also asserts the one request is the read's own path, with no readability proof and no write.
 4. **No tenant in a store log line.** The store's generic `GetAsync` already takes a fixed `logLabel` (used by the email lookups). The home link lookup (its path carries the home tenant and oid) and the new home tenant read now pass one, so a failed or throwing read logs the label and the status, never the path or body. No other read's log line changed. Test: `AFailingHomeLinkRead_LogsAFixedLabel_NeverTheTenantOrTheOid`; it failed before the label (the path with the tenant and oid was logged) and passes after. Its control shows the sign-in's home contact lookup still logs its path.
 
-## Known limits (filed separately: #ISSUE)
+## Known limits (filed separately: #2499)
 
 - `InMemoryContactIdentityStore.GetContactAsync` rows still carry the tenant that the real `ContactSelect` never returns, so a test that reads it from the row can pass where the real store would not.
 - `AssignTaskRecipientGate.ComposePortalPrincipalAsync` (~:496) still passes the row's empty tenant into the WorkforceHome principal. No consumer reads it today.
