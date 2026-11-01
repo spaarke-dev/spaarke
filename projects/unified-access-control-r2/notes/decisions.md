@@ -152,3 +152,17 @@ CLAUDE.md fact 1 used to read "on the MDA, Dataverse enforces natively and we wr
    - PRJ-000034 and PRJ-000038 move root → BU1;
    - Project 6 moves BU1 → root, following its matter LITG-153116, which is person-owned in the root unit.
    - It is applied after the feature is deployed, report first.
+
+## 2026-11-01: BU1 move on dev, owner decisions (Q1–Q12 of the RBU1 plan)
+
+The owner accepted every recommendation ("yes follow your recommendation for the bu 1 move"). Q1 had been decided on 2026-10-30: Core and Basic User read product configuration org-wide (#2474). The plan and the live re-read behind these answers are in the session scratch plan `rbu1_plan.md` §6–§7 (dev only).
+
+- **Product data (Q2 + K4).** Product configuration rows owned by the administrator's own user are first assigned to the root default team, which is what the resolver answers for an unfiled root row. Records are owned by teams, not people. The administrator then moves to BU1 without moving their records. Their customer records follow their families into BU1. Platform components (apps, bots, AI models, environment variables) stay where they are.
+- **Who moves.** Every enabled human in the root, including the administrator's admin-mode account (Q5) and "# Spaarke Demo Access" (to BU1, not to "Spaarke Demo", Q6), plus the two dev BFF application users. The ontology writer identity stays in the root (Q3). Identities that are not dev BFF identities stay where they are; their clean-up is a separate owner step, tracked privately (Q4).
+- **Policy versions (Q7).** Accepted on dev for now: a new version lands in its publisher's unit. The fix is that a version follows its policy's owner (family rule), handed to the ontology session.
+- **Customer business unit setting (Q8).** Already BU1 on spaarke-bff-dev; no change.
+- **Ambiguous rows (Q9).** Communication accounts and the container record are environment configuration and stay in the root. A communication rule with a matter follows its matter. Personal workspace layouts and personal views stay with their user.
+- **Scope (Q10).** Every customer scope (A–D) is re-owned in this change, from a fresh dry run. Roots first; children follow through the ordinary-moves pass.
+- **Reconciler (Q11).** Not switched off: the setting restarts the BFF. The application users move in a quiet window, with their roles re-added in the same script.
+- **Administrator role (Q12).** Pre-assign the BU1 System Administrator copy, only if the one-user probe proves that a pre-assigned target-unit role survives a move. Otherwise the owner restores the role from the Power Platform admin center.
+- **Execution.** Each write step shows its dry run and waits for the owner's go. The timing is coordinated with the other sessions on shared dev (R3, ebilling).
