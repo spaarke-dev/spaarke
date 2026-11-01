@@ -102,13 +102,13 @@ To begin: `work on task 001`. Wave W0-1 (001, 002, 003) and W2-1 (040, 041) have
 | 097b | ✅ [done; on work 932efea9cc; ships to master only with 097c] | Correction intake on both routes: contract fields, guards (Write, firm, core record, status, same number), target in `sprk_resubmissionof`, job snapshot | FULL | opus / high | P3-F | 097 |
 | 097c | ✅ [done; on work] | Persister: the explicit target replaces the automatic lookup, guarded Superseded close in the commit transaction, compensation reopens the old invoice | FULL | opus / high | none | 097a, 097b |
 | 097d | ✅ [done; on work 169c55a498 with the follow-up and the second-review fixes; ontology-r1 OK on ChangedSinceRead→Retry; field security for `sprk_resubmissionof` pending (owner OK)] | After-step closes the old invoice's open Signals as Superseded; resume and idempotency; notes; two adversarial passes | FULL | opus / high | none | 097c |
-| 097e | 🔲 [open] | Correction prefill read for the add-in (firm, core record, status, tracking number; 095 contract item G3) | FULL | sonnet / high | none | 097b |
+| 097e | ✅ [done; on work 8b49cb2432; shape agreed with word-add-in incl. replacedBy] | Correction prefill read for the add-in (firm, core record, status, tracking number; 095 contract item G3) | FULL | sonnet / high | none | 097b |
 | 097f | 🔲 [open] | Superseded invoice's submission view: stays Accepted with a 'replaced by a correction' outcome reason and the correcting tracking number (EB-D-180) | FULL | sonnet / high | none | 097d |
 | 098 | ✅ [merged 8b1aa1fa58; uac READY round 5] | (a′) on sprk_invoice: hide invoices with an isolated Submit Invoice source, and derived rows, from external callers | FULL | opus / high | P3-C (p-safe false) | 088, 090 |
 | 099 | ✅ [done] | Finance step 0: refuse flagged-external callers on every /api/finance route (5.3; owner 2026-10-21) | FULL | opus / high | P3-A | none |
 | 113 | 🔲 [open] | Read-time Procedure-change banner on /review: app-only comparison with the snapshot, internal callers only | FULL | sonnet / high | P3-F | 082, 100 |
 | 114 | 🔲 [open] | Override releases a no-version-in-force gap hold for that invoice only, recorded through WriteBillingDecisionAsync | FULL | sonnet / high | P3-F | 082, 105 |
-| 115 | 🟡 [code on master; ontology PR review and the dev option run (owner OK) pending] | AddedFee (100000015) and Discount (100000016) billing rule types: options, domain, schemas, validator refusals, handlers | FULL | opus / high | P3-A | none |
+| 115 | ✅ [on master b0679c6ce1 + f4874f4f8a; ontology-r1 PASS 12040e2a74; dev options read back 6edfdb6d6b] | AddedFee (100000015) and Discount (100000016) billing rule types: options, domain, schemas, validator refusals, handlers | FULL | opus / high | P3-A | none |
 | 116 | 🔲 [open] | Procedure Version documents: drafting and readers keyed per version on its Stored File; sprk_sourcedocument retired | FULL | opus / high | P3-F (p-safe false) | 081, 085, 090 |
 | 117 | 🔲 [open] | Core-record delete and Procedures: retire sweep for unlinked record-scoped rule sets; delete lists agreed with uac-r2 | FULL | opus / high | P3-D (p-safe false) | 089 |
 | 118 | 🔲 [open] | Submit Invoice in the email UI: toolbar button (replaces Link Invoice), flagged attachments, Email Review Invoice tab | FULL | sonnet / high | P3-F | 094, 118a |
@@ -169,6 +169,8 @@ To begin: `work on task 001`. Wave W0-1 (001, 002, 003) and W2-1 (040, 041) have
 | 163 | 🔲 [open] | UAT with the owner and dev rollout | STANDARD | sonnet / high | none | 162 |
 | 189 | 🔲 [open] | Docs: retire "Procedure Library"; data-model docs for the Procedure and Stored File tables; file-store architecture note | STANDARD | sonnet / high | none | 079 |
 | 190 | 🔲 [open] | Project wrap-up | FULL | sonnet / high | none | all |
+| 191 | 🔄 [running] | Invoice reader preflight at intake (422 `ebilling.submission.reader_not_configured` before anything is written) and the `ai.invoice.*` outcome codes in contract §9 (owner OK 2026-10-31, after the first dev UAT) | FULL | sonnet / high | none | 095 |
+| 192 | 🔲 [open; owner OK 2026-10-31; after 191] | Optional `filedUnder` on the from-email 409 `document_core_record_mismatch`: the record the email is filed under, only when the caller can Read it, never for a secure record | FULL | sonnet / high | none | 191 |
 
 ## Parallel Execution Plan
 
