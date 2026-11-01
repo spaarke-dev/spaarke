@@ -315,10 +315,109 @@ public class RecordTableRulesTests
     }
 
     [Fact]
-    public void SearchIndexed_IsMatterProjectAndDocumentOnly()
+    public void SearchIndexed_IsTheSixIndexedTablesOnly()
     {
+        // Task 039 (FR-38): work assignment, event and invoice join matter, project and document (was: the last three only).
         RecordTableRules.All.Where(r => r.SearchIndexed).Select(r => r.Table)
-            .Should().BeEquivalentTo("sprk_matter", "sprk_project", "sprk_document");
+            .Should().BeEquivalentTo("sprk_matter", "sprk_project", "sprk_document", "sprk_workassignment", "sprk_event", "sprk_invoice");
+    }
+
+    /// <summary>Round 2 (S3): the name shape is anchored with \A...\z, so a trailing newline (which "$" accepts) is not an index name.</summary>
+    [Theory]
+    [InlineData("spaarke-files-index\n")]
+    [InlineData("spaarke-files-index\r\n")]
+    [InlineData("a\nb")]
+    public void LoggableIndexName_ANameWithALineBreak_IsNotAnIndexName(string name)
+    {
+        RecordTableRules.LoggableIndexName(name).Should().Be($"<not an index name> (length {name.Length})");
+    }
+
+    [Theory]
+    [InlineData("spaarke-files-index")]
+    [InlineData("a")]
+    public void LoggableIndexName_AnIndexName_IsLoggedAsIs(string name)
+    {
+        RecordTableRules.LoggableIndexName(name).Should().Be(name);
+    }
+
+    // ── Round 3 (G3): the one update-path drop sequence ──────────────────────────────────────────────────────────────
+
+    private static readonly Guid UpdatedRowId = Guid.Parse("a0390000-0000-4000-8000-0000000000c1");
+
+    private static Dictionary<string, object?> Fields(params string[] keys) => keys.ToDictionary(k => k, _ => (object?)"v");
+
+    [Fact]
+    public void DropSearchIndexFromUpdate_OnlyTheIndex_EmptiesTheDictionary_AndLogsOncePerColumn()
+    {
+        var log = new Sprk.Bff.Api.Tests.Integration.DataMutation.RecordOwnership.CapturingLog<object>();
+        var fields = Fields("sprk_searchindexname", "sprk_AI_Search_Index@odata.bind");
+
+        var result = RecordTableRules.DropSearchIndexFromUpdate(
+            " SPRK_Event ", UpdatedRowId, fields, RecordTableRules.SearchIndexOriginMapping, log);
+
+        result.Should().Be((true, true));
+        fields.Should().BeEmpty();
+        log.Messages.Should().HaveCount(2).And.OnlyContain(m => m.Contains("table=sprk_event") && m.Contains($"record={UpdatedRowId}")
+            && m.Contains("origin=mapping") && m.Contains("unchanged"), "the table name is logged trimmed and lower-cased");
+    }
+
+    [Fact]
+    public void DropSearchIndexFromUpdate_WithOtherColumns_RemovesTheIndex_AndDoesNotEmpty()
+    {
+        var log = new Sprk.Bff.Api.Tests.Integration.DataMutation.RecordOwnership.CapturingLog<object>();
+        var fields = Fields("sprk_description", "sprk_searchindexname");
+
+        var result = RecordTableRules.DropSearchIndexFromUpdate(
+            "sprk_workassignment", UpdatedRowId, fields, RecordTableRules.SearchIndexOriginCaller, log);
+
+        result.Should().Be((true, false));
+        fields.Keys.Should().Equal("sprk_description");
+    }
+
+    [Theory]
+    [InlineData("sprk_todo")]
+    [InlineData(null)]
+    public void DropSearchIndexFromUpdate_ATableThatDoesNotOwnItsIndex_ChangesNothing(string? table)
+    {
+        var log = new Sprk.Bff.Api.Tests.Integration.DataMutation.RecordOwnership.CapturingLog<object>();
+        var fields = Fields("sprk_searchindexname");
+
+        RecordTableRules.DropSearchIndexFromUpdate(table, UpdatedRowId, fields, RecordTableRules.SearchIndexOriginCaller, log)
+            .Should().Be((false, false));
+        fields.Keys.Should().Equal("sprk_searchindexname");
+        log.Messages.Should().BeEmpty();
+    }
+
+    /// <summary>The rule lives inside the helper: a payload empty BEFORE the drop is not "emptied" (its caller keeps its own refusal).</summary>
+    [Fact]
+    public void DropSearchIndexFromUpdate_APayloadEmptyBeforeAnyDrop_IsNotEmptied_AndLogsNothing()
+    {
+        var log = new Sprk.Bff.Api.Tests.Integration.DataMutation.RecordOwnership.CapturingLog<object>();
+        var fields = new Dictionary<string, object?>();
+
+        RecordTableRules.DropSearchIndexFromUpdate("sprk_event", UpdatedRowId, fields, RecordTableRules.SearchIndexOriginCaller, log)
+            .Should().Be((false, false));
+        log.Messages.Should().BeEmpty();
+
+        var json = System.Text.Json.JsonDocument.Parse("{}").RootElement;
+        var body = RecordTableRules.DropSearchIndexFromUpdate("sprk_event", UpdatedRowId, json, RecordTableRules.SearchIndexOriginCaller, log);
+        (body.DroppedAny, body.Emptied).Should().Be((false, false));
+        log.Messages.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void DropSearchIndexFromUpdate_AJsonBody_IsHandledLikeADictionary()
+    {
+        var log = new Sprk.Bff.Api.Tests.Integration.DataMutation.RecordOwnership.CapturingLog<object>();
+        var onlyIndex = System.Text.Json.JsonDocument.Parse("{\"sprk_searchindexname\":\"x\",\"sprk_ai_search_index@odata.bind\":\"/sprk_aisearchindexes(a0390000-0000-4000-8000-0000000000c2)\"}").RootElement;
+        var mixed = System.Text.Json.JsonDocument.Parse("{\"sprk_description\":\"d\",\"sprk_searchindexname\":\"x\"}").RootElement;
+
+        var first = RecordTableRules.DropSearchIndexFromUpdate("sprk_invoice", UpdatedRowId, onlyIndex, RecordTableRules.SearchIndexOriginCaller, log);
+        var second = RecordTableRules.DropSearchIndexFromUpdate("sprk_invoice", UpdatedRowId, mixed, RecordTableRules.SearchIndexOriginCaller, log);
+
+        (first.DroppedAny, first.Emptied).Should().Be((true, true));
+        (second.DroppedAny, second.Emptied).Should().Be((true, false));
+        second.Body.EnumerateObject().Select(p => p.Name).Should().Equal("sprk_description");
     }
 
     // ── Named rules carry a rationale ────────────────────────────────────────────────────────────────────────────────

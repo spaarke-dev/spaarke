@@ -63,3 +63,53 @@ Two-write rule: every entry here has a GitHub issue, and every issue has an entr
 | **Class** | K: no caller sends a case variant today |
 | **Owner task** | 018b (optional; criterion added), else a follow-up |
 | **Failure** | Step 2 is skipped for system-principal items, so a case-variant `ownerid@odata.bind`, creator-person bind or `sprk_issecure` would sit beside the server's own key. The fix is the K3 approach |
+
+## DI-007 — A system-principal create gets its I-1 stamp only after the create
+
+| Field | Value |
+|---|---|
+| **Found** | 2026-10-30, task 017 part 2d-1 |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2479 |
+| **Class** | K: no system-principal creator exists (owner decision 2d) |
+| **Owner task** | 033 (first system creator) |
+| **Failure** | The caller principal gets the stamp in the create payload (decision 2a). The system principal still gets it from the post-create re-derivation, because binding needs nav-property names only a caller can read. Fix: app-only metadata read or a test-verified nav-property map |
+
+## DI-008 — The repair pass must not re-own task, contact and account
+
+| Field | Value |
+|---|---|
+| **Found** | 2026-10-30, task 017 part 2d-2 |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2480 |
+| **Class** | Deferred: RepairAsync has no production caller yet |
+| **Owner task** | 052 |
+| **Failure** | Registering the three chat tables (owner, 2026-10-30) makes RepairAsync accept them, so the scheduled pass would re-own user-created rows to a team. Exclude them in 052, or ask the owner |
+
+## DI-009 — The owner decision does not see a secure root reached only through the derived stamp
+
+| Field | Value |
+|---|---|
+| **Found** | 2026-10-30, task 017 adversarial review (finding 3) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2483 |
+| **Class** | K2: the same as the deleted core for the route and chat; email.draft keeps its stamp in the item (a′) |
+| **Owner task** | Follow-up after 017; needs UAC-r2 (changes owner decisions) |
+| **Failure** | Step 7 decides the owner from the item, and step 10 binds the derived stamp only into the create body. A child of a team-owned invoice in the reconcile window, whose secure matter is reachable only through that stamp, is owned without secure-if-any. Fix: derive the stamp before step 7 and add its root to the owner question |
+
+## DI-010 — Budget inquiry preflight is looser than the create it precedes
+
+| Field | Value |
+|---|---|
+| **Found** | 2026-10-30, task 017 adversarial review (finding 4) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2484 |
+| **Class** | K3: rare (a service request is filed directly under a matter); not a regression |
+| **Owner task** | Follow-up (a decide-only mode on RecordCreationService) |
+| **Failure** | `PreflightAsync` asks through `OwnedChildWrite.OwnershipOf` (no pair parent, intermediates or stamp). The service can then refuse at step 7 or 10 after the decision is committed, so the decision is recorded with no service request |
+
+## DI-011 — An unregistered owned table is refused only after the chat user confirms
+
+| Field | Value |
+|---|---|
+| **Found** | 2026-10-30, task 017 adversarial review (finding 2, the part the round-1 fix left) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2485 |
+| **Class** | Deferred: it fails closed (nothing is created); the fix needs new interface surface beyond 017's scope |
+| **Owner task** | Follow-up (chat / AIR2-034 owner) |
+| **Failure** | `ValidateChat` is sync with no I/O, and only a metadata read tells an Owned table from an org-owned (RunAsUser) one, so `table_unsupported` comes after confirmation. Fix: an async pre-suspend hook on `IToolHandler` that reads `OwnershipType`, or a tool description that names the creatable tables |

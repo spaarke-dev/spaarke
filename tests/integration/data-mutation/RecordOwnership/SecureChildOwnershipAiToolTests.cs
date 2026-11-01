@@ -733,6 +733,8 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
             ["phonecall"] = "phonecalls",
             // Field mapping task 017-d2: the chat create's company table (contact and task are above).
             ["account"] = "accounts",
+            // Task 039 (FR-38): the AI search index catalog the six search-indexed tables look up.
+            ["sprk_aisearchindex"] = "sprk_aisearchindexes",
         };
 
         /// <summary>
@@ -780,6 +782,8 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
             },
             ["sprk_matter"] = new[]
             {
+                // Task 039 (FR-38): the server-owned search-index lookup, declared on the six search-indexed tables (live navigation-property casing).
+                ("sprk_ai_search_index", "sprk_aisearchindex", "sprk_AI_Search_Index"),
                 ("sprk_assignedtointernal", "contact", "sprk_AssignedToInternal"),
                 ("sprk_createdbyperson", "systemuser", "sprk_CreatedByPerson"),
                 // Field mapping task 018a (K-3): the matter's organization-owned references (live navigation-property casing).
@@ -788,6 +792,8 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
             },
             ["sprk_project"] = new[]
             {
+                // Task 039 (FR-38): the server-owned search-index lookup, declared on the six search-indexed tables (live navigation-property casing).
+                ("sprk_ai_search_index", "sprk_aisearchindex", "sprk_AI_Search_Index"),
                 ("sprk_assignedtointernal", "contact", "sprk_AssignedToInternal"),
                 ("sprk_createdbyperson", "systemuser", "sprk_CreatedByPerson"),
                 // A project's only filing is the ADR-024 pair (it has no typed filing column).
@@ -795,6 +801,8 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
             },
             ["sprk_workassignment"] = new[]
             {
+                // Task 039 (FR-38): the server-owned search-index lookup, declared on the six search-indexed tables (live navigation-property casing).
+                ("sprk_ai_search_index", "sprk_aisearchindex", "sprk_AI_Search_Index"),
                 ("sprk_regardingmatter", "sprk_matter", "sprk_RegardingMatter"),
                 ("sprk_regardingproject", "sprk_project", "sprk_RegardingProject"),
                 // #1616 fix round / task 046 r3: the Create Work Assignment wizard also files under an invoice or an event.
@@ -822,6 +830,8 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
             },
             ["sprk_document"] = new[]
             {
+                // Task 039 (FR-38): the server-owned search-index lookup, declared on the six search-indexed tables (live navigation-property casing).
+                ("sprk_ai_search_index", "sprk_aisearchindex", "sprk_AI_Search_Index"),
                 ("sprk_matter", "sprk_matter", "sprk_Matter"),
                 ("sprk_project", "sprk_project", "sprk_Project"),
                 // Task 147 r1c (round 34 item 6): the document's event lookup is sprk_relatedevent / sprk_RelatedEvent
@@ -831,6 +841,8 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
             // Task 147 r1c: the remaining census create/re-file tables (live navigation-property casing).
             ["sprk_invoice"] = new[]
             {
+                // Task 039 (FR-38): the server-owned search-index lookup, declared on the six search-indexed tables (live navigation-property casing).
+                ("sprk_ai_search_index", "sprk_aisearchindex", "sprk_AI_Search_Index"),
                 ("sprk_matter", "sprk_matter", "sprk_Matter"),
                 ("sprk_project", "sprk_project", "sprk_Project"),
                 // ebilling-r1 task 012: the invoice's work-assignment filing and the invoice it supersedes (a peer reference).
@@ -894,6 +906,8 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
             },
             ["sprk_event"] = new[]
             {
+                // Task 039 (FR-38): the server-owned search-index lookup, declared on the six search-indexed tables (live navigation-property casing).
+                ("sprk_ai_search_index", "sprk_aisearchindex", "sprk_AI_Search_Index"),
                 ("sprk_regardingmatter", "sprk_matter", "sprk_RegardingMatter"),
                 ("sprk_regardingproject", "sprk_project", "sprk_RegardingProject"),
                 ("sprk_regardingrecordtype", "sprk_recordtype_ref", "sprk_RegardingRecordType"),
@@ -979,6 +993,9 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
 
         /// <summary>Task 147 r1: records that do not exist — RetrievePrincipalAccess on one fails (404).</summary>
         public HashSet<Guid> Missing { get; } = new();
+
+        /// <summary>Round 2 (S1): rows that do not exist — a GET or PATCH of the row itself answers 404 (RetrievePrincipalAccess keeps <see cref="Missing"/>).</summary>
+        public HashSet<Guid> MissingRows { get; } = new();
 
         /// <summary>
         /// Per TABLE (entity set, id): a record the caller may not append to, where another table's record with the same id
@@ -1127,6 +1144,9 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
         {
             if (GetOverride?.Invoke(path) is { } overridden)
                 return overridden;
+
+            if (MissingRow(path) is { } absent)
+                return absent;
 
             if (path == "WhoAmI()")
                 return Ok(new { UserId = me });
@@ -1323,6 +1343,8 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
 
         public Task<DataverseUserResponse> PatchAsync(string relativePath, string jsonBody, CancellationToken cancellationToken)
         {
+            if (MissingRow(Uri.UnescapeDataString(relativePath)) is { } absent)
+                return Task.FromResult(absent);
             if (PatchStatus >= 400)
                 return Task.FromResult(DataverseUserResponse.Fail(PatchStatus, DataverseUserClientErrorCodes.AccessDenied, "Denied."));
             if (RefuseUndeclared(relativePath, jsonBody) is { } refused)
@@ -1334,6 +1356,11 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
             OnPatch?.Invoke(relativePath, jsonBody);
             return Task.FromResult(DataverseUserResponse.Ok(204, null));
         }
+
+        private DataverseUserResponse? MissingRow(string path) =>
+            !path.Contains("RetrievePrincipalAccess", StringComparison.Ordinal) && MissingRows.Any(id => path.Contains($"({id:D})", StringComparison.Ordinal))
+                ? DataverseUserResponse.Fail(404, DataverseUserClientErrorCodes.NotFound, "Record does not exist.")
+                : null;
 
         public Task<DataverseUserResponse> DeleteAsync(string relativePath, CancellationToken cancellationToken) =>
             throw new NotSupportedException();

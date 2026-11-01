@@ -4,6 +4,7 @@ using System.Text.RegularExpressions;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Services.Ai.Handlers.Dataverse;
 using Sprk.Bff.Api.Services.Dataverse;
+using Sprk.Bff.Api.Services.RecordCreation;
 
 namespace Sprk.Bff.Api.Services.Ai.Handlers;
 
@@ -221,6 +222,29 @@ public sealed partial class DataverseUpdateRecordHandler : IToolHandler
                 return LogOutcome(context, tablename, recordId,
                     Error(tool, $"Table '{tablename}' has no entity-set name.", ToolErrorCodes.InternalError, startedAt),
                     stopwatch);
+            }
+
+            // Task 039 (FR-38): on a search-indexed table both index columns are the SERVER's (step 8 of the create writes them from
+            // the owning business unit), so an item that names either has it dropped — never refused — and the row's index stays
+            // as it is. Review R2 (NFR-07: drop, never refuse): an item that held ONLY the index is left with nothing to write and
+            // answers a success that says so, with nothing written; an item that was empty to begin with keeps the mapper's
+            // empty-update refusal.
+            var indexDrop = RecordTableRules.DropSearchIndexFromUpdate(
+                tablename, recordId, item, RecordTableRules.SearchIndexOriginCaller, _logger, context.DecisionId.ToString("N"));
+            item = indexDrop.Body;
+            if (indexDrop.Emptied)
+            {
+                // Round 2 (S1): no PATCH is sent, so the row is read as the caller first — a missing or unreadable row
+                // gets the tool error a normal update of that id gets, never "nothing to update".
+                var rowRead = await _dataverse.GetAsync(
+                    $"{entitySetName}({recordId:D})" + (primaryIdAttribute is null ? string.Empty : $"?$select={primaryIdAttribute}"),
+                    cancellationToken).ConfigureAwait(false);
+                if (!rowRead.IsSuccess)
+                {
+                    return LogOutcome(context, tablename, recordId, MapClientError(tool, rowRead, startedAt), stopwatch);
+                }
+
+                return LogOutcome(context, tablename, recordId, NothingToWrite(tool, tablename, recordId, startedAt), stopwatch);
             }
 
             var mapped = await DataverseWriteItemMapper.MapAsync(_dataverse, tablename, item, cancellationToken).ConfigureAwait(false);
@@ -504,6 +528,24 @@ public sealed partial class DataverseUpdateRecordHandler : IToolHandler
 
         return Updated(tool, tablename, recordId, item, startedAt);
     }
+
+    /// <summary>Review R2: the success result for an update whose only columns were the search index, which the server sets (FR-38) —
+    /// nothing was written, and the model is told why.</summary>
+    private ToolResult NothingToWrite(AnalysisTool tool, string tablename, Guid recordId, DateTimeOffset startedAt) =>
+        ToolResult.Ok(
+            HandlerId, tool.Id, tool.Name,
+            data: new
+            {
+                tool = DataverseToolNames.UpdateRecord,
+                tablename,
+                recordId = recordId.ToString("D"),
+                path = DataverseRecordCitations.RecordPath(tablename, recordId),
+                columnsUpdated = Array.Empty<string>(),
+                columnCount = 0
+            },
+            summary: $"Nothing to update on record {recordId:D} in '{tablename}': the search index is set by the server, so it was left as it is.",
+            confidence: 1.0,
+            execution: Timed(startedAt));
 
     /// <summary>The tool's success result for an update that was written.</summary>
     private ToolResult Updated(
