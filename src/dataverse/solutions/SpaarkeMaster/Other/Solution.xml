@@ -373,6 +373,7 @@
       <RootComponent type="61" schemaName="sprk_/js/registrationribbon.js" behavior="0" />
       <RootComponent type="61" schemaName="sprk_/scripts/access_ribbon.js" behavior="0" />
       <RootComponent type="61" schemaName="sprk_/scripts/accessstatus_banner.js" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_/scripts/apexport_ribbon.js" behavior="0" />
       <RootComponent type="61" schemaName="sprk_/scripts/assignedaccess_postsave.js" behavior="0" />
       <RootComponent type="61" schemaName="sprk_/scripts/bff_auth.js" behavior="0" />
       <RootComponent type="61" schemaName="sprk_/scripts/communications_grid_onload.js" behavior="0" />

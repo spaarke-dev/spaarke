@@ -36,6 +36,26 @@
         </FlyoutAnchor>
       </CommandUIDefinition>
     </CustomAction>
+    <CustomAction Id="sprk.ApExport.Invoice.Grid.Export.CustomAction" Location="Mscrm.HomepageGrid.sprk_invoice.MainTab.Actions.Controls._children" Sequence="100">
+      <CommandUIDefinition>
+        <Button Id="sprk.ApExport.Invoice.Grid.Export.Button" Command="sprk.ApExport.Invoice.Grid.Export.Command" LabelText="$LocLabels:sprk.ApExport.Export.LabelText" Alt="$LocLabels:sprk.ApExport.Export.LabelText" ToolTipTitle="$LocLabels:sprk.ApExport.Export.LabelText" ToolTipDescription="$LocLabels:sprk.ApExport.Export.ToolTipDescription" Image16by16="$webresource:sprk_/icons/cmd/export.svg" Image32by32="$webresource:sprk_/icons/cmd/export.svg" ModernImage="$webresource:sprk_/icons/cmd/export.svg" Sequence="100" TemplateAlias="o1" />
+      </CommandUIDefinition>
+    </CustomAction>
+    <CustomAction Id="sprk.ApExport.Invoice.Grid.MarkPaid.CustomAction" Location="Mscrm.HomepageGrid.sprk_invoice.MainTab.Actions.Controls._children" Sequence="110">
+      <CommandUIDefinition>
+        <Button Id="sprk.ApExport.Invoice.Grid.MarkPaid.Button" Command="sprk.ApExport.Invoice.Grid.MarkPaid.Command" LabelText="$LocLabels:sprk.ApExport.MarkPaid.LabelText" Alt="$LocLabels:sprk.ApExport.MarkPaid.LabelText" ToolTipTitle="$LocLabels:sprk.ApExport.MarkPaid.LabelText" ToolTipDescription="$LocLabels:sprk.ApExport.MarkPaid.ToolTipDescription" ModernImage="Accept" Sequence="110" TemplateAlias="o1" />
+      </CommandUIDefinition>
+    </CustomAction>
+    <CustomAction Id="sprk.ApExport.Invoice.Form.Export.CustomAction" Location="Mscrm.Form.sprk_invoice.MainTab.Actions.Controls._children" Sequence="100">
+      <CommandUIDefinition>
+        <Button Id="sprk.ApExport.Invoice.Form.Export.Button" Command="sprk.ApExport.Invoice.Form.Export.Command" LabelText="$LocLabels:sprk.ApExport.Export.LabelText" Alt="$LocLabels:sprk.ApExport.Export.LabelText" ToolTipTitle="$LocLabels:sprk.ApExport.Export.LabelText" ToolTipDescription="$LocLabels:sprk.ApExport.Export.ToolTipDescription" Image16by16="$webresource:sprk_/icons/cmd/export.svg" Image32by32="$webresource:sprk_/icons/cmd/export.svg" ModernImage="$webresource:sprk_/icons/cmd/export.svg" Sequence="100" TemplateAlias="o1" />
+      </CommandUIDefinition>
+    </CustomAction>
+    <CustomAction Id="sprk.ApExport.Invoice.Form.MarkPaid.CustomAction" Location="Mscrm.Form.sprk_invoice.MainTab.Actions.Controls._children" Sequence="110">
+      <CommandUIDefinition>
+        <Button Id="sprk.ApExport.Invoice.Form.MarkPaid.Button" Command="sprk.ApExport.Invoice.Form.MarkPaid.Command" LabelText="$LocLabels:sprk.ApExport.MarkPaid.LabelText" Alt="$LocLabels:sprk.ApExport.MarkPaid.LabelText" ToolTipTitle="$LocLabels:sprk.ApExport.MarkPaid.LabelText" ToolTipDescription="$LocLabels:sprk.ApExport.MarkPaid.ToolTipDescription" ModernImage="Accept" Sequence="110" TemplateAlias="o1" />
+      </CommandUIDefinition>
+    </CustomAction>
     <HideCustomAction HideActionId="sprk.Mscrm.Form.sprk_invoice.Activate.Hide" Location="Mscrm.Form.sprk_invoice.Activate" />
     <HideCustomAction HideActionId="sprk.Mscrm.Form.sprk_invoice.Deactivate.Hide" Location="Mscrm.Form.sprk_invoice.Deactivate" />
     <HideCustomAction HideActionId="sprk.Mscrm.Form.sprk_invoice.Re-activate.Hide" Location="Mscrm.Form.sprk_invoice.Re-activate" />
@@ -69,6 +89,64 @@
           <CrmParameter Value="FirstPrimaryItemId" />
           <CrmParameter Value="PrimaryControl" />
           <CrmParameter Value="SelectedControl" />
+        </JavaScriptFunction>
+      </Actions>
+    </CommandDefinition>
+    <CommandDefinition Id="sprk.ApExport.Invoice.Form.Export.Command">
+      <EnableRules>
+        <EnableRule Id="sprk.ApExport.Invoice.FormApproved.EnableRule" />
+      </EnableRules>
+      <DisplayRules>
+        <DisplayRule Id="sprk.ApExport.Invoice.FormExisting.DisplayRule" />
+        <DisplayRule Id="sprk.ApExport.CreateBatchPrivilege.DisplayRule" />
+      </DisplayRules>
+      <Actions>
+        <JavaScriptFunction Library="$webresource:sprk_/scripts/apexport_ribbon.js" FunctionName="Spaarke.ApExport.Ribbon.openFromForm">
+          <CrmParameter Value="PrimaryControl" />
+          <StringParameter Value="export" />
+        </JavaScriptFunction>
+      </Actions>
+    </CommandDefinition>
+    <CommandDefinition Id="sprk.ApExport.Invoice.Form.MarkPaid.Command">
+      <EnableRules>
+        <EnableRule Id="sprk.ApExport.Invoice.FormSentToAp.EnableRule" />
+      </EnableRules>
+      <DisplayRules>
+        <DisplayRule Id="sprk.ApExport.Invoice.FormExisting.DisplayRule" />
+      </DisplayRules>
+      <Actions>
+        <JavaScriptFunction Library="$webresource:sprk_/scripts/apexport_ribbon.js" FunctionName="Spaarke.ApExport.Ribbon.openFromForm">
+          <CrmParameter Value="PrimaryControl" />
+          <StringParameter Value="markpaid" />
+        </JavaScriptFunction>
+      </Actions>
+    </CommandDefinition>
+    <CommandDefinition Id="sprk.ApExport.Invoice.Grid.Export.Command">
+      <EnableRules>
+        <EnableRule Id="sprk.ApExport.Invoice.SelectionInRange.EnableRule" />
+      </EnableRules>
+      <DisplayRules>
+        <DisplayRule Id="sprk.ApExport.CreateBatchPrivilege.DisplayRule" />
+      </DisplayRules>
+      <Actions>
+        <JavaScriptFunction Library="$webresource:sprk_/scripts/apexport_ribbon.js" FunctionName="Spaarke.ApExport.Ribbon.openFromGrid">
+          <CrmParameter Value="SelectedControlSelectedItemIds" />
+          <CrmParameter Value="SelectedControl" />
+          <StringParameter Value="export" />
+        </JavaScriptFunction>
+      </Actions>
+    </CommandDefinition>
+    <CommandDefinition Id="sprk.ApExport.Invoice.Grid.MarkPaid.Command">
+      <EnableRules>
+        <EnableRule Id="sprk.ApExport.Invoice.SelectionInRange.EnableRule" />
+        <EnableRule Id="sprk.ApExport.Invoice.SelectionSentToAp.EnableRule" />
+      </EnableRules>
+      <DisplayRules />
+      <Actions>
+        <JavaScriptFunction Library="$webresource:sprk_/scripts/apexport_ribbon.js" FunctionName="Spaarke.ApExport.Ribbon.openFromGrid">
+          <CrmParameter Value="SelectedControlSelectedItemIds" />
+          <CrmParameter Value="SelectedControl" />
+          <StringParameter Value="markpaid" />
         </JavaScriptFunction>
       </Actions>
     </CommandDefinition>
@@ -126,8 +204,36 @@
   </CommandDefinitions>
   <RuleDefinitions>
     <TabDisplayRules />
-    <DisplayRules />
+    <DisplayRules>
+      <DisplayRule Id="sprk.ApExport.CreateBatchPrivilege.DisplayRule">
+        <EntityPrivilegeRule EntityName="sprk_billingexport" PrivilegeType="Create" PrivilegeDepth="Basic" />
+      </DisplayRule>
+      <DisplayRule Id="sprk.ApExport.Invoice.FormExisting.DisplayRule">
+        <FormStateRule State="Existing" />
+      </DisplayRule>
+    </DisplayRules>
     <EnableRules>
+      <EnableRule Id="sprk.ApExport.Invoice.FormApproved.EnableRule">
+        <CustomRule Library="$webresource:sprk_/scripts/apexport_ribbon.js" FunctionName="Spaarke.ApExport.Ribbon.formStatusIs" Default="false">
+          <CrmParameter Value="PrimaryControl" />
+          <StringParameter Value="approved" />
+        </CustomRule>
+      </EnableRule>
+      <EnableRule Id="sprk.ApExport.Invoice.FormSentToAp.EnableRule">
+        <CustomRule Library="$webresource:sprk_/scripts/apexport_ribbon.js" FunctionName="Spaarke.ApExport.Ribbon.formStatusIs" Default="false">
+          <CrmParameter Value="PrimaryControl" />
+          <StringParameter Value="sentToAp" />
+        </CustomRule>
+      </EnableRule>
+      <EnableRule Id="sprk.ApExport.Invoice.SelectionInRange.EnableRule">
+        <SelectionCountRule AppliesTo="SelectedEntity" Minimum="1" Maximum="200" />
+      </EnableRule>
+      <EnableRule Id="sprk.ApExport.Invoice.SelectionSentToAp.EnableRule">
+        <CustomRule Library="$webresource:sprk_/scripts/apexport_ribbon.js" FunctionName="Spaarke.ApExport.Ribbon.selectionHasStatus" Default="false">
+          <CrmParameter Value="SelectedControlSelectedItemIds" />
+          <StringParameter Value="sentToAp" />
+        </CustomRule>
+      </EnableRule>
       <EnableRule Id="sprk.SecureChild.sprk_invoice.NativeNewAllowed.EnableRule">
         <CustomRule Library="$webresource:sprk_/scripts/secure_child_ribbon.js" FunctionName="Spaarke.SecureChild.Ribbon.nativeNewAllowed" Default="false">
           <CrmParameter Value="PrimaryControl" />
@@ -146,6 +252,26 @@
     </EnableRules>
   </RuleDefinitions>
   <LocLabels>
+    <LocLabel Id="sprk.ApExport.Export.LabelText">
+      <Titles>
+        <Title description="Export to AP" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.ApExport.Export.ToolTipDescription">
+      <Titles>
+        <Title description="Export the selected Approved invoices to AP as one batch, then download the CSV and JSON files" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.ApExport.MarkPaid.LabelText">
+      <Titles>
+        <Title description="Mark Paid" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.ApExport.MarkPaid.ToolTipDescription">
+      <Titles>
+        <Title description="Record that AP has paid the selected Sent to AP invoices" languagecode="1033" />
+      </Titles>
+    </LocLabel>
     <LocLabel Id="sprk.SecureChild.sprk_invoice.New.LabelText">
       <Titles>
         <Title description="New Invoice" languagecode="1033" />

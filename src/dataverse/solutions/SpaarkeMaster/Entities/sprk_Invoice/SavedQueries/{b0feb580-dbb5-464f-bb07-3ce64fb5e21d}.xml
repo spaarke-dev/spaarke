@@ -1,0 +1,53 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<savedqueries xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <savedquery>
+    <IsCustomizable>1</IsCustomizable>
+    <CanBeDeleted>1</CanBeDeleted>
+    <isquickfindquery>0</isquickfindquery>
+    <isprivate>0</isprivate>
+    <isdefault>0</isdefault>
+    <savedqueryid>{b0feb580-dbb5-464f-bb07-3ce64fb5e21d}</savedqueryid>
+    <layoutxml>
+      <grid name="resultset" jump="sprk_name" select="1" icon="1" preview="1">
+        <row name="result" id="sprk_invoiceid">
+          <cell name="sprk_vendororg" width="180" />
+          <cell name="sprk_regardingrecordname" width="200" />
+          <cell name="sprk_invoicenumber" width="140" />
+          <cell name="sprk_trackingnumber" width="140" />
+          <cell name="sprk_invoicedate" width="110" />
+          <cell name="sprk_approvedtotal" width="130" />
+          <cell name="sprk_currency" width="80" />
+          <cell name="sprk_billingexport" width="180" />
+        </row>
+      </grid>
+    </layoutxml>
+    <querytype>0</querytype>
+    <fetchxml>
+      <fetch version="1.0" mapping="logical">
+        <entity name="sprk_invoice">
+          <attribute name="sprk_invoiceid" />
+          <attribute name="sprk_name" />
+          <attribute name="sprk_vendororg" />
+          <attribute name="sprk_regardingrecordname" />
+          <attribute name="sprk_invoicenumber" />
+          <attribute name="sprk_trackingnumber" />
+          <attribute name="sprk_invoicedate" />
+          <attribute name="sprk_approvedtotal" />
+          <attribute name="sprk_currency" />
+          <attribute name="sprk_billingexport" />
+          <order attribute="sprk_invoicedate" descending="true" />
+          <filter type="and">
+            <condition attribute="statuscode" operator="eq" value="659490002" />
+          </filter>
+        </entity>
+      </fetch>
+    </fetchxml>
+    <IntroducedVersion>1.2.4.0</IntroducedVersion>
+    <LocalizedNames>
+      <LocalizedName description="Paid" languagecode="1033" />
+    </LocalizedNames>
+    <Descriptions>
+      <Description description="Invoices AP has paid (FR-42; EB-D-181), with the export batch each was sent in." languagecode="1033" />
+    </Descriptions>
+  </savedquery>
+</savedqueries>
