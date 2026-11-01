@@ -30,7 +30,7 @@ import {
   describeSubmissionRefusal,
   EMAIL_UNIDENTIFIABLE_CODE,
   FILING_KEPT_DETAIL,
-  HELD_FOR_REVIEW_MESSAGE,
+  describeAcceptedOutcome,
   isRetryableSubmissionRefusal,
   PERMANENT_SUBMISSION_CODES,
   type InvoiceMessageContext,
@@ -146,7 +146,13 @@ const FINAL_STATUSES: ReadonlySet<string> = new Set<InvoiceFinalStatus>(['Accept
 
 /** What {@link pollSubmission} ends with. */
 export type InvoicePollResult =
-  | { kind: 'final'; status: InvoiceFinalStatus; outcomeReasonCode: string | null }
+  | {
+      kind: 'final';
+      status: InvoiceFinalStatus;
+      outcomeReasonCode: string | null;
+      /** §9 (ebilling 097f): the correcting submission's tracking number, when the server names it. */
+      replacedByTrackingNumber?: string;
+    }
   /** The cap was reached while the submission was still Received / Processing (or unreadable for a moment). */
   | { kind: 'pending'; status: string | undefined }
   /** The status cannot be read at all (404, or a refusal that will not change). */
@@ -534,10 +540,16 @@ export async function pollSubmission(
     const status = stringOrUndefined(json?.status);
     lastStatus = status ?? lastStatus;
     if (status && FINAL_STATUSES.has(status)) {
+      const replacedBy = json?.replacedBy;
+      const replacedByTrackingNumber =
+        replacedBy && typeof replacedBy === 'object'
+          ? stringOrUndefined((replacedBy as Record<string, unknown>).trackingNumber)
+          : undefined;
       return {
         kind: 'final',
         status: status as InvoiceFinalStatus,
         outcomeReasonCode: stringOrUndefined(json?.outcomeReasonCode) ?? null,
+        ...(replacedByTrackingNumber ? { replacedByTrackingNumber } : {}),
       };
     }
   }
@@ -636,13 +648,10 @@ export function createInvoiceSubmitHandler(deps: {
 
     if (polled.kind === 'final') {
       if (polled.status === 'Accepted') {
-        // An Accepted invoice with a code is HELD (§9): never the catalog's Failed / Rejected sentences.
-        return {
-          kind: 'success',
-          ...tracking,
-          ...(polled.outcomeReasonCode ? { message: HELD_FOR_REVIEW_MESSAGE } : {}),
-          ...skipped,
-        };
+        // An Accepted invoice with a code is HELD (§9), except one replaced by a correction (097f): never the catalog's
+        // Failed / Rejected sentences.
+        const message = describeAcceptedOutcome(polled.outcomeReasonCode, polled.replacedByTrackingNumber);
+        return { kind: 'success', ...tracking, ...(message ? { message } : {}), ...skipped };
       }
       // Rejected or Failed AFTER the 202: the submission exists (it has a tracking number), so it is not "not submitted".
       return {
