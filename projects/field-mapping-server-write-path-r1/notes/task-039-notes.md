@@ -70,11 +70,15 @@ The drop was disabled with a temporary switch (not committed): B off (create-sid
 
 ## Verification
 
-VERIFY_PLACEHOLDER
+Logs are outside the repo, in the session scratchpad folder `fm039\verify\` (`sln.log`, `arch.log`, `suites.log`) and `fm039\sln-build.log`.
+
+- `dotnet build Spaarke.sln`: 0 errors, 0 warnings.
+- `verify-suites.sh`: Spaarke.ArchTests 1884 passed, 0 failed; Sprk.Bff.Api.Tests (filtered) 6511 passed, 7 skipped (existing skips), 0 failed.
+- Sprk.Bff.Api.Tests was never run unfiltered.
 
 ## Publish delta and CVE
 
-PUBLISH_PLACEHOLDER
+`publish-delta.ps1 -MasterSha d0c1c5dc3c -BranchSha bcd40aecba`: master zip 40,985,178 bytes (192 files), branch zip 40,992,607 bytes (192 files); delta +7,429 bytes (+0.007 MB); total 39.09 MB (thresholds: +5 MB needs justification, 55 MB review, 60 MB stop: none reached). `dotnet list package --vulnerable --include-transitive` on `Sprk.Bff.Api`: no vulnerable packages. No new package.
 
 ### Placement Justification (CLAUDE.md section 10 and 11)
 
