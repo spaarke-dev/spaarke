@@ -110,4 +110,38 @@ public sealed partial class SecureChildOwnershipAiToolTests
         var fields = _appCreates.Should().ContainSingle().Subject.Fields;
         ServerValue(fields, "sprk_AI_Search_Index@odata.bind").Should().Be($"/sprk_aisearchindexes({UnitIndexRow:D})");
     }
+
+    // ── Review R7: the chat create tool (dataverse.create_record) ────────────────────────────────────────────────────
+
+    /// <summary>
+    /// The chat create maps the model's item before the service drops anything, so a model-built index lookup that cannot be
+    /// mapped used to fail the whole create (ValidationFailed) while the chat UPDATE dropped it. Both now drop the index first:
+    /// a malformed lookup, or one the caller cannot AppendTo, never refuses the create and never reaches the row.
+    /// </summary>
+    [Theory]
+    [InlineData("malformed")]
+    [InlineData("noappendto")]
+    [InlineData("name")]
+    public async Task ChatCreate_AnItemNamingTheSearchIndex_IsCreated_NeverRefused_AndTheIndexIsNotTheModels(string shape)
+    {
+        _user.NoAppendToIn.Add(("sprk_aisearchindexes", CallersIndexRow));
+        var index = shape switch
+        {
+            "malformed" => ("sprk_ai_search_index", System.Text.Json.JsonSerializer.SerializeToElement(
+                new { relatedTable = "sprk_aisearchindexes", recordId = "x" })),
+            "noappendto" => Lookup("sprk_ai_search_index", "sprk_aisearchindex", CallersIndexRow),
+            _ => ("sprk_searchindexname", System.Text.Json.JsonSerializer.SerializeToElement("model-index")),
+        };
+
+        var result = await CreateRecord("sprk_event",
+            ("sprk_eventname", System.Text.Json.JsonSerializer.SerializeToElement("Hearing")),
+            Lookup("sprk_regardingmatter", "sprk_matter", OrdinaryMatter),
+            index);
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        var fields = _appCreates.Should().ContainSingle(c => c.Table == "sprk_event").Subject.Fields;
+        fields.Keys.Where(k => k.StartsWith("sprk_ai_search_index", StringComparison.OrdinalIgnoreCase)).Should().BeEmpty(
+            "the model's index lookup is dropped (the owning unit has no index in this world)");
+        fields.Should().NotContainKey("sprk_searchindexname", "the model's name is dropped too");
+    }
 }
