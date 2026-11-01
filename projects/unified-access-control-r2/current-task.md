@@ -13,7 +13,7 @@
 | **Mode** | Final push, round-90 rules. Merge only when Router + "Client lint (type-aware ratchet)" are green; `--squash --match-head-commit <sha>`, no `--delete-branch`, after `git merge-tree`. Live actions, deploys and settings changes need the owner's go; shared-dev deploys go through the R3 protocol. |
 | **Active task** | None in progress. Task 195 is ✅ (d0c1c5dc3c, #2496; live result in `notes/task-195-project-filing-root.md` §5). |
 | **Dev state** | BFF = d0c1c5dc3c since 2026-11-01 03:09Z. Web resources and the `SpaarkeProjectMatterLinkRibbons` ribbon are live. Dev SPA = b083d62183. Deploy checkout C:/wt2468, detached at d0c1c5dc3c. |
-| **Next action** | (1) The owner report and click-test list for 195 have been sent; act on the owner's answer. (2) Clean up merged worktrees with `pwsh scripts/worktree/Remove-WorktreeSafe.ps1 -Path <p>`: C:/wt195, C:/wt2486, C:/wtuacq1, C:/wtuacwo, C:/wtuacrf, C:/wt2471f, C:/wt194 (keep C:/wt2468 until the next deploy). (3) BU1 Q2–Q12 recommendations (below). |
+| **Next action** | (1) The owner report and click-test list for 195 have been sent; act on the owner's answer. (2) BU1 Q2–Q12 recommendations (below). Worktrees C:/wt195, C:/wt2486, C:/wtuacq1, C:/wtuacwo, C:/wtuacrf, C:/wt2471f and C:/wt194 were removed 2026-11-01 (all PRs merged at their local head); keep C:/wt2468 until the next deploy. |
 
 ## Task 195: done
 - **After-notices:** sent to R3 (gate, external 0), ebilling (the transient SQL 207 in its column-delete window; acknowledged and recorded in its 015 notes) and field-mapping.
@@ -21,10 +21,9 @@
 - **Owner browser click-test** stays on the checklist (§5 of the note) and does not hold the task open (round 90).
 
 ## Next (mine, in order)
-1. Worktree cleanup (above).
-2. BU1 Q2–Q12 recommendations for the owner (`$TEMP/uacmerge/uacg/rbu1/rbu1_plan.md` §6), including K4.
-3. Review field-mapping's 039 diff (FR-38 widening: WA, event and invoice search-indexed; both index columns server-owned), its #2483 follow-up and later 040, when they arrive.
-4. Parked (verify state):
+1. BU1 Q2–Q12 recommendations for the owner (`$TEMP/uacmerge/uacg/rbu1/rbu1_plan.md` §6), including K4.
+2. Review field-mapping's 039 diff (FR-38 widening: WA, event and invoice search-indexed; both index columns server-owned), its #2483 follow-up and later 040, when they arrive.
+3. Parked (verify state):
    - task 193 (C:/wt193), task 197 (C:/wt197);
    - #2427 output lookups (C:/wt2427; ebilling waits for its sha);
    - 196a/196b.
