@@ -10,6 +10,8 @@ Changes 2026-10-31 (097e, agreed with word-add-in-r1): new section 10, the corre
 
 Changes 2026-10-31 (191, owner-approved 2026-10-31 after the first dev UAT, for word-add-in-r1): new synchronous 422 `ebilling.submission.reader_not_configured` (section 6), answered before anything is written or filed on the from-email, from-document (confirm) and upload routes; section 9 now lists every `ai.invoice.*` outcome code the job can store (`ai.invoice.read.not_configured`, `ai.invoice.disabled`, `ai.invoice.binding_missing`, `ai.invoice.completion_failed`, `ai.invoice.output_invalid`), each marked permanent or retried.
 
+Changes 2026-11-01 (097f, EB-D-180, for word-add-in-r1's agreement): the submission status read (section 3, "Progress") of an Accepted submission whose invoice a correction Superseded answers `outcomeReasonCode` `ebilling.submission.replaced_by_correction` and an additive `replacedBy { submissionId, trackingNumber }` (section 9). Status stays `Accepted`. An answer for any other submission is unchanged.
+
 Binding for 095 and word-add-in-r1; changes need word-add-in-r1's agreement first. Behaviour is model §9.1 (v5.9 FINAL); this pins names, statuses and codes only. Citations: `work/ebilling-r1` @ 786d1ea17a, under `src/server/api/Sprk.Bff.Api/` unless shown. NEW = no existing code to follow.
 
 ## 1. Route
@@ -82,7 +84,7 @@ The firm fields are **not** part of the idempotency key K (section 4; Changed 20
 
 - The first four fields are `InvoiceSubmissionAccepted` (InvoiceSubmissionEndpoints.cs:184; InvoiceSubmissionHttp.cs:112-113). `emlDocumentId` is NEW: the .eml source (fresh, or resolved in 1a).
 - `jobId` is the submission job (deterministic, as InvoiceSubmissionService.cs:207), not an Office job: never poll `/api/office/jobs/{id}`. The .eml's save job is not returned; its failure ends the submission Failed (§9.1 step 3).
-- **Progress:** `GET statusUrl`, the existing route (InvoiceSubmissionEndpoints.cs:66-74), returns 200 `InvoiceSubmissionView` (InvoiceSubmissionContracts.cs:185-215). `status`: `Received`, `Processing` (not final); `Accepted`, `Rejected`, `Failed` (final). `outcomeReasonCode` is pinned in section 9 (G2). Unreadable or absent: 404 reasonCode `sdap.access.deny.record_unavailable`; read fault: 503 `ebilling.submission.record_unavailable`.
+- **Progress:** `GET statusUrl`, the existing route (InvoiceSubmissionEndpoints.cs:66-74), returns 200 `InvoiceSubmissionView` (InvoiceSubmissionContracts.cs:185-215). `status`: `Received`, `Processing` (not final); `Accepted`, `Rejected`, `Failed` (final). `outcomeReasonCode` is pinned in section 9 (G2); an Accepted submission whose invoice was replaced by a correction also carries `replacedBy` (section 9, Added 2026-11-01, 097f). Unreadable or absent: 404 reasonCode `sdap.access.deny.record_unavailable`; read fault: 503 `ebilling.submission.record_unavailable`.
 
 ## 4. Idempotency
 
@@ -193,7 +195,7 @@ Field names and codes in this file are binding once word-add-in-r1 agrees (095 P
 
 ## 9. Submission outcome codes (G2)
 
-`InvoiceSubmissionView.outcomeReasonCode` when `status` is final and not `Accepted`, or while an Accepted invoice is held. Clients must accept unknown codes and show a generic message for them. No server prose is pinned; the add-in localises.
+`InvoiceSubmissionView.outcomeReasonCode` when `status` is final and not `Accepted`, or while an Accepted invoice is held, or (Added 2026-11-01, 097f) when an Accepted submission's invoice was replaced by a correction (`ebilling.submission.replaced_by_correction`, below). Clients must accept unknown codes and show a generic message for them. No server prose is pinned; the add-in localises.
 
 | status | outcomeReasonCode | Meaning |
 |---|---|---|
@@ -218,8 +220,21 @@ Field names and codes in this file are binding once word-add-in-r1 agrees (095 P
 | Failed | `ebilling.submission.document_not_found` | Added 2026-10-28 (094 step 3): the saved `.eml` was deleted before the commit |
 | Failed | `ebilling.submission.source_changed` | Added 2026-10-28 (094): the saved `.eml` no longer belongs to the communication its marked files were read from (Failed at once), or it kept changing until the processing attempts ran out. A re-attempt is allowed (EB-D-160) |
 | Failed | `ebilling.submission.processing_failed` | Any other processing failure |
+| Accepted | `ebilling.submission.replaced_by_correction` | Added 2026-11-01 (097f, EB-D-180). The submission was accepted and its invoice has since been replaced by a correction (the invoice is Superseded). **This is not a hold**: a client that treats any code on an Accepted submission as "held for review" must treat this one as a plain Accepted. Derived when the status is read, never stored |
 | Rejected | `ebilling.submission.blocked` | A blocking rule rejected the invoice |
 | Rejected | `ebilling.submission.returned` | Returned to the firm |
+
+**Replaced by a correction (Added 2026-11-01, 097f, EB-D-180).** Every route that answers a submission's status (`GET /api/finance/invoice-submissions/{id}`, and the external `GET /api/v1/external/invoice-submissions/{id}` and list `GET /api/v1/external/invoice-submissions`) answers, for an Accepted submission whose own invoice is Superseded, `status` `Accepted` (unchanged), `outcomeReasonCode` `ebilling.submission.replaced_by_correction` (in place of any other stored code, which no longer applies to a closed invoice), and:
+
+```json
+"replacedBy": { "submissionId": "guid", "trackingNumber": "string | null" }
+```
+
+- `replacedBy` is **absent** (not `null`) unless the caller may read the correcting submission; clients treat an absent or null `replacedBy` as "replaced, correction not shown". The reason code is answered either way.
+- The correcting submission is the invoice-bearing submission whose `sprk_resubmissionof` is this submission (the direct one only; no chain). Several: the one whose invoice is not itself Superseded; still not exactly one: absent. A fault finding it, reading it or deciding the caller's right to it leaves `replacedBy` absent (a Warning is logged); it never turns the answer into a 503.
+- The caller may read it by the rule the route already applies to a submission: internal, the caller's own Read on the submission (`finance.read`); external, the caller's firm, their Read on its core record, and the same visibility decision the submission list uses. A correcting submission the caller cannot read is never named, and nothing else in the answer reveals it.
+- This is the submission's `submissionId` and `trackingNumber`, which is not the `replacedBy` of section 10 (an invoice id and name, on the correction prefill).
+- A submission whose invoice is not Superseded, and any submission that is not Accepted, is answered exactly as before: the same bytes. The note is derived at read time; nothing is written and no status is added.
 
 `ebilling.submission.attachment_not_preserved` (Added 2026-10-28) is a synchronous 422 from the submit (section 6), never an `outcomeReasonCode`: a request it refuses creates no submission.
 
