@@ -85,7 +85,7 @@ public sealed class ApExportDeliveryTests
         body["sentTo"]!.GetValue<string>().Should().Be(ApAddress);
         body["cc"]!.AsArray().Select(n => n!.GetValue<string>()).Should().Equal("boss@example.com", "ops@example.com");
         body["communicationId"]!.GetValue<Guid>().Should().NotBeEmpty();
-        body["senttoapDateSet"]!.GetValue<bool>().Should().BeTrue();
+        body["sentToApDateSet"]!.GetValue<bool>().Should().BeTrue();
         body["sentToApDate"]!.GetValue<DateTimeOffset>().Should().Be(host.Clock.Now);
         SentToApOf(host, batchId).Should().Be(host.Clock.Now.UtcDateTime);
 
@@ -148,7 +148,7 @@ public sealed class ApExportDeliveryTests
         first.StatusCode.Should().Be(HttpStatusCode.OK);
         second.StatusCode.Should().Be(HttpStatusCode.OK);
         var body = await BodyOf(second);
-        body["senttoapDateSet"]!.GetValue<bool>().Should().BeFalse();
+        body["sentToApDateSet"]!.GetValue<bool>().Should().BeFalse();
         body["sentToApDate"]!.GetValue<DateTimeOffset>().UtcDateTime.Should().Be(firstDate!.Value);
         SentToApOf(host, batchId).Should().Be(firstDate, "never overwritten");
         host.World.Dataverse.WritesTo("sprk_billingexport").Should().Be(writes, "the second send wrote nothing to the batch");
@@ -166,7 +166,7 @@ public sealed class ApExportDeliveryTests
 
         var response = await host.SendAsync(HttpMethod.Post, EmailUrl(batchId));
 
-        (await BodyOf(response))["senttoapDateSet"]!.GetValue<bool>().Should().BeFalse();
+        (await BodyOf(response))["sentToApDateSet"]!.GetValue<bool>().Should().BeFalse();
         SentToApOf(host, batchId).Should().Be(marked);
     }
 
@@ -191,7 +191,7 @@ public sealed class ApExportDeliveryTests
         host.DeliveryLog.Entries.Should().Contain(e => e.Level == LogLevel.Error);
     }
 
-    [Fact(DisplayName = "151c-1a: the date write failing AFTER the send logs an Error and still answers 200 with senttoapDateSet false (the email went)")]
+    [Fact(DisplayName = "151c-1a: the date write failing AFTER the send logs an Error and still answers 200 with sentToApDateSet false (the email went)")]
     public async Task Email_DateWriteFails_StillOk_AndLogsAnError()
     {
         var (batchId, host) = await ExportedAsync();
@@ -202,7 +202,7 @@ public sealed class ApExportDeliveryTests
 
         response.StatusCode.Should().Be(HttpStatusCode.OK);
         var body = await BodyOf(response);
-        body["senttoapDateSet"]!.GetValue<bool>().Should().BeFalse();
+        body["sentToApDateSet"]!.GetValue<bool>().Should().BeFalse();
         body["sentToApDate"].Should().BeNull();
         body["communicationId"]!.GetValue<Guid>().Should().NotBeEmpty();
         host.FakeMailer!.Sent.Should().ContainSingle("the email went exactly once");

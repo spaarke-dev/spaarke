@@ -50,10 +50,10 @@ Request body (optional; an empty body is the same as `{}`):
 
 ```json
 { "communicationId": "<guid>", "sentTo": "ap@example.com", "cc": ["a@example.com"],
-  "sentToApDate": "2026-11-02T09:30:00+00:00", "senttoapDateSet": true }
+  "sentToApDate": "2026-11-02T09:30:00+00:00", "sentToApDateSet": true }
 ```
 
-Note the casing of `senttoapDateSet` (lower-case `to`, as the brief gave it). `senttoapDateSet` is true only when this call set the date. A re-send returns the date already held and `false`. If the date write fails after the send, the answer is still 200 with `senttoapDateSet: false` and `sentToApDate: null`; the email went and must not be sent again.
+`sentToApDateSet` is true only when this call set the date. A re-send returns the date already held and `false`. If the date write fails after the send, the answer is still 200 with `sentToApDateSet: false` and `sentToApDate: null`; the email went and must not be sent again.
 
 | Status | `errorCode` | When |
 |---|---|---|

@@ -16,12 +16,12 @@ namespace Sprk.Bff.Api.Services.Finance;
 public sealed record ApExportEmailRequest(IReadOnlyList<string>? Cc, string? Message);
 
 /// <summary>
-/// 200 body of Email to AP. <see cref="SenttoapDateSet"/> is true when THIS call set the batch's Sent to AP Date; false when the date was already
+/// 200 body of Email to AP. <see cref="SentToApDateSet"/> is true when THIS call set the batch's Sent to AP Date; false when the date was already
 /// set (<see cref="SentToApDate"/> is then the earlier value, unchanged) or when the date could not be written after the send (it is then null: the
 /// email WAS sent, so a retry must not send again unless the user asks).
 /// </summary>
 public sealed record ApExportEmailResponse(
-    Guid? CommunicationId, string SentTo, IReadOnlyList<string> Cc, DateTimeOffset? SentToApDate, bool SenttoapDateSet);
+    Guid? CommunicationId, string SentTo, IReadOnlyList<string> Cc, DateTimeOffset? SentToApDate, bool SentToApDateSet);
 
 /// <summary>200 body of Mark Sent to AP: the batch's Sent to AP Date, and whether it was already set (then it is unchanged).</summary>
 public sealed record ApExportMarkSentResponse(DateTimeOffset? SentToApDate, bool AlreadySet);
@@ -91,7 +91,7 @@ public class ApExportMailer(CommunicationService communication)
 /// <para><b>The record.</b> The sent <c>sprk_communication</c> is owned as a content row of the batch (the ownership resolver, never the default owner),
 /// is internal-only, is not enriched, is not archived, and carries no regarding or lookup to the batch: linking it to the batch is task 151c-2.</para>
 /// <para><b>The date.</b> Set only when empty, by a version-conditional write, and never overwritten. After the email went, a failure to write it is logged
-/// at Error and the route still answers 200 (<see cref="ApExportEmailResponse.SenttoapDateSet"/> false), because a retry would send the email again.</para>
+/// at Error and the route still answers 200 (<see cref="ApExportEmailResponse.SentToApDateSet"/> false), because a retry would send the email again.</para>
 /// <para><b>The recipient</b> is read from the settings row with its own one-column query, not through <see cref="IEbillingSettingsReader"/>: that reader's
 /// query names every settings column and serves every submission, so a column the schema script has not yet added must not be able to fail it.</para>
 /// </remarks>

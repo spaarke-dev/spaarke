@@ -141,7 +141,7 @@ public static class ApExportEndpoints
                 "ebilling.export.ap_email_not_configured, file_not_available (the batch did not complete, or a file is missing or unscanned) or " +
                 "attachments_too_large; 400 for a bad CC or message; 503 ebilling.export.email_send_failed (nothing recorded). On success the batch's " +
                 "Sent to AP Date is set when empty and never overwritten; if that write fails after the send the answer is still 200 with " +
-                "senttoapDateSet false.")
+                "sentToApDateSet false.")
             .Produces<ApExportEmailResponse>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status400BadRequest)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
