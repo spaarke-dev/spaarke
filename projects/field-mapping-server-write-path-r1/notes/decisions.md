@@ -550,3 +550,15 @@ missing to add. Owners and refusals are unchanged, and the service needs no chan
 - **Visible change:** PRJT.10001.01 now inherits Restricted from its matter REAL-2026-123456.02.
 - **Facts for 040:** on dev, every project with a matter link has a pair, and none is filed under a secure matter. 195 no longer blocks 040, but 040 still needs 005 (`-Apply` on hold, owner) and 019.
 - **For 076:** the "projects pair-filed" check can now be run.
+
+### 2026-11-01 — #2502: users never choose the index; the index follows the content type (owner, in this session)
+
+- **Owner:** "users should not choose the index; the index is determined by the document/file type."
+- **For `POST /api/ai/rag/index-file`:** the client's `searchIndexName` is not honoured. The server picks the index from what is being indexed, using the canonical catalog (`docs/architecture/AI-SEARCH-INDEX-CATALOG.md`):
+  - SPE document chunks go to `spaarke-files-index` (plus `spaarke-discovery-index`);
+  - chat session files go to `spaarke-session-files`;
+  - invoices go to `spaarke-invoices-index`;
+  - and so on.
+- **Found while checking:** the route stamps `sprk_searchindexname` with `GetDefaultIndexName()` even when the chunks went to a client-named index (`RagEndpoints.cs:638-648`). The record can therefore name an index the file is not in. The fix removes this mismatch.
+- **Open (asked of the owner):** this rule pulls against the per-BU index hook kept by Q2 = (B), 2026-10-29: BU → `sprk_ai_search_index`, step 8's fill, and the resolver's parent-BU chain. Do the per-BU record columns stay as a hook, for example a Secure Records index, or go?
+- **Not yet scheduled.** It takes the scope path (design → UAC-r2 review → spec amendment → task → TASK-INDEX → owner approval).
