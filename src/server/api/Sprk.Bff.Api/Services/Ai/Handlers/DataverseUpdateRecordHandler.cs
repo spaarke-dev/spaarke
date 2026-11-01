@@ -226,7 +226,9 @@ public sealed partial class DataverseUpdateRecordHandler : IToolHandler
 
             // Task 039 (FR-38): on a search-indexed table both index columns are the SERVER's (step 8 of the create writes them from
             // the owning business unit), so an item that names either has it dropped — never refused — and the row's index stays
-            // as it is. An item left empty is answered as any empty update is (the mapper's).
+            // as it is. Review R2 (NFR-07: drop, never refuse): an item that held ONLY the index is left with nothing to write and
+            // answers a success that says so, with nothing written; an item that was empty to begin with keeps the mapper's
+            // empty-update refusal.
             if (RecordTableRules.OwnsSearchIndex(tablename))
             {
                 var droppedIndex = new List<RecordTableRules.DroppedSearchIndexValue>();
@@ -235,6 +237,10 @@ public sealed partial class DataverseUpdateRecordHandler : IToolHandler
                 {
                     RecordTableRules.LogSearchIndexDropped(
                         _logger, tablename, recordId, droppedIndex, applied: null, correlationId: context.DecisionId.ToString("N"));
+                    if (item.ValueKind == JsonValueKind.Object && !item.EnumerateObject().Any())
+                    {
+                        return LogOutcome(context, tablename, recordId, NothingToWrite(tool, tablename, recordId, startedAt), stopwatch);
+                    }
                 }
             }
 
@@ -519,6 +525,24 @@ public sealed partial class DataverseUpdateRecordHandler : IToolHandler
 
         return Updated(tool, tablename, recordId, item, startedAt);
     }
+
+    /// <summary>Review R2: the success result for an update whose only columns were the search index, which the server sets (FR-38) —
+    /// nothing was written, and the model is told why.</summary>
+    private ToolResult NothingToWrite(AnalysisTool tool, string tablename, Guid recordId, DateTimeOffset startedAt) =>
+        ToolResult.Ok(
+            HandlerId, tool.Id, tool.Name,
+            data: new
+            {
+                tool = DataverseToolNames.UpdateRecord,
+                tablename,
+                recordId = recordId.ToString("D"),
+                path = DataverseRecordCitations.RecordPath(tablename, recordId),
+                columnsUpdated = Array.Empty<string>(),
+                columnCount = 0
+            },
+            summary: $"Nothing to update on record {recordId:D} in '{tablename}': the search index is set by the server, so it was left as it is.",
+            confidence: 1.0,
+            execution: Timed(startedAt));
 
     /// <summary>The tool's success result for an update that was written.</summary>
     private ToolResult Updated(

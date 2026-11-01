@@ -84,18 +84,36 @@ public sealed partial class SecureChildOwnershipAiToolTests
         line.Should().Contain("<not an index name> (length 20)");
     }
 
+    /// <summary>Review R2 (NFR-07: drop, never refuse): a body that names only the index is answered as it was before task 039 (204), with nothing written.</summary>
     [Fact]
-    public async Task ChildRecordPatch_AnInvoiceNamingOnlyTheSearchIndex_WritesNothing()
+    public async Task ChildRecordPatch_AnInvoiceNamingOnlyTheSearchIndex_AnswersNoContent_AndWritesNothing()
     {
+        var log = new CapturingLog<Program>();
         var result = await ChildRecordEndpoints.UpdateAsync(
             "sprk_invoice", UpdatedRow,
             Payload(new() { [IndexName] = "client-index", [IndexBind] = $"/sprk_aisearchindexes({ClientsIndex:D})" }),
+            _user, _world.Resolver(), Restamper(), Children(), HttpContextOfCaller(), log, CancellationToken.None,
+            appOnlyEntities: AppEntities());
+
+        Status(result).Should().Be(StatusCodes.Status204NoContent, Detail(result));
+        _user.Patches.Should().BeEmpty("the index is never written by a client, and there is nothing else to write");
+        log.Messages.Where(m => m.Contains("client_search_index_dropped")).Should().HaveCount(2, "the drop is still logged");
+    }
+
+    /// <summary>Review R2 control: a body that was empty BEFORE any drop keeps the mapper's empty-update refusal (the refusal is unchanged).</summary>
+    [Theory]
+    [InlineData("sprk_invoice")]
+    [InlineData("sprk_todo")]
+    public async Task ChildRecordPatch_ABodyThatWasEmptyBeforeAnyDrop_KeepsItsExistingRefusal(string table)
+    {
+        var result = await ChildRecordEndpoints.UpdateAsync(
+            table, UpdatedRow, Payload(new()),
             _user, _world.Resolver(), Restamper(), Children(), HttpContextOfCaller(),
             Microsoft.Extensions.Logging.Abstractions.NullLogger<Program>.Instance, CancellationToken.None,
             appOnlyEntities: AppEntities());
 
-        Status(result).Should().Be(StatusCodes.Status400BadRequest, "an update left with no column is the mapper's empty-update answer");
-        _user.Patches.Should().BeEmpty("the index is never written by a client");
+        Status(result).Should().Be(StatusCodes.Status400BadRequest, "an update with no column is the mapper's empty-update answer");
+        _user.Patches.Should().BeEmpty();
     }
 
     [Fact]
@@ -159,13 +177,28 @@ public sealed partial class SecureChildOwnershipAiToolTests
             .And.OnlyContain(m => m.Contains($"table={table}") && m.Contains("origin=caller") && m.Contains("unchanged"));
     }
 
+    /// <summary>Review R2: an item that names only the index is a success that says so, with nothing written (drop, never refuse).</summary>
     [Fact]
-    public async Task ChatUpdate_ASearchIndexedTable_NamingOnlyTheIndex_WritesNothing()
+    public async Task ChatUpdate_ASearchIndexedTable_NamingOnlyTheIndex_Succeeds_WithANote_AndWritesNothing()
     {
-        var result = await ChatUpdate("sprk_event", new CapturingLog<DataverseUpdateRecordHandler>(),
-            Lookup("sprk_ai_search_index", "sprk_aisearchindex", ClientsIndex));
+        var log = new CapturingLog<DataverseUpdateRecordHandler>();
+        var result = await ChatUpdate("sprk_event", log, Lookup("sprk_ai_search_index", "sprk_aisearchindex", ClientsIndex));
 
-        result.Success.Should().BeFalse("an update left with no column is the mapper's empty-update answer");
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        result.Summary.Should().Contain("search index").And.Contain("server");
+        _user.Patches.Should().BeEmpty();
+        log.Messages.Where(m => m.Contains("client_search_index_dropped")).Should().HaveCount(1);
+    }
+
+    /// <summary>Review R2 control: an item that was empty BEFORE any drop keeps the mapper's empty-update refusal.</summary>
+    [Theory]
+    [InlineData("sprk_event")]
+    [InlineData("sprk_todo")]
+    public async Task ChatUpdate_AnItemThatWasEmptyBeforeAnyDrop_KeepsItsExistingRefusal(string table)
+    {
+        var result = await ChatUpdate(table, new CapturingLog<DataverseUpdateRecordHandler>());
+
+        result.Success.Should().BeFalse("an update with no column is the mapper's empty-update answer");
         _user.Patches.Should().BeEmpty();
     }
 

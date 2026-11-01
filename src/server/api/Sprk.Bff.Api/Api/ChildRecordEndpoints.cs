@@ -604,7 +604,9 @@ public static class ChildRecordEndpoints
 
         // Task 039 (FR-38): on a search-indexed table (an invoice, here) both index columns are the SERVER's — step 8 of the create
         // writes them from the owning business unit — so a body that names either has it dropped, never refused, and the
-        // row's index stays as it is. A body left empty is answered as any empty update is (the mapper's).
+        // row's index stays as it is. Review R2 (NFR-07: drop, never refuse): a body that held ONLY the index is left with nothing to
+        // write, and answers its normal success with nothing written (as it did before 039); a body that was empty to begin with
+        // keeps the mapper's empty-update refusal.
         if (RecordTableRules.OwnsSearchIndex(entity))
         {
             var droppedIndex = new List<RecordTableRules.DroppedSearchIndexValue>();
@@ -613,6 +615,8 @@ public static class ChildRecordEndpoints
             {
                 RecordTableRules.LogSearchIndexDropped(
                     logger, entity, id, droppedIndex, applied: null, correlationId: httpContext.TraceIdentifier);
+                if (body.ValueKind == JsonValueKind.Object && !body.EnumerateObject().Any())
+                    return Results.NoContent();
             }
         }
 
