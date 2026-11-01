@@ -167,3 +167,14 @@ The owner accepted every recommendation ("yes follow your recommendation for the
 - **Administrator role (Q12).** Pre-assign the BU1 System Administrator copy, only if the one-user probe proves that a pre-assigned target-unit role survives a move. Otherwise the owner restores the role from the Power Platform admin center.
 - **Execution.** Each write step shows its dry run and waits for the owner's go. The timing is coordinated with the other sessions on shared dev (R3, ebilling).
 - **Playbooks (2026-11-01, owner answer to the product hand-over dry run).** The BFF's playbook routes authorize by owner == caller (#2505), so a team-owned playbook could not be edited, shared or changed through the BFF. The 34 dev playbooks therefore stay owned by their author. The other 263 product configuration rows go to the root default team. The playbooks follow once #2505 is fixed.
+- **Done so far (2026-11-01).**
+  - **Product hand-over.** All 263 rows are assigned to the root default team and read back (after R3's "done").
+  - **Step 1 probe.** The probe ran on the administrator's second account (`rbu1s1_probe_log.json` in the session scratch).
+    - The move held: the account is in BU1 and the BU1 default team.
+    - Its field-security profiles are unchanged (none).
+    - With `DoNotMoveAllRecords`, all 5 of its rows stayed in the root: 2 mailboxes, a queue, user settings and 1 outbox row.
+  - **A role from the target unit, assigned before the move, does NOT survive it.** Every role is stripped, so Q12's pre-assignment path is out. The owner restores the administrator's System Administrator role from the Power Platform admin center. Step 3 therefore runs last, while the owner is at the admin center.
+  - **Probe roles restored.** The BU1 Console and Office Add In copies are assigned; Basic comes through the BU1 default team.
+  - **Outbox row not moved.** Setting the outbox row's owning unit was refused: Dataverse requires the row's owner to hold Read on the table, and no role the account holds grants Read on Notification Outbox (only Core User and the admin and service roles do).
+    - The row stays in the root with the same owner. Nothing reads it as that user.
+  - **Before step 2.** Check, for each mover's owned tables, that the mover's BU1 roles hold Read, or expect the same refusal.
