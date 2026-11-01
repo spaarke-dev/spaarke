@@ -653,11 +653,11 @@ internal static class RecordTableRules
     }
 
     private static readonly Regex IndexNameShape = new(
-        "^[a-z0-9](?:[a-z0-9-]{0,126}[a-z0-9])?$", RegexOptions.CultureInvariant, TimeSpan.FromMilliseconds(100));
+        @"\A[a-z0-9](?:[a-z0-9-]{0,126}[a-z0-9])?\z", RegexOptions.CultureInvariant, TimeSpan.FromMilliseconds(100));
 
     /// <summary>
     /// Review R1 (UAC-r2 condition 4): the ONE way an index name reaches a log. A name is logged only when it has the shape of
-    /// an Azure AI Search index name (<c>^[a-z0-9](?:[a-z0-9-]{0,126}[a-z0-9])?$</c>); anything else is a client's free text
+    /// an Azure AI Search index name (<c>\A[a-z0-9](?:[a-z0-9-]{0,126}[a-z0-9])?\z</c>; known limit: lowercase-hyphen free text has this shape); anything else is a client's free text
     /// (an email, a sentence) and is logged as <c>&lt;not an index name&gt; (length N)</c>. <c>null</c> stays none.
     /// </summary>
     internal static string? LoggableIndexName(string? name)

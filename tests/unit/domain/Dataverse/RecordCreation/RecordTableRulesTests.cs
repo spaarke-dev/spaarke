@@ -322,6 +322,24 @@ public class RecordTableRulesTests
             .Should().BeEquivalentTo("sprk_matter", "sprk_project", "sprk_document", "sprk_workassignment", "sprk_event", "sprk_invoice");
     }
 
+    /// <summary>Round 2 (S3): the name shape is anchored with \A...\z, so a trailing newline (which "$" accepts) is not an index name.</summary>
+    [Theory]
+    [InlineData("spaarke-files-index\n")]
+    [InlineData("spaarke-files-index\r\n")]
+    [InlineData("a\nb")]
+    public void LoggableIndexName_ANameWithALineBreak_IsNotAnIndexName(string name)
+    {
+        RecordTableRules.LoggableIndexName(name).Should().Be($"<not an index name> (length {name.Length})");
+    }
+
+    [Theory]
+    [InlineData("spaarke-files-index")]
+    [InlineData("a")]
+    public void LoggableIndexName_AnIndexName_IsLoggedAsIs(string name)
+    {
+        RecordTableRules.LoggableIndexName(name).Should().Be(name);
+    }
+
     // ── Named rules carry a rationale ────────────────────────────────────────────────────────────────────────────────
 
     [Fact]
