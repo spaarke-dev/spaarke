@@ -1,5 +1,6 @@
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Services.Ai;
+using Sprk.Bff.Api.Services.RecordCreation;
 
 namespace Sprk.Bff.Api.Services.Dataverse;
 
@@ -66,6 +67,23 @@ public class DataverseUpdateHandler : IDataverseUpdateHandler
         CancellationToken ct,
         Guid? impersonateSystemUserId = null)
     {
+        // Task 039 (FR-38): on a search-indexed table both index columns are the SERVER's (step 8 of the create writes them from
+        // the owning business unit). A playbook output mapping that names either has it dropped — never refused, and not written —
+        // so the row's index stays as it is. Dropped from a copy: the caller's dictionary is not changed.
+        if (RecordTableRules.OwnsSearchIndex(entityLogicalName)
+            && fields.Keys.Any(k => RecordTableRules.SearchIndexColumnOf(k) is not null))
+        {
+            fields = new Dictionary<string, object?>(fields, fields.Comparer);
+        }
+
+        // Round 2 (S5): nothing left to write means no write is asked of Dataverse (not even an empty one) and none of the reads
+        // or after-write steps run; a mapping that was empty before the drop is not affected (DropSearchIndexFromUpdate).
+        if (RecordTableRules.DropSearchIndexFromUpdate(
+                entityLogicalName, recordId, fields, RecordTableRules.SearchIndexOriginMapping, _logger).Emptied)
+        {
+            return;
+        }
+
         // unified-access-control-r2 task 189 fix round C (K5): this handler writes a playbook's output mapping (the output
         // orchestrator; app-only for a System run, as the runner for a person's run since #2257), so it never writes a document's Access Permission or its own-narrowing record; only the
         // document rule's writers do. Refused before anything is read or written. Task 188 round 4e: nor its D7 link columns

@@ -78,12 +78,17 @@ public sealed partial class SecureChildOwnershipAiToolTests
         Bind(fields, "sprk_AssignedLawFirm1@odata.bind").Should().Be($"/sprk_organizations({WaLawFirm:D})");
         foreach (var column in new[]
                  {
-                     "sprk_name", "sprk_priority", "sprk_description", "sprk_responseduedate", "sprk_searchindexname",
+                     "sprk_name", "sprk_priority", "sprk_description", "sprk_responseduedate",
                      "sprk_regardingrecordid", "sprk_regardingrecordname", "sprk_regardingrecordurl",
                  })
         {
             fields.Should().ContainKey(column, "every field the wizard sets is written as given (parity table)");
         }
+
+        // Task 039 (FR-38; was: the wizard's index name is written as given): the server owns both index columns, so the
+        // wizard's value is dropped and the owning unit (which has no index in this world) supplies none.
+        fields.Should().NotContainKey("sprk_searchindexname", "the search index is the server's, never the client's (FR-38)");
+        fields.Keys.Should().NotContain(k => k.StartsWith("sprk_ai_search_index", StringComparison.OrdinalIgnoreCase));
 
         fields.Keys.Should().NotContain(k => k.StartsWith("sprk_AssignedToInternal", StringComparison.OrdinalIgnoreCase),
             "wizard parity: the chat tool's 'for person' default is not added by this route");

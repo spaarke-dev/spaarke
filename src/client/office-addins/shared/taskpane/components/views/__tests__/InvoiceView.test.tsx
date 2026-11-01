@@ -6,7 +6,8 @@
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { FluentProvider, webLightTheme } from '@fluentui/react-components';
-import { InvoiceView, INVOICE_UPLOAD_HINT, invoiceFiledRecord, type InvoiceViewProps } from '../InvoiceView';
+import { InvoiceView, INVOICE_UPLOAD_HINT, type InvoiceViewProps } from '../InvoiceView';
+import { filedUnderRecord, invoiceFiledRecord } from '../../../services/invoiceSubmissionSeam';
 import { fetchRelatedCandidates } from '../../../services/communicationSuggestionsService';
 import { searchOfficeEntities } from '../../../services/officeEntitySearch';
 import type { IHostAdapter } from '@shared/adapters';
@@ -123,6 +124,15 @@ describe('invoiceFiledRecord — the record the open email is filed to', () => {
     expect(invoiceFiledRecord({ kind: 'new', reason: 'not_cloud_document' } as never)).toBeNull();
     expect(invoiceFiledRecord({ kind: 'resolved', documentId: 'doc-1', relatedRecord: null } as never)).toBeNull();
     expect(invoiceFiledRecord(resolved('sprk_invoice'))).toBeNull();
+  });
+
+  it("filedUnderRecord maps a refusal's filedUnder (ebilling task 192) to the picker record", () => {
+    expect(filedUnderRecord({ entityType: 'WorkAssignment', entityId: MATTER_ID, name: 'WA-7' })).toEqual({
+      id: MATTER_ID,
+      entityType: 'WorkAssignment',
+      logicalName: 'sprk_workassignment',
+      name: 'WA-7',
+    });
   });
 });
 
@@ -510,6 +520,46 @@ describe('InvoiceView — results (task 133)', () => {
       finish({ kind: 'success', trackingNumber: 'INV-4711.1' });
       expect(await screen.findByText('Invoice submitted')).toBeInTheDocument();
       expect(screen.queryByText('Processing the invoice')).toBeNull();
+    },
+    TIMEOUT
+  );
+
+  it(
+    'ebilling task 192: a refusal naming the filed-under record offers "Use {name}", which switches the record',
+    async () => {
+      const projectId = '2a7d4c1e-9b3f-4e8a-b6d2-7c5e1f0a9d33';
+      const onSubmit = jest
+        .fn()
+        .mockResolvedValueOnce({
+          kind: 'refused',
+          message: 'This email is filed under Project X, so its invoice can only be submitted to that record.',
+          filedUnder: { entityType: 'Project', entityId: projectId, name: 'Project X' },
+        })
+        .mockResolvedValueOnce({ kind: 'success', trackingNumber: 'INV-4711.1' });
+      renderView({ onSubmit });
+      await fillAndSubmit();
+      await userEvent.click(await screen.findByRole('button', { name: 'Use Project X' }));
+      // The refusal described the record the user had picked: it is cleared, and nothing is sent until Submit.
+      expect(screen.queryByText('The invoice was not submitted')).toBeNull();
+      expect(screen.queryByTestId('invoice-use-filed-under')).toBeNull();
+      expect(onSubmit).toHaveBeenCalledTimes(1);
+
+      await waitFor(() => expect(submitButton()).toBeEnabled());
+      await userEvent.click(submitButton());
+      await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(2));
+      const calls = onSubmit.mock.calls as unknown as Array<[{ targetEntity: unknown }, unknown]>;
+      expect(calls[1]![0].targetEntity).toEqual({ entityType: 'Project', entityId: projectId });
+    },
+    TIMEOUT
+  );
+
+  it(
+    'must-not-fire: a refusal without filedUnder offers no switch',
+    async () => {
+      renderView({ onSubmit: jest.fn(async () => ({ kind: 'refused' as const, message: 'Belongs elsewhere.' })) });
+      await fillAndSubmit();
+      expect(await screen.findByText('Belongs elsewhere.')).toBeInTheDocument();
+      expect(screen.queryByTestId('invoice-use-filed-under')).toBeNull();
     },
     TIMEOUT
   );

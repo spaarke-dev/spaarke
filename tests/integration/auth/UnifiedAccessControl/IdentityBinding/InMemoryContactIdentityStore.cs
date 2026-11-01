@@ -229,6 +229,12 @@ public sealed class InMemoryContactIdentityStore : IContactIdentityStore
 
     /// <summary>A9 (r3 task 046): the home contact read ends this way.</summary>
     public LookupStatus HomeContactLookupStatus { get; set; } = LookupStatus.Read;
+
+    /// <summary>r3 task 079: the home-tenant read ends this way.</summary>
+    public LookupStatus HomeTenantReadStatus { get; set; } = LookupStatus.Read;
+
+    /// <summary>r3 task 079: the home-tenant read throws.</summary>
+    public bool ThrowOnHomeTenantRead { get; set; }
     public bool FailReferences { get; set; }
     public bool FailGetContact { get; set; }
     /// <summary>Reinstate option (b): <c>GetContactAsync</c> answers the row with an empty statecode (a statecode not read).</summary>
@@ -333,6 +339,8 @@ public sealed class InMemoryContactIdentityStore : IContactIdentityStore
             HomeLinkWriteFailure = null;
             BeforeHomeLinkWrite = null;
             HomeContactLookupStatus = LookupStatus.Read;
+            HomeTenantReadStatus = LookupStatus.Read;
+            ThrowOnHomeTenantRead = false;
             FailReferences = FailGetContact = FailBind = FailCreate = FailFlagWrites = FailSystemUserScan = FailProbe = false;
             ScanFlaggedWithoutETags = false;
             MaskHomeColumns = FailHomeProbe = FailLicensedUserLookup = FailTeamLookup = false;
@@ -784,6 +792,31 @@ public sealed class InMemoryContactIdentityStore : IContactIdentityStore
                 .Where(c => !MaskBindingColumn && OidEquals(c.Oid, homeObjectId))
                 .Take(2).Select(Row).ToArray();
             return Task.FromResult(ContactLookup.Of(rows));
+        }
+    }
+
+    /// <summary>
+    /// r3 task 079: the contact's stored home directory, by id, as the Dataverse store answers it: the stored value through the
+    /// production parse rule (<see cref="HomeTenantLookup.FromStored"/>), null while <see cref="MaskHomeColumns"/> (a masked
+    /// column reads null), and no tenant for a contact that is not there. <see cref="HomeTenantReadStatus"/> and
+    /// <see cref="ThrowOnHomeTenantRead"/> inject a fault.
+    /// </summary>
+    public Task<HomeTenantLookup> ReadHomeTenantAsync(Guid contactId, CancellationToken ct)
+    {
+        lock (_gate)
+        {
+            Reads.Add("home-tenant");
+            AfterRead?.Invoke("home-tenant");
+            if (ThrowOnHomeTenantRead) throw new HttpRequestException("injected home-tenant-read fault");
+            if (HomeTenantReadStatus != LookupStatus.Read)
+            {
+                return Task.FromResult(HomeTenantReadStatus == LookupStatus.ColumnMissing
+                    ? HomeTenantLookup.ColumnMissing
+                    : HomeTenantLookup.Failed);
+            }
+
+            return Task.FromResult(HomeTenantLookup.FromStored(
+                !MaskHomeColumns && Contacts.TryGetValue(contactId, out var c) ? c.ExternalTenantId : null));
         }
     }
 

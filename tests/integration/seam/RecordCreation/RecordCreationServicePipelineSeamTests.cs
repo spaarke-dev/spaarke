@@ -142,7 +142,7 @@ public sealed partial class RecordCreationServicePipelineSeamTests
             (RecordCreationStep.CallerChecks, RecordCreationStepState.Ran),
             (RecordCreationStep.SecureRootPlan, RecordCreationStepState.Ran),
             (RecordCreationStep.Owner, RecordCreationStepState.Ran),
-            (RecordCreationStep.SearchIndexDefault, RecordCreationStepState.NoOp),
+            (RecordCreationStep.SearchIndexDefault, RecordCreationStepState.Ran), // task 039: an event is search-indexed now
             (RecordCreationStep.CreatorAndDefaults, RecordCreationStepState.Ran),
             (RecordCreationStep.StampAndInheritance, RecordCreationStepState.Ran),
             (RecordCreationStep.Create, RecordCreationStepState.Ran),
@@ -254,7 +254,7 @@ public sealed partial class RecordCreationServicePipelineSeamTests
             (RecordCreationStep.CallerChecks, RecordCreationStepState.Skipped),
             (RecordCreationStep.SecureRootPlan, RecordCreationStepState.Ran),
             (RecordCreationStep.Owner, RecordCreationStepState.Ran),
-            (RecordCreationStep.SearchIndexDefault, RecordCreationStepState.NoOp),
+            (RecordCreationStep.SearchIndexDefault, RecordCreationStepState.Ran), // task 039: an event is search-indexed now
             (RecordCreationStep.CreatorAndDefaults, RecordCreationStepState.Ran),
             (RecordCreationStep.StampAndInheritance, RecordCreationStepState.Ran),
             (RecordCreationStep.Create, RecordCreationStepState.Ran),

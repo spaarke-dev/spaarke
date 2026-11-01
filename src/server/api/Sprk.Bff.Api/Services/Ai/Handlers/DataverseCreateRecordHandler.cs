@@ -387,6 +387,13 @@ internal sealed partial class DataverseCreateRecordHandler : IToolHandler
                     stopwatch);
             }
 
+            // Task 039 review R7 (FR-38): on a search-indexed table both index columns are the SERVER's (step 8 of the create
+            // writes them), so the model's item has them dropped BEFORE it is mapped — never refused, as the chat UPDATE does. The
+            // service strips the same columns from the mapped item, but by then a lookup the mapper cannot read (a malformed
+            // recordId) has already failed the whole create.
+            item = RecordTableRules.DropSearchIndexFromUpdate(
+                tablename, recordId: null, item, RecordTableRules.SearchIndexOriginCaller, _logger, context.DecisionId.ToString("N")).Body;
+
             var mapped = await DataverseWriteItemMapper.MapAsync(_dataverse, tablename, item, cancellationToken).ConfigureAwait(false);
             if (mapped.ValidationError is not null)
             {
