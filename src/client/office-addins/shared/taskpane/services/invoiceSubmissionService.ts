@@ -45,13 +45,16 @@ import {
   type SkippedAttachment,
 } from './emailContentCapture';
 import { buildEmailSaveRequest, type OfficeSaveRequestBody, type QuickSaveEmailContext } from './quickSaveHelpers';
-import type {
-  InvoiceFirmOption,
-  InvoiceSubmissionInput,
-  InvoiceSubmissionMark,
-  InvoiceSubmissionTarget,
-  InvoiceSubmitHandler,
-  InvoiceWireMark,
+import {
+  INVOICE_CORE_RECORD_TYPES,
+  type InvoiceCoreRecordType,
+  type InvoiceFiledUnder,
+  type InvoiceFirmOption,
+  type InvoiceSubmissionInput,
+  type InvoiceSubmissionMark,
+  type InvoiceSubmissionTarget,
+  type InvoiceSubmitHandler,
+  type InvoiceWireMark,
 } from './invoiceSubmissionSeam';
 
 /** The BFF base URL and token getter every call needs. */
@@ -107,6 +110,20 @@ export interface InvoiceRefusalExtras {
   invoiceStatus?: string;
   /** §6 "After step A" (task 094): the email was filed under the record before the refusal, and stays filed. */
   filingKept?: true;
+  /** §6 (ebilling task 192): on 409 `document_core_record_mismatch`, the readable record the email is filed under. */
+  filedUnder?: InvoiceFiledUnder;
+}
+
+/** A well-formed `filedUnder` (a core record type, an id and a name), or undefined: anything else is ignored. */
+function readFiledUnder(value: unknown): InvoiceFiledUnder | undefined {
+  if (!value || typeof value !== 'object') return undefined;
+  const v = value as Record<string, unknown>;
+  const entityType = stringOrUndefined(v.entityType);
+  const entityId = stringOrUndefined(v.entityId);
+  const name = stringOrUndefined(v.name);
+  if (!entityType || !entityId || !name) return undefined;
+  if (!(INVOICE_CORE_RECORD_TYPES as string[]).includes(entityType)) return undefined;
+  return { entityType: entityType as InvoiceCoreRecordType, entityId, name };
 }
 
 /**
@@ -474,6 +491,7 @@ async function postFromEmail(
   const fileName = stringOrUndefined(json?.fileName);
   const mark = stringOrUndefined(json?.mark);
   const invoiceStatus = stringOrUndefined(json?.invoiceStatus);
+  const filedUnder = readFiledUnder(json?.filedUnder);
   return {
     kind: 'refused',
     status: response.status,
@@ -483,6 +501,7 @@ async function postFromEmail(
     ...(fileName ? { fileName } : {}),
     ...(mark ? { mark } : {}),
     ...(invoiceStatus ? { invoiceStatus } : {}),
+    ...(filedUnder ? { filedUnder } : {}),
     ...filingKept,
   };
 }
@@ -634,7 +653,7 @@ export function createInvoiceSubmitHandler(deps: {
       const message = describeSubmissionRefusal(result, ctx);
       return result.code !== undefined && PERMANENT_SUBMISSION_CODES.has(result.code)
         ? { kind: 'permanent', message, ...skipped }
-        : { kind: 'refused', message, ...skipped };
+        : { kind: 'refused', message, ...(result.filedUnder ? { filedUnder: result.filedUnder } : {}), ...skipped };
     }
 
     const { trackingNumber, statusUrl } = result.accepted;

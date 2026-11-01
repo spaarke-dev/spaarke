@@ -30,6 +30,7 @@ import {
   applyMarkingBudget,
   describeOverBudget,
   isPdfAttachment,
+  filedUnderRecord,
   FIRM_INVOICE_NUMBER_MAX,
   PO_NUMBER_MAX,
   type InvoiceCoreRecordType,
@@ -488,6 +489,14 @@ export const InvoiceView: React.FC<InvoiceViewProps> = ({
     announce('Ready for another invoice.');
   };
 
+  // A 409 that names the record the email is filed under (ebilling task 192): switch the form to it. The refusal is
+  // cleared because it described the record the user had picked; nothing is sent until they submit again.
+  const handleUseFiledUnder = (record: EntitySearchResult): void => {
+    chooseCoreRecord(record);
+    setOutcome(null);
+    announce(`${record.name} chosen. Submit to send the invoice to it.`);
+  };
+
   const doneAction = (
     <MessageBarActions>
       <Button appearance="outline" size="small" onClick={handleDone}>
@@ -521,15 +530,31 @@ export const InvoiceView: React.FC<InvoiceViewProps> = ({
             {doneAction}
           </MessageBar>
         );
-      case 'refused':
+      case 'refused': {
+        const filedUnder = outcome.filedUnder ? filedUnderRecord(outcome.filedUnder) : null;
+        const offerFiledUnder = filedUnder !== null && !(coreRecord && sameRecordId(coreRecord.id, filedUnder.id));
         return (
           <MessageBar intent="error" layout="multiline" role="alert">
             <MessageBarBody>
               <MessageBarTitle>The invoice was not submitted</MessageBarTitle>
               {outcome.message}
             </MessageBarBody>
+            {offerFiledUnder && (
+              <MessageBarActions>
+                <Button
+                  appearance="outline"
+                  size="small"
+                  onClick={() => handleUseFiledUnder(filedUnder)}
+                  disabled={locked}
+                  data-testid="invoice-use-filed-under"
+                >
+                  {`Use ${filedUnder.name}`}
+                </Button>
+              </MessageBarActions>
+            )}
           </MessageBar>
         );
+      }
       case 'retryable':
         return (
           <MessageBar intent="warning" layout="multiline" role="alert">

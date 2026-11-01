@@ -58,6 +58,8 @@ export interface InvoiceRefusalLike {
   retryAfterSeconds?: number;
   /** §6 "After step A": the server filed the email under the record before it refused, and the filing is kept. */
   filingKept?: boolean;
+  /** §6 (ebilling task 192): on `document_core_record_mismatch`, the record the email is filed under, when readable. */
+  filedUnder?: { name: string };
 }
 
 type Facts = InvoiceRefusalLike & InvoiceMessageContext;
@@ -202,9 +204,13 @@ export const SUBMISSION_ERROR_MESSAGES: Readonly<Record<string, Entry>> = {
     `Spaarke couldn't reach the record right now. ${NOTHING} ${tryAgain(f)}`,
   'ebilling.submission.failed': f => `The submission couldn't be queued. ${NOTHING} ${tryAgain(f)}`,
   'ebilling.submission.attachment_not_preserved': `One of the marked files couldn't be saved exactly as attached. ${NOTHING}`,
-  // Filed under another core record, or (task 094 step A) unfiled but held under a restricted record; the body does
-  // not say which, so the sentence is true for both and names no record to submit to.
-  'ebilling.submission.document_core_record_mismatch': `This email belongs to a different matter, project or work assignment, so it can't be submitted to this record. ${NOTHING}`,
+  // Filed under another core record, or (task 094 step A) unfiled but held under a restricted record. Task 192: the
+  // body names the record (`filedUnder`) only when it is the one readable, non-secure record the email is filed under;
+  // without it the sentence is true for both cases and names no record to submit to.
+  'ebilling.submission.document_core_record_mismatch': ({ filedUnder }) =>
+    filedUnder
+      ? `This email is filed under ${filedUnder.name}, so its invoice can only be submitted to that record. ${NOTHING}`
+      : `This email belongs to a different matter, project or work assignment, so it can't be submitted to this record. ${NOTHING}`,
   'ebilling.submission.correction_not_allowed': fromReasons(CORRECTION_REASON_MESSAGES, CORRECTION_FALLBACK),
   'sdap.access.deny.record_unavailable': `The invoice isn't available to you: it may not exist, or you can't change it. ${NOTHING}`,
   // §6 task 094 (2026-10-28): step 1 reads the saved .eml and its communication, step A files an unfiled communication
