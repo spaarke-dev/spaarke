@@ -117,6 +117,9 @@ public sealed class AssignTaskRecipientGatePlaneTests
     {
         var identities = new Mock<IContactIdentityStore>(MockBehavior.Strict);
         identities.Setup(i => i.GetContactAsync(Contact, It.IsAny<CancellationToken>())).ReturnsAsync(ContactLookup.Of(row));
+        // r3 task 079: the gate reads the stored home directory in its own read; it answers the value this row carries.
+        identities.Setup(i => i.ReadHomeTenantAsync(Contact, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(HomeTenantLookup.FromStored(row.RawExternalTenantId));
         identities.Setup(i => i.FindHomeLinkedSystemUsersAsync(HomeTenant, HomeOid, It.IsAny<CancellationToken>()))
             .ReturnsAsync(homeLink ?? HomeLinkLookup.Of());
         return identities;

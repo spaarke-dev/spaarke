@@ -17,12 +17,11 @@ import {
 } from '@fluentui/react-components';
 import { ReceiptRegular } from '@fluentui/react-icons';
 import type { IHostAdapter } from '@shared/adapters';
-import { ENTITY_LOGICAL_NAMES, type EntitySearchResult, type EntityType } from '../../hooks/useEntitySearch';
+import type { EntitySearchResult, EntityType } from '../../hooks/useEntitySearch';
 import { useAnnounce } from '../../hooks/useAnnounce';
 import { RelatedToPicker } from '../RelatedToPicker';
 import { searchOfficeEntities } from '../../services/officeEntitySearch';
 import { fetchRelatedCandidates, type RelatedCandidate } from '../../services/communicationSuggestionsService';
-import type { DocumentIdentityState } from '../../services/documentIdentityService';
 import {
   INVOICE_CORE_RECORD_TYPES,
   buildInvoiceSubmissionInput,
@@ -31,6 +30,7 @@ import {
   applyMarkingBudget,
   describeOverBudget,
   isPdfAttachment,
+  filedUnderRecord,
   FIRM_INVOICE_NUMBER_MAX,
   PO_NUMBER_MAX,
   type InvoiceCoreRecordType,
@@ -107,30 +107,6 @@ export interface InvoiceViewProps {
    * to another kind of record.
    */
   filedRecord?: EntitySearchResult | null;
-}
-
-const CORE_TYPE_BY_LOGICAL_NAME: Readonly<Record<string, InvoiceCoreRecordType>> = Object.fromEntries(
-  INVOICE_CORE_RECORD_TYPES.map(type => [ENTITY_LOGICAL_NAMES[type], type])
-);
-
-/**
- * The core record the open email is filed to, from the pane's email identity (task 120): the same answer the Save tab's
- * "Filed to" card shows. Null when the email is not saved, its record is unknown, or it is filed to a record that is not
- * a Matter, Project or Work Assignment.
- */
-export function invoiceFiledRecord(identity: DocumentIdentityState | undefined): EntitySearchResult | null {
-  if (identity === undefined || identity === 'checking' || identity.kind !== 'resolved') return null;
-  const record = identity.relatedRecord;
-  const entityType = record ? CORE_TYPE_BY_LOGICAL_NAME[record.entityType] : undefined;
-  if (!record || !entityType) return null;
-  const name = record.displayName || record.name || record.number || '';
-  return {
-    id: record.id,
-    entityType,
-    logicalName: record.entityType,
-    name,
-    ...(record.number && record.number !== name ? { displayInfo: record.number } : {}),
-  };
 }
 
 function sameRecordId(a: string, b: string): boolean {
@@ -513,6 +489,14 @@ export const InvoiceView: React.FC<InvoiceViewProps> = ({
     announce('Ready for another invoice.');
   };
 
+  // A 409 that names the record the email is filed under (ebilling task 192): switch the form to it. The refusal is
+  // cleared because it described the record the user had picked; nothing is sent until they submit again.
+  const handleUseFiledUnder = (record: EntitySearchResult): void => {
+    chooseCoreRecord(record);
+    setOutcome(null);
+    announce(`${record.name} chosen. Submit to send the invoice to it.`);
+  };
+
   const doneAction = (
     <MessageBarActions>
       <Button appearance="outline" size="small" onClick={handleDone}>
@@ -546,15 +530,31 @@ export const InvoiceView: React.FC<InvoiceViewProps> = ({
             {doneAction}
           </MessageBar>
         );
-      case 'refused':
+      case 'refused': {
+        const filedUnder = outcome.filedUnder ? filedUnderRecord(outcome.filedUnder) : null;
+        const offerFiledUnder = filedUnder !== null && !(coreRecord && sameRecordId(coreRecord.id, filedUnder.id));
         return (
           <MessageBar intent="error" layout="multiline" role="alert">
             <MessageBarBody>
               <MessageBarTitle>The invoice was not submitted</MessageBarTitle>
               {outcome.message}
             </MessageBarBody>
+            {offerFiledUnder && (
+              <MessageBarActions>
+                <Button
+                  appearance="outline"
+                  size="small"
+                  onClick={() => handleUseFiledUnder(filedUnder)}
+                  disabled={locked}
+                  data-testid="invoice-use-filed-under"
+                >
+                  {`Use ${filedUnder.name}`}
+                </Button>
+              </MessageBarActions>
+            )}
           </MessageBar>
         );
+      }
       case 'retryable':
         return (
           <MessageBar intent="warning" layout="multiline" role="alert">

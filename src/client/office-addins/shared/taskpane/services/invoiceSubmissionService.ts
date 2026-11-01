@@ -30,7 +30,7 @@ import {
   describeSubmissionRefusal,
   EMAIL_UNIDENTIFIABLE_CODE,
   FILING_KEPT_DETAIL,
-  HELD_FOR_REVIEW_MESSAGE,
+  describeAcceptedOutcome,
   isRetryableSubmissionRefusal,
   PERMANENT_SUBMISSION_CODES,
   type InvoiceMessageContext,
@@ -45,13 +45,16 @@ import {
   type SkippedAttachment,
 } from './emailContentCapture';
 import { buildEmailSaveRequest, type OfficeSaveRequestBody, type QuickSaveEmailContext } from './quickSaveHelpers';
-import type {
-  InvoiceFirmOption,
-  InvoiceSubmissionInput,
-  InvoiceSubmissionMark,
-  InvoiceSubmissionTarget,
-  InvoiceSubmitHandler,
-  InvoiceWireMark,
+import {
+  INVOICE_CORE_RECORD_TYPES,
+  type InvoiceCoreRecordType,
+  type InvoiceFiledUnder,
+  type InvoiceFirmOption,
+  type InvoiceSubmissionInput,
+  type InvoiceSubmissionMark,
+  type InvoiceSubmissionTarget,
+  type InvoiceSubmitHandler,
+  type InvoiceWireMark,
 } from './invoiceSubmissionSeam';
 
 /** The BFF base URL and token getter every call needs. */
@@ -107,6 +110,20 @@ export interface InvoiceRefusalExtras {
   invoiceStatus?: string;
   /** §6 "After step A" (task 094): the email was filed under the record before the refusal, and stays filed. */
   filingKept?: true;
+  /** §6 (ebilling task 192): on 409 `document_core_record_mismatch`, the readable record the email is filed under. */
+  filedUnder?: InvoiceFiledUnder;
+}
+
+/** A well-formed `filedUnder` (a core record type, an id and a name), or undefined: anything else is ignored. */
+function readFiledUnder(value: unknown): InvoiceFiledUnder | undefined {
+  if (!value || typeof value !== 'object') return undefined;
+  const v = value as Record<string, unknown>;
+  const entityType = stringOrUndefined(v.entityType);
+  const entityId = stringOrUndefined(v.entityId);
+  const name = stringOrUndefined(v.name);
+  if (!entityType || !entityId || !name) return undefined;
+  if (!(INVOICE_CORE_RECORD_TYPES as string[]).includes(entityType)) return undefined;
+  return { entityType: entityType as InvoiceCoreRecordType, entityId, name };
 }
 
 /**
@@ -146,7 +163,13 @@ const FINAL_STATUSES: ReadonlySet<string> = new Set<InvoiceFinalStatus>(['Accept
 
 /** What {@link pollSubmission} ends with. */
 export type InvoicePollResult =
-  | { kind: 'final'; status: InvoiceFinalStatus; outcomeReasonCode: string | null }
+  | {
+      kind: 'final';
+      status: InvoiceFinalStatus;
+      outcomeReasonCode: string | null;
+      /** §9 (ebilling 097f): the correcting submission's tracking number, when the server names it. */
+      replacedByTrackingNumber?: string;
+    }
   /** The cap was reached while the submission was still Received / Processing (or unreadable for a moment). */
   | { kind: 'pending'; status: string | undefined }
   /** The status cannot be read at all (404, or a refusal that will not change). */
@@ -468,6 +491,7 @@ async function postFromEmail(
   const fileName = stringOrUndefined(json?.fileName);
   const mark = stringOrUndefined(json?.mark);
   const invoiceStatus = stringOrUndefined(json?.invoiceStatus);
+  const filedUnder = readFiledUnder(json?.filedUnder);
   return {
     kind: 'refused',
     status: response.status,
@@ -477,6 +501,7 @@ async function postFromEmail(
     ...(fileName ? { fileName } : {}),
     ...(mark ? { mark } : {}),
     ...(invoiceStatus ? { invoiceStatus } : {}),
+    ...(filedUnder ? { filedUnder } : {}),
     ...filingKept,
   };
 }
@@ -534,10 +559,16 @@ export async function pollSubmission(
     const status = stringOrUndefined(json?.status);
     lastStatus = status ?? lastStatus;
     if (status && FINAL_STATUSES.has(status)) {
+      const replacedBy = json?.replacedBy;
+      const replacedByTrackingNumber =
+        replacedBy && typeof replacedBy === 'object'
+          ? stringOrUndefined((replacedBy as Record<string, unknown>).trackingNumber)
+          : undefined;
       return {
         kind: 'final',
         status: status as InvoiceFinalStatus,
         outcomeReasonCode: stringOrUndefined(json?.outcomeReasonCode) ?? null,
+        ...(replacedByTrackingNumber ? { replacedByTrackingNumber } : {}),
       };
     }
   }
@@ -622,7 +653,7 @@ export function createInvoiceSubmitHandler(deps: {
       const message = describeSubmissionRefusal(result, ctx);
       return result.code !== undefined && PERMANENT_SUBMISSION_CODES.has(result.code)
         ? { kind: 'permanent', message, ...skipped }
-        : { kind: 'refused', message, ...skipped };
+        : { kind: 'refused', message, ...(result.filedUnder ? { filedUnder: result.filedUnder } : {}), ...skipped };
     }
 
     const { trackingNumber, statusUrl } = result.accepted;
@@ -636,13 +667,10 @@ export function createInvoiceSubmitHandler(deps: {
 
     if (polled.kind === 'final') {
       if (polled.status === 'Accepted') {
-        // An Accepted invoice with a code is HELD (§9): never the catalog's Failed / Rejected sentences.
-        return {
-          kind: 'success',
-          ...tracking,
-          ...(polled.outcomeReasonCode ? { message: HELD_FOR_REVIEW_MESSAGE } : {}),
-          ...skipped,
-        };
+        // An Accepted invoice with a code is HELD (§9), except one replaced by a correction (097f): never the catalog's
+        // Failed / Rejected sentences.
+        const message = describeAcceptedOutcome(polled.outcomeReasonCode, polled.replacedByTrackingNumber);
+        return { kind: 'success', ...tracking, ...(message ? { message } : {}), ...skipped };
       }
       // Rejected or Failed AFTER the 202: the submission exists (it has a tracking number), so it is not "not submitted".
       return {
