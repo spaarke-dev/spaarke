@@ -828,7 +828,7 @@ When the home token has no `email` claim, the form's prefill falls back to the u
 
 | Field | Value |
 |---|---|
-| **Status** | Open (owner decision: fix in R3 with uac-r2, or R4) |
+| **Status** | Fix in PR #2500 (R3 task 079, owner option 2, 2026-10-31; also fixes #2491). Not yet deployed. Follow-ups: #2499 |
 | **Urgency** | next-round |
 | **Filed** | 2026-10-29 (by ontology-r1 as DI-137) |
 | **Source** | Ontology task 168 fix round 3, after the R3 review |
