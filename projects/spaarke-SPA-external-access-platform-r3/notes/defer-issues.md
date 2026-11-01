@@ -828,7 +828,7 @@ When the home token has no `email` claim, the form's prefill falls back to the u
 
 | Field | Value |
 |---|---|
-| **Status** | Fix in PR #2500 (R3 task 079, owner option 2, 2026-10-31; also fixes #2491). Not yet deployed. Follow-ups: #2499 |
+| **Status** | **Resolved.** PR #2500 (R3 task 079, owner option 2; also fixes #2491), deployed to dev as fcf01480f4 on 2026-11-01 at 14:03:20Z. The owner accepted it without a live re-run, because the 2026-11-01 test Task was created through "+ New", which never notifies. Follow-ups: #2499 |
 | **Urgency** | next-round |
 | **Filed** | 2026-10-29 (by ontology-r1 as DI-137) |
 | **Source** | Ontology task 168 fix round 3, after the R3 review |
@@ -877,3 +877,12 @@ When the home token has no `email` claim, the form's prefill falls back to the u
 | **What** | `InMemoryContactIdentityStore.GetContactAsync` returns rows that carry `sprk_externaltenantid`, which the real `ContactSelect` never returns. That divergence hid #2491. Separately, `AssignTaskRecipientGate.ComposePortalPrincipalAsync` passes the row's tenant, which is always empty on Dataverse. Nothing reads it today, so no outcome changes. |
 | **Decision** | Known limit, filed. Task 079 moved both known readers to `ReadHomeTenantAsync`. The gate file is ontology's. |
 | **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2499 |
+
+### ISS-029: Work-account contacts with record grants see no record tabs in the portal (deferred to R4)
+
+| Field | Value |
+|---|---|
+| **Found** | 2026-11-01, owner UAT on dev (task 079 re-check; Tony Howe, WorkforceHome, Collaborate on CMRCL-479772) |
+| **What** | The Projects, Matters, Work Assignments, Documents and Invoices widgets are `planes: ['ciam']` (`widgetRegistry.ts`). Workforce-plane callers get only the default modules (Legal Front Door, Policy Library, Service Requests). A granted matter is reachable only from the grant email's link or the bell. |
+| **Decision** | Owner 2026-11-01: R4. Show the record tabs to a workforce contact who holds grants, scoped by Tier-2. |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2508 |

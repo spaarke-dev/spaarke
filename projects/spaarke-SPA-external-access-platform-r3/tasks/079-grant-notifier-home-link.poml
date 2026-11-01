@@ -3,7 +3,7 @@
   <metadata>
     <title>#2458 / ISS-024 + #2491: a shared one-contact home-tenant read; the grant notifier and AssignTaskRecipientGate decide the home link from it</title>
     <phase>R3 hardening (ISS-024)</phase>
-    <status>in-progress</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Tags bff-api, security; decides who is emailed a portal link after a grant, from an identity link; adds a store read</rigor-reason>
     <model-tier>opus</model-tier>
@@ -104,7 +104,7 @@
     <criterion testable="true">No email address, name, UPN or tenant value appears in any new log line.</criterion>
   </acceptance-criteria>
 
-  <notes>Owner decisions 2026-10-31: "#2458 - we should fix it here"; "#2458 - yes option 2". Ontology's conditions are in the gate constraint and criteria above.</notes>
+  <notes>Owner decisions 2026-10-31: "#2458 - we should fix it here"; "#2458 - yes option 2". Ontology's conditions are in the gate constraint and criteria above. Completed 2026-11-01: PR #2500 merged (fcf01480f4; two adversarial passes, one F-class item fixed in dedf9c37a8; ontology approved), deployed to dev 14:03:20Z (rollout record §13; uac gate PASS). The live Assign Task re-check was waived by the owner: the test Task was created via "+ New" (child-records), which never notifies. Known limits: #2499 (ISS-028). Portal tabs for work-account contacts: #2508 (ISS-029, R4).</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
