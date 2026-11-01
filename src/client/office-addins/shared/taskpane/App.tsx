@@ -14,13 +14,13 @@ import { ShareView } from './components/views/ShareView';
 import { StatusView } from './components/views/StatusView';
 import { SignInView } from './components/views/SignInView';
 import { CreateTodoView } from './components/views/CreateTodoView';
-import { InvoiceView, invoiceFiledRecord } from './components/views/InvoiceView';
+import { InvoiceView } from './components/views/InvoiceView';
 import {
   createInvoiceSubmitHandler,
   hostAdapterInvoiceEmailSource,
   loadInvoiceFirms,
 } from './services/invoiceSubmissionService';
-import type { InvoiceSubmissionTarget } from './services/invoiceSubmissionSeam';
+import { invoiceFiledRecord, type InvoiceSubmissionTarget } from './services/invoiceSubmissionSeam';
 import type { InitialAction } from './initialAction';
 import { FindView, type FindItemNoun } from './components/views/FindView';
 import type {
