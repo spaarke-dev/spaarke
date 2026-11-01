@@ -33,8 +33,8 @@ namespace Sprk.Bff.Api.Api.Finance;
 /// <c>currentStatus</c>; 404 uniform for an invoice that vanished; 409 <c>invoice.concurrent_change</c> (retry); 503 <c>ebilling.invoice.payment_unavailable</c>.</para>
 /// <para><b>Email to AP and Mark Sent to AP (151c-1a, EB-D-182).</b> <c>POST export-batches/{batchId}/email</c> sends the stored CSV and JSON as the signed-in user through the
 /// communication send-as-user path (bytes to the mail channel only; the communication is owned by the batch's team) to the settings' AP export email, and sets
-/// the batch's Sent to AP Date once. <c>POST export-batches/{batchId}/mark-sent-to-ap</c> sets the same date for files delivered another way. Both need Read on the
-/// batch (uniform 404 otherwise); see <see cref="ApExportDeliveryService"/>. No regarding link to the batch yet (task 151c-2).</para>
+/// the batch's Sent to AP Date once. <c>POST export-batches/{batchId}/mark-sent-to-ap</c> sets the same date for files delivered another way. Both need Read and Write
+/// on the batch (uniform 404 otherwise); see <see cref="ApExportDeliveryService"/>. No regarding link to the batch yet (task 151c-2).</para>
 /// </remarks>
 public static class ApExportEndpoints
 {
@@ -130,16 +130,17 @@ public static class ApExportEndpoints
 
         // POST /api/finance/export-batches/{batchId}/email - Email to AP: the batch's CSV and JSON, as the caller (151c-1a, EB-D-181 / EB-D-182)
         group.MapPost("/export-batches/{batchId:guid}/email", EmailToAp)
-            .AddFinanceAuthorizationFilter(BatchReadTargets, FinanceDenial.UniformNotFound)
+            .AddFinanceAuthorizationFilter(BatchWriteTargets, FinanceDenial.UniformNotFound)
             .AddEndpointFilter<CommunicationAuthorizationFilter>() // the communication path's own send precondition (an identity with an oid)
             .RequireEbillingEnabled()
             .WithName("EmailApExportBatch")
             .WithSummary("Email an AP export batch's files to AP")
             .WithDescription(
                 "Sends the batch's stored CSV and JSON as attachments, as the signed-in user, to the AP export email in the eBilling settings, with " +
-                "optional CCs (at most 10) and a message (at most 2000 characters). Needs Read on the batch (uniform 404 otherwise). 409 " +
-                "ebilling.export.ap_email_not_configured, file_not_available (the batch did not complete, or a file is missing or unscanned) or " +
-                "attachments_too_large; 400 for a bad CC or message; 503 ebilling.export.email_send_failed (nothing recorded). On success the batch's " +
+                "optional CCs (at most 10) and a message (at most 2000 characters). Needs Read and Write on the batch (uniform 404 otherwise). 409 " +
+                "ebilling.export.ap_email_not_configured, ap_email_recipient_monitored, file_not_available (the batch did not complete, or a file is " +
+                "missing or unscanned), attachments_too_large (over 3 MB), email_owner_refused or email_send_refused (do not retry); 400 for a bad CC " +
+                "or message; 503 ebilling.export.email_send_failed (nothing recorded; retry). On success the batch's " +
                 "Sent to AP Date is set when empty and never overwritten; if that write fails after the send the answer is still 200 with " +
                 "sentToApDateSet false.")
             .Produces<ApExportEmailResponse>(StatusCodes.Status200OK)
@@ -152,13 +153,13 @@ public static class ApExportEndpoints
 
         // POST /api/finance/export-batches/{batchId}/mark-sent-to-ap - the files were delivered another way (151c-1a, EB-D-182)
         group.MapPost("/export-batches/{batchId:guid}/mark-sent-to-ap", MarkSentToAp)
-            .AddFinanceAuthorizationFilter(BatchReadTargets, FinanceDenial.UniformNotFound)
+            .AddFinanceAuthorizationFilter(BatchWriteTargets, FinanceDenial.UniformNotFound)
             .RequireEbillingEnabled()
             .WithName("MarkApExportBatchSentToAp")
             .WithSummary("Mark an AP export batch as sent to AP")
             .WithDescription(
                 "Sets the batch's Sent to AP Date to now when it is empty; otherwise leaves it (idempotent). Both answer 200 { sentToApDate, alreadySet }. " +
-                "Needs Read on the batch (uniform 404 otherwise). 409 ebilling.export.batch_not_completed when the batch is not Completed.")
+                "Needs Read and Write on the batch (uniform 404 otherwise). 409 ebilling.export.batch_not_completed when the batch is not Completed.")
             .Produces<ApExportMarkSentResponse>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
             .ProducesProblem(StatusCodes.Status404NotFound)
@@ -171,6 +172,19 @@ public static class ApExportEndpoints
     /// <summary>The route's declaration for the batch read and the file download: Read on the batch named in the path (uniform 404).</summary>
     private static FinanceAuthorizationTargets BatchReadTargets(EndpointFilterInvocationContext ctx) =>
         FinanceAuthorizationTargets.FromRoute(ctx, BatchRouteKey, ApExportAuthorization.BatchEntitySet, "read");
+
+    /// <summary>
+    /// Email to AP and Mark Sent to AP (151c-1a, owner decision D1): Read AND Write on the batch named in the path (uniform 404). Both routes
+    /// record on the batch; Read stays required because the email carries the batch's files to addresses the caller chooses.
+    /// </summary>
+    private static FinanceAuthorizationTargets BatchWriteTargets(EndpointFilterInvocationContext ctx)
+    {
+        var read = BatchReadTargets(ctx);
+        return read.Checks.Count == 0
+            ? read // no id, no check: the filter denies
+            : FinanceAuthorizationTargets.Authorize(
+                [.. read.Checks, .. FinanceAuthorizationTargets.FromRoute(ctx, BatchRouteKey, ApExportAuthorization.BatchEntitySet, "write").Checks]);
+    }
 
     private static async Task<IResult> GetCandidates(ApExportService service, HttpContext httpContext, CancellationToken ct)
     {
@@ -305,7 +319,8 @@ public static class ApExportEndpoints
         ApExportDeliveryOutcome.NotFound => FinanceAuthorizationFilter.UniformRecordNotFound(httpContext),
         ApExportDeliveryOutcome.InvalidRequest => InvoiceLineReviewEndpoints.Refused(StatusCodes.Status400BadRequest, result.Code!, result.Detail),
         ApExportDeliveryOutcome.ApEmailNotConfigured or ApExportDeliveryOutcome.FileNotAvailable or ApExportDeliveryOutcome.BatchNotCompleted
-            or ApExportDeliveryOutcome.AttachmentsTooLarge => InvoiceLineReviewEndpoints.Refused(StatusCodes.Status409Conflict, result.Code!, result.Detail),
+            or ApExportDeliveryOutcome.AttachmentsTooLarge or ApExportDeliveryOutcome.RecipientMonitored or ApExportDeliveryOutcome.SendRefused
+            => InvoiceLineReviewEndpoints.Refused(StatusCodes.Status409Conflict, result.Code!, result.Detail),
         _ => InvoiceLineReviewEndpoints.Refused(StatusCodes.Status503ServiceUnavailable, result.Code!, result.Detail),
     };
 

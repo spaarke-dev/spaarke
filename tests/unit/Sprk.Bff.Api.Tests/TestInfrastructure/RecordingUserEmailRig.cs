@@ -37,7 +37,8 @@ internal sealed class RecordingUserEmailRig
 
     public CommunicationService Service { get; }
 
-    public RecordingUserEmailRig()
+    /// <param name="signer">The tracking-token signer the service signs a server-send marker with (null: none, as in a bare host).</param>
+    public RecordingUserEmailRig(Sprk.Bff.Api.Services.Communication.Tracking.ITrackingTokenSigner? signer = null)
     {
         Entities.Setup(e => e.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
             .Callback<Entity, CancellationToken>((entity, _) => Created.Add(entity))
@@ -74,7 +75,8 @@ internal sealed class RecordingUserEmailRig
             CoreAncestorResolverFixtures.Inert(),
             Owners,
             Mock.Of<ILogger<CommunicationService>>(),
-            Threads.Object);
+            Threads.Object,
+            trackingTokenSigner: signer);
     }
 
     /// <summary>An authenticated OBO context carrying the email and oid claims <c>SendAsUserAsync</c> reads.</summary>

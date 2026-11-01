@@ -211,6 +211,34 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
     }
 
     /// <summary>
+    /// The <see cref="ServerSendMarker"/> header value for a server-only send with attachments (ebilling-r1 task 151c-1a, D2 b), or null: no
+    /// server-only options, no attachments, no signer, no signing key, or a signing fault (logged; the send is not failed for it).
+    /// </summary>
+    private async Task<string?> SignServerSendMarkerAsync(SendCommunicationRequest request, string correlationId, CancellationToken ct)
+    {
+        if (request.ServerSend is not { Attachments.Count: > 0 } serverSend || _trackingTokenSigner is null)
+        {
+            return null;
+        }
+
+        try
+        {
+            return await ServerSendMarker.SignAsync(
+                _trackingTokenSigner,
+                serverSend.Attachments.Select(a => ((string?)a.Name, (byte[]?)a.Content)),
+                serverSend.OwnerFollows?.RecordId ?? Guid.Empty,
+                DateTimeOffset.UtcNow,
+                ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogWarning(ex,
+                "Server-send marker could not be signed; sending without it | CorrelationId: {CorrelationId}", correlationId);
+            return null;
+        }
+    }
+
+    /// <summary>
     /// Archives an EXISTING communication on demand (task 044 — the "Save to SharePoint" action).
     /// Reuses the same archival path as send/receive: generates the <c>.eml</c> via the channel
     /// archiver seam, uploads it to SPE, and creates the archive <c>sprk_document</c> plus a
@@ -2187,6 +2215,9 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
             // the original `request` is kept for the Dataverse record below.
             var sendRequest = await ApplyTrackingFooterAsync(request, correlationId, ct);
 
+            // Task 151c-1a (D2 b): a server-only send carries a signed marker bound to its attachments (best effort: none without a key).
+            var serverSendMarker = await SignServerSendMarkerAsync(request, correlationId, ct);
+
             var sendResult = await _channelDispatcher.ResolveSender(request.CommunicationType).SendAsync(
                 new ChannelSendRequest
                 {
@@ -2195,7 +2226,8 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
                     UserMode = true,
                     HttpContext = httpContext,
                     Attachments = fileAttachments,
-                    CorrelationId = correlationId
+                    CorrelationId = correlationId,
+                    ServerSendMarker = serverSendMarker
                 },
                 ct);
 
@@ -2355,7 +2387,9 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
             // Step 8: Direction-agnostic enrichment (ADR-045 / FR-08) — best-effort, non-fatal (NFR-06).
             // Closes the previously-missing OUTBOUND RAG-indexing half; full association/analysis
             // direction-symmetry lands in task 011. EnrichAsync is itself non-fatal; the guard is defense-in-depth.
-            if (communicationId.HasValue && request.ServerSend?.SkipEnrichment != true) // task 151c-1a: a server-only send may skip enrichment
+            // Task 151c-1a: a server-only send may skip enrichment, and one whose owner follows a record always does (enrichment's
+            // category routing would re-own it).
+            if (communicationId.HasValue && request.ServerSend is not ({ SkipEnrichment: true } or { OwnerFollows: not null }))
             {
                 try
                 {
@@ -2548,6 +2582,25 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
                 RequestedBy = requestedBy,
             };
         var owner = await _ownership.ResolveOwnerAsync(ownershipContext, ct);
+
+        // Task 151c-1a (uac-r2 F4): the answer must be the team that owns the followed record. A team-owned parent is answered with its
+        // business unit's default team, which is not the parent's owner when another team owns it: refuse rather than file it elsewhere.
+        if (follows is not null && owner.IsOwned && owner.OwningTeamId != follows.ExpectedOwnerTeamId)
+        {
+            _logger.LogWarning(
+                "Outbound communication REFUSED before the send: the owner answered for {Entity} {RecordId} is not the team that owns it | CorrelationId: {CorrelationId}",
+                follows.EntityLogicalName, follows.RecordId, correlationId);
+            throw new SdapProblemException(
+                code: ServerOwnerRecord.OwnerMismatchCode,
+                title: "Record owner unresolved",
+                detail: "The message was not sent: it cannot be owned by the team that owns the record it follows.",
+                statusCode: 409,
+                extensions: new Dictionary<string, object>
+                {
+                    ["correlationId"] = correlationId,
+                    ["reasonCode"] = ServerOwnerRecord.OwnerMismatchCode,
+                });
+        }
 
         if (owner.IsRefused || (follows is not null && !owner.IsOwned))
         {

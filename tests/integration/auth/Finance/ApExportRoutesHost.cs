@@ -16,6 +16,7 @@ using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.Finance;
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
+using Sprk.Bff.Api.Services.Communication;
 using Sprk.Bff.Api.Services.Communication.Models;
 using Sprk.Bff.Api.Services.Finance;
 using Sprk.Bff.Api.Services.Finance.Files;
@@ -67,6 +68,36 @@ internal sealed class ApExportRoutesHost : IAsyncDisposable
     /// <summary>What the delivery service logged.</summary>
     public CapturingLogger<ApExportDeliveryService> DeliveryLog { get; } = new();
 
+    /// <summary>The mailboxes of the receive-enabled communication accounts (task 151c-1a D2 a): a recipient among them is refused.</summary>
+    public List<string> MonitoredMailboxes { get; } = [];
+
+    /// <summary>The REAL account service over a Dataverse double that answers <see cref="MonitoredMailboxes"/> (no cache entry, so it is read every time).</summary>
+    public CommunicationAccountService Accounts { get; }
+
+    public ApExportRoutesHost()
+    {
+        var dataverse = new Mock<ICommunicationDataverseService>();
+        dataverse
+            .Setup(d => d.QueryCommunicationAccountsAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Returns((string filter, string _, CancellationToken _) => Task.FromResult(
+                filter.Contains("sprk_receiveenabled eq true", StringComparison.Ordinal)
+                    ? MonitoredMailboxes.Select(address => new Entity("sprk_communicationaccount", Guid.NewGuid())
+                    {
+                        ["sprk_emailaddress"] = address,
+                        ["sprk_name"] = address,
+                        ["sprk_receiveenabled"] = true,
+                        ["sprk_accounttype"] = new OptionSetValue(100000000),
+                    }).ToArray()
+                    : []));
+        Accounts = new CommunicationAccountService(
+            dataverse.Object, Mock.Of<IGenericEntityService>(), Mock.Of<Microsoft.Extensions.Caching.Distributed.IDistributedCache>(),
+            Microsoft.Extensions.Logging.Abstractions.NullLogger<CommunicationAccountService>.Instance);
+    }
+
+    /// <summary>A delivery service over this host's world, mailer, accounts, log and clock (a test may hand it another Dataverse seam).</summary>
+    public ApExportDeliveryService NewDelivery(IGenericEntityService? entities = null) =>
+        new(World.Service, entities ?? World.Dataverse.Service, World.Files, Mailer, Accounts, DeliveryLog, Clock);
+
     /// <summary>Puts (or replaces) the active eBilling settings row with this AP export email (null: the row has none).</summary>
     public void SetApEmail(string? address)
     {
@@ -117,8 +148,7 @@ internal sealed class ApExportRoutesHost : IAsyncDisposable
         builder.Services.AddScoped(_ => host.World.Service);
         builder.Services.AddScoped(_ => host.World.Files);
         builder.Services.AddScoped(_ => host.Mailer);
-        builder.Services.AddScoped(_ => new ApExportDeliveryService(
-            host.World.Service, host.World.Dataverse.Service, host.World.Files, host.Mailer, host.DeliveryLog, host.Clock));
+        builder.Services.AddScoped(_ => host.NewDelivery());
         builder.Services.AddScoped<IInvoiceLifecycleService>(_ => new InvoiceLifecycleService(
             host.LifecycleRecords(), Microsoft.Extensions.Logging.Abstractions.NullLogger<InvoiceLifecycleService>.Instance));
 
@@ -251,6 +281,9 @@ internal sealed class RecordingApMailer : ApExportMailer
     /// <summary>When set, a send throws it (a Graph fault or a refusal).</summary>
     public Exception? Fault { get; set; }
 
+    /// <summary>Runs while the send is in flight, after it succeeded (for example a client that disconnects).</summary>
+    public Action? DuringSend { get; set; }
+
     public override Task<Guid?> SendAsync(SendCommunicationRequest request, Microsoft.AspNetCore.Http.HttpContext httpContext, CancellationToken ct)
     {
         if (Fault is { } fault)
@@ -259,6 +292,7 @@ internal sealed class RecordingApMailer : ApExportMailer
         }
 
         Sent.Add(request);
+        DuringSend?.Invoke();
         return Task.FromResult<Guid?>(Guid.NewGuid());
     }
 }

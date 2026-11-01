@@ -41,14 +41,14 @@ public class CommunicationServiceServerSendTests
     private static ServerSendOptions Options(IReadOnlyList<ServerAttachment>? attachments = null) => new()
     {
         Attachments = attachments ?? [new ServerAttachment("ap-export-b1.csv", "text/csv", Csv), new ServerAttachment("ap-export-b1.json", "application/json", Json)],
-        OwnerFollows = new ServerOwnerRecord("sprk_billingexport", BatchId),
+        OwnerFollows = new ServerOwnerRecord("sprk_billingexport", BatchId, FinanceTeam),
         SkipEnrichment = true,
     };
 
     /// <summary>The batch's team for a question about the batch; the unit's default team for any other.</summary>
-    private static RecordingUserEmailRig Rig()
+    private static RecordingUserEmailRig Rig(Sprk.Bff.Api.Services.Communication.Tracking.ITrackingTokenSigner? signer = null)
     {
-        var rig = new RecordingUserEmailRig();
+        var rig = new RecordingUserEmailRig(signer);
         rig.Owners.AnswerFor = context => context.TargetEntityLogicalName == "sprk_billingexport" && context.TargetRecordId == BatchId
             ? RecordOwnerResolution.Owned(FinanceTeam)
             : RecordOwnerResolution.Owned(UnitTeam);
@@ -116,6 +116,61 @@ public class CommunicationServiceServerSendTests
         failure.StatusCode.Should().Be(409);
         rig.Channel.Sent.Should().BeEmpty("nothing is sent");
         rig.Created.Should().BeEmpty("nothing is written");
+    }
+
+    /// <summary>MUTATION (uac-r2 F4): removing the expected-owner check files the email under the unit's default team instead of the batch's own team.</summary>
+    [Fact(DisplayName = "151c-1a F4 SEEDED: a resolver answer that is not the followed record's owning team refuses BEFORE anything is sent or written")]
+    public async Task OwnerAnswerNotTheRecordsTeam_RefusesBeforeTheSend()
+    {
+        var rig = Rig();
+        rig.Owners.AnswerFor = _ => RecordOwnerResolution.Owned(UnitTeam); // the unit's default team, while FinanceTeam owns the batch
+
+        var act = () => rig.Service.SendAsync(Request(), RecordingUserEmailRig.UserContext());
+
+        var failure = (await act.Should().ThrowAsync<SdapProblemException>()).Which;
+        failure.StatusCode.Should().Be(409);
+        failure.Code.Should().Be(ServerOwnerRecord.OwnerMismatchCode);
+        rig.Channel.Sent.Should().BeEmpty("nothing is sent");
+        rig.Created.Should().BeEmpty("nothing is written");
+    }
+
+    /// <summary>MUTATION (A8): gating enrichment on <c>SkipEnrichment</c> alone runs enrichment (and its category routing) for an owner-following send.</summary>
+    [Fact(DisplayName = "151c-1a A8: a send whose owner follows a record is never enriched, even without SkipEnrichment")]
+    public async Task OwnerFollows_IsNeverEnriched_EvenWithoutSkipEnrichment()
+    {
+        var rig = Rig();
+
+        await rig.Service.SendAsync(Request(Options() with { SkipEnrichment = false }), RecordingUserEmailRig.UserContext());
+
+        rig.Channel.Sent.Should().ContainSingle();
+        rig.Enrichment.Verify(
+            e => e.EnrichAsync(It.IsAny<Guid>(), It.IsAny<CommunicationDirection>(), It.IsAny<NormalizedMessage>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()),
+            Times.Never, "category routing would re-own the communication");
+    }
+
+    /// <summary>MUTATION (D2 b): not passing the marker to the channel sends the server-only email without its header.</summary>
+    [Fact(DisplayName = "151c-1a D2 b: a server-only send carries a marker signed for exactly its attachments; a normal send, or no signing key, carries none")]
+    public async Task ServerSend_CarriesASignedMarkerBoundToItsAttachments()
+    {
+        var signer = new FixedKeyTrackingTokenSigner(FixedKeyTrackingTokenSigner.KeyA);
+        var rig = Rig(signer);
+
+        await rig.Service.SendAsync(Request(), RecordingUserEmailRig.UserContext());
+        await rig.Service.SendAsync(new SendCommunicationRequest
+        {
+            To = ["someone@example.com"], Subject = "s", Body = "b", CommunicationType = CommunicationType.Email, SendMode = SendMode.User,
+        }, RecordingUserEmailRig.UserContext());
+
+        rig.Channel.Sent.Should().HaveCount(2);
+        var marker = rig.Channel.Sent[0].ServerSendMarker;
+        marker.Should().NotBeNullOrEmpty();
+        var files = rig.Channel.Sent[0].Attachments!.Select(a => ((string?)a.Name, (byte[]?)a.Content)).ToList();
+        (await ServerSendMarker.IsVerifiedAsync(signer, [marker!], files, CancellationToken.None)).Should().BeTrue();
+        rig.Channel.Sent[1].ServerSendMarker.Should().BeNull("a normal send carries no marker");
+
+        var noKey = Rig(new FixedKeyTrackingTokenSigner(null));
+        await noKey.Service.SendAsync(Request(), RecordingUserEmailRig.UserContext());
+        noKey.Channel.Sent.Should().ContainSingle().Which.ServerSendMarker.Should().BeNull("no signing key, no marker; the send is not failed for it");
     }
 
     /// <summary>MUTATION: running enrichment for a server-only send calls the (strict) enrichment service, which also routes by category.</summary>
@@ -232,7 +287,10 @@ public class CommunicationServiceServerSendTests
     // MUST NOT FIRE: never bound from a request body
     // ---------------------------------------------------------------------------------------------------------------------------------
 
-    /// <summary>MUTATION: removing <c>[JsonIgnore]</c> from <see cref="SendCommunicationRequest.ServerSend"/> binds the body's value and fails this test.</summary>
+    /// <summary>
+    /// MUTATION: making <see cref="SendCommunicationRequest.ServerSend"/> public AND removing its <c>[JsonIgnore]</c> binds the body's value and fails
+    /// this test. Either change alone does not: System.Text.Json binds neither an internal property nor an ignored one, so the two guards back each other up.
+    /// </summary>
     [Fact(DisplayName = "151c-1a must-not-fire: a JSON body that carries the field is deserialized with the field ignored")]
     public void ServerSend_IsNotBoundFromJson()
     {

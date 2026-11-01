@@ -38,6 +38,11 @@ public static class ApExportCodes
     public const string EmailSendFailed = "ebilling.export.email_send_failed";
     public const string BatchNotCompleted = "ebilling.export.batch_not_completed";
 
+    /// <summary>Email to AP refusals that a retry will not change (task 151c-1a fix round: D2 a, uac-r2 F4, adversarial A4).</summary>
+    public const string ApEmailRecipientMonitored = "ebilling.export.ap_email_recipient_monitored";
+    public const string EmailOwnerRefused = "ebilling.export.email_owner_refused";
+    public const string EmailSendRefused = "ebilling.export.email_send_refused";
+
     /// <summary>Per-invoice reasons of <see cref="SelectionRefused"/>.</summary>
     public const string ReasonNotApproved = "invoice_not_approved";
     public const string ReasonAlreadyExported = "invoice_already_exported";

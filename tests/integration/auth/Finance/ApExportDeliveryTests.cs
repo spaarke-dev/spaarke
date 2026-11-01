@@ -2,8 +2,10 @@ using System.Net;
 using System.Text;
 using System.Text.Json.Nodes;
 using FluentAssertions;
+using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;
 using Microsoft.Xrm.Sdk;
+using Moq;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.Filters;
 using Sprk.Bff.Api.Infrastructure.Exceptions;
@@ -12,6 +14,7 @@ using Sprk.Bff.Api.Services.Communication.Models;
 using Sprk.Bff.Api.Services.Finance;
 using Sprk.Bff.Api.Services.Finance.Files;
 using Sprk.Bff.Api.Tests.Api.Finance;
+using Sprk.Bff.Api.Tests.DataMutation.Ebilling;
 using Xunit;
 
 namespace Sprk.Bff.Api.Tests.Auth.Finance;
@@ -32,9 +35,9 @@ public sealed class ApExportDeliveryTests
 
     private static string MarkUrl(Guid batchId) => $"/api/finance/export-batches/{batchId}/mark-sent-to-ap";
 
-    /// <summary>Exports two Approved invoices, scans the files clean, sets the AP address and (unless told not to) grants the caller Read on the batch.</summary>
+    /// <summary>Exports two Approved invoices, scans the files clean, sets the AP address and (unless told not to) grants the caller Read and Write on the batch.</summary>
     private static async Task<(Guid BatchId, ApExportRoutesHost Host)> ExportedAsync(
-        string[]? formats = null, bool grantRead = true, bool ebillingEnabled = true, string? apEmail = ApAddress, bool scanned = true)
+        string[]? formats = null, bool grantAccess = true, bool ebillingEnabled = true, string? apEmail = ApAddress, bool scanned = true)
     {
         var host = await ApExportRoutesHost.StartAsync();
         var a = host.World.AddInvoice("INV-A", approved: 900m);
@@ -51,9 +54,9 @@ public sealed class ApExportDeliveryTests
         }
 
         host.EbillingEnabled = ebillingEnabled;
-        if (grantRead)
+        if (grantAccess)
         {
-            host.World.Access.Grant(ApExportAuthorization.BatchEntitySet, batchId, AccessRights.Read);
+            host.World.Access.Grant(ApExportAuthorization.BatchEntitySet, batchId, AccessRights.Read | AccessRights.Write);
         }
 
         return (batchId, host);
@@ -101,7 +104,8 @@ public sealed class ApExportDeliveryTests
         sent.Body.Should().Contain(batchId.ToString("D")).And.Contain("Invoices: 2").And.Contain("Total: 1,500.50 USD").And.Contain("Please pay by Friday.");
         var server = sent.ServerSend!;
         server.SkipEnrichment.Should().BeTrue();
-        server.OwnerFollows.Should().BeEquivalentTo(new ServerOwnerRecord("sprk_billingexport", batchId));
+        host.World.Dataverse.Get("sprk_billingexport", batchId).GetAttributeValue<EntityReference>("ownerid").Should().BeEquivalentTo(new EntityReference("team", ApExportWorld.TeamId));
+        server.OwnerFollows.Should().BeEquivalentTo(new ServerOwnerRecord("sprk_billingexport", batchId, ApExportWorld.TeamId), "the email's owner must equal the batch's owning team");
         server.Attachments.Select(a => (a.Name, a.ContentType)).Should().Equal(
             ($"ap-export-{batchId:D}.csv", "text/csv"), ($"ap-export-{batchId:D}.json", "application/json"));
         Encoding.UTF8.GetString(server.Attachments[0].Content).Should().Be(csvText).And.NotBeEmpty();
@@ -232,16 +236,34 @@ public sealed class ApExportDeliveryTests
         }
     }
 
-    [Fact(DisplayName = "151c-1a: a configured address that is not a valid address is treated as not configured")]
-    public async Task Email_InvalidConfiguredAddress_Is409()
+    [Theory(DisplayName = "151c-1a A5: a configured value that is not one valid address is 409 not_configured with its own detail and a Warning (not 'not set')")]
+    [InlineData("not an address")]
+    [InlineData("ap@example.com; ops@example.com")]
+    [InlineData("AP <ap@example.com>")]
+    public async Task Email_InvalidConfiguredAddress_Is409_WithItsOwnDetail(string configured)
     {
-        var (batchId, host) = await ExportedAsync(apEmail: "not an address");
+        var (batchId, host) = await ExportedAsync(apEmail: configured);
         await using var _ = host;
 
         var response = await host.SendAsync(HttpMethod.Post, EmailUrl(batchId));
 
         response.StatusCode.Should().Be(HttpStatusCode.Conflict);
-        (await CodeOf(response)).Should().Be(ApExportCodes.ApEmailNotConfigured);
+        var body = await BodyOf(response);
+        body["errorCode"]!.GetValue<string>().Should().Be(ApExportCodes.ApEmailNotConfigured);
+        body["detail"]!.GetValue<string>().Should().Contain("not a single valid address").And.NotContain("No AP export email address is set");
+        host.DeliveryLog.Entries.Should().Contain(e => e.Level == LogLevel.Warning && e.Message.Contains("not a single valid address"));
+        host.FakeMailer!.Sent.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "151c-1a A5 control: an empty column still says the address is not set")]
+    public async Task Email_EmptyConfiguredAddress_SaysNotSet()
+    {
+        var (batchId, host) = await ExportedAsync(apEmail: "   ");
+        await using var _ = host;
+
+        var response = await host.SendAsync(HttpMethod.Post, EmailUrl(batchId));
+
+        (await BodyOf(response))["detail"]!.GetValue<string>().Should().Contain("No AP export email address is set");
     }
 
     [Theory(DisplayName = "151c-1a: a batch that is not Completed is 409 ebilling.export.file_not_available and nothing is read or sent")]
@@ -295,14 +317,14 @@ public sealed class ApExportDeliveryTests
         host.FakeMailer!.Sent.Should().BeEmpty();
     }
 
-    [Fact(DisplayName = "151c-1a: files over the send path's total limit are 409 ebilling.export.attachments_too_large and nothing is sent")]
+    [Fact(DisplayName = "151c-1a A3: files over the route's 3 MB budget are 409 ebilling.export.attachments_too_large up front and nothing is sent")]
     public async Task Email_FilesTooLarge_Is409()
     {
         var (batchId, host) = await ExportedAsync();
         await using var _ = host;
         foreach (var (container, name) in host.World.Gateway.Names)
         {
-            host.World.Gateway.Get(container, name)!.Content = new byte[(int)(CommunicationService.MaxTotalAttachmentSizeBytes / 2) + 1];
+            host.World.Gateway.Get(container, name)!.Content = new byte[(int)(ApExportDeliveryService.MaxEmailAttachmentBytes / 2) + 1];
         }
 
         var response = await host.SendAsync(HttpMethod.Post, EmailUrl(batchId));
@@ -325,6 +347,167 @@ public sealed class ApExportDeliveryTests
         response.StatusCode.Should().Be(HttpStatusCode.Conflict);
         (await CodeOf(response)).Should().Be(ApExportCodes.AttachmentsTooLarge);
         SentToApOf(host, batchId).Should().BeNull();
+    }
+
+    [Fact(DisplayName = "151c-1a A3 must-not-fire: files exactly at the 3 MB budget are sent")]
+    public async Task Email_FilesAtTheBudget_AreSent()
+    {
+        var (batchId, host) = await ExportedAsync();
+        await using var _ = host;
+        foreach (var (container, name) in host.World.Gateway.Names)
+        {
+            host.World.Gateway.Get(container, name)!.Content = new byte[(int)(ApExportDeliveryService.MaxEmailAttachmentBytes / 2)];
+        }
+
+        var response = await host.SendAsync(HttpMethod.Post, EmailUrl(batchId));
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        host.FakeMailer!.Sent.Should().ContainSingle().Which.ServerSend!.Attachments.Sum(a => (long)a.Content.Length)
+            .Should().Be(ApExportDeliveryService.MaxEmailAttachmentBytes);
+    }
+
+    [Fact(DisplayName = "151c-1a A3: Graph refusing the request as too large (GRAPH_SEND_FAILED 413) is 409 attachments_too_large, not a retry")]
+    public async Task Email_Graph413_Is409TooLarge()
+    {
+        var (batchId, host) = await ExportedAsync();
+        await using var _ = host;
+        host.FakeMailer!.Fault = new SdapProblemException("GRAPH_SEND_FAILED", "Email Send Failed", "request entity too large", 413);
+
+        var response = await host.SendAsync(HttpMethod.Post, EmailUrl(batchId));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Conflict);
+        (await CodeOf(response)).Should().Be(ApExportCodes.AttachmentsTooLarge);
+        SentToApOf(host, batchId).Should().BeNull();
+    }
+
+    [Theory(DisplayName = "151c-1a A4: a send-path refusal below 500 (no user email claim, Graph 403 for a user without a mailbox) is 409 email_send_refused telling the user to deliver another way")]
+    [InlineData("USER_EMAIL_NOT_FOUND", 400)]
+    [InlineData("GRAPH_SEND_FAILED", 403)]
+    [InlineData("OBO_CONTEXT_REQUIRED", 400)]
+    public async Task Email_RefusalBelow500_Is409_NoRetry(string code, int status)
+    {
+        var (batchId, host) = await ExportedAsync();
+        await using var _ = host;
+        host.FakeMailer!.Fault = new SdapProblemException(code, "Refused", "refused", status);
+
+        var response = await host.SendAsync(HttpMethod.Post, EmailUrl(batchId));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Conflict);
+        var body = await BodyOf(response);
+        body["errorCode"]!.GetValue<string>().Should().Be(ApExportCodes.EmailSendRefused);
+        body["detail"]!.GetValue<string>().Should().Contain("Mark Sent to AP").And.NotContain("try again;");
+        SentToApOf(host, batchId).Should().BeNull();
+    }
+
+    [Theory(DisplayName = "151c-1a refusal code: an ownership refusal from the send path is 409 email_owner_refused (not 503 'try again')")]
+    [InlineData("record_owner_no_source")]
+    [InlineData("record_owner_parent_unresolved")]
+    [InlineData(ServerOwnerRecord.OwnerMismatchCode)]
+    public async Task Email_OwnerRefusal_Is409_NoRetry(string code)
+    {
+        var (batchId, host) = await ExportedAsync();
+        await using var _ = host;
+        host.FakeMailer!.Fault = new SdapProblemException(code, "Record owner unresolved", "The message was not sent", 409);
+
+        var response = await host.SendAsync(HttpMethod.Post, EmailUrl(batchId));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Conflict);
+        var body = await BodyOf(response);
+        body["errorCode"]!.GetValue<string>().Should().Be(ApExportCodes.EmailOwnerRefused);
+        body["detail"]!.GetValue<string>().Should().Contain("trying again will not help");
+        SentToApOf(host, batchId).Should().BeNull();
+    }
+
+    [Fact(DisplayName = "151c-1a F4: a batch not owned by a team (a user owns it) is 409 email_owner_refused before any file is read or anything is sent")]
+    public async Task Email_BatchNotTeamOwned_Is409_NothingSent()
+    {
+        var (batchId, host) = await ExportedAsync();
+        await using var _ = host;
+        host.World.Dataverse.Touch("sprk_billingexport", batchId, new Dictionary<string, object> { ["ownerid"] = new EntityReference("systemuser", ApExportWorld.CallerSystemUser) });
+        var storageCalls = host.World.Gateway.StorageCalls;
+
+        var response = await host.SendAsync(HttpMethod.Post, EmailUrl(batchId));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Conflict);
+        (await CodeOf(response)).Should().Be(ApExportCodes.EmailOwnerRefused);
+        host.FakeMailer!.Sent.Should().BeEmpty();
+        host.World.Gateway.StorageCalls.Should().Be(storageCalls);
+    }
+
+    [Theory(DisplayName = "151c-1a D2 a: the AP address or a CC (any case) that is a monitored mailbox is 409 ap_email_recipient_monitored and nothing is read or sent")]
+    [InlineData("AP@Example.com", null)]
+    [InlineData("intake@example.com", "INTAKE@example.com")]
+    public async Task Email_MonitoredRecipient_Is409_NothingSent(string monitored, string? cc)
+    {
+        var (batchId, host) = await ExportedAsync();
+        await using var _ = host;
+        host.MonitoredMailboxes.Add(monitored);
+        var storageCalls = host.World.Gateway.StorageCalls;
+
+        var response = await host.SendAsync(HttpMethod.Post, EmailUrl(batchId), body: new { cc = cc is null ? Array.Empty<string>() : new[] { "ops@example.com", cc } });
+
+        response.StatusCode.Should().Be(HttpStatusCode.Conflict);
+        (await CodeOf(response)).Should().Be(ApExportCodes.ApEmailRecipientMonitored);
+        host.FakeMailer!.Sent.Should().BeEmpty();
+        host.World.Gateway.StorageCalls.Should().Be(storageCalls, "no file is read for a refused recipient");
+        SentToApOf(host, batchId).Should().BeNull();
+    }
+
+    [Fact(DisplayName = "151c-1a D2 a must-not-fire: monitored mailboxes that are not recipients do not stop the send")]
+    public async Task Email_OtherMonitoredMailboxes_DoNotStopTheSend()
+    {
+        var (batchId, host) = await ExportedAsync();
+        await using var _ = host;
+        host.MonitoredMailboxes.Add("intake@example.com");
+
+        var response = await host.SendAsync(HttpMethod.Post, EmailUrl(batchId), body: new { cc = new[] { "ops@example.com" } });
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        host.FakeMailer!.Sent.Should().ContainSingle();
+    }
+
+    [Fact(DisplayName = "151c-1a A6: when the Sent to AP Date column cannot be read the route answers 503 BEFORE sending")]
+    public async Task Email_SentToApColumnMissing_Is503_BeforeTheSend()
+    {
+        var (batchId, host) = await ExportedAsync();
+        await using var _ = host;
+        host.World.Dataverse.Mock
+            .Setup(e => e.RetrieveAsync("sprk_billingexport", batchId, It.Is<string[]>(c => c.Contains("sprk_senttoapdate")), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("'sprk_billingexport' entity doesn't contain attribute with Name = 'sprk_senttoapdate'"));
+
+        var response = await host.SendAsync(HttpMethod.Post, EmailUrl(batchId));
+
+        response.StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable);
+        (await CodeOf(response)).Should().Be(ApExportCodes.Unavailable);
+        host.FakeMailer!.Sent.Should().BeEmpty("the route must not send an email whose date it cannot record");
+    }
+
+    [Fact(DisplayName = "151c-1a A2: a client that disconnects after the send still gets the Sent to AP Date written (the caller's token is not used after the send)")]
+    public async Task Email_CancelledAfterTheSend_StillSetsTheDate()
+    {
+        var (batchId, host) = await ExportedAsync();
+        await using var _ = host;
+        using var disconnect = new CancellationTokenSource();
+        host.FakeMailer!.DuringSend = disconnect.Cancel;
+
+        // The Dataverse seam honours the token, as the real client does: a cancelled token fails the call.
+        var entities = new Mock<IGenericEntityService>(MockBehavior.Strict);
+        var world = host.World.Dataverse.Service;
+        entities.Setup(e => e.RetrieveAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .Returns((string t, Guid id, string[] c, CancellationToken ct) => ct.IsCancellationRequested ? Task.FromCanceled<Entity>(ct) : world.RetrieveAsync(t, id, c, ct));
+        entities.Setup(e => e.RetrieveMultipleAsync(It.IsAny<Microsoft.Xrm.Sdk.Query.QueryExpression>(), It.IsAny<CancellationToken>()))
+            .Returns((Microsoft.Xrm.Sdk.Query.QueryExpression q, CancellationToken ct) => ct.IsCancellationRequested ? Task.FromCanceled<EntityCollection>(ct) : world.RetrieveMultipleAsync(q, ct));
+        entities.Setup(e => e.UpdateIfRowVersionMatchesAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<Dictionary<string, object>>(), It.IsAny<CancellationToken>()))
+            .Returns((string t, Guid id, string v, Dictionary<string, object> f, CancellationToken ct) => ct.IsCancellationRequested ? Task.FromCanceled(ct) : world.UpdateIfRowVersionMatchesAsync(t, id, v, f, ct));
+        var delivery = host.NewDelivery(entities.Object);
+
+        var result = await delivery.EmailAsync(batchId, new ApExportEmailRequest(null, null), ApExportWorld.CallerSystemUser, new DefaultHttpContext(), disconnect.Token);
+
+        disconnect.IsCancellationRequested.Should().BeTrue();
+        host.FakeMailer.Sent.Should().ContainSingle();
+        result.Outcome.Should().Be(ApExportDeliveryOutcome.Done);
+        result.Email!.SentToApDateSet.Should().BeTrue();
+        SentToApOf(host, batchId).Should().Be(host.Clock.Now.UtcDateTime);
     }
 
     // =========================================================================================
@@ -392,7 +575,7 @@ public sealed class ApExportDeliveryTests
     [Fact(DisplayName = "151c-1a SEEDED: no Read on the batch (Write alone, or nothing) is the uniform 404 - no settings read, no bytes, no send")]
     public async Task Email_NoReadOnTheBatch_Is404_AndNothingHappens()
     {
-        var (batchId, host) = await ExportedAsync(grantRead: false);
+        var (batchId, host) = await ExportedAsync(grantAccess: false);
         await using var _ = host;
         host.World.Access.Grant(ApExportAuthorization.BatchEntitySet, batchId, AccessRights.Write | AccessRights.Append);
         host.World.Access.Grant(ApExportAuthorization.BatchEntitySet, Guid.NewGuid(), AccessRights.Read);
@@ -409,13 +592,34 @@ public sealed class ApExportDeliveryTests
         SentToApOf(host, batchId).Should().BeNull();
     }
 
-    [Fact(DisplayName = "151c-1a: an unknown batch the caller holds Read on is the same uniform 404")]
+    [Theory(DisplayName = "151c-1a D1 SEEDED: Read alone (no Write) on the batch is the uniform 404 on both routes - nothing read, written or sent")]
+    [InlineData("email")]
+    [InlineData("mark-sent-to-ap")]
+    public async Task ReadOnlyCaller_IsTheUniform404_AndNothingHappens(string route)
+    {
+        var (batchId, host) = await ExportedAsync(grantAccess: false);
+        await using var _ = host;
+        host.World.Access.Grant(ApExportAuthorization.BatchEntitySet, batchId, AccessRights.Read);
+        var storageCalls = host.World.Gateway.StorageCalls;
+        var log = host.World.Dataverse.Log.Count;
+
+        var response = await host.SendAsync(HttpMethod.Post, $"/api/finance/export-batches/{batchId}/{route}");
+
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        (await BodyOf(response))["reasonCode"]!.GetValue<string>().Should().Be(FinanceAuthorizationFilter.RecordUnavailableReasonCode);
+        host.FakeMailer!.Sent.Should().BeEmpty();
+        host.World.Gateway.StorageCalls.Should().Be(storageCalls);
+        host.World.Dataverse.Log.Count.Should().Be(log, "not one Dataverse call was made for a caller without Write");
+        SentToApOf(host, batchId).Should().BeNull();
+    }
+
+    [Fact(DisplayName = "151c-1a: an unknown batch the caller holds Read and Write on is the same uniform 404")]
     public async Task Email_UnknownBatch_IsTheUniform404()
     {
         await using var host = await ApExportRoutesHost.StartAsync();
         host.SetApEmail(ApAddress);
         var unknown = Guid.NewGuid();
-        host.World.Access.Grant(ApExportAuthorization.BatchEntitySet, unknown, AccessRights.Read);
+        host.World.Access.Grant(ApExportAuthorization.BatchEntitySet, unknown, AccessRights.Read | AccessRights.Write);
 
         var response = await host.SendAsync(HttpMethod.Post, EmailUrl(unknown));
 
@@ -574,7 +778,7 @@ public sealed class ApExportDeliveryTests
     [Fact(DisplayName = "151c-1a SEEDED: no Read on the batch is the uniform 404 on Mark Sent to AP and nothing is read or written")]
     public async Task Mark_NoReadOnTheBatch_Is404_AndNothingHappens()
     {
-        var (batchId, host) = await ExportedAsync(grantRead: false);
+        var (batchId, host) = await ExportedAsync(grantAccess: false);
         await using var _ = host;
         host.World.Access.Grant(ApExportAuthorization.BatchEntitySet, batchId, AccessRights.Write | AccessRights.Append);
         var log = host.World.Dataverse.Log.Count;
@@ -587,12 +791,12 @@ public sealed class ApExportDeliveryTests
         SentToApOf(host, batchId).Should().BeNull();
     }
 
-    [Fact(DisplayName = "151c-1a: an unknown batch the caller holds Read on is the same uniform 404 on Mark Sent to AP")]
+    [Fact(DisplayName = "151c-1a: an unknown batch the caller holds Read and Write on is the same uniform 404 on Mark Sent to AP")]
     public async Task Mark_UnknownBatch_IsTheUniform404()
     {
         await using var host = await ApExportRoutesHost.StartAsync();
         var unknown = Guid.NewGuid();
-        host.World.Access.Grant(ApExportAuthorization.BatchEntitySet, unknown, AccessRights.Read);
+        host.World.Access.Grant(ApExportAuthorization.BatchEntitySet, unknown, AccessRights.Read | AccessRights.Write);
 
         var response = await host.SendAsync(HttpMethod.Post, MarkUrl(unknown));
 

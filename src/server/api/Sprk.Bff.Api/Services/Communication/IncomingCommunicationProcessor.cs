@@ -64,6 +64,12 @@ public sealed class IncomingCommunicationProcessor
     private readonly Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver _ownership;
 
     /// <summary>
+    /// Ebilling-r1 task 151c-1a (D2 b): verifies the <see cref="ServerSendMarker"/> of a server-only send. Null (a bare test ctor): no
+    /// message is treated as one, so every message is processed as before.
+    /// </summary>
+    private readonly Sprk.Bff.Api.Services.Communication.Tracking.ITrackingTokenSigner? _trackingTokenSigner;
+
+    /// <summary>
     /// Matches a GUID pattern — Graph webhook resource paths use user object IDs (GUIDs)
     /// instead of email addresses, e.g. "users/e2e9000e-ce35-4f33-b0de-9c203fd5087a/messages/..."
     /// </summary>
@@ -91,8 +97,10 @@ public sealed class IncomingCommunicationProcessor
         ILogger<IncomingCommunicationProcessor> logger,
         IThreadResolver? threadResolver = null,
         CommunicationParticipantIndexer? participantIndexer = null,
-        CommunicationArrivedProducer? arrivedProducer = null)
+        CommunicationArrivedProducer? arrivedProducer = null,
+        Sprk.Bff.Api.Services.Communication.Tracking.ITrackingTokenSigner? trackingTokenSigner = null)
     {
+        _trackingTokenSigner = trackingTokenSigner;
         _ownership = ownership ?? throw new ArgumentNullException(nameof(ownership));
         _graphClientFactory = graphClientFactory;
         _communicationService = communicationService;
@@ -434,7 +442,17 @@ public sealed class IncomingCommunicationProcessor
         // ── Step 5: Process attachments ──────────────────────────────────────────
         // Process attachments when: account has AutoCreateRecords enabled, OR account
         // could not be resolved (default to processing rather than silently dropping).
-        var shouldProcessAttachments = account is null || account.AutoCreateRecords;
+        // Ebilling-r1 task 151c-1a (D2 b): a verified server-only send (this server sent these exact files, which are already stored
+        // on their own record) files no attachment document and archives no .eml. Anything unverified is processed as before.
+        var verifiedServerSend = await IsVerifiedServerSendAsync(message, mailboxEmail, graphMessageId, ct);
+        if (verifiedServerSend)
+        {
+            _logger.LogInformation(
+                "Verified server-only send: attachment documents and .eml archive skipped | CommunicationId: {CommunicationId}, GraphMessageId: {GraphMessageId}",
+                communicationId, graphMessageId);
+        }
+
+        var shouldProcessAttachments = !verifiedServerSend && (account is null || account.AutoCreateRecords);
         if (shouldProcessAttachments && message.HasAttachments == true
             && message.Attachments is { Count: > 0 })
         {
@@ -460,7 +478,7 @@ public sealed class IncomingCommunicationProcessor
         // an unset flag (null) is the intended default and archives. An unresolved account (null) also
         // defaults to archiving. Decision lives in CommunicationAccount.ShouldArchiveIncoming() so the
         // default-on contract is pinned by unit test. No historical mail is backfilled (forward-only).
-        if (account?.ShouldArchiveIncoming() ?? true)
+        if (!verifiedServerSend && (account?.ShouldArchiveIncoming() ?? true))
         {
             try
             {
@@ -476,7 +494,7 @@ public sealed class IncomingCommunicationProcessor
                     communicationId, graphMessageId);
             }
         }
-        else
+        else if (!verifiedServerSend)
         {
             _logger.LogInformation(
                 "EML archival skipped: ArchiveIncomingOptIn is disabled for account {Mailbox} | " +
@@ -968,6 +986,53 @@ public sealed class IncomingCommunicationProcessor
                 "Attachment text extraction step failed (non-fatal) | GraphMessageId: {GraphMessageId}; " +
                 "proceeding with subject/body match only", graphMessageId);
             return envelope;
+        }
+    }
+
+    /// <summary>
+    /// Ebilling-r1 task 151c-1a (D2 b): true only when the message carries exactly one <see cref="ServerSendMarker.HeaderName"/> header whose
+    /// token this server signed for exactly the file attachments the message carries. A message without the header costs nothing extra; a
+    /// forged, copied-onto-other-files or unreadable marker, a non-file attachment, or any fault is false (processed as before).
+    /// </summary>
+    internal async Task<bool> IsVerifiedServerSendAsync(Message message, string mailboxEmail, string graphMessageId, CancellationToken ct)
+    {
+        var markers = ServerSendMarker.MarkerValues(message.InternetMessageHeaders?.Select(h => (h.Name, h.Value)));
+        if (markers.Count == 0 || _trackingTokenSigner is null)
+        {
+            return false;
+        }
+
+        try
+        {
+            if (message.Attachments is { } listed && listed.Any(a => a is not FileAttachment))
+            {
+                return false;
+            }
+
+            var files = message.Attachments is { Count: > 0 } attachments
+                ? await ResolveFileAttachmentsWithContentAsync(attachments, mailboxEmail, graphMessageId, ct)
+                : [];
+            if (files.Count == 0 && message.HasAttachments == true)
+            {
+                // Listed as having attachments but none came with the message: fetch them, as the attachment step does.
+                var fetched = await _graphClientFactory.ForApp().Users[mailboxEmail].Messages[graphMessageId]
+                    .Attachments.GetAsync(cancellationToken: ct);
+                if (fetched?.Value is { } all && all.Any(a => a is not FileAttachment))
+                {
+                    return false;
+                }
+
+                files = (fetched?.Value ?? []).OfType<FileAttachment>().ToList();
+            }
+
+            return await ServerSendMarker.IsVerifiedAsync(
+                _trackingTokenSigner, markers, files.Select(f => (f.Name, f.ContentBytes)), ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogWarning(ex,
+                "Server-send marker check failed; the message is processed as any other | GraphMessageId: {GraphMessageId}", graphMessageId);
+            return false;
         }
     }
 

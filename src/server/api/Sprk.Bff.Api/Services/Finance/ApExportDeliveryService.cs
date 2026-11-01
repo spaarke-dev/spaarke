@@ -47,10 +47,19 @@ public enum ApExportDeliveryOutcome
     /// <summary>409 <c>ebilling.export.batch_not_completed</c> (Mark Sent to AP only).</summary>
     BatchNotCompleted,
 
-    /// <summary>409 <c>ebilling.export.attachments_too_large</c>: the files do not fit the send path's attachment limits. Nothing was sent.</summary>
+    /// <summary>409 <c>ebilling.export.attachments_too_large</c>: the files do not fit this route's attachment budget or Graph's request limit. Nothing was sent.</summary>
     AttachmentsTooLarge,
 
-    /// <summary>503 <c>ebilling.export.email_send_failed</c>: the send faulted or was refused. The date was not set.</summary>
+    /// <summary>409 <c>ebilling.export.ap_email_recipient_monitored</c>: the AP address or a CC is a receive-enabled (monitored) mailbox. Nothing was sent.</summary>
+    RecipientMonitored,
+
+    /// <summary>
+    /// 409, not worth retrying: <c>ebilling.export.email_owner_refused</c> (the email cannot be owned by the batch's team) or
+    /// <c>ebilling.export.email_send_refused</c> (the send path or Graph refused it, for example a user without a mailbox). Nothing was sent.
+    /// </summary>
+    SendRefused,
+
+    /// <summary>503 <c>ebilling.export.email_send_failed</c>: the send faulted (a 5xx or a transient failure). The date was not set.</summary>
     SendFailed,
 
     /// <summary>503 <c>ebilling.export.unavailable</c>: a read or write other than the send faulted.</summary>
@@ -100,6 +109,13 @@ public sealed class ApExportDeliveryService
     /// <summary>The most CC addresses; the longest message.</summary>
     public const int MaxCc = 10, MaxMessageLength = 2000;
 
+    /// <summary>
+    /// The most raw attachment bytes this route sends (3 MB; adversarial review A3). Graph's inline <c>sendMail</c> request is limited to about
+    /// 4 MB and base64 grows the files by a third; anything larger needs an upload session, which this path does not use. Larger batches are
+    /// refused up front with the "deliver another way" answer.
+    /// </summary>
+    public const long MaxEmailAttachmentBytes = 3L * 1024 * 1024;
+
     /// <summary>The column this task adds to the settings table.</summary>
     internal const string ApEmailColumn = "sprk_apexportemail";
 
@@ -110,6 +126,7 @@ public sealed class ApExportDeliveryService
     private readonly IGenericEntityService _entities;
     private readonly StoredFileService _files;
     private readonly ApExportMailer _mailer;
+    private readonly CommunicationAccountService _accounts;
     private readonly TimeProvider _clock;
     private readonly ILogger<ApExportDeliveryService> _logger;
 
@@ -118,6 +135,7 @@ public sealed class ApExportDeliveryService
         IGenericEntityService entities,
         StoredFileService files,
         ApExportMailer mailer,
+        CommunicationAccountService accounts,
         ILogger<ApExportDeliveryService> logger,
         TimeProvider? clock = null)
     {
@@ -125,6 +143,7 @@ public sealed class ApExportDeliveryService
         _entities = entities ?? throw new ArgumentNullException(nameof(entities));
         _files = files ?? throw new ArgumentNullException(nameof(files));
         _mailer = mailer ?? throw new ArgumentNullException(nameof(mailer));
+        _accounts = accounts ?? throw new ArgumentNullException(nameof(accounts));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _clock = clock ?? TimeProvider.System;
     }
@@ -153,11 +172,26 @@ public sealed class ApExportDeliveryService
                 return new ApExportDeliveryResult(ApExportDeliveryOutcome.NotFound);
             }
 
-            var to = await ReadApAddressAsync(ct).ConfigureAwait(false);
+            var (to, configured) = await ReadApAddressAsync(ct).ConfigureAwait(false);
             if (to is null)
             {
+                if (configured)
+                {
+                    _logger.LogWarning("Email to AP: the configured AP export email is not a single valid address; batch {BatchId} was not sent", batchId);
+                    return ApExportDeliveryResult.Refused(ApExportDeliveryOutcome.ApEmailNotConfigured, ApExportCodes.ApEmailNotConfigured,
+                        "The configured AP address is not a single valid address, so nothing was sent. Ask an administrator to correct it in the eBilling settings.");
+                }
+
                 return ApExportDeliveryResult.Refused(ApExportDeliveryOutcome.ApEmailNotConfigured, ApExportCodes.ApEmailNotConfigured,
                     "No AP export email address is set in the eBilling settings, so nothing was sent. Ask an administrator to set it.");
+            }
+
+            // (2b) No recipient may be a mailbox Spaarke monitors: the inbound path would file the files again from there (D2 a).
+            if (await IsMonitoredAsync([to, .. cc], ct).ConfigureAwait(false))
+            {
+                _logger.LogWarning("Email to AP: batch {BatchId} not sent, the AP address or a CC is a monitored mailbox", batchId);
+                return ApExportDeliveryResult.Refused(ApExportDeliveryOutcome.RecipientMonitored, ApExportCodes.ApEmailRecipientMonitored,
+                    "The AP address or a CC is a mailbox Spaarke monitors for incoming email, so nothing was sent. Use an address that is not monitored, or download the files, deliver them another way, then use Mark Sent to AP.");
             }
 
             // (3) A Completed batch with every file it produced, servable.
@@ -178,12 +212,21 @@ public sealed class ApExportDeliveryService
                 listed.Add(file);
             }
 
-            // (4) The bytes, under the send path's total-size limit (checked as they are read, so an oversize file is never fully loaded).
+            // (3b) The batch's owning team, which the email's owner must equal (uac-r2 F4), read with the Sent to AP Date so a missing
+            // column answers 503 here, before the send (A6), and never after it.
+            var owned = await _entities.RetrieveAsync(ApExportService.BatchEntity, batchId, ["ownerid", SentToApColumn], ct).ConfigureAwait(false);
+            if (owned.GetAttributeValue<EntityReference>("ownerid") is not { LogicalName: "team" } owningTeam || owningTeam.Id == Guid.Empty)
+            {
+                _logger.LogWarning("Email to AP: batch {BatchId} is not owned by a team; nothing was sent", batchId);
+                return OwnerRefused();
+            }
+
+            // (4) The bytes, under this route's attachment budget (checked as they are read, so an oversize file is never fully loaded).
             var attachments = new List<ServerAttachment>(listed.Count);
             long total = 0;
             foreach (var file in listed.OrderBy(f => f.Format, StringComparer.Ordinal))
             {
-                var read = await ReadFileAsync(batchId, file, callerSystemUserId, CommunicationService.MaxTotalAttachmentSizeBytes - total, ct).ConfigureAwait(false);
+                var read = await ReadFileAsync(batchId, file, callerSystemUserId, MaxEmailAttachmentBytes - total, ct).ConfigureAwait(false);
                 if (read.Refusal is not null)
                 {
                     return read.Refusal;
@@ -197,33 +240,48 @@ public sealed class ApExportDeliveryService
 
             // (5) The send.
             var currencies = await ReadCurrenciesAsync(batchId, ct).ConfigureAwait(false);
-            var send = BuildRequest(batch, to, cc, request?.Message, currencies, attachments, batchId);
+            var send = BuildRequest(batch, to, cc, request?.Message, currencies, attachments, batchId, owningTeam.Id);
             Guid? communicationId;
             try
             {
                 communicationId = await _mailer.SendAsync(send, httpContext, ct).ConfigureAwait(false);
             }
-            catch (SdapProblemException ex) when (ex.Code == "ATTACHMENT_LIMIT_EXCEEDED")
+            catch (SdapProblemException ex) when (ex.Code == "ATTACHMENT_LIMIT_EXCEEDED"
+                                                   || (ex.Code == "GRAPH_SEND_FAILED" && ex.StatusCode == StatusCodes.Status413PayloadTooLarge))
             {
-                _logger.LogWarning("Email to AP: batch {BatchId} attachments exceed the send path's limits (nothing sent)", batchId);
+                _logger.LogWarning("Email to AP: batch {BatchId} attachments exceed the send path's limits ({Code} {Status}; nothing sent)", batchId, ex.Code, ex.StatusCode);
                 return TooLarge();
+            }
+            catch (SdapProblemException ex) when (ex.StatusCode == StatusCodes.Status409Conflict
+                                                   && (ex.Code == ServerOwnerRecord.OwnerMismatchCode || ex.Code.StartsWith("record_owner_", StringComparison.Ordinal)))
+            {
+                _logger.LogWarning("Email to AP: batch {BatchId} not sent, the email cannot be owned by the batch's team ({Code})", batchId, ex.Code);
+                return OwnerRefused();
+            }
+            catch (SdapProblemException ex) when (ex.StatusCode < StatusCodes.Status500InternalServerError)
+            {
+                // A refusal (a missing user email claim, Graph 403 for a user without a mailbox, ...): trying again will not help.
+                _logger.LogWarning(ex, "Email to AP: sending batch {BatchId} was refused ({Code} {Status}); the Sent to AP Date was not set", batchId, ex.Code, ex.StatusCode);
+                return ApExportDeliveryResult.Refused(ApExportDeliveryOutcome.SendRefused, ApExportCodes.EmailSendRefused,
+                    "The email could not be sent from your mailbox, and trying again will not help. Nothing was sent. Download the files, deliver them another way, then use Mark Sent to AP.");
             }
             catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
             {
-                // Nothing the caller can fix by changing the request; the date is NOT set, so the user can try again.
-                _logger.LogError(ex, "Email to AP: sending batch {BatchId} faulted or was refused; the Sent to AP Date was not set", batchId);
+                // A 5xx or transient fault; the date is NOT set, so the user can try again.
+                _logger.LogError(ex, "Email to AP: sending batch {BatchId} faulted; the Sent to AP Date was not set", batchId);
                 return ApExportDeliveryResult.Refused(ApExportDeliveryOutcome.SendFailed, ApExportCodes.EmailSendFailed,
                     "The email could not be sent. Nothing was recorded; try again.");
             }
 
-            // (6) The email went. The date is best effort from here: a failure is logged and the answer is still 200.
+            // (6) The email went. The date is best effort from here: a failure is logged and the answer is still 200. The caller's token is
+            // NOT used from here (A2): a client that disconnects now must not leave the email sent with no date and no log.
             var dateSet = false;
             DateTimeOffset? sentToAp = null;
             try
             {
-                (sentToAp, dateSet) = await SetSentToApDateIfEmptyAsync(batchId, ct).ConfigureAwait(false);
+                (sentToAp, dateSet) = await SetSentToApDateIfEmptyAsync(batchId, CancellationToken.None).ConfigureAwait(false);
             }
-            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+            catch (Exception ex)
             {
                 _logger.LogError(
                     ex, "Email to AP: batch {BatchId} WAS emailed (communication {CommunicationId}) but its Sent to AP Date could not be written; do not send it again",
@@ -246,7 +304,21 @@ public sealed class ApExportDeliveryService
 
     private static ApExportDeliveryResult TooLarge() =>
         ApExportDeliveryResult.Refused(ApExportDeliveryOutcome.AttachmentsTooLarge, ApExportCodes.AttachmentsTooLarge,
-            $"The batch's files are larger than an email can carry ({CommunicationService.MaxTotalAttachmentSizeBytes / (1024 * 1024)} MB). Nothing was sent. Download the files and deliver them another way, then use Mark Sent to AP.");
+            $"The batch's files are larger than this email can carry ({MaxEmailAttachmentBytes / (1024 * 1024)} MB). Nothing was sent. Download the files and deliver them another way, then use Mark Sent to AP.");
+
+    private static ApExportDeliveryResult OwnerRefused() =>
+        ApExportDeliveryResult.Refused(ApExportDeliveryOutcome.SendRefused, ApExportCodes.EmailOwnerRefused,
+            "The email cannot be filed under the team that owns this batch, so nothing was sent, and trying again will not help. Download the files, deliver them another way, then use Mark Sent to AP.");
+
+    /// <summary>True when any address is a receive-enabled communication account's mailbox (case-insensitive).</summary>
+    private async Task<bool> IsMonitoredAsync(IReadOnlyList<string> addresses, CancellationToken ct)
+    {
+        var monitored = (await _accounts.QueryReceiveEnabledAccountsAsync(ct).ConfigureAwait(false))
+            .Select(a => a.EmailAddress?.Trim())
+            .Where(a => !string.IsNullOrEmpty(a))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        return addresses.Any(a => monitored.Contains(a.Trim()));
+    }
 
     /// <summary>The CC addresses, trimmed and de-duplicated; <paramref name="problem"/> says what is wrong with the request, if anything.</summary>
     internal static List<string> ValidateRequest(ApExportEmailRequest? request, out string? problem)
@@ -296,7 +368,8 @@ public sealed class ApExportDeliveryService
         && MailAddress.TryCreate(value, out var parsed)
         && string.Equals(parsed.Address, value, StringComparison.Ordinal);
 
-    private async Task<string?> ReadApAddressAsync(CancellationToken ct)
+    /// <summary>The AP address when it is one valid address; otherwise null, with <c>Configured</c> true when a value is set but is not one.</summary>
+    private async Task<(string? Address, bool Configured)> ReadApAddressAsync(CancellationToken ct)
     {
         var query = new QueryExpression(EbillingSettingsReader.EntityName)
         {
@@ -307,7 +380,7 @@ public sealed class ApExportDeliveryService
         query.AddOrder("createdon", OrderType.Ascending);
         var rows = await _entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false);
         var address = rows.Entities.FirstOrDefault()?.GetAttributeValue<string>(ApEmailColumn)?.Trim();
-        return IsValidAddress(address) ? address : null;
+        return IsValidAddress(address) ? (address, true) : (null, !string.IsNullOrEmpty(address));
     }
 
     private async Task<List<string>> ReadCurrenciesAsync(Guid batchId, CancellationToken ct)
@@ -397,7 +470,7 @@ public sealed class ApExportDeliveryService
     /// </summary>
     internal static SendCommunicationRequest BuildRequest(
         ApExportBatchDto batch, string to, IReadOnlyList<string> cc, string? message, IReadOnlyList<string> currencies,
-        IReadOnlyList<ServerAttachment> attachments, Guid batchId)
+        IReadOnlyList<ServerAttachment> attachments, Guid batchId, Guid owningTeamId)
     {
         var currency = currencies.Count switch
         {
@@ -432,7 +505,7 @@ public sealed class ApExportDeliveryService
             ServerSend = new ServerSendOptions
             {
                 Attachments = attachments,
-                OwnerFollows = new ServerOwnerRecord(ApExportService.BatchEntity, batchId),
+                OwnerFollows = new ServerOwnerRecord(ApExportService.BatchEntity, batchId, owningTeamId),
                 SkipEnrichment = true,
             },
         };
