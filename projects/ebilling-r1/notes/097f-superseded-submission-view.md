@@ -68,7 +68,7 @@ Unchanged fields stay. For an Accepted submission whose own invoice is Supersede
 
 Placement: `Sprk.Bff.Api`, `Services/Finance/Submission` and the two existing endpoint files, where the status reads already live (the BFF is the single backend for the add-in and the SPA; ADR-001, ADR-008). No DI registration, package or project file changed; no AI facade involved.
 
-**Publish size.** Command `dotnet publish -c Release -r linux-x64 --self-contained false <project> -o <dir>\deploypi-publish`, framework-dependent linux-x64, Release, each side exported with `git archive` to a short path (`C:\w97fm` fresh master `b50301a219`, `C:\w97fb` this task's code head `0666b656ee`), zipped with `Compress-Archive -CompressionLevel Optimal` over `api-publish\*`, PDBs included, **192 files on both sides**. Both folders were plain exports (not worktrees) and were deleted afterwards.
+**Publish size.** Command `dotnet publish -c Release -r linux-x64 --self-contained false <project> -o <dir>\deploy\api-publish`, framework-dependent linux-x64, Release, each side exported with `git archive` to a short path (`C:\w97fm` fresh master `b50301a219`, `C:\w97fb` this task's code head `0666b656ee`), zipped with `Compress-Archive -CompressionLevel Optimal` over `api-publish\*`, PDBs included, **192 files on both sides**. Both folders were plain exports (not worktrees) and were deleted afterwards.
 
 | Side | Zipped | `Sprk.Bff.Api.dll` |
 |---|---|---|
