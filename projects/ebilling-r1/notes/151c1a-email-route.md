@@ -32,9 +32,9 @@ Deploy-EbillingSentToApDateColumn.ps1 -WhatIf
 1. `Deploy-EbillingApExportEmailColumn.ps1` and `Deploy-EbillingSentToApDateColumn.ps1` (each with `-WhatIf` first), then `Deploy-EbillingFormsViews.ps1` (adds both to the main forms).
 2. Then the BFF.
 
-The BFF reads each new column in isolation, so deploying the BFF first breaks nothing else: the AP address is read by its own one-column query (not the shared `IEbillingSettingsReader`, whose select would fail on a missing column and break invoice submissions), and the batch read (`GET export-batches/{id}`) does not select the date. Until the columns exist, Email to AP and Mark Sent to AP answer 503; every other route is unaffected.
+The BFF reads each new column in isolation, so deploying the BFF first breaks nothing else: the AP address is read by its own one-column query (not the shared `IEbillingSettingsReader`, whose select would fail on a missing column and break invoice submissions), and the batch read (`GET export-batches/{id}`) does not select the date. Until the columns exist, Email to AP and Mark Sent to AP answer 503 `ebilling.export.unavailable` and send nothing: Email to AP reads the batch's `ownerid` and `sprk_senttoapdate` together BEFORE the send (fix round, A6), so a missing date column fails that read and the email is never sent without a date it can record. Every other route is unaffected.
 
-## Routes (both in `Api/Finance/ApExportEndpoints.cs`, group `/api/finance`, step 0, then `AddFinanceAuthorizationFilter(BatchReadTargets, UniformNotFound)`, then (email only) `CommunicationAuthorizationFilter`, then `RequireEbillingEnabled`)
+## Routes (both in `Api/Finance/ApExportEndpoints.cs`, group `/api/finance`, step 0, then `AddFinanceAuthorizationFilter(BatchWriteTargets, UniformNotFound)` (Read AND Write on the batch; owner decision D1), then (email only) `CommunicationAuthorizationFilter`, then `RequireEbillingEnabled`)
 
 ### `POST /api/finance/export-batches/{batchId}/email`
 
@@ -60,11 +60,14 @@ Request body (optional; an empty body is the same as `{}`):
 | 400 | `ebilling.export.invalid_request` | Bad CC, more than 10 CCs, message over 2000 characters. Nothing is read or sent |
 | 401 | | Not authenticated |
 | 403 | `ebilling.export.caller_unresolved` | The caller's systemuser could not be established |
-| 404 | (uniform body, `reasonCode` `sdap.access.deny.record_unavailable`) | No Read on the batch, unknown batch, step-0 refusal, rights-read fault |
-| 409 | `ebilling.export.ap_email_not_configured` | No active settings row, an empty column, or a value that is not a valid address |
+| 404 | (uniform body, `reasonCode` `sdap.access.deny.record_unavailable`) | No Read or no Write on the batch, unknown batch, step-0 refusal, rights-read fault |
+| 409 | `ebilling.export.ap_email_not_configured` | No active settings row or an empty column ("not set"); or a value that is not a single valid address (its own detail, and a Warning is logged) |
 | 409 | `ebilling.export.file_not_available` | Batch not Completed, a requested format has no servable file, a file row is missing/removed or its scan verdict is pending |
-| 409 | `ebilling.export.attachments_too_large` | Files over the send path's 35 MB total (or its own limit refused them) |
-| 503 | `ebilling.export.email_send_failed` | The send faulted. No date is set |
+| 409 | `ebilling.export.ap_email_recipient_monitored` | The AP address or a CC is a receive-enabled (monitored) mailbox, compared case-insensitively. Nothing is read or sent |
+| 409 | `ebilling.export.attachments_too_large` | Files over this route's 3 MB raw budget (`ApExportDeliveryService.MaxEmailAttachmentBytes`), checked as they are read; or the send path's own limit; or Graph `GRAPH_SEND_FAILED` 413 |
+| 409 | `ebilling.export.email_owner_refused` | The batch is not team-owned, the resolver refused, or its answer is not the batch's owning team. Not a retry |
+| 409 | `ebilling.export.email_send_refused` | Any other send-path refusal below 500 (for example 400 `USER_EMAIL_NOT_FOUND`, a Graph 403 for a user without a mailbox). Not a retry: download the files and use Mark Sent to AP |
+| 503 | `ebilling.export.email_send_failed` | The send faulted with a 5xx or a transient failure. No date is set; retry |
 | 503 | `ebilling.export.unavailable` | A Dataverse or file-store fault before the send |
 | 503 | `ebilling.disabled` | Kill switch (an unauthorized caller still gets the 404) |
 
@@ -86,7 +89,14 @@ The sent communication carries **no** link to the batch: no `Associations`, no `
 
 **Owner.** What 150 sets today: `ApExportService.CreateBatchAsync` asks the ownership resolver with no parent (`RecordOwnershipContext { CallerSystemUserId, RequestedBy }`), so `WhenUnfiled` is the default `ActingUserTeam`: the batch is owned by the exporting caller's business-unit default team (or the Secure team when the resolver says so, or a refusal that stops the export). The owner is being asked which team should own batches, and that may change 150. Email to AP does not copy that choice: it asks the resolver again, as a **content row of the batch** (`RecordOwnershipContext.ContentOf("sprk_billingexport", batchId)`, `KeepCreatorUnlessTargetIsTeamOwned`), so the communication follows whatever team the resolver names for the batch at send time, and so follows any later change to how batches are owned. An answer that is not a team (refused, or "keep the creator") refuses before anything is sent or written (409). The default owner (the sender's unit team) is never kept.
 
-**Category routing.** `CommunicationEnrichmentService` (which calls `AssignOwningTeamAsync`, the category routing that re-owns a communication) is not run for this send (`ServerSend.SkipEnrichment`). That also means no AI indexing, triage or proposals for the AP email. A normal send still enriches (a regression test pins it).
+**Owner check (fix round, uac-r2 F4).** The resolver answers a content row of a team-owned parent with the default team of the parent's business unit, not the parent's own owner. So the delivery service reads the batch's `ownerid` before the send (a non-team owner refuses, 409 `email_owner_refused`) and passes it as `ServerOwnerRecord.ExpectedOwnerTeamId`; `CommunicationService` refuses before the send (`server_send_owner_mismatch`, 409) unless the resolver's answer equals it. It is a check, never a computed owner. With batches owned by their unit's default team (task 150, unchanged), the two agree.
+
+**Category routing.** `CommunicationEnrichmentService` (which calls `AssignOwningTeamAsync`, the category routing that re-owns a communication) is not run for this send: `CommunicationService` skips enrichment whenever `ServerSend.SkipEnrichment` OR `ServerSend.OwnerFollows` is set (fix round, A8). That also means no AI indexing, triage or proposals for the AP email. A normal send still enriches (a regression test pins it).
+
+**Re-ingestion (fix round, owner decision D2; uac-r2 F2).** The echo guard was only the best-effort Internet-Message-Id lookup, so a miss let the inbound path file the files as `sprk_document` rows and archive the `.eml`. Both are now closed:
+- (a) Before any send, a recipient (the AP address or a CC) that is a receive-enabled communication account's mailbox (`CommunicationAccountService.QueryReceiveEnabledAccountsAsync`, case-insensitive) is refused, 409 `ap_email_recipient_monitored`.
+- (b) A server-only send with attachments carries the header `x-spaarke-server-send` (`ServerSendMarker`). Its value is a token from the existing tracking-token signer (`ITrackingTokenSigner`, HMAC-SHA256 with the Key Vault key, constant-time verify) whose record type is `spaarke-server-send:` + a SHA-256 digest of the attachments sent (each name and the SHA-256 of its bytes, sorted). `IncomingCommunicationProcessor` skips the attachment step and the `.eml` archive only when the message has exactly one such header, the token verifies, and the digest equals the digest of the attachments the message actually carries. A forged header fails the signature; a header copied by a recipient onto another email fails the digest unless that email carries byte-identical copies of the batch files (already stored on the batch); a footer token for a record fails the record type; no header, no key or any fault processes the message as before. The communication row itself is still captured either way.
+- Residual: a recipient who re-sends the identical files with the copied header (and a different body) gets that one message's `.eml` not archived. No key configured (`Communication:TrackingFooter:SigningKeySecretName` unset) means no marker is sent; (a) still applies.
 
 **Copies.** None. The bytes go from the stored files to the mail channel only. No `sprk_document`, `sprk_communicationattachment` or other row holds them; `sprk_hasattachments` and `sprk_attachmentcount` are not set (no attachment rows exist to count); `ArchiveToSpe` is false and the option is refused if combined with an archive, a shared mailbox, a message or a system-mail send. The only stored copies of the files are the batch's own Stored Files (parent = the batch, so they keep the stored-file hard-deny and Read on the batch).
 
@@ -169,7 +179,28 @@ The sent communication carries **no** link to the batch: no `Associations`, no `
 - **Post-send window.** If the process dies between the send and the date write, the email went and the date is empty. The caller can use Mark Sent to AP. Making the send idempotent (a sent marker before the send) would need a new column; not done.
 - **Unchanged send-path behaviour.** Thread resolution, the arrived-producer, the participant index and the link sweep run for this email as for any send-as-user email. They were not changed and are mocked in the unit rig, so uac-r2 may want to look at what they write for a team-owned communication (they write metadata about the message, not the files).
 - **`sprk_hasattachments` is not set**, on purpose: no attachment rows exist, and the flag would claim rows that are not there. The Communication form will not show a paperclip for this email.
-- **Graph payload.** The files are sent inline in the Graph `sendMail` body; the existing 35 MB cap (the send path's own) is the only limit applied.
+- **Graph payload.** The files are sent inline in the Graph `sendMail` body, whose request limit is about 4 MB; this route caps the raw files at 3 MB (`MaxEmailAttachmentBytes`) and maps a Graph 413 to `attachments_too_large`. Larger batches are delivered another way and marked with Mark Sent to AP; an upload session is not used.
+- **Cancellation (fix round, A2).** After `_mailer.SendAsync` returns, the date write uses `CancellationToken.None`, so a client that disconnects cannot leave the email sent with no date and no log. The same token problem exists in the shared `SendAsUserAsync` / `CreatePreparedRecordAsync` (a cancelled request token after the Graph send can lose the `sprk_communication` row); that is pre-existing shared code, not changed here, and is reported for filing.
 - **Unresolved caller is 403** (`ebilling.export.caller_unresolved`), like the export route, after the uniform 404 check has passed.
 - **Settings read.** The AP address uses its own query, not `IEbillingSettingsReader`, for the deploy-order reason above. Once the column is deployed everywhere the reader could carry it; left for a later cleanup.
 - **Owner question open.** Which team should own batches is with the owner; this task needs no change if that changes (see "Owner").
+
+## Fix round (uac-r2 access review and adversarial review)
+
+| Item | Change | Test (seeded or fail-before proof) |
+|---|---|---|
+| D1 | Both routes require Read and Write on the batch (`BatchWriteTargets`, the same `FromRoute` Record check the Procedure write routes use, plus Read) | `ReadOnlyCaller_IsTheUniform404_AndNothingHappens` (both routes) |
+| D2 a | Monitored recipient refused before any send | `Email_MonitoredRecipient_Is409_NothingSent`, must-not-fire `Email_OtherMonitoredMailboxes_DoNotStopTheSend` |
+| D2 b | Signed, attachment-bound `x-spaarke-server-send` marker; inbound skips attachments and archive only when verified | `ServerSendMarkerTests` (marker, channel header, inbound end to end through `ProcessAsync`), `ServerSend_CarriesASignedMarkerBoundToItsAttachments` |
+| F2 | Closed by D2 | as D2 |
+| F3 | `ApExportEmailAccessTests` rewritten: owner answered from the batch row (its unit's default team, as the real resolver answers); `communication.ownerid == batch.ownerid`; stored files gated as Read on the batch; property "the email is readable exactly like the batch; no row holds the bytes"; the "same-unit user cannot read it" and "only sprk_communication was written" claims dropped | `TheEmailIsReadableExactlyLikeTheBatch_AndNoRowHoldsTheBytes` (control: a default-owned email would not read like the batch) |
+| F4 | Expected-owner check in `CommunicationService`; non-team batch owner refused in the delivery service | `OwnerAnswerNotTheRecordsTeam_RefusesBeforeTheSend`, `BatchOwnedByAnotherTeam_IsRefused_BeforeTheSend`, `Email_BatchNotTeamOwned_Is409_NothingSent` |
+| Refusal code | Ownership refusals map to 409 `email_owner_refused` (was 503 "try again") | `Email_OwnerRefusal_Is409_NoRetry` |
+| A2 | Date write after the send uses `CancellationToken.None` | `Email_CancelledAfterTheSend_StillSetsTheDate` |
+| A3 | 3 MB raw budget; Graph 413 maps to `attachments_too_large` | `Email_FilesTooLarge_Is409`, `Email_FilesAtTheBudget_AreSent`, `Email_Graph413_Is409TooLarge` |
+| A4 | Refusals below 500 map to 409 `email_send_refused` | `Email_RefusalBelow500_Is409_NoRetry` |
+| A5 | Invalid configured address: Warning and its own detail | `Email_InvalidConfiguredAddress_Is409_WithItsOwnDetail`, control `Email_EmptyConfiguredAddress_SaysNotSet` |
+| A6 | Pre-send read of `sprk_senttoapdate` (with `ownerid`); deploy-order note corrected | `Email_SentToApColumnMissing_Is503_BeforeTheSend` |
+| A7 | `sprk_senttoapdate` disabled on the batch form (forms script spec and both form XML files) | (form) |
+| A8 | Enrichment skipped whenever `OwnerFollows` is set | `OwnerFollows_IsNeverEnriched_EvenWithoutSkipEnrichment` |
+| A9 | The JSON must-not-fire test's mutation comment corrected (an internal property is not bound either) | (comment) |
