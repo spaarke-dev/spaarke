@@ -163,7 +163,9 @@ internal static class RecordTableRules
                     "RecordCreationService, tasks 100 and 152)."),
                 ChatCallerIsTheForPerson("sprk_assignedtointernal"),
             ],
-            // Office RecordCreationService.ApplyBusinessUnitDefaultsAsync fills sprk_searchindexname / sprk_ai_search_index.
+            // Step 8 of the unified create (RecordCreationService.SearchIndexDefaultAsync) writes sprk_searchindexname /
+            // sprk_ai_search_index from the owning business unit, and nothing else does: SearchIndexed makes both columns the
+            // server's (FR-38, task 039). The Office core's ApplyBusinessUnitDefaultsAsync that used to fill them is deleted (018c).
             // Task 017 (#1608, decision 2b): refused in a caller's payload on every path, as on a work assignment.
             TableServerOwnedColumns = RootServerOwnedColumns,
             SearchIndexed = true,
