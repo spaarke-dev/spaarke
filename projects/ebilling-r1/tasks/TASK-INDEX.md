@@ -155,7 +155,10 @@ To begin: `work on task 001`. Wave W0-1 (001, 002, 003) and W2-1 (040, 041) have
 | ID | Status | Title | Rigor | Model / Effort | Group | Deps |
 |---|---|---|---|---|---|---|
 | 150 | ✅ [done; on work b3eaf99f9f, review fixes in; credit-memo batches need Deploy-EbillingInvoiceTotalsRange.ps1 per environment (owner OK)] | AP export batch (CSV + JSON, D-56 default mapping, snapshot); files as internal-only Stored Files (EB-D-148) | FULL | sonnet / high | P6-A | 014, 023, 025, 028, 103, 090 |
-| 151 | 🔲 [open] | Mark Paid and export UI | STANDARD | sonnet / high | none | 150 |
+| 151 | 🔄 [split into 151a/b/c, EB-D-181] | Mark Paid and export UI | STANDARD | sonnet / high | none | 150 |
+| 151a | ✅ [done; on work 06c72f5571] | Mark Paid route (Sent to AP → Paid) and the export batch file download (CSV / JSON, stored bytes) | FULL | sonnet / high | none | 150 |
+| 151b | 🔲 [open] | Invoice views by status, Export to AP and Mark Paid ribbon buttons on views and form, the export modal (ADR-050) with Download, the Billing Export form's Download | FULL | sonnet / high | none | 151a |
+| 151c | 🔲 [open] | Email to AP: the AP export email column on the eBilling settings record (owner OK), CSV + JSON attached, sent from the user's mailbox through the communication send path, recorded against the batch | FULL | sonnet / high | none | 151a |
 | 152 | ✅ [done; on work 62039c6887, review fixes in] | Invoice index from structured records | STANDARD | sonnet / high | P6-A | 049, 103 |
 | 153 | 🔲 [open] | Deploy WP6 to dev | STANDARD | sonnet / high | none (deploy) | 150, 151, 152, 136 |
 
