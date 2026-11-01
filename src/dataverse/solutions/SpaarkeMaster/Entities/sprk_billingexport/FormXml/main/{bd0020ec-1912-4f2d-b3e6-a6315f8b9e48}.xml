@@ -66,7 +66,7 @@
                         <labels>
                           <label description="Sent to AP Date" languagecode="1033" />
                         </labels>
-                        <control id="sprk_senttoapdate" classid="{5B773807-9FB2-42DB-97C3-7A91EFF8ADFF}" datafieldname="sprk_senttoapdate" />
+                        <control id="sprk_senttoapdate" classid="{5B773807-9FB2-42DB-97C3-7A91EFF8ADFF}" datafieldname="sprk_senttoapdate" disabled="true" />
                       </cell>
                       <cell id="{26EBB34B-F2EF-D3B1-0521-198E13C4D689}">
                         <labels>
