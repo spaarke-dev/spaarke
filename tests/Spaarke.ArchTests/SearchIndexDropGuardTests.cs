@@ -38,7 +38,7 @@ public class SearchIndexDropGuardTests
         ["src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/EmailDraftToolHandler.cs"] =
             "Writes a sprk_communication draft; that table is not search-indexed.",
         ["src/server/api/Sprk.Bff.Api/Services/Dataverse/InvoiceFamilyCoreRecordGuard.cs"] =
-            "Passes through fields the invoice-family writers computed; it takes no client body.",
+            "Every caller drops first (FieldMappingEndpoints push, UpdateRecordActionCore, DataverseUpdateHandler).",
         ["src/server/api/Sprk.Bff.Api/Services/Finance/FinanceRollupService.cs"] =
             "Writes server-computed roll-up columns on the parent; a fixed column set.",
         ["src/server/api/Sprk.Bff.Api/Services/Finance/InvoiceTotalsService.cs"] =
