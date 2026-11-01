@@ -1,121 +1,60 @@
 # Current Task State — `spaarkeai-word-add-in-r1`
 
-> **Format (2026-10-06):** CURRENT state only, REWRITTEN at each checkpoint. Standing directives + gotchas: project `CLAUDE.md` → "Standing directives & gotchas" (incl. "Multi-customer add-in (Model 1)" and "Guest sign-in, PCFs and telemetry" blocks). History: git log + `notes/handoff-history/` (do not load on recovery; the pre-2026-10-21 state, including the Console run log, is archived in `notes/handoff-history/2026-10.md`).
+> **Format (2026-10-06):** CURRENT state only, REWRITTEN at each checkpoint. Standing directives + gotchas: project `CLAUDE.md` → "Standing directives & gotchas". History: git log + `notes/handoff-history/` (do not load on recovery; the state before 2026-11-01 is archived verbatim in `notes/handoff-history/2026-11.md`).
 
-> **Last Updated**: 2026-10-30 (context-handoff at 85%): dev BFF candidate c91b99e575 is blocked by #2468; UAC's fix is PR #2471 (draft), and our check is in progress.
+> **Last Updated**: 2026-11-01 (context-handoff at 85%).
 
-## 🔥 ACTIVE NOW (2026-10-29)
-
-- **#2412 (ISS-027) and #2416 (ISS-028): CLOSED 2026-10-29.** The owner re-test passed on dev in Outlook web: a typed name produced `2026-10-08_New Email File Name 10-29-2026.eml` filed to PAT-935426, and the subject was kept. Retest comments are on both issues. Known limit: #2421.
-- **Outlook DESKTOP sign-in: "Bad Request - Request Too Long" (HTTP 400, request headers too long) on login.microsoftonline.com** in the sign-in popup. Outlook web is fine.
-  - NOT the add-in and NOT the Office cache: clearing Wef did not help, and Edge also gets the 400 on admin.microsoft.com and portal.azure.com.
-  - Machine: Entra-joined to Helios IP, plus 3 registered work accounts (RightHub Groups, Spaarke Inc., Dewey Cheatham & Howe PC). Likely cause: the per-account Windows SSO cookies Edge and WebView2 send to login.microsoftonline.com are too large in total.
-  - Owner steps: an InPrivate test, clear Edge's login.microsoftonline.com site data, then disconnect an unneeded work account (never Helios IP: that is the device join). No code change; nothing to file.
-- **Dev BFF candidate (R3): c91b99e575 was BLOCKED by us (#2468); replaced by 9f4afe82ac, which we OK'd.** UAC 194b (2cd0f62e2c; not in dev's 136568cf70) makes unfiled Office .eml and attachment documents owned by the ROOT BU team. The communication is now the primary ownership parent, and an unfiled one is root-owned. Basic and Core User read sprk_document at Parent:Child depth (4), so a child-BU saver loses access to their own unfiled save. Verified on dev (read-only).
-  - The rest is fine for the add-in: ebilling's /office/save changes are inert while it is off, and #2412/#2416 are intact.
-  - R3 told (the owner decides: hold for UAC's fix, which we recommend, or deploy accepting it). UAC told at session spaarke-wt-unified-access-control-r2-db (the old pipe is stale).
-  - BFF tests at c91b99e575 (Office, idempotency, association, upload, incoming, EntityAccessFilter): 1203 passed, 7 skipped, 1 failed. The failure is R3's ProvisionProjectIdempotencyTests timeout test, which passes 55/55 alone (timing under load). Reported to R3. C:\wt2464 removed. **UAC confirmed #2468 was unintended** (task 080's rule stands) and is fixing it on fix/uac-r2-2468-office-unfiled-owner, with a real-resolver test and a reconciler test. They are also assessing OFFICE_022 and OFFICE_014. Design A3 (refined by UAC): an UNFILED communication counts only for Secure and the saver's team owns the document; a FILED communication means the document follows its filing team (the family rule, accepted as known behavior); communication ownership is unchanged. Our condition: decide "unfiled" from the filing, not the owner kind, and add a test for a filed communication that is root-team-owned (a root-BU matter). **UAC PR #2471** (fix/uac-r2-2468-office-unfiled-owner @ 810a1bb2a3; draft while 2 UAC security reviews run). I read the resolver diff: filed-ness comes from the communication's own ownership-parent lookups or its thread's filing, never the owner kind; when unfiled, the communication moves to SecureOnlyParents. 14 tests, including our cases (1) and (2) and reconciler parity. CI was pending at the check. UAC's lower items: (a) OFFICE_022 leaving a communication behind gets FILED, not fixed here; (b) the 502 OFFICE_014 on a lookup throw is deliberate (fail closed). **OK sent to UAC** (2026-10-30). The note is resolved: only a MISSING thread refuses (OFFICE_022); a transient fault propagates as the retryable 502 OFFICE_014. UAC is adding a PR line and filing the OFFICE_022 leftover. **#2471 squash-merged at 9f4afe82ac.** R3's new candidate is 9f4afe82ac. **OK sent to R3** (2026-10-30, content only): resolver identical to the reviewed 810a1bb2a3; #2470 RecordFamilyReader is off the Office path. **DEPLOYED: dev BFF = 9f4afe82ac** (R3 readback 2026-10-30 14:40:39Z; our healthz 200, /api/me 401). Rollback target: 136568cf70. **Next:** a post-deploy check of one unfiled Outlook save by a child-BU user (the owner or a test user saves; I read back owningbusinessunit/ownerid of the sprk_document and confirm the saver's BU team). ebilling will now switch Ebilling:Enabled on (EB-D-173) after uac's 30-minute check, then send the dev notice.
-- Offer to correct the owner's 10-28 test record (comm 12f1f3f8…, doc 536204ff…) only if they ask.
-- **ebilling 094 client: #2448 MERGED** at 5119519679 (2026-10-29 14:48Z; inert, `?action=submitInvoice` only). C:\wt133d removed.
-  - Every 094 row in §6 and §9 has a sentence. `filingKept`: the top-level field first, then the pinned sentence. Code = `errorCode ?? reasonCode`, plus `extensions.code` on a 403 only.
-  - ebilling's contract fix is on task/ebill-095-errorcode @ d7218072fb: step A's 403 gets a top-level `errorCode`; `filingKept: true` goes on every refusal after step A filed (including reasonCode-only answers and Office pass-throughs); sweep list received. I checked their contract diff: it matches #2448. ebilling 095 is ON MASTER: #1911 merged at eaa0d44f7f (verified; the contract is unchanged since 842110e6ab, the version we OK'd). Not live on dev yet. It needs an SPA-r3 dev BFF deploy from this master, then `Ebilling:Enabled=true` on dev. ebilling reports the owner OK'd this in their session (EB-D-173, 2026-10-29; reconcile job stays off). They set it after the SPA-r3 deploy passes uac's 30-minute check. ebilling owns that setting, not us. Then ebilling sends the dev notice, and slice C follows with the owner's go.
-- **eBilling ON in dev since 2026-10-30 15:21Z** (dev BFF 9f4afe82ac; the from-email route and the firms read answer; the Finance store is configured; malware scan off on dev; Correction still answers not_available). **Next (owner):** dev runs the UNIFIED package (both XML add-ins were removed after 078), and the button never shipped because it landed 2026-10-27 without a version bump. **PR #2476** (auto-merge) makes package 1.1.3 (and the XML 1.0.23.0); after it merges and deploy-office-addins runs, the owner downloads `spaarke-addin-1.1.3.zip` (artifact `spaarke-addin-unified-package`) and uses M365 admin center → Integrated apps → Spaarke → Update (Edge InPrivate because of the sign-in 400). C:\wt133v is the PR worktree; remove it with Remove-WorktreeSafe after the merge. Then test a New invoice end to end in Outlook on the web. Then the owner's go for slice C (remove Invoice from Save and + New in both hosts; Word loses Invoice save; then tell ebilling for 096).
-- **Submit Invoice UAT 2026-10-31 (package 1.1.3 live):** the button opens the view. The first submit got 409 document_core_record_mismatch, which is CORRECT: the email (communication 99b5f650, 'Fw: PAT-942665 ... Elisa Liardo') is already filed under PAT-897705, and the owner picked PAT-792345. Next: the owner retests with a fresh email, or with PAT-897705 selected. I proposed to ebilling an optional filedUnder {entityType,entityId,name} on that 409 (only when readable) so the add-in can name the record and offer a switch; awaiting their answer.
-- **Submit Invoice UAT #2 2026-10-31:** (a) INV-012.1 (submission 24800a9d) ended Failed with ai.invoice.read.not_configured: the dev BFF has no ContentUnderstanding:Endpoint. Sent to ebilling: configure it (environment change, owner go), refuse up front like storage_not_configured, and add the code to the contract's outcome list (§9). (b) The view didn't prefill the filed record and had no suggestions: fixed in **PR #2492** (merged; it broke the gated jest job because App.invoiceRoute doubles InvoiceView, so the follow-up **PR #2497** moves invoiceFiledRecord to invoiceSubmissionSeam.ts; gated jest green, auto-merge on). Owner go relayed to ebilling for the reader config plus the contract items. Local jest needs the stale node_modules in Spaarke.Communication.Components and Spaarke.UI.Components set aside (a second React). C:\wt133p is the PR worktree; remove it after the merge.
-- **2026-11-01: OK to R3 for dev BFF fcf01480f4** (from live d0c1c5dc3c: 3 external-access notification files only); asked R3 to confirm ContentUnderstanding__Endpoint survives.
-- **2026-11-01: dev reader configured by ebilling** (owner go in both sessions); #2497 merged. **Owner retest next:** same email, Submit Invoice; expect PAT-792345 prefilled and tracking INV-012.2. ebilling task 191 (work fdd3c79b7f/d4849acbe6): 422 reader_not_configured plus the ai.invoice.* outcomes; add-in sentences in **PR #2498** (auto-merge). Task 192 filedUnder (owner OK) is in progress at ebilling; when it lands, use it in the 409 sentence (name the record; the view's switch).
-- **ebilling 097b Correction (contract 08ab4f32b2, work only; ships to master with 097c): AGREED 2026-10-30.** Write check first (uniform 404, transient included); 409 reasons now include different_invoice_number and no_submission; not_available retired. **Client to-do when 097b+c reach master:** sentences for the two new reasons; add 'if you can open this invoice in Spaarke, try again' to the record_unavailable sentence; enable Correction only once 097e's prefill read exists. **Added 2026-10-30 (ebilling 169c55a498, work only):** intake reason submission_in_progress (wait, then resubmit); stored permanent outcomes correction_not_allowed.{invoice_status,different_firm,different_core_record,different_invoice_number,submission_in_progress} and correction_target_unavailable need sentences. **097e prefill** GET /api/finance/invoices/{id}/correction-prefill: route and errors agreed; I asked for the intake's entityType vocabulary (Matter/Project/WorkAssignment, incl. WorkAssignment), a closed invoiceStatus set (the client maps it to words), no extra fields, Guid input. **AGREED by ebilling** (in its 097e task); invoiceStatus set: InReview, Approved, SentToAp, Paid, Rejected, ReturnedToFirm, Cancelled, Superseded (null or omitted when unknown). replacedBy {invoiceId,name}|null AGREED (direct replacement; only when Superseded and the caller can Read it; null on a read fault, never a 503); ebilling sends the commit when 097e is on work. so the client offers 'Correct the newer invoice'; Superseded sentence: 'This invoice has already been replaced by a correction. Correct the newer invoice instead.'
-- Cleanup later (Remove-WorktreeSafe): C:\wt2412, C:\wt2412m, C:\wt2416, C:\wt2416c.
-
-## ⚡ Quick Recovery (READ THIS FIRST)
+## Quick Recovery (READ THIS FIRST)
 
 | Field | Value |
 |---|---|
-| **Task** | **133 🔄 Outlook Submit Invoice view** (FULL, opus/high). Slices A+B MERGED: server #2357 (68048b83d5, Work Assignment in office entity search) and client #2359 (4ab7c1a9c1, inert: `?action=submitInvoice` only; the ribbon button appears only on an owner manifest redeploy). All 133 worktrees removed. Dev BFF = e56a3a51d4 (R3, live 2026-10-28 14:11:58Z; contact schema -Verify passed first; rollback de38296499): #2357 is LIVE, so C0 is met (Work Assignment in office entity search on dev). Slice C's manifest redeploy now waits only on from-email working on dev + owner go. ebilling 2026-10-27: 095 built (task/ebill-095-from-email 96681b8825, not merged; submit path 503 until 094); new Failed code `ebilling.submission.file_scan_timeout` (092) OK'd by us; its client message merged in #2361 (90f3cab765; contract f1ae28290e); the no_message_id 400 is a code-less ValidationProblem, which our generic 400 sentence covers; OP-5 decided (EB-D-165, 2026-10-28): another user's Failed attempt allows a new attempt; otherwise 409 document_already_submitted with no reason field (by design). Our neutral 409 sentence merged in #2365 (083b7c9727). 095 review round 2026-10-28 (contract at cc7bb5eeee, task/ebill-095-from-email: K v2 without firm fields; 422 attachment_not_preserved; 500 OFFICE_AUTH_ERROR; firms 404; poNumber ≤100) agreed; client follow-up merged #2384 (b099bc4e8f). ebilling's next step: 094 seam (route stops answering 503). WAITING: supporting files (after ebilling 123 is built), Correction (after ebilling 097), slice C (from-email works on dev ~11-20 + owner go; order: BFF with #2357 live -> owner manifest redeploy -> remove Invoice from Save/+New in both hosts, tell the owner Word loses Invoice Save -> tell ebilling for 096). Owner Outlook checks PASSED 2026-10-28 (already-in-Spaarke card on the Form D email; new save stores sprk_emaildate 2026-10-16T02:52:53Z = Outlook's 10/15 10:52 PM EDT; To Do, Find, Send also OK). Found in passing: ISS-027 / #2412 (save-pane matter lost to a body tracking token → communication Ambiguous, no regarding); owner to decide whether to fix now (email-intelligence engine). Office dev-cert files exist in %USERPROFILE%\.office-addin-dev-certs from a review build (CA NOT installed). |
-| **Status** | 130 and 131 are both live in dev. BFF `583f90c1d9` (R3, 18:04:37Z) contains 733c65063c, 4e36c1929d and 077. The add-in auto-deployed on the #2182 merge push (`deploy-office-addins.yml`, 16:50:34Z, success). The notice text is in the hosted `150.bundle.js`, which both the Outlook taskpane and commands (Quick Save) load. No manual add-in deploy is needed. |
-| **Next Action** | 0. **Dev BFF is now `1fa0cf5cb8`** (2026-10-23 00:00:36Z, R3, on our OK; our healthz check: 200). It is `f5bf481185` plus field-mapping #2282.
-   - The save path is untouched. The Office change is field-mapping 018b/018c: the Matter/Project quick-create now runs on RecordCreationService.
-   - ISS-001 only widens the Copilot audience; the add-in's workforce audiences are unchanged.
-   - Quick-create problems found in UAT go to field-mapping first.<br>1. When R3 sends the times or subjects of the owner's two .eml saves, read the sprk_document rows back and report them to UAC and R3.<br>2. Owner live checks (below), then 090. |
+| **Task** | **133 🔄 Outlook Submit Invoice view** (FULL, opus/high). Live on dev in unified package 1.1.3; first owner UATs done. |
+| **Status** | Waiting on the owner's retest (INV-012.2) and on ebilling's work reaching master. Open PRs: **#2501** (097f replaced-by-correction; auto-merge on). |
+| **Next Action** | 1. When #2501 merges, remove C:\wt133p with `pwsh -NoProfile -Command "& ./scripts/worktree/Remove-WorktreeSafe.ps1 -Path 'C:\wt133p'"`. 2. Act on the owner's retest result. 3. When ebilling sends task 192 (filedUnder), use it in the 409 sentence. |
 
-## Task 130 (#2126 / R3 ISS-015 / UAC D7 T8): what is in #2177
-- Every Office email-derived `sprk_document` (the .eml, each attachment child, a single attachment, the worker fallback) is created linked to its `sprk_communication`, or Restricted. Restricted carries `sprk_accessinheritance` = `AccessInheritance.OwnNarrowing(Restricted)` in the same create (UAC 189); the stager refuses a value without its record.
-- Guards: `DocumentCreateStagesCommunicationFieldsGuardTests` (stager call; outcome at all 3 sites; only `ApplyEmailCommunicationOutcome` sets the record, compound assignment included); 189's `DocumentAccessPermissionWriterGuardTests` (the stager listed; UNSEEN-alias check; Key widened). Write-path registry I-19.
-- Gates: full Office/ChildAccessPermission filter 749/0/7; ArchTests 1225/1225 (`65b4f5f468`); the pass 1/2 fixes re-run on their scope.
-- **Deploy dependency:** a BFF with T8 REQUIRES `sprk_document.sprk_accessinheritance` (`Set-DocumentAccessPermissionSchema.ps1`, guide §7.4). It is applied in dev; prod needs it before any BFF with 189 or T8. A deploy needs the owner's go, coordinated with R3, and the build must contain 077.
+## Submit Invoice (task 133): state
+- **Dev:** eBilling is ON (since 2026-10-30 15:21Z). The invoice reader is configured (`ContentUnderstanding__Endpoint`, 2026-11-01 02:54:30Z, ebilling, owner go in both sessions; analyzers sprk_invoice_v2p and sprk_invoice_v2 deployed). The owner updated Integrated apps to package **1.1.3** (#2476); the Submit Invoice ribbon button works in Outlook on the web.
+- **Merged to master (auto-deploys the add-in):**
+  - #2476: package 1.1.3 and Outlook XML 1.0.23.0.
+  - #2492 + #2497: the view starts on the record the email is filed to (`invoiceFiledRecord` in `invoiceSubmissionSeam.ts`, from the pane's email identity), never replaces a user pick, names the filed record when another one is picked, and shows the Save picker's suggestion cards for an unfiled email.
+  - #2498: sentences for ebilling task 191 (422 `reader_not_configured`; outcomes `ai.invoice.read.not_configured`, `.disabled`, `.binding_missing` ask an administrator; `.completion_failed`, `.output_invalid` say submit again later).
+- **Open PR #2501** (auto-merge): Accepted + `ebilling.submission.replaced_by_correction` is not "held for review"; it names `replacedBy.trackingNumber` when present (ebilling 097f, EB-D-180).
+- **UAT results 2026-10-31:**
+  - UAT 1: a 409 `document_core_record_mismatch` was correct (communication 99b5f650 "Fw: PAT-942665 …" is filed under PAT-897705; the owner picked PAT-792345).
+  - UAT 2: INV-012.1 (submission 24800a9d) Failed with `ai.invoice.read.not_configured` (since fixed on dev); the view didn't prefill (fixed by #2492).
+- **Owner retest pending:** the same email "Invoice Submission - PAT-792345", Submit Invoice; expect PAT-792345 prefilled, Morrison Foerster auto-chosen if it is the only linked firm, INV-012 → tracking **INV-012.2** (a new attempt after Failed, §5), then a final status. If it fails, read `sprk_invoicesubmission` (latest by createdon): `sprk_processingstatusname`, `sprk_outcomereasoncode`.
+- **Slice C (needs the owner's explicit go):** remove Invoice from Save and "+ New" in both hosts; tell the owner Word loses Invoice save; then tell ebilling for 096.
 
-## Live in dev
-- **BFF `spaarke-bff-dev`: master `1.0.0+1283c41817`** since 2026-10-22 12:50:18Z (deployed by R3 on our OK; healthz 200). It adds to `a7b956fb55`:
-  - UAC #2234 (round 122, the provisional own-Restricted release; our save line);
-  - #2239 / #2237 (the AI profile writer is limited to the ACT-011 columns);
-  - #2244 (the generic writers refuse the BFF-owned document columns);
-  - #2249 (and the owner and creator columns);
-  - #2248 (the on-demand archive verifies each attachment's Graph item, #2246);
-  - field-mapping 018a (dormant).
+## ebilling contract items (peer: ebilling, pipe cc-msg-c961e15ec4fa4e62d8bf9706a34c677d)
+- **Task 191** (work fdd3c79b7f, d4849acbe6; not on master or dev): intake 422 `reader_not_configured`, §9 `ai.invoice.*` codes. The client side is merged (#2498).
+- **Task 192 `filedUnder`** (owner OK'd via ebilling): optional `filedUnder {entityType: Matter|Project|WorkAssignment, entityId, name}` on 409 `document_core_record_mismatch`, only when the caller can Read it. When it lands: name the record in the sentence and let the view switch to it.
+- **097b/097c Correction** (agreed 2026-10-30; work only). Client to-do when they reach master:
+  - sentences for intake reasons `different_invoice_number`, `no_submission`, `submission_in_progress` ("wait, then submit the correction again");
+  - stored permanent outcomes `correction_not_allowed.{invoice_status,different_firm,different_core_record,different_invoice_number,submission_in_progress}` and `correction_target_unavailable`;
+  - add "if you can open this invoice in Spaarke, try again" to the record_unavailable sentence;
+  - `not_available` is retired.
+- **097e prefill** (work 8b49cb2432): `GET /api/finance/invoices/{invoiceId}/correction-prefill` → `{invoiceId, firm{id,name}, coreRecord{entityType Matter|Project|WorkAssignment, entityId, name}, invoiceStatus, trackingNumber, firmInvoiceNumber, canCorrect, reason, replacedBy{invoiceId,name}|null}`.
+  - `reason` ∈ invoice_status, no_submission, submission_in_progress.
+  - Errors: uniform 404 `record_unavailable`, 503, 503 `ebilling.disabled`.
+  - `invoiceStatus` set: InReview "In Review", Approved, SentToAp "Sent to AP", Paid, Rejected, ReturnedToFirm "Returned to Firm", Cancelled, Superseded (own sentence: "This invoice has already been replaced by a correction. Correct the newer invoice instead." plus a button selecting `replacedBy`); null or unknown → "in its current state".
+  - Enable Correction (`correctionAvailable`) only once 097b+c+e are on master and dev.
+- **097f** (work task/ebill-097f-superseded-view 0666b656ee): the client side is in #2501.
 
-  None of these changes Office save files.
-- Before it: `a7b956fb55` from 02:18:52Z, which added to `f1b3dadcf5`:
-  - field-mapping #2223 and #2228;
-  - UAC #2221 / task 190, the .eml-to-communication link sweep, registered disabled with Apply off.
+## Peer duties
+- Answer cross-session BFF/Console/deploy notices; for a deploy request verify ancestry, OK on content only, record it here, commit and push.
+- **Last OK: R3 dev BFF master fcf01480f4** (2026-11-01; from live d0c1c5dc3c: 3 external-access notification files). I asked R3 to confirm `ContentUnderstanding__Endpoint` survives the deploy.
+- Peers: R3 `cc-msg-481466c0265b87ddd1bb000bf672a69d`; UAC session name `spaarke-wt-unified-access-control-r2-db`; ontology `cc-msg-12a5ac7fc59e21f736827730b8d44c8a`.
 
-  **Owner (UAC round 122): "the access should match the 'parent'".** A task-130 own-Restricted .eml that is later linked to exactly one communication (by the 190 sweep or CrossPathLink) follows that communication. A Restricted set by hand still stays (round 87). UAC builds it as a task-190 follow-up and sends us the design before touching CrossPathLink.
+## Gotchas found this session
+- PowerShell `git commit -m` with embedded `"` breaks the argument; use `git commit -F <file>`.
+- Local jest: stale gitignored `node_modules` in `src/client/shared/Spaarke.Communication.Components` and `Spaarke.UI.Components` (from 2026-10-08) load a second React and fail view/picker suites with "Invalid hook call". CI is unaffected. Rename them aside for a run (they can be locked by another process); the owner was offered their deletion.
+- `App.invoiceRoute.test.tsx` replaces the whole `InvoiceView` module: export pure helpers from a service module, never from the view file.
+- `Gated jest suites (office-addins)` is NOT a required check, so auto-merge can merge a PR that breaks it. Wait for it before relying on a merge.
 
-  **UAC design** (`projects/unified-access-control-r2/notes/task-190-round122-linked-eml-access.md`, `6c980f0da3`): an `OwnProvisional` marker in the AccessInheritance JSON, set only through `AccessInheritance.OwnNarrowingUntilEmailIdentified` in `ApplyEmailCommunicationOutcome`, and released in `OwnPermissionOf` by the D7 walk.
-  - **We reviewed it 2026-10-22: no objection.** UAC builds all of it in one PR (including our one line); we review before merge. **UAC accepted all five points** (no record version bump: an older BFF ignores the field and keeps own = Restricted). **Draft PR #2234** (head `d5448eddd4`) reviewed 2026-10-22. Our scope is approved: the factory swap at `OfficeDocumentPersistence.cs:144`, our test helpers asserting the marker, and I-19.
-  - **F1 sent:** a released attachment child can end up wider than its person-Restricted .eml, because the release falls back to the TOPS floor (`ParentLineage.cs:525-538`), which ignores an intermediate document's own narrowing. Suggested fix: no release while any document on the walk carries a non-provisional own narrowing, plus a must-not-fire test.
-  - **K sent:** confirming the same value can't make a provisional Restricted the person's; state it in I-19.
-  - **Fix round 1 (`96ab2be917`) re-checked 2026-10-22: F1 closed; we approved from our side.** The release now walks every node to the link and refuses on any person-set narrowing. It also has an Undecidable state that is carried to the next run, a field-security gate, and a copy constructor that drops the marker. Noted, no change needed: a chain-refused child isn't carried; it stays Restricted until its row changes or a sweep pass reaches it. **Merged to master as `230302c307`** (both UAC passes ACCEPT; fix round 2: "link columns not secured" is a refusal that isn't carried, and the marker is kept only while the own value is the same). The dev deploy is batched with UAC #2237 through R3. Master is merged into our work branch.
-  - Our five points:
-    1. The release needs the link field security (`Set-DocumentNarrowingFieldSecurity.ps1`) applied first, or a stated window.
-    2. Single-attachment saves are never released: a known limit.
-    3. Our test helpers must assert `OwnProvisional`.
-    4. A guard against forging the marker, and the I-19 row updated.
-    5. Parse must fail closed on an unknown higher record version.
-  - FYI: 190's server gate passed. The sweep dry run found 29 of 120 rows would link (0 written); Apply is an owner item.
-
-  `f1b3dadcf5` (21:45:37Z) added UAC 188 / D7 T7, field-mapping #2214 and UAC #2186 to `583f90c1d9` (tasks 130 and 131, and 077). UAC is applying, live, the document-link Delete = Restrict (`Set-DocumentLinkDeleteRestrict.ps1`), field security and web resources. After that, deleting a saved .eml that has attachment children is refused (409) until the children are deleted. No Office save path deletes. R3's 30-minute App Insights reading (16:41:30Z–17:12:38Z): **0** stager refusals and no new exception class; the only group is the known Graph "Invalid hostname" noise. UAC's gate (one identified and one unidentifiable .eml save) waits on the owner; when R3 sends times or subjects, read the sprk_document rows back (relatedcommunication, accesspermission, accessinheritance).
-- **Console `sprk_spaarkeai`:** `deploy-spaarke-ai.yml` auto-publishes on every master push touching SpaarkeAi or the shared UI packages; read `modifiedon` to know which build is live. Default landing tab is Worklist (ontology data change 2026-10-17; Daily Briefing is in the Workspaces dropdown).
-- The add-ins are current (`733c65063c`; `deploy-office-addins.yml` runs on every master push).
-
-## eBilling (ebilling-r1, owner-requested review): decisions recorded in `notes/ebilling-r1-review-2026-10-21.md`
-- Decided and sent: K5 race fixed by A + B; internal-only, Restricted and Private-thread sources allowed with isolation carried. The Outlook invoice flow:
-  - an explicit Invoice mark;
-  - corrections are resubmissions, refused after Approved/Sent to AP/Paid;
-  - a separate Invoice task-pane view with a "Submit Invoice" ribbon button;
-  - Invoice removed from Save and quick-create;
-  - Matter/Project/Work Assignment (Agreement in ebilling R2);
-  - the .eml always saved to the core record;
-  - no LEDES.
-- ebilling's `POST /api/finance/invoice-submissions/from-email` contract includes our four changes (their model v5.5 §9.1, `8c65b3bd89`):
-  - step 0 refuses with 422 when a marked file isn't in the request;
-  - the .eml id comes from the job's artifact, and filing step A runs through the refile path;
-  - the known limits are recorded;
-  - our key and removal order are adopted.
-  Not built; it waits on the owner finalizing ebilling's model.
-- **Future work for this project (no task yet):** the Invoice view and ribbon button, removing Invoice from Save and quick-create, the email-only .eml save. All ship in ONE add-in release; ebilling 096 removes the server legs one release later.
-  - **Owner decision 2026-10-21: create the task only once ebilling 095 (from-email) is built.** Send ebilling the task number then.
-  - **ebilling timeline (2026-10-27, owner asked them to send it):** 095 not started; chain 089 (~4d) → 086 (~1d) → 094 (~3-4d) → 095 (~3-4d), with 092/098 alongside 089 (089, 092, 098 started 10-27). 095 code-complete ~11-13 at the earliest, ~11-20 realistic; on dev after #1911 merges and an R3 deploy. They will update at 094's merge or a slip of more than a few days. We asked them to pin in 095's POML: request DTO names, idempotency-key transport, response (status, ids, how to follow progress), a reasonCode per refusal, duplicate replay. Question to the owner: start our task now against §9.1 with a mock (release still waits on a working dev endpoint)?
-  - Gates: 118's shared `InvoiceAttachmentMarking` merged; 095 deployed. The 095 shapes are frozen at v5.9 FINAL.
-  - Non-invoice attachments default to Supporting (owner decision 2026-10-21).
-  - Production needs a manifest version bump and an M365 Admin Center upload (new ribbon button).
-
-## Filed 2026-10-21
-- **ISS-022 / #2209:** the `/office/save` re-save gap (the email save key excludes the attachment selection, so re-saving to add attachments is answered "already saved"). Filed on the owner's go; next-round, no task yet.
-- **ebilling v5.7 (`ef9b1a9e9b`)** took our fix for finding the .eml, and the owner chose F1-a(i) and F1-c. Both are recorded in `notes/ebilling-r1-review-2026-10-21.md`: they shape the future Invoice view (show a retry; suggest internal upload). No reply owed.
-
-## Waiting on the owner (live checks)
-- UAT: 042 (full); 080 (Test User 1 opens a matter-filed document they saved, then Index and document To Do); 121 (email save: Message-ID, link to an existing communication, an unfiled communication gets filed, "Related to" cards); 127 (grids: Matter Documents footer `v1.1.85`, no `[AppInsightsService]` warning, VisualHost, App Insights `customEvents`, Daily Briefing); 078 (one Word-on-the-web run plus the desktop Word build number). Fix what they report.
-- PCF re-sync: MatterHeader 1.0.22; RecordHeader 1.1.12; Communication form timeline and actions; the document relationship viewer opens.
-- A9: a licensed B2B guest signs in from their own company's desktop Office and Word.
-- SPA-r3 waits on the owner's Ralph Dewey sign-in retest; pass the result on.
-- Then 090 wrap-up (`/test-diet`), after UAT.
-
-## Blocked / waiting on others
-- SPA-r3 (A9): workforce-contact sign-in tasks not built.
-- customer-provisioning-orchestration-r1: T186 awaits the owner's OK.
-
-## Open owner items / later
-- Main checkout `C:\code_files\spaarke` refused a fast-forward earlier (untracked `tests/Spaarke.ArchTests/WebResourceMirrorParity.baseline.txt`, 4 modified tracked files, possibly another session's work). Left untouched for the owner.
-- Optional: reassign the 3 pre-task-146 app-owned dev events (#1034 comment). A Dataverse write; needs the owner's go.
-- Filed follow-ups (other owners): #1464, #1468–#1471, #1476, #1477, #1505, #1540, #1551, #1591, #1832, #2172.
-- C:\wtqa1906 is left for the owner.
+## Owner items (open)
+- **Outlook desktop sign-in 400 "Request Too Long":** cause = Windows SSO credentials for 4 work accounts, plus a dead Helios IP PRT (last refresh 2026-01-28). Steps given: (1) clear login.microsoftonline.com site data and turn off Edge work SSO, as a test; (2) disconnect RightHub Groups (`rschroeder@righthub.com`); (3) leave Helios IP only after preparation (local admin password, BitLocker key, copy `OneDrive - Helios IP` 47 GB, back up .claude/.ssh/.gitconfig/Code, unlink OneDrive), then disconnect, restart, and re-add Spaarke (join recommended). Re-check with `dsregcmd /status` after.
+- Excel/PowerPoint add-in: answered as a moderate project; offered a researcher check of unified-manifest and custom-XML support first. No go yet.
+- UAT 042, 080, 121, 127, 078; PCF re-sync; A9 guest sign-in; the Ralph Dewey retest (pass the result to R3); then 090 wrap-up (`/test-diet`).
+- Post-deploy check (UAC #2468 fix): a child-BU user's unfiled Outlook save; read back the sprk_document owner and BU (expect the saver's BU team).
+- Main checkout `C:\code_files\spaarke`: leave its uncommitted files alone. C:\wtqa1906 is the owner's.
+- Cleanup later (Remove-WorktreeSafe): C:\wt2412, C:\wt2412m, C:\wt2416, C:\wt2416c, and C:\wt133p after #2501.
