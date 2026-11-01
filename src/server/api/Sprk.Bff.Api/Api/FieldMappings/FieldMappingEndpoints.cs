@@ -1072,9 +1072,39 @@ public static class FieldMappingEndpoints
                         continue;
                     }
 
+                    // Task 039 (FR-38): on a search-indexed table both index columns are the SERVER's (step 8 of the create writes
+                    // them from the owning business unit), so a rule aimed at either is skipped — never written, never an error —
+                    // and the dropped value is logged, ids only (the rule is applied to a scratch payload to read it).
+                    if (Sprk.Bff.Api.Services.RecordCreation.RecordTableRules.OwnsSearchIndex(targetEntity)
+                        && Sprk.Bff.Api.Services.RecordCreation.RecordTableRules.SearchIndexColumnOf(rule.TargetField) is not null)
+                    {
+                        // Round 3 (G6): ApplyMappingRule only READS lookupBinds (an IReadOnlyDictionary: TryGetValue) and writes only to the
+                        // payload it is given, so this call adds nothing to the shared lookupBinds and the scratch payload is never written.
+                        var scratch = new Dictionary<string, object?>();
+                        ApplyMappingRule(rule, sourceValues, scratch, lookupBinds);
+                        Sprk.Bff.Api.Services.RecordCreation.RecordTableRules.DropSearchIndexFromUpdate(
+                            targetEntity, childRecordId, scratch, Sprk.Bff.Api.Services.RecordCreation.RecordTableRules.SearchIndexOriginMapping, logger);
+                        recordFieldResults.Add(new FieldMappingResultDto
+                        {
+                            SourceField = rule.SourceField,
+                            TargetField = rule.TargetField,
+                            Status = FieldMappingStatus.Skipped,
+                            ErrorMessage = "The search index is set by the server and cannot be copied.",
+                        });
+                        continue;
+                    }
+
                     var fieldResult = ApplyMappingRule(rule, sourceValues, updatePayload, lookupBinds);
                     recordFieldResults.Add(fieldResult);
                 }
+
+                // Task 039 (FR-38) safety net: the bind plans (lookupBinds) are built from the target's metadata, apart from the rule's
+                // TargetField, so a plan can name an index key under a rule whose TargetField does not (an alias of the navigation
+                // property). Whatever sits under either index column's key is removed from the final payload too, and logged.
+                // Round 3 (G3): both drops here use the shared update-path sequence (DropSearchIndexFromUpdate).
+                Sprk.Bff.Api.Services.RecordCreation.RecordTableRules.DropSearchIndexFromUpdate(
+                    targetEntity, childRecordId, updatePayload,
+                    Sprk.Bff.Api.Services.RecordCreation.RecordTableRules.SearchIndexOriginMapping, logger);
 
                 if (updatePayload.Count > 0)
                 {

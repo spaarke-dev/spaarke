@@ -232,6 +232,9 @@ contract), `tests/Spaarke.ArchTests/` (`RecordOwnerAssignmentCensusTests`, `Refi
 
     Acceptance: an explicit value wins; an unset value takes the owning BU's default; tested for Matter, Project and
     Document.
+
+    *Amended by FR-38 (2026-10-30): on a search-indexed table the client's value no longer wins. The server drops it
+    and applies the final owning BU's index.*
 11. **FR-11 Per-table rules registry.** One declarative registry holds, per table: root/child; protected columns;
     autonumber column; "for"-person column; server defaults; search-indexed Y/N; mapping-applies Y/N. It replaces
     `MatterProtectedAttributes`/`ProjectProtectedAttributes`, `ServerOwnedColumns`, `RootServerOwnedColumns` and
@@ -490,6 +493,43 @@ ontology D-191)
     (The Work Assignment Number, #2353, is a Dataverse autonumber `WRK-{SEQNUM:6}`, applied on dev 2026-10-27 with the
     owner's OK; PR #2358. No code.)
 
+**Server-owned search index** (amendment, 2026-10-30; owner decisions 2026-10-29, UAC-r2 review conditions 1-4;
+design §13.3)
+
+38. **FR-38 The search index is server-owned (#2399).** Amends FR-10.
+    - On a search-indexed table (the rules registry's flag), a client-supplied `sprk_ai_search_index` is not a lookup
+      the caller binds. The service **drops** it before step 5, so no AppendTo is asked on the `sprk_aisearchindex`
+      row. Step 8 then applies the index of the record's **final** owning BU: after the ownership step, so a Secure
+      Record BU owner, the restricted-content team in the customer top BU, or a parent-inherited owner. Never the
+      caller's BU, never the client's value.
+    - An owning BU with no index (Secure Record today; every customer BU, which has catalog rows but no BU defaults,
+      owner Q2 = (B)) leaves the column **empty** and logs `search_index_unset_for_owner_bu`. No walk up to the root,
+      no fallback to the caller's index. The per-BU lookup stays as the hook for a future per-BU index.
+    - **Every BFF write path, not only creates** (UAC-r2 condition 2): a BFF update or PATCH carrying
+      `sprk_ai_search_index` gets the same drop. Native form edits are out of scope (Dataverse role checks, as W5).
+    - A dropped value that differs from the applied one is logged as `client_search_index_dropped`, ids only: record,
+      table, dropped index id, applied index id (UAC-r2 condition 4). Precedent: 018's `default_value_dropped`.
+    - *Amended 2026-10-31 (owner, before task 039):* the drop and the step-8 fill cover **both** index columns
+      (`sprk_ai_search_index` and the legacy text `sprk_searchindexname`) on **six** tables: matter, project, document,
+      and now work assignment, event and invoice (registry `SearchIndexed = true`). #2399 was a Work Assignment create.
+      The drop log adds the dropped and applied index name for the name column (catalog data, not personal data).
+    - Business-unit moves are a known limit (#2413): the index affects discoverability only; search trims by live
+      Read (design §13.3b).
+    - Wizards stop binding the index (`applyUserBuDefaults` / `bindLookup('sprk_aisearchindex', …)`) in their W3
+      tasks 021–029 (design §13.2 e), which also remove the `sprk_aisearchindex` entry from
+      `config/core-user-wizard-linking-role.json` and consider removing Core User's `prvAppendTosprk_AISearchIndex`.
+
+    Acceptance:
+    - a create carrying a client index on a search-indexed table writes the owning BU's index, or none, and asks no
+      AppendTo on the catalog row (a caller without AppendTo on it is not refused);
+    - a secure record and a BU with no index leave the column empty with the `search_index_unset_for_owner_bu` log;
+    - a BFF update carrying the column drops it;
+    - the drop log carries ids only;
+    - must-not-fire: a create on a table that is not search-indexed keeps the caller's lookup and its AppendTo check.
+
+    (FR-39, the mapping seeder owning its rows to the customer configuration team, is provisioning's, #2429; design
+    §13.3a. This project reviews it.)
+
 ### Non-Functional Requirements
 
 - **NFR-01 Security fails closed** (WP-6): every caller check refuses on error. Uniform 404 for "doesn't exist" and
@@ -675,6 +715,8 @@ ontology D-191)
 | WA Assigned To (2026-10-27, #2354) | Default | The record's own Assigned To Internal | FR-36 |
 | WA wizard Assigned To (2026-10-27) | Field on the wizard? | Yes, it can be added: an optional picker on Enter Info; blank uses the FR-36 default | FR-37 |
 | Push Updates timing (2026-10-28) | When does the button switch to the Family view? | Ship 075 with 040: Push Updates keeps pushing as today until the Family view's own Push action exists | FR-35 |
+| Client search index (2026-10-29, #2399) | Drop or refuse a client `sprk_ai_search_index` | Drop; the server applies the final owning BU's index | FR-38 |
+| Index rows in customer environments (2026-10-29) | Seed `sprk_aisearchindex` rows? | (B) seed the 7 canonical rows per customer, team-owned, no BU defaults | FR-38, FR-39 |
 | WA Number (2026-10-27, #2353) | Generation | Autonumber `WRK-{SEQNUM:6}` (dev applied, PR #2358) | — |
 
 ## Assumptions

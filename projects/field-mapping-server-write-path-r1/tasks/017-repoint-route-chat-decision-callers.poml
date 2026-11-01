@@ -4,7 +4,7 @@
     <title>Re-point the child-records route, chat create / email.draft / budget inquiry and decision cores at RecordCreationService (FR-13 part 1)</title>
     <phase>2 W2 Unified RecordCreationService</phase>
     <gate>016 complete</gate>
-    <status>in-progress</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies .cs in Sprk.Bff.Api; tags include bff-api, ai-tools, security; removes the create half of a security-critical core (OwnedChildWrite); adds tests at KEEP paths (TEST-MODIFYING override).</rigor-reason>
     <model-tier>opus</model-tier>
@@ -98,6 +98,13 @@
     <existing>Grep `OwnedChildWrite.CreateAsync` in src/server/api/Sprk.Bff.Api: four call sites (ChildRecordEndpoints.cs ~:258, DataverseCreateRecordHandler.cs ~:341, EmailDraftToolHandler.cs ~:455, BudgetInquiryExecutor.cs ~:242). Existing tests for chat creates: tests/integration/data-mutation/RecordOwnership/SecureChildOwnershipAiToolTests*.cs; none asserts the I-1 stamp on a chat-created child.</existing>
     <extension>Yes for production code: callers are re-pointed at the service from task 013, no new production file. The only new file is a test class because the SecureChildOwnershipAiToolTests* suite must pass unchanged and cannot take new assertions.</extension>
     <cost-of-doing-nothing>Chat creates keep skipping the I-1 stamp, I-16 and sharee mirror, and the route, chat and decision creates keep two authorization cores whose owner and mapping behaviour drift (spec FR-13, section 11 table).</cost-of-doing-nothing>
+    <!-- Added at completion (2026-10-31, code-review gate): the new surface inside existing files, as in PR #2486's section 11 table. -->
+    <new-surface name="record_creation.stamp_underivable (400) / record_creation.stamp_unavailable (503)">Existing: the RecordCreationRefusal kinds. Extension: the codes are added to that type and the shared map. Cost: without them, a step-10 stamp failure is an unclassified 500, and a data condition cannot be told from a fault (owner decision 2a).</new-surface>
+    <new-surface name="RecordCreationOutcome.IsolatedCompletion">Existing: SecureRootInheritResult. Extension: an additive property on the outcome. Cost: chat would lose provisioning's reason codes and its stranded/unfinished tool error.</new-surface>
+    <new-surface name="RecordCreationService.CallerBlockedColumnRefusal / DataverseCreateRecordHandler.BlockedColumnBeforeSuspend">Existing: step 2's inline check. Extension: extracted, so step 2 and chat share one source. Cost: chat would ask the user to confirm a create that can never succeed (AIR2-034).</new-surface>
+    <new-surface name="DataverseCreateRecordHandler.ServerWrittenInvoiceFamilyTables / ExternalIdentifierTable">Existing: InvoiceFamilyCoreRecordGuard. Extension: a list with a drift test against the registry and the guard keys. Cost: chat would create invoice-family rows whose only writer is ebilling's persister.</new-surface>
+    <new-surface name="RecordTableRules entries (task, contact, account, sprk_servicerequest, invoice family)">Existing: the registry. Extension: entries added to it. Cost: the service refuses an unregistered table, so the chat and budget creates would fail. The invoice-family entries stay so ebilling's single creator can adopt the service (ebilling-r1, 2026-10-30).</new-surface>
+    <new-surface name="RecordCreationRequest.Grantor (AssignedAccessGrantor { Caller, None })">Existing: the grantor was always the caller. Extension: an additive request property with no arbitrary-oid setter. Cost: chat-created roots would email an invitation to an external Assigned To, attributed to the user; master passed a null grantor (UAC-r2 F1).</new-surface>
   </justification>
 
   <tools>
@@ -153,7 +160,7 @@
     </criterion>
   </acceptance-criteria>
 
-  <notes>Spec FR-13 part 1, FR-12, NFR-07, NFR-08. Office quick-create is task 018; widening the route to sprk_matter and sprk_project is task 020. Release note: chat-created children now get the I-1 stamp, I-16 and sharee mirror.</notes>
+  <notes>Spec FR-13 part 1, FR-12, NFR-07, NFR-08. Office quick-create is task 018; widening the route to sprk_matter and sprk_project is task 020. Release note: chat-created children now get the I-1 stamp, I-16 and sharee mirror. Completed 2026-10-31: PR #2486 merged as b083d62183 (UAC-r2 approved at ff2f76e39e; ebilling-r1: no findings). Known limits filed: #2479, #2480, #2483, #2484, #2485 (UAC-r2 #2487). Notes: notes/task-017-notes.md.</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>

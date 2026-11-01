@@ -602,6 +602,17 @@ public static class ChildRecordEndpoints
                 : CallerFailure(row, entity);
         }
 
+        // Task 039 (FR-38): on a search-indexed table (an invoice, here) both index columns are the SERVER's — step 8 of the create
+        // writes them from the owning business unit — so a body that names either has it dropped, never refused, and the
+        // row's index stays as it is. Review R2 (NFR-07: drop, never refuse): a body that held ONLY the index is left with nothing to
+        // write, and answers its normal success with nothing written (as it did before 039); a body that was empty to begin with
+        // keeps the mapper's empty-update refusal.
+        var indexDrop = RecordTableRules.DropSearchIndexFromUpdate(
+            entity, id, body, RecordTableRules.SearchIndexOriginCaller, logger, httpContext.TraceIdentifier);
+        body = indexDrop.Body;
+        if (indexDrop.Emptied)
+            return Results.NoContent();
+
         var mapped = await DataverseWriteItemMapper.MapWebApiPayloadAsync(user, entity, body, ct).ConfigureAwait(false);
         if (mapped.ValidationError is { } invalid)
             return Problem(StatusCodes.Status400BadRequest, InvalidPayloadCode, invalid);

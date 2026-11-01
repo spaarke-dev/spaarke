@@ -148,6 +148,24 @@ public static class DataverseDocumentsEndpoints
                         });
                 }
 
+                // Task 039 (FR-38): a document's search index is the SERVER's: step 8 of the create is the only writer on the create
+                // and client paths (from the owning business unit). The indexing pipeline's own stamps (RagEndpoints and the RAG
+                // indexing jobs) record where a file was indexed and are deliberately left alone. A body that names one has it
+                // dropped — never refused — and the row's index stays as it is. This typed request does not use
+                // DropSearchIndexFromUpdate (it has no dictionary or JSON body to drop from: one nullable property).
+                if (request.SearchIndexName is not null
+                    && Sprk.Bff.Api.Services.RecordCreation.RecordTableRules.OwnsSearchIndex("sprk_document"))
+                {
+                    Sprk.Bff.Api.Services.RecordCreation.RecordTableRules.LogSearchIndexDropped(
+                        logger, "sprk_document", Guid.Parse(id),
+                        [new Sprk.Bff.Api.Services.RecordCreation.RecordTableRules.DroppedSearchIndexValue(
+                            Sprk.Bff.Api.Services.Ai.SearchIndexNameResolver.LegacyTextColumn,
+                            Sprk.Bff.Api.Services.RecordCreation.RecordTableRules.SearchIndexOriginCaller, null,
+                            string.IsNullOrWhiteSpace(request.SearchIndexName) ? null : request.SearchIndexName.Trim())],
+                        applied: null, correlationId: traceId);
+                    request.SearchIndexName = null;
+                }
+
                 // Check if document exists
                 var existingDocument = await dataverseService.GetDocumentAsync(id);
                 if (existingDocument == null)
