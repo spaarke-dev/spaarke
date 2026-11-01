@@ -83,7 +83,7 @@ public class InvoiceSubmissionService
     internal const string EarlierAttemptBeingRemovedDetail =
         "An earlier attempt to submit this invoice failed and is still being removed. Nothing was saved; try again shortly.";
 
-    private static readonly string[] ViewColumns =
+    internal static readonly string[] ViewColumns =
     {
         TrackingNumberAllocator.TrackingNumberColumn, TrackingNumberAllocator.FirmInvoiceNumberColumn, TrackingNumberAllocator.FirmColumn,
         "sprk_ponumber", "sprk_processingstatus", "sprk_channel", "sprk_receivedon", "sprk_outcomereasoncode", "sprk_document",
@@ -1887,6 +1887,16 @@ public class InvoiceSubmissionService
             .ToList();
     }
 
+    /// <summary>
+    /// ebilling-r1 task 097f (EB-D-180): <paramref name="views"/> as a status route answers them, with the read-time note on each Accepted
+    /// submission whose invoice is Superseded (<see cref="SupersededSubmissionNote.ApplyAsync"/>). Not part of <see cref="GetAsync"/> or
+    /// <see cref="ListAsync"/>: the service's other callers (the intake's replays, the visibility decisions) must see the stored view. Never
+    /// throws for a read fault; the answer is then the one the views had.
+    /// </summary>
+    internal Task<IReadOnlyList<InvoiceSubmissionView>> WithReplacementNoteAsync(
+        IReadOnlyList<InvoiceSubmissionView> views, ReplacementReadGate mayRead, CancellationToken ct) =>
+        SupersededSubmissionNote.ApplyAsync(_entities, _logger, views, mayRead, ct);
+
     internal static InvoiceSubmissionView ToView(Entity row)
     {
         InvoiceCoreRecord? core = null;
@@ -1943,7 +1953,7 @@ public class InvoiceSubmissionService
 
     private static bool IsCallerCancellation(Exception ex, CancellationToken ct) => ex is OperationCanceledException && ct.IsCancellationRequested;
 
-    private static bool IsNotFound(Exception ex)
+    internal static bool IsNotFound(Exception ex)
     {
         for (var e = ex; e is not null; e = e.InnerException)
         {

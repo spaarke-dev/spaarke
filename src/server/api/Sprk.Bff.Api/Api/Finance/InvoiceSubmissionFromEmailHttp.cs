@@ -638,46 +638,7 @@ internal static class InvoiceSubmissionFromEmailHttp
 
         try
         {
-            var query = new Microsoft.Xrm.Sdk.Query.QueryExpression(InvoiceSubmissionService.SubmissionEntity)
-            {
-                ColumnSet = new Microsoft.Xrm.Sdk.Query.ColumnSet(InvoiceSubmissionService.InvoiceColumn),
-            };
-            query.Criteria.AddCondition(InvoiceSubmissionService.ResubmissionOfColumn, Microsoft.Xrm.Sdk.Query.ConditionOperator.Equal, ownSubmission.Id);
-            var candidates = (await entities.RetrieveMultipleAsync(query, ct)).Entities
-                .Select(s => s.GetAttributeValue<Microsoft.Xrm.Sdk.EntityReference>(InvoiceSubmissionService.InvoiceColumn)?.Id)
-                .OfType<Guid>()
-                .Where(id => id != Guid.Empty)
-                .Distinct()
-                .ToList();
-
-            var rows = new List<Microsoft.Xrm.Sdk.Entity>();
-            foreach (var id in candidates)
-            {
-                try
-                {
-                    var row = await entities.RetrieveAsync(
-                        Services.Finance.FinanceBaseValues.InvoiceEntity, id, [InvoiceNameColumn, "statuscode"], ct);
-                    if (row is not null)
-                    {
-                        rows.Add(row);
-                    }
-                }
-                catch (Exception ex) when (InvoiceSubmissionEndpoints.IsNotFound(ex))
-                {
-                    // A replacement that is gone is not a replacement.
-                }
-            }
-
-            var replacement = rows.Count == 1 ? rows[0] : null;
-            if (rows.Count > 1)
-            {
-                var live = rows.Where(r => r.GetAttributeValue<Microsoft.Xrm.Sdk.OptionSetValue>("statuscode")?.Value != Services.Finance.InvoiceStatusCodes.Superseded).ToList();
-                replacement = live.Count == 1 ? live[0] : null;
-                if (replacement is null)
-                {
-                    logger.LogWarning("Correction prefill: the replacement of a superseded invoice is ambiguous ({Count} submissions name it); replacedBy is null", rows.Count);
-                }
-            }
+            var replacement = (await SupersededSubmissionNote.FindReplacementAsync(entities, logger, ownSubmission.Id, [InvoiceNameColumn], ct))?.Invoice;
 
             if (replacement is null || CallerResolution.ResolveObjectId(http.User) is not { Length: > 0 } userId)
             {

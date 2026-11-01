@@ -126,6 +126,12 @@ public sealed class InvoiceSubmissionServiceTests
         /// <summary>Task 097e: non-null, the query for the submissions that name an earlier one (<c>sprk_resubmissionof</c>) throws this.</summary>
         public Exception? ResubmissionReadFailure;
 
+        /// <summary>Task 097f: non-null, the status routes' page read of which invoices are Superseded (<c>sprk_invoice</c> by key) throws this.</summary>
+        public Exception? SupersededInvoiceReadFailure;
+
+        /// <summary>Task 097f: every page read of which invoices are Superseded, with the ids it asked about.</summary>
+        public readonly List<Guid[]> SupersededInvoiceReads = new();
+
         /// <summary>050a: the <c>sprk_document</c> the existing-document entry reads (null: not found).</summary>
         public Entity? ExistingDocument;
 
@@ -296,6 +302,24 @@ public sealed class InvoiceSubmissionServiceTests
                             .Where(s => s.GetAttributeValue<EntityReference>("sprk_resubmissionof")?.Id is { } earlierId
                                 && byEarlier.Values.Contains(earlierId))
                             .Select(s => OnlyColumns(s, q.ColumnSet.Columns.ToArray()))
+                            .ToList());
+                    }
+
+                    // Task 097f: the status routes page read of which of the asked invoices are Superseded, among Invoices.
+                    if (q.EntityName == "sprk_invoice"
+                        && q.Criteria.Conditions.FirstOrDefault(c => c.AttributeName == "sprk_invoiceid") is { } byKey)
+                    {
+                        if (SupersededInvoiceReadFailure is { } failure)
+                        {
+                            throw failure;
+                        }
+
+                        SupersededInvoiceReads.Add(byKey.Values.Cast<Guid>().ToArray());
+                        var wanted = q.Criteria.Conditions.First(c => c.AttributeName == "statuscode").Values.Cast<int>().ToHashSet();
+                        return new EntityCollection(Invoices.Values
+                            .Where(i => byKey.Values.Contains(i.Id)
+                                && i.GetAttributeValue<OptionSetValue>("statuscode") is { } status && wanted.Contains(status.Value))
+                            .Select(i => OnlyColumns(i, q.ColumnSet.Columns.ToArray()))
                             .ToList());
                     }
 

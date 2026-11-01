@@ -683,18 +683,53 @@ public static class InvoiceSubmissionEndpoints
         return InvoiceSubmissionHttp.ToResult(outcome, StatusUrl, http.TraceIdentifier);
     }
 
-    private static async Task<IResult> GetAsync(Guid id, HttpContext http, InvoiceSubmissionService service, CancellationToken ct)
+    private static async Task<IResult> GetAsync(
+        Guid id, HttpContext http, InvoiceSubmissionService service, Spaarke.Core.Auth.AuthorizationService authorization, CancellationToken ct)
     {
         try
         {
             var view = await service.GetAsync(id, ct);
-            return view is null ? FinanceAuthorizationFilter.UniformRecordNotFound(http) : Results.Ok(view);
+            if (view is null)
+            {
+                return FinanceAuthorizationFilter.UniformRecordNotFound(http);
+            }
+
+            // Task 097f (EB-D-180): an Accepted submission whose invoice a correction Superseded still answers Accepted, with the replaced-by-
+            // correction reason and, when the caller may read the correcting submission, its id and tracking number. Derived here; nothing is written.
+            var shown = await service.WithReplacementNoteAsync([view], ReplacementGate(http, authorization), ct);
+            return Results.Ok(shown[0]);
         }
         catch (SdapProblemException ex)
         {
             return InvoiceSubmissionHttp.ReadFault(ex);
         }
     }
+
+    /// <summary>
+    /// Who may be told the correcting submission: the caller's own Read on it, <c>finance.read</c> on the submission, exactly the right this
+    /// route's filter asked for the submission itself. A caller without a resolvable identity may read none.
+    /// </summary>
+    private static ReplacementReadGate ReplacementGate(HttpContext http, Spaarke.Core.Auth.AuthorizationService authorization) =>
+        async (replacements, ct) =>
+        {
+            var readable = new HashSet<Guid>();
+            if (CallerResolution.ResolveObjectId(http.User) is not { Length: > 0 } userId)
+            {
+                return readable;
+            }
+
+            var token = TokenHelper.ExtractBearerTokenOrNull(http);
+            foreach (var replacement in replacements)
+            {
+                if (await FinanceAuthorizationFilter.CallerHoldsRightsAsync(
+                        authorization, userId, FinanceAuthorizationFilter.InvoiceSubmissionEntitySet, replacement.SubmissionId, "finance.read", token, ct))
+                {
+                    readable.Add(replacement.SubmissionId);
+                }
+            }
+
+            return readable;
+        };
 }
 
 /// <summary>

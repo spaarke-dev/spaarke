@@ -25,6 +25,15 @@ public static class SubmissionReasonCodes
     /// </summary>
     public const string Blocked = "ebilling.submission.blocked";
 
+    // ── Derived at read time (ebilling-r1 task 097f, EB-D-180) ──
+
+    /// <summary>
+    /// Derived, never stored: the status routes answer it as the <c>outcomeReasonCode</c> of an Accepted submission whose own invoice is
+    /// Superseded by a correction (<see cref="InvoiceSubmissionView.ReplacedBy"/> names the correcting submission when the caller may read it).
+    /// The submission itself stays Accepted and nothing is written; it is not a hold (the held set reads the stored column, never this).
+    /// </summary>
+    public const string ReplacedByCorrection = "ebilling.submission.replaced_by_correction";
+
     // ── Decided by a person (ebilling-r1 task 105; D-24, D-73) ──
 
     /// <summary>

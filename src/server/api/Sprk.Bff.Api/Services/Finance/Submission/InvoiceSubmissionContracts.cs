@@ -284,7 +284,19 @@ public sealed record InvoiceSubmissionView
     /// </summary>
     [JsonIgnore]
     public Guid? ResubmissionOfId { get; init; }
+
+    /// <summary>
+    /// ebilling-r1 task 097f (EB-D-180): the correcting submission, set only by the status ROUTES (never by <see cref="InvoiceSubmissionService.GetAsync"/>)
+    /// on an Accepted submission whose own invoice is Superseded, beside <see cref="OutcomeReasonCode"/> =
+    /// <see cref="SubmissionReasonCodes.ReplacedByCorrection"/>. Null (and then absent from the JSON, so every other answer is byte-for-byte what it was)
+    /// when the invoice is not Superseded, or the caller may not read the correcting submission, or it could not be found or read.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public SubmissionReplacement? ReplacedBy { get; init; }
 }
+
+/// <summary>The correcting submission a Superseded invoice's submission names (<see cref="InvoiceSubmissionView.ReplacedBy"/>): its id and tracking number.</summary>
+public sealed record SubmissionReplacement(Guid SubmissionId, string? TrackingNumber);
 
 /// <summary>Stable error codes of the submission operation (ADR-019). The strings are a contract with the SPA (051) and the review UI.</summary>
 public static class InvoiceSubmissionErrors

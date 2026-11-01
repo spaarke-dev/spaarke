@@ -46,7 +46,7 @@ public sealed class ResubmissionOfAppOnlyWriteGuardTests
         typeof(SubmissionSnapshot), // reader: the column list of the submission read for the evaluation (IGenericEntityService)
         typeof(SubmissionCommitGate), // reader: the commit's re-read of the Correction target (IGenericEntityService)
         typeof(InvoiceSubmissionAfterSteps), // reader: the Signals close's re-read of the Correction target (IGenericEntityService)
-        typeof(Sprk.Bff.Api.Api.Finance.InvoiceSubmissionFromEmailHttp), // reader (097e prefill): finds the replacing submission by the column (IGenericEntityService)
+        typeof(SupersededSubmissionNote), // reader (097e prefill and 097f status routes): finds the replacing submission by the column (IGenericEntityService, app-only; the caller's own right is asked afterwards)
         typeof(SecureChildLineage), // data only: the lineage table lists the lookup; it reaches no Dataverse client
     ];
 
