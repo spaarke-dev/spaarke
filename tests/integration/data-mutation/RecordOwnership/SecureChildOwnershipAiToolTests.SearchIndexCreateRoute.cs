@@ -15,8 +15,10 @@ namespace Sprk.Bff.Api.Tests.Integration.DataMutation.RecordOwnership;
 /// (<c>POST /api/v1/child-records/sprk_workassignment</c>, <see cref="ChildRecordEndpoints.CreateAsync"/> over the real
 /// <c>RecordCreationService</c>) with a Web API body that names the search index. The service drops both index columns from
 /// that body before it is mapped and before step 5 asks the caller anything, so a bind the caller cannot AppendTo, or one that is
-/// malformed, is neither asked about nor refused, and the owning unit's index is what is written. Must fire: take the Web API
-/// body drop out of <c>RecordCreationService</c> step 2 and the AppendTo case is refused and the malformed case is a 400.
+/// malformed, is neither asked about nor refused, and the owning unit's index is what is written. Must fire for the Web API body
+/// drop (<c>RecordCreationService</c> step 2): take it out and the malformed-bind tests and the both-spellings test fail. The
+/// AppendTo theory is defence in depth: it still passes without that drop, because the late drop after step 3.5 removes the bind
+/// before step 5 asks anything.
 /// </summary>
 public sealed partial class SecureChildOwnershipAiToolTests
 {
