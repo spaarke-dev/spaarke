@@ -32,7 +32,7 @@ Searched: `DataverseUpdateRecordHandler`, `ChildRecordEndpoints` (incl. `PATCH /
 | 12 | Server index stamps after indexing (`RagEndpoints`, `RagIndexingJobHandler`, `PostUploadIndexingEnqueuer`) | `sprk_document` | not client-shaped and not through the service: they record WHERE a file was indexed, after the fact. Left as they are (out of scope, listed in "Out of scope") | typed `UpdateDocumentRequest`/entity writes |
 | 13 | Any other server writer that sets an index through `RecordCreationService` | none | none found, so no escalation was needed | grep of `sprk_ai_search_index` and `sprk_searchindexname` in `src/`: the resolver, `RecordCreation`, the indexing stamps and the typed document requests only |
 
-A body left with no column after the drop is answered as any empty update is (the mapper's 400 `'item' must contain at least one column`; the chat tool reports it): nothing is written, and the index is not.
+A body left with no column after the drop is not refused (NFR-07, review R2): nothing is written, `PATCH /api/v1/child-records/{table}/{id}` answers its normal 204 and the chat update returns success with a note that the search index is set by the server. A body that was empty BEFORE any drop keeps the mapper's 400 `'item' must contain at least one column` (pinned by a control test). The first version of this task answered the 400 for the index-only body; review round 1 found that was a new refusal.
 
 ## Changed existing assertions (old to new)
 
@@ -75,14 +75,39 @@ Logs are outside the repo, in the session scratchpad folder `fm039\verify\` (`sl
 - `dotnet build Spaarke.sln`: 0 errors, 0 warnings.
 - `verify-suites.sh`: Spaarke.ArchTests 1884 passed, 0 failed; Sprk.Bff.Api.Tests (filtered) 6511 passed, 7 skipped (existing skips), 0 failed.
 - Sprk.Bff.Api.Tests was never run unfiltered.
+- Re-run after review round 1 at `40647a4c1d` (logs in `fm039\verify2\`): `dotnet build Spaarke.sln` 0 errors, 0 warnings; `verify-suites.sh` Spaarke.ArchTests 1886 passed, 1 failed on the first pass, then 1887 of 1887 (the failure was `ContactCreateOwnerPolicyGuardTests.Control_ManyAssignmentsToOneLocal_ResolveInBoundedTime`, a wall-clock bound that overran (6 s) while another session's test host held about 16 GB of a 61 GB machine; it passes alone, with the other ArchTests of this change: 155 of 155); Sprk.Bff.Api.Tests (filtered, which already includes `ChildRecord` and `ExternalDocumentNarrowing`) 6529 passed, 7 skipped (existing), 0 failed, up from 6511 (18 new tests).
 
 ## Publish delta and CVE
 
 `publish-delta.ps1 -MasterSha d0c1c5dc3c -BranchSha bcd40aecba`: master zip 40,985,178 bytes (192 files), branch zip 40,992,607 bytes (192 files); delta +7,429 bytes (+0.007 MB); total 39.09 MB (thresholds: +5 MB needs justification, 55 MB review, 60 MB stop: none reached). `dotnet list package --vulnerable --include-transitive` on `Sprk.Bff.Api`: no vulnerable packages. No new package.
 
+After review round 1: `publish-delta.ps1 -MasterSha d0c1c5dc3c -BranchSha 40647a4c1d`: master zip 40,985,159 bytes (192 files), branch zip 40,993,275 bytes (192 files); delta +8,116 bytes (+0.008 MB); total 39.09 MB (no threshold reached). `dotnet list package --vulnerable --include-transitive` on `Sprk.Bff.Api`: no vulnerable packages.
+
 ### Placement Justification (CLAUDE.md section 10 and 11)
 
 Existing: the work lands in `RecordCreationService` step 8 and the existing `RecordTableRules` registry, and in the existing update paths that already own the write. Extension: nothing new is needed, because the registry's `SearchIndexed` flag already says which tables own an index and one `internal static` helper block on it serves create and every update path; a separate abstraction would only be a second place that says which tables are indexed. Cost of doing nothing: a client-supplied index lets the AppendTo check refuse a legitimate create (#2399) and lets any client choose which index a record lands in. Placement: code stays in the BFF inside the existing service; no new endpoint, no DI registration, no interface, no package, no background work, no new file under `src/`.
+
+## Review round 1 (Opus adversarial review of `09210a41c4`; no blocking defect)
+
+Each item below has a test that failed before the fix and passes after (or, for a test-only item, a must-fire proof). Logs are outside the repo, in `fm039\` (`r2-before.log`, `r2-after.log`, `r3-before.log`, `r3-after.log`, `r4-after.log`, `r4-mustfire.log`, `r5-after.log`, `r5-mustfire.log`, `r7-before.log`, `r7-after.log`).
+
+| Item | Finding | Fix | Commit | Before | After |
+|---|---|---|---|---|---|
+| R1 | A dropped index name could carry free text (an email, a long sentence) into the log | One shape check, `RecordTableRules.LoggableIndexName` (`^[a-z0-9](?:[a-z0-9-]{0,126}[a-z0-9])?$`, 100 ms timeout); anything else logs `<not an index name> (length N)`. Every log site goes through `LogSearchIndexDropped`, so it is the one place | `c306ddce43` | 2 failed | 0 failed (612 in the `SearchIndex` + `SecureChildOwnershipAiToolTests` filter) |
+| R2 | An update naming only an index column was refused 400 `child_record.invalid_payload`, a refusal that did not exist before 039 (NFR-07) | When the drop empties the body, skip the write. Child-records PATCH answers 204; the chat update returns success with "the search index is set by the server, so it was left as it is". `PUT /documents` and the push already no-op. A body empty BEFORE any drop keeps the mapper's 400 (control test x4) | `509e67c005` | 2 failed of 6 | 0 failed of 6 (979 in the wider filter) |
+| R3 | Repair's mapping could copy a parent's index onto a search-indexed row and report it Present | `RecordCreationService.Repair.cs`: both index columns join Repair's protected set when `rule.SearchIndexed`. Not put in `ProtectedFromMapping`, because create step 3 also reads it: the create-side drop at step 3.5 logs `origin=mapping`, and moving the exclusion would silence that log and add a skip warning. Repair stays fill-only; its own search-index step writes the owning unit's index | `745186b5d4` | 1 failed | 102 passed in the Repair filters |
+| R4 | The real wizard route had no test of its own: reverting the Web API body drop (`RecordCreationService.cs:412-414`) broke nothing | `SecureChildOwnershipAiToolTests.SearchIndexCreateRoute.cs`: `POST /api/v1/child-records/sprk_workassignment` over the real service with a unit that holds an index; both bind casings, both at once, a malformed bind, a catalog row the caller cannot AppendTo; asserts 201, no catalog read, exactly one server bind key holding the owning unit's index | `0ecd0bb982` | n/a (test only) | 5 pass; with the body drop reverted 3 fail (both spellings, malformed x2) |
+| R5 | The must-not-fire test missed the lookup itself | `ATableNotMarkedSearchIndexed_KeepsTheCallersSearchIndexLookup_AndItsAppendToCheck`: on `sprk_todo`, a bind of `sprk_ai_search_index` with `NoAppendToIn` is refused as before, and written when allowed | `155da7b5e8` | n/a (test only) | 3 pass; with the drop made unconditional 2 fail |
+| R6 | No guard against a new writer of a client-shaped body that forgets the drop | `tests/Spaarke.ArchTests/SearchIndexDropGuardTests.cs`: a source scan of `src/server/**` for the mapper entry points and the field updaters; each file must show `OwnsSearchIndex` / `WithoutSearchIndex` / `RemoveSearchIndex` / `rule.SearchIndexed` or be listed with a one-line reason (12 listed, no violation baseline; a stale entry fails). Must-fire and must-not-fire controls | `3c4577c050` | n/a | 3 pass; with the drop renamed out of `DataverseCreateRecordHandler` the guard fails |
+| R7 | The chat create mapped the model's item before the service dropped the index, so a malformed index lookup failed the whole create (`ValidationFailed`) while the chat update dropped it | `DataverseCreateRecordHandler.cs`: when `OwnsSearchIndex`, the item's index columns are dropped before `MapAsync`, with the same helper and log | `7544f27dd5` | 1 failed of 3 | 0 failed |
+| R9 | Docs said the I-5 row was the matter/project/document fill-only default; a comment at `RecordTableRules.cs` named a deleted Office method | I-5 row rewritten for FR-38 (six tables, both columns server-owned, step 8 the only writer, client value dropped on create and on BFF updates, native form edits out of scope); the comment now names step 8 | `40647a4c1d` | docs | docs |
+
+Finding 10 (the rag index-file name names the index) is filed by the coordinator. Finding 8 (log timing and labels) is a known limit that the coordinator records; as the code stands:
+
+- **K1 timing.** On a create, the `client_search_index_dropped` line is written at step 12, after the row exists. A create refused or faulted between the drop (steps 2 and 3.5) and the create logs the refusal on its own path but not the drop.
+- **K2 labels.** `origin` says which strip caught the value (`caller`, `mapping`, `default`), not who wrote it: a value in a caller's already-mapped item that survives to the post-mapping strip is labelled `mapping`.
+- **K3 chat create.** R7's early drop logs with `record` unset and no applied value (the row does not exist yet and the service finds nothing left to drop), so a chat create never logs the applied index beside the dropped one. A chat create whose item held ONLY an index column is left with no column and gets the mapper's empty-item answer; before, Dataverse would have refused the same create for its missing required columns (a primary name), so nothing is created either way, but the refusal text differs.
+- **K4 update paths.** An update logs `unchanged` for the applied index, because the row's index is not touched; it is not read to compare.
 
 ## Out of scope (found, not changed)
 
