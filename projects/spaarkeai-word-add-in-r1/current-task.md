@@ -9,8 +9,8 @@
 | Field | Value |
 |---|---|
 | **Task** | **133 🔄 Outlook Submit Invoice view** (FULL, opus/high). Live on dev in unified package 1.1.3; first owner UATs done. |
-| **Status** | Waiting on the owner's retest (INV-012.2) and on ebilling's work reaching master. Open PRs: **#2501** (097f replaced-by-correction; auto-merge on). |
-| **Next Action** | 1. When #2501 merges, remove C:\wt133p with `pwsh -NoProfile -Command "& ./scripts/worktree/Remove-WorktreeSafe.ps1 -Path 'C:\wt133p'"`. 2. Act on the owner's retest result. 3. When ebilling sends task 192 (filedUnder), use it in the 409 sentence. |
+| **Status** | Waiting on the owner's retest (INV-012.2) and on ebilling's work reaching master. #2501 (097f) merged. Open PR: **#2503** (task 192 filedUnder; branch fix/invoice-filed-under in C:\wt133p, cherry-pick of work d776e9277d). |
+| **Next Action** | 1. When the #2503 "Gated jest suites (office-addins)" check passes, `gh pr merge 2503 --auto --merge`. 2. After #2503 merges, remove C:\wt133p with `pwsh -NoProfile -Command "& ./scripts/worktree/Remove-WorktreeSafe.ps1 -Path 'C:\wt133p'"`. 3. Act on the owner's retest result. 4. When ebilling sends its combined master PR number, do the correction client items below. |
 
 ## Submit Invoice (task 133): state
 - **Dev:** eBilling is ON (since 2026-10-30 15:21Z). The invoice reader is configured (`ContentUnderstanding__Endpoint`, 2026-11-01 02:54:30Z, ebilling, owner go in both sessions; analyzers sprk_invoice_v2p and sprk_invoice_v2 deployed). The owner updated Integrated apps to package **1.1.3** (#2476); the Submit Invoice ribbon button works in Outlook on the web.
@@ -18,7 +18,7 @@
   - #2476: package 1.1.3 and Outlook XML 1.0.23.0.
   - #2492 + #2497: the view starts on the record the email is filed to (`invoiceFiledRecord` in `invoiceSubmissionSeam.ts`, from the pane's email identity), never replaces a user pick, names the filed record when another one is picked, and shows the Save picker's suggestion cards for an unfiled email.
   - #2498: sentences for ebilling task 191 (422 `reader_not_configured`; outcomes `ai.invoice.read.not_configured`, `.disabled`, `.binding_missing` ask an administrator; `.completion_failed`, `.output_invalid` say submit again later).
-- **Open PR #2501** (auto-merge): Accepted + `ebilling.submission.replaced_by_correction` is not "held for review"; it names `replacedBy.trackingNumber` when present (ebilling 097f, EB-D-180).
+  - #2501: Accepted + `ebilling.submission.replaced_by_correction` is not "held for review"; it names `replacedBy.trackingNumber` when present (ebilling 097f, EB-D-180).
 - **UAT results 2026-10-31:**
   - UAT 1: a 409 `document_core_record_mismatch` was correct (communication 99b5f650 "Fw: PAT-942665 …" is filed under PAT-897705; the owner picked PAT-792345).
   - UAT 2: INV-012.1 (submission 24800a9d) Failed with `ai.invoice.read.not_configured` (since fixed on dev); the view didn't prefill (fixed by #2492).
@@ -27,7 +27,7 @@
 
 ## ebilling contract items (peer: ebilling, pipe cc-msg-c961e15ec4fa4e62d8bf9706a34c677d)
 - **Task 191** (work fdd3c79b7f, d4849acbe6; not on master or dev): intake 422 `reader_not_configured`, §9 `ai.invoice.*` codes. The client side is merged (#2498).
-- **Task 192 `filedUnder`** (owner OK'd via ebilling): optional `filedUnder {entityType: Matter|Project|WorkAssignment, entityId, name}` on 409 `document_core_record_mismatch`, only when the caller can Read it. When it lands: name the record in the sentence and let the view switch to it.
+- **Task 192 `filedUnder`** (work 25778a59b7): optional `filedUnder {entityType: Matter|Project|WorkAssignment, entityId, name}` on 409 `document_core_record_mismatch`, only when the caller can Read it. Client side is PR #2503: the sentence names the record, and the view offers "Use {name}". ebilling has been told.
 - **097b/097c Correction** (agreed 2026-10-30; work only). Client to-do when they reach master:
   - sentences for intake reasons `different_invoice_number`, `no_submission`, `submission_in_progress` ("wait, then submit the correction again");
   - stored permanent outcomes `correction_not_allowed.{invoice_status,different_firm,different_core_record,different_invoice_number,submission_in_progress}` and `correction_target_unavailable`;
@@ -49,6 +49,7 @@
 - PowerShell `git commit -m` with embedded `"` breaks the argument; use `git commit -F <file>`.
 - Local jest: stale gitignored `node_modules` in `src/client/shared/Spaarke.Communication.Components` and `Spaarke.UI.Components` (from 2026-10-08) load a second React and fail view/picker suites with "Invalid hook call". CI is unaffected. Rename them aside for a run (they can be locked by another process); the owner was offered their deletion.
 - `App.invoiceRoute.test.tsx` replaces the whole `InvoiceView` module: export pure helpers from a service module, never from the view file.
+- When the stale `node_modules` are locked, run jest with a scratchpad config that spreads `jest.config.js` and maps `^react$`, `^react/(.*)$`, `^react-dom$` and `^react-dom/(.*)$` to `office-addins/node_modules` (set `rootDir` to office-addins). This gives one React without renaming anything.
 - `Gated jest suites (office-addins)` is NOT a required check, so auto-merge can merge a PR that breaks it. Wait for it before relying on a merge.
 
 ## Owner items (open)
