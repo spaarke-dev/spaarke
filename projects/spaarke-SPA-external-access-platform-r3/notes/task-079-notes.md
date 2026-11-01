@@ -15,11 +15,11 @@ Issues: #2458 (ISS-024, DI-137) and #2491. Owner decision 2026-10-31: fix in R3,
     | null / absent / empty / non-GUID / empty GUID / non-string (a masked column reads null) | `Read` | none |
     | 404 | `Read` | none |
     | another contact's id, no id, not JSON, not an object, no body | `Failed` | none |
-    | 400 "Could not find a property named …" | `ColumnMissing` (logged once, naming `Set-WorkforceHomeIdentitySchema.ps1`) | none |
+    | 400 "Could not find a property named …" | `ColumnMissing` (logged on every call, like the neighbouring home reads; the message text is the sign-in one and names `Set-WorkforceHomeIdentitySchema.ps1`) | none |
     | any other failure | `Failed` | none |
 
   - Its `ToString` never prints the tenant.
-- **`GrantAccessNotifier.NotifyContactGrantAsync`**: on the external branch (`people.Count == 0`, nobody represents the contact), the new `HomeLinkBarsExternalEmailAsync` runs before `EmailExternalContactGrantAsync`, and only for a binding that reads Bound + WorkforceHome. It reads the stored tenant, then `FindHomeLinkedSystemUsersAsync(tenant, bound oid)` → `ContactBindingDecision.DecideHomeLink`, the same read and decision the portal's home sign-in makes.
+- **`GrantAccessNotifier.NotifyContactGrantAsync`**: on the external branch (`people.Count == 0`, nobody represents the contact), the new `HomeLinkBarsExternalEmailAsync` runs inside `EmailExternalContactGrantAsync`, after its own onboarded-with-email and caller-is-the-contact checks and before the link is built or anything is sent, and only for a binding that reads Bound + WorkforceHome. It reads the stored tenant, then `FindHomeLinkedSystemUsersAsync(tenant, bound oid)` → `ContactBindingDecision.DecideHomeLink`, the same read and decision the portal's home sign-in makes.
   - NotLinked → emailed as today.
   - Enabled → no email, `NotApplicable`. The user's own rights apply in the portal, so the internal notice is not sent either.
   - Disabled → no email, `NotApplicable`.
@@ -59,13 +59,14 @@ The added setup in its `Identities(row, …)` helper (3 lines) answers the new r
 
 | Filter | Passed |
 |---|---|
-| `GrantAccessNotifier*` | 54 / 54 |
+| `GrantAccessNotifier*` | 56 / 56 |
 | `AssignTaskRecipientGatePlaneTests` | 25 / 25 |
 | `AssignTaskRecipientGateSeamTests` | 25 / 25 |
 | `AssignTaskNotifierTests` (holds the gate's real-store cases) | 74 / 74 |
-| `DataverseContactIdentityStore*` | 239 / 239 |
+| `DataverseContactIdentityStore*` | 246 / 246 |
 | `GrantExternalContactEmailTests` (integration, `/grant` endpoint) | 12 / 12 |
-| `Spaarke.ArchTests` | 1883 / 1884 in the full run. The one failure, the ISS-005 timing guard (`Control_ManyAssignmentsToOneLocal_ResolveInBoundedTime`, 5 s budget, took 9 s), ran while a BFF publish loaded the machine. Its class passes 129 / 129 in isolation. |
+| `Spaarke.ArchTests`, filtered to ExternalAccess, Logging and Adr015 (after the review fixes) | 5 / 5 |
+| `Spaarke.ArchTests`, before the review fixes | 1883 / 1884 in the full run. The one failure, the ISS-005 timing guard (`Control_ManyAssignmentsToOneLocal_ResolveInBoundedTime`, 5 s budget, took 9 s), ran while a BFF publish loaded the machine. Its class passes 129 / 129 in isolation. |
 
 New tests:
 - `DataverseContactIdentityStoreTests`:
@@ -93,6 +94,20 @@ New tests:
   - `ACiamAssignee_IsDecidedAsToday_WithoutTheHomeReads`
 
 The full BFF unit suite was not run (project gotcha 2026-10-11).
+
+## Review fixes (two adversarial passes; both found item 1)
+
+1. **Order of checks.** The home check ran before `EmailExternalContactGrantAsync`'s own onboarded-with-email and caller-is-the-contact checks. A Bound + WorkforceHome contact who would never be emailed (no address, or the granter themself) got two extra reads and, when they failed, `Failed` (`notificationFailed: true` on /grant and /invite-and-grant) instead of `NotApplicable`. The home check now runs inside `EmailExternalContactGrantAsync`, after those two checks and before `TryBuildLink`. Every other case is unchanged. Tests: `AWorkforceHomeContactWithNoEmailAddress_IsNotApplicable_WithoutTheHomeReads_EvenWhenThoseReadsWouldFail` and `AWorkforceHomeContactThatIsTheCaller_IsNotApplicable_WithoutTheHomeReads_EvenWhenThoseReadsWouldFail`; both failed before the move (`Failed` instead of `NotApplicable`) and pass after.
+2. **Stale remark.** The `IsOnboardedWithEmail` doc said a WorkforceHome binding "IS emailed"; it now says it is emailed only when no licensed user carries its home pair.
+3. **Store HTTP wiring.** `TheRealStore_ReadHomeTenant_DecidesFromTheContactReadsAnswer` runs the real store's `ReadHomeTenantAsync` over the HTTP harness: 200 with this contact's GUID tenant, 200 masked (null), 404, 400 missing-column, 403 and 500. It also asserts the one request is the read's own path, with no readability proof and no write.
+4. **No tenant in a store log line.** The store's generic `GetAsync` already takes a fixed `logLabel` (used by the email lookups). The home link lookup (its path carries the home tenant and oid) and the new home tenant read now pass one, so a failed or throwing read logs the label and the status, never the path or body. No other read's log line changed. Test: `AFailingHomeLinkRead_LogsAFixedLabel_NeverTheTenantOrTheOid`; it failed before the label (the path with the tenant and oid was logged) and passes after. Its control shows the sign-in's home contact lookup still logs its path.
+
+## Known limits (filed separately: #ISSUE)
+
+- `InMemoryContactIdentityStore.GetContactAsync` rows still carry the tenant that the real `ContactSelect` never returns, so a test that reads it from the row can pass where the real store would not.
+- `AssignTaskRecipientGate.ComposePortalPrincipalAsync` (~:496) still passes the row's empty tenant into the WorkforceHome principal. No consumer reads it today.
+- Whether `sprk_externaltenantid` is readable by id under the BFF identity is to be confirmed on dev at deploy. A masked column reads null, which this read treats as could-not-tell, so it fails closed (no email, Unverified).
+- The sign-in path's other home reads (the home contact lookup and the guest systemuser lookup) still log their paths, which carry the home tenant and oid. Left as is (outside this change).
 
 ## Publish-size delta
 

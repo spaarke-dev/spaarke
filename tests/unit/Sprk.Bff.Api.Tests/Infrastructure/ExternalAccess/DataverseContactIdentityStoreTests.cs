@@ -351,6 +351,90 @@ public class DataverseContactIdentityStoreTests
         => HomeTenantLookup.FromStored(HomeTenant.ToString("D")).ToString()
             .Should().NotContain(HomeTenant.ToString("D")).And.Contain("HasTenant = True");
 
+    private const string MissingTenantColumnBody =
+        "{\"error\":{\"code\":\"0x80060888\",\"message\":\"Could not find a property named 'sprk_externaltenantid' on type 'Microsoft.Dynamics.CRM.contact'.\"}}";
+
+    private const string PermissionFaultBody =
+        "{\"error\":{\"code\":\"0x80040220\",\"message\":\"Principal user is missing prvReadContact privilege.\"}}";
+
+    /// <summary>
+    /// The REAL store's <c>ReadHomeTenantAsync</c> over its own Web API request (the pure interpreter is covered above): one GET
+    /// of this contact's row selecting the contact id and the home directory only, whose answer decides the result. A tenant
+    /// only from a 200 naming this contact with a GUID; a masked (null) value or a 404 reads with no tenant; a 400 for a column
+    /// this environment lacks is ColumnMissing; a refusal (403) or a server fault (500) is Failed.
+    /// </summary>
+    [Theory]
+    [InlineData(HttpStatusCode.OK, "own-tenant", LookupStatus.Read, true)]
+    [InlineData(HttpStatusCode.OK, "masked-null", LookupStatus.Read, false)]
+    [InlineData(HttpStatusCode.NotFound, "{}", LookupStatus.Read, false)]
+    [InlineData(HttpStatusCode.BadRequest, MissingTenantColumnBody, LookupStatus.ColumnMissing, false)]
+    [InlineData(HttpStatusCode.Forbidden, PermissionFaultBody, LookupStatus.Failed, false)]
+    [InlineData(HttpStatusCode.InternalServerError, "{\"error\":{\"message\":\"server fault\"}}", LookupStatus.Failed, false)]
+    public async Task TheRealStore_ReadHomeTenant_DecidesFromTheContactReadsAnswer(
+        HttpStatusCode code, string body, LookupStatus expectedStatus, bool expectedTenant)
+    {
+        body = body switch
+        {
+            "own-tenant" => $"{{\"contactid\":\"{TenantContact:D}\",\"sprk_externaltenantid\":\"{HomeTenant:D}\"}}",
+            "masked-null" => $"{{\"contactid\":\"{TenantContact:D}\",\"sprk_externaltenantid\":null}}",
+            _ => body,
+        };
+        var http = new ReadProofHttp { ContactStatus = code, ContactBody = body };
+
+        var read = await StoreOver(http).ReadHomeTenantAsync(TenantContact, CancellationToken.None);
+
+        read.Status.Should().Be(expectedStatus, $"{(int)code}");
+        read.HomeTenantId.Should().Be(expectedTenant ? HomeTenant : null, $"{(int)code}");
+        http.Requests.Should().ContainSingle("one read of its own, no readability proof")
+            .Which.Should().EndWith(DataverseContactIdentityStore.BuildHomeTenantReadPath(TenantContact));
+        http.WhoAmICount.Should().Be(0);
+        http.Writes.Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// ADR-015: a failing or throwing home-link read (whose path carries the home tenant and oid) logs a fixed label and the
+    /// status, never the path or the body, and the new home-tenant read does the same. MUST FIRE: each read faulted. MUST NOT
+    /// FIRE (control): the sign-in's other home reads keep logging what they logged.
+    /// </summary>
+    [Fact]
+    public async Task AFailingHomeLinkRead_LogsAFixedLabel_NeverTheTenantOrTheOid()
+    {
+        var echo = $"{{\"error\":{{\"message\":\"bad filter {HomeTenant:D} {Oid:D}\"}}}}";
+        var logger = new CapturingLogger();
+        var http = new ScriptedHttp(
+            (HttpStatusCode.InternalServerError, echo),
+            (HttpStatusCode.InternalServerError, echo));
+        var store = new DataverseContactIdentityStore(http, _ => Task.FromResult("token"), "https://org.test.invalid", logger);
+
+        (await store.FindHomeLinkedSystemUsersAsync(HomeTenant, Oid, CancellationToken.None)).Status.Should().Be(LookupStatus.Failed);
+        (await store.ReadHomeTenantAsync(TenantContact, CancellationToken.None)).Status.Should().Be(LookupStatus.Failed);
+
+        logger.Messages.Should().HaveCount(2);
+        logger.Messages.Should().OnlyContain(m =>
+            !m.Contains(HomeTenant.ToString("D"), StringComparison.OrdinalIgnoreCase)
+            && !m.Contains(Oid.ToString("D"), StringComparison.OrdinalIgnoreCase)
+            && !m.Contains(HomeTenant.ToString("N"), StringComparison.OrdinalIgnoreCase)
+            && !m.Contains(Oid.ToString("N"), StringComparison.OrdinalIgnoreCase));
+        logger.Messages.Should().Contain(m => m.Contains("home link lookup") && m.Contains("500"))
+            .And.Contain(m => m.Contains("home tenant read") && m.Contains("500"));
+
+        // The throwing leg: the token source is down, so the read throws before any request.
+        logger.Messages.Clear();
+        var down = new DataverseContactIdentityStore(http, _ => throw new InvalidOperationException("token source down"),
+            "https://org.test.invalid", logger);
+        (await down.FindHomeLinkedSystemUsersAsync(HomeTenant, Oid, CancellationToken.None)).Status.Should().Be(LookupStatus.Failed);
+        logger.Messages.Should().ContainSingle().Which.Should().Contain("home link lookup")
+            .And.NotContain(HomeTenant.ToString("D")).And.NotContain(Oid.ToString("D"));
+
+        // Control: a read that was not relabelled keeps logging its path.
+        logger.Messages.Clear();
+        var control = new DataverseContactIdentityStore(
+            new ScriptedHttp((HttpStatusCode.InternalServerError, echo)), _ => Task.FromResult("token"),
+            "https://org.test.invalid", logger);
+        await control.FindHomeContactsAsync(HomeTenant, Oid, CancellationToken.None);
+        logger.Messages.Should().ContainSingle().Which.Should().Contain(HomeTenant.ToString("D"));
+    }
+
     [Fact]
     public void EveryContactRead_SelectsTheBindingAndTheMirror_SoASquatCanBeToldApart()
         => DataverseContactIdentityStore.ContactSelect.Split(',')

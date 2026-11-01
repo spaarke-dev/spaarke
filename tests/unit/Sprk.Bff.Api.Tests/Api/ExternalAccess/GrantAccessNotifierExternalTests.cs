@@ -348,12 +348,12 @@ public class GrantAccessNotifierExternalTests
     /// read (<paramref name="tenant"/>, the stored tenant by default). The stored-link read answers <paramref name="link"/>
     /// (no licensed user by default).
     /// </summary>
-    private Guid HomeContact(HomeTenantLookup? tenant = null, HomeLinkLookup? link = null)
+    private Guid HomeContact(HomeTenantLookup? tenant = null, HomeLinkLookup? link = null, bool noEmail = false)
     {
         var id = Guid.NewGuid();
         _identities.Setup(i => i.GetContactAsync(id, It.IsAny<CancellationToken>()))
             .ReturnsAsync(ContactLookup.Of(new ContactBindingRow(
-                id, 0, HomeOid.ToString("D"), (int)IdentityPlaneMarker.WorkforceHome, Email: HomeAddress)));
+                id, 0, HomeOid.ToString("D"), (int)IdentityPlaneMarker.WorkforceHome, Email: noEmail ? null : HomeAddress)));
         _identities.Setup(i => i.ReadHomeTenantAsync(id, It.IsAny<CancellationToken>()))
             .ReturnsAsync(tenant ?? HomeTenantLookup.FromStored(HomeTenant.ToString("D")));
         _identities.Setup(i => i.FindHomeLinkedSystemUsersAsync(HomeTenant, HomeOid, It.IsAny<CancellationToken>()))
@@ -465,6 +465,43 @@ public class GrantAccessNotifierExternalTests
         }
 
         NoIdentityValueWasLogged();
+    }
+
+    // Review fix (079): the home check runs AFTER the checks that decide nobody is emailed anyway (no address; the caller is the
+    // contact), so a contact that would never be emailed costs no extra read and is NotApplicable, never Failed.
+    [Fact]
+    public async Task AWorkforceHomeContactWithNoEmailAddress_IsNotApplicable_WithoutTheHomeReads_EvenWhenThoseReadsWouldFail()
+    {
+        var contact = HomeContact(tenant: HomeTenantLookup.Failed, noEmail: true);
+
+        var outcome = await Notifier().NotifyContactGrantAsync(
+            ExternalGrantRootType.Matter, _matter, contact, ExternalAccessLevel.Collaborate, Granter());
+
+        outcome.Should().Be(GrantNotificationOutcome.NotApplicable);
+        _emails.Sent.Should().BeEmpty();
+        NoHomeReadWasMade();
+        NoIdentityValueWasLogged();
+    }
+
+    [Fact]
+    public async Task AWorkforceHomeContactThatIsTheCaller_IsNotApplicable_WithoutTheHomeReads_EvenWhenThoseReadsWouldFail()
+    {
+        var contact = HomeContact(tenant: HomeTenantLookup.Failed);
+
+        var outcome = await Notifier().NotifyContactGrantAsync(
+            ExternalGrantRootType.Matter, _matter, contact, ExternalAccessLevel.Collaborate, Granter(HomeOid));
+
+        outcome.Should().Be(GrantNotificationOutcome.NotApplicable);
+        _emails.Sent.Should().BeEmpty();
+        NoHomeReadWasMade();
+        NoIdentityValueWasLogged();
+    }
+
+    private void NoHomeReadWasMade()
+    {
+        _identities.Verify(i => i.ReadHomeTenantAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
+        _identities.Verify(i => i.FindHomeLinkedSystemUsersAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()),
+            Times.Never);
     }
 
     [Theory]

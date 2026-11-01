@@ -1796,7 +1796,8 @@ public sealed class DataverseContactIdentityStore : IContactIdentityStore
     /// <inheritdoc />
     public async Task<HomeLinkLookup> FindHomeLinkedSystemUsersAsync(Guid homeTenantId, Guid homeObjectId, CancellationToken ct)
     {
-        var (status, _, body, _) = await GetAsync(BuildHomeLinkLookupPath(homeTenantId, homeObjectId), ct).ConfigureAwait(false);
+        var (status, _, body, _) = await GetAsync(
+            BuildHomeLinkLookupPath(homeTenantId, homeObjectId), ct, logLabel: "home link lookup").ConfigureAwait(false);
         if (status != LookupStatus.Read || body is null)
         {
             if (status == LookupStatus.ColumnMissing)
@@ -1885,7 +1886,8 @@ public sealed class DataverseContactIdentityStore : IContactIdentityStore
     /// </remarks>
     public async Task<HomeTenantLookup> ReadHomeTenantAsync(Guid contactId, CancellationToken ct)
     {
-        var (status, code, body, _) = await GetAsync(BuildHomeTenantReadPath(contactId), ct).ConfigureAwait(false);
+        var (status, code, body, _) = await GetAsync(
+            BuildHomeTenantReadPath(contactId), ct, logLabel: "home tenant read").ConfigureAwait(false);
         if (status == LookupStatus.ColumnMissing)
         {
             LogHomeSchemaMissing("home tenant read");
@@ -2461,7 +2463,8 @@ public sealed class DataverseContactIdentityStore : IContactIdentityStore
     /// <param name="path">The request path (never logged when <paramref name="logLabel"/> is given).</param>
     /// <param name="logLabel">
     /// UAC review K2: a FIXED label logged in place of the path by a read whose OData filter carries the caller's email
-    /// (PII, URL-escaped in the path). Null for every other read, which logs its path.
+    /// (PII, URL-escaped in the path). Null for every other read, which logs its path. R3 079 also labels the home link lookup
+    /// (its path carries the home tenant and oid) and the home tenant read: ADR-015, no tenant value in a log line.
     /// </param>
     private async Task<(LookupStatus Status, HttpStatusCode Code, string? Body, string? Error)> GetAsync(
         string path, CancellationToken ct, string? prefer = null, string? logLabel = null)

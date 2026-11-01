@@ -213,11 +213,6 @@ public sealed class GrantAccessNotifier
             if (readContact is not null
                 && !candidates.Any(u => u.SystemUserId != Guid.Empty && u.Represents(contactId, boundOid)))
             {
-                // r3 task 079 (#2458): a WorkforceHome contact's home sign-in resolves in the portal as the licensed user who
-                // carries its home pair, when one does; that user's own rights apply there, not this grant.
-                if (await HomeLinkBarsExternalEmailAsync(rootType, rootId, readContact) is { } barred)
-                    return barred;
-
                 return await EmailExternalContactGrantAsync(rootType, rootId, readContact, caller);
             }
 
@@ -374,6 +369,13 @@ public sealed class GrantAccessNotifier
                 return GrantNotificationOutcome.NotApplicable;
             }
 
+            // r3 task 079 (#2458): asked only now, after the checks above that already decide nobody is emailed (so a contact
+            // that is never emailed costs no extra read and keeps its outcome), and before the link is built or anything sent.
+            // A WorkforceHome contact's home sign-in resolves in the portal as the licensed user who carries its home pair,
+            // when one does; that user's own rights apply there, not this grant.
+            if (await HomeLinkBarsExternalEmailAsync(rootType, rootId, contact) is { } barred)
+                return barred;
+
             var link = TryBuildLink(rootType, rootId);
             if (link is null)
                 return GrantNotificationOutcome.Failed;
@@ -412,8 +414,9 @@ public sealed class GrantAccessNotifier
     /// <remarks>
     /// A binding on the WORKFORCE plane is an employee's work identity, not an external contact's CIAM account: it is never
     /// emailed as one (task 036 review K4). An oid with no plane marker is a pre-141 CIAM binding (<see cref="ContactBindingDecision.ReadBinding"/>).
-    /// A WorkforceHome binding (ADR-028 A9, r3 task 047) IS emailed: that contact registered through, and signs in to, the
-    /// same external portal the email links to.
+    /// A WorkforceHome binding (ADR-028 A9, r3 task 047) is emailed only when no licensed user carries its home pair (r3 task
+    /// 079, <see cref="HomeLinkBarsExternalEmailAsync"/>, asked after this test): that contact registered through, and signs in
+    /// to, the same external portal the email links to.
     /// Ontology task 168 (D-199) asks the same test before an Assign Task email to an external contact (<c>AssignTaskRecipientGate</c>).
     /// </remarks>
     internal static bool IsOnboardedWithEmail(ContactBindingRow contact)
