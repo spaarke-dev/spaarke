@@ -868,3 +868,12 @@ When the home token has no `email` claim, the form's prefill falls back to the u
 | **What** | `components/DocumentLibrary.tsx` renders the record Documents list (record modal, project page) with its own Fluent `DataGrid`. It sets no widths and no `resizableColumns`, so its columns cannot be resized and they overlap. The Documents tab uses the shared grid and does not have this problem. |
 | **Decision** | Owner: R4. The preferred fix moves the list onto the shared `DataGrid`. |
 | **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2490 |
+
+### ISS-028: The in-memory contact store returns the home tenant from GetContactAsync; the gate's portal principal carries an empty tenant
+
+| Field | Value |
+|---|---|
+| **Found** | 2026-11-01, task 079 adversarial review |
+| **What** | `InMemoryContactIdentityStore.GetContactAsync` returns rows that carry `sprk_externaltenantid`, which the real `ContactSelect` never returns. That divergence hid #2491. Separately, `AssignTaskRecipientGate.ComposePortalPrincipalAsync` passes the row's tenant, which is always empty on Dataverse. Nothing reads it today, so no outcome changes. |
+| **Decision** | Known limit, filed. Task 079 moved both known readers to `ReadHomeTenantAsync`. The gate file is ontology's. |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2499 |
