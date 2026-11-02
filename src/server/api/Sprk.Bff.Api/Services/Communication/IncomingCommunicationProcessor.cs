@@ -1014,12 +1014,12 @@ public sealed class IncomingCommunicationProcessor
                 return false;
             }
 
-            var files = message.Attachments is { Count: > 0 } attachments
-                ? await ResolveFileAttachmentsWithContentAsync(attachments, mailboxEmail, graphMessageId, ct)
-                : [];
-            if (files.Count == 0 && message.HasAttachments == true)
+            // EVERY listed file, not only those that came with bytes (uac-r2 re-check F4): a file left out of the digest would let a message
+            // with the copied header, the batch files and one more file verify, and that file would then never be filed.
+            var files = (message.Attachments ?? []).OfType<FileAttachment>().ToList();
+            if ((files.Count == 0 && message.HasAttachments == true) || files.Any(f => f.ContentBytes is not { Length: > 0 }))
             {
-                // Listed as having attachments but none came with the message: fetch them, as the attachment step does.
+                // Listed as having attachments but some or all came without bytes: fetch the whole collection, as the attachment step does.
                 var fetched = await _graphClientFactory.ForApp().Users[mailboxEmail].Messages[graphMessageId]
                     .Attachments.GetAsync(cancellationToken: ct);
                 if (fetched?.Value is { } all && all.Any(a => a is not FileAttachment))
@@ -1030,6 +1030,7 @@ public sealed class IncomingCommunicationProcessor
                 files = (fetched?.Value ?? []).OfType<FileAttachment>().ToList();
             }
 
+            // A file still without bytes is passed as such: the digest is then null and the marker is not honoured.
             return await ServerSendMarker.IsVerifiedAsync(
                 _trackingTokenSigner, markers, files.Select(f => (f.Name, f.ContentBytes)), ct);
         }

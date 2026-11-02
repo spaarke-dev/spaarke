@@ -32,14 +32,15 @@ internal static class ServerSendMarker
 
     /// <summary>
     /// The digest of a set of files: SHA-256 over each file's name and the SHA-256 of its bytes, sorted by name then content hash.
-    /// Null when there are no files or a file has no bytes (nothing to bind the marker to).
+    /// Null when there are no files or a file has no bytes, null or empty (nothing to bind the marker to; on the inbound side Graph gives a
+    /// file whose content it did not return as null or empty, so such a file must fail the check rather than be left out of it).
     /// </summary>
     public static string? AttachmentDigest(IEnumerable<(string? Name, byte[]? Content)> files)
     {
         var lines = new List<string>();
         foreach (var (name, content) in files)
         {
-            if (content is null)
+            if (content is not { Length: > 0 })
             {
                 return null;
             }

@@ -69,6 +69,8 @@ public class ServerSendMarkerTests
         yield return ["a tracking-footer token for a record"];
         yield return ["two marker headers"];
         yield return ["no attachments"];
+        yield return ["an extra file without bytes"];
+        yield return ["an extra file with empty bytes"];
         yield return ["no signer on the inbound side"];
         yield return ["no key on the inbound side"];
         yield return ["garbage"];
@@ -91,6 +93,8 @@ public class ServerSendMarkerTests
             case "a tracking-footer token for a record": markers = [(await signer.SignAsync("sprk_matter", Guid.NewGuid(), null, DateTimeOffset.UtcNow))!]; break;
             case "two marker headers": markers = [valid, valid]; break;
             case "no attachments": files = []; break;
+            case "an extra file without bytes": files = [.. Files(), ("large.pdf", null)]; break;
+            case "an extra file with empty bytes": files = [.. Files(), ("large.pdf", [])]; break;
             case "no signer on the inbound side": verifier = null; break;
             case "no key on the inbound side": verifier = new FixedKeyTrackingTokenSigner(null); break;
             default: markers = ["not.a.token"]; break;
@@ -99,11 +103,16 @@ public class ServerSendMarkerTests
         (await ServerSendMarker.IsVerifiedAsync(verifier, markers, files, CancellationToken.None)).Should().BeFalse();
     }
 
-    [Fact(DisplayName = "151c-1a D2 b: no signing key, or no files, signs no marker")]
+    [Fact(DisplayName = "151c-1a D2 b: no signing key, no files, or a file with null or empty bytes signs no marker and has no digest")]
     public async Task NoKeyOrNoFiles_SignsNothing()
     {
         (await ServerSendMarker.SignAsync(new FixedKeyTrackingTokenSigner(null), Files(), BatchId, DateTimeOffset.UtcNow, CancellationToken.None)).Should().BeNull();
         (await ServerSendMarker.SignAsync(Server(), [], BatchId, DateTimeOffset.UtcNow, CancellationToken.None)).Should().BeNull();
+
+        // uac-r2 re-check F4: Graph gives a file whose content it did not return as null or empty bytes, so neither can bind a marker.
+        (await ServerSendMarker.SignAsync(Server(), [.. Files(), ("empty.csv", [])], BatchId, DateTimeOffset.UtcNow, CancellationToken.None)).Should().BeNull();
+        ServerSendMarker.AttachmentDigest([.. Files(), ("empty.csv", [])]).Should().BeNull();
+        ServerSendMarker.AttachmentDigest([.. Files(), ("missing.csv", null)]).Should().BeNull();
     }
 
     // ---------------------------------------------------------------------------------------------------------------------------------
@@ -173,10 +182,16 @@ public class ServerSendMarkerTests
         }
     }
 
-    private sealed class FixedResponse(string json) : HttpMessageHandler
+    /// <summary>Answers the message for every request, except the attachments collection when <paramref name="attachmentsJson"/> is given.</summary>
+    private sealed class FixedResponse(string json, string? attachmentsJson = null) : HttpMessageHandler
     {
-        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
-            Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(json, Encoding.UTF8, "application/json") });
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            var body = attachmentsJson is not null && request.RequestUri!.AbsolutePath.EndsWith("/attachments", StringComparison.OrdinalIgnoreCase)
+                ? attachmentsJson
+                : json;
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(body, Encoding.UTF8, "application/json") });
+        }
     }
 
     private const string Mailbox = "mailbox-central@spaarke.com";
@@ -197,21 +212,32 @@ public class ServerSendMarkerTests
         ["uniqueBody"] = new { contentType = "text", content = "AP export batch b1" },
         ["receivedDateTime"] = DateTimeOffset.UtcNow.ToString("o"),
         ["hasAttachments"] = true,
-        ["attachments"] = files.Select(f => new Dictionary<string, object?>
+        ["attachments"] = AttachmentsOf(files),
+    });
+
+    /// <summary>File attachments as Graph lists them; a file with null content comes without <c>contentBytes</c> (metadata only).</summary>
+    private static Dictionary<string, object?>[] AttachmentsOf(IEnumerable<(string? Name, byte[]? Content)> files) => files.Select(f =>
+    {
+        var attachment = new Dictionary<string, object?>
         {
             ["@odata.type"] = "#microsoft.graph.fileAttachment",
             ["name"] = f.Name,
             ["contentType"] = "application/octet-stream",
-            ["size"] = f.Content!.Length,
-            ["contentBytes"] = Convert.ToBase64String(f.Content!),
-        }).ToArray(),
-    });
+            ["size"] = f.Content?.Length ?? 4096,
+        };
+        if (f.Content is not null)
+        {
+            attachment["contentBytes"] = Convert.ToBase64String(f.Content);
+        }
+
+        return attachment;
+    }).ToArray();
 
     private static (IncomingCommunicationProcessor Processor, RecordingProvider Scoped, Mock<IDataverseService> Dv, Mock<ITextExtractor> Text) Inbound(
-        string messageJson, Sprk.Bff.Api.Services.Communication.Tracking.ITrackingTokenSigner? signer)
+        string messageJson, Sprk.Bff.Api.Services.Communication.Tracking.ITrackingTokenSigner? signer, string? attachmentsJson = null)
     {
         var graph = new Mock<IGraphClientFactory>();
-        graph.Setup(f => f.ForApp()).Returns(new GraphServiceClient(new HttpClient(new FixedResponse(messageJson))));
+        graph.Setup(f => f.ForApp()).Returns(new GraphServiceClient(new HttpClient(new FixedResponse(messageJson, attachmentsJson))));
 
         var dv = new Mock<IDataverseService>();
         var text = new Mock<ITextExtractor>();
@@ -279,11 +305,13 @@ public class ServerSendMarkerTests
         yield return ["forged marker", false];
         yield return ["marker copied onto other files", false];
         yield return ["marked, but the inbound side has no signer", false];
+        yield return ["marker plus an extra file without inline bytes", false];
     }
 
     /// <summary>
     /// MUTATION (seeded): removing the <c>verifiedServerSend</c> guard from the attachment-text match step, the attachment step or the archive step fails the "marked" case;
-    /// honouring a marker without the digest comparison fails the "copied" case; without the signature check, the "forged" case.
+    /// honouring a marker without the digest comparison fails the "copied" case; without the signature check, the "forged" case; digesting only
+    /// the files that came with bytes (uac-r2 re-check F4) fails the "extra file without inline bytes" case, whose re-fetch still returns it without bytes.
     /// </summary>
     [Theory(DisplayName = "151c-1a D2 b SEEDED: a verified server send is no match signal, files no attachment document and archives no .eml; anything else is processed as before")]
     [MemberData(nameof(InboundCases))]
@@ -297,9 +325,13 @@ public class ServerSendMarkerTests
             "unmarked" => (null, files, server),
             "forged marker" => (await MarkerFor(new FixedKeyTrackingTokenSigner(FixedKeyTrackingTokenSigner.KeyB), files), files, server),
             "marker copied onto other files" => (await MarkerFor(server, files), [("invoice.pdf", Encoding.UTF8.GetBytes("%PDF-1.7 genuine inbound"))], server),
+            "marker plus an extra file without inline bytes" => (await MarkerFor(server, files), [.. files, ("large-genuine-inbound.pdf", null)], server),
             _ => (await MarkerFor(server, files), files, null),
         };
-        var (processor, scoped, dv, text) = Inbound(MessageJson(marker, carried), inboundSigner);
+        var attachmentsJson = carried.Any(f => f.Content is null)
+            ? JsonSerializer.Serialize(new Dictionary<string, object?> { ["value"] = AttachmentsOf(carried) })
+            : null;
+        var (processor, scoped, dv, text) = Inbound(MessageJson(marker, carried), inboundSigner, attachmentsJson);
 
         await processor.ProcessAsync(Mailbox, GraphMessageId, ct: CancellationToken.None);
 
