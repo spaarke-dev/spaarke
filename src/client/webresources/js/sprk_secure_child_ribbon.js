@@ -59,6 +59,14 @@ Spaarke.SecureChild.Ribbon = Spaarke.SecureChild.Ribbon || {};
      */
     ns.PARTIES = { contact: true, sprk_organization: true, account: true };
 
+    /**
+     * ebilling-r1 task 151c-2: hosts that offer NO "New" child at all, neither the platform "+ New" nor the BFF "New <thing>". The
+     * AP export batch's "AP emails" subgrid only lists the emails the server sent for the batch (sprk_communication.sprk_billingexport,
+     * a plain reference written by the BFF, not a filing). A message cannot be composed against a batch (no regarding route names it),
+     * and the platform "+ New" would create an unfiled email by hand: so neither is offered.
+     */
+    ns.NO_NEW_HOSTS = { sprk_billingexport: true };
+
     /** Wizard code pages (envelope: entityType / entityId / bffBaseUrl - sprk_wizard_commands.js). */
     ns.WIZARDS = {
         sprk_todo: { page: "sprk_createtodowizard", title: "Create New To Do" },
@@ -135,6 +143,9 @@ Spaarke.SecureChild.Ribbon = Spaarke.SecureChild.Ribbon || {};
      */
     ns.nativeNewAllowed = function (primaryControl) {
         var host = ns.hostOf(primaryControl);
+        if (host && ns.NO_NEW_HOSTS[host.entity]) {
+            return false;
+        }
         if (!host || ns.PARTIES[host.entity]) {
             return true;
         }
@@ -144,7 +155,7 @@ Spaarke.SecureChild.Ribbon = Spaarke.SecureChild.Ribbon || {};
     /** EnableRule for the "New <thing>" command: the exact complement of nativeNewAllowed (one of the two is shown). */
     ns.newChildAvailable = function (primaryControl) {
         var host = ns.hostOf(primaryControl);
-        if (!host || ns.PARTIES[host.entity]) {
+        if (!host || ns.PARTIES[host.entity] || ns.NO_NEW_HOSTS[host.entity]) {
             return false;
         }
         return ns.hostSecureFlag(primaryControl).then(function (flag) { return flag !== false; });
