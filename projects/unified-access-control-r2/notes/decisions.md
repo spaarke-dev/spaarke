@@ -198,3 +198,8 @@ The owner accepted every recommendation ("yes follow your recommendation for the
   - **Records.** Both platform record-move jobs completed, with 0 rows left in the root (a live count per owned table).
   - **Health.** BFF /healthz and /healthz/dataverse were 200 afterwards.
   - **Remaining.** Step 3, the administrator's own account, is the last step. The owner restores System Administrator from the Power Platform admin center.
+- **Step 3 not done, by owner decision (2026-11-02).** Dataverse refuses a self-move unless the org setting `DoNotRemoveRolesOnChangeBusinessUnit` is on. Nothing changed.
+  - The owner chose to leave the administrator's account in the root, over turning that setting on.
+  - **Consequence, accepted.** Records that account creates unfiled are owned by the root team (the creator's unit), so its own test data does not take the customer shape.
+- **Move closed (2026-11-02).** All 11 interactive humans except the administrator, and both dev BFF app users, are in BU1. The customer families are owned by the BU1 team. The 156 other app users stay in the root (Q3, Q4).
+  - Rollback source: `rbu1s0_snapshot_*` in the session scratch.
