@@ -34,6 +34,7 @@
       <file role="modify">src/dataverse/solutions/SpaarkeMaster: Entities/sprk_Communication/Entity.xml, Other/Relationships/sprk_billingexport.xml, Other/Relationships.xml, Entities/sprk_billingexport/FormXml/main (plain and managed)</file>
       <file role="modify">src/server/api/Sprk.Bff.Api/Services/Communication/Models/ServerSendOptions.cs, Services/Communication/CommunicationService.cs, Services/Finance/ApExportDeliveryService.cs</file>
       <file role="new">tests/Spaarke.ArchTests/CommunicationBatchLinkNotFilingGuardTests.cs</file>
+      <file role="modify">src/client/webresources/js/sprk_secure_child_ribbon.js and its mirror src/dataverse/solutions/SpaarkeMaster/WebResources/sprk_/scripts/secure_child_ribbon.js; src/client/shared/Spaarke.UI.Components/src/utils/adapters/__tests__/secureChildRibbonScript.test.ts</file>
       <file role="modify">tests/unit/Sprk.Bff.Api.Tests/Services/Communication/CommunicationServiceServerSendTests.cs, tests/integration/auth/Finance/ApExportDeliveryTests.cs</file>
       <file role="modify">docs/data-model/sprk_billingexport.md, docs/data-model/sprk_communication.md</file>
       <file role="new">projects/ebilling-r1/notes/151c2-batch-link.md</file>
@@ -49,17 +50,17 @@
   </constraints>
 
   <acceptance-criteria>
-    <criterion>Deploy-EbillingCommunicationBatchLink.ps1 is idempotent, supports -WhatIf, adds the column to SpaarkeMaster, publishes sprk_communication only, sets all seven cascade members explicitly and stops (exit 2) on a conflicting column, a second lookup to the batch, or an existing relationship with another cascade.</criterion>
+    <criterion>Deploy-EbillingCommunicationBatchLink.ps1 is idempotent, supports -WhatIf, adds the column to SpaarkeMaster, publishes sprk_communication only, sets all seven cascade members explicitly and stops (exit 2) on a conflicting column, a second lookup to the batch, or an existing relationship with another cascade or another name.</criterion>
     <criterion>The send sets sprk_billingexport in the create (one create, no follow-up update); the owner is still the batch's team; the email carries no sprk_regarding* column and the owner resolver is asked only about the batch.</criterion>
     <criterion>A JSON body cannot set the reference under any spelling; a send without a batch id, and a normal send, create the row without the column.</criterion>
     <criterion>A create that faults because the column does not exist yet is retried once without it and the email is recorded; any other fault, and any row that does not carry the reference, is not retried.</criterion>
     <criterion>An ArchTest guard fails if the column on sprk_communication, or the batch table as an ownership parent or regarding target, appears in any family-edge, lineage, ownership or regarding registry, or if code in the registry folders names the batch link; it ships with must-fire and must-not-fire controls and a seeding proof.</criterion>
-    <criterion>The batch main form has a read-only "AP emails" subgrid on the new relationship (plain and managed source).</criterion>
+    <criterion>The batch main form has an "AP emails" subgrid on the new relationship (plain and managed source); the subgrid offers no New (ribbon NO_NEW_HOSTS, script and mirror identical); Add Existing is left on and recorded as K1 in the notes; the forms script stops before writing if the relationship does not exist.</criterion>
   </acceptance-criteria>
 
   <deploy-order>
     1. Deploy-EbillingCommunicationBatchLink.ps1 -WhatIf, then without it (after notices).
     2. Deploy-EbillingFormsViews.ps1 -FormsOnly -WhatIf, then without it (adds the subgrid; needs step 1).
-    3. The BFF (safe before step 1: the create falls back to recording the email without the link).
+    3. The BFF, after steps 1 and 2 (before step 1 no email is lost, but each AP email logs an Error plus the fallback Warning).
   </deploy-order>
 </task>
