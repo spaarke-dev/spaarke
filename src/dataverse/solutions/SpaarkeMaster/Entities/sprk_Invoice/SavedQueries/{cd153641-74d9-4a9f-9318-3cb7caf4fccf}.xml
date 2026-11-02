@@ -18,6 +18,7 @@
           <cell name="sprk_approvedtotal" width="130" />
           <cell name="sprk_currency" width="80" />
           <cell name="sprk_billingexport" width="180" />
+          <cell name="export_batch.sprk_senttoapdate" width="150" />
         </row>
       </grid>
     </layoutxml>
@@ -35,6 +36,9 @@
           <attribute name="sprk_approvedtotal" />
           <attribute name="sprk_currency" />
           <attribute name="sprk_billingexport" />
+          <link-entity name="sprk_billingexport" from="sprk_billingexportid" to="sprk_billingexport" alias="export_batch" link-type="outer">
+            <attribute name="sprk_senttoapdate" />
+          </link-entity>
           <order attribute="sprk_invoicedate" descending="false" />
           <filter type="and">
             <condition attribute="statuscode" operator="eq" value="659490001" />

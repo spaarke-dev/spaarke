@@ -147,7 +147,8 @@ $Spec = [ordered]@{
                 # Task 151c-1a: the BFF is the one writer of the Sent to AP Date (set once, never overwritten): disabled on the form.
                 ReadOnly = 'sprk_senttoapdate' }
             @{ Name = 'mapping'; Label = 'Mapping snapshot'; Cols = 'sprk_mappingsnapshot' })
-        View = 'sprk_name', 'sprk_exportstatus', 'sprk_invoicecount', 'sprk_totalamount', 'createdon'
+        # Task 151c-1b: the Sent to AP Date joins the Active view (a batch's delivery state is visible in the list).
+        View = 'sprk_name', 'sprk_exportstatus', 'sprk_invoicecount', 'sprk_totalamount', 'sprk_senttoapdate', 'createdon'
     }
     sprk_invoicecorrection = @{
         Form = 'Replace'; FormName = 'Information'; AllReadOnly = $true

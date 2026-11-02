@@ -14,6 +14,7 @@
           <cell name="sprk_exportstatus" width="150" />
           <cell name="sprk_invoicecount" width="150" />
           <cell name="sprk_totalamount" width="150" />
+          <cell name="sprk_senttoapdate" width="150" />
           <cell name="createdon" width="150" />
         </row>
       </grid>
@@ -27,6 +28,7 @@
           <attribute name="sprk_exportstatus" />
           <attribute name="sprk_invoicecount" />
           <attribute name="sprk_totalamount" />
+          <attribute name="sprk_senttoapdate" />
           <attribute name="createdon" />
           <order attribute="sprk_name" descending="false" />
           <filter type="and">
