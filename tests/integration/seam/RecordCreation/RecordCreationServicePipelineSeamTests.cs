@@ -540,6 +540,21 @@ public sealed partial class RecordCreationServicePipelineSeamTests
         _creates.Should().ContainSingle().Which.Id.Should().Be(outcome.CreatedId!.Value);
     }
 
+    // #2515: an event's number is the platform's (EVT-{SEQNUM:6}), so a key-refused event create is retried on the same id, as a matter's.
+    [Fact]
+    public async Task CreateAsync_AnEventWhoseNumberIsTaken_IsRetriedOnTheSameId_AndCreatesOneRow()
+    {
+        _createFaults.Enqueue(NumberTaken());
+
+        var outcome = await Service().CreateAsync(
+            WebApiRequest("sprk_event", new { sprk_eventname = "Hearing", sprk_RegardingMatter_bind = $"/sprk_matters({OrdinaryMatter:D})" }),
+            AsCaller(), CancellationToken.None);
+
+        outcome.Succeeded.Should().BeTrue(outcome.Refusal?.Detail);
+        _createAttempts.Should().HaveCount(2);
+        _createAttempts.Select(a => a.Id).Distinct().Should().ContainSingle();
+    }
+
     [Fact]
     public async Task CreateAsync_AMatterWhoseNumberIsTakenOnEveryAttempt_Is409NumberUnavailable_AndRunsNoPostCreateStep()
     {
@@ -576,7 +591,7 @@ public sealed partial class RecordCreationServicePipelineSeamTests
         _createFaults.Enqueue(NumberTaken());
 
         var create = () => Service().CreateAsync(
-            WebApiRequest("sprk_event", new { sprk_eventname = "Hearing", sprk_RegardingMatter_bind = $"/sprk_matters({OrdinaryMatter:D})" }),
+            WebApiRequest("sprk_memo", new { sprk_name = "Note", sprk_RegardingMatter_bind = $"/sprk_matters({OrdinaryMatter:D})" }),
             AsCaller(), CancellationToken.None);
 
         await create.Should().ThrowAsync<HttpRequestException>();

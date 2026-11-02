@@ -535,6 +535,21 @@ public class FinanceAuthorizationFilter : IEndpointFilter
         }
     }
 
+    /// <summary>
+    /// The Record path's decision, AS THE CALLER: the caller's rights on <paramref name="entitySetName"/>(<paramref name="recordId"/>)
+    /// (<see cref="AuthorizationService.GetCallerRecordAccessAsync"/>) against <paramref name="operation"/>'s required rights. The ONE
+    /// definition of it: the filter's Record check and a handler that must put a SECOND record to the caller (the correction prefill's
+    /// replacement invoice, ebilling-r1 task 097e) both call it, so the two cannot differ. A fault propagates; the filter denies on it, a
+    /// handler decides what its own fault means.
+    /// </summary>
+    internal static async Task<bool> CallerHoldsRightsAsync(
+        AuthorizationService authorizationService, string userId, string entitySetName, Guid recordId, string operation, string? callerToken,
+        CancellationToken ct)
+    {
+        var snapshot = await authorizationService.GetCallerRecordAccessAsync(userId, entitySetName, recordId, callerToken, ct);
+        return OperationAccessPolicy.HasRequiredRights(snapshot.AccessRights, operation);
+    }
+
     /// <summary>Returns <c>null</c> when allowed, otherwise the deny reason code.</summary>
     private async Task<string?> EvaluateAsync(
         FinanceAuthorizationCheck check, string userId, string? callerToken, HttpContext httpContext, ILogger? logger,
@@ -578,10 +593,8 @@ public class FinanceAuthorizationFilter : IEndpointFilter
 
             case FinanceCheckPath.Record:
             {
-                var snapshot = await _authorizationService.GetCallerRecordAccessAsync(
-                    userId, check.EntitySetName, check.RecordId, callerToken, ct);
-
-                return OperationAccessPolicy.HasRequiredRights(snapshot.AccessRights, check.Operation)
+                return await CallerHoldsRightsAsync(
+                    _authorizationService, userId, check.EntitySetName, check.RecordId, check.Operation, callerToken, ct)
                     ? null
                     : InsufficientRightsReasonCode;
             }

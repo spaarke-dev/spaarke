@@ -88,6 +88,9 @@ internal sealed class ApprovalWorld
     public readonly List<(Guid SignalId, Guid RecordId, SignalAutomatedCloseOutcome Outcome)> Closes = [];
     public readonly Dictionary<Guid, Guid> ClosedBy = new();
 
+    /// <summary>The user each close was asked to name as the decider (the writer's <c>decidedByUserId</c>), in call order.</summary>
+    public readonly List<Guid?> CloseDeciders = [];
+
     /// <summary>A Signal whose next close fails once: ChangedSinceRead is answered, any other value throws a timeout (recorded as that value).</summary>
     public readonly Dictionary<Guid, SignalAutomatedCloseOutcome> CloseFailsOnce = new();
 
@@ -96,6 +99,9 @@ internal sealed class ApprovalWorld
 
     /// <summary>The 014 transition commits and THEN throws (a timeout after the commit).</summary>
     public bool TransitionThrowsAfterCommit { get; set; }
+
+    /// <summary>101 fix round, part 3: a fault chosen by a transaction's requests (null: none), checked before the keyed <c>tx:</c> faults.</summary>
+    public Func<IReadOnlyList<OrganizationRequest>, Exception?>? TransactionFault { get; set; }
 
     public int Transitions;
     private long _nextVersion = 100;
@@ -236,9 +242,9 @@ internal sealed class ApprovalWorld
         Records.Setup(r => r.UpdateExistingRecordFieldsAsync("sprk_billingevent", It.IsAny<Guid>(), It.IsAny<Dictionary<string, object?>>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
 
-        // 014: the status moves only from In Review; a repeat is AlreadyInTarget.
-        Lifecycle.Setup(l => l.TransitionAsync(It.IsAny<Guid>(), InvoiceLifecycleStatus.Approved, It.IsAny<CancellationToken>()))
-            .Returns((Guid id, InvoiceLifecycleStatus _, CancellationToken _) =>
+        // 014: the status moves only from In Review; a repeat is AlreadyInTarget. Task 104: the same for Rejected and Returned to Firm.
+        Lifecycle.Setup(l => l.TransitionAsync(It.IsAny<Guid>(), It.IsAny<InvoiceLifecycleStatus>(), It.IsAny<CancellationToken>()))
+            .Returns((Guid id, InvoiceLifecycleStatus target, CancellationToken _) =>
             {
                 Interlocked.Increment(ref Transitions);
                 if (TakeFault("transition") is { } before)
@@ -246,21 +252,22 @@ internal sealed class ApprovalWorld
                     return Task.FromException<InvoiceTransitionResult>(before);
                 }
 
+                var targetCode = InvoiceStatusCodes.StatusCodeOf(target);
                 lock (Gate)
                 {
                     var invoice = Rows[("sprk_invoice", id)];
                     var status = invoice.GetAttributeValue<OptionSetValue>("statuscode").Value;
-                    if (status == InvoiceStatusCodes.Approved)
+                    if (status == targetCode)
                     {
-                        return Task.FromResult(new InvoiceTransitionResult(InvoiceTransitionOutcome.AlreadyInTarget, InvoiceLifecycleStatus.Approved, InvoiceLifecycleStatus.Approved, null));
+                        return Task.FromResult(new InvoiceTransitionResult(InvoiceTransitionOutcome.AlreadyInTarget, target, target, null));
                     }
 
                     if (status != InvoiceStatusCodes.InReview)
                     {
-                        return Task.FromResult(new InvoiceTransitionResult(InvoiceTransitionOutcome.Refused, InvoiceLifecycleStatus.Approved, null, "invoice-lifecycle.transition-not-allowed"));
+                        return Task.FromResult(new InvoiceTransitionResult(InvoiceTransitionOutcome.Refused, target, null, "invoice-lifecycle.transition-not-allowed"));
                     }
 
-                    invoice["statuscode"] = new OptionSetValue(InvoiceStatusCodes.Approved);
+                    invoice["statuscode"] = new OptionSetValue(targetCode);
                     WriteLog.Add("transition");
                 }
 
@@ -270,7 +277,7 @@ internal sealed class ApprovalWorld
                     return Task.FromException<InvoiceTransitionResult>(new TimeoutException("the commit landed, the answer did not"));
                 }
 
-                return Task.FromResult(new InvoiceTransitionResult(InvoiceTransitionOutcome.Transitioned, InvoiceLifecycleStatus.Approved, InvoiceLifecycleStatus.InReview, null));
+                return Task.FromResult(new InvoiceTransitionResult(InvoiceTransitionOutcome.Transitioned, target, InvoiceLifecycleStatus.InReview, null));
             });
     }
 
@@ -344,6 +351,27 @@ internal sealed class ApprovalWorld
         return id;
     }
 
+    /// <summary>Task 104: an Open Signal on a LINE of the invoice (a reject or return resolves the lines' Signals too, D-122).</summary>
+    public Guid AddLineSignal(Guid lineId, string policyCode = "EB-RATE", int status = SignalWriter.SignalStatusOpen, DateTime? createdOn = null)
+    {
+        var id = Guid.NewGuid();
+        var lookup = SignalWriter.RegardingLookupByEntity["sprk_billingevent"];
+        Put(new Entity("sprk_signal", id)
+        {
+            ["sprk_dedupekey"] = SignalWriter.BuildDedupeKey(policyCode, "sprk_billingevent", lineId.ToString("D"), 1),
+            ["sprk_signalstatus"] = new OptionSetValue(status),
+            ["sprk_regardingrecordid"] = lineId.ToString("D"),
+            [lookup] = new EntityReference("sprk_billingevent", lineId),
+            ["createdon"] = createdOn ?? Now.UtcDateTime.AddHours(-1),
+        });
+        H.Rows[("sprk_signal", id)] = new Entity("sprk_signal", id)
+        {
+            ["sprk_regardingrecordid"] = lineId.ToString("D"),
+            [lookup] = new EntityReference("sprk_billingevent", lineId),
+        };
+        return id;
+    }
+
     public int SignalStatus(Guid signalId) => Row("sprk_signal", signalId).GetAttributeValue<OptionSetValue>("sprk_signalstatus").Value;
 
     /// <summary>The app-identity close as the Signal writer behaves: Open/Acknowledged → Resolved Acted by the record; a repeat by the same
@@ -354,6 +382,7 @@ internal sealed class ApprovalWorld
         lock (Gate)
         {
             SignalAutomatedCloseOutcome outcome;
+            CloseDeciders.Add(decidedBy);
             if (CloseFailsOnce.Remove(signalId, out var failure))
             {
                 Closes.Add((signalId, recordId, failure));
@@ -405,7 +434,10 @@ internal sealed class ApprovalWorld
 
     public int InvoiceStatus => Invoice.GetAttributeValue<OptionSetValue>("statuscode").Value;
 
-    public List<Entity> ApproveRecords => H.Created.Where(r => r.GetAttributeValue<string>("sprk_actioncode") == "approve-invoice").ToList();
+    public List<Entity> ApproveRecords => RecordsOf("approve-invoice");
+
+    /// <summary>Task 104: the Decision Records written for an action code.</summary>
+    public List<Entity> RecordsOf(string actionCode) => H.Created.Where(r => r.GetAttributeValue<string>("sprk_actioncode") == actionCode).ToList();
 
     public List<Entity> Corrections
     {
@@ -465,6 +497,19 @@ internal sealed class ApprovalWorld
     public InvoiceApprovalService Service(Func<InvoiceContextService.InvoiceCaller, Guid, CancellationToken, Task<bool>>? canDecide = null) => new(
         Entities.Object, Resolver(), LineService(), Totals(), Lifecycle.Object, Recorder(), Locks, CallerIdentity.Object, CoreAncestors(), Probe.Object,
         CloseAsync, canDecide ?? ((_, _, _) => Task.FromResult(CanDecide)), Log, Clock);
+
+    public readonly ApprovalListLogger<InvoiceRejectReturnService> RejectReturnLog = new();
+
+    /// <summary>Task 104: the reject / return service over this world (the same resolver, recorder, locks, identity and close as approve).</summary>
+    public InvoiceRejectReturnService RejectReturnService() => new(
+        Entities.Object, Resolver(), Lifecycle.Object, Recorder(), Locks, CallerIdentity.Object, CoreAncestors(), Probe.Object,
+        CloseAsync, RejectReturnLog, Clock);
+
+    public Task<InvoiceDecisionResult> RejectAs(Guid user, string? reason = "Rate card not followed") =>
+        RejectReturnService().RejectAsync(InvoiceId, user, reason, CallerToken, CancellationToken.None);
+
+    public Task<InvoiceDecisionResult> ReturnAs(Guid user, string? reason = "Please correct the task codes") =>
+        RejectReturnService().ReturnAsync(InvoiceId, user, reason, CallerToken, CancellationToken.None);
 
     /// <summary>The GET as the endpoint calls it for <paramref name="user"/> (the decide right asked with the caller's own token).</summary>
     public Task<InvoiceApprovalStateDto?> GetAs(Guid? user) =>
@@ -551,6 +596,8 @@ internal sealed class ApprovalWorld
             ConditionOperator.In => condition.Values.Any(v => Same(actual, v)),
             ConditionOperator.Null => actual is null,
             ConditionOperator.NotNull => actual is not null,
+            // Task 101 B2b-2: the Signal lifecycle finds a (policy, subject)'s latest episode by the dedupe-key prefix.
+            ConditionOperator.BeginsWith => actual is string text && text.StartsWith((string)condition.Values.Single(), StringComparison.Ordinal),
             _ => throw new NotSupportedException($"Test world: {condition.Operator} is not evaluated."),
         };
     }
@@ -590,6 +637,11 @@ internal sealed class ApprovalWorld
 
     private Task Transaction(IReadOnlyList<OrganizationRequest> requests)
     {
+        if (TransactionFault?.Invoke(requests) is { } chosen)
+        {
+            return Task.FromException(chosen);
+        }
+
         var key = requests.Any(r => r is AssociateRequest or DisassociateRequest) || requests.All(r => r is UpdateRequest) ? "tx:approvers" : "tx:corrections";
         if (TakeFault(key) is { } fault)
         {

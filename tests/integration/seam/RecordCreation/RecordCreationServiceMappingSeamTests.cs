@@ -168,6 +168,11 @@ public sealed partial class RecordCreationServiceMappingSeamTests
                 if (table == "businessunit")
                     return Task.FromResult(new Entity(table, id));
 
+                // #2515: step 12's number read-back (an event has a platform autonumber, as a budget does) is not a mapping-source read
+                // either: answer it, unjournaled, with a number, so the create carries no "record_number_unassigned" warning.
+                if (table == "sprk_event" && columns.SequenceEqual(["sprk_eventnumber"]))
+                    return Task.FromResult(new Entity(table, id) { ["sprk_eventnumber"] = "EVT-000001" });
+
                 _journal.Add("source-read");
                 _sourceReads.Add((table, id, columns));
                 if (!_sources.TryGetValue((table, id), out var row))

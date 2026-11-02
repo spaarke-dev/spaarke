@@ -257,6 +257,10 @@ internal static partial class RecordTableRules
             Kind = RecordTableKind.Child,
             // FR-38 (owner, 2026-10-31, before task 039): server-owned search index.
             SearchIndexed = true,
+            // #2515 (owner, 2026-11-02): EVT-{SEQNUM:6}, set on the attribute in SpaarkeMaster Entities/sprk_Event/Entity.xml, as the
+            // budget's (task 167, D-193). The platform fills it; no code sets it, and a field-mapping rule may not either.
+            MappingProtectedColumns = Columns("sprk_eventnumber"),
+            AutonumberColumn = "sprk_eventnumber",
             ForPerson = new ForPersonLookup(AssignedToDefaults.AssignedToAttribute, "contact"),
             ServerDefaults =
             [

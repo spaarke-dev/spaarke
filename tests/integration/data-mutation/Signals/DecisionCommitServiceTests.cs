@@ -2132,6 +2132,7 @@ public sealed partial class DecisionCommitServiceTests
     private static readonly Guid OtherUser = Guid.Parse("c0430000-0000-4000-8000-000000000092");
     private static readonly Guid FilingMatter = Guid.Parse("c0430000-0000-4000-8000-000000000093");
     private static readonly Guid FilingDocument = Guid.Parse("c0430000-0000-4000-8000-000000000096");
+    private static readonly Guid TypeDocument = Guid.Parse("c0430000-0000-4000-8000-000000000097");   // the sprk_recordtype_ref row for sprk_document (#2506: a lookup, as on dev)
     private static readonly Guid FilingServiceRequest = Guid.Parse("c0430000-0000-4000-8000-000000000095");
 
     /// <summary>The REAL resolver over: a personal To Do (user-owned, filed under nothing unless <paramref name="filed"/>) in the
@@ -2210,7 +2211,7 @@ public sealed partial class DecisionCommitServiceTests
                 // identity parents (not lineage) and the ADR-024 pair alone: all FILED, so the assignee never wins
                 "todo-regarding-organization" => new() { ["sprk_regardingorganization"] = new EntityReference("sprk_organization", Guid.NewGuid()) },
                 "todo-regarding-contact" => new() { ["sprk_regardingcontact"] = new EntityReference("contact", Guid.NewGuid()) },
-                "todo-pair-only" => new() { ["sprk_regardingrecordtype"] = "sprk_document", ["sprk_regardingrecordid"] = FilingDocument.ToString() },
+                "todo-pair-only" => new() { ["sprk_regardingrecordtype"] = new EntityReference("sprk_recordtype_ref", TypeDocument), ["sprk_regardingrecordid"] = FilingDocument.ToString() },
                 _ => null,
             });   // owner-confirmed K2: only a To Do filed under NOTHING is personal
         rig.Links.UsersByLink[AssigneeContact] = fallback switch

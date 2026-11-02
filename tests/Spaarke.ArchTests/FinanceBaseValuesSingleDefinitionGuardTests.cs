@@ -77,6 +77,7 @@ public class FinanceBaseValuesSingleDefinitionGuardTests
     private static readonly IReadOnlyDictionary<string, string> AmountColumnBaseline = new Dictionary<string, string>(StringComparer.Ordinal)
     {
         ["Infrastructure/DI/ExternalAccessModule.cs"] = "column allow-list for the external SPA's invoice detail; no sum",
+        ["Services/Finance/ApExportService.cs"] = "AP export (task 150): writes each invoice's own approved total as the ApprovedTotal column and sums them for the batch total (the amount payable); not a spend rollup",
         ["Services/Finance/FinanceSummaryService.cs"] = "recent-invoices listing: each invoice's own billed total, not a spend sum (DTO contract)",
         ["Services/Finance/InvoiceReviewService.cs"] = "holds the sprk_invoice column-name constants the submission persister writes (050a: it no longer writes an invoice); no sum",
         ["Services/Finance/InvoiceTotalsService.cs"] = "writes sprk_totalamount / sprk_approvedtotal (the source of the amount)",
