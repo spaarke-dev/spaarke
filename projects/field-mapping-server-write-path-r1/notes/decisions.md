@@ -677,3 +677,25 @@ missing to add. Owners and refusals are unchanged, and the service needs no chan
      - those three append-only tables stay out of repair.
    - **Task 052** must design the family cascade.
 3. **The 019 live-check rows are approved.** They are created once R3's batch is live on dev. The test rows carry the `FMSWP-019` prefix, and their ids are recorded so the owner can delete them.
+
+### 2026-11-02 — UAC-r2: a server create that files a project under a matter also writes the `sprk_Project_Matter_nn` link (new scope item, ours)
+
+- **Found by:** 019 live check B. Office quick-create project `1cccf07d-0e0a-43f9-8ea0-f40533d5d691` got its matter pair but no N:N link row. UAC-r2's census reported "1 project filed under a matter with no link row".
+- **Who writes the link today:** no BFF path writes it, now or before W2. Only the CreateMatter and CreateProject wizards do, through a client `$ref`.
+- **UAC-r2's ruling (task 195):**
+  - The pair is the only filing root. The N:N link grants nothing, and no server code reads it.
+  - The matter's Projects subgrid lists projects through the link, and the census counts "pair but no link" as drift.
+  - So a server path that files a project under a matter must also write the link. After W3 the server is its only writer.
+- **Ownership:**
+  - **Create path (ours):** `RecordCreationService` step 12, for `sprk_project` with a matter pair.
+  - **Re-file path (UAC-r2):** task 195's core, reached from the chat update tool, has the same gap. UAC-r2 fixes it.
+- **UAC-r2's rules** (they review our diff):
+  1. The link is written app-only, after the pair is written and the caller's AppendTo on the matter has passed.
+  2. It is idempotent: an existing link is not an error.
+  3. A failed link write logs a Warning and does not fail the create (still 201).
+  4. Only a matter pair gets a link.
+  5. On a re-file, the earlier matter's link stays (195 §2.3).
+  6. Tests: one link for a matter pair; none otherwise; a failed write still returns 201 and logs the Warning.
+- **Issue:** UAC-r2 files one issue for both paths once GitHub is reachable.
+- **Next on the scope path:** a design note (UAC-r2 has already reviewed it through these rules), then a spec amendment, task-create for task 043, TASK-INDEX, and owner approval.
+- **Project `1cccf07d`:** it gets its link from the backfill, or by hand after the fix. Its access needs no change.
