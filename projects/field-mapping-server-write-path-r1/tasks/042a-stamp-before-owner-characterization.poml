@@ -1,0 +1,91 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="042a" project="field-mapping-server-write-path-r1">
+  <metadata>
+    <title>Characterize the #2483 window: a create's owner ignores its derived stamp's root (tests only)</title>
+    <phase>2 W2 Unified RecordCreationService (follow-up)</phase>
+    <gate>startable on owner approval of this task (requested 2026-11-02); lands ALONE, in its own PR, before 042b</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Tests only (tags testing, integration-test), no src change; CLAUDE.md §8 TEST-MODIFYING override: code-review and adr-check run regardless.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Three tests in existing harnesses with exact setups and assertions given by design §15.6; no design judgment.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Touches only two test files; may run beside 041 (no shared file). Must merge before 042b starts.</parallel-reason>
+    <deps>none</deps>
+    <tags>testing, integration-test</tags>
+    <estimated-effort>2-3 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Add three characterization tests that pin today's wrong owner in the #2483 window (design.md §15.1, §15.6 "042a"): A1 and A2 in RouteCreatePreCreateStampTests.cs, A3 in RecordCreationServicePipelineSeamTests.PreCreateStamp.cs. Change nothing under src/. Ship them in their own PR; 042b inverts them.</prompt>
+  <role>SPAARKE platform developer, .NET 10 BFF test harnesses (data-mutation and seam), Dataverse ownership model.</role>
+  <goal>Master holds three green tests that state, in assertions, that a create filed under a team-owned intermediate of a Secure matter is owned by the intermediate's ordinary team while the reconciler would own the written row to the Secure team.</goal>
+
+  <context>
+    <background>design.md §15 (moved from the addendum 2026-11-02), §15.11 UAC-r2 review; spec FR-41; owner decision notes/decisions.md 2026-11-02 item 3 ("a characterization test of today's window, then the fix as its own change"); DI-009; #2483. Line numbers in §15 are at 4fdb0a5c99; re-grep.</background>
+    <relevant-files>
+      <file role="modify">tests/integration/data-mutation/RecordOwnership/RouteCreatePreCreateStampTests.cs (partial of SecureChildOwnershipAiToolTests; route harness, real service, StampWorld; add A1, A2)</file>
+      <file role="modify">tests/integration/seam/RecordCreation/RecordCreationServicePipelineSeamTests.PreCreateStamp.cs (add A3; copy the system-principal shape at ~:165-175 and the post-create re-derivation assertion at ~:44-62)</file>
+      <file role="canonical-reference">tests/integration/data-mutation/RecordOwnership/ChatCreatedChildStampTests.cs (~:106 ordinary control; ~:130 sharee-mirror assertion shape)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/RecordCreation/RecordCreationService.cs (~:730-777 steps 7 and 10; ResolveOwnerOverAsync ~:1030; OwnerQuestionOf ~:1074) — read only</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Dataverse/RecordOwnershipResolver.cs (ForExistingRowAsync ~:437; secure look-through ~:3715, ~:3796) — read only</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project CLAUDE.md §6 gotcha 2026-10-20">Brief line 1: `git switch -c task/fm-042a &lt;tip of work/field-mapping-server-write-path-r1&gt;` (385e060e67 when written; use the current tip), then confirm this POML exists on the branch.</constraint>
+    <constraint source="design §15.6">Scope: tests only. `git diff --stat` shows no file under src/. Only the two files to modify change, plus the task notes and TASK-INDEX.</constraint>
+    <constraint source="owner 2026-11-02">The PR carries only 042a. It is not combined with 042b or with any 041 or 019 change.</constraint>
+    <constraint source="ADR-038">KEEP paths only (tests/integration/data-mutation/**, tests/integration/seam/**); no new file under tests/unit/Sprk.Bff.Api.Tests/**; no Mock&lt;HttpMessageHandler&gt;. Names follow {Method}_{Scenario}_{ExpectedResult}.</constraint>
+    <constraint source="ADR-008 path A">No production check changes; the tests observe the existing CallerWriteAuthorization and owner decision as they are.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/field-mapping-server-write-path-r1/design.md (§15.1, §15.6, §15.11)</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/patterns/testing/unit-test-structure.md</file>
+      <file>.claude/patterns/testing/mocking-patterns.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md (I-1, I-6)</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Branch (constraint 1); declare STANDARD rigor plus code-review and adr-check (TEST-MODIFYING).</step>
+    <step order="1">A1 `RouteCreate_AnEventUnderATeamOwnedEventOfASecureMatter_IsOwnedByTheEventsOrdinaryTeam_DI009Window`: world `.WithSecureRoot("sprk_matter", SecureMatter)`; the parent Event team-owned by ChildTeam in ChildBu and filed under SecureMatter; the stamp world derives sprk_regardingmatter = SecureMatter. Comment names #2483 and says 042b inverts the test.</step>
+    <step order="2">A2 (same file): build the written row from A1's create body and ask the same resolver ForExistingRowAsync → ResolveOwnerAsync.</step>
+    <step order="3">A3 (seam file): the same world as the system principal.</step>
+    <step order="4">AC3's scratch check, never committed. Run the filtered suites; update TASK-INDEX to `✅ [done]`; record in notes/task-042a-notes.md.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If A1 does NOT reproduce the window on the current src (the create is already owned by SecureNamedTeam), STOP and escalate: the defect premise of §15.1 is false and 042b must be re-scoped.</trigger>
+    <trigger>If a test can only pass by changing a file under src/, STOP and escalate rather than changing it.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="test">tests/integration/data-mutation/RecordOwnership/RouteCreatePreCreateStampTests.cs</output>
+    <output type="test">tests/integration/seam/RecordCreation/RecordCreationServicePipelineSeamTests.PreCreateStamp.cs</output>
+    <output type="notes">projects/field-mapping-server-write-path-r1/notes/task-042a-notes.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">AC1: A1, A2 and A3 are added and pass on the current src/; `git diff --stat` against the branch base lists no path under src/.</criterion>
+    <criterion testable="true">AC2: A1 asserts all four facts: 201; `ownerid@odata.bind` = `/teams(ChildTeam)`; `sprk_RegardingMatter@odata.bind` = `/sprk_matters(SecureMatter)` in the create body; no sharee-mirror row for the new event.</criterion>
+    <criterion testable="true">AC3: A2 asserts that the reconciler's question over A1's written row resolves to SecureNamedTeam (the window's disagreement in one assertion).</criterion>
+    <criterion testable="true">AC4: A3, as the system principal, asserts an ordinary owner, no stamp in the create body, and the stamp bound by the post-create re-derivation (as the existing test at ~:44-62 asserts it).</criterion>
+    <criterion testable="true">AC5 (negative): A1 fails when ResolveOwnerOverAsync is given the derived stamp. Verified once by a local scratch edit to src that is never committed; the edit, the failing assertion and the revert are recorded in the notes.</criterion>
+    <criterion testable="true">AC6 (negative): ChatCreatedChildStampTests.cs ~:106 (the ordinary control) is unchanged and green; no existing test in the two modified files changes.</criterion>
+    <criterion testable="true">AC7: the filtered suites SecureChildOwnershipAiToolTests*, RecordCreationServicePipelineSeamTests* and ChatCreatedChildStampTests pass; code-review and adr-check results are in the notes.</criterion>
+    <criterion testable="true">Test scope: exactly the three characterizations above. Anything beyond that needs a one-line justification in the task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>Placement Justification (CLAUDE.md §10): no BFF code changes; tests only. Publish-delta and CVE step: not applicable to a tests-only PR (no src or package change); record "n/a, tests only, git diff shows no src/ path" in the notes, and run `dotnet list package --vulnerable --include-transitive` only if a test project's package reference changes (it must not).
+§11: no new surface (two existing test files gain tests).
+ADR-008 path A: cited in the PR; nothing changes.
+Added 2026-11-02 by the scope path (design §15 → UAC-r2 review → spec FR-41 → this task → TASK-INDEX → owner approval). Awaiting owner approval.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

@@ -4,7 +4,7 @@
     <title>FR-38: the search index is server-owned on every BFF write path (#2399)</title>
     <phase>2 W2 Unified RecordCreationService</phase>
     <gate>017 complete (the child-records route runs RecordCreationService step 8)</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies .cs in Sprk.Bff.Api; changes what a client may bind on create and update (security, access-adjacent: the index decides which BU's search a record lands in); adds tests at KEEP paths.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -87,7 +87,10 @@
     <output type="notes">projects/field-mapping-server-write-path-r1/notes/task-039-notes.md</output>
   </outputs>
 
-  <notes>Added 2026-10-30 by the scope procedure (design §13 → UAC-r2 review → spec FR-38 → this task → TASK-INDEX → owner approval). Release note: a client can no longer choose a record's search index; records land in their owning BU's index. Wizard cleanup is 021-029 (design §13.2 e).</notes>
+  <notes>Added 2026-10-30 by the scope procedure (design §13 → UAC-r2 review → spec FR-38 → this task → TASK-INDEX → owner approval). Release note: a client can no longer choose a record's search index; records land in their owning BU's index. Wizard cleanup is 021-029 (design §13.2 e).
+
+COMPLETED 2026-11-01: PR #2504 merged as 0e3962069b (09:50:31Z). Scope widened by the owner before start (decisions.md 2026-10-31): six tables (+ work assignment, event, invoice SearchIndexed) and both columns (sprk_ai_search_index + sprk_searchindexname); step 8 is the only writer on the create/client paths. Update paths drop through one helper, RecordTableRules.DropSearchIndexFromUpdate (inventory of 13 paths in notes/task-039-notes.md); a new ArchTest, SearchIndexDropGuardTests. Final verification: build 0/0; ArchTests 1887; filtered 6553 passed, 7 skipped, 0 failed; publish +7,832 B against a fresh master f56cf8f724 (39.10 MB); CVE none. Reviews: one Opus adversarial pass (0 BLOCKING; 6 fix-now + docs, fixed); a scoped Sonnet re-check (4 small findings, fixed); code-review + adr-check (nothing Critical, no ADR violation; 5 fix-now, fixed). UAC-r2 reviewed at d90098ade8: no blocking findings, K5 accepted. ebilling: no objection to the sprk_invoice flag. Known limits K1-K12 in the notes; filed: #2502 / DI-012 (rag/index-file names the index; owner decision); #2413 gained the 195 moves as a known instance. Not live: ships with the next batched dev BFF deploy (task 019).
+rework: fix-round-3 task 039</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>
