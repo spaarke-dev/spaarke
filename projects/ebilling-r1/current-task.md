@@ -15,7 +15,8 @@
 - Filed: #2511 (SendAsUserAsync post-send token), #2517 (Email to AP: an unknown send outcome is answered as retryable).
 
 ## Dev state
-- The dev BFF does not include #2507 or 151c. `Ebilling:Enabled` is on (owner); `StoredFileReconcileEnabled=false`. SPA-r3 runs `Set-ChildRecordCreatorPersonSchema.ps1 -Verify` (must exit 0) before its next deploy, and tells us and word-add-in.
+- The dev BFF has been on master 3740e1a105 since 2026-11-02 18:52Z (SPA-r3 deployed it; that build includes #2507). It does NOT include 151c. `Ebilling:Enabled=true`, `StoredFileReconcileEnabled=false`, `MalwareScanningEnabled=false`. Before deploying, SPA-r3 ran `Set-ChildRecordCreatorPersonSchema.ps1 -Verify`, which exited 0.
+- word-add-in now switches corrections on and bumps the add-in version. Ebilling then tests a correction against dev when asked.
 - Not on dev yet: the 151c-2 lookup and relationship, the batch form's AP emails subgrid, the ApExport code page, the 151b and 151c-1b ribbons and views, and the secure-child ribbon change.
 
 ## Open items
