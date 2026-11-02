@@ -22,7 +22,8 @@
     (nothing is changed - the script never alters an existing relationship).
 
     ESCALATION (exit 2, before any write): sprk_communication.sprk_billingexport exists but is not a lookup to sprk_billingexport; a second
-    lookup from sprk_communication to sprk_billingexport exists; or the existing relationship's cascade differs from the above.
+    lookup from sprk_communication to sprk_billingexport exists; the column is carried by a relationship with another SchemaName than
+    sprk_communication_billingexport_billingexport; or the existing relationship's cascade differs from the above.
 
     Publish is entity-scoped (PublishXml for sprk_communication only, never tenant-wide), and only when this run wrote metadata. The
     Billing Export main form's "AP emails" subgrid is Deploy-EbillingFormsViews.ps1's (Spec) and is published with sprk_billingexport
@@ -112,6 +113,12 @@ function Test-ExistingBatchLink {
     foreach ($rel in (Get-BatchRelationships)) {
         if ($rel.ReferencingAttribute -ne $Column) {
             $conflict.Add("$Table.$($rel.ReferencingAttribute) is already a second lookup to $Target (relationship $($rel.SchemaName))")
+            continue
+        }
+        if ($rel.SchemaName -ne $RelSchema) {
+            # The forms script's subgrid and the solution source name this relationship; a column carried by another one would leave the
+            # subgrid pointing at nothing. Never renamed by script.
+            $conflict.Add("$Table.$Column exists but its relationship is '$($rel.SchemaName)', not '$RelSchema' (the AP emails subgrid and the solution source use that name)")
             continue
         }
         $diff = @(Get-CascadeMismatches $rel.CascadeConfiguration)
