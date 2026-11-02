@@ -2125,6 +2125,19 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
     }
 
     /// <summary>
+    /// The signed-in user's email address as the send-as-user path reads it from the claims (v2.0 tokens carry preferred_username/email,
+    /// v1.0 tokens upn/unique_name); null when none is present. Shared with the AP export route's monitored-mailbox check (ebilling-r1 151c-1a K5)
+    /// so both read the same address.
+    /// </summary>
+    internal static string? ResolveUserEmail(System.Security.Claims.ClaimsPrincipal user) =>
+        user.FindFirst(System.Security.Claims.ClaimTypes.Email)?.Value
+        ?? user.FindFirst("preferred_username")?.Value
+        ?? user.FindFirst("email")?.Value
+        ?? user.FindFirst("upn")?.Value
+        ?? user.FindFirst(System.Security.Claims.ClaimTypes.Upn)?.Value
+        ?? user.FindFirst("unique_name")?.Value;
+
+    /// <summary>
     /// Sends an email as the authenticated user via On-Behalf-Of (OBO) flow.
     /// Skips ApprovedSenderValidator — the user sends as themselves.
     /// Uses GraphClientFactory.ForUserAsync() and calls /me/sendMail.
@@ -2173,12 +2186,7 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
         // Step 2: Resolve user email from claims (no ApprovedSenderValidator for user mode)
         // Check multiple claim types: v2.0 tokens use preferred_username/email,
         // v1.0 tokens use upn/unique_name, ClaimTypes.Email maps to xmlsoap email claim
-        var userEmail = httpContext.User.FindFirst(System.Security.Claims.ClaimTypes.Email)?.Value
-            ?? httpContext.User.FindFirst("preferred_username")?.Value
-            ?? httpContext.User.FindFirst("email")?.Value
-            ?? httpContext.User.FindFirst("upn")?.Value
-            ?? httpContext.User.FindFirst(System.Security.Claims.ClaimTypes.Upn)?.Value
-            ?? httpContext.User.FindFirst("unique_name")?.Value;
+        var userEmail = ResolveUserEmail(httpContext.User);
 
         if (string.IsNullOrWhiteSpace(userEmail))
         {

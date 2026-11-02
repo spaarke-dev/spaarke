@@ -71,6 +71,9 @@ internal sealed class ApExportRoutesHost : IAsyncDisposable
     /// <summary>The mailboxes of the receive-enabled communication accounts (task 151c-1a D2 a): a recipient among them is refused.</summary>
     public List<string> MonitoredMailboxes { get; } = [];
 
+    /// <summary>When set, the communication-account query throws it (a Dataverse throttle or fault).</summary>
+    public Exception? AccountsFault { get; set; }
+
     /// <summary>The REAL account service over a Dataverse double that answers <see cref="MonitoredMailboxes"/> (no cache entry, so it is read every time).</summary>
     public CommunicationAccountService Accounts { get; }
 
@@ -79,7 +82,9 @@ internal sealed class ApExportRoutesHost : IAsyncDisposable
         var dataverse = new Mock<ICommunicationDataverseService>();
         dataverse
             .Setup(d => d.QueryCommunicationAccountsAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .Returns((string filter, string _, CancellationToken _) => Task.FromResult(
+            .Returns((string filter, string _, CancellationToken _) => AccountsFault is { } fault
+                ? Task.FromException<Entity[]>(fault)
+                : Task.FromResult(
                 filter.Contains("sprk_receiveenabled eq true", StringComparison.Ordinal)
                     ? MonitoredMailboxes.Select(address => new Entity("sprk_communicationaccount", Guid.NewGuid())
                     {

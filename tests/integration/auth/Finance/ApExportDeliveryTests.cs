@@ -466,6 +466,74 @@ public sealed class ApExportDeliveryTests
         host.FakeMailer!.Sent.Should().ContainSingle();
     }
 
+    /// <summary>MUTATION (seeded): the lenient account query (a fault answers "no monitored mailboxes") turns this 503 into a 200 and a send.</summary>
+    [Fact(DisplayName = "151c-1a uac-r2 re-check F2 SEEDED: a fault reading the monitored mailboxes is 503 unavailable; no file is read, nothing is sent, no date is written")]
+    public async Task Email_MonitoredMailboxQueryFaults_Is503_NothingSent()
+    {
+        var (batchId, host) = await ExportedAsync();
+        await using var _ = host;
+        host.AccountsFault = new TimeoutException("Dataverse throttled the request (429)");
+        var storageCalls = host.World.Gateway.StorageCalls;
+
+        var response = await host.SendAsync(HttpMethod.Post, EmailUrl(batchId));
+
+        response.StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable);
+        (await CodeOf(response)).Should().Be(ApExportCodes.Unavailable);
+        host.FakeMailer!.Sent.Should().BeEmpty();
+        host.World.Gateway.StorageCalls.Should().Be(storageCalls, "no file is read when the recipients cannot be checked");
+        SentToApOf(host, batchId).Should().BeNull();
+    }
+
+    [Theory(DisplayName = "151c-1a K4: a +tag on either side does not hide a monitored mailbox (ap+batch@ is ap@), any case; 409 and nothing sent")]
+    [InlineData("ap+batch@example.com", "ap@example.com", null)]
+    [InlineData("AP@Example.com", "ap+intake@example.com", null)]
+    [InlineData("ap@example.com", "OPS@example.com", "ops+copy@Example.com")]
+    public async Task Email_PlusTaggedMonitoredMailbox_Is409_NothingSent(string apEmail, string monitored, string? cc)
+    {
+        var (batchId, host) = await ExportedAsync(apEmail: apEmail);
+        await using var _ = host;
+        host.MonitoredMailboxes.Add(monitored);
+
+        var response = await host.SendAsync(HttpMethod.Post, EmailUrl(batchId), body: new { cc = cc is null ? Array.Empty<string>() : new[] { cc } });
+
+        response.StatusCode.Should().Be(HttpStatusCode.Conflict);
+        (await CodeOf(response)).Should().Be(ApExportCodes.ApEmailRecipientMonitored);
+        host.FakeMailer!.Sent.Should().BeEmpty();
+        SentToApOf(host, batchId).Should().BeNull();
+    }
+
+    [Theory(DisplayName = "151c-1a K5: the sender's own mailbox (read from the claims as the send path reads it) that is monitored is 409 recipient_monitored, saying so; another sender is sent")]
+    [InlineData("preferred_username", "Finance.User@Example.com", true)]
+    [InlineData("upn", "finance.user+ap@example.com", true)]
+    [InlineData("preferred_username", "someone.else@example.com", false)]
+    public async Task Email_SendersOwnMailboxMonitored_Is409(string claim, string senderAddress, bool refused)
+    {
+        var (batchId, host) = await ExportedAsync();
+        await using var _ = host;
+        host.MonitoredMailboxes.Add("finance.user@example.com");
+        var http = new DefaultHttpContext
+        {
+            User = new System.Security.Claims.ClaimsPrincipal(new System.Security.Claims.ClaimsIdentity(
+                [new System.Security.Claims.Claim(claim, senderAddress)], "test")),
+        };
+
+        var result = await host.NewDelivery().EmailAsync(batchId, new ApExportEmailRequest(null, null), ApExportWorld.CallerSystemUser, http, CancellationToken.None);
+
+        if (refused)
+        {
+            result.Outcome.Should().Be(ApExportDeliveryOutcome.RecipientMonitored);
+            result.Code.Should().Be(ApExportCodes.ApEmailRecipientMonitored);
+            result.Detail.Should().Contain("Your own mailbox");
+            host.FakeMailer!.Sent.Should().BeEmpty();
+            SentToApOf(host, batchId).Should().BeNull();
+        }
+        else
+        {
+            result.Outcome.Should().Be(ApExportDeliveryOutcome.Done);
+            host.FakeMailer!.Sent.Should().ContainSingle();
+        }
+    }
+
     [Fact(DisplayName = "151c-1a A6: when the Sent to AP Date column cannot be read the route answers 503 BEFORE sending")]
     public async Task Email_SentToApColumnMissing_Is503_BeforeTheSend()
     {

@@ -186,12 +186,18 @@ public sealed class ApExportDeliveryService
                     "No AP export email address is set in the eBilling settings, so nothing was sent. Ask an administrator to set it.");
             }
 
-            // (2b) No recipient may be a mailbox Spaarke monitors: the inbound path would file the files again from there (D2 a).
-            if (await IsMonitoredAsync([to, .. cc], ct).ConfigureAwait(false))
+            // (2b) No recipient, and not the sender's own mailbox (K5), may be a mailbox Spaarke monitors: the inbound path would file the files
+            // again from there (D2 a). The accounts are read strictly (F2): a fault is the 503 below, never "not monitored".
+            switch (await FindMonitoredAsync([to, .. cc], CommunicationService.ResolveUserEmail(httpContext.User), ct).ConfigureAwait(false))
             {
-                _logger.LogWarning("Email to AP: batch {BatchId} not sent, the AP address or a CC is a monitored mailbox", batchId);
-                return ApExportDeliveryResult.Refused(ApExportDeliveryOutcome.RecipientMonitored, ApExportCodes.ApEmailRecipientMonitored,
-                    "The AP address or a CC is a mailbox Spaarke monitors for incoming email, so nothing was sent. Use an address that is not monitored, or download the files, deliver them another way, then use Mark Sent to AP.");
+                case MonitoredMailbox.Recipient:
+                    _logger.LogWarning("Email to AP: batch {BatchId} not sent, the AP address or a CC is a monitored mailbox", batchId);
+                    return ApExportDeliveryResult.Refused(ApExportDeliveryOutcome.RecipientMonitored, ApExportCodes.ApEmailRecipientMonitored,
+                        "The AP address or a CC is a mailbox Spaarke monitors for incoming email, so nothing was sent. Use an address that is not monitored, or download the files, deliver them another way, then use Mark Sent to AP.");
+                case MonitoredMailbox.Sender:
+                    _logger.LogWarning("Email to AP: batch {BatchId} not sent, the sender's own mailbox is a monitored mailbox", batchId);
+                    return ApExportDeliveryResult.Refused(ApExportDeliveryOutcome.RecipientMonitored, ApExportCodes.ApEmailRecipientMonitored,
+                        "Your own mailbox, which this email would be sent from, is a mailbox Spaarke monitors for incoming email, so nothing was sent. Download the files, deliver them another way, then use Mark Sent to AP.");
             }
 
             // (3) A Completed batch with every file it produced, servable.
@@ -310,14 +316,55 @@ public sealed class ApExportDeliveryService
         ApExportDeliveryResult.Refused(ApExportDeliveryOutcome.SendRefused, ApExportCodes.EmailOwnerRefused,
             "The email cannot be filed under the team that owns this batch, so nothing was sent, and trying again will not help. Download the files, deliver them another way, then use Mark Sent to AP.");
 
-    /// <summary>True when any address is a receive-enabled communication account's mailbox (case-insensitive).</summary>
-    private async Task<bool> IsMonitoredAsync(IReadOnlyList<string> addresses, CancellationToken ct)
+    private enum MonitoredMailbox
     {
-        var monitored = (await _accounts.QueryReceiveEnabledAccountsAsync(ct).ConfigureAwait(false))
-            .Select(a => a.EmailAddress?.Trim())
-            .Where(a => !string.IsNullOrEmpty(a))
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
-        return addresses.Any(a => monitored.Contains(a.Trim()));
+        None,
+        Recipient,
+        Sender,
+    }
+
+    /// <summary>
+    /// Which address, if any, is a receive-enabled communication account's mailbox: a recipient first, then the sender's own address (K5).
+    /// Compared by <see cref="MailboxKey"/> (K4). The accounts are read with the STRICT query (F2): a Dataverse fault throws, so the route answers
+    /// 503 and sends nothing, never "not monitored". Aliases, distribution lists and Inbox-rule forwards are not caught here.
+    /// </summary>
+    private async Task<MonitoredMailbox> FindMonitoredAsync(IReadOnlyList<string> recipients, string? sender, CancellationToken ct)
+    {
+        var monitored = (await _accounts.QueryReceiveEnabledAccountsStrictAsync(ct).ConfigureAwait(false))
+            .Select(a => MailboxKey(a.EmailAddress))
+            .OfType<string>()
+            .ToHashSet(StringComparer.Ordinal);
+        if (recipients.Any(a => MailboxKey(a) is { } key && monitored.Contains(key)))
+        {
+            return MonitoredMailbox.Recipient;
+        }
+
+        return MailboxKey(sender) is { } own && monitored.Contains(own) ? MonitoredMailbox.Sender : MonitoredMailbox.None;
+    }
+
+    /// <summary>
+    /// The address compared against monitored mailboxes (K4): trimmed, lower-case, with any <c>+tag</c> removed from the local part
+    /// (<c>AP+Batch@X.com</c> is <c>ap@x.com</c>). Null for an empty value.
+    /// </summary>
+    internal static string? MailboxKey(string? address)
+    {
+        var value = address?.Trim();
+        if (string.IsNullOrEmpty(value))
+        {
+            return null;
+        }
+
+        var at = value.LastIndexOf('@');
+        if (at > 0)
+        {
+            var plus = value.IndexOf('+', 0, at);
+            if (plus > 0)
+            {
+                value = value[..plus] + value[at..];
+            }
+        }
+
+        return value.ToLowerInvariant();
     }
 
     /// <summary>The CC addresses, trimmed and de-duplicated; <paramref name="problem"/> says what is wrong with the request, if anything.</summary>
