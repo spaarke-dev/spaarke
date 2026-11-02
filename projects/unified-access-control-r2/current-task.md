@@ -27,7 +27,7 @@
 
 ## Gates and peers
 - **R3:** released the BU1 move and confirmed step 5 from its side, including the Identity Link Writers field permissions. No open asks.
-- **ebilling:** 151c-2 (`7d493b53db..e1a8be6223`) verdict SENT 2026-11-02: passes the access gate, on one condition, F1 fixed before merge. F1: `secure_child_ribbon.js` (both copies, lines 112-150) shows the custom New Message on the batch subgrid, because a host that is not a root gives `newChildAvailable` true; Compose then refuses with 403. Fix: a `NO_NEW_HOSTS` list, made in their branch. K1-K5 accepted (re-pointing the link changes no access; the retry matches on message text; gaps in the ArchTest; optional check that the two batch ids match). Waiting for the F1 diff to re-check.
+- **ebilling:** 151c-2 CLEARED 2026-11-02. F1 fixed in 9511a1e17c (`NO_NEW_HOSTS`; both copies identical), K5 409 check in 2abe0f0cbf; re-check OK at tip 1eb91e79de; ebilling merges into work. K1-K4 accepted. No open asks.
 - **Field-mapping:** #2504 reviewed OK. 039/040 diffs to come.
 
 ## Parked (verify state)
