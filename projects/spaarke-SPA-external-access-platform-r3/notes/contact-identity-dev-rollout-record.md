@@ -139,3 +139,17 @@
   - The census findings are the expected ones for the users still in the root.
   - 6 `ReadProofAsync` exceptions come from the identity-link reconciler's **spaarke-acme** pass ("not a member of the organization", tracked as #2163). They started at 13:40:02Z, before this deploy. The spaarkedev1 pass reads 11 of 11.
 - uac-r2's owner-approved move of the dev users to BU1 waits for R3's "done" on the CMRCL-479772 re-check.
+
+## 14. Dev users and BFF app users moved to Spaarke Business Unit 1 (2026-11-01/02, uac-r2, owner-approved)
+
+- uac-r2 ran the move step by step, with the owner's go for each.
+  - **Product hand-over:** 263 configuration rows, including grid configurations, were reassigned to the root default team.
+  - **Steps 1–2:** 11 internal users moved to BU1, with copies of their roles.
+  - **Step 4:** 684 customer rows were reassigned to the BU1 team, and 119 children followed through the reconciler. These include all 32 `sprk_externalrecordaccess` rows, none under a secure root: 17 under roots that moved in this step, 15 under records already in BU1. Also 8 contacts.
+  - **Step 5:** both BFF app users moved to BU1.
+- **mi-bff-api-dev:** roles before [System Administrator], after [System Administrator @BU1]; no-role gap 6.8 s.
+- **SDAP-BFF-SPE-API:** roles before [Delegate, Spaarke Ontology Service, System Administrator], after the same three @BU1; no-role gap 4.0 s.
+- Both app users' field security profiles are unchanged by membership. R3 re-read `sprk_externaltenantid`'s field permissions after step 5: both BFF app ids are still in "Spaarke Identity Link Writers" (canread 4). /healthz and /healthz/dataverse are 200.
+- `ExternalAccess:CustomerBusinessUnitId` was already BU1 (owner Q8), so nothing changed.
+- External effect expected: none. Contact access comes from grants, and the BFF reads grants and contacts app-only.
+- Remaining: step 3 (the administrator's account) last. The owner restores System Administrator in the Power Platform admin center.
