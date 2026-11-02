@@ -567,3 +567,15 @@ missing to add. Owners and refusals are unchanged, and the service needs no chan
 
 - **Owner:** "we can leave off invitations from chats; this functionality may change so we do not need to extend the chat functionality at this time."
 - **Effect:** the chat Owned create keeps `Grantor = AssignedAccessGrantor.None` (task 017). The external "Assigned To" grants and shares are made, but no invitation is sent and no `sprk_grantedby` is recorded. No change is planned, and the open owner item is closed.
+
+### 2026-11-02 — Owner accepts the three recommendations (in this session)
+
+1. **#2502, index routing.** Plan one follow-up task through the scope path (design → UAC-r2 review → spec amendment → task → TASK-INDEX → owner approval). The task covers:
+   - `rag/index-file` ignores a caller's `searchIndexName` and uses the configured files index;
+   - the per-BU record routing is retired: step 8 stops copying the business unit's index, the indexer stops reading the record and BU columns, and the wizards stop sending them (W3);
+   - existing column values stay;
+   - the `sprk_aisearchindex` catalog table stays (provisioning seeds it; the picker and the allow-list read it).
+
+   Facts behind it (checked on dev 2026-11-01): every business unit that has an index names `spaarke-files-index`, which equals `KnowledgeIndexName`; customer business units have none; each customer has its own search service with the fixed index names.
+2. **Chat invitations.** None (recorded 2026-11-01).
+3. **#2483, change 1 accepted.** In the target model, every record is owned by the customer's main business unit or by Secure Record, so owning an ordinary record by its root's business unit changes nothing there. It matches the reconciler and lets the fix close the 2–4 minute Make Secure window. The fix proceeds as UAC-r2 planned: a characterization test of today's window, then the fix (derive the stamp before step 7) as its own change, reviewed by UAC-r2. It also takes the scope path, as a task in this project.
