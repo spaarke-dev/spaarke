@@ -63,12 +63,12 @@ Request body (optional; an empty body is the same as `{}`):
 | 404 | (uniform body, `reasonCode` `sdap.access.deny.record_unavailable`) | No Read or no Write on the batch, unknown batch, step-0 refusal, rights-read fault |
 | 409 | `ebilling.export.ap_email_not_configured` | No active settings row or an empty column ("not set"); or a value that is not a single valid address (its own detail, and a Warning is logged) |
 | 409 | `ebilling.export.file_not_available` | Batch not Completed, a requested format has no servable file, a file row is missing/removed or its scan verdict is pending |
-| 409 | `ebilling.export.ap_email_recipient_monitored` | The AP address or a CC is a receive-enabled (monitored) mailbox, compared case-insensitively. Nothing is read or sent |
+| 409 | `ebilling.export.ap_email_recipient_monitored` | The AP address or a CC is a receive-enabled (monitored) mailbox, or the sender's own address is (its own detail), compared case-insensitively with any `+tag` removed. Nothing is read or sent |
 | 409 | `ebilling.export.attachments_too_large` | Files over this route's 3 MB raw budget (`ApExportDeliveryService.MaxEmailAttachmentBytes`), checked as they are read; or the send path's own limit; or Graph `GRAPH_SEND_FAILED` 413 |
 | 409 | `ebilling.export.email_owner_refused` | The batch is not team-owned, the resolver refused, or its answer is not the batch's owning team. Not a retry |
 | 409 | `ebilling.export.email_send_refused` | Any other send-path refusal below 500 (for example 400 `USER_EMAIL_NOT_FOUND`, a Graph 403 for a user without a mailbox). Not a retry: download the files and use Mark Sent to AP |
 | 503 | `ebilling.export.email_send_failed` | The send faulted with a 5xx or a transient failure. No date is set; retry |
-| 503 | `ebilling.export.unavailable` | A Dataverse or file-store fault before the send |
+| 503 | `ebilling.export.unavailable` | A Dataverse or file-store fault before the send, including a fault reading the monitored mailboxes |
 | 503 | `ebilling.disabled` | Kill switch (an unauthorized caller still gets the 404) |
 
 What is sent: To = the settings AP address; Cc; subject `AP export {batch name}: {N invoices}, {total} {currency}`; a plain-text body with the batch name, invoice count, total and currency (several currencies read "mixed currencies: CAD, USD"), the files attached, and the optional message; both stored files attached as `ap-export-{batchId}.csv` (`text/csv`) and `ap-export-{batchId}.json` (`application/json`), byte for byte as stored; sent as the signed-in user; internal only; not archived.
@@ -204,3 +204,19 @@ The sent communication carries **no** link to the batch: no `Associations`, no `
 | A7 | `sprk_senttoapdate` disabled on the batch form (forms script spec and both form XML files) | (form) |
 | A8 | Enrichment skipped whenever `OwnerFollows` is set | `OwnerFollows_IsNeverEnriched_EvenWithoutSkipEnrichment` |
 | A9 | The JSON must-not-fire test's mutation comment corrected (an internal property is not bound either) | (comment) |
+
+## Fix round 2 (uac-r2 access re-check)
+
+| Item | Change | Test (seeded or fail-before proof) |
+|---|---|---|
+| F2 | The monitored-mailbox check fails closed. `CommunicationAccountService.QueryReceiveEnabledAccountsStrictAsync` throws on a Dataverse fault (a cache fault still falls back to Dataverse); the lenient `QueryReceiveEnabledAccountsAsync` and its callers are unchanged. The delivery service uses the strict one, so a throttle or fault answers 503 `ebilling.export.unavailable` before any file is read, anything is sent or the date is written | `Email_MonitoredMailboxQueryFaults_Is503_NothingSent`. Seeded: strict call swapped back to the lenient one, red (200 instead of 503); restored, `cmp`-identical |
+| F4 | `IsVerifiedServerSendAsync` digests every listed file, not only those that came with bytes. If any lacks bytes, the whole attachments collection is fetched from Graph (as the all-missing branch already did) and every file is passed to the digest. A file still without bytes, null or empty, makes the digest null and the marker is not honoured (`ServerSendMarker.AttachmentDigest` now treats empty bytes like null, on both sides: an empty file signs no marker). A non-file attachment is still false | `Inbound_HonoursOnlyAVerifiedMarker` case "marker plus an extra file without inline bytes" (re-fetch also returns it without bytes): full processing. Seeded: the processor at the previous commit, red on that case only; restored, `cmp`-identical. Empty bytes: `NoKeyOrNoFiles_SignsNothing` red with the previous `ServerSendMarker`, green after |
+| K4 | Recipients and monitored mailboxes are compared by `ApExportDeliveryService.MailboxKey`: trimmed, lower-case, any `+tag` removed from the local part, on both sides | `Email_PlusTaggedMonitoredMailbox_Is409_NothingSent` (AP `ap+batch@`, monitored `ap+intake@`, CC `ops+copy@`). Fail-before: red with the previous delivery service |
+| K5 | The sender's own address joins the check. It is read from the claims by `CommunicationService.ResolveUserEmail`, the same chain the send-as-user path uses (extracted from `SendAsUserAsync`, which now calls it; no Graph call). A monitored sender is 409 `ap_email_recipient_monitored` with a detail that names the sender's own mailbox | `Email_SendersOwnMailboxMonitored_Is409` (two claim kinds, one `+tag`; control: another sender is sent). Fail-before: red with the previous delivery service |
+
+**What the recipient check does not catch (K4, stated plainly).** It compares addresses only. An alias of a monitored mailbox (a second SMTP address on the same mailbox), a distribution list or group that contains a monitored mailbox, an Inbox rule or forward that sends the mail on to a monitored mailbox, and a sender whose claim address differs from the mailbox's primary address are not detected. For those, the signed marker (D2 b) is the guard.
+
+**Known limits recorded, not changed in this round:**
+- **K3, shared signing key.** The marker and the tracking footer use the same HMAC key; they are kept apart only by the record-type prefix (`spaarke-server-send:` and a digest, against an entity name). Nobody outside the server can mint either token today.
+- **K6, owner race.** The batch's owning team is read before the send and the resolver is asked at send time. A re-own of the batch between the two refuses the send (owner mismatch); a re-own after the send leaves the email with the earlier team. Not closed.
+- **K7, no key, no marker.** When the signing key is not configured no marker is sent, so the inbound path processes the email as before; only the recipient check applies.
