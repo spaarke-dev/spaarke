@@ -167,3 +167,11 @@
 - **Readback** (18:53:42Z): ProductVersion `+3740e1a105…`; /healthz 200, /healthz/dataverse 200, anonymous /api/me 401. Settings are unchanged (225, ebilling reconcile off).
 - **After-notices** sent to uac-r2 (gate), ebilling, field-mapping (its #2519 chat-tool re-seed and checks A–C run in its own session), ontology and word-add-in.
 - **Rollback:** redeploy `fcf01480f4`, or restore the snapshot above.
+- **UAC gate (uac-r2, 18:52:25Z–19:22:25Z): PASS, no reason to roll back.**
+  - 30 requests, 0 5xx. The 7 failures are anonymous 401s.
+  - External split: 0 external requests in the window; the 7-day baseline is unchanged. The 097f note path has had no live traffic yet.
+  - Finance: 0 requests.
+  - Ownership: no refusals and no reassign or put-back writes. FOLLOW-PARENT and SECURE-INHERIT show unsecured, refused and failed all 0.
+  - SECURE-CENSUS: findings=0 at 19:00Z and 19:15Z.
+  - Exceptions: none new (#2292, the known acme readability read, and the AI catalog drift check, all as before).
+  - Information only, which uac-r2 is following up with field-mapping: from 19:05Z the ROOT-OWNER census reports 1 project filed under a matter with no link row, up from 0. It coincides with a new project (61 → 62), probably field-mapping's quick-create check. It has no effect on ownership or read access.
