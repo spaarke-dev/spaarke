@@ -1371,13 +1371,55 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
     private async Task<Guid> CreatePreparedRecordAsync(DataverseEntity communication, string correlationId, CancellationToken ct)
     {
         communication["sprk_sentat"] = DateTimeOffset.UtcNow.DateTime;
-        var recordId = await _genericEntityService.CreateAsync(communication, ct);
+        Guid recordId;
+        try
+        {
+            recordId = await _genericEntityService.CreateAsync(communication, ct);
+        }
+        catch (Exception ex) when (communication.Contains(ServerSendOptions.BillingExportColumn)
+                                   && IsMissingColumnFault(ex, ServerSendOptions.BillingExportColumn))
+        {
+            // Ebilling-r1 task 151c-2: the BFF can be deployed before the batch-link column exists. The email has already been sent, so it
+            // must still be recorded: create it once more without the lookup. Only a fault that names the column triggers this, and only a
+            // row that carries it, so every other send and every other fault is unchanged.
+            _logger.LogWarning(
+                ex,
+                "Communication create failed because {Column} does not exist yet; recording the email without the batch link | CorrelationId: {CorrelationId}",
+                ServerSendOptions.BillingExportColumn, correlationId);
+            communication.Attributes.Remove(ServerSendOptions.BillingExportColumn);
+            recordId = await _genericEntityService.CreateAsync(communication, ct);
+        }
 
         _logger.LogInformation(
             "Dataverse communication record created | Id: {RecordId}, Type: {Type}, CorrelationId: {CorrelationId}",
             recordId, communication.GetAttributeValue<OptionSetValue>("sprk_communicationtype")?.Value, correlationId);
 
         return recordId;
+    }
+
+    /// <summary>
+    /// True when <paramref name="ex"/> (or an inner exception) is Dataverse refusing a write because <paramref name="column"/> does not
+    /// exist on the table: the message names the column and says the table has no such attribute / property. A fault that merely mentions
+    /// the column (a privilege, a bad value) is not one. Task 151c-2.
+    /// </summary>
+    internal static bool IsMissingColumnFault(Exception? ex, string column)
+    {
+        for (var e = ex; e is not null; e = e.InnerException)
+        {
+            var message = e.Message;
+            if (message.Contains(column, StringComparison.OrdinalIgnoreCase)
+                && (message.Contains("doesn't contain attribute", StringComparison.OrdinalIgnoreCase)
+                    || message.Contains("does not contain attribute", StringComparison.OrdinalIgnoreCase)
+                    || message.Contains("does not contain an attribute", StringComparison.OrdinalIgnoreCase)
+                    || message.Contains("Could not find a property named", StringComparison.OrdinalIgnoreCase)
+                    || message.Contains("Invalid property", StringComparison.OrdinalIgnoreCase)
+                    || message.Contains("does not exist on type", StringComparison.OrdinalIgnoreCase)))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /// <summary>
@@ -2524,6 +2566,14 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
         // now on the row (task 146): its parents' team; unfiled keeps its creator (E1). A refusal is a 409 BEFORE the send.
         var owner = await ResolveOutboundOwnerAsync(communication, request, correlationId, ct, requestedBy);
         owner.ApplyTo(communication);
+
+        // Ebilling-r1 task 151c-2: a server send names the AP export batch it was sent for. Written LAST, after the owner is decided, in the
+        // same create as the row. A plain reference, not a filing: the owner resolver never sees it (it is not an ownership parent), and no
+        // other send carries it.
+        if (request.ServerSend?.BillingExportId is { } batchId && batchId != Guid.Empty)
+        {
+            communication[ServerSendOptions.BillingExportColumn] = new EntityReference(ServerSendOptions.BillingExportEntity, batchId);
+        }
 
         return communication;
     }

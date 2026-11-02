@@ -19,6 +19,11 @@ namespace Sprk.Bff.Api.Services.Communication.Models;
 /// indexing, triage, proposals, and no category routing, which would re-assign the owner above);</item>
 /// <item>sends the signed <see cref="ServerSendMarker"/> header when there are <see cref="Attachments"/> and a signing key, so the inbound
 /// mailbox path does not file the attachments or archive the message again.</item>
+/// <item>writes <see cref="BillingExportId"/>, when set, as the new row's <see cref="BillingExportColumn"/> lookup in the same create as
+/// the row (ebilling-r1 task 151c-2, EB-D-182 (2) as narrowed by the owner and unified-access-control-r2). It is a plain reference, not a
+/// filing: no <c>sprk_regarding*</c> column, no association, never read by the family, lineage or ownership code, so it cannot move who owns
+/// or can read the email. A BFF deployed before the column exists records the email without it (<see cref="CommunicationService"/> retries
+/// the create once, without the lookup, when the fault names the column).</item>
 /// </list>
 /// <para>Only the send-as-user email path accepts the option, and not with <c>ArchiveToSpe</c>: any other send that carries it is refused
 /// before anything is sent (the archive would copy the attachments into the unit's container).</para>
@@ -38,6 +43,19 @@ internal sealed record ServerSendOptions
 
     /// <summary>True: the send is not enriched.</summary>
     public bool SkipEnrichment { get; init; }
+
+    /// <summary>
+    /// The AP export batch (<c>sprk_billingexport</c>) this email was sent for. Written as the <see cref="BillingExportColumn"/> lookup of
+    /// the created <c>sprk_communication</c>. Null: nothing is written. Never JSON-bound (the whole option is internal and
+    /// <c>[JsonIgnore]</c>).
+    /// </summary>
+    public Guid? BillingExportId { get; init; }
+
+    /// <summary>The <c>sprk_communication</c> lookup column to the AP export batch (task 151c-2): a plain reference, not a filing.</summary>
+    public const string BillingExportColumn = "sprk_billingexport";
+
+    /// <summary>The table <see cref="BillingExportColumn"/> points at.</summary>
+    public const string BillingExportEntity = "sprk_billingexport";
 }
 
 /// <summary>One file attached from memory by server code.</summary>
