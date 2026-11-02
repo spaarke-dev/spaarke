@@ -153,3 +153,17 @@
 - `ExternalAccess:CustomerBusinessUnitId` was already BU1 (owner Q8), so nothing changed.
 - External effect expected: none. Contact access comes from grants, and the BFF reads grants and contacts app-only.
 - Step 3 (the administrator's own account) was **not run**. Dataverse refuses a self-move unless a role-keeping org setting is on, and the owner chose to leave that account in the root with all 5 roles. The move is closed: every other interactive user and both BFF app users are in BU1, and the customer families and the 32 grant rows are on the BU1 team.
+
+## 15. Dev BFF `3740e1a105` (2026-11-02, deployed by R3; batch for field-mapping and ebilling)
+
+- **Content:** master at #2520. Field-mapping 039 (0e3962069b), #2514 (a50ada7330), #2519 (961c6846af), #2520; ebilling #2507 (0878ca36ac) and #2501/#2503/#2510/#2512; uac #2509; #2516. 57 src/server files changed from `fcf01480f4`. The only external-surface change is ebilling 097f in `ExternalInvoiceSubmissionEndpoints.cs`: the replaced-by-correction note, under the same visibility rule, failing closed. #2450 is present, and there is no non-comment `sprk_invoicestatus`. Router green.
+- **Go:** the owner in R3's session ("go bff deploy" of 3740e1a105).
+- **OKs:** ontology (a9), uac-r2 (38), field-mapping (5c) and ebilling (7b); provisioning standing. Word-add-in's request expired undelivered (a session permission-mode hold), and the owner's go went ahead without it.
+- **Pre-deploy checks:**
+  - Settings: 225; both write switches true; ebilling's six keys present.
+  - `Set-ChildRecordCreatorPersonSchema.ps1 -Verify` exited 0 (272 OK). ebilling's own four `-Verify` checks also exited 0 (its report).
+  - phaseA: live `fcf01480f4`, healthz 200. Rollback snapshot `deploy/rollback/wwwroot-20261102T185123Z` (197 files).
+- **Deploy:** `Deploy-BffApi.ps1 -Environment dev` from a detached worktree at `3740e1a105`. Package 39.29 MB. Received at 18:52:25Z. The 4 critical files match by SHA-256; health and CORS checks passed.
+- **Readback** (18:53:42Z): ProductVersion `+3740e1a105…`; /healthz 200, /healthz/dataverse 200, anonymous /api/me 401. Settings are unchanged (225, ebilling reconcile off).
+- **After-notices** sent to uac-r2 (gate), ebilling, field-mapping (its #2519 chat-tool re-seed and checks A–C run in its own session), ontology and word-add-in.
+- **Rollback:** redeploy `fcf01480f4`, or restore the snapshot above.
