@@ -69,8 +69,22 @@ The W2 total stays far below the 55 MB review line. 039 measured 39.10 MB at f56
 
 **Review status:** two full passes, with no F-class finding open once #2520 merges. Still open: P2-2 (live check B) and the live checks themselves.
 
-## Live checks A–C and App Insights
+## Live checks A–C and App Insights (dev BFF 3740e1a105, live 18:52Z on 2026-11-02)
 
-Pending. Two things must happen first:
-- dev carries 0e3962069b (039) and the P1-1 fix, through R3's batch;
-- the owner gives an OK in this session for the `FMSWP-019` test-row creates.
+Full detail is in `notes/task-019-live-checks.md`. The parent record is MAT-000032 (ordinary), owned by the BU default team "Spaarke Business Unit 1".
+
+| Check | Result |
+|---|---|
+| A: child-records route, Event | **PASS.** The owner is the BU default team. The I-1 stamp is set, `EVT-000001` was assigned, and the search index is the BU's. **Deviation:** the "mapped fields" clause does not apply. The route deliberately passes no mapping until W3, where task 020 adds mapping to it, so that clause moves to 020. |
+| B: Office quick-create, Project | **PASS.** Same owner as A, the stamp is set, 6 fields were mapped, and `PRJ-000044` was assigned. The response shape is unchanged. |
+| P2-2 | Remains K, unverified. The alternate key on `sprk_projectnumber` exists and is Active. A collision was not provoked. |
+| C: chat create | **Owner action.** The handler can only be reached through the Console chat. |
+| Negative check (AppendTo) | **Owner action.** It needs a narrower user; `# UAC Child BU Test User` fits. |
+| App Insights | No 5xx after the deploy. One new exception type (`sprk_userentityassociation` "does not exist", ×10), sent to UAC-r2. Check A produced no telemetry: #2522. |
+
+Also found: the Office Project create took about 18 s, about 11 s of it on six sequential assigned-access grants (#2523).
+
+**Rows to delete later:**
+- event `fcdd4724-e243-4d37-9583-d694a8644318`;
+- project `1cccf07d-0e0a-43f9-8ea0-f40533d5d691`;
+- 6 `sprk_assignedaccess` rows, with their ids in the live-checks note.
