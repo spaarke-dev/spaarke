@@ -1,7 +1,7 @@
 # sprk_billingexport (Billing Export)
 
 > **Project**: ebilling-r1, task 023 (FR-13, FR-41, D-21, D-56)
-> **Last Updated**: 2026-10-15
+> **Last Updated**: 2026-11-01 (task 151c-1a: `sprk_senttoapdate`)
 > **Script**: `scripts/ebilling/Deploy-EbillingExportSchema.ps1` (idempotent, additive; a second run changes nothing)
 > **Solution**: `SpaarkeMaster` (unmanaged, in dev). Solution source, forms and views are synced by task 029.
 
@@ -20,6 +20,7 @@ User-owned, entity set `sprk_billingexports`, primary name `sprk_name` (text 100
 | `sprk_exportstatus` | Choice (local), no default | Generating 100000000, Completed 100000001, Failed 100000002. |
 | `sprk_mappingsnapshot` | Multiline text (1,048,576) | The field mapping used to produce the files, snapshotted per batch (FR-41): a later mapping change does not alter how a past batch is read. |
 | `sprk_failurereason` | Text (200) | Why the batch failed, when `sprk_exportstatus` is Failed. |
+| `sprk_senttoapdate` | Date and Time (user local), optional ("Sent to AP Date") | When the batch was first sent to AP (task 151c-1a, EB-D-182; `scripts/ebilling/Deploy-EbillingSentToApDateColumn.ps1`, idempotent, refuses a same-name column of another type or Date Only). Set by `POST .../email` when it first succeeds, or by `POST .../mark-sent-to-ap` for files delivered another way; empty until then; **set once, never overwritten**. No per-invoice copy. On the Billing Export main form. |
 
 The system `statecode` / `statuscode` keep their defaults (Active / Inactive) and carry no export meaning.
 

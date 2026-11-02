@@ -577,6 +577,14 @@ public sealed class ApExportAuthorizationTests
             // The routes added by task 151a take these (Mark Paid, the file download); the 150 tests never call them.
             builder.Services.AddScoped<IInvoiceLifecycleService>(_ => host.World.Lifecycle);
             builder.Services.AddScoped(_ => host.World.Files);
+            // The routes added by task 151c-1a (Email to AP, Mark Sent to AP); the 150 tests never call them.
+            builder.Services.AddScoped(_ => new ApExportDeliveryService(
+                host.World.Service, host.World.Dataverse.Service, host.World.Files, new ApExportMailer(null!),
+                new Sprk.Bff.Api.Services.Communication.CommunicationAccountService(
+                    Moq.Mock.Of<Spaarke.Dataverse.ICommunicationDataverseService>(), Moq.Mock.Of<Spaarke.Dataverse.IGenericEntityService>(),
+                    Moq.Mock.Of<Microsoft.Extensions.Caching.Distributed.IDistributedCache>(),
+                    Microsoft.Extensions.Logging.Abstractions.NullLogger<Sprk.Bff.Api.Services.Communication.CommunicationAccountService>.Instance),
+                Microsoft.Extensions.Logging.Abstractions.NullLogger<ApExportDeliveryService>.Instance));
 
             builder.WebHost.UseTestServer();
             host._app = builder.Build();
