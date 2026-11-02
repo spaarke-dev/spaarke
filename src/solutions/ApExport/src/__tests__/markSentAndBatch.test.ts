@@ -56,6 +56,12 @@ describe('markSentOutcome', () => {
     expect(unknown.message).toBe('Boom. (x.y) Nothing was changed.');
   });
 
+  it('reads the stable code from reasonCode when the server sends it there', () => {
+    const f = markSentFailure(toFailure(problem(409, null, { reasonCode: 'ebilling.export.batch_not_completed' })));
+    expect(f.message).toBe('This batch is not Completed, so it cannot be marked Sent to AP. Nothing was changed.');
+    expect(f.code).toBe('ebilling.export.batch_not_completed');
+  });
+
   it('no answer: safe to repeat, because the server never overwrites a date', () => {
     expect(markSentFailure(toFailure(new TypeError('Failed to fetch'))).retryable).toBe(true);
   });
@@ -180,6 +186,9 @@ describe('AP address read', () => {
     expect(await readApAddress(w)).toEqual({ kind: 'address', address: 'ap@example.com' });
     expect(w.retrieveMultipleRecords).toHaveBeenCalledWith('sprk_ebillingsetting', AP_ADDRESS_QUERY);
     expect(AP_ADDRESS_QUERY).toContain('statecode eq 0');
+    // The server reads the oldest active row; the page reads the same one.
+    expect(AP_ADDRESS_QUERY).toContain('$orderby=createdon asc');
+    expect(AP_ADDRESS_QUERY).toContain('$top=1');
   });
 
   it('no row, or an empty column, is "none"', async () => {

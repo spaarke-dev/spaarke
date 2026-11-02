@@ -120,7 +120,8 @@ export const AP_NOT_CONFIGURED_TEXT = `No usable AP email address is set in the 
 
 /** Turn a failed Email to AP call into one plain sentence and the next step. */
 export function emailFailure(f: ApiFailure): EmailFailureView {
-  const code = f.errorCode;
+  // Some refusals (403 caller_unresolved, ProblemDetailsHelper.Forbidden) carry their stable code in `reasonCode`.
+  const code = f.errorCode ?? f.reasonCode;
   const view = (message: string, next: NextStep): EmailFailureView => ({ message, next, code });
 
   if (f.signInFailed || f.status === 401) {
@@ -163,7 +164,7 @@ export function emailFailure(f: ApiFailure): EmailFailureView {
       return view(`The mail service refused to send the email, so nothing was sent. Do not try again. ${MANUAL}`, 'manual');
     case CODE_EMAIL_SEND_FAILED:
       return view(
-        'The mail service had a temporary problem. The email was not sent and the Sent to AP Date was not set. Try again.',
+        'The mail service had a temporary problem. The email may not have been sent, and the Sent to AP Date was not set. Check your Sent Items, then try again if it is not there.',
         'retry'
       );
     case CODE_UNAVAILABLE:
@@ -211,7 +212,7 @@ export function emailSuccess(r: EmailResponse, locale?: string, timeZone?: strin
     ...base,
     kind: 'unchanged',
     title: 'Sent to AP',
-    message: 'The email was sent again. The Sent to AP Date was already set and is unchanged.',
+    message: 'The email was sent. The Sent to AP Date was already set and is unchanged.',
     sentToApDate: date,
   };
 }
@@ -233,7 +234,63 @@ export function allowsAnotherSend(next: NextStep): boolean {
 
 export type SendResult = EmailOutcome | { kind: 'skipped'; reason: 'in_flight' | 'locked' };
 
+/** What the Email to AP step shows. Derived from the sender's last outcome, so a step that is closed and reopened (Back) keeps it. */
+export type EmailPhase =
+  | { name: 'compose' }
+  | { name: 'sending' }
+  | { name: 'sent'; sent: EmailSentView }
+  | { name: 'failed'; failure: EmailFailureView };
+
+/** The phase a step opens in: compose for a sender that has not sent, else the state its last send ended in. */
+export function phaseOf(outcome: EmailOutcome | null): EmailPhase {
+  if (!outcome) return { name: 'compose' };
+  return outcome.kind === 'sent' ? { name: 'sent', sent: outcome.sent } : { name: 'failed', failure: outcome.failure };
+}
+
+/** The sent view once Mark Sent to AP has recorded the date after an email whose date could not be recorded. */
+export function withMarkedDate(sent: EmailSentView, markedDate: string | null): EmailSentView {
+  if (sent.kind !== 'not_recorded' || !markedDate) return sent;
+  return {
+    ...sent,
+    kind: 'recorded',
+    title: 'Sent to AP',
+    message: 'The email was sent and the Sent to AP Date was recorded with Mark Sent to AP.',
+    sentToApDate: markedDate,
+  };
+}
+
+/**
+ * Whether the Mark Sent to AP section shows. It is hidden only for a date that was already held when the step opened,
+ * and once an email recorded the date; it stays after Mark Sent itself ran, so the user sees the answer.
+ */
+export function showMarkSent(dateHeldAtOpen: boolean, phase: EmailPhase): boolean {
+  if (dateHeldAtOpen || phase.name === 'sending') return false;
+  return !(phase.name === 'sent' && phase.sent.kind !== 'not_recorded');
+}
+
+/** A caution above Send: the batch already has a date, or the read that would tell failed. */
+export type ResendCaution = 'held' | 'unknown' | null;
+
+export const RESEND_HELD_TITLE = 'This batch already has a Sent to AP Date';
+export const RESEND_HELD_TEXT = 'Sending again emails AP another time; the Sent to AP Date stays as it is.';
+export const RESEND_UNKNOWN_TEXT =
+  "Couldn't check whether this batch was already sent. Sending may email AP again; the server keeps an existing Sent to AP Date.";
+
+export function resendCaution(sentToApDate: string | null, readFailed: boolean): ResendCaution {
+  if (sentToApDate) return 'held';
+  return readFailed ? 'unknown' : null;
+}
+
+/** The Send button's label: "Send again" when a date is already held, "Try again" after a retryable failure. */
+export function sendLabel(caution: ResendCaution, phase: EmailPhase, sending: boolean): string {
+  if (sending) return 'Sending…';
+  if (phase.name === 'failed') return 'Try again';
+  return caution === 'held' ? 'Send again' : 'Send to AP';
+}
+
 export interface EmailSender {
+  /** The outcome of the last send that ran (null before one did). A reopened step starts from it. */
+  readonly lastOutcome: EmailOutcome | null;
   /** Start a send. Skipped (nothing sent) while another is in flight, and once the email went or a failure was final. */
   send(request: EmailRequest): Promise<SendResult>;
   /** True once no further send may start: the email went, or a failure said not to try again. */
@@ -248,15 +305,20 @@ export function createEmailSender(
 ): EmailSender {
   const flight = createSingleFlight();
   let locked = false;
+  let lastOutcome: EmailOutcome | null = null;
   return {
     get locked() {
       return locked;
+    },
+    get lastOutcome() {
+      return lastOutcome;
     },
     async send(request) {
       if (locked) return { kind: 'skipped', reason: 'locked' };
       const ran = await flight.run(async () => emailOutcome(await api.emailBatch(batchId, request), locale, timeZone));
       if (!ran.ran) return { kind: 'skipped', reason: 'in_flight' };
       const outcome = ran.value;
+      lastOutcome = outcome;
       if (outcome.kind === 'sent' || !allowsAnotherSend(outcome.failure.next)) locked = true;
       return outcome;
     },

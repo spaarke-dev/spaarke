@@ -4,12 +4,18 @@ import {
   MAX_CC,
   MAX_MESSAGE,
   allowsAnotherSend,
+  RESEND_HELD_TITLE,
   createEmailSender,
   emailFailure,
   emailOutcome,
   emailSuccess,
+  phaseOf,
+  resendCaution,
+  sendLabel,
+  showMarkSent,
   splitCc,
   validateEmailInput,
+  withMarkedDate,
   type NextStep,
 } from '../services/emailFlow';
 import type { ApiResult, EmailResponse } from '../services/apExportApi';
@@ -28,10 +34,15 @@ const sent = (over: Partial<EmailResponse> = {}): EmailResponse => ({
 const failure = (status: number, errorCode: string | null, extra: Record<string, unknown> = {}) =>
   emailFailure(toFailure(problem(status, errorCode, extra)));
 
+/**
+ * The server's real shape for 403 caller_unresolved: ProblemDetailsHelper.Forbidden puts the stable code in `reasonCode`
+ * and sets no `errorCode`.
+ */
+const forbidden = (reasonCode: string) => emailFailure(toFailure(problem(403, null, { reasonCode })));
+
 /** Every error code of the 151c-1a notes, with what the dialog must tell the user to do next. */
 const CODES: Array<[number, string, NextStep]> = [
   [400, 'ebilling.export.invalid_request', 'edit'],
-  [403, 'ebilling.export.caller_unresolved', 'manual'],
   [409, 'ebilling.export.ap_email_not_configured', 'manual'],
   [409, 'ebilling.export.file_not_available', 'manual'],
   [409, 'ebilling.export.ap_email_recipient_monitored', 'manual'],
@@ -44,13 +55,30 @@ const CODES: Array<[number, string, NextStep]> = [
 ];
 
 describe('emailFailure: every error code becomes one plain sentence that says what to do next', () => {
+  it('403 caller_unresolved arrives in reasonCode (no errorCode) and is mapped from there', () => {
+    const f = forbidden('ebilling.export.caller_unresolved');
+    expect(f.next).toBe('manual');
+    expect(f.code).toBe('ebilling.export.caller_unresolved');
+    expect(f.message).toMatch(/could not be identified/);
+    expect(f.message).toMatch(/Do not try again/);
+    expect(f.message).toMatch(/Download/);
+    expect(f.message).toMatch(/Mark Sent to AP/);
+    // Not the generic fallback, which would echo the server detail with its code.
+    expect(f.message).not.toMatch(/Sent Items/);
+  });
+
+  it('errorCode wins when both are present', () => {
+    const f = emailFailure(toFailure(problem(409, 'ebilling.export.email_send_refused', { reasonCode: 'ebilling.export.caller_unresolved' })));
+    expect(f.code).toBe('ebilling.export.email_send_refused');
+  });
+
   it.each(CODES)('%i %s', (status, code, next) => {
     const f = failure(status, code, { detail: 'server words' });
     expect(f.next).toBe(next);
     expect(f.code).toBe(code);
     expect(f.message.length).toBeGreaterThan(20);
     // The user is told either to try again or to use Download plus Mark Sent to AP (or to correct the input).
-    if (next === 'retry') expect(f.message).toMatch(/Try again/);
+    if (next === 'retry') expect(f.message).toMatch(/try again/i);
     else if (next === 'manual') {
       expect(f.message).toMatch(/Do not try again/);
       expect(f.message).toMatch(/Download/);
@@ -75,6 +103,15 @@ describe('emailFailure: every error code becomes one plain sentence that says wh
   it('only the two 503 codes are retryable (plus input to correct on a 400)', () => {
     const open = CODES.filter(([, , next]) => allowsAnotherSend(next)).map(([, code]) => code);
     expect(open).toEqual(['ebilling.export.invalid_request', 'ebilling.export.email_send_failed', 'ebilling.export.unavailable']);
+  });
+
+  it('503 email_send_failed does not claim the email was not sent: it may have gone, so check Sent Items, then retry', () => {
+    const f = failure(503, 'ebilling.export.email_send_failed');
+    expect(f.next).toBe('retry');
+    expect(f.message).toMatch(/may not have been sent/);
+    expect(f.message).toMatch(/Sent Items/);
+    expect(f.message).not.toMatch(/was not sent\b/);
+    expect(f.message).not.toMatch(/nothing was sent/i);
   });
 
   it('the uniform 404 reads "This export batch isn\'t available to you." and offers nothing', () => {
@@ -134,6 +171,9 @@ describe('emailSuccess: the three sent states', () => {
     expect(v.kind).toBe('unchanged');
     expect(v.title).toBe('Sent to AP');
     expect(v.message).toMatch(/unchanged/);
+    // Neutral: it does not assume an earlier email went.
+    expect(v.message).toBe('The email was sent. The Sent to AP Date was already set and is unchanged.');
+    expect(v.message).not.toMatch(/again/);
     expect(v.sentToApDate).toBe('Nov 2, 2026, 9:30 AM');
   });
 
@@ -276,5 +316,121 @@ describe('createEmailSender: one send at a time, and none after the email went',
       await sender.send(REQUEST);
       expect(h.emailBatch).toHaveBeenCalledTimes(1);
     }
+  });
+});
+
+describe('the step survives Back: the sender keeps its last outcome and its lock (F1)', () => {
+  const REQUEST = { cc: [], message: '' };
+  const apiOf = (answer: ApiResult<EmailResponse>) => ({ emailBatch: jest.fn(async () => answer) });
+
+  it('a step that has not sent opens in compose', () => {
+    expect(phaseOf(createEmailSender(apiOf(ok(sent())), BATCH_ID).lastOutcome)).toEqual({ name: 'compose' });
+  });
+
+  it('send (200), Back, reopen: the step opens in the sent state and no Send is possible', async () => {
+    const api = apiOf(ok(sent()));
+    const sender = createEmailSender(api, BATCH_ID); // what ExportDialog owns for this batch
+    await sender.send(REQUEST);
+    // Back unmounts the step; reopening builds its initial phase from the same sender.
+    const reopened = phaseOf(sender.lastOutcome);
+    expect(reopened.name).toBe('sent');
+    expect(reopened.name === 'sent' && reopened.sent.kind).toBe('recorded');
+    expect(sender.locked).toBe(true);
+    expect(await sender.send(REQUEST)).toEqual({ kind: 'skipped', reason: 'locked' });
+    expect(api.emailBatch).toHaveBeenCalledTimes(1);
+  });
+
+  it('a 200 whose date was not recorded: reopened, still sent and locked', async () => {
+    const api = apiOf(ok(sent({ sentToApDateSet: false, sentToApDate: null })));
+    const sender = createEmailSender(api, BATCH_ID);
+    await sender.send(REQUEST);
+    const reopened = phaseOf(sender.lastOutcome);
+    expect(reopened.name === 'sent' && reopened.sent.kind).toBe('not_recorded');
+    expect(sender.locked).toBe(true);
+    await sender.send(REQUEST);
+    expect(api.emailBatch).toHaveBeenCalledTimes(1);
+  });
+
+  it('no answer (network): reopened, the step says it is not known whether it went, and no Send is possible', async () => {
+    const api = apiOf(failed(new TypeError('Failed to fetch')));
+    const sender = createEmailSender(api, BATCH_ID);
+    await sender.send(REQUEST);
+    const reopened = phaseOf(sender.lastOutcome);
+    expect(reopened.name).toBe('failed');
+    expect(reopened.name === 'failed' && reopened.failure.next).toBe('unknown');
+    expect(sender.locked).toBe(true);
+    expect(await sender.send(REQUEST)).toEqual({ kind: 'skipped', reason: 'locked' });
+    expect(api.emailBatch).toHaveBeenCalledTimes(1);
+  });
+
+  it('a retryable failure reopens as failed but stays open for another send', async () => {
+    const api = apiOf(failed(problem(503, 'ebilling.export.email_send_failed')));
+    const sender = createEmailSender(api, BATCH_ID);
+    await sender.send(REQUEST);
+    expect(phaseOf(sender.lastOutcome).name).toBe('failed');
+    expect(sender.locked).toBe(false);
+  });
+
+  it('a skipped call does not replace the last outcome', async () => {
+    const api = apiOf(ok(sent()));
+    const sender = createEmailSender(api, BATCH_ID);
+    await sender.send(REQUEST);
+    const before = sender.lastOutcome;
+    await sender.send(REQUEST);
+    expect(sender.lastOutcome).toBe(before);
+  });
+});
+
+describe('Mark Sent to AP inside the step shows its answer (F2)', () => {
+  const phaseSent = (over: Partial<EmailResponse> = {}) => phaseOf(emailOutcome(ok(sent(over)), 'en-US', 'UTC'));
+
+  it('the section shows when no date was held at open and no email recorded one', () => {
+    expect(showMarkSent(false, { name: 'compose' })).toBe(true);
+    expect(showMarkSent(false, phaseSent({ sentToApDateSet: false, sentToApDate: null }))).toBe(true);
+  });
+
+  it('the section is hidden for a date already held when the step opened, and once an email recorded the date', () => {
+    expect(showMarkSent(true, { name: 'compose' })).toBe(false);
+    expect(showMarkSent(false, phaseSent())).toBe(false);
+    expect(showMarkSent(false, { name: 'sending' })).toBe(false);
+  });
+
+  it('marking after the email whose date was not recorded keeps the section (so its answer shows) and clears the warning', () => {
+    // Nothing here reads "marked": the section stays visible because the phase is still not_recorded.
+    const phase = phaseSent({ sentToApDateSet: false, sentToApDate: null });
+    expect(showMarkSent(false, phase)).toBe(true);
+    const view = phase.name === 'sent' ? phase.sent : null;
+    expect(view?.kind).toBe('not_recorded');
+    const marked = withMarkedDate(view!, 'Nov 2, 2026, 9:30 AM');
+    expect(marked.kind).toBe('recorded');
+    expect(marked.sentToApDate).toBe('Nov 2, 2026, 9:30 AM');
+    expect(marked.message).not.toMatch(/could not be recorded/);
+    expect(marked.message).toMatch(/recorded with Mark Sent to AP/);
+  });
+
+  it('withMarkedDate leaves a recorded view, an unchanged view and an unmarked view as they are', () => {
+    const recorded = emailSuccess(sent(), 'en-US', 'UTC');
+    expect(withMarkedDate(recorded, 'x')).toBe(recorded);
+    const notRecorded = emailSuccess(sent({ sentToApDateSet: false, sentToApDate: null }));
+    expect(withMarkedDate(notRecorded, null)).toBe(notRecorded);
+  });
+});
+
+describe('re-send caution (K6)', () => {
+  it('a held date is a caution; a failed batch read is a different caution; otherwise none', () => {
+    expect(resendCaution('2026-11-02T09:30:00Z', false)).toBe('held');
+    expect(resendCaution('2026-11-02T09:30:00Z', true)).toBe('held');
+    expect(resendCaution(null, true)).toBe('unknown');
+    expect(resendCaution(null, false)).toBeNull();
+    expect(RESEND_HELD_TITLE).toBe('This batch already has a Sent to AP Date');
+  });
+
+  it('the button says Send again for a held date, Try again after a failure, Sending while in flight, else Send to AP', () => {
+    const compose = { name: 'compose' } as const;
+    expect(sendLabel('held', compose, false)).toBe('Send again');
+    expect(sendLabel('unknown', compose, false)).toBe('Send to AP');
+    expect(sendLabel(null, compose, false)).toBe('Send to AP');
+    expect(sendLabel('held', phaseOf({ kind: 'failed', failure: { message: 'x', next: 'retry', code: null } }), false)).toBe('Try again');
+    expect(sendLabel('held', { name: 'sending' }, true)).toBe('Sending…');
   });
 });

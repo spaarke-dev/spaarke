@@ -27,9 +27,9 @@ Nothing was imported or published. The deploy steps for the main session are at 
 - **Send.** The button is disabled while a send is in flight, and `createEmailSender` refuses a second call before the network (the React state updates after the next render, so a fast second click could still reach the handler; the sender's flag is synchronous).
 - **200.** "Sent to AP", the Sent to AP Date (the user's locale) and the recipients (To, then each CC).
   - `sentToApDateSet:true`: "The email was sent and the Sent to AP Date was recorded."
-  - `sentToApDateSet:false` with a date (a re-send): "The email was sent again. The Sent to AP Date was already set and is unchanged."
+  - `sentToApDateSet:false` with a date (a re-send): "The email was sent. The Sent to AP Date was already set and is unchanged." (neutral; it does not assume an earlier email)
   - `sentToApDateSet:false`, `sentToApDate:null`: "The email was sent, but the Sent to AP Date could not be recorded; use Mark Sent to AP." The warning shows Mark Sent to AP and no Send.
-- **After the email went there is no Send.** After any 200, and after a failure whose next step is not "try again" or "correct the input", the sender is locked (the compose form and Send are gone). To re-send a batch that already holds a date, open the dialog again (EB-D-181: the batch form gets a re-send); the step says "This batch was already sent to AP. Sending again emails AP a second time; the Sent to AP Date stays as it is."
+- **After the email went there is no Send.** After any 200, and after a failure whose next step is not "try again" or "correct the input", the sender is locked (the compose form and Send are gone). To re-send a batch that already holds a date, open the dialog again (EB-D-181: the batch form gets a re-send); the step shows a warning "This batch already has a Sent to AP Date" and the button reads "Send again"
 - **Mark Sent to AP** is shown in the step unless a date is held (read from the batch, set by the email, or set by Mark Sent in this dialog). It calls the route, shows "Marked Sent to AP" or "Already marked Sent to AP" (date unchanged), and the 409 / 404 / 503 answers. A repeat is safe (the server never overwrites), so the retryable failures show Try again.
 
 ### Every error code, one sentence, one next step
@@ -37,14 +37,14 @@ Nothing was imported or published. The deploy steps for the main session are at 
 | Status / code | Next step | Sentence (abridged) |
 |---|---|---|
 | 400 `invalid_request` | edit | A CC address or the message was not accepted (+ the server detail). Correct it and send again |
-| 403 `caller_unresolved` | manual | Your user account could not be identified, nothing was sent. Do not try again. Use Download, deliver the files, then Mark Sent to AP |
+| 403 `caller_unresolved` (code in `reasonCode`, no `errorCode`) | manual | Your user account could not be identified, nothing was sent. Do not try again. Use Download, deliver the files, then Mark Sent to AP |
 | 409 `ap_email_not_configured` | manual | No usable AP email address is set (empty, or not a single valid address); nothing was sent. Do not try again. Download, then Mark Sent to AP |
 | 409 `file_not_available` | manual | The batch is not Completed, or a file is missing or still being scanned. Do not try again from here. Download, then Mark Sent to AP |
 | 409 `ap_email_recipient_monitored` | manual | The AP address, a CC address or your own mailbox is monitored by Spaarke. Do not try again. Download, then Mark Sent to AP (one sentence for the AP / CC and the sender's own mailbox variants, which share the code) |
 | 409 `attachments_too_large` | manual | Too large to email (3 MB). Do not try again. Download, then Mark Sent to AP |
 | 409 `email_owner_refused` | manual | Could not be tied to the batch's owning team. Do not try again. Download, then Mark Sent to AP |
 | 409 `email_send_refused` | manual | The mail service refused to send. Do not try again. Download, then Mark Sent to AP |
-| 503 `email_send_failed` | retry | Temporary mail problem; not sent, no date set. Try again |
+| 503 `email_send_failed` | retry | Temporary mail problem. The email may not have been sent, and the Sent to AP Date was not set. Check your Sent Items, then try again if it is not there |
 | 503 `ebilling.export.unavailable` | retry | A needed service is unavailable; nothing sent. Try again in a moment |
 | 503 `ebilling.disabled` | manual | eBilling is off; nothing sent. Do not try again; ask an administrator. Download, then Mark Sent to AP |
 | 404 (uniform) | none | "This export batch isn't available to you." |
@@ -115,7 +115,7 @@ Same as 151b: the ribbon script launches with `navigateTo`, the platform dialog 
 | Check | Result |
 |---|---|
 | `npm install --legacy-peer-deps --no-audit --no-fund` (ApExport) | OK |
-| `npm test` (jest, node env) | 7 suites, 151 tests, 0 failed (77 before; 74 added) |
+| `npm test` (jest, node env) | 7 suites, 166 tests, 0 failed (77 before 151c-1b; 89 added, 15 of them in the fix round) |
 | `npm run typecheck` / the build's tsc gate | Surface-owned errors 0 (100 pre-existing shared-lib errors, the gate's known baseline) |
 | `npm run build` | `dist/sprk_apexport.html`, 1,024,470 bytes (gzip 310 kB); 151b: 1,016,781 bytes |
 | ArchTests filter (WebResourceMirrorParity, SecureChildNewCommand, InvoiceStatusRetirement, SpaarkeMasterApplicationDependency, ExternalSpaGridViewSelector) | 284 passed, 0 failed |
@@ -163,6 +163,8 @@ In order:
 4. **Ribbon and views**, by the narrow route (ribbon-edit) or a SpaarkeMaster import (check with the owner first: dev is the authoring environment): a temporary solution with `sprk_billingexport` (RibbonDiff + the Active view `{c19542df-...}`) and `sprk_invoice` (views `{cd153641-...}` and `{b0feb580-...}`). The batch Active view's columns can alternatively come from `pwsh scripts/ebilling/Deploy-EbillingFormsViews.ps1 -WhatIf`, then live (the spec has the column); the invoice views have no script, only the solution source.
 5. Publish all, hard-refresh the app.
 
+**Import-time check (K3):** the linked batch column on the invoice views needs Read on `sprk_billingexport`. The "Spaarke Office Add In User" role has Read on invoices but not on batches, so those users see an empty Sent to AP Date cell (or the view may refuse to load, depending on the platform's handling of a linked table the user cannot read). Check the views as that role after the import; grant Read on `sprk_billingexport` only if the owner wants those users to see the date.
+
 **Unverified until imported:** the linked-entity layout cell name `export_batch.sprk_senttoapdate` (the platform's `<alias>.<attribute>` form for a custom alias). If the grid shows an empty column, open the view in the view designer, add Export Batch > Sent to AP Date once and compare its cell name; the fetch side is standard.
 
 ## Manual UI test steps (after the deploy)
@@ -179,3 +181,22 @@ Run as a finance user with Write on `sprk_billingexport` unless stated.
 8. **Mark Sent to AP.** On a Completed batch with no date, ribbon Mark Sent to AP: the dialog, the button, "Marked Sent to AP" with the date. Again: "Already marked Sent to AP", date unchanged. On a Generating or Failed batch both buttons are disabled.
 9. **Rights.** A user with only Read on `sprk_billingexport` does not see Email to AP or Mark Sent to AP but still sees Download. A user with Write who lacks the right on this batch (other business unit): the buttons show and the dialog says "This export batch isn't available to you."
 10. **Dark mode (ADR-021).** Switch to dark and open the step (compose, sent, each message bar, the CC and message fields); no white panels or black text inside the page. Check the browser console for errors in each step.
+
+## Fix round (adversarial review of 7d493b53db..a27916342a)
+
+| Item | Change | Test (seeded) |
+|---|---|---|
+| F1 double send after Back | `ExportDialog` owns one `createEmailSender` per batch id (a ref map) and passes it to `BatchEmailView`; the sender stores its `lastOutcome`, and the step opens in `phaseOf(sender.lastOutcome)`. A reopened step is therefore in the sent / failed state and, when the sender is locked, has no Send. The result step's Email to AP button is disabled while the sender is locked, with a line that says why (the batch form reopens the step for a re-send, or for Mark Sent to AP) | `the step survives Back` (6): 200, a 200 without a recorded date, and a network failure each reopen locked with one api call; a retryable failure reopens open; a skipped call keeps the last outcome. Seed: `lastOutcome` not stored, 4 red |
+| F2 no confirmation after Mark Sent inside the step | `showMarkSent`: the section is hidden only for a date held when the step opened (or once an email recorded the date); after Mark Sent it stays, so its "Marked Sent to AP" answer shows. The facts grid shows the marked date; `withMarkedDate` turns the "could not be recorded" warning into a recorded state | `Mark Sent to AP inside the step shows its answer` (4). Seeds: section hidden for a not-recorded email, 2 red; marked date ignored, 1 red |
+| F3 `caller_unresolved` is in `reasonCode` | `emailFlow` and `markSentFlow` read `f.errorCode ?? f.reasonCode`; the test uses the real shape (`reasonCode` set, `errorCode` absent) and a mark-sent case | Seeds: errorCode only in `emailFlow`, 1 red; in `markSentFlow`, 1 red |
+| F3 server test | `ApExportAuthorizationTests.cs` line 466 asserted `["errorCode"]?.GetValue<string>().Should()...`: the `?.` skipped the whole assertion when the value was null, and the server puts this code in `reasonCode`. Now `["reasonCode"]!...`. Line 367 (`authorization_unavailable`, a real `errorCode`) lost its `?.` as well. `MarkPaidAuthorizationTests.cs` lines 212-213 had the same skip on two equality checks and are parenthesised. A grep of `tests/` for `["errorCode"|"reasonCode"]?` found only these in the Finance integration tests; the other hits are helper readers that return the nullable value, not assertions | Seed: `ApExportEndpoints.cs` code changed to another value, the test went red (1 failed of 34); restored, 58 green with the MarkPaid suite |
+| K1 | The settings query has `$orderby=createdon asc` (the server reads the oldest active row) | seeded, 1 red |
+| K2 | The 503 `email_send_failed` sentence no longer says "was not sent" as a fact (see the table above); still retryable | seeded, 1 red |
+| K6 | A held date: a warning "This batch already has a Sent to AP Date", the button "Send again", neutral result wording. A failed batch read: "Couldn't check whether this batch was already sent." | seeded (label), 1 red; caution cases tested |
+
+Not covered by a test: the wiring of the sender through `ExportDialog` itself (the package has no DOM harness). The behaviour that matters is in the sender and `phaseOf`, which the tests pin; the ref map is five lines.
+
+### Follow-ups recorded, not changed
+
+- **K4: the invoice form does not show the batch's Sent to AP Date.** EB-D-182 (3) says the views and the form show it through the batch link. This task did the views only (the brief's scope). Follow-up: a read-only linked field or a small form script on the `sprk_invoice` form.
+- Mark Sent to AP's own answer is not kept across Back from the export flow: the reopened step shows the section again, and a second click answers "Already marked Sent to AP" (the server never overwrites). Not changed.

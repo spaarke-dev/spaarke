@@ -209,8 +209,8 @@ public sealed class MarkPaidAuthorizationTests
         var b = await BodyAsync(unknown);
         a["reasonCode"]!.GetValue<string>().Should().Be(FinanceAuthorizationFilter.RecordUnavailableReasonCode);
         b["reasonCode"]!.GetValue<string>().Should().Be(a["reasonCode"]!.GetValue<string>());
-        a["detail"]?.GetValue<string>().Should().Be(b["detail"]?.GetValue<string>());
-        a["title"]?.GetValue<string>().Should().Be(b["title"]?.GetValue<string>());
+        (a["detail"]?.GetValue<string>()).Should().Be(b["detail"]?.GetValue<string>());
+        (a["title"]?.GetValue<string>()).Should().Be(b["title"]?.GetValue<string>());
     }
 
     [Fact(DisplayName = "151a: a rights read that faults is the uniform 404 (fail closed), and nothing is written")]

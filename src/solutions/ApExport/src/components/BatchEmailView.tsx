@@ -6,7 +6,8 @@
  *   - no address: the not-configured message and Download only (no CC, no message, no Send);
  *   - an address: optional CCs (up to 10) and message (up to 2000 characters), checked on the client, then Send to AP.
  *     The Send button is disabled while a send is in flight and the {@link createEmailSender} refuses a second call, so a
- *     double click sends once. After the email went there is no Send at all: a 200 whose date was not recorded
+ *     double click sends once. The sender is owned by the caller (ExportDialog keeps one per batch), so closing the step
+ *     (Back) and reopening it starts from the sender's last outcome and cannot send a second time. After the email went there is no Send at all: a 200 whose date was not recorded
  *     (`sentToApDateSet: false`, `sentToApDate: null`) says so and offers Mark Sent to AP instead;
  *   - a refusal: one plain sentence that says whether to try again or to use Download plus Mark Sent to AP.
  *
@@ -38,11 +39,19 @@ import {
   AP_NOT_CONFIGURED_TEXT,
   MAX_CC,
   MAX_MESSAGE,
+  RESEND_HELD_TEXT,
+  RESEND_HELD_TITLE,
+  RESEND_UNKNOWN_TEXT,
   allowsAnotherSend,
   createEmailSender,
+  phaseOf,
+  resendCaution,
+  sendLabel,
+  showMarkSent,
   validateEmailInput,
-  type EmailFailureView,
-  type EmailSentView,
+  withMarkedDate,
+  type EmailPhase,
+  type EmailSender,
 } from '../services/emailFlow';
 import { downloadFailureMessage } from '../services/exportFlow';
 import { saveBlob } from '../services/download';
@@ -62,33 +71,33 @@ const useStyles = makeStyles({
   footerStart: { display: 'flex', gap: tokens.spacingHorizontalS },
 });
 
-type Phase =
-  | { name: 'compose' }
-  | { name: 'sending' }
-  | { name: 'sent'; sent: EmailSentView }
-  | { name: 'failed'; failure: EmailFailureView };
-
 export interface BatchEmailViewProps {
   api: ApExportApi;
   batch: BatchInfo;
   /** True when the batch details could not be read; the dialog still works (the server decides). */
   readFailed?: boolean;
+  /**
+   * The sender for this batch. A caller that can close and reopen the step (ExportDialog) owns it, so its lock and last
+   * outcome survive; without one the step makes its own.
+   */
+  sender?: EmailSender;
   /** Back to the export result (set when the step was opened from it). */
   onBack?: () => void;
   onClose: () => void;
 }
 
-export const BatchEmailView: React.FC<BatchEmailViewProps> = ({ api, batch, readFailed = false, onBack, onClose }) => {
+export const BatchEmailView: React.FC<BatchEmailViewProps> = ({ api, batch, readFailed = false, sender: given, onBack, onClose }) => {
   const s = useStyles();
-  const sender = React.useMemo(() => createEmailSender(api, batch.batchId), [api, batch.batchId]);
+  const sender = React.useMemo(() => given ?? createEmailSender(api, batch.batchId), [given, api, batch.batchId]);
   const [address, setAddress] = React.useState<ApAddress | null>(null);
-  const [phase, setPhase] = React.useState<Phase>({ name: 'compose' });
+  const [phase, setPhase] = React.useState<EmailPhase>(() => phaseOf(sender.lastOutcome));
   const [ccText, setCcText] = React.useState('');
   const [message, setMessage] = React.useState('');
   const [showErrors, setShowErrors] = React.useState(false);
   const [downloading, setDownloading] = React.useState<ExportFormat | null>(null);
   const [downloadError, setDownloadError] = React.useState<string | null>(null);
-  const [dateMarked, setDateMarked] = React.useState(false);
+  // The date Mark Sent to AP recorded in this step (formatted), so the step can show it and drop the stale warning.
+  const [markedDate, setMarkedDate] = React.useState<string | null>(null);
 
   React.useEffect(() => {
     let cancelled = false;
@@ -108,7 +117,8 @@ export const BatchEmailView: React.FC<BatchEmailViewProps> = ({ api, batch, read
   const canCompose =
     !notCompleted && !noAddress && (phase.name === 'compose' || phase.name === 'sending' || (phase.name === 'failed' && allowsAnotherSend(phase.failure.next)));
   const sending = phase.name === 'sending';
-  const dateHeld = !!batch.sentToApDate || dateMarked || (phase.name === 'sent' && phase.sent.kind !== 'not_recorded');
+  const caution = resendCaution(batch.sentToApDate, readFailed);
+  const sentView = phase.name === 'sent' ? withMarkedDate(phase.sent, markedDate) : null;
 
   const send = React.useCallback(async () => {
     setShowErrors(true);
@@ -144,7 +154,6 @@ export const BatchEmailView: React.FC<BatchEmailViewProps> = ({ api, batch, read
     </div>
   );
 
-  const sendLabel = sending ? 'Sending…' : phase.name === 'failed' ? 'Try again' : 'Send to AP';
   const footer = canCompose ? (
     <Button
       appearance="primary"
@@ -153,7 +162,7 @@ export const BatchEmailView: React.FC<BatchEmailViewProps> = ({ api, batch, read
       onClick={() => void send()}
       data-testid="send-to-ap"
     >
-      {sendLabel}
+      {sendLabel(caution, phase, sending)}
     </Button>
   ) : undefined;
 
@@ -162,6 +171,19 @@ export const BatchEmailView: React.FC<BatchEmailViewProps> = ({ api, batch, read
       {readFailed && (
         <MessageBar intent="warning">
           <MessageBarBody>The batch details could not be read. The server still checks every step.</MessageBarBody>
+        </MessageBar>
+      )}
+      {caution === 'held' && canCompose && (
+        <MessageBar intent="warning" data-testid="resend-caution">
+          <MessageBarBody>
+            <MessageBarTitle>{RESEND_HELD_TITLE}</MessageBarTitle>
+            {RESEND_HELD_TEXT}
+          </MessageBarBody>
+        </MessageBar>
+      )}
+      {caution === 'unknown' && canCompose && (
+        <MessageBar intent="warning" data-testid="resend-caution">
+          <MessageBarBody>{RESEND_UNKNOWN_TEXT}</MessageBarBody>
         </MessageBar>
       )}
 
@@ -180,10 +202,10 @@ export const BatchEmailView: React.FC<BatchEmailViewProps> = ({ api, batch, read
             <Text>{batch.totalLabel}</Text>
           </>
         )}
-        {batch.sentToApDate && (
+        {(markedDate || batch.sentToApDate) && (
           <>
             <Text className={s.label}>Sent to AP Date</Text>
-            <Text>{formatDateTime(batch.sentToApDate)}</Text>
+            <Text data-testid="batch-sent-date">{markedDate ?? formatDateTime(batch.sentToApDate)}</Text>
           </>
         )}
       </div>
@@ -214,30 +236,25 @@ export const BatchEmailView: React.FC<BatchEmailViewProps> = ({ api, batch, read
               </MessageBarBody>
             </MessageBar>
           )}
-          {batch.sentToApDate && phase.name !== 'sent' && !noAddress && (
-            <Text>
-              This batch was already sent to AP. Sending again emails AP a second time; the Sent to AP Date stays as it is.
-            </Text>
-          )}
         </div>
       )}
 
-      {phase.name === 'sent' && (
-        <MessageBar intent={phase.sent.kind === 'not_recorded' ? 'warning' : 'success'}>
+      {sentView && (
+        <MessageBar intent={sentView.kind === 'not_recorded' ? 'warning' : 'success'}>
           <MessageBarBody>
-            <MessageBarTitle>{phase.sent.title}</MessageBarTitle>
-            {phase.sent.message}
+            <MessageBarTitle>{sentView.title}</MessageBarTitle>
+            {sentView.message}
           </MessageBarBody>
         </MessageBar>
       )}
-      {phase.name === 'sent' && (
+      {sentView && (
         <div className={s.facts} data-testid="sent-details">
           <Text className={s.label}>Sent to</Text>
-          <Text>{[phase.sent.sentTo, ...phase.sent.cc.map(c => `CC ${c}`)].join(', ')}</Text>
-          {phase.sent.sentToApDate && (
+          <Text>{[sentView.sentTo, ...sentView.cc.map(c => `CC ${c}`)].join(', ')}</Text>
+          {sentView.sentToApDate && (
             <>
               <Text className={s.label}>Sent to AP Date</Text>
-              <Text>{phase.sent.sentToApDate}</Text>
+              <Text>{sentView.sentToApDate}</Text>
             </>
           )}
         </div>
@@ -287,8 +304,8 @@ export const BatchEmailView: React.FC<BatchEmailViewProps> = ({ api, batch, read
         </MessageBar>
       )}
 
-      {!notCompleted && !batchGone && !dateHeld && !sending && (
-        <MarkSentSection api={api} batchId={batch.batchId} onMarked={() => setDateMarked(true)} />
+      {!notCompleted && !batchGone && showMarkSent(!!batch.sentToApDate, phase) && (
+        <MarkSentSection api={api} batchId={batch.batchId} onMarked={date => setMarkedDate(date)} />
       )}
     </DialogLayout>
   );

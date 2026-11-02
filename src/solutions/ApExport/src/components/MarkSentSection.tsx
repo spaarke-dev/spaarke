@@ -20,8 +20,8 @@ export interface MarkSentSectionProps {
   batchId: string;
   /** The sentence above the button. */
   intro?: string;
-  /** Called once the date is recorded (or was already held). */
-  onMarked?: () => void;
+  /** Called once the date is recorded (or was already held), with the date as the user's locale shows it. */
+  onMarked?: (sentToApDate: string) => void;
 }
 
 export const MarkSentSection: React.FC<MarkSentSectionProps> = ({
@@ -42,7 +42,7 @@ export const MarkSentSection: React.FC<MarkSentSectionProps> = ({
     setBusy(false);
     if (!ran.ran) return;
     setOutcome(ran.value);
-    if (ran.value.kind === 'marked') onMarked?.();
+    if (ran.value.kind === 'marked') onMarked?.(ran.value.sentToApDate);
   }, [api, batchId, flight, onMarked]);
 
   return (

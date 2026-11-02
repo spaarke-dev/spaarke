@@ -91,7 +91,7 @@ export async function readBatch(
 /** The configured AP address: set, empty, or unknown (the read failed or the user may not read the settings). */
 export type ApAddress = { kind: 'address'; address: string } | { kind: 'none' } | { kind: 'unknown' };
 
-export const AP_ADDRESS_QUERY = '?$select=sprk_apexportemail&$filter=statecode eq 0&$top=1';
+export const AP_ADDRESS_QUERY = '?$select=sprk_apexportemail&$filter=statecode eq 0&$orderby=createdon asc&$top=1';
 
 export async function readApAddress(webApi: WebApiLike | undefined): Promise<ApAddress> {
   if (!webApi) return { kind: 'unknown' };

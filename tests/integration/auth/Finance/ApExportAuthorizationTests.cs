@@ -364,7 +364,7 @@ public sealed class ApExportAuthorizationTests
         var response = await host.SendAsync("POST", ids: [a.Id]);
 
         response.StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable);
-        JsonNode.Parse(await response.Content.ReadAsStringAsync())!["errorCode"]?.GetValue<string>().Should().Be(ApExportCodes.AuthorizationUnavailable);
+        JsonNode.Parse(await response.Content.ReadAsStringAsync())!["errorCode"]!.GetValue<string>().Should().Be(ApExportCodes.AuthorizationUnavailable);
         host.World.Dataverse.Log.Should().BeEmpty();
         host.World.Batches().Should().BeEmpty();
     }
@@ -463,7 +463,7 @@ public sealed class ApExportAuthorizationTests
         var response = await host.SendAsync("POST", ids: [a.Id]);
 
         response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
-        JsonNode.Parse(await response.Content.ReadAsStringAsync())!["errorCode"]?.GetValue<string>().Should().Be(ApExportCodes.CallerUnresolved);
+        JsonNode.Parse(await response.Content.ReadAsStringAsync())!["reasonCode"]!.GetValue<string>().Should().Be(ApExportCodes.CallerUnresolved);
         host.World.Dataverse.Log.Should().BeEmpty();
     }
 

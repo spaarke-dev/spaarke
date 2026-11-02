@@ -19,7 +19,7 @@ export type MarkSentOutcome =
   | { kind: 'failed'; message: string; retryable: boolean; code: string | null };
 
 export function markSentFailure(f: ApiFailure): Extract<MarkSentOutcome, { kind: 'failed' }> {
-  const code = f.errorCode;
+  const code = f.errorCode ?? f.reasonCode;
   const failed = (message: string, retryable: boolean) => ({ kind: 'failed' as const, message, retryable, code });
   if (f.signInFailed || f.status === 401) {
     return failed('Sign-in could not be verified, so nothing was changed. Close this dialog, reload the page and try again.', false);
