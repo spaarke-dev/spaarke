@@ -3,7 +3,12 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Xrm.Sdk;
 using Moq;
+using System.Text.Json;
 using Sprk.Bff.Api.Api;
+using Sprk.Bff.Api.Api.Agent;
+using Sprk.Bff.Api.Services.Ai;
+using Sprk.Bff.Api.Services.Ai.Handlers;
+using Sprk.Bff.Api.Services.RecordCreation;
 using Sprk.Bff.Api.Tests.TestInfrastructure;
 using Xunit;
 using Directory = Sprk.Bff.Api.Tests.TestInfrastructure.OwnershipDirectory;
@@ -145,5 +150,85 @@ public sealed partial class SecureChildOwnershipAiToolTests
         fields.Keys.Where(k => k.StartsWith("sprk_ai_search_index", StringComparison.OrdinalIgnoreCase)).Should().BeEmpty(
             "the model's index lookup is dropped (the owning unit has no index in this world)");
         fields.Should().NotContainKey("sprk_searchindexname", "the model's name is dropped too");
+    }
+    // ── Fix 019 review: the chat create's drop log has the service's shape, and only when the values differ ───────────
+
+    /// <summary>
+    /// The chat create tool over a business unit that holds an index, with both loggers captured: the handler's (where the
+    /// pre-fix drop logged, with no record id) and the service's (step 12, where the drop is logged with the record id and the
+    /// applied index).
+    /// </summary>
+    private async Task<(ToolResult Result, List<string> DropLines)> ChatCreateEventOverAUnitWithAnIndex(
+        params (string Column, JsonElement Value)[] index)
+    {
+        var entities = RouteRecordCreation.Entities();
+        entities
+            .Setup(e => e.RetrieveAsync("businessunit", Directory.ChildBu, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() =>
+            {
+                var unit = new Entity("businessunit", Directory.ChildBu);
+                unit["sprk_searchindexname"] = UnitIndexName;
+                unit["sprk_ai_search_index"] = new EntityReference("sprk_aisearchindex", UnitIndexRow);
+                return unit;
+            });
+        var handlerLog = new CapturingLog<DataverseCreateRecordHandler>();
+        var serviceLog = new CapturingLog<RecordCreationService>();
+        var handler = new DataverseCreateRecordHandler(
+            _user, handlerLog, new HandoffUrlBuilder("https://spaarkedev1.crm.dynamics.com"),
+            _world.Resolver(), IdentityNormalizationFixtures.WithContact(CallerContact).Object,
+            RouteRecordCreation.Over(_world.Resolver(), _appOnly.Object, Restamper(), Shares(),
+                SecureRootFilingGateFixtures.NothingSecure(), null, null, entities.Object, serviceLog));
+
+        var result = await handler.ExecuteChatAsync(
+            CreateContext("sprk_event",
+                new[]
+                {
+                    ("sprk_eventname", System.Text.Json.JsonSerializer.SerializeToElement("Hearing")),
+                    Lookup("sprk_regardingmatter", "sprk_matter", OrdinaryMatter),
+                }.Concat(index).ToArray()),
+            BuildAnalysisTool(nameof(DataverseCreateRecordHandler)), CancellationToken.None);
+
+        return (result, handlerLog.Messages.Concat(serviceLog.Messages).Where(m => m.Contains("client_search_index_dropped")).ToList());
+    }
+
+    [Fact]
+    public async Task ChatCreate_AClientIndexThatDiffersFromTheApplied_LogsOneDrop_WithTheRecordId_TheAppliedIndex_AndOriginCaller()
+    {
+        var (result, dropLines) = await ChatCreateEventOverAUnitWithAnIndex(
+            Lookup("sprk_ai_search_index", "sprk_aisearchindex", CallersIndexRow));
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        var created = _appCreates.Should().ContainSingle(c => c.Table == "sprk_event").Subject;
+        ServerValue(created.Fields, "sprk_AI_Search_Index@odata.bind").Should().Be($"/sprk_aisearchindexes({UnitIndexRow:D})");
+        var line = dropLines.Should().ContainSingle("the create logs the drop once, from the service's step 12").Subject;
+        line.Should().Contain("table=sprk_event").And.Contain($"record={created.Id}").And.Contain("origin=caller")
+            .And.Contain($"droppedIndexId={CallersIndexRow}").And.Contain($"appliedIndexId={UnitIndexRow}");
+        line.Should().NotContain("unchanged", "a create has an applied index; 'unchanged' is the update's");
+    }
+
+    [Fact]
+    public async Task ChatCreate_AClientIndexThatEqualsTheApplied_LogsNoDrop()
+    {
+        var (result, dropLines) = await ChatCreateEventOverAUnitWithAnIndex(
+            Lookup("sprk_ai_search_index", "sprk_aisearchindex", UnitIndexRow),
+            ("sprk_searchindexname", System.Text.Json.JsonSerializer.SerializeToElement(UnitIndexName)));
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        var fields = _appCreates.Should().ContainSingle(c => c.Table == "sprk_event").Subject.Fields;
+        ServerValue(fields, "sprk_AI_Search_Index@odata.bind").Should().Be($"/sprk_aisearchindexes({UnitIndexRow:D})");
+        dropLines.Should().BeEmpty("FR-38 logs a dropped index only when it differs from the applied one");
+    }
+
+    [Fact]
+    public async Task ChatCreate_AMalformedClientIndex_StillSucceeds_AndIsLoggedOnceFromTheService()
+    {
+        var (result, dropLines) = await ChatCreateEventOverAUnitWithAnIndex(
+            ("sprk_ai_search_index", System.Text.Json.JsonSerializer.SerializeToElement(
+                new { relatedTable = "sprk_aisearchindexes", recordId = "x" })));
+
+        result.Success.Should().BeTrue(result.ErrorMessage, "R7: a malformed index is dropped before it is mapped, never refused");
+        var created = _appCreates.Should().ContainSingle(c => c.Table == "sprk_event").Subject;
+        ServerValue(created.Fields, "sprk_AI_Search_Index@odata.bind").Should().Be($"/sprk_aisearchindexes({UnitIndexRow:D})");
+        dropLines.Should().ContainSingle().Which.Should().Contain($"record={created.Id}").And.Contain($"appliedIndexId={UnitIndexRow}");
     }
 }
