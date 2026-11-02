@@ -328,6 +328,18 @@ contract), `tests/Spaarke.ArchTests/` (`RecordOwnerAssignmentCensusTests`, `Refi
     are preserved as registry rules.
 
     Acceptance: the census test lists each as routed; each exception is a named registry rule with its rationale.
+
+    *Amended 2026-11-02 (owner; ontology-r1 research, decisions.md):* **named exception.** These writers keep their
+    dedicated least-privileged identity (`OntologyWriterDataverseClient`, ontology D-1, ADR-028 path A) and do NOT
+    create through `RecordCreationService`:
+    - `SignalWriter`;
+    - `SignalSuppressionService`;
+    - `DecisionRecordWriter`;
+    - `GateDecisionRecordSharing`;
+    - the revise-budget step.
+
+    The service gets no second principal. The census lists them as exceptions with this reason: append-only by
+    privilege, because the shared BFF identity is System Administrator. No field mapping runs into those rows.
 22. **FR-22 Delete the client engine.** Delete `FieldMappingService.applyFieldMappings` (keep only what other code
     still imports, if anything) and `FieldMappingHandler.ts`.
 
@@ -368,7 +380,15 @@ contract), `tests/Spaarke.ArchTests/` (`RecordOwnerAssignmentCensusTests`, `Refi
     Acceptance: a natively created or imported row gets its mapping, standard owner, search-index default and stamp
     within ≤ 10 minutes; re-runs are no-ops; a pre-go-live row is never written.
 
-    *Amended 2026-11-02 (task 050; notes/decisions.md "W5 open questions resolved"), **pending owner confirmation**:*
+    *Amended 2026-11-02 (owner): the outcome is binding, the mechanism is the project's choice.* For any record
+    created outside the server-mediated owner process, the repair process brings **every member of that record's
+    family to the same owner**: the root to its standard owner, and each child to its family's owner. This covers
+    members that already exist when a root is repaired, so a repaired root's children follow it; it is not limited
+    to the selected row. Task 052 designs that cascade, including the cross-BU re-own that task 016 left open. That
+    re-own is now in scope, because the owner rule requires it. It uses the record family service (W7) and the
+    same owner decision as create. The selection mechanism below is the project's choice under that outcome.
+
+    *Amended 2026-11-02 (task 050; notes/decisions.md "W5 open questions resolved"), confirmed (the owner delegated the mechanism):*
     the repair marker is a **principal set**, not a single identity. The pass selects rows with
     `createdon` ≥ max(go-live, watermark) and `createdby` NOT IN `ProductPrincipals`. The set holds the shared BFF
     identity (resolved at runtime by WhoAmI), the ontology writer (`mi-ontology-writer-dev` on dev) and a configured

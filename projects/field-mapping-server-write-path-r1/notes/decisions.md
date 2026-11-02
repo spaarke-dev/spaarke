@@ -665,3 +665,15 @@ missing to add. Owners and refusals are unchanged, and the service needs no chan
   - name it as an FR-21 exception: SignalWriter, SignalSuppressionService, DecisionRecordWriter, GateDecisionRecordSharing and the revise-budget step create through `OntologyWriterDataverseClient`, not `RecordCreationService`;
   - do not give the service a second principal.
 - **For the FR-25 marker:** both `mi-bff-api-*` and the writer's application user are product principals. Resolve each from its configured client id (`systemuser.applicationid`) or WhoAmI, never from a dev GUID.
+
+### 2026-11-02 — Owner approves tasks 041, 042a and 042b; the repair outcome; the 019 live-check rows
+
+1. **Tasks 041, 042a and 042b: approved.** Under the scope path, that completes them. 042a starts now. 041 and 042b start once 019 clears.
+2. **Repair and the marker.** The owner's words: "however technically this happens, what is important is that we have a process that for any records created outside the server-mediated owner process, there is a repair process that aligns all family members to the same owner; so however is the best approach to achieve this."
+   - **The outcome is binding.** The repair process gives every member of a family the same owner. That includes members that already exist when a root is repaired, and the cross-BU re-own that task 016 left open. FR-25 is amended to say so.
+   - **The mechanism is our choice.** We take the recommended route:
+     - the marker is the principal set (task 050);
+     - the Signal, Decision Record and Budget Revision writers keep their dedicated identity, as a named FR-21 exception, per ontology-r1's research. The service gets no second principal;
+     - those three append-only tables stay out of repair.
+   - **Task 052** must design the family cascade.
+3. **The 019 live-check rows are approved.** They are created once R3's batch is live on dev. The test rows carry the `FMSWP-019` prefix, and their ids are recorded so the owner can delete them.
