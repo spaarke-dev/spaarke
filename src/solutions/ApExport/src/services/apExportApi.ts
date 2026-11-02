@@ -5,6 +5,8 @@
  *   - POST /api/finance/export-batches                              (task 150) create one batch from a selection
  *   - POST /api/finance/invoices/{invoiceId}/mark-paid              (task 151a) one invoice per call, Sent to AP to Paid
  *   - GET  /api/finance/export-batches/{batchId}/files/{csv|json}    (task 151a) the stored file, byte for byte
+ *   - POST /api/finance/export-batches/{batchId}/email               (task 151c-1a) email the batch's files to AP
+ *   - POST /api/finance/export-batches/{batchId}/mark-sent-to-ap     (task 151c-1a) record that the files reached AP
  *
  * The page never writes Dataverse rows itself (ADR-002) and never decides who may export or pay: the server does (FR-41,
  * FR-42, EB-D-178). This module carries the calls and turns every failure into one {@link ApiFailure} shape, keeping the
@@ -61,6 +63,28 @@ export interface MarkPaidResponse {
   invoiceId: string;
   /** `Paid`. */
   status: string;
+}
+
+/** The body of Email to AP: up to 10 CCs and an optional message of up to 2000 characters. */
+export interface EmailRequest {
+  cc: string[];
+  message: string;
+}
+
+/** The 200 body of Email to AP (`sentToApDateSet` is true only when this call set the date). */
+export interface EmailResponse {
+  communicationId: string;
+  sentTo: string;
+  cc: string[];
+  /** The batch's Sent to AP Date; null when the email went but the date write failed. */
+  sentToApDate: string | null;
+  sentToApDateSet: boolean;
+}
+
+/** The 200 body of Mark Sent to AP (`alreadySet` is true when the date was already held; it is returned unchanged). */
+export interface MarkSentResponse {
+  sentToApDate: string;
+  alreadySet: boolean;
 }
 
 /** A downloaded batch file. */
@@ -196,6 +220,8 @@ export interface ApExportApi {
   createBatch(invoiceIds: string[]): Promise<ApiResult<ExportBatch>>;
   markPaid(invoiceId: string): Promise<ApiResult<MarkPaidResponse>>;
   downloadFile(batchId: string, format: ExportFormat): Promise<ApiResult<DownloadedFile>>;
+  emailBatch(batchId: string, request: EmailRequest): Promise<ApiResult<EmailResponse>>;
+  markSentToAp(batchId: string): Promise<ApiResult<MarkSentResponse>>;
 }
 
 export function createApExportApi(fetchFn: AuthenticatedFetchFn, bffBaseUrl: string): ApExportApi {
@@ -220,6 +246,15 @@ export function createApExportApi(fetchFn: AuthenticatedFetchFn, bffBaseUrl: str
       }),
 
     markPaid: invoiceId => call<MarkPaidResponse>(`${base}/invoices/${enc(invoiceId)}/mark-paid`, { method: 'POST' }),
+
+    emailBatch: (batchId, request) =>
+      call<EmailResponse>(`${base}/export-batches/${enc(batchId.toLowerCase())}/email`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(request.message ? { cc: request.cc, message: request.message } : { cc: request.cc }),
+      }),
+
+    markSentToAp: batchId => call<MarkSentResponse>(`${base}/export-batches/${enc(batchId.toLowerCase())}/mark-sent-to-ap`, { method: 'POST' }),
 
     async downloadFile(batchId, format) {
       try {

@@ -1,6 +1,6 @@
 /**
  * AP export and Mark Paid commands - the sprk_invoice views and form, and the sprk_billingexport form
- * (ebilling-r1 task 151b, EB-D-181).
+ * (ebilling-r1 task 151b, EB-D-181; task 151c-1b adds Email to AP and Mark Sent to AP on the sprk_billingexport form).
  *
  * Web Resource Name: sprk_/scripts/apexport_ribbon.js   (namespace Spaarke.ApExport.Ribbon)
  *
@@ -11,6 +11,9 @@
  *     BFF: POST /api/finance/export-batches (task 150) and POST /api/finance/invoices/{id}/mark-paid (task 151a).
  *   - "Download CSV" / "Download JSON" (Billing Export form) fetch GET /api/finance/export-batches/{id}/files/{csv|json}
  *     (task 151a) and save the file.
+ *   - "Email to AP" and "Mark Sent to AP" (Billing Export form, a Completed batch, a user with Write on the batch table)
+ *     open the same dialog code page on the open batch (mode "email" or "marksent"). The page calls the BFF:
+ *     POST /api/finance/export-batches/{id}/email and .../mark-sent-to-ap (task 151c-1a).
  *
  * DISPLAY ONLY: the enable rules below only decide when a button is offered. The server decides every export, payment and
  * download (FR-41, FR-42): a selection that slips past a rule is refused by the server, per invoice, in the dialog.
@@ -33,7 +36,7 @@ Spaarke.ApExport = Spaarke.ApExport || {};
 Spaarke.ApExport.Ribbon = Spaarke.ApExport.Ribbon || {};
 
 (function (ns) {
-    ns.VERSION = "1.0.0";
+    ns.VERSION = "1.1.0";
 
     var LOG = "[ApExport.Ribbon v" + ns.VERSION + "]";
 
@@ -49,8 +52,8 @@ Spaarke.ApExport.Ribbon = Spaarke.ApExport.Ribbon || {};
     /** The largest selection the export route accepts (task 150: 1 to 200 invoices). Mark Paid uses the same cap. */
     ns.MAX_SELECTION = 200;
 
-    /** The two dialog modes the page knows. */
-    ns.MODES = { export: "Export to AP", markpaid: "Mark Paid" };
+    /** The dialog modes the page knows: two on invoices (the views and form), two on one batch (the Billing Export form). */
+    ns.MODES = { export: "Export to AP", markpaid: "Mark Paid", email: "Email to AP", marksent: "Mark Sent to AP" };
 
     /** Same size as the wizard dialogs (sprk_wizard_commands.js). */
     ns.DIALOG_OPTIONS = { target: 2, position: 1, width: { value: 60, unit: "%" }, height: { value: 70, unit: "%" } };
@@ -63,6 +66,11 @@ Spaarke.ApExport.Ribbon = Spaarke.ApExport.Ribbon || {};
     /** The navigateTo `data` string the page reads (parseDataParams): mode and comma-separated ids. */
     ns.launchData = function (mode, ids) {
         return "mode=" + encodeURIComponent(mode) + "&ids=" + encodeURIComponent(ids.join(","));
+    };
+
+    /** The navigateTo `data` string for a mode opened on one batch: mode and batch id. */
+    ns.batchLaunchData = function (mode, batchId) {
+        return "mode=" + encodeURIComponent(mode) + "&batch=" + encodeURIComponent(ns.cleanId(batchId));
     };
 
     /** 151a's download route for one batch file. `baseUrl` is the BFF host without "/api". */
@@ -212,7 +220,7 @@ Spaarke.ApExport.Ribbon = Spaarke.ApExport.Ribbon || {};
      */
     ns.openFromGrid = function (selectedIds, selectedControl, mode) {
         try {
-            if (!ns.MODES[mode]) {
+            if (mode !== "export" && mode !== "markpaid") {
                 console.error(LOG, "Unknown mode:", mode);
                 return;
             }
@@ -240,7 +248,7 @@ Spaarke.ApExport.Ribbon = Spaarke.ApExport.Ribbon || {};
     /** Command on the invoice form: open the dialog in `mode` for the open invoice, then refresh the form and its ribbon. */
     ns.openFromForm = function (primaryControl, mode) {
         try {
-            if (!ns.MODES[mode]) {
+            if (mode !== "export" && mode !== "markpaid") {
                 console.error(LOG, "Unknown mode:", mode);
                 return;
             }
@@ -261,6 +269,41 @@ Spaarke.ApExport.Ribbon = Spaarke.ApExport.Ribbon || {};
             });
         } catch (error) {
             console.error(LOG, "openFromForm failed:", error);
+        }
+    };
+
+    /**
+     * Command on the Billing Export form: open the dialog in `mode` ("email" or "marksent") on the open batch, then
+     * refresh the form (the Sent to AP Date may have been set) and its ribbon.
+     */
+    ns.openFromBatchForm = function (primaryControl, mode) {
+        try {
+            if (mode !== "email" && mode !== "marksent") {
+                console.error(LOG, "Unknown mode:", mode);
+                return Promise.resolve();
+            }
+            var id = recordIdOf(primaryControl);
+            if (!id) {
+                alert(ns.MODES[mode], "Save this export batch first.");
+                return Promise.resolve();
+            }
+            var onClose = function () {
+                try {
+                    var refreshed = primaryControl.data && primaryControl.data.refresh ? primaryControl.data.refresh(false) : null;
+                    Promise.resolve(refreshed).then(function () {
+                        if (primaryControl.ui && primaryControl.ui.refreshRibbon) primaryControl.ui.refreshRibbon();
+                    });
+                } catch (error) {
+                    console.warn(LOG, "The form could not be refreshed:", error);
+                }
+            };
+            return Xrm.Navigation.navigateTo(
+                { pageType: "webresource", webresourceName: ns.PAGE, data: ns.batchLaunchData(mode, id) },
+                Object.assign({}, ns.DIALOG_OPTIONS, { title: ns.MODES[mode] })
+            ).then(onClose, onClose);
+        } catch (error) {
+            console.error(LOG, "openFromBatchForm failed:", error);
+            return Promise.resolve();
         }
     };
 

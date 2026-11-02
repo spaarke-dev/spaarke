@@ -34,6 +34,8 @@ interface IRibbon {
   batchIsCompleted(primaryControl: unknown): boolean | Promise<boolean>;
   openFromGrid(selectedIds: string[] | null, selectedControl: unknown, mode: string): void;
   openFromForm(primaryControl: unknown, mode: string): void;
+  openFromBatchForm(primaryControl: unknown, mode: string): Promise<void>;
+  batchLaunchData(mode: string, batchId: string): string;
   downloadBatchFile(primaryControl: unknown, format: string): Promise<void>;
   launchData(mode: string, ids: string[]): string;
   fileUrl(baseUrl: string, batchId: string, format: string): string;
@@ -370,5 +372,153 @@ describe('downloadBatchFile (Billing Export form)', () => {
     const h = harness({});
     await h.ribbon.downloadBatchFile(form(BATCH), 'xml');
     expect(h.fetches).toEqual([]);
+  });
+});
+
+/**
+ * Task 151c-1b: Email to AP and Mark Sent to AP on the Billing Export form. The script half runs in the sandbox; the
+ * wiring half reads the committed RibbonDiff (an EntityPrivilegeRule is evaluated by the platform, not by the script).
+ */
+describe('Billing Export form: Email to AP and Mark Sent to AP (script)', () => {
+  it('batchLaunchData carries the mode and the batch id, without braces', () => {
+    expect(harness({}).ribbon.batchLaunchData('email', `{${BATCH.toUpperCase()}}`)).toBe(`mode=email&batch=${BATCH}`);
+  });
+
+  it.each([
+    ['email', 'Email to AP'],
+    ['marksent', 'Mark Sent to AP'],
+  ])('openFromBatchForm opens the page on the open batch in %s mode, then refreshes the form and its ribbon', async (mode, title) => {
+    const h = harness({});
+    const f = form(BATCH, { sprk_exportstatus: 100000001 });
+    await h.ribbon.openFromBatchForm(f, mode);
+    await flush();
+    expect(h.pages).toHaveLength(1);
+    expect(h.pages[0].page).toEqual({ pageType: 'webresource', webresourceName: 'sprk_apexport', data: `mode=${mode}&batch=${BATCH}` });
+    expect(h.pages[0].options).toMatchObject({ target: 2, title, width: { value: 60, unit: '%' } });
+    expect(f.refreshed).toEqual(['data', 'ribbon']);
+  });
+
+  it('openFromBatchForm on a new form asks to save first, and an unknown mode opens nothing', async () => {
+    const h = harness({});
+    await h.ribbon.openFromBatchForm(form(null), 'email');
+    await h.ribbon.openFromBatchForm(form(BATCH), 'delete');
+    expect(h.pages).toEqual([]);
+    expect(h.alerts.map(a => a.text)).toEqual(['Save this export batch first.']);
+  });
+
+  it('the invoice commands do not open the batch modes', () => {
+    const h = harness({});
+    h.ribbon.openFromGrid([INV_A], null, 'email');
+    h.ribbon.openFromForm(form(INV_A), 'marksent');
+    expect(h.pages).toEqual([]);
+  });
+
+  it('the script version is bumped for the new commands', () => {
+    const version = /ns\.VERSION = "([^"]+)"/.exec(SCRIPT)?.[1];
+    expect(version).toBe('1.1.0');
+  });
+});
+
+const BATCH_RIBBON = fs
+  .readFileSync(
+    path.join(__dirname, '..', '..', '..', '..', 'dataverse', 'solutions', 'SpaarkeMaster', 'Entities', 'sprk_billingexport', 'RibbonDiff.xml'),
+    'utf8'
+  )
+  .replace(/^﻿/, '');
+
+function batchBlock(tag: string, id: string): string {
+  const match = new RegExp(`<${tag} Id="${id.replace(/\./g, '\\.')}">([\\s\\S]*?)</${tag}>`).exec(BATCH_RIBBON);
+  return match ? match[1] : '';
+}
+
+function batchRules(commandId: string, kind: 'EnableRule' | 'DisplayRule'): string[] {
+  return Array.from(batchBlock('CommandDefinition', commandId).matchAll(new RegExp(`<${kind} Id="([^"]+)" />`, 'g')), m => m[1]);
+}
+
+const EMAIL_COMMAND = 'sprk.ApExport.BillingExport.Form.EmailToAp.Command';
+const MARKSENT_COMMAND = 'sprk.ApExport.BillingExport.Form.MarkSentToAp.Command';
+const DOWNLOAD_CSV_COMMAND = 'sprk.ApExport.BillingExport.Form.DownloadCsv.Command';
+const BATCH_WRITE = 'sprk.ApExport.BatchWritePrivilege.DisplayRule';
+
+describe('Billing Export form: Email to AP and Mark Sent to AP (RibbonDiff wiring)', () => {
+  it('both buttons exist on the form, with their labels', () => {
+    for (const id of ['EmailToAp', 'MarkSentToAp']) {
+      expect(BATCH_RIBBON).toContain(`Id="sprk.ApExport.BillingExport.Form.${id}.Button"`);
+      expect(BATCH_RIBBON).toContain(`Location="Mscrm.Form.sprk_billingexport.MainTab.Actions.Controls._children"`);
+    }
+    expect(BATCH_RIBBON).toContain('<Title description="Email to AP" languagecode="1033" />');
+    expect(BATCH_RIBBON).toContain('<Title description="Mark Sent to AP" languagecode="1033" />');
+  });
+
+  it('the display rule is the Write privilege on sprk_billingexport, the pattern of InvoiceWritePrivilege', () => {
+    expect(batchBlock('DisplayRule', BATCH_WRITE).trim()).toBe(
+      '<EntityPrivilegeRule EntityName="sprk_billingexport" PrivilegeType="Write" PrivilegeDepth="Basic" />'
+    );
+  });
+
+  it('both commands are shown only for an existing record with Write, and enabled only on a Completed batch', () => {
+    for (const command of [EMAIL_COMMAND, MARKSENT_COMMAND]) {
+      expect(batchRules(command, 'DisplayRule')).toEqual(['sprk.ApExport.BillingExport.FormExisting.DisplayRule', BATCH_WRITE]);
+      expect(batchRules(command, 'EnableRule')).toEqual(['sprk.ApExport.BillingExport.Completed.EnableRule']);
+    }
+    const rule = batchBlock('EnableRule', 'sprk.ApExport.BillingExport.Completed.EnableRule');
+    expect(rule).toContain('FunctionName="Spaarke.ApExport.Ribbon.batchIsCompleted"');
+    expect(rule).toContain('Default="false"');
+  });
+
+  it('each command calls openFromBatchForm with the open batch and its mode', () => {
+    for (const [command, mode] of [
+      [EMAIL_COMMAND, 'email'],
+      [MARKSENT_COMMAND, 'marksent'],
+    ]) {
+      const body = batchBlock('CommandDefinition', command);
+      expect(body).toContain('FunctionName="Spaarke.ApExport.Ribbon.openFromBatchForm"');
+      expect(body).toContain('<CrmParameter Value="PrimaryControl" />');
+      expect(body).toContain(`<StringParameter Value="${mode}" />`);
+    }
+  });
+
+  it('Download CSV and JSON do not carry the Write rule (a reader may still download)', () => {
+    expect(batchRules(DOWNLOAD_CSV_COMMAND, 'DisplayRule')).not.toContain(BATCH_WRITE);
+    expect(batchRules('sprk.ApExport.BillingExport.Form.DownloadJson.Command', 'DisplayRule')).not.toContain(BATCH_WRITE);
+  });
+});
+
+/** The view source files this task edits (SpaarkeMaster). */
+function view(entityFolder: string, guid: string): string {
+  return fs
+    .readFileSync(
+      path.join(__dirname, '..', '..', '..', '..', 'dataverse', 'solutions', 'SpaarkeMaster', 'Entities', entityFolder, 'SavedQueries', `{${guid}}.xml`),
+      'utf8'
+    )
+    .replace(/^﻿/, '');
+}
+
+describe('Sent to AP Date on the views', () => {
+  it('the Billing Export Active view lists the date, in the layout and the fetch', () => {
+    const xml = view('sprk_billingexport', 'c19542df-a537-49c5-9021-b4a6cbb3fc36');
+    expect(xml).toContain('<cell name="sprk_senttoapdate"');
+    expect(xml).toContain('<attribute name="sprk_senttoapdate" />');
+  });
+
+  it.each([
+    ['Sent to AP', 'cd153641-74d9-4a9f-9318-3cb7caf4fccf'],
+    ['Paid', 'b0feb580-dbb5-464f-bb07-3ce64fb5e21d'],
+  ])('the invoice view "%s" shows the batch date through the batch lookup, with an outer join and no per-invoice copy', (_name, guid) => {
+    const xml = view('sprk_Invoice', guid);
+    expect(xml).toContain(
+      '<link-entity name="sprk_billingexport" from="sprk_billingexportid" to="sprk_billingexport" alias="export_batch" link-type="outer">'
+    );
+    expect(xml).toContain('<attribute name="sprk_senttoapdate" />');
+    // The layout cell is addressed as <alias>.<attribute>, and the alias is the one the fetch declares.
+    expect(xml).toContain('<cell name="export_batch.sprk_senttoapdate"');
+    expect(xml).toContain('<cell name="sprk_billingexport"');
+    // No column of the invoice itself carries the date.
+    expect(xml).not.toMatch(/<entity name="sprk_invoice">[\s\S]*?<attribute name="sprk_senttoapdate" \/>[\s\S]*?<link-entity/);
+  });
+
+  it('the Approved view has no batch, so it gets no linked column', () => {
+    const xml = view('sprk_Invoice', '467cbd98-eb63-4f05-b7fb-3bc71f14bac9');
+    expect(xml).not.toContain('sprk_senttoapdate');
   });
 });
