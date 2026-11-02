@@ -38,6 +38,7 @@
 
 ## Peer duties
 - Answer cross-session BFF/Console/deploy notices; for a deploy request verify ancestry, OK on content only, record it here, commit and push.
+- **Last OK: R3 dev BFF master 5796774091** (2026-11-02; from live 3740e1a105: 12 src/server files, all ebilling #2526; the Communication changes only act on a signed server-send, and the default path is unchanged; no add-in route touched). Waiting for R3's after-notice.
 - **Live on dev: 3740e1a105** (R3, owner go, 2026-11-02 18:52:25Z; replaced fcf01480f4; includes ebilling #2507, field-mapping 039, #2519, #2520, uac #2509, #2516). `ContentUnderstanding__Endpoint` is still set; app settings stay at 225. Rollback snapshot for fcf01480f4: `deploy/rollback/wwwroot-20261102T185123Z`.
 - R3's dev BFF deploy rules: owner go naming the SHA; OKs from uac-r2, ontology, field-mapping and ebilling; Router green; `scripts/Set-ChildRecordCreatorPersonSchema.ps1 -Verify` exits 0 first (plus ebilling's four `-Verify` scripts, see ebilling 7b's message 2026-11-02); after the deploy, `Ebilling__Enabled=true` and `Ebilling__StoredFileReconcileEnabled=false`; after-notices to every peer, then uac-r2's 30-minute gate. Read the live commit back from the Kudu VFS `Sprk.Bff.Api.dll` ProductVersion.
 - Peers: R3 `cc-msg-d998caed4166082c2c443072ac542a83` (name spaarke-wt-spa-external-access-platform-f2); ebilling 7b `cc-msg-a027c144054932864ee427c120b4e2c1` (ignore 9c); UAC session name `spaarke-wt-unified-access-control-r2-db`; ontology `cc-msg-12a5ac7fc59e21f736827730b8d44c8a`.
