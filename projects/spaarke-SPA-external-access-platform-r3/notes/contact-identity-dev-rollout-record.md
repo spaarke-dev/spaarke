@@ -152,4 +152,4 @@
 - Both app users' field security profiles are unchanged by membership. R3 re-read `sprk_externaltenantid`'s field permissions after step 5: both BFF app ids are still in "Spaarke Identity Link Writers" (canread 4). /healthz and /healthz/dataverse are 200.
 - `ExternalAccess:CustomerBusinessUnitId` was already BU1 (owner Q8), so nothing changed.
 - External effect expected: none. Contact access comes from grants, and the BFF reads grants and contacts app-only.
-- Remaining: step 3 (the administrator's account) last. The owner restores System Administrator in the Power Platform admin center.
+- Step 3 (the administrator's own account) was **not run**. Dataverse refuses a self-move unless a role-keeping org setting is on, and the owner chose to leave that account in the root with all 5 roles. The move is closed: every other interactive user and both BFF app users are in BU1, and the customer families and the 32 grant rows are on the BU1 team.
