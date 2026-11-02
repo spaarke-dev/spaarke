@@ -1398,22 +1398,46 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
     }
 
     /// <summary>
+    /// Dataverse error <c>0x80041103</c> (QueryBuilderNoAttribute) as a signed 32-bit integer, which is how
+    /// <see cref="Microsoft.Xrm.Sdk.OrganizationServiceFault.ErrorCode"/> exposes it: the table has no such attribute. The house idiom
+    /// (<c>RecordOwnershipResolver.AttributeDoesNotExistErrorCode</c>): typed on the code, which is locale-independent.
+    /// </summary>
+    private const int AttributeDoesNotExistErrorCode = unchecked((int)0x80041103);
+
+    /// <summary>
     /// True when <paramref name="ex"/> (or an inner exception) is Dataverse refusing a write because <paramref name="column"/> does not
-    /// exist on the table: the message names the column and says the table has no such attribute / property. A fault that merely mentions
-    /// the column (a privilege, a bad value) is not one. Task 151c-2.
+    /// exist on the table. Two signals, either is enough, both must name the column (a fault about another column is not one, and a
+    /// retry without this column would not fix it):
+    /// <list type="bullet">
+    /// <item>the typed fault: a <c>FaultException&lt;OrganizationServiceFault&gt;</c> whose error code is <c>0x80041103</c> and whose message
+    /// names the column (localized messages still carry the attribute name);</item>
+    /// <item>the text: the message says the table has no such attribute / property ("doesn't contain attribute", "does not contain
+    /// attribute / an attribute", "Could not find a property named", "Invalid property", "does not exist on type").</item>
+    /// </list>
+    /// A fault that merely mentions the column (a privilege, a bad value) is neither. Task 151c-2.
     /// </summary>
     internal static bool IsMissingColumnFault(Exception? ex, string column)
     {
         for (var e = ex; e is not null; e = e.InnerException)
         {
             var message = e.Message;
-            if (message.Contains(column, StringComparison.OrdinalIgnoreCase)
-                && (message.Contains("doesn't contain attribute", StringComparison.OrdinalIgnoreCase)
-                    || message.Contains("does not contain attribute", StringComparison.OrdinalIgnoreCase)
-                    || message.Contains("does not contain an attribute", StringComparison.OrdinalIgnoreCase)
-                    || message.Contains("Could not find a property named", StringComparison.OrdinalIgnoreCase)
-                    || message.Contains("Invalid property", StringComparison.OrdinalIgnoreCase)
-                    || message.Contains("does not exist on type", StringComparison.OrdinalIgnoreCase)))
+            if (!message.Contains(column, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            if (e is System.ServiceModel.FaultException<Microsoft.Xrm.Sdk.OrganizationServiceFault> fault
+                && fault.Detail?.ErrorCode == AttributeDoesNotExistErrorCode)
+            {
+                return true;
+            }
+
+            if (message.Contains("doesn't contain attribute", StringComparison.OrdinalIgnoreCase)
+                || message.Contains("does not contain attribute", StringComparison.OrdinalIgnoreCase)
+                || message.Contains("does not contain an attribute", StringComparison.OrdinalIgnoreCase)
+                || message.Contains("Could not find a property named", StringComparison.OrdinalIgnoreCase)
+                || message.Contains("Invalid property", StringComparison.OrdinalIgnoreCase)
+                || message.Contains("does not exist on type", StringComparison.OrdinalIgnoreCase))
             {
                 return true;
             }
@@ -1808,6 +1832,29 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
         {
             throw new InvalidOperationException(
                 "A server-only send must be a send-as-user email that is not archived to SharePoint Embedded and is not system mail.");
+        }
+
+        // Ebilling-r1 task 151c-2 (uac-r2 K5): the batch the email is linked to and the record its owner follows are one decision made twice. If
+        // both are set and they differ, the email would be owned like one batch and listed under another: refused before anything is sent or
+        // written, like the owner mismatch.
+        if (request.ServerSend is { BillingExportId: { } linkedBatch, OwnerFollows: { } ownerRecord }
+            && linkedBatch != Guid.Empty
+            && (ownerRecord.RecordId != linkedBatch
+                || !string.Equals(ownerRecord.EntityLogicalName, ServerSendOptions.BillingExportEntity, StringComparison.OrdinalIgnoreCase)))
+        {
+            _logger.LogWarning(
+                "Server send REFUSED before the send: the linked batch {Batch} differs from the record the owner follows ({Entity} {Record}) | CorrelationId: {CorrelationId}",
+                linkedBatch, ownerRecord.EntityLogicalName, ownerRecord.RecordId, correlationId);
+            throw new SdapProblemException(
+                code: ServerSendOptions.BatchMismatchCode,
+                title: "Server send inputs disagree",
+                detail: "The message was not sent: the batch it is linked to is not the record whose owner it follows.",
+                statusCode: 409,
+                extensions: new Dictionary<string, object>
+                {
+                    ["correlationId"] = correlationId,
+                    ["reasonCode"] = ServerSendOptions.BatchMismatchCode,
+                });
         }
 
         // Branch: MESSAGE (ACS Chat) sends take the persist-on-send + echo-dedup path (task 051 / FR-04).

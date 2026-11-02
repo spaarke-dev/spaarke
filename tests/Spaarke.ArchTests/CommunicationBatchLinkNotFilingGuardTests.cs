@@ -24,6 +24,17 @@ namespace Spaarke.ArchTests;
 /// </list>
 /// Each guard ships with must-fire and must-not-fire controls over synthetic data. Source and static tables only.
 /// </summary>
+/// <remarks>
+/// <para><b>What the source scan skips, and why the risk is low.</b> It reads only the folders in <see cref="GuardedFolders"/> and skips the rest of the
+/// BFF: <c>Services/Ai</c>, <c>Services/Signals</c>, <c>Services/Workspace</c>, <c>Services/Finance</c>, <c>Infrastructure/Dataverse</c>,
+/// <c>Api/Filters</c> and the top-level <c>Api/*.cs</c> files. (<c>Services/Dataverse/RecordCreation</c> is inside the scanned <c>Services/Dataverse</c>.)
+/// Inside the scanned folders, <c>Services/Communication/CommunicationService.cs</c> and <c>Models/ServerSendOptions.cs</c> are allowed to name the
+/// link, because they write it. The risk of the skipped code is low because every scanner of a row's lookups that decides ownership, filing or
+/// isolation filters through <c>RecordOwnershipResolver.OwnershipParentEntities</c> (<c>IsOwnershipParent</c>): a reference to a table that is not in it
+/// is never read as a parent. The registry guard pins that the batch table is not in it, and the behavioural check pins that a communication carrying the
+/// reference has no ownership parent. The source scan is the second line: it catches a registry or resolver that starts to name the link by name.</para>
+/// <para>Each registry read has a minimum size (<see cref="MinimumRows"/>), so a registry that read as empty fails instead of passing vacuously.</para>
+/// </remarks>
 public class CommunicationBatchLinkNotFilingGuardTests
 {
     private const string Communication = "sprk_communication";
@@ -98,6 +109,54 @@ public class CommunicationBatchLinkNotFilingGuardTests
                         or "RegardingFieldMap.All" or "CommunicationService.RegardingLookupMap"
                     && string.Equals(r.Target, Batch, StringComparison.OrdinalIgnoreCase)))
             .ToList();
+
+    /// <summary>Minimum rows each registry must yield (about half of what each held at task 151c-2), so an empty read cannot pass the guard.</summary>
+    internal static readonly IReadOnlyDictionary<string, int> MinimumRows = new Dictionary<string, int>(StringComparer.Ordinal)
+    {
+        ["RecordFamilyEdges.All"] = 80,
+        ["SecureChildLineage.Children"] = 75,
+        ["SecureRootInheritance.TypedFilingColumns"] = 2,
+        ["SecureRootInheritance.IntermediateFilingColumns"] = 2,
+        ["CoreAncestorResolver.IntermediateRootColumns"] = 19,
+        ["CoreAncestorResolver.StampSourceColumns"] = 22,
+        ["CoreAncestorResolver.CoreAncestorLookups"] = 4,
+        ["RegardingFieldMap.All"] = 6,
+        ["RecordOwnershipResolver.OwnershipParentEntities"] = 10,
+        ["CommunicationService.RegardingLookupMap"] = 6,
+    };
+
+    /// <summary>The registries whose row count is below its minimum (empty read, renamed member).</summary>
+    internal static IReadOnlyList<string> UndersizedRegistries(IEnumerable<Row> rows)
+    {
+        var counts = rows.GroupBy(r => r.Registry).ToDictionary(g => g.Key, g => g.Count());
+        return MinimumRows
+            .Where(m => !counts.TryGetValue(m.Key, out var n) || n < m.Value)
+            .Select(m => $"{m.Key}: {(counts.TryGetValue(m.Key, out var have) ? have : 0)} rows, minimum {m.Value}")
+            .ToList();
+    }
+
+    [Fact(DisplayName = "151c-2 guard: every registry the guard reads yielded at least its minimum number of rows (an empty read fails)")]
+    public void EveryRegistry_WasReadAtItsMinimumSize()
+    {
+        var undersized = UndersizedRegistries(RealRegistryRows());
+
+        Assert.True(undersized.Count == 0,
+            "A registry read as (nearly) empty, so the batch-link guard would pass without looking. Registries:\n  " + string.Join("\n  ", undersized));
+    }
+
+    [Fact(DisplayName = "151c-2 guard control (must fire): a registry with too few rows is reported, each alone")]
+    public void SizeGuard_FiresOnAnEmptyRegistry()
+    {
+        var real = RealRegistryRows();
+        Assert.Empty(UndersizedRegistries(real));
+
+        foreach (var registry in MinimumRows.Keys)
+        {
+            var without = real.Where(r => r.Registry != registry).ToList();
+            var found = Assert.Single(UndersizedRegistries(without));
+            Assert.StartsWith(registry + ":", found, StringComparison.Ordinal);
+        }
+    }
 
     [Fact(DisplayName = "151c-2 guard: sprk_communication.sprk_billingexport is in no family-edge, lineage, ownership or regarding registry")]
     public void TheBatchLink_IsInNoRegistry()
@@ -205,7 +264,8 @@ public class CommunicationBatchLinkNotFilingGuardTests
     ];
 
     /// <summary>The identifiers and literals that mean "the batch link": the table, and the constants that name the column and its table.</summary>
-    private static readonly string[] Tokens = ["\"sprk_billingexport\"", "BillingExportColumn", "BillingExportEntity", "BillingExportId"];
+    private static readonly string[] Tokens =
+        ["\"sprk_billingexport\"", "BillingExportColumn", "BillingExportEntity", "BillingExportId", "ApExportService.BatchEntity"];
 
     /// <summary>The files that may use the tokens: the option that carries the reference, and the service that writes it.</summary>
     private static readonly string[] AllowedFiles =
@@ -267,6 +327,7 @@ public class CommunicationBatchLinkNotFilingGuardTests
             "var c = ServerSendOptions.BillingExportColumn;",
             "new EntityReference(ServerSendOptions.BillingExportEntity, id);",
             "if (options.BillingExportId is not null) { }",
+            "var t = ApExportService.BatchEntity;",
         })
         {
             var found = FilesNamingTheBatchLink([("Services/Dataverse/RecordOwnershipResolver.cs", "class X {\r\n    " + line + "\r\n}")]);

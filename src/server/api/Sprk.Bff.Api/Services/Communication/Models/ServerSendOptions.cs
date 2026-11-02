@@ -56,6 +56,9 @@ internal sealed record ServerSendOptions
 
     /// <summary>The table <see cref="BillingExportColumn"/> points at.</summary>
     public const string BillingExportEntity = "sprk_billingexport";
+
+    /// <summary>The 409 refusal code when <see cref="BillingExportId"/> and <see cref="OwnerFollows"/> name different records.</summary>
+    public const string BatchMismatchCode = "server_send_batch_mismatch";
 }
 
 /// <summary>One file attached from memory by server code.</summary>

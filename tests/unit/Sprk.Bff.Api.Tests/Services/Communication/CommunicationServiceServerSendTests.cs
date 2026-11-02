@@ -474,6 +474,56 @@ public class CommunicationServiceServerSendTests
         CommunicationService.IsMissingColumnFault(null, BatchLink).Should().BeFalse();
     }
 
+    [Fact(DisplayName = "151c-2 K3: the typed Dataverse fault 0x80041103 naming the column is a missing column, in any language; the same code for another column, or another code, is not")]
+    public void MissingColumnClassifier_TypedFault()
+    {
+        static Exception Fault(int code, string reason) =>
+            new InvalidOperationException("wrapper", new System.ServiceModel.FaultException<OrganizationServiceFault>(
+                new OrganizationServiceFault { ErrorCode = code, Message = reason }, new System.ServiceModel.FaultReason(reason)));
+
+        const int noAttribute = unchecked((int)0x80041103);
+
+        // A localized message: no English phrase, only the code and the column name.
+        CommunicationService.IsMissingColumnFault(Fault(noAttribute, "Das Attribut sprk_billingexport ist nicht vorhanden."), BatchLink).Should().BeTrue();
+        // Same code, a different column: a retry without THIS column would not fix it.
+        CommunicationService.IsMissingColumnFault(Fault(noAttribute, "Das Attribut sprk_other ist nicht vorhanden."), BatchLink).Should().BeFalse();
+        // Another code (object does not exist), column named, no missing-attribute phrase.
+        CommunicationService.IsMissingColumnFault(Fault(unchecked((int)0x80040217), "sprk_billingexport ist nicht vorhanden."), BatchLink).Should().BeFalse();
+    }
+
+    /// <summary>MUTATION: removing the agreement check lets a send be owned like one batch and linked to another.</summary>
+    [Theory(DisplayName = "151c-2 K5: a server send whose batch reference and followed owner record differ is refused (409) BEFORE anything is sent or written")]
+    [InlineData("other-batch")]
+    [InlineData("other-table")]
+    public async Task BatchAndOwnerRecordDisagree_RefusesBeforeTheSend(string kind)
+    {
+        var rig = Rig();
+        var options = kind == "other-batch"
+            ? Options() with { BillingExportId = Guid.Parse("15100000-0000-4000-8000-0000000000b2") }
+            : Options() with { BillingExportId = BatchId, OwnerFollows = new ServerOwnerRecord("sprk_invoice", BatchId, FinanceTeam) };
+
+        var act = () => rig.Service.SendAsync(Request(options), RecordingUserEmailRig.UserContext());
+
+        var failure = (await act.Should().ThrowAsync<SdapProblemException>()).Which;
+        failure.StatusCode.Should().Be(409);
+        failure.Code.Should().Be(ServerSendOptions.BatchMismatchCode);
+        rig.Channel.Sent.Should().BeEmpty("nothing is sent");
+        rig.Created.Should().BeEmpty("nothing is written");
+        rig.Owners.Requests.Should().BeEmpty("refused before the owner is asked");
+    }
+
+    [Fact(DisplayName = "151c-2 K5 must-not-fire: the same batch in both, the link alone, and the owner alone are accepted")]
+    public async Task BatchAndOwnerRecordAgree_AreAccepted()
+    {
+        var rig = Rig();
+
+        await rig.Service.SendAsync(Request(Options() with { BillingExportId = BatchId }), RecordingUserEmailRig.UserContext());
+        await rig.Service.SendAsync(Request(Options() with { BillingExportId = BatchId, OwnerFollows = null }), RecordingUserEmailRig.UserContext());
+        await rig.Service.SendAsync(Request(), RecordingUserEmailRig.UserContext());
+
+        rig.Channel.Sent.Should().HaveCount(3);
+    }
+
     /// <summary>A send that carries no options is exactly the send it was: nothing merged, the default owner question, enrichment on.</summary>
     [Fact(DisplayName = "151c-1a regression pin: a send without the options has no server attachments and asks the unchanged owner question")]
     public async Task WithoutTheOptions_TheSendIsUnchanged()
