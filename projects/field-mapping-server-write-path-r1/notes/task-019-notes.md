@@ -47,17 +47,27 @@ Tests: 1750 passed; ArchTests subset 316 passed.
 
 | # | Finding | Where | Class | Disposition |
 |---|---|---|---|---|
-| P2-1 | A failed create logs every field value (`Payload: {Payload}` plus Dataverse's error body, at Error). Through step 11 this reaches the email.draft recipients and body, and the Office name and description. | `Spaarke.Dataverse/DataverseWebApiService.cs:2126-2142` (from `RecordCreationService.cs:220`) | F4 (privacy) | **Fixing:** branch `fix/fm-019-pass2`. Log field names and status only. |
+| P2-1 | A failed create logs every field value (`Payload: {Payload}` plus Dataverse's error body, at Error). Through step 11 this reaches the email.draft recipients and body, and the Office name and description. | `Spaarke.Dataverse/DataverseWebApiService.cs:2126-2142` (from `RecordCreationService.cs:220`) | F4 (privacy) | **Fixed:** PR #2520. All three PATCH-failure logs carry the field names, the status and a strict `0x…` error code only. The main session re-checked the fix diff: clean. |
 | P2-2 | The Office autonumber retry now fires only on a 412 from the PATCH upsert. The SDK `0x80060892` classifier no longer sees a body. Task 013's note "live check needed" (task-013-notes.md:105) is still open. | `RecordCreationService.cs:223`, `:1657-1659` | K (unverified) | **Live check:** add it to live check B. Provoke or observe a seed collision, or read the status Dataverse returns. If the status differs, fix the classifier before W3. |
-| P2-3 | A search-index bind under a different navigation-property name would survive the drop. It is not live: all six tables use `sprk_AI_Search_Index`. | `RecordTableRules.cs:566-590` | K (hardening) | **Fixing:** an ArchTest pins each SearchIndexed table's navigation property (`fix/fm-019-pass2`). |
-| P2-4 | #2514's run-as-user drop log fires before the secure-filing refusal and the POST. No current table reaches it. | `DataverseCreateRecordHandler.cs:448-454` | NIT | **Fixing:** the log moves after a successful POST (`fix/fm-019-pass2`). |
+| P2-3 | A search-index bind under a different navigation-property name would survive the drop. It is not live: all six tables use `sprk_AI_Search_Index`. | `RecordTableRules.cs:566-590` | K (hardening) | **Fixed:** PR #2520. A new ArchTest checks each table's navigation property, with must-fire and must-not-fire controls. |
+| P2-4 | #2514's run-as-user drop log fires before the secure-filing refusal and the POST. No current table reaches it. | `DataverseCreateRecordHandler.cs:448-454` | NIT | **Fixed:** PR #2520. The log is written after a successful POST, with 3 tests. |
 | P2-5 | When step 8 faults, the applied value is (null, null), so a malformed dropped value compares equal and is not logged. | `RecordCreationService.cs:1408-1419` | K4 | Moot once task 041 makes step 8 a no-op. No fix. |
 
 A third full pass is not needed: P2-1 is a logging-only change. A scoped Sonnet re-check covers the fix diff and its direct callers (CLAUDE.md §8.5).
 
 ## Step 1: publish size and CVE
 
-Pending. Measure against a fresh master build that carries the P1-1 fix.
+Measured against a fresh master on each fix branch:
+
+| PR | Change | Publish delta | Total | CVE |
+|---|---|---|---|---|
+| #2514 | P1-1 | (the implementer measured none; very small) | — | none |
+| #2520 | P2-1, P2-3, P2-4 | +23 B vs a50ada7330 | 39.29 MB, 192 files | none |
+| #2519 | #2515, event number | +735 B vs 0fc87effd4 | 39.29 MB | none |
+
+The W2 total stays far below the 55 MB review line. 039 measured 39.10 MB at f56cf8f724.
+
+**Review status:** two full passes, with no F-class finding open once #2520 merges. Still open: P2-2 (live check B) and the live checks themselves.
 
 ## Live checks A–C and App Insights
 
