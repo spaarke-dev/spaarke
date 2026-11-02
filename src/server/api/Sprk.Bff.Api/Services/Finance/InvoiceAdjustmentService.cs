@@ -9,6 +9,7 @@ using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.Finance.Submission;
 using Sprk.Bff.Api.Services.Jobs;
+using Sprk.Bff.Api.Services.Jobs.Handlers;
 using Sprk.Bff.Api.Services.Signals;
 using Sprk.Bff.Api.Services.Signals.Billing;
 
@@ -180,6 +181,7 @@ public sealed class InvoiceAdjustmentService
     private readonly LoadRules _loadRules;
     private readonly ILogger<InvoiceAdjustmentService> _logger;
     private readonly TimeProvider _time;
+    private readonly JobSubmissionService? _jobs;
 
     public InvoiceAdjustmentService(
         IGenericEntityService entities,
@@ -187,8 +189,9 @@ public sealed class InvoiceAdjustmentService
         IIdempotencyService locks,
         IRecordOwnershipResolver ownership,
         BillingFactLoader rules,
-        ILogger<InvoiceAdjustmentService> logger)
-        : this(entities, totals, locks, ownership, (rules ?? throw new ArgumentNullException(nameof(rules))).LoadRulesAsync, logger)
+        ILogger<InvoiceAdjustmentService> logger,
+        JobSubmissionService? jobs = null)
+        : this(entities, totals, locks, ownership, (rules ?? throw new ArgumentNullException(nameof(rules))).LoadRulesAsync, logger, time: null, jobs)
     {
     }
 
@@ -199,8 +202,10 @@ public sealed class InvoiceAdjustmentService
         IRecordOwnershipResolver ownership,
         LoadRules loadRules,
         ILogger<InvoiceAdjustmentService> logger,
-        TimeProvider? time = null)
+        TimeProvider? time = null,
+        JobSubmissionService? jobs = null)
     {
+        _jobs = jobs; // Task 152: null in a test seam; the DI path always supplies it (JobSubmissionService is a singleton).
         _entities = entities ?? throw new ArgumentNullException(nameof(entities));
         _totals = totals ?? throw new ArgumentNullException(nameof(totals));
         _locks = locks ?? throw new ArgumentNullException(nameof(locks));
@@ -455,7 +460,7 @@ public sealed class InvoiceAdjustmentService
         }
 
         // ── The row: the invoice's core record and resolver fields (013), its owner (uac-r2), the firm. ──
-        var core = InvoiceLineDecisionService.CoreOf(invoice);
+        var core = EligibleApproverResolver.SingleCoreOf(InvoiceReviewReadService.InvoiceEntity, invoice);
         if (core is null)
         {
             return new AdjustmentResult(AdjustmentStatus.OwnerUnresolved, AdjustmentCodes.OwnerUnresolved, "The invoice names no single core record.");
@@ -543,6 +548,11 @@ public sealed class InvoiceAdjustmentService
 
             return Refused(command.InvoiceId, calculation);
         }
+
+        // Task 152 (FR-43): the adjustment line and the invoice's approved total changed, so the index document is rebuilt. The change is the
+        // client's adjustment id: a repeat of the request reuses it (one re-index). Best effort; never fails the add.
+        await InvoiceIndexingJobHandler.TryEnqueueAsync(
+            _jobs, _logger, command.InvoiceId, $"a{command.AdjustmentId.ToString("N", CultureInfo.InvariantCulture)}").ConfigureAwait(false);
 
         var on = reviewedOnUtc is { } at ? new DateTimeOffset(DateTime.SpecifyKind(at, DateTimeKind.Utc)) : _time.GetUtcNow();
         return new AdjustmentResult(
@@ -707,6 +717,10 @@ public sealed class InvoiceAdjustmentService
             return Refused(command.InvoiceId, calculation);
         }
 
+        // Task 152 (FR-43): the removal changed the approved total; the change is the removed line's id (unique per adjustment line). Best effort.
+        await InvoiceIndexingJobHandler.TryEnqueueAsync(
+            _jobs, _logger, command.InvoiceId, $"r{command.LineId.ToString("N", CultureInfo.InvariantCulture)}").ConfigureAwait(false);
+
         return new AdjustmentResult(AdjustmentStatus.Applied, "ok", RemovedLineId: command.LineId, Totals: TotalsOf(invoice, calculation), AlreadyApplied: alreadyRemoved);
     }
 
@@ -787,7 +801,7 @@ public sealed class InvoiceAdjustmentService
         [InvoiceReviewReadService.LineReviewedOn] = atUtc,
     };
 
-    private static InvoiceLineInput ToInput(Entity row)
+    internal static InvoiceLineInput ToInput(Entity row)
     {
         var type = row.GetAttributeValue<OptionSetValue>(InvoiceTotalsService.LineCostType)?.Value;
         var status = row.GetAttributeValue<OptionSetValue>(InvoiceTotalsService.LineStatus)?.Value;

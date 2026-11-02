@@ -46,6 +46,8 @@ public sealed class FindingsJsonAppOnlyReadGuardTests
         typeof(SubmissionOverrideService),
         typeof(InvoiceReviewReadService),
         typeof(SubmissionCommitGate), // task 094: reads it app-only (IGenericEntityService) to decide whether a commit is left, and clears it in the undo
+        typeof(InvoiceCorrectionService), // task 101 B1: reads it app-only (IGenericEntityService) for the header provenance (EB-D-170) of a header correction; never writes it
+        typeof(InvoiceCorrectionReevaluation), // task 101 B2b-1: reads and patches it app-only (IGenericEntityService, row-version conditional update) after a correction
     ];
 
     /// <summary>The assemblies whose types may read Dataverse: the BFF and its data layer.</summary>
@@ -133,7 +135,7 @@ public sealed class FindingsJsonAppOnlyReadGuardTests
             .Select(r => $"{IlCallScan.Outermost(r.Caller).Name}.{IlCallScan.SourceMethodName(r.Caller, r.CallerMethod)} -> {IlCallScan.Describe(r.Target)} ({r.Why})")
             .Distinct();
 
-    private static string? CallerIdentityReason(MethodBase target)
+    internal static string? CallerIdentityReason(MethodBase target)
     {
         var declaring = target.DeclaringType;
         if (declaring is not null && typeof(IDataverseUserClient).IsAssignableFrom(declaring))
@@ -158,7 +160,7 @@ public sealed class FindingsJsonAppOnlyReadGuardTests
             : null;
     }
 
-    private static bool IsAsync(MethodBase method) =>
+    internal static bool IsAsync(MethodBase method) =>
         method is MethodInfo { ReturnType: var r }
         && (r == typeof(Task) || r == typeof(ValueTask)
             || (r.IsGenericType && (r.GetGenericTypeDefinition() == typeof(Task<>) || r.GetGenericTypeDefinition() == typeof(ValueTask<>))));

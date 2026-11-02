@@ -1,48 +1,42 @@
 # Current Task State
 
-> **Last Updated**: 2026-10-29 ~19:40Z. merge-to-master for PR #1911: the CI timeout is fixed on work (aedb5c7dbf); waiting on CI.
+> **Last Updated**: 2026-11-01 ~17:00Z (checkpoint). origin/work/ebilling-r1 = 9b6bd559ee (master merged at f660d84303, level with origin/master 0e3962069b). Master PR **#2507** open.
 
 ## Quick Recovery (READ THIS FIRST)
 
 | Field | Value |
 |-------|-------|
-| **Work branch** | origin/work/ebilling-r1 = **842110e6ab** (PR #1911, draft, MERGEABLE, BLOCKED by CI). It integrates 102, 103 @ dca71dfbed, storedfile-owner @ d3eb47376a, 095-errorcode @ d7218072fb, master 3d54ac845d and signal-close @ 7354384779, plus 842110e6ab (the retirement guard's ExcludedFiles list replaces a split-string constant). Local gate at f78afac072: unit 12,562/0/14, ArchTests 1,858, integration 199/0/8 and 353/0/23, Client lint ok. Route ledger = 146. |
-| **Reviews** | **uac PASS** (storedfile Q1/Q2; 102's Adjustment ForChild 5e863d29bd). "#1911 can go ready from UAC". **ontology APPROVED** (PR comment; F2 closed on every caller incl. 103 approve; K1 closed). |
-| **CI fix** | The office-scope "rest" leg was not hanging: email-save tests waited on a real token exchange (~22 s each) and a real Service Bus enqueue (5 s each). aedb5c7dbf (test code only) gives the Office test hosts a fake Graph factory and a loose job-submission mock: rest leg 12m21s → 7m32s locally, api-office 6m01s, 1,947/0 and 522/0/7. Not yet proven on CI. Follow-ups (not filed yet): test host working set ~5 GB; `test.search.windows.net` / `test.openai.azure.com` resolve to real Azure. |
-| **Next action** | Watch CI on the pushed head. When all checks are terminal with zero fail: add the integration counts to the PR body, `gh pr ready 1911`, `gh pr merge 1911 --auto --merge`, watch it merge, then the A.6 post-merge sync of the main checkout (ff-only; never reset). |
-| **CI monitor** | Use `gh pr checks 1911 --json name,bucket --jq '.[]\|"\(.bucket)\t\(.name)"'` and `grep -E` with `T=$'\t'`. NO bare jq, NO grep -P on this machine (memory: no-jq-use-gh-jq). The other checks on 842110e6ab were passing or pending at 17:40. |
+| **Running** | (1) Adversarial review (opus) of 151c-1a, range `d566e5f7fd..4e4d45ac23` on `task/ebill-151c1a-email-route` (worktree `C:\code_files\spaarke\.claude\worktrees\agent-ab1a1dc9a62b799db`). (2) uac-r2's access review of the same range, which covers owner, no copies, the negative test, thread/participant index/sweep, and Sent Items ingestion. uac-r2 asked us to **hold the merge** until its findings arrive. |
+| **Next action** | (1) #2507: when ontology-r1 approves, run `gh pr merge 2507 --auto --merge`, then watch for MERGED and tell word-add-in. If CI fails, fix it on work. (2) 151c-1a: when both reviews are in, fix the F-class findings on the branch, merge into work, run the gate (5 builds, ArchTests, broad filter, integration), and push. (3) After uac-r2 sends "move done", send notices and run the two column scripts on dev, then `Deploy-EbillingFormsViews.ps1`, then the -Verify scripts below. (4) Then 151c-1b (UI) and 151c-2 (the `sprk_billingexport` reference on `sprk_communication`). |
+| **Master PR** | #2507, auto-merge OFF until ontology-r1 approves (the ruleset needs 0 approvals). The body carries 097b and 097c together and gives the counts and the publish delta (+0.19 MB compressed). |
 
-## Running agents (2026-10-29 late)
-- **ebill-reconcile-switch**: `Ebilling:StoredFileReconcileEnabled` (default false) on branch task/ebill-reconcile-switch. Merge into work before ebilling is switched on anywhere.
-- **ebill-104**: task 104 on task/ebill-104-reject-return.
-- **ebill-101**: resumed. Persister prep (provenance EB-D-170, Clean status Q2, #2455), then 101.
+## Gate on 9b6bd559ee
+- ArchTests 1897/1. The failure is ISS-005 (#2469), which passes alone (129/0).
+- Broad filter 9891/1/7. The failure is D134 todo-pair-only, which also fails on master: **#2506**. uac-r2 bisected it to #2477 and is fixing it on `fix/uac-r2-2506-todo-pair-owner`.
+- Integration 199/0/8, Spe 353/0/23, LoadTests 5/0.
 
-## Dev enablement (EB-D-173, owner approved 2026-10-29)
-R3 deploys the dev BFF (needs uac to clear the 194b hold, plus the owner's direct approval in R3's session naming the SHA; R3 includes #1911 if merged). After R3's "gate passed, you can go" message (UAC 30-min check), WE apply the dev app settings: `Ebilling:Enabled=true` and the Finance file-store settings; `Ebilling:StoredFileReconcileEnabled=false`. Rollback: remove them. Then notify word-add-in that 095 is live on dev, and run the 015 column delete.
+## 151c-1a (task/ebill-151c1a-email-route, head 4e4d45ac23)
+- Routes: `POST /api/finance/export-batches/{id}/email` (200 `{communicationId, sentTo, cc, sentToApDate, sentToApDateSet}`) and `POST .../mark-sent-to-ap`.
+- Columns: `sprk_apexportemail` (settings) and `sprk_senttoapdate` (batch); -WhatIf only so far. Deploy order: columns, then forms and views, then the BFF.
+- I renamed `senttoapDateSet` to `sentToApDateSet` (4e4d45ac23).
+- Notes: `projects/ebilling-r1/notes/151c1a-email-route.md` on that branch.
 
-## After #1911 merges (on work, as a follow-up)
-- ontology asks (non-blocking): (1) the 105-override-server.md known limits must name the principal-change case: a repeat by a different person without Write on the Signal subjects gets 403, so only the original decider's retry completes the closes. (2) SubmissionOverrideService runs RecordRefusal twice in its catch filter, so the warning logs twice.
-- Tell word-add-in-r1 the master sha. Notify them again when 095 answers on dev (needs #1911 on master + SPA-r3's dev BFF deploy, which waits on uac's 194b hold, + the owner's OK to switch ebilling on in dev).
-- 015: delete the dev column only after the next dev BFF deploy (R3 will notify).
-- Mark 101/102/103 status in TASK-INDEX (102 and 103 are on work now; they complete when merged).
+## Owner decisions this stretch
+- EB-D-182: server-only byte attachments; one Sent to AP Date on the batch; the batch link is a plain `sprk_billingexport` reference (151c-2, which uac-r2 agreed); batch owner = the creator's default (task 150 unchanged).
 
-## Task branches / next work
-| Task | State |
-|---|---|
-| 101 | Waiting (worktree agent-ae6eabaa0ec9d718e, branch task/ebill-101-corrections). Resume: rebase on work. Persister prep (EB-D-170 provenance + Q2: unflagged lines are written Clean, with an end-to-end persister → approve test) + #2455 (line decisions and corrections use SingleCoreOf; CorrectionRow no-core throw). Then build 101. |
-| 086 / 092 / 089 | Merge work, then the content-team writers + the 086 fix round (uac F3-1, K1–K5; adversarial K2–K6). |
-| After 103 | 104, 150 (its export writer must pass `requestedBy` to CreateForAppAsync, or it fails closed), 152. After 101: 161. |
+## Dev state
+- **Hold:** uac-r2 is moving the dev users and both BFF application users into BU1 (owner-approved). Hold the 151c schema runs until uac-r2 sends "move done", or agree a time with them first. After "move done", run the -Verify scripts: `Set-EbillingFindingsJsonFieldSecurity`, `Set-EbillingFirmReasonFieldSecurity`, `Set-EbillingResubmissionOfFieldSecurity`, and `Seed-BillingSystemPolicy -Verify -RequireRows -CustomerBusinessUnit 'Spaarke Business Unit 1'`.
+- BFF fcf01480f4 (R3), our six keys intact. The ApExport code page and the 151b ribbons and views are NOT deployed (the dev import needs the owner's OK).
 
-## Peers
-- uac-r2: PASS on everything sent. #2427 OutputLookups sha to come; 194b dev-deploy notice to come.
-- ontology-r1: approved.
-- R3: `sprk_invoicestatus` off the master allow-list (#2450). It will notify when the dev BFF deploys.
-- word-add-in-r1: OK on the 095 contract fix; #2448 is on master. Owed: the master sha, then the dev notice.
-- field-mapping: told that stash 3067d28d24 is ours and fully superseded. **Owner decision pending: OK to drop it** (re-find its stash@{n} by sha first).
-- Filed: #2426 (flaky ProvisionProject test), #2454 (approval sweep), #2455 (CoreOf first-core / CorrectionRow throw).
+## Peer state
+- word-add-in: told #2507. Waits for the merge.
+- ontology-r1: review of #2507 requested, and told about #2506.
+- uac-r2: reviewing 151c-1a; fixing #2506.
 
-## Owner decisions this session (logged)
-EB-D-169 to EB-D-172 are in notes/decisions-log.md.
+## Open items
+- Older notes name the owner in plain text (003, 004, 011, 029, 091). Clean up in a docs pass.
+- 151b: 053 must add `sprk_trackingnumber` to `sprk_Invoice/Entity.xml` before any non-dev import.
+- 050a §9 items 2–4 (owner).
 
 ## Standing rules (see project CLAUDE.md)
-No bare git stash, no --no-verify. Live writes and role changes need the owner's OK; schema runs need notices. StoredFileReconcileJob is not enabled anywhere before F4 merges and DEF-044 is fixed. After merges: build the 5 test projects, then run the broad filter and ArchTests before pushing. Remove worktrees only with Remove-WorktreeSafe.ps1. Max 4 concurrent subagents. Every agent launch states a model.
+No bare git stash, no --no-verify. Live writes and role changes need the owner's OK; schema runs need notices (warn of ~1 min of invalid-column faults on column deletes). StoredFileReconcileJob stays off until F4 merges and DEF-044 is fixed. After merges: 5 builds, ArchTests, broad filter before pushing (ISS-005 flaky, #2469). If builds report a locked file, run `dotnet build-server shutdown` and rebuild. Max 4 concurrent subagents; every agent launch states a model. No bare jq, no grep -P. Remove worktrees with `pwsh -File scripts/worktree/Remove-WorktreeSafe.ps1 -Path <one path>`.

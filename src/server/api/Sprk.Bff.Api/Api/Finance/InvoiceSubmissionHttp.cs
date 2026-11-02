@@ -112,7 +112,7 @@ internal static class InvoiceSubmissionHttp
         InvoiceSubmissionOutcomeKind.OwnerRefused => outcome.FilingKept
             ? WithFilingKept(ProblemDetailsHelper.RecordOwnerRefused(outcome.OwnerRefusal!, "invoice submission", traceId))
             : ProblemDetailsHelper.RecordOwnerRefused(outcome.OwnerRefusal!, "invoice submission", traceId),
-        _ => Refused(outcome.StatusCode, outcome.ErrorCode!, outcome.Detail!, outcome.FilingKept),
+        _ => Refused(outcome.StatusCode, outcome.ErrorCode!, outcome.Detail!, outcome.FilingKept, outcome.Extensions),
     };
 
     private static IResult Accepted(InvoiceSubmissionReceipt receipt, string statusUrl) =>
@@ -123,12 +123,20 @@ internal static class InvoiceSubmissionHttp
     /// changed 2026-10-29) adds the top-level boolean <c>filingKept: true</c> to a refusal that comes after step A filed the communication; a refusal
     /// with nothing filed does not carry the field.
     /// </summary>
-    internal static IResult Refused(int statusCode, string errorCode, string detail, bool filingKept = false)
+    /// <remarks>Task 097b: <paramref name="fields"/> (a Correction's <c>reason</c> and <c>invoiceStatus</c>) are added as top-level members; a
+    /// refusal without them renders exactly as before.</remarks>
+    internal static IResult Refused(
+        int statusCode, string errorCode, string detail, bool filingKept = false, IReadOnlyDictionary<string, object?>? fields = null)
     {
         var extensions = new Dictionary<string, object?> { ["errorCode"] = errorCode };
         if (filingKept)
         {
             extensions[FilingKeptField] = true;
+        }
+
+        foreach (var (key, value) in fields ?? new Dictionary<string, object?>())
+        {
+            extensions.TryAdd(key, value);
         }
 
         return Results.Problem(statusCode: statusCode, detail: detail, extensions: extensions);

@@ -119,7 +119,9 @@ internal sealed class FromEmailWorld
     {
         var callers = new Mock<ICallerSystemUserResolver>();
         callers.Setup(c => c.ResolveAsync(It.IsAny<ClaimsPrincipal?>(), It.IsAny<CancellationToken>())).ReturnsAsync(() => Caller);
-        return new FromEmailSubmissionService(Intake.Build(), operation ?? Operation, Save, Entities.Object, Communications.Object, callers.Object,
+        // Task 192: the secure-record test the 409's `filedUnder` candidate asks (the REAL check over the harness's isolation world).
+        return new FromEmailSubmissionService(Intake.Build(), InvoiceSubmissionServiceTests.IsolationOver(() => Intake.Isolation),
+            operation ?? Operation, Save, Entities.Object, Communications.Object, callers.Object,
             Spe.Object, NullLogger<FromEmailSubmissionService>.Instance);
     }
 

@@ -3,6 +3,8 @@ using System.Globalization;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Messages;
 using Spaarke.Dataverse;
+using Sprk.Bff.Api.Services.Jobs;
+using Sprk.Bff.Api.Services.Jobs.Handlers;
 
 namespace Sprk.Bff.Api.Services.Finance;
 
@@ -32,6 +34,14 @@ public enum InvoiceLifecycleStatus
 
     /// <summary>Inactive (statecode 1). Final.</summary>
     Cancelled,
+
+    /// <summary>
+    /// Inactive (statecode 1). Closed because a corrected invoice replaced it (task 097, model 9.1). Reached only from In Review, and left only
+    /// back to In Review when the correction's commit is undone; both moves are request builders that a transaction carries
+    /// (<see cref="IInvoiceLifecycleService.BuildSupersedeRequest"/>, <see cref="IInvoiceLifecycleService.BuildSupersedeUndoRequest"/>), never
+    /// <see cref="IInvoiceLifecycleService.TransitionAsync"/>. Never counted in spend, never exportable, never decided.
+    /// </summary>
+    Superseded,
 }
 
 /// <summary>
@@ -46,7 +56,7 @@ public static class InvoiceStatusCodes
     /// <summary>statecode of an in-flight invoice (In Review, Approved, Sent to AP).</summary>
     public const int StateActive = 0;
 
-    /// <summary>statecode of a closed invoice (Paid, Rejected, Returned to Firm, Cancelled).</summary>
+    /// <summary>statecode of a closed invoice (Paid, Rejected, Returned to Firm, Cancelled, Superseded).</summary>
     public const int StateInactive = 1;
 
     /// <summary>In Review — statecode 0 (the platform default "Active", relabelled).</summary>
@@ -70,6 +80,9 @@ public static class InvoiceStatusCodes
     /// <summary>Cancelled — statecode 1 (the platform default "Inactive", relabelled).</summary>
     public const int Cancelled = 2;
 
+    /// <summary>Superseded — statecode 1 (task 088's <c>Deploy-EbillingStoredFileSchema.ps1</c> F5; set only by task 097).</summary>
+    public const int Superseded = 659490005;
+
     /// <summary>The statuscode Dataverse stores for <paramref name="status"/>.</summary>
     public static int StatusCodeOf(InvoiceLifecycleStatus status) => status switch
     {
@@ -80,6 +93,7 @@ public static class InvoiceStatusCodes
         InvoiceLifecycleStatus.Rejected => Rejected,
         InvoiceLifecycleStatus.ReturnedToFirm => ReturnedToFirm,
         InvoiceLifecycleStatus.Cancelled => Cancelled,
+        InvoiceLifecycleStatus.Superseded => Superseded,
         _ => throw new ArgumentOutOfRangeException(nameof(status), status, "Unknown invoice status."),
     };
 
@@ -87,7 +101,8 @@ public static class InvoiceStatusCodes
     public static int StateCodeOf(InvoiceLifecycleStatus status) => status switch
     {
         InvoiceLifecycleStatus.InReview or InvoiceLifecycleStatus.Approved or InvoiceLifecycleStatus.SentToAp => StateActive,
-        InvoiceLifecycleStatus.Paid or InvoiceLifecycleStatus.Rejected or InvoiceLifecycleStatus.ReturnedToFirm or InvoiceLifecycleStatus.Cancelled => StateInactive,
+        InvoiceLifecycleStatus.Paid or InvoiceLifecycleStatus.Rejected or InvoiceLifecycleStatus.ReturnedToFirm or InvoiceLifecycleStatus.Cancelled
+            or InvoiceLifecycleStatus.Superseded => StateInactive,
         _ => throw new ArgumentOutOfRangeException(nameof(status), status, "Unknown invoice status."),
     };
 
@@ -103,6 +118,7 @@ public static class InvoiceStatusCodes
             case Rejected: status = InvoiceLifecycleStatus.Rejected; return true;
             case ReturnedToFirm: status = InvoiceLifecycleStatus.ReturnedToFirm; return true;
             case Cancelled: status = InvoiceLifecycleStatus.Cancelled; return true;
+            case Superseded: status = InvoiceLifecycleStatus.Superseded; return true;
             default: status = default; return false;
         }
     }
@@ -166,6 +182,30 @@ public sealed record InvoiceCreateRequestResult(InvoiceLifecycleStatus Requested
     internal static InvoiceCreateRequestResult Refuse(InvoiceLifecycleStatus requested, string reason) => new(requested, [], reason);
 }
 
+/// <summary>
+/// The result of <see cref="IInvoiceLifecycleService.BuildSupersedeRequest"/> and <see cref="IInvoiceLifecycleService.BuildSupersedeUndoRequest"/>.
+/// </summary>
+/// <param name="Requested">The status the request moves the invoice to.</param>
+/// <param name="Current">The status the caller read (the move's starting point).</param>
+/// <param name="Request">The update to place in the caller's transaction: the status pair, conditional on the row version the caller read
+/// (<c>ConcurrencyBehavior.IfRowVersionMatches</c>). Null when refused, so a refused move can never be sent by mistake.</param>
+/// <param name="Reason">Set only when refused; <see cref="InvoiceTransitionReasons.NotAllowed"/>.</param>
+public sealed record InvoiceTransitionRequestResult(
+    InvoiceLifecycleStatus Requested,
+    InvoiceLifecycleStatus Current,
+    UpdateRequest? Request,
+    string? Reason)
+{
+    /// <summary>True when <see cref="Request"/> was built.</summary>
+    public bool Succeeded => Request is not null;
+
+    internal static InvoiceTransitionRequestResult Built(InvoiceLifecycleStatus from, InvoiceLifecycleStatus to, UpdateRequest request) =>
+        new(to, from, request, null);
+
+    internal static InvoiceTransitionRequestResult Refuse(InvoiceLifecycleStatus from, InvoiceLifecycleStatus to, string reason) =>
+        new(to, from, null, reason);
+}
+
 /// <summary>The result of <see cref="IInvoiceLifecycleService.TransitionAsync"/>.</summary>
 /// <param name="Outcome">What happened.</param>
 /// <param name="Requested">The status the caller asked for.</param>
@@ -221,6 +261,33 @@ public interface IInvoiceLifecycleService
     /// <exception cref="ArgumentNullException"><paramref name="invoice"/> is null.</exception>
     /// <exception cref="ArgumentException"><paramref name="invoice"/> is not a <c>sprk_invoice</c> row.</exception>
     InvoiceCreateRequestResult BuildInvoiceCreateRequest(Entity invoice, InvoiceLifecycleStatus initialStatus);
+
+    /// <summary>
+    /// Task 097 (model 9.1 step 4): builds, without sending, the update that closes the invoice a correction replaces: In Review to
+    /// Superseded, conditional on <paramref name="rowVersion"/> (<c>IfRowVersionMatches</c>), so an invoice approved, decided or otherwise
+    /// changed since the caller read it faults the request and the caller's whole transaction rolls back. Any <paramref name="current"/>
+    /// other than In Review is refused with <see cref="InvoiceTransitionReasons.NotAllowed"/> and no request.
+    /// </summary>
+    /// <param name="invoiceId">The invoice being replaced.</param>
+    /// <param name="current">Its status, as the caller read it together with <paramref name="rowVersion"/>.</param>
+    /// <param name="rowVersion">Its <c>versionnumber</c> from that same read.</param>
+    /// <remarks>Pure: no I/O. The caller owns the transaction and, after it commits, the invoice's re-index (task 152).</remarks>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="rowVersion"/> is not positive (no version was read).</exception>
+    InvoiceTransitionRequestResult BuildSupersedeRequest(Guid invoiceId, InvoiceLifecycleStatus current, long rowVersion);
+
+    /// <summary>
+    /// Task 097 (model 9.1 step 5): builds, without sending, the undo of <see cref="BuildSupersedeRequest"/>: Superseded back to In Review,
+    /// conditional on <paramref name="rowVersion"/> (<c>IfRowVersionMatches</c>), so the reopen never overwrites a change made since the
+    /// caller read the invoice. This is the only way out of Superseded. Any <paramref name="current"/> other than Superseded is refused with
+    /// <see cref="InvoiceTransitionReasons.NotAllowed"/> and no request (the result's <see cref="InvoiceTransitionRequestResult.Current"/>
+    /// tells a caller that finds the invoice already In Review that there is nothing to undo).
+    /// </summary>
+    /// <param name="invoiceId">The invoice to reopen.</param>
+    /// <param name="current">Its status, as the caller read it together with <paramref name="rowVersion"/>.</param>
+    /// <param name="rowVersion">Its <c>versionnumber</c> from that same read.</param>
+    /// <remarks>Pure: no I/O. The caller owns the transaction and, after it commits, the invoice's re-index (task 152).</remarks>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="rowVersion"/> is not positive (no version was read).</exception>
+    InvoiceTransitionRequestResult BuildSupersedeUndoRequest(Guid invoiceId, InvoiceLifecycleStatus current, long rowVersion);
 }
 
 /// <summary>
@@ -230,7 +297,9 @@ public interface IInvoiceLifecycleService
 /// <remarks>
 /// FR-06 matrix: In Review to Approved, Rejected, Returned to Firm or Cancelled; Approved to Sent to AP or Cancelled; Sent to AP to Paid.
 /// Anything else, including every move out of Paid, Rejected, Returned to Firm and Cancelled, is refused with
-/// <see cref="InvoiceTransitionReasons.NotAllowed"/> and no write.
+/// <see cref="InvoiceTransitionReasons.NotAllowed"/> and no write. Task 097: In Review to Superseded and its undo, Superseded to In Review,
+/// are the only moves into or out of Superseded; each is a request a transaction carries (<see cref="BuildSupersedeRequest"/>,
+/// <see cref="BuildSupersedeUndoRequest"/>), so <see cref="TransitionAsync"/> refuses both.
 /// </remarks>
 public sealed class InvoiceLifecycleService : IInvoiceLifecycleService
 {
@@ -239,14 +308,26 @@ public sealed class InvoiceLifecycleService : IInvoiceLifecycleService
 
     private readonly IFieldMappingDataverseService _records;
     private readonly ILogger<InvoiceLifecycleService> _logger;
+    private readonly JobSubmissionService? _jobs;
 
-    public InvoiceLifecycleService(IFieldMappingDataverseService records, ILogger<InvoiceLifecycleService> logger)
+    /// <param name="records">The Dataverse boundary.</param>
+    /// <param name="logger">The logger.</param>
+    /// <param name="jobs">Task 152 (FR-43): enqueues the invoice's re-index after each status move. Registered in DI always; the unit-test
+    /// seam leaves it null, which enqueues nothing.</param>
+    public InvoiceLifecycleService(
+        IFieldMappingDataverseService records,
+        ILogger<InvoiceLifecycleService> logger,
+        JobSubmissionService? jobs = null)
     {
         _records = records ?? throw new ArgumentNullException(nameof(records));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _jobs = jobs;
     }
 
-    /// <summary>True when FR-06 allows moving from <paramref name="from"/> to <paramref name="to"/> (never for from == to).</summary>
+    /// <summary>
+    /// True when FR-06 allows <see cref="TransitionAsync"/> to move from <paramref name="from"/> to <paramref name="to"/> (never for from == to).
+    /// Superseded is absent on purpose: its two moves are built only as transaction requests (<see cref="IsAllowedInTransaction"/>).
+    /// </summary>
     internal static bool IsAllowed(InvoiceLifecycleStatus from, InvoiceLifecycleStatus to) => (from, to) switch
     {
         (InvoiceLifecycleStatus.InReview, InvoiceLifecycleStatus.Approved) => true,
@@ -256,6 +337,17 @@ public sealed class InvoiceLifecycleService : IInvoiceLifecycleService
         (InvoiceLifecycleStatus.Approved, InvoiceLifecycleStatus.SentToAp) => true,
         (InvoiceLifecycleStatus.Approved, InvoiceLifecycleStatus.Cancelled) => true,
         (InvoiceLifecycleStatus.SentToAp, InvoiceLifecycleStatus.Paid) => true,
+        _ => false,
+    };
+
+    /// <summary>
+    /// Task 097: the moves built only as requests inside a caller's transaction, conditional on the row version the caller read: a correction
+    /// closes the invoice it replaces (In Review to Superseded), and the correction's undo reopens it (Superseded to In Review).
+    /// </summary>
+    internal static bool IsAllowedInTransaction(InvoiceLifecycleStatus from, InvoiceLifecycleStatus to) => (from, to) switch
+    {
+        (InvoiceLifecycleStatus.InReview, InvoiceLifecycleStatus.Superseded) => true,
+        (InvoiceLifecycleStatus.Superseded, InvoiceLifecycleStatus.InReview) => true,
         _ => false,
     };
 
@@ -300,6 +392,44 @@ public sealed class InvoiceLifecycleService : IInvoiceLifecycleService
         row[StatusCode] = new OptionSetValue(InvoiceStatusCodes.StatusCodeOf(initialStatus));
 
         return InvoiceCreateRequestResult.Built(initialStatus, [new CreateRequest { Target = row }]);
+    }
+
+    /// <inheritdoc />
+    public InvoiceTransitionRequestResult BuildSupersedeRequest(Guid invoiceId, InvoiceLifecycleStatus current, long rowVersion) =>
+        BuildConditionalTransition(invoiceId, current, InvoiceLifecycleStatus.Superseded, rowVersion);
+
+    /// <inheritdoc />
+    public InvoiceTransitionRequestResult BuildSupersedeUndoRequest(Guid invoiceId, InvoiceLifecycleStatus current, long rowVersion) =>
+        BuildConditionalTransition(invoiceId, current, InvoiceLifecycleStatus.InReview, rowVersion);
+
+    /// <summary>
+    /// The status pair as an update conditional on <paramref name="rowVersion"/>, for one of the <see cref="IsAllowedInTransaction"/> moves.
+    /// The condition is what keeps the move safe without a read here: Dataverse faults the request (and rolls back the caller's transaction)
+    /// when the invoice no longer has that version, so a status read earlier is never written over.
+    /// </summary>
+    private InvoiceTransitionRequestResult BuildConditionalTransition(
+        Guid invoiceId, InvoiceLifecycleStatus current, InvoiceLifecycleStatus target, long rowVersion)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(rowVersion);
+
+        if (!IsAllowedInTransaction(current, target))
+        {
+            _logger.LogWarning(
+                "Invoice {InvoiceId}: refused building the move {From} to {Target}; only In Review to Superseded and its undo are built as requests",
+                invoiceId, current, target);
+            return InvoiceTransitionRequestResult.Refuse(current, target, InvoiceTransitionReasons.NotAllowed);
+        }
+
+        // The pair travels together: Dataverse refuses a statuscode whose statecode does not own it.
+        var row = new Entity(InvoiceReviewService.InvoiceEntity, invoiceId)
+        {
+            RowVersion = rowVersion.ToString(CultureInfo.InvariantCulture),
+            [StateCode] = new OptionSetValue(InvoiceStatusCodes.StateCodeOf(target)),
+            [StatusCode] = new OptionSetValue(InvoiceStatusCodes.StatusCodeOf(target)),
+        };
+
+        return InvoiceTransitionRequestResult.Built(
+            current, target, new UpdateRequest { Target = row, ConcurrencyBehavior = ConcurrencyBehavior.IfRowVersionMatches });
     }
 
     /// <inheritdoc />
@@ -377,6 +507,7 @@ public sealed class InvoiceLifecycleService : IInvoiceLifecycleService
             }
 
             _logger.LogInformation("Invoice {InvoiceId} moved {From} to {Target} (version {Version})", invoiceId, current, target, version);
+            await EnqueueIndexAsync(invoiceId, version).ConfigureAwait(false);
             return InvoiceTransitionResult.Moved(current, target);
         }
 
@@ -385,6 +516,15 @@ public sealed class InvoiceLifecycleService : IInvoiceLifecycleService
             invoiceId, target, InvoiceReviewService.MaxConditionalWriteAttempts);
         return InvoiceTransitionResult.Refuse(target, lastSeen, InvoiceTransitionReasons.ConcurrentChange);
     }
+
+    /// <summary>
+    /// Task 152 (FR-43, NFR-03): after a status move, asks for the invoice's index document to be rebuilt. The change key is the row version the
+    /// move replaced: the write was conditional on it, so exactly one move owns each version and two moves never share an idempotency key
+    /// (a fixed key would let Service Bus duplicate detection drop every re-index after the first). Best effort: the move is already committed,
+    /// so a failed enqueue is logged and never undoes or fails it; the next change re-indexes the invoice.
+    /// </summary>
+    private Task EnqueueIndexAsync(Guid invoiceId, long replacedVersion) =>
+        InvoiceIndexingJobHandler.TryEnqueueAsync(_jobs, _logger, invoiceId, $"v{replacedVersion.ToString(CultureInfo.InvariantCulture)}");
 
     private static bool TryReadLong(Dictionary<string, object?> row, string column, out long value)
     {

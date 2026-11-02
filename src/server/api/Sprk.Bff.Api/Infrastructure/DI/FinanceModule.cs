@@ -139,6 +139,13 @@ public static class FinanceModule
         services.AddScoped<InvoiceLineDecisionService>();
         // Invoice-level adjustments (ebilling-r1 task 102, FR-32, D-74): add / remove an Adjustment line and the rule list; 016 owns the amounts and totals.
         services.AddScoped<InvoiceAdjustmentService>();
+        // Value and code corrections (ebilling-r1 task 101 part B1, FR-31, FR-22, D-64): the D-64 correction rows and the corrected value. Concrete (ADR-010).
+        // Scoped: it holds the scoped CodeSetResolver and the scoped EligibleApproverResolver. Unconditional (flag rule above); the routes carry the kill switch.
+        services.AddScoped<InvoiceCorrectionService>();
+        // B2b-1: the follow-through of a saved correction (re-evaluation diff, findings patch, line status), the service's onValueWritten seam. Concrete
+        // (ADR-010), scoped: it holds the scoped BillingFactLoader and InvoiceComplianceEvaluator. Unconditional (flag rule above). B2b-2: it also takes the
+        // singleton SignalWriter (SignalsModule) for the Signals step; no registration added.
+        services.AddScoped<InvoiceCorrectionReevaluation>();
         // UTBMS line coding (ebilling-r1 task 047, FR-22, D-46): resolves an invoice's code set (CodeSetResolver), codes its
         // lines through IInvoiceAi.CodeLinesAsync in chunks, and refuses any code outside the set (ILineCodingService).
         // Scoped (they hold the scoped IInvoiceAi and the scoped suggestion provider; IGenericEntityService is a singleton);
@@ -193,6 +200,14 @@ public static class FinanceModule
         // The refresh is an ADR-036 scheduled job (no BackgroundService), every 15 minutes.
         services.AddScoped<EligibleApproverResolver>();
         services.AddScoped<InvoiceApprovalService>();
+
+        // Reject and Return to Firm of an invoice (ebilling-r1 task 104, FR-36): concrete (ADR-010), scoped like the approval service it follows.
+        services.AddScoped<InvoiceRejectReturnService>();
+
+        // AP export batch (ebilling-r1 task 150, FR-41, EB-D-178): the service (claim, generate, store, send) and the one seam that decides who may export.
+        // Concrete (ADR-010), scoped like the Stored File service and the lifecycle service it uses. Unconditional (flag rule above); the routes read the kill switch.
+        services.AddScoped<ApExportAuthorization>();
+        services.AddScoped<ApExportService>();
         services.AddScheduledJob<EligibleApproverRefreshJob>(EligibleApproverRefreshJob.DefaultCronSchedule);
 
         // Invoice submission processing (ebilling-r1 task 049 parts B-E, FR-20 / FR-21, D-101; Processing Pipeline steps 1-9). The pipeline is
@@ -354,7 +369,7 @@ public static class FinanceModule
         // Scoped: extracts invoice facts via AI (Playbook B), creates BillingEvent records
         // IdempotencyKey: extract-{invoiceId}
         // VisibilityState ALWAYS "Invoiced" (deterministic, never from LLM)
-        // Enqueues InvoiceIndexing on success (InvoiceExtractionJobHandler.cs:344).
+        // Enqueues InvoiceIndexing on success (legacy path, no producer since 050a; 050b deletes it).
         // NOTE (verified 2026-08-20): it does NOT enqueue SpendSnapshotGeneration — no code
         // anywhere submits that job type. The snapshots → signals → rollup analytics chain has
         // no automatic trigger; FinanceRollupService runs ONLY via the manual
@@ -367,16 +382,18 @@ public static class FinanceModule
         // ============================================================================
         // Invoice Indexing Job Handler (indexes invoices into Azure AI Search)
         // ============================================================================
-        // Scoped: generates embeddings and indexes invoice documents for semantic search
-        // IdempotencyKey: invoice-index-{invoiceId}
+        // Scoped: builds one search document per invoice from its structured records (sprk_invoice + sprk_billingevent lines;
+        // ebilling-r1 task 152, FR-43) and indexes it with an embedding for semantic search
+        // IdempotencyKey: invoice-index-{invoiceId:N}-{change} (InvoiceIndexingJobHandler.BuildJob). Producers: the acceptance
+        // (InvoiceSubmissionAfterSteps, change "accepted") and every lifecycle move (InvoiceLifecycleService, change "v{replaced row version}")
         // Index: spaarke-invoices-index (MVP single index; per-tenant fan-out is a future extension)
         // Embeddings: text-embedding-3-large (3072 dimensions)
         //
-        // Depends on IOpenAiClient + SearchIndexClient — both gated on DocumentIntelligence:Enabled.
-        if (documentIntelligenceEnabled)
-        {
-            services.AddScoped<IJobHandler, InvoiceIndexingJobHandler>();
-        }
+        // UNCONDITIONAL (flag rule above): every lifecycle move and line/adjustment/correction/override change queues this job, so a missing
+        // handler would dead-letter each message NoHandler. SearchIndexClient (registered only with DocumentIntelligence:Enabled) is an
+        // OPTIONAL constructor dependency (default null; IInvoiceAi already has its Null peer), and the handler reads Ebilling:Enabled itself
+        // (ADR-018): flag off = completes with nothing done; no search client = completes with one warning; no embedding = indexed without a vector.
+        services.AddScoped<IJobHandler, InvoiceIndexingJobHandler>();
 
         // ============================================================================
         // Spend Snapshot Generation Job Handler (deterministic aggregation, no AI)

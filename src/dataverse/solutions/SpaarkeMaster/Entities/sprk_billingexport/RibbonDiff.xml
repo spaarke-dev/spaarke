@@ -1,14 +1,89 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
 <RibbonDiffXml xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
-  <CustomActions />
+  <CustomActions>
+    <CustomAction Id="sprk.ApExport.BillingExport.Form.DownloadCsv.CustomAction" Location="Mscrm.Form.sprk_billingexport.MainTab.Actions.Controls._children" Sequence="100">
+      <CommandUIDefinition>
+        <Button Id="sprk.ApExport.BillingExport.Form.DownloadCsv.Button" Command="sprk.ApExport.BillingExport.Form.DownloadCsv.Command" LabelText="$LocLabels:sprk.ApExport.DownloadCsv.LabelText" Alt="$LocLabels:sprk.ApExport.DownloadCsv.LabelText" ToolTipTitle="$LocLabels:sprk.ApExport.DownloadCsv.LabelText" ToolTipDescription="$LocLabels:sprk.ApExport.DownloadCsv.ToolTipDescription" Image16by16="$webresource:sprk_/icons/cmd/save.svg" Image32by32="$webresource:sprk_/icons/cmd/save.svg" ModernImage="$webresource:sprk_/icons/cmd/save.svg" Sequence="100" TemplateAlias="o1" />
+      </CommandUIDefinition>
+    </CustomAction>
+    <CustomAction Id="sprk.ApExport.BillingExport.Form.DownloadJson.CustomAction" Location="Mscrm.Form.sprk_billingexport.MainTab.Actions.Controls._children" Sequence="110">
+      <CommandUIDefinition>
+        <Button Id="sprk.ApExport.BillingExport.Form.DownloadJson.Button" Command="sprk.ApExport.BillingExport.Form.DownloadJson.Command" LabelText="$LocLabels:sprk.ApExport.DownloadJson.LabelText" Alt="$LocLabels:sprk.ApExport.DownloadJson.LabelText" ToolTipTitle="$LocLabels:sprk.ApExport.DownloadJson.LabelText" ToolTipDescription="$LocLabels:sprk.ApExport.DownloadJson.ToolTipDescription" Image16by16="$webresource:sprk_/icons/cmd/save.svg" Image32by32="$webresource:sprk_/icons/cmd/save.svg" ModernImage="$webresource:sprk_/icons/cmd/save.svg" Sequence="110" TemplateAlias="o1" />
+      </CommandUIDefinition>
+    </CustomAction>
+  </CustomActions>
   <Templates>
     <RibbonTemplates Id="Mscrm.Templates"></RibbonTemplates>
   </Templates>
-  <CommandDefinitions />
+  <CommandDefinitions>
+    <CommandDefinition Id="sprk.ApExport.BillingExport.Form.DownloadCsv.Command">
+      <EnableRules>
+        <EnableRule Id="sprk.ApExport.BillingExport.Completed.EnableRule" />
+      </EnableRules>
+      <DisplayRules>
+        <DisplayRule Id="sprk.ApExport.BillingExport.FormExisting.DisplayRule" />
+      </DisplayRules>
+      <Actions>
+        <JavaScriptFunction Library="$webresource:sprk_/scripts/bff_auth.js" FunctionName="isNaN" />
+        <JavaScriptFunction Library="$webresource:sprk_/scripts/assignedaccess_postsave.js" FunctionName="isNaN" />
+        <JavaScriptFunction Library="$webresource:sprk_/scripts/apexport_ribbon.js" FunctionName="Spaarke.ApExport.Ribbon.downloadBatchFile">
+          <CrmParameter Value="PrimaryControl" />
+          <StringParameter Value="csv" />
+        </JavaScriptFunction>
+      </Actions>
+    </CommandDefinition>
+    <CommandDefinition Id="sprk.ApExport.BillingExport.Form.DownloadJson.Command">
+      <EnableRules>
+        <EnableRule Id="sprk.ApExport.BillingExport.Completed.EnableRule" />
+      </EnableRules>
+      <DisplayRules>
+        <DisplayRule Id="sprk.ApExport.BillingExport.FormExisting.DisplayRule" />
+      </DisplayRules>
+      <Actions>
+        <JavaScriptFunction Library="$webresource:sprk_/scripts/bff_auth.js" FunctionName="isNaN" />
+        <JavaScriptFunction Library="$webresource:sprk_/scripts/assignedaccess_postsave.js" FunctionName="isNaN" />
+        <JavaScriptFunction Library="$webresource:sprk_/scripts/apexport_ribbon.js" FunctionName="Spaarke.ApExport.Ribbon.downloadBatchFile">
+          <CrmParameter Value="PrimaryControl" />
+          <StringParameter Value="json" />
+        </JavaScriptFunction>
+      </Actions>
+    </CommandDefinition>
+  </CommandDefinitions>
   <RuleDefinitions>
     <TabDisplayRules />
-    <DisplayRules />
-    <EnableRules />
+    <DisplayRules>
+      <DisplayRule Id="sprk.ApExport.BillingExport.FormExisting.DisplayRule">
+        <FormStateRule State="Existing" />
+      </DisplayRule>
+    </DisplayRules>
+    <EnableRules>
+      <EnableRule Id="sprk.ApExport.BillingExport.Completed.EnableRule">
+        <CustomRule Library="$webresource:sprk_/scripts/apexport_ribbon.js" FunctionName="Spaarke.ApExport.Ribbon.batchIsCompleted" Default="false">
+          <CrmParameter Value="PrimaryControl" />
+        </CustomRule>
+      </EnableRule>
+    </EnableRules>
   </RuleDefinitions>
-  <LocLabels />
+  <LocLabels>
+    <LocLabel Id="sprk.ApExport.DownloadCsv.LabelText">
+      <Titles>
+        <Title description="Download CSV" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.ApExport.DownloadCsv.ToolTipDescription">
+      <Titles>
+        <Title description="Download this batch's CSV file, as it was written at export" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.ApExport.DownloadJson.LabelText">
+      <Titles>
+        <Title description="Download JSON" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.ApExport.DownloadJson.ToolTipDescription">
+      <Titles>
+        <Title description="Download this batch's JSON file, as it was written at export" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+  </LocLabels>
 </RibbonDiffXml>

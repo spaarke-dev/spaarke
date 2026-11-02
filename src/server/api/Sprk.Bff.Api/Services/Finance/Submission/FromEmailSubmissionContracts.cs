@@ -29,8 +29,9 @@ public static class FromEmailSubmissionErrors
     /// </summary>
     public const string EmailUnavailable = "ebilling.submission.email_unavailable";
 
-    /// <summary>409: a Correction is refused; <c>reason</c> is one of <see cref="FromEmailCorrectionReasons"/>.</summary>
-    public const string CorrectionNotAllowed = "ebilling.submission.correction_not_allowed";
+    /// <summary>409: a Correction is refused; <c>reason</c> is one of <see cref="FromEmailCorrectionReasons"/>. Task 097b: the intake's code
+    /// (<see cref="InvoiceSubmissionErrors.CorrectionNotAllowed"/>), shared with the from-document route.</summary>
+    public const string CorrectionNotAllowed = InvoiceSubmissionErrors.CorrectionNotAllowed;
 
     /// <summary>Outcome code (contract section 9): the <c>.eml</c> save did not finish, so the submission ended Failed.</summary>
     public const string EmailSaveFailed = "ebilling.submission.email_save_failed";
@@ -64,13 +65,34 @@ public static class FromEmailUnidentifiableReasons
     public const string EmlAmbiguous = "eml_ambiguous";
 }
 
-/// <summary>The <c>reason</c> values of 409 <see cref="FromEmailSubmissionErrors.CorrectionNotAllowed"/>; <see cref="NotAvailable"/> until task 097 (OP-7).</summary>
+/// <summary>
+/// The <c>reason</c> values of 409 <see cref="FromEmailSubmissionErrors.CorrectionNotAllowed"/> on both Submit Invoice routes (from-email and,
+/// since task 097b, from-document). <see cref="NotAvailable"/> was the answer until task 097b (OP-7) and is no longer produced.
+/// </summary>
 public static class FromEmailCorrectionReasons
 {
     public const string NotAvailable = "not_available";
+
+    /// <summary>The invoice is not In Review (Approved, Sent to AP, Paid, or any inactive status); the answer also carries <c>invoiceStatus</c>.</summary>
     public const string InvoiceStatus = "invoice_status";
+
+    /// <summary>The invoice (or its submission) is from another firm than the request's.</summary>
     public const string DifferentFirm = "different_firm";
+
+    /// <summary>The invoice (or its submission) is filed under another core record than the request's.</summary>
     public const string DifferentCoreRecord = "different_core_record";
+
+    /// <summary>Task 097b (EB-D-179 item 3, D-37): the request's firm invoice number is not the one the invoice was submitted with.</summary>
+    public const string DifferentInvoiceNumber = "different_invoice_number";
+
+    /// <summary>Task 097b (EB-D-179 item 1): the invoice has no submission record, so it cannot be corrected.</summary>
+    public const string NoSubmission = "no_submission";
+
+    /// <summary>
+    /// Task 097 second review (F1): the invoice's own submission has not finished (Received, Processing, Failed, or Rejected other than
+    /// held Blocked), so a correction could supersede an invoice whose own processing is still running. Retry once it has finished.
+    /// </summary>
+    public const string SubmissionInProgress = "submission_in_progress";
 }
 
 /// <summary>The mark values (exact case, contract section 2).</summary>
@@ -345,3 +367,41 @@ public sealed record InvoiceSubmissionFromEmailAccepted(Guid SubmissionId, Guid 
 
 /// <summary>One firm of a core record (contract section 8).</summary>
 public sealed record CoreRecordFirm(Guid FirmId, string Name);
+
+/// <summary>The 200 body of <c>GET /api/finance/invoices/{invoiceId}/correction-prefill</c> (ebilling-r1 task 097e; contract section 10).</summary>
+/// <param name="InvoiceId">The invoice asked about.</param>
+/// <param name="Firm">The invoice's firm.</param>
+/// <param name="CoreRecord">The invoice's one core record.</param>
+/// <param name="InvoiceStatus">The <c>InvoiceLifecycleStatus</c> name; null for a status this lifecycle does not know.</param>
+/// <param name="TrackingNumber">The invoice's own submission's tracking number; null when it has none.</param>
+/// <param name="FirmInvoiceNumber">The firm invoice number the invoice was submitted with.</param>
+/// <param name="CanCorrect">The intake's answer now (<see cref="InvoiceSubmissionService.JudgeCorrectionAsync"/>).</param>
+/// <param name="Reason">When not <paramref name="CanCorrect"/>: <c>invoice_status</c>, <c>no_submission</c> or <c>submission_in_progress</c>; else null.</param>
+/// <param name="ReplacedBy">When the invoice is Superseded: its direct replacement, if the caller can read it; else null.</param>
+public sealed record CorrectionPrefillResponse(
+    Guid InvoiceId,
+    CorrectionPrefillFirm Firm,
+    CorrectionPrefillCoreRecord CoreRecord,
+    string? InvoiceStatus,
+    string? TrackingNumber,
+    string FirmInvoiceNumber,
+    bool CanCorrect,
+    string? Reason,
+    CorrectionPrefillReplacement? ReplacedBy);
+
+/// <summary>The prefill's firm (<c>sprk_organization</c> id and name).</summary>
+public sealed record CorrectionPrefillFirm(Guid Id, string Name);
+
+/// <summary>The prefill's core record: <c>entityType</c> is <c>Matter</c>, <c>Project</c> or <c>WorkAssignment</c> (the intake vocabulary).</summary>
+public sealed record CorrectionPrefillCoreRecord(string EntityType, Guid EntityId, string Name);
+
+/// <summary>The invoice that replaced a Superseded one, as the caller may see it (id and the invoice's primary name).</summary>
+public sealed record CorrectionPrefillReplacement(Guid InvoiceId, string Name);
+
+/// <summary>
+/// Task 192: the optional <c>filedUnder</c> extension of the from-email 409 <c>document_core_record_mismatch</c> ("the communication is
+/// filed under another core record"): the record the email is filed under. <c>entityType</c> is <c>Matter</c>, <c>Project</c> or
+/// <c>WorkAssignment</c> (the intake vocabulary, never a logical name); <c>name</c> is the record's primary name. Sent only when the caller can
+/// open the record; otherwise the 409 is exactly what it was without the field.
+/// </summary>
+public sealed record FromEmailFiledUnder(string EntityType, Guid EntityId, string Name);

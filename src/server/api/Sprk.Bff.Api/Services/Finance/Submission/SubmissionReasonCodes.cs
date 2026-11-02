@@ -25,6 +25,15 @@ public static class SubmissionReasonCodes
     /// </summary>
     public const string Blocked = "ebilling.submission.blocked";
 
+    // ── Derived at read time (ebilling-r1 task 097f, EB-D-180) ──
+
+    /// <summary>
+    /// Derived, never stored: the status routes answer it as the <c>outcomeReasonCode</c> of an Accepted submission whose own invoice is
+    /// Superseded by a correction (<see cref="InvoiceSubmissionView.ReplacedBy"/> names the correcting submission when the caller may read it).
+    /// The submission itself stays Accepted and nothing is written; it is not a hold (the held set reads the stored column, never this).
+    /// </summary>
+    public const string ReplacedByCorrection = "ebilling.submission.replaced_by_correction";
+
     // ── Decided by a person (ebilling-r1 task 105; D-24, D-73) ──
 
     /// <summary>
@@ -174,6 +183,46 @@ public static class SubmissionReasonCodes
     /// submission Processing and flags it for the administrator, and nothing marks it Failed.
     /// </summary>
     public const string StoredStateMismatch = "ebilling.submission.stored_state_mismatch";
+
+    // ── A Correction at commit (ebilling-r1 task 097c; model 9.1 "Existing invoice", step 4) ──
+
+    /// <summary>
+    /// Task 097c: the invoice a Correction replaces is no longer In Review when the job commits (approved, sent to AP, paid, or otherwise moved
+    /// on since the intake checked it; the intake's check is not a lock). The intake's 409 <see cref="InvoiceSubmissionErrors.CorrectionNotAllowed"/>
+    /// with reason <see cref="FromEmailCorrectionReasons.InvoiceStatus"/>, as one stored code. Permanent: nothing is written.
+    /// </summary>
+    public const string CorrectionInvoiceStatus = InvoiceSubmissionErrors.CorrectionNotAllowed + "." + FromEmailCorrectionReasons.InvoiceStatus;
+
+    /// <summary>Task 097c: the replaced invoice is from another firm at commit (the intake's reason <see cref="FromEmailCorrectionReasons.DifferentFirm"/>). Permanent.</summary>
+    public const string CorrectionDifferentFirm = InvoiceSubmissionErrors.CorrectionNotAllowed + "." + FromEmailCorrectionReasons.DifferentFirm;
+
+    /// <summary>
+    /// Task 097c: the replaced invoice is filed under another core record, or under none or several, at commit (the intake's reason
+    /// <see cref="FromEmailCorrectionReasons.DifferentCoreRecord"/>). Permanent.
+    /// </summary>
+    public const string CorrectionDifferentCoreRecord = InvoiceSubmissionErrors.CorrectionNotAllowed + "." + FromEmailCorrectionReasons.DifferentCoreRecord;
+
+    /// <summary>
+    /// Task 097 second review (F2): the earlier submission named by <c>sprk_resubmissionof</c> carries another firm invoice number than this
+    /// submission at commit (trimmed, ignoring case, as the intake compares; D-37). The intake's reason
+    /// <see cref="FromEmailCorrectionReasons.DifferentInvoiceNumber"/>. Permanent.
+    /// </summary>
+    public const string CorrectionDifferentInvoiceNumber = InvoiceSubmissionErrors.CorrectionNotAllowed + "." + FromEmailCorrectionReasons.DifferentInvoiceNumber;
+
+    /// <summary>
+    /// Task 097 second review (F1): the replaced invoice's own submission has not finished at commit (only Accepted, or Rejected and held
+    /// Blocked, may be superseded; <see cref="InvoiceSubmissionService.CorrectionTargetSubmissionFinished"/>). The intake's reason
+    /// <see cref="FromEmailCorrectionReasons.SubmissionInProgress"/>. Permanent, not a Retry: the earlier submission may run for a long time,
+    /// so the correction ends Failed and the firm submits it again once that one has finished.
+    /// </summary>
+    public const string CorrectionSubmissionInProgress = InvoiceSubmissionErrors.CorrectionNotAllowed + "." + FromEmailCorrectionReasons.SubmissionInProgress;
+
+    /// <summary>
+    /// Task 097c: the Correction's target no longer resolves at commit: the earlier submission it names is gone, no longer links the invoice
+    /// created from it (<see cref="SubmissionSnapshot.ReadCorrectedInvoiceAsync"/>), or that invoice is gone. Permanent (fail closed: the
+    /// correction is never committed as a New invoice beside the one it was meant to replace).
+    /// </summary>
+    public const string CorrectionTargetUnavailable = "ebilling.submission.correction_target_unavailable";
 
     /// <summary>
     /// The document-level read failures (FR-21): the submission is Rejected with the code and no invoice is created. Every other read

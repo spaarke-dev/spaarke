@@ -332,6 +332,10 @@ public class RecordOwnerAssignmentCensusTests
             "transaction UpsertRequests of sprk_invoicecorrection rows built with deterministic ids (the Accepted-in-bulk rows)",
             "ebilling-r1 task 100: ResolveOwnerAsync ForParents over the invoice's one core record (secure-if-any), applied with "
             + "RecordOwnerResolution.ApplyTo to every row; an unresolved owner refuses before the first write, so nothing is created."),
+        new UnscannedWriter("InvoiceCorrectionService.cs",
+            "transaction UpsertRequest of one sprk_invoicecorrection row (Corrected or Confirmed individually) built with a deterministic id",
+            "ebilling-r1 task 101 part B1: ResolveOwnerAsync over the row's own question (RecordOwnershipContext.ForChild, the same one the "
+            + "secure-child reconciler asks), applied with RecordOwnerResolution.ApplyTo; an unresolved owner refuses before the write, so nothing is created."),
         new UnscannedWriter("InvoiceAdjustmentService.cs",
             "transaction CreateRequest of one sprk_billingevent Adjustment line built with a deterministic id",
             "ebilling-r1 task 102: ResolveOwnerAsync ForParents over the invoice's one core record (secure-if-any), applied with "

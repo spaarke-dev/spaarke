@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Http.Json;
 using Microsoft.Extensions.Options;
 using Sprk.Bff.Api.Api.Filters;
 using Sprk.Bff.Api.Api.Office;
+using Sprk.Bff.Api.Infrastructure.Auth;
 using Sprk.Bff.Api.Infrastructure.Authentication;
 using Sprk.Bff.Api.Infrastructure.Errors;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
@@ -378,6 +379,7 @@ internal static class InvoiceSubmissionFromEmailHttp
         HttpContext http,
         FromEmailSubmissionService service,
         Spaarke.Core.Auth.AuthorizationService authorization,
+        Spaarke.Dataverse.IGenericEntityService entities,
         ILogger<FromEmailSubmissionService> logger,
         CancellationToken ct)
     {
@@ -433,7 +435,65 @@ internal static class InvoiceSubmissionFromEmailHttp
             extensions[key] = value;
         }
 
+        // Task 192: the optional `filedUnder` of the "filed under another core record" 409, only for a record the caller can open.
+        if (outcome.FiledUnder is { } candidate
+            && await FiledUnderAsync(candidate, http, entities, authorization, logger, ct) is { } filedUnder)
+        {
+            extensions[FiledUnderField] = filedUnder;
+        }
+
         return Results.Problem(statusCode: outcome.Status, detail: outcome.Detail, extensions: extensions);
+    }
+
+    /// <summary>The top-level field of the "filed under another core record" 409 (contract section 6; additive and optional to read).</summary>
+    internal const string FiledUnderField = "filedUnder";
+
+    /// <summary>
+    /// <c>filedUnder</c> of the "filed under another core record" 409 (task 192): the record's type in the intake vocabulary, id and primary
+    /// name, only when the caller has Read on it, checked as the caller through the Finance filter's own rights decision
+    /// (<see cref="FinanceAuthorizationFilter.CallerHoldsRightsAsync"/>, operation <c>finance.read</c>, as <c>replacedBy</c> does). The record
+    /// is read app-only for its name AFTER that check passes, so one the caller cannot open is never named or read. DELIBERATE: the field is
+    /// optional, so a refusal OR a fault (the rights, the name, an unmapped type) leaves it out, a Warning for a fault; it never changes the
+    /// 409's status, code or detail and is never a 503. The candidate is already a non-secure record (<see cref="FromEmailSubmissionOutcome.FiledUnder"/>).
+    /// </summary>
+    private static async Task<FromEmailFiledUnder?> FiledUnderAsync(
+        InvoiceCoreRecord record,
+        HttpContext http,
+        Spaarke.Dataverse.IGenericEntityService entities,
+        Spaarke.Core.Auth.AuthorizationService authorization,
+        ILogger logger,
+        CancellationToken ct)
+    {
+        try
+        {
+            var typeName = record.Kind switch
+            {
+                InvoiceCoreRecordKind.Matter => "Matter",
+                InvoiceCoreRecordKind.Project => "Project",
+                InvoiceCoreRecordKind.WorkAssignment => "WorkAssignment",
+                _ => null,
+            };
+            if (typeName is null || CallerResolution.ResolveObjectId(http.User) is not { Length: > 0 } userId)
+            {
+                return null;
+            }
+
+            var mayRead = await FinanceAuthorizationFilter.CallerHoldsRightsAsync(
+                authorization, userId, InvoiceSubmissionEndpoints.CoreEntitySet(record.Kind), record.RecordId, "finance.read",
+                TokenHelper.ExtractBearerTokenOrNull(http), ct);
+            if (!mayRead)
+            {
+                return null;
+            }
+
+            var name = await ReadNameAsync(entities, record.EntityLogicalName, record.RecordId, logger, ct, "From-email 409");
+            return name is null ? null : new FromEmailFiledUnder(typeName, record.RecordId, name);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            logger.LogWarning(ex, "From-email 409: the record the email is filed under could not be checked or read; filedUnder is left out");
+            return null;
+        }
     }
 
     /// <summary>
@@ -485,6 +545,187 @@ internal static class InvoiceSubmissionFromEmailHttp
             .Select(f => new CoreRecordFirm(f.FirmId, f.Name))
             .ToList());
     }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // GET /api/finance/invoices/{invoiceId}/correction-prefill (task 097e, contract section 10)
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// What the Outlook add-in needs to prefill a correction of one invoice (contract section 10). The route's Finance filter has already put
+    /// the caller's own Write on the invoice (uniform 404 without it, for an unknown invoice, at step 0 and on a rights fault). The invoice is
+    /// then read app-only, and <c>canCorrect</c> is the intake's own guard (<see cref="InvoiceSubmissionService.JudgeCorrectionPrefillAsync"/>)
+    /// over the invoice's own firm, record and number. Any read fault is 503, never a partial answer, except the OPTIONAL
+    /// <c>replacedBy</c> (<see cref="FindReplacementAsync"/>), which a fault leaves null.
+    /// </summary>
+    internal static async Task<IResult> GetCorrectionPrefillAsync(
+        Guid invoiceId,
+        HttpContext http,
+        InvoiceSubmissionService submissions,
+        Spaarke.Dataverse.IGenericEntityService entities,
+        Spaarke.Core.Auth.AuthorizationService authorization,
+        ILogger<FromEmailSubmissionService> logger,
+        CancellationToken ct)
+    {
+        Microsoft.Xrm.Sdk.Entity? invoice;
+        try
+        {
+            invoice = await entities.RetrieveAsync(
+                Services.Finance.FinanceBaseValues.InvoiceEntity, invoiceId, [.. InvoiceSubmissionService.CorrectionInvoiceColumns, InvoiceNameColumn], ct);
+        }
+        catch (Exception ex) when (InvoiceSubmissionEndpoints.IsNotFound(ex))
+        {
+            invoice = null;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            logger.LogWarning(ex, "Correction prefill: invoice {InvoiceId} could not be read", invoiceId);
+            return PrefillUnavailable();
+        }
+
+        if (invoice is null)
+        {
+            // Gone since the rights check: the same answer as a refusal, so nothing about the invoice is revealed.
+            return FinanceAuthorizationFilter.UniformRecordNotFound(http);
+        }
+
+        var firmId = invoice.GetAttributeValue<Microsoft.Xrm.Sdk.EntityReference>(InvoiceSubmissionPersister.InvoiceVendorOrg)?.Id;
+        var single = Services.Finance.EligibleApproverResolver.SingleCoreOf(Services.Finance.FinanceBaseValues.InvoiceEntity, invoice);
+        if (firmId is not { } firm || firm == Guid.Empty || single is not { } found
+            || InvoiceSubmissionService.CoreRecordKindOfTable(found.Entity) is not { } kind)
+        {
+            // The intake refuses such an invoice too (different_firm / different_core_record); there is nothing coherent to prefill.
+            logger.LogWarning("Correction prefill: invoice {InvoiceId} names no single firm and core record", invoiceId);
+            return PrefillUnavailable();
+        }
+
+        var core = new InvoiceCoreRecord(kind, found.Id);
+        var judgement = await submissions.JudgeCorrectionPrefillAsync(invoice, core, firm, ct);
+        if (judgement is null)
+        {
+            return PrefillUnavailable();
+        }
+
+        var firmName = await ReadNameAsync(entities, InvoiceSubmissionService.OrganizationEntity, firm, logger, ct);
+        var coreName = await ReadNameAsync(entities, core.EntityLogicalName, core.RecordId, logger, ct);
+        if (firmName is null || coreName is null)
+        {
+            return PrefillUnavailable();
+        }
+
+        var statusCode = invoice.GetAttributeValue<Microsoft.Xrm.Sdk.OptionSetValue>("statuscode")?.Value;
+        var status = statusCode is { } code && Services.Finance.InvoiceStatusCodes.TryFromStatusCode(code, out var known) ? known : (Services.Finance.InvoiceLifecycleStatus?)null;
+        var tracking = judgement.Submission?.GetAttributeValue<string>(TrackingNumberAllocator.TrackingNumberColumn);
+        var replacedBy = status == Services.Finance.InvoiceLifecycleStatus.Superseded
+            ? await FindReplacementAsync(judgement.Submission, http, entities, authorization, logger, ct)
+            : null;
+
+        return Results.Ok(new CorrectionPrefillResponse(
+            invoiceId,
+            new CorrectionPrefillFirm(firm, firmName),
+            new CorrectionPrefillCoreRecord(CoreTypeName(kind), core.RecordId, coreName),
+            status?.ToString(),
+            string.IsNullOrWhiteSpace(tracking) ? null : tracking,
+            judgement.Submission?.GetAttributeValue<string>(TrackingNumberAllocator.FirmInvoiceNumberColumn) ?? string.Empty,
+            judgement.CanCorrect,
+            judgement.Reason,
+            replacedBy));
+    }
+
+    /// <summary>The invoice's primary name column (<c>sprk_name</c>, the one map <see cref="Services.Communication.RegardingNameFields.PrimaryNameField"/>).</summary>
+    private static readonly string InvoiceNameColumn =
+        Services.Communication.RegardingNameFields.PrimaryNameField(Services.Finance.FinanceBaseValues.InvoiceEntity)
+        ?? throw new InvalidOperationException("No primary name column is known for sprk_invoice.");
+
+    private static string CoreTypeName(InvoiceCoreRecordKind kind) => kind switch
+    {
+        InvoiceCoreRecordKind.Matter => "Matter",
+        InvoiceCoreRecordKind.Project => "Project",
+        _ => "WorkAssignment",
+    };
+
+    /// <summary>The record's primary name, read app-only (an id for a blank name, as the firm list does); null when it could not be read.</summary>
+    private static async Task<string?> ReadNameAsync(
+        Spaarke.Dataverse.IGenericEntityService entities, string table, Guid id, ILogger logger, CancellationToken ct,
+        string route = "Correction prefill")
+    {
+        var nameColumn = Services.Communication.RegardingNameFields.PrimaryNameField(table);
+        if (nameColumn is null)
+        {
+            logger.LogWarning("{Route}: no primary name column is known for {Entity}", route, table);
+            return null;
+        }
+
+        try
+        {
+            var row = await entities.RetrieveAsync(table, id, [nameColumn], ct);
+            if (row is null)
+            {
+                logger.LogWarning("{Route}: {Entity} {RecordId} was not found", route, table, id);
+                return null;
+            }
+
+            var name = row.GetAttributeValue<string>(nameColumn);
+            return string.IsNullOrWhiteSpace(name) ? id.ToString() : name;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            logger.LogWarning(ex, "{Route}: the name of {Entity} {RecordId} could not be read", route, table, id);
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// <c>replacedBy</c> of a Superseded invoice (contract section 10): the DIRECT replacement, only when the caller can Read it, else null.
+    /// The replacement is the invoice of the submission whose <c>sprk_resubmissionof</c> is the old invoice's own submission. Several: the
+    /// one not itself Superseded; still not exactly one: null (a Warning). The replacement is read app-only to choose it, but only the
+    /// caller's own Read (<see cref="FinanceAuthorizationFilter.CallerHoldsRightsAsync"/>, the filter's Record check, operation
+    /// <c>finance.read</c>) lets it into the answer, so a record the caller cannot open is never named. DELIBERATE: this field is optional,
+    /// so a refusal OR a fault anywhere in finding or reading the replacement leaves it null (a Warning for a fault) and never turns the
+    /// whole answer into a 503; every other field is still exactly what the intake would judge.
+    /// </summary>
+    private static async Task<CorrectionPrefillReplacement?> FindReplacementAsync(
+        Microsoft.Xrm.Sdk.Entity? ownSubmission,
+        HttpContext http,
+        Spaarke.Dataverse.IGenericEntityService entities,
+        Spaarke.Core.Auth.AuthorizationService authorization,
+        ILogger logger,
+        CancellationToken ct)
+    {
+        if (ownSubmission is null)
+        {
+            return null;
+        }
+
+        try
+        {
+            var replacement = (await SupersededSubmissionNote.FindReplacementAsync(entities, logger, ownSubmission.Id, [InvoiceNameColumn], ct))?.Invoice;
+
+            if (replacement is null || CallerResolution.ResolveObjectId(http.User) is not { Length: > 0 } userId)
+            {
+                return null;
+            }
+
+            var mayRead = await FinanceAuthorizationFilter.CallerHoldsRightsAsync(
+                authorization, userId, FinanceAuthorizationFilter.InvoiceEntitySet, replacement.Id, "finance.read",
+                TokenHelper.ExtractBearerTokenOrNull(http), ct);
+            if (!mayRead)
+            {
+                return null;
+            }
+
+            var name = replacement.GetAttributeValue<string>(InvoiceNameColumn);
+            return new CorrectionPrefillReplacement(replacement.Id, string.IsNullOrWhiteSpace(name) ? replacement.Id.ToString() : name);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            logger.LogWarning(ex, "Correction prefill: the replacement of a superseded invoice could not be read; replacedBy is null");
+            return null;
+        }
+    }
+
+    private static IResult PrefillUnavailable() =>
+        InvoiceSubmissionHttp.Refused(StatusCodes.Status503ServiceUnavailable, InvoiceSubmissionErrors.CoreRecordUnavailable,
+            "The invoice could not be read right now. Try again shortly.");
 
     private static IResult FirmsUnavailable() =>
         InvoiceSubmissionHttp.Refused(StatusCodes.Status503ServiceUnavailable, InvoiceSubmissionErrors.CoreRecordUnavailable,

@@ -212,6 +212,20 @@ public sealed class InvoiceApprovalServiceTests
         w.Transitions.Should().Be(0);
     }
 
+    [Fact(DisplayName = "097a: a Superseded invoice (closed by its correction) is 409 not_in_review and nothing is written")]
+    public async Task Superseded_Is409NotInReview()
+    {
+        var w = new ApprovalWorld(invoiceStatus: InvoiceStatusCodes.Superseded);
+        w.AddLine(InvoiceLineStatus.Accepted, approved: 100m);
+
+        var result = await w.ApproveAs(AliceUser);
+
+        result.Outcome.Should().Be(ApprovalOutcome.NotInReview);
+        result.Code.Should().Be(InvoiceApprovalCodes.NotInReview);
+        w.Writes.Should().Be(0);
+        w.Transitions.Should().Be(0);
+    }
+
     [Fact(DisplayName = "103 K2: a refused 014 transition is 409, records nothing, and clears the claim it wrote (so nobody is blocked by it)")]
     public async Task TransitionRefused_RecordsNothing_AndClearsTheClaim()
     {

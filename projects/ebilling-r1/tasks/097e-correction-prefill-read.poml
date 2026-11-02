@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="097e" project="ebilling-r1">
+  <metadata>
+    <title>Correction prefill read for the add-in</title>
+    <phase>3 Rules — corrected invoices (split from 097, EB-D-179)</phase>
+    <gate>startable after 097b</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Adds a read endpoint to the BFF behind the Finance route gate; tags include bff-api and auth.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>One read endpoint following the 095 "firms for a record" route (G1) as the reference; the gate and refusal shapes already exist.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>097b</deps>
+    <tags>bff-api, auth, ebilling</tags>
+    <estimated-effort>0.5 day</estimated-effort>
+  </metadata>
+
+  <prompt>Give the Outlook add-in one read that returns what it needs to prefill a correction of an existing invoice: the firm, the core record, the invoice's status, its tracking number and its firm invoice number, plus whether the caller may submit a correction for it now. This is 095 contract item G3, deferred to 097 and split out by the owner (EB-D-179).</prompt>
+
+  <role>SPAARKE platform developer. Expert in the BFF Minimal API, the Finance route gate and the ebilling intake contracts.</role>
+
+  <goal>An internal caller who could submit a correction of invoice X can read X's prefill fields in one call; anyone else gets the same uniform not-found answer the intake routes use; the answer agrees with the 097b intake guards at the moment it is read; the 095 contract notes document it.</goal>
+
+  <context>
+    <background>
+      Read first: projects/ebilling-r1/notes/095-from-email-contract.md (§7 OP-7 and G3; §8 is the reference route "firms for a record"), projects/ebilling-r1/notes/097b-correction-intake.md (the intake guards and their codes), decision EB-D-179 in notes/decisions-log.md.
+      The intake guards from 097b decide whether a correction is allowed: the caller's own Write on the old invoice, the old invoice's status (not Approved, Sent to AP, Paid or inactive), the old invoice has a submission. The prefill read must use the same guard code, not a copy, so the two cannot disagree.
+    </background>
+    <relevant-files>
+      <file role="reference">The 095 firms-for-a-record route (GET /api/finance/core-records/{entityType}/{entityId}/firms) — copy its gate, refusal shapes and tests</file>
+      <file role="reference">The 097b intake guard code (FromEmailSubmissionService / the shared correction guard 097b introduces)</file>
+      <file role="modify">The existing endpoints file that holds the 095 routes, if the route fits there (no new endpoint file unless §11 says so)</file>
+      <file role="modify">projects/ebilling-r1/notes/095-from-email-contract.md (replace the G3 deferral with the route's contract)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="CLAUDE.md §11">The new route answers the three justification questions in the task notes. Prefer extending the 095 endpoints file and the 097b guard over new services.</constraint>
+    <constraint source="ADR-008 / Finance route gate">The route is in the /api/finance group with step 0, internal callers only, and RequireEbillingEnabled. Every route added in this task applies AddFinanceAuthorizationFilter on the route's invoice.</constraint>
+    <constraint source="uniform not-found">No Write on the invoice, an invoice that does not exist, a step-0 refusal and a rights-read fault all answer the same 404 the 095 routes use; the answer reveals nothing about the invoice.</constraint>
+    <constraint source="CLAUDE.md §10">BFF hygiene: placement statement, publish-size delta against the task's base commit, no new HIGH CVE.</constraint>
+  </constraints>
+
+  <steps mode="directional">
+    <step>Response shape agreed with word-add-in-r1 (2026-10-31): route GET /api/finance/invoices/{invoiceId}/correction-prefill; body { invoiceId, firm { id, name }, coreRecord { entityType, entityId, name }, invoiceStatus, trackingNumber (null when none), firmInvoiceNumber, canCorrect, reason }. coreRecord.entityType uses the intake vocabulary "Matter" | "Project" | "WorkAssignment" (InvoiceCoreRecordKind; the invoice's sprk_matter / sprk_project / sprk_regardingworkassignment), never logical names. invoiceStatus is the InvoiceLifecycleStatus name, a closed set: InReview, Approved, SentToAp, Paid, Rejected, ReturnedToFirm, Cancelled, Superseded; absent (null) for an unknown statuscode, as the intake does. reason, when canCorrect is false, is one of invoice_status, no_submission, submission_in_progress (the different_* reasons are judged only by the intake). No date, total or currency. Input is the invoice Guid only.</step>
+    <step>Implement the route using the 097b guard code for canCorrect.</step>
+    <step>Update the route ledger in tests/Spaarke.ArchTests if a new endpoint file is added.</step>
+    <step>Update the 095 contract notes and write notes/097e-correction-prefill-read.md.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>A caller with Write on an In Review invoice gets 200 with the prefill fields and canCorrect true.</criterion>
+    <criterion>For an Approved, Sent to AP, Paid or inactive invoice, or one with no submission, the caller with Write gets 200 with canCorrect false and the same reason code the intake would refuse with.</criterion>
+    <criterion>No Write, a missing invoice, a step-0 refusal and a rights-read fault all get the identical 404; a read fault elsewhere is 503, never a partial answer.</criterion>
+    <criterion>With Ebilling:Enabled false the route answers 503 ebilling.disabled.</criterion>
+    <criterion>Test scope: the cases above, plus one test that the prefill canCorrect and the intake guard agree for each refusal reason. Anything beyond needs a one-line justification in the notes. Seed-proof the Write gate only.</criterion>
+    <criterion>Gate: the 5 test projects build; ArchTests and the Finance unit filter pass.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>If word-add-in-r1 needs a field the invoice does not hold, or the response would expose data the intake routes do not, STOP and escalate (root CLAUDE.md §6).</trigger>
+  </escalation>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>.claude/patterns/api/endpoint-filters.md</file>
+      <file>projects/ebilling-r1/CLAUDE.md</file>
+    </files>
+  </knowledge>
+</task>

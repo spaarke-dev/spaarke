@@ -23,6 +23,7 @@ using Sprk.Bff.Api.Api.Filters;
 using Sprk.Bff.Api.Api.Finance;
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
+using Sprk.Bff.Api.Services.Finance;
 using Sprk.Bff.Api.Services.Finance.Submission;
 using Sprk.Bff.Api.Tests.Services.Finance.Submission;
 using Xunit;
@@ -1953,5 +1954,402 @@ public sealed class InvoiceSubmissionEndpointsContractTests : IAsyncLifetime
         response.StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable);
         _sourceRights.Calls.Should().BeEmpty();
         NothingWritten();
+    }
+
+    // ── ebilling-r1 task 097b (EB-D-179 item 2): a Correction from a document (mode / invoiceId, as the from-email route takes them) ──
+
+    private static object CorrectionBody(Guid? invoiceId = null, string? mode = "Correction", string number = CorrectionSeed.Number) => new
+    {
+        communicationId = SourceCommunicationId,
+        documentId = SourceDocumentId,
+        coreRecord = new { kind = "matter", id = MatterId },
+        firmId = FirmId,
+        firmInvoiceNumber = number,
+        mode,
+        invoiceId = invoiceId ?? CorrectionSeed.OldInvoiceId,
+    };
+
+    /// <summary>A correctable invoice (In Review, its own submission, this firm and matter) the caller may Write.</summary>
+    private void CorrectableInvoice(Entity? invoice = null, AccessRights rights = AccessRights.Read | AccessRights.Write)
+    {
+        GrantInternalSubmit();
+        SourceDocumentExists();
+        CorrectionSeed.Seed(_h, invoice);
+        _sourceRights.Grant(FinanceAuthorizationFilter.InvoiceEntitySet, CorrectionSeed.OldInvoiceId, rights);
+    }
+
+    [Fact(DisplayName = "097b: a Correction from a document is 202; its submission names the replaced invoice's submission in sprk_resubmissionof")]
+    public async Task FromDocument_correction_is_202_with_the_target_recorded()
+    {
+        CorrectableInvoice();
+
+        var response = await PostFromDocumentAsync(CorrectionBody());
+
+        response.StatusCode.Should().Be(HttpStatusCode.Accepted, await response.Content.ReadAsStringAsync());
+        _h.Allocations.Should().ContainSingle().Which.Fields!["sprk_resubmissionof"]
+            .Should().Be(new EntityReference("sprk_invoicesubmission", CorrectionSeed.OldSubmissionId));
+        _sourceRights.Calls.Should().Contain(c => c.Set == FinanceAuthorizationFilter.InvoiceEntitySet && c.Id == CorrectionSeed.OldInvoiceId && c.Token != null,
+            "the Write check is the caller's own (OBO)");
+    }
+
+    [Fact(DisplayName = "097b: a from-document body without mode or invoiceId is unchanged: a New submission, no sprk_resubmissionof, no invoice asked about")]
+    public async Task FromDocument_without_the_correction_fields_is_unchanged()
+    {
+        CorrectableInvoice();
+
+        var response = await PostFromDocumentAsync(FromDocumentBody());
+
+        response.StatusCode.Should().Be(HttpStatusCode.Accepted);
+        _h.Allocations.Should().ContainSingle().Which.Fields!.Should().NotContainKey("sprk_resubmissionof");
+        _sourceRights.Calls.Should().NotContain(c => c.Set == FinanceAuthorizationFilter.InvoiceEntitySet);
+    }
+
+    [Fact(DisplayName = "097b (seed-proof, the Write guard): without the caller's own Write on the invoice the route is the uniform 404, byte-for-byte the answer for an unknown invoice; nothing read about it, nothing written")]
+    public async Task FromDocument_correction_without_write_is_the_uniform_404()
+    {
+        CorrectableInvoice(rights: AccessRights.Read);
+
+        var denied = await PostFromDocumentAsync(CorrectionBody());
+        var unknown = await PostFromDocumentAsync(CorrectionBody(invoiceId: Guid.NewGuid()));
+
+        denied.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        unknown.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        var deniedBody = await denied.Content.ReadAsStringAsync();
+        using (var problem = JsonDocument.Parse(deniedBody))
+        {
+            problem.RootElement.GetProperty("reasonCode").GetString().Should().Be("sdap.access.deny.record_unavailable");
+        }
+
+        var normalise = (string body) => System.Text.RegularExpressions.Regex.Replace(body, "\"correlationId\":\"[^\"]*\"", "\"correlationId\":\"x\"");
+        normalise(await unknown.Content.ReadAsStringAsync()).Should().Be(normalise(deniedBody), "the answer reveals nothing about the invoice");
+        deniedBody.Should().NotContain(CorrectionSeed.OldInvoiceId.ToString());
+        _h.Entities.Verify(e => e.RetrieveAsync("sprk_invoice", It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()), Times.Never());
+        _sourceRights.Calls.Should().NotContain(c => c.Set == FinanceAuthorizationFilter.DocumentEntitySet, "the source is not read for a refused Correction");
+        NothingWritten();
+    }
+
+    [Fact(DisplayName = "097b (review F3): the Write check runs before the earlier-submission path: a retry of a correction without Write is the uniform 404, never the earlier receipt")]
+    public async Task FromDocument_correction_retry_without_write_is_the_uniform_404()
+    {
+        CorrectableInvoice(rights: AccessRights.Read);
+        _h.Submission = new Entity("sprk_invoicesubmission", InvoiceSubmissionService.ExistingDocumentSubmissionIdFor(SourceDocumentId))
+        {
+            ["sprk_trackingnumber"] = "INV-7.2",
+            ["sprk_firminvoicenumber"] = CorrectionSeed.Number,
+            ["sprk_vendororg"] = new EntityReference("sprk_organization", FirmId),
+            ["sprk_processingstatus"] = new OptionSetValue((int)InvoiceSubmissionStatus.Accepted),
+            ["sprk_channel"] = new OptionSetValue((int)InvoiceSubmissionChannel.Internal),
+            ["sprk_document"] = new EntityReference("sprk_document", SourceDocumentId),
+            ["sprk_regardingmatter"] = new EntityReference("sprk_matter", MatterId),
+            ["sprk_resubmissionof"] = new EntityReference("sprk_invoicesubmission", CorrectionSeed.OldSubmissionId),
+        };
+
+        var response = await PostFromDocumentAsync(CorrectionBody());
+
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        using var problem = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        problem.RootElement.GetProperty("reasonCode").GetString().Should().Be("sdap.access.deny.record_unavailable");
+        problem.RootElement.TryGetProperty("submissionId", out _).Should().BeFalse();
+        _h.SubmissionReads.Should().BeEmpty("the earlier submission is not read for a caller without Write");
+        NothingWritten();
+    }
+
+    public static TheoryData<string> CorrectionRefusals =>new() { "invoice_status", "different_firm", "different_core_record", "different_invoice_number", "no_submission", "submission_in_progress" };
+
+    [Theory(DisplayName = "097b (seed-proof, the firm and core-record guards; must fire): a Correction the guard refuses is 409 correction_not_allowed with its reason; nothing written")]
+    [MemberData(nameof(CorrectionRefusals))]
+    public async Task FromDocument_correction_refused_is_409_with_its_reason(string reason)
+    {
+        CorrectableInvoice(reason switch
+        {
+            "invoice_status" => CorrectionSeed.Invoice(status: Sprk.Bff.Api.Services.Finance.InvoiceStatusCodes.Approved),
+            "different_firm" => CorrectionSeed.Invoice(firm: Guid.NewGuid()),
+            "different_core_record" => CorrectionSeed.Invoice(coreId: Guid.NewGuid()),
+            _ => null,
+        });
+        if (reason == "no_submission")
+        {
+            _h.PriorSubmissions.Clear();
+        }
+
+        if (reason == "submission_in_progress")
+        {
+            // Task 097 second review F1: the invoice's own submission is still running.
+            _h.PriorSubmissions[0]["sprk_processingstatus"] = new OptionSetValue((int)InvoiceSubmissionStatus.Processing);
+        }
+
+        var response = await PostFromDocumentAsync(CorrectionBody(number: reason == "different_invoice_number" ? "INV-8" : CorrectionSeed.Number));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Conflict, await response.Content.ReadAsStringAsync());
+        using var problem = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        problem.RootElement.GetProperty("errorCode").GetString().Should().Be("ebilling.submission.correction_not_allowed");
+        problem.RootElement.GetProperty("reason").GetString().Should().Be(reason);
+        if (reason == "invoice_status")
+        {
+            problem.RootElement.GetProperty("invoiceStatus").GetString().Should().Be("Approved");
+        }
+
+        NothingWritten();
+    }
+
+    [Theory(DisplayName = "097b: an invalid mode, a New naming an invoice, or a Correction without one is 400 before anything is read; nothing written")]
+    [InlineData("Replace", true, "mode")]
+    [InlineData("New", true, "invoiceId")]
+    [InlineData(null, true, "invoiceId")]
+    [InlineData("Correction", false, "invoiceId")]
+    public async Task FromDocument_invalid_correction_fields_are_400(string? mode, bool withInvoice, string field)
+    {
+        CorrectableInvoice();
+        object body = withInvoice
+            ? CorrectionBody(mode: mode)
+            : new
+            {
+                communicationId = SourceCommunicationId,
+                documentId = SourceDocumentId,
+                coreRecord = new { kind = "matter", id = MatterId },
+                firmId = FirmId,
+                firmInvoiceNumber = CorrectionSeed.Number,
+                mode,
+            };
+
+        var response = await PostFromDocumentAsync(body);
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        using var problem = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        problem.RootElement.GetProperty("errors").TryGetProperty(field, out _).Should().BeTrue();
+        _sourceRights.Calls.Should().BeEmpty("the body is validated before anything is asked");
+        NothingWritten();
+    }
+
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // ebilling-r1 task 097f (EB-D-180): the status read of an Accepted submission whose invoice a correction Superseded answers Accepted with
+    // the replaced-by-correction reason and, when the caller may read the correcting submission, its id and tracking number. Derived at read time.
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    private const string ReplacedByCorrection = "ebilling.submission.replaced_by_correction";
+    private const string InternalRoute = "/api/finance/invoice-submissions";
+    private const string ExternalRoute = "/api/v1/external/invoice-submissions";
+    private static readonly Guid OldSubmissionId = Guid.Parse("097f0000-0000-4000-8000-000000000001");
+    private static readonly Guid OldInvoiceId = Guid.Parse("097f0000-0000-4000-8000-000000000002");
+    private static readonly Guid NewSubmissionId = Guid.Parse("097f0000-0000-4000-8000-000000000003");
+    private static readonly Guid NewInvoiceId = Guid.Parse("097f0000-0000-4000-8000-000000000004");
+    private static readonly Guid SecondSubmissionId = Guid.Parse("097f0000-0000-4000-8000-000000000005");
+    private static readonly Guid SecondInvoiceId = Guid.Parse("097f0000-0000-4000-8000-000000000006");
+    private static readonly Guid OtherInvoiceId = Guid.Parse("097f0000-0000-4000-8000-000000000009");
+
+    private static Entity InvoiceRow(Guid id, int status) =>
+        new("sprk_invoice", id) { ["statuscode"] = new OptionSetValue(status) };
+
+    /// <summary>A correcting submission of the old one: Accepted, the given firm (the caller's by default) and the matter, naming <see cref="OldSubmissionId"/>.</summary>
+    private void AddReplacement(Guid submissionId, Guid invoiceId, int invoiceStatus, string tracking, Guid? firm = null)
+    {
+        _h.PriorSubmissions.Add(new Entity("sprk_invoicesubmission", submissionId)
+        {
+            ["sprk_trackingnumber"] = tracking,
+            ["sprk_vendororg"] = new EntityReference("sprk_organization", firm ?? FirmId),
+            ["sprk_regardingmatter"] = new EntityReference("sprk_matter", MatterId),
+            ["sprk_processingstatus"] = new OptionSetValue((int)InvoiceSubmissionStatus.Accepted),
+            ["sprk_channel"] = new OptionSetValue(Internal),
+            [InvoiceSubmissionService.InvoiceColumn] = new EntityReference("sprk_invoice", invoiceId),
+            [InvoiceSubmissionService.ResubmissionOfColumn] = new EntityReference("sprk_invoicesubmission", OldSubmissionId),
+        });
+        _h.Invoices[invoiceId] = InvoiceRow(invoiceId, invoiceStatus);
+        _world.SpaUpload(invoiceId); // visible to a firm by the (a') predicate
+        _access.Grant(FinanceAuthorizationFilter.InvoiceSubmissionEntitySet, submissionId, AccessRights.Read);
+    }
+
+    /// <summary>The old submission (Accepted, its invoice Superseded) and one correcting submission "INV-1.2" with an In Review invoice; the caller may read both.</summary>
+    private Entity SeedSuperseded()
+    {
+        var old = StoredSubmissionWithInvoice(OldSubmissionId, OldInvoiceId);
+        old["sprk_processingstatus"] = new OptionSetValue((int)InvoiceSubmissionStatus.Accepted);
+        old["sprk_trackingnumber"] = "INV-1.1";
+        _h.Invoices[OldInvoiceId] = InvoiceRow(OldInvoiceId, InvoiceStatusCodes.Superseded);
+        _world.SpaUpload(OldInvoiceId);
+        _access.Grant(FinanceAuthorizationFilter.InvoiceSubmissionEntitySet, OldSubmissionId, AccessRights.Read);
+        AddReplacement(NewSubmissionId, NewInvoiceId, InvoiceStatusCodes.InReview, "INV-1.2");
+        return old;
+    }
+
+    private async Task<(JsonElement Body, string Text)> ReadAsync(string route, Guid id)
+    {
+        var response = await SendAsync(HttpMethod.Get, $"{route}/{id}");
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var text = await response.Content.ReadAsStringAsync();
+        return (JsonDocument.Parse(text).RootElement.Clone(), text);
+    }
+
+    private void NothingWrittenToDataverse() =>
+        _h.Entities.Invocations.Select(i => i.Method.Name).Where(n => !n.StartsWith("Retrieve", StringComparison.Ordinal))
+            .Should().BeEmpty("the note is derived at read time; nothing is written");
+
+    [Theory(DisplayName = "097f: a Superseded invoice's submission answers Accepted, the replaced-by-correction reason and the correcting submission, on the internal and the external read")]
+    [InlineData(InternalRoute)]
+    [InlineData(ExternalRoute)]
+    public async Task Superseded_AnswersAccepted_WithTheReason_AndTheCorrectingSubmission(string route)
+    {
+        SeedSuperseded();
+
+        var (body, _) = await ReadAsync(route, OldSubmissionId);
+
+        body.GetProperty("status").GetString().Should().Be("Accepted");
+        body.GetProperty("outcomeReasonCode").GetString().Should().Be(ReplacedByCorrection);
+        var replacedBy = body.GetProperty("replacedBy");
+        replacedBy.EnumerateObject().Select(p => p.Name).Should().Equal("submissionId", "trackingNumber");
+        replacedBy.GetProperty("submissionId").GetGuid().Should().Be(NewSubmissionId);
+        replacedBy.GetProperty("trackingNumber").GetString().Should().Be("INV-1.2");
+        body.GetProperty("trackingNumber").GetString().Should().Be("INV-1.1", "the submission keeps its own tracking number");
+        NothingWrittenToDataverse();
+    }
+
+    [Theory(DisplayName = "097f (seed-proof, the Read check on the replacement): the caller cannot read the replacement: the reason without replacedBy, and nothing of the replacement in the answer")]
+    [InlineData(InternalRoute)]
+    [InlineData(ExternalRoute)]
+    public async Task Superseded_CallerCannotReadTheReplacement_HasTheReason_WithoutReplacedBy(string route)
+    {
+        SeedSuperseded();
+        if (route == InternalRoute)
+        {
+            _access.Grant(FinanceAuthorizationFilter.InvoiceSubmissionEntitySet, NewSubmissionId, AccessRights.None);
+        }
+        else
+        {
+            _world.Source(NewInvoiceId, permission: RestrictedPermission); // the (a') predicate withholds the replacement from this caller
+        }
+
+        var (body, text) = await ReadAsync(route, OldSubmissionId);
+
+        body.GetProperty("status").GetString().Should().Be("Accepted");
+        body.GetProperty("outcomeReasonCode").GetString().Should().Be(ReplacedByCorrection);
+        body.TryGetProperty("replacedBy", out _).Should().BeFalse("it is not named for a caller who cannot read it");
+        text.Should().NotContain(NewSubmissionId.ToString()).And.NotContain("INV-1.2");
+    }
+
+    [Fact(DisplayName = "097f: an external caller is not told a replacement of another firm")]
+    public async Task External_ReplacementOfAnotherFirm_IsNotNamed()
+    {
+        SeedSuperseded();
+        _h.PriorSubmissions.Clear();
+        AddReplacement(NewSubmissionId, NewInvoiceId, InvoiceStatusCodes.InReview, "INV-1.2", firm: OtherFirmId);
+
+        var (otherFirm, text) = await ReadAsync(ExternalRoute, OldSubmissionId);
+
+        otherFirm.GetProperty("outcomeReasonCode").GetString().Should().Be(ReplacedByCorrection);
+        text.Should().NotContain("replacedBy").And.NotContain("INV-1.2");
+
+        _h.PriorSubmissions.Clear();
+        AddReplacement(NewSubmissionId, NewInvoiceId, InvoiceStatusCodes.InReview, "INV-1.2");
+        (await ReadAsync(ExternalRoute, OldSubmissionId)).Body.GetProperty("replacedBy").GetProperty("submissionId").GetGuid()
+            .Should().Be(NewSubmissionId, "control: the same replacement is named once it is the caller's firm");
+    }
+
+    [Theory(DisplayName = "097f: an invoice that is not Superseded is answered exactly as before: the same bytes, no reason, no replacedBy")]
+    [InlineData(InternalRoute, InvoiceStatusCodes.InReview)]
+    [InlineData(InternalRoute, InvoiceStatusCodes.Approved)]
+    [InlineData(ExternalRoute, InvoiceStatusCodes.InReview)]
+    [InlineData(ExternalRoute, InvoiceStatusCodes.Paid)]
+    public async Task NotSuperseded_IsUnchanged_ByteForByte(string route, int invoiceStatus)
+    {
+        SeedSuperseded();
+        _h.Invoices[OldInvoiceId] = InvoiceRow(OldInvoiceId, invoiceStatus);
+
+        var (body, text) = await ReadAsync(route, OldSubmissionId);
+        _h.Invoices.Clear(); // the baseline: the answer when nothing is known of the invoice at all
+        var (_, baseline) = await ReadAsync(route, OldSubmissionId);
+
+        text.Should().Be(baseline);
+        text.Should().NotContain("replacedBy");
+        body.GetProperty("outcomeReasonCode").ValueKind.Should().Be(JsonValueKind.Null);
+        NothingWrittenToDataverse();
+    }
+
+    [Fact(DisplayName = "097f: only an Accepted submission carries the note (a Rejected one with a Superseded invoice is answered as stored)")]
+    public async Task NotAccepted_IsUnchanged()
+    {
+        var old = SeedSuperseded();
+        old["sprk_processingstatus"] = new OptionSetValue((int)InvoiceSubmissionStatus.Rejected);
+        old["sprk_outcomereasoncode"] = SubmissionReasonCodes.Blocked;
+
+        var (body, text) = await ReadAsync(InternalRoute, OldSubmissionId);
+
+        body.GetProperty("status").GetString().Should().Be("Rejected");
+        body.GetProperty("outcomeReasonCode").GetString().Should().Be(SubmissionReasonCodes.Blocked);
+        text.Should().NotContain("replacedBy");
+    }
+
+    [Theory(DisplayName = "097f (deliberate): a fault finding the replacement leaves the reason and no replacedBy; it is not a 503")]
+    [InlineData(InternalRoute)]
+    [InlineData(ExternalRoute)]
+    public async Task ReplacementReadFault_HasTheReason_WithoutReplacedBy_NotA503(string route)
+    {
+        SeedSuperseded();
+        _h.ResubmissionReadFailure = new TimeoutException("dataverse down");
+
+        var (body, text) = await ReadAsync(route, OldSubmissionId);
+
+        body.GetProperty("status").GetString().Should().Be("Accepted");
+        body.GetProperty("outcomeReasonCode").GetString().Should().Be(ReplacedByCorrection);
+        text.Should().NotContain("replacedBy");
+    }
+
+    [Fact(DisplayName = "097f (deliberate): a fault finding which invoices are Superseded leaves the answer as it was before the note (still Accepted, no reason); it is not a 503")]
+    public async Task SupersededReadFault_LeavesTheAnswerUnchanged()
+    {
+        SeedSuperseded();
+        _h.SupersededInvoiceReadFailure = new TimeoutException("dataverse down");
+
+        var (body, text) = await ReadAsync(InternalRoute, OldSubmissionId);
+
+        body.GetProperty("status").GetString().Should().Be("Accepted");
+        body.GetProperty("outcomeReasonCode").ValueKind.Should().Be(JsonValueKind.Null);
+        text.Should().NotContain("replacedBy");
+    }
+
+    [Fact(DisplayName = "097f: with several correcting submissions the one whose invoice is not Superseded is named; if that is still ambiguous, replacedBy is absent")]
+    public async Task SeveralReplacements_PreferTheLive_ElseNone()
+    {
+        SeedSuperseded();
+        AddReplacement(SecondSubmissionId, SecondInvoiceId, InvoiceStatusCodes.Superseded, "INV-1.3");
+
+        var preferred = (await ReadAsync(InternalRoute, OldSubmissionId)).Body;
+        preferred.GetProperty("replacedBy").GetProperty("submissionId").GetGuid().Should().Be(NewSubmissionId);
+
+        _h.Invoices[SecondInvoiceId] = InvoiceRow(SecondInvoiceId, InvoiceStatusCodes.InReview);
+        var (ambiguous, text) = await ReadAsync(InternalRoute, OldSubmissionId);
+        ambiguous.GetProperty("outcomeReasonCode").GetString().Should().Be(ReplacedByCorrection);
+        text.Should().NotContain("replacedBy");
+    }
+
+    [Fact(DisplayName = "097f: the external list notes each visible Accepted submission whose invoice is Superseded, leaves the others as they were, and asks which invoices are Superseded once")]
+    public async Task ExternalList_NotesOnlyTheSuperseded_WithOneStatusRead()
+    {
+        var old = SeedSuperseded();
+        var other = SubmissionRow("INV-9.1", Spa, invoice: OtherInvoiceId, status: InvoiceSubmissionStatus.Accepted);
+        _h.Invoices[OtherInvoiceId] = InvoiceRow(OtherInvoiceId, InvoiceStatusCodes.InReview);
+        _world.SpaUpload(OtherInvoiceId);
+        var received = SubmissionRow("INV-9.2", Spa);
+        _h.Entities.Setup(e => e.RetrieveMultipleAsync(
+                It.Is<Microsoft.Xrm.Sdk.Query.QueryExpression>(q => q.EntityName == "sprk_invoicesubmission"
+                    && q.Criteria.Conditions.Any(c => c.AttributeName == "sprk_vendororg")),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new EntityCollection(new List<Entity> { old, other, received }));
+
+        var response = await SendAsync(HttpMethod.Get, ExternalRoute);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var rows = JsonDocument.Parse(await response.Content.ReadAsStringAsync()).RootElement.EnumerateArray().ToList();
+        rows.Should().HaveCount(3);
+        var noted = rows.Single(r => r.GetProperty("submissionId").GetGuid() == OldSubmissionId);
+        noted.GetProperty("outcomeReasonCode").GetString().Should().Be(ReplacedByCorrection);
+        noted.GetProperty("replacedBy").GetProperty("trackingNumber").GetString().Should().Be("INV-1.2");
+        foreach (var unchanged in rows.Where(r => r.GetProperty("submissionId").GetGuid() != OldSubmissionId))
+        {
+            unchanged.GetProperty("outcomeReasonCode").ValueKind.Should().Be(JsonValueKind.Null);
+            unchanged.TryGetProperty("replacedBy", out _).Should().BeFalse();
+        }
+
+        _h.SupersededInvoiceReads.Should().ContainSingle("one status read for the whole page")
+            .Which.Should().BeEquivalentTo(new[] { OldInvoiceId, OtherInvoiceId }, "only the Accepted submissions with an invoice are asked about");
     }
 }

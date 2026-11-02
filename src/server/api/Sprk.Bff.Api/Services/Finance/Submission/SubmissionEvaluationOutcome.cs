@@ -1,4 +1,6 @@
 using Microsoft.Xrm.Sdk;
+using Spaarke.Dataverse;
+using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Services.Ai.PublicContracts;
 using Sprk.Bff.Api.Services.Finance.Coding;
 using Sprk.Bff.Api.Services.Finance.Resolution;
@@ -58,6 +60,8 @@ public sealed record SubmissionSnapshot
         TrackingNumberAllocator.TrackingNumberColumn, TrackingNumberAllocator.SequenceColumn, TrackingNumberAllocator.FirmInvoiceNumberColumn,
         TrackingNumberAllocator.FirmColumn, "sprk_channel", "sprk_document", "sprk_processingstatus", "sprk_invoice",
         "sprk_regardingmatter", "sprk_regardingproject", "sprk_regardingworkassignment", "createdon",
+        // ebilling-r1 task 097b: a Correction's target (ResubmissionOfSubmissionId).
+        InvoiceSubmissionService.ResubmissionOfColumn,
     ];
 
     public required Guid SubmissionId { get; init; }
@@ -94,6 +98,12 @@ public sealed record SubmissionSnapshot
 
     /// <summary>True when the PDF is the upload staged in the Finance file store (no document; task 092).</summary>
     public bool IsUpload => FileSource == SubmissionFileSource.Upload;
+
+    /// <summary>
+    /// ebilling-r1 task 097b (EB-D-179 item 1): <c>sprk_resubmissionof</c>, the earlier submission a Correction replaces; null for a New
+    /// submission. The replaced invoice is resolved from it by <see cref="ReadCorrectedInvoiceAsync"/>, never assumed.
+    /// </summary>
+    public Guid? ResubmissionOfSubmissionId { get; init; }
 
     /// <summary><c>createdon</c> in UTC.</summary>
     public required DateTime CreatedOnUtc { get; init; }
@@ -175,9 +185,76 @@ public sealed record SubmissionSnapshot
             FirmInvoiceNumber = view.FirmInvoiceNumber!,
             DocumentId = documentId,
             FileSource = documentId is null ? SubmissionFileSource.Upload : SubmissionFileSource.SourceDocument,
+            ResubmissionOfSubmissionId = view.ResubmissionOfId,
             CreatedOnUtc = createdOn.Kind == DateTimeKind.Local ? createdOn.ToUniversalTime() : DateTime.SpecifyKind(createdOn, DateTimeKind.Utc),
         }, null);
     }
+
+    /// <summary>
+    /// ebilling-r1 task 097b: the invoice this submission corrects, resolved from <see cref="ResubmissionOfSubmissionId"/>: that submission's
+    /// <c>sprk_invoice</c>, accepted only when it is <see cref="InvoiceSubmissionPersister.InvoiceIdFor"/> of that submission (the invoice
+    /// the job created from it; the intake guard records nothing else). For task 097c's persister, which closes the old invoice.
+    /// </summary>
+    /// <returns><see cref="CorrectedInvoiceRead.None"/> for a New submission; <see cref="CorrectedInvoiceRead.Resolved"/> with both ids; or
+    /// <see cref="CorrectedInvoiceRead.Unresolved"/> (fail closed) when the earlier submission is gone, names no invoice or names another one.
+    /// A read fault propagates (the caller's retry).</returns>
+    public Task<CorrectedInvoiceRead> ReadCorrectedInvoiceAsync(IGenericEntityService entities, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(entities);
+        return ResubmissionOfSubmissionId is { } earlier
+            ? ReadCorrectedInvoiceAsync(entities, earlier, ct)
+            : Task.FromResult(CorrectedInvoiceRead.None);
+    }
+
+    /// <summary>
+    /// The same resolution from the stored <c>sprk_resubmissionof</c> alone (<paramref name="earlier"/>), for a reader that has the submission
+    /// row but no snapshot: task 097c's undo (<see cref="SubmissionCommitGate.CompensateAsync"/>), which may run on a later delivery.
+    /// </summary>
+    internal static async Task<CorrectedInvoiceRead> ReadCorrectedInvoiceAsync(IGenericEntityService entities, Guid earlier, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(entities);
+        Entity row;
+        try
+        {
+            row = await entities.RetrieveAsync(FinanceBaseValues.SubmissionEntity, earlier, [InvoiceSubmissionService.InvoiceColumn], ct)
+                .ConfigureAwait(false);
+        }
+        catch (Exception ex) when (IsRecordNotFound(ex))
+        {
+            return CorrectedInvoiceRead.Unresolved(earlier);
+        }
+
+        var invoice = row?.GetAttributeValue<EntityReference>(InvoiceSubmissionService.InvoiceColumn)?.Id;
+        return invoice is { } id && id == InvoiceSubmissionPersister.InvoiceIdFor(earlier)
+            ? CorrectedInvoiceRead.Resolved(earlier, id)
+            : CorrectedInvoiceRead.Unresolved(earlier);
+    }
+
+    private static bool IsRecordNotFound(Exception ex)
+    {
+        for (var e = ex; e is not null; e = e.InnerException)
+        {
+            if (RecordContainerResolver.IsRecordNotFound(e))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+}
+
+/// <summary>
+/// ebilling-r1 task 097b: what <see cref="SubmissionSnapshot.ReadCorrectedInvoiceAsync"/> found. <see cref="IsCorrection"/> false: a New
+/// submission. Otherwise <see cref="CorrectedInvoiceId"/> is set only when the target resolved (fail closed when it did not).
+/// </summary>
+public sealed record CorrectedInvoiceRead(bool IsCorrection, Guid? ResubmissionOfSubmissionId, Guid? CorrectedInvoiceId)
+{
+    public static CorrectedInvoiceRead None { get; } = new(false, null, null);
+
+    public static CorrectedInvoiceRead Resolved(Guid resubmissionOf, Guid invoiceId) => new(true, resubmissionOf, invoiceId);
+
+    public static CorrectedInvoiceRead Unresolved(Guid resubmissionOf) => new(true, resubmissionOf, null);
 }
 
 /// <summary>

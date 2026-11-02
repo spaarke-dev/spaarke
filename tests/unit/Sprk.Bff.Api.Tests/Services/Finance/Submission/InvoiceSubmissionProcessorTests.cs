@@ -58,6 +58,40 @@ public class InvoiceSubmissionProcessorTests
         h.Evaluated!.CoreRecord.Should().Be(new CoreRecordReference(CoreRecordKind.Matter, Matter));
     }
 
+    [Fact(DisplayName = "097b: a Correction is judged with its replaced invoice derived on the server from sprk_resubmissionof; a New submission names none and reads nothing")]
+    public async Task ACorrection_CarriesItsReplacedInvoice_DerivedFromItsResubmissionOf()
+    {
+        var earlier = Guid.NewGuid();
+        var replaced = InvoiceSubmissionPersister.InvoiceIdFor(earlier);
+        var h = new Harness { ReadInvoiceNumber = "INV-100-R" };
+        h.Row["sprk_resubmissionof"] = new EntityReference("sprk_invoicesubmission", earlier);
+        h.Entities.Setup(e => e.RetrieveAsync("sprk_invoicesubmission", earlier, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Entity("sprk_invoicesubmission", earlier) { ["sprk_invoice"] = new EntityReference("sprk_invoice", replaced) });
+        var asNew = new Harness();
+
+        await h.RunAsync();
+        await asNew.RunAsync();
+
+        h.Evaluated!.ReplacedInvoiceId.Should().Be(replaced);
+        h.Evaluated.SubmittedFirmInvoiceNumber.Should().Be("INV-100", "the typed number on the submission row, not the read one");
+        asNew.Evaluated!.ReplacedInvoiceId.Should().BeNull();
+        asNew.Entities.Invocations.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "097b: a replaced submission that names another invoice than the one it created gives no replaced invoice (nothing excluded, fail closed)")]
+    public async Task ACorrection_WhoseTargetDoesNotResolve_ExcludesNothing()
+    {
+        var earlier = Guid.NewGuid();
+        var h = new Harness();
+        h.Row["sprk_resubmissionof"] = new EntityReference("sprk_invoicesubmission", earlier);
+        h.Entities.Setup(e => e.RetrieveAsync("sprk_invoicesubmission", earlier, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Entity("sprk_invoicesubmission", earlier) { ["sprk_invoice"] = new EntityReference("sprk_invoice", Guid.NewGuid()) });
+
+        await h.RunAsync();
+
+        h.Evaluated!.ReplacedInvoiceId.Should().BeNull();
+    }
+
     [Fact(DisplayName = "049 B: ReceivedOn is createdon's UTC day, and the tracking number is sprk_trackingnumber, never re-allocated")]
     public async Task ReceivedOnAndTrackingNumber_ComeFromTheSubmissionRead()
     {
@@ -688,6 +722,9 @@ public class InvoiceSubmissionProcessorTests
         public FakeResolution Resolution { get; } = new();
         public FakeCoding Coding { get; } = new();
         public BillingEvaluationRequest? Evaluated { get; private set; }
+
+        /// <summary>Task 097b: the job's Dataverse for a Correction's replaced-invoice read (strict: any other call fails the test).</summary>
+        public Mock<Spaarke.Dataverse.IGenericEntityService> Entities { get; } = new(MockBehavior.Strict);
         public int DocumentLoads { get; private set; }
         public int Reads { get; private set; }
 
@@ -745,7 +782,8 @@ public class InvoiceSubmissionProcessorTests
                 },
                 new SubmissionRejectionRule(settings.Object, NullLogger<SubmissionRejectionRule>.Instance),
                 monitor,
-                NullLogger<InvoiceSubmissionProcessor>.Instance);
+                NullLogger<InvoiceSubmissionProcessor>.Instance,
+                Entities.Object);
 
             return sut;
         }
@@ -869,6 +907,10 @@ public class InvoiceSubmissionProcessorTests
 
         public IReadOnlyList<InvoiceLineObservation> Observations { get; set; } = [];
 
+        /// <summary>Line keys the model returned nothing usable for (<see cref="LineCodingStatus.NotReturned"/>). A blank narrative is
+        /// <see cref="LineCodingStatus.NoNarrative"/>, as in the real service.</summary>
+        public IReadOnlySet<string> NotReturnedKeys { get; set; } = new HashSet<string>();
+
         public Task<InvoiceCodingResult> CodeLinesAsync(LineCodingRequest request, CancellationToken cancellationToken = default)
         {
             Request = request;
@@ -885,12 +927,14 @@ public class InvoiceSubmissionProcessorTests
                 Lines = request.Lines.Select(line => new LineCodingResult
                 {
                     LineKey = line.LineKey,
-                    Status = LineCodingStatus.Coded,
-                    Task = new LineCodeValue("L110", line.BilledTaskCode, false),
-                    Activity = new LineCodeValue("A103", line.BilledActivityCode, false),
+                    Status = string.IsNullOrWhiteSpace(line.Narrative) ? LineCodingStatus.NoNarrative
+                        : NotReturnedKeys.Contains(line.LineKey) ? LineCodingStatus.NotReturned
+                        : LineCodingStatus.Coded,
+                    Task = new LineCodeValue(Coded(line) ? "L110" : null, line.BilledTaskCode, false),
+                    Activity = new LineCodeValue(Coded(line) ? "A103" : null, line.BilledActivityCode, false),
                     Expense = new LineCodeValue(null, null, false),
-                    Confidence = 0.95m,
-                    Observations = Observations,
+                    Confidence = Coded(line) ? 0.95m : 0m,
+                    Observations = Coded(line) ? Observations : [],
                     RefusedCodes = [],
                     CodeSetId = codeSet.CodeSetId,
                     CodeSetName = codeSet.CodeSetName,
@@ -898,5 +942,7 @@ public class InvoiceSubmissionProcessorTests
                 }).ToList(),
             });
         }
+
+        private bool Coded(InvoiceLineToCode line) => !string.IsNullOrWhiteSpace(line.Narrative) && !NotReturnedKeys.Contains(line.LineKey);
     }
 }

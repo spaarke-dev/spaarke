@@ -370,6 +370,14 @@ public partial class RouteAuthorizationGuardTests
             "GET /api/finance/invoices/{invoiceId}/context (ebilling-r1 task 106, FR-33) -- the Invoice Review context panel. The route carries "
             + "AddFinanceAuthorizationFilter(\"finance.read\", sprk_invoices, invoiceId): Read on the invoice as the caller, fail closed; the eBilling "
             + "kill switch runs after it. The firm and core record the sections are scoped to are read from that invoice, never from the request."),
+        new GovernedFile("Api/Finance/InvoiceCorrectionEndpoints.cs", Scope.RouteLevelGate,
+            "POST /api/finance/invoices/{invoiceId}/lines/{lineId}/corrections, POST .../header/corrections and GET .../corrections (ebilling-r1 task "
+            + "101 part B1, FR-31, FR-22, D-64) -- reviewer corrections of extracted values and AI codes. Every route carries "
+            + "AddFinanceAuthorizationFilter on sprk_invoices(invoiceId) as the caller, fail closed: the list with \"finance.read\" (Read), the two "
+            + "corrections with \"ebilling.invoice.decide\" (Write, D-77); invoice access reaches the caller through the core record (013, ADR-034). "
+            + "The eBilling kill switch runs after it. The line must belong to the route's invoice (uniform 404) and a code must be in the line's "
+            + "recorded code set before anything is written; the body carries no outcome, role or reviewer (the reviewer is the caller's systemuserid "
+            + "from their own token) and a correction never touches a line's status, approved amount or decision."),
         new GovernedFile("Api/Finance/InvoiceLineReviewEndpoints.cs", Scope.RouteLevelGate,
             "GET /api/finance/invoices/{invoiceId}/review and POST /api/finance/invoices/{invoiceId}/lines/{lineId}/decision, .../lines/decisions, "
             + ".../lines/accept-clean (ebilling-r1 task 100, FR-31) -- the Invoice Review read model and the line decisions. Every route carries "
@@ -395,7 +403,9 @@ public partial class RouteAuthorizationGuardTests
             + "check), then the /office/save chain (OfficeAuth, EntityAccess entity.associate_document, rate limit, version-save "
             + "authorization), the kill switch and the idempotency filter bound to the submission key; firm_not_linked through "
             + "CheckFirmLinkAsync. And GET /api/finance/core-records/{entityType}/{entityId}/firms (finance.read on the core record, "
-            + "uniform 404), which lists only the record's active linked firms."),
+            + "uniform 404), which lists only the record's active linked firms. Task 097e adds GET /api/finance/invoices/{invoiceId}/correction-prefill "
+            + "(\"ebilling.invoice.decide\", Write on the invoice as the caller, uniform 404 for no Write, an unknown invoice, step 0 and a rights fault); "
+            + "its canCorrect is the Correction intake's own guard, and its optional replacedBy is put to the caller's own Read (finance.read) on the replacement."),
         new GovernedFile("Api/Finance/CodeSetMappingEndpoints.cs", Scope.RouteLevelGate,
             "/api/finance/code-set-mappings/* (ebilling-r1 task 048, FR-22) -- AI code-set proposals (GET) and the admin confirm that writes one "
             + "default code set (POST). Each route declares the Dataverse table privileges the caller must hold (AddFinanceAuthorizationFilter, "
@@ -416,6 +426,26 @@ public partial class RouteAuthorizationGuardTests
             + "it. Approve additionally resolves the caller's eligibility LIVE from the invoice's core record inside InvoiceApprovalService on every "
             + "call (403 ebilling.approver.not_eligible, nothing written); the stored eligible-approver set never grants. The decider and the "
             + "decision id are derived server-side, never taken from the request."),
+        new GovernedFile("Api/Finance/InvoiceRejectReturnEndpoints.cs", Scope.RouteLevelGate,
+            "POST /api/finance/invoices/{invoiceId}/reject and POST /api/finance/invoices/{invoiceId}/return (ebilling-r1 task 104, FR-36, "
+            + "FR-11, D-43, D-122) -- an eligible approver rejects an invoice (final) or returns it to the firm. Each route carries "
+            + "AddFinanceAuthorizationFilter as the caller on the invoice named in the path (ebilling.invoice.decide: Write), fail closed; the "
+            + "eBilling kill switch runs after it. Both additionally resolve the caller's eligibility LIVE from the invoice's core record inside "
+            + "InvoiceRejectReturnService on every call (403 ebilling.approver.not_eligible, nothing written); the stored eligible-approver set "
+            + "never grants. The decider and the decision id are derived server-side, never taken from the request."),
+        new GovernedFile("Api/Finance/ApExportEndpoints.cs", Scope.RouteLevelGate,
+            "GET /api/finance/export-batches/candidates, POST /api/finance/export-batches and GET /api/finance/export-batches/{batchId} (ebilling-r1 "
+            + "task 150, FR-41, EB-D-178, D-56) -- export a selection of Approved invoices to AP as one batch; plus, from task 151a (EB-D-181), "
+            + "GET /api/finance/export-batches/{batchId}/files/{format} (the stored CSV or JSON, Read on the batch in the path, uniform 404, served "
+            + "through 090's download pipeline) and POST /api/finance/invoices/{invoiceId}/mark-paid (FR-42: Sent to AP to Paid through "
+            + "InvoiceLifecycleService only; ApExportAuthorization.PaymentRouteTargets declares the decide right and finance.read on the invoice in "
+            + "the path, uniform 404). Step 0 on the group, then "
+            + "AddFinanceAuthorizationFilter on each route: the list and the export declare the caller's own Create privilege on sprk_billingexport "
+            + "(ApExportAuthorization.RouteTargets; 403 before the handler runs), the batch read declares Read on the batch named in the path "
+            + "(uniform 404); the eBilling kill switch runs after it. The per-invoice part of the rule (ebilling.invoice.decide: Write on EVERY "
+            + "selected invoice, asked of Dataverse as the caller, fail closed) cannot be declared on the route because the ids are in the body; "
+            + "ApExportService asks ApExportAuthorization.AuthorizeExportAsync, the ONE seam, before it reads or writes anything. The batch's "
+            + "caller, owner and file purpose are derived server-side, never taken from the request."),
         new GovernedFile("Api/Finance/StoredFileEndpoints.cs", Scope.RouteLevelGate,
             "GET /api/finance/files/{fileId}/content (ebilling-r1 task 090, EB-D-148, procedure-and-file-model 4.3) -- an internal caller downloads "
             + "a Stored File's bytes. AddStoredFileAccessFilter runs the download rule before the handler: step 0 (403 before any record read), "
@@ -1089,7 +1119,23 @@ public partial class RouteAuthorizationGuardTests
     //            denies 403). The uniform 404 covers no Read, an unknown id, a non-family table and a probe fault. Pinned
     //            through a minimal TestServer host (this endpoint mapped alone, probe and Dataverse substituted) by
     //            tests/integration/contract/Api/Records/RecordFamilyEndpointsContractTests.cs.
-    private const int ExpectedEndpointFileCount = 147;
+    //
+    // 147 -> 148 (2026-10-29, ebilling-r1 task 104, FR-36; written on the branch as 146 -> 147, reconciled at the merge into work). Net +1: Api/Finance/InvoiceRejectReturnEndpoints.cs ADDED -- POST
+    // /api/finance/invoices/{invoiceId}/reject and POST .../return. Classified by GovernedFiles (RouteLevelGate: step 0 on the group, then
+    // AddFinanceAuthorizationFilter as the caller on the route's invoice, ebilling.invoice.decide: Write; eligibility is asked inside the
+    // service on every call); .RequireEbillingEnabled is already in NotAuthorizationForms.
+    //
+    // 148 -> 149 (2026-10-30 at the merge into work; written on the branch as 146 -> 147), ebilling-r1 task 101 part B1, FR-31). Net +1: Api/Finance/InvoiceCorrectionEndpoints.cs ADDED -- POST
+    // /api/finance/invoices/{invoiceId}/lines/{lineId}/corrections, POST .../header/corrections and GET .../corrections. Classified by GovernedFiles
+    // (RouteLevelGate: step 0 on the group, then AddFinanceAuthorizationFilter as the caller on the route's invoice, finance.read /
+    // ebilling.invoice.decide); .RequireEbillingEnabled is already in NotAuthorizationForms. (Written on the branch as 146 -> 147; reconciled at
+    // the ebilling-r1 integration merge.)
+    //
+    // 149 -> 150 (2026-10-30 at the merge into work, ebilling-r1 task 150, FR-41, EB-D-178; written on the branch as 148 -> 149). Net +1: Api/Finance/ApExportEndpoints.cs ADDED --
+    // GET /api/finance/export-batches/candidates, POST /api/finance/export-batches, GET /api/finance/export-batches/{batchId}. Classified by GovernedFiles
+    // (RouteLevelGate: step 0 on the group, then AddFinanceAuthorizationFilter on each route; the per-invoice decide right is asked inside the service
+    // through the one authorization seam); .RequireEbillingEnabled is already in NotAuthorizationForms.
+    private const int ExpectedEndpointFileCount = 150;
 
     // =============================================================================================
     // THE CREDITED ALLOW-LIST — the only attachment forms Rule A credits as a per-resource decision
