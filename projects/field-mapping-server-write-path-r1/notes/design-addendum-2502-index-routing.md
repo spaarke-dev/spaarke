@@ -120,7 +120,7 @@
 
 ### 14.9 Risks
 
-- **Chunks left in a non-default index.** A document indexed under a per-record or caller-named index keeps those chunks there; a re-index writes the files index and trims only there. Search paths trim by live Read; `RagService.SearchAsync` relies on `privilege_group_ids` (§13.3b open item). Mitigation: 041 step 1 counts stamps ≠ `spaarke-files-index` on dev. If any exist, the owner chooses one of two remedies: clean them with `DeleteSupersededFileChunksAsync` per document (the relocator's pattern), or leave them.
+- **Chunks left in a non-default index.** A document indexed under a per-record or caller-named index keeps those chunks there; a re-index writes the files index and trims only there. `privilege_group_ids` is only a pre-filter. The access boundary is `IRetrievalAccessTrim` / `TrimToReadableDocumentsAsync` in each consumer: `RagEndpoints` search, `SemanticSearchEndpoints`, `ReadableRagSearch`, `AnalysisRagProcessor`, `DocumentSearchHandler` and `PlaybookChatContextProvider`. `RecallSessionFileHandler` is scoped to the session (UAC-r2, 2026-11-02). Mitigation: 041 step 1 counts stamps ≠ `spaarke-files-index` on dev and records the count. **Owner 2026-11-02: leave the old chunks;** they are not cleaned.
 - **The Dedicated deployment model** (`{tenant}-knowledge`, "do not configure", #1432) would make the `null` write differ from `GetDefaultIndexName()`. This is a known limit and is unchanged.
 - **Two settings name the files index** (`KnowledgeIndexName`, `FilesIndexName`; `AiSearchOptions.cs:14`, `:42`). Drift is possible and pre-exists this change; not changed here.
 - **Hot-path churn** (RagEndpoints, Compose, Communication, ExternalAccess): one-line deletions; run `/conflict-check` before the PR.
@@ -161,3 +161,20 @@
 - AC8 (negative): session-files, discovery and invoice index routing are unchanged (existing tests pass).
 - AC9: the OBO enqueuer stamp equals `KnowledgeIndexName` when `SharedIndexName` differs.
 - AC10: I-5 and the catalog doc are updated in the same PR. The publish-size delta and the CVE result are recorded. No new HIGH CVE.
+
+## Reviews (2026-11-02)
+
+**UAC-r2: OK.** Index routing was never an access control; the per-caller trim on live Read is the boundary (see above). Conditions:
+- **Log level.** `client_search_index_dropped` goes to **Information** (039 shipped it at Warning) and stays there as the W3 progress signal, ids only. When W3 lands it goes back to **Warning**. This is a W3 acceptance criterion: from then on, any firing is a client regression.
+- **#2206 and #2413.** Both close on 041's merge, with a link to the PR. Close them only after 041 step 1's count is recorded. (Dev fact: the BU1 move ran on 2026-11-02.)
+- **Search routes.** Keep a test showing that a request-named index outside the allow-list is still refused on the SEARCH routes.
+- **Interaction with 042b (§15.5).** §15.5's step-8 bullet, "a secure event gets an empty index plus `search_index_unset_for_owner_bu`", is moot once step 8 is a no-op. Whichever of 041 and 042b lands second updates that bullet and its test.
+- **Review before merge.** UAC-r2 does a scoped check of 041's diff before merge, confirming that only routing is removed and no trim call moves (RagEndpoints, Communication, ExternalAccess).
+- **Accepted.** The 400 → 200 change on index-file is acceptable.
+
+**Secure Records carve-out.** The owner deferred this to UAC-r2. UAC-r2's answer: a separate index is not needed, because secure isolation rests on Read and the trim enforces it. The carve-out is **withdrawn**. If a secure index is ever wanted, the server chooses it from the record's secure state, with its own design and a UAC-r2 review, never from BU columns.
+
+**Provisioning: confirmed, no dependency.** H10, H2b, H4b and H13 never read a BU index default. H12b (not built) seeds one catalog row per verified index, with `sprk_isdefault` on `spaarke-files-index` and no BU default. 041 must not change what `sprk_isdefault` means on the catalog row.
+- **Added to 041's scope:** retire or update `scripts/backfill-multi-container-multi-index/Audit-MultiContainerMultiIndex-Drift.ps1`, which reads `businessunits.sprk_searchindexname`. Once routing is retired, its "drift" means nothing.
+
+**Owner (2026-11-02):** documents found in a non-default index are **left** as they are; nothing is cleaned.

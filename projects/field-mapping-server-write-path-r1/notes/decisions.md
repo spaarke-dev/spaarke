@@ -592,3 +592,54 @@ missing to add. Owners and refusals are unchanged, and the service needs no chan
   - a creator-visibility assertion;
   - a full UAC-r2 pass on the 042b diff before merge.
 - **Next on the scope path.** The spec is amended, then tasks 042a and 042b are created and added to TASK-INDEX, then the owner approves.
+
+### 2026-11-02 — #2502 addendum (§14) reviewed; owner answers on old chunks, the Family deploy and event numbers
+
+- **#2502 §14 reviews.**
+  - UAC-r2: OK, with conditions.
+  - Provisioning: no dependency.
+  - Both are recorded at the end of `notes/design-addendum-2502-index-routing.md`.
+- **Secure Records carve-out.** The owner deferred to UAC-r2, which judged it not needed because secure isolation rests on Read and the per-caller trim. The carve-out is **withdrawn**. A future secure index would be chosen by the server from the record's secure state, under its own design.
+- **Old chunks.** Documents found indexed into a non-default index are **left**; they are not cleaned (owner).
+- **#2513.** The owner approved importing TrackingFieldTrio 1.0.56 to dev after PR #2516 merges.
+- **#2515.** The owner approved numbering events with `EVT-{SEQNUM:6}` on `sprk_event.sprk_eventnumber`, both in the solution and on dev. Existing events stay blank; there is no backfill.
+
+### 2026-11-02 — W5 open questions resolved: the repair marker is a principal set; only Project has quick create on (task 050)
+
+- **Evidence.** `notes/w5-open-questions.md`. Read-only against dev (`spaarkedev1`), on the BFF that carries task 017 (`fcf01480f4`). Task 019 was still pending; the coordinator approved this deviation.
+
+**Q1: the repair marker.**
+- **No impersonated creates.** No product path creates under impersonation:
+  - `MSCRMCallerID` is set only on GET, PATCH and the owner's own share-revoke (`DataverseImpersonation.cs:64-73`, `DataverseWebApiService.cs:214-233`);
+  - the entity-create sender takes no impersonation (`:249-253`);
+  - `CallerObjectId` is never sent;
+  - `createdonbehalfby` was empty on all 2,446 sampled dev rows.
+- **Core creates.** The W2 core checks the caller (an OBO WhoAmI) but writes app-only (`RecordCreationService.cs:208-220`). So `createdby` is the BFF app user for every core create.
+- **A single identity is NOT safe as the marker.**
+  - Dev has two BFF application users: `SDAP-BFF-SPE-API` until 2026-08-17, and `mi-bff-api-dev` since.
+  - The Signal, Decision Record and Budget Revision writers create as `mi-ontology-writer-dev`.
+  - The Matter and Project wizards, and four legacy OBO create calls, create as the user.
+- **Proposed marker (owner to confirm).** Select rows where `createdon >= max(go-live, watermark)` and `createdby NOT IN ProductPrincipals`.
+  - The set is the shared BFF identity (resolved at runtime by WhoAmI), the ontology writer, and a configured list of retired identities. People are never in the set.
+  - Selecting too many rows is harmless, because Repair is fill-only and idempotent.
+  - `createdonbehalfby` is rejected because it is empty on every row. A server-written origin column is the fallback.
+- **Excluded tables.** `sprk_signal`, `sprk_decisionrecord` and `sprk_budgetrevision` stay out of the repair table list.
+- **Gap.** App-only creates that bypass the core have `createdby` set to the BFF app user and are never selected: the ebilling persister, ingestion, `CreateDocumentAsync` and `CreateEventAsync`. FR-21's census must either route them through the core or name them as exceptions.
+- **Open (owner).** FR-21 says the Signal and Decision writers create through the service's system principal, which is the shared identity. They were given a dedicated managed identity on purpose. Keep it, or move them?
+
+**Q2: quick create (dev only).**
+- **Project:** the only table with it on, both live and in SpaarkeMaster (`IsQuickCreateEnabled` 1). It has no quick-create form.
+- **Matter:** off. The XML says 0, so the earlier "XML says on" was wrong.
+- **"Invoice Line Item":** this is `sprk_billingevent`, off live and 0 in the XML. There is no `sprk_invoicelineitem`.
+- **Everything else:** all other `sprk_` registry tables are off.
+
+**FR-24 table list.**
+- `-Verify` covers the 22 `sprk_` tables in `RecordTableRules.All`. The only change needed is to turn `sprk_project` off.
+- Reported but not changed:
+  - `task` (a platform table, on);
+  - the dormant quick-create forms on matter, document, event, invoice and kpiassessment.
+- Other environments were not read; `-Verify` reports each environment separately.
+
+**For tasks 051 and 052.**
+- 051 also checks what Event "Add Memo" (`useQuickCreateForm` on `sprk_memo`) and Project "+ New" do live.
+- 052 builds the selection from the principal set above, and adds Repair's go-live cutoff (019 finding P1-3).
