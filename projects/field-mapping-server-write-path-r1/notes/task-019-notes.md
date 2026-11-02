@@ -80,7 +80,7 @@ Full detail is in `notes/task-019-live-checks.md`. The parent record is MAT-0000
 | P2-2 | Remains K, unverified. The alternate key on `sprk_projectnumber` exists and is Active. A collision was not provoked. |
 | C: chat create | **Owner action.** The handler can only be reached through the Console chat. |
 | Negative check (AppendTo) | **Owner action.** It needs a narrower user; `# UAC Child BU Test User` fits. |
-| App Insights | No 5xx after the deploy. One new exception type (`sprk_userentityassociation` "does not exist", ×10), sent to UAC-r2. Check A produced no telemetry: #2522. |
+| App Insights | No 5xx after the deploy. The `sprk_userentityassociation` "does not exist" exception (×10 at 19:00:52Z) is **not new**. It is the known #2292 (UAC-r2): the nightly reconciler logs about 1,000 of them a day. Check A triggered one first-time membership event, which is 10 log lines. The fault is fail-closed, so it does not affect A or B. **Correction:** the "24 h before" baseline was wrong, because `az monitor app-insights query` defaults to `--offset 1h`. Future baselines must pass `--offset` or a `timestamp` filter. Check A produced no telemetry: #2522. |
 
 Also found: the Office Project create took about 18 s, about 11 s of it on six sequential assigned-access grants (#2523).
 

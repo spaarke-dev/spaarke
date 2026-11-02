@@ -198,3 +198,13 @@ Nothing else was created. No Matter, contact or team was changed. Numbers consum
 4. **Missing telemetry for A:** the child-records POST left no request or trace in App Insights. If this is the OpenTelemetry sampler, W3's App Insights step cannot rely on request counts for this route; use the read-back.
 5. **Acceptance text for A:** "mapped fields present" cannot hold on the child-records route until 020-029 wire `Mapping` in (decide: amend, or confirm that W3 owns it).
 6. **P2-2** stays K, unverified: the key exists and is Active; the 412 is not observed. The Project create took 18 s (six sequential grants), which is worth knowing for the add-in's timeout.
+
+
+## Correction (2026-11-02, UAC-r2)
+
+The `FaultException<OrganizationServiceFault>` on `sprk_userentityassociation` is **not new** in 3740e1a105:
+- **Known defect:** it is #2292, filed 2026-10-23 and still open.
+- **Volume:** `MembershipReconciliationJob` logs about 1,000 a day around 02:01Z.
+- **Shape of the burst:** `MembershipJunctionUpdaterHost` logs 10 per first-time membership event, which is how the 19:00:52Z burst from check A looks.
+- **Why the baseline missed it:** that query ran with the `az monitor app-insights query` default of `--offset 1h`.
+- **Cause:** the junction updater does not recognise the wrapped "does not exist" message, so the junction stays empty. That fails closed and has no bearing on checks A or B.
