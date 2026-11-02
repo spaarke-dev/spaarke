@@ -13,7 +13,11 @@ import { searchOfficeEntities } from '../../../services/officeEntitySearch';
 import type { IHostAdapter } from '@shared/adapters';
 import type { AttachmentInfo } from '@shared/adapters/types';
 import type { EntitySearchResult } from '../../../hooks/useEntitySearch';
-import type { InvoiceSubmissionOutcome, InvoiceSubmitAttempt } from '../../../services/invoiceSubmissionSeam';
+import type {
+  InvoiceCorrectionPrefill,
+  InvoiceSubmissionOutcome,
+  InvoiceSubmitAttempt,
+} from '../../../services/invoiceSubmissionSeam';
 
 jest.mock('../../../services/officeEntitySearch', () => ({ searchOfficeEntities: jest.fn() }));
 const mockSearch = searchOfficeEntities as jest.MockedFunction<typeof searchOfficeEntities>;
@@ -607,6 +611,299 @@ describe('InvoiceView — Existing invoice (task 133)', () => {
     const options = mockSearch.mock.calls[0]![2];
     expect(mockSearch.mock.calls[0]![1]).toBe('Invoice');
     expect(options.access).toBeUndefined();
+  });
+});
+
+describe('InvoiceView — Correction from the prefill (ebilling 097e)', () => {
+  const INVOICE_ID = '3c9d2b1a-7e4f-4a6b-8c2d-1e0f9a8b7c65';
+  const INVOICE: EntitySearchResult = {
+    id: INVOICE_ID,
+    entityType: 'Invoice',
+    logicalName: 'sprk_invoice',
+    name: 'INV-012',
+  };
+  const PREFILL: InvoiceCorrectionPrefill = {
+    invoiceId: INVOICE_ID,
+    firm: { id: FIRM_ID, name: 'Morrison Foerster' },
+    coreRecord: { entityType: 'Matter', entityId: MATTER_ID, name: 'PAT-792345' },
+    invoiceStatus: 'InReview',
+    trackingNumber: 'INV-012.2',
+    firmInvoiceNumber: 'INV-012',
+    canCorrect: true,
+    reason: null,
+    replacedBy: null,
+  };
+
+  async function chooseCorrection() {
+    await findRow('INV-4711.pdf');
+    await userEvent.click(screen.getByRole('radio', { name: 'Existing invoice' }));
+    mockSearch.mockResolvedValue([INVOICE]);
+    await userEvent.type(screen.getByLabelText('Search Invoice records'), 'INV-012');
+    await userEvent.click(screen.getByRole('button', { name: 'Search' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'Select this record' }));
+    await userEvent.click(screen.getByRole('radio', { name: 'Submit a corrected invoice' }));
+  }
+
+  it(
+    "must-fire: a correctable invoice shows what the correction keeps and submits the invoice's own values",
+    async () => {
+      const loadCorrectionPrefill = jest.fn(async () => PREFILL);
+      const loadFirms = jest.fn(async () => [{ firmId: FIRM_ID, name: 'Firm F' }]);
+      const { onSubmit } = renderView({ correctionAvailable: true, loadCorrectionPrefill, loadFirms });
+      await chooseCorrection();
+      const details = await screen.findByTestId('invoice-correction-details');
+      expect(loadCorrectionPrefill).toHaveBeenCalledWith(INVOICE_ID);
+      expect(within(details).getByText('Correcting (tracking INV-012.2)')).toBeInTheDocument();
+      expect(within(details).getByText('Matter: PAT-792345')).toBeInTheDocument();
+      expect(within(details).getByText('Firm: Morrison Foerster')).toBeInTheDocument();
+      expect(within(details).getByText('Firm invoice number: INV-012')).toBeInTheDocument();
+      // Not editable: no record picker, firm list or number box for a correction.
+      expect(screen.queryByLabelText('Search Matter records')).toBeNull();
+      expect(screen.queryByRole('textbox', { name: /Firm invoice number/ })).toBeNull();
+      expect(loadFirms).not.toHaveBeenCalled();
+
+      await waitFor(() => expect(submitButton()).toBeEnabled());
+      await userEvent.click(submitButton());
+      await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+      const [input] = onSubmit.mock.calls[0] as unknown as [Record<string, unknown>];
+      expect(input).toMatchObject({
+        mode: 'Correction',
+        invoiceId: INVOICE_ID,
+        targetEntity: { entityType: 'Matter', entityId: MATTER_ID },
+        firmId: FIRM_ID,
+        firmInvoiceNumber: 'INV-012',
+      });
+    },
+    TIMEOUT
+  );
+
+  it(
+    'a Superseded invoice says to correct the newer one and offers it; the form is not shown',
+    async () => {
+      const loadCorrectionPrefill = jest
+        .fn()
+        .mockResolvedValueOnce({
+          ...PREFILL,
+          invoiceStatus: 'Superseded',
+          canCorrect: false,
+          reason: 'invoice_status',
+          replacedBy: { invoiceId: 'aa11bb22-0000-4000-8000-000000000013', name: 'INV-013' },
+        })
+        .mockResolvedValueOnce({ ...PREFILL, invoiceId: 'aa11bb22-0000-4000-8000-000000000013' });
+      const { onSubmit } = renderView({ correctionAvailable: true, loadCorrectionPrefill });
+      await chooseCorrection();
+      expect(
+        await screen.findByText(
+          'This invoice has already been replaced by a correction. Correct the newer invoice instead.'
+        )
+      ).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Submit' })).toBeNull();
+
+      await userEvent.click(screen.getByRole('button', { name: 'Use INV-013' }));
+      await waitFor(() =>
+        expect(loadCorrectionPrefill).toHaveBeenLastCalledWith('aa11bb22-0000-4000-8000-000000000013')
+      );
+      expect(await screen.findByTestId('invoice-correction-details')).toBeInTheDocument();
+      // The correction is sent for the replacement, not the Superseded invoice.
+      await waitFor(() => expect(submitButton()).toBeEnabled());
+      await userEvent.click(submitButton());
+      await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+      const [input] = onSubmit.mock.calls[0] as unknown as [{ invoiceId: string }];
+      expect(input.invoiceId).toBe('aa11bb22-0000-4000-8000-000000000013');
+    },
+    TIMEOUT
+  );
+
+  it(
+    'must-not-fire: an invoice still being processed says why and offers nothing to submit',
+    async () => {
+      const loadCorrectionPrefill = jest.fn(async () => ({
+        ...PREFILL,
+        canCorrect: false,
+        reason: 'submission_in_progress',
+      }));
+      const { onSubmit } = renderView({ correctionAvailable: true, loadCorrectionPrefill });
+      await chooseCorrection();
+      expect(await screen.findByTestId('invoice-correction-blocked')).toHaveTextContent(/still being processed/);
+      expect(screen.queryByRole('button', { name: /^Use / })).toBeNull();
+      expect(screen.queryByRole('button', { name: 'Submit' })).toBeNull();
+      expect(onSubmit).not.toHaveBeenCalled();
+    },
+    TIMEOUT
+  );
+
+  it(
+    'a failed prefill shows its sentence, and Retry asks again',
+    async () => {
+      const loadCorrectionPrefill = jest
+        .fn()
+        .mockRejectedValueOnce(new Error("Spaarke couldn't read this invoice right now. Try again in a moment."))
+        .mockResolvedValueOnce(PREFILL);
+      renderView({ correctionAvailable: true, loadCorrectionPrefill });
+      await chooseCorrection();
+      expect(await screen.findByText(/couldn't read this invoice right now/)).toBeInTheDocument();
+      await userEvent.click(screen.getByRole('button', { name: 'Retry reading the invoice' }));
+      expect(await screen.findByTestId('invoice-correction-details')).toBeInTheDocument();
+      expect(loadCorrectionPrefill).toHaveBeenCalledTimes(2);
+    },
+    TIMEOUT
+  );
+
+  it(
+    "names the email's filed record when it is not the invoice's record",
+    async () => {
+      const PROJECT: EntitySearchResult = {
+        id: '2a7d4c1e-9b3f-4e8a-b6d2-7c5e1f0a9d33',
+        entityType: 'Project',
+        logicalName: 'sprk_project',
+        name: 'Project X',
+      };
+      renderView({
+        correctionAvailable: true,
+        loadCorrectionPrefill: jest.fn(async () => PREFILL),
+        filedRecord: PROJECT,
+      });
+      await chooseCorrection();
+      expect(await screen.findByTestId('invoice-correction-details')).toHaveTextContent(
+        "This email is filed to Project X in Spaarke, but this invoice is for PAT-792345. Spaarke accepts a correction only from an email filed to the invoice's record."
+      );
+    },
+    TIMEOUT
+  );
+
+  it(
+    'must-not-fire: an older prefill answering late never replaces the newer one',
+    async () => {
+      let answerFirst: (p: InvoiceCorrectionPrefill) => void = () => undefined;
+      const loadCorrectionPrefill = jest
+        .fn()
+        .mockImplementationOnce(() => new Promise<InvoiceCorrectionPrefill>(resolve => (answerFirst = resolve)))
+        .mockResolvedValueOnce({ ...PREFILL, canCorrect: false, reason: 'no_submission' });
+      renderView({ correctionAvailable: true, loadCorrectionPrefill });
+      await chooseCorrection();
+      // Leave and come back: a second read for the same choice.
+      await userEvent.click(screen.getByRole('radio', { name: 'New invoice' }));
+      await userEvent.click(screen.getByRole('radio', { name: 'Existing invoice' }));
+      expect(await screen.findByTestId('invoice-correction-blocked')).toHaveTextContent(/no submission/);
+      answerFirst(PREFILL);
+      await new Promise(r => setTimeout(r, 50));
+      expect(screen.queryByTestId('invoice-correction-details')).toBeNull();
+      expect(screen.getByTestId('invoice-correction-blocked')).toBeInTheDocument();
+    },
+    TIMEOUT
+  );
+
+  it(
+    'Retry in a correction re-sends the same request; choosing another invoice drops it',
+    async () => {
+      const onSubmit = jest.fn(async () => ({ kind: 'retryable' as const, message: 'Outlook is busy. Try again.' }));
+      const loadCorrectionPrefill = jest.fn(async (id: string) => ({ ...PREFILL, invoiceId: id }));
+      renderView({ correctionAvailable: true, loadCorrectionPrefill, onSubmit });
+      await chooseCorrection();
+      await waitFor(() => expect(submitButton()).toBeEnabled());
+      await userEvent.click(submitButton());
+      await userEvent.click(await screen.findByRole('button', { name: 'Retry' }));
+      await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(2));
+      const calls = onSubmit.mock.calls as unknown as Array<[unknown, { actionId: string }]>;
+      expect(calls[1]![1].actionId).toBe(calls[0]![1].actionId);
+      expect(calls[1]![0]).toEqual(calls[0]![0]);
+
+      // Another choice: the retry (and the request it would resend) is dropped.
+      await userEvent.click(screen.getByRole('radio', { name: 'New invoice' }));
+      expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull();
+      await userEvent.click(screen.getByRole('radio', { name: 'Existing invoice' }));
+      await screen.findByTestId('invoice-correction-details');
+      expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull();
+    },
+    TIMEOUT
+  );
+
+  it(
+    'must-fire: a correction that ended keeps its result and Done on screen; the choices stay locked until Done',
+    async () => {
+      const onSubmit = jest.fn(async () => ({
+        kind: 'ended' as const,
+        status: 'Failed' as const,
+        message: 'The original invoice was still being processed, so the correction was not processed.',
+        trackingNumber: 'INV-012.3',
+      }));
+      renderView({ correctionAvailable: true, loadCorrectionPrefill: jest.fn(async () => PREFILL), onSubmit });
+      await chooseCorrection();
+      await waitFor(() => expect(submitButton()).toBeEnabled());
+      await userEvent.click(submitButton());
+      expect(await screen.findByText('The invoice could not be processed')).toBeInTheDocument();
+      expect(screen.getByRole('radio', { name: 'New invoice' })).toBeDisabled();
+      expect(screen.getByRole('radio', { name: 'Submit a corrected invoice' })).toBeDisabled();
+      // A Failed correction can still be sent again from the same form (it stays on screen).
+      expect(submitButton()).toBeEnabled();
+
+      await userEvent.click(screen.getByRole('button', { name: 'Done' }));
+      expect(screen.getByRole('radio', { name: 'New invoice' })).toBeEnabled();
+      // Done after an ended result leaves the correction as it was, ready to submit again.
+      expect(screen.getByTestId('invoice-correction-details')).toBeInTheDocument();
+    },
+    TIMEOUT
+  );
+
+  it(
+    "a refusal for one choice is dropped when the choice changes, so it never shows under another invoice's details",
+    async () => {
+      const onSubmit = jest.fn(async () => ({ kind: 'refused' as const, message: 'That firm is not linked.' }));
+      renderView({ correctionAvailable: true, loadCorrectionPrefill: jest.fn(async () => PREFILL), onSubmit });
+      await chooseCorrection();
+      await waitFor(() => expect(submitButton()).toBeEnabled());
+      await userEvent.click(submitButton());
+      expect(await screen.findByText('That firm is not linked.')).toBeInTheDocument();
+      await userEvent.click(screen.getByRole('radio', { name: 'New invoice' }));
+      await userEvent.click(screen.getByRole('radio', { name: 'Existing invoice' }));
+      await screen.findByTestId('invoice-correction-details');
+      expect(screen.queryByText('The invoice was not submitted')).toBeNull();
+    },
+    TIMEOUT
+  );
+
+  it(
+    'a correctable answer without a firm invoice number says why Submit stays disabled',
+    async () => {
+      renderView({
+        correctionAvailable: true,
+        loadCorrectionPrefill: jest.fn(async () => ({ ...PREFILL, firmInvoiceNumber: '  ' })),
+      });
+      await chooseCorrection();
+      expect(await screen.findByTestId('invoice-correction-no-number')).toBeInTheDocument();
+      expect(submitButton()).toBeDisabled();
+    },
+    TIMEOUT
+  );
+
+  it(
+    'must-not-fire: a correction refused as filed under another record offers no switch (its record is fixed)',
+    async () => {
+      const onSubmit = jest.fn(async () => ({
+        kind: 'refused' as const,
+        message: 'This email is filed under Project X, so its invoice can only be submitted to that record.',
+        filedUnder: {
+          entityType: 'Project' as const,
+          entityId: '2a7d4c1e-9b3f-4e8a-b6d2-7c5e1f0a9d33',
+          name: 'Project X',
+        },
+      }));
+      renderView({ correctionAvailable: true, loadCorrectionPrefill: jest.fn(async () => PREFILL), onSubmit });
+      await chooseCorrection();
+      await waitFor(() => expect(submitButton()).toBeEnabled());
+      await userEvent.click(submitButton());
+      expect(await screen.findByText('The invoice was not submitted')).toBeInTheDocument();
+      expect(screen.queryByTestId('invoice-use-filed-under')).toBeNull();
+    },
+    TIMEOUT
+  );
+
+  it('must-not-fire: with corrections off the prefill is never read', async () => {
+    const loadCorrectionPrefill = jest.fn(async () => PREFILL);
+    renderView({ loadCorrectionPrefill });
+    await userEvent.click(screen.getByRole('radio', { name: 'Existing invoice' }));
+    expect(screen.getByRole('radio', { name: 'Submit a corrected invoice' })).toBeDisabled();
+    expect(loadCorrectionPrefill).not.toHaveBeenCalled();
   });
 });
 

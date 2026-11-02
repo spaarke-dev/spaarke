@@ -7,6 +7,7 @@ import type { AttachmentInfo } from '@shared/adapters/types';
 import {
   createInvoiceSubmitHandler,
   FROM_EMAIL_ROUTE,
+  loadCorrectionPrefill,
   loadInvoiceFirms,
   pollSubmission,
   submitInvoiceFromEmail,
@@ -499,6 +500,70 @@ describe('loadInvoiceFirms (§8)', () => {
   it('a 404 record_unavailable (the read gate, 2026-10-28) says the record is not available, never []', async () => {
     mockFetch.mockResolvedValueOnce(res(404, { reasonCode: 'sdap.access.deny.record_unavailable' }));
     await expect(loadInvoiceFirms(target, config)).rejects.toThrow(/This record isn't available to you/);
+  });
+});
+
+describe('loadCorrectionPrefill (§10, ebilling 097e)', () => {
+  const INVOICE_ID = '3c9d2b1a-7e4f-4a6b-8c2d-1e0f9a8b7c65';
+  const PREFILL = {
+    invoiceId: INVOICE_ID,
+    firm: { id: 'f1', name: 'Morrison Foerster' },
+    coreRecord: { entityType: 'Matter', entityId: 'm1', name: 'PAT-792345' },
+    invoiceStatus: 'InReview',
+    trackingNumber: 'INV-012.2',
+    firmInvoiceNumber: 'INV-012',
+    canCorrect: true,
+    reason: null,
+    replacedBy: null,
+  };
+
+  it('calls the §10 route with the cleaned id and returns the body', async () => {
+    mockFetch.mockResolvedValueOnce(res(200, PREFILL));
+    expect(await loadCorrectionPrefill(`{${INVOICE_ID.toUpperCase()}}`, config)).toEqual(PREFILL);
+    expect(mockFetch.mock.calls[0]![0]).toBe(`${BASE}/api/finance/invoices/${INVOICE_ID}/correction-prefill`);
+  });
+
+  it('a Superseded invoice carries its replacement; an unreadable replacement is null', async () => {
+    const superseded = {
+      ...PREFILL,
+      invoiceStatus: 'Superseded',
+      canCorrect: false,
+      reason: 'invoice_status',
+      replacedBy: { invoiceId: 'i2', name: 'INV-013' },
+    };
+    mockFetch.mockResolvedValueOnce(res(200, superseded));
+    expect(await loadCorrectionPrefill(INVOICE_ID, config)).toMatchObject({
+      canCorrect: false,
+      reason: 'invoice_status',
+      replacedBy: { invoiceId: 'i2', name: 'INV-013' },
+    });
+
+    mockFetch.mockResolvedValueOnce(res(200, { ...superseded, replacedBy: { invoiceId: 'i2' } }));
+    expect(await loadCorrectionPrefill(INVOICE_ID, config)).toMatchObject({ replacedBy: null });
+  });
+
+  it('must-not-fire: a body missing what a correction keeps is not used', async () => {
+    for (const bad of [
+      { ...PREFILL, firm: null },
+      { ...PREFILL, coreRecord: { ...PREFILL.coreRecord, entityType: 'Account' } },
+      { ...PREFILL, firmInvoiceNumber: undefined },
+      { ...PREFILL, canCorrect: 'yes' },
+      null,
+    ]) {
+      mockFetch.mockResolvedValueOnce(res(200, bad));
+      await expect(loadCorrectionPrefill(INVOICE_ID, config)).rejects.toThrow(/couldn't be read/);
+    }
+  });
+
+  it('the uniform 404, ebilling.disabled, another 503 and no answer each have their sentence', async () => {
+    mockFetch.mockResolvedValueOnce(res(404, { reasonCode: 'sdap.access.deny.record_unavailable' }));
+    await expect(loadCorrectionPrefill(INVOICE_ID, config)).rejects.toThrow(/This invoice isn't available to you/);
+    mockFetch.mockResolvedValueOnce(res(503, { errorCode: 'ebilling.disabled' }));
+    await expect(loadCorrectionPrefill(INVOICE_ID, config)).rejects.toThrow(/turned off in Spaarke/);
+    mockFetch.mockResolvedValueOnce(res(503, { errorCode: 'ebilling.submission.record_unavailable' }));
+    await expect(loadCorrectionPrefill(INVOICE_ID, config)).rejects.toThrow(/couldn't read this invoice right now/);
+    mockFetch.mockRejectedValueOnce(new TypeError('network'));
+    await expect(loadCorrectionPrefill(INVOICE_ID, config)).rejects.toThrow(/Couldn't reach Spaarke/);
   });
 });
 
