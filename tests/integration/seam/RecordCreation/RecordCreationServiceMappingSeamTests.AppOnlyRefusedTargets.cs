@@ -70,6 +70,26 @@ public sealed partial class RecordCreationServiceMappingSeamTests
                 w.Code == RecordCreationWarning.MappingRuleSkippedCode && w.Detail.Contains(column));
     }
 
+    // #2515 (EVT-{SEQNUM:6}): the platform fills an event's number, as a budget's (task 167), so a rule targeting it is skipped.
+    [Fact]
+    public async Task CreateAsync_ARuleTargetingTheEventNumber_IsSkippedWithTheWarning_AndAnOrdinaryRuleIsStillFilled()
+    {
+        _user.Columns["sprk_event"]["sprk_eventnumber"] = ("String", true);
+        Profile("sprk_matter", "sprk_event",
+            Rule(null, "  SPRK_EVENTNUMBER ", Text, Default, "EVT-000999"),
+            Rule(null, "sprk_location", Text, Default, "Room 1"));
+
+        var outcome = await Service().CreateAsync(EventUnder(OrdinaryMatter), AsCaller(), CancellationToken.None);
+
+        outcome.Succeeded.Should().BeTrue(outcome.Refusal?.Detail);
+        var fields = _creates.Should().ContainSingle().Subject.Fields;
+        fields.Keys.Should().NotContain(k => Normalized(k) == "sprkeventnumber", "the number is the platform's alone (must fire)");
+        StringOf(fields, "sprk_location").Should().Be("Room 1", "an ordinary column of the same profile is still written (must not fire)");
+        outcome.MappingWarnings.Should().ContainSingle()
+            .Which.Should().Match<RecordCreationWarning>(w =>
+                w.Code == RecordCreationWarning.MappingRuleSkippedCode && w.Detail.Contains("sprk_eventnumber"));
+    }
+
     [Theory]
     [MemberData(nameof(AppOnlyRefusedDocumentTargets))]
     public async Task CreateAsync_ARuleTargetingAColumnTheAppOnlyRefusalRefuses_IsSkippedWithTheRefusalCode_AndAnOrdinaryRuleIsStillFilled(
