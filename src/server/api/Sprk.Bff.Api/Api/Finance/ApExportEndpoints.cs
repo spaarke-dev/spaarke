@@ -34,7 +34,7 @@ namespace Sprk.Bff.Api.Api.Finance;
 /// <para><b>Email to AP and Mark Sent to AP (151c-1a, EB-D-182).</b> <c>POST export-batches/{batchId}/email</c> sends the stored CSV and JSON as the signed-in user through the
 /// communication send-as-user path (bytes to the mail channel only; the communication is owned by the batch's team) to the settings' AP export email, and sets
 /// the batch's Sent to AP Date once. <c>POST export-batches/{batchId}/mark-sent-to-ap</c> sets the same date for files delivered another way. Both need Read and Write
-/// on the batch (uniform 404 otherwise); see <see cref="ApExportDeliveryService"/>. No regarding link to the batch yet (task 151c-2).</para>
+/// on the batch (uniform 404 otherwise); see <see cref="ApExportDeliveryService"/>. The email carries a plain batch reference (task 151c-2), no regarding link.</para>
 /// </remarks>
 public static class ApExportEndpoints
 {

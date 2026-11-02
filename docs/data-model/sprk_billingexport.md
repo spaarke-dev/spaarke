@@ -1,7 +1,7 @@
 # sprk_billingexport (Billing Export)
 
 > **Project**: ebilling-r1, task 023 (FR-13, FR-41, D-21, D-56)
-> **Last Updated**: 2026-11-01 (task 151c-1a: `sprk_senttoapdate`)
+> **Last Updated**: 2026-11-02 (task 151c-2: `sprk_communication.sprk_billingexport`)
 > **Script**: `scripts/ebilling/Deploy-EbillingExportSchema.ps1` (idempotent, additive; a second run changes nothing)
 > **Solution**: `SpaarkeMaster` (unmanaged, in dev). Solution source, forms and views are synced by task 029.
 
@@ -33,8 +33,15 @@ All use delete = RemoveLink and NoCascade for assign, merge, reparent, share and
 | `sprk_billingexport` | `sprk_csvdocument` | `sprk_document` | `sprk_billingexport_csvdocument_document` | The CSV file, stored as a Document in the E-Billing Output Files container (D-44, D-55). |
 | `sprk_billingexport` | `sprk_jsondocument` | `sprk_document` | `sprk_billingexport_jsondocument_document` | The JSON file, same container. |
 | `sprk_invoice` | `sprk_billingexport` ("Export Batch") | `sprk_billingexport` | `sprk_invoice_billingexport_billingexport` | See "Invoice in one batch" below. |
+| `sprk_communication` | `sprk_billingexport` ("Export Batch") | `sprk_billingexport` | `sprk_communication_billingexport_billingexport` | Task 151c-2 (EB-D-182): the AP email sent for the batch. See "Email to batch reference" below. |
 
 FR-13 says "file document" (singular); FR-41 produces a CSV and a JSON file, so there is one document lookup per format and `sprk_formats` records which files a batch produced.
+
+## Email to batch reference (task 151c-2)
+
+`sprk_communication.sprk_billingexport` ("Export Batch", `scripts/ebilling/Deploy-EbillingCommunicationBatchLink.ps1`, idempotent, `-WhatIf`) is a **plain reference**, written by the BFF in the same create as the AP email (`ServerSendOptions.BillingExportId`, internal and never bound from a request body). It is **not** a `sprk_regarding*` column, a filing or an ownership parent: it is in none of `RecordFamilyEdges`, `SecureChildLineage`, `RegardingFieldMap`, `RegardingLookupMap` or the communication filing fields, so it cannot change who owns or can read the email (guard: `CommunicationBatchLinkNotFilingGuardTests`).
+
+**Cascade (an access requirement, agreed with unified-access-control-r2):** Assign, Share, Unshare, Reparent, Merge and Rollup View are **NoCascade**; Delete is **RemoveLink** (not Restrict). The script sets these explicitly and verifies them on every run; an existing relationship that differs stops it (exit 2). The Billing Export main form shows the emails in an "AP emails" subgrid (`Deploy-EbillingFormsViews.ps1`). An email sent before the column existed has no reference.
 
 ## Invoice in one batch
 

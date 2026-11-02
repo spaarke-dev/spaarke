@@ -1371,13 +1371,79 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
     private async Task<Guid> CreatePreparedRecordAsync(DataverseEntity communication, string correlationId, CancellationToken ct)
     {
         communication["sprk_sentat"] = DateTimeOffset.UtcNow.DateTime;
-        var recordId = await _genericEntityService.CreateAsync(communication, ct);
+        Guid recordId;
+        try
+        {
+            recordId = await _genericEntityService.CreateAsync(communication, ct);
+        }
+        catch (Exception ex) when (communication.Contains(ServerSendOptions.BillingExportColumn)
+                                   && IsMissingColumnFault(ex, ServerSendOptions.BillingExportColumn))
+        {
+            // Ebilling-r1 task 151c-2: the BFF can be deployed before the batch-link column exists. The email has already been sent, so it
+            // must still be recorded: create it once more without the lookup. Only a fault that names the column triggers this, and only a
+            // row that carries it, so every other send and every other fault is unchanged.
+            _logger.LogWarning(
+                ex,
+                "Communication create failed because {Column} does not exist yet; recording the email without the batch link | CorrelationId: {CorrelationId}",
+                ServerSendOptions.BillingExportColumn, correlationId);
+            communication.Attributes.Remove(ServerSendOptions.BillingExportColumn);
+            recordId = await _genericEntityService.CreateAsync(communication, ct);
+        }
 
         _logger.LogInformation(
             "Dataverse communication record created | Id: {RecordId}, Type: {Type}, CorrelationId: {CorrelationId}",
             recordId, communication.GetAttributeValue<OptionSetValue>("sprk_communicationtype")?.Value, correlationId);
 
         return recordId;
+    }
+
+    /// <summary>
+    /// Dataverse error <c>0x80041103</c> (QueryBuilderNoAttribute) as a signed 32-bit integer, which is how
+    /// <see cref="Microsoft.Xrm.Sdk.OrganizationServiceFault.ErrorCode"/> exposes it: the table has no such attribute. The house idiom
+    /// (<c>RecordOwnershipResolver.AttributeDoesNotExistErrorCode</c>): typed on the code, which is locale-independent.
+    /// </summary>
+    private const int AttributeDoesNotExistErrorCode = unchecked((int)0x80041103);
+
+    /// <summary>
+    /// True when <paramref name="ex"/> (or an inner exception) is Dataverse refusing a write because <paramref name="column"/> does not
+    /// exist on the table. Two signals, either is enough, both must name the column (a fault about another column is not one, and a
+    /// retry without this column would not fix it):
+    /// <list type="bullet">
+    /// <item>the typed fault: a <c>FaultException&lt;OrganizationServiceFault&gt;</c> whose error code is <c>0x80041103</c> and whose message
+    /// names the column (localized messages still carry the attribute name);</item>
+    /// <item>the text: the message says the table has no such attribute / property ("doesn't contain attribute", "does not contain
+    /// attribute / an attribute", "Could not find a property named", "Invalid property", "does not exist on type").</item>
+    /// </list>
+    /// A fault that merely mentions the column (a privilege, a bad value) is neither. Task 151c-2.
+    /// </summary>
+    internal static bool IsMissingColumnFault(Exception? ex, string column)
+    {
+        for (var e = ex; e is not null; e = e.InnerException)
+        {
+            var message = e.Message;
+            if (!message.Contains(column, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            if (e is System.ServiceModel.FaultException<Microsoft.Xrm.Sdk.OrganizationServiceFault> fault
+                && fault.Detail?.ErrorCode == AttributeDoesNotExistErrorCode)
+            {
+                return true;
+            }
+
+            if (message.Contains("doesn't contain attribute", StringComparison.OrdinalIgnoreCase)
+                || message.Contains("does not contain attribute", StringComparison.OrdinalIgnoreCase)
+                || message.Contains("does not contain an attribute", StringComparison.OrdinalIgnoreCase)
+                || message.Contains("Could not find a property named", StringComparison.OrdinalIgnoreCase)
+                || message.Contains("Invalid property", StringComparison.OrdinalIgnoreCase)
+                || message.Contains("does not exist on type", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /// <summary>
@@ -1766,6 +1832,29 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
         {
             throw new InvalidOperationException(
                 "A server-only send must be a send-as-user email that is not archived to SharePoint Embedded and is not system mail.");
+        }
+
+        // Ebilling-r1 task 151c-2 (uac-r2 K5): the batch the email is linked to and the record its owner follows are one decision made twice. If
+        // both are set and they differ, the email would be owned like one batch and listed under another: refused before anything is sent or
+        // written, like the owner mismatch.
+        if (request.ServerSend is { BillingExportId: { } linkedBatch, OwnerFollows: { } ownerRecord }
+            && linkedBatch != Guid.Empty
+            && (ownerRecord.RecordId != linkedBatch
+                || !string.Equals(ownerRecord.EntityLogicalName, ServerSendOptions.BillingExportEntity, StringComparison.OrdinalIgnoreCase)))
+        {
+            _logger.LogWarning(
+                "Server send REFUSED before the send: the linked batch {Batch} differs from the record the owner follows ({Entity} {Record}) | CorrelationId: {CorrelationId}",
+                linkedBatch, ownerRecord.EntityLogicalName, ownerRecord.RecordId, correlationId);
+            throw new SdapProblemException(
+                code: ServerSendOptions.BatchMismatchCode,
+                title: "Server send inputs disagree",
+                detail: "The message was not sent: the batch it is linked to is not the record whose owner it follows.",
+                statusCode: 409,
+                extensions: new Dictionary<string, object>
+                {
+                    ["correlationId"] = correlationId,
+                    ["reasonCode"] = ServerSendOptions.BatchMismatchCode,
+                });
         }
 
         // Branch: MESSAGE (ACS Chat) sends take the persist-on-send + echo-dedup path (task 051 / FR-04).
@@ -2524,6 +2613,14 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
         // now on the row (task 146): its parents' team; unfiled keeps its creator (E1). A refusal is a 409 BEFORE the send.
         var owner = await ResolveOutboundOwnerAsync(communication, request, correlationId, ct, requestedBy);
         owner.ApplyTo(communication);
+
+        // Ebilling-r1 task 151c-2: a server send names the AP export batch it was sent for. Written LAST, after the owner is decided, in the
+        // same create as the row. A plain reference, not a filing: the owner resolver never sees it (it is not an ownership parent), and no
+        // other send carries it.
+        if (request.ServerSend?.BillingExportId is { } batchId && batchId != Guid.Empty)
+        {
+            communication[ServerSendOptions.BillingExportColumn] = new EntityReference(ServerSendOptions.BillingExportEntity, batchId);
+        }
 
         return communication;
     }

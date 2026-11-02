@@ -11,8 +11,10 @@
     What it does (spec FR-08 / FR-35 / FR-48; tasks/029-wp1-apply-and-export.poml steps 2-3):
       Forms   Rewrites the stub main form of sprk_ebillingsetting, sprk_ratecard, sprk_ratecardrate, sprk_billingcodeset,
               sprk_billingcode, sprk_ruleset, sprk_invoicesubmission, sprk_invoiceapproval, sprk_externalidentifier,
-              sprk_billingexport and sprk_invoicecorrection (all controls read-only) from the table below; the rate card form gets a
-              rates subgrid, the code set form a codes subgrid, the approval form an "Eligible approvers" (N:N contact) subgrid.
+              sprk_billingexport and sprk_invoicecorrection from the table below (the correction form is all read-only; the batch form
+              disables only Sent to AP Date, and its "AP emails" subgrid needs Deploy-EbillingCommunicationBatchLink.ps1 run first); the
+              rate card form gets a rates subgrid, the code set form a codes subgrid, the approval form an "Eligible approvers" (N:N
+              contact) subgrid.
               On the EXISTING sprk_timekeeper, sprk_invoice and sprk_billingevent main forms only the section "section_ebilling" is
               added or refreshed (everything else on those forms is left byte for byte). Read-only (task 014/016 constraint):
               the five invoice totals and sprk_billingevent.sprk_amount (the Adjustment line amount is computed by
@@ -147,6 +149,10 @@ $Spec = [ordered]@{
                 # Task 151c-1a: the BFF is the one writer of the Sent to AP Date (set once, never overwritten): disabled on the form.
                 ReadOnly = 'sprk_senttoapdate' }
             @{ Name = 'mapping'; Label = 'Mapping snapshot'; Cols = 'sprk_mappingsnapshot' })
+        # Task 151c-2: the AP emails sent for this batch, through the sprk_communication.sprk_billingexport relationship
+        # (Deploy-EbillingCommunicationBatchLink.ps1, which must have run first). The BFF is the only writer of the link; the view is the
+        # existing "All Outgoing Email" (to, from, subject, sent). A plain related-records subgrid: nothing on the form writes the link.
+        Subgrids = @(@{ Name = 'apemails'; Label = 'AP emails'; Target = 'sprk_communication'; Relationship = 'sprk_communication_billingexport_billingexport'; ViewName = 'All Outgoing Email' })
         # Task 151c-1b: the Sent to AP Date joins the Active view (a batch's delivery state is visible in the list).
         View = 'sprk_name', 'sprk_exportstatus', 'sprk_invoicecount', 'sprk_totalamount', 'sprk_senttoapdate', 'createdon'
     }
@@ -271,7 +277,22 @@ function Get-ActiveViewId([string]$Table, [string]$Name) {
     return $rows[0].savedqueryid
 }
 
+# Task 151c-2: a subgrid names its relationship in the form XML, and Dataverse accepts a form whose subgrid relationship does not exist
+# (it shows an empty or broken grid). So the relationship is read first, in -WhatIf and in a real run, before any form is written. Cached.
+$script:SubgridRelationshipsChecked = @{}
+function Assert-SubgridRelationship($Sub) {
+    $rel = $Sub.Relationship
+    if ($script:SubgridRelationshipsChecked.ContainsKey($rel)) { return }
+    $r = Get-DvOrNull "RelationshipDefinitions(SchemaName='$rel')?`$select=SchemaName" -Retries 2
+    if (-not $r) {
+        $hint = if ($rel -eq 'sprk_communication_billingexport_billingexport') { 'run Deploy-EbillingCommunicationBatchLink.ps1 first' } else { 'create the relationship first' }
+        throw "The subgrid '$($Sub.Name)' uses relationship '$rel', which does not exist in ${EnvironmentUrl} ($hint). Nothing was written."
+    }
+    $script:SubgridRelationshipsChecked[$rel] = $true
+}
+
 function New-SubgridSectionXml($Table, $Sub) {
+    Assert-SubgridRelationship $Sub
     $seed = "$Table/sub/$($Sub.Name)"
     $viewId = (Get-ActiveViewId $Sub.Target $Sub["ViewName"])
     $label = Esc $Sub.Label
@@ -473,6 +494,11 @@ if ($collateral.Count -gt 0) {
     $collateral | ForEach-Object { Write-Host "    $_" -ForegroundColor Yellow }
 }
 $Evidence['collateralBefore'] = @($collateral)
+
+# Task 151c-2: every subgrid's relationship must exist before any form is written (read only; fails in -WhatIf as well).
+foreach ($t in $Spec.Keys) {
+    if ($Spec[$t].ContainsKey('Subgrids')) { foreach ($sub in $Spec[$t].Subgrids) { Assert-SubgridRelationship $sub } }
+}
 
 Write-Host "`n1. Forms"
 foreach ($t in $Spec.Keys) { Write-Host " $t"; Sync-Form $t $Spec[$t] }

@@ -98,7 +98,7 @@ public class ApExportMailer(CommunicationService communication)
 /// batch and purpose, <see cref="StoredFileService.JudgeServableAsync"/>, the download audit event), never regenerated, and handed to the mail path as
 /// in-memory attachments (<see cref="ServerSendOptions"/>). They are never copied into a document, a communication attachment row or an archive.</para>
 /// <para><b>The record.</b> The sent <c>sprk_communication</c> is owned as a content row of the batch (the ownership resolver, never the default owner),
-/// is internal-only, is not enriched, is not archived, and carries no regarding or lookup to the batch: linking it to the batch is task 151c-2.</para>
+/// is internal-only, is not enriched, is not archived, and carries no regarding or association to the batch; task 151c-2 gives it a plain batch reference (`ServerSendOptions.BillingExportId`, the `sprk_billingexport` lookup on `sprk_communication`), which is not a filing.</para>
 /// <para><b>The date.</b> Set only when empty, by a version-conditional write, and never overwritten. After the email went, a failure to write it is logged
 /// at Error and the route still answers 200 (<see cref="ApExportEmailResponse.SentToApDateSet"/> false), because a retry would send the email again.</para>
 /// <para><b>The recipient</b> is read from the settings row with its own one-column query, not through <see cref="IEbillingSettingsReader"/>: that reader's
@@ -513,7 +513,7 @@ public sealed class ApExportDeliveryService
 
     /// <summary>
     /// The send request: to the AP address, the caller's CCs, the summary in the subject and body, both files as server-only attachments. No
-    /// association (so no regarding or lookup to the batch; 151c-2 adds a plain batch reference), internal-only, not archived.
+    /// association (no regarding; the plain batch reference is `BillingExportId`, task 151c-2), internal-only, not archived.
     /// </summary>
     internal static SendCommunicationRequest BuildRequest(
         ApExportBatchDto batch, string to, IReadOnlyList<string> cc, string? message, IReadOnlyList<string> currencies,
@@ -554,6 +554,8 @@ public sealed class ApExportDeliveryService
                 Attachments = attachments,
                 OwnerFollows = new ServerOwnerRecord(ApExportService.BatchEntity, batchId, owningTeamId),
                 SkipEnrichment = true,
+                // Task 151c-2: the email carries a plain reference to its batch (not a filing; the owner above is unchanged by it).
+                BillingExportId = batchId,
             },
         };
     }

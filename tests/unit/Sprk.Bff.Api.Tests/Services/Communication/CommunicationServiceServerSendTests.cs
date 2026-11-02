@@ -308,6 +308,222 @@ public class CommunicationServiceServerSendTests
             .Should().NotContain("serverSend", "the options are never written back out").And.NotContain("ap-export-b1");
     }
 
+    // ---------------------------------------------------------------------------------------------------------------------------------
+    // Task 151c-2: the plain reference from the email to its AP export batch
+    // ---------------------------------------------------------------------------------------------------------------------------------
+
+    private const string BatchLink = "sprk_billingexport";
+
+    private static bool CarriesAnyFiling(Entity communication) =>
+        communication.Attributes.Keys.Any(k => k.StartsWith("sprk_regarding", StringComparison.OrdinalIgnoreCase));
+
+    private static SendCommunicationRequest NormalRequest() => new()
+    {
+        To = ["someone@example.com"], Subject = "s", Body = "b", CommunicationType = CommunicationType.Email, SendMode = SendMode.User,
+    };
+
+    /// <summary>
+    /// MUTATION: not writing <c>BillingExportId</c> in <c>BuildDataverseRecordForUserAsync</c> leaves the column off the row. The reference is in the
+    /// SAME create as the row (one create, no follow-up update), the owner is still the batch's team, and nothing files the email.
+    /// </summary>
+    [Fact(DisplayName = "151c-2 must-fire: the send sets sprk_billingexport in the create; the owner is unchanged and the email is not filed")]
+    public async Task BillingExport_IsSetInTheCreate_AndChangesNeitherOwnerNorFiling()
+    {
+        var rig = Rig();
+
+        var response = await rig.Service.SendAsync(Request(Options() with { BillingExportId = BatchId }), RecordingUserEmailRig.UserContext());
+
+        response.CommunicationId.Should().NotBeNull();
+        var communication = rig.Created.Should().ContainSingle(e => e.LogicalName == "sprk_communication").Subject;
+        communication.GetAttributeValue<EntityReference>(BatchLink).Should().BeEquivalentTo(new EntityReference("sprk_billingexport", BatchId));
+        rig.Created.Should().ContainSingle("one create, carrying the reference");
+        rig.Entities.Verify(
+            e => e.UpdateAsync(It.IsAny<string>(), It.IsAny<Guid>(),
+                It.Is<Dictionary<string, object>>(d => d.ContainsKey(BatchLink)), It.IsAny<CancellationToken>()),
+            Times.Never, "not a later update");
+        communication.GetAttributeValue<EntityReference>("ownerid").Should().BeEquivalentTo(new EntityReference("team", FinanceTeam));
+        CarriesAnyFiling(communication).Should().BeFalse("a plain reference, not a filing: no sprk_regarding* column");
+        communication.Contains("sprk_associationcount").Should().BeFalse();
+        rig.Owners.Requests.Should().ContainSingle("the batch reference is not an ownership parent: the only owner question is the one about the batch")
+            .Which.TargetRecordId.Should().Be(BatchId);
+    }
+
+    /// <summary>MUTATION: writing the column for every server send (not only when <c>BillingExportId</c> is set) puts it on this row.</summary>
+    [Fact(DisplayName = "151c-2 must-not-fire: a server send without a batch id, and a normal send, create the row without the column")]
+    public async Task WithoutABatchId_NoColumnIsWritten()
+    {
+        var rig = Rig();
+
+        await rig.Service.SendAsync(Request(), RecordingUserEmailRig.UserContext());
+        await rig.Service.SendAsync(Request(Options() with { BillingExportId = Guid.Empty }), RecordingUserEmailRig.UserContext());
+        await rig.Service.SendAsync(NormalRequest(), RecordingUserEmailRig.UserContext());
+
+        rig.Created.Should().HaveCount(3).And.OnlyContain(e => e.LogicalName == "sprk_communication");
+        rig.Created.Should().OnlyContain(e => !e.Contains(BatchLink));
+    }
+
+    /// <summary>
+    /// MUTATION: making <see cref="SendCommunicationRequest.ServerSend"/> public AND removing its <c>[JsonIgnore]</c> binds the body's reference and fails
+    /// this test (either change alone does not: System.Text.Json binds neither an internal property nor an ignored one).
+    /// </summary>
+    [Fact(DisplayName = "151c-2 must-not-fire: a JSON body cannot set the batch reference, under any spelling")]
+    public void BillingExportId_IsNotBoundFromJson()
+    {
+        const string json = """
+            {"to":["a@example.com"],"subject":"s","body":"b",
+             "serverSend":{"billingExportId":"15100000-0000-4000-8000-0000000000b1"},
+             "ServerSend":{"BillingExportId":"15100000-0000-4000-8000-0000000000b1"},
+             "billingExportId":"15100000-0000-4000-8000-0000000000b1",
+             "sprk_billingexport":"15100000-0000-4000-8000-0000000000b1",
+             "sprk_billingexport@odata.bind":"/sprk_billingexports(15100000-0000-4000-8000-0000000000b1)"}
+            """;
+
+        var bound = JsonSerializer.Deserialize<SendCommunicationRequest>(json, new JsonSerializerOptions(JsonSerializerDefaults.Web))!;
+
+        bound.ServerSend.Should().BeNull();
+        JsonSerializer.Serialize(Request(Options() with { BillingExportId = BatchId }), new JsonSerializerOptions(JsonSerializerDefaults.Web))
+            .Should().NotContain("serverSend").And.NotContain("15100000-0000-4000-8000-0000000000b1");
+    }
+
+    /// <summary>
+    /// The chosen fallback (BFF deployed before the column): the create faults naming the column, the row is created once more WITHOUT it and the email
+    /// is recorded. MUTATION: removing the retry loses the row (the best-effort step logs and moves on, the response has no communication id).
+    /// </summary>
+    [Fact(DisplayName = "151c-2 fallback: a create that faults because the column does not exist yet is retried without it, and the email is recorded")]
+    public async Task MissingColumn_RecordsTheEmailWithoutTheLink()
+    {
+        var rig = Rig();
+        var attempts = new List<bool>();
+        rig.Entities.Setup(e => e.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
+            .Returns<Entity, CancellationToken>((entity, _) =>
+            {
+                attempts.Add(entity.Contains(BatchLink));
+                rig.Created.Add(entity);
+                if (entity.Contains(BatchLink))
+                {
+                    throw new InvalidOperationException(
+                        "Failed to create sprk_communication record: 'sprk_communication' entity doesn't contain attribute with Name = 'sprk_billingexport' and NameMapping = 'Logical'.",
+                        new Exception("'sprk_communication' entity doesn't contain attribute with Name = 'sprk_billingexport'"));
+                }
+
+                return Task.FromResult(Guid.NewGuid());
+            });
+
+        var response = await rig.Service.SendAsync(Request(Options() with { BillingExportId = BatchId }), RecordingUserEmailRig.UserContext());
+
+        attempts.Should().Equal(true, false);
+        response.CommunicationId.Should().NotBeNull("the email is recorded");
+        rig.Channel.Sent.Should().ContainSingle("the email went once");
+        var recorded = rig.Created[^1];
+        recorded.Contains(BatchLink).Should().BeFalse();
+        recorded.GetAttributeValue<EntityReference>("ownerid").Should().BeEquivalentTo(new EntityReference("team", FinanceTeam), "the owner is untouched by the retry");
+        recorded.GetAttributeValue<string>("sprk_subject").Should().Be("AP export b1");
+    }
+
+    /// <summary>MUTATION: retrying on any fault (or on a fault that does not name the column) would double-create on a fault the retry cannot fix.</summary>
+    [Theory(DisplayName = "151c-2 must-not-fire: any other create fault is not retried (one attempt, the existing best-effort behaviour)")]
+    [InlineData("The operation timed out")]
+    [InlineData("Principal user is missing prvAppendToBillingExport privilege on sprk_billingexport")]
+    [InlineData("'sprk_communication' entity doesn't contain attribute with Name = 'sprk_somethingelse'")]
+    public async Task OtherCreateFaults_AreNotRetried(string fault)
+    {
+        var rig = Rig();
+        var attempts = 0;
+        rig.Entities.Setup(e => e.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
+            .Returns<Entity, CancellationToken>((_, _) =>
+            {
+                attempts++;
+                throw new InvalidOperationException(fault);
+            });
+
+        var response = await rig.Service.SendAsync(Request(Options() with { BillingExportId = BatchId }), RecordingUserEmailRig.UserContext());
+
+        attempts.Should().Be(1);
+        rig.Channel.Sent.Should().ContainSingle("the email was sent; a record fault does not unsend or resend it");
+        response.CommunicationId.Should().BeNull();
+    }
+
+    /// <summary>MUTATION: a fault on a row that does not carry the link (every other send) must never enter the retry, even when its text names the column.</summary>
+    [Fact(DisplayName = "151c-2 must-not-fire: a normal send whose create faults is not retried")]
+    public async Task NormalSend_CreateFault_IsNotRetried()
+    {
+        var rig = Rig();
+        var attempts = 0;
+        rig.Entities.Setup(e => e.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
+            .Returns<Entity, CancellationToken>((_, _) =>
+            {
+                attempts++;
+                throw new InvalidOperationException("'sprk_communication' entity doesn't contain attribute with Name = 'sprk_billingexport'");
+            });
+
+        await rig.Service.SendAsync(NormalRequest(), RecordingUserEmailRig.UserContext());
+
+        attempts.Should().Be(1);
+    }
+
+    [Theory(DisplayName = "151c-2: the missing-column classifier names the column and a missing-attribute shape, nothing else")]
+    [InlineData("'sprk_communication' entity doesn't contain attribute with Name = 'sprk_billingexport' and NameMapping = 'Logical'.", true)]
+    [InlineData("The entity 'sprk_communication' does not contain an attribute with the name sprk_billingexport", true)]
+    [InlineData("Could not find a property named 'sprk_billingexport' on type 'Microsoft.Dynamics.CRM.sprk_communication'", true)]
+    [InlineData("'sprk_communication' entity doesn't contain attribute with Name = 'sprk_other'", false)]
+    [InlineData("sprk_billingexport: access denied", false)]
+    [InlineData("", false)]
+    public void MissingColumnClassifier(string message, bool expected)
+    {
+        CommunicationService.IsMissingColumnFault(new InvalidOperationException("wrapper", new Exception(message)), BatchLink).Should().Be(expected);
+        CommunicationService.IsMissingColumnFault(null, BatchLink).Should().BeFalse();
+    }
+
+    [Fact(DisplayName = "151c-2 K3: the typed Dataverse fault 0x80041103 naming the column is a missing column, in any language; the same code for another column, or another code, is not")]
+    public void MissingColumnClassifier_TypedFault()
+    {
+        static Exception Fault(int code, string reason) =>
+            new InvalidOperationException("wrapper", new System.ServiceModel.FaultException<OrganizationServiceFault>(
+                new OrganizationServiceFault { ErrorCode = code, Message = reason }, new System.ServiceModel.FaultReason(reason)));
+
+        const int noAttribute = unchecked((int)0x80041103);
+
+        // A localized message: no English phrase, only the code and the column name.
+        CommunicationService.IsMissingColumnFault(Fault(noAttribute, "Das Attribut sprk_billingexport ist nicht vorhanden."), BatchLink).Should().BeTrue();
+        // Same code, a different column: a retry without THIS column would not fix it.
+        CommunicationService.IsMissingColumnFault(Fault(noAttribute, "Das Attribut sprk_other ist nicht vorhanden."), BatchLink).Should().BeFalse();
+        // Another code (object does not exist), column named, no missing-attribute phrase.
+        CommunicationService.IsMissingColumnFault(Fault(unchecked((int)0x80040217), "sprk_billingexport ist nicht vorhanden."), BatchLink).Should().BeFalse();
+    }
+
+    /// <summary>MUTATION: removing the agreement check lets a send be owned like one batch and linked to another.</summary>
+    [Theory(DisplayName = "151c-2 K5: a server send whose batch reference and followed owner record differ is refused (409) BEFORE anything is sent or written")]
+    [InlineData("other-batch")]
+    [InlineData("other-table")]
+    public async Task BatchAndOwnerRecordDisagree_RefusesBeforeTheSend(string kind)
+    {
+        var rig = Rig();
+        var options = kind == "other-batch"
+            ? Options() with { BillingExportId = Guid.Parse("15100000-0000-4000-8000-0000000000b2") }
+            : Options() with { BillingExportId = BatchId, OwnerFollows = new ServerOwnerRecord("sprk_invoice", BatchId, FinanceTeam) };
+
+        var act = () => rig.Service.SendAsync(Request(options), RecordingUserEmailRig.UserContext());
+
+        var failure = (await act.Should().ThrowAsync<SdapProblemException>()).Which;
+        failure.StatusCode.Should().Be(409);
+        failure.Code.Should().Be(ServerSendOptions.BatchMismatchCode);
+        rig.Channel.Sent.Should().BeEmpty("nothing is sent");
+        rig.Created.Should().BeEmpty("nothing is written");
+        rig.Owners.Requests.Should().BeEmpty("refused before the owner is asked");
+    }
+
+    [Fact(DisplayName = "151c-2 K5 must-not-fire: the same batch in both, the link alone, and the owner alone are accepted")]
+    public async Task BatchAndOwnerRecordAgree_AreAccepted()
+    {
+        var rig = Rig();
+
+        await rig.Service.SendAsync(Request(Options() with { BillingExportId = BatchId }), RecordingUserEmailRig.UserContext());
+        await rig.Service.SendAsync(Request(Options() with { BillingExportId = BatchId, OwnerFollows = null }), RecordingUserEmailRig.UserContext());
+        await rig.Service.SendAsync(Request(), RecordingUserEmailRig.UserContext());
+
+        rig.Channel.Sent.Should().HaveCount(3);
+    }
+
     /// <summary>A send that carries no options is exactly the send it was: nothing merged, the default owner question, enrichment on.</summary>
     [Fact(DisplayName = "151c-1a regression pin: a send without the options has no server attachments and asks the unchanged owner question")]
     public async Task WithoutTheOptions_TheSendIsUnchanged()

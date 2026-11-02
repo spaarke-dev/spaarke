@@ -98,12 +98,13 @@ public sealed class ApExportDeliveryTests
         sent.SendMode.Should().Be(SendMode.User);
         sent.ArchiveToSpe.Should().BeFalse();
         sent.IsInternalOnly.Should().BeTrue();
-        sent.Associations.Should().BeNull("no regarding link to the batch yet: that is task 151c-2");
+        sent.Associations.Should().BeNull("a plain batch reference (ServerSend.BillingExportId, task 151c-2), never an association or regarding link");
         sent.AttachmentDocumentIds.Should().BeNull("the files are not documents");
         sent.Subject.Should().Contain(batchId.ToString("D")).And.Contain("2 invoices").And.Contain("1,500.50").And.Contain("USD");
         sent.Body.Should().Contain(batchId.ToString("D")).And.Contain("Invoices: 2").And.Contain("Total: 1,500.50 USD").And.Contain("Please pay by Friday.");
         var server = sent.ServerSend!;
         server.SkipEnrichment.Should().BeTrue();
+        server.BillingExportId.Should().Be(batchId, "task 151c-2: the email carries a plain reference to its batch, in the same create as the row");
         host.World.Dataverse.Get("sprk_billingexport", batchId).GetAttributeValue<EntityReference>("ownerid").Should().BeEquivalentTo(new EntityReference("team", ApExportWorld.TeamId));
         server.OwnerFollows.Should().BeEquivalentTo(new ServerOwnerRecord("sprk_billingexport", batchId, ApExportWorld.TeamId), "the email's owner must equal the batch's owning team");
         server.Attachments.Select(a => (a.Name, a.ContentType)).Should().Equal(
