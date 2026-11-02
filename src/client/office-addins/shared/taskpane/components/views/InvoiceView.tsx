@@ -34,14 +34,17 @@ import {
   FIRM_INVOICE_NUMBER_MAX,
   PO_NUMBER_MAX,
   type InvoiceCoreRecordType,
+  type InvoiceCorrectionPrefill,
   type InvoiceFirmOption,
   type InvoiceSubmissionInput,
   type InvoiceSubmissionOutcome,
   type InvoiceListedAttachment,
   type InvoiceMarkingValue,
   type InvoiceSubmitHandler,
+  type LoadCorrectionPrefill,
   type LoadInvoiceFirms,
 } from '../../services/invoiceSubmissionSeam';
+import { describeCorrectionBlock } from '../../utils/invoiceSubmissionMessages';
 import {
   InvoiceAttachmentMarking,
   defaultInvoiceMarking,
@@ -58,10 +61,14 @@ import {
  * - New invoice: the core record (Matter, Project or Work Assignment — required), the firm (required; its options
  *   come from {@link InvoiceViewProps.loadFirms}), the firm's invoice number (required, 1-100), an optional PO number,
  *   and the email's attachments marked Invoice / Supporting / Don't save.
- * - Existing invoice: pick the invoice, then submit a corrected invoice or add supporting files. Both are shown
- *   disabled with their reason: corrections until the server supports them ({@link InvoiceViewProps.correctionAvailable},
- *   ebilling 097), supporting files until the upload route exists (ebilling 123; its contract is agreed, the route is
- *   not built, so the add-in does not call it yet).
+ * - Existing invoice: pick the invoice, then submit a corrected invoice or add supporting files. Corrections are shown
+ *   disabled with their reason until {@link InvoiceViewProps.correctionAvailable} (ebilling 097 on the server); supporting
+ *   files until the upload route exists (ebilling 123; its contract is agreed, the route is not built, so the add-in
+ *   does not call it yet).
+ * - Correction: the chosen invoice's prefill ({@link InvoiceViewProps.loadCorrectionPrefill}, contract §10) decides.
+ *   When it can be corrected, the form shows the firm, core record and firm invoice number the correction keeps (not
+ *   editable: the server refuses any other) and the attachment marking; otherwise the view says why, and offers a
+ *   Superseded invoice's replacement.
  *
  * Submit goes through the injected {@link InvoiceViewProps.onSubmit} seam (App wires `invoiceSubmissionService`);
  * without it the view says submitting is not available and Submit stays disabled. Once the server accepts the
@@ -95,6 +102,11 @@ export interface InvoiceViewProps {
   loadFirms?: LoadInvoiceFirms;
   /** Whether "Submit a corrected invoice" can be used (the server refuses corrections until ebilling 097). */
   correctionAvailable?: boolean;
+  /**
+   * The chosen invoice's correction prefill (contract §10, ebilling 097e): the firm, core record and number a correction
+   * keeps, and whether it can be made. Absent → a correction can't be prepared.
+   */
+  loadCorrectionPrefill?: LoadCorrectionPrefill;
   /**
    * Called with true while a submission is running, or its result (one the server accepted: submitted, rejected or
    * failed, with its tracking number) is showing; false otherwise and on unmount. The pane hides its tab bar while
@@ -136,6 +148,18 @@ type FirmLoad =
   | { status: 'loading' }
   | { status: 'error'; message: string }
   | { status: 'ready'; firms: InvoiceFirmOption[] };
+
+type PrefillLoad =
+  | { status: 'none' }
+  | { status: 'loading' }
+  | { status: 'error'; message: string }
+  | { status: 'ready'; prefill: InvoiceCorrectionPrefill };
+
+const CORE_TYPE_LABEL: Record<InvoiceCoreRecordType, string> = {
+  Matter: 'Matter',
+  Project: 'Project',
+  WorkAssignment: 'Work assignment',
+};
 
 type InvoiceMode = 'new' | 'existing';
 
@@ -196,6 +220,7 @@ export const InvoiceView: React.FC<InvoiceViewProps> = ({
   onSubmit,
   loadFirms,
   correctionAvailable = false,
+  loadCorrectionPrefill,
   onBusyChange,
   filedRecord = null,
 }) => {
@@ -231,6 +256,10 @@ export const InvoiceView: React.FC<InvoiceViewProps> = ({
   const userPickedRef = useRef(false);
   const [candidates, setCandidates] = useState<RelatedCandidate[]>(NO_CANDIDATES);
   const [candidatesLoading, setCandidatesLoading] = useState(false);
+  const [prefill, setPrefill] = useState<PrefillLoad>({ status: 'none' });
+  /** Bumped by the prefill's Retry; the prefill effect runs again. */
+  const [prefillReload, setPrefillReload] = useState(0);
+  const prefillRequestRef = useRef(0);
 
   const chooseCoreRecord = useCallback((record: EntitySearchResult | null) => {
     userPickedRef.current = true;
@@ -337,6 +366,34 @@ export const InvoiceView: React.FC<InvoiceViewProps> = ({
     );
   }, [coreRecord, loadFirms, firmsReload]);
 
+  // A correction of the chosen invoice: read what it must keep and whether it can be made (§10). A newer choice
+  // supersedes an older request.
+  const correcting = correctionAvailable && mode === 'existing' && correctionChosen && invoice !== null;
+  useEffect(() => {
+    const request = ++prefillRequestRef.current;
+    if (!correcting || !invoice) {
+      setPrefill({ status: 'none' });
+      return;
+    }
+    if (!loadCorrectionPrefill) {
+      setPrefill({ status: 'error', message: "A correction can't be prepared here yet." });
+      return;
+    }
+    setPrefill({ status: 'loading' });
+    loadCorrectionPrefill(invoice.id).then(
+      result => {
+        if (request === prefillRequestRef.current) setPrefill({ status: 'ready', prefill: result });
+      },
+      (err: unknown) => {
+        if (request !== prefillRequestRef.current) return;
+        setPrefill({
+          status: 'error',
+          message: err instanceof Error ? err.message : "Couldn't read this invoice. Try again.",
+        });
+      }
+    );
+  }, [correcting, invoice, loadCorrectionPrefill, prefillReload]);
+
   // A Retry resends the LAST submitted request. Once the user changes anything the request was built from, that
   // request is no longer what is on screen: drop the retryable outcome and the stored attempt, so the next Submit is
   // a new attempt (new action id) with the values shown.
@@ -384,25 +441,31 @@ export const InvoiceView: React.FC<InvoiceViewProps> = ({
     []
   );
 
-  // The submission form applies to a new invoice, or to a correction once corrections are available.
-  const formActive = mode === 'new' || (correctionAvailable && correctionChosen && invoice !== null);
+  // A correction is sent with the invoice's own firm, core record and number (§10), never with values typed here.
+  const correction = correcting && prefill.status === 'ready' && prefill.prefill.canCorrect ? prefill.prefill : null;
+
+  // The submission form applies to a new invoice, or to a correction the server says can be made.
+  const formActive = mode === 'new' || correction !== null;
 
   const missing = useMemo(() => {
     const list: string[] = [];
+    if (mode !== 'new') return list;
     if (!coreRecord) list.push('the matter, project or work assignment');
     if (!firmId) list.push('the firm');
     if (!normalizedNumber) list.push("the firm's invoice number");
     return list;
-  }, [coreRecord, firmId, normalizedNumber]);
+  }, [mode, coreRecord, firmId, normalizedNumber]);
+
+  const detailsReady =
+    mode === 'new'
+      ? coreRecord !== null && isCoreRecordType(coreRecord.entityType) && firmId.length > 0 && normalizedNumber !== null
+      : correction !== null && normalizeFirmInvoiceNumber(correction.firmInvoiceNumber) !== null;
 
   const canSubmit =
     onSubmit !== undefined &&
     formActive &&
     load.status === 'ready' &&
-    coreRecord !== null &&
-    isCoreRecordType(coreRecord.entityType) &&
-    firmId.length > 0 &&
-    normalizedNumber !== null &&
+    detailsReady &&
     !poTooLong &&
     markingCheck.ok &&
     overBudget.length === 0 &&
@@ -448,17 +511,32 @@ export const InvoiceView: React.FC<InvoiceViewProps> = ({
   };
 
   const handleSubmit = (): void => {
-    if (!canSubmit || !coreRecord || !isCoreRecordType(coreRecord.entityType)) return;
-    const input = buildInvoiceSubmissionInput({
-      target: { entityType: coreRecord.entityType, entityId: coreRecord.id },
-      attachments,
-      marking,
-      firmId,
-      firmInvoiceNumber,
-      poNumber,
-      mode: mode === 'existing' ? 'Correction' : 'New',
-      invoiceId: invoice?.id ?? null,
-    });
+    if (!canSubmit) return;
+    let input: InvoiceSubmissionInput;
+    if (correction) {
+      input = buildInvoiceSubmissionInput({
+        target: { entityType: correction.coreRecord.entityType, entityId: correction.coreRecord.entityId },
+        attachments,
+        marking,
+        firmId: correction.firm.id,
+        firmInvoiceNumber: correction.firmInvoiceNumber,
+        poNumber,
+        mode: 'Correction',
+        invoiceId: correction.invoiceId,
+      });
+    } else {
+      if (!coreRecord || !isCoreRecordType(coreRecord.entityType)) return;
+      input = buildInvoiceSubmissionInput({
+        target: { entityType: coreRecord.entityType, entityId: coreRecord.id },
+        attachments,
+        marking,
+        firmId,
+        firmInvoiceNumber,
+        poNumber,
+        mode: 'New',
+        invoiceId: null,
+      });
+    }
     void runAttempt(input, newActionId());
   };
 
@@ -532,7 +610,9 @@ export const InvoiceView: React.FC<InvoiceViewProps> = ({
         );
       case 'refused': {
         const filedUnder = outcome.filedUnder ? filedUnderRecord(outcome.filedUnder) : null;
-        const offerFiledUnder = filedUnder !== null && !(coreRecord && sameRecordId(coreRecord.id, filedUnder.id));
+        // A correction keeps the invoice's own record, so only a new invoice can switch to the filed-under record.
+        const offerFiledUnder =
+          mode === 'new' && filedUnder !== null && !(coreRecord && sameRecordId(coreRecord.id, filedUnder.id));
         return (
           <MessageBar intent="error" layout="multiline" role="alert">
             <MessageBarBody>
@@ -682,7 +762,93 @@ export const InvoiceView: React.FC<InvoiceViewProps> = ({
     );
   };
 
+  // A correction keeps the original invoice's firm, record and number: shown, not editable (§10).
+  const renderCorrectionDetails = (c: InvoiceCorrectionPrefill) => (
+    <div className={styles.section} data-testid="invoice-correction-details">
+      <Text size={200} weight="semibold" className={styles.sectionLabel}>
+        Correcting{c.trackingNumber ? ` (tracking ${c.trackingNumber})` : ''}
+      </Text>
+      <Text size={200}>{`${CORE_TYPE_LABEL[c.coreRecord.entityType]}: ${c.coreRecord.name}`}</Text>
+      <Text size={200}>{`Firm: ${c.firm.name}`}</Text>
+      <Text size={200}>{`Firm invoice number: ${c.firmInvoiceNumber}`}</Text>
+      <Text size={200} className={styles.note}>
+        {"A correction keeps the original invoice's firm, record and firm invoice number."}
+      </Text>
+      {filedRecord && !sameRecordId(filedRecord.id, c.coreRecord.entityId) && (
+        <Text size={200} className={styles.note} data-testid="invoice-filed-record-note">
+          {`This email is filed to ${filedRecord.displayInfo ? `${filedRecord.displayInfo} ` : ''}${filedRecord.name} in Spaarke, so a correction for ${c.coreRecord.name} can't be submitted from it.`}
+        </Text>
+      )}
+    </div>
+  );
+
+  // The chosen invoice's correction prefill while it loads, fails, or says the invoice can't be corrected.
+  const renderPrefillState = () => {
+    if (prefill.status === 'loading') return <Spinner size="tiny" label="Checking this invoice…" />;
+    if (prefill.status === 'error') {
+      return (
+        <MessageBar intent="error" layout="multiline" role="alert">
+          <MessageBarBody>{prefill.message}</MessageBarBody>
+          <MessageBarActions>
+            <Button
+              appearance="outline"
+              size="small"
+              aria-label="Retry reading the invoice"
+              onClick={() => setPrefillReload(n => n + 1)}
+            >
+              Retry
+            </Button>
+          </MessageBarActions>
+        </MessageBar>
+      );
+    }
+    if (prefill.status !== 'ready' || prefill.prefill.canCorrect) return null;
+    const replacedBy = prefill.prefill.replacedBy;
+    return (
+      <MessageBar intent="warning" layout="multiline" role="status" data-testid="invoice-correction-blocked">
+        <MessageBarBody>{describeCorrectionBlock(prefill.prefill)}</MessageBarBody>
+        {replacedBy && (
+          <MessageBarActions>
+            <Button
+              appearance="outline"
+              size="small"
+              disabled={locked}
+              onClick={() =>
+                setInvoice({
+                  id: replacedBy.invoiceId,
+                  entityType: 'Invoice',
+                  logicalName: 'sprk_invoice',
+                  name: replacedBy.name,
+                })
+              }
+            >
+              {`Use ${replacedBy.name}`}
+            </Button>
+          </MessageBarActions>
+        )}
+      </MessageBar>
+    );
+  };
+
   const renderSubmissionForm = () => (
+    <>
+      {correction ? renderCorrectionDetails(correction) : renderNewInvoiceDetails()}
+
+      <Field
+        label="PO number"
+        hint="Optional"
+        {...(poTooLong
+          ? { validationState: 'error' as const, validationMessage: `At most ${PO_NUMBER_MAX} characters.` }
+          : {})}
+      >
+        <Input value={poNumber} onChange={(_, d) => setPoNumber(d.value)} disabled={locked} />
+      </Field>
+
+      {renderAttachmentsAndSubmit()}
+    </>
+  );
+
+  const renderNewInvoiceDetails = () => (
     <>
       <div className={styles.section}>
         <Text size={200} weight="semibold" className={styles.sectionLabel}>
@@ -719,17 +885,11 @@ export const InvoiceView: React.FC<InvoiceViewProps> = ({
       >
         <Input value={firmInvoiceNumber} onChange={(_, d) => setFirmInvoiceNumber(d.value)} disabled={locked} />
       </Field>
+    </>
+  );
 
-      <Field
-        label="PO number"
-        hint="Optional"
-        {...(poTooLong
-          ? { validationState: 'error' as const, validationMessage: `At most ${PO_NUMBER_MAX} characters.` }
-          : {})}
-      >
-        <Input value={poNumber} onChange={(_, d) => setPoNumber(d.value)} disabled={locked} />
-      </Field>
-
+  const renderAttachmentsAndSubmit = () => (
+    <>
       <div className={styles.section}>
         <Text size={200} weight="semibold" className={styles.sectionLabel}>
           Attachments
@@ -854,6 +1014,7 @@ export const InvoiceView: React.FC<InvoiceViewProps> = ({
                   Adding supporting files from Outlook is not available yet
                 </Text>
               )}
+              {correcting && renderPrefillState()}
             </div>
           )}
 

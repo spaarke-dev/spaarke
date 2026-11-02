@@ -24,6 +24,7 @@
 import type { IHostAdapter } from '@shared/adapters';
 import type { AttachmentInfo } from '@shared/adapters/types';
 import { authenticatedJsonFetch } from '@shared/services/authenticatedJsonFetch';
+import { cleanGuid } from '@spaarke/ui-components/guid';
 import { describeFetchFailure } from '../utils/errorMessages';
 import {
   describeInvoiceOutcome,
@@ -48,6 +49,7 @@ import { buildEmailSaveRequest, type OfficeSaveRequestBody, type QuickSaveEmailC
 import {
   INVOICE_CORE_RECORD_TYPES,
   type InvoiceCoreRecordType,
+  type InvoiceCorrectionPrefill,
   type InvoiceFiledUnder,
   type InvoiceFirmOption,
   type InvoiceSubmissionInput,
@@ -617,6 +619,76 @@ export async function loadInvoiceFirms(
         !!row && typeof row.firmId === 'string' && typeof row.name === 'string'
     )
     .map(row => ({ firmId: row.firmId, name: row.name }));
+}
+
+const UNREADABLE_PREFILL_MESSAGE = "Spaarke's answer about this invoice couldn't be read. Try again.";
+
+/** A §10 body, or undefined when any field the contract makes required is missing or of the wrong type. */
+function readCorrectionPrefill(json: unknown): InvoiceCorrectionPrefill | undefined {
+  if (!json || typeof json !== 'object') return undefined;
+  const body = json as Record<string, unknown>;
+  const firm = body.firm && typeof body.firm === 'object' ? (body.firm as Record<string, unknown>) : undefined;
+  const firmId = stringOrUndefined(firm?.id);
+  const firmName = stringOrUndefined(firm?.name);
+  const coreRecord = readFiledUnder(body.coreRecord);
+  const invoiceId = stringOrUndefined(body.invoiceId);
+  const firmInvoiceNumber = stringOrUndefined(body.firmInvoiceNumber);
+  if (!invoiceId || !firmId || firmName === undefined || !coreRecord || firmInvoiceNumber === undefined)
+    return undefined;
+  if (typeof body.canCorrect !== 'boolean') return undefined;
+  const replaced =
+    body.replacedBy && typeof body.replacedBy === 'object' ? (body.replacedBy as Record<string, unknown>) : undefined;
+  const replacedId = stringOrUndefined(replaced?.invoiceId);
+  const replacedName = stringOrUndefined(replaced?.name);
+  return {
+    invoiceId,
+    firm: { id: firmId, name: firmName },
+    coreRecord,
+    invoiceStatus: stringOrUndefined(body.invoiceStatus) ?? null,
+    trackingNumber: stringOrUndefined(body.trackingNumber) ?? null,
+    firmInvoiceNumber,
+    canCorrect: body.canCorrect,
+    reason: stringOrUndefined(body.reason) ?? null,
+    replacedBy: replacedId && replacedName ? { invoiceId: replacedId, name: replacedName } : null,
+  };
+}
+
+/**
+ * The correction prefill of an invoice (§10, ebilling 097e). Any failure THROWS with a sentence for the user: the
+ * uniform 404 (no Write on the invoice, not found, or a faulted rights read), 503 `ebilling.disabled`, any other 503,
+ * no answer, or a body that can't be read.
+ */
+export async function loadCorrectionPrefill(
+  invoiceId: string,
+  config: InvoiceServiceConfig
+): Promise<InvoiceCorrectionPrefill> {
+  let response: Response;
+  try {
+    const token = await config.getAccessToken();
+    response = await authenticatedJsonFetch(
+      `${config.apiBaseUrl}/api/finance/invoices/${encodeURIComponent(cleanGuid(invoiceId))}/correction-prefill`,
+      { method: 'GET', headers: { 'Content-Type': 'application/json' } },
+      token,
+      { getRetryToken: config.getAccessToken }
+    );
+  } catch {
+    throw new Error("Couldn't reach Spaarke to read this invoice. Check your connection and try again.");
+  }
+  if (!response.ok) {
+    if (response.status === 404) {
+      throw new Error("This invoice isn't available to you: it may not exist, or you can't change it.");
+    }
+    if (response.status === 503) {
+      const json = (await response.json().catch(() => null)) as Record<string, unknown> | null;
+      if (problemCode(503, json) === 'ebilling.disabled')
+        throw new Error('Invoice submission is turned off in Spaarke.');
+      throw new Error("Spaarke couldn't read this invoice right now. Try again in a moment.");
+    }
+    throw new Error((await describeFetchFailure(response)).message);
+  }
+  const prefill = readCorrectionPrefill(await response.json().catch(() => null));
+  if (!prefill) throw new Error(UNREADABLE_PREFILL_MESSAGE);
+  return prefill;
 }
 
 /** The text context for messages: the file the user marked Invoice, from the client's own marks. */
