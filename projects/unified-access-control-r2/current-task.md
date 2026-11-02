@@ -12,7 +12,7 @@
 |---|---|
 | **Mode** | Final push, round-90 rules. Merge only when Router + "Client lint (type-aware ratchet)" are green: `git merge-tree`, then `--squash --match-head-commit <sha>`, no `--delete-branch`. Live actions, deploys and settings changes need the owner's go. Shared-dev deploys go through the R3 protocol. |
 | **Active task** | None in progress. |
-| **Dev state** | BFF = d0c1c5dc3c since 2026-11-01 03:09Z (no deploy since). Dev SPA = b083d62183. Deploy checkout C:/wt2468, detached at d0c1c5dc3c. |
+| **Dev state** | BFF = fcf01480f4 (R3 read it back 18:16Z on 2026-11-02); R3 is deploying 3740e1a105 next. Dev SPA = b083d62183. Deploy checkout C:/wt2468, detached at d0c1c5dc3c. |
 | **BU1 move** | **Closed 2026-11-02** (record: `notes/decisions.md`).<br>• In BU1: every interactive human except the administrator 1d02f31c, plus both dev BFF app users (roles = BU1 copies of the same set, profiles unchanged by id).<br>• Customer families: 684 rows assigned to the BU1 team; 119 children followed through the reconciler.<br>• Product configuration: 263 rows went to the root team. The 34 playbooks stay with 1d02f31c until #2505.<br>• Step 3 not done, by owner choice: a self-move needs `DoNotRemoveRolesOnChangeBusinessUnit`, so the administrator stays in the root.<br>• Rollback source: `$TEMP/uacmerge/uacg/rbu1/rbu1s0_snapshot_*`. |
 | **Next action** | (0) The #2483 addendum verdict was sent to field-mapping (2026-11-02): OK with conditions (a)–(c); Q1 accept the 409 with no exemption; Q2 accept, skip visible; Q3 fix in 042b. #2502 §14 addendum (13c9e89cf9): OK. Routing was never an access control; the boundary is `IRetrievalAccessTrim` at each consumer. Conditions: reword line 123; keep the log at Information until W3, then Warning; close #2206/#2413 on 041's merge after the dev count of non-default stamps; reconcile 042b's step-8 bullet with 041. Waiting for: the 041 diff (scoped check: no trim call moves) and the 042a/042b diffs (042b gets a full review). (1) Review field-mapping's 039/040 diffs and its #2483 follow-up when they arrive. (2) Verify the state of the parked items below. (3) The 195 owner click-test stays on the checklist. |
 
@@ -26,7 +26,7 @@
 - **ebilling #2507 K1:** OK for the access gate (the fallback to the caller is kept as a known limit, accepted by ontology).
 
 ## Gates and peers
-- **R3:** released the BU1 move and confirmed step 5 from its side, including the Identity Link Writers field permissions. No open asks.
+- **R3:** asked for my OK on a dev BFF deploy of master 3740e1a105 (live fcf01480f4); I sent OK 2026-11-02, with conditions: Person-schema -Verify first, keep ebilling's six keys, tell me the deploy time. When R3 reports the deploy done (hash-verify + /healthz), run my 30-minute post-deploy gate with the external split and report back. The owner's go is given in R3's session.
 - **ebilling:** 151c-2 CLEARED 2026-11-02. F1 fixed in 9511a1e17c (`NO_NEW_HOSTS`; both copies identical), K5 409 check in 2abe0f0cbf; re-check OK at tip 1eb91e79de; ebilling merges into work. K1-K4 accepted. No open asks.
 - **Field-mapping:** #2504 reviewed OK. 039/040 diffs to come.
 
