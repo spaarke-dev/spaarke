@@ -144,13 +144,42 @@ export const EMAIL_UNIDENTIFIABLE_REASON_MESSAGES: Readonly<Record<string, Entry
 };
 const EMAIL_UNIDENTIFIABLE_FALLBACK = "Spaarke couldn't identify this email, so it can't be submitted from Outlook.";
 
-/** §6 / OP-7 `correction_not_allowed` reasons. */
+/**
+ * An invoice status as the contract spells it (§6 `invoiceStatus`, §10 `invoiceStatus`), in words. A status not listed
+ * here is not named: the sentence says "in its current state". `Superseded` has its own sentence.
+ */
+export const INVOICE_STATUS_WORDS: Readonly<Record<string, string>> = {
+  InReview: 'In Review',
+  Approved: 'Approved',
+  SentToAp: 'Sent to AP',
+  Paid: 'Paid',
+  Rejected: 'Rejected',
+  ReturnedToFirm: 'Returned to Firm',
+  Cancelled: 'Cancelled',
+};
+
+/** A Superseded invoice (§10, agreed 2026-10-31): the correction belongs on the newer invoice. */
+export const SUPERSEDED_INVOICE_MESSAGE =
+  'This invoice has already been replaced by a correction. Correct the newer invoice instead.';
+
+/** Why an invoice can't be corrected because of its status (§6 reason `invoice_status`, §10 `reason`). */
+export function describeUncorrectableStatus(invoiceStatus: string | null | undefined): string {
+  if (invoiceStatus === 'Superseded') return SUPERSEDED_INVOICE_MESSAGE;
+  const words = invoiceStatus ? INVOICE_STATUS_WORDS[invoiceStatus] : undefined;
+  return `This invoice can't be corrected ${words ? `while it is ${words}` : 'in its current state'}.`;
+}
+
+/**
+ * §6 `correction_not_allowed` reasons (097b, 2026-10-30). `not_available` (OP-7) is no longer sent; an unknown reason
+ * gets the fallback.
+ */
 export const CORRECTION_REASON_MESSAGES: Readonly<Record<string, Entry>> = {
-  not_available: `Corrections from Outlook are not available yet. ${NOTHING}`,
-  invoice_status: f =>
-    `This invoice can't be corrected${f.invoiceStatus ? ` while it is ${f.invoiceStatus}` : ' in its current state'}. ${NOTHING}`,
+  invoice_status: f => `${describeUncorrectableStatus(f.invoiceStatus)} ${NOTHING}`,
   different_firm: `A correction must come from the same firm as the original invoice. ${NOTHING}`,
   different_core_record: `A correction must be for the same matter, project or work assignment as the original invoice. ${NOTHING}`,
+  different_invoice_number: `A correction must keep the original invoice's number. ${NOTHING}`,
+  no_submission: `This invoice has no submission in Spaarke to correct. ${NOTHING}`,
+  submission_in_progress: `The original invoice is still being processed. ${NOTHING} Wait until it has finished, then submit the correction again.`,
 };
 const CORRECTION_FALLBACK = `This invoice can't be corrected. ${NOTHING}`;
 
@@ -212,7 +241,9 @@ export const SUBMISSION_ERROR_MESSAGES: Readonly<Record<string, Entry>> = {
       ? `This email is filed under ${filedUnder.name}, so its invoice can only be submitted to that record. ${NOTHING}`
       : `This email belongs to a different matter, project or work assignment, so it can't be submitted to this record. ${NOTHING}`,
   'ebilling.submission.correction_not_allowed': fromReasons(CORRECTION_REASON_MESSAGES, CORRECTION_FALLBACK),
-  'sdap.access.deny.record_unavailable': `The invoice isn't available to you: it may not exist, or you can't change it. ${NOTHING}`,
+  // Correction: the uniform 404 for an invoice the caller can't Write or that doesn't exist; a transient fault of the
+  // rights check gives the same answer (§6), so the sentence suggests trying again.
+  'sdap.access.deny.record_unavailable': `The invoice isn't available to you: it may not exist, or you can't change it. ${NOTHING} If you can open this invoice in Spaarke, try again.`,
   // §6 task 094 (2026-10-28): step 1 reads the saved .eml and its communication, step A files an unfiled communication
   'ebilling.submission.source_forbidden': `You can't open this email's saved copy in Spaarke, so it can't be submitted. ${NOTHING}`,
   'ebilling.submission.document_not_found': `This email's saved copy is no longer in Spaarke. ${NOTHING}`,
@@ -286,6 +317,22 @@ export const INVOICE_OUTCOME_MESSAGES: Readonly<Record<string, Entry>> = {
     "Spaarke's AI service failed while coding the invoice lines, so the invoice was not processed. Submit it again later.",
   'ai.invoice.output_invalid':
     "Spaarke couldn't code the invoice lines, so the invoice was not processed. Submit it again later.",
+  // 097c (2026-10-30): the job re-checks a correction before it replaces the original invoice. A refusal there ends the
+  // submission Failed with one of these; the original invoice is unchanged, and the same request is a new attempt.
+  'ebilling.submission.correction_not_allowed.invoice_status':
+    "The original invoice's status changed before the correction was processed, so the correction was not processed.",
+  'ebilling.submission.correction_not_allowed.different_firm':
+    "The original invoice's firm changed before the correction was processed, so the correction was not processed.",
+  'ebilling.submission.correction_not_allowed.different_core_record':
+    "The original invoice's matter, project or work assignment changed before the correction was processed, so the " +
+    'correction was not processed.',
+  'ebilling.submission.correction_not_allowed.different_invoice_number':
+    "The original invoice's number changed before the correction was processed, so the correction was not processed.",
+  'ebilling.submission.correction_not_allowed.submission_in_progress':
+    'The original invoice was still being processed, so the correction was not processed. Submit the correction again ' +
+    'once it has finished.',
+  'ebilling.submission.correction_target_unavailable':
+    'The original invoice was no longer available when the correction was processed, so the correction was not processed.',
   'ebilling.submission.blocked': 'The invoice was rejected by a billing rule.',
   'ebilling.submission.returned': 'The invoice was returned to the firm.',
 };
