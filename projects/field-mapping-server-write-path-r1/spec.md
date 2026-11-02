@@ -197,6 +197,10 @@ contract), `tests/Spaarke.ArchTests/` (`RecordOwnerAssignmentCensusTests`, `Refi
 
    Acceptance: a seam test asserts the step order and that one create call is made. Every step is covered for one
    root (Matter) and one child (Event).
+
+   *Amended 2026-11-02 (design §14, §15; tasks 041, 042b):* step 8 becomes a recorded no-op (FR-40). The I-1
+   derivation moves from step 10 to a new step 6½, before the owner; step 10 binds the 6½ result and sets I-16 with no
+   second derivation (FR-41). Step numbers 1–12 are otherwise unchanged.
 7. **FR-07 Principals.**
    - **Caller**: WhoAmI under the caller's token; unresolved → 403.
    - **System**: for jobs, playbook nodes, ingestion and the repair pass. Skips the as-caller checks (steps 2 and 5),
@@ -227,6 +231,9 @@ contract), `tests/Spaarke.ArchTests/` (`RecordOwnerAssignmentCensusTests`, `Refi
    Acceptance: the same Project filed under the same Matter gets the same owner via Office, the browser route, chat
    and a decision follow-on. Unresolved → typed refusal. No create yields a user- or app-owned row except a listed
    exception.
+
+   *Amended 2026-11-02 by FR-41 (#2483):* the parents the owner is resolved over include the derived I-1 stamp's
+   root, so a create gets the owner the secure-child reconciler gives the written row.
 10. **FR-10 Search-index default (I-5).** Fill-only, from the **owning** BU's `sprk_searchindexname` /
     `sprk_ai_search_index`, on every table the rules registry marks as search-indexed.
 
@@ -235,6 +242,10 @@ contract), `tests/Spaarke.ArchTests/` (`RecordOwnerAssignmentCensusTests`, `Refi
 
     *Amended by FR-38 (2026-10-30): on a search-indexed table the client's value no longer wins. The server drops it
     and applies the final owning BU's index.*
+
+    *Superseded by FR-40 (2026-11-02, #2502; owner 2026-11-01/02, UAC-r2 OK; design §14):* the server no longer
+    writes either index column from the owning BU. Step 8 is a recorded no-op; the index follows the content type,
+    never the user, the record or the business unit. Existing column values stay.
 11. **FR-11 Per-table rules registry.** One declarative registry holds, per table: root/child; protected columns;
     autonumber column; "for"-person column; server defaults; search-indexed Y/N; mapping-applies Y/N. It replaces
     `MatterProtectedAttributes`/`ProjectProtectedAttributes`, `ServerOwnedColumns`, `RootServerOwnedColumns` and
@@ -262,6 +273,10 @@ contract), `tests/Spaarke.ArchTests/` (`RecordOwnerAssignmentCensusTests`, `Refi
     not a listed exception), search-index default, I-1 stamp.
 
     Acceptance: two consecutive repairs produce no second write; a present value is never overwritten.
+
+    *Amended 2026-11-02 (design §14, §15):* Repair no longer fills the search-index default; it writes neither index
+    column (FR-40, task 041). Repair plans the missing I-1 stamp once, before the owner, and the owner question
+    includes it; a planning failure keeps the current owner (FR-41, task 042b).
 
 **W3 — Product creators onto the service**
 
@@ -313,6 +328,18 @@ contract), `tests/Spaarke.ArchTests/` (`RecordOwnerAssignmentCensusTests`, `Refi
     are preserved as registry rules.
 
     Acceptance: the census test lists each as routed; each exception is a named registry rule with its rationale.
+
+    *Amended 2026-11-02 (owner; ontology-r1 research, decisions.md):* **named exception.** These writers keep their
+    dedicated least-privileged identity (`OntologyWriterDataverseClient`, ontology D-1, ADR-028 path A) and do NOT
+    create through `RecordCreationService`:
+    - `SignalWriter`;
+    - `SignalSuppressionService`;
+    - `DecisionRecordWriter`;
+    - `GateDecisionRecordSharing`;
+    - the revise-budget step.
+
+    The service gets no second principal. The census lists them as exceptions with this reason: append-only by
+    privilege, because the shared BFF identity is System Administrator. No field mapping runs into those rows.
 22. **FR-22 Delete the client engine.** Delete `FieldMappingService.applyFieldMappings` (keep only what other code
     still imports, if anything) and `FieldMappingHandler.ts`.
 
@@ -352,6 +379,26 @@ contract), `tests/Spaarke.ArchTests/` (`RecordOwnerAssignmentCensusTests`, `Refi
 
     Acceptance: a natively created or imported row gets its mapping, standard owner, search-index default and stamp
     within ≤ 10 minutes; re-runs are no-ops; a pre-go-live row is never written.
+
+    *Amended 2026-11-02 (owner): the outcome is binding, the mechanism is the project's choice.* For any record
+    created outside the server-mediated owner process, the repair process brings **every member of that record's
+    family to the same owner**: the root to its standard owner, and each child to its family's owner. This covers
+    members that already exist when a root is repaired, so a repaired root's children follow it; it is not limited
+    to the selected row. Task 052 designs that cascade, including the cross-BU re-own that task 016 left open. That
+    re-own is now in scope, because the owner rule requires it. It uses the record family service (W7) and the
+    same owner decision as create. The selection mechanism below is the project's choice under that outcome.
+
+    *Amended 2026-11-02 (task 050; notes/decisions.md "W5 open questions resolved"), confirmed (the owner delegated the mechanism):*
+    the repair marker is a **principal set**, not a single identity. The pass selects rows with
+    `createdon` ≥ max(go-live, watermark) and `createdby` NOT IN `ProductPrincipals`. The set holds the shared BFF
+    identity (resolved at runtime by WhoAmI), the ontology writer (`mi-ontology-writer-dev` on dev) and a configured
+    list of retired identities (`SDAP-BFF-SPE-API` on dev); people are never in it. `createdonbehalfby` is not used
+    (empty on every sampled dev row); a server-written origin column is the fallback. `sprk_signal`,
+    `sprk_decisionrecord` and `sprk_budgetrevision` stay out of the repair table list. Repair applies the go-live
+    cutoff itself (019 finding P1-3). Over-selection is harmless: Repair is fill-only and idempotent.
+
+    *Amended 2026-11-02 (FR-40, #2502):* the repair pass fills no search index. Read the acceptance as "mapping,
+    standard owner and stamp"; neither index column is written.
 
 **W6 — Standard, guards, docs, retirement**
 
@@ -527,14 +574,120 @@ design §13.3)
     - the drop log carries ids only;
     - must-not-fire: a create on a table that is not search-indexed keeps the caller's lookup and its AppendTo check.
 
+    *Amended 2026-11-02 by FR-40 (#2502; owner 2026-11-01/02; UAC-r2 OK with conditions; provisioning: no
+    dependency; design §14):*
+    - **Kept:** the drop of both columns before step 5 and on every BFF update path, the update-path helper and
+      `SearchIndexDropGuardTests`. The columns stay server-owned so no client can bring routing back.
+    - **Withdrawn:** step 8's fill from the final owning BU. Step 8 is a recorded `NoOp` and writes neither column;
+      `search_index_unset_for_owner_bu` is no longer logged. "The per-BU lookup stays as the hook for a future
+      per-BU index" is withdrawn, and so is the Secure Records carve-out (UAC-r2, 2026-11-02): a future secure index
+      would be chosen by the server from the record's secure state, under its own design and UAC-r2 review.
+    - **The drop log:** with nothing applied, every client value is logged as `client_search_index_dropped` (ids
+      only, plus the index name for the name column). It logs at **Information** until W3 lands, then returns to
+      **Warning** (W3 acceptance, task 035).
+    - **#2413** (BU moves) and **#2206** (stamp not re-derived on owner change) close on task 041's merge, after
+      041's dev count is recorded: the owner no longer affects routing.
+    - **Acceptance, read now as:** a create carrying a client index on a search-indexed table writes neither column
+      and asks no AppendTo on the catalog row; a secure record and a record whose BU has an index both get no index
+      column from the server (no `search_index_unset_for_owner_bu`); the update-path drop, the ids-only log and the
+      must-not-fire line are unchanged.
+
     (FR-39, the mapping seeder owning its rows to the customer configuration team, is provisioning's, #2429; design
     §13.3a. This project reviews it.)
+
+**The index follows the content type** (amendment, 2026-11-02; owner decisions 2026-11-01 and 2026-11-02 item 1;
+UAC-r2 and provisioning reviews 2026-11-02; design §14; task 041)
+
+40. **FR-40 The search index follows the content type, never the user (#2502, DI-012).** Amends FR-10, FR-14,
+    FR-25 and FR-38.
+    - **The server picks the index from what is indexed**, from settings: SPE document chunks →
+      `AiSearch:KnowledgeIndexName` (`spaarke-files-index`; discovery-tier chunks → `DiscoveryIndexName`); chat session
+      files → `SessionFilesIndexName`; invoices → the invoice handler's index (`AI-SEARCH-INDEX-CATALOG.md` §4). No
+      request field, record column or business-unit column changes it.
+    - **`POST /api/ai/rag/index-file`** ignores a body `searchIndexName`. The field leaves `FileIndexRequest`,
+      `ContentIndexRequest`, `RagIndexingJobPayload` and `PostUploadIndexingRequest`; JSON that still carries it
+      binds (unknown members are ignored). A body naming a non-allow-listed index gets 200, not 400
+      `INDEX_NOT_ALLOWED` (accepted by UAC-r2). The tenant 403, row-mismatch 409 and knowledge-source 400 are unchanged.
+    - **The indexer reads no record or BU index column.** SendToIndex, `RagIndexingJobHandler`,
+      `BulkRagIndexingJobHandler` and the Office `IndexingWorkerHostedService` write and stamp the default index; their
+      `INDEX_NOT_ALLOWED` retry branches go. `SearchIndexNameResolver.ResolveAsync` is deleted;
+      `GetDefaultIndexName()` stays as the single point (G-9).
+    - **The stamp** `sprk_document.sprk_searchindexname` is written only by the indexing pipeline, app-only, and
+      always equals the index written. The OBO enqueuer stamps `GetDefaultIndexName()`, not
+      `AnalysisOptions.SharedIndexName`.
+    - **Record columns** `sprk_ai_search_index` / `sprk_searchindexname` on the six search-indexed tables: no server
+      writer (step 8 `NoOp`; Repair stops), no client writer (FR-38's drop), no reader on the indexing path. Existing
+      values stay; nothing is backfilled or cleared. On `sprk_document` the text column `sprk_searchindexname` is
+      also the stamp: the create and Repair paths never write it; only the indexing pipeline does, after indexing.
+    - **Unchanged:** search-time index selection on the search routes (allow-listed, never from the caller's BU,
+      trimmed by live Read; a request-named index outside the allow-list is still refused); the `sprk_aisearchindex`
+      catalog, its readers and the meaning of `sprk_isdefault`; the read-only consumers (the PCF
+      `SearchIndexResolver.ts`, the Office profile display); BU columns; session-files, discovery and invoice routing.
+    - **Old chunks** in a non-default index are left as they are (owner 2026-11-02). Task 041 first counts, read-only
+      on dev, the document stamps that are not `spaarke-files-index`, and records the count.
+    - **Client senders** (wizards, `EntityCreationService`, `createXrmEmailComposeHandlers.ts`, the document upload
+      pipeline) stop sending either value in W3 (021–029); `Spaarke.SdapClient`'s field goes after the last wizard (035).
+    - **Retired with it:** `scripts/backfill-multi-container-multi-index/Audit-MultiContainerMultiIndex-Drift.ps1`
+      (it reads `businessunits.sprk_searchindexname`) is retired or updated.
+
+    Acceptance:
+    - index-file with any `searchIndexName` (allow-listed, not allow-listed, or absent) writes to
+      `KnowledgeIndexName` and stamps the same name;
+    - SendToIndex, the RAG job handler, the bulk handler and the Office worker issue no Dataverse read of either index
+      column on any record or BU, and write and stamp `KnowledgeIndexName`;
+    - a unified create on each of the six tables, with an owning BU that has an index, sends neither column; step 8
+      traces `NoOp`; no `businessunit` retrieve;
+    - Repair writes neither column on any row;
+    - must-not-fire: no create, update or Repair body carries either column as `null`; the FR-38 drop, the index-file
+      authorization contract, search-time selection and the search-route allow-list refusal, relocation cleanup and
+      session-files/discovery/invoice routing are unchanged.
+
+**The owner decision sees the derived stamp's root** (amendment, 2026-11-02; owner decision 2026-11-02 item 3;
+UAC-r2 OK with conditions; design §15; tasks 042a, 042b)
+
+41. **FR-41 The owner decision includes the derived I-1 stamp's root (#2483, DI-009).** Amends FR-06 (step order),
+    FR-09 and FR-14.
+    - **Step 6½ (moved from step 10):** for every principal, the missing I-1 stamp is planned app-only
+      (`CoreAncestorRestamper.PlanMissingStampAsync`) over the item, before the owner. Its refusals keep their codes,
+      words and trace step: 400 `stamp_underivable`, 503 `stamp_unavailable`. A document is skipped, as today.
+    - **Step 7** asks the owner over the item's lookups plus each derived stamp column → its root, through the same
+      `OwnerQuestionOf` / `RecordOwnershipContext.ForRow`. This is the question the secure-child reconciler asks of
+      the written row (`ForExistingRowAsync`). Fill-only: a stamp the item already holds is never derived.
+    - **Step 10** binds the 6½ result as the caller and sets I-16 from the same row. No second derivation. A system
+      principal still binds after the create (DI-007).
+    - **Change 1 (owner 2026-11-02):** where the table's lineage order ranks the root above the intermediate (today:
+      a row with no subject pair filed under a report card), an ordinary row is owned by the root's BU team, not the
+      intermediate's. This is the reconciler's answer.
+    - **Fail closed:** a root flagged secure but not isolated refuses 409 `SecureParentNotIsolated` with the existing
+      words ("re-run Make Secure on it, then retry"); there is no "SecuringRoot" exemption. A root unreadable at step 7
+      after 6½ read it refuses 409 `ParentUnresolved`; a report-card child whose root's BU has no default team
+      refuses 409.
+    - **Repair** plans the missing stamp once, before the owner, and the owner question includes it. A planning
+      failure keeps the current owner (Skipped, `record_repair.stamp_unavailable`), never re-owns over the lookups
+      alone, and is counted in the repair result and logged with the row id and reason.
+    - **Thread filing:** if the create can carry `sprk_communicationthread`, the create's question includes the
+      record-thread filing as Repair's does (inside `OwnerQuestionOf` / `ForRow`); otherwise it is filed as its own
+      issue with a DI entry.
+    - **Creator visibility:** a creator who cannot read the Secure family gets the normal 201, which reveals no
+      secure-family id beyond what the caller sent.
+    - Security-sensitive (owner decision on secure families): FULL rigor and an adversarial review (NFR-01); UAC-r2
+      reviews the full diff before merge.
+
+    Acceptance:
+    - a to-do or event filed under a team-owned intermediate of a Secure matter is owned by the Secure Record Owners
+      team at create, with the sharee mirror written; the create's owner equals the reconciler's for every stamped
+      table, in a secure and an ordinary world (parity theory, including a communication carrying a thread);
+    - row 5 (root flagged secure, not isolated) refuses 409 `SecureParentNotIsolated`, in the transient and in the
+      lasting compensated state;
+    - must-not-fire: no new AppendTo probe (the derived root is never asked as the caller); `email.draft`, Office codes
+      and every single-condition refusal code, status and word are unchanged; a browser-sent stamp, a document and a
+      work assignment derive nothing.
 
 ### Non-Functional Requirements
 
 - **NFR-01 Security fails closed** (WP-6): every caller check refuses on error. Uniform 404 for "doesn't exist" and
   "can't see". Mapping never becomes an existence oracle or an AppendTo bypass. Security-sensitive tasks (FR-06…FR-09,
-  FR-25) carry FULL rigor and an adversarial review.
+  FR-25) carry FULL rigor and an adversarial review. *Amended 2026-11-02:* FR-41 joins that list.
 - **NFR-02 Latency**: the Matter wizard create p95 (wizard click → record id) is measured before and after migration
   on dev. The added cost of server mapping ≤ 1 profile read + 1 source read per create, and none when no profile
   exists. Report the delta; escalate if p95 grows by > 500 ms.
@@ -551,6 +704,13 @@ design §13.3)
 - **NFR-07 Backward compatibility**: Office quick-create error codes are unchanged. Push response shape is unchanged
   apart from error text. The child-records route contract is unchanged except for the added tables and the optional
   `mappingSource`.
+
+  *Amended 2026-11-02 (design §14.6, §15.4):*
+  - FR-40: `rag/index-file` answers 200, not 400 `INDEX_NOT_ALLOWED`, to a body naming a non-allow-listed index (a
+    relaxation; UAC-r2 accepted). Clients that still send `searchIndexName` keep working; the field is ignored.
+  - FR-41: a refusal raised by a single condition keeps its code, status and words, on the route, chat,
+    `email.draft` and Office. Only the order changes when two conditions fail at once (design §15.4 rows 1–4,
+    recorded as known-limit lines in 042b's PR), plus the new fail-closed refusals (rows 5–7).
 - **NFR-08 Coordination**: changes to `OwnedChildWrite`, the census tests and role definitions are sequenced with
   UAC-r2. Chat and decision re-pointing is sequenced with ontology-r1. Run `/conflict-check` before each W2 task.
 
@@ -643,6 +803,11 @@ design §13.3)
 
 > No other tensions. The behaviour changes (Office Project owner, fill-only create mapping, Copy-only push) are owner
 > decisions, not ADR conflicts; they are called out in release notes.
+>
+> *2026-11-02 (FR-40, FR-41; design §14.8, §15.7):* no new tension. Both comply with ADR-002, ADR-010, ADR-013 and
+> ADR-038, and run under the ADR-008 path A exception above: `CallerWriteAuthorization` and the route filters are
+> unchanged, step 5's AppendTo set is unchanged, and the I-1 derivation stays app-only behind the caller's AppendTo on
+> the intermediate. Tasks 041, 042a and 042b cite path A in their PRs.
 
 ## Success Criteria
 

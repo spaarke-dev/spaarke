@@ -13,7 +13,7 @@
     <parallel-group>W3-wizards</parallel-group>
     <parallel-safe>false</parallel-safe>
     <parallel-reason>Wizards migrate one at a time, each live-verified before the next (spec FR-16).</parallel-reason>
-    <deps>020</deps>
+    <deps>020, 041</deps>
     <tags>frontend, fluent-ui, bff-api, field-mapping, deploy, testing</tags>
     <estimated-effort>6-8 hours</estimated-effort>
   </metadata>

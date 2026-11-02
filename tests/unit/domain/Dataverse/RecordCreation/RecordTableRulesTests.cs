@@ -145,6 +145,7 @@ public class RecordTableRulesTests
     [InlineData("sprk_matter", "sprk_matternumber")]
     [InlineData("sprk_project", "sprk_projectnumber")]
     [InlineData("sprk_budget", "sprk_budgetnumber")] // task 167 (D-193): BUD-{SEQNUM:6}
+    [InlineData("sprk_event", "sprk_eventnumber")] // #2515: EVT-{SEQNUM:6}
     public void AutonumberColumn_IsTheNumberingSchemaColumn_AndIsProtectedFromMapping(string table, string column)
     {
         var rule = RecordTableRules.Get(table);
@@ -158,6 +159,7 @@ public class RecordTableRulesTests
     [InlineData("sprk_Matter", "sprk_matternumber", "MAT-{SEQNUM:6}")]
     [InlineData("sprk_Project", "sprk_projectnumber", "PRJ-{SEQNUM:6}")]
     [InlineData("sprk_Budget", "sprk_budgetnumber", "BUD-{SEQNUM:6}")]
+    [InlineData("sprk_Event", "sprk_eventnumber", "EVT-{SEQNUM:6}")] // #2515
     public void AutonumberColumn_IsDeclaredWithItsSeqnumFormat_InTheSolutionSource(string folder, string column, string format)
     {
         var entityXml = System.Xml.Linq.XDocument.Load(Path.Combine(
@@ -213,6 +215,8 @@ public class RecordTableRulesTests
     {
         RecordTableRules.All.Where(r => r.MappingProtectedColumns.Count > 0).Select(r => r.Table)
             .Should().BeEquivalentTo("sprk_matter", "sprk_project", "sprk_invoice", "sprk_billingevent", "sprk_document", "sprk_budget",
+                // #2515: the event's platform number (EVT-{SEQNUM:6}).
+                "sprk_event",
                 // Task 017 (coordinator item 8): the other four invoice-family tables protect their core lookups too.
                 "sprk_invoicesubmission", "sprk_invoiceapproval", "sprk_externalidentifier", "sprk_invoicecorrection");
     }

@@ -191,6 +191,35 @@ public sealed partial class RecordCreationServicePipelineSeamTests
             "the post-create re-derivation (step 12) writes it");
     }
 
+    /// <summary>
+    /// CHARACTERIZES #2483 (DI-009); task 042b INVERTS this test (field-mapping-server-write-path-r1 task 042a, design.md
+    /// section 15.6 A3). The system-principal twin of the route's window: an event filed under a TEAM-OWNED event of a SECURE
+    /// matter is today owned by the event's ordinary team (step 7 decides over the item's lookups only), carries no stamp in the
+    /// create body (a system principal binds it after), and is stamped with the Secure matter by the post-create
+    /// re-derivation. After 042b the owner is <see cref="Directory.SecureNamedTeam"/>.
+    /// </summary>
+    [Fact]
+    public async Task CreateAsync_AsTheSystem_AnEventUnderATeamOwnedEventOfASecureMatter_IsOwnedByTheEventsOrdinaryTeam_DI009Window()
+    {
+        _world.WithRecord("sprk_event", ParentEvent, Directory.ChildBu, owningTeam: Directory.ChildTeam,
+            extra: new() { ["sprk_regardingmatter"] = new EntityReference("sprk_matter", SecureMatter) });
+        _stamps.Row("sprk_event", ParentEvent, [("sprk_regardingmatter", "sprk_matter", SecureMatter)]);
+        _shareWorld.OrdinaryChild("sprk_event", ParentEvent, ("sprk_regardingmatter", "sprk_matter", SecureMatter));
+        var request = await MappedRequest("sprk_event", new { sprk_eventname = "Follow-up", sprk_regardingevent = Lookup("sprk_event", ParentEvent) });
+
+        var outcome = await Service().CreateAsync(
+            request, RecordCreationPrincipal.ForSystem(RecordRequester.Of(Caller, CallerOid)), CancellationToken.None);
+
+        outcome.Succeeded.Should().BeTrue(outcome.Refusal?.Detail);
+        var (_, id, fields) = _creates.Should().ContainSingle().Subject;
+        Owner(fields).Should().Be(Directory.ChildTeam,
+            "CHARACTERIZES #2483: an ordinary owner today, though the event's root is a Secure matter; 042b inverts to SecureNamedTeam");
+        Owner(fields).Should().NotBe(Directory.SecureNamedTeam);
+        fields.Should().NotContainKey(MatterStampBind, "a system principal's derived stamp is bound after the create, not in the body");
+        _stamps.Lookup("sprk_event", id, "sprk_regardingmatter").Should().Be(SecureMatter,
+            "the post-create re-derivation (step 12) binds the Secure matter after the owner was already decided");
+    }
+
     // =====================================================================================
     // 3. I-16: set before the create when it resolves; a null never refuses
     // =====================================================================================

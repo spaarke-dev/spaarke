@@ -92,6 +92,7 @@
     <criterion testable="true">Negative: reintroducing `applyFieldMappings` in any `src/` file makes the guard fail (demonstrated once in the task notes, then reverted).</criterion>
     <criterion testable="true">No deprecated alias or empty re-export for the deleted symbols remains in `index.ts`.</criterion>
     <criterion testable="true">The shared library and every dependent solution build with 0 errors; the library's tests pass.</criterion>
+    <criterion testable="true">(Added 2026-11-02, W3 closer; UAC-r2 condition on FR-40 / task 041.) `client_search_index_dropped` returns to Warning: every log site in src/server/api/Sprk.Bff.Api (grep; RecordTableRules.cs ~:773 and ~:780 at the time of writing, plus any in RecordCreationService) logs at Warning again, ids only, and a grep of src/client and src/solutions (excluding node_modules) finds no sprk_searchindexname, sprk_AI_Search_Index bind or index-file searchIndexName sent by a create or index-file call (Spaarke.SdapClient's field removed, design §14.4). From then on any firing is a client regression. BFF build 0 errors; the change ships with the next batched BFF deploy; publish-size delta and CVE result recorded.</criterion>
   </acceptance-criteria>
 
   <notes>Spec FR-22. Client preview was superseded (owner Q4): none exists, so nothing replaces the engine.
