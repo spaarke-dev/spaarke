@@ -23,7 +23,7 @@
 - The shared inbound processor changed. Mention it to the email-intelligence owners in the 151c PR.
 
 ## Dev state
-- **Hold:** uac-r2 is moving the dev users and both BFF application users into BU1 (owner-approved). Hold the 151c schema runs until uac-r2 sends "move done", or agree a time with them first. After "move done", run the -Verify scripts: `Set-EbillingFindingsJsonFieldSecurity`, `Set-EbillingFirmReasonFieldSecurity`, `Set-EbillingResubmissionOfFieldSecurity`, and `Seed-BillingSystemPolicy -Verify -RequireRows -CustomerBusinessUnit 'Spaarke Business Unit 1'`.
+- uac-r2 BU1 move: done 2026-11-02; the four -Verify scripts pass after it. `sprk_apexportemail` and `sprk_senttoapdate` are live on dev, with the batch form date read-only.
 - The dev BFF does not include #2507 yet. SPA-r3 will run `Set-ChildRecordCreatorPersonSchema.ps1 -Verify` (must exit 0) before its next deploy and will check our six keys. The ApExport code page and the 151b ribbons and views are NOT deployed (the dev import needs the owner's OK).
 
 ## Open items
