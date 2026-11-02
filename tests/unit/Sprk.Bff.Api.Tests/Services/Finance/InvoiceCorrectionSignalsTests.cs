@@ -154,6 +154,28 @@ public sealed class InvoiceCorrectionSignalsTests
         world.SignalsOf(Cap.PolicyCode, W.FeeLineId).Should().Equal((1, false, (int?)null, CapFingerprint));
     }
 
+    [Fact(DisplayName = "101 B2b-2 (#2507 F1): a correction that changes a still-firing rule finding's fingerprint (fp0 -> fp1) SUPERSEDES episode 1 and opens episode 2 - it is not ConditionCleared")]
+    public async Task ChangedFingerprint_WhileStillFiring_SupersedesTheOldEpisode()
+    {
+        const string Fp0 = BillingReasonCodes.DailyHoursOverCap + "|Hold"; // the group as stored; the rule now fires as CapFingerprint (fp1, Flag)
+        var world = new CorrectionWorld();
+        var root = Root();
+        root["findings"] = new JsonArray(CapFinding("Hold"));
+        var plan = CapPlan();
+        plan["fingerprint"] = Fp0;
+        root["signalPlan"] = new JsonArray(plan);
+        Store(world, root);
+        world.AddSignal(Cap.PolicyCode, LineEntity, W.FeeLineId, 1, Fp0);
+
+        (await Service(world, Cap).CorrectAsync(Line("Hours", "24"), CancellationToken.None)).IsApplied.Should().BeTrue(); // still over the cap
+
+        world.SignalsOf(Cap.PolicyCode, W.FeeLineId).Should().Equal(
+            (1, true, SignalWriter.ResolutionSuperseded, Fp0),
+            (2, false, (int?)null, CapFingerprint));
+        world.SignalCloses.Should().ContainSingle("one close, by the lifecycle");
+        Stored(world).ContainsKey(InvoiceCorrectionReevaluation.PendingSignalChangesMember).Should().BeFalse();
+    }
+
     // =========================================================================================
     // Item 2 - system Signals of a line
     // =========================================================================================

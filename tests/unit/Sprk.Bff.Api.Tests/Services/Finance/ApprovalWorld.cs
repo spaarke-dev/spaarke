@@ -88,6 +88,9 @@ internal sealed class ApprovalWorld
     public readonly List<(Guid SignalId, Guid RecordId, SignalAutomatedCloseOutcome Outcome)> Closes = [];
     public readonly Dictionary<Guid, Guid> ClosedBy = new();
 
+    /// <summary>The user each close was asked to name as the decider (the writer's <c>decidedByUserId</c>), in call order.</summary>
+    public readonly List<Guid?> CloseDeciders = [];
+
     /// <summary>A Signal whose next close fails once: ChangedSinceRead is answered, any other value throws a timeout (recorded as that value).</summary>
     public readonly Dictionary<Guid, SignalAutomatedCloseOutcome> CloseFailsOnce = new();
 
@@ -379,6 +382,7 @@ internal sealed class ApprovalWorld
         lock (Gate)
         {
             SignalAutomatedCloseOutcome outcome;
+            CloseDeciders.Add(decidedBy);
             if (CloseFailsOnce.Remove(signalId, out var failure))
             {
                 Closes.Add((signalId, recordId, failure));
