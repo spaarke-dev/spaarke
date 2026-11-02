@@ -696,6 +696,6 @@ missing to add. Owners and refusals are unchanged, and the service needs no chan
   4. Only a matter pair gets a link.
   5. On a re-file, the earlier matter's link stays (195 §2.3).
   6. Tests: one link for a matter pair; none otherwise; a failed write still returns 201 and logs the Warning.
-- **Issue:** UAC-r2 files one issue for both paths once GitHub is reachable.
+- **Issue:** #2524 (filed by UAC-r2), covering both paths.
 - **Next on the scope path:** a design note (UAC-r2 has already reviewed it through these rules), then a spec amendment, task-create for task 043, TASK-INDEX, and owner approval.
 - **Project `1cccf07d`:** it gets its link from the backfill, or by hand after the fix. Its access needs no change.
