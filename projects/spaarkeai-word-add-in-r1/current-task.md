@@ -2,15 +2,15 @@
 
 > **Format (2026-10-06):** CURRENT state only, REWRITTEN at each checkpoint. Standing directives + gotchas: project `CLAUDE.md` → "Standing directives & gotchas". History: git log + `notes/handoff-history/` (do not load on recovery; the state before 2026-11-01 is archived verbatim in `notes/handoff-history/2026-11.md`).
 
-> **Last Updated**: 2026-11-01 (context-handoff at 85%).
+> **Last Updated**: 2026-11-02 (no BFF deploy needed; corrections PR #2525 open).
 
 ## Quick Recovery (READ THIS FIRST)
 
 | Field | Value |
 |---|---|
 | **Task** | **133 🔄 Outlook Submit Invoice view** (FULL, opus/high). Live on dev in unified package 1.1.3; first owner UATs done. |
-| **Status** | ebilling's **#2507** (097b/c/e/f, 191, 192) merged to master at 0878ca36ac (2026-11-01). It is NOT on dev: no dev BFF deploy is planned, and the next deployer runs the schema -Verify first; SPA-r3 or ebilling will say when it's live. The client side is all merged: #2501, #2503, #2510 and **#2512** (097e correction prefill behind the off flag, adversarially reviewed and fixed). All PR worktrees are removed. No open PRs. Also waiting on the owner's retest (INV-012.2). |
-| **Next Action** | **OWNER GO 2026-11-02: "yes deploy whatever needs to be deployed"**, a dev BFF deploy of master including 0878ca36ac. In progress, in this order:<br>(a) find the schema `-Verify` ebilling says the next deployer runs first. Candidates on 0878ca36ac: `scripts/ebilling/Set-EbillingResubmissionOfFieldSecurity.ps1`, `scripts/ebilling/Seed-BillingSystemPolicy.ps1`. Ask ebilling which script, and run `-Verify` only, read-only.<br>(b) Check what is live on dev and whose deploy it replaces (last: R3 fcf01480f4); it must be an ancestor of origin/master. Tell R3 before deploying.<br>(c) `/bff-deploy` from a fresh `origin/master` worktree, under pwsh. Check the Kudu hash, app state Running, `/healthz` and an authed 401. Confirm `ContentUnderstanding__Endpoint` survives.<br>(d) Tell ebilling and R3 it is live.<br>(e) Set `correctionAvailable` on InvoiceView in App.tsx and bump `UNIFIED_PACKAGE.VERSION` (1.1.3 → 1.1.4). Open a PR (it auto-deploys the add-in), and the owner re-uploads the package in Integrated apps and runs a correction UAT. |
+| **Status** | ebilling's **#2507** (097b/c/e/f, 191, 192, 0878ca36ac) **is live on dev**: R3 deployed master 3740e1a105 at 2026-11-02 18:52:25Z (UAC gate passed 19:22:25Z). I read it back myself (Kudu DLL ProductVersion `1.0.0+3740e1a105…`; no `src/server` diff to master edb1a784ba; healthz and healthz/dataverse 200, anonymous /api/me 401). So the owner's deploy go (2026-11-02, "yes deploy whatever needs to be deployed") needed **no BFF deploy**; C:\wtbffdep was removed unused. **PR #2525** (branch `task/133-enable-correction`, worktree **C:\wt133s**) sets `correctionAvailable` on InvoiceView; invoice suites 264/264 locally. **No package bump**: the manifest is unchanged, so nothing to re-upload; the pane script ships via the master → SWA deploy. Also waiting on the owner's retest (INV-012.2). |
+| **Next Action** | Wait for #2525's checks to be terminal (including `Gated jest suites (office-addins)`), then `gh pr merge 2525 --auto --merge` (never `--delete-branch`). After it merges and the office-addins SWA deploy finishes, send ebilling 7b (`cc-msg-a027c144054932864ee427c120b4e2c1`) the merge commit and deploy time; they test a correction. Tell the owner the correction UAT is ready (no Integrated apps upload). Then remove C:\wt133s with Remove-WorktreeSafe. |
 
 ## Submit Invoice (task 133): state
 - **Dev:** eBilling is ON (since 2026-10-30 15:21Z). The invoice reader is configured (`ContentUnderstanding__Endpoint`, 2026-11-01 02:54:30Z, ebilling, owner go in both sessions; analyzers sprk_invoice_v2p and sprk_invoice_v2 deployed). The owner updated Integrated apps to package **1.1.3** (#2476); the Submit Invoice ribbon button works in Outlook on the web.
@@ -33,13 +33,14 @@
   - `reason` ∈ invoice_status, no_submission, submission_in_progress.
   - Errors: uniform 404 `record_unavailable`, 503, 503 `ebilling.disabled`.
   - `invoiceStatus` set: InReview "In Review", Approved, SentToAp "Sent to AP", Paid, Rejected, ReturnedToFirm "Returned to Firm", Cancelled, Superseded (own sentence: "This invoice has already been replaced by a correction. Correct the newer invoice instead." plus a button selecting `replacedBy`); null or unknown → "in its current state".
-  - Enable Correction (`correctionAvailable`) only once 097b+c+e are on master and dev.
+  - 097b+c+e are on master and dev (3740e1a105); `correctionAvailable` is turned on by PR #2525.
 - **097f** (work task/ebill-097f-superseded-view 0666b656ee): the client side is in #2501.
 
 ## Peer duties
 - Answer cross-session BFF/Console/deploy notices; for a deploy request verify ancestry, OK on content only, record it here, commit and push.
-- **Last OK: R3 dev BFF master fcf01480f4** (2026-11-01; from live d0c1c5dc3c: 3 external-access notification files). **Live on dev** (R3 after-notice: deploy 14:03:20Z, readback 14:04:42Z, healthz 200). `ContentUnderstanding__Endpoint` is still set; app settings are unchanged at 225.
-- Peers: R3 `cc-msg-481466c0265b87ddd1bb000bf672a69d`; UAC session name `spaarke-wt-unified-access-control-r2-db`; ontology `cc-msg-12a5ac7fc59e21f736827730b8d44c8a`.
+- **Live on dev: 3740e1a105** (R3, owner go, 2026-11-02 18:52:25Z; replaced fcf01480f4; includes ebilling #2507, field-mapping 039, #2519, #2520, uac #2509, #2516). `ContentUnderstanding__Endpoint` is still set; app settings stay at 225. Rollback snapshot for fcf01480f4: `deploy/rollback/wwwroot-20261102T185123Z`.
+- R3's dev BFF deploy rules: owner go naming the SHA; OKs from uac-r2, ontology, field-mapping and ebilling; Router green; `scripts/Set-ChildRecordCreatorPersonSchema.ps1 -Verify` exits 0 first (plus ebilling's four `-Verify` scripts, see ebilling 7b's message 2026-11-02); after the deploy, `Ebilling__Enabled=true` and `Ebilling__StoredFileReconcileEnabled=false`; after-notices to every peer, then uac-r2's 30-minute gate. Read the live commit back from the Kudu VFS `Sprk.Bff.Api.dll` ProductVersion.
+- Peers: R3 `cc-msg-d998caed4166082c2c443072ac542a83` (name spaarke-wt-spa-external-access-platform-f2); ebilling 7b `cc-msg-a027c144054932864ee427c120b4e2c1` (ignore 9c); UAC session name `spaarke-wt-unified-access-control-r2-db`; ontology `cc-msg-12a5ac7fc59e21f736827730b8d44c8a`.
 
 ## Gotchas found this session
 - PowerShell `git commit -m` with embedded `"` breaks the argument; use `git commit -F <file>`.
