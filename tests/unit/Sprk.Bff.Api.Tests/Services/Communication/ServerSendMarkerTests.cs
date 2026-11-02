@@ -14,6 +14,7 @@ using Moq;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Infrastructure.Graph;
+using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Services;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Communication;
@@ -206,13 +207,17 @@ public class ServerSendMarkerTests
         }).ToArray(),
     });
 
-    private static (IncomingCommunicationProcessor Processor, RecordingProvider Scoped, Mock<IDataverseService> Dv) Inbound(
+    private static (IncomingCommunicationProcessor Processor, RecordingProvider Scoped, Mock<IDataverseService> Dv, Mock<ITextExtractor> Text) Inbound(
         string messageJson, Sprk.Bff.Api.Services.Communication.Tracking.ITrackingTokenSigner? signer)
     {
         var graph = new Mock<IGraphClientFactory>();
         graph.Setup(f => f.ForApp()).Returns(new GraphServiceClient(new HttpClient(new FixedResponse(messageJson))));
 
         var dv = new Mock<IDataverseService>();
+        var text = new Mock<ITextExtractor>();
+        text.Setup(t => t.IsSupported(It.IsAny<string>())).Returns(true);
+        text.Setup(t => t.ExtractAsync(It.IsAny<Stream>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(TextExtractionResult.Succeeded("Matter Alpha 1,250.00", TextExtractionMethod.Native));
         var account = new Entity("sprk_communicationaccount", Guid.NewGuid())
         {
             ["sprk_emailaddress"] = Mailbox,
@@ -258,13 +263,13 @@ public class ServerSendMarkerTests
             new NotificationService(Mock.Of<IGenericEntityService>(), Mock.Of<ILogger<NotificationService>>()),
             Mock.Of<ICommunicationEnrichmentService>(),
             Options.Create(new CommunicationOptions { DefaultMailbox = "noreply@contoso.com" }),
-            Mock.Of<ITextExtractor>(),
-            Options.Create(new AttachmentMatchOptions { Enabled = false }),
+            text.Object,
+            Options.Create(new AttachmentMatchOptions { Enabled = true }), // the attachment-text match step runs for unverified mail
             new ConfigurationBuilder().Build(),
             new RecordOwnershipResolverDouble(),
             Mock.Of<ILogger<IncomingCommunicationProcessor>>(),
             trackingTokenSigner: signer);
-        return (processor, scoped, dv);
+        return (processor, scoped, dv, text);
     }
 
     public static IEnumerable<object[]> InboundCases()
@@ -277,10 +282,10 @@ public class ServerSendMarkerTests
     }
 
     /// <summary>
-    /// MUTATION (seeded): removing the <c>verifiedServerSend</c> guard from the attachment step or the archive step fails the "marked" case;
+    /// MUTATION (seeded): removing the <c>verifiedServerSend</c> guard from the attachment-text match step, the attachment step or the archive step fails the "marked" case;
     /// honouring a marker without the digest comparison fails the "copied" case; without the signature check, the "forged" case.
     /// </summary>
-    [Theory(DisplayName = "151c-1a D2 b SEEDED: a verified server send files no attachment document and archives no .eml; anything else is processed as before")]
+    [Theory(DisplayName = "151c-1a D2 b SEEDED: a verified server send is no match signal, files no attachment document and archives no .eml; anything else is processed as before")]
     [MemberData(nameof(InboundCases))]
     public async Task Inbound_HonoursOnlyAVerifiedMarker(string kind, bool skipped)
     {
@@ -294,7 +299,7 @@ public class ServerSendMarkerTests
             "marker copied onto other files" => (await MarkerFor(server, files), [("invoice.pdf", Encoding.UTF8.GetBytes("%PDF-1.7 genuine inbound"))], server),
             _ => (await MarkerFor(server, files), files, null),
         };
-        var (processor, scoped, dv) = Inbound(MessageJson(marker, carried), inboundSigner);
+        var (processor, scoped, dv, text) = Inbound(MessageJson(marker, carried), inboundSigner);
 
         await processor.ProcessAsync(Mailbox, GraphMessageId, ct: CancellationToken.None);
 
@@ -304,5 +309,8 @@ public class ServerSendMarkerTests
         var archiveStepRan = scoped.Requested.Contains(typeof(Sprk.Bff.Api.Infrastructure.Graph.SpeFileStore));
         attachmentStepRan.Should().Be(!skipped, "attachment documents are filed unless this server sent exactly these files");
         archiveStepRan.Should().Be(!skipped, "the .eml is archived unless this server sent exactly these files");
+        text.Verify(t => t.ExtractAsync(It.IsAny<Stream>(), It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            skipped ? Times.Never() : Times.AtLeastOnce(),
+            "a verified server send's files are not a match signal, so they cannot file the copy under a record named inside them");
     }
 }

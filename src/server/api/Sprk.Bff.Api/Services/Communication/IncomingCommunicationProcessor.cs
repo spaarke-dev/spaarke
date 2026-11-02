@@ -308,7 +308,13 @@ public sealed class IncomingCommunicationProcessor
         // Extract bounded plain text from the message's attachments and add it to the envelope BEFORE
         // association so an email whose matter/project name appears only in the attachment still matches.
         // Best-effort + non-fatal: on any failure the envelope keeps its subject/body-only match surface.
-        envelope = await AddAttachmentTextAsync(envelope, message, mailboxEmail, graphMessageId, ct);
+        // Ebilling-r1 task 151c-1a (D2 b): a verified server-only send is checked FIRST, and its attachment text is not a match signal,
+        // so the export files cannot file this copy under a record named inside them (that record's readers would read the email).
+        var verifiedServerSend = await IsVerifiedServerSendAsync(message, mailboxEmail, graphMessageId, ct);
+        if (!verifiedServerSend)
+        {
+            envelope = await AddAttachmentTextAsync(envelope, message, mailboxEmail, graphMessageId, ct);
+        }
 
         // ── Steps 3.7 + 3.8: the association and the OWNER, decided BEFORE the create (task 146) ─────────
         var (decision, owner, filingFields) = await ResolveInboundFilingAsync(envelope, account, graphMessageId, ct);
@@ -443,12 +449,11 @@ public sealed class IncomingCommunicationProcessor
         // Process attachments when: account has AutoCreateRecords enabled, OR account
         // could not be resolved (default to processing rather than silently dropping).
         // Ebilling-r1 task 151c-1a (D2 b): a verified server-only send (this server sent these exact files, which are already stored
-        // on their own record) files no attachment document and archives no .eml. Anything unverified is processed as before.
-        var verifiedServerSend = await IsVerifiedServerSendAsync(message, mailboxEmail, graphMessageId, ct);
+        // on their own record) files no attachment document and archives no .eml (checked before step 3.6). Anything unverified is processed as before.
         if (verifiedServerSend)
         {
             _logger.LogInformation(
-                "Verified server-only send: attachment documents and .eml archive skipped | CommunicationId: {CommunicationId}, GraphMessageId: {GraphMessageId}",
+                "Verified server-only send: attachment text match, attachment documents and .eml archive skipped | CommunicationId: {CommunicationId}, GraphMessageId: {GraphMessageId}",
                 communicationId, graphMessageId);
         }
 
