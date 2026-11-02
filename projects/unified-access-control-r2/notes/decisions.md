@@ -186,3 +186,9 @@ The owner accepted every recommendation ("yes follow your recommendation for the
   - **Rows.** Every owned row (mailboxes, queue, user settings, navitems, outbox) is now in BU1 under the same owner.
   - **How the rows move.** Under the default move, the mailbox and queue move inside the call. Every other row moves in a platform async job ("Update business unit for all records to Owner Business Unit", operationtype 95), which completed in about 30 s per user.
   - **Steps 4 and 5 must wait for that job before reading back.**
+- **Step 4 done (2026-11-02).**
+  - **Dry run.** A fresh dry run after step 2 gave the same 687 explicit Assigns as step 0. The 3 `sprk_workoffice` rows are skipped: the BU1 team's role (Basic User) has no Read on that table, so Dataverse would refuse that owner. They stay with the administrator.
+  - **Roots.** 30 roots were assigned at 13:35:48Z. The reconciler's ordinary-moves pass carried all 119 children by 13:43Z (about 8 min).
+  - **The rest.** Then 654 more: 651 assigned and read back (owner = BU1 team, BU = BU1); 3 contacts were already on the BU1 team.
+  - **Grant rows.** The 32 grant rows were all non-secure: 17 under records that moved in this step and 15 under records already in BU1.
+  - **Failures.** None, and no row was overwritten.
