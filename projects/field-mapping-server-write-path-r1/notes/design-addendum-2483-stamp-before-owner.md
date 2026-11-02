@@ -192,3 +192,23 @@ A refusal raised by a single condition keeps its code, status and words. Only th
 - **AC4:** the parity theory passes for every stamped table registered in `RecordTableRules`. Any other difference it finds is fixed here or filed with a DI entry (Q3).
 - **AC5:** the refusal-order rows 1–7 of §15.4 are recorded as K lines in the PR. Rows 2 and 5 are covered by tests.
 - **AC6:** the publish-size delta is measured against a fresh master build. The UAC-r2 review line is in the PR. DI-009 is closed, and #2483 is closed with a link to the PR.
+
+## UAC-r2 review (2026-11-02): OK with conditions
+
+UAC-r2 confirms the design: step 7 asks the reconciler's question, built once by `ForRow`. There is no caller-side probe and no new surface, and the G5 split is kept. The derivation stays app-only and is never exposed before step 5's AppendTo on the intermediate. Rows 6 and 7 fail closed, which is correct.
+
+- **Q1, the Make Secure order.**
+  - **The interval exists.** Make Secure (`ProvisionProjectEndpoint.cs`, class doc) sets `sprk_issecure` first at 4.1 and assigns the Secure team only at step 5. A failed or compensated run (5.5) can leave that state in place for good.
+  - **Row 5 is accepted** as 409 `SecureParentNotIsolated`. This is the existing C11 refusal, which direct children already get. There is **no** "SecuringRoot" exemption, because one would give a child an ordinary owner while its family goes secure.
+  - **Condition (a):** two tests for row 5, one for the transient interval and one for the lasting compensated state.
+  - **Condition (b):** keep the existing refusal words ("re-run Make Secure on it, then retry"). A friendlier transient message can only be a client-side mapping; no new server code.
+- **Q2, Repair.**
+  - **The same reorder is accepted.** A planning failure keeps the current owner (Skipped, `record_repair.stamp_unavailable`) and never re-owns over the row's lookups alone.
+  - **Condition (c):** the skip is counted in the repair result and logged with the row id and reason, never silently.
+- **Q3, thread filing.**
+  - **Fix it in 042b** if the parity theory confirms that a create can carry `sprk_communicationthread`. The fix goes inside `OwnerQuestionOf` / `ForRow`, the way `RecordCreationService.cs:1183-1187` already handles Repair.
+  - **File it** as its own issue, with a DI entry, only if it needs a different seam.
+  - **Either way,** AC4's parity theory covers a communication that carries a thread.
+- **Row 7:** the parity test confirms that the reconciler refuses the same report-card case. If the two disagree, fix it in 042b.
+- **§15.8, creator visibility:** this is the intended outcome. The create response stays the normal 201 and reveals no secure-family id beyond what the caller sent. Add an assertion for this.
+- **042b review:** UAC-r2 gets the diff before merge and does a full pass, since the change touches the owner decision on secure families.

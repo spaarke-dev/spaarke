@@ -579,3 +579,16 @@ missing to add. Owners and refusals are unchanged, and the service needs no chan
    Facts behind it (checked on dev 2026-11-01): every business unit that has an index names `spaarke-files-index`, which equals `KnowledgeIndexName`; customer business units have none; each customer has its own search service with the fixed index names.
 2. **Chat invitations.** None (recorded 2026-11-01).
 3. **#2483, change 1 accepted.** In the target model, every record is owned by the customer's main business unit or by Secure Record, so owning an ordinary record by its root's business unit changes nothing there. It matches the reconciler and lets the fix close the 2–4 minute Make Secure window. The fix proceeds as UAC-r2 planned: a characterization test of today's window, then the fix (derive the stamp before step 7) as its own change, reviewed by UAC-r2. It also takes the scope path, as a task in this project.
+
+### 2026-11-02 — UAC-r2: #2483 addendum (§15) OK with conditions
+
+- **Verdict.** UAC-r2 returned OK with conditions.
+- **Conditions.** They are recorded in full at the end of `notes/design-addendum-2483-stamp-before-owner.md`:
+  - (a) two tests for row 5 (the transient case and the durable case);
+  - (b) the refusal words stay the same, and there is no "SecuringRoot" exemption;
+  - (c) a Repair skip is counted and logged;
+  - thread filing is fixed in 042b if the parity theory confirms the gap; otherwise it is filed;
+  - reconciler parity for row 7;
+  - a creator-visibility assertion;
+  - a full UAC-r2 pass on the 042b diff before merge.
+- **Next on the scope path.** The spec is amended, then tasks 042a and 042b are created and added to TASK-INDEX, then the owner approves.
