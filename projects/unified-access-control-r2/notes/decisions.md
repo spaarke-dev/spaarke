@@ -178,3 +178,11 @@ The owner accepted every recommendation ("yes follow your recommendation for the
   - **Outbox row not moved.** Setting the outbox row's owning unit was refused: Dataverse requires the row's owner to hold Read on the table, and no role the account holds grants Read on Notification Outbox (only Core User and the admin and service roles do).
     - The row stays in the root with the same owner. Nothing reads it as that user.
   - **Before step 2.** Check, for each mover's owned tables, that the mover's BU1 roles hold Read, or expect the same refusal.
+- **Step 2 done (2026-11-01).**
+  - **Who moved.** All 10 humans are in BU1 with the planned BU1 role copies, all read back:
+    - Core + Console + Office Add In: Chelsea, Jessica, Lori, Ralph Dewey, Demo Access;
+    - Console + Office Add In: Jane, John, Eyal, Jake;
+    - none: the admin-mode account.
+  - **Rows.** Every owned row (mailboxes, queue, user settings, navitems, outbox) is now in BU1 under the same owner.
+  - **How the rows move.** Under the default move, the mailbox and queue move inside the call. Every other row moves in a platform async job ("Update business unit for all records to Owner Business Unit", operationtype 95), which completed in about 30 s per user.
+  - **Steps 4 and 5 must wait for that job before reading back.**
