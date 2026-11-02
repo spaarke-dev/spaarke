@@ -27,7 +27,7 @@
 
 ## Gates and peers
 - **R3:** released the BU1 move and confirmed step 5 from its side, including the Identity Link Writers field permissions. No open asks.
-- **ebilling:** 151c-2 to come: a plain `sprk_billingexport` reference column, not a `sprk_regarding…` one, kept out of family edges. I review it before merge.
+- **ebilling:** 151c-2 access review IN PROGRESS (2026-11-02 ~16:10Z): branch `task/ebill-151c2-batch-link`, diff `7d493b53db..e1a8be6223`, notes `projects/ebilling-r1/notes/151c2-batch-link.md`. A Sonnet-high adversarial-reviewer agent is running (generic lookup scanners, client-settable column, the `CreatePreparedRecordAsync` retry, cascades, the subgrid known limit). When it finishes: send ebilling the verdict. Do not relaunch it.
 - **Field-mapping:** #2504 reviewed OK. 039/040 diffs to come.
 
 ## Parked (verify state)
