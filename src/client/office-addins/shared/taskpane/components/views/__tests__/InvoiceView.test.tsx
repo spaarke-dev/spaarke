@@ -690,7 +690,7 @@ describe('InvoiceView — Correction from the prefill (ebilling 097e)', () => {
           replacedBy: { invoiceId: 'aa11bb22-0000-4000-8000-000000000013', name: 'INV-013' },
         })
         .mockResolvedValueOnce({ ...PREFILL, invoiceId: 'aa11bb22-0000-4000-8000-000000000013' });
-      renderView({ correctionAvailable: true, loadCorrectionPrefill });
+      const { onSubmit } = renderView({ correctionAvailable: true, loadCorrectionPrefill });
       await chooseCorrection();
       expect(
         await screen.findByText(
@@ -704,6 +704,12 @@ describe('InvoiceView — Correction from the prefill (ebilling 097e)', () => {
         expect(loadCorrectionPrefill).toHaveBeenLastCalledWith('aa11bb22-0000-4000-8000-000000000013')
       );
       expect(await screen.findByTestId('invoice-correction-details')).toBeInTheDocument();
+      // The correction is sent for the replacement, not the Superseded invoice.
+      await waitFor(() => expect(submitButton()).toBeEnabled());
+      await userEvent.click(submitButton());
+      await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+      const [input] = onSubmit.mock.calls[0] as unknown as [{ invoiceId: string }];
+      expect(input.invoiceId).toBe('aa11bb22-0000-4000-8000-000000000013');
     },
     TIMEOUT
   );
@@ -759,8 +765,113 @@ describe('InvoiceView — Correction from the prefill (ebilling 097e)', () => {
       });
       await chooseCorrection();
       expect(await screen.findByTestId('invoice-correction-details')).toHaveTextContent(
-        "This email is filed to Project X in Spaarke, so a correction for PAT-792345 can't be submitted from it."
+        "This email is filed to Project X in Spaarke, but this invoice is for PAT-792345. Spaarke accepts a correction only from an email filed to the invoice's record."
       );
+    },
+    TIMEOUT
+  );
+
+  it(
+    'must-not-fire: an older prefill answering late never replaces the newer one',
+    async () => {
+      let answerFirst: (p: InvoiceCorrectionPrefill) => void = () => undefined;
+      const loadCorrectionPrefill = jest
+        .fn()
+        .mockImplementationOnce(() => new Promise<InvoiceCorrectionPrefill>(resolve => (answerFirst = resolve)))
+        .mockResolvedValueOnce({ ...PREFILL, canCorrect: false, reason: 'no_submission' });
+      renderView({ correctionAvailable: true, loadCorrectionPrefill });
+      await chooseCorrection();
+      // Leave and come back: a second read for the same choice.
+      await userEvent.click(screen.getByRole('radio', { name: 'New invoice' }));
+      await userEvent.click(screen.getByRole('radio', { name: 'Existing invoice' }));
+      expect(await screen.findByTestId('invoice-correction-blocked')).toHaveTextContent(/no submission/);
+      answerFirst(PREFILL);
+      await new Promise(r => setTimeout(r, 50));
+      expect(screen.queryByTestId('invoice-correction-details')).toBeNull();
+      expect(screen.getByTestId('invoice-correction-blocked')).toBeInTheDocument();
+    },
+    TIMEOUT
+  );
+
+  it(
+    'Retry in a correction re-sends the same request; choosing another invoice drops it',
+    async () => {
+      const onSubmit = jest.fn(async () => ({ kind: 'retryable' as const, message: 'Outlook is busy. Try again.' }));
+      const loadCorrectionPrefill = jest.fn(async (id: string) => ({ ...PREFILL, invoiceId: id }));
+      renderView({ correctionAvailable: true, loadCorrectionPrefill, onSubmit });
+      await chooseCorrection();
+      await waitFor(() => expect(submitButton()).toBeEnabled());
+      await userEvent.click(submitButton());
+      await userEvent.click(await screen.findByRole('button', { name: 'Retry' }));
+      await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(2));
+      const calls = onSubmit.mock.calls as unknown as Array<[unknown, { actionId: string }]>;
+      expect(calls[1]![1].actionId).toBe(calls[0]![1].actionId);
+      expect(calls[1]![0]).toEqual(calls[0]![0]);
+
+      // Another choice: the retry (and the request it would resend) is dropped.
+      await userEvent.click(screen.getByRole('radio', { name: 'New invoice' }));
+      expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull();
+      await userEvent.click(screen.getByRole('radio', { name: 'Existing invoice' }));
+      await screen.findByTestId('invoice-correction-details');
+      expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull();
+    },
+    TIMEOUT
+  );
+
+  it(
+    'must-fire: a correction that ended keeps its result and Done on screen; the choices stay locked until Done',
+    async () => {
+      const onSubmit = jest.fn(async () => ({
+        kind: 'ended' as const,
+        status: 'Failed' as const,
+        message: 'The original invoice was still being processed, so the correction was not processed.',
+        trackingNumber: 'INV-012.3',
+      }));
+      renderView({ correctionAvailable: true, loadCorrectionPrefill: jest.fn(async () => PREFILL), onSubmit });
+      await chooseCorrection();
+      await waitFor(() => expect(submitButton()).toBeEnabled());
+      await userEvent.click(submitButton());
+      expect(await screen.findByText('The invoice could not be processed')).toBeInTheDocument();
+      expect(screen.getByRole('radio', { name: 'New invoice' })).toBeDisabled();
+      expect(screen.getByRole('radio', { name: 'Submit a corrected invoice' })).toBeDisabled();
+      // A Failed correction can still be sent again from the same form (it stays on screen).
+      expect(submitButton()).toBeEnabled();
+
+      await userEvent.click(screen.getByRole('button', { name: 'Done' }));
+      expect(screen.getByRole('radio', { name: 'New invoice' })).toBeEnabled();
+      // Done after an ended result leaves the correction as it was, ready to submit again.
+      expect(screen.getByTestId('invoice-correction-details')).toBeInTheDocument();
+    },
+    TIMEOUT
+  );
+
+  it(
+    "a refusal for one choice is dropped when the choice changes, so it never shows under another invoice's details",
+    async () => {
+      const onSubmit = jest.fn(async () => ({ kind: 'refused' as const, message: 'That firm is not linked.' }));
+      renderView({ correctionAvailable: true, loadCorrectionPrefill: jest.fn(async () => PREFILL), onSubmit });
+      await chooseCorrection();
+      await waitFor(() => expect(submitButton()).toBeEnabled());
+      await userEvent.click(submitButton());
+      expect(await screen.findByText('That firm is not linked.')).toBeInTheDocument();
+      await userEvent.click(screen.getByRole('radio', { name: 'New invoice' }));
+      await userEvent.click(screen.getByRole('radio', { name: 'Existing invoice' }));
+      await screen.findByTestId('invoice-correction-details');
+      expect(screen.queryByText('The invoice was not submitted')).toBeNull();
+    },
+    TIMEOUT
+  );
+
+  it(
+    'a correctable answer without a firm invoice number says why Submit stays disabled',
+    async () => {
+      renderView({
+        correctionAvailable: true,
+        loadCorrectionPrefill: jest.fn(async () => ({ ...PREFILL, firmInvoiceNumber: '  ' })),
+      });
+      await chooseCorrection();
+      expect(await screen.findByTestId('invoice-correction-no-number')).toBeInTheDocument();
+      expect(submitButton()).toBeDisabled();
     },
     TIMEOUT
   );

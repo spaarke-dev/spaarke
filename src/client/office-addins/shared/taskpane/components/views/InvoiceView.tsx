@@ -403,6 +403,12 @@ export const InvoiceView: React.FC<InvoiceViewProps> = ({
     setRetryableInARow(0);
   }, [coreRecord, invoice, mode, correctionChosen, firmId, firmInvoiceNumber, poNumber, marking]);
 
+  // A refusal describes the invoice it was for: choosing another invoice or another kind of submission drops it, so it
+  // never shows under the new choice. (A result the server accepted locks these choices until Done.)
+  useEffect(() => {
+    setOutcome(prev => (prev?.kind === 'refused' || prev?.kind === 'permanent' ? null : prev));
+  }, [invoice, mode, correctionChosen]);
+
   const searchCoreRecords = useCallback(
     (query: string, type: EntityType) =>
       searchOfficeEntities(query, type, { apiBaseUrl, getAccessToken, access: 'file' }),
@@ -431,6 +437,9 @@ export const InvoiceView: React.FC<InvoiceViewProps> = ({
   const locked = submitting || succeeded;
   // Running, or showing the result of a submission the server accepted (it carries the tracking number).
   const busy = submitting || outcome?.kind === 'success' || outcome?.kind === 'ended';
+  // While busy, the choices that decide which form shows (new or existing, the invoice, correction) are locked, so the
+  // result and its Done stay on screen with the form they belong to. An ended one can still be edited and sent again.
+  const choicesLocked = busy;
   useEffect(() => {
     onBusyChangeRef.current?.(busy);
   }, [busy]);
@@ -442,7 +451,15 @@ export const InvoiceView: React.FC<InvoiceViewProps> = ({
   );
 
   // A correction is sent with the invoice's own firm, core record and number (§10), never with values typed here.
-  const correction = correcting && prefill.status === 'ready' && prefill.prefill.canCorrect ? prefill.prefill : null;
+  // Only the chosen invoice's own prefill: on the render where the choice changes, the previous one is not used.
+  const correction =
+    correcting &&
+    invoice !== null &&
+    prefill.status === 'ready' &&
+    prefill.prefill.canCorrect &&
+    sameRecordId(prefill.prefill.invoiceId, invoice.id)
+      ? prefill.prefill
+      : null;
 
   // The submission form applies to a new invoice, or to a correction the server says can be made.
   const formActive = mode === 'new' || correction !== null;
@@ -776,7 +793,12 @@ export const InvoiceView: React.FC<InvoiceViewProps> = ({
       </Text>
       {filedRecord && !sameRecordId(filedRecord.id, c.coreRecord.entityId) && (
         <Text size={200} className={styles.note} data-testid="invoice-filed-record-note">
-          {`This email is filed to ${filedRecord.displayInfo ? `${filedRecord.displayInfo} ` : ''}${filedRecord.name} in Spaarke, so a correction for ${c.coreRecord.name} can't be submitted from it.`}
+          {`This email is filed to ${filedRecord.displayInfo ? `${filedRecord.displayInfo} ` : ''}${filedRecord.name} in Spaarke, but this invoice is for ${c.coreRecord.name}. Spaarke accepts a correction only from an email filed to the invoice's record.`}
+        </Text>
+      )}
+      {normalizeFirmInvoiceNumber(c.firmInvoiceNumber) === null && (
+        <Text size={200} className={styles.note} role="status" data-testid="invoice-correction-no-number">
+          {"This invoice has no firm invoice number in Spaarke, so it can't be corrected from Outlook."}
         </Text>
       )}
     </div>
@@ -812,7 +834,7 @@ export const InvoiceView: React.FC<InvoiceViewProps> = ({
             <Button
               appearance="outline"
               size="small"
-              disabled={locked}
+              disabled={choicesLocked}
               onClick={() =>
                 setInvoice({
                   id: replacedBy.invoiceId,
@@ -970,7 +992,7 @@ export const InvoiceView: React.FC<InvoiceViewProps> = ({
             layout="horizontal"
             value={mode}
             onChange={(_, data) => setMode(data.value as InvoiceMode)}
-            disabled={locked}
+            disabled={choicesLocked}
             aria-label="Invoice"
           >
             <Radio value="new" label="New invoice" />
@@ -989,7 +1011,7 @@ export const InvoiceView: React.FC<InvoiceViewProps> = ({
                 onSearch={searchInvoices}
                 allowedTypes={['Invoice']}
                 defaultType="Invoice"
-                disabled={locked}
+                disabled={choicesLocked}
               />
               {/* Both choices are shown disabled with their reason until the server can take them. A correction is
                   offered once the server accepts one (ebilling 097). Adding supporting files is ebilling 123
@@ -998,10 +1020,14 @@ export const InvoiceView: React.FC<InvoiceViewProps> = ({
               <RadioGroup
                 value={correctionChosen ? 'correction' : ''}
                 onChange={(_, data) => setCorrectionChosen(data.value === 'correction')}
-                disabled={locked}
+                disabled={choicesLocked}
                 aria-label="What to do with the invoice"
               >
-                <Radio value="correction" label="Submit a corrected invoice" disabled={!correctionAvailable} />
+                <Radio
+                  value="correction"
+                  label="Submit a corrected invoice"
+                  disabled={!correctionAvailable || choicesLocked}
+                />
                 <Radio value="supporting" label="Add supporting files" disabled={!SUPPORTING_FILES_AVAILABLE} />
               </RadioGroup>
               {!correctionAvailable && (
