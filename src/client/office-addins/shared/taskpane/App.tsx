@@ -905,8 +905,8 @@ export const App: React.FC<AppProps> = ({
 
         {/* Task 133: the Outlook "Submit Invoice" view — reached only from the ribbon (`?action=submitInvoice`), never
             from a tab. The submission and the firm list are ebilling's from-email contract (invoiceSubmissionService);
-            corrections stay off (`correctionAvailable`) until ebilling 097 (#2507) is on master and dev; the
-            correction prefill is wired so turning them on is the flag alone. */}
+            corrections are on: ebilling 097b/c/e (#2507) is on master and dev, and the view prepares each one from
+            the invoice's correction prefill. */}
         {currentTab === 'invoice' && (
           <InvoiceView
             hostAdapter={hostAdapter}
@@ -914,6 +914,7 @@ export const App: React.FC<AppProps> = ({
             getAccessToken={getInvoiceAccessToken}
             onSubmit={submitInvoice}
             loadFirms={loadFirms}
+            correctionAvailable
             loadCorrectionPrefill={loadPrefill}
             onBusyChange={setInvoiceBusy}
             filedRecord={invoiceFiledTo}
