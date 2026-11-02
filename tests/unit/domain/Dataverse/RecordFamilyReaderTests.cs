@@ -339,6 +339,44 @@ public class RecordFamilyReaderTests
             m.Name == "Acme v Contoso" && m.RecordNumber == "MAT-0001");
     }
 
+    // #2513: each table with a record-number column returns it, read through the table's own column.
+    [Theory]
+    [InlineData("sprk_budget", "sprk_matter", "sprk_budgetnumber", "BUD-000001")]
+    [InlineData("sprk_event", "sprk_regardingmatter", "sprk_eventnumber", "EVT-0001")]
+    [InlineData("sprk_analysis", "sprk_regardingmatter", "sprk_analysis_number", "ANL-0001")]
+    [InlineData("sprk_document", "sprk_matter", "sprk_document_number", "DOC-0001")]
+    [InlineData("sprk_invoice", "sprk_matter", "sprk_invoicenumber", "INV-0001")]
+    [InlineData("sprk_reportcard", "sprk_regardingmatter", "sprk_reportcardnumber", "RC-0001")]
+    [InlineData("sprk_signal", "sprk_matter", "sprk_signalnumber", "SIG-00001")]
+    [InlineData("sprk_decisionrecord", "sprk_matter", "sprk_decisionnumber", "DR-00001")]
+    [InlineData("sprk_workassignment", "sprk_regardingmatter", "sprk_workassignmentnumber", "WRK-000001")]
+    public async Task ReadAsync_TableWithARecordNumberColumn_ReturnsTheNumber(string table, string lookup, string numberColumn, string number)
+    {
+        var matter = Record(Matter);
+        var child = Record(table, (lookup, matter), (numberColumn, number));
+
+        var read = await ReadAsync(Matter, matter);
+
+        read.Members.Single(m => m.Id == child).RecordNumber.Should().Be(number);
+    }
+
+    // #2513: a table with no record-number column shows nothing, and a row whose number is empty shows nothing.
+    [Theory]
+    [InlineData("sprk_communication", "sprk_regardingmatter")]
+    [InlineData("sprk_communicationthread", "sprk_regardingmatter")]
+    [InlineData("sprk_memo", "sprk_regardingmatter")]
+    [InlineData("sprk_budget", "sprk_matter")]
+    [InlineData("sprk_event", "sprk_regardingmatter")]
+    public async Task ReadAsync_NoRecordNumberToShow_ComesBackNull(string table, string lookup)
+    {
+        var matter = Record(Matter);
+        var child = Record(table, (lookup, matter));
+
+        var read = await ReadAsync(Matter, matter);
+
+        read.Members.Single(m => m.Id == child).RecordNumber.Should().BeNull();
+    }
+
     [Fact]
     public async Task ReadAsync_EveryDataverseRead_IsMadeAsTheCallerThroughTheCallerScopedSeam()
     {

@@ -123,6 +123,10 @@
  * - The dead `onSetStandingGrant` wiring is removed (the modal has had no
  *   standing-grant control since task 073 UAT v1.0.24 #5).
  *
+ * v1.0.56 (#2513, Family view fixes): no change in this file's logic. The bundled `RecordFamilyModal` shows no selection
+ *   checkboxes here (this host passes no `onAction`), labels the Details pane as the focused record, and keeps the "This
+ *   record" badge from overlapping a truncated name.
+ *
  * v1.0.55 (field-mapping-server-write-path-r1 task 074, FR-33): the Family tool. The shared toolbar gains an opt-in
  *   Family icon (`onOpenFamily`, same pattern as `onOpenGrantModal` / `onOpenEmailMembers`); clicking it opens the shared
  *   `RecordFamilyModal` for this form's record (`context.page.entityTypeName` + `entityId`, the same host reads the
@@ -1568,7 +1572,7 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
       title: (this.context.parameters.title?.raw as string) || undefined,
       showTitle,
       showVersion,
-      versionText: 'v1.0.55 • Built 2026-10-28',
+      versionText: 'v1.0.56 • Built 2026-11-02',
       // Task 175 (owner round 87): only the options at or above the parent's floor.
       accessPermissionOptions: accessPermissionPill.options,
       // Labels pulled from each bound field's Dataverse metadata so they

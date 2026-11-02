@@ -23,6 +23,10 @@
  * exactly the (table, id) pairs the person ticked, and the server re-checks everything. Until the
  * push preview ships (task 040) a host passes no `onAction`, and both actions render disabled with
  * the tooltip "Available after the push update".
+ *
+ * Selection (#2513): checkboxes, the "N selected" count and the "Selected" detail exist only when the host passes
+ * `onAction` — selection is how rows reach an action, so a read-only host (the Family tool, task 074) shows none. The
+ * Details pane's "Focused record" row always describes the highlighted row (where the header navigator is), not the selection.
  */
 
 import * as React from 'react';
@@ -237,13 +241,22 @@ const useStyles = makeStyles({
   },
   nameCell: {
     display: 'flex',
+    flexWrap: 'nowrap',
     alignItems: 'center',
     columnGap: tokens.spacingHorizontalS,
     minWidth: 0,
+    width: '100%',
   },
+  // The name takes the room the badge leaves and truncates alone (#2513): the name may shrink, the badge may not.
   nameText: {
+    flexShrink: 1,
+    minWidth: 0,
     overflow: 'hidden',
     textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+  thisRecordBadge: {
+    flexShrink: 0,
     whiteSpace: 'nowrap',
   },
   footer: {
@@ -403,17 +416,25 @@ export const RecordFamilyModal: React.FC<RecordFamilyModalProps> = ({
   };
 
   const selectedCount = ordered.filter(m => selected.has(familyKey(m))).length;
+  // Selection exists only to hand rows to an action (design §12.3 E). A host that passes no `onAction` (the read-only Family
+  // tool, task 074) has nothing to hand them to: no checkboxes and no selected count (#2513). Task 075 passes `onAction`.
+  const selectable = onAction !== undefined;
+  const columnCount = selectable ? 6 : 5;
   const disabledReason = !onAction ? NO_HANDLER_TOOLTIP : selectedCount === 0 ? NO_SELECTION_TOOLTIP : null;
 
   const metadata: PreviewModalMetadataItem[] =
     state.kind === 'ready'
       ? [
           { label: 'Records shown', value: String(ordered.length) },
-          { label: 'Selected', value: String(selectedCount) },
+          ...(selectable ? [{ label: 'Selected', value: String(selectedCount) }] : []),
+          // The rows below describe the ONE record the header navigator is on (the highlighted row), never the
+          // selection, so each label says so (#2513).
           ...(activeMember
             ? [
-                { label: 'Table', value: tableLabel(activeMember.table) },
-                { label: 'Level', value: String(activeMember.depth) },
+                {
+                  label: 'Focused record',
+                  value: `${activeMember.name ? `${activeMember.name} · ` : ''}${tableLabel(activeMember.table)}, level ${activeMember.depth}`,
+                },
               ]
             : []),
         ]
@@ -445,7 +466,7 @@ export const RecordFamilyModal: React.FC<RecordFamilyModalProps> = ({
               onClick={() => runAction(a.action)}
             />
           ))}
-          <span className={styles.toolbarCount}>{selectedCount} selected</span>
+          {selectable && <span className={styles.toolbarCount}>{selectedCount} selected</span>}
         </div>
         {state.truncated && (
           <MessageBar intent="info" className={styles.notice}>
@@ -456,7 +477,7 @@ export const RecordFamilyModal: React.FC<RecordFamilyModalProps> = ({
           <Table size="small" aria-label="Family members">
             <TableHeader>
               <TableRow>
-                <TableHeaderCell className={styles.selectCell} aria-label="Select" />
+                {selectable && <TableHeaderCell className={styles.selectCell} aria-label="Select" />}
                 <TableHeaderCell>Name</TableHeaderCell>
                 <TableHeaderCell>Record number</TableHeaderCell>
                 <TableHeaderCell>Record type</TableHeaderCell>
@@ -468,7 +489,7 @@ export const RecordFamilyModal: React.FC<RecordFamilyModalProps> = ({
               {groups.map(g => (
                 <React.Fragment key={g.key}>
                   <TableRow className={styles.groupRow}>
-                    <TableCell colSpan={6}>
+                    <TableCell colSpan={columnCount}>
                       <span className={styles.groupLabel}>{`Level ${g.depth} · ${tableLabel(g.table)}`}</span>
                     </TableCell>
                   </TableRow>
@@ -482,19 +503,23 @@ export const RecordFamilyModal: React.FC<RecordFamilyModalProps> = ({
                         aria-current={isCurrent ? 'true' : undefined}
                         onClick={() => setCurrentKey(key)}
                       >
-                        <TableCell className={styles.selectCell}>
-                          <Checkbox
-                            aria-label={`Select ${m.name ?? 'record'}`}
-                            checked={selected.has(key)}
-                            onChange={(_e, data) => toggle(key, data.checked === true)}
-                            onClick={e => e.stopPropagation()}
-                          />
-                        </TableCell>
+                        {selectable && (
+                          <TableCell className={styles.selectCell}>
+                            <Checkbox
+                              aria-label={`Select ${m.name ?? 'record'}`}
+                              checked={selected.has(key)}
+                              onChange={(_e, data) => toggle(key, data.checked === true)}
+                              onClick={e => e.stopPropagation()}
+                            />
+                          </TableCell>
+                        )}
                         <TableCell>
                           <div className={styles.nameCell}>
-                            <span className={styles.nameText}>{m.name ?? ''}</span>
+                            <span className={styles.nameText} title={m.name ?? undefined}>
+                              {m.name ?? ''}
+                            </span>
                             {key === anchorKey && (
-                              <Badge appearance="tint" size="small">
+                              <Badge appearance="tint" size="small" className={styles.thisRecordBadge}>
                                 This record
                               </Badge>
                             )}
