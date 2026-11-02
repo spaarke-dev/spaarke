@@ -562,3 +562,8 @@ missing to add. Owners and refusals are unchanged, and the service needs no chan
 - **Found while checking:** the route stamps `sprk_searchindexname` with `GetDefaultIndexName()` even when the chunks went to a client-named index (`RagEndpoints.cs:638-648`). The record can therefore name an index the file is not in. The fix removes this mismatch.
 - **Open (asked of the owner):** this rule pulls against the per-BU index hook kept by Q2 = (B), 2026-10-29: BU → `sprk_ai_search_index`, step 8's fill, and the resolver's parent-BU chain. Do the per-BU record columns stay as a hook, for example a Secure Records index, or go?
 - **Not yet scheduled.** It takes the scope path (design → UAC-r2 review → spec amendment → task → TASK-INDEX → owner approval).
+
+### 2026-11-01 — Chat creates send no external invitations (owner, in this session)
+
+- **Owner:** "we can leave off invitations from chats; this functionality may change so we do not need to extend the chat functionality at this time."
+- **Effect:** the chat Owned create keeps `Grantor = AssignedAccessGrantor.None` (task 017). The external "Assigned To" grants and shares are made, but no invitation is sent and no `sprk_grantedby` is recorded. No change is planned, and the open owner item is closed.
