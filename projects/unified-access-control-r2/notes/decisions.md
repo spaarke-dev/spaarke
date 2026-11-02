@@ -192,3 +192,9 @@ The owner accepted every recommendation ("yes follow your recommendation for the
   - **The rest.** Then 654 more: 651 assigned and read back (owner = BU1 team, BU = BU1); 3 contacts were already on the BU1 team.
   - **Grant rows.** The 32 grant rows were all non-secure: 17 under records that moved in this step and 15 under records already in BU1.
   - **Failures.** None, and no row was overwritten.
+- **Step 5 done (2026-11-02, inside a window agreed with R3 and ebilling).** Both dev BFF app users are in BU1.
+  - **Roles.** The roles are the BU1 copies of exactly the set each held before. The time with no roles was 6.8 s and 4.0 s.
+  - **Profiles.** Field-security profile membership is unchanged, compared by id: Identity Link Writers, BFF-Managed Field Writers, Standing Grant Administrators, System Administrator.
+  - **Records.** Both platform record-move jobs completed, with 0 rows left in the root (a live count per owned table).
+  - **Health.** BFF /healthz and /healthz/dataverse were 200 afterwards.
+  - **Remaining.** Step 3, the administrator's own account, is the last step. The owner restores System Administrator from the Power Platform admin center.
