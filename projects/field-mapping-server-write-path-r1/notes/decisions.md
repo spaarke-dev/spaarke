@@ -643,3 +643,25 @@ missing to add. Owners and refusals are unchanged, and the service needs no chan
 **For tasks 051 and 052.**
 - 051 also checks what Event "Add Memo" (`useQuickCreateForm` on `sprk_memo`) and Project "+ New" do live.
 - 052 builds the selection from the principal set above, and adds Repair's go-live cutoff (019 finding P1-3).
+
+### 2026-11-02 — Ontology-r1 research: the Signal/Decision writers keep their dedicated identity (recommendation; owner to decide)
+
+- **Source:** ontology-r1, `projects/spaarke-ontology-platform-r1/notes/writer-identity-fr21-answer.md` (branch `docs/ontology-platform-design`, 4279c429d2). The owner asked for deep research first.
+- **Why the identity exists:** ontology D-1, "ADR-028 path A", 2026-10-03/04.
+  - The shared BFF identities are System Administrator. Dataverse privileges are additive with no deny, so those identities can Write and Delete `sprk_decisionrecord`.
+  - `mi-ontology-writer-dev` holds only the Spaarke Ontology Service role:
+    - Create and Write on Signal;
+    - Create only on Decision Record and Budget Revision.
+  - That role is what makes the ledger append-only by privilege. It also limits attribution and blast radius.
+  - It has no secret, so the ADR-028 E-1 to E-3 rules do not apply.
+- **What depends on it:**
+  - the idempotency and gate lookups filter on `createdby = writer user` (`DecisionRecordWriter.cs:733/1017/1662`, DecisionCommitService, SignalReadService, SignalReevaluationJob, GateDecisionRecordSharing);
+  - three ArchTests;
+  - the field-security profiles;
+  - the `ontology-writer-failures` alert.
+- **Provisioning gap:** provisioning never creates this identity; dev was set up by hand. Filed as #2518 (ontology DI-138).
+- **Recommendation:**
+  - keep the dedicated identity;
+  - name it as an FR-21 exception: SignalWriter, SignalSuppressionService, DecisionRecordWriter, GateDecisionRecordSharing and the revise-budget step create through `OntologyWriterDataverseClient`, not `RecordCreationService`;
+  - do not give the service a second principal.
+- **For the FR-25 marker:** both `mi-bff-api-*` and the writer's application user are product principals. Resolve each from its configured client id (`systemuser.applicationid`) or WhoAmI, never from a dev GUID.
