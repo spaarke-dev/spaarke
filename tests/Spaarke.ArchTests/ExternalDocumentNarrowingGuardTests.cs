@@ -1125,6 +1125,9 @@ public class ExternalDocumentNarrowingGuardTests
             "Writes only sprk_billingexport (BatchLookup, an EntityReference to the batch) on sprk_invoice, a literal key (the claim, conditional on the row version read).",
         ["Sprk.Bff.Api.Services.Finance.ApExportService::ReleaseClaimAsync"] =
             "Clears only sprk_billingexport (BatchLookup, DBNull) on sprk_invoice, a literal key, under the version just read.",
+        // ebilling-r1 task 151c-1a: Email to AP / Mark Sent to AP set the batch's Sent to AP Date once, conditional on the row version read.
+        ["Sprk.Bff.Api.Services.Finance.ApExportDeliveryService::SetSentToApDateIfEmptyAsync"] =
+            "Writes only sprk_senttoapdate on sprk_billingexport (a literal key, never a document), only when the date was empty, under the version just read.",
         // ebilling-r1 task 090 (found at the merge of master's #2253 guard): the Stored File store's verified flip. It cannot ask the
         // refusal: sprk_storedfile is itself refused whole (AccessTables, uac-r2 F4), and this is its typed writer.
         ["Sprk.Bff.Api.Services.Finance.Files.StoredFileService::FlipToServableAsync"] =

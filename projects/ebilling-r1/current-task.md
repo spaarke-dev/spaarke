@@ -1,42 +1,33 @@
 # Current Task State
 
-> **Last Updated**: 2026-11-01 ~17:00Z (checkpoint). origin/work/ebilling-r1 = 9b6bd559ee (master merged at f660d84303, level with origin/master 0e3962069b). Master PR **#2507** open.
+> **Last Updated**: 2026-11-02 (PR #2526 open). work/ebilling-r1 = 530286e428 (151c plus master, gated green). #2507 is on master (0878ca36ac). This session is ebilling-r1-7b; the duplicate 9c session after the crash should stay idle or be closed.
 
 ## Quick Recovery (READ THIS FIRST)
 
 | Field | Value |
 |-------|-------|
-| **Running** | (1) Adversarial review (opus) of 151c-1a, range `d566e5f7fd..4e4d45ac23` on `task/ebill-151c1a-email-route` (worktree `C:\code_files\spaarke\.claude\worktrees\agent-ab1a1dc9a62b799db`). (2) uac-r2's access review of the same range, which covers owner, no copies, the negative test, thread/participant index/sweep, and Sent Items ingestion. uac-r2 asked us to **hold the merge** until its findings arrive. |
-| **Next action** | (1) #2507: when ontology-r1 approves, run `gh pr merge 2507 --auto --merge`, then watch for MERGED and tell word-add-in. If CI fails, fix it on work. (2) 151c-1a: when both reviews are in, fix the F-class findings on the branch, merge into work, run the gate (5 builds, ArchTests, broad filter, integration), and push. (3) After uac-r2 sends "move done", send notices and run the two column scripts on dev, then `Deploy-EbillingFormsViews.ps1`, then the -Verify scripts below. (4) Then 151c-1b (UI) and 151c-2 (the `sprk_billingexport` reference on `sprk_communication`). |
-| **Master PR** | #2507, auto-merge OFF until ontology-r1 approves (the ruleset needs 0 approvals). The body carries 097b and 097c together and gives the counts and the publish delta (+0.19 MB compressed). |
+| **Waiting on** | (a) ontology-r1's review of **PR #2526** (151c, Email to AP). Auto-merge stays off until ontology-r1 approves. Before-notices have gone to word-add-in, SPA-r3 and uac-r2. (b) word-add-in's #2525 SWA deploy, after which ebilling tests a correction on dev. |
+| **Next action** | (1) When ontology-r1 approves: `gh pr merge 2526 --auto --merge`. Once it merges, send the SHA to ontology-r1, word-add-in, SPA-r3 and uac-r2, and ask SPA-r3 to deploy the dev BFF (its -Verify gate; same six keys). (2) After that BFF deploy, import the UI on dev (owner OK given 2026-11-02): code page `sprk_apexport`, ribbon script 1.1.0 `{a20517ef-dd2a-4461-822b-f80c1d735e69}`, the RibbonDiffs on sprk_invoice and sprk_billingexport, and the views, through Import-SolutionScoped or the code-page-deploy and web-resource scripts. Check the Office Add In User role's Read on `sprk_billingexport` (K3). This is step 5 of task 153; the rest of 153 (index, end to end, UI tests) waits for task 136. Task 153 step 4 conflicts with the rule that only SPA-r3 deploys the dev BFF: amend the POML. (3) Click-through: a batch's AP emails grid shows no New button (Add Existing may show: K1). This needs a browser; it is on the owner's checklist through uac-r2. (4) Delete `C:\w15p`, the publish-size scratch folder. A safety check blocked my rm, so the owner deletes it. |
 
-## Gate on 9b6bd559ee
-- ArchTests 1897/1. The failure is ISS-005 (#2469), which passes alone (129/0).
-- Broad filter 9891/1/7. The failure is D134 todo-pair-only, which also fails on master: **#2506**. uac-r2 bisected it to #2477 and is fixing it on `fix/uac-r2-2506-todo-pair-owner`.
-- Integration 199/0/8, Spe 353/0/23, LoadTests 5/0.
-
-## 151c-1a (task/ebill-151c1a-email-route, head 4e4d45ac23)
-- Routes: `POST /api/finance/export-batches/{id}/email` (200 `{communicationId, sentTo, cc, sentToApDate, sentToApDateSet}`) and `POST .../mark-sent-to-ap`.
-- Columns: `sprk_apexportemail` (settings) and `sprk_senttoapdate` (batch); -WhatIf only so far. Deploy order: columns, then forms and views, then the BFF.
-- I renamed `senttoapDateSet` to `sentToApDateSet` (4e4d45ac23).
-- Notes: `projects/ebilling-r1/notes/151c1a-email-route.md` on that branch.
-
-## Owner decisions this stretch
-- EB-D-182: server-only byte attachments; one Sent to AP Date on the batch; the batch link is a plain `sprk_billingexport` reference (151c-2, which uac-r2 agreed); batch owner = the creator's default (task 150 unchanged).
+## Done this stretch
+- 151c-1b merged into work (b1f05d71c5). 151c-2 merged (9402a48ad4). uac-r2 passed both, including the 151c-2 F1 re-check; I took its doc-line nit. The forms-script conflict kept both the AP emails subgrid and the Sent to AP Date view column.
+- Live on dev, 2026-11-02 (owner OK): `sprk_ebillingsetting.sprk_apexportemail` and `sprk_billingexport.sprk_senttoapdate`; the batch form date is read-only.
+- Filed: #2511 (SendAsUserAsync post-send token), #2517 (Email to AP: an unknown send outcome is answered as retryable).
 
 ## Dev state
-- **Hold:** uac-r2 is moving the dev users and both BFF application users into BU1 (owner-approved). Hold the 151c schema runs until uac-r2 sends "move done", or agree a time with them first. After "move done", run the -Verify scripts: `Set-EbillingFindingsJsonFieldSecurity`, `Set-EbillingFirmReasonFieldSecurity`, `Set-EbillingResubmissionOfFieldSecurity`, and `Seed-BillingSystemPolicy -Verify -RequireRows -CustomerBusinessUnit 'Spaarke Business Unit 1'`.
-- BFF fcf01480f4 (R3), our six keys intact. The ApExport code page and the 151b ribbons and views are NOT deployed (the dev import needs the owner's OK).
-
-## Peer state
-- word-add-in: told #2507. Waits for the merge.
-- ontology-r1: review of #2507 requested, and told about #2506.
-- uac-r2: reviewing 151c-1a; fixing #2506.
+- The dev BFF has been on master 3740e1a105 since 2026-11-02 18:52Z (SPA-r3 deployed it; that build includes #2507). It does NOT include 151c. `Ebilling:Enabled=true`, `StoredFileReconcileEnabled=false`, `MalwareScanningEnabled=false`. Before deploying, SPA-r3 ran `Set-ChildRecordCreatorPersonSchema.ps1 -Verify`, which exited 0.
+- word-add-in now switches corrections on and bumps the add-in version. Ebilling then tests a correction against dev when asked.
+- Live on dev 2026-11-02 (owner OK; notices sent before and after): `sprk_communication.sprk_billingexport` and its relationship (cascade read back as agreed); `sprk_/scripts/secure_child_ribbon.js` at the work version (NO_NEW_HOSTS, plus the ISS-010 catch-up), published on its own; the batch form's AP emails subgrid. The click-through check (no New on the subgrid) is still open because no browser is connected.
+- Not on dev yet: the ApExport code page, the 151b and 151c-1b ribbons (sprk_invoice and sprk_billingexport RibbonDiffs, the ribbon script `{a20517ef-dd2a-4461-822b-f80c1d735e69}`) and the views (task 153, owner OK given).
 
 ## Open items
+- 151c-1b K3: the Office Add In User role may lack Read on `sprk_billingexport`. Check when importing the invoice views.
+- 151d (new): the invoice form shows the batch's Sent to AP Date (151c-1b K4).
+- The main checkout `C:\code_files\spaarke` has another session's uncommitted changes. Don't fast-forward it.
 - Older notes name the owner in plain text (003, 004, 011, 029, 091). Clean up in a docs pass.
 - 151b: 053 must add `sprk_trackingnumber` to `sprk_Invoice/Entity.xml` before any non-dev import.
 - 050a §9 items 2–4 (owner).
+- Worktrees to remove once merged and pushed: `C:\code_files\spaarke\.claude\worktrees\agent-ab1007764e5ac3856` (151c-2) and the 151c-1b one, `agent-ae423c3eb3b722197` (`Remove-WorktreeSafe.ps1`, one path per call).
 
 ## Standing rules (see project CLAUDE.md)
-No bare git stash, no --no-verify. Live writes and role changes need the owner's OK; schema runs need notices (warn of ~1 min of invalid-column faults on column deletes). StoredFileReconcileJob stays off until F4 merges and DEF-044 is fixed. After merges: 5 builds, ArchTests, broad filter before pushing (ISS-005 flaky, #2469). If builds report a locked file, run `dotnet build-server shutdown` and rebuild. Max 4 concurrent subagents; every agent launch states a model. No bare jq, no grep -P. Remove worktrees with `pwsh -File scripts/worktree/Remove-WorktreeSafe.ps1 -Path <one path>`.
+No bare git stash, no --no-verify. Live writes and role changes need the owner's OK. Schema runs need notices before and after, and the publish is entity-scoped only (ontology-r1). StoredFileReconcileJob stays off until F4 merges and DEF-044 is fixed. After merges: 5 builds, ArchTests and the broad filter before pushing (ISS-005 is flaky, #2469). Never run `dotnet build-server shutdown` while another gate is building. Master PRs: auto-merge only after ontology-r1 approves; send before-notices to word-add-in, SPA-r3 and uac-r2, and send the merge SHA to ontology-r1. Max 4 concurrent subagents, and every agent launch states a model. No bare jq, no grep -P. Remove worktrees with `pwsh -File scripts/worktree/Remove-WorktreeSafe.ps1 -Path <one path>`.

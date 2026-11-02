@@ -2,8 +2,8 @@
  * Export to AP (ebilling-r1 task 151b, EB-D-181; FR-41). Steps:
  *   1. the selection (read for display) with its count and approved total;
  *   2. Export: one `POST /api/finance/export-batches` (task 150) for the whole selection;
- *   3a. created: the batch, its count and total, Download CSV / Download JSON (151a) and Email to AP (151c, not yet
- *       available, shown disabled);
+ *   3a. created: the batch, its count and total, Download CSV / Download JSON (151a) and Email to AP (151c-1b: opens
+ *       the Email to AP step on the new batch);
  *   3b. refused per invoice: each refused invoice with its reason; nothing was exported; the user may export the rest
  *       (a new request, which the server checks again);
  *   3c. any other refusal: the server's message, and Try again when it is transient.
@@ -17,18 +17,20 @@ import {
   MessageBarTitle,
   Spinner,
   Text,
-  Tooltip,
   makeStyles,
   tokens,
 } from '@fluentui/react-components';
 import { ArrowDownload20Regular, Mail20Regular } from '@fluentui/react-icons';
 import type { ApExportApi, ExportFormat } from '../services/apExportApi';
 import { downloadFailureMessage, exportOutcome, type ExportOutcome } from '../services/exportFlow';
+import { batchFromExport } from '../services/batch';
 import { formatAmount, summarize, type InvoiceRow } from '../services/invoices';
 import { saveBlob } from '../services/download';
 import { DialogLayout } from './DialogLayout';
 import { InvoiceTable, type RowOutcome } from './InvoiceTable';
 import { SelectionSummary } from './SelectionSummary';
+import { BatchEmailView } from './BatchEmailView';
+import { createEmailSender, type EmailSender } from '../services/emailFlow';
 
 const useStyles = makeStyles({
   facts: {
@@ -57,6 +59,21 @@ export const ExportDialog: React.FC<ExportDialogProps> = ({ api, invoiceIds, row
   const [phase, setPhase] = React.useState<Phase>({ name: 'review' });
   const [downloading, setDownloading] = React.useState<ExportFormat | null>(null);
   const [downloadError, setDownloadError] = React.useState<string | null>(null);
+  const [emailing, setEmailing] = React.useState(false);
+  // One sender per batch for the life of this dialog. The Email to AP step is closed and reopened with Back, so the lock
+  // and the last outcome live here: a reopened step cannot send a batch a second time.
+  const senders = React.useRef(new Map<string, EmailSender>());
+  const senderFor = React.useCallback(
+    (batchId: string): EmailSender => {
+      let sender = senders.current.get(batchId);
+      if (!sender) {
+        sender = createEmailSender(api, batchId);
+        senders.current.set(batchId, sender);
+      }
+      return sender;
+    },
+    [api]
+  );
 
   const rowsById = React.useMemo(() => new Map(rows.map(r => [r.id, r] as const)), [rows]);
   const selectedRows = React.useMemo(() => selection.map(id => rowsById.get(id)).filter((r): r is InvoiceRow => !!r), [selection, rowsById]);
@@ -120,6 +137,17 @@ export const ExportDialog: React.FC<ExportDialogProps> = ({ api, invoiceIds, row
     const { batch, formats } = outcome;
     const currencies = Array.from(new Set(requestedRows.map(r => r.currency).filter((c): c is string => !!c)));
     const total = formatAmount(batch.totalAmount, currencies.length === 1 ? currencies[0] : null);
+    if (emailing) {
+      return (
+        <BatchEmailView
+          api={api}
+          batch={batchFromExport(batch, total)}
+          sender={senderFor(batch.batchId)}
+          onBack={() => setEmailing(false)}
+          onClose={onClose}
+        />
+      );
+    }
     return (
       <DialogLayout footerStart={close}>
         <MessageBar intent="success">
@@ -147,12 +175,22 @@ export const ExportDialog: React.FC<ExportDialogProps> = ({ api, invoiceIds, row
               {downloading === format ? 'Downloading…' : `Download ${format.toUpperCase()}`}
             </Button>
           ))}
-          <Tooltip content="Email to AP is not available yet." relationship="description">
-            <Button icon={<Mail20Regular />} disabled data-testid="email-to-ap">
-              Email to AP
-            </Button>
-          </Tooltip>
+          <Button
+            icon={<Mail20Regular />}
+            disabled={downloading !== null || senderFor(batch.batchId).locked}
+            onClick={() => setEmailing(true)}
+            data-testid="email-to-ap"
+          >
+            Email to AP
+          </Button>
         </div>
+        {senderFor(batch.batchId).locked && (
+          <Text>
+            {senderFor(batch.batchId).lastOutcome?.kind === 'sent'
+              ? 'The email to AP was already sent. To send it again, open the batch from the Billing Export form.'
+              : 'Email to AP cannot be repeated from this dialog. Use Download, then Mark Sent to AP from the Billing Export form.'}
+          </Text>
+        )}
         {formats.length === 0 && (
           <MessageBar intent="warning">
             <MessageBarBody>This batch lists no file to download yet. Open the Billing Export record to download it later.</MessageBarBody>

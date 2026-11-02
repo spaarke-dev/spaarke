@@ -147,3 +147,18 @@ Self-review at FULL depth; the operator's adversarial review follows.
 | Full ArchTests | 1,858 / 0 |
 | `Sprk.Bff.Api.IntegrationTests` | 199 passed, 0 failed, 8 skipped |
 | Code review (Step 9.5, fix scope plus direct callers) | No new F-class finding. `CompleteOrNoOpAsync` passes the stored record id only to a claimant's finish; the existing-record branch writes the status, closes the stored set and links, each idempotent; the predecessor walk reads the approvals in one `In` query and a fault is a Retry. |
+
+## #2507 review round (2026-11-01/02)
+
+ontology-r1's K1 and K2 were fixed in fa261452fd, and the PR merged at 0878ca36ac.
+- A repeated Reject or Return names its Signal closes for the stored `ConfirmedByUserId`, not for the caller.
+- A test pins EB-D-177: another approver repeats after the claimant stopped at signals, gets `AlreadyDecided`, and the Signal stays Open.
+
+uac-r2 passed the access gate with a static check (nothing built or run). Known limits:
+
+| Id | Limit | Decision |
+|---|---|---|
+| K-a | A stored record with no `ConfirmedByUserId` falls back to the caller, who is the claimant and has passed the rights check. Task 105 refuses in that case. | Kept. ontology-r1 accepted it: the repeat path is claimant-only, so it can never name another person. |
+| K-b | The claimant is matched by contact, but the close names the stored systemuser, so two systemusers bound to one contact would count as the same person. Admins control who can write that binding. | Known limit; the binding control is not verified here. |
+| K-c | (Pre-existing) A non-claimant with decide rights can trigger the app write that aligns the portion status to the invoice's. | Known limit. |
+| K-d | An unfinished claim blocks other approvers until the claimant repeats. | By design (103). |

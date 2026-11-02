@@ -208,6 +208,12 @@ public static class FinanceModule
         // Concrete (ADR-010), scoped like the Stored File service and the lifecycle service it uses. Unconditional (flag rule above); the routes read the kill switch.
         services.AddScoped<ApExportAuthorization>();
         services.AddScoped<ApExportService>();
+
+        // Email to AP and Mark Sent to AP (ebilling-r1 task 151c-1a, EB-D-181 / EB-D-182): the delivery service and the one seam over the communication
+        // send (CommunicationService is sealed). Concrete (ADR-010), scoped like ApExportService and the Stored File service they use. Unconditional (flag
+        // rule above); the routes read the kill switch.
+        services.AddScoped<ApExportMailer>();
+        services.AddScoped<ApExportDeliveryService>();
         services.AddScheduledJob<EligibleApproverRefreshJob>(EligibleApproverRefreshJob.DefaultCronSchedule);
 
         // Invoice submission processing (ebilling-r1 task 049 parts B-E, FR-20 / FR-21, D-101; Processing Pipeline steps 1-9). The pipeline is

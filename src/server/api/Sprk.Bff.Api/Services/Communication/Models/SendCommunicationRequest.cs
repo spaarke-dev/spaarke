@@ -141,4 +141,12 @@ public sealed record SendCommunicationRequest
     /// </summary>
     [System.Text.Json.Serialization.JsonIgnore]
     internal SystemMailOptions? SystemMail { get; init; }
+
+    /// <summary>
+    /// Ebilling-r1 task 151c-1a (EB-D-182 (1)): the server-only options of a send-as-user email, or <c>null</c> for a normal send (the
+    /// default; every other send is unchanged). See <see cref="ServerSendOptions"/>. Internal and
+    /// <see cref="System.Text.Json.Serialization.JsonIgnoreAttribute"/>: server code sets it, a request body never can.
+    /// </summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    internal ServerSendOptions? ServerSend { get; init; }
 }
