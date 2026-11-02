@@ -231,4 +231,65 @@ public sealed partial class SecureChildOwnershipAiToolTests
         ServerValue(created.Fields, "sprk_AI_Search_Index@odata.bind").Should().Be($"/sprk_aisearchindexes({UnitIndexRow:D})");
         dropLines.Should().ContainSingle().Which.Should().Contain($"record={created.Id}").And.Contain($"appliedIndexId={UnitIndexRow}");
     }
+
+    // ── Pass 2 (task 019): the run-as-user branch logs its drop only after the create succeeds ────────────────────────
+
+    /// <summary>
+    /// A chat create of <c>sprk_event</c> down the RUN-AS-USER path (the table is declared organization-owned here, which is
+    /// the only way a search-indexed table reaches it: <c>OwnedChildWrite.PathFor</c>), the model's index lookup in the item,
+    /// filed under <paramref name="regarding"/>. Returns the result and the handler's drop lines.
+    /// </summary>
+    private async Task<(ToolResult Result, List<string> DropLines)> RunAsUserCreateEventNamingAnIndex(Guid regarding)
+    {
+        _user.AlsoOrganizationOwned.Add("sprk_event");
+        var handlerLog = new CapturingLog<DataverseCreateRecordHandler>();
+        var handler = new DataverseCreateRecordHandler(
+            _user, handlerLog, new HandoffUrlBuilder("https://spaarkedev1.crm.dynamics.com"),
+            _world.Resolver(), IdentityNormalizationFixtures.WithContact(CallerContact).Object,
+            RouteRecordCreation.Over(_world.Resolver(), _appOnly.Object, Restamper(), Shares(), SecureRootFilingGateFixtures.NothingSecure()));
+
+        var result = await handler.ExecuteChatAsync(
+            CreateContext("sprk_event",
+                ("sprk_eventname", System.Text.Json.JsonSerializer.SerializeToElement("Hearing")),
+                Lookup("sprk_regardingmatter", "sprk_matter", regarding),
+                Lookup("sprk_ai_search_index", "sprk_aisearchindex", CallersIndexRow)),
+            BuildAnalysisTool(nameof(DataverseCreateRecordHandler)), CancellationToken.None);
+
+        return (result, handlerLog.Messages.Where(m => m.Contains("client_search_index_dropped")).ToList());
+    }
+
+    /// <summary>The drop was logged BEFORE the secure-filing refusal and the POST, so a create that never happened still claimed one.</summary>
+    [Fact]
+    public async Task RunAsUserCreate_RefusedUnderASecureRecord_LogsNoSearchIndexDrop()
+    {
+        var (result, dropLines) = await RunAsUserCreateEventNamingAnIndex(SecureMatter);
+
+        result.Success.Should().BeFalse("filed under a secure record, a run-as-user create is refused");
+        _user.Posts.Should().BeEmpty("refused before the caller's POST");
+        dropLines.Should().BeEmpty("nothing was created, so no index was dropped from a create");
+    }
+
+    /// <summary>The same branch, the create going through, still logs the drop once (the log moved; it was not removed).</summary>
+    [Fact]
+    public async Task RunAsUserCreate_ThatSucceeds_LogsTheSearchIndexDropOnce()
+    {
+        var (result, dropLines) = await RunAsUserCreateEventNamingAnIndex(OrdinaryMatter);
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        var post = _user.Posts.Should().ContainSingle().Subject;
+        post.Body.Should().NotContain("sprk_ai_search_index", "the model's index is not written on this path either");
+        dropLines.Should().ContainSingle().Which.Should().Contain("table=sprk_event").And.Contain("origin=caller");
+    }
+
+    /// <summary>A POST the caller's Dataverse refuses creates nothing, so it logs no drop either.</summary>
+    [Fact]
+    public async Task RunAsUserCreate_WhoseCreateFails_LogsNoSearchIndexDrop()
+    {
+        _user.PostStatus = 403;
+
+        var (result, dropLines) = await RunAsUserCreateEventNamingAnIndex(OrdinaryMatter);
+
+        result.Success.Should().BeFalse();
+        dropLines.Should().BeEmpty();
+    }
 }
