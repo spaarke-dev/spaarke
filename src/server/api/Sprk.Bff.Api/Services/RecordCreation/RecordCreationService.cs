@@ -377,6 +377,8 @@ internal sealed partial class RecordCreationService
         // never a refusal, and never the blocked-column refusal below — so no AppendTo is ever asked on the catalog row (#2399).
         // What a mapping rule or an adapter's default fills is dropped again after step 3½; every drop is logged at step 12.
         var indexDrops = new List<RecordTableRules.DroppedSearchIndexValue>();
+        if (request.PreDroppedSearchIndex is { Count: > 0 } preDropped)
+            indexDrops.AddRange(preDropped);
         if (user is null)
         {
             item = ((RecordCreationPayload.Mapped)request.Payload).Item;
@@ -1958,6 +1960,14 @@ internal sealed record RecordCreationRequest(string Table, RecordCreationPayload
     /// invitation is sent and no user is recorded - the AI chat create's behaviour, as it was before the service.
     /// </summary>
     public AssignedAccessGrantor Grantor { get; init; } = AssignedAccessGrantor.Caller;
+
+    /// <summary>
+    /// Task 019 review: search-index values (FR-38) the caller's adapter already removed from the payload BEFORE it mapped it
+    /// (the chat create drops them first so a malformed index lookup cannot fail the mapping, review R7). They are logged at
+    /// step 12 with the other drops (record id, applied index, origin <c>caller</c>, only when they differ from what step 8
+    /// applied), never at the adapter, which does not know either. <c>null</c> (the default): the adapter dropped nothing.
+    /// </summary>
+    internal IReadOnlyList<RecordTableRules.DroppedSearchIndexValue>? PreDroppedSearchIndex { get; init; }
 }
 
 /// <summary>Who a create names as the person behind its "Assigned *" access (see <see cref="RecordCreationRequest.Grantor"/>).</summary>

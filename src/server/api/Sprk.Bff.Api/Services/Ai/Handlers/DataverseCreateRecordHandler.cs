@@ -391,8 +391,12 @@ internal sealed partial class DataverseCreateRecordHandler : IToolHandler
             // writes them), so the model's item has them dropped BEFORE it is mapped — never refused, as the chat UPDATE does. The
             // service strips the same columns from the mapped item, but by then a lookup the mapper cannot read (a malformed
             // recordId) has already failed the whole create.
-            item = RecordTableRules.DropSearchIndexFromUpdate(
-                tablename, recordId: null, item, RecordTableRules.SearchIndexOriginCaller, _logger, context.DecisionId.ToString("N")).Body;
+            // Task 019 review: removed WITHOUT logging - the update helper logs at once, with no record id and no applied index,
+            // and even when the value equals the one step 8 applies. The drops go to the service with the request, which logs
+            // them at step 12 (record id, applied index, only when they differ).
+            var searchIndexDrops = new List<RecordTableRules.DroppedSearchIndexValue>();
+            if (RecordTableRules.OwnsSearchIndex(tablename))
+                item = RecordTableRules.WithoutSearchIndex(item, RecordTableRules.SearchIndexOriginCaller, searchIndexDrops);
 
             var mapped = await DataverseWriteItemMapper.MapAsync(_dataverse, tablename, item, cancellationToken).ConfigureAwait(false);
             if (mapped.ValidationError is not null)
@@ -431,6 +435,7 @@ internal sealed partial class DataverseCreateRecordHandler : IToolHandler
                             // Task 017 r3 (UAC-r2 F1): as before the service and as every other AI-tool write - no grantor, so
                             // an external "Assigned To" contact gets the grant but no invitation attributed to the confirming user.
                             Grantor = AssignedAccessGrantor.None,
+                            PreDroppedSearchIndex = searchIndexDrops,
                         },
                         RecordCreationPrincipal.ForCaller(_dataverse, CallerObjectId(context)),
                         cancellationToken)
@@ -438,6 +443,14 @@ internal sealed partial class DataverseCreateRecordHandler : IToolHandler
 
                 return LogOutcome(context, tablename,
                     OwnedCreateResult(tool, tablename, forMapped, outcome, startedAt), stopwatch);
+            }
+
+            // A run-as-user create has no step 12 and no step 8: the index columns are simply not written, so the drop is logged
+            // here as before (no applied index, so "unchanged").
+            if (searchIndexDrops.Count > 0)
+            {
+                RecordTableRules.LogSearchIndexDropped(
+                    _logger, tablename, recordId: null, searchIndexDrops, applied: null, context.DecisionId.ToString("N"));
             }
 
             // A create that keeps its creator (per-user / unfiled communication / no user-team ownership) filed under a
