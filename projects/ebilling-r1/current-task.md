@@ -17,7 +17,8 @@
 ## Dev state
 - The dev BFF has been on master 3740e1a105 since 2026-11-02 18:52Z (SPA-r3 deployed it; that build includes #2507). It does NOT include 151c. `Ebilling:Enabled=true`, `StoredFileReconcileEnabled=false`, `MalwareScanningEnabled=false`. Before deploying, SPA-r3 ran `Set-ChildRecordCreatorPersonSchema.ps1 -Verify`, which exited 0.
 - word-add-in now switches corrections on and bumps the add-in version. Ebilling then tests a correction against dev when asked.
-- Not on dev yet: the 151c-2 lookup and relationship, the batch form's AP emails subgrid, the ApExport code page, the 151b and 151c-1b ribbons and views, and the secure-child ribbon change.
+- Live on dev 2026-11-02 (owner OK; notices sent before and after): `sprk_communication.sprk_billingexport` and its relationship (cascade read back as agreed); `sprk_/scripts/secure_child_ribbon.js` at the work version (NO_NEW_HOSTS, plus the ISS-010 catch-up), published on its own; the batch form's AP emails subgrid. The click-through check (no New on the subgrid) is still open because no browser is connected.
+- Not on dev yet: the ApExport code page, the 151b and 151c-1b ribbons (sprk_invoice and sprk_billingexport RibbonDiffs, the ribbon script `{a20517ef-dd2a-4461-822b-f80c1d735e69}`) and the views (task 153, owner OK given).
 
 ## Open items
 - 151c-1b K3: the Office Add In User role may lack Read on `sprk_billingexport`. Check when importing the invoice views.
