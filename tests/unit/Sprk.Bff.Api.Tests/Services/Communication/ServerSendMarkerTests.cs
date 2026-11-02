@@ -182,14 +182,26 @@ public class ServerSendMarkerTests
         }
     }
 
-    /// <summary>Answers the message for every request, except the attachments collection when <paramref name="attachmentsJson"/> is given.</summary>
-    private sealed class FixedResponse(string json, string? attachmentsJson = null) : HttpMessageHandler
+    /// <summary>
+    /// Answers the message for every request, except the attachments collection when <paramref name="attachmentsJson"/> is given; with
+    /// <paramref name="failFirstAttachments"/> the first attachments request answers 500 (the marker check makes it, before any later step).
+    /// </summary>
+    private sealed class FixedResponse(string json, string? attachmentsJson = null, bool failFirstAttachments = false) : HttpMessageHandler
     {
+        private int _attachmentRequests;
+
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
-            var body = attachmentsJson is not null && request.RequestUri!.AbsolutePath.EndsWith("/attachments", StringComparison.OrdinalIgnoreCase)
-                ? attachmentsJson
-                : json;
+            var isAttachments = attachmentsJson is not null && request.RequestUri!.AbsolutePath.EndsWith("/attachments", StringComparison.OrdinalIgnoreCase);
+            if (isAttachments && failFirstAttachments && Interlocked.Increment(ref _attachmentRequests) == 1)
+            {
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.InternalServerError)
+                {
+                    Content = new StringContent("{\"error\":{\"code\":\"ServiceUnavailable\",\"message\":\"fault\"}}", Encoding.UTF8, "application/json"),
+                });
+            }
+
+            var body = isAttachments ? attachmentsJson! : json;
             return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(body, Encoding.UTF8, "application/json") });
         }
     }
@@ -234,10 +246,11 @@ public class ServerSendMarkerTests
     }).ToArray();
 
     private static (IncomingCommunicationProcessor Processor, RecordingProvider Scoped, Mock<IDataverseService> Dv, Mock<ITextExtractor> Text) Inbound(
-        string messageJson, Sprk.Bff.Api.Services.Communication.Tracking.ITrackingTokenSigner? signer, string? attachmentsJson = null)
+        string messageJson, Sprk.Bff.Api.Services.Communication.Tracking.ITrackingTokenSigner? signer, string? attachmentsJson = null,
+        bool failFirstAttachments = false)
     {
         var graph = new Mock<IGraphClientFactory>();
-        graph.Setup(f => f.ForApp()).Returns(new GraphServiceClient(new HttpClient(new FixedResponse(messageJson, attachmentsJson))));
+        graph.Setup(f => f.ForApp()).Returns(new GraphServiceClient(new HttpClient(new FixedResponse(messageJson, attachmentsJson, failFirstAttachments))));
 
         var dv = new Mock<IDataverseService>();
         var text = new Mock<ITextExtractor>();
@@ -306,12 +319,16 @@ public class ServerSendMarkerTests
         yield return ["marker copied onto other files", false];
         yield return ["marked, but the inbound side has no signer", false];
         yield return ["marker plus an extra file without inline bytes", false];
+        yield return ["marked, files only on the attachment re-fetch", true];
+        yield return ["marked, the attachment re-fetch faults", false];
+        yield return ["marked, the attachment re-fetch is paged", false];
     }
 
     /// <summary>
     /// MUTATION (seeded): removing the <c>verifiedServerSend</c> guard from the attachment-text match step, the attachment step or the archive step fails the "marked" case;
     /// honouring a marker without the digest comparison fails the "copied" case; without the signature check, the "forged" case; digesting only
-    /// the files that came with bytes (uac-r2 re-check F4) fails the "extra file without inline bytes" case, whose re-fetch still returns it without bytes.
+    /// the files that came with bytes (uac-r2 re-check F4) fails the "extra file without inline bytes" case, whose re-fetch still returns it without bytes;
+    /// honouring a paged re-fetch (files beyond page 1 never digested) fails the "paged" case. "Files only on the re-fetch" proves large sends still verify.
     /// </summary>
     [Theory(DisplayName = "151c-1a D2 b SEEDED: a verified server send is no match signal, files no attachment document and archives no .eml; anything else is processed as before")]
     [MemberData(nameof(InboundCases))]
@@ -326,12 +343,22 @@ public class ServerSendMarkerTests
             "forged marker" => (await MarkerFor(new FixedKeyTrackingTokenSigner(FixedKeyTrackingTokenSigner.KeyB), files), files, server),
             "marker copied onto other files" => (await MarkerFor(server, files), [("invoice.pdf", Encoding.UTF8.GetBytes("%PDF-1.7 genuine inbound"))], server),
             "marker plus an extra file without inline bytes" => (await MarkerFor(server, files), [.. files, ("large-genuine-inbound.pdf", null)], server),
+            "marked, files only on the attachment re-fetch" or "marked, the attachment re-fetch faults" or "marked, the attachment re-fetch is paged"
+                => (await MarkerFor(server, files), files.Select(f => (f.Name, (byte[]?)null)).ToList(), server),
             _ => (await MarkerFor(server, files), files, null),
         };
-        var attachmentsJson = carried.Any(f => f.Content is null)
-            ? JsonSerializer.Serialize(new Dictionary<string, object?> { ["value"] = AttachmentsOf(carried) })
-            : null;
-        var (processor, scoped, dv, text) = Inbound(MessageJson(marker, carried), inboundSigner, attachmentsJson);
+
+        // A file listed without bytes is re-fetched. The re-fetch answers with the bytes the sender sent (the extra-file case: still without them).
+        var refetched = kind == "marker plus an extra file without inline bytes" ? carried : files;
+        var attachmentsBody = new Dictionary<string, object?> { ["value"] = AttachmentsOf(refetched) };
+        if (kind == "marked, the attachment re-fetch is paged")
+        {
+            attachmentsBody["@odata.nextLink"] = $"https://graph.microsoft.com/v1.0/users/{Mailbox}/messages/{GraphMessageId}/attachments?$skiptoken=page2";
+        }
+
+        var attachmentsJson = carried.Any(f => f.Content is null) ? JsonSerializer.Serialize(attachmentsBody) : null;
+        var (processor, scoped, dv, text) = Inbound(
+            MessageJson(marker, carried), inboundSigner, attachmentsJson, failFirstAttachments: kind == "marked, the attachment re-fetch faults");
 
         await processor.ProcessAsync(Mailbox, GraphMessageId, ct: CancellationToken.None);
 

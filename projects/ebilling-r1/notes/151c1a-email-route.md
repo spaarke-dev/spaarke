@@ -220,3 +220,20 @@ The sent communication carries **no** link to the batch: no `Associations`, no `
 - **K3, shared signing key.** The marker and the tracking footer use the same HMAC key; they are kept apart only by the record-type prefix (`spaarke-server-send:` and a digest, against an entity name). Nobody outside the server can mint either token today.
 - **K6, owner race.** The batch's owning team is read before the send and the resolver is asked at send time. A re-own of the batch between the two refuses the send (owner mismatch); a re-own after the send leaves the email with the earlier team. Not closed.
 - **K7, no key, no marker.** When the signing key is not configured no marker is sent, so the inbound path processes the email as before; only the recipient check applies.
+
+## uac-r2 round-2 pass (2026-11-02) and the follow-ups
+
+uac-r2 passed round 2 (5bdd25bdc6..a27a1d4b2b) at the access gate. The follow-ups:
+
+- **Fixed: paged attachment re-fetch.** If the re-fetch in `IsVerifiedServerSendAsync` comes back paged (`OdataNextLink`), the message isn't verified and is processed as before, since files beyond page 1 would otherwise be left out of the digest. Seeded: removing the guard turns the "paged" case red.
+- **Added tests.**
+  - A marked send whose files arrive only on the re-fetch still verifies, so large sends keep their marker.
+  - A re-fetch that faults leaves the message unverified.
+
+**Known limits, unchanged:**
+
+| Id | Limit |
+|---|---|
+| L2 | The digest string is not injective for file names containing a line break. Each hash must still match a batch file, so the worst case is a byte-identical file under an odd name. Length-prefix the lines if the format is ever changed. |
+| L3 | The receive-enabled account cache can be up to 5 minutes stale after an admin enables a mailbox, the same as for its other callers. |
+| L4 | Addresses are matched exactly, so aliases, distribution lists, Inbox-rule forwards, UPN ≠ SMTP and `#EXT#` `preferred_username` slip past. The sender check reads the claim, while the OBO send uses the token's mailbox. |

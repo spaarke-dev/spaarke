@@ -1027,6 +1027,12 @@ public sealed class IncomingCommunicationProcessor
                     return false;
                 }
 
+                // A paged collection would leave the files beyond page 1 out of the digest: not verified (uac-r2 re-check, limit 1).
+                if (fetched?.OdataNextLink is not null)
+                {
+                    return false;
+                }
+
                 files = (fetched?.Value ?? []).OfType<FileAttachment>().ToList();
             }
 
