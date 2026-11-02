@@ -28,7 +28,7 @@
 ## Gates and peers
 - **R3:** dev BFF = 3740e1a105 since 2026-11-02 18:52:25Z (R3's deploy; rollback fcf01480f4). My 30-min gate PASSED and was reported to R3 (log `$TEMP/uacmerge/uacg/gate3740_30m.txt`). Census follow-up resolved: the drift is project 1cccf07d (Office quick-create, MAT-000032). No BFF path writes the `sprk_Project_Matter_nn` link; it is display-only and confers nothing. Agreed with field-mapping: the server writes the link once the pair is set. Field-mapping owns the create path (`RecordCreationService` step 12; I review their diff). I own the task 195 re-file core (chat update tool). Filed as #2524; field-mapping links it to their task 043. My part, the re-file core link write, is still to do.
 - **Field-mapping 5c:** the junction exception they reported is #2292 (pre-existing; sighting added). #2522 noted. #2523: any change to how the grants run comes to me before merge.
-- **ebilling:** 151c-2 CLEARED 2026-11-02. F1 fixed in 9511a1e17c (`NO_NEW_HOSTS`; both copies identical), K5 409 check in 2abe0f0cbf; re-check OK at tip 1eb91e79de; ebilling merges into work. K1-K4 accepted. No open asks.
+- **ebilling:** 151c-2 CLEARED, and LIVE on dev 2026-11-02 (ebilling session 7b, with the owner's OK): the link column, with its cascade read back as agreed; the ribbon script set to master + `NO_NEW_HOSTS` (checked against master); the batch form's `subgrid_apemails`. Open: a browser click-through, by ebilling or the owner. Pass = no New on a batch's AP emails grid; Add Existing may show (K1).
 - **Field-mapping:** #2504 reviewed OK. 039/040 diffs to come.
 
 ## Parked (verify state)
@@ -37,7 +37,7 @@
 - 196a/196b.
 
 ## Owner items outstanding
-- The 195 click-test (checklist).
+- The 195 click-test (checklist), plus the 151c-2 batch "AP emails" grid showing no New.
 - The owner-private items in `scratchpad/q1_owner_private.md`; Q4 private clean-up.
 - Whether chat should send invites (as its own change, through field-mapping).
 - Older:
