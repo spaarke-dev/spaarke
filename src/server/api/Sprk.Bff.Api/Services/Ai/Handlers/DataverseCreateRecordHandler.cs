@@ -445,14 +445,6 @@ internal sealed partial class DataverseCreateRecordHandler : IToolHandler
                     OwnedCreateResult(tool, tablename, forMapped, outcome, startedAt), stopwatch);
             }
 
-            // A run-as-user create has no step 12 and no step 8: the index columns are simply not written, so the drop is logged
-            // here as before (no applied index, so "unchanged").
-            if (searchIndexDrops.Count > 0)
-            {
-                RecordTableRules.LogSearchIndexDropped(
-                    _logger, tablename, recordId: null, searchIndexDrops, applied: null, context.DecisionId.ToString("N"));
-            }
-
             // A create that keeps its creator (per-user / unfiled communication / no user-team ownership) filed under a
             // SECURE record cannot be re-owned here and must not sit in the caller's ordinary business unit: refused
             // (fail closed). Filed under ordinary records — or under nothing — it stays a run-as-user create.
@@ -473,6 +465,14 @@ internal sealed partial class DataverseCreateRecordHandler : IToolHandler
             {
                 // Privilege-denied create surfaces the USER's own access error — never escalates.
                 return LogOutcome(context, tablename, MapClientError(tool, response, startedAt), stopwatch);
+            }
+
+            // A run-as-user create has no step 12 and no step 8: the index columns are simply not written, so the drop is logged
+            // here (no applied index, so "unchanged"). Only after the POST succeeded: a refused or failed create dropped nothing.
+            if (searchIndexDrops.Count > 0)
+            {
+                RecordTableRules.LogSearchIndexDropped(
+                    _logger, tablename, recordId: null, searchIndexDrops, applied: null, context.DecisionId.ToString("N"));
             }
 
             var warnings = new List<string>();

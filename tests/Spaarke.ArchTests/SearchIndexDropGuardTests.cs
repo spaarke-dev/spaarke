@@ -1,4 +1,7 @@
 using System.Text.RegularExpressions;
+using System.Xml.Linq;
+using Sprk.Bff.Api.Services.Ai;
+using Sprk.Bff.Api.Services.RecordCreation;
 using Xunit;
 
 namespace Spaarke.ArchTests;
@@ -161,5 +164,110 @@ public class SearchIndexDropGuardTests
 
         var (other, _) = Classify("// DataverseWriteItemMapper.MapAsync(x)\nvar n = await _service.UpdateRecordAsync(request, ct);");
         Assert.False(other);
+    }
+
+    // -- Pass 2 hardening: the navigation property the drop matches by name ---------------------------------------------
+
+    /// <summary>The solution's relationship file for the <c>sprk_aisearchindex</c> lookup.</summary>
+    private const string SearchIndexRelationshipsXml = "src/dataverse/solutions/SpaarkeMaster/Other/Relationships/sprk_AISearchIndex.xml";
+
+    /// <summary>
+    /// The drop matches body keys BY NAME: <c>RecordTableRules.SearchIndexColumnOf</c> strips <c>@odata.bind</c> and compares what
+    /// is left, case-insensitively, with <c>SearchIndexNameResolver.LookupColumn</c>. A bind written under any other navigation
+    /// property name would survive the drop, so for every table the registry marks <c>SearchIndexed</c> the lookup's navigation
+    /// property (the referencing side of its relationship) must be that name. Every table's is <c>sprk_AI_Search_Index</c> today.
+    /// Returns one problem per table that breaks it; empty when the XML agrees with the drop.
+    /// </summary>
+    internal static IReadOnlyList<string> NavigationPropertyProblems(string relationshipsXml, IEnumerable<string> searchIndexedTables)
+    {
+        var relationships = XDocument.Parse(relationshipsXml).Descendants("EntityRelationship").ToList();
+        var problems = new List<string>();
+        foreach (var table in searchIndexedTables)
+        {
+            var navs = relationships
+                .Where(r => string.Equals((string?)r.Element("ReferencingEntityName"), table, StringComparison.OrdinalIgnoreCase)
+                            && string.Equals((string?)r.Element("ReferencedEntityName"), "sprk_aisearchindex", StringComparison.OrdinalIgnoreCase)
+                            && string.Equals((string?)r.Element("ReferencingAttributeName"), SearchIndexNameResolver.LookupColumn, StringComparison.OrdinalIgnoreCase))
+                .SelectMany(r => r.Descendants("EntityRelationshipRole")
+                    .Where(role => (string?)role.Element("RelationshipRoleType") == "1")
+                    .Select(role => (string?)role.Element("NavigationPropertyName")))
+                .ToList();
+
+            if (navs.Count == 0)
+            {
+                problems.Add($"{table}: no relationship from {table}.{SearchIndexNameResolver.LookupColumn} to sprk_aisearchindex in the solution XML; the registry marks it SearchIndexed.");
+                continue;
+            }
+
+            foreach (var nav in navs)
+            {
+                var dropped = RecordTableRules.SearchIndexColumnOf(nav + "@odata.bind");
+                if (dropped != SearchIndexNameResolver.LookupColumn)
+                    problems.Add($"{table}: the lookup's navigation property is '{nav}', which the search-index drop does not match "
+                                 + $"(it matches '{SearchIndexNameResolver.LookupColumn}'); a bind written as '{nav}@odata.bind' would survive the drop.");
+            }
+        }
+
+        return problems;
+    }
+
+    [Fact(DisplayName = "Task 019 pass 2: every SearchIndexed table's lookup navigation property is the name the drop matches")]
+    public void EverySearchIndexedTable_NavigationProperty_IsTheNameTheDropMatches()
+    {
+        var tables = RecordTableRules.All.Where(r => r.SearchIndexed).Select(r => r.Table).ToList();
+        Assert.True(tables.Count >= 6, "non-vacuity: the registry marks at least matter, project, document, work assignment, event and invoice");
+
+        var xml = File.ReadAllText(Path.Combine(SourceScan.RepoRoot, SearchIndexRelationshipsXml.Replace('/', Path.DirectorySeparatorChar)));
+        var problems = NavigationPropertyProblems(xml, tables);
+
+        Assert.True(problems.Count == 0,
+            "The search-index drop matches body keys by name (RecordTableRules.SearchIndexColumnOf); a navigation property under another " +
+            "name would let a client's bind through:\n" + string.Join("\n", problems));
+    }
+
+    [Fact(DisplayName = "Task 019 pass 2 control (must fire): a relationship under a different navigation property name is found")]
+    public void Control_ADifferentNavigationPropertyName_IsFound()
+    {
+        var fake = """
+            <EntityRelationships>
+              <EntityRelationship Name="fake">
+                <ReferencingEntityName>sprk_Matter</ReferencingEntityName>
+                <ReferencedEntityName>sprk_AISearchIndex</ReferencedEntityName>
+                <ReferencingAttributeName>sprk_AI_Search_Index</ReferencingAttributeName>
+                <EntityRelationshipRoles>
+                  <EntityRelationshipRole><NavigationPropertyName>sprk_SearchIndexLookup</NavigationPropertyName><RelationshipRoleType>1</RelationshipRoleType></EntityRelationshipRole>
+                  <EntityRelationshipRole><NavigationPropertyName>fake</NavigationPropertyName><RelationshipRoleType>0</RelationshipRoleType></EntityRelationshipRole>
+                </EntityRelationshipRoles>
+              </EntityRelationship>
+            </EntityRelationships>
+            """;
+
+        var problems = NavigationPropertyProblems(fake, ["sprk_matter"]);
+
+        Assert.Single(problems);
+        Assert.Contains("sprk_SearchIndexLookup", problems[0]);
+
+        // A table with no relationship at all is also a problem, not a silent pass.
+        Assert.Single(NavigationPropertyProblems(fake, ["sprk_project"]));
+    }
+
+    [Fact(DisplayName = "Task 019 pass 2 control (must not fire): the matching navigation property, in any case, passes")]
+    public void Control_TheMatchingNavigationPropertyName_IsNotFound()
+    {
+        var ok = """
+            <EntityRelationships>
+              <EntityRelationship Name="ok">
+                <ReferencingEntityName>sprk_Matter</ReferencingEntityName>
+                <ReferencedEntityName>sprk_AISearchIndex</ReferencedEntityName>
+                <ReferencingAttributeName>sprk_AI_Search_Index</ReferencingAttributeName>
+                <EntityRelationshipRoles>
+                  <EntityRelationshipRole><NavigationPropertyName>sprk_AI_Search_Index</NavigationPropertyName><RelationshipRoleType>1</RelationshipRoleType></EntityRelationshipRole>
+                  <EntityRelationshipRole><NavigationPropertyName>other</NavigationPropertyName><RelationshipRoleType>0</RelationshipRoleType></EntityRelationshipRole>
+                </EntityRelationshipRoles>
+              </EntityRelationship>
+            </EntityRelationships>
+            """;
+
+        Assert.Empty(NavigationPropertyProblems(ok, ["sprk_matter"]));
     }
 }
