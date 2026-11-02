@@ -27,7 +27,7 @@
 
 ## Gates and peers
 - **R3:** released the BU1 move and confirmed step 5 from its side, including the Identity Link Writers field permissions. No open asks.
-- **ebilling:** 151c-2 access review IN PROGRESS (2026-11-02 ~16:10Z): branch `task/ebill-151c2-batch-link`, diff `7d493b53db..e1a8be6223`, notes `projects/ebilling-r1/notes/151c2-batch-link.md`. A Sonnet-high adversarial-reviewer agent is running (generic lookup scanners, client-settable column, the `CreatePreparedRecordAsync` retry, cascades, the subgrid known limit). When it finishes: send ebilling the verdict. Do not relaunch it.
+- **ebilling:** 151c-2 (`7d493b53db..e1a8be6223`) verdict SENT 2026-11-02: passes the access gate, on one condition, F1 fixed before merge. F1: `secure_child_ribbon.js` (both copies, lines 112-150) shows the custom New Message on the batch subgrid, because a host that is not a root gives `newChildAvailable` true; Compose then refuses with 403. Fix: a `NO_NEW_HOSTS` list, made in their branch. K1-K5 accepted (re-pointing the link changes no access; the retry matches on message text; gaps in the ArchTest; optional check that the two batch ids match). Waiting for the F1 diff to re-check.
 - **Field-mapping:** #2504 reviewed OK. 039/040 diffs to come.
 
 ## Parked (verify state)
