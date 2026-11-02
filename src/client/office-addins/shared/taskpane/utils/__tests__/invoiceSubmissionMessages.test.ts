@@ -6,6 +6,7 @@
 import {
   describeInvoiceOutcome,
   describeSubmissionRefusal,
+  describeCorrectionBlock,
   describeUncorrectableStatus,
   SUPERSEDED_INVOICE_MESSAGE,
   GENERIC_FAILED_OUTCOME_MESSAGE,
@@ -214,6 +215,19 @@ describe('invoice submission messages — specifics', () => {
     expect(status('Archived')).toMatch(/can't be corrected in its current state\./);
     expect(status('Archived')).not.toMatch(/Archived/);
     expect(describeUncorrectableStatus(null)).toBe("This invoice can't be corrected in its current state.");
+  });
+
+  it('the prefill (§10) says why an invoice cannot be corrected, without "Nothing was submitted"', () => {
+    const block = (reason: string | null, invoiceStatus: string | null = null) =>
+      describeCorrectionBlock({ reason, invoiceStatus });
+    expect(block('invoice_status', 'Paid')).toBe("This invoice can't be corrected while it is Paid.");
+    expect(block('invoice_status', 'Superseded')).toBe(SUPERSEDED_INVOICE_MESSAGE);
+    expect(block('no_submission')).toBe('This invoice has no submission in Spaarke to correct.');
+    expect(block('submission_in_progress')).toMatch(/still being processed\. Wait until it has finished/);
+    expect(block('something_new')).toBe("This invoice can't be corrected.");
+    for (const reason of ['invoice_status', 'no_submission', 'submission_in_progress', null]) {
+      expect(block(reason, 'Paid')).not.toMatch(/Nothing was submitted/);
+    }
   });
 
   it('correction_not_allowed / submission_in_progress says to wait and submit the correction again', () => {

@@ -170,6 +170,23 @@ export function describeUncorrectableStatus(invoiceStatus: string | null | undef
 }
 
 /**
+ * Why the correction prefill (§10) says an invoice can't be corrected, before anything is submitted. `reason` is the
+ * intake's: `invoice_status`, `no_submission`, `submission_in_progress`; a newer one gets the plain sentence.
+ */
+export function describeCorrectionBlock(prefill: { reason: string | null; invoiceStatus: string | null }): string {
+  switch (prefill.reason) {
+    case 'invoice_status':
+      return describeUncorrectableStatus(prefill.invoiceStatus);
+    case 'no_submission':
+      return 'This invoice has no submission in Spaarke to correct.';
+    case 'submission_in_progress':
+      return 'The original invoice is still being processed. Wait until it has finished, then try again.';
+    default:
+      return prefill.invoiceStatus === 'Superseded' ? SUPERSEDED_INVOICE_MESSAGE : "This invoice can't be corrected.";
+  }
+}
+
+/**
  * §6 `correction_not_allowed` reasons (097b, 2026-10-30). `not_available` (OP-7) is no longer sent; an unknown reason
  * gets the fallback.
  */

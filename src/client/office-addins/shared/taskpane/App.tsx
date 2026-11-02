@@ -18,6 +18,7 @@ import { InvoiceView } from './components/views/InvoiceView';
 import {
   createInvoiceSubmitHandler,
   hostAdapterInvoiceEmailSource,
+  loadCorrectionPrefill,
   loadInvoiceFirms,
 } from './services/invoiceSubmissionService';
 import { invoiceFiledRecord, type InvoiceSubmissionTarget } from './services/invoiceSubmissionSeam';
@@ -688,6 +689,10 @@ export const App: React.FC<AppProps> = ({
       loadInvoiceFirms(target, { apiBaseUrl, getAccessToken: getInvoiceAccessToken }),
     [apiBaseUrl, getInvoiceAccessToken]
   );
+  const loadPrefill = useCallback(
+    (invoiceId: string) => loadCorrectionPrefill(invoiceId, { apiBaseUrl, getAccessToken: getInvoiceAccessToken }),
+    [apiBaseUrl, getInvoiceAccessToken]
+  );
   // The record the open email is already filed to (task 120's lookup — the Save tab's "Filed to"): the view starts there.
   const invoiceFiledTo = useMemo(() => invoiceFiledRecord(documentIdentity), [documentIdentity]);
 
@@ -900,7 +905,8 @@ export const App: React.FC<AppProps> = ({
 
         {/* Task 133: the Outlook "Submit Invoice" view — reached only from the ribbon (`?action=submitInvoice`), never
             from a tab. The submission and the firm list are ebilling's from-email contract (invoiceSubmissionService);
-            corrections stay off (`correctionAvailable`) until ebilling 097. */}
+            corrections stay off (`correctionAvailable`) until ebilling 097 (#2507) is on master and dev; the
+            correction prefill is wired so turning them on is the flag alone. */}
         {currentTab === 'invoice' && (
           <InvoiceView
             hostAdapter={hostAdapter}
@@ -908,6 +914,7 @@ export const App: React.FC<AppProps> = ({
             getAccessToken={getInvoiceAccessToken}
             onSubmit={submitInvoice}
             loadFirms={loadFirms}
+            loadCorrectionPrefill={loadPrefill}
             onBusyChange={setInvoiceBusy}
             filedRecord={invoiceFiledTo}
           />
