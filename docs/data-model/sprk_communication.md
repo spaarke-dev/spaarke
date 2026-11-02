@@ -7,6 +7,8 @@
 
 > **2026-10-08 (unified-access-control-r2 task 173, owner round 81)**: `sprk_communication.sprk_accesspermission` is **kept** as a DISPLAY copy of the parent's value (it was to be retired by task 138; round 81 supersedes that) — see **Access Permission — a display copy of the parent's** below.
 
+> **2026-11-02 (ebilling-r1 task 151c-2)**: `sprk_communication.sprk_billingexport` ("Export Batch", Lookup -> `sprk_billingexport`) is a **plain reference**, not a regarding or a filing: the AP email's link to its export batch, written by the BFF in the same create as the row (`ServerSendOptions.BillingExportId`). It is in no family-edge, lineage, ownership or regarding registry. Relationship `sprk_communication_billingexport_billingexport`: no cascade on assign, share, unshare, reparent or merge; delete RemoveLink. See `sprk_billingexport.md` ("Email to batch reference").
+
 ## Access Permission — a display copy of the parent's
 
 **Rule (owner Q6, 2026-09-30, and owner round 81, 2026-10-08, binding):** a communication's ACCESS is decided by its **parent root** — the `sprk_project`, `sprk_matter` or `sprk_workassignment` it is filed under. That root's `sprk_accesspermission` (Standard / Limited / Restricted) and `sprk_issecure` decide which contacts may reach the communication. **No access decision reads the communication's own `sprk_accesspermission`.**

@@ -147,6 +147,10 @@ $Spec = [ordered]@{
                 # Task 151c-1a: the BFF is the one writer of the Sent to AP Date (set once, never overwritten): disabled on the form.
                 ReadOnly = 'sprk_senttoapdate' }
             @{ Name = 'mapping'; Label = 'Mapping snapshot'; Cols = 'sprk_mappingsnapshot' })
+        # Task 151c-2: the AP emails sent for this batch, through the sprk_communication.sprk_billingexport relationship
+        # (Deploy-EbillingCommunicationBatchLink.ps1, which must have run first). The BFF is the only writer of the link; the view is the
+        # existing "All Outgoing Email" (to, from, subject, sent). A plain related-records subgrid: nothing on the form writes the link.
+        Subgrids = @(@{ Name = 'apemails'; Label = 'AP emails'; Target = 'sprk_communication'; Relationship = 'sprk_communication_billingexport_billingexport'; ViewName = 'All Outgoing Email' })
         View = 'sprk_name', 'sprk_exportstatus', 'sprk_invoicecount', 'sprk_totalamount', 'createdon'
     }
     sprk_invoicecorrection = @{
