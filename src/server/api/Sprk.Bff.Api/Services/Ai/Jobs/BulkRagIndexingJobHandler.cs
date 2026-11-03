@@ -1,6 +1,7 @@
 using System.Net.Http.Headers;
 using System.Text.Json;
 using Azure.Core;
+using Spaarke.Dataverse;
 using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Models.Email;
 using Sprk.Bff.Api.Services.Ai;
@@ -32,6 +33,8 @@ public class BulkRagIndexingJobHandler : IJobHandler
     private readonly IFileIndexingService _fileIndexingService;
     private readonly BatchJobStatusStore _statusStore;
     private readonly IIdempotencyService _idempotencyService;
+    private readonly IDocumentDataverseService _documentService;
+    private readonly ISearchIndexNameResolver _searchIndexNameResolver;
     private readonly RagTelemetry _telemetry;
     private readonly IConfiguration _configuration;
     private readonly ILogger<BulkRagIndexingJobHandler> _logger;
@@ -55,6 +58,8 @@ public class BulkRagIndexingJobHandler : IJobHandler
         IFileIndexingService fileIndexingService,
         BatchJobStatusStore statusStore,
         IIdempotencyService idempotencyService,
+        IDocumentDataverseService documentService,
+        ISearchIndexNameResolver searchIndexNameResolver,
         RagTelemetry telemetry,
         IConfiguration configuration,
         IHttpClientFactory httpClientFactory,
@@ -64,6 +69,8 @@ public class BulkRagIndexingJobHandler : IJobHandler
         _fileIndexingService = fileIndexingService ?? throw new ArgumentNullException(nameof(fileIndexingService));
         _statusStore = statusStore ?? throw new ArgumentNullException(nameof(statusStore));
         _idempotencyService = idempotencyService ?? throw new ArgumentNullException(nameof(idempotencyService));
+        _documentService = documentService ?? throw new ArgumentNullException(nameof(documentService));
+        _searchIndexNameResolver = searchIndexNameResolver ?? throw new ArgumentNullException(nameof(searchIndexNameResolver));
         _telemetry = telemetry ?? throw new ArgumentNullException(nameof(telemetry));
         _configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
@@ -340,6 +347,8 @@ public class BulkRagIndexingJobHandler : IJobHandler
                 "Successfully indexed document {DocumentId} ({FileName}), {ChunksIndexed} chunks",
                 doc.DocumentId, doc.FileName, result.ChunksIndexed);
 
+            await StampSearchIndexAsync(doc.DocumentId, ct);
+
             return DocumentIndexOutcome.Success;
         }
         catch (Exception ex)
@@ -351,6 +360,47 @@ public class BulkRagIndexingJobHandler : IJobHandler
                 ex.Message,
                 ct);
             return DocumentIndexOutcome.Failed;
+        }
+    }
+
+    /// <summary>
+    /// Task 041 (FR-40, AC3; review round 1 F1): stamp the index the file actually landed in, the single canonical default
+    /// (<see cref="ISearchIndexNameResolver.GetDefaultIndexName"/>), as <c>RagIndexingJobHandler</c> does. A document stamped
+    /// with another index before task 041 is re-stamped when it is re-indexed. A failed stamp is logged and never fails the
+    /// document: indexing succeeded.
+    /// </summary>
+    private async Task StampSearchIndexAsync(string documentId, CancellationToken ct)
+    {
+        if (string.IsNullOrEmpty(documentId))
+            return;
+
+        try
+        {
+            var completedAt = DateTime.UtcNow;
+            var stampedIndexName = _searchIndexNameResolver.GetDefaultIndexName();
+            var updateRequest = new UpdateDocumentRequest
+            {
+                // New canonical lifecycle marker (R3+)
+                SearchIndexCompletedOn = completedAt,
+                // Legacy dual-write (preserved during transition)
+                SearchIndexed = true,
+                SearchIndexedOn = completedAt,
+                // Index routing (canonical single setting per FR-26)
+                SearchIndexName = stampedIndexName
+            };
+
+            await _documentService.UpdateDocumentAsync(documentId, updateRequest, ct);
+
+            _logger.LogDebug(
+                "Updated Dataverse search index tracking for document {DocumentId}: SearchIndexCompletedOn={CompletedAt}, SearchIndexed=true (dual-write), IndexName={IndexName}",
+                documentId, completedAt, stampedIndexName);
+        }
+        catch (Exception ex)
+        {
+            // Log but don't fail - indexing succeeded, Dataverse update is non-critical
+            _logger.LogWarning(ex,
+                "Failed to update Dataverse search index tracking for document {DocumentId}: {Error}. Indexing was successful.",
+                documentId, ex.Message);
         }
     }
 
