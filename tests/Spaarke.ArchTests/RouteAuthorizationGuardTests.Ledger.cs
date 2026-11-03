@@ -491,7 +491,10 @@ public partial class RouteAuthorizationGuardTests
             + "server-owned column; a re-file also needs the row readable (uniform 404) and F3 to leave a secure record. "
             + "uac-r2 task 195: PATCH .../sprk_project/{id} takes the filing pair only and is decided by ProjectMatterFiling.FileAsync "
             + "(the caller's read, Write+Append and AppendTo first; a move of an already filed project only with ?move=true; then the "
-            + "app-only, version-conditioned pair write)."),
+            + "app-only, version-conditioned pair write). Field-mapping task 020 (FR-15): the create also takes sprk_matter and "
+            + "sprk_project (roots: the same caller checks, record-first owner, a project under a secure record created into "
+            + "isolation by the secure-create plan) and the optional mappingSourceEntity/mappingSourceId query, which authorizes "
+            + "nothing: the source is Read-probed AS THE CALLER in the service (FR-04), unreadable = no mapping + a warning."),
 
         // ---- Office add-in ----
         new GovernedFile("Api/Office/OfficeEndpoints.cs", Scope.RouteLevelGate,
@@ -2349,7 +2352,10 @@ public partial class RouteAuthorizationGuardTests
             + "cannot name is the single 403, ontology task 046; ChildRecordEndpoints.RefusalResult, reached from ChildRecordEndpoints.cs:205 CreateAsync), the payload mapped with the "
             + "caller's client, then the ONE server create (RecordCreationService.CreateAsync, since field-mapping task 017; "
             + "it replaced OwnedChildWrite.CreateAsync, deleted in 017) checks the table privilege and AppendTo on EVERY bound "
-            + "record before the app-only create — for a work assignment (task 046, D-113) with the secure-create plan."),
+            + "record before the app-only create — for a work assignment (task 046, D-113) with the secure-create plan. "
+            + "Field-mapping task 020: a matter or project (the plan for a project) the same way; a named or inferred mapping "
+            + "source adds no decision to the handler (ADR-008 path A): CallerRecordAccessProbe asks Read on it as the caller "
+            + "inside the service, and a denied, missing or malformed source maps nothing, with a warning, never a refusal."),
         new HandlerDecision("PATCH /api/v1/child-records/{table}/{id:guid}", "RefileAsync", "IDataverseUserClient", Array.Empty<string>(),
             "Task 147 r1: the re-file is the caller's own PATCH through IDataverseUserClient (ChildRecordEndpoints.cs:410-412 → "
             + "UpdateAsync, :569): an unreadable row is the uniform 404, AppendTo on every new parent and F3 on a move out of a "
