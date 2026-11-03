@@ -291,8 +291,9 @@ internal static partial class RecordTableRules
         {
             Table = "sprk_document",
             Kind = RecordTableKind.Child,
-            // OWNER REVIEW: in no old list. Spec FR-10's acceptance names Document with Matter and Project; no create
-            // path fills a document's search index today (grep sprk_searchindexname: only the Office Matter/Project create).
+            // OWNER REVIEW: in no old list. Spec FR-10's acceptance names Document with Matter and Project. No create path fills a
+            // record's search index (task 041, FR-40: the Office Matter/Project create no longer does either); a document's
+            // sprk_searchindexname is the indexing pipeline's app-only stamp of where its file landed.
             SearchIndexed = true,
             // Task 014 (unified-access-control-r2 D7 / #2169, 2026-10-21): the document's access record — the inherited
             // floor and the document's own narrowing — is written by the BFF only, never by a field-mapping rule (the push

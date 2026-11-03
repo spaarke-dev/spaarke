@@ -189,12 +189,24 @@ public sealed class PostUploadIndexingEnqueuerTests
     }
 
     /// <summary>
-    /// Task 041 (FR-40, G-9; design §14.7 must-fire 7): the OBO write lands in <c>AiSearch:KnowledgeIndexName</c>, so the stamp
-    /// names it too — not the deprecated <c>Analysis:SharedIndexName</c>, which the enqueuer no longer reads.
+    /// Task 041 (FR-40, G-9; design §14.7 must-fire 7; review round 1 F2): the OBO write lands in
+    /// <c>AiSearch:KnowledgeIndexName</c>, so the stamp names it too. The resolver here is the REAL
+    /// <see cref="SearchIndexNameResolver"/> over a non-default <c>KnowledgeIndexName</c>, so the stamp is proven to come
+    /// from that setting. (<c>Analysis:SharedIndexName</c> cannot be an input: the enqueuer no longer takes
+    /// <c>AnalysisOptions</c>, and <c>AiSearchOptions</c> has no such option.)
     /// </summary>
     [Fact]
-    public async Task EnqueueIfApplicableAsync_SharedIndexNameDiffersFromTheKnowledgeIndex_StampsTheKnowledgeIndex()
+    public async Task EnqueueIfApplicableAsync_StampsTheConfiguredKnowledgeIndexName()
     {
+        var resolver = new SearchIndexNameResolver(Options.Create(new AiSearchOptions { KnowledgeIndexName = "k-041" }));
+        var sut = new PostUploadIndexingEnqueuer(
+            _fileIndexingMock.Object,
+            _jobSubmissionMock.Object,
+            _documentServiceMock.Object,
+            TestDocumentIndexParentResolver.Over(),
+            resolver,
+            Options.Create(_options),
+            _loggerMock.Object);
         _fileIndexingMock
             .Setup(s => s.IndexFileAsync(It.IsAny<FileIndexRequest>(), It.IsAny<HttpContext>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new FileIndexingResult { Success = true });
@@ -205,9 +217,9 @@ public sealed class PostUploadIndexingEnqueuerTests
             .Callback<string, UpdateDocumentRequest, CancellationToken>((_, req, _) => captured = req)
             .Returns(Task.CompletedTask);
 
-        await CreateSut().EnqueueIfApplicableAsync(ValidRequest(), CreateHttpContext(), CancellationToken.None);
+        await sut.EnqueueIfApplicableAsync(ValidRequest(), CreateHttpContext(), CancellationToken.None);
 
-        captured!.SearchIndexName.Should().Be("spaarke-files-index", "the stamp equals the index written (KnowledgeIndexName)");
+        captured!.SearchIndexName.Should().Be("k-041", "the stamp equals the index written (AiSearch:KnowledgeIndexName)");
     }
 
     [Fact]

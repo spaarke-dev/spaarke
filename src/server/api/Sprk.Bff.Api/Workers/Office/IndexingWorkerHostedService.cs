@@ -38,6 +38,8 @@ public class IndexingWorkerHostedService : BackgroundService
     private readonly IJobStatusService _jobStatusService;
     private readonly IProcessingJobService _jobService;
     private readonly IFileIndexingService _fileIndexingService;
+    private readonly IDocumentDataverseService _documentService;
+    private readonly ISearchIndexNameResolver _searchIndexNameResolver;
     private readonly ServiceBusOptions _serviceBusOptions;
 
     private const string QueueName = "office-indexing";
@@ -53,6 +55,8 @@ public class IndexingWorkerHostedService : BackgroundService
         IJobStatusService jobStatusService,
         IProcessingJobService jobService,
         IFileIndexingService fileIndexingService,
+        IDocumentDataverseService documentService,
+        ISearchIndexNameResolver searchIndexNameResolver,
         IOptions<ServiceBusOptions> serviceBusOptions)
     {
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
@@ -60,6 +64,8 @@ public class IndexingWorkerHostedService : BackgroundService
         _jobStatusService = jobStatusService ?? throw new ArgumentNullException(nameof(jobStatusService));
         _jobService = jobService ?? throw new ArgumentNullException(nameof(jobService));
         _fileIndexingService = fileIndexingService ?? throw new ArgumentNullException(nameof(fileIndexingService));
+        _documentService = documentService ?? throw new ArgumentNullException(nameof(documentService));
+        _searchIndexNameResolver = searchIndexNameResolver ?? throw new ArgumentNullException(nameof(searchIndexNameResolver));
         _serviceBusOptions = serviceBusOptions?.Value ?? throw new ArgumentNullException(nameof(serviceBusOptions));
     }
 
@@ -197,6 +203,9 @@ public class IndexingWorkerHostedService : BackgroundService
                         message.JobId,
                         result.ChunksIndexed,
                         result.Duration);
+
+                    if (payload.DocumentId != Guid.Empty)
+                        await StampSearchIndexAsync(payload.DocumentId.ToString(), args.CancellationToken);
                 }
 
                 await CompleteJobAsync(message.JobId, payload.DocumentId, args.CancellationToken);
@@ -229,6 +238,42 @@ public class IndexingWorkerHostedService : BackgroundService
         }
     }
 
+    /// <summary>
+    /// Task 041 (FR-40, AC3; review round 1 F1): stamp the index the file actually landed in, the single canonical default
+    /// (<see cref="ISearchIndexNameResolver.GetDefaultIndexName"/>), as <c>RagIndexingJobHandler</c> does. A failed stamp is
+    /// logged and never fails the job: indexing succeeded.
+    /// </summary>
+    private async Task StampSearchIndexAsync(string documentId, CancellationToken ct)
+    {
+        try
+        {
+            var completedAt = DateTime.UtcNow;
+            var stampedIndexName = _searchIndexNameResolver.GetDefaultIndexName();
+            var updateRequest = new UpdateDocumentRequest
+            {
+                // New canonical lifecycle marker (R3+)
+                SearchIndexCompletedOn = completedAt,
+                // Legacy dual-write (preserved during transition)
+                SearchIndexed = true,
+                SearchIndexedOn = completedAt,
+                // Index routing (canonical single setting per FR-26)
+                SearchIndexName = stampedIndexName
+            };
+
+            await _documentService.UpdateDocumentAsync(documentId, updateRequest, ct);
+
+            _logger.LogInformation(
+                "Updated Dataverse search index tracking for document {DocumentId}: SearchIndexCompletedOn={CompletedAt}, SearchIndexed=true (dual-write), IndexName={IndexName}",
+                documentId, completedAt, stampedIndexName);
+        }
+        catch (Exception ex)
+        {
+            // Log but don't fail - indexing succeeded, Dataverse update is non-critical
+            _logger.LogWarning(ex,
+                "Failed to update Dataverse search index tracking for document {DocumentId}: {Error}. Indexing was successful.",
+                documentId, ex.Message);
+        }
+    }
     private Task ProcessErrorAsync(ProcessErrorEventArgs args)
     {
         _logger.LogError(
