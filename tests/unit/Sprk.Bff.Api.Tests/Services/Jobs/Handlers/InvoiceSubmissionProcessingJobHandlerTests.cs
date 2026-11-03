@@ -17,6 +17,7 @@ using Sprk.Bff.Api.Services.Jobs;
 using Sprk.Bff.Api.Services.Jobs.Handlers;
 using Sprk.Bff.Api.Services.Signals;
 using Sprk.Bff.Api.Tests.Finance.Files;
+using Sprk.Bff.Api.Tests.Services.Finance.Submission;
 using Xunit;
 
 namespace Sprk.Bff.Api.Tests.Services.Jobs.Handlers;
@@ -307,6 +308,9 @@ public sealed class InvoiceSubmissionProcessingJobHandlerTests
         public Locks Locks { get; } = new();
         public RecordingLog Log { get; } = new();
 
+        /// <summary>Task 095b: the submitter's bell (the REAL notifier and notification writer over a Dataverse double); what it holds is what the person was told.</summary>
+        public SubmissionBellWorld Bell { get; } = new(SubmissionId);
+
         /// <summary>Every submission update, in order.</summary>
         public List<Dictionary<string, object>> Writes { get; } = [];
         public List<string> Events { get; } = [];
@@ -444,6 +448,7 @@ public sealed class InvoiceSubmissionProcessingJobHandlerTests
                 Persister,
                 After,
                 sink.Object,
+                Bell.Build(),
                 Locks,
                 Mock.Of<IOptionsMonitor<EbillingOptions>>(m => m.CurrentValue == new EbillingOptions { Enabled = Enabled }),
                 Files.Service,
@@ -1946,5 +1951,161 @@ public sealed class InvoiceSubmissionProcessingJobHandlerTests
 
         faulting.Log.Entries.Where(e => e.Level == LogLevel.Error).Select(e => e.Message).Should()
             .OnlyContain(m => m.Contains(SubmissionId.ToString()) && !m.Contains("INV-100"), "a fault is logged by its type and our code, not its message");
+    }
+
+    // ── 095b: the submitter's bell (owner 2026-11-03). Exactly once = only the delivery that wrote the final status calls the notifier ──
+
+    [Fact(DisplayName = "095b: Accepted - the after-steps wrote the terminal status, so the submitter is told once, linking to the invoice")]
+    public async Task Completed_TellsTheSubmitterOnce_LinkingToTheInvoice()
+    {
+        var rig = new Rig().HappyPath();
+
+        var outcome = await rig.Build().ProcessAsync(Job(), CancellationToken.None);
+
+        outcome.Status.Should().Be(JobStatus.Completed);
+        var bell = rig.Bell.Created.Should().ContainSingle().Subject;
+        bell.GetAttributeValue<string>("title").Should().Be("Invoice INV-100 accepted");
+        SubmissionBellWorld.ActionUrl(bell).Should().Contain($"etn=sprk_invoice&id={InvoiceId:D}");
+    }
+
+    [Fact(DisplayName = "095b: a rule refusal (Rejected terminal) tells the submitter once; the invoice exists, so the link opens it")]
+    public async Task CompletedRejected_TellsTheSubmitterOnce()
+    {
+        var rig = new Rig().HappyPath();
+        rig.After.Run = _ => Task.FromResult(AfterResult(SubmissionAfterStepsStatus.Completed) with { TerminalStatus = InvoiceSubmissionStatus.Rejected });
+
+        await rig.Build().ProcessAsync(Job(), CancellationToken.None);
+
+        var bell = rig.Bell.Created.Should().ContainSingle().Subject;
+        bell.GetAttributeValue<string>("title").Should().Be("Invoice INV-100 refused");
+        SubmissionBellWorld.ActionUrl(bell).Should().Contain($"etn=sprk_invoice&id={InvoiceId:D}");
+    }
+
+    [Fact(DisplayName = "095b: a document that could not be read (Rejected by the handler, no invoice) tells the submitter once, with no invoice link")]
+    public async Task RejectedUnreadable_TellsTheSubmitterOnce_WithoutAnInvoiceLink()
+    {
+        var rig = new Rig().HappyPath();
+        rig.Processor.Script = (_, _) => Task.FromResult(Outcome(SubmissionEvaluationKind.RejectedUnreadable, "invoice.read.unreadable"));
+
+        await rig.Build().ProcessAsync(Job(), CancellationToken.None);
+
+        var bell = rig.Bell.Created.Should().ContainSingle().Subject;
+        bell.GetAttributeValue<string>("title").Should().Be("Invoice INV-100 refused");
+        SubmissionBellWorld.ActionUrl(bell).Should().Contain("etn=sprk_invoicesubmission").And.NotContain("etn=sprk_invoice&");
+    }
+
+    [Fact(DisplayName = "095b: Failed (written by the handler) tells the submitter once; a Failed submission with no person tells nobody")]
+    public async Task Failed_TellsTheSubmitterOnce_AndNobodyWhenThereIsNoPerson()
+    {
+        var failing = new Rig().HappyPath();
+        failing.Processor.Script = (_, _) => Task.FromResult(Outcome(SubmissionEvaluationKind.Failed, "ai.invoice.disabled"));
+        var anonymous = new Rig().HappyPath();
+        anonymous.Bell.Submission.Attributes.Remove("sprk_createdbyperson");
+        anonymous.Processor.Script = (_, _) => Task.FromResult(Outcome(SubmissionEvaluationKind.Failed, "ai.invoice.disabled"));
+
+        await failing.Build().ProcessAsync(Job(), CancellationToken.None);
+        await anonymous.Build().ProcessAsync(Job(), CancellationToken.None);
+
+        failing.Bell.Created.Should().ContainSingle().Subject.GetAttributeValue<string>("title").Should().Be("Invoice INV-100 could not be processed");
+        anonymous.Bell.Created.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "095b: a transient fault tells nobody until the final delivery; then the submission is Failed and the submitter is told once")]
+    public async Task FinalDeliveryFailure_TellsTheSubmitter_EarlierDeliveriesDoNot()
+    {
+        var early = new Rig().HappyPath();
+        early.Processor.Script = (_, _) => throw new TimeoutException();
+        var last = new Rig().HappyPath();
+        last.Processor.Script = (_, _) => throw new TimeoutException();
+
+        await early.Build().ProcessAsync(Job(), CancellationToken.None);
+        await last.Build().ProcessAsync(FinalJob(), CancellationToken.None);
+
+        early.Bell.Created.Should().BeEmpty("the broker redelivers; the submission is not final");
+        last.StatusWrites.Should().Contain(w => w.Status == Failed);
+        last.Bell.Created.Should().ContainSingle();
+    }
+
+    [Theory(DisplayName = "095b: a job redelivered after the final status (a replay, or a dead-letter after Failed) tells nobody a second time")]
+    [InlineData(Accepted)]
+    [InlineData(Rejected)]
+    [InlineData(Failed)]
+    public async Task RedeliveryAfterTheFinalStatus_NeverNotifies(int status)
+    {
+        var rig = new Rig { Row = SubmissionRow(status, status == Failed ? null : InvoiceId) }.HappyPath();
+
+        var first = await rig.Build().ProcessAsync(Job(), CancellationToken.None);
+        var replay = await rig.Build().ProcessAsync(FinalJob(), CancellationToken.None);
+
+        first.Status.Should().Be(JobStatus.Completed);
+        replay.Status.Should().Be(JobStatus.Completed);
+        rig.Bell.Created.Should().BeEmpty("only the delivery that wrote the final status tells the submitter");
+    }
+
+    [Fact(DisplayName = "095b: after-steps that found the submission already final (AlreadyTerminal, written by someone else) tell nobody")]
+    public async Task CompletedAlreadyTerminal_TellsNobody()
+    {
+        var rig = new Rig { Row = SubmissionRow(Processing, InvoiceId) }.HappyPath();
+        rig.After.Resume = () => Task.FromResult(AfterResult(SubmissionAfterStepsStatus.Completed) with { AlreadyTerminal = true });
+
+        var outcome = await rig.Build().ProcessAsync(Job(), CancellationToken.None);
+
+        outcome.Status.Should().Be(JobStatus.Completed);
+        rig.Bell.Created.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "095b: the commit gate's Failed (an undone commit) tells the submitter once; its later compensation does not")]
+    public async Task GateUndo_TellsOnce_TheCompensationDoesNot()
+    {
+        var undone = new Rig().HappyPath();
+        undone.Persister.Script.Clear();
+        undone.Persister.Script.Add(_ => Task.FromResult(Persist(SubmissionPersistStatus.Undone, null, SubmissionReasonCodes.FileUnservable) with { UndoHeld = true }));
+        var row = SubmissionRow(Failed);
+        row[InvoiceSubmissionPersister.SubmissionReasonCode] = SubmissionReasonCodes.FileUnservable;
+        var compensation = new Rig { Row = row }.HappyPath();
+        compensation.Gate.Compensate = () => Task.FromResult(true);
+
+        await undone.Build().ProcessAsync(Job(), CancellationToken.None);
+        await compensation.Build().ProcessAsync(Job(), CancellationToken.None);
+
+        undone.Bell.Created.Should().ContainSingle().Subject.GetAttributeValue<string>("title").Should().Be("Invoice INV-100 could not be processed");
+        compensation.Bell.Created.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "095b: a linked submission left Processing (the after-steps Refused) is not final and tells nobody")]
+    public async Task LeftProcessing_TellsNobody()
+    {
+        var rig = new Rig { Row = SubmissionRow(Processing, InvoiceId) }.HappyPath();
+        rig.After.Resume = () => Task.FromResult(AfterResult(SubmissionAfterStepsStatus.Refused, SubmissionReasonCodes.StoredStateMismatch));
+
+        var outcome = await rig.Build().ProcessAsync(Job(), CancellationToken.None);
+
+        outcome.Status.Should().Be(JobStatus.Poisoned);
+        rig.Bell.Created.Should().BeEmpty();
+    }
+
+    // Seeded proof (task 095b): replace NotifyAsync's catch with a rethrow and both rows fail - the Accepted job would not complete and the Failed one would not Poison.
+    [Theory(DisplayName = "095b: NotificationService throws -> the submission still reaches its final status and the job completes exactly as before")]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task NotificationFault_NeverChangesTheOutcome(bool accepted)
+    {
+        var rig = new Rig().HappyPath();
+        rig.Bell.CreateFault = new InvalidOperationException("appnotification refused");
+        if (!accepted)
+        {
+            rig.Processor.Script = (_, _) => Task.FromResult(Outcome(SubmissionEvaluationKind.Failed, "ai.invoice.disabled"));
+        }
+
+        var outcome = await rig.Build().ProcessAsync(Job(), CancellationToken.None);
+
+        outcome.Status.Should().Be(accepted ? JobStatus.Completed : JobStatus.Poisoned);
+        if (!accepted)
+        {
+            rig.StatusWrites.Should().Contain((Failed, "ai.invoice.disabled"), "the Failed status was written before, and regardless of, the notification");
+        }
+
+        rig.Bell.Created.Should().BeEmpty();
+        rig.Bell.Log.Entries.Should().ContainSingle(e => e.Level == LogLevel.Warning && e.Event == SubmissionOutcomeNotifierEvents.BellNotCreated);
     }
 }

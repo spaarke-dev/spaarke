@@ -95,6 +95,8 @@ public sealed class InvoiceSubmissionProcessingFlowTests
         public List<(Guid Signal, Guid Record)> Closes { get; } = [];
         public Dictionary<string, Entity> Signals { get; } = new(StringComparer.Ordinal);
         public List<SubmissionDecidedNotification> Notified { get; } = [];
+        /// <summary>Task 095b: every appnotification (bell) created, as the real notifier wrote it over this Dataverse double.</summary>
+        public List<Entity> Bells { get; } = [];
         public List<int> StatusHistory { get; } = [];
         public Locks Locks { get; } = new();
 
@@ -128,6 +130,12 @@ public sealed class InvoiceSubmissionProcessingFlowTests
                 .ReturnsAsync((string entity, Guid id, string[] columns, CancellationToken _) => entity == FinanceBaseValues.SubmissionEntity
                     ? ReadSubmission(columns)
                     : new Entity(entity, id) { [RegardingRecordType.GetPrimaryNameField(entity)!] = "Acme v. Roe", ["sprk_matternumber"] = "M-1" });
+            Entities.Setup(e => e.CreateAsync(It.Is<Entity>(x => x.LogicalName == "appnotification"), It.IsAny<CancellationToken>()))
+                .Returns((Entity bell, CancellationToken _) =>
+                {
+                    Bells.Add(bell);
+                    return Task.FromResult(Guid.NewGuid());
+                });
             Entities.Setup(e => e.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync((QueryExpression q, CancellationToken _) => q.EntityName switch
                 {
@@ -240,6 +248,10 @@ public sealed class InvoiceSubmissionProcessingFlowTests
                 persister,
                 after,
                 BuildSink(),
+                new SubmissionOutcomeNotifier(
+                    Entities.Object,
+                    new Sprk.Bff.Api.Services.NotificationService(Entities.Object, NullLogger<Sprk.Bff.Api.Services.NotificationService>.Instance),
+                    NullLogger<SubmissionOutcomeNotifier>.Instance),
                 Locks,
                 Mock.Of<IOptionsMonitor<EbillingOptions>>(m => m.CurrentValue == new EbillingOptions { Enabled = Enabled }),
                 Files.Service,
@@ -747,5 +759,72 @@ public sealed class InvoiceSubmissionProcessingFlowTests
         flow.RecordCreates.Should().Be(1, "exactly one record call");
         flow.Notified.Should().ContainSingle();
         flow.Locks.Held.Should().BeEmpty("the owner released the lock");
+    }
+
+    // ── 095b: the submitter's bell, end to end over the REAL after-steps ──
+
+    [Fact(DisplayName = "095b: Accepted - one bell for the submitter after the terminal status is written, linking to the invoice; a redelivery and a replay add none")]
+    public async Task Accepted_TellsTheSubmitterOnce_ARedeliveryAddsNone()
+    {
+        var flow = new Flow(Aged((int)BillingConsequence.Flag));
+        var job = Job();
+
+        await flow.BuildHandler().ProcessAsync(job, CancellationToken.None);
+        flow.Status.Should().Be((int)InvoiceSubmissionStatus.Accepted);
+        var bell = flow.Bells.Should().ContainSingle().Subject;
+        bell.GetAttributeValue<EntityReference>("ownerid").Id.Should().Be(Submitter);
+        bell.GetAttributeValue<string>("title").Should().Be("Invoice INV-100 accepted");
+        System.Text.Json.JsonDocument.Parse(bell.GetAttributeValue<string>("data")!).RootElement.GetProperty("actionUrl").GetString()
+            .Should().Contain($"etn=sprk_invoice&id={InvoiceId:D}");
+
+        await flow.BuildHandler().ProcessAsync(job, CancellationToken.None);
+        await flow.BuildHandler().ProcessAsync(Job(), CancellationToken.None);
+
+        flow.Bells.Should().ContainSingle("the redelivery and the replay find Accepted at step 0");
+    }
+
+    [Fact(DisplayName = "095b: a crash before the terminal status tells nobody; the resume that writes it tells the submitter once, and a later delivery adds none")]
+    public async Task ResumeThatWritesTheTerminal_TellsOnce()
+    {
+        var flow = AgedLineRejecting();
+        flow.CrashAtSignalWrite = 0;
+        var job = Job();
+
+        await flow.BuildHandler().ProcessAsync(job, CancellationToken.None);
+        flow.Bells.Should().BeEmpty("the submission is not final yet");
+
+        await flow.BuildHandler().ProcessAsync(job, CancellationToken.None);
+        flow.Status.Should().Be((int)InvoiceSubmissionStatus.Rejected);
+        flow.Bells.Should().ContainSingle().Subject.GetAttributeValue<string>("title").Should().Be("Invoice INV-100 refused");
+
+        await flow.BuildHandler().ProcessAsync(job, CancellationToken.None);
+
+        flow.Bells.Should().ContainSingle();
+    }
+
+    [Fact(DisplayName = "095b: Failed after the last delivery - one bell with no invoice link; a replay of the dead-lettered message adds none")]
+    public async Task FailedAfterTheLastDelivery_TellsOnce_TheReplayAddsNone()
+    {
+        var flow = new Flow
+        {
+            TransactionFault = new DataverseTransactionException("line refused", failedRequestIndex: 1, outcomeUnknown: false, null),
+        };
+
+        var early = await flow.BuildHandler().ProcessAsync(Job(), CancellationToken.None);
+        early.Status.Should().Be(JobStatus.Failed);
+        flow.Bells.Should().BeEmpty("the broker redelivers; the submission is not final");
+
+        var last = await flow.BuildHandler().ProcessAsync(FinalJob(), CancellationToken.None);
+        last.Status.Should().Be(JobStatus.Poisoned);
+        flow.Status.Should().Be((int)InvoiceSubmissionStatus.Failed);
+        var bell = flow.Bells.Should().ContainSingle().Subject;
+        bell.GetAttributeValue<string>("title").Should().Be("Invoice INV-100 could not be processed");
+        System.Text.Json.JsonDocument.Parse(bell.GetAttributeValue<string>("data")!).RootElement.GetProperty("actionUrl").GetString()
+            .Should().Contain("etn=sprk_invoicesubmission").And.NotContain("etn=sprk_invoice&");
+
+        var replay = await flow.BuildHandler().ProcessAsync(FinalJob(), CancellationToken.None);
+
+        replay.Status.Should().Be(JobStatus.Completed, "a Failed submission is a no-op on replay");
+        flow.Bells.Should().ContainSingle();
     }
 }
