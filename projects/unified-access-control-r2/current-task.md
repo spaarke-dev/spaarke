@@ -38,7 +38,7 @@
   4. it stays out of the family, lineage and resolver lists.
 
   Owner decision (through ebilling): whether a submission reader may see the lookup name of a Restricted .eml, the same class as `sprk_document`. Waiting for: the column after-notice, then the 095a PR review.
-- **PR #2530** (Office Add In User billing reads plus `sprk_trackingnumber` in source): the role part is OK from me, and the dev role was read back; waiting on ontology's approval and the merge SHA.
+- **PR #2530** (Office Add In User billing reads plus `sprk_trackingnumber` in source): the role part is OK from me, and the dev role was read back. MERGED to master at 1571b0be9d (2026-11-03); src identical to the reviewed head 7a33014d9c.
 - **K3, the Office Add In User role (root 9e6af7ee; the 5 BU copies inherit it):** the owner is granting Read on the billing tables: billingexport and billingevent at Deep; billingcode, billingcodeset, ebillingsetting and ebillingoverride at Global. That matches Basic User and Core User, plus the override table, which holds only a name. It was NOT saved as of 14:00Z: I must re-check it with RetrieveRolePrivilegesRole. Source `src/dataverse/solutions/SpaarkeMaster/Roles/Spaarke Office Add In User.xml` needs the same privileges; that's ebilling's PR, and I review it.
 
 ## Parked (verify state)
