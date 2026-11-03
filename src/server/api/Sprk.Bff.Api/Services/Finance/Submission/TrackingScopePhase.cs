@@ -125,13 +125,22 @@ internal sealed class TrackingScopePhaseCache
     private readonly SemaphoreSlim _gate = new(1, 1);
     private int _phase = (int)TrackingScopePhase.P0NoScopeColumn;
     private long _readAtUtcTicks; // 0: never read
+    private long _readsStarted;
 
     internal TrackingScopePhaseCache(TimeProvider clock) => _clock = clock ?? throw new ArgumentNullException(nameof(clock));
 
+    /// <summary>
+    /// How many reads have been started. A caller that the platform refused takes this at the refusal and passes it as
+    /// <c>refusedAtRead</c>: a read that started after that point already shows the schema the refusal came from.
+    /// </summary>
+    internal long ReadsStarted => Volatile.Read(ref _readsStarted);
+
     /// <summary>The phase now: the cached one while it is fresh (or P2), else <paramref name="read"/>'s answer, never lower than the cached one.
-    /// With <paramref name="force"/> the read is made even while the cached phase is fresh (still never once P2 is reached).</summary>
+    /// With <paramref name="force"/> the read is made even while the cached phase is fresh (still never once P2 is reached), unless
+    /// <paramref name="refusedAtRead"/> is given and a read started after it: callers queued behind one forced read then share its answer
+    /// (one metadata read, not one per caller).</summary>
     internal async Task<TrackingScopePhase> GetAsync(
-        Func<CancellationToken, Task<TrackingScopePhase?>> read, bool force, CancellationToken ct)
+        Func<CancellationToken, Task<TrackingScopePhase?>> read, bool force, CancellationToken ct, long? refusedAtRead = null)
     {
         if (Current == TrackingScopePhase.P2ScopeKeyActive || (!force && IsFresh()))
         {
@@ -146,6 +155,13 @@ internal sealed class TrackingScopePhaseCache
                 return Current;
             }
 
+            if (force &&refusedAtRead is { } at && Volatile.Read(ref _readsStarted) > at)
+            {
+                // Reads are serial (this gate), so none is in flight: a read that started after this caller's refusal has completed.
+                return Current;
+            }
+
+            Interlocked.Increment(ref _readsStarted);
             if (await read(ct).ConfigureAwait(false) is { } seen && seen > Current)
             {
                 Volatile.Write(ref _phase, (int)seen);
