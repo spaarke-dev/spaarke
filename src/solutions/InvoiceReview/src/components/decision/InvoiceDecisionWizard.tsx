@@ -54,8 +54,8 @@ export interface InvoiceDecisionWizardProps {
   approval: ApprovalState;
   api: InvoiceDecisionApi;
   invoiceId: string;
-  /** Re-read the review after the decision (the page shows the server's state). */
-  reload: () => Promise<unknown>;
+  /** Re-read the review after the decision (the page shows the server's state); null when the re-read failed. */
+  reload: () => Promise<InvoiceReview | null>;
   /** Re-read the approval state after the decision. */
   refreshApproval: () => Promise<unknown>;
   notifyStep?: NotifyStep;
@@ -157,9 +157,11 @@ export function InvoiceDecisionWizard(props: InvoiceDecisionWizardProps) {
     const result =
       outcome === 'approve' ? await a.approve(id) : outcome === 'reject' ? await a.reject(id, f.reason.trim()) : await a.returnToFirm(id, f.reason.trim());
     if (!result.ok) {
-      // Part of the change may be saved (503 incomplete): show the server's state, then the message tells the user to repeat. Any other
-      // refusal (403, 409, a validation code) changes nothing on the page; the message carries the server's detail and its code.
-      if (isDecisionIncomplete(result.failure)) await Promise.all([refreshApproval(), reload()]);
+      // Part of the change may be saved (503 incomplete): show the server's state, then the message tells the user to repeat. A 409
+      // (already decided, approval changed, corrections pending) means the page and the approval are out of date: re-read both so
+      // the page shows what the server holds. Any other refusal (403, a validation code) changes nothing; the message carries the
+      // server's detail and its code.
+      if (isDecisionIncomplete(result.failure) || result.failure.status === 409) await Promise.all([refreshApproval(), reload()]);
       throw new Error(decisionFailureMessage(result.failure));
     }
     await Promise.all([refreshApproval(), reload()]);

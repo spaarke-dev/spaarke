@@ -32,6 +32,7 @@ import {
 import { FormModal, type IWizardShellHandle } from '@spaarke/ui-components';
 import {
   decisionFailureMessage,
+  isDecisionIncomplete,
   newAdjustmentId,
   type AdjustmentMethod,
   type AdjustmentRule,
@@ -155,6 +156,8 @@ function ruleLabel(r: AdjustmentRule): string {
   return `${r.headline ?? r.policyCode}${where ? ` (${where})` : ''}`;
 }
 
+const REREAD_FAILED = 'The totals could not be read back from the server, so the page may show old figures.';
+
 export function AdjustStep() {
   const s = useStyles();
   const { form, set, readOnly, review, api, invoiceId, reload } = useWiz();
@@ -205,15 +208,27 @@ export function AdjustStep() {
     });
     if (!alive.current) return;
     if (r.ok) {
-      // The server computed the amount and stored the totals; the page re-reads them.
-      adjustmentId.current = newAdjustmentId();
-      setRepeatable(false);
-      set({ adjValue: '', adjReason: '', adjRule: '' });
-      await reload();
+      // The server computed the amount and stored the totals; the page re-reads them and shows what the re-read returns.
+      const fresh = await reload();
       if (!alive.current) return;
+      if (fresh) {
+        adjustmentId.current = newAdjustmentId();
+        setRepeatable(false);
+        set({ adjValue: '', adjReason: '', adjRule: '' });
+      } else {
+        // Saved, but the page is not showing the server's totals. The form stays, locked, with the same id: Repeat answers "already applied"
+        // and re-reads, so nothing is added twice and a new id is never minted over a saved adjustment.
+        setError(`${REREAD_FAILED} Repeat to read them again; nothing is added twice.`);
+        setRepeatable(true);
+      }
     } else {
       setError(decisionFailureMessage(r.failure));
-      // A 503 where the line was written but the totals were not: the same request, with the same id, finishes it.
+      // A 503 where the line was written but the totals were not: the same request, with the same id, finishes it. Show the server's state
+      // first (the page still shows the old totals), as 110's writes do.
+      if (isDecisionIncomplete(r.failure)) {
+        await reload();
+        if (!alive.current) return;
+      }
       setRepeatable(r.failure.status === 503);
     }
     setBusy(false);
@@ -225,11 +240,15 @@ export function AdjustStep() {
     setRemoveError(null);
     const r = await api.removeAdjustment(invoiceId, removing.id);
     if (!alive.current) return;
-    setRemoveBusy(false);
     if (r.ok) {
-      setRemoving(null);
-      await reload();
+      const fresh = await reload();
+      if (!alive.current) return;
+      setRemoveBusy(false);
+      // A failed re-read leaves the list as it was: the form stays open and says so; Remove again answers "already applied" and re-reads.
+      if (fresh) setRemoving(null);
+      else setRemoveError(`The adjustment was removed. ${REREAD_FAILED} Remove again to read them again; nothing is removed twice.`);
     } else {
+      setRemoveBusy(false);
       setRemoveError(decisionFailureMessage(r.failure));
     }
   };
@@ -261,7 +280,7 @@ export function AdjustStep() {
 
       {!readOnly && (
         <>
-          <RadioGroup layout="horizontal" value={form.adjMethod} onChange={(_, d) => set({ adjMethod: d.value as AdjustmentMethod })} aria-label="Adjustment type">
+          <RadioGroup layout="horizontal" disabled={repeatable} value={form.adjMethod} onChange={(_, d) => set({ adjMethod: d.value as AdjustmentMethod })} aria-label="Adjustment type">
             <Radio value="percent" label="Percent of fees" />
             <Radio value="fixed" label="Fixed amount" />
           </RadioGroup>
@@ -269,6 +288,7 @@ export function AdjustStep() {
             <Field label={form.adjMethod === 'percent' ? 'Percent' : 'Amount'} validationMessage={valueError ?? undefined} validationState={valueError ? 'error' : 'none'}>
               <Input
                 type="number"
+                disabled={repeatable}
                 value={form.adjValue}
                 onChange={(_, d) => set({ adjValue: d.value })}
                 contentAfter={form.adjMethod === 'percent' ? '%' : undefined}
@@ -278,6 +298,7 @@ export function AdjustStep() {
             <Field label="Rule (optional)" hint={rulesUnavailable ? 'The rule list is not available; you can still add the adjustment without a rule.' : undefined}>
               <Dropdown
                 aria-label="Adjustment rule"
+                disabled={repeatable}
                 value={rules?.find(r => r.ruleId === form.adjRule) ? ruleLabel(rules.find(r => r.ruleId === form.adjRule)!) : 'No rule'}
                 selectedOptions={[form.adjRule]}
                 onOptionSelect={(_, d) => set({ adjRule: d.optionValue ?? '' })}
@@ -292,7 +313,7 @@ export function AdjustStep() {
             </Field>
           </div>
           <Field label="Reason" required={form.adjValue.trim() !== ''}>
-            <Textarea value={form.adjReason} onChange={(_, d) => set({ adjReason: d.value })} resize="vertical" aria-label="Adjustment reason" maxLength={REASON_MAX} />
+            <Textarea value={form.adjReason} disabled={repeatable} onChange={(_, d) => set({ adjReason: d.value })} resize="vertical" aria-label="Adjustment reason" maxLength={REASON_MAX} />
           </Field>
           {error && (
             <MessageBar intent="error" layout="multiline" data-testid="adjustment-error">

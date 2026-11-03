@@ -151,7 +151,7 @@ function Root() {
       </div>
     );
   } else {
-    body = <InvoiceReviewWithDecisions invoiceId={launch.invoiceId} api={api} decisionApi={decisionApi}openRecord={openRecord} />;
+    body = <InvoiceReviewWithDecisions invoiceId={launch.invoiceId} api={api} decisionApi={decisionApi} openRecord={openRecord} />;
   }
 
   // The FluentProvider carries only the theme; the surface colours sit on a wrapper div (project gotcha F-10).

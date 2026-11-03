@@ -316,12 +316,19 @@ export interface RelatedWork {
  */
 export const INCOMPLETE_CODES: ReadonlySet<string> = new Set([
   'ebilling.approval.incomplete',
+  // The bulk accept of an approve stopped after some lines were written (InvoiceApprovalService.FromLineResult).
+  'ebilling.decision.incomplete',
   'ebilling.invoice.decision_incomplete',
   'ebilling.adjustment.incomplete',
   'ebilling.blocked.unavailable',
 ]);
 
-export const isDecisionIncomplete = (f: ApiFailure): boolean => f.status === 503 && f.errorCode !== null && INCOMPLETE_CODES.has(f.errorCode);
+/**
+ * A 503 that saved part of the change: one of the documented codes, or any 503 that names the step it stopped at or the lines it committed
+ * (the approve route answers those with the line service's own code, so the list alone would miss a code it does not know yet).
+ */
+export const isDecisionIncomplete = (f: ApiFailure): boolean =>
+  f.status === 503 && ((f.errorCode !== null && INCOMPLETE_CODES.has(f.errorCode)) || f.failedStep !== null || f.committedLineIds.length > 0);
 
 /**
  * The sentence shown for a refused decision step. The server's `detail` is its own explanation (ADR-019) and is shown as is, followed by the

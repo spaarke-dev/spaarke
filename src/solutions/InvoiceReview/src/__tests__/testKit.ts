@@ -3,6 +3,8 @@
  * (InvoiceReviewReadService.cs, InvoiceLineDecisionService.cs, InvoiceCorrectionService.cs).
  */
 
+import * as fs from 'fs';
+import * as path from 'path';
 import { ApiError, AuthError } from '@spaarke/auth';
 import type {
   ApiResult,
@@ -28,6 +30,14 @@ export const ok = <T>(value: T): ApiResult<T> => ({ ok: true, value });
 /** An `ApiError` as `authenticatedFetch` throws it, with a ProblemDetails body. */
 export function problem(status: number, errorCode: string | null, extra: Record<string, unknown> = {}): ApiError {
   return new ApiError(`HTTP ${status}`, status, { status, title: 'x', errorCode, ...extra } as never);
+}
+
+/**
+ * A 403 as ProblemDetailsHelper.Forbidden answers it: the stable code is under `reasonCode`, not `errorCode` (a hand-built 403 with
+ * `errorCode` would hide the page's code-reading bug).
+ */
+export function forbidden(reasonCode: string, extra: Record<string, unknown> = {}): ApiError {
+  return new ApiError('HTTP 403', 403, { status: 403, title: 'Forbidden', reasonCode, ...extra } as never);
 }
 
 export function failed<T>(err: unknown): ApiResult<T> {
@@ -328,6 +338,18 @@ export function mockDecisionApi(initial: ApprovalState = approval()): MockDecisi
       })
     ),
   };
+}
+
+/**
+ * Every `.ts` / `.tsx` source file of the page (tests excluded). The colour-literal guard of task 110 and the source guards of task 111
+ * walk the page with THIS function, so a folder added later is covered by the guard that already exists, not by a copy of its walker.
+ */
+export function listSourceFiles(dir: string = path.resolve(__dirname, '..')): string[] {
+  return fs.readdirSync(dir, { withFileTypes: true }).flatMap(e => {
+    const p = path.join(dir, e.name);
+    if (e.isDirectory()) return e.name === '__tests__' ? [] : listSourceFiles(p);
+    return /\.(ts|tsx)$/.test(e.name) ? [p] : [];
+  });
 }
 
 export { ApiError, AuthError };

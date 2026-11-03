@@ -2,7 +2,7 @@ import '@testing-library/jest-dom';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as React from 'react';
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { FluentProvider, webDarkTheme, webLightTheme } from '@fluentui/react-components';
 import { InvoiceReviewWithDecisions } from '../components/InvoiceReviewWithDecisions';
 import type { ApprovalState } from '../services/decisionApi';
@@ -15,10 +15,12 @@ import {
   decisionRecord,
   failed,
   flagged,
+  forbidden,
   heldReview,
   invoiceContext,
   line,
   lineId,
+  listSourceFiles,
   mockApi,
   mockDecisionApi,
   ok,
@@ -119,6 +121,52 @@ describe('Awaiting approvers (header)', () => {
     expect(screen.getByTestId('review-title')).toBeInTheDocument();
     expect(screen.queryByTestId('decide-invoice')).not.toBeInTheDocument();
   });
+
+  it('retries a failed first read: Retry asks again and Decide invoice appears', async () => {
+    const decision = mockDecisionApi();
+    decision.getApproval.mockResolvedValueOnce(failed(problem(503, null)));
+    renderDecisions(clean(), decision);
+    expect(await screen.findByTestId('awaiting')).toHaveTextContent('Approvers are not available right now.');
+    expect(screen.queryByTestId('decide-invoice')).not.toBeInTheDocument();
+    // One read for one review signature: nothing asks again by itself.
+    expect(decision.getApproval).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getByTestId('awaiting-retry'));
+    expect(await screen.findByTestId('decide-invoice')).toBeInTheDocument();
+    expect(decision.getApproval).toHaveBeenCalledTimes(2);
+    expect(screen.getByTestId('awaiting')).toHaveTextContent('Awaiting: Pat Approver, Sam Second');
+    expect(screen.queryByTestId('awaiting-retry')).not.toBeInTheDocument();
+  });
+
+  it('does not keep the signature of a failed read: the next re-read of the same review asks again by itself', async () => {
+    jest.useFakeTimers();
+    try {
+      // Line 2 stays Processing, so every poll brings back a review with the SAME approval signature.
+      const pending = review([line(1), line(2, { status: 'Pending', statusLabel: 'Processing' })]);
+      const decision = mockDecisionApi();
+      decision.getApproval.mockResolvedValueOnce(failed(problem(503, null)));
+      const api = mockApi(pending);
+      // The server sends a new object on every read (the mock would hand back the same one, which React does not re-render).
+      api.getReview.mockImplementation(async () => ok(JSON.parse(JSON.stringify(pending)) as InvoiceReview));
+      render(
+        <FluentProvider theme={webLightTheme}>
+          <InvoiceReviewWithDecisions invoiceId={INVOICE_ID} api={api as never} decisionApi={decision as never} pollIntervalMs={1000} />
+        </FluentProvider>
+      );
+      await act(async () => {
+        await Promise.resolve();
+      });
+      expect(await screen.findByTestId('awaiting')).toHaveTextContent('Approvers are not available right now.');
+      expect(decision.getApproval).toHaveBeenCalledTimes(1);
+      await act(async () => {
+        jest.advanceTimersByTime(1000);
+      });
+      await waitFor(() => expect(decision.getApproval).toHaveBeenCalledTimes(2));
+      await waitFor(() => expect(screen.getByTestId('awaiting')).toHaveTextContent('Awaiting: Pat Approver, Sam Second'));
+    } finally {
+      jest.useRealTimers();
+    }
+  });
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -214,7 +262,8 @@ describe('Approve', () => {
 
   it('sends the chosen fixed amount and rule, and shows a refusal with its code without losing the form', async () => {
     const decision = mockDecisionApi();
-    decision.addAdjustment.mockResolvedValue(failed(problem(409, 'ebilling.adjustment.exceeds_fees', { detail: 'The adjustment is more than the fees.' })));
+    // InvoiceAdjustmentService: an adjustment that would take the invoice total below zero is a 400 negative_total.
+    decision.addAdjustment.mockResolvedValue(failed(problem(400, 'ebilling.adjustment.negative_total', { detail: 'The adjustment is more than the fees.' })));
     renderDecisions(clean(), decision);
     const d = await openWizard();
     fireEvent.click(next(d));
@@ -226,7 +275,7 @@ describe('Approve', () => {
     fireEvent.click(await screen.findByRole('option', { name: /Block billing/, hidden: true }));
     fireEvent.click(within(d).getByTestId('add-adjustment'));
 
-    expect(await within(d).findByTestId('adjustment-error')).toHaveTextContent('The adjustment is more than the fees. (ebilling.adjustment.exceeds_fees)');
+    expect(await within(d).findByTestId('adjustment-error')).toHaveTextContent('The adjustment is more than the fees. (ebilling.adjustment.negative_total)');
     expect(decision.addAdjustment).toHaveBeenCalledWith(INVOICE_ID, expect.objectContaining({ method: 'fixed', value: 9000, ruleId: 'r1' }));
     // Nothing changed: the typed values are still there and the totals are the old ones.
     expect(within(d).getByLabelText('Adjustment value')).toHaveValue(9000);
@@ -236,19 +285,120 @@ describe('Approve', () => {
   it('repeats a partly saved adjustment (503) with the same client id', async () => {
     const decision = mockDecisionApi();
     decision.addAdjustment.mockResolvedValueOnce(failed(problem(503, 'ebilling.adjustment.incomplete', { detail: 'The line was saved but the totals were not.' })));
-    renderDecisions(clean(), decision);
+    const { api } = renderDecisions(clean(), decision);
     const d = await openWizard();
     fireEvent.click(next(d));
     fireEvent.change(await within(d).findByLabelText('Adjustment value'), { target: { value: '5' } });
     fireEvent.change(within(d).getByLabelText('Adjustment reason'), { target: { value: 'Courtesy' } });
+    const reads = api.getReview.mock.calls.length;
     fireEvent.click(within(d).getByTestId('add-adjustment'));
 
     expect(await within(d).findByTestId('adjustment-error')).toHaveTextContent('repeat it to finish');
+    // The page shows the server's state (the line was written) before Repeat is offered.
+    expect(api.getReview.mock.calls.length).toBeGreaterThan(reads);
     const again = within(d).getByTestId('add-adjustment');
     expect(again).toHaveTextContent('Repeat');
     fireEvent.click(again);
     await waitFor(() => expect(decision.addAdjustment).toHaveBeenCalledTimes(2));
     expect(decision.addAdjustment.mock.calls[1][1].adjustmentId).toBe(decision.addAdjustment.mock.calls[0][1].adjustmentId);
+  });
+
+  const fillAdjustment = async (d: HTMLElement) => {
+    fireEvent.click(next(d));
+    fireEvent.change(await within(d).findByLabelText('Adjustment value'), { target: { value: '5' } });
+    fireEvent.change(within(d).getByLabelText('Adjustment reason'), { target: { value: 'Courtesy' } });
+  };
+  const adjusted = () => {
+    const adj = line(90, { type: 'Adjustment', amount: -250, status: 'Accepted', statusLabel: 'Accepted', reason: 'Courtesy', approvedAmount: -250 });
+    const base = clean();
+    return review([line(1), line(2), adj], { totals: { ...base.totals, invoiceAdjustments: -250, approved: 4750 } });
+  };
+
+  it('after a 503 incomplete the page shows the re-read totals, and Skip goes to a Confirm step with them', async () => {
+    const decision = mockDecisionApi();
+    decision.addAdjustment.mockResolvedValueOnce(failed(problem(503, 'ebilling.adjustment.incomplete', { detail: 'The line was saved but the totals were not.' })));
+    // The first read is the clean invoice; the re-read after the 503 shows the adjustment the server did write.
+    renderDecisions([clean(), adjusted()], decision);
+    const d = await openWizard();
+    await fillAdjustment(d);
+    fireEvent.click(within(d).getByTestId('add-adjustment'));
+
+    expect(await within(d).findByTestId('adjustment-error')).toHaveTextContent('repeat it to finish');
+    await waitFor(() => expect(within(d).getByTestId('wizard-approved')).toHaveTextContent('4,750.00'));
+    expect(within(d).getByTestId(`adjustment-${lineId(90)}`)).toHaveTextContent('Courtesy');
+
+    fireEvent.click(within(d).getByRole('button', { name: 'Skip', hidden: true }));
+    expect(await within(d).findByTestId('confirm-invoice-adj')).toHaveTextContent('Courtesy');
+    expect(within(d).getByTestId('confirm-approved')).toHaveTextContent('4,750.00');
+    expect(finishBtn(d, /Approve .*4,750\.00 & record/)).toBeEnabled();
+  });
+
+  it('locks the adjustment inputs while Repeat shows, so an edit cannot resend the same id with other content', async () => {
+    const decision = mockDecisionApi();
+    decision.addAdjustment.mockResolvedValueOnce(failed(problem(503, 'ebilling.adjustment.incomplete', { detail: 'The line was saved but the totals were not.' })));
+    renderDecisions(clean(), decision);
+    const d = await openWizard();
+    await fillAdjustment(d);
+    // Before the failure the inputs are editable.
+    expect(within(d).getByLabelText('Adjustment value')).toBeEnabled();
+    fireEvent.click(within(d).getByTestId('add-adjustment'));
+
+    await waitFor(() => expect(within(d).getByTestId('add-adjustment')).toHaveTextContent('Repeat'));
+    expect(within(d).getByLabelText('Adjustment value')).toBeDisabled();
+    expect(within(d).getByLabelText('Adjustment reason')).toBeDisabled();
+    expect(within(d).getByLabelText('Adjustment rule')).toBeDisabled();
+    expect(within(d).getByRole('radio', { name: 'Percent of fees', hidden: true })).toBeDisabled();
+    expect(within(d).getByRole('radio', { name: 'Fixed amount', hidden: true })).toBeDisabled();
+    // Clear is the way out: it drops the unsent form and mints a new id.
+    fireEvent.click(within(d).getByRole('button', { name: 'Clear', hidden: true }));
+    await waitFor(() => expect(within(d).getByLabelText('Adjustment value')).toBeEnabled());
+    expect(within(d).getByTestId('add-adjustment')).toHaveTextContent('Add adjustment');
+  });
+
+  it('shows an error inside the step, keeps the form and the same id, and adds nothing twice, when an add is saved but its re-read fails', async () => {
+    const decision = mockDecisionApi();
+    const { api } = renderDecisions(clean(), decision);
+    const d = await openWizard();
+    await fillAdjustment(d);
+    // The add succeeds (200); the re-read of the review that follows fails.
+    api.getReview.mockResolvedValueOnce(failed(problem(503, null)));
+    fireEvent.click(within(d).getByTestId('add-adjustment'));
+
+    expect(await within(d).findByTestId('adjustment-error')).toHaveTextContent('could not be read back from the server');
+    // Not a cleared form: the typed values stay, locked, and the button is a Repeat of the same request.
+    expect(within(d).getByLabelText('Adjustment value')).toHaveValue(5);
+    expect(within(d).getByLabelText('Adjustment value')).toBeDisabled();
+    expect(within(d).getByTestId('add-adjustment')).toHaveTextContent('Repeat');
+    expect(decision.addAdjustment).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(within(d).getByTestId('add-adjustment'));
+    await waitFor(() => expect(decision.addAdjustment).toHaveBeenCalledTimes(2));
+    // The repeat carries the same id (the server answers "already applied"), never a new one.
+    expect(decision.addAdjustment.mock.calls[1][1].adjustmentId).toBe(decision.addAdjustment.mock.calls[0][1].adjustmentId);
+    // The second re-read works: the form clears and the error goes.
+    await waitFor(() => expect(within(d).queryByTestId('adjustment-error')).not.toBeInTheDocument());
+    expect(within(d).getByLabelText('Adjustment value')).toHaveValue(null);
+    expect(within(d).getByTestId('add-adjustment')).toHaveTextContent('Add adjustment');
+  });
+
+  it('keeps the remove form open with an error when the removal is saved but the re-read fails', async () => {
+    const decision = mockDecisionApi();
+    const adj = line(90, { type: 'Adjustment', amount: -250, status: 'Accepted', statusLabel: 'Accepted', reason: 'Courtesy' });
+    const { api } = renderDecisions([review([line(1), adj]), review([line(1)])], decision);
+    const d = await openWizard();
+    fireEvent.click(next(d));
+    fireEvent.click(await within(d).findByTestId(`remove-adjustment-${lineId(90)}`));
+    const confirm = await screen.findByRole('dialog', { name: 'Remove adjustment', hidden: true });
+    api.getReview.mockResolvedValueOnce(failed(problem(503, null)));
+    fireEvent.click(within(confirm).getByRole('button', { name: 'Remove', hidden: true }));
+
+    expect(await within(confirm).findByTestId('remove-error')).toHaveTextContent('could not be read back from the server');
+    expect(decision.removeAdjustment).toHaveBeenCalledTimes(1);
+    // Remove again answers "already applied" and re-reads; the list then shows the server's state.
+    fireEvent.click(within(confirm).getByRole('button', { name: 'Remove', hidden: true }));
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Remove adjustment', hidden: true })).not.toBeInTheDocument());
+    await waitFor(() => expect(within(d).queryByTestId(`adjustment-${lineId(90)}`)).not.toBeInTheDocument());
+    expect(decision.removeAdjustment).toHaveBeenCalledTimes(2);
   });
 
   it('removes an adjustment after a confirm form, through route 102', async () => {
@@ -308,7 +458,7 @@ describe('Approve', () => {
 
   it('shows a 403 with its code and changes nothing on the page', async () => {
     const decision = mockDecisionApi();
-    decision.approve.mockResolvedValue(failed(problem(403, 'ebilling.approval.not_eligible', { detail: 'You are not an approver for this invoice.' })));
+    decision.approve.mockResolvedValue(failed(forbidden('ebilling.approver.not_eligible', { detail: 'You are not an approver for this invoice.' })));
     const { api } = renderDecisions(clean(), decision);
     const d = await openWizard();
     fireEvent.click(next(d));
@@ -318,7 +468,7 @@ describe('Approve', () => {
     const approvals = decision.getApproval.mock.calls.length;
     fireEvent.click(finishBtn(d, /Approve .*& record/));
 
-    expect(await within(d).findByRole('alert', { hidden: true })).toHaveTextContent('You are not an approver for this invoice. (ebilling.approval.not_eligible)');
+    expect(await within(d).findByRole('alert', { hidden: true })).toHaveTextContent('You are not an approver for this invoice. (ebilling.approver.not_eligible)');
     // Nothing changed client-side: still on the confirm step, no success screen, nothing re-read, the button still there.
     expect(within(d).getByTestId('confirm-decision')).toBeInTheDocument();
     expect(within(d).queryByTestId('wizard-done')).not.toBeInTheDocument();
@@ -327,18 +477,74 @@ describe('Approve', () => {
     expect(screen.getByTestId('decide-invoice')).toBeInTheDocument();
   });
 
-  it('shows a 409 (open lines) with its code, nothing re-read', async () => {
+  it('shows a 409 (open lines) with its code, and re-reads the page and the approval it is out of date with', async () => {
     const decision = mockDecisionApi();
-    decision.approve.mockResolvedValue(failed(problem(409, 'ebilling.approval.open_lines', { detail: '1 line still needs a decision.' })));
+    // InvoiceApprovalCodes.LinesOpen
+    decision.approve.mockResolvedValue(failed(problem(409, 'ebilling.approve.lines_open', { detail: '1 line still needs a decision.' })));
     const { api } = renderDecisions(clean(), decision);
     const d = await openWizard();
     fireEvent.click(next(d));
     fireEvent.click(await within(d).findByRole('button', { name: 'Skip', hidden: true }));
     await within(d).findByTestId('confirm-decision');
     const reads = api.getReview.mock.calls.length;
+    const approvals = decision.getApproval.mock.calls.length;
     fireEvent.click(finishBtn(d, /Approve .*& record/));
-    expect(await within(d).findByRole('alert', { hidden: true })).toHaveTextContent('1 line still needs a decision. (ebilling.approval.open_lines)');
-    expect(api.getReview.mock.calls.length).toBe(reads);
+    expect(await within(d).findByRole('alert', { hidden: true })).toHaveTextContent('1 line still needs a decision. (ebilling.approve.lines_open)');
+    // A 409 means the page or the approval changed under the wizard: both are re-read, and the wizard stays on the Confirm step.
+    await waitFor(() => expect(api.getReview.mock.calls.length).toBeGreaterThan(reads));
+    await waitFor(() => expect(decision.getApproval.mock.calls.length).toBeGreaterThan(approvals));
+    expect(within(d).getByTestId('confirm-decision')).toBeInTheDocument();
+    expect(within(d).queryByTestId('wizard-done')).not.toBeInTheDocument();
+  });
+
+  it.each([['ebilling.approval.already_decided'], ['ebilling.approval.changed'], ['ebilling.approval.corrections_pending']])(
+    're-reads the page and the approval on a 409 %s',
+    async code => {
+      const decision = mockDecisionApi();
+      decision.approve.mockResolvedValue(failed(problem(409, code, { detail: 'The invoice changed.' })));
+      const { api } = renderDecisions(clean(), decision);
+      const d = await openWizard();
+      fireEvent.click(next(d));
+      fireEvent.click(await within(d).findByRole('button', { name: 'Skip', hidden: true }));
+      await within(d).findByTestId('confirm-decision');
+      const reads = api.getReview.mock.calls.length;
+      const approvals = decision.getApproval.mock.calls.length;
+      fireEvent.click(finishBtn(d, /Approve .*& record/));
+      expect(await within(d).findByRole('alert', { hidden: true })).toHaveTextContent(`The invoice changed. (${code})`);
+      await waitFor(() => expect(api.getReview.mock.calls.length).toBeGreaterThan(reads));
+      await waitFor(() => expect(decision.getApproval.mock.calls.length).toBeGreaterThan(approvals));
+    }
+  );
+
+  it("treats the approve route's own 503 (ebilling.decision.incomplete, with failedStep) as saved in part: re-reads both and says so", async () => {
+    const decision = mockDecisionApi();
+    // What InvoiceApprovalService.FromLineResult answers when the bulk accept stopped after some lines were written.
+    decision.approve.mockResolvedValueOnce(
+      failed(
+        problem(503, 'ebilling.decision.incomplete', {
+          detail: 'Some of the clean lines were accepted.',
+          failedStep: 'accept-clean',
+          committedLineIds: [lineId(1)],
+        })
+      )
+    );
+    const { api } = renderDecisions(clean(), decision);
+    const d = await openWizard();
+    fireEvent.click(next(d));
+    fireEvent.click(await within(d).findByRole('button', { name: 'Skip', hidden: true }));
+    await within(d).findByTestId('confirm-decision');
+    const reads = api.getReview.mock.calls.length;
+    const approvals = decision.getApproval.mock.calls.length;
+    fireEvent.click(finishBtn(d, /Approve .*& record/));
+    const alert = await within(d).findByRole('alert', { hidden: true });
+    expect(alert).toHaveTextContent('Some of the clean lines were accepted. (ebilling.decision.incomplete)');
+    expect(alert).toHaveTextContent('It was saved in part: repeat it to finish.');
+    expect(api.getReview.mock.calls.length).toBeGreaterThan(reads);
+    expect(decision.getApproval.mock.calls.length).toBeGreaterThan(approvals);
+    // Finish again sends the same request.
+    fireEvent.click(finishBtn(d, /Approve .*& record/));
+    await waitFor(() => expect(decision.approve).toHaveBeenCalledTimes(2));
+    expect(await within(d).findByTestId('wizard-done')).toBeInTheDocument();
   });
 
   it('on a 503 that saved part of the approval, shows the server state and repeats the same request', async () => {
@@ -418,7 +624,7 @@ describe('Reject and Return to firm', () => {
     expect(await within(d).findByText('Returned to firm')).toBeInTheDocument();
   });
 
-  it('shows a refused reject (409 with its code) and changes nothing', async () => {
+  it('shows a refused reject (409 with its code), writes nothing and re-reads the page it is out of date with', async () => {
     const decision = mockDecisionApi();
     decision.reject.mockResolvedValue(failed(problem(409, 'ebilling.invoice.not_in_review', { detail: 'The invoice is no longer in review.' })));
     const { api } = renderDecisions(clean(), decision);
@@ -427,13 +633,13 @@ describe('Reject and Return to firm', () => {
     const reads = api.getReview.mock.calls.length;
     fireEvent.click(finishBtn(d, /^Reject & record$/));
     expect(await within(d).findByRole('alert', { hidden: true })).toHaveTextContent('The invoice is no longer in review. (ebilling.invoice.not_in_review)');
-    expect(api.getReview.mock.calls.length).toBe(reads);
+    await waitFor(() => expect(api.getReview.mock.calls.length).toBeGreaterThan(reads));
     expect(within(d).queryByTestId('wizard-done')).not.toBeInTheDocument();
   });
 
   it('shows a refused return without a detail as a fixed sentence with the code (403)', async () => {
     const decision = mockDecisionApi();
-    decision.returnToFirm.mockResolvedValue(failed(problem(403, 'ebilling.approval.not_eligible')));
+    decision.returnToFirm.mockResolvedValue(failed(forbidden('ebilling.approver.not_eligible')));
     renderDecisions(clean(), decision);
     const d = await openWizard();
     fireEvent.click(radio(d, /^Return to firm/));
@@ -442,7 +648,7 @@ describe('Reject and Return to firm', () => {
     fireEvent.click(next(d));
     await within(d).findByTestId('confirm-decision');
     fireEvent.click(finishBtn(d, /^Return to firm & record$/));
-    expect(await within(d).findByRole('alert', { hidden: true })).toHaveTextContent('You do not have permission to do this. (ebilling.approval.not_eligible)');
+    expect(await within(d).findByRole('alert', { hidden: true })).toHaveTextContent('You do not have permission to do this. (ebilling.approver.not_eligible)');
   });
 
   it('has no notify step unless one is supplied', async () => {
@@ -631,7 +837,7 @@ describe('the blocked-submission view', () => {
 
   it('shows a refused override (403 with its code) in the form and changes nothing', async () => {
     const decision = mockDecisionApi(held());
-    decision.overrideBlocked.mockResolvedValue(failed(problem(403, 'ebilling.override.privilege_required', { detail: 'Overriding needs the eBilling Override privilege.' })));
+    decision.overrideBlocked.mockResolvedValue(failed(forbidden('ebilling.blocked.not_authorized', { detail: 'Overriding needs the eBilling Override privilege.' })));
     const { api } = renderDecisions(heldReview(), decision);
     fireEvent.click(await screen.findByTestId('override-block'));
     const dialog = await screen.findByRole('dialog', { name: 'Override the block', hidden: true });
@@ -639,7 +845,7 @@ describe('the blocked-submission view', () => {
     const reads = api.getReview.mock.calls.length;
     fireEvent.click(within(dialog).getByRole('button', { name: 'Override', hidden: true }));
 
-    expect(await within(dialog).findByTestId('blocked-error')).toHaveTextContent('Overriding needs the eBilling Override privilege. (ebilling.override.privilege_required)');
+    expect(await within(dialog).findByTestId('blocked-error')).toHaveTextContent('Overriding needs the eBilling Override privilege. (ebilling.blocked.not_authorized)');
     expect(within(dialog).getByLabelText('Reason')).toHaveValue('Known resubmission');
     expect(api.getReview.mock.calls.length).toBe(reads);
     expect(screen.getByTestId('blocked-banner')).toBeInTheDocument();
@@ -659,13 +865,54 @@ describe('the blocked-submission view', () => {
     expect(decision.overrideBlocked).not.toHaveBeenCalled();
   });
 
-  it('says the reasons could not be loaded and offers no action when the blocked read fails', async () => {
+  it('says the reasons could not be loaded and offers no decision when the blocked read fails, only Retry', async () => {
     const decision = mockDecisionApi(held());
     decision.getBlocked.mockResolvedValue(failed(problem(500, null)));
     renderDecisions(heldReview(), decision);
     const banner = await screen.findByTestId('blocked-banner');
     expect(await within(banner).findByTestId('blocked-unavailable')).toHaveTextContent('could not be loaded');
-    expect(within(banner).queryByRole('button')).not.toBeInTheDocument();
+    expect(within(banner).queryByTestId('override-block')).not.toBeInTheDocument();
+    expect(within(banner).queryByTestId('return-blocked')).not.toBeInTheDocument();
+    expect(within(banner).getAllByRole('button')).toHaveLength(1);
+    expect(within(banner).getByTestId('blocked-retry')).toHaveTextContent('Retry');
+  });
+
+  it('retries a failed blocked read: Retry asks again and the findings and Override appear', async () => {
+    const decision = mockDecisionApi(held());
+    decision.getBlocked.mockResolvedValueOnce(failed(problem(500, null)));
+    renderDecisions(heldReview(), decision);
+    const banner = await screen.findByTestId('blocked-banner');
+    fireEvent.click(await within(banner).findByTestId('blocked-retry'));
+    expect(await within(banner).findByTestId('blocked-findings')).toHaveTextContent('DUP-INV');
+    expect(within(banner).getByTestId('override-block')).toBeInTheDocument();
+    expect(within(banner).queryByTestId('blocked-unavailable')).not.toBeInTheDocument();
+    expect(decision.getBlocked).toHaveBeenCalledTimes(2);
+  });
+
+  it('on 503 ebilling.blocked.unavailable (which can come after the decision stood) re-reads the page, the approval and the blocked view before showing the error', async () => {
+    const decision = mockDecisionApi(held());
+    decision.overrideBlocked.mockResolvedValueOnce(
+      failed(problem(503, 'ebilling.blocked.unavailable', { detail: 'The decision was recorded but not every Signal closed.' }))
+    );
+    const { api } = renderDecisions(heldReview(), decision);
+    fireEvent.click(await screen.findByTestId('override-block'));
+    const dialog = await screen.findByRole('dialog', { name: 'Override the block', hidden: true });
+    fireEvent.change(within(dialog).getByLabelText('Reason'), { target: { value: 'Known resubmission' } });
+    await waitFor(() => expect(decision.getBlocked).toHaveBeenCalledTimes(1));
+    const reads = api.getReview.mock.calls.length;
+    const approvals = decision.getApproval.mock.calls.length;
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Override', hidden: true }));
+
+    const error = await within(dialog).findByTestId('blocked-error');
+    expect(error).toHaveTextContent('(ebilling.blocked.unavailable)');
+    expect(error).toHaveTextContent('It was saved in part: repeat it to finish.');
+    expect(api.getReview.mock.calls.length).toBeGreaterThan(reads);
+    expect(decision.getApproval.mock.calls.length).toBeGreaterThan(approvals);
+    expect(decision.getBlocked).toHaveBeenCalledTimes(2);
+    // Repeating the same request finishes it.
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Override', hidden: true }));
+    await waitFor(() => expect(decision.overrideBlocked).toHaveBeenCalledTimes(2));
+    expect(decision.overrideBlocked.mock.calls[1]).toEqual(decision.overrideBlocked.mock.calls[0]);
   });
 });
 
@@ -881,29 +1128,31 @@ describe('dark theme', () => {
 
 describe('source guards (task 111)', () => {
   const srcRoot = path.resolve(__dirname, '..');
-  const list = (dir: string): string[] =>
-    fs.readdirSync(dir, { withFileTypes: true }).flatMap(e => {
-      const p = path.join(dir, e.name);
-      if (e.isDirectory()) return e.name === '__tests__' ? [] : list(p);
-      return /\.(ts|tsx)$/.test(e.name) ? [p] : [];
-    });
-  const rel = list(srcRoot).map(f => path.relative(srcRoot, f).replace(/\\/g, '/'));
+  // The same walker task 110's colour guard uses (testKit.listSourceFiles).
+  const rel = listSourceFiles().map(f => path.relative(srcRoot, f).replace(/\\/g, '/'));
 
-  it('the colour-literal guard walks the decision and tab folders (it is not vacuous for task 111)', () => {
+  it("task 110's colour-literal guard walks the decision and tab folders (it is not vacuous for task 111)", () => {
+    // The guard in InvoiceReviewPage.test.tsx walks the page with testKit.listSourceFiles: the very function asserted here, not a copy of it.
+    const guarded = rel;
     for (const f of [
       'components/decision/steps.tsx',
       'components/decision/InvoiceDecisionWizard.tsx',
       'components/decision/BlockedBanner.tsx',
       'components/tabs/ContextTab.tsx',
       'components/tabs/HistoryTab.tsx',
+      'components/decision/ApprovalProvider.tsx',
+      'components/tabs/RelatedWorkTab.tsx',
       'services/decisionApi.ts',
+      'services/decisionModel.ts',
     ]) {
-      expect(rel).toContain(f);
+      expect(guarded).toContain(f);
     }
+    // Nothing is skipped but the tests.
+    expect(guarded.some(f => f.includes('__tests__'))).toBe(false);
   });
 
   it('takes nothing from the prototype and calls no Dataverse route or table directly', () => {
-    for (const f of list(srcRoot)) {
+    for (const f of listSourceFiles()) {
       const text = fs.readFileSync(f, 'utf8');
       expect(text).not.toMatch(/spaarke-prototype/);
       expect(text).not.toMatch(/\/api\/data\/v9|Xrm\.WebApi/);
