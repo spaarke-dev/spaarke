@@ -36,6 +36,12 @@ internal enum SourceDocumentFileOutcome
 
     /// <summary>SharePoint Embedded returned no stream (it may answer later).</summary>
     NotDownloaded,
+
+    /// <summary>
+    /// Only when the caller passed <c>maxBytes</c> (task 118b review, F1-b): the row's <c>sprk_filesize</c> is over it (nothing was
+    /// downloaded), or the stream delivered more than it (the copy stopped there). The job passes none and never sees this.
+    /// </summary>
+    TooLarge,
 }
 
 /// <summary>
@@ -71,15 +77,27 @@ internal static class SourceDocumentFileRead
         "sprk_relatedcommunication", "sprk_isemailarchive",
         // Task 118b-2: the extension of a supporting copy (the name itself is never copied).
         "sprk_filename",
+        // Task 118b review (F1-b): the size the row records (Whole Number, may be empty), judged before a download when a limit is given.
+        FileSizeColumn,
     ];
 
-    /// <summary>Reads the file of <paramref name="documentId"/> (see the type's summary for the order).</summary>
+    /// <summary>The row's recorded file size in bytes (<c>sprk_filesize</c>, a Whole Number; empty on rows written before it was kept).</summary>
+    private const string FileSizeColumn = "sprk_filesize";
+
+    /// <summary>
+    /// Reads the file of <paramref name="documentId"/> (see the type's summary for the order). <paramref name="maxBytes"/> (task 118b review,
+    /// F1-b; <c>null</c>, the default, is no limit and exactly the read the job has always made): when set, a row whose recorded
+    /// <c>sprk_filesize</c> is over it is <see cref="SourceDocumentFileOutcome.TooLarge"/> before anything is downloaded, and a download
+    /// that delivers more than it is <see cref="SourceDocumentFileOutcome.TooLarge"/> too (the copy stops as soon as the limit is passed, so
+    /// a row with no recorded size, or a wrong one, cannot fill memory). A file of exactly <paramref name="maxBytes"/> is read.
+    /// </summary>
     internal static async Task<SourceDocumentFile> ReadAsync(
         IGenericEntityService entities,
         ISpeFileOperations spe,
         RecordContainerResolver containerResolver,
         Guid documentId,
-        CancellationToken ct)
+        CancellationToken ct,
+        long? maxBytes = null)
     {
         ArgumentNullException.ThrowIfNull(entities);
         ArgumentNullException.ThrowIfNull(spe);
@@ -108,6 +126,13 @@ internal static class SourceDocumentFileRead
             return new SourceDocumentFile(SourceDocumentFileOutcome.StorageUnverified);
         }
 
+        // The size the row records is judged after the container check (a pointer that is not the row's own is the stronger refusal) and
+        // before the download. Empty or not positive is "not recorded": the stream is then the judge.
+        if (maxBytes is { } recordedLimit && RecordedSizeOf(document) is { } recorded && recorded > recordedLimit)
+        {
+            return new SourceDocumentFile(SourceDocumentFileOutcome.TooLarge);
+        }
+
         var stream = await spe.DownloadFileAsync(driveId, itemId, ct).ConfigureAwait(false);
         if (stream is null)
         {
@@ -118,7 +143,18 @@ internal static class SourceDocumentFileRead
         using (stream)
         {
             using var buffer = new MemoryStream();
-            await stream.CopyToAsync(buffer, ct).ConfigureAwait(false);
+            if (maxBytes is { } streamLimit)
+            {
+                if (!await CopyUpToAsync(stream, buffer, streamLimit, ct).ConfigureAwait(false))
+                {
+                    return new SourceDocumentFile(SourceDocumentFileOutcome.TooLarge);
+                }
+            }
+            else
+            {
+                await stream.CopyToAsync(buffer, ct).ConfigureAwait(false);
+            }
+
             bytes = buffer.ToArray();
         }
 
@@ -133,6 +169,47 @@ internal static class SourceDocumentFileRead
                 ? communication
                 : null,
             string.IsNullOrWhiteSpace(fileName) ? null : fileName);
+    }
+
+    /// <summary>The <c>sprk_filesize</c> the row records, whatever integer width the retrieve returned it in; null when empty, not a number or not positive.</summary>
+    private static long? RecordedSizeOf(Entity document) => document.Contains(FileSizeColumn)
+        ? document[FileSizeColumn] switch
+        {
+            int whole when whole > 0 => whole,
+            long wide when wide > 0 => wide,
+            _ => null,
+        }
+        : null;
+
+    /// <summary>
+    /// Copies <paramref name="source"/> into <paramref name="destination"/> and stops at the first byte past <paramref name="limit"/>: false
+    /// then (the destination holds at most <paramref name="limit"/> bytes), true when the whole stream, up to and including exactly
+    /// <paramref name="limit"/> bytes, was copied.
+    /// </summary>
+    private static async Task<bool> CopyUpToAsync(Stream source, Stream destination, long limit, CancellationToken ct)
+    {
+        var chunk = System.Buffers.ArrayPool<byte>.Shared.Rent(81920);
+        try
+        {
+            long copied = 0;
+            int read;
+            while ((read = await source.ReadAsync(chunk.AsMemory(), ct).ConfigureAwait(false)) > 0)
+            {
+                copied += read;
+                if (copied > limit)
+                {
+                    return false;
+                }
+
+                await destination.WriteAsync(chunk.AsMemory(0, read), ct).ConfigureAwait(false);
+            }
+
+            return true;
+        }
+        finally
+        {
+            System.Buffers.ArrayPool<byte>.Shared.Return(chunk);
+        }
     }
 
     private static bool IsRecordNotFound(Exception ex)

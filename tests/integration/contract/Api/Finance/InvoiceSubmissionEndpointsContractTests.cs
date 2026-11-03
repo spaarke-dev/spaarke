@@ -2170,7 +2170,7 @@ public sealed class InvoiceSubmissionEndpointsContractTests : IAsyncLifetime
     };
 
     /// <summary>A supporting document row linking <paramref name="communication"/> (null: none), readable by the caller when <paramref name="readable"/>.</summary>
-    private void SupportingDocumentExists(Guid id, Guid? communication, bool readable = true)
+    private void SupportingDocumentExists(Guid id, Guid? communication, bool readable = true, int? fileSize = null)
     {
         var row = new Entity("sprk_document", id)
         {
@@ -2180,6 +2180,11 @@ public sealed class InvoiceSubmissionEndpointsContractTests : IAsyncLifetime
             ["sprk_mimetype"] = "application/pdf",
             ["sprk_filename"] = "Timesheet.pdf",
         };
+        if (fileSize is { } recorded)
+        {
+            row["sprk_filesize"] = recorded;
+        }
+
         if (communication is { } linked)
         {
             row["sprk_relatedcommunication"] = new EntityReference("sprk_communication", linked);
@@ -2279,6 +2284,23 @@ public sealed class InvoiceSubmissionEndpointsContractTests : IAsyncLifetime
         NothingWritten();
     }
 
+    [Fact(DisplayName = "118b review F1-b (must fire): a supporting document whose row records a size over the configured file limit is 413 ebilling.submission.too_large (the upload's code) through the route's own binding of the shared read; nothing downloaded for it, nothing staged or created")]
+    public async Task FromDocument_a_supporting_document_over_the_file_limit_is_413_nothing_written()
+    {
+        GrantInternalSubmit();
+        SourceDocumentExists();
+        SupportingDocumentExists(SupportingA, SourceCommunicationId);
+        SupportingDocumentExists(SupportingB, SourceCommunicationId, fileSize: int.MaxValue);
+
+        var response = await PostFromDocumentAsync(SupportingBody(SupportingA, SupportingB));
+
+        response.StatusCode.Should().Be(HttpStatusCode.RequestEntityTooLarge, await response.Content.ReadAsStringAsync());
+        (await ErrorCodeAsync(response)).Should().Be(InvoiceSubmissionErrors.TooLarge);
+        _spe.Verify(s => s.DownloadFileAsync("b!drive", "item-" + SupportingB.ToString("N"), It.IsAny<CancellationToken>()), Times.Never(),
+            "the row says it is too big: no download");
+        NothingWritten();
+    }
+
     public static TheoryData<string> SupportingShapeRefusals => new() { "invoice_document", "empty_id", "too_many" };
 
     [Theory(DisplayName = "118b-1 (must fire): the invoice document listed as supporting, an empty id, or more than 50 files in all is 400 supportingDocumentIds before anything is read; nothing written")]
@@ -2315,8 +2337,13 @@ public sealed class InvoiceSubmissionEndpointsContractTests : IAsyncLifetime
 
         var response = await PostFromDocumentAsync(SupportingBody([.. ids, .. ids.Take(5)]));
 
-        response.StatusCode.Should().NotBe(HttpStatusCode.BadRequest, await response.Content.ReadAsStringAsync());
+        // Task 118b review: the whole request goes through (not only "past the 400"): 202, one stage per distinct supporting document,
+        // repeats not counted, and the limit's own count (49 + the invoice document = MaxFiles) is not off by one at the intake.
+        response.StatusCode.Should().Be(HttpStatusCode.Accepted, await response.Content.ReadAsStringAsync());
         _sourceRights.Calls.Count(c => c.Set == FinanceAuthorizationFilter.DocumentEntitySet && ids.Contains(c.Id)).Should().Be(ids.Length);
+        _h.Stages.Should().HaveCount(SubmissionCommitGate.MaxFiles - 1, "49 distinct supporting documents are staged, one part each");
+        _h.Allocations.Should().ContainSingle();
+        _h.JobsSent.Should().ContainSingle();
     }
 
     [Fact(DisplayName = "118b (must fire): a retry of an earlier submission of the document that staged no supporting documents (the empty set), naming some, is 409 document_already_submitted; the same request without them replays; nothing written")]

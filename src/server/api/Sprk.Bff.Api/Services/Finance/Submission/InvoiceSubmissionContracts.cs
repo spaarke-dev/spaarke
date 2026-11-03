@@ -175,9 +175,11 @@ public sealed record InvoiceSubmissionRequest
     /// ebilling-r1 task 118b-2: the read of one supporting document's file, the route's binding of the ONE shared read
     /// (<see cref="SourceDocumentFileRead.ReadAsync"/>, app-only, the pointer's container verified first) to its own SharePoint Embedded and
     /// container seams, which the intake does not take (it never reaches SharePoint Embedded itself, task 092). Required when
-    /// <see cref="SupportingDocumentIds"/> is not empty and the request makes a new attempt; a fault throws.
+    /// <see cref="SupportingDocumentIds"/> is not empty and the request makes a new attempt; a fault throws. The <c>long</c> is the file size
+    /// limit the read enforces (<see cref="InvoiceSubmissionService.MaxFileBytes"/>, task 118b review F1-b): a file over it answers
+    /// <see cref="SourceDocumentFileOutcome.TooLarge"/>.
     /// </summary>
-    internal Func<Guid, CancellationToken, Task<SourceDocumentFile>>? ReadSupportingDocument { get; init; }
+    internal Func<Guid, long, CancellationToken, Task<SourceDocumentFile>>? ReadSupportingDocument { get; init; }
 }
 
 /// <summary>A submission that was received: the row exists with its tracking number and the processing job is enqueued.</summary>

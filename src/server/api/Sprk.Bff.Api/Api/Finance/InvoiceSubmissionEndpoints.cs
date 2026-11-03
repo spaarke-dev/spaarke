@@ -721,12 +721,13 @@ public static class InvoiceSubmissionEndpoints
                 // resolved only when a new attempt reads a supporting document.
                 ReadSupportingDocument = supporting.Count == 0
                     ? null
-                    : (id, readCt) => SourceDocumentFileRead.ReadAsync(
+                    : (id, maxBytes, readCt) => SourceDocumentFileRead.ReadAsync(
                         http.RequestServices.GetRequiredService<IGenericEntityService>(),
                         http.RequestServices.GetRequiredService<ISpeFileOperations>(),
                         http.RequestServices.GetRequiredService<RecordContainerResolver>(),
                         id,
-                        readCt),
+                        readCt,
+                        maxBytes),
             }, ct);
         }
         catch (SourceFilingRefusedException ex)

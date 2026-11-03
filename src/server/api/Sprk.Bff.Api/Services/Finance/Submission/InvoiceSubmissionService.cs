@@ -812,8 +812,10 @@ public class InvoiceSubmissionService
     /// <see cref="InvoiceSubmissionErrors.DocumentAlreadySubmitted"/> (other details; known limit K2: it stays until the stage is removed).
     /// A read fault is 503 <see cref="InvoiceSubmissionErrors.CoreRecordUnavailable"/>.</item>
     /// <item>With supporting documents: the file store first (as the from-email route: a fault is 503 <see cref="InvoiceSubmissionErrors.Failed"/>,
-    /// not configured 422 <see cref="InvoiceSubmissionErrors.StorageNotConfigured"/>), then each document's file through the ONE shared read
-    /// (<see cref="InvoiceSubmissionRequest.ReadSupportingDocument"/>). Gone, no file or an email archive, storage that cannot be verified, or
+    /// not configured 422 <see cref="InvoiceSubmissionErrors.StorageNotConfigured"/>), then (review F1-a) each document's filing and isolation
+    /// as the invoice document's are judged (<see cref="CheckSupportingFilingAsync"/>), then each document's file through the ONE shared read
+    /// (<see cref="InvoiceSubmissionRequest.ReadSupportingDocument"/>, review F1-b: with <see cref="MaxFileBytes"/>; over it is 413
+    /// <see cref="InvoiceSubmissionErrors.TooLarge"/>). Gone, no file or an email archive, storage that cannot be verified, or
     /// a document no longer linked to the route's communication is a permanent 422 <see cref="SubmissionReasonCodes.DocumentUnavailable"/>;
     /// no stream or a read fault is 503 <see cref="InvoiceSubmissionErrors.CoreRecordUnavailable"/>. The answers name no document.</item>
     /// </list>
@@ -872,12 +874,24 @@ public class InvoiceSubmissionService
                 "Invoice file storage is not configured, so the supporting documents cannot be stored. Nothing was saved.");
         }
 
+        // Task 118b review (F1-a): each supporting document is judged as the invoice document is (step 3) and as the commit gate judges every
+        // source again: filed under the core record only, isolated nowhere else. All of them first (cheap, read-only), so no file is
+        // downloaded for a request that is going to be refused.
+        foreach (var supportingId in supportingIds)
+        {
+            if (await CheckSupportingFilingAsync(request.CoreRecord, submissionId, supportingId, ct).ConfigureAwait(false) is { } filingRefusal)
+            {
+                return filingRefusal;
+            }
+        }
+
         foreach (var supportingId in supportingIds)
         {
             SourceDocumentFile file;
             try
             {
-                file = await read(supportingId, ct).ConfigureAwait(false);
+                // Task 118b review (F1-b): the same per-file limit the upload enforces.
+                file = await read(supportingId, MaxFileBytes, ct).ConfigureAwait(false);
             }
             catch (Exception ex) when (!IsCallerCancellation(ex, ct))
             {
@@ -895,11 +909,15 @@ public class InvoiceSubmissionService
                     _logger.LogWarning("Invoice submission {SubmissionId}: supporting document {SupportingId} could not be downloaded; refused (503)",
                         submissionId, supportingId);
                     return SupportingUnavailable();
+                case SourceDocumentFileOutcome.TooLarge:
+                    _logger.LogInformation("Invoice submission {SubmissionId}: supporting document {SupportingId} is over the {MaxMb} MB file limit; refused (413)",
+                        submissionId, supportingId, _ebilling.CurrentValue.MaxSubmissionFileSizeMb);
+                    return InvoiceSubmissionOutcome.Refused(StatusCodes.Status413PayloadTooLarge, InvoiceSubmissionErrors.TooLarge,
+                        $"A supporting document may be at most {_ebilling.CurrentValue.MaxSubmissionFileSizeMb} MB. Nothing was saved.");
                 default:
                     _logger.LogWarning("Invoice submission {SubmissionId}: supporting document {SupportingId} cannot be copied ({Outcome}); refused (422)",
                         submissionId, supportingId, file.Outcome);
-                    return InvoiceSubmissionOutcome.Refused(StatusCodes.Status422UnprocessableEntity, SubmissionReasonCodes.DocumentUnavailable,
-                        "A supporting document has no file that can be copied, or no longer belongs to this communication. Nothing was saved.");
+                    return SupportingNotCopyable();
             }
         }
 
@@ -908,6 +926,56 @@ public class InvoiceSubmissionService
         static InvoiceSubmissionOutcome SupportingUnavailable() =>
             InvoiceSubmissionOutcome.Refused(StatusCodes.Status503ServiceUnavailable, InvoiceSubmissionErrors.CoreRecordUnavailable,
                 "A supporting document could not be read right now. Nothing was saved; try again shortly.");
+    }
+
+    /// <summary>The 422 every "this supporting document cannot be copied" refusal answers (no document is named).</summary>
+    private static InvoiceSubmissionOutcome SupportingNotCopyable() =>
+        InvoiceSubmissionOutcome.Refused(StatusCodes.Status422UnprocessableEntity, SubmissionReasonCodes.DocumentUnavailable,
+            "A supporting document has no file that can be copied, or no longer belongs to this communication. Nothing was saved.");
+
+    /// <summary>
+    /// Task 118b review (F1-a): whether supporting document <paramref name="supportingId"/> may be copied under <paramref name="core"/>: the
+    /// invoice document's check (<see cref="CheckExistingDocumentAsync"/>, step 3) through the function the commit gate re-runs for every
+    /// source (<see cref="CheckSourceFilingAsync"/>: the D-140 filing chain, then isolation). Null when allowed (an UNFILED document is
+    /// allowed, as the invoice document is). Mapped as the invoice document is: filed or isolated under another record, or a filing that
+    /// cannot be placed, is 409 <see cref="InvoiceSubmissionErrors.DocumentCoreRecordMismatch"/>; isolation that cannot be read, or any
+    /// fault, is 503 <see cref="InvoiceSubmissionErrors.CoreRecordUnavailable"/>; a document that no longer exists is 422
+    /// <see cref="SubmissionReasonCodes.DocumentUnavailable"/> (as the shared read answers it). The answers name no document or record.
+    /// </summary>
+    private async Task<InvoiceSubmissionOutcome?> CheckSupportingFilingAsync(
+        InvoiceCoreRecord core, Guid submissionId, Guid supportingId, CancellationToken ct)
+    {
+        SourceFilingCheck check;
+        try
+        {
+            check = await CheckSourceFilingAsync(_entities, _isolation, supportingId, core, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (!IsCallerCancellation(ex, ct))
+        {
+            _logger.LogWarning("Invoice submission {SubmissionId}: the filing of supporting document {SupportingId} could not be checked ({Fault}); refused (503)",
+                submissionId, supportingId, ex.GetType().Name);
+            return InvoiceSubmissionOutcome.Refused(StatusCodes.Status503ServiceUnavailable, InvoiceSubmissionErrors.CoreRecordUnavailable,
+                "A supporting document could not be checked right now. Nothing was saved; try again shortly.");
+        }
+
+        switch (check.Verdict)
+        {
+            case SourceFilingVerdict.Allowed:
+                return null;
+            case SourceFilingVerdict.Gone:
+                _logger.LogWarning("Invoice submission {SubmissionId}: supporting document {SupportingId} no longer exists; refused (422)", submissionId, supportingId);
+                return SupportingNotCopyable();
+            case SourceFilingVerdict.Unavailable:
+                _logger.LogWarning("Invoice submission {SubmissionId}: the isolation of supporting document {SupportingId} could not be read ({Detail}); refused (503)",
+                    submissionId, supportingId, check.Detail);
+                return InvoiceSubmissionOutcome.Refused(StatusCodes.Status503ServiceUnavailable, InvoiceSubmissionErrors.CoreRecordUnavailable,
+                    "Who may see a supporting document could not be checked right now. Nothing was saved; try again shortly.");
+            default:
+                _logger.LogInformation("Invoice submission {SubmissionId}: supporting document {SupportingId} is filed or restricted elsewhere ({Detail}); refused (409)",
+                    submissionId, supportingId, check.Detail);
+                return InvoiceSubmissionOutcome.Refused(StatusCodes.Status409Conflict, InvoiceSubmissionErrors.DocumentCoreRecordMismatch,
+                    "A supporting document is filed under a different record than the one named, so it cannot be submitted for this record. Nothing was saved.");
+        }
     }
 
     /// <summary>

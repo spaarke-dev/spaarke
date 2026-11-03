@@ -1805,7 +1805,7 @@ public partial class InvoiceSubmissionPersisterTests
             FirmInvoiceNumber = "INV-100",
             ExistingDocumentId = Document,
             SupportingDocumentIds = supporting,
-            ReadSupportingDocument = (id, _) => Task.FromResult(new SourceDocumentFile(
+            ReadSupportingDocument = (id, _, _) => Task.FromResult(new SourceDocumentFile(
                 SourceDocumentFileOutcome.Read, SupportingBytes(id), Version: 4, MimeType: "application/vnd.ms-excel", FileName: "Timesheet.XLS")),
         }, CancellationToken.None);
         outcome.Receipt!.SubmissionId.Should().Be(SourceSubmission);
@@ -1844,6 +1844,26 @@ public partial class InvoiceSubmissionPersisterTests
 
         store.Files.Dataverse.Rows.Values.Select(r => (StoredFileStatus)r.GetAttributeValue<OptionSetValue>(StoredFileSchema.Status).Value)
             .Should().HaveCount(3).And.OnlyContain(s => s == StoredFileStatus.Servable, "the gate re-ran each file's own source and flipped every file");
+    }
+
+    [Fact(DisplayName = "118b review (must not fire, the limit): 49 supporting documents (50 files with the invoice document: the commit gate's MaxFiles) are staged by the intake and committed - Accepted, 49 Supporting rows, every file Servable; the reader and the gate agree on the limit")]
+    public async Task Source_With49SupportingDocuments_CommitsWithinTheGatesLimitOf50()
+    {
+        var store = new Store();
+        var ids = Enumerable.Range(1, SubmissionCommitGate.MaxFiles - 1).Select(i => new Guid($"118b0000-0000-4000-8000-{i:D12}")).ToArray();
+        await StageSupportingThroughTheIntakeAsync(store, ids);
+        var outcome = AsSource(await new ProcessorHarness().RunAsync(), store);
+
+        var result = await store.Build().PersistAsync(outcome, null);
+
+        result.Status.Should().Be(SubmissionPersistStatus.Committed);
+        var files = store.Transactions.Single().OfType<CreateRequest>().Where(c => c.Target.LogicalName == StoredFileSchema.Entity).Select(c => c.Target).ToList();
+        files.Should().HaveCount(SubmissionCommitGate.MaxFiles, "the invoice document's copy and 49 supporting copies");
+        files.Count(f => f.GetAttributeValue<OptionSetValue>(StoredFileSchema.Purpose).Value == (int)StoredFilePurpose.InvoiceSupportingFile).Should().Be(ids.Length);
+        files.Where(f => f.GetAttributeValue<OptionSetValue>(StoredFileSchema.Purpose).Value == (int)StoredFilePurpose.InvoiceSupportingFile)
+            .Select(f => f.GetAttributeValue<EntityReference>(StoredFileSchema.SourceDocument).Id).Should().BeEquivalentTo(ids);
+        store.Files.Dataverse.Rows.Values.Select(r => (StoredFileStatus)r.GetAttributeValue<OptionSetValue>(StoredFileSchema.Status).Value)
+            .Should().HaveCount(SubmissionCommitGate.MaxFiles).And.OnlyContain(s => s == StoredFileStatus.Servable);
     }
 
     [Theory(DisplayName = "118b-2 (must fire): supporting parts that do not read back as the first part lists them (a part missing, the list not 1..N) are Refused file_unservable before any write")]
