@@ -209,8 +209,10 @@ export interface InvoiceReviewPageProps {
 type View = 'lines' | 'rules';
 
 interface Notice {
-  intent: 'success' | 'error' | 'info';
+  intent: 'success' | 'warning' | 'error' | 'info';
   text: string;
+  /** A failed re-read of the review: the next successful one clears it. */
+  kind?: 'readfail';
   /**
    * Repeat: the same request again (503 incomplete: the change was saved, a later step did not finish; the same decision id records
    * nothing twice). Reload: re-read the review (409: the invoice or line changed under the user).
@@ -294,20 +296,37 @@ export function InvoiceReviewPage(props: InvoiceReviewPageProps) {
     };
   }, []);
 
-  /** Re-read the review (and the corrections). A failed re-read keeps what is shown and says so; a failed first read is the page's error. */
+  /** Newest request issued / newest answer applied: an answer older than the last one applied is dropped. */
+  const issued = React.useRef(0);
+  const applied = React.useRef(0);
+  const latest = React.useRef<InvoiceReview | null>(null);
+
+  /**
+   * Re-read the review (and the corrections). A failed re-read keeps what is shown and says so, with Reload; a failed first read is the
+   * page's error. Returns the review now shown, or null when the re-read failed.
+   */
   const reload = React.useCallback(async (): Promise<InvoiceReview | null> => {
+    const seq = ++issued.current;
     const [r, c] = await Promise.all([api.getReview(invoiceId), api.listCorrections(invoiceId)]);
     if (!alive.current) return null;
+    // A newer answer was already applied: this one is stale, whatever it says. What stays shown is the newer one.
+    if (seq < applied.current) return latest.current;
+    applied.current = seq;
     // The corrections list feeds "Corrected from" notes only; its failure never blocks the page.
     if (c.ok) setCorrections(c.value);
     if (r.ok) {
       loaded.current = true;
+      latest.current = r.value;
       setReview(r.value);
       setLoadFailure(null);
+      setNotice(n => (n?.kind === 'readfail' ? null : n));
       return r.value;
     }
-    if (loaded.current) setNotice({ intent: 'error', text: loadFailureMessage(r.failure) });
-    else setLoadFailure(r.failure);
+    if (loaded.current) {
+      setNotice({ intent: 'error', text: loadFailureMessage(r.failure), kind: 'readfail', action: { label: 'Reload', run: () => void reload() } });
+    } else {
+      setLoadFailure(r.failure);
+    }
     return null;
   }, [api, invoiceId]);
 
@@ -315,13 +334,21 @@ export function InvoiceReviewPage(props: InvoiceReviewPageProps) {
     void reload();
   }, [reload]);
 
-  // F-1: re-read while any line is Processing; stop when none is.
+  // F-1: re-read while any line is Processing; stop when none is. An interval, not a one-shot timer: a failed re-read leaves the review
+  // unchanged, and the next tick must still come. A tick is skipped while the previous re-read is still out.
   const processing = review?.lines.some(l => l.status === 'Pending') ?? false;
   React.useEffect(() => {
     if (!processing) return undefined;
-    const t = setTimeout(() => void reload(), pollIntervalMs);
-    return () => clearTimeout(t);
-  }, [processing, review, reload, pollIntervalMs]);
+    let out = false;
+    const t = setInterval(() => {
+      if (out) return;
+      out = true;
+      void reload().finally(() => {
+        out = false;
+      });
+    }, pollIntervalMs);
+    return () => clearInterval(t);
+  }, [processing, reload, pollIntervalMs]);
 
   const lines = React.useMemo(() => (review ? [...review.lines].sort((a, b) => a.sequence - b.sequence) : []), [review]);
   const access = review ? reviewAccess(review, refused403) : { canWrite: false, reason: null };
@@ -368,6 +395,11 @@ export function InvoiceReviewPage(props: InvoiceReviewPageProps) {
         /** Closes that dialog: on a 403 or a 503 incomplete the outcome belongs to the page, not the form. */
         closeDialog?: () => void;
         after?: (value: T, fresh: InvoiceReview | null) => void;
+        /**
+         * What Repeat sends after a 503 incomplete. Default: the same call. Accept all Clean cannot repeat itself (its lines left Clean), so
+         * its repeat is the multi-line route with the committed line ids (InvoiceLineDecisionService).
+         */
+        repeatCall?: (failure: ApiFailure) => () => Promise<ApiResult<T>>;
       }
     ): Promise<boolean> => {
       setBusy(true);
@@ -378,22 +410,33 @@ export function InvoiceReviewPage(props: InvoiceReviewPageProps) {
         const fresh = await reload();
         if (!alive.current) return false;
         setBusy(false);
-        setNotice({ intent: 'success', text: opts.success });
+        // The write is saved; if the re-read failed, what is on the page is NOT the server's state: say so instead of a plain "Saved".
+        setNotice(
+          fresh
+            ? { intent: 'success', text: opts.success }
+            : { intent: 'warning', text: `${opts.success} — but the page could not refresh.`, action: { label: 'Reload', run: () => void reload() } }
+        );
         opts.after?.(result.value, fresh);
         return true;
       }
-      setBusy(false);
       const f = result.failure;
       if (f.status === 403) setRefused403(true);
       const text = writeFailureMessage(f);
       const incomplete = isIncomplete(f);
-      if (opts.inDialog && !incomplete && f.status !== 403) {
+      // 503 incomplete: part of the change was saved. Show the server's state (the page still shows the old one) before offering Repeat.
+      if (incomplete) await reload();
+      if (!alive.current) return false;
+      setBusy(false);
+      // An ordinary refusal stays in its form so nothing is lost. A 409 (the invoice or line changed) cannot be fixed in the form: the page
+      // notice offers Reload instead.
+      if (opts.inDialog && !incomplete && f.status !== 403 && f.status !== 409) {
         setDialogError(text);
         return false;
       }
       opts.closeDialog?.();
+      const again = opts.repeatCall ? opts.repeatCall(f) : call;
       const action: Notice['action'] = incomplete
-        ? { label: 'Repeat', run: () => void runWrite(call, { ...opts, inDialog: false }) }
+        ? { label: 'Repeat', run: () => void runWrite(again, { ...opts, inDialog: false }) }
         : f.status === 409
           ? { label: 'Reload', run: () => void reload() }
           : undefined;
@@ -422,6 +465,18 @@ export function InvoiceReviewPage(props: InvoiceReviewPageProps) {
     const decisionId = newDecisionId();
     void runWrite(() => api.acceptClean(invoiceId, decisionId), {
       success: 'Saved · Clean lines accepted',
+      // The lines that were written are no longer Clean, so the same route would apply nothing and answer 200. Repeat through the
+      // multi-line route with the same decision id and the committed ids (the server's recovery contract).
+      repeatCall: f =>
+        f.committedLineIds.length > 0
+          ? () =>
+              api.decideLines(invoiceId, {
+                decisionId,
+                action: 'accept',
+                reason: null,
+                lines: f.committedLineIds.map(id => ({ lineId: id, approvedAmount: null })),
+              })
+          : () => api.acceptClean(invoiceId, decisionId),
     });
   };
 

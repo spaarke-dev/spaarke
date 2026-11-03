@@ -82,4 +82,28 @@ The POML ui-tests need the deployed page: no browser integration in this session
 - K4: the field key used for a row box is whatever the read model's `fields` carry; a line with no boxes shows no highlight (the PDF still shows).
 - Timekeeper correction not offered (deviation 6).
 
-rework: fix-round-1 task 110
+## Fix round 2 (coordinator review, 2026-11-03)
+
+Done in its own commit, before task 111 (which edits the same files). Jest 65 / 65 (was 51); 13 of the new or strengthened tests fail against the round-1 source.
+
+| # | Class | Fix |
+|---|---|---|
+| 1 | F2 | A 503 `ebilling.decision.incomplete` on Accept all clean is repeated through `POST lines/decisions` with the same decision id, action accept and the committed line ids. `ApiFailure.committedLineIds` is read from the ProblemDetails (`toFailure`). The old repeat re-sent accept-clean, whose lines were no longer Clean: 200, nothing applied. |
+| 2 | F1 | `DecisionForm` is keyed on line id, status, amount and suggestion, so a correction that re-runs the rules cannot leave a stale "Suggested: reduce" choice or amount. "Suggested" with no suggestion decides nothing (Confirm disabled). |
+| 3 | F2 | An Accept shows no reason field (single and bulk) and sends `reason: null`; the server drops it. |
+| 4 | F1 | On a 503 incomplete the page re-reads the review before it offers Repeat. |
+| 5 | F1 | A 409 from Bulk, By rule or Correct value closes the form and shows the page notice with Reload (other refusals stay in the form). |
+| 6 | F1 | Polling is an interval (skipped while a re-read is out), so one failed re-read no longer stops it for good. A failed re-read notice has Reload and is cleared by the next successful re-read. |
+| 7 | F1 | A write that was saved but whose re-read failed shows "... but the page could not refresh." (warning, with Reload), not plain Saved. Re-reads carry a sequence number; an answer older than the last one applied is dropped. |
+| 8 | F1 | A fetch that threw a non-ApiError ("Failed to fetch", a non-JSON body) gives `detail: null`, so the status-0 sentence shows (write and PDF); the raw text goes to `console.warn`. |
+| 9 | F3 | New source guard: no hex colour, `rgb(` / `hsl(` or named CSS colour as a style value anywhere in `src` (must-fire and must-not-fire cases); the dark-theme render test now also checks the rows. Tests for 1, 2, 3, 4, 5, 6, 7, 8. |
+| 10 | F4 | The stray `rework:` line is removed from this file and from the POML. |
+
+### Known limits recorded by the review (K-class, not fixed)
+
+- K: the PDF worker is loaded from jsdelivr with no SRI (`pdfJsLoader.ts:70-73`), and its fallback constant `6.2.108` is behind the `^6.4.299` the package asks for. Flagged for the CSP check in task 112 (with the same-origin worker option already noted above).
+- K: only one notice shows at a time; a later notice replaces an earlier one.
+- K: number parsing in the Approved amount and Correct value fields assumes en-US separators.
+- K: read-only mode and the eBilling switch only hide buttons; the server stays authoritative and refuses a write regardless.
+- K: a Processing (stored Pending) line cannot be corrected; it becomes correctable when it leaves Processing.
+

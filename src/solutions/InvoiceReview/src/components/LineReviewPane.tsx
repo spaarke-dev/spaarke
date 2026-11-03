@@ -196,6 +196,12 @@ function DecidedState({ line }: { line: ReviewLine }) {
 
 type Choice = 'suggested' | 'accept' | 'reduce' | 'disallow';
 
+/** What a decision form is made against: the line, its status and amount, and the suggestion the rules gave. */
+function decisionFormKey(line: ReviewLine): string {
+  const s = lineSuggestion(line);
+  return [line.id, line.status, line.amount, s ? `${s.kind}:${s.amount}` : 'none'].join('|');
+}
+
 /** "Your decision": suggestion first, nothing happens until the single Confirm. */
 function DecisionForm({ line, busy, onDecide }: { line: ReviewLine; busy: boolean; onDecide: (d: PaneDecision) => void }) {
   const s = useStyles();
@@ -205,14 +211,16 @@ function DecisionForm({ line, busy, onDecide }: { line: ReviewLine; busy: boolea
   const [reason, setReason] = React.useState('');
   const [amountText, setAmountText] = React.useState(suggestedAmount !== null ? suggestedAmount.toFixed(2) : '');
 
+  // "Suggested" with no suggestion (the rules re-ran and the finding is gone) decides nothing: Confirm stays disabled.
   const effective: DecisionAction | null =
-    choice === 'suggested' ? (suggestion?.kind === 'Disallow' ? 'disallow' : 'reduce') : choice === '' ? null : choice;
+    choice === 'suggested' ? (suggestion ? (suggestion.kind === 'Disallow' ? 'disallow' : 'reduce') : null) : choice === '' ? null : choice;
 
   const confirm = () => {
     if (!effective) return;
     const trimmed = reason.trim();
     if (effective === 'accept') {
-      onDecide({ action: 'accept', reason: trimmed || null, approvedAmount: null });
+      // The server stores no reason for an Accept (it drops it), so none is asked for or sent.
+      onDecide({ action: 'accept', reason: null, approvedAmount: null });
       return;
     }
     if (effective === 'disallow') {
@@ -224,7 +232,7 @@ function DecisionForm({ line, busy, onDecide }: { line: ReviewLine; busy: boolea
   };
 
   const body = (option: Choice) => {
-    if (choice !== option) return null;
+    if (choice !== option || option === 'accept') return null;
     const wantsAmount = option === 'reduce' || (option === 'suggested' && suggestion?.kind === 'Reduce');
     return (
       <div className={s.optionBody}>
@@ -238,7 +246,7 @@ function DecisionForm({ line, busy, onDecide }: { line: ReviewLine; busy: boolea
             />
           </Field>
         )}
-        <Field label={option === 'accept' ? 'Reason (optional)' : 'Reason'}>
+        <Field label="Reason">
           <Textarea value={reason} onChange={(_, d) => setReason(d.value)} resize="vertical" aria-label={`Reason for line ${line.sequence}`} />
         </Field>
       </div>
@@ -506,7 +514,9 @@ export function LineReviewPane(props: LineReviewPaneProps) {
       )}
 
       {isDecided(line) && <DecidedState line={line} />}
-      {decidable && <DecisionForm key={line.id} line={line} busy={busy} onDecide={onDecide} />}
+      {/* Keyed on what the choice was made against: a correction re-runs the rules and can change the status, the amount or the suggestion,
+          and a stale "Suggested" choice or amount must not survive that. */}
+      {decidable && <DecisionForm key={decisionFormKey(line)} line={line} busy={busy} onDecide={onDecide} />}
 
       <Divider />
       <WhatWasRead

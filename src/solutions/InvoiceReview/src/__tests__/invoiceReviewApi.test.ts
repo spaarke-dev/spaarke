@@ -84,9 +84,41 @@ describe('createInvoiceReviewApi', () => {
     const r = await api.decideLine(INVOICE_ID, lineId(1), { decisionId: 'd', action: 'accept', reason: null, approvedAmount: null });
     expect(r).toEqual({
       ok: false,
-      failure: { status: 503, errorCode: 'ebilling.decision.incomplete', detail: 'The lines were saved; the totals were not.', signInFailed: false, failedStep: 'totals' },
+      failure: { status: 503, errorCode: 'ebilling.decision.incomplete', detail: 'The lines were saved; the totals were not.', signInFailed: false, failedStep: 'totals', committedLineIds: [] },
     });
     expect(!r.ok && isIncomplete(r.failure)).toBe(true);
+  });
+
+  it('keeps the committed line ids of a 503 incomplete decision (the accept-clean repeat needs them)', async () => {
+    const fetchFn = jest.fn(async () => {
+      throw problem(503, 'ebilling.decision.incomplete', { committedLineIds: [lineId(1), lineId(2), 7, ''], failedStep: 'totals' });
+    });
+    const api = createInvoiceReviewApi(fetchFn as never, BASE);
+    const r = await api.acceptClean(INVOICE_ID, 'd');
+    expect(!r.ok && r.failure.committedLineIds).toEqual([lineId(1), lineId(2)]);
+  });
+
+  it('does not show the browser text of a request that got no server answer: a write and the PDF both read as status 0', async () => {
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+    try {
+      const fetchFn = jest.fn(async () => {
+        throw new TypeError('Failed to fetch');
+      });
+      const api = createInvoiceReviewApi(fetchFn as never, BASE);
+
+      const write = await api.decideLine(INVOICE_ID, lineId(1), { decisionId: 'd', action: 'accept', reason: null, approvedAmount: null });
+      expect(!write.ok && write.failure).toMatchObject({ status: 0, errorCode: null, detail: null });
+      expect(!write.ok && writeFailureMessage(write.failure)).toBe('The change could not be sent. Check your connection and retry.');
+
+      const pdf = await api.fetchFile(PDF_ID);
+      expect(!pdf.ok && pdf.failure).toMatchObject({ status: 0, detail: null });
+      expect(!pdf.ok && writeFailureMessage(pdf.failure)).not.toMatch(/Failed to fetch/);
+
+      // The raw text goes to the console, not to the user.
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('InvoiceReview'), 'Failed to fetch');
+    } finally {
+      warn.mockRestore();
+    }
   });
 
   it('fetches the invoice PDF bytes through the content route', async () => {
