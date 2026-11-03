@@ -232,6 +232,24 @@ public sealed class RecordRepairModeTests
         Field(outcome, RecordRepairPart.Owner, "ownerid").ReasonCode.Should().Be(RecordRepairReason.OwnerMovesBusinessUnit);
     }
 
+    [Fact]
+    public async Task ADocumentOwnedInAnotherBusinessUnit_IsNotWritten_EscalationTrigger2()
+    {
+        // Restored as owner-only (task 041, UAC-r2 NOTE 1): the trigger-2 guard runs per table (IsOwnershipParent), so the
+        // document needs its own case. A user-owned document in the GENERAL unit, filed under the matter of the CHILD unit:
+        // the move is refused and nothing is written.
+        var id = _world.RowOf("sprk_document", Directory.GeneralBu, new Dictionary<string, object>
+        {
+            ["ownerid"] = new EntityReference("systemuser", Directory.CallerUserId),
+            ["sprk_matter"] = new EntityReference("sprk_matter", RepairWorld.Matter),
+        });
+
+        var outcome = await _world.RepairAsync("sprk_document", id);
+
+        _world.Writes.Should().BeEmpty();
+        Field(outcome, RecordRepairPart.Owner, "ownerid").ReasonCode.Should().Be(RecordRepairReason.OwnerMovesBusinessUnit);
+    }
+
     // =====================================================================================
     // Search index (task 041, FR-40: Repair writes none) and the I-1 stamp, fill-only
     // =====================================================================================
