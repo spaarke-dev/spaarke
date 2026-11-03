@@ -451,6 +451,27 @@ public sealed class StoredFileService
         return StageCreateFlipAsync(spec, content, RecordRequester.Of(systemUserId: requestedBy), requestedBy, ct);
     }
 
+    /// <summary>
+    /// The owner question <see cref="CreateForAppAsync"/> will ask for <paramref name="spec"/> — and nothing else: no read of the content, no
+    /// blob, no row. For a caller that must know BEFORE it writes anything whether the file can be owned (the AP export asks it before it creates its
+    /// batch or claims an invoice). It is the SAME question as the create's, from the same builder (<see cref="OwnerQuestionOf"/>) and the same
+    /// <paramref name="requestedBy"/>, so the two cannot be asked differently; the create still asks again and its answer decides (a change
+    /// between the two calls is still refused there). A resolver fault propagates. Returns the resolver's answer unchanged
+    /// (<see cref="RecordOwnerResolution.IsRefused"/>, <see cref="RecordOwnerResolution.RefusalCode"/>).
+    /// </summary>
+    /// <remarks>Component Justification (CLAUDE.md §11): (1) Existing — the create asks this question inline. (2) Extension — the same builder and
+    /// the same resolver call, now behind one private method both use; nothing about the owner rule is copied. (3) Cost of doing nothing — the AP export
+    /// either rebuilds the file's question itself (a second copy of the owner rule) or creates its batch first and finds out afterwards, leaving a
+    /// Failed batch row in the caller's business unit for a refusal that can never succeed.</remarks>
+    public Task<RecordOwnerResolution> ResolveOwnerForAppAsync(StoredFileRowSpec spec, Guid? requestedBy, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(spec);
+        return AskOwnerAsync(spec, RecordRequester.Of(systemUserId: requestedBy), requestedBy, ct);
+    }
+
+    private Task<RecordOwnerResolution> AskOwnerAsync(StoredFileRowSpec spec, RecordRequester? requester, Guid? creatorPersonId, CancellationToken ct) =>
+        _owners.ResolveOwnerAsync(OwnerQuestionOf(spec, requester, creatorPersonId), ct);
+
     private async Task<StoredFileCreateResult> StageCreateFlipAsync(
         StoredFileRowSpec spec, Stream content, RecordRequester? requester, Guid? creatorPersonId, CancellationToken ct)
     {
@@ -468,12 +489,13 @@ public sealed class StoredFileService
         // and the lookups BuildRow writes), never its parent's content question. An ordinary answer is then the restricted-content owner
         // team, a Secure one the Secure team. A parent that files nothing (a billing export, a procedure version) leaves the row unfiled:
         // the acting user's business unit decides, through the same restricted-content exit; no acting user refuses.
-        var owner = await _owners.ResolveOwnerAsync(OwnerQuestionOf(spec, requester, creatorPersonId), ct).ConfigureAwait(false);
+        var owner = await AskOwnerAsync(spec, requester, creatorPersonId, ct).ConfigureAwait(false);
         if (owner.IsRefused)
         {
             _logger.LogWarning("Stored file {FileId} refused: no owner under {ParentTable} {ParentId} ({OwnerCode})",
                 spec.FileId, spec.Parent.Table, spec.Parent.Id, owner.RefusalCode);
-            return StoredFileCreateResult.Refused(StoredFileRefusal.OwnerUnresolved);
+            // The resolver's own code rides along (never re-derived here), so a caller can tell a refusal no retry changes from a fault.
+            return StoredFileCreateResult.Refused(StoredFileRefusal.OwnerUnresolved, owner.RefusalCode);
         }
 
         var staged = await StageAsync(spec, content, ct).ConfigureAwait(false);
