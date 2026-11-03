@@ -17,15 +17,14 @@
 - Correction test PASSED: INV-792345.4 supersedes .3 (.3 is Superseded/inactive; the .4 submission has resubmissionof = .3's submission). The -0.03 total is correct (a Microsoft credit note).
 
 ## Open owner questions
-1. Seed the invoice-line-code and invoice-codeset-match Actions/Bindings on dev (053 steps 2-3)? Not yet answered. Without them, no AI line coding.
-2. Refused bell: link to the submission (per the POML, being implemented) or to the invoice? Not answered.
-3. Approve test invoices for the 153 end-to-end (needed for the AP-emails "no New" click-through and the first Email to AP send; uac-r2 wants the batch link and the send time).
+1. Refused bell: link to the submission (per the POML, being implemented) or to the invoice? Not answered.
+2. Approve test invoices for the 153 end-to-end (needed for the AP-emails "no New" click-through and the first Email to AP send; uac-r2 wants the batch link and the send time).
 
 ## Just observed (16:00Z)
 The owner emailed synthetic invoice B-0001.pdf (INV-2025-78232) to the Spaarke Mailbox (mailbox-central). The inbound communication pipeline processed it twice (polling job a80bbd36 and delta reconciliation d5737ca3): StructuralDetector flagged invoice@0.80, association Suggested at 0.70. **No invoice submission was created**: the mailbox route does not submit invoices (Submit Invoice from the communication is task 118, not built). A sprk_communication query by name found nothing yet. Tell the owner to use Submit Invoice in the Outlook pane on that email. Check for duplicate communication rows from the double processing (email-communication-intelligence's area).
 
 ## Known on dev (not defects)
-- `ai.invoice.binding_missing` for invoice-codeset-match and invoice-line-code (only invoice-classify is bound): 053 steps 2-3.
+- 053 steps 2-3 done 2026-11-03 (owner OK): the invoice-line-code and invoice-codeset-match Actions and Bindings are on dev. The owner resubmits INV-2025-78232 from the Outlook pane (expect .2: an invoice on the matter, 22 lines coded); then verify the lines, header, totals and code set. Not seeded: billing-rule-draft (needs its own OK).
 - No invoice lines on the two Microsoft invoices: expected, since they have no law-firm lines.
 
 ## Filed
