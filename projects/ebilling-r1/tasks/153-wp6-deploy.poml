@@ -45,7 +45,7 @@
 
   <constraints>
     <constraint source="project CLAUDE.md section 5">Dev only; no secrets in the repo or notes (setting names only).</constraint>
-    <constraint source=".claude/skills/bff-deploy/SKILL.md">BFF only through scripts/Deploy-BffApi.ps1 with hash verification.</constraint>
+    <constraint source="project CLAUDE.md (2026-10-17 entry), amended 2026-11-03">This task never deploys the dev BFF. SPA-r3 deploys spaarke-bff-dev from its branch; ebilling asks SPA-r3 for the deploy of a named master SHA and verifies the result. Before asking, Set-ChildRecordCreatorPersonSchema.ps1 -Verify must exit 0.</constraint>
     <constraint source="project CLAUDE.md section 3">Solution source: only WP6 eBilling components and the export UI navigation entry, via the 029 procedure; no real import, no Assemble, no version bump.</constraint>
     <constraint source="project">Index deploy -DryRun first; a recreate of spaarke-invoices-index only if 152's notes call for it and the main session agreed.</constraint>
     <constraint source="project">No destructive Dataverse change; test export batches and paid invoices are dev test data, recorded by id.</constraint>
@@ -66,8 +66,8 @@
     <step order="1">Preconditions: every dependency shows ✅ in TASK-INDEX.md; dotnet build and dotnet test green; record the commit SHA. Collect from 150-152 notes: routes, setting names, components created in dev, index recreate need.</step>
     <step order="2">Index: Deploy-AllIndexes.ps1 -Environment dev -Indexes invoices-index -DryRun, then for real, then -VerifyOnly; record output.</step>
     <step order="3">App Service settings: verify Finance__EbillingOutputContainerId and Ebilling__Enabled on spaarke-bff-dev; set any new setting named in the notes (values never written to notes).</step>
-    <step order="4">BFF: scripts/Deploy-BffApi.ps1 against spaarke-bff-dev; hash verification passed; /healthz Healthy.</step>
-    <step order="5">UI: build and deploy 151's surface (code page via code-page-deploy / Deploy-WebResourceInline.ps1, or views and ribbon per its option); deploy its grid configuration rows; publish touched components only.</step>
+    <step order="4">BFF: run Set-ChildRecordCreatorPersonSchema.ps1 -Verify (must exit 0), then ask SPA-r3 to deploy the master SHA carrying 150-152 to spaarke-bff-dev. Verify the deployed build carries that SHA and /healthz is Healthy. (2026-11-03: 150 and 151a-c are already on dev at 5796774091; only 152 remains.)</step>
+    <step order="5">UI (2026-11-03: the ApExport code page, ribbon script, both RibbonDiffs, the batch Active view and the 3 invoice views are already on dev; see notes/151b-export-ui.md and 151c1b-email-ui.md, and verify instead of redeploying): build and deploy 151's surface (code page via code-page-deploy / Deploy-WebResourceInline.ps1, or views and ribbon per its option); deploy its grid configuration rows; publish touched components only.</step>
     <step order="6">Solution source: for every WP6 component (151's views, configuration-backed web resource, commands, sitemap entry for the export page in the Matter Management app; any column 150 or 151 added), follow 029 steps 4-6 (completeness check, AddSolutionComponent, export to temp, copy only those eBilling files and hunks, pac pack, Import-SolutionScoped -PlanOnly). Record the diff summary.</step>
     <step order="7">Route smoke: every route added by 150 and 151 — unauthenticated (expect 401), finance user (expect 200 / 201), non-finance user on a write route (expect 403). Record status codes.</step>
     <step order="8">End to end: approve two invoices (or use approved test invoices), create an export batch in the UI, verify CSV and JSON documents in the E-Billing Output Files container and both invoices Sent to AP; try exporting one again (expect refusal); Mark Paid one (expect Paid) and try Mark Paid on an Approved invoice (expect 409).</step>
