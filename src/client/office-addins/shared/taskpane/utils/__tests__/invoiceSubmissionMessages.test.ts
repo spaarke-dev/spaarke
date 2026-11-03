@@ -14,6 +14,9 @@ import {
   FILING_KEPT_MESSAGE,
   GENERIC_SUBMISSION_MESSAGE,
   HELD_FOR_REVIEW_MESSAGE,
+  FIRM_MISSING_CODE,
+  REPLACED_BY_CORRECTION_CODE,
+  describeAcceptedOutcome,
   isRetryableSubmissionRefusal,
   PERMANENT_SUBMISSION_CODES,
 } from '../invoiceSubmissionMessages';
@@ -393,6 +396,26 @@ describe('invoice submission messages — task 094', () => {
     ).toMatch(/Try again in a moment\. The email itself was filed/);
     expect(describeSubmissionRefusal({ kind: 'refused', status: 409, code: 'x.new', filingKept: true })).toBe(
       `${GENERIC_SUBMISSION_MESSAGE} ${FILING_KEPT_MESSAGE}`
+    );
+  });
+});
+
+describe('describeAcceptedOutcome — firm_missing (ebilling EB-D-185, §9)', () => {
+  it('must-fire: the firm_missing code is the contract sentence, exactly', () => {
+    expect(FIRM_MISSING_CODE).toBe('ebilling.submission.firm_missing');
+    expect(describeAcceptedOutcome(FIRM_MISSING_CODE)).toBe(
+      'Submitted without a firm. A reviewer will add the firm before approval.'
+    );
+  });
+
+  it('must-not-fire: any other code is still the held sentence, no code is none, replaced_by_correction is unchanged', () => {
+    expect(describeAcceptedOutcome('ebilling.held.duplicate_suspected')).toBe(HELD_FOR_REVIEW_MESSAGE);
+    expect(describeAcceptedOutcome('ebilling.submission.firm_missing_x')).toBe(HELD_FOR_REVIEW_MESSAGE);
+    expect(describeAcceptedOutcome(null)).toBeUndefined();
+    expect(describeAcceptedOutcome(undefined)).toBeUndefined();
+    expect(describeAcceptedOutcome(REPLACED_BY_CORRECTION_CODE)).toBe('This invoice was replaced by a correction.');
+    expect(describeAcceptedOutcome(REPLACED_BY_CORRECTION_CODE, 'INV-1.2')).toBe(
+      'This invoice was replaced by a correction (tracking INV-1.2).'
     );
   });
 });

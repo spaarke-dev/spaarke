@@ -83,8 +83,17 @@ export const HELD_FOR_REVIEW_MESSAGE =
 export const REPLACED_BY_CORRECTION_CODE = 'ebilling.submission.replaced_by_correction';
 
 /**
+ * §9 (ebilling EB-D-185): an Accepted submission made without a firm. The invoice is accepted and then held until a
+ * reviewer sets a firm.
+ */
+export const FIRM_MISSING_CODE = 'ebilling.submission.firm_missing';
+/** The sentence for {@link FIRM_MISSING_CODE} (the contract's wording). */
+export const FIRM_MISSING_MESSAGE = 'Submitted without a firm. A reviewer will add the firm before approval.';
+
+/**
  * The sentence for an Accepted submission: none without a code, the replaced-by-correction sentence for
- * {@link REPLACED_BY_CORRECTION_CODE}, and {@link HELD_FOR_REVIEW_MESSAGE} for any other code.
+ * {@link REPLACED_BY_CORRECTION_CODE}, {@link FIRM_MISSING_MESSAGE} for {@link FIRM_MISSING_CODE}, and
+ * {@link HELD_FOR_REVIEW_MESSAGE} for any other code.
  */
 export function describeAcceptedOutcome(
   code: string | null | undefined,
@@ -96,6 +105,7 @@ export function describeAcceptedOutcome(
       ? `This invoice was replaced by a correction (tracking ${replacedByTrackingNumber}).`
       : 'This invoice was replaced by a correction.';
   }
+  if (code === FIRM_MISSING_CODE) return FIRM_MISSING_MESSAGE;
   return HELD_FOR_REVIEW_MESSAGE;
 }
 
