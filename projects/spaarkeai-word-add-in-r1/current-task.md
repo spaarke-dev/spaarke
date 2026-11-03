@@ -9,8 +9,8 @@
 | Field | Value |
 |---|---|
 | **Task** | **133 🔄 Outlook Submit Invoice view** (FULL, opus/high). Live on dev in unified package 1.1.3; corrections on (#2525). Side fix in flight: **PR #2531** (NAA sign-in for new Outlook / OWA). |
-| **Status** | **PR #2531** (C:\wt133t, branch `fix/office-naa-detection`, head **3d5211c2ae**): owner go 2026-11-03 for option A. Two full adversarial passes done, every fix-now fixed; the scoped re-check of d1c875a6f1 was clean, and the K2/K4 tidy-ups are in 3d5211c2ae (Spaarke.Auth 272/272). CI was running at 14:5xZ; a monitor waits for every check to finish, including the non-required `Gated jest suites (office-addins)`. |
-| **Next Action** | When all #2531 checks finish with none failed: `gh pr merge 2531 --auto --merge` (never `--delete-branch`). After the merge: confirm the "Deploy Office Add-ins to Azure Static Web App" run, then ask the owner to live test on dev in new Outlook (their machine), OWA, classic Outlook and Word desktop. In the console, look for `[OfficeNaaStrategy] host=… platform=… NestedAppAuth1.1=…` and "initialized via NAA broker". JS only, so no package bump. Then remove C:\wt133t with Remove-WorktreeSafe. |
+| **Status** | **PR #2531 MERGED** at 21730d5d65 (2026-11-03; 35 pass, 10 skipping, 0 failed incl. the gated jest check). SWA deploy run 41661250220 succeeded; the live `89.bundle.js` (shared by the Outlook and Word panes) carries the new strategy. No package bump (JS only). C:\wt133t removed. |
+| **Next Action** | Owner live test on dev: new Outlook (their machine), OWA, classic Outlook, Word desktop. In the console (F12 / Edge DevTools for the pane), look for `[OfficeNaaStrategy] host=… platform=… NestedAppAuth1.1=…` and "initialized via NAA broker" (or "NAA bridge not available; initialized via standard popup client"). If new Outlook still shows Request Too Long, ask for that console output. Rollback = revert 21730d5d65 on master. |
 
 ## PR #2531 — what it does (for the live test and the PR notes)
 - `OfficeNaaStrategy.detectNaaSupport()`: gate = `isSetSupported('NestedAppAuth','1.1')` on every host (old version thresholds removed); Word on the web stays on the popup.
