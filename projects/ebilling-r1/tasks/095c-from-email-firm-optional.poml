@@ -4,7 +4,7 @@
     <title>Submit Invoice from email: the firm is optional; a no-firm invoice is held "firm needed" and cannot be approved</title>
     <phase>3 Rules (follow-up to 095; owner UAT 2026-11-03)</phase>
     <gate>owner decided 2026-11-03 in the ebilling session (hold until a firm is set; Decision Record; renumber if secure)</gate>
-    <status>not-started</status>
+    <status>in-progress</status>
     <rigor>FULL</rigor>
     <rigor-reason>Changes the intake contract, the tracking-number allocator's inputs and the approval gate; tags include bff-api and auth.</rigor-reason>
     <model-tier>opus</model-tier>
