@@ -263,6 +263,8 @@ export const InvoiceView: React.FC<InvoiceViewProps> = ({
   const [coreRecord, setCoreRecord] = useState<EntitySearchResult | null>(null);
   const [invoice, setInvoice] = useState<EntitySearchResult | null>(null);
   const [firms, setFirms] = useState<FirmLoad>({ status: 'none' });
+  /** The request `firms` describes ({@link firmsKey} when its effect last ran); it lags the chosen record by a render. */
+  const [firmsFor, setFirmsFor] = useState<string | null>(null);
   const [firmId, setFirmId] = useState('');
   const [firmInvoiceNumber, setFirmInvoiceNumber] = useState('');
   const [poNumber, setPoNumber] = useState('');
@@ -368,7 +370,14 @@ export const InvoiceView: React.FC<InvoiceViewProps> = ({
       }
       if (controller.signal.aborted || !followed) return;
       setPrevious({ status: 'ready', submission: followed, following: false });
-      if (!isRunning(followed.status)) announce(previousSubmissionTitle(followed), 'polite');
+      if (!isRunning(followed.status)) {
+        announce(
+          followed.message
+            ? `${previousSubmissionTitle(followed)}. ${followed.message}`
+            : previousSubmissionTitle(followed),
+          'polite'
+        );
+      }
     })();
     return () => controller.abort();
   }, [loadPreviousSubmission, followPreviousSubmission, previousReload, announce]);
@@ -408,10 +417,14 @@ export const InvoiceView: React.FC<InvoiceViewProps> = ({
     };
   }, [hostAdapter]);
 
-  // The firms linked to the chosen core record. A newer choice supersedes an older request.
+  // The firms linked to the chosen core record. A newer choice supersedes an older request. `firmsKey` names the
+  // record and the reload count, so `firms` is only used for the record it was loaded for (see `detailsReady`), and a
+  // reload (Retry, or Done on a finished submission) re-runs this even when the record object is unchanged.
+  const firmsKey = coreRecord ? `${coreRecord.id}:${firmsReload}` : null;
   useEffect(() => {
     const request = ++firmRequestRef.current;
     setFirmId('');
+    setFirmsFor(firmsKey);
     if (!coreRecord || !isCoreRecordType(coreRecord.entityType)) {
       setFirms({ status: 'none' });
       return;
@@ -437,7 +450,7 @@ export const InvoiceView: React.FC<InvoiceViewProps> = ({
         });
       }
     );
-  }, [coreRecord, loadFirms, firmsReload]);
+  }, [coreRecord, loadFirms, firmsReload, firmsKey]);
 
   // A correction of the chosen invoice: read what it must keep and whether it can be made (§10). A newer choice
   // supersedes an older request.
@@ -548,10 +561,12 @@ export const InvoiceView: React.FC<InvoiceViewProps> = ({
   const detailsReady =
     mode === 'new'
       ? // The firm is optional (EB-D-185), but not while the list is loading: a record's only firm is auto-selected
-        // when it arrives, and a submit before that would send "no firm" for a record that has one.
+        // when it arrives, and a submit before that would send "no firm" for a record that has one. `firms` must also
+        // describe the CURRENT record: for the render in which the record changed, it still describes the previous one.
         coreRecord !== null &&
         isCoreRecordType(coreRecord.entityType) &&
         firms.status !== 'loading' &&
+        firmsFor === firmsKey &&
         normalizedNumber !== null
       : correction !== null && normalizeFirmInvoiceNumber(correction.firmInvoiceNumber) !== null;
 
@@ -603,7 +618,10 @@ export const InvoiceView: React.FC<InvoiceViewProps> = ({
     if (result.kind !== 'success' && result.kind !== 'ended') setPreviousReload(n => n + 1);
     announce(
       result.kind === 'success'
-        ? 'Invoice submitted.'
+        ? // The outcome sentence too (firm_missing, held, replaced): the visible bar says it, so a screen reader must.
+          result.message
+          ? `Invoice submitted. ${result.message}`
+          : 'Invoice submitted.'
         : result.kind === 'ended'
           ? `${ENDED_TITLES[result.status]}. ${result.message}`
           : result.message,
@@ -658,6 +676,9 @@ export const InvoiceView: React.FC<InvoiceViewProps> = ({
       setCoreRecord(filedRecord);
       setInvoice(null);
       setFirmId('');
+      // The firm effect re-runs even when the record is unchanged (the filed record is the same object): it lists the
+      // firms again and re-selects a record's only firm, which `setFirmId('')` above just cleared.
+      setFirmsReload(n => n + 1);
       setFirmInvoiceNumber('');
       setPoNumber('');
       setRetryableInARow(0);
@@ -921,7 +942,7 @@ export const InvoiceView: React.FC<InvoiceViewProps> = ({
     if (firms.status === 'error') {
       return (
         <>
-          <Field label="Firm" validationState="error" validationMessage={firms.message}>
+          <Field label="Firm" validationState="error" validationMessage={`${firms.message} ${HELD_FOR_FIRM}`}>
             <Select disabled value="">
               <option value="">Choose a firm</option>
             </Select>
