@@ -100,6 +100,9 @@
       - the firm-code step of coding: coding by the matter's code set still runs;
       - billing rule evaluation entirely, including the Duplicate priors, recorded with the existing rules.not_checked finding and the firm_missing hold.
       Nothing in BillingFactLoader changes (ontology-owned): it is not called for a no-firm invoice.
+      Correction (ontology-r1, 2026-11-03): a skipped evaluation produces NO rules.not_checked today. InvoiceSubmissionPersister.RulesNotChecked (:1445) is empty when evaluation is null, so every line would read Clean, which breaks EB-D-175.
+      095c-3 must flag EVERY line rules.not_checked explicitly when evaluation is skipped for no firm. Test: a no-firm invoice has no Clean line. Seed-proof this guard.
+      No client-default rule set runs: a partial run would mark firm-scoped rules and Duplicate as checked.
       095d's assign-firm runs the full pipeline (resolution, firm coding, rule evaluation) once the firm is set.
       Split, run serially, each its own commits (Opus, high effort):
       095c-1: the schema script and SpaarkeMaster source; the allocator taking Guid? and the phase probe; the in-memory key store with scope; the race test with a null firm and the phase tests; ParentLineage refusing sprk_trackingscope; the source scan that ListAsync, DecideReadOneAsync and the replacement gate never read the scope; the "Notice for uac-r2" notes section.

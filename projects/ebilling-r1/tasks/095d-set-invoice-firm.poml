@@ -66,7 +66,11 @@
       - the caller checks: AppendTo on the core, Write on each Signal's subject;
       - a close that fails answers 503, never "decided".
       Findings that need a firm (rates, timekeepers, firm coding) are re-evaluated after the firm is set. They become new Signals, outside the resolved set.
-      Per 095c's design, a no-firm invoice skipped resolution, firm coding and rule evaluation entirely, so this task runs all three once the firm is set, through the existing pipeline entry points and not a second copy. The rules.not_checked finding is closed by that run.
+      Per 095c's design, a no-firm invoice skipped resolution, firm coding and rule evaluation entirely, so this task runs all three once the firm is set, through the existing pipeline entry points and not a second copy. rules.not_checked is a LINE FLAG in lineFindings[], not a Signal (ontology-r1, 2026-11-03), and nothing removes it today (InvoiceCorrectionReevaluation.cs:1015).
+      - This task RECOMPUTES the flags from the new evaluation (RulesNotChecked over its refusals) rather than clearing them all. A line a refused rule still did not check stays flagged. If the post-assignment evaluation faults, the flags stay (the safe default) and the answer is 503.
+      - The post-assignment run is a second evaluation of a persisted submission. Make sure the persister's resume and idempotency logic does not take it for a resume of the intake run (which writes nothing), and test that.
+      - Its billing Signals are new D-13 keys (episode 1 under each rule's code).
+      - A blocking failure found after assignment does NOT reject: the invoice is a person's decision in progress. It joins the D-101 held set, with override and return available, and no "automated:" rejection Decision Record is written. State this in the notes; the owner may revisit it.
     </constraint>
     <constraint source="uac-r2 2026-11-03 (binding)">
       No new visibility rule: invoice and file visibility are unchanged. After the firm is set, the SUBMISSION becomes visible to that firm's users who can read its core record. 095d adds a new writer of guarded columns, so these conditions apply:
