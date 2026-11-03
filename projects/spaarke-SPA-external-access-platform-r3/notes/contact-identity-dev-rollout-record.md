@@ -190,3 +190,8 @@
 - **Readback** (13:30:33Z): ProductVersion `+5796774091…`; /healthz 200, /healthz/dataverse 200, anonymous /api/me 401. Settings unchanged (225).
 - **After-notices** sent to all five. uac-r2's gate runs from 13:29:19Z, with the external, finance export-batches and verified server-send splits. ebilling then imports the ApExport code page, ribbons and views.
 - **Rollback:** redeploy `3740e1a105`, or restore the snapshot above.
+- **After the deploy (ebilling, 2026-11-03):**
+  - The ApExport UI was imported (code page, ribbon script, ribbons and views on `sprk_invoice` and `sprk_billingexport`, entity-scoped publishes).
+  - The owner created `sprk_invoice.sprk_trackingnumber` (Text 100) on dev at about 13:45Z. It was missing, and every dev BFF build R3 has recorded since §10 (9f4e3820b2, 2026-10-30) writes it on the invoice create (`InvoiceSubmissionPersister`). So any channel's invoice create on dev failed until then.
+  - Known effect: one submission (INV-792345.1, 2026-11-03). The only other dev submission (2026-10-31) failed earlier in the pipeline and never reached the create.
+  - The column was missing from SpaarkeMaster `sprk_Invoice/Entity.xml`. ebilling added it on work/ebilling-r1 (21aec9a10b), and it reaches master with the next ebilling PR. The retry of a permanent schema fault is #2529.
