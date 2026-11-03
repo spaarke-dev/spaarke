@@ -16,4 +16,7 @@
   - No app-only calls and no Dataverse writes.
 - **Then:** the owner opens the batch, checks there is no New button on the AP emails grid (Add Existing may still show; known limit K1), and clicks Email to AP.
 - **Check:** uac-r2 looks in App Insights for the route status, the server-only send line, no OWNERSHIP-REFUSED, and no inbound filing of the message.
+- **The export as the owner failed twice:** batches f6788e95 (15:43) and ac07ec43 (16:20, dev local time) were left Failed. The owner's account is in the root business unit, and export files refuse a root-unit owner (194b R4b-2c). The owner decided to leave both rows. The retry runs as demo@demo.spaarke.com (BU1) from the invoice view's Export to AP.
+- **The fix** is merged into work as a6ff149cd9, notes/150. The owner check now runs before anything is written, and a root unit gets a 409 `ebilling.export.owner_unit_not_allowed`. uac-r2 passed it on all four points on 2026-11-03.
+- **Owed:** the live proof that the pre-check passes for a BU1 caller on the real resolver. Record it here after the first BU1 export on a BFF that has the fix.
 - Result: (pending)
