@@ -168,9 +168,10 @@ public static class InvoiceSubmissionEndpoints
         // may read, for the add-in's "already submitted" banner. The filter is step 0, the shape check of the Message-ID (the uniform 404) and
         // the caller's table-level Read on submissions; the per-record Read on the .eml and on each candidate submission is the handler's,
         // through HoldsReadAsync (the same finance.read check, on the rights snapshot so that Faulted is seen), because a skipped candidate must not deny the whole route and a rights fault must
-        // be a 503 here, never "not submitted".
+        // be a 503 here, never "not submitted". The filter runs in the fail-closed mode (review F1, uac-r2 binding): a genuine denial (no table Read, a
+        // step-0 refusal of an external caller) is the uniform 404, but a step-0 read fault or a table-privilege read with no answer is the same 503.
         group.MapGet("/invoice-submissions", GetByEmailAsync)
-            .AddFinanceAuthorizationFilter(ResolveByEmailTargets, FinanceDenial.UniformNotFound)
+            .AddFinanceAuthorizationFilter(ResolveByEmailTargets, FinanceDenial.UniformNotFoundFailClosed)
             .RequireEbillingEnabled()
             .WithName("GetInvoiceSubmissionByEmail")
             .WithSummary("The latest invoice submission of an email (by its Message-ID) that the caller can read")
@@ -821,6 +822,8 @@ public static class InvoiceSubmissionEndpoints
             attemptQuery.Criteria.AddCondition(
                 InvoiceSubmissionService.SourceEmailDocumentColumn, Microsoft.Xrm.Sdk.Query.ConditionOperator.In, readableEmls.ToArray());
             attemptQuery.AddOrder("createdon", Microsoft.Xrm.Sdk.Query.OrderType.Descending);
+            // A tie-break (two attempts created in the same instant): the order, and so the answer, is the same on every read.
+            attemptQuery.AddOrder(TrackingNumberAllocator.SubmissionIdColumn, Microsoft.Xrm.Sdk.Query.OrderType.Descending);
             var attempts = (await ReadOrUnavailableAsync(() => entities.RetrieveMultipleAsync(attemptQuery, ct), logger, "the email's attempts", ct)).Entities;
 
             foreach (var row in attempts.Take(MaxAttemptCandidates))

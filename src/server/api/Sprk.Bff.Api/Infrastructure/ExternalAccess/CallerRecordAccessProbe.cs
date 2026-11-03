@@ -8,6 +8,25 @@ using Sprk.Bff.Api.Infrastructure.Dataverse;
 namespace Sprk.Bff.Api.Infrastructure.ExternalAccess;
 
 /// <summary>
+/// The answer of <see cref="CallerRecordAccessProbe.CallerPrivilegeAnswerAsync"/>: whether the caller holds a Dataverse table
+/// privilege, with "Dataverse gave no complete answer" kept apart from "the caller does not hold it" (ebilling-r1 task 095a review F1).
+/// </summary>
+public enum CallerPrivilegeAnswer
+{
+    /// <summary>Dataverse answered and the privilege is among the caller's.</summary>
+    Held,
+
+    /// <summary>Dataverse answered and the privilege is not among the caller's.</summary>
+    NotHeld,
+
+    /// <summary>
+    /// No complete answer (no token, OBO unavailable, a failed exchange or identity lookup, a non-success response, an exception).
+    /// A route that must never turn "could not decide" into a denial renders this as its own fault.
+    /// </summary>
+    Faulted,
+}
+
+/// <summary>
 /// Answers ONE question, for ONE record, AS THE CALLER: <i>what rights does the human who made this
 /// request hold on this Dataverse record?</i>
 /// </summary>
@@ -518,9 +537,30 @@ public class CallerRecordAccessProbe
     /// themselves, uncached.</para>
     ///
     /// <para><b>Fail closed.</b> No token, a failed exchange, an unresolved caller, a non-success response, an
-    /// unparseable body, or any exception answers <c>false</c>.</para>
+    /// unparseable body, or any exception answers <c>false</c>. A route that must tell "the caller does not hold it" from
+    /// "Dataverse gave no answer" asks <see cref="CallerPrivilegeAnswerAsync"/> instead (ebilling-r1 task 095a review F1).</para>
     /// </remarks>
     public virtual async Task<bool> CallerHoldsPrivilegeAsync(
+        string? callerBearerToken,
+        string privilegeName,
+        CancellationToken ct = default) =>
+        await CallerPrivilegeAnswerAsync(callerBearerToken, privilegeName, ct).ConfigureAwait(false) == CallerPrivilegeAnswer.Held;
+
+    /// <summary>
+    /// The question of <see cref="CallerHoldsPrivilegeAsync"/> with a three-state answer: held, not held (Dataverse answered and the
+    /// privilege is not among the caller's), or <see cref="CallerPrivilegeAnswer.Faulted"/> (no complete answer).
+    /// </summary>
+    /// <remarks>
+    /// <para>Added by ebilling-r1 task 095a review F1 (uac-r2 binding: a route must never answer the no-match 404 when it could not
+    /// decide). <c>GET /api/finance/invoice-submissions?internetMessageId=</c> asks its table-level Read through this method, so an
+    /// OBO, WhoAmI or privilege-read fault is a 503 there and only a real "not held" is the uniform 404. Every other caller keeps
+    /// <see cref="CallerHoldsPrivilegeAsync"/>, which maps a fault to <c>false</c> exactly as before: the logic below is the one body of both.</para>
+    /// <para><b>Faulted</b>: no usable privilege name, no caller token, OBO or the environment URL not configured, a failed OBO
+    /// exchange, an unresolved caller systemuser, a non-success response, or an exception. <b>NotHeld</b>: a success response that
+    /// does not list the privilege (<see cref="ResponseGrantsPrivilege"/>: an empty array, another privilege or an unreadable body).
+    /// A cancelled request still throws.</para>
+    /// </remarks>
+    public virtual async Task<CallerPrivilegeAnswer> CallerPrivilegeAnswerAsync(
         string? callerBearerToken,
         string privilegeName,
         CancellationToken ct = default)
@@ -534,20 +574,20 @@ public class CallerRecordAccessProbe
                 FallbackMarker, privilegeName, !string.IsNullOrWhiteSpace(callerBearerToken), OboAvailable,
                 !string.IsNullOrEmpty(_environmentUrl));
 
-            return false;
+            return CallerPrivilegeAnswer.Faulted;
         }
 
         var dataverseToken = await ExchangeForDataverseTokenAsync(
             callerBearerToken, $"privilege {privilegeName}", ct).ConfigureAwait(false);
         if (dataverseToken is null)
         {
-            return false;
+            return CallerPrivilegeAnswer.Faulted;
         }
 
         var callerSystemUserId = await ResolveCallerSystemUserIdAsync(dataverseToken, ct).ConfigureAwait(false);
         if (callerSystemUserId is null)
         {
-            return false;
+            return CallerPrivilegeAnswer.Faulted;
         }
 
         var names = JsonSerializer.Serialize(new[] { privilegeName });
@@ -567,14 +607,14 @@ public class CallerRecordAccessProbe
                 _logger.LogWarning(
                     "[{Marker}] RetrieveUserSetOfPrivilegesByNames returned {StatusCode} for {Privilege}. Denying.",
                     FallbackMarker, (int)response.StatusCode, privilegeName);
-                return false;
+                return CallerPrivilegeAnswer.Faulted;
             }
 
             var body = await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
             var holds = ResponseGrantsPrivilege(body, privilegeName);
 
             _logger.LogInformation("[DELEGATION] Caller holds {Privilege}: {Holds}", privilegeName, holds);
-            return holds;
+            return holds ? CallerPrivilegeAnswer.Held : CallerPrivilegeAnswer.NotHeld;
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -584,7 +624,7 @@ public class CallerRecordAccessProbe
         {
             _logger.LogWarning(ex,
                 "[{Marker}] RetrieveUserSetOfPrivilegesByNames threw for {Privilege}. Denying.", FallbackMarker, privilegeName);
-            return false;
+            return CallerPrivilegeAnswer.Faulted;
         }
     }
 

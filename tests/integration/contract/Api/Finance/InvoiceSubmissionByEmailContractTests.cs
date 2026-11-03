@@ -52,6 +52,7 @@ public sealed class InvoiceSubmissionByEmailContractTests : IAsyncLifetime
     private readonly List<Entity> _attempts = new();
     private readonly Dictionary<Guid, string?> _people = new();
     private readonly List<QueryExpression> _queries = new();
+    private readonly List<string> _doubleErrors = new();
     private readonly Mock<IGenericEntityService> _entities = new();
     private Exception? _emlQueryFault;
     private Exception? _attemptQueryFault;
@@ -75,36 +76,27 @@ public sealed class InvoiceSubmissionByEmailContractTests : IAsyncLifetime
                     _queries.Add(q);
                 }
 
-                var keys = q.Criteria.Conditions.FirstOrDefault(c => c.Operator == ConditionOperator.In)?.Values.Select(v => v).ToList() ?? [];
-                if (q.EntityName == "sprk_document")
+                try
                 {
-                    if (_emlQueryFault is { } fault)
+                    if (q.EntityName == "sprk_document")
                     {
-                        return Task.FromException<EntityCollection>(fault);
+                        return _emlQueryFault is { } fault ? Task.FromException<EntityCollection>(fault) : Task.FromResult(AnswerEmlQuery(q));
                     }
 
-                    // Dataverse string equality ignores case; the key set is the spellings the route asked.
-                    var found = _emls.Where(d => d.Value.Archive && keys.OfType<string>().Any(k => string.Equals(k, d.Value.MessageId, StringComparison.OrdinalIgnoreCase)))
-                        .Select(d => new Entity("sprk_document", d.Key)).Take(q.TopCount ?? int.MaxValue).ToList();
-                    return Task.FromResult(new EntityCollection(found));
-                }
-
-                if (q.EntityName == InvoiceSubmissionService.SubmissionEntity)
-                {
-                    if (_attemptQueryFault is { } fault)
+                    if (q.EntityName == InvoiceSubmissionService.SubmissionEntity)
                     {
-                        return Task.FromException<EntityCollection>(fault);
+                        return _attemptQueryFault is { } fault ? Task.FromException<EntityCollection>(fault) : Task.FromResult(AnswerAttemptQuery(q));
                     }
 
-                    var wanted = keys.OfType<Guid>().ToHashSet();
-                    var rows = _attempts
-                        .Where(r => r.GetAttributeValue<EntityReference>(InvoiceSubmissionService.SourceEmailDocumentColumn) is { } link && wanted.Contains(link.Id))
-                        .OrderByDescending(r => r.GetAttributeValue<DateTime>("createdon"))
-                        .Take(q.TopCount ?? int.MaxValue).ToList();
-                    return Task.FromResult(new EntityCollection(rows));
+                    return Task.FromException<EntityCollection>(new InvalidOperationException("unexpected query " + q.EntityName));
                 }
-
-                return Task.FromException<EntityCollection>(new InvalidOperationException("unexpected query " + q.EntityName));
+                catch (NotSupportedException ex)
+                {
+                    // The double does not understand a condition, order or join the route sent: the test fails (in DisposeAsync, so even a
+                    // test that expects a 503 cannot pass on it) rather than answer from a query the double did not read (095a review F3).
+                    _doubleErrors.Add(ex.Message);
+                    return Task.FromException<EntityCollection>(ex);
+                }
             });
         _entities.Setup(e => e.RetrieveAsync("systemuser", It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
             .Returns((string _, Guid id, string[] _, CancellationToken _) =>
@@ -161,6 +153,89 @@ public sealed class InvoiceSubmissionByEmailContractTests : IAsyncLifetime
         _client.Dispose();
         await _app.StopAsync();
         await _app.DisposeAsync();
+        _doubleErrors.Should().BeEmpty("the Dataverse double answers only queries it understands (a condition, order or join it does not read would make a test pass on nothing)");
+    }
+
+    /// <summary>
+    /// The .eml query as Dataverse answers it: EVERY condition the route sent is applied (case-insensitive string match for <c>In</c> on the
+    /// Message-ID, the archive flag only when the route asks for it), so a condition the route drops changes the answer; a condition, nested
+    /// filter, join or order the double does not read is <see cref="NotSupportedException"/>.
+    /// </summary>
+    private EntityCollection AnswerEmlQuery(QueryExpression q)
+    {
+        RequireFlat(q);
+        if (q.Orders.Count > 0)
+        {
+            throw new NotSupportedException("an order on the .eml query");
+        }
+
+        IEnumerable<KeyValuePair<Guid, (string MessageId, bool Archive)>> rows = _emls;
+        foreach (var condition in q.Criteria.Conditions.ToList())
+        {
+            var values = condition.Values.Cast<object>().ToList();
+            rows = (condition.AttributeName, condition.Operator) switch
+            {
+                ("sprk_emailmessageid", ConditionOperator.In) =>
+                    rows.Where(d => values.OfType<string>().Any(k => string.Equals(k, d.Value.MessageId, StringComparison.OrdinalIgnoreCase))).ToList(),
+                ("sprk_isemailarchive", ConditionOperator.Equal) =>
+                    rows.Where(d => values.Count == 1 && values[0] is bool wanted && d.Value.Archive == wanted).ToList(),
+                _ => throw new NotSupportedException($"the condition {condition.AttributeName} {condition.Operator} on the .eml query"),
+            };
+        }
+
+        return new EntityCollection(rows.Select(d => new Entity("sprk_document", d.Key)).Take(q.TopCount ?? int.MaxValue).ToList());
+    }
+
+    /// <summary>
+    /// The attempt query as Dataverse answers it: the link condition applied, then the query's own orders IN ORDER (createdon, then the
+    /// submission id), then <c>TopCount</c>. With no order the rows come back in the order they were stored, so an order the route drops
+    /// changes which attempt answers (095a review F3).
+    /// </summary>
+    private EntityCollection AnswerAttemptQuery(QueryExpression q)
+    {
+        RequireFlat(q);
+        IEnumerable<Entity> rows = _attempts;
+        foreach (var condition in q.Criteria.Conditions.ToList())
+        {
+            var values = condition.Values.Cast<object>().ToList();
+            rows = (condition.AttributeName, condition.Operator) switch
+            {
+                (InvoiceSubmissionService.SourceEmailDocumentColumn, ConditionOperator.In) =>
+                    rows.Where(r => r.GetAttributeValue<EntityReference>(InvoiceSubmissionService.SourceEmailDocumentColumn) is { } link
+                        && values.OfType<Guid>().Contains(link.Id)).ToList(),
+                _ => throw new NotSupportedException($"the condition {condition.AttributeName} {condition.Operator} on the attempt query"),
+            };
+        }
+
+        IOrderedEnumerable<Entity>? ordered = null;
+        foreach (var order in q.Orders)
+        {
+            Func<Entity, object> key = order.AttributeName switch
+            {
+                "createdon" => r => r.GetAttributeValue<DateTime>("createdon"),
+                TrackingNumberAllocator.SubmissionIdColumn => r => r.Id,
+                _ => throw new NotSupportedException($"an order on {order.AttributeName} on the attempt query"),
+            };
+            var descending = order.OrderType == OrderType.Descending;
+            if (ordered is null)
+            {
+                ordered = descending ? rows.OrderByDescending(key) : rows.OrderBy(key);
+            }
+            else
+            {
+                ordered = descending ? ordered.ThenByDescending(key) : ordered.ThenBy(key);
+            }
+        }
+
+        return new EntityCollection((ordered ?? rows).Take(q.TopCount ?? int.MaxValue).ToList());
+    }
+
+    private static void RequireFlat(QueryExpression q)
+    {
+        if (q.Criteria.Filters.Count > 0 || q.LinkEntities.Count > 0 || q.Criteria.FilterOperator != LogicalOperator.And)
+        {
+            throw new NotSupportedException("a nested filter, an OR filter or a join");
+        }
     }
 
     private sealed class ThrowingAccess(IAccessDataSource inner, HashSet<Guid> throwFor) : IAccessDataSource
@@ -192,21 +267,27 @@ public sealed class InvoiceSubmissionByEmailContractTests : IAsyncLifetime
 
     private static string Normalise(string body) => Regex.Replace(body, "\"correlationId\":\"[^\"]*\"", "\"correlationId\":\"x\"");
 
-    /// <summary>The .eml of <see cref="MessageId"/> (readable unless said otherwise).</summary>
-    private void SeedEml(Guid? id = null, string? messageId = null, bool readable = true)
+    /// <summary>
+    /// The .eml of <see cref="MessageId"/> (readable unless said otherwise). <paramref name="archive"/> false seeds a document of the same
+    /// Message-ID that is NOT the email archive (<c>sprk_isemailarchive</c> false): the route must never consider it.
+    /// </summary>
+    private void SeedEml(Guid? id = null, string? messageId = null, bool readable = true, bool archive = true)
     {
         var emlId = id ?? Eml;
-        _emls[emlId] = (messageId ?? MessageId, true);
+        _emls[emlId] = (messageId ?? MessageId, archive);
         _access.Grant(FinanceAuthorizationFilter.DocumentEntitySet, emlId, readable ? AccessRights.Read : AccessRights.None);
     }
 
-    /// <summary>An attempt naming <paramref name="eml"/>, readable unless said otherwise; <paramref name="ageMinutes"/> older than the base day.</summary>
+    /// <summary>
+    /// An attempt naming <paramref name="eml"/>, readable unless said otherwise; <paramref name="ageMinutes"/> older than the base day.
+    /// <paramref name="id"/> fixes the submission id (the tie-break order).
+    /// </summary>
     private Entity SeedAttempt(
         string tracking, InvoiceSubmissionStatus status, int ageMinutes = 0, Guid? eml = null, bool readable = true, Guid? person = null,
-        Guid? invoice = null, Guid? correctionOf = null, string? reason = null)
+        Guid? invoice = null, Guid? correctionOf = null, string? reason = null, Guid? id = null)
     {
-        var id = Guid.NewGuid();
-        var row = new Entity(InvoiceSubmissionService.SubmissionEntity, id)
+        var attemptId = id ?? Guid.NewGuid();
+        var row = new Entity(InvoiceSubmissionService.SubmissionEntity, attemptId)
         {
             ["sprk_processingstatus"] = new OptionSetValue((int)status),
             [TrackingNumberAllocator.TrackingNumberColumn] = tracking,
@@ -240,7 +321,7 @@ public sealed class InvoiceSubmissionByEmailContractTests : IAsyncLifetime
         }
 
         _attempts.Add(row);
-        _access.Grant(FinanceAuthorizationFilter.InvoiceSubmissionEntitySet, id, readable ? AccessRights.Read : AccessRights.None);
+        _access.Grant(FinanceAuthorizationFilter.InvoiceSubmissionEntitySet, attemptId, readable ? AccessRights.Read : AccessRights.None);
         return row;
     }
 
@@ -363,6 +444,69 @@ public sealed class InvoiceSubmissionByEmailContractTests : IAsyncLifetime
         var newest = SeedAttempt("1001.2", InvoiceSubmissionStatus.Accepted, ageMinutes: 2, eml: OtherEml);
 
         (await BodyAsync(await GetAsync())).GetProperty("submissionId").GetGuid().Should().Be(newest.Id);
+    }
+
+    [Fact(DisplayName = "095a F3: a document of the same Message-ID that is not the email archive is never considered, however new its attempt (seed-proof: the sprk_isemailarchive condition)")]
+    public async Task NonArchiveDocumentOfTheSameMessageId_IsIgnored()
+    {
+        SeedEml();
+        SeedEml(OtherEml, archive: false);
+        var mine = SeedAttempt("1001.1", InvoiceSubmissionStatus.Failed, ageMinutes: 10, eml: Eml);
+        SeedAttempt("1001.2", InvoiceSubmissionStatus.Accepted, ageMinutes: 1, eml: OtherEml);
+
+        var body = await BodyAsync(await GetAsync());
+
+        body.GetProperty("submissionId").GetGuid().Should().Be(mine.Id, "the newer attempt names a document that is not the email archive");
+        _queries.First(q => q.EntityName == "sprk_document").Criteria.Conditions
+            .Should().Contain(c => c.AttributeName == "sprk_isemailarchive" && c.Operator == ConditionOperator.Equal && true.Equals(c.Values.Single()));
+        _queries.Single(q => q.EntityName == InvoiceSubmissionService.SubmissionEntity).Criteria.Conditions
+            .Single(c => c.AttributeName == InvoiceSubmissionService.SourceEmailDocumentColumn).Values.Cast<Guid>()
+            .Should().BeEquivalentTo(new[] { Eml }, "only the archive's id is asked for");
+    }
+
+    [Fact(DisplayName = "095a F3: an email whose only document of that Message-ID is not the email archive: the uniform 404")]
+    public async Task OnlyANonArchiveDocument_IsTheUniform404()
+    {
+        SeedEml(archive: false);
+        SeedAttempt("1001.1", InvoiceSubmissionStatus.Accepted);
+
+        (await GetAsync()).StatusCode.Should().Be(HttpStatusCode.NotFound);
+        _queries.Should().NotContain(q => q.EntityName == InvoiceSubmissionService.SubmissionEntity);
+    }
+
+    [Fact(DisplayName = "095a F3: the attempts are asked newest first (createdon descending, then the submission id descending) (seed-proof: the AddOrder calls)")]
+    public async Task TheAttemptQuery_IsOrderedNewestFirst_ThenBySubmissionId()
+    {
+        SeedEml();
+        SeedAttempt("1001.1", InvoiceSubmissionStatus.Failed, ageMinutes: 10);
+
+        await GetAsync();
+
+        _queries.Single(q => q.EntityName == InvoiceSubmissionService.SubmissionEntity).Orders
+            .Select(o => (o.AttributeName, o.OrderType))
+            .Should().Equal(("createdon", OrderType.Descending), (TrackingNumberAllocator.SubmissionIdColumn, OrderType.Descending));
+    }
+
+    [Theory(DisplayName = "095a F3: two attempts created in the same instant: the one with the higher submission id answers, whichever was stored first (the tie-break)")]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task SameInstant_TheHigherSubmissionIdAnswers(bool lowStoredFirst)
+    {
+        var low = Guid.Parse("095a0000-0000-4000-8000-0000000000b1");
+        var high = Guid.Parse("095a0000-0000-4000-8000-0000000000b2");
+        SeedEml();
+        if (lowStoredFirst)
+        {
+            SeedAttempt("1001.1", InvoiceSubmissionStatus.Failed, id: low);
+            SeedAttempt("1001.2", InvoiceSubmissionStatus.Accepted, id: high);
+        }
+        else
+        {
+            SeedAttempt("1001.2", InvoiceSubmissionStatus.Accepted, id: high);
+            SeedAttempt("1001.1", InvoiceSubmissionStatus.Failed, id: low);
+        }
+
+        (await BodyAsync(await GetAsync())).GetProperty("submissionId").GetGuid().Should().Be(high);
     }
 
     [Fact(DisplayName = "095a: a submission with no person recorded: submittedBy null; the service identity (createdby) is never named")]
@@ -510,21 +654,26 @@ public sealed class InvoiceSubmissionByEmailContractTests : IAsyncLifetime
             && c.Values.OfType<string>().Any(v => v.Contains("not-a-message-id"))));
     }
 
-    [Fact(DisplayName = "095a: a step-0 refusal (an external caller) is the uniform 404, and nothing is read")]
-    public async Task Step0Refusal_IsTheUniform404()
+    [Theory(DisplayName = "095a F1: a step-0 refusal that is a decision (an external caller, a caller with no systemuser row) is the uniform 404, and nothing is read")]
+    [InlineData(StepZeroCallerKind.FlagTrue)]
+    [InlineData(StepZeroCallerKind.NoSystemUserRow)]
+    public async Task Step0Refusal_IsTheUniform404(StepZeroCallerKind kind)
     {
         SeedEml();
         SeedAttempt("1001.1", InvoiceSubmissionStatus.Accepted);
-        StepZero.Kind = StepZeroCallerKind.FlagTrue;
+        StepZero.Kind = kind;
+        var noMatch = await NoMatchBodyAsync(); // the no-match body, asked as the same refused caller (the body must not depend on the cause)
 
         var response = await GetAsync();
 
         response.StatusCode.Should().Be(HttpStatusCode.NotFound);
-        Normalise(await response.Content.ReadAsStringAsync()).Should().Be(await NoMatchBodyAsync());
+        Normalise(await response.Content.ReadAsStringAsync()).Should().Be(noMatch);
+        noMatch.Should().Contain("sdap.access.deny.record_unavailable");
         _queries.Should().BeEmpty();
+        _probe.Calls.Should().BeEmpty("step 0 refuses before the privilege is asked");
     }
 
-    [Fact(DisplayName = "095a: a caller without the table-level Read on submissions: the uniform 404, and nothing is read")]
+    [Fact(DisplayName = "095a F1: a caller without the table-level Read on submissions (Dataverse answered, the privilege is not held): the uniform 404, and nothing is read")]
     public async Task NoTableRead_IsTheUniform404()
     {
         SeedEml();
@@ -534,7 +683,10 @@ public sealed class InvoiceSubmissionByEmailContractTests : IAsyncLifetime
         var response = await GetAsync();
 
         response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        (await response.Content.ReadAsStringAsync()).Should().Contain("sdap.access.deny.record_unavailable");
         _queries.Should().BeEmpty();
+        _probe.Calls.Should().ContainSingle(c => c.Privilege == InvoiceSubmissionEndpoints.ReadSubmissionPrivilege && c.HasToken,
+            "the three-state question is asked with the caller's token");
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -565,6 +717,90 @@ public sealed class InvoiceSubmissionByEmailContractTests : IAsyncLifetime
         _attemptQueryFault = new TimeoutException();
 
         await Is503Async(await GetAsync());
+    }
+
+    [Fact(DisplayName = "095a F1: a fault answering the caller's table-level Read (OBO, WhoAmI or privilege-read fault) is 503, never the no-match 404, and nothing is read")]
+    public async Task PrivilegeProbeFault_Is503_NotTheNoMatch404()
+    {
+        SeedEml();
+        SeedAttempt("1001.1", InvoiceSubmissionStatus.Accepted);
+        _probe.FaultFor.Add(InvoiceSubmissionEndpoints.ReadSubmissionPrivilege);
+
+        await Is503Async(await GetAsync());
+        _queries.Should().BeEmpty("a caller whose privilege could not be read is answered before anything is read");
+
+        // Control (must not fire): the same caller once the probe answers is a plain yes.
+        _probe.FaultFor.Clear();
+        (await GetAsync()).StatusCode.Should().Be(HttpStatusCode.OK);
+    }
+
+    [Fact(DisplayName = "095a F1: a privilege probe that throws is 503, never the no-match 404")]
+    public async Task PrivilegeProbeThrows_Is503()
+    {
+        SeedEml();
+        SeedAttempt("1001.1", InvoiceSubmissionStatus.Accepted);
+        _probe.ThrowOnEveryCall = new TimeoutException("WhoAmI timed out");
+
+        await Is503Async(await GetAsync());
+        _queries.Should().BeEmpty();
+    }
+
+    [Theory(DisplayName = "095a F1: a step-0 fault (the sprk_isexternal flag read or the systemuser lookup faults) is 503, never the no-match 404, and nothing is read")]
+    [InlineData(StepZeroCallerKind.FlagReadFault)]
+    [InlineData(StepZeroCallerKind.LookupFault)]
+    public async Task Step0Fault_Is503_NotTheNoMatch404(StepZeroCallerKind kind)
+    {
+        SeedEml();
+        SeedAttempt("1001.1", InvoiceSubmissionStatus.Accepted);
+        StepZero.Kind = kind;
+
+        await Is503Async(await GetAsync());
+        _queries.Should().BeEmpty();
+        _probe.Calls.Should().BeEmpty("step 0 faults before the privilege is asked");
+
+        // Control (must not fire): the same caller once the lookup answers (internal) is a plain yes.
+        StepZero.Kind = StepZeroCallerKind.FlagFalse;
+        (await GetAsync()).StatusCode.Should().Be(HttpStatusCode.OK);
+    }
+
+    [Fact(DisplayName = "095a F3: more than 50 .eml documents of one Message-ID: 503 (cannot decide), never a partial answer; exactly 50 still decides")]
+    public async Task MoreThanFiftyEmls_Is503_ExactlyFiftyDecides()
+    {
+        var ids = Enumerable.Range(0, InvoiceSubmissionEndpoints.MaxEmlCandidates + 1).Select(_ => Guid.NewGuid()).ToList();
+        foreach (var id in ids)
+        {
+            SeedEml(id);
+        }
+
+        SeedAttempt("1001.1", InvoiceSubmissionStatus.Accepted, eml: ids[0]);
+
+        await Is503Async(await GetAsync());
+        _queries.Should().NotContain(q => q.EntityName == InvoiceSubmissionService.SubmissionEntity, "no attempt is read once the .eml set is over the cap");
+
+        // Control (must not fire): exactly the cap decides.
+        _emls.Remove(ids[^1]);
+        (await GetAsync()).StatusCode.Should().Be(HttpStatusCode.OK);
+    }
+
+    [Fact(DisplayName = "095a F3: none of the newest 50 attempts readable and more exist: 503 (cannot decide); exactly 50 unreadable is the no-match 404; a readable newest of 51 answers")]
+    public async Task MoreThanFiftyAttempts_NoneReadable_Is503_Controls()
+    {
+        SeedEml();
+        var cap = InvoiceSubmissionEndpoints.MaxAttemptCandidates;
+        for (var i = 0; i <= cap; i++)
+        {
+            SeedAttempt("1001." + (i + 1), InvoiceSubmissionStatus.Failed, ageMinutes: i, readable: false);
+        }
+
+        await Is503Async(await GetAsync());
+
+        // Control (must not fire): exactly the cap, none readable, is a decision: nothing readable, the no-match 404.
+        _attempts.RemoveAt(_attempts.Count - 1);
+        (await GetAsync()).StatusCode.Should().Be(HttpStatusCode.NotFound);
+
+        // Control (must not fire): over the cap, but the newest is readable: it answers.
+        var newest = SeedAttempt("1001.0", InvoiceSubmissionStatus.Accepted, ageMinutes: -1);
+        (await BodyAsync(await GetAsync())).GetProperty("submissionId").GetGuid().Should().Be(newest.Id);
     }
 
     [Fact(DisplayName = "095a: a fault reading the caller's rights on the .eml (thrown) is 503, not the 404")]

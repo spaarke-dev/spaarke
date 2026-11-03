@@ -84,7 +84,7 @@ public class CallerPrivilegeCheckTests
         assertions.MintCount.Should().BeGreaterThan(0, "the guard let a token through to the exchange");
     }
 
-    private static CallerRecordAccessProbe ConfiguredProbe(IClientAssertionProvider assertions)
+    private static (IConfiguration Configuration, OrderedCredentialClientProvider Credentials) ConfiguredObo(IClientAssertionProvider assertions)
     {
         var configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
         {
@@ -102,8 +102,142 @@ public class CallerPrivilegeCheckTests
             NullLogger<OrderedCredentialClientProvider>.Instance,
             assertions);
 
+        return (configuration, credentials);
+    }
+
+    private static CallerRecordAccessProbe ConfiguredProbe(IClientAssertionProvider assertions)
+    {
+        var (configuration, credentials) = ConfiguredObo(assertions);
+
         return new CallerRecordAccessProbe(
             new HttpClient(new NoNetworkHandler()), configuration, NullLogger<CallerRecordAccessProbe>.Instance, credentials);
+    }
+
+    // ── The three-state answer (ebilling-r1 task 095a review F1: a fault is not a "no") ──
+
+    private const string Privilege = "prvCreatesprk_Invoice";
+
+    /// <summary>The exchange and WhoAmI seams answered by the test; the privilege read goes through the REAL code and a canned HTTP handler.</summary>
+    private sealed class SeamProbe(
+        HttpMessageHandler handler, IConfiguration configuration, OrderedCredentialClientProvider credentials, string? dataverseToken, Guid? caller)
+        : CallerRecordAccessProbe(new HttpClient(handler), configuration, NullLogger<CallerRecordAccessProbe>.Instance, credentials)
+    {
+        protected override Task<string?> ExchangeForDataverseTokenAsync(string callerBearerToken, string context, CancellationToken ct) =>
+            Task.FromResult(dataverseToken);
+
+        protected override Task<Guid?> ResolveCallerSystemUserIdAsync(string dataverseToken, CancellationToken ct) => Task.FromResult(caller);
+    }
+
+    private static SeamProbe Seamed(HttpMessageHandler handler, string? dataverseToken = "dv-token", Guid? caller = null)
+    {
+        var (configuration, credentials) = ConfiguredObo(new RecordingAssertionProvider());
+        return new SeamProbe(handler, configuration, credentials, dataverseToken, caller ?? Guid.Parse("095a0000-0000-4000-8000-0000000000c1"));
+    }
+
+    private sealed class CannedHandler(Func<HttpResponseMessage> respond) : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
+            Task.FromResult(respond());
+    }
+
+    private static HttpResponseMessage Json(System.Net.HttpStatusCode status, string body) =>
+        new(status) { Content = new StringContent(body, System.Text.Encoding.UTF8, "application/json") };
+
+    [Fact]
+    public async Task PrivilegeAnswer_ListedInTheResponse_IsHeld()
+    {
+        var probe = Seamed(new CannedHandler(() => Json(System.Net.HttpStatusCode.OK, Held)));
+
+        (await probe.CallerPrivilegeAnswerAsync("caller-token", Privilege)).Should().Be(CallerPrivilegeAnswer.Held);
+        (await probe.CallerHoldsPrivilegeAsync("caller-token", Privilege)).Should().BeTrue();
+    }
+
+    [Theory]
+    [InlineData("""{"RolePrivileges":[]}""")]
+    [InlineData("""{"RolePrivileges":[{"Depth":"Deep","PrivilegeName":"prvReadsprk_Invoice"}]}""")]
+    public async Task PrivilegeAnswer_DataverseAnsweredWithoutThePrivilege_IsNotHeld_NotAFault(string body)
+    {
+        var probe = Seamed(new CannedHandler(() => Json(System.Net.HttpStatusCode.OK, body)));
+
+        (await probe.CallerPrivilegeAnswerAsync("caller-token", Privilege)).Should().Be(CallerPrivilegeAnswer.NotHeld);
+        (await probe.CallerHoldsPrivilegeAsync("caller-token", Privilege)).Should().BeFalse();
+    }
+
+    [Theory]
+    [InlineData(System.Net.HttpStatusCode.InternalServerError)]
+    [InlineData(System.Net.HttpStatusCode.ServiceUnavailable)]
+    [InlineData(System.Net.HttpStatusCode.TooManyRequests)]
+    [InlineData(System.Net.HttpStatusCode.Unauthorized)]
+    public async Task PrivilegeAnswer_ANonSuccessResponse_IsFaulted_AndTheBoolQuestionStaysFalse(System.Net.HttpStatusCode status)
+    {
+        var probe = Seamed(new CannedHandler(() => Json(status, "{}")));
+
+        (await probe.CallerPrivilegeAnswerAsync("caller-token", Privilege)).Should().Be(CallerPrivilegeAnswer.Faulted);
+        (await probe.CallerHoldsPrivilegeAsync("caller-token", Privilege)).Should().BeFalse("the bool question maps a fault to false, as before");
+    }
+
+    [Fact]
+    public async Task PrivilegeAnswer_TheHttpCallThrows_IsFaulted()
+    {
+        var probe = Seamed(new ThrowingHandler(new HttpRequestException("connection reset")));
+
+        (await probe.CallerPrivilegeAnswerAsync("caller-token", Privilege)).Should().Be(CallerPrivilegeAnswer.Faulted);
+    }
+
+    [Fact]
+    public async Task PrivilegeAnswer_AFailedOboExchange_IsFaulted_WithoutAskingDataverse()
+    {
+        var probe = Seamed(new NoNetworkHandler(), dataverseToken: null);
+
+        (await probe.CallerPrivilegeAnswerAsync("caller-token", Privilege)).Should().Be(CallerPrivilegeAnswer.Faulted);
+    }
+
+    [Fact]
+    public async Task PrivilegeAnswer_AnUnresolvedCaller_IsFaulted_WithoutAskingDataverse()
+    {
+        var (configuration, credentials) = ConfiguredObo(new RecordingAssertionProvider());
+        var probe = new SeamProbe(new NoNetworkHandler(), configuration, credentials, "dv-token", caller: null);
+
+        (await probe.CallerPrivilegeAnswerAsync("caller-token", Privilege)).Should().Be(CallerPrivilegeAnswer.Faulted);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    public async Task PrivilegeAnswer_NoCallerToken_IsFaulted_WithoutAnyExchange(string? token)
+    {
+        var assertions = new RecordingAssertionProvider();
+        var probe = ConfiguredProbe(assertions);
+
+        (await probe.CallerPrivilegeAnswerAsync(token, Privilege)).Should().Be(CallerPrivilegeAnswer.Faulted);
+        assertions.MintCount.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task PrivilegeAnswer_OboNotConfigured_IsFaulted()
+    {
+        var probe = new CallerRecordAccessProbe(
+            new HttpClient(new NoNetworkHandler()), new ConfigurationBuilder().Build(), NullLogger<CallerRecordAccessProbe>.Instance);
+
+        (await probe.CallerPrivilegeAnswerAsync("caller-token", Privilege)).Should().Be(CallerPrivilegeAnswer.Faulted);
+    }
+
+    [Fact]
+    public async Task PrivilegeAnswer_ACancelledRequest_StillThrows()
+    {
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+        var probe = Seamed(new ThrowingHandler(new OperationCanceledException(cts.Token)));
+
+        var act = () => probe.CallerPrivilegeAnswerAsync("caller-token", Privilege, cts.Token);
+
+        await act.Should().ThrowAsync<OperationCanceledException>();
+    }
+
+    private sealed class ThrowingHandler(Exception fault) : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
+            Task.FromException<HttpResponseMessage>(fault);
     }
 
     /// <summary>
