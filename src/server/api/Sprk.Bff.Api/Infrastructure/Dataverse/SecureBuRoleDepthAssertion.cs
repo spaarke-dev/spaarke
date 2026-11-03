@@ -282,12 +282,26 @@ public static class SecureBuRoleDepthAssertion
 
     /// <summary>
     /// The NFR-05 depth list (<see cref="RestrictedContentPrivileges"/>): one finding per listed privilege the environment
-    /// did not return and the codified set does not list (clause 5 names those), so clause 1 could not grade that table.
+    /// did not return, so clause 1 could not grade that table, except where clause 5 already names it (see below).
     /// </summary>
     private static IEnumerable<SecureBuFinding> EvaluateRestrictedContentResolution(SecureBuRoleDepthCensus census)
     {
+        var coverage = census.OwnerRoleCoverage;
+
+        // Clause 5 names a codified table the environment lacks only when it can grade at all: tables present and exactly one
+        // owner role that is not a replica. Where it cannot (it returns early), this clause is the only one naming the
+        // privilege (089a review K6); where it can, it already did, and a second finding would double-report.
+        var clauseFiveGrades = coverage.Tables.Count > 0 && coverage.OwnerRoleCount == 1 && coverage.InheritedFromRootRoleId is null;
+
         foreach (var (logicalName, privilegeName) in census.UnresolvedRestrictedContentPrivileges)
         {
+            if (clauseFiveGrades
+                && coverage.Tables.Any(t => !t.ExistsInEnvironment
+                                            && string.Equals(t.PrivilegeName, privilegeName, StringComparison.OrdinalIgnoreCase)))
+            {
+                continue;
+            }
+
             yield return new SecureBuFinding(
                 SecureBuVerdict.RestrictedContentPrivilegeNotResolved,
                 $"The NFR-05 depth list requires {privilegeName} (table {logicalName}), but this environment has no privilege of "
@@ -834,13 +848,20 @@ public static class SecureBuRoleDepthCensusBuilder
         }
 
         // ebilling-r1 (NFR-05 depth list): the hard-deny tables' Reads are graded too, codified or not. One not returned by
-        // the environment is graded nowhere and is reported (once: clause 5 names it when the codified set lists it).
+        // the environment is graded nowhere and is reported (once: clause 5 names it when it can grade the codified set).
         var codifiedPrivileges = ownerRoleSet.Tables.Select(t => t.PrivilegeName).ToHashSet(StringComparer.OrdinalIgnoreCase);
         var restricted = SecureBuRoleDepthAssertion.RestrictedContentPrivileges
             .Where(entry => !codifiedPrivileges.Contains(entry.PrivilegeName)
                             && !SecureBuRoleDepthAssertion.GuardedPrivileges.Contains(entry.PrivilegeName, StringComparer.OrdinalIgnoreCase))
             .ToArray();
-        var unresolvedRestricted = restricted.Where(entry => !returnedNames.ContainsKey(entry.PrivilegeName)).ToArray();
+
+        // 089a review K6: EVERY depth-list entry the environment did not return, codified or not. A codified one is named by
+        // clause 5 too, but only when clause 5 can grade (exactly one non-replica owner role); the evaluator drops this
+        // report where clause 5 speaks, so each missing privilege still yields exactly one finding naming it.
+        var unresolvedRestricted = SecureBuRoleDepthAssertion.RestrictedContentPrivileges
+            .Where(entry => !SecureBuRoleDepthAssertion.GuardedPrivileges.Contains(entry.PrivilegeName, StringComparer.OrdinalIgnoreCase)
+                            && !returnedNames.ContainsKey(entry.PrivilegeName))
+            .ToArray();
 
         var childTables = SecureBuRoleDepthAssertion.GuardedChildTables(ownerRoleSet)
             .Select(table => (PrivilegeName: table.PrivilegeName, LogicalName: table.LogicalName))
@@ -1166,7 +1187,7 @@ public sealed record SecureBuRoleDepthCensus(
 {
     /// <summary>
     /// The NFR-05 depth-list privileges (<see cref="SecureBuRoleDepthAssertion.RestrictedContentPrivileges"/>) the environment
-    /// did not return and the codified set does not list: one finding each. Empty when every one resolved.
+    /// did not return: one finding each, except a codified one clause 5 names itself. Empty when every one resolved.
     /// </summary>
     public IReadOnlyList<(string LogicalName, string PrivilegeName)> UnresolvedRestrictedContentPrivileges { get; init; } =
         Array.Empty<(string, string)>();

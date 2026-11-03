@@ -101,7 +101,9 @@ public class SecureChildRecordRuleSetLineageTests
             _world.OwnerOf(table, id).Should().Be(DataversePrincipalRef.Team(_world.OwnerTeam), $"{table} follows its matter");
         }
 
-        // The assignment CITES the rule it excludes: the Procedure's base rule is not filed under the assignment.
+        // The Procedure's base rule is not reached from the Secure matter. The citation of the excluded rule is NOT what this
+        // assertion proves (it passes with the citation removed): that is pinned by SecureChildLineageTests (IsCitation) and by
+        // AnAssignment_ExcludingAnotherSecureMattersRecordRule_FollowsItsOwnMatterOutOfIsolation below.
         AssertProcedureRulesUntouched();
     }
 
@@ -150,6 +152,36 @@ public class SecureChildRecordRuleSetLineageTests
         _world.OwnerWrites.Should().BeEmpty("nothing is filed under the Secure matter");
         _world.OwnerOf("sprk_ruleset", ordinarySet).Should().Be(DataversePrincipalRef.Team(ContentTeam));
         _world.OwnerOf("sprk_policy", ordinaryRule).Should().Be(DataversePrincipalRef.Team(ContentTeam));
+        AssertProcedureRulesUntouched();
+    }
+
+    [Fact(DisplayName = "089a must not fire: an assignment that excludes a Secure matter's record rule is not held in isolation by that rule")]
+    public async Task AnAssignment_ExcludingAnotherSecureMattersRecordRule_FollowsItsOwnMatterOutOfIsolation()
+    {
+        // The citation case. sprk_excludedpolicy targets sprk_policy, an ownership parent, so it is a candidate parent unless it
+        // is a citation. This matter is mid-unsecure and its assignment excludes the record rule of ANOTHER, still Secure matter.
+        // Read as a parent, that rule (isolated by its own matter) would keep the assignment Secure (secure-if-any); cited, the
+        // assignment is filed under its own matter only and follows it out of isolation to the content team.
+        var otherSecureMatter = Guid.NewGuid();
+        var (otherSet, otherRule) = (Guid.NewGuid(), Guid.NewGuid());
+        _world.Add(Matter, MatterId, ("owningteam", TeamRef(CustomerTeam)), ("sprk_issecure", true)); // mid-unsecure, flag cleared last
+        _world.SecureRoot(Matter, otherSecureMatter);
+        _world.SecureChild("sprk_ruleset", otherSet, ("sprk_matter", Matter, otherSecureMatter))
+            .SecureChild("sprk_policy", otherRule, ("sprk_ruleset", "sprk_ruleset", otherSet))
+            .SecureChild("sprk_procedureassignment", AssignmentId,
+                ("sprk_matter", Matter, MatterId), ("sprk_excludedpolicy", "sprk_policy", otherRule));
+        ProcedureRules();
+
+        var report = await Reconciler().ReconcileAsync(
+            Matter, MatterId, SecureChildReconcileMode.Apply, SecureChildPassTrigger.Unsecure, CancellationToken.None);
+
+        _world.OwnerOf("sprk_procedureassignment", AssignmentId).Should().Be(
+            DataversePrincipalRef.Team(ContentTeam), "the assignment cites the rule it excludes and follows its own matter");
+        report.Changes.Should().ContainSingle(c => c.Id == AssignmentId)
+            .Which.Outcome.Should().Be(SecureChildRowOutcome.Changed);
+        _world.OwnerOf("sprk_policy", otherRule).Should().NotBe(DataversePrincipalRef.Team(ContentTeam),
+            "the other matter's rule stays in its own isolation");
+        _world.OwnerWrites.Select(w => w.Id).Should().NotContain(new[] { otherSet, otherRule });
         AssertProcedureRulesUntouched();
     }
 }
