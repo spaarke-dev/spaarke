@@ -138,8 +138,84 @@ The named constant is guarded by `the pass-through example table is not a BFF cr
   - In the harness with no field security, `POST /child-records/sprk_matter` with `sprk_issecure: true` returned 201 and wrote the flag. The Project refuses with `secure_flag_transition_only`, because it inherits.
   - Live, `sprk_issecure` is field-secured, so the caller-context write is refused (403 `child_record.denied`), and the seam test asserts that path.
   - The only guard is therefore field security. A server-side refusal belongs in `RecordTableRules.cs`, which is off-limits to task 020 (task 041). Not fixed here.
+  - **Fixed in fix round 1** (below): the service refuses it at step 6.
 - **Deferred (main files the issue): should the ribbon-only tables (`sprk_budget`, `sprk_kpiassessment`, `sprk_billingevent`) join the client `BFF_CHILD_CREATE_TABLES`?** They are created through the route only by ribbon commands, so the agreement test names them in `RibbonOnlyCreateTables`.
 - **Deviation:** the publish delta ran from a scratch copy of `publish-delta.ps1` with different temporary worktree paths. This avoids a collision with task 041, which may be running the same script at the same time on `C:\tmp\hpdm` and `C:\tmp\hpdb`. The logic is unchanged.
+
+## Fix round 1 (F-1): a Matter create may not name `sprk_issecure`
+
+Set-up:
+- Merged `origin/work/field-mapping-server-write-path-r1` at bdd152a521 (task 041 plus a master merge) into `task/fm-020` as 3c4941bec5, with no conflicts.
+- After the merge, the build was green and the task 020 seam tests passed 32 of 32 before any change.
+
+**The rule (UAC-r2, 2026-11-03).** A Matter create that names `sprk_issecure` is refused by the SERVICE (ADR-008 path A, no endpoint check):
+- reason `sdap.access.secure_flag_transition_only` (`AccessFollowsParent.SecureFlagReasonCode`);
+- the project's refusal text (`SecureRootInheritance.SecureFlagRefusalText`) and the project's HTTP mapping: `PlanRefused` → `RecordCreationRefusalKind.Forbidden` → 403;
+- true, false and null are all refused: naming the column at all is the refusal.
+
+**Where it lives.** `src/server/api/Sprk.Bff.Api/Services/RecordCreation/RecordCreationService.cs`, step 6 (the secure-root plan), in the branch for tables that inherit nothing. It applies to `SecureRootInheritance.IsParent(table)`, which in that branch is only `sprk_matter`. It refuses through the step's own `PlanRefused`, with `RecordOwnerResolution.Refused(SecureFlagReasonCode, SecureFlagRefusalText)`.
+
+Why here and not elsewhere:
+- **Not the registry (`RecordTableRules`).** Its server-owned columns are refused at step 2 as `blocked_column` (400, "set by Spaarke — omit it"), and its pre-write rules map to 400 or 404. Neither gives the project's code or its 403.
+- **Not `SecureRootInheritance.cs` or `SecureRootFilingGate.cs`.** Neither file is changed. Their `PlanCreateAsync` returns at once for a table that does not inherit, and the gate is shared by other writers (update tools, field-mapping push), whose contract this fix must not change.
+
+Step 6 is the one place every create path reaches, it already owns this refusal for project and work assignment, and it runs after step 2. So, as for a project, a field-secured column is still refused first by the caller's own column check (403 `child_record.denied`, live).
+
+**The access column (`sprk_accessinheritance`).** Not applied: `sprk_matter` does not carry it.
+- `scripts/Set-AccessInheritanceSchema.ps1:154` creates it only on `@('sprk_workassignment', 'sprk_project')`.
+- The solution source has it only in `sprk_Project`, `sprk_WorkAssignment` and `sprk_Document` `Entity.xml`, with no `sprk_Matter`.
+- `AccessInheritance.Column`'s own doc agrees.
+
+A matter create that names it fails Dataverse's own attribute validation. `RecordTableRules.SecureRootAccessColumns` lists it for a matter only as mapping-protected, which is harmless.
+
+**"Names" includes a JSON null in a mapped item.** `OwnedChildWrite.WritesOf` leaves a JSON-null body column out (it lists a null only for a cleared lookup), yet the create still writes it. The matter check therefore also reads the item's `Columns`. Without that, a system principal's mapped item with `"sprk_issecure": null` was created; that was the red case `system: True, value: null`.
+
+**Paths covered.** Every path that creates a matter goes through `RecordCreationService.CreateAsync`, so step 6 covers all of them:
+
+| Path | How it reaches the service | Test |
+|---|---|---|
+| Child-records route | `ChildRecordEndpoints.CreateAsync` → service, caller Web API body | `RouteCreate_ARootNamingTheSecureFlag_WithoutFieldSecurity_IsRefusedSecureFlagTransitionOnly_403_AndNothingIsCreated` (matter: true, false, null; project rows as controls) |
+| Chat `dataverse.create_record` | `DataverseCreateRecordHandler.cs:430` → service, caller mapped item. `sprk_matter` is a registered table, so it takes the owned path. Refused after the confirmation, as a project's flag is; `ValidateChat`'s pure pre-check covers step 2 columns only (unchanged) | `MatterSecureFlagChatRefusalTests` (true, false, null): `ErrorCode` = the reason, nothing created |
+| Office quick-create | `OfficeService.cs:2431` → service, caller Web API body. Its payload is built from the fixed `QuickCreateRequest` DTO (name, description, type, practice area, …), so a caller cannot name the flag. A mapping rule onto it is skipped, because `sprk_matter`'s `MappingProtectedColumns` include `SecureRootAccessColumns`. | `MatterSecureFlagServiceRefusalTests`, caller Web API body (the Office and route shape: true, false, null) |
+| System writers (playbooks, signals, any app-only caller) | service, `RecordCreationPrincipal.ForSystem`, mapped item | `MatterSecureFlagServiceRefusalTests`, system principal (true, false, null) |
+
+No matter create path bypasses the service: the Office core that used to create directly was deleted in 018, and the chat path for a registered table is the service. The client wizards create matters through `Xrm.WebApi` (see "Real-world check"), which is outside the BFF. There, field security is the guard, unchanged.
+
+**Legitimate senders: none.**
+- `matterService.ts`, the `CreateMatterWizard` and the LegalWorkspace `matterService.ts` never write `sprk_issecure` (grep).
+- No secure-matter provisioning creates a matter through the service. `ProvisionProjectEndpoint.cs:4113` and `UnsecureProjectEndpoint.cs:815` write the flag as an UPDATE of an existing record, not a create.
+- The Office quick-create cannot carry it.
+- The only service create that writes the flag is step 9's own write on a project or work assignment created into isolation, which is server-set after step 6.
+
+**Tests (failing first).**
+- **RED**, before the fix (filter `MatterSecureFlag | RouteCreate_ARoot | RouteCreate_ACallerSuppliedSecureFlag | RouteCreate_AnUnfiledMatter`): **12 failed**:
+  - route matter true, false and null: 201 instead of 403;
+  - service caller and system, true, false and null (6): created;
+  - chat true, false and null: created.
+  The controls passed:
+  - route project true, false and null;
+  - the field-security theory, both tables;
+  - the unfiled matter (must-not-fire);
+  - service matter without the flag, caller and system (must-not-fire).
+- **First fix:** `WritesOf` only. It left 1 failure, system + null, which led to the `Columns` clause above.
+- **GREEN:** 49 of 49 = the 32 task 020 seam tests + 6 route + 8 service + 3 chat.
+- **The existing field-security seam test** (`RouteCreate_ACallerSuppliedSecureFlagOnARoot_IsRefused403_AndNothingIsCreated`) still asserts 403 `child_record.denied` for both tables, because step 2 runs before step 6. Only its doc comment changed: the "a matter's is not" parenthetical became the step order.
+
+**F-2, found and NOT fixed (for main to file or route to UAC-r2).** The same JSON-null gap exists for project and work assignment.
+- A system principal's mapped item `{ "sprk_issecure": null }` on an unfiled `sprk_project` or `sprk_workassignment` is NOT refused. The create writes `sprk_issecure = null`.
+- Probe: a temporary test over `CreateWorld`, since removed. Both tables returned `Succeeded`, with body `sprk_issecure=` present.
+- Cause: `SecureRootFilingGate.PlanCreateAsync` and `SecureRootInheritance.PlanCreateAsync` both ask `NamesSecureFlag(OwnedChildWrite.WritesOf(item))`, and `WritesOf` drops JSON-null body columns.
+- Caller paths are unaffected: the route, chat and Office nulls are refused, as the project control rows show.
+- This is UAC-r2's rule in UAC-r2's files. Tightening it for project and work assignment changes their behaviour beyond F-1, so it is reported rather than fixed. The one-line fix is the same `Columns` clause, in the gate, or in the service before it calls the plan.
+
+**Verification, fix round 1** (`verify-suites.sh` over the fix, after the merge):
+- Solution build: 0 warnings, 0 errors.
+- ArchTests (rebuilt): **1911 of 1911 passed**. The ISS-005 timing guard passed in the full run this time.
+- BFF filtered suites: **6607 passed, 0 failed, 7 skipped** (the pre-existing skips).
+- No TypeScript changed in this round, so jest was not rerun.
+- After the pre-commit `dotnet format`, the 49 seam tests were rerun on the committed code: 49 of 49.
+- Publish delta (the scratch copy of `publish-delta.ps1`), origin/master 249809ce0b against 47dd89ba00: **+591 bytes, total 39.3 MB**. This includes task 041, which is on the work branch but not yet on master.
+- CVE: "no vulnerable packages given the current sources".
 
 ## Verification
 
