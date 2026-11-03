@@ -101,6 +101,12 @@ public static class FinanceModule
         // Scoped like its callers (the pipeline's scoped processor). Unconditional (flag rule above): the processor always calls it.
         services.AddScoped<IEbillingNotificationSink, NoOpEbillingNotificationSink>();
 
+        // Submission outcome bell (ebilling-r1 task 095b): the job handler tells the submitter, in the model-driven app's bell, when a submission
+        // reaches a final status (after it is committed; never fails or delays the outcome). Concrete (ADR-010: one implementation; no second
+        // is planned, task 132's channels are the sink's). Scoped like the handler that calls it. Unconditional (flag rule above): NotificationService
+        // is a singleton registered by AnalysisServicesModule's unconditional notification services.
+        services.AddScoped<SubmissionOutcomeNotifier>();
+
         // Rate card and timekeeper import / publish (ebilling-r1 task 078, FR-29 / FR-08): template, all-or-nothing import into a Draft card,
         // overlap re-check and publish. Concrete (ADR-010: no interface, no second implementation). Scoped: holds the scoped Dataverse
         // clients and the SPE facade. Unconditional (flag rule above); the routes carry the kill switch.

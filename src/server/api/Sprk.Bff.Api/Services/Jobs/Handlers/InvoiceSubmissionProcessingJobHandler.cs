@@ -100,6 +100,7 @@ public sealed class InvoiceSubmissionProcessingJobHandler : IJobHandler
     private readonly IInvoiceSubmissionPersister _persister;
     private readonly IInvoiceSubmissionAfterSteps _afterSteps;
     private readonly IEbillingNotificationSink _sink;
+    private readonly SubmissionOutcomeNotifier _notifier;
     private readonly IIdempotencyService _idempotency;
     private readonly IOptionsMonitor<EbillingOptions> _ebilling;
     private readonly StoredFileService _files;
@@ -114,6 +115,7 @@ public sealed class InvoiceSubmissionProcessingJobHandler : IJobHandler
         IInvoiceSubmissionPersister persister,
         IInvoiceSubmissionAfterSteps afterSteps,
         IEbillingNotificationSink sink,
+        SubmissionOutcomeNotifier notifier,
         IIdempotencyService idempotency,
         IOptionsMonitor<EbillingOptions> ebilling,
         StoredFileService files,
@@ -127,6 +129,7 @@ public sealed class InvoiceSubmissionProcessingJobHandler : IJobHandler
         _persister = persister ?? throw new ArgumentNullException(nameof(persister));
         _afterSteps = afterSteps ?? throw new ArgumentNullException(nameof(afterSteps));
         _sink = sink ?? throw new ArgumentNullException(nameof(sink));
+        _notifier = notifier ?? throw new ArgumentNullException(nameof(notifier));
         _idempotency = idempotency ?? throw new ArgumentNullException(nameof(idempotency));
         _ebilling = ebilling ?? throw new ArgumentNullException(nameof(ebilling));
         _files = files ?? throw new ArgumentNullException(nameof(files));
@@ -379,6 +382,8 @@ public sealed class InvoiceSubmissionProcessingJobHandler : IJobHandler
                         return await TransientAsync(job, submissionId, SubmissionReasonCodes.SourceChanged, stopwatch, ct).ConfigureAwait(false);
 
                     case SubmissionPersistStatus.Undone:
+                        // Task 095b: the gate wrote Failed in this delivery (see the after-steps' Undone).
+                        await NotifySubmitterAsync(submissionId, SubmissionOutcomeKind.Failed, invoiceId: null).ConfigureAwait(false);
                         return await UndoneAsync(job, submissionId, persisted.ReasonCode, persisted.UndoHeld, stopwatch, ct).ConfigureAwait(false);
 
                     case SubmissionPersistStatus.Refused:
@@ -424,6 +429,16 @@ public sealed class InvoiceSubmissionProcessingJobHandler : IJobHandler
                 _logger.LogInformation(
                     "Invoice submission job {JobId}: submission {SubmissionId} complete ({Status}), invoice {InvoiceId}, {Signals} Signals, in {Elapsed} ms",
                     job.JobId, submissionId, result.TerminalStatus, result.InvoiceId, result.SignalsWritten, stopwatch.ElapsedMilliseconds);
+                // Task 095b: only the delivery whose own (row-version-conditional) terminal write won tells the submitter; AlreadyTerminal means a
+                // reviewer, an earlier run or the job decided and nothing was written now.
+                if (!result.AlreadyTerminal && result.TerminalStatus is { } written)
+                {
+                    await NotifySubmitterAsync(
+                        submissionId,
+                        written == InvoiceSubmissionStatus.Accepted ? SubmissionOutcomeKind.Accepted : SubmissionOutcomeKind.Refused,
+                        result.InvoiceId).ConfigureAwait(false);
+                }
+
                 return Done(job, stopwatch);
 
             case SubmissionAfterStepsStatus.SubmissionMissing:
@@ -432,6 +447,8 @@ public sealed class InvoiceSubmissionProcessingJobHandler : IJobHandler
 
             case SubmissionAfterStepsStatus.Undone:
                 // Tasks 092 / 094: the resume's commit gate failed; the gate wrote Failed and undid the commit (or holds the undo).
+                // Task 095b: this delivery's gate wrote Failed, so it tells the submitter (a later compensation of a held undo does not).
+                await NotifySubmitterAsync(submissionId, SubmissionOutcomeKind.Failed, invoiceId: null).ConfigureAwait(false);
                 return await UndoneAsync(job, submissionId, result.ReasonCode, result.UndoHeld, stopwatch, ct).ConfigureAwait(false);
 
             case SubmissionAfterStepsStatus.Refused:
@@ -476,6 +493,8 @@ public sealed class InvoiceSubmissionProcessingJobHandler : IJobHandler
                 job.JobId, submissionId, ex.GetType().Name);
         }
 
+        // Task 095b: this delivery wrote Rejected, so the submitter is told (no invoice exists).
+        await NotifySubmitterAsync(submissionId, SubmissionOutcomeKind.Refused, invoiceId: null).ConfigureAwait(false);
         return Done(job, stopwatch);
     }
 
@@ -493,6 +512,7 @@ public sealed class InvoiceSubmissionProcessingJobHandler : IJobHandler
 
         _logger.LogWarning("Invoice submission job {JobId}: submission {SubmissionId} Failed ({ReasonCode})", job.JobId, submissionId, reasonCode);
         await MarkFailedAsync(submissionId, reasonCode, ct).ConfigureAwait(false);
+        await NotifySubmitterAsync(submissionId, SubmissionOutcomeKind.Failed, invoiceId: null).ConfigureAwait(false);
         return JobOutcome.Poisoned(job.JobId, JobType, reasonCode, job.Attempt, stopwatch.Elapsed);
     }
 
@@ -598,6 +618,7 @@ public sealed class InvoiceSubmissionProcessingJobHandler : IJobHandler
             {
                 _logger.LogWarning("Invoice submission job {JobId}: final delivery failed; submission {SubmissionId} Failed ({ReasonCode})", job.JobId, submissionId, reasonCode);
                 await MarkFailedAsync(submissionId, reasonCode, ct).ConfigureAwait(false);
+                await NotifySubmitterAsync(submissionId, SubmissionOutcomeKind.Failed, invoiceId: null).ConfigureAwait(false);
             }
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
@@ -620,6 +641,15 @@ public sealed class InvoiceSubmissionProcessingJobHandler : IJobHandler
             [InvoiceSubmissionPersister.SubmissionStatus] = new OptionSetValue((int)InvoiceSubmissionStatus.Failed),
             [InvoiceSubmissionPersister.SubmissionReasonCode] = reasonCode,
         }, ct);
+
+    /// <summary>
+    /// Task 095b (owner 2026-11-03): tells the person who submitted that the submission ended. Called only AFTER the final status is committed
+    /// and only by the delivery that wrote it, which is the exactly-once rule: a redelivery, a replay and a dead-letter after Failed find the
+    /// status final at step 0 and never reach a call. A submission that is not final (a linked one left Processing, a lock held elsewhere)
+    /// never calls it. The notifier cannot throw or wait long, so the outcome, the status and the retries never depend on it.
+    /// </summary>
+    private Task NotifySubmitterAsync(Guid submissionId, SubmissionOutcomeKind outcome, Guid? invoiceId) =>
+        _notifier.NotifyAsync(submissionId, outcome, invoiceId);
 
     private JobOutcome Done(JobContract job, Stopwatch stopwatch) => JobOutcome.Success(job.JobId, JobType, stopwatch.Elapsed);
 
