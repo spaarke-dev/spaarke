@@ -67,7 +67,16 @@
       - a close that fails answers 503, never "decided".
       Findings that need a firm (rates, timekeepers, firm coding) are re-evaluated after the firm is set. They become new Signals, outside the resolved set.
     </constraint>
-    <constraint source="visibility">After the firm is set, the invoice becomes visible to that firm's users under the existing rule, unchanged.</constraint>
+    <constraint source="uac-r2 2026-11-03 (binding)">
+      No new visibility rule: invoice and file visibility are unchanged. After the firm is set, the SUBMISSION becomes visible to that firm's users who can read its core record. 095d adds a new writer of guarded columns, so these conditions apply:
+      (a) Before any write, as the caller: Write on the invoice under a new operation key `ebilling.invoice.assign_firm`, and AppendTo on the firm organization (`finance.attach_invoice`, always).
+      (b) The core record is derived from the invoice (EligibleApproverResolver.SingleCoreOf), never from the body. CheckFirmLinkAsync: Unreadable is 503; NotLinked is a 4xx that names no other firm; an inactive firm is refused.
+      (c) Assign only: refuse if sprk_vendororg is set on the invoice or its submission, and refuse unless the invoice is Active and In Review. A change of firm is the correction flow.
+      (d) ParentLineage lists sprk_invoicesubmission.sprk_vendororg and sprk_trackingnumber as refused for generic writers. Update that entry to name the typed service (persister and allocator) as the second writer. Keep the generic refusal: no Update Record node, playbook mapping, field-mapping rule or Repair writes them. Any apply path of the D-201 record calls the typed service.
+      (e) After the checks, writes are app-only. The invoice, the submission and the lines (LineVendorOrg) get the same firm. The renumber goes through the allocator's alternate key, and a lost race retries or answers 409, never 500. A fault after a partial write leaves a state the census or a retry can see, never a half-assigned firm that shows the submission.
+      (f) Before the click-test, confirm on dev that the reviewer roles hold AppendTo on sprk_organization.
+      uac-r2 gives 095d a full review.
+    </constraint>
     <constraint source="CLAUDE.md §11 / §10">Justify the route and the allocator method in the notes; BFF hygiene as usual. No role or field-security change.</constraint>
   </constraints>
 
@@ -80,7 +89,16 @@
 
   <acceptance-criteria>
     <criterion>Set a linked firm on a no-firm invoice: 200. The firm is on the invoice and its submission. The tracking number is the firm's next one for that invoice number. The hold is resolved. One Decision Record has the old and new numbers. The firm rules have run.</criterion>
-    <criterion>An unlinked firm: refused, with nothing changed. An invoice that already has a firm: 409. No Write on the invoice, or an unknown invoice: the uniform 404. A step-0 refusal: 404.</criterion>
+    <criterion>Refusals, each with nothing changed:
+      - an unlinked firm: a 4xx naming no other firm;
+      - an unreadable link: 503;
+      - an inactive firm: refused;
+      - the firm already set on the invoice or the submission: 409;
+      - the invoice not Active and In Review: 409;
+      - no AppendTo on the firm: 403;
+      - no Write on the invoice, an unknown invoice, a step-0 refusal: the uniform 404.</criterion>
+    <criterion>After assignment, the submission appears for that firm's external user who can read the record, and not for another firm's user. Before assignment, it is absent from the external list and its single read is 404.</criterion>
+    <criterion>The lines get the same firm as the invoice and the submission. ParentLineage's entry names the typed writer, and the generic refusal still holds (the existing guard test passes).</criterion>
     <criterion>A failure after the allocator step (seed one) leaves the invoice, the submission and the tracking number as they were. Seed-proof this guard only.</criterion>
     <criterion>Two reviewers setting the firm at once: one wins and the other gets 409; never two numbers.</criterion>
     <criterion>Approve works afterwards. A 095a read and a replay return the new number.</criterion>

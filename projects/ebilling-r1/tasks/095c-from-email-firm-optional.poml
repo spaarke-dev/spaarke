@@ -49,7 +49,13 @@
 
   <constraints>
     <constraint source="owner 2026-11-03">Only the internal from-email route (channel Outlook) accepts a null firm, and only for mode New. A correction keeps the original's firm; if that is null, the correction's is null too. The external SPA route and the internal wizard route keep requiring the firm. A firmId that is sent is still checked: active and linked (firm_not_linked).</constraint>
-    <constraint source="fail closed">Every reader of the invoice's or submission's firm handles null explicitly. In external visibility, a no-firm invoice is visible to no firm user (fail closed). Rule sets: only the rules that do not depend on the firm run, and the result says the firm rules were not run. AP export: a no-firm invoice cannot be approved, so it never reaches export; export refuses one anyway (defence in depth). No reader treats null as a match.</constraint>
+    <constraint source="fail closed">
+      Every reader of the invoice's or submission's firm handles null explicitly.
+      External visibility (uac-r2, 2026-11-03):
+      - Only the SUBMISSION is firm-gated. InvoiceSubmissionService.ListAsync filters sprk_vendororg In callerFirmIds, and DecideReadOneAsync and the replacement gate need FirmId in scope.FirmIds, so a no-firm submission is invisible externally.
+      - The invoice, its lines and its documents are NOT firm-gated. ExternalModuleRegistry scopes them by root records, RightsForInvoiceAsync applies the owner's option A of 2026-10-11, and ExternalInvoiceVisibility is source-based. So a no-firm invoice is visible to the record's external participants exactly as a firm invoice is.
+      - Unless the owner decides otherwise, this task adds no new external rule.
+      - FinanceAuthorizationFilter covers internal routes only. Rule sets: only the rules that do not depend on the firm run, and the result says the firm rules were not run. AP export: a no-firm invoice cannot be approved, so it never reaches export; export refuses one anyway (defence in depth). No reader treats null as a match.</constraint>
     <constraint source="tracking number">With no firm, the allocator counts the sequence per (no firm, firm invoice number), the row is written with sprk_vendororg null, and the alternate key must still guard uniqueness. Verify on spaarkedev1 how the alternate key treats a null sprk_vendororg: two inserts with the same tracking number and a null firm. Record the result in the notes. See the escalation.</constraint>
     <constraint source="ontology-r1 D-201 (2026-11-03)">firm_missing is a system finding under BILL-SYSTEM-SUBMISSION (SubmissionIntegrity), like the invoice-number mismatch. Add a new reason code, template and headline in Services/Signals/Billing (BillingReasonCodes, BillingRuleCatalogue.ReasonTemplate and a headline), and the FirmMissing case in HasSystemFindings and SystemFindings in InvoiceSubmissionAfterSteps. No new policy row. Today SubmissionEvaluationOutcome:143 returns FirmMissing as a rejection; for this channel's null firm it becomes the hold. Those Signals/Billing files are ontology-owned, so ontology-r1 reviews the PR.</constraint>
     <constraint source="hold">"Firm needed" is a pipeline finding (reason code ebilling.submission.firm_missing), held for review and recorded the same way InvoiceNumberMismatch is, never a rejection. The submission is Accepted. The pane sentence: "Submitted without a firm. A reviewer will add the firm before approval."</constraint>
@@ -75,7 +81,7 @@
     <criterion>A correction of a no-firm invoice keeps the null firm and supersedes it. A correction that sends a firm for a no-firm original: refused with the existing different-firm reason.</criterion>
     <criterion>The external SPA route and the internal wizard route with no firm: refused as today.</criterion>
     <criterion>Approve on a no-firm invoice: refused with the new reason code, and the invoice stays In Review.</criterion>
-    <criterion>A firm user cannot see a no-firm invoice. Seed-proof this guard only.</criterion>
+    <criterion>A no-firm submission is absent from the external submission list, and its single external read is 404 (the same as unknown). Seed-proof this guard only. The invoice's external visibility is unchanged (no new test beyond the existing ones).</criterion>
     <criterion>Rule evaluation with no firm runs only the rules that do not depend on the firm, and says so. AP export refuses a no-firm invoice.</criterion>
     <criterion>Test scope: the cases above. Anything beyond needs a one-line justification in the notes.</criterion>
     <criterion>Gate: the 5 test projects build; ArchTests, the broad filter and the integration suites pass.</criterion>
