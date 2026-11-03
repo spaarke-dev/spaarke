@@ -2,77 +2,56 @@
 
 > **Format (2026-10-06):** CURRENT state only, REWRITTEN at each checkpoint. Standing directives + gotchas: project `CLAUDE.md` → "Standing directives & gotchas". History: git log + `notes/handoff-history/` (do not load on recovery; the state before 2026-11-01 is archived verbatim in `notes/handoff-history/2026-11.md`).
 
-> **Last Updated**: 2026-11-02 (no BFF deploy needed; corrections PR #2525 open).
+> **Last Updated**: 2026-11-03 (NAA fix #2531 reviewed and clean; waiting on CI before auto-merge).
 
 ## Quick Recovery (READ THIS FIRST)
 
 | Field | Value |
 |---|---|
-| **Task** | **133 🔄 Outlook Submit Invoice view** (FULL, opus/high). Live on dev in unified package 1.1.3; first owner UATs done. |
-| **Status** | ebilling's **#2507** (097b/c/e/f, 191, 192, 0878ca36ac) **is live on dev**: R3 deployed master 3740e1a105 at 2026-11-02 18:52:25Z (UAC gate passed 19:22:25Z). I read it back myself (Kudu DLL ProductVersion `1.0.0+3740e1a105…`; no `src/server` diff to master edb1a784ba; healthz and healthz/dataverse 200, anonymous /api/me 401). So the owner's deploy go (2026-11-02, "yes deploy whatever needs to be deployed") needed **no BFF deploy**; C:\wtbffdep was removed unused. **Corrections are LIVE in Outlook on dev:** PR #2525 (`correctionAvailable` on InvoiceView) merged at 55ef2ab1ab (2026-11-02 22:03:29Z). SWA deploy run 41533905200 succeeded at 22:05:31Z; the live bundle (`icy-desert-0bfdbb61e.6.azurestaticapps.net`) has the flag on. **No package bump**: the package stays at 1.1.3 and nothing was re-uploaded. C:\wt133s is removed. ebilling 7b was told and is testing a correction. Also waiting on the owner's retest (INV-012.2). |
-| **Next Action** | Wait for ebilling's correction test result and the owner's correction UAT (email → Submit Invoice → Existing invoice → "Submit a corrected invoice"). Fix any wrong sentence or behaviour from the submission id they report. ebilling #2526 (151c Email to AP) is live on dev in 5796774091. Owner item: reject the Teams admin "Spaarke portal" submission `5d88b948…` (a Developer Portal "Publish to your org" duplicate; keep the uploaded `60055573…`; per EXTERNAL-ACCESS-TEAMS-APP-GUIDE lines 230 and 337). Once it's done, tell R3 and legal-ai-accelerator. |
+| **Task** | **133 🔄 Outlook Submit Invoice view** (FULL, opus/high). Live on dev in unified package 1.1.3; corrections on (#2525). Side fix in flight: **PR #2531** (NAA sign-in for new Outlook / OWA). |
+| **Status** | **PR #2531** (C:\wt133t, branch `fix/office-naa-detection`, head **3d5211c2ae**): owner go 2026-11-03 for option A. Two full adversarial passes done, every fix-now fixed; the scoped re-check of d1c875a6f1 was clean, and the K2/K4 tidy-ups are in 3d5211c2ae (Spaarke.Auth 272/272). CI was running at 14:5xZ; a monitor waits for every check to finish, including the non-required `Gated jest suites (office-addins)`. |
+| **Next Action** | When all #2531 checks finish with none failed: `gh pr merge 2531 --auto --merge` (never `--delete-branch`). After the merge: confirm the "Deploy Office Add-ins to Azure Static Web App" run, then ask the owner to live test on dev in new Outlook (their machine), OWA, classic Outlook and Word desktop. In the console, look for `[OfficeNaaStrategy] host=… platform=… NestedAppAuth1.1=…` and "initialized via NAA broker". JS only, so no package bump. Then remove C:\wt133t with Remove-WorktreeSafe. |
 
-## Open items from the owner's Outlook testing on dev (2026-11-03, via ebilling 7b)
-- **Request Too Long in new Outlook (urgent).** New Outlook for Windows reports `OfficeOnline`, and `OfficeNaaStrategy.detectNaaSupport()` turns NAA off for it (a 2026-09-03 decision made while the broker redirect was still hardcoded to localhost), so it uses an MSAL popup that carries the owner's oversized login.microsoftonline.com cookies. A researcher is checking NAA support on web and new Outlook and the `isSetSupported('NestedAppAuth','1.1')` detection. Then propose the change to the owner (auth change: owner go, plus a live test in new Outlook, OWA, classic and Word). `loginHint` does not fix it. Workaround given to the owner.
-- `…%3E/suggestions` 404: expected (an encoded Internet Message-ID `<…>`; 404 = email not captured). Not a bug.
-- **Owner's OWA retest passed:** INV-792345.3 Accepted 14:04:59Z (about 21 s; invoice 3d3009f7, In Review). Owner finding: reopening Submit Invoice on the same email gives no sign that it was already submitted (a resubmit replays the same tracking number, no duplicate). Agreed shape with ebilling: their `GET /api/finance/invoice-submissions?internetMessageId=…` (latest attempt, same body shape as the by-id GET, uniform 404); the pane shows the state on open (resumes polling if processing; Accepted → offers a correction; Failed → shows the sentence plus "Submit again"). Waiting on the owner's scope go for both halves.
-- **OWNER GO 2026-11-03 for option A** ("yes proceed with this option A NAA fix"). Built in worktree **C:\wt133t**, branch `fix/office-naa-detection`, commit 0031f7d54a (Spaarke.Auth OfficeNaaStrategy plus new tests; Spaarke.Auth 260/260; new tests fail 5/11 on the old code; office-addins auth tests 20/20; tsc at the 68 baseline). Review pass 1 findings fixed (popup fallback after a failed bridge token request, except user_cancelled; two weak tests; a guard on the MSAL log line; docs incl. the `brk-9199bf20-…://<host>` broker scheme, which prod `1958aec2` lacks per the docs = owner Entra item before prod). **PR #2531** open (2 commits). **Review pass 2 fix-now items are DONE in d1c875a6f1** (pushed; Spaarke.Auth 271/271; the previous strategy fails 6 of the new tests). **A scoped re-check of d1c875a6f1 is running** (sonnet). When it is clean: wait for #2531's checks to finish, including the gated jest check, then `gh pr merge 2531 --auto --merge` and the live test. The items that were fixed:
-  (1) The NAA cancel code is `user_canceled` (ClientAuthErrorCodes; one l); `user_cancelled` is the browser popup's spelling. Treat both as a cancel.
-  (2) The switch to the popup must be an allow-list, not "any failure": switch only on `nested_app_auth_bridge_disabled` or a ServerError whose message carries an AADSTS code. Never on a cancel, `no_network_connectivity`, `no_account_found`, `interaction_in_progress` or InteractionRequired (a transient failure would otherwise downgrade the page for good and let the 4-minute refresh timer open popups).
-  (3) The cancel test must use `user_canceled`; add browser-spelling, no-network and AADSTS cases.
-  (4) Sign-out under NAA does nothing: NestedAppAuthController `logoutPopup` and `clearCache` throw unsupported. Under NAA, clear the MSAL sessionStorage entries directly: keys starting with `msal.`, plus the keys listed in `msal.account.keys` and `msal.token.keys.<clientId>`. Fix the logout comment.
-  (5) Soften the architecture doc line "never on no token"; fix the `AuthService.ts:103` "never prompts on startup" comment.
-  Known limits to note in the PR: K1 shared instance state across concurrent calls; K2 a failed fallback creation is memoised; K3 other bridge cancel shapes (confirm in the live-test console); K4 the desktop popup in the WebView is untested.
-  Then commit, run a scoped re-check of the fix diff, wait for the gated jest check, `gh pr merge 2531 --auto --merge`, and live test with the owner on dev: new Outlook (owner's machine), OWA, classic, Word desktop; check console `[OfficeNaaStrategy] host=… platform=… NestedAppAuth1.1=…` and "initialized via NAA broker". The owner still gets the 400 after deleting all cookies, so the likely cause is the per-account Windows SSO headers (`x-ms-RefreshTokenCredential*`), not cookies; diagnostic steps given to the owner.
-- **Owner go 2026-11-03: completion notification now; "already submitted" banner at the top (date, tracking number, who).** ebilling tasks 095a (`GET invoice-submissions?internetMessageId=`, plus `submittedOn`, `submittedBy {name}|null` from sprk_createdbyperson, `isCorrection`) and 095b (in-app bell via NotificationService) are committed locally at 2d4094ea50; ebilling builds after the owner confirms in their session. The pane banner is mine once 095a is on dev.
-- "Record Created On" in the Invoices view = OOB `overriddencreatedon` (import-only, blank by design); there is no `sprk_recordcreatedon`. Not a defect; ebilling will raise dropping the column with the owner.
-- Superseded: **Sign-in fix proposal sent to the owner** (option A: `isSetSupported('NestedAppAuth','1.1')` gate on every host; the NAA config's redirectUri becomes https `/auth-callback.html` so a missing bridge falls back to a working popup; log the path actually used; Word web stays on the popup unless a live test shows otherwise). Research: `.claude/agent-memory/researcher/naa-web-newoutlook-fallback-redirect-2026-11-03.md`. Waiting on A/B.
-- ebilling #2530 (Entity `sprk_trackingnumber` plus six Read privileges on the add-in user role): content OK given, with a note to point out the Deep reads to the owner.
-- **Leave and come back** (owner asked): proposed (a) after acceptance the pane says the user can close it; (b) reopening Submit Invoice on the same email shows that email's latest submission and resumes polling; (c) the server sends a notification on final status. This needs ebilling's by-email lookup route plus the notification. Owner decides scope.
-- ebilling-side: INV-792345.1 (submission 5a1a526f) failed because dev lacks `sprk_invoice.sprk_trackingnumber` (owner adding it); a permanent error was retried 5 times (ebilling is filing it).
+## PR #2531 — what it does (for the live test and the PR notes)
+- `OfficeNaaStrategy.detectNaaSupport()`: gate = `isSetSupported('NestedAppAuth','1.1')` on every host (old version thresholds removed); Word on the web stays on the popup.
+- NAA config `redirectUri` = https `/auth-callback.html` (never `brk-`); MSAL's Info log line "Nested App Auth Bridge available: …" sets `isNaaActive` (a guard test checks the line still exists in msal-browser).
+- Falls back to the standard popup only on `nested_app_auth_bridge_disabled` or a ServerError carrying an AADSTS code. Never on a cancel (`user_canceled` / `user_cancelled`), no network, no account or interaction required.
+- Under NAA, sign-out and clearCache clear the MSAL sessionStorage keys (`logoutPopup` and `clearCache` are unsupported there).
+- Known limits: concurrent calls share instance state; a failed fallback creation is memoised; any AADSTS code switches (consent declined included); a host-coded NestedAppAuthUnavailable does not switch; the desktop popup in the WebView is untested.
+- Owner Entra item before production: register `brk-9199bf20-a13f-4107-85dc-02114787ef48://addins.spaarke.com` on prod `1958aec2` (dev has it).
+- The 400 "Request Too Long" the owner still gets after deleting all cookies: the likely cause is per-account Windows SSO headers (`x-ms-RefreshTokenCredential*`). Diagnostics given: F12 request header names only; Edge "Allow single sign-on for work or school sites" off as a test.
 
 ## Submit Invoice (task 133): state
-- **Dev:** eBilling is ON (since 2026-10-30 15:21Z). The invoice reader is configured (`ContentUnderstanding__Endpoint`, 2026-11-01 02:54:30Z, ebilling, owner go in both sessions; analyzers sprk_invoice_v2p and sprk_invoice_v2 deployed). The owner updated Integrated apps to package **1.1.3** (#2476); the Submit Invoice ribbon button works in Outlook on the web.
-- **Merged to master (auto-deploys the add-in):**
-  - #2476: package 1.1.3 and Outlook XML 1.0.23.0.
-  - #2492 + #2497: the view starts on the record the email is filed to (`invoiceFiledRecord` in `invoiceSubmissionSeam.ts`, from the pane's email identity), never replaces a user pick, names the filed record when another one is picked, and shows the Save picker's suggestion cards for an unfiled email.
-  - #2498: sentences for ebilling task 191 (422 `reader_not_configured`; outcomes `ai.invoice.read.not_configured`, `.disabled`, `.binding_missing` ask an administrator; `.completion_failed`, `.output_invalid` say submit again later).
-  - #2501: Accepted + `ebilling.submission.replaced_by_correction` is not "held for review"; it names `replacedBy.trackingNumber` when present (ebilling 097f, EB-D-180).
-- **UAT results 2026-10-31:**
-  - UAT 1: a 409 `document_core_record_mismatch` was correct (communication 99b5f650 "Fw: PAT-942665 …" is filed under PAT-897705; the owner picked PAT-792345).
-  - UAT 2: INV-012.1 (submission 24800a9d) Failed with `ai.invoice.read.not_configured` (since fixed on dev); the view didn't prefill (fixed by #2492).
-- **Owner retest pending:** the same email "Invoice Submission - PAT-792345", Submit Invoice; expect PAT-792345 prefilled, Morrison Foerster auto-chosen if it is the only linked firm, INV-012 → tracking **INV-012.2** (a new attempt after Failed, §5), then a final status. If it fails, read `sprk_invoicesubmission` (latest by createdon): `sprk_processingstatusname`, `sprk_outcomereasoncode`.
+- **Dev:** eBilling on; invoice reader configured; package **1.1.3** in Integrated apps. Corrections live (#2525, 55ef2ab1ab, SWA run 41533905200).
+- **Owner OWA retest passed:** INV-792345.3 Accepted (about 21 s).
+- **Already-submitted banner (mine, after ebilling 095a is on dev; owner go 2026-11-03):** a MessageBar at the top like Save's "already filed to": "Already submitted on {date} as {tracking} by {name}" plus status. Processing → resume polling; Accepted → offer a correction; Failed → the sentence plus "Submit again"; 404 → today's form. ebilling 095a route: `GET /api/finance/invoice-submissions?internetMessageId=…` → the by-id body plus `submittedOn` (UTC), `submittedBy {name}|null` (sprk_createdbyperson), `isCorrection`; uniform 404, 503, 503 `ebilling.disabled`. ebilling sends the PR number and deploy SHA.
+- **095b** (ebilling): in-app bell notification on Accepted / Failed / refused. Nothing client-side.
+- "Record Created On" = OOB `overriddencreatedon` (import-only, blank by design); there is no `sprk_recordcreatedon`. Not a defect.
+- `…%3E/suggestions` 404 = an encoded Internet Message-ID for an email not yet captured. Expected.
+- Owner retest still open: INV-012.2 / correction UAT (email → Submit Invoice → Existing invoice → "Submit a corrected invoice").
 - **Slice C (needs the owner's explicit go):** remove Invoice from Save and "+ New" in both hosts; tell the owner Word loses Invoice save; then tell ebilling for 096.
 
-## ebilling contract items (peer: ebilling, pipe cc-msg-c961e15ec4fa4e62d8bf9706a34c677d)
-- **Task 191** (work fdd3c79b7f, d4849acbe6; not on master or dev): intake 422 `reader_not_configured`, §9 `ai.invoice.*` codes. The client side is merged (#2498).
-- **Task 192 `filedUnder`** (work 25778a59b7): optional `filedUnder {entityType: Matter|Project|WorkAssignment, entityId, name}` on 409 `document_core_record_mismatch`, only when the caller can Read it. Client side is merged (#2503): the sentence names the record, and the view offers "Use {name}". ebilling has been told.
-- **097b/097c Correction** (in #2507). All four client sentence items are merged (#2510): the intake reasons, the stored outcomes, the record_unavailable addition, and `not_available` retired.
-- **097e prefill** (work 8b49cb2432): `GET /api/finance/invoices/{invoiceId}/correction-prefill` → `{invoiceId, firm{id,name}, coreRecord{entityType Matter|Project|WorkAssignment, entityId, name}, invoiceStatus, trackingNumber, firmInvoiceNumber, canCorrect, reason, replacedBy{invoiceId,name}|null}`.
-  - `reason` ∈ invoice_status, no_submission, submission_in_progress.
-  - Errors: uniform 404 `record_unavailable`, 503, 503 `ebilling.disabled`.
-  - `invoiceStatus` set: InReview "In Review", Approved, SentToAp "Sent to AP", Paid, Rejected, ReturnedToFirm "Returned to Firm", Cancelled, Superseded (own sentence: "This invoice has already been replaced by a correction. Correct the newer invoice instead." plus a button selecting `replacedBy`); null or unknown → "in its current state".
-  - 097b+c+e are on master and dev (3740e1a105); `correctionAvailable` is turned on by PR #2525.
-- **097f** (work task/ebill-097f-superseded-view 0666b656ee): the client side is in #2501.
+## ebilling contract items (peer: ebilling 7b)
+- Client sides merged: 191 sentences (#2498), 192 `filedUnder` (#2503), 097b/c correction sentences (#2510), 097e prefill + `correctionAvailable` (#2525), 097f superseded (#2501).
+- #2530 (Entity `sprk_trackingnumber` plus six Read privileges on the add-in user role): content OK given; Deep reads pointed out for the owner to decide.
 
 ## Peer duties
 - Answer cross-session BFF/Console/deploy notices; for a deploy request verify ancestry, OK on content only, record it here, commit and push.
-- **Last OK: R3 dev BFF master 5796774091** (2026-11-02; from live 3740e1a105: 12 src/server files, all ebilling #2526; the Communication changes only act on a signed server-send, and the default path is unchanged; no add-in route touched).
-- **Live on dev: 5796774091** (R3, deploy 2026-11-03 13:29:19Z; I read it back myself: Kudu `1.0.0+5796774091…`, healthz 200, anonymous /api/me 401). Settings unchanged at 225; `ContentUnderstanding__Endpoint` is still set. Rollback: 3740e1a105. uac-r2's gate runs from 13:29:19Z.
-- R3's dev BFF deploy rules: owner go naming the SHA; OKs from uac-r2, ontology, field-mapping and ebilling; Router green; `scripts/Set-ChildRecordCreatorPersonSchema.ps1 -Verify` exits 0 first (plus ebilling's four `-Verify` scripts, see ebilling 7b's message 2026-11-02); after the deploy, `Ebilling__Enabled=true` and `Ebilling__StoredFileReconcileEnabled=false`; after-notices to every peer, then uac-r2's 30-minute gate. Read the live commit back from the Kudu VFS `Sprk.Bff.Api.dll` ProductVersion.
-- Peers: R3 `cc-msg-d998caed4166082c2c443072ac542a83` (name spaarke-wt-spa-external-access-platform-f2); ebilling 7b `cc-msg-a027c144054932864ee427c120b4e2c1` (ignore 9c); UAC session name `spaarke-wt-unified-access-control-r2-db`; ontology `cc-msg-12a5ac7fc59e21f736827730b8d44c8a`.
+- **Live on dev: 5796774091** (R3, 2026-11-03 13:29:19Z; read back: Kudu `1.0.0+5796774091…`). Rollback 3740e1a105. Last OK given: this SHA.
+- R3's dev BFF deploy rules: owner go naming the SHA; OKs from uac-r2, ontology, field-mapping and ebilling; Router green; `scripts/Set-ChildRecordCreatorPersonSchema.ps1 -Verify` plus ebilling's four `-Verify` scripts exit 0; after the deploy `Ebilling__Enabled=true`, `Ebilling__StoredFileReconcileEnabled=false` (225 settings); after-notices, then uac-r2's 30-minute gate.
+- Peers: R3 `cc-msg-d998caed4166082c2c443072ac542a83`; ebilling 7b `cc-msg-a027c144054932864ee427c120b4e2c1` (ignore 9c); UAC `spaarke-wt-unified-access-control-r2-db`; ontology `cc-msg-12a5ac7fc59e21f736827730b8d44c8a`.
 
-## Gotchas found this session
-- PowerShell `git commit -m` with embedded `"` breaks the argument; use `git commit -F <file>`.
-- Local jest: stale gitignored `node_modules` in `src/client/shared/Spaarke.Communication.Components` and `Spaarke.UI.Components` (from 2026-10-08) load a second React and fail view/picker suites with "Invalid hook call". CI is unaffected. Rename them aside for a run (they can be locked by another process); the owner was offered their deletion.
-- `App.invoiceRoute.test.tsx` replaces the whole `InvoiceView` module: export pure helpers from a service module, never from the view file.
-- When the stale `node_modules` are locked, run jest with a scratchpad config that spreads `jest.config.js` and maps `^react$`, `^react/(.*)$`, `^react-dom$` and `^react-dom/(.*)$` to `office-addins/node_modules` (set `rootDir` to office-addins). This gives one React without renaming anything.
-- `Gated jest suites (office-addins)` is NOT a required check, so auto-merge can merge a PR that breaks it. Wait for it before relying on a merge.
+## Gotchas (this session)
+- Use `git commit -F <file>`; git under the Bash tool hangs, so use PowerShell.
+- `Gated jest suites (office-addins)` is NOT required: wait for it before relying on a merge.
+- `App.invoiceRoute.test.tsx` replaces the whole `InvoiceView` module: export pure helpers from a service module.
+- A fresh worktree needs `npm run build` in `src/client/shared/Spaarke.Auth` before office-addins tsc (gitignored `dist`); the baseline is 68 errors.
+- Stale `node_modules` in Spaarke.Communication.Components / Spaarke.UI.Components load a second React locally; map react/react-dom to office-addins in a scratchpad jest config.
 
 ## Owner items (open)
-- **Outlook desktop sign-in 400 "Request Too Long":** cause = Windows SSO credentials for 4 work accounts, plus a dead Helios IP PRT (last refresh 2026-01-28). Steps given: (1) clear login.microsoftonline.com site data and turn off Edge work SSO, as a test; (2) disconnect RightHub Groups (`rschroeder@righthub.com`); (3) leave Helios IP only after preparation (local admin password, BitLocker key, copy `OneDrive - Helios IP` 47 GB, back up .claude/.ssh/.gitconfig/Code, unlink OneDrive), then disconnect, restart, and re-add Spaarke (join recommended). Re-check with `dsregcmd /status` after.
-- Excel/PowerPoint add-in: answered as a moderate project; offered a researcher check of unified-manifest and custom-XML support first. No go yet.
-- UAT 042, 080, 121, 127, 078; PCF re-sync; A9 guest sign-in; the Ralph Dewey retest (pass the result to R3); then 090 wrap-up (`/test-diet`).
-- Post-deploy check (UAC #2468 fix): a child-BU user's unfiled Outlook save; read back the sprk_document owner and BU (expect the saver's BU team).
+- Teams admin: reject the "Spaarke portal" submission `5d88b948…` (a Developer Portal duplicate; keep `60055573…`). Once it's done, tell R3 and legal-ai-accelerator.
+- Request Too Long: header-name diagnostics; remove the RightHub work account; Helios IP only after its preparation steps (local admin password, BitLocker key, OneDrive copy, backups), then `dsregcmd /status`.
+- Excel/PowerPoint add-in (no go yet); UAT 042, 080, 121, 127, 078; PCF re-sync; A9 guest sign-in; the Ralph Dewey retest (pass the result to R3); 090 wrap-up (`/test-diet`).
+- Post-deploy check (UAC #2468): a child-BU user's unfiled Outlook save; read back the sprk_document owner and BU.
 - Main checkout `C:\code_files\spaarke`: leave its uncommitted files alone. C:\wtqa1906 is the owner's.
 - Cleanup later (Remove-WorktreeSafe): C:\wt2412, C:\wt2412m, C:\wt2416, C:\wt2416c.
