@@ -11,25 +11,11 @@ import type { AuthStrategy } from './AuthStrategy';
 /** Buffer (ms) before token expiry to consider it stale. Matches config.TOKEN_EXPIRY_BUFFER_MS. */
 const EXPIRY_BUFFER_MS = 5 * 60 * 1000;
 
-/**
- * NAA broker redirect URI — required when running inside Office hosts that support NAA.
- *
- * PORTABLE by design (email-communication-intelligence-r2 UAT 2026-09-03): derived from the serving
- * host, NOT hardcoded. The value MUST match a `brk-multihub://<host>` redirect URI registered under the
- * Entra app's **SPA** platform for Office-on-the-web (the pure-SPA flow validates the redirect against
- * that list; a mismatch → AADSTS7000471 "reply address scheme is reserved for brokered application
- * requests"). Because it tracks `window.location.hostname`, each environment (dev SWA, and every future
- * production customer SWA / custom domain) works as long as its Entra app registers
- * `brk-multihub://<that-host>` — no code change per environment. Falls back to `localhost` for
- * non-browser/test contexts.
- *
- * Was previously hardcoded to `brk-multihub://localhost`, which is only in the dev app's publicClient
- * (native) list — so desktop (native broker) worked but Office-on-the-web (SPA flow) failed.
- */
-function naaRedirectUri(): string {
-  const host = typeof window !== 'undefined' && window.location?.hostname ? window.location.hostname : 'localhost';
-  return `brk-multihub://${host}`;
-}
+/** MSAL `LogLevel.Info` — the level of the line that says whether the NAA bridge came up. */
+const MSAL_LOG_LEVEL_INFO = 2;
+
+/** The MSAL line (`NestedAppOperatingContext.initialize`) that reports whether the Office NAA bridge is available. */
+const BRIDGE_AVAILABLE_LINE = /Nested App Auth Bridge available: (true|false)/;
 
 /**
  * Decode a JWT and return its `exp` claim as a Unix-ms timestamp.
@@ -56,8 +42,8 @@ function decodeJwtExpMs(jwt: string): number {
  * `IAuthConfig` already carries `clientId`, `authority`/`tenantId`, `redirectUri`,
  * and `bffApiScope` — the OfficeNaaStrategy reuses those. Office-specific fields:
  *
- * - `fallbackRedirectUri`: only consulted when Office host does NOT support NAA
- *   and `PublicClientApplication` is used as fallback. Defaults to
+ * - `fallbackRedirectUri`: the https popup redirect, used by the standard client
+ *   (no NAA, or NAA without the bridge). Defaults to
  *   `${window.location.origin}/auth-callback.html`.
  * - `forceFallback`: lets callers explicitly skip NAA detection (used by tests
  *   and by hosts where NAA detection is unreliable but standard MSAL works).
@@ -70,18 +56,24 @@ export interface IOfficeNaaConfig {
 }
 
 /**
- * Detect whether the current Office host supports Nested App Authentication (NAA).
+ * Detect whether the current Office host supports Nested App Authentication (NAA), with Microsoft's documented
+ * check: `Office.context.requirements.isSetSupported('NestedAppAuth', '1.1')`. That covers Outlook on the web and
+ * new Outlook for Windows (both report `OfficeOnline`), classic Outlook and Office on Windows and Mac, without
+ * version-number rules of our own.
  *
- * NAA is supported in:
- *   - Office on the web (all browsers)
- *   - Office on Windows (build 16.0.13530.20424 or later)
- *   - Office on Mac (version 16.44 or later)
- *   - New Outlook for Windows
+ * One exception stays on the standard popup: **Word on the web**. Microsoft supports NAA there only for documents
+ * opened from SharePoint Online or OneDrive (whether SharePoint Embedded documents count is unconfirmed), and it needs
+ * a login hint the strategy does not pass; Word on the web keeps the popup until a live test shows NAA works there.
+ *
+ * Until 2026-11-03 every `OfficeOnline` host was excluded, after a 2026-09-03 UAT in which NAA "did not engage" on the
+ * web and Entra refused the popup with AADSTS7000471. The cause was the NAA config's `brk-multihub://` redirect:
+ * when the bridge is not available, `createNestablePublicClientApplication` falls back to a standard client with the
+ * SAME config, and a standard popup cannot use a `brk-` redirect. The NAA config now uses the https redirect (see
+ * `_buildNaaConfig`), so a missing bridge ends in a working popup. Excluding `OfficeOnline` sent new Outlook to the
+ * popup, whose request carries every login.microsoftonline.com cookie and SSO header of the browser profile (HTTP 400
+ * "Request Too Long" on a machine with several work accounts).
  *
  * Returns false outside an Office host (e.g., unit tests, standalone browser).
- *
- * Lifted from the pre-v2 `NaaAuthService.detectNaaSupport` so OfficeNaaStrategy
- * is the single source of truth post-task-080.
  */
 async function detectNaaSupport(): Promise<boolean> {
   try {
@@ -104,43 +96,24 @@ async function detectNaaSupport(): Promise<boolean> {
     });
 
     const diagnostics = OfficeRef.context.diagnostics;
-    if (!diagnostics) {
-      console.warn('[OfficeNaaStrategy] Office diagnostics unavailable — assuming no NAA');
+    const platform = diagnostics?.platform ?? OfficeRef.context.platform;
+    const host = OfficeRef.context.host ?? diagnostics?.host;
+    const version: string = diagnostics?.version ?? '';
+    const requirements = OfficeRef.context.requirements;
+    const supported =
+      typeof requirements?.isSetSupported === 'function' &&
+      requirements.isSetSupported('NestedAppAuth', '1.1') === true;
+    console.info(
+      `[OfficeNaaStrategy] host=${host} platform=${platform} version=${version} NestedAppAuth1.1=${supported}`
+    );
+
+    if (!supported) return false;
+
+    if (platform === OfficeRef.PlatformType?.OfficeOnline && host === OfficeRef.HostType?.Word) {
+      console.info('[OfficeNaaStrategy] Word on the web: using the standard popup, not NAA');
       return false;
     }
 
-    const platform = diagnostics.platform;
-    const version: string = diagnostics.version ?? '';
-    console.info(`[OfficeNaaStrategy] platform=${platform} version=${version}`);
-
-    if (platform === OfficeRef.PlatformType?.OfficeOnline) {
-      // Office-on-the-web: use the STANDARD MSAL popup (https redirect), NOT NAA.
-      // Empirically (email-communication-intelligence-r2 UAT 2026-09-03, Word/Outlook on the web) the
-      // NAA broker does not actually engage for this add-in/app-registration — MSAL opens a real popup
-      // still carrying the brk-multihub:// redirect, which Entra rejects for the now-non-brokered
-      // request (AADSTS7000471). The desktop native broker works, so NAA stays enabled there. The web
-      // standard-popup path uses the registered https://<origin>/auth-callback.html redirect and is
-      // reliable + portable (any customer domain that registers its auth-callback.html SPA redirect).
-      return false;
-    }
-
-    if (platform === OfficeRef.PlatformType?.PC) {
-      // Windows version format: 16.0.XXXXX.YYYYY
-      const parts = version.split('.');
-      if (parts.length >= 3) {
-        const build = parseInt(parts[2] || '0', 10);
-        return build >= 13530;
-      }
-      return false;
-    }
-
-    if (platform === OfficeRef.PlatformType?.Mac) {
-      // Mac version format: 16.XX
-      const major = parseFloat(version);
-      return major >= 16.44;
-    }
-
-    // Unknown platform — let NAA attempt; it will fail gracefully if unsupported.
     return true;
   } catch (err) {
     console.warn('[OfficeNaaStrategy] NAA detection threw — assuming no NAA:', err);
@@ -163,10 +136,13 @@ async function detectNaaSupport(): Promise<boolean> {
  *   2. `acquireTokenPopup` with `loginHint` from the cached account
  *      (NAA-backed PCA routes this through the Office broker — not a real popup)
  *
- * Falls back to a standard `PublicClientApplication` when:
+ * Falls back to a standard `PublicClientApplication` (popup to `fallbackRedirectUri`) when:
  *   - Office is not detected (e.g., standalone browser test page)
- *   - Office host predates NAA (Office build < 13530 / Mac < 16.44)
+ *   - the host does not support `NestedAppAuth` 1.1, or is Word on the web (see `detectNaaSupport`)
  *   - Caller passes `forceFallback: true`
+ * and, inside MSAL, when NAA is chosen but the Office bridge is not available: `createNestablePublicClientApplication`
+ * then returns a standard client with the same config, so that config's redirect is the https one too.
+ * `isNaaActive()` reports the bridge MSAL actually found, not the detection result.
  *
  * Strategy-agnostic API surface:
  *   - implements `AuthStrategy` (acquire / clearCache / logout)
@@ -193,9 +169,9 @@ export class OfficeNaaStrategy implements AuthStrategy {
 
   /**
    * @param config Standard @spaarke/auth resolved config (clientId, authority,
-   *               redirectUri, bffApiScope). The Office NAA redirectUri is derived
-   *               internally from the serving host (`brk-multihub://<hostname>`) when
-   *               NAA is active — callers do NOT need to override `config.redirectUri`.
+   *               bffApiScope). `config.redirectUri` is not used: both MSAL configs use the
+   *               https popup redirect (`options.fallbackRedirectUri`), and over the NAA bridge
+   *               the Office host supplies the broker redirect itself.
    * @param options Office-specific overrides (fallback redirect URI; forced fallback).
    */
   constructor(config: Required<IAuthConfig>, options: IOfficeNaaConfig = {}) {
@@ -376,13 +352,24 @@ export class OfficeNaaStrategy implements AuthStrategy {
           const msalModule = await import('@azure/msal-browser');
 
           if (useNaa) {
-            const instance = await msalModule.createNestablePublicClientApplication(this._buildNaaConfig());
+            // MSAL has no public "is this the NAA controller?" API; it logs whether the bridge came up, and
+            // falls back to a standard client silently when it did not. Read that line to know which path runs.
+            let bridgeAvailable = false;
+            const instance = await msalModule.createNestablePublicClientApplication(
+              this._buildNaaConfig(available => {
+                bridgeAvailable = available;
+              })
+            );
             // createNestablePublicClientApplication returns an already-initialized
             // instance; no extra .initialize() call required.
             await this._drainRedirectIfAny(instance);
             this._instance = instance;
-            this._isNaaActive = true;
-            console.info('[OfficeNaaStrategy] initialized via NAA broker');
+            this._isNaaActive = bridgeAvailable;
+            console.info(
+              bridgeAvailable
+                ? '[OfficeNaaStrategy] initialized via NAA broker'
+                : '[OfficeNaaStrategy] NAA bridge not available; initialized via standard popup client'
+            );
           } else {
             const pca: PublicClientApplication = new msalModule.PublicClientApplication(this._buildFallbackConfig());
             await pca.initialize();
@@ -404,20 +391,22 @@ export class OfficeNaaStrategy implements AuthStrategy {
 
   /**
    * MSAL config for the NAA path. Distinguishing from BrowserMsalStrategy:
-   *   - supportsNestedAppAuth: true   — required by NAA factory
+   *   - redirectUri: the https fallback redirect, NEVER `brk-multihub://…`. Over the bridge MSAL does not use it (the
+   *     Office host supplies the broker redirect, which stays registered in Entra as a SPA redirect). Without the
+   *     bridge, `createNestablePublicClientApplication` builds a standard client from this same config, and a standard
+   *     popup with a `brk-` redirect is refused (AADSTS7000471, the 2026-09-03 web failure).
+   *   - supportsNestedAppAuth: true — read by MSAL's controller factory for NAA
    *   - navigateToLoginRequestUrl: false — NAA broker handles redirect; we never navigate
    *   - cacheLocation: 'sessionStorage' — Add-in iframe storage guidance
    *   - storeAuthStateInCookie: false — no Entra cookie shared with host
+   *   - a logger at Info whose only job is to report the "Nested App Auth Bridge available" line; nothing is printed
    */
-  private _buildNaaConfig(): Configuration {
+  private _buildNaaConfig(onBridge: (available: boolean) => void): Configuration {
     return {
       auth: {
         clientId: this._config.clientId,
         authority: this._config.authority,
-        // NAA always uses the brk-multihub broker URI regardless of caller-provided redirectUri.
-        // Honor caller override only if it's the canonical brk- form, otherwise derive from the host
-        // (portable across dev + prod customer domains — see naaRedirectUri).
-        redirectUri: this._config.redirectUri?.startsWith('brk-') ? this._config.redirectUri : naaRedirectUri(),
+        redirectUri: this._fallbackRedirectUri(),
         supportsNestedAppAuth: true,
         navigateToLoginRequestUrl: false,
       },
@@ -427,25 +416,33 @@ export class OfficeNaaStrategy implements AuthStrategy {
       },
       system: {
         loggerOptions: {
-          logLevel: 3, // Warning
+          logLevel: MSAL_LOG_LEVEL_INFO,
           piiLoggingEnabled: false,
+          loggerCallback: (_level: number, message: string) => {
+            const match = BRIDGE_AVAILABLE_LINE.exec(message);
+            if (match) onBridge(match[1] === 'true');
+          },
         },
         allowRedirectInIframe: true,
       },
     };
   }
 
+  /** The https popup redirect: `fallbackRedirectUri`, else `<origin>/auth-callback.html` (registered as a SPA redirect). */
+  private _fallbackRedirectUri(): string {
+    return (
+      this._options.fallbackRedirectUri ||
+      (typeof window !== 'undefined' ? `${window.location.origin}/auth-callback.html` : '')
+    );
+  }
+
   /** MSAL config for the fallback PCA path (Office host without NAA support). */
   private _buildFallbackConfig(): Configuration {
-    const fallbackRedirect =
-      this._options.fallbackRedirectUri ||
-      (typeof window !== 'undefined' ? `${window.location.origin}/auth-callback.html` : '');
-
     return {
       auth: {
         clientId: this._config.clientId,
         authority: this._config.authority,
-        redirectUri: fallbackRedirect,
+        redirectUri: this._fallbackRedirectUri(),
         navigateToLoginRequestUrl: false,
       },
       cache: {
