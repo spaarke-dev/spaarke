@@ -74,6 +74,14 @@ These eight categories are the **only** test categories Spaarke maintains. (The 
 | 7 | **vertical-slice-seam** | `tests/integration/seam/**` | End-to-end slice across an AI convergence seam (dispatch → input resolution → executor → ledger → disposition → render) using production types, with only the LLM, catalog-data and side-effect-transport boundaries doubled. A green router-unit or contract-shape test is not a substitute. Definition of done for any dispatch-spine change (ADR-038 §2). | `tests/integration/seam/Ai/ComposeDocSessionDispatchSeamTests.cs` |
 | 8 | **structural fitness function** | `tests/Spaarke.ArchTests/**` | Asserts an invariant over source or assemblies rather than runtime behaviour; the sanctioned replacement for the wiring tests banned by B1–B5 (ADR-038 Amendment A1). Each rule carries negative and positive controls; each allowlist entry carries a reason and an ADR citation. Naming (B13) and setup-ratio (B15) heuristics do not apply — see `tests/CLAUDE.md`. | `tests/Spaarke.ArchTests/CredentialGuardTests.cs` — fails the build on a new `.WithClientSecret(...)` site. |
 
+### Which project compiles each path
+
+The BFF categories 1–7 (`tests/integration/{regression,auth,data-mutation,tenant,contract,seam}/**` and `tests/unit/domain/**`) all compile into **`tests/unit/Sprk.Bff.Api.Tests`**, through `<Compile Include>` globs in its `.csproj`. They do not compile into `Sprk.Bff.Api.IntegrationTests`. This has two consequences:
+- moving a test file between these paths, or out of `tests/unit/Sprk.Bff.Api.Tests/` into one of them, needs no namespace, `using` or project-reference change;
+- `dotnet test` with a `--filter` must target `Sprk.Bff.Api.Tests`; the same filter on the IntegrationTests project matches none of them.
+
+Category 8 has its own project, `tests/Spaarke.ArchTests`. (Added 2026-11-03, external-access-platform-r3 wrap-up: 32 files were moved this way.)
+
 ### Deletion safety (binding)
 
 Per `ci-cd-unit-test-remediation-r1` spec FR-B06, any deletion under one of these eight paths requires a **same-PR replacement** of equivalent coverage in the same category — or, for an orphaned test whose subject was deleted, the evidence of ADR-038 Amendment A3. Code-review at Step 9.5 enforces this path check. A test in `tests/integration/auth/**` may be deleted only if another test in `tests/integration/auth/**` lands in the same PR exercising the same auth path.
