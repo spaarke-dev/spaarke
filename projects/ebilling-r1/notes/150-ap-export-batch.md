@@ -159,4 +159,56 @@ Findings of the adversarial review of the merged task, fixed in scope. Every fix
 
 - `InvoiceDate`, `DueDate`, billing period and line dates go through `DateOf` (the UTC date of the stored value). Checked by the main session (2026-10-30): `sprk_invoicedate` and `sprk_eventdate` are date-format, user-local columns in the solution (`Behavior` 1); the billing period columns are documented Date only (`docs/data-model/sprk_invoice.md`). The server writes these dates as midnight UTC, so `DateOf` returns the written date. Known limit: a date a user edits in the app from a time zone east of UTC is stored as the previous day's evening in UTC and exports one day early. Changing the columns to Date only is a schema change, not done here.
 
+## Owner of the export files: the batch asks before it writes (dev incident 2026-11-03, uac-r2)
+
+### The incident
+
+On dev, 2026-11-03, a System Administrator whose systemuser sits in the ROOT business unit called `POST /api/finance/export-batches`:
+
+1. `ApExportService` resolved the batch owner from the caller (`_owners.ResolveOwnerAsync`, no child table), which gave the root unit's default team. The batch row `f6788e95` was created there, in Generating.
+2. The CSV Stored File then asked the hard-deny owner question (`sprk_storedfile` is a restricted-content table). `RestrictedContentOwnerTeam.CustomerTopBusinessUnitAsync` returned `AnswerIsRootBusinessUnit` (the root holds no customer data, so there is no customer unit), and the resolver refused with `record_owner_restricted_content_team_unresolved`.
+3. `StoredFileService` collapsed that to `stored_file.owner_unresolved`, the export mapped every non-size refusal to `ebilling.export.file_failed`, and the route answered a retryable 503 "Try again". Compensation was clean (claims released, nothing sent), but batch `f6788e95` stayed Failed in the root unit, and every retry would leave another.
+
+The fail-closed refusal itself is correct and unchanged: a hard-deny row is never owned by a default team.
+
+### Defect 1: a refusal that can never succeed was answered as retryable
+
+- **Threading, no second copy of the rule.** `StoredFileCreateResult` gained an optional `OwnerRefusalCode`: when the file store refuses with `OwnerUnresolved`, the resolver's own `RecordOwnerRefusal` code rides along unchanged. `ApExportService.IsOwnerUnitRefusal` matches the one code the resolver gives for every non-`Resolved` `RestrictedContentOwnerTeamStatus` (`RestrictedContentOwnerTeamUnresolved`): root unit, Secure Record unit, an unreadable or looping unit chain, and a missing, ambiguous or member-holding owner team. Each is configuration, not a fault (a Dataverse fault throws and never becomes a refusal), so a retry cannot change any of them. The status text is not parsed; the rule stays in `RestrictedContentOwnerTeam` and the resolver.
+- **New stable code `ebilling.export.owner_unit_not_allowed`, 409.** 409 is what this module already gives refusals a retry will not change (`email_owner_refused`, `email_send_refused`, `ap_email_recipient_monitored`); 422 is used here for mapping and file-size faults, so it is not this class. Text: "Your business unit cannot own export files, so nothing was exported, and trying again will not help. An administrator must run the export from a user in a business unit that can own them." It names no id and carries no `batchId` extension.
+- **503 `file_failed` stays for genuine faults:** a resolver or storage exception, and any owner refusal that is not the restricted-content one. The ApExport client already treats an unknown code as not retryable and shows the server's `detail` (`src/solutions/ApExport/src/services/exportFlow.ts` lists the retryable codes explicitly), so no client change was needed.
+- The endpoint's `.WithDescription` and class remarks list the new 409. `.ProducesProblem(409)` and `(503)` were already declared on the route, so no `.Produces` line changed.
+
+### Defect 2: the batch row was created before the file owner question was asked
+
+- **Step (3b), before the selection read, the batch row and every claim.** `ApExportService` calls `StoredFileService.ResolveOwnerForAppAsync` with the same spec shape (`ExportFileSpec`, one builder shared with the write loop) and the same acting user the file write uses. That method builds the question through the same `OwnerQuestionOf` and the same private `AskOwnerAsync` that `CreateForAppAsync` uses, so the pre-check cannot be asked differently from the file's own check. A deterministic refusal writes nothing: no batch row, no claim, no blob, no file row.
+- **Why the two checks cannot disagree, and what happens if they do.** A billing export is not an ownership parent (`RecordOwnershipResolver.OwnershipParentEntities`), so the file's question depends only on the acting user's business unit, never on the batch; asking before the batch exists changes nothing. They can differ only if the world changes between the two asks (the user moves to another unit, a member is added to the owner team). The file's own check then still refuses: the batch is compensated (files withdrawn, claims released, marked Failed with the code as its reason) and the answer is the file's (409 for a deterministic refusal, 503 `file_failed` for a fault). The pre-check is an early exit and never a grant.
+- **Fail closed at the pre-check.** A fault, an answer that is neither an owner nor a refusal (`Unchanged`, an owner with an empty id) and any refusal other than the restricted-content one are a 503 `unavailable` with nothing written. Never the 409, never "allowed".
+- **A Failed batch still blocks nothing.** Compensation (`CompensateAsync`) releases every claim not sent, withdraws files and marks the batch Failed; no invoice names a Failed batch, so the same invoices re-export (asserted in `TransientFileOwnerFault_Is503FileFailed_AndCompensates` and `FileOwnerRefusalAfterPreCheck_StillRefuses_409_AndCompensates`). A caller in the root unit now never reaches step (5), so no Failed row is created in the root unit. Batch `f6788e95` and any like it on dev are Failed rows that block nothing; clearing them is an operator decision, not done here (no live writes).
+
+### Component justification (CLAUDE.md section 11): the new code and its supporting surface
+
+1. **Existing.** `ebilling.export.file_failed` (503, retry) and `ebilling.export.email_owner_refused` (409, the email route). `StoredFileRefusal.OwnerUnresolved` names the refusal but drops why.
+2. **Extension.** `file_failed` cannot carry it: its status tells a client to retry and the ApExport dialog offers "Try again" for it. The email code is another route and another cause (the email cannot be filed under the batch's team). So one new code. The status (409) and response helper (`InvoiceLineReviewEndpoints.Refused`) are existing; the carried status is one optional field on an existing record (`StoredFileCreateResult.OwnerRefusalCode`); the pre-check is one public method over the existing question builder (`StoredFileService.ResolveOwnerForAppAsync`). No new type, DI registration, endpoint, package or Dataverse column.
+3. **Cost of doing nothing.** A user in the root business unit is told "Try again" for a refusal that can never succeed, and every attempt leaves a Failed batch row in the root unit. Without the pre-check method the export either copies the file's owner question (a second copy of the owner rule that can drift) or creates the batch first.
+
+### Tests
+
+`ApExportOwnerUnitTests` (data-mutation, service over the in-memory world, 10 cases) and `ApExportOwnerUnitRouteTests` (the real route, 4 cases):
+
+- a root-unit caller gets the 409 code with no batch row, no claim, no blob and no file row, and a retry writes nothing either;
+- a pre-check fault is a 503 `unavailable` with nothing written (service and route);
+- four unknown or unreadable pre-check answers (another owner code, no code, `Unchanged`, an owner with an empty id) are 503, never the 409;
+- a BU1 caller passes the pre-check and the export completes (service and route); the questions are asserted in order (pre-check, the batch's own owner, then one per file), the first asked before the first write, and the three file questions identical field for field;
+- a transient owner fault in the file's own check (after the pre-check passed) is still 503 `file_failed`, compensates, and the same invoices re-export (service and route);
+- a deterministic refusal in the file's check after the pre-check passed is the 409 and compensates; a non-restricted refusal there stays 503 `file_failed`.
+
+`ApExportWorld` gained `CallerInRootBusinessUnit` (the resolver's contract for a hard-deny row: refused for the root unit while the batch's own ordinary question is still answered, which is how dev's batch was created) and a scripted `OwnerAnswer` hook.
+
+**Seed proof (once).** With the step (3b) block removed, 7 of the 14 new tests fail, among them `RootUnitCaller_Is409_AndNothingIsWritten` at `result.BatchId.Should().BeNull("no batch exists")` (the batch was created before the file refused) and its route twin. The pre-check was restored from a byte-identical copy (63,131 bytes) and the 14 tests are green again.
+
+### Found, not changed
+
+- Other deterministic refusals of the plain (non-restricted) owner question, such as `record_owner_no_default_team` and `record_owner_acting_user_unresolved`, are still the retryable 503 here. A retry cannot fix those either. They are left out because the brief scopes the 409 to the restricted-content refusals; widening it is one more arm in `IsOwnerUnitRefusal`.
+- The API answer names no unit id by design. An operator finds which status applied in the resolver's Error log line (`OrdinaryExitAsync`), which carries the status and the business unit ids.
+
 rework: none task 150

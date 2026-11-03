@@ -51,6 +51,18 @@ internal sealed class ApExportWorld
 
     public bool OwnerThrows { get; set; }
 
+    /// <summary>
+    /// The acting user sits in the ROOT business unit (a System Administrator whose systemuser is in the root unit, dev 2026-11-03). Default false: the
+    /// caller is in a customer business unit (BU1), where the restricted-content owner team resolves.
+    /// </summary>
+    public bool CallerInRootBusinessUnit { get; set; }
+
+    /// <summary>
+    /// A scripted owner answer (question, how many questions were asked before it, this one included): a non-null answer is returned as is, and it may
+    /// throw. Null falls through to <see cref="OwnerThrows"/> / <see cref="CallerInRootBusinessUnit"/> / <see cref="OwnerRefused"/>.
+    /// </summary>
+    public Func<RecordOwnershipContext, int, RecordOwnerResolution?>? OwnerAnswer { get; set; }
+
     public InvoiceContextService.InvoiceCaller Caller { get; } = new("caller-oid", CallerToken);
 
     public ApExportWorld(bool fileStoreConfigured = true)
@@ -60,7 +72,29 @@ internal sealed class ApExportWorld
             NullLogger.Instance, timeProvider: new GatewayClock(Gateway));
         Owners.Setup(o => o.ResolveOwnerAsync(It.IsAny<RecordOwnershipContext>(), It.IsAny<CancellationToken>()))
             .Callback((RecordOwnershipContext context, CancellationToken _) => OwnerQuestions.Add(context))
-            .Returns(() => OwnerThrows ? throw new InvalidOperationException("resolver down") : Task.FromResult(OwnerRefused ? RecordOwnerResolution.Refused("record_owner_test_refusal", "test refusal") : RecordOwnerResolution.Owned(TeamId)));
+            .Returns((RecordOwnershipContext context, CancellationToken _) =>
+            {
+                if (OwnerAnswer?.Invoke(context, OwnerQuestions.Count) is { } scripted)
+                {
+                    return Task.FromResult(scripted);
+                }
+
+                if (OwnerThrows)
+                {
+                    throw new InvalidOperationException("resolver down");
+                }
+
+                // The resolver's own contract for a hard-deny row (RecordOwnershipResolver.OrdinaryExitAsync): a caller in the ROOT business unit has no
+                // customer business unit, so the restricted-content owner team refuses (AnswerIsRootBusinessUnit); the ordinary question (the batch's) is
+                // still answered with the unit's default team, which is how dev's batch was created in the root unit before the file refused.
+                if (CallerInRootBusinessUnit && RecordOwnershipResolver.IsRestrictedContentTable(context.ChildEntityLogicalName))
+                {
+                    return Task.FromResult(RecordOwnerResolution.Refused(
+                        RecordOwnerRefusal.RestrictedContentOwnerTeamUnresolved, "the restricted-content owner team cannot be used (AnswerIsRootBusinessUnit)"));
+                }
+
+                return Task.FromResult(OwnerRefused ? RecordOwnerResolution.Refused("record_owner_test_refusal", "test refusal") : RecordOwnerResolution.Owned(TeamId));
+            });
         Settings.Setup(s => s.GetAsync(It.IsAny<CancellationToken>()))
             .Returns(() => Task.FromResult(new EbillingSettings { ApExportMappingJson = MappingJson }));
         Lifecycle = new WorldLifecycle(Dataverse);

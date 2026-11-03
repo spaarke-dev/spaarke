@@ -543,13 +543,23 @@ public enum StoredFileFlipOutcome
 public sealed record StoredFileFlipResult(StoredFileFlipOutcome Outcome, string? RefusalCode = null);
 
 /// <summary>The answer of a create (caller upload or app create): the Servable file, or a refusal.</summary>
-public sealed record StoredFileCreateResult(Guid? FileId, string? RefusalCode)
+/// <param name="FileId">The created file's id; <c>null</c> for a refusal.</param>
+/// <param name="RefusalCode">The file store's own <see cref="StoredFileRefusal"/> code; <c>null</c> for a created file.</param>
+/// <param name="OwnerRefusalCode">
+/// Set only with <see cref="StoredFileRefusal.OwnerUnresolved"/>: the owner resolver's own refusal code
+/// (<c>Sprk.Bff.Api.Services.Dataverse.RecordOwnerRefusal</c>), carried through unchanged so a caller can tell a refusal that a retry cannot change
+/// (the acting user's business unit cannot own the file) from a fault, without a second copy of the owner rule.
+/// </param>
+/// <remarks>Component Justification (CLAUDE.md §11): (1) Existing — <see cref="RefusalCode"/> names the refusal but drops WHY the owner was refused.
+/// (2) Extension — one optional field on this record, no new type. (3) Cost of doing nothing — the AP export read every owner refusal as a retryable
+/// file fault, so a user in the root business unit was told "Try again" for a refusal that can never succeed (dev incident 2026-11-03).</remarks>
+public sealed record StoredFileCreateResult(Guid? FileId, string? RefusalCode, string? OwnerRefusalCode = null)
 {
     public bool IsCreated => FileId is not null;
 
     public static StoredFileCreateResult Created(Guid fileId) => new(fileId, null);
 
-    public static StoredFileCreateResult Refused(string code) => new(null, code);
+    public static StoredFileCreateResult Refused(string code, string? ownerRefusalCode = null) => new(null, code, ownerRefusalCode);
 }
 
 /// <summary>What <c>OpenForProcessingAsync</c> found.</summary>

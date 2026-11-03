@@ -19,6 +19,14 @@ public static class ApExportCodes
     public const string Unavailable = "ebilling.export.unavailable";
     public const string InvoiceConflict = "ebilling.export.invoice_conflict";
     public const string FileFailed = "ebilling.export.file_failed";
+
+    /// <summary>
+    /// 409: the acting user's business unit cannot own export files (the root unit, or any other state of the restricted-content owner team that a
+    /// retry cannot change). Nothing was exported; an administrator must run the export from a user in a business unit. Distinct from
+    /// <see cref="FileFailed"/>, which is a transient fault (503, retry).
+    /// </summary>
+    public const string OwnerUnitNotAllowed = "ebilling.export.owner_unit_not_allowed";
+
     public const string FileTooLarge = "ebilling.export.file_too_large";
     public const string TransitionFailed = "ebilling.export.transition_failed";
     public const string TransitionIncomplete = "ebilling.export.transition_incomplete";
@@ -90,6 +98,9 @@ public enum ApExportOutcome
 
     /// <summary>The batch total is outside what <c>sprk_billingexport.sprk_totalamount</c> can hold (400, nothing claimed or written).</summary>
     TotalOutOfRange,
+
+    /// <summary>The acting user's business unit cannot own the export files (409; a retry cannot change it; nothing exported).</summary>
+    OwnerUnitNotAllowed,
 }
 
 /// <summary>The answer of <see cref="ApExportService.CreateBatchAsync"/>: a created batch, or one outcome with its stable code.</summary>
@@ -110,7 +121,9 @@ public sealed record ApExportResult(
 /// </summary>
 /// <remarks>
 /// <para><b>Order.</b> (1) validate the request; (2) <see cref="ApExportAuthorization.AuthorizeExportAsync"/> (EB-D-178; the whole batch or nothing, before any read
-/// of the invoices' state); (3) read the mapping and check the file store (before any claim: a fault here writes nothing); (4) read and check the
+/// of the invoices' state); (3) read the mapping, check the file store, and ask who would own the files (<see cref="StoredFileService.ResolveOwnerForAppAsync"/>:
+/// before the batch is created and before any claim, so a fault or a refusal here writes nothing; a refusal a retry cannot change, such as a caller in the root
+/// business unit, is 409 <see cref="ApExportCodes.OwnerUnitNotAllowed"/>); (4) read and check the
 /// selection (each invoice Approved with an empty batch lookup, else 400 with per-invoice reasons, nothing claimed; and the batch total fits the batch total column, else 400 <c>batch_total_out_of_range</c>, nothing claimed); (5) create the batch, status
 /// Generating; (6) claim every invoice in id order with <c>IfRowVersionMatches</c> on the version read in (4): a conflict releases this batch's claims,
 /// marks the batch Failed and answers 409 (ordered claims make exactly one of two overlapping batches win); (7) re-check that every claimed invoice is
@@ -246,6 +259,36 @@ public sealed class ApExportService
             return ApExportResult.Refused(ApExportOutcome.Unavailable, ApExportCodes.Unavailable, "The file store is not available. Nothing was exported.");
         }
 
+        // (3b) Who would own the files, asked BEFORE the batch row exists and before any invoice is claimed, so a refusal writes nothing (dev incident
+        // 2026-11-03: the batch was created first, the file's owner question then refused the root business unit, and a Failed batch was left behind).
+        // The question is the FILE's own, not a copy of it: StoredFileService builds it from the same spec and the same acting user it will use to write
+        // each file, and the restricted-content owner team rule (RestrictedContentOwnerTeam) runs inside the resolver both go through, so the pre-check
+        // and the file's check cannot be asked differently. They can still disagree only if the world changes between them (the user's unit moved, a
+        // member added to the owner team): the file's own check then still refuses, the batch is compensated (a Failed batch blocks nothing) and the answer
+        // is the file's. The pre-check is an early exit and never a grant: only a resolved owner passes it; a fault, an unreadable or unknown answer
+        // and any refusal other than the deterministic one are a retryable 503 with nothing written, never 409 and never "allowed".
+        var batchId = Guid.NewGuid();
+        var batchName = batchId.ToString("D");
+        RecordOwnerResolution fileOwner;
+        try
+        {
+            fileOwner = await _files.ResolveOwnerForAppAsync(
+                ExportFileSpec(batchId, $"ap-export-{batchName}.csv", "text/csv"), callerSystemUserId, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            _logger.LogError(ex, "AP export: the owner of the export files could not be resolved; nothing was created");
+            return ApExportResult.Refused(ApExportOutcome.Unavailable, ApExportCodes.Unavailable, "Who would own the export files could not be confirmed. Nothing was exported. Try again.");
+        }
+
+        if (!fileOwner.IsOwned)
+        {
+            _logger.LogWarning("AP export: the export files cannot be owned for the caller ({Code}); nothing was created", fileOwner.RefusalCode);
+            return fileOwner.IsRefused && IsOwnerUnitRefusal(fileOwner.RefusalCode)
+                ? ApExportResult.Refused(ApExportOutcome.OwnerUnitNotAllowed, ApExportCodes.OwnerUnitNotAllowed, OwnerUnitNotAllowedDetail)
+                : ApExportResult.Refused(ApExportOutcome.Unavailable, ApExportCodes.Unavailable, "The export files could not be created. Nothing was exported.");
+        }
+
         // (4) The selection: every invoice Approved with an empty batch lookup, else the whole request is refused with the reasons.
         var selected = new List<Entity>();
         var refusals = new List<ApExportInvoiceRefusal>();
@@ -289,8 +332,6 @@ public sealed class ApExportService
 
         // (5) The batch, Generating. Owned like any user-owned row the caller creates (the caller's business-unit team), so the people who can see
         // the invoices can see the batch (D-90).
-        var batchId = Guid.NewGuid();
-        var batchName = batchId.ToString("D");
         RecordOwnerResolution owner;
         try
         {
@@ -380,15 +421,7 @@ public sealed class ApExportService
 
                 var contentType = format == "csv" ? "text/csv" : "application/json";
                 var name = $"ap-export-{batchName}.{format}";
-                var spec = new StoredFileRowSpec
-                {
-                    FileId = StoredFileIds.New(),
-                    Purpose = StoredFilePurpose.ExportFile,
-                    Parent = new StoredFileParent(StoredFileParentKind.BillingExport, batchId),
-                    Name = name,
-                    ContentType = contentType,
-                    FirmVisible = false,
-                };
+                var spec = ExportFileSpec(batchId, name, contentType);
                 progress.Files.Add(spec.FileId);
                 StoredFileCreateResult created;
                 try
@@ -404,10 +437,18 @@ public sealed class ApExportService
 
                 if (!created.IsCreated)
                 {
-                    _logger.LogWarning("AP export: the file store refused the {Format} file of batch {BatchId} ({Code})", format, batchId, created.RefusalCode);
-                    throw created.RefusalCode == StoredFileRefusal.SizeOutOfRange
-                        ? new Stopped(ApExportOutcome.Failed, ApExportCodes.FileTooLarge, "The export file is too large to store. Nothing was exported. Select fewer invoices.")
-                        : new Stopped(ApExportOutcome.Failed, ApExportCodes.FileFailed, "The export file could not be stored. Nothing was exported. Try again.");
+                    _logger.LogWarning("AP export: the file store refused the {Format} file of batch {BatchId} ({Code}, owner {OwnerCode})",
+                        format, batchId, created.RefusalCode, created.OwnerRefusalCode);
+                    // The pre-check at (3b) normally answers an owner refusal first; this is the same refusal arriving AFTER the batch exists (the world
+                    // changed between the two asks), so it is the same non-retryable answer, compensated like any other failure here.
+                    throw created.RefusalCode switch
+                    {
+                        StoredFileRefusal.SizeOutOfRange =>
+                            new Stopped(ApExportOutcome.Failed, ApExportCodes.FileTooLarge, "The export file is too large to store. Nothing was exported. Select fewer invoices."),
+                        StoredFileRefusal.OwnerUnresolved when IsOwnerUnitRefusal(created.OwnerRefusalCode) =>
+                            new Stopped(ApExportOutcome.OwnerUnitNotAllowed, ApExportCodes.OwnerUnitNotAllowed, OwnerUnitNotAllowedDetail),
+                        _ => new Stopped(ApExportOutcome.Failed, ApExportCodes.FileFailed, "The export file could not be stored. Nothing was exported. Try again."),
+                    };
                 }
 
                 written.Add(new ApExportFileDto(spec.FileId, format, name, contentType));
@@ -722,6 +763,36 @@ public sealed class ApExportService
     // =============================================================================================================================
     // Helpers
     // =============================================================================================================================
+
+    /// <summary>The answer when the acting user's business unit cannot own export files. Names no id; says what an administrator must do.</summary>
+    private const string OwnerUnitNotAllowedDetail =
+        "Your business unit cannot own export files, so nothing was exported, and trying again will not help. " +
+        "An administrator must run the export from a user in a business unit that can own them.";
+
+    /// <summary>
+    /// The one spec of an export file: the batch as parent, internal only. The write loop and the owner pre-check (3b) both build it here, so the
+    /// question the pre-check asks is the question the write asks.
+    /// </summary>
+    private static StoredFileRowSpec ExportFileSpec(Guid batchId, string name, string contentType) => new()
+    {
+        FileId = StoredFileIds.New(),
+        Purpose = StoredFilePurpose.ExportFile,
+        Parent = new StoredFileParent(StoredFileParentKind.BillingExport, batchId),
+        Name = name,
+        ContentType = contentType,
+        FirmVisible = false,
+    };
+
+    /// <summary>
+    /// True for the owner refusals that a retry cannot change: the resolver's <see cref="RecordOwnerRefusal.RestrictedContentOwnerTeamUnresolved"/>. It is
+    /// the ONE code the resolver gives when the restricted-content owner team cannot be used for the acting user's business unit
+    /// (<see cref="Sprk.Bff.Api.Infrastructure.Dataverse.RestrictedContentOwnerTeamStatus"/>: the answer is in the root unit or the Secure Record unit, the
+    /// unit chain is unreadable or loops, or the named team is missing, ambiguous or has a member). Every status behind it is a fact about configuration, not
+    /// a fault: a read that faults throws instead, and never reaches here. This names the code; it does not decide the rule. Any other code, or none, is
+    /// not matched, so it stays the retryable answer.
+    /// </summary>
+    private static bool IsOwnerUnitRefusal(string? ownerRefusalCode) =>
+        string.Equals(ownerRefusalCode, RecordOwnerRefusal.RestrictedContentOwnerTeamUnresolved, StringComparison.Ordinal);
 
     private static (IReadOnlyList<Guid> Ids, IReadOnlyList<string> Formats)? Validate(ApExportRequest request)
     {
