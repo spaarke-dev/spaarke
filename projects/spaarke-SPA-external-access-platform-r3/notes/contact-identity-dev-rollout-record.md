@@ -219,4 +219,12 @@
 - **After-notices** sent to all five. uac-r2's gate runs from 22:26:31Z. field-mapping runs its read-only checks. word-add-in asked for an Outlook save smoke (one save filed to a matter, one unfiled), which needs the owner to do the saves.
 - **Rollback:** restore the snapshot above (`Deploy-BffApi.ps1 -Environment dev -SkipBuild -PublishPath deploy/rollback/wwwroot-20261103T220358Z`), or redeploy `5796774091`. Owner approval first.
 - **Hand-off:** from the next deploy, unified-access-control-r2 orchestrates dev BFF deploys (owner decision 2026-11-03; `docs/procedures/dev-bff-deploy-coordination.md`).
-- **UAC gate:** pending.
+- **UAC gate (uac-r2, 22:26:31Z–22:56:31Z): PASS.**
+  - 22 requests, 0 5xx; the only failures were 4 anonymous 401s.
+  - 0 OWNERSHIP-REFUSED. SECURE-INHERIT, FOLLOW-PARENT and ROOT-OWNER steady (unsecured, refused and failed all 0). The census still shows the 1 known missing link row (#2524).
+  - No invite traffic, so the new WorkforceHome-contact 409 is not yet proven live. No collision-flag lines. No indexing traffic.
+  - A separate census finding started at 19:45Z, before the deploy, and is unrelated to this build. uac-r2 sent it to the owner.
+- **Startup exceptions:** 4 `BadImageFormatException` "error writing to logger(s)" at 22:26:37–38Z, startup only, never again. Also seen 2026-10-28, so not from this build. Filed as #2549 (field-mapping).
+- **field-mapping read-only checks: PASS on what exists.** 0 5xx; no calls to the changed routes (index-file, send-to-index, child-records); no document modified and no matter, project or event created since the deploy. FR-40 needs a real upload or create on dev to be proven live. field-mapping re-runs its checks after the next real activity and reports to uac-r2.
+- **word-add-in Office smoke:** waits for the owner's two Outlook saves (one filed to a matter, one unfiled). word-add-in runs it and reports to uac-r2.
+- **Not deployed:** #2550 (restores a doc-comment close tag; comment and test text only) ships with uac-r2's next deploy. The SPA registration message change (85fbba3f64) ships with the next SPA deploy.
