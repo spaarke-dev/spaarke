@@ -4,7 +4,7 @@
     <title>Submit Invoice from document: carry supporting documents (supportingDocumentIds) into Stored File copies</title>
     <phase>3 Rules (prerequisite of 118; found by 118's escalation 2026-11-03)</phase>
     <gate>startable (094 merged)</gate>
-    <status>in-progress</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Changes the request contract of an internal BFF write route and the persister's file path; tags include bff-api and auth.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -92,4 +92,7 @@
       <file>projects/ebilling-r1/CLAUDE.md</file>
     </files>
   </knowledge>
+
+  <notes>Completed 2026-11-03 in two parts (escalation option A). 118b-1: the shared document read (moved out of the job), the supportingDocumentIds contract and 400s, the caller Read check (seed-proofed) and the set in the "same details?" comparison. 118b-2 (ab0ae5a0cc): each supporting document read before step A through the shared read (bound by the route; the intake constructor stays SPE-free), staged after step A under document-part-{i} with its own source, part 1 listing the parts; the earlier set read from those stages by the one reader the persister commits with; the parts list in StoredFileBlobs.SameSource (seed-proofed), so a leftover of another set is 409, never extra files; the persister commits one Supporting Stored File per part with sprk_sourcedocument. Gate: 5 test projects build, ArchTests 1950/0, broad unit filter 0 failed. Known limits K2, K2-b, K3, K4 in notes/118b-from-document-supporting-files.md section 7; K4 (bytes held in memory, no per-file cap) reported to the main session.
+rework: none task 118b</notes>
 </task>
