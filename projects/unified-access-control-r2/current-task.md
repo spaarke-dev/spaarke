@@ -35,7 +35,9 @@
 - **Field-mapping:** #2504 reviewed OK. 039/040 diffs to come.
   - **041 scoped check: PASS with notes** (2026-11-03, 6275553d84..f6124e8fab). Only write-time routing was removed; no trim or search-time selection moved.
     - Note 1: keep the `sprk_document` trigger-2 case as an owner-only test (fix in 041).
-    - 020 (Matter `sprk_issecure` refused in the service, as for Project): no objection; the diff comes to me before merge.
+    - 041 merged as #2541 (249809ce0b), with Note 1 applied.
+  - **020 secure-flag diff: OK with notes** (3c4941bec5..2b6920e009). Matter `sprk_issecure` is refused in the service; the F-2 fix catches a null-valued column on system creates.
+    - My follow-up: make `SecureRootFilingGate.CheckAsync` and `PlanCreateAsync` see null-valued named columns. Some writers pass `WritesOf`, which leaves nulls out (`DataverseUpdateRecordHandler:299`, `ProjectMatterFiling:256`). Defense in depth only: those PATCHes run as the user, so field security applies.
 - **ebilling ApExport UI (151b, 151c-1b) on dev 2026-11-03** (owner OK): ribbons-only scoped import plus views. My readbacks 1–4 passed: batch form still has `subgrid_apemails`, link cascade unchanged, `NO_NEW_HOSTS` intact. The 7 undeployed task-014 invoice HideCustomActions were left out; ebilling noted it on 014 (21aec9a10b). The owner added `sprk_invoice.sprk_trackingnumber` (Text 100); the 10 missing-column faults and 2 transaction_failed dead-letters at 13:39–13:43 come from that (#2529). I asked ebilling whether the dead-letters need a replay.
 - **ebilling 095a (Outlook "already submitted" banner):** new `sprk_invoicesubmission.sprk_sourceemaildocument` (a lookup to the .eml document, RemoveLink, written only by the BFF). No field security is needed. My four conditions are binding in 095a's brief:
   1. not on external outputs (null it in `ExternalView`, with a negative test);
