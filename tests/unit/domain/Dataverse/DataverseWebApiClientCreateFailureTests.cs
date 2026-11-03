@@ -17,7 +17,8 @@ public class DataverseWebApiClientCreateFailureTests
 {
     private const string MessageWithValues = "A record with the same email ZZ-SECRET-VALUE@example.test already exists. Read Privilege Check For Owner failed.";
 
-    private static DataverseWebApiClient ClientAnswering(HttpStatusCode status, string? body, string contentType = "application/json")
+    private static DataverseWebApiClient ClientAnswering(
+        HttpStatusCode status, string? body, string contentType = "application/json", string? entityId = null)
     {
         var client = new DataverseWebApiClient(
             new ConfigurationBuilder()
@@ -25,7 +26,7 @@ public class DataverseWebApiClientCreateFailureTests
                 .Build(),
             NullLogger<DataverseWebApiClient>.Instance,
             new FixedCredential());
-        var http = new HttpClient(new Stub(status, body, contentType)) { BaseAddress = new Uri("https://test.crm.dynamics.com/api/data/v9.2/") };
+        var http = new HttpClient(new Stub(status, body, contentType, entityId)) { BaseAddress = new Uri("https://test.crm.dynamics.com/api/data/v9.2/") };
         typeof(DataverseWebApiClient).GetField("_httpClient", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(client, http);
         return client;
     }
@@ -108,12 +109,8 @@ public class DataverseWebApiClientCreateFailureTests
     public async Task ASuccessfulCreate_StillReturnsTheIdFromTheEntityIdHeader()
     {
         var id = Guid.NewGuid();
-        var http = new HttpClient(new Stub(HttpStatusCode.NoContent, null, "application/json", $"https://test.crm.dynamics.com/api/data/v9.2/contacts({id})"))
-        {
-            BaseAddress = new Uri("https://test.crm.dynamics.com/api/data/v9.2/")
-        };
-        var client = ClientAnswering(HttpStatusCode.NoContent, null);
-        typeof(DataverseWebApiClient).GetField("_httpClient", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(client, http);
+        var client = ClientAnswering(HttpStatusCode.NoContent, null,
+            entityId: $"https://test.crm.dynamics.com/api/data/v9.2/contacts({id})");
 
         (await client.CreateAsync("contacts", new { lastname = "x" })).Should().Be(id);
     }

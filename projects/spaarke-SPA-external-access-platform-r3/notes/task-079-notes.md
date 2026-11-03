@@ -130,3 +130,7 @@ Both sides are far below the 55 MB review line and the 60 MB ceiling. No package
 - `InMemoryContactIdentityStore.GetContactAsync` still returns the tenant on its rows, as before; other tests depend on it. The gate and notifier no longer read it.
 - `notes/defer-issues.md` ISS-024 is not updated here; that belongs to the caller's close-out.
 - No live change; the fix ships with a later dev BFF deploy.
+
+## Live result (recorded at wrap-up, 2026-11-03)
+
+- PR #2500 was deployed to dev in BFF `fcf01480f4` (2026-11-01), and is still present in every later dev build (3740e1a105, then 5796774091). #2458 and #2491 are closed. The owner waived a separate live re-check. Both open observations above are filed as #2499.

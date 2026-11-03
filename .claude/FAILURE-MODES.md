@@ -60,6 +60,7 @@ The distinction matters because the fix is different. Anti-patterns require *unl
 - [G-21: In jsdom, a Fluent v9 dialog can be `aria-hidden`, so role queries cannot find its contents](#g-21-in-jsdom-a-fluent-v9-dialog-can-be-aria-hidden-so-role-queries-cannot-find-its-contents)
 - [G-22: `python3` on Windows is the Store alias stub and hangs on stdin scripts](#g-22-python3-on-windows-is-the-store-alias-stub-and-hangs-on-stdin-scripts)
 - [G-23: A narrowed Exchange role entry refuses `-ErrorAction` — and the module calls it a "server side error"](#g-23-a-narrowed-exchange-role-entry-refuses--erroraction--and-the-module-calls-it-a-server-side-error)
+- [G-24: A full test run on a shared machine reports load failures as defects](#g-24-a-full-test-run-on-a-shared-machine-reports-load-failures-as-defects)
 
 ---
 
@@ -1251,6 +1252,25 @@ the deployment guide §4.2.1 step 5.
 
 **Evidence**: `projects/customer-provisioning-orchestration-r1/notes/t186-acme-run-log.md` L62 ·
 `projects/customer-provisioning-orchestration-r1/notes/t263-customer-shared-mailbox.md` §5 (M4 correction, M8).
+
+---
+
+### G-24: A full test run on a shared machine reports load failures as defects
+
+> **Added 2026-11-03** (spaarke-SPA-external-access-platform-r3, task 090). **Class**: environment trap.
+
+**What happens.** Several sessions share one machine. When another worktree runs a full BFF suite (`testhost.exe`) or a build at the same time, a full `Sprk.Bff.Api.Tests` run fails host-based tests in every area. Real-clock waits (`WaitAsync(TimeSpan.FromSeconds(30))`) expire while the test host is starved of threads. SPA vitest runs fail with `Test timed out in 60000ms` and `Unable to find an element`. Occurrences:
+- 2026-10-11: 7 false failures in an R3 run that took 47 minutes instead of 26;
+- 2026-11-03: 255 of 39,388 BFF tests failed in a 1 h 48 m run while two other full suites ran. The failing classes re-run in isolation passed 3,444 / 3,445 and 380 / 380. The last one passed 5 / 5 alone (#2543). The SPA failed 28 of 1,292; the failing files re-run with 2 workers passed 465 / 465.
+
+**Rule.** Before treating a failure as a defect:
+1. See who else is testing: `Get-CimInstance Win32_Process -Filter "Name like 'testhost%'"` shows each test host's worktree path.
+2. Re-run the failing classes in isolation, with a `trx` logger so the cause is recorded (`-v q` records only names).
+3. Treat as real only what still fails. A test that fails only under load is filed to its owner as a reliability item, or registered `TimingSensitive` in `tests/.reliability-registry.json`.
+
+Never call a run green or red from a loaded full run alone.
+
+**Enforced by:** prose only. Whether a run was loaded depends on what other sessions do at run time, so no build or lint step can see it. A hook cannot refuse a test run without blocking legitimate parallel work.
 
 ---
 
