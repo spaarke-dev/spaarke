@@ -2145,6 +2145,168 @@ public sealed class InvoiceSubmissionEndpointsContractTests : IAsyncLifetime
         NothingWritten();
     }
 
+    // ── ebilling-r1 task 118b-1: supportingDocumentIds on POST from-document (contract, the caller's Read, the same communication) ──
+
+    private static readonly Guid SupportingA = Guid.Parse("118b0000-0000-4000-8000-0000000000a1");
+    private static readonly Guid SupportingB = Guid.Parse("118b0000-0000-4000-8000-0000000000b1");
+
+    private static object SupportingBody(params Guid[] supporting) => new
+    {
+        communicationId = SourceCommunicationId,
+        documentId = SourceDocumentId,
+        coreRecord = new { kind = "matter", id = MatterId },
+        firmId = FirmId,
+        firmInvoiceNumber = "INV-94",
+        supportingDocumentIds = supporting,
+    };
+
+    /// <summary>A supporting document row linking <paramref name="communication"/> (null: none), readable by the caller when <paramref name="readable"/>.</summary>
+    private void SupportingDocumentExists(Guid id, Guid? communication, bool readable = true)
+    {
+        var row = new Entity("sprk_document", id) { ["sprk_graphdriveid"] = "b!drive", ["sprk_graphitemid"] = "item-" + id.ToString("N") };
+        if (communication is { } linked)
+        {
+            row["sprk_relatedcommunication"] = new EntityReference("sprk_communication", linked);
+        }
+
+        _h.OtherDocuments[id] = row;
+        if (readable)
+        {
+            _sourceRights.Grant(FinanceAuthorizationFilter.DocumentEntitySet, id, AccessRights.Read);
+        }
+    }
+
+    [Fact(DisplayName = "118b-1 (must not fire): readable supporting documents of the same communication pass, each checked as the caller (OBO); a new attempt then gets 118b-1's interim refusal, nothing filed or written")]
+    public async Task FromDocument_readable_supporting_documents_pass_the_checks_as_the_caller()
+    {
+        GrantInternalSubmit();
+        SourceDocumentExists();
+        SupportingDocumentExists(SupportingA, SourceCommunicationId);
+        SupportingDocumentExists(SupportingB, SourceCommunicationId);
+
+        var response = await PostFromDocumentAsync(SupportingBody(SupportingB, SupportingA, SupportingB));
+
+        response.StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable, await response.Content.ReadAsStringAsync());
+        (await ErrorCodeAsync(response)).Should().Be(InvoiceSubmissionErrors.Failed);
+        foreach (var id in new[] { SupportingA, SupportingB })
+        {
+            _sourceRights.Calls.Should().ContainSingle(c => c.Set == FinanceAuthorizationFilter.DocumentEntitySet && c.Id == id && c.Token != null,
+                "each supporting document is checked once (repeats ignored), as the caller");
+        }
+
+        NothingWritten();
+    }
+
+    [Theory(DisplayName = "118b-1 (seed-proof, the Read guard; must fire): a supporting document the caller cannot Read, an unknown one, one of another communication or of none is the uniform 404, byte-for-byte the same; an unreadable row is never read; nothing written")]
+    [InlineData("unreadable")]
+    [InlineData("other_communication")]
+    [InlineData("no_communication")]
+    public async Task FromDocument_supporting_document_refusals_are_the_uniform_404(string state)
+    {
+        GrantInternalSubmit();
+        SourceDocumentExists();
+        SupportingDocumentExists(SupportingA, SourceCommunicationId);
+        switch (state)
+        {
+            case "unreadable":
+                SupportingDocumentExists(SupportingB, SourceCommunicationId, readable: false);
+                break;
+            case "other_communication":
+                SupportingDocumentExists(SupportingB, Guid.NewGuid());
+                break;
+            default:
+                SupportingDocumentExists(SupportingB, communication: null);
+                break;
+        }
+
+        var refused = await PostFromDocumentAsync(SupportingBody(SupportingA, SupportingB));
+        var unknown = await PostFromDocumentAsync(SupportingBody(SupportingA, Guid.Parse("118b0000-0000-4000-8000-0000000000ff")));
+
+        refused.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        unknown.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        var refusedBody = await refused.Content.ReadAsStringAsync();
+        using (var problem = JsonDocument.Parse(refusedBody))
+        {
+            problem.RootElement.GetProperty("reasonCode").GetString().Should().Be("sdap.access.deny.record_unavailable");
+        }
+
+        WithoutCorrelation(await unknown.Content.ReadAsStringAsync()).Should().Be(WithoutCorrelation(refusedBody), "the answer reveals nothing about the document");
+        refusedBody.Should().NotContain(SupportingB.ToString());
+        if (state == "unreadable")
+        {
+            _h.Entities.Verify(e => e.RetrieveAsync("sprk_document", SupportingB, It.IsAny<string[]>(), It.IsAny<CancellationToken>()), Times.Never(),
+                "the row of a document the caller cannot Read is never read");
+        }
+
+        NothingWritten();
+    }
+
+    public static TheoryData<string> SupportingShapeRefusals => new() { "invoice_document", "empty_id", "too_many" };
+
+    [Theory(DisplayName = "118b-1 (must fire): the invoice document listed as supporting, an empty id, or more than 50 files in all is 400 supportingDocumentIds before anything is read; nothing written")]
+    [MemberData(nameof(SupportingShapeRefusals))]
+    public async Task FromDocument_invalid_supporting_documents_are_400(string shape)
+    {
+        GrantInternalSubmit();
+        SourceDocumentExists();
+
+        var response = await PostFromDocumentAsync(shape switch
+        {
+            "invoice_document" => SupportingBody(SupportingA, SourceDocumentId),
+            "empty_id" => SupportingBody(SupportingA, Guid.Empty),
+            _ => SupportingBody(Enumerable.Range(1, SubmissionCommitGate.MaxFiles).Select(_ => Guid.NewGuid()).ToArray()),
+        });
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        using var problem = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        problem.RootElement.GetProperty("errors").TryGetProperty("supportingDocumentIds", out _).Should().BeTrue();
+        _sourceRights.Calls.Should().BeEmpty("the body is validated before anything is asked");
+        NothingWritten();
+    }
+
+    [Fact(DisplayName = "118b-1 (must not fire): 49 supporting documents (50 files with the invoice document) pass the limit, and repeats are not counted")]
+    public async Task FromDocument_the_file_limit_counts_distinct_documents_and_the_invoice_document()
+    {
+        GrantInternalSubmit();
+        SourceDocumentExists();
+        var ids = Enumerable.Range(1, SubmissionCommitGate.MaxFiles - 1).Select(_ => Guid.NewGuid()).ToArray();
+        foreach (var id in ids)
+        {
+            SupportingDocumentExists(id, SourceCommunicationId);
+        }
+
+        var response = await PostFromDocumentAsync(SupportingBody([.. ids, .. ids.Take(5)]));
+
+        response.StatusCode.Should().NotBe(HttpStatusCode.BadRequest, await response.Content.ReadAsStringAsync());
+        _sourceRights.Calls.Count(c => c.Set == FinanceAuthorizationFilter.DocumentEntitySet && ids.Contains(c.Id)).Should().Be(ids.Length);
+    }
+
+    [Fact(DisplayName = "118b-1 (must fire): a retry of an earlier submission of the document that names supporting documents is 409 document_already_submitted (the earlier attempt has the empty set until 118b-2); nothing written")]
+    public async Task FromDocument_retry_with_another_supporting_set_is_409()
+    {
+        GrantInternalSubmit();
+        SourceDocumentExists();
+        SupportingDocumentExists(SupportingA, SourceCommunicationId);
+        _h.Submission = new Entity("sprk_invoicesubmission", InvoiceSubmissionService.ExistingDocumentSubmissionIdFor(SourceDocumentId))
+        {
+            ["sprk_trackingnumber"] = "INV-94.1",
+            ["sprk_firminvoicenumber"] = "INV-94",
+            ["sprk_vendororg"] = new EntityReference("sprk_organization", FirmId),
+            ["sprk_processingstatus"] = new OptionSetValue((int)InvoiceSubmissionStatus.Accepted),
+            ["sprk_channel"] = new OptionSetValue((int)InvoiceSubmissionChannel.Internal),
+            ["sprk_document"] = new EntityReference("sprk_document", SourceDocumentId),
+            ["sprk_regardingmatter"] = new EntityReference("sprk_matter", MatterId),
+        };
+
+        var withSet = await PostFromDocumentAsync(SupportingBody(SupportingA));
+        var without = await PostFromDocumentAsync(FromDocumentBody());
+
+        withSet.StatusCode.Should().Be(HttpStatusCode.Conflict, await withSet.Content.ReadAsStringAsync());
+        (await ErrorCodeAsync(withSet)).Should().Be(InvoiceSubmissionErrors.DocumentAlreadySubmitted);
+        without.StatusCode.Should().Be(HttpStatusCode.Accepted, "the same request without the field replays as before");
+        NothingWritten();
+    }
+
 
     // ═══════════════════════════════════════════════════════════════════════════
     // ebilling-r1 task 097f (EB-D-180): the status read of an Accepted submission whose invoice a correction Superseded answers Accepted with

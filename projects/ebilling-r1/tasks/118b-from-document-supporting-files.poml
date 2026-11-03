@@ -4,7 +4,7 @@
     <title>Submit Invoice from document: carry supporting documents (supportingDocumentIds) into Stored File copies</title>
     <phase>3 Rules (prerequisite of 118; found by 118's escalation 2026-11-03)</phase>
     <gate>startable (094 merged)</gate>
-    <status>not-started</status>
+    <status>in-progress</status>
     <rigor>FULL</rigor>
     <rigor-reason>Changes the request contract of an internal BFF write route and the persister's file path; tags include bff-api and auth.</rigor-reason>
     <model-tier>opus</model-tier>
