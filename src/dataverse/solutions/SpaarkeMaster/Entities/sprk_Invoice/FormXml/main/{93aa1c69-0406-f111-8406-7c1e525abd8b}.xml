@@ -208,13 +208,10 @@
                         <labels>
                           <label description="Batch" languagecode="1033" />
                         </labels>
-                        <control id="qv_billingexport" classid="{5C5600E0-1D6E-4205-A272-BE80DA87FD42}" datafieldname="sprk_billingexport" uniqueid="{3B6A9C1E-72D4-4F08-8E15-A4C7D9E2B610}">
+                        <control id="qv_billingexport" classid="{5C5600E0-1D6E-4205-A272-BE80DA87FD42}" datafieldname="sprk_billingexport" disabled="false" uniqueid="{3B6A9C1E-72D4-4F08-8E15-A4C7D9E2B610}">
                           <parameters>
-                            <QuickForms>
-                              <QuickFormIds>
-                                <QuickFormId entityname="sprk_billingexport">{2c568b46-e9dd-4774-bcfa-00c436cb4eba}</QuickFormId>
-                              </QuickFormIds>
-                            </QuickForms>
+                            <QuickForms>&lt;QuickFormIds&gt;&lt;QuickFormId entityname="sprk_billingexport"&gt;2C568B46-E9DD-4774-BCFA-00C436CB4EBA&lt;/QuickFormId&gt;&lt;/QuickFormIds&gt;</QuickForms>
+                            <ControlMode>Edit</ControlMode>
                           </parameters>
                         </control>
                       </cell>

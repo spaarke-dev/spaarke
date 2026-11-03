@@ -267,9 +267,9 @@ public sealed class InvoiceFilesListTests
     // Faults: 503, never a partial or empty list
     // =============================================================================================================================
 
-    public static IEnumerable<object[]> FaultCases => [["query"], ["document"], ["props"], ["tags"]];
+    public static IEnumerable<object[]> FaultCases => [["query"], ["document"], ["props"], ["tags"], ["rights-email"], ["rights-invoice"]];
 
-    [Theory(DisplayName = "A read fault (the file query, the source document's name, the blob's properties or scan tags) → 503 file_store_unavailable, not a partial or empty list")]
+    [Theory(DisplayName = "A read fault (the file query, the source document's name, the blob's properties or scan tags, an UNKNOWN rights answer on the source email or on the invoice) → 503 file_store_unavailable, not a partial or empty list")]
     [MemberData(nameof(FaultCases))]
     public async Task ReadFault_503(string where)
     {
@@ -288,6 +288,14 @@ public sealed class InvoiceFilesListTests
             case "document":
                 host.Rig.Dataverse.RetrieveFault = new TimeoutException("Dataverse slow");
                 break;
+            case "rights-email":
+                // A 429/5xx/OBO/WhoAmI fault on the source email: the gate variant would read it as "cannot read" and drop the PDF (a partial list).
+                host.Rig.Probe.Unknown.Add(("sprk_documents", email));
+                break;
+            case "rights-invoice":
+                // The same on the invoice: every file would be dropped ("No files").
+                host.Rig.Probe.Unknown.Add(("sprk_invoices", InvoiceId));
+                break;
             default:
                 host.Rig.Gateway.FailOp[where] = new Azure.RequestFailedException(500, "storage fault");
                 break;
@@ -297,6 +305,32 @@ public sealed class InvoiceFilesListTests
 
         response.StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable, where);
         JsonNode.Parse(await response.Content.ReadAsStringAsync())!["errorCode"]!.GetValue<string>().Should().Be("file_store_unavailable");
+    }
+
+    [Fact(DisplayName = "A step-0 refusal INSIDE the handler that is a system failure (not a refusal of the caller) → 503, not the uniform 404; a real refusal there stays 404")]
+    public async Task StepZeroSystemFailureInHandler_503_RealRefusalStays404()
+    {
+        await using var host = await Host.StartAsync();
+        host.GrantParentRead();
+        Seed(host, "ok.pdf", StoredFilePurpose.InvoicePdf, Day1);
+
+        // Baseline: how many lookups one full step 0 asks (the authorization filter runs it, then the handler runs it again).
+        (await host.SendAsync(ListUrl(InvoiceId))).StatusCode.Should().Be(HttpStatusCode.OK);
+        var perStepZero = host.StepZero.Queries.Count / 2;
+        perStepZero.Should().BeGreaterThan(0);
+        host.StepZero.Queries.Clear();
+
+        // The filter's step 0 admits the caller; the handler's own step 0 (query perStepZero + 1 onward) finds the lookup faulted.
+        var asked = 0;
+        host.StepZero.KindSource = () => ++asked > perStepZero ? StepZeroCallerKind.LookupFault : StepZeroCallerKind.FlagFalse;
+        var fault = await host.SendAsync(ListUrl(InvoiceId));
+        fault.StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable);
+        JsonNode.Parse(await fault.Content.ReadAsStringAsync())!["errorCode"]!.GetValue<string>().Should().Be("file_store_unavailable");
+
+        // Control: a real refusal at the handler's step 0 (the caller turns out flagged external) is still the uniform 404.
+        asked = 0;
+        host.StepZero.KindSource = () => ++asked > perStepZero ? StepZeroCallerKind.FlagTrue : StepZeroCallerKind.FlagFalse;
+        (await host.SendAsync(ListUrl(InvoiceId))).StatusCode.Should().Be(HttpStatusCode.NotFound);
     }
 
     [Fact(DisplayName = "More files than an invoice can have (51) → 503, never a truncated list")]
@@ -389,11 +423,25 @@ public sealed class InvoiceFilesListTests
 
         var quickView = form.Descendants("control").Single(c => (string?)c.Attribute("classid") == QuickViewClassId);
         ((string?)quickView.Attribute("datafieldname")).Should().Be("sprk_billingexport");
-        var quickForm = quickView.Descendants("QuickFormId").Single();
+
+        // The platform's own shape (verified on spaarkedev1, the Account main form's primarycontactid Quick View, 2026-11-03): QuickForms
+        // holds an ESCAPED STRING (text, not child elements) of <QuickFormIds><QuickFormId entityname="...">GUID</QuickFormId>, and
+        // ControlMode sits beside it.
+        var parameters = quickView.Element("parameters")!;
+        var quickForms = parameters.Element("QuickForms")!;
+        quickForms.HasElements.Should().BeFalse("the platform stores QuickForms as an escaped string, not as child elements");
+        var quickFormIds = System.Xml.Linq.XDocument.Parse(quickForms.Value);
+        var quickForm = quickFormIds.Root!.Elements("QuickFormId").Single();
+        quickFormIds.Root.Name.LocalName.Should().Be("QuickFormIds");
         ((string?)quickForm.Attribute("entityname")).Should().Be("sprk_billingexport");
+        parameters.Element("ControlMode")!.Value.Should().Be("Edit");
+
+        // Control: the old literal-child-elements shape has child elements, so this check fires on it.
+        var literalShape = System.Xml.Linq.XElement.Parse("<QuickForms><QuickFormIds><QuickFormId entityname=\"sprk_billingexport\">x</QuickFormId></QuickFormIds></QuickForms>");
+        literalShape.HasElements.Should().BeTrue();
 
         var batch = LoadForm(BatchQuickForm);
-        batch.Descendants("formid").Single().Value.Should().BeEquivalentTo(quickForm.Value);
+        batch.Descendants("formid").Single().Value.Trim('{', '}').Should().BeEquivalentTo(quickForm.Value.Trim('{', '}'));
         var date = batch.Descendants("control").Single(c => (string?)c.Attribute("datafieldname") == "sprk_senttoapdate");
         ((string?)date.Attribute("disabled")).Should().Be("true");
 
