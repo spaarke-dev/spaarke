@@ -530,7 +530,7 @@ External users cannot submit an invoice through the portal; invoices are created
 
 | Field | Value |
 |---|---|
-| **Status** | Open |
+| **Status** | Resolved (GitHub #2001 closed 2026-10-22). ACME stamp app PATCHed to `removeUnverifiedEmailClaim: true` with the owner's OK. Whether new stamps set it is provisioning's to confirm (073 handoff #2532). |
 | **Urgency** | next-round (before any customer stamp enables A9 workforce sign-in) |
 | **Filed** | 2026-10-16 |
 | **Source** | Task 047 adversarial review, known limit K1 (`notes/task-047-notes.md:186`) |
@@ -604,7 +604,7 @@ For an external caller, refuse a configuration whose target entity is in the `sp
 
 | Field | Value |
 |---|---|
-| **Status** | Open — D7 accepted by the owner (2026-10-20); fix = uac-r2 task 188 (T7 predicate) + word-add-in task 130 (T8 writer gaps); deploy via R3 |
+| **Status** | Resolved (GitHub #2126 closed 2026-10-21 by #2177, uac-r2 task 188 D7 T7 document narrowing). |
 | **Urgency** | next-round |
 | **Filed** | 2026-10-20 |
 | **Source** | Task 078 review pass 1 (F1) plus a code map; not reproduced live |
@@ -653,7 +653,7 @@ Fix owners: Office and Communication. Options: set the link in those writers, an
 
 | Field | Value |
 |---|---|
-| **Status** | Open |
+| **Status** | Resolved (GitHub #2127 closed 2026-10-22). Fixed by #2170 (uac-r2 task 188): RAG retrieval and chat archive ingest narrowed for external callers. |
 | **Urgency** | next-round (closes with ISS-010's real fix) |
 | **Filed** | 2026-10-20 |
 | **Source** | Task 078 review pass 2 (F4) |
@@ -705,7 +705,7 @@ A customer employee whose Entra user has no Email gets a token with no `email` c
 
 | Field | Value |
 |---|---|
-| **Status** | Fixed: PR #2175 (`3531ed65e`), dev SPA run 39536100531 (2026-10-21); owner smoke pending |
+| **Status** | Resolved (GitHub #2166 closed 2026-10-21). PR #2175, live on the dev SPA since 2026-10-21. |
 | **Urgency** | before 072 |
 | **Filed** | 2026-10-20 |
 | **Source** | Owner live check on dev SPA `28274e04e` (ralph.schroeder@spaarke.com) |
