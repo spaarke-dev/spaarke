@@ -165,7 +165,10 @@ export class OfficeNaaStrategy implements AuthStrategy {
   private readonly _options: IOfficeNaaConfig;
   private _instance: IPublicClientApplication | null = null;
   private _initPromise: Promise<void> | null = null;
+  private _fallbackPromise: Promise<IPublicClientApplication | null> | null = null;
   private _isNaaActive = false;
+  /** The last interactive attempt was cancelled by the user (MSAL `user_cancelled`): never answered with a second prompt. */
+  private _lastInteractionCancelled = false;
 
   /**
    * @param config Standard @spaarke/auth resolved config (clientId, authority,
@@ -183,7 +186,19 @@ export class OfficeNaaStrategy implements AuthStrategy {
     const msal = await this._ensureInitialized();
     if (!msal) return { accessToken: '', expiresOn: 0 };
     const token = await this._tryAcquireWith(msal);
-    return token ?? { accessToken: '', expiresOn: 0 };
+    if (token) return token;
+
+    // NAA failed (an app registration without the broker redirect, a Conditional Access block on the bridge, a host
+    // fault): fall back once to the standard popup client, the path these hosts used before NAA was turned on for
+    // them. Not after a user cancel: that is an answer, not a fault.
+    if (this._isNaaActive && !this._lastInteractionCancelled) {
+      const fallback = await this._switchToFallback();
+      if (fallback) {
+        const retried = await this._tryAcquireWith(fallback);
+        if (retried) return retried;
+      }
+    }
+    return { accessToken: '', expiresOn: 0 };
   }
 
   /**
@@ -211,6 +226,7 @@ export class OfficeNaaStrategy implements AuthStrategy {
 
     // 2. acquireTokenPopup — under NAA this routes through the Office broker (no real popup);
     //    under fallback PCA it opens an interactive popup.
+    this._lastInteractionCancelled = false;
     try {
       const loginHint = account?.username;
       console.info(
@@ -225,10 +241,36 @@ export class OfficeNaaStrategy implements AuthStrategy {
       const token = this._validate(result);
       if (token) return token;
     } catch (err) {
+      this._lastInteractionCancelled = (err as { errorCode?: string } | null)?.errorCode === 'user_cancelled';
       console.warn('[OfficeNaaStrategy] acquireTokenPopup failed:', err);
     }
 
     return null;
+  }
+
+  /**
+   * Replace the NAA client with the standard popup client for the rest of this page's life (a reload detects again).
+   * One switch even when several acquisitions fail at once.
+   */
+  private _switchToFallback(): Promise<IPublicClientApplication | null> {
+    if (!this._fallbackPromise) {
+      this._fallbackPromise = (async () => {
+        try {
+          console.warn('[OfficeNaaStrategy] NAA token request failed; switching to the standard popup client');
+          const msalModule = await import('@azure/msal-browser');
+          const pca: PublicClientApplication = new msalModule.PublicClientApplication(this._buildFallbackConfig());
+          await pca.initialize();
+          await this._drainRedirectIfAny(pca);
+          this._instance = pca;
+          this._isNaaActive = false;
+          return pca;
+        } catch (err) {
+          console.warn('[OfficeNaaStrategy] standard popup client could not be created:', err);
+          return null;
+        }
+      })();
+    }
+    return this._fallbackPromise;
   }
 
   clearCache(): void {

@@ -15,17 +15,27 @@ function makeJwt(expSeconds: number): string {
   return `${header}.${payload}.sig`;
 }
 
+function freshJwt(): string {
+  return makeJwt(Math.floor(Date.now() / 1000) + 3600);
+}
+
 const mockAccount = { username: 'user@tenant.onmicrosoft.com' };
 
-const mockInstance = {
-  initialize: jest.fn(() => Promise.resolve()),
-  handleRedirectPromise: jest.fn(() => Promise.resolve(null)),
-  getAllAccounts: jest.fn((): unknown[] => [mockAccount]),
-  acquireTokenSilent: jest.fn(),
-  acquireTokenPopup: jest.fn(),
-  clearCache: jest.fn(() => Promise.resolve()),
-  logoutPopup: jest.fn(() => Promise.resolve()),
-};
+function makeInstance() {
+  return {
+    initialize: jest.fn(() => Promise.resolve()),
+    handleRedirectPromise: jest.fn(() => Promise.resolve(null)),
+    getAllAccounts: jest.fn((): unknown[] => [mockAccount]),
+    acquireTokenSilent: jest.fn(),
+    acquireTokenPopup: jest.fn(),
+    clearCache: jest.fn(() => Promise.resolve()),
+    logoutPopup: jest.fn(() => Promise.resolve()),
+  };
+}
+
+/** The client `createNestablePublicClientApplication` returns, and the standard popup client. */
+let naaInstance = makeInstance();
+let pcaInstance = makeInstance();
 
 /** What the mocked nestable factory says about the bridge, through the config's logger (null = no line at all). */
 let bridgeLine: 'true' | 'false' | null = 'true';
@@ -38,9 +48,9 @@ const mockCreateNestable = jest.fn(async (config: Configuration) => {
       false
     );
   }
-  return mockInstance;
+  return naaInstance;
 });
-const mockPca = jest.fn().mockImplementation(() => mockInstance);
+const mockPca = jest.fn().mockImplementation(() => pcaInstance);
 
 jest.mock('@azure/msal-browser', () => ({
   createNestablePublicClientApplication: (config: Configuration) => mockCreateNestable(config),
@@ -100,11 +110,11 @@ describe('OfficeNaaStrategy — which MSAL client the host gets', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     bridgeLine = 'true';
-    mockInstance.getAllAccounts.mockReturnValue([mockAccount]);
-    mockInstance.acquireTokenSilent.mockResolvedValue({
-      accessToken: makeJwt(Math.floor(Date.now() / 1000) + 3600),
-      expiresOn: null,
-    });
+    naaInstance = makeInstance();
+    pcaInstance = makeInstance();
+    for (const instance of [naaInstance, pcaInstance]) {
+      instance.acquireTokenSilent.mockResolvedValue({ accessToken: freshJwt(), expiresOn: null });
+    }
     saved = { warn: console.warn, info: console.info, error: console.error };
     console.warn = jest.fn();
     console.info = jest.fn();
@@ -137,7 +147,8 @@ describe('OfficeNaaStrategy — which MSAL client the host gets', () => {
   });
 
   it('the NAA config never carries a brk-multihub redirect: it is the https popup redirect', async () => {
-    installOffice({ host: 'Outlook', platform: 'OfficeOnline', nestedAppAuth: true });
+    // Classic Windows, a host the old rules also sent to NAA, so this checks the redirect and not the detection.
+    installOffice({ host: 'Outlook', platform: 'PC', version: '16.0.19328.20000', nestedAppAuth: true });
     const strategy = new OfficeNaaStrategy(
       { ...baseConfig, redirectUri: 'brk-multihub://addins.example.com' },
       { fallbackRedirectUri: FALLBACK }
@@ -166,7 +177,57 @@ describe('OfficeNaaStrategy — which MSAL client the host gets', () => {
 
     const strategy = await start();
 
+    expect(mockCreateNestable).toHaveBeenCalledTimes(1);
     expect(strategy.isNaaActive()).toBe(false);
+  });
+
+  it('a failed NAA token request falls back once to the standard popup client, which answers', async () => {
+    installOffice({ host: 'Outlook', platform: 'OfficeOnline', nestedAppAuth: true });
+    naaInstance.acquireTokenSilent.mockRejectedValue(new Error('bridge: AADSTS700046'));
+    naaInstance.acquireTokenPopup.mockRejectedValue(Object.assign(new Error('bridge'), { errorCode: 'server_error' }));
+    const strategy = new OfficeNaaStrategy(baseConfig, { fallbackRedirectUri: FALLBACK });
+
+    const token = await strategy.acquire();
+
+    expect(token.accessToken).not.toBe('');
+    expect(mockPca).toHaveBeenCalledTimes(1);
+    expect(mockPca.mock.calls[0]![0].auth.redirectUri).toBe(FALLBACK);
+    expect(pcaInstance.acquireTokenSilent).toHaveBeenCalledTimes(1);
+    expect(strategy.isNaaActive()).toBe(false);
+
+    // The switch lasts: the next acquisition goes straight to the standard client.
+    naaInstance.acquireTokenSilent.mockClear();
+    await strategy.acquire();
+    expect(naaInstance.acquireTokenSilent).not.toHaveBeenCalled();
+    expect(mockPca).toHaveBeenCalledTimes(1);
+  });
+
+  it('a user cancel on the NAA prompt is not answered with a second (popup) prompt', async () => {
+    installOffice({ host: 'Outlook', platform: 'OfficeOnline', nestedAppAuth: true });
+    naaInstance.acquireTokenSilent.mockRejectedValue(new Error('interaction required'));
+    naaInstance.acquireTokenPopup.mockRejectedValue(
+      Object.assign(new Error('cancelled'), { errorCode: 'user_cancelled' })
+    );
+    const strategy = new OfficeNaaStrategy(baseConfig, { fallbackRedirectUri: FALLBACK });
+
+    const token = await strategy.acquire();
+
+    expect(token.accessToken).toBe('');
+    expect(mockPca).not.toHaveBeenCalled();
+    expect(strategy.isNaaActive()).toBe(true);
+  });
+
+  it('the standard popup client failing is not retried (no fallback loop)', async () => {
+    installOffice({ host: 'Outlook', platform: 'PC', nestedAppAuth: false });
+    pcaInstance.acquireTokenSilent.mockRejectedValue(new Error('no session'));
+    pcaInstance.acquireTokenPopup.mockRejectedValue(new Error('400 Request Too Long'));
+    const strategy = new OfficeNaaStrategy(baseConfig, { fallbackRedirectUri: FALLBACK });
+
+    const token = await strategy.acquire();
+
+    expect(token.accessToken).toBe('');
+    expect(mockPca).toHaveBeenCalledTimes(1);
+    expect(pcaInstance.acquireTokenPopup).toHaveBeenCalledTimes(1);
   });
 
   it('a host without NestedAppAuth 1.1 gets the standard popup client with the https redirect', async () => {
