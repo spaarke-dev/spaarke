@@ -672,9 +672,12 @@ jobs:
           # Determine merge base for diff
           $baseRef = $env:GITHUB_BASE_REF
           if (-not $baseRef) { $baseRef = 'master' }
-          git fetch origin $baseRef --depth=1 2>$null
+          # No --depth here: a shallow fetch into the full clone cuts the merge base off whenever master has moved
+          # since the PR merge ref was built, and the diff then came back empty — a silent pass on every PR.
+          git fetch origin $baseRef 2>$null
           $base = "origin/$baseRef"
-          $changed = git diff --name-only --diff-filter=AM $base...HEAD 2>$null
+          $changed = git diff --name-only --diff-filter=AM $base...HEAD
+          if ($LASTEXITCODE -ne 0) { Write-Host "::error::git diff $base...HEAD failed; cannot determine touched docs"; exit 1 }
           if (-not $changed) { Write-Host 'No changed files vs base'; exit 0 }
 
           $targets = @(
