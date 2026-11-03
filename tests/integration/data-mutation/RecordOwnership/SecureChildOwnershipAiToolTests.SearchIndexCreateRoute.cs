@@ -187,7 +187,7 @@ public sealed partial class SecureChildOwnershipAiToolTests
     }
 
     [Fact]
-    public async Task ChatCreate_AClientIndexThatDiffersFromTheApplied_LogsOneDrop_WithTheRecordId_TheAppliedIndex_AndOriginCaller()
+    public async Task ChatCreate_AClientIndexThatDiffersFromTheApplied_LogsOneDrop_WithTheRecordId_AndOriginCaller()
     {
         var (result, dropLines) = await ChatCreateEventOverAUnitWithAnIndex(
             Lookup("sprk_ai_search_index", "sprk_aisearchindex", CallersIndexRow));
@@ -198,7 +198,7 @@ public sealed partial class SecureChildOwnershipAiToolTests
         var line = dropLines.Should().ContainSingle("the create logs the drop once, from the service's step 12").Subject;
         line.Should().Contain("table=sprk_event").And.Contain($"record={created.Id}").And.Contain("origin=caller")
             .And.Contain($"droppedIndexId={CallersIndexRow}").And.Contain("appliedIndexId=(null)");
-        line.Should().NotContain("unchanged", "a create has an applied index; 'unchanged' is the update's");
+        line.Should().NotContain("unchanged", "a create logs `(null)` as the applied value; 'unchanged' is the update's wording");
     }
 
     /// <summary>

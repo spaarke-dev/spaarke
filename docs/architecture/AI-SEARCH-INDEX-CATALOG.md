@@ -177,7 +177,7 @@ Rolling back to 1536-dim would require: (a) re-deploying the OpenAI `text-embedd
 Binding since `field-mapping-server-write-path-r1` task 041:
 
 1. The server picks the index for each content type from settings: SPE document chunks → `AiSearch:KnowledgeIndexName` (`spaarke-files-index`; discovery-tier chunks → `DiscoveryIndexName`), chat session files → `SessionFilesIndexName`, invoices → the invoice handler's index, and so on (the table above). No request field, record column or business-unit column changes it.
-2. The only SPE-document seam that still takes an index argument is `FileIndexingService`. Every caller of it gets the files index (`ISearchIndexNameResolver.GetDefaultIndexName()`). Session files, discovery and invoices already follow rule 1.
+2. `FileIndexingService` takes no index argument: it passes none to `RagService`, so SPE document chunks land in the tenant default, the files index (`ISearchIndexNameResolver.GetDefaultIndexName()`). `RagService.IndexDocumentsBatchAsync` is the seam that still takes an optional index (`null` means the tenant default). Session files, discovery and invoices already follow rule 1.
 3. `sprk_document.sprk_searchindexname` stays the **stamp** of where the file landed. It is written only by the indexing pipeline, app-only, and always equals the index actually written. `VisualizationService`, `RelocatedFileIndexing` and `DocumentContainerRelocator` read it, so it must be true.
 4. Record columns `sprk_ai_search_index` / `sprk_searchindexname` on the six search-indexed tables: **no server writer**, **no client writer** (client values are dropped, `DATAVERSE-WRITE-PATH-ARCHITECTURE.md` I-5), **no reader on the indexing path**. Existing values stay; nothing is backfilled or cleared.
 
