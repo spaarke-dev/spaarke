@@ -37,9 +37,11 @@ public class IndexingWorkerHostedService : BackgroundService
     private readonly ServiceBusClient _serviceBusClient;
     private readonly IJobStatusService _jobStatusService;
     private readonly IProcessingJobService _jobService;
-    private readonly IFileIndexingService _fileIndexingService;
+    // IFileIndexingService and ISearchIndexNameResolver are Scoped; this worker is a Singleton BackgroundService, so both
+    // are resolved per message from _scopeFactory (task 041 review round 2 N1, as UploadFinalizationWorker does) rather
+    // than captured on the ctor. IDocumentDataverseService is a Singleton and stays injected.
+    private readonly IServiceScopeFactory _scopeFactory;
     private readonly IDocumentDataverseService _documentService;
-    private readonly ISearchIndexNameResolver _searchIndexNameResolver;
     private readonly ServiceBusOptions _serviceBusOptions;
 
     private const string QueueName = "office-indexing";
@@ -54,18 +56,16 @@ public class IndexingWorkerHostedService : BackgroundService
         ServiceBusClient serviceBusClient,
         IJobStatusService jobStatusService,
         IProcessingJobService jobService,
-        IFileIndexingService fileIndexingService,
+        IServiceScopeFactory scopeFactory,
         IDocumentDataverseService documentService,
-        ISearchIndexNameResolver searchIndexNameResolver,
         IOptions<ServiceBusOptions> serviceBusOptions)
     {
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _serviceBusClient = serviceBusClient ?? throw new ArgumentNullException(nameof(serviceBusClient));
         _jobStatusService = jobStatusService ?? throw new ArgumentNullException(nameof(jobStatusService));
         _jobService = jobService ?? throw new ArgumentNullException(nameof(jobService));
-        _fileIndexingService = fileIndexingService ?? throw new ArgumentNullException(nameof(fileIndexingService));
+        _scopeFactory = scopeFactory ?? throw new ArgumentNullException(nameof(scopeFactory));
         _documentService = documentService ?? throw new ArgumentNullException(nameof(documentService));
-        _searchIndexNameResolver = searchIndexNameResolver ?? throw new ArgumentNullException(nameof(searchIndexNameResolver));
         _serviceBusOptions = serviceBusOptions?.Value ?? throw new ArgumentNullException(nameof(serviceBusOptions));
     }
 
@@ -155,6 +155,11 @@ public class IndexingWorkerHostedService : BackgroundService
 
             try
             {
+                // One scope per message for the Scoped services (review round 2 N1).
+                using var scope = _scopeFactory.CreateScope();
+                var fileIndexingService = scope.ServiceProvider.GetRequiredService<IFileIndexingService>();
+                var searchIndexNameResolver = scope.ServiceProvider.GetRequiredService<ISearchIndexNameResolver>();
+
                 // Build FileIndexRequest using the payload details. It names no index (task 041, FR-40): the file
                 // lands in the content type's index; no record or business-unit index column is read.
                 var indexRequest = new FileIndexRequest
@@ -172,7 +177,7 @@ public class IndexingWorkerHostedService : BackgroundService
                 };
 
                 // Call FileIndexingService using app-only authentication.
-                var result = await _fileIndexingService.IndexFileAppOnlyAsync(indexRequest, args.CancellationToken);
+                var result = await fileIndexingService.IndexFileAppOnlyAsync(indexRequest, args.CancellationToken);
 
                 if (!result.Success)
                 {
@@ -205,7 +210,7 @@ public class IndexingWorkerHostedService : BackgroundService
                         result.Duration);
 
                     if (payload.DocumentId != Guid.Empty)
-                        await StampSearchIndexAsync(payload.DocumentId.ToString(), args.CancellationToken);
+                        await StampSearchIndexAsync(searchIndexNameResolver, payload.DocumentId.ToString(), args.CancellationToken);
                 }
 
                 await CompleteJobAsync(message.JobId, payload.DocumentId, args.CancellationToken);
@@ -243,12 +248,12 @@ public class IndexingWorkerHostedService : BackgroundService
     /// (<see cref="ISearchIndexNameResolver.GetDefaultIndexName"/>), as <c>RagIndexingJobHandler</c> does. A failed stamp is
     /// logged and never fails the job: indexing succeeded.
     /// </summary>
-    private async Task StampSearchIndexAsync(string documentId, CancellationToken ct)
+    private async Task StampSearchIndexAsync(ISearchIndexNameResolver searchIndexNameResolver, string documentId, CancellationToken ct)
     {
         try
         {
             var completedAt = DateTime.UtcNow;
-            var stampedIndexName = _searchIndexNameResolver.GetDefaultIndexName();
+            var stampedIndexName = searchIndexNameResolver.GetDefaultIndexName();
             var updateRequest = new UpdateDocumentRequest
             {
                 // New canonical lifecycle marker (R3+)
@@ -274,6 +279,7 @@ public class IndexingWorkerHostedService : BackgroundService
                 documentId, ex.Message);
         }
     }
+
     private Task ProcessErrorAsync(ProcessErrorEventArgs args)
     {
         _logger.LogError(
