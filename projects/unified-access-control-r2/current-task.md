@@ -52,6 +52,18 @@
     - app-only writes go through the allocator;
     - tests.
   - 095d gets a full review.
+- **ebilling 089 (record Procedure writes)**, answered 2026-11-03.
+  - The gate:
+    - step 0 (refuse callers flagged external);
+    - Write and AppendTo on the record (gate variant);
+    - Read on the Procedure;
+    - `BillingAdminAuthorization.Admin()` on assign, pin, exclude and remove.
+  - Change rule also needs `CreateRuleSet()` and Create on policy/policyversion.
+  - N4 covered only the Procedure lifecycle row; ebilling rewords v5.2 #4.
+  - EB-D-158 covers the 089 live steps on these conditions:
+    - I see the -WhatIf before -Apply;
+    - adds on the four 089 tables only;
+    - any removal, deeper depth, other table, or another project's pending entry → fresh owner OK.
 - **PR #2530** (Office Add In User billing reads plus `sprk_trackingnumber` in source): the role part is OK from me, and the dev role was read back. MERGED to master at 1571b0be9d (2026-11-03); src identical to the reviewed head 7a33014d9c.
 - **K3, the Office Add In User role (root 9e6af7ee; the 5 BU copies inherit it):** the owner is granting Read on the billing tables: billingexport and billingevent at Deep; billingcode, billingcodeset, ebillingsetting and ebillingoverride at Global. That matches Basic User and Core User, plus the override table, which holds only a name. It was NOT saved as of 14:00Z: I must re-check it with RetrieveRolePrivilegesRole. Source `src/dataverse/solutions/SpaarkeMaster/Roles/Spaarke Office Add In User.xml` needs the same privileges; that's ebilling's PR, and I review it.
 
