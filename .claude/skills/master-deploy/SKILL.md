@@ -2,7 +2,7 @@
 
 > **Category**: Operations (Tier 3) — end-to-end unified-master deploy
 > **Created**: 2026-06-11 (after the 4-parallel-session deploy collision was resolved)
-> **Last Reviewed**: 2026-10-11 — Step 0.5 clobber check + restore point, ~13 missing surfaces added, no `git stash`, read-back verification (first full run under these rules: 28 pages + 1 JS on 2026-10-11, 0 clobbers)
+> **Last Reviewed**: 2026-11-03 — Step 0.5 clobber check + restore point, ~13 missing surfaces added, no `git stash`, read-back verification (first full run under these rules: 28 pages + 1 JS on 2026-10-11, 0 clobbers)
 > **When to use**: After multiple PRs have merged to master and the entire deployable surface needs to land on `spaarkedev1` from one unified master HEAD. The single source of truth for "deploy everything from master."
 > **When NOT to use**: A single small change to one Code Page → use that surface's individual `Deploy-*.ps1` directly. A BFF-only change → use `/bff-deploy`.
 
@@ -44,6 +44,22 @@ The 12 surfaces in `Deploy-WizardCodePages.ps1`: CreateMatter, CreateProject, Cr
 `scripts/Deploy-WebResourceInline.ps1` PATCHes the exact bytes and publishes **only that web resource** (scoped `PublishXml`), like every other script here.
 
 **Excluded** (intentional): `sprk_tododetailsidepane` (deleted by #373), `sprk_corporateworkspace` (retired by OC-R4-05), `sprk_analysisbuilder` / `sprk_analysisworkspace` (no source on master), PCF controls (`/pcf-deploy` — each needs a version bump).
+
+## Progress Checklist
+
+Copy this into your working notes and tick each item as you go:
+
+```
+- [ ] Step 0: Pre-flight (master HEAD, branch, open PRs, clean detached deploy worktree)
+- [ ] Step 0.5: Clobber check and restore point (`BRANCH_ONLY` is a hard stop)
+- [ ] Step 1: Build shared libs
+- [ ] Step 2: Build all Vite solutions
+- [ ] Step 3: Deploy 12 wizards via batch script
+- [ ] Step 4: Deploy 6 individual web resource scripts
+- [ ] Step 5: Deploy Reporting
+- [ ] Step 6: Deploy BFF via /bff-deploy skill
+- [ ] Step 7: Verification (read back every web resource, `/healthz` and `/ping`)
+```
 
 ## Pre-flight (Step 0 — always run)
 
@@ -190,6 +206,8 @@ curl -s -o /dev/null -w "%{http_code}\n" https://spaarke-bff-dev.azurewebsites.n
 ```
 
 If `/healthz` is slow (90-120 s after Linux App Service cold-start) but hash-verify in Step 6 passed: don't redeploy, just re-curl after 60 s.
+
+If verification fails: fix the cause, redeploy, and re-run verification; do not report success until it passes.
 
 The user should hard-refresh **`spaarkedev1`** in Incognito to verify SpaarkeAi shows all merged work — that's the eyeball check this skill can't do for them.
 

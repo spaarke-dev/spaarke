@@ -6,8 +6,22 @@ TEMPLATE — How to use this:
   4. Delete this HTML comment block
   5. Add an entry to `.claude/skills/INDEX.md`
   6. Add an entry to `.claude/CHANGELOG.md` under [Unreleased] → Added
-  7. Body must stay UNDER 200 lines (ideal target). Cap is 400 lines with justification stamped in the Gotchas section.
-  8. Reference subdirectories (`references/`, `examples/`, `scripts/`) for detail — keep SKILL.md tight.
+  7. LENGTH — aim for under 200 lines; the cap is 500. The whole SKILL.md loads every time the skill runs.
+     Over 500 only for a real reason, stated three ways: a `length-justification: <one sentence>` frontmatter key;
+     directly under the title, "> **Read this file in full.** It is long on purpose: <reason>."; then a
+     `## Contents` map (section → what it covers → when it applies). Enforced by: scripts/quality/check-skill-length.py
+     (CI Tier 2, ratcheted by scripts/quality/skill-length.baseline.txt).
+  8. WHAT STAYS INLINE — steps that run every time, MUST / MUST NOT rules, acceptance criteria, gotchas, and every
+     step number another file cites (POMLs cite "task-create Step 3.5.5"; renumbering breaks them).
+     WHAT MOVES OUT — a branch that applies only sometimes goes to `references/<name>.md`, with an explicit
+     directive at the branch point: "If <condition>, read `references/<name>.md` before continuing." (a directive,
+     not a "see also" — an agent skips a "see also"). Long examples go to `examples/`. Runnable code goes to a
+     script the skill RUNS (`scripts/`), not a code block the agent re-types.
+  9. A `references/` or `examples/` file over 100 lines opens with a `## Contents` list: Claude may preview only the
+     top of a referenced file. Exempt: `*-template.md` files copied verbatim into outputs. Same guard as item 7.
+  10. FREEDOM — state the goal and the constraints; script exact steps only where order or exactness matters
+     (deploys, data writes, irreversible actions). Give a multi-step procedure a `- [ ]` checklist and a
+     validate → fix → re-validate loop. Name the model only where it matters; model-specific settings go stale.
 -->
 ---
 name: <your-skill-name>
@@ -91,4 +105,4 @@ If there are auto-detection rules (file types touched, commands run, project sta
 
 ---
 
-*To split this skill: keep trigger conditions + constraints + acceptance criteria + gotchas in this `SKILL.md`. Move long examples to `examples/<name>.md`, long reference content to `references/<name>.md`, and any sidecar tooling to `scripts/<name>.ps1`. The agent loads `SKILL.md` first and dereferences supporting files only when needed.*
+*To split this skill: keep trigger conditions, every-time steps, constraints, acceptance criteria and gotchas in this `SKILL.md`. Move conditional branches to `references/<name>.md` behind an explicit "If <condition>, read … before continuing" line, long examples to `examples/<name>.md`, and runnable code to a script the skill runs. The agent loads `SKILL.md` in full and opens supporting files only when the directive tells it to.*

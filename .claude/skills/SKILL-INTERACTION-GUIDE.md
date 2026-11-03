@@ -189,10 +189,10 @@ Step B5: Create Task Files (project-pipeline Step 3)
 
 Step B6: Create Feature Branch (project-pipeline Step 4)
   🔧 Git operations:
-    → git checkout -b feature/{project-name}
+    → git checkout -b work/{project-name}
     → git add projects/{project-name}/
     → git commit -m "feat: initialize {project-name} project"
-    → git push -u origin feature/{project-name}
+    → git push -u origin work/{project-name}
   ✅ Output: "Feature branch created and pushed"
 
 Step B7: Optional Auto-Start (project-pipeline Step 5)
@@ -384,10 +384,10 @@ Step 3: Manual Branch & Commit
   💬 User: (Manually via bash or push-to-github skill)
 
   Commands:
-    git checkout -b feature/{project-name}
+    git checkout -b work/{project-name}
     git add projects/{project-name}/
     git commit -m "feat: initialize {project-name}"
-    git push -u origin feature/{project-name}
+    git push -u origin work/{project-name}
 
 Step 4: Execute Tasks
   (Same as Workflow 2 - Execute Single Task)
