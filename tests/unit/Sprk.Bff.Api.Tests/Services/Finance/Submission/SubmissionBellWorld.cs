@@ -32,6 +32,18 @@ internal sealed class SubmissionBellWorld
     /// <summary>When set, reading the submission throws it.</summary>
     public Exception? ReadFault { get; set; }
 
+    /// <summary>When true, reading the submission never answers: it waits on the token it was given (review F3, the notifier's time bound).</summary>
+    public bool ReadWaitsOnItsToken { get; set; }
+
+    /// <summary>When true, creating the appnotification never answers: it waits on the token it was given (review F3, the notifier's time bound).</summary>
+    public bool CreateWaitsOnItsToken { get; set; }
+
+    private static async Task<T> WaitOnTokenAsync<T>(CancellationToken ct)
+    {
+        await Task.Delay(System.Threading.Timeout.InfiniteTimeSpan, ct);
+        return default!;
+    }
+
     public CapturingLog<SubmissionOutcomeNotifier> Log { get; } = new();
 
     public SubmissionBellWorld(Guid submissionId, bool withPerson = true, string? reasonCode = null)
@@ -57,11 +69,17 @@ internal sealed class SubmissionBellWorld
     {
         var entities = new Mock<IGenericEntityService>(MockBehavior.Strict);
         entities.Setup(e => e.RetrieveAsync(FinanceBaseValues.SubmissionEntity, SubmissionId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
-            .Returns((string _, Guid _, string[] _, CancellationToken _) =>
-                ReadFault is { } fault ? Task.FromException<Entity>(fault) : Task.FromResult(Copy(Submission)));
+            .Returns((string _, Guid _, string[] _, CancellationToken ct) =>
+                ReadWaitsOnItsToken ? WaitOnTokenAsync<Entity>(ct)
+                : ReadFault is { } fault ? Task.FromException<Entity>(fault) : Task.FromResult(Copy(Submission)));
         entities.Setup(e => e.CreateAsync(It.Is<Entity>(x => x.LogicalName == "appnotification"), It.IsAny<CancellationToken>()))
-            .Returns((Entity entity, CancellationToken _) =>
+            .Returns((Entity entity, CancellationToken ct) =>
             {
+                if (CreateWaitsOnItsToken)
+                {
+                    return WaitOnTokenAsync<Guid>(ct);
+                }
+
                 if (CreateFault is { } fault)
                 {
                     return Task.FromException<Guid>(fault);

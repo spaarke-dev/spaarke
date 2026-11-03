@@ -113,7 +113,7 @@ public sealed class SubmissionOutcomeNotifier
     /// </summary>
     /// <param name="submissionId">The submission that ended.</param>
     /// <param name="outcome">How it ended.</param>
-    /// <param name="invoiceId">The invoice it created, when there is one (Accepted, a rule refusal, a held one); the link opens it. Otherwise the link opens the submission.</param>
+    /// <param name="invoiceId">The invoice it created, passed for an Accepted outcome only; the link opens it. Otherwise (Failed, a rule refusal, a held one, a document not read) the link opens the submission.</param>
     public async Task NotifyAsync(Guid submissionId, SubmissionOutcomeKind outcome, Guid? invoiceId)
     {
         try
