@@ -48,6 +48,21 @@ public class CallerPrivilegeCheckTests
         CallerRecordAccessProbe.ResponseGrantsPrivilege(body, "prvCreatesprk_Invoice").Should().BeFalse();
     }
 
+    // 095a review K2: the probe's tri-state answer maps an unreadable 2xx body to Faulted, so it must tell
+    // "a privilege answer that lists no such privilege" (false) from "no privilege answer at all" (null).
+    [Theory]
+    [InlineData("""{"RolePrivileges":[]}""", false)]
+    [InlineData("""{"RolePrivileges":[{"Depth":"Deep","PrivilegeName":"prvReadsprk_Invoice"}]}""", false)]
+    [InlineData("""{"RolePrivileges":[{"Depth":"Deep","PrivilegeName":"prvCreatesprk_Invoice"}]}""", true)]
+    [InlineData("""{"value":[]}""", null)]
+    [InlineData("""{"RolePrivileges":"prvCreatesprk_Invoice"}""", null)]
+    [InlineData("<html>proxy</html>", null)]
+    [InlineData("", null)]
+    public void ReadPrivilegeResponse_AnswersOnlyFromAPrivilegeArray(string body, bool? expected)
+    {
+        CallerRecordAccessProbe.ReadPrivilegeResponse(body, "prvCreatesprk_Invoice").Should().Be(expected);
+    }
+
     /// <summary>
     /// The no-token guard, ISOLATED: OBO is fully configured (tenant, client, credential provider, environment URL),
     /// so the token guard is the only condition that can stop the check before an exchange. Whether an exchange was

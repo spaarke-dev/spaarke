@@ -2157,8 +2157,9 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
                     Remember(column);
                 }
             }
-            else if (IsOwnershipParent(value.LogicalName))
+            else if (IsOwnershipParent(value.LogicalName) && !IsCitation(request.EntityLogicalName, column))
             {
+                // 095a review K2: a citation column (it names a record, it files nothing) is never a parent, on a change as on the row read.
                 // #2091 round 4: re-binding the parent the column already holds moves nothing (a push from the parent it
                 // files its children under writes exactly that).
                 var parent = new RecordOwnershipParent(value.LogicalName, value.Id);

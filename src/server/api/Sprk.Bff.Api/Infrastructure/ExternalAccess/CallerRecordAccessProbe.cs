@@ -611,7 +611,14 @@ public class CallerRecordAccessProbe
             }
 
             var body = await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
-            var holds = ResponseGrantsPrivilege(body, privilegeName);
+            if (ReadPrivilegeResponse(body, privilegeName) is not { } holds)
+            {
+                // 095a review K2: a 2xx whose body is no privilege answer decided nothing, so it is a fault, not a NotHeld.
+                _logger.LogWarning(
+                    "[{Marker}] RetrieveUserSetOfPrivilegesByNames answered with an unreadable body for {Privilege}. Denying.",
+                    FallbackMarker, privilegeName);
+                return CallerPrivilegeAnswer.Faulted;
+            }
 
             _logger.LogInformation("[DELEGATION] Caller holds {Privilege}: {Holds}", privilegeName, holds);
             return holds ? CallerPrivilegeAnswer.Held : CallerPrivilegeAnswer.NotHeld;
@@ -636,11 +643,18 @@ public class CallerRecordAccessProbe
     /// <remarks>Pure and <c>internal</c> so the wire-format reading is assertable without a transport mock
     /// (ADR-038 ban B1) — the same reason as <see cref="NotFoundRetryDelay"/>. Response shape verified against
     /// spaarkedev1 2026-10-01 (read-only): <c>{"RolePrivileges":[{"Depth":"Deep","PrivilegeName":"prvCreatesprk_Invoice",…}]}</c>.</remarks>
-    internal static bool ResponseGrantsPrivilege(string? responseBody, string privilegeName)
+    internal static bool ResponseGrantsPrivilege(string? responseBody, string privilegeName) =>
+        ReadPrivilegeResponse(responseBody, privilegeName) ?? false;
+
+    /// <summary>
+    /// <see cref="ResponseGrantsPrivilege"/> that tells an unreadable body apart: <c>true</c> or <c>false</c> when the body
+    /// carries a <c>RolePrivileges</c> array, <c>null</c> when it is empty, not JSON or has no such array (095a review K2).
+    /// </summary>
+    internal static bool? ReadPrivilegeResponse(string? responseBody, string privilegeName)
     {
         if (string.IsNullOrWhiteSpace(responseBody) || string.IsNullOrWhiteSpace(privilegeName))
         {
-            return false;
+            return null;
         }
 
         try
@@ -649,7 +663,7 @@ public class CallerRecordAccessProbe
             if (!document.RootElement.TryGetProperty("RolePrivileges", out var privileges)
                 || privileges.ValueKind != JsonValueKind.Array)
             {
-                return false;
+                return null;
             }
 
             foreach (var privilege in privileges.EnumerateArray())
@@ -667,7 +681,7 @@ public class CallerRecordAccessProbe
         }
         catch (JsonException)
         {
-            return false;
+            return null;
         }
     }
 
