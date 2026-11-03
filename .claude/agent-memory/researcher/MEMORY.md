@@ -98,6 +98,11 @@
 - [EXO app-only DC-write error (2026-10-04)](exo-apponly-dc-write-error-2026-10-04.md) — -Organization must be primary .onmicrosoft.com, not tenant GUID; Q&A accepted fixes; App-RBAC: apps not in role groups
 
 ## AI platform / models / competitors
+- [Legal enablement-kit deploy paths (2026-10-29)](copilot-legal-enablement-kit-deployment-paths-2026-10-29.md) — users upload/share Cowork skills+plugins (Claude auto-convert, MCP) w/o admin; Word legal not extensible; store 4-6 wks
+- [Copilot for Legal + Cowork + plugin registry (2026-10-29)](ms-copilot-for-legal-cowork-registry-2026-10-29.md) — legal plugins GA 10-15, Legal Agent retired; .docx playbooks only; ISV MCP plugin path; Business-apps plugin writes Dataverse
+- [Foundry + Work IQ delta (2026-10-29)](foundry-work-iq-delta-2026-10-29.md) — Foundry IQ unchanged; GPT-6 GA; Routines GA; Work IQ `retrieve` (SPE, preview); Dataverse-in-Work-IQ deprioritised; AF 1.26
+- [Dataverse/M365 Copilot/Fabric IQ delta (2026-10-29)](dataverse-m365-copilot-platform-delta-2026-10-29.md) — BYO-MCP cert NOT GA (Dec 2026); Business Apps in Work IQ default-on; Fabric IQ new ontology (preview); DA v1.9; MDA default agent
+- [Action presets + AI config authoring (2026-10-22)](configurable-action-catalogs-ai-config-authoring-2026-10-22.md) — code=contract, data=preset; strict schema limits; draft-only agent, human publish, report-only precedent
 - [Copilot agent for B2B guests (2026-10-08)](m365-copilot-agent-guest-crosstenant-2026-10-08.md) — guests can't use agents in resource tenant → home-tenant install; OAuth+PKCE AnyTenant; publish delegated-only
 - [Foundry IQ + Work IQ state (2026-09-21)](foundry-iq-work-iq-state-2026-09-21.md) — Foundry IQ GA extractive-only; SPE source not ISV-viable; supersedes 07-14 Work IQ memo
 - [Fabric IQ vs Dataverse ontology (2026-09-21)](fabric-iq-vs-dataverse-ontology-2026-09-21.md) — ontology still preview, read-only over OneLake; complements, not replaces
