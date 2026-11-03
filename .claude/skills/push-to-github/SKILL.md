@@ -103,10 +103,10 @@ PRs should be created **early in the project lifecycle** for visibility:
 
 1. **Project start** (after `/design-to-project` Phase 3):
    ```powershell
-   git checkout -b feature/{project-name}
+   git checkout -b work/{project-name}
    git add projects/{project-name}/
    git commit -m "feat({scope}): initialize {project-name} project"
-   git push -u origin feature/{project-name}
+   git push -u origin work/{project-name}
    ```
 
 2. **Create draft PR** (for visibility):
