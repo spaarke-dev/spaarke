@@ -1968,8 +1968,10 @@ public sealed class InvoiceSubmissionProcessingJobHandlerTests
         SubmissionBellWorld.ActionUrl(bell).Should().Contain($"etn=sprk_invoice&id={InvoiceId:D}");
     }
 
-    [Fact(DisplayName = "095b: a rule refusal (Rejected terminal) tells the submitter once; the invoice exists, so the link opens it")]
-    public async Task CompletedRejected_TellsTheSubmitterOnce()
+    // Review F4 (POML 095b acceptance: "refused: one notification, with the outcome sentence and no invoice link"). The after-steps result carries an invoice
+    // (the rule refusal leaves one behind), and the handler must still not pass it on: the link opens the submission, where the reason is.
+    [Fact(DisplayName = "095b F4: a rule refusal (Rejected terminal) tells the submitter once and links to the SUBMISSION, not the invoice the result carries")]
+    public async Task CompletedRejected_TellsTheSubmitterOnce_LinkingToTheSubmission()
     {
         var rig = new Rig().HappyPath();
         rig.After.Run = _ => Task.FromResult(AfterResult(SubmissionAfterStepsStatus.Completed) with { TerminalStatus = InvoiceSubmissionStatus.Rejected });
@@ -1978,7 +1980,23 @@ public sealed class InvoiceSubmissionProcessingJobHandlerTests
 
         var bell = rig.Bell.Created.Should().ContainSingle().Subject;
         bell.GetAttributeValue<string>("title").Should().Be("Invoice INV-100 refused");
-        SubmissionBellWorld.ActionUrl(bell).Should().Contain($"etn=sprk_invoice&id={InvoiceId:D}");
+        AfterResult(SubmissionAfterStepsStatus.Completed).InvoiceId.Should().Be(InvoiceId, "control: the after-steps result does carry the invoice, so the link below is a choice of the handler");
+        SubmissionBellWorld.ActionUrl(bell).Should().Be($"/main.aspx?etn=sprk_invoicesubmission&id={SubmissionId:D}&pagetype=entityrecord")
+            .And.NotContain(InvoiceId.ToString("D"));
+    }
+
+    [Fact(DisplayName = "095b F4: a held (Blocked) internal submission is told as held for review and links to the SUBMISSION")]
+    public async Task CompletedBlocked_IsHeldForReview_LinkingToTheSubmission()
+    {
+        var rig = new Rig().HappyPath();
+        rig.Bell.Submission["sprk_outcomereasoncode"] = SubmissionReasonCodes.Blocked;
+        rig.After.Run = _ => Task.FromResult(AfterResult(SubmissionAfterStepsStatus.Completed) with { TerminalStatus = InvoiceSubmissionStatus.Rejected });
+
+        await rig.Build().ProcessAsync(Job(), CancellationToken.None);
+
+        var bell = rig.Bell.Created.Should().ContainSingle().Subject;
+        bell.GetAttributeValue<string>("title").Should().Be("Invoice INV-100 held for review");
+        SubmissionBellWorld.ActionUrl(bell).Should().Contain($"etn=sprk_invoicesubmission&id={SubmissionId:D}").And.NotContain(InvoiceId.ToString("D"));
     }
 
     [Fact(DisplayName = "095b: a document that could not be read (Rejected by the handler, no invoice) tells the submitter once, with no invoice link")]

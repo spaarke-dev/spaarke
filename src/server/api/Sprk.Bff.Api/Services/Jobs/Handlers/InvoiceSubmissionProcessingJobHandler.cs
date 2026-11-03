@@ -431,12 +431,15 @@ public sealed class InvoiceSubmissionProcessingJobHandler : IJobHandler
                     job.JobId, submissionId, result.TerminalStatus, result.InvoiceId, result.SignalsWritten, stopwatch.ElapsedMilliseconds);
                 // Task 095b: only the delivery whose own (row-version-conditional) terminal write won tells the submitter; AlreadyTerminal means a
                 // reviewer, an earlier run or the job decided and nothing was written now.
+                // Review F4 (POML 095b: "refused: ... no invoice link"): an Accepted outcome links the invoice it created; a rule refusal or a
+                // held (Blocked) one links the SUBMISSION, where its reason is, not the invoice it left behind.
                 if (!result.AlreadyTerminal && result.TerminalStatus is { } written)
                 {
+                    var accepted = written == InvoiceSubmissionStatus.Accepted;
                     await NotifySubmitterAsync(
                         submissionId,
-                        written == InvoiceSubmissionStatus.Accepted ? SubmissionOutcomeKind.Accepted : SubmissionOutcomeKind.Refused,
-                        result.InvoiceId).ConfigureAwait(false);
+                        accepted ? SubmissionOutcomeKind.Accepted : SubmissionOutcomeKind.Refused,
+                        accepted ? result.InvoiceId : null).ConfigureAwait(false);
                 }
 
                 return Done(job, stopwatch);

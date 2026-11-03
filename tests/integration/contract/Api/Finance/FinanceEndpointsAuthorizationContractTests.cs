@@ -1246,6 +1246,31 @@ public class FinanceEndpointsAuthorizationContractTests
             return Task.FromResult(!string.IsNullOrEmpty(callerBearerToken) && _held.Contains(privilegeName));
         }
 
+        /// <summary>Privileges whose question answers <see cref="CallerPrivilegeAnswer.Faulted"/> (an OBO, WhoAmI or privilege-read fault).</summary>
+        public HashSet<string> FaultFor { get; } = new(StringComparer.Ordinal);
+
+        /// <summary>
+        /// The three-state question (ebilling-r1 task 095a review F1: the by-email route's fail-closed mode asks it). Held when the privilege is
+        /// held, NotHeld when it is not, Faulted for a privilege in <see cref="FaultFor"/> or with no caller token (as the real probe answers
+        /// it); <see cref="ThrowOnEveryCall"/> throws.
+        /// </summary>
+        public override Task<CallerPrivilegeAnswer> CallerPrivilegeAnswerAsync(
+            string? callerBearerToken, string privilegeName, CancellationToken ct = default)
+        {
+            Calls.Add(new PrivilegeCall(privilegeName, !string.IsNullOrEmpty(callerBearerToken)));
+            if (ThrowOnEveryCall is not null)
+            {
+                return Task.FromException<CallerPrivilegeAnswer>(ThrowOnEveryCall);
+            }
+
+            if (string.IsNullOrEmpty(callerBearerToken) || FaultFor.Contains(privilegeName))
+            {
+                return Task.FromResult(CallerPrivilegeAnswer.Faulted);
+            }
+
+            return Task.FromResult(_held.Contains(privilegeName) ? CallerPrivilegeAnswer.Held : CallerPrivilegeAnswer.NotHeld);
+        }
+
         /// <summary>
         /// What WhoAmI on the caller's OBO token answers (task 162 f1, the personal-analysis creator match). Null — the
         /// default, and the base class's answer without OBO configuration — means "the caller's systemuserid could not be

@@ -7,7 +7,7 @@ namespace Spaarke.ArchTests;
 /// unified-access-control-r2 task 036 option C (owner 2026-10-20): no handler or filter file of the <c>/api/v1/external</c>
 /// plane calls a token-taking (OBO) question of <c>CallerRecordAccessProbe</c> — <c>GetCallerRightsAsync</c>,
 /// <c>GetCallerRightsForRecordsAsync</c>, <c>GetCallerRightsForRecordsOrUnknownAsync</c> (ebilling-r1 081),
-/// <c>GetCallerRightsForAuthorizationGateAsync</c>, <c>CallerHoldsPrivilegeAsync</c>,
+/// <c>GetCallerRightsForAuthorizationGateAsync</c>, <c>CallerHoldsPrivilegeAsync</c>, <c>CallerPrivilegeAnswerAsync</c>,
 /// <c>GetCallerSystemUserIdAsync</c> — or any other OBO entry point the BFF has (the MSAL exchange itself, the Graph
 /// <c>ForUser*</c> clients, the SpeFileStore <c>*AsUserAsync</c> methods, the OBO Dataverse client
 /// <c>IDataverseUserClient</c>, <c>GrantExternalAccessEndpoint.ProbeGrantorCeilingAsync</c>), or reads the caller's bearer
@@ -71,7 +71,7 @@ public class ExternalPlaneNoOboGuardTests
     private static readonly (Regex Pattern, string Why)[] Forbidden =
     {
         (new Regex(
-                @"\b(GetCallerRightsAsync|GetCallerRightsForRecordsAsync|GetCallerRightsForRecordsOrUnknownAsync|GetCallerRightsForAuthorizationGateAsync|CallerHoldsPrivilegeAsync|GetCallerSystemUserIdAsync)\b",
+                @"\b(GetCallerRightsAsync|GetCallerRightsForRecordsAsync|GetCallerRightsForRecordsOrUnknownAsync|GetCallerRightsForAuthorizationGateAsync|CallerHoldsPrivilegeAsync|CallerPrivilegeAnswerAsync|GetCallerSystemUserIdAsync)\b",
                 RegexOptions.CultureInvariant),
             "a token-taking (OBO) CallerRecordAccessProbe question — use GetPrincipalRightsAppOnlyOrUnknownAsync / "
             + "PrincipalHoldsPrivilegeAppOnlyOrUnknownAsync with the resolved systemuser (ExternalProjectDataEndpoints.CallerRightsReader)"),
