@@ -56,7 +56,20 @@
       - The invoice, its lines and its documents are NOT firm-gated. ExternalModuleRegistry scopes them by root records, RightsForInvoiceAsync applies the owner's option A of 2026-10-11, and ExternalInvoiceVisibility is source-based. So a no-firm invoice is visible to the record's external participants exactly as a firm invoice is.
       - The owner decided on 2026-11-03 to keep this as it is: no new external rule. A no-firm invoice follows option A like any invoice; only its submission stays hidden until a firm is set.
       - FinanceAuthorizationFilter covers internal routes only. Rule sets: only the rules that do not depend on the firm run, and the result says the firm rules were not run. AP export: a no-firm invoice cannot be approved, so it never reaches export; export refuses one anyway (defence in depth). No reader treats null as a match.</constraint>
-    <constraint source="tracking number">With no firm, the allocator counts the sequence per (no firm, firm invoice number), the row is written with sprk_vendororg null, and the alternate key must still guard uniqueness. Verify on spaarkedev1 how the alternate key treats a null sprk_vendororg: two inserts with the same tracking number and a null firm. Record the result in the notes. See the escalation.</constraint>
+    <constraint source="owner 2026-11-03: option B (notes/095c §3)">
+      Schema, in SpaarkeMaster source and in ONE idempotent script `scripts/ebilling/Deploy-EbillingSubmissionTrackingScopeSchema.ps1` (-WhatIf, -Verify), modelled on Deploy-EbillingSubmissionSourceEmailSchema.ps1:
+      (a) lower `sprk_invoicesubmission.sprk_vendororg` from SystemRequired to None;
+      (b) add a text column `sprk_trackingscope` (SystemRequired, 36 characters): the firm id in D form, or the literal `none`;
+      (c) backfill it on every existing row from `sprk_vendororg`;
+      (d) add a new alternate key on (sprk_trackingnumber, sprk_trackingscope) and wait for it to be Active;
+      (e) only then retire the old key `sprk_invoicesubmission_firm_trackingnumber`.
+      The order matters: the old key stays until the new one is Active, so uniqueness is guarded at every moment.
+      The script makes NO live change in this task. The main session runs it with the owner's OK and notices to uac-r2, ontology-r1 and SPA-r3.
+      The allocator counts per (scope, firm invoice number), writes the scope on every row, and relies on the new key as it relies on the old one today. No code-guarded protocol.
+      The intake must keep working against the CURRENT dev schema until the script runs: before the scope column exists, a no-firm request answers the existing refusal. Say how this is detected (a metadata read at startup, or a setting) and test it.
+      Provisioning (stamps) gets the same schema through SpaarkeMaster; note anything the provisioning path needs.
+    </constraint>
+    <constraint source="readers (notes/095c §6)">Besides the files listed above, show each of these safe with a null firm: InvoiceAdjustmentService, InvoiceCorrectionService, InvoiceCorrectionReevaluation, InvoiceExtractionJobHandler, AttachmentClassificationJobHandler.</constraint>
     <constraint source="ontology-r1 D-201 (2026-11-03)">firm_missing is a system finding under BILL-SYSTEM-SUBMISSION (SubmissionIntegrity), like the invoice-number mismatch. Add a new reason code, template and headline in Services/Signals/Billing (BillingReasonCodes, BillingRuleCatalogue.ReasonTemplate and a headline), and the FirmMissing case in HasSystemFindings and SystemFindings in InvoiceSubmissionAfterSteps. No new policy row. Today SubmissionEvaluationOutcome:143 returns FirmMissing as a rejection; for this channel's null firm it becomes the hold. Those Signals/Billing files are ontology-owned, so ontology-r1 reviews the PR.</constraint>
     <constraint source="hold">"Firm needed" is a pipeline finding (reason code ebilling.submission.firm_missing), held for review and recorded the same way InvoiceNumberMismatch is, never a rejection. The submission is Accepted. The pane sentence: "Submitted without a firm. A reviewer will add the firm before approval."</constraint>
     <constraint source="approval">InvoiceApprovalService refuses an invoice with no firm (a stable reason code; the review UI shows it). This is the only new refusal.</constraint>
@@ -67,7 +80,7 @@
   </constraints>
 
   <steps mode="directional">
-    <step>Verify the alternate key with a null firm on spaarkedev1 (read the metadata, then try two inserts in a throwaway way and clean up after; get the owner's OK before any live write).</step>
+    <step>Schema in source and the script (option B), not run. The verification script is in notes/095c §4; Part 2 runs after the schema script, by the main session.</step>
     <step>Contract: mode New accepts firmId null or absent; the correction rule above; §6 and §8 unchanged otherwise; the user sentence.</step>
     <step>The allocator and persister with a null firm; the hold finding; the approval refusal; null handling in every reader listed above.</step>
     <step>Tests; notes/095c-from-email-firm-optional.md (justification, placement, publish size, the alternate-key evidence, the reader inventory with the null behaviour of each); the D-106 amendment entry.</step>
@@ -88,7 +101,7 @@
   </acceptance-criteria>
 
   <escalation>
-    <trigger>If the alternate key does not enforce uniqueness when sprk_vendororg is null, STOP. Report the options: a sentinel "no firm" organization, a separate key, or a check in the allocator. A key or schema change needs the owner's OK and notices to peers.</trigger>
+    <trigger>If option B cannot keep uniqueness guarded through the key change (old key retired only after the new one is Active), STOP and report.</trigger>
     <trigger>If a firm reader cannot be made to fail closed on null without changing an access rule, STOP and escalate to uac-r2 and the owner.</trigger>
   </escalation>
 

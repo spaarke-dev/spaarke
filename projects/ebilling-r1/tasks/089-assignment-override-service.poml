@@ -50,6 +50,31 @@
     <constraint source=".claude/constraints/bff-extensions.md, ADR-010">Concrete service in AddFinanceModule; publish-size delta; no package; no new HIGH CVE.</constraint>
     <constraint source="uac-r2 2026-10-21 (round 113 item 3; task 191)">Procedures are internal-only. Flagged-external systemusers on dev hold the same roles as internal users (Spaarke Basic User, Spaarke Console User, Spaarke Office Add In User) through their business unit's default team. So until uac-r2 task 191 lands, this task adds NO role privilege on sprk_procedure, sprk_procedureversion or sprk_procedureassignment without uac-r2's agreement; all access goes through the BFF.</constraint>
     <constraint source="uac-r2 2026-10-23 (090 round 2)">090 already stamps sprk_createdbyperson on sprk_ruleset and sprk_procedureassignment (RecordCreatorPerson.StampedChildTables, the schema script's gate), so the creator column is trustworthy before this task's registration relies on it. The registration here is the first real create path for procedure assignments and record-scoped rule sets (today's sets are ClientDefault or Firm only) and is binding in full: SecureChildLineage, the RecordOwnershipResolver ownership parent (record-scoped set and assignment: the core record they name; Procedure-owned sets are not secure children), config/secure-record-owner-role.json with Read depth, the census entry, and a Restrict delete behaviour on the core-record lookups (uac Q10).</constraint>
+    <constraint source="resolutions 2026-11-03 (uac-r2; ontology-r1 D-202; EB-D-168)">
+      Billing privilege (uac-r2): option (a). Check all of these as the caller, before any app-only write:
+      - step 0 (refuse sprk_isexternal; a fault reading the flag refuses);
+      - Write and AppendTo on the record, through the gate variant (the same 404 everywhere);
+      - Read on the Procedure or rule it names;
+      - BillingAdminAuthorization.Admin() (prvWritesprk_ruleset) on assign, pin, exclude and remove.
+      Change rule also needs the table privileges of what it writes: Create plus Write on sprk_ruleset when it creates the record set (CreateRuleSet()), Create on sprk_Policy, and Create/Write on sprk_PolicyVersion. Compose these from the existing checks; no second admin marker.
+      Tests: a refusal for each missing privilege, plus a must-pass refusal for a Billing Administrator who has record Write but no Read on the Procedure.
+      Reword model v5.2 change #4 to: "Procedure lifecycle: billing-admin stays for retire, publish and date changes; the banner write is gone (N4). Record-level assignment, override and change-rule writes keep the billing privilege (§5.1)."
+      Record-rule code (ontology-r1 D-202): `BRR-{recordRulePolicyId:N}`, 36 characters, lowercase hex.
+      - The policy id is deterministic: IdOf("ebilling-record-rule-{recordRuleSetId:D}-{basePolicyId:D}"). No 8-hex short form and no sequence. A {base}-R-{8 hex} code would be 51 characters, and SignalWriter refuses anything over 50.
+      - Uniqueness comes from the key sprk_policycodekey. A duplicate-key create is a retry only if the existing row's sprk_ruleset is the same record set and its sprk_basedonversion belongs to the same base policy; otherwise refuse.
+      - A removed record rule that is needed again reuses its policy row (a new version, or reactivated), never a second row.
+      - Open Signals that the base rule raised on that record's invoices keep the base code. They are left for the next evaluation of each invoice, which raises under the record rule. Say in the notes whether the existing evaluation closes the stale base-code Signals. If it does not, STOP and report rather than add a close path.
+      Owner context (EB-D-168, 2026-10-28) wins over "ForParents" above: these writers use ForRow/ForChild with the memberless content-owner team (RestrictedContentOwnerTeam.cs and its use in RecordOwnershipResolver.cs).
+      Live steps (EB-D-158, with uac-r2's conditions):
+      - Run Set-SecureRecordOwnerRolePrivileges.ps1 -WhatIf only, and report its output. -Apply waits until uac-r2 has seen the -WhatIf.
+      - If -WhatIf shows a removal, a deeper depth than designed, a table outside sprk_procedureassignment and the record-scoped sprk_ruleset, sprk_policy and sprk_policyversion, or entries from another project's role JSON that are not on dev: STOP for a fresh owner OK.
+      - The refusal probes and -Apply are run by the main session.
+    </constraint>
+    <constraint source="split 2026-11-03">The task runs in three serial parts, each its own reviewable commit set:
+      089a: the secure-child registration as one change (lineage, OwnershipParentEntities, OWNERSHIP_CHILD_TABLES, the role JSON, RecordCreatorPerson plus its script and Pester test, the census rewrite and guards, the NFR-05 list, the K-2 test). 089b and 089c depend on it.
+      089b: ProcedureAssignmentService and its endpoints: assign, pin, exclude and exclude rule, with step 0, the caller checks, the 409 duplicate rule and the route-ledger entry.
+      089c: change rule (the record-scoped set plus a record rule, undo on failure, firm rule) and remove with preview (081's shared close, AffectedInvoiceCounter), plus questions h to j of notes/084-prototype-questions.md.
+    </constraint>
   </constraints>
 
   <knowledge>
