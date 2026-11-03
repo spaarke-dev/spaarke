@@ -29,7 +29,8 @@
 - **Next deploy carries** PR #2550 (restores the ExternalUserContextEndpoint `</summary>`; ledger cite :46/:75; comments and test text only).
 - **Rollback for d763dc120e:** R3's snapshot `deploy/rollback/wwwroot-20261103T220358Z` (kept until my next deploy passes its gate), or redeploy 5796774091.
 - **Watches:**
-  - ebilling 095a/095b: ExternalInvoiceVisibility must still hide an invoice from the firm when its source email is restricted, whether it reads the Stored File or the new `sprk_sourceemaildocument` column;
+  - ebilling 095a/095b: answered at bf85f93aee. ExternalInvoiceVisibility is unchanged against master and does not read `sprk_sourceemaildocument`, so a restricted source email still hides the invoice through the Stored File. Any later change that makes it read that column is an access change for me and the owner;
+  - ebilling's Matter Management app source sync (f5354caebf..bf85f93aee): reviewed OK. It adds only entity components and the `area_finance` sitemap; no role-map change;
   - field-mapping FR-40: live proof after the next real upload or create;
   - word-add-in: the Office smoke test after the owner's two Outlook saves.
 - **Not deployed:** the SPA registration message change (85fbba3f64), due with the next SPA deploy (`deploy-external-spa.yml` on a tag).
