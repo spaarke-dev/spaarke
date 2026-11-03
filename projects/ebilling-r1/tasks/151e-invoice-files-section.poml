@@ -4,7 +4,7 @@
     <title>Invoice form: Files section (invoice PDF and supporting files, open / download, source email link)</title>
     <phase>6 Export UI follow-ups (owner UAT 2026-11-03)</phase>
     <gate>owner asked for it 2026-11-03 ("yes this is important")</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Adds a BFF read endpoint behind the Finance route gate and a form-embedded web resource; tags include bff-api and auth.</rigor-reason>
     <model-tier>sonnet</model-tier>
