@@ -192,7 +192,7 @@ public class UpdateRecordNodeExecutorSeamTests
     /// </summary>
     private void UseMetadataFor(string entityLogicalName, EntityMetadataDto dto)
     {
-        var cacheKey = $"sdap:dv:entitymetadata:{entityLogicalName.ToLowerInvariant()}";
+        var cacheKey = $"sdap:dv:entitymetadata:v2:{entityLogicalName.ToLowerInvariant()}";
         var cacheMock = new Mock<IDistributedCache>();
         var bytes = Encoding.UTF8.GetBytes(JsonSerializer.Serialize(dto, MetadataCacheJsonOptions));
         cacheMock

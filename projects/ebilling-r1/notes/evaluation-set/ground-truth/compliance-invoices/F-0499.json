@@ -1,0 +1,28 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0499",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0499","generator_id":"gen_eval_set.py@1 F-0499","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0499.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-01"},
+ "header":{"firm":"Kestrel Ambrose PC","firm_invoice_number":"INV-2025-24832","invoice_date":"2026-06-03","billing_period_start":"2026-05-01","billing_period_end":"2026-05-31","firm_matter_reference":"92524-0004","po_number":"PO-4540078","fees_total":4709.0,"expenses_total":454.67,"adjustments_total":0.0,"total_due":5163.67,"currency":"USD"},
+ "timekeepers":[{"name":"Emeka Hargrove","title":"Paralegal","rate":255.0,"billed_as":"Emeka Hargrove"},{"name":"Gregory Eriksen","title":"Paralegal","rate":275.0,"billed_as":"Gregory Eriksen"},{"name":"Ivan Mbeki","title":"Partner","rate":825.0,"billed_as":"Ivan Mbeki"},{"name":"Oliver Lindqvist","title":"Associate","rate":490.0,"billed_as":"Oliver Lindqvist"},{"name":"Yusuf Galbraith","title":"Associate","rate":490.0,"billed_as":"Yusuf Galbraith"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2026-05-04","timekeeper":"Emeka Hargrove","timekeeper_name":"Emeka Hargrove","timekeeper_title":"Paralegal","title":"Para","hours":0.7,"rate":255.0,"amount":178.5,"narrative":"Conference with client expert regarding rebuttal report","codes":["L340","A106"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2026-05-14","timekeeper":"Emeka Hargrove","timekeeper_name":"Emeka Hargrove","timekeeper_title":"Paralegal","title":"Para","hours":1.0,"rate":255.0,"amount":255.0,"narrative":"Draft notice of deposition in the vendor agreement","codes":["L250","A103"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2026-05-29","timekeeper":"Emeka Hargrove","timekeeper_name":"Emeka Hargrove","timekeeper_title":"Paralegal","title":"Para","hours":2.9,"rate":255.0,"amount":739.5,"narrative":"Attend deposition of Ironbridge Steel corporate representative","codes":["L330","A109"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2026-05-21","timekeeper":"Gregory Eriksen","timekeeper_name":"Gregory Eriksen","timekeeper_title":"Paralegal","title":"Para","hours":2.9,"rate":275.0,"amount":797.5,"narrative":"Update document review protocol and coding panel for the lease dispute","codes":["L140","A110"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2026-05-22","timekeeper":"Gregory Eriksen","timekeeper_name":"Gregory Eriksen","timekeeper_title":"Paralegal","title":"Para","hours":1.8,"rate":275.0,"amount":495.0,"narrative":"Review and analyze complaint received from Redstone Mining","codes":["L310","A104"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2026-05-21","timekeeper":"Ivan Mbeki","timekeeper_name":"Ivan Mbeki","timekeeper_title":"Partner","title":"Ptr","hours":0.7,"rate":825.0,"amount":577.5,"narrative":"Update document review protocol and coding panel for the licensing dispute","codes":["L140","A110"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2026-05-25","timekeeper":"Oliver Lindqvist","timekeeper_name":"Oliver Lindqvist","timekeeper_title":"Associate","title":"Assoc","hours":1.6,"rate":490.0,"amount":784.0,"narrative":"Research authority for reply brief","codes":["L250","A102"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2026-05-04","timekeeper":"Yusuf Galbraith","timekeeper_name":"Yusuf Galbraith","timekeeper_title":"Associate","title":"Assoc","hours":0.7,"rate":490.0,"amount":343.0,"narrative":"Review privilege log entries before service","codes":["L140","A104"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"fee","date":"2026-05-12","timekeeper":"Yusuf Galbraith","timekeeper_name":"Yusuf Galbraith","timekeeper_title":"Associate","title":"Assoc","hours":0.6,"rate":490.0,"amount":294.0,"narrative":"Prepare outline for deposition of Solano Freight witness","codes":["L330","A101"],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"fee","date":"2026-05-20","timekeeper":"Yusuf Galbraith","timekeeper_name":"Yusuf Galbraith","timekeeper_title":"Associate","title":"Assoc","hours":0.5,"rate":490.0,"amount":245.0,"narrative":"Research case law supporting settlement proposal","codes":["L240","A102"],"page":1,"narrative_style":"clear"},
+  {"n":11,"line_type":"expense","date":"2026-05-12","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":3.0,"rate":44.18,"amount":132.54,"narrative":"Overnight courier to Caldera Energy counsel","codes":["E107"],"page":2,"narrative_style":"clear"},
+  {"n":12,"line_type":"expense","date":"2026-05-19","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":322.13,"amount":322.13,"narrative":"Airfare to Phoenix for deposition","codes":["E110"],"page":2,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["461 Congress Boulevard","Boston","Tax ID 73-3039821"],"template":"T03","pages":2},
+ "rule_set_id":"RS-01",
+ "context":{"matter_open":"2025-05-02","matter_close":"2026-08-29","matter_budget":45654.0,"approved_timekeepers":["Gregory Eriksen","Sofia Castellanos","Yusuf Galbraith","Mei Rosenthal","Oliver Lindqvist","Ivan Mbeki","Emeka Hargrove"],"invoice_received_date":"2026-06-20"},
+ "expected_findings":[],
+ "seeded_violations":0
+}

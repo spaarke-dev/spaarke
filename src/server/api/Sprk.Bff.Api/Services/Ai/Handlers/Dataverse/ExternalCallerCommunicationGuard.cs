@@ -70,7 +70,7 @@ internal static class ExternalCallerCommunicationGuard
     /// <see cref="CallerSystemUserResolution.UnresolvedReason"/> for a lookup fault the resolver swallowed (pinned by a
     /// test against the real <see cref="CallerSystemUserResolver"/>).
     /// </summary>
-    internal const string LookupFailedReason = "lookup-failed";
+    internal const string LookupFailedReason = CallerExternality.LookupFailedReason;
 
     /// <summary>
     /// Tables OUTSIDE <see cref="FamilyPrefix"/> that hold copies of email or message content and carry no link this guard
@@ -281,29 +281,15 @@ internal static class ExternalCallerCommunicationGuard
     /// True when the request's caller is external: flagged <c>sprk_isexternal</c>, or not resolvable to an active
     /// systemuser (no principal, no oid, no matching active row). A lookup that FAILED (<see cref="LookupFailedReason"/>: a
     /// Dataverse or cache fault the resolver swallowed) THROWS, as does a failing externality read, so the caller's tool
-    /// call fails with no data — a transient fault never decides who the caller is.
+    /// call fails with no data — a transient fault never decides who the caller is. Delegates to the one definition,
+    /// <see cref="CallerExternality.IsExternalCallerAsync"/> (ebilling-r1 task 099 moved it there unchanged).
     /// </summary>
-    internal static async Task<bool> IsExternalCallerAsync(
+    internal static Task<bool> IsExternalCallerAsync(
         IHttpContextAccessor httpContextAccessor,
         ICallerSystemUserResolver callerResolver,
         ISystemUserIdentityResolver identityResolver,
-        CancellationToken ct)
-    {
-        var principal = httpContextAccessor.HttpContext?.User;
-        var resolution = await callerResolver.ResolveAsync(principal, ct).ConfigureAwait(false);
-        if (!resolution.IsResolved && string.Equals(resolution.UnresolvedReason, LookupFailedReason, StringComparison.Ordinal))
-        {
-            throw new InvalidOperationException(
-                "The caller's systemuser lookup failed; externality cannot be decided (fail closed: no data).");
-        }
-
-        if (!resolution.IsResolved || !Guid.TryParse(resolution.SystemUserId, out var systemUserId))
-        {
-            return true;
-        }
-
-        return await identityResolver.IsExternalAsync(systemUserId, ct).ConfigureAwait(false);
-    }
+        CancellationToken ct) =>
+        CallerExternality.IsExternalCallerAsync(httpContextAccessor.HttpContext?.User, callerResolver, identityResolver, ct);
 
     /// <summary>
     /// The thread-privacy read for <see cref="CommunicationOpenThreadGate.ReadOpenThreadIdsAsync"/> over the caller's own

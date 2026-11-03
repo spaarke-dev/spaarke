@@ -1,0 +1,32 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0137",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0137","generator_id":"gen_eval_set.py@1 F-0137","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0137.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-05"},
+ "header":{"firm":"Ostrander & Beckett LLP","firm_invoice_number":"INV-2025-51987","invoice_date":"2025-06-02","billing_period_start":"2025-05-01","billing_period_end":"2025-05-31","firm_matter_reference":"44848-0020","po_number":"PO-4535182","fees_total":5560.0,"expenses_total":96.89,"adjustments_total":0.0,"total_due":5656.89,"currency":"USD"},
+ "timekeepers":[{"name":"Elena Esposito","title":"Paralegal","rate":145.0,"billed_as":"EE"},{"name":"Katya Santoro","title":"Paralegal","rate":130.0,"billed_as":"KS"},{"name":"Oliver Lindqvist","title":"Of Counsel","rate":430.0,"billed_as":"OL"},{"name":"Peter Hargrove","title":"Associate","rate":260.0,"billed_as":"PH"},{"name":"Sofia Wickham","title":"Associate","rate":230.0,"billed_as":"SW"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2025-05-15","timekeeper":"SW","timekeeper_name":"Sofia Wickham","timekeeper_title":"Associate","title":"Assoc","hours":4.0,"rate":230.0,"amount":920.0,"narrative":"Prepare monthly status report to client regarding the customs audit","codes":["L190","A111"],"page":2,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2025-05-15","timekeeper":"SW","timekeeper_name":"Sofia Wickham","timekeeper_title":"Associate","title":"Assoc","hours":4.0,"rate":230.0,"amount":920.0,"narrative":"Review expert qualifications and prior testimony for the distribution agreement","codes":["L130","A104"],"page":2,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2025-05-15","timekeeper":"SW","timekeeper_name":"Sofia Wickham","timekeeper_title":"Associate","title":"Assoc","hours":4.0,"rate":230.0,"amount":920.0,"narrative":"Review and organize incoming production from Larkspur Medical for matter file","codes":["L140","A104"],"page":2,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2025-05-15","timekeeper":"SW","timekeeper_name":"Sofia Wickham","timekeeper_title":"Associate","title":"Assoc","hours":1.7,"rate":230.0,"amount":391.0,"narrative":"Review and analyze client documents concerning the construction contract to identify key facts","codes":["L110","A104"],"page":2,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2025-05-16","timekeeper":"OL","timekeeper_name":"Oliver Lindqvist","timekeeper_title":"Of Counsel","title":"O/C","hours":2.5,"rate":430.0,"amount":1075.0,"narrative":"Review and analyze client documents concerning the licensing dispute to identify key facts","codes":["L110","A104"],"page":2,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2025-05-21","timekeeper":"PH","timekeeper_name":"Peter Hargrove","timekeeper_title":"Associate","title":"Assoc","hours":0.3,"rate":260.0,"amount":78.0,"narrative":"Attend case management conference in the construction contract","codes":["L230","A109"],"page":2,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2025-05-26","timekeeper":"EE","timekeeper_name":"Elena Esposito","timekeeper_title":"Paralegal","title":"Para","hours":2.8,"rate":145.0,"amount":406.0,"narrative":"Review and organize incoming production from Larkspur Medical for matter file","codes":["L140","A104"],"page":2,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2025-05-27","timekeeper":"KS","timekeeper_name":"Katya Santoro","timekeeper_title":"Paralegal","title":"Para","hours":1.5,"rate":220.0,"amount":330.0,"narrative":"Telephone conference with opposing counsel regarding settlement terms","codes":["L160","A107"],"page":2,"narrative_style":"clear"},
+  {"n":9,"line_type":"fee","date":"2025-05-27","timekeeper":"PH","timekeeper_name":"Peter Hargrove","timekeeper_title":"Associate","title":"Assoc","hours":0.1,"rate":260.0,"amount":26.0,"narrative":"Review and revise complaint based on client comments","codes":["L210","A104"],"page":2,"narrative_style":"clear"},
+  {"n":10,"line_type":"fee","date":"2025-05-28","timekeeper":"KS","timekeeper_name":"Katya Santoro","timekeeper_title":"Paralegal","title":"Para","hours":2.9,"rate":130.0,"amount":377.0,"narrative":"Draft settlement term sheet for the employment claim","codes":["L160","A103"],"page":2,"narrative_style":"clear"},
+  {"n":11,"line_type":"fee","date":"2025-05-30","timekeeper":"KS","timekeeper_name":"Katya Santoro","timekeeper_title":"Paralegal","title":"Para","hours":0.9,"rate":130.0,"amount":117.0,"narrative":"Attend case management conference in the supply agreement","codes":["L230","A109"],"page":2,"narrative_style":"clear"},
+  {"n":12,"line_type":"expense","date":"2025-05-13","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":8.34,"amount":8.34,"narrative":"Long distance conference call charges","codes":["E105"],"page":2,"narrative_style":"clear"},
+  {"n":13,"line_type":"expense","date":"2025-05-27","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":805.0,"rate":0.11,"amount":88.55,"narrative":"Photocopies - 805 pages","codes":["E101"],"page":2,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["72 Market Street","Portland","Tax ID 27-8750560"],"template":"T21","pages":2},
+ "rule_set_id":"RS-05",
+ "context":{"matter_open":"2024-03-07","matter_close":"2025-08-29","matter_budget":47627.0,"approved_timekeepers":["Sofia Wickham","Peter Hargrove","Elena Esposito","Katya Santoro","Oliver Lindqvist","Aisha Abernathy"],"invoice_received_date":"2025-06-15"},
+ "expected_findings":[
+  {"rule_id":"RS-05-R01","rule_type":"ApprovedRate","scope":"line","line_refs":[8],"consequence":"Reduce"},
+  {"rule_id":"RS-05-R06","rule_type":"DailyHoursCap","scope":"line","line_refs":[4],"consequence":"Flag"}
+ ],
+ "seeded_violations":2
+}

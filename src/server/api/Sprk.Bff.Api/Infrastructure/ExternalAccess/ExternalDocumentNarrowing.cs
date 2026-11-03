@@ -120,6 +120,40 @@ internal static class ExternalDocumentNarrowing
         FromJson(documentId, column => row is not null && row.TryGetValue(column, out var v) ? v : null);
 
     /// <summary>
+    /// ebilling-r1 task 098: <see cref="FromWebApi(Guid, IReadOnlyDictionary{string, JsonElement})"/> that also reads the
+    /// submission marker (its <c>$select</c> must also carry <see cref="SubmissionMarkerColumns"/>) when
+    /// <paramref name="readSubmissionMarker"/> is set. The row is marked only when BOTH <see cref="EmailArchiveField"/> and
+    /// <see cref="SubmissionMarkerField"/> read exactly JSON <c>true</c>: absent, null, false or any other value is not marked
+    /// (fail closed: an unmarked Restricted source hides the invoice). Only a decision that honours the marker
+    /// (<see cref="DecideAsync(IEnumerable{DocumentNarrowingRow}, CommunicationOpenThreadGate.RowQuery, CancellationToken, bool)"/>)
+    /// looks at it.
+    /// </summary>
+    internal static DocumentNarrowingRow FromWebApi(
+        Guid documentId, IReadOnlyDictionary<string, JsonElement>? row, bool readSubmissionMarker)
+    {
+        var parsed = FromWebApi(documentId, row);
+        return readSubmissionMarker && row is not null && IsJsonTrue(row, EmailArchiveField) && IsJsonTrue(row, SubmissionMarkerField)
+            ? parsed with { SubmissionMarked = true }
+            : parsed;
+    }
+
+    private static bool IsJsonTrue(IReadOnlyDictionary<string, JsonElement> row, string column) =>
+        row.TryGetValue(column, out var value) && value.ValueKind == JsonValueKind.True;
+
+    /// <summary>ebilling-r1 task 098: the document is an archived email (.eml).</summary>
+    internal const string EmailArchiveField = "sprk_isemailarchive";
+
+    /// <summary>
+    /// ebilling-r1 tasks 088 / 098: the submission marker on an .eml
+    /// (<see cref="Sprk.Bff.Api.Services.Dataverse.InheritedAccessPermission.SubmissionMarkerColumn"/>): the Restricted narrowing on it was
+    /// written by the invoice submission, in the same create (procedure-and-file-model 9.1).
+    /// </summary>
+    internal const string SubmissionMarkerField = Sprk.Bff.Api.Services.Dataverse.InheritedAccessPermission.SubmissionMarkerColumn;
+
+    /// <summary>ebilling-r1 task 098: the extra <c>$select</c> columns a marker-reading row needs.</summary>
+    internal static IReadOnlyList<string> SubmissionMarkerColumns { get; } = new[] { EmailArchiveField, SubmissionMarkerField };
+
+    /// <summary>
     /// One FetchXML (module) row, keyed by LOGICAL name as the SDK projects it: a lookup is an <see cref="EntityReference"/>,
     /// a GUID or a GUID string; the choice is an <see cref="OptionSetValue"/> or an int. Absent or null is "not set" (the SDK
     /// omits a null attribute); anything else is unreadable.
@@ -202,17 +236,30 @@ internal static class ExternalDocumentNarrowing
     /// <param name="query">The BFF's app-only reader (the external plane's), on every surface.</param>
     /// <param name="ct">Cancellation token.</param>
     internal static Task<DocumentNarrowingResult> DecideAsync(
-        IEnumerable<DocumentNarrowingRow> rows, CommunicationOpenThreadGate.RowQuery query, CancellationToken ct)
+        IEnumerable<DocumentNarrowingRow> rows, CommunicationOpenThreadGate.RowQuery query, CancellationToken ct) =>
+        DecideAsync(rows, query, ct, honourSubmissionMarker: false);
+
+    /// <summary>
+    /// <see cref="DecideAsync(IEnumerable{DocumentNarrowingRow}, CommunicationOpenThreadGate.RowQuery, CancellationToken)"/>
+    /// with ebilling-r1 task 098's opt-in marker-aware rule 2 (procedure-and-file-model 9.1, the invoice's (a′) predicate):
+    /// when <paramref name="honourSubmissionMarker"/> is set, a SUBJECT row (hop 0) whose own value is Restricted and that
+    /// carries the submission marker (<see cref="DocumentNarrowingRow.SubmissionMarked"/>, read by
+    /// <see cref="FromWebApi(Guid, IReadOnlyDictionary{string, JsonElement}, bool)"/>) skips the OWN leg only. An unreadable
+    /// own value, every ancestor and the communication leg are decided as always. <c>false</c> is the 188 decision unchanged.
+    /// </summary>
+    internal static Task<DocumentNarrowingResult> DecideAsync(
+        IEnumerable<DocumentNarrowingRow> rows, CommunicationOpenThreadGate.RowQuery query, CancellationToken ct,
+        bool honourSubmissionMarker)
     {
         ArgumentNullException.ThrowIfNull(rows);
         ArgumentNullException.ThrowIfNull(query);
         var counter = new ReadCounter();
-        return DecideCoreAsync(rows, counter.Wrap(query), counter, ct);
+        return DecideCoreAsync(rows, counter.Wrap(query), counter, ct, honourSubmissionMarker);
     }
 
     private static async Task<DocumentNarrowingResult> DecideCoreAsync(
         IEnumerable<DocumentNarrowingRow> rows, CommunicationOpenThreadGate.RowQuery query, ReadCounter counter,
-        CancellationToken ct)
+        CancellationToken ct, bool honourSubmissionMarker = false)
     {
         // Keyed by the row AS READ (a value): a row is decided on its own columns and chain, so one that came back without its
         // id is still decided, and two copies of one row decide alike.
@@ -243,7 +290,7 @@ internal static class ExternalDocumentNarrowing
         // the ancestor leg check EVERY node to the top of the chain; the communication leg takes the FIRST link found.
         bool Visit(DocumentNarrowingRow subject, DocumentNarrowingRow node, int hop)
         {
-            if (node.Own != DocumentPermission.NotNarrowed)
+            if (node.Own != DocumentPermission.NotNarrowed && !SkipsOwnLeg(node, hop))
             {
                 decided[subject] = (hop, node.Own) switch
                 {
@@ -269,6 +316,11 @@ internal static class ExternalDocumentNarrowing
 
             return true;
         }
+
+        // Task 098: only the subject's own Restricted value, only when it carries the submission marker, and only when the caller
+        // asked for the marker-aware rule. Never an Unreadable value, never an ancestor.
+        bool SkipsOwnLeg(DocumentNarrowingRow node, int hop) =>
+            honourSubmissionMarker && hop == 0 && node.Own == DocumentPermission.Restricted && node.SubmissionMarked;
 
         // The walk ended without a node deciding the subject.
         void End(DocumentNarrowingRow subject, DocumentNarrowingReason? unknowable)
@@ -636,7 +688,16 @@ internal enum DocumentPermission
 /// Built only from a row as read (<see cref="ExternalDocumentNarrowing.FromWebApi(Guid, IReadOnlyDictionary{string, JsonElement})"/>,
 /// <see cref="ExternalDocumentNarrowing.FromFetch"/>).
 /// </summary>
-internal readonly record struct DocumentNarrowingRow(Guid DocumentId, DocumentPermission Own, Guid Communication, Guid Parent);
+internal readonly record struct DocumentNarrowingRow(Guid DocumentId, DocumentPermission Own, Guid Communication, Guid Parent)
+{
+    /// <summary>
+    /// ebilling-r1 task 098: the row is an .eml whose Restricted narrowing the invoice submission wrote (both
+    /// <see cref="ExternalDocumentNarrowing.EmailArchiveField"/> and <see cref="ExternalDocumentNarrowing.SubmissionMarkerField"/>
+    /// read true). Set only by the marker-reading <c>FromWebApi</c> overload; <c>false</c> on every other row, so it changes
+    /// nothing for a decision that does not honour it.
+    /// </summary>
+    internal bool SubmissionMarked { get; init; }
+}
 
 /// <summary>Why a document is hidden (or <see cref="Visible"/>). Logged as counts per reason code only.</summary>
 internal enum DocumentNarrowingReason

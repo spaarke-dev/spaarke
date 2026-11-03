@@ -178,6 +178,15 @@ public sealed class EmailChannelSender : ICommunicationChannelSender
             }).ToList()
         };
 
+        // Ebilling-r1 task 151c-1a: a server-only send carries its signed marker, so the inbound path does not file its attachments again.
+        if (request.ServerSendMarker is { Length: > 0 } marker)
+        {
+            message.InternetMessageHeaders =
+            [
+                new InternetMessageHeader { Name = ServerSendMarker.HeaderName, Value = marker },
+            ];
+        }
+
         // Shared-mailbox mode addresses the send from the approved sender; user (OBO) mode sends as
         // the authenticated user via /me and MUST NOT set an explicit From (preserves prior behavior).
         if (!request.UserMode)

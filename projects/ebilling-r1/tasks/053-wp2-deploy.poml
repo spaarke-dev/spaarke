@@ -1,0 +1,129 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="053" project="ebilling-r1">
+  <metadata>
+    <title>Deploy WP2 to dev</title>
+    <phase>2 Submission and extraction (WP2)</phase>
+    <gate>startable</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Prescriptive deployment with existing scripts; live changes are dev-only and recorded.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Runs existing deploy scripts in a fixed order and records evidence.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Shared dev environment (BFF App Service, Dataverse, external SPA) and serial edits of SpaarkeMaster solution source.</parallel-reason>
+    <deps>042, 043, 044, 045, 046, 047, 048, 049, 050a, 050b, 051, 054</deps>
+    <tags>deploy, bff, external-spa</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Deploy WP2 to dev: seed the invoice-classify and invoice-line-code Actions and Bindings, set the dev app settings (eBilling flag on, Content Understanding, eBilling containers), deploy the BFF, deploy the external SPA, sync any WP2 schema drift into SpaarkeMaster source, smoke every new route, and submit a sample invoice end to end.</prompt>
+
+  <role>SPAARKE deployment operator. Expert in the BFF, Dataverse seed scripts and the external SPA workflow.</role>
+
+  <goal>Dev runs the WP2 build: /healthz Healthy (including consumer-type reconciliation and the Content Understanding check); every WP2 route answers 401 unauthenticated and its expected status authenticated; a sample PDF submitted through the SPA ends Accepted with an invoice and tracking number (and one rejected case ends Rejected); evidence is in notes.</goal>
+
+  <context>
+    <background>Plan WP2 deploy. Routes to smoke: 044 (internal POST / GET, external POST / GET by id / GET list) and 048 (GET proposals, POST confirm). App-setting names (values not secret; no keys exist — managed identity): Ebilling__Enabled; ContentUnderstanding__Endpoint, ContentUnderstanding__ApiVersion, ContentUnderstanding__AnalyzerId (keys from 003, read by 043); Finance__ProcedureLibraryContainerId and Finance__EbillingOutputContainerId (task 028 notes; container ids in projects/ebilling-r1/CLAUDE.md §5). Solution-source sync after 029 is done only by serial tasks; this deploy task syncs any WP2 schema drift using 029's procedure.</background>
+    <relevant-files>
+      <file role="canonical-reference">scripts/Deploy-BffApi.ps1 (-Environment dev, -UseSlotDeploy, HealthCheckPath /healthz)</file>
+      <file role="canonical-reference">scripts/Deploy-ActionMirrors.ps1 (-Filter, -DryRun) and scripts/dataverse/Seed-PlaybookConsumers.ps1 (-DryRun, -DiffOnly)</file>
+      <file role="canonical-reference">.github/workflows/deploy-external-spa.yml (workflow_dispatch, input environment dev or prod)</file>
+      <file role="canonical-reference">scripts/solution-authoring/Test-SolutionCompleteness.ps1 and scripts/solution-authoring/Export-SpaarkeMasterSource.ps1 (procedure as in projects/ebilling-r1/tasks/029-wp1-apply-and-export.poml)</file>
+      <file role="canonical-reference">scripts/Import-SolutionScoped.ps1 (-PlanOnly only)</file>
+      <file role="modify">src/dataverse/solutions/SpaarkeMaster/** (only eBilling components drifted since 029, if any)</file>    </relevant-files>
+    <dependencies>
+      <dependency task="042" status="required">invoice-classify Action and Binding.</dependency>
+      <dependency task="043" status="required">Content Understanding client.</dependency>
+      <dependency task="044" status="required">Submission routes.</dependency>
+      <dependency task="045" status="required">Tracking numbers.</dependency>
+      <dependency task="046" status="required">Resolution.</dependency>
+      <dependency task="047" status="required">invoice-line-code Action and Binding.</dependency>
+      <dependency task="048" status="required">Code-set proposal routes.</dependency>
+      <dependency task="054" status="required">invoice-codeset-match Action and Binding (code-set matching review step, D-93).</dependency>
+      <dependency task="049" status="required">Processing job.</dependency>
+      <dependency task="050b" status="required">Legacy path retired (appsettings no longer carries InvoiceExtractionPlaybookId).</dependency>
+      <dependency task="051" status="required">SPA submission UI.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="dev BFF coordination (R3, 2026-10-16)">Before deploying, read the live dev BFF version (/healthz or the version endpoint; on 2026-10-16 it was 1.0.0+2c2fed38deae9e8a1629a4f1fa36eb4118bad791, deployed by spaarke-SPA-external-access-platform-r3) and run git merge-base --is-ancestor against the build being deployed. If the live commit is not an ancestor, merge master first; never deploy a build that drops another session's live work. Announce the deploy to the other BFF-deploying sessions and wait for the owner's go.</constraint>
+    <constraint source="task 047 (2026-10-16)">Seed the invoice-line-code Action with this deploy, in order: (1) scripts/ebilling/Ensure-ActionRow.ps1 -ActionCode invoice-line-code; (2) scripts/Deploy-ActionMirrors.ps1 -Filter invoice-line-code; (3) deploy the BFF build carrying ConsumerTypes.InvoiceLineCode together with scripts/dataverse/Seed-PlaybookConsumers.ps1, then run it with -DiffOnly. Accept only when -DiffOnly is clean and /healthz is Healthy (a row without the build, or the build without the row, turns /healthz Degraded / Unhealthy). Model tier stays Fast until DEF-020 / task 162 (notes/047).</constraint>
+    <constraint source="task 054 (2026-10-16)">Seed the invoice-codeset-match Action with this deploy, in the same order: (1) scripts/ebilling/Ensure-ActionRow.ps1 -ActionCode invoice-codeset-match; (2) scripts/Deploy-ActionMirrors.ps1 -Filter invoice-codeset-match (-DryRun first); (3) deploy the BFF build carrying ConsumerTypes.InvoiceCodeSetMatch together with scripts/dataverse/Seed-PlaybookConsumers.ps1, then run it with -DiffOnly. Accept only when -DiffOnly is clean and /healthz is Healthy. Until the row and Binding exist, GET proposals still answers 200 with every row marked unreviewed (binding_missing falls back to the embedding ranking). The two sprk_billingcodeset columns (sprk_description, sprk_matchhints) and their tuning text are ALREADY on spaarkedev1 (task 054); SpaarkeMaster source carries the columns and the form's Matching section, so step 9 should find no drift for them. Model tier stays Fast (notes/054).</constraint>
+    <constraint source="task 054 fix-round-1 (2026-10-17)">The invoice-codeset-match mirror text changed after 054 (the reason constraint, the none example and the output-schema reason description no longer name a closest set; $version stays 1). Seed from the current mirror. If the Action row was already seeded from an earlier commit, rerun scripts/Deploy-ActionMirrors.ps1 -Filter invoice-codeset-match (-DryRun first, then live); it updates sprk_systemprompt and the sidecar sprk_outputschemajson. Verify with a Dataverse read that the row's prompt no longer contains "came closest". The BFF build deployed with this task must include the fix-round-1 commits (ConcurrentChange 409, coverage "failed" column).</constraint>
+    <constraint source="CLAUDE.md §9">No secrets in the repo, in notes or in app settings typed by hand; Content Understanding auth is managed identity (no key setting). Record setting names and non-secret values only.</constraint>
+    <constraint source="project CLAUDE.md §5">Dev only. scripts/Import-SolutionScoped.ps1 is the only solution import path and runs with -PlanOnly here; no real import, no version bump.</constraint>
+    <constraint source="task 026 fix-round-1 (2026-10-17)">BINDING deploy order: the SpaarkeMaster schema goes in BEFORE the BFF. From task 026 the BFF's Signal and Decision Record reads $select sprk_regardinginvoiceline (SecureChildLineage, the restamp / reconciliation stamp sources), so a BFF deployed to an environment where that column does not exist answers 400 on every Signal and Decision Record read. On spaarkedev1 the columns are already live (scripts/ebilling/Deploy-EbillingSignalLineSubjectSchema.ps1); step 5 verifies them. Any other environment: SpaarkeMaster import (scripts/Import-SolutionScoped.ps1) first, then scripts/ebilling/Set-EbillingFirmReasonFieldSecurity.ps1 (the profile's member is per environment), then the BFF (notes/026, DEF-021).</constraint>
+    <constraint source="ADR-039">Seed the Bindings before deploying the BFF that lists their consumer types in ConsumerTypes.All, so /healthz never goes Unhealthy.</constraint>
+    <constraint source="git">Pushing the branch for the SPA workflow needs operator OK; no force push; never bare git stash.</constraint>
+    <constraint source=".claude/constraints/bff-extensions.md">Record the deployed BFF publish size against the fresh master build.</constraint>
+    <constraint source="D-116 (owner)">SpaarkeMaster must carry the owner-created global option set sprk_billingstatus, the sprk_billingstatus column on sprk_matter, sprk_project and sprk_workassignment, and sprk_workassignment's sprk_openeddate and sprk_closeddate (all created live on dev 2026-10-18). Add them to the solution and the data-model docs. Do not re-create them.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Deployment</topic>
+    <files>
+      <file>.claude/skills/bff-deploy/SKILL.md</file>
+      <file>.claude/skills/ci-cd/SKILL.md</file>
+      <file>.claude/skills/context-handoff/SKILL.md</file>
+      <file>.claude/constraints/azure-deployment.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>docs/guides/ai-guide-playbook-deploy-recipe.md</file>
+      <file>docs/guides/EXTERNAL-ACCESS-SPA-GUIDE.md</file>
+      <file>projects/ebilling-r1/tasks/029-wp1-apply-and-export.poml</file>
+    </files>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="1">Preconditions: every dependency shows ✅ in TASK-INDEX.md; dotnet build and dotnet test green on work/ebilling-r1; record the commit SHA; measure the BFF publish size against a fresh master build.</step>
+    <step order="2">Actions: run scripts/Deploy-ActionMirrors.ps1 -Filter invoice-classify -DryRun, then live; repeat for invoice-line-code and invoice-codeset-match (each after its Ensure-ActionRow.ps1). Verify the three rows with a Dataverse read query.</step>
+    <step order="3">Bindings: run scripts/dataverse/Seed-PlaybookConsumers.ps1 -DryRun, then live, then -DiffOnly (expect no difference). Verify the invoice-classify, invoice-line-code and invoice-codeset-match rows.</step>
+    <step order="4">App settings on spaarke-bff-dev (az webapp config appsettings set, staging slot if slot deploy is used): Ebilling__Enabled=true; ContentUnderstanding__Endpoint, ContentUnderstanding__ApiVersion=2025-11-01, ContentUnderstanding__AnalyzerId (from 003 / 004 notes); Finance__ProcedureLibraryContainerId and Finance__EbillingOutputContainerId (from 028 notes). Remove Finance__InvoiceExtractionPlaybookId if present (050b). Record names and values (none are secret).</step>
+    <step order="5">BINDING, before the BFF (task 026 fix-round-1): read metadata on the target environment and confirm sprk_signal.sprk_regardinginvoiceline and sprk_decisionrecord.sprk_regardinginvoiceline exist, then run scripts/ebilling/Set-EbillingFirmReasonFieldSecurity.ps1 -OntologyWriterApplicationId (dev: 69040982-612e-469e-a85f-26d5172367c5): write run, then -Verify, and expect exit 0 from -Verify (on a fresh environment -Verify passes only after the write run; on spaarkedev1 the write run reports every item OK and writes nothing). -Verify's (p2) check must show the reader profile "Spaarke BFF-Managed Field Readers" on EVERY business unit's default team: a business unit created later without a re-run reads the firm reason as null (task 026 fix-round-2, ontology-r1 K1). If a column is missing, STOP: the BFF from task 026 on fails every Signal and Decision Record read with a 400 until the SpaarkeMaster schema is in (on spaarkedev1 run scripts/ebilling/Deploy-EbillingSignalLineSubjectSchema.ps1; elsewhere the SpaarkeMaster import comes first). Record the result.</step>
+    <step order="6">BFF: run scripts/Deploy-BffApi.ps1 -Environment dev -UseSlotDeploy; confirm hash verification and swap; GET /healthz is Healthy, including the consumer-type reconciliation and the Content Understanding check.</step>
+    <step order="7">Route smoke: for every 044 and 048 route call once unauthenticated (expect 401) and once authenticated with the expected status (external routes as a CIAM firm user, internal as an internal user, confirm as an admin; a non-admin confirm expects 403). Record status codes.</step>
+    <step order="8">External SPA: with operator OK push the branch, then gh workflow run deploy-external-spa.yml --ref work/ebilling-r1 -f environment=dev; wait for success; record the run URL.</step>
+    <step order="9">Solution source: run scripts/solution-authoring/Test-SolutionCompleteness.ps1 for dev; if any WP2 table, column, choice or key is missing from SpaarkeMaster source, export with scripts/solution-authoring/Export-SpaarkeMasterSource.ps1 to a temporary folder outside the repo and copy only those eBilling files (029's procedure); run scripts/Import-SolutionScoped.ps1 -PlanOnly. If nothing drifted, record "no drift".</step>
+    <step order="10">End to end: as a CIAM firm user submit a sample invoice from the evaluation set through the SPA; observe Processing then Accepted; verify in Dataverse the submission (tracking number), invoice (In Review), lines with codes and extraction-confidence JSON, approval portion and Signals. Submit one sample expected to fail a blocking rule on reliable reads (or an unreadable PDF) and verify Rejected with reason code and no invoice. Run 051's ui-tests in dev, including dark mode.</step>
+    <step order="11">Record evidence (SHA, publish size, script outputs summarised, setting names, status codes, record ids, workflow run URL) in projects/ebilling-r1/notes/053-wp2-deploy.md; run context-handoff (live change checkpoint).</step>
+    <step order="12">Update TASK-INDEX.md: change this task's status cell to `✅ [done]`.</step>
+    <step order="13">Record deviations in projects/ebilling-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If /healthz is Unhealthy after deploy, or the end-to-end submission does not reach a terminal state, STOP, swap back if a slot was used, and report with logs (identifiers only).</trigger>
+    <trigger>If a required setting value (Content Understanding endpoint or container id) is missing from 003 / 028 notes, STOP and ask — do not guess or read secrets.</trigger>
+    <trigger>If Test-SolutionCompleteness reports drift outside eBilling components, STOP: do not copy another project's components.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="pwsh">Deploy-ActionMirrors.ps1, Seed-PlaybookConsumers.ps1, Deploy-BffApi.ps1, Test-SolutionCompleteness.ps1, Export-SpaarkeMasterSource.ps1, Import-SolutionScoped.ps1</tool>
+    <tool name="az">az webapp config appsettings set</tool>
+    <tool name="gh">gh workflow run deploy-external-spa.yml</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/ebilling-r1/notes/053-wp2-deploy.md</output>
+    <output type="config">SpaarkeMaster solution source (eBilling drift only, if any)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">invoice-classify, invoice-line-code and invoice-codeset-match Action and Binding rows exist in dev; Seed-PlaybookConsumers.ps1 -DiffOnly reports no difference.</criterion>
+    <criterion testable="true">/healthz on spaarke-bff-dev is Healthy after deploy, including consumer-type reconciliation and the Content Understanding check.</criterion>
+    <criterion testable="true">Every 044 and 048 route answers 401 unauthenticated and its expected status authenticated; a non-admin confirm answers 403; codes recorded.</criterion>
+    <criterion testable="true">The external SPA workflow run for dev succeeded (run URL recorded).</criterion>
+    <criterion testable="true">A sample invoice submitted through the SPA reaches Accepted with tracking number, invoice, lines, approval portion and Signals; a blocking-failure or unreadable sample reaches Rejected with a reason code and no invoice.</criterion>
+    <criterion testable="true">Test-SolutionCompleteness shows no eBilling drift after the step-8 sync (or no drift found); Import-SolutionScoped -PlanOnly succeeds.</criterion>
+    <criterion testable="true">Notes contain the app-setting names and non-secret values set, and no secret.</criterion>
+    <criterion testable="true">Publish-size delta of Sprk.Bff.Api measured against a fresh master build and recorded in task notes; no new HIGH CVE.</criterion>
+  </acceptance-criteria>
+
+  <notes>Plan WP2 deploy; spec FR-17 through FR-23, FR-45, FR-46. Shared environment: run alone. The brief lists Deploy-Actions.ps1; Action rows are deployed with Deploy-ActionMirrors.ps1 (Seed-JpsActions.ps1 is retired, scripts/README.md:171). The CreateInvoiceWizard code page (052) deploys with WP4 (112).</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load every file in knowledge/files before Step 1. Follow task-execute for rigor, checkpoints and quality gates.</protocol>
+  </execution>
+</task>

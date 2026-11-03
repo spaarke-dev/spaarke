@@ -1,0 +1,35 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0083",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0083","generator_id":"gen_eval_set.py@1 F-0083","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0083.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-05"},
+ "header":{"firm":"Northcott and Whitcombe LLP","firm_invoice_number":"INV-2026-62383","invoice_date":"2026-03-01","billing_period_start":"2026-02-01","billing_period_end":"2026-02-28","firm_matter_reference":"13774-0012","po_number":"PO-4575650","fees_total":9605.5,"expenses_total":725.21,"adjustments_total":0.0,"total_due":10330.71,"currency":"USD"},
+ "timekeepers":[{"name":"Daniel Esposito","title":"Partner","rate":505.0,"billed_as":"DE"},{"name":"Ivan Ashdown","title":"Senior Associate","rate":325.0,"billed_as":"IA"},{"name":"Leila Tavares","title":"Paralegal","rate":120.0,"billed_as":"LT"},{"name":"Peter Okafor","title":"Associate","rate":245.0,"billed_as":"PO"},{"name":"Sofia Mbeki","title":"Paralegal","rate":145.0,"billed_as":"SM"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2025-10-14","timekeeper":"SM","timekeeper_name":"Sofia Mbeki","timekeeper_title":"Paralegal","title":"Para","hours":1.7,"rate":145.0,"amount":246.5,"narrative":"Review and analyze client documents concerning the insurance coverage issue to identify key facts","codes":["L110","A104"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2026-02-03","timekeeper":"DE","timekeeper_name":"Daniel Esposito","timekeeper_title":"Partner","title":"Ptr","hours":1.4,"rate":505.0,"amount":707.0,"narrative":"Prepare updated litigation budget for the construction contract","codes":["L150","A103"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2026-02-04","timekeeper":"SM","timekeeper_name":"Sofia Mbeki","timekeeper_title":"Paralegal","title":"Para","hours":1.6,"rate":215.0,"amount":344.0,"narrative":"Telephone conference with client regarding selection of expert for the employment claim","codes":["L130","A106"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2026-02-05","timekeeper":"PO","timekeeper_name":"Peter Okafor","timekeeper_title":"Associate","title":"Assoc","hours":0.6,"rate":245.0,"amount":147.0,"narrative":"Prepare for case management conference in the warranty claim","codes":["L230","A101"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2026-02-10","timekeeper":"SM","timekeeper_name":"Sofia Mbeki","timekeeper_title":"Paralegal","title":"Para","hours":2.4,"rate":145.0,"amount":348.0,"narrative":"Correspondence with consulting expert regarding scope of analysis","codes":["L130","A108"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2026-02-16","timekeeper":"IA","timekeeper_name":"Ivan Ashdown","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":1.6,"rate":325.0,"amount":520.0,"narrative":"Research standard for provisional remedies concerning the distribution agreement","codes":["L220","A102"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2026-02-19","timekeeper":"LT","timekeeper_name":"Leila Tavares","timekeeper_title":"Paralegal","title":"Para","hours":0.9,"rate":120.0,"amount":108.0,"narrative":"Review and revise answer and affirmative defenses based on client comments","codes":["L210","A104"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2026-02-20","timekeeper":"PO","timekeeper_name":"Peter Okafor","timekeeper_title":"Associate","title":"Assoc","hours":1.5,"rate":245.0,"amount":367.5,"narrative":"Prepare monthly status report to client regarding the employment claim","codes":["L190","A111"],"page":2,"narrative_style":"clear"},
+  {"n":9,"line_type":"fee","date":"2026-02-27","timekeeper":"DE","timekeeper_name":"Daniel Esposito","timekeeper_title":"Partner","title":"Ptr","hours":4.0,"rate":505.0,"amount":2020.0,"narrative":"Analyze exposure and damages model for the supply agreement","codes":["L120","A104"],"page":2,"narrative_style":"clear"},
+  {"n":10,"line_type":"fee","date":"2026-02-27","timekeeper":"DE","timekeeper_name":"Daniel Esposito","timekeeper_title":"Partner","title":"Ptr","hours":4.0,"rate":505.0,"amount":2020.0,"narrative":"Review court docket and calendar of pending deadlines for the warranty claim","codes":["L190","A104"],"page":2,"narrative_style":"clear"},
+  {"n":11,"line_type":"fee","date":"2026-02-27","timekeeper":"DE","timekeeper_name":"Daniel Esposito","timekeeper_title":"Partner","title":"Ptr","hours":4.0,"rate":505.0,"amount":2020.0,"narrative":"Research standard for provisional remedies concerning the employment claim","codes":["L220","A102"],"page":2,"narrative_style":"clear"},
+  {"n":12,"line_type":"fee","date":"2026-02-27","timekeeper":"DE","timekeeper_name":"Daniel Esposito","timekeeper_title":"Partner","title":"Ptr","hours":1.5,"rate":505.0,"amount":757.5,"narrative":"Draft pretrial brief in the lease dispute","codes":["L210","A103"],"page":2,"narrative_style":"clear"},
+  {"n":13,"line_type":"expense","date":"2026-02-02","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":509.53,"amount":509.53,"narrative":"Document hosting and processing vendor","codes":["E118"],"page":2,"narrative_style":"clear"},
+  {"n":14,"line_type":"expense","date":"2026-02-05","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":3.0,"rate":36.04,"amount":108.12,"narrative":"Working meal during deposition preparation","codes":["E111"],"page":2,"narrative_style":"clear"},
+  {"n":15,"line_type":"expense","date":"2026-02-12","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":2.0,"rate":53.78,"amount":107.56,"narrative":"Working meal during deposition preparation","codes":["E111"],"page":2,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["643 Commerce Avenue","Phoenix","Tax ID 87-5759851"],"template":"T22","pages":2},
+ "rule_set_id":"RS-05",
+ "context":{"matter_open":"2025-05-10","matter_close":"2026-05-29","matter_budget":66322.0,"approved_timekeepers":["Leila Tavares","Peter Okafor","Ivan Ashdown","Sofia Mbeki","Cyrus Halloran","Daniel Esposito","Nadia Brennan"],"invoice_received_date":"2026-03-08"},
+ "expected_findings":[
+  {"rule_id":"RS-05-R01","rule_type":"ApprovedRate","scope":"line","line_refs":[3],"consequence":"Reduce"},
+  {"rule_id":"RS-05-R06","rule_type":"DailyHoursCap","scope":"line","line_refs":[12],"consequence":"Flag"},
+  {"rule_id":"RS-05-R08","rule_type":"InvoiceAge","scope":"line","line_refs":[1],"consequence":"Disallow"}
+ ],
+ "seeded_violations":3
+}

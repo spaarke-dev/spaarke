@@ -5,6 +5,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Xrm.Sdk;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
+using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.ExternalAccess;
 using Sprk.Bff.Api.Services.RecordCreation;
 using Xunit;
@@ -646,6 +647,37 @@ public sealed partial class RecordCreationServiceMappingSeamTests
         warning.Values["Entity"].Should().Be("sprk_workassignment");
         warning.Values["Column"].Should().Be("sprk_assignedto");
         warning.Values["Source"].Should().Be("sprk_assignedtointernal");
+    }
+
+    /// <summary>
+    /// Task 017 follow-up (K2): a source default with no Web API form is not copied, and the column staying blank is logged —
+    /// the same shape as <c>copied_default_source_unset</c>. Unreachable through <c>CreateAsync</c> (a default is validated as
+    /// convertible, with the same check, when the request is read), so this drives <c>WithCopiedDefaults</c> directly.
+    /// </summary>
+    [Fact]
+    public void CopiedDefault_ASourceDefaultWithNoWebApiForm_IsNotCopied_AndLogsAStructuredWarning()
+    {
+        var log = new SeamLog();
+        _logger = log;
+        var unconvertible = new EntityReference("  ", Guid.NewGuid());
+        var defaults = new Dictionary<string, RecordCreationService.PostMappingDefault>(StringComparer.Ordinal)
+        {
+            ["sprk_assignedtointernal"] = new(unconvertible, JsonDocument.Parse("{}").RootElement),
+        };
+
+        var (merged, copied) = Service().WithCopiedDefaults(
+            "sprk_workassignment", RecordTableRules.Get("sprk_workassignment"),
+            new DataverseWriteItemMapper.MappedItem("{}", []), defaults);
+
+        merged.Should().NotContainKey("sprk_assignedto");
+        copied.Should().BeEmpty();
+        var warning = log.Entries.Should().ContainSingle(e => e.Message.StartsWith("copied_default_value_unconvertible")).Subject;
+        warning.Level.Should().Be(LogLevel.Warning);
+        warning.Values["Entity"].Should().Be("sprk_workassignment");
+        warning.Values["Column"].Should().Be("sprk_assignedto");
+        warning.Values["Source"].Should().Be("sprk_assignedtointernal");
+        warning.Message.Should().NotContain(unconvertible.Id.ToString(), "ids of records are values; table and column names only");
+        log.Entries.Should().NotContain(e => e.Message.StartsWith("copied_default_source_unset"));
     }
 
     /// <summary>

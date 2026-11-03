@@ -1,0 +1,28 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0432",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0432","generator_id":"gen_eval_set.py@1 F-0432","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0432.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-06"},
+ "header":{"firm":"Calloway and Beckett LLP","firm_invoice_number":"INV-2025-62446","invoice_date":"2026-03-01","billing_period_start":"2026-02-01","billing_period_end":"2026-02-28","firm_matter_reference":"44483-0022","po_number":"PO-4588468","fees_total":2898.0,"expenses_total":746.81,"adjustments_total":0.0,"total_due":3644.81,"currency":"USD"},
+ "timekeepers":[{"name":"Clara Okafor","title":"Associate","rate":225.0,"billed_as":"CO"},{"name":"Ingrid Ramanathan","title":"Partner","rate":420.0,"billed_as":"IR"},{"name":"Tomas Fairweather","title":"Associate","rate":180.0,"billed_as":"TF"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2026-02-04","timekeeper":"IR","timekeeper_name":"Ingrid Ramanathan","timekeeper_title":"Partner","title":"Ptr","hours":0.9,"rate":420.0,"amount":378.0,"narrative":"Prepare trial notebook and demonstrative exhibits for the vendor agreement","codes":["L440","A101"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2026-02-06","timekeeper":"TF","timekeeper_name":"Tomas Fairweather","timekeeper_title":"Associate","title":"Assoc","hours":1.7,"rate":180.0,"amount":306.0,"narrative":"Plan strategy for upcoming phase of the vendor agreement with team","codes":["L120","A101"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2026-02-16","timekeeper":"CO","timekeeper_name":"Clara Okafor","timekeeper_title":"Associate","title":"Assoc","hours":0.3,"rate":225.0,"amount":67.5,"narrative":"Prepare fact witness for testimony regarding the insurance coverage issue","codes":["L410","A101"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2026-02-16","timekeeper":"CO","timekeeper_name":"Clara Okafor","timekeeper_title":"Associate","title":"Assoc","hours":1.6,"rate":225.0,"amount":360.0,"narrative":"Prepare examination outlines for trial in the lease dispute","codes":["L440","A101"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2026-02-17","timekeeper":"CO","timekeeper_name":"Clara Okafor","timekeeper_title":"Associate","title":"Assoc","hours":0.9,"rate":225.0,"amount":202.5,"narrative":"Attend trial day in the regulatory inquiry","codes":["L450","A109"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2026-02-18","timekeeper":"TF","timekeeper_name":"Tomas Fairweather","timekeeper_title":"Associate","title":"Assoc","hours":0.7,"rate":180.0,"amount":126.0,"narrative":"Prepare fact witness for testimony regarding the regulatory inquiry","codes":["L410","A101"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2026-02-19","timekeeper":"CO","timekeeper_name":"Clara Okafor","timekeeper_title":"Associate","title":"Assoc","hours":2.7,"rate":225.0,"amount":607.5,"narrative":"Telephone conference with witness regarding the customs audit","codes":["L410","A106"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2026-02-23","timekeeper":"TF","timekeeper_name":"Tomas Fairweather","timekeeper_title":"Associate","title":"Assoc","hours":1.2,"rate":180.0,"amount":216.0,"narrative":"Attend hearing on pretrial brief in the warranty claim","codes":["L450","A109"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"fee","date":"2026-02-23","timekeeper":"IR","timekeeper_name":"Ingrid Ramanathan","timekeeper_title":"Partner","title":"Ptr","hours":0.6,"rate":420.0,"amount":252.0,"narrative":"Telephone conference with witness regarding the data incident","codes":["L410","A106"],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"fee","date":"2026-02-25","timekeeper":"CO","timekeeper_name":"Clara Okafor","timekeeper_title":"Associate","title":"Assoc","hours":1.7,"rate":225.0,"amount":382.5,"narrative":"Prepare monthly status report to client regarding the regulatory inquiry","codes":["L190","A111"],"page":1,"narrative_style":"clear"},
+  {"n":11,"line_type":"expense","date":"2026-02-17","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":31.13,"amount":31.13,"narrative":"Overnight courier to Bluepine Holdings counsel","codes":["E107"],"page":1,"narrative_style":"clear"},
+  {"n":12,"line_type":"expense","date":"2026-02-19","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":715.68,"amount":715.68,"narrative":"Airfare to Minneapolis for deposition","codes":["E110"],"page":1,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["773 Harbor Road","Phoenix","Tax ID 76-9959285"],"template":"T23","pages":1},
+ "rule_set_id":"RS-06",
+ "context":{"matter_open":"2025-02-07","matter_close":"2026-05-29","matter_budget":39579.0,"approved_timekeepers":["Ingrid Rosenthal","Oliver Nakamura","Clara Okafor","Ingrid Ramanathan","Tomas Fairweather"],"invoice_received_date":"2026-03-17"},
+ "expected_findings":[],
+ "seeded_violations":0
+}

@@ -139,7 +139,7 @@ public sealed class RecordRepairModeTests
     public async Task ATeamOwnedRow_KeepsItsOwner_EvenOneTheRuleWouldNotGive()
     {
         var id = _world.EventUnderTheMatter(clientName: "Acme", practiceArea: "Tax", priority: "Urgent",
-            owner: new EntityReference("team", Directory.GeneralTeam), owningUnit: Directory.GeneralBu);
+            owner: new EntityReference("team", Directory.GeneralTeam), owningUnit: Directory.GeneralBu, indexed: true);
 
         var outcome = await _world.RepairAsync("sprk_event", id);
 
@@ -346,7 +346,8 @@ public sealed class RecordRepairModeTests
     [Fact]
     public async Task ATableThisServiceDoesNotCreate_IsSkipped_WithNothingRead()
     {
-        var outcome = await _world.RepairAsync("account", Guid.NewGuid());
+        // Task 017-d2: "account" is now registered (the chat create's company table), so an unregistered platform table is used.
+        var outcome = await _world.RepairAsync("phonecall", Guid.NewGuid());
 
         outcome.Status.Should().Be(RecordRepairStatus.Skipped);
         outcome.ReasonCode.Should().Be(RecordRepairReason.TableUnsupported);
@@ -432,7 +433,7 @@ public sealed class RecordRepairModeTests
     public async Task ATemplateThatYieldsABlankString_IsNeverWritten_TwoRepairsWriteNothing()
     {
         var id = _world.EventUnderTheMatter(clientName: "Acme", practiceArea: "Tax", priority: "Urgent",
-            owner: new EntityReference("team", Directory.ChildTeam), owningUnit: Directory.ChildBu);
+            owner: new EntityReference("team", Directory.ChildTeam), owningUnit: Directory.ChildBu, indexed: true);
         _world.MapABlankTemplateOntoTheEvent();
 
         var first = await _world.RepairAsync("sprk_event", id);
@@ -505,7 +506,7 @@ public sealed class RecordRepairModeTests
     [InlineData(false)]
     public async Task AMappingFault_MapsNothing_AndTheOwnerIsStillRepaired(bool profileUnreadable)
     {
-        var id = _world.EventUnderTheMatter(clientName: null, practiceArea: null, priority: null);
+        var id = _world.EventUnderTheMatter(clientName: null, practiceArea: null, priority: null, indexed: true);
         _world.MappingFault = profileUnreadable ? RepairWorld.MappingFaultKind.ProfileUnreadable : RepairWorld.MappingFaultKind.RuleFaults;
 
         var outcome = await _world.RepairAsync("sprk_event", id);
@@ -903,6 +904,35 @@ public sealed class RecordRepairModeTests
             .Should().Be(InheritedAccessPermission.AppOnlyCreatorWriteReasonCode);
     }
 
+    /// <summary>
+    /// Review R3 (FR-38): a mapping rule that targets either search-index column of a search-indexed table is never applied by
+    /// Repair — the index is the owning unit's alone (step 8's rule), so the parent's index is not copied and Repair's own
+    /// search-index step writes the owning unit's.
+    /// </summary>
+    [Fact]
+    public async Task AMappingRuleTargetingTheSearchIndex_IsNeverApplied_AndRepairWritesTheOwningUnitsIndex()
+    {
+        var matter = _world.Directory.Row("sprk_matter", RepairWorld.Matter);
+        matter["sprk_searchindexname"] = RepairWorld.GeneralIndexName;
+        matter["sprk_ai_search_index"] = new EntityReference("sprk_aisearchindex", RepairWorld.GeneralIndex);
+        _world.Map("sprk_matter", "sprk_event",
+            RepairWorld.Expression(CreateTimeFieldMapping.MappingTypeTemplate, "{sprk_clientname}", "sprk_clientname", 1),
+            RepairWorld.Expression(CreateTimeFieldMapping.MappingTypeTemplate, "{sprk_searchindexname}", "sprk_searchindexname", 2),
+            RepairWorld.CopyLookup("sprk_ai_search_index", "sprk_ai_search_index", 3));
+        var id = _world.EventUnderTheMatter(clientName: null, practiceArea: "Tax", priority: "Urgent");
+
+        var outcome = await _world.RepairAsync("sprk_event", id);
+
+        var write = _world.Writes.Should().ContainSingle().Subject;
+        write.Fields["sprk_clientname"].Should().Be(RepairWorld.MatterClient, "the other rules still map");
+        write.Fields["sprk_searchindexname"].Should().Be(RepairWorld.ChildIndexName, "the owning unit's index, not the matter's");
+        write.Fields["sprk_ai_search_index"].Should().Be(new EntityReference("sprk_aisearchindex", RepairWorld.ChildIndex));
+        outcome.Fields.Should().NotContain(f => f.Part == RecordRepairPart.Mapping
+            && (f.Column == "sprk_searchindexname" || f.Column == "sprk_ai_search_index")
+            && f.State == RecordRepairFieldState.Repaired, "a mapping rule never repairs the index");
+        Field(outcome, RecordRepairPart.SearchIndex, "sprk_searchindexname").State.Should().Be(RecordRepairFieldState.Repaired);
+    }
+
     // =====================================================================================
     // UAC-r2 condition (b) F1-1: columns that decide access or filing are never mapped, on any table
     // =====================================================================================
@@ -996,7 +1026,7 @@ public sealed class RecordRepairModeTests
     public async Task AConcatThatYieldsOnlyASpace_IsNeverWritten_TwoRepairsWriteNothing()
     {
         var id = _world.EventUnderTheMatter(clientName: "Acme", practiceArea: "Tax", priority: "Urgent",
-            owner: new EntityReference("team", Directory.ChildTeam), owningUnit: Directory.ChildBu);
+            owner: new EntityReference("team", Directory.ChildTeam), owningUnit: Directory.ChildBu, indexed: true);
         _world.Map("sprk_matter", "sprk_event",
             RepairWorld.Expression(CreateTimeFieldMapping.MappingTypeConcat, "{sprk_nosuch1} {sprk_nosuch2}", "sprk_eventdescription", 1));
 
@@ -1017,6 +1047,36 @@ public sealed class RecordRepairModeTests
 
         _world.Writes.SelectMany(w => w.Fields.Keys).Should().NotContain("ownerid");
         Field(outcome, RecordRepairPart.Owner, "ownerid").ReasonCode.Should().Be(RecordRepairReason.OwnerRootSecure);
+    }
+
+    [Fact]
+    public async Task AWorkAssignmentFiledOnlyUnderAnEvent_IsReOwnedInTheUnitOfTheEventsMatter_NeverTheEventsOwn()
+    {
+        // Owner decision 2026-10-29: a work assignment belongs to its core record. Filed only under an event owned in the
+        // GENERAL unit whose matter is in the CHILD unit, it is owned with the matter (the parents the un-secure cascade names),
+        // so this user-owned row in the child unit is re-owned there — not escalated as a move to the event's general unit.
+        var @event = _world.RowOf("sprk_event", Directory.GeneralBu, new Dictionary<string, object>
+        {
+            ["ownerid"] = new EntityReference("team", Directory.GeneralTeam),
+            ["owningteam"] = new EntityReference("team", Directory.GeneralTeam),
+            ["sprk_regardingmatter"] = new EntityReference("sprk_matter", RepairWorld.Matter),
+        });
+        var id = _world.RowOf("sprk_workassignment", Directory.ChildBu, new Dictionary<string, object>
+        {
+            ["ownerid"] = new EntityReference("systemuser", RepairWorld.PersonInChild),
+            ["sprk_issecure"] = false,
+            ["sprk_regardingevent"] = new EntityReference("sprk_event", @event),
+        });
+
+        var outcome = await _world.RepairAsync("sprk_workassignment", id);
+
+        _world.OwnerContexts.Should().ContainSingle().Which.Parents.Should().Equal(
+            [new RecordOwnershipParent("sprk_matter", RepairWorld.Matter), new RecordOwnershipParent("sprk_event", @event)],
+            "the event's matter first, the event kept among the parents (secure-if-any)");
+        var write = _world.Writes.Should().ContainSingle().Subject;
+        write.Fields["ownerid"].Should().Be(new EntityReference("team", Directory.ChildTeam),
+            $"the matter's unit's team; never the event's ({Directory.GeneralTeam:D})");
+        Field(outcome, RecordRepairPart.Owner, "ownerid").State.Should().Be(RecordRepairFieldState.Repaired);
     }
 
     [Fact]
@@ -1186,7 +1246,8 @@ internal sealed class RepairWorld
     // ── Rows ────────────────────────────────────────────────────────────────────────────────────────────────────
 
     public Guid EventUnderTheMatter(
-        string? clientName, string? practiceArea, string? priority, EntityReference? owner = null, Guid? owningUnit = null)
+        string? clientName, string? practiceArea, string? priority, EntityReference? owner = null, Guid? owningUnit = null,
+        bool indexed = false)
     {
         var id = Guid.NewGuid();
         var extra = new Dictionary<string, object>
@@ -1194,6 +1255,13 @@ internal sealed class RepairWorld
             ["ownerid"] = owner ?? new EntityReference("systemuser", PersonInChild),
             ["sprk_regardingmatter"] = new EntityReference("sprk_matter", Matter),
         };
+        if (indexed)
+        {
+            // Task 039 (FR-38): an event is search-indexed now, so Repair fills its two index columns where unset. A test about
+            // something else gives the row both values already, so its owner/mapping assertions stay about the owner/mapping.
+            extra["sprk_searchindexname"] = ChildIndexName;
+            extra["sprk_ai_search_index"] = new EntityReference("sprk_aisearchindex", ChildIndex);
+        }
         if (owner is { LogicalName: "team" })
             extra["owningteam"] = owner;
         if (clientName is not null)

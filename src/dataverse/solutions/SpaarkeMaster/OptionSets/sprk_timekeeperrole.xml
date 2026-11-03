@@ -12,15 +12,7 @@
     <Description description="" languagecode="1033" />
   </Descriptions>
   <options>
-    <option value="100000000" ExternalValue="" IsHidden="0">
-      <labels>
-        <label description="Senior Partner" languagecode="1033" />
-      </labels>
-      <Descriptions>
-        <Description description="" languagecode="1033" />
-      </Descriptions>
-    </option>
-    <option value="100000001" ExternalValue="" IsHidden="0">
+    <option value="100000001" ExternalValue="PARTNR" IsHidden="0">
       <labels>
         <label description="Partner" languagecode="1033" />
       </labels>
@@ -28,15 +20,7 @@
         <Description description="" languagecode="1033" />
       </Descriptions>
     </option>
-    <option value="100000002" ExternalValue="" IsHidden="0">
-      <labels>
-        <label description="Senior Associate" languagecode="1033" />
-      </labels>
-      <Descriptions>
-        <Description description="" languagecode="1033" />
-      </Descriptions>
-    </option>
-    <option value="100000003" ExternalValue="" IsHidden="0">
+    <option value="100000003" ExternalValue="ASSOC" IsHidden="0">
       <labels>
         <label description="Associate" languagecode="1033" />
       </labels>
@@ -44,7 +28,7 @@
         <Description description="" languagecode="1033" />
       </Descriptions>
     </option>
-    <option value="100000004" ExternalValue="" IsHidden="0">
+    <option value="100000004" ExternalValue="PARALG" IsHidden="0">
       <labels>
         <label description="Paralegal" languagecode="1033" />
       </labels>
@@ -52,15 +36,7 @@
         <Description description="" languagecode="1033" />
       </Descriptions>
     </option>
-    <option value="100000005" ExternalValue="" IsHidden="0">
-      <labels>
-        <label description="Specialist" languagecode="1033" />
-      </labels>
-      <Descriptions>
-        <Description description="" languagecode="1033" />
-      </Descriptions>
-    </option>
-    <option value="100000006" ExternalValue="" IsHidden="0">
+    <option value="100000006" ExternalValue="NBOTHR" IsHidden="0">
       <labels>
         <label description="Other" languagecode="1033" />
       </labels>
@@ -68,61 +44,85 @@
         <Description description="" languagecode="1033" />
       </Descriptions>
     </option>
-    <option value="100000007" IsHidden="0">
+    <option value="100000014" ExternalValue="OFCOUN" IsHidden="0">
       <labels>
-        <label description="Practice Support" languagecode="1033" />
+        <label description="Of Counsel" languagecode="1033" />
       </labels>
-      <Descriptions>
-        <Description description="" languagecode="1033" />
-      </Descriptions>
     </option>
-    <option value="100000008" IsHidden="0">
+    <option value="100000015" ExternalValue="TRANEE" IsHidden="0">
       <labels>
-        <label description="Administrator" languagecode="1033" />
+        <label description="Associate Trainee" languagecode="1033" />
       </labels>
-      <Descriptions>
-        <Description description="" languagecode="1033" />
-      </Descriptions>
     </option>
-    <option value="100000009" IsHidden="0">
+    <option value="100000016" ExternalValue="STFATT" IsHidden="0">
       <labels>
-        <label description="Legal Operations" languagecode="1033" />
+        <label description="Staff Attorney" languagecode="1033" />
       </labels>
-      <Descriptions>
-        <Description description="" languagecode="1033" />
-      </Descriptions>
     </option>
-    <option value="100000010" IsHidden="0">
+    <option value="100000017" ExternalValue="SECNDE" IsHidden="0">
       <labels>
-        <label description="Senior Counsel" languagecode="1033" />
+        <label description="Secondee" languagecode="1033" />
       </labels>
-      <Descriptions>
-        <Description description="" languagecode="1033" />
-      </Descriptions>
     </option>
-    <option value="100000011" IsHidden="0">
+    <option value="100000018" ExternalValue="LGLINT" IsHidden="0">
       <labels>
-        <label description="General Counsel" languagecode="1033" />
+        <label description="Legal Intern" languagecode="1033" />
       </labels>
-      <Descriptions>
-        <Description description="" languagecode="1033" />
-      </Descriptions>
     </option>
-    <option value="100000012" IsHidden="0">
+    <option value="100000019" ExternalValue="LGLAST" IsHidden="0">
       <labels>
-        <label description="Counsel" languagecode="1033" />
+        <label description="Legal Assistant" languagecode="1033" />
       </labels>
-      <Descriptions>
-        <Description description="" languagecode="1033" />
-      </Descriptions>
     </option>
-    <option value="100000013" IsHidden="0">
+    <option value="100000020" ExternalValue="CLKSEC" IsHidden="0">
       <labels>
-        <label description="Associate General Counsel" languagecode="1033" />
+        <label description="Clerk or Secretary" languagecode="1033" />
       </labels>
-      <Descriptions>
-        <Description description="" languagecode="1033" />
-      </Descriptions>
+    </option>
+    <option value="100000021" ExternalValue="LIBRRN" IsHidden="0">
+      <labels>
+        <label description="Librarian" languagecode="1033" />
+      </labels>
+    </option>
+    <option value="100000022" ExternalValue="RSRCHR" IsHidden="0">
+      <labels>
+        <label description="Research Specialist/Researcher" languagecode="1033" />
+      </labels>
+    </option>
+    <option value="100000023" ExternalValue="ANALST" IsHidden="0">
+      <labels>
+        <label description="Analyst" languagecode="1033" />
+      </labels>
+    </option>
+    <option value="100000024" ExternalValue="HLNLPF" IsHidden="0">
+      <labels>
+        <label description="High-Level Non-Lawyer Professional" languagecode="1033" />
+      </labels>
+    </option>
+    <option value="100000025" ExternalValue="LGPRMG" IsHidden="0">
+      <labels>
+        <label description="Legal Project Manager" languagecode="1033" />
+      </labels>
+    </option>
+    <option value="100000026" ExternalValue="IPAGNT" IsHidden="0">
+      <labels>
+        <label description="IP Agent" languagecode="1033" />
+      </labels>
+    </option>
+    <option value="100000027" ExternalValue="CSTCNS" IsHidden="0">
+      <labels>
+        <label description="Costs Counsel" languagecode="1033" />
+      </labels>
+    </option>
+    <option value="100000028" ExternalValue="TEMPAT" IsHidden="0">
+      <labels>
+        <label description="Contract Attorney" languagecode="1033" />
+      </labels>
+    </option>
+    <option value="100000029" ExternalValue="TEMPOS" IsHidden="0">
+      <labels>
+        <label description="Contract Other Staff" languagecode="1033" />
+      </labels>
     </option>
   </options>
 </optionset>

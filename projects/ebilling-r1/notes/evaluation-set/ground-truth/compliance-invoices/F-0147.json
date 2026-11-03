@@ -1,0 +1,32 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0147",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0147","generator_id":"gen_eval_set.py@1 F-0147","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0147.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-03"},
+ "header":{"firm":"Quimby & Whitcombe LLP","firm_invoice_number":"A-46664/2026","invoice_date":"2025-07-03","billing_period_start":"2025-06-01","billing_period_end":"2025-06-30","firm_matter_reference":"65723-0002","po_number":"PO-4530793","fees_total":3761.5,"expenses_total":814.56,"adjustments_total":0.0,"total_due":4576.06,"currency":"USD"},
+ "timekeepers":[{"name":"Aisha Mbeki","title":"Associate","rate":215.0,"billed_as":"AM"},{"name":"Cyrus Rosenthal","title":"Of Counsel","rate":440.0,"billed_as":"CR"},{"name":"Mei Carmichael","title":"Associate","rate":210.0,"billed_as":"MC"},{"name":"Yusuf Lindqvist","title":"Senior Associate","rate":275.0,"billed_as":"YL"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2025-06-05","timekeeper":"YL","timekeeper_name":"Yusuf Lindqvist","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":1.4,"rate":275.0,"amount":385.0,"narrative":"Draft interrogatory responses in the licensing dispute","codes":["L210","A103"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2025-06-09","timekeeper":"AM","timekeeper_name":"Aisha Mbeki","timekeeper_title":"Associate","title":"Assoc","hours":0.7,"rate":215.0,"amount":150.5,"narrative":"Correspondence with consulting expert regarding scope of analysis","codes":["L130","A108"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2025-06-12","timekeeper":"CR","timekeeper_name":"Cyrus Rosenthal","timekeeper_title":"Of Counsel","title":"O/C","hours":1.7,"rate":440.0,"amount":748.0,"narrative":"Telephone conference with client representative regarding factual background of the lease dispute","codes":["L110","A106"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2025-06-12","timekeeper":"AM","timekeeper_name":"Aisha Mbeki","timekeeper_title":"Associate","title":"Assoc","hours":1.8,"rate":215.0,"amount":387.0,"narrative":"Telephone conference with client regarding selection of expert for the regulatory inquiry","codes":["L130","A106"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2025-06-16","timekeeper":"YL","timekeeper_name":"Yusuf Lindqvist","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":1.8,"rate":275.0,"amount":495.0,"narrative":"Review and organize incoming production from Redstone Mining for matter file","codes":["L140","A104"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2025-06-23","timekeeper":"MC","timekeeper_name":"Mei Carmichael","timekeeper_title":"Associate","title":"Assoc","hours":2.8,"rate":210.0,"amount":588.0,"narrative":"Review and analyze client documents concerning the regulatory inquiry to identify key facts","codes":["L110","A104"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2025-06-25","timekeeper":"MC","timekeeper_name":"Mei Carmichael","timekeeper_title":"Associate","title":"Assoc","hours":3.9,"rate":210.0,"amount":819.0,"narrative":"Prepare updated litigation budget for the vendor agreement; Prepare updated litigation budget for the data incident; Prepare monthly status report to client regarding the vendor agreement.","codes":["L150","A106"],"page":1,"narrative_style":"block_billed"},
+  {"n":8,"line_type":"fee","date":"2025-06-27","timekeeper":"MC","timekeeper_name":"Mei Carmichael","timekeeper_title":"Associate","title":"Assoc","hours":0.9,"rate":210.0,"amount":189.0,"narrative":"Draft settlement term sheet for the warranty claim","codes":["L160","A103"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"expense","date":"2025-06-09","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":294.28,"amount":294.28,"narrative":"Court filing fee","codes":["E112"],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"expense","date":"2025-06-12","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":3.0,"rate":115.62,"amount":346.86,"narrative":"Working meal during deposition preparation","codes":["E111"],"page":1,"narrative_style":"clear"},
+  {"n":11,"line_type":"expense","date":"2025-06-19","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":29.28,"amount":29.28,"narrative":"Overnight courier to Meridian Foods counsel","codes":["E107"],"page":1,"narrative_style":"clear"},
+  {"n":12,"line_type":"expense","date":"2025-06-19","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":44.0,"rate":0.64,"amount":28.16,"narrative":"Mileage to courthouse","codes":["E109"],"page":1,"narrative_style":"clear"},
+  {"n":13,"line_type":"expense","date":"2025-06-23","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":3.0,"rate":38.66,"amount":115.98,"narrative":"Overnight courier to Harbor Point Capital counsel","codes":["E107"],"page":1,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["485 Peachtree Way","Boston","Tax ID 33-5237976"],"template":"T07","pages":1},
+ "rule_set_id":"RS-03",
+ "context":{"matter_open":"2024-07-31","matter_close":"2025-09-28","matter_budget":43304.0,"approved_timekeepers":["Cyrus Rosenthal","Ingrid Eriksen","Beatrix Eriksen","Katya Halloran","Ivan Lockhart","Aisha Mbeki","Yusuf Lindqvist","Mei Carmichael"],"invoice_received_date":"2025-07-10"},
+ "expected_findings":[
+  {"rule_id":"RS-03-R06","rule_type":"ExpenseRule","scope":"line","line_refs":[10],"consequence":"Reduce"},
+  {"rule_id":"RS-03-R07","rule_type":"AiObservation","scope":"line","line_refs":[7],"consequence":"Flag"}
+ ],
+ "seeded_violations":2
+}

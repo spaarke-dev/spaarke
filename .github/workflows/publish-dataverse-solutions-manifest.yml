@@ -186,11 +186,16 @@ jobs:
           upload_zip "${UNMANAGED_BLOB}" out/SpaarkeMaster.zip
           blob upload --name "dataverse-solutions-${BUILD_ID}-${GITHUB_RUN_ATTEMPT}.json" --file out/manifest.json --overwrite false
 
-          # Rollback pointer: keep the manifest being replaced (the first run keeps the hand-made pre-T218 one).
+          # Rollback pointer: keep the manifest being replaced (the first run keeps the hand-made pre-T218 one). A re-run
+          # of THIS commit finds its own manifest in latest already; copying that would lose the real previous version.
           latest_exists=$(blob exists --name dataverse-solutions-latest.json --query exists -o tsv)
           if [ "${latest_exists}" = "true" ]; then
             blob download --name dataverse-solutions-latest.json --file out/previous-latest.json --overwrite true
-            blob upload --name dataverse-solutions-latest.previous.json --file out/previous-latest.json --overwrite true
+            if grep -q "${GITHUB_SHA}" out/previous-latest.json; then
+              echo "latest already names this commit (re-run) — keeping the existing rollback pointer."
+            else
+              blob upload --name dataverse-solutions-latest.previous.json --file out/previous-latest.json --overwrite true
+            fi
           fi
           blob upload --name dataverse-solutions-latest.json --file out/manifest.json --overwrite true
 

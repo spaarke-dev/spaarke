@@ -111,7 +111,7 @@ Counted from the POMLs 2026-09-21. **Done** includes `completed`, `completed-wit
 | **3 — Child inheritance** | Core-ancestor denormalization (FR-26); children inherit parent rights (FR-27) | 4 | 5 | 🔴 **Entirely blocked behind 036** |
 | **3 — Secure Project lifecycle** | Unsecure/reverse path correctness | 0 | 1 | 🟡 108 code-complete, 2 verification items left |
 | **4 — Secure Project + Manage Access** | Share-only access, Manage Access rework, wizard Secure step (FR-28…FR-31) | 5 | 5 | 🔴 **The visible half.** 060/061/062/063/068 ✅ |
-| **5 — Attestation** | Append-only access-event log; point-in-time replay (FR-32) | 1 | 3 | 🔴 Barely started |
+| **5 — Attestation** | Append-only access-event log; point-in-time replay (FR-32) | 1 | 3 | ⏸️ **Deferred (2026-10-16) → #1303**; known gap, interim = Dataverse audit review |
 | **Register-driven (`ISS-xxx`)** | 29 issues found *by* the work | 1 | **12** | 🔴 New in the last two weeks; see §0 |
 | **Wave 0 / Wrap-up** | 082 caller-identity census · 090 close-out + `/test-diet` | 0 | 2 | 🔴 090 is last by construction |
 
@@ -206,6 +206,8 @@ are *shareable in code* and *not yet proven end-to-end in a live environment* �
 **FR-32**: *"who could see record X on date D"* becomes answerable, by replaying the evaluator over
 Dataverse field audit rather than materializing derived access into rows. That distinction matters —
 materializing it would create a second source of truth that drifts from the first.
+
+> **Status (2026-10-16): NOT delivered in uac-r2 — known gap, deferred to [#1303](https://github.com/spaarke-dev/spaarke/issues/1303).** There is no access-event writer (task 087 cut), no evaluator replay (088) and no attestation seam (089, folded into #1303). Until #1303 ships, "who could see record X on date D" is answered by a manual review of the Dataverse audit log. That log records grant-row changes, Share / Modify Share / Unshare, assignments and access-flag changes on the audited tables, and it requires org-level auditing to be on in the environment: verified on dev 2026-10-16; for customer environments see [#2027](https://github.com/spaarke-dev/spaarke/issues/2027).
 
 ---
 

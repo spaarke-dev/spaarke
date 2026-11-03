@@ -1,0 +1,32 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0140",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0140","generator_id":"gen_eval_set.py@1 F-0140","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0140.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-02"},
+ "header":{"firm":"Montclair & Cranmer LLP","firm_invoice_number":"INV-2025-73784","invoice_date":"2025-05-03","billing_period_start":"2025-04-01","billing_period_end":"2025-04-30","firm_matter_reference":"67462-0024","po_number":"PO-4587226","fees_total":3840.0,"expenses_total":153.53,"adjustments_total":0.0,"total_due":3993.53,"currency":"USD"},
+ "timekeepers":[{"name":"Beatrix Ramanathan","title":"Associate","rate":275.0,"billed_as":"B. Ramanathan"},{"name":"Emeka Ashdown","title":"Legal Assistant","rate":115.0,"billed_as":"E. Ashdown"},{"name":"Gideon Abernathy","title":"Associate","rate":325.0,"billed_as":"G. Abernathy"},{"name":"Leila Kowalczyk","title":"Paralegal","rate":140.0,"billed_as":"L. Kowalczyk"},{"name":"Samuel Santoro","title":"Senior Associate","rate":435.0,"billed_as":"S. Santoro"},{"name":"Victor Sandoval","title":"Paralegal","rate":175.0,"billed_as":"V. Sandoval"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2025-04-02","timekeeper":"B. Ramanathan","timekeeper_name":"Beatrix Ramanathan","timekeeper_title":"Associate","title":"Assoc","hours":2.2,"rate":275.0,"amount":605.0,"narrative":"Review court docket and calendar of pending deadlines for the employment claim","codes":["L190","A104"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2025-04-08","timekeeper":"B. Ramanathan","timekeeper_name":"Beatrix Ramanathan","timekeeper_title":"Associate","title":"Assoc","hours":1.6,"rate":275.0,"amount":440.0,"narrative":"Plan strategy for upcoming phase of the vendor agreement with team","codes":["L120","A101"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2025-04-21","timekeeper":"B. Ramanathan","timekeeper_name":"Beatrix Ramanathan","timekeeper_title":"Associate","title":"Assoc","hours":2.5,"rate":440.0,"amount":1100.0,"narrative":"Draft requests for production regarding deficiencies in Northwind Logistics responses","codes":["L350","A103"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2025-04-22","timekeeper":"E. Ashdown","timekeeper_name":"Emeka Ashdown","timekeeper_title":"Legal Assistant","title":"LA","hours":1.1,"rate":115.0,"amount":126.5,"narrative":"Prepare outline for deposition of Meridian Foods witness","codes":["L330","A101"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2025-04-03","timekeeper":"G. Abernathy","timekeeper_name":"Gideon Abernathy","timekeeper_title":"Associate","title":"Assoc","hours":1.4,"rate":325.0,"amount":455.0,"narrative":"Prepare responses and objections to witness list","codes":["L310","A103"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2025-04-16","timekeeper":"L. Kowalczyk","timekeeper_name":"Leila Kowalczyk","timekeeper_title":"Paralegal","title":"Para","hours":0.7,"rate":140.0,"amount":98.0,"narrative":"Research authority for motion for summary judgment","codes":["L250","A102"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2025-04-22","timekeeper":"L. Kowalczyk","timekeeper_name":"Leila Kowalczyk","timekeeper_title":"Paralegal","title":"Para","hours":1.1,"rate":140.0,"amount":154.0,"narrative":"Review documents produced by Tidewater Retail for responsiveness","codes":["L320","A104"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2025-04-11","timekeeper":"S. Santoro","timekeeper_name":"Samuel Santoro","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":1.9,"rate":435.0,"amount":826.5,"narrative":"Draft protective order regarding deficiencies in Redstone Mining responses","codes":["L350","A103"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"fee","date":"2025-04-11","timekeeper":"V. Sandoval","timekeeper_name":"Victor Sandoval","timekeeper_title":"Paralegal","title":"Para","hours":0.2,"rate":175.0,"amount":35.0,"narrative":"Review and analyze witness list received from Solano Freight","codes":["L310","A104"],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"expense","date":"2025-04-01","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":84.86,"amount":84.86,"narrative":"Court filing fee","codes":["E112"],"page":1,"narrative_style":"clear"},
+  {"n":11,"line_type":"expense","date":"2025-04-03","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":4.0,"rate":10.28,"amount":41.12,"narrative":"Postage - certified mail","codes":["E108"],"page":1,"narrative_style":"clear"},
+  {"n":12,"line_type":"expense","date":"2025-04-21","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":38.0,"rate":0.08,"amount":3.04,"narrative":"Photocopies - 38 pages","codes":["E101"],"page":2,"narrative_style":"clear"},
+  {"n":13,"line_type":"expense","date":"2025-04-22","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":3.0,"rate":8.17,"amount":24.51,"narrative":"Postage - certified mail","codes":["E108"],"page":2,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["662 Pine Street","Dallas","Tax ID 61-8000130"],"template":"T16","pages":2},
+ "rule_set_id":"RS-02",
+ "context":{"matter_open":"2024-01-02","matter_close":"2025-07-29","matter_budget":40974.0,"approved_timekeepers":["Hannah Kowalczyk","Gideon Abernathy","Leila Kowalczyk","Aisha Dunleavy","Farah Voss","Beatrix Ramanathan","Samuel Santoro","Victor Sandoval"],"invoice_received_date":"2025-05-16"},
+ "expected_findings":[
+  {"rule_id":"RS-02-R01","rule_type":"ApprovedTimekeeper","scope":"line","line_refs":[4],"consequence":"Reject"},
+  {"rule_id":"RS-02-R02","rule_type":"ApprovedRate","scope":"line","line_refs":[3],"consequence":"Reduce"}
+ ],
+ "seeded_violations":2
+}

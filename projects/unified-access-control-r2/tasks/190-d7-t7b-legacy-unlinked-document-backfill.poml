@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="190" project="unified-access-control-r2">
+  <metadata>
+    <title>D7 T7b: link legacy email documents to their communication by recorded keys only; list the rest for the owner (#2126)</title>
+    <phase>Session 28: UAC (owner round 110, 2026-10-20)</phase>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>A data backfill whose writes change partner visibility; a wrong match would expose.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Data migration with a security consequence; exact-match only.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>New backfill code path; no overlap with 188/189 files.</parallel-reason>
+    <deps>188 merged (the predicate that makes a link matter)</deps>
+    <tags>bff-api, security, dataverse, data-migration, testing</tags>
+    <estimated-effort>1 day</estimated-effort>
+    <origin>
+      notes/2119-manage-access-all-forms-design.md §6.4 "T7b" with the match keys from word-add-in-r1 (910e78a3e).
+    </origin>
+  </metadata>
+
+  <goal>
+Documents saved through the three add-in gap paths before T8 have no communication link, so task 188's rule 3 cannot see them and they stay visible by root grants. Link each one whose source email can be identified by a RECORDED key, and report the rest for the owner's call. No heuristic matching (a wrong match would expose).
+
+Match keys (from code, word-add-in-r1):
+1. .eml rows (sprk_isemailarchive = true): sprk_document.sprk_emailmessageid = sprk_communication.sprk_internetmessageid, exactly one match. Rows saved before task 121 hold the mailbox-specific Exchange item id (OfficeEmailEnricher.ResolveStoredMessageId) and are unmatchable; an email whose capture never created a communication has nothing to link to.
+2. Attachment children: sprk_parentdocument to the parent .eml, then key 1 (pre-121 caveat through sprk_emailparentid). Not through sprk_communicationattachment (the add-in never writes it).
+3. Single attachment saves: the only trace is ProcessingJob sprk_payload Attachment.ParentEmailId. Count them on dev first (read-only); if zero, record that and do not build a matcher.
+  </goal>
+
+  <constraints>
+    - Report-only by default (count, matched, ambiguous, unmatchable, by reason); writing links is a separate explicit mode. Ambiguous (more than one communication) is never linked.
+    - The write goes through the BFF's existing document write path / the job framework (ADR-004 IJobHandler or ADR-036 IScheduledJob, ADR-052); no hand-rolled timer, no plugin. Answer CLAUDE.md §11.
+    - On dev: run report-only and record the counts. Running the write mode on dev waits for the main session's go after the report.
+    - Whether unmatched legacy rows become Restricted is the owner's call: list them (ids and counts only) and raise it; do not set Restricted.
+    - Logs and notes carry ids and counts only; no subjects, addresses or message ids printed.
+  </constraints>
+
+  <acceptance-criteria>
+    <criterion>Exact single match links; zero or several matches never link (tests for each key).</criterion>
+    <criterion>Attachment child links only through a parent .eml that matched by key 1.</criterion>
+    <criterion>Report-only mode writes nothing (test).</criterion>
+    <criterion>Idempotent: a second run links nothing new and reports the same unmatched set.</criterion>
+    <criterion>Dev report recorded in notes/task-190-legacy-backfill.md (counts by reason; key-3 count).</criterion>
+    <criterion>BFF build 0 errors; targeted tests green; full ArchTests green; publish-size delta measured.</criterion>
+  </acceptance-criteria>
+
+  <outputs>
+    - Code and tests on branch uac/190-legacy-backfill (worktree C:/wt190), draft PR to master.
+    - notes/task-190-legacy-backfill.md.
+  </outputs>
+</task>

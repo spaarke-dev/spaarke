@@ -12,7 +12,8 @@
 
 import type { AttachmentInfo } from '@shared/adapters/types';
 import { cleanGuid } from '@spaarke/ui-components/guid';
-import type { EntityType } from '../hooks/useEntitySearch';
+import type { EntitySearchResult, EntityType } from '../hooks/useEntitySearch';
+import type { DocumentIdentityState } from './documentIdentityService';
 import {
   EMAIL_CONTENT_BUDGET_BYTES,
   MAX_ATTACHMENT_BYTES,
@@ -28,6 +29,58 @@ import type {
 /** The core records an invoice is submitted against (owner decision 2026-10-21 item 5; the contract's targetEntity). */
 export type InvoiceCoreRecordType = Extract<EntityType, 'Matter' | 'Project' | 'WorkAssignment'>;
 export const INVOICE_CORE_RECORD_TYPES: InvoiceCoreRecordType[] = ['Matter', 'Project', 'WorkAssignment'];
+
+/**
+ * §6 (ebilling task 192): the one other core record a 409 `document_core_record_mismatch` says the email is filed under.
+ * The server sends it only when the caller can Read that record and it is not secure.
+ */
+export interface InvoiceFiledUnder {
+  entityType: InvoiceCoreRecordType;
+  entityId: string;
+  name: string;
+}
+
+const CORE_TYPE_BY_LOGICAL_NAME: Readonly<Record<string, InvoiceCoreRecordType>> = {
+  sprk_matter: 'Matter',
+  sprk_project: 'Project',
+  sprk_workassignment: 'WorkAssignment',
+};
+
+/**
+ * The core record the open email is filed to, from the pane's email identity (task 120): the same answer the Save tab's
+ * "Filed to" card shows. Null when the email is not saved, its record is unknown, or it is filed to a record that is not
+ * a Matter, Project or Work Assignment. The Invoice view starts on it (`InvoiceViewProps.filedRecord`).
+ */
+export function invoiceFiledRecord(identity: DocumentIdentityState | undefined): EntitySearchResult | null {
+  if (identity === undefined || identity === 'checking' || identity.kind !== 'resolved') return null;
+  const record = identity.relatedRecord;
+  const entityType = record ? CORE_TYPE_BY_LOGICAL_NAME[record.entityType] : undefined;
+  if (!record || !entityType) return null;
+  const name = record.displayName || record.name || record.number || '';
+  return {
+    id: record.id,
+    entityType,
+    logicalName: record.entityType,
+    name,
+    ...(record.number && record.number !== name ? { displayInfo: record.number } : {}),
+  };
+}
+
+const LOGICAL_NAME_BY_CORE_TYPE: Readonly<Record<InvoiceCoreRecordType, string>> = {
+  Matter: 'sprk_matter',
+  Project: 'sprk_project',
+  WorkAssignment: 'sprk_workassignment',
+};
+
+/** The record a refusal's `filedUnder` names, as the core record picker holds it (the view's "Use {name}" switch). */
+export function filedUnderRecord(filedUnder: InvoiceFiledUnder): EntitySearchResult {
+  return {
+    id: filedUnder.entityId,
+    entityType: filedUnder.entityType,
+    logicalName: LOGICAL_NAME_BY_CORE_TYPE[filedUnder.entityType],
+    name: filedUnder.name,
+  };
+}
 
 /** A mark as the contract spells it (exact case). */
 export type InvoiceWireMark = 'Invoice' | 'Supporting' | 'DontSave';
@@ -92,7 +145,8 @@ export interface InvoiceSubmitAttempt {
  */
 export type InvoiceSubmissionOutcome = (
   | { kind: 'success'; message?: string; trackingNumber?: string }
-  | { kind: 'refused'; message: string }
+  /** `filedUnder`: the record the email is filed under (task 192), which the view offers to switch to. */
+  | { kind: 'refused'; message: string; filedUnder?: InvoiceFiledUnder }
   | { kind: 'retryable'; message: string }
   | { kind: 'permanent'; message: string }
   | { kind: 'ended'; status: 'Rejected' | 'Failed'; message: string; trackingNumber?: string }
@@ -111,6 +165,31 @@ export interface InvoiceFirmOption {
 
 /** The firms linked to a core record (contract §8; `invoiceSubmissionService.loadInvoiceFirms`). */
 export type LoadInvoiceFirms = (target: InvoiceSubmissionTarget) => Promise<InvoiceFirmOption[]>;
+
+/**
+ * What a correction of an invoice must keep, and whether it can be made (contract §10, ebilling 097e). A correction is
+ * sent with the invoice's own firm, core record and firm invoice number; `canCorrect` is the intake's own guard.
+ */
+export interface InvoiceCorrectionPrefill {
+  invoiceId: string;
+  firm: { id: string; name: string };
+  coreRecord: InvoiceFiledUnder;
+  /** The lifecycle status name (`InReview`, `SentToAp`, `Superseded`, ...), or null when the server doesn't know it. */
+  invoiceStatus: string | null;
+  trackingNumber: string | null;
+  firmInvoiceNumber: string;
+  canCorrect: boolean;
+  /** Why not, when `canCorrect` is false: `invoice_status`, `no_submission`, `submission_in_progress` (or a newer one). */
+  reason: string | null;
+  /** A Superseded invoice's replacement, when the caller can open it. */
+  replacedBy: { invoiceId: string; name: string } | null;
+}
+
+/**
+ * The correction prefill of an invoice (`invoiceSubmissionService.loadCorrectionPrefill`). Any failure THROWS with a
+ * sentence for the user, as {@link LoadInvoiceFirms} does.
+ */
+export type LoadCorrectionPrefill = (invoiceId: string) => Promise<InvoiceCorrectionPrefill>;
 
 /** The contract's `firmInvoiceNumber` bound: trimmed, 1-100 characters. */
 export const FIRM_INVOICE_NUMBER_MAX = 100;

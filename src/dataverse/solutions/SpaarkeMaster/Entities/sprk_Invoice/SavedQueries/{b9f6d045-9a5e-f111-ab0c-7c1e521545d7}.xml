@@ -12,7 +12,7 @@
         <row name="result" id="sprk_invoiceid">
           <cell name="sprk_invoicenumber" width="180" />
           <cell name="sprk_name" width="250" />
-          <cell name="sprk_invoicestatus" width="120" />
+          <cell name="statuscode" width="120" />
           <cell name="sprk_visibilitystate" width="120" />
           <cell name="sprk_invoicedate" width="125" />
           <cell name="modifiedon" width="125" />
@@ -26,7 +26,7 @@
           <attribute name="sprk_invoiceid" />
           <attribute name="sprk_invoicenumber" />
           <attribute name="sprk_name" />
-          <attribute name="sprk_invoicestatus" />
+          <attribute name="statuscode" />
           <attribute name="sprk_visibilitystate" />
           <attribute name="sprk_invoicedate" />
           <attribute name="modifiedon" />

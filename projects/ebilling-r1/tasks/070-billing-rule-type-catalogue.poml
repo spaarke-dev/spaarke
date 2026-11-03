@@ -1,0 +1,143 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="070" project="ebilling-r1">
+  <metadata>
+    <title>Billing rule-type catalogue: schemas, describer, validation, fail-closed refusal</title>
+    <phase>3 Rules (WP3) — wave W3-1</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Security-class fail-closed guard (MUST "refuse unknown rule types fail-closed in every consumer") in ontology-owned code the nightly Signal job and the describer depend on.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Cross-cutting change to the ontology rule system with judgment calls (domain dispatch, billing gate, nightly-job behaviour) that ontology-r1 must accept; a wrong call fails open silently.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>019, 029, #1111</deps>
+    <tags>bff, rules, security, signals, coordination</tags>
+    <estimated-effort>2-3 days</estimated-effort>
+  </metadata>
+
+  <prompt>Extend the ontology's closed rule system (PR #1111) with the 11 billing rule types of spec FR-24: enum members grouped by domain, one JSON Schema each, describer entries, billing save-time validation in PolicyVersionValidator, a billing evaluation-time gate, and fail-closed refusal in every existing consumer that cannot evaluate a type (PredicateCompiler, the Ontology evaluation gate, the nightly SignalReevaluationJob, the describer). Handlers are 071; consequence eligibility is 073.</prompt>
+
+  <role>SPAARKE platform developer. Expert in the Signals rule grammar, JSON Schema 2020-12 and fail-closed validation design.</role>
+
+  <goal>11 billing RuleType members (values match dev and source), each with a schema, describer entry and save-time validation; billing rows obtainable only through a fail-closed billing gate; Ontology consumers refuse billing bodies; the nightly job skips Billing-domain policies without failing; existing Signals tests green; ontology-r1 review recorded.</goal>
+
+  <context>
+    <background>Spec FR-24, MUST rules, design.md 6, 6.1 (parameters, allowed consequences) and 9, D-23, D-27. Verified extension points (Services/Signals/ unless noted):
+- RuleType.cs:22-37 mirrors the Dataverse local choice sprk_policyversion_sprk_ruletype (Threshold 100000000, Switch 100000001, Existence 100000002; "do not renumber"). SpaarkeMaster Entities/sprk_PolicyVersion/Entity.xml:924-947 has only these; no WP1 task adds billing values.
+- RuleBodySchemaValidator.cs: ResolveSchema switch :355-364, TryParseRuleType :271-301, closed-set message :255. Schemas are embedded by the NON-recursive glob Services\Signals\Schemas\*.json (Sprk.Bff.Api.csproj:259): new schemas sit directly in Schemas/.
+- PolicyVersionValidator.cs: ValidateForSave :138; TryPrepareForEvaluation :162 (Ontology gate, logs PolicyVersionInvalid); ValidateInternal :218-349 (type :228, Switch :235, compile :278, template tokens vs compiled read set :288-334).
+- PredicateCompiler.cs:372-378 RequireCompilable admits only Existence and Threshold.
+- RuleBodyDescriber.cs:106-160 infers the type from the body "type" member (Threshold, else Existence) and calls ValidateForSave.
+- SignalReevaluationJob.cs:645-657 reads EVERY enabled policy (no domain filter); EvaluatePolicyAsync :165-215 throws on a missing lane and calls SignalEvaluator.cs:150. Unchanged, a billing policy is counted as a nightly PolicyFailure every run.
+- DI: Infrastructure/DI/SignalsModule.cs:32-39, :108.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Signals/RuleType.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Signals/RuleBodySchemaValidator.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Signals/PolicyVersionValidator.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Signals/RuleBodyDescriber.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Signals/SignalReevaluationJob.cs</file>
+      <file role="new">src/server/api/Sprk.Bff.Api/Services/Signals/Schemas/billing-{type}.schema.json (11, flat)</file>
+      <file role="new">src/server/api/Sprk.Bff.Api/Services/Signals/Billing/ (domain mapping, parsed definition, fact-field sets, describer phrases)</file>
+      <file role="new">scripts/ebilling/Deploy-EbillingRuleTypeOptions.ps1</file>
+      <file role="modify">src/dataverse/solutions/SpaarkeMaster/Entities/sprk_PolicyVersion/Entity.xml (ruletype options only; see escalation)</file>
+      <file role="modify">tests/unit/domain/Signals/ (validator, compiler, describer, reevaluation-job tests)</file>
+      <file role="new">tests/unit/domain/Signals/Billing/BillingRuleCatalogueTests.cs</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="019" status="pending">Policy store domain, rule set, clause, consequence columns</dependency>
+      <dependency task="029" status="pending">WP1 applied to dev and synced to source</dependency>
+      <dependency task="#1111" status="merged">Ontology rule system at f292ad119</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="task 019 / ontology-r1 review 2026-10-15">Ontology readers must load only ontology policies: filter on an ALLOWLIST, sprk_domain null OR Ontology (100000001), never "!= Billing", so Docketing and future domains stay excluded. Re-grep at your base; at ontology's branch the readers are SignalReevaluationJob.cs:647 (enabled-policies query), SignalReevaluationJob.cs:152 (retrieve by id: a job triggered with a non-Ontology policy id is refused), PolicyScopeResolver.LoadEnabledPoliciesAsync (evaluator and communications gate: a Billing rule must never gate a communication) and SignalClosureService.cs:153 (policies-not-in-force query, kept consistent). Also filter the Ontology admin tab (D-22 in ontology's log) that lists sprk_policy rows to the same allowlist, so Ontology Administrators do not see or edit billing rows. This is ontology-r1 code: send the PR to ontology-r1 for review and tell them before opening it which branch it targets (their branch docs/ontology-platform-design touches SignalSuppressionService / DecisionRecordWriter). A billing sprk_policyversion still fills the required sprk_proposedaction and a valid sprk_lane; billing sprk_policycode values carry a BILL- prefix; the domain of a policy is set at create by the billing write path and never changed by it.</constraint>
+    <constraint source="spec FR-24, D-27">Closed set in code (enum plus exhaustive switches). No data-driven registry, no reflection discovery, no expression language.</constraint>
+    <constraint source="spec MUST">A consumer that cannot evaluate a type refuses it: never compiles it, never treats it as true, never describes it as another type.</constraint>
+    <constraint source="project">Ontology types and their validation, compilation and template read-set rule unchanged (existing tests unmodified).</constraint>
+    <constraint source="project">Single path: PredicateCompiler.Compile* only via PolicyVersionValidator (tests/Spaarke.ArchTests/PredicateCompilerCallerGuardTests.cs green); the billing gate is the only way to obtain a parsed billing rule.</constraint>
+    <constraint source="design.md 4">Bodies hold parameters only, never copied rates, timekeepers or codes. Consequence is the 019 column, not body content.</constraint>
+    <constraint source=".claude/constraints/bff-extensions.md">BFF hygiene: publish-size delta vs a fresh master build, no new HIGH CVE, no package.</constraint>
+    <constraint source="project CLAUDE.md 4">Ontology-owned files: ontology-r1 review recorded in notes before merge.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ebilling-r1/design.md (6, 6.1, 9)</file>
+      <file>projects/spaarke-ontology-platform-r1/tasks/022-rule-body-validation-refusal.poml</file>
+      <file>projects/spaarke-ontology-platform-r1/tasks/061-do-lane-temporal-policies.poml</file>
+      <file>tests/unit/domain/Signals/NullTestGrammarTests.cs (task 061 refusal pattern)</file>
+      <file>.claude/skills/dataverse-create-schema/SKILL.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+    <patterns>
+      <pattern name="Schema per type" location="src/server/api/Sprk.Bff.Api/Services/Signals/Schemas/threshold-rule.schema.json">type const, additionalProperties false, closed enums; refusal-reason tests at tests/unit/domain/Signals/PolicyVersionValidatorTests.cs:569-612.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Step-0 check: git merge-base --is-ancestor f292ad119 HEAD (else merge origin/master). Confirm 019's domain columns in dev metadata; check whether billing ruletype values already exist.</step>
+    <step order="1">Add the 11 members in FR-24 order (option values 100000003 to 100000013 unless 019 created others) and a code-only domain mapping (Ontology, Billing).</step>
+    <step order="2">Deploy-EbillingRuleTypeOptions.ps1: idempotent option insert with labels, -WhatIf first, run on dev, verify by metadata read. Solution-source edit only after the escalation is answered.</step>
+    <step order="3">One schema per type from design 6.1 parameters (increment, cap, tolerance, code list, days, grace days, match fields, field list, observation kind plus threshold); extend ResolveSchema and closed-set messages.</step>
+    <step order="4">PolicyVersionValidator: Billing types in ValidateForSave get length cap, schema and billing checks (no compile); template tokens limited to a static per-type fact-field set defined here. TryPrepareForEvaluation refuses non-Ontology types first as rule_type_unsupported. Add a billing gate mirroring TryPrepareForEvaluation (parsed definition or log, meter, false; never throws for content).</step>
+    <step order="5">SignalReevaluationJob: skip Billing-domain policies when reading (not a failure); a billing-typed version on a non-Billing policy is refused and counted. Check PolicyScopeResolver and SignalEvaluationTriggerHandler for the same gap.</step>
+    <step order="6">RuleBodyDescriber: recognise every closed type name; deterministic billing entries; an unrecognised "type" is a refusal, not the Existence fallback.</step>
+    <step order="7">Tests per type and per consumer (see acceptance criteria). Seeding proof for each fail-closed guard (compiler, Ontology gate, billing gate, describer, nightly job): remove the guard, show the named test fails, restore; record in notes.</step>
+    <step order="8">dotnet build and dotnet test green; publish-size delta and vulnerable-package check recorded; ontology-r1 review requested and recorded.</step>
+    <step order="9">Update TASK-INDEX.md: this task's status cell to "✅ [done]".</step>
+    <step order="10">Record deviations (option values, file names, solution-source path) in projects/ebilling-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the RuleType set cannot take a billing domain without changing Ontology semantics (renumbering, altering Existence / Threshold / Switch, the template read-set rule, or nightly behaviour for Ontology policies), STOP and escalate per root CLAUDE.md 6.5; do not bend the Ontology path.</trigger>
+    <trigger>Before editing SpaarkeMaster Entity.xml (the brief reserves solution source to 029, 015, 026): STOP and ask — (a) 070 edits only the ruletype option set, after 029, like 015 / 026 (recommended), or (b) hand the values to a 029 re-sync.</trigger>
+    <trigger>If 019's domain column is missing or collides with an ontology column, STOP and report.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>RuleType.cs, RuleBodySchemaValidator.cs, PolicyVersionValidator.cs, RuleBodyDescriber.cs (#1111); spec 11 row "InvoiceComplianceEvaluator + billing rule handlers".</existing>
+    <extension>Yes — extends the existing closed set, validator and describer (D-23). New files are only schemas, the domain mapping and the billing gate, which have no existing home.</extension>
+    <cost-of-doing-nothing>Billing rules cannot be saved or published (ValidateForSave refuses unknown types), and a billing row in the shared store is compiled or counted as a nightly failure by the Ontology job.</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="dotnet">build, test</tool>
+    <tool name="pwsh">dev option-set script</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Signals/ and Services/Signals/Billing/, Schemas/billing-*.schema.json</output>
+    <output type="script">scripts/ebilling/Deploy-EbillingRuleTypeOptions.ps1</output>
+    <output type="test">tests/unit/domain/Signals/ and tests/unit/domain/Signals/Billing/</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Per the ontology-r1 review: an enabled sprk_policy with sprk_domain = Billing is neither evaluated nor counted as invalid by the Signals passes (SignalReevaluationJob enabled query and retrieve-by-id, PolicyScopeResolver.LoadEnabledPoliciesAsync, SignalClosureService) and is absent from the Ontology admin tab; an Ontology policy with null domain still is evaluated (two seeded tests minimum).</criterion>
+    <criterion testable="true">RuleType has 14 members; a test pins each billing name to its option value and domain both ways; values match dev metadata.</criterion>
+    <criterion testable="true">Per billing type: a valid body passes ValidateForSave; missing parameter, extra property, wrong "type" const, out-of-range value, messageTemplate or "then" property are refused with a field-level error.</criterion>
+    <criterion testable="true">Unknown, blank, comma-combined or signed-numeric types are refused as rule_type_unsupported (existing tests unmodified, green).</criterion>
+    <criterion testable="true">Every billing body is refused by PredicateCompiler.Compile (PredicateCompilationException) and by TryPrepareForEvaluation (false, rule_type_unsupported); seeding proof recorded.</criterion>
+    <criterion testable="true">The billing gate returns a definition only for a valid billing row; it refuses Ontology, unknown, invalid and oversized rows and never throws for content; seeding proof recorded.</criterion>
+    <criterion testable="true">The nightly job neither evaluates nor fails on a Billing-domain policy; a billing-typed version on a non-Billing policy is refused and counted as a failure.</criterion>
+    <criterion testable="true">The describer describes each billing type and refuses an unrecognised type; Existence and Threshold output unchanged.</criterion>
+    <criterion testable="true">Grep finds no configuration or Dataverse read defining rule types; PredicateCompilerCallerGuardTests green; dotnet build 0 errors.</criterion>
+    <criterion testable="true">Publish-size delta measured against a fresh master build and recorded in task notes; no new HIGH CVE.</criterion>
+    <criterion testable="true">ontology-r1 review recorded in task notes.</criterion>
+    <criterion testable="true">Cover the stated contract plus the edge cases named above. Anything beyond that needs a one-line justification in task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>071 consumes the parsed definitions and fact-field sets; 073 adds consequence checks to the billing save path and gate; 076 publish calls ValidateForSave. With values 100000003 onward in FR-24 order, catalogue position N (FR-26 "1, 2, 6-10") equals option value 100000002 plus N; pin it in a test.
+
+Completed 2026-10-16 (details: projects/ebilling-r1/notes/070-billing-rule-type-catalogue.md). 11 billing members 100000003-100000013 in FR-24 order, applied to dev by scripts/ebilling/Deploy-EbillingRuleTypeOptions.ps1 (WhatIf, run, idempotent re-run, verified by metadata read). Billing gate PolicyVersionValidator.TryPrepareBillingRule (ArchTest-guarded); Ontology gate, compiler and describer refuse billing / unknown types; Signals readers use the sprk_domain allowlist in the query and per row. Seeding proof recorded for all 9 guards. Publish delta vs fresh master +0.147 MB (37.303 MB). RESOLVED (commit 0ee94c3f6): Entity.xml escalation answered, option (a), solution source now lists all 14 ruletype options. OPEN: (1) ontology-r1 review not yet recorded; (2) adversarial-reviewer not run (subagent cap full). Deviation: RuleDomain.cs sits in Services/Signals/, not Billing/. D-89: no conflict (eligibility is 073's; D-89 holds type 1 via the confidence cap). Two existing closed-set pins now pin the Ontology domain only.
+Fix-round-1 2026-10-16: billing gate meters its own billing.rule.invalid (not ontology.policy.invalid); TryPrepareForEvaluation logs and meters a valid-but-uncompiled result as internal_error; ValidateForSave takes an optional expected RuleDomain (rule_type_wrong_domain); retrieve-by-id column set asserted; RuleType enum equals the Entity.xml option set (test); stale comments fixed; known limits K1-K3 in the notes.
+Fix-round-2 2026-10-17 (ontology-r1 paired change, commit 27ca05e0f): the Ontology admin's shared ValidateRule maps RuleTypeWrongDomain to field ruleType with reasonCode rule_type_wrong_domain on validate, dry run, save and publish (nothing evaluated or written); OntologyAdminAuthoringService / OntologyAdminRulesService take the sprk_domain column and Ontology value from RuleDomains. rework: fix-round-2 task 070</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load the knowledge files first. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

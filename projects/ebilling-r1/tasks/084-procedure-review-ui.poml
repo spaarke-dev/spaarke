@@ -1,0 +1,147 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="084" project="ebilling-r1">
+  <metadata>
+    <title>Procedures and rules-in-force on the record: back-end read models of 6.6 now; UI after the prototype (O-14)</title>
+    <phase>3 Rules (WP3) — Procedure model (EB-D-148), wave W3-E</phase>
+    <gate>Part A (back end): 081, 089 and 082 merged. Part B (UI): BLOCKED until the owner's Procedure prototype exists (O-14: UI/UX is prototyped separately) and its path is recorded in this task's notes; do not start Part B before then.</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>New BFF routes exposing internal-only Procedure and override content (step 0, caller reads) plus a frontend change.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Read models built on 082's resolver with routes copied from 081's endpoints; the UI follows a prototype and an existing list component.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P3-E</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>081, 089, 082</deps>
+    <tags>bff, api, frontend, fluent-ui, rules, testing</tags>
+    <estimated-effort>Part A 1-2 days; Part B per prototype</estimated-effort>
+  </metadata>
+
+  <prompt>Part A: expose the two lists of notes/procedure-and-file-model.md section 6.6 for a core record as caller-read BFF routes built from 082's ProcedureResolver: the Procedures the record is subject to, and the rules in force for a chosen date and firm. Part B (blocked on O-14): show them on the record as the prototype specifies.</prompt>
+
+  <role>SPAARKE platform developer. Expert in ASP.NET Core Minimal APIs, the Finance authorization filter, and React code pages with Fluent UI v9 and @spaarke/ui-components.</role>
+
+  <goal>Part A: an internal caller with Read on a record sees every Procedure it is subject to (source, inheritance, version in force today, overrides) and every rule in force with its marks, computed by the evaluation's own resolver; a flagged-external caller, or one who cannot read the record, sees nothing. Part B: the same data on the record, matching the prototype.</goal>
+
+  <context>
+    <background>Model 6.6 (two read models, read as the caller, routes in the RouteAuthorizationGuardTests ledger, step 0), 6.1-6.5 (sources, overrides, inheritance), 6.3 (stale and base retired computed, never stamped), 3.2 (sprk_billingfirm sets the default firm). 082 provides ProcedureResolver and CoreRecordChain; 081 and 089 provide ProcedureEndpoints.cs and ProcedureAssignmentEndpoints.cs (route and filter shape to copy). Visual anchor for Part B: src/solutions/RuleReview/src/components/RuleSetListView.tsx (list layout, tokens) and StatusBadge (src/client/shared/Spaarke.UI.Components/src/components/StatusBadge/StatusBadge.tsx) for the marks.</background>
+    <relevant-files>
+      <file role="new">src/server/api/Sprk.Bff.Api/Services/Finance/Procedures/RecordProcedureReadService.cs</file>
+      <file role="new">src/server/api/Sprk.Bff.Api/Api/Finance/RecordProcedureEndpoints.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/DI/FinanceModule.cs, EndpointMappingExtensions.cs (shared append points); tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.Ledger.cs</file>
+      <file role="new">tests/unit/Sprk.Bff.Api.Tests/Services/Finance/Procedures/RecordProcedureReadServiceTests.cs; tests/unit/Sprk.Bff.Api.Tests/Api/Finance/RecordProcedureEndpointsTests.cs</file>
+      <file role="new">Part B: files named by the prototype; record them in notes before starting</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="model 6.6, 5.3 (uac-r2 C5)">Both routes carry 099's step-0 flag. The core record type is fixed per route from the core-record list (matter, project, work assignment), the id comes from the route, and the caller's Read on it is checked through the Record path with FinanceDenial.UniformNotFound (unknown and unreadable answer the same 404).</constraint>
+    <constraint source="model 6.6 (read as the caller)">The resolver's row reads run with the caller's identity, not app-only. If any row the lists need is refused to the caller or the read faults, the route answers 503 ProblemDetails procedures.unavailable and shows no partial list; it never fills the gap app-only.</constraint>
+    <constraint source="model 6.6, 3.2">Procedures list: firm = the query's firmId, else the record's sprk_billingfirm, else none (then only Procedures with no Firm). Per Procedure: name, type, source (All records, Firm, Manual d0, Manual d1 with the parent's type), the version in force today (number and dates) or "no version in force", and the overrides on the chain (mode, pinned version, reason, distance).</constraint>
+    <constraint source="model 6.6, 6.3">Rules in force: for the query's date (default today) and firm, every rule with its source Procedure Version, marked displaced, excluded, changed (record rule), stale (based on ≠ the base rule's current version) or base retired. Marks are computed at read time; nothing is written.</constraint>
+    <constraint source="ADR-001, ADR-008, ADR-019, .claude/constraints/bff-extensions.md">Own endpoints file; ProblemDetails with stable codes; ledger GovernedFile entry with each route's basis; no new package; publish-size delta recorded.</constraint>
+    <constraint source="O-14, ADR-021, ADR-012">Part B only after the prototype: Fluent v9 semantic tokens, shared components first (StatusBadge for the marks; RuleSetListView's list pattern), no new npm package; npm install --legacy-peer-deps --no-audit --no-fund. Part B never writes Dataverse through Xrm.WebApi; overrides are made through 089's routes.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ebilling-r1/notes/procedure-and-file-model.md (sections 6, 3.2)</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>.claude/patterns/api/endpoint-filters.md</file>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/patterns/pcf/theme-management.md</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+      <file>docs/guides/PCF-DEPLOYMENT-GUIDE.md</file>
+      <file>.claude/skills/fluent-v9-component/SKILL.md</file>
+      <file>.claude/skills/ui-test/SKILL.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+    <patterns>
+      <pattern name="List page layout" location="src/solutions/RuleReview/src/components/RuleSetListView.tsx">Column list and token use to mirror in Part B.</pattern>
+      <pattern name="Status marks" location="src/client/shared/Spaarke.UI.Components/src/components/StatusBadge/StatusBadge.tsx">One badge per mark (displaced, excluded, changed, stale, base retired).</pattern>
+      <pattern name="Caller-checked record route" location="src/server/api/Sprk.Bff.Api/Api/Finance/ProcedureAssignmentEndpoints.cs (089)">Step-0 flag, Record path, uniform 404.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Part A: RecordProcedureReadService over ProcedureResolver with a caller-identity row source; the two routes; ledger entry.</step>
+    <step order="2">Part A tests (criteria); dotnet build and test; publish-size delta.</step>
+    <step order="3">Part A done: mark Part A complete in notes; leave the task 🔄 [wip] in TASK-INDEX.md until Part B.</step>
+    <step order="4">Part B (after the prototype): record the prototype path and target surface in notes; build it; npm run build; run the ui-tests.</step>
+    <step order="5">Update TASK-INDEX.md: this task's status cell to "✅ [done]" after Part B.</step>
+    <step order="6">Record deviations in projects/ebilling-r1/notes/084-procedure-review-ui.md.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the prototype is not available when Part A is done, STOP after Part A and report; do not design the UI.</trigger>
+    <trigger>If caller-identity reads make the lists unavailable for most records (for example a d1 parent the caller cannot read is common), STOP and raise 🔔 Human Input Required; do not switch to app-only reads.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>No route lists a record's Procedures or rules in force; RuleSetEndpoints lists rule sets for billing admins without a record; ProcedureResolver (082) computes the same sources for evaluation.</existing>
+    <extension>The read service is a thin caller-identity wrapper over 082's resolver (no second selection); a new endpoints file because the routes are keyed by core record, not by Procedure.</extension>
+    <cost-of-doing-nothing>O-3 and O-9 fail: the rules that apply to a record are not visible or reviewable, so an override cannot be checked before an invoice is judged.</cost-of-doing-nothing>
+  </justification>
+
+  <ui-tests>
+    <test name="Procedures list">
+      <url>https://{org}.crm.dynamics.com/main.aspx?appid={app-id}&amp;pagetype=entityrecord&amp;etn=sprk_matter&amp;id={matter-id}</url>
+      <steps>
+        <step>Open a matter with sprk_billingfirm set and one manual assignment pinned to an older version</step>
+        <step>Open the Procedures list on the record (surface per the prototype)</step>
+      </steps>
+      <expected>The firm's and all-records Procedures and the manual one are listed with their source; the pinned one shows its pinned version; no console errors</expected>
+    </test>
+    <test name="Rules in force marks">
+      <steps>
+        <step>Pick a date and the firm; view rules in force on a record with an excluded rule and a changed rule</step>
+      </steps>
+      <expected>The excluded rule shows an Excluded badge, the record rule a Changed badge, and a record rule whose base has a newer version a Stale badge</expected>
+    </test>
+    <test name="No access">
+      <steps>
+        <step>Sign in as a user without Read on the record and open the same view</step>
+      </steps>
+      <expected>The view shows the same not-available message as for a missing record; no Procedure data appears</expected>
+    </test>
+    <test name="Dark Mode Compliance (ADR-021)">
+      <steps>
+        <step>Switch to dark theme; repeat the first two tests</step>
+      </steps>
+      <expected>All colours from Fluent v9 semantic tokens; badges and text legible</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="dotnet">build, test</tool>
+    <tool name="npm">install, build, test (Part B)</tool>
+    <tool name="ui-test">browser checks (Part B)</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">RecordProcedureReadService.cs, RecordProcedureEndpoints.cs; Part B files per prototype</output>
+    <output type="test">RecordProcedureReadServiceTests.cs, RecordProcedureEndpointsTests.cs, ledger; Part B tests</output>
+    <output type="docs">projects/ebilling-r1/notes/084-procedure-review-ui.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Both routes refuse a flagged-external caller, no systemuser row and a flag-read fault (negative); a caller without Read on the record gets a 404 byte-identical to a non-existent record.</criterion>
+    <criterion testable="true">Procedures list: with sprk_billingfirm = F it lists F's Procedures, all-records Procedures and manual ones on the chain, each with its source and today's version; with firmId = G it lists G's instead of F's; a Procedure naming firm F assigned manually is absent for firm G (firm condition); an Exclude on the record removes it.</criterion>
+    <criterion testable="true">Rules in force: the list equals 082's resolver output for the same record, date and firm (one shared resolution, asserted by a test), with displaced, excluded, changed, stale and base-retired marks each covered by one test.</criterion>
+    <criterion testable="true">A row read refused to the caller, or a faulted read, returns 503 procedures.unavailable with no list (negative: never a partial list, never an app-only read).</criterion>
+    <criterion testable="true">Nothing is written by either route (no Dataverse create or update in the tests).</criterion>
+    <criterion testable="true">Ledger entry added; publish-size delta recorded; no package; no new HIGH CVE.</criterion>
+    <criterion testable="true">Part B: the ui-tests above pass, including dark mode; npm run build succeeds with no new package.</criterion>
+    <criterion testable="true">Cover the stated contract plus the edge cases named above. Anything beyond that needs a one-line justification in task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>The superseded 084 (rule-set scope, record and business-unit pickers) is dropped with the BU filter and record-scoped rule-set assignment (O-12, EB-D-148). Deployment of Part B is 079's or a later deploy task's. P3-E beside 083 and 085: no shared files except the shared append points. spaarke-prototype 2026-10-21: the UI prototype (O-14) is not started; it starts when the owner asks. Answer questions a-g (and h where the read is 084's) from notes/084-prototype-questions.md in this task's DTO notes, and send the notes path to spaarke-prototype.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load the knowledge files first. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

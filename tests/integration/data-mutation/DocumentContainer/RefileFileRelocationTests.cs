@@ -329,12 +329,10 @@ public class RefileFileRelocationTests
     // #2151 — declared home containers of unfiled documents
     // ═════════════════════════════════════════════════════════════════════════════════════════════════════════════
 
-    [Theory(DisplayName = "#2151: an unfiled document the BFF placed in a declared home is served by the strict rule and stays put")]
-    [InlineData(ProcedureLibraryKey)]
-    [InlineData(EbillingOutputKey)]
-    public async Task DeclaredHome_UnfiledAndBound_IsServedUnderStrict_AndNotMoved(string key)
+    [Fact(DisplayName = "#2151: an unfiled document the BFF placed in a declared home is served by the strict rule and stays put")]
+    public async Task DeclaredHome_UnfiledAndBound_IsServedUnderStrict_AndNotMoved()
     {
-        var world = Env(strict: true, homeKey: key);
+        var world = Env(strict: true, homeKey: ProcedureLibraryKey);
         world.Rows[("sprk_document", T.DocumentId)] = Doc(T.DocumentId, null, ProcedureLibrary);
         var rig = new T.Rig(world);
 
@@ -406,6 +404,18 @@ public class RefileFileRelocationTests
         RecordContainerResolver.DeclaredUnfiledHomesFrom(blank).Should().BeEmpty();
         RecordContainerResolver.DeclaredUnfiledHomesFrom(null).Should().BeEmpty();
         RecordContainerResolver.DeclaredUnfiledHomesFrom(one).Should().Equal(ProcedureLibrary);
+    }
+
+    [Fact(DisplayName = "092 must-not-fire: the retired Finance:EbillingOutputContainerId declares no home, even when it still holds a value")]
+    public void DeclaredHomes_TheRetiredOutputKeyDeclaresNothing()
+    {
+        var retired = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            [EbillingOutputKey] = "b!ebilling-output-files",
+        }).Build();
+
+        RecordContainerResolver.DeclaredUnfiledHomesFrom(retired).Should().BeEmpty();
+        RecordContainerResolver.DeclaredUnfiledHomeContainerKeys.Should().Equal(ProcedureLibraryKey);
     }
 
     [Fact(DisplayName = "#2151: with no home configured (master today) an unfiled document's derivation is unchanged")]

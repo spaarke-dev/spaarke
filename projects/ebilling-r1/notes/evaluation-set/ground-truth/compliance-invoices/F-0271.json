@@ -1,0 +1,31 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0271",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0271","generator_id":"gen_eval_set.py@1 F-0271","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0271.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-01"},
+ "header":{"firm":"Holloway & Whitcombe LLP","firm_invoice_number":"INV-2026-25377","invoice_date":"2025-10-01","billing_period_start":"2025-09-01","billing_period_end":"2025-09-30","firm_matter_reference":"47921-0006","po_number":null,"fees_total":4751.5,"expenses_total":115.36,"adjustments_total":0.0,"total_due":4866.86,"currency":"USD"},
+ "timekeepers":[{"name":"Dmitri Thornbury","title":"Legal Assistant","rate":170.0,"billed_as":"DT"},{"name":"Katya Carmichael","title":"Associate","rate":390.0,"billed_as":"KC"},{"name":"Katya Galbraith","title":"Associate","rate":370.0,"billed_as":"KG"},{"name":"Katya Kowalczyk","title":"Paralegal","rate":225.0,"billed_as":"KK"},{"name":"Leila Lockhart","title":"Senior Associate","rate":485.0,"billed_as":"LL"},{"name":"Mei Kowalczyk","title":"Associate","rate":385.0,"billed_as":"MK"},{"name":"Peter Voss","title":"Partner","rate":705.0,"billed_as":"PV"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2025-09-03","timekeeper":"PV","timekeeper_name":"Peter Voss","timekeeper_title":"Partner","title":"Ptr","hours":0.2,"rate":705.0,"amount":141.0,"narrative":"Attend and present oral argument in the data incident","codes":["L530","A109"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2025-09-04","timekeeper":"KG","timekeeper_name":"Katya Galbraith","timekeeper_title":"Associate","title":"Assoc","hours":2.2,"rate":370.0,"amount":814.0,"narrative":"Attention to file.","codes":["L120","A104"],"page":1,"narrative_style":"vague"},
+  {"n":3,"line_type":"fee","date":"2025-09-17","timekeeper":"LL","timekeeper_name":"Leila Lockhart","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":2.3,"rate":485.0,"amount":1115.5,"narrative":"Attend and present oral argument in the lease dispute","codes":["L530","A109"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2025-09-17","timekeeper":"KK","timekeeper_name":"Katya Kowalczyk","timekeeper_title":"Paralegal","title":"Para","hours":2.4,"rate":225.0,"amount":540.0,"narrative":"Prepare case assessment memorandum regarding the regulatory inquiry and recommended strategy","codes":["L120","A103"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2025-09-23","timekeeper":"MK","timekeeper_name":"Mei Kowalczyk","timekeeper_title":"Associate","title":"Assoc","hours":1.4,"rate":385.0,"amount":539.0,"narrative":"Prepare for oral argument in the vendor agreement","codes":["L530","A101"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2025-09-30","timekeeper":"DT","timekeeper_name":"Dmitri Thornbury","timekeeper_title":"Legal Assistant","title":"LA","hours":1.5,"rate":170.0,"amount":255.0,"narrative":"Prepare case assessment memorandum regarding the licensing dispute and recommended strategy","codes":["L120","A103"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2025-09-30","timekeeper":"KC","timekeeper_name":"Katya Carmichael","timekeeper_title":"Associate","title":"Assoc","hours":2.8,"rate":390.0,"amount":1092.0,"narrative":"Prepare monthly status report to client regarding the supply agreement","codes":["L190","A111"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2025-09-30","timekeeper":"DT","timekeeper_name":"Dmitri Thornbury","timekeeper_title":"Legal Assistant","title":"LA","hours":1.5,"rate":170.0,"amount":255.0,"narrative":"Prepare case assessment memorandum regarding the licensing dispute and recommended strategy","codes":["L120","A103"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"expense","date":"2025-09-01","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":2.0,"rate":9.85,"amount":19.7,"narrative":"Postage - certified mail","codes":["E108"],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"expense","date":"2025-09-30","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":2.0,"rate":42.88,"amount":85.76,"narrative":"Overnight courier to Summit Ridge Homes counsel","codes":["E107"],"page":1,"narrative_style":"clear"},
+  {"n":11,"line_type":"expense","date":"2025-09-30","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":15.0,"rate":0.66,"amount":9.9,"narrative":"Mileage to courthouse","codes":["E109"],"page":1,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["421 Federal Plaza","Atlanta","Tax ID 23-8665056"],"template":"T15","pages":2},
+ "rule_set_id":"RS-01",
+ "context":{"matter_open":"2024-05-03","matter_close":"2025-12-29","matter_budget":44467.0,"approved_timekeepers":["Katya Carmichael","Katya Galbraith","Peter Voss","Leila Lockhart","Dmitri Thornbury","Mei Kowalczyk","Mei Rosenthal","Katya Kowalczyk"],"invoice_received_date":"2025-10-13"},
+ "expected_findings":[
+  {"rule_id":"RS-01-R02","rule_type":"AiObservation","scope":"line","line_refs":[2],"consequence":"Flag"},
+  {"rule_id":"RS-01-R07","rule_type":"Duplicate","scope":"line","line_refs":[8],"consequence":"Disallow","related_line_refs":[6]},
+  {"rule_id":"RS-01-R08","rule_type":"RequiredData","scope":"invoice","line_refs":[],"consequence":"Reject"}
+ ],
+ "seeded_violations":3
+}

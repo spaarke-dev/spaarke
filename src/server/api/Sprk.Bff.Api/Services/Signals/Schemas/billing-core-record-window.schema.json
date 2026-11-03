@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://spaarke.com/schemas/billing/billing-core-record-window.schema.json",
+  "title": "CoreRecordWindow billing rule body",
+  "description": "sprk_policyversion.sprk_rulebody shape for sprk_ruletype = CoreRecordWindow (ebilling-r1 task 070; spec FR-24, design.md 6.1). 8. Judged by the core record's billing status (sprk_billingstatus, D-116), with the grace days on each date; credit lines are never flagged. Open: a line dated before the open date is flagged; the close date and closed state are ignored. Final: also a line dated after the close date is flagged (work dated on or before it and billed later is not); with no close date, every charge line (credits excluded) is flagged. Closed: every charge line (credits excluded) is flagged as closed to billing. No billing status (D-111): a line dated before the open date or after the close date is flagged, and a closed core record with no close date flags every charge line (credits excluded). The dates are the core record's, never copied here. Parameters only: no rates, timekeepers or code descriptions, and no consequence (that is the sprk_consequence column). additionalProperties=false: any other member is refused, not ignored. 'messageTemplate' (anywhere) and 'then' are refused by RuleBodySchemaValidator before this schema runs.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["type", "graceDays"],
+  "properties": {
+    "type": {
+      "const": "CoreRecordWindow"
+    },
+    "graceDays": {
+      "description": "Days allowed outside the window, 0-365.",
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 365
+    }
+  }
+}

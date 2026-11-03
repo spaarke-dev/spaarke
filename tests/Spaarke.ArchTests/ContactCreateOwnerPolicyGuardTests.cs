@@ -757,7 +757,8 @@ public class ContactCreateOwnerPolicyGuardTests
             BffRoot + "Services/Ai/Handlers/DataverseCreateRecordHandler.cs",
             "tablename",
             "Chat dataverse.create_record with tablename=contact: the table is a RUNTIME tool argument, so no source text names it. "
-            + "App-only, owned by the caller's business-unit team via the general record-first resolver (OwnedChildWrite), and "
+            + "App-only, owned by the caller's business-unit team via the general record-first resolver (RecordCreationService "
+            + "since field-mapping task 017), and "
             + "it does NOT use ExternalAccess:CustomerBusinessUnitId: it is not an identity-contact create."),
     };
 

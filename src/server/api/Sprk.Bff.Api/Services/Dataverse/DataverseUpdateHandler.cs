@@ -1,5 +1,6 @@
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Services.Ai;
+using Sprk.Bff.Api.Services.RecordCreation;
 
 namespace Sprk.Bff.Api.Services.Dataverse;
 
@@ -66,6 +67,23 @@ public class DataverseUpdateHandler : IDataverseUpdateHandler
         CancellationToken ct,
         Guid? impersonateSystemUserId = null)
     {
+        // Task 039 (FR-38): on a search-indexed table both index columns are the SERVER's (step 8 of the create writes them from
+        // the owning business unit). A playbook output mapping that names either has it dropped — never refused, and not written —
+        // so the row's index stays as it is. Dropped from a copy: the caller's dictionary is not changed.
+        if (RecordTableRules.OwnsSearchIndex(entityLogicalName)
+            && fields.Keys.Any(k => RecordTableRules.SearchIndexColumnOf(k) is not null))
+        {
+            fields = new Dictionary<string, object?>(fields, fields.Comparer);
+        }
+
+        // Round 2 (S5): nothing left to write means no write is asked of Dataverse (not even an empty one) and none of the reads
+        // or after-write steps run; a mapping that was empty before the drop is not affected (DropSearchIndexFromUpdate).
+        if (RecordTableRules.DropSearchIndexFromUpdate(
+                entityLogicalName, recordId, fields, RecordTableRules.SearchIndexOriginMapping, _logger).Emptied)
+        {
+            return;
+        }
+
         // unified-access-control-r2 task 189 fix round C (K5): this handler writes a playbook's output mapping (the output
         // orchestrator; app-only for a System run, as the runner for a person's run since #2257), so it never writes a document's Access Permission or its own-narrowing record; only the
         // document rule's writers do. Refused before anything is read or written. Task 188 round 4e: nor its D7 link columns
@@ -80,6 +98,18 @@ public class DataverseUpdateHandler : IDataverseUpdateHandler
                 entityLogicalName, fields.Keys, InheritedAccessPermission.WriteIdentity.AppOnly) is { } documentRefusal)
         {
             throw new RecordOwnerUnresolvedException(entityLogicalName, documentRefusal);
+        }
+
+        // ebilling-r1 DEF-022 (#2056): an invoice or invoice line names exactly one core record, a line regards its invoice's,
+        // and an invoice re-file keeps its lines (D-96). Decided on the stored lookups overlaid with this write, before it.
+        // #2257 (master merge): a person's write answers "not found" as "could not be read" (the guard reads as the app).
+        if (await InvoiceFamilyCoreRecordGuard.CheckGenericUpdateAsync(
+                    entityLogicalName, recordId, fields, _genericEntityService, ct,
+                    writeIsImpersonated: impersonateSystemUserId is not null)
+                .ConfigureAwait(false) is { RefusalCode: { } familyCode })
+        {
+            // Code only: the guard read as the app, so its reason can name records the caller has not read.
+            throw InvoiceFamilyCoreRecordGuard.RefusalException(entityLogicalName, familyCode);
         }
 
         // Task 158 (owner round 6): a work assignment or project filed under a secure matter or project is secured. Whether
@@ -190,13 +220,37 @@ public class DataverseUpdateHandler : IDataverseUpdateHandler
         else
         {
             // Simple update - last write wins
-            await _fieldMappingService.UpdateRecordFieldsAsync(
-                entityLogicalName, recordId, fields, ct, impersonateSystemUserId);
+            await PatchAsync(entityLogicalName, recordId, fields, ct, impersonateSystemUserId);
 
             _logger.LogInformation(
                 "Updated {EntityType} {RecordId} with {FieldCount} fields (no concurrency control)",
                 entityLogicalName, recordId, fields.Count);
         }
+    }
+
+    /// <summary>
+    /// The write. An invoice or line is written UPDATE-ONLY (If-Match: *): the guard at the top of <see cref="UpdateAsync"/>
+    /// checked that the row exists, and a row deleted since must not be re-created by the upsert (ebilling-r1 #2081). It is
+    /// refused like the guard, nothing created. #2257 (master merge): every write runs as <paramref name="impersonateSystemUserId"/>
+    /// when the run has one (a person's run writes AS that person) and app-only otherwise; a person's "not found" is answered as
+    /// "could not be read", so it never tells them whether the id names a row they cannot read.
+    /// </summary>
+    private async Task PatchAsync(
+        string entityLogicalName, Guid recordId, Dictionary<string, object?> fields, CancellationToken ct, Guid? impersonateSystemUserId)
+    {
+        if (InvoiceFamilyCoreRecordGuard.IsUpdateOnlyTarget(entityLogicalName))
+        {
+            if (await InvoiceFamilyCoreRecordGuard.UpdateExistingAsync(
+                    _fieldMappingService, entityLogicalName, recordId, fields, impersonateSystemUserId,
+                    notFoundAsReadFailed: impersonateSystemUserId is not null, ct) is { } gone)
+            {
+                throw InvoiceFamilyCoreRecordGuard.RefusalException(entityLogicalName, gone);
+            }
+
+            return;
+        }
+
+        await _fieldMappingService.UpdateRecordFieldsAsync(entityLogicalName, recordId, fields, ct, impersonateSystemUserId);
     }
 
     /// <summary>
@@ -247,8 +301,7 @@ public class DataverseUpdateHandler : IDataverseUpdateHandler
                 };
 
                 // 3. Update with version check
-                await _fieldMappingService.UpdateRecordFieldsAsync(
-                    entityLogicalName, recordId, fieldsWithVersion, ct, impersonateSystemUserId);
+                await PatchAsync(entityLogicalName, recordId, fieldsWithVersion, ct, impersonateSystemUserId);
 
                 _logger.LogInformation(
                     "Updated {EntityType} {RecordId} with optimistic concurrency (version {Version}, {FieldCount} fields)",

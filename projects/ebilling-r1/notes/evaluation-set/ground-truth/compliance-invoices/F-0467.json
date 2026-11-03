@@ -1,0 +1,28 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0467",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0467","generator_id":"gen_eval_set.py@1 F-0467","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0467.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-05"},
+ "header":{"firm":"Ingersoll Yardley PC","firm_invoice_number":"A-44825/2026","invoice_date":"2025-08-02","billing_period_start":"2025-07-01","billing_period_end":"2025-07-31","firm_matter_reference":"88688-0012","po_number":"PO-4547265","fees_total":3982.0,"expenses_total":353.23,"adjustments_total":0.0,"total_due":4335.23,"currency":"USD"},
+ "timekeepers":[{"name":"Aisha Quillen","title":"Paralegal","rate":135.0,"billed_as":"AQ"},{"name":"Clara Zielinski","title":"Associate","rate":235.0,"billed_as":"CZ"},{"name":"Dalia Blackwood","title":"Partner","rate":475.0,"billed_as":"DB"},{"name":"Farah Delacroix","title":"Of Counsel","rate":420.0,"billed_as":"FD"},{"name":"Gideon Nwosu","title":"Partner","rate":500.0,"billed_as":"GN"},{"name":"Jordan Hargrove","title":"Paralegal","rate":150.0,"billed_as":"JH"},{"name":"Peter Oyelaran","title":"Associate","rate":290.0,"billed_as":"PO"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2025-07-01","timekeeper":"DB","timekeeper_name":"Dalia Blackwood","timekeeper_title":"Partner","title":"Ptr","hours":0.6,"rate":475.0,"amount":285.0,"narrative":"Prepare case assessment memorandum regarding the lease dispute and recommended strategy","codes":["L120","A103"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2025-07-03","timekeeper":"FD","timekeeper_name":"Farah Delacroix","timekeeper_title":"Of Counsel","title":"O/C","hours":1.7,"rate":420.0,"amount":714.0,"narrative":"Attend and present oral argument in the insurance coverage issue","codes":["L530","A109"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2025-07-04","timekeeper":"PO","timekeeper_name":"Peter Oyelaran","timekeeper_title":"Associate","title":"Assoc","hours":0.9,"rate":290.0,"amount":261.0,"narrative":"Prepare for oral argument in the insurance coverage issue","codes":["L530","A101"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2025-07-14","timekeeper":"GN","timekeeper_name":"Gideon Nwosu","timekeeper_title":"Partner","title":"Ptr","hours":1.7,"rate":500.0,"amount":850.0,"narrative":"Attend and present oral argument in the regulatory inquiry","codes":["L530","A109"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2025-07-17","timekeeper":"CZ","timekeeper_name":"Clara Zielinski","timekeeper_title":"Associate","title":"Assoc","hours":1.0,"rate":235.0,"amount":235.0,"narrative":"Draft appellate brief in the supply agreement","codes":["L520","A103"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2025-07-18","timekeeper":"PO","timekeeper_name":"Peter Oyelaran","timekeeper_title":"Associate","title":"Assoc","hours":0.4,"rate":290.0,"amount":116.0,"narrative":"Plan strategy for upcoming phase of the warranty claim with team","codes":["L120","A101"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2025-07-22","timekeeper":"JH","timekeeper_name":"Jordan Hargrove","timekeeper_title":"Paralegal","title":"Para","hours":1.3,"rate":150.0,"amount":195.0,"narrative":"Research appealability issues in the licensing dispute","codes":["L510","A102"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2025-07-23","timekeeper":"AQ","timekeeper_name":"Aisha Quillen","timekeeper_title":"Paralegal","title":"Para","hours":3.0,"rate":135.0,"amount":405.0,"narrative":"Revise appellate brief after cite check","codes":["L520","A104"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"fee","date":"2025-07-24","timekeeper":"JH","timekeeper_name":"Jordan Hargrove","timekeeper_title":"Paralegal","title":"Para","hours":0.5,"rate":150.0,"amount":75.0,"narrative":"Revise appellate brief after cite check","codes":["L520","A104"],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"fee","date":"2025-07-30","timekeeper":"CZ","timekeeper_name":"Clara Zielinski","timekeeper_title":"Associate","title":"Assoc","hours":0.8,"rate":235.0,"amount":188.0,"narrative":"Prepare monthly status report to client regarding the warranty claim","codes":["L190","A111"],"page":1,"narrative_style":"clear"},
+  {"n":11,"line_type":"fee","date":"2025-07-31","timekeeper":"CZ","timekeeper_name":"Clara Zielinski","timekeeper_title":"Associate","title":"Assoc","hours":2.8,"rate":235.0,"amount":658.0,"narrative":"Analyze exposure and damages model for the employment claim","codes":["L120","A104"],"page":1,"narrative_style":"clear"},
+  {"n":12,"line_type":"expense","date":"2025-07-24","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":353.23,"amount":353.23,"narrative":"Court filing fee","codes":["E112"],"page":1,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["243 Harbor Road","Boston","Tax ID 39-3306246"],"template":"T07","pages":2},
+ "rule_set_id":"RS-05",
+ "context":{"matter_open":"2024-05-22","matter_close":"2025-10-29","matter_budget":42340.0,"approved_timekeepers":["Aisha Quillen","Dalia Blackwood","Clara Zielinski","Aisha Santoro","Peter Oyelaran","Gideon Thornbury","Jordan Hargrove","Farah Delacroix","Gideon Nwosu"],"invoice_received_date":"2025-08-06"},
+ "expected_findings":[],
+ "seeded_violations":0
+}

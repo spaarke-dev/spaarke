@@ -56,7 +56,7 @@ Types 2 and 3 are identical on record permission — they differ only by credent
 - [ ] A shared user reads a secure project in **both** MDA and SPA *(live dev — gated on UAT)*
 - [ ] Manage Access answers "who can see this and why" with provenance per row
 - [ ] A contact with Project access sees its invoices, events, communications and To Dos
-- [ ] Point-in-time attestation answerable
+- [ ] ~~Point-in-time attestation answerable~~ — **deferred (known gap, FR-32 → [#1303](https://github.com/spaarke-dev/spaarke/issues/1303))**. Interim: manual Dataverse audit review, which needs org auditing on ([#2027](https://github.com/spaarke-dev/spaarke/issues/2027) for customer environments)
 - [ ] BFF publish size ≤60 MB (baseline ~44.96 MB incl. PDBs)
 
 ## Out of scope

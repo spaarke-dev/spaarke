@@ -174,7 +174,7 @@ public sealed class FakeRecordShareTable : IDataverseRecordShareService
 
     public Task RevokeAccessAsync(
         string entitySetName, Guid recordId, DataversePrincipalRef principal, CancellationToken ct = default)
-        => Revoke(entitySetName, recordId, principal, asOwner: false);
+        => Revoke(entitySetName, recordId, principal, asOwner: false, ct);
 
     /// <summary>
     /// The owner-aware revoke (#1620): sent as the principal exactly when the caller-named owner is that systemuser — the
@@ -184,10 +184,13 @@ public sealed class FakeRecordShareTable : IDataverseRecordShareService
         string entitySetName, Guid recordId, DataversePrincipalRef principal, DataversePrincipalRef recordOwner,
         CancellationToken ct = default)
         => Revoke(entitySetName, recordId, principal,
-            asOwner: principal.Kind == DataversePrincipalKind.SystemUser && recordOwner == principal);
+            asOwner: principal.Kind == DataversePrincipalKind.SystemUser && recordOwner == principal, ct);
 
-    private Task Revoke(string entitySetName, Guid recordId, DataversePrincipalRef principal, bool asOwner)
+    private Task Revoke(string entitySetName, Guid recordId, DataversePrincipalRef principal, bool asOwner, CancellationToken ct)
     {
+        // As the real transport does: a cancelled token throws before anything happens (#2095 K1 - a write that must survive a
+        // cancelled request has to be sent with CancellationToken.None).
+        ct.ThrowIfCancellationRequested();
         Target("RevokeAccess", entitySetName, recordId, principal, null);
         Write("RevokeAccess", () =>
         {

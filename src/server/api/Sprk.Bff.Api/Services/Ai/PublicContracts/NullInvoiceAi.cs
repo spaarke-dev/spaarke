@@ -32,7 +32,7 @@ public sealed class NullInvoiceAi : IInvoiceAi
 {
     private const string ErrorCode = "ai.invoice.disabled";
     private const string DetailMessage =
-        "Finance Intelligence (invoice classification/extraction/search) requires Analysis:Enabled=true AND DocumentIntelligence:Enabled=true.";
+        "Finance Intelligence and eBilling AI (invoice classification/extraction/search, line coding, code-set matching, rule drafting, firm notices) requires Analysis:Enabled=true AND DocumentIntelligence:Enabled=true.";
 
     private readonly ILogger<NullInvoiceAi> _logger;
 
@@ -67,6 +67,54 @@ public sealed class NullInvoiceAi : IInvoiceAi
         CancellationToken cancellationToken = default)
     {
         LogDisabled(nameof(GenerateEmbeddingAsync));
+        throw new FeatureDisabledException(ErrorCode, DetailMessage);
+    }
+
+    public Task<InvoiceClassifyResult> ClassifyAsync(
+        InvoiceClassifyRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        LogDisabled(nameof(ClassifyAsync));
+        throw new FeatureDisabledException(ErrorCode, DetailMessage);
+    }
+
+    public Task<InvoiceCodeLinesResult> CodeLinesAsync(
+        InvoiceCodeLinesRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        LogDisabled(nameof(CodeLinesAsync));
+        throw new FeatureDisabledException(ErrorCode, DetailMessage);
+    }
+
+    public Task<InvoiceCodeSetMatchResult> MatchCodeSetAsync(
+        InvoiceCodeSetMatchRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        LogDisabled(nameof(MatchCodeSetAsync));
+        throw new FeatureDisabledException(ErrorCode, DetailMessage);
+    }
+
+    public Task<BillingRuleDraftResult> DraftRulesAsync(
+        BillingRuleDraftRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        LogDisabled(nameof(DraftRulesAsync));
+        throw new FeatureDisabledException(ErrorCode, DetailMessage);
+    }
+
+    public Task<InvoiceFirmNoticeDraft> DraftFirmNoticeAsync(
+        InvoiceFirmNoticeRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        LogDisabled(nameof(DraftFirmNoticeAsync));
+        throw new FeatureDisabledException(ErrorCode, DetailMessage);
+    }
+
+    public Task<ExtractedInvoice> ReadInvoiceAsync(
+        InvoiceReadRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        LogDisabled(nameof(ReadInvoiceAsync));
         throw new FeatureDisabledException(ErrorCode, DetailMessage);
     }
 

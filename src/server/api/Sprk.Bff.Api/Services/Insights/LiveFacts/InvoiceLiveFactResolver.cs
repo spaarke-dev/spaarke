@@ -22,14 +22,13 @@ namespace Sprk.Bff.Api.Services.Insights.LiveFacts;
 /// and consumes <see cref="IGenericEntityService"/> only. ZERO AI-internal imports.
 /// </para>
 /// <para>
-/// <b>Supported predicates (Phase 1.5 initial set per design-a6 §6.3)</b>. The actual
-/// <c>sprk_invoice</c> attribute names below are placeholder mappings pending D5-Q2 SME
-/// confirmation against the Spaarke Dev <c>sprk_invoice</c> schema; the resolver dispatch
-/// logic + shape is the load-bearing part:
+/// <b>Supported predicates (Phase 1.5 initial set per design-a6 §6.3)</b>. Columns checked against the live
+/// <c>sprk_invoice</c> schema (ebilling-r1 task 015, ISS-001 / #1904: the original placeholders <c>sprk_total</c> and
+/// <c>sprk_status</c> do not exist on the table, so every read of them failed):
 /// <list type="bullet">
 ///   <item><c>invoiceNumber</c> → <c>sprk_invoicenumber</c> (plain string)</item>
-///   <item><c>invoiceTotal</c> → <c>sprk_total</c> (decimal/Money; USD by default)</item>
-///   <item><c>invoiceStatus</c> → <c>sprk_status</c> (option set → display name string)</item>
+///   <item><c>invoiceTotal</c> → <c>sprk_totalamount</c> (Money, the billed total; USD by default)</item>
+///   <item><c>invoiceStatus</c> → <c>statuscode</c> (In Review, Approved, ... → display name string; D-41)</item>
 ///   <item><c>relatedMatter</c> → <c>sprk_matter</c> (LOOKUP → sprk_matter; <c>{id, name}</c>
 ///   per A6-D7 — NO recursion into matter resolver)</item>
 ///   <item><c>currentInvoiceFacts</c> → composite shape returning the above sub-values</item>
@@ -63,16 +62,21 @@ public sealed class InvoiceLiveFactResolver : ILiveFactResolver
     /// <summary>ProducedBy.Version for all FactArtifacts.</summary>
     internal const string ProducerVersion = "v1";
 
+    /// <summary>The billed total (Money).</summary>
+    internal const string TotalColumn = "sprk_totalamount";
+
+    /// <summary>The invoice status (ebilling-r1 D-41: status lives on statuscode).</summary>
+    internal const string StatusColumn = "statuscode";
+
     /// <summary>
-    /// Fields the resolver pulls from sprk_invoice to satisfy the Phase 1.5 initial predicate
-    /// set. Pending D5-Q2 SME confirmation of attribute names.
+    /// Fields the resolver pulls from sprk_invoice to satisfy the Phase 1.5 initial predicate set.
     /// </summary>
-    private static readonly string[] ReadColumns =
+    internal static readonly string[] ReadColumns =
     [
         "sprk_invoiceid",
         "sprk_invoicenumber",
-        "sprk_total",
-        "sprk_status",
+        TotalColumn,
+        StatusColumn,
         "sprk_matter"
     ];
 
@@ -139,8 +143,8 @@ public sealed class InvoiceLiveFactResolver : ILiveFactResolver
         return predicate switch
         {
             PredicateInvoiceNumber => BuildStringFact(invoice, subject, predicate, "sprk_invoicenumber", tenantId),
-            PredicateInvoiceTotal => BuildNumericFact(invoice, subject, predicate, "sprk_total", tenantId),
-            PredicateInvoiceStatus => BuildOptionSetFact(invoice, subject, predicate, "sprk_status", tenantId),
+            PredicateInvoiceTotal => BuildNumericFact(invoice, subject, predicate, TotalColumn, tenantId),
+            PredicateInvoiceStatus => BuildOptionSetFact(invoice, subject, predicate, StatusColumn, tenantId),
             PredicateRelatedMatter => BuildLookupFact(invoice, subject, predicate, "sprk_matter", tenantId),
             PredicateCurrentInvoiceFacts => BuildCompositeFact(invoice, subject, predicate, tenantId),
             _ => throw new LiveFactNotSupportedException(subject, predicate)
@@ -294,9 +298,9 @@ public sealed class InvoiceLiveFactResolver : ILiveFactResolver
         var invoiceNumber = invoice.GetAttributeValue<string>("sprk_invoicenumber");
 
         decimal? invoiceTotal = null;
-        if (invoice.Contains("sprk_total"))
+        if (invoice.Contains(TotalColumn))
         {
-            invoiceTotal = invoice["sprk_total"] switch
+            invoiceTotal = invoice[TotalColumn] switch
             {
                 Money money => money.Value,
                 decimal dec => dec,
@@ -307,11 +311,11 @@ public sealed class InvoiceLiveFactResolver : ILiveFactResolver
             };
         }
 
-        var status = invoice.GetAttributeValue<OptionSetValue>("sprk_status");
+        var status = invoice.GetAttributeValue<OptionSetValue>(StatusColumn);
         string? statusDisplay = null;
         if (status is not null)
         {
-            statusDisplay = invoice.FormattedValues.TryGetValue("sprk_status", out var formatted)
+            statusDisplay = invoice.FormattedValues.TryGetValue(StatusColumn, out var formatted)
                 && !string.IsNullOrWhiteSpace(formatted)
                 ? formatted
                 : status.Value.ToString(CultureInfo.InvariantCulture);

@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="173" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>An external Assign Task assignee is emailed from the system mailbox, never the assigner's (D-199 amendment)</title>
+    <phase>11 UAT</phase>
+    <gate>startable: 168 is merged to docs (`7cb3c263c0`)</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Changes .cs in the BFF send path; decides which mailbox an external party sees.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>A narrow, fully specified change on code that four review rounds have just covered.</model-tier-reason>
+    <effort>high</effort>
+    <deps>168</deps>
+    <tags>bff,email,testing</tags>
+    <estimated-effort>2 hours</estimated-effort>
+    <parallel-group>N</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>The owner amended D-199 on 2026-10-29: email to an EXTERNAL Assign Task assignee always comes from the system mailbox (`Communication:DefaultMailbox`), never from the assigning user's mailbox. The body still names the assigner as "Assigned by {display name}". Today the in-request send goes from the assigner's mailbox first (`AssignTaskNotifier.cs` ~:426-434), so an outside party sees the lawyer's address in From. The system-mailbox job already sends from DefaultMailbox (~:329-333). An internal assignee is unchanged: the assigner's mailbox first, with the system mailbox as the fallback.</prompt>
+  <role>SPAARKE BFF engineer (Signals notifications).</role>
+  <goal>When the recipient gate's answer is External, the email is sent from the system mailbox, in the request or through the existing system-mailbox job, whichever the code already supports with the least change. It is never sent as the assigner. The gate, the content (portal link, display name only, no bell) and the internal path are unchanged.</goal>
+
+  <constraints>
+    <constraint source="D-199">Every send still passes `AssignTaskRecipientGate`; the system-mailbox path reaches only gated recipients. No new mailbox setting: reuse `Communication:DefaultMailbox` and the existing send path the job or `SendFromSystemMailboxAsync` uses.</constraint>
+    <constraint source="CLAUDE.md">Use `python`, never `python3`. No --no-verify, no git stash. No Dataverse writes, no deploys. Never run the unfiltered Sprk.Bff.Api.Tests. Run the full ArchTests and measure the publish-size delta (bff-hygiene).</constraint>
+  </constraints>
+
+  <acceptance-criteria>
+    <criterion testable="true">An external recipient: the send uses the system mailbox (assert the sender/mailbox on the real send request), and the user-mode send is never called. Mutation: route an external recipient to the user-mode send, and a test fails.</criterion>
+    <criterion testable="true">An internal recipient: unchanged, the user mailbox first and the fallback on failure (the existing tests stay green).</criterion>
+    <criterion testable="true">The body still has "Assigned by {display name}" for an external recipient, with no email address or UPN anywhere in the subject or body.</criterion>
+    <criterion testable="true">The tracked email row is still internal-only, and `sprk_sentby` still records the assigner.</criterion>
+  </acceptance-criteria>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ontology-platform-r1/notes/decisions.md (D-199 and its amendment)</file>
+      <file>projects/spaarke-ontology-platform-r1/notes/task-168-notes.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/ExternalAccess/GrantAccessNotifier.cs (the reference: the portal email from the system mailbox)</file>
+    </files>
+  </knowledge>
+  <completion date="2026-10-29">
+    Delivered (PR #2462, merged to docs `f4a0fc6862`, head `ec76eea1f0`): when the recipient gate answers External, `AssignTaskNotifier.EmailAsync` sends in the request from the system mailbox (`SendMode.SharedMailbox`, `FromMailbox = RegistrationEmailService.ResolveFromMailbox`). This is the job's request shape, with no new setting, interface or job. A failure falls back to the existing system-mailbox job, which re-asks the gate. A blank DefaultMailbox sends nothing (`assignee_email_not_sent`). Internal recipients are unchanged. The gate calls, the content (portal link, display name only, no bell), the internal-only row and `sprk_sentby` are unchanged. One new log event: `EmailSentFromSystem` (50395).
+    Tests: the external case asserts the system sender on the real request, that the user-mode send is never called, and no '@' in the subject or body. Also: the system send failing, a blank mailbox, and the real OutboundCommunicationRow. AssignTask|Notifier|Communication 2392/0 (2 skipped); ArchTests 1665/1665. Mutation (external routed to user mode): 5 tests fail. Publish delta vs a fresh master: -2.5 KB (192 files each; no packages).
+    Review: main-session read of the diff (sender keyed on the gate's verdict; the fallback stays behind the gate). CI green.
+    rework: none task 173
+  </completion>
+</task>

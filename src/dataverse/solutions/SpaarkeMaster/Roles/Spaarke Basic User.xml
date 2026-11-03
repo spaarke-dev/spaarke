@@ -112,6 +112,7 @@
     <RolePrivilege name="prvAppendTosprk_Agreement" level="Deep" />
     <RolePrivilege name="prvAppendTosprk_AgreementType" level="Global" />
     <RolePrivilege name="prvAppendTosprk_analysis" level="Deep" />
+    <RolePrivilege name="prvAppendTosprk_billingexport" level="Deep" />
     <RolePrivilege name="prvAppendTosprk_Communication" level="Basic" />
     <RolePrivilege name="prvAppendTosprk_CommunicationAccount" level="Basic" />
     <RolePrivilege name="prvAppendTosprk_CommunicationAttachment" level="Basic" />
@@ -122,8 +123,11 @@
     <RolePrivilege name="prvAppendTosprk_DocumentType" level="Deep" />
     <RolePrivilege name="prvAppendTosprk_documenttype_ref" level="Global" />
     <RolePrivilege name="prvAppendTosprk_Event" level="Deep" />
+    <RolePrivilege name="prvAppendTosprk_externalidentifier" level="Deep" />
     <RolePrivilege name="prvAppendTosprk_Invoice" level="Deep" />
-    <RolePrivilege name="prvAppendTosprk_InvoiceLineItem" level="Deep" />
+    <RolePrivilege name="prvAppendTosprk_invoiceapproval" level="Deep" />
+    <RolePrivilege name="prvAppendTosprk_invoicecorrection" level="Deep" />
+    <RolePrivilege name="prvAppendTosprk_invoicesubmission" level="Deep" />
     <RolePrivilege name="prvAppendTosprk_Matter" level="Deep" />
     <RolePrivilege name="prvAppendTosprk_Memo" level="Deep" />
     <RolePrivilege name="prvAppendTosprk_NavItem" level="Deep" />
@@ -427,31 +431,34 @@
     <RolePrivilege name="prvReadsprk_Agreement" level="Deep" />
     <RolePrivilege name="prvReadsprk_AgreementType" level="Global" />
     <RolePrivilege name="prvReadsprk_aiactiontype" level="Global" />
-    <RolePrivilege name="prvReadsprk_AIChatContextMap" level="Deep" />
+    <RolePrivilege name="prvReadsprk_AIChatContextMap" level="Global" />
     <RolePrivilege name="prvReadsprk_AIChatMessage" level="Deep" />
     <RolePrivilege name="prvReadsprk_AIChatSummary" level="Deep" />
     <RolePrivilege name="prvReadsprk_AIKnowledgeDeployment" level="Deep" />
     <RolePrivilege name="prvReadsprk_AIKnowledgeSource" level="Deep" />
-    <RolePrivilege name="prvReadsprk_AIKnowledgeType" level="Deep" />
+    <RolePrivilege name="prvReadsprk_AIKnowledgeType" level="Global" />
     <RolePrivilege name="prvReadsprk_aimodeldeployment" level="Global" />
-    <RolePrivilege name="prvReadsprk_AIOutputType" level="Deep" />
+    <RolePrivilege name="prvReadsprk_AIOutputType" level="Global" />
     <RolePrivilege name="prvReadsprk_AIRetrievalMode" level="Deep" />
-    <RolePrivilege name="prvReadsprk_AISkillType" level="Deep" />
-    <RolePrivilege name="prvReadsprk_AIToolType" level="Deep" />
+    <RolePrivilege name="prvReadsprk_AISkillType" level="Global" />
+    <RolePrivilege name="prvReadsprk_AIToolType" level="Global" />
     <RolePrivilege name="prvReadsprk_analysis" level="Deep" />
-    <RolePrivilege name="prvReadsprk_analysisaction" level="Deep" />
-    <RolePrivilege name="prvReadsprk_AnalysisActionType" level="Deep" />
+    <RolePrivilege name="prvReadsprk_analysisaction" level="Global" />
+    <RolePrivilege name="prvReadsprk_AnalysisActionType" level="Global" />
     <RolePrivilege name="prvReadsprk_analysischatmessage" level="Deep" />
     <RolePrivilege name="prvReadsprk_analysisdeliverytype" level="Global" />
     <RolePrivilege name="prvReadsprk_analysisemailmetadata" level="Deep" />
-    <RolePrivilege name="prvReadsprk_analysisknowledge" level="Deep" />
+    <RolePrivilege name="prvReadsprk_analysisknowledge" level="Global" />
     <RolePrivilege name="prvReadsprk_analysisoutput" level="Deep" />
-    <RolePrivilege name="prvReadsprk_analysisplaybook" level="Deep" />
-    <RolePrivilege name="prvReadsprk_analysisskill" level="Deep" />
-    <RolePrivilege name="prvReadsprk_analysistool" level="Deep" />
+    <RolePrivilege name="prvReadsprk_analysisplaybook" level="Global" />
+    <RolePrivilege name="prvReadsprk_analysisskill" level="Global" />
+    <RolePrivilege name="prvReadsprk_analysistool" level="Global" />
     <RolePrivilege name="prvReadsprk_analysisworkingversion" level="Deep" />
     <RolePrivilege name="prvReadsprk_AttachmentArtifact" level="Deep" />
+    <RolePrivilege name="prvReadsprk_billingcode" level="Global" />
+    <RolePrivilege name="prvReadsprk_billingcodeset" level="Global" />
     <RolePrivilege name="prvReadsprk_BillingEvent" level="Deep" />
+    <RolePrivilege name="prvReadsprk_billingexport" level="Deep" />
     <RolePrivilege name="prvReadsprk_Budget" level="Deep" />
     <RolePrivilege name="prvReadsprk_BudgetBucket" level="Deep" />
     <RolePrivilege name="prvReadsprk_BudgetRevision" level="Deep" />
@@ -472,6 +479,7 @@
     <RolePrivilege name="prvReadsprk_Document" level="Deep" />
     <RolePrivilege name="prvReadsprk_DocumentType" level="Deep" />
     <RolePrivilege name="prvReadsprk_documenttype_ref" level="Global" />
+    <RolePrivilege name="prvReadsprk_ebillingsetting" level="Global" />
     <RolePrivilege name="prvReadsprk_EmailArtifact" level="Deep" />
     <RolePrivilege name="prvReadsprk_EmailReviewLog" level="Basic" />
     <RolePrivilege name="prvReadsprk_EmailSaveRule" level="Deep" />
@@ -480,13 +488,15 @@
     <RolePrivilege name="prvReadsprk_EventSet" level="Deep" />
     <RolePrivilege name="prvReadsprk_EventToDo" level="Deep" />
     <RolePrivilege name="prvReadsprk_EventType_Ref" level="Deep" />
+    <RolePrivilege name="prvReadsprk_externalidentifier" level="Deep" />
     <RolePrivilege name="prvReadsprk_ExternalRecordAccess" level="Deep" />
-    <RolePrivilege name="prvReadsprk_ExternalServiceConfig" level="Global" />
     <RolePrivilege name="prvReadsprk_FieldMappingRule" level="Deep" />
     <RolePrivilege name="prvReadsprk_FileVersion" level="Deep" />
-    <RolePrivilege name="prvReadsprk_GridConfiguration" level="Deep" />
+    <RolePrivilege name="prvReadsprk_GridConfiguration" level="Global" />
     <RolePrivilege name="prvReadsprk_Invoice" level="Deep" />
-    <RolePrivilege name="prvReadsprk_InvoiceLineItem" level="Deep" />
+    <RolePrivilege name="prvReadsprk_invoiceapproval" level="Deep" />
+    <RolePrivilege name="prvReadsprk_invoicecorrection" level="Deep" />
+    <RolePrivilege name="prvReadsprk_invoicesubmission" level="Deep" />
     <RolePrivilege name="prvReadsprk_KPIAssessment" level="Deep" />
     <RolePrivilege name="prvReadsprk_Matter" level="Deep" />
     <RolePrivilege name="prvReadsprk_MatterSubtype_Ref" level="Global" />
@@ -503,6 +513,8 @@
     <RolePrivilege name="prvReadsprk_ProcessingJob" level="Deep" />
     <RolePrivilege name="prvReadsprk_Project" level="Deep" />
     <RolePrivilege name="prvReadsprk_ProjectType_Ref" level="Global" />
+    <RolePrivilege name="prvReadsprk_ratecard" level="Deep" />
+    <RolePrivilege name="prvReadsprk_ratecardrate" level="Deep" />
     <RolePrivilege name="prvReadsprk_RecordType_Ref" level="Global" />
     <RolePrivilege name="prvReadsprk_Report" level="Deep" />
     <RolePrivilege name="prvReadsprk_ReportCard" level="Deep" />

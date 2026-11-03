@@ -1,0 +1,17 @@
+{
+  "$comment": "ebilling-r1 task 054 (D-93) code-set matching evaluation. The 11 active matter type and practice area rows of spaarkedev1 (read 2026-10-16) plus one negative control that fits no set. 'expected' is the code set name the owner decision D-93 calls correct; 'none' means the row must come back NoneFits. Read by tests/integration/seam/Finance/CodeSetMatchingLiveTests.cs. Reasoning for the two judgement calls is in notes/054-code-set-matching.md.",
+  "cases": [
+    { "type": "MatterType", "name": "Litigation", "expected": "UTBMS Litigation" },
+    { "type": "MatterType", "name": "Commercial", "expected": "UTBMS Project" },
+    { "type": "MatterType", "name": "Patent", "expected": "UTBMS IP Patent Prosecution" },
+    { "type": "MatterType", "name": "Trademark", "expected": "UTBMS Trademark" },
+    { "type": "MatterType", "name": "Employment", "expected": "UTBMS Counseling", "note": "Employment matters in a legal department are mostly advice (policies, terminations, investigations); employment disputes are a Litigation matter type." },
+    { "type": "PracticeArea", "name": "Appellate", "expected": "UTBMS Litigation" },
+    { "type": "PracticeArea", "name": "Intellectual Property Patents", "expected": "UTBMS IP Patent Prosecution" },
+    { "type": "PracticeArea", "name": "Intellectual Property Trademarks", "expected": "UTBMS Trademark" },
+    { "type": "PracticeArea", "name": "Mergers & Acquisitions", "expected": "UTBMS Project" },
+    { "type": "PracticeArea", "name": "Banking & Finance", "expected": "UTBMS Project", "note": "Lending and financing transactions of a solvent business; the Bankruptcy set is for insolvency proceedings." },
+    { "type": "PracticeArea", "name": "Commercial Transactions", "expected": "UTBMS Project" },
+    { "type": "MatterType", "name": "Office Catering", "expected": "none", "negative": true, "note": "Negative control: not legal work; must not be forced onto the closest set." }
+  ]
+}

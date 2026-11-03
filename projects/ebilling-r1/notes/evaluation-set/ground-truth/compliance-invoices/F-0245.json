@@ -1,0 +1,33 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0245",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0245","generator_id":"gen_eval_set.py@1 F-0245","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0245.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-05"},
+ "header":{"firm":"Holloway Ambrose PC","firm_invoice_number":"A-83571/2025","invoice_date":"2025-07-04","billing_period_start":"2025-06-01","billing_period_end":"2025-06-30","firm_matter_reference":"23338-0009","po_number":"PO-4538264","fees_total":6459.5,"expenses_total":9.1,"adjustments_total":0.0,"total_due":6468.6,"currency":"USD"},
+ "timekeepers":[{"name":"Emeka Nakamura","title":"Partner","rate":485.0,"billed_as":"EN"},{"name":"Helena Marchetti","title":"Paralegal","rate":135.0,"billed_as":"HM"},{"name":"Ingrid Lindqvist","title":"Associate","rate":310.0,"billed_as":"IL"},{"name":"Katya Quillen","title":"Senior Associate","rate":360.0,"billed_as":"KQ"},{"name":"Leila Delacroix","title":"Associate","rate":310.0,"billed_as":"LD"},{"name":"Naomi Eriksen","title":"Paralegal","rate":160.0,"billed_as":"NE"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2025-03-03","timekeeper":"LD","timekeeper_name":"Leila Delacroix","timekeeper_title":"Associate","title":"Assoc","hours":0.4,"rate":310.0,"amount":124.0,"narrative":"Prepare monthly status report to client regarding the vendor agreement","codes":["L190","A111"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2025-06-03","timekeeper":"NE","timekeeper_name":"Naomi Eriksen","timekeeper_title":"Paralegal","title":"Para","hours":1.8,"rate":160.0,"amount":288.0,"narrative":"Review draft expert disclosure for the warranty claim","codes":["L420","A104"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2025-06-04","timekeeper":"KQ","timekeeper_name":"Katya Quillen","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":1.1,"rate":360.0,"amount":396.0,"narrative":"Telephone conference with witness regarding the warranty claim","codes":["L410","A106"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2025-06-06","timekeeper":"IL","timekeeper_name":"Ingrid Lindqvist","timekeeper_title":"Associate","title":"Assoc","hours":2.8,"rate":310.0,"amount":868.0,"narrative":"Prepare trial notebook and demonstrative exhibits for the licensing dispute","codes":["L440","A101"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2025-06-09","timekeeper":"LD","timekeeper_name":"Leila Delacroix","timekeeper_title":"Associate","title":"Assoc","hours":0.2,"rate":310.0,"amount":62.0,"narrative":"Draft interrogatory responses for trial in the supply agreement","codes":["L430","A103"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2025-06-09","timekeeper":"IL","timekeeper_name":"Ingrid Lindqvist","timekeeper_title":"Associate","title":"Assoc","hours":2.2,"rate":310.0,"amount":682.0,"narrative":"Review draft expert disclosure for the warranty claim","codes":["L420","A104"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2025-06-10","timekeeper":"IL","timekeeper_name":"Ingrid Lindqvist","timekeeper_title":"Associate","title":"Assoc","hours":2.4,"rate":310.0,"amount":744.0,"narrative":"Prepare monthly status report to client regarding the data incident","codes":["L190","A111"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2025-06-10","timekeeper":"HM","timekeeper_name":"Helena Marchetti","timekeeper_title":"Paralegal","title":"Para","hours":0.6,"rate":135.0,"amount":81.0,"narrative":"Review draft expert disclosure for the construction contract","codes":["L420","A104"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"fee","date":"2025-06-17","timekeeper":"EN","timekeeper_name":"Emeka Nakamura","timekeeper_title":"Partner","title":"Ptr","hours":0.1,"rate":485.0,"amount":48.5,"narrative":"Review draft expert disclosure for the vendor agreement","codes":["L420","A104"],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"fee","date":"2025-06-17","timekeeper":"IL","timekeeper_name":"Ingrid Lindqvist","timekeeper_title":"Associate","title":"Assoc","hours":1.1,"rate":310.0,"amount":341.0,"narrative":"Attend trial day in the regulatory inquiry","codes":["L450","A109"],"page":1,"narrative_style":"clear"},
+  {"n":11,"line_type":"fee","date":"2025-06-19","timekeeper":"KQ","timekeeper_name":"Katya Quillen","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":0.9,"rate":360.0,"amount":324.0,"narrative":"Prepare expert witness for testimony in the customs audit","codes":["L420","A101"],"page":1,"narrative_style":"clear"},
+  {"n":12,"line_type":"fee","date":"2025-06-19","timekeeper":"EN","timekeeper_name":"Emeka Nakamura","timekeeper_title":"Partner","title":"Ptr","hours":2.9,"rate":485.0,"amount":1406.5,"narrative":"Review draft expert disclosure for the regulatory inquiry","codes":["L420","A104"],"page":1,"narrative_style":"clear"},
+  {"n":13,"line_type":"fee","date":"2025-06-24","timekeeper":"EN","timekeeper_name":"Emeka Nakamura","timekeeper_title":"Partner","title":"Ptr","hours":1.7,"rate":485.0,"amount":824.5,"narrative":"Revise complaint after review by lead counsel","codes":["L430","A104"],"page":1,"narrative_style":"clear"},
+  {"n":14,"line_type":"fee","date":"2025-06-26","timekeeper":"HM","timekeeper_name":"Helena Marchetti","timekeeper_title":"Paralegal","title":"Para","hours":2.0,"rate":135.0,"amount":270.0,"narrative":"Review court docket and calendar of pending deadlines for the customs audit","codes":["L190","A104"],"page":1,"narrative_style":"clear"},
+  {"n":15,"line_type":"expense","date":"2025-06-12","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":13.0,"rate":0.7,"amount":9.1,"narrative":"Mileage to courthouse","codes":["E109"],"page":1,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["892 Market Street","Atlanta","Tax ID 51-1890751"],"template":"T07","pages":2},
+ "rule_set_id":"RS-05",
+ "context":{"matter_open":"2024-04-20","matter_close":"2025-09-28","matter_budget":50874.0,"approved_timekeepers":["Katya Quillen","Ingrid Lindqvist","Yusuf Galbraith","Naomi Eriksen","Hector Galbraith","Tomas Delacroix","Emeka Nakamura","Helena Marchetti","Leila Delacroix"],"invoice_received_date":"2025-07-17"},
+ "expected_findings":[
+  {"rule_id":"RS-05-R08","rule_type":"InvoiceAge","scope":"line","line_refs":[1],"consequence":"Disallow"}
+ ],
+ "seeded_violations":1
+}

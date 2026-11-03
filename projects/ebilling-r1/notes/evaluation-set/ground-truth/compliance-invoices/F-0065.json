@@ -1,0 +1,37 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0065",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0065","generator_id":"gen_eval_set.py@1 F-0065","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0065.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-05"},
+ "header":{"firm":"Garrison and Yardley LLP","firm_invoice_number":"INV-2026-49236","invoice_date":"2025-10-02","billing_period_start":"2025-09-01","billing_period_end":"2025-09-30","firm_matter_reference":"32144-0018","po_number":"PO-4569089","fees_total":6486.0,"expenses_total":3852.28,"adjustments_total":0.0,"total_due":10338.28,"currency":"USD"},
+ "timekeepers":[{"name":"Anders Whitfield","title":"Associate","rate":265.0,"billed_as":"Anders Whitfield"},{"name":"Elena Galbraith","title":"Paralegal","rate":155.0,"billed_as":"Elena Galbraith"},{"name":"Marcus Okafor","title":"Associate","rate":270.0,"billed_as":"Marcus Okafor"},{"name":"Tomas Oyelaran","title":"Associate","rate":290.0,"billed_as":"Tomas Oyelaran"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2025-09-09","timekeeper":"Anders Whitfield","timekeeper_name":"Anders Whitfield","timekeeper_title":"Associate","title":"Assoc","hours":2.0,"rate":265.0,"amount":530.0,"narrative":"Revise appellate brief after cite check","codes":["L520","A104"],"page":2,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2025-09-11","timekeeper":"Anders Whitfield","timekeeper_name":"Anders Whitfield","timekeeper_title":"Associate","title":"Assoc","hours":1.0,"rate":265.0,"amount":265.0,"narrative":"Prepare monthly status report to client regarding the vendor agreement","codes":["L190","A111"],"page":2,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2025-09-10","timekeeper":"Elena Galbraith","timekeeper_name":"Elena Galbraith","timekeeper_title":"Paralegal","title":"Para","hours":0.4,"rate":155.0,"amount":62.0,"narrative":"Plan strategy for upcoming phase of the licensing dispute with team","codes":["L120","A101"],"page":2,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2025-09-24","timekeeper":"Elena Galbraith","timekeeper_name":"Elena Galbraith","timekeeper_title":"Paralegal","title":"Para","hours":1.2,"rate":155.0,"amount":186.0,"narrative":"Legal research.","codes":["L190","A104"],"page":2,"narrative_style":"vague"},
+  {"n":5,"line_type":"fee","date":"2025-09-25","timekeeper":"Elena Galbraith","timekeeper_name":"Elena Galbraith","timekeeper_title":"Paralegal","title":"Para","hours":1.4,"rate":155.0,"amount":217.0,"narrative":"Review court docket and calendar of pending deadlines for the regulatory inquiry","codes":["L190","A104"],"page":2,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2025-09-08","timekeeper":"Marcus Okafor","timekeeper_name":"Marcus Okafor","timekeeper_title":"Associate","title":"Assoc","hours":2.2,"rate":270.0,"amount":594.0,"narrative":"Prepare for oral argument in the distribution agreement; Draft appellate brief in the licensing dispute; Analyze exposure and damages model for the construction contract.","codes":["L520","A104"],"page":2,"narrative_style":"block_billed"},
+  {"n":7,"line_type":"fee","date":"2025-09-18","timekeeper":"Marcus Okafor","timekeeper_name":"Marcus Okafor","timekeeper_title":"Associate","title":"Assoc","hours":2.0,"rate":270.0,"amount":540.0,"narrative":"Prepare monthly status report to client regarding the employment claim","codes":[],"page":2,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2025-09-19","timekeeper":"Marcus Okafor","timekeeper_name":"Marcus Okafor","timekeeper_title":"Associate","title":"Assoc","hours":1.3,"rate":270.0,"amount":351.0,"narrative":"Prepare case assessment memorandum regarding the warranty claim and recommended strategy","codes":["L120","A103"],"page":2,"narrative_style":"clear"},
+  {"n":9,"line_type":"fee","date":"2025-09-05","timekeeper":"Tomas Oyelaran","timekeeper_name":"Tomas Oyelaran","timekeeper_title":"Associate","title":"Assoc","hours":4.0,"rate":290.0,"amount":1160.0,"narrative":"Draft appellate brief in the licensing dispute","codes":["L520","A103"],"page":2,"narrative_style":"clear"},
+  {"n":10,"line_type":"fee","date":"2025-09-05","timekeeper":"Tomas Oyelaran","timekeeper_name":"Tomas Oyelaran","timekeeper_title":"Associate","title":"Assoc","hours":4.0,"rate":290.0,"amount":1160.0,"narrative":"Prepare monthly status report to client regarding the vendor agreement","codes":["L190","A111"],"page":2,"narrative_style":"clear"},
+  {"n":11,"line_type":"fee","date":"2025-09-05","timekeeper":"Tomas Oyelaran","timekeeper_name":"Tomas Oyelaran","timekeeper_title":"Associate","title":"Assoc","hours":4.0,"rate":290.0,"amount":1160.0,"narrative":"Research appealability issues in the warranty claim","codes":["L510","A102"],"page":2,"narrative_style":"clear"},
+  {"n":12,"line_type":"fee","date":"2025-09-05","timekeeper":"Tomas Oyelaran","timekeeper_name":"Tomas Oyelaran","timekeeper_title":"Associate","title":"Assoc","hours":0.8,"rate":290.0,"amount":232.0,"narrative":"Draft appellate brief in the vendor agreement","codes":["L520","A103"],"page":2,"narrative_style":"clear"},
+  {"n":13,"line_type":"fee","date":"2025-09-05","timekeeper":"Tomas Oyelaran","timekeeper_name":"Tomas Oyelaran","timekeeper_title":"Associate","title":"Assoc","hours":0.1,"rate":290.0,"amount":29.0,"narrative":"Prepare monthly status report to client regarding the distribution agreement","codes":["L190","A111"],"page":2,"narrative_style":"clear"},
+  {"n":14,"line_type":"expense","date":"2025-09-03","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":2554.22,"amount":2554.22,"narrative":"Consulting expert fees","codes":["E119"],"page":2,"narrative_style":"clear"},
+  {"n":15,"line_type":"expense","date":"2025-09-17","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":549.18,"amount":549.18,"narrative":"Airfare to Chicago for deposition","codes":["E110"],"page":2,"narrative_style":"clear"},
+  {"n":16,"line_type":"expense","date":"2025-09-29","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":748.88,"amount":748.88,"narrative":"Court reporter and transcript - deposition","codes":["E115"],"page":2,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["187 Commerce Avenue","Boston","Tax ID 27-6306292"],"template":"T10","pages":2},
+ "rule_set_id":"RS-05",
+ "context":{"matter_open":"2024-06-30","matter_close":"2025-12-29","matter_budget":66353.0,"approved_timekeepers":["Elena Galbraith","Tomas Oyelaran","Anders Marchetti","Hector Dunleavy","Jordan Thornbury","Mei Yilmaz","Marcus Okafor","Anders Whitfield"],"invoice_received_date":"2025-10-14"},
+ "expected_findings":[
+  {"rule_id":"RS-05-R03","rule_type":"AiObservation","scope":"line","line_refs":[4],"consequence":"Reduce"},
+  {"rule_id":"RS-05-R03","rule_type":"AiObservation","scope":"line","line_refs":[6],"consequence":"Reduce"},
+  {"rule_id":"RS-05-R06","rule_type":"DailyHoursCap","scope":"line","line_refs":[12],"consequence":"Flag"},
+  {"rule_id":"RS-05-R07","rule_type":"RequiredData","scope":"line","line_refs":[7],"consequence":"Reject"}
+ ],
+ "seeded_violations":4
+}

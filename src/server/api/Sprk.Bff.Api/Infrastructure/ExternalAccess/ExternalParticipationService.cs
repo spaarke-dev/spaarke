@@ -1281,9 +1281,11 @@ public class ExternalParticipationService
 
                 foreach (var id in chunk)
                 {
-                    result[id] = byId.TryGetValue(id, out var row)
+                    result[id] = byId.TryGetValue(id, out var row) && row.EveryLookupReturned
                         ? new ReferencedOrganizations(row.ReferencedOrganizationIds(), Unreadable: false)
-                        // Asked about, not returned. Cannot be distinguished from an unreadable row.
+                        // Asked about, not returned - or returned WITHOUT one of its org-lookup properties (a property absent from the response; an
+                        // empty lookup is an explicit null). Neither can be told from an unreadable row, and an org slot that was not read must
+                        // not read as an empty one: that would be "references no organization" (D-110).
                         : ReferencedOrganizations.Unresolved;
                 }
             }
@@ -1421,11 +1423,36 @@ public class ExternalParticipationService
         public string? sprk_matterid { get; set; }
         public string? sprk_workassignmentid { get; set; }
 
+        private Guid? _assignedLawFirm1;
+        private Guid? _assignedLawFirm2;
+
         [JsonPropertyName("_sprk_assignedlawfirm1_value")]
-        public Guid? sprk_assignedlawfirm1 { get; set; }
+        public Guid? sprk_assignedlawfirm1
+        {
+            get => _assignedLawFirm1;
+            set { _assignedLawFirm1 = value; AssignedLawFirm1Returned = true; }
+        }
 
         [JsonPropertyName("_sprk_assignedlawfirm2_value")]
-        public Guid? sprk_assignedlawfirm2 { get; set; }
+        public Guid? sprk_assignedlawfirm2
+        {
+            get => _assignedLawFirm2;
+            set { _assignedLawFirm2 = value; AssignedLawFirm2Returned = true; }
+        }
+
+        // The setters run for a property that is PRESENT in the JSON, a null value included (live, spaarkedev1, 2026-10-17: an empty lookup
+        // is returned as an explicit null). A property that is ABSENT from the response was not returned at all, which is not "this slot
+        // is empty" (ebilling-r1 task 051, D-110). The reader is app-only, so this does not rest on any column-security behaviour: it only
+        // refuses to read an absent property as an empty lookup.
+        [JsonIgnore]
+        public bool AssignedLawFirm1Returned { get; private set; }
+
+        [JsonIgnore]
+        public bool AssignedLawFirm2Returned { get; private set; }
+
+        /// <summary>True only when BOTH org-lookup slots came back on the row (each a Guid or an explicit null).</summary>
+        [JsonIgnore]
+        public bool EveryLookupReturned => AssignedLawFirm1Returned && AssignedLawFirm2Returned;
 
         public Guid GetId(string idAttribute)
         {

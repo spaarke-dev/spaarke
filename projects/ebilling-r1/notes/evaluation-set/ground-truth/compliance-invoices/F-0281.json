@@ -1,0 +1,38 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0281",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0281","generator_id":"gen_eval_set.py@1 F-0281","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0281.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-05"},
+ "header":{"firm":"Lindenmeyer and Whitcombe LLP","firm_invoice_number":"INV-2025-62130","invoice_date":"2025-06-01","billing_period_start":"2025-05-01","billing_period_end":"2025-05-31","firm_matter_reference":"41685-0011","po_number":"PO-4598285","fees_total":8243.0,"expenses_total":5077.64,"adjustments_total":0.0,"total_due":13320.64,"currency":"USD"},
+ "timekeepers":[{"name":"Helena Nakamura","title":"Associate","rate":315.0,"billed_as":"HN"},{"name":"Naomi Zielinski","title":"Senior Associate","rate":370.0,"billed_as":"NZ"},{"name":"Peter Carmichael","title":"Paralegal","rate":145.0,"billed_as":"PC"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2025-01-19","timekeeper":"PC","timekeeper_name":"Peter Carmichael","timekeeper_title":"Paralegal","title":"Para","hours":0.9,"rate":145.0,"amount":130.5,"narrative":"Analyze exposure and damages model for the lease dispute","codes":["L120","A104"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2025-02-02","timekeeper":"NZ","timekeeper_name":"Naomi Zielinski","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":0.2,"rate":370.0,"amount":74.0,"narrative":"Draft notice of appeal and docketing statement for the regulatory inquiry","codes":["L510","A103"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2025-05-01","timekeeper":"HN","timekeeper_name":"Helena Nakamura","timekeeper_title":"Associate","title":"Assoc","hours":1.3,"rate":315.0,"amount":409.5,"narrative":"Prepare monthly status report to client regarding the data incident","codes":["L190","A111"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2025-05-06","timekeeper":"NZ","timekeeper_name":"Naomi Zielinski","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":2.1,"rate":370.0,"amount":777.0,"narrative":"Review court docket and calendar of pending deadlines for the vendor agreement","codes":[],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2025-05-08","timekeeper":"NZ","timekeeper_name":"Naomi Zielinski","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":1.3,"rate":370.0,"amount":481.0,"narrative":"Prepare for oral argument in the lease dispute","codes":["L530","A101"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2025-05-08","timekeeper":"PC","timekeeper_name":"Peter Carmichael","timekeeper_title":"Paralegal","title":"Para","hours":1.3,"rate":145.0,"amount":188.5,"narrative":"Draft appellate brief in the lease dispute","codes":["L520","A103"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2025-05-09","timekeeper":"PC","timekeeper_name":"Peter Carmichael","timekeeper_title":"Paralegal","title":"Para","hours":0.5,"rate":205.0,"amount":102.5,"narrative":"Revise appellate brief after cite check","codes":["L520","A104"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2025-05-16","timekeeper":"HN","timekeeper_name":"Helena Nakamura","timekeeper_title":"Associate","title":"Assoc","hours":4.0,"rate":315.0,"amount":1260.0,"narrative":"Draft appellate brief in the distribution agreement","codes":["L520","A103"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"fee","date":"2025-05-16","timekeeper":"HN","timekeeper_name":"Helena Nakamura","timekeeper_title":"Associate","title":"Assoc","hours":4.0,"rate":315.0,"amount":1260.0,"narrative":"Prepare monthly status report to client regarding the construction contract","codes":["L190","A111"],"page":2,"narrative_style":"clear"},
+  {"n":10,"line_type":"fee","date":"2025-05-16","timekeeper":"HN","timekeeper_name":"Helena Nakamura","timekeeper_title":"Associate","title":"Assoc","hours":4.0,"rate":315.0,"amount":1260.0,"narrative":"Draft appellate brief in the licensing dispute","codes":["L520","A103"],"page":2,"narrative_style":"clear"},
+  {"n":11,"line_type":"fee","date":"2025-05-16","timekeeper":"HN","timekeeper_name":"Helena Nakamura","timekeeper_title":"Associate","title":"Assoc","hours":1.5,"rate":315.0,"amount":472.5,"narrative":"Prepare for oral argument in the employment claim","codes":["L530","A101"],"page":2,"narrative_style":"clear"},
+  {"n":12,"line_type":"fee","date":"2025-05-16","timekeeper":"HN","timekeeper_name":"Helena Nakamura","timekeeper_title":"Associate","title":"Assoc","hours":0.1,"rate":315.0,"amount":31.5,"narrative":"Review court docket and calendar of pending deadlines for the licensing dispute","codes":["L190","A104"],"page":2,"narrative_style":"clear"},
+  {"n":13,"line_type":"fee","date":"2025-05-22","timekeeper":"HN","timekeeper_name":"Helena Nakamura","timekeeper_title":"Associate","title":"Assoc","hours":3.0,"rate":315.0,"amount":945.0,"narrative":"Prepare case assessment memorandum regarding the regulatory inquiry and recommended strategy","codes":["L120","A103"],"page":2,"narrative_style":"clear"},
+  {"n":14,"line_type":"fee","date":"2025-05-26","timekeeper":"NZ","timekeeper_name":"Naomi Zielinski","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":2.3,"rate":370.0,"amount":851.0,"narrative":"Analyze exposure and damages model for the licensing dispute","codes":["L120","A104"],"page":2,"narrative_style":"clear"},
+  {"n":15,"line_type":"expense","date":"2025-05-23","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":4666.76,"amount":4666.76,"narrative":"Consulting expert fees","codes":["E119"],"page":2,"narrative_style":"clear"},
+  {"n":16,"line_type":"expense","date":"2025-05-30","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":410.88,"amount":410.88,"narrative":"Airfare to Dallas for deposition","codes":["E110"],"page":2,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["230 Peachtree Way","Portland","Tax ID 69-6820172"],"template":"T22","pages":2},
+ "rule_set_id":"RS-05",
+ "context":{"matter_open":"2024-09-14","matter_close":"2025-08-29","matter_budget":78282.0,"approved_timekeepers":["Helena Zielinski","Peter Carmichael","Marcus Carmichael","Helena Nakamura","Oliver Halloran","Ivan Eriksen","Gregory Delacroix","Naomi Zielinski"],"invoice_received_date":"2025-06-16"},
+ "expected_findings":[
+  {"rule_id":"RS-05-R01","rule_type":"ApprovedRate","scope":"line","line_refs":[7],"consequence":"Reduce"},
+  {"rule_id":"RS-05-R06","rule_type":"DailyHoursCap","scope":"line","line_refs":[11],"consequence":"Flag"},
+  {"rule_id":"RS-05-R07","rule_type":"RequiredData","scope":"line","line_refs":[4],"consequence":"Reject"},
+  {"rule_id":"RS-05-R08","rule_type":"InvoiceAge","scope":"line","line_refs":[1],"consequence":"Disallow"},
+  {"rule_id":"RS-05-R08","rule_type":"InvoiceAge","scope":"line","line_refs":[2],"consequence":"Disallow"}
+ ],
+ "seeded_violations":5
+}

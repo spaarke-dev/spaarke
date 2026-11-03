@@ -132,16 +132,16 @@ public static class SecureBuRoleDepthAssertion
     /// deliberate per-identity holder. The same role held through a TEAM promotes every current and future member (a
     /// default business-unit team cannot be curated), so it is not excepted and stays the ordinary finding.</para>
     ///
+    /// <para><b>No Billing Administrator entry.</b> EB-D-150 (2026-10-26) accepted its Global Read on sprk_Policy / sprk_PolicyVersion; the
+    /// owner lowered that Read to Deep instead (EB-D-162, 2026-10-27), which does not accept the reach, so a direct holder whose Deep Read
+    /// still reaches the secure BU (before design §5.2) is an ordinary finding.</para>
+    ///
     /// <para><b>Visible, not silent.</b> Every match is returned on the outcome and logged by
     /// <c>SecureRecordIsolationCensusJob</c> at Information on every run. Adding to this list requires editing this file
     /// and citing the owner decision.</para>
     /// </remarks>
     public static readonly IReadOnlyList<AcceptedRoleException> AcceptedRoleExceptions = new[]
     {
-        new AcceptedRoleException(
-            "Spaarke Billing Administrator",
-            new[] { "prvReadsprk_Policy", "prvReadsprk_PolicyVersion" },
-            "EB-D-150 (ebilling, owner 2026-10-26)"),
         new AcceptedRoleException(
             "Spaarke AI Analysis Admin",
             new[] { "prvReadsprk_analysis", "prvReadsprk_analysisoutput" },

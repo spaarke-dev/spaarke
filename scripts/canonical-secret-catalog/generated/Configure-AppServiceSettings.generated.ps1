@@ -45,6 +45,9 @@ param(
     [string]$VaultName,
 
     [Parameter(Mandatory = $true)]
+    [string[]]$AiSearchIndexNames,
+
+    [Parameter(Mandatory = $true)]
     [string]$BffAppClientId,
 
     [Parameter(Mandatory = $true)]
@@ -177,9 +180,11 @@ $settings = @(
 
 if (-not [string]::IsNullOrWhiteSpace($OpenaiMonthlyLimitUsd)) { $settings += "AiSpendLimit__MonthlyLimitUsd=$OpenaiMonthlyLimitUsd" }
 
+for ($i = 0; $i -lt $AiSearchIndexNames.Count; $i++) { $settings += "AiSearch__AllowedIndexes__$i=$($AiSearchIndexNames[$i])" }
+
 for ($i = 0; $i -lt $CustomerWorkforceTenantIds.Count; $i++) { $settings += "WorkforceIdentity__CustomerTenantIds__$i=$($CustomerWorkforceTenantIds[$i])" }
 
-$exclusiveListKeys = @('WorkforceIdentity__CustomerTenantIds')
+$exclusiveListKeys = @('AiSearch__AllowedIndexes', 'WorkforceIdentity__CustomerTenantIds')
 
 function Remove-StaleListSettings {
     # Task 255: removes every setting under an exclusive list key that $settings does not name — the bare key or

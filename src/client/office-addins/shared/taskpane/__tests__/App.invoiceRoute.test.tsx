@@ -12,6 +12,7 @@ import { getAvailableTabs } from '../components/TaskPaneNavigation';
 import * as SaveViewModule from '../components/views/SaveView';
 import * as InvoiceViewModule from '../components/views/InvoiceView';
 import * as CreateTodoViewModule from '../components/views/CreateTodoView';
+import { resolveEmailIdentity } from '../services/documentIdentityService';
 
 jest.mock('@shared/services', () => ({
   authService: {
@@ -109,15 +110,49 @@ describe('App — the Invoice view is reachable only through ?action=submitInvoi
 
     await waitFor(() => expect(InvoiceView).toHaveBeenCalled());
     expect(SaveView).not.toHaveBeenCalled();
-    // A1: the submission and the firm list are wired (ebilling's from-email contract); corrections stay off.
+    // A1: the submission and the firm list are wired (ebilling's from-email contract); corrections are on (ebilling
+    // 097b/c/e live on dev) with their prefill.
     const props = InvoiceView.mock.calls[InvoiceView.mock.calls.length - 1]![0];
     expect(typeof props.onSubmit).toBe('function');
     expect(typeof props.loadFirms).toBe('function');
-    expect(props.correctionAvailable).toBeUndefined();
+    expect(props.correctionAvailable).toBe(true);
+    expect(typeof props.loadCorrectionPrefill).toBe('function');
     // Stable seams across re-renders: a new `loadFirms` would make the view reload the firms and drop the choice.
     const first = InvoiceView.mock.calls[0]![0];
     expect(props.loadFirms).toBe(first.loadFirms);
     expect(props.onSubmit).toBe(first.onSubmit);
+  });
+
+  it('passes the record the open email is filed to (the Save tab\'s "Filed to") to the Invoice view', async () => {
+    const MATTER_ID = '15f7ff99-6f64-f111-ab0c-7ced8ddc4cc6';
+    (resolveEmailIdentity as jest.Mock).mockResolvedValueOnce({
+      kind: 'resolved',
+      documentId: 'doc-1',
+      relatedRecord: {
+        entityType: 'sprk_matter',
+        id: MATTER_ID,
+        name: 'Patent',
+        displayName: 'Patent',
+        number: 'PAT-1',
+      },
+    });
+    const base = outlookAdapter();
+    const adapter = {
+      ...base,
+      getCapabilities: () => ({ ...base.getCapabilities(), canResolveEmailIdentity: true }),
+      getEmailIdentityKeys: async () => ({ internetMessageId: '<m1@x>' }),
+    } as unknown as IHostAdapter;
+    render(<App hostAdapter={adapter} initialAction="submitInvoice" />);
+
+    await waitFor(() =>
+      expect(InvoiceView.mock.calls[InvoiceView.mock.calls.length - 1]![0].filedRecord).toEqual({
+        id: MATTER_ID,
+        entityType: 'Matter',
+        logicalName: 'sprk_matter',
+        name: 'Patent',
+        displayInfo: 'PAT-1',
+      })
+    );
   });
 
   it('the default pane (no action) renders Save and no Invoice view', async () => {

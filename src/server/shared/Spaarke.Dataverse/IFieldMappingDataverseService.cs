@@ -68,6 +68,24 @@ public interface IFieldMappingDataverseService
         CancellationToken ct = default);
 
     /// <summary>
+    /// <see cref="UpdateExistingRecordFieldsAsync(string, Guid, Dictionary{string, object?}, CancellationToken)"/> that can
+    /// run AS a Dataverse user (<c>MSCRMCallerID</c> impersonation, the counterpart of
+    /// <see cref="UpdateRecordFieldsAsync"/>'s <c>impersonateSystemUserId</c>): <c>If-Match: *</c> AND the impersonation
+    /// header, so a write that acts for a person cannot re-create a row deleted since it was checked (#2081).
+    /// </summary>
+    /// <param name="impersonateSystemUserId">The <c>systemuserid</c> to act as; null = app-only (the same request as the
+    /// overload without it). <see cref="Guid.Empty"/> is refused before anything is sent (task 104, fail closed).</param>
+    /// <exception cref="KeyNotFoundException">The record does not exist (Dataverse refused the precondition).</exception>
+    /// <remarks>An overload, not an optional parameter on the method above: that one is set up in expression trees by
+    /// existing tests, which cannot call a method through an optional argument.</remarks>
+    Task UpdateExistingRecordFieldsAsync(
+        string entityLogicalName,
+        Guid recordId,
+        Dictionary<string, object?> fields,
+        Guid? impersonateSystemUserId,
+        CancellationToken ct = default);
+
+    /// <summary>
     /// Updates fields on an existing record ONLY IF it is still at <paramref name="expectedVersion"/> — its
     /// <c>versionnumber</c> as read earlier. Sends <c>If-Match: W/"{expectedVersion}"</c> (a Dataverse row's
     /// ETag is its version number), so a concurrent write in between makes this one fail instead of silently

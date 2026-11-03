@@ -483,6 +483,8 @@ public class FieldMappingPushAuthorizationContractTests
              (string?)FieldMappingPushLookups.RelationshipMetadataQuery, CallerSystemUserId),
             "the referenced table of the source lookup comes from its relationship metadata, read as the caller");
         host.Writes.Should().HaveCount(2);
+        host.UpdateOnlyWrites.Should().HaveCount(2).And.OnlyContain(w => w.Table == "sprk_invoice" && w.ImpersonatedAs == CallerSystemUserId,
+            "an invoice is pushed update-only (a deleted child is never re-created) and still AS THE CALLER");
         host.Writes.Should().AllSatisfy(w => w.Payload.Should().BeEquivalentTo(new Dictionary<string, object?>
         {
             ["sprk_AssignedToAttorney1@odata.bind"] = $"/contacts({AttorneyId:D})",
@@ -699,11 +701,25 @@ public class FieldMappingPushAuthorizationContractTests
             Entities.Setup(e => e.GetEntitySetNameAsync(targetEntity, It.IsAny<CancellationToken>())).ReturnsAsync(targetSet);
             Entities.Setup(e => e.GetEntitySetNameAsync("sprk_matter", It.IsAny<CancellationToken>())).ReturnsAsync("sprk_matters");
             Entities.Setup(e => e.GetEntitySetNameAsync("contact", It.IsAny<CancellationToken>())).ReturnsAsync("contacts");
+            // ebilling-r1 #2081: the invoice-family guard reads each pushed child's stored row (app-only) and refuses a missing
+            // one, so the children the caller's query found exist here too (no core lookups stored).
+            Entities.Setup(e => e.RetrieveAsync(targetEntity, It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync((string table, Guid id, string[] _, CancellationToken _) => new Microsoft.Xrm.Sdk.Entity(table, id));
             FieldMappings
                 .Setup(f => f.UpdateRecordFieldsAsync(
                     It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object?>>(), It.IsAny<CancellationToken>(), It.IsAny<Guid?>()))
                 .Callback((string _, Guid id, Dictionary<string, object?> payload, CancellationToken _, Guid? _) =>
                     Writes.Add((id, new Dictionary<string, object?>(payload))))
+                .Returns(Task.CompletedTask);
+            // ebilling-r1 #2081: an invoice or line is pushed UPDATE-ONLY (If-Match: *), still as the caller.
+            FieldMappings
+                .Setup(f => f.UpdateExistingRecordFieldsAsync(
+                    It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object?>>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+                .Callback((string table, Guid id, Dictionary<string, object?> payload, Guid? caller, CancellationToken _) =>
+                {
+                    Writes.Add((id, new Dictionary<string, object?>(payload)));
+                    UpdateOnlyWrites.Add((table, id, caller));
+                })
                 .Returns(Task.CompletedTask);
 
             // The SOURCE row, as the caller reads it (task 166 r2): a field-secured column the caller cannot read comes
@@ -788,6 +804,9 @@ public class FieldMappingPushAuthorizationContractTests
 
         /// <summary>Every child PATCH, with a copy of its payload.</summary>
         public List<(Guid Id, Dictionary<string, object?> Payload)> Writes { get; } = new();
+
+        /// <summary>The writes that went through the update-only overload (<c>If-Match: *</c>), with the user they acted as.</summary>
+        public List<(string Table, Guid Id, Guid? ImpersonatedAs)> UpdateOnlyWrites { get; } = new();
 
         internal static FieldMappingRuleEntity Rule(string sourceField, int sourceType, string targetField, int targetType) => new()
         {

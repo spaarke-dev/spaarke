@@ -142,9 +142,9 @@ public sealed partial class RecordCreationServicePipelineSeamTests
             (RecordCreationStep.CallerChecks, RecordCreationStepState.Ran),
             (RecordCreationStep.SecureRootPlan, RecordCreationStepState.Ran),
             (RecordCreationStep.Owner, RecordCreationStepState.Ran),
-            (RecordCreationStep.SearchIndexDefault, RecordCreationStepState.NoOp),
+            (RecordCreationStep.SearchIndexDefault, RecordCreationStepState.Ran), // task 039: an event is search-indexed now
             (RecordCreationStep.CreatorAndDefaults, RecordCreationStepState.Ran),
-            (RecordCreationStep.StampAndInheritance, RecordCreationStepState.Deferred),
+            (RecordCreationStep.StampAndInheritance, RecordCreationStepState.Ran),
             (RecordCreationStep.Create, RecordCreationStepState.Ran),
             (RecordCreationStep.PostCreate, RecordCreationStepState.Ran));
         Journal().Should().Equal(
@@ -254,9 +254,9 @@ public sealed partial class RecordCreationServicePipelineSeamTests
             (RecordCreationStep.CallerChecks, RecordCreationStepState.Skipped),
             (RecordCreationStep.SecureRootPlan, RecordCreationStepState.Ran),
             (RecordCreationStep.Owner, RecordCreationStepState.Ran),
-            (RecordCreationStep.SearchIndexDefault, RecordCreationStepState.NoOp),
+            (RecordCreationStep.SearchIndexDefault, RecordCreationStepState.Ran), // task 039: an event is search-indexed now
             (RecordCreationStep.CreatorAndDefaults, RecordCreationStepState.Ran),
-            (RecordCreationStep.StampAndInheritance, RecordCreationStepState.Deferred),
+            (RecordCreationStep.StampAndInheritance, RecordCreationStepState.Ran),
             (RecordCreationStep.Create, RecordCreationStepState.Ran),
             (RecordCreationStep.PostCreate, RecordCreationStepState.Ran));
         Journal().Should().Equal("owner", "create", "restamp", "mirror", "membership");
@@ -540,6 +540,21 @@ public sealed partial class RecordCreationServicePipelineSeamTests
         _creates.Should().ContainSingle().Which.Id.Should().Be(outcome.CreatedId!.Value);
     }
 
+    // #2515: an event's number is the platform's (EVT-{SEQNUM:6}), so a key-refused event create is retried on the same id, as a matter's.
+    [Fact]
+    public async Task CreateAsync_AnEventWhoseNumberIsTaken_IsRetriedOnTheSameId_AndCreatesOneRow()
+    {
+        _createFaults.Enqueue(NumberTaken());
+
+        var outcome = await Service().CreateAsync(
+            WebApiRequest("sprk_event", new { sprk_eventname = "Hearing", sprk_RegardingMatter_bind = $"/sprk_matters({OrdinaryMatter:D})" }),
+            AsCaller(), CancellationToken.None);
+
+        outcome.Succeeded.Should().BeTrue(outcome.Refusal?.Detail);
+        _createAttempts.Should().HaveCount(2);
+        _createAttempts.Select(a => a.Id).Distinct().Should().ContainSingle();
+    }
+
     [Fact]
     public async Task CreateAsync_AMatterWhoseNumberIsTakenOnEveryAttempt_Is409NumberUnavailable_AndRunsNoPostCreateStep()
     {
@@ -576,7 +591,7 @@ public sealed partial class RecordCreationServicePipelineSeamTests
         _createFaults.Enqueue(NumberTaken());
 
         var create = () => Service().CreateAsync(
-            WebApiRequest("sprk_event", new { sprk_eventname = "Hearing", sprk_RegardingMatter_bind = $"/sprk_matters({OrdinaryMatter:D})" }),
+            WebApiRequest("sprk_memo", new { sprk_name = "Note", sprk_RegardingMatter_bind = $"/sprk_matters({OrdinaryMatter:D})" }),
             AsCaller(), CancellationToken.None);
 
         await create.Should().ThrowAsync<HttpRequestException>();
@@ -872,12 +887,17 @@ public sealed partial class RecordCreationServicePipelineSeamTests
 
         public Func<string, Exception?>? ThrowOn { get; set; }
 
+        /// <summary>Answers a read itself (instead of the scripted Dataverse) when it returns a response; null lets it through.</summary>
+        public Func<string, DataverseUserResponse?>? RespondTo { get; set; }
+
         public Task<DataverseUserResponse> GetAsync(string relativePath, CancellationToken cancellationToken)
         {
             var path = Uri.UnescapeDataString(relativePath);
             journal.Add(KindOf(path));
             if (ThrowOn?.Invoke(path) is { } fault)
                 throw fault;
+            if (RespondTo?.Invoke(path) is { } answer)
+                return Task.FromResult(answer);
             if (path == "WhoAmI()" && WhoAmIFailure is { } failure)
                 return Task.FromResult(failure);
             return inner.GetAsync(relativePath, cancellationToken);

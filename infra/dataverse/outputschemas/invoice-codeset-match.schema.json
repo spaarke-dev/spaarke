@@ -1,0 +1,24 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://spaarke.com/schemas/analysisaction/invoice-codeset-match.schema.json",
+  "title": "Invoice Code Set Match (INVOICE-CODESET-MATCH@v1) - Output Schema (invoice-codeset-match)",
+  "description": "Output schema for sprk_analysisaction sprk_actioncode='invoice-codeset-match' (ebilling-r1 task 054, FR-22, D-93, D-52). Deployed by scripts/Deploy-ActionMirrors.ps1 as the sprk_outputschemajson sidecar of infra/dataverse/actions/invoice-codeset-match.action.json. It MUST stay in step with IInvoiceAi.MatchCodeSetAsync's parser (InvoiceAiOutputParser.ParseCodeSetMatch in Services/Ai/PublicContracts/InvoiceAi.cs) and the result DTO (InvoiceAiContracts.cs: InvoiceCodeSetMatchResult); tests/integration/contract/Catalog/InvoiceCodeSetMatchActionContractTests.cs pins them together. codeSetId is a plain string on purpose: the candidate ids differ per request, so a static enum would be stale; CodeSetProposalService refuses any value that is not a candidate id or 'none'. Azure OpenAI Structured Outputs compatible: additionalProperties:false, object-level required array listing every property.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["codeSetId", "confidence", "reason"],
+  "$comment-required": "Object-level required arrays only - property-level boolean 'required' is FORBIDDEN (OpenAiFunctionSchemaValidator).",
+  "properties": {
+    "codeSetId": {
+      "type": "string",
+      "description": "The codeSetId of the chosen candidate, copied exactly, or the string none when no candidate fits."
+    },
+    "confidence": {
+      "type": "number",
+      "description": "Certainty, 0.0 to 1.0, that the answer (a candidate or none) is right."
+    },
+    "reason": {
+      "type": "string",
+      "description": "One or two sentences for an administrator: the work the reference involves and why the chosen code set covers it, or why no candidate does. Code sets are named by name, never by id."
+    }
+  }
+}

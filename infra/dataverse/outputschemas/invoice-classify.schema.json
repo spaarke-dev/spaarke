@@ -1,0 +1,57 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://spaarke.com/schemas/analysisaction/invoice-classify.schema.json",
+  "title": "Invoice Classify (INVOICE-CLASSIFY@v1) - Output Schema (invoice-classify)",
+  "description": "Output schema for sprk_analysisaction sprk_actioncode='invoice-classify' (ebilling-r1 task 042, FR-46, D-52). Replaces the C# FinanceJsonSchemas.ClassificationResultSchema (deleted by task 042). Deployed by scripts/Deploy-ActionMirrors.ps1 as the sprk_outputschemajson sidecar of infra/dataverse/actions/invoice-classify.action.json. It MUST stay in step with IInvoiceAi.ClassifyAsync's parser (InvoiceAiOutputParser.ParseClassify in Services/Ai/PublicContracts/InvoiceAi.cs) and the result DTOs (InvoiceAiContracts.cs: InvoiceClassifyResult, InvoiceClassifyHints); tests/integration/contract/Catalog/InvoiceClassifyActionContractTests.cs pins the three together. Azure OpenAI Structured Outputs compatible: additionalProperties:false, object-level required array, every property listed in required (optional values are nullable, not omitted). Property order is the legacy order (classification, confidence, hints, reasoning) so the migration changes the carrier, not the decoding behaviour (FR-46 parity).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["classification", "confidence", "hints", "reasoning"],
+  "$comment-required": "Object-level required array only - property-level boolean 'required' is FORBIDDEN (OpenAiFunctionSchemaValidator).",
+  "properties": {
+    "classification": {
+      "type": "string",
+      "description": "InvoiceCandidate: appears to be an invoice, billing statement or fee-bearing financial document from a legal or professional-services provider. NotInvoice: clearly not an invoice. Unknown: ambiguous or unreadable, needs human review.",
+      "enum": ["InvoiceCandidate", "NotInvoice", "Unknown"]
+    },
+    "confidence": {
+      "type": "number",
+      "description": "Certainty about the classification, 0.0 to 1.0. It is certainty about the verdict, not the probability that the document is an invoice: a clear NotInvoice has HIGH confidence."
+    },
+    "hints": {
+      "type": ["object", "null"],
+      "description": "Best-effort invoice header hints. All six members are always present; a value that cannot be determined from the text is null (never guessed). The whole object is null when the document is NotInvoice.",
+      "additionalProperties": false,
+      "required": ["vendorName", "invoiceNumber", "invoiceDate", "totalAmount", "currency", "matterReference"],
+      "properties": {
+        "vendorName": {
+          "type": ["string", "null"],
+          "description": "The entity issuing the invoice (law firm or service provider), from letterhead or 'From' / 'Bill From'."
+        },
+        "invoiceNumber": {
+          "type": ["string", "null"],
+          "description": "Invoice, statement or fee-note number, as printed."
+        },
+        "invoiceDate": {
+          "type": ["string", "null"],
+          "description": "Invoice date as YYYY-MM-DD. If only a month and year are given, the first day of that month."
+        },
+        "totalAmount": {
+          "type": ["number", "null"],
+          "description": "Total amount due or grand total as a plain decimal number: no currency symbol, no thousands separators."
+        },
+        "currency": {
+          "type": ["string", "null"],
+          "description": "ISO 4217 currency code. USD when the document uses a bare dollar sign."
+        },
+        "matterReference": {
+          "type": ["string", "null"],
+          "description": "Matter number, case number, project code or client-matter reference, as printed."
+        }
+      }
+    },
+    "reasoning": {
+      "type": ["string", "null"],
+      "description": "Brief explanation (1-3 sentences) of the signals that drove the classification and the confidence. Names which header elements were found (invoice), what kind of document it is (not an invoice) or what made it ambiguous (unknown)."
+    }
+  }
+}

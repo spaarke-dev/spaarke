@@ -1,0 +1,111 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="113" project="ebilling-r1">
+  <metadata>
+    <title>Read-time Procedure-change banner on /review: app-only comparison with the snapshot, internal callers only</title>
+    <phase>3 Rules (WP3) — Procedure model (EB-D-148), wave W3-F</phase>
+    <gate>082 (resolver and 7.4 snapshot) and 100 (Invoice Review read model) merged; 099 merged (step-0 verdict on the request)</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Adds a computed member to an internal BFF read model that must never reach external callers and must never read as "no change" on a fault.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Single read-model addition over 082's resolver and 099's verdict, with an exact state contract; the authorization decision is 099's.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P3-F</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>082, 100</deps>
+    <tags>bff, api, rules, testing</tags>
+    <estimated-effort>1 day</estimated-effort>
+  </metadata>
+
+  <prompt>Add the read-time banner of notes/procedure-and-file-model.md section 8.2 and section 15 answer 6 to GET /api/finance/invoices/{invoiceId}/review only: for an open invoice and an internal caller, re-run 082's resolver app-only once for the invoice, compare the result with the invoice's evaluation snapshot, and return one banner state. Nothing is stored.</prompt>
+
+  <role>SPAARKE platform developer. Expert in the Invoice Review read model (100), the billing resolver (082) and fail-closed read paths.</role>
+
+  <goal>An internal reviewer of an open invoice sees "The procedures that apply to this invoice have changed; re-check to apply them." exactly when the current resolution differs from the snapshot, a "Not yet checked" state when there is no usable snapshot, and "Procedure changes could not be checked" on any fault, and nobody else ever receives the member.</goal>
+
+  <context>
+    <background>Model 8.2 (banner: how, whose rights, snapshot states, cost bound, coverage, fault, who sees it, nothing written, known limits), 15 answer 6 (text), 7.4 (snapshot), 5.3 (step 0). Route: InvoiceLineReviewEndpoints.GetReview (Api/Finance/InvoiceLineReviewEndpoints.cs:109) calls InvoiceReviewReadService.GetAsync (Services/Finance/InvoiceReviewReadService.cs:373), which returns InvoiceReviewDto (:21). The snapshot is the submission's sprk_findingsjson with 082's 7.4 members. 099 sets the step-0 verdict item on the request only when the caller was classed internal.</background>
+    <relevant-files>
+      <file role="new">src/server/api/Sprk.Bff.Api/Services/Finance/Procedures/ProcedureChangeBanner.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Finance/InvoiceReviewReadService.cs (InvoiceReviewDto: one additive nullable member)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/Finance/InvoiceLineReviewEndpoints.cs (GetReview passes the step-0 verdict)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/DI/FinanceModule.cs (shared append point)</file>
+      <file role="new">tests/unit/Sprk.Bff.Api.Tests/Services/Finance/Procedures/ProcedureChangeBannerTests.cs</file>
+      <file role="modify">tests/unit/Sprk.Bff.Api.Tests/Services/Finance/InvoiceReviewReadServiceTests.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="model 8.2 (one route)">Computed only on GET /api/finance/invoices/{invoiceId}/review, once per request. No other route, list, export, external route, firm findings DTO or SPA projection computes or carries it.</constraint>
+    <constraint source="model 8.2 (uac-r2 N3, C4)">Computed and returned only when 099's verdict item says Internal; otherwise the member is absent (null and omitted from JSON). It is never computed for CIAM contacts.</constraint>
+    <constraint source="model 8.2 (uac-r2 C2)">The comparison runs app-only through 082's ProcedureResolver for the invoice's core record, firm and every line's work date, and compares: the Procedure Versions chosen, the policy versions applied, and the override content that decided them. Any difference → Changed.</constraint>
+    <constraint source="model 8.2 (uac-r2 C1), 15 answer 6">States and texts, exactly: Changed → "The procedures that apply to this invoice have changed; re-check to apply them."; NotChanged → no text; NotYetChecked → "Not yet checked" (no snapshot yet, or a snapshot without the 7.4 Procedure and override members); CouldNotBeChecked → "Procedure changes could not be checked". The member carries the state and the text only: never a diff, names, ids, counts or reasons.</constraint>
+    <constraint source="model 8.2">Only open invoices (pending or In Review) get a state; decided invoices get no member. An invoice judged only by BILL-SYSTEM-SUBMISSION is exempt (no member).</constraint>
+    <constraint source="model 8.2 (uac-r2 C3)">Cost bound: one resolution per invoice; the query count does not depend on the line count. A 429, a timeout or any fault → CouldNotBeChecked; the review response is still returned (never blocked, never a 5xx because of the banner). The fault log carries ids and counts only.</constraint>
+    <constraint source="model 8.2">Nothing is written: no column, no marker, no cache entry that outlives the request.</constraint>
+    <constraint source=".claude/constraints/bff-extensions.md">Concrete class registered in AddFinanceModule; publish-size delta; no package; no new HIGH CVE.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ebilling-r1/notes/procedure-and-file-model.md (sections 7.4, 8.2, 15)</file>
+      <file>projects/ebilling-r1/tasks/100-review-read-model-line-decisions.poml</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+    <patterns>
+      <pattern name="Read model with a fixed read count" location="src/server/api/Sprk.Bff.Api/Services/Finance/InvoiceReviewReadService.cs">Fixed number of reads per invoice; copy its query-count test.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">ProcedureChangeBanner: snapshot parse, resolver call, comparison, states, timeout and fault handling.</step>
+    <step order="2">InvoiceReviewDto member; GetReview passes the verdict; registration.</step>
+    <step order="3">Tests (criteria).</step>
+    <step order="4">dotnet build and test; publish-size delta.</step>
+    <step order="5">Update TASK-INDEX.md: this task's status cell to "✅ [done]".</step>
+    <step order="6">Record deviations in projects/ebilling-r1/notes/113-procedure-change-banner.md.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If 099's verdict item is not available on the review route, STOP; do not resolve the caller's flag a second time here.</trigger>
+    <trigger>If 082's snapshot cannot express the override content per rule, STOP and ask; do not compare on a subset and call it "no change".</trigger>
+  </escalation>
+
+  <justification>
+    <existing>InvoiceReviewReadService (100) builds the review read model; ProcedureResolver (082) computes the current resolution; nothing compares the two.</existing>
+    <extension>The DTO gains one member; the comparison is a separate class because it calls the resolver app-only with its own timeout and fault rules, which the caller-scoped read model does not have.</extension>
+    <cost-of-doing-nothing>After an override removal, a Procedure retire or a new version, a reviewer approves an invoice judged under rules that no longer apply without any sign of it (O-21 revised: no automatic re-check).</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="dotnet">build, test</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">ProcedureChangeBanner.cs, InvoiceReviewReadService.cs, InvoiceLineReviewEndpoints.cs, FinanceModule.cs</output>
+    <output type="test">ProcedureChangeBannerTests.cs, InvoiceReviewReadServiceTests.cs</output>
+    <output type="docs">projects/ebilling-r1/notes/113-procedure-change-banner.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Changed, each must fire: an override removed, an override added, a record rule switched Off, a Procedure retired, a Procedure newly assigned, a version ended or retired, a first version newly published, a date change, each against a snapshot that cited the old outcome.</criterion>
+    <criterion testable="true">NotChanged, must not fire: the same resolution as the snapshot; an override for firm F on firm G's invoice; a change on an unrelated record.</criterion>
+    <criterion testable="true">NotYetChecked: an invoice with no snapshot and one with a pre-v5 snapshot each return "Not yet checked", never NotChanged.</criterion>
+    <criterion testable="true">CouldNotBeChecked: a resolver fault, a 429 and a timeout each return "Procedure changes could not be checked" and the review is still 200; the log carries no names or reasons.</criterion>
+    <criterion testable="true">Absent member: a request without the Internal verdict; a decided invoice; an invoice judged only by BILL-SYSTEM-SUBMISSION.</criterion>
+    <criterion testable="true">The member never carries a diff, name, id, count or reason (serialised DTO checked); no file under Api/ExternalAccess or the firm projection references the banner type (source-scan test).</criterion>
+    <criterion testable="true">The query count for a 1-line and a 150-line invoice is equal; no Dataverse write occurs.</criterion>
+    <criterion testable="true">Publish-size delta recorded; no package; no new HIGH CVE.</criterion>
+    <criterion testable="true">Cover the stated contract plus the edge cases named above. Anything beyond that needs a one-line justification in task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>Known limits (model 8.2): one bit about a Secure distance-1 parent; a non-atomic publish can briefly show a false banner or "could not be checked". Invoice lists do not show the banner in R1. ebilling-r2 owns the explicit re-check. The review page UI (110) shows the member; that is 110's.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load the knowledge files first. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

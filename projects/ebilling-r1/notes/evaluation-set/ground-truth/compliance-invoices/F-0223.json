@@ -1,0 +1,31 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0223",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0223","generator_id":"gen_eval_set.py@1 F-0223","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0223.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-01"},
+ "header":{"firm":"Rutherford and Yardley LLP","firm_invoice_number":"INV-2025-11885","invoice_date":"2026-06-23","billing_period_start":"2026-04-01","billing_period_end":"2026-04-30","firm_matter_reference":"74009-0026","po_number":"PO-4521393","fees_total":7648.75,"expenses_total":187.11,"adjustments_total":0.0,"total_due":7835.86,"currency":"USD"},
+ "timekeepers":[{"name":"Helena Oyelaran","title":"Senior Associate","rate":565.0,"billed_as":"HO"},{"name":"Rafael Mbeki","title":"Associate","rate":475.0,"billed_as":"RM"},{"name":"Samuel Blackwood","title":"Associate","rate":460.0,"billed_as":"SB"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2026-04-02","timekeeper":"SB","timekeeper_name":"Samuel Blackwood","timekeeper_title":"Associate","title":"Assoc","hours":1.65,"rate":460.0,"amount":759.0,"narrative":"Prepare monthly status report to client regarding the lease dispute","codes":["L190","A111"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2026-04-03","timekeeper":"RM","timekeeper_name":"Rafael Mbeki","timekeeper_title":"Associate","title":"Assoc","hours":1.95,"rate":475.0,"amount":926.25,"narrative":"Prepare fact witness for testimony regarding the vendor agreement","codes":["L410","A101"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2026-04-08","timekeeper":"SB","timekeeper_name":"Samuel Blackwood","timekeeper_title":"Associate","title":"Assoc","hours":2.7,"rate":460.0,"amount":1242.0,"narrative":"Attend hearing on witness list in the data incident","codes":["L450","A109"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2026-04-23","timekeeper":"HO","timekeeper_name":"Helena Oyelaran","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":2.7,"rate":565.0,"amount":1525.5,"narrative":"Prepare expert witness for testimony in the lease dispute","codes":["L420","A101"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2026-04-28","timekeeper":"SB","timekeeper_name":"Samuel Blackwood","timekeeper_title":"Associate","title":"Assoc","hours":1.8,"rate":460.0,"amount":828.0,"narrative":"Attend trial day in the construction contract","codes":["L450","A109"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2026-04-29","timekeeper":"HO","timekeeper_name":"Helena Oyelaran","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":2.4,"rate":565.0,"amount":1356.0,"narrative":"Draft post-trial motion in the supply agreement","codes":["L460","A103"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2026-04-30","timekeeper":"SB","timekeeper_name":"Samuel Blackwood","timekeeper_title":"Associate","title":"Assoc","hours":2.2,"rate":460.0,"amount":1012.0,"narrative":"Prepare examination outlines for trial in the construction contract","codes":["L440","A101"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"expense","date":"2026-04-03","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":19.0,"rate":0.63,"amount":11.97,"narrative":"Mileage to courthouse","codes":["E109"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"expense","date":"2026-04-28","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":39.0,"rate":0.69,"amount":26.91,"narrative":"Mileage to courthouse","codes":["E109"],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"expense","date":"2026-04-28","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":549.0,"rate":0.27,"amount":148.23,"narrative":"Photocopies - 549 pages","codes":["E101"],"page":1,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["884 Pine Street","Boston","Tax ID 95-7684906"],"template":"T08","pages":1},
+ "rule_set_id":"RS-01",
+ "context":{"matter_open":"2025-06-04","matter_close":"2026-07-29","matter_budget":56343.0,"approved_timekeepers":["Clara Esposito","Rafael Mbeki","Helena Oyelaran","Samuel Blackwood","Samuel Zielinski","Elena Yilmaz","Hector Esposito","Gideon Fairweather"],"invoice_received_date":"2026-06-24"},
+ "expected_findings":[
+  {"rule_id":"RS-01-R01","rule_type":"TimeIncrement","scope":"line","line_refs":[1],"consequence":"Reduce"},
+  {"rule_id":"RS-01-R01","rule_type":"TimeIncrement","scope":"line","line_refs":[2],"consequence":"Reduce"},
+  {"rule_id":"RS-01-R05","rule_type":"ExpenseRule","scope":"line","line_refs":[10],"consequence":"Reduce"},
+  {"rule_id":"RS-01-R06","rule_type":"InvoiceAge","scope":"invoice","line_refs":[],"consequence":"Flag"}
+ ],
+ "seeded_violations":4
+}

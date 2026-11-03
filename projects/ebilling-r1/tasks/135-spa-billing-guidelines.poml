@@ -1,0 +1,157 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="135" project="ebilling-r1">
+  <metadata>
+    <title>SPA Billing Guidelines view</title>
+    <phase>5 Firm feedback (WP5) — wave W5-2</phase>
+    <gate>startable</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>One read endpoint reusing 130's firm-scope check and 076's visibility helper, plus one SPA widget; the visibility rules are a closed set with negative tests.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Read projection over published policy versions using the existing RuleBodyDescriber, and a widget following the SPA registry pattern.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P5-B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>076, 130</deps>
+    <tags>frontend, external-spa, bff, api</tags>
+    <estimated-effort>2 days</estimated-effort>
+  </metadata>
+
+  <prompt>Add the SPA Billing Guidelines view (FR-49, D-66): a firm-scoped read endpoint returning the published rules in force for the caller's firm — client-default rule sets plus that firm's rule sets, only those with "visible to firms" on — grouped by rule set, each rule with its RuleBodyDescriber plain-language description, parameters, clause quote, section reference and effective dates; and a Billing Guidelines widget in the external SPA that renders it.</prompt>
+
+  <role>SPAARKE full-stack developer. Expert in ASP.NET Core Minimal APIs on the external group, the Signals policy store, and Fluent v9 in the external SPA.</role>
+
+  <goal>BillingGuidelinesService and GET /api/v1/external/ebilling/billing-guidelines return the visible published rules for the caller's firm; a BillingGuidelinesWidget (ciam plane) renders them grouped by rule set; tests prove other firms' sets and flag-off sets never appear and no document link exists.</goal>
+
+  <context>
+    <background>Spec FR-49 (acceptance: a firm sees only client-default and its own rule sets; flag-off sets never appear; no link to a Procedure Library document anywhere in the SPA), FR-28, D-66, spec section 11 row "SPA Billing Guidelines view + endpoint" (reuses the describer and published versions; new read endpoint only). Published, in-force policy versions and rule set scope / visibility come from 019 and 076 (use 076's clause-visibility helper in Services/Finance/RuleSetService.cs). Description: RuleBodyDescriber.DescribeAsync (Services/Signals/RuleBodyDescriber.cs:106) with the billing entries 070 adds; it returns a refusal for a type it cannot describe. Firm of the caller: 130's firm-scope helper (active sprk_contactorganization memberships). External routes mount on /api/v1/external (Api/ExternalAccess/ExternalAccessEndpoints.cs:60-63, mount lines :100-132). SPA widgets register in src/client/external-spa/src/registry/widgetRegistry.ts (descriptor with planes, requiredEntitlement, lazyLoader; Invoices descriptor near :242).</background>
+    <relevant-files>
+      <file role="new">src/server/api/Sprk.Bff.Api/Services/Finance/BillingGuidelinesService.cs</file>
+      <file role="new">src/server/api/Sprk.Bff.Api/Api/Finance/BillingGuidelinesEndpoints.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ExternalAccessEndpoints.cs (one mount line; shared append point)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/DI/FinanceModule.cs (shared append point)</file>
+      <file role="new">src/client/external-spa/src/widgets/BillingGuidelinesWidget.tsx</file>
+      <file role="new">src/client/external-spa/src/api/billing-guidelines-client.ts</file>
+      <file role="modify">src/client/external-spa/src/registry/widgetRegistry.ts (one descriptor)</file>
+      <file role="new">tests/unit/Sprk.Bff.Api.Tests/Services/Finance/BillingGuidelinesServiceTests.cs</file>
+      <file role="new">tests/integration/auth/Finance/BillingGuidelinesScopeTests.cs</file>
+      <file role="new">src/client/external-spa/tests/BillingGuidelinesWidget.test.tsx</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="076" status="pending">Rule sets, publish, visibility helper</dependency>
+      <dependency task="130" status="pending">Firm-scope helper and external mount pattern</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="FR-49, D-66">Content comes only from Published, in-force policy versions (in force today) of rule sets that are client default or assigned to one of the caller's firms AND have "visible to firms" on. Never from the source document; no document link, container id or drive item id in the response.</constraint>
+    <constraint source="ADR-008, ADR-028">CIAM callers with at least one active firm membership; any other principal gets 403 with a stable code. Same firm resolution as 130; no second copy.</constraint>
+    <constraint source="FR-24">A rule the describer refuses is listed with its rule name and clause only and a "description unavailable" marker, never dropped silently and never described by fallback text; log the refusal with ids.</constraint>
+    <constraint source="ADR-019, 040">ProblemDetails with stable codes; RequireEbillingEnabled() (503 ebilling.disabled); the widget is hidden when the flag is off, using the same signal 051 uses.</constraint>
+    <constraint source="ADR-021, ADR-012, NFR-13">Fluent v9 tokens only; shared components first; works at 360 px width; no new npm package.</constraint>
+    <constraint source=".claude/constraints/bff-extensions.md">BFF hygiene: placement BFF (B1 caller identity, B4 live request), no package, publish-size delta recorded, no new HIGH CVE.</constraint>
+    <constraint source="076 review round 2 item 5 (notes/076-ruleset-endpoints.md section 8)">Clause text for firms comes only from RuleSetService.GetFirmClauseAsync(policyVersionId, invoiceFirmId, ct). invoiceFirmId is the firm of the INVOICE the finding belongs to: the invoice's sprk_vendororg, read server-side, and passed only after the route's own firm-membership check has established that the caller may see that invoice. Never pass a value from the request (body, query or route) and never the SPA identity's firm: a CIAM caller may belong to several firms, and internal callers have no SPA identity. Guid.Empty (the invoice has no firm) returns no text. Required test: a caller in two firms, viewing firm A's invoice, gets A's clause and never B's.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ebilling-r1/spec.md (FR-28, FR-49)</file>
+      <file>docs/guides/EXTERNAL-ACCESS-SPA-GUIDE.md</file>
+      <file>docs/architecture/external-access-spa-architecture.md</file>
+      <file>.claude/skills/fluent-v9-component/SKILL.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+    <patterns>
+      <pattern name="External widget body" location="src/client/external-spa/src/widgets/InvoicesWidget.tsx">Widget body shape and lazy registration in widgetRegistry.ts.</pattern>
+      <pattern name="Card container" location="src/client/external-spa/src/components/SectionCard.tsx">Visual anchor: one card per rule set with a Fluent v9 Accordion of rules.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Read 076's model (rule set scope, flag, current version, effective dates), 070's describer entries and 130's firm helper; npm install --legacy-peer-deps --no-audit --no-fund in src/client/external-spa.</step>
+    <step order="1">Service: select rule sets (client default plus caller firms', visible, Published), their in-force versions, describe each body, shape parameters for display (names and values from the rule body; units from the type schema), attach clause quote and section reference via 076's helper. Group by rule set (name, version, scope label "All firms" or the firm name, effective from / to).</step>
+    <step order="2">Route GET /api/v1/external/ebilling/billing-guidelines (directional) on the external group.</step>
+    <step order="3">Widget: one SectionCard per rule set, rules in an Accordion (description, parameters, clause quote, section, effective dates); empty state "No published billing guidelines"; register in widgetRegistry.ts for the ciam plane.</step>
+    <step order="4">Tests: service (other firm's set excluded; flag-off excluded; Draft and superseded versions excluded; describer refusal marked; no document field in any DTO); auth (401; 403 workforce or no-firm principal; 503 when off; 200); widget vitest (grouping, empty state, phone width).</step>
+    <step order="5">dotnet build and dotnet test green; npm run build and npm test green; publish-size delta and vulnerable-package check recorded.</step>
+    <step order="6">Run the ui-tests below after 136 deploys (or on the SPA dev host); record results.</step>
+    <step order="7">Update TASK-INDEX.md: this task's status cell to "✅ [done]".</step>
+    <step order="8">Record deviations (route, widget id, entitlement gating) in projects/ebilling-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If a caller belongs to several firms, confirm with the owner whether the view shows all their firms' sets (default: yes, each labelled with its firm) before shipping.</trigger>
+    <trigger>If the widget needs a new Tier-1 module entitlement (sprk_approlemodulemap) to be visible to CIAM users, STOP and coordinate with SPA-r3 rather than adding one.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>Spec section 11 row "SPA Billing Guidelines view + endpoint" (overlap: RuleBodyDescriber, SPA invoice detail); RuleBodyDescriber.DescribeAsync; widgetRegistry pattern; grep "BillingGuidelines" in src finds none.</existing>
+    <extension>Reuses the describer, the published policy versions and 076's visibility helper; only a read endpoint and a widget are new, because no existing route exposes policy content to CIAM callers.</extension>
+    <cost-of-doing-nothing>Firms cannot see the rules they are measured against (D-66); FR-49 fails.</cost-of-doing-nothing>
+  </justification>
+
+  <ui-tests>
+    <test name="Guidelines render for firm user">
+      <url>https://{external-spa-dev-host}/</url>
+      <steps>
+        <step>Sign in as a firm user whose client has a published, visible OCG rule set and a firm-specific rate card</step>
+        <step>Open the Billing Guidelines widget</step>
+        <step>Verify both rule sets appear, each rule with description, parameters, clause quote, section and effective dates</step>
+        <step>Verify no link to a document appears anywhere in the widget</step>
+        <step>Check the browser console for errors</step>
+      </steps>
+      <expected>Only client-default and own-firm visible rule sets; no console errors.</expected>
+    </test>
+    <test name="Flag-off and other-firm sets hidden">
+      <steps>
+        <step>In dev, set one rule set's visible-to-firms flag off and assign another to a different firm</step>
+        <step>Reload the widget as the first firm's user</step>
+      </steps>
+      <expected>Neither rule set appears.</expected>
+    </test>
+    <test name="Phone width (NFR-13)">
+      <steps>
+        <step>Set the viewport to 360 by 740 and open the widget</step>
+      </steps>
+      <expected>Cards stack; clause text wraps; no horizontal page scroll.</expected>
+    </test>
+    <test name="Dark Mode Compliance (ADR-021)">
+      <steps>
+        <step>Switch the SPA to dark theme and open the widget</step>
+        <step>Verify card, accordion and quote backgrounds and text use theme tokens</step>
+      </steps>
+      <expected>No white panels or black text in dark mode; all colours from Fluent v9 semantic tokens.</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="dotnet">build, test</tool>
+    <tool name="npm">install, build, test</tool>
+    <tool name="ui-test">browser checks</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Finance/BillingGuidelinesService.cs; Api/Finance/BillingGuidelinesEndpoints.cs; src/client/external-spa/src/widgets/BillingGuidelinesWidget.tsx; src/client/external-spa/src/api/billing-guidelines-client.ts</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Finance/BillingGuidelinesServiceTests.cs; tests/integration/auth/Finance/BillingGuidelinesScopeTests.cs; src/client/external-spa/tests/BillingGuidelinesWidget.test.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The response contains only client-default rule sets and rule sets assigned to the caller's firm(s), all with "visible to firms" on; another firm's set and any flag-off set never appear (negative tests).</criterion>
+    <criterion testable="true">Only Published versions in force today appear; Draft, Rejected and superseded versions do not.</criterion>
+    <criterion testable="true">Each rule carries describer text (or the refusal marker), parameters, clause quote, section reference and effective dates; no DTO field carries a document link, container id or drive item id.</criterion>
+    <criterion testable="true">401 unauthenticated; 403 with a stable code for a workforce or no-firm principal; 503 ebilling.disabled when off; 200 for a firm user.</criterion>
+    <criterion testable="true">The widget renders rule sets grouped as cards, shows the empty state when the list is empty, and is hidden when the flag is off.</criterion>
+    <criterion testable="true">ui-tests pass, including phone width and dark mode; no new npm dependency.</criterion>
+    <criterion testable="true">Publish-size delta measured against a fresh master build and recorded in task notes; no new HIGH CVE.</criterion>
+    <criterion testable="true">Cover the stated contract plus the edge cases named above. Anything beyond that needs a one-line justification in task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>Shared append points: FinanceModule.cs and the external-group mount site in ExternalAccessEndpoints.cs (130, 133 also add one line). widgetRegistry.ts and ExternalAccessEndpoints.cs are SPA-r3 / uac-r2 files — /conflict-check before the PR. P5-B: own client file (billing-guidelines-client.ts) so no overlap with 134.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load the knowledge files first. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

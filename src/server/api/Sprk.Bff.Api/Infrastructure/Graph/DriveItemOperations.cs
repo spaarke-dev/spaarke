@@ -957,6 +957,46 @@ public class DriveItemOperations
     }
 
     /// <summary>
+    /// The drive item at <paramref name="path"/> under the drive root (app-only), or null when nothing is there. For a writer that
+    /// must find the item its own upload created when the upload's reply never arrived (a lost reply, or a retried PUT answered
+    /// 409): the path is all it holds. Same ownership gate and 404 handling as <see cref="GetDriveItemAsync"/>.
+    /// </summary>
+    public async Task<SpeDriveItemSummary?> GetDriveItemByPathAsync(string driveId, string path, CancellationToken ct = default)
+    {
+        // Ownership outside the try: a refusal is a 404 spe_container_not_owned, never a null summary (task 227d).
+        var graphClient = await _ownership.ForOwnedContainerAsync(driveId, ct);
+
+        Microsoft.Graph.Models.DriveItem? item;
+        try
+        {
+            item = await graphClient.Drives[driveId]
+                .Root
+                .ItemWithPath(path)
+                .GetAsync(req =>
+                {
+                    req.QueryParameters.Select = new[] { "id", "name", "size", "webUrl", "file", "parentReference" };
+                }, cancellationToken: ct);
+        }
+        catch (ODataError ex) when (ex.ResponseStatusCode == (int)System.Net.HttpStatusCode.NotFound)
+        {
+            return null;
+        }
+
+        if (item is null || string.IsNullOrEmpty(item.Id)) return null;
+
+        return new SpeDriveItemSummary(
+            Id: item.Id,
+            Name: item.Name ?? string.Empty,
+            Size: item.Size,
+            WebUrl: item.WebUrl,
+            WebDavUrl: null,
+            MimeType: item.File?.MimeType,
+            ParentReferencePath: item.ParentReference?.Path,
+            LastModifiedDateTime: null,
+            CreatedDateTime: null);
+    }
+
+    /// <summary>
     /// FR-01 (task 012): resolves an absolute document URL — in practice <c>Office.context.document.url</c> — to
     /// the SPE drive item it names, via Graph <c>GET /shares/u!{base64url}/driveItem</c>, AS THE CALLER (OBO).
     /// </summary>

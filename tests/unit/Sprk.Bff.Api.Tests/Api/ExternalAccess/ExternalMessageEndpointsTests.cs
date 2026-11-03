@@ -174,8 +174,12 @@ public class ExternalMessageEndpointsTests
         var data = _roots.NewService();
         return ExternalMessageEndpoints.GetMessagesCoreAsync(
             root, id, caller, registry ?? ProductionRegistry(), ReadRecord, ReadService(),
-            data.GetNonSecureRootsAsync, NullLogger.Instance, CancellationToken.None, data.GetLiveParentRootsAsync);
+            data.GetNonSecureRootsAsync, NullLogger.Instance, CancellationToken.None, data.GetLiveParentRootsAsync,
+            _invoiceHiding.Seam);
     }
+
+    /// <summary>ebilling-r1 task 098: the (a') predicate the route passes; hides nothing unless a test says so.</summary>
+    private InvoiceHidingStub _invoiceHiding = InvoiceHidingStub.NoneHidden();
 
     /// <summary>A lookup value as RecordService projects it.</summary>
     private static Dictionary<string, object?> Lookup(Guid id, string entity) =>
@@ -790,6 +794,138 @@ public class ExternalMessageEndpointsTests
         a.ProblemDetails.Detail.Should().Be(b.ProblemDetails.Detail, "a missing record and a foreign one must be indistinguishable");
         a.ProblemDetails.Title.Should().Be(b.ProblemDetails.Title);
         ShouldNotHaveReadMessages();
+    }
+
+    // ── ebilling-r1 task 098 surface (b): the (a') invoice predicate on message threads ──────────────
+    // An invoice whose Submit Invoice source is isolated is hidden from an external caller: its thread answers exactly as an
+    // invoice that does not exist (or lives in another tenant) does, and a message regarding it is withheld from every other
+    // thread it appears on. The predicate is the server's; nothing the caller sends can change it.
+
+    private void AddInvoiceUnder(Guid invoice, Guid matter) =>
+        _records[("sprk_invoice", invoice)] = new Dictionary<string, object?>
+        {
+            ["id"] = invoice,
+            ["sprk_matter"] = Lookup(matter, "sprk_matter"),
+        };
+
+    private static void ShouldBeTheSameAnswer(IResult hidden, IResult missing)
+    {
+        ShouldBeForbiddenNotAccessible(hidden);
+        ShouldBeForbiddenNotAccessible(missing);
+        var a = ((ProblemHttpResult)hidden).ProblemDetails;
+        var b = ((ProblemHttpResult)missing).ProblemDetails;
+        a.Status.Should().Be(b.Status);
+        a.Title.Should().Be(b.Title);
+        a.Detail.Should().Be(b.Detail, "a hidden invoice and one that does not exist must be indistinguishable");
+        a.Extensions.Keys.Should().BeEquivalentTo(b.Extensions.Keys);
+        a.Extensions["reasonCode"].Should().Be(b.Extensions["reasonCode"]);
+    }
+
+    [Fact]
+    public async Task Task098_AnInvoiceThePredicateHides_ItsThreadAnswersAsANonexistentOrCrossTenantInvoice_AndNoMessageIsRead()
+    {
+        var matter = Guid.NewGuid();
+        var hiddenInvoice = Guid.NewGuid();
+        AddInvoiceUnder(hiddenInvoice, matter);
+        _invoiceHiding = InvoiceHidingStub.Hiding(hiddenInvoice);
+        SetupMessages(MessageRow(Guid.NewGuid(), "sprk_regardinginvoice", hiddenInvoice, internalOnly: false, "2026-10-01T09:00:00Z"));
+
+        var hidden = await Get("invoices", hiddenInvoice, Ciam(matter: matter));
+        var crossTenant = await Get("invoices", Guid.NewGuid(), Ciam(matter: matter));
+
+        ShouldBeTheSameAnswer(hidden, crossTenant);
+        ShouldNotHaveReadMessages();
+        _invoiceHiding.Calls.Should().ContainSingle().Which.Should().Equal(hiddenInvoice);
+    }
+
+    [Fact]
+    public async Task Task098_APredicateReadFault_RefusesTheInvoiceThread_AsANonexistentInvoice_FailClosed()
+    {
+        var matter = Guid.NewGuid();
+        var invoice = Guid.NewGuid();
+        AddInvoiceUnder(invoice, matter);
+        _invoiceHiding = InvoiceHidingStub.Faulting();
+        SetupMessages(MessageRow(Guid.NewGuid(), "sprk_regardinginvoice", invoice, internalOnly: false, "2026-10-01T09:00:00Z"));
+
+        ShouldBeTheSameAnswer(await Get("invoices", invoice, Ciam(matter: matter)), await Get("invoices", Guid.NewGuid(), Ciam(matter: matter)));
+        ShouldNotHaveReadMessages();
+    }
+
+    [Fact]
+    public async Task Task098_NoPredicate_RefusesTheInvoiceThread_FailClosed()
+    {
+        var matter = Guid.NewGuid();
+        var invoice = Guid.NewGuid();
+        AddInvoiceUnder(invoice, matter);
+        SetupMessages(MessageRow(Guid.NewGuid(), "sprk_regardinginvoice", invoice, internalOnly: false, "2026-10-01T09:00:00Z"));
+        var data = _roots.NewService();
+
+        var result = await ExternalMessageEndpoints.GetMessagesCoreAsync(
+            "invoices", invoice, Ciam(matter: matter), ProductionRegistry(), ReadRecord, ReadService(),
+            data.GetNonSecureRootsAsync, NullLogger.Instance, CancellationToken.None, data.GetLiveParentRootsAsync,
+            hideInvoices: null);
+
+        ShouldBeForbiddenNotAccessible(result);
+        ShouldNotHaveReadMessages();
+    }
+
+    [Fact]
+    public async Task Task098_AnInvoiceThePredicateLeavesVisible_ItsThreadIsListed_AsBefore()
+    {
+        var matter = Guid.NewGuid();
+        var invoice = Guid.NewGuid();
+        AddInvoiceUnder(invoice, matter);
+        _invoiceHiding = InvoiceHidingStub.Hiding(Guid.NewGuid());
+        SetupMessages(MessageRow(Guid.NewGuid(), "sprk_regardinginvoice", invoice, internalOnly: false, "2026-10-01T09:00:00Z"));
+
+        Messages(await Get("invoices", invoice, Ciam(matter: matter))).Should().HaveCount(1);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Task098_AMessageRegardingAHiddenInvoice_IsWithheld_FromTheMattersThread(bool fault)
+    {
+        var matter = Guid.NewGuid();
+        var hiddenInvoice = Guid.NewGuid();
+        var visibleInvoice = Guid.NewGuid();
+        _invoiceHiding = fault ? InvoiceHidingStub.Faulting() : InvoiceHidingStub.Hiding(hiddenInvoice);
+        var plain = Guid.NewGuid();
+        var aboutHidden = Guid.NewGuid();
+        var aboutVisible = Guid.NewGuid();
+        var hiddenRow = MessageRow(aboutHidden, "sprk_regardingmatter", matter, internalOnly: false, "2026-10-02T09:00:00Z");
+        hiddenRow["_sprk_regardinginvoice_value"] = El(hiddenInvoice.ToString("D"));
+        var visibleRow = MessageRow(aboutVisible, "sprk_regardingmatter", matter, internalOnly: false, "2026-10-03T09:00:00Z");
+        visibleRow["_sprk_regardinginvoice_value"] = El(visibleInvoice.ToString("D"));
+        _roots.AddFilingRow("sprk_invoice", hiddenInvoice, ("sprk_matter", "sprk_matter", matter));
+        _roots.AddFilingRow("sprk_invoice", visibleInvoice, ("sprk_matter", "sprk_matter", matter));
+        _roots.AddOpenRoot(ExternalGrantRootType.Matter, matter);
+        SetupMessages(MessageRow(plain, "sprk_regardingmatter", matter, internalOnly: false, "2026-10-01T09:00:00Z"), hiddenRow, visibleRow);
+
+        var listed = Messages(await Get("matters", matter, Ciam(matter: matter))).Select(m => m.SprkCommunicationid).ToList();
+
+        listed.Should().Contain(plain.ToString("D"));
+        listed.Should().NotContain(aboutHidden.ToString("D"));
+        if (fault)
+            listed.Should().NotContain(aboutVisible.ToString("D"), "a failed predicate read hides every invoice it was asked about");
+        else
+            listed.Should().Contain(aboutVisible.ToString("D"));
+        _invoiceHiding.Calls.Should().ContainSingle("one predicate call per page")
+            .Which.Should().BeEquivalentTo(new[] { hiddenInvoice, visibleInvoice });
+    }
+
+    [Fact]
+    public async Task Task098_AMessageWithAMalformedInvoiceRegarding_IsWithheld_FailClosed()
+    {
+        var matter = Guid.NewGuid();
+        var plain = Guid.NewGuid();
+        var malformed = Guid.NewGuid();
+        var row = MessageRow(malformed, "sprk_regardingmatter", matter, internalOnly: false, "2026-10-02T09:00:00Z");
+        row["_sprk_regardinginvoice_value"] = El("not-a-guid");
+        SetupMessages(MessageRow(plain, "sprk_regardingmatter", matter, internalOnly: false, "2026-10-01T09:00:00Z"), row);
+
+        Messages(await Get("matters", matter, Ciam(matter: matter))).Select(m => m.SprkCommunicationid)
+            .Should().Equal(plain.ToString("D"));
     }
 
     [Theory]

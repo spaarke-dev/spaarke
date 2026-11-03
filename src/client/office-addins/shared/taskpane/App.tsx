@@ -18,9 +18,10 @@ import { InvoiceView } from './components/views/InvoiceView';
 import {
   createInvoiceSubmitHandler,
   hostAdapterInvoiceEmailSource,
+  loadCorrectionPrefill,
   loadInvoiceFirms,
 } from './services/invoiceSubmissionService';
-import type { InvoiceSubmissionTarget } from './services/invoiceSubmissionSeam';
+import { invoiceFiledRecord, type InvoiceSubmissionTarget } from './services/invoiceSubmissionSeam';
 import type { InitialAction } from './initialAction';
 import { FindView, type FindItemNoun } from './components/views/FindView';
 import type {
@@ -688,6 +689,12 @@ export const App: React.FC<AppProps> = ({
       loadInvoiceFirms(target, { apiBaseUrl, getAccessToken: getInvoiceAccessToken }),
     [apiBaseUrl, getInvoiceAccessToken]
   );
+  const loadPrefill = useCallback(
+    (invoiceId: string) => loadCorrectionPrefill(invoiceId, { apiBaseUrl, getAccessToken: getInvoiceAccessToken }),
+    [apiBaseUrl, getInvoiceAccessToken]
+  );
+  // The record the open email is already filed to (task 120's lookup — the Save tab's "Filed to"): the view starts there.
+  const invoiceFiledTo = useMemo(() => invoiceFiledRecord(documentIdentity), [documentIdentity]);
 
   // Task 113 (provisioning's guest sign-in test): "⋮ → Diagnostics" opens a panel above the tab content; the tabs
   // stay mounted underneath, so closing it loses nothing.
@@ -898,7 +905,8 @@ export const App: React.FC<AppProps> = ({
 
         {/* Task 133: the Outlook "Submit Invoice" view — reached only from the ribbon (`?action=submitInvoice`), never
             from a tab. The submission and the firm list are ebilling's from-email contract (invoiceSubmissionService);
-            corrections stay off (`correctionAvailable`) until ebilling 097. */}
+            corrections are on: ebilling 097b/c/e (#2507) is on master and dev, and the view prepares each one from
+            the invoice's correction prefill. */}
         {currentTab === 'invoice' && (
           <InvoiceView
             hostAdapter={hostAdapter}
@@ -906,7 +914,10 @@ export const App: React.FC<AppProps> = ({
             getAccessToken={getInvoiceAccessToken}
             onSubmit={submitInvoice}
             loadFirms={loadFirms}
+            correctionAvailable
+            loadCorrectionPrefill={loadPrefill}
             onBusyChange={setInvoiceBusy}
+            filedRecord={invoiceFiledTo}
           />
         )}
 

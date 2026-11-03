@@ -163,6 +163,7 @@ $script:AllowedPerEnvSources = @(
     'from-h2a-output:bff_url',
     'from-h3-output:bff_app_client_id',
     'from-h5-output:dataverse_env_url',
+    'from-h2b-output:ai_search_index_names',
     'from-h8-output:spe_container_id',
     'from-h10-output:customer_business_unit_id',
     'from-intake-parameter:tenant_id',
@@ -174,7 +175,8 @@ $script:AllowedPerEnvSources = @(
 # Task 255: the LIST sources among them (PerEnvSourceCatalog entries with ResolveList). A list source feeds only an
 # `indexed: true` entry and an indexed entry reads only a list source; its script parameter is [string[]].
 $script:ListPerEnvSources = @(
-    'from-intake-parameter:customer_workforce_tenant_ids'
+    'from-intake-parameter:customer_workforce_tenant_ids',
+    'from-h2b-output:ai_search_index_names'
 )
 
 # ---------------------------------------------------------------------------

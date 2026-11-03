@@ -118,6 +118,11 @@ export interface ITrackingFieldTrioProps {
    * ADR-045 — this component MUST NOT implement ad hoc send logic). When
    * omitted, the email icon is NOT rendered. */
   onOpenEmailMembers?: () => void;
+  /** Invoked when the Family icon is clicked, to open the record's Family (task 074, FR-33 - the host renders
+   * `RecordFamilyModal`). When omitted, the Family icon is NOT rendered and the toolbar is unchanged. Not gated by
+   * {@link canGrantAccess}: the Family lists only records the caller may already read (the server filters it), and the
+   * modal's own actions are re-checked by the server. */
+  onOpenFamily?: () => void;
   /** Gates the person icon's enabled state: `true` enables it, anything else
    * — `false`, or the prop omitted — disables it.
    *

@@ -508,6 +508,77 @@ describe('deriveCoreAncestorStamps — intermediate targets', () => {
     ]);
   });
 
+  // ebilling-r1 task 013: task 012 added sprk_invoice.sprk_regardingworkassignment (FR-05); the server's
+  // IntermediateRootColumns gained it in the same change.
+  it('derivesAnInvoicesWorkAssignmentFromItsRegardingWorkAssignment', async () => {
+    const { webApi, calls } = buildWebApi({
+      _sprk_matter_value: null,
+      _sprk_project_value: null,
+      _sprk_regardingworkassignment_value: WA_ID,
+    });
+    const result = await deriveCoreAncestorStamps(
+      webApi,
+      'sprk_invoice',
+      INVOICE_ID,
+      metadataFetchStub({ sprk_invoice: ['sprk_matter', 'sprk_project', 'sprk_regardingworkassignment'] })
+    );
+
+    expect(result.status).toBe('derived');
+    expect(result.stamps).toEqual([
+      {
+        entityType: 'sprk_workassignment',
+        entitySet: 'sprk_workassignments',
+        lookupAttribute: 'sprk_regardingworkassignment',
+        recordId: WA_ID,
+      },
+    ]);
+    const select = /\$select=([^&]*)/.exec(calls.filter(c => c.query.includes('_value'))[0].query)?.[1] ?? '';
+    expect(select).toContain('_sprk_regardingworkassignment_value');
+  });
+
+  // ebilling-r1 task 026 (FR-05, D-75, D-94): the Invoice Line is an intermediate whose root is its OWN
+  // project / matter / work-assignment lookup, in lockstep with the server's IntermediateRootColumns.
+  it('derivesAnInvoiceLinesProjectFromItsOwnLookup_NeverReadingItsInvoice', async () => {
+    const lineId = '02600000-0000-0000-0000-000000000b01';
+    const { webApi, calls } = buildWebApi({
+      _sprk_matter_value: null,
+      _sprk_project_value: PROJECT_ID,
+      _sprk_regardingworkassignment_value: null,
+    });
+    const result = await deriveCoreAncestorStamps(
+      webApi,
+      'sprk_billingevent',
+      lineId,
+      metadataFetchStub({
+        sprk_billingevent: [
+          'sprk_matter',
+          'sprk_project',
+          'sprk_regardingworkassignment',
+          'sprk_invoice',
+          'sprk_resolvedtimekeeper',
+        ],
+      })
+    );
+
+    expect(result.status).toBe('derived');
+    expect(result.stamps).toEqual([
+      {
+        entityType: 'sprk_project',
+        entitySet: 'sprk_projects',
+        lookupAttribute: 'sprk_regardingproject',
+        recordId: PROJECT_ID,
+      },
+    ]);
+    const select = /\$select=([^&]*)/.exec(calls.filter(c => c.query.includes('_value'))[0].query)?.[1] ?? '';
+    expect(select).not.toContain('_sprk_invoice_value');
+    expect(select).not.toContain('_sprk_resolvedtimekeeper_value');
+    expect(INTERMEDIATE_ROOT_COLUMNS.filter(r => r.intermediate === 'sprk_billingevent').map(r => r.column)).toEqual([
+      'sprk_project',
+      'sprk_matter',
+      'sprk_regardingworkassignment',
+    ]);
+  });
+
   it('derivesABudgetsProjectFromItsTypedLookup', async () => {
     const { webApi } = buildWebApi({ _sprk_matter_value: null, _sprk_project_value: PROJECT_ID });
     const result = await deriveCoreAncestorStamps(

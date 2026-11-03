@@ -40,9 +40,13 @@ namespace Sprk.Bff.Api.Services.RecordCreation;
 /// </remarks>
 internal sealed partial class RecordCreationService
 {
-    /// <summary>The invoice family: ebilling-r1's <c>InvoiceFamilyCoreRecordGuard</c> owns every stored-row write of these.</summary>
+    /// <summary>
+    /// The invoice family: ebilling-r1's <c>InvoiceFamilyCoreRecordGuard</c> owns every stored-row write of these — its
+    /// <see cref="InvoiceFamilyCoreRecordGuard.CoreRecordLookups"/> tables, all six in the registry since task 017, so
+    /// none is repaired past the guard.
+    /// </summary>
     private static readonly IReadOnlySet<string> InvoiceFamilyTables =
-        new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "sprk_invoice", "sprk_billingevent" };
+        new HashSet<string>(InvoiceFamilyCoreRecordGuard.CoreRecordLookups.Keys, StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
     /// Review F1-f / UAC-r2: tables Repair never touches. Repair's own set, NOT the registry's ownership exception: Create's
@@ -332,6 +336,11 @@ internal sealed partial class RecordCreationService
             var protectedColumns = new HashSet<string>(ProtectedFromMapping(table, rule, serverSetLookupColumns: null),
                 StringComparer.OrdinalIgnoreCase);
             protectedColumns.UnionWith(neverMapped.Keys);
+            // Review R3 (FR-38): on a search-indexed table both index columns are the owning unit's (Repair's own search-index step
+            // writes them), so a rule that targets either never copies the parent's index. Kept here, not in ProtectedFromMapping:
+            // create's step 3 drops a mapped index itself (and logs it, origin=mapping), so its behaviour stays as it is.
+            if (rule.SearchIndexed)
+                protectedColumns.UnionWith([SearchIndexColumns.LookupColumn, SearchIndexColumns.LegacyTextColumn]);
 
             var written = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             CreateTimeFieldMapping.ApplyFillOnly(

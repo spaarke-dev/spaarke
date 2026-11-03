@@ -1,0 +1,24 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0519",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0519","generator_id":"gen_eval_set.py@1 F-0519","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0519.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-03"},
+ "header":{"firm":"Montclair Ambrose PC","firm_invoice_number":"A-29309/2025","invoice_date":"2026-07-01","billing_period_start":"2026-06-01","billing_period_end":"2026-06-30","firm_matter_reference":"76266-0017","po_number":"PO-4518091","fees_total":3248.5,"expenses_total":4008.25,"adjustments_total":0.0,"total_due":7256.75,"currency":"USD"},
+ "timekeepers":[{"name":"Aisha Nakamura","title":"Partner","rate":430.0,"billed_as":"AN"},{"name":"Elena Halloran","title":"Paralegal","rate":145.0,"billed_as":"EH"},{"name":"Helena Mbeki","title":"Associate","rate":255.0,"billed_as":"HM"},{"name":"Jordan Lindqvist","title":"Associate","rate":235.0,"billed_as":"JL"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2026-06-03","timekeeper":"JL","timekeeper_name":"Jordan Lindqvist","timekeeper_title":"Associate","title":"Assoc","hours":2.8,"rate":235.0,"amount":658.0,"narrative":"Review and revise witness list based on client comments","codes":["L210","A104"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2026-06-03","timekeeper":"AN","timekeeper_name":"Aisha Nakamura","timekeeper_title":"Partner","title":"Ptr","hours":1.7,"rate":430.0,"amount":731.0,"narrative":"Prepare monthly status report to client regarding the lease dispute","codes":["L190","A111"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2026-06-09","timekeeper":"HM","timekeeper_name":"Helena Mbeki","timekeeper_title":"Associate","title":"Assoc","hours":2.3,"rate":255.0,"amount":586.5,"narrative":"Review and organize incoming production from Harbor Point Capital for matter file","codes":["L140","A104"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2026-06-11","timekeeper":"EH","timekeeper_name":"Elena Halloran","timekeeper_title":"Paralegal","title":"Para","hours":2.9,"rate":145.0,"amount":420.5,"narrative":"Draft motion for preliminary injunction in the lease dispute","codes":["L220","A103"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2026-06-12","timekeeper":"JL","timekeeper_name":"Jordan Lindqvist","timekeeper_title":"Associate","title":"Assoc","hours":1.9,"rate":235.0,"amount":446.5,"narrative":"Review and analyze client documents concerning the licensing dispute to identify key facts","codes":["L110","A104"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2026-06-22","timekeeper":"EH","timekeeper_name":"Elena Halloran","timekeeper_title":"Paralegal","title":"Para","hours":1.3,"rate":145.0,"amount":188.5,"narrative":"Telephone conference with client representative regarding factual background of the insurance coverage issue","codes":["L110","A106"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2026-06-29","timekeeper":"EH","timekeeper_name":"Elena Halloran","timekeeper_title":"Paralegal","title":"Para","hours":1.5,"rate":145.0,"amount":217.5,"narrative":"Prepare monthly status report to client regarding the construction contract","codes":["L190","A111"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"expense","date":"2026-06-04","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":4008.25,"amount":4008.25,"narrative":"Consulting expert fees","codes":["E119"],"page":1,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["620 Market Street","Denver","Tax ID 56-1255840"],"template":"T07","pages":1},
+ "rule_set_id":"RS-03",
+ "context":{"matter_open":"2025-11-12","matter_close":"2026-09-28","matter_budget":54027.0,"approved_timekeepers":["Helena Mbeki","Elena Halloran","Cyrus Ashdown","Leila Galbraith","Jordan Lindqvist","Aisha Nakamura"],"invoice_received_date":"2026-07-07"},
+ "expected_findings":[],
+ "seeded_violations":0
+}

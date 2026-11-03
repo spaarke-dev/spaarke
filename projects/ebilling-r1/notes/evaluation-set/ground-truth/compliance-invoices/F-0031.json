@@ -1,0 +1,34 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0031",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0031","generator_id":"gen_eval_set.py@1 F-0031","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0031.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-01"},
+ "header":{"firm":"Draycott & Yardley LLP","firm_invoice_number":"INV-2025-14870","invoice_date":"2025-09-01","billing_period_start":"2025-08-01","billing_period_end":"2025-08-31","firm_matter_reference":"71649-0003","po_number":null,"fees_total":10014.0,"expenses_total":1835.94,"adjustments_total":0.0,"total_due":11849.94,"currency":"USD"},
+ "timekeepers":[{"name":"Daniel Ramanathan","title":"Associate","rate":405.0,"billed_as":"DR"},{"name":"Dmitri Kowalczyk","title":"Associate","rate":410.0,"billed_as":"DK"},{"name":"Imani Nwosu","title":"Partner","rate":755.0,"billed_as":"IN"},{"name":"Ingrid Hargrove","title":"Legal Assistant","rate":185.0,"billed_as":"IH"},{"name":"Ingrid Marchetti","title":"Paralegal","rate":220.0,"billed_as":"IM"},{"name":"Mei Blackwood","title":"Senior Associate","rate":570.0,"billed_as":"MB"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2025-08-01","timekeeper":"IM","timekeeper_name":"Ingrid Marchetti","timekeeper_title":"Paralegal","title":"Para","hours":2.4,"rate":220.0,"amount":528.0,"narrative":"Prepare fact witness for testimony regarding the lease dispute","codes":["L410","A101"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2025-08-05","timekeeper":"IM","timekeeper_name":"Ingrid Marchetti","timekeeper_title":"Paralegal","title":"Para","hours":0.4,"rate":220.0,"amount":88.0,"narrative":"Prepare monthly status report to client regarding the distribution agreement","codes":["L190","A111"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2025-08-05","timekeeper":"DK","timekeeper_name":"Dmitri Kowalczyk","timekeeper_title":"Associate","title":"Assoc","hours":1.2,"rate":410.0,"amount":492.0,"narrative":"Research standard for new trial in the employment claim","codes":["L460","A102"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2025-08-06","timekeeper":"IH","timekeeper_name":"Ingrid Hargrove","timekeeper_title":"Legal Assistant","title":"LA","hours":2.9,"rate":185.0,"amount":536.5,"narrative":"Prepare expert witness for testimony in the construction contract","codes":["L420","A101"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2025-08-06","timekeeper":"IM","timekeeper_name":"Ingrid Marchetti","timekeeper_title":"Paralegal","title":"Para","hours":1.7,"rate":220.0,"amount":374.0,"narrative":"Draft mediation statement for trial in the construction contract","codes":["L430","A103"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2025-08-07","timekeeper":"IM","timekeeper_name":"Ingrid Marchetti","timekeeper_title":"Paralegal","title":"Para","hours":0.7,"rate":220.0,"amount":154.0,"narrative":"Attend hearing on motion to compel in the vendor agreement","codes":["L450","A109"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2025-08-08","timekeeper":"MB","timekeeper_name":"Mei Blackwood","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":2.3,"rate":570.0,"amount":1311.0,"narrative":"Draft post-trial motion in the vendor agreement","codes":["L460","A103"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2025-08-14","timekeeper":"DK","timekeeper_name":"Dmitri Kowalczyk","timekeeper_title":"Associate","title":"Assoc","hours":1.9,"rate":410.0,"amount":779.0,"narrative":"Research standard for new trial in the warranty claim","codes":["L460","A102"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"fee","date":"2025-08-14","timekeeper":"IN","timekeeper_name":"Imani Nwosu","timekeeper_title":"Partner","title":"Ptr","hours":1.4,"rate":755.0,"amount":1057.0,"narrative":"Prepare case assessment memorandum regarding the construction contract and recommended strategy","codes":["L120","A103"],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"fee","date":"2025-08-15","timekeeper":"IN","timekeeper_name":"Imani Nwosu","timekeeper_title":"Partner","title":"Ptr","hours":2.9,"rate":755.0,"amount":2189.5,"narrative":"Prepare fact witness for testimony regarding the customs audit","codes":["L410","A101"],"page":2,"narrative_style":"clear"},
+  {"n":11,"line_type":"fee","date":"2025-08-15","timekeeper":"DR","timekeeper_name":"Daniel Ramanathan","timekeeper_title":"Associate","title":"Assoc","hours":0.9,"rate":405.0,"amount":364.5,"narrative":"Analyze exposure and damages model for the employment claim","codes":["L120","A104"],"page":2,"narrative_style":"clear"},
+  {"n":12,"line_type":"fee","date":"2025-08-20","timekeeper":"DK","timekeeper_name":"Dmitri Kowalczyk","timekeeper_title":"Associate","title":"Assoc","hours":0.4,"rate":410.0,"amount":164.0,"narrative":"Review draft expert disclosure for the employment claim","codes":["L420","A104"],"page":2,"narrative_style":"clear"},
+  {"n":13,"line_type":"fee","date":"2025-08-21","timekeeper":"DK","timekeeper_name":"Dmitri Kowalczyk","timekeeper_title":"Associate","title":"Assoc","hours":0.65,"rate":410.0,"amount":266.5,"narrative":"Prepare fact witness for testimony regarding the construction contract","codes":["L410","A101"],"page":2,"narrative_style":"clear"},
+  {"n":14,"line_type":"fee","date":"2025-08-29","timekeeper":"MB","timekeeper_name":"Mei Blackwood","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":3.0,"rate":570.0,"amount":1710.0,"narrative":"Review court docket and calendar of pending deadlines for the warranty claim","codes":["L190","A104"],"page":2,"narrative_style":"clear"},
+  {"n":15,"line_type":"expense","date":"2025-08-06","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":1835.94,"amount":1835.94,"narrative":"Court reporter and transcript - deposition","codes":["E115"],"page":2,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["191 Lakeshore Drive","Seattle","Tax ID 62-7939362"],"template":"T22","pages":2},
+ "rule_set_id":"RS-01",
+ "context":{"matter_open":"2024-05-11","matter_close":"2025-11-29","matter_budget":72399.0,"approved_timekeepers":["Mei Blackwood","Dmitri Kowalczyk","Rafael Galbraith","Louis Thornbury","Ingrid Marchetti","Daniel Ramanathan","Imani Nwosu","Ingrid Hargrove","Marcus Ramanathan"],"invoice_received_date":"2025-09-08"},
+ "expected_findings":[
+  {"rule_id":"RS-01-R01","rule_type":"TimeIncrement","scope":"line","line_refs":[13],"consequence":"Reduce"},
+  {"rule_id":"RS-01-R08","rule_type":"RequiredData","scope":"invoice","line_refs":[],"consequence":"Reject"}
+ ],
+ "seeded_violations":2
+}

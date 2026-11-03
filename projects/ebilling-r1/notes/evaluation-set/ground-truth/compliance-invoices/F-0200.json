@@ -1,0 +1,34 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0200",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0200","generator_id":"gen_eval_set.py@1 F-0200","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0200.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-02"},
+ "header":{"firm":"Rutherford and Whitcombe LLP","firm_invoice_number":"INV-2026-00552","invoice_date":"2025-04-04","billing_period_start":"2025-03-01","billing_period_end":"2025-03-31","firm_matter_reference":"68063-0010","po_number":"PO-4556790","fees_total":7509.0,"expenses_total":449.77,"adjustments_total":0.0,"total_due":7958.77,"currency":"USD"},
+ "timekeepers":[{"name":"Emeka Sandoval","title":"Partner","rate":625.0,"billed_as":"Emeka Sandoval"},{"name":"Hector Eriksen","title":"Paralegal","rate":145.0,"billed_as":"Hector Eriksen"},{"name":"Ingrid Abernathy","title":"Associate","rate":305.0,"billed_as":"Ingrid Abernathy"},{"name":"Ivan Wickham","title":"Associate","rate":335.0,"billed_as":"Ivan Wickham"},{"name":"Sofia Castellanos","title":"Paralegal","rate":160.0,"billed_as":"Sofia Castellanos"},{"name":"Tomas Carmichael","title":"Senior Associate","rate":395.0,"billed_as":"Tomas Carmichael"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2025-03-05","timekeeper":"Emeka Sandoval","timekeeper_name":"Emeka Sandoval","timekeeper_title":"Partner","title":"Partner","hours":2.2,"rate":625.0,"amount":1375.0,"narrative":"Prepare case assessment memorandum regarding the vendor agreement and recommended strategy","codes":["L120","A103"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2025-03-10","timekeeper":"Emeka Sandoval","timekeeper_name":"Emeka Sandoval","timekeeper_title":"Partner","title":"Partner","hours":2.6,"rate":625.0,"amount":1625.0,"narrative":"Analyze exposure and damages model for the regulatory inquiry","codes":["L120","A104"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2025-03-13","timekeeper":"Hector Eriksen","timekeeper_name":"Hector Eriksen","timekeeper_title":"Paralegal","title":"Paralegal","hours":2.2,"rate":145.0,"amount":319.0,"narrative":"Prepare responses and objections to complaint","codes":["L310","A103"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2025-03-03","timekeeper":"Ingrid Abernathy","timekeeper_name":"Ingrid Abernathy","timekeeper_title":"Associate","title":"Associate","hours":1.3,"rate":305.0,"amount":396.5,"narrative":"Review documents produced by Alder & Finch Ltd for responsiveness","codes":["L320","A104"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2025-03-05","timekeeper":"Ingrid Abernathy","timekeeper_name":"Ingrid Abernathy","timekeeper_title":"Associate","title":"Associate","hours":2.4,"rate":305.0,"amount":732.0,"narrative":"Prepare monthly status report to client regarding the regulatory inquiry","codes":["L190","A111"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2025-03-10","timekeeper":"Ivan Wickham","timekeeper_name":"Ivan Wickham","timekeeper_title":"Associate","title":"Associate","hours":2.1,"rate":335.0,"amount":703.5,"narrative":"Review documents produced by Bluepine Holdings for responsiveness","codes":[],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2025-03-27","timekeeper":"Ivan Wickham","timekeeper_name":"Ivan Wickham","timekeeper_title":"Associate","title":"Associate","hours":2.7,"rate":335.0,"amount":904.5,"narrative":"Review and summarize deposition transcript of Quarry Lane Partners witness","codes":[],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2025-03-31","timekeeper":"Ivan Wickham","timekeeper_name":"Ivan Wickham","timekeeper_title":"Associate","title":"Associate","hours":1.2,"rate":335.0,"amount":402.0,"narrative":"Review privilege log entries before service","codes":["L140","A104"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"fee","date":"2025-03-12","timekeeper":"Sofia Castellanos","timekeeper_name":"Sofia Castellanos","timekeeper_title":"Paralegal","title":"Paralegal","hours":0.4,"rate":160.0,"amount":64.0,"narrative":"Analyze exposure and damages model for the warranty claim","codes":["L120","A104"],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"fee","date":"2025-03-20","timekeeper":"Tomas Carmichael","timekeeper_name":"Tomas Carmichael","timekeeper_title":"Senior Associate","title":"Senior Associate","hours":2.5,"rate":395.0,"amount":987.5,"narrative":"Review court docket and calendar of pending deadlines for the employment claim","codes":["L190","A104"],"page":2,"narrative_style":"clear"},
+  {"n":11,"line_type":"expense","date":"2025-03-13","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":41.92,"amount":41.92,"narrative":"Working meal during deposition preparation","codes":["E111"],"page":2,"narrative_style":"clear"},
+  {"n":12,"line_type":"expense","date":"2025-03-24","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":385.16,"amount":385.16,"narrative":"Court filing fee","codes":["E112"],"page":2,"narrative_style":"clear"},
+  {"n":13,"line_type":"expense","date":"2025-03-28","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":22.69,"amount":22.69,"narrative":"Overnight courier to Caldera Energy counsel","codes":["E107"],"page":2,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["828 Market Street","Seattle","Tax ID 34-9513480"],"template":"T13","pages":2},
+ "rule_set_id":"RS-02",
+ "context":{"matter_open":"2024-01-22","matter_close":"2025-06-29","matter_budget":6367.0,"approved_timekeepers":["Tomas Brennan","Ingrid Abernathy","Yusuf Pemberton","Marcus Lindqvist","Sofia Castellanos","Ivan Wickham","Tomas Carmichael","Emeka Sandoval"],"invoice_received_date":"2025-04-16"},
+ "expected_findings":[
+  {"rule_id":"RS-02-R01","rule_type":"ApprovedTimekeeper","scope":"line","line_refs":[3],"consequence":"Reject"},
+  {"rule_id":"RS-02-R05","rule_type":"RequiredData","scope":"line","line_refs":[6],"consequence":"Reject"},
+  {"rule_id":"RS-02-R05","rule_type":"RequiredData","scope":"line","line_refs":[7],"consequence":"Reject"},
+  {"rule_id":"RS-02-R06","rule_type":"CoreRecordWindow","scope":"invoice","line_refs":[],"consequence":"Flag"}
+ ],
+ "seeded_violations":4
+}

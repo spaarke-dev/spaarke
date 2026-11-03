@@ -1,0 +1,28 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0255",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0255","generator_id":"gen_eval_set.py@1 F-0255","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0255.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-03"},
+ "header":{"firm":"Holloway Ellison PC","firm_invoice_number":"INV-2025-31226","invoice_date":"2025-10-02","billing_period_start":"2025-09-01","billing_period_end":"2025-09-30","firm_matter_reference":"77611-0002","po_number":"PO-4547501","fees_total":4586.5,"expenses_total":1252.39,"adjustments_total":0.0,"total_due":5838.89,"currency":"USD"},
+ "timekeepers":[{"name":"Cyrus Zielinski","title":"Paralegal","rate":135.0,"billed_as":"CZ"},{"name":"Emeka Halloran","title":"Partner","rate":420.0,"billed_as":"EH"},{"name":"Gideon Fairweather","title":"Partner","rate":490.0,"billed_as":"GF"},{"name":"Katya Rosenthal","title":"Associate","rate":245.0,"billed_as":"KR"},{"name":"Sofia Brennan","title":"Associate","rate":230.0,"billed_as":"SB"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2025-09-05","timekeeper":"SB","timekeeper_name":"Sofia Brennan","timekeeper_title":"Associate","title":"Assoc","hours":3.0,"rate":230.0,"amount":690.0,"narrative":"Attend hearing on mediation statement in the licensing dispute","codes":["L450","A109"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2025-09-10","timekeeper":"GF","timekeeper_name":"Gideon Fairweather","timekeeper_title":"Partner","title":"Ptr","hours":2.7,"rate":490.0,"amount":1323.0,"narrative":"Draft post-trial motion in the construction contract","codes":["L460","A103"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2025-09-10","timekeeper":"SB","timekeeper_name":"Sofia Brennan","timekeeper_title":"Associate","title":"Assoc","hours":1.8,"rate":230.0,"amount":414.0,"narrative":"Telephone conference with witness regarding the warranty claim","codes":["L410","A106"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2025-09-11","timekeeper":"KR","timekeeper_name":"Katya Rosenthal","timekeeper_title":"Associate","title":"Assoc","hours":0.8,"rate":245.0,"amount":196.0,"narrative":"Prepare examination outlines for trial in the construction contract","codes":["L440","A101"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2025-09-12","timekeeper":"CZ","timekeeper_name":"Cyrus Zielinski","timekeeper_title":"Paralegal","title":"Para","hours":2.2,"rate":135.0,"amount":297.0,"narrative":"Attend trial day in the warranty claim","codes":["L450","A109"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2025-09-16","timekeeper":"CZ","timekeeper_name":"Cyrus Zielinski","timekeeper_title":"Paralegal","title":"Para","hours":2.3,"rate":135.0,"amount":310.5,"narrative":"Research standard for new trial in the licensing dispute","codes":["L460","A102"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2025-09-17","timekeeper":"KR","timekeeper_name":"Katya Rosenthal","timekeeper_title":"Associate","title":"Assoc","hours":0.3,"rate":245.0,"amount":73.5,"narrative":"Invoice preparation and review of billing entries","codes":["L420","A111"],"page":1,"narrative_style":"clerical"},
+  {"n":8,"line_type":"fee","date":"2025-09-24","timekeeper":"CZ","timekeeper_name":"Cyrus Zielinski","timekeeper_title":"Paralegal","title":"Para","hours":1.1,"rate":135.0,"amount":148.5,"narrative":"Revise motion to compel after review by lead counsel","codes":["L430","A104"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"fee","date":"2025-09-29","timekeeper":"EH","timekeeper_name":"Emeka Halloran","timekeeper_title":"Partner","title":"Ptr","hours":2.7,"rate":420.0,"amount":1134.0,"narrative":"Prepare trial notebook and demonstrative exhibits for the construction contract","codes":["L440","A101"],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"expense","date":"2025-09-26","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":1252.39,"amount":1252.39,"narrative":"Court reporter and transcript - deposition","codes":["E115"],"page":1,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["334 Commerce Avenue","Houston","Tax ID 63-5394160"],"template":"T23","pages":1},
+ "rule_set_id":"RS-03",
+ "context":{"matter_open":"2024-09-03","matter_close":"2025-12-29","matter_budget":48355.0,"approved_timekeepers":["Naomi Oyelaran","Sofia Brennan","Katya Rosenthal","Cyrus Zielinski","Gideon Fairweather","Emeka Halloran"],"invoice_received_date":"2025-10-14"},
+ "expected_findings":[
+  {"rule_id":"RS-03-R04","rule_type":"NonBillableActivity","scope":"line","line_refs":[7],"consequence":"Disallow"}
+ ],
+ "seeded_violations":1
+}

@@ -1,0 +1,38 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0174",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0174","generator_id":"gen_eval_set.py@1 F-0174","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0174.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-06"},
+ "header":{"firm":"Jarrow and Forsythe LLP","firm_invoice_number":"INV-2026-31710","invoice_date":"2026-01-26","billing_period_start":"2025-11-01","billing_period_end":"2025-11-30","firm_matter_reference":"64887-0029","po_number":"PO-4575136","fees_total":3833.5,"expenses_total":358.71,"adjustments_total":0.0,"total_due":4192.21,"currency":"USD"},
+ "timekeepers":[{"name":"Emeka Rosenthal","title":"Associate","rate":200.0,"billed_as":"ER"},{"name":"Helena Lindqvist","title":"Associate","rate":190.0,"billed_as":"HL"},{"name":"Ingrid Nwosu","title":"Partner","rate":400.0,"billed_as":"IN"},{"name":"Katya Okafor","title":"Paralegal","rate":110.0,"billed_as":"KO"},{"name":"Louis Rosenthal","title":"Legal Assistant","rate":80.0,"billed_as":"LR"},{"name":"Victor Voss","title":"Paralegal","rate":125.0,"billed_as":"VV"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2025-11-03","timekeeper":"LR","timekeeper_name":"Louis Rosenthal","timekeeper_title":"Legal Assistant","title":"LA","hours":0.7,"rate":120.0,"amount":84.0,"narrative":"Draft settlement proposal to Caldera Energy","codes":["L310","A103"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2025-11-10","timekeeper":"IN","timekeeper_name":"Ingrid Nwosu","timekeeper_title":"Partner","title":"Ptr","hours":2.4,"rate":400.0,"amount":960.0,"narrative":"Review and organize incoming production from Ironbridge Steel for matter file","codes":["L140","A104"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2025-11-11","timekeeper":"ER","timekeeper_name":"Emeka Rosenthal","timekeeper_title":"Associate","title":"Assoc","hours":1.4,"rate":200.0,"amount":280.0,"narrative":"Research authority for witness list","codes":["L250","A102"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2025-11-11","timekeeper":"ER","timekeeper_name":"Emeka Rosenthal","timekeeper_title":"Associate","title":"Assoc","hours":1.4,"rate":200.0,"amount":280.0,"narrative":"Research authority for witness list","codes":["L250","A102"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2025-11-13","timekeeper":"ER","timekeeper_name":"Emeka Rosenthal","timekeeper_title":"Associate","title":"Assoc","hours":1.9,"rate":200.0,"amount":380.0,"narrative":"Prepare monthly status report to client regarding the vendor agreement","codes":["L190","A111"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2025-11-13","timekeeper":"HL","timekeeper_name":"Helena Lindqvist","timekeeper_title":"Associate","title":"Assoc","hours":3.0,"rate":190.0,"amount":570.0,"narrative":"Review expert report served by Meridian Foods","codes":["L340","A104"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2025-11-14","timekeeper":"HL","timekeeper_name":"Helena Lindqvist","timekeeper_title":"Associate","title":"Assoc","hours":2.0,"rate":190.0,"amount":380.0,"narrative":"Meet and confer with counsel for Ironbridge Steel regarding discovery dispute","codes":["L350","A107"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2025-11-20","timekeeper":"VV","timekeeper_name":"Victor Voss","timekeeper_title":"Paralegal","title":"Para","hours":0.9,"rate":125.0,"amount":112.5,"narrative":"Draft complaint regarding deficiencies in Alder & Finch Ltd responses","codes":["L350","A103"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"fee","date":"2025-11-21","timekeeper":"KO","timekeeper_name":"Katya Okafor","timekeeper_title":"Paralegal","title":"Para","hours":0.2,"rate":110.0,"amount":22.0,"narrative":"Draft motion to dismiss to Tidewater Retail","codes":["L310","A103"],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"fee","date":"2025-11-27","timekeeper":"ER","timekeeper_name":"Emeka Rosenthal","timekeeper_title":"Associate","title":"Assoc","hours":1.7,"rate":200.0,"amount":340.0,"narrative":"Review opposing brief in response to answer and affirmative defenses","codes":["L240","A104"],"page":1,"narrative_style":"clear"},
+  {"n":11,"line_type":"fee","date":"2025-11-28","timekeeper":"HL","timekeeper_name":"Helena Lindqvist","timekeeper_title":"Associate","title":"Assoc","hours":0.6,"rate":190.0,"amount":114.0,"narrative":"Draft requests for production regarding deficiencies in Harbor Point Capital responses","codes":["L350","A103"],"page":1,"narrative_style":"clear"},
+  {"n":12,"line_type":"fee","date":"2025-11-28","timekeeper":"KO","timekeeper_name":"Katya Okafor","timekeeper_title":"Paralegal","title":"Para","hours":2.6,"rate":110.0,"amount":286.0,"narrative":"Meet and confer with counsel for Caldera Energy regarding discovery dispute","codes":["L350","A107"],"page":1,"narrative_style":"clear"},
+  {"n":13,"line_type":"fee","date":"2026-03-07","timekeeper":"VV","timekeeper_name":"Victor Voss","timekeeper_title":"Paralegal","title":"Para","hours":0.2,"rate":125.0,"amount":25.0,"narrative":"Review and analyze protective order received from Northwind Logistics","codes":["L310","A104"],"page":1,"narrative_style":"clear"},
+  {"n":14,"line_type":"expense","date":"2025-11-11","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":6.0,"rate":3.54,"amount":21.24,"narrative":"Facsimile charges","codes":["E104"],"page":1,"narrative_style":"clear"},
+  {"n":15,"line_type":"expense","date":"2025-11-24","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":305.04,"amount":305.04,"narrative":"Document hosting and processing vendor","codes":["E118"],"page":1,"narrative_style":"clear"},
+  {"n":16,"line_type":"expense","date":"2025-11-26","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":47.0,"rate":0.69,"amount":32.43,"narrative":"Mileage to courthouse","codes":["E109"],"page":1,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["434 Harbor Road","Chicago","Tax ID 89-1061282"],"template":"T23","pages":2},
+ "rule_set_id":"RS-06",
+ "context":{"matter_open":"2025-01-13","matter_close":"2026-02-28","matter_budget":41768.0,"approved_timekeepers":["Katya Okafor","Louis Rosenthal","Emeka Rosenthal","Ingrid Nwosu","Victor Voss","Hannah Lockhart","Helena Lindqvist"],"invoice_received_date":"2026-01-27"},
+ "expected_findings":[
+  {"rule_id":"RS-06-R02","rule_type":"ApprovedRate","scope":"line","line_refs":[1],"consequence":"Reduce"},
+  {"rule_id":"RS-06-R03","rule_type":"ExpenseRule","scope":"line","line_refs":[14],"consequence":"Disallow"},
+  {"rule_id":"RS-06-R05","rule_type":"CoreRecordWindow","scope":"line","line_refs":[13],"consequence":"Flag"},
+  {"rule_id":"RS-06-R06","rule_type":"InvoiceAge","scope":"invoice","line_refs":[],"consequence":"Flag"},
+  {"rule_id":"RS-06-R09","rule_type":"Duplicate","scope":"line","line_refs":[4],"consequence":"Disallow","related_line_refs":[3]}
+ ],
+ "seeded_violations":5
+}

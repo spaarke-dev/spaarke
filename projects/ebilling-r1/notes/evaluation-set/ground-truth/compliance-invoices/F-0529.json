@@ -1,0 +1,28 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0529",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0529","generator_id":"gen_eval_set.py@1 F-0529","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0529.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-01"},
+ "header":{"firm":"Maddox & Cranmer LLP","firm_invoice_number":"INV-2026-72457","invoice_date":"2025-08-01","billing_period_start":"2025-07-01","billing_period_end":"2025-07-31","firm_matter_reference":"84778-0028","po_number":"PO-4520098","fees_total":5121.0,"expenses_total":1416.49,"adjustments_total":0.0,"total_due":6537.49,"currency":"USD"},
+ "timekeepers":[{"name":"Daniel Nakamura","title":"Partner","rate":960.0,"billed_as":"DN"},{"name":"Ingrid Okafor","title":"Associate","rate":520.0,"billed_as":"IO"},{"name":"Tomas Tavares","title":"Paralegal","rate":290.0,"billed_as":"TT"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2025-07-03","timekeeper":"IO","timekeeper_name":"Ingrid Okafor","timekeeper_title":"Associate","title":"Assoc","hours":1.5,"rate":520.0,"amount":780.0,"narrative":"Review expert qualifications and prior testimony for the regulatory inquiry","codes":["L130","A104"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2025-07-16","timekeeper":"IO","timekeeper_name":"Ingrid Okafor","timekeeper_title":"Associate","title":"Assoc","hours":3.0,"rate":520.0,"amount":1560.0,"narrative":"Prepare updated litigation budget for the customs audit","codes":["L150","A103"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2025-07-23","timekeeper":"TT","timekeeper_name":"Tomas Tavares","timekeeper_title":"Paralegal","title":"Para","hours":2.2,"rate":290.0,"amount":638.0,"narrative":"Prepare monthly status report to client regarding the warranty claim","codes":["L190","A111"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2025-07-23","timekeeper":"TT","timekeeper_name":"Tomas Tavares","timekeeper_title":"Paralegal","title":"Para","hours":2.7,"rate":290.0,"amount":783.0,"narrative":"Review privilege log entries before service","codes":["L140","A104"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2025-07-24","timekeeper":"IO","timekeeper_name":"Ingrid Okafor","timekeeper_title":"Associate","title":"Assoc","hours":0.4,"rate":520.0,"amount":208.0,"narrative":"Conference with client regarding budget variance for the employment claim","codes":["L150","A106"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2025-07-28","timekeeper":"IO","timekeeper_name":"Ingrid Okafor","timekeeper_title":"Associate","title":"Assoc","hours":0.4,"rate":520.0,"amount":208.0,"narrative":"Conference with client regarding settlement authority for the customs audit","codes":["L160","A106"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2025-07-28","timekeeper":"TT","timekeeper_name":"Tomas Tavares","timekeeper_title":"Paralegal","title":"Para","hours":1.0,"rate":290.0,"amount":290.0,"narrative":"Attend case management conference in the employment claim","codes":["L230","A109"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2025-07-29","timekeeper":"TT","timekeeper_name":"Tomas Tavares","timekeeper_title":"Paralegal","title":"Para","hours":0.6,"rate":290.0,"amount":174.0,"narrative":"Draft motion for preliminary injunction in the construction contract","codes":["L220","A103"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"fee","date":"2025-07-31","timekeeper":"DN","timekeeper_name":"Daniel Nakamura","timekeeper_title":"Partner","title":"Ptr","hours":0.5,"rate":960.0,"amount":480.0,"narrative":"Telephone conference with client regarding selection of expert for the warranty claim","codes":["L130","A106"],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"expense","date":"2025-07-01","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":1354.33,"amount":1354.33,"narrative":"Document hosting and processing vendor","codes":["E118"],"page":1,"narrative_style":"clear"},
+  {"n":11,"line_type":"expense","date":"2025-07-14","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":243.0,"rate":0.12,"amount":29.16,"narrative":"Photocopies - 243 pages","codes":["E101"],"page":1,"narrative_style":"clear"},
+  {"n":12,"line_type":"expense","date":"2025-07-16","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":3.0,"rate":11.0,"amount":33.0,"narrative":"Postage - certified mail","codes":["E108"],"page":2,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["526 Market Street","Phoenix","Tax ID 65-4874818"],"template":"T15","pages":2},
+ "rule_set_id":"RS-01",
+ "context":{"matter_open":"2024-05-10","matter_close":"2025-10-29","matter_budget":51149.0,"approved_timekeepers":["Tomas Tavares","Ingrid Okafor","Gregory Brennan","Mei Nwosu","Beatrix Fairweather","Daniel Nakamura"],"invoice_received_date":"2025-08-05"},
+ "expected_findings":[],
+ "seeded_violations":0
+}

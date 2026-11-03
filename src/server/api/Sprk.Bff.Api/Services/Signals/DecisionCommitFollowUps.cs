@@ -33,17 +33,61 @@ public class DecisionCommitFollowUps
     private readonly SignalSuppressionService _suppression;
     private readonly IGenericEntityService _entities;
     private readonly ILogger<DecisionCommitFollowUps> _logger;
+    private readonly AssignTaskNotifier? _assignTask;
 
+    /// <summary>Without Assign Task's notifier (the route's test rigs): <see cref="NotifyAssigneesAsync"/> then sends nothing.</summary>
     public DecisionCommitFollowUps(
         SignalEvaluationTrigger trigger,
         SignalSuppressionService suppression,
         IGenericEntityService entities,
         ILogger<DecisionCommitFollowUps> logger)
+        : this(trigger, suppression, entities, logger, assignTask: null)
+    {
+    }
+
+    /// <param name="assignTask">Task 168 (D-194): Assign Task's email and bell. The app always registers it (DI takes this, the longest
+    /// constructor it can satisfy).</param>
+    public DecisionCommitFollowUps(
+        SignalEvaluationTrigger trigger,
+        SignalSuppressionService suppression,
+        IGenericEntityService entities,
+        ILogger<DecisionCommitFollowUps> logger,
+        AssignTaskNotifier? assignTask)
     {
         _trigger = trigger ?? throw new ArgumentNullException(nameof(trigger));
         _suppression = suppression ?? throw new ArgumentNullException(nameof(suppression));
         _entities = entities ?? throw new ArgumentNullException(nameof(entities));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _assignTask = assignTask;
+    }
+
+    /// <summary>
+    /// Task 168 (D-194): after the record (D-17: the Decision Record stays the commit's last write), tell each Assign Task's assignee:
+    /// the email and the bell (<see cref="AssignTaskNotifier.NotifyAsync"/>). Returns the commit warnings for an email that did not go.
+    /// Never throws, except cancellation.
+    /// </summary>
+    public virtual async Task<IReadOnlyList<string>> NotifyAssigneesAsync(
+        HttpContext http, IReadOnlyList<AssignTaskNotice> notices, CancellationToken ct)
+    {
+        if (notices.Count == 0 || _assignTask is null)
+            return [];
+
+        var warnings = new List<string>();
+        foreach (var notice in notices)
+        {
+            try
+            {
+                warnings.AddRange(await _assignTask.NotifyAsync(http, notice, ct).ConfigureAwait(false));
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+            {
+                _logger.LogWarning(DecisionCommitEvents.AfterRecordFailed, ex,
+                    "Decision commit: the assignee of task {TaskId} could not be notified; the decision stands.", notice.TaskId);
+                warnings.Add(AssignTaskNotifier.EmailNotSentWarning);
+            }
+        }
+
+        return warnings;
     }
 
     /// <summary>After a recorded commit: the budget-revision trigger for each revision written, then suppression for each

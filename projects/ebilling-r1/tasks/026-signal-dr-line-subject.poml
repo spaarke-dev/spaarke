@@ -1,0 +1,147 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="026" project="ebilling-r1">
+  <metadata>
+    <title>Signal / Decision Record invoice-line subject and derivation</title>
+    <phase>1 Data model (WP1)</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies ontology-owned and access-control C# (SignalWriter, TodoRegardingBuilder, CoreAncestorResolver, SecureChildLineage) plus schema and solution source.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Cross-cutting change across three owners' pinned tables (ontology-r1, uac-r2, eBilling) where a wrong entry changes who sees what; guard tests must stay in lockstep.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits ontology-owned files and SpaarkeMaster solution source (sprk_Signal, sprk_DecisionRecord), which only one task may touch at a time.</parallel-reason>
+    <deps>010, 013, 029, #1111</deps>
+    <tags>bff, dataverse, schema, signals, coordination</tags>
+    <estimated-effort>1-2 days</estimated-effort>
+  </metadata>
+
+  <prompt>Implement spec FR-15 exactly: add the sprk_regardinginvoiceline lookup (to sprk_billingevent) on sprk_signal and sprk_decisionrecord, register the invoice line as a Signal / Decision Record subject through the shared regarding builder, make invoice and line subjects derive the grouping core record for every core type, register the new lookup with SecureChildLineage and the guard tests, and add the firm-visible reason text — keeping every existing dedupe key unchanged.</prompt>
+
+  <role>SPAARKE platform developer. Expert in the Ontology Signals writer, ADR-024 regarding pairs, uac-r2 core-ancestor stamping and secure-child lineage. Follow ADRs strictly.</role>
+
+  <goal>Dev has the two new lookups (and the reason column); SpaarkeMaster source for sprk_Signal / sprk_DecisionRecord matches dev; SignalWriter accepts sprk_invoice and sprk_billingevent subjects whose core type follows the subject's core record; SignalPairTypeSchemaAgreementTests, SecureChildLineageTests, SecureFamilyConsistencyTests, CoreAncestorResolverTests and the stamp-topology lockstep tests are green; ontology-r1 and uac-r2 reviews are recorded.</goal>
+
+  <context>
+    <background>spec.md FR-15 and D-31 (owner approved). Prior art for the same kind of change: projects/spaarke-ontology-platform-r1/notes/140-schema-delta.md (sections 2, 4, 6, 9: lookup shape, export-to-temp then copy only the two tables' files, the 6-hour metadata cache, builder-first rule). SignalWriter.RegardingLookupByEntity is not its own map: it reads TodoRegardingBuilder.RegardingLookupsByHostTable["sprk_signal"], so the entry is added once in TodoRegardingBuilder. The grouping core record comes only from CoreAncestorResolver.ResolveStampsAsync; task 013 extends that resolver for the invoice family.</background>
+    <relevant-files>
+      <file role="new">scripts/ebilling/Deploy-EbillingSignalLineSubjectSchema.ps1</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Workspace/TodoRegardingBuilder.cs:101 (SignalAndDecisionRecordRegardingLookupByEntity: add sprk_billingevent → sprk_regardinginvoiceline)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Signals/SignalWriter.cs:341 (doc counts), :396 (VerifiedSubjects: add sprk_invoice, sprk_billingevent), :762 (BuildDedupeKey — unchanged, verify)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Dataverse/CoreAncestorResolver.cs:267 (OntologySubjectSources: add sprk_regardinginvoiceline → sprk_billingevent)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Access/SecureChildLineage.cs:100 and :145 (sprk_decisionrecord and sprk_signal lineage rows: add the new lookup)</file>
+      <file role="modify">src/dataverse/solutions/SpaarkeMaster/Entities/sprk_Signal/Entity.xml, Entities/sprk_DecisionRecord/Entity.xml, Other/Relationships/sprk_BillingEvent.xml (from a temp export only)</file>
+      <file role="modify">tests/integration/data-mutation/Signals/SignalPairTypeSchemaAgreementTests.cs</file>
+      <file role="modify">tests/unit/domain/Access/SecureChildLineageTests.cs, tests/Spaarke.ArchTests/SecureFamilyConsistencyTests.cs (only if they need the new row)</file>
+      <file role="modify">tests/unit/Sprk.Bff.Api.Tests/Services/Dataverse/CoreAncestorResolverTests.cs, tests/integration/auth/UnifiedAccessControl/CoreAncestorStampTopologyLockstepTests.cs, tests/unit/Sprk.Bff.Api.Tests/Services/Workspace/TodoRegardingBuilderTests.cs, tests/unit/domain/Signals/SignalWriterTests.cs, tests/unit/domain/Signals/DecisionActionCatalogTests.cs</file>
+      <file role="canonical-reference">src/dataverse/solutions/SpaarkeMaster/Other/Relationships/sprk_Invoice.xml:143 and :528 (sprk_decisionrecord_reginvoice / sprk_signal_reginvoice relationship shape to copy)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="010" status="pending">sprk_billingevent is the Invoice Line (display name, line columns).</dependency>
+      <dependency task="029" status="pending">WP1 solution source is synced, so this task's source edit applies on top.</dependency>
+      <dependency task="#1111" status="complete">Ontology Signals code on master at f292ad119 (merged into this branch).</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="D-75">Per D-75 (with ontology-r1, 2026-10-15): the core record of an invoice line (sprk_billingevent) is derived only from the line's OWN core-record lookup (sprk_matter / sprk_project / sprk_regardingworkassignment, FR-05), never by walking sprk_billingevent.sprk_invoice; a line may in future not belong to exactly one invoice. Any other derivation needs uac-r2 approval (STOP and ask). The line subject is registered in SecureChildLineage and the census (ontology-r1 condition) so secure-family placement works for line-subject Signals and Decision Records.</constraint>
+    <constraint source="project">Existing dedupe keys do not change: BuildDedupeKey keeps its inputs and format; a line subject only adds keys whose subject segment is sprk_billingevent.</constraint>
+    <constraint source="project">The lookup is added only through TodoRegardingBuilder.SignalAndDecisionRecordRegardingLookupByEntity; no second map is created in SignalWriter or DecisionRecordWriter.</constraint>
+    <constraint source="project">Core derivation for invoice and line subjects comes only from CoreAncestorResolver.ResolveStampsAsync (task 013's extension); SignalWriter does not walk lookups itself.</constraint>
+    <constraint source="project">Ontology-owned files (Services/Signals/**) and uac-r2 tables (CoreAncestorResolver, SecureChildLineage, census tests) change only as listed; the PR records ontology-r1 and uac-r2 reviews. Run /conflict-check before the PR.</constraint>
+    <constraint source="project">Schema script runs only against spaarkedev1, additive, -WhatIf supported, entity-scoped PublishXml. Solution source: export with scripts/solution-authoring/Export-SpaarkeMasterSource.ps1 to a temp folder and copy only the sprk_Signal, sprk_DecisionRecord and relationship files that change; no version bump.</constraint>
+    <constraint source="bff-extensions.md">Publish-size delta against a fresh master build recorded; no new HIGH CVE; no new package.</constraint>
+    <constraint source="ADR-024">The new lookup is one more entity-specific lookup of the existing pair; at most one subject lookup per row stays enforced by the builder's guard.</constraint>
+    <constraint source="D-94">D-94 (uac-r2 approval of option A): make sprk_billingevent an intermediate in CoreAncestorResolver.IntermediateRootColumns with root columns exactly sprk_project, sprk_matter, sprk_regardingworkassignment (never sprk_invoice or sprk_timekeeper; sprk_timekeeper stays a Party), in lockstep with the TypeScript INTERMEDIATE_ROOT_COLUMNS row in src/client/shared/Spaarke.UI.Components/src/services/PolymorphicResolverService.ts (same three columns, same order) and RecordContainerResolver.ChildAncestorLinks (KindByEntity / ByEntity follow exactly those three). ChildRecordEntities, CHILD_RECORD_ENTITIES and StampedOutsideAccessTaxonomy stay unchanged. These three files are added to this task's scope by D-94.</constraint>
+    <constraint source="D-94">D-94 condition 1: confirm the three lookup column names and targets on sprk_billingevent by a read-only spaarkedev1 metadata read, and cite it in the IntermediateRootColumns comment like the other rows.</constraint>
+    <constraint source="D-94">D-94 condition 2: every write path that changes one of the three columns on a line runs the restamp for the line's dependants (as the other intermediates do), and the reconciliation job covers sprk_billingevent as a source; verify the StampSourceColumns entries for sprk_signal and sprk_decisionrecord (sprk_regardinginvoiceline -&gt; sprk_billingevent) are what both the restamper and the reconciler read. If no BFF path edits a line's core lookup today, say so in the notes.</constraint>
+    <constraint source="D-94">D-94 condition 3 tests: must-fire, a line whose sprk_invoice names an invoice under a different matter still resolves the line's own root; must-fire, a line whose root columns name different records is a derivation error (nothing stamped, writers refuse); a line with no core lookup is NoAncestor and SignalWriter and DecisionRecordWriter refuse it (pin the refusal); StampSourceTopology_IsClosed, IntermediateRootColumns_MatchTheTypeScriptSide and IntermediateRootColumns_MatchTheResolversFollowedRoots pass.</constraint>
+    <constraint source="D-94">D-94 condition 4 tests: a document or to-do regarding a line of a SECURE matter resolves to the secure matter's container; a line with conflicting root columns is refused and never given a default container.</constraint>
+    <constraint source="D-94">D-94 condition 5: run the targeted jest suite for PolymorphicResolverService.</constraint>
+    <constraint source="D-94">D-94 review gate: uac-r2 reviews the diff (three tables, restamp coverage, tests) before merge; the main session sends it. ontology-r1 still reviews the ontology-owned files.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Ontology Signals subjects and core-ancestor stamping</topic>
+    <files>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/adr/ADR-024-polymorphic-resolver-pattern.md</file>
+      <file>.claude/adr/ADR-034-user-record-membership.md</file>
+      <file>docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md</file>
+      <file>docs/architecture/uac-access-control.md</file>
+      <file>projects/spaarke-ontology-platform-r1/notes/140-schema-delta.md</file>
+      <file>.claude/skills/dataverse-create-schema/SKILL.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+    <patterns>
+      <pattern name="Polymorphic resolver" location=".claude/patterns/dataverse/polymorphic-resolver.md">Pair plus entity-specific lookups.</pattern>
+      <pattern name="UAC access control" location=".claude/patterns/auth/uac-access-control.md">Core-ancestor inheritance and stamp topology.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Gate checks">Declare RIGOR LEVEL: FULL. Run git merge-base --is-ancestor f292ad119 HEAD; if it fails, merge origin/master first (never copy files). Confirm task 013 is ✅ in TASK-INDEX.md (see escalation). Read FR-15 and 140-schema-delta.md.</step>
+    <step order="1" name="Schema">scripts/ebilling/Deploy-EbillingSignalLineSubjectSchema.ps1: on sprk_signal and sprk_decisionrecord create lookup sprk_regardinginvoiceline → sprk_billingevent (relationships sprk_signal_reginvoiceline, sprk_decisionrecord_reginvoiceline; Delete = RemoveLink, others NoCascade, same shape as *_reginvoice); on sprk_signal create sprk_firmreason (multiline 2000, firm-visible reason text). Ensure a sprk_recordtype_ref catalog row exists for sprk_billingevent (display "Invoice Line"); create it only if absent. -WhatIf, run, second run no change.</step>
+    <step order="2" name="Builder + writer">Add the entry to TodoRegardingBuilder.SignalAndDecisionRecordRegardingLookupByEntity; add sprk_invoice and sprk_billingevent to SignalWriter.VerifiedSubjects; update the "9 lookups" doc counts. Confirm BuildDedupeKey output for an existing subject is byte-identical.</step>
+    <step order="3" name="Stamp + lineage">Add (sprk_regardinginvoiceline, sprk_billingevent) to CoreAncestorResolver.OntologySubjectSources and to the sprk_signal / sprk_decisionrecord rows of SecureChildLineage (explicit tuple — the Regarding helper would build the wrong column name). Update the pinned guards that list these tables.</step>
+    <step order="4" name="Tests">Extend SignalPairTypeSchemaAgreementTests for a line subject; SignalWriterTests: an invoice-line Signal on a Project-scoped invoice carries core type Project (not Matter), and one for Work Assignment; existing-subject dedupe key unchanged; CoreAncestorResolverTests / lockstep / lineage tests for the new source column.</step>
+    <step order="5" name="Solution source">Export to a temp folder (path ≤ 140 chars), copy only the changed sprk_Signal / sprk_DecisionRecord / relationship files into src/dataverse/solutions/SpaarkeMaster; list unrelated drift in notes, do not copy it.</step>
+    <step order="6" name="Build + size">dotnet build and the affected unit / integration / ArchTests green; publish-size delta; vulnerable-package check.</step>
+    <step order="7" name="Reviews">Record ontology-r1 and uac-r2 review requests and outcomes in task notes; notify ontology-r1 when the PR opens.</step>
+    <step order="8">Update TASK-INDEX.md: set this task's status cell to ✅ [done].</step>
+    <step order="9">Record deviations in projects/ebilling-r1/notes/ and this task's notes.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If task 013 is not ✅ (CoreAncestorResolver does not yet derive the core record for sprk_invoice / sprk_billingevent, and both tasks edit CoreAncestorResolver.cs), STOP and escalate — do not implement derivation in SignalWriter.</trigger>
+    <trigger>If any existing dedupe key, existing lookup, pinned taxonomy list (CoreRecordEntities, ChildRecordEntities, StampedOutsideAccessTaxonomy) or the TypeScript CHILD_RECORD_ENTITIES would have to change, STOP and escalate to ontology-r1 / uac-r2 via the owner.</trigger>
+    <trigger>If ontology-r1 asks for the firm-visible reason text elsewhere (for example on sprk_decisionrecord), STOP and confirm with the owner before adding the column.</trigger>
+    <trigger>If the live gate tests read stale metadata (MetadataService caches entity metadata for up to 6 hours, 140-schema-delta.md section 6), wait or ask the owner before evicting a cache key.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>sprk_signal / sprk_decisionrecord carry 9 subject lookups (TodoRegardingBuilder.cs:101) including sprk_regardinginvoice; none points at a line.</existing>
+    <extension>The change extends the existing maps and pair; a line finding filed on the invoice would lose which line it is about, and per-line dedupe would collapse findings on different lines of one invoice.</extension>
+    <cost-of-doing-nothing>Line findings cannot be stored, deduplicated or shown per line (FR-15, FR-31), and their core record would default wrongly for Project / Work Assignment invoices.</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="pwsh">Schema script, Export-SpaarkeMasterSource.ps1</tool>
+    <tool name="dotnet">Build and test</tool>
+    <tool name="gh">PR review requests</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">scripts/ebilling/Deploy-EbillingSignalLineSubjectSchema.ps1 and the C# edits listed</output>
+    <output type="test">Updated tests listed in relevant-files</output>
+    <output type="config">SpaarkeMaster source for sprk_Signal, sprk_DecisionRecord, relationships</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Per D-75, a Decision Record and a Signal whose subject is an invoice line get their core grouping (CoreAncestorResolver) from the line's own core lookup, proven by a test where the line's sprk_invoice is absent; the line subject appears in SecureChildLineage and the census.</criterion>
+    <criterion testable="true">Dev metadata shows sprk_regardinginvoiceline (→ sprk_billingevent) on sprk_signal and sprk_decisionrecord and sprk_firmreason on sprk_signal; the solution source declares the same.</criterion>
+    <criterion testable="true">SignalPairTypeSchemaAgreementTests passes for an invoice-line subject and for every existing subject.</criterion>
+    <criterion testable="true">An invoice-line Signal on a Project-scoped invoice carries sprk_corerecordtype Project (negative: not Matter); a Work Assignment-scoped one carries Work Assignment.</criterion>
+    <criterion testable="true">BuildDedupeKey for an existing subject returns the same string as before; two lines of one invoice with the same policy get different keys.</criterion>
+    <criterion testable="true">SecureChildLineageTests, SecureFamilyConsistencyTests, CoreAncestorResolverTests and CoreAncestorStampTopologyLockstepTests pass with the new source column.</criterion>
+    <criterion testable="true">dotnet build green; all affected tests pass; publish-size delta recorded; no new HIGH CVE.</criterion>
+    <criterion testable="true">ontology-r1 and uac-r2 reviews recorded in task notes.</criterion>
+    <criterion testable="true">Cover the stated contract plus the edge cases named above. Anything beyond that needs a one-line justification in task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    013 was added to deps by the main session (2026-10-15): 013 extends CoreAncestorResolver for the line and invoice and this task edits the same file and depends on that derivation; see escalation.
+    "Firm-visible reason text" in FR-15 is placed on sprk_signal (findings are Signals); 130 projects it to firms.
+    Ontology-owned file changes need ontology-r1 review (CLAUDE.md section 4).
+
+Completed 2026-10-16 (notes/026-signal-dr-line-subject.md). uac-r2 D-94 option A: sprk_billingevent is an intermediate stamp root whose root columns are only its own project / matter / work-assignment lookups (live read 2026-10-16), never sprk_invoice; it is mirrored in C#, TS and the storage resolver, and a line naming two roots is refused in all three (SingleRootIntermediates). SignalWriter accepts invoice and line subjects and refuses an invoice-family subject with no core or more than one; DecisionRecordWriter refuses SubjectUnfileable. Live (spaarkedev1, additive, WhatIf → apply → rerun 0 changes): sprk_regardinginvoiceline on sprk_signal / sprk_decisionrecord, sprk_signal.sprk_firmreason, and the Invoice Line catalog row fb30d221-bbc9-f111-a05a-7c1e520a989f. Solution source: only the 4 task files were copied from the export; the export's F12 guard failed on 7 pre-existing missing dependencies that are not this task's. Tests: targeted + Signals + Finance 4,782 pass, ArchTests 1,056, jest 83. Publish +1.5 KB. Known limits: invoice two-root parity (question for uac-r2); the TS preview does not apply the single-root rule (unreachable); model-driven re-file reaches Signal/DR only through the report-only reconciler. ontology-r1 and uac-r2 reviews requested (diff ef3efce73..b5f4a4c78). Fix-round-1 (2026-10-17, notes/026): refusal kinds (a two-root line is CoreRecordAmbiguous), a DR core must be its invoice-family subject's own, a line must regard its invoice's core record, firm reason field-secured live (D-95(2)), deploy order in 053 step 5 and DEF-021, order-sensitive lockstep.
+rework: fix-round-2 task 026
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load the knowledge files first. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

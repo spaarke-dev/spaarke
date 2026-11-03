@@ -1,0 +1,93 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="002" project="ebilling-r1">
+  <metadata>
+    <title>Assemble the evaluation set and manifest</title>
+    <phase>0 Baseline and AI foundations (WP0)</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>MINIMAL</rigor>
+    <rigor-reason>Data collection, labelling and a manifest under projects/; no product code, no deployment.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Follows a written source list and target sizes (notes/research/test-data-sources.md); judgment is limited to licence screening against a fixed rule.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P0-A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>none</deps>
+    <tags>evaluation, test-data, research</tags>
+    <estimated-effort>2-3 days</estimated-effort>
+  </metadata>
+
+  <prompt>Assemble the eBilling evaluation set from public sources per notes/research/test-data-sources.md and write notes/evaluation-set/manifest.md listing every item with source, licence and PII note (spec FR-02). Ground truth must be machine-readable so the extraction spike (005), calibration (161) and accuracy evaluation (162) can score against it.</prompt>
+
+  <role>SPAARKE platform developer with legal-operations data experience. Careful about licences and personal data.</role>
+
+  <goal>notes/evaluation-set/manifest.md lists at least: 6 fee applications, 150 synthetic invoices with ground truth, 10 real invoices, 15 OCGs, 5 rate cards, 300 seeded-violation invoices and 300 clean invoices — each row with source URL or generator id, licence, PII note, storage location (committed path or local-only path) and ground-truth file. No item has a non-commercial or research-only licence.</goal>
+
+  <context>
+    <background>FR-02 is the input to FR-03 (spike, task 005), the D-47 calibration report (161) and FR-44 accuracy evaluation (162). The research note's "Recommended starter evaluation set" sets A–G and its "Handling and risk notes" are the plan: keep real filings and partner invoices outside git; commit labels, the generator and source manifests. D-32: UTBMS and LEDES standards are freely usable.</background>
+    <relevant-files>
+      <file role="read">projects/ebilling-r1/notes/research/test-data-sources.md</file>
+      <file role="read">projects/ebilling-r1/notes/research/ledes-utbms-ocg-reference.md</file>
+      <file role="read">projects/ebilling-r1/notes/decisions-log.md (D-32)</file>
+      <file role="output">projects/ebilling-r1/notes/evaluation-set/manifest.md</file>
+      <file role="output">projects/ebilling-r1/notes/evaluation-set/ground-truth/ (one JSON per item)</file>
+      <file role="output">projects/ebilling-r1/notes/evaluation-set/generator/ (synthetic invoice generator, committed)</file>
+      <file role="output">projects/ebilling-r1/notes/evaluation-set/local/ (git-ignored; real documents)</file>
+    </relevant-files>
+    <dependencies>none</dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="spec FR-02">Exclude every item whose licence is non-commercial or research-only (e.g. ConfBench CC BY-NC 4.0, DocILE research-only access, Onit proprietary samples). An item with no stated licence is allowed only as a public record used for internal evaluation, and the manifest says so.</constraint>
+    <constraint source="project">Real documents (fee applications, real invoices, OCGs, rate cards) are NOT committed: store them under projects/ebilling-r1/notes/evaluation-set/local/, which carries its own .gitignore that ignores everything except itself. Commit only the manifest, ground-truth JSON, expected-rule lists and the generator.</constraint>
+    <constraint source="ADR-015">Run a PII scan on real documents before they are ever used in a prompt; record the result per item in the manifest. Do not paste narrative text from real documents into notes.</constraint>
+    <constraint source="project">No code under src/ or scripts/. The generator lives under the project notes folder and has no runtime dependency on the BFF.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ebilling-r1/notes/research/test-data-sources.md</file>
+      <file>projects/ebilling-r1/notes/research/ledes-utbms-ocg-reference.md</file>
+      <file>.claude/constraints/ai.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Define the ground-truth JSON format first (header fields and line fields as named in spec FR-21; codes as filed; for seeded-violation invoices the expected findings as rule type + line reference) and write it as the manifest's first section.</step>
+    <step order="2">Collect sets in the research note's order of work: OCGs and rate cards with an expected-rule list per document (set E); 6+ fee applications with hand-labelled header and sampled lines (set A); real invoice layouts (set C).</step>
+    <step order="3">Build the synthetic generator (set B, 150+ PDFs over 20+ templates, 30% with scan noise) including bundled PDFs (cover letter + invoice) and at least one invoice over 20 pages, then sets F: 300+ seeded-violation and 300+ clean invoices against rules from set E.</step>
+    <step order="4">Screen every item's licence; drop excluded items; run the PII scan on real items; fill the manifest columns.</step>
+    <step order="5">Mark the 30+ item subset for the 005 spike (largest available invoice, 3+ bundled PDFs, mixed layouts) in the manifest.</step>
+    <step order="6">Update TASK-INDEX.md: change this task's status cell to ✅ [done].</step>
+    <step order="7">If any deviations from plan (e.g. a target count not reachable), document in projects/ebilling-r1/notes/ and in the manifest.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If a target count in FR-02 cannot be reached from licence-clean sources (most likely the 10 real invoices), STOP and present the shortfall and options to the owner (root CLAUDE.md §6) instead of including a licence-restricted source.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="terminal">Download sources, run the generator and PII scan</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/ebilling-r1/notes/evaluation-set/manifest.md</output>
+    <output type="data">projects/ebilling-r1/notes/evaluation-set/ground-truth/*.json</output>
+    <output type="code">projects/ebilling-r1/notes/evaluation-set/generator/</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The manifest's counts meet FR-02: ≥ 6 fee applications, ≥ 150 synthetic invoices with ground truth, ≥ 10 real invoices, ≥ 15 OCGs, ≥ 5 rate cards, ≥ 300 seeded-violation and ≥ 300 clean invoices.</criterion>
+    <criterion testable="true">Every manifest row has source, licence, PII note, storage location and ground-truth file; no row has a non-commercial or research-only licence.</criterion>
+    <criterion testable="true">git status shows no file from the local/ folder staged or tracked; the folder's .gitignore is the only tracked file in it.</criterion>
+    <criterion testable="true">The manifest marks a spike subset of ≥ 30 invoices including the largest available invoice and ≥ 3 bundled PDFs.</criterion>
+    <criterion testable="true">The ground-truth format section names every header and line field FR-21 lists and the expected-finding format for seeded violations.</criterion>
+  </acceptance-criteria>
+
+  <notes>The ground-truth format is a contract for 005, 161 and 162 — change it only with a note in the manifest. The generator is evaluation tooling, not product code; /test-diet and repo-cleanup at wrap-up (190) decide whether it stays. Completed 2026-10-15: A 8, B 150, C 12, E 16 OCG + 5 rate cards, F 300 seeded + 300 clean; manifest.md and manifest.csv in notes/evaluation-set/ (committed about 6.2 MB, local-only about 164 MB). Set E labels are ai-drafted-pending-review (legal-operations sign-off outstanding). Real invoices (C) all come from three Kentucky PSC rate-case filings (one jurisdiction) - widen when other sources are available. Rework: task 004 found B-0001 stale versus its ground-truth JSON; all 150 B PDFs re-rendered, render-manifest.json freshness guard and `gen_eval_set.py check` (PDF text versus ground truth) added; task 005 should run `check` before scoring.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in knowledge files. Follow the task-execute skill for the mandatory pre-execution checklist.</protocol>
+  </execution>
+</task>

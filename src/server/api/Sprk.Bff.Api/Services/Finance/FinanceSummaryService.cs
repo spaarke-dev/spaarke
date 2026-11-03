@@ -92,7 +92,7 @@ public class FinanceSummaryService : IFinanceSummaryService
     private const string Invoice_InvoiceDate = "sprk_invoicedate";
     private const string Invoice_TotalAmount = "sprk_totalamount";
     private const string Invoice_VendorOrg = "sprk_vendororg";
-    private const string Invoice_InvoiceStatus = "sprk_invoicestatus";
+    private const string Invoice_StatusCode = FinanceBaseValues.InvoiceStatusCodeColumn;
 
     // Period type option set values
     private const int PeriodType_ToDate = 100000003;
@@ -376,14 +376,21 @@ public class FinanceSummaryService : IFinanceSummaryService
         Guid matterId,
         CancellationToken ct)
     {
-        var query = new QueryExpression(InvoiceEntity)
+        var results = await serviceClient.RetrieveMultipleAsync(BuildRecentInvoicesQuery(matterId), ct);
+
+        return results.Entities.Select(ToRecentInvoice).ToList();
+    }
+
+    /// <summary>The recent-invoices query (internal so a test can pin its columns: the status is <c>statuscode</c>, D-41).</summary>
+    internal static QueryExpression BuildRecentInvoicesQuery(Guid matterId) =>
+        new(InvoiceEntity)
         {
             ColumnSet = new ColumnSet(
                 Invoice_InvoiceNumber,
                 Invoice_InvoiceDate,
                 Invoice_TotalAmount,
                 Invoice_VendorOrg,
-                Invoice_InvoiceStatus),
+                Invoice_StatusCode),
             Criteria = new FilterExpression(LogicalOperator.And)
             {
                 Conditions =
@@ -398,18 +405,16 @@ public class FinanceSummaryService : IFinanceSummaryService
             TopCount = 5
         };
 
-        var results = await serviceClient.RetrieveMultipleAsync(query, ct);
-
-        return results.Entities.Select(e => new RecentInvoiceDto
-        {
-            InvoiceId = e.Id,
-            InvoiceNumber = e.GetAttributeValue<string>(Invoice_InvoiceNumber) ?? string.Empty,
-            InvoiceDate = e.GetAttributeValue<DateTime?>(Invoice_InvoiceDate),
-            TotalAmount = e.GetAttributeValue<Microsoft.Xrm.Sdk.Money>(Invoice_TotalAmount)?.Value ?? 0m,
-            VendorOrgId = e.GetAttributeValue<Microsoft.Xrm.Sdk.EntityReference>(Invoice_VendorOrg)?.Id,
-            Status = e.GetAttributeValue<Microsoft.Xrm.Sdk.OptionSetValue>(Invoice_InvoiceStatus)?.Value ?? 0
-        }).ToList();
-    }
+    /// <summary>One invoice row as a <see cref="RecentInvoiceDto"/>; <c>Status</c> is the invoice's <c>statuscode</c>.</summary>
+    internal static RecentInvoiceDto ToRecentInvoice(Microsoft.Xrm.Sdk.Entity e) => new()
+    {
+        InvoiceId = e.Id,
+        InvoiceNumber = e.GetAttributeValue<string>(Invoice_InvoiceNumber) ?? string.Empty,
+        InvoiceDate = e.GetAttributeValue<DateTime?>(Invoice_InvoiceDate),
+        TotalAmount = e.GetAttributeValue<Microsoft.Xrm.Sdk.Money>(Invoice_TotalAmount)?.Value ?? 0m,
+        VendorOrgId = e.GetAttributeValue<Microsoft.Xrm.Sdk.EntityReference>(Invoice_VendorOrg)?.Id,
+        Status = e.GetAttributeValue<Microsoft.Xrm.Sdk.OptionSetValue>(Invoice_StatusCode)?.Value ?? 0
+    };
 
     // ═══════════════════════════════════════════════════════════════════════════
     // Helper Methods
@@ -525,6 +530,6 @@ public record RecentInvoiceDto
     /// <summary>Vendor organization ID.</summary>
     public Guid? VendorOrgId { get; init; }
 
-    /// <summary>Invoice status (option set value).</summary>
+    /// <summary>Invoice status: the <c>statuscode</c> value (see <c>InvoiceStatusCodes</c>; In Review is 1). 0 when unread.</summary>
     public int Status { get; init; }
 }

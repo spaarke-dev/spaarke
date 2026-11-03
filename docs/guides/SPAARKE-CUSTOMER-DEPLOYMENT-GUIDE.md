@@ -1279,8 +1279,9 @@ former `scripts/Register-EntraAppRegistrations.ps1` path was retired by task 130
   Known limit (ISS-018 K1): an app registration H3 created before 2026-10-14 would keep a stale delegated entry with id `75359482-...` (the reconcile only adds); none exists, because H3 had never run live.
 
 **Office add-in and Teams sign-in redirects are NOT on the customer's registration.** The shared clients sign in with
-their OWN app registrations (production add-in: `1958aec2…` "Spaarke Office Add-in (Production)"), so `brk-multihub://<host>` and
-`https://<host>/auth-callback.html` are registered ONCE, on that client app, for the production site
+their OWN app registrations (production add-in: `1958aec2…` "Spaarke Office Add-in (Production)"), so `brk-multihub://<host>`,
+`brk-9199bf20-a13f-4107-85dc-02114787ef48://<host>` (the broker scheme for Outlook on the web and new Outlook; without
+it those users fall back to the popup) and `https://<host>/auth-callback.html` are registered ONCE, on that client app, for the production site
 (`addins.spaarke.com`) — never per customer. A customer BFF only pre-authorizes the client (above) and lists its origin in
 CORS (H4b). Reference impl: [`src/client/shared/Spaarke.Auth/src/strategies/OfficeNaaStrategy.ts`](../../src/client/shared/Spaarke.Auth/src/strategies/OfficeNaaStrategy.ts).
 For the External Access Teams app (package build, customer-tenant install, Teams sign-in prerequisites and support), see
@@ -1353,8 +1354,15 @@ System Administrator application user there. **H10** follows (before H6 — §5.
 only when the intake says `solutionPackageType = unmanaged` (ADR-027 §3, amended 2026-10-07). It refuses to switch an
 environment's type and refuses a downgrade; an upgrade is `StageAndUpgrade`. Package definition, release, IAM and
 upgrade: [`SPAARKE-SOLUTION-RELEASE-PROCESS.md`](../procedures/SPAARKE-SOLUTION-RELEASE-PROCESS.md). H6 side built
-2026-10-07 (T218b). ⚠️ A real run fails at H6 until the package is published in the new format (T218c–e: content,
-git source, CI publish) — the store still holds the hand-made 2026-08-21 manifest.
+2026-10-07 (T218b); the store holds CI-published packages (1.2.4.0 since 2026-10-29).
+
+**After any SpaarkeMaster upgrade of a stamp** (an H6 run or a manual `pac solution import --stage-and-upgrade`), check
+the security roles against the release:
+`scripts/provisioning/Test-RolePrivilegeExpectations.ps1 -EnvironmentUrl <stamp> -ExpectationsPath
+scripts/provisioning/role-privilege-expectations/spaarkemaster-<version>.json` (read-only; exit 0 = match). A managed
+role loses a privilege the release removed only on a stage-and-upgrade, so a leftover means the wrong import method or a
+privilege added by hand. A leftover Signal Write or Decision Record Create lets callers bypass the BFF commit route. Add
+an expectations file for every release that changes roles (the owning project supplies the list).
 
 **H7** sets the 7 per-customer env-var values (§6.4).
 
@@ -1833,6 +1841,32 @@ Run intake no longer takes `communicationGraphResource` / `emailGraphResource`. 
 > configuration rows to this team, so it must exist before either runs for the customer. Until they ship, no seeder does:
 > the rows stay with the seeding identity, and an operator re-owns them to this team after setup. Users keep reading the
 > rows through their own roles (`Spaarke Core User`, Deep).
+>
+> **Product configuration is read at Global (owner decision 2026-10-29).** Spaarke product data stays owned in the root
+> (owner round 136), and people work in the customer's business unit below it, where a Read at Deep does not reach the
+> root. So `Spaarke Core User` and `Spaarke Basic User` read the product configuration tables at Global: the playbooks and
+> their actions, skills, tools and knowledge, the AI type catalogs, the Assistant's context map, and grid configuration.
+> This is Read only, on those tables only. Restricted content (`sprk_policy`, `sprk_policyversion`, `sprk_ruleset`,
+> `sprk_procedureassignment`, `sprk_storedfile`), customer records, customer configuration and per-user tables keep their
+> depths. The one list is `config/product-configuration-read-role.json` (with the tables left out and why); the roles'
+> solution XML carries it, so a SpaarkeMaster import applies it. On an environment that has not had that import, run
+> `scripts/Set-ProductConfigurationReadDepth.ps1` (dry run, then `-Apply`, then `-Verify`, which must exit 0).
+> `ProductConfigurationReadRoleGuardTests` fails the build if the list gains a customer or restricted table or platform
+> service configuration (`sprk_externalserviceconfig`, `sprk_dataverseenvironment`, `sprk_aimodeldeployment`), if an
+> entry names any privilege other than the table's own Read, or if either role gains Create on `sprk_gridconfiguration`.
+> Nothing in the product reads `sprk_externalserviceconfig` as a user, so no end-user Spaarke role holds a privilege on
+> it, and its `sprk_clientsecret` column is field-secured with no Spaarke field security profile (only the platform's
+> System Administrator profile reads it); the same guard checks both. An environment imported before that change still
+> holds the old Read on the two roles: the same script's dry run lists it, `-Apply` removes it, and `-Verify` fails
+> until it is gone.
+> Because every user can read every playbook, **creating, cloning and sharing playbooks is for playbook administrators
+> only**: in the role XML only `Spaarke AI Analysis Admin` holds Create and Share on `sprk_analysisplaybook`, and the BFF
+> routes `POST /api/ai/playbooks`, `/{id}/clone`, `/{id}/share` and `/{id}/unshare` require the caller's own Create
+> (create, clone) or Share (share, unshare) privilege on that table before anything is read or written. Every playbook
+> write route (`PUT /api/ai/playbooks/{id}`, `PUT /{id}/canvas`, and the node create, update, delete and scopes routes)
+> requires the caller's own Write privilege first, and an update that changes whether the playbook is public also
+> requires Share. A user without the privilege gets 403. Give a person who builds playbooks the
+> `Spaarke AI Analysis Admin` role.
 
 Secure projects, matters and work assignments (unified-access-control-r2) need Dataverse security configuration that
 no solution import can create. Since T256, **H7b creates it on every run**, after H6 and before H9:
@@ -1985,9 +2019,23 @@ The package has no `permissions`, `webApplicationInfo`, bot or knowledge capabil
    - scope `api://{bffAppRegId}/user_impersonation offline_access`;
    - PKCE **on**.
 
-   Save, then copy the **OAuth client registration ID**. With the Agents Toolkit the same values go through
-   `oauth/register` (`isPKCEEnabled: true`, `targetAudience: AnyTenant`, `applicableToApps: AnyApp`, no
-   `clientSecret`).
+   **The portal form cannot save these values (T186 ACME, 2026-10-28):** it marks the client secret required, and the
+   Spaarke Copilot Agent client has no secret (SPA redirect + PKCE), so a dummy value would make every sign-in fail.
+   Use the Agents Toolkit `oauth/register` instead, which takes no secret when `isPKCEEnabled: true`. Copy
+   `provisioning-runs/acme-b6941254-ac1b-42a6-8b12-dec7587090fc/copilot-auth-config/m365agents.yml` into the
+   customer's run record, change the name, base URL and scope, then run (operator's own Microsoft 365 sign-in):
+   `npm install -g @microsoft/m365agentstoolkit-cli`, `atk auth login m365 --tenant {SpaarkeTenantId}`,
+   `atk provision --env {customerId} --folder {that folder}`. The id lands in `env/.env.{customerId}` as
+   `SPAARKE_COPILOT_AUTH_CONFIG_ID` — commit that file: the toolkit skips creation only while that variable has a
+   value, so a run from a fresh folder creates a second auth config. Scope is comma-separated there; `appId` is
+   required by the driver and unused with `AnyApp`. The portal's **Client password authentication method** does not
+   apply (no secret). The portal still shows, edits and deletes the auth config. **Sign in with the Spaarke work
+   account**, not a personal Microsoft account. The same address can be both (ACME: the operator's @spaarke.com
+   address also exists as a personal account); when Microsoft asks which one, pick **Work or school account**. The
+   browser also reuses an already signed-in account, and `--tenant` stops neither. A personal account fails `oauth/register` with `Request failed with status code 401`;
+   `~/.fx/account/homeId.cache.appStudio` then ends in the consumer tenant `9188040d-6c67-4c5b-b112-36a304b66dad`.
+   Fix: `atk auth logout m365`, sign in again choosing the work account, re-run `atk provision` (safe — nothing was
+   created).
 7. **Record the id** on the customer's registry row. PATCH `sprk_copilotauthconfigid` on `sprk_dataverseenvironment`
    with your own identity (`pac data update` or the Web API). The id is not a secret; re-renders and decommission read
    it from the row.
@@ -2152,7 +2200,7 @@ Delete the column through the API, then import or recreate. Do this before impor
    `MSCRM.SolutionUniqueName`) and publish `sprk_signal` and `sprk_decisionrecord` only (`PublishXml`).
 7. **Verify** the metadata read now returns `Lookup` with `Targets = [sprk_recordtype_ref]`, then re-enable the writers
    (they must be on a build that writes the lookup, task 141) and clear the cached entity metadata
-   (`sdap:dv:entitymetadata:sprk_signal` and `sprk_decisionrecord`, up to 6 h in Redis) in the same window.
+   (`sdap:dv:entitymetadata:v2:sprk_signal` and `sprk_decisionrecord`, up to 6 h in Redis) in the same window.
 
 Between steps 5 and 6 the column is absent; keep that gap short and do not run Signal jobs inside it.
 
@@ -2179,7 +2227,7 @@ goes out in **two SpaarkeMaster versions**:
    `StageAndUpgrade`. Creating the lookup is then an ordinary additive change.
 6. **Verify** the metadata read returns `Lookup` with `Targets = [sprk_recordtype_ref]`, back-fill the lookup from the
    exported rows if there were any, then re-enable the writers (a build that writes the lookup, task 141) and clear the
-   cached entity metadata (`sdap:dv:entitymetadata:sprk_signal` and `sprk_decisionrecord`, up to 6 h in Redis).
+   cached entity metadata (`sdap:dv:entitymetadata:v2:sprk_signal` and `sprk_decisionrecord`, up to 6 h in Redis).
 
 Between steps 4 and 5 the column is absent; keep that gap short and do not run Signal jobs inside it. Both versions are
 cut at release time (`Assemble-SpaarkeMasterSolution.ps1 -Version`); this task did not bump the version, and the source

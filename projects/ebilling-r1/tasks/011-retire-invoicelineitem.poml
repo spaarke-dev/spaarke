@@ -1,0 +1,107 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="011" project="ebilling-r1">
+  <metadata>
+    <title>Retire sprk_invoicelineitem</title>
+    <phase>1 Data model (WP1)</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Destructive dev schema change behind an owner gate, plus removal of code / test / doc references; tagged deletion, so code-review and adr-check run regardless (root CLAUDE.md §8).</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Closed reference inventory (below) and an ordered, gated procedure; no design judgment.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P1-B</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Destructive change in the shared dev environment behind an owner OK; edits a uac-r2 census ArchTest.</parallel-reason>
+    <deps>010, 017</deps>
+    <tags>dataverse, schema, deletion</tags>
+    <estimated-effort>3-5 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Retire sprk_invoicelineitem (D-18, FR-04): prove it has zero rows and zero code references, remove every reference outside the Dataverse solution source, remove its dev dependencies, and — only after explicit owner OK — delete the table in dev. Hand task 029 the list of solution-source files its sync must drop.</prompt>
+
+  <role>SPAARKE platform developer. Expert in Dataverse dependency removal (forms, relationships, roles) and the Web API.</role>
+
+  <goal>In dev, sprk_invoicelineitem no longer exists; grep over src/server, src/client, src/solutions, tests, scripts, config, docs and .github finds no sprk_invoicelineitem reference; task notes hold the zero-row evidence, the owner OK, the dependency-removal log and the solution-source file list for 029.</goal>
+
+  <context>
+    <background>sprk_billingevent becomes the Invoice Line (010). Reference inventory (grep, 2026-10-15): tests/Spaarke.ArchTests/RecordOwnerAssignmentCensusTests.cs:52 (ChildTables); scripts/Migrate-DataverseData.ps1:116; docs/data-model/sprk_financial-related-entities.md; docs/guides/DATAGRID-FRAMEWORK-CONFIGURATION-GUIDE.md:744-746; docs/procedures/production-release.md:114. Solution source (dropped by 029's sync, not edited here): Entities/sprk_InvoiceLineItem/**, sprk_Timekeeper/Entity.xml (sprk_invoicelineitem lookup, around line 569), sprk_BillingEvent main forms {54b1c4d9-…} and {fc621f4e-…}, sprk_Invoice main form {93aa1c69-…}, Other/Relationships/*.xml (BusinessUnit, Contact, Owner, sprk_BillingEvent, sprk_Invoice, sprk_InvoiceLineItem, SystemUser, Team, TransactionCurrency), Other/Relationships.xml, Other/Solution.xml, Roles (Spaarke Basic User, Spaarke Core User, Spaarke Ontology Service), aiskillconfigs/ais_FormFillFieldOptOut_sprk_invoicelineitem_sprk_recordsummary. No BFF or client code reads it.</background>
+    <relevant-files>
+      <file role="modify">tests/Spaarke.ArchTests/RecordOwnerAssignmentCensusTests.cs (remove the one ChildTables entry)</file>
+      <file role="modify">scripts/Migrate-DataverseData.ps1 (remove from the table list)</file>
+      <file role="modify">docs/data-model/sprk_financial-related-entities.md</file>
+      <file role="modify">docs/guides/DATAGRID-FRAMEWORK-CONFIGURATION-GUIDE.md</file>
+      <file role="modify">docs/procedures/production-release.md</file>
+      <file role="read">src/dataverse/solutions/SpaarkeMaster/Entities/sprk_InvoiceLineItem/Entity.xml</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="010" status="pending">sprk_billingevent carries the line columns that replace this table</dependency>
+      <dependency task="017" status="pending">Timekeeper review decided which timekeeper lookups are obsolete; the timekeeper → invoice-line-item lookup is removed here</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project CLAUDE.md §5">Deleting the table, its columns or its relationships is destructive: nothing is deleted in dev until the owner has given an explicit OK in this session, quoted in task notes with the date. Removing references in repo files does not need the OK.</constraint>
+    <constraint source="project">Do NOT edit src/dataverse/solutions/SpaarkeMaster/** (task 029 syncs solution source from dev). Record the file list instead.</constraint>
+    <constraint source="ADR-038">The ArchTest edit removes only the sprk_invoicelineitem entry; the census test still passes and still fails on an unlisted table (run it before and after).</constraint>
+    <constraint source="project">Dev dependency removal order: form subgrids / fields on sprk_billingevent and sprk_invoice forms → the sprk_invoicelineitem lookup on sprk_timekeeper → the AI skill config opt-out → then the table. Use RetrieveDependenciesForDelete to prove nothing remains before the delete.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/dataverse-create-schema/SKILL.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+      <file>.claude/constraints/plugins.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="1">Re-run the reference grep (all of src, tests, scripts, config, docs, .github, infra, infrastructure; case-insensitive) and compare with the background inventory; record differences.</step>
+    <step order="2">Count rows in dev (and, read-only, in any other environment the owner names); record the counts. Run RetrieveDependenciesForDelete for the entity and record the dependency list.</step>
+    <step order="3">Remove the repo references listed in relevant-files; run dotnet test on tests/Spaarke.ArchTests (before and after).</step>
+    <step order="4">Present the evidence (row counts, dependency list, planned removals) to the owner and STOP for an explicit OK.</step>
+    <step order="5">After the OK: remove the dev dependencies in the stated order, re-run RetrieveDependenciesForDelete until empty, delete the table, publish customizations; record each call.</step>
+    <step order="6">Verify: EntityDefinitions(LogicalName='sprk_invoicelineitem') returns 404; forms of sprk_billingevent / sprk_invoice / sprk_timekeeper load in dev.</step>
+    <step order="7">Write the solution-source file list for 029 into task notes.</step>
+    <step order="8">Update TASK-INDEX.md: change this task's status cell to ✅ [done].</step>
+    <step order="9">If any deviations from plan, document in projects/ebilling-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>Any row in sprk_invoicelineitem in any environment checked: STOP — no deletion; escalate with the counts (FR-04 negative case).</trigger>
+    <trigger>A reference found in code (src/server, src/client, src/solutions) beyond the inventory: STOP and escalate before removing it.</trigger>
+    <trigger>No explicit owner OK: do not run step 5; leave the task in progress with the evidence in notes.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dataverse-mcp">Row counts and metadata reads</tool>
+    <tool name="az">Web API calls for dependency removal and delete</tool>
+    <tool name="dotnet">Run the ArchTests</tool>
+  </tools>
+
+  <outputs>
+    <output type="test">tests/Spaarke.ArchTests/RecordOwnerAssignmentCensusTests.cs</output>
+    <output type="script">scripts/Migrate-DataverseData.ps1</output>
+    <output type="docs">docs/data-model/sprk_financial-related-entities.md, docs/guides/DATAGRID-FRAMEWORK-CONFIGURATION-GUIDE.md, docs/procedures/production-release.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Task notes record zero rows in sprk_invoicelineitem in dev (and any other environment checked) before deletion, and the owner's OK with date.</criterion>
+    <criterion testable="true">Given any remaining reference or any row, when the task reaches the delete step, then it stops without deleting (escalation recorded).</criterion>
+    <criterion testable="true">After the task, EntityDefinitions(LogicalName='sprk_invoicelineitem') in dev returns 404 and the sprk_billingevent, sprk_invoice and sprk_timekeeper forms open without error.</criterion>
+    <criterion testable="true">grep -ri invoicelineitem over src/server, src/client, src/solutions, tests, scripts, config, docs and .github returns nothing.</criterion>
+    <criterion testable="true">tests/Spaarke.ArchTests passes after the edit; RecordOwnerAssignmentCensusTests still fails for a table not in its lists (existing control unchanged).</criterion>
+    <criterion testable="true">Task notes contain the solution-source file list 029 must drop; no file under src/dataverse/solutions/SpaarkeMaster/ changed in this task.</criterion>
+  </acceptance-criteria>
+
+  <notes>STATUS 2026-10-16: IN PROGRESS, dev delete NOT run. Escalation trigger 1 fired: sprk_invoicelineitem holds 4 rows in dev (test data on test invoices; evidence and ids in notes/011-retire-invoicelineitem.md section 2); no owner OK yet (trigger 3). Done: repo/doc references removed or redirected to sprk_billingevent (steps 1 and 3; ArchTests 1052 passed before and after); dependency and usage inventory (step 2); guarded script scripts/ebilling/Remove-EbillingInvoiceLineItem.ps1 (read-only by default, -Delete refuses with exit 2 on any row or unexpected dependency; tested read-only and with -WhatIf); solution-source list for 029 (notes section 6). After the owner decides on the 4 rows and gives the explicit OK, run: pwsh scripts/ebilling/Remove-EbillingInvoiceLineItem.ps1 -Delete -DeleteRows -OwnerApproval '&lt;date&gt; &lt;who&gt;' (drop -DeleteRows if the rows were already removed), quote the OK and the output in the notes, then set the status to completed. Steps 5 and 6 are pending. RecordOwnerAssignmentCensusTests is a uac-r2 guard: mention the edit in the PR and ask uac-r2 to review. Shared append point: docs/data-model/sprk_financial-related-entities.md (edit only the invoice-line-item rows).
+Completed 2026-10-16: table deleted in dev (owner removed it via maker portal after the scripted cleanup); verification in notes/011 section 8.
+rework: none task 011</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in knowledge files. Follow the task-execute skill for the mandatory pre-execution checklist.</protocol>
+  </execution>
+</task>

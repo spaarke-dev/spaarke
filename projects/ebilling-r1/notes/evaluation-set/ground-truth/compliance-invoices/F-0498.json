@@ -1,0 +1,29 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0498",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0498","generator_id":"gen_eval_set.py@1 F-0498","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0498.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-06"},
+ "header":{"firm":"Hartwell Zeller PC","firm_invoice_number":"INV-2025-77238","invoice_date":"2025-09-04","billing_period_start":"2025-08-01","billing_period_end":"2025-08-31","firm_matter_reference":"82937-0032","po_number":"PO-4550744","fees_total":3754.0,"expenses_total":141.5,"adjustments_total":0.0,"total_due":3895.5,"currency":"USD"},
+ "timekeepers":[{"name":"Dalia Whitfield","title":"Associate","rate":230.0,"billed_as":"DW"},{"name":"Hannah Halloran","title":"Of Counsel","rate":300.0,"billed_as":"HH"},{"name":"Jordan Oyelaran","title":"Legal Assistant","rate":105.0,"billed_as":"JO"},{"name":"Marcus Yilmaz","title":"Associate","rate":235.0,"billed_as":"MY"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2025-08-04","timekeeper":"HH","timekeeper_name":"Hannah Halloran","timekeeper_title":"Of Counsel","title":"O/C","hours":3.0,"rate":300.0,"amount":900.0,"narrative":"Research pleading standards applicable to the supply agreement","codes":["L210","A102"],"page":2,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2025-08-13","timekeeper":"MY","timekeeper_name":"Marcus Yilmaz","timekeeper_title":"Associate","title":"Assoc","hours":2.5,"rate":235.0,"amount":587.5,"narrative":"Update document review protocol and coding panel for the construction contract","codes":["L140","A110"],"page":2,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2025-08-15","timekeeper":"MY","timekeeper_name":"Marcus Yilmaz","timekeeper_title":"Associate","title":"Assoc","hours":2.0,"rate":235.0,"amount":470.0,"narrative":"Conference with client regarding budget variance for the employment claim","codes":["L150","A106"],"page":2,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2025-08-18","timekeeper":"DW","timekeeper_name":"Dalia Whitfield","timekeeper_title":"Associate","title":"Assoc","hours":1.9,"rate":230.0,"amount":437.0,"narrative":"Conference with client regarding settlement authority for the warranty claim","codes":["L160","A106"],"page":2,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2025-08-19","timekeeper":"DW","timekeeper_name":"Dalia Whitfield","timekeeper_title":"Associate","title":"Assoc","hours":1.3,"rate":230.0,"amount":299.0,"narrative":"Conference with client regarding budget variance for the vendor agreement","codes":["L150","A106"],"page":2,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2025-08-21","timekeeper":"DW","timekeeper_name":"Dalia Whitfield","timekeeper_title":"Associate","title":"Assoc","hours":2.0,"rate":230.0,"amount":460.0,"narrative":"Update document review protocol and coding panel for the supply agreement","codes":["L140","A110"],"page":2,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2025-08-26","timekeeper":"MY","timekeeper_name":"Marcus Yilmaz","timekeeper_title":"Associate","title":"Assoc","hours":1.7,"rate":235.0,"amount":399.5,"narrative":"Review expert qualifications and prior testimony for the supply agreement","codes":["L130","A104"],"page":2,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2025-08-27","timekeeper":"JO","timekeeper_name":"Jordan Oyelaran","timekeeper_title":"Legal Assistant","title":"LA","hours":0.6,"rate":105.0,"amount":63.0,"narrative":"Draft settlement term sheet for the warranty claim","codes":["L160","A103"],"page":2,"narrative_style":"clear"},
+  {"n":9,"line_type":"fee","date":"2025-08-29","timekeeper":"DW","timekeeper_name":"Dalia Whitfield","timekeeper_title":"Associate","title":"Assoc","hours":0.2,"rate":230.0,"amount":46.0,"narrative":"Prepare updated litigation budget for the data incident","codes":["L150","A103"],"page":2,"narrative_style":"clear"},
+  {"n":10,"line_type":"fee","date":"2025-08-29","timekeeper":"DW","timekeeper_name":"Dalia Whitfield","timekeeper_title":"Associate","title":"Assoc","hours":0.4,"rate":230.0,"amount":92.0,"narrative":"Plan strategy for upcoming phase of the licensing dispute with team","codes":["L120","A101"],"page":2,"narrative_style":"clear"},
+  {"n":11,"line_type":"expense","date":"2025-08-01","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":22.2,"amount":22.2,"narrative":"Long distance conference call charges","codes":["E105"],"page":2,"narrative_style":"clear"},
+  {"n":12,"line_type":"expense","date":"2025-08-01","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":17.09,"amount":17.09,"narrative":"Long distance conference call charges","codes":["E105"],"page":2,"narrative_style":"clear"},
+  {"n":13,"line_type":"expense","date":"2025-08-18","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":3.0,"rate":34.07,"amount":102.21,"narrative":"Overnight courier to Harbor Point Capital counsel","codes":["E107"],"page":2,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["737 Harbor Road","Boston","Tax ID 37-5096385"],"template":"T21","pages":2},
+ "rule_set_id":"RS-06",
+ "context":{"matter_open":"2024-07-10","matter_close":"2025-11-29","matter_budget":40582.0,"approved_timekeepers":["Dalia Whitfield","Hannah Halloran","Jordan Oyelaran","Louis Thornbury","Marcus Yilmaz"],"invoice_received_date":"2025-09-04"},
+ "expected_findings":[],
+ "seeded_violations":0
+}

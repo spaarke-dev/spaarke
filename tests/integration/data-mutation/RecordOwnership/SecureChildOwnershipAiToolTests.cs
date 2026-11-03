@@ -351,8 +351,9 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
 
     // ── Task 133 creator stamp, integrated with G5 (owner round 10: "superseded at integration by task 146's
     //    create-as-the-app, which writes the stamp in the create payload"). Batch 4 integration: the ONE stamp is task 146
-    //    c1-r1's (RecordOwnerResolution.StampCreatorOn in OwnedChildWrite.CreateAsync, a sprk_CreatedByPerson bind after
-    //    the caller's checks); task 149 r3's own WithCreatorPersonAsync re-map was dropped so the column is written once.
+    //    c1-r1's (RecordOwnerResolution.StampCreatorOn, a sprk_CreatedByPerson bind after the caller's checks — in the owned
+    //    create then, in RecordCreationService's create since task 017 deleted that one); task 149 r3's own
+    //    WithCreatorPersonAsync re-map was dropped so the column is written once.
 
     [Theory]
     [InlineData("sprk_matter", "sprk_mattername")]
@@ -480,7 +481,7 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
         var (visibility, visibilityAccessor) = new Sprk.Bff.Api.Tests.TestInfrastructure.CommunicationVisibilityFixtures().Build();
         var handler = new EmailDraftToolHandler(
             _user, Mock.Of<IEmailDraftAi>(), CoreAncestorResolverFixtures.Inert(), CreateLogger<EmailDraftToolHandler>(),
-            _world.Resolver(), _appOnly.Object, visibility, visibilityAccessor);
+            DraftCreation(), visibility, visibilityAccessor);
         var args = JsonSerializer.Serialize(new
         {
             subject = "Settlement",
@@ -511,7 +512,7 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
         var (visibility, visibilityAccessor) = new Sprk.Bff.Api.Tests.TestInfrastructure.CommunicationVisibilityFixtures().Build();
         var handler = new EmailDraftToolHandler(
             _user, Mock.Of<IEmailDraftAi>(), CoreAncestorResolverFixtures.Inert(), CreateLogger<EmailDraftToolHandler>(),
-            _world.Resolver(), _appOnly.Object, visibility, visibilityAccessor);
+            DraftCreation(), visibility, visibilityAccessor);
         var args = JsonSerializer.Serialize(new { subject = "Hello", body = "Draft.", to = new[] { "a@b.example" } });
 
         var result = await handler.ExecuteChatAsync(
@@ -645,9 +646,12 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
         Sprk.Bff.Api.Services.Ai.Membership.IIdentityNormalizationService? identity = null,
         Sprk.Bff.Api.Services.Access.SecureRootFilingGate? rootFiling = null) =>
         new(_user, CreateLogger<DataverseCreateRecordHandler>(), new HandoffUrlBuilder("https://spaarkedev1.crm.dynamics.com"),
-            resolver ?? _world.Resolver(), _appOnly.Object,
+            resolver ?? _world.Resolver(),
             identity ?? IdentityNormalizationFixtures.WithContact(CallerContact).Object,
-            rootFiling ?? SecureRootFilingGateFixtures.NothingSecure());
+            // Task 017 (2d-3): the owned create is the ONE server create, over this harness's collaborators (its share world
+            // and stamp world, as the route's suites build it).
+            RouteRecordCreation.Over(resolver ?? _world.Resolver(), _appOnly.Object, Restamper(), Shares(),
+                rootFiling ?? SecureRootFilingGateFixtures.NothingSecure()));
 
     private Task<ToolResult> CreateRecord(string table, params (string Column, JsonElement Value)[] item) =>
         CreateRecordHandler().ExecuteChatAsync(
@@ -663,7 +667,8 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
     private Task<ToolResult> UpdateRecord(string table, Guid id, params (string Column, JsonElement Value)[] item) =>
         new DataverseUpdateRecordHandler(
                 _user, new Sprk.Bff.Api.Tests.Integration.DataMutation.CoreAncestorStamping.StampWorld().AfterWriteRestamp,
-                CreateLogger<DataverseUpdateRecordHandler>(), _world.Resolver(), Sprk.Bff.Api.Tests.TestInfrastructure.SecureRootFilingGateFixtures.NothingSecure())
+                CreateLogger<DataverseUpdateRecordHandler>(), _world.Resolver(), Sprk.Bff.Api.Tests.TestInfrastructure.SecureRootFilingGateFixtures.NothingSecure(),
+                appOnlyEntities: AppEntities())
             .ExecuteChatAsync(
                 BuildChatInvocationContext(toolArgumentsJson: JsonSerializer.Serialize(new
                 {
@@ -720,6 +725,16 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
             ["sprk_signal"] = "sprk_signals", ["sprk_policy"] = "sprk_policies",
             // #2110: a communication's thread.
             ["sprk_communicationthread"] = "sprk_communicationthreads",
+            // Field mapping task 017 (item 8): an invoice-family table filed by the regarding trio.
+            ["sprk_invoicesubmission"] = "sprk_invoicesubmissions",
+            // Field mapping task 017 (item 9): the budget inquiry's service request.
+            ["sprk_servicerequest"] = "sprk_servicerequests",
+            // Field mapping task 017 (2d-3): an Owned-path table with no registry entry (the chat create refuses it).
+            ["phonecall"] = "phonecalls",
+            // Field mapping task 017-d2: the chat create's company table (contact and task are above).
+            ["account"] = "accounts",
+            // Task 039 (FR-38): the AI search index catalog the six search-indexed tables look up.
+            ["sprk_aisearchindex"] = "sprk_aisearchindexes",
         };
 
         /// <summary>
@@ -747,8 +762,16 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
             _ => table,
         };
 
-        private static string OwnershipOf(string table) =>
-            OrganizationOwned.Contains(table) ? "OrganizationOwned" : BusinessOwned.Contains(table) ? "BusinessOwned" : "UserOwned";
+        /// <summary>
+        /// Per-instance additions to <see cref="OrganizationOwned"/>: a test that needs a table the handler creates AS THE USER
+        /// (no user/team ownership - <c>OwnedChildWrite.PathFor</c>) lists it here. Instance state, so no other test sees it.
+        /// </summary>
+        public HashSet<string> AlsoOrganizationOwned { get; } = new(StringComparer.OrdinalIgnoreCase);
+
+        private string OwnershipOf(string table) =>
+            OrganizationOwned.Contains(table) || AlsoOrganizationOwned.Contains(table)
+                ? "OrganizationOwned"
+                : BusinessOwned.Contains(table) ? "BusinessOwned" : "UserOwned";
 
         /// <summary>table → (lookup column, target table, navigation property).</summary>
         private static readonly Dictionary<string, (string Column, string Target, string Navigation)[]> Lookups = new()
@@ -757,6 +780,8 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
             {
                 ("sprk_regardingmatter", "sprk_matter", "sprk_RegardingMatter"),
                 ("sprk_regardingproject", "sprk_project", "sprk_RegardingProject"),
+                // Owner decision 2026-10-29: a To Do filed under a work assignment (live navigation property, as TodoRegardingUpdateBuilder binds it).
+                ("sprk_regardingworkassignment", "sprk_workassignment", "sprk_RegardingWorkAssignment"),
                 ("sprk_assignedto", "contact", "sprk_AssignedTo"),
                 ("ownerid", "systemuser", "ownerid"),
                 ("sprk_createdbyperson", "systemuser", "sprk_CreatedByPerson"), // task 146 c1-r1 schema step
@@ -765,6 +790,8 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
             },
             ["sprk_matter"] = new[]
             {
+                // Task 039 (FR-38): the server-owned search-index lookup, declared on the six search-indexed tables (live navigation-property casing).
+                ("sprk_ai_search_index", "sprk_aisearchindex", "sprk_AI_Search_Index"),
                 ("sprk_assignedtointernal", "contact", "sprk_AssignedToInternal"),
                 ("sprk_createdbyperson", "systemuser", "sprk_CreatedByPerson"),
                 // Field mapping task 018a (K-3): the matter's organization-owned references (live navigation-property casing).
@@ -773,6 +800,8 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
             },
             ["sprk_project"] = new[]
             {
+                // Task 039 (FR-38): the server-owned search-index lookup, declared on the six search-indexed tables (live navigation-property casing).
+                ("sprk_ai_search_index", "sprk_aisearchindex", "sprk_AI_Search_Index"),
                 ("sprk_assignedtointernal", "contact", "sprk_AssignedToInternal"),
                 ("sprk_createdbyperson", "systemuser", "sprk_CreatedByPerson"),
                 // A project's only filing is the ADR-024 pair (it has no typed filing column).
@@ -780,6 +809,8 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
             },
             ["sprk_workassignment"] = new[]
             {
+                // Task 039 (FR-38): the server-owned search-index lookup, declared on the six search-indexed tables (live navigation-property casing).
+                ("sprk_ai_search_index", "sprk_aisearchindex", "sprk_AI_Search_Index"),
                 ("sprk_regardingmatter", "sprk_matter", "sprk_RegardingMatter"),
                 ("sprk_regardingproject", "sprk_project", "sprk_RegardingProject"),
                 // #1616 fix round / task 046 r3: the Create Work Assignment wizard also files under an invoice or an event.
@@ -807,6 +838,8 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
             },
             ["sprk_document"] = new[]
             {
+                // Task 039 (FR-38): the server-owned search-index lookup, declared on the six search-indexed tables (live navigation-property casing).
+                ("sprk_ai_search_index", "sprk_aisearchindex", "sprk_AI_Search_Index"),
                 ("sprk_matter", "sprk_matter", "sprk_Matter"),
                 ("sprk_project", "sprk_project", "sprk_Project"),
                 // Task 147 r1c (round 34 item 6): the document's event lookup is sprk_relatedevent / sprk_RelatedEvent
@@ -816,8 +849,13 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
             // Task 147 r1c: the remaining census create/re-file tables (live navigation-property casing).
             ["sprk_invoice"] = new[]
             {
+                // Task 039 (FR-38): the server-owned search-index lookup, declared on the six search-indexed tables (live navigation-property casing).
+                ("sprk_ai_search_index", "sprk_aisearchindex", "sprk_AI_Search_Index"),
                 ("sprk_matter", "sprk_matter", "sprk_Matter"),
                 ("sprk_project", "sprk_project", "sprk_Project"),
+                // ebilling-r1 task 012: the invoice's work-assignment filing and the invoice it supersedes (a peer reference).
+                ("sprk_regardingworkassignment", "sprk_workassignment", "sprk_RegardingWorkAssignment"),
+                ("sprk_supersedesinvoice", "sprk_invoice", "sprk_SupersedesInvoice"),
             },
             ["sprk_reportcard"] = new[]
             {
@@ -839,10 +877,28 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
                 ("sprk_matter", "sprk_matter", "sprk_Matter"),
                 ("sprk_project", "sprk_project", "sprk_Project"),
             },
+            // Field mapping task 017 (item 8): the invoice submission's core lookups are the regarding trio
+            // (InvoiceFamilyCoreRecordGuard.CoreRecordLookups).
+            ["sprk_invoicesubmission"] = new[]
+            {
+                ("sprk_regardingmatter", "sprk_matter", "sprk_RegardingMatter"),
+                ("sprk_regardingproject", "sprk_project", "sprk_RegardingProject"),
+                ("sprk_regardingworkassignment", "sprk_workassignment", "sprk_RegardingWorkAssignment"),
+            },
+            // Field mapping task 017 (item 9): the budget inquiry's service request (BudgetInquiryExecutor.BuildBody's binds).
+            ["sprk_servicerequest"] = new[]
+            {
+                ("sprk_regardingmatter", "sprk_matter", "sprk_RegardingMatter"),
+                ("sprk_regardingrecordtype", "sprk_recordtype_ref", "sprk_RegardingRecordType"),
+                ("sprk_regardingorganization", "sprk_organization", "sprk_RegardingOrganization"),
+            },
             ["sprk_billingevent"] = new[]
             {
                 ("sprk_matter", "sprk_matter", "sprk_matter"),
                 ("sprk_project", "sprk_project", "sprk_project"),
+                // ebilling-r1 task 012: the line's work-assignment filing, and its invoice (never its core record, D-75).
+                ("sprk_regardingworkassignment", "sprk_workassignment", "sprk_RegardingWorkAssignment"),
+                ("sprk_invoice", "sprk_invoice", "sprk_Invoice"),
             },
             // A polymorphic lookup: one navigation property per target table (task 147 r1c-v1: a clear goes through one).
             ["task"] = new[]
@@ -858,11 +914,16 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
             },
             ["sprk_event"] = new[]
             {
+                // Task 039 (FR-38): the server-owned search-index lookup, declared on the six search-indexed tables (live navigation-property casing).
+                ("sprk_ai_search_index", "sprk_aisearchindex", "sprk_AI_Search_Index"),
                 ("sprk_regardingmatter", "sprk_matter", "sprk_RegardingMatter"),
                 ("sprk_regardingproject", "sprk_project", "sprk_RegardingProject"),
                 ("sprk_regardingrecordtype", "sprk_recordtype_ref", "sprk_RegardingRecordType"),
                 // A person the event is assigned to — not a column the pair's readers match the pair against.
                 ("sprk_assignedto", "contact", "sprk_AssignedTo"),
+                // Field mapping task 017 (Phase 2d-1): an event filed under another event, an intermediate, so its I-1 stamp
+                // is derived (live navigation property: Spaarke.Dataverse.Models GetEventNavigationProperty).
+                ("sprk_regardingevent", "sprk_event", "sprk_RegardingEvent"),
             },
             // #2084 round 2: a Signal's core matter (sprk_signal.sprk_matter) and the rule it CITES (sprk_signal.sprk_policy).
             ["sprk_signal"] = new[]
@@ -941,6 +1002,9 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
         /// <summary>Task 147 r1: records that do not exist — RetrievePrincipalAccess on one fails (404).</summary>
         public HashSet<Guid> Missing { get; } = new();
 
+        /// <summary>Round 2 (S1): rows that do not exist — a GET or PATCH of the row itself answers 404 (RetrievePrincipalAccess keeps <see cref="Missing"/>).</summary>
+        public HashSet<Guid> MissingRows { get; } = new();
+
         /// <summary>
         /// Per TABLE (entity set, id): a record the caller may not append to, where another table's record with the same id
         /// is untouched — a contact whose id was chosen equal to a matter's (a client may choose a new row's id).
@@ -973,7 +1037,14 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
 
         /// <summary>Further columns a row read as the caller reports (e.g. its pair: <c>sprk_regardingrecordid</c>).</summary>
         public Dictionary<Guid, Dictionary<string, object?>> RowValues { get; } = new();
+
+        /// <summary>ebilling-r1 ISS-010: answers a read first when it returns a response (a fault or a malformed row).</summary>
+        public Func<string, DataverseUserResponse?>? GetOverride { get; set; }
+
         public int PatchStatus { get; set; } = 204;
+
+        /// <summary>The status the caller's POST answers with; 400 and above is a refusal (nothing is created).</summary>
+        public int PostStatus { get; set; } = 201;
         public List<(string Path, string Body)> Posts { get; } = new();
         public List<(string Path, string Body)> Patches { get; } = new();
 
@@ -1082,6 +1153,12 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
 
         private DataverseUserResponse Get(string path)
         {
+            if (GetOverride?.Invoke(path) is { } overridden)
+                return overridden;
+
+            if (MissingRow(path) is { } absent)
+                return absent;
+
             if (path == "WhoAmI()")
                 return Ok(new { UserId = me });
 
@@ -1163,6 +1240,23 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
             {
                 var table = definition.Groups["t"].Value;
                 var rest = definition.Groups["rest"].Value;
+                if (rest.StartsWith("/Attributes", StringComparison.Ordinal) && rest.Contains("AttributeType", StringComparison.Ordinal))
+                {
+                    // Task 017: the unified create's post-mapping default step asks each target column's type and
+                    // create-validity (its $filter escaped). A lookup this client knows is a Lookup; any other a String.
+                    var typed = AttributeNamed().Matches(Uri.UnescapeDataString(rest)).Select(m => m.Groups["c"].Value).Distinct();
+                    var tableLookups = Lookups.GetValueOrDefault(table, Array.Empty<(string Column, string Target, string Navigation)>());
+                    return Ok(new
+                    {
+                        value = typed.Select(c => new
+                        {
+                            LogicalName = c,
+                            AttributeType = tableLookups.Any(l => l.Column == c) ? "Lookup" : "String",
+                            IsValidForCreate = true,
+                        }),
+                    });
+                }
+
                 if (rest.StartsWith("/Attributes", StringComparison.Ordinal))
                 {
                     // Only the columns the question names — as Dataverse answers the $filter.
@@ -1233,6 +1327,16 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
                 foreach (var (column, value) in values)
                     rowBody[column] = value;
             }
+
+            // ebilling-r1 ISS-010: Dataverse answers every $select'ed lookup value, null when it is unset.
+            var selectAt = path.IndexOf("$select=", StringComparison.Ordinal);
+            if (selectAt >= 0)
+            {
+                var selected = path[(selectAt + "$select=".Length)..].Split('&')[0].Split(',');
+                foreach (var column in selected.Where(c => c.StartsWith('_') && c.EndsWith("_value", StringComparison.Ordinal)))
+                    rowBody.TryAdd(column, null);
+            }
+
             return Ok(rowBody);
         }
 
@@ -1244,12 +1348,17 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
             if (RefuseUndeclared(absoluteApiPath, jsonBody) is { } refused)
                 return Task.FromResult(refused);
 
+            if (PostStatus >= 400)
+                return Task.FromResult(DataverseUserResponse.Fail(PostStatus, DataverseUserClientErrorCodes.AccessDenied, "Denied."));
+
             Posts.Add((absoluteApiPath, jsonBody));
             return Task.FromResult(Ok(new { sprk_todoid = Guid.NewGuid(), activityid = Guid.NewGuid() }, 201));
         }
 
         public Task<DataverseUserResponse> PatchAsync(string relativePath, string jsonBody, CancellationToken cancellationToken)
         {
+            if (MissingRow(Uri.UnescapeDataString(relativePath)) is { } absent)
+                return Task.FromResult(absent);
             if (PatchStatus >= 400)
                 return Task.FromResult(DataverseUserResponse.Fail(PatchStatus, DataverseUserClientErrorCodes.AccessDenied, "Denied."));
             if (RefuseUndeclared(relativePath, jsonBody) is { } refused)
@@ -1261,6 +1370,11 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
             OnPatch?.Invoke(relativePath, jsonBody);
             return Task.FromResult(DataverseUserResponse.Ok(204, null));
         }
+
+        private DataverseUserResponse? MissingRow(string path) =>
+            !path.Contains("RetrievePrincipalAccess", StringComparison.Ordinal) && MissingRows.Any(id => path.Contains($"({id:D})", StringComparison.Ordinal))
+                ? DataverseUserResponse.Fail(404, DataverseUserClientErrorCodes.NotFound, "Record does not exist.")
+                : null;
 
         public Task<DataverseUserResponse> DeleteAsync(string relativePath, CancellationToken cancellationToken) =>
             throw new NotSupportedException();

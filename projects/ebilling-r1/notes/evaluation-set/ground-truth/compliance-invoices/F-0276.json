@@ -1,0 +1,33 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0276",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0276","generator_id":"gen_eval_set.py@1 F-0276","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0276.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-06"},
+ "header":{"firm":"Ingersoll and Forsythe LLP","firm_invoice_number":"INV-2025-39629","invoice_date":"2025-09-03","billing_period_start":"2025-08-01","billing_period_end":"2025-08-31","firm_matter_reference":"52205-0016","po_number":"PO-4546799","fees_total":4418.0,"expenses_total":1275.58,"adjustments_total":0.0,"total_due":5693.58,"currency":"USD"},
+ "timekeepers":[{"name":"Gideon Quillen","title":"Paralegal","rate":130.0,"billed_as":"Gideon Quillen"},{"name":"Ingrid Ramanathan","title":"Senior Associate","rate":230.0,"billed_as":"Ingrid Ramanathan"},{"name":"Leila Abernathy","title":"Associate","rate":210.0,"billed_as":"Leila Abernathy"},{"name":"Tomas Sandoval","title":"Partner","rate":380.0,"billed_as":"Tomas Sandoval"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2025-08-25","timekeeper":"Gideon Quillen","timekeeper_name":"Gideon Quillen","timekeeper_title":"Paralegal","title":"Paralegal","hours":0.7,"rate":130.0,"amount":91.0,"narrative":"Attend hearing on witness list in the supply agreement","codes":["L450","A109"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2025-08-28","timekeeper":"Gideon Quillen","timekeeper_name":"Gideon Quillen","timekeeper_title":"Paralegal","title":"Paralegal","hours":2.6,"rate":130.0,"amount":338.0,"narrative":"Prepare fact witness for testimony regarding the supply agreement","codes":["L410","A101"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2025-08-08","timekeeper":"Ingrid Ramanathan","timekeeper_name":"Ingrid Ramanathan","timekeeper_title":"Senior Associate","title":"Senior Associate","hours":4.0,"rate":230.0,"amount":920.0,"narrative":"Review court docket and calendar of pending deadlines for the data incident","codes":["L190","A104"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2025-08-08","timekeeper":"Ingrid Ramanathan","timekeeper_name":"Ingrid Ramanathan","timekeeper_title":"Senior Associate","title":"Senior Associate","hours":4.0,"rate":230.0,"amount":920.0,"narrative":"Draft settlement proposal for trial in the regulatory inquiry","codes":["L430","A103"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2025-08-08","timekeeper":"Ingrid Ramanathan","timekeeper_name":"Ingrid Ramanathan","timekeeper_title":"Senior Associate","title":"Senior Associate","hours":2.7,"rate":230.0,"amount":621.0,"narrative":"Prepare fact witness for testimony regarding the employment claim","codes":["L410","A101"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2025-08-08","timekeeper":"Ingrid Ramanathan","timekeeper_name":"Ingrid Ramanathan","timekeeper_title":"Senior Associate","title":"Senior Associate","hours":0.1,"rate":230.0,"amount":23.0,"narrative":"Draft post-trial motion in the licensing dispute","codes":["L460","A103"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2025-08-18","timekeeper":"Ingrid Ramanathan","timekeeper_name":"Ingrid Ramanathan","timekeeper_title":"Senior Associate","title":"Senior Associate","hours":2.5,"rate":230.0,"amount":575.0,"narrative":"Attend hearing on mediation statement in the vendor agreement","codes":["L450","A109"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2025-08-29","timekeeper":"Ingrid Ramanathan","timekeeper_name":"Ingrid Ramanathan","timekeeper_title":"Senior Associate","title":"Senior Associate","hours":0.6,"rate":230.0,"amount":138.0,"narrative":"Analyze exposure and damages model for the distribution agreement","codes":["L120","A104"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"fee","date":"2025-08-25","timekeeper":"Leila Abernathy","timekeeper_name":"Leila Abernathy","timekeeper_title":"Associate","title":"Associate","hours":1.0,"rate":210.0,"amount":210.0,"narrative":"Prepare case assessment memorandum regarding the construction contract and recommended strategy","codes":["L120","A103"],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"fee","date":"2025-08-26","timekeeper":"Leila Abernathy","timekeeper_name":"Leila Abernathy","timekeeper_title":"Associate","title":"Associate","hours":0.6,"rate":210.0,"amount":126.0,"narrative":"Review court docket and calendar of pending deadlines for the licensing dispute","codes":["L190","A104"],"page":2,"narrative_style":"clear"},
+  {"n":11,"line_type":"fee","date":"2025-08-29","timekeeper":"Tomas Sandoval","timekeeper_name":"Tomas Sandoval","timekeeper_title":"Partner","title":"Partner","hours":1.2,"rate":380.0,"amount":456.0,"narrative":"Revise complaint after review by lead counsel","codes":["L430","A104"],"page":2,"narrative_style":"clear"},
+  {"n":12,"line_type":"expense","date":"2025-08-22","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":1158.32,"amount":1158.32,"narrative":"Court reporter and transcript - deposition","codes":["E115"],"page":2,"narrative_style":"clear"},
+  {"n":13,"line_type":"expense","date":"2025-08-25","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":451.0,"rate":0.26,"amount":117.26,"narrative":"Photocopies - 451 pages","codes":["E101"],"page":2,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["607 Market Street","Atlanta","Tax ID 66-8970531"],"template":"T13","pages":2},
+ "rule_set_id":"RS-06",
+ "context":{"matter_open":"2024-08-25","matter_close":"2025-11-29","matter_budget":4554.0,"approved_timekeepers":["Tomas Sandoval","Ingrid Ramanathan","Farah Tavares","Leila Abernathy","Gideon Quillen","Jordan Dunleavy"],"invoice_received_date":"2025-09-17"},
+ "expected_findings":[
+  {"rule_id":"RS-06-R04","rule_type":"ExpenseRule","scope":"line","line_refs":[13],"consequence":"Reduce"},
+  {"rule_id":"RS-06-R05","rule_type":"CoreRecordWindow","scope":"invoice","line_refs":[],"consequence":"Flag"},
+  {"rule_id":"RS-06-R07","rule_type":"DailyHoursCap","scope":"line","line_refs":[5],"consequence":"Reduce"}
+ ],
+ "seeded_violations":3
+}

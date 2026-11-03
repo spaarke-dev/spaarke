@@ -1,10 +1,13 @@
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using Microsoft.Extensions.Options;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Cache;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
+using Sprk.Bff.Api.Infrastructure.ExternalAccess;
+using Sprk.Bff.Api.Services.Access;
 
 namespace Sprk.Bff.Api.Services.Signals.Actions;
 
@@ -34,11 +37,19 @@ public sealed record DecisionParameterFacts(
 /// <para><b>Sources.</b> <c>metadata:{table}.{column}</c> is a picklist's CURRENT options and labels, read from live metadata (an owner's
 /// relabel shows up within <see cref="OptionsTtl"/>; nothing is hard-coded); <c>currency:active</c> is the active
 /// <c>transactioncurrency</c> rows. The default <c>matter-business-unit-currency</c> is the Default Currency of the business unit that
-/// owns the core matter, else the organization base currency (logged).</para>
-/// <para><b>Reads.</b> Metadata is read as the caller (the caller's own client, as the child-records route reads it). Currency and business
-/// unit are read by the BFF's own app-only reader: they are organization configuration, not record content, and a Core User's Read on
-/// <c>businessunit</c> is not a fact the Create budget needs to hold. The binding of the currency onto the budget is still checked as the
-/// caller by the child-records create core (AppendTo on the currency, which the Core User role holds on spaarkedev1).</para>
+/// owns the core matter, else the organization base currency (logged). D-198 (task 167c): a SECURE matter is owned by the Secure Record
+/// business unit, which has no Default Currency, so its default is the Default Currency of the deployment customer business unit
+/// (<c>ExternalAccess:CustomerBusinessUnitId</c>), else the base currency when that unit is unset, invalid (absent, the Secure Record unit
+/// or the root) or has none. "Secure" is the uac-r2 rule (<c>SecureChildShareSynchronizer.ResolveSecureBusinessUnitAsync</c> with
+/// <c>SecureRecordOwnerTeam.IsInSecureBusinessUnit</c>); an ambiguous or unresolved Secure Record unit means not secure. A non-secure
+/// matter never reads the customer unit.</para>
+/// <para><b>Reads.</b> Metadata is read as the caller (the caller's own client, as the child-records route reads it). So is (d), the
+/// owning business unit of the core matter: it is record data, and a caller who cannot read the matter gets the organization base currency,
+/// never an app-only read of the matter (uac-r2: record data is read as the caller wherever the caller can read it). The reads (a)-(c) are
+/// app-only by the BFF's own reader, because they are organization configuration, not record content: the active <c>transactioncurrency</c>
+/// rows, <c>organization.basecurrencyid</c>, <c>businessunit.transactioncurrencyid</c> (a Core User's Read on <c>businessunit</c> is not a
+/// fact the Create budget needs to hold) and, for D-198, the Secure Record unit id and the customer unit currency and parent. The binding of the currency onto the budget is still checked as the caller by the child-records
+/// create core (AppendTo on the currency, which the Core User role holds on spaarkedev1).</para>
 /// <para><b>Fail closed.</b> A list that cannot be read is <c>null</c> (never an empty list that would refuse every value or accept any); a
 /// currency that cannot be determined is a refusal, never a blank <c>sprk_currency</c>. A fault in Dataverse throws, so the commit route
 /// answers 503 before it writes anything.</para>
@@ -56,7 +67,7 @@ public class DecisionParameterSources
     /// <summary>The source of the active currencies (value: the <c>transactioncurrencyid</c>).</summary>
     public const string ActiveCurrencies = "currency:active";
 
-    /// <summary>The default source: the Default Currency of the core matter's owning business unit.</summary>
+    /// <summary>The default source: the Default Currency of the core matter's owning business unit (D-198: the customer business unit's, for a secure matter).</summary>
     public const string MatterCurrencyDefault = "matter-business-unit-currency";
 
     /// <summary>How long a metadata or currency list is reused, so an owner relabel shows up within minutes (ADR-009: Redis, tenant-scoped).</summary>
@@ -70,15 +81,20 @@ public class DecisionParameterSources
     private readonly IDataverseUserClient _user;
     private readonly IGenericEntityService _entities;
     private readonly ITenantCache _cache;
+    private readonly IConfiguration _configuration;
+    private readonly IOptionsMonitor<ExternalAccessOptions> _externalAccess;
     private readonly ILogger<DecisionParameterSources> _logger;
     private readonly System.Collections.Concurrent.ConcurrentDictionary<(Guid MatterId, string Requested), BudgetCurrency> _resolvedCurrencies = new();
 
     public DecisionParameterSources(
-        IDataverseUserClient user, IGenericEntityService entities, ITenantCache cache, ILogger<DecisionParameterSources> logger)
+        IDataverseUserClient user, IGenericEntityService entities, ITenantCache cache, IConfiguration configuration,
+        IOptionsMonitor<ExternalAccessOptions> externalAccess, ILogger<DecisionParameterSources> logger)
     {
         _user = user ?? throw new ArgumentNullException(nameof(user));
         _entities = entities ?? throw new ArgumentNullException(nameof(entities));
         _cache = cache ?? throw new ArgumentNullException(nameof(cache));
+        _configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));
+        _externalAccess = externalAccess ?? throw new ArgumentNullException(nameof(externalAccess));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
@@ -257,15 +273,26 @@ public class DecisionParameterSources
     }
 
     /// <summary>The Default Currency of the business unit that owns <paramref name="matterId"/>, else the organization base currency
-    /// (logged); <c>null</c> when neither exists. A fault in Dataverse throws.</summary>
+    /// (logged); <c>null</c> when neither exists. The matter's owning business unit is read AS THE CALLER; a caller read that is refused
+    /// (401/403), finds nothing (404) or returns no value is treated as "the business unit has no Default Currency" (logged), never retried
+    /// app-only. A Dataverse fault on that read (5xx, throttling, OBO failure, an exception) throws, like every other fault here, so the
+    /// commit answers 503 before it writes anything. D-198: when that unit IS the Secure Record unit (which has no currency of its own), the
+    /// currency is the deployment's customer business unit's (<see cref="CustomerBusinessUnitCurrencyAsync"/>), else the base currency.</summary>
     internal async Task<Guid?> DefaultCurrencyAsync(Guid matterId, CancellationToken ct)
     {
-        var matter = await _entities.RetrieveAsync("sprk_matter", matterId, ["owningbusinessunit"], ct).ConfigureAwait(false);
-        if (matter.GetAttributeValue<EntityReference>("owningbusinessunit") is { } unit)
+        if (await ReadOwningBusinessUnitAsCallerAsync(matterId, ct).ConfigureAwait(false) is { } unitId)
         {
-            var businessUnit = await _entities.RetrieveAsync("businessunit", unit.Id, ["transactioncurrencyid"], ct).ConfigureAwait(false);
-            if (businessUnit.GetAttributeValue<EntityReference>("transactioncurrencyid") is { } fromUnit)
-                return fromUnit.Id;
+            if (await SecureRecordBusinessUnitIdAsync(unitId, ct).ConfigureAwait(false) is { } secureUnitId)
+            {
+                if (await CustomerBusinessUnitCurrencyAsync(secureUnitId, ct).ConfigureAwait(false) is { } fromCustomer)
+                    return fromCustomer;
+            }
+            else
+            {
+                var businessUnit = await _entities.RetrieveAsync("businessunit", unitId, ["transactioncurrencyid"], ct).ConfigureAwait(false);
+                if (businessUnit.GetAttributeValue<EntityReference>("transactioncurrencyid") is { } fromUnit)
+                    return fromUnit.Id;
+            }
         }
 
         var org = await _entities.RetrieveMultipleAsync(
@@ -276,6 +303,90 @@ public class DecisionParameterSources
             return baseCurrency.Id;
         }
 
+        return null;
+    }
+
+    /// <summary>The id of the Secure Record business unit when <paramref name="owningBusinessUnitId"/> IS it, else <c>null</c>. uac-r2 shared
+    /// resolver and predicate (D-191; not <c>RecordOwnershipResolver</c> private copy). An ambiguous or unresolved Secure Record unit, or a
+    /// predicate that cannot tell, means undeterminable: the matter is treated as not secure. A Dataverse fault throws.</summary>
+    private async Task<Guid?> SecureRecordBusinessUnitIdAsync(Guid owningBusinessUnitId, CancellationToken ct)
+    {
+        var (secureId, ambiguous) = await SecureRecordOwnerTeam.ResolveSecureBusinessUnitAsync(_entities, _configuration, ct).ConfigureAwait(false);
+        if (ambiguous)
+        {
+            _logger.LogWarning("Decision budget currency: more than one business unit carries the Secure Record name; the matter is treated as not secure.");
+            return null;
+        }
+
+        return secureId is { } secure && SecureRecordOwnerTeam.IsInSecureBusinessUnit(owningBusinessUnitId, secure) == true ? secure : null;
+    }
+
+    /// <summary>The Default Currency of <c>ExternalAccess:CustomerBusinessUnitId</c>, the deployment single customer business unit, for a
+    /// secure matter (D-198); <c>null</c> (logged as a Warning) when it is unset, names no business unit, is the Secure Record unit
+    /// (<paramref name="secureBusinessUnitId"/>) or the root (no parent), or has no currency: the caller then uses the base currency. The
+    /// Secure Record unit and root currencies are never taken as the customer. App-only: business-unit configuration, not record data.</summary>
+    private async Task<Guid?> CustomerBusinessUnitCurrencyAsync(Guid secureBusinessUnitId, CancellationToken ct)
+    {
+        if (_externalAccess.CurrentValue.CustomerBusinessUnitId is not { } customerId || customerId == Guid.Empty)
+        {
+            _logger.LogWarning("Decision budget currency: ExternalAccess:CustomerBusinessUnitId is not configured; a secure matter uses the organization base currency.");
+            return null;
+        }
+
+        if (customerId == secureBusinessUnitId)
+        {
+            _logger.LogWarning("Decision budget currency: ExternalAccess:CustomerBusinessUnitId is the Secure Record unit; a secure matter uses the organization base currency.");
+            return null;
+        }
+
+        var query = new QueryExpression("businessunit") { ColumnSet = new ColumnSet("transactioncurrencyid", "parentbusinessunitid"), TopCount = 1, NoLock = true };
+        query.Criteria.AddCondition("businessunitid", ConditionOperator.Equal, customerId);
+        var unit = (await _entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false)).Entities.FirstOrDefault();
+        if (unit is null)
+        {
+            _logger.LogWarning("Decision budget currency: ExternalAccess:CustomerBusinessUnitId {BusinessUnitId} names no business unit; a secure matter uses the organization base currency.", customerId);
+            return null;
+        }
+
+        if (unit.GetAttributeValue<EntityReference>("parentbusinessunitid") is null)
+        {
+            _logger.LogWarning("Decision budget currency: ExternalAccess:CustomerBusinessUnitId {BusinessUnitId} is the root business unit; a secure matter uses the organization base currency.", customerId);
+            return null;
+        }
+
+        if (unit.GetAttributeValue<EntityReference>("transactioncurrencyid") is { } currency)
+            return currency.Id;
+
+        _logger.LogWarning("Decision budget currency: the customer business unit {BusinessUnitId} has no Default Currency; a secure matter uses the organization base currency.", customerId);
+        return null;
+    }
+
+    /// <summary>The owning business unit of the matter as the CALLER sees it (<c>sprk_matters(id)?$select=_owningbusinessunit_value</c>), or
+    /// <c>null</c> when the caller cannot read the matter or the value is absent. Throws on a Dataverse fault.</summary>
+    private async Task<Guid?> ReadOwningBusinessUnitAsCallerAsync(Guid matterId, CancellationToken ct)
+    {
+        var response = await _user.GetAsync($"sprk_matters({matterId:D})?$select=_owningbusinessunit_value", ct).ConfigureAwait(false);
+        if (!response.IsSuccess)
+        {
+            if (response.ErrorCode is DataverseUserClientErrorCodes.AccessDenied or DataverseUserClientErrorCodes.NotFound
+                or DataverseUserClientErrorCodes.UserContextRequired)
+            {
+                _logger.LogWarning(
+                    "Decision budget currency: the caller's read of matter {MatterId} failed ({ErrorCode}); treating its business unit as having no Default Currency.",
+                    matterId, response.ErrorCode);
+                return null;
+            }
+
+            throw new HttpRequestException($"The caller's read of the matter's business unit failed ({response.ErrorCode ?? "unknown"}, HTTP {response.StatusCode}).");
+        }
+
+        if (response.Body is { ValueKind: JsonValueKind.Object } body
+            && body.TryGetProperty("_owningbusinessunit_value", out var value) && value.ValueKind == JsonValueKind.String
+            && Guid.TryParse(value.GetString(), out var unitId) && unitId != Guid.Empty)
+            return unitId;
+
+        _logger.LogWarning(
+            "Decision budget currency: the caller's read of matter {MatterId} returned no business unit; treating it as having no Default Currency.", matterId);
         return null;
     }
 

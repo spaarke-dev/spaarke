@@ -211,11 +211,22 @@ public class IndexingWorkerHostedService : BackgroundService
                     return;
                 }
 
-                _logger.LogInformation(
-                    "RAG indexing succeeded for job {JobId}: {ChunksIndexed} chunks indexed in {Duration}",
-                    message.JobId,
-                    result.ChunksIndexed,
-                    result.Duration);
+                if (result.Skipped)
+                {
+                    // Deliberately not indexed (E-Billing Output Files container, ebilling-r1 FR-16).
+                    _logger.LogInformation(
+                        "RAG indexing for job {JobId} skipped: the file is not indexed ({SkipReason})",
+                        message.JobId,
+                        result.SkipReason);
+                }
+                else
+                {
+                    _logger.LogInformation(
+                        "RAG indexing succeeded for job {JobId}: {ChunksIndexed} chunks indexed in {Duration}",
+                        message.JobId,
+                        result.ChunksIndexed,
+                        result.Duration);
+                }
 
                 await CompleteJobAsync(message.JobId, payload.DocumentId, args.CancellationToken);
                 await args.CompleteMessageAsync(args.Message, args.CancellationToken);

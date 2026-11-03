@@ -133,7 +133,7 @@ const renderModal = (props: RecordFamilyModalProps, theme = webLightTheme) =>
     </FluentProvider>
   );
 
-/** The cells of the table row whose name cell reads `name` (checkbox cell first). */
+/** The cells of the table row whose name cell reads `name` (a checkbox cell comes first only when the host passes `onAction`). */
 function cellsOfRow(name: string): string[] {
   const row = screen.getByText(name).closest('tr') as HTMLElement;
   return within(row)
@@ -167,21 +167,21 @@ describe('RecordFamilyModal (FR-32)', () => {
       // Two work assignments share ONE group.
       expect(screen.getAllByText(/Level 2\b.*Work Assignment/)).toHaveLength(1);
 
-      // cells: [select, name, record number, record type, status, modified on]
+      // cells (no handler, so no select cell): [name, record number, record type, status, modified on]
       const project = cellsOfRow('Diligence Project');
-      expect(project[1]).toBe('Diligence ProjectThis record'); // the opened record carries a badge
-      expect(project[2]).toBe(''); // no record number -> blank, not "null" / "—" / "N/A"
-      expect(project[3]).toBe('Due Diligence');
-      expect(project[4]).toBe('Open');
-      expect(project[5]).toContain('2026');
+      expect(project[0]).toBe('Diligence ProjectThis record'); // the opened record carries a badge
+      expect(project[1]).toBe(''); // no record number -> blank, not "null" / "—" / "N/A"
+      expect(project[2]).toBe('Due Diligence');
+      expect(project[3]).toBe('Open');
+      expect(project[4]).toContain('2026');
 
       const matter = cellsOfRow('Acme Acquisition');
-      expect(matter[2]).toBe('MAT-0001');
+      expect(matter[1]).toBe('MAT-0001');
 
       // A member with a null record type and null modifiedOn is blank in both cells.
       const memo = cellsOfRow('Draft memo');
-      expect(memo[3]).toBe('');
-      expect(memo[5]).toBe('');
+      expect(memo[2]).toBe('');
+      expect(memo[4]).toBe('');
     });
 
     it('does not fetch while closed', () => {
@@ -309,11 +309,9 @@ describe('RecordFamilyModal (FR-32)', () => {
       expect(onAction.mock.calls[0][1]).toHaveLength(2);
     });
 
-    it('renders the actions disabled with the tooltip when no handler is supplied, even with rows selected', async () => {
+    it('renders the actions disabled with the tooltip when no handler is supplied', async () => {
       renderModal(makeProps(() => ok(response())));
       await screen.findByText('Diligence Project');
-
-      fireEvent.click(screen.getByRole('checkbox', { name: 'Select Review contracts' }));
 
       const push = screen.getByRole('button', { name: 'Push field updates' });
       const assign = screen.getByRole('button', { name: 'Update Assigned To' });
@@ -322,6 +320,91 @@ describe('RecordFamilyModal (FR-32)', () => {
 
       fireEvent.focus(push);
       expect((await screen.findAllByText('Available after the push update')).length).toBeGreaterThan(0);
+    });
+  });
+
+  // #2513: selection exists to feed an action. The read-only Family tool (074) passes no handler, so it has none.
+  describe('selection only where an action can use it', () => {
+    it('shows no checkboxes, no select column and no selected count without a handler', async () => {
+      renderModal(makeProps(() => ok(response())));
+      await screen.findByText('Diligence Project');
+
+      expect(screen.queryAllByRole('checkbox')).toHaveLength(0);
+      expect(screen.queryByRole('columnheader', { name: 'Select' })).not.toBeInTheDocument();
+      expect(screen.queryByText(/\d+ selected/)).not.toBeInTheDocument();
+      expect(screen.queryByText('Selected')).not.toBeInTheDocument();
+      // Group rows span the five columns that remain.
+      const groupCell = screen.getByText(/Level 0\b.*Matter/).closest('td') as HTMLElement;
+      expect(groupCell).toHaveAttribute('colspan', '5');
+    });
+
+    it('keeps a checkbox per row, the selected count and the Selected detail when a handler is supplied', async () => {
+      renderModal(makeProps(() => ok(response()), { onAction: jest.fn() }));
+      await screen.findByText('Diligence Project');
+
+      expect(screen.getAllByRole('checkbox')).toHaveLength(4);
+      expect(screen.getByText('0 selected')).toBeInTheDocument();
+      expect(screen.getByText('Selected')).toBeInTheDocument();
+      const groupCell = screen.getByText(/Level 0\b.*Matter/).closest('td') as HTMLElement;
+      expect(groupCell).toHaveAttribute('colspan', '6');
+    });
+  });
+
+  // #2513: the Details pane describes the highlighted row, and says so; it never mixes it up with the selection.
+  describe('details pane', () => {
+    it('labels the highlighted record, starting on the opened record, and follows the row the person clicks', async () => {
+      renderModal(makeProps(() => ok(response()), { onAction: jest.fn() }));
+      await screen.findByText('Diligence Project');
+      const meta = screen.getByTestId('preview-meta');
+
+      expect(within(meta).getByText('Focused record').nextSibling).toHaveTextContent(
+        'Diligence Project · Project, level 1'
+      );
+      // The old unlabeled rows are gone: they read as if they described the selection.
+      expect(within(meta).queryByText('Table')).not.toBeInTheDocument();
+      expect(within(meta).queryByText('Level')).not.toBeInTheDocument();
+
+      fireEvent.click(screen.getByRole('checkbox', { name: 'Select Acme Acquisition' }));
+      fireEvent.click(screen.getByRole('checkbox', { name: 'Select Review contracts' }));
+      expect(within(meta).getByText('Selected').nextSibling).toHaveTextContent('2');
+      // Ticking does not move the focus.
+      expect(within(meta).getByText('Focused record').nextSibling).toHaveTextContent(
+        'Diligence Project · Project, level 1'
+      );
+
+      fireEvent.click(screen.getByText('Review contracts'));
+      expect(within(meta).getByText('Focused record').nextSibling).toHaveTextContent(
+        'Review contracts · Work Assignment, level 2'
+      );
+    });
+  });
+
+  describe('This record badge', () => {
+    it('cannot shrink or wrap, so a long name truncates alone (it never sits over the name)', async () => {
+      const long = member({
+        id: PROJECT,
+        table: 'sprk_project',
+        depth: 1,
+        parentId: MATTER,
+        name: 'A project with a very long name that will not fit in the name column of the family table',
+      });
+      renderModal(makeProps(() => ok(response({ members: [M_MATTER, long] }))));
+      await screen.findByText(long.name as string);
+
+      const badge = screen.getByText('This record');
+      const badgeStyle = window.getComputedStyle(badge);
+      expect(badgeStyle.flexShrink).toBe('0');
+      expect(badgeStyle.whiteSpace).toBe('nowrap');
+
+      const name = screen.getByText(long.name as string);
+      const nameStyle = window.getComputedStyle(name);
+      expect(nameStyle.overflow).toBe('hidden');
+      expect(nameStyle.textOverflow).toBe('ellipsis');
+      expect(['0', '0px']).toContain(nameStyle.minWidth);
+      const cell = name.parentElement as HTMLElement;
+      expect(window.getComputedStyle(cell).flexWrap).toBe('nowrap');
+      // The full name stays reachable when it is cut.
+      expect(name).toHaveAttribute('title', long.name as string);
     });
   });
 

@@ -1,0 +1,113 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="014" project="ebilling-r1">
+  <metadata>
+    <title>Invoice lifecycle transition service</title>
+    <phase>1 Data model (WP1)</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>New BFF service and DI registration on the write path (tags bff, write-path).</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Closed transition matrix (spec FR-06) and an existing conditional-write pattern to copy; single component.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P1-B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>012</deps>
+    <tags>bff, finance, write-path</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Build the single server-side owner of invoice status (ADR-002, FR-06, I-6): a lifecycle service in Services/Finance that moves sprk_invoice between statecode / statuscode pairs only along the FR-06 matrix, with a conditional (optimistic-concurrency) write, and refuses every other transition with a stable reason code.</prompt>
+
+  <role>SPAARKE platform developer. Expert in ASP.NET Core service design, Dataverse statecode / statuscode semantics and optimistic concurrency.</role>
+
+  <goal>IInvoiceLifecycleService + InvoiceLifecycleService registered in AddFinanceModule; a transition call reads the current status, validates it against the matrix, writes statecode + statuscode conditionally on the read version, and returns Transitioned / AlreadyInTarget / Refused(reason); unit tests cover every allowed transition and a sample of disallowed ones.</goal>
+
+  <context>
+    <background>FR-06 matrix: In Review → Approved | Rejected | Returned to Firm | Cancelled; Approved → Sent to AP | Cancelled; Sent to AP → Paid. Active (statecode 0): In Review, Approved, Sent to AP; Inactive (statecode 1): Paid, Rejected, Returned to Firm, Cancelled. The numeric statuscode values are created by task 012 and recorded in its task notes and docs/data-model/sprk_invoice.md. Callers: 103 approve, 104 reject / return, 150 send to AP, 151 mark paid; they own authorization and Decision Records — this service owns only the status move. Conditional-write pattern to copy: InvoiceReviewService.MarkDocumentConfirmedAsync (~line 1171: read version, UpdateRecordFieldsIfUnchangedAsync, retry on DBConcurrencyException up to MaxConditionalWriteAttempts).</background>
+    <relevant-files>
+      <file role="new">src/server/api/Sprk.Bff.Api/Services/Finance/InvoiceLifecycleService.cs (interface, implementation, status constants, result type)</file>
+      <file role="new">tests/unit/Sprk.Bff.Api.Tests/Services/Finance/InvoiceLifecycleServiceTests.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/DI/FinanceModule.cs (one registration — shared append point)</file>
+      <file role="read">src/server/api/Sprk.Bff.Api/Services/Finance/InvoiceReviewService.cs</file>
+      <file role="read">src/server/shared/Spaarke.Dataverse/IGenericEntityService.cs</file>
+      <file role="read">docs/data-model/sprk_invoice.md (statuscode values from 012)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="012" status="pending">Lifecycle statuscode values exist in dev and are recorded</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-002 / FR-06">Allowed transitions are exactly the matrix above; every other (from, to) pair — including any move out of Paid, Rejected, Returned to Firm or Cancelled — is refused with a stable reason code and no write. The statecode written is always the one paired with the target statuscode.</constraint>
+    <constraint source="project">Idempotent: a request whose target equals the current status returns AlreadyInTarget with no write (FR-35's "second approval is a no-op" builds on this).</constraint>
+    <constraint source="project">The write is conditional on the version read; on a concurrency conflict, re-read and re-validate (the conflicting writer may have moved the status), up to the same attempt limit as InvoiceReviewService; never a blind overwrite.</constraint>
+    <constraint source="project">Out of scope: removing sprk_invoicestatus readers or writers (015), authorization, Decision Records, notifications. Do not edit ontology-owned FinanceBaseValues.cs.</constraint>
+    <constraint source="ADR-010">One AddScoped registration inside AddFinanceModule, unconditional (no feature-flag gate on a write-path owner); re-read FinanceModule.cs immediately before editing and add only this line.</constraint>
+    <constraint source=".claude/constraints/bff-extensions.md">State placement (BFF, write-path owner), measure publish-size delta against a fresh master build, no new HIGH CVE, tests in tests/unit/Sprk.Bff.Api.Tests/.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md</file>
+      <file>.claude/adr/ADR-002-thin-plugins.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-019-problemdetails.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/patterns/api/service-registration.md</file>
+      <file>.claude/patterns/testing/unit-test-structure.md</file>
+      <file>.claude/patterns/testing/mocking-patterns.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Read 012's recorded statuscode values; define them once as constants in the new file (with a comment citing docs/data-model/sprk_invoice.md).</step>
+    <step order="2">Write tests first: every allowed transition succeeds with the right statecode; a sample of disallowed transitions (at least Paid → In Review, Rejected → Approved, In Review → Paid, Sent to AP → Approved) is refused with no write; same-status is AlreadyInTarget with no write; a concurrency conflict re-reads and re-validates.</step>
+    <step order="3">Implement the service with the conditional write; register it in AddFinanceModule.</step>
+    <step order="4">dotnet build and dotnet test; measure publish-size delta.</step>
+    <step order="5">Update TASK-INDEX.md: change this task's status cell to ✅ [done].</step>
+    <step order="6">If any deviations from plan, document in projects/ebilling-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If 012's recorded statuscodes differ from the FR-06 list (e.g. value 2 kept as Inactive after its escalation), STOP and confirm the mapping before encoding it.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>Grep of Services/** finds no sprk_invoice statuscode / statecode writer and no transition matrix (the only *Lifecycle class is ExternalGrantLifecycle in Infrastructure/ExternalAccess, unrelated); InvoiceReviewService writes sprk_invoicestatus ToReview on create (line 843) and has no transitions.</existing>
+    <extension>No — InvoiceReviewService is the classification-gate / confirm service; adding status transitions would give it a second responsibility (COMPONENT-COMPLEXITY), and five later callers need the transition without the review flow.</extension>
+    <cost-of-doing-nothing>FR-06's acceptance (server enforces the matrix; Paid → In Review refused) fails and approve / reject / return / export / paid (103, 104, 150, 151) each write status directly — the ADR-002 one-owner rule is broken.</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="dotnet">Build and test</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Finance/InvoiceLifecycleService.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/DI/FinanceModule.cs</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Finance/InvoiceLifecycleServiceTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Each of the seven allowed transitions writes the target statuscode with its paired statecode (In Review, Approved, Sent to AP → 0; Paid, Rejected, Returned to Firm, Cancelled → 1).</criterion>
+    <criterion testable="true">Paid → In Review, Rejected → Approved, In Review → Paid and Sent to AP → Approved are refused with a stable reason code and no write.</criterion>
+    <criterion testable="true">A transition to the current status returns AlreadyInTarget and performs no write.</criterion>
+    <criterion testable="true">Given a concurrency conflict where another writer moved the invoice to a status from which the requested transition is not allowed, the retry refuses rather than overwriting.</criterion>
+    <criterion testable="true">The service is registered unconditionally in AddFinanceModule and resolves from the DI container in the existing DI-resolution test (or a new resolution assertion).</criterion>
+    <criterion testable="true">Publish-size delta measured against a fresh master build and recorded in task notes; no new HIGH CVE.</criterion>
+    <criterion testable="true">Cover the stated contract plus the edge cases named above. Anything beyond that needs a one-line justification in task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>Shared append point: FinanceModule.cs. Enforcing "only writer of invoice status" mechanically (an ArchTest source scan) is a candidate for 015 once sprk_invoicestatus is gone — note it there, do not add it here.
+
+COMPLETED 2026-10-15. Full notes: projects/ebilling-r1/notes/014-invoice-lifecycle-service.md. Summary: IInvoiceLifecycleService / InvoiceLifecycleService (Services/Finance/InvoiceLifecycleService.cs), enum InvoiceLifecycleStatus, reasons invoice.transition_not_allowed | not_found | status_unknown | concurrent_change; registered unconditionally in AddFinanceModule; 28 unit tests (all 49 pairs, conflict re-validation, fail-closed unknown status); ADR-010 1:1 ceiling 160 -> 161 (+1, seam justified in ADR010_DITests.cs); publish-size delta +3,169 B (+0.003 MB) vs fresh base build (Release linux-x64 framework-dependent, Compress-Archive Optimal, PDBs included); no package change. Found in passing and filed: #1957 (status changeable outside the service via OOB Activate/Deactivate and direct Web API). TASK-INDEX.md not edited (parallel mode, main session owns it).
+rework: fix-round-1 task 014</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in knowledge files. Follow the task-execute skill for the mandatory pre-execution checklist.</protocol>
+  </execution>
+</task>

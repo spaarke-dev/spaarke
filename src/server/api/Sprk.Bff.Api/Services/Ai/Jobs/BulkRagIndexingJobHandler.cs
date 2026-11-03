@@ -360,6 +360,15 @@ public class BulkRagIndexingJobHandler : IJobHandler
                 TimeSpan.FromDays(7),
                 ct);
 
+            if (result.Skipped)
+            {
+                // Deliberately not indexed (E-Billing Output Files container, ebilling-r1 FR-16): counted as skipped.
+                _logger.LogDebug(
+                    "Document {DocumentId} ({FileName}) was not indexed ({SkipReason})",
+                    doc.DocumentId, doc.FileName, result.SkipReason);
+                return DocumentIndexOutcome.Skipped;
+            }
+
             _logger.LogDebug(
                 "Successfully indexed document {DocumentId} ({FileName}), {ChunksIndexed} chunks",
                 doc.DocumentId, doc.FileName, result.ChunksIndexed);

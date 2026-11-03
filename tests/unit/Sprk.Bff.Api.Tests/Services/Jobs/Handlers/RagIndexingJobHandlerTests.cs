@@ -207,6 +207,30 @@ public class RagIndexingJobHandlerTests
         result.JobType.Should().Be(RagIndexingJobHandler.JobTypeName);
     }
 
+    // ebilling-r1 task 028 (FR-16): a file the indexing service deliberately skipped (E-Billing Output Files container)
+    // completes the job — no retry, no dead letter — but the document is NOT stamped as indexed.
+
+    [Theory]
+    [InlineData(true, 0)]
+    [InlineData(false, 1)]   // control: an indexed file is stamped
+    public async Task ProcessAsync_SkippedFile_CompletesWithoutStampingTheDocumentAsIndexed(bool skipped, int stamps)
+    {
+        var job = CreateJobContract();
+        SetupSuccessfulIdempotencyFlow();
+        _fileIndexingServiceMock
+            .Setup(x => x.IndexFileAppOnlyAsync(It.IsAny<FileIndexRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(skipped
+                ? FileIndexingResult.Skip(FileIndexingService.NonIndexedContainerReason, TestDocumentId, TestItemId)
+                : FileIndexingResult.Succeeded(chunksIndexed: 3, duration: TimeSpan.FromSeconds(1)));
+
+        var result = await _handler.ProcessAsync(job, CancellationToken.None);
+
+        result.Status.Should().Be(JobStatus.Completed);
+        _dataverseServiceMock.Verify(
+            x => x.UpdateDocumentAsync(TestDocumentId, It.IsAny<UpdateDocumentRequest>(), It.IsAny<CancellationToken>()),
+            Times.Exactly(stamps));
+    }
+
     #endregion
 
     #region Idempotency Key Format

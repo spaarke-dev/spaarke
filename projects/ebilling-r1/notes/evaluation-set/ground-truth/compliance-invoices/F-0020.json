@@ -1,0 +1,30 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0020",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0020","generator_id":"gen_eval_set.py@1 F-0020","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0020.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-02"},
+ "header":{"firm":"Fenwick & Dunmore LLP","firm_invoice_number":"INV-2026-69211","invoice_date":"2025-08-02","billing_period_start":"2025-07-01","billing_period_end":"2025-07-31","firm_matter_reference":"53191-0040","po_number":"PO-4589188","fees_total":3597.0,"expenses_total":2983.57,"adjustments_total":0.0,"total_due":6580.57,"currency":"USD"},
+ "timekeepers":[{"name":"Cyrus Thornbury","title":"Senior Associate","rate":380.0,"billed_as":"Cyrus Thornbury"},{"name":"Dalia Halloran","title":"Paralegal","rate":170.0,"billed_as":"Dalia Halloran"},{"name":"Elena Brennan","title":"Associate","rate":300.0,"billed_as":"Elena Brennan"},{"name":"Imani Hargrove","title":"Associate","rate":340.0,"billed_as":"Imani Hargrove"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2025-07-08","timekeeper":"Cyrus Thornbury","timekeeper_name":"Cyrus Thornbury","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":1.2,"rate":380.0,"amount":456.0,"narrative":"Review court docket and calendar of pending deadlines for the vendor agreement","codes":["L190","A104"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2025-07-11","timekeeper":"Cyrus Thornbury","timekeeper_name":"Cyrus Thornbury","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":2.2,"rate":380.0,"amount":836.0,"narrative":"Draft notice of appeal and docketing statement for the supply agreement","codes":["L510","A103"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2025-07-29","timekeeper":"Dalia Halloran","timekeeper_name":"Dalia Halloran","timekeeper_title":"Paralegal","title":"Para","hours":1.0,"rate":170.0,"amount":170.0,"narrative":"Analyze exposure and damages model for the regulatory inquiry","codes":[],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2025-07-24","timekeeper":"Elena Brennan","timekeeper_name":"Elena Brennan","timekeeper_title":"Associate","title":"Assoc","hours":2.9,"rate":300.0,"amount":870.0,"narrative":"Prepare monthly status report to client regarding the distribution agreement","codes":["L190","A111"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2025-07-29","timekeeper":"Elena Brennan","timekeeper_name":"Elena Brennan","timekeeper_title":"Associate","title":"Assoc","hours":2.9,"rate":300.0,"amount":870.0,"narrative":"Plan strategy for upcoming phase of the construction contract with team","codes":["L120","A101"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2025-07-03","timekeeper":"Imani Hargrove","timekeeper_name":"Imani Hargrove","timekeeper_title":"Associate","title":"Assoc","hours":0.5,"rate":340.0,"amount":170.0,"narrative":"Prepare case assessment memorandum regarding the warranty claim and recommended strategy","codes":["L120","A103"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2025-07-30","timekeeper":"Imani Hargrove","timekeeper_name":"Imani Hargrove","timekeeper_title":"Associate","title":"Assoc","hours":0.5,"rate":450.0,"amount":225.0,"narrative":"Research appealability issues in the data incident","codes":["L510","A102"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"expense","date":"2025-07-11","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":1240.66,"amount":1240.66,"narrative":"Court reporter and transcript - deposition","codes":["E115"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"expense","date":"2025-07-16","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":356.66,"amount":356.66,"narrative":"Airfare to Chicago for deposition","codes":["E110"],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"expense","date":"2025-07-23","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":1386.25,"amount":1386.25,"narrative":"Consulting expert fees","codes":["E119"],"page":1,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["681 Elm Court","Minneapolis","Tax ID 35-1547503"],"template":"T03","pages":2},
+ "rule_set_id":"RS-02",
+ "context":{"matter_open":"2024-10-16","matter_close":"2025-10-29","matter_budget":5264.0,"approved_timekeepers":["Dalia Halloran","Nadia Tavares","Elena Brennan","Cyrus Thornbury","Imani Hargrove"],"invoice_received_date":"2025-08-18"},
+ "expected_findings":[
+  {"rule_id":"RS-02-R02","rule_type":"ApprovedRate","scope":"line","line_refs":[7],"consequence":"Reduce"},
+  {"rule_id":"RS-02-R05","rule_type":"RequiredData","scope":"line","line_refs":[3],"consequence":"Reject"},
+  {"rule_id":"RS-02-R06","rule_type":"CoreRecordWindow","scope":"invoice","line_refs":[],"consequence":"Flag"}
+ ],
+ "seeded_violations":3
+}

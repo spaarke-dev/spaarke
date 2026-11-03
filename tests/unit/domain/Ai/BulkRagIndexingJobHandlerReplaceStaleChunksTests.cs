@@ -5,6 +5,7 @@ using Azure.Core;
 using FluentAssertions;
 using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Sprk.Bff.Api.Models.Ai;
@@ -78,7 +79,7 @@ public sealed class BulkRagIndexingJobHandlerReplaceStaleChunksTests
     }
 
     private static (BulkRagIndexingJobHandler Handler, Mock<IFileIndexingService> FileIndexing, StaticJsonHttpMessageHandler HttpHandler)
-        CreateSut()
+        CreateSut(ILogger<BulkRagIndexingJobHandler>? logger = null)
     {
         var fileIndexingMock = new Mock<IFileIndexingService>();
         fileIndexingMock
@@ -124,7 +125,7 @@ public sealed class BulkRagIndexingJobHandlerReplaceStaleChunksTests
             configuration,
             httpClientFactoryMock.Object,
             credentialMock.Object,
-            NullLogger<BulkRagIndexingJobHandler>.Instance);
+            logger ?? NullLogger<BulkRagIndexingJobHandler>.Instance);
 
         return (handler, fileIndexingMock, httpHandler);
     }
@@ -190,5 +191,48 @@ public sealed class BulkRagIndexingJobHandlerReplaceStaleChunksTests
         captured!.ReplaceStaleChunks.Should().BeFalse(
             "the scheduled/default sweep only ever selects documents that were never indexed before " +
             "(sprk_ragindexedon eq null) — a trim call there can only ever delete nothing");
+    }
+
+    [Theory]
+    [InlineData(true, 0, 1)]
+    [InlineData(false, 1, 0)]
+    public async Task ProcessAsync_FileSkippedByIndexing_IsCountedAsSkipped_NotAsProcessed(bool skipped, int processed, int skippedCount)
+    {
+        // ebilling-r1 task 028 (FR-16): a file in the E-Billing Output Files container is deliberately not
+        // indexed. The bulk job must count it as skipped, not as an indexed document.
+        var logger = new CompletionCapturingLogger();
+        var (handler, fileIndexingMock, _) = CreateSut(logger);
+        fileIndexingMock
+            .Setup(f => f.IndexFileAppOnlyAsync(It.IsAny<FileIndexRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(skipped
+                ? FileIndexingResult.Skip(FileIndexingService.NonIndexedContainerReason)
+                : new FileIndexingResult { Success = true, ChunksIndexed = 2 });
+
+        var outcome = await handler.ProcessAsync(MakeJob(forceReindex: false), CancellationToken.None);
+
+        outcome.Status.Should().Be(JobStatus.Completed);
+        logger.Completion.Should().NotBeNull("the handler logs its processed/skipped counts on completion");
+        logger.Completion!["Processed"].Should().Be(processed);
+        logger.Completion["Skipped"].Should().Be(skippedCount);
+    }
+
+    /// <summary>Captures the structured state of the handler's "completed" log line.</summary>
+    private sealed class CompletionCapturingLogger : ILogger<BulkRagIndexingJobHandler>
+    {
+        public Dictionary<string, object?>? Completion { get; private set; }
+
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
+        {
+            if (state is IReadOnlyList<KeyValuePair<string, object?>> values
+                && values.Any(v => v.Key == "{OriginalFormat}"
+                    && (v.Value as string)?.StartsWith("Bulk RAG indexing job {JobId} completed", StringComparison.Ordinal) == true))
+            {
+                Completion = values.ToDictionary(v => v.Key, v => v.Value);
+            }
+        }
     }
 }

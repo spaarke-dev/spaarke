@@ -1,0 +1,33 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0123",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0123","generator_id":"gen_eval_set.py@1 F-0123","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0123.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-03"},
+ "header":{"firm":"Tennant and Ellison LLP","firm_invoice_number":"2026000683","invoice_date":"2026-01-01","billing_period_start":"2025-12-01","billing_period_end":"2025-12-31","firm_matter_reference":"12303-0006","po_number":null,"fees_total":4126.0,"expenses_total":133.26,"adjustments_total":0.0,"total_due":4259.26,"currency":"USD"},
+ "timekeepers":[{"name":"Helena Hargrove","title":"Associate","rate":215.0,"billed_as":"Helena Hargrove"},{"name":"Leila Voss","title":"Paralegal","rate":135.0,"billed_as":"Leila Voss"},{"name":"Louis Nakamura","title":"Associate","rate":210.0,"billed_as":"Louis Nakamura"},{"name":"Marcus Santoro","title":"Senior Associate","rate":355.0,"billed_as":"Marcus Santoro"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2025-12-05","timekeeper":"Marcus Santoro","timekeeper_name":"Marcus Santoro","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":2.0,"rate":355.0,"amount":710.0,"narrative":"Prepare monthly status report to client regarding the employment claim","codes":["L190","A111"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2025-12-08","timekeeper":"Leila Voss","timekeeper_name":"Leila Voss","timekeeper_title":"Paralegal","title":"Para","hours":2.9,"rate":135.0,"amount":391.5,"narrative":"Prepare for oral argument in the lease dispute","codes":["L530","A101"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2025-12-12","timekeeper":"Helena Hargrove","timekeeper_name":"Helena Hargrove","timekeeper_title":"Associate","title":"Assoc","hours":1.9,"rate":215.0,"amount":408.5,"narrative":"Docketed deadlines in case management system","codes":["L530","A110"],"page":1,"narrative_style":"clerical"},
+  {"n":4,"line_type":"fee","date":"2025-12-18","timekeeper":"Leila Voss","timekeeper_name":"Leila Voss","timekeeper_title":"Paralegal","title":"Para","hours":2.8,"rate":135.0,"amount":378.0,"narrative":"Revise appellate brief after cite check","codes":["L520","A104"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2025-12-19","timekeeper":"Helena Hargrove","timekeeper_name":"Helena Hargrove","timekeeper_title":"Associate","title":"Assoc","hours":2.3,"rate":215.0,"amount":494.5,"narrative":"Prepare monthly status report to client regarding the employment claim","codes":["L190","A111"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2025-12-22","timekeeper":"Louis Nakamura","timekeeper_name":"Louis Nakamura","timekeeper_title":"Associate","title":"Assoc","hours":2.2,"rate":315.0,"amount":693.0,"narrative":"Analyze exposure and damages model for the data incident","codes":["L120","A104"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2025-12-22","timekeeper":"Helena Hargrove","timekeeper_name":"Helena Hargrove","timekeeper_title":"Associate","title":"Assoc","hours":2.2,"rate":215.0,"amount":473.0,"narrative":"Prepare for oral argument in the regulatory inquiry","codes":["L530","A101"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2025-12-23","timekeeper":"Louis Nakamura","timekeeper_name":"Louis Nakamura","timekeeper_title":"Associate","title":"Assoc","hours":0.6,"rate":210.0,"amount":126.0,"narrative":"Prepare for oral argument in the insurance coverage issue","codes":["L530","A101"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"fee","date":"2025-12-24","timekeeper":"Louis Nakamura","timekeeper_name":"Louis Nakamura","timekeeper_title":"Associate","title":"Assoc","hours":1.7,"rate":210.0,"amount":357.0,"narrative":"Prepare monthly status report to client regarding the warranty claim","codes":["L190","A111"],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"fee","date":"2025-12-29","timekeeper":"Leila Voss","timekeeper_name":"Leila Voss","timekeeper_title":"Paralegal","title":"Para","hours":0.7,"rate":135.0,"amount":94.5,"narrative":"Prepare monthly status report to client regarding the supply agreement","codes":["L190","A111"],"page":1,"narrative_style":"clear"},
+  {"n":11,"line_type":"expense","date":"2025-12-02","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":2.0,"rate":22.86,"amount":45.72,"narrative":"Working meal during deposition preparation","codes":["E111"],"page":1,"narrative_style":"clear"},
+  {"n":12,"line_type":"expense","date":"2025-12-12","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":2.0,"rate":13.34,"amount":26.68,"narrative":"Postage - certified mail","codes":["E108"],"page":1,"narrative_style":"clear"},
+  {"n":13,"line_type":"expense","date":"2025-12-16","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":2.0,"rate":30.43,"amount":60.86,"narrative":"Overnight courier to Ironbridge Steel counsel","codes":["E107"],"page":1,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["583 Congress Boulevard","Phoenix","Tax ID 17-7596999"],"template":"T02","pages":2},
+ "rule_set_id":"RS-03",
+ "context":{"matter_open":"2024-09-24","matter_close":"2026-03-31","matter_budget":42037.0,"approved_timekeepers":["Priya Halloran","Jordan Santoro","Leila Voss","Marcus Santoro","Helena Hargrove","Dalia Ramanathan","Louis Nakamura"],"invoice_received_date":"2026-01-07"},
+ "expected_findings":[
+  {"rule_id":"RS-03-R01","rule_type":"ApprovedRate","scope":"line","line_refs":[6],"consequence":"Reduce"},
+  {"rule_id":"RS-03-R04","rule_type":"NonBillableActivity","scope":"line","line_refs":[3],"consequence":"Disallow"},
+  {"rule_id":"RS-03-R08","rule_type":"RequiredData","scope":"invoice","line_refs":[],"consequence":"Reject"}
+ ],
+ "seeded_violations":3
+}

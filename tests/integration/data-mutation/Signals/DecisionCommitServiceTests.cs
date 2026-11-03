@@ -1354,6 +1354,29 @@ public sealed partial class DecisionCommitServiceTests
     }
 
     [Theory]
+    [InlineData("approve-invoice")]
+    [InlineData("reject-invoice")]
+    [InlineData("return-to-firm")]
+    [InlineData("override-submission")]
+    [InlineData("accept-line")]
+    public async Task ABillingCode_IsRefusedByTheCommitRoute_NothingWritten_Ebilling074(string code)
+    {
+        // ebilling-r1 task 074: billing decisions are recorded by the eBilling endpoints. The commit route does not know their codes, so
+        // a review naming one is refused before anything runs, and no executor exists to run it.
+        DecisionActionCatalog.TryGetBilling(code, out _).Should().BeTrue();
+        var rig = new Rig();
+        rig.Executors.Should().NotContainKey(code);
+        var review = PathBReview();
+        review = review with { Actions = [.. review.Actions!, Take(code)] };
+
+        var result = await rig.CommitAsync(review);
+
+        result.Status.Should().Be(DecisionCommitStatus.Refused);
+        result.ReasonCode.Should().Be(DecisionCommitReasons.UnresolvedAction);
+        rig.Writes.Should().BeEmpty();
+    }
+
+    [Theory]
     [InlineData("missing")]
     [InlineData("duplicate")]
     [InlineData("notInPlan")]
@@ -2109,6 +2132,7 @@ public sealed partial class DecisionCommitServiceTests
     private static readonly Guid OtherUser = Guid.Parse("c0430000-0000-4000-8000-000000000092");
     private static readonly Guid FilingMatter = Guid.Parse("c0430000-0000-4000-8000-000000000093");
     private static readonly Guid FilingDocument = Guid.Parse("c0430000-0000-4000-8000-000000000096");
+    private static readonly Guid TypeDocument = Guid.Parse("c0430000-0000-4000-8000-000000000097");   // the sprk_recordtype_ref row for sprk_document (#2506: a lookup, as on dev)
     private static readonly Guid FilingServiceRequest = Guid.Parse("c0430000-0000-4000-8000-000000000095");
 
     /// <summary>The REAL resolver over: a personal To Do (user-owned, filed under nothing unless <paramref name="filed"/>) in the
@@ -2187,7 +2211,7 @@ public sealed partial class DecisionCommitServiceTests
                 // identity parents (not lineage) and the ADR-024 pair alone: all FILED, so the assignee never wins
                 "todo-regarding-organization" => new() { ["sprk_regardingorganization"] = new EntityReference("sprk_organization", Guid.NewGuid()) },
                 "todo-regarding-contact" => new() { ["sprk_regardingcontact"] = new EntityReference("contact", Guid.NewGuid()) },
-                "todo-pair-only" => new() { ["sprk_regardingrecordtype"] = "sprk_document", ["sprk_regardingrecordid"] = FilingDocument.ToString() },
+                "todo-pair-only" => new() { ["sprk_regardingrecordtype"] = new EntityReference("sprk_recordtype_ref", TypeDocument), ["sprk_regardingrecordid"] = FilingDocument.ToString() },
                 _ => null,
             });   // owner-confirmed K2: only a To Do filed under NOTHING is personal
         rig.Links.UsersByLink[AssigneeContact] = fallback switch

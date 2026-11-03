@@ -1,0 +1,125 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="020" project="ebilling-r1">
+  <metadata>
+    <title>sprk_invoicesubmission schema</title>
+    <phase>1 Data model (WP1)</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Creates a new table and a new script file (new files, explicit ADR constraints); no C# code.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Single-table schema script following the canonical Deploy-ChartDefinitionEntity.ps1 exemplar and an exact column list.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P1-A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>none</deps>
+    <tags>dataverse, schema</tags>
+    <estimated-effort>3-5 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Create the new Dataverse table sprk_invoicesubmission (one row per submission attempt) in dev with an idempotent Web API script, including the FR-05 core-record fields and a firm-scoped alternate key on the tracking number, then document it in docs/data-model.</prompt>
+
+  <role>SPAARKE platform developer. Expert in Dataverse metadata Web API scripting (PowerShell) and the ADR-024 dual-field pattern. Follow ADRs strictly.</role>
+
+  <goal>scripts/ebilling/Deploy-EbillingSubmissionSchema.ps1 exists, has been run against spaarkedev1 (a second run reports no change), and a metadata read shows sprk_invoicesubmission with every column, lookup and the alternate key listed in the steps; docs/data-model/sprk_invoicesubmission.md describes it.</goal>
+
+  <context>
+    <background>spec.md FR-10 (submission record, tracking number {firm invoice number}.{n}, channel, processing status, findings JSON, report document, resulting invoice, resubmission-of) and FR-05 (core-record dual fields). Spec section New Components row sprk_invoicesubmission: rejected attempts must never become invoices. Task 045 allocates tracking numbers against the alternate key created here; task 044 writes rows; task 049 updates processing status. Solution source sync is task 029, not this task.</background>
+    <relevant-files>
+      <file role="new">scripts/ebilling/Deploy-EbillingSubmissionSchema.ps1</file>
+      <file role="new">docs/data-model/sprk_invoicesubmission.md</file>
+      <file role="modify">docs/data-model/INDEX.md (add one row under "Entity Documentation — Financial")</file>
+      <file role="canonical-reference">scripts/Deploy-ChartDefinitionEntity.ps1 (entity + attributes + entity-scoped PublishXml)</file>
+      <file role="canonical-reference">scripts/Create-BackgroundJobEntity.ps1:210 and :289 (alternate key check + create)</file>
+      <file role="canonical-reference">scripts/Deploy-AccessEventEntity.ps1:585 (MSCRM.SolutionUniqueName header so components land in the dev solution)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Dataverse/CoreAncestorResolver.cs:116-122 (CoreAncestorLookups: sprk_regarding{core} column names)</file>
+      <file role="canonical-reference">projects/spaarke-ontology-platform-r1/notes/140-schema-delta.md section 2 (resolver column lengths and lookup relationship shape)</file>
+      <file role="canonical-reference">docs/data-model/sprk_invoice.md (doc table format)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="none" status="complete">Parallel with 010, 012, 021, 022 (all additive Web API changes on different tables).</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">This task writes ONE script, scripts/ebilling/Deploy-EbillingSubmissionSchema.ps1, runs it only against https://spaarkedev1.crm.dynamics.com, supports -WhatIf, checks existence before every create, and publishes with an entity-scoped PublishXml (never PublishAllXml).</constraint>
+    <constraint source="project">Do NOT edit src/dataverse/solutions/SpaarkeMaster/** — task 029 syncs solution source, forms and views.</constraint>
+    <constraint source="project">Additive only. Deleting or retyping any existing table, column or option set needs explicit owner OK first.</constraint>
+    <constraint source="ADR-024">The table carries the three entity-specific lookups sprk_regardingmatter, sprk_regardingproject, sprk_regardingworkassignment plus all five resolver fields; at most one entity-specific lookup is populated per row (enforced server-side by task 013, not by schema).</constraint>
+    <constraint source="ADR-002">No plugin, business rule, calculated rollup or Power Automate flow is added for any invariant on this table.</constraint>
+    <constraint source="project">docs/data-model/INDEX.md is a shared append point: re-read it immediately before editing and add only this table's row.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Dataverse schema via Web API</topic>
+    <files>
+      <file>.claude/skills/dataverse-create-schema/SKILL.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+      <file>.claude/constraints/plugins.md</file>
+      <file>.claude/adr/ADR-024-polymorphic-resolver-pattern.md</file>
+      <file>.claude/adr/ADR-002-thin-plugins.md</file>
+    </files>
+    <patterns>
+      <pattern name="Polymorphic resolver" location=".claude/patterns/dataverse/polymorphic-resolver.md">Dual-field columns: entity-specific lookups plus five resolver fields.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="0" name="Rigor + discovery">Declare RIGOR LEVEL: STANDARD. Read spec FR-10 and FR-05. Describe sprk_invoicesubmission in dev (MCP describe or EntityDefinitions read); if it already exists, the script adds only the missing delta.</step>
+    <step order="1" name="Script">Write scripts/ebilling/Deploy-EbillingSubmissionSchema.ps1 copying the helper functions of scripts/Deploy-ChartDefinitionEntity.ps1. User/team-owned table sprk_invoicesubmission (display "Invoice Submission"), primary name sprk_name (text 200). Columns: sprk_trackingnumber (text 100); sprk_firminvoicenumber (text 100, as submitted or extracted); sprk_submissionsequence (whole number, min 1 — the n of the tracking number, used by 045); sprk_channel (local choice: SPA, Internal, reserved Mailbox, Outlook, API); sprk_processingstatus (local choice: Received, Processing, Accepted, Rejected, Failed); sprk_outcomereasoncode (text 100, stable reason code for Failed or Rejected); sprk_findingsjson (multiline 1048576); sprk_firmnoticetext (multiline 100000, the sent firm notice, FR-50); sprk_ponumber (text 100, as entered); sprk_receivedon (date and time); sprk_correlationid (text 100, as on sprk_invoice).</step>
+    <step order="2" name="Lookups">Create via RelationshipDefinitions (OneToManyRelationshipMetadata; Delete = RemoveLink, other cascades NoCascade): sprk_submitter → contact; sprk_vendororg → sprk_organization (the firm, same name as on sprk_invoice); sprk_document → sprk_document (the PDF); sprk_reportdocument → sprk_document; sprk_invoice → sprk_invoice (resulting invoice); sprk_resubmissionof → sprk_invoicesubmission (self); sprk_regardingmatter → sprk_matter; sprk_regardingproject → sprk_project; sprk_regardingworkassignment → sprk_workassignment; sprk_regardingrecordtype → sprk_recordtype_ref.</step>
+    <step order="3" name="Resolver text fields">sprk_regardingrecordid (text 100), sprk_regardingrecordname (text 200), sprk_regardingrecordnumber (text 100), sprk_regardingrecordurl (text 500, format Url) — lengths per 140-schema-delta.md section 2.</step>
+    <step order="4" name="Alternate key">Create alternate key sprk_invoicesubmission_firm_trackingnumber on (sprk_vendororg, sprk_trackingnumber). Wait for the key's EntityKeyIndexStatus to reach Active before reporting success.</step>
+    <step order="5" name="Run">Send every create with header MSCRM.SolutionUniqueName = SpaarkeMaster. Run with -WhatIf, review, run for real, then run again and confirm the second run reports no change.</step>
+    <step order="6" name="Verify">Metadata read (EntityDefinitions with Attributes, ManyToOneRelationships, Keys) and record the column list, relationship names and key status in task notes.</step>
+    <step order="7" name="Docs">Write docs/data-model/sprk_invoicesubmission.md in the table format of docs/data-model/sprk_invoice.md, plus one INDEX.md row.</step>
+    <step order="8">Update TASK-INDEX.md: set this task's status cell to ✅ [done].</step>
+    <step order="9">Record any deviation (names, lengths, choice values) in projects/ebilling-r1/notes/ and in this task's notes.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If sprk_invoicesubmission already exists in dev with a different shape (column of the same name with another type), STOP and escalate per root CLAUDE.md §6 rather than retyping.</trigger>
+    <trigger>If task 012 has chosen different entity-specific lookup names for the invoice family (for example typed sprk_matter rather than sprk_regardingmatter), STOP and align with the main session before creating lookups, so 013 resolves one naming scheme.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>sprk_invoice (src/dataverse/solutions/SpaarkeMaster/Entities/sprk_Invoice/Entity.xml) holds invoice status; no submission table exists (Entities/ has no sprk_InvoiceSubmission; git grep for sprk_invoicesubmission outside projects/ finds nothing).</existing>
+    <extension>No — a rejected attempt stored as an sprk_invoice would be counted by Finance rollups and Ontology facts (spec section New Components row sprk_invoicesubmission).</extension>
+    <cost-of-doing-nothing>Rejected submissions and resubmissions have no record, the {firm invoice number}.{n} tracking number cannot be allocated (FR-10, task 045), and the SPA cannot show a result for a rejected attempt (FR-18).</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="pwsh">Run the schema script</tool>
+    <tool name="az">Token for the Dataverse Web API (az account get-access-token)</tool>
+    <tool name="mcp-dataverse">describe for pre-validation and verification</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">scripts/ebilling/Deploy-EbillingSubmissionSchema.ps1</output>
+    <output type="docs">docs/data-model/sprk_invoicesubmission.md</output>
+    <output type="docs">docs/data-model/INDEX.md (one row)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">A metadata read of sprk_invoicesubmission in spaarkedev1 lists every column and lookup named in steps 1-3 with the stated types, and the choice values listed for sprk_channel and sprk_processingstatus.</criterion>
+    <criterion testable="true">The alternate key on (sprk_vendororg, sprk_trackingnumber) exists with index status Active; creating a second row with the same firm and tracking number in dev is refused by Dataverse (record the refusal; delete the test rows afterwards).</criterion>
+    <criterion testable="true">The same tracking number under a different firm is accepted (the key is firm-scoped).</criterion>
+    <criterion testable="true">A second run of the script reports no change and exits 0; -WhatIf makes no change.</criterion>
+    <criterion testable="true">No file under src/dataverse/solutions/SpaarkeMaster/ is modified by this task.</criterion>
+    <criterion testable="true">docs/data-model/sprk_invoicesubmission.md and the INDEX.md row exist.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Completed 2026-10-15. Script scripts/ebilling/Deploy-EbillingSubmissionSchema.ps1 created sprk_invoicesubmission in dev (27 items: table, 11 columns, 10 lookups, 4 resolver fields, firm-scoped alternate key sprk_invoicesubmission_firm_trackingnumber Active); the final run reports created 0 / changed 0 / skipped 29, exit 0. Key test: duplicate (firm, tracking number) refused HTTP 412 0x80060892, same number under another firm accepted, test rows deleted. Details, run history and deviations: projects/ebilling-r1/notes/020-invoicesubmission-schema.md. Deviations: primary name length and required level are ignored in the create body (set afterwards); relationship duplicate refusal 0x80072551 handled (DEF-008, #1938 for the other scripts); sprk_ruleset.sprk_name not required (DEF-007, #1937). TASK-INDEX.md and current-task.md are updated by the main session.
+    rework: none task 020
+    Brief said "alternate key for tracking number uniqueness"; the key is (firm, tracking number) because two firms can both send INV-002 (FR-10 numbering is per firm invoice number, D-37).
+    Columns sprk_firminvoicenumber, sprk_submissionsequence, sprk_outcomereasoncode, sprk_firmnoticetext, sprk_ponumber and sprk_correlationid are not named in FR-10 but are required by FR-10 (tracking composition), FR-21 (stable reason code), FR-50 (sent text stored with the submission) and FR-18 (PO entered at submission); they are added here because later tasks have no solution-sync step.
+    Persons are contacts in Spaarke (assignment fields and sprk_createdbyperson-style person links), so sprk_submitter targets contact.
+    Open for 013 / uac-r2 (not this task): whether this table joins the secure-record family (config/secure-record-owner-role.json, Services/Access/SecureChildLineage.cs, tests/Spaarke.ArchTests/RecordOwnerAssignmentCensusTests.cs) and needs sprk_createdbyperson (scripts/Set-ChildRecordCreatorPersonSchema.ps1).
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load the knowledge files first. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

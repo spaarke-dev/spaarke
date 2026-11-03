@@ -15,12 +15,19 @@ namespace Sprk.Bff.Api.Services.Dataverse.Models;
 /// Payload budget per FR-BFF-03: &lt;50KB per entity. The dropped fields (notably
 /// <c>displayName.localizedLabels[]</c> arrays and the privilege catalog) are what makes that budget achievable.
 /// </para>
+/// <para>
+/// <see cref="DisplayName"/> (field-mapping-server-write-path-r1 task 072) is the entity's own display name as ONE label string
+/// (the user's localized label, else the first localized label), never the localized arrays, so the budget holds. It is a
+/// trailing optional member: existing constructor calls and cache entries written before it deserialize with it null (until
+/// their 6-hour TTL ends).
+/// </para>
 /// </remarks>
 public sealed record EntityMetadataDto(
     string LogicalName,
     string PrimaryIdAttribute,
     string PrimaryNameAttribute,
-    IReadOnlyList<AttributeDto> Attributes);
+    IReadOnlyList<AttributeDto> Attributes,
+    string? DisplayName = null);
 
 /// <summary>
 /// Projected attribute metadata.

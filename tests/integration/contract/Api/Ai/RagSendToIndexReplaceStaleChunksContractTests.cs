@@ -98,6 +98,35 @@ public sealed class RagSendToIndexReplaceStaleChunksContractTests : IClassFixtur
             "chunks from an earlier index — a shorter re-index must not leave a stale tail behind " +
             "(task 029's DeleteChunksBeyondCountAsync trim, applied here for the first time by task 048)");
     }
+
+    [Fact]
+    public async Task SendToIndex_FileInANonIndexedContainer_ReportsNotIndexed_AndDoesNotStampTheDocument()
+    {
+        // ebilling-r1 task 028 (FR-16): indexing skips a file in the E-Billing Output Files container. The
+        // route must report that the document was not indexed and must not stamp it as indexed.
+        _fixture.DataverseMock
+            .Setup(d => d.GetDocumentAsync(DocumentId.ToString(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(IndexableDocument());
+        _fixture.FileIndexingMock
+            .Setup(f => f.IndexFileAsync(It.IsAny<FileIndexRequest>(), It.IsAny<HttpContext>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(FileIndexingResult.Skip(FileIndexingService.NonIndexedContainerReason, DocumentId.ToString(), "item-id-048"));
+
+        using var client = _fixture.CreateAuthenticatedClient();
+
+        var response = await client.PostAsJsonAsync("/api/ai/rag/send-to-index", new SendToIndexRequest
+        {
+            DocumentIds = [DocumentId.ToString()],
+            TenantId = RagSendToIndexReplaceStaleChunksFixture.TestTenantId,
+        });
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var body = await response.Content.ReadFromJsonAsync<SendToIndexResponse>();
+        body!.Results[0].Success.Should().BeFalse();
+        body.Results[0].ErrorMessage.Should().Contain("not indexed");
+        _fixture.DataverseMock.Verify(
+            d => d.UpdateDocumentAsync(It.IsAny<string>(), It.IsAny<UpdateDocumentRequest>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
 }
 
 /// <summary>

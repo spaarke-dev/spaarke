@@ -1,0 +1,29 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0028",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0028","generator_id":"gen_eval_set.py@1 F-0028","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0028.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-04"},
+ "header":{"firm":"Kestrel & Ambrose LLP","firm_invoice_number":"INV-2026-60475","invoice_date":"2025-12-03","billing_period_start":"2025-11-01","billing_period_end":"2025-11-30","firm_matter_reference":"42644-0023","po_number":"PO-4560826","fees_total":3615.0,"expenses_total":1689.16,"adjustments_total":0.0,"total_due":5304.16,"currency":"USD"},
+ "timekeepers":[{"name":"Aisha Blackwood","title":"Paralegal","rate":185.0,"billed_as":"AB"},{"name":"Anders Oyelaran","title":"Partner","rate":580.0,"billed_as":"AO"},{"name":"Helena Fairweather","title":"Senior Associate","rate":425.0,"billed_as":"HF"},{"name":"Imani Ashdown","title":"Associate","rate":320.0,"billed_as":"IA"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2025-11-11","timekeeper":"IA","timekeeper_name":"Imani Ashdown","timekeeper_title":"Associate","title":"Assoc","hours":2.75,"rate":320.0,"amount":880.0,"narrative":"Attend trial day in the customs audit","codes":["L450","A109"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2025-11-11","timekeeper":"HF","timekeeper_name":"Helena Fairweather","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":0.5,"rate":425.0,"amount":212.5,"narrative":"Draft protective order for trial in the data incident","codes":["L430","A103"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2025-11-11","timekeeper":"AO","timekeeper_name":"Anders Oyelaran","timekeeper_title":"Partner","title":"Ptr","hours":1.5,"rate":580.0,"amount":870.0,"narrative":"Prepare expert witness for testimony in the lease dispute","codes":["L420","A101"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2025-11-13","timekeeper":"HF","timekeeper_name":"Helena Fairweather","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":0.75,"rate":425.0,"amount":318.75,"narrative":"Prepare monthly status report to client regarding the customs audit","codes":["L190","A111"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2025-11-17","timekeeper":"IA","timekeeper_name":"Imani Ashdown","timekeeper_title":"Associate","title":"Assoc","hours":1.25,"rate":535.0,"amount":668.75,"narrative":"Prepare examination outlines for trial in the construction contract","codes":["L440","A101"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2025-11-19","timekeeper":"AB","timekeeper_name":"Aisha Blackwood","timekeeper_title":"Paralegal","title":"Para","hours":1.0,"rate":185.0,"amount":185.0,"narrative":"Revise settlement proposal after review by lead counsel","codes":["L430","A104"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2025-11-21","timekeeper":"IA","timekeeper_name":"Imani Ashdown","timekeeper_title":"Associate","title":"Assoc","hours":1.5,"rate":320.0,"amount":480.0,"narrative":"Draft post-trial motion in the vendor agreement","codes":["L460","A103"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"expense","date":"2025-11-07","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":244.72,"amount":244.72,"narrative":"Court filing fee","codes":["E112"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"expense","date":"2025-11-13","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":300.0,"rate":0.11,"amount":33.0,"narrative":"Photocopies - 300 pages","codes":["E101"],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"expense","date":"2025-11-14","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":1341.7,"amount":1341.7,"narrative":"Court reporter and transcript - deposition","codes":["E115"],"page":1,"narrative_style":"clear"},
+  {"n":11,"line_type":"expense","date":"2025-11-27","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":634.0,"rate":0.11,"amount":69.74,"narrative":"Photocopies - 634 pages","codes":["E101"],"page":1,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["851 Harbor Road","Minneapolis","Tax ID 74-7034131"],"template":"T01","pages":1},
+ "rule_set_id":"RS-04",
+ "context":{"matter_open":"2024-10-20","matter_close":"2026-02-28","matter_budget":46216.0,"approved_timekeepers":["Helena Fairweather","Anders Oyelaran","Aisha Blackwood","Dalia Okafor","Aisha Eriksen","Imani Ashdown","Mei Hargrove"],"invoice_received_date":"2025-12-18"},
+ "expected_findings":[
+  {"rule_id":"RS-04-R02","rule_type":"ApprovedRate","scope":"line","line_refs":[5],"consequence":"Reduce"}
+ ],
+ "seeded_violations":1
+}

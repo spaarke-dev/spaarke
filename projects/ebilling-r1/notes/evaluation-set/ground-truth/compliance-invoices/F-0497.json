@@ -1,0 +1,28 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0497",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0497","generator_id":"gen_eval_set.py@1 F-0497","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0497.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-05"},
+ "header":{"firm":"Ingersoll and Vance LLP","firm_invoice_number":"2026046846","invoice_date":"2026-06-02","billing_period_start":"2026-05-01","billing_period_end":"2026-05-31","firm_matter_reference":"46561-0027","po_number":"PO-4505651","fees_total":3694.0,"expenses_total":1812.76,"adjustments_total":0.0,"total_due":5506.76,"currency":"USD"},
+ "timekeepers":[{"name":"Clara Fairweather","title":"Legal Assistant","rate":135.0,"billed_as":"Clara Fairweather"},{"name":"Daniel Galbraith","title":"Associate","rate":275.0,"billed_as":"Daniel Galbraith"},{"name":"Elena Kowalczyk","title":"Associate","rate":270.0,"billed_as":"Elena Kowalczyk"},{"name":"Hector Hargrove","title":"Paralegal","rate":160.0,"billed_as":"Hector Hargrove"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2026-05-07","timekeeper":"Clara Fairweather","timekeeper_name":"Clara Fairweather","timekeeper_title":"Legal Assistant","title":"LA","hours":2.7,"rate":135.0,"amount":364.5,"narrative":"Telephone conference with client representative regarding factual background of the customs audit","codes":["L110","A106"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2026-05-08","timekeeper":"Daniel Galbraith","timekeeper_name":"Daniel Galbraith","timekeeper_title":"Associate","title":"Assoc","hours":2.6,"rate":275.0,"amount":715.0,"narrative":"Plan strategy for upcoming phase of the customs audit with team","codes":["L120","A101"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2026-05-11","timekeeper":"Hector Hargrove","timekeeper_name":"Hector Hargrove","timekeeper_title":"Paralegal","title":"Para","hours":2.4,"rate":160.0,"amount":384.0,"narrative":"Review and revise motion to dismiss based on client comments","codes":["L210","A104"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2026-05-12","timekeeper":"Hector Hargrove","timekeeper_name":"Hector Hargrove","timekeeper_title":"Paralegal","title":"Para","hours":1.2,"rate":160.0,"amount":192.0,"narrative":"Draft settlement term sheet for the warranty claim","codes":["L160","A103"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2026-05-13","timekeeper":"Elena Kowalczyk","timekeeper_name":"Elena Kowalczyk","timekeeper_title":"Associate","title":"Assoc","hours":2.0,"rate":270.0,"amount":540.0,"narrative":"Draft motion for preliminary injunction in the insurance coverage issue","codes":["L220","A103"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2026-05-25","timekeeper":"Daniel Galbraith","timekeeper_name":"Daniel Galbraith","timekeeper_title":"Associate","title":"Assoc","hours":2.9,"rate":275.0,"amount":797.5,"narrative":"Draft settlement term sheet for the construction contract","codes":["L160","A103"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2026-05-26","timekeeper":"Hector Hargrove","timekeeper_name":"Hector Hargrove","timekeeper_title":"Paralegal","title":"Para","hours":0.1,"rate":160.0,"amount":16.0,"narrative":"Research standard for provisional remedies concerning the distribution agreement","codes":["L220","A102"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2026-05-26","timekeeper":"Elena Kowalczyk","timekeeper_name":"Elena Kowalczyk","timekeeper_title":"Associate","title":"Assoc","hours":0.3,"rate":270.0,"amount":81.0,"narrative":"Review and analyze client documents concerning the distribution agreement to identify key facts","codes":["L110","A104"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"fee","date":"2026-05-28","timekeeper":"Clara Fairweather","timekeeper_name":"Clara Fairweather","timekeeper_title":"Legal Assistant","title":"LA","hours":0.4,"rate":135.0,"amount":54.0,"narrative":"Review court docket and calendar of pending deadlines for the vendor agreement","codes":["L190","A104"],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"fee","date":"2026-05-29","timekeeper":"Daniel Galbraith","timekeeper_name":"Daniel Galbraith","timekeeper_title":"Associate","title":"Assoc","hours":2.0,"rate":275.0,"amount":550.0,"narrative":"Review and organize incoming production from Pacifica Telecom for matter file","codes":["L140","A104"],"page":1,"narrative_style":"clear"},
+  {"n":11,"line_type":"expense","date":"2026-05-22","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":18.3,"amount":18.3,"narrative":"Long distance conference call charges","codes":["E105"],"page":1,"narrative_style":"clear"},
+  {"n":12,"line_type":"expense","date":"2026-05-26","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":1794.46,"amount":1794.46,"narrative":"Consulting expert fees","codes":["E119"],"page":1,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["23 Lakeshore Drive","Phoenix","Tax ID 86-2723663"],"template":"T02","pages":2},
+ "rule_set_id":"RS-05",
+ "context":{"matter_open":"2025-07-26","matter_close":"2026-08-29","matter_budget":47027.0,"approved_timekeepers":["Clara Fairweather","Elena Oyelaran","Hector Hargrove","Emeka Brennan","Priya Carmichael","Oliver Nwosu","Daniel Galbraith","Elena Kowalczyk"],"invoice_received_date":"2026-06-11"},
+ "expected_findings":[],
+ "seeded_violations":0
+}
