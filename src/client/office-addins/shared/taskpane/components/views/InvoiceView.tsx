@@ -288,6 +288,8 @@ export const InvoiceView: React.FC<InvoiceViewProps> = ({
   const [previous, setPrevious] = useState<PreviousLoad>({ status: 'none' });
   /** Bumped by the earlier-submission check's Retry; the effect runs again. */
   const [previousReload, setPreviousReload] = useState(0);
+  /** The earlier-submission read / follow in flight; a new submission from this view aborts it. */
+  const previousAbortRef = useRef<AbortController | null>(null);
 
   const chooseCoreRecord = useCallback((record: EntitySearchResult | null) => {
     userPickedRef.current = true;
@@ -328,11 +330,12 @@ export const InvoiceView: React.FC<InvoiceViewProps> = ({
     };
   }, [hostAdapter]);
 
-  // The email's latest submission (§11), and — while it is still running — its final status. Leaving the view (or a
-  // Retry) aborts both.
+  // The email's latest submission (§11), and — while it is still running — its final status. Leaving the view, a
+  // Retry, or a new submission from this view (which is then the newer answer) aborts both.
   useEffect(() => {
     if (!loadPreviousSubmission) return;
     const controller = new AbortController();
+    previousAbortRef.current = controller;
     setPrevious({ status: 'none' });
     void (async () => {
       let found: InvoicePreviousSubmission | null;
@@ -556,6 +559,8 @@ export const InvoiceView: React.FC<InvoiceViewProps> = ({
 
   const runAttempt = async (input: InvoiceSubmissionInput, actionId: string): Promise<void> => {
     if (!onSubmit) return;
+    // This attempt is the newer answer: stop following the earlier one (no second poller, no second announcement).
+    previousAbortRef.current?.abort();
     lastAttemptRef.current = { input, actionId };
     const controller = new AbortController();
     abortRef.current = controller;
@@ -583,6 +588,9 @@ export const InvoiceView: React.FC<InvoiceViewProps> = ({
     setProcessing(null);
     setOutcome(result);
     setRetryableInARow(prev => (result.kind === 'retryable' ? prev + 1 : 0));
+    // Not accepted (refused, retryable, permanent): the banner shows again, so read the email's latest attempt afresh.
+    // An accepted one (success / ended) is read again on Done.
+    if (result.kind !== 'success' && result.kind !== 'ended') setPreviousReload(n => n + 1);
     announce(
       result.kind === 'success'
         ? 'Invoice submitted.'
@@ -645,9 +653,9 @@ export const InvoiceView: React.FC<InvoiceViewProps> = ({
       setRetryableInARow(0);
       if (load.status === 'ready') setMarking(defaultInvoiceMarking(load.attachments, 'new'));
       setFormKey(k => k + 1);
-      // The banner at the top now describes this submission: read it again.
-      setPreviousReload(n => n + 1);
     }
+    // The banner at the top now describes this submission (accepted, or ended): read it again.
+    setPreviousReload(n => n + 1);
     setOutcome(null);
     announce('Ready for another invoice.');
   };
@@ -799,7 +807,9 @@ export const InvoiceView: React.FC<InvoiceViewProps> = ({
     if (previous.status !== 'ready') return null;
     const { submission, following } = previous;
     const running = isRunning(submission.status);
-    const ended = submission.status === 'Rejected' || submission.status === 'Failed';
+    // "Submit again" only after Failed, and only for a new invoice: after Rejected the same request is refused (§5
+    // `submission_already_ended`), and a failed correction is resent from Existing invoice, not as a new invoice.
+    const offerSubmitAgain = submission.status === 'Failed' && !submission.isCorrection;
     const detail = running
       ? following
         ? 'Spaarke is checking it.'
@@ -818,7 +828,7 @@ export const InvoiceView: React.FC<InvoiceViewProps> = ({
           {describeSubmittedLine(submission)}
           {detail ? ` ${detail}` : ''}
         </MessageBarBody>
-        {(offerCorrection || ended) && (
+        {(offerCorrection || offerSubmitAgain) && (
           <MessageBarActions>
             {offerCorrection && (
               <Button
@@ -831,7 +841,7 @@ export const InvoiceView: React.FC<InvoiceViewProps> = ({
                 Submit a correction
               </Button>
             )}
-            {ended && (
+            {offerSubmitAgain && (
               <Button
                 appearance="outline"
                 size="small"

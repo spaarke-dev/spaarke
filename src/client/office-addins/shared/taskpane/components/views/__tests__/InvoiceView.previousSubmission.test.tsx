@@ -143,6 +143,8 @@ describe('InvoiceView — the email was already submitted (§11)', () => {
       finish({ ...running, status: 'Failed', message: 'The invoice could not be read.' });
       await waitFor(() => expect(screen.getByText("This email's invoice could not be processed")).toBeInTheDocument());
       expect(screen.getByTestId('invoice-previous-submission')).toHaveTextContent('The invoice could not be read.');
+      // Announced once it is final: the live region carries the title too.
+      await waitFor(() => expect(screen.getAllByText("This email's invoice could not be processed")).toHaveLength(2));
     },
     TIMEOUT
   );
@@ -230,14 +232,140 @@ describe('InvoiceView — the email was already submitted (§11)', () => {
           status: 'Failed' as const,
           message: 'The invoice reader is not set up.',
           invoiceId: null,
-          isCorrection: true,
         })),
       });
       const bar = await banner();
-      expect(bar).toHaveTextContent(/A correction was submitted on .+ as INV-792345\.3 by Ana Diaz\./);
       expect(bar).toHaveTextContent('The invoice reader is not set up.');
       await userEvent.click(within(bar).getByTestId('invoice-previous-submit-again'));
       expect(screen.queryByTestId('invoice-previous-submission')).not.toBeInTheDocument();
+    },
+    TIMEOUT
+  );
+
+  it(
+    'must-not-fire: no "Submit again" after Rejected (§5 refuses the same request) or for a failed correction',
+    async () => {
+      const { unmount } = renderView({
+        loadPreviousSubmission: jest.fn(async () => ({
+          ...ACCEPTED,
+          status: 'Rejected' as const,
+          message: 'The firm is not on this matter.',
+        })),
+      });
+      expect(await banner()).toHaveTextContent('The firm is not on this matter.');
+      expect(screen.queryByTestId('invoice-previous-submit-again')).not.toBeInTheDocument();
+      unmount();
+      renderView({
+        loadPreviousSubmission: jest.fn(async () => ({
+          ...ACCEPTED,
+          status: 'Failed' as const,
+          message: 'The invoice reader is not set up.',
+          isCorrection: true,
+        })),
+      });
+      expect(await banner()).toHaveTextContent(/A correction was submitted on .+ as INV-792345\.3 by Ana Diaz\./);
+      expect(screen.queryByTestId('invoice-previous-submit-again')).not.toBeInTheDocument();
+    },
+    TIMEOUT
+  );
+});
+
+describe('InvoiceView — the earlier submission and a new one from this view', () => {
+  const MATTER = {
+    id: 'm-1',
+    entityType: 'Matter' as const,
+    logicalName: 'sprk_matter',
+    name: 'PAT-792345',
+  };
+  const submitButton = () => screen.getByRole('button', { name: /^(Submit|Submitting…|Processing…|Submitted)$/ });
+
+  async function fillAndSubmit() {
+    await screen.findByText('INV-4711.pdf');
+    await userEvent.type(screen.getByRole('textbox', { name: /Firm invoice number/ }), 'INV-4711');
+    await waitFor(() => expect(submitButton()).toBeEnabled());
+    await userEvent.click(submitButton());
+  }
+
+  const formProps = (over: Partial<InvoiceViewProps>): Partial<InvoiceViewProps> => ({
+    filedRecord: MATTER,
+    loadFirms: jest.fn(async () => [{ firmId: 'firm-1', name: 'Morrison Foerster' }]),
+    ...over,
+  });
+
+  it(
+    'is hidden while a new submission runs and while its result shows, and read again after Done',
+    async () => {
+      let finish: (o: { kind: 'success'; trackingNumber: string }) => void = () => undefined;
+      const onSubmit = jest.fn(
+        () =>
+          new Promise<{ kind: 'success'; trackingNumber: string }>(resolve => {
+            finish = resolve;
+          })
+      );
+      const load = jest.fn(
+        async (): Promise<InvoicePreviousSubmission | null> => ({
+          ...ACCEPTED,
+          status: 'Failed',
+          message: 'Old failure.',
+        })
+      );
+      renderView(formProps({ onSubmit, loadPreviousSubmission: load }));
+      await banner();
+      await fillAndSubmit();
+      await waitFor(() => expect(screen.queryByTestId('invoice-previous-submission')).not.toBeInTheDocument());
+      finish({ kind: 'success', trackingNumber: 'INV-4711.1' });
+      expect(await screen.findByText('Invoice submitted')).toBeInTheDocument();
+      expect(screen.queryByTestId('invoice-previous-submission')).not.toBeInTheDocument();
+      expect(load).toHaveBeenCalledTimes(1);
+
+      load.mockResolvedValueOnce({ ...ACCEPTED, trackingNumber: 'INV-4711.1' });
+      await userEvent.click(screen.getByRole('button', { name: 'Done' }));
+      await waitFor(() => expect(load).toHaveBeenCalledTimes(2));
+      expect(await banner()).toHaveTextContent('INV-4711.1');
+    },
+    TIMEOUT
+  );
+
+  it(
+    'after Done on an attempt that ended (Failed), it is read again too — never the attempt before it',
+    async () => {
+      const onSubmit = jest.fn(async () => ({
+        kind: 'ended' as const,
+        status: 'Failed' as const,
+        message: 'Could not read it.',
+        trackingNumber: 'INV-1.2',
+      }));
+      const load = jest.fn(async () => ({ ...ACCEPTED, status: 'Failed' as const, trackingNumber: 'INV-1.1' }));
+      renderView(formProps({ onSubmit, loadPreviousSubmission: load }));
+      await banner();
+      await fillAndSubmit();
+      expect(await screen.findByText('The invoice could not be processed')).toBeInTheDocument();
+      load.mockResolvedValueOnce({ ...ACCEPTED, status: 'Failed', trackingNumber: 'INV-1.2' });
+      await userEvent.click(screen.getByRole('button', { name: 'Done' }));
+      await waitFor(() => expect(load).toHaveBeenCalledTimes(2));
+      expect(await banner()).toHaveTextContent('INV-1.2');
+    },
+    TIMEOUT
+  );
+
+  it(
+    'a new submission stops following the earlier one, and a refusal shows it again, read afresh',
+    async () => {
+      const signals: Array<AbortSignal | undefined> = [];
+      const follow = jest.fn((_s: InvoicePreviousSubmission, signal?: AbortSignal) => {
+        signals.push(signal);
+        return new Promise<InvoicePreviousSubmission | null>(() => undefined);
+      });
+      const load = jest.fn(async () => ({ ...ACCEPTED, status: 'Processing' as const }));
+      const onSubmit = jest.fn(async () => ({ kind: 'refused' as const, message: 'Not allowed.' }));
+      renderView(formProps({ onSubmit, loadPreviousSubmission: load, followPreviousSubmission: follow }));
+      await banner();
+      expect(signals[0]?.aborted).toBe(false);
+      await fillAndSubmit();
+      expect(await screen.findByText('Not allowed.')).toBeInTheDocument();
+      expect(signals[0]?.aborted).toBe(true);
+      await waitFor(() => expect(load).toHaveBeenCalledTimes(2));
+      expect(await banner()).toBeInTheDocument();
     },
     TIMEOUT
   );

@@ -224,6 +224,11 @@ export type LoadPreviousSubmission = (signal?: AbortSignal) => Promise<InvoicePr
  * Follows a Received / Processing submission to its final status. Resolves with it updated (still Processing when the
  * answer is not known in time), or null when the view went away.
  */
+export type FollowPreviousSubmission = (
+  submission: InvoicePreviousSubmission,
+  signal?: AbortSignal
+) => Promise<InvoicePreviousSubmission | null>;
+
 const PREVIOUS_TITLES: Record<InvoicePreviousSubmission['status'], string> = {
   Received: "This email's invoice is being processed",
   Processing: "This email's invoice is being processed",
@@ -254,11 +259,6 @@ export function describeSubmittedLine(submission: InvoicePreviousSubmission, loc
     `${submission.submittedBy ? ` by ${submission.submittedBy}` : ''}.`
   );
 }
-
-export type FollowPreviousSubmission = (
-  submission: InvoicePreviousSubmission,
-  signal?: AbortSignal
-) => Promise<InvoicePreviousSubmission | null>;
 
 /** The contract's `firmInvoiceNumber` bound: trimmed, 1-100 characters. */
 export const FIRM_INVOICE_NUMBER_MAX = 100;
