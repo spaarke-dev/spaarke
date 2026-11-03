@@ -164,6 +164,21 @@ public static class InvoiceSubmissionEndpoints
             .ProducesProblem(StatusCodes.Status404NotFound)
             .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
 
+        // GET /api/finance/invoice-submissions?internetMessageId=... (task 095a, contract section 11): the latest attempt of an email the caller
+        // may read, for the add-in's "already submitted" banner. The filter is step 0, the shape check of the Message-ID (the uniform 404) and
+        // the caller's table-level Read on submissions; the per-record Read on the .eml and on each candidate submission is the handler's,
+        // through HoldsReadAsync (the same finance.read check, on the rights snapshot so that Faulted is seen), because a skipped candidate must not deny the whole route and a rights fault must
+        // be a 503 here, never "not submitted".
+        group.MapGet("/invoice-submissions", GetByEmailAsync)
+            .AddFinanceAuthorizationFilter(ResolveByEmailTargets, FinanceDenial.UniformNotFound)
+            .RequireEbillingEnabled()
+            .WithName("GetInvoiceSubmissionByEmail")
+            .WithSummary("The latest invoice submission of an email (by its Message-ID) that the caller can read")
+            .Produces<InvoiceSubmissionByEmailView>(StatusCodes.Status200OK)
+            .ProducesProblem(StatusCodes.Status401Unauthorized)
+            .ProducesProblem(StatusCodes.Status404NotFound)
+            .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
+
         // GET /api/finance/invoice-submissions/{id}
         group.MapGet("/invoice-submissions/{id:guid}", GetAsync)
             .AddFinanceAuthorizationFilter("finance.read", FinanceAuthorizationFilter.InvoiceSubmissionEntitySet, "id", FinanceDenial.UniformNotFound)
@@ -683,6 +698,236 @@ public static class InvoiceSubmissionEndpoints
         return InvoiceSubmissionHttp.ToResult(outcome, StatusUrl, http.TraceIdentifier);
     }
 
+    // ═══════════════════════════════════════════════════════════════════════════
+    // GET /api/finance/invoice-submissions?internetMessageId=... (task 095a, contract section 11)
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /// <summary>The table-level Read the by-email route's filter asks first (every caller who can read any submission holds it).</summary>
+    internal const string ReadSubmissionPrivilege = "prvReadsprk_invoicesubmission";
+
+    /// <summary>The most .eml Documents of one Message-ID the route will decide over; more is "cannot decide" (503), never a partial answer.</summary>
+    internal const int MaxEmlCandidates = 50;
+
+    /// <summary>The most attempts of one email the route reads; the newest readable one is returned, and when none of this many is readable
+    /// while more exist, the answer is "cannot decide" (503).</summary>
+    internal const int MaxAttemptCandidates = 50;
+
+    private const string DocumentEmailMessageIdColumn = "sprk_emailmessageid";
+    private const string DocumentIsEmailArchiveColumn = "sprk_isemailarchive";
+    private const string SystemUserEntity = "systemuser";
+    private const string SystemUserFullName = "fullname";
+
+    /// <summary>
+    /// The by-email route's filter declaration: a Message-ID that is empty, repeated, over RFC length or not RFC-shaped (the intake's own test,
+    /// <c>OfficeEmailEnricher.IsRfcMessageId</c>) is the uniform 404 (nothing to look up, and nothing is revealed); otherwise the caller's
+    /// table-level Read on submissions. The per-record rights are the handler's (<see cref="GetByEmailAsync"/>).
+    /// </summary>
+    internal static FinanceAuthorizationTargets ResolveByEmailTargets(EndpointFilterInvocationContext context)
+    {
+        var http = context.HttpContext;
+        var values = http.Request.Query["internetMessageId"];
+        if (values.Count != 1 || MessageIdKeys(values[0]) is null)
+        {
+            return FinanceAuthorizationTargets.Reject(FinanceAuthorizationFilter.UniformRecordNotFound(http));
+        }
+
+        return FinanceAuthorizationTargets.Authorize(FinanceAuthorizationCheck.CallerPrivilege(
+            ReadSubmissionPrivilege, FinanceAuthorizationFilter.InvoiceSubmissionEntitySet, "invoice submissions"));
+    }
+
+    /// <summary>
+    /// The keys <c>sprk_document.sprk_emailmessageid</c> is matched on for <paramref name="raw"/>, or null when it is not a usable Message-ID.
+    /// The intake stores and matches the Message-ID exactly as the add-in sent it (<c>OfficeEmailEnricher.ResolveRfcMessageId</c>; Outlook's
+    /// carries angle brackets, an older sender's may not), so both spellings are asked, with and without the brackets; case is the column's
+    /// own (Dataverse string equality ignores case), as it is for the intake.
+    /// </summary>
+    internal static IReadOnlyList<string>? MessageIdKeys(string? raw)
+    {
+        var value = raw?.Trim();
+        if (string.IsNullOrEmpty(value) || value.Length > 998 || !Services.Office.OfficeEmailEnricher.IsRfcMessageId(value))
+        {
+            return null;
+        }
+
+        var bracketed = value.Length > 2 && value[0] == '<' && value[^1] == '>';
+        var inner = bracketed ? value[1..^1].Trim() : value;
+        if (inner.Length == 0 || inner.Contains('<') || inner.Contains('>'))
+        {
+            return null;
+        }
+
+        return [inner, "<" + inner + ">"];
+    }
+
+    /// <summary>
+    /// The latest attempt, of the email the Message-ID names, that the caller may read. The .eml Documents of the Message-ID and the attempts
+    /// that name them (<c>sprk_sourceemaildocument</c>) are read app-only; EVERY .eml and EVERY candidate attempt is then put to the caller's
+    /// own Read (<see cref="HoldsReadAsync"/>, the filter's Record check, <c>finance.read</c>) before
+    /// anything is answered, newest attempt first. An unreadable .eml or attempt is skipped and is indistinguishable from no match (the same
+    /// uniform 404). ANY read fault, a failed rights read included, is a 503: the route never answers "not submitted" when it could not decide.
+    /// </summary>
+    internal static async Task<IResult> GetByEmailAsync(
+        [FromQuery] string? internetMessageId,
+        HttpContext http,
+        InvoiceSubmissionService service,
+        IGenericEntityService entities,
+        Spaarke.Core.Auth.AuthorizationService authorization,
+        ILogger<FromEmailSubmissionService> logger,
+        CancellationToken ct)
+    {
+        if (MessageIdKeys(internetMessageId) is not { } keys || CallerResolution.ResolveObjectId(http.User) is not { Length: > 0 } userId)
+        {
+            return FinanceAuthorizationFilter.UniformRecordNotFound(http);
+        }
+
+        var token = TokenHelper.ExtractBearerTokenOrNull(http);
+        try
+        {
+            // 1. The .eml Documents of this Message-ID (app-only), then the caller's own Read on each.
+            var emlQuery = new Microsoft.Xrm.Sdk.Query.QueryExpression(InvoiceSubmissionService.DocumentEntity)
+            {
+                ColumnSet = new Microsoft.Xrm.Sdk.Query.ColumnSet(false),
+                TopCount = MaxEmlCandidates + 1,
+            };
+            emlQuery.Criteria.AddCondition(DocumentEmailMessageIdColumn, Microsoft.Xrm.Sdk.Query.ConditionOperator.In, keys.Cast<object>().ToArray());
+            emlQuery.Criteria.AddCondition(DocumentIsEmailArchiveColumn, Microsoft.Xrm.Sdk.Query.ConditionOperator.Equal, true);
+            var emls = (await ReadOrUnavailableAsync(() => entities.RetrieveMultipleAsync(emlQuery, ct), logger, "the email's documents", ct)).Entities;
+            if (emls.Count > MaxEmlCandidates)
+            {
+                logger.LogWarning("Submission by email: more than {Max} .eml documents carry one Message-ID; it cannot be decided", MaxEmlCandidates);
+                throw InvoiceSubmissionService.ReadUnavailable();
+            }
+
+            var readableEmls = new List<object>();
+            foreach (var eml in emls)
+            {
+                if (await HoldsReadAsync(authorization, userId, FinanceAuthorizationFilter.DocumentEntitySet, eml.Id, token, logger, ct))
+                {
+                    readableEmls.Add(eml.Id);
+                }
+            }
+
+            if (readableEmls.Count == 0)
+            {
+                return FinanceAuthorizationFilter.UniformRecordNotFound(http);
+            }
+
+            // 2. The attempts that name those .eml Documents, newest first, each put to the caller's own Read; the first readable one answers.
+            var attemptQuery = new Microsoft.Xrm.Sdk.Query.QueryExpression(InvoiceSubmissionService.SubmissionEntity)
+            {
+                ColumnSet = new Microsoft.Xrm.Sdk.Query.ColumnSet([.. InvoiceSubmissionService.ViewColumns, RecordCreatorPerson.Column]),
+                TopCount = MaxAttemptCandidates + 1,
+            };
+            attemptQuery.Criteria.AddCondition(
+                InvoiceSubmissionService.SourceEmailDocumentColumn, Microsoft.Xrm.Sdk.Query.ConditionOperator.In, readableEmls.ToArray());
+            attemptQuery.AddOrder("createdon", Microsoft.Xrm.Sdk.Query.OrderType.Descending);
+            var attempts = (await ReadOrUnavailableAsync(() => entities.RetrieveMultipleAsync(attemptQuery, ct), logger, "the email's attempts", ct)).Entities;
+
+            foreach (var row in attempts.Take(MaxAttemptCandidates))
+            {
+                if (!await HoldsReadAsync(authorization, userId, FinanceAuthorizationFilter.InvoiceSubmissionEntitySet, row.Id, token, logger, ct))
+                {
+                    continue;
+                }
+
+                var view = InvoiceSubmissionService.ToView(row);
+                var name = await ReadSubmitterNameAsync(row, entities, logger, ct);
+                var shown = await service.WithReplacementNoteAsync([view], ReplacementGate(http, authorization), ct);
+                return Results.Ok(InvoiceSubmissionByEmailView.From(shown[0], name));
+            }
+
+            if (attempts.Count > MaxAttemptCandidates)
+            {
+                logger.LogWarning("Submission by email: none of the newest {Max} attempts is readable and more exist; it cannot be decided", MaxAttemptCandidates);
+                throw InvoiceSubmissionService.ReadUnavailable();
+            }
+
+            return FinanceAuthorizationFilter.UniformRecordNotFound(http);
+        }
+        catch (SdapProblemException ex)
+        {
+            return InvoiceSubmissionHttp.ReadFault(ex);
+        }
+    }
+
+    /// <summary>
+    /// The caller's own Read on one record: the filter's Record check (<c>finance.read</c> over the caller-scoped snapshot, as
+    /// <see cref="FinanceAuthorizationFilter.CallerHoldsRightsAsync"/> decides it) but asked of the snapshot itself, because a snapshot that
+    /// carries no Read AND is <see cref="Spaarke.Dataverse.AccessSnapshot.Faulted"/> is "Dataverse gave no answer", not "the caller may not
+    /// read it": that is the route's 503, never a "no" (which would be the not-submitted 404). A thrown rights read is the same 503.
+    /// </summary>
+    private static async Task<bool> HoldsReadAsync(
+        Spaarke.Core.Auth.AuthorizationService authorization, string userId, string entitySet, Guid id, string? token, ILogger logger, CancellationToken ct)
+    {
+        try
+        {
+            var snapshot = await authorization.GetCallerRecordAccessAsync(userId, entitySet, id, token, ct);
+            if (Spaarke.Core.Auth.OperationAccessPolicy.HasRequiredRights(snapshot.AccessRights, "finance.read"))
+            {
+                return true;
+            }
+
+            if (snapshot.Faulted)
+            {
+                logger.LogWarning("Submission by email: the caller's rights on {EntitySet} were not a complete answer", entitySet);
+                throw InvoiceSubmissionService.ReadUnavailable();
+            }
+
+            return false;
+        }
+        catch (SdapProblemException)
+        {
+            throw;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            logger.LogWarning(ex, "Submission by email: the caller's rights on {EntitySet} could not be read ({Fault})", entitySet, ex.GetType().Name);
+            throw InvoiceSubmissionService.ReadUnavailable();
+        }
+    }
+
+    /// <summary>One app-only read; a fault is the route's 503 (<see cref="InvoiceSubmissionService.ReadUnavailable"/>).</summary>
+    private static async Task<T> ReadOrUnavailableAsync<T>(Func<Task<T>> read, ILogger logger, string what, CancellationToken ct)
+    {
+        try
+        {
+            return await read();
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            logger.LogWarning(ex, "Submission by email: {What} could not be read ({Fault})", what, ex.GetType().Name);
+            throw InvoiceSubmissionService.ReadUnavailable();
+        }
+    }
+
+    /// <summary>
+    /// The display name of the person who submitted (<c>sprk_createdbyperson</c>, a systemuser; never <c>createdby</c>, the service identity),
+    /// or null when no person is recorded or the user has no name. A name only: no id, no address. A read fault is the route's 503.
+    /// </summary>
+    private static async Task<string?> ReadSubmitterNameAsync(Entity submission, IGenericEntityService entities, ILogger logger, CancellationToken ct)
+    {
+        if (submission.GetAttributeValue<EntityReference>(RecordCreatorPerson.Column) is not { Id: var personId } || personId == Guid.Empty)
+        {
+            return null;
+        }
+
+        try
+        {
+            var person = await entities.RetrieveAsync(SystemUserEntity, personId, [SystemUserFullName], ct);
+            var name = person?.GetAttributeValue<string>(SystemUserFullName);
+            return string.IsNullOrWhiteSpace(name) ? null : name.Trim();
+        }
+        catch (Exception ex) when (IsNotFound(ex))
+        {
+            return null;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            logger.LogWarning(ex, "Submission by email: the submitter's name could not be read ({Fault})", ex.GetType().Name);
+            throw InvoiceSubmissionService.ReadUnavailable();
+        }
+    }
+
     private static async Task<IResult> GetAsync(
         Guid id, HttpContext http, InvoiceSubmissionService service, Spaarke.Core.Auth.AuthorizationService authorization, CancellationToken ct)
     {
@@ -841,3 +1086,77 @@ public sealed record SubmitInvoiceCoreRecord
 /// <param name="TrackingNumber">The firm-scoped tracking number (D-87); never null (D-91).</param>
 /// <param name="StatusUrl">The status route of this submission on the channel it arrived through.</param>
 public sealed record InvoiceSubmissionAccepted(Guid SubmissionId, Guid JobId, string TrackingNumber, string StatusUrl);
+
+/// <summary>
+/// Task 095a (contract section 11): the 200 of <c>GET /api/finance/invoice-submissions?internetMessageId=...</c>: the fields of
+/// <see cref="InvoiceSubmissionView"/> as <c>GET /invoice-submissions/{id}</c> serializes it (same names, same omissions; pinned by a test),
+/// plus <c>invoiceId</c> (the status route keeps it server-side; here the pane needs it, and only a caller who can read the submission gets
+/// it), <c>submittedOn</c>, <c>submittedBy</c> and <c>isCorrection</c>.
+/// </summary>
+public sealed record InvoiceSubmissionByEmailView
+{
+    public Guid SubmissionId { get; init; }
+
+    public string? TrackingNumber { get; init; }
+
+    public string? FirmInvoiceNumber { get; init; }
+
+    public string? PoNumber { get; init; }
+
+    public string? Status { get; init; }
+
+    public string? Channel { get; init; }
+
+    public DateTime? ReceivedOn { get; init; }
+
+    public string? OutcomeReasonCode { get; init; }
+
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public Guid? DocumentId { get; init; }
+
+    public Guid? FirmId { get; init; }
+
+    public InvoiceCoreRecord? CoreRecord { get; init; }
+
+    public DateTime? CreatedOn { get; init; }
+
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public SubmissionReplacement? ReplacedBy { get; init; }
+
+    /// <summary>The resulting invoice, when the attempt has one (an Accepted attempt); absent otherwise.</summary>
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public Guid? InvoiceId { get; init; }
+
+    /// <summary>When the attempt was created (<c>createdon</c>), UTC.</summary>
+    public DateTime? SubmittedOn { get; init; }
+
+    /// <summary>The person who submitted (display name only); null when no person is recorded. Never the service identity.</summary>
+    public SubmittedByPerson? SubmittedBy { get; init; }
+
+    /// <summary>True when the attempt corrects an existing invoice (it names the earlier submission it replaces).</summary>
+    public bool IsCorrection { get; init; }
+
+    internal static InvoiceSubmissionByEmailView From(InvoiceSubmissionView view, string? submittedByName) => new()
+    {
+        SubmissionId = view.SubmissionId,
+        TrackingNumber = view.TrackingNumber,
+        FirmInvoiceNumber = view.FirmInvoiceNumber,
+        PoNumber = view.PoNumber,
+        Status = view.Status,
+        Channel = view.Channel,
+        ReceivedOn = view.ReceivedOn,
+        OutcomeReasonCode = view.OutcomeReasonCode,
+        DocumentId = view.DocumentId,
+        FirmId = view.FirmId,
+        CoreRecord = view.CoreRecord,
+        CreatedOn = view.CreatedOn,
+        ReplacedBy = view.ReplacedBy,
+        InvoiceId = view.InvoiceId,
+        SubmittedOn = view.CreatedOn is { } created ? DateTime.SpecifyKind(created, DateTimeKind.Utc) : null,
+        SubmittedBy = submittedByName is null ? null : new SubmittedByPerson(submittedByName),
+        IsCorrection = view.ResubmissionOfId is not null,
+    };
+}
+
+/// <summary>The submitter of an attempt as the by-email route names them: a display name only (no id, no address).</summary>
+public sealed record SubmittedByPerson(string Name);

@@ -239,6 +239,10 @@ internal class SubmitInvoiceFromEmailOperation : ISubmitInvoiceFromEmail
             row[InvoiceSubmissionService.ResubmissionOfColumn] = new EntityReference(InvoiceSubmissionService.SubmissionEntity, earlierSubmission);
         }
 
+        // Task 095a: the .eml this attempt was read from, in the same create; the id the stage recorded as the Stored Files' source.
+        row[InvoiceSubmissionService.SourceEmailDocumentColumn] =
+            new EntityReference(InvoiceSubmissionService.DocumentEntity, input.SourceEmlDocumentId);
+
         row["sprk_receivedon"] = DateTime.UtcNow;
         if (!string.IsNullOrWhiteSpace(input.PoNumber))
         {
