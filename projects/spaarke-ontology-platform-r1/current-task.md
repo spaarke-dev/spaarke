@@ -11,7 +11,7 @@
 |---|---|
 | **Task** | **Billing-guideline compliance test (owner option C, 2026-11-03): ontology part DONE.** PR #2545 merged into `work/ebilling-r1` (`9e56ce36ce`; ebilling regenerated the manifest `9883553f29`). Temp worktree removed with Remove-WorktreeSafe. Plan: `notes/billing-guidelines-compliance-test-plan.md`. Data lives in ebilling's `projects/ebilling-r1/notes/evaluation-set/guidelines/` (README there). |
 | **Status** | ebilling accepted the three asks (one firm record per reference-data key; drafter scored on keys/ with production.consequence, minConfidence excluded; no-approved-rate ApprovedRate beside ApprovedTimekeeper expected). Seeding and scoring are their tasks 161/162, after their current wave and with the owner's OK for live seeding. They triage the six product gaps with the owner and send decisions (period-end 47, clerical-by-task 40+, PO 39, per-unit cap 36+, budget 23, per-code cap 22). Render venv `C:\glvenv`: the owner approved deleting it, but the harness blocks deleting top-level C: paths, so the owner deletes it by hand. Local branch `ontology/billing-guidelines-eval` kept (merged). |
-| **Next Action** | 1) When ebilling sends gap decisions or scoring results: review the Signal/Decision Record side (plan phase 6). 2) Owner UAT on dev `5796774091` (168/173 runs A/B/C, Tony Howe Assign Task on CMRCL-479772 expecting 50395 and no bell, BUD- budget, 170 latency, re-checks 158-163/166, 114, 111 row 4; then 105, then 090). Reviews pending when they arrive: ebilling 095a (sourceemaildocument guard), 095c-3 (firm_missing code/template). ebilling session now `spaarke-wt-ebilling-r1-7b`. |
+| **Next Action** | 1) When ebilling sends gap decisions or scoring results: review the Signal/Decision Record side (plan phase 6). 2) Owner UAT on dev `d763dc120e` (168/173 runs A/B/C, Tony Howe Assign Task on CMRCL-479772 expecting 50395 and no bell, BUD- budget, 170 latency, re-checks 158-163/166, 114, 111 row 4; then 105, then 090). Reviews pending when they arrive: ebilling 095a (sourceemaildocument guard), 095c-3 (firm_missing code/template). ebilling session now `spaarke-wt-ebilling-r1-7b`. |
 
 ## Task 168 decisions: D-199 (owner, 2026-10-29)
 
@@ -19,7 +19,7 @@ Q1 = A (an eligible internal user, or an onboarded external contact with a grant
 
 ## Lane facts to carry
 
-- **Dev BFF deploys (2026-11-03):** R3 asked to deploy `d763dc120e` (live `5796774091`; delta #2541 field-mapping 041 index follows content type, #2546 R3 invite refusal). Ontology replied OK with conditions: Router green, the owner's go naming the SHA, before/after notices because the owner is in UAT, smoke afterwards. No ontology code in the delta. **From the next deploy, uac-r2 orchestrates dev BFF deploys** (`docs/procedures/dev-bff-deploy-coordination.md`); send requests to uac-r2.
+- **Dev BFF deploys (2026-11-03):** R3 asked to deploy `d763dc120e` (live `5796774091`; delta #2541 field-mapping 041 index follows content type, #2546 R3 invite refusal). Ontology replied OK with conditions: Router green, the owner's go naming the SHA, before/after notices because the owner is in UAT, smoke afterwards. **Live since 22:26:31Z** (readback: ProductVersion +d763dc120e, healthz 200, healthz/dataverse 200, anonymous /api/me 401; settings unchanged at 225; rollback target 5796774091). No ontology code in the delta. **From the next deploy, uac-r2 orchestrates dev BFF deploys** (`docs/procedures/dev-bff-deploy-coordination.md`); send requests to uac-r2.
 - **Docs now contains master through 194b** (`2cd0f62e2c`, merge `4470c95b86`). 194b moved `ResolveSecureBusinessUnitAsync` to `SecureRecordOwnerTeam`; our call was repointed in `f1133d951b` (uac-r2 approved). ArchTests 1665/1665 on that state.
 - **Dev BFF** `136568cf70` (R3, live 02:23:53Z). Smoke PASS (deploy-log `83e3e409cb`). **Pending:** the task-170 commit-path check (before: 28 WhoAmI, 22.4 s per commit) and the `BUD-` number need the owner's next real decision commit. Then query App Insights `spe-insights-dev-67e2xz` (rg `spe-infrastructure-westus2`) for `POST /api/v1/signals/{id}/decision` after 02:23:53Z.
 - **SpaarkeMaster 1.2.4.0 stamp check:** customer-provisioning built `Test-RolePrivilegeExpectations.ps1` + `spaarkemaster-1.2.4.0.json` (`b6e94f4499`). Stamps run 1.2.3.1, so the upgrade REMOVES Basic User `prvReadsprk_Policy` (D-189 note `53c01465dc`). They will send ACME's result after its upgrade.
@@ -40,7 +40,7 @@ The last was PR #2463, merged as master `c8bb55d0cd` (2026-10-29): 168 and 173. 
 
 ## Dev state (spaarkedev1 / spaarke-bff-dev)
 
-- **BFF:** `136568cf70` (R3, 2026-10-29). **Console:** `a8314c2e0e`. **SpaarkeMaster:** 1.2.4.0. **POL-MATTER-NOBUDGET:** v3 `…6313`.
+- **BFF:** `d763dc120e` (R3's last deploy, live 2026-11-03 22:26:31Z; rollback 5796774091). **Console:** `a8314c2e0e`. **SpaarkeMaster:** 1.2.4.0. **POL-MATTER-NOBUDGET:** v3 `…6313`.
 - **Worktrees:** none for lanes. Remove only with `Remove-WorktreeSafe.ps1`, one path per call.
 - **Stash:** two old `lint-staged automatic backup` entries (20 and 30 h old) are not ours. Leave them.
 
