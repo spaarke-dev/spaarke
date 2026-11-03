@@ -33,3 +33,11 @@ Entries are dated; add new ones at the end. Dates are 2026-10-15 unless shown.
 ### 7.5 Spike subset (task 005)
 
 The spike holds the B items listed in section 3 (including B-0150, the longest invoice, and bundled PDFs), two fee applications (A-02 line-level with a discounted rate, A-07 a long final application) and three real invoices (C-03 scan with OCR noise, C-10 interleaved columns, C-11 clean native text).
+
+### 7.6 Billing-guideline compliance test (2026-11-03)
+
+- Added by the spaarke-ontology-platform-r1 session (owner decision "option C"; ebilling seeds, publishes, submits and scores). Everything is under `guidelines/`; `guidelines/README.md` describes it. Set F ground truth and the RS rule sets are unchanged.
+- **Subset**: 120 Set F invoices, 15 seeded and 5 clean per rule set (`guidelines/subset.json`, `build_guideline_data.py`). Seeded picks cover every rule at least twice; clean picks favour invoices with clean A110 or A105 lines, so the code-based non-billable rule's over-flag shows in the score.
+- **Guidelines GL-01..GL-06**: one per rule set, written for six fictional departments (county, university, mid-size manufacturer, bank, P&C insurer, state attorney general) profiled from public benchmarks. Every rule and parameter is a numbered clause; 45 non-rule provisions test the drafter's "not converted" list. `build_guidelines.py` checks each document against its rule set and renders DOCX and PDF to `local/guidelines/`.
+- **Two keys**: `guidelines/keys/GL-0n.json` scores the drafter (Set E format plus the production rule bodies); `guidelines/production-key/RS-0n.json` scores detection, because production R1 cannot state some Set F rules (PO number, received-date age, budget, per-unit and per-code expense caps, keyword-only non-billables). `guidelines/gap-report.md` counts them: 39 PO, 47 period-end, 36 per-unit cap, 23 budget and 22 per-code cap findings across all of Set F.
+- **Reference data**: `guidelines/reference-data/RS-0n.json` holds the synthetic firms, matters and 078 rate-card workbooks to seed on dev with the zz- prefix. Senior associates are rostered as Associate with a per-timekeeper rate, because LEDES has no Senior Associate classification.
