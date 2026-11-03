@@ -1664,7 +1664,7 @@
           <IsCustomField>1</IsCustomField>
           <IsAuditEnabled>1</IsAuditEnabled>
           <IsSecured>0</IsSecured>
-          <IntroducedVersion>1.2.3.0</IntroducedVersion>
+          <IntroducedVersion>1.2.4.0</IntroducedVersion>
           <IsCustomizable>1</IsCustomizable>
           <IsRenameable>1</IsRenameable>
           <CanModifySearchSettings>1</CanModifySearchSettings>
@@ -1930,9 +1930,22 @@
       </attributes>
       <EntityKeys>
         <EntityKey>
+          <Name>sprk_invoicesubmission_firm_trackingnumber</Name>
+          <LogicalName>sprk_invoicesubmission_firm_trackingnumber</LogicalName>
+          <IntroducedVersion>1.2.3.0</IntroducedVersion>
+          <IsCustomizable>0</IsCustomizable>
+          <EntityKeyAttributes>
+            <AttributeName>sprk_trackingnumber</AttributeName>
+            <AttributeName>sprk_vendororg</AttributeName>
+          </EntityKeyAttributes>
+          <displaynames>
+            <displayname description="Firm and Tracking Number" languagecode="1033" />
+          </displaynames>
+        </EntityKey>
+        <EntityKey>
           <Name>sprk_invoicesubmission_scope_trackingnumber</Name>
           <LogicalName>sprk_invoicesubmission_scope_trackingnumber</LogicalName>
-          <IntroducedVersion>1.2.3.0</IntroducedVersion>
+          <IntroducedVersion>1.2.4.0</IntroducedVersion>
           <IsCustomizable>0</IsCustomizable>
           <EntityKeyAttributes>
             <AttributeName>sprk_trackingnumber</AttributeName>
