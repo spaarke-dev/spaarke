@@ -122,7 +122,7 @@ function Get-ScopeKey { return Get-Keys $Table | Where-Object { $_.SchemaName -e
 # A key on (tracking number, scope) under any other name: the BFF would read P1 forever, and Add-AlternateKey would skip creating the right one.
 function Get-MisnamedScopeKey { return Get-Keys $Table | Where-Object { $_.SchemaName -ne $ScopeKey -and (Get-KeyColumns $_) -eq $ScopeKeyColumns } | Select-Object -First 1 }
 function Publish-Submission {
-    # Entity-scoped (never PublishAllXml): the BFF's phase probe reads published metadata.
+    # Entity-scoped (never the tenant-wide publish): the BFF's phase probe reads published metadata.
     Invoke-Dv -Path 'PublishXml' -Method POST -Body @{ ParameterXml = "<importexportxml><entities><entity>$Table</entity></entities></importexportxml>" } | Out-Null
     Write-Host "  published $Table" -ForegroundColor Green
 }
