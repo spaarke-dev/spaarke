@@ -220,7 +220,8 @@ public sealed class BulkRagIndexingJobHandlerReplaceStaleChunksTests
         // ebilling-r1 task 028 (FR-16): a file in the E-Billing Output Files container is deliberately not
         // indexed. The bulk job must count it as skipped, not as an indexed document.
         var logger = new CompletionCapturingLogger();
-        var (handler, fileIndexingMock, _) = CreateSut(logger);
+        var documentService = new Mock<IDocumentDataverseService>();
+        var (handler, fileIndexingMock, _) = CreateSut(logger, documentService);
         fileIndexingMock
             .Setup(f => f.IndexFileAppOnlyAsync(It.IsAny<FileIndexRequest>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(skipped
@@ -233,6 +234,10 @@ public sealed class BulkRagIndexingJobHandlerReplaceStaleChunksTests
         logger.Completion.Should().NotBeNull("the handler logs its processed/skipped counts on completion");
         logger.Completion!["Processed"].Should().Be(processed);
         logger.Completion["Skipped"].Should().Be(skippedCount);
+        // Task 041 review round 2 N3: a skipped file was not written to any index, so it is never stamped.
+        documentService.Verify(
+            d => d.UpdateDocumentAsync(It.IsAny<string>(), It.IsAny<UpdateDocumentRequest>(), It.IsAny<CancellationToken>()),
+            skipped ? Times.Never() : Times.Once());
     }
 
     /// <summary>
