@@ -436,3 +436,14 @@ Task 168, owner questions Q1 and Q2 (asked 2026-10-28, explained in detail 2026-
 - **Decision id:** namespaced per verb, like override and return: `IdOf("ebilling-assign-firm-{submissionId}")`. Reusing the override's id would be refused as another code under the same id.
 - **Signals:** firm_missing is a system finding under `BILL-SYSTEM-SUBMISSION` (SubmissionIntegrity), like the invoice-number mismatch. No new policy row. The decision resolves the firm_missing Signal(s) only, not every Signal on the invoice as override and return do. They are closed as Acted and linked to the record.
 - **Not ontology's call:** what setting the firm opens to the firm's external users is for uac-r2. Findings that need a firm are re-evaluated after the firm is set; they are new Signals, not part of this decision.
+
+## D-202 — Record-rule policy code: `BRR-{recordRulePolicyId:N}` (ontology position, 2026-11-03)
+
+- **Context:** ebilling 089 creates record rules (EB-D-148; component model §3 "record rule"). A record rule is its own `sprk_policy`, so its code starts a new D-13 key (`{policycode}|{type}|{id}|{episode}`). ebilling suggested `{baseCode}-R-{first 8 hex of the record id}`.
+- **Facts (dev, 2026-11-03):** `sprk_policy.sprk_policycode` and `sprk_signal.sprk_policycode` are both 50 characters, and SignalWriter refuses longer codes (`PolicyCodeTooLong`). `sprk_signal.sprk_dedupekey` is 400. The alternate key `sprk_policycodekey` on `sprk_policy.sprk_policycode` is Active and in SpaarkeMaster `Entity.xml`. Base billing codes are `BRD-{ruleSetId:N}-{nnn}` (RuleSetService.DraftCodePrefix), which is 40 characters.
+- **Position:** a record rule's code is **`BRR-` + the record-rule policy's own id in 32-hex `N` form**: 36 characters, uppercase prefix, lowercase hex. The policy id is deterministic, `IdOf("ebilling-record-rule-{recordRuleSetId:D}-{basePolicyId:D}")`, so a retry produces the same id and code.
+  - **Not derived from the base code:** `{40-char base}-R-{8 hex}` is 51 characters, over the limit.
+  - **Not truncated:** 8 hex characters is 32 bits, and a collision would be a hard refusal.
+  - **The link to the base rule** is `sprk_basedonversion`, not the code.
+- **Uniqueness:** Dataverse enforces it through `sprk_policycodekey`, across all domains and inactive rows. When a create hits the duplicate key, the writer reads the existing row. It is a retry only when that row's rule set and `sprk_basedonversion` policy match; otherwise refuse. A record rule removed and then needed again reuses its policy (a new version or reactivation), never a second row.
+- **Catalogue:** none. The `sprk_policy` row is the catalogue entry (billing domain). The code is copied to `sprk_signal.sprk_policycode` by SignalWriter; it is not free text like `sprk_actioncode`.
