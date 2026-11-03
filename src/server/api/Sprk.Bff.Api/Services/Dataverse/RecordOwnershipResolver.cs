@@ -1764,7 +1764,11 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
     /// <c>OwnedChildWrite.ParentsOf</c>.
     /// </summary>
     private static readonly HashSet<(string Table, string Column)> CitationLookups = new(
-        [("sprk_signal", "sprk_policy")], CitationComparer.Instance);
+        [("sprk_signal", "sprk_policy"),
+         // ebilling-r1 task 095a: a from-email submission's link to the .eml it was read from. The .eml is an ownership-parent table
+         // (sprk_document); read as a parent it would file the submission under the email (and under a Restricted email's isolation).
+         // The submission is filed under its core record only; the link is a plain reference (SubmissionSourceEmailLinkNotFilingGuardTests).
+         ("sprk_invoicesubmission", "sprk_sourceemaildocument")], CitationComparer.Instance);
 
     /// <summary>True when <paramref name="column"/> of <paramref name="table"/> cites a record rather than files the row under it.</summary>
     public static bool IsCitation(string? table, string? column) =>

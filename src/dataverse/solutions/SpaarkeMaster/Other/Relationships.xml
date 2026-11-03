@@ -759,6 +759,7 @@
   <EntityRelationship Name="sprk_invoicesubmission_regworkassignment" />
   <EntityRelationship Name="sprk_invoicesubmission_reportdocument_document" />
   <EntityRelationship Name="sprk_invoicesubmission_resubmissionof" />
+  <EntityRelationship Name="sprk_invoicesubmission_SourceEmailDocument_sprk_document" />
   <EntityRelationship Name="sprk_invoicesubmission_submitter_contact" />
   <EntityRelationship Name="sprk_invoicesubmission_vendororg_organization" />
   <EntityRelationship Name="sprk_kpiassessment_Matter_1n" />

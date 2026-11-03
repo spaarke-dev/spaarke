@@ -4,7 +4,7 @@
     <title>Read the latest invoice submission of an email (add-in "already submitted" banner)</title>
     <phase>3 Rules (follow-up to 095; owner scope 2026-11-03)</phase>
     <gate>owner confirms scope in the ebilling session</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Adds a read endpoint to the BFF behind the Finance route gate; tags include bff-api and auth.</rigor-reason>
     <model-tier>sonnet</model-tier>

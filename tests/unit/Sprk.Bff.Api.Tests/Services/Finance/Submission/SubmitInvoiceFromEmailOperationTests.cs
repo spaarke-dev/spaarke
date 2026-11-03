@@ -741,6 +741,36 @@ public sealed class SubmitInvoiceFromEmailOperationTests
         H.Allocations.Should().ContainSingle().Which.Fields!.Should().NotContainKey("sprk_resubmissionof");
     }
 
+    [Theory(DisplayName = "095a: every from-email attempt (New or Correction) creates its submission with sprk_sourceemaildocument = the staged source .eml, the id sprk_storedfile.sprk_sourcedocument is written from")]
+    [InlineData(FromEmailModes.New)]
+    [InlineData(FromEmailModes.Correction)]
+    public async Task Submit_RecordsTheSourceEml_OnTheSubmission(string mode)
+    {
+        var target = Guid.NewGuid();
+        var input = mode == FromEmailModes.New
+            ? Input()
+            : Input() with { Mode = FromEmailModes.Correction, InvoiceId = InvoiceSubmissionPersister.InvoiceIdFor(target), ResubmissionOf = target };
+
+        await Build().SubmitAsync(input, CancellationToken.None);
+
+        var fields = H.Allocations.Should().ContainSingle().Which.Fields!;
+        fields["sprk_sourceemaildocument"].Should().Be(new EntityReference("sprk_document", input.SourceEmlDocumentId));
+        fields["sprk_sourceemaildocument"].Should().Be(new EntityReference("sprk_document", W.EmlId));
+        fields.Should().NotContainKey("sprk_document", "the from-email submission still has no document of its own (092); the link is a citation, not a filing parent");
+    }
+
+    [Fact(DisplayName = "095a: the source-email link is a column the external view never selects or serializes (uac-r2: it never reaches an external response)")]
+    public void SourceEmailLink_IsNotInTheViewColumns_AndNotOnTheViewType()
+    {
+        InvoiceSubmissionService.ViewColumns.Should().NotContain("sprk_sourceemaildocument");
+        InvoiceSubmissionService.ViewColumns.Should().NotContain(c => c.Contains("sourceemail", StringComparison.OrdinalIgnoreCase));
+        typeof(InvoiceSubmissionView).GetProperties().Select(p => p.Name)
+            .Should().NotContain(n => n.Contains("SourceEmail", StringComparison.OrdinalIgnoreCase) || n.Contains("Eml", StringComparison.OrdinalIgnoreCase));
+
+        // Control (must fire): a column that IS in the view is found by the same probes.
+        InvoiceSubmissionService.ViewColumns.Should().Contain("sprk_trackingnumber");
+    }
+
     // ═══════════════════════════════════════════════════════════════════════════
     // The replay's reads (contract section 5)
     // ═══════════════════════════════════════════════════════════════════════════

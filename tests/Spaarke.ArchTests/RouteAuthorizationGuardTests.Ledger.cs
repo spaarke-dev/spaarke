@@ -405,7 +405,13 @@ public partial class RouteAuthorizationGuardTests
             + "CheckFirmLinkAsync. And GET /api/finance/core-records/{entityType}/{entityId}/firms (finance.read on the core record, "
             + "uniform 404), which lists only the record's active linked firms. Task 097e adds GET /api/finance/invoices/{invoiceId}/correction-prefill "
             + "(\"ebilling.invoice.decide\", Write on the invoice as the caller, uniform 404 for no Write, an unknown invoice, step 0 and a rights fault); "
-            + "its canCorrect is the Correction intake's own guard, and its optional replacedBy is put to the caller's own Read (finance.read) on the replacement."),
+            + "its canCorrect is the Correction intake's own guard, and its optional replacedBy is put to the caller's own Read (finance.read) on the replacement. "
+            + "Task 095a adds GET /api/finance/invoice-submissions?internetMessageId=... (the add-in's \"already submitted\" banner): the Finance filter with "
+            + "step 0 (uniform 404), the Message-ID shape check (uniform 404) and the caller's table-level Read on sprk_invoicesubmissions as the credited "
+            + "check; the handler then puts the .eml documents the Message-ID names, and EACH candidate submission (found by sprk_sourceemaildocument, newest "
+            + "first), to the caller's own Read (finance.read, per record): an unreadable .eml or submission is skipped and is indistinguishable from no match "
+            + "(the uniform 404); a read or rights-read fault (including a Faulted rights snapshot with no Read) is a 503, never \"not submitted\". "
+            + "submittedBy is the sprk_createdbyperson name (null when none), never createdby; the source-email link is never returned."),
         new GovernedFile("Api/Finance/CodeSetMappingEndpoints.cs", Scope.RouteLevelGate,
             "/api/finance/code-set-mappings/* (ebilling-r1 task 048, FR-22) -- AI code-set proposals (GET) and the admin confirm that writes one "
             + "default code set (POST). Each route declares the Dataverse table privileges the caller must hold (AddFinanceAuthorizationFilter, "

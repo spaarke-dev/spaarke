@@ -107,6 +107,17 @@ public class InvoiceSubmissionService
     internal const string ResubmissionOfColumn = "sprk_resubmissionof";
 
     /// <summary>
+    /// ebilling-r1 task 095a (owner choice B, 2026-11-03): <c>sprk_invoicesubmission.sprk_sourceemaildocument</c>, the <c>.eml</c> Document a
+    /// from-email attempt was read from, so "was this email already submitted" is one indexed query. A PLAIN REFERENCE, written once at the
+    /// create by <see cref="SubmitInvoiceFromEmailOperation"/> from the same id the stage records as the Stored Files' <c>sprk_sourcedocument</c>.
+    /// It is NOT <c>sprk_document</c> (which a from-email row leaves empty, 092), not a filing, not a regarding and not an ownership parent
+    /// (<see cref="RecordOwnershipResolver.IsCitation"/>); it is deliberately absent from <see cref="ViewColumns"/> and
+    /// <see cref="InvoiceSubmissionView"/>, so no route that answers a view (external or internal) can carry it, and
+    /// <c>ExternalInvoiceVisibility</c> never reads it (guarded by SubmissionSourceEmailLinkNotFilingGuardTests).
+    /// </summary>
+    internal const string SourceEmailDocumentColumn = "sprk_sourceemaildocument";
+
+    /// <summary>
     /// ebilling-r1 task 097b: what the Correction guard reads of the old invoice (app-only, after the caller's own Write passed): its firm,
     /// its core lookups (<see cref="InvoiceFamilyCoreRecordGuard.CoreRecordLookups"/>) and its status pair.
     /// </summary>

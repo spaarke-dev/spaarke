@@ -936,6 +936,30 @@ public sealed class InvoiceSubmissionEndpointsContractTests : IAsyncLifetime
         body.RootElement.GetProperty("status").GetString().Should().Be("Received");
     }
 
+    [Fact(DisplayName = "095a (uac-r2): a submission that carries sprk_sourceemaildocument is answered to an external caller without it (single read and list), and without the .eml id")]
+    public async Task External_get_and_list_never_carry_the_source_email_link()
+    {
+        var eml = Guid.NewGuid();
+        var id = Guid.NewGuid();
+        var row = StoredSubmission(id, FirmId);
+        row[InvoiceSubmissionService.SourceEmailDocumentColumn] = new EntityReference("sprk_document", eml);
+
+        var single = await (await SendAsync(HttpMethod.Get, $"/api/v1/external/invoice-submissions/{id}")).Content.ReadAsStringAsync();
+        var listed = SubmissionRow("INV-LIST", Spa);
+        listed[InvoiceSubmissionService.SourceEmailDocumentColumn] = new EntityReference("sprk_document", eml);
+        ListReturns(listed);
+        var list = await (await SendAsync(HttpMethod.Get, "/api/v1/external/invoice-submissions")).Content.ReadAsStringAsync();
+
+        // Control (must fire): the rows ARE answered, so the absence below is not an empty body.
+        single.Should().Contain("INV-1.1");
+        list.Should().Contain("INV-LIST");
+        foreach (var text in new[] { single, list })
+        {
+            text.ToLowerInvariant().Should().NotContain("sourceemail");
+            text.Should().NotContain(eml.ToString());
+        }
+    }
+
     [Fact]
     public async Task External_get_of_another_firms_submission_is_the_same_404_as_a_missing_one()
     {
