@@ -77,7 +77,7 @@ function createQuery(options?: IBffCreateOptions): string {
   const source = options?.mappingSource;
   if (!source) return '';
   return (
-    `?mappingSourceEntity=${encodeURIComponent((source.entity ?? '').trim().toLowerCase())}` +
+    `?mappingSourceEntity=${encodeURIComponent(source.entity.trim().toLowerCase())}` +
     `&mappingSourceId=${encodeURIComponent(cleanId(source.id))}`
   );
 }
