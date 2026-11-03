@@ -913,6 +913,14 @@ function failureFromProblem(status: number, problemBody: unknown): IProvisionPro
 /**
  * Calls the BFF /api/v1/external-access/provision-project endpoint.
  *
+ * Field-mapping-server-write-path-r1 task 020 (spec FR-15), the secure-Project split: a project CREATED through
+ * `POST /api/v1/child-records/sprk_project` FILED UNDER a secure matter or project is made secure by the server in that
+ * create (the secure-root plan: created into isolation, owned by the Secure Record Owners team, shared to its creator,
+ * its container and its parents' sharees completed) — this call is not needed for it. This call stays the one path for the
+ * user's own "Secure Project" choice on a project that inherits no isolation: the server marks it secure, shares it to the
+ * creator, moves it to the named owner team and provisions its container (unified-access-control-r2's contract,
+ * unchanged). Which of the two a wizard uses is decided when it moves onto the route (task 022).
+ *
  * Dependencies are injected as parameters to avoid solution-specific imports.
  *
  * @param request - Provisioning request payload

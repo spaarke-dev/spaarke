@@ -1,9 +1,11 @@
 using System.Text.Json;
 using Microsoft.AspNetCore.Mvc;
 using Spaarke.Dataverse;
+using Sprk.Bff.Api.Infrastructure.Auth;
 using Sprk.Bff.Api.Infrastructure.Authentication;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Errors;
+using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Services.Access;
 using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.RecordCreation;
@@ -74,7 +76,32 @@ public static class ChildRecordEndpoints
         // a ROOT, not a child: the secure-create plan decides how it is made (filed under a secure matter or project → INTO
         // isolation, task 158 r1) and the service completes it (its post-create step).
         "sprk_workassignment",
+        // field-mapping-server-write-path-r1 task 020 (spec FR-15): the Matter and Project wizards' create. Both are ROOTS:
+        // a project filed under a secure matter or project is created INTO isolation by the same secure-create plan as a work
+        // assignment; a matter is owned record-first (FR-09). Field mapping is the server's (FR-02, FR-03): see
+        // InferMappingSourceTables.
+        "sprk_matter", "sprk_project",
     };
+
+    /// <summary>
+    /// Task 020 (spec FR-03, FR-15): the create tables whose create asks the service for field mapping when the caller names
+    /// no <c>mappingSource</c> — the source is then inferred from what the row is filed under (the regarding pair, else the
+    /// single typed parent; none is a silent no-op). Only tables whose browser writers no longer map on the client: the Matter
+    /// and Project wizards create here only once they stop (tasks 021, 022). Every other create table asks for mapping only
+    /// when the caller names a source, so a create with no <c>mappingSource</c> is exactly what it was before task 020.
+    /// Tasks 023-029 add their table HERE (this one set is the switch) when their wizard moves off the client mapping engine.
+    /// </summary>
+    internal static readonly IReadOnlySet<string> InferMappingSourceTables = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+    {
+        "sprk_matter", "sprk_project",
+    };
+
+    /// <summary>
+    /// Task 020: the entity a malformed <c>mappingSource</c> is passed to the resolver as when only an unreadable id was named
+    /// — not a logical name, so the source is "named but undetermined" (no mapping, one warning), never "not named" (which
+    /// would infer some other record).
+    /// </summary>
+    internal const string MalformedMappingSourceEntity = "?";
 
     /// <summary>
     /// The tables a browser writer re-files through <c>PATCH /api/v1/child-records/{table}/{id}</c> (note §2b). An event
@@ -169,11 +196,14 @@ public static class ChildRecordEndpoints
         // the resolver's team. Authorization is decided in the handler, as the caller, on every record the body binds.
         group.MapPost("/{table}", CreateAsync)
             .WithName("CreateChildRecord")
-            .WithSummary("Create a child record (to-do, event, memo, invoice, report card, analysis, document, budget, KPI assessment, billing event) or a work assignment")
+            .WithSummary("Create a child record (to-do, event, memo, invoice, report card, analysis, document, budget, KPI assessment, billing event), a work assignment, a matter or a project")
             .WithDescription("Takes the Dataverse Web API payload a browser writer would have sent. Checks AS THE CALLER " +
                 "that they could create it (table privilege, AppendTo on every record it binds, no owner or field-secured " +
                 "column), then the application creates it owned by the team the ownership rule names (the Secure Record " +
-                "Owners team under a secure record) and records the caller as its creator person.")
+                "Owners team under a secure record) and records the caller as its creator person. The optional query " +
+                "parameters mappingSourceEntity and mappingSourceId name the record to copy mapped fields from (fill-only; " +
+                "read as the caller: one the caller cannot read gives no mapped values and a warning, never an error). " +
+                "Without them a matter or project infers the source from what it is filed under; other tables map nothing.")
             .Produces(StatusCodes.Status201Created)
             .ProducesProblem(StatusCodes.Status400BadRequest)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
@@ -206,8 +236,14 @@ public static class ChildRecordEndpoints
     /// AppendTo, the pre-write rules, the secure-create plan), the owner, the app-only create and every post-create step (the
     /// root's completion, the "Assigned *" grants, the I-1 re-stamp, I-16, the sharee mirror, the membership event) run
     /// there, once (ADR-008 path A). The route keeps its own accept-list and renders the service's refusal in its own
-    /// contract (<see cref="RefusalResult"/>, NFR-07). No field mapping is asked for here: the browser writers still map on
-    /// the client until their wizard moves (FR-15/FR-16, tasks 020-029).
+    /// contract (<see cref="RefusalResult"/>, NFR-07).
+    /// <para><b>Field mapping (task 020, FR-03, FR-15).</b> Asked for only when the caller names a source
+    /// (<paramref name="mappingSourceEntity"/> + <paramref name="mappingSourceId"/>, query parameters so the body stays the
+    /// Web API payload), or when the table infers one (<see cref="InferMappingSourceTables"/>). The named source is never trusted
+    /// on its own: the service's resolver decides it, and the caller's own Read on it is probed before it is read (FR-04) —
+    /// a missing, unreadable or malformed source is one outcome, no mapped value and one warning, never a refusal. With no
+    /// source named, every other table's create is exactly what it was: no mapping is asked for (its browser writers still
+    /// map on the client until their wizard moves, tasks 023-029).</para>
     /// </remarks>
     internal static async Task<IResult> CreateAsync(
         string table,
@@ -216,16 +252,36 @@ public static class ChildRecordEndpoints
         [FromServices] RecordCreationService recordCreation,
         HttpContext httpContext,
         ILogger<Program> logger,
-        CancellationToken ct)
+        CancellationToken ct,
+        [FromQuery] string? mappingSourceEntity = null,
+        [FromQuery] string? mappingSourceId = null)
     {
         var entity = (table ?? string.Empty).Trim().ToLowerInvariant();
         if (!CreateTables.Contains(entity))
             return Problem(StatusCodes.Status400BadRequest, UnsupportedTableCode, $"'{table}' records are not created here.");
 
+        RecordCreationMapping? mapping = null;
+        if (MappingSourceOf(entity, mappingSourceEntity, mappingSourceId) is { } source)
+        {
+            // Resolved here, only when a mapping is built (task 020 review #7): a create that maps nothing never asks for it.
+            var callerAccess = httpContext.RequestServices?.GetService<CallerRecordAccessProbe>();
+            if (callerAccess is null)
+            {
+                // Fail closed: without the probe the source cannot be read AS THE CALLER (FR-04), and a create that silently
+                // dropped the mapping it was asked for would be wrong without a word.
+                logger.LogError("[CHILD-RECORD] create of {Entity}: field mapping was asked for, but no caller-access probe is registered", entity);
+                return Problem(StatusCodes.Status500InternalServerError, NoDecisionCode, "The record was not created.");
+            }
+
+            mapping = RecordCreationMapping.ForCaller(
+                callerAccess, TokenHelper.ExtractBearerTokenOrNull(httpContext), source.Table, source.Id);
+        }
+
         var outcome = await recordCreation.CreateAsync(
                 new RecordCreationRequest(entity, new RecordCreationPayload.WebApi(body))
                 {
                     CorrelationId = httpContext.TraceIdentifier,
+                    Mapping = mapping,
                 },
                 RecordCreationPrincipal.ForCaller(user, CallerObjectId(httpContext)),
                 ct)
@@ -249,6 +305,25 @@ public static class ChildRecordEndpoints
             entity, id, outcome.Isolated, outcome.Warnings.Count);
         return Results.Created($"/api/v1/child-records/{entity}/{id:D}",
             outcome.Warnings.Count == 0 ? new { id } : (object)new { id, warnings = outcome.Warnings });
+    }
+
+    /// <summary>
+    /// Task 020 (FR-03): whether a create of <paramref name="entity"/> asks for field mapping and, if the caller named one,
+    /// the source to pass on — <c>null</c> when no mapping is asked for. No I/O, and no validation beyond the shape: the
+    /// resolver decides the source (a half-named pair, or a table that is not a logical name, is its "undetermined" — no
+    /// mapping, one warning), so this never refuses and never says anything about a record.
+    /// </summary>
+    internal static (string? Table, Guid? Id)? MappingSourceOf(string entity, string? sourceEntity, string? sourceId)
+    {
+        var namesEntity = !string.IsNullOrWhiteSpace(sourceEntity);
+        var namesId = !string.IsNullOrWhiteSpace(sourceId);
+        if (!namesEntity && !namesId)
+            return InferMappingSourceTables.Contains(entity) ? (null, null) : null;
+
+        Guid? id = namesId && Guid.TryParse(sourceId!.Trim(), out var parsed) && parsed != Guid.Empty ? parsed : null;
+        // Only an id was named and it is not one: still a NAMED source — undetermined, never a cue to infer another record.
+        var table = namesEntity ? sourceEntity!.Trim() : id is null ? MalformedMappingSourceEntity : null;
+        return (table, id);
     }
 
     /// <summary>The route's code for a create that ended without a decision.</summary>
@@ -745,6 +820,7 @@ public static class ChildRecordEndpoints
         "sprk_billingevent" => "billing event",
         "sprk_workassignment" => "work assignment",
         "sprk_project" => "project",
+        "sprk_matter" => "matter",
         _ => "record",
     };
 

@@ -434,7 +434,7 @@ public sealed partial class SecureChildOwnershipAiToolTests
     }
 
     [Theory]
-    [InlineData("sprk_project")]
+    [InlineData("sprk_servicerequest")]
     [InlineData("sprk_communication")]
     [InlineData("account")]
     public async Task ChildCreate_OfATableOutsideTheCensus_IsRefused400(string table)
@@ -470,7 +470,8 @@ public sealed partial class SecureChildOwnershipAiToolTests
         // (not owned by the named team as a child), so its secure/ordinary/refusal cases are its own
         // (SecureChildOwnershipAiToolTests.WorkAssignmentCreate.cs, SecureRootInheritanceWriterTests.ChildRecordRoute.cs).
         CensusCreateTablesUnderAMatter.Select(row => (string)row[0]).Should()
-            .BeEquivalentTo(ChildRecordEndpoints.CreateTables.Where(t => !SecureRootInheritance.Inherits(t)),
+            // Field-mapping task 020: a top root (a parent that inherits from nothing: sprk_matter) is not a secure child; its cases are ChildRecordMatterProjectCreateSeamTests'.
+            .BeEquivalentTo(ChildRecordEndpoints.CreateTables.Where(t => !SecureRootInheritance.Inherits(t) && !SecureRootInheritance.IsParent(t)),
                 "a table added to the route gets its secure/ordinary/refusal cases");
     }
 
