@@ -312,6 +312,37 @@ describe('InvoiceReviewPage: decisions (task 100)', () => {
     });
   });
 
+  it('closes the bulk dialog on a 503 incomplete and repeats the same request from the page', async () => {
+    const api = mockApi(normal());
+    api.decideLines
+      .mockResolvedValueOnce(failed(problem(503, 'ebilling.decision.incomplete', { detail: 'The lines were saved; the totals were not.', failedStep: 'totals' })))
+      .mockResolvedValueOnce(ok({ decisionId: 'x', lines: [], totals: null }));
+    renderPage(api);
+    await screen.findByTestId('review-title');
+    fireEvent.click(within(row(2)).getByRole('checkbox'));
+    fireEvent.click(screen.getByTestId('bulk-accept'));
+    const dialog = await screen.findByRole('dialog');
+    expect(screen.getByText('Accept 1 selected line')).toBeInTheDocument();
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Accept 1 line' }));
+    // The change was saved: the form closes and the page offers Repeat (text query: it also sees content Fluent hides from roles).
+    await waitFor(() => expect(screen.queryByText('Accept 1 selected line')).not.toBeInTheDocument());
+    fireEvent.click(await screen.findByTestId('notice-repeat'));
+    await waitFor(() => expect(api.decideLines).toHaveBeenCalledTimes(2));
+    expect(api.decideLines.mock.calls[1][1]).toEqual(api.decideLines.mock.calls[0][1]);
+  });
+
+  it('offers Reload when the server says the line changed (409)', async () => {
+    const api = mockApi(normal());
+    api.decideLine.mockResolvedValue(failed(problem(409, 'ebilling.line.changed', { detail: 'The line changed. Reload and decide again.' })));
+    renderPage(api);
+    await screen.findByTestId('review-title');
+    fireEvent.click(row(2));
+    await screen.findByTestId(`pane-line-${lineId(2)}`);
+    fireEvent.click(screen.getByTestId('decision-confirm'));
+    fireEvent.click(await screen.findByTestId('notice-reload'));
+    await waitFor(() => expect(api.getReview).toHaveBeenCalledTimes(2));
+  });
+
   it('keeps a bulk refusal in the dialog', async () => {
     const api = mockApi(normal());
     api.decideLines.mockResolvedValue(failed(problem(400, 'ebilling.line.reason_required', { detail: 'A reason is required to disallow.' })));
@@ -362,13 +393,14 @@ describe('InvoiceReviewPage: corrections (task 101) and the PDF', () => {
     fireEvent.click(within(pane).getByTestId('correct-Hours'));
     const dialog = await screen.findByRole('dialog');
     expect(dialog).toHaveTextContent('As read: 25');
+    expect(screen.getByText('Correct hours · line 7')).toBeInTheDocument();
     fireEvent.change(within(dialog).getByLabelText('Correct value'), { target: { value: '2.5' } });
     fireEvent.click(within(dialog).getByRole('button', { name: 'Save correction' }));
 
     await waitFor(() => expect(api.correctLine).toHaveBeenCalledWith(INVOICE_ID, lineId(7), { field: 'Hours', value: '2.5', confirm: false }));
     expect(api.decideLine).not.toHaveBeenCalled();
     expect(api.decideLines).not.toHaveBeenCalled();
-    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    await waitFor(() => expect(screen.queryByText('Correct hours · line 7')).not.toBeInTheDocument());
     // The line is Clean after the server re-ran the rules.
     expect(within(row(7)).getByText('Clean')).toBeInTheDocument();
   });

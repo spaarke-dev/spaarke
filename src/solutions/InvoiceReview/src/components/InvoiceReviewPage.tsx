@@ -211,8 +211,11 @@ type View = 'lines' | 'rules';
 interface Notice {
   intent: 'success' | 'error' | 'info';
   text: string;
-  /** Repeat the same request (503 incomplete: the change was saved, a later step did not finish). */
-  repeat?: () => void;
+  /**
+   * Repeat: the same request again (503 incomplete: the change was saved, a later step did not finish; the same decision id records
+   * nothing twice). Reload: re-read the review (409: the invoice or line changed under the user).
+   */
+  action?: { label: 'Repeat' | 'Reload'; run: () => void };
 }
 
 /** The field's editor value in the wire format 101 reads (invariant number, yyyy-mm-dd, text). */
@@ -358,7 +361,14 @@ export function InvoiceReviewPage(props: InvoiceReviewPageProps) {
   const runWrite = React.useCallback(
     async <T,>(
       call: () => Promise<ApiResult<T>>,
-      opts: { success: string; inDialog?: boolean; after?: (value: T, fresh: InvoiceReview | null) => void }
+      opts: {
+        success: string;
+        /** The write was sent from a dialog: an ordinary refusal stays in the dialog. */
+        inDialog?: boolean;
+        /** Closes that dialog: on a 403 or a 503 incomplete the outcome belongs to the page, not the form. */
+        closeDialog?: () => void;
+        after?: (value: T, fresh: InvoiceReview | null) => void;
+      }
     ): Promise<boolean> => {
       setBusy(true);
       setDialogError(null);
@@ -376,9 +386,18 @@ export function InvoiceReviewPage(props: InvoiceReviewPageProps) {
       const f = result.failure;
       if (f.status === 403) setRefused403(true);
       const text = writeFailureMessage(f);
-      const repeat = isIncomplete(f) ? () => void runWrite(call, { ...opts, inDialog: false }) : undefined;
-      if (opts.inDialog && !repeat && f.status !== 403) setDialogError(text);
-      else setNotice({ intent: 'error', text, repeat });
+      const incomplete = isIncomplete(f);
+      if (opts.inDialog && !incomplete && f.status !== 403) {
+        setDialogError(text);
+        return false;
+      }
+      opts.closeDialog?.();
+      const action: Notice['action'] = incomplete
+        ? { label: 'Repeat', run: () => void runWrite(call, { ...opts, inDialog: false }) }
+        : f.status === 409
+          ? { label: 'Reload', run: () => void reload() }
+          : undefined;
+      setNotice({ intent: 'error', text, action });
       return false;
     },
     [reload]
@@ -419,6 +438,7 @@ export function InvoiceReviewPage(props: InvoiceReviewPageProps) {
       {
         success: `Saved · ${request.lines.length} ${request.lines.length === 1 ? 'line' : 'lines'} ${request.action === 'accept' ? 'accepted' : request.action === 'disallow' ? 'disallowed' : 'reduced'}`,
         inDialog: true,
+        closeDialog: () => setBulk(null),
         after: () => {
           setBulk(null);
           setChecked(prev => new Set([...prev].filter(id => !request.lines.some(l => l.lineId === id))));
@@ -435,6 +455,7 @@ export function InvoiceReviewPage(props: InvoiceReviewPageProps) {
       {
         success: `Saved · ${label} corrected${target.lineSequence ? ` on line ${target.lineSequence}` : ''}; the rules ran again`,
         inDialog: true,
+        closeDialog: () => setCorrect(null),
         after: () => setCorrect(null),
       }
     );
@@ -594,9 +615,9 @@ export function InvoiceReviewPage(props: InvoiceReviewPageProps) {
                 </Button>
               }
             >
-              {notice.repeat && (
-                <Button size="small" onClick={notice.repeat} disabled={busy} data-testid="notice-repeat">
-                  Repeat
+              {notice.action && (
+                <Button size="small" onClick={notice.action.run} disabled={busy} data-testid={`notice-${notice.action.label.toLowerCase()}`}>
+                  {notice.action.label}
                 </Button>
               )}
             </MessageBarActions>
