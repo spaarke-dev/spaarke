@@ -10,6 +10,8 @@
 |---|---|
 | **Task** | **133 🔄 Outlook Submit Invoice view** (FULL, opus/high). Live on dev in unified package 1.1.3; corrections on (#2525). Side fix in flight: **PR #2531** (NAA sign-in for new Outlook / OWA). |
 | **Status** | **PR #2531 MERGED** at 21730d5d65 (2026-11-03; 35 pass, 10 skipping, 0 failed incl. the gated jest check). SWA deploy run 41661250220 succeeded; the live `89.bundle.js` (shared by the Outlook and Word panes) carries the new strategy. No package bump (JS only). C:\wt133t removed. |
+| **Banner** | **PR #2533** (C:\wt133u, branch `feat/invoice-already-submitted`, head 6c18511f98): already-submitted banner against ebilling contract §11. New tests 32, existing invoice/App suites 192/192, tsc 68 baseline, ESLint clean. One adversarial review (opus) running; then fix, wait for all checks incl. gated jest, `gh pr merge 2533 --auto --merge`. Safe before 095a is on dev (404 → today's form). ebilling 7b told (095a/095b are on work/ebilling-r1, no PR yet; needs the `sprk_sourceemaildocument` column, a BFF deploy with owner go, and a backfill decision for older submissions such as INV-792345.3). |
+| **Owner result 2026-11-03** | New Outlook desktop: no Request Too Long, add-in works with the NAA fix. OWA / Word desktop retest optional. Owner asked where to add the prod redirect: steps given (Entra → App registrations → `1958aec2` → Authentication → Single-page application → Add URI); offered to do it via az with a go. |
 | **Next Action** | Owner live test on dev: new Outlook (their machine), OWA, classic Outlook, Word desktop. In the console (F12 / Edge DevTools for the pane), look for `[OfficeNaaStrategy] host=… platform=… NestedAppAuth1.1=…` and "initialized via NAA broker" (or "NAA bridge not available; initialized via standard popup client"). If new Outlook still shows Request Too Long, ask for that console output. Rollback = revert 21730d5d65 on master. |
 
 ## PR #2531 — what it does (for the live test and the PR notes)
@@ -39,7 +41,7 @@
 - Answer cross-session BFF/Console/deploy notices; for a deploy request verify ancestry, OK on content only, record it here, commit and push.
 - **Live on dev: 5796774091** (R3, 2026-11-03 13:29:19Z; read back: Kudu `1.0.0+5796774091…`). Rollback 3740e1a105. Last OK given: this SHA.
 - R3's dev BFF deploy rules: owner go naming the SHA; OKs from uac-r2, ontology, field-mapping and ebilling; Router green; `scripts/Set-ChildRecordCreatorPersonSchema.ps1 -Verify` plus ebilling's four `-Verify` scripts exit 0; after the deploy `Ebilling__Enabled=true`, `Ebilling__StoredFileReconcileEnabled=false` (225 settings); after-notices, then uac-r2's 30-minute gate.
-- Peers: R3 `cc-msg-d998caed4166082c2c443072ac542a83`; ebilling 7b `cc-msg-a027c144054932864ee427c120b4e2c1` (ignore 9c); UAC `spaarke-wt-unified-access-control-r2-db`; ontology `cc-msg-12a5ac7fc59e21f736827730b8d44c8a`.
+- Peers (SendMessage by session name; the old cc-msg pipes no longer resolve): R3 `spaarke-wt-spa-external-access-platform-f2`; ebilling `spaarke-wt-ebilling-r1-7b` (ignore 9c); UAC `spaarke-wt-unified-access-control-r2-db`; ontology `cc-msg-12a5ac7fc59e21f736827730b8d44c8a`.
 
 ## Gotchas (this session)
 - Use `git commit -F <file>`; git under the Bash tool hangs, so use PowerShell.
