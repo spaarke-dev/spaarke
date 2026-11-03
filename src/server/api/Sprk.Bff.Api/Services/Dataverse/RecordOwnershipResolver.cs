@@ -2468,14 +2468,20 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
         return (await _dataverse.RetrieveMultipleAsync(query, ct).ConfigureAwait(false)).Entities.FirstOrDefault();
     }
 
-    /// <summary>Every ownership-parent lookup <paramref name="row"/> holds, keyed by column.</summary>
-    private static Dictionary<string, RecordOwnershipParent> OwnershipParentColumnsOf(Entity row)
+    /// <summary>
+    /// Every ownership-parent lookup <paramref name="row"/> holds, keyed by column. A column that CITES rather than files
+    /// (<see cref="IsCitation"/>) is left out, as in every other parent derivation (ebilling-r1 task 095a review, known limit (a)): the
+    /// re-file reads the whole row, so a citation it holds (<c>sprk_invoicesubmission.sprk_sourceemaildocument</c>, a lookup to a
+    /// <c>sprk_document</c>) would otherwise file the row under the record it cites.
+    /// </summary>
+    internal static Dictionary<string, RecordOwnershipParent> OwnershipParentColumnsOf(Entity row)
     {
         var byColumn = new Dictionary<string, RecordOwnershipParent>(StringComparer.OrdinalIgnoreCase);
         foreach (var (column, value) in row.Attributes)
         {
             if (value is EntityReference reference && reference.Id != Guid.Empty
-                && IsOwnershipParent(reference.LogicalName))
+                && IsOwnershipParent(reference.LogicalName)
+                && !IsCitation(row.LogicalName, column))
             {
                 byColumn[column] = new RecordOwnershipParent(reference.LogicalName, reference.Id);
             }

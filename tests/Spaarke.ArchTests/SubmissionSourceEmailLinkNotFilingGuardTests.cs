@@ -117,6 +117,31 @@ public class SubmissionSourceEmailLinkNotFilingGuardTests
         Assert.Empty(RecordOwnershipContext.SecureOnlyParentsOf(row));
     }
 
+    // Review known limit (a): the re-file (ResolveReparentOwnerAsync) reads the WHOLE row and derives its parents by column through
+    // OwnershipParentColumnsOf, which did not apply the citation rule every other derivation applies; it would have filed the submission under the .eml.
+    [Fact(DisplayName = "095a guard: the re-file's column read (OwnershipParentColumnsOf, the whole row) leaves the citation out, and keeps the submission's own sprk_document lookup (control)")]
+    public void ReparentColumnRead_LeavesTheSourceEmailLinkOut_AndKeepsARealParent()
+    {
+        var citedEml = Guid.NewGuid();
+        var filedDocument = Guid.NewGuid();
+        var row = new Entity(Submission) { Id = Guid.NewGuid() };
+        row[Column] = new EntityReference(Document, citedEml);
+        row["sprk_document"] = new EntityReference(Document, filedDocument);
+        row["sprk_someotherlink"] = new EntityReference(Document, Guid.NewGuid());
+
+        var byColumn = RecordOwnershipResolver.OwnershipParentColumnsOf(row);
+
+        Assert.DoesNotContain(Column, byColumn.Keys);
+        Assert.DoesNotContain(byColumn.Values, p => p.RecordId == citedEml);
+        // Controls (must not fire): a real filing lookup and an unregistered lookup of the same shape ARE read, so the exclusion above is the registration's.
+        Assert.Equal(filedDocument, byColumn["sprk_document"].RecordId);
+        Assert.True(byColumn.ContainsKey("sprk_someotherlink"));
+        // And the same column name on another table is not excluded (the citation is per table).
+        var elsewhere = new Entity("sprk_somechildtable") { Id = Guid.NewGuid() };
+        elsewhere[Column] = new EntityReference(Document, citedEml);
+        Assert.True(RecordOwnershipResolver.OwnershipParentColumnsOf(elsewhere).ContainsKey(Column));
+    }
+
     [Fact(DisplayName = "095a guard control (must fire): the same read DOES keep the submission's own sprk_document lookup, and an unregistered lookup to a document, so the check above can fail")]
     public void OwnerResolver_ControlKeepsARealParent_AndAnUnregisteredDocumentLookup()
     {
