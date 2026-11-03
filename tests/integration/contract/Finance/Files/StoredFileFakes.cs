@@ -252,12 +252,36 @@ internal sealed class RecordingRightsProbe : CallerRecordAccessProbe
 
     public ConcurrentQueue<(string Set, Guid Id, string? Token)> Calls { get; } = new();
 
+    /// <summary>Records the probe answers as "unknown" (a 429, a 5xx, an OBO or WhoAmI failure): the gate variant reads it as None, the OrUnknown variant keeps it null.</summary>
+    public HashSet<(string Set, Guid Id)> Unknown { get; } = new();
+
     public void Grant(string set, Guid id, AccessRights rights) => Rights[(set, id)] = rights;
 
     public override Task<AccessRights> GetCallerRightsAsync(string? callerBearerToken, string entitySet, Guid recordId, CancellationToken ct = default)
     {
         Calls.Enqueue((entitySet, recordId, callerBearerToken));
         return Task.FromResult(callerBearerToken is not null && Rights.TryGetValue((entitySet, recordId), out var r) ? r : AccessRights.None);
+    }
+
+    /// <summary>The unknown-keeping variant, as the real one answers: one entry per target in order, null for an unknown (recorded in <see cref="Calls"/> like the single ask).</summary>
+    public override Task<IReadOnlyList<AccessRights?>> GetCallerRightsForRecordsOrUnknownAsync(
+        string? callerBearerToken, IReadOnlyList<(string EntitySet, Guid RecordId)> targets, CancellationToken ct = default)
+    {
+        var answers = new AccessRights?[targets.Count];
+        for (var i = 0; i < targets.Count; i++)
+        {
+            var (set, id) = targets[i];
+            Calls.Enqueue((set, id, callerBearerToken));
+            if (callerBearerToken is null || Unknown.Contains((set, id)))
+            {
+                answers[i] = null;
+                continue;
+            }
+
+            answers[i] = Rights.TryGetValue((set, id), out var r) ? r : AccessRights.None;
+        }
+
+        return Task.FromResult<IReadOnlyList<AccessRights?>>(answers);
     }
 }
 

@@ -61,11 +61,58 @@ code-review and adr-check were run by the implementer. The independent adversari
 
 - **K3: the Sent to AP Date Quick View needs Read on `sprk_billingexport`.** A user without it sees nothing in that row (the same caveat as 151c-1b K3). No privilege was changed.
 - **K3: a user who cannot read the source email does not see the Invoice PDF.** The PDF is a copy of the email's attachment; the content route 404s it for that user, so the list does not show it. It is the rule, kept in one place, not a defect of the list.
-- **K4: the Quick View control XML is unverified until it is imported.** Control class id `{5C5600E0-1D6E-4205-A272-BE80DA87FD42}` follows the platform's form XML; the import is the first check.
+- **K4: the Quick View form XML as a whole is unverified until it is imported.** The control's parameter shape was verified against dev's own forms in the review fix (F2 below); the import is still the first check of the whole form.
 - **K4: the list judges each file one after another (up to 50) with a storage read each.** Bounded by the cap; not parallelised to keep one schedule of reads per request.
 - **K4: `ListInvoiceFiles` sequences five phases in one handler (step 0, read, decide, order, map).** Each phase is a call or a short loop; cohesive, one reason to change.
 
+## Review log (adversarial review, 2026-11-03; fixes on `work/ebilling-r1` from `f62300190e`)
+
+| # | Finding | Fix | Where | Seed proof |
+|---|---|---|---|---|
+| F1 | A rights fault hid files instead of answering 503. `CallerRightsMemo` asked the gate variant, which answers `None` for a 429, a 5xx, an OBO failure or a WhoAmI failure; `DecideRowAsync` then dropped the file (a partial list or "No files"). The task says a read fault is 503, never a partial or empty list. | `ListInvoiceFiles` prefetches the caller's rights once with `GetCallerRightsForRecordsOrUnknownAsync` (task 081's variant) for the invoice and the distinct source documents of this invoice's own rows. Any unknown (null) answer is the route's read-fault 503 (`file_store_unavailable`). The answers seed the memo (`CallerRightsMemo.Seed`); `DecideRowAsync` and the content route are unchanged. | `Api/Finance/StoredFileEndpoints.cs` `ListInvoiceFiles` (prefetch and 503), `CallerRightsMemo.Seed` | `ReadFault_503("rights-email")` and `("rights-invoice")` fail (200: a partial or empty list) with the null check removed and a null answer read as `None`; pass restored |
+| F1b | (the review's K2) A step-0 refusal inside the handler whose `RefusalReasonCode` is `SystemFailureReasonCode` answered the uniform 404. A fault is not a "not found". | That reason answers 503 `file_store_unavailable`; every other refusal (flagged external, no active row) stays the uniform 404. | `StoredFileEndpoints.cs` `ListInvoiceFiles`, the step-0 branch | `StepZeroSystemFailureInHandler_503_RealRefusalStays404` fails (404 where 503 is expected) with the old branch; its control (a real refusal at the handler's step 0) stays 404 |
+| F2 | The Quick View's `QuickForms` parameter held literal child elements; the platform stores an escaped string. | Copied the platform's shape (evidence below): `QuickForms` is escaped text of `<QuickFormIds><QuickFormId entityname="...">GUID</QuickFormId></QuickFormIds>`, `ControlMode` `Edit` beside it, the control `disabled="false"`. | `sprk_Invoice/FormXml/main/{93aa1c69-...}.xml` (and the managed copy) | `Form_ShowsBatchSentToApDate` parses the real shape; it fails on the old form (`QuickForms` has child elements); a control in the test pins that check |
+| F3a | The two managed form copies were not in step with the 151e edits. | Both edits mirrored into `{93aa1c69-...}_managed.xml` and `{2c568b46-...}_managed.xml`, as task 015's commit `b2d8cb6dda` did by hand (the same change as the unmanaged copy). One export convention carried over: the managed copies hold `description=""` on cell labels (section and tab labels keep their text), so the new cells' labels are blank there. | the two `_managed.xml` files | none (source files; the form tests read the unmanaged copies) |
+| F3b | The form references the web resource `sprk_invoicefiles`, which is not in `WebResources/` or `Other/Solution.xml`. | **Not brought into source; recorded as a task 153 prerequisite** (below). | none | none |
+
+### F1 design notes
+
+- **Unknown is not denied.** `GetCallerRightsForRecordsOrUnknownAsync` keeps "Dataverse said no" (a 403: `AccessRights.None`, the file is not listed) apart from "Dataverse said nothing" (null: 503). A 404 from Dataverse after its re-asks is also null.
+- **No timing equalization needed.** The invoice was already authorized by the route's filter on the equalized gate path, and the source document ids come from the file store (the app's own read), never from the caller. The list therefore offers no unknown-versus-denied oracle, so the unequalized variant is fine here. (The content route keeps the equalized gate variant: its `fileId` is caller input.)
+- **Prefetch scope.** Only rows whose parent is this invoice contribute source documents; a row of another parent is never asked about. An invoice with no such rows makes no rights call (an empty list is not a fault).
+- **Risk to watch (not changed):** a source email that was deleted would answer 404 from `RetrievePrincipalAccess`, which is "unknown", so the whole list answers 503 while such a copy exists. Before this fix the file was silently dropped. Revisit if a deleted-email case shows up in UAT; the fix would be a typed "record gone" answer from the probe (task 081's contract), not a change in this list.
+- **Calls.** One batched call (OBO exchange and `WhoAmI` once, then one `RetrievePrincipalAccess` per record at bounded concurrency) replaces 1 + distinct-document sequential gate asks.
+- **Test rig.** `RecordingRightsProbe` (`tests/integration/contract/Finance/Files/StoredFileFakes.cs`) gained an `Unknown` set and an override of `GetCallerRightsForRecordsOrUnknownAsync` that answers null for those records (and for every record when there is no token, as the real one does) and records each ask in `Calls`.
+
+### F2 evidence: the Quick View control's real shape
+
+Read-only query of `systemforms` on spaarkedev1 (2026-11-03), filtering `contains(formxml,'5C5600E0-1D6E-4205-A272-BE80DA87FD42')`: four forms (Account main form, Account for Interactive experience, Social Profile, Social Profile for Interactive experience). The Account main form (`8448b78f-8f42-454e-8e2a-f8196b0419af`), control `contactquickform`, verbatim:
+
+```xml
+<control id="contactquickform" classid="{5C5600E0-1D6E-4205-A272-BE80DA87FD42}" datafieldname="primarycontactid" disabled="false"><parameters><QuickForms>&lt;QuickFormIds&gt;&lt;QuickFormId entityname="contact"&gt;29DE27BC-A257-4F29-99CF-BAB4A84E688F&lt;/QuickFormId&gt;&lt;/QuickFormIds&gt;</QuickForms><ControlMode>Edit</ControlMode></parameters></control>
+```
+
+So `QuickForms` is an escaped string (text), the quick form id has no braces and is upper case, `ControlMode` is `Edit` (a Quick View displays read-only regardless), and the control is `disabled="false"`. The invoice form now carries the same shape with `sprk_billingexport` and `2C568B46-E9DD-4774-BCFA-00C436CB4EBA`.
+
+### F3b decision: the web resource is a task 153 prerequisite, not source
+
+Checked: `WebResources/` does hold code pages (`sprk_NavigatorPane.html`, `sprk_invoicespage.html`, `sprk_communicationspage.html` and others, each with a `.data.xml` carrying a Dataverse-assigned `WebResourceId` and `FileName`), and `Other/Solution.xml` lists type 61 root components for them. But the in-family precedent does not follow it: `sprk_apexport` (the 151b ApExport page, the same pattern as this page) is deployed on spaarkedev1 (id `837ac16f-8bd7-f111-84e8-7ced8dda31f8`) and is NOT in `WebResources/` or `Solution.xml`; only its ribbon script is. `sprk_invoicefiles` does not exist on dev yet (queried read-only).
+
+Why it was not added now: the `WebResourceId` is assigned by Dataverse on first creation, and the existing `.data.xml` files carry exported ids. An invented id would collide with the web resource that `scripts/Deploy-WebResourceInline.ps1` creates (deploy step 2 creates it before the form import, because the form needs it to exist), and a committed copy of the 970 KB build output goes stale on the next page change. The right order is deploy, then export.
+
+**Task 153 prerequisite** (add to its deploy list): after `sprk_invoicefiles` is created on dev and the form imported, add the web resource to SpaarkeMaster (add it to the solution, export, commit `WebResources/sprk_invoicefiles.html` with its `.data.xml` and the type 61 root component); do the same for `sprk_apexport`. Until then the source form references a web resource the solution does not carry, so importing SpaarkeMaster into an environment where the page was not deployed first fails on the missing dependency (dev is fine: the deploy step runs first).
+
+### Out of scope (K-class, left as they are)
+
+- Latency of up to 50 sequential judgements (K4, as above).
+- The "Source email" label for a non-email source document.
+- Deviation 2: a file whose source email the caller cannot read is not listed. The owner is being asked.
+
 ## Gate
+
+**After the review fixes (tip of the fix commit):** five test projects built, 0 warnings, 0 errors; unit filter `Finance|Invoice|Ebilling|StoredFile` 6446 passed, 0 failed, 5 skipped; ArchTests in full 1928 passed, 0 failed; InvoiceFiles jest 4 suites, 41 tests passed. `InvoiceFilesListTests` + `StoredFileEndpointsTests`: 73 passed (the new cases are 2 `ReadFault_503` theory rows, the step-0 test, and the changed form test). With all fixes removed together: 4 failed (both `rights-*` rows, the step-0 test, the form test), 22 of 26 in `InvoiceFilesListTests` passed.
+
+**Original gate (151e, before the review):**
 
 - Five test projects built (`Sprk.Bff.Api.Tests`, `Spaarke.ArchTests`, `Sprk.Bff.Api.IntegrationTests`, `Spe.Integration.Tests`, `Sprk.Provisioning.ControlPlane.LoadTests`): 0 warnings, 0 errors.
 - Unit filter `Finance|Invoice|Ebilling|StoredFile`: 6418 passed, 0 failed, 5 skipped (live-service tests).

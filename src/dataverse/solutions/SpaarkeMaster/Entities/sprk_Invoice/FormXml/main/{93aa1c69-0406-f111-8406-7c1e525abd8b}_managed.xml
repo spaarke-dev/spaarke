@@ -204,6 +204,19 @@
                       </cell>
                     </row>
                     <row>
+                      <cell id="{7E4F1B2A-3C5D-4E8F-9A06-B1D2C3E4F5A7}">
+                        <labels>
+                          <label description="" languagecode="1033" />
+                        </labels>
+                        <control id="qv_billingexport" classid="{5C5600E0-1D6E-4205-A272-BE80DA87FD42}" datafieldname="sprk_billingexport" disabled="false" uniqueid="{3B6A9C1E-72D4-4F08-8E15-A4C7D9E2B610}">
+                          <parameters>
+                            <QuickForms>&lt;QuickFormIds&gt;&lt;QuickFormId entityname="sprk_billingexport"&gt;2C568B46-E9DD-4774-BCFA-00C436CB4EBA&lt;/QuickFormId&gt;&lt;/QuickFormIds&gt;</QuickForms>
+                            <ControlMode>Edit</ControlMode>
+                          </parameters>
+                        </control>
+                      </cell>
+                    </row>
+                    <row>
                       <cell id="{0818E6A7-4E43-1F6F-5DB0-43E0644C5A23}">
                         <labels>
                           <label description="" languagecode="1033" />
@@ -239,6 +252,37 @@
                         <control id="sprk_approvedtotal" classid="{533B9E00-756B-4312-95A0-DC888637AC78}" datafieldname="sprk_approvedtotal" disabled="true" />
                       </cell>
                     </row>
+                  </rows>
+                </section>
+                <section name="section_files" id="{5D2A8E47-1F63-4B90-A3C8-9E7F0B1D4C62}" IsUserDefined="1" showlabel="true" showbar="false" columns="1" celllabelposition="Top" labelwidth="115" celllabelalignment="Left" layout="varwidth">
+                  <labels>
+                    <label description="Files" languagecode="1033" />
+                  </labels>
+                  <rows>
+                    <row>
+                      <cell id="{A94C6D13-8B2E-4F70-B5D1-2C8E3F7A0916}" showlabel="false" rowspan="8" colspan="1" auto="false">
+                        <labels>
+                          <label description="" languagecode="1033" />
+                        </labels>
+                        <control id="WebResource_invoicefiles" classid="{9FDF5F91-88B1-47F4-AD53-C11EFC01A01D}">
+                          <parameters>
+                            <Url>sprk_invoicefiles</Url>
+                            <PassParameters>true</PassParameters>
+                            <Security>false</Security>
+                            <Scrolling>auto</Scrolling>
+                            <Border>false</Border>
+                            <ShowOnMobileClient>false</ShowOnMobileClient>
+                          </parameters>
+                        </control>
+                      </cell>
+                    </row>
+                    <row />
+                    <row />
+                    <row />
+                    <row />
+                    <row />
+                    <row />
+                    <row />
                   </rows>
                 </section>
               </sections>
