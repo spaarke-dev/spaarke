@@ -83,13 +83,6 @@ public class InvoiceSubmissionService
     internal const string EarlierAttemptBeingRemovedDetail =
         "An earlier attempt to submit this invoice failed and is still being removed. Nothing was saved; try again shortly.";
 
-    /// <summary>
-    /// Task 118b-1: the detail of the interim refusal of a new attempt that names supporting documents, until 118b-2 stages their copies.
-    /// TEMPORARY: 118b-2 removes it with the refusal (SubmitExistingDocumentAsync step 4a-supporting).
-    /// </summary>
-    internal const string SupportingNotYetCopiedDetail =
-        "Supporting documents cannot be submitted with an invoice yet. Nothing was saved; submit the invoice document without them.";
-
     internal static readonly string[] ViewColumns =
     {
         TrackingNumberAllocator.TrackingNumberColumn, TrackingNumberAllocator.FirmInvoiceNumberColumn, TrackingNumberAllocator.FirmColumn,
@@ -554,7 +547,7 @@ public class InvoiceSubmissionService
         }
 
         // ── 4-reader. Task 191: the invoice reader, read-only, before a Correction's checks, step A and the create. This route stages no
-        //        file, so there is no store check beside it. ──
+        //        invoice file, so there is no store check beside it (task 118b-2: supporting documents check the store at 4a-supporting). ──
         if (ReaderNotConfiguredRefusal() is { } readerRefusal)
         {
             _logger.LogInformation("Invoice submission: the confirm of document {DocumentId} refused (422), the invoice reader is not configured", documentId);
@@ -575,20 +568,33 @@ public class InvoiceSubmissionService
             resubmissionOf = target;
         }
 
-        // ── 4a-supporting. Task 118b-1: the supporting copies are staged by 118b-2, here (after every read-only refusal, before step A).
-        //        Until that is built, a NEW attempt that names supporting documents is refused, read-only, so the field is never silently
-        //        dropped (a submission created without the files the caller asked for). A retry was answered above ("same details?"). ──
-        if (request.SupportingDocumentIds.Count > 0)
+        // ── 4a-supporting. Task 118b-2: the supporting documents, read-only, after every other read-only refusal and before step A, so
+        //        a refusal here never leaves a filing behind: the file store (as the from-email route checks it), then each document's
+        //        file through the ONE shared read. Their copies are staged after step A (4c). A request without supporting documents
+        //        reads only whether this attempt's id already holds staged parts (a stage left by a request with another set). ──
+        var supportingIds = request.SupportingDocumentIds.Distinct().Order().ToList();
+        var supportingFiles = new List<(Guid DocumentId, SourceDocumentFile File)>(supportingIds.Count);
+        if (await CheckSupportingDocumentsAsync(request, submissionId, documentId, supportingIds, supportingFiles, ct) is { } supportingRefusal)
         {
-            _logger.LogInformation("Invoice submission: document {DocumentId} names {Count} supporting documents, which this build cannot copy yet; refused (503)",
-                documentId, request.SupportingDocumentIds.Count);
-            return InvoiceSubmissionOutcome.Refused(StatusCodes.Status503ServiceUnavailable, InvoiceSubmissionErrors.Failed,
-                SupportingNotYetCopiedDetail);
+            return supportingRefusal;
         }
 
         // ── 4b. Step A (fix round F1-b): the route's filing of an unfiled source communication, as the caller - only now, after every
         //        read-only refusal above, so a refused submission never leaves a filing behind. Its refusal throws (the route answers). ──
         var filed = request.FileSourceBeforeWrite is { } fileSource && await fileSource(ct);
+
+        // ── 4c. Task 118b-2: each supporting document's copy staged under its part id of THIS attempt, with that document's own source
+        //        (the document, its communication, its version, its SHA-256); the first part lists the parts. As the from-email parts: no
+        //        compensation (the ids are deterministic; a concurrent request of the same attempt stages the same blobs). Other bytes or
+        //        another set under the ids is 409 (StoredFileBlobs.SameSource). The persister writes their rows in the commit. ──
+        if (supportingFiles.Count > 0)
+        {
+            ct.ThrowIfCancellationRequested();
+            if (await StageSupportingDocumentsAsync(submissionId, supportingFiles) is { } stageRefusal)
+            {
+                return AfterFiling(stageRefusal, filed);
+            }
+        }
 
         // ── 5. The submission, then its job ──
         var row = decision.Row!;
@@ -778,14 +784,212 @@ public class InvoiceSubmissionService
 
     /// <summary>
     /// Task 118b: the supporting documents attempt <paramref name="submissionId"/> was created with, de-duplicated and sorted. They are read
-    /// from its part stages (<c>StoredFileIds.ForAttachment(submissionId, "document-part-{i}")</c>, the first part listing the parts), which
-    /// task 118b-2 writes; a fault throws (the caller answers 503, never "no supporting documents").
-    /// <para><b>Until 118b-2</b> nothing stages document parts, and the intake refuses a new attempt that names supporting documents (step
-    /// 4a-supporting), so every attempt has no stored parts and its set is the EMPTY set. This method answers that without a read; 118b-2
-    /// replaces the body with the stage read.</para>
+    /// from its part stages (<see cref="InvoiceSubmissionPersister.ReadDocumentPartStagesAsync"/>: <c>document-part-{i}</c>, the first part
+    /// listing the parts, each part's own source document), the reader the persister commits them with. No first part is the empty set (an
+    /// attempt without supporting documents, or one made before 118b). A store that cannot hold a stage of this environment (not configured,
+    /// or its segment not this environment's: <see cref="StoredFileService.CanStageAsync"/>) has none either. Parts that do not read back as
+    /// the first one listed them, and any fault, throw: the caller answers 503, never "no supporting documents".
     /// </summary>
-    internal virtual Task<IReadOnlyList<Guid>> ReadAttemptSupportingDocumentsAsync(Guid submissionId, CancellationToken ct) =>
-        Task.FromResult<IReadOnlyList<Guid>>([]);
+    internal virtual async Task<IReadOnlyList<Guid>> ReadAttemptSupportingDocumentsAsync(Guid submissionId, CancellationToken ct)
+    {
+        if (!await _files.CanStageAsync(ct).ConfigureAwait(false))
+        {
+            return [];
+        }
+
+        var parts = await InvoiceSubmissionPersister.ReadDocumentPartStagesAsync(_files, submissionId, ct).ConfigureAwait(false)
+            ?? throw new InvalidOperationException($"The staged supporting documents of submission {submissionId} do not read back as their first part lists them.");
+        return parts.Select(p => p.SourceDocumentId!.Value).Order().ToList();
+    }
+
+    /// <summary>
+    /// Task 118b-2, step 4a-supporting of <see cref="SubmitExistingDocumentAsync"/> (a NEW attempt <paramref name="submissionId"/>): read-only.
+    /// Null when the attempt may go on; <paramref name="files"/> then holds each supporting document's file, in <paramref name="supportingIds"/>
+    /// order (sorted), for 4c.
+    /// <list type="bullet">
+    /// <item>No supporting documents: this attempt's id must hold no staged part. One there (whether or not its parts read back) was left by a
+    /// request of this attempt that named ANOTHER set and created no row; committing it would add files this request did not name, so it is 409
+    /// <see cref="InvoiceSubmissionErrors.DocumentAlreadySubmitted"/> (other details; known limit K2: it stays until the stage is removed).
+    /// A read fault is 503 <see cref="InvoiceSubmissionErrors.CoreRecordUnavailable"/>.</item>
+    /// <item>With supporting documents: the file store first (as the from-email route: a fault is 503 <see cref="InvoiceSubmissionErrors.Failed"/>,
+    /// not configured 422 <see cref="InvoiceSubmissionErrors.StorageNotConfigured"/>), then each document's file through the ONE shared read
+    /// (<see cref="InvoiceSubmissionRequest.ReadSupportingDocument"/>). Gone, no file or an email archive, storage that cannot be verified, or
+    /// a document no longer linked to the route's communication is a permanent 422 <see cref="SubmissionReasonCodes.DocumentUnavailable"/>;
+    /// no stream or a read fault is 503 <see cref="InvoiceSubmissionErrors.CoreRecordUnavailable"/>. The answers name no document.</item>
+    /// </list>
+    /// </summary>
+    private async Task<InvoiceSubmissionOutcome?> CheckSupportingDocumentsAsync(
+        InvoiceSubmissionRequest request, Guid submissionId, Guid documentId, IReadOnlyList<Guid> supportingIds,
+        List<(Guid DocumentId, SourceDocumentFile File)> files, CancellationToken ct)
+    {
+        if (supportingIds.Count == 0)
+        {
+            // Any first part is a leftover of another set, whether or not its parts read back (a request that stopped between two
+            // stages leaves part 1 alone): never a 503 the client would retry for ever.
+            IReadOnlyList<StagedSource>? leftover;
+            try
+            {
+                leftover = await _files.CanStageAsync(ct).ConfigureAwait(false)
+                    ? await InvoiceSubmissionPersister.ReadDocumentPartStagesAsync(_files, submissionId, ct).ConfigureAwait(false)
+                    : [];
+            }
+            catch (Exception ex) when (!IsCallerCancellation(ex, ct))
+            {
+                _logger.LogWarning("Invoice submission {SubmissionId}: its staged supporting documents could not be read ({Fault}); refused (503)",
+                    submissionId, ex.GetType().Name);
+                return InvoiceSubmissionOutcome.Refused(StatusCodes.Status503ServiceUnavailable, InvoiceSubmissionErrors.CoreRecordUnavailable,
+                    "The document could not be checked right now. Nothing was saved; try again shortly.");
+            }
+
+            if (leftover is not { Count: 0 })
+            {
+                _logger.LogInformation("Invoice submission {SubmissionId}: document {DocumentId} has supporting documents staged by another request; refused (409)",
+                    submissionId, documentId);
+                return DocumentAlreadySubmitted();
+            }
+
+            return null;
+        }
+
+        var read = request.ReadSupportingDocument
+            ?? throw new ArgumentException("A new attempt with supporting documents needs ReadSupportingDocument.", nameof(request));
+
+        bool storeReady;
+        try
+        {
+            storeReady = await _files.CanStageAsync(ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (!IsCallerCancellation(ex, ct))
+        {
+            _logger.LogWarning("Invoice submission {SubmissionId}: the file store's environment could not be confirmed ({Fault})", submissionId, ex.GetType().Name);
+            return InvoiceSubmissionOutcome.Refused(StatusCodes.Status503ServiceUnavailable, InvoiceSubmissionErrors.Failed,
+                "The invoice could not be submitted right now. Nothing was saved; try again shortly.");
+        }
+
+        if (!storeReady)
+        {
+            return InvoiceSubmissionOutcome.Refused(StatusCodes.Status422UnprocessableEntity, InvoiceSubmissionErrors.StorageNotConfigured,
+                "Invoice file storage is not configured, so the supporting documents cannot be stored. Nothing was saved.");
+        }
+
+        foreach (var supportingId in supportingIds)
+        {
+            SourceDocumentFile file;
+            try
+            {
+                file = await read(supportingId, ct).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (!IsCallerCancellation(ex, ct))
+            {
+                _logger.LogWarning("Invoice submission {SubmissionId}: supporting document {SupportingId} could not be read ({Fault}); refused (503)",
+                    submissionId, supportingId, ex.GetType().Name);
+                return SupportingUnavailable();
+            }
+
+            switch (file.Outcome)
+            {
+                case SourceDocumentFileOutcome.Read when file.Content is not null && file.CommunicationId == request.SourceCommunicationId:
+                    files.Add((supportingId, file));
+                    continue;
+                case SourceDocumentFileOutcome.NotDownloaded:
+                    _logger.LogWarning("Invoice submission {SubmissionId}: supporting document {SupportingId} could not be downloaded; refused (503)",
+                        submissionId, supportingId);
+                    return SupportingUnavailable();
+                default:
+                    _logger.LogWarning("Invoice submission {SubmissionId}: supporting document {SupportingId} cannot be copied ({Outcome}); refused (422)",
+                        submissionId, supportingId, file.Outcome);
+                    return InvoiceSubmissionOutcome.Refused(StatusCodes.Status422UnprocessableEntity, SubmissionReasonCodes.DocumentUnavailable,
+                        "A supporting document has no file that can be copied, or no longer belongs to this communication. Nothing was saved.");
+            }
+        }
+
+        return null;
+
+        static InvoiceSubmissionOutcome SupportingUnavailable() =>
+            InvoiceSubmissionOutcome.Refused(StatusCodes.Status503ServiceUnavailable, InvoiceSubmissionErrors.CoreRecordUnavailable,
+                "A supporting document could not be read right now. Nothing was saved; try again shortly.");
+    }
+
+    /// <summary>
+    /// Task 118b-2, 4c of <see cref="SubmitExistingDocumentAsync"/>: each supporting document's copy staged under
+    /// <see cref="InvoiceSubmissionPersister.DocumentPartFileId"/> (part 1 to N in <paramref name="files"/> order), purpose Supporting, parent
+    /// the invoice the job will create, Firm-visible No, with that document's own source (the document, its communication, its version, the
+    /// SHA-256 of the bytes read) and its extension; part 1's manifest lists every part (<see cref="StagedSourceManifest"/>, the from-email
+    /// Invoice part's mechanism). Writes on <see cref="CancellationToken.None"/> (a write that started finishes). Null when every part is
+    /// staged (a retry's identical stage is reused); else the refusal: other bytes or another set under the ids is 409
+    /// <see cref="InvoiceSubmissionErrors.DocumentAlreadySubmitted"/>, the store not configured 422, anything else 503 (a retry completes it).
+    /// </summary>
+    private async Task<InvoiceSubmissionOutcome?> StageSupportingDocumentsAsync(
+        Guid submissionId, IReadOnlyList<(Guid DocumentId, SourceDocumentFile File)> files)
+    {
+        for (var index = 0; index < files.Count; index++)
+        {
+            var (supportingId, file) = files[index];
+            var number = index + 1;
+            var (spec, manifest) = DocumentPartSpecOf(submissionId, number, files.Count, supportingId, file);
+
+            StageResult stage;
+            try
+            {
+                await using var content = new MemoryStream(file.Content!, writable: false);
+                stage = await _files.StageAsync(spec, content, manifest, CancellationToken.None).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Invoice submission {SubmissionId}: supporting part {Number} could not be staged", submissionId, number);
+                return NotStaged();
+            }
+
+            if (!stage.IsStaged)
+            {
+                _logger.LogWarning("Invoice submission {SubmissionId}: the file store refused supporting part {Number} ({Code})", submissionId, number, stage.RefusalCode);
+                return stage.RefusalCode switch
+                {
+                    StoredFileRefusal.NotConfigured => InvoiceSubmissionOutcome.Refused(StatusCodes.Status422UnprocessableEntity,
+                        InvoiceSubmissionErrors.StorageNotConfigured,
+                        "Invoice file storage is not configured, so the supporting documents cannot be stored. Nothing was saved."),
+                    // Other bytes, or another set, are staged under this attempt's ids: a request of this attempt named other documents.
+                    StoredFileRefusal.ContentConflict => DocumentAlreadySubmitted(),
+                    _ => NotStaged(),
+                };
+            }
+        }
+
+        return null;
+
+        static InvoiceSubmissionOutcome NotStaged() =>
+            InvoiceSubmissionOutcome.Refused(StatusCodes.Status503ServiceUnavailable, InvoiceSubmissionErrors.Failed,
+                "The supporting documents could not be stored right now. Nothing was saved; try again shortly.");
+    }
+
+    /// <summary>
+    /// Task 118b-2: the spec and manifest of supporting part <paramref name="number"/> of <paramref name="count"/>, the copy of
+    /// <paramref name="documentId"/> as <paramref name="file"/> read it (see <see cref="StageSupportingDocumentsAsync"/>). The stage's name
+    /// is the part id and the source's extension (never the source's name; the persister names the row); the content type is the
+    /// document's own when it fits, else <c>application/octet-stream</c>.
+    /// </summary>
+    internal static (StoredFileRowSpec Spec, StagedSourceManifest Manifest) DocumentPartSpecOf(
+        Guid submissionId, int number, int count, Guid documentId, SourceDocumentFile file)
+    {
+        ArgumentNullException.ThrowIfNull(file);
+        var extension = Path.GetExtension(file.FileName);
+        var safeExtension = !string.IsNullOrEmpty(extension) && StoredFileService.IsExtension(extension) ? extension.ToLowerInvariant() : null;
+        var spec = new StoredFileRowSpec
+        {
+            FileId = InvoiceSubmissionPersister.DocumentPartFileId(submissionId, number),
+            Purpose = StoredFilePurpose.InvoiceSupportingFile,
+            Parent = new StoredFileParent(StoredFileParentKind.Invoice, InvoiceSubmissionPersister.InvoiceIdFor(submissionId)),
+            Name = InvoiceSubmissionPersister.DocumentPartIdentity(number) + (safeExtension ?? string.Empty),
+            ContentType = file.MimeType is { Length: <= StoredFileSchema.ContentTypeMaxLength } mimeType ? mimeType : "application/octet-stream",
+            FirmVisible = false,
+            SourceDocumentId = documentId,
+            SourceCommunicationId = file.CommunicationId,
+            SourceVersion = file.Version,
+            SourceSha256 = Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(file.Content ?? [])),
+            SubmissionId = submissionId,
+        };
+        return (spec, new StagedSourceManifest(number == 1 ? Enumerable.Range(1, count).ToList() : [], safeExtension));
+    }
 
     /// <summary>
     /// Null when the document can be submitted; otherwise the refusal. A read fault is 503 (never "not found"). A document filed under a core

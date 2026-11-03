@@ -504,6 +504,24 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
                 return Result(SubmissionPersistStatus.Refused, submissionId, SubmissionReasonCodes.FileUnservable);
             }
         }
+        else
+        {
+            // Task 118b-2: the supporting documents the from-document intake staged (each under its part id, with that document's own
+            // source; the first part lists the parts). Each becomes a Supporting row in this transaction, as a from-email part does; the
+            // commit gate re-runs each row's own source and enforces the file limit. Parts that do not read back as the first part listed
+            // them: nothing is written (Failed file_unservable).
+            var parts = await ReadDocumentPartStagesAsync(_files, submissionId, ct).ConfigureAwait(false);
+            if (parts is null)
+            {
+                _logger.LogWarning("Invoice submission {SubmissionId}: its staged supporting documents are incomplete or record another source; nothing persisted",
+                    submissionId);
+                return Result(SubmissionPersistStatus.Refused, submissionId, SubmissionReasonCodes.FileUnservable);
+            }
+
+            supporting = parts
+                .Select((part, index) => (SupportingPartSpec(outcome.Submission, DocumentPartFileId(submissionId, index + 1), index + 1, part), part.Blob))
+                .ToList();
+        }
 
         // ── Rows ──
         var resolverFields = decided.ResolverFields.ToFields();
@@ -624,7 +642,8 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
 
         foreach (var (partSpec, partBlob) in supporting)
         {
-            // From-email (task 094): a Supporting part's row, the same rules (Not yet servable, the Stored File answer, Firm-visible No).
+            // From-email (task 094) and from-document (task 118b-2): a Supporting part's row, the same rules (Not yet servable, the Stored
+            // File answer, Firm-visible No).
             requests.Add(_files.BuildRow(partSpec, partBlob, fileOwner!, submitter));
         }
 
@@ -847,21 +866,82 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
                 return null;
             }
 
-            var name = $"{StoredFileSchema.NameSegmentOf(submission.TrackingNumber) ?? "invoice"}-{ordinal.ToString(CultureInfo.InvariantCulture)}";
-            var spec = FromEmailPartSpec(new StoredFileRowSpec
-            {
-                FileId = fileId,
-                Purpose = StoredFilePurpose.InvoiceSupportingFile,
-                Parent = parent,
-                Name = (name.Length > 100 ? name[..100] : name) + (staged.Extension ?? string.Empty),
-                ContentType = staged.ContentType is { Length: > 0 and <= StoredFileSchema.ContentTypeMaxLength } type ? type : "application/octet-stream",
-                SubmissionId = submission.SubmissionId,
-            }, staged);
-            parts.Add((spec, staged.Blob));
+            parts.Add((SupportingPartSpec(submission, fileId, ordinal, staged), staged.Blob));
         }
 
         return parts;
     }
+
+    /// <summary>
+    /// A Supporting part's row spec (from-email, task 094; from-document, task 118b-2): the source its stage recorded
+    /// (<see cref="FromEmailPartSpec"/>), the name the tracking number and <paramref name="number"/> plus the staged extension (never the
+    /// source's name), the staged content type.
+    /// </summary>
+    private static StoredFileRowSpec SupportingPartSpec(SubmissionSnapshot submission, Guid fileId, int number, StagedSource staged)
+    {
+        var name = $"{StoredFileSchema.NameSegmentOf(submission.TrackingNumber) ?? "invoice"}-{number.ToString(CultureInfo.InvariantCulture)}";
+        return FromEmailPartSpec(new StoredFileRowSpec
+        {
+            FileId = fileId,
+            Purpose = StoredFilePurpose.InvoiceSupportingFile,
+            Parent = new StoredFileParent(StoredFileParentKind.Invoice, InvoiceIdFor(submission.SubmissionId)),
+            Name = (name.Length > 100 ? name[..100] : name) + (staged.Extension ?? string.Empty),
+            ContentType = staged.ContentType is { Length: > 0 and <= StoredFileSchema.ContentTypeMaxLength } type ? type : "application/octet-stream",
+            SubmissionId = submission.SubmissionId,
+        }, staged);
+    }
+
+    /// <summary>Task 118b-2: the part id of the from-document intake's supporting document number <paramref name="number"/> (1 to N).</summary>
+    internal static string DocumentPartIdentity(int number) => "document-part-" + number.ToString(CultureInfo.InvariantCulture);
+
+    /// <summary>Task 118b-2: the Stored File id of supporting part <paramref name="number"/> of <paramref name="submissionId"/>.</summary>
+    internal static Guid DocumentPartFileId(Guid submissionId, int number) => StoredFileIds.ForAttachment(submissionId, DocumentPartIdentity(number));
+
+    /// <summary>
+    /// Task 118b-2: the supporting documents the from-document intake staged for <paramref name="submissionId"/>, read back from their stages
+    /// (the ONE reader of the rule: the intake's "same details?" check and this persister both call it). Empty when no first part is staged
+    /// (an attempt without supporting documents). Otherwise the first part lists the parts 1 to N, and each part must read back with its own
+    /// source document (distinct), a version, and no attachment identity (a document is copied whole). <c>null</c> when they do not:
+    /// a list that is not 1 to N or names more than the file limit allows, a part missing, a source that cannot be read, or a document
+    /// listed twice. A storage fault throws.
+    /// </summary>
+    internal static async Task<IReadOnlyList<StagedSource>?> ReadDocumentPartStagesAsync(StoredFileService files, Guid submissionId, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(files);
+        var parent = new StoredFileParent(StoredFileParentKind.Invoice, InvoiceIdFor(submissionId));
+        var first = await files.ReadStagedSourceAsync(StoredFilePurpose.InvoiceSupportingFile, parent, DocumentPartFileId(submissionId, 1), ct)
+            .ConfigureAwait(false);
+        if (first is null)
+        {
+            return [];
+        }
+
+        var numbers = first.SupportingOrdinals;
+        if (!UsableDocumentPart(first) || numbers.Count is 0 or >= SubmissionCommitGate.MaxFiles
+            || !numbers.SequenceEqual(Enumerable.Range(1, numbers.Count)))
+        {
+            return null;
+        }
+
+        var parts = new List<StagedSource>(numbers.Count) { first };
+        for (var number = 2; number <= numbers.Count; number++)
+        {
+            var part = await files.ReadStagedSourceAsync(StoredFilePurpose.InvoiceSupportingFile, parent, DocumentPartFileId(submissionId, number), ct)
+                .ConfigureAwait(false);
+            if (part is null || !UsableDocumentPart(part))
+            {
+                return null;
+            }
+
+            parts.Add(part);
+        }
+
+        return parts.Select(p => p.SourceDocumentId).Distinct().Count() == parts.Count ? parts : null;
+    }
+
+    private static bool UsableDocumentPart(StagedSource part) =>
+        !part.SourceUnreadable && part.SourceDocumentId is { } document && document != Guid.Empty && part.SourceVersion is not null
+        && part.SourceAttachmentIdentity is null;
 
     /// <summary>
     /// The row version of a source document as read (<c>versionnumber</c>, else the entity's <c>RowVersion</c>); throws when neither is there,

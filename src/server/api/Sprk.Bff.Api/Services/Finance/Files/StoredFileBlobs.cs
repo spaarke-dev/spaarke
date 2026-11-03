@@ -69,6 +69,9 @@ public sealed class StoredFileBlobs
     /// reads it back (<see cref="StoredFileService.ReadStagedSourceAsync"/>): the source document, its communication, its version, the
     /// attachment identity, and, on a from-email Invoice part only, the ordinals of the Supporting parts staged with it and a file
     /// extension. Written only when the spec carries them; values are ASCII.
+    /// <para>Task 118b-2: <see cref="MetadataEmlParts"/> also carries, on a from-document attempt's FIRST supporting part
+    /// (<c>document-part-1</c>), the numbers of every part of that attempt (1 to N); its other parts carry none. The key keeps its name
+    /// (it is on staged blobs already).</para>
     /// </summary>
     internal const string MetadataSourceDocument = "sourcedocument", MetadataSourceCommunication = "sourcecommunication",
         MetadataSourceVersion = "sourceversion", MetadataSourceAttachment = "sourceattachment", MetadataEmlParts = "emlparts",
@@ -369,10 +372,17 @@ public sealed class StoredFileBlobs
         }
     }
 
-    /// <summary>The source keys a reused stage must carry exactly as the request does (absent on one side and present on the other differs).</summary>
-    private static readonly string[] SourceIdentityKeys = [MetadataSourceDocument, MetadataSourceCommunication, MetadataSourceAttachment];
+    /// <summary>
+    /// The source keys a reused stage must carry exactly as the request does (absent on one side and present on the other differs). Task
+    /// 118b-2: the parts list (<see cref="MetadataEmlParts"/>) is one of them, so a stage left by a request with ANOTHER set of parts (a
+    /// from-document attempt's first part lists every part) is a conflict, never reused: reusing it would make the commit read that other
+    /// set and copy files this request did not name. For from-email the list is fixed by the key the ids derive from (the same email,
+    /// record and marks), so a retry of the same request carries the same list.
+    /// </summary>
+    private static readonly string[] SourceIdentityKeys =
+        [MetadataSourceDocument, MetadataSourceCommunication, MetadataSourceAttachment, MetadataEmlParts];
 
-    /// <summary>True when the existing blob's source document, communication and attachment (eml part) identity equal the request's.</summary>
+    /// <summary>True when the existing blob's source document, communication, attachment (eml part) identity and parts list equal the request's.</summary>
     private static bool SameSource(IReadOnlyDictionary<string, string> existing, IReadOnlyDictionary<string, string> requested) =>
         SourceIdentityKeys.All(key => string.Equals(
             existing.TryGetValue(key, out var had) ? had : null,

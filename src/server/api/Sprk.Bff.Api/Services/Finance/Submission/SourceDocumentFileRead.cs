@@ -42,13 +42,16 @@ internal enum SourceDocumentFileOutcome
 /// The answer of <see cref="SourceDocumentFileRead.ReadAsync"/>. On <see cref="SourceDocumentFileOutcome.Read"/>: the bytes, the row's
 /// <c>versionnumber</c> read in the same retrieve, its <c>sprk_mimetype</c> as stored (null when empty) and its communication
 /// (<c>sprk_relatedcommunication</c>, null when none). On any other outcome only <see cref="Outcome"/> is meaningful.
+/// <para>Task 118b-2: <see cref="FileName"/>, the row's <c>sprk_filename</c> (null when empty), is read only for its extension (a supporting
+/// copy's name is the tracking number and its part number, never the source's name: uac K1).</para>
 /// </summary>
 internal sealed record SourceDocumentFile(
     SourceDocumentFileOutcome Outcome,
     byte[]? Content = null,
     long Version = 0,
     string? MimeType = null,
-    Guid? CommunicationId = null);
+    Guid? CommunicationId = null,
+    string? FileName = null);
 
 /// <summary>
 /// ebilling-r1 tasks 094 / 118b-1 (procedure-and-file-model 9.1 step 2): a source document's file, read as the application. In order, as
@@ -66,6 +69,8 @@ internal static class SourceDocumentFileRead
     [
         "sprk_graphdriveid", "sprk_graphitemid", "sprk_mimetype", InvoiceReviewService.VersionNumber,
         "sprk_relatedcommunication", "sprk_isemailarchive",
+        // Task 118b-2: the extension of a supporting copy (the name itself is never copied).
+        "sprk_filename",
     ];
 
     /// <summary>Reads the file of <paramref name="documentId"/> (see the type's summary for the order).</summary>
@@ -118,6 +123,7 @@ internal static class SourceDocumentFileRead
         }
 
         var mimeType = document.GetAttributeValue<string>("sprk_mimetype");
+        var fileName = document.GetAttributeValue<string>("sprk_filename");
         return new SourceDocumentFile(
             SourceDocumentFileOutcome.Read,
             bytes,
@@ -125,7 +131,8 @@ internal static class SourceDocumentFileRead
             string.IsNullOrWhiteSpace(mimeType) ? null : mimeType,
             document.GetAttributeValue<EntityReference>("sprk_relatedcommunication")?.Id is { } communication && communication != Guid.Empty
                 ? communication
-                : null);
+                : null,
+            string.IsNullOrWhiteSpace(fileName) ? null : fileName);
     }
 
     private static bool IsRecordNotFound(Exception ex)

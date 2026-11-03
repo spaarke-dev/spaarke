@@ -1782,6 +1782,98 @@ public partial class InvoiceSubmissionPersisterTests
         store.Isolation.OwnerWrites.Should().BeEmpty("the source is never re-owned");
     }
 
+    // ── Task 118b-2: the from-document intake's supporting documents, staged by the REAL intake into this store's file store, committed here ──
+
+    private static readonly Guid SupportingA = Guid.Parse("118b0000-0000-4000-8000-0000000002a1");
+    private static readonly Guid SupportingB = Guid.Parse("118b0000-0000-4000-8000-0000000002b1");
+
+    private static byte[] SupportingBytes(Guid id) => System.Text.Encoding.ASCII.GetBytes("supporting " + id.ToString("N"));
+
+    /// <summary>Runs the REAL from-document intake for <see cref="Document"/> naming <paramref name="supporting"/>, staging into <paramref name="store"/>'s file store.</summary>
+    private static async Task StageSupportingThroughTheIntakeAsync(Store store, params Guid[] supporting)
+    {
+        var intake = new InvoiceSubmissionServiceTests.Harness
+        {
+            Files = store.Files,
+            ExistingDocument = new Entity("sprk_document", Document) { ["sprk_graphdriveid"] = "b!drive", ["sprk_graphitemid"] = "item-118b" },
+        };
+        var outcome = await intake.Build().SubmitExistingDocumentAsync(new InvoiceSubmissionRequest
+        {
+            FirmId = InvoiceSubmissionServiceTests.FirmId,
+            CoreRecord = new InvoiceCoreRecord(InvoiceCoreRecordKind.Matter, InvoiceSubmissionServiceTests.MatterId),
+            Channel = InvoiceSubmissionChannel.Internal,
+            FirmInvoiceNumber = "INV-100",
+            ExistingDocumentId = Document,
+            SupportingDocumentIds = supporting,
+            ReadSupportingDocument = (id, _) => Task.FromResult(new SourceDocumentFile(
+                SourceDocumentFileOutcome.Read, SupportingBytes(id), Version: 4, MimeType: "application/vnd.ms-excel", FileName: "Timesheet.XLS")),
+        }, CancellationToken.None);
+        outcome.Receipt!.SubmissionId.Should().Be(SourceSubmission);
+    }
+
+    [Fact(DisplayName = "118b-2 (acceptance: two readable supporting documents): Accepted - the invoice has 1 Invoice PDF (the job's copy) and 2 Supporting Stored Files, each with sprk_sourcedocument its own document, in the ONE transaction; every file ends Servable after the gate re-ran each source")]
+    public async Task Source_WithTwoSupportingDocuments_CommitsOneInvoicePdfAndTwoSupporting_EachWithItsSourceDocument()
+    {
+        var store = new Store();
+        await StageSupportingThroughTheIntakeAsync(store, SupportingB, SupportingA);
+        var outcome = AsSource(await new ProcessorHarness().RunAsync(), store);
+
+        var result = await store.Build().PersistAsync(outcome, null);
+
+        result.Status.Should().Be(SubmissionPersistStatus.Committed);
+        store.Transactions.Single().Select(Describe).Should().Equal(
+            "Create sprk_invoice", "Create sprk_storedfile", "Create sprk_storedfile", "Create sprk_storedfile", "Create sprk_billingevent",
+            "Create sprk_invoiceapproval", "Update sprk_document", "Update sprk_invoicesubmission");
+        var files = store.Transactions.Single().OfType<CreateRequest>().Where(c => c.Target.LogicalName == StoredFileSchema.Entity).Select(c => c.Target).ToList();
+        files.Count(f => f.GetAttributeValue<OptionSetValue>(StoredFileSchema.Purpose).Value == (int)StoredFilePurpose.InvoicePdf).Should().Be(1);
+        var supporting = files.Where(f => f.GetAttributeValue<OptionSetValue>(StoredFileSchema.Purpose).Value == (int)StoredFilePurpose.InvoiceSupportingFile).ToList();
+        supporting.Select(f => f.Id).Should().Equal(
+            InvoiceSubmissionPersister.DocumentPartFileId(SourceSubmission, 1), InvoiceSubmissionPersister.DocumentPartFileId(SourceSubmission, 2));
+        supporting.Select(f => f.GetAttributeValue<EntityReference>(StoredFileSchema.SourceDocument).Id).Should().Equal(SupportingA, SupportingB);
+        files.Single(f => f.GetAttributeValue<OptionSetValue>(StoredFileSchema.Purpose).Value == (int)StoredFilePurpose.InvoicePdf)
+            .GetAttributeValue<EntityReference>(StoredFileSchema.SourceDocument).Id.Should().Be(Document);
+        foreach (var (row, id) in supporting.Zip(new[] { SupportingA, SupportingB }))
+        {
+            row.GetAttributeValue<EntityReference>("sprk_invoice").Id.Should().Be(SourceInvoice);
+            row.GetAttributeValue<bool>(StoredFileSchema.FirmVisible).Should().BeFalse();
+            row.GetAttributeValue<string>(StoredFileSchema.SourceVersion).Should().Be("4");
+            row.GetAttributeValue<string>(StoredFileSchema.SourceSha256).Should().Be(Sha(SupportingBytes(id)));
+            row.GetAttributeValue<string>(StoredFileSchema.Name).Should().MatchRegex(@"^INV-100\.2-[12]\.xls$", "the tracking number and the part number, never the source's name");
+            row.GetAttributeValue<EntityReference>(RecordCreatorPerson.Column).Id.Should().Be(Submitter);
+        }
+
+        store.Files.Dataverse.Rows.Values.Select(r => (StoredFileStatus)r.GetAttributeValue<OptionSetValue>(StoredFileSchema.Status).Value)
+            .Should().HaveCount(3).And.OnlyContain(s => s == StoredFileStatus.Servable, "the gate re-ran each file's own source and flipped every file");
+    }
+
+    [Theory(DisplayName = "118b-2 (must fire): supporting parts that do not read back as the first part lists them (a part missing, the list not 1..N) are Refused file_unservable before any write")]
+    [InlineData("missing")]
+    [InlineData("list")]
+    public async Task Source_SupportingPartsDoNotReadBack_IsRefused_NoTransaction(string fault)
+    {
+        var store = new Store();
+        await StageSupportingThroughTheIntakeAsync(store, SupportingA, SupportingB);
+        var parent = new StoredFileParent(StoredFileParentKind.Invoice, SourceInvoice);
+        var container = StoredFileSchema.ContainerOf(StoredFilePurpose.InvoiceSupportingFile);
+        if (fault == "missing")
+        {
+            await store.Files.Gateway.DeleteIfExistsAsync(container,
+                StoredFileBlobName.Build(store.Files.TenantId, parent, InvoiceSubmissionPersister.DocumentPartFileId(SourceSubmission, 2)), ifMatch: null, CancellationToken.None);
+        }
+        else
+        {
+            store.Files.Gateway.Get(container, StoredFileBlobName.Build(store.Files.TenantId, parent, InvoiceSubmissionPersister.DocumentPartFileId(SourceSubmission, 1)))!
+                .Metadata[StoredFileBlobs.MetadataEmlParts] = "1,3";
+        }
+
+        var outcome = AsSource(await new ProcessorHarness().RunAsync(), store);
+        var result = await store.Build().PersistAsync(outcome, null);
+
+        result.Status.Should().Be(SubmissionPersistStatus.Refused);
+        result.ReasonCode.Should().Be(SubmissionReasonCodes.FileUnservable);
+        store.Transactions.Should().BeEmpty();
+    }
+
     [Fact(DisplayName = "094: the guard writes the review status back exactly as the check read it (a value-preserving write) at the staged version")]
     public async Task Source_Guard_WritesTheReviewStatusBackAsRead()
     {
