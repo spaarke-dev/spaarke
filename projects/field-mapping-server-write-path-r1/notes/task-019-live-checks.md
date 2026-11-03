@@ -12,7 +12,7 @@
 | A. Child-records route, Event under the Matter | **PASS** on owner, stamp, number, search index and response. The "mapped fields" clause is **not met by design** (see A, "Mapped fields"): the owner needs to amend the acceptance text. |
 | B. Office quick-create, Project under the same Matter | **PASS** (owner, mapping, search index, number, response shape). P2-2: alternate key exists and is Active (the 412 itself remains unverified, as instructed). |
 | C. Chat-style create | **NOT RUN.** No non-UI route calls the `dataverse.create_record` handler. The owner runs it in the Spaarke Console chat (prompt below). |
-| Negative (uniform refusal for an un-appendable parent) | **NOT RUN.** Needs a narrower user and that user's token. Candidates below. |
+| Negative (uniform refusal for an un-appendable parent) | **PASS** (2026-11-03, as `# UAC Child BU Test User`): child-records 404 and Office 403 `OFFICE_009`, each byte-identical to a nonexistent parent; no row created. The denied-mapping-source clause moves to 020 (see below). |
 | App Insights | No 5xx. **One new exception type** since the deploy (see "Needs the owner", item 2). The child-records request and its logs are **missing from App Insights**. |
 
 No 5xx, no owner mismatch between the two surfaces, no failed check, so the stop rule did not fire.
@@ -132,7 +132,19 @@ An Event works equally: "Create an event named FMSWP-019 C under matter MAT-0000
 
 ## Negative check — a parent the caller cannot AppendTo
 
-**Not run.** The admin can AppendTo every record. It needs a narrower user's token (a user sign-in, or a token minted for that user); I cannot obtain one from the admin `az` login.
+**PASS, run 2026-11-03 15:27–15:29Z on dev BFF 5796774091.** The caller was `# UAC Child BU Test User` (`uac.child.user@demo.spaarke.com`, oid `94047962-…`, `scp` = `SDAP.Access user_impersonation`), signed in by the owner in a separate `AZURE_CONFIG_DIR`. Each refused target was compared with a matter id that does not exist (`0f0f0f0f-1111-4222-8333-444455556666`):
+
+| Route | Target | Result |
+|---|---|---|
+| `POST /api/v1/child-records/sprk_event`, the request from check A | PAT-908068 (`5d46df87-…`, which the caller cannot read) | `404 application/problem+json`, `reasonCode` `child_record.not_found`, "A record this event is filed under was not found. The event was not saved." |
+| same | the nonexistent id | **byte-identical** status, content type and body |
+| timing (4 alternating calls each, after warm-up) | denied 1203/1020/977/1016 ms; nonexistent 1121/1014/941/941 ms | no usable timing difference |
+| `POST /api/office/quickcreate/project`, `sourceRecordId` = PAT-908068 | — | `403`, `errorCode` `OFFICE_009`, `reasonCode` `insufficient_rights` |
+| same, `sourceRecordId` = the nonexistent id | — | identical `403 OFFICE_009` body (only the correlation id differs) |
+
+Read-back: no `sprk_event` or `sprk_project` named `FMSWP-019 NEG%` exists. **No row was created.**
+
+**The second half of the criterion ("a denied mapping source produces no mapped values and one warning") cannot be reached live today.** On every route the mapping source is also the filing parent, so a source the caller cannot read is refused as a parent first. That is the correct order (FR-08). An explicit `mappingSource` separate from the parent arrives on the child-records route with task 020. That clause moves to 020's live check, as check A's mapping clause did. Until then it is covered by the FR-04 unit tests (probe denied → no mapping + one warning).
 
 Existing dev users (read-only lookup of `systemusers` with their roles, all in BU "Spaarke Business Unit 1", `06fbf21c-…` is its parent):
 - **`# UAC Child BU Test User`** (uac.child.user@demo.spaarke.com, `d6f8f439-40bf-f111-a05b-3833c5e9614d`). Roles: Spaarke Basic User and Spaarke Core User only (no Console / Office role). Best fit for the narrowest rights.
@@ -192,8 +204,8 @@ Nothing else was created. No Matter, contact or team was changed. Numbers consum
 
 ## Needs the owner
 
-1. **Check C** in the Console chat (prompt above), then record the row id here.
-2. **Negative check:** a token for `# UAC Child BU Test User` or Test User 1, against PAT-908068.
+1. ~~**Check C**~~: done 2026-11-03. Event `6d1563bb-829d-49da-9d29-92ea695ebba6`, PASS; see `task-019-notes.md`.
+2. ~~**Negative check**~~: done 2026-11-03, PASS; see the "Negative check" section above.
 3. **The new exception type** (`sprk_userentityassociation` miss, 10 occurrences at 19:00:52Z): confirm that the membership updater's miss path is expected to appear in telemetry, and why the junction table stays empty.
 4. **Missing telemetry for A:** the child-records POST left no request or trace in App Insights. If this is the OpenTelemetry sampler, W3's App Insights step cannot rely on request counts for this route; use the read-back.
 5. **Acceptance text for A:** "mapped fields present" cannot hold on the child-records route until 020-029 wire `Mapping` in (decide: amend, or confirm that W3 owns it).

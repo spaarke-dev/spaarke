@@ -699,3 +699,18 @@ missing to add. Owners and refusals are unchanged, and the service needs no chan
 - **Issue:** #2524 (filed by UAC-r2), covering both paths.
 - **Next on the scope path:** a design note (UAC-r2 has already reviewed it through these rules), then a spec amendment, task-create for task 043, TASK-INDEX, and owner approval.
 - **Project `1cccf07d`:** it gets its link from the backfill, or by hand after the fix. Its access needs no change.
+
+## 2026-11-03 — Task 019 closed (W2 gate passed); 042a closed
+
+- **Gate result:**
+  - two adversarial passes with no open F-class finding (#2514, #2520);
+  - live checks A, B and C pass;
+  - the negative check passes as `# UAC Child BU Test User`. The child-records 404 and the Office 403 `OFFICE_009` are byte-identical to a nonexistent parent; no row was created.
+- **Clauses moved to task 020:**
+  - check A's "mapped fields";
+  - the negative criterion's "denied mapping source → no mapped values + one warning". It cannot be reached live while every route's mapping source is also its filing parent; an explicit `mappingSource` arrives with 020. Unit tests cover it today.
+- **Deviation:** the deploy was R3's batched dev deploy (5796774091), not a bff-deploy run from this session (standing rule).
+- **Check C:** the owner supplied the name and parent when the Assistant asked. That is correct behaviour. Event `6d1563bb-…` stays (owner: do not delete).
+- **Chat tool description:** re-seeded on dev (row `18b3531f-…`) so the model knows that `sprk_eventnumber` is set by the server.
+- **042a:** done in #2521 (merged 2026-11-02T19:28Z); the index is now ✅.
+- **Next:** 041 and 042b, **in sequence, not in parallel** (TASK-INDEX: both edit `RecordCreationService*.cs`). 041 goes first because W3 waits on it. 020 depends only on 019 and may run beside 041. UAC-r2 reviews the 041 diff (scoped) and the 042b diff (full) before merge.

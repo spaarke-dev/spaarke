@@ -28,9 +28,9 @@
 | 017 | [Re-point route, chat and decision callers](017-repoint-route-chat-decision-callers.poml) | FR-13 | opus / high | FULL | none | 016 | ✅ |
 | 018 | [Office quick-create adapter; delete Office service](018-office-quick-create-adapter.poml) | FR-13, FR-12 | opus / high | FULL | none | 016 | ✅ |
 | 039 | [Server-owned search index (#2399)](039-server-owned-search-index.poml) | FR-38 | sonnet / high | FULL | none | 017 | ✅ |
-| 019 | [W2 deploy, live checks, adversarial review](019-w2-deploy-and-adversarial-review.poml) | NFR-01, NFR-05 | sonnet / high | FULL | none | 017, 018, 039 | 🔲 |
+| 019 | [W2 deploy, live checks, adversarial review](019-w2-deploy-and-adversarial-review.poml) | NFR-01, NFR-05 | sonnet / high | FULL | none | 017, 018, 039 | ✅ |
 | 041 | [Index routing follows the content type (#2502)](041-content-type-index-routing.poml) | FR-40 (FR-10, FR-38) | opus / high | FULL | none | 019, 039 | 🔲 approved by owner 2026-11-02 |
-| 042a | [#2483 window characterization (tests only; lands alone)](042a-stamp-before-owner-characterization.poml) | FR-41 | sonnet / high | STANDARD | none | none | 🔲 approved by owner 2026-11-02 |
+| 042a | [#2483 window characterization (tests only; lands alone)](042a-stamp-before-owner-characterization.poml) | FR-41 | sonnet / high | STANDARD | none | none | ✅ (#2521) |
 | 042b | [Derive the stamp before the owner (#2483, DI-009)](042b-stamp-before-owner-fix.poml) | FR-41 | opus / high | FULL | none | 042a, 019 | 🔲 approved by owner 2026-11-02 |
 
 ## Phase 3 — W3 Product creators onto the service
