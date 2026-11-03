@@ -2,7 +2,7 @@
 
 > **Purpose:** the curated starting set for anyone building or reviewing this project, human or Claude Code. Every link was checked on 2026-10-29; dates are the page's `ms.date` (last update in parentheses where different).
 > **Shorthand:** `L/` = `https://learn.microsoft.com/en-us/` · `CW/` = `L/copilot/cowork/` · `X/` = `L/microsoft-365/copilot/extensibility/`
-> **Rule:** these products change monthly. When a page here disagrees with training-data knowledge, the page wins; when two pages disagree, note it in `notes/` and test in the tenant. Snapshots for Claude Code live in `knowledge/` (design.md §7).
+> **Rule:** these products change monthly. When a page here disagrees with training-data knowledge, the page wins; when two pages disagree, note it in `notes/` and test in the tenant. Snapshots for Claude Code live in `knowledge/` (design.md §11).
 
 ---
 
@@ -27,7 +27,8 @@
 | [Customize Cowork](https://learn.microsoft.com/en-us/copilot/cowork/cowork-customize) (upd 10-21) | Uploading skills (.md/.zip/.skill) and plugins; sharing "Only you" / "Specific users" |
 | [Cowork plugins](https://learn.microsoft.com/en-us/copilot/cowork/cowork-plugins) (upd 10-29) | User plugin upload, Claude package auto-conversion, per-user connector sign-in |
 | [Manage Cowork plugins](https://learn.microsoft.com/en-us/copilot/cowork/cowork-manage-plugins) (upd 10-29) | Admin side; "no single tenant setting that turns off plugin sharing"; org-wide publishing approval |
-| [MCP Apps support in Cowork](https://learn.microsoft.com/en-us/copilot/cowork/mcp-apps-support) (2026-09-08) | Interactive UI in Cowork: 64 KiB inline cap, `validDomains[]`, no model-context updates |
+| [**MCP apps plugin author guide for Cowork**](https://learn.microsoft.com/en-us/copilot/cowork/mcp-apps-support) (2026-09-08, upd 10-21; also at `/microsoft-365/copilot/cowork/mcp-apps-support`) | **The UI build reference.** Covers: SEP-1865 model (`ui://` `resourceUri` on the tool → HTML via `resources/read`, `text/html;profile=mcp-app`, self-contained); inline/fullscreen only; widget may call only `tools/call`, `resources/read`, `ui/message` (+ `ui/open-link` with confirmation); auth attached by Cowork, never in the iframe; `visibility`, CSP, permissions, `validDomains[]` (fail-closed); limits (64 KiB, 60 calls/min, 10 s init, 200–720 × 640 px); widget vs elicitation guidance; quick checklist. No GA/preview label. Note: `.claude/agent-memory/researcher/cowork-mcp-apps-author-guide-2026-10-30.md` |
+| [MCP Apps spec (SEP-1865, 2026-01-26)](https://github.com/modelcontextprotocol/ext-apps/blob/main/specification/2026-01-26/apps.mdx) | The open standard Cowork implements; SDK `@modelcontextprotocol/ext-apps` |
 | [Elicitation forms](https://learn.microsoft.com/en-us/copilot/cowork/cowork-elicitation-forms) (2026-05-27) | MCP form-mode elicitation; flat schemas only |
 | [Cowork projects](https://learn.microsoft.com/en-us/copilot/cowork/cowork-projects) (2026-10-28) | Projects are private to the creator |
 | [Cowork access](https://learn.microsoft.com/en-us/copilot/cowork/cowork-access) (upd 10-21) · [Admin governance](https://learn.microsoft.com/en-us/copilot/cowork/cowork-admin-governance) (10-27) · [FAQ](https://learn.microsoft.com/en-us/copilot/cowork/cowork-faq) (upd 10-29) · [Models](https://learn.microsoft.com/en-us/copilot/cowork/cowork-models) (10-24) · [What's new](https://learn.microsoft.com/en-us/copilot/cowork/whats-new) (10-29) | Spending-policy access; Purview; by-design limits (no local or encrypted files, no deletes); model picker (EU Data Boundary = GPT only) |
@@ -71,7 +72,7 @@
 
 | Source | Licence | Use in this project |
 |---|---|---|
-| [anthropics/claude-for-legal](https://github.com/anthropics/claude-for-legal) @ `4a6c651` | Apache-2.0 | **Method and guardrails**: cold-start interview, side-of-deal logic, `[verify]` tagging, scope traps. 13 plugins, 151 skills; ships no default positions; does **not** import into Cowork as-is (design.md §5.4) |
+| [anthropics/claude-for-legal](https://github.com/anthropics/claude-for-legal) @ `4a6c651` | Apache-2.0 | **Method and guardrails**: cold-start interview, side-of-deal logic, `[verify]` tagging, scope traps. 13 plugins, 151 skills; ships no default positions; does **not** import into Cowork as-is; adapt it to read our legal playbook files (design.md §5.3, §5.5) |
 | [Open-Legal-Products/mike-workflows](https://github.com/Open-Legal-Products/mike-workflows) @ `20bed20` | MIT (per-skill authors; `PROVENANCE.md`) | **Checklist content**: NDA, employment and commercial-lease review plus tabular column sets. Jurisdiction-general; lease content is UK law |
 | [Open-Legal-Products/mikegc-workflows](https://github.com/Open-Legal-Products/mikegc-workflows) | Apache-2.0 + NOTICE | In-house skills (contract intake, markup, obligation tracking) |
 | `C:\code_files\lavern-reference-vault` @ `7c2efe6` (Lavern v0.15.0) | Apache-2.0 + NOTICE | **Evaluation method** (`evals/jv/RUBRIC.md`: pre-registered rubric, recall/precision/hallucination counts); NDA templates; U.S. lease checklist lines in `src/agents/prompts/real-estate-counsel.ts` |
@@ -92,4 +93,4 @@
 | `projects/spaarke-ontology-platform-r1/notes/spaarke-ontology-strategy-synopsis-v2.md` §2.5b | Microsoft platform state, October 2026 |
 | `.claude/agent-memory/researcher/*-2026-10-29.md` | Evidence behind every claim above: `copilot-for-legal-mechanics-walkthrough`, `copilot-legal-taxonomy-and-practice-pack-dev-refs`, `copilot-legal-enablement-kit-deployment-paths`, `copilot-ux-components-and-kit-package-anatomy`, `practice-pack-content-sources`, `ms-copilot-for-legal-cowork-registry` |
 | `infrastructure/ai-foundry/evaluation/` | Existing legal evaluation config and citation-accuracy metric |
-| `knowledge/README.md`, `knowledge/REFRESH-PROCEDURE.md` | Knowledge-base conventions for design.md §7 |
+| `knowledge/README.md`, `knowledge/REFRESH-PROCEDURE.md` | Knowledge-base conventions for design.md §11 |

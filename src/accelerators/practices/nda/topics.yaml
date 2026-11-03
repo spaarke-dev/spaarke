@@ -1,0 +1,186 @@
+# NDA topic catalogue: the join key between playbooks, skills, review results, evals and Word playbooks.
+# IDs are stable: never rename or reuse one. Retire a topic by setting `status: retired`.
+# MVP status: test catalogue, not attorney-approved (design §8.4).
+#
+# Fields:
+#   id                stable topic id (nda.<kebab>)
+#   title             short label used in summaries and the Word playbook
+#   question          what the reviewer decides for this topic
+#   look_for          clause signals that locate the topic in an agreement
+#   sides             sides for which the topic applies (mutual, disclosing, receiving)
+#   default_priority  High | Medium | Low (a playbook may override)
+#   contractnli       ContractNLI hypothesis names used to seed eval cases (check names against the
+#                     dataset release before scoring; empty when none applies)
+practice: nda
+version: '0.1.0'
+status: mvp-test
+topics:
+  - id: nda.definition-unmarked
+    title: Definition and marking
+    question: Is information protected when it is not marked confidential?
+    look_for: ['Confidential Information means', 'marked', 'designated as confidential']
+    sides: [mutual, disclosing, receiving]
+    default_priority: High
+    contractnli: ['Explicit identification', 'Non-inclusion of non-technical information']
+  - id: nda.oral-disclosure
+    title: Oral and visual disclosure
+    question: Is orally or visually disclosed information protected, and on what condition?
+    look_for: ['orally', 'visual', 'written summary', 'reduced to writing']
+    sides: [mutual, disclosing, receiving]
+    default_priority: Medium
+    contractnli: ['Inclusion of verbally conveyed information']
+  - id: nda.exclusion-prior-possession
+    title: Exclusion - prior possession
+    question: How must the recipient show it already had the information?
+    look_for: ['already in the possession', 'prior to disclosure', 'known to the Recipient']
+    sides: [mutual, disclosing, receiving]
+    default_priority: Medium
+    contractnli: ['Permissible post-agreement possession']
+  - id: nda.exclusion-independent-development
+    title: Exclusion - independent development
+    question: May the recipient rely on independent development, and how is it shown?
+    look_for: ['independently developed', 'without use of', 'without reference to']
+    sides: [mutual, disclosing, receiving]
+    default_priority: Medium
+    contractnli: ['Permissible development of similar information']
+  - id: nda.exclusion-third-party
+    title: Exclusion - third-party source
+    question: When may information received from a third party be used freely?
+    look_for: ['third party', 'without restriction', 'rightfully received']
+    sides: [mutual, disclosing, receiving]
+    default_priority: Medium
+    contractnli: ['Permissible acquirement of similar information']
+  - id: nda.one-sided-carveouts
+    title: One-sided carve-outs
+    question: Does any carve-out remove a class of one party's information from protection?
+    look_for: ['shall not include', 'excluding', 'notwithstanding']
+    sides: [mutual, disclosing]
+    default_priority: High
+    contractnli: []
+  - id: nda.purpose-limited-use
+    title: Purpose and limited use
+    question: Is use limited to the stated purpose?
+    look_for: ['Purpose', 'solely for', 'evaluating a potential']
+    sides: [mutual, disclosing, receiving]
+    default_priority: High
+    contractnli: ['Limited use']
+  - id: nda.representatives
+    title: Representatives
+    question: Who may receive the information, and is the recipient responsible for them?
+    look_for: ['Representatives', 'employees', 'advisors', 'need to know']
+    sides: [mutual, disclosing, receiving]
+    default_priority: High
+    contractnli: ['Sharing with employees', 'Sharing with third-parties']
+  - id: nda.compelled-disclosure
+    title: Compelled disclosure
+    question: What must the recipient do before disclosing under legal compulsion?
+    look_for: ['required by law', 'subpoena', 'court order', 'compelled']
+    sides: [mutual, disclosing, receiving]
+    default_priority: Medium
+    contractnli: ['Notice on compelled disclosure']
+  - id: nda.reverse-engineering
+    title: Reverse engineering
+    question: Is analysis or reverse engineering of disclosed materials prohibited?
+    look_for: ['reverse engineer', 'decompile', 'disassemble', 'analyze']
+    sides: [mutual, disclosing]
+    default_priority: High
+    contractnli: []
+  - id: nda.copying-and-breach-notice
+    title: Copying and breach notice
+    question: Are copies limited, and must the recipient report unauthorized disclosure?
+    look_for: ['copies', 'reproduce', 'unauthorized', 'notify']
+    sides: [mutual, disclosing, receiving]
+    default_priority: Medium
+    contractnli: ['Permissible copy']
+  - id: nda.data-use-licence-back
+    title: Derived data and licence-back
+    question: May the recipient use the information, or data derived from it, for its own purposes?
+    look_for: ['anonymized', 'aggregated', 'derived', 'improve its products', 'feedback']
+    sides: [mutual, disclosing]
+    default_priority: High
+    contractnli: []
+  - id: nda.no-licence-no-warranty
+    title: No licence and no warranty
+    question: Does the agreement confirm that no licence is granted and information is provided as is?
+    look_for: ['no license', 'no licence', 'as is', 'no warranty']
+    sides: [mutual, disclosing, receiving]
+    default_priority: Low
+    contractnli: ['No licensing']
+  - id: nda.return-destruction
+    title: Return or destruction
+    question: When must information be returned or destroyed, and is it certified?
+    look_for: ['return', 'destroy', 'certify', 'upon request']
+    sides: [mutual, disclosing, receiving]
+    default_priority: Medium
+    contractnli: ['Return of confidential information']
+  - id: nda.residuals
+    title: Residuals
+    question: May the recipient freely use information retained in unaided memory?
+    look_for: ['residuals', 'unaided memory', 'retained in memory']
+    sides: [mutual, disclosing, receiving]
+    default_priority: High
+    contractnli: []
+  - id: nda.term
+    title: Term and survival
+    question: How long do the confidentiality obligations last, and do trade secrets survive?
+    look_for: ['term', 'years', 'survive', 'expiration', 'terminate']
+    sides: [mutual, disclosing, receiving]
+    default_priority: High
+    contractnli: ['Survival of obligations']
+  - id: nda.non-solicit
+    title: Non-solicitation
+    question: Does the NDA contain a non-solicit or non-compete, and is it acceptable?
+    look_for: ['solicit', 'hire', 'employ', 'compete']
+    sides: [mutual, disclosing, receiving]
+    default_priority: High
+    contractnli: ['No solicitation']
+  - id: nda.remedies
+    title: Remedies
+    question: Is injunctive relief available, and on what terms?
+    look_for: ['injunctive', 'irreparable', 'equitable relief', 'bond']
+    sides: [mutual, disclosing, receiving]
+    default_priority: Medium
+    contractnli: []
+  - id: nda.whistleblower-dtsa
+    title: Whistleblower and DTSA notice
+    question: Does the agreement preserve reporting to government agencies and give the DTSA immunity notice where needed?
+    look_for:
+      ['Defend Trade Secrets Act', '1833', 'government agency', 'whistleblower', 'Securities and Exchange Commission']
+    sides: [mutual, disclosing, receiving]
+    default_priority: Medium
+    contractnli: []
+  - id: nda.trade-secret-preservation
+    title: Trade-secret preservation
+    question: Does anything in the NDA limit trade-secret rights or obligations implied by law?
+    look_for: ['trade secret', 'applicable law', 'in addition to']
+    sides: [mutual, disclosing]
+    default_priority: High
+    contractnli: []
+  - id: nda.assignment
+    title: Assignment
+    question: May either party assign the agreement without consent?
+    look_for: ['assign', 'successor', 'change of control']
+    sides: [mutual, disclosing, receiving]
+    default_priority: Medium
+    contractnli: []
+  - id: nda.governing-law-venue
+    title: Governing law and venue
+    question: Which law governs, and where are disputes heard?
+    look_for: ['governed by', 'laws of the State', 'jurisdiction', 'venue', 'courts']
+    sides: [mutual, disclosing, receiving]
+    default_priority: High
+    contractnli: []
+  - id: nda.confidentiality-of-agreement
+    title: Confidentiality of the agreement and discussions
+    question: Are the existence and terms of the discussions themselves confidential?
+    look_for: ['existence of this Agreement', 'fact that discussions', 'terms of this Agreement']
+    sides: [mutual, disclosing, receiving]
+    default_priority: Low
+    contractnli: ['Confidentiality of Agreement']
+  - id: nda.housekeeping
+    title: Housekeeping
+    question: Are the effective date, party names, notices and signature blocks correct?
+    look_for: ['Effective Date', 'IN WITNESS WHEREOF', 'By:', 'Name:', 'Title:']
+    sides: [mutual, disclosing, receiving]
+    default_priority: Low
+    contractnli: []

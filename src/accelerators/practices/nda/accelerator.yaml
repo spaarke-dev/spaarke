@@ -1,0 +1,53 @@
+# NDA accelerator: what the build assembles (design §5.5). Paths are relative to src/accelerators/.
+id: nda
+version: 0.1.1-mvp
+wave: 1
+status: mvp-test # positions are test positions, not attorney-approved (design §8.4)
+
+plugin:
+  package: spaarke-nda-mvp
+  name_short: Spaarke NDA (MVP)
+  name_full: Spaarke NDA Accelerator (MVP test build)
+  description_short: Packaged NDA redlines against your playbook, checked by script.
+  description_full: >-
+    Spaarke NDA Accelerator, MVP test build. nda-review produces an internal redline with a linked
+    summary and one comment per change, an external redline and a clean copy, against the user's NDA
+    playbook or the Spaarke baseline positions, and verifies them by script. accelerator-setup records
+    the attorney's defaults and runs a trial review. Drafts for attorney review; not legal advice.
+    Test positions, not attorney-approved.
+  accent_color: '#1F3864'
+  developer:
+    name: Spaarke
+    website: https://spaarke.com
+    privacy: https://spaarke.com/privacy
+    terms: https://spaarke.com/terms
+
+skills:
+  - name: nda-review
+    source: practices/nda/skills/nda-review
+    engines: [probe, safe_docx, segment_clauses, playbook_parse, ooxml_redline, summary_table, check_outputs]
+    references:
+      - core/shared-references/guardrails.md
+      - core/shared-references/standards-protocol.md
+      - core/shared-references/playbook-format.md
+      - core/schemas/edit-plan.schema.json
+      - practices/nda/positions/baseline-mutual.md
+      - generated/topics.json
+      - generated/review-checklist.md
+
+  - name: accelerator-setup
+    source: core/skills/accelerator-setup
+    engines: [probe, playbook_parse]
+    references:
+      - core/shared-references/guardrails.md
+      - core/shared-references/playbook-format.md
+      - generated/topics.json
+      - { from: practices/nda/onboarding.md, as: onboarding-nda.md }
+    assets:
+      - { from: practices/nda/evals/corpus/nda-01-bluefin-harbor-mutual.docx, as: sample-nda.docx }
+
+playbooks: # validated against topics.yaml at build; rendered for the Word legal plugin
+  - source: practices/nda/positions/baseline-mutual.md
+    word: Spaarke NDA Playbook - Mutual (baseline).docx
+  - source: practices/nda/samples/acme-nda-disclosing.md
+    word: Acme NDA Playbook - Disclosing (sample).docx
