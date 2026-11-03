@@ -71,7 +71,6 @@ public sealed class RelocatedFileIndexing : IRelocatedFileIndexing
                     ContentType: null,
                     DocumentId: request.DocumentId.ToString("D"),
                     ParentEntity: null,
-                    SearchIndexName: null, // the handler's resolver chain decides, as for every app-only producer
                     Source: SourceTag,
                     CorrelationId: request.DocumentId.ToString("N")),
                 cancellationToken).ConfigureAwait(false);

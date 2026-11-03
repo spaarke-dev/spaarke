@@ -3,7 +3,6 @@ using Azure.Messaging.ServiceBus;
 using Microsoft.Extensions.Options;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Configuration;
-using Sprk.Bff.Api.Infrastructure.Exceptions;
 using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Models.Office;
 using Sprk.Bff.Api.Services.Ai;
@@ -39,7 +38,6 @@ public class IndexingWorkerHostedService : BackgroundService
     private readonly IJobStatusService _jobStatusService;
     private readonly IProcessingJobService _jobService;
     private readonly IFileIndexingService _fileIndexingService;
-    private readonly ISearchIndexNameResolver _searchIndexNameResolver;
     private readonly ServiceBusOptions _serviceBusOptions;
 
     private const string QueueName = "office-indexing";
@@ -55,7 +53,6 @@ public class IndexingWorkerHostedService : BackgroundService
         IJobStatusService jobStatusService,
         IProcessingJobService jobService,
         IFileIndexingService fileIndexingService,
-        ISearchIndexNameResolver searchIndexNameResolver,
         IOptions<ServiceBusOptions> serviceBusOptions)
     {
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
@@ -63,7 +60,6 @@ public class IndexingWorkerHostedService : BackgroundService
         _jobStatusService = jobStatusService ?? throw new ArgumentNullException(nameof(jobStatusService));
         _jobService = jobService ?? throw new ArgumentNullException(nameof(jobService));
         _fileIndexingService = fileIndexingService ?? throw new ArgumentNullException(nameof(fileIndexingService));
-        _searchIndexNameResolver = searchIndexNameResolver ?? throw new ArgumentNullException(nameof(searchIndexNameResolver));
         _serviceBusOptions = serviceBusOptions?.Value ?? throw new ArgumentNullException(nameof(serviceBusOptions));
     }
 
@@ -153,16 +149,8 @@ public class IndexingWorkerHostedService : BackgroundService
 
             try
             {
-                // multi-container-multi-index-r1 indexer-routing-fix (Tier 3) — resolve
-                // per-record sprk_searchindexname (Office Add-in payload does not carry it;
-                // we rely on the resolver chain off the DocumentId).
-                var resolvedSearchIndexName = await _searchIndexNameResolver.ResolveAsync(
-                    payload.DocumentId.ToString(),
-                    parentEntityType: null,
-                    parentEntityId: null,
-                    args.CancellationToken);
-
-                // Build FileIndexRequest using the payload details
+                // Build FileIndexRequest using the payload details. It names no index (task 041, FR-40): the file
+                // lands in the content type's index; no record or business-unit index column is read.
                 var indexRequest = new FileIndexRequest
                 {
                     DriveId = payload.DriveId,
@@ -170,7 +158,6 @@ public class IndexingWorkerHostedService : BackgroundService
                     FileName = payload.FileName,
                     TenantId = payload.TenantId,
                     DocumentId = payload.DocumentId.ToString(),
-                    SearchIndexName = resolvedSearchIndexName,
                     Metadata = new Dictionary<string, string>
                     {
                         ["source"] = "OfficeAddIn",
@@ -179,23 +166,7 @@ public class IndexingWorkerHostedService : BackgroundService
                 };
 
                 // Call FileIndexingService using app-only authentication.
-                // multi-container-multi-index-r1 indexer-routing-fix (Tier 3) — background-job
-                // default-fall-back: catch INDEX_NOT_ALLOWED and retry with SearchIndexName=null
-                // so a stale per-record value does not block Office Add-in indexing entirely.
-                FileIndexingResult result;
-                try
-                {
-                    result = await _fileIndexingService.IndexFileAppOnlyAsync(indexRequest, args.CancellationToken);
-                }
-                catch (SdapProblemException ex) when (ex.Code == "INDEX_NOT_ALLOWED")
-                {
-                    _logger.LogWarning(
-                        "Office Add-in RAG indexing rejected by AI Search allow-list: requested SearchIndexName={RejectedIndex} (DocumentId={DocumentId}, JobId={JobId}). Falling back to tenant default.",
-                        indexRequest.SearchIndexName ?? "(null)", payload.DocumentId, message.JobId);
-
-                    var fallbackRequest = indexRequest with { SearchIndexName = null };
-                    result = await _fileIndexingService.IndexFileAppOnlyAsync(fallbackRequest, args.CancellationToken);
-                }
+                var result = await _fileIndexingService.IndexFileAppOnlyAsync(indexRequest, args.CancellationToken);
 
                 if (!result.Success)
                 {

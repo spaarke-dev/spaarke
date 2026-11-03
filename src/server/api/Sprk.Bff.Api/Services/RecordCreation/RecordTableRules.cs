@@ -166,8 +166,8 @@ internal static partial class RecordTableRules
                     "RecordCreationService, tasks 100 and 152)."),
                 ChatCallerIsTheForPerson("sprk_assignedtointernal"),
             ],
-            // Step 8 of the unified create (RecordCreationService.SearchIndexDefaultAsync) is the only writer of sprk_searchindexname /
-            // sprk_ai_search_index on the create and client paths: SearchIndexed makes both columns the server's (FR-38, task 039).
+            // SearchIndexed makes sprk_searchindexname / sprk_ai_search_index the server's (FR-38, task 039), and since task 041
+            // (FR-40) nothing on the create and client paths writes them: the index follows the content type (step 8 is a no-op).
             // The indexing pipeline's stamps (RagEndpoints, the RAG indexing jobs) record where a file was indexed and are left
             // alone. The Office core's ApplyBusinessUnitDefaultsAsync that used to fill them is deleted (018c).
             // Task 017 (#1608, decision 2b): refused in a caller's payload on every path, as on a work assignment.
@@ -487,8 +487,9 @@ internal static partial class RecordTableRules
 {
     // ── FR-38: the search index is server-owned (task 039) ──────────────────────────────────────────────────────────
     // ONE column check and ONE removal, shared by the unified create (RecordCreationService) and every BFF update path, so
-    // they cannot drift. A drop, never a refusal; step 8 of the create is the only writer of either column on the create and
-    // client paths (the indexing pipeline's own stamps record where a file was indexed and are left alone).
+    // they cannot drift. A drop, never a refusal; nothing writes either column on the create and client paths since task 041
+    // (FR-40: the index follows the content type; the indexing pipeline's own stamps record where a file was indexed and are
+    // left alone).
 
     /// <summary>Where a dropped search-index value came from: the caller's payload (or a server writer's item).</summary>
     internal const string SearchIndexOriginCaller = "caller";
@@ -749,11 +750,12 @@ internal static partial class RecordTableRules
 
     /// <summary>
     /// FR-38 (UAC-r2 condition 4): logs <c>client_search_index_dropped</c>, ids only, for each dropped value that differs from
-    /// what was applied. <paramref name="applied"/> is what step 8 applied to a new record (the id for the lookup, the name
-    /// for the text column), or <c>null</c> on an update, where the value is "unchanged" and so never equal. Equal means:
+    /// what was applied. <paramref name="applied"/> is what a new record was given (both none since task 041, FR-40: nothing
+    /// writes either column), or <c>null</c> on an update, where the value is "unchanged" and so never equal. Equal means:
     /// both none, the same id, or the same name compared trimmed and ordinal-ignore-case. The text column's entry also carries
     /// the dropped and applied index NAME (catalog configuration, not personal data); nothing else textual is logged.
-    /// Warning level, as 018's default_value_dropped is a warning.
+    /// Information level until the clients stop sending the columns (task 041, UAC-r2: every create that sends one now logs);
+    /// task 035 returns it to Warning.
     /// </summary>
     internal static void LogSearchIndexDropped(
         ILogger logger, string table, Guid? recordId, IEnumerable<DroppedSearchIndexValue> dropped,
@@ -774,14 +776,14 @@ internal static partial class RecordTableRules
             const string unchanged = "unchanged";
             if (isLookup)
             {
-                logger.LogWarning(
+                logger.LogInformation(
                     "[RECORD-WRITE] client_search_index_dropped: table={Table} record={RecordId} column={Column} origin={Origin} " +
                     "droppedIndexId={DroppedIndexId} appliedIndexId={AppliedIndexId} correlationId={CorrelationId}",
                     table, recordId, drop.Column, drop.Origin, drop.IndexId, applied is { } a ? a.IndexId : unchanged, correlationId);
             }
             else
             {
-                logger.LogWarning(
+                logger.LogInformation(
                     "[RECORD-WRITE] client_search_index_dropped: table={Table} record={RecordId} column={Column} origin={Origin} " +
                     "droppedIndexName={DroppedIndexName} appliedIndexName={AppliedIndexName} correlationId={CorrelationId}",
                     table, recordId, drop.Column, drop.Origin, LoggableIndexName(drop.IndexName),
@@ -955,10 +957,9 @@ internal sealed record RecordTableRule
     public IReadOnlyList<ServerDefault> ServerDefaults { get; init; } = [];
 
     /// <summary>
-    /// Whether the table's search index is SERVER-OWNED (FR-38, amending FR-10, I-5): both columns
-    /// (<c>sprk_ai_search_index</c> and the legacy text <c>sprk_searchindexname</c>) are written by step 8 alone on the create
-    /// and client paths, from the record's final owning business unit, and a client value is dropped on every BFF create and
-    /// update path that takes a client-, model- or playbook-shaped body
+    /// Whether the table's search index is SERVER-OWNED (FR-38, amending FR-10, I-5; FR-40): no create or client path writes
+    /// either column (<c>sprk_ai_search_index</c> and the legacy text <c>sprk_searchindexname</c>) since task 041 — the index
+    /// follows the content type — and a client value is dropped on every BFF create and update path that takes a client-, model- or playbook-shaped body
     /// (<see cref="RecordTableRules.SearchIndexColumnOf"/>, <see cref="RecordTableRules.OwnsSearchIndex"/>). The indexing
     /// pipeline's own stamps (<c>RagEndpoints</c> and the RAG indexing jobs) record WHERE a file was indexed and are deliberately
     /// left alone.

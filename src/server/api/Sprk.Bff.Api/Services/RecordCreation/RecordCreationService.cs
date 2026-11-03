@@ -10,7 +10,6 @@ using Sprk.Bff.Api.Services.Ai.Membership.Events;
 using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.Dataverse.FieldMapping;
 using Sprk.Bff.Api.Services.ExternalAccess;
-using SearchIndexColumns = Sprk.Bff.Api.Services.Ai.SearchIndexNameResolver;
 
 namespace Sprk.Bff.Api.Services.RecordCreation;
 
@@ -27,9 +26,9 @@ namespace Sprk.Bff.Api.Services.RecordCreation;
 /// (<c>CompleteRootCreateAsync</c>, the I-1 re-stamp, I-16, the sharee mirror) and the Office create's (the autonumber
 /// retry and its number read-back, the membership event), in their order. Existing callers still call those cores: tasks
 /// 017 and 018 re-point them. Field mapping (step 3) is task 014's (the partial <c>RecordCreationService.Mapping.cs</c>);
-/// the owner (step 7, <see cref="DecideOwnerAsync"/>) and the search-index default (step 8,
-/// <see cref="SearchIndexDefaultAsync"/>) are task 015's: record-first for every create, roots and children (FR-09), and
-/// the OWNING business unit's search index, fill-only (FR-10).</para>
+/// the owner (step 7, <see cref="DecideOwnerAsync"/>) is task 015's: record-first for every create, roots and children
+/// (FR-09). Step 8 (the search index) is a recorded no-op since task 041 (FR-40, #2502): the index follows the content type,
+/// so no create writes either index column and no business unit is read for it.</para>
 /// <para><b>Step 10 runs before the create, and again after it</b> (owner decision 2a, 2026-10-22; task 017). The I-1 stamp
 /// columns the row is missing are derived from what it is filed under (<see cref="CoreAncestorRestamper.PlanMissingStampAsync"/>,
 /// fill-only) and bound into the create payload; a derivation that fails refuses the create, nothing written
@@ -269,9 +268,9 @@ internal sealed partial class RecordCreationService
             "warnings={MappingWarnings}, correlationId={CorrelationId})",
             table, id, decision.OwningTeamId, decision.IsolatedFor is not null, warnings.Count, decision.MappingWarnings.Count,
             correlationId);
-        // The mapping step's warnings first (step 3 ran before the create), then step 8's, then the post-create ones.
+        // The mapping step's warnings first (step 3 ran before the create), then the post-create ones.
         return trace.Created(id, decision.OwningTeamId, decision.IsolatedFor is not null,
-            [.. decision.MappingWarnings.Select(w => w.Detail), .. decision.DefaultWarnings, .. warnings], decision.MappingWarnings,
+            [.. decision.MappingWarnings.Select(w => w.Detail), .. warnings], decision.MappingWarnings,
             writtenColumns) with { IsolatedCompletion = isolatedCompletion };
     }
 
@@ -291,14 +290,8 @@ internal sealed partial class RecordCreationService
         /// <summary>Step 3's and step 5's warnings about the mapped values (task 014): what was not mapped, and why.</summary>
         public IReadOnlyList<RecordCreationWarning> MappingWarnings { get; init; } = [];
 
-        /// <summary>Step 8's warning (task 015): the owning business unit's search-index defaults could not be read.</summary>
-        public IReadOnlyList<string> DefaultWarnings { get; init; } = [];
-
         /// <summary>Task 039 (FR-38): the client-supplied search-index values dropped before step 5 (logged at step 12, when the id is known).</summary>
         public IReadOnlyList<RecordTableRules.DroppedSearchIndexValue> SearchIndexDrops { get; init; } = [];
-
-        /// <summary>Task 039 (FR-38): the index step 8 applied (the catalog row id, the index name); both none when the unit has none.</summary>
-        public (Guid? IndexId, string? IndexName) AppliedSearchIndex { get; init; }
 
         public static Decision Refuse(RecordCreationRefusal refusal) => new() { Refusal = refusal };
     }
@@ -372,8 +365,8 @@ internal sealed partial class RecordCreationService
         DataverseWriteItemMapper.MappedItem item;
         var referenceWarnings = new List<RecordCreationWarning>();
 
-        // Task 039 (FR-38): on a search-indexed table both index columns are the SERVER's (step 8 writes them from the final
-        // owning business unit). Whatever the payload carries for either is DROPPED here, before anything is checked — a drop,
+        // Task 039 (FR-38), task 041 (FR-40): on a search-indexed table both index columns are the SERVER's, and the server
+        // writes neither (the index follows the content type). Whatever the payload carries for either is DROPPED here, before anything is checked — a drop,
         // never a refusal, and never the blocked-column refusal below — so no AppendTo is ever asked on the catalog row (#2399).
         // What a mapping rule or an adapter's default fills is dropped again after step 3½; every drop is logged at step 12.
         var indexDrops = new List<RecordTableRules.DroppedSearchIndexValue>();
@@ -594,7 +587,7 @@ internal sealed partial class RecordCreationService
 
         // ── Task 039 (FR-38): what step 3 (a mapping rule, which may name a parent via an explicit mappingSource) and step 3½ (an
         // adapter's default) filled is dropped too, so step 5 never asks AppendTo on the catalog row and no step-3 or step-5 warning
-        // mentions either column. Step 8 is the only writer of both. ─────────────────────────────────────────────────────────
+        // mentions either column. Nothing writes either (step 8 is a no-op since task 041). ──────────────────────────────────
         if (rule.SearchIndexed)
         {
             var lateDrops = new List<RecordTableRules.DroppedSearchIndexValue>();
@@ -748,23 +741,17 @@ internal sealed partial class RecordCreationService
             trace.Record(RecordCreationStep.Owner, RecordCreationStepState.Ran, "the plan's named Secure team (an isolated root)");
         }
 
-        // ── Step 8: the search index — the FINAL owning business unit's, the ONLY writer of both columns (FR-38, I-5) ───
-        trace.Begin(RecordCreationStep.SearchIndexDefault);
+        // ── Step 8: the search index — a recorded no-op (task 041, FR-40, #2502): the index follows the content type ─────
+        // Kept as a step so steps 9 to 12 keep their numbers (the spec, the docs and the trace tests cite them). Neither column
+        // is written and no business unit is read; a client's value was dropped above.
         var owningTeam = isolatedTeam ?? owner!.OwningTeamId!.Value;
-        var searchIndex = await SearchIndexDefaultAsync(table, rule, owningTeam, noun, ct).ConfigureAwait(false);
-        trace.Add(searchIndex.Step);
+        trace.Record(RecordCreationStep.SearchIndexDefault, RecordCreationStepState.NoOp,
+            "the index follows the content type (#2502); nothing written");
 
         // ── Step 9: the creator person ("for" person and table defaults: the adapters', owner-review item 3) ─────────────
         var fields = owner is not null
             ? OwnedCreateFields(owner, table, item)
             : IsolatedCreateFields(table, item, isolatedTeam!.Value, creatorPerson);
-        foreach (var (column, value) in searchIndex.Fields)
-        {
-            // Nothing else can carry either column any more (dropped above), so this is the only writer. UAC-r2's review of 015
-            // (K3), kept: the body's keys are case-sensitive, so any other spelling of the key is removed rather than sent beside
-            // the canonical key Dataverse would then see twice.
-            PutServerValue(fields, column, value);
-        }
         trace.Record(RecordCreationStep.CreatorAndDefaults, RecordCreationStepState.Ran,
             RecordCreatorPerson.IsStamped(table)
                 ? "creator person stamped when the requester resolved; \"for\" person and table defaults stay with the adapters"
@@ -786,9 +773,7 @@ internal sealed partial class RecordCreationService
             IsolatedFor = isolatedTeam is null ? null : creatorPerson,
             GrantorOid = grantorOid,
             MappingWarnings = referenceWarnings.Count == 0 ? mappingWarnings : [.. referenceWarnings, .. mappingWarnings],
-            DefaultWarnings = searchIndex.Warning is { } searchIndexWarning ? [searchIndexWarning] : [],
             SearchIndexDrops = indexDrops,
-            AppliedSearchIndex = (searchIndex.AppliedIndex, searchIndex.AppliedName),
         };
     }
 
@@ -1328,99 +1313,8 @@ internal sealed partial class RecordCreationService
         IGenericEntityService entities, string table, string? idText, Guid? typeId, CancellationToken ct) =>
         SecureRootInheritance.PairParentAsync(entities, table, idText, typeId, ct);
 
-    /// <summary>The search-index lookup's navigation property on the six search-indexed tables (matter, project, document, work assignment, event, invoice) —
-    /// the bind every browser create already sends (<c>matterService.ts</c>, <c>DocumentRecordService.ts</c>: live).</summary>
-    internal const string SearchIndexNavigationProperty = "sprk_AI_Search_Index";
-
-    /// <summary>The entity set of the AI search index catalog (<c>sprk_aisearchindex</c>).</summary>
-    internal const string SearchIndexEntitySet = "sprk_aisearchindexes";
-
-    /// <summary>What step 8 decided: the step's record, the columns it writes (none, one or both), what it applied, and its warning.</summary>
-    private sealed record SearchIndexFill(
-        RecordCreationStepRecord Step, IReadOnlyDictionary<string, object?> Fields, string? Warning = null,
-        Guid? AppliedIndex = null, string? AppliedName = null)
-    {
-        public static SearchIndexFill Nothing(RecordCreationStepState state, string note) =>
-            new(new RecordCreationStepRecord(RecordCreationStep.SearchIndexDefault, state, note), new Dictionary<string, object?>());
-    }
-
     /// <summary>
-    /// Step 8 (FR-38 amending FR-10, I-5; tasks 015 and 039): on a table the rules registry marks search-indexed
-    /// (<see cref="RecordTableRule.SearchIndexed"/>), the ONLY writer of both index columns: the business unit of the record's
-    /// FINAL owning team (<paramref name="owningTeam"/>, after step 7: the resolver's team, a parent-inherited owner, or the
-    /// named Secure Record Owners team of a root created into isolation) supplies its <c>sprk_searchindexname</c> and
-    /// <c>sprk_ai_search_index</c> — the columns <see cref="Sprk.Bff.Api.Services.Ai.SearchIndexNameResolver"/> reads at index
-    /// time, by its own names. Nothing reaches this step carrying either column (dropped before step 5), so there is no
-    /// fill-only check: it writes that unit's two values, or nothing.
-    /// </summary>
-    /// <remarks>
-    /// <para><b>Never the caller's business unit, never a walk up to the root, never a fallback.</b> A unit with no index
-    /// leaves the column empty (not sent) and logs <c>search_index_unset_for_owner_bu</c>, ids only: the table, the owning team
-    /// and the unit.</para>
-    /// <para><b>Non-fatal</b>, as the Office create's business-unit defaults are: these are index ROUTING hints, not a storage
-    /// location or an access boundary, and the resolver walks the record's owning business unit at index time anyway. A read
-    /// that fails writes nothing and tells the caller once (the Office create's words); the create stands.</para>
-    /// <para><b>No precedence chosen</b> between the two columns: each is copied from its own business-unit counterpart, so a
-    /// unit whose two values disagree is passed on as it is and the resolver's lookup-first order decides at index time, as
-    /// it does today.</para>
-    /// </remarks>
-    private async Task<SearchIndexFill> SearchIndexDefaultAsync(
-        string table, RecordTableRule rule, Guid owningTeam, string noun, CancellationToken ct)
-    {
-        if (!rule.SearchIndexed)
-            return SearchIndexFill.Nothing(RecordCreationStepState.NoOp, "the table is not search-indexed");
-
-        try
-        {
-            var unit = await TeamBusinessUnitAsync(owningTeam, ct).ConfigureAwait(false);
-            var defaults = await BusinessUnitSearchDefaultsAsync(unit, ct).ConfigureAwait(false);
-
-            var fields = new Dictionary<string, object?>(StringComparer.Ordinal);
-            if (defaults.Name is { } indexName)
-            {
-                fields[SearchIndexColumns.LegacyTextColumn] = indexName;
-            }
-
-            if (defaults.Index is { } index)
-            {
-                fields[$"{SearchIndexNavigationProperty}@odata.bind"] = $"/{SearchIndexEntitySet}({index:D})";
-            }
-
-            if (defaults.Name is null || defaults.Index is null)
-            {
-                // Ids and states only: the table, the owning team, the unit and which column has none (the usual case in a
-                // customer environment: catalog rows but no business-unit defaults, owner Q2 = (B)).
-                _logger.LogInformation(
-                    "[RECORD-CREATE] search_index_unset_for_owner_bu: table={Table} owningTeam={OwningTeam} businessUnit={BusinessUnit} " +
-                    "lookupUnset={LookupUnset} nameUnset={NameUnset}",
-                    table, owningTeam, unit, defaults.Index is null, defaults.Name is null);
-            }
-
-            return new SearchIndexFill(
-                new RecordCreationStepRecord(RecordCreationStep.SearchIndexDefault, RecordCreationStepState.Ran,
-                    $"{fields.Count} value(s) written from the owning business unit (the only writer)"),
-                fields, AppliedIndex: defaults.Index, AppliedName: defaults.Name);
-        }
-        catch (OperationCanceledException) when (ct.IsCancellationRequested)
-        {
-            throw;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex,
-                "[RECORD-CREATE] the owning business unit's search-index defaults for a new {Table} could not be read; it is " +
-                "created without them and index routing falls back to its owning business unit", table);
-            return new SearchIndexFill(
-                new RecordCreationStepRecord(RecordCreationStep.SearchIndexDefault, RecordCreationStepState.Failed,
-                    "the owning business unit's defaults could not be read; nothing filled"),
-                new Dictionary<string, object?>(),
-                "Business-unit search defaults could not be read, so they were not applied. Document indexing for this " +
-                $"{noun} falls back to its business unit's settings.");
-        }
-    }
-
-    /// <summary>
-    /// The business unit of <paramref name="owningTeam"/>, read app-only (steps 7 and 8; shared with Repair, task 016).
+    /// The business unit of <paramref name="owningTeam"/>, read app-only (step 7; shared with Repair, task 016).
     /// </summary>
     /// <exception cref="InvalidOperationException">The team reported no business unit.</exception>
     private async Task<Guid> TeamBusinessUnitAsync(Guid owningTeam, CancellationToken ct)
@@ -1432,27 +1326,10 @@ internal sealed partial class RecordCreationService
     }
 
     /// <summary>
-    /// A business unit's two search-index defaults (FR-10), read app-only by the columns
-    /// <see cref="Sprk.Bff.Api.Services.Ai.SearchIndexNameResolver"/> reads at index time: the trimmed name (none when blank)
-    /// and the catalog row (none when unset). Shared by step 8 and Repair (task 016).
-    /// </summary>
-    private async Task<(string? Name, Guid? Index)> BusinessUnitSearchDefaultsAsync(Guid businessUnit, CancellationToken ct)
-    {
-        var row = await _entities.RetrieveAsync(SearchIndexColumns.BusinessUnitEntity, businessUnit,
-                [SearchIndexColumns.LegacyTextColumn, SearchIndexColumns.LookupColumn],
-                ct)
-            .ConfigureAwait(false);
-        var name = row?.GetAttributeValue<string>(SearchIndexColumns.LegacyTextColumn)?.Trim() is { Length: > 0 } text ? text : null;
-        var index = row?.GetAttributeValue<EntityReference>(SearchIndexColumns.LookupColumn) is { } reference && reference.Id != Guid.Empty
-            ? reference.Id
-            : (Guid?)null;
-        return (name, index);
-    }
-
-    /// <summary>
     /// Step 12 (FR-38, UAC-r2 condition 4): logs <c>client_search_index_dropped</c> for each value dropped before step 5 that
-    /// differs from the index step 8 applied, ids only (<see cref="RecordTableRules.LogSearchIndexDropped"/>). The record id is
-    /// known only now. Never throws: a log must not fail a create that has already landed.
+    /// differs from what was applied, ids only (<see cref="RecordTableRules.LogSearchIndexDropped"/>). Since task 041 (FR-40)
+    /// nothing is applied (step 8 writes neither column), so every dropped value that names an index is logged. The record id
+    /// is known only now. Never throws: a log must not fail a create that has already landed.
     /// </summary>
     private void LogDroppedSearchIndex(string table, Guid id, Decision decision, string correlationId)
     {
@@ -1462,7 +1339,7 @@ internal sealed partial class RecordCreationService
         try
         {
             RecordTableRules.LogSearchIndexDropped(
-                _logger, table, id, decision.SearchIndexDrops, decision.AppliedSearchIndex, correlationId);
+                _logger, table, id, decision.SearchIndexDrops, applied: (null, null), correlationId);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -1964,8 +1841,8 @@ internal sealed record RecordCreationRequest(string Table, RecordCreationPayload
     /// <summary>
     /// Task 019 review: search-index values (FR-38) the caller's adapter already removed from the payload BEFORE it mapped it
     /// (the chat create drops them first so a malformed index lookup cannot fail the mapping, review R7). They are logged at
-    /// step 12 with the other drops (record id, applied index, origin <c>caller</c>, only when they differ from what step 8
-    /// applied), never at the adapter, which does not know either. <c>null</c> (the default): the adapter dropped nothing.
+    /// step 12 with the other drops (record id, applied index, origin <c>caller</c>, only when they differ from what was
+    /// applied — nothing since task 041), never at the adapter, which does not know either. <c>null</c> (the default): the adapter dropped nothing.
     /// </summary>
     internal IReadOnlyList<RecordTableRules.DroppedSearchIndexValue>? PreDroppedSearchIndex { get; init; }
 }
@@ -2103,7 +1980,7 @@ internal enum RecordCreationStep
     /// <summary>7 — the owner.</summary>
     Owner,
 
-    /// <summary>8 — the search-index default: the owning business unit's, fill-only, on a search-indexed table (task 015).</summary>
+    /// <summary>8 — the search index: a recorded no-op since task 041 (FR-40), kept so steps 9 to 12 keep their numbers.</summary>
     SearchIndexDefault,
 
     /// <summary>9 — the creator person, the "for" person and the table defaults.</summary>
@@ -2170,7 +2047,7 @@ internal sealed record RecordCreationOutcome
     /// Task 018b-1s (G1): the keys of the one app-only create's body (step 11), exactly as sent — a plain column by its
     /// logical name (<c>sprk_mattername</c>) and a lookup by its bind key (<c>sprk_MatterType@odata.bind</c>, the metadata's
     /// own navigation-property spelling; never expanded or rewritten). It is the final row, so it holds what the server added
-    /// (the owner bind, the creator person, a search-index default) and leaves out a mapped value that was dropped. An
+    /// (the owner bind, the creator person) and leaves out a mapped value that was dropped. An
     /// adapter asks whether a column was written by comparing case-insensitively with and without the bind suffix. Empty
     /// for every refusal, including one after the create (an isolated root removed again) — the row no longer exists.
     /// </summary>

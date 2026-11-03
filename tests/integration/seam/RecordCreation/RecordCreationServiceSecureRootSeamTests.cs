@@ -251,10 +251,10 @@ public sealed class RecordCreationServiceSecureRootSeamTests : IClassFixture<Pro
     }
 
     [Fact]
-    public async Task CreateAsync_AProjectUnderASecureMatter_IsCreatedIntoIsolation_WithTheSecureBusinessUnitsSearchDefaults()
+    public async Task CreateAsync_AProjectUnderASecureMatter_IsCreatedIntoIsolation_WithNoSearchIndex()
     {
-        // Task 015 review round 1 (F6), FR-10: step 8 reads the OWNING unit — for a row created into isolation, the named
-        // team's unit (the Secure BU), never the caller's.
+        // Task 015 review round 1 (F6), FR-10 read the OWNING unit's index here. Task 041 (FR-40): the index follows the
+        // content type, so step 8 reads no unit, even though the Secure BU holds an index, and writes neither column.
         var secure = Guid.NewGuid();
         SecureMatter(_fixture, secure);
         var secureIndex = Guid.NewGuid();
@@ -280,11 +280,10 @@ public sealed class RecordCreationServiceSecureRootSeamTests : IClassFixture<Pro
         outcome.Succeeded.Should().BeTrue(outcome.Refusal?.Detail);
         outcome.Isolated.Should().BeTrue();
         outcome.OwningTeamId.Should().Be(SecureTeam);
-        unitReads.Should().Equal([ProvisionProjectTestFixture.SecureBuId], "the isolated owner's unit, read once");
+        unitReads.Should().BeEmpty("no business unit is read for an index");
         var (table, _, fields) = _writes.Should().ContainSingle().Subject;
         table.Should().Be("sprk_project");
-        fields["sprk_searchindexname"].Should().Be("spaarke-secure-index");
-        fields["sprk_AI_Search_Index@odata.bind"].Should().Be($"/sprk_aisearchindexes({secureIndex:D})");
+        fields.Should().NotContainKey("sprk_searchindexname").And.NotContainKey("sprk_AI_Search_Index@odata.bind");
     }
 
     // ── Harness ──────────────────────────────────────────────────────────────────────────────────────────────────────

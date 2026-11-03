@@ -1572,7 +1572,6 @@ public sealed class IncomingCommunicationProcessor
             // the caller (avoids a per-attachment refetch) so matter-scoped RAG returns this correspondence
             // (was null). Best-effort/non-fatal (NFR-04): null when no representable regarding is set.
             ParentEntity: parentEntity,
-            SearchIndexName: null, // handler runs ISearchIndexNameResolver chain
             Source: "InboundEmail",
             CorrelationId: communicationId.ToString("N"));
 

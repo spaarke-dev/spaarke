@@ -22,9 +22,9 @@ using Directory = Sprk.Bff.Api.Tests.TestInfrastructure.OwnershipDirectory;
 namespace Sprk.Bff.Api.Tests.Integration.DataMutation.RecordOwnership;
 
 /// <summary>
-/// field-mapping-server-write-path-r1 task 016 (spec FR-14, FR-25, NFR-03) — Repair mode: steps 3 (mapping), 7 (owner), 8
-/// (search-index default) and 10 (I-1 stamp) of the unified create, applied to an EXISTING row, fill-only, against its
-/// current values, in at most ONE conditional update and as the system principal.
+/// field-mapping-server-write-path-r1 task 016 (spec FR-14, FR-25, NFR-03) — Repair mode: steps 3 (mapping), 7 (owner) and 10
+/// (I-1 stamp) of the unified create, applied to an EXISTING row, fill-only, against its current values, in at most ONE
+/// conditional update and as the system principal. Since task 041 (FR-40) Repair writes no search-index column.
 /// </summary>
 /// <remarks>
 /// Only the Dataverse module boundary is doubled: the row store is <see cref="Directory"/> (whole-row reads, the conditional
@@ -163,7 +163,7 @@ public sealed class RecordRepairModeTests
     }
 
     [Fact]
-    public async Task AnUnresolvableOwner_IsLeftUnchanged_WithATypedRefusal_AndNoSearchIndexIsFilled()
+    public async Task AnUnresolvableOwner_IsLeftUnchanged_WithATypedRefusal()
     {
         // An APPLICATION-owned document filed under nothing: there is no person to act (I-6), so no owner can be decided —
         // and it is never given the application user's own team.
@@ -174,12 +174,7 @@ public sealed class RecordRepairModeTests
         outcome.OwnerRefusal.Should().NotBeNull();
         outcome.OwnerRefusal!.Code.Should().Be(RecordOwnerRefusal.NoOwnerSource);
         Field(outcome, RecordRepairPart.Owner, "ownerid").State.Should().Be(RecordRepairFieldState.Refused);
-        // UAC-r2 condition (b) F2-1: the owner refused, so the search index is not filled from the row's current unit.
         _world.Writes.Should().BeEmpty();
-        Field(outcome, RecordRepairPart.SearchIndex, "sprk_searchindexname").ReasonCode
-            .Should().Be(RecordRepairReason.SearchIndexOwnerUnsettled);
-        Field(outcome, RecordRepairPart.SearchIndex, "sprk_ai_search_index").ReasonCode
-            .Should().Be(RecordRepairReason.SearchIndexOwnerUnsettled);
         _world.Directory.Row("sprk_document", id).GetAttributeValue<EntityReference>("ownerid")
             .Should().Be(new EntityReference("systemuser", RepairWorld.AppUser));
     }
@@ -207,28 +202,10 @@ public sealed class RecordRepairModeTests
     }
 
     [Fact]
-    public async Task AnOwnerKeptInItsUnitByTheBusinessUnitSkip_GetsNoSearchIndex()
+    public async Task AUserOwnedRowReOwnedInThisPatch_GetsNoSearchIndex_NotEvenItsNewOwnersUnits()
     {
-        // UAC-r2 condition (b) F2-1: a user-owned document in the GENERAL unit, filed under the matter of the CHILD unit — the
-        // move is refused (trigger 2), so the owner is not settled and the general unit's index is never written.
-        var id = _world.RowOf("sprk_document", Directory.GeneralBu, new Dictionary<string, object>
-        {
-            ["ownerid"] = new EntityReference("systemuser", Directory.CallerUserId),
-            ["sprk_matter"] = new EntityReference("sprk_matter", RepairWorld.Matter),
-        });
-
-        var outcome = await _world.RepairAsync("sprk_document", id);
-
-        Field(outcome, RecordRepairPart.Owner, "ownerid").ReasonCode.Should().Be(RecordRepairReason.OwnerMovesBusinessUnit);
-        _world.Writes.SelectMany(w => w.Fields.Keys).Should().NotContain(["sprk_searchindexname", "sprk_ai_search_index"]);
-        Field(outcome, RecordRepairPart.SearchIndex, "sprk_searchindexname").ReasonCode
-            .Should().Be(RecordRepairReason.SearchIndexOwnerUnsettled);
-    }
-
-    [Fact]
-    public async Task AUserOwnedRowReOwnedInThisPatch_GetsTheSearchIndexOfItsNewOwnersUnit()
-    {
-        // Must not fire (F2-1): the owner is settled on a team in this same patch.
+        // Task 041 (FR-40) must-fire 6: the owner is settled on a team in this same patch, and that team's unit has an index —
+        // the index follows the content type, so neither column is in the patch.
         var id = _world.RowOf("sprk_document", Directory.ChildBu, new Dictionary<string, object>
         {
             ["ownerid"] = new EntityReference("systemuser", RepairWorld.PersonInChild),
@@ -239,8 +216,7 @@ public sealed class RecordRepairModeTests
 
         var write = _world.Writes.Should().ContainSingle().Subject;
         write.Fields["ownerid"].Should().Be(new EntityReference("team", Directory.ChildTeam));
-        write.Fields["sprk_searchindexname"].Should().Be(RepairWorld.ChildIndexName);
-        Field(outcome, RecordRepairPart.SearchIndex, "sprk_searchindexname").State.Should().Be(RecordRepairFieldState.Repaired);
+        AssertNoIndexKey(outcome);
     }
 
     [Fact]
@@ -257,21 +233,23 @@ public sealed class RecordRepairModeTests
     }
 
     // =====================================================================================
-    // Search-index default (FR-10) and the I-1 stamp, fill-only
+    // Search index (task 041, FR-40: Repair writes none) and the I-1 stamp, fill-only
     // =====================================================================================
 
-    [Fact]
-    public async Task TheSearchIndexDefault_IsFilledOnlyWhereUnset()
+    [Theory]
+    [InlineData(null)]
+    [InlineData("kept-index")]
+    public async Task ARowMissingTheIndexColumns_WithItsOwnerSettled_GetsNoIndexKeyInThePatch(string? heldName)
     {
-        var id = _world.DocumentUnderTheMatter(indexName: "kept-index", index: null);
+        // Task 041 (FR-40) must-fire 6: the row's owning team's unit has an index; nothing copies it, and a held value is
+        // left as it is.
+        var id = _world.DocumentUnderTheMatter(indexName: heldName, index: null);
 
         var outcome = await _world.RepairAsync("sprk_document", id);
 
-        var write = _world.Writes.Should().ContainSingle().Subject;
-        write.Fields.Should().NotContainKey("sprk_searchindexname");
-        write.Fields["sprk_ai_search_index"].Should().Be(new EntityReference("sprk_aisearchindex", RepairWorld.ChildIndex));
-        Field(outcome, RecordRepairPart.SearchIndex, "sprk_searchindexname").State.Should().Be(RecordRepairFieldState.Present);
-        _world.Directory.Row("sprk_document", id).GetAttributeValue<string>("sprk_searchindexname").Should().Be("kept-index");
+        AssertNoIndexKey(outcome);
+        _world.Directory.Row("sprk_document", id).GetAttributeValue<string>("sprk_searchindexname").Should().Be(heldName);
+        _world.Directory.Row("sprk_document", id).GetAttributeValue<EntityReference>("sprk_ai_search_index").Should().BeNull();
     }
 
     [Fact]
@@ -361,18 +339,15 @@ public sealed class RecordRepairModeTests
     [Theory]
     [InlineData(true)]
     [InlineData(null)]
-    public async Task AUserOwnedSecureFlaggedRoot_KeepsItsOwner_AndGetsNoSearchIndexUntilItsOwnerIsSettled(bool? flag)
+    public async Task AUserOwnedSecureFlaggedRoot_KeepsItsOwner(bool? flag)
     {
         var id = _world.MatterOwnedBy(RepairWorld.PersonInChild, flag);
 
         var outcome = await _world.RepairAsync("sprk_matter", id);
 
         Field(outcome, RecordRepairPart.Owner, "ownerid").ReasonCode.Should().Be(RecordRepairReason.OwnerRootSecure);
-        // A secure root is provisioned by task 144, never re-owned (owner S6); UAC-r2 condition (b) F2-1: with its owner
-        // unsettled, its search index is not filled either.
+        // A secure root is provisioned by task 144, never re-owned (owner S6).
         _world.Writes.Should().BeEmpty();
-        Field(outcome, RecordRepairPart.SearchIndex, "sprk_searchindexname").ReasonCode
-            .Should().Be(RecordRepairReason.SearchIndexOwnerUnsettled);
         _world.Directory.Row("sprk_matter", id).GetAttributeValue<EntityReference>("ownerid")
             .Should().Be(new EntityReference("systemuser", RepairWorld.PersonInChild));
         _world.Evictions.Should().BeEmpty();
@@ -905,12 +880,12 @@ public sealed class RecordRepairModeTests
     }
 
     /// <summary>
-    /// Review R3 (FR-38): a mapping rule that targets either search-index column of a search-indexed table is never applied by
-    /// Repair — the index is the owning unit's alone (step 8's rule), so the parent's index is not copied and Repair's own
-    /// search-index step writes the owning unit's.
+    /// Review R3 (FR-38), as amended by task 041 (FR-40): a mapping rule that targets either search-index column of a
+    /// search-indexed table is never applied by Repair, so the parent's index is not copied — and Repair writes no index of
+    /// its own either.
     /// </summary>
     [Fact]
-    public async Task AMappingRuleTargetingTheSearchIndex_IsNeverApplied_AndRepairWritesTheOwningUnitsIndex()
+    public async Task AMappingRuleTargetingTheSearchIndex_IsNeverApplied_AndRepairWritesNoIndex()
     {
         var matter = _world.Directory.Row("sprk_matter", RepairWorld.Matter);
         matter["sprk_searchindexname"] = RepairWorld.GeneralIndexName;
@@ -925,12 +900,10 @@ public sealed class RecordRepairModeTests
 
         var write = _world.Writes.Should().ContainSingle().Subject;
         write.Fields["sprk_clientname"].Should().Be(RepairWorld.MatterClient, "the other rules still map");
-        write.Fields["sprk_searchindexname"].Should().Be(RepairWorld.ChildIndexName, "the owning unit's index, not the matter's");
-        write.Fields["sprk_ai_search_index"].Should().Be(new EntityReference("sprk_aisearchindex", RepairWorld.ChildIndex));
         outcome.Fields.Should().NotContain(f => f.Part == RecordRepairPart.Mapping
             && (f.Column == "sprk_searchindexname" || f.Column == "sprk_ai_search_index")
             && f.State == RecordRepairFieldState.Repaired, "a mapping rule never repairs the index");
-        Field(outcome, RecordRepairPart.SearchIndex, "sprk_searchindexname").State.Should().Be(RecordRepairFieldState.Repaired);
+        AssertNoIndexKey(outcome);
     }
 
     // =====================================================================================
@@ -1120,6 +1093,14 @@ public sealed class RecordRepairModeTests
 
     private static RecordRepairField Field(RecordRepairOutcome outcome, RecordRepairPart part, string column) =>
         outcome.Fields.Should().ContainSingle(f => f.Part == part && f.Column == column).Subject;
+
+    /// <summary>Task 041: no search-index column is in any patch, and no part reports one as repaired.</summary>
+    private void AssertNoIndexKey(RecordRepairOutcome outcome)
+    {
+        _world.Writes.SelectMany(w => w.Fields.Keys).Should().NotContain(["sprk_searchindexname", "sprk_ai_search_index"]);
+        outcome.Fields.Should().NotContain(f => (f.Column == "sprk_searchindexname" || f.Column == "sprk_ai_search_index")
+            && f.State == RecordRepairFieldState.Repaired);
+    }
 }
 
 /// <summary>

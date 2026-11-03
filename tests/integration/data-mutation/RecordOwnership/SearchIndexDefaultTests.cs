@@ -8,18 +8,17 @@ using UnifiedCreateRequest = Sprk.Bff.Api.Services.RecordCreation.RecordCreation
 namespace Sprk.Bff.Api.Tests.Integration.DataMutation.RecordOwnership;
 
 /// <summary>
-/// field-mapping-server-write-path-r1 task 015 (spec FR-10, write-path invariant I-5) and task 039 (FR-38, #2399) — step 8 of
-/// the unified create: on a table the rules registry marks search-indexed (matter, project, document, work assignment, event,
-/// invoice), step 8 is the ONLY writer of the OWNING business unit's <c>sprk_searchindexname</c> and
-/// <c>sprk_ai_search_index</c>: whatever a client sent for either column is dropped (never refused, never asked AppendTo,
-/// logged as <c>client_search_index_dropped</c> when it differs), and the final owning team's unit supplies its two values or
-/// nothing; a table not marked search-indexed is untouched; a unit that cannot be read fills nothing and says so, and the
-/// create stands.
+/// field-mapping-server-write-path-r1 tasks 015 and 039 (FR-38, #2399), as amended by task 041 (FR-40, #2502) — the search
+/// index on the unified create: on a table the rules registry marks search-indexed (matter, project, document, work assignment,
+/// event, invoice), whatever a client sent for <c>sprk_searchindexname</c> or <c>sprk_ai_search_index</c> is dropped (never
+/// refused, never asked AppendTo, logged as <c>client_search_index_dropped</c> when it differs from what was applied — since
+/// 041 nothing is applied), and step 8 is a recorded no-op that writes neither column and reads no business unit (the index
+/// follows the content type); a table not marked search-indexed is untouched.
 /// </summary>
 /// <remarks>
-/// The caller sits in the GENERAL business unit and the ordinary matter in the CHILD one, each unit with its own defaults,
-/// so a row filed under the matter (owned by the child unit's team) proves the default is the OWNER's unit, not the
-/// caller's. Same world as <see cref="CrossSurfaceOwnerTests"/> (<see cref="CreateWorld"/>).
+/// The caller sits in the GENERAL business unit and the ordinary matter in the CHILD one, and BOTH units hold an index, so a
+/// create that writes no column proves no unit's index is copied, the owner's or the caller's. Same world as
+/// <see cref="CrossSurfaceOwnerTests"/> (<see cref="CreateWorld"/>).
 /// </remarks>
 [Trait("status", "new")]
 public sealed class SearchIndexDefaultTests
@@ -104,67 +103,61 @@ public sealed class SearchIndexDefaultTests
         return (CreateWorld.Mapped(table, body, [.. lookups]), filed ? Directory.ChildBu : Directory.GeneralBu);
     }
 
-    private static (string Name, Guid Index) DefaultsOf(Guid businessUnit) =>
-        businessUnit == Directory.ChildBu ? (ChildIndexName, ChildIndex) : (GeneralIndexName, GeneralIndex);
-
     // =====================================================================================
-    // Unset → the owning business unit's default
+    // Task 041 (FR-40, #2502): the index follows the content type — step 8 is a recorded no-op and writes neither column
     // =====================================================================================
 
-    [Fact]
-    public async Task AMatterFiledUnderNothing_TakesItsOwningBusinessUnitsDefaults()
+    /// <summary>
+    /// Design §14.7 must-fire 5: a create on each of the six search-indexed tables, owned by a business unit that HAS an index
+    /// (the general unit for the matter and the project, the child unit for the four filed under the ordinary matter), sends
+    /// neither column; step 8 is traced <see cref="RecordCreationStepState.NoOp"/>; no business unit is read for the index.
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(AllSearchIndexedTables))]
+    public async Task ACreateWhoseOwningUnitHasAnIndex_WritesNeitherColumn_TracesStep8NoOp_AndReadsNoBusinessUnit(string table)
     {
-        var fields = await CreatedFieldsAsync(await _world.MappedAsync("sprk_matter", new { sprk_mattername = "Acme v. Widget" }));
+        var (request, unit) = WithClientIndex(table, Guid.Empty, clientName: null);
 
-        CreateWorld.Owner(fields).Should().Be(Directory.GeneralTeam);
-        Text(fields, NameColumn).Should().Be(GeneralIndexName);
-        Text(fields, LookupBind).Should().Be($"/sprk_aisearchindexes({GeneralIndex:D})");
+        var outcome = await _world.CreateAsync(request);
+
+        outcome.Succeeded.Should().BeTrue(outcome.Refusal?.Detail);
+        outcome.Warnings.Should().BeEmpty();
+        var fields = _world.Creates.Should().ContainSingle().Subject.Fields;
+        _world.SearchIndexDefaults.Should().ContainKey(unit, "the owning unit has an index, and it is not copied");
+        AssertNoIndexColumn(fields);
+        outcome.Steps.Single(s => s.Step == RecordCreationStep.SearchIndexDefault).State.Should().Be(RecordCreationStepState.NoOp);
+        _world.BusinessUnitReads.Should().BeEmpty("the index is not read from any business unit");
     }
 
-    [Fact]
-    public async Task AProjectFiledUnderAMatter_TakesTheMattersBusinessUnitsDefaults_NotTheCallers()
+    // A project created INTO isolation: RecordCreationServiceSecureRootSeamTests (it needs the provisioning fixture's plan,
+    // which this world does not carry).
+
+    /// <summary>Neither index column is in the create body, under any spelling, and none is sent as <c>null</c> (AC8).</summary>
+    private static void AssertNoIndexColumn(IReadOnlyDictionary<string, object?> fields)
     {
-        var fields = await CreatedFieldsAsync(await _world.ChatProjectAsync(CreateWorld.OrdinaryMatter));
-
-        CreateWorld.Owner(fields).Should().Be(Directory.ChildTeam);
-        Text(fields, NameColumn).Should().Be(ChildIndexName, "the OWNING unit's (the matter's), never the caller's general unit");
-        Text(fields, LookupBind).Should().Be($"/sprk_aisearchindexes({ChildIndex:D})");
+        fields.Keys.Should().NotContain(k => string.Equals(k, NameColumn, StringComparison.OrdinalIgnoreCase));
+        fields.Keys.Should().NotContain(k => k.StartsWith("sprk_ai_search_index", StringComparison.OrdinalIgnoreCase));
     }
-
-    [Fact]
-    public async Task ADocumentFiledUnderAMatter_TakesTheMattersBusinessUnitsDefaults_NotTheCallers()
-    {
-        var fields = await CreatedFieldsAsync(await _world.MappedAsync("sprk_document",
-            new { sprk_documentname = "Lease.docx", sprk_matter = CreateWorld.Lookup("sprk_matter", CreateWorld.OrdinaryMatter) }));
-
-        CreateWorld.Owner(fields).Should().Be(Directory.ChildTeam);
-        Text(fields, NameColumn).Should().Be(ChildIndexName);
-        Text(fields, LookupBind).Should().Be($"/sprk_aisearchindexes({ChildIndex:D})");
-    }
-
-    // A project created INTO isolation takes the Secure BU's defaults: RecordCreationServiceSecureRootSeamTests (it needs
-    // the provisioning fixture's plan, which this world does not carry).
 
     // =====================================================================================
-    // Task 039 (FR-38, #2399): whatever the client sent for either column is dropped; step 8 writes the owning unit's
+    // Task 039 (FR-38, #2399): whatever the client sent for either column is dropped; since task 041 nothing replaces it
     // =====================================================================================
 
     [Theory]
     [MemberData(nameof(AllSearchIndexedTables))]
-    public async Task AClientsSearchIndex_IsDropped_AndTheOwningUnitsIsWritten_OnEverySearchIndexedTable(string table)
+    public async Task AClientsSearchIndex_IsDropped_AndNothingIsWritten_OnEverySearchIndexedTable(string table)
     {
-        var (request, unit) = WithClientIndex(table, ExplicitIndex, "explicit-index");
+        var (request, _) = WithClientIndex(table, ExplicitIndex, "explicit-index");
 
         var fields = await CreatedFieldsAsync(request);
 
-        var (name, index) = DefaultsOf(unit);
-        Text(fields, NameColumn).Should().Be(name, "the client's name is dropped; the owning unit's is written");
-        Text(fields, LookupBind).Should().Be($"/sprk_aisearchindexes({index:D})", "the client's index is dropped; the owning unit's is written");
-        fields.Keys.Where(k => k.StartsWith("sprk_ai_search_index", StringComparison.OrdinalIgnoreCase)).Should().ContainSingle(
-            "the body carries the server's bind only, never the client's spelling of it").Which.Should().Be(LookupBind);
+        AssertNoIndexColumn(fields);
     }
 
-    /// <summary>The drop, proved where the overwrite cannot hide it: the owning unit has no index, so nothing replaces the client's.</summary>
+    /// <summary>
+    /// The drop where the owning unit has no index: nothing replaces the client's, and task 041 withdrew
+    /// <c>search_index_unset_for_owner_bu</c> (step 8 reads no unit, so it has nothing to report).
+    /// </summary>
     [Theory]
     [MemberData(nameof(AllSearchIndexedTables))]
     public async Task AClientsSearchIndex_IsNeverPassedOn_WhenTheOwningUnitHasNone(string table)
@@ -174,55 +167,48 @@ public sealed class SearchIndexDefaultTests
 
         var fields = await CreatedFieldsAsync(request);
 
-        fields.Should().NotContainKey(NameColumn);
-        fields.Keys.Should().NotContain(k => k.StartsWith("sprk_ai_search_index", StringComparison.OrdinalIgnoreCase));
-        _world.Log.Messages.Should().Contain(m => m.Contains("search_index_unset_for_owner_bu"));
+        AssertNoIndexColumn(fields);
+        _world.Log.Messages.Should().NotContain(m => m.Contains("search_index_unset_for_owner_bu"));
     }
 
     [Theory]
     [MemberData(nameof(AllSearchIndexedTables))]
-    public async Task AClientsSearchIndex_InTheLowerCaseSpelling_IsDroppedToo_AndTheBodyHasOneBindKey(string table)
+    public async Task AClientsSearchIndex_InTheLowerCaseSpelling_IsDroppedToo_AndNoBindKeyIsSent(string table)
     {
-        var (request, unit) = WithClientIndex(table, ExplicitIndex, clientName: null, bindKey: "sprk_ai_search_index@odata.bind");
+        var (request, _) = WithClientIndex(table, ExplicitIndex, clientName: null, bindKey: "sprk_ai_search_index@odata.bind");
 
         var fields = await CreatedFieldsAsync(request);
 
-        fields.Keys.Where(k => string.Equals(k, LookupBind, StringComparison.OrdinalIgnoreCase)).Should().ContainSingle()
-            .Which.Should().Be(LookupBind);
-        Text(fields, LookupBind).Should().Be($"/sprk_aisearchindexes({DefaultsOf(unit).Index:D})");
+        AssertNoIndexColumn(fields);
     }
 
     [Theory]
     [MemberData(nameof(SearchIndexedTables))]
-    public async Task AnExplicitName_IsDropped_AndTheOwningUnitsNameAndIndexAreWritten(string table)
+    public async Task AnExplicitName_IsDropped_AndNeitherColumnIsWritten(string table)
     {
         var fields = await CreatedFieldsAsync(CreateWorld.Mapped(table,
             new Dictionary<string, object?> { [NameColumn] = "explicit-index" }));
 
-        Text(fields, NameColumn).Should().Be(GeneralIndexName, "the name column is the server's too (the legacy text column)");
-        Text(fields, LookupBind).Should().Be($"/sprk_aisearchindexes({GeneralIndex:D})");
+        AssertNoIndexColumn(fields);
     }
 
     [Fact]
-    public async Task TheClientsNameAlone_IsReplacedByTheOwningUnitsName_OrByNothing_WhenTheUnitHasNone()
+    public async Task TheClientsNameAlone_IsDropped_AndNothingIsWritten_WhetherOrNotTheUnitHasAName()
     {
         var (request, _) = WithClientIndex("sprk_workassignment", Guid.Empty, "client-name");
-        var named = await CreatedFieldsAsync(request);
-        Text(named, NameColumn).Should().Be(ChildIndexName);
+        AssertNoIndexColumn(await CreatedFieldsAsync(request));
 
         _world.Creates.Clear();
         _world.SearchIndexDefaults[Directory.ChildBu] = (null, ChildIndex);
         var (again, _) = WithClientIndex("sprk_workassignment", Guid.Empty, "client-name");
-        var unnamed = await CreatedFieldsAsync(again);
-        unnamed.Should().NotContainKey(NameColumn, "the unit has no name, so none is sent (never the client's)");
-        Text(unnamed, LookupBind).Should().Be($"/sprk_aisearchindexes({ChildIndex:D})");
+        AssertNoIndexColumn(await CreatedFieldsAsync(again));
     }
 
     /// <summary>
     /// The #2399 repro: a work assignment created by a caller of the GENERAL unit under a matter owned by the CHILD unit, the
     /// client binding the user's own unit's index, a catalog row the caller cannot AppendTo. It used to be refused (the caller
-    /// has no AppendTo on the row); the bind is dropped before the caller's checks, so no AppendTo is asked on the catalog and the
-    /// row takes the final owning unit's index.
+    /// has no AppendTo on the row); the bind is dropped before the caller's checks, so no AppendTo is asked on the catalog, and
+    /// since task 041 the row gets no index column at all.
     /// </summary>
     [Fact]
     public async Task Issue2399_AWorkAssignmentBindingTheUsersUnitIndexTheCallerCannotAppendTo_IsNotRefused_AndAsksNoAppendToOnTheCatalog()
@@ -244,8 +230,7 @@ public sealed class SearchIndexDefaultTests
         asked.Should().BeEmpty("the bind is dropped before step 5, so AppendTo is never asked on a catalog row (#2399)");
         var fields = _world.Creates.Should().ContainSingle().Subject.Fields;
         CreateWorld.Owner(fields).Should().Be(Directory.ChildTeam);
-        Text(fields, LookupBind).Should().Be($"/sprk_aisearchindexes({ChildIndex:D})", "the final owning unit's index, not the user's");
-        Text(fields, NameColumn).Should().Be(ChildIndexName);
+        AssertNoIndexColumn(fields);
     }
 
     [Fact]
@@ -261,33 +246,20 @@ public sealed class SearchIndexDefaultTests
     }
 
     // =====================================================================================
-    // Step 8 uses the FINAL owning team's unit: the Secure team's, and nothing when that unit has no index
+    // A secure record gets no index column either: the owning Secure team's unit is not read (task 041)
     // =====================================================================================
 
     [Fact]
-    public async Task AnEventUnderASecureMatter_TakesTheSecureTeamsBusinessUnitsIndex()
+    public async Task AnEventUnderASecureMatter_WhoseUnitHasAnIndex_GetsNoIndexColumn_AndNoUnitIsRead()
     {
         _world.SearchIndexDefaults[Directory.SecureBu] = ("spaarke-secure-index", Guid.Parse("a0150000-0000-4000-8000-0000000000a9"));
 
         var fields = await CreatedFieldsAsync(EventUnder(CreateWorld.SecureMatter, ExplicitIndex, "client-name"));
 
         CreateWorld.Owner(fields).Should().Be(Directory.SecureNamedTeam, "isolated: the named Secure Record Owners team");
-        Text(fields, NameColumn).Should().Be("spaarke-secure-index", "the secure team's unit, never the caller's or the root's");
-        Text(fields, LookupBind).Should().Be("/sprk_aisearchindexes(a0150000-0000-4000-8000-0000000000a9)");
-    }
-
-    [Fact]
-    public async Task AnEventUnderASecureMatter_WhoseUnitHasNoIndex_GetsNone_NotTheCallersNorTheRoots_AndLogsIt()
-    {
-        // The caller's (general) and the matter's (child) units HAVE an index; the secure unit has none: nothing falls back.
-        var fields = await CreatedFieldsAsync(EventUnder(CreateWorld.SecureMatter, ExplicitIndex, "client-name"));
-
-        CreateWorld.Owner(fields).Should().Be(Directory.SecureNamedTeam);
-        fields.Should().NotContainKey(NameColumn).And.NotContainKey(LookupBind);
-        var line = _world.Log.Entries.Should().ContainSingle(e => e.Message.Contains("search_index_unset_for_owner_bu")).Subject;
-        line.Message.Should().Contain(Directory.SecureNamedTeam.ToString()).And.Contain(Directory.SecureBu.ToString());
-        line.Message.Should().Contain("sprk_event");
-        line.Message.Should().NotContain("client-name").And.NotContain("@");
+        AssertNoIndexColumn(fields);
+        _world.BusinessUnitReads.Should().BeEmpty();
+        _world.Log.Messages.Should().NotContain(m => m.Contains("search_index_unset_for_owner_bu"));
     }
 
     private static UnifiedCreateRequest EventUnder(Guid matter, Guid clientIndex, string clientName) =>
@@ -316,13 +288,14 @@ public sealed class SearchIndexDefaultTests
         outcome.Succeeded.Should().BeTrue(outcome.Refusal?.Detail);
         var lines = _world.Log.Entries.Where(e => e.Message.Contains("client_search_index_dropped")).ToList();
         lines.Should().HaveCount(2, "one for the lookup, one for the name column");
-        lines.Should().OnlyContain(l => l.Level == Microsoft.Extensions.Logging.LogLevel.Warning);
+        lines.Should().OnlyContain(l => l.Level == Microsoft.Extensions.Logging.LogLevel.Information,
+            "Information until W3 lands (UAC-r2, task 041); task 035 returns it to Warning");
         var lookup = lines.Single(l => l.Message.Contains("column=sprk_ai_search_index"));
         lookup.Message.Should().Contain("table=sprk_workassignment").And.Contain($"record={outcome.CreatedId}")
             .And.Contain("origin=caller")
-            .And.Contain($"droppedIndexId={UserBusinessUnitIndex}").And.Contain($"appliedIndexId={ChildIndex}");
+            .And.Contain($"droppedIndexId={UserBusinessUnitIndex}").And.Contain("appliedIndexId=(null)");
         var name = lines.Single(l => l.Message.Contains("column=sprk_searchindexname"));
-        name.Message.Should().Contain("droppedIndexName=" + GeneralIndexName).And.Contain("appliedIndexName=" + ChildIndexName);
+        name.Message.Should().Contain("droppedIndexName=" + GeneralIndexName).And.Contain("appliedIndexName=(null)");
         lines.Should().OnlyContain(l => !l.Message.Contains("Review the lease") && !l.Message.Contains('@'),
             "ids and catalog names only: no record name, no person, no email");
     }
@@ -341,7 +314,7 @@ public sealed class SearchIndexDefaultTests
         var line = _world.Log.Messages.Should().ContainSingle(m => m.Contains("client_search_index_dropped")).Subject;
         line.Should().NotContain("jane").And.NotContain("contoso").And.NotContain("Acme").And.NotContain("memo").And.NotContain("@");
         line.Should().Contain("<not an index name>").And.Contain($"length {freeText.Length}");
-        line.Should().Contain("appliedIndexName=" + ChildIndexName, "the catalog's own name is an index name and is logged");
+        line.Should().Contain("appliedIndexName=(null)", "nothing is applied (task 041), so no catalog name is logged");
     }
 
     [Fact]
@@ -355,16 +328,21 @@ public sealed class SearchIndexDefaultTests
             .Which.Should().Contain("droppedIndexName=client-made-index");
     }
 
+    /// <summary>
+    /// Task 041: the owning unit's own index, sent by the client, is no longer "equal to the applied" — nothing is applied, so
+    /// every dropped value differs and is logged (FR-38's "log only when it differs" rule itself is unchanged; the both-none
+    /// case below still logs nothing).
+    /// </summary>
     [Fact]
-    public async Task ADroppedIndexThatEqualsTheApplied_IsNotLogged_NameComparedTrimmedAndIgnoringCase()
+    public async Task ADroppedIndexThatEqualsTheOwningUnitsIndex_IsLogged_BecauseNothingIsApplied()
     {
         var (request, _) = WithClientIndex("sprk_workassignment", ChildIndex, "  " + ChildIndexName.ToUpperInvariant() + " ");
 
         var outcome = await _world.CreateAsync(request);
 
         outcome.Succeeded.Should().BeTrue(outcome.Refusal?.Detail);
-        _world.Log.Messages.Should().NotContain(m => m.Contains("client_search_index_dropped"),
-            "the same id, and the same name trimmed and ordinal-ignore-case, is nothing to report");
+        _world.Log.Messages.Where(m => m.Contains("client_search_index_dropped")).Should().HaveCount(2,
+            "one line per column: nothing is applied, so the unit's own index differs from it");
     }
 
     [Fact]
@@ -390,29 +368,28 @@ public sealed class SearchIndexDefaultTests
 
     [Theory]
     [MemberData(nameof(SearchIndexedTables))]
-    public async Task ABlankName_IsUnset_AndTakesTheOwningBusinessUnitsDefault(string table)
+    public async Task ABlankName_IsDropped_AndNeitherColumnIsWritten(string table)
     {
         var fields = await CreatedFieldsAsync(CreateWorld.Mapped(table, new Dictionary<string, object?> { [NameColumn] = "  " }));
 
-        Text(fields, NameColumn).Should().Be(GeneralIndexName);
+        AssertNoIndexColumn(fields);
     }
 
     // =====================================================================================
-    // An explicit null bind → unset, filled under ONE key (UAC-r2's review of 015, K3; task 018a)
+    // An explicit null bind → dropped, and never sent as null (UAC-r2's review of 015, K3; task 018a; task 041 AC8)
     // =====================================================================================
 
     [Theory]
     [InlineData("sprk_ai_search_index@odata.bind", "a lower-case spelling of the bind key")]
     [InlineData(LookupBind, "the canonical spelling of the bind key")]
-    public async Task AnExplicitNullBind_IsUnset_AndIsFilledUnderTheCanonicalKeyOnly(string nullKey, string because)
+    public async Task AnExplicitNullBind_IsDropped_AndNoBindKeyIsSent_NotEvenAsNull(string nullKey, string because)
     {
         var fields = await CreatedFieldsAsync(CreateWorld.Mapped("sprk_matter",
             new Dictionary<string, object?> { ["sprk_mattername"] = "Acme v. Widget", [nullKey] = null }));
 
         fields.Keys.Where(k => string.Equals(k, LookupBind, StringComparison.OrdinalIgnoreCase))
-            .Should().ContainSingle($"{because}: the body never carries two keys that differ only in case")
-            .Which.Should().Be(LookupBind, "the default is written under the canonical key");
-        Text(fields, LookupBind).Should().Be($"/sprk_aisearchindexes({GeneralIndex:D})", "an explicit null is unset (fill-only)");
+            .Should().BeEmpty($"{because}: an existing value is left as it is, never cleared by a null");
+        AssertNoIndexColumn(fields);
     }
 
     // =====================================================================================
@@ -496,20 +473,17 @@ public sealed class SearchIndexDefaultTests
         _world.Log.Messages.Should().NotContain(m => m.Contains("client_search_index_dropped"));
     }
 
+    /// <summary>Task 041: step 8 reads no business unit, so a unit that cannot be read neither warns nor touches the create.</summary>
     [Fact]
-    public async Task WhenTheOwningBusinessUnitCannotBeRead_NothingIsFilled_TheCallerIsTold_AndTheRecordIsCreated()
+    public async Task WhenTheOwningBusinessUnitCannotBeRead_TheCreateIsUnaffected_AndNothingIsSaidAboutTheIndex()
     {
         _world.BusinessUnitReadFault = new TimeoutException("business unit read timed out");
 
         var outcome = await _world.CreateAsync(await _world.MappedAsync("sprk_matter", new { sprk_mattername = "Acme v. Widget" }));
 
-        outcome.Succeeded.Should().BeTrue("a routing hint never fails a create");
-        var fields = _world.Creates.Should().ContainSingle().Subject.Fields;
-        fields.Should().NotContainKey(NameColumn).And.NotContainKey(LookupBind);
-        outcome.Warnings.Should().ContainSingle().Which.Should().Be(
-            "Business-unit search defaults could not be read, so they were not applied. Document indexing for this matter " +
-            "falls back to its business unit's settings.");
-        outcome.Warnings.Single().Should().NotContain("timed out", "the fault's text stays in the log");
+        outcome.Succeeded.Should().BeTrue(outcome.Refusal?.Detail);
+        AssertNoIndexColumn(_world.Creates.Should().ContainSingle().Subject.Fields);
+        outcome.Warnings.Should().BeEmpty("the create no longer reads the unit's search defaults, so it has nothing to report");
     }
 
     /// <summary>A created column's text: a value the server added, or one passed through from the payload's JSON body.</summary>
