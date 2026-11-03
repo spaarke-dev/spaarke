@@ -12,6 +12,9 @@
 ## Known on dev (not defects)
 - `ai.invoice.binding_missing` for invoice-codeset-match, and for invoice-line-code too: dev has only the invoice-classify Binding. Seeding those Actions and Bindings is task 053 steps 2–3, which haven't run. It isn't fatal: code-set matching falls back to embedding ranking, and the proposals are marked unreviewed. Seeding them on dev is a live write and needs the owner's OK.
 
+## Done 2026-11-03
+- K3: the owner granted the Office Add In User role Read on the six billing tables on dev; source in #2530 (7a33014d9c), approved by uac-r2 and ontology-r1. The solution import carries it to new environments.
+
 ## Filed
 - #2529: the submission job retries a permanent schema fault 5 times. That is why the owner's run took over a minute; a good run takes about 15 s.
 
@@ -19,7 +22,6 @@
 - word-add-in: the fix for Outlook desktop "Request Too Long" (new Outlook reports OfficeOnline, `naa=false`, so sign-in uses a popup with oversized cookies). Their researcher is checking NAA support; the auth change needs the owner's go. The `%3E/suggestions` 404 is the expected answer for an uncaptured email, not a bug.
 - The click-through check that the AP emails grid shows no New button (on the owner's checklist through uac-r2).
 - The owner deletes `C:\w15p` (my rm was blocked).
-- K3 (owner's call): no Office Add In User role has Read on `sprk_billingexport`. It fails closed. A grant would need all six BU copies, the provisioning step and the deployment guide.
 
 ## Open items
 - Task 153 step 4 conflicts with the rule that only SPA-r3 deploys the dev BFF: amend the POML. The rest of 153 waits for 136.
