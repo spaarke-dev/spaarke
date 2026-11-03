@@ -677,7 +677,7 @@ jobs:
           if (-not $changed) { Write-Host 'No changed files vs base'; exit 0 }
 
           $targets = @(
-            '^\.claude/skills/[^/]+/SKILL\.md$',
+            '^\.claude/skills/(?!_)[^/]+/SKILL\.md$',   # skip _template (placeholder stamp) and _archived
             '^\.claude/constraints/.+\.md$',
             '^docs/standards/.+\.md$',
             '^docs/architecture/.+\.md$',
