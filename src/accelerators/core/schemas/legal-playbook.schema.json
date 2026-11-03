@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://spaarke.com/schemas/accelerators/legal-playbook/0.1.json",
+  "title": "Spaarke legal playbook (parsed)",
+  "description": "Output of playbook_parse.py. The Markdown playbook is the source; this JSON is what skills and the Word renderer consume.",
+  "type": "object",
+  "required": ["title", "meta", "topics", "silent_topics"],
+  "additionalProperties": false,
+  "properties": {
+    "title": { "type": "string" },
+    "meta": {
+      "type": "object",
+      "required": ["version", "side"],
+      "additionalProperties": false,
+      "properties": {
+        "version": { "type": "string" },
+        "owner": { "type": "string" },
+        "effective": { "type": "string" },
+        "jurisdiction_default": { "type": "string" },
+        "side": { "enum": ["mutual", "disclosing", "receiving"] },
+        "status": { "type": "string" }
+      }
+    },
+    "topics": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "preferred", "priority"],
+        "additionalProperties": false,
+        "properties": {
+          "id": { "type": "string", "pattern": "^[a-z]+\\.[a-z0-9-]+$" },
+          "preferred": { "type": "string" },
+          "fallback": { "type": ["string", "null"] },
+          "escalate": { "type": ["string", "null"] },
+          "model_language": { "type": ["string", "null"] },
+          "rationale": { "type": ["string", "null"] },
+          "priority": { "enum": ["High", "Medium", "Low"] }
+        }
+      }
+    },
+    "silent_topics": { "type": "array", "items": { "type": "string" } }
+  }
+}

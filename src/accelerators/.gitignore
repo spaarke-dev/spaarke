@@ -1,0 +1,5 @@
+# The repo-root .gitignore ignores every build/ folder; here build/ holds source, only build/out/ is output.
+!build/
+build/out/
+__pycache__/
+*.pyc
