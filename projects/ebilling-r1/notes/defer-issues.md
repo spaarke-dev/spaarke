@@ -10,6 +10,24 @@
 
 ## Open (in priority order)
 
+### DEF-052 — The job's document copy and from-email parts skip the per-file size limit
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | next-round |
+| **Filed** | 2026-11-03 |
+| **Source** | 118b adversarial review (finding 2, parity) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2553 |
+
+**Description**: `MaxSubmissionFileSizeMb` (default 25 MB, exposed as `MaxFileBytes`) is enforced on uploads (413) and imports. Two copy paths skip it: `SourceDocumentFileRead.ReadAsync` as called by the processing job, which buffers the whole file at about twice its size, and the from-email marked `.eml` parts. The 118b fix applies the limit to supporting documents at intake only.
+
+**Entry-points**: `Services/Finance/Submission/SourceDocumentFileRead.cs`; `InvoiceSubmissionProcessingJobHandler.cs`; the from-email part reader (094).
+
+**Fails without it**: a file far over the limit is held in memory by the API process, which also runs the job processor. Concurrent submissions multiply that, while an upload of the same file is refused.
+
+---
+
 ### DEF-051 — Dates read day-for-month at high confidence get past the reliability gate
 
 | Field | Value |
