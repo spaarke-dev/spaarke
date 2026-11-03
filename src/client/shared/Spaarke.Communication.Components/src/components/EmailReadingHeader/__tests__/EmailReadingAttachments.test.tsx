@@ -232,4 +232,82 @@ describe('EmailReadingAttachments', () => {
     expect(consoleErrorSpy).not.toHaveBeenCalled();
     consoleErrorSpy.mockRestore();
   });
+
+  // ── ebilling-r1 task 118: the profile's Invoice flag → badge + "Submit as invoice" ─────────────────────────────
+  describe('Invoice flag (task 118)', () => {
+    const DOCUMENT_TYPE_INVOICE = 100000001;
+    const DOCUMENT_TYPE_CONTRACT = 100000000;
+    const row = (id: string, name: string, doc: string | null) => ({
+      sprk_communicationattachmentid: id,
+      sprk_name: name,
+      sprk_attachmenttype: ATTACHMENT_TYPE_FILE,
+      _sprk_document_value: doc,
+    });
+
+    function renderFlagged(onSubmitAsInvoice?: (documentId: string) => void) {
+      const dataService = makeDataService(
+        [
+          row('a1', 'Invoice-10044725.pdf', 'doc-1'),
+          row('a2', 'Contract.pdf', 'doc-2'),
+          row('a3', 'notes.pdf', 'doc-3'),
+          row('a4', 'orphan.pdf', null),
+        ],
+        [
+          { sprk_documentid: 'doc-1', sprk_hasfile: true, sprk_documenttype: DOCUMENT_TYPE_INVOICE },
+          { sprk_documentid: 'doc-2', sprk_hasfile: true, sprk_documenttype: DOCUMENT_TYPE_CONTRACT },
+          // doc-3: not profiled yet - no type at all
+          { sprk_documentid: 'doc-3', sprk_hasfile: true, sprk_documenttype: null },
+        ]
+      );
+      renderWithProvider(
+        <EmailReadingAttachments
+          selectedId="comm-1"
+          dataService={dataService}
+          navigation={makeNavigation()}
+          apiBaseUrl="https://bff.example.com"
+          onSubmitAsInvoice={onSubmitAsInvoice}
+        />
+      );
+      return dataService;
+    }
+
+    it('shows the Invoice badge only on the attachment whose document is typed Invoice', async () => {
+      renderFlagged();
+      await waitFor(() => expect(screen.getByText('Invoice-10044725.pdf')).toBeInTheDocument());
+      const badges = screen.getAllByTestId('attachment-invoice-badge');
+      expect(badges).toHaveLength(1);
+      const flaggedRow = screen.getByText('Invoice-10044725.pdf').closest('[role="listitem"]') as HTMLElement;
+      expect(flaggedRow).toContainElement(badges[0]);
+      // Another type, no type yet, and no document at all show none.
+      for (const name of ['Contract.pdf', 'notes.pdf', 'orphan.pdf']) {
+        const other = screen.getByText(name).closest('[role="listitem"]') as HTMLElement;
+        expect(other.querySelector('[data-testid="attachment-invoice-badge"]')).toBeNull();
+        expect(other.querySelector('[data-testid="attachment-submit-as-invoice"]')).toBeNull();
+      }
+    });
+
+    it('reads the type in the existing single sprk_document query (query count unchanged)', async () => {
+      const dataService = renderFlagged();
+      await waitFor(() => expect(screen.getByText('Invoice-10044725.pdf')).toBeInTheDocument());
+      const calls = (dataService.retrieveMultipleRecords as jest.Mock).mock.calls;
+      expect(calls.map(c => c[0])).toEqual(['sprk_communicationattachment', 'sprk_document']);
+      expect(calls[1][1]).toContain('sprk_documenttype');
+    });
+
+    it('"Submit as invoice" opens the flow with that attachment document and does not open the preview', async () => {
+      const onSubmitAsInvoice = jest.fn();
+      renderFlagged(onSubmitAsInvoice);
+      await waitFor(() => expect(screen.getByText('Invoice-10044725.pdf')).toBeInTheDocument());
+      fireEvent.click(screen.getByTestId('attachment-submit-as-invoice'));
+      expect(onSubmitAsInvoice).toHaveBeenCalledTimes(1);
+      expect(onSubmitAsInvoice).toHaveBeenCalledWith('doc-1');
+      expect(screen.queryByTestId('rich-file-preview-dialog')).not.toBeInTheDocument();
+    });
+
+    it('without a handler the badge still shows and there is no action', async () => {
+      renderFlagged(undefined);
+      await waitFor(() => expect(screen.getByTestId('attachment-invoice-badge')).toBeInTheDocument());
+      expect(screen.queryByTestId('attachment-submit-as-invoice')).not.toBeInTheDocument();
+    });
+  });
 });

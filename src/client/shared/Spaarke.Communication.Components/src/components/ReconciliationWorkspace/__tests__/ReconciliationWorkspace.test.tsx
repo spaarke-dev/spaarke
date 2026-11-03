@@ -314,4 +314,76 @@ describe('ReconciliationWorkspace', () => {
     expect(screen.queryByText('Email Review All')).not.toBeInTheDocument();
     expect(screen.queryByText('Email Review Completed')).not.toBeInTheDocument();
   });
+
+  describe('Invoice tab (ebilling-r1 task 118)', () => {
+    /** An OData read: the email's attachment rows, then the documents' file flags. */
+    function odataFor(attachmentNames: string[]) {
+      return {
+        retrieveMultipleRecords: jest.fn(async (entity: string) => {
+          if (entity === 'sprk_communicationattachment') {
+            return {
+              entities: attachmentNames.map((name, i) => ({
+                sprk_communicationattachmentid: `aaaaaaaa-0000-0000-0000-00000000000${i + 1}`,
+                sprk_name: name,
+                sprk_attachmenttype: 100000000,
+                _sprk_document_value: `dddddddd-0000-0000-0000-00000000000${i + 1}`,
+              })),
+            };
+          }
+          if (entity === 'sprk_document') {
+            return {
+              entities: attachmentNames.map((_n, i) => ({
+                sprk_documentid: `dddddddd-0000-0000-0000-00000000000${i + 1}`,
+                sprk_hasfile: true,
+                sprk_graphitemid: `item-${i + 1}`,
+              })),
+            };
+          }
+          return { entities: [] };
+        }),
+      };
+    }
+
+    it('offers an "Invoice" tab when the email has a PDF attachment, and it opens the one Submit Invoice flow', async () => {
+      const dataService = odataFor(['invoice-2026.pdf', 'cover.docx']);
+      renderWorkspace({ dataService });
+      await openFirstRow();
+
+      const tab = await screen.findByTestId('reconcile-tab-invoice');
+      expect(tab).toHaveTextContent('Invoice');
+      fireEvent.click(tab);
+      expect(await screen.findByTestId('invoice-submit-tab')).toBeInTheDocument();
+      expect(await screen.findByTestId('submit-invoice-flow')).toBeInTheDocument();
+    });
+
+    it('negative: no "Invoice" tab when the email has no PDF attachment', async () => {
+      const dataService = odataFor(['cover.docx', 'logo.png']);
+      renderWorkspace({ dataService });
+      await openFirstRow();
+      await waitFor(() => expect(dataService.retrieveMultipleRecords).toHaveBeenCalled());
+      // Let the best-effort attachment probe settle before asserting absence.
+      await waitFor(() =>
+        expect(dataService.retrieveMultipleRecords).toHaveBeenCalledWith('sprk_document', expect.any(String))
+      );
+      expect(screen.queryByTestId('reconcile-tab-invoice')).not.toBeInTheDocument();
+    });
+
+    it('negative: no "Invoice" tab when the attachment read fails (best-effort, never a broken dialog)', async () => {
+      const dataService = { retrieveMultipleRecords: jest.fn().mockRejectedValue(new Error('boom')) };
+      renderWorkspace({ dataService });
+      await openFirstRow();
+      await waitFor(() => expect(dataService.retrieveMultipleRecords).toHaveBeenCalled());
+      expect(screen.queryByTestId('reconcile-tab-invoice')).not.toBeInTheDocument();
+      expect(screen.getByTestId('reconcile-tab-fields')).toBeInTheDocument();
+    });
+
+    it('the Invoice tab is reachable while Fields/Tasks are gated (no confirmed Related-to is needed)', async () => {
+      const dataService = odataFor(['invoice-2026.pdf']);
+      renderWorkspace({ dataService, resolveRegarding: () => null });
+      await openFirstRow();
+      const tab = await screen.findByTestId('reconcile-tab-invoice');
+      expect(tab).not.toBeDisabled();
+      expect(screen.getByTestId('reconcile-tab-fields')).toBeDisabled();
+    });
+  });
 });

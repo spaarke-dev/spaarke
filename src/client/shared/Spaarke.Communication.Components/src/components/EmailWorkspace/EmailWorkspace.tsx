@@ -15,7 +15,7 @@
  *      (`EmailReadingHeader`).
  *   3. TOOLBAR (shell's own `EmailToolbar`) — Reply / Reply All / Forward / New
  *      (icon+text, left) + a right-aligned icon-only group with tooltips: Save to
- *      SharePoint, Create Event, Create To Do, Link Invoice, Open full form. The
+ *      SharePoint, Create Event, Create To Do, Submit Invoice, Open full form. The
  *      create/save actions act on the email's resolved association.
  *   4-6. `renderBody` composes, in order:
  *      4. RECIPIENTS — From/To always; Cc/Bcc only when non-empty (`EmailRecipients`).
@@ -41,7 +41,7 @@
  */
 import * as React from 'react';
 import { makeStyles, tokens, Text, MessageBar, MessageBarBody } from '@fluentui/react-components';
-import type { ICommunicationAssociation } from '@spaarke/ui-components';
+import { resolveInitialInvoiceRecord, type ICommunicationAssociation } from '@spaarke/ui-components';
 import { EmailViewSelector, useEmailViews } from '../EmailViewSelector';
 import { EmailReadingPaneShell } from '../EmailReadingPaneShell';
 import { EmailBodyView } from '../EmailBody';
@@ -51,6 +51,8 @@ import { EmailConnectionsReview, ConfirmedChip, useConnectionsReviewStyles } fro
 import { useEmailComposeActions } from '../EmailComposeActions';
 import { derivePrimaryReview, summarizePrimaryReview, clearPrimaryRegarding, bffRefile } from '../../logic/connections';
 import { launchCreate, refusedAttachmentsNotice, type CreateKind, type IArchiveResult } from '../../logic/actions';
+import { createEmailInvoiceSubmission } from '../../logic/invoice';
+import { SubmitInvoiceDialog } from '../SubmitInvoice';
 import { CollapsibleSection } from './CollapsibleSection';
 import {
   COMMUNICATION_ENTITY,
@@ -284,12 +286,32 @@ export const EmailWorkspace: React.FC<EmailWorkspaceProps> = ({
     [authenticatedFetch, record.reload]
   );
 
-  // "Create from this email" (Event / To Do / Invoice) — routes through the single
+  // "Create from this email" (Event / To Do) — routes through the single
   // `launchCreate` seam (OOB `navigateTo` modal today; swappable later) so the
   // create form opens against the email's context / resolved association.
   const handleCreate = React.useCallback((kind: CreateKind): void => {
     launchCreate(kind, { onError: err => console.warn('[EmailWorkspace] create-from-email launch failed:', err) });
   }, []);
+
+  // "Submit Invoice" (ebilling-r1 task 118) — replaces "Link Invoice". Three entry points (this toolbar button, a
+  // flagged attachment's "Submit as invoice", the Email Review dialog's "Invoice" tab) run ONE flow, which submits
+  // through the BFF's from-document route; nothing in this UI creates an sprk_invoice directly.
+  const invoiceSubmission = React.useMemo(
+    () => createEmailInvoiceSubmission({ authenticatedFetch, dataService, bffBaseUrl }),
+    [authenticatedFetch, dataService, bffBaseUrl]
+  );
+  const [invoiceFlow, setInvoiceFlow] = React.useState<{ communicationId: string; preMarkedInvoiceId?: string } | null>(
+    null
+  );
+  // The core record the selected email is already filed to (a Matter, Project or Work Assignment), if any: the
+  // flow starts with it chosen.
+  const invoiceInitialRecord = React.useMemo(() => {
+    for (const a of record.recordState?.filedAssociations ?? []) {
+      const core = resolveInitialInvoiceRecord(a);
+      if (core) return core;
+    }
+    return undefined;
+  }, [record.recordState]);
 
   const toolbarActions = React.useMemo(
     () => ({
@@ -300,7 +322,7 @@ export const EmailWorkspace: React.FC<EmailWorkspaceProps> = ({
       onSaveToSharePoint: handleSaveToSharePoint,
       onCreateEvent: () => handleCreate('event'),
       onCreateTodo: () => handleCreate('todo'),
-      onLinkInvoice: () => handleCreate('invoice'),
+      onSubmitInvoice: (communicationId: string) => setInvoiceFlow({ communicationId }),
       onOpenFullForm: (communicationId: string) => {
         void openFullForm(communicationId);
       },
@@ -413,6 +435,9 @@ export const EmailWorkspace: React.FC<EmailWorkspaceProps> = ({
                   navigation={navigationService}
                   apiBaseUrl={bffBaseUrl}
                   onCountChange={setAttachmentCount}
+                  onSubmitAsInvoice={documentId =>
+                    setInvoiceFlow({ communicationId: id, preMarkedInvoiceId: documentId })
+                  }
                 />
               </CollapsibleSection>
 
@@ -506,6 +531,17 @@ export const EmailWorkspace: React.FC<EmailWorkspaceProps> = ({
       </div>
 
       {composerDialog}
+
+      {invoiceFlow && (
+        <SubmitInvoiceDialog
+          open
+          onClose={() => setInvoiceFlow(null)}
+          communicationId={invoiceFlow.communicationId}
+          preMarkedInvoiceId={invoiceFlow.preMarkedInvoiceId}
+          submission={invoiceSubmission}
+          initialRecord={invoiceInitialRecord}
+        />
+      )}
     </div>
   );
 };
