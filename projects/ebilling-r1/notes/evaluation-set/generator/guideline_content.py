@@ -9,14 +9,16 @@ guidelines/README.md): "S" marks a figure taken from a source, "E" an estimate d
 
 A clause is C(number, text, rules=[Set F rule ids it states] | unmapped=reason, para=short paraphrase). Unmapped reasons follow Set E:
   not-billing     not about invoices (conduct, confidentiality, reporting, payment terms)
-  judgement       about billing, but deciding it needs facts the invoice does not carry (an approval, a receipt, the firm's other rates)
-  needs-new-type  checkable from invoice data, but no rule type states it
+  judgement       about billing, but deciding it needs facts the invoice does not carry (an approval with no threshold, a receipt, the
+                  firm's other rates)
+  needs-new-type  checkable from invoice data, but no rule type states it; includes an approval above a stated threshold (Set E
+                  E-OCG-14: vendor costs over $2,000)
 A clause with neither is context (scope, definitions) and is not scored.
 """
 
-# Activity codes the production NonBillableActivity rule lists (production_key.PRODUCTION_RULES): the guideline names them so a drafter
-# can state the rule as codes.
-A110 = "UTBMS activity code A110, Manage data/files"
+# Internal conferences are exactly UTBMS activity A105, so the guideline names the code. Clerical work is named by task only: no code
+# identifies it (A110 also covers legitimate document work, and Set F codes invoice preparation A111), so naming A110 would make every
+# A110 line non-compliant by the text, which Set F does not (review of 2026-11-03).
 A105 = "UTBMS activity code A105, Communicate (within the firm)"
 
 CLERICAL = ("scheduled conference calls, calendar entries, recording docketed deadlines, conflict checks, invoice preparation, "
@@ -78,7 +80,7 @@ GUIDELINES = [
                        "Attorney for review.",
                 rules=["RS-01-R02"], para="Block-billed and vague entries are referred for review."),
               C("2.3", f"Clerical and administrative work is overhead and is not billable, whoever performs it. It includes {CLERICAL}. "
-                       f"Entries for this work ({A110}) are disallowed and not paid.",
+                       "Entries for this work are disallowed and not paid.",
                 rules=["RS-01-R03"], para="Clerical and administrative work is not billable.")),
             S("3", "Expenses",
               C("3.1", "Expenses are billed at actual cost, without markup.",
@@ -149,8 +151,9 @@ GUIDELINES = [
               C("2.2", "The OGC expects lean staffing and may ask the firm to explain the staffing of any task.",
                 unmapped="judgement", para="Lean staffing; the OGC may question the staffing of any task.")),
             S("3", "Rates",
-              C("3.1", "Rates billed to the System are at least 10% below the firm's standard rates for the same timekeepers.",
-                unmapped="judgement", para="Rates at least 10% below the firm's standard rates (standard rates are not on the invoice)."),
+              C("3.1", "Rates offered to the System reflect the firm's most favourable terms for public-sector clients.",
+                unmapped="judgement", para="Rates reflect the firm's best public-sector terms (the firm's other rates are not on the "
+                                           "invoice)."),
               C("3.2", "Each timekeeper's hourly rate is the rate in the firm's approved rate schedule, which may not exceed the "
                        "maximum for the timekeeper's classification in Appendix A. Rates are fixed for the fiscal year (July to June) "
                        "and change only when the OGC issues a revised schedule. Time billed at a higher rate is reduced to the "
@@ -160,7 +163,7 @@ GUIDELINES = [
               C("4.1", "Time is recorded in increments of one-tenth of an hour (0.1 hour). An entry in any other increment is reduced "
                        "to the next lower tenth.",
                 rules=["RS-02-R03"], para="0.1-hour increments; other increments are reduced."),
-              C("4.2", "No timekeeper may bill more than 10 hours in a single day on System matters. Time above 10 hours in a day is "
+              C("4.2", "No timekeeper may bill more than 10 hours in a single day. Time above 10 hours in a day is "
                        "reduced to 10 hours.",
                 rules=["RS-02-R04"], para="At most 10 hours per timekeeper per day; excess is reduced.")),
             S("5", "Invoices",
@@ -236,18 +239,18 @@ GUIDELINES = [
               C("3.1", "Time is recorded in increments of one-tenth of an hour (0.1 hour). An entry in any other increment is reduced "
                        "to the next lower tenth.",
                 rules=["RS-03-R02"], para="0.1-hour increments; other increments are reduced."),
-              C("3.2", "No timekeeper may bill more than 8 hours in one day on Company matters. Time above 8 hours in a day is reduced "
+              C("3.2", "No timekeeper may bill more than 8 hours in one day. Time above 8 hours in a day is reduced "
                        "to 8 hours.",
                 rules=["RS-03-R03"], para="At most 8 hours per timekeeper per day; excess is reduced."),
               C("3.3", "Each task is recorded separately with its own time. Block billing, several tasks under one time charge, is not "
                        "accepted; block-billed entries are referred to the Law Department for review.",
                 rules=["RS-03-R07"], para="Block-billed entries are referred for review."),
-              C("3.4", f"The following are not billable and are disallowed: clerical and administrative work, including {CLERICAL} "
-                       f"({A110}); and time spent in internal conferences between lawyers or staff of the firm ({A105}).",
+              C("3.4", f"The following are not billable and are disallowed: clerical and administrative work, including {CLERICAL}; "
+                       f"and time spent in internal conferences between lawyers or staff of the firm ({A105}).",
                 rules=["RS-03-R04"], para="Clerical work and internal firm conferences are not billable."),
               C("3.5", "Legal research of more than 5 hours on a single issue needs the responsible in-house lawyer's approval in "
                        "advance.",
-                unmapped="judgement", para="Research over 5 hours on one issue needs advance approval.")),
+                unmapped="needs-new-type", para="Research over 5 hours on one issue needs advance approval.")),
             S("4", "Expenses",
               C("4.1", "Word processing (UTBMS expense code E103) and online legal research (E106) are part of the firm's overhead and "
                        "are disallowed.",
@@ -316,7 +319,7 @@ GUIDELINES = [
               C("4.1", "As provided in the Panel Agreement, time is recorded in quarter-hour increments (0.25 hour). An entry in any "
                        "other increment is reduced to the next lower quarter hour.",
                 rules=["RS-04-R03"], para="Quarter-hour (0.25) increments; other increments are reduced."),
-              C("4.2", f"Clerical and administrative work is not billable. It includes {CLERICAL} ({A110}). Such entries are "
+              C("4.2", f"Clerical and administrative work is not billable. It includes {CLERICAL}. Such entries are "
                        "disallowed.",
                 rules=["RS-04-R08"], para="Clerical and administrative work is not billable.")),
             S("5", "Expenses",
@@ -325,7 +328,7 @@ GUIDELINES = [
                 rules=["RS-04-R07"], para="E104 and E106 are not reimbursable; copying above $0.15 per page is disallowed."),
               C("5.2", "Experts, consultants and other vendors costing more than $10,000 need the Legal Department's approval before "
                        "they are engaged.",
-                unmapped="judgement", para="Vendors over $10,000 need advance approval.")),
+                unmapped="needs-new-type", para="Vendors over $10,000 need advance approval.")),
             S("6", "Invoices and budgets",
               C("6.1", "Harborline must receive each invoice within 60 days after the end of the billing period. A later invoice is "
                        "referred for review.",
@@ -339,7 +342,7 @@ GUIDELINES = [
                        "disallowed.",
                 rules=["RS-04-R06"], para="Duplicate entries are disallowed."),
               C("6.4", "The firm submits an accrual of unbilled fees for each open matter by the fifth business day after quarter end.",
-                unmapped="needs-new-type", para="Quarterly accruals by the fifth business day."),
+                unmapped="not-billing", para="Quarterly accruals by the fifth business day."),
               C("6.5", OUTCOMES)),
         ],
         "rates_appendix": True,
@@ -375,7 +378,7 @@ GUIDELINES = [
               C("1.2", "Counsel sends a pre-trial report at least 60 days before trial.",
                 unmapped="not-billing", para="Pre-trial report 60 days before trial."),
               C("1.3", "Legal research of more than 3 hours on one issue needs the claims professional's approval in advance.",
-                unmapped="judgement", para="Research over 3 hours needs advance approval.")),
+                unmapped="needs-new-type", para="Research over 3 hours needs advance approval.")),
             S("2", "Rates",
               C("2.1", "Hourly rates may not exceed the maximum for the timekeeper's classification in Appendix A. Time billed at a "
                        "higher rate is reduced to the Appendix A maximum.",
@@ -387,7 +390,7 @@ GUIDELINES = [
               C("3.2", "Each task is recorded separately with a description that shows what was done. Block-billed entries and vague "
                        "descriptions (for example \"work on file\" or \"trial preparation\" with no detail) are reduced.",
                 rules=["RS-05-R03"], para="Block-billed and vague entries are reduced."),
-              C("3.3", f"Clerical and administrative work is not billable, including {CLERICAL} ({A110}). Internal conferences "
+              C("3.3", f"Clerical and administrative work is not billable, including {CLERICAL}. Internal conferences "
                        f"between counsel's own lawyers or staff are not billable ({A105}). Such entries are disallowed.",
                 rules=["RS-05-R04"], para="Clerical work and internal conferences are not billable."),
               C("3.4", "Time of more than 12 hours by one timekeeper in one day is referred to the claims professional for review.",

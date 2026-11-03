@@ -68,6 +68,7 @@
       "type": "ApprovedTimekeeper"
      }
     ],
+    "consequence": "Flag",
     "not_expressible": null
    }
   },
@@ -99,6 +100,7 @@
       "tolerancePercent": 0
      }
     ],
+    "consequence": "SuggestAdjustment",
     "not_expressible": null
    }
   },
@@ -123,6 +125,7 @@
       "incrementHours": 0.25
      }
     ],
+    "consequence": "Flag",
     "not_expressible": null
    }
   },
@@ -148,6 +151,7 @@
       "graceDays": 0
      }
     ],
+    "consequence": "Flag",
     "not_expressible": "CoreRecordWindow checks dates only; no rule type compares an invoice with the core record's budget"
    }
   },
@@ -167,6 +171,7 @@
    "production": {
     "status": "none",
     "rules": [],
+    "consequence": null,
     "not_expressible": "InvoiceAge is invoice date minus line date per line; no rule type measures received date against the billing period end"
    }
   },
@@ -201,6 +206,7 @@
       ]
      }
     ],
+    "consequence": "Flag",
     "not_expressible": null
    }
   },
@@ -234,6 +240,7 @@
       ]
      }
     ],
+    "consequence": "Flag",
     "not_expressible": "ExpenseRule caps the line amount; it cannot cap a unit rate (cost per page)"
    }
   },
@@ -259,16 +266,10 @@
    "paraphrase": "Clerical and administrative work is not billable.",
    "expressible": true,
    "production": {
-    "status": "partial",
-    "rules": [
-     {
-      "type": "NonBillableActivity",
-      "codes": [
-       "A110"
-      ]
-     }
-    ],
-    "not_expressible": "NonBillableActivity lists codes, not narrative keywords; the guideline's task list is stated as UTBMS codes"
+    "status": "none",
+    "rules": [],
+    "consequence": null,
+    "not_expressible": "NonBillableActivity lists activity codes only, and no code identifies clerical work: A110 (Manage data/files) also covers legitimate document work, and invoice preparation is coded A111"
    }
   }
  ],
@@ -319,7 +320,7 @@
     "heading": "Expenses"
    },
    "paraphrase": "Vendors over $10,000 need advance approval.",
-   "reason": "judgement"
+   "reason": "needs-new-type"
   },
   {
    "clause_ref": {
@@ -327,7 +328,7 @@
     "heading": "Invoices and budgets"
    },
    "paraphrase": "Quarterly accruals by the fifth business day.",
-   "reason": "needs-new-type"
+   "reason": "not-billing"
   }
  ]
 }

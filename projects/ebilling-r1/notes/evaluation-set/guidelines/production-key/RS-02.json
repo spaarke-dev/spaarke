@@ -6,7 +6,7 @@
  "meta": {
   "generator_id": "production_key.py",
   "label_method": "generator",
-  "note": "Predicted production findings; basis proxy/uncertain marks rows that depend on AI output or 046 resolution."
+  "note": "Predicted production findings; basis proxy marks rows that depend on AI output."
  },
  "production_rules": {
   "RS-02-R01": [
@@ -71,6 +71,16 @@
    "not_expressible": "InvoiceAge is invoice date minus line date per line; no rule type measures received date against the billing period end"
   }
  },
+ "production_consequences": {
+  "RS-02-R01": "Flag",
+  "RS-02-R02": "SuggestAdjustment",
+  "RS-02-R03": "Flag",
+  "RS-02-R04": "Flag",
+  "RS-02-R05": "Reject",
+  "RS-02-R06": "Flag",
+  "RS-02-R07": "Flag",
+  "RS-02-R08": "Flag"
+ },
  "invoices": [
   {
    "id": "F-0008",
@@ -110,6 +120,16 @@
      "basis": "exact"
     },
     {
+     "rule_id": "RS-02-R02",
+     "type": "ApprovedRate",
+     "scope": "line",
+     "line_refs": [
+      4
+     ],
+     "basis": "exact",
+     "reason": "no_approved_rate"
+    },
+    {
      "rule_id": "RS-02-R03",
      "type": "TimeIncrement",
      "scope": "line",
@@ -119,7 +139,19 @@
      "basis": "exact"
     }
    ],
-   "production_only": []
+   "production_only": [
+    {
+     "rule_id": "RS-02-R02",
+     "type": "ApprovedRate",
+     "scope": "line",
+     "line_refs": [
+      4
+     ],
+     "basis": "exact",
+     "reason": "the timekeeper is not on the roster, so no approved rate is in force (fires beside ApprovedTimekeeper)",
+     "status": "production_only"
+    }
+   ]
   },
   {
    "id": "F-0020",
@@ -224,6 +256,16 @@
      "basis": "exact"
     },
     {
+     "rule_id": "RS-02-R02",
+     "type": "ApprovedRate",
+     "scope": "line",
+     "line_refs": [
+      11
+     ],
+     "basis": "exact",
+     "reason": "no_approved_rate"
+    },
+    {
      "rule_id": "RS-02-R07",
      "type": "Duplicate",
      "scope": "line",
@@ -233,7 +275,19 @@
      "basis": "exact"
     }
    ],
-   "production_only": []
+   "production_only": [
+    {
+     "rule_id": "RS-02-R02",
+     "type": "ApprovedRate",
+     "scope": "line",
+     "line_refs": [
+      11
+     ],
+     "basis": "exact",
+     "reason": "the timekeeper is not on the roster, so no approved rate is in force (fires beside ApprovedTimekeeper)",
+     "status": "production_only"
+    }
+   ]
   },
   {
    "id": "F-0032",
@@ -432,6 +486,16 @@
      "basis": "exact"
     },
     {
+     "rule_id": "RS-02-R02",
+     "type": "ApprovedRate",
+     "scope": "line",
+     "line_refs": [
+      13
+     ],
+     "basis": "exact",
+     "reason": "no_approved_rate"
+    },
+    {
      "rule_id": "RS-02-R03",
      "type": "TimeIncrement",
      "scope": "line",
@@ -459,7 +523,19 @@
      "basis": "exact"
     }
    ],
-   "production_only": []
+   "production_only": [
+    {
+     "rule_id": "RS-02-R02",
+     "type": "ApprovedRate",
+     "scope": "line",
+     "line_refs": [
+      13
+     ],
+     "basis": "exact",
+     "reason": "the timekeeper is not on the roster, so no approved rate is in force (fires beside ApprovedTimekeeper)",
+     "status": "production_only"
+    }
+   ]
   },
   {
    "id": "F-0062",
@@ -652,6 +728,16 @@
      "basis": "exact"
     },
     {
+     "rule_id": "RS-02-R02",
+     "type": "ApprovedRate",
+     "scope": "line",
+     "line_refs": [
+      2
+     ],
+     "basis": "exact",
+     "reason": "no_approved_rate"
+    },
+    {
      "rule_id": "RS-02-R04",
      "type": "DailyHoursCap",
      "scope": "line",
@@ -661,7 +747,19 @@
      "basis": "exact"
     }
    ],
-   "production_only": []
+   "production_only": [
+    {
+     "rule_id": "RS-02-R02",
+     "type": "ApprovedRate",
+     "scope": "line",
+     "line_refs": [
+      2
+     ],
+     "basis": "exact",
+     "reason": "the timekeeper is not on the roster, so no approved rate is in force (fires beside ApprovedTimekeeper)",
+     "status": "production_only"
+    }
+   ]
   },
   {
    "id": "F-0182",

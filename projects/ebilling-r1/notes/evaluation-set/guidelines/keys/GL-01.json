@@ -57,6 +57,7 @@
       "incrementHours": 0.1
      }
     ],
+    "consequence": "Flag",
     "not_expressible": null
    }
   },
@@ -90,6 +91,7 @@
       "minConfidence": 0.7
      }
     ],
+    "consequence": "Flag",
     "not_expressible": null
    }
   },
@@ -115,16 +117,10 @@
    "paraphrase": "Clerical and administrative work is not billable.",
    "expressible": true,
    "production": {
-    "status": "partial",
-    "rules": [
-     {
-      "type": "NonBillableActivity",
-      "codes": [
-       "A110"
-      ]
-     }
-    ],
-    "not_expressible": "NonBillableActivity lists codes, not narrative keywords; the guideline's task list is stated as UTBMS codes"
+    "status": "none",
+    "rules": [],
+    "consequence": null,
+    "not_expressible": "NonBillableActivity lists activity codes only, and no code identifies clerical work: A110 (Manage data/files) also covers legitimate document work, and invoice preparation is coded A111"
    }
   },
   {
@@ -156,6 +152,7 @@
       ]
      }
     ],
+    "consequence": "Flag",
     "not_expressible": null
    }
   },
@@ -177,6 +174,7 @@
    "production": {
     "status": "none",
     "rules": [],
+    "consequence": null,
     "not_expressible": "ExpenseRule caps the line amount; it cannot cap a unit rate (cost per page)"
    }
   },
@@ -196,6 +194,7 @@
    "production": {
     "status": "none",
     "rules": [],
+    "consequence": null,
     "not_expressible": "InvoiceAge is invoice date minus line date per line; no rule type measures received date against the billing period end"
    }
   },
@@ -230,6 +229,7 @@
       ]
      }
     ],
+    "consequence": "Flag",
     "not_expressible": null
    }
   },
@@ -251,6 +251,7 @@
    "production": {
     "status": "none",
     "rules": [],
+    "consequence": null,
     "not_expressible": "RequiredData has no PO-number field (closed vocabulary: firmInvoiceNumber, invoiceDate, billingPeriodStart, billingPeriodEnd, timekeeper, lineDate, narrative, taskCode, activityCode, expenseCode)"
    }
   }

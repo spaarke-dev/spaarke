@@ -17,7 +17,7 @@ that are not billing rules. **No Set F invoice was regenerated and no rule set w
 | `gap-report.md` | What production R1 cannot state, with finding counts, and the subset scoring baseline | yes |
 | `subset.json` | The 120 test invoices: 15 seeded and 5 clean per rule set | yes |
 | `reference-data/RS-0n.json` | Synthetic firms, matters and one rate-card workbook per firm (078 format) for every subset invoice | yes |
-| `production-key/RS-0n.json` | Per invoice: the Set F findings and what production should raise instead, with a status per finding | yes |
+| `production-key/RS-0n.json` | Per invoice: the Set F findings and what production should raise instead, with a status per finding, plus the production rule bodies and consequences | yes |
 | `local/guidelines/GL-0n.docx` and `.pdf` | The guideline rendered for upload (the drafter accepts both) | no (git-ignored) |
 
 Generators, run from the `evaluation-set` folder in this order:
@@ -30,7 +30,8 @@ python -I generator/build_guidelines.py --render      # GL-0n.md, keys/, gap-rep
 
 All three are deterministic. `build_guidelines.py` fails when a rule-set rule has no clause, a clause omits a parameter value or its
 consequence, a provision has no reason, or the rate schedule disagrees with the rule set. The text lives in
-`generator/guideline_content.py`, so the documents and the keys cannot drift apart.
+`generator/guideline_content.py`, so the documents and the keys cannot drift apart. `production_key.py` models the production handlers
+in Python (`Services/Signals/Billing/**`, 2026-11-03); the consequence rules come from `BillingRuleCatalogue.AllowedConsequences`.
 
 ## The six departments
 
@@ -69,11 +70,18 @@ legacy panel agreement.
 
 `reference-data/RS-0n.json` holds what ebilling seeds on dev before submitting (zz- prefix, removed afterwards):
 
-- **Firms**: the firm on each subset invoice, its letterhead address and a billing e-mail on the reserved `.example` domain.
+- **Firms**: the firm on each subset invoice, its letterhead address and a billing e-mail on the reserved `.example` domain. `key` is
+  unique per rule set (`rs-0n-...`). Six firm names appear in two rule sets with different rate caps and rosters (for example
+  "Ravenscroft & Ambrose LLP" in RS-02 and RS-06), and "Kingsley and Forsythe LLP" bills two RS-01 invoices. Seed one firm record per
+  `key`; if firm names must be unique on dev, suffix the rule set. One firm shared across rule sets would merge rosters and rate cards and
+  approve one invoice's timekeepers for another.
 - **Rate-card workbook per firm** (078 sheets `Timekeepers` and `Rates`, exact column names): the roster is the invoice's approved
   timekeepers where the guideline has an approved-timekeeper rule, otherwise every timekeeper on the invoice; each rostered timekeeper has a
   per-timekeeper approved rate (the guideline maximum for their title, or their billed rate where the guideline sets no rate); the rack rate
-  is the higher of the billed rate and the approved rate plus 12%; classification rows carry the guideline maximums. Roster and rates run
+  is the higher of the billed rate and the approved rate plus at least 12%, rounded up to $5 (so a 10% discount off rack never falls below
+  the approved rate); classification rows carry the guideline maximums. A timekeeper who bills but is not on the roster has no approved
+  rate: production raises a "no approved rate" ApprovedRate finding beside the ApprovedTimekeeper finding, and the production key expects
+  it. Roster and rates run
   from 2024-01-01 with no end date, so they never decide a date rule.
 - **Matters**: one per invoice, with name, firm reference, assigned firm, matter type Litigation, open and close dates, budget, PO number and
   received date from the invoice's context. Billing status is Final where the guideline has a matter-dates rule, because the after-close
@@ -87,16 +95,21 @@ changes.
 
 Two keys, both agreed with ebilling:
 
-- **Guideline key** (`keys/GL-0n.json`): scores the drafter. A proposal matches a key rule when its type, production body and consequence
-  match and it cites the key's clause. Provisions in `unmapped_provisions` should appear on the drafter's "not converted" list. A rule whose
+- **Guideline key** (`keys/GL-0n.json`): scores the drafter. A proposal matches a key rule when its type and production body match
+  `production.rules`, its consequence matches `production.consequence` (production cannot apply Reduce or Disallow as written;
+  `gap-report.md` section 3), and it cites the key's clause. AiObservation `minConfidence` (0.7) is a test setting no guideline states;
+  leave it out of the body match. Provisions in `unmapped_provisions` should appear on the drafter's "not converted" list. A rule whose
   `production.status` is `none` should also be on that list, with the gap named. Target: rule recall at least 80%.
 - **Production key** (`production-key/RS-0n.json`): scores detection. Score findings against `production_findings`, not against Set F's
   expected findings, wherever the two differ (status `moved`, `not_expressible`, `missed`, `production_only`). `gap-report.md` §3 is the
   baseline. Targets: recall and precision at least 90% per mechanical rule type, at least 75% for AiObservation, consequence correct on
   every finding.
-- **Clean invoices**: at most 2% may carry any finding. With 30 clean invoices that means none. The production key predicts that the
-  clean invoices of RS-01, RS-03, RS-04 and RS-05 fail: their code-based non-billable rule flags every clean A110 or A105 line. That is a
-  real gap to report, not a scoring error (`gap-report.md`).
+- **Clean invoices**: at most 2% may carry any finding. With 30 clean invoices that means none, and the production key predicts none.
+  The clean invoices were chosen for their legitimate A110 entries ("Update document review protocol...", "Prepare production set...").
+  The guidelines name clerical work by task, not by code, because no UTBMS code identifies it: A110 also covers that legitimate work. A
+  drafter or admin who turns the clerical clause into an "A110 is not billable" rule produces false alarms on these clean invoices; across
+  all of Set F that rule would flag about one clean invoice in five under GL-01, GL-03, GL-04 and GL-05 (43 of 200). Internal conferences
+  are exactly A105, so that half of the GL-03 and GL-05 clause converts.
 
 ## Limits
 
@@ -105,7 +118,13 @@ Two keys, both agreed with ebilling:
 - Wolters Kluwer 2024-2025 rate tables by firm size are paywalled; the rate anchors are the 2022 sample, 2024 summaries and secondary
   reports.
 - All Set F invoices are USD litigation invoices, so the guidelines' non-litigation scope (contracts, regulatory) is never exercised.
-- Every Set F invoice has its own firm, so production's cross-invoice duplicate check (a firm's earlier submissions) is never exercised.
+- Almost every subset invoice has its own firm, so production's cross-invoice duplicate check (a firm's earlier submissions) is barely
+  exercised (one RS-01 firm bills two invoices).
+- The codes clauses (GL-02 5.1, GL-05 5.1, GL-06 6.2) require a task code and an activity code, as production does; Set F checks the task
+  code only. No subset line has a task code without an activity code, so the difference cannot show.
+- The daily-hours caps read per day; Set F and production both judge them per invoice.
+- A few clean narratives could read as clerical to a person or an AI ("Review court docket and calendar of pending deadlines");
+  production's rules do not read narratives for non-billable work, so they do not affect the production key.
 
 ## Sources (researched 2026-11-03)
 

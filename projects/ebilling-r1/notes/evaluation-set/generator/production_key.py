@@ -14,8 +14,12 @@ Production findings with no Set F counterpart are listed as production_only, wit
 
 The production semantics mirror the handlers' documented behaviour (Handlers/*Handler.cs, 2026-11-03). Two inputs are proxies, so those
 rows are PREDICTIONS, marked `proxy`: NonBillableActivity judges AI-assigned codes (the billed codes stand in), and AiObservation judges
-the AI's observation (the generator's narrative_style stands in). ApprovedRate for a timekeeper who is not on the roster depends on
-task 046's classification resolution; those rows are marked `uncertain`.
+the AI's observation (the generator's narrative_style stands in). ApprovedRate for a timekeeper who is not on the roster raises a "no
+approved rate" finding (RateCardResolver returns NotFound.TimekeeperUnmatched without a timekeeper id; ApprovedRateHandler reports it as
+RateTimekeeperUnmatched), so it fires beside ApprovedTimekeeper on the same line.
+
+Each production rule also carries the consequence a correct drafter can choose (production_consequence): production allows only Reject,
+Flag or SuggestAdjustment, per rule type (BillingRuleCatalogue.AllowedConsequences, 2026-11-03).
 
 Run from the evaluation-set folder:  python -I generator/production_key.py
 Writes ../guidelines/production-key/RS-0n.json and ../guidelines/production-key/summary.json.
@@ -35,7 +39,8 @@ NE_PERIOD = "InvoiceAge is invoice date minus line date per line; no rule type m
 NE_CAP_CODE = "ExpenseRule maxAmountPerItem applies to every expense line; it cannot be limited to one expense code"
 NE_CAP_UNIT = "ExpenseRule caps the line amount; it cannot cap a unit rate (cost per page)"
 NE_BUDGET = "CoreRecordWindow checks dates only; no rule type compares an invoice with the core record's budget"
-NE_KEYWORD = "NonBillableActivity lists codes, not narrative keywords; the guideline's task list is stated as UTBMS codes"
+NE_KEYWORD = ("NonBillableActivity lists activity codes only, and no code identifies clerical work: A110 (Manage data/files) also covers "
+              "legitimate document work, and invoice preparation is coded A111")
 
 # The production rule bodies a correct drafter produces from each guideline, keyed by the Set F rule id. A list holds the bodies one Set F
 # rule becomes (AiObservation is one kind per rule). {"not_expressible": reason} marks a provision no R1 type can state; a dict with
@@ -49,7 +54,7 @@ PRODUCTION_RULES = {
         "RS-01-R01": [{"type": "TimeIncrement", "incrementHours": 0.1}],
         "RS-01-R02": [{"type": "AiObservation", "observation": "blockBilling", "minConfidence": MIN_CONF},
                       {"type": "AiObservation", "observation": "vagueDescription", "minConfidence": MIN_CONF}],
-        "RS-01-R03": {"rules": [{"type": "NonBillableActivity", "codes": ["A110"]}], "not_expressible": NE_KEYWORD},
+        "RS-01-R03": {"not_expressible": NE_KEYWORD},
         "RS-01-R04": [{"type": "ExpenseRule", "nonReimbursableCodes": ["E103", "E104", "E106"]}],
         "RS-01-R05": {"not_expressible": NE_CAP_UNIT},
         "RS-01-R06": {"not_expressible": NE_PERIOD},
@@ -70,7 +75,7 @@ PRODUCTION_RULES = {
         "RS-03-R01": [{"type": "ApprovedRate", "tolerancePercent": 0}],
         "RS-03-R02": [{"type": "TimeIncrement", "incrementHours": 0.1}],
         "RS-03-R03": [{"type": "DailyHoursCap", "maxHoursPerDay": 8}],
-        "RS-03-R04": {"rules": [{"type": "NonBillableActivity", "codes": ["A110", "A105"]}], "not_expressible": NE_KEYWORD},
+        "RS-03-R04": {"rules": [{"type": "NonBillableActivity", "codes": ["A105"]}], "not_expressible": NE_KEYWORD},
         "RS-03-R05": [{"type": "ExpenseRule", "nonReimbursableCodes": ["E103", "E106"]}],
         "RS-03-R06": {"not_expressible": NE_CAP_UNIT + "; " + NE_CAP_CODE},
         "RS-03-R07": [{"type": "AiObservation", "observation": "blockBilling", "minConfidence": MIN_CONF}],
@@ -84,14 +89,14 @@ PRODUCTION_RULES = {
         "RS-04-R05": {"not_expressible": NE_PERIOD},
         "RS-04-R06": [DUP],
         "RS-04-R07": {"rules": [{"type": "ExpenseRule", "nonReimbursableCodes": ["E104", "E106"]}], "not_expressible": NE_CAP_UNIT},
-        "RS-04-R08": {"rules": [{"type": "NonBillableActivity", "codes": ["A110"]}], "not_expressible": NE_KEYWORD},
+        "RS-04-R08": {"not_expressible": NE_KEYWORD},
     },
     "RS-05": {
         "RS-05-R01": [{"type": "ApprovedRate", "tolerancePercent": 0}],
         "RS-05-R02": [{"type": "TimeIncrement", "incrementHours": 0.1}],
         "RS-05-R03": [{"type": "AiObservation", "observation": "blockBilling", "minConfidence": MIN_CONF},
                       {"type": "AiObservation", "observation": "vagueDescription", "minConfidence": MIN_CONF}],
-        "RS-05-R04": {"rules": [{"type": "NonBillableActivity", "codes": ["A110", "A105"]}], "not_expressible": NE_KEYWORD},
+        "RS-05-R04": {"rules": [{"type": "NonBillableActivity", "codes": ["A105"]}], "not_expressible": NE_KEYWORD},
         "RS-05-R05": [DUP],
         "RS-05-R06": [{"type": "DailyHoursCap", "maxHoursPerDay": 12}],
         "RS-05-R07": {"rules": [CODES], "not_expressible": NE_PO},
@@ -112,7 +117,25 @@ PRODUCTION_RULES = {
     },
 }
 
-TITLE_TO_CLASSIFICATION = {"Senior Associate": "Associate"}
+# BillingRuleCatalogue.AllowedConsequences (src/server/api/Sprk.Bff.Api/Services/Signals/Billing/BillingRuleCatalogue.cs, 2026-11-03).
+ALLOWED_CONSEQUENCES = {
+    "ApprovedTimekeeper": {"Flag"}, "ApprovedRate": {"Reject", "Flag", "SuggestAdjustment"}, "TimeIncrement": {"Flag"},
+    "DailyHoursCap": {"Flag"}, "NonBillableActivity": {"Flag", "SuggestAdjustment"}, "ExpenseRule": {"Reject", "Flag"},
+    "InvoiceAge": {"Reject", "Flag"}, "CoreRecordWindow": {"Reject", "Flag"}, "Duplicate": {"Reject", "Flag"},
+    "RequiredData": {"Reject", "Flag"}, "AiObservation": {"Flag"},
+}
+
+
+def production_consequence(rule_type, guideline_consequence):
+    """The nearest consequence production allows. Reject stays Reject where the type may reject (ApprovedTimekeeper holds instead, D-89).
+    Reduce and Disallow change an amount: SuggestAdjustment where a handler suggests one, else Flag (production never rejects a whole
+    invoice for a line it would only adjust). Flag stays Flag."""
+    allowed = ALLOWED_CONSEQUENCES[rule_type]
+    if guideline_consequence == "Reject" and "Reject" in allowed:
+        return "Reject"
+    if guideline_consequence in ("Reduce", "Disallow") and "SuggestAdjustment" in allowed:
+        return "SuggestAdjustment"
+    return "Flag"
 
 
 def bodies(spec):
@@ -140,7 +163,7 @@ def activity_code(line):
 
 
 def evaluate(inv, rs_id, matter, roster, rates):
-    """Production findings: dicts {rule_id, type, scope, line_refs, basis}. `basis` is exact, proxy or uncertain."""
+    """Production findings: dicts {rule_id, type, scope, line_refs, basis}. `basis` is exact or proxy."""
     out = []
     lines = inv["lines"]
     fee = [l for l in lines if l["line_type"] == "fee"]
@@ -163,15 +186,10 @@ def evaluate(inv, rs_id, matter, roster, rates):
                     if is_credit(l) or l.get("rate") is None:
                         continue
                     name = l.get("timekeeper_name")
-                    if name in rates:
-                        approved, basis = rates[name], "exact"
-                    else:
-                        cls = TITLE_TO_CLASSIFICATION.get(l.get("timekeeper_title"), l.get("timekeeper_title"))
-                        approved, basis = rates.get(("class", cls)), "uncertain"
-                    if approved is None:
-                        add(rule_id, body, [l["n"]], "uncertain", reason="no_approved_rate")
-                    elif D(str(l["rate"])) > D(str(approved)) * (1 + D(str(body["tolerancePercent"])) / 100):
-                        add(rule_id, body, [l["n"]], basis)
+                    if name not in roster:
+                        add(rule_id, body, [l["n"]], reason="no_approved_rate")  # NotFound.TimekeeperUnmatched
+                    elif name in rates and D(str(l["rate"])) > D(str(rates[name])) * (1 + D(str(body["tolerancePercent"])) / 100):
+                        add(rule_id, body, [l["n"]])
             elif t == "TimeIncrement":
                 inc = D(str(body["incrementHours"]))
                 for l in fee:
@@ -292,11 +310,9 @@ def missed_reason(e):
 
 def extra_reason(p):
     if p["type"] == "NonBillableActivity":
-        return "a clean line carries a listed code: the code-based rule over-flags compared with the guideline's task list"
+        return "a line carries a listed code that Set F did not flag"
     if p["type"] == "ApprovedRate" and p.get("reason") == "no_approved_rate":
         return "the timekeeper is not on the roster, so no approved rate is in force (fires beside ApprovedTimekeeper)"
-    if p["type"] == "ApprovedRate":
-        return "an unrostered timekeeper judged against a classification rate (Senior Associate resolves to Associate)"
     if p["type"] == "RequiredData":
         return "the line has a task code but no activity code; Set F required the task code only"
     if p["type"] == "DailyHoursCap":
@@ -306,6 +322,11 @@ def extra_reason(p):
     if p["type"] == "AiObservation":
         return "a narrative style the rule lists, not seeded as a finding in Set F"
     return "no Set F counterpart"
+
+
+def consequences_of(rs_id):
+    rs = json.loads((GT / "rule-sets" / f"{rs_id}.json").read_text(encoding="utf-8"))
+    return {r["rule_id"]: production_consequence(r["rule_type"], r["consequence"]) for r in rs["rules"] if bodies(PRODUCTION_RULES[rs_id][r["rule_id"]])}
 
 
 def main():
@@ -322,7 +343,6 @@ def main():
             wb = firms[inv["header"]["firm"]]["workbook"]
             roster = {r["Name"] for r in wb["Timekeepers"]}
             rates = {r["Timekeeper"]: float(r["Approved Rate"]) for r in wb["Rates"] if r["Timekeeper"]}
-            rates.update({("class", r["Classification"]): float(r["Approved Rate"]) for r in wb["Rates"] if r["Classification"]})
             produced = evaluate(inv, rs_id, matters[inv_id], roster, rates)
             rows, extra = classify(inv["expected_findings"], produced, rs_id)
             invoices.append({"id": inv_id, "clean": not inv["expected_findings"], "set_f_findings": rows,
@@ -335,8 +355,8 @@ def main():
                 summary["by_rule_type"][p["type"]]["production_only"] += 1
         doc = {"schema": "ebilling-eval/1", "kind": "production-key", "id": f"{rs_id}-PK", "rule_set_id": rs_id,
                "meta": {"generator_id": "production_key.py", "label_method": "generator",
-                        "note": "Predicted production findings; basis proxy/uncertain marks rows that depend on AI output or 046 resolution."},
-               "production_rules": PRODUCTION_RULES[rs_id], "invoices": invoices}
+                        "note": "Predicted production findings; basis proxy marks rows that depend on AI output."},
+               "production_rules": PRODUCTION_RULES[rs_id], "production_consequences": consequences_of(rs_id), "invoices": invoices}
         (GL / "production-key" / f"{rs_id}.json").write_text(json.dumps(doc, indent=1) + "\n", encoding="utf-8")
         clean_hits = sum(1 for i in invoices if i["clean"] and i["production_findings"])
         summary["by_rule_set"][rs_id] = {

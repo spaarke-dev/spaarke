@@ -3,37 +3,37 @@
   "RS-01": {
    "invoices": 20,
    "set_f_findings": 53,
-   "production_findings": 50,
-   "clean_invoices_with_production_findings": 5
+   "production_findings": 33,
+   "clean_invoices_with_production_findings": 0
   },
   "RS-02": {
    "invoices": 20,
    "set_f_findings": 38,
-   "production_findings": 33,
+   "production_findings": 37,
    "clean_invoices_with_production_findings": 0
   },
   "RS-03": {
    "invoices": 20,
    "set_f_findings": 38,
-   "production_findings": 36,
-   "clean_invoices_with_production_findings": 5
+   "production_findings": 26,
+   "clean_invoices_with_production_findings": 0
   },
   "RS-04": {
    "invoices": 20,
    "set_f_findings": 49,
-   "production_findings": 49,
-   "clean_invoices_with_production_findings": 5
+   "production_findings": 38,
+   "clean_invoices_with_production_findings": 0
   },
   "RS-05": {
    "invoices": 20,
    "set_f_findings": 44,
-   "production_findings": 51,
-   "clean_invoices_with_production_findings": 5
+   "production_findings": 39,
+   "clean_invoices_with_production_findings": 0
   },
   "RS-06": {
    "invoices": 20,
    "set_f_findings": 48,
-   "production_findings": 39,
+   "production_findings": 44,
    "clean_invoices_with_production_findings": 0
   }
  },
@@ -42,8 +42,8 @@
    "reproduced": 24
   },
   "ApprovedRate": {
-   "reproduced": 40,
-   "production_only": 1
+   "production_only": 16,
+   "reproduced": 40
   },
   "ApprovedTimekeeper": {
    "reproduced": 16
@@ -68,9 +68,8 @@
    "missed": 4
   },
   "NonBillableActivity": {
-   "production_only": 41,
-   "reproduced": 20,
-   "not_expressible": 3
+   "not_expressible": 18,
+   "reproduced": 5
   },
   "RequiredData": {
    "not_expressible": 14,
@@ -81,11 +80,11 @@
   }
  },
  "not_expressible": {
+  "NonBillableActivity lists activity codes only, and no code identifies clerical work: A110 (Manage data/files) also covers legitimate document work, and invoice preparation is coded A111": 18,
   "RequiredData has no PO-number field (closed vocabulary: firmInvoiceNumber, invoiceDate, billingPeriodStart, billingPeriodEnd, timekeeper, lineDate, narrative, taskCode, activityCode, expenseCode)": 14,
   "InvoiceAge is invoice date minus line date per line; no rule type measures received date against the billing period end": 13,
   "CoreRecordWindow checks dates only; no rule type compares an invoice with the core record's budget": 9,
   "ExpenseRule caps the line amount; it cannot cap a unit rate (cost per page); ExpenseRule maxAmountPerItem applies to every expense line; it cannot be limited to one expense code": 6,
-  "ExpenseRule caps the line amount; it cannot cap a unit rate (cost per page)": 5,
-  "NonBillableActivity lists codes, not narrative keywords; the guideline's task list is stated as UTBMS codes": 3
+  "ExpenseRule caps the line amount; it cannot cap a unit rate (cost per page)": 5
  }
 }

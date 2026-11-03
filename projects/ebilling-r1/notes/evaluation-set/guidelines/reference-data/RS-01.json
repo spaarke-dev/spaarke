@@ -11,13 +11,13 @@
  "firms": [
   {
    "name": "Aldridge & Ellison LLP",
-   "key": "aldridge-and-ellison-llp",
+   "key": "rs-01-aldridge-amp-ellison-llp",
    "address": [
     "196 Pine Street",
     "Portland",
     "Tax ID 30-2126551"
    ],
-   "billing_contact_email": "billing@aldridge-and-ellison-llp.example",
+   "billing_contact_email": "billing@aldridge-amp-ellison-llp.example",
    "workbook": {
     "Timekeepers": [
      {
@@ -25,49 +25,49 @@
       "Classification": "Paralegal",
       "Effective From": "2024-01-01",
       "Effective To": null,
-      "Contact Email": "clara.okafor@aldridge-and-ellison-llp.example"
+      "Contact Email": "clara.okafor@aldridge-amp-ellison-llp.example"
      },
      {
       "Name": "Elena Hargrove",
       "Classification": "Of Counsel",
       "Effective From": "2024-01-01",
       "Effective To": null,
-      "Contact Email": "elena.hargrove@aldridge-and-ellison-llp.example"
+      "Contact Email": "elena.hargrove@aldridge-amp-ellison-llp.example"
      },
      {
       "Name": "Farah Nwosu",
       "Classification": "Legal Assistant",
       "Effective From": "2024-01-01",
       "Effective To": null,
-      "Contact Email": "farah.nwosu@aldridge-and-ellison-llp.example"
+      "Contact Email": "farah.nwosu@aldridge-amp-ellison-llp.example"
      },
      {
       "Name": "Nadia Marchetti",
       "Classification": "Associate",
       "Effective From": "2024-01-01",
       "Effective To": null,
-      "Contact Email": "nadia.marchetti@aldridge-and-ellison-llp.example"
+      "Contact Email": "nadia.marchetti@aldridge-amp-ellison-llp.example"
      },
      {
       "Name": "Nadia Sandoval",
       "Classification": "Associate",
       "Effective From": "2024-01-01",
       "Effective To": null,
-      "Contact Email": "nadia.sandoval@aldridge-and-ellison-llp.example"
+      "Contact Email": "nadia.sandoval@aldridge-amp-ellison-llp.example"
      },
      {
       "Name": "Naomi Oyelaran",
       "Classification": "Associate",
       "Effective From": "2024-01-01",
       "Effective To": null,
-      "Contact Email": "naomi.oyelaran@aldridge-and-ellison-llp.example"
+      "Contact Email": "naomi.oyelaran@aldridge-amp-ellison-llp.example"
      },
      {
       "Name": "Tomas Ramanathan",
       "Classification": "Partner",
       "Effective From": "2024-01-01",
       "Effective To": null,
-      "Contact Email": "tomas.ramanathan@aldridge-and-ellison-llp.example"
+      "Contact Email": "tomas.ramanathan@aldridge-amp-ellison-llp.example"
      }
     ],
     "Rates": [
@@ -84,7 +84,7 @@
       "Timekeeper": "Elena Hargrove",
       "Classification": null,
       "Approved Rate": "515.00",
-      "Rack Rate": "575.00",
+      "Rack Rate": "580.00",
       "Currency": "USD",
       "Effective From": "2024-01-01",
       "Effective To": null
@@ -93,7 +93,7 @@
       "Timekeeper": "Farah Nwosu",
       "Classification": null,
       "Approved Rate": "145.00",
-      "Rack Rate": "160.00",
+      "Rack Rate": "165.00",
       "Currency": "USD",
       "Effective From": "2024-01-01",
       "Effective To": null
@@ -111,7 +111,7 @@
       "Timekeeper": "Nadia Sandoval",
       "Classification": null,
       "Approved Rate": "335.00",
-      "Rack Rate": "375.00",
+      "Rack Rate": "380.00",
       "Currency": "USD",
       "Effective From": "2024-01-01",
       "Effective To": null
@@ -120,7 +120,7 @@
       "Timekeeper": "Naomi Oyelaran",
       "Classification": null,
       "Approved Rate": "340.00",
-      "Rack Rate": "380.00",
+      "Rack Rate": "385.00",
       "Currency": "USD",
       "Effective From": "2024-01-01",
       "Effective To": null
@@ -129,7 +129,7 @@
       "Timekeeper": "Tomas Ramanathan",
       "Classification": null,
       "Approved Rate": "590.00",
-      "Rack Rate": "660.00",
+      "Rack Rate": "665.00",
       "Currency": "USD",
       "Effective From": "2024-01-01",
       "Effective To": null
@@ -139,13 +139,13 @@
   },
   {
    "name": "Draycott & Cranmer LLP",
-   "key": "draycott-and-cranmer-llp",
+   "key": "rs-01-draycott-amp-cranmer-llp",
    "address": [
     "359 Elm Court",
     "Denver",
     "Tax ID 99-5129946"
    ],
-   "billing_contact_email": "billing@draycott-and-cranmer-llp.example",
+   "billing_contact_email": "billing@draycott-amp-cranmer-llp.example",
    "workbook": {
     "Timekeepers": [
      {
@@ -153,42 +153,42 @@
       "Classification": "Associate",
       "Effective From": "2024-01-01",
       "Effective To": null,
-      "Contact Email": "clara.oyelaran@draycott-and-cranmer-llp.example"
+      "Contact Email": "clara.oyelaran@draycott-amp-cranmer-llp.example"
      },
      {
       "Name": "Gregory Tavares",
       "Classification": "Associate",
       "Effective From": "2024-01-01",
       "Effective To": null,
-      "Contact Email": "gregory.tavares@draycott-and-cranmer-llp.example"
+      "Contact Email": "gregory.tavares@draycott-amp-cranmer-llp.example"
      },
      {
       "Name": "Imani Esposito",
       "Classification": "Of Counsel",
       "Effective From": "2024-01-01",
       "Effective To": null,
-      "Contact Email": "imani.esposito@draycott-and-cranmer-llp.example"
+      "Contact Email": "imani.esposito@draycott-amp-cranmer-llp.example"
      },
      {
       "Name": "Imani Hargrove",
       "Classification": "Paralegal",
       "Effective From": "2024-01-01",
       "Effective To": null,
-      "Contact Email": "imani.hargrove@draycott-and-cranmer-llp.example"
+      "Contact Email": "imani.hargrove@draycott-amp-cranmer-llp.example"
      },
      {
       "Name": "Ivan Brennan",
       "Classification": "Associate",
       "Effective From": "2024-01-01",
       "Effective To": null,
-      "Contact Email": "ivan.brennan@draycott-and-cranmer-llp.example"
+      "Contact Email": "ivan.brennan@draycott-amp-cranmer-llp.example"
      },
      {
       "Name": "Marcus Mbeki",
       "Classification": "Partner",
       "Effective From": "2024-01-01",
       "Effective To": null,
-      "Contact Email": "marcus.mbeki@draycott-and-cranmer-llp.example"
+      "Contact Email": "marcus.mbeki@draycott-amp-cranmer-llp.example"
      }
     ],
     "Rates": [
@@ -205,7 +205,7 @@
       "Timekeeper": "Gregory Tavares",
       "Classification": null,
       "Approved Rate": "470.00",
-      "Rack Rate": "525.00",
+      "Rack Rate": "530.00",
       "Currency": "USD",
       "Effective From": "2024-01-01",
       "Effective To": null
@@ -214,7 +214,7 @@
       "Timekeeper": "Imani Esposito",
       "Classification": null,
       "Approved Rate": "805.00",
-      "Rack Rate": "900.00",
+      "Rack Rate": "905.00",
       "Currency": "USD",
       "Effective From": "2024-01-01",
       "Effective To": null
@@ -223,7 +223,7 @@
       "Timekeeper": "Imani Hargrove",
       "Classification": null,
       "Approved Rate": "255.00",
-      "Rack Rate": "285.00",
+      "Rack Rate": "290.00",
       "Currency": "USD",
       "Effective From": "2024-01-01",
       "Effective To": null
@@ -232,7 +232,7 @@
       "Timekeeper": "Ivan Brennan",
       "Classification": null,
       "Approved Rate": "475.00",
-      "Rack Rate": "530.00",
+      "Rack Rate": "535.00",
       "Currency": "USD",
       "Effective From": "2024-01-01",
       "Effective To": null
@@ -251,7 +251,7 @@
   },
   {
    "name": "Fenwick Dunmore PC",
-   "key": "fenwick-dunmore-pc",
+   "key": "rs-01-fenwick-dunmore-pc",
    "address": [
     "887 Market Street",
     "Boston",
@@ -287,7 +287,7 @@
       "Timekeeper": "Cyrus Hargrove",
       "Classification": null,
       "Approved Rate": "255.00",
-      "Rack Rate": "285.00",
+      "Rack Rate": "290.00",
       "Currency": "USD",
       "Effective From": "2024-01-01",
       "Effective To": null
@@ -296,7 +296,7 @@
       "Timekeeper": "Ingrid Esposito",
       "Classification": null,
       "Approved Rate": "255.00",
-      "Rack Rate": "285.00",
+      "Rack Rate": "290.00",
       "Currency": "USD",
       "Effective From": "2024-01-01",
       "Effective To": null
@@ -305,7 +305,7 @@
       "Timekeeper": "Ivan Galbraith",
       "Classification": null,
       "Approved Rate": "145.00",
-      "Rack Rate": "160.00",
+      "Rack Rate": "165.00",
       "Currency": "USD",
       "Effective From": "2024-01-01",
       "Effective To": null
@@ -315,13 +315,13 @@
   },
   {
    "name": "Hartwell & Whitcombe LLP",
-   "key": "hartwell-and-whitcombe-llp",
+   "key": "rs-01-hartwell-amp-whitcombe-llp",
    "address": [
     "764 Harbor Road",
     "Minneapolis",
     "Tax ID 57-4663912"
    ],
-   "billing_contact_email": "billing@hartwell-and-whitcombe-llp.example",
+   "billing_contact_email": "billing@hartwell-amp-whitcombe-llp.example",
    "workbook": {
     "Timekeepers": [
      {
@@ -329,56 +329,56 @@
       "Classification": "Legal Assistant",
       "Effective From": "2024-01-01",
       "Effective To": null,
-      "Contact Email": "clara.yilmaz@hartwell-and-whitcombe-llp.example"
+      "Contact Email": "clara.yilmaz@hartwell-amp-whitcombe-llp.example"
      },
      {
       "Name": "Dalia Kowalczyk",
       "Classification": "Paralegal",
       "Effective From": "2024-01-01",
       "Effective To": null,
-      "Contact Email": "dalia.kowalczyk@hartwell-and-whitcombe-llp.example"
+      "Contact Email": "dalia.kowalczyk@hartwell-amp-whitcombe-llp.example"
      },
      {
       "Name": "Dmitri Fairweather",
       "Classification": "Partner",
       "Effective From": "2024-01-01",
       "Effective To": null,
-      "Contact Email": "dmitri.fairweather@hartwell-and-whitcombe-llp.example"
+      "Contact Email": "dmitri.fairweather@hartwell-amp-whitcombe-llp.example"
      },
      {
       "Name": "Elena Kowalczyk",
       "Classification": "Associate",
       "Effective From": "2024-01-01",
       "Effective To": null,
-      "Contact Email": "elena.kowalczyk@hartwell-and-whitcombe-llp.example"
+      "Contact Email": "elena.kowalczyk@hartwell-amp-whitcombe-llp.example"
      },
      {
       "Name": "Emeka Zielinski",
       "Classification": "Partner",
       "Effective From": "2024-01-01",
       "Effective To": null,
-      "Contact Email": "emeka.zielinski@hartwell-and-whitcombe-llp.example"
+      "Contact Email": "emeka.zielinski@hartwell-amp-whitcombe-llp.example"
      },
      {
       "Name": "Farah Pemberton",
       "Classification": "Associate",
       "Effective From": "2024-01-01",
       "Effective To": null,
-      "Contact Email": "farah.pemberton@hartwell-and-whitcombe-llp.example"
+      "Contact Email": "farah.pemberton@hartwell-amp-whitcombe-llp.example"
      },
      {
       "Name": "Katya Yilmaz",
       "Classification": "Associate",
       "Effective From": "2024-01-01",
       "Effective To": null,
-      "Contact Email": "katya.yilmaz@hartwell-and-whitcombe-llp.example"
+      "Contact Email": "katya.yilmaz@hartwell-amp-whitcombe-llp.example"
      },
      {
       "Name": "Naomi Mbeki",
       "Classification": "Paralegal",
       "Effective From": "2024-01-01",
       "Effective To": null,
-      "Contact Email": "naomi.mbeki@hartwell-and-whitcombe-llp.example"
+      "Contact Email": "naomi.mbeki@hartwell-amp-whitcombe-llp.example"
      }
     ],
     "Rates": [
@@ -386,7 +386,7 @@
       "Timekeeper": "Clara Yilmaz",
       "Classification": null,
       "Approved Rate": "180.00",
-      "Rack Rate": "200.00",
+      "Rack Rate": "205.00",
       "Currency": "USD",
       "Effective From": "2024-01-01",
       "Effective To": null
@@ -413,7 +413,7 @@
       "Timekeeper": "Elena Kowalczyk",
       "Classification": null,
       "Approved Rate": "550.00",
-      "Rack Rate": "615.00",
+      "Rack Rate": "620.00",
       "Currency": "USD",
       "Effective From": "2024-01-01",
       "Effective To": null
@@ -431,7 +431,7 @@
       "Timekeeper": "Farah Pemberton",
       "Classification": null,
       "Approved Rate": "420.00",
-      "Rack Rate": "470.00",
+      "Rack Rate": "475.00",
       "Currency": "USD",
       "Effective From": "2024-01-01",
       "Effective To": null
@@ -440,7 +440,7 @@
       "Timekeeper": "Katya Yilmaz",
       "Classification": null,
       "Approved Rate": "430.00",
-      "Rack Rate": "480.00",
+      "Rack Rate": "485.00",
       "Currency": "USD",
       "Effective From": "2024-01-01",
       "Effective To": null
@@ -459,13 +459,13 @@
   },
   {
    "name": "Holloway & Whitcombe LLP",
-   "key": "holloway-and-whitcombe-llp",
+   "key": "rs-01-holloway-amp-whitcombe-llp",
    "address": [
     "421 Federal Plaza",
     "Atlanta",
     "Tax ID 23-8665056"
    ],
-   "billing_contact_email": "billing@holloway-and-whitcombe-llp.example",
+   "billing_contact_email": "billing@holloway-amp-whitcombe-llp.example",
    "workbook": {
     "Timekeepers": [
      {
@@ -473,49 +473,49 @@
       "Classification": "Legal Assistant",
       "Effective From": "2024-01-01",
       "Effective To": null,
-      "Contact Email": "dmitri.thornbury@holloway-and-whitcombe-llp.example"
+      "Contact Email": "dmitri.thornbury@holloway-amp-whitcombe-llp.example"
      },
      {
       "Name": "Katya Carmichael",
       "Classification": "Associate",
       "Effective From": "2024-01-01",
       "Effective To": null,
-      "Contact Email": "katya.carmichael@holloway-and-whitcombe-llp.example"
+      "Contact Email": "katya.carmichael@holloway-amp-whitcombe-llp.example"
      },
      {
       "Name": "Katya Galbraith",
       "Classification": "Associate",
       "Effective From": "2024-01-01",
       "Effective To": null,
-      "Contact Email": "katya.galbraith@holloway-and-whitcombe-llp.example"
+      "Contact Email": "katya.galbraith@holloway-amp-whitcombe-llp.example"
      },
      {
       "Name": "Katya Kowalczyk",
       "Classification": "Paralegal",
       "Effective From": "2024-01-01",
       "Effective To": null,
-      "Contact Email": "katya.kowalczyk@holloway-and-whitcombe-llp.example"
+      "Contact Email": "katya.kowalczyk@holloway-amp-whitcombe-llp.example"
      },
      {
       "Name": "Leila Lockhart",
       "Classification": "Associate",
       "Effective From": "2024-01-01",
       "Effective To": null,
-      "Contact Email": "leila.lockhart@holloway-and-whitcombe-llp.example"
+      "Contact Email": "leila.lockhart@holloway-amp-whitcombe-llp.example"
      },
      {
       "Name": "Mei Kowalczyk",
       "Classification": "Associate",
       "Effective From": "2024-01-01",
       "Effective To": null,
-      "Contact Email": "mei.kowalczyk@holloway-and-whitcombe-llp.example"
+      "Contact Email": "mei.kowalczyk@holloway-amp-whitcombe-llp.example"
      },
      {
       "Name": "Peter Voss",
       "Classification": "Partner",
       "Effective From": "2024-01-01",
       "Effective To": null,
-      "Contact Email": "peter.voss@holloway-and-whitcombe-llp.example"
+      "Contact Email": "peter.voss@holloway-amp-whitcombe-llp.example"
      }
     ],
     "Rates": [
@@ -523,7 +523,7 @@
       "Timekeeper": "Dmitri Thornbury",
       "Classification": null,
       "Approved Rate": "170.00",
-      "Rack Rate": "190.00",
+      "Rack Rate": "195.00",
       "Currency": "USD",
       "Effective From": "2024-01-01",
       "Effective To": null
@@ -532,7 +532,7 @@
       "Timekeeper": "Katya Carmichael",
       "Classification": null,
       "Approved Rate": "390.00",
-      "Rack Rate": "435.00",
+      "Rack Rate": "440.00",
       "Currency": "USD",
       "Effective From": "2024-01-01",
       "Effective To": null
@@ -550,7 +550,7 @@
       "Timekeeper": "Katya Kowalczyk",
       "Classification": null,
       "Approved Rate": "225.00",
-      "Rack Rate": "250.00",
+      "Rack Rate": "255.00",
       "Currency": "USD",
       "Effective From": "2024-01-01",
       "Effective To": null
@@ -568,7 +568,7 @@
       "Timekeeper": "Mei Kowalczyk",
       "Classification": null,
       "Approved Rate": "385.00",
-      "Rack Rate": "430.00",
+      "Rack Rate": "435.00",
       "Currency": "USD",
       "Effective From": "2024-01-01",
       "Effective To": null
@@ -587,7 +587,7 @@
   },
   {
    "name": "Kestrel Ambrose PC",
-   "key": "kestrel-ambrose-pc",
+   "key": "rs-01-kestrel-ambrose-pc",
    "address": [
     "461 Congress Boulevard",
     "Boston",
@@ -637,7 +637,7 @@
       "Timekeeper": "Emeka Hargrove",
       "Classification": null,
       "Approved Rate": "255.00",
-      "Rack Rate": "285.00",
+      "Rack Rate": "290.00",
       "Currency": "USD",
       "Effective From": "2024-01-01",
       "Effective To": null
@@ -683,7 +683,7 @@
   },
   {
    "name": "Kingsley and Forsythe LLP",
-   "key": "kingsley-and-forsythe-llp",
+   "key": "rs-01-kingsley-and-forsythe-llp",
    "address": [
     "604 Elm Court",
     "Dallas",
@@ -761,7 +761,7 @@
       "Timekeeper": "Cyrus Okafor",
       "Classification": null,
       "Approved Rate": "260.00",
-      "Rack Rate": "290.00",
+      "Rack Rate": "295.00",
       "Currency": "USD",
       "Effective From": "2024-01-01",
       "Effective To": null
@@ -779,7 +779,7 @@
       "Timekeeper": "Marcus Mbeki",
       "Classification": null,
       "Approved Rate": "140.00",
-      "Rack Rate": "155.00",
+      "Rack Rate": "160.00",
       "Currency": "USD",
       "Effective From": "2024-01-01",
       "Effective To": null
@@ -815,7 +815,7 @@
       "Timekeeper": "Elena Voss",
       "Classification": null,
       "Approved Rate": "435.00",
-      "Rack Rate": "485.00",
+      "Rack Rate": "490.00",
       "Currency": "USD",
       "Effective From": "2024-01-01",
       "Effective To": null
@@ -824,7 +824,7 @@
       "Timekeeper": "Imani Fairweather",
       "Classification": null,
       "Approved Rate": "140.00",
-      "Rack Rate": "155.00",
+      "Rack Rate": "160.00",
       "Currency": "USD",
       "Effective From": "2024-01-01",
       "Effective To": null
@@ -833,7 +833,7 @@
       "Timekeeper": "Ingrid Voss",
       "Classification": null,
       "Approved Rate": "140.00",
-      "Rack Rate": "155.00",
+      "Rack Rate": "160.00",
       "Currency": "USD",
       "Effective From": "2024-01-01",
       "Effective To": null
@@ -843,13 +843,13 @@
   },
   {
    "name": "Lindenmeyer & Beckett LLP",
-   "key": "lindenmeyer-and-beckett-llp",
+   "key": "rs-01-lindenmeyer-amp-beckett-llp",
    "address": [
     "631 Lakeshore Drive",
     "Denver",
     "Tax ID 95-3127668"
    ],
-   "billing_contact_email": "billing@lindenmeyer-and-beckett-llp.example",
+   "billing_contact_email": "billing@lindenmeyer-amp-beckett-llp.example",
    "workbook": {
     "Timekeepers": [
      {
@@ -857,35 +857,35 @@
       "Classification": "Associate",
       "Effective From": "2024-01-01",
       "Effective To": null,
-      "Contact Email": "farah.ashdown@lindenmeyer-and-beckett-llp.example"
+      "Contact Email": "farah.ashdown@lindenmeyer-amp-beckett-llp.example"
      },
      {
       "Name": "Gideon Tavares",
       "Classification": "Paralegal",
       "Effective From": "2024-01-01",
       "Effective To": null,
-      "Contact Email": "gideon.tavares@lindenmeyer-and-beckett-llp.example"
+      "Contact Email": "gideon.tavares@lindenmeyer-amp-beckett-llp.example"
      },
      {
       "Name": "Jordan Quillen",
       "Classification": "Associate",
       "Effective From": "2024-01-01",
       "Effective To": null,
-      "Contact Email": "jordan.quillen@lindenmeyer-and-beckett-llp.example"
+      "Contact Email": "jordan.quillen@lindenmeyer-amp-beckett-llp.example"
      },
      {
       "Name": "Samuel Okafor",
       "Classification": "Partner",
       "Effective From": "2024-01-01",
       "Effective To": null,
-      "Contact Email": "samuel.okafor@lindenmeyer-and-beckett-llp.example"
+      "Contact Email": "samuel.okafor@lindenmeyer-amp-beckett-llp.example"
      },
      {
       "Name": "Victor Castellanos",
       "Classification": "Associate",
       "Effective From": "2024-01-01",
       "Effective To": null,
-      "Contact Email": "victor.castellanos@lindenmeyer-and-beckett-llp.example"
+      "Contact Email": "victor.castellanos@lindenmeyer-amp-beckett-llp.example"
      }
     ],
     "Rates": [
@@ -939,7 +939,7 @@
   },
   {
    "name": "Montclair and Whitcombe LLP",
-   "key": "montclair-and-whitcombe-llp",
+   "key": "rs-01-montclair-and-whitcombe-llp",
    "address": [
     "761 Lakeshore Drive",
     "Portland",
@@ -989,7 +989,7 @@
       "Timekeeper": "Clara Whitfield",
       "Classification": null,
       "Approved Rate": "380.00",
-      "Rack Rate": "425.00",
+      "Rack Rate": "430.00",
       "Currency": "USD",
       "Effective From": "2024-01-01",
       "Effective To": null
@@ -1007,7 +1007,7 @@
       "Timekeeper": "Ivan Lockhart",
       "Classification": null,
       "Approved Rate": "210.00",
-      "Rack Rate": "235.00",
+      "Rack Rate": "240.00",
       "Currency": "USD",
       "Effective From": "2024-01-01",
       "Effective To": null
@@ -1035,7 +1035,7 @@
   },
   {
    "name": "Northcott and Beckett LLP",
-   "key": "northcott-and-beckett-llp",
+   "key": "rs-01-northcott-and-beckett-llp",
    "address": [
     "138 Lakeshore Drive",
     "Houston",
@@ -1089,7 +1089,7 @@
       "Timekeeper": "Yusuf Galbraith",
       "Classification": null,
       "Approved Rate": "140.00",
-      "Rack Rate": "155.00",
+      "Rack Rate": "160.00",
       "Currency": "USD",
       "Effective From": "2024-01-01",
       "Effective To": null
@@ -1099,7 +1099,7 @@
   },
   {
    "name": "Oakhurst Yardley PC",
-   "key": "oakhurst-yardley-pc",
+   "key": "rs-01-oakhurst-yardley-pc",
    "address": [
     "96 Elm Court",
     "Portland",
@@ -1156,7 +1156,7 @@
       "Timekeeper": "Clara Thornbury",
       "Classification": null,
       "Approved Rate": "675.00",
-      "Rack Rate": "755.00",
+      "Rack Rate": "760.00",
       "Currency": "USD",
       "Effective From": "2024-01-01",
       "Effective To": null
@@ -1165,7 +1165,7 @@
       "Timekeeper": "Dmitri Lockhart",
       "Classification": null,
       "Approved Rate": "810.00",
-      "Rack Rate": "905.00",
+      "Rack Rate": "910.00",
       "Currency": "USD",
       "Effective From": "2024-01-01",
       "Effective To": null
@@ -1174,7 +1174,7 @@
       "Timekeeper": "Gideon Fairweather",
       "Classification": null,
       "Approved Rate": "895.00",
-      "Rack Rate": "1000.00",
+      "Rack Rate": "1005.00",
       "Currency": "USD",
       "Effective From": "2024-01-01",
       "Effective To": null
@@ -1183,7 +1183,7 @@
       "Timekeeper": "Helena Fairweather",
       "Classification": null,
       "Approved Rate": "510.00",
-      "Rack Rate": "570.00",
+      "Rack Rate": "575.00",
       "Currency": "USD",
       "Effective From": "2024-01-01",
       "Effective To": null
@@ -1201,7 +1201,7 @@
       "Timekeeper": "Victor Yilmaz",
       "Classification": null,
       "Approved Rate": "925.00",
-      "Rack Rate": "1035.00",
+      "Rack Rate": "1040.00",
       "Currency": "USD",
       "Effective From": "2024-01-01",
       "Effective To": null
@@ -1211,7 +1211,7 @@
   },
   {
    "name": "Pryce Whitcombe PC",
-   "key": "pryce-whitcombe-pc",
+   "key": "rs-01-pryce-whitcombe-pc",
    "address": [
     "510 Harbor Road",
     "Portland",
@@ -1277,7 +1277,7 @@
       "Timekeeper": "Ingrid Abernathy",
       "Classification": null,
       "Approved Rate": "390.00",
-      "Rack Rate": "435.00",
+      "Rack Rate": "440.00",
       "Currency": "USD",
       "Effective From": "2024-01-01",
       "Effective To": null
@@ -1286,7 +1286,7 @@
       "Timekeeper": "Ingrid Hargrove",
       "Classification": null,
       "Approved Rate": "375.00",
-      "Rack Rate": "420.00",
+      "Rack Rate": "425.00",
       "Currency": "USD",
       "Effective From": "2024-01-01",
       "Effective To": null
@@ -1295,7 +1295,7 @@
       "Timekeeper": "Ivan Mbeki",
       "Classification": null,
       "Approved Rate": "395.00",
-      "Rack Rate": "440.00",
+      "Rack Rate": "445.00",
       "Currency": "USD",
       "Effective From": "2024-01-01",
       "Effective To": null
@@ -1313,7 +1313,7 @@
       "Timekeeper": "Sofia Halloran",
       "Classification": null,
       "Approved Rate": "215.00",
-      "Rack Rate": "240.00",
+      "Rack Rate": "245.00",
       "Currency": "USD",
       "Effective From": "2024-01-01",
       "Effective To": null
@@ -1323,7 +1323,7 @@
   },
   {
    "name": "Ravenscroft Beckett PC",
-   "key": "ravenscroft-beckett-pc",
+   "key": "rs-01-ravenscroft-beckett-pc",
    "address": [
     "656 Congress Boulevard",
     "Houston",
@@ -1391,7 +1391,7 @@
       "Timekeeper": "Ivan Brennan",
       "Classification": null,
       "Approved Rate": "300.00",
-      "Rack Rate": "335.00",
+      "Rack Rate": "340.00",
       "Currency": "USD",
       "Effective From": "2024-01-01",
       "Effective To": null
@@ -1409,7 +1409,7 @@
       "Timekeeper": "Leila Tavares",
       "Classification": null,
       "Approved Rate": "295.00",
-      "Rack Rate": "330.00",
+      "Rack Rate": "335.00",
       "Currency": "USD",
       "Effective From": "2024-01-01",
       "Effective To": null
@@ -1419,13 +1419,13 @@
   },
   {
    "name": "Rutherford & Vance LLP",
-   "key": "rutherford-and-vance-llp",
+   "key": "rs-01-rutherford-amp-vance-llp",
    "address": [
     "122 Lakeshore Drive",
     "Portland",
     "Tax ID 27-6237757"
    ],
-   "billing_contact_email": "billing@rutherford-and-vance-llp.example",
+   "billing_contact_email": "billing@rutherford-amp-vance-llp.example",
    "workbook": {
     "Timekeepers": [
      {
@@ -1433,49 +1433,49 @@
       "Classification": "Associate",
       "Effective From": "2024-01-01",
       "Effective To": null,
-      "Contact Email": "beatrix.dunleavy@rutherford-and-vance-llp.example"
+      "Contact Email": "beatrix.dunleavy@rutherford-amp-vance-llp.example"
      },
      {
       "Name": "Dalia Ashdown",
       "Classification": "Partner",
       "Effective From": "2024-01-01",
       "Effective To": null,
-      "Contact Email": "dalia.ashdown@rutherford-and-vance-llp.example"
+      "Contact Email": "dalia.ashdown@rutherford-amp-vance-llp.example"
      },
      {
       "Name": "Ivan Pemberton",
       "Classification": "Associate",
       "Effective From": "2024-01-01",
       "Effective To": null,
-      "Contact Email": "ivan.pemberton@rutherford-and-vance-llp.example"
+      "Contact Email": "ivan.pemberton@rutherford-amp-vance-llp.example"
      },
      {
       "Name": "Ivan Ramanathan",
       "Classification": "Partner",
       "Effective From": "2024-01-01",
       "Effective To": null,
-      "Contact Email": "ivan.ramanathan@rutherford-and-vance-llp.example"
+      "Contact Email": "ivan.ramanathan@rutherford-amp-vance-llp.example"
      },
      {
       "Name": "Leila Ramanathan",
       "Classification": "Associate",
       "Effective From": "2024-01-01",
       "Effective To": null,
-      "Contact Email": "leila.ramanathan@rutherford-and-vance-llp.example"
+      "Contact Email": "leila.ramanathan@rutherford-amp-vance-llp.example"
      },
      {
       "Name": "Oliver Dunleavy",
       "Classification": "Paralegal",
       "Effective From": "2024-01-01",
       "Effective To": null,
-      "Contact Email": "oliver.dunleavy@rutherford-and-vance-llp.example"
+      "Contact Email": "oliver.dunleavy@rutherford-amp-vance-llp.example"
      },
      {
       "Name": "Oliver Eriksen",
       "Classification": "Legal Assistant",
       "Effective From": "2024-01-01",
       "Effective To": null,
-      "Contact Email": "oliver.eriksen@rutherford-and-vance-llp.example"
+      "Contact Email": "oliver.eriksen@rutherford-amp-vance-llp.example"
      }
     ],
     "Rates": [
@@ -1483,7 +1483,7 @@
       "Timekeeper": "Beatrix Dunleavy",
       "Classification": null,
       "Approved Rate": "295.00",
-      "Rack Rate": "330.00",
+      "Rack Rate": "335.00",
       "Currency": "USD",
       "Effective From": "2024-01-01",
       "Effective To": null
@@ -1492,7 +1492,7 @@
       "Timekeeper": "Dalia Ashdown",
       "Classification": null,
       "Approved Rate": "505.00",
-      "Rack Rate": "565.00",
+      "Rack Rate": "570.00",
       "Currency": "USD",
       "Effective From": "2024-01-01",
       "Effective To": null
@@ -1501,7 +1501,7 @@
       "Timekeeper": "Ivan Pemberton",
       "Classification": null,
       "Approved Rate": "305.00",
-      "Rack Rate": "340.00",
+      "Rack Rate": "345.00",
       "Currency": "USD",
       "Effective From": "2024-01-01",
       "Effective To": null
@@ -1547,7 +1547,7 @@
   },
   {
    "name": "Rutherford Beckett PC",
-   "key": "rutherford-beckett-pc",
+   "key": "rs-01-rutherford-beckett-pc",
    "address": [
     "998 Market Street",
     "Chicago",
@@ -1599,7 +1599,7 @@
       "Timekeeper": "Gregory Tavares",
       "Classification": null,
       "Approved Rate": "430.00",
-      "Rack Rate": "480.00",
+      "Rack Rate": "485.00",
       "Currency": "USD",
       "Effective From": "2024-01-01",
       "Effective To": null
@@ -1608,7 +1608,7 @@
       "Timekeeper": "Helena Voss",
       "Classification": null,
       "Approved Rate": "505.00",
-      "Rack Rate": "565.00",
+      "Rack Rate": "570.00",
       "Currency": "USD",
       "Effective From": "2024-01-01",
       "Effective To": null
@@ -1617,7 +1617,7 @@
       "Timekeeper": "Leila Esposito",
       "Classification": null,
       "Approved Rate": "145.00",
-      "Rack Rate": "160.00",
+      "Rack Rate": "165.00",
       "Currency": "USD",
       "Effective From": "2024-01-01",
       "Effective To": null
@@ -1627,7 +1627,7 @@
   },
   {
    "name": "Rutherford and Yardley LLP",
-   "key": "rutherford-and-yardley-llp",
+   "key": "rs-01-rutherford-and-yardley-llp",
    "address": [
     "884 Pine Street",
     "Boston",
@@ -1672,7 +1672,7 @@
       "Timekeeper": "Rafael Mbeki",
       "Classification": null,
       "Approved Rate": "475.00",
-      "Rack Rate": "530.00",
+      "Rack Rate": "535.00",
       "Currency": "USD",
       "Effective From": "2024-01-01",
       "Effective To": null
@@ -1681,7 +1681,7 @@
       "Timekeeper": "Samuel Blackwood",
       "Classification": null,
       "Approved Rate": "460.00",
-      "Rack Rate": "515.00",
+      "Rack Rate": "520.00",
       "Currency": "USD",
       "Effective From": "2024-01-01",
       "Effective To": null
@@ -1691,7 +1691,7 @@
   },
   {
    "name": "Stanhope and Yardley LLP",
-   "key": "stanhope-and-yardley-llp",
+   "key": "rs-01-stanhope-and-yardley-llp",
    "address": [
     "985 Union Square",
     "Atlanta",
@@ -1734,7 +1734,7 @@
       "Timekeeper": "Farah Mbeki",
       "Classification": null,
       "Approved Rate": "585.00",
-      "Rack Rate": "655.00",
+      "Rack Rate": "660.00",
       "Currency": "USD",
       "Effective From": "2024-01-01",
       "Effective To": null
@@ -1743,7 +1743,7 @@
       "Timekeeper": "Hannah Nakamura",
       "Classification": null,
       "Approved Rate": "305.00",
-      "Rack Rate": "340.00",
+      "Rack Rate": "345.00",
       "Currency": "USD",
       "Effective From": "2024-01-01",
       "Effective To": null
@@ -1752,7 +1752,7 @@
       "Timekeeper": "Helena Yilmaz",
       "Classification": null,
       "Approved Rate": "175.00",
-      "Rack Rate": "195.00",
+      "Rack Rate": "200.00",
       "Currency": "USD",
       "Effective From": "2024-01-01",
       "Effective To": null
@@ -1771,13 +1771,13 @@
   },
   {
    "name": "Sutherland & Zeller LLP",
-   "key": "sutherland-and-zeller-llp",
+   "key": "rs-01-sutherland-amp-zeller-llp",
    "address": [
     "283 Market Street",
     "Minneapolis",
     "Tax ID 67-5100116"
    ],
-   "billing_contact_email": "billing@sutherland-and-zeller-llp.example",
+   "billing_contact_email": "billing@sutherland-amp-zeller-llp.example",
    "workbook": {
     "Timekeepers": [
      {
@@ -1785,28 +1785,28 @@
       "Classification": "Paralegal",
       "Effective From": "2024-01-01",
       "Effective To": null,
-      "Contact Email": "farah.nwosu@sutherland-and-zeller-llp.example"
+      "Contact Email": "farah.nwosu@sutherland-amp-zeller-llp.example"
      },
      {
       "Name": "Ivan Sandoval",
       "Classification": "Partner",
       "Effective From": "2024-01-01",
       "Effective To": null,
-      "Contact Email": "ivan.sandoval@sutherland-and-zeller-llp.example"
+      "Contact Email": "ivan.sandoval@sutherland-amp-zeller-llp.example"
      },
      {
       "Name": "Katya Wickham",
       "Classification": "Associate",
       "Effective From": "2024-01-01",
       "Effective To": null,
-      "Contact Email": "katya.wickham@sutherland-and-zeller-llp.example"
+      "Contact Email": "katya.wickham@sutherland-amp-zeller-llp.example"
      },
      {
       "Name": "Mei Castellanos",
       "Classification": "Partner",
       "Effective From": "2024-01-01",
       "Effective To": null,
-      "Contact Email": "mei.castellanos@sutherland-and-zeller-llp.example"
+      "Contact Email": "mei.castellanos@sutherland-amp-zeller-llp.example"
      }
     ],
     "Rates": [
@@ -1814,7 +1814,7 @@
       "Timekeeper": "Farah Nwosu",
       "Classification": null,
       "Approved Rate": "260.00",
-      "Rack Rate": "290.00",
+      "Rack Rate": "295.00",
       "Currency": "USD",
       "Effective From": "2024-01-01",
       "Effective To": null
@@ -1823,7 +1823,7 @@
       "Timekeeper": "Ivan Sandoval",
       "Classification": null,
       "Approved Rate": "810.00",
-      "Rack Rate": "905.00",
+      "Rack Rate": "910.00",
       "Currency": "USD",
       "Effective From": "2024-01-01",
       "Effective To": null
@@ -1832,7 +1832,7 @@
       "Timekeeper": "Katya Wickham",
       "Classification": null,
       "Approved Rate": "435.00",
-      "Rack Rate": "485.00",
+      "Rack Rate": "490.00",
       "Currency": "USD",
       "Effective From": "2024-01-01",
       "Effective To": null
@@ -1851,13 +1851,13 @@
   },
   {
    "name": "Tennant & Whitcombe LLP",
-   "key": "tennant-and-whitcombe-llp",
+   "key": "rs-01-tennant-amp-whitcombe-llp",
    "address": [
     "868 Federal Plaza",
     "Denver",
     "Tax ID 15-7244086"
    ],
-   "billing_contact_email": "billing@tennant-and-whitcombe-llp.example",
+   "billing_contact_email": "billing@tennant-amp-whitcombe-llp.example",
    "workbook": {
     "Timekeepers": [
      {
@@ -1865,35 +1865,35 @@
       "Classification": "Of Counsel",
       "Effective From": "2024-01-01",
       "Effective To": null,
-      "Contact Email": "gregory.kowalczyk@tennant-and-whitcombe-llp.example"
+      "Contact Email": "gregory.kowalczyk@tennant-amp-whitcombe-llp.example"
      },
      {
       "Name": "Marcus Nakamura",
       "Classification": "Associate",
       "Effective From": "2024-01-01",
       "Effective To": null,
-      "Contact Email": "marcus.nakamura@tennant-and-whitcombe-llp.example"
+      "Contact Email": "marcus.nakamura@tennant-amp-whitcombe-llp.example"
      },
      {
       "Name": "Mei Rosenthal",
       "Classification": "Paralegal",
       "Effective From": "2024-01-01",
       "Effective To": null,
-      "Contact Email": "mei.rosenthal@tennant-and-whitcombe-llp.example"
+      "Contact Email": "mei.rosenthal@tennant-amp-whitcombe-llp.example"
      },
      {
       "Name": "Priya Hargrove",
       "Classification": "Associate",
       "Effective From": "2024-01-01",
       "Effective To": null,
-      "Contact Email": "priya.hargrove@tennant-and-whitcombe-llp.example"
+      "Contact Email": "priya.hargrove@tennant-amp-whitcombe-llp.example"
      },
      {
       "Name": "Yusuf Lindqvist",
       "Classification": "Associate",
       "Effective From": "2024-01-01",
       "Effective To": null,
-      "Contact Email": "yusuf.lindqvist@tennant-and-whitcombe-llp.example"
+      "Contact Email": "yusuf.lindqvist@tennant-amp-whitcombe-llp.example"
      }
     ],
     "Rates": [
@@ -1901,7 +1901,7 @@
       "Timekeeper": "Gregory Kowalczyk",
       "Classification": null,
       "Approved Rate": "725.00",
-      "Rack Rate": "810.00",
+      "Rack Rate": "815.00",
       "Currency": "USD",
       "Effective From": "2024-01-01",
       "Effective To": null
@@ -1928,7 +1928,7 @@
       "Timekeeper": "Priya Hargrove",
       "Classification": null,
       "Approved Rate": "465.00",
-      "Rack Rate": "520.00",
+      "Rack Rate": "525.00",
       "Currency": "USD",
       "Effective From": "2024-01-01",
       "Effective To": null

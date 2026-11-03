@@ -8,6 +8,7 @@ Run from the evaluation-set folder:  python -I generator/build_guideline_data.py
 Deterministic: the same inputs give byte-identical output.
 """
 import collections
+import math
 import json
 import random
 import re
@@ -73,8 +74,8 @@ def a110_clean_lines(inv, codes):
 
 def pick(rs, invs, rng):
     """15 seeded invoices covering every rule of the set at least twice (greedy), then 5 clean ones. Where the guideline has a
-    NonBillableActivity rule, the clean invoices are those with the most clean lines carrying a listed code, so the code-based
-    rule's over-flag shows in the score (ebilling 2026-11-03)."""
+    NonBillableActivity rule, the clean invoices are those with the most legitimate A110/A105 lines (agreed with ebilling 2026-11-03),
+    so a drafter or admin who states the clerical-work clause as an A110 code rule shows false alarms on clean invoices."""
     seeded = [i for i in invs if i["expected_findings"]]
     clean = [i for i in invs if not i["expected_findings"]]
     rng.shuffle(seeded)
@@ -94,8 +95,13 @@ def pick(rs, invs, rng):
 
 
 def slug(name):
-    s = re.sub(r"[^a-z0-9]+", "-", name.lower().replace("&", "and")).strip("-")
-    return s
+    """'&' and 'and' stay distinct: Set F has both "Pryce & Whitcombe LLP" and "Pryce and Whitcombe LLP"."""
+    return re.sub(r"[^a-z0-9]+", "-", name.lower().replace("&", " amp ")).strip("-")
+
+
+def rack_of(approved):
+    """At least 12% above the approved rate, rounded UP to $5, so a 10% discount off rack never lands below the approved rate."""
+    return math.ceil(approved * 1.12 / 5) * 5
 
 
 def email(person, firm):
@@ -135,7 +141,7 @@ def workbook(inv, rs, roster):
         approved = caps[title] if caps else (billed_rate if billed_rate is not None else None)
         if approved is None:
             continue  # an approved timekeeper who bills nothing on this invoice and whose rate the guideline does not set
-        rack = max(billed_rate or 0, round(approved * 1.12 / 5) * 5)
+        rack = max(billed_rate or 0, rack_of(approved))
         rates.append({
             "Timekeeper": name, "Classification": None, "Approved Rate": money(approved), "Rack Rate": money(rack),
             "Currency": "USD", "Effective From": ROSTER_FROM, "Effective To": None,
@@ -145,7 +151,7 @@ def workbook(inv, rs, roster):
             if title in caps:
                 rates.append({
                     "Timekeeper": None, "Classification": cls, "Approved Rate": money(caps[title]),
-                    "Rack Rate": money(round(caps[title] * 1.12 / 5) * 5), "Currency": "USD",
+                    "Rack Rate": money(rack_of(caps[title])), "Currency": "USD",
                     "Effective From": ROSTER_FROM, "Effective To": None,
                 })
     return {"Timekeepers": timekeepers, "Rates": rates}
@@ -182,7 +188,8 @@ def build():
             if firm not in firms:
                 firms[firm] = {
                     "name": firm,
-                    "key": slug(firm),
+                    # Unique per rule set: six firm names appear in two rule sets with different rate caps and rosters.
+                    "key": f"{rs_id.lower()}-{slug(firm)}",
                     "address": inv["document"].get("letterhead", []),
                     "billing_contact_email": f"billing@{slug(firm)}.example",
                     "workbook": workbook(inv, rs, roster),

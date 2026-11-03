@@ -6,7 +6,7 @@
  "meta": {
   "generator_id": "production_key.py",
   "label_method": "generator",
-  "note": "Predicted production findings; basis proxy/uncertain marks rows that depend on AI output or 046 resolution."
+  "note": "Predicted production findings; basis proxy marks rows that depend on AI output."
  },
  "production_rules": {
   "RS-04-R01": [
@@ -62,16 +62,16 @@
    "not_expressible": "ExpenseRule caps the line amount; it cannot cap a unit rate (cost per page)"
   },
   "RS-04-R08": {
-   "rules": [
-    {
-     "type": "NonBillableActivity",
-     "codes": [
-      "A110"
-     ]
-    }
-   ],
-   "not_expressible": "NonBillableActivity lists codes, not narrative keywords; the guideline's task list is stated as UTBMS codes"
+   "not_expressible": "NonBillableActivity lists activity codes only, and no code identifies clerical work: A110 (Manage data/files) also covers legitimate document work, and invoice preparation is coded A111"
   }
+ },
+ "production_consequences": {
+  "RS-04-R01": "Flag",
+  "RS-04-R02": "SuggestAdjustment",
+  "RS-04-R03": "Flag",
+  "RS-04-R04": "Flag",
+  "RS-04-R06": "Flag",
+  "RS-04-R07": "Flag"
  },
  "invoices": [
   {
@@ -159,8 +159,8 @@
       13
      ],
      "consequence": "Disallow",
-     "status": "reproduced",
-     "basis": "proxy"
+     "status": "not_expressible",
+     "reason": "NonBillableActivity lists activity codes only, and no code identifies clerical work: A110 (Manage data/files) also covers legitimate document work, and invoice preparation is coded A111"
     }
    ],
    "production_findings": [
@@ -183,6 +183,16 @@
      "basis": "exact"
     },
     {
+     "rule_id": "RS-04-R02",
+     "type": "ApprovedRate",
+     "scope": "line",
+     "line_refs": [
+      17
+     ],
+     "basis": "exact",
+     "reason": "no_approved_rate"
+    },
+    {
      "rule_id": "RS-04-R04",
      "type": "CoreRecordWindow",
      "scope": "line",
@@ -199,18 +209,21 @@
       12
      ],
      "basis": "exact"
-    },
-    {
-     "rule_id": "RS-04-R08",
-     "type": "NonBillableActivity",
-     "scope": "line",
-     "line_refs": [
-      13
-     ],
-     "basis": "proxy"
     }
    ],
-   "production_only": []
+   "production_only": [
+    {
+     "rule_id": "RS-04-R02",
+     "type": "ApprovedRate",
+     "scope": "line",
+     "line_refs": [
+      17
+     ],
+     "basis": "exact",
+     "reason": "the timekeeper is not on the roster, so no approved rate is in force (fires beside ApprovedTimekeeper)",
+     "status": "production_only"
+    }
+   ]
   },
   {
    "id": "F-0040",
@@ -234,7 +247,7 @@
      ],
      "consequence": "Disallow",
      "status": "not_expressible",
-     "reason": "NonBillableActivity lists codes, not narrative keywords; the guideline's task list is stated as UTBMS codes"
+     "reason": "NonBillableActivity lists activity codes only, and no code identifies clerical work: A110 (Manage data/files) also covers legitimate document work, and invoice preparation is coded A111"
     },
     {
      "rule_id": "RS-04-R08",
@@ -244,21 +257,11 @@
       5
      ],
      "consequence": "Disallow",
-     "status": "reproduced",
-     "basis": "proxy"
+     "status": "not_expressible",
+     "reason": "NonBillableActivity lists activity codes only, and no code identifies clerical work: A110 (Manage data/files) also covers legitimate document work, and invoice preparation is coded A111"
     }
    ],
-   "production_findings": [
-    {
-     "rule_id": "RS-04-R08",
-     "type": "NonBillableActivity",
-     "scope": "line",
-     "line_refs": [
-      5
-     ],
-     "basis": "proxy"
-    }
-   ],
+   "production_findings": [],
    "production_only": []
   },
   {
@@ -315,8 +318,8 @@
       3
      ],
      "consequence": "Disallow",
-     "status": "reproduced",
-     "basis": "proxy"
+     "status": "not_expressible",
+     "reason": "NonBillableActivity lists activity codes only, and no code identifies clerical work: A110 (Manage data/files) also covers legitimate document work, and invoice preparation is coded A111"
     }
    ],
    "production_findings": [
@@ -328,6 +331,16 @@
       4
      ],
      "basis": "exact"
+    },
+    {
+     "rule_id": "RS-04-R02",
+     "type": "ApprovedRate",
+     "scope": "line",
+     "line_refs": [
+      4
+     ],
+     "basis": "exact",
+     "reason": "no_approved_rate"
     },
     {
      "rule_id": "RS-04-R03",
@@ -346,18 +359,21 @@
       7
      ],
      "basis": "exact"
-    },
-    {
-     "rule_id": "RS-04-R08",
-     "type": "NonBillableActivity",
-     "scope": "line",
-     "line_refs": [
-      3
-     ],
-     "basis": "proxy"
     }
    ],
-   "production_only": []
+   "production_only": [
+    {
+     "rule_id": "RS-04-R02",
+     "type": "ApprovedRate",
+     "scope": "line",
+     "line_refs": [
+      4
+     ],
+     "basis": "exact",
+     "reason": "the timekeeper is not on the roster, so no approved rate is in force (fires beside ApprovedTimekeeper)",
+     "status": "production_only"
+    }
+   ]
   },
   {
    "id": "F-0082",
@@ -420,8 +436,8 @@
       4
      ],
      "consequence": "Disallow",
-     "status": "reproduced",
-     "basis": "proxy"
+     "status": "not_expressible",
+     "reason": "NonBillableActivity lists activity codes only, and no code identifies clerical work: A110 (Manage data/files) also covers legitimate document work, and invoice preparation is coded A111"
     }
    ],
    "production_findings": [
@@ -433,15 +449,6 @@
       2
      ],
      "basis": "exact"
-    },
-    {
-     "rule_id": "RS-04-R08",
-     "type": "NonBillableActivity",
-     "scope": "line",
-     "line_refs": [
-      4
-     ],
-     "basis": "proxy"
     }
    ],
    "production_only": []
@@ -489,8 +496,8 @@
       5
      ],
      "consequence": "Disallow",
-     "status": "reproduced",
-     "basis": "proxy"
+     "status": "not_expressible",
+     "reason": "NonBillableActivity lists activity codes only, and no code identifies clerical work: A110 (Manage data/files) also covers legitimate document work, and invoice preparation is coded A111"
     }
    ],
    "production_findings": [
@@ -511,15 +518,6 @@
       2
      ],
      "basis": "exact"
-    },
-    {
-     "rule_id": "RS-04-R08",
-     "type": "NonBillableActivity",
-     "scope": "line",
-     "line_refs": [
-      5
-     ],
-     "basis": "proxy"
     }
    ],
    "production_only": []
@@ -585,6 +583,16 @@
      "basis": "exact"
     },
     {
+     "rule_id": "RS-04-R02",
+     "type": "ApprovedRate",
+     "scope": "line",
+     "line_refs": [
+      12
+     ],
+     "basis": "exact",
+     "reason": "no_approved_rate"
+    },
+    {
      "rule_id": "RS-04-R06",
      "type": "Duplicate",
      "scope": "line",
@@ -594,7 +602,19 @@
      "basis": "exact"
     }
    ],
-   "production_only": []
+   "production_only": [
+    {
+     "rule_id": "RS-04-R02",
+     "type": "ApprovedRate",
+     "scope": "line",
+     "line_refs": [
+      12
+     ],
+     "basis": "exact",
+     "reason": "the timekeeper is not on the roster, so no approved rate is in force (fires beside ApprovedTimekeeper)",
+     "status": "production_only"
+    }
+   ]
   },
   {
    "id": "F-0178",
@@ -651,8 +671,8 @@
       5
      ],
      "consequence": "Disallow",
-     "status": "reproduced",
-     "basis": "proxy"
+     "status": "not_expressible",
+     "reason": "NonBillableActivity lists activity codes only, and no code identifies clerical work: A110 (Manage data/files) also covers legitimate document work, and invoice preparation is coded A111"
     }
    ],
    "production_findings": [
@@ -673,15 +693,6 @@
       7
      ],
      "basis": "exact"
-    },
-    {
-     "rule_id": "RS-04-R08",
-     "type": "NonBillableActivity",
-     "scope": "line",
-     "line_refs": [
-      5
-     ],
-     "basis": "proxy"
     }
    ],
    "production_only": []
@@ -790,7 +801,8 @@
      "line_refs": [
       1
      ],
-     "basis": "uncertain"
+     "basis": "exact",
+     "reason": "no_approved_rate"
     },
     {
      "rule_id": "RS-04-R02",
@@ -818,15 +830,6 @@
       10
      ],
      "basis": "exact"
-    },
-    {
-     "rule_id": "RS-04-R08",
-     "type": "NonBillableActivity",
-     "scope": "line",
-     "line_refs": [
-      3
-     ],
-     "basis": "proxy"
     }
    ],
    "production_only": [
@@ -837,20 +840,9 @@
      "line_refs": [
       1
      ],
-     "basis": "uncertain",
-     "status": "production_only",
-     "reason": "an unrostered timekeeper judged against a classification rate (Senior Associate resolves to Associate)"
-    },
-    {
-     "rule_id": "RS-04-R08",
-     "type": "NonBillableActivity",
-     "scope": "line",
-     "line_refs": [
-      3
-     ],
-     "basis": "proxy",
-     "status": "production_only",
-     "reason": "a clean line carries a listed code: the code-based rule over-flags compared with the guideline's task list"
+     "basis": "exact",
+     "reason": "the timekeeper is not on the roster, so no approved rate is in force (fires beside ApprovedTimekeeper)",
+     "status": "production_only"
     }
    ]
   },
@@ -1018,8 +1010,8 @@
       1
      ],
      "consequence": "Disallow",
-     "status": "reproduced",
-     "basis": "proxy"
+     "status": "not_expressible",
+     "reason": "NonBillableActivity lists activity codes only, and no code identifies clerical work: A110 (Manage data/files) also covers legitimate document work, and invoice preparation is coded A111"
     }
    ],
    "production_findings": [
@@ -1046,21 +1038,55 @@
      "type": "ApprovedRate",
      "scope": "line",
      "line_refs": [
+      3
+     ],
+     "basis": "exact",
+     "reason": "no_approved_rate"
+    },
+    {
+     "rule_id": "RS-04-R02",
+     "type": "ApprovedRate",
+     "scope": "line",
+     "line_refs": [
       6
      ],
      "basis": "exact"
     },
     {
-     "rule_id": "RS-04-R08",
-     "type": "NonBillableActivity",
+     "rule_id": "RS-04-R02",
+     "type": "ApprovedRate",
      "scope": "line",
      "line_refs": [
-      1
+      7
      ],
-     "basis": "proxy"
+     "basis": "exact",
+     "reason": "no_approved_rate"
     }
    ],
-   "production_only": []
+   "production_only": [
+    {
+     "rule_id": "RS-04-R02",
+     "type": "ApprovedRate",
+     "scope": "line",
+     "line_refs": [
+      3
+     ],
+     "basis": "exact",
+     "reason": "the timekeeper is not on the roster, so no approved rate is in force (fires beside ApprovedTimekeeper)",
+     "status": "production_only"
+    },
+    {
+     "rule_id": "RS-04-R02",
+     "type": "ApprovedRate",
+     "scope": "line",
+     "line_refs": [
+      7
+     ],
+     "basis": "exact",
+     "reason": "the timekeeper is not on the roster, so no approved rate is in force (fires beside ApprovedTimekeeper)",
+     "status": "production_only"
+    }
+   ]
   },
   {
    "id": "F-0298",
@@ -1096,8 +1122,8 @@
       5
      ],
      "consequence": "Disallow",
-     "status": "reproduced",
-     "basis": "proxy"
+     "status": "not_expressible",
+     "reason": "NonBillableActivity lists activity codes only, and no code identifies clerical work: A110 (Manage data/files) also covers legitimate document work, and invoice preparation is coded A111"
     }
    ],
    "production_findings": [
@@ -1111,6 +1137,16 @@
      "basis": "exact"
     },
     {
+     "rule_id": "RS-04-R02",
+     "type": "ApprovedRate",
+     "scope": "line",
+     "line_refs": [
+      7
+     ],
+     "basis": "exact",
+     "reason": "no_approved_rate"
+    },
+    {
      "rule_id": "RS-04-R03",
      "type": "TimeIncrement",
      "scope": "line",
@@ -1118,223 +1154,56 @@
       2
      ],
      "basis": "exact"
-    },
-    {
-     "rule_id": "RS-04-R08",
-     "type": "NonBillableActivity",
-     "scope": "line",
-     "line_refs": [
-      5
-     ],
-     "basis": "proxy"
     }
    ],
-   "production_only": []
+   "production_only": [
+    {
+     "rule_id": "RS-04-R02",
+     "type": "ApprovedRate",
+     "scope": "line",
+     "line_refs": [
+      7
+     ],
+     "basis": "exact",
+     "reason": "the timekeeper is not on the roster, so no approved rate is in force (fires beside ApprovedTimekeeper)",
+     "status": "production_only"
+    }
+   ]
   },
   {
    "id": "F-0352",
    "clean": true,
    "set_f_findings": [],
-   "production_findings": [
-    {
-     "rule_id": "RS-04-R08",
-     "type": "NonBillableActivity",
-     "scope": "line",
-     "line_refs": [
-      8
-     ],
-     "basis": "proxy"
-    }
-   ],
-   "production_only": [
-    {
-     "rule_id": "RS-04-R08",
-     "type": "NonBillableActivity",
-     "scope": "line",
-     "line_refs": [
-      8
-     ],
-     "basis": "proxy",
-     "status": "production_only",
-     "reason": "a clean line carries a listed code: the code-based rule over-flags compared with the guideline's task list"
-    }
-   ]
+   "production_findings": [],
+   "production_only": []
   },
   {
    "id": "F-0364",
    "clean": true,
    "set_f_findings": [],
-   "production_findings": [
-    {
-     "rule_id": "RS-04-R08",
-     "type": "NonBillableActivity",
-     "scope": "line",
-     "line_refs": [
-      1
-     ],
-     "basis": "proxy"
-    }
-   ],
-   "production_only": [
-    {
-     "rule_id": "RS-04-R08",
-     "type": "NonBillableActivity",
-     "scope": "line",
-     "line_refs": [
-      1
-     ],
-     "basis": "proxy",
-     "status": "production_only",
-     "reason": "a clean line carries a listed code: the code-based rule over-flags compared with the guideline's task list"
-    }
-   ]
+   "production_findings": [],
+   "production_only": []
   },
   {
    "id": "F-0382",
    "clean": true,
    "set_f_findings": [],
-   "production_findings": [
-    {
-     "rule_id": "RS-04-R08",
-     "type": "NonBillableActivity",
-     "scope": "line",
-     "line_refs": [
-      5
-     ],
-     "basis": "proxy"
-    }
-   ],
-   "production_only": [
-    {
-     "rule_id": "RS-04-R08",
-     "type": "NonBillableActivity",
-     "scope": "line",
-     "line_refs": [
-      5
-     ],
-     "basis": "proxy",
-     "status": "production_only",
-     "reason": "a clean line carries a listed code: the code-based rule over-flags compared with the guideline's task list"
-    }
-   ]
+   "production_findings": [],
+   "production_only": []
   },
   {
    "id": "F-0502",
    "clean": true,
    "set_f_findings": [],
-   "production_findings": [
-    {
-     "rule_id": "RS-04-R08",
-     "type": "NonBillableActivity",
-     "scope": "line",
-     "line_refs": [
-      6
-     ],
-     "basis": "proxy"
-    },
-    {
-     "rule_id": "RS-04-R08",
-     "type": "NonBillableActivity",
-     "scope": "line",
-     "line_refs": [
-      8
-     ],
-     "basis": "proxy"
-    },
-    {
-     "rule_id": "RS-04-R08",
-     "type": "NonBillableActivity",
-     "scope": "line",
-     "line_refs": [
-      10
-     ],
-     "basis": "proxy"
-    }
-   ],
-   "production_only": [
-    {
-     "rule_id": "RS-04-R08",
-     "type": "NonBillableActivity",
-     "scope": "line",
-     "line_refs": [
-      6
-     ],
-     "basis": "proxy",
-     "status": "production_only",
-     "reason": "a clean line carries a listed code: the code-based rule over-flags compared with the guideline's task list"
-    },
-    {
-     "rule_id": "RS-04-R08",
-     "type": "NonBillableActivity",
-     "scope": "line",
-     "line_refs": [
-      8
-     ],
-     "basis": "proxy",
-     "status": "production_only",
-     "reason": "a clean line carries a listed code: the code-based rule over-flags compared with the guideline's task list"
-    },
-    {
-     "rule_id": "RS-04-R08",
-     "type": "NonBillableActivity",
-     "scope": "line",
-     "line_refs": [
-      10
-     ],
-     "basis": "proxy",
-     "status": "production_only",
-     "reason": "a clean line carries a listed code: the code-based rule over-flags compared with the guideline's task list"
-    }
-   ]
+   "production_findings": [],
+   "production_only": []
   },
   {
    "id": "F-0538",
    "clean": true,
    "set_f_findings": [],
-   "production_findings": [
-    {
-     "rule_id": "RS-04-R08",
-     "type": "NonBillableActivity",
-     "scope": "line",
-     "line_refs": [
-      8
-     ],
-     "basis": "proxy"
-    },
-    {
-     "rule_id": "RS-04-R08",
-     "type": "NonBillableActivity",
-     "scope": "line",
-     "line_refs": [
-      10
-     ],
-     "basis": "proxy"
-    }
-   ],
-   "production_only": [
-    {
-     "rule_id": "RS-04-R08",
-     "type": "NonBillableActivity",
-     "scope": "line",
-     "line_refs": [
-      8
-     ],
-     "basis": "proxy",
-     "status": "production_only",
-     "reason": "a clean line carries a listed code: the code-based rule over-flags compared with the guideline's task list"
-    },
-    {
-     "rule_id": "RS-04-R08",
-     "type": "NonBillableActivity",
-     "scope": "line",
-     "line_refs": [
-      10
-     ],
-     "basis": "proxy",
-     "status": "production_only",
-     "reason": "a clean line carries a listed code: the code-based rule over-flags compared with the guideline's task list"
-    }
-   ]
+   "production_findings": [],
+   "production_only": []
   }
  ]
 }

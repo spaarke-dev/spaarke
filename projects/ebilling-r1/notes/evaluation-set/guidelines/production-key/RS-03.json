@@ -6,7 +6,7 @@
  "meta": {
   "generator_id": "production_key.py",
   "label_method": "generator",
-  "note": "Predicted production findings; basis proxy/uncertain marks rows that depend on AI output or 046 resolution."
+  "note": "Predicted production findings; basis proxy marks rows that depend on AI output."
  },
  "production_rules": {
   "RS-03-R01": [
@@ -32,12 +32,11 @@
     {
      "type": "NonBillableActivity",
      "codes": [
-      "A110",
       "A105"
      ]
     }
    ],
-   "not_expressible": "NonBillableActivity lists codes, not narrative keywords; the guideline's task list is stated as UTBMS codes"
+   "not_expressible": "NonBillableActivity lists activity codes only, and no code identifies clerical work: A110 (Manage data/files) also covers legitimate document work, and invoice preparation is coded A111"
   },
   "RS-03-R05": [
    {
@@ -61,6 +60,14 @@
   "RS-03-R08": {
    "not_expressible": "RequiredData has no PO-number field (closed vocabulary: firmInvoiceNumber, invoiceDate, billingPeriodStart, billingPeriodEnd, timekeeper, lineDate, narrative, taskCode, activityCode, expenseCode)"
   }
+ },
+ "production_consequences": {
+  "RS-03-R01": "SuggestAdjustment",
+  "RS-03-R02": "Flag",
+  "RS-03-R03": "Flag",
+  "RS-03-R04": "SuggestAdjustment",
+  "RS-03-R05": "Flag",
+  "RS-03-R07": "Flag"
  },
  "invoices": [
   {
@@ -331,21 +338,11 @@
       6
      ],
      "consequence": "Disallow",
-     "status": "reproduced",
-     "basis": "proxy"
+     "status": "not_expressible",
+     "reason": "NonBillableActivity lists activity codes only, and no code identifies clerical work: A110 (Manage data/files) also covers legitimate document work, and invoice preparation is coded A111"
     }
    ],
-   "production_findings": [
-    {
-     "rule_id": "RS-03-R04",
-     "type": "NonBillableActivity",
-     "scope": "line",
-     "line_refs": [
-      6
-     ],
-     "basis": "proxy"
-    }
-   ],
+   "production_findings": [],
    "production_only": []
   },
   {
@@ -371,8 +368,8 @@
       8
      ],
      "consequence": "Disallow",
-     "status": "reproduced",
-     "basis": "proxy"
+     "status": "not_expressible",
+     "reason": "NonBillableActivity lists activity codes only, and no code identifies clerical work: A110 (Manage data/files) also covers legitimate document work, and invoice preparation is coded A111"
     }
    ],
    "production_findings": [
@@ -384,15 +381,6 @@
       5
      ],
      "basis": "exact"
-    },
-    {
-     "rule_id": "RS-03-R04",
-     "type": "NonBillableActivity",
-     "scope": "line",
-     "line_refs": [
-      8
-     ],
-     "basis": "proxy"
     }
    ],
    "production_only": []
@@ -471,8 +459,8 @@
       2
      ],
      "consequence": "Disallow",
-     "status": "reproduced",
-     "basis": "proxy"
+     "status": "not_expressible",
+     "reason": "NonBillableActivity lists activity codes only, and no code identifies clerical work: A110 (Manage data/files) also covers legitimate document work, and invoice preparation is coded A111"
     }
    ],
    "production_findings": [
@@ -500,15 +488,6 @@
      "scope": "line",
      "line_refs": [
       1
-     ],
-     "basis": "proxy"
-    },
-    {
-     "rule_id": "RS-03-R04",
-     "type": "NonBillableActivity",
-     "scope": "line",
-     "line_refs": [
-      2
      ],
      "basis": "proxy"
     }
@@ -727,7 +706,7 @@
      ],
      "consequence": "Disallow",
      "status": "not_expressible",
-     "reason": "NonBillableActivity lists codes, not narrative keywords; the guideline's task list is stated as UTBMS codes"
+     "reason": "NonBillableActivity lists activity codes only, and no code identifies clerical work: A110 (Manage data/files) also covers legitimate document work, and invoice preparation is coded A111"
     },
     {
      "rule_id": "RS-03-R08",
@@ -755,7 +734,7 @@
      ],
      "consequence": "Disallow",
      "status": "not_expressible",
-     "reason": "NonBillableActivity lists codes, not narrative keywords; the guideline's task list is stated as UTBMS codes"
+     "reason": "NonBillableActivity lists activity codes only, and no code identifies clerical work: A110 (Manage data/files) also covers legitimate document work, and invoice preparation is coded A111"
     }
    ],
    "production_findings": [],
@@ -874,186 +853,36 @@
    "id": "F-0309",
    "clean": true,
    "set_f_findings": [],
-   "production_findings": [
-    {
-     "rule_id": "RS-03-R04",
-     "type": "NonBillableActivity",
-     "scope": "line",
-     "line_refs": [
-      10
-     ],
-     "basis": "proxy"
-    }
-   ],
-   "production_only": [
-    {
-     "rule_id": "RS-03-R04",
-     "type": "NonBillableActivity",
-     "scope": "line",
-     "line_refs": [
-      10
-     ],
-     "basis": "proxy",
-     "status": "production_only",
-     "reason": "a clean line carries a listed code: the code-based rule over-flags compared with the guideline's task list"
-    }
-   ]
+   "production_findings": [],
+   "production_only": []
   },
   {
    "id": "F-0321",
    "clean": true,
    "set_f_findings": [],
-   "production_findings": [
-    {
-     "rule_id": "RS-03-R04",
-     "type": "NonBillableActivity",
-     "scope": "line",
-     "line_refs": [
-      1
-     ],
-     "basis": "proxy"
-    }
-   ],
-   "production_only": [
-    {
-     "rule_id": "RS-03-R04",
-     "type": "NonBillableActivity",
-     "scope": "line",
-     "line_refs": [
-      1
-     ],
-     "basis": "proxy",
-     "status": "production_only",
-     "reason": "a clean line carries a listed code: the code-based rule over-flags compared with the guideline's task list"
-    }
-   ]
+   "production_findings": [],
+   "production_only": []
   },
   {
    "id": "F-0339",
    "clean": true,
    "set_f_findings": [],
-   "production_findings": [
-    {
-     "rule_id": "RS-03-R04",
-     "type": "NonBillableActivity",
-     "scope": "line",
-     "line_refs": [
-      11
-     ],
-     "basis": "proxy"
-    }
-   ],
-   "production_only": [
-    {
-     "rule_id": "RS-03-R04",
-     "type": "NonBillableActivity",
-     "scope": "line",
-     "line_refs": [
-      11
-     ],
-     "basis": "proxy",
-     "status": "production_only",
-     "reason": "a clean line carries a listed code: the code-based rule over-flags compared with the guideline's task list"
-    }
-   ]
+   "production_findings": [],
+   "production_only": []
   },
   {
    "id": "F-0417",
    "clean": true,
    "set_f_findings": [],
-   "production_findings": [
-    {
-     "rule_id": "RS-03-R04",
-     "type": "NonBillableActivity",
-     "scope": "line",
-     "line_refs": [
-      5
-     ],
-     "basis": "proxy"
-    },
-    {
-     "rule_id": "RS-03-R04",
-     "type": "NonBillableActivity",
-     "scope": "line",
-     "line_refs": [
-      6
-     ],
-     "basis": "proxy"
-    }
-   ],
-   "production_only": [
-    {
-     "rule_id": "RS-03-R04",
-     "type": "NonBillableActivity",
-     "scope": "line",
-     "line_refs": [
-      5
-     ],
-     "basis": "proxy",
-     "status": "production_only",
-     "reason": "a clean line carries a listed code: the code-based rule over-flags compared with the guideline's task list"
-    },
-    {
-     "rule_id": "RS-03-R04",
-     "type": "NonBillableActivity",
-     "scope": "line",
-     "line_refs": [
-      6
-     ],
-     "basis": "proxy",
-     "status": "production_only",
-     "reason": "a clean line carries a listed code: the code-based rule over-flags compared with the guideline's task list"
-    }
-   ]
+   "production_findings": [],
+   "production_only": []
   },
   {
    "id": "F-0513",
    "clean": true,
    "set_f_findings": [],
-   "production_findings": [
-    {
-     "rule_id": "RS-03-R04",
-     "type": "NonBillableActivity",
-     "scope": "line",
-     "line_refs": [
-      5
-     ],
-     "basis": "proxy"
-    },
-    {
-     "rule_id": "RS-03-R04",
-     "type": "NonBillableActivity",
-     "scope": "line",
-     "line_refs": [
-      13
-     ],
-     "basis": "proxy"
-    }
-   ],
-   "production_only": [
-    {
-     "rule_id": "RS-03-R04",
-     "type": "NonBillableActivity",
-     "scope": "line",
-     "line_refs": [
-      5
-     ],
-     "basis": "proxy",
-     "status": "production_only",
-     "reason": "a clean line carries a listed code: the code-based rule over-flags compared with the guideline's task list"
-    },
-    {
-     "rule_id": "RS-03-R04",
-     "type": "NonBillableActivity",
-     "scope": "line",
-     "line_refs": [
-      13
-     ],
-     "basis": "proxy",
-     "status": "production_only",
-     "reason": "a clean line carries a listed code: the code-based rule over-flags compared with the guideline's task list"
-    }
-   ]
+   "production_findings": [],
+   "production_only": []
   }
  ]
 }

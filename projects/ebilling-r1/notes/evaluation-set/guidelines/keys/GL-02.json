@@ -68,6 +68,7 @@
       "type": "ApprovedTimekeeper"
      }
     ],
+    "consequence": "Flag",
     "not_expressible": null
    }
   },
@@ -99,6 +100,7 @@
       "tolerancePercent": 0
      }
     ],
+    "consequence": "SuggestAdjustment",
     "not_expressible": null
    }
   },
@@ -123,6 +125,7 @@
       "incrementHours": 0.1
      }
     ],
+    "consequence": "Flag",
     "not_expressible": null
    }
   },
@@ -147,6 +150,7 @@
       "maxHoursPerDay": 10
      }
     ],
+    "consequence": "Flag",
     "not_expressible": null
    }
   },
@@ -174,6 +178,7 @@
       ]
      }
     ],
+    "consequence": "Reject",
     "not_expressible": null
    }
   },
@@ -199,6 +204,7 @@
       "graceDays": 0
      }
     ],
+    "consequence": "Flag",
     "not_expressible": "CoreRecordWindow checks dates only; no rule type compares an invoice with the core record's budget"
    }
   },
@@ -233,6 +239,7 @@
       ]
      }
     ],
+    "consequence": "Flag",
     "not_expressible": null
    }
   },
@@ -258,6 +265,7 @@
       "maxAgeDays": 90
      }
     ],
+    "consequence": "Flag",
     "not_expressible": "InvoiceAge is invoice date minus line date per line; no rule type measures received date against the billing period end"
    }
   }
@@ -300,7 +308,7 @@
     "section": "3.1",
     "heading": "Rates"
    },
-   "paraphrase": "Rates at least 10% below the firm's standard rates (standard rates are not on the invoice).",
+   "paraphrase": "Rates reflect the firm's best public-sector terms (the firm's other rates are not on the invoice).",
    "reason": "judgement"
   },
   {

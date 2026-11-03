@@ -76,6 +76,7 @@
       "tolerancePercent": 0
      }
     ],
+    "consequence": "SuggestAdjustment",
     "not_expressible": null
    }
   },
@@ -100,6 +101,7 @@
       "incrementHours": 0.1
      }
     ],
+    "consequence": "Flag",
     "not_expressible": null
    }
   },
@@ -124,6 +126,7 @@
       "maxHoursPerDay": 8
      }
     ],
+    "consequence": "Flag",
     "not_expressible": null
    }
   },
@@ -155,12 +158,12 @@
      {
       "type": "NonBillableActivity",
       "codes": [
-       "A110",
        "A105"
       ]
      }
     ],
-    "not_expressible": "NonBillableActivity lists codes, not narrative keywords; the guideline's task list is stated as UTBMS codes"
+    "consequence": "SuggestAdjustment",
+    "not_expressible": "NonBillableActivity lists activity codes only, and no code identifies clerical work: A110 (Manage data/files) also covers legitimate document work, and invoice preparation is coded A111"
    }
   },
   {
@@ -190,6 +193,7 @@
       ]
      }
     ],
+    "consequence": "Flag",
     "not_expressible": null
    }
   },
@@ -212,6 +216,7 @@
    "production": {
     "status": "none",
     "rules": [],
+    "consequence": null,
     "not_expressible": "ExpenseRule caps the line amount; it cannot cap a unit rate (cost per page); ExpenseRule maxAmountPerItem applies to every expense line; it cannot be limited to one expense code"
    }
   },
@@ -239,6 +244,7 @@
       "minConfidence": 0.7
      }
     ],
+    "consequence": "Flag",
     "not_expressible": null
    }
   },
@@ -260,6 +266,7 @@
    "production": {
     "status": "none",
     "rules": [],
+    "consequence": null,
     "not_expressible": "RequiredData has no PO-number field (closed vocabulary: firmInvoiceNumber, invoiceDate, billingPeriodStart, billingPeriodEnd, timekeeper, lineDate, narrative, taskCode, activityCode, expenseCode)"
    }
   }
@@ -303,7 +310,7 @@
     "heading": "Recording time"
    },
    "paraphrase": "Research over 5 hours on one issue needs advance approval.",
-   "reason": "judgement"
+   "reason": "needs-new-type"
   },
   {
    "clause_ref": {

@@ -76,6 +76,7 @@
       "tolerancePercent": 0
      }
     ],
+    "consequence": "SuggestAdjustment",
     "not_expressible": null
    }
   },
@@ -100,6 +101,7 @@
       "incrementHours": 0.1
      }
     ],
+    "consequence": "Flag",
     "not_expressible": null
    }
   },
@@ -133,6 +135,7 @@
       "minConfidence": 0.7
      }
     ],
+    "consequence": "Flag",
     "not_expressible": null
    }
   },
@@ -164,12 +167,12 @@
      {
       "type": "NonBillableActivity",
       "codes": [
-       "A110",
        "A105"
       ]
      }
     ],
-    "not_expressible": "NonBillableActivity lists codes, not narrative keywords; the guideline's task list is stated as UTBMS codes"
+    "consequence": "SuggestAdjustment",
+    "not_expressible": "NonBillableActivity lists activity codes only, and no code identifies clerical work: A110 (Manage data/files) also covers legitimate document work, and invoice preparation is coded A111"
    }
   },
   {
@@ -203,6 +206,7 @@
       ]
      }
     ],
+    "consequence": "Flag",
     "not_expressible": null
    }
   },
@@ -227,6 +231,7 @@
       "maxHoursPerDay": 12
      }
     ],
+    "consequence": "Flag",
     "not_expressible": null
    }
   },
@@ -257,6 +262,7 @@
       ]
      }
     ],
+    "consequence": "Reject",
     "not_expressible": "RequiredData has no PO-number field (closed vocabulary: firmInvoiceNumber, invoiceDate, billingPeriodStart, billingPeriodEnd, timekeeper, lineDate, narrative, taskCode, activityCode, expenseCode)"
    }
   },
@@ -281,6 +287,7 @@
       "maxAgeDays": 120
      }
     ],
+    "consequence": "Flag",
     "not_expressible": null
    }
   }
@@ -308,7 +315,7 @@
     "heading": "Reporting"
    },
    "paraphrase": "Research over 3 hours needs advance approval.",
-   "reason": "judgement"
+   "reason": "needs-new-type"
   },
   {
    "clause_ref": {
