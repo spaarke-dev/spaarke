@@ -1,0 +1,1441 @@
+{
+ "schema": "ebilling-eval/1",
+ "kind": "production-key",
+ "id": "RS-01-PK",
+ "rule_set_id": "RS-01",
+ "meta": {
+  "generator_id": "production_key.py",
+  "label_method": "generator",
+  "note": "Predicted production findings; basis proxy/uncertain marks rows that depend on AI output or 046 resolution."
+ },
+ "production_rules": {
+  "RS-01-R01": [
+   {
+    "type": "TimeIncrement",
+    "incrementHours": 0.1
+   }
+  ],
+  "RS-01-R02": [
+   {
+    "type": "AiObservation",
+    "observation": "blockBilling",
+    "minConfidence": 0.7
+   },
+   {
+    "type": "AiObservation",
+    "observation": "vagueDescription",
+    "minConfidence": 0.7
+   }
+  ],
+  "RS-01-R03": {
+   "rules": [
+    {
+     "type": "NonBillableActivity",
+     "codes": [
+      "A110"
+     ]
+    }
+   ],
+   "not_expressible": "NonBillableActivity lists codes, not narrative keywords; the guideline's task list is stated as UTBMS codes"
+  },
+  "RS-01-R04": [
+   {
+    "type": "ExpenseRule",
+    "nonReimbursableCodes": [
+     "E103",
+     "E104",
+     "E106"
+    ]
+   }
+  ],
+  "RS-01-R05": {
+   "not_expressible": "ExpenseRule caps the line amount; it cannot cap a unit rate (cost per page)"
+  },
+  "RS-01-R06": {
+   "not_expressible": "InvoiceAge is invoice date minus line date per line; no rule type measures received date against the billing period end"
+  },
+  "RS-01-R07": [
+   {
+    "type": "Duplicate",
+    "matchFields": [
+     "timekeeper",
+     "lineDate",
+     "hours",
+     "narrative"
+    ]
+   }
+  ],
+  "RS-01-R08": {
+   "not_expressible": "RequiredData has no PO-number field (closed vocabulary: firmInvoiceNumber, invoiceDate, billingPeriodStart, billingPeriodEnd, timekeeper, lineDate, narrative, taskCode, activityCode, expenseCode)"
+  }
+ },
+ "invoices": [
+  {
+   "id": "F-0007",
+   "clean": false,
+   "set_f_findings": [
+    {
+     "rule_id": "RS-01-R01",
+     "rule_type": "TimeIncrement",
+     "scope": "line",
+     "line_refs": [
+      4
+     ],
+     "consequence": "Reduce",
+     "status": "reproduced",
+     "basis": "exact"
+    }
+   ],
+   "production_findings": [
+    {
+     "rule_id": "RS-01-R01",
+     "type": "TimeIncrement",
+     "scope": "line",
+     "line_refs": [
+      4
+     ],
+     "basis": "exact"
+    }
+   ],
+   "production_only": []
+  },
+  {
+   "id": "F-0013",
+   "clean": false,
+   "set_f_findings": [
+    {
+     "rule_id": "RS-01-R02",
+     "rule_type": "AiObservation",
+     "scope": "line",
+     "line_refs": [
+      10
+     ],
+     "consequence": "Flag",
+     "status": "reproduced",
+     "basis": "proxy"
+    },
+    {
+     "rule_id": "RS-01-R05",
+     "rule_type": "ExpenseRule",
+     "scope": "line",
+     "line_refs": [
+      12
+     ],
+     "consequence": "Reduce",
+     "status": "not_expressible",
+     "reason": "ExpenseRule caps the line amount; it cannot cap a unit rate (cost per page)"
+    },
+    {
+     "rule_id": "RS-01-R06",
+     "rule_type": "InvoiceAge",
+     "scope": "invoice",
+     "line_refs": [],
+     "consequence": "Flag",
+     "status": "not_expressible",
+     "reason": "InvoiceAge is invoice date minus line date per line; no rule type measures received date against the billing period end"
+    },
+    {
+     "rule_id": "RS-01-R07",
+     "rule_type": "Duplicate",
+     "scope": "line",
+     "line_refs": [
+      5
+     ],
+     "consequence": "Disallow",
+     "related_line_refs": [
+      4
+     ],
+     "status": "reproduced",
+     "basis": "exact"
+    },
+    {
+     "rule_id": "RS-01-R08",
+     "rule_type": "RequiredData",
+     "scope": "invoice",
+     "line_refs": [],
+     "consequence": "Reject",
+     "status": "not_expressible",
+     "reason": "RequiredData has no PO-number field (closed vocabulary: firmInvoiceNumber, invoiceDate, billingPeriodStart, billingPeriodEnd, timekeeper, lineDate, narrative, taskCode, activityCode, expenseCode)"
+    }
+   ],
+   "production_findings": [
+    {
+     "rule_id": "RS-01-R02",
+     "type": "AiObservation",
+     "scope": "line",
+     "line_refs": [
+      10
+     ],
+     "basis": "proxy"
+    },
+    {
+     "rule_id": "RS-01-R07",
+     "type": "Duplicate",
+     "scope": "line",
+     "line_refs": [
+      5
+     ],
+     "basis": "exact"
+    }
+   ],
+   "production_only": []
+  },
+  {
+   "id": "F-0079",
+   "clean": false,
+   "set_f_findings": [
+    {
+     "rule_id": "RS-01-R01",
+     "rule_type": "TimeIncrement",
+     "scope": "line",
+     "line_refs": [
+      6
+     ],
+     "consequence": "Reduce",
+     "status": "reproduced",
+     "basis": "exact"
+    },
+    {
+     "rule_id": "RS-01-R05",
+     "rule_type": "ExpenseRule",
+     "scope": "line",
+     "line_refs": [
+      2
+     ],
+     "consequence": "Reduce",
+     "status": "not_expressible",
+     "reason": "ExpenseRule caps the line amount; it cannot cap a unit rate (cost per page)"
+    },
+    {
+     "rule_id": "RS-01-R08",
+     "rule_type": "RequiredData",
+     "scope": "invoice",
+     "line_refs": [],
+     "consequence": "Reject",
+     "status": "not_expressible",
+     "reason": "RequiredData has no PO-number field (closed vocabulary: firmInvoiceNumber, invoiceDate, billingPeriodStart, billingPeriodEnd, timekeeper, lineDate, narrative, taskCode, activityCode, expenseCode)"
+    }
+   ],
+   "production_findings": [
+    {
+     "rule_id": "RS-01-R01",
+     "type": "TimeIncrement",
+     "scope": "line",
+     "line_refs": [
+      6
+     ],
+     "basis": "exact"
+    }
+   ],
+   "production_only": []
+  },
+  {
+   "id": "F-0085",
+   "clean": false,
+   "set_f_findings": [
+    {
+     "rule_id": "RS-01-R01",
+     "rule_type": "TimeIncrement",
+     "scope": "line",
+     "line_refs": [
+      2
+     ],
+     "consequence": "Reduce",
+     "status": "reproduced",
+     "basis": "exact"
+    },
+    {
+     "rule_id": "RS-01-R01",
+     "rule_type": "TimeIncrement",
+     "scope": "line",
+     "line_refs": [
+      6
+     ],
+     "consequence": "Reduce",
+     "status": "reproduced",
+     "basis": "exact"
+    },
+    {
+     "rule_id": "RS-01-R02",
+     "rule_type": "AiObservation",
+     "scope": "line",
+     "line_refs": [
+      3
+     ],
+     "consequence": "Flag",
+     "status": "reproduced",
+     "basis": "proxy"
+    },
+    {
+     "rule_id": "RS-01-R02",
+     "rule_type": "AiObservation",
+     "scope": "line",
+     "line_refs": [
+      4
+     ],
+     "consequence": "Flag",
+     "status": "reproduced",
+     "basis": "proxy"
+    },
+    {
+     "rule_id": "RS-01-R02",
+     "rule_type": "AiObservation",
+     "scope": "line",
+     "line_refs": [
+      7
+     ],
+     "consequence": "Flag",
+     "status": "reproduced",
+     "basis": "proxy"
+    }
+   ],
+   "production_findings": [
+    {
+     "rule_id": "RS-01-R01",
+     "type": "TimeIncrement",
+     "scope": "line",
+     "line_refs": [
+      2
+     ],
+     "basis": "exact"
+    },
+    {
+     "rule_id": "RS-01-R01",
+     "type": "TimeIncrement",
+     "scope": "line",
+     "line_refs": [
+      6
+     ],
+     "basis": "exact"
+    },
+    {
+     "rule_id": "RS-01-R02",
+     "type": "AiObservation",
+     "scope": "line",
+     "line_refs": [
+      3
+     ],
+     "basis": "proxy"
+    },
+    {
+     "rule_id": "RS-01-R02",
+     "type": "AiObservation",
+     "scope": "line",
+     "line_refs": [
+      4
+     ],
+     "basis": "proxy"
+    },
+    {
+     "rule_id": "RS-01-R02",
+     "type": "AiObservation",
+     "scope": "line",
+     "line_refs": [
+      7
+     ],
+     "basis": "proxy"
+    }
+   ],
+   "production_only": []
+  },
+  {
+   "id": "F-0109",
+   "clean": false,
+   "set_f_findings": [
+    {
+     "rule_id": "RS-01-R01",
+     "rule_type": "TimeIncrement",
+     "scope": "line",
+     "line_refs": [
+      4
+     ],
+     "consequence": "Reduce",
+     "status": "reproduced",
+     "basis": "exact"
+    },
+    {
+     "rule_id": "RS-01-R02",
+     "rule_type": "AiObservation",
+     "scope": "line",
+     "line_refs": [
+      5
+     ],
+     "consequence": "Flag",
+     "status": "reproduced",
+     "basis": "proxy"
+    },
+    {
+     "rule_id": "RS-01-R02",
+     "rule_type": "AiObservation",
+     "scope": "line",
+     "line_refs": [
+      7
+     ],
+     "consequence": "Flag",
+     "status": "reproduced",
+     "basis": "proxy"
+    },
+    {
+     "rule_id": "RS-01-R07",
+     "rule_type": "Duplicate",
+     "scope": "line",
+     "line_refs": [
+      2
+     ],
+     "consequence": "Disallow",
+     "related_line_refs": [
+      1
+     ],
+     "status": "reproduced",
+     "basis": "exact"
+    },
+    {
+     "rule_id": "RS-01-R07",
+     "rule_type": "Duplicate",
+     "scope": "line",
+     "line_refs": [
+      9
+     ],
+     "consequence": "Disallow",
+     "related_line_refs": [
+      8
+     ],
+     "status": "reproduced",
+     "basis": "exact"
+    }
+   ],
+   "production_findings": [
+    {
+     "rule_id": "RS-01-R01",
+     "type": "TimeIncrement",
+     "scope": "line",
+     "line_refs": [
+      4
+     ],
+     "basis": "exact"
+    },
+    {
+     "rule_id": "RS-01-R02",
+     "type": "AiObservation",
+     "scope": "line",
+     "line_refs": [
+      5
+     ],
+     "basis": "proxy"
+    },
+    {
+     "rule_id": "RS-01-R02",
+     "type": "AiObservation",
+     "scope": "line",
+     "line_refs": [
+      7
+     ],
+     "basis": "proxy"
+    },
+    {
+     "rule_id": "RS-01-R03",
+     "type": "NonBillableActivity",
+     "scope": "line",
+     "line_refs": [
+      4
+     ],
+     "basis": "proxy"
+    },
+    {
+     "rule_id": "RS-01-R07",
+     "type": "Duplicate",
+     "scope": "line",
+     "line_refs": [
+      2
+     ],
+     "basis": "exact"
+    },
+    {
+     "rule_id": "RS-01-R07",
+     "type": "Duplicate",
+     "scope": "line",
+     "line_refs": [
+      9
+     ],
+     "basis": "exact"
+    }
+   ],
+   "production_only": [
+    {
+     "rule_id": "RS-01-R03",
+     "type": "NonBillableActivity",
+     "scope": "line",
+     "line_refs": [
+      4
+     ],
+     "basis": "proxy",
+     "status": "production_only",
+     "reason": "a clean line carries a listed code: the code-based rule over-flags compared with the guideline's task list"
+    }
+   ]
+  },
+  {
+   "id": "F-0121",
+   "clean": false,
+   "set_f_findings": [
+    {
+     "rule_id": "RS-01-R01",
+     "rule_type": "TimeIncrement",
+     "scope": "line",
+     "line_refs": [
+      4
+     ],
+     "consequence": "Reduce",
+     "status": "reproduced",
+     "basis": "exact"
+    },
+    {
+     "rule_id": "RS-01-R01",
+     "rule_type": "TimeIncrement",
+     "scope": "line",
+     "line_refs": [
+      9
+     ],
+     "consequence": "Reduce",
+     "status": "reproduced",
+     "basis": "exact"
+    },
+    {
+     "rule_id": "RS-01-R06",
+     "rule_type": "InvoiceAge",
+     "scope": "invoice",
+     "line_refs": [],
+     "consequence": "Flag",
+     "status": "not_expressible",
+     "reason": "InvoiceAge is invoice date minus line date per line; no rule type measures received date against the billing period end"
+    },
+    {
+     "rule_id": "RS-01-R08",
+     "rule_type": "RequiredData",
+     "scope": "invoice",
+     "line_refs": [],
+     "consequence": "Reject",
+     "status": "not_expressible",
+     "reason": "RequiredData has no PO-number field (closed vocabulary: firmInvoiceNumber, invoiceDate, billingPeriodStart, billingPeriodEnd, timekeeper, lineDate, narrative, taskCode, activityCode, expenseCode)"
+    }
+   ],
+   "production_findings": [
+    {
+     "rule_id": "RS-01-R01",
+     "type": "TimeIncrement",
+     "scope": "line",
+     "line_refs": [
+      4
+     ],
+     "basis": "exact"
+    },
+    {
+     "rule_id": "RS-01-R01",
+     "type": "TimeIncrement",
+     "scope": "line",
+     "line_refs": [
+      9
+     ],
+     "basis": "exact"
+    }
+   ],
+   "production_only": []
+  },
+  {
+   "id": "F-0223",
+   "clean": false,
+   "set_f_findings": [
+    {
+     "rule_id": "RS-01-R01",
+     "rule_type": "TimeIncrement",
+     "scope": "line",
+     "line_refs": [
+      1
+     ],
+     "consequence": "Reduce",
+     "status": "reproduced",
+     "basis": "exact"
+    },
+    {
+     "rule_id": "RS-01-R01",
+     "rule_type": "TimeIncrement",
+     "scope": "line",
+     "line_refs": [
+      2
+     ],
+     "consequence": "Reduce",
+     "status": "reproduced",
+     "basis": "exact"
+    },
+    {
+     "rule_id": "RS-01-R05",
+     "rule_type": "ExpenseRule",
+     "scope": "line",
+     "line_refs": [
+      10
+     ],
+     "consequence": "Reduce",
+     "status": "not_expressible",
+     "reason": "ExpenseRule caps the line amount; it cannot cap a unit rate (cost per page)"
+    },
+    {
+     "rule_id": "RS-01-R06",
+     "rule_type": "InvoiceAge",
+     "scope": "invoice",
+     "line_refs": [],
+     "consequence": "Flag",
+     "status": "not_expressible",
+     "reason": "InvoiceAge is invoice date minus line date per line; no rule type measures received date against the billing period end"
+    }
+   ],
+   "production_findings": [
+    {
+     "rule_id": "RS-01-R01",
+     "type": "TimeIncrement",
+     "scope": "line",
+     "line_refs": [
+      1
+     ],
+     "basis": "exact"
+    },
+    {
+     "rule_id": "RS-01-R01",
+     "type": "TimeIncrement",
+     "scope": "line",
+     "line_refs": [
+      2
+     ],
+     "basis": "exact"
+    }
+   ],
+   "production_only": []
+  },
+  {
+   "id": "F-0235",
+   "clean": false,
+   "set_f_findings": [
+    {
+     "rule_id": "RS-01-R04",
+     "rule_type": "ExpenseRule",
+     "scope": "line",
+     "line_refs": [
+      12
+     ],
+     "consequence": "Disallow",
+     "status": "reproduced",
+     "basis": "exact"
+    },
+    {
+     "rule_id": "RS-01-R04",
+     "rule_type": "ExpenseRule",
+     "scope": "line",
+     "line_refs": [
+      13
+     ],
+     "consequence": "Disallow",
+     "status": "reproduced",
+     "basis": "exact"
+    },
+    {
+     "rule_id": "RS-01-R06",
+     "rule_type": "InvoiceAge",
+     "scope": "invoice",
+     "line_refs": [],
+     "consequence": "Flag",
+     "status": "not_expressible",
+     "reason": "InvoiceAge is invoice date minus line date per line; no rule type measures received date against the billing period end"
+    }
+   ],
+   "production_findings": [
+    {
+     "rule_id": "RS-01-R04",
+     "type": "ExpenseRule",
+     "scope": "line",
+     "line_refs": [
+      12
+     ],
+     "basis": "exact"
+    },
+    {
+     "rule_id": "RS-01-R04",
+     "type": "ExpenseRule",
+     "scope": "line",
+     "line_refs": [
+      13
+     ],
+     "basis": "exact"
+    }
+   ],
+   "production_only": []
+  },
+  {
+   "id": "F-0241",
+   "clean": false,
+   "set_f_findings": [
+    {
+     "rule_id": "RS-01-R01",
+     "rule_type": "TimeIncrement",
+     "scope": "line",
+     "line_refs": [
+      4
+     ],
+     "consequence": "Reduce",
+     "status": "reproduced",
+     "basis": "exact"
+    },
+    {
+     "rule_id": "RS-01-R03",
+     "rule_type": "NonBillableActivity",
+     "scope": "line",
+     "line_refs": [
+      6
+     ],
+     "consequence": "Disallow",
+     "status": "reproduced",
+     "basis": "proxy"
+    }
+   ],
+   "production_findings": [
+    {
+     "rule_id": "RS-01-R01",
+     "type": "TimeIncrement",
+     "scope": "line",
+     "line_refs": [
+      4
+     ],
+     "basis": "exact"
+    },
+    {
+     "rule_id": "RS-01-R03",
+     "type": "NonBillableActivity",
+     "scope": "line",
+     "line_refs": [
+      6
+     ],
+     "basis": "proxy"
+    }
+   ],
+   "production_only": []
+  },
+  {
+   "id": "F-0259",
+   "clean": false,
+   "set_f_findings": [
+    {
+     "rule_id": "RS-01-R03",
+     "rule_type": "NonBillableActivity",
+     "scope": "line",
+     "line_refs": [
+      5
+     ],
+     "consequence": "Disallow",
+     "status": "reproduced",
+     "basis": "proxy"
+    },
+    {
+     "rule_id": "RS-01-R05",
+     "rule_type": "ExpenseRule",
+     "scope": "line",
+     "line_refs": [
+      10
+     ],
+     "consequence": "Reduce",
+     "status": "not_expressible",
+     "reason": "ExpenseRule caps the line amount; it cannot cap a unit rate (cost per page)"
+    },
+    {
+     "rule_id": "RS-01-R07",
+     "rule_type": "Duplicate",
+     "scope": "line",
+     "line_refs": [
+      4
+     ],
+     "consequence": "Disallow",
+     "related_line_refs": [
+      3
+     ],
+     "status": "reproduced",
+     "basis": "exact"
+    }
+   ],
+   "production_findings": [
+    {
+     "rule_id": "RS-01-R03",
+     "type": "NonBillableActivity",
+     "scope": "line",
+     "line_refs": [
+      5
+     ],
+     "basis": "proxy"
+    },
+    {
+     "rule_id": "RS-01-R07",
+     "type": "Duplicate",
+     "scope": "line",
+     "line_refs": [
+      4
+     ],
+     "basis": "exact"
+    }
+   ],
+   "production_only": []
+  },
+  {
+   "id": "F-0271",
+   "clean": false,
+   "set_f_findings": [
+    {
+     "rule_id": "RS-01-R02",
+     "rule_type": "AiObservation",
+     "scope": "line",
+     "line_refs": [
+      2
+     ],
+     "consequence": "Flag",
+     "status": "reproduced",
+     "basis": "proxy"
+    },
+    {
+     "rule_id": "RS-01-R07",
+     "rule_type": "Duplicate",
+     "scope": "line",
+     "line_refs": [
+      8
+     ],
+     "consequence": "Disallow",
+     "related_line_refs": [
+      6
+     ],
+     "status": "reproduced",
+     "basis": "exact"
+    },
+    {
+     "rule_id": "RS-01-R08",
+     "rule_type": "RequiredData",
+     "scope": "invoice",
+     "line_refs": [],
+     "consequence": "Reject",
+     "status": "not_expressible",
+     "reason": "RequiredData has no PO-number field (closed vocabulary: firmInvoiceNumber, invoiceDate, billingPeriodStart, billingPeriodEnd, timekeeper, lineDate, narrative, taskCode, activityCode, expenseCode)"
+    }
+   ],
+   "production_findings": [
+    {
+     "rule_id": "RS-01-R02",
+     "type": "AiObservation",
+     "scope": "line",
+     "line_refs": [
+      2
+     ],
+     "basis": "proxy"
+    },
+    {
+     "rule_id": "RS-01-R07",
+     "type": "Duplicate",
+     "scope": "line",
+     "line_refs": [
+      8
+     ],
+     "basis": "exact"
+    }
+   ],
+   "production_only": []
+  },
+  {
+   "id": "F-0277",
+   "clean": false,
+   "set_f_findings": [
+    {
+     "rule_id": "RS-01-R02",
+     "rule_type": "AiObservation",
+     "scope": "line",
+     "line_refs": [
+      2
+     ],
+     "consequence": "Flag",
+     "status": "reproduced",
+     "basis": "proxy"
+    },
+    {
+     "rule_id": "RS-01-R05",
+     "rule_type": "ExpenseRule",
+     "scope": "line",
+     "line_refs": [
+      11
+     ],
+     "consequence": "Reduce",
+     "status": "not_expressible",
+     "reason": "ExpenseRule caps the line amount; it cannot cap a unit rate (cost per page)"
+    },
+    {
+     "rule_id": "RS-01-R07",
+     "rule_type": "Duplicate",
+     "scope": "line",
+     "line_refs": [
+      5
+     ],
+     "consequence": "Disallow",
+     "related_line_refs": [
+      4
+     ],
+     "status": "reproduced",
+     "basis": "exact"
+    },
+    {
+     "rule_id": "RS-01-R07",
+     "rule_type": "Duplicate",
+     "scope": "line",
+     "line_refs": [
+      7
+     ],
+     "consequence": "Disallow",
+     "related_line_refs": [
+      6
+     ],
+     "status": "reproduced",
+     "basis": "exact"
+    },
+    {
+     "rule_id": "RS-01-R08",
+     "rule_type": "RequiredData",
+     "scope": "invoice",
+     "line_refs": [],
+     "consequence": "Reject",
+     "status": "not_expressible",
+     "reason": "RequiredData has no PO-number field (closed vocabulary: firmInvoiceNumber, invoiceDate, billingPeriodStart, billingPeriodEnd, timekeeper, lineDate, narrative, taskCode, activityCode, expenseCode)"
+    }
+   ],
+   "production_findings": [
+    {
+     "rule_id": "RS-01-R02",
+     "type": "AiObservation",
+     "scope": "line",
+     "line_refs": [
+      2
+     ],
+     "basis": "proxy"
+    },
+    {
+     "rule_id": "RS-01-R07",
+     "type": "Duplicate",
+     "scope": "line",
+     "line_refs": [
+      5
+     ],
+     "basis": "exact"
+    },
+    {
+     "rule_id": "RS-01-R07",
+     "type": "Duplicate",
+     "scope": "line",
+     "line_refs": [
+      7
+     ],
+     "basis": "exact"
+    }
+   ],
+   "production_only": []
+  },
+  {
+   "id": "F-0283",
+   "clean": false,
+   "set_f_findings": [
+    {
+     "rule_id": "RS-01-R01",
+     "rule_type": "TimeIncrement",
+     "scope": "line",
+     "line_refs": [
+      7
+     ],
+     "consequence": "Reduce",
+     "status": "reproduced",
+     "basis": "exact"
+    },
+    {
+     "rule_id": "RS-01-R04",
+     "rule_type": "ExpenseRule",
+     "scope": "line",
+     "line_refs": [
+      9
+     ],
+     "consequence": "Disallow",
+     "status": "reproduced",
+     "basis": "exact"
+    },
+    {
+     "rule_id": "RS-01-R06",
+     "rule_type": "InvoiceAge",
+     "scope": "invoice",
+     "line_refs": [],
+     "consequence": "Flag",
+     "status": "not_expressible",
+     "reason": "InvoiceAge is invoice date minus line date per line; no rule type measures received date against the billing period end"
+    },
+    {
+     "rule_id": "RS-01-R08",
+     "rule_type": "RequiredData",
+     "scope": "invoice",
+     "line_refs": [],
+     "consequence": "Reject",
+     "status": "not_expressible",
+     "reason": "RequiredData has no PO-number field (closed vocabulary: firmInvoiceNumber, invoiceDate, billingPeriodStart, billingPeriodEnd, timekeeper, lineDate, narrative, taskCode, activityCode, expenseCode)"
+    }
+   ],
+   "production_findings": [
+    {
+     "rule_id": "RS-01-R01",
+     "type": "TimeIncrement",
+     "scope": "line",
+     "line_refs": [
+      7
+     ],
+     "basis": "exact"
+    },
+    {
+     "rule_id": "RS-01-R04",
+     "type": "ExpenseRule",
+     "scope": "line",
+     "line_refs": [
+      9
+     ],
+     "basis": "exact"
+    }
+   ],
+   "production_only": []
+  },
+  {
+   "id": "F-0289",
+   "clean": false,
+   "set_f_findings": [
+    {
+     "rule_id": "RS-01-R01",
+     "rule_type": "TimeIncrement",
+     "scope": "line",
+     "line_refs": [
+      3
+     ],
+     "consequence": "Reduce",
+     "status": "reproduced",
+     "basis": "exact"
+    },
+    {
+     "rule_id": "RS-01-R02",
+     "rule_type": "AiObservation",
+     "scope": "line",
+     "line_refs": [
+      14
+     ],
+     "consequence": "Flag",
+     "status": "reproduced",
+     "basis": "proxy"
+    },
+    {
+     "rule_id": "RS-01-R03",
+     "rule_type": "NonBillableActivity",
+     "scope": "line",
+     "line_refs": [
+      7
+     ],
+     "consequence": "Disallow",
+     "status": "reproduced",
+     "basis": "proxy"
+    },
+    {
+     "rule_id": "RS-01-R08",
+     "rule_type": "RequiredData",
+     "scope": "invoice",
+     "line_refs": [],
+     "consequence": "Reject",
+     "status": "not_expressible",
+     "reason": "RequiredData has no PO-number field (closed vocabulary: firmInvoiceNumber, invoiceDate, billingPeriodStart, billingPeriodEnd, timekeeper, lineDate, narrative, taskCode, activityCode, expenseCode)"
+    }
+   ],
+   "production_findings": [
+    {
+     "rule_id": "RS-01-R01",
+     "type": "TimeIncrement",
+     "scope": "line",
+     "line_refs": [
+      3
+     ],
+     "basis": "exact"
+    },
+    {
+     "rule_id": "RS-01-R02",
+     "type": "AiObservation",
+     "scope": "line",
+     "line_refs": [
+      14
+     ],
+     "basis": "proxy"
+    },
+    {
+     "rule_id": "RS-01-R03",
+     "type": "NonBillableActivity",
+     "scope": "line",
+     "line_refs": [
+      1
+     ],
+     "basis": "proxy"
+    },
+    {
+     "rule_id": "RS-01-R03",
+     "type": "NonBillableActivity",
+     "scope": "line",
+     "line_refs": [
+      7
+     ],
+     "basis": "proxy"
+    },
+    {
+     "rule_id": "RS-01-R03",
+     "type": "NonBillableActivity",
+     "scope": "line",
+     "line_refs": [
+      8
+     ],
+     "basis": "proxy"
+    }
+   ],
+   "production_only": [
+    {
+     "rule_id": "RS-01-R03",
+     "type": "NonBillableActivity",
+     "scope": "line",
+     "line_refs": [
+      1
+     ],
+     "basis": "proxy",
+     "status": "production_only",
+     "reason": "a clean line carries a listed code: the code-based rule over-flags compared with the guideline's task list"
+    },
+    {
+     "rule_id": "RS-01-R03",
+     "type": "NonBillableActivity",
+     "scope": "line",
+     "line_refs": [
+      8
+     ],
+     "basis": "proxy",
+     "status": "production_only",
+     "reason": "a clean line carries a listed code: the code-based rule over-flags compared with the guideline's task list"
+    }
+   ]
+  },
+  {
+   "id": "F-0295",
+   "clean": false,
+   "set_f_findings": [
+    {
+     "rule_id": "RS-01-R01",
+     "rule_type": "TimeIncrement",
+     "scope": "line",
+     "line_refs": [
+      2
+     ],
+     "consequence": "Reduce",
+     "status": "reproduced",
+     "basis": "exact"
+    },
+    {
+     "rule_id": "RS-01-R02",
+     "rule_type": "AiObservation",
+     "scope": "line",
+     "line_refs": [
+      5
+     ],
+     "consequence": "Flag",
+     "status": "reproduced",
+     "basis": "proxy"
+    }
+   ],
+   "production_findings": [
+    {
+     "rule_id": "RS-01-R01",
+     "type": "TimeIncrement",
+     "scope": "line",
+     "line_refs": [
+      2
+     ],
+     "basis": "exact"
+    },
+    {
+     "rule_id": "RS-01-R02",
+     "type": "AiObservation",
+     "scope": "line",
+     "line_refs": [
+      5
+     ],
+     "basis": "proxy"
+    },
+    {
+     "rule_id": "RS-01-R03",
+     "type": "NonBillableActivity",
+     "scope": "line",
+     "line_refs": [
+      4
+     ],
+     "basis": "proxy"
+    },
+    {
+     "rule_id": "RS-01-R03",
+     "type": "NonBillableActivity",
+     "scope": "line",
+     "line_refs": [
+      8
+     ],
+     "basis": "proxy"
+    }
+   ],
+   "production_only": [
+    {
+     "rule_id": "RS-01-R03",
+     "type": "NonBillableActivity",
+     "scope": "line",
+     "line_refs": [
+      4
+     ],
+     "basis": "proxy",
+     "status": "production_only",
+     "reason": "a clean line carries a listed code: the code-based rule over-flags compared with the guideline's task list"
+    },
+    {
+     "rule_id": "RS-01-R03",
+     "type": "NonBillableActivity",
+     "scope": "line",
+     "line_refs": [
+      8
+     ],
+     "basis": "proxy",
+     "status": "production_only",
+     "reason": "a clean line carries a listed code: the code-based rule over-flags compared with the guideline's task list"
+    }
+   ]
+  },
+  {
+   "id": "F-0307",
+   "clean": true,
+   "set_f_findings": [],
+   "production_findings": [
+    {
+     "rule_id": "RS-01-R03",
+     "type": "NonBillableActivity",
+     "scope": "line",
+     "line_refs": [
+      9
+     ],
+     "basis": "proxy"
+    }
+   ],
+   "production_only": [
+    {
+     "rule_id": "RS-01-R03",
+     "type": "NonBillableActivity",
+     "scope": "line",
+     "line_refs": [
+      9
+     ],
+     "basis": "proxy",
+     "status": "production_only",
+     "reason": "a clean line carries a listed code: the code-based rule over-flags compared with the guideline's task list"
+    }
+   ]
+  },
+  {
+   "id": "F-0343",
+   "clean": true,
+   "set_f_findings": [],
+   "production_findings": [
+    {
+     "rule_id": "RS-01-R03",
+     "type": "NonBillableActivity",
+     "scope": "line",
+     "line_refs": [
+      4
+     ],
+     "basis": "proxy"
+    }
+   ],
+   "production_only": [
+    {
+     "rule_id": "RS-01-R03",
+     "type": "NonBillableActivity",
+     "scope": "line",
+     "line_refs": [
+      4
+     ],
+     "basis": "proxy",
+     "status": "production_only",
+     "reason": "a clean line carries a listed code: the code-based rule over-flags compared with the guideline's task list"
+    }
+   ]
+  },
+  {
+   "id": "F-0499",
+   "clean": true,
+   "set_f_findings": [],
+   "production_findings": [
+    {
+     "rule_id": "RS-01-R03",
+     "type": "NonBillableActivity",
+     "scope": "line",
+     "line_refs": [
+      4
+     ],
+     "basis": "proxy"
+    },
+    {
+     "rule_id": "RS-01-R03",
+     "type": "NonBillableActivity",
+     "scope": "line",
+     "line_refs": [
+      6
+     ],
+     "basis": "proxy"
+    }
+   ],
+   "production_only": [
+    {
+     "rule_id": "RS-01-R03",
+     "type": "NonBillableActivity",
+     "scope": "line",
+     "line_refs": [
+      4
+     ],
+     "basis": "proxy",
+     "status": "production_only",
+     "reason": "a clean line carries a listed code: the code-based rule over-flags compared with the guideline's task list"
+    },
+    {
+     "rule_id": "RS-01-R03",
+     "type": "NonBillableActivity",
+     "scope": "line",
+     "line_refs": [
+      6
+     ],
+     "basis": "proxy",
+     "status": "production_only",
+     "reason": "a clean line carries a listed code: the code-based rule over-flags compared with the guideline's task list"
+    }
+   ]
+  },
+  {
+   "id": "F-0571",
+   "clean": true,
+   "set_f_findings": [],
+   "production_findings": [
+    {
+     "rule_id": "RS-01-R03",
+     "type": "NonBillableActivity",
+     "scope": "line",
+     "line_refs": [
+      2
+     ],
+     "basis": "proxy"
+    },
+    {
+     "rule_id": "RS-01-R03",
+     "type": "NonBillableActivity",
+     "scope": "line",
+     "line_refs": [
+      3
+     ],
+     "basis": "proxy"
+    },
+    {
+     "rule_id": "RS-01-R03",
+     "type": "NonBillableActivity",
+     "scope": "line",
+     "line_refs": [
+      6
+     ],
+     "basis": "proxy"
+    }
+   ],
+   "production_only": [
+    {
+     "rule_id": "RS-01-R03",
+     "type": "NonBillableActivity",
+     "scope": "line",
+     "line_refs": [
+      2
+     ],
+     "basis": "proxy",
+     "status": "production_only",
+     "reason": "a clean line carries a listed code: the code-based rule over-flags compared with the guideline's task list"
+    },
+    {
+     "rule_id": "RS-01-R03",
+     "type": "NonBillableActivity",
+     "scope": "line",
+     "line_refs": [
+      3
+     ],
+     "basis": "proxy",
+     "status": "production_only",
+     "reason": "a clean line carries a listed code: the code-based rule over-flags compared with the guideline's task list"
+    },
+    {
+     "rule_id": "RS-01-R03",
+     "type": "NonBillableActivity",
+     "scope": "line",
+     "line_refs": [
+      6
+     ],
+     "basis": "proxy",
+     "status": "production_only",
+     "reason": "a clean line carries a listed code: the code-based rule over-flags compared with the guideline's task list"
+    }
+   ]
+  },
+  {
+   "id": "F-0595",
+   "clean": true,
+   "set_f_findings": [],
+   "production_findings": [
+    {
+     "rule_id": "RS-01-R03",
+     "type": "NonBillableActivity",
+     "scope": "line",
+     "line_refs": [
+      2
+     ],
+     "basis": "proxy"
+    },
+    {
+     "rule_id": "RS-01-R03",
+     "type": "NonBillableActivity",
+     "scope": "line",
+     "line_refs": [
+      3
+     ],
+     "basis": "proxy"
+    }
+   ],
+   "production_only": [
+    {
+     "rule_id": "RS-01-R03",
+     "type": "NonBillableActivity",
+     "scope": "line",
+     "line_refs": [
+      2
+     ],
+     "basis": "proxy",
+     "status": "production_only",
+     "reason": "a clean line carries a listed code: the code-based rule over-flags compared with the guideline's task list"
+    },
+    {
+     "rule_id": "RS-01-R03",
+     "type": "NonBillableActivity",
+     "scope": "line",
+     "line_refs": [
+      3
+     ],
+     "basis": "proxy",
+     "status": "production_only",
+     "reason": "a clean line carries a listed code: the code-based rule over-flags compared with the guideline's task list"
+    }
+   ]
+  }
+ ]
+}

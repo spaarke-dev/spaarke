@@ -1,0 +1,988 @@
+{
+ "schema": "ebilling-eval/1",
+ "kind": "production-key",
+ "id": "RS-02-PK",
+ "rule_set_id": "RS-02",
+ "meta": {
+  "generator_id": "production_key.py",
+  "label_method": "generator",
+  "note": "Predicted production findings; basis proxy/uncertain marks rows that depend on AI output or 046 resolution."
+ },
+ "production_rules": {
+  "RS-02-R01": [
+   {
+    "type": "ApprovedTimekeeper"
+   }
+  ],
+  "RS-02-R02": [
+   {
+    "type": "ApprovedRate",
+    "tolerancePercent": 0
+   }
+  ],
+  "RS-02-R03": [
+   {
+    "type": "TimeIncrement",
+    "incrementHours": 0.1
+   }
+  ],
+  "RS-02-R04": [
+   {
+    "type": "DailyHoursCap",
+    "maxHoursPerDay": 10
+   }
+  ],
+  "RS-02-R05": [
+   {
+    "type": "RequiredData",
+    "fields": [
+     "taskCode",
+     "activityCode"
+    ]
+   }
+  ],
+  "RS-02-R06": {
+   "rules": [
+    {
+     "type": "CoreRecordWindow",
+     "graceDays": 0
+    }
+   ],
+   "not_expressible": "CoreRecordWindow checks dates only; no rule type compares an invoice with the core record's budget"
+  },
+  "RS-02-R07": [
+   {
+    "type": "Duplicate",
+    "matchFields": [
+     "timekeeper",
+     "lineDate",
+     "hours",
+     "narrative"
+    ]
+   }
+  ],
+  "RS-02-R08": {
+   "rules": [
+    {
+     "type": "InvoiceAge",
+     "maxAgeDays": 90
+    }
+   ],
+   "not_expressible": "InvoiceAge is invoice date minus line date per line; no rule type measures received date against the billing period end"
+  }
+ },
+ "invoices": [
+  {
+   "id": "F-0008",
+   "clean": false,
+   "set_f_findings": [
+    {
+     "rule_id": "RS-02-R01",
+     "rule_type": "ApprovedTimekeeper",
+     "scope": "line",
+     "line_refs": [
+      4
+     ],
+     "consequence": "Reject",
+     "status": "reproduced",
+     "basis": "exact"
+    },
+    {
+     "rule_id": "RS-02-R03",
+     "rule_type": "TimeIncrement",
+     "scope": "line",
+     "line_refs": [
+      6
+     ],
+     "consequence": "Reduce",
+     "status": "reproduced",
+     "basis": "exact"
+    }
+   ],
+   "production_findings": [
+    {
+     "rule_id": "RS-02-R01",
+     "type": "ApprovedTimekeeper",
+     "scope": "line",
+     "line_refs": [
+      4
+     ],
+     "basis": "exact"
+    },
+    {
+     "rule_id": "RS-02-R03",
+     "type": "TimeIncrement",
+     "scope": "line",
+     "line_refs": [
+      6
+     ],
+     "basis": "exact"
+    }
+   ],
+   "production_only": []
+  },
+  {
+   "id": "F-0020",
+   "clean": false,
+   "set_f_findings": [
+    {
+     "rule_id": "RS-02-R02",
+     "rule_type": "ApprovedRate",
+     "scope": "line",
+     "line_refs": [
+      7
+     ],
+     "consequence": "Reduce",
+     "status": "reproduced",
+     "basis": "exact"
+    },
+    {
+     "rule_id": "RS-02-R05",
+     "rule_type": "RequiredData",
+     "scope": "line",
+     "line_refs": [
+      3
+     ],
+     "consequence": "Reject",
+     "status": "reproduced",
+     "basis": "exact"
+    },
+    {
+     "rule_id": "RS-02-R06",
+     "rule_type": "CoreRecordWindow",
+     "scope": "invoice",
+     "line_refs": [],
+     "consequence": "Flag",
+     "status": "not_expressible",
+     "reason": "CoreRecordWindow checks dates only; no rule type compares an invoice with the core record's budget"
+    }
+   ],
+   "production_findings": [
+    {
+     "rule_id": "RS-02-R02",
+     "type": "ApprovedRate",
+     "scope": "line",
+     "line_refs": [
+      7
+     ],
+     "basis": "exact"
+    },
+    {
+     "rule_id": "RS-02-R05",
+     "type": "RequiredData",
+     "scope": "line",
+     "line_refs": [
+      3
+     ],
+     "basis": "exact",
+     "fields": [
+      "taskCode",
+      "activityCode"
+     ]
+    }
+   ],
+   "production_only": []
+  },
+  {
+   "id": "F-0026",
+   "clean": false,
+   "set_f_findings": [
+    {
+     "rule_id": "RS-02-R01",
+     "rule_type": "ApprovedTimekeeper",
+     "scope": "line",
+     "line_refs": [
+      11
+     ],
+     "consequence": "Reject",
+     "status": "reproduced",
+     "basis": "exact"
+    },
+    {
+     "rule_id": "RS-02-R07",
+     "rule_type": "Duplicate",
+     "scope": "line",
+     "line_refs": [
+      6
+     ],
+     "consequence": "Disallow",
+     "related_line_refs": [
+      5
+     ],
+     "status": "reproduced",
+     "basis": "exact"
+    }
+   ],
+   "production_findings": [
+    {
+     "rule_id": "RS-02-R01",
+     "type": "ApprovedTimekeeper",
+     "scope": "line",
+     "line_refs": [
+      11
+     ],
+     "basis": "exact"
+    },
+    {
+     "rule_id": "RS-02-R07",
+     "type": "Duplicate",
+     "scope": "line",
+     "line_refs": [
+      6
+     ],
+     "basis": "exact"
+    }
+   ],
+   "production_only": []
+  },
+  {
+   "id": "F-0032",
+   "clean": false,
+   "set_f_findings": [
+    {
+     "rule_id": "RS-02-R02",
+     "rule_type": "ApprovedRate",
+     "scope": "line",
+     "line_refs": [
+      7
+     ],
+     "consequence": "Reduce",
+     "status": "reproduced",
+     "basis": "exact"
+    },
+    {
+     "rule_id": "RS-02-R06",
+     "rule_type": "CoreRecordWindow",
+     "scope": "line",
+     "line_refs": [
+      8
+     ],
+     "consequence": "Flag",
+     "status": "reproduced",
+     "basis": "exact"
+    }
+   ],
+   "production_findings": [
+    {
+     "rule_id": "RS-02-R02",
+     "type": "ApprovedRate",
+     "scope": "line",
+     "line_refs": [
+      7
+     ],
+     "basis": "exact"
+    },
+    {
+     "rule_id": "RS-02-R06",
+     "type": "CoreRecordWindow",
+     "scope": "line",
+     "line_refs": [
+      8
+     ],
+     "basis": "exact"
+    }
+   ],
+   "production_only": []
+  },
+  {
+   "id": "F-0044",
+   "clean": false,
+   "set_f_findings": [
+    {
+     "rule_id": "RS-02-R05",
+     "rule_type": "RequiredData",
+     "scope": "line",
+     "line_refs": [
+      2
+     ],
+     "consequence": "Reject",
+     "status": "reproduced",
+     "basis": "exact"
+    },
+    {
+     "rule_id": "RS-02-R06",
+     "rule_type": "CoreRecordWindow",
+     "scope": "line",
+     "line_refs": [
+      6
+     ],
+     "consequence": "Flag",
+     "status": "reproduced",
+     "basis": "exact"
+    },
+    {
+     "rule_id": "RS-02-R06",
+     "rule_type": "CoreRecordWindow",
+     "scope": "line",
+     "line_refs": [
+      7
+     ],
+     "consequence": "Flag",
+     "status": "reproduced",
+     "basis": "exact"
+    }
+   ],
+   "production_findings": [
+    {
+     "rule_id": "RS-02-R05",
+     "type": "RequiredData",
+     "scope": "line",
+     "line_refs": [
+      2
+     ],
+     "basis": "exact",
+     "fields": [
+      "taskCode",
+      "activityCode"
+     ]
+    },
+    {
+     "rule_id": "RS-02-R06",
+     "type": "CoreRecordWindow",
+     "scope": "line",
+     "line_refs": [
+      6
+     ],
+     "basis": "exact"
+    },
+    {
+     "rule_id": "RS-02-R06",
+     "type": "CoreRecordWindow",
+     "scope": "line",
+     "line_refs": [
+      7
+     ],
+     "basis": "exact"
+    }
+   ],
+   "production_only": []
+  },
+  {
+   "id": "F-0056",
+   "clean": false,
+   "set_f_findings": [
+    {
+     "rule_id": "RS-02-R01",
+     "rule_type": "ApprovedTimekeeper",
+     "scope": "line",
+     "line_refs": [
+      13
+     ],
+     "consequence": "Reject",
+     "status": "reproduced",
+     "basis": "exact"
+    },
+    {
+     "rule_id": "RS-02-R03",
+     "rule_type": "TimeIncrement",
+     "scope": "line",
+     "line_refs": [
+      12
+     ],
+     "consequence": "Reduce",
+     "status": "reproduced",
+     "basis": "exact"
+    },
+    {
+     "rule_id": "RS-02-R04",
+     "rule_type": "DailyHoursCap",
+     "scope": "line",
+     "line_refs": [
+      10
+     ],
+     "consequence": "Reduce",
+     "status": "moved",
+     "production_line_refs": [
+      8
+     ],
+     "reason": "production reports a timekeeper-day on the group's first line"
+    },
+    {
+     "rule_id": "RS-02-R06",
+     "rule_type": "CoreRecordWindow",
+     "scope": "invoice",
+     "line_refs": [],
+     "consequence": "Flag",
+     "status": "not_expressible",
+     "reason": "CoreRecordWindow checks dates only; no rule type compares an invoice with the core record's budget"
+    },
+    {
+     "rule_id": "RS-02-R07",
+     "rule_type": "Duplicate",
+     "scope": "line",
+     "line_refs": [
+      6
+     ],
+     "consequence": "Disallow",
+     "related_line_refs": [
+      5
+     ],
+     "status": "reproduced",
+     "basis": "exact"
+    }
+   ],
+   "production_findings": [
+    {
+     "rule_id": "RS-02-R01",
+     "type": "ApprovedTimekeeper",
+     "scope": "line",
+     "line_refs": [
+      13
+     ],
+     "basis": "exact"
+    },
+    {
+     "rule_id": "RS-02-R03",
+     "type": "TimeIncrement",
+     "scope": "line",
+     "line_refs": [
+      12
+     ],
+     "basis": "exact"
+    },
+    {
+     "rule_id": "RS-02-R04",
+     "type": "DailyHoursCap",
+     "scope": "line",
+     "line_refs": [
+      8
+     ],
+     "basis": "exact"
+    },
+    {
+     "rule_id": "RS-02-R07",
+     "type": "Duplicate",
+     "scope": "line",
+     "line_refs": [
+      6
+     ],
+     "basis": "exact"
+    }
+   ],
+   "production_only": []
+  },
+  {
+   "id": "F-0062",
+   "clean": false,
+   "set_f_findings": [
+    {
+     "rule_id": "RS-02-R02",
+     "rule_type": "ApprovedRate",
+     "scope": "line",
+     "line_refs": [
+      6
+     ],
+     "consequence": "Reduce",
+     "status": "reproduced",
+     "basis": "exact"
+    },
+    {
+     "rule_id": "RS-02-R03",
+     "rule_type": "TimeIncrement",
+     "scope": "line",
+     "line_refs": [
+      4
+     ],
+     "consequence": "Reduce",
+     "status": "reproduced",
+     "basis": "exact"
+    }
+   ],
+   "production_findings": [
+    {
+     "rule_id": "RS-02-R02",
+     "type": "ApprovedRate",
+     "scope": "line",
+     "line_refs": [
+      6
+     ],
+     "basis": "exact"
+    },
+    {
+     "rule_id": "RS-02-R03",
+     "type": "TimeIncrement",
+     "scope": "line",
+     "line_refs": [
+      4
+     ],
+     "basis": "exact"
+    }
+   ],
+   "production_only": []
+  },
+  {
+   "id": "F-0074",
+   "clean": false,
+   "set_f_findings": [
+    {
+     "rule_id": "RS-02-R02",
+     "rule_type": "ApprovedRate",
+     "scope": "line",
+     "line_refs": [
+      11
+     ],
+     "consequence": "Reduce",
+     "status": "reproduced",
+     "basis": "exact"
+    },
+    {
+     "rule_id": "RS-02-R05",
+     "rule_type": "RequiredData",
+     "scope": "line",
+     "line_refs": [
+      5
+     ],
+     "consequence": "Reject",
+     "status": "reproduced",
+     "basis": "exact"
+    },
+    {
+     "rule_id": "RS-02-R08",
+     "rule_type": "InvoiceAge",
+     "scope": "line",
+     "line_refs": [
+      1
+     ],
+     "consequence": "Flag",
+     "status": "reproduced",
+     "basis": "exact"
+    }
+   ],
+   "production_findings": [
+    {
+     "rule_id": "RS-02-R02",
+     "type": "ApprovedRate",
+     "scope": "line",
+     "line_refs": [
+      11
+     ],
+     "basis": "exact"
+    },
+    {
+     "rule_id": "RS-02-R05",
+     "type": "RequiredData",
+     "scope": "line",
+     "line_refs": [
+      5
+     ],
+     "basis": "exact",
+     "fields": [
+      "taskCode",
+      "activityCode"
+     ]
+    },
+    {
+     "rule_id": "RS-02-R08",
+     "type": "InvoiceAge",
+     "scope": "line",
+     "line_refs": [
+      1
+     ],
+     "basis": "exact"
+    }
+   ],
+   "production_only": []
+  },
+  {
+   "id": "F-0116",
+   "clean": false,
+   "set_f_findings": [
+    {
+     "rule_id": "RS-02-R08",
+     "rule_type": "InvoiceAge",
+     "scope": "invoice",
+     "line_refs": [],
+     "consequence": "Flag",
+     "status": "not_expressible",
+     "reason": "InvoiceAge is invoice date minus line date per line; no rule type measures received date against the billing period end"
+    }
+   ],
+   "production_findings": [],
+   "production_only": []
+  },
+  {
+   "id": "F-0164",
+   "clean": false,
+   "set_f_findings": [
+    {
+     "rule_id": "RS-02-R01",
+     "rule_type": "ApprovedTimekeeper",
+     "scope": "line",
+     "line_refs": [
+      2
+     ],
+     "consequence": "Reject",
+     "status": "reproduced",
+     "basis": "exact"
+    },
+    {
+     "rule_id": "RS-02-R04",
+     "rule_type": "DailyHoursCap",
+     "scope": "line",
+     "line_refs": [
+      8
+     ],
+     "consequence": "Reduce",
+     "status": "moved",
+     "production_line_refs": [
+      6
+     ],
+     "reason": "production reports a timekeeper-day on the group's first line"
+    },
+    {
+     "rule_id": "RS-02-R08",
+     "rule_type": "InvoiceAge",
+     "scope": "line",
+     "line_refs": [
+      1
+     ],
+     "consequence": "Flag",
+     "status": "missed",
+     "reason": "the work-age limit is measured from the invoice date in production, from the received date in Set F"
+    }
+   ],
+   "production_findings": [
+    {
+     "rule_id": "RS-02-R01",
+     "type": "ApprovedTimekeeper",
+     "scope": "line",
+     "line_refs": [
+      2
+     ],
+     "basis": "exact"
+    },
+    {
+     "rule_id": "RS-02-R04",
+     "type": "DailyHoursCap",
+     "scope": "line",
+     "line_refs": [
+      6
+     ],
+     "basis": "exact"
+    }
+   ],
+   "production_only": []
+  },
+  {
+   "id": "F-0182",
+   "clean": false,
+   "set_f_findings": [
+    {
+     "rule_id": "RS-02-R03",
+     "rule_type": "TimeIncrement",
+     "scope": "line",
+     "line_refs": [
+      10
+     ],
+     "consequence": "Reduce",
+     "status": "reproduced",
+     "basis": "exact"
+    },
+    {
+     "rule_id": "RS-02-R04",
+     "rule_type": "DailyHoursCap",
+     "scope": "line",
+     "line_refs": [
+      5
+     ],
+     "consequence": "Reduce",
+     "status": "moved",
+     "production_line_refs": [
+      3
+     ],
+     "reason": "production reports a timekeeper-day on the group's first line"
+    }
+   ],
+   "production_findings": [
+    {
+     "rule_id": "RS-02-R03",
+     "type": "TimeIncrement",
+     "scope": "line",
+     "line_refs": [
+      10
+     ],
+     "basis": "exact"
+    },
+    {
+     "rule_id": "RS-02-R04",
+     "type": "DailyHoursCap",
+     "scope": "line",
+     "line_refs": [
+      3
+     ],
+     "basis": "exact"
+    }
+   ],
+   "production_only": []
+  },
+  {
+   "id": "F-0260",
+   "clean": false,
+   "set_f_findings": [
+    {
+     "rule_id": "RS-02-R03",
+     "rule_type": "TimeIncrement",
+     "scope": "line",
+     "line_refs": [
+      4
+     ],
+     "consequence": "Reduce",
+     "status": "reproduced",
+     "basis": "exact"
+    },
+    {
+     "rule_id": "RS-02-R05",
+     "rule_type": "RequiredData",
+     "scope": "line",
+     "line_refs": [
+      2
+     ],
+     "consequence": "Reject",
+     "status": "reproduced",
+     "basis": "exact"
+    },
+    {
+     "rule_id": "RS-02-R06",
+     "rule_type": "CoreRecordWindow",
+     "scope": "line",
+     "line_refs": [
+      11
+     ],
+     "consequence": "Flag",
+     "status": "reproduced",
+     "basis": "exact"
+    },
+    {
+     "rule_id": "RS-02-R07",
+     "rule_type": "Duplicate",
+     "scope": "line",
+     "line_refs": [
+      7
+     ],
+     "consequence": "Disallow",
+     "related_line_refs": [
+      6
+     ],
+     "status": "reproduced",
+     "basis": "exact"
+    }
+   ],
+   "production_findings": [
+    {
+     "rule_id": "RS-02-R03",
+     "type": "TimeIncrement",
+     "scope": "line",
+     "line_refs": [
+      4
+     ],
+     "basis": "exact"
+    },
+    {
+     "rule_id": "RS-02-R05",
+     "type": "RequiredData",
+     "scope": "line",
+     "line_refs": [
+      2
+     ],
+     "basis": "exact",
+     "fields": [
+      "taskCode",
+      "activityCode"
+     ]
+    },
+    {
+     "rule_id": "RS-02-R06",
+     "type": "CoreRecordWindow",
+     "scope": "line",
+     "line_refs": [
+      11
+     ],
+     "basis": "exact"
+    },
+    {
+     "rule_id": "RS-02-R07",
+     "type": "Duplicate",
+     "scope": "line",
+     "line_refs": [
+      7
+     ],
+     "basis": "exact"
+    }
+   ],
+   "production_only": []
+  },
+  {
+   "id": "F-0278",
+   "clean": false,
+   "set_f_findings": [
+    {
+     "rule_id": "RS-02-R02",
+     "rule_type": "ApprovedRate",
+     "scope": "line",
+     "line_refs": [
+      3
+     ],
+     "consequence": "Reduce",
+     "status": "reproduced",
+     "basis": "exact"
+    }
+   ],
+   "production_findings": [
+    {
+     "rule_id": "RS-02-R02",
+     "type": "ApprovedRate",
+     "scope": "line",
+     "line_refs": [
+      3
+     ],
+     "basis": "exact"
+    }
+   ],
+   "production_only": []
+  },
+  {
+   "id": "F-0290",
+   "clean": false,
+   "set_f_findings": [
+    {
+     "rule_id": "RS-02-R02",
+     "rule_type": "ApprovedRate",
+     "scope": "line",
+     "line_refs": [
+      5
+     ],
+     "consequence": "Reduce",
+     "status": "reproduced",
+     "basis": "exact"
+    },
+    {
+     "rule_id": "RS-02-R03",
+     "rule_type": "TimeIncrement",
+     "scope": "line",
+     "line_refs": [
+      4
+     ],
+     "consequence": "Reduce",
+     "status": "reproduced",
+     "basis": "exact"
+    },
+    {
+     "rule_id": "RS-02-R08",
+     "rule_type": "InvoiceAge",
+     "scope": "line",
+     "line_refs": [
+      1
+     ],
+     "consequence": "Flag",
+     "status": "reproduced",
+     "basis": "exact"
+    }
+   ],
+   "production_findings": [
+    {
+     "rule_id": "RS-02-R02",
+     "type": "ApprovedRate",
+     "scope": "line",
+     "line_refs": [
+      5
+     ],
+     "basis": "exact"
+    },
+    {
+     "rule_id": "RS-02-R03",
+     "type": "TimeIncrement",
+     "scope": "line",
+     "line_refs": [
+      4
+     ],
+     "basis": "exact"
+    },
+    {
+     "rule_id": "RS-02-R08",
+     "type": "InvoiceAge",
+     "scope": "line",
+     "line_refs": [
+      1
+     ],
+     "basis": "exact"
+    }
+   ],
+   "production_only": []
+  },
+  {
+   "id": "F-0296",
+   "clean": false,
+   "set_f_findings": [
+    {
+     "rule_id": "RS-02-R03",
+     "rule_type": "TimeIncrement",
+     "scope": "line",
+     "line_refs": [
+      2
+     ],
+     "consequence": "Reduce",
+     "status": "reproduced",
+     "basis": "exact"
+    },
+    {
+     "rule_id": "RS-02-R08",
+     "rule_type": "InvoiceAge",
+     "scope": "line",
+     "line_refs": [
+      1
+     ],
+     "consequence": "Flag",
+     "status": "missed",
+     "reason": "the work-age limit is measured from the invoice date in production, from the received date in Set F"
+    }
+   ],
+   "production_findings": [
+    {
+     "rule_id": "RS-02-R03",
+     "type": "TimeIncrement",
+     "scope": "line",
+     "line_refs": [
+      2
+     ],
+     "basis": "exact"
+    }
+   ],
+   "production_only": []
+  },
+  {
+   "id": "F-0368",
+   "clean": true,
+   "set_f_findings": [],
+   "production_findings": [],
+   "production_only": []
+  },
+  {
+   "id": "F-0386",
+   "clean": true,
+   "set_f_findings": [],
+   "production_findings": [],
+   "production_only": []
+  },
+  {
+   "id": "F-0416",
+   "clean": true,
+   "set_f_findings": [],
+   "production_findings": [],
+   "production_only": []
+  },
+  {
+   "id": "F-0482",
+   "clean": true,
+   "set_f_findings": [],
+   "production_findings": [],
+   "production_only": []
+  },
+  {
+   "id": "F-0512",
+   "clean": true,
+   "set_f_findings": [],
+   "production_findings": [],
+   "production_only": []
+  }
+ ]
+}

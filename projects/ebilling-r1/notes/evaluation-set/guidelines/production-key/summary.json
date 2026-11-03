@@ -1,0 +1,91 @@
+{
+ "by_rule_set": {
+  "RS-01": {
+   "invoices": 20,
+   "set_f_findings": 53,
+   "production_findings": 50,
+   "clean_invoices_with_production_findings": 5
+  },
+  "RS-02": {
+   "invoices": 20,
+   "set_f_findings": 38,
+   "production_findings": 33,
+   "clean_invoices_with_production_findings": 0
+  },
+  "RS-03": {
+   "invoices": 20,
+   "set_f_findings": 38,
+   "production_findings": 36,
+   "clean_invoices_with_production_findings": 5
+  },
+  "RS-04": {
+   "invoices": 20,
+   "set_f_findings": 49,
+   "production_findings": 49,
+   "clean_invoices_with_production_findings": 5
+  },
+  "RS-05": {
+   "invoices": 20,
+   "set_f_findings": 44,
+   "production_findings": 51,
+   "clean_invoices_with_production_findings": 5
+  },
+  "RS-06": {
+   "invoices": 20,
+   "set_f_findings": 48,
+   "production_findings": 39,
+   "clean_invoices_with_production_findings": 0
+  }
+ },
+ "by_rule_type": {
+  "AiObservation": {
+   "reproduced": 24
+  },
+  "ApprovedRate": {
+   "reproduced": 40,
+   "production_only": 1
+  },
+  "ApprovedTimekeeper": {
+   "reproduced": 16
+  },
+  "CoreRecordWindow": {
+   "not_expressible": 9,
+   "reproduced": 11
+  },
+  "DailyHoursCap": {
+   "moved": 11
+  },
+  "Duplicate": {
+   "reproduced": 23
+  },
+  "ExpenseRule": {
+   "not_expressible": 11,
+   "reproduced": 9
+  },
+  "InvoiceAge": {
+   "not_expressible": 13,
+   "reproduced": 10,
+   "missed": 4
+  },
+  "NonBillableActivity": {
+   "production_only": 41,
+   "reproduced": 20,
+   "not_expressible": 3
+  },
+  "RequiredData": {
+   "not_expressible": 14,
+   "reproduced": 9
+  },
+  "TimeIncrement": {
+   "reproduced": 43
+  }
+ },
+ "not_expressible": {
+  "RequiredData has no PO-number field (closed vocabulary: firmInvoiceNumber, invoiceDate, billingPeriodStart, billingPeriodEnd, timekeeper, lineDate, narrative, taskCode, activityCode, expenseCode)": 14,
+  "InvoiceAge is invoice date minus line date per line; no rule type measures received date against the billing period end": 13,
+  "CoreRecordWindow checks dates only; no rule type compares an invoice with the core record's budget": 9,
+  "ExpenseRule caps the line amount; it cannot cap a unit rate (cost per page); ExpenseRule maxAmountPerItem applies to every expense line; it cannot be limited to one expense code": 6,
+  "ExpenseRule caps the line amount; it cannot cap a unit rate (cost per page)": 5,
+  "NonBillableActivity lists codes, not narrative keywords; the guideline's task list is stated as UTBMS codes": 3
+ }
+}
