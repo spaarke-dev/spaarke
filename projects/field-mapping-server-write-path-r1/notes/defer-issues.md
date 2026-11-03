@@ -153,3 +153,13 @@ Two-write rule: every entry here has a GitHub issue, and every issue has an entr
 | **Class** | Out of scope: changing the client routing of three tables needs its own decision, and billingevent is in ebilling-r1's area |
 | **Owner task** | Unassigned; ebilling-r1 must agree to the billingevent part |
 | **Failure** | `CreateTables` has sprk_budget, sprk_kpiassessment and sprk_billingevent; `BFF_CHILD_CREATE_TABLES` does not, so a wrapped client create of these tables bypasses the BFF. Pinned as `RibbonOnlyCreateTables` in `ChildRecordCreateTablesAgreementTests` |
+
+## DI-016 — Dev BFF logger provider throws BadImageFormatException
+
+| Field | Value |
+|---|---|
+| **Found** | 2026-11-03, main session, post-deploy check of d763dc120e (in passing) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2549 |
+| **Class** | Out of scope, pre-existing: seen 2026-10-28 before this project's #2541 deployed; not this project's code |
+| **Owner task** | Unassigned (BFF platform / deploy owners) |
+| **Failure** | `Logger.ThrowLoggingError` → BadImageFormatException at instance startup (4× 2026-11-03 22:26:37Z) and in a 2026-10-28 burst (14×). Log entries in those windows are lost; no 5xx followed |
