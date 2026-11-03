@@ -145,6 +145,15 @@ export interface InvoiceSubmissionWizardProps extends InvoiceSubmissionCallbacks
   pollIntervalMs?: number;
   /** Label of the button on the result screen. Default "Done". */
   doneLabel?: string;
+  /**
+   * Optional (task 052): a record to start the Record step with already chosen (the internal wizard, launched from a
+   * record). It stays chosen while the host's `loadRecords` still offers it; otherwise it is dropped like any other choice.
+   */
+  initialRecord?: InvoiceCoreRecordOption;
+  /** Optional (task 052): passed to the result screen (`InvoiceSubmissionOutcome.keepPolling`). */
+  keepPolling?: (status: InvoiceSubmissionStatusView) => boolean;
+  /** Optional (task 052): passed to the result screen (`InvoiceSubmissionOutcome.renderAccepted`). */
+  renderAccepted?: (status: InvoiceSubmissionStatusView) => React.ReactNode;
 }
 
 /**
@@ -188,6 +197,9 @@ export const InvoiceSubmissionWizard: React.FC<InvoiceSubmissionWizardProps> = (
   maxFileSizeBytes = DEFAULT_MAX_INVOICE_FILE_BYTES,
   pollIntervalMs,
   doneLabel = 'Done',
+  initialRecord,
+  keepPolling,
+  renderAccepted,
   loadRecords,
   loadFirms,
   submit,
@@ -248,7 +260,7 @@ export const InvoiceSubmissionWizard: React.FC<InvoiceSubmissionWizardProps> = (
   const [recordsPartial, setRecordsPartial] = React.useState(false);
   const [recordsError, setRecordsError] = React.useState<string | null>(null);
   const [recordFilter, setRecordFilter] = React.useState('');
-  const [selected, setSelected] = React.useState<InvoiceCoreRecordOption | null>(null);
+  const [selected, setSelected] = React.useState<InvoiceCoreRecordOption | null>(initialRecord ?? null);
 
   const loadRecordsRef = React.useRef(loadRecords);
   loadRecordsRef.current = loadRecords;
@@ -355,6 +367,8 @@ export const InvoiceSubmissionWizard: React.FC<InvoiceSubmissionWizardProps> = (
           getStatus={getStatus}
           pollIntervalMs={pollIntervalMs}
           renderReport={renderReport}
+          keepPolling={keepPolling}
+          renderAccepted={renderAccepted}
         />
       ),
       actions: (
@@ -376,6 +390,8 @@ export const InvoiceSubmissionWizard: React.FC<InvoiceSubmissionWizardProps> = (
     getStatus,
     pollIntervalMs,
     renderReport,
+    keepPolling,
+    renderAccepted,
     onClose,
     doneLabel,
   ]);

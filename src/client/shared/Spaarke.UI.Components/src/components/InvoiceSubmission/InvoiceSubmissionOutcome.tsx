@@ -100,6 +100,14 @@ export interface InvoiceSubmissionOutcomeProps {
    * and PDF download arrive with task 134).
    */
   renderReport?: (status: InvoiceSubmissionStatusView) => React.ReactNode;
+  /**
+   * Optional (task 052): keep reading the status after a terminal answer while this returns true for it. The internal
+   * host uses it for a held (blocked) submission, which is Rejected but is decided afterwards (Override / Return), so the
+   * screen follows the server to Accepted instead of showing a stale Rejected. Absent: a terminal answer stops the poll.
+   */
+  keepPolling?: (status: InvoiceSubmissionStatusView) => boolean;
+  /** Optional (task 052): extra content under the Accepted message (the internal host notes an override here). */
+  renderAccepted?: (status: InvoiceSubmissionStatusView) => React.ReactNode;
 }
 
 function toneFor(status: string | null | undefined): StatusBadgeTone {
@@ -120,6 +128,8 @@ export const InvoiceSubmissionOutcome: React.FC<InvoiceSubmissionOutcomeProps> =
   getStatus,
   pollIntervalMs = DEFAULT_POLL_INTERVAL_MS,
   renderReport,
+  keepPolling,
+  renderAccepted,
 }) => {
   const styles = useStyles();
   const [view, setView] = React.useState<InvoiceSubmissionStatusView | null>(null);
@@ -131,6 +141,8 @@ export const InvoiceSubmissionOutcome: React.FC<InvoiceSubmissionOutcomeProps> =
   // The latest callback, without restarting the poll when the host re-renders with a new function identity.
   const getStatusRef = React.useRef(getStatus);
   getStatusRef.current = getStatus;
+  const keepPollingRef = React.useRef(keepPolling);
+  keepPollingRef.current = keepPolling;
 
   React.useEffect(() => {
     let cancelled = false;
@@ -143,7 +155,7 @@ export const InvoiceSubmissionOutcome: React.FC<InvoiceSubmissionOutcomeProps> =
         setView(next);
         setLoadError(null);
         setStale(false);
-        if (isTerminalStatus(next.status)) return;
+        if (isTerminalStatus(next.status) && !keepPollingRef.current?.(next)) return;
       } catch (err) {
         if (cancelled) return;
         if (err instanceof InvoiceSubmissionError && (err.statusCode === 403 || err.statusCode === 404)) {
@@ -224,6 +236,7 @@ export const InvoiceSubmissionOutcome: React.FC<InvoiceSubmissionOutcomeProps> =
           </MessageBarBody>
         </MessageBar>
       )}
+      {status === 'Accepted' && view && renderAccepted?.(view)}
 
       {status === 'Rejected' && view && (
         <>

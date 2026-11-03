@@ -3,8 +3,8 @@
  * unfilled. A privilege or access refusal now becomes one plain sentence naming no ids, users, tables or privilege
  * names, chosen from the privilege the raw message names (Create / AppendTo or Append / none); a BFF child-record
  * refusal (`child_record.denied`) gets the neutral sentence; any other error keeps a clean message. Covers the helper,
- * the two Xrm.WebApi create wizards end to end (Project, Matter), and the five BFF-routed create wizards end to end
- * (Event, Invoice, Report Card, To Do, Work Assignment) through the BFF's 403.
+ * the two Xrm.WebApi create wizards end to end (Project, Matter), and the four BFF-routed create wizards end to end
+ * (Event, Report Card, To Do, Work Assignment) through the BFF's 403. (The Invoice wizard no longer creates anything itself: task 052.)
  */
 
 import { describeWebApiCreateError } from '../webApiCreateError';
@@ -12,12 +12,10 @@ import { ChildRecordWriteError } from '../adapters/bffChildWriteAdapter';
 import { ProjectService } from '../../components/CreateProjectWizard/projectService';
 import { MatterService } from '../../components/CreateMatterWizard/matterService';
 import { EventService } from '../../components/CreateEventWizard/eventService';
-import { InvoiceService } from '../../components/CreateInvoiceWizard/invoiceService';
 import { ReportCardService } from '../../components/CreateReportCardWizard/reportCardService';
 import { TodoService } from '../../components/CreateTodoWizard/todoService';
 import { WorkAssignmentService } from '../../components/CreateWorkAssignmentWizard/workAssignmentService';
 import { EMPTY_EVENT_FORM } from '../../components/CreateEventWizard/formTypes';
-import { buildEmptyInvoiceForm } from '../../components/CreateInvoiceWizard/formTypes';
 import { buildEmptyReportCardForm } from '../../components/CreateReportCardWizard/formTypes';
 import { EMPTY_TODO_FORM } from '../../components/CreateTodoWizard/formTypes';
 import { EMPTY_WORK_ASSIGNMENT_FORM } from '../../components/CreateWorkAssignmentWizard/formTypes';
@@ -361,16 +359,6 @@ describe('the BFF-routed create wizards show the neutral sentence for the BFF re
       'Event',
       'event',
       f => new EventService(readOnlyDataService(), f, BFF).createEvent({ ...EMPTY_EVENT_FORM, eventName: 'Hearing' }),
-    ],
-    [
-      'Invoice',
-      'invoice',
-      f =>
-        new InvoiceService(readOnlyDataService(), f, BFF).createInvoice(
-          { ...buildEmptyInvoiceForm(), name: 'INV' },
-          null,
-          []
-        ),
     ],
     [
       'Report Card',
