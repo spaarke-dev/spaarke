@@ -30,7 +30,7 @@ namespace Sprk.Bff.Api.Tests.Domain.Ai;
 /// </summary>
 /// <remarks>
 /// <para><b>Boundary doubles</b> (ADR-038): <see cref="IFileIndexingService"/> (captures the
-/// <see cref="FileIndexRequest"/>), <see cref="IIdempotencyService"/>, <see cref="ISearchIndexNameResolver"/>,
+/// <see cref="FileIndexRequest"/>), <see cref="IIdempotencyService"/>,
 /// and the raw Dataverse OData <see cref="HttpClient"/> the handler builds internally from
 /// <c>IHttpClientFactory.CreateClient("DataverseBatch")</c>. That last one is answered by a small,
 /// HAND-WRITTEN <see cref="HttpMessageHandler"/> subclass returning one canned document row — this is
@@ -94,11 +94,6 @@ public sealed class BulkRagIndexingJobHandlerReplaceStaleChunksTests
             .Setup(s => s.MarkEventAsProcessedAsync(It.IsAny<string>(), It.IsAny<TimeSpan>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
 
-        var resolverMock = new Mock<ISearchIndexNameResolver>();
-        resolverMock
-            .Setup(r => r.ResolveAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((string?)null);
-
         var statusStore = new BatchJobStatusStore(Mock.Of<IDistributedCache>(), NullLogger<BatchJobStatusStore>.Instance);
 
         var configuration = new ConfigurationBuilder()
@@ -120,7 +115,6 @@ public sealed class BulkRagIndexingJobHandlerReplaceStaleChunksTests
             fileIndexingMock.Object,
             statusStore,
             idempotencyMock.Object,
-            resolverMock.Object,
             new RagTelemetry(),
             configuration,
             httpClientFactoryMock.Object,
@@ -214,6 +208,30 @@ public sealed class BulkRagIndexingJobHandlerReplaceStaleChunksTests
         logger.Completion.Should().NotBeNull("the handler logs its processed/skipped counts on completion");
         logger.Completion!["Processed"].Should().Be(processed);
         logger.Completion["Skipped"].Should().Be(skippedCount);
+    }
+
+    /// <summary>
+    /// Task 041 (FR-40, #2502; design §14.7 must-fire 4): the document, its matter or the matter's business unit names another
+    /// index. The bulk job reads none of them (it takes no index resolver): one write, with a request that names no index (the
+    /// files index), and no INDEX_NOT_ALLOWED retry.
+    /// </summary>
+    [Fact]
+    public async Task ProcessAsync_WhenTheDocumentParentOrUnitNamesAnotherIndex_WritesTheFilesIndexOnce()
+    {
+        var (handler, fileIndexingMock, _) = CreateSut();
+        FileIndexRequest? captured = null;
+        fileIndexingMock
+            .Setup(f => f.IndexFileAppOnlyAsync(It.IsAny<FileIndexRequest>(), It.IsAny<CancellationToken>()))
+            .Callback<FileIndexRequest, CancellationToken>((req, _) => captured = req)
+            .ReturnsAsync(new FileIndexingResult { Success = true, ChunksIndexed = 2 });
+
+        var outcome = await handler.ProcessAsync(MakeJob(forceReindex: true), CancellationToken.None);
+
+        outcome.Status.Should().Be(JobStatus.Completed);
+        fileIndexingMock.Verify(f => f.IndexFileAppOnlyAsync(It.IsAny<FileIndexRequest>(), It.IsAny<CancellationToken>()), Times.Once);
+        var named = JsonSerializer.SerializeToElement(captured!).TryGetProperty("SearchIndexName", out var value)
+                    && value.ValueKind == JsonValueKind.String ? value.GetString() : null;
+        named.Should().BeNull("the index follows the content type: the request names none, so the files index is written");
     }
 
     /// <summary>Captures the structured state of the handler's "completed" log line.</summary>
