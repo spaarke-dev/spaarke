@@ -1,34 +1,46 @@
 # Current Task State
 
-> **Last Updated**: 2026-11-03 (after compaction). 151c is on master (#2526, 5796774091). The dev BFF has been on 5796774091 since 13:29Z (SPA-r3 deployed it) and `/healthz` reports Healthy. This session is ebilling-r1-7b; the duplicate 9c session should stay idle or be closed.
+> **Last Updated**: 2026-11-03 ~16:05Z (checkpoint at 86% context). This session is ebilling-r1-7b. Work head ca795e6293 (pushed). #2530 merged into master as 1571b0be9d. The dev BFF is on 5796774091 and Healthy.
 
 ## Quick Recovery (READ THIS FIRST)
 
 | Field | Value |
 |-------|-------|
-| **State** | Dev intake is unblocked: the owner created `sprk_invoice.sprk_trackingnumber` on dev at about 13:45Z, and it is in SpaarkeMaster in dev. Source fix 21aec9a10b puts the attribute in `Entities/sprk_Invoice/Entity.xml`. The ApExport UI is fully on dev: code page, ribbons, the batch Active view and the 3 invoice views. uac-r2's after-notice checks 1–5 passed. |
-| **Next action** | (1) The owner resubmits the invoice from Outlook web; it should become INV-792345.2. Then the correction test. Then ebilling verifies the server side by tracking number: the old invoice is Superseded (659490005); `sprk_resubmissionof` and `sprk_supersedesinvoice` are set; the old invoice's Signals are closed as Superseded; the old submission shows Accepted with "replaced by". Diagnostics: App Insights `6a76b012-46d9-412f-b4ab-4905658a9559`. (2) When the owner decides on scope for leave-and-come-back (the pane's (a)/(b), or the server-side (c)), write the ebilling task: `GET /api/finance/invoice-submissions?internetMessageId=…` plus a final-status notification. |
+| **Running agents** | (1) **095a/095b review-fix implementer**, in its own worktree from 21ee1f14ef. It is fixing adversarial findings F1 (a pre-gate/step-0 fault gives 503, not 404, via a new opt-in FinanceDenial mode), F2 (field-secure `sprk_sourceemaildocument` in source and script, BFF readers app-only), F3 (the by-email test double honours Orders and the archive condition, plus the 50-cap 503 tests; a notifier time-bound test), F4 (a refused bell links to the submission), and K fixes (IsCitation in OwnershipParentColumnsOf, the K2 oracles in contract §11, a tie-break). (2) **151e implementer** (the invoice Files section plus 151d's Sent to AP Date), in its own worktree from ca795e6293. |
+| **Next action** | When the fix agent reports: merge its branch into work, re-run the full gate (the 5 builds, ArchTests, the broad filter, the 3 integration suites; the pre-fix gate was green: ArchTests 1919, broad 16116/0/10, BFF integration 199/0/8, SPE 353/0/23, load 5), measure publish size against a fresh master (`scratchpad/pubsize151c.ps1` method), then open ONE master PR for 095a+095b. Reviewers: ontology-r1 (a9 session), uac-r2 (38 session: binding points 1-4 plus F2 field security), R3 (f2 session: the O-32 ExternalInvoiceVisibility point). Auto-merge only after approvals. Then ask the owner for the deploy go for that SHA plus OK for (a) the dev field security on `sprk_sourceemaildocument` (F2) and (b) the backfill script (`scripts/ebilling/Backfill-EbillingSubmissionSourceEmail.ps1`, -WhatIf first, before-notice to uac-r2). Then ask SPA-r3 to deploy (`Set-ChildRecordCreatorPersonSchema.ps1 -Verify` must exit 0 first). Send word-add-in (dc session) the PR number and the deploy SHA; their pane PR is #2533. |
+
+## Owner decisions 2026-11-03
+- 095a and 095b approved. The channel is the bell (appnotification). The pane banner is word-add-in's.
+- Column `sprk_invoicesubmission.sprk_sourceemaildocument` (Lookup to sprk_document) was created by the owner on dev. Relationship `sprk_invoicesubmission_SourceEmailDocument_sprk_document`: Delete/Archive RemoveLink (I fixed Archive), others NoCascade. It is in SpaarkeMaster through the table root (behavior 0). After-notices sent. Lookup-name exposure: I recommended accepting it, and the owner didn't object.
+- The Files section on the invoice form is wanted ("important"), with a link to the source email Document. That is task 151e, which folds in 151d.
+- The owner's go for word-add-in's Outlook desktop sign-in fix was relayed.
+- Correction test PASSED: INV-792345.4 supersedes .3 (.3 is Superseded/inactive; the .4 submission has resubmissionof = .3's submission). The -0.03 total is correct (a Microsoft credit note).
+
+## Open owner questions
+1. Seed the invoice-line-code and invoice-codeset-match Actions/Bindings on dev (053 steps 2-3)? Not yet answered. Without them, no AI line coding.
+2. Refused bell: link to the submission (per the POML, being implemented) or to the invoice? Not answered.
+3. Approve test invoices for the 153 end-to-end (needed for the AP-emails "no New" click-through and the first Email to AP send; uac-r2 wants the batch link and the send time).
+
+## Just observed (16:00Z)
+The owner emailed synthetic invoice B-0001.pdf (INV-2025-78232) to the Spaarke Mailbox (mailbox-central). The inbound communication pipeline processed it twice (polling job a80bbd36 and delta reconciliation d5737ca3): StructuralDetector flagged invoice@0.80, association Suggested at 0.70. **No invoice submission was created**: the mailbox route does not submit invoices (Submit Invoice from the communication is task 118, not built). A sprk_communication query by name found nothing yet. Tell the owner to use Submit Invoice in the Outlook pane on that email. Check for duplicate communication rows from the double processing (email-communication-intelligence's area).
 
 ## Known on dev (not defects)
-- `ai.invoice.binding_missing` for invoice-codeset-match, and for invoice-line-code too: dev has only the invoice-classify Binding. Seeding those Actions and Bindings is task 053 steps 2–3, which haven't run. It isn't fatal: code-set matching falls back to embedding ranking, and the proposals are marked unreviewed. Seeding them on dev is a live write and needs the owner's OK.
-
-## Done 2026-11-03
-- K3: the owner granted the Office Add In User role Read on the six billing tables on dev; source in #2530 (7a33014d9c), approved by uac-r2 and ontology-r1. The solution import carries it to new environments.
+- `ai.invoice.binding_missing` for invoice-codeset-match and invoice-line-code (only invoice-classify is bound): 053 steps 2-3.
+- No invoice lines on the two Microsoft invoices: expected, since they have no law-firm lines.
 
 ## Filed
-- #2529: the submission job retries a permanent schema fault 5 times. That is why the owner's run took over a minute; a good run takes about 15 s.
+- #2529: the submission job retries a permanent schema fault 5 times.
 
 ## Waiting on
-- word-add-in: the fix for Outlook desktop "Request Too Long" (new Outlook reports OfficeOnline, `naa=false`, so sign-in uses a popup with oversized cookies). Their researcher is checking NAA support; the auth change needs the owner's go. The `%3E/suggestions` 404 is the expected answer for an uncaptured email, not a bug.
-- The click-through check that the AP emails grid shows no New button (on the owner's checklist through uac-r2).
-- The owner deletes `C:\w15p` (my rm was blocked).
+- The owner deletes `C:\w15p`.
+- Task 153: the AP-emails grid "no New" check moved into its end-to-end (needs approved invoices and a batch).
 
 ## Open items
-- Task 153 step 4 conflicts with the rule that only SPA-r3 deploys the dev BFF: amend the POML. The rest of 153 waits for 136.
-- 151d: the invoice form shows the batch's Sent to AP Date.
-- Task 014 note §7: the next `sprk_invoice` RibbonDiff import must decide on the 7 Activate/Deactivate hides, which are source-only.
+- 153 step 4 already amended (SPA-r3 deploys). The rest of 153 waits for 136.
+- Task 014 note §7: the next `sprk_invoice` RibbonDiff import must decide on the 7 Activate/Deactivate hides.
+- 132 must treat the submitter's bell as done by 095b (095b K-note).
 - Older notes name the owner in plain text (003, 004, 011, 029, 091): needs a docs pass.
-- 050a §9 items 2–4 (owner).
+- 050a §9 items 2-4 (owner).
 
 ## Standing rules (see project CLAUDE.md)
 No bare git stash, no --no-verify. Live writes and role changes need the owner's OK. Schema runs need notices before and after, and the publish is entity-scoped only. StoredFileReconcileJob stays off. ebilling never deploys the dev BFF (SPA-r3 does). Master PRs: ontology-r1 review, then auto-merge, then the SHA to peers. Max 4 subagents, and every agent launch states a model. No bare jq, no grep -P.
