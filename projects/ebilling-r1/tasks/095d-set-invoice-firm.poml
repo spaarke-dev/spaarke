@@ -66,6 +66,7 @@
       - the caller checks: AppendTo on the core, Write on each Signal's subject;
       - a close that fails answers 503, never "decided".
       Findings that need a firm (rates, timekeepers, firm coding) are re-evaluated after the firm is set. They become new Signals, outside the resolved set.
+      Per 095c's design, a no-firm invoice skipped resolution, firm coding and rule evaluation entirely, so this task runs all three once the firm is set, through the existing pipeline entry points and not a second copy. The rules.not_checked finding is closed by that run.
     </constraint>
     <constraint source="uac-r2 2026-11-03 (binding)">
       No new visibility rule: invoice and file visibility are unchanged. After the firm is set, the SUBMISSION becomes visible to that firm's users who can read its core record. 095d adds a new writer of guarded columns, so these conditions apply:

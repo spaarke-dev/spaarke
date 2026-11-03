@@ -77,6 +77,36 @@
     <constraint source="CLAUDE.md §11">No new service. Extend the files above, and answer the three justification questions for the new reason code and the approval refusal in the notes.</constraint>
     <constraint source="CLAUDE.md §10">BFF hygiene: the placement statement, the publish-size delta against a fresh master build, no new HIGH CVE.</constraint>
     <constraint source="privacy">Use neutral wording in commits, notes and the PR.</constraint>
+    <constraint source="main-session design 2026-11-03 (after run 2's stop; notes/095c)">
+      Phase probe and script order: run 2's proposal is approved as the design. The live run still needs the owner's OK and the uac-r2 notice.
+      - Phases, from a metadata read reusing ComposeIdentityKeyHealthCheck's RetrieveEntityRequest path:
+        P0, no scope column: today's behaviour;
+        P1, the column exists but the new key is not Active: the scope is written on every row, counting is per firm, and no-firm requests are refused;
+        P2, the new key is Active: counting is per scope, and no-firm requests for mode New are accepted.
+        The phase only moves forward, and it is cached for 5 minutes until it reaches P2.
+      - Script order:
+        1. lower sprk_vendororg to None;
+        2. add sprk_trackingscope at None;
+        3. wait longer than the cache;
+        4. backfill;
+        5. raise the column to SystemRequired;
+        6. re-backfill and verify;
+        7. add the new key and wait for Active;
+        8. verify;
+        9. retire the old key.
+      - In P0 and P1, a request with no firm answers 400 ebilling.submission.firm_invalid "A firm is required.".
+      Null firm in the pipeline: a no-firm invoice SKIPS every firm-dependent step rather than half-running it:
+      - resolution: no rates and no timekeeper roster, so lines are unresolved;
+      - the firm-code step of coding: coding by the matter's code set still runs;
+      - billing rule evaluation entirely, including the Duplicate priors, recorded with the existing rules.not_checked finding and the firm_missing hold.
+      Nothing in BillingFactLoader changes (ontology-owned): it is not called for a no-firm invoice.
+      095d's assign-firm runs the full pipeline (resolution, firm coding, rule evaluation) once the firm is set.
+      Split, run serially, each its own commits (Opus, high effort):
+      095c-1: the schema script and SpaarkeMaster source; the allocator taking Guid? and the phase probe; the in-memory key store with scope; the race test with a null firm and the phase tests; ParentLineage refusing sprk_trackingscope; the source scan that ListAsync, DecideReadOneAsync and the replacement gate never read the scope; the "Notice for uac-r2" notes section.
+      095c-2: the intake: HTTP and service code taking Guid?, the P0/P1 refusal, the correction rule, the idempotency binding, and the external, wizard and SPA routes unchanged.
+      095c-3: the pipeline skips above, plus the firm_missing system finding (reason code, template, headline), which ontology-r1 reviews.
+      095c-4: the approval and AP-export refusals, the remaining readers, the reader inventory, the final contract text, and the full gate.
+    </constraint>
   </constraints>
 
   <steps mode="directional">
