@@ -13,8 +13,8 @@
 | **Mode** | Final push, round-90 rules. Merge only when Router + "Client lint (type-aware ratchet)" are green: `git merge-tree`, then `--squash --match-head-commit <sha>`, no `--delete-branch`. Live actions, deploys and settings changes need the owner's go IN THIS SESSION. |
 | **Active task** | None in progress. Reviewing and gating for peers. |
 | **NEW ROLE (owner confirmed in this session, 2026-11-03)** | **uac-r2 orchestrates dev BFF deploys** after R3's final deploy and my 30-minute gate on it. Procedure: `docs/procedures/dev-bff-deploy-coordination.md`. Scripts: `scripts/Save-BffDevRollbackSnapshot.ps1` and `scripts/Test-BffDevDeployReadback.ps1`. Record: R3 `notes/contact-identity-dev-rollout-record.md` §9–16. All arrive on master with PR #2546. R3 (session `spaarke-wt-spa-external-access-platform-f2`) runs one last deploy: merged #2546 master SHA = 5796774091 plus 2 R3 fixes. Peers' OKs, then the owner's go. Acceptance and the conditions below were sent to R3 at ~21:35Z. |
-| **Dev state** | BFF = 5796774091 since 13:29:19Z (gate PASSED, `$TEMP/uacmerge/uacg/gate5796_30m.txt`; rollback 3740e1a105). Dev SPA = b083d62183. |
-| **Next action** | 1. R3's final deploy candidate **d763dc120e** (master tip): my OK was sent ~22:15Z, on condition that Router and "Release build + BFF publish" finish green. Nit sent: `ExternalUserContextEndpoint.cs` is missing its class `</summary>` (it doesn't affect the build). When R3 sends the receive time, run the 30-minute gate. 2. Wait for ebilling's Email-to-AP send time, then run `$TEMP/uacmerge/uacg/apsend_check.sh SINCE UNTIL BATCHID` and report to the owner. 3. Review diffs as they arrive (list below). 4. #2524 re-file link write (my code). |
+| **Dev state** | BFF = **d763dc120e** since 22:26:31Z (R3's final deploy; my 30-minute gate PASSED, `$TEMP/uacmerge/uacg/gated763_30m.txt`, script `gated763.sh`; rollback: R3's snapshot `wwwroot-20261103T220358Z`, or redeploy 5796774091). **From now on I orchestrate dev BFF deploys.** Dev SPA = b083d62183. The census has reported findings since 19:45Z. Cause: the two new mailbox user accounts in the root business unit (see owner items). This predates the deploy. |
+| **Next action** | 1. Owner decision on the two mailbox users (owner items). 2. Wait for ebilling's Email-to-AP send time, then run `$TEMP/uacmerge/uacg/apsend_check.sh SINCE UNTIL BATCHID` and report to the owner. 3. Review diffs as they arrive (list below). 4. #2524 re-file link write (my code). |
 
 ## Email-to-AP test (owner go, 2026-11-03)
 - AP address: `sprk_apexportemail` = **ap@finance.spaarke.com** on settings row 92acd624 (read back 20:42:32Z). Not monitored: receive-enabled accounts are mailbox-central@ and testuser1@ only. ap@ must never be receive-enabled; invoices@ is free to become intake. Memory: test-mailbox-invoices.
@@ -57,6 +57,7 @@
 - **TASK-INDEX is stale** (196/197 missing; many statuses old): reconcile it at wrap-up 090.
 
 ## Owner items outstanding
+- **NEW (private, details in session only):** what to do with the invoices@ and ap@ Dataverse users (root business unit, no direct roles): move them to BU1, disable them, or other. Until then the census keeps reporting its verdict.
 - Owner decisions:
   - no-firm invoices: hide them externally until a firm is set? (Today they are visible, by option A.)
   - 095a: may a reader see the lookup name of a Restricted .eml?
