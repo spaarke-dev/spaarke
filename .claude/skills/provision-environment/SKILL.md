@@ -1,2418 +1,354 @@
 ---
+name: provision-environment
 description: Provision a new Spaarke customer environment end-to-end via L2 control-plane REST API — prereqs, interactive intake, preflight, confirmation gate, execute loop with poll + manual-gate handling, and handoff report
 tags: [provisioning, l3-skill, l2-controlplane, deploy, operations, customer-onboarding]
 techStack: [powershell, azure-cli, pac-cli, dataverse-mcp, curl, azure]
 appliesTo: ["provision-environment", "provision customer", "new customer environment", "customer stamp", "provision {customerId}", "customer-provisioning"]
 alwaysApply: false
 exemplar: none-too-volatile
-last-reviewed: 2026-08-18
+last-reviewed: 2026-11-03
 ---
 
 # Provision Environment
 
 > **Category**: Provisioning
-> **Last Reviewed**: 2026-08-18 (customer-provisioning-orchestration-r1 task 075)
-> **Reviewed By**: main-session per Sub-Agent Write Boundary (root CLAUDE.md §3) — sub-agents cannot write to `.claude/skills/**`.
-> **Procedure**: [`docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md`](../../../docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md) (operator runbook — §12 interim manual sequence until this skill supersedes)
-> **Companion**: [Task 076 Fallback Matrix](#) — added by follow-on task; do not remove the placeholder if empty.
+> **Last Reviewed**: 2026-11-03
+> **Procedure**: [`docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md`](../../../docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md) (operator runbook)
 
-Interactive Claude Code skill for provisioning a **new Spaarke customer environment** (a dedicated stamp in either model since D-12: Model 1 in Spaarke's tenant, Model 2 in the customer's) end-to-end via the **L2 control-plane REST API**. The skill provides the **operator UX layer** — prerequisite checks, intake wizard, preflight, confirmation gate, execute loop with poll + manual-gate handling, and structured handoff report.
+Interactive Claude Code skill for provisioning a **new Spaarke customer environment** — a dedicated stamp in either
+model since D-12 (Model 1 in Spaarke's tenant, Model 2 in the customer's) — end-to-end via the **L2 control-plane REST
+API**. The skill is the **operator UX layer**: prerequisite checks, intake, preflight, confirmation gate, execute loop
+with poll + manual-gate handling, handoff report and postmortem. The provisioning itself is done by L2
+(`Sprk.Provisioning.ControlPlane` — Service Bus enqueue, Cosmos state, `IJobHandler` handlers H0–H14). The skill is
+thin: it drives the operator experience, never the provisioning logic.
 
-**The actual provisioning is performed by**: L2 control-plane (`Sprk.Provisioning.ControlPlane` — enqueues via Service Bus + tracks state in Cosmos + runs `IJobHandler` handlers H0-H14) and its underlying handler catalog. This skill is thin — it drives the operator experience, not the provisioning logic itself.
-
-**Trigger phrases**:
-- `/provision-environment {customerId}`
-- `/provision-environment` (interactive; prompts for customerId)
-- "provision new customer"
-- "provision customer {name}"
-- "new customer environment"
-- "new customer stamp"
-
----
+**Trigger phrases**: `/provision-environment {customerId}`, `/provision-environment` (prompts for customerId),
+"provision new customer", "provision customer {name}", "new customer environment", "new customer stamp".
+Flags: `--batch <intake.json>` (unattended, Step 1.0), `-SkipStep0_5` / intake `skipExternalPrereqs` (Step 0.5),
+`--resume <runId>`.
 
 ## Quick Reference
 
 | Item | Value |
 |------|-------|
-| L2 API base (dev) | `https://spaarke-provisioning-controlplane-dev.azurewebsites.net` |
-| L2 API base (prod) | `https://spaarke-provisioning-controlplane-prod.azurewebsites.net` |
-| L2 REST surface | `POST /api/runs`, `GET /api/runs/{id}`, `POST /api/runs/{id}/resume`, `POST /api/runs/{id}/clear-quarantine` |
+| L2 API base | `https://spaarke-provisioning-controlplane-{dev,demo,prod}.azurewebsites.net` |
+| L2 REST surface | `POST /api/runs`, `GET /api/runs/{id}`, `POST /api/runs/{id}/resume`, `POST /api/runs/{id}/gates/{gateId}/advance`, `POST /api/runs/{id}/preflight`, `POST /api/runs/{id}/cancel`, `POST /api/runs/{id}/clear-quarantine` — every call carries `?customerId=` |
 | L2 audience (token) | `api://spaarke.com/provisioning-controlplane-{env}` |
 | Operator role required | `Operator` app-role (mutating) OR `Reader` (poll-only) |
-| Handler catalog | 20 handlers per run (Model 1: 19 — skips H0.5; Model 2: 20 — H11 runs on EVERY run, both models; it was once documented as skipped for Model 2, but `DagAdvancer` has no such skip and H12a/H12b depend on it): H0 / H0.5 / H1 / H2a / H2b / H3 / H4 / H4b / H5 / H6 / H7 / H8 / H9 / H10 / H11 / H12a / H12b / H12c / H13 / H14 — the 20 ids in `HandlerIds.Dispatchable` (`Sprk.Provisioning.ControlPlane.Core`), H0 included. H4-shared was retired by T226 (2026-09-30). See [`docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md`](../../../docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md) §H0–H14. |
-| Trap catalog | 7 traps T1-T7 (see design §4B) — each handler asserts its trap clear before reporting success |
-| Tenant-isolation invariants | 5 invariants I1-I5 (see design §4D) — asserted by ArchTests; I2-I5 also sample-verified on the stamp at H13 acceptance (I1 is a build gate — T230a) |
-| Estimated wall-clock (Model 2 fresh stamp) | ≤ 1 hour (NFR-03) if no lead-time gates (Azure quota / SPE 24h / customer admin consent) |
-| Cost envelope | One envelope per customer stamp, both models: ≤ $400/mo empty (NFR-04; ≈ $337 fixed at 2026-10-06 list prices — T229). H0 refuses an estimate above the tier ceiling (smb $700 / enterprise $2,500 / dedicated $5,000); H13 flags > 20% drift |
-| Handoff report path | `runs/{runId}.md` in operator's cwd (NOT under `.claude/`) |
-
----
+| Handler catalog | 20 dispatchable ids (`HandlerIds.Dispatchable`): H0 / H0.5 / H1 / H2a / H2b / H3 / H4 / H4b / H5 / H6 / H7 / H8 / H9 / H10 / H11 / H12a / H12b / H12c / H13 / H14. Model 1 runs 19 (skips H0.5); Model 2 runs 20. H11 runs on EVERY run, both models (`DagAdvancer` has no skip; H12a/H12b depend on it). H4-shared retired (T226). Guide §H0–H14 |
+| Trap catalog | T1–T7 (design §4B) — each handler asserts its trap clear before reporting success |
+| Tenant-isolation invariants | I1–I5 (design §4D) — ArchTests; I2–I5 sample-verified at H13 (I1 is a build gate — T230a) |
+| Wall-clock (fresh stamp) | ≤ 1 h (NFR-03) without lead-time gates (Azure quota / SPE / customer admin consent) |
+| Cost envelope | ≤ $400/mo empty (NFR-04; ≈ $337 fixed at 2026-10-06 prices — T229). H0 refuses an estimate above the tier ceiling (smb $700 / enterprise $2,500 / dedicated $5,000); H13 flags > 20% drift |
+| Handoff report | `runs/{runId}.md` in the operator's cwd (NOT under `.claude/`) |
+| Scripts | `scripts/provision-environment/*.ps1` (run driver) + `scripts/provisioning-prereqs/Invoke-PrereqPass.ps1`, `Test-SpeTopology.ps1` |
 
 ## Critical Rules
 
 ### MUST:
 - **MUST** run all Step 0 prerequisite checks BEFORE any intake or preflight; any failure is a hard stop
 - **MUST** authenticate as the **operator's own AAD identity** (`az login`) — NEVER a service principal (NFR-11 auditable operator action)
-- **MUST** call L2 REST API with `Authorization: Bearer <token>` where token is acquired via `az account get-access-token --resource api://spaarke.com/provisioning-controlplane-{env}`
+- **MUST** call L2 with `Authorization: Bearer <token>` from `az account get-access-token --resource api://spaarke.com/provisioning-controlplane-{env}` (the scripts do this)
 - **MUST** enqueue via L2 (`POST /api/runs`) and poll (`GET /api/runs/{id}`) — NEVER invoke handlers directly or reach into BFF Service Bus
-- **MUST** require an **explicit "proceed" phrase** at the Step 3 confirmation gate — a bare "y" or "yes" is INSUFFICIENT
-- **MUST** surface manual gates with actionable instructions (URL to click, `az` command to run, etc.) — never fake progress past a gate
-- **MUST** produce a handoff report at `runs/{runId}.md` in the operator's working directory on completion (success OR failure)
-- **MUST** update `sprk_dataverseenvironment` registry via Dataverse MCP on run completion — fall back per §4.3a.5 if MCP is disconnected
-- **MUST** apply canonical KV secret naming per FR-35 pre-check protocol — check LIVE App Service + KV + Dataverse before removing any alias
-- **MUST** follow the KV credential-lifecycle rule (updated 2026-08-27 SESSION 13 task 199 for E-3 CLOSED reality per BFF `CLAUDE.md` correction 2026-08-20 + `spaarke-auth-v4-dataverse-MI` task 033 completion 2026-08-24): **`BFF-API-ClientSecret` is GONE** — auth-v4 task 033 deleted BOTH KV copies (`BFF-API-ClientSecret` + `bff-api-client-secret`), all 4 App Service settings, and pinned `Graph:Credentials:Order = [ManagedIdentityFederated]` with `RequireSecretFreeIdentity=true`. Do NOT re-introduce this secret under any name — `CredentialGuardTests` fails the build on any new `.WithClientSecret(...)` site. H4 **omits** `BFF-API-ClientSecret` unconditionally (no sentinel — §9.1 opaque `AADSTS7000215` risk is gone with E-3 closed). Separately, `Dataverse-ClientSecret` never-delete rule STILL in force until 2026-11-23 (auth-v4 owns its retirement). Full rule: [`.claude/constraints/provisioning.md`](../../constraints/provisioning.md) §KV credential lifecycle.
+- **MUST** require the **explicit phrase** `proceed with provisioning` at the Step 3 gate — a bare "y" or "yes" is INSUFFICIENT
+- **MUST** surface manual gates with actionable instructions (URL to click, `az` command to run) — never fake progress past a gate
+- **MUST** produce the handoff report `runs/{runId}.md` in the operator's working directory on every terminal outcome (success OR failure)
+- **MUST** update the `sprk_dataverseenvironment` registry on run completion via the Dataverse MCP — Fallback F1 if it is disconnected
+- **MUST** apply canonical KV secret naming per the FR-35 pre-check protocol — check LIVE App Service + KV + Dataverse before removing any alias
+- **MUST** follow the KV credential-lifecycle rule: **`BFF-API-ClientSecret` is GONE** (auth-v4 task 033 deleted both KV copies `BFF-API-ClientSecret` + `bff-api-client-secret` and all 4 App Service settings; `Graph:Credentials:Order = [ManagedIdentityFederated]`, `RequireSecretFreeIdentity=true`). Do NOT re-introduce it under any name — `CredentialGuardTests` fails the build on any new `.WithClientSecret(...)`. H4 **omits** it unconditionally. `Dataverse-ClientSecret` never-delete rule STILL in force until 2026-11-23 (auth-v4 owns its retirement). Apply the current text of [`.claude/constraints/provisioning.md`](../../constraints/provisioning.md) §KV credential lifecycle, not this summary
+- **MUST** run each step's script with `pwsh -NoProfile -File <script> -SessionFile <session>` and branch on its exit code (below) — never retype the logic inline
 
 ### NEVER:
-- **NEVER** skip Step 0 prereqs — they exist because operator machines drift and silent tool-version mismatches cause silent-fail traps
+- **NEVER** skip Step 0 prereqs — operator machines drift and silent tool-version mismatches cause silent-fail traps
 - **NEVER** authenticate as a service principal — the L2 audit trail requires operator identity per NFR-11
-- **NEVER** invoke handlers directly (bypassing L2 orchestration) — you'd break the state machine + idempotency + rollback taxonomy
-- **NEVER** advance past a `WaitingOnGate` state without the gate actually clearing (verify via Dataverse or Azure state, not by asking the operator "did you do it")
-- **NEVER** hardcode a tenant ID — every intake requires explicit `tenantId` (I1 invariant, `Register-EntraAppRegistrations.ps1:63` fix precedent)
-- **NEVER** proceed with a `Quarantined` run — quarantine requires explicit `POST /api/runs/{id}/clear-quarantine` with reason + audit trail
-- **NEVER** run two concurrent runs against the same `customerId` — L2 returns 409 via optimistic concurrency on `sprk_currentrunid`; respect it
-- **NEVER** invent a customerId — must be pre-registered or explicit intake asks operator + validates format
+- **NEVER** invoke handlers directly (bypassing L2 orchestration) — it breaks the state machine + idempotency + rollback taxonomy
+- **NEVER** advance past a `WaitingOnGate` without the gate actually clearing — `POST .../gates/{gateId}/advance` makes L2 re-verify; the operator's "I did it" is not evidence
+- **NEVER** hardcode or default a tenant ID — every intake carries an explicit `tenantId` (I1; `Register-EntraAppRegistrations.ps1:63` fix `1834b77bc`)
+- **NEVER** proceed with a `Quarantined` run, and never call `clear-quarantine` on the operator's behalf — it needs a human-accountable reason
+- **NEVER** run two concurrent runs for one `customerId` — L2 returns 409 (optimistic concurrency on `sprk_currentrunid`); respect it
+- **NEVER** invent a customerId — the operator supplies it and Step 1a validates it
+- **NEVER** auto-retry a `Failed` run (batch `onFailedPolicy=autoResumeOnce` is the one sanctioned exception) — auto-retry hides operator-actionable diagnostics
+- **NEVER** use `Read-Host` or any console prompt — the PowerShell tool has no stdin. Ask the operator in chat, then pass the answer to the script
 
----
+## How the scripts keep state
+
+No PowerShell variable survives between tool calls, so state lives in two files (both ignored by git):
+
+- **Session file** `runs/provision-session-{timestamp}.json` — created by `New-ProvisionSession.ps1`, which prints
+  `SESSION=<path>`. Pass that path as `-SessionFile` to every later script. Holds mode, control-plane env,
+  environmentId, runId, the confirmation phrase, MCP-fallback and registry-stale flags, prerequisite results. No
+  personal data. Keep the path in your notes — after a compaction, find the newest `runs/provision-session-*.json`.
+- **Intake file** — batch: the operator's file (never edited; its SHA-256 is the audit record). Interactive: write the
+  operator's answers to `runs/{customerId}-intake.json` in the [`intake.schema.json`](../../../scripts/provisioning-prereqs/intake.schema.json)
+  shape (no `confirmationAcknowledgment` — Step 3 records that) and register it with `Set-ProvisionSession.ps1 -IntakeFile`.
+
+| Exit | Meaning | Do |
+|---|---|---|
+| 0 | passed / done | next step |
+| 1 | HARD STOP | report the message + resolution; stop (then Step 7 if a run exists) |
+| 7 | interactive: value needed (`FIELD=<name>` printed) | ask the operator for that value, update the intake file, rerun the same script |
+| 2 / 3 / 4 / 5 | run Failed / Quarantined / WaitingOnGate / Cancelled | Step 4b / Step 5 |
+| 5 (from `Write-HandoffReport -Action Check`) | registry stale — both artifacts written | Step 6d warning variant |
+| 6 | batch postmortem file invalid | Step 7b |
+| 9 | L2 unreachable after one retry | Fallback F3 |
+| 10 | poll window elapsed, run still in progress | call `Watch-ProvisioningRun.ps1` again |
+
+All paths below are relative to the repo root (the operator's cwd); `$S` is the session path.
 
 ## Procedure
 
+- [ ] Step 0 prerequisites (+ 0d MCP) → [ ] 0.5 external prerequisites + 0.5c SPE topology → [ ] 1 intake (1a–1g)
+- [ ] 2 client-side preflight (2.5 when fresh subscription) → [ ] 3 confirmation gate → [ ] 4 POST + poll
+- [ ] 5 manual gates (as they arise) → [ ] 6 registry + handoff (+ 6e, 6f) → [ ] 7 postmortem (ALWAYS)
+
 ### Step 0: Prerequisites Check (Automated) — HARD STOP on any failure
 
-Run every check. Report results as a checklist. Any FAIL is a hard stop — do NOT proceed to Step 1.
+**Batch mode: run Step 1.0 first** — it binds the env and the batch policies that Steps 0d and 0.5a read.
+Interactive: the checks need the control-plane env; use the operator's argument, else ask now (`dev` | `demo` |
+`prod` — the same answer as Step 1d; `dev` was the original placeholder). Create the session:
+`pwsh -NoProfile -File scripts/provision-environment/New-ProvisionSession.ps1 -Mode Interactive -Env <env>`.
 
 #### 0a. Tool version checks
-
-```powershell
-pwsh --version               # ≥ 7.4
-az --version                 # az-cli ≥ 2.60
-pac --version                # ≥ 1.35
-git --version                # ≥ 2.40
-```
-
-Parse each version; compare against minimum. On mismatch, print the missing/stale tool + install/upgrade instructions.
-
-**COMP-15 addition (SESSION 15 Wave 4) — batch-mode contract test**: when invoked with `--batch`, ALSO verify:
-- `az account show` exits 0 within 5s (proves `az login` is live and token cache is not stale). If fails, HARD STOP with: "Batch dispatch requires a fresh `az login` session. Run `az login --scope api://spaarke.com/provisioning-controlplane-$env/.default` interactively before re-invoking."
-- Dataverse MCP is contactable via `mcp__dataverse__describe` OR intake explicitly sets `"skipDataverseMcp": true` (deferring registry ops to raw Web API fallback path per Fallback Matrix F1). Silent MCP unavailability in batch mode causes Step 6a registry update to fail silently — the batch-mode audit trail depends on this contract holding at Step 0.
-
-The interactive-mode counterpart of these checks lives in 0b/0d; batch mode reruns them at 0a to fail-fast on subagent environments that lack the necessary tooling.
-
 #### 0b. Operator AAD identity
-
-```powershell
-az account show --query "{name:name, tenantId:tenantId, user:user.name}" -o json
-az ad signed-in-user show --query "{oid:id, upn:userPrincipalName}" -o json
-```
-
-Assertions:
-- `tenantId` MUST equal the Spaarke tenant ID (`a221a95e-6abc-4434-aecc-e48338a1b2f2` — verify from environment; fail-fast if mismatched)
-- `user.name` MUST be a real UPN (not a service-principal ObjectId)
-- If the returned identity is a service principal, HARD STOP with message: "L3 skill requires operator's own AAD identity per NFR-11. Run `az login` interactively. Refusing to proceed under SP auth."
-
 #### 0c. L2 API reachability + Operator role
+#### 0e. Working directory + git state
+#### 0f. L2 deployment probe
+#### 0g. Report + gate
 
-> **ISH-10 rewrite (SESSION 16)**: earlier drafts of this step POSTed to `/api/runs` with `profile:"dev"` — but `dev` is NOT in the [`intake.schema.json`](../../scripts/provisioning-prereqs/intake.schema.json) profile enum (`spaarke-hosted-model2` / `customer-owned-model2` since task 225b). L2's model-binding would surface a 400 either way, so the probe technically "worked" — but the diagnostic path was wrong: a 400 could mean either "validation failure" (proving auth passed) OR "the probe payload is malformed and we're not actually testing auth." Worse, the probe was a mutating `POST` — even though L2 rejects the row before enqueue, POSTing a garbage payload to a mutation endpoint just to probe role assignment is bad hygiene. The rewrite uses a **read-only `GET`** against a Reader-safe endpoint. If `GET /api/runs/{fake-guid}?customerId=__role-probe__` returns anything OTHER than 403, the operator has at least Reader; a 403 proves the operator has NO role assignment at all.
-
-```powershell
-# Acquire token — env is one of {dev, demo, prod}
-$env = "dev"  # populated by -Environment CLI arg / intake.controlPlaneEnv / Step 1d prompt (ISH-12 rename SESSION 18)
-$token = az account get-access-token `
-  --resource "api://spaarke.com/provisioning-controlplane-$env" `
-  --query accessToken -o tsv
-
-# Health check L2 (unauth endpoint)
-$l2Base = if ($env -eq "prod") { "https://spaarke-provisioning-controlplane-prod.azurewebsites.net" } `
-          elseif ($env -eq "demo") { "https://spaarke-provisioning-controlplane-demo.azurewebsites.net" } `
-          else { "https://spaarke-provisioning-controlplane-dev.azurewebsites.net" }
-curl -sf "$l2Base/healthz"  # expect 200
-
-# --- Role probe — READ-ONLY GET (ISH-10 rewrite; no mutation) ---
-# Uses a well-formed but guaranteed-not-to-exist run-id + a valid customerId query param.
-# Expected outcomes:
-#   200 → run exists (impossible with random probe GUID; treat as noise, retry)
-#   404 → route matched, customerId partition check passed, but run not found → PROVES auth+role work (Reader OR Operator both succeed)
-#   400 → customerId param missing/malformed (our probe payload bug; fix before shipping)
-#   401 → token invalid/expired → re-run `az login` and retry
-#   403 → NO role assignment at all → HARD STOP with grant instructions
-#   5xx → L2 upstream problem → escalate per Fallback F3
-$probeGuid = [Guid]::NewGuid().ToString()
-$probeUrl = "$l2Base/api/runs/$probeGuid`?customerId=__role-probe__"
-$probeCode = curl -sS -o $null -w "%{http_code}" `
-  -H "Authorization: Bearer $token" `
-  $probeUrl
-switch ($probeCode) {
-  '404' { Write-Host "  [PASS] L2 reader/operator role check (HTTP $probeCode on read-probe)" -ForegroundColor Green }
-  '200' { Write-Host "  [PASS] L2 reader/operator role check (HTTP $probeCode — probe GUID collision; retrying would return 404)" -ForegroundColor Green }
-  '401' { Write-Error "  [FAIL] L2 token rejected (HTTP 401). Run `az login` interactively and retry."; exit 1 }
-  '403' { Write-Error "  [FAIL] L2 rejected the operator's identity with HTTP 403 — NO role assignment. Grant the operator's UPN at least the Reader app-role on 'api://spaarke.com/provisioning-controlplane-$env' via Portal or 'az ad app app-role assignment create' (Operator role is required for the actual /provision-environment dispatch — Reader alone will pass this probe but 403 on Step 4 POST)."; exit 1 }
-  default { Write-Warning "  [WARN] Unexpected role-probe HTTP $probeCode against $probeUrl — proceeding cautiously; investigate if Step 4 POST returns 403." }
-}
-
-# --- Operator-role probe (ISH-10 addendum) — attempt a Reader→Operator distinction ---
-# The GET above proves Reader. For Operator, we'd have to POST — but per this section's
-# intro we deliberately do NOT probe by POSTing garbage. Operator-role verification
-# happens organically at Step 4 (the real POST). A 403 there IS the signal.
-Write-Host "  [INFO] Operator-role assignment is verified organically at Step 4 (POST /api/runs). Reader-tier verified here." -ForegroundColor Cyan
-```
+All five run in one script and print the 0g checklist:
+`pwsh -NoProfile -File scripts/provision-environment/Test-OperatorPrereqs.ps1 -Env <env> [-Batch]`.
+0a: pwsh ≥ 7.4, az ≥ 2.60, pac ≥ 1.35, git ≥ 2.40 (batch adds COMP-15: `az account show` < 5 s). 0b: Spaarke tenant,
+a user — never a service principal. 0c: `/healthz` + a READ-ONLY role probe (`GET /api/runs/{random}?customerId=__role-probe__`
+— 404 proves Reader/Operator, 401 → `az login`, 403 → no role: grant at least Reader; never probe with a POST, ISH-10).
+Operator role is proven only by the Step 4 POST (a 403 there IS the signal). 0e: a git repo (warning only). 0f: L2 App
+Service `Running` (else HARD STOP); build-tag mismatch is a warning until the deploy pipeline stamps one. Exit 1 → stop.
 
 #### 0d. Dataverse MCP status (optional but strongly recommended)
 
-Attempt an MCP ping (`mcp__dataverse__describe` against a known small table).
-
-**Interactive mode** — if MCP is disconnected, prompt:
-
-```
-⚠ Dataverse MCP is not connected.
-  Impact: registry updates on run completion will use the fallback matrix
-          (pac data / raw Web API PS) — slower but functional.
-  Continue anyway? (yes/no)
-```
-
-**Batch mode (BAT-04, SESSION 16)** — honor `$script:BatchMcpDisconnectPolicy` bound at Step 1.0:
-
-```powershell
-$mcpAlive = $false
-try { mcp__dataverse__describe(entityName='sprk_dataverseenvironment') | Out-Null; $mcpAlive = $true } catch { $mcpAlive = $false }
-
-if (-not $mcpAlive) {
-  if ($script:SkipInteractiveIntake) {
-    # BATCH MODE
-    switch ($script:BatchMcpDisconnectPolicy) {
-      'failFast' {
-        $diag = @{
-          check    = 'dataverse-mcp'
-          runId    = 'pre-dispatch'
-          detected = (Get-Date -Format 'o')
-          reason   = 'Dataverse MCP ping returned no result; batch policy mcpDisconnectPolicy=failFast'
-          remedy   = 'Reconnect Dataverse MCP (see .claude/skills/provision-environment/SKILL.md Fallback F1) OR rerun with mcpDisconnectPolicy=proceedWithFallback'
-        } | ConvertTo-Json -Depth 4
-        $diagPath = "runs/pre-dispatch-mcp-disconnect.json"
-        New-Item -Path (Split-Path $diagPath) -ItemType Directory -Force | Out-Null
-        Set-Content -Path $diagPath -Value $diag
-        Write-Error "[skill] Batch HARD STOP (BAT-04, mcpDisconnectPolicy=failFast): Dataverse MCP not reachable. Diagnostic: $diagPath"
-        exit 1
-      }
-      'proceedWithFallback' {
-        Write-Warning "[skill] Batch mcpDisconnectPolicy=proceedWithFallback: Dataverse MCP not reachable. Registry ops (Step 1a probe, Step 1f placeholder-create, Step 6a completion PATCH) will use `pac data` / raw Web API fallback per Fallback F1. This choice is captured in Step 7b lessons-learned."
-        $script:McpFallbackActive = $true
-      }
-      default {
-        Write-Error "[skill] Batch HARD STOP: unknown mcpDisconnectPolicy '$($script:BatchMcpDisconnectPolicy)'. Valid: failFast | proceedWithFallback."
-        exit 1
-      }
-    }
-  } else {
-    # INTERACTIVE MODE — the prompt above
-    $answer = Read-Host "Continue anyway? (yes/no)"
-    if ($answer -ne 'yes') { Write-Error 'Aborted at Step 0d MCP prompt.'; exit 1 }
-    $script:McpFallbackActive = $true
-  }
-} else {
-  $script:McpFallbackActive = $false
-}
-```
-
-MCP status is NOT a hard stop by default in interactive mode; batch mode defaults to `failFast` (per BAT-04 rationale that unattended runs need up-front reliability, not degraded-path surprises later). Either way the fallback matrix handles disconnect (see Fallback Matrix section, added by task 076).
-
-#### 0e. Working directory + git state
-
-```powershell
-git rev-parse --show-toplevel   # verify inside a repo (operator's working tree)
-git status --porcelain          # note uncommitted changes (informational; not blocking)
-```
-
-Runs create `runs/{runId}.md` in the operator's cwd. If cwd is not a git repo, warn: "handoff report will be written to cwd but won't be checkpointed to git — consider running from repo root."
-
-#### 0f. L2 deployment probe (COMP-04 addition SESSION 15 — verifies deployed L2 image is current AND contains H4b)
-
-Before iterating prereqs.yaml or issuing the run POST, verify L2 App Service is:
-- Reachable (`az webapp show` state == Running)
-- Healthy (`/healthz` returns 200)
-- Current image (build-tag assertion — the deployed image must contain the SESSION 15 Wave 2 HANDLER-01 DAG fix; without it, H4b never dispatches and the r1 F20 automation is inert on the dispatched run)
-
-```powershell
-$l2WebAppName = "spaarke-provisioning-controlplane-$env"
-$l2Rg = "rg-spaarke-platform-$env"
-$state = az webapp show -g $l2Rg -n $l2WebAppName --query state -o tsv 2>$null
-if ($state -ne 'Running') {
-  Write-Error "[skill] L2 App Service '$l2WebAppName' is '$state' (expected 'Running'). Deploy L2 before /provision-environment."
-  exit 1
-}
-# /healthz — includes JSON body with build-tag
-$health = Invoke-RestMethod -Uri "$l2Base/healthz" -Method GET -TimeoutSec 10 2>$null
-$expectedBuildTag = 'SESSION-15-wave-2-handler-01'  # placeholder — replace with real build-tag emit convention when deploy pipeline stamps it
-if ($health.buildTag -and $health.buildTag -notmatch $expectedBuildTag) {
-  Write-Warning "[skill] L2 build-tag mismatch (got '$($health.buildTag)', expected match on '$expectedBuildTag'). Deployed image may lack the SESSION 15 Wave 2 fixes (HANDLER-01 DAG, REG-01 registry PATCH, ISH-01 tenantId validation). Run may HALT deep in the DAG. Deploy latest L2 image before proceeding."
-}
-```
-
-Note: build-tag emission from the L2 deploy pipeline is a follow-on — until it lands, this probe is informational (warns on mismatch, does not HARD STOP). Deploy pipeline stamping is tracked separately as a Wave 8-adjacent follow-on.
-
-#### 0g. Report + gate
-
-Present the operator with a summary:
-
-```
-PRE-FLIGHT CHECKS
-  [PASS] pwsh 7.4.6
-  [PASS] az-cli 2.62.0
-  [PASS] pac 1.36.3
-  [PASS] git 2.42.0
-  [PASS] AAD identity: ralph.schroeder@spaarke.com (tenant: a221a95e-...)
-  [PASS] L2 API reachable (dev): https://spaarke-provisioning-controlplane-dev.azurewebsites.net
-  [PASS] Operator role granted
-  [PASS] Dataverse MCP connected
-  [PASS] Working directory: c:/code_files/spaarke-wt-customer-provisioning-orchestration-r1
-
-All prerequisite checks passed. Proceeding to intake.
-```
-
-If any FAIL: report the failure + resolution instructions + HARD STOP.
-
----
+Ping with `mcp__dataverse__describe` on `sprk_dataverseenvironment`. Record the result:
+`Set-McpStatus.ps1 -SessionFile $S -Alive` when it answered. When it did not — interactive: show
+"⚠ Dataverse MCP is not connected. Impact: registry updates on run completion will use the fallback matrix (Web API) —
+slower but functional. Continue anyway? (yes/no)" and pass `-OperatorAnswer <answer>`; batch: run it without `-Alive`
+— `mcpDisconnectPolicy` (default `failFast`, BAT-04) stops with `runs/pre-dispatch-mcp-disconnect.json` or proceeds on
+the fallback. Not a hard stop in interactive mode; batch defaults to fail-fast because unattended runs need up-front reliability.
 
 ### Step 0.5: External Prerequisites Iteration (per `scripts/provisioning-prereqs/prereqs.yaml`) — HARD STOP on any failure
 
-Added by `customer-provisioning-orchestration-r1` task 203c per punch-list row A02. Reads the codified [`scripts/provisioning-prereqs/prereqs.yaml`](../../scripts/provisioning-prereqs/prereqs.yaml) manifest and iterates every prereq whose scope is checkable at operator invocation time (`once_per_tenant`, `once_per_subscription`, and — when `-Environment` is known from arg or batch intake — `once_per_env`). Customer-scoped prereqs (`once_per_customer`) defer to Step 2 preflight (server-side L2 H0 handler). This step iterates the manifest DYNAMICALLY — new prereqs added by future task 202 amendments are picked up automatically without a SKILL.md edit.
+Iterates the manifest DYNAMICALLY — new prereqs are picked up without a SKILL.md edit. Skipped only with
+`-SkipStep0_5` / `"skipExternalPrereqs": true` (interactive: `Set-ProvisionSession.ps1 -SkipExternalPrereqs`) when the
+operator has checked every applicable prereq by hand per [`PROVISIONING-PREREQUISITES.md`](../../../docs/guides/PROVISIONING-PREREQUISITES.md);
+recorded in Step 7. Silent skip is FORBIDDEN.
 
 #### 0.5a. YAML parser + environment fail-fast
-
-```powershell
-# One-time install (idempotent); powershell-yaml provides ConvertFrom-Yaml.
-if (-not (Get-Module -ListAvailable -Name powershell-yaml)) {
-  Install-Module powershell-yaml -Scope CurrentUser -Force -Confirm:$false
-}
-Import-Module powershell-yaml
-```
-
-If the module is unavailable AND cannot be installed (offline / restricted-network operator), the operator MUST invoke each prereq check manually per [`docs/guides/PROVISIONING-PREREQUISITES.md`](../../docs/guides/PROVISIONING-PREREQUISITES.md) and pass `-SkipStep0_5` (or `"skipExternalPrereqs": true` in batch intake) to acknowledge the risk. Silent skip is FORBIDDEN.
-
-**COMP-14 environment fail-fast (SESSION 16)** — Step 0.5b's substitution chain and its `$scopesToCheck += 'once_per_env'` branch both require a non-empty `$env`. When `$env` is null/empty, Step 0.5b silently degrades: `once_per_env` prereqs are skipped (invisible to the operator) and every `{env}` token substitutes to the empty string, producing malformed recipes that either fail with cryptic `az` parse errors OR — worse — false-PASS because the resulting name matches nothing.
-
-Different modes have different `$env` timing:
-- **Batch mode**: `$env` MUST be set by Step 1.0 (from `intake.controlPlaneEnv` — ISH-12 rename SESSION 18); a null value here means the intake was malformed and never should have passed schema validation, so HARD STOP.
-- **Interactive mode**: `$env` is set at Step 1d (after Step 0.5). It is EXPECTED to be null at Step 0.5 time; the `if ($env) { $scopesToCheck += 'once_per_env' }` branch in Step 0.5b handles this by skipping once_per_env prereqs (they get re-checked at Step 2 client-side dry-run once `$env` is known). Emit an INFO message but do NOT fail.
-
-```powershell
-if ($script:SkipInteractiveIntake) {
-  # BATCH — $env MUST be populated by Step 1.0 from intake.controlPlaneEnv (ISH-12 rename SESSION 18)
-  if ([string]::IsNullOrWhiteSpace($env)) {
-    Write-Error "[skill-config] Step 0.5a HARD STOP (COMP-14): batch-mode `$env is null/empty after Step 1.0 read of intake.controlPlaneEnv. This means the intake.json passed schema validation with a null/empty controlPlaneEnv field OR the Step 1.0 batch loader dropped it. Correct the intake and rerun. Silent-skip of once_per_env prereqs is FORBIDDEN in batch mode."
-    exit 1
-  }
-  if ($env -notin @('dev','demo','prod')) {
-    Write-Error "[skill-config] Step 0.5a HARD STOP (COMP-14): batch-mode `$env='$env' is not one of the valid values (dev|demo|prod) per intake.schema.json. spaarke-constants.yaml per_env_constants.$env lookup would return null; PLX-13 sanity check would emit a confusing 'containerTypeId is null' error. Correct the intake and rerun."
-    exit 1
-  }
-  Write-Host "  [PASS] Batch-mode env='$env' — Step 0.5b will iterate once_per_tenant + once_per_subscription + once_per_env prereqs" -ForegroundColor Green
-} else {
-  # INTERACTIVE — Step 1d assigns $env; null here is expected and safe
-  if ([string]::IsNullOrWhiteSpace($env)) {
-    Write-Host "  [INFO] Interactive-mode env not yet assigned (Step 1d has not run); Step 0.5b will skip once_per_env prereqs. They get re-checked at Step 2 client-side dry-run once `$env` is known." -ForegroundColor Cyan
-  } elseif ($env -notin @('dev','demo','prod')) {
-    Write-Error "[skill-config] Step 0.5a HARD STOP: `$env='$env' is not one of (dev|demo|prod). Correct the CLI arg and rerun."
-    exit 1
-  }
-}
-```
-
 #### 0.5b. Iterate the manifest
-
-Per SESSION 15 Wave 4 (SKILL-08 + PLX-01..14 + PRQ-06):
-- Substitution block extended from 2 tokens ({env}, {openAiRegion}) to the full set of ~15 tokens the recipes reference. Values are DERIVED (via `az` + Spaarke constants file) rather than hardcoded — this survives per-env drift.
-- Author-time regex sanity check (PLX-14): if a recipe references an unresolved `{token}`, the skill emits a targeted `[skill-config]` error identifying the missing substitution BEFORE invoking `bash -c` (turns silent literal-in-cli az errors into loud maintainer diagnostics).
-- Defense-in-depth expect-field classifier (PRQ-06): REMOVED. Belt-and-braces was well-intentioned but the belt was broken (only matched FIRST backticked token) and the braces made it worse (false-fails on prose-literal expects like `>= 25600000`). Assertion semantics now live in the recipe itself (per Wave 3 PRQ-03 assertion-recompute + task 206 exit-1 contract). Recipes exit 1 on real failure; classifier trust falls back to exit code.
-
-```powershell
-# --- Load Spaarke constants (PLX-13) ---
-$repoRoot = git rev-parse --show-toplevel
-$constantsPath = Join-Path $repoRoot 'scripts/provisioning-prereqs/spaarke-constants.yaml'
-$constants = Get-Content $constantsPath -Raw | ConvertFrom-Yaml
-
-# --- Derive runtime tokens (per PLX-01..07 substitution strategy) ---
-$graphAppId       = $constants.microsoft_constants.graphAppId
-$customerManagementGroupId = $constants.management_groups.customers.id   # T262 (PRQ-S-06) — tenant-wide, not per env
-$subId            = az account show --query id -o tsv   # the operator's current subscription — once_per_env / once_per_tenant checks only; the customer pass (Step 1e-ter) uses {stampSubscriptionId} (T228)
-$openAiRegionResolved = if ($openAiRegion) { $openAiRegion } else { 'westus3' }  # canonical Spaarke split per operator memory
-
-# Everything below needs $env. Interactive mode reaches Step 0.5 before Step 1d assigns it; once_per_env is
-# skipped then (see $scopesToCheck), so these stay $null and no az call runs with an empty resource name (T207).
-$l2UamiPrincipalId = $null; $l2UamiClientId = $null; $l2UamiSpId = $null; $sbNamespace = $null
-$artifactsStorage = $null; $acrId = $null; $kvResourceId = $null; $containerTypeId = $null; $adminDvUrl = $null
-if ($env) {
-  $l2UamiName        = $constants.name_templates.l2UamiName -replace '\{env\}', $env
-  $platformRg        = $constants.name_templates.platformResourceGroup -replace '\{env\}', $env
-  $l2UamiJson        = az identity show -g $platformRg -n $l2UamiName -o json | ConvertFrom-Json
-  $l2UamiPrincipalId = $l2UamiJson.principalId
-  $l2UamiClientId    = $l2UamiJson.clientId
-  $l2UamiSpId        = az ad sp show --id $l2UamiClientId --query id -o tsv
-  $sbNamespace       = $constants.name_templates.sbNamespace -replace '\{env\}', $env
-  $artifactsStorage  = az storage account show -g $platformRg -n ($constants.name_templates.artifactsStorageName -replace '\{env\}', $env) --query id -o tsv 2>$null
-  $acrId             = az acr show -g $platformRg -n ($constants.name_templates.acrName -replace '\{env\}', $env) --query id -o tsv 2>$null
-  $kvResourceId      = az keyvault show -g $platformRg -n ($constants.name_templates.platformKvName -replace '\{env\}', $env) --query id -o tsv 2>$null
-  $containerTypeId   = $constants.per_env_constants.$env.containerTypeId
-  $adminDvUrl        = $constants.name_templates.registryDvUrl.$env
-  # Sanity: per_env_constants that require operator population MUST be set
-  if (-not $containerTypeId) {
-    Write-Error "[skill-config] scripts/provisioning-prereqs/spaarke-constants.yaml per_env_constants.$env.containerTypeId is null. Operator MUST populate before Step 0.5 iteration. See docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md §2.4 for how to obtain the SPE container-type GUID."
-    exit 1
-  }
-}
-# Task 245b / 248: the L2 Worker must also carry this container type's OWNING app
-# (SpeContainerOptions__ContainerTypeOwners__{i}__ContainerTypeId / __OwnerAppId — Bicep param
-# speContainerTypeOwners). L2 signs in as the owning app through the federated identity credential on it that
-# trusts the Worker UAMI (MI-FIC, owner decision D16) — there is no certificate or secret to bootstrap. H0's
-# SpeOwnerCredential check rejects the run before anything is created with one of three Resumable codes:
-#   spe-owner-not-configured          → add the owner entry to the Worker configuration (not the intake);
-#   spe-owner-token-failed            → the owning app's FIC / consent (SPAARKE-SPE-TOPOLOGY-SETUP-RUNBOOK.md);
-#   spe-container-type-not-registered → register the container type as the owning app (same runbook).
-
-$manifestPath = Join-Path $repoRoot 'scripts/provisioning-prereqs/prereqs.yaml'
-$manifest = Get-Content $manifestPath -Raw | ConvertFrom-Yaml
-
-# `bash` on a Windows PowerShell PATH can be the WSL stub ("no installed distributions") — in System32 OR in
-# %LOCALAPPDATA%\Microsoft\WindowsApps (seen 2026-10-09). Prefer Git for Windows' own bash; elsewhere the PATH bash.
-$gitBash = Join-Path (Split-Path (Split-Path (Get-Command git).Source)) 'bin/bash.exe'
-$bashExe = if (Test-Path $gitBash) { $gitBash } else {
-  (Get-Command bash -All -ErrorAction SilentlyContinue | Where-Object { $_.Source -notmatch 'System32|WindowsApps' } | Select-Object -First 1).Source }
-if (-not $bashExe) { Write-Error "[skill-config] No usable bash (Git Bash on Windows; bash on Linux/macOS)."; exit 1 }
-$env:MSYS_NO_PATHCONV = '1'   # Git Bash rewrites a leading /subscriptions/... argument
-
-# The token map. Step 1e-ter adds the customer (intake) tokens and runs once_per_customer with the same function.
-$prereqTokens = [ordered]@{
-  env = $env; openAiRegion = $openAiRegionResolved; region = $openAiRegionResolved; subId = $subId; sub = $subId
-  l2UamiPrincipalId = $l2UamiPrincipalId; l2UamiClientId = $l2UamiClientId; l2UamiSpId = $l2UamiSpId
-  graphAppId = $graphAppId; customerManagementGroupId = $customerManagementGroupId; sbNamespace = $sbNamespace; artifactsStorageId = $artifactsStorage; acrId = $acrId
-  kvResourceId = $kvResourceId; containerTypeId = $containerTypeId; adminDvUrl = $adminDvUrl
-}
-# Tokens that must not be empty when a recipe uses them. artifactsStorageId / acrId / kvResourceId are exempt:
-# E-01..E-04 and E-10 report "not found" themselves.
-$mustResolveTokens = @('env','l2UamiPrincipalId','l2UamiClientId','l2UamiSpId','sbNamespace','containerTypeId','adminDvUrl','graphAppId','customerManagementGroupId',
-                       'customerId','stampSubscriptionId','stampEnvironment','dvUrl','exchangePolicyScopeGroupId','environmentSecurityGroupId',
-                       'customerWorkforceTenantIds')
-
-function Invoke-PrereqPass([string[]]$Scopes, $Tokens) {
-  $passResults = @()
-  foreach ($prereq in $manifest.prereqs) {
-    if ($prereq.scope -notin $Scopes) { continue }
-    # Retired entries keep their id (so references do not dangle) but carry no check_recipe;
-    # without this skip, `bash -c ""` exits 0 and a retired prerequisite reports as a passed check.
-    if ($prereq.status -eq 'retired') { continue }
-
-    # Full substitution chain (SKILL-08 + PLX-01..10; the customer tokens in Step 1e-ter). Missing token →
-    # literal-in-cli (caught by the PLX-14 check below).
-    $recipe = $prereq.check_recipe.cli
-    foreach ($t in $Tokens.Keys) { $recipe = $recipe -replace ('\{' + $t + '\}'), [string]$Tokens[$t] }
-
-    # --- PLX-14 author-time sanity check ---
-    # If any {token} literal survives substitution, the substitution chain is out of date vs the manifest.
-    if ($recipe -match '\{[a-zA-Z_][a-zA-Z_0-9]*\}') {
-      Write-Error "[skill-config] Recipe for $($prereq.id) references unresolved placeholder '$($Matches[0])'. Extend the token map at .claude/skills/provision-environment/SKILL.md § Step 0.5b with a derivation for this token, or verify it belongs in spaarke-constants.yaml per_env_constants.$env.*."
-      $passResults += @{ Id = $prereq.id; Name = $prereq.name; Scope = $prereq.scope; Passed = $false; ExitCode = -1; Output = "[skill-config] unresolved placeholder: $($Matches[0])"; Consequence = $prereq.consequence_of_absence; Remediation = $prereq.remediation }
-      continue
-    }
-    # A token that resolved to NOTHING is as bad as one left literal: `az ... -n ""` fails cryptically or, worse,
-    # matches everything (T207).
-    $emptyTok = $mustResolveTokens | Where-Object { $Tokens.Contains($_) -and -not $Tokens[$_] -and $prereq.check_recipe.cli -match ('\{' + $_ + '\}') } | Select-Object -First 1
-    if ($emptyTok) {
-      Write-Error "[skill-config] Recipe for $($prereq.id) uses {$emptyTok}, which resolved to an empty value."
-      $passResults += @{ Id = $prereq.id; Name = $prereq.name; Scope = $prereq.scope; Passed = $false; ExitCode = -1; Output = "[skill-config] empty token: $emptyTok"; Consequence = $prereq.consequence_of_absence; Remediation = $prereq.remediation }
-      continue
-    }
-
-    Write-Host "  [CHECK] $($prereq.id) $($prereq.name)" -ForegroundColor Yellow
-
-    # Run the recipe via `bash -c` (recipes use for/if/exit shell syntax that Invoke-Expression does not handle).
-    # PASS/FAIL SIGNAL IS THE RECIPE'S EXIT CODE (not output shape). Recipes MUST explicitly `exit 1` on any
-    # failure condition (task 206 contract; validate.ps1 lints it). Silent empty output never passes.
-    $output = & $bashExe -c $recipe 2>&1 | Out-String
-    $exitCode = $LASTEXITCODE
-
-    $passResults += @{
-      Id = $prereq.id; Name = $prereq.name; Scope = $prereq.scope; Passed = ($exitCode -eq 0); ExitCode = $exitCode
-      Output = $output.Trim(); Consequence = $prereq.consequence_of_absence; Remediation = $prereq.remediation
-    }
-  }
-  return ,$passResults
-}
-
-# Determine which scopes are checkable this early
-$scopesToCheck = @('once_per_tenant', 'once_per_subscription')
-if ($env) { $scopesToCheck += 'once_per_env' }  # $env from arg or batch intake
-# once_per_customer needs intake values ({customerId}, {stampSubscriptionId}, {dvUrl}, ...): Step 1e-ter runs it.
-
-$results = Invoke-PrereqPass -Scopes $scopesToCheck -Tokens $prereqTokens
-```
-
-**Recipe author contract** (BINDING for every entry in `prereqs.yaml`):
-- Recipe MUST explicitly `exit 1` on any failure condition it detects internally (empty query result, unexpected value, missing account, wrong role, wrong setting, wrong region, wrong pin, etc.). Wave 3 SESSION 15 applied this contract across every recipe per task 206 + PRQ-03.
-- Recipe MUST NOT rely on the classifier to interpret empty output as failure. Wave 4 SESSION 15 REMOVED the defense-in-depth expect-field classifier (PRQ-06) — assertion semantics live in the recipe itself; classifier trust falls back to exit code.
-- `check_recipe.expect` is a HUMAN-readable description of what success looks like — no longer machine-enforced. Ambiguous prose expects are fine.
-- Multi-line shell scripts (`for/if/echo/exit`) are supported natively via the `bash -c` wrapper.
-- **Placeholders currently substituted** (SKILL-08 + PLX-01..14 SESSION 15 extension; `{bffAppServiceId}` + `{bffAppId}` removed by T227a — there is no shared BFF):
-  - Runtime-derived from az: `{subId}`, `{sub}`, `{l2UamiPrincipalId}`, `{l2UamiClientId}`, `{l2UamiSpId}`, `{artifactsStorageId}`, `{acrId}`, `{kvResourceId}`
-  - Interpolated from name_templates: `{sbNamespace}`
-  - Loaded from Spaarke constants file: `{graphAppId}` (invariant Microsoft), `{containerTypeId}` (per_env populated by operator), `{adminDvUrl}` (per_env template), `{customerManagementGroupId}` (management_groups.customers.id — tenant-wide, T262)
-  - Session/intake variables: `{env}`, `{openAiRegion}`, `{region}` (aliased to openAiRegion)
-  - Intake tokens `{customerId}`, `{stampSubscriptionId}`, `{stampEnvironment}`, `{dvUrl}`, `{exchangePolicyScopeGroupId}`, `{environmentSecurityGroupId}`, `{customerWorkforceTenantIds}`, `{customerOutboundB2BAttested}` (PRQ-C-14; never in `$mustResolveTokens` — `false` is a valid value) are `availability: customer` in `context-defaults.*.json` and are substituted only by the customer pass (Step 1e-ter, `once_per_customer`).
-- **PLX-14 author-time sanity check**: adding a new placeholder to `prereqs.yaml` REQUIRES extending the substitution chain in this section AND (if per_env or invariant) adding to `spaarke-constants.yaml`. If you forget, Step 0.5b emits `[skill-config] unresolved placeholder` and HARD STOPs before invoking bash — targeted diagnostic, no cryptic az CLI parse error.
-
-#### 0.5c. SPE topology verify — HARD STOP on missing owning-app / container-type (added 2026-08-30 task 213.6; BFF-app checks removed by T227a)
-
-Per **[SPAARKE-SPE-CONTAINER-TYPE-TOPOLOGY.md](../../../docs/architecture/SPAARKE-SPE-CONTAINER-TYPE-TOPOLOGY.md) §3A** (owner-attested authoritative 2026-08-30), two Entra + SPE artifacts MUST exist BEFORE any customer dispatch can proceed:
-
-1. **Owning app-reg** — permanent 1:1 with container-type per topology doc §R1. Registered by [`Register-EntraAppRegistrations.ps1 -CreateOwningApp <tier>`](../../../scripts/Register-EntraAppRegistrations.ps1) per task 213.4, OR manually per [SPAARKE-SPE-TOPOLOGY-SETUP-RUNBOOK.md Step 1](../../../docs/guides/SPAARKE-SPE-TOPOLOGY-SETUP-RUNBOOK.md#step-1--register-the-owning-app-reg-entra-single-tenant).
-2. **Container-type** — 1 of 25 tenant-cap per §R2. Created via delegated flow (SPE Admin app / VS Code extension / SharePoint admin center) per §R5; app-only 403 per §7. Runbook step 3.
-
-There is **no shared BFF app-reg** to check (D-12/D-13, T227a): each customer's BFF app registration is created by **H3** during the run, and **H8** grants it and the stamp UAMI access to the container-type registration (T227b). The registration itself is verified by H0's `SpeOwnerCredential` check, which signs in as the owning app — the operator's Azure CLI token is not consented for registration reads.
-
-Step 0.5c verifies both exist BEFORE Step 1 intake fires. Each check HARD STOPs on failure with actionable message pointing at the runbook step to fix.
-
-```powershell
-# --- Prereq: $env is populated (Step 0.5a fail-fast guarantees this for batch mode) ---
-Write-Host "=== Step 0.5c SPE topology verify (task 213.6) ===" -ForegroundColor Cyan
-
-# --- (1) Owning app-reg exists ---
-# containerTypeId comes from the Step 0.5b constants block. The owning-app-reg id is
-# NOT stored in spaarke-constants.yaml — it's the app-reg that OWNS the container-type. Derive
-# it by querying the container-type's owningAppId (delegated Graph call).
-if ([string]::IsNullOrWhiteSpace($containerTypeId)) {
-  Write-Error "[skill-config] Step 0.5c HARD STOP (task 213.6): per_env_constants.$env.containerTypeId is null. Cannot verify SPE topology without a container-type GUID. Run docs/guides/SPAARKE-SPE-TOPOLOGY-SETUP-RUNBOOK.md steps 1-8 before dispatch, then re-run this skill."
-  exit 1
-}
-
-# --- (2) Container-type exists + is queryable (delegated Graph token; app-only 403 per §R5) ---
-$graphToken = az account get-access-token --resource https://graph.microsoft.com --query accessToken -o tsv 2>$null
-if ([string]::IsNullOrWhiteSpace($graphToken)) {
-  Write-Error "[skill-config] Step 0.5c HARD STOP: cannot acquire delegated Graph token for topology verify. Run 'az login' interactively and retry."
-  exit 1
-}
-$ctResp = curl -sS -o - -w "|%{http_code}" -H "Authorization: Bearer $graphToken" `
-  "https://graph.microsoft.com/v1.0/storage/fileStorage/containerTypes/$containerTypeId"
-$ctCode = ($ctResp -split '\|')[-1]
-$ctBody = ($ctResp -split "\|$ctCode$")[0]
-switch ($ctCode) {
-  '200' {
-    $ctJson = $ctBody | ConvertFrom-Json
-    if ($ctJson.id -ne $containerTypeId) {
-      Write-Error "[skill-config] Step 0.5c HARD STOP: container-type GET returned different id ($($ctJson.id) != $containerTypeId). Constants file may reference a stale/rotated GUID."
-      exit 1
-    }
-    Write-Host "  [PASS] Container-type $containerTypeId exists (name: $($ctJson.name), owningAppId: $($ctJson.owningAppId))" -ForegroundColor Green
-    $owningAppId = $ctJson.owningAppId
-  }
-  '404' {
-    Write-Error "[skill-config] Step 0.5c HARD STOP: container-type $containerTypeId does not exist in Spaarke tenant (HTTP 404). Either (a) it was never created — run runbook steps 3-4, OR (b) it was deleted (impossible for 'standard' classification per §R3) — reconcile constants + runbook to actual state, OR (c) 24h replication still in progress — retry in 30 min (empirically ~2 min per operator memory)."
-    exit 1
-  }
-  '403' {
-    # Observed 2026-10-03 (T248): the Azure CLI's delegated Graph token is NOT consented for container-type reads
-    # (FileStorageContainerType.Manage.All), so this GET returns 403 even for a Global Admin. Not a topology fault.
-    # H0's SpeOwnerCredential check proves the owning app + registration end to end with the real L2 credential,
-    # so the owning-app check (3) is skipped here rather than hard-stopping.
-    Write-Warning "  [SKIP] Container-type GET returned 403 to the operator's Azure CLI token (expected — not consented for container-type reads). Verify '$containerTypeId' in the SharePoint admin center if in doubt; H0's SpeOwnerCredential check verifies the owning app and the registration."
-    $owningAppId = $null
-  }
-  default {
-    Write-Error "[skill-config] Step 0.5c HARD STOP: container-type GET returned unexpected HTTP $ctCode. Body: $ctBody"
-    exit 1
-  }
-}
-
-# --- (3) Owning app-reg exists in Spaarke tenant (skipped when (2) could not read the container type) ---
-if ($owningAppId) {
-  $owningAppCheck = az ad app show --id $owningAppId --query displayName -o tsv 2>&1
-  if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($owningAppCheck)) {
-    Write-Error "[skill-config] Step 0.5c HARD STOP: container-type's owningAppId ($owningAppId) does NOT resolve to a live Entra app-reg. This is a broken topology state — the container-type references a deleted app-reg. Container-type binding is IMMUTABLE per §R1 — the container-type itself is now unusable. Escalate."
-    exit 1
-  }
-  Write-Host "  [PASS] Owning app-reg $owningAppId ($owningAppCheck) exists in Spaarke tenant" -ForegroundColor Green
-}
-
-Write-Host "  [ALL PASS] SPE topology verified — proceeding to Step 0.5d report" -ForegroundColor Green
-```
-
-**Escalation triggers for Step 0.5c**:
-- Container-type 404 that persists >30 min past creation → escalate; container-type creation may have failed silently.
-- Owning app-reg missing but container-type exists → BROKEN topology state (immutable binding to deleted app-reg per §R1); container-type is now unusable. Cannot recover without container-type replacement (which itself is undeletable for `standard` per §R3). This is an operator emergency — escalate.
-
-**BAT mode note**: Step 0.5c HARD STOPs in both interactive and batch mode. In batch mode, writes `runs/pre-dispatch-topology-gap.json` with the failure details for audit-trail parity with 0d BAT-04 pattern (implementation deferred to task 213.6.1 if needed — for now, the Write-Error path exits non-zero which batch dispatch treats as failed prereq).
-
 #### 0.5d. Report + HARD STOP
 
-Present results as a checklist. Any `Passed = $false` triggers HARD STOP with the id + name + recipe output (or exception message) + `consequence_of_absence` + `remediation` link pointing INTO [`docs/guides/PROVISIONING-PREREQUISITES.md`](../../docs/guides/PROVISIONING-PREREQUISITES.md) at the fragment matching the prereq id.
+`pwsh -NoProfile -File scripts/provisioning-prereqs/Invoke-PrereqPass.ps1 -SessionFile $S -Pass Env` — installs
+`powershell-yaml` if needed (0.5a), checks the env (COMP-14: batch HARD STOPs on a null/invalid env), derives the token
+map, runs `once_per_tenant` + `once_per_subscription` + `once_per_env` recipes under `bash -c` (0.5b) and prints the
+0.5d checklist (id, output, consequence, remediation link `PROVISIONING-PREREQUISITES.md#<id>`). Exit 1 → HARD STOP.
+**Recipe author contract** (BINDING for every `prereqs.yaml` entry): pass/fail is the recipe's EXIT CODE — it MUST
+`exit 1` on every failure it detects (task 206; `validate.ps1` lints it); `check_recipe.expect` is human-readable only;
+a new `{token}` REQUIRES extending the token map in `Invoke-PrereqPass.ps1` (and `spaarke-constants.yaml` /
+`context-defaults.*.json`) — otherwise the pass fails with `[skill-config] unresolved placeholder` (PLX-14) before bash runs.
 
-```
-EXTERNAL PREREQUISITES (from scripts/provisioning-prereqs/prereqs.yaml)
-  [PASS] PRQ-T-01 SPE container-type registered on Spaarke tenant
-  [PASS] PRQ-T-02 SPE container-type application permissions granted
-  [PASS] PRQ-S-01 Azure subscription billing-agreement type known
-  [PASS] PRQ-S-02 Azure subscription has a Support Plan (Basic or better)
-  [FAIL] PRQ-S-03 Resource-provider registration for required namespaces
-    Output:      Microsoft.CognitiveServices=NotRegistered
-    Consequence: F6 — az deployment sub create fails on unregistered provider even after az provider register reports success.
-    Remediation: az provider register --namespace Microsoft.CognitiveServices, then poll every 30s for 5 min. See docs/guides/PROVISIONING-PREREQUISITES.md#PRQ-S-03.
-    HARD STOP — resolve this prereq before proceeding.
-```
+#### 0.5c. SPE topology verify — HARD STOP on missing owning-app / container-type
 
-`-SkipStep0_5` flag bypasses iteration entirely (also settable via `"skipExternalPrereqs": true` in batch intake). Use ONLY when operator has manually verified every applicable prereq. The choice is recorded in Step 7 lessons-learned.md.
-
----
+`pwsh -NoProfile -File scripts/provisioning-prereqs/Test-SpeTopology.ps1 -SessionFile $S` — the owning app-reg and the
+container type must exist before any dispatch ([topology §3A](../../../docs/architecture/SPAARKE-SPE-CONTAINER-TYPE-TOPOLOGY.md)).
+A 403 on the container-type read is expected (CLI token not consented, T248) and skips the owning-app check — H0's
+`SpeOwnerCredential` check proves it. There is no shared BFF app-reg to check (H3 creates one per customer — T227a).
+Escalate: a 404 persisting > 30 min after creation; an owning app that no longer exists (the binding is immutable —
+the container type is unusable; operator emergency).
 
 ### Step 1: Interactive Intake
 
-Collect the 4 inputs the L2 REST API requires. If the operator passed `{customerId}` as a slash-command arg, pre-fill it. Otherwise ask.
+**In interactive mode, read [`references/intake-fields.md`](references/intake-fields.md) before asking the operator
+for intake values** — it holds each field's meaning, the operator-facing explanations and the full rules. Ask one
+field (or group) at a time, write it into `runs/{customerId}-intake.json`, and validate with
+`Test-ProvisionIntake.ps1 -SessionFile $S -Step <ids>` (exit 7 → ask again; exit 1 → HARD STOP). Batch mode runs the
+same script with `-Step all` and every failure is a HARD STOP.
 
-#### 1.0 Batch mode (`--batch <path.json>`) — added by task 203c per punch-list row A03
+#### 1.0 Batch mode (`--batch <path.json>`)
 
-For automated / non-interactive invocations. Consumes a JSON intake file validated against [`scripts/provisioning-prereqs/intake.schema.json`](../../scripts/provisioning-prereqs/intake.schema.json) (JSON Schema Draft 2020-12), pre-fills every field in 1a-1f, and skips all interactive prompts.
-
-```powershell
-# Skill invoked with --batch flag: $BatchIntakeFile is the JSON path
-if ($BatchIntakeFile) {
-  $repoRoot = git rev-parse --show-toplevel
-  $schemaPath = Join-Path $repoRoot 'scripts/provisioning-prereqs/intake.schema.json'
-
-  # Validate against schema with ajv-cli + ajv-formats via npx (no global install needed; same invocation as the
-  # `prereqs` job in ci-router.yml). ajv-formats makes `format: uuid` on tenantId / subscriptionId
-  # actually checked — the previous `--strict false` silently skipped it (fixed 2026-09-30).
-  # Fallback if npx is unavailable: any Draft 2020-12 validator that checks formats (e.g., check-jsonschema).
-  $validationOutput = & npx --yes -p ajv-cli@5 -p ajv-formats@3 ajv validate `
-    --spec=draft2020 -c ajv-formats `
-    -s $schemaPath -d $BatchIntakeFile 2>&1
-  if ($LASTEXITCODE -ne 0) {
-    Write-Error "Batch intake failed JSON Schema validation ($schemaPath):`n$validationOutput"
-    exit 1
-  }
-
-  # T245c / owner decision D15: the intake carries personal data (the H11 user list). It may live in the L2 run
-  # document, never in git — so refuse a file git would track. Inside a repo it must be ignored (`runs/*-intake.json`
-  # is); `git check-ignore` exits 1 for a tracked file and for an untracked-but-not-ignored one.
-  $intakeFullPath = (Resolve-Path $BatchIntakeFile).Path
-  $intakeDir = Split-Path -Parent $intakeFullPath
-  if ((git -C $intakeDir rev-parse --is-inside-work-tree 2>$null) -eq 'true') {
-    git -C $intakeDir check-ignore -q -- $intakeFullPath
-    if ($LASTEXITCODE -ne 0) {
-      Write-Error "[skill] Batch intake HARD STOP: '$BatchIntakeFile' is inside a git repository and not ignored, and it carries personal data (users). Keep it outside the repo, or name it runs/{customerId}-intake.json (ignored). If it is already tracked: git rm --cached it."
-      exit 1
-    }
-  }
-
-  # Pre-fill from validated intake (skips 1a-1e interactive prompts)
-  $intake         = Get-Content $BatchIntakeFile -Raw | ConvertFrom-Json -Depth 10
-  $customerId     = $intake.customerId
-  $displayName    = if ($intake.displayName) { $intake.displayName } else { $intake.customerId }  # T237 — full customer name, recorded once on the registry row (sprk_name)
-  $tenantId       = $intake.tenantId
-  $tenancyModel   = $intake.tenancyModel
-  $environment    = $intake.controlPlaneEnv    # ISH-12 rename SESSION 18 — intake field is `controlPlaneEnv`; local var stays `$environment` for existing downstream references
-  $env            = $environment                # alias — Step 0.5a fail-fast + Step 0c URL selector read $env
-  $profile        = $intake.profile
-  $environmentId  = $intake.environmentId       # may be null → 1f auto-creates
-  $subscriptionId = $intake.subscriptionId      # T228 — REQUIRED for every model: the customer's OWN subscription (PRQ-S-00)
-  $dataverseEnvUrl = $intake.dataverseEnvUrl    # T228 — REQUIRED: the Dataverse environment the operator created (PRQ-C-09)
-  $region         = $intake.region              # optional platform region (default westus2)
-  $openAiRegion   = $intake.openAiRegion        # optional AOAI region (default westus3); consumed by Step 4.0 openAiLocation mapping
-  $tier           = $intake.tier                # T229 — REQUIRED for every model: smb | enterprise | dedicated (Step 1b-ter)
-  $estimatedMonthlyUsd = $intake.estimatedMonthlyUsd  # T229 — REQUIRED: projected monthly Azure spend of the stamp (USD); Step 2 + Step 4.0 + H0 cost-envelope gate
-  $openAiMonthlyLimitUsd = $intake.openAiMonthlyLimitUsd  # T254 — OPTIONAL: monthly OpenAI spend limit (USD); absent = no limit (Step 1b-quater)
-  $solutionPackageType = $intake.solutionPackageType  # T218b — OPTIONAL: managed (default) | unmanaged on explicit instruction (Step 1b-quinquies)
-  $secureRecordSetupDryRun = $intake.secureRecordSetupDryRun  # T256 — OPTIONAL: true = H7b dry run (plan only; the run stops at H7b); absent/false = apply (Step 1b-sexies)
-  $notes          = $intake.notes               # optional
-  # T245c — operator intake H11 / H14 / H4 need (schema-required; POST /api/runs re-validates with the handlers' rules)
-  $identityPreset              = $intake.identityPreset               # B2BGuest | NativeAccount (exact case); Model1 → B2BGuest only (T232)
-  $environmentSecurityGroupId  = $intake.environmentSecurityGroupId   # T232 — B2BGuest: object id of sprk-{customerId}-users (PRQ-C-10)
-  $users                       = if ($null -ne $intake.users) { @($intake.users) } else { @() }   # sent as nonSecretParameters.usersJson (Step 4.0); never @($null) — its Count is 1
-  $exchangePolicyScopeGroupId  = $intake.exchangePolicyScopeGroupId   # created by the stamp tenant's Exchange admin (PRQ-C-08)
-  $customerWorkforceTenantIds  = if ($null -ne $intake.customerWorkforceTenantIds) { @($intake.customerWorkforceTenantIds) } else { @() }   # T255 — REQUIRED every model: the CUSTOMER's Entra tenant id(s) (PRQ-C-13); sent as nonSecretParameters.customerWorkforceTenantIds (Step 4.0)
-  $customerOutboundB2BAttested = [bool]$intake.customerOutboundB2BAttested   # PRQ-C-14 — skill-local customer attestation; NOT sent to L2
-  $communicationDefaultMailbox = $intake.communicationDefaultMailbox
-  $operatorUpn    = az ad signed-in-user show --query userPrincipalName -o tsv  # NEVER trust an operatorUpn field in the JSON (would risk NFR-11 spoof)
-  $script:SkipInteractiveIntake = $true         # gates 1a-1e prompts below
-  $script:SkipStep0_5 = [bool]$intake.skipExternalPrereqs  # honors batch opt-in
-
-  # --- BAT-01/BAT-03 confirmation attestation (SESSION 16) ---
-  # Interactive mode requires the literal phrase typed at Step 3.
-  # Batch mode requires the same phrase in intake.confirmationAcknowledgment (const in schema).
-  # Capture BOTH the phrase AND the intake SHA-256 hash for NFR-11 audit parity.
-  if ($intake.confirmationAcknowledgment -ne 'proceed with provisioning') {
-    Write-Error "[skill] Batch intake HARD STOP: intake.confirmationAcknowledgment MUST equal the literal 'proceed with provisioning' (batch equivalent of Step 3 interactive gate per wave-0-adr-note Decision 3 / BAT-03). Got: '$($intake.confirmationAcknowledgment)'."
-    exit 1
-  }
-  $confirmationPhrase = $intake.confirmationAcknowledgment
-  Write-Host "  [PASS] Confirmation attestation: '$confirmationPhrase' (SHA-256 of intake file captured at Step 4 for audit trail)" -ForegroundColor Green
-
-  # --- BAT-04..09 batch policy fields (SESSION 16 — schema landed Wave 6 commit dc77381f8) ---
-  # These are SKILL-LOCAL control-flow policies, NOT L2 payload. Defaults per schema:
-  $script:BatchMcpDisconnectPolicy   = if ($intake.mcpDisconnectPolicy)   { $intake.mcpDisconnectPolicy }   else { 'failFast' }             # BAT-04 → Step 0d
-  $script:BatchAcknowledgeUpgradeMode = [bool]$intake.acknowledgeUpgradeMode                                                                # BAT-05 → Step 1a
-  $script:BatchOnFailedPolicy        = if ($intake.onFailedPolicy)        { $intake.onFailedPolicy }        else { 'abandon' }              # BAT-07 → Step 4b Failed
-  $script:BatchOnQuarantinedPolicy   = if ($intake.onQuarantinedPolicy)   { $intake.onQuarantinedPolicy }   else { 'failFast' }             # BAT-07 → Step 4b Quarantined
-  $script:BatchOnManualGatePolicy    = if ($intake.onManualGatePolicy)    { $intake.onManualGatePolicy }    else { 'waitAndExit' }          # BAT-08 → Step 5a-d
-  $script:BatchPostmortemFile        = $intake.postmortemFile                                                                                # BAT-09 → Step 7b
-
-  # T229: there is no cost-overrun waiver (the former costEnvelopePolicy=warnAndProceed was the shared-trial tier's;
-  # every stamp is dedicated since D-12). An over-budget intake stops at Step 2 and, failing that, at H0.
-
-  Write-Host "Batch intake loaded from $BatchIntakeFile (schema-validated + batch policies bound)."
-}
-```
-
-**Semantics**: when `-BatchIntakeFile` is passed, sub-steps 1a-1e and 1e-bis are non-interactive (values already assigned from the validated JSON; a missing or invalid value is a HARD STOP — the schema refuses it, and 1e-bis re-checks it in case a fallback validator skipped a conditional rule). Sub-step 1f (environmentId auto-create via Dataverse MCP / `pac data create`) still runs when `intake.environmentId` was omitted or null. The `--batch` path also honors `intake.skipExternalPrereqs` as a batch-native `-SkipStep0_5` equivalent (see Step 0.5c) — recorded in Step 7 lessons-learned.md when set.
-
-Sample intake (see [`intake.schema.json`](../../scripts/provisioning-prereqs/intake.schema.json) `examples` block for full-fidelity sample):
-
-```json
-{
-  "customerId": "acme",
-  "tenantId": "a221a95e-6abc-4434-aecc-e48338a1b2f2",
-  "tenancyModel": "Model1",
-  "controlPlaneEnv": "dev",
-  "profile": "spaarke-hosted-model2",
-  "subscriptionId": "00000000-0000-0000-0000-000000000000",
-  "dataverseEnvUrl": "https://spaarke-acme.crm.dynamics.com/",
-  "region": "westus2",
-  "tier": "dedicated",
-  "estimatedMonthlyUsd": 900,
-  "confirmationAcknowledgment": "proceed with provisioning",
-  "identityPreset": "B2BGuest",
-  "users": [{ "firstName": "Ada", "lastName": "Lovelace", "email": "ada@acme.example", "companyName": "Acme" }],
-  "environmentSecurityGroupId": "6f1c2b3a-4d5e-4f60-8a7b-9c0d1e2f3a4b",
-  "customerWorkforceTenantIds": ["4b6f2c1e-8d3a-4f5b-9c7e-2a1d0e9f8b7c"],
-  "exchangePolicyScopeGroupId": "Spaarke-AppAccess-acme@spaarke.onmicrosoft.com",
-  "communicationDefaultMailbox": "acme@spaarke.onmicrosoft.com"
-}
-```
-
-The `confirmationAcknowledgment` literal is REQUIRED for batch dispatch (intake.schema.json `const` + top-level `required[]` — Bucket A HIGH#2 SESSION 18); a missing/wrong value hard-stops Step 1.0 (line 515-517). `tier` + `estimatedMonthlyUsd` are REQUIRED for every model (T229) — the schema, POST /api/runs and H0 all refuse a run without them; H0 refuses an estimate above the tier's ceiling, with no override.
-
-Interactive-mode operators skip this section entirely — proceed to 1a.
+`New-ProvisionSession.ps1 -Mode Batch -BatchIntakeFile <path> -Env <controlPlaneEnv>` validates the intake against
+`intake.schema.json` (ajv + ajv-formats via npx), refuses a file git would track (personal data — D15), requires
+`confirmationAcknowledgment` = `proceed with provisioning` (BAT-03), and binds the env, environmentId, skip flag and the
+BAT-04..09 policies. Every 1a–1e-bis prompt is then non-interactive; 1f still runs when `environmentId` is absent.
 
 #### 1a. `customerId` (required)
+The customerId standard `^[a-z][a-z0-9]{2,7}$` — no hyphens, not `platform`/`shared`/`byok`; abbreviate once, here.
+Validate (`-Step 1a`), then the **uniqueness / upgrade probe**: `mcp__dataverse__read_query` on
+`sprk_dataverseenvironment` filtered by `sprk_customerid` (attributes `sprk_dataverseenvironmentid`,
+`sprk_provisionedon`, `sprk_setupstatus`), then `Invoke-RegistryStep.ps1 -SessionFile $S -Action Probe -ProbeJson '<rows>'`
+(MCP down → `-UseWebApi`). `REGISTRY=new` → fresh run. A row with `sprk_provisionedon` → UPGRADE: interactive asks
+"Continue as UPGRADE run? (yes/no)" (exit 7 → ask, rerun with `-OperatorAnswer`); batch needs
+`acknowledgeUpgradeMode` (BAT-05). `REGISTRY=in-progress` → Fallback F1 recovery path.
 
-- Format: **the customerId standard** `^[a-z][a-z0-9]{2,7}$` — 3-8 lowercase letters and digits, starting with a
-  letter, **no hyphens** ([`AZURE-RESOURCE-NAMING-CONVENTION.md` § "The customerId standard"](../../../docs/architecture/AZURE-RESOURCE-NAMING-CONVENTION.md)).
-  Max 8 because `customer.bicep`'s Key Vault name `sprk-{customerId}-{env}-kv` must fit 24 characters without
-  ending in a hyphen; no hyphens because the storage-account name strips them (`acme-x` and `acmex` would share
-  one account). Neither Bicep nor the Dataverse column can enforce the character rule — **this step and
-  `POST /api/runs` are the enforcement points.**
-- **Abbreviate once, here.** A customer name longer than 8 characters is shortened by the operator now
-  (`northwind` → `nwind`) and the full name goes in `displayName` (1a-bis). Nothing downstream re-derives the id.
-- Validate before anything else in Step 1 (both modes). Case-sensitive (`-cmatch`) and anchored with `\z`, so
-  `Acme` and a value with a trailing newline are rejected rather than repaired:
+#### 1a-bis. `displayName` · 1b. `tenantId` · 1b-bis. `subscriptionId` and `dataverseEnvUrl` · 1b-ter. `tier` and `estimatedMonthlyUsd` · 1b-quater. `openAiMonthlyLimitUsd` · 1b-quinquies. `solutionPackageType` · 1b-sexies. `secureRecordSetupDryRun` · 1c. `tenancyModel` · 1d. `environment` · 1e. `profile`
 
-  ```powershell
-  # T237 (owner D10): reject, never repair — no trimming, lower-casing or auto-abbreviation.
-  # Reserved ids name NON-customer resource groups (rg-spaarke-platform-{env} hosts the BFF + L2).
-  $reservedIds = @('platform', 'shared', 'byok')
-  if (-not $script:SkipInteractiveIntake -and [string]::IsNullOrEmpty($customerId)) {
-    $customerId = Read-Host 'customerId (3-8 lowercase letters/digits, starts with a letter)'
-  }
-  while (($customerId -cnotmatch '^[a-z][a-z0-9]{2,7}\z') -or ($customerId -cin $reservedIds)) {
-    $why = if ($customerId -cin $reservedIds) { "is reserved (names a non-customer resource group)" } else { "does not match the customerId standard ^[a-z][a-z0-9]{2,7}`$ (3-8 lowercase letters/digits, starts with a letter; no hyphens)" }
-    if ($script:SkipInteractiveIntake) {
-      Write-Error "[skill] Batch HARD STOP: customerId '$customerId' $why. Fix the intake file (the schema should have caught this)."
-      exit 1
-    }
-    Write-Host "customerId '$customerId' $why." -ForegroundColor Yellow
-    Write-Host "Abbreviate a longer customer name (northwind -> nwind); the full name is captured next as displayName."
-    $customerId = Read-Host 'customerId'
-  }
-  ```
-- **Uniqueness / upgrade detection** (per Wave 0 Decision 2 / SKILL-02 fix, SESSION 15): probe the `sprk_dataverseenvironment` registry via Dataverse MCP alt-key filter on `sprk_customerid`. Earlier drafts of this skill probed a non-existent `GET /api/runs?customerId=` L2 endpoint (that endpoint has never existed — `RunsEndpoints.cs` maps only 7 routes, none of which is list-by-customerId).
-
-  ```powershell
-  # Registry probe — Dataverse MCP alt-key path per ADR-044 canonical registry
-  $probe = mcp__dataverse__read_query(query = @"
-    <fetch top="1">
-      <entity name="sprk_dataverseenvironment">
-        <attribute name="sprk_dataverseenvironmentid" />
-        <attribute name="sprk_provisionedon" />
-        <attribute name="sprk_setupstatus" />
-        <filter><condition attribute="sprk_customerid" operator="eq" value="$customerId" /></filter>
-      </entity>
-    </fetch>
-"@)
-
-  if ($probe.rows.Count -eq 0) {
-    # Fresh customerId — proceed to Step 1f placeholder-create
-    Write-Host "customerId '$customerId' is new (fresh provisioning)"
-  } elseif ($probe.rows[0].sprk_provisionedon -ne $null) {
-    # Prior successful run — upgrade-mode. BAT-05 branch:
-    if ($script:SkipInteractiveIntake) {
-      # BATCH MODE — honor $script:BatchAcknowledgeUpgradeMode (SESSION 16)
-      if (-not $script:BatchAcknowledgeUpgradeMode) {
-        $diag = @{
-          check       = 'upgrade-mode-detection'
-          customerId  = $customerId
-          detected    = (Get-Date -Format 'o')
-          reason      = "Prior sprk_provisionedon=$($probe.rows[0].sprk_provisionedon) row exists AND intake.acknowledgeUpgradeMode is false"
-          remedy      = "Set intake.acknowledgeUpgradeMode=true if the upgrade path is intended (see design.md §14A upgrade model), OR change customerId to a fresh identifier"
-        } | ConvertTo-Json -Depth 4
-        $diagPath = "runs/pre-dispatch-upgrade-required.json"
-        New-Item -Path (Split-Path $diagPath) -ItemType Directory -Force -ErrorAction SilentlyContinue | Out-Null
-        Set-Content -Path $diagPath -Value $diag
-        Write-Error "[skill] Batch HARD STOP (BAT-05): customerId '$customerId' has prior successful provisioning but intake.acknowledgeUpgradeMode is false. Diagnostic: $diagPath"
-        exit 1
-      }
-      Write-Host "  [BATCH] Upgrade-mode acknowledged in intake — proceeding as UPGRADE run against existing environmentId=$($probe.rows[0].sprk_dataverseenvironmentid)"
-    } else {
-      # INTERACTIVE MODE
-      Write-Host "customerId '$customerId' has a prior successful run (sprk_provisionedon=$($probe.rows[0].sprk_provisionedon)). Continue as UPGRADE run? (yes/no)"
-      $answer = Read-Host
-      if ($answer -ne 'yes') { Write-Error 'Aborted at Step 1a upgrade-mode confirmation prompt.'; exit 1 }
-    }
-    $environmentId = $probe.rows[0].sprk_dataverseenvironmentid
-    $script:IsUpgradeRun = $true
-  } else {
-    # Prior halt / quarantine / partial (placeholder exists, sprk_provisionedon still null) — recover
-    Write-Host "customerId '$customerId' has a prior in-progress row (setupstatus=$($probe.rows[0].sprk_setupstatus)). See Fallback Matrix F1 recovery path."
-  }
-  ```
-
-  Fallback if Dataverse MCP disconnected: `pac data query --entity sprk_dataverseenvironment --filter "sprk_customerid eq '$customerId'"` OR raw Web API GET with operator's `az` token. See Fallback Matrix F1.
-- If reused (upgrade-mode) → per FR-34 §14A upgrade model; operator MUST confirm intent
-- If new → this is a fresh-provisioning run (proceed to Step 1f placeholder-create)
-
-#### 1a-bis. `displayName` (the customer's full name — also its Dataverse business unit)
-
-- The customer's full name, e.g. `Northwind Traders`. Written to `sprk_dataverseenvironment.sprk_name` next to
-  `sprk_customerid` by the Step 1f placeholder create, so the id ↔ name decision is **recorded once on the
-  registry row** (T237 / INCOMING-CUSTOMERID-STANDARD §3.3). Defaults to `customerId`.
-- **T259 (ISS-010, owner 2026-10-09):** also sent to `POST /api/runs` (Step 4.0), where it is REQUIRED — H10 creates the
-  customer's own business unit with this name directly under the Dataverse root (a sibling of `Secure Record`) and puts
-  the BFF's application users and every guest in it. Rule (same at `POST /api/runs`, `CustomerBusinessUnitIntake`):
-  1–160 characters, no leading/trailing whitespace, no control character, never `Secure Record` in any case.
-- Batch mode: `intake.displayName` (pre-filled above). Interactive mode:
-
-  ```powershell
-  if (-not $script:SkipInteractiveIntake) {
-    $displayName = Read-Host "displayName (customer's full name) [$customerId]"
-    if ([string]::IsNullOrWhiteSpace($displayName)) { $displayName = $customerId }
-    while ($displayName.Length -gt 160 -or $displayName -ne $displayName.Trim() -or $displayName -match '\p{Cc}' -or $displayName -ieq 'Secure Record') {
-      $displayName = Read-Host "displayName must be 1-160 characters, no leading/trailing space or control character, not 'Secure Record' [$customerId]"
-      if ([string]::IsNullOrWhiteSpace($displayName)) { $displayName = $customerId }
-    }
-  }
-  ```
-
-#### 1b. `tenantId` (required per I1 invariant — NEVER default)
-
-- Format: RFC 4122 GUID
-- The customer's Entra tenant ID (Model 1: Spaarke's tenant, where every dedicated stamp lives; Model 2 — out of scope now — would be the customer's tenant)
-- Do NOT default; do NOT fall back to `az account show` — the operator MUST supply this explicitly. This enforces the §4D I1 tenant-isolation invariant (FR-28).
-
-#### 1b-bis. `subscriptionId` and `dataverseEnvUrl` (required for every model — T228)
-
-The operator creates both BEFORE the run; L2 creates neither and nothing defaults them (owner D4 / Q1; ADR-027).
-
-- `subscriptionId` — the customer's OWN Azure subscription (PRQ-S-00), with the L2 identity granted **Owner** on it
-  (PRQ-S-04 — `infrastructure/bicep/modules/controlplane-subscription-rbac.bicep`). Never another customer's, never the
-  platform subscription, never `az account show`. H1 refuses a subscription in another tenant or one holding another
-  customer's `rg-spaarke-*` group.
-- `dataverseEnvUrl` — the environment the operator created (PRQ-C-09), e.g. `https://spaarke-acme.crm.dynamics.com/`.
-  Its domain MUST be `spaarke-{customerId}` or `spaarke-{customerId}-{environmentName}` — POST /api/runs and H5 refuse
-  anything else (the guard against adopting another customer's environment). The L2 Worker identity must be its System
-  Administrator application user, or H5 stops with `worker-not-app-user`.
-
-Reject a blank or malformed value here, before Step 2:
-
-```powershell
-if (-not ($subscriptionId -as [guid])) { Write-Error "❌ subscriptionId must be the GUID of the customer's own subscription (PRQ-S-00)."; exit 1 }
-if ($dataverseEnvUrl -notmatch "^https://spaarke-$customerId(-[a-z]+)?\.crm[0-9]*\.dynamics\.com/?$") {
-  Write-Error "❌ dataverseEnvUrl must be https://spaarke-$customerId[-{environmentName}].crm[N].dynamics.com/ — the environment the operator created (PRQ-C-09)."
-  exit 1
-}
-```
-
-#### 1b-ter. `tier` and `estimatedMonthlyUsd` (required for every model — T229)
-
-Every run deploys ONE dedicated stamp (`customer.bicep`) into the customer's own subscription — Model 1 paid by Spaarke,
-Model 2 by the customer — so the cost check applies to both models and has no override (the shared-trial tier and its
-`warnAndProceed` waiver are retired).
-
-- `estimatedMonthlyUsd` — the stamp's projected monthly Azure spend in USD (digits, optional `.`). An empty stamp costs
-  about **$340/month fixed** (2026-10-06 list prices, westus2: App Service S1 Linux $58, AI Search S1 $245, Managed Redis
-  B0 with high availability $23, Service Bus Standard $10); add the customer's expected OpenAI, Document Intelligence,
-  Content Safety, Cosmos DB, storage and log volume.
-- `tier` — the budget class whose monthly ceiling covers that estimate: `smb` ($700), `enterprise` ($2,500) or
-  `dedicated` ($5,000) (`H0Options.DefaultCeilingsUsd`; exact case).
-
-```powershell
-if (-not $script:SkipInteractiveIntake) {
-  $estimatedMonthlyUsd = Read-Host "Projected monthly Azure spend of the stamp in USD (empty stamp ≈ 340 + usage)"
-  $tier = Read-Host "Cost tier: smb (≤ 700) | enterprise (≤ 2500) | dedicated (≤ 5000)"
-}
-if ($tier -cnotin @('smb', 'enterprise', 'dedicated')) { Write-Error "❌ tier must be smb | enterprise | dedicated (exact case; T229)."; exit 1 }
-if ("$estimatedMonthlyUsd" -notmatch '^[0-9]+(\.[0-9]+)?$') { Write-Error "❌ estimatedMonthlyUsd must be a plain non-negative number of USD (e.g. 450)."; exit 1 }
-```
-
-#### 1b-quater. `openAiMonthlyLimitUsd` (OPTIONAL — T254, owner G37)
-
-No limit is the default: "we do not want to prevent a customer from activating and working, but we do want to have the
-ability to have a cap if necessary." Ask only whether the customer should have one; leave it empty unless the owner or
-the customer's agreement calls for a cap. When set, H4b writes `AiSpendLimit__MonthlyLimitUsd` on both slots and the
-stamp's BFF answers model calls with HTTP 429 (Retry-After = next UTC month start) once its list-price estimate of the
-month's OpenAI spend reaches it. It never blocks provisioning. Change or remove it later with
-`scripts/Set-AiSpendLimit.ps1` (guide §3.2b) — not by re-running provisioning. On an UPGRADE run, leave it out (the
-setting is then left alone) or send the CURRENT value: a re-run that carries it re-applies it, overriding a later script
-change or re-adding a removed limit.
-
-```powershell
-if (-not $script:SkipInteractiveIntake) {
-  $openAiMonthlyLimitUsd = Read-Host "OPTIONAL monthly Azure OpenAI spend limit in USD (Enter = no limit)"
-}
-if (-not [string]::IsNullOrWhiteSpace("$openAiMonthlyLimitUsd")) {
-  # Same rule as L2's OpenAiMonthlyLimitRule: plain decimal, > 0, <= 1000000. Omit for no limit — never 0.
-  $parsedLimit = [decimal]0
-  if ("$openAiMonthlyLimitUsd" -notmatch '^[0-9]+(\.[0-9]+)?$' -or
-      -not [decimal]::TryParse("$openAiMonthlyLimitUsd", [System.Globalization.NumberStyles]::AllowDecimalPoint, [cultureinfo]::InvariantCulture, [ref]$parsedLimit) -or
-      $parsedLimit -le 0 -or $parsedLimit -gt 1000000) {
-    Write-Error "❌ openAiMonthlyLimitUsd must be a plain number of USD greater than 0 and at most 1000000 (e.g. 500), or empty for no limit."; exit 1
-  }
-}
-```
-
-#### 1b-quinquies. `solutionPackageType` (OPTIONAL — T218b, owner D8)
-
-Customer environments receive the Spaarke package (`SpaarkeMaster`) **managed**. Do not ask; set `unmanaged` only when
-the owner explicitly instructs it for this environment (ADR-027 §3, amended 2026-10-07). H6 refuses to switch an
-environment that already holds the other type, so on an UPGRADE run send the type the environment already has.
-
-```powershell
-if (-not [string]::IsNullOrWhiteSpace("$solutionPackageType") -and "$solutionPackageType" -cnotin @('managed','unmanaged')) {
-  Write-Error "❌ solutionPackageType must be managed or unmanaged (exact case), or omitted for managed."; exit 1
-}
-```
-
-#### 1b-sexies. `secureRecordSetupDryRun` (OPTIONAL — T256)
-
-Do not ask. `true` only when the operator asks to see what H7b (Secure Record setup) would change: H7b reads everything,
-writes nothing, records the plan in gate `h7b-secure-setup-plan`, and the run stops at H7b with `secure_setup.dry_run`
-(Failed — expected). Apply with a new run without it.
-
-```powershell
-if ($null -ne $secureRecordSetupDryRun -and $secureRecordSetupDryRun -isnot [bool]) {
-  Write-Error "❌ secureRecordSetupDryRun must be true or false, or omitted."; exit 1
-}
-```
-
-#### 1c. `tenancyModel` (required)
-
-Choice:
-
-> 🔴 **AMENDED 2026-09-28 (owner decision D-12).** Both models are **dedicated stamps** — dedicated
-> Dataverse environment, dedicated Azure resources, and **one Azure subscription per customer**. They differ
-> **only** in which **Azure tenant** owns that subscription. The shared trial/SMB tier is **RETIRED** (it was
-> documented and partly built in Bicep but **never implemented in the engine**, which always made one Dataverse
-> environment per run — since T228 H5 *adopts* the one the operator created). The BFF **Entra app registration is per customer in both
-> models** (D-13, BINDING).
->
-> ⚠️ **Literals (T223/T224):** L2 and `intake.schema.json` accept exactly `Model1` | `Model2`
-> (case-sensitive). The old `Model1Shared` / `Model2Dedicated` spellings are a 400. L2 pairs `Model1` ↔
-> `spaarke-hosted-model2` and `Model2` ↔ `customer-owned-model2` (task 225b); any other pair is a 400
-> `tenancy-profile-invalid`.
-
-- `Model1` — Spaarke-hosted dedicated stamp (Spaarke's tenant); profile `spaarke-hosted-model2`. Deployable since
-  **T228**: the customer's own subscription (PRQ-S-00 + PRQ-S-04) and Dataverse environment (PRQ-C-09) exist first
-  (Step 1b-bis), and H2a deploys the same `customer` template as Model 2.
-- `Model2` — customer-hosted dedicated stamp (customer's tenant); profile `customer-owned-model2`; Azure
-  Lighthouse required. Out of scope for the current project (owner, 2026-09-30).
-
-Explain the trade-off to the operator if they ask.
-
-#### 1d. `environment` (required)
-
-Choice: `dev` / `demo` / `prod` — determines which L2 API base + which Bicep parameter file is used (session-level; NOT the L2 `profile` enum below).
-
-#### 1e. `profile` (required — L2 API enum, per punch list row A09 / DS-5 c6-1)
-
-Choice — MUST be the profile paired with the Step 1c `tenancyModel` (two literal strings; any drift → L2 400):
-
-- ~~`spaarke-hosted-model1-trial`~~ — 🔴 **RETIRED (D-12).** L2 refuses it as an unknown profile (400
-  `tenancy-profile-invalid`).
-- `spaarke-hosted-model2` — pair with **`Model1`**: a dedicated stamp in the customer's **own Azure
-  subscription**, inside **Spaarke's** Azure tenant. Lighthouse: **not needed**. H0.5 consent: **not needed**.
-- `customer-owned-model2` — pair with **`Model2`**: the same dedicated stamp in the **customer's own Azure
-  tenant**. Lighthouse: **required**. H0.5 consent: **required**.
-
-⚠️ **The profile names still encode the retired vocabulary.** They are the literals the live L2 API accepts,
-so they are correct to *send* until the enum migration (D-12 §6 items 2–3) renames them to
-`spaarke-tenant-model1` / `customer-tenant-model2`. Do not "fix" them locally — L2 rejects unknown values
-with a 400.
-
-**Reject any other value BEFORE POST /api/runs**. Do not silently substitute or ask the operator to "just try one" — surface the failure with the exact enum choices.
-
-```powershell
-# The retired-profile stop runs FIRST so its specific message wins over the generic enum check.
-if ($profile -eq 'spaarke-hosted-model1-trial') {
-  Write-Error "❌ Profile 'spaarke-hosted-model1-trial' is RETIRED (owner decision D-12, 2026-09-28). The shared trial/SMB tier no longer exists and was never implemented in the engine. Use 'spaarke-hosted-model2' (pairs with Model1, Spaarke's Azure tenant) or 'customer-owned-model2' (pairs with Model2, customer's Azure tenant)."
-  # HARD STOP — do not proceed to Step 2
-  exit 1
-}
-$validProfiles = @('spaarke-hosted-model2', 'customer-owned-model2')
-if ($profile -notin $validProfiles) {
-  Write-Error "❌ Invalid profile '$profile'. Must be one of: $($validProfiles -join ', '). Per DS-5 c6-1: L2 API rejects any other value with 400."
-  # HARD STOP — do not proceed to Step 2
-  exit 1
-}
-if ($tenancyModel -cnotin @('Model1', 'Model2')) {
-  Write-Error "❌ tenancyModel '$tenancyModel' must be exactly 'Model1' or 'Model2' (case-sensitive — L2 returns 400 otherwise)."
-  # HARD STOP — do not proceed to Step 2
-  exit 1
-}
-$requiredProfile = @{ 'Model1' = 'spaarke-hosted-model2'; 'Model2' = 'customer-owned-model2' }[$tenancyModel]
-if ($profile -ne $requiredProfile) {
-  Write-Error "❌ tenancyModel '$tenancyModel' pairs only with profile '$requiredProfile' (received '$profile'). L2 returns 400 tenancy-profile-invalid."
-  # HARD STOP — do not proceed to Step 2
-  exit 1
-}
-```
-
-Cross-check: `tenancyModel` × `profile` MUST be consistent: `Model1` ↔ `spaarke-hosted-model2`, `Model2` ↔ `customer-owned-model2` (enforced above). Mismatch → L2 400 `tenancy-profile-invalid`.
-
-Since task 225b the pairing is **1:1** — H1 no longer sees a Spaarke-owned subscription under `Model2`, so the P-2 defect (D-12 §5: Lighthouse demanded for Spaarke-owned subscriptions) is closed at intake. H1 maps `Model1` to Spaarke-owned (no Lighthouse).
+Validated by `-Step 1a-bis,1b,1b-bis,1b-ter,1b-quater,1b-quinquies,1b-sexies,1e`. Hard rules: `tenantId` is NEVER
+defaulted (I1). `subscriptionId` is the customer's OWN subscription and `dataverseEnvUrl` the environment the operator
+created — never `az account show` (T228). Do not ask about `solutionPackageType` (managed unless the owner says
+unmanaged) or `secureRecordSetupDryRun` (only on request). `tenancyModel` ↔ `profile` are 1:1: `Model1` ↔
+`spaarke-hosted-model2`, `Model2` ↔ `customer-owned-model2` (Model 2 is out of scope now); `spaarke-hosted-model1-trial`
+is RETIRED — never "fix" the profile literals. 1d (`dev`/`demo`/`prod`) is the session env: confirm it matches Step 0
+(`Set-ProvisionSession.ps1 -Env`).
 
 #### 1e-bis. Users, Exchange scope group, Graph resources, default mailbox (required — T245c)
 
-Five values only the operator knows. `POST /api/runs` refuses a run without them, using **the handlers' own rules
-and codes** (H11's through the same `UserProvisioningIntake` code H11 runs), so collect them correctly here — intake
-is fixed once the run exists. This step runs **before 1f**, so a bad value stops the skill before it writes the
-registry placeholder (the same "validate everything, then write" order `POST /api/runs` follows):
+`-Step 1e-bis` — runs BEFORE 1f so a bad value stops the skill before it writes the registry. Model 1 takes only
+`B2BGuest`; B2BGuest also checks, live and read-only as the operator, the PRQ-C-14 attestation, the
+`sprk-{customerId}-users` group (PRQ-C-10, including that it is the group SET ON the environment), guest access
+(PRQ-C-12) and PAYG billing on the stamp subscription (PRQ-C-11). **Personal data**: never print or commit the user
+list; `provisioning-runs/{run}/intake.md` records the user COUNT only.
 
-| Value | Read by | Rule (same at `POST /api/runs`) |
-|---|---|---|
-| `identityPreset` | H11 | `B2BGuest` (invite guests; consent gate) or `NativeAccount` (create users in the stamp's tenant) — exact case. **`Model1` takes only `B2BGuest`** (owner D2, T232 — `userprov-model1-requires-b2b-guest`); this step sets it for a Model 1 run |
-| `environmentSecurityGroupId` | H11 | **B2BGuest (every Model 1 run)**: object id (GUID) of the environment's security group `sprk-{customerId}-users`, created by the operator and set on the environment before the run (`PRQ-C-10`). H11 adds each redeemed guest to it, then makes the guest a Dataverse user with the Spaarke role — the group keeps other customers' guests out of this environment. The environment must also allow guests (`PRQ-C-12`) and be linked to a pay-as-you-go billing policy on the stamp subscription (`PRQ-C-11` — Spaarke pays guest access PAYG, owner 2026-10-07; no licences are assigned). This step checks all three as the operator |
-| `users` → `usersJson` | H11 | 1–500 entries; `NativeAccount`: non-blank `firstName` + `lastName` (the UPN is built from them); `B2BGuest`: `email` (the invitation goes to it; names optional) |
-| `exchangePolicyScopeGroupId` | H14a | the mail-enabled security group H14a scopes the stamp identity's Exchange mailbox roles to (Entra object id or email address; only DIRECT members' mailboxes are reachable). **The Exchange admin of the stamp's tenant creates it before the run, named `Spaarke-AppAccess-{customerId}` — prerequisite `PRQ-C-08`.** H14m adds exactly one member, the customer's shared mailbox (T263); every other member is the customer's decision. |
-| `communicationDefaultMailbox` | H4 (KV `Communication-DefaultMailbox`); H14m | `local@domain.tld`, ≤ 254 characters — the address of the Spaarke-tenant shared mailbox H14m CREATES (T263): an accepted domain of Spaarke's tenant (e.g. `acme@spaarke.onmicrosoft.com`), not in use by any other mailbox (that quarantines the run) |
-| `displayName` | H10 (customer business unit), registry `sprk_name` | **Every run (T259)**: 1–160 characters, no leading/trailing whitespace, no control character, never `Secure Record` (`h10-customer-display-name-required` / `-invalid`); defaults to `customerId` (1a-bis) |
-| `customerWorkforceTenantIds` | H4b → `WorkforceIdentity__CustomerTenantIds__N` (both slots); H13 T7 | **Every run (T255, INCOMING-141)**: the CUSTOMER's Entra tenant id(s), 1–10 distinct lowercase GUIDs. Model 1: the customer's HOME tenant (its staff are B2B guests from there) — never Spaarke's tenant / this run's `tenantId`; Model 2: the customer's tenant. POST /api/runs also refuses the CIAM tenant (`workforce-tenants-required` / `-invalid` / `-ciam-tenant` / `-spaarke-tenant`). Prerequisite `PRQ-C-13` |
-| `customerOutboundB2BAttested` | PRQ-C-14 (skill-local) | B2BGuest: `true` only after the customer's Entra admin confirmed outbound B2B collaboration to Spaarke's tenant; never sent to L2 |
+#### 1e-ter. Customer prerequisites — the `once_per_customer` pass
 
-**Personal data.** The user list (names, emails) is stored in the L2 run document, as the owner accepted on
-2026-10-01 (D15). It never goes into git: Step 1.0 refuses a batch intake file git would track, and
-`provisioning-runs/{run}/intake.md` (committed) records the user **count** only. Prefer shared/service mailboxes for
-the Graph resources and the default mailbox — those values ARE recorded in `intake.md`.
+`Invoke-PrereqPass.ps1 -SessionFile $S -Pass Customer` — same rules and HARD STOP as Step 0.5, BEFORE 1f writes
+anything (skipped with `-SkipStep0_5`). Recipes needing the customer's subscription run with the operator's az sign-in,
+which must reach it; PRQ-S-06 needs Reader on the `spaarke-customers` management group.
 
-```powershell
-# T245c — interactive: prompt until valid. Batch: Step 1.0 already validated against the schema; any failure here
-# means a fallback validator skipped a rule, so HARD STOP instead of prompting.
-function Stop-IfBatch([string]$message) {
-  if ($script:SkipInteractiveIntake) { Write-Error "[skill] Batch HARD STOP: $message Fix the intake file."; exit 1 }
-  Write-Host $message -ForegroundColor Yellow
-}
+#### 1f. `environmentId` — create placeholder `sprk_dataverseenvironment` record
 
-# T232 (owner D2): Model 1 customer users are B2B guests in Spaarke's tenant — the preset is not a choice there.
-if ($tenancyModel -ceq 'Model1') {
-  if ($identityPreset -and $identityPreset -cne 'B2BGuest') { Stop-IfBatch "identityPreset '$identityPreset' — a Model1 run takes only B2BGuest (owner D2)." }
-  $identityPreset = 'B2BGuest'
-}
-while ($identityPreset -cnotin @('B2BGuest', 'NativeAccount')) {
-  if ($identityPreset -or $script:SkipInteractiveIntake) { Stop-IfBatch "identityPreset '$identityPreset' must be B2BGuest or NativeAccount (exact case)." }
-  $identityPreset = Read-Host 'identityPreset (B2BGuest = invite guests; NativeAccount = create users in the stamp tenant)'
-}
-
-# @($null).Count is 1 in PowerShell — normalise first, or an unassigned $users looks like one (null) entry.
-$users = @($users | Where-Object { $null -ne $_ })
-if (-not $script:SkipInteractiveIntake -and $users.Count -eq 0) {
-  while ($true) {
-    $isGuest = $identityPreset -ceq 'B2BGuest'
-    $prompt  = if ($isGuest) { "User $($users.Count + 1) email (blank to finish)" } else { "User $($users.Count + 1) first name (blank to finish)" }
-    $key     = Read-Host $prompt
-    if ([string]::IsNullOrWhiteSpace($key)) {
-      if ($users.Count -ge 1) { break }
-      Write-Host 'At least one user is required.' -ForegroundColor Yellow; continue
-    }
-    if ($isGuest) {
-      $email = $key
-      if (@($users | Where-Object { "$($_.email)".Trim() -eq $email.Trim() }).Count -gt 0) {
-        Write-Host '  Not added: this email is already in the list (a guest is invited once).' -ForegroundColor Yellow; continue
-      }
-      $first = Read-Host '  first name (optional — display name only)'
-      $last  = Read-Host '  last name (optional)'
-    } else {
-      $first = $key
-      $last  = Read-Host '  last name'
-      $email = Read-Host '  email (optional)'
-      if ([string]::IsNullOrWhiteSpace($last)) { Write-Host '  Not added: NativeAccount needs a last name (UPN).' -ForegroundColor Yellow; continue }
-    }
-    $company = Read-Host '  company (optional)'
-    $entry = [ordered]@{}
-    if ($first)   { $entry.firstName = $first }
-    if ($last)    { $entry.lastName = $last }
-    if ($email)   { $entry.email = $email }
-    if ($company) { $entry.companyName = $company }
-    $users += [pscustomobject]$entry
-    if ($users.Count -ge 500) { Write-Host 'Reached the 500-user limit for one run.' -ForegroundColor Yellow; break }
-  }
-}
-if ($users.Count -eq 0)  { Stop-IfBatch 'users needs at least one entry.'; exit 1 }
-if ($users.Count -gt 500) { Stop-IfBatch "users has $($users.Count) entries — at most 500 per run."; exit 1 }
-$position = 0
-foreach ($u in $users) {
-  $position++
-  $bad = if ($identityPreset -ceq 'B2BGuest') { [string]::IsNullOrWhiteSpace($u.email) }
-         else { [string]::IsNullOrWhiteSpace($u.firstName) -or [string]::IsNullOrWhiteSpace($u.lastName) }
-  if ($bad) {
-    Write-Error "[skill] HARD STOP: users entry $position needs $(if ($identityPreset -ceq 'B2BGuest') { 'an email' } else { 'firstName + lastName' })."
-    exit 1
-  }
-}
-# T232: a guest address listed twice would be invited twice (POST /api/runs refuses it too — userprov-invalid-user-entry).
-if ($identityPreset -ceq 'B2BGuest') {
-  $dupes = @($users | Group-Object { "$($_.email)".Trim().ToLowerInvariant() } | Where-Object Count -gt 1)
-  if ($dupes.Count -gt 0) { Write-Error "[skill] HARD STOP: $($dupes.Count) guest email(s) appear more than once in users — list each guest once."; exit 1 }
-}
-
-# T232 — B2BGuest: the environment's security group (PRQ-C-10), guest access (PRQ-C-12) and PAYG billing (PRQ-C-11),
-# checked now as the operator. H11 re-checks the group's NAME and guest access server-side, but only after H0–H10 have
-# built the stamp — and only the operator (a Power Platform admin) can see which group is SET ON the environment, or
-# its billing. A failed az/pac call is a stop with its own error, never an empty value read as an answer.
-if ($identityPreset -ceq 'B2BGuest') {
-  if (-not $customerOutboundB2BAttested) {
-    Stop-IfBatch "customerOutboundB2BAttested is false/absent: the CUSTOMER's Entra admin must confirm that its cross-tenant access settings allow outbound B2B collaboration to Spaarke's tenant (PRQ-C-14)."
-    $customerOutboundB2BAttested = ((Read-Host "Has the customer's Entra admin confirmed in writing that outbound B2B collaboration to Spaarke's tenant is allowed? (PRQ-C-14) [y/N]") -match '^(y|yes)$')
-  }
-  $groupGuid = [guid]::Empty
-  while (-not [guid]::TryParseExact([string]$environmentSecurityGroupId, 'D', [ref]$groupGuid) -or $groupGuid -eq [guid]::Empty) {
-    Stop-IfBatch 'environmentSecurityGroupId is required for B2BGuest — the object id (GUID) of sprk-{customerId}-users (PRQ-C-10).'
-    $environmentSecurityGroupId = Read-Host "environmentSecurityGroupId (object id of sprk-$customerId-users — PRQ-C-10)"
-  }
-  $environmentSecurityGroupId = $groupGuid.ToString('D')
-
-  # PRQ-C-10 (a): the group is this customer's security group.
-  $groupJson = az rest --method get --url "https://graph.microsoft.com/v1.0/groups/$environmentSecurityGroupId`?`$select=displayName,securityEnabled" -o json
-  if ($LASTEXITCODE -ne 0) { Write-Error "[skill] HARD STOP (PRQ-C-10): reading group $environmentSecurityGroupId failed (az output above). Is the operator signed in to the stamp's tenant?"; exit 1 }
-  $group = $groupJson | ConvertFrom-Json
-  if ($group.displayName -ne "sprk-$customerId-users" -or -not $group.securityEnabled) {
-    Write-Error "[skill] HARD STOP (PRQ-C-10): group $environmentSecurityGroupId is '$($group.displayName)' (securityEnabled=$($group.securityEnabled)) — it must be the security group sprk-$customerId-users. H11 would refuse it (userprov-security-group-rejected)."
-    exit 1
-  }
-
-  # PRQ-C-10 (b): it is the group SET ON the environment — the isolation boundary between Model 1 environments. Read
-  # from the Power Platform admin API (the operator is a Power Platform admin; L2 is not, so H11 cannot check this).
-  $dvRes = $dataverseEnvUrl.TrimEnd('/')
-  # The environment's Power Platform id, from the environment itself — then ONE admin-API read (no list, no paging).
-  # Tokens from az, requests via Invoke-RestMethod: on Windows `az` is az.cmd, and cmd breaks on the `)` in
-  # RetrieveCurrentOrganization(...) ("?@p was unexpected at this time", 2026-10-07).
-  $dvToken = az account get-access-token --resource $dvRes --query accessToken -o tsv
-  $ppToken = az account get-access-token --resource 'https://service.powerapps.com/' --query accessToken -o tsv
-  if ($LASTEXITCODE -ne 0 -or -not $dvToken -or -not $ppToken) { Write-Error '[skill] HARD STOP (PRQ-C-10): az could not get a Dataverse / Power Platform token (az output above).'; exit 1 }
-  try {
-    $org = Invoke-RestMethod -Headers @{ Authorization = "Bearer $dvToken" } `
-      -Uri "$dvRes/api/data/v9.2/RetrieveCurrentOrganization(AccessType=@p)?@p=Microsoft.Dynamics.CRM.EndpointAccessType'Default'"
-    $ppEnvId = "$($org.Detail.EnvironmentId)"
-    if (-not $ppEnvId) { throw 'RetrieveCurrentOrganization returned no Detail.EnvironmentId' }
-    $bap = Invoke-RestMethod -Headers @{ Authorization = "Bearer $ppToken" } `
-      -Uri "https://api.bap.microsoft.com/providers/Microsoft.BusinessAppPlatform/scopes/admin/environments/$ppEnvId`?api-version=2021-04-01"
-  } catch {
-    Write-Error "[skill] HARD STOP (PRQ-C-10): reading the environment's security group failed — $($_.Exception.Message). The operator must be a Power Platform admin."
-    exit 1
-  }
-  $boundGroup = "$($bap.properties.linkedEnvironmentMetadata.securityGroupId)"
-  if ($boundGroup -ne $environmentSecurityGroupId) {
-    Write-Error "[skill] HARD STOP (PRQ-C-10): environment $ppEnvId ($dvRes) has security group '$boundGroup' — it must be $environmentSecurityGroupId (sprk-$customerId-users). Without it every user of the tenant, other customers' guests included, is admitted. Set it (admin center → Environments → Edit → Security group), then rerun."
-    exit 1
-  }
-
-  # PRQ-C-12: guests may use the environment.
-  $restricted = az rest --method get --resource $dvRes --url "$dvRes/api/data/v9.2/organizations?`$select=restrictGuestUserAccess" --query "value[0].restrictGuestUserAccess" -o tsv
-  if ($LASTEXITCODE -ne 0) { Write-Error '[skill] HARD STOP (PRQ-C-12): reading restrictGuestUserAccess failed (az output above).'; exit 1 }
-  if ($restricted -ne 'false') {
-    Write-Error "[skill] HARD STOP (PRQ-C-12): the environment restricts guest access (restrictGuestUserAccess=$restricted). Turn it off per prereqs.yaml PRQ-C-12, then rerun. H11 would refuse it (userprov-guest-access-restricted)."
-    exit 1
-  }
-
-  # PRQ-C-11: billed pay-as-you-go on the STAMP subscription — an Enabled billing policy whose billingInstrument is the
-  # stamp subscription has this environment linked. Power Platform API licensing/billingPolicies, api-version 2024-10-01
-  # (GA; verified live at T186 2026-10-14). Not `pac licensing`: preview, and absent from pac 1.46.1 (T186 L12).
-  $stampSub = ([guid]$subscriptionId).ToString('D')
-  $plToken = az account get-access-token --resource 'https://api.powerplatform.com' --query accessToken -o tsv
-  if ($LASTEXITCODE -ne 0 -or -not $plToken) { Write-Error '[skill] HARD STOP (PRQ-C-11): az could not get a Power Platform API token (az output above).'; exit 1 }
-  $plHeaders = @{ Authorization = "Bearer $plToken" }
-  try {
-    $policies = @((Invoke-RestMethod -Headers $plHeaders -Uri 'https://api.powerplatform.com/licensing/billingPolicies?api-version=2024-10-01').value |
-      Where-Object { $_.status -ceq 'Enabled' -and "$($_.billingInstrument.subscriptionId)" -eq $stampSub })
-  } catch {
-    Write-Error "[skill] HARD STOP (PRQ-C-11): listing billing policies failed — $($_.Exception.Message). The operator must be a Power Platform admin."
-    exit 1
-  }
-  $linkedPolicy = $null
-  foreach ($p in $policies) {
-    try {
-      Invoke-RestMethod -Headers $plHeaders -Uri "https://api.powerplatform.com/licensing/billingPolicies/$($p.id)/environments/$ppEnvId`?api-version=2024-10-01" | Out-Null
-      $linkedPolicy = $p; break
-    } catch {
-      if ($_.Exception.Response.StatusCode.value__ -ne 404) { Write-Error "[skill] HARD STOP (PRQ-C-11): reading policy $($p.name) failed — $($_.Exception.Message)"; exit 1 }
-    }
-  }
-  if (-not $linkedPolicy) {
-    Write-Error "[skill] HARD STOP (PRQ-C-11): environment $ppEnvId ($dvRes) is linked to no Enabled pay-as-you-go billing policy on the stamp subscription $stampSub ($($policies.Count) Enabled on it). Link it per prereqs.yaml PRQ-C-11, then rerun."
-    exit 1
-  }
-  Write-Host "PRQ-C-11 OK — billing policy '$($linkedPolicy.name)' (Enabled, subscription $stampSub) has the environment linked." -ForegroundColor Green
-}
-
-while ([string]::IsNullOrWhiteSpace($exchangePolicyScopeGroupId)) {
-  Stop-IfBatch 'exchangePolicyScopeGroupId is required — the Exchange admin creates the group before the run (PRQ-C-08).'
-  $exchangePolicyScopeGroupId = Read-Host 'exchangePolicyScopeGroupId (mail-enabled security group email or object id — PRQ-C-08)'
-}
-
-# T255 (INCOMING-141): the CUSTOMER's workforce tenant id(s) — required for every model. Same shape rules as POST /api/runs
-# (CustomerWorkforceTenantsRule); L2 also refuses the CIAM tenant and Spaarke's own tenant from its own settings.
-$wfIds = @($customerWorkforceTenantIds | ForEach-Object { [string]$_ } | Where-Object { $_ -and $_.Trim() })
-while ($true) {
-  $parsed = @(); $bad = $null
-  foreach ($v in $wfIds) { $g = [guid]::Empty; if (-not [guid]::TryParse($v.Trim(), [ref]$g) -or $g -eq [guid]::Empty) { $bad = "'$v' is not a tenant id"; break }; $parsed += $g.ToString('D') }
-  if (-not $bad -and $parsed.Count -eq 0) { $bad = 'at least one is required' }
-  if (-not $bad -and $parsed.Count -gt 10) { $bad = 'at most 10' }
-  if (-not $bad -and @($parsed | Select-Object -Unique).Count -ne $parsed.Count) { $bad = 'a tenant is listed twice' }
-  if (-not $bad -and $tenancyModel -eq 'Model1' -and $parsed -contains ([guid]$tenantId).ToString('D')) { $bad = "$tenantId is this Model 1 run's tenantId (Spaarke's tenant) — give the CUSTOMER's home tenant" }
-  if (-not $bad) { $customerWorkforceTenantIds = $parsed; break }
-  Stop-IfBatch "customerWorkforceTenantIds: $bad (PRQ-C-13)."
-  $wfIds = @((Read-Host "customerWorkforceTenantIds — the customer's Entra tenant id(s), comma-separated (PRQ-C-13)") -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ })
-}
-
-
-while ($communicationDefaultMailbox -cnotmatch '^[^@\s]+@[^@\s]+\.[^@\s]+\z' -or $communicationDefaultMailbox.Length -gt 254) {
-  if ($communicationDefaultMailbox -or $script:SkipInteractiveIntake) { Stop-IfBatch "communicationDefaultMailbox '$communicationDefaultMailbox' must be a mailbox address (local@domain.tld, at most 254 characters)." }
-  $communicationDefaultMailbox = Read-Host 'communicationDefaultMailbox (local@domain.tld)'
-}
-```
-
-#### 1e-ter. Customer prerequisites — the `once_per_customer` pass (T207 close-out, 2026-10-09)
-
-Now that the intake names the customer, run the `once_per_customer` recipes (the customer's subscription, its
-Dataverse environment, the environment security group, the Exchange scope group, quotas) with the same function and
-the same HARD STOP rules as Step 0.5 — BEFORE Step 1f writes anything. Skipped only with `-SkipStep0_5` /
-`"skipExternalPrereqs": true` (recorded in Step 7, as for Step 0.5).
-
-```powershell
-if (-not $SkipStep0_5) {
-  $customerTokens = [ordered]@{}
-  foreach ($k in $prereqTokens.Keys) { $customerTokens[$k] = $prereqTokens[$k] }
-  $customerTokens.customerId                 = $customerId
-  $customerTokens.stampSubscriptionId        = $subscriptionId                 # Step 1b-bis (T228)
-  $customerTokens.stampEnvironment           = 'prod'                          # L2's default environmentName (owner D6); the intake has no override
-  $customerTokens.dvUrl                      = $dataverseEnvUrl                # Step 1b-bis — canonical, trailing slash
-  $customerTokens.exchangePolicyScopeGroupId = $exchangePolicyScopeGroupId     # Step 1e-bis (PRQ-C-08)
-  $customerTokens.environmentSecurityGroupId = $environmentSecurityGroupId     # Step 1e-bis (PRQ-C-10; B2BGuest)
-  $customerTokens.customerWorkforceTenantIds = ($customerWorkforceTenantIds -join ' ')   # Step 1e-bis (PRQ-C-13; T255) — space-separated for the recipe's for-loop
-  $customerTokens.customerOutboundB2BAttested = if ($identityPreset -ceq 'B2BGuest') { ([string][bool]$customerOutboundB2BAttested).ToLowerInvariant() } else { 'notApplicable' }   # PRQ-C-14
-  $customerResults = Invoke-PrereqPass -Scopes @('once_per_customer') -Tokens $customerTokens
-  # Report exactly as Step 0.5d: a checklist; any Passed = $false → HARD STOP with id, output, consequence and the
-  # remediation link into docs/guides/PROVISIONING-PREREQUISITES.md#<id>. Nothing has been written yet.
-}
-```
-
-Recipes that need the customer's subscription (PRQ-S-*, PRQ-C-03, PRQ-C-11) run with the operator's az
-sign-in, which must reach that subscription (Model 1: Spaarke's tenant). PRQ-S-06 also needs read on the
-`spaarke-customers` management group (Reader or above at or over it). PRQ-E-15's Exchange half and PRQ-C-10's
-"group is the one set on the environment" are asserted elsewhere (the Exchange admin; Step 1e-bis).
-
-#### 1f. `environmentId` — create placeholder `sprk_dataverseenvironment` record (required — per punch list rows A10 + A11 / DS-5 c6-2 + c6-3)
-
-The L2 API's `POST /api/runs` REQUIRES `environmentId` (the `sprk_dataverseenvironment` record GUID). L2 returns 400 without it (per DS-5 c6-2). This step creates the placeholder record BEFORE the POST so the GUID is available.
-
-**Registry env (until central-managing env exists — 2026-08-26 owner directive)**: use `spaarkedev1` for `environment=dev`. No registry env exists for `environment=demo`: the old `spaarke-demo` environment was retired 2026-10-14 (D35), and the demo is now the ACME stamp, which this skill provisions on the dev control plane (registry `spaarkedev1`). Production registry env is NOT YET provisioned; treat as an r2 follow-on. The Spaarke dev registry env doubles as the engineering dev env — this is intentional for now. See operator memory `feedback_no_central_managing_env_yet`.
-
-**Preferred path — Dataverse MCP** (`mcp__dataverse__create_record`). The payload MUST include the 4 NOT-NULL fields (`sprk_name`, `sprk_environmenttype`, `sprk_dataverseurl`, `sprk_isactive`, `sprk_isdefault`) OR Dataverse returns 400. Registry columns added in task 023 (deployed 2026-08-26 SESSION 13) + `sprk_customerid` added by companion `scripts/Add-CustomerIdColumn.ps1` (task 199 reconciliation) provide the remaining fields.
-
-```powershell
-# environment (intake) -> sprk_environmenttype enum (per DataverseEnvironmentRecord.cs EnvironmentType)
-$envTypeMap = @{ 'dev' = 0; 'demo' = 1; 'sandbox' = 2; 'trial' = 3; 'partner' = 4; 'training' = 5; 'prod' = 6 }
-$envType    = $envTypeMap[$environment]
-
-# tenancyModel (intake) -> sprk_tenancymodel option-set integer. T224 renamed the values to Model1/Model2
-# (integers unchanged); the old keys made this lookup return $null for every current intake value (fixed T237).
-$tenancyModelMap = @{ 'Model1' = 0; 'Model2' = 1 }
-$tenancyModelInt = $tenancyModelMap[$tenancyModel]
-if ($null -eq $tenancyModelInt) {
-  Write-Error "❌ tenancyModel '$tenancyModel' has no sprk_tenancymodel mapping (expected Model1 or Model2). Refusing to write a placeholder row without it."
-  exit 1
-}
-
-$placeholderPayload = @{
-  entityName = 'sprk_dataverseenvironment'
-  attributes = @{
-    # --- Required fields (NOT NULL per live schema) ---
-    sprk_name             = $displayName                                # T237: the customer's full name (1a-bis; defaults to customerId) — recorded once next to the id
-    sprk_environmenttype  = $envType                                    # Choice: enum int per environment
-    sprk_dataverseurl     = $dataverseEnvUrl                            # T228: the environment the operator created (Step 1b-bis) — H5 adopts it
-    sprk_isactive         = $true
-    sprk_isdefault        = $false
-    # --- r1 registry extension (task 023 v3.3 columns) ---
-    sprk_customerid       = $customerId                                 # ALT-KEY for L2 CustomerRunGuard + DataverseRegistryConcurrencyStore lookup
-    sprk_tenantid         = $tenantId
-    sprk_tenancymodel     = $tenancyModelInt                            # option-set integer, NOT string
-    sprk_setupstatus      = 1                                           # 1=InProgress per EnvironmentSetupStatus enum (NotStarted=0, InProgress=1, Ready=2, Issue=3)
-  }
-}
-$mcpResponse = mcp__dataverse__create_record @placeholderPayload
-$environmentId = $mcpResponse.sprk_dataverseenvironmentid
-```
-
-Fallback path (per §4.3a.5) — if MCP disconnected, use `pac data create`:
-
-```powershell
-# --attributes is a ';'/'='-delimited string: a display name containing either character would corrupt it.
-# Fall back to the id for sprk_name and say so; the full name can be set on the row afterwards.
-$registryName = $displayName
-if ($displayName -match '[;=]') {
-  Write-Warning "displayName '$displayName' contains ';' or '=' — the pac fallback writes sprk_name=$customerId instead. Set the full name on the registry row afterwards."
-  $registryName = $customerId   # $displayName itself is kept: Step 4.0 sends it as the customer business unit's name (T259)
-}
-$environmentId = pac data create --entity sprk_dataverseenvironment `
-  --attributes "sprk_name=$registryName;sprk_environmenttype=$envType;sprk_dataverseurl=$dataverseEnvUrl;sprk_isactive=true;sprk_isdefault=false;sprk_customerid=$customerId;sprk_tenantid=$tenantId;sprk_tenancymodel=$tenancyModelInt;sprk_setupstatus=1" `
-  --query 'sprk_dataverseenvironmentid' -o tsv
-```
-
-Verify `$environmentId` is a valid GUID **AND** that the row is queryable via alt-key (PRQ-05 addendum, SESSION 15 — PRQ-E-13 is retired in prereqs.yaml because this step creates the row after the customer pass (T186 L13), so the placeholder-record-exists check lives here exclusively):
-
-```powershell
-if (-not ($environmentId -match '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$')) {
-  Write-Error "❌ Placeholder create failed — no valid GUID returned. Cannot proceed to POST /api/runs without environmentId. Check registry-env MCP connection or pac data auth."
-  exit 1
-}
-
-# PRQ-05 post-create verification — round-trip the row via alt-key to prove the
-# CustomerRunGuard alt-key lookup path works BEFORE Step 4 POSTs /api/runs
-# (avoids discovering the alt-key gap deep inside L2's concurrency-guard
-# 409-return path where the diagnostic is much worse).
-$verify = mcp__dataverse__read_query(query = @"
-  <fetch top="1">
-    <entity name="sprk_dataverseenvironment">
-      <attribute name="sprk_dataverseenvironmentid" />
-      <attribute name="sprk_customerid" />
-      <attribute name="sprk_setupstatus" />
-      <filter><condition attribute="sprk_customerid" operator="eq" value="$customerId" /></filter>
-    </entity>
-  </fetch>
-"@)
-if ($verify.rows.Count -eq 0 -or $verify.rows[0].sprk_dataverseenvironmentid -ne $environmentId) {
-  Write-Error "❌ Post-create verification failed — sprk_customerid alt-key returned no row OR returned a different GUID than the create call. CustomerRunGuard concurrency path will 409-loop indefinitely. Check sprk_customerid_key alt-key is registered on the entity (see scripts/Add-CustomerIdColumn.ps1)."
-  exit 1
-}
-```
-
-**Fields intentionally NOT set at placeholder-create time** (populated by later handlers, per task 023 constraint "no code path that reads/writes these columns beyond what already exists in DataverseEnvironmentRecord.cs"):
-- `sprk_currentrunid` — set by L2 CustomerRunGuard as part of the run enqueue (§4D I5)
-- `sprk_azuresubscriptionid`, `sprk_resourcegroupname`, `sprk_appservicename`, `sprk_keyvaultname`, `sprk_containertypeid` — populated by H2a Bicep composition
-- `sprk_bffversion`, `sprk_solutionversion` — populated by H9 BFF deploy + H6 solution import
-- `sprk_ClientCacheBustToken` — populated by H7 env-var writes
-- `sprk_provisionedon` — set by H13 acceptance gate on transition to Ready
-- `sprk_setupstatus = 2 (Ready)` — set by H13 via `DataverseRegistrySetupStatusUpdater` at completion (also clears `sprk_currentrunid`)
-
-The placeholder is later promoted to real state by H10/H13 (setup registry update) when the run reaches `Ready`. This creates the audit trail from "run enqueued" → "run complete" in a single sprk_dataverseenvironment lifecycle.
-
-**Fields deliberately NOT in the placeholder** (deprecated / never landed — do NOT re-add these):
-- `sprk_profile` — never authored in any script or code; skill previously referenced it but grep-zero across `src/**` (removed 2026-08-26 SESSION 13 per task 199 reconciliation)
-- `sprk_upgrademode` — DERIVED from `sprk_provisionedon IS NOT NULL` by H4 KV secrets handler (`IKvSecretsWriter.UpgradeMode`); never persisted as a column
+`POST /api/runs` REQUIRES it. Skip when the probe found the row (upgrade) or the intake carried it. Registry env:
+`spaarkedev1` for `dev` (and for the demo, which is the ACME stamp on the dev control plane); prod registry not yet
+provisioned. `Invoke-RegistryStep.ps1 -Action Plan` prints the payload → `mcp__dataverse__create_record` (MCP down:
+`-Action CreateWebApi`). Then read the row back by `sprk_customerid` and run `-Action Confirm -EnvironmentId <id>
+-ProbeJson '<rows>'` (or `-UseWebApi`) — PRQ-05: the alt-key must return the same GUID, or CustomerRunGuard 409-loops.
+Never add `sprk_profile` or `sprk_upgrademode` (deprecated). Field details: `references/intake-fields.md` §1f.
 
 #### 1g. Show intake summary
 
-```
-INTAKE SUMMARY
-  customerId:      acme
-  displayName:     Acme Corporation
-  tenantId:        12345678-...-...-...  (customer tenant)
-  tenancyModel:    Model2
-  controlPlaneEnv: dev
-  profile:         customer-owned-model2
-  subscriptionId:  9f1c...  (the customer's own — PRQ-S-00)
-  dataverseEnvUrl: https://spaarke-acme.crm.dynamics.com/  (operator-created — PRQ-C-09)
-  environmentId:   a1b2c3d4-...  (placeholder sprk_dataverseenvironment record, sprk_setupstatus=1 InProgress)
-  identityPreset:  B2BGuest
-  users:           3 entries          (names/emails are NOT printed or written to intake.md)
-  env group:       6f1c2b3a-...  sprk-acme-users  (PRQ-C-10; guest access PRQ-C-12 ✓; PAYG PRQ-C-11 confirmed)
-  exchange group:  Spaarke-AppAccess-acme@spaarke.onmicrosoft.com  (PRQ-C-08)
-  default mailbox: acme@spaarke.onmicrosoft.com  (H14m creates it as sprk-acme-mail)
-  L2 API:          https://spaarke-provisioning-controlplane-dev.azurewebsites.net
-
-Proceed to preflight (H0)? (yes/no)
-```
-
-Wait for "yes" (bare "y" is insufficient at every gate in this skill — spec §4.3a.4).
-
-**BAT-02 (SESSION 16)** — batch mode SKIPS the Step 1g prompt (the summary is written to stdout for audit, but no operator input is expected). The Step 3 confirmation gate is what covers the intent-to-proceed attestation in batch mode (via `intake.confirmationAcknowledgment` const-string validated at Step 1.0). Skipping Step 1g's yes/no prompt in batch mode is NOT a bypass — it eliminates a stdin read that would block the run indefinitely under `--batch` unattended dispatch:
-
-```powershell
-if (-not $script:SkipInteractiveIntake) {
-  $answer = Read-Host "Proceed to preflight (H0)? (yes/no)"
-  if ($answer -ne 'yes') { Write-Error 'Aborted at Step 1g preflight prompt.'; exit 1 }
-} else {
-  Write-Host "  [BATCH] Step 1g summary printed above; skipping interactive prompt (intent-to-proceed already captured at Step 1.0 via intake.confirmationAcknowledgment)." -ForegroundColor Cyan
-}
-```
-
----
+Show customerId, displayName, tenantId, tenancyModel, controlPlaneEnv, profile, subscriptionId, dataverseEnvUrl,
+environmentId (placeholder, setupstatus 1 InProgress), identityPreset, user COUNT (never names/emails), env group
+(PRQ-C-10/12/11 results), Exchange group, default mailbox, L2 base. Interactive: ask "Proceed to preflight (H0)?
+(yes/no)" and wait for "yes" (bare "y" is insufficient at every gate — spec §4.3a.4). Batch: print it, no prompt
+(BAT-02 — the intent is attested by `confirmationAcknowledgment`).
 
 ### Step 2: Client-side Dry-Run + Preflight Planning (no server mutation)
 
-> **CRITICAL architectural correction (EXEC-02 / SKILL-03 / ISH-03 fix, SESSION 15 Wave 4)**: Step 2 is now CLIENT-SIDE ONLY. Earlier drafts of this skill POSTed to `/api/runs` with a fictional `mode:"preflight"` field — but `CreateRunRequest` (`RunsEndpoints.cs:861-880`) accepts NO `mode` field, silently DROPPED both `tenantId` (I1 invariant violation) and `mode`, and unconditionally enqueued H0 → the full H1..H14 cascade via the reconciler. Step 3's confirmation gate was therefore theatrical: by the time the operator typed "proceed with provisioning," H1-H2a had already fired. The redesign: Step 2 stays client-side (validates + shows plan); Step 3 gate fires BEFORE any L2 POST; Step 4 issues the SINGLE actual POST to `/api/runs`.
->
-> **BEFORE this step**, if the target Azure subscription was created within the last 90 days (i.e. "fresh sub"), invoke **Step 2.5 (Fresh-Sub Deployment Feasibility Check)** first. Fresh subs have region/quota/model gotchas; L2's H0 now checks OpenAI quota and model pins in `openAiLocation` (task 247), but not the other Step 2.5 findings (App Service quota, provider registration, global names). See "Fresh-Sub Automation Gaps" section at end of this file for the full evidence base (customer-provisioning-orchestration-r1 lessons learned 2026-08-22).
+Step 2 is CLIENT-SIDE ONLY. There is no preflight-only run mode: `CreateRunRequest` has no `mode` field, and H0 runs
+as the first handler of the single Step 4 POST (EXEC-02 / ISH-03). H0-only re-verification on an EXISTING run:
+`POST /api/runs/{runId}/preflight?customerId=` (upgrade use case). **If the target subscription is < 90 days old, or
+this is the first Bicep deploy into it in this region, read [`references/fresh-sub-feasibility.md`](references/fresh-sub-feasibility.md)
+(Step 2.5) before continuing.** Then, with nothing mutating on L2 or in Azure:
+- re-run the customer-run history probe (Step 1a semantics — `Invoke-RegistryStep.ps1 -Action Probe`) to catch an
+  upgrade or a run started since Step 1a;
+- prereqs scoped `once_per_customer_pre_intake` run again here (none in the current manifest — reserved, EXEC-10);
+- `Test-CostEnvelope.ps1 -SessionFile $S` (BAT-10/T229 — estimate vs tier ceiling; no override; diagnostic
+  `runs/pre-dispatch-cost-overrun.json`);
+- build and show the plan for Step 3 (handler list per profile, cost, duration). A batch intake was schema-validated
+  at Step 1.0 (an interactive intake cannot pass the schema before Step 3 — MOVE-MAP D14).
 
-Step 2 performs **client-side validation only** (no L2 POST). It:
-- Re-validates intake JSON against `intake.schema.json` (idempotent with Step 1.0 batch validate; belt-and-suspenders for interactive mode)
-- Runs Step 0.5 iteration once more if any prereqs are scoped `once_per_customer_pre_intake` (per EXEC-10 scoping — none in current manifest, but reserved for future extensibility)
-- Performs the SPAARKE customer-run history probe (Step 1a semantics — Dataverse MCP alt-key GET on `sprk_dataverseenvironment` filtered by `sprk_customerid`) to detect upgrade-mode
-- Builds the run plan (handler list per profile + estimated cost + estimated duration)
-- Displays the plan to the operator
+On any failure present it with escalation instructions and do NOT proceed to Step 3.
 
-The plan is presented; NOTHING mutates on L2 or in Azure. The operator sees the full picture BEFORE the confirmation gate fires.
-
-```
-PREFLIGHT (H0) RESULT
-  Duration: 8.2s
-  [PASS] Azure OpenAI TPM headroom OK (projected 187/2000 sum-across-models)
-  [PASS] App Service plan tier available in westus2
-  [PASS] SPE container-type headroom OK (7,442 of 10,000 remaining)
-  [PASS] DNS pre-check: acme.spaarke.com not reserved
-  [PASS] Spaarke tenant reachable (Model 1)
-  [PASS] Estimated cost: $450/mo (within tier 'smb' ceiling $700/mo)
-  [PASS] Estimated duration: 42 min (H1-H14, no lead-time gates)
-
-Preflight passed. Proceed to Step 3 (confirmation gate)? (yes/no)
-```
-
-**Note**: server-side preflight (H0 handler) will run automatically when Step 4 POSTs `/api/runs`; H0 is the FIRST handler in the L2 DAG per `DagAdvancer.cs`. There is no separate "preflight-only" run mode — that concept was a skill fiction. If the operator wants H0-only re-verification WITHOUT triggering H1+, the actual mechanism is `POST /api/runs/{runId}/preflight?customerId={cid}` per `RunsEndpoints.cs:188` on an EXISTING run (upgrade-mode use case).
-
-**Cost-envelope pre-check (BAT-10; T229)** — the estimate is compared with the tier ceiling before Step 4 POSTs, in both
-modes. H0 applies the same rule server-side and is the authority; there is no override in either place (T229 retired the
-shared-trial tier and its `warnAndProceed` waiver — every stamp is dedicated). An overrun means choosing the tier that
-covers the stamp, or reducing what drives the estimate:
-
-```powershell
-# Client-side envelope check (H0 is the authority). These are the BUILT-IN ceilings (H0Options.DefaultCeilingsUsd); if the
-# L2 deployment configures H0__TierMonthlyCostCeilingsUsd__{tier}, change the table below to match — this check would
-# otherwise stop an estimate H0 accepts.
-$tierCap = switch -CaseSensitive ($tier) { 'smb' { 700 } 'enterprise' { 2500 } 'dedicated' { 5000 } default { $null } }
-if ($null -eq $tierCap) { Write-Error "[skill] Step 2 HARD STOP: tier '$tier' is not smb | enterprise | dedicated (Step 1b-ter)."; exit 1 }
-if ([decimal]$estimatedMonthlyUsd -gt $tierCap) {
-  $diag = @{ runId='pre-dispatch'; customerId=$customerId; estimated=$estimatedMonthlyUsd; cap=$tierCap; tier=$tier } | ConvertTo-Json
-  Set-Content -Path "runs/pre-dispatch-cost-overrun.json" -Value $diag
-  Write-Error "[skill] Step 2 HARD STOP (BAT-10): estimated `$$estimatedMonthlyUsd/mo exceeds tier '$tier' cap `$$tierCap/mo. Choose the tier that covers the stamp (Step 1b-ter) and rerun. Diagnostic: runs/pre-dispatch-cost-overrun.json"
-  exit 1
-}
-```
-
-If Step 2 client-side validation FAILS, present the failure + escalation instructions. Do NOT proceed to Step 3.
-
----
-
-### Step 2.5: Fresh-Sub Deployment Feasibility Check (NEW — customer-provisioning-orchestration-r1 lessons 2026-08-22)
-
-> **T228**: every check below runs against the **customer's own subscription** (intake `subscriptionId`), never the
-> operator's current `az account`: Step 0.5b's `$subId` is rebound here.
->
-> ```powershell
-> $subId = $subscriptionId   # T228 — the customer's subscription (Step 1b-bis); F3–F6 / F10 below read $subId
-> ```
-
-**When to run**: Target Azure subscription was created within the last 90 days, OR this is the FIRST Bicep deploy attempt against this subscription in this region. Fresh subs have gotchas Microsoft has quietly introduced since 2024-2025 that break naive "just deploy" flows. These checks run OPERATOR-SIDE (in this skill) before invoking L2 H0, because L2 doesn't have the visibility (or the mandate) to modify region defaults or Bicep params.
-
-Full evidence base: `projects/customer-provisioning-orchestration-r1/notes/lessons-learned-model1-prod-standup-2026-08-22.md` (findings F1-F9).
-
-Automated checks (each MUST pass or auto-remediate before Step 2):
-
-**F1 — OpenAI model pin freshness**:
-```powershell
-$pins = (Get-Content infrastructure/bicep/stacks/{stack}.bicep | Select-String "version: '(\d{4}-\d{2}-\d{2})'").Matches.Groups[1].Value
-foreach ($pin in $pins) {
-  $models = az cognitiveservices model list --location $openAiLocation --query "[?kind=='OpenAI' && model.version=='$pin']" -o json | ConvertFrom-Json
-  if ($models[0].model.lifecycleStatus -in @('Deprecating','Deprecated')) {
-    # HALT — pin is dead. Recommend bump to latest GA/Legacy in same family.
-  }
-}
-```
-
-**F2 — Deployment SKU compatibility**:
-- Verify each pinned model's `sku` field is in the list returned by `az cognitiveservices model list --query "[?...].model.skus"`
-- gpt-5.x family REQUIRES `GlobalStandard` (gpt-5-pro literally supports NO other SKU)
-- Legacy gpt-4o family accepts `Standard`
-
-**F3 — Primary region App Service quota feasibility**:
-```powershell
-# Deploy a throwaway S1 App Service Plan via what-if to test quota
-az deployment group what-if --resource-group $tempRg --template-file .claude/skills/provision-environment/refs/test-s1-plan.bicep `
-  --parameters location=$candidateRegion --subscription $subId
-# If SubscriptionIsOverQuotaForSku → this region has quota walls; auto-fallback to westus2 (Spaarke canonical)
-```
-
-**F4 — OpenAI region GA availability**:
-```powershell
-# Confirm all pinned models are GA in the stamp's openAiLocation (customer.bicep param; default westus3)
-az cognitiveservices model list --location $openAiLocation --subscription $subId --query "[?kind=='OpenAI' && model.name=='$pinnedModelName']" -o table
-# Empty result → model not offered in this region; pick another openAiLocation (westus2 offers NO OpenAI models — checked 2026-10-06)
-# L2's H0 runs this check itself (openai-pin-freshness, against PinnedModelCatalog.Models).
-```
-
-**F5 — Auto-allocated TPM detection**:
-```powershell
-az rest --method get --url "https://management.azure.com/subscriptions/$subId/providers/Microsoft.CognitiveServices/locations/$openAiRegion/usages?api-version=2023-05-01" `
-  --query "value[?limit != '0']" -o json
-```
-- Enumerate what's already granted. L2's H0 runs this check itself (azure-openai-tpm-headroom, per Azure quota name, against `PinnedModelCatalog`).
-- **No recompose (task 247, owner 2026-10-06).** The stamp deployment set is fixed: the BFF calls every deployment by NAME (`gpt-4o`, `gpt-4o-mini`, `text-embedding-3-large`), so dropping or swapping one deploys a stamp that fails at runtime. The set uses DataZoneStandard, which fresh subscriptions auto-grant (westus3, 2026-10-06: gpt-4o 300, gpt4.1-mini 2000, text-embedding-3-large 1000 — vs. a 150/200/350 request). A shortfall fails H0 before anything deploys; the fix is a quota increase or another `openAiLocation`.
-
-**F6 — Provider registration retry-verify loop**:
-```powershell
-foreach ($ns in $requiredProviders) {
-  az provider register --namespace $ns --subscription $subId -o none
-  $deadline = (Get-Date).AddMinutes(5)
-  while ((Get-Date) -lt $deadline) {
-    $state = az provider show -n $ns --query registrationState -o tsv
-    if ($state -eq 'Registered') { break }
-    Start-Sleep 30
-  }
-  if ($state -ne 'Registered') {
-    # HALT — provide operator with Portal link: https://portal.azure.com/#view/HubsExtension/BrowseAll → subscription → Resource providers → search "$ns" → Register
-  }
-}
-```
-
-**F7 — Fresh-sub UX preamble**:
-- Warn operator: "Portal Usage+Quotas dropdown will show empty until resources exist; use https://ai.azure.com Quotas for OpenAI TPM visibility"
-
-**F8 — Support ticket: NOT USED** (owner: an ordinary stamp must deploy without a Microsoft support case). The deployment set is chosen to fit fresh-subscription auto-grants (F5), so no ticket path is needed.
-
-**F10 — Global resource-name availability pre-check** (added 2026-08-22 after F10 discovery):
-```powershell
-# Service Bus namespace (Azure reserves suffixes like -sb globally)
-az rest --method post --url "https://management.azure.com/subscriptions/$subId/providers/Microsoft.ServiceBus/checkNameAvailability?api-version=2022-10-01-preview" `
-  --body "{`"name`":`"$sbName`",`"type`":`"Microsoft.ServiceBus/namespaces`"}"
-# Storage account (global namespace)
-az storage account check-name --name $storageName
-# Cognitive Services custom subdomain (global namespace)
-az cognitiveservices account check-domain-availability --subdomain-name $openAiName --type OpenAI
-```
-what-if does NOT run these checks — only actual create-time validation catches global-namespace conflicts. This gap wasted 16m35s on this session's first deploy attempt. Skill Step 2.5 MUST run these before invoking `az deployment sub create`.
-
-**F9 — Support Plan check: NOT USED** (no ticket-dependent action exists — see F8).
-
-**Auto-remediation vs HALT decision matrix**:
-| Finding | Auto-remediate? | Fallback |
-|---|---|---|
-| F1 (pin stale) | NO (requires operator ADR-020 sign-off on new pin) | HALT + recommend bump |
-| F2 (SKU wrong) | YES (bicepparam auto-generation) | Log the change |
-| F3 (region quota wall) | YES (fallback to westus2) | Log region pivot with rationale |
-| F4 (OpenAI region absence) | YES (`openAiLocation` defaults to westus3; westus2 has no OpenAI models) | Log the split |
-| F5 (auto-quota mismatch) | NO (task 247: the set is fixed — the BFF calls each deployment by name) | HALT at H0 naming the Azure quotas that fall short; raise quota or change `openAiLocation` |
-| F6 (provider reg hang) | Retry 5 min, then HALT | Portal link |
-| F7 (UX preamble) | Informational — always show | N/A |
-| F8 / F9 (support ticket / plan) | Not used — no support case (owner) | N/A |
-
-**Skill output on completion of Step 2.5**:
-```
-FRESH-SUB FEASIBILITY (customer-provisioning-orchestration-r1 lessons):
-  [PASS/AUTO-FIX/HALT] F1 OpenAI pin freshness: 3 of 3 pins GA in westus3
-  [AUTO-FIX] F3 Primary region: eastus quota wall detected → auto-pivoted to westus2
-  [PASS] F4 OpenAI region: openAiLocation=westus3 (westus2 offers no OpenAI models)
-  [PASS] F5 DataZoneStandard quota in westus3 covers gpt-4o 150 / gpt4.1-mini 200 / text-embedding-3-large 350
-  [PASS] F6 All required providers registered
-
-Proceeding to Step 2 (L2 H0 preflight)...
-```
-
-**Current status of Step 2.5 automation** (as of 2026-08-22):
-- MVP: Step 2.5 exists as INFORMATIONAL — operator is prompted to check findings F1-F9 manually with the queries above
-- Full E2E-no-human-interaction: Step 2.5 becomes FULLY AUTOMATED — the skill absorbs each check as an automation, with the auto-remediation matrix above driving behavior
-- Owner directive 2026-08-22: "the expectation for the final delivered solutions is that this process will run E2E with no human interaction. Ultimately the best solution is we have a 'Customer Deployment' web app that allows the user to input whatever information/setting choices and Claude Code / the scripts run everything." Absorbing F1-F9 into Step 2.5 automation is the largest single gap between MVP and full E2E.
-
----
+### Step 2.5: Fresh-Sub Deployment Feasibility Check
+Conditional — see Step 2. Checks run against the customer's subscription, never the operator's current one (T228).
 
 ### Step 3: Confirmation Gate — explicit "proceed" phrase required
 
-**This is the critical decision gate. Nothing mutates the target env until the operator says the exact phrase.**
-
-Present the full run plan:
+**Nothing mutates the target env until the operator types the exact phrase.** Present the run plan:
 
 ```
 RUN PLAN
-
-  customerId:    acme
-  tenantId:      12345678-...
-  tenancyModel:  Model2
-  profile:       customer-owned-model2
-
-  Handlers to execute (17 — one handler set for both models; *amended 2026-09-28, D-12: the 13-handler
-  Model1Shared set is retired*):
-    H0.5      consent-callback (Model 2 only — skipped for Model 1, which is in Spaarke's own tenant)
-    H1        resource-group provisioning
-    H2a       Bicep infra apply (30-min timeout)
-    H2b       AI Search index deploy (7 canonical indexes)
-    H3        per-customer BFF Entra app registration (FIC; SPA redirect = Dataverse origin + pre-authorized shared clients, T240a)
-    H4        canonical secret population (per-tenant KV; literal values)
-    H4b       bulk App Service app-settings from canonical manifest (~80-160 settings in ONE batch → ONE restart; F20/F20a; task 201; incl. CORS shared client origins, T240a)
-    H5        adopt the operator's Dataverse environment (URL rule + WhoAmI as the Worker identity; never creates — T228)
-    H10       Dataverse application users + Graph parity (T228: before H6, which signs in as the BFF app it registers)
-    H6        Dataverse package import — ONE solution, SpaarkeMaster, managed by default (ADR-027 §3 amended 2026-10-07; T218b)
-    H7        env-var writes to customer env
-    H8        SPE root container in the model's container type (create or reuse; bound + marked; T227e)
-    H9        BFF deploy to customer stamp (blue-green via staging slot; runs AFTER H4 + H4b so BFF boots with config in place — HANDLER-01 DAG fix SESSION 15)
-    H11       user provisioning — identityPreset + users from Step 1e-bis (every run, both models)
-    H12a      AI seed chain (playbooks + embeddings)
-    H12b      playbook consumers seed
-    H12c      agents seed
-    H13       acceptance gate (all traps clear + invariants pass + the stamp proved keyless + cost envelope)
-    H14       Exchange mailbox roles scoped to the customer's group (T4)
-
-  Estimated wall-clock: 42 min (no lead-time gates surfaced by H0)
-  Estimated cost impact: $450/mo for the dedicated stamp (tier 'smb', ceiling $700/mo)
-
-  Manual gates you MAY encounter mid-run:
-    - Model 2 admin consent URL (H0.5) — customer admin clicks
-    - Azure quota bump (if H1 hits soft cap) — operator opens support ticket; advance via /gates/{gateId}/advance once the condition is met — it re-runs the gate's verifier now (SKILL-07 fix; T186 L18)
-    - SPE container replication wait (H8) — empirically near-instant per operator memory feedback_spe_container_timing; 25h fallback ceiling in the SKILL, rarely fires
-
-  DESTRUCTIVE OPERATIONS: none in fresh-provisioning mode. Upgrade mode may
-  overwrite Bicep-managed resources with drift; if this is an upgrade run,
-  H2a's what-if diff will be presented separately before applying.
+  customerId / tenantId / tenancyModel / profile / subscriptionId / dataverseEnvUrl / environmentId
+  Handlers (one set for both models; D-12): H0.5 consent (Model 2 only) · H1 resource group ·
+    H2a Bicep apply (30-min timeout) · H2b AI Search indexes (7) · H3 per-customer BFF app registration (FIC, T240a) ·
+    H4 per-tenant KV secrets · H4b bulk app settings (one batch, one restart; F20) · H5 adopt the operator's Dataverse
+    environment (never creates — T228) · H10 application users + Graph parity (before H6) · H6 SpaarkeMaster import
+    (managed by default — T218b) · H7 env vars · H8 SPE root container (T227e) ·
+    H9 BFF deploy (staging slot, after H4 + H4b) · H11 users (identityPreset + users) · H12a AI seed · H12b playbook
+    consumers · H12c agents · H13 acceptance (traps, invariants, keyless stamp, cost) · H14 Exchange mailbox roles (T4)
+  Estimated wall-clock: ~42 min without lead-time gates   Estimated cost: ${estimate}/mo (tier '{tier}', ceiling ${cap}/mo)
+  Manual gates you MAY meet: H0.5 Model 2 admin consent · H1 Azure quota bump (advance re-runs the verifier) ·
+    H8 SPE replication (near-instant in practice; 25 h fallback ceiling)
+  DESTRUCTIVE OPERATIONS: none in fresh-provisioning mode. Upgrade mode may overwrite Bicep-managed resources with
+    drift; H2a's what-if diff is presented separately before applying.
 
 To proceed with this run, type the exact phrase:
-
     proceed with provisioning
-
 (a bare "y" or "yes" is NOT accepted at this gate — spec §4.3a.4)
 ```
 
-Wait for the literal string `proceed with provisioning`. Anything else — including "y", "yes", "go", "ok" — prompts a re-ask with the same gate. This is by design per NFR-11 auditability (the operator's explicit phrase is captured in the run's audit trail).
-
-**Batch mode (BAT-03, SESSION 16)** — the Step 3 gate is enforced at Step 1.0 (JSON schema `const:"proceed with provisioning"` on `intake.confirmationAcknowledgment`, PLUS the Step 1.0 branch that explicitly matches the string and exits on drift). Step 3 does NOT re-prompt in batch mode; the intake-level attestation is what carries the auditable intent. The SHA-256 of the intake file is captured into `nonSecretParameters.intakeFileSha256` at Step 4.0 so the L2 audit record can prove-back which exact intake JSON authorized this run:
-
-```powershell
-if (-not $script:SkipInteractiveIntake) {
-  # INTERACTIVE — retry-until-literal Read-Host loop
-  do {
-    $phrase = Read-Host
-    if ($phrase -ne 'proceed with provisioning') {
-      Write-Host "(literal phrase required; try again OR press Ctrl+C to abort)"
-    }
-  } until ($phrase -eq 'proceed with provisioning')
-  $confirmationPhrase = $phrase
-} else {
-  # BATCH — attestation already validated at Step 1.0; carry the phrase into Step 4.0
-  $confirmationPhrase = 'proceed with provisioning'
-  Write-Host "  [BATCH] Confirmation gate satisfied by intake.confirmationAcknowledgment (validated at Step 1.0)." -ForegroundColor Cyan
-}
-```
-
----
+Pass what the operator typed, verbatim: `Confirm-ProvisionGate.ps1 -SessionFile $S -Phrase '<text>'`. Exit 7 → anything
+else ("y", "yes", "go", "ok") — re-ask the same gate. Batch (BAT-03): run it without `-Phrase`; it re-checks the
+intake attestation and records the intake SHA-256. The phrase is captured in the run's audit trail (NFR-11).
 
 ### Step 4: Execute — issue THE single POST + poll → advance
 
-Once Step 3's `proceed with provisioning` phrase captured (interactive) OR `confirmationAcknowledgment` field validated (batch), Step 4 issues THE single POST that mutates L2 state. L2 unconditionally enqueues H0 → reconciler dispatches H1 → H2a → ... → H13 → H14 without further operator input.
-
 #### 4.0. Enqueue
+`Start-ProvisioningRun.ps1 -SessionFile $S` — refuses without the Step 3 phrase or the Step 1f environmentId; builds
+`CreateRunRequest` (exactly `customerId, environmentId, tenancyModel, profile, nonSecretParameters`; the
+`nonSecretParameters` keys are a CLOSED SET — `IntakeParameterCatalog`, else 400 `intake-unknown-key`) and POSTs once.
+Prints `RUN_ID=`. 403 → the operator lacks the Operator role; 409 → a run already holds the customer — never POST a
+second one. L2 then auto-advances the DAG; `/resume` is ONLY for a `Failed` run.
 
-Per Wave 0 Decision 1 (`tenantId` flows via `nonSecretParameters`) + Decision 6 (mechanical prune to match `CreateRunRequest` top-level shape) + Decision 3 (`confirmationAcknowledgment` in nonSecretParameters). `CreateRunRequest` (`RunsEndpoints.cs:861-880`) accepts EXACTLY `customerId, environmentId, tenancyModel, profile, nonSecretParameters` — no `tenantId` top-level, no `mode`.
-
-```powershell
-$intakeFileSha256 = if ($BatchIntakeFile) { (Get-FileHash -Path $BatchIntakeFile -Algorithm SHA256).Hash } else { $null }
-
-# --- T228: the customer's own subscription and Dataverse environment — required for EVERY model ---
-# The operator created both (PRQ-S-00 / PRQ-C-09). NEVER default either — in particular never `az account show`, which
-# is the operator's current subscription, not the customer's (ISH-02 used to do exactly that for Model 1).
-if ([string]::IsNullOrWhiteSpace($subscriptionId) -or [string]::IsNullOrWhiteSpace($dataverseEnvUrl)) {
-  Write-Error "[skill] Step 4.0 HARD STOP: intake must carry subscriptionId AND dataverseEnvUrl (Step 1b-bis; T228). L2 returns 400 subscription-id-required / dataverse-env-url-invalid otherwise. Correct the intake and rerun."
-  exit 1
-}
-# --- T229: the cost tier + estimate — required for every model (L2 400s quota-cost-envelope-* otherwise) ---
-if ([string]::IsNullOrWhiteSpace($tier) -or $null -eq $estimatedMonthlyUsd) {
-  Write-Error "[skill] Step 4.0 HARD STOP: intake must carry tier AND estimatedMonthlyUsd (Step 1b-ter; T229)."
-  exit 1
-}
-$resolvedSubscriptionId = $subscriptionId
-
-# --- openAiRegion → openAiLocation mapping (Bicep param name is openAiLocation, intake field is openAiRegion) ---
-$resolvedOpenAiLocation = if ($openAiRegion) { $openAiRegion } else { 'westus3' }  # canonical Spaarke default per operator memory reference_azure_fresh_sub_regional_gotchas
-
-$runRequest = @{
-  customerId    = $customerId
-  environmentId = $environmentId          # created at Step 1f
-  tenancyModel  = $tenancyModel           # Model1 | Model2 (case-sensitive — T223/T224)
-  profile       = $profile                # paired with tenancyModel per Step 1e: Model1 → spaarke-hosted-model2, Model2 → customer-owned-model2
-  nonSecretParameters = @{
-    tenantId                    = $tenantId              # I1 invariant per Wave 0 Decision 1
-    subscriptionId              = $resolvedSubscriptionId # T228 — the customer's own subscription; H1/H2a/H2b/H4/H4b/H8/H9/H13/H14
-    dataverseEnvUrl             = $dataverseEnvUrl        # T228 — the operator's environment; H5 adopts it (L2 stores the canonical https://{host}/)
-    openAiLocation              = $resolvedOpenAiLocation # Bicep param name (openAiLocation), NOT openAiRegion; intake field renamed at the boundary
-    confirmationAcknowledgment  = $confirmationPhrase     # verbatim "proceed with provisioning"
-    intakeFileSha256            = $intakeFileSha256       # batch-mode audit trail (null in interactive)
-    region                      = $region                 # primary platform region (e.g. westus2) — distinct from openAiLocation
-    tier                        = $tier                   # T229 — required: smb | enterprise | dedicated (H0Options.GetCeilingUsd lookup key)
-    estimatedMonthlyUsd         = ([decimal]$estimatedMonthlyUsd).ToString([cultureinfo]::InvariantCulture)   # T229 — required; a STRING via [decimal], which never prints an exponent (a large JSON double would print '1E+15') — nonSecretParameters is a string map, and a JSON number fails request binding (400 before CreateRun runs; found 2026-10-01 T245c review)
-    operatorUpn                 = $operatorUpn
-    containerTypeId             = $containerTypeId        # Step 0.5b (spaarke-constants.yaml per_env_constants.$env) — H4b writes SharePointEmbedded__ContainerTypeId from it; H8 finds or creates the customer's container in it. Missing → both fail (T226, 2026-09-30: was read but never sent)
-    # T245c (Step 1e-bis) — required; L2 refuses the run with the handler's own code when a rule is broken
-    identityPreset              = $identityPreset         # H11 — userprov-missing/invalid-identity-preset
-    usersJson                   = (ConvertTo-Json -InputObject @($users) -Compress -Depth 4)   # H11 — always a JSON array (do NOT add -AsArray: it double-nests)
-    environmentSecurityGroupId  = $environmentSecurityGroupId   # H11 (T232) — required for B2BGuest: userprov-missing/invalid-security-group-id; null for NativeAccount
-    exchangePolicyScopeGroupId  = $exchangePolicyScopeGroupId   # H14a — h14a-missing-policy-scope-group-id
-    communicationDefaultMailbox = $communicationDefaultMailbox  # H4 → KV Communication-DefaultMailbox
-    customerWorkforceTenantIds  = (ConvertTo-Json -InputObject @($customerWorkforceTenantIds) -Compress)   # T255 (INCOMING-141) — H4b writes WorkforceIdentity__CustomerTenantIds__N; workforce-tenants-* codes
-    displayName                 = $displayName            # T259 (ISS-010) — REQUIRED: H10 names the customer's business unit with it (directly under the root, sibling of Secure Record); h10-customer-display-name-required / -invalid. The full name, never the pac fallback's substitute (Step 1f)
-    # CLOSED SET (task 245a): L2 accepts ONLY the keys in IntakeParameterCatalog
-    # (src/server/services/Sprk.Provisioning.ControlPlane.Core/Models/IntakeParameterCatalog.cs).
-    # Any other key — a typo, `notes`, a value some handler produces — is a 400 with
-    # errorCode 'intake-unknown-key' (the response lists the accepted keys). Adding a key here
-    # means adding it to that catalog AND declaring which handler reads it.
-    # environmentName may be omitted (L2 stores 'prod'); dev | staging | prod only.
-    # DO NOT include the SKILL-LOCAL batch policy fields (mcpDisconnectPolicy / acknowledgeUpgradeMode /
-    # onFailedPolicy / onQuarantinedPolicy / onManualGatePolicy / postmortemFile), nor customerOutboundB2BAttested (PRQ-C-14) — those are
-    # BAT-01..09 control-flow knobs, NOT L2 payload. They control this skill's control flow at
-    # Steps 0d/1a/1g/4b/5/7b and would be noise on the L2 audit record.
-    # costEnvelopePolicy is GONE (T229): it carried the shared-trial warnAndProceed waiver; L2 now
-    # refuses it as an unknown key.
-  }
-}
-# T254 — the OPTIONAL OpenAI spend limit (Step 1b-quater): sent only when set; absent = no limit. A string via [decimal]
-# like estimatedMonthlyUsd. L2 refuses a bad value with 400 quota-openai-monthly-limit-invalid.
-if (-not [string]::IsNullOrWhiteSpace("$openAiMonthlyLimitUsd")) {
-  $runRequest.nonSecretParameters.openAiMonthlyLimitUsd = ([decimal]$openAiMonthlyLimitUsd).ToString([cultureinfo]::InvariantCulture)
-}
-# T218b — the package type (Step 1b-quinquies): sent only when the owner instructed unmanaged; absent = managed.
-if (-not [string]::IsNullOrWhiteSpace("$solutionPackageType")) {
-  $runRequest.nonSecretParameters.solutionPackageType = "$solutionPackageType"
-}
-# T256 — the H7b dry run (Step 1b-sexies): sent only when true; absent = apply. Exact lower case — L2 refuses anything
-# else with 400 secure_setup.dry_run_invalid.
-if ($secureRecordSetupDryRun -eq $true) {
-  $runRequest.nonSecretParameters.secureRecordSetupDryRun = 'true'
-}
-$body = $runRequest | ConvertTo-Json -Depth 5
-
-$response = Invoke-RestMethod `
-  -Uri "$l2Base/api/runs" `
-  -Method POST `
-  -Headers @{ Authorization = "Bearer $token" } `
-  -Body $body -ContentType "application/json; charset=utf-8"   # names may be non-ASCII (pwsh < 7.4 does not default to UTF-8)
-
-$runId = $response.runId  # response shape: { runId, customerId, status:"NotStarted", location:"/api/runs/{runId}?customerId=..." }
-```
-
-L2 returns 202 within 100ms and the reconciler picks up H0 within ~5s. L2's state reconciler then auto-advances the DAG — `POST /api/runs/{id}/resume` is ONLY for retry of a `Failed` run per `RunsEndpoints.cs:232-244`, NOT a transition trigger.
+Re-attaching to a run that already exists (`--resume <runId>`, a batch `WAITING.md`, a Fallback F3 re-invocation, or
+Step 1a `REGISTRY=in-progress` — take the run id from the earlier session file, `runs/{runId}*.md|json` or
+`sprk_currentrunid`): `New-ProvisionSession.ps1 ... -ResumeRunId <runId>`, then go straight to Step 4a.
 
 #### 4a. Poll loop
+`Watch-ProvisioningRun.ps1 -SessionFile $S` polls every 10 s for 9 min (exit 10 → call again; or run it in the
+background with `-MaxMinutes 60`). It refreshes the token on 401 (3 strikes → stop, F2), retries a 5xx once (then exit 9
+→ F3) and checks `/healthz` when the run stalls outside H2a/H8/H12a (EXEC-05 — there is no nudge for a stuck `Running`
+run; escalate as F3). Track each handler in TodoWrite and report progress every ~5 handlers or on any state change.
 
-Poll `GET /api/runs/{runId}?customerId={customerId}` at **10s intervals**. The `?customerId=` query parameter is MANDATORY per `RunsEndpoints.cs:582` (`TryValidateRouteAndPartition` returns 400 if missing).
-
-```powershell
-# URL-encode customerId per RFC 3986; Step 1a already enforced the customerId standard (lowercase letters + digits only), but escape defensively.
-# Bucket B LOW#4 SESSION 18 (customer-provisioning-orchestration-r1 adversarial e2e verify workflow wepdcb8we):
-# implement token auto-refresh on 401 with a bounded retry counter — Prior version was prose-only.
-# A Model 2 run entering H0.5 waiting on customer admin consent + 45min operator idle would blow past the
-# ~1h L2-audience token TTL; the naive Invoke-RestMethod call would throw HttpResponseException 401 and
-# either crash the skill (no handoff) or hit an unbounded retry loop with the expired token.
-$encodedCustomerId = [Uri]::EscapeDataString($customerId)
-$maxConsecutive401 = 3   # after this many, escalate per Fallback F2 (line 1809)
-$consecutive401 = 0
-
-function Invoke-L2PollWithTokenRefresh {
-    param([string]$Uri, [string]$Env)
-    $script:consecutive401 = 0
-    while ($true) {
-        try {
-            return Invoke-RestMethod -Uri $Uri -Method GET -Headers @{ Authorization = "Bearer $script:token" }
-        }
-        catch [System.Net.Http.HttpRequestException] {
-            # PowerShell 7+: HttpRequestException.StatusCode is HttpStatusCode?.
-            $statusCode = $_.Exception.StatusCode
-            if ($statusCode -ne 'Unauthorized') { throw }
-            $script:consecutive401++
-            if ($script:consecutive401 -ge $maxConsecutive401) {
-                throw "Poll loop hit $maxConsecutive401 consecutive 401s after token refresh — escalate per Fallback F2 (line 1809). Operator's AAD context is broken; run 'az login' + rerun skill with -Resume $runId."
-            }
-            Write-Warning "Poll got 401 (attempt $script:consecutive401/$maxConsecutive401) — re-acquiring L2-audience token via 'az account get-access-token' then retrying ONCE."
-            $script:token = az account get-access-token --resource "api://spaarke.com/provisioning-controlplane-$Env" --query accessToken -o tsv 2>$null
-            if ([string]::IsNullOrWhiteSpace($script:token)) {
-                throw "az account get-access-token returned empty for api://spaarke.com/provisioning-controlplane-$Env — az context lost. Run 'az login' + rerun skill with -Resume $runId."
-            }
-            # Loop continues → retry with fresh token.
-        }
-    }
-}
-
-$run = Invoke-L2PollWithTokenRefresh -Uri "$l2Base/api/runs/$runId`?customerId=$encodedCustomerId" -Env $environment
-```
-
-**Reconciler liveness check (EXEC-05)**: if 3 consecutive polls return identical state AND the current handler is not one of the long-running ones (H2a bicep = 30min, H8 SPE 25h fallback, H12a AI-seed = 15min), fetch `$l2Base/healthz` to verify L2 is still up. If the run is `WaitingOnGate` and the gate's condition is met, `POST /api/runs/{runId}/gates/{gateId}/advance?customerId={cid}` re-dispatches the gate's verifier with a fresh attempt. A stuck `Running` run has no nudge: escalate as Fallback F3.
-
-**`/resume` is for `Failed` runs only (T186 L18, 2026-10-15).** It used to enqueue a control envelope no Worker handler took (dead-lettered — resume, cancel and gate-advance were all no-ops). It now re-takes the customer guard, sets the run `Running` and dispatches `currentPhase` with a fresh attempt, and returns 409 `run-not-resumable` for any other status. The earlier EXEC-05 use of `/resume` on a `Running` run is removed.
-
-Track TodoWrite entries for each handler as it enters/exits `Running`:
-- `Handler H2a (bicep-apply) — Running`
-- `Handler H2a (bicep-apply) — Completed (28m 14s)`
-- `Handler H6 (dv-solutions) — Running`
-- ...
-
-Present progress to the operator every ~5 completed handlers OR on any state transition (`WaitingOnGate`, `Failed`, `Quarantined`, `Cancelled`).
-
-#### 4b. Handle each terminal state (RunStatus enum per `ProvisioningRun.cs:212-239`)
-
-The run's `status` field transitions through the actual enum values — NOT the fictional Accepted/Executing/Succeeded/Drifted values earlier drafts of this skill listed:
+#### 4b. Handle each terminal state (RunStatus enum per `ProvisioningRun.cs`)
 
 | Status | Meaning | Skill action |
 |---|---|---|
-| `NotStarted` | POST /api/runs returned 202; H0 not yet dequeued from Service Bus | Poll |
-| `Running` | Handlers actively executing per the reconciler DAG | Poll; update TodoWrite; apply EXEC-05 liveness nudge if stuck |
-| `WaitingOnGate` | Handler paused pending external condition (H0.5 admin consent, H1 quota, H8 SPE replication) | See Step 5 (manual gate handling) |
-| `Completed` | All handlers completed + H13 acceptance passed | See Step 6 (completion handoff) |
-| `Failed` | Handler failed with `Retryable*` or `Resumable` class per §4C rollback taxonomy. `Failed` with rejection `secure_setup.dry_run` is the expected end of a dry run: show the `plan` from gate `h7b-secure-setup-plan` and stop; never resume it (resume repeats the dry run). | Present failure + `POST /api/runs/{id}/resume?customerId=` option to operator |
-| `Cancelled` | Operator called `POST /api/runs/{id}/cancel`; sprk_currentrunid released (EXEC-07 fix) | Report cancellation; no auto-restart |
-| `Quarantined` | Handler failed with `QuarantineRequired` class | HARD STOP; require `POST /api/runs/{id}/clear-quarantine?customerId=` with reason + audit trail |
+| `NotStarted` / `Running` | queued / handlers executing | keep polling |
+| `WaitingOnGate` (exit 4) | handler paused on an external condition | Step 5 |
+| `Completed` (exit 0) | all handlers done + H13 acceptance passed | Step 6 |
+| `Failed` (exit 2) | `Retryable*` / `Resumable` failure (§4C). `secure_setup.dry_run` = the expected end of an H7b dry run: show the plan from gate `h7b-secure-setup-plan`; never resume it | Interactive: show phase + error, ask "Resume this run? (yes/no)"; yes → `Invoke-RunAction.ps1 -Action Resume`, then poll; no → abandoned, Steps 6b + 7. Batch: the script applied `onFailedPolicy` |
+| `Cancelled` (exit 5) | `POST .../cancel`; `sprk_currentrunid` released | report; no auto-restart |
+| `Quarantined` (exit 3) | `QuarantineRequired` failure | HARD STOP; `runs/{runId}-quarantine.json`; operator must `clear-quarantine` with reason + audit trail |
 
-There is NO `Drifted` state — drift is detected inline by H13 and surfaces as `Failed` with a specific rejection code (upgrade-drift-detected).
-
-Do NOT auto-retry `Failed` runs. Auto-retry hides operator-actionable diagnostics. Ask.
-
-**Batch-mode terminal-state handling (BAT-07, SESSION 16)**:
-
-```powershell
-switch ($run.status) {
-  'Completed' {
-    # Interactive AND batch: proceed to Step 5 (manual gate handling) / Step 6 (completion handoff)
-  }
-  'Failed' {
-    if ($script:SkipInteractiveIntake) {
-      # BATCH — $script:BatchOnFailedPolicy is 'autoResumeOnce' | 'abandon' (default)
-      switch ($script:BatchOnFailedPolicy) {
-        'autoResumeOnce' {
-          if (-not $script:AlreadyResumed) {
-            Write-Host "  [BATCH] onFailedPolicy=autoResumeOnce → POST /api/runs/$runId/resume?customerId=$encodedCustomerId (single attempt)" -ForegroundColor Yellow
-            Invoke-RestMethod -Uri "$l2Base/api/runs/$runId/resume`?customerId=$encodedCustomerId" -Method POST -Headers @{ Authorization = "Bearer $token" }
-            $script:AlreadyResumed = $true
-            continue  # back to poll loop
-          }
-          # Fall through — already resumed once and still Failed. Write diag + exit.
-        }
-        'abandon' { <#  fall through — write diag + exit #> }
-      }
-      $diag = @{
-        runId       = $runId
-        customerId  = $customerId
-        finalStatus = 'Failed'
-        policy      = $script:BatchOnFailedPolicy
-        currentPhase = $run.currentPhase
-        rejection   = $run.rejectionCode
-        message     = $run.rejectionMessage
-      } | ConvertTo-Json -Depth 4
-      $diagPath = "runs/$runId-failed.json"
-      New-Item -Path (Split-Path $diagPath) -ItemType Directory -Force -ErrorAction SilentlyContinue | Out-Null
-      Set-Content -Path $diagPath -Value $diag
-      Write-Error "[skill] Batch HARD STOP (BAT-07, onFailedPolicy=$($script:BatchOnFailedPolicy)): run $runId ended Failed at phase $($run.currentPhase). Diagnostic: $diagPath"
-      # Still writes lessons-learned.md via Step 7 (postmortem is UNCONDITIONAL)
-      # Non-zero exit is 2 per BAT-07 convention.
-      exit 2
-    }
-    # INTERACTIVE — ask operator
-    Write-Host "❌ Run FAILED at phase $($run.currentPhase). Rejection: $($run.rejectionMessage)"
-    $answer = Read-Host "Resume this run? (yes/no)"
-    if ($answer -eq 'yes') { Invoke-RestMethod -Uri "$l2Base/api/runs/$runId/resume`?customerId=$encodedCustomerId" -Method POST -Headers @{ Authorization = "Bearer $token" }; continue }
-    Write-Error "Run abandoned by operator."
-    exit 2
-  }
-  'Quarantined' {
-    # $script:BatchOnQuarantinedPolicy is 'failFast' (enum-of-one for forward compat)
-    $diag = @{
-      runId       = $runId
-      customerId  = $customerId
-      finalStatus = 'Quarantined'
-      quarantineReason = $run.quarantineReason
-      remedy      = "Manually invoke QuarantineClearService via a separate maintenance workflow — batch mode never auto-clears quarantine per BAT-07 rationale (unattended runs must not silently clear operator-required state)."
-    } | ConvertTo-Json -Depth 4
-    $diagPath = "runs/$runId-quarantine.json"
-    New-Item -Path (Split-Path $diagPath) -ItemType Directory -Force -ErrorAction SilentlyContinue | Out-Null
-    Set-Content -Path $diagPath -Value $diag
-    Write-Error "[skill] HARD STOP (BAT-07, Quarantined): run $runId requires manual QuarantineClearService intervention. Diagnostic: $diagPath. Postmortem will still be written via Step 7."
-    exit 3
-  }
-  'Cancelled' {
-    Write-Warning "Run cancelled. sprk_currentrunid released."
-    exit 5
-  }
-  default {
-    # NotStarted / Running / WaitingOnGate — keep polling; WaitingOnGate handled in Step 5
-    continue
-  }
-}
-```
-
----
+There is NO `Drifted` state — drift surfaces as `Failed` with `upgrade-drift-detected`. Every terminal outcome still
+goes through Step 6b (report) and Step 7 (postmortem).
 
 ### Step 5: Manual Gate Handling
 
-Some handlers reach `WaitingOnGate` because they require operator-visible action:
-
-> **What a gate holds up (task 245a DAG edges).** H3 (the per-customer BFF app registration, which also
-> verifies the customer's admin consent on Model 2) is an ancestor of H4b, H6, H8 and H9, and through them
-> of H7 onward, because each reads H3's `bffAppRegId`. While H3 waits on consent, the Dataverse branch
-> (H6 solution import → H7 env vars) waits with it; only H2b and H5 keep moving. Expect that when
-> estimating a gated run's time.
-
-**Batch-mode dispatch (BAT-08, SESSION 16)** — the interactive sub-flows below (5a/5b/5c/5d) assume a live operator at stdin. In batch mode (`$script:SkipInteractiveIntake -eq $true`), the shared dispatch block below runs FIRST and short-circuits the interactive sub-flows per `$script:BatchOnManualGatePolicy`:
-
-```powershell
-if ($script:SkipInteractiveIntake -and $run.status -eq 'WaitingOnGate') {
-  $gateInfo = @{
-    runId       = $runId
-    customerId  = $customerId
-    gateId      = $run.gateId
-    handler     = $run.currentPhase
-    reason      = $run.gateReason
-    instructions = $run.gateInstructions
-    detected    = (Get-Date -Format 'o')
-  } | ConvertTo-Json -Depth 4
-  $gatePath = "runs/$runId-gate.json"
-  New-Item -Path (Split-Path $gatePath) -ItemType Directory -Force -ErrorAction SilentlyContinue | Out-Null
-  Set-Content -Path $gatePath -Value $gateInfo
-
-  switch ($script:BatchOnManualGatePolicy) {
-    'waitAndExit' {
-      # Write WAITING marker so operator resume flow can pick up
-      $waitingMd = @"
-# Run $runId — WAITING at manual gate
-
-- **Gate**: $($run.gateId) (handler: $($run.currentPhase))
-- **Reason**: $($run.gateReason)
-- **Instructions**: $($run.gateInstructions)
-- **Detected**: $(Get-Date -Format 'o')
-
-## Resume
-After clearing the gate condition, rerun the skill with:
-    /provision-environment $customerId --batch <original-intake.json> --resume $runId
-"@
-      $waitingPath = "runs/$runId-WAITING.md"
-      Set-Content -Path $waitingPath -Value $waitingMd
-      Write-Warning "[skill] Batch WAITING (BAT-08, onManualGatePolicy=waitAndExit): run $runId hit gate '$($run.gateId)'. Wrote $waitingPath + $gatePath. Exit 4."
-      exit 4
-    }
-    'pollUntilTimeout' {
-      # Bucket B MED#13 SESSION 18 (customer-provisioning-orchestration-r1
-      # adversarial e2e verify workflow wepdcb8we): branch the poll cap on
-      # gate identity. Step 5c prose promises H8 SPE container-type replication
-      # a 25h fallback (per MS's documented 24h SLO), but the default 30-min
-      # cap would prematurely exit-4 on a genuinely-slow replication event.
-      # Other gates (H0.5 admin consent, H1 quota bump) legitimately deserve
-      # the 30-min ceiling — operator escalates to Fallback F3 after that.
-      # Empirical practice per operator memory feedback_spe_container_timing:
-      # SPE replication is near-instant (~2 min in 2026-08-22 Model 1 stand-up),
-      # so the 25h ceiling is defensive and almost never fires in real dispatches.
-      $isSpeReplication = ($run.gateId -eq 'spe-replication') -or
-                          ($run.currentHandler -eq 'H8')
-      $capMinutes = if ($isSpeReplication) { 1500 } else { 30 }  # 1500 min = 25h for SPE, 30 min otherwise
-      $capLabel = if ($isSpeReplication) { '25h SPE-replication fallback' } else { '30 min' }
-      $deadline = (Get-Date).AddMinutes($capMinutes)
-      Write-Host "[skill] Batch onManualGatePolicy=pollUntilTimeout — polling gate '$($run.gateId)' for clear ($capLabel hard cap)..." -ForegroundColor Cyan
-      while ((Get-Date) -lt $deadline) {
-        Start-Sleep -Seconds 10
-        $run = Invoke-RestMethod -Uri "$l2Base/api/runs/$runId`?customerId=$encodedCustomerId" -Method GET -Headers @{ Authorization = "Bearer $token" }
-        if ($run.status -ne 'WaitingOnGate') { break }
-      }
-      if ($run.status -eq 'WaitingOnGate') {
-        Write-Warning "[skill] Batch WAITING (BAT-08, pollUntilTimeout hit $capLabel cap): run $runId still at gate '$($run.gateId)'. Exit 4."
-        exit 4
-      }
-      # else fall through — status advanced; continue poll loop
-      continue
-    }
-    'failFast' {
-      Write-Warning "[skill] Batch WAITING (BAT-08, onManualGatePolicy=failFast): run $runId hit gate '$($run.gateId)' — exiting immediately without poll. Exit 4."
-      exit 4
-    }
-  }
-}
-```
-
-Interactive-mode sub-flows below assume a live operator; batch mode returns before reaching them.
+Batch: `Watch-ProvisioningRun.ps1` already applied `onManualGatePolicy` (`waitAndExit` → `runs/{runId}-gate.json` +
+`runs/{runId}-WAITING.md`, exit 4; `pollUntilTimeout` → 30 min, 25 h for H8 SPE; `failFast` → exit 4). **Interactive:
+read [`references/manual-gates.md`](references/manual-gates.md) before continuing** — it has the operator messages for
+each gate. Advance ONLY with `Invoke-RunAction.ps1 -Action Advance -GateId <id>` when the operator says the action is
+done: L2 re-verifies, and the run stays `WaitingOnGate` if the condition is not met. NEVER use `/resume` for a gate.
+While H3 waits on consent, the Dataverse branch (H6 → H7) waits with it; only H2b and H5 keep moving.
 
 #### 5a. H0.5 Model 2 admin consent (Model 2 only)
-
-```
-🔔 MANUAL GATE: Customer admin consent required (Model 2)
-
-  Handler: H0.5 consent-callback
-  NOTE (T258): the BFF maps this route only with `Onboarding__Enabled=true`, which no stamp sets; the endpoint cannot carry consent to L2 as built (ISS-013).
-  Reason:  The customer's BFF app-reg (created by H3) needs admin consent on the customer's
-           Entra tenant before H10 can create a Dataverse Application User.
-
-  ACTION FOR CUSTOMER ADMIN (send this URL to the customer — skill substitutes {tokens} before display):
-    URL construction:
-      # T227a: there is no shared BFF app id or base URL in spaarke-constants.yaml. Model 2 is out of scope (D-12);
-      # if it returns, take the customer's BFF app id from the run (H3's InterStepState.BffAppRegId via GET /api/runs/{runId})
-      # and the callback base from the customer stamp's BFF host name.
-      $bffAppId = '<customer BFF app id from the run>'
-      $callback = "https://<customer stamp BFF host>/api/onboarding/consent-callback"
-      $consentUrl = "https://login.microsoftonline.com/$tenantId/adminconsent" +
-                    "?client_id=$bffAppId&redirect_uri=$([Uri]::EscapeDataString($callback))&state=$runId"
-      Write-Host $consentUrl
-
-    Example (shape only — real values substituted at runtime):
-      https://login.microsoftonline.com/<customer-tenant-guid>/adminconsent
-        ?client_id=<multitenant-bff-app-id>
-        &redirect_uri=https%3A%2F%2Fspaarke-bff-prod.azurewebsites.net%2Fapi%2Fonboarding%2Fconsent-callback
-        &state=<runId>
-
-  The customer admin clicks, signs in with a Global Admin account, and consents.
-  H0.5 will auto-detect the callback (HMAC-verified) and advance the run.
-
-  Skill will auto-poll every 30s for the next 2 hours. If no callback in 2h,
-  the skill will pause + ask you what to do.
-
-  Type 'status' anytime to see current wait state.
-  Type 'abandon' to abort the run + quarantine (requires clear-quarantine to resume).
-```
-
 #### 5b. H1 Azure quota bump (rare)
-
-```
-🔔 MANUAL GATE: Azure quota bump required (H1)
-
-  Handler: H1 resource-group provisioning
-  Reason:  Target subscription hit soft cap on {App Service PremiumV3 workers /
-           Storage GB / whatever the specific quota is}. H0 does not check
-           App Service quota (no readable API; T186 L17), so it surfaces here.
-
-  ACTION FOR OPERATOR:
-    1. Open Azure Portal → Subscription → Usage + Quotas → filter by {quota-name}
-    2. Request quota increase (may require Microsoft support ticket)
-    3. Wait for approval email (usually 15-60 min for standard bumps)
-    4. Return here and type 'advance' to have L2 re-verify quota + release the gate
-
-  Skill call on 'advance': POST /api/runs/{runId}/gates/{gateId}/advance?customerId={cid}
-  (NOT /resume — /resume is for retrying a Failed run per RunsEndpoints.cs:232-244.)
-```
-
-#### 5c. H8 SPE container-type replication (per operator memory `feedback_spe_container_timing`, MS's documented 24h wait is near-instantaneous in practice)
-
-```
-🔔 MANUAL GATE: SPE container-type replication in progress (H8)
-
-  Handler: H8 spe-container-create
-  Reason:  Container-type created successfully; H8.a needs Microsoft-side replication
-           to complete before it can verify or H9 can bind BFF to the container.
-
-  ACTION: none required. The skill polls H8.a on this schedule:
-    - Minutes 0-15: every 30-60s (empirical: near-instant per operator memory
-      `feedback_spe_container_timing`; 2026-08-22 Model 1 Prod stand-up saw
-      replication complete within ~2 min)
-    - Minutes 15-60: every 5 min
-    - Hour 1+: alert operator + fall back to 25h ceiling (defensive; almost
-      never fires in practice)
-
-  The skill will not exit the session; it stays on this gate until H8.a succeeds
-  OR operator types 'abandon'.
-```
-
+#### 5c. H8 SPE container-type replication
 #### 5d. Generic pattern for any other `WaitingOnGate`
-
-```
-🔔 MANUAL GATE: {gate name} ({handler name})
-
-  Reason: {gate reason from L2 response}
-  Action: {gate.instructions from L2 response}
-
-  Type 'advance' when the action is complete — skill will POST
-  /api/runs/{runId}/gates/{gateId}/advance?customerId={cid} and let L2 re-verify.
-  Type 'abandon' to quarantine the run.
-```
-
-**IMPORTANT**: NEVER auto-advance past a gate by trusting the operator's assertion. Always call `POST /api/runs/{id}/gates/{gateId}/advance?customerId={cid}` (per `RunsEndpoints.cs` GateAdvance handler) and let L2 re-verify the underlying condition (Dataverse query, Graph query, Azure resource state). If verification fails, the run stays at `WaitingOnGate`. `/resume` is ONLY for retrying a Failed run — using it for gate advance either does nothing (if run is still WaitingOnGate) or wastes a retry budget entry (if run has since transitioned to Failed).
-
----
 
 ### Step 6: Completion Handoff
 
-When the run reaches `Completed` (H13 acceptance passed — this is the terminal-success RunStatus per `ProvisioningRun.cs:212-239`; earlier drafts of this skill used the fictional `Succeeded`):
+#### 6a. Update `sprk_dataverseenvironment` registry — read then update
 
-#### 6a. Update `sprk_dataverseenvironment` registry — TWO-STEP: read then update (HARD-STOP on any failure)
-
-Per REG-04 (SESSION 15) and MED#10 (SESSION 19 — customer-provisioning-orchestration-r1 adversarial e2e verify workflow wepdcb8we, H13 Cosmos-first refactor): Step 6a is NOT belt-and-suspenders — it is the operator-side reconciliation for registry state that may have been PATCHed BEST-EFFORT by H13 after Cosmos-Completed already landed.
-
-**Post-MED#10 semantic change** (binding, since SESSION 19): H13 writes to Cosmos FIRST (`RunStatus = Completed`), then attempts the registry PATCHes (promoted-columns → `sprk_setupstatus = Ready`) AFTER. If either registry PATCH fails, H13 logs a `REGISTRY-STALE (MED#10 SESSION-19)` warning + returns `HandlerResult.Success` — the run IS complete (Cosmos is authoritative), but the registry may show ANY combination of the following stale states:
-
-| State | Cosmos | Registry columns (promoted) | Registry `sprk_setupstatus` |
-|---|---|---|---|
-| Full success (green path) | Completed | Ready-values | Ready |
-| Columns PATCH failed | Completed | stale/missing | InProgress (short-circuited) |
-| Setupstatus PATCH failed (columns OK) | Completed | Ready-values | InProgress |
-| Both PATCHes failed | Completed | stale/missing | InProgress |
-
-Step 6a MUST cover ALL FOUR cases. It:
-1. Reads the current `sprk_dataverseenvironment` row via Dataverse MCP (or Web API fallback).
-2. Compares observed columns to the run's Ready-state values (from `run.CompletedOn`, `run.InterStepState.*`, `run.Parameters.NonSecret.*`).
-3. Writes the missing columns (idempotent PATCH — no-op if H13 already landed them).
-4. Additionally sets `sprk_setupstatus = 'Ready'` **IFF** the observed value is `InProgress` (indicating H13's setupstatus PATCH did not land). This is the MED#10-driven addition to the operator recovery recipe. On observed `Ready`, do NOT re-write (H13 already succeeded — a no-op re-write burns a Dataverse RU with no state change).
-
-Prior REG-04 language "if that PATCH failed (leaving RunStatus=Running-blocked, not Completed), by the operator-side skill here" is NO LONGER TRUE after MED#10. RunStatus is Completed regardless of registry state; the operator-side skill picks up the residual registry PATCH in every failure combination above.
-
-Per Wave 0 Decision 2 (Dataverse MCP alt-key probe as the canonical registry lookup):
-
-```powershell
-# ---------------------------------------------------------------------------
-# Bucket B HIGH#10 SESSION 18 (customer-provisioning-orchestration-r1
-# adversarial e2e verify workflow wepdcb8we): Step 6a MUST NOT throw before
-# Step 6b writes the handoff report. Per SKILL.md line 60 MUST rule, the
-# handoff artifact `runs/{runId}.md` is a NON-NEGOTIABLE audit-trail obligation
-# — it is written on EVERY terminal outcome (success + registry-clean, success +
-# registry-stale, or hard failure). Prior behavior threw on the null-guards or
-# on Invoke-RestMethod PATCH errors → Step 6b + 6c never ran → operator lost
-# the mandatory audit artifact and had no diagnostic pointing at the failure.
-#
-# NEW STRUCTURE (Bucket B HIGH#10):
-#   - Step 6a uses flags $script:RegistryStale + $script:RegistryStaleDiagnostic
-#     to capture failure state INSTEAD OF throwing.
-#   - Step 6b writes the handoff report UNCONDITIONALLY (adding a REGISTRY-STALE
-#     section when the flag is set).
-#   - Step 6c writes a separate `runs/{runId}-registry-stale.md` skeleton with
-#     an actionable manual-recovery recipe (`pac data update` / Portal) when
-#     the flag is set, then exits non-zero AFTER the handoff report is written.
-#
-# The single-writer invariant on sprk_currentrunid (Bucket B HIGH#7) is
-# unaffected — this reshaping is purely about error-path ordering.
-# ---------------------------------------------------------------------------
-$script:RegistryStale = $false
-$script:RegistryStaleDiagnostic = $null
-
-# Task 245b: every promoted column comes from the run record (GET /api/runs/{id} → $run) — the SAME
-# sources H13 uses (H13E2EAcceptanceGateHandler.BuildPromotedColumnsForReady), so the operator fallback
-# can never write a different value than H13 would have.
-$isv                = $run.interStepState
-$completedAtIso     = ([datetimeoffset]$run.completedOn).ToString('o')
-$rgName             = $isv.resourceGroupName           # H2a output
-$appServiceName     = $isv.appServiceName              # H2a output
-$kvName             = $isv.keyVaultName                # H2a output (the CUSTOMER vault)
-$bffAppRegId        = $isv.bffAppRegId                 # H3 output — the customer BFF app registration (T257: registry sprk_bffappid)
-$azureSubId         = $run.parameters.nonSecret.subscriptionId
-$deployedBffVersion = $isv.bffBuildId                  # H9 output — the build it deployed
-$cacheBustToken     = $runId                           # new per deploy / upgrade, stable across retries
-# sprk_solutionversion — ImportedSolutionSet (T218b): "SpaarkeMaster {version} ({managed|unmanaged})" from H6's
-# importedSolutions SpaarkeMaster entry ($null when absent or versionless).
-$deployedSolutionVer = $null
-$pkg = @($isv.importedSolutions) | Where-Object { $_ -and "$($_.solutionUniqueName)".Trim() -ieq 'SpaarkeMaster' } | Select-Object -First 1
-if ($pkg -and -not [string]::IsNullOrWhiteSpace("$($pkg.version)")) {
-  $deployedSolutionVer = "SpaarkeMaster $("$($pkg.version)".Trim()) ($(if ($pkg.isManaged) { 'managed' } else { 'unmanaged' }))"
-}
-
-# Step 1: lookup — resolve environmentId GUID. Prefer the value captured at Step 1f
-# (skill session-local $environmentId). Fallback: query by sprk_customerid alt-key
-# in case Step 1f state was lost across a compact/handoff.
-if ([string]::IsNullOrWhiteSpace($environmentId)) {
-  try {
-    $lookup = mcp__dataverse__read_query(query = @"
-      <fetch top="1">
-        <entity name="sprk_dataverseenvironment">
-          <attribute name="sprk_dataverseenvironmentid" />
-          <filter><condition attribute="sprk_customerid" operator="eq" value="$customerId" /></filter>
-        </entity>
-      </fetch>
-"@)
-    $environmentId = $lookup.rows[0].sprk_dataverseenvironmentid
-  } catch {
-    $script:RegistryStale = $true
-    $script:RegistryStaleDiagnostic = "environmentId lookup failed (MCP): $($_.Exception.Message)"
-    Write-Warning "Step 6a environmentId lookup failed — will write registry-stale diagnostic AFTER handoff report. Diagnostic: $script:RegistryStaleDiagnostic"
-  }
-}
-if (-not $script:RegistryStale -and -not ($environmentId -match '^[0-9a-fA-F-]{36}$')) {
-  $script:RegistryStale = $true
-  $script:RegistryStaleDiagnostic = "environmentId could not be resolved for customerId=$customerId — value='$environmentId' does not match GUID shape"
-  Write-Warning "Step 6a HARD-WARN (Bucket B HIGH#10): $script:RegistryStaleDiagnostic. Handoff will still be written."
-}
-
-# Step 2a: OBSERVE current registry state BEFORE writing (MED#10 SESSION-19).
-# Because H13 (post-MED#10 Cosmos-first refactor) may have left the registry
-# in any of four stale states (see REG-04 table above), the operator recipe
-# reads the current sprk_setupstatus + observes column values BEFORE issuing
-# a PATCH. This drives the include-vs-exclude-sprk_setupstatus decision at
-# Step 2b (line ~1520 below).
-if (-not $script:RegistryStale) {
-  try {
-    $current = mcp__dataverse__read_query(query = @"
-      <fetch top="1">
-        <entity name="sprk_dataverseenvironment">
-          <attribute name="sprk_setupstatus" />
-          <attribute name="sprk_provisionedon" />
-          <filter><condition attribute="sprk_dataverseenvironmentid" operator="eq" value="$environmentId" /></filter>
-        </entity>
-      </fetch>
-"@)
-    $observedSetupStatus = $current.rows[0].sprk_setupstatus  # e.g. 'InProgress' if H13's setupstatus PATCH did not land
-  } catch {
-    # Non-fatal for the write path — if the read failed, default to including
-    # sprk_setupstatus in the PATCH (safe default: H13 may have missed it).
-    $observedSetupStatus = 'InProgress'
-    Write-Warning "Step 6a pre-observe read failed; defaulting to include sprk_setupstatus in the recovery PATCH. Diagnostic: $($_.Exception.Message)"
-  }
-}
-
-# Step 2b: update — write the promoted columns AND (conditionally) sprk_setupstatus.
-if (-not $script:RegistryStale) {
-  # MED#10 SESSION-19: include sprk_setupstatus IFF H13's setupstatus PATCH did
-  # NOT land (observed value is anything other than 'Ready'). If H13 already
-  # landed Ready, do NOT re-write it (RU-cost + audit-noise for no state change).
-  $fields = @{
-    sprk_provisionedon            = $completedAtIso     # from run.CompletedOn
-    sprk_bffversion               = $deployedBffVersion  # run.interStepState.bffBuildId (H9)
-    sprk_solutionversion          = $deployedSolutionVer # "SpaarkeMaster {version} ({type})" from run.interStepState.importedSolutions (H6, T218b)
-    sprk_azuresubscriptionid      = $azureSubId
-    sprk_resourcegroupname        = $rgName
-    sprk_appservicename           = $appServiceName
-    sprk_keyvaultname             = $kvName
-    sprk_bffappid                 = $bffAppRegId         # run.interStepState.bffAppRegId (H3) — T257
-    sprk_containertypeid          = $containerTypeId
-    sprk_ClientCacheBustToken     = $cacheBustToken
-    # sprk_currentrunid release is routed via ICustomerRunGuard.ReleaseAsync
-    # per Bucket B HIGH#6/#7 SESSION 18 — do NOT clear it from this operator-side PATCH.
-    # If drift detected on any set-once column, operator MUST HARD STOP + escalate — do NOT overwrite blindly.
-  }
-  if ($observedSetupStatus -ne 'Ready') {
-    # MED#10 SESSION-19 recovery: H13 either short-circuited the setupstatus
-    # PATCH after a columns PATCH failure OR the setupstatus PATCH itself
-    # failed. Either way, the operator-side reconciliation now sets it.
-    $fields.sprk_setupstatus = 'Ready'
-    Write-Warning "Step 6a MED#10 recovery: observed sprk_setupstatus='$observedSetupStatus' — including in recovery PATCH (H13's server-side setupstatus PATCH did not land)."
-  }
-  try {
-    mcp__dataverse__update_record(
-      entityName = "sprk_dataverseenvironment",
-      recordId   = $environmentId,
-      fields = $fields
-    )
-  } catch {
-    # F1 fallback path (Dataverse MCP disconnect) — use raw Web API PATCH with operator's az token.
-    # Bucket A HIGH#13 SESSION 18 fix: previously read `$constants.spaarke[$environment].registryDvUrl`
-    # which was a PHANTOM shape ($constants.spaarke.* never existed in spaarke-constants.yaml — the
-    # real path is $constants.name_templates.registryDvUrl.{env}, matching Step 0.5b line 347).
-    #
-    # Bucket B HIGH#10 SESSION 18: nested try/catch here so a fallback failure ALSO writes to the
-    # $script:RegistryStale flag instead of throwing. Step 6b runs unconditionally after this block.
-    try {
-      $dvUrl = $constants.name_templates.registryDvUrl.$environment  # e.g. https://spaarkedev1.crm.dynamics.com for dev per operator memory feedback_no_central_managing_env_yet
-      if ([string]::IsNullOrWhiteSpace($dvUrl)) {
-        throw "registry env dvUrl not resolvable for controlPlaneEnv='$environment' — verify scripts/provisioning-prereqs/spaarke-constants.yaml name_templates.registryDvUrl.$environment is populated"
-      }
-      $dvToken = az account get-access-token --resource $dvUrl --query accessToken -o tsv
-      if ([string]::IsNullOrWhiteSpace($dvToken)) {
-        throw "az token acquisition failed for resource '$dvUrl' — operator's AAD context lost between Step 0b and Step 6a (run 'az login')"
-      }
-      # MED#10 SESSION-19: also honor the include-sprk_setupstatus decision in
-      # the Web API fallback body (same rule as Step 2b MCP path above).
-      $bodyHash = @{ sprk_provisionedon = $completedAtIso; sprk_bffversion = $deployedBffVersion; sprk_solutionversion = $deployedSolutionVer; sprk_azuresubscriptionid = $azureSubId; sprk_resourcegroupname = $rgName; sprk_appservicename = $appServiceName; sprk_keyvaultname = $kvName; sprk_bffappid = $bffAppRegId; sprk_containertypeid = $containerTypeId; sprk_ClientCacheBustToken = $cacheBustToken }
-      if ($observedSetupStatus -ne 'Ready') { $bodyHash.sprk_setupstatus = 'Ready' }
-      $body = $bodyHash | ConvertTo-Json
-      Invoke-RestMethod -Uri "$dvUrl/api/data/v9.2/sprk_dataverseenvironments($environmentId)" `
-        -Method PATCH -Headers @{ Authorization = "Bearer $dvToken"; "OData-Version" = "4.0"; "If-Match" = "*" } `
-        -Body $body -ContentType "application/json"
-    } catch {
-      $script:RegistryStale = $true
-      $script:RegistryStaleDiagnostic = "BOTH Dataverse MCP AND raw Web API fallback failed (Bucket B HIGH#10). MCP: $($_.Exception.Message); Web API: $($_.Exception.Message). Manual recovery required via pac data update or Portal — see runs/{runId}-registry-stale.md."
-      Write-Warning "Step 6a fallback failed — will write registry-stale diagnostic AFTER handoff report. Diagnostic: $script:RegistryStaleDiagnostic"
-    }
-  }
-}
-```
-
-Note: `sprk_tenantid` MUST NOT be re-written here — it's set at placeholder-create (Step 1f) and NEVER changes for the customer's lifetime. Overwriting risks silent §4D I1 tenant-isolation invariant violation.
-
-**Bucket B HIGH#10 (SESSION 18) reversal of the previous HARD STOP contract**: Step 6a failures no longer HARD STOP before the handoff report. The handoff artifact `runs/{runId}.md` is written UNCONDITIONALLY at Step 6b (per SKILL.md line 60 MUST — operator must have an audit trail on every terminal outcome), and Step 6c writes a separate `runs/{runId}-registry-stale.md` skeleton with an actionable manual-recovery recipe when the registry PATCH failed. Only AFTER both artifacts are written does the skill exit non-zero. The registry state is still stale (operator MUST manually resolve via `pac data update` or Portal), but now the operator has a durable diagnostic pointing them at the recovery path — a significant improvement over the prior behavior of throwing uncaught before any artifact was written.
+H13 writes Cosmos first and the registry best-effort (MED#10), so the row may be stale in any of four ways; this step
+covers all of them and NEVER stops before 6b (HIGH#10). `Sync-RegistryOnCompletion.ps1 -SessionFile $S -Action Plan
+-ObservedSetupStatus <value>` — first read the row with `mcp__dataverse__read_query` (`sprk_setupstatus`,
+`sprk_provisionedon` by `sprk_dataverseenvironmentid`) and pass its `sprk_setupstatus`; the script prints the promoted
+columns (adding `sprk_setupstatus = 2` only when not already Ready). Write them with `mcp__dataverse__update_record`.
+MCP fails → `-Action ApplyWebApi`; the environmentId lookup fails → `-Action MarkStale -Diagnostic '<error>'`. NEVER
+write `sprk_tenantid` (I1) or `sprk_currentrunid` (released only by `ICustomerRunGuard`); drift in a set-once column →
+HARD STOP + escalate, never overwrite.
 
 #### 6b. Write handoff report
+#### 6c. Registry-stale diagnostic
 
-`runs/{runId}.md` in the operator's cwd. Per PLX-12 (SESSION 15 Wave 4), the template shown below is the SHAPE ONLY — the skill MUST substitute every `{token}` before writing. Direct `Set-Content` of the template verbatim would ship an audit-trail artifact with literal `{runId}` etc. text (mandatory audit-trail per SKILL.md line 60 would be corrupted).
-
-Skill substitution block (immediately before `Set-Content`):
-
-```powershell
-$template = @'
-<TEMPLATE-CONTENT-HERE — literal below>
-'@
-$report = $template `
-  -replace '\{runId\}',           $runId `
-  -replace '\{customerId\}',      $customerId `
-  -replace '\{tenantId\}',        $tenantId `
-  -replace '\{tenancyModel\}',    $tenancyModel `
-  -replace '\{profile\}',         $profile `
-  -replace '\{startedAt\}',       $run.StartedOn.ToString('o') `
-  -replace '\{completedAt\}',     $run.CompletedOn.ToString('o') `
-  -replace '\{duration\}',        ("{0:hh\:mm\:ss}" -f ($run.CompletedOn - $run.StartedOn)) `
-  -replace '\{l2Base\}',          $l2Base `
-  -replace '\{amount\}',          $costMonthly `
-  -replace '\{escalation notes if any\}', $escalationNotes `
-  -replace '\{timestamp\}',       (Get-Date -Format 'o') `
-  -replace '\{version\}',         $deployedBffVersion `
-  -replace '\{URL\}',             $customerFacingUrl
-Set-Content -Path "runs/$runId.md" -Value $report
-```
-
-Template shape:
-
-```markdown
-# Provisioning Run {runId}
-
-- **Customer**: {customerId}
-- **Tenant**: {tenantId}
-- **Tenancy Model**: {tenancyModel}
-- **Profile**: {profile}
-- **Started**: {startedAt}
-- **Completed**: {completedAt}
-- **Wall-clock duration**: {duration}
-- **Status**: Completed / Failed / Cancelled / Quarantined (per `RunStatus` enum; no `Drifted` — drift surfaces as `Failed` + rejection code)
-- **L2 run URL**: {l2Base}/api/runs/{runId}
-
-## Handler outcomes
-
-| # | Handler | Status | Duration | Notes |
-|---|---|---|---|---|
-| 1 | H0 preflight | Succeeded | 8.2s | quota OK, DNS OK |
-| 2 | H1 rg-provision | Succeeded | 12s | |
-| 3 | H2a bicep-apply | Succeeded | 28m 14s | |
-| ... | ... | ... | ... | ... |
-| N | H13 acceptance | Succeeded | 1m 32s | 7/7 traps clear, 5/5 invariants pass |
-
-## Traps verified (T1-T7)
-
-- T1 (keyVaultReferenceIdentity == UAMI): ✅
-- T2 (Dataverse App User for MI): ✅
-- T3 (UAMI Graph app-role parity: the Entra-granted roles, no mailbox role in Entra): ✅
-- T4 (stamp identity's Exchange mailbox roles, all in the customer's group): ✅
-- T5 (both slot MIs KV RBAC): ✅ (structurally impossible post-Phase C UAMI)
-- T6 (SPE owning app, app-only via the Worker UAMI's FIC — the run's container is listed): ✅
-- T7 (both BFF slots carry Customer__Id == customerId): ✅
-
-## Invariants verified (I1-I5)
-
-- I1 (no hardcoded tenant): ✅
-- I2 (AI Search tenantId filter): ✅
-- I3 (Cosmos partition-key predicate): ✅
-- I4 (the deployed BFF is configured with this run's container type and container; app-only SPE calls pass SpeContainerOwnershipGuard): ✅
-- I5 (Graph per-tenant token): ✅
-
-## Cost snapshot
-
-- Estimated monthly: ${amount}/mo
-- vs envelope: within limits / +N% over ({escalation notes if any})
-
-## Registry state
-
-`sprk_dataverseenvironment` for customerId={customerId}:
-- sprk_provisionedon: {timestamp}
-- sprk_bffversion: {version}
-- sprk_solutionversion: {version}
-- sprk_setupstatus: Ready
-
-## Deviations / notes
-
-{any manual gates encountered, quota bumps requested, drift detected, etc.}
-
-## Next steps
-
-- Notify customer admin: {URL to send them / instructions}
-- Post-provision smoke tests: {list from customer-comms template U-CB-01}
-- Monitor for 24h via App Insights: {URL}
-- Identity-link writes (T255): after one report-only `identity-link-reconciliation` cycle has been reviewed, set `IdentityLink__Reconciliation__WritesEnabled=true` on BOTH BFF slots (deployment guide §6.5.2) — provisioning never sets it
-```
-
-#### 6c. Registry-stale diagnostic (Bucket B HIGH#10 SESSION 18)
-
-If `$script:RegistryStale = $true` (Step 6a failed on BOTH the MCP call AND the raw Web API fallback), write a separate `runs/{runId}-registry-stale.md` skeleton with an actionable manual-recovery recipe. This file supplements — does NOT replace — the mandatory `runs/{runId}.md` handoff artifact written at Step 6b.
-
-```powershell
-if ($script:RegistryStale) {
-  $staleReport = @"
-# Registry Stale — Run $runId
-
-**⚠ MANUAL RECOVERY REQUIRED**
-
-The provisioning run reached RunStatus.Completed successfully, but the operator-side
-Step 6a Dataverse registry PATCH FAILED. The customer's `sprk_dataverseenvironment`
-row is missing the promoted Ready-state columns (sprk_provisionedon, sprk_bffversion,
-sprk_solutionversion, sprk_azuresubscriptionid, sprk_resourcegroupname,
-sprk_appservicename, sprk_keyvaultname, sprk_bffappid, sprk_containertypeid, sprk_ClientCacheBustToken).
-
-The customer's Azure resources are provisioned correctly and the L2 control-plane
-has released the I5 concurrency guard (`sprk_currentrunid` via ICustomerRunGuard.
-ReleaseAsync per Bucket B HIGH#6/#7 SESSION 18). Only the operator-side registry
-PATCH failed. Customer-facing functionality works; only the operator dashboards and
-downstream automation that queries these columns are affected.
-
-## Diagnostic
-
-$($script:RegistryStaleDiagnostic)
-
-## Manual Recovery (choose ONE)
-
-### Option A — pac data update (recommended for CLI operators)
-``````powershell
-pac data update `
-    --environment $dvUrl `
-    --entity sprk_dataverseenvironment `
-    --record-id $environmentId `
-    --data '{
-      "sprk_provisionedon":       "$completedAtIso",
-      "sprk_bffversion":          "$deployedBffVersion",
-      "sprk_solutionversion":     "$deployedSolutionVer",
-      "sprk_azuresubscriptionid": "$azureSubId",
-      "sprk_resourcegroupname":   "$rgName",
-      "sprk_appservicename":      "$appServiceName",
-      "sprk_keyvaultname":        "$kvName",
-      "sprk_bffappid":            "$bffAppRegId",
-      "sprk_containertypeid":     "$containerTypeId",
-      "sprk_ClientCacheBustToken":"$cacheBustToken"
-    }'
-``````
-
-### Option B — Power Apps Portal (recommended for GUI operators)
-1. Open https://make.powerapps.com → your environment
-2. Navigate: Tables → sprk_dataverseenvironment → row `$environmentId`
-3. Edit the columns listed above using the values from ``runs/$runId.md`` § Deployed Versions
-4. Save
-
-### Option C — Skill re-invocation with -ResumeRegistryPatch flag
-(Not yet implemented; add to backlog if this failure recurs.)
-
-## Post-recovery verification
-
-After applying either recovery option:
-``````powershell
-mcp__dataverse__read_query(query = "<fetch><entity name='sprk_dataverseenvironment'><attribute name='sprk_provisionedon' /><filter><condition attribute='sprk_dataverseenvironmentid' operator='eq' value='$environmentId' /></filter></entity></fetch>")
-``````
-Expect ``sprk_provisionedon != null``. If null, retry the recovery.
-
-## Do NOT
-
-- **Do NOT touch** `sprk_setupstatus` (already set to Ready by L2 H13)
-- **Do NOT touch** `sprk_currentrunid` (already released by ICustomerRunGuard per Bucket B HIGH#6/#7)
-- **Do NOT touch** `sprk_tenantid` (I1 invariant — set at placeholder-create, NEVER re-writable)
-
-## Escalation
-
-If manual recovery fails repeatedly, file a GitHub Issue with:
-- This file (``runs/$runId-registry-stale.md``)
-- The handoff report (``runs/$runId.md``)
-- The Dataverse error message from the recovery attempt
-"@
-  Set-Content -Path "runs/$runId-registry-stale.md" -Value $staleReport -Encoding utf8
-  Write-Warning "Registry-stale diagnostic written to runs/$runId-registry-stale.md — MANUAL RECOVERY REQUIRED. Handoff report at runs/$runId.md is complete."
-}
-```
+`Write-HandoffReport.ps1 -SessionFile $S -Action Write [-Status <s>]` writes `runs/{runId}.md` (every token
+substituted — PLX-12) and, when 6a marked the registry stale, `runs/{runId}-registry-stale.md` with the recovery
+recipe. Fill every `<!-- FILL -->` marker from the run record and this session (handler outcomes, traps T1–T7,
+invariants I1–I5, 6e/6f results, deviations and fallbacks used), then `-Action Check` (exit 1 while anything is
+unfilled; exit 5 when the registry is stale — after both files exist).
 
 #### 6d. Final summary to operator
 
 ```
-✅ PROVISIONING COMPLETE
-
-  Customer:  {customerId}
-  Run ID:    {runId}
-  Duration:  {duration}
-  Status:    Ready
-
-  Handoff report: runs/{runId}.md
-
-  Registry updated: sprk_dataverseenvironment.sprk_setupstatus = Ready
-
+✅ PROVISIONING COMPLETE — Customer {customerId} · Run {runId} · Duration {duration} · Status Ready
+  Handoff report: runs/{runId}.md   Registry updated: sprk_setupstatus = Ready
   Post-completion checklist:
     [ ] Send customer welcome email (template docs/deployment/customer-comms/U-CB-01)
     [ ] Verify first user can sign in and load workspace
@@ -2421,637 +357,81 @@ If manual recovery fails repeatedly, file a GitHub Issue with:
     [ ] Copilot agent gate (6f): auth config recorded, package rendered and sent to customer IT
 ```
 
-**Bucket B HIGH#10 SESSION 18**: When `$script:RegistryStale = $true`, replace the final summary above with the WARNING variant:
-
-```
-⚠ PROVISIONING COMPLETE (REGISTRY STALE)
-
-  Customer:  {customerId}
-  Run ID:    {runId}
-  Duration:  {duration}
-  Status:    Ready (L2), Registry PATCH FAILED (operator-side)
-
-  Handoff report: runs/{runId}.md
-  Registry-stale diagnostic: runs/{runId}-registry-stale.md
-
-  MANUAL RECOVERY REQUIRED — see runs/{runId}-registry-stale.md for the
-  pac data update / Portal recipe. Customer-facing functionality is
-  operational; only operator dashboards + downstream automation affected.
-```
-
-Then exit non-zero (code 5, distinct from the exit-4 gate-timeout and exit-3 quarantine paths at Step 4-5) AFTER both artifacts are written:
-
-```powershell
-if ($script:RegistryStale) {
-  exit 5
-}
-```
-
----
+Registry stale (exit 5): "⚠ PROVISIONING COMPLETE (REGISTRY STALE)" — Status "Ready (L2), Registry PATCH FAILED
+(operator-side)", both file paths, "MANUAL RECOVERY REQUIRED — see runs/{runId}-registry-stale.md. Customer-facing
+functionality is operational; only operator dashboards + downstream automation affected."
 
 #### 6e. Secure-record environment verification (MANDATORY before the customer is told the environment is ready — H7b, T256)
 
-H7b creates unified-access-control-r2's secure-record configuration on every run, between H6 and H9:
-- the `Secure Record` business unit, with no users and **no container**;
-- the named `Secure Record Owners` team;
-- the `Secure Record Owner` role inside that unit;
-- the BFF-managed field-security memberships and the identity-link memberships.
+H7b creates, on every run between H6 and H9: the `Secure Record` business unit (no users, **no container**), the
+`Secure Record Owners` team, the `Secure Record Owner` role inside that unit, and the BFF-managed field-security and
+identity-link memberships. Run the **§7 verification checklist** of
+[`SECURE-PROJECT-ENVIRONMENT-SETUP.md`](../../../docs/guides/SECURE-PROJECT-ENVIRONMENT-SETUP.md) against THIS
+environment (it is the one source — do not copy its steps here) and record each result in `runs/{runId}.md`. Any item
+not passing → report the environment as NOT secure-record ready (the BFF fails closed — nothing leaks — but no record
+can be made secure). Containers are not part of this step.
 
-The operator verifies the result. Run the **§7 verification checklist** of
-[`docs/guides/SECURE-PROJECT-ENVIRONMENT-SETUP.md`](../../../docs/guides/SECURE-PROJECT-ENVIRONMENT-SETUP.md) against THIS
-environment. It is the one source; do not copy its steps here.
-record each item's result in `runs/{runId}.md`. Any item not passing → report the environment as NOT secure-record ready
-(the BFF fails closed — nothing leaks — but no record can be made secure). Containers are not part of this step: the BFF
-creates each secure record's container when the record is made secure, and H7 has already linked the root business unit
-to H8's container.
+#### 6f. Per-customer Copilot agent (MANUAL GATE after Ready — T257)
 
-#### 6f. Per-customer Copilot agent (MANUAL GATE after Ready — T257; one delegated step per customer)
+**When the run is Completed, read [`references/copilot-agent-gate.md`](references/copilot-agent-gate.md) before
+continuing.** Interactive only; batch writes `runs/{runId}-copilot-gate.md` and marks it PENDING in the handoff.
 
-Each customer gets its own Microsoft Copilot agent. The customer's IT installs it in THEIR tenant; never install it in
-Spaarke's catalog. The full procedure, with the one-time platform setup, is
-[`SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md`](../../../docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md) §7.12; do not copy
-it here. This gate is the exception to the no-human-interaction end state that the owner accepted on 2026-10-09
-(design note t257 Q3). Microsoft has no API for creating an auth config. Re-check Graph and `wiqd` at each refresh.
+### Step 7: Postmortem — write `lessons-learned.md` (MANDATORY)
 
-Interactive mode only. In batch mode, write `runs/{runId}-copilot-gate.md` with the values below, mark it PENDING in the
-handoff, and continue.
-
-1. **Pre-check (read-only).** If either check fails, STOP the gate, not the run, and report it:
-   - `az ad app show --id <run.interStepState.bffAppRegId> --query "api.preAuthorizedApplications[].appId" -o tsv`
-     lists the Spaarke Copilot Agent client id (`copilotAgentClientAppId` in the control-plane bicepparam). If it does
-     not, the control plane was deployed without the client; fix that first (guide §7.12 step 3).
-   - The registry row has `sprk_bffappid` (H13 promoted it, or Step 6a did).
-2. **Show the operator the auth-config values** and ask them to create it in the Teams developer portal (Tools → OAuth
-   client registration → New):
-   - name `spaarke-copilot-{customerId}`. Reuse it if it exists; never create a duplicate;
-   - base URL `<run.interStepState.bffApiUrl>`;
-   - restrict usage by org: Any Microsoft 365 organization;
-   - restrict usage by app: Any Teams app;
-   - client id = the Spaarke Copilot Agent client, **no client secret**;
-   - authorize `https://login.microsoftonline.com/<Spaarke tenant id>/oauth2/v2.0/authorize`;
-   - token and refresh `https://login.microsoftonline.com/<Spaarke tenant id>/oauth2/v2.0/token`;
-   - scope `api://<bffAppRegId>/user_impersonation offline_access`;
-   - PKCE on.
-3. **Ask for the OAuth client registration ID.** Refuse a value that does not match `^[A-Za-z0-9+/=_.-]{8,512}$`.
-4. **Write it to the registry** with the operator's identity. This is a live write; confirm before sending it.
-   `PATCH sprk_dataverseenvironments(<environmentId>)` `{ "sprk_copilotauthconfigid": "<id>" }`, through the Dataverse MCP
-   or the F1 Web API fallback, as in Step 6a. If `sprk_bffappid` is empty, set it in the same PATCH from
-   `run.interStepState.bffAppRegId`.
-5. **Render the package** (local file only):
-   `scripts/copilot-agent/Render-CopilotAgentPackage.ps1 -TemplatePath <template zip> -TemplateManifestPath <copilot-agent-template-latest.json> -OutputFolder runs/<runId>-copilot -CustomerId <customerId> -AdminEnvironmentUrl <registry env URL>`.
-   - Download the template and manifest read-only from `provisioning-artifacts`.
-   - Record the package path, version, manifest id and SHA-256 in `runs/{runId}.md` § Copilot agent.
-6. **Hand-off text for the operator:** "Send `spaarke-copilot-<customerId>-<version>.zip` and
-   docs/guides/COPILOT-AGENT-CUSTOMER-IT-ONBOARDING.md to the customer's IT. They upload it in their Microsoft 365 admin
-   center (Agents → Upload custom agent) and assign it to the staff invited as guests. When one user has signed in,
-   check the BFF log: `tid` = Spaarke, `acct` = 1, `azp` = the Spaarke Copilot Agent client, `aud` = this BFF."
-
-### Step 7: Postmortem — write `lessons-learned.md` (MANDATORY) — added by task 203c per punch-list row A04
-
-Runs UNCONDITIONALLY after Step 6 (Completion Handoff) regardless of outcome — `Completed`, `Failed`, `Cancelled`, `Quarantined`, or manual-abort (no `Drifted` state — drift surfaces as `Failed` + upgrade-drift-detected rejection code). Written BEFORE the run folder is committed to git so the postmortem is captured with the same commit as the artifacts. Consumes the 203a-authored template at [`provisioning-runs/_templates/lessons-learned.md`](../../provisioning-runs/_templates/lessons-learned.md). Skipping this step silently regresses the two-level lessons process (in-flight direct-apply per root CLAUDE.md §7 wrap-up + this per-run postmortem).
-
-Trigger conditions (each writes a distinct postmortem):
-- `Completed` (H13 acceptance passed; sprk_setupstatus=Ready reached) — capture what worked + manual gates encountered + recommendations
-- `Failed` (any handler unrecoverable per §4C taxonomy; includes drift-detected via `upgrade-drift-detected` rejection code) — capture root cause + fix location + blocks-future-runs flag
-- `Cancelled` (operator called POST /api/runs/{id}/cancel) — capture stop point + rationale
-- `Quarantined` (rollback classified `NeedsHumanIntervention`) — capture quarantine reason + owner
-- Manual abort (operator stopped skill session mid-run without calling cancel) — capture stop point + rationale
+Runs UNCONDITIONALLY after Step 6 — `Completed`, `Failed`, `Cancelled`, `Quarantined` or a manual abort — and before
+the run folder is committed. Skipping is FORBIDDEN even for successful runs; an operator who declines still gets a
+3-line file saying so, committed.
 
 #### 7a. Copy template + prefill run metadata
-
-```powershell
-$runDir       = "provisioning-runs/$customerId-$runId"
-$lessonsPath  = Join-Path $runDir 'lessons-learned.md'
-$templatePath = Join-Path (git rev-parse --show-toplevel) 'provisioning-runs/_templates/lessons-learned.md'
-
-Copy-Item -Path $templatePath -Destination $lessonsPath -Force
-
-# Substitute template placeholders with actual run metadata
-$content = Get-Content $lessonsPath -Raw
-$content = $content -replace '\{customerId\}', $customerId
-$content = $content -replace '\{runId\}', $runId
-$content = $content -replace '\{operatorUpn\}', $operatorUpn
-$content = $content -replace '\{ts\}', (Get-Date -Format 'yyyy-MM-ddTHH:mm:ssK')
-Set-Content -Path $lessonsPath -Value $content
-```
-
 #### 7b. Interactive postmortem (or batch mode: `intake.postmortemFile`)
-
-Present the operator with each template section and collect responses. In batch mode, honor `$script:BatchPostmortemFile` (bound at Step 1.0 from `intake.postmortemFile`).
-
-**Batch-mode postmortem dispatch (BAT-09, SESSION 16)**:
-
-```powershell
-if ($script:SkipInteractiveIntake) {
-  if ($script:BatchPostmortemFile) {
-    $postmortemAbs = if ([System.IO.Path]::IsPathRooted($script:BatchPostmortemFile)) {
-      $script:BatchPostmortemFile
-    } else {
-      Join-Path (git rev-parse --show-toplevel) $script:BatchPostmortemFile
-    }
-    if (-not (Test-Path $postmortemAbs)) {
-      $diag = @{ runId = $runId; reason = "postmortemFile '$postmortemAbs' not found on disk"; remedy = 'Author the file at the path in intake.postmortemFile OR omit the field to auto-generate a minimum lessons-learned.md' } | ConvertTo-Json
-      Set-Content -Path "runs/$runId-postmortem-invalid.json" -Value $diag
-      Write-Error "[skill] Batch HARD STOP (BAT-09): intake.postmortemFile references '$postmortemAbs' which does not exist. Diagnostic: runs/$runId-postmortem-invalid.json"
-      exit 6
-    }
-    # Validate required sections (mirror interactive template's H2 headings)
-    $required = @('What went right','What went wrong','Recommendations for next run','Sign-off')
-    $content  = Get-Content -Raw -Path $postmortemAbs
-    $missing  = @()
-    foreach ($h in $required) {
-      if ($content -notmatch "(?im)^##\s+$([regex]::Escape($h))") { $missing += $h }
-    }
-    if ($missing.Count -gt 0) {
-      $diag = @{ runId = $runId; postmortemFile = $postmortemAbs; missingSections = $missing; remedy = 'Add the missing ## headings, or omit intake.postmortemFile to auto-generate the minimum shape' } | ConvertTo-Json -Depth 4
-      Set-Content -Path "runs/$runId-postmortem-invalid.json" -Value $diag
-      Write-Error "[skill] Batch HARD STOP (BAT-09): intake.postmortemFile is missing required sections: $($missing -join ', '). Diagnostic: runs/$runId-postmortem-invalid.json"
-      exit 6
-    }
-    # Copy verbatim + append auto-populated metadata (git-sha, INDEX.md lessons-count, run outcome)
-    Copy-Item -Path $postmortemAbs -Destination $lessonsPath -Force
-    $gitSha = git rev-parse HEAD
-    $auto = @"
-
----
-
-## Auto-populated metadata (BAT-09)
-
-- **runId**: $runId
-- **customerId**: $customerId
-- **outcome**: $runOutcome
-- **git-sha**: $gitSha
-- **written-at**: $(Get-Date -Format 'o')
-- **source-postmortem**: $script:BatchPostmortemFile (validated + copied verbatim by skill Step 7b)
-"@
-    Add-Content -Path $lessonsPath -Value $auto
-    Write-Host "  [BATCH] Postmortem copied from $script:BatchPostmortemFile + metadata appended." -ForegroundColor Cyan
-  } else {
-    # No postmortemFile — auto-generate minimum shape from run outcome
-    $minimum = @"
-# Lessons Learned — $customerId / $runId
-
-## What went right
-- Run reached terminal state '$runOutcome' without manual gate escalation beyond design tolerance.
-
-## What went wrong
-- No operator-authored lessons for this batch run. If lessons DO exist for this run, an operator SHOULD amend this file post-hoc via a follow-up commit citing the runId.
-
-## Recommendations for next run
-- (none — auto-generated postmortem; consider providing intake.postmortemFile on future batch runs for higher-fidelity lessons capture)
-
-## Sign-off
-- Author: batch-mode auto-generation (BAT-09 auto-minimum path)
-- Reviewer: pending (operator should review + amend if lessons emerge)
-- git-sha: $(git rev-parse HEAD)
-- written-at: $(Get-Date -Format 'o')
-"@
-    Set-Content -Path $lessonsPath -Value $minimum
-    Write-Host "  [BATCH] Auto-generated minimum lessons-learned.md (no intake.postmortemFile supplied)." -ForegroundColor Cyan
-  }
-} else {
-  # INTERACTIVE — see below (operator prompt per template section)
-}
-```
-
-Sections (per template):
-- **What went right** — 3-5 concrete bullets citing handler + timestamp
-- **What went wrong** — normalized `### Lesson L01/L02/...` shape with Symptom / Root cause / Fix applied / Landing spot / Blocks future runs / Punch-list class
-- **New prereqs to codify** — proposed additions to `PROVISIONING-PREREQUISITES.md` + `prereqs.yaml` (Step 0.5 picks them up automatically on the NEXT run)
-- **New patterns to add** — proposed additions to `.claude/patterns/provisioning/`
-- **Recommendations for next run** — concrete actionable items (avoid vague aspirations)
-- **Cross-run pattern** — first-observed / occurrence-count / recommended-promotion
-- **Sign-off** — author + reviewer + git-sha
-
-The Step 0.5 iteration result (which prereqs PASSed, which were skipped via `-SkipStep0_5` / `skipExternalPrereqs`, which FAILed) MUST be summarized under **What went right** or **What went wrong** as appropriate — this makes Step 0.5 outcomes visible in the cross-run audit corpus.
-
 #### 7c. Update `provisioning-runs/INDEX.md`
-
-Append this run's lesson-count so the cross-run audit slash command `/audit-provisioning-lessons` (planned; task 203-followup) can roll up recurring themes.
-
-```powershell
-$lessonCount = (Select-String -Path $lessonsPath -Pattern '^### Lesson ').Count
-$indexRow = "| $customerId-$runId | $(Get-Date -Format 'yyyy-MM-dd') | $runOutcome | $lessonCount |"
-Add-Content -Path (Join-Path (git rev-parse --show-toplevel) 'provisioning-runs/INDEX.md') -Value $indexRow
-```
-
 #### 7d. Report + commit gate
 
-```
-POSTMORTEM CAPTURED
-
-  Lessons written: provisioning-runs/{customerId}-{runId}/lessons-learned.md
-  Lesson count:    {N}
-  INDEX.md row:    | {customerId}-{runId} | {date} | {outcome} | {N} |
-
-  Next step: commit the entire {customerId}-{runId}/ folder (Step 6b handoff report + this postmortem + all artifacts). Once committed, this run's postmortem contributes to the cross-run audit corpus (/audit-provisioning-lessons roll-up).
-```
-
-**MANDATORY** — skipping is FORBIDDEN even for successful runs. An operator explicitly declining ("no meaningful lessons for this run") still writes a 3-line lessons-learned.md stating that + commits it (audit trail). Silent skip regresses the entire two-level lessons process.
-
----
-
-## Fallback Matrix
-
-> Per spec §4.3a.5 + task 076. Three primary failure modes with decision-tree fallbacks. Each subsection: **primary command → fallback command → escalation trigger**.
-
-### F1. Dataverse MCP disconnect
-
-**Symptom**: `mcp__dataverse__*` calls return connection error, timeout, or "MCP server not connected."
-
-**Impact**: Cannot query gate state via MCP; cannot update `sprk_dataverseenvironment` via MCP in Step 6.
-
-**Decision tree**:
-
-```
-IF mcp__dataverse__* call fails with connection error:
-
-  1. DO NOT attempt reconnect loop — MCP disconnects require the operator to
-     re-authenticate the connector in VS Code / Claude Code settings, which
-     is out-of-band. A skill-side reconnect will just retry the failed call.
-
-  2. Log the fallback: "⚠ MCP disconnect at Step {N}; switching to pac data fallback"
-
-  3. Fallback A (preferred if pac is authed): pac data
-       # Read
-       pac data query --entity sprk_dataverseenvironment `
-         --filter "sprk_customerid eq '{customerId}'" `
-         --select sprk_dataverseenvironmentid,sprk_currentrunid,sprk_setupstatus
-
-       # Write (Step 6 registry update — setupstatus 2 = Ready per EnvironmentSetupStatus enum)
-       pac data update --entity sprk_dataverseenvironment `
-         --id {envRecordId} `
-         --data '{"sprk_provisionedon":"{timestamp}","sprk_setupstatus":2,"sprk_currentrunid":null}'
-
-  4. Fallback B (if pac unavailable OR command shape not supported): raw Web API PS
-       # NOTE: registry updates target the REGISTRY env (spaarkedev1 for dev),
-       # NOT the customer's just-provisioned env. `sprk_dataverseenvironment`
-       # is the central catalog per operator memory feedback_no_central_managing_env_yet.
-       $dvUrl = "https://spaarkedev1.crm.dynamics.com"  # registry env
-       $dvToken = az account get-access-token --resource $dvUrl --query accessToken -o tsv
-       $body = @{
-         sprk_provisionedon = "{timestamp}"
-         sprk_setupstatus   = 2         # 2 = Ready per EnvironmentSetupStatus enum
-         sprk_currentrunid  = $null
-       } | ConvertTo-Json
-       Invoke-RestMethod `
-         -Uri "$dvUrl/api/data/v9.2/sprk_dataverseenvironments({envRecordId})" `
-         -Method PATCH `
-         -Headers @{
-           Authorization = "Bearer $dvToken"
-           "OData-Version" = "4.0"
-           "If-Match" = "*"
-         } `
-         -Body $body -ContentType "application/json"
-
-  5. NOTE in handoff report which fallback was used + reason (MCP was
-     disconnected). This becomes an operator action item — re-auth the MCP
-     connector in VS Code settings BEFORE the next provisioning run.
-```
-
-**Escalation trigger**: BOTH primary + Fallback A + Fallback B fail. This is rare and indicates a broader Dataverse-connectivity issue (network, cert, or Dataverse-side outage). STOP + escalate; do NOT mark the run complete. Registry becomes stale (`CompleteButRegistryStale` state) until operator manually reconciles.
-
-**Design intent**: MCP disconnect is a normal occurrence per our own experience (2026-08-14, 2026-08-15). The skill degrades gracefully via `pac data` (which uses the same `pac auth` context — no re-authentication needed) or raw Web API (which reuses the `az` token operator already has). No user-facing prompt required.
-
----
-
-### F2. `az` token expiry mid-run
-
-**Symptom**: L2 REST call returns `401 Unauthorized` with `WWW-Authenticate: Bearer error="invalid_token"`; token acquired at start of run has aged past ~1 hour lifetime.
-
-**Impact**: Skill loses ability to advance the run until token is refreshed.
-
-**Decision tree**:
-
-```
-IF Invoke-RestMethod against $l2Base returns HTTP 401:
-
-  1. DO NOT re-authenticate the operator — they are already logged in
-     (`az login` succeeded at Step 0). Only refresh the L2-audience token.
-
-  2. Refresh via:
-       $token = az account get-access-token `
-         --resource "api://spaarke.com/provisioning-controlplane-$env" `
-         --query accessToken -o tsv
-
-     `az` uses cached refresh tokens; this is silent + fast (<2s) if the
-     operator's session is still valid.
-
-  3. Retry the failed L2 call ONCE with the new token.
-
-  4. IF retry also returns 401:
-     - Operator's SSO session may have expired (rare inside a single skill
-       invocation, but possible on long-running runs with human gates).
-     - PAUSE the poll loop; prompt operator:
-         "⚠ az token refresh failed. Please run 'az login' in a separate
-          terminal and confirm here when done. The run continues in L2
-          — it is not lost. Type 'refreshed' to resume, or 'abandon' to
-          quarantine."
-     - On 'refreshed' → re-acquire token + resume poll from where it stopped.
-     - On 'abandon' → invoke POST /api/runs/{id}/quarantine with reason
-       "operator session expired; abandoning skill session."
-
-  5. Log every refresh event in the handoff report — repeated refreshes on
-     the same run are a signal to shorten the run OR investigate token
-     lifetime configuration on the L2 app-reg.
-```
-
-**Escalation trigger**: 3 consecutive refreshes fail. Indicates operator's `az` login is broken (tenant policy, MFA revocation, etc.). Skill hard-stops; operator addresses AAD state before re-invoking.
-
-**Design intent**: Token expiry is expected on long runs (Model 2 full provisioning can exceed 1 hour). Auto-refresh keeps the operator out of the loop for the common case. The prompt is a last resort for genuinely-expired SSO sessions.
-
----
-
-### F3. L2 API unreachable
-
-**Symptom**: `POST /api/runs`, `GET /api/runs/{id}`, or `POST /api/runs/{id}/resume` returns 5xx (500, 502, 503, 504) OR the request times out (connection refused, DNS failure, gateway timeout).
-
-**Impact**: Cannot advance the run through the skill. L2 continues running its state-reconciler independently (per FR-22 + FR-23 I6 crash-recovery) — the run is NOT lost; the skill is just cut off from steering it.
-
-**Decision tree**:
-
-```
-IF L2 call returns 5xx OR times out:
-
-  1. First occurrence: retry ONCE with 30s backoff. Transient errors
-     (Azure ILB blip, App Service cold-start, Cosmos throttling) usually
-     recover in <60s.
-
-  2. If second attempt also fails, DO NOT auto-retry further. Auto-retry
-     loops hide the outage from the operator + waste their time.
-
-  3. ESCALATE IMMEDIATELY to the operator:
-
-       🚨 L2 API UNREACHABLE
-
-         Endpoint:  {failed URL}
-         Response:  {status code + first 200 chars of body OR error}
-         Elapsed:   {time since first failure}
-
-         The provisioning run continues in L2 — your work is NOT lost.
-         L2's state-reconciler (I6 crash-recovery) will resume orphan
-         runs when L2 is back up.
-
-         DIAGNOSTIC ACTIONS:
-           1. Check L2 App Service status:
-                az webapp show --resource-group rg-spaarke-{env} `
-                  --name spaarke-provisioning-{env} --query state
-              (expect "Running")
-
-           2. Check L2 /healthz:
-                curl -sf https://spaarke-provisioning-{env}.azurewebsites.net/healthz
-              (expect 200)
-
-           3. Check L2 App Insights for failures (last 15m):
-                {App Insights URL for this L2 instance}
-
-           4. Check Cosmos DB availability (partition rebalancing?):
-                az cosmosdb show --resource-group rg-spaarke-{env} `
-                  --name cosmos-spaarke-{env} --query provisioningState
-
-           5. Escalate to on-call if outage exceeds 15 min:
-                {on-call URL / channel}
-
-         RESUME OPTIONS:
-           - When L2 recovers, re-invoke:
-                /provision-environment {customerId}
-             The skill detects the in-progress run + resumes at Step 4 poll.
-           - Do NOT create a new run for the same customerId — L2 will
-             return 409 via optimistic concurrency lock on sprk_currentrunid.
-
-  4. Write partial handoff report with status "SkillDetached" — captures
-     what the skill saw before the outage. When operator re-invokes and
-     the run reaches terminal state, a second (final) report is written
-     at runs/{runId}.md (superseding the partial).
-```
-
-**Escalation trigger**: Any 5xx or timeout that doesn't clear after the first backoff. L2 outage is genuinely rare + operator-actionable.
-
-**Design intent**: L2 owns run state; the skill is a thin driver. When L2 is unavailable, the skill can't drive but the state persists in Cosmos. I6 (FR-23) crash-recovery on L2 restart resumes orphan runs automatically. The skill's job is to surface the outage clearly + tell the operator how to check + reconnect — NOT to try to work around L2.
-
----
-
-### Cross-references
-
-- **Step 4 (Execute Loop)** — F1 (MCP not needed here) / F2 (token auto-refresh applies during poll) / F3 (L2 unreachable during poll) all in scope
-- **Step 5 (Manual Gate Handling)** — F2 applies if operator's session expires during a long gate wait (Model 2 admin consent, SPE 24h)
-- **Step 6 (Completion Handoff)** — F1 (MCP registry update fallback) is the primary use case; F2 (token refresh) rare but possible if the run took >1h
-
----
-
-## Tool Matrix (per spec §4.3a.1 — 15 tools)
-
-| # | Capability | Primary | Fallback |
-|---|---|---|---|
-| 1 | Read design + spec + POML | Read / Glob / Grep | — |
-| 2 | Invoke PowerShell scripts | `PowerShell` tool | `Bash` + `pwsh -File` |
-| 3 | Invoke bash tooling | `Bash` tool | — |
-| 4 | Call L2 REST API | `WebFetch` (bearer from #5) OR `Bash` + `curl` + `az account get-access-token` | `PowerShell` + `Invoke-RestMethod` |
-| 5 | AAD bearer for L2 | `az account get-access-token --resource api://spaarke.com/provisioning-controlplane-{env}` | Interactive `az login` first |
-| 6 | Read Dataverse | `mcp__dataverse__read_query`, `mcp__dataverse__search` | `pac data` OR raw Web API |
-| 7 | Write Dataverse | `mcp__dataverse__update_record` | `pac data` OR raw Web API PATCH |
-| 8 | Read Azure resource state | `Bash` + `az resource show / az keyvault / az webapp` | Azure MCP if configured |
-| 9 | Read Graph | `Bash` + `az ad / az rest` against Graph endpoints | Graph SDK script |
-| 10 | Read Cosmos | `Bash` + `az cosmosdb sql query` | `Invoke-RestMethod` against Cosmos SQL API |
-| 11 | File upload to SPE (H13 sample) | `Bash` + `curl` with Graph app-only token | `pnp` CLI OR Graph SDK script |
-| 12 | Real-time run status polling | `WebFetch` / `curl` loop against `GET /api/runs/{id}` | — |
-| 13 | Structured handoff report | `Write` (markdown to `runs/{runId}.md`) | — |
-| 14 | Task tracking | `TodoWrite` tool | — |
-| 15 | Multi-agent orchestration (rare) | `Agent` tool with `researcher` / `general-purpose` subagent | — |
-
----
-
-## Auth Flow
-
-**Identity**: operator's own AAD (`az login`) per NFR-11. NEVER a service principal.
-
-**Role**: `Operator` app-role on the control-plane app-reg `api://spaarke.com/provisioning-controlplane-{env}`. Assigned via:
-
-```
-az ad app show --id api://spaarke.com/provisioning-controlplane-dev --query "id"
-# → objectId of the app-reg's SP
-az rest --method POST --uri "https://graph.microsoft.com/v1.0/servicePrincipals/{spObjId}/appRoleAssignments" `
-  --body '{ "principalId":"{operatorObjId}", "resourceId":"{spObjId}", "appRoleId":"{operatorRoleGuid}" }'
-```
-
-**Token**: acquired once per run, refreshed on 401:
-
-```powershell
-$token = az account get-access-token `
-  --resource "api://spaarke.com/provisioning-controlplane-{env}" `
-  --query accessToken -o tsv
-```
-
-Lifetime ~1 hour. Fallback matrix handles mid-run expiry.
-
-**Model 2 exception**: H0.5 consent-callback endpoint (`POST /api/onboarding/consent-callback`) is anonymous + HMAC-verified — the customer admin authenticates to THEIR tenant via Microsoft, not to Spaarke's control plane. The skill does NOT participate in this exchange directly; L2 auto-detects the HMAC-signed callback.
-
----
-
-## Dry-Run Mode
-
-Support a `--dry-run` flag on the slash command:
-
-```
-/provision-environment acme --dry-run
-```
-
-Behavior differences:
-- Step 0 unchanged (still run prereqs; dry-run doesn't skip environment checks)
-- Step 1 unchanged (still collect intake)
-- Step 2 invokes L2 with `mode: "preflight-dry-run"` — H0 runs quota/DNS/reachability checks WITHOUT reserving any resources (Cosmos writes = read-only assertion of state; ARM calls use `az resource show` not `az deployment`)
-- Step 3 confirmation gate still requires "proceed with provisioning" but prints "(DRY-RUN)" prefix; on proceed:
-- Step 4 does NOT enqueue H1-H14 — instead L2 returns a JSON plan (`GET /api/runs/{runId}/plan-preview`) enumerating what WOULD run
-- Step 5 skipped (no gates in dry-run)
-- Step 6 writes handoff report labeled `runs/{runId}-DRYRUN.md` and does NOT touch `sprk_dataverseenvironment`
-
-Dry-run is intended for pre-flight validation before a real customer deployment (e.g., "prove we can provision acme without actually doing it").
-
----
-
-## Troubleshooting
-
-| Issue | Cause | Resolution |
-|---|---|---|
-| H14 fails `h14m-mailbox-ensure-failed` naming PRQ-E-16 and a write, or showing "A server side error has occurred … try again after some time" | Exchange refused `New-Mailbox` or `Add-DistributionGroupMember` for `Spaarke Exchange Admin` (403 `CmdletAccessDeniedException`; the EXO module hides the 403 behind that message). Usual cause: a role entry narrowed with `Set-ManagementRoleEntry -Parameters` without the PowerShell common parameters (T186 L62) | Do NOT wait it out or open a support case. Compare the roles with guide §4.2.1 step 5 (the `New-Mailbox` entry must list `ErrorAction … WhatIf`); test as the app with check M8 in `projects/customer-provisioning-orchestration-r1/notes/t263-customer-shared-mailbox.md` §5 — never with `-WhatIf` (`.claude/FAILURE-MODES.md` G-23). After a role change allow 30 min – 2 h, then `POST /resume`. Nothing was created |
-| Step 0c returns 403 on role probe | Operator not granted `Operator` app-role on `api://spaarke.com/provisioning-controlplane-{env}` | Ask a control-plane admin to run the `az rest` app-role assignment (see Auth Flow) |
-| Step 0c token acquisition fails: `AADSTS500011` | Resource URI wrong OR app-reg not exposed in operator's tenant | Verify `az ad app show --id api://spaarke.com/provisioning-controlplane-{env}` returns a value; if not, wrong env |
-| Step 1 customerId probe returns 500 | L2 read-side broken; database issue | Check L2 App Insights + escalate to on-call — do NOT bypass |
-| Step 2 H0 times out (>60s) | Azure quota query hung OR L2 stuck | Check L2 logs; may need to abort + retry; occasional Azure quota API slowness |
-| Step 4 poll returns 401 mid-run | Token expired | Auto-refresh via `az account get-access-token` (see Fallback Matrix); retry the poll |
-| Step 4 handler fails with `QuarantineRequired` | Handler cleanup impossible; state indeterminate | STOP — file `POST /api/runs/{runId}/clear-quarantine` with reason after root-cause analysis. NEVER retry without clear-quarantine |
-| Step 5 gate URL 404 on customer admin's browser | Model 2 admin consent URL malformed | Check H0.5 output; may need to reconstruct manually with correct redirect_uri |
-| Step 6 MCP update fails | MCP disconnected between preflight + completion | Fallback matrix → `pac data update` (see Fallback Matrix) |
-| Skill exits before Step 6 (session timeout, network blip) | L2 continues asynchronously; run state persists in Cosmos | Re-invoke `/provision-environment {customerId}` — skill detects the in-progress run via `GET /api/runs?customerId={id}` and resumes at Step 4 poll |
-
----
-
-## Related Skills
-
-| Skill | When to use instead |
-|---|---|
-| `/deploy-new-release` | Deploying a new release to existing environments (different lifecycle stage — provisioning is customer onboarding; deploy-new-release is application updates) |
-| `/dataverse-mcp-usage` | Reference for MCP tool call patterns used in Step 6 registry update |
-| `/adr-check` | Auto-invoked by task-execute when this skill is authored/modified |
-| `/code-review` | Auto-invoked by task-execute when this skill is authored/modified |
-| `/conflict-check` | Optional pre-flight before any BFF-touching provisioning follow-up |
-
----
-
-## Related Documentation
-
-| Document | Purpose |
-|---|---|
-| [`docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md`](../../../docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md) | Full operator runbook including §12 interim manual sequence this skill supersedes |
-| [`projects/customer-provisioning-orchestration-r1/spec.md`](../../../projects/customer-provisioning-orchestration-r1/spec.md) | Authoritative spec — FR-25, §4.3a, NFR-11 |
-| [`projects/customer-provisioning-orchestration-r1/design.md`](../../../projects/customer-provisioning-orchestration-r1/design.md) | Design v3.3 — §4.3a operator toolchain, §4B silent-fail traps, §4C rollback taxonomy, §4D tenant-isolation invariants, §14A upgrade model |
-| [`docs/deployment/version-compatibility-matrix.md`](../../../docs/deployment/version-compatibility-matrix.md) | H0 upgrade-mode preflight consults this |
-| [`docs/deployment/customer-comms/`](../../../docs/deployment/customer-comms/) | 6 U-CB customer communication templates (welcome, gate URLs, escalation) |
-| [`.claude/skills/deploy-new-release/SKILL.md`](../deploy-new-release/SKILL.md) | Reference model this skill's UX pattern derives from |
-
----
-
-## Tips for AI
-
-- **Prereqs are non-negotiable.** Do NOT proceed past Step 0 if any check fails — silent tool-version mismatches are the #1 cause of silent-fail traps.
-- **NEVER default a `tenantId`.** The `Register-EntraAppRegistrations.ps1:63` fix (`1834b77bc`) established that hardcoded default tenant is an I1 invariant violation. Ask; don't assume.
-- **The confirmation gate phrase is load-bearing.** "y" and "yes" are insufficient — the operator must type `proceed with provisioning` literally. This is captured in the audit trail per NFR-11.
-- **Poll, don't reach.** Never invoke handlers directly or query BFF Service Bus. L2 owns orchestration; the skill is a thin driver.
-- **Manual gates require re-verification, not trust.** Always call `POST /api/runs/{id}/resume` and let L2 re-verify (Dataverse, Graph, Azure state). The operator's assertion "I did it" is NOT sufficient.
-- **Auto-retry hides diagnostics.** On `Failed`, present the failure + operator options; do NOT auto-retry. Operators need to see the failure to root-cause.
-- **`QuarantineRequired` is a hard stop.** Never invoke `clear-quarantine` on behalf of the operator; the reason field is auditable + requires human accountability.
-- **Handoff report is durable.** Write `runs/{runId}.md` on every completion — success OR failure OR quarantine. The report is the audit trail + the resumption baseline.
-- **MCP disconnect is common** (we experienced this 2026-08-14, 2026-08-15). The fallback matrix handles it. Do not treat MCP disconnect as an error — it's expected.
-- **The skill is idempotent at the intake level.** If the operator re-invokes with the same `customerId`, the skill detects the existing run + resumes rather than starting fresh. The state lives in Cosmos, not the skill session.
-- **BINDING pre-check protocol** (FR-35): before removing any KV alias / fallback spelling, pre-check the LIVE App Service + KV + Dataverse-persisted config. Root CLAUDE.md §10 canonical secret-catalog manifest is the source of truth.
-- **KV credential-lifecycle rule** (updated 2026-08-27 SESSION 13 task 199 for E-3 CLOSED reality per `spaarke-auth-v4-dataverse-MI` task 033 completion 2026-08-24): **`BFF-API-ClientSecret` is GONE** — both KV copies + all 4 App Service settings deleted; credential order pinned to `[ManagedIdentityFederated]` with `RequireSecretFreeIdentity=true`. Do NOT re-introduce this secret under any name — `CredentialGuardTests` fails the build on any new `.WithClientSecret(...)` site. H4 **omits** `BFF-API-ClientSecret` unconditionally. Separately, `Dataverse-ClientSecret` never-delete rule STILL in force until 2026-11-23 (auth-v4 owns its retirement). Full rule: `.claude/constraints/provisioning.md` §KV credential lifecycle.
-
----
-
-## Failure Modes & Recovery
-
-| Failure | Cause | Prevention / Recovery |
-|---|---|---|
-| Step 0 skipped ("just start the run, we know the machine is fine") | Operator confidence + skill impatience | HARD STOP; prereqs are unconditional. Silent tool-version mismatches are the #1 cause of silent-fail traps T1-T7. |
-| Confirmation gate bypassed with "y" | Skill accepted a partial phrase | Enforced literal string `proceed with provisioning`. Any other input re-asks. |
-| Same-customer concurrent run attempted | Operator forgot the first run is still active | L2 returns 409 via optimistic concurrency on `sprk_currentrunid`. Skill presents the existing run's status + offers to resume/poll rather than starting a second. |
-| Handler retried past its retry budget | Auto-retry logic in the skill | REMOVED — the skill never auto-retries. Operator sees failures + decides. |
-| Manual gate auto-advanced by trusting operator assertion | Skill said "y" advances the run without L2 re-verifying | ALWAYS call `POST /api/runs/{id}/resume`; L2 re-verifies the underlying condition (Dataverse / Graph / Azure state). If verification fails, the run stays at `WaitingOnGate` regardless of operator input. |
-| `Quarantined` run silently ignored by operator (walked away) | Skill session ended before quarantine surfaced | Quarantine is written to Cosmos + surfaces on next `/provision-environment {customerId}` invocation. Skill presents it as the first order of business + refuses to start new runs until cleared. |
-| Handoff report not written on failure | Skill treated failure as "no report needed" | Report is written on ALL terminal RunStatus values (Completed, Failed, Cancelled, Quarantined — no Drifted; drift surfaces as Failed + rejection code). Failure reports capture the failure mode + diagnostic + resumption instructions. |
-| Registry update via MCP fails silently — run marked complete but registry stale | MCP disconnect between preflight + completion; skill didn't check | Fallback matrix triggers immediately on MCP failure; registry MUST be updated before completion is reported. If BOTH MCP + fallback fail, run is marked `CompleteButRegistryStale` and operator must manually update via `pac data update`. |
-| Token expires mid-run; skill fails hard | No auto-refresh | Fallback matrix documents `az account get-access-token` auto-refresh on 401 (see Fallback Matrix section, task 076 owns). |
-| L2 unreachable mid-run — skill panics | No graceful degradation | Fallback matrix documents escalation + resume-from-Cosmos-state pattern; L2's crash-recovery (I6) re-runs orphaned runs on restart. |
-
----
-
-*This skill is the operator's single entry point to the customer-provisioning platform. It wraps the L2 REST API — it does not reimplement provisioning logic. The state machine lives in Cosmos; the handlers live in BFF; this skill is thin UX driving it all.*
-
----
-
-## Fresh-Sub Automation Gaps (customer-provisioning-orchestration-r1 lessons 2026-08-22)
-
-**Evidence base**: `projects/customer-provisioning-orchestration-r1/notes/lessons-learned-model1-prod-standup-2026-08-22.md` (findings F1-F20, F20a — 2026-08-22 through 2026-08-24 live stand-up)
-
-**Owner directive**: "the expectation for the final delivered solutions is that this process will run E2E with no human interaction. Ultimately the best solution is we have a 'Customer Deployment' web app that allows the user to input whatever information/setting choices and Claude Code / the scripts run everything."
-
-The first live Model 1 Prod stand-up (2026-08-22, sub `cd95fcec-...`) surfaced 9 gotchas Microsoft has quietly introduced since 2024-2025 that break naive "just deploy" flows for fresh Azure subscriptions. Each gotcha is an automation gap this skill MUST absorb before we can claim E2E-no-human-interaction. Step 2.5 (above) is where the automation lives.
-
-| # | Finding | Auto-remediation strategy | Status |
-|---|---|---|---|
-| F1 | OpenAI model version pins age ~4-6 months; Microsoft blocks new deploys of Deprecating pins | Pre-deploy `az cognitiveservices model list` check; HALT + operator sign-off for pin bump (ADR-020) | MVP: informational; TODO: fully automated with operator confirmation |
-| F2 | gpt-5.x family REQUIRES GlobalStandard SKU; module hardcoded 'Standard' broke this | Per-deployment `sku` field in openai module (safe-access default 'Standard') — DONE this session | ✅ Module fix committed in `798f61c9` |
-| F3 | East US fresh subs have 0 App Service quota AND Portal auto-denies quota request | Preflight test-deploy in candidate region; auto-fallback to westus2 (Spaarke canonical) | MVP: manual; TODO: automated region auto-selection |
-| F4 | West US 2 has NO gpt-5 family; West US 3 has all (2026-10-06: West US 2 offers no OpenAI models at all) | customer.bicep `openAiLocation` (default westus3) splits the OpenAI account from the primary region | ✅ Template default; H0 checks quota + pins in `openAiLocation` (task 247) |
-| F5 | Fresh subs auto-grant mini/embedding TPM generously (500+); frontier tiers (gpt-5.4, gpt-5-pro) = 0; Standard gpt-4o = 0 | Choose a deployment set that fits the auto-grants (DataZoneStandard gpt-4o / gpt-4.1-mini / text-embedding-3-large); no recompose — the BFF calls each deployment by name | ✅ Task 247: fixed set + H0 quota check per Azure quota name |
-| F6 | `az provider register` reports success but state stays NotRegistered on fresh subs | Retry-verify loop 5 min; HALT with Portal link if not registered | TODO: not implemented |
-| F7 | Portal Usage+Quotas provider dropdown empty on fresh subs (only shows providers with existing resources) | Preemptive operator warning + link to https://ai.azure.com Quotas | MVP: informational only |
-| F8 | Portal auto-denies fresh-sub quota requests + pushes to Support Ticket | Avoid needing one: the deployment set fits auto-grants (F5) | ✅ Not used — no support case (owner) |
-| F9 | Support Plan availability varies; skill must not queue ticket-dependent actions on plan-less sub | No ticket-dependent action exists (F8) | ✅ Not needed |
-| F10 | Global resource-name reservations not caught by what-if (Service Bus `-sb` suffix, etc.) — burned 16m35s on this session's first deploy | Run `az {svc} check-name` for every resource with global namespace BEFORE `az deployment sub create` | Bicep fix committed; skill automation TODO |
-| F11 | Cognitive Services accounts hold a 3-5 min soft-lock after failed deploys (invisible to `provisioningState`); back-to-back retries fail with RequestConflict even when everything reads Succeeded | Detect RequestConflict on CogSvc writes + linear backoff retry (30s → 90s → 180s → 300s) | TODO: not implemented — burned 3 failed retries this session; 3-min explicit `sleep 180` broke through |
-| F12 | `Build-SpaarkeMaster.ps1` was calling `AddSolutionComponent AddRequiredComponents=$false` → managed export had 105 self-referencing "leaky" deps against `solution="Active"`. Fresh env installs failed with 240 total MissingDependency (105 Cat B + 135 Cat A first-party) | Line 138 changed to `$true`; rebuilt in spaarkedev1 → 485 components (was 386); re-export → 77 MissingDep, ALL Category A (Cat B eliminated) | ✅ Script fix committed on this branch; longer-term automation TODO: nightly smoke-install job on rebuilt .zip to a throwaway env + CI assert `MissingDependency solution="Active"` count == 0 |
-| F13 | Fresh Production-tier envs do NOT include Power BI Extensions (`msft_PowerBI_Anchor`, publisher solution `msft_PowerBI_Entities`, `isFirstParty="False"`). One SpaarkeMaster env-var-def carries a spurious dep on `powerbimashupparameter` → import fails with 1 unresolved MissingDependency even after F12 fix | Pre-import: intersect `pac application list --environment {env}` with a `Required Applications` manifest; auto-install any missing via `pac application install --application-name {name}` in a loop (each takes ~6 min, polls every 30s). Initial manifest: `msft_PowerBI_Anchor` | ✅ Installed manually this session; automation TODO — introduce `Required Applications` config-driven manifest on H6 solution-import handler; longer-term: fix the spurious dep at source in Build-SpaarkeMaster.ps1 |
-| F14 | Fresh Production-tier envs default `organization.maxuploadfilesize = 5,242,880` (5 MB); UniversalDocumentUpload PCF bundle exceeds this. Import fails 5min in with "Webresource content size is too big" | Pre-import: run `pac org list-settings` → compare against Spaarke `Org Settings Contract` → any drift → auto-apply via `pac org update-settings --name maxuploadfilesize --value 25600000`. Idempotent + fast (single API call). Initial contract: `maxuploadfilesize: 25_600_000` (25 MB, matches spaarkedev1) | ✅ Applied manually this session; automation TODO — introduce `Org Settings Contract` config-driven map on H6 solution-import handler |
-| F15 | Fresh RBAC-enabled Key Vaults grant NO data-plane access even to subscription Owner. `enableRbacAuthorization=true` KVs require explicit data-plane role (`Key Vault Secrets Officer` for read/write). `az role assignment create` had a `MissingSubscription` bug on this endpoint (F15b) — use `az rest --method put` fallback | Post-Bicep: detect operator OID + KV RBAC mode; if RBAC=true, grant `Key Vault Secrets Officer` (role ID `b86a8fe4-44ce-4948-aee5-eccb2c155cd7`) via `az rest`; poll `az keyvault secret list` until non-403. Idempotent | ✅ Applied manually this session for per-tenant KV; automation TODO — operator-RBAC-bootstrap step in H3 or pre-H4 |
-| F16 | Shared BFF App Service `keyVaultReferenceIdentity` set to literal `"SystemAssigned"` but only UserAssigned identity attached → all `@Microsoft.KeyVault(...)` refs silently unresolvable. Also shared UAMI has 0 data-plane RBAC on the shared KV. Two independent misconfigs, both from Bicep | (Not yet applied — planned) Grant shared UAMI `Key Vault Secrets User` on shared KV via `az rest`; PATCH kvRefIdentity to UAMI resource ID (not "SystemAssigned") via `az webapp update --set keyVaultReferenceIdentity=...`; apply to both production + staging slots per T1 rule; restart App Service | Bicep hardening TODO: (a) never emit `keyVaultReferenceIdentity='SystemAssigned'` when only UAMI attached, (b) emit role assignments for attached UAMIs on referenced KVs. T1 handler must verify + auto-remediate |
-| F17 | Bicep deploy provisions App Service resource but does NOT deploy BFF code. Root URL returns default "empty App Service" page; `/healthz` returns 404. All subsequent config work (KV refs, App User, /healthz verify) tests an empty shell | Fresh-env case: detect empty App Service via root-URL response check; build+publish BFF (`dotnet publish -c Release`); zip-deploy via `az webapp deploy --type zip`; poll `/healthz` with 30-90s warm-up backoff. NFR-01 constrains publish size ≤60 MB | H9 handler exists as name in catalog but no code yet. Reference `.claude/skills/deploy-new-release/SKILL.md` (built for shared-env slot-swap, needs fresh-env variant) — verified this session with 46 MB compressed publish (PASSES NFR-01) |
-| F16.5 | `az webapp update -g <rg> -n <name> --set keyVaultReferenceIdentity="<uami-resource-id>"` returns `ERROR: Operation returned an invalid status 'Bad Request'` — the CLI wrapper does not accept this property path (mirror of F15b bug pattern for a different endpoint). Blocks the F16 Part B remediation via the obvious CLI form | Use `az rest --method patch --url "https://management.azure.com/subscriptions/{sub}/resourceGroups/{rg}/providers/Microsoft.Web/sites/{name}?api-version=2022-03-01" --body '{"properties":{"keyVaultReferenceIdentity":"<uami-resource-id>"}}'` fallback | ✅ Fallback applied this session; T1 handler should skip `az webapp update --set` and go straight to `az rest --method patch` (or file Azure CLI issue upstream) |
-| F18 | Fresh RBAC-enabled SHARED KV grants NO data-plane access even to subscription Owner — SAME F15 pattern for a different vault. Shared KV `sprk-prod-kv` blocked operator from listing/reading/writing secrets during F19 investigation | Same as F15: pre-H4 bootstrap grants operator `Key Vault Secrets Officer` via `az rest` fallback. Idempotent. Extend F15 handler to ALL fresh RBAC-enabled KVs in scope (per-tenant AND shared) | ✅ Applied manually this session; automation TODO absorbed into F15 handler (widen scope to enumerate every KV in RG) |
-| F19 | Bicep deploy provisions shared KV `sprk-prod-kv` but leaves it EMPTY — all 6 BFF `@Microsoft.KeyVault(...)` references point to non-existent secrets. Even after F16 fixes (RBAC + kvRefIdentity), refs cannot resolve. BFF fail-fast at boot on missing config downstream | H4-shared handler: extract keys/conn-strings from source Azure services (AI Search admin key, Cog Svc key1, SB RootManageSharedAccessKey, Storage conn string, Redis primaryKey composed with `<host>:<port>,password=<key>,ssl=True,abortConnect=False`), seed to KV under canonical secret names matching App Service KV-ref manifest. Idempotent | ✅ Applied manually this session (6 secrets seeded); H4 handler needs extending — currently H4 is scoped per-tenant KV; needs sibling H4-shared handler + canonical secret-name manifest (with F19 initial map) |
-| F20 | BFF crashes at startup with exit code 134 (SIGABRT) via `Unhandled exception. System.InvalidOperationException: SpeAdmin:KeyVaultUri (or KeyVaultUri) configuration is required for SpeAdminModule.` (`SpeAdminModule.cs:45`). Bicep provisions App Service with 14 app settings incl. 6 KV refs — but NOT the app settings that hard-required IOptions modules read directly (bypass `ValidateOnStart`). BFF has ~40 `.ValidateOnStart()` modules — many will surface as F20a/b/c... in sequence | H4b-BulkAppSettings handler (companion to H4-KV-seed): read canonical app-settings template from a manifest, resolve KV refs, `az webapp config appsettings set --settings k1=v1 k2=v2 ...` (single call, single restart). Template driven from `SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md` § App Service settings + per-env inputs (TenantId, BFF ClientId, ContainerTypeId, Webhook signing keys, EmailProcessing signing key) | ❌ NOT YET REMEDIATED — chose NOT to serially chase 40-module chain this session; single setting `SpeAdmin__KeyVaultUri` applied revealed F20a. Full remediation deferred to design of H4b handler |
-| F20a | After F20 setting applied, next fail-fast: `Unhandled exception. System.InvalidOperationException: CosmosPersistence:Endpoint is not configured. Add this setting to appsettings.json or Azure App Service configuration.` (`AiPersistenceModule.cs:56`). Progressive discovery pattern confirmed | Same as F20 — batch-set all required app settings from canonical template in one call | ❌ NOT YET REMEDIATED — evidence for F20 progressive chain; validates the "40 IOptions modules" scale claim |
-
-### What r1 delivery still needs (roadmap)
-
-Before r1 can claim E2E-no-human-interaction:
-
-1. **Absorb F1-F20 into automated Step 2.5 + H4/H4b handlers + H6 solution-import handler + H9 BFF-deploy handler** (currently mostly informational)
-2. **Codify Spaarke canonical region defaults**: westus2 platform + westus3 OpenAI (baked into `Model 1 Prod` profile in `pac admin create`)
-3. **Parameterize the OpenAI deployment set** in `customer.bicep` (it passes none today — `openai.bicep` defaults apply) so the skill can compute the deployment set at runtime (auto-quota compatible → full P5 progressive upgrade). The original item named `stacks/model1-shared.bicep`, retired by T225a.
-4. **Auto-registration retry-verify** for all `Microsoft.*` providers
-5. **Auto-support-ticket flow** for cases where auto-grant path doesn't exist (advanced, gated on operator having Support Plan)
-6. (Superseded T253, 2026-10-09: the CI-built SpaarkeMaster has no Power BI dependency; H6 installs no application, PRQ-C-07 retired, `SpaarkeMasterApplicationDependencyTests` guards it.) **Introduce `Required Applications` manifest** on H6 solution-import handler (F13): config-driven list of AppSource apps that MUST be pre-installed on any Spaarke target env before SpaarkeMaster import. Initial list: `msft_PowerBI_Anchor`. Pre-import intersect + auto-install via `pac application install` loop.
-7. (Done T253: H6 applies it with one Dataverse Web API `organization` PATCH, no pac.) **Introduce `Org Settings Contract`** on H6 solution-import handler (F14): config-driven map of `settingName → minValue` that MUST be applied to any Spaarke target env before SpaarkeMaster import. Initial map: `maxuploadfilesize: 25_600_000`. Pre-import diff + auto-apply via `pac org update-settings`. Idempotent, single-call, ~2s per setting.
-8. **(Partly done, T218c 2026-10-07: `Export-SpaarkeMasterSource.ps1` fails on any `solution="Active"` missing dependency; `Build-SpaarkeMaster.ps1` retired.) Add nightly smoke-install job** for the SpaarkeMaster export (F12 forcing-function): re-export managed .zip → extract solution.xml → CI asserts `MissingDependency solution="Active"` count == 0. Catches regressions in the leaky-export fix before they reach fresh-env installs.
-9. **Operator-RBAC-bootstrap step** (F15): idempotent pre-H4 grant of `Key Vault Secrets Officer` to operator on every RBAC-enabled KV, via `az rest` (F15b bypass). Uses `az ad signed-in-user show` for OID auto-detect. Silent success on re-run.
-10. **Bicep hardening for kvRefIdentity + UAMI-KV RBAC** (F16): (a) reject `keyVaultReferenceIdentity='SystemAssigned'` combined with UserAssigned-only identity in the Bicep template; (b) auto-emit role assignments for attached UAMIs on referenced KVs. Backstop: T1 handler verifies + auto-remediates any drift post-deploy.
-11. **Fresh-env BFF deploy handler** (F17): H9 currently exists as a catalog name only. Needs code that (a) detects empty-App-Service state, (b) builds + zip-deploys BFF, (c) polls `/healthz` with warm-up backoff, (d) sequences AFTER F16 remediation so BFF starts in configured state (not degraded). **This session verified: 46 MB compressed publish passes NFR-01 60 MB ceiling; `az webapp deploy --type zip` uploads cleanly but Site Startup Probe fails when config chain (F20) unresolved.**
-12. **H4-shared handler + canonical secret manifest** (F19) — *H4-shared shipped (task 200) and was RETIRED by T226 (2026-09-30): customer stamps never read a shared service's credential; the manifest half stands.* Original remediation item: sibling to H4 (per-tenant); H4-shared extracts keys from source Azure services (AI Search admin key, Cog Svc key1s, SB RootManageSharedAccessKey, Storage conn string, Redis composed conn string) and seeds to shared KV under canonical secret names. Initial 6-secret manifest: `AiSearch--AdminKey`, `DocumentIntelligence-ApiKey`, `AzureOpenAI-ApiKey`, `servicebus-connection-string`, `storage-connection-string`, `redis-connection-string` (must MATCH the App Service `@Microsoft.KeyVault(SecretName=...)` refs). **📝 Handler POML designed 2026-08-24 SESSION 3: [`projects/customer-provisioning-orchestration-r1/tasks/200-implement-h4-shared-kv-source-extraction-handler.poml`](../../../projects/customer-provisioning-orchestration-r1/tasks/200-implement-h4-shared-kv-source-extraction-handler.poml). Extends task 084 manifest schema with `source: { type, service-ref }` field. Includes IArmKeyVaultRefProbe post-condition (uses F16-remediated kvRefIdentity). Bicep hardening implied: L2 UAMI needs 5 new RBAC assignments on source services (`Cognitive Services User`, `Search Service Contributor`, `Azure Service Bus Data Owner`, `Storage Account Contributor`, `Redis Cache Contributor`).**
-13. **H4b-BulkAppSettings handler** (F20/F20a): CRITICAL NEW HANDLER. Reads canonical BFF app-settings template (~40 IOptions modules × ~2-4 settings each ≈ 80-160 app settings) + resolves KV refs + per-env inputs (TenantId, BFF ClientId, ContainerTypeId, WebhookSigningKeys, EmailProcessing WebhookSigningKey), calls `az webapp config appsettings set --settings k1=v1 k2=v2 ...` in single batch to trigger ONE restart cycle. Manifest source: `docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md` § App Service settings. **This handler is the difference between "BFF App Service exists" and "BFF actually boots" — without it, F20 chain progressively reveals ~40 missing configs.** **📝 Handler POML designed 2026-08-24 SESSION 3: [`projects/customer-provisioning-orchestration-r1/tasks/201-implement-h4b-bulk-appsettings-handler.poml`](../../../projects/customer-provisioning-orchestration-r1/tasks/201-implement-h4b-bulk-appsettings-handler.poml). Introduces NEW canonical manifest at `scripts/canonical-app-settings/manifest.yaml` (sibling to task 084 secret-catalog). Diff-first idempotency preserves operator overrides. IHealthzProbe polls `/healthz` with 8-min backoff + parses container docker-logs on failure to extract fail-fast module name for actionable diagnostic. Sequencing: H4-shared || H4-per-tenant → H4b → H9 → BFF boots configured.**
-14. **F16 Bicep hardening (extend)**: (a) never emit `keyVaultReferenceIdentity='SystemAssigned'` when only UserAssigned attached, (b) auto-emit role assignments for attached UAMIs on referenced KVs — **AND** (c) via F16.5 discovery: T1 handler skips `az webapp update --set keyVaultReferenceIdentity=...` (returns Bad Request); goes straight to `az rest --method patch` on the site resource with `{"properties":{"keyVaultReferenceIdentity":"..."}}` body.
-
-### The Customer Deployment Web App (natural evolution)
-
-Owner-directed follow-on project: replace the operator-invoked skill with a self-service web UI. Prospect/ops user fills a form; the L3 skill (fully automated per above) executes end-to-end; SSE stream provides real-time progress.
-
-Prerequisites:
-- All F1-F9 absorbed into fully-automated Step 2.5
-- L2 control-plane `/api/runs` API surfaced via BFF
-- All handlers H0-H14 live-validated (in-progress; see current-task.md for status)
-
-Filing: proposed as `projects/customer-deployment-webapp-r1` (skeleton to be created after r1 completes).
-
----
-
-*Fresh-Sub Automation Gaps section added 2026-08-22 during Model 1 Prod first-live stand-up. Preserves the discovery arc for future operators + subsequent r1 automation absorption.*
+`Write-Postmortem.ps1 -SessionFile $S -Action Prepare -Outcome <outcome>` — 7a, plus the batch 7b path (`postmortemFile`
+validated, exit 6 if missing or lacking a required section; else the auto-minimum). Interactive 7b: walk the operator
+through each section — What went right (3–5 bullets citing handler + timestamp) · What went wrong (`### Lesson L01…`:
+Symptom / Root cause / Fix applied / Landing spot / Blocks future runs / Punch-list class) · New prereqs to codify ·
+New patterns to add · Recommendations for next run · Cross-run pattern · Sign-off — and include the Step 0.5 / 1e-ter
+results the script prints. Then `-Action Finalize -Outcome <outcome>` (7c index row + 7d summary) and tell the operator
+to commit `provisioning-runs/{customerId}-{runId}/` with the handoff report.
+
+## Fallbacks
+
+**If the Dataverse MCP disconnects, an L2 call returns 401 after a refresh, or L2 returns 5xx / times out, read
+[`references/fallback-matrix.md`](references/fallback-matrix.md) (F1 / F2 / F3) before continuing.** The scripts already
+apply the automatic part (Web API registry path, token refresh, one retry); the reference holds the operator prompts
+and escalation.
+
+## Gotchas
+
+- **Interactive `$env` timing**: Step 0c/0f and 0.5c need the control-plane env, so interactive mode asks for it at
+  Step 0 (Step 1d confirms). Without it `once_per_env` prereqs would never run; the Step 1e-ter pass runs them when
+  Step 0.5 could not.
+- **`sprk_setupstatus` is an option set** — write `2` (Ready) / `1` (InProgress), never the label; the Web API refuses
+  `"Ready"`. Server code writes `2` (`DataverseEnvironmentRegistryClient`).
+- **`pac data` has no query/create/update** (pac 1.46: export/import only) — the F1 fallback is the Web API.
+- **`az.cmd` breaks on `)`** in arguments on Windows (`RetrieveCurrentOrganization(...)`) — get the token from az and
+  call with `Invoke-RestMethod`. Prereq recipes must not put parentheses in az arguments (`validate.ps1` lints it).
+- **`bash` on PATH can be the WSL stub** (System32 or WindowsApps) — `Invoke-PrereqPass.ps1` prefers Git Bash.
+- **H14 `h14m-mailbox-ensure-failed` naming PRQ-E-16** ("A server side error has occurred … try again") is a 403
+  from a role entry narrowed without the PowerShell common parameters (T186 L62) — do not wait it out; see
+  `references/troubleshooting.md`.
+- **MCP disconnect is common** (2026-08-14, 2026-08-15) — expected, not an error; F1 handles it.
+- **The run state lives in Cosmos, not the session** — re-invoking for the same customerId detects the run; a lost
+  session does not lose the run.
+
+## References
+
+- **Detailed references** (this skill): [`references/intake-fields.md`](references/intake-fields.md),
+  [`references/fresh-sub-feasibility.md`](references/fresh-sub-feasibility.md),
+  [`references/manual-gates.md`](references/manual-gates.md), [`references/copilot-agent-gate.md`](references/copilot-agent-gate.md),
+  [`references/fallback-matrix.md`](references/fallback-matrix.md), [`references/troubleshooting.md`](references/troubleshooting.md)
+  (also: tool matrix, auth flow, failure modes, related skills and docs)
+- **Code**: `src/server/services/Sprk.Provisioning.ControlPlane.Api/Api/RunsEndpoints.cs` (routes),
+  `…ControlPlane.Core/Models/ProvisioningRun.cs` (run record), `…/Models/IntakeParameterCatalog.cs` (accepted keys)
+- **Spec / design**: `projects/customer-provisioning-orchestration-r1/spec.md` (FR-25, §4.3a, NFR-11), `design.md`
+  (§4B traps, §4C rollback taxonomy, §4D invariants, §14A upgrade model)
+- **Constraints**: [`.claude/constraints/provisioning.md`](../../constraints/provisioning.md)
+
+*This skill is the operator's single entry point to customer provisioning. It wraps the L2 REST API — it does not
+reimplement provisioning logic.*

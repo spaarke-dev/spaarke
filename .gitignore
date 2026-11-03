@@ -170,5 +170,7 @@ src/client/shared/Spaarke.UI.Components/datagrid-jest-results.json
 # (customer-provisioning-orchestration-r1 T245c, owner decision D15). /provision-environment Step 1.0 refuses
 # a batch intake file git would track.
 runs/*-intake.json
+# /provision-environment session state (scripts/provision-environment/New-ProvisionSession.ps1) — per-invocation, never committed
+runs/provision-session-*.json
 
 __pycache__/

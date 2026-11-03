@@ -3,7 +3,7 @@
   Forcing-function validator for scripts/provisioning-prereqs/prereqs.yaml.
 
 .DESCRIPTION
-  Uses the SAME parser as .claude/skills/provision-environment/SKILL.md Step 0.5a
+  Uses the SAME parser as /provision-environment Step 0.5a (scripts/provisioning-prereqs/Invoke-PrereqPass.ps1)
   (powershell-yaml / ConvertFrom-Yaml), so 'parses here' == 'parses at runtime'.
 
   Validates:
@@ -195,7 +195,7 @@ if ($contextDefaultsByEnv.ContainsKey('dev') -and $m -and $m.prereqs) {
   }
   if ($missing.Count -gt 0) {
     foreach ($token in $missing) {
-      $fail += "context-defaults.dev.json tokenMap missing entry for '{$token}' — referenced by prereqs.yaml. Add a documentation entry (source, shape, populatedBy) so maintainers know how to derive it, then extend SKILL.md Step 0.5b substitution chain accordingly."
+      $fail += "context-defaults.dev.json tokenMap missing entry for '{$token}' — referenced by prereqs.yaml. Add a documentation entry (source, shape, populatedBy) so maintainers know how to derive it, then extend the token map in scripts/provisioning-prereqs/Invoke-PrereqPass.ps1 (skill Step 0.5b) accordingly."
     }
   } else {
     Write-Host "  [PASS] All $($referencedTokens.Count) prereqs.yaml {tokens} documented in context-defaults.dev.json" -ForegroundColor Green
