@@ -1,0 +1,1209 @@
+{
+ "schema": "ebilling-eval/1",
+ "kind": "production-key",
+ "id": "RS-04-PK",
+ "rule_set_id": "RS-04",
+ "meta": {
+  "generator_id": "production_key.py",
+  "label_method": "generator",
+  "note": "Predicted production findings; basis proxy marks rows that depend on AI output."
+ },
+ "production_rules": {
+  "RS-04-R01": [
+   {
+    "type": "ApprovedTimekeeper"
+   }
+  ],
+  "RS-04-R02": [
+   {
+    "type": "ApprovedRate",
+    "tolerancePercent": 0
+   }
+  ],
+  "RS-04-R03": [
+   {
+    "type": "TimeIncrement",
+    "incrementHours": 0.25
+   }
+  ],
+  "RS-04-R04": {
+   "rules": [
+    {
+     "type": "CoreRecordWindow",
+     "graceDays": 0
+    }
+   ],
+   "not_expressible": "CoreRecordWindow checks dates only; no rule type compares an invoice with the core record's budget"
+  },
+  "RS-04-R05": {
+   "not_expressible": "InvoiceAge is invoice date minus line date per line; no rule type measures received date against the billing period end"
+  },
+  "RS-04-R06": [
+   {
+    "type": "Duplicate",
+    "matchFields": [
+     "timekeeper",
+     "lineDate",
+     "hours",
+     "narrative"
+    ]
+   }
+  ],
+  "RS-04-R07": {
+   "rules": [
+    {
+     "type": "ExpenseRule",
+     "nonReimbursableCodes": [
+      "E104",
+      "E106"
+     ]
+    }
+   ],
+   "not_expressible": "ExpenseRule caps the line amount; it cannot cap a unit rate (cost per page)"
+  },
+  "RS-04-R08": {
+   "not_expressible": "NonBillableActivity lists activity codes only, and no code identifies clerical work: A110 (Manage data/files) also covers legitimate document work, and invoice preparation is coded A111"
+  }
+ },
+ "production_consequences": {
+  "RS-04-R01": "Flag",
+  "RS-04-R02": "SuggestAdjustment",
+  "RS-04-R03": "Flag",
+  "RS-04-R04": "Flag",
+  "RS-04-R06": "Flag",
+  "RS-04-R07": "Flag"
+ },
+ "invoices": [
+  {
+   "id": "F-0028",
+   "clean": false,
+   "set_f_findings": [
+    {
+     "rule_id": "RS-04-R02",
+     "rule_type": "ApprovedRate",
+     "scope": "line",
+     "line_refs": [
+      5
+     ],
+     "consequence": "Reduce",
+     "status": "reproduced",
+     "basis": "exact"
+    }
+   ],
+   "production_findings": [
+    {
+     "rule_id": "RS-04-R02",
+     "type": "ApprovedRate",
+     "scope": "line",
+     "line_refs": [
+      5
+     ],
+     "basis": "exact"
+    }
+   ],
+   "production_only": []
+  },
+  {
+   "id": "F-0034",
+   "clean": false,
+   "set_f_findings": [
+    {
+     "rule_id": "RS-04-R01",
+     "rule_type": "ApprovedTimekeeper",
+     "scope": "line",
+     "line_refs": [
+      17
+     ],
+     "consequence": "Reject",
+     "status": "reproduced",
+     "basis": "exact"
+    },
+    {
+     "rule_id": "RS-04-R02",
+     "rule_type": "ApprovedRate",
+     "scope": "line",
+     "line_refs": [
+      10
+     ],
+     "consequence": "Reduce",
+     "status": "reproduced",
+     "basis": "exact"
+    },
+    {
+     "rule_id": "RS-04-R04",
+     "rule_type": "CoreRecordWindow",
+     "scope": "line",
+     "line_refs": [
+      19
+     ],
+     "consequence": "Flag",
+     "status": "reproduced",
+     "basis": "exact"
+    },
+    {
+     "rule_id": "RS-04-R07",
+     "rule_type": "ExpenseRule",
+     "scope": "line",
+     "line_refs": [
+      12
+     ],
+     "consequence": "Disallow",
+     "status": "reproduced",
+     "basis": "exact"
+    },
+    {
+     "rule_id": "RS-04-R08",
+     "rule_type": "NonBillableActivity",
+     "scope": "line",
+     "line_refs": [
+      13
+     ],
+     "consequence": "Disallow",
+     "status": "not_expressible",
+     "reason": "NonBillableActivity lists activity codes only, and no code identifies clerical work: A110 (Manage data/files) also covers legitimate document work, and invoice preparation is coded A111"
+    }
+   ],
+   "production_findings": [
+    {
+     "rule_id": "RS-04-R01",
+     "type": "ApprovedTimekeeper",
+     "scope": "line",
+     "line_refs": [
+      17
+     ],
+     "basis": "exact"
+    },
+    {
+     "rule_id": "RS-04-R02",
+     "type": "ApprovedRate",
+     "scope": "line",
+     "line_refs": [
+      10
+     ],
+     "basis": "exact"
+    },
+    {
+     "rule_id": "RS-04-R02",
+     "type": "ApprovedRate",
+     "scope": "line",
+     "line_refs": [
+      17
+     ],
+     "basis": "exact",
+     "reason": "no_approved_rate"
+    },
+    {
+     "rule_id": "RS-04-R04",
+     "type": "CoreRecordWindow",
+     "scope": "line",
+     "line_refs": [
+      19
+     ],
+     "basis": "exact"
+    },
+    {
+     "rule_id": "RS-04-R07",
+     "type": "ExpenseRule",
+     "scope": "line",
+     "line_refs": [
+      12
+     ],
+     "basis": "exact"
+    }
+   ],
+   "production_only": [
+    {
+     "rule_id": "RS-04-R02",
+     "type": "ApprovedRate",
+     "scope": "line",
+     "line_refs": [
+      17
+     ],
+     "basis": "exact",
+     "reason": "the timekeeper is not on the roster, so no approved rate is in force (fires beside ApprovedTimekeeper)",
+     "status": "production_only"
+    }
+   ]
+  },
+  {
+   "id": "F-0040",
+   "clean": false,
+   "set_f_findings": [
+    {
+     "rule_id": "RS-04-R04",
+     "rule_type": "CoreRecordWindow",
+     "scope": "invoice",
+     "line_refs": [],
+     "consequence": "Flag",
+     "status": "not_expressible",
+     "reason": "CoreRecordWindow checks dates only; no rule type compares an invoice with the core record's budget"
+    },
+    {
+     "rule_id": "RS-04-R08",
+     "rule_type": "NonBillableActivity",
+     "scope": "line",
+     "line_refs": [
+      4
+     ],
+     "consequence": "Disallow",
+     "status": "not_expressible",
+     "reason": "NonBillableActivity lists activity codes only, and no code identifies clerical work: A110 (Manage data/files) also covers legitimate document work, and invoice preparation is coded A111"
+    },
+    {
+     "rule_id": "RS-04-R08",
+     "rule_type": "NonBillableActivity",
+     "scope": "line",
+     "line_refs": [
+      5
+     ],
+     "consequence": "Disallow",
+     "status": "not_expressible",
+     "reason": "NonBillableActivity lists activity codes only, and no code identifies clerical work: A110 (Manage data/files) also covers legitimate document work, and invoice preparation is coded A111"
+    }
+   ],
+   "production_findings": [],
+   "production_only": []
+  },
+  {
+   "id": "F-0064",
+   "clean": false,
+   "set_f_findings": [
+    {
+     "rule_id": "RS-04-R01",
+     "rule_type": "ApprovedTimekeeper",
+     "scope": "line",
+     "line_refs": [
+      4
+     ],
+     "consequence": "Reject",
+     "status": "reproduced",
+     "basis": "exact"
+    },
+    {
+     "rule_id": "RS-04-R03",
+     "rule_type": "TimeIncrement",
+     "scope": "line",
+     "line_refs": [
+      5
+     ],
+     "consequence": "Reduce",
+     "status": "reproduced",
+     "basis": "exact"
+    },
+    {
+     "rule_id": "RS-04-R04",
+     "rule_type": "CoreRecordWindow",
+     "scope": "line",
+     "line_refs": [
+      7
+     ],
+     "consequence": "Flag",
+     "status": "reproduced",
+     "basis": "exact"
+    },
+    {
+     "rule_id": "RS-04-R04",
+     "rule_type": "CoreRecordWindow",
+     "scope": "invoice",
+     "line_refs": [],
+     "consequence": "Flag",
+     "status": "not_expressible",
+     "reason": "CoreRecordWindow checks dates only; no rule type compares an invoice with the core record's budget"
+    },
+    {
+     "rule_id": "RS-04-R08",
+     "rule_type": "NonBillableActivity",
+     "scope": "line",
+     "line_refs": [
+      3
+     ],
+     "consequence": "Disallow",
+     "status": "not_expressible",
+     "reason": "NonBillableActivity lists activity codes only, and no code identifies clerical work: A110 (Manage data/files) also covers legitimate document work, and invoice preparation is coded A111"
+    }
+   ],
+   "production_findings": [
+    {
+     "rule_id": "RS-04-R01",
+     "type": "ApprovedTimekeeper",
+     "scope": "line",
+     "line_refs": [
+      4
+     ],
+     "basis": "exact"
+    },
+    {
+     "rule_id": "RS-04-R02",
+     "type": "ApprovedRate",
+     "scope": "line",
+     "line_refs": [
+      4
+     ],
+     "basis": "exact",
+     "reason": "no_approved_rate"
+    },
+    {
+     "rule_id": "RS-04-R03",
+     "type": "TimeIncrement",
+     "scope": "line",
+     "line_refs": [
+      5
+     ],
+     "basis": "exact"
+    },
+    {
+     "rule_id": "RS-04-R04",
+     "type": "CoreRecordWindow",
+     "scope": "line",
+     "line_refs": [
+      7
+     ],
+     "basis": "exact"
+    }
+   ],
+   "production_only": [
+    {
+     "rule_id": "RS-04-R02",
+     "type": "ApprovedRate",
+     "scope": "line",
+     "line_refs": [
+      4
+     ],
+     "basis": "exact",
+     "reason": "the timekeeper is not on the roster, so no approved rate is in force (fires beside ApprovedTimekeeper)",
+     "status": "production_only"
+    }
+   ]
+  },
+  {
+   "id": "F-0082",
+   "clean": false,
+   "set_f_findings": [
+    {
+     "rule_id": "RS-04-R02",
+     "rule_type": "ApprovedRate",
+     "scope": "line",
+     "line_refs": [
+      8
+     ],
+     "consequence": "Reduce",
+     "status": "reproduced",
+     "basis": "exact"
+    }
+   ],
+   "production_findings": [
+    {
+     "rule_id": "RS-04-R02",
+     "type": "ApprovedRate",
+     "scope": "line",
+     "line_refs": [
+      8
+     ],
+     "basis": "exact"
+    }
+   ],
+   "production_only": []
+  },
+  {
+   "id": "F-0100",
+   "clean": false,
+   "set_f_findings": [
+    {
+     "rule_id": "RS-04-R03",
+     "rule_type": "TimeIncrement",
+     "scope": "line",
+     "line_refs": [
+      2
+     ],
+     "consequence": "Reduce",
+     "status": "reproduced",
+     "basis": "exact"
+    },
+    {
+     "rule_id": "RS-04-R04",
+     "rule_type": "CoreRecordWindow",
+     "scope": "invoice",
+     "line_refs": [],
+     "consequence": "Flag",
+     "status": "not_expressible",
+     "reason": "CoreRecordWindow checks dates only; no rule type compares an invoice with the core record's budget"
+    },
+    {
+     "rule_id": "RS-04-R08",
+     "rule_type": "NonBillableActivity",
+     "scope": "line",
+     "line_refs": [
+      4
+     ],
+     "consequence": "Disallow",
+     "status": "not_expressible",
+     "reason": "NonBillableActivity lists activity codes only, and no code identifies clerical work: A110 (Manage data/files) also covers legitimate document work, and invoice preparation is coded A111"
+    }
+   ],
+   "production_findings": [
+    {
+     "rule_id": "RS-04-R03",
+     "type": "TimeIncrement",
+     "scope": "line",
+     "line_refs": [
+      2
+     ],
+     "basis": "exact"
+    }
+   ],
+   "production_only": []
+  },
+  {
+   "id": "F-0124",
+   "clean": false,
+   "set_f_findings": [
+    {
+     "rule_id": "RS-04-R02",
+     "rule_type": "ApprovedRate",
+     "scope": "line",
+     "line_refs": [
+      8
+     ],
+     "consequence": "Reduce",
+     "status": "reproduced",
+     "basis": "exact"
+    },
+    {
+     "rule_id": "RS-04-R03",
+     "rule_type": "TimeIncrement",
+     "scope": "line",
+     "line_refs": [
+      2
+     ],
+     "consequence": "Reduce",
+     "status": "reproduced",
+     "basis": "exact"
+    },
+    {
+     "rule_id": "RS-04-R04",
+     "rule_type": "CoreRecordWindow",
+     "scope": "invoice",
+     "line_refs": [],
+     "consequence": "Flag",
+     "status": "not_expressible",
+     "reason": "CoreRecordWindow checks dates only; no rule type compares an invoice with the core record's budget"
+    },
+    {
+     "rule_id": "RS-04-R08",
+     "rule_type": "NonBillableActivity",
+     "scope": "line",
+     "line_refs": [
+      5
+     ],
+     "consequence": "Disallow",
+     "status": "not_expressible",
+     "reason": "NonBillableActivity lists activity codes only, and no code identifies clerical work: A110 (Manage data/files) also covers legitimate document work, and invoice preparation is coded A111"
+    }
+   ],
+   "production_findings": [
+    {
+     "rule_id": "RS-04-R02",
+     "type": "ApprovedRate",
+     "scope": "line",
+     "line_refs": [
+      8
+     ],
+     "basis": "exact"
+    },
+    {
+     "rule_id": "RS-04-R03",
+     "type": "TimeIncrement",
+     "scope": "line",
+     "line_refs": [
+      2
+     ],
+     "basis": "exact"
+    }
+   ],
+   "production_only": []
+  },
+  {
+   "id": "F-0136",
+   "clean": false,
+   "set_f_findings": [
+    {
+     "rule_id": "RS-04-R01",
+     "rule_type": "ApprovedTimekeeper",
+     "scope": "line",
+     "line_refs": [
+      12
+     ],
+     "consequence": "Reject",
+     "status": "reproduced",
+     "basis": "exact"
+    },
+    {
+     "rule_id": "RS-04-R02",
+     "rule_type": "ApprovedRate",
+     "scope": "line",
+     "line_refs": [
+      1
+     ],
+     "consequence": "Reduce",
+     "status": "reproduced",
+     "basis": "exact"
+    },
+    {
+     "rule_id": "RS-04-R06",
+     "rule_type": "Duplicate",
+     "scope": "line",
+     "line_refs": [
+      9
+     ],
+     "consequence": "Disallow",
+     "related_line_refs": [
+      8
+     ],
+     "status": "reproduced",
+     "basis": "exact"
+    }
+   ],
+   "production_findings": [
+    {
+     "rule_id": "RS-04-R01",
+     "type": "ApprovedTimekeeper",
+     "scope": "line",
+     "line_refs": [
+      12
+     ],
+     "basis": "exact"
+    },
+    {
+     "rule_id": "RS-04-R02",
+     "type": "ApprovedRate",
+     "scope": "line",
+     "line_refs": [
+      1
+     ],
+     "basis": "exact"
+    },
+    {
+     "rule_id": "RS-04-R02",
+     "type": "ApprovedRate",
+     "scope": "line",
+     "line_refs": [
+      12
+     ],
+     "basis": "exact",
+     "reason": "no_approved_rate"
+    },
+    {
+     "rule_id": "RS-04-R06",
+     "type": "Duplicate",
+     "scope": "line",
+     "line_refs": [
+      9
+     ],
+     "basis": "exact"
+    }
+   ],
+   "production_only": [
+    {
+     "rule_id": "RS-04-R02",
+     "type": "ApprovedRate",
+     "scope": "line",
+     "line_refs": [
+      12
+     ],
+     "basis": "exact",
+     "reason": "the timekeeper is not on the roster, so no approved rate is in force (fires beside ApprovedTimekeeper)",
+     "status": "production_only"
+    }
+   ]
+  },
+  {
+   "id": "F-0178",
+   "clean": false,
+   "set_f_findings": [
+    {
+     "rule_id": "RS-04-R03",
+     "rule_type": "TimeIncrement",
+     "scope": "line",
+     "line_refs": [
+      2
+     ],
+     "consequence": "Reduce",
+     "status": "reproduced",
+     "basis": "exact"
+    },
+    {
+     "rule_id": "RS-04-R04",
+     "rule_type": "CoreRecordWindow",
+     "scope": "invoice",
+     "line_refs": [],
+     "consequence": "Flag",
+     "status": "not_expressible",
+     "reason": "CoreRecordWindow checks dates only; no rule type compares an invoice with the core record's budget"
+    },
+    {
+     "rule_id": "RS-04-R05",
+     "rule_type": "InvoiceAge",
+     "scope": "invoice",
+     "line_refs": [],
+     "consequence": "Flag",
+     "status": "not_expressible",
+     "reason": "InvoiceAge is invoice date minus line date per line; no rule type measures received date against the billing period end"
+    },
+    {
+     "rule_id": "RS-04-R06",
+     "rule_type": "Duplicate",
+     "scope": "line",
+     "line_refs": [
+      7
+     ],
+     "consequence": "Disallow",
+     "related_line_refs": [
+      6
+     ],
+     "status": "reproduced",
+     "basis": "exact"
+    },
+    {
+     "rule_id": "RS-04-R08",
+     "rule_type": "NonBillableActivity",
+     "scope": "line",
+     "line_refs": [
+      5
+     ],
+     "consequence": "Disallow",
+     "status": "not_expressible",
+     "reason": "NonBillableActivity lists activity codes only, and no code identifies clerical work: A110 (Manage data/files) also covers legitimate document work, and invoice preparation is coded A111"
+    }
+   ],
+   "production_findings": [
+    {
+     "rule_id": "RS-04-R03",
+     "type": "TimeIncrement",
+     "scope": "line",
+     "line_refs": [
+      2
+     ],
+     "basis": "exact"
+    },
+    {
+     "rule_id": "RS-04-R06",
+     "type": "Duplicate",
+     "scope": "line",
+     "line_refs": [
+      7
+     ],
+     "basis": "exact"
+    }
+   ],
+   "production_only": []
+  },
+  {
+   "id": "F-0202",
+   "clean": false,
+   "set_f_findings": [
+    {
+     "rule_id": "RS-04-R02",
+     "rule_type": "ApprovedRate",
+     "scope": "line",
+     "line_refs": [
+      3
+     ],
+     "consequence": "Reduce",
+     "status": "reproduced",
+     "basis": "exact"
+    }
+   ],
+   "production_findings": [
+    {
+     "rule_id": "RS-04-R02",
+     "type": "ApprovedRate",
+     "scope": "line",
+     "line_refs": [
+      3
+     ],
+     "basis": "exact"
+    }
+   ],
+   "production_only": []
+  },
+  {
+   "id": "F-0238",
+   "clean": false,
+   "set_f_findings": [
+    {
+     "rule_id": "RS-04-R01",
+     "rule_type": "ApprovedTimekeeper",
+     "scope": "line",
+     "line_refs": [
+      1
+     ],
+     "consequence": "Reject",
+     "status": "reproduced",
+     "basis": "exact"
+    },
+    {
+     "rule_id": "RS-04-R02",
+     "rule_type": "ApprovedRate",
+     "scope": "line",
+     "line_refs": [
+      7
+     ],
+     "consequence": "Reduce",
+     "status": "reproduced",
+     "basis": "exact"
+    },
+    {
+     "rule_id": "RS-04-R03",
+     "rule_type": "TimeIncrement",
+     "scope": "line",
+     "line_refs": [
+      9
+     ],
+     "consequence": "Reduce",
+     "status": "reproduced",
+     "basis": "exact"
+    },
+    {
+     "rule_id": "RS-04-R04",
+     "rule_type": "CoreRecordWindow",
+     "scope": "line",
+     "line_refs": [
+      10
+     ],
+     "consequence": "Flag",
+     "status": "reproduced",
+     "basis": "exact"
+    },
+    {
+     "rule_id": "RS-04-R05",
+     "rule_type": "InvoiceAge",
+     "scope": "invoice",
+     "line_refs": [],
+     "consequence": "Flag",
+     "status": "not_expressible",
+     "reason": "InvoiceAge is invoice date minus line date per line; no rule type measures received date against the billing period end"
+    }
+   ],
+   "production_findings": [
+    {
+     "rule_id": "RS-04-R01",
+     "type": "ApprovedTimekeeper",
+     "scope": "line",
+     "line_refs": [
+      1
+     ],
+     "basis": "exact"
+    },
+    {
+     "rule_id": "RS-04-R02",
+     "type": "ApprovedRate",
+     "scope": "line",
+     "line_refs": [
+      1
+     ],
+     "basis": "exact",
+     "reason": "no_approved_rate"
+    },
+    {
+     "rule_id": "RS-04-R02",
+     "type": "ApprovedRate",
+     "scope": "line",
+     "line_refs": [
+      7
+     ],
+     "basis": "exact"
+    },
+    {
+     "rule_id": "RS-04-R03",
+     "type": "TimeIncrement",
+     "scope": "line",
+     "line_refs": [
+      9
+     ],
+     "basis": "exact"
+    },
+    {
+     "rule_id": "RS-04-R04",
+     "type": "CoreRecordWindow",
+     "scope": "line",
+     "line_refs": [
+      10
+     ],
+     "basis": "exact"
+    }
+   ],
+   "production_only": [
+    {
+     "rule_id": "RS-04-R02",
+     "type": "ApprovedRate",
+     "scope": "line",
+     "line_refs": [
+      1
+     ],
+     "basis": "exact",
+     "reason": "the timekeeper is not on the roster, so no approved rate is in force (fires beside ApprovedTimekeeper)",
+     "status": "production_only"
+    }
+   ]
+  },
+  {
+   "id": "F-0250",
+   "clean": false,
+   "set_f_findings": [
+    {
+     "rule_id": "RS-04-R03",
+     "rule_type": "TimeIncrement",
+     "scope": "line",
+     "line_refs": [
+      7
+     ],
+     "consequence": "Reduce",
+     "status": "reproduced",
+     "basis": "exact"
+    }
+   ],
+   "production_findings": [
+    {
+     "rule_id": "RS-04-R03",
+     "type": "TimeIncrement",
+     "scope": "line",
+     "line_refs": [
+      7
+     ],
+     "basis": "exact"
+    }
+   ],
+   "production_only": []
+  },
+  {
+   "id": "F-0262",
+   "clean": false,
+   "set_f_findings": [
+    {
+     "rule_id": "RS-04-R02",
+     "rule_type": "ApprovedRate",
+     "scope": "line",
+     "line_refs": [
+      8
+     ],
+     "consequence": "Reduce",
+     "status": "reproduced",
+     "basis": "exact"
+    },
+    {
+     "rule_id": "RS-04-R04",
+     "rule_type": "CoreRecordWindow",
+     "scope": "invoice",
+     "line_refs": [],
+     "consequence": "Flag",
+     "status": "not_expressible",
+     "reason": "CoreRecordWindow checks dates only; no rule type compares an invoice with the core record's budget"
+    },
+    {
+     "rule_id": "RS-04-R06",
+     "rule_type": "Duplicate",
+     "scope": "line",
+     "line_refs": [
+      2
+     ],
+     "consequence": "Disallow",
+     "related_line_refs": [
+      1
+     ],
+     "status": "reproduced",
+     "basis": "exact"
+    },
+    {
+     "rule_id": "RS-04-R07",
+     "rule_type": "ExpenseRule",
+     "scope": "line",
+     "line_refs": [
+      12
+     ],
+     "consequence": "Disallow",
+     "status": "reproduced",
+     "basis": "exact"
+    }
+   ],
+   "production_findings": [
+    {
+     "rule_id": "RS-04-R02",
+     "type": "ApprovedRate",
+     "scope": "line",
+     "line_refs": [
+      8
+     ],
+     "basis": "exact"
+    },
+    {
+     "rule_id": "RS-04-R06",
+     "type": "Duplicate",
+     "scope": "line",
+     "line_refs": [
+      2
+     ],
+     "basis": "exact"
+    },
+    {
+     "rule_id": "RS-04-R07",
+     "type": "ExpenseRule",
+     "scope": "line",
+     "line_refs": [
+      12
+     ],
+     "basis": "exact"
+    }
+   ],
+   "production_only": []
+  },
+  {
+   "id": "F-0292",
+   "clean": false,
+   "set_f_findings": [
+    {
+     "rule_id": "RS-04-R01",
+     "rule_type": "ApprovedTimekeeper",
+     "scope": "line",
+     "line_refs": [
+      3
+     ],
+     "consequence": "Reject",
+     "status": "reproduced",
+     "basis": "exact"
+    },
+    {
+     "rule_id": "RS-04-R01",
+     "rule_type": "ApprovedTimekeeper",
+     "scope": "line",
+     "line_refs": [
+      7
+     ],
+     "consequence": "Reject",
+     "status": "reproduced",
+     "basis": "exact"
+    },
+    {
+     "rule_id": "RS-04-R02",
+     "rule_type": "ApprovedRate",
+     "scope": "line",
+     "line_refs": [
+      6
+     ],
+     "consequence": "Reduce",
+     "status": "reproduced",
+     "basis": "exact"
+    },
+    {
+     "rule_id": "RS-04-R05",
+     "rule_type": "InvoiceAge",
+     "scope": "invoice",
+     "line_refs": [],
+     "consequence": "Flag",
+     "status": "not_expressible",
+     "reason": "InvoiceAge is invoice date minus line date per line; no rule type measures received date against the billing period end"
+    },
+    {
+     "rule_id": "RS-04-R08",
+     "rule_type": "NonBillableActivity",
+     "scope": "line",
+     "line_refs": [
+      1
+     ],
+     "consequence": "Disallow",
+     "status": "not_expressible",
+     "reason": "NonBillableActivity lists activity codes only, and no code identifies clerical work: A110 (Manage data/files) also covers legitimate document work, and invoice preparation is coded A111"
+    }
+   ],
+   "production_findings": [
+    {
+     "rule_id": "RS-04-R01",
+     "type": "ApprovedTimekeeper",
+     "scope": "line",
+     "line_refs": [
+      3
+     ],
+     "basis": "exact"
+    },
+    {
+     "rule_id": "RS-04-R01",
+     "type": "ApprovedTimekeeper",
+     "scope": "line",
+     "line_refs": [
+      7
+     ],
+     "basis": "exact"
+    },
+    {
+     "rule_id": "RS-04-R02",
+     "type": "ApprovedRate",
+     "scope": "line",
+     "line_refs": [
+      3
+     ],
+     "basis": "exact",
+     "reason": "no_approved_rate"
+    },
+    {
+     "rule_id": "RS-04-R02",
+     "type": "ApprovedRate",
+     "scope": "line",
+     "line_refs": [
+      6
+     ],
+     "basis": "exact"
+    },
+    {
+     "rule_id": "RS-04-R02",
+     "type": "ApprovedRate",
+     "scope": "line",
+     "line_refs": [
+      7
+     ],
+     "basis": "exact",
+     "reason": "no_approved_rate"
+    }
+   ],
+   "production_only": [
+    {
+     "rule_id": "RS-04-R02",
+     "type": "ApprovedRate",
+     "scope": "line",
+     "line_refs": [
+      3
+     ],
+     "basis": "exact",
+     "reason": "the timekeeper is not on the roster, so no approved rate is in force (fires beside ApprovedTimekeeper)",
+     "status": "production_only"
+    },
+    {
+     "rule_id": "RS-04-R02",
+     "type": "ApprovedRate",
+     "scope": "line",
+     "line_refs": [
+      7
+     ],
+     "basis": "exact",
+     "reason": "the timekeeper is not on the roster, so no approved rate is in force (fires beside ApprovedTimekeeper)",
+     "status": "production_only"
+    }
+   ]
+  },
+  {
+   "id": "F-0298",
+   "clean": false,
+   "set_f_findings": [
+    {
+     "rule_id": "RS-04-R01",
+     "rule_type": "ApprovedTimekeeper",
+     "scope": "line",
+     "line_refs": [
+      7
+     ],
+     "consequence": "Reject",
+     "status": "reproduced",
+     "basis": "exact"
+    },
+    {
+     "rule_id": "RS-04-R03",
+     "rule_type": "TimeIncrement",
+     "scope": "line",
+     "line_refs": [
+      2
+     ],
+     "consequence": "Reduce",
+     "status": "reproduced",
+     "basis": "exact"
+    },
+    {
+     "rule_id": "RS-04-R08",
+     "rule_type": "NonBillableActivity",
+     "scope": "line",
+     "line_refs": [
+      5
+     ],
+     "consequence": "Disallow",
+     "status": "not_expressible",
+     "reason": "NonBillableActivity lists activity codes only, and no code identifies clerical work: A110 (Manage data/files) also covers legitimate document work, and invoice preparation is coded A111"
+    }
+   ],
+   "production_findings": [
+    {
+     "rule_id": "RS-04-R01",
+     "type": "ApprovedTimekeeper",
+     "scope": "line",
+     "line_refs": [
+      7
+     ],
+     "basis": "exact"
+    },
+    {
+     "rule_id": "RS-04-R02",
+     "type": "ApprovedRate",
+     "scope": "line",
+     "line_refs": [
+      7
+     ],
+     "basis": "exact",
+     "reason": "no_approved_rate"
+    },
+    {
+     "rule_id": "RS-04-R03",
+     "type": "TimeIncrement",
+     "scope": "line",
+     "line_refs": [
+      2
+     ],
+     "basis": "exact"
+    }
+   ],
+   "production_only": [
+    {
+     "rule_id": "RS-04-R02",
+     "type": "ApprovedRate",
+     "scope": "line",
+     "line_refs": [
+      7
+     ],
+     "basis": "exact",
+     "reason": "the timekeeper is not on the roster, so no approved rate is in force (fires beside ApprovedTimekeeper)",
+     "status": "production_only"
+    }
+   ]
+  },
+  {
+   "id": "F-0352",
+   "clean": true,
+   "set_f_findings": [],
+   "production_findings": [],
+   "production_only": []
+  },
+  {
+   "id": "F-0364",
+   "clean": true,
+   "set_f_findings": [],
+   "production_findings": [],
+   "production_only": []
+  },
+  {
+   "id": "F-0382",
+   "clean": true,
+   "set_f_findings": [],
+   "production_findings": [],
+   "production_only": []
+  },
+  {
+   "id": "F-0502",
+   "clean": true,
+   "set_f_findings": [],
+   "production_findings": [],
+   "production_only": []
+  },
+  {
+   "id": "F-0538",
+   "clean": true,
+   "set_f_findings": [],
+   "production_findings": [],
+   "production_only": []
+  }
+ ]
+}
