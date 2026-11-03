@@ -202,3 +202,21 @@
   - Finance: 7 requests, all 2xx.
   - The new AP export routes and the server-only-send path saw no traffic. So the gate clears the deploy as causing no regression; it does not prove those paths.
   - Exceptions: none caused by the deploy. #2292 and #1522 are pre-existing. The 10 `sprk_trackingnumber` faults (13:39–13:43) and 2 dead-letters are the dev column gap above (#2529). The ROOT-OWNER census +1 is #2524.
+
+## 17. Dev BFF `d763dc120e` (2026-11-03, deployed by R3; R3's last deploy, hand-off to uac-r2)
+
+- **Content:** master at the #2546 merge (R3 task 090: the invite to a WorkforceHome contact is refused with no collision flag; a comment fix) and #2541 (field-mapping task 041, FR-40: the search index follows the content type). The src/server delta from `5796774091` is 26 files: #2546 4, #2541 22. #2541's one external-plane edit (`ExternalProjectDataEndpoints.cs:2011`) only drops the unused `SearchIndexName: null` argument. #2450 is present, and there is no non-comment `sprk_invoicestatus`.
+- **CI:** Router green at 22:24:56Z, all Tier 1 jobs success. Release build + BFF publish green at 21:58:16Z.
+- **Go:** the owner in R3's session ("go BFF deploy d763dc120e").
+- **OKs** (each with conditions, all met): uac-r2 (38), field-mapping (5c), ebilling (7b), ontology (a9), word-add-in (dc); provisioning standing.
+- **Pre-deploy checks:**
+  - `Set-ChildRecordCreatorPersonSchema.ps1 -Verify` exited 0 (272 OK).
+  - Settings: 225; both write switches true; `Ebilling__Enabled` true, `Ebilling__StoredFileReconcileEnabled` false; 3 `Finance__FileStore__*` names; `AiSearch__KnowledgeIndexName` equals `spaarke-files-index` (field-mapping's condition).
+  - Snapshot by `scripts/Save-BffDevRollbackSnapshot.ps1`, first use: live `5796774091`, healthz 200, `deploy/rollback/wwwroot-20261103T220358Z` (197 files).
+- **Start notice** to ebilling (the owner's live Email-to-AP test) and to ontology (the owner's UAT).
+- **Deploy:** `Deploy-BffApi.ps1 -Environment dev` from the detached worktree `C:\wtbffe-d763dc120e`. Package 39.3 MB. Received at 2026-11-03 22:26:31Z. The 4 critical files match by SHA-256; health and CORS checks passed.
+- **Readback** (`scripts/Test-BffDevDeployReadback.ps1`, 22:27:46Z): ProductVersion `+d763dc120e…`; /healthz 200, /healthz/dataverse 200, anonymous /api/me 401. Settings unchanged (225).
+- **After-notices** sent to all five. uac-r2's gate runs from 22:26:31Z. field-mapping runs its read-only checks. word-add-in asked for an Outlook save smoke (one save filed to a matter, one unfiled), which needs the owner to do the saves.
+- **Rollback:** restore the snapshot above (`Deploy-BffApi.ps1 -Environment dev -SkipBuild -PublishPath deploy/rollback/wwwroot-20261103T220358Z`), or redeploy `5796774091`. Owner approval first.
+- **Hand-off:** from the next deploy, unified-access-control-r2 orchestrates dev BFF deploys (owner decision 2026-11-03; `docs/procedures/dev-bff-deploy-coordination.md`).
+- **UAC gate:** pending.
