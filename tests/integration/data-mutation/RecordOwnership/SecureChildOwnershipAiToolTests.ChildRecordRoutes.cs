@@ -434,7 +434,7 @@ public sealed partial class SecureChildOwnershipAiToolTests
     }
 
     [Theory]
-    [InlineData("sprk_project")]
+    [InlineData("sprk_servicerequest")]
     [InlineData("sprk_communication")]
     [InlineData("account")]
     public async Task ChildCreate_OfATableOutsideTheCensus_IsRefused400(string table)

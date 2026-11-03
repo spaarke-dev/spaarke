@@ -2,6 +2,7 @@ using System.Text.RegularExpressions;
 using FluentAssertions;
 using Sprk.Bff.Api.Api;
 using Sprk.Bff.Api.Services.Access;
+using Sprk.Bff.Api.Tests.Integration.DataMutation.RecordOwnership;
 using Xunit;
 
 namespace Sprk.Bff.Api.Tests.Seam.ChildRecords;
@@ -109,6 +110,30 @@ public sealed partial class ChildRecordCreateTablesAgreementTests
         before.Should().Contain("sprk_matter", "without the IsParent clause the census would demand secure-child cases for a matter");
         now.Should().NotContain("sprk_matter");
         before.Except(now).Should().BeEquivalentTo(["sprk_matter"], "the new clause removes the top root and nothing else");
+    }
+
+    /// <summary>
+    /// Guard for <c>SecureChildOwnershipAiToolTests.ChildCreate_OfATableOutsideTheCensus_IsRefused400</c>: every table that
+    /// theory names (read from its own <c>[InlineData]</c>, so the two cannot drift) is absent from the route's create tables.
+    /// Task 020 moved sprk_project onto the route and the theory's sprk_project row silently changed meaning; a table added
+    /// to the route later now fails HERE, by name, instead.
+    /// </summary>
+    [Fact]
+    public void TheOutsideTheCensusTheory_NamesOnlyTablesTheRouteDoesNotCreate()
+    {
+        var theory = typeof(SecureChildOwnershipAiToolTests).GetMethod(
+            nameof(SecureChildOwnershipAiToolTests.ChildCreate_OfATableOutsideTheCensus_IsRefused400));
+        theory.Should().NotBeNull();
+
+        var tables = theory!.GetCustomAttributes(typeof(InlineDataAttribute), inherit: false)
+            .Cast<InlineDataAttribute>()
+            .SelectMany(a => a.GetData(theory))
+            .Select(row => (string)row[0])
+            .ToList();
+
+        tables.Should().NotBeEmpty();
+        tables.Where(ChildRecordEndpoints.CreateTables.Contains).Should().BeEmpty(
+            "a table the route creates is not 'outside the census'; pick another real table for that theory");
     }
 
     private static string RepoRoot()
