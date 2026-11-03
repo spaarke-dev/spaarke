@@ -1,0 +1,88 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="095d" project="ebilling-r1">
+  <metadata>
+    <title>Set the firm on a no-firm invoice: a Decision Record, renumber into the firm's sequence, then run the firm rules</title>
+    <phase>3 Rules (follow-up to 095c; owner UAT 2026-11-03)</phase>
+    <gate>owner decided 2026-11-03 (Decision Record; renumber if secure)</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Adds an internal write route that changes an invoice's firm and its tracking number, plus a form command; tags include bff-api and auth.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Rewrites an alternate-key value through the allocator and records a Decision Record; the race and visibility consequences need top-tier reasoning.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Builds on 095c's allocator and hold changes.</parallel-reason>
+    <deps>095c</deps>
+    <tags>bff-api, auth, ebilling, frontend</tags>
+    <estimated-effort>1 day</estimated-effort>
+  </metadata>
+
+  <prompt>A reviewer reconciles the firm on an invoice submitted without one (task 095c). The owner, 2026-11-03: "hold until firm; and this should go to ontology for a Decision Record". On renumbering: "take whichever is the most 'secure' but if renumbering is ok then that does make is better aligned to firm's invoice and easier to visually related the submission to the invoice".</prompt>
+
+  <role>SPAARKE platform developer. Expert in the Finance route gate, the tracking-number allocator, BillingDecisionRecorder and the invoice review UI.</role>
+
+  <goal>An internal reviewer with Write on invoice X (which has no firm) sets X's firm to a firm linked to X's core record. In one guarded operation:
+    - X and its submission get the firm.
+    - The submission is renumbered into the firm's sequence through the allocator (the same race-safe path as intake).
+    - The firm_missing hold is resolved.
+    - A Decision Record keeps the old and new tracking number, the firm and the reviewer.
+    - The firm rules run.
+  The operation is all or nothing: a failure leaves X unchanged.</goal>
+
+  <context>
+    <background>
+      Read notes/095c-from-email-firm-optional.md first: the alternate-key evidence and the reader inventory.
+      Decision Records go through BillingDecisionRecorder.RecordAsync (Services/Finance/BillingDecisionRecorder.cs:113), as the invoice-line decisions and the overrides do (InvoiceLineDecisionService, SubmissionOverrideService). ontology-r1 owns the Decision Record model: agree the decision kind and its fields with them before you build.
+      Renumbering is chosen over keeping the number because the allocator is the only writer of the (firm, tracking number) key. Reusing it keeps the uniqueness guarantee, and the new number lines up with the firm's own invoices. The old number stays findable: it is in the Decision Record, and a replay or a 095a read returns the current number.
+    </background>
+    <relevant-files>
+      <file role="reference">src/server/api/Sprk.Bff.Api/Services/Finance/BillingDecisionRecorder.cs, SubmissionOverrideService.cs (a reviewer action that records a decision)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Finance/Submission/TrackingNumberAllocator.cs (renumber an existing submission)</file>
+      <file role="modify">the invoice review endpoints file holding the reviewer actions (extend it; no new endpoints file)</file>
+      <file role="modify">the invoice review UI where the hold is shown (a "Set firm" action offering the record's linked firms, from the §8 firms route)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="Finance route gate">The route is in the /api/finance group with step 0 (internal callers only), RequireEbillingEnabled, and the caller's Write on the invoice. The firm must be active and linked to the invoice's core record (CheckFirmLinkAsync, the one definition). It works only while the invoice has no firm: if it already has one, the answer is 409.</constraint>
+    <constraint source="atomic">Renumbering, the firm on the invoice and on the submission, resolving the hold, and the Decision Record either all land or none do. Use the existing commit or undo pattern of the intake (task 094), and state how. A lost allocator race retries within the allocator's bound.</constraint>
+    <constraint source="Decision Record">The decision kind and its fields are agreed with ontology-r1 and written through BillingDecisionRecorder. They carry the previous and new tracking number, the firm, and the reviewer as a person.</constraint>
+    <constraint source="visibility">After the firm is set, the invoice becomes visible to that firm's users under the existing rule, unchanged.</constraint>
+    <constraint source="CLAUDE.md §11 / §10">Justify the route and the allocator method in the notes; BFF hygiene as usual. No role or field-security change.</constraint>
+  </constraints>
+
+  <steps mode="directional">
+    <step>Agree the Decision Record kind and its fields with ontology-r1.</step>
+    <step>The allocator's renumber method and the route; tests.</step>
+    <step>The "Set firm" action in the review UI; jest tests.</step>
+    <step>notes/095d-set-invoice-firm.md; update TASK-INDEX.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>Set a linked firm on a no-firm invoice: 200. The firm is on the invoice and its submission. The tracking number is the firm's next one for that invoice number. The hold is resolved. One Decision Record has the old and new numbers. The firm rules have run.</criterion>
+    <criterion>An unlinked firm: refused, with nothing changed. An invoice that already has a firm: 409. No Write on the invoice, or an unknown invoice: the uniform 404. A step-0 refusal: 404.</criterion>
+    <criterion>A failure after the allocator step (seed one) leaves the invoice, the submission and the tracking number as they were. Seed-proof this guard only.</criterion>
+    <criterion>Two reviewers setting the firm at once: one wins and the other gets 409; never two numbers.</criterion>
+    <criterion>Approve works afterwards. A 095a read and a replay return the new number.</criterion>
+    <criterion>UI: the Set firm action appears only with the hold present, lists the linked firms, and shows the error and success states, in dark mode too.</criterion>
+    <criterion>Test scope: the cases above. Anything beyond needs a one-line justification in the notes.</criterion>
+    <criterion>Gate: the 5 test projects build; ArchTests, the broad filter and the integration suites pass; the UI jest suite passes.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>If renumbering cannot be made atomic and race-safe through the allocator, STOP. Recommend keeping the number (the owner accepted either option) and ask the owner.</trigger>
+    <trigger>If ontology-r1 says this decision needs a new Decision Record kind that needs schema, STOP: a schema change needs the owner's OK and notices to peers.</trigger>
+  </escalation>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>projects/ebilling-r1/CLAUDE.md</file>
+    </files>
+  </knowledge>
+</task>

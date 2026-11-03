@@ -1,0 +1,98 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="095c" project="ebilling-r1">
+  <metadata>
+    <title>Submit Invoice from email: the firm is optional; a no-firm invoice is held "firm needed" and cannot be approved</title>
+    <phase>3 Rules (follow-up to 095; owner UAT 2026-11-03)</phase>
+    <gate>owner decided 2026-11-03 in the ebilling session (hold until a firm is set; Decision Record; renumber if secure)</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Changes the intake contract, the tracking-number allocator's inputs and the approval gate; tags include bff-api and auth.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Cross-cutting: the firm feeds the allocator and its alternate key, the correction judge, rule sets, the AP export and external visibility; each must be shown safe with a null firm.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits InvoiceSubmissionService / FromEmailSubmissionService and the 095 contract notes, which the 095a/095b fix round also edits; start after that round is merged.</parallel-reason>
+    <deps>095, 095a, 095b, 097</deps>
+    <tags>bff-api, auth, ebilling</tags>
+    <estimated-effort>1-1.5 days</estimated-effort>
+  </metadata>
+
+  <prompt>Let an internal user submit an invoice from Outlook when no firm is linked to the record. The owner, 2026-11-03 (relayed by word-add-in-r1): the Firm "should be a business required not required field; it should include the warning but not block the submission since it can be reconciled in the decision process". The owner's decisions in the ebilling session: hold the invoice until a firm is set; the firm assignment is a Decision Record (task 095d builds the set-firm action); renumber the tracking number into the firm's sequence when the firm is set, if that is secure.</prompt>
+
+  <role>SPAARKE platform developer. Expert in the BFF Minimal API, the Finance route gate, the ebilling intake, the tracking-number allocator and the billing findings and Decision Records.</role>
+
+  <goal>POST /api/finance/invoice-submissions/from-email with mode New accepts firmId null or absent. The submission is accepted, and the invoice is created In Review with no firm and a "firm needed" hold (a pipeline finding, recorded as other holds are). The pane gets one sentence. Approve refuses the invoice while it has no firm. Every place that reads the invoice's firm behaves correctly and fails closed on null. Nothing changes when a firm is sent.</goal>
+
+  <context>
+    <background>
+      Read first:
+      - notes/095-from-email-contract.md: §2 the firm fields (OP-1), §4 K (the firm is not in K), §5, §8 the firms route.
+      - The D-91 and D-106 entries in spec.md and the decision log. This task narrows D-106 for the internal from-email channel only. Record the amendment as EB-D-nnn.
+      Where the firm is used today (grep sprk_vendororg; the file list was taken 2026-11-03):
+      - TrackingNumberAllocator: the sequence per (firm, firm invoice number), and the alternate key sprk_invoicesubmission_firm_trackingnumber on (sprk_trackingnumber, sprk_vendororg). It refuses Guid.Empty at :97.
+      - InvoiceSubmissionService: IsActiveFirmAsync, CheckFirmLinkAsync, and JudgeCorrectionAsync :1274 and :1322, which require the invoice's firm to equal the request's.
+      - FinanceAuthorizationFilter: external visibility by firm.
+      - RuleSetService: the firm's rule set.
+      - ApExportService: the vendor.
+      - Also FinanceSummaryService, InvoiceContextService, InvoiceReviewService, InvoiceIndexDocument, BillingFactLoader, ParentLineage, InvoiceSubmissionPersister, SubmissionEvaluationOutcome.
+      Hold pattern to copy: the pipeline finding SubmissionReasonCodes.InvoiceNumberMismatch, which goes through InvoiceSubmissionAfterSteps :1573-1590 to BillingSystemFindings.InvoiceNumberMismatch. It holds for review and never rejects.
+      External SPA submissions always carry the caller's firm and are out of scope. They must keep requiring it.
+    </background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Finance/Submission/FromEmailSubmissionContracts.cs, FromEmailSubmissionService.cs, InvoiceSubmissionService.cs, TrackingNumberAllocator.cs, SubmissionReasonCodes.cs, InvoiceSubmissionAfterSteps.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Signals/Billing/BillingSystemFindings.cs (add FirmMissing beside InvoiceNumberMismatch)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Finance/InvoiceApprovalService.cs (refuse approval with no firm)</file>
+      <file role="modify">projects/ebilling-r1/notes/095-from-email-contract.md (§2, §6, §8 and the user sentence)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="owner 2026-11-03">Only the internal from-email route (channel Outlook) accepts a null firm, and only for mode New. A correction keeps the original's firm; if that is null, the correction's is null too. The external SPA route and the internal wizard route keep requiring the firm. A firmId that is sent is still checked: active and linked (firm_not_linked).</constraint>
+    <constraint source="fail closed">Every reader of the invoice's or submission's firm handles null explicitly. In external visibility, a no-firm invoice is visible to no firm user (fail closed). Rule sets: only the rules that do not depend on the firm run, and the result says the firm rules were not run. AP export: a no-firm invoice cannot be approved, so it never reaches export; export refuses one anyway (defence in depth). No reader treats null as a match.</constraint>
+    <constraint source="tracking number">With no firm, the allocator counts the sequence per (no firm, firm invoice number), the row is written with sprk_vendororg null, and the alternate key must still guard uniqueness. Verify on spaarkedev1 how the alternate key treats a null sprk_vendororg: two inserts with the same tracking number and a null firm. Record the result in the notes. See the escalation.</constraint>
+    <constraint source="hold">"Firm needed" is a pipeline finding (reason code ebilling.submission.firm_missing), held for review and recorded the same way InvoiceNumberMismatch is, never a rejection. The submission is Accepted. The pane sentence: "Submitted without a firm. A reviewer will add the firm before approval."</constraint>
+    <constraint source="approval">InvoiceApprovalService refuses an invoice with no firm (a stable reason code; the review UI shows it). This is the only new refusal.</constraint>
+    <constraint source="idempotency">K is unchanged. In the X-Idempotency-Key cache binding, a null firm binds as an empty value. A replay with firmId null or absent is the same request.</constraint>
+    <constraint source="CLAUDE.md §11">No new service. Extend the files above, and answer the three justification questions for the new reason code and the approval refusal in the notes.</constraint>
+    <constraint source="CLAUDE.md §10">BFF hygiene: the placement statement, the publish-size delta against a fresh master build, no new HIGH CVE.</constraint>
+    <constraint source="privacy">Use neutral wording in commits, notes and the PR.</constraint>
+  </constraints>
+
+  <steps mode="directional">
+    <step>Verify the alternate key with a null firm on spaarkedev1 (read the metadata, then try two inserts in a throwaway way and clean up after; get the owner's OK before any live write).</step>
+    <step>Contract: mode New accepts firmId null or absent; the correction rule above; §6 and §8 unchanged otherwise; the user sentence.</step>
+    <step>The allocator and persister with a null firm; the hold finding; the approval refusal; null handling in every reader listed above.</step>
+    <step>Tests; notes/095c-from-email-firm-optional.md (justification, placement, publish size, the alternate-key evidence, the reader inventory with the null behaviour of each); the D-106 amendment entry.</step>
+    <step>Send word-add-in-r1 the contract delta and the PR number.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>Mode New with firmId null, and with firmId absent: 202 Accepted. The invoice is In Review, has no firm, and carries the firm_missing finding. The tracking number is {firmInvoiceNumber}.{n} in the no-firm sequence.</criterion>
+    <criterion>Two no-firm submissions with the same firm invoice number get .1 and .2, never a duplicate, under parallel calls (the allocator's race test with a null firm).</criterion>
+    <criterion>A firmId that is sent but not linked: still 409 or 400 as today. A sent active, linked firm: behaviour unchanged (existing tests pass untouched).</criterion>
+    <criterion>A correction of a no-firm invoice keeps the null firm and supersedes it. A correction that sends a firm for a no-firm original: refused with the existing different-firm reason.</criterion>
+    <criterion>The external SPA route and the internal wizard route with no firm: refused as today.</criterion>
+    <criterion>Approve on a no-firm invoice: refused with the new reason code, and the invoice stays In Review.</criterion>
+    <criterion>A firm user cannot see a no-firm invoice. Seed-proof this guard only.</criterion>
+    <criterion>Rule evaluation with no firm runs only the rules that do not depend on the firm, and says so. AP export refuses a no-firm invoice.</criterion>
+    <criterion>Test scope: the cases above. Anything beyond needs a one-line justification in the notes.</criterion>
+    <criterion>Gate: the 5 test projects build; ArchTests, the broad filter and the integration suites pass.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>If the alternate key does not enforce uniqueness when sprk_vendororg is null, STOP. Report the options: a sentinel "no firm" organization, a separate key, or a check in the allocator. A key or schema change needs the owner's OK and notices to peers.</trigger>
+    <trigger>If a firm reader cannot be made to fail closed on null without changing an access rule, STOP and escalate to uac-r2 and the owner.</trigger>
+  </escalation>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>.claude/patterns/api/endpoint-filters.md</file>
+      <file>projects/ebilling-r1/CLAUDE.md</file>
+    </files>
+  </knowledge>
+</task>

@@ -16,6 +16,9 @@
 - The owner's go for word-add-in's Outlook desktop sign-in fix was relayed.
 - Correction test PASSED: INV-792345.4 supersedes .3 (.3 is Superseded/inactive; the .4 submission has resubmissionof = .3's submission). The -0.03 total is correct (a Microsoft credit note).
 
+## Owner decisions 2026-11-03 (firm optional)
+- Firm optional on Submit Invoice from Outlook (relayed by word-add-in): hold the invoice until a firm is set; the firm assignment is a Decision Record (ontology-r1 agrees the kind); renumber into the firm's sequence if secure. Tasks 095c (intake, hold, approval refusal) and 095d (set-firm action). 095c starts after the 095a/095b fix round merges (same files). word-add-in has a holding answer; the pane change waits behind their flag for the contract delta.
+
 ## Open owner questions
 1. Refused bell: link to the submission (per the POML, being implemented) or to the invoice? Not answered.
 2. Approve test invoices for the 153 end-to-end (needed for the AP-emails "no New" click-through and the first Email to AP send; uac-r2 wants the batch link and the send time).
