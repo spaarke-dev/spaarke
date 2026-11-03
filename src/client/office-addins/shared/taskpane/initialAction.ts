@@ -1,9 +1,9 @@
 /**
- * The `?action=` a ribbon button opens the taskpane with.
+ * The `?action=` a ribbon button opened the taskpane with. Package 1.1.4 (task 133, owner UAT 2026-11-03) removed both
+ * buttons — the To Do and Invoice views are pane tabs — so these come only from a cached older manifest.
  *
- * - `createTodo` — the Outlook "Create To Do" button (smart-todo-decoupling-r3 FR-27 / task 070): the To Do tab.
- * - `submitInvoice` — the Outlook "Submit Invoice" button (word-add-in-r1 task 133): the Invoice view, which has no
- *   tab — this is the only way to reach it.
+ * - `createTodo` — the former Outlook "Create To Do" button (smart-todo-decoupling-r3 FR-27 / task 070): the To Do tab.
+ * - `submitInvoice` — the former Outlook "Submit Invoice" button (word-add-in-r1 task 133): the Invoice tab.
  *
  * Any other value, or none, is the default pane.
  */

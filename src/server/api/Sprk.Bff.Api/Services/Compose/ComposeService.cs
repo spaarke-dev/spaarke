@@ -2297,7 +2297,6 @@ public class ComposeService : IComposeService
                     ContentType: DocxContentType,
                     DocumentId: promotion.DocumentRecordId?.ToString(),
                     ParentEntity: null,          // parent association is task 014 — standalone Document is valid
-                    SearchIndexName: null,       // resolver cascade runs downstream
                     Source: "ComposeCreateOnSave",
                     CorrelationId: httpContext.TraceIdentifier),
                 httpContext,

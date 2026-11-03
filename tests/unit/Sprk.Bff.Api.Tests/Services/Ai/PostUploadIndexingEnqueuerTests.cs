@@ -32,7 +32,8 @@ public sealed class PostUploadIndexingEnqueuerTests
     private readonly Mock<IDocumentDataverseService> _documentServiceMock = new();
     private readonly Mock<ILogger<PostUploadIndexingEnqueuer>> _loggerMock = new();
     private readonly PostUploadIndexingOptions _options = new();
-    private readonly AnalysisOptions _analysisOptions = new() { SharedIndexName = "spaarke-files-index" };
+    private readonly ISearchIndexNameResolver _indexNames =
+        Mock.Of<ISearchIndexNameResolver>(r => r.GetDefaultIndexName() == "spaarke-files-index");
 
     public PostUploadIndexingEnqueuerTests()
     {
@@ -56,7 +57,7 @@ public sealed class PostUploadIndexingEnqueuerTests
             _jobSubmissionMock.Object,
             _documentServiceMock.Object,
             TestDocumentIndexParentResolver.Over(),
-            Options.Create(_analysisOptions),
+            _indexNames,
             Options.Create(_options),
             _loggerMock.Object);
 
@@ -67,7 +68,6 @@ public sealed class PostUploadIndexingEnqueuerTests
         string contentType = "application/pdf",
         string fileName = "contract.pdf",
         string tenantId = "tenant-1",
-        string? searchIndexName = null,
         ParentEntityContext? parentEntity = null) =>
         new(
             TenantId: tenantId,
@@ -78,7 +78,6 @@ public sealed class PostUploadIndexingEnqueuerTests
             ContentType: contentType,
             DocumentId: "doc-guid-123",
             ParentEntity: parentEntity,
-            SearchIndexName: searchIndexName,
             Source: "TestSource",
             CorrelationId: "corr-id-1");
 
@@ -106,7 +105,7 @@ public sealed class PostUploadIndexingEnqueuerTests
             .Callback<FileIndexRequest, HttpContext, CancellationToken>((req, _, _) => captured = req)
             .ReturnsAsync(new FileIndexingResult { Success = true, ChunksIndexed = 1, Duration = TimeSpan.FromSeconds(1) });
         var sut = new PostUploadIndexingEnqueuer(_fileIndexingMock.Object, _jobSubmissionMock.Object, _documentServiceMock.Object,
-            TestDocumentIndexParentResolver.Over(dataverse.Object), Options.Create(_analysisOptions), Options.Create(_options),
+            TestDocumentIndexParentResolver.Over(dataverse.Object), _indexNames, Options.Create(_options),
             _loggerMock.Object);
 
         await sut.EnqueueIfApplicableAsync(ValidRequest() with { DocumentId = document.ToString() }, CreateHttpContext(), CancellationToken.None);
@@ -127,14 +126,13 @@ public sealed class PostUploadIndexingEnqueuerTests
 
         var sut = CreateSut();
         var ctx = CreateHttpContext();
-        var request = ValidRequest(searchIndexName: "spaarke-file-index");
+        var request = ValidRequest();
 
         var result = await sut.EnqueueIfApplicableAsync(request, ctx, CancellationToken.None);
 
         result.JobSubmitted.Should().BeTrue();
         capturedRequest.Should().NotBeNull();
         capturedRequest!.DriveId.Should().Be("drive-abc");
-        capturedRequest.SearchIndexName.Should().Be("spaarke-file-index");
         capturedContext.Should().BeSameAs(ctx);
         _fileIndexingMock.Verify(
             s => s.IndexFileAsync(It.IsAny<FileIndexRequest>(), It.IsAny<HttpContext>(), It.IsAny<CancellationToken>()),
@@ -155,9 +153,9 @@ public sealed class PostUploadIndexingEnqueuerTests
             .Callback<string, UpdateDocumentRequest, CancellationToken>((id, req, _) => { capturedId = id; captured = req; })
             .Returns(Task.CompletedTask);
 
-        // Compose passes SearchIndexName=null → falls back to SharedIndexName default.
+        // The stamp names the tenant-default index (task 041: the index follows the content type).
         var result = await CreateSut().EnqueueIfApplicableAsync(
-            ValidRequest(searchIndexName: null),
+            ValidRequest(),
             CreateHttpContext(),
             CancellationToken.None);
 
@@ -190,9 +188,25 @@ public sealed class PostUploadIndexingEnqueuerTests
             Times.Never);
     }
 
+    /// <summary>
+    /// Task 041 (FR-40, G-9; design §14.7 must-fire 7; review round 1 F2): the OBO write lands in
+    /// <c>AiSearch:KnowledgeIndexName</c>, so the stamp names it too. The resolver here is the REAL
+    /// <see cref="SearchIndexNameResolver"/> over a non-default <c>KnowledgeIndexName</c>, so the stamp is proven to come
+    /// from that setting. (<c>Analysis:SharedIndexName</c> cannot be an input: the enqueuer no longer takes
+    /// <c>AnalysisOptions</c>, and <c>AiSearchOptions</c> has no such option.)
+    /// </summary>
     [Fact]
-    public async Task EnqueueIfApplicableAsync_SuccessWithExplicitIndexName_PrefersRequestIndexName()
+    public async Task EnqueueIfApplicableAsync_StampsTheConfiguredKnowledgeIndexName()
     {
+        var resolver = new SearchIndexNameResolver(Options.Create(new AiSearchOptions { KnowledgeIndexName = "k-041" }));
+        var sut = new PostUploadIndexingEnqueuer(
+            _fileIndexingMock.Object,
+            _jobSubmissionMock.Object,
+            _documentServiceMock.Object,
+            TestDocumentIndexParentResolver.Over(),
+            resolver,
+            Options.Create(_options),
+            _loggerMock.Object);
         _fileIndexingMock
             .Setup(s => s.IndexFileAsync(It.IsAny<FileIndexRequest>(), It.IsAny<HttpContext>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new FileIndexingResult { Success = true });
@@ -203,12 +217,9 @@ public sealed class PostUploadIndexingEnqueuerTests
             .Callback<string, UpdateDocumentRequest, CancellationToken>((_, req, _) => captured = req)
             .Returns(Task.CompletedTask);
 
-        await CreateSut().EnqueueIfApplicableAsync(
-            ValidRequest(searchIndexName: "custom-index"),
-            CreateHttpContext(),
-            CancellationToken.None);
+        await sut.EnqueueIfApplicableAsync(ValidRequest(), CreateHttpContext(), CancellationToken.None);
 
-        captured!.SearchIndexName.Should().Be("custom-index");
+        captured!.SearchIndexName.Should().Be("k-041", "the stamp equals the index written (AiSearch:KnowledgeIndexName)");
     }
 
     [Fact]

@@ -677,3 +677,59 @@ missing to add. Owners and refusals are unchanged, and the service needs no chan
      - those three append-only tables stay out of repair.
    - **Task 052** must design the family cascade.
 3. **The 019 live-check rows are approved.** They are created once R3's batch is live on dev. The test rows carry the `FMSWP-019` prefix, and their ids are recorded so the owner can delete them.
+
+### 2026-11-02 — UAC-r2: a server create that files a project under a matter also writes the `sprk_Project_Matter_nn` link (new scope item, ours)
+
+- **Found by:** 019 live check B. Office quick-create project `1cccf07d-0e0a-43f9-8ea0-f40533d5d691` got its matter pair but no N:N link row. UAC-r2's census reported "1 project filed under a matter with no link row".
+- **Who writes the link today:** no BFF path writes it, now or before W2. Only the CreateMatter and CreateProject wizards do, through a client `$ref`.
+- **UAC-r2's ruling (task 195):**
+  - The pair is the only filing root. The N:N link grants nothing, and no server code reads it.
+  - The matter's Projects subgrid lists projects through the link, and the census counts "pair but no link" as drift.
+  - So a server path that files a project under a matter must also write the link. After W3 the server is its only writer.
+- **Ownership:**
+  - **Create path (ours):** `RecordCreationService` step 12, for `sprk_project` with a matter pair.
+  - **Re-file path (UAC-r2):** task 195's core, reached from the chat update tool, has the same gap. UAC-r2 fixes it.
+- **UAC-r2's rules** (they review our diff):
+  1. The link is written app-only, after the pair is written and the caller's AppendTo on the matter has passed.
+  2. It is idempotent: an existing link is not an error.
+  3. A failed link write logs a Warning and does not fail the create (still 201).
+  4. Only a matter pair gets a link.
+  5. On a re-file, the earlier matter's link stays (195 §2.3).
+  6. Tests: one link for a matter pair; none otherwise; a failed write still returns 201 and logs the Warning.
+- **Issue:** #2524 (filed by UAC-r2), covering both paths.
+- **Next on the scope path:** a design note (UAC-r2 has already reviewed it through these rules), then a spec amendment, task-create for task 043, TASK-INDEX, and owner approval.
+- **Project `1cccf07d`:** it gets its link from the backfill, or by hand after the fix. Its access needs no change.
+
+## 2026-11-03 — Task 019 closed (W2 gate passed); 042a closed
+
+- **Gate result:**
+  - two adversarial passes with no open F-class finding (#2514, #2520);
+  - live checks A, B and C pass;
+  - the negative check passes as `# UAC Child BU Test User`. The child-records 404 and the Office 403 `OFFICE_009` are byte-identical to a nonexistent parent; no row was created.
+- **Clauses moved to task 020:**
+  - check A's "mapped fields";
+  - the negative criterion's "denied mapping source → no mapped values + one warning". It cannot be reached live while every route's mapping source is also its filing parent; an explicit `mappingSource` arrives with 020. Unit tests cover it today.
+- **Deviation:** the deploy was R3's batched dev deploy (5796774091), not a bff-deploy run from this session (standing rule).
+- **Check C:** the owner supplied the name and parent when the Assistant asked. That is correct behaviour. Event `6d1563bb-…` stays (owner: do not delete).
+- **Chat tool description:** re-seeded on dev (row `18b3531f-…`) so the model knows that `sprk_eventnumber` is set by the server.
+- **042a:** done in #2521 (merged 2026-11-02T19:28Z); the index is now ✅.
+- **Next:** 041 and 042b, **in sequence, not in parallel** (TASK-INDEX: both edit `RecordCreationService*.cs`). 041 goes first because W3 waits on it. 020 depends only on 019 and may run beside 041. UAC-r2 reviews the 041 diff (scoped) and the 042b diff (full) before merge.
+
+## 2026-11-03 — Task 041: review and UAC-r2 verdict
+
+- **Opus adversarial review.** Over c58ea58faf. 0 High, and no authorization bypass, existence oracle or data-loss path. Two findings were F-class:
+  - F4: the bulk handler and the Office worker did not stamp the index. Fixed in round 1.
+  - F3: the MF7 test proved nothing. Fixed in round 1.
+  - K4 items 3–5 were also fixed in round 1.
+- **Scoped Sonnet re-check.** Over b087022071. All five findings fixed, and nothing F-class new. N1 (a scoped service held by the Office worker), N3 and N4 were fixed in round 2 (bdadc2a3b9). N2 (the Office worker's stamp has no harness) is a disclosed known limit.
+- **Filed.**
+  - DI-013 #2538: the backfill scripts.
+  - DI-014 #2539: the DeliverToIndex node reports an index it does not use.
+  - The P2-5 note in task-019 is corrected: a malformed client index is dropped but no longer logged (K4).
+- **UAC-r2 verdict (AC17).** "PASSES WITH NOTES; nothing blocks the PR."
+  - Only write-time routing was removed, and no retrieval trim or search-time selection moved.
+  - The drops are intact at all nine sites.
+  - The AC9 exceptions are as listed, and no drop, refusal or authorization assertion was weakened.
+  - NOTE 1: restore the document trigger-2 Repair test as owner-only. Done in round 3.
+  - NOTE 2: the removed `ResolveAsync` Verify in Issue1510 is correct, so no action.
+- **UAC-r2 on task 020 F-1.** No objection to refusing a caller-supplied `sprk_issecure` on a Matter create in the service with `sdap.access.secure_flag_transition_only`, exactly as for Project, with explicit false and null treated as the Project rule treats them. UAC-r2 sees the diff before merge.

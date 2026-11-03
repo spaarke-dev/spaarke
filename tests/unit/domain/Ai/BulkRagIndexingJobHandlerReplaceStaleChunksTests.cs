@@ -8,6 +8,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
+using Spaarke.Dataverse;
 using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.Jobs;
@@ -30,7 +31,7 @@ namespace Sprk.Bff.Api.Tests.Domain.Ai;
 /// </summary>
 /// <remarks>
 /// <para><b>Boundary doubles</b> (ADR-038): <see cref="IFileIndexingService"/> (captures the
-/// <see cref="FileIndexRequest"/>), <see cref="IIdempotencyService"/>, <see cref="ISearchIndexNameResolver"/>,
+/// <see cref="FileIndexRequest"/>), <see cref="IIdempotencyService"/>,
 /// and the raw Dataverse OData <see cref="HttpClient"/> the handler builds internally from
 /// <c>IHttpClientFactory.CreateClient("DataverseBatch")</c>. That last one is answered by a small,
 /// HAND-WRITTEN <see cref="HttpMessageHandler"/> subclass returning one canned document row — this is
@@ -59,6 +60,25 @@ public sealed class BulkRagIndexingJobHandlerReplaceStaleChunksTests
         }
     });
 
+    private const string DocumentId = "77777777-0000-0000-0000-000000000048";
+    private const string DefaultIndexName = "spaarke-files-index";
+
+    /// <summary>The same document, stamped before task 041 with a non-default index.</summary>
+    private static readonly string StaleStampODataJson = JsonSerializer.Serialize(new
+    {
+        value = new[]
+        {
+            new
+            {
+                sprk_documentid = DocumentId,
+                sprk_filename = "already-indexed.docx",
+                sprk_graphdriveid = "drive-bulk-048",
+                sprk_graphitemid = "item-bulk-048",
+                sprk_searchindexname = "spaarke-knowledge-index-v2",
+            }
+        }
+    });
+
     private sealed class StaticJsonHttpMessageHandler : HttpMessageHandler
     {
         private readonly string _json;
@@ -79,7 +99,10 @@ public sealed class BulkRagIndexingJobHandlerReplaceStaleChunksTests
     }
 
     private static (BulkRagIndexingJobHandler Handler, Mock<IFileIndexingService> FileIndexing, StaticJsonHttpMessageHandler HttpHandler)
-        CreateSut(ILogger<BulkRagIndexingJobHandler>? logger = null)
+        CreateSut(
+            ILogger<BulkRagIndexingJobHandler>? logger = null,
+            Mock<IDocumentDataverseService>? documentService = null,
+            string? odataJson = null)
     {
         var fileIndexingMock = new Mock<IFileIndexingService>();
         fileIndexingMock
@@ -94,18 +117,13 @@ public sealed class BulkRagIndexingJobHandlerReplaceStaleChunksTests
             .Setup(s => s.MarkEventAsProcessedAsync(It.IsAny<string>(), It.IsAny<TimeSpan>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
 
-        var resolverMock = new Mock<ISearchIndexNameResolver>();
-        resolverMock
-            .Setup(r => r.ResolveAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((string?)null);
-
         var statusStore = new BatchJobStatusStore(Mock.Of<IDistributedCache>(), NullLogger<BatchJobStatusStore>.Instance);
 
         var configuration = new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?> { ["Dataverse:ServiceUrl"] = DataverseUrl })
             .Build();
 
-        var httpHandler = new StaticJsonHttpMessageHandler(OneDocumentODataJson);
+        var httpHandler = new StaticJsonHttpMessageHandler(odataJson ?? OneDocumentODataJson);
         var httpClientFactoryMock = new Mock<IHttpClientFactory>();
         httpClientFactoryMock
             .Setup(f => f.CreateClient("DataverseBatch"))
@@ -120,7 +138,8 @@ public sealed class BulkRagIndexingJobHandlerReplaceStaleChunksTests
             fileIndexingMock.Object,
             statusStore,
             idempotencyMock.Object,
-            resolverMock.Object,
+            (documentService ?? new Mock<IDocumentDataverseService>()).Object,
+            Mock.Of<ISearchIndexNameResolver>(r => r.GetDefaultIndexName() == DefaultIndexName),
             new RagTelemetry(),
             configuration,
             httpClientFactoryMock.Object,
@@ -201,7 +220,8 @@ public sealed class BulkRagIndexingJobHandlerReplaceStaleChunksTests
         // ebilling-r1 task 028 (FR-16): a file in the E-Billing Output Files container is deliberately not
         // indexed. The bulk job must count it as skipped, not as an indexed document.
         var logger = new CompletionCapturingLogger();
-        var (handler, fileIndexingMock, _) = CreateSut(logger);
+        var documentService = new Mock<IDocumentDataverseService>();
+        var (handler, fileIndexingMock, _) = CreateSut(logger, documentService);
         fileIndexingMock
             .Setup(f => f.IndexFileAppOnlyAsync(It.IsAny<FileIndexRequest>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(skipped
@@ -214,6 +234,77 @@ public sealed class BulkRagIndexingJobHandlerReplaceStaleChunksTests
         logger.Completion.Should().NotBeNull("the handler logs its processed/skipped counts on completion");
         logger.Completion!["Processed"].Should().Be(processed);
         logger.Completion["Skipped"].Should().Be(skippedCount);
+        // Task 041 review round 2 N3: a skipped file was not written to any index, so it is never stamped.
+        documentService.Verify(
+            d => d.UpdateDocumentAsync(It.IsAny<string>(), It.IsAny<UpdateDocumentRequest>(), It.IsAny<CancellationToken>()),
+            skipped ? Times.Never() : Times.Once());
+    }
+
+    /// <summary>
+    /// Task 041 (FR-40, #2502; design §14.7 must-fire 4): the document, its matter or the matter's business unit names another
+    /// index. The bulk job reads none of them (it takes no index resolver): one write, with a request that names no index (the
+    /// files index), and no INDEX_NOT_ALLOWED retry.
+    /// </summary>
+    [Fact]
+    public async Task ProcessAsync_WhenTheDocumentParentOrUnitNamesAnotherIndex_WritesTheFilesIndexOnce()
+    {
+        var (handler, fileIndexingMock, _) = CreateSut();
+        FileIndexRequest? captured = null;
+        fileIndexingMock
+            .Setup(f => f.IndexFileAppOnlyAsync(It.IsAny<FileIndexRequest>(), It.IsAny<CancellationToken>()))
+            .Callback<FileIndexRequest, CancellationToken>((req, _) => captured = req)
+            .ReturnsAsync(new FileIndexingResult { Success = true, ChunksIndexed = 2 });
+
+        var outcome = await handler.ProcessAsync(MakeJob(forceReindex: true), CancellationToken.None);
+
+        outcome.Status.Should().Be(JobStatus.Completed);
+        fileIndexingMock.Verify(f => f.IndexFileAppOnlyAsync(It.IsAny<FileIndexRequest>(), It.IsAny<CancellationToken>()), Times.Once);
+        var named = JsonSerializer.SerializeToElement(captured!).TryGetProperty("SearchIndexName", out var value)
+                    && value.ValueKind == JsonValueKind.String ? value.GetString() : null;
+        named.Should().BeNull("the index follows the content type: the request names none, so the files index is written");
+    }
+
+    /// <summary>
+    /// Task 041 (FR-40, AC3; review round 1 F1): the bulk job writes the knowledge index, so it stamps that index on the
+    /// document. A document stamped with another index before task 041 is re-stamped with the default on a force re-index.
+    /// </summary>
+    [Fact]
+    public async Task ProcessAsync_ForceReindexOfADocumentStampedWithAnotherIndex_RestampsTheDefaultIndex()
+    {
+        var documentService = new Mock<IDocumentDataverseService>();
+        UpdateDocumentRequest? stamped = null;
+        documentService
+            .Setup(d => d.UpdateDocumentAsync(It.IsAny<string>(), It.IsAny<UpdateDocumentRequest>(), It.IsAny<CancellationToken>()))
+            .Callback<string, UpdateDocumentRequest, CancellationToken>((_, req, _) => stamped = req)
+            .Returns(Task.CompletedTask);
+        var (handler, _, _) = CreateSut(documentService: documentService, odataJson: StaleStampODataJson);
+
+        var outcome = await handler.ProcessAsync(MakeJob(forceReindex: true), CancellationToken.None);
+
+        outcome.Status.Should().Be(JobStatus.Completed);
+        documentService.Verify(d => d.UpdateDocumentAsync(DocumentId, It.IsAny<UpdateDocumentRequest>(), It.IsAny<CancellationToken>()), Times.Once);
+        stamped!.SearchIndexName.Should().Be(DefaultIndexName, "the stamp always equals the index actually written, never the stale one");
+        stamped.SearchIndexed.Should().BeTrue();
+        stamped.SearchIndexCompletedOn.Should().NotBeNull();
+    }
+
+    /// <summary>Review round 1 F1: a failed stamp is logged and never fails the document or the job; indexing succeeded.</summary>
+    [Fact]
+    public async Task ProcessAsync_WhenTheStampFails_TheJobStillCompletesWithTheDocumentProcessed()
+    {
+        var documentService = new Mock<IDocumentDataverseService>();
+        documentService
+            .Setup(d => d.UpdateDocumentAsync(It.IsAny<string>(), It.IsAny<UpdateDocumentRequest>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("Dataverse unavailable"));
+        var logger = new CompletionCapturingLogger();
+        var (handler, fileIndexingMock, _) = CreateSut(logger, documentService, StaleStampODataJson);
+
+        var outcome = await handler.ProcessAsync(MakeJob(forceReindex: true), CancellationToken.None);
+
+        outcome.Status.Should().Be(JobStatus.Completed);
+        logger.Completion!["Processed"].Should().Be(1);
+        fileIndexingMock.Verify(f => f.IndexFileAppOnlyAsync(It.IsAny<FileIndexRequest>(), It.IsAny<CancellationToken>()), Times.Once,
+            "a failed stamp never retries the index");
     }
 
     /// <summary>Captures the structured state of the handler's "completed" log line.</summary>
