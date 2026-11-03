@@ -127,6 +127,7 @@ describe('OfficeNaaStrategy — which MSAL client the host gets', () => {
   afterEach(() => {
     Object.assign(console, saved);
     delete (globalThis as unknown as { Office?: unknown }).Office;
+    sessionStorage.clear();
   });
 
   it('new Outlook and Outlook on the web (OfficeOnline) use NAA when NestedAppAuth 1.1 is supported', async () => {
@@ -268,7 +269,18 @@ describe('OfficeNaaStrategy — which MSAL client the host gets', () => {
     expect(sessionStorage.getItem(tokenKey)).toBeNull();
     expect(sessionStorage.getItem('msal.account.keys')).toBeNull();
     expect(sessionStorage.getItem('unrelated')).toBe('kept');
-    sessionStorage.clear();
+  });
+
+  it('clearCache under NAA clears the session cache instead of calling MSAL (unsupported there)', async () => {
+    installOffice({ host: 'Outlook', platform: 'OfficeOnline', nestedAppAuth: true });
+    sessionStorage.setItem('msal.account.keys', JSON.stringify(['an-account']));
+    sessionStorage.setItem('an-account', '{}');
+    const strategy = await start();
+
+    strategy.clearCache();
+
+    expect(naaInstance.clearCache).not.toHaveBeenCalled();
+    expect(sessionStorage.getItem('an-account')).toBeNull();
   });
 
   it('the standard popup client failing is not retried (no fallback loop)', async () => {

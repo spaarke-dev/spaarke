@@ -20,7 +20,8 @@ const BRIDGE_AVAILABLE_LINE = /Nested App Auth Bridge available: (true|false)/;
 /**
  * Whether an NAA interactive failure shows that NAA cannot serve this app on this host, so the standard popup client
  * should take over. msal-browser 3.x maps bridge statuses in `NestedAppAuthAdapter.fromBridgeError`:
- *   - Disabled / NestedAppAuthUnavailable → `nested_app_auth_bridge_disabled` (or a host code): yes.
+ *   - Disabled, or NestedAppAuthUnavailable without a host code → `nested_app_auth_bridge_disabled`: yes. (With a
+ *     host code MSAL keeps that code, which this does not recognise: NAA stays, and the user can sign in again.)
  *   - Transient / PersistentError → `ServerError(code, description)`: yes only when Entra refused the request (an
  *     `AADSTS…` code in the message: a registration without the broker redirect, a Conditional Access block).
  *   - UserCancel → `user_canceled` (the browser popup's spelling is `user_cancelled`), NoNetwork →
