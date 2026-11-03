@@ -121,7 +121,7 @@ Two-write rule: every entry here has a GitHub issue, and every issue has an entr
 | **Found** | 2026-11-01, task 039 adversarial review (finding 10) |
 | **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2502 |
 | **Class** | Out of scope, pre-existing: 039 covers record create/update payloads; search trims by live Read (design §13.3b), so routing, not disclosure |
-| **Owner task** | Owner decision: does FR-38 cover where a document is indexed? |
+| **Owner task** | Task 041 (FR-40). **Closed 2026-11-03** by PR #2541 (249809ce0b): index-file ignores `searchIndexName`; the index follows the content type |
 | **Failure** | `POST /api/ai/rag/index-file` passes a client, allow-listed `searchIndexName` to `FileIndexingService` (`:140`, `:224`, `:272`), so the chunks land in the index the client named, not the record's server-owned one |
 
 ## DI-013 — The multi-container backfill scripts contradict FR-40
