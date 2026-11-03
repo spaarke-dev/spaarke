@@ -336,11 +336,11 @@ public sealed class InvoiceSubmissionServiceTests
                     return OwnerAnswer;
                 });
 
-            Allocator.Setup(a => a.CreateSubmissionAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<string>(),
+            Allocator.Setup(a => a.CreateSubmissionAsync(It.IsAny<Guid>(), It.IsAny<Guid?>(), It.IsAny<string>(),
                     It.IsAny<IReadOnlyDictionary<string, object>?>(), It.IsAny<CancellationToken>()))
-                .ReturnsAsync((Guid id, Guid firm, string number, IReadOnlyDictionary<string, object>? fields, CancellationToken ct) =>
+                .ReturnsAsync((Guid id, Guid? firm, string number, IReadOnlyDictionary<string, object>? fields, CancellationToken ct) =>
                 {
-                    Allocations.Add((id, firm, number, fields));
+                    Allocations.Add((id, firm!.Value, number, fields));
                     WriteTokens.Add(ct);
                     if (AllocatorFailure is { } failure)
                     {
