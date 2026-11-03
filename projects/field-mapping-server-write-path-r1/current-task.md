@@ -1,6 +1,6 @@
 # Current Task — field-mapping-server-write-path-r1
 
-> **Last updated**: 2026-11-02 (main session checkpoint). Recovery: read Quick Recovery first.
+> **Last updated**: 2026-11-03 (main session checkpoint). Recovery: read Quick Recovery first.
 > **Done on master**: 001–006, 010–016, 017, 018, 037, 039, 038, 070, 071, 072, 073, 074. The work branch was merged to master as #2435 (6b0c1e2fed); later doc commits are on the work branch.
 > **Live on dev:** BFF 5796774091 since 2026-11-03T13:29Z (R3; carries 039, #2514, #2519, #2520; 019 live A/B ran on 3740e1a105). 017 (b083d62183, #2486) first went live 2026-10-31T19:52:25Z (UAC-r2 deploy; gate PASS: 23 req, 0 5xx, 0 OWNERSHIP-REFUSED, the reconciler wrote nothing). TrackingFieldTrio 1.0.55. SpaarkeMaster 1.2.4.0 is published but not imported. Check that the BU→Matter index map is gone after the model1-prod upgrade or the next provisioning run (H6).
 
@@ -8,56 +8,22 @@
 
 | Field | Value |
 |---|---|
-| **Active** | **2026-11-02, session 5c is the only field-mapping session.** The owner was asked to close the other tab (pid 53128, started 12:55).
-
-**019:**
-- Code gate done: two passes, all F-class findings fixed (#2514, #2520).
-- Dev BFF is 3740e1a105 (R3, 18:52Z).
-- Live checks A and B PASS (`notes/task-019-live-checks.md`). Check A's mapping clause moves to 020.
-- C (Console chat) and the negative AppendTo check (as a narrower user) are with the owner.
-- Findings, all filed:
-  - #2522: no telemetry for the child-records create;
-  - #2523: Office Project create takes ~18 s, with sequential grants (any change needs UAC review);
-  - the junction exception is the known #2292 (not new).
-- UAC-r2 found the check-B project has no `sprk_Project_Matter_nn` link row. No BFF path writes that link; only the wizards do. UAC-r2 is deciding whether it is still required and is filing it.
-
-**042a:** PR #2521 (auto-merge).
-
-**041 and 042b:** approved, waiting on 019. |
-
-**019:**
-- Code gate done: both adversarial passes ran, with no open F-class finding.
-- Fixes: #2514 is merged; #2520 (privacy, payload logging) is auto-merging.
-- Notes: `notes/task-019-notes.md`, covering P1/P2 and the publish size.
-- Remaining: R3's batched dev deploy (039 + #2514 + #2520 + #2519), then live checks A-C. The owner approved the `FMSWP-019` test rows. Then App Insights.
-
-**042a** (characterization tests for #2483): implementer fm-042a is running on `task/fm-042a`.
-
-**Approved by the owner on 2026-11-02:** 041 (#2502 index routing) and 042b (#2483 fix). Both are gated on 019. UAC-r2 checks 041's diff (scoped) and 042b's diff (full) before merge.
-
-**Done today:**
-- #2513 Family fixes: PR #2516; TrackingFieldTrio 1.0.56 is live on dev.
-- #2515 event number: `EVT-{SEQNUM:6}` is live on dev; the code is PR #2519 (auto-merging).
-- 050 is done: notes/w5-open-questions.md.
-- Design §14 and §15; spec FR-40 and FR-41; FR-21 ontology exception; FR-25 family-alignment outcome. |
-| **Next Action** | 1. Owner runs check C in the Console on MAT-000032, prompt: "Create a to-do named "FMSWP-019 C" filed under matter MAT-000032 (Matter 123456.01 Word Add In 10-22-2026)". Then read the row back: stamp, team owner, number.
-2. Owner runs the negative check as `# UAC Child BU Test User` under secure matter PAT-908068. Expect a uniform 404 and no row.
-3. Get the owner's OK, then re-seed the chat tool description (`scripts/Seed-TypedHandlers.ps1`, `DATAVERSE-CREATE-RECORD` row).
-4. Close 019: TASK-INDEX ✅, POML status, decisions entry.
-5. Launch 041 and 042b in parallel. UAC-r2 gets 041 (scoped) and 042b (full) before merge.
-6. Then W3: 020 onward, plus 030–034.
-7. If UAC-r2 says the N:N link is required: take it through the scope path as a `RecordCreationService` step-12 write.
-8. Stale wording in POMLs 020–034 and 052, and the 028 test path: fix each as its task starts. |
-2. When R3 sends the deployed SHA: confirm it contains 0e3962069b, a50ada7330, #2520 and #2519. Then re-seed the chat tool description, which needs the owner's OK (#2519 deploy note). Then run 019 live checks A-C, where B includes P2-2, the Office 412 autonumber retry.
-3. After 019: start 041 and 042b in parallel, then W3 (020 onward; 021-029 now wait on 041), and the W3 server tasks 030-034.
-4. Mark 050 ✅ in TASK-INDEX.
-5. Fix the stale "search-index default" wording in POMLs 020-034 and 052, and the 028 test path, as each task starts. |
+| **Active** | **Task 041 (FR-40, #2502), step 2–5 with the Opus implementer `fm-041` on branch `task/fm-041`** (cut from c0b543aedc). Rigor FULL, opus/high, prescriptive. Session 5c is the only field-mapping session; pid 53128 (pre-crash, no window) is still alive, and the owner can say "kill it".
+- Step 0 done: master merged into the work branch (9935ef2dcf); no open PR touches 041's files.
+- Step 1 done: the read-only dev count is in `notes/task-041-notes.md` (c0b543aedc). No BU names a non-files index, so there is no escalation. 77 old document stamps (knowledge-index-v2 ×76, file-index ×1) are left alone.
+- **019 ✅ (2026-11-03):** the negative check passed as the test user. Check C passed: the owner supplied the name and parent; event `6d1563bb` stays. The chat tool row was re-seeded. **042a ✅** (#2521). |
+| **Next Action** | 1. When fm-041 reports: merge `task/fm-041` into the work branch `--no-ff`, verify the build and filtered tests, and run ONE adversarial-reviewer pass (opus). Fix every F-class finding.
+2. Send the diff to UAC-r2 for its scoped check (AC17: only routing removed, no trim moved). Record its verdict line.
+3. Open the PR (cite ADR-008 path A; release note: index-file ignores `searchIndexName`). After merge: close #2206, #2413, #2502 and DI-012 (AC15). TASK-INDEX ✅.
+4. Then 042b (sequential: both edit `RecordCreationService*.cs`; UAC-r2 does a full review). 020 depends only on 019 and may start beside 041.
+5. Then W3: 021–029 (wait on 041), plus 030–034. Task 043 (#2524, N:N link) goes through the scope path.
+6. Fix the stale wording in POMLs 020–034 and 052, and the 028 test path, as each task starts. |
 | **Phase branches** | 2d-1 798936c47e (step 10 pre-create; new codes stamp_underivable 400 / stamp_unavailable 503; Office map rows added as generic 500; system principal still stamped post-create = known limit). 2d-2 e106b19d7c (task/contact/account Child + MappingExclusion; owner + row byte-identical vs today). 017a f758480f3c (ebilling OK, no findings). 017b 43b48f3249 (route, decision parity, R3-1, 037 K2 = copy after merge, #1608, documents, invoice-family protection from guard, sprk_servicerequest; NFR-07 table all same; 401 stays 401; traceId kept). 017c 9cc37b415a (chat refuses invoicesubmission/approval/correction; escalated 3 items, resolved 2026-10-30). R3-2 = K2 known limit. |
 | **Open PRs** | #2387 (075, HOLD, ships with 040). |
 | **Issues** | #2444, #2413, #2429 (provisioning; I review), #2469 (flaky ISS-005), #1948 (lint-staged uses the shared stash; 017b re-found it). |
-| **Waiting on** | - Owner: check C, the negative check, the re-seed OK, the Family 1.0.56 look, closing the other tab, 005 `-Apply`, and the 076 narrower-user pass.
-- UAC-r2: the N:N link decision.
-- Rows to delete later: see `notes/task-019-live-checks.md`. |
+| **Waiting on** | - fm-041 (implementer).
+- Owner: the Family 1.0.56 look, 005 `-Apply`, the 076 narrower-user pass, and "kill it" for pid 53128.
+- Rows to delete later: see `notes/task-019-notes.md` (the check-C event is the owner's and stays). |
 - The owner's Family view check on 1.0.56.
 - The owner's 076 narrower-user pass.
 - 005 `-Apply` (owner).
