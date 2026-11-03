@@ -42,6 +42,25 @@
     <constraint source="idempotency">The sorted supporting ids join the route's idempotency key, so the same request replays and a different set is a different request. State the effect on existing keys (the absent list reproduces today's key exactly) and test it.</constraint>
     <constraint source="limits">The total file count respects SubmissionCommitGate.MaxFiles (50). Above it, a 400 with a stable reason, before staging.</constraint>
     <constraint source="file store">Each supporting document becomes a Stored File, purpose Supporting, with sprk_invoice the new invoice and sprk_sourcedocument the document, through the same staging and commit path as 094's from-email parts. No new storage path. The scan state follows the existing rule.</constraint>
+    <constraint source="escalation resolved 2026-11-03 (main session): option A">
+      The first run's escalation fired: the from-email path needs the bytes and the parts list at intake, and from-document stages nothing until the job runs.
+      Resolution, option A: stage the supporting copies at intake.
+      - Move the job's document byte read (InvoiceSubmissionProcessingJobHandler.LoadSourceDocumentAsync, the storage-container check) into ONE shared method that the job and the intake both call. This is a move, not a copy.
+      - Stage each copy under StoredFileIds.ForAttachment(submissionId, "document-part-{i}"), with that document's own source facts. The first part's stage lists the parts.
+      - The earlier attempt's set is read back from those stages. It joins the "same details?" comparison (InvoiceSubmissionService.AnswerWithEarlierAsync), never the submission id (D-134):
+        - a different set is 409 document_already_submitted;
+        - after a Failed attempt, it is a new attempt.
+      - The parts list joins StoredFileBlobs.SameSource, so a leftover stage from a different set is a 409, never extra files. From-email is unchanged.
+      - The persister gets a document-parts branch.
+      Allowed beyond the relevant files: InvoiceSubmissionProcessingJobHandler.cs and StoredFileBlobs.cs.
+      Rejected:
+      - B, a submission column: schema, and a natively writable column could point the app at a document the caller can't read (DEF-048).
+      - C, a second copy of the byte read.
+      Split:
+      - 118b-1: the shared byte read, the contract and validation, the caller-Read check (seed-proofed) and the sameness check.
+      - 118b-2: staging, the parts list and its reuse check, the persister branch, the remaining tests and the notes.
+      Known limit K2: a leftover stage can give a stuck 409, as from-email can (094 §11.3).
+    </constraint>
     <constraint source="CLAUDE.md §10/§11">No new service. Justify the new field in the notes. BFF hygiene: placement statement, publish-size delta, no new HIGH CVE.</constraint>
   </constraints>
 
