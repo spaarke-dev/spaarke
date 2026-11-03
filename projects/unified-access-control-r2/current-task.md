@@ -65,6 +65,9 @@
     - `BillingAdminAuthorization.Admin()` on assign, pin, exclude and remove.
   - Change rule also needs `CreateRuleSet()` and Create on policy/policyversion.
   - N4 covered only the Procedure lifecycle row; ebilling rewords v5.2 #4.
+  - **089a -WhatIf PASSED (2026-11-03):** nothing to add; the privileges were applied 2026-10-27 with probe evidence. OK given for -Verify plus the NFR-05 census, outputs to me.
+    - Asked ebilling to add `prvReadsprk_StoredFile` (Basic, from 086) to `config/secure-record-owner-role.json`, so new environments get it.
+    - My census item: the Secure Record Owner role holds 4 SharePoint privileges (SharePointData C/R/W Global, SharePointDocument R Global) that are outside the role file; their origin is unknown.
   - EB-D-158 covers the 089 live steps on these conditions:
     - I see the -WhatIf before -Apply;
     - adds on the four 089 tables only;
