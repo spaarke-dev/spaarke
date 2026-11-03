@@ -2,6 +2,7 @@ using FluentAssertions;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Xrm.Sdk;
+using Moq;
 using Sprk.Bff.Api.Services.Finance.Files;
 using Sprk.Bff.Api.Services.Finance.Submission;
 using Sprk.Bff.Api.Tests.Finance.Files;
@@ -88,14 +89,18 @@ public sealed class InvoiceSubmissionSupportingDocumentsTests
         public Exception? Fault { get; init; }
         public List<string> Events { get; } = new();
 
+        /// <summary>The per-file limit each read was asked to enforce (task 118b review F1-b).</summary>
+        public List<long> MaxBytes { get; } = new();
+
         public static byte[] BytesOf(Guid id) => System.Text.Encoding.ASCII.GetBytes("supporting " + id.ToString("N"));
 
         public static SourceDocumentFile Readable(Guid id, long version = 3) =>
             new(SourceDocumentFileOutcome.Read, BytesOf(id), version, "application/pdf", CommunicationId: null, FileName: "Timesheet " + id.ToString("N")[..4] + ".PDF");
 
-        public Task<SourceDocumentFile> ReadAsync(Guid id, CancellationToken ct)
+        public Task<SourceDocumentFile> ReadAsync(Guid id, long maxBytes, CancellationToken ct)
         {
             Events.Add("read " + id);
+            MaxBytes.Add(maxBytes);
             return Fault is { } fault ? Task.FromException<SourceDocumentFile>(fault) : Task.FromResult(Files.TryGetValue(id, out var file) ? file : Readable(id));
         }
     }
@@ -277,9 +282,10 @@ public sealed class InvoiceSubmissionSupportingDocumentsTests
         { "not_downloaded", StatusCodes.Status503ServiceUnavailable, InvoiceSubmissionErrors.CoreRecordUnavailable },
         { "fault", StatusCodes.Status503ServiceUnavailable, InvoiceSubmissionErrors.CoreRecordUnavailable },
         { "store_not_configured", StatusCodes.Status422UnprocessableEntity, InvoiceSubmissionErrors.StorageNotConfigured },
+        { "too_large", StatusCodes.Status413PayloadTooLarge, InvoiceSubmissionErrors.TooLarge },
     };
 
-    [Theory(DisplayName = "118b-2 (must fire): a supporting document that cannot be copied (gone, no file, unverified storage, another communication) is 422, one that cannot be read now 503, an unconfigured store 422; all BEFORE step A: nothing filed, staged or created")]
+    [Theory(DisplayName = "118b-2 (must fire): a supporting document that cannot be copied (gone, no file, unverified storage, another communication) is 422, one that cannot be read now 503, one over the file limit 413 (review F1-b), an unconfigured store 422; all BEFORE step A: nothing filed, staged or created")]
     [MemberData(nameof(SupportingReadRefusals))]
     public async Task NewAttempt_ASupportingDocumentCannotBeRead_IsRefusedBeforeStepA(string state, int status, string code)
     {
@@ -291,6 +297,7 @@ public sealed class InvoiceSubmissionSupportingDocumentsTests
             "no_file" => new SourceDocumentFile(SourceDocumentFileOutcome.NoFile),
             "storage_unverified" => new SourceDocumentFile(SourceDocumentFileOutcome.StorageUnverified),
             "not_downloaded" => new SourceDocumentFile(SourceDocumentFileOutcome.NotDownloaded),
+            "too_large" => new SourceDocumentFile(SourceDocumentFileOutcome.TooLarge),
             "another_communication" => Documents.Readable(B) with { CommunicationId = Guid.NewGuid() },
             _ => Documents.Readable(B),
         };
@@ -311,6 +318,118 @@ public sealed class InvoiceSubmissionSupportingDocumentsTests
 
         outcome.Detail.Should().NotContain(B.ToString()).And.NotContain(A.ToString(), "the answer names no document");
         ShouldHaveWrittenNothing(h);
+    }
+
+    [Fact(DisplayName = "118b review F1-b (must fire): every supporting document is read with the configured per-file limit (the upload's MaxFileBytes), so the shared read can refuse an oversize file")]
+    public async Task NewAttempt_ReadsEverySupportingDocument_WithTheConfiguredFileLimit()
+    {
+        var h = NewHarness();
+        h.Options.MaxSubmissionFileSizeMb = 3;
+        var documents = new Documents();
+
+        (await h.Build().SubmitExistingDocumentAsync(Submit(documents, A, B), CancellationToken.None)).Kind.Should().Be(InvoiceSubmissionOutcomeKind.Received);
+
+        documents.MaxBytes.Should().Equal(3L * 1024 * 1024, 3L * 1024 * 1024);
+    }
+
+    /// <summary>The refusal shape every supporting-document check shares: before any file is read or step A, nothing written, no document named.</summary>
+    private static void ShouldBeRefusedBeforeAnyRead(Harness h, Documents documents, InvoiceSubmissionOutcome outcome, int status, string code)
+    {
+        outcome.Kind.Should().Be(InvoiceSubmissionOutcomeKind.Refused);
+        outcome.StatusCode.Should().Be(status);
+        outcome.ErrorCode.Should().Be(code);
+        documents.Events.Should().BeEmpty("the filing of every supporting document is judged before any file is read, and before step A");
+        outcome.Detail.Should().NotContain(A.ToString()).And.NotContain(B.ToString()).And.NotContain(SecureMatterS.ToString(), "the answer names no document or record");
+        ShouldHaveWrittenNothing(h);
+    }
+
+    /// <summary>A Secure matter other than the intake's (the review's S).</summary>
+    private static readonly Guid SecureMatterS = Guid.NewGuid();
+
+    [Fact(DisplayName = "118b review F1-a (must fire, Mismatch by the filing chain): a supporting document filed under ANOTHER core record is 409 document_core_record_mismatch before any read or step A; nothing staged")]
+    public async Task NewAttempt_ASupportingDocumentFiledUnderAnotherRecord_Is409_NothingStaged()
+    {
+        var h = NewHarness();
+        h.OtherDocuments[B] = new Entity("sprk_document", B) { ["sprk_matter"] = new EntityReference("sprk_matter", Guid.NewGuid()) };
+        var documents = new Documents();
+
+        var outcome = await h.Build().SubmitExistingDocumentAsync(Submit(documents, A, B), CancellationToken.None);
+
+        ShouldBeRefusedBeforeAnyRead(h, documents, outcome, StatusCodes.Status409Conflict, InvoiceSubmissionErrors.DocumentCoreRecordMismatch);
+    }
+
+    [Fact(DisplayName = "118b review F1-a (must fire, Mismatch by isolation): a supporting document unfiled by the columns but isolated under another Secure matter's thread is 409, as the invoice document is")]
+    public async Task NewAttempt_ASupportingDocumentIsolatedUnderAnotherSecureMatter_Is409_NothingStaged()
+    {
+        var h = NewHarness();
+        var (communication, thread) = (Guid.NewGuid(), Guid.NewGuid());
+        h.Isolation
+            .SecureRoot("sprk_matter", SecureMatterS)
+            .OrdinaryRoot("sprk_matter", InvoiceSubmissionServiceTests.MatterId)
+            .SecureChild("sprk_communicationthread", thread, ("sprk_regardingmatter", "sprk_matter", SecureMatterS))
+            .SecureChild("sprk_communication", communication, ("sprk_communicationthread", "sprk_communicationthread", thread))
+            .SecureChild("sprk_document", B, ("sprk_relatedcommunication", "sprk_communication", communication));
+        var documents = new Documents();
+
+        var outcome = await h.Build().SubmitExistingDocumentAsync(Submit(documents, A, B), CancellationToken.None);
+
+        ShouldBeRefusedBeforeAnyRead(h, documents, outcome, StatusCodes.Status409Conflict, InvoiceSubmissionErrors.DocumentCoreRecordMismatch);
+    }
+
+    [Fact(DisplayName = "118b review F1-a (must fire, Unavailable): a supporting document whose isolation cannot be read is 503 record_unavailable - never 'not isolated' - before any read or step A")]
+    public async Task NewAttempt_ASupportingDocumentWhoseIsolationCannotBeRead_Is503_NothingStaged()
+    {
+        var h = NewHarness();
+        var (communication, thread) = (Guid.NewGuid(), Guid.NewGuid());
+        h.Isolation
+            .SecureRoot("sprk_matter", SecureMatterS)
+            .SecureChild("sprk_communicationthread", thread, ("sprk_regardingmatter", "sprk_matter", SecureMatterS))
+            .SecureChild("sprk_communication", communication, ("sprk_communicationthread", "sprk_communicationthread", thread))
+            .SecureChild("sprk_document", B, ("sprk_relatedcommunication", "sprk_communication", communication))
+            .FailingQueriesOf("sprk_communication");
+        var documents = new Documents();
+
+        var outcome = await h.Build().SubmitExistingDocumentAsync(Submit(documents, A, B), CancellationToken.None);
+
+        ShouldBeRefusedBeforeAnyRead(h, documents, outcome, StatusCodes.Status503ServiceUnavailable, InvoiceSubmissionErrors.CoreRecordUnavailable);
+    }
+
+    [Fact(DisplayName = "118b review F1-a (must fire, fault): a supporting document whose row cannot be read is 503 record_unavailable before any read or step A")]
+    public async Task NewAttempt_ASupportingDocumentWhoseRowCannotBeRead_Is503_NothingStaged()
+    {
+        var h = NewHarness();
+        h.Entities.Setup(e => e.RetrieveAsync("sprk_document", B, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new TimeoutException("dataverse"));
+        var documents = new Documents();
+
+        var outcome = await h.Build().SubmitExistingDocumentAsync(Submit(documents, A, B), CancellationToken.None);
+
+        ShouldBeRefusedBeforeAnyRead(h, documents, outcome, StatusCodes.Status503ServiceUnavailable, InvoiceSubmissionErrors.CoreRecordUnavailable);
+    }
+
+    [Fact(DisplayName = "118b review F1-a (must fire, Gone): a supporting document that no longer exists is 422 document_unavailable (as the shared read answers it) before any read or step A")]
+    public async Task NewAttempt_ASupportingDocumentThatNoLongerExists_Is422_NothingStaged()
+    {
+        var h = NewHarness();
+        h.OtherDocuments[B] = null!; // the row read answers "not found"
+        var documents = new Documents();
+
+        var outcome = await h.Build().SubmitExistingDocumentAsync(Submit(documents, A, B), CancellationToken.None);
+
+        ShouldBeRefusedBeforeAnyRead(h, documents, outcome, StatusCodes.Status422UnprocessableEntity, SubmissionReasonCodes.DocumentUnavailable);
+    }
+
+    [Fact(DisplayName = "118b review F1-a (must not fire): supporting documents UNFILED, or filed under the intake's own record, are allowed and staged (an unfiled document stays Allowed)")]
+    public async Task NewAttempt_SupportingDocumentsUnfiledOrFiledUnderTheSameRecord_AreAllowed()
+    {
+        var h = NewHarness();
+        h.OtherDocuments[B] = new Entity("sprk_document", B) { ["sprk_matter"] = new EntityReference("sprk_matter", InvoiceSubmissionServiceTests.MatterId) };
+        var documents = new Documents();
+
+        var outcome = await h.Build().SubmitExistingDocumentAsync(Submit(documents, A, B), CancellationToken.None); // A is unfiled
+
+        outcome.Kind.Should().Be(InvoiceSubmissionOutcomeKind.Received);
+        h.Stages.Should().HaveCount(2);
     }
 
     [Fact(DisplayName = "118b-2 (seed-proof, StoredFileBlobs.SameSource's parts list; must fire): a stage left under this attempt's ids by a request with ANOTHER set (no row created) is 409 document_already_submitted - with fewer documents, more, or none - never committed as extra files; the same set reuses it")]
