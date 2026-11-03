@@ -27,7 +27,7 @@ import {
   tokens,
 } from '@fluentui/react-components';
 import { FormModal } from '@spaarke/ui-components';
-import { decisionFailureMessage, type BlockedFinding, type BlockedSubmission } from '../../services/decisionApi';
+import { decisionFailureMessage, isDecisionIncomplete, type BlockedFinding, type BlockedSubmission } from '../../services/decisionApi';
 import type { ApiFailure, InvoiceReview } from '../../services/invoiceReviewApi';
 import { useApproval } from './ApprovalProvider';
 
@@ -59,7 +59,7 @@ type Action = 'override' | 'return';
 
 export interface BlockedBannerProps {
   review: InvoiceReview;
-  reload: () => Promise<unknown>;
+  reload: () => Promise<InvoiceReview | null>;
 }
 
 export function BlockedBanner({ review, reload }: BlockedBannerProps) {
@@ -118,7 +118,13 @@ export function BlockedBanner({ review, reload }: BlockedBannerProps) {
       await Promise.all([reload(), refresh(), load()]);
       return;
     }
-    // Shown in the form with the server's detail and code; nothing on the page changes. A 503 is repeated by submitting again.
+    // A 503 `ebilling.blocked.unavailable` can come after the decision stood (the Signals were not all closed): show the server's state
+    // (the hold may already be gone) before the error.
+    if (isDecisionIncomplete(r.failure)) {
+      await Promise.all([reload(), refresh(), load()]);
+      if (!alive.current) return;
+    }
+    // Shown in the form with the server's detail and code. A 503 is repeated by submitting again.
     setBusy(false);
     setError(decisionFailureMessage(r.failure));
   };
@@ -135,7 +141,10 @@ export function BlockedBanner({ review, reload }: BlockedBannerProps) {
           <Text as="p">Its submission was blocked by a rule. It stays In Review and cannot be approved until the block is overridden or the invoice is returned to the firm.</Text>
           {failure && (
             <Caption1 className={s.muted} data-testid="blocked-unavailable">
-              The reasons could not be loaded: {decisionFailureMessage(failure)}
+              The reasons could not be loaded: {decisionFailureMessage(failure)}{' '}
+              <Button size="small" appearance="transparent" onClick={() => void load()} data-testid="blocked-retry">
+                Retry
+              </Button>
             </Caption1>
           )}
           {shown.length > 0 && (

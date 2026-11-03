@@ -311,7 +311,8 @@ export function toFailure(err: unknown): ApiFailure {
     const p = problemOf(err) as Record<string, unknown> | null;
     return {
       status: err.status,
-      errorCode: str(p?.errorCode),
+      // ProblemDetailsHelper.Forbidden puts the stable code of a 403 under `reasonCode`; every other refusal uses `errorCode`.
+      errorCode: str(p?.errorCode) ?? str(p?.reasonCode),
       // Only the server's own ProblemDetails detail is shown; the error's message is transport text ("HTTP 409").
       detail: str(p?.detail),
       signInFailed: isAuthFailure(err),

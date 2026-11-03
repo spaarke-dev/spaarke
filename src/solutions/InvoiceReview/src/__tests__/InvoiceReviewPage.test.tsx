@@ -5,7 +5,7 @@ import { act, fireEvent, render, screen, waitFor, within } from '@testing-librar
 import { FluentProvider, webDarkTheme, webLightTheme } from '@fluentui/react-components';
 import { InvoiceReviewPage } from '../components/InvoiceReviewPage';
 import { LINE_FINDING_FALLBACK } from '../services/reviewModel';
-import { INVOICE_ID, failed, field, finding, flagged, line, lineId, mockApi, ok, problem, review, type MockApi } from './testKit';
+import { INVOICE_ID, failed, field, finding, flagged, line, lineId, listSourceFiles, mockApi, ok, problem, review, type MockApi } from './testKit';
 
 function renderPage(api: MockApi, opts: { theme?: typeof webLightTheme; pollIntervalMs?: number; openRecord?: jest.Mock } = {}) {
   return render(
@@ -500,6 +500,49 @@ describe('InvoiceReviewPage: failures and recovery (task 110 fix round 2)', () =
     expect(screen.getByTestId('notice-reload')).toBeInTheDocument();
   });
 
+  it("does not report a plain Saved when the write's re-read loses to a newer poll read that failed", async () => {
+    jest.useFakeTimers();
+    try {
+      const api = mockApi(normal());
+      let call = 0;
+      let answerWriteRead: (r: Awaited<ReturnType<MockApi['getReview']>>) => void = () => undefined;
+      api.getReview.mockImplementation(() => {
+        call += 1;
+        if (call === 1) return Promise.resolve(ok(normal())); // the first read
+        if (call === 2) return new Promise(resolve => (answerWriteRead = resolve)); // the write's re-read: slow
+        if (call === 3) return Promise.resolve(failed(problem(503, null))); // a poll read that starts later and fails first
+        return Promise.resolve(ok(normal()));
+      });
+      renderPage(api, { pollIntervalMs: 1000 });
+      await act(async () => {
+        await Promise.resolve();
+      });
+      await screen.findByTestId('review-title');
+      fireEvent.click(row(2));
+      await screen.findByTestId(`pane-line-${lineId(2)}`);
+      fireEvent.click(screen.getByRole('radio', { name: /Accept at/ }));
+      fireEvent.click(screen.getByTestId('decision-confirm'));
+      await waitFor(() => expect(api.getReview).toHaveBeenCalledTimes(2));
+
+      // The poll tick starts the newer read; it fails and is applied first.
+      await act(async () => {
+        jest.advanceTimersByTime(1000);
+      });
+      await waitFor(() => expect(api.getReview).toHaveBeenCalledTimes(3));
+      await waitFor(() => expect(screen.getByTestId('notice')).toHaveTextContent('temporarily unavailable'));
+
+      // Now the older answer (the write's re-read) arrives: it is dropped as stale, and the page it would have refreshed is not current.
+      await act(async () => {
+        answerWriteRead(ok(normal()));
+      });
+      await waitFor(() => expect(screen.getByTestId('notice')).toHaveTextContent('could not refresh'));
+      expect(screen.getByTestId('notice')).toHaveAttribute('data-intent', 'warning');
+      expect(screen.getByTestId('notice-reload')).toBeInTheDocument();
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
   it('shows the connection sentence, never the browser text, when a write gets no server answer', async () => {
     const warn = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
     try {
@@ -645,13 +688,8 @@ function findColourLiterals(source: string): string[] {
 describe('source guards', () => {
   it('uses no colour literal anywhere in the page source (dark mode: Fluent tokens only, ADR-021)', () => {
     const srcRoot = path.resolve(__dirname, '..');
-    const walk = (dir: string): string[] =>
-      fs.readdirSync(dir, { withFileTypes: true }).flatMap(e => {
-        const p = path.join(dir, e.name);
-        if (e.isDirectory()) return e.name === '__tests__' ? [] : walk(p);
-        return /\.(ts|tsx)$/.test(e.name) ? [p] : [];
-      });
-    for (const f of walk(srcRoot)) {
+    // The same walker task 111's guard asserts covers the decision and tab folders (testKit.listSourceFiles).
+    for (const f of listSourceFiles()) {
       const found = findColourLiterals(fs.readFileSync(f, 'utf8'));
       expect({ file: path.relative(srcRoot, f), found }).toEqual({ file: path.relative(srcRoot, f), found: [] });
     }

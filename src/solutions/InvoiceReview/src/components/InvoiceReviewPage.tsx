@@ -189,8 +189,8 @@ export interface PaneTabSlot {
 export interface ReviewSlotContext {
   review: InvoiceReview;
   canWrite: boolean;
-  /** Re-read the review (after an invoice decision). */
-  reload: () => Promise<unknown>;
+  /** Re-read the review (after an invoice decision or an adjustment); resolves with the review now shown, or null when the re-read failed. */
+  reload: () => Promise<InvoiceReview | null>;
 }
 
 export interface InvoiceReviewPageProps {
@@ -299,6 +299,8 @@ export function InvoiceReviewPage(props: InvoiceReviewPageProps) {
   /** Newest request issued / newest answer applied: an answer older than the last one applied is dropped. */
   const issued = React.useRef(0);
   const applied = React.useRef(0);
+  /** The newest answer applied was a failed read: what is shown is then not known to be current. */
+  const appliedFailed = React.useRef(false);
   const latest = React.useRef<InvoiceReview | null>(null);
 
   /**
@@ -309,9 +311,12 @@ export function InvoiceReviewPage(props: InvoiceReviewPageProps) {
     const seq = ++issued.current;
     const [r, c] = await Promise.all([api.getReview(invoiceId), api.listCorrections(invoiceId)]);
     if (!alive.current) return null;
-    // A newer answer was already applied: this one is stale, whatever it says. What stays shown is the newer one.
-    if (seq < applied.current) return latest.current;
+    // A newer answer was already applied: this one is stale, whatever it says. What stays shown is the newer one. When that newer answer
+    // was a failed read, the page is not known to be current and this caller must not report Saved over it: it gets null (the write path
+    // then says "but the page could not refresh", with Reload).
+    if (seq < applied.current) return appliedFailed.current ? null : latest.current;
     applied.current = seq;
+    appliedFailed.current = !r.ok;
     // The corrections list feeds "Corrected from" notes only; its failure never blocks the page.
     if (c.ok) setCorrections(c.value);
     if (r.ok) {

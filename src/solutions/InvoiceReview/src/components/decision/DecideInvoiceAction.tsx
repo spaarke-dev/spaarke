@@ -16,7 +16,7 @@ import { useApproval } from './ApprovalProvider';
 export interface DecideInvoiceActionProps {
   review: InvoiceReview;
   canWrite: boolean;
-  reload: () => Promise<unknown>;
+  reload: () => Promise<InvoiceReview | null>;
   notifyStep?: NotifyStep;
 }
 

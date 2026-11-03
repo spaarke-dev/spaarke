@@ -4,7 +4,7 @@
  */
 
 import * as React from 'react';
-import { Caption1, makeStyles, tokens } from '@fluentui/react-components';
+import { Button, Caption1, makeStyles, tokens } from '@fluentui/react-components';
 import { Warning16Filled } from '@fluentui/react-icons';
 import type { InvoiceReview } from '../../services/invoiceReviewApi';
 import { approvalSignature, awaitingLine } from '../../services/decisionModel';
@@ -26,15 +26,20 @@ export function useApprovalSync(review: InvoiceReview): void {
 
 export function AwaitingApprovers({ review }: { review: InvoiceReview }) {
   const s = useStyles();
-  const { state, failure, loading } = useApproval();
+  const { state, failure, loading, refresh } = useApproval();
   useApprovalSync(review);
 
   if (loading) return null;
   if (!state) {
     return failure ? (
-      <Caption1 className={s.muted} data-testid="awaiting">
-        Approvers are not available right now.
-      </Caption1>
+      <span className={s.line}>
+        <Caption1 className={s.muted} data-testid="awaiting">
+          Approvers are not available right now.
+        </Caption1>
+        <Button size="small" appearance="transparent" onClick={() => void refresh()} data-testid="awaiting-retry">
+          Retry
+        </Button>
+      </span>
     ) : null;
   }
   const line = awaitingLine(state);

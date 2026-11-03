@@ -32,8 +32,8 @@ export interface WizardCtx {
   approval: ApprovalState;
   api: InvoiceDecisionApi;
   invoiceId: string;
-  /** Re-read the review (after an adjustment is added or removed). */
-  reload: () => Promise<unknown>;
+  /** Re-read the review (after an adjustment is added or removed); resolves with the review now shown, or null when the re-read failed. */
+  reload: () => Promise<InvoiceReview | null>;
   onOutcome: (outcome: InvoiceOutcome, handle: IWizardShellHandle) => void;
 }
 

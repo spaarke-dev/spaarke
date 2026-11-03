@@ -5,7 +5,8 @@
  * One provider wraps the page. The slots call `sync(signature)` with a signature of what the approval depends on in the review (status, line
  * statuses, totals, history); the state is re-read when that changes (and only then, so a Processing poll does not hit the route every few
  * seconds). Two slots syncing the same review make one request; a sync that arrives while a read is out marks it dirty and one more read runs.
- * A failed re-read keeps the state last shown (the server stays authoritative at the click) and records the failure.
+ * A failed re-read keeps the state last shown (the server stays authoritative at the click) and records the failure; its signature is
+ * not kept as seen, so the next sync of it asks again, and `refresh()` (the Retry on the header line) always asks.
  */
 
 import * as React from 'react';
@@ -59,10 +60,12 @@ export function ApprovalProvider({ api, invoiceId, children }: ApprovalProviderP
   }, []);
 
   const run = React.useCallback(async (): Promise<ApprovalState | null> => {
+    let lastOk = true;
     do {
       dirty.current = false;
       const r = await api.getApproval(invoiceId);
       if (!alive.current) return null;
+      lastOk = r.ok;
       if (r.ok) {
         shown.current = r.value;
         setState(r.value);
@@ -71,6 +74,8 @@ export function ApprovalProvider({ api, invoiceId, children }: ApprovalProviderP
         setFailure(r.failure);
       }
     } while (dirty.current);
+    // A failed read must not count as seen: the next sync of the same signature (or Retry) asks again.
+    if (!lastOk) seen.current = null;
     setLoading(false);
     return shown.current;
   }, [api, invoiceId]);

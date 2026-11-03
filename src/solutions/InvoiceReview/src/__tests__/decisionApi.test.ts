@@ -6,7 +6,7 @@ import {
   newAdjustmentId,
 } from '../services/decisionApi';
 import { toFailure } from '../services/invoiceReviewApi';
-import { INVOICE_ID, SUBMISSION_ID, approval, blockedSubmission, invoiceContext, lineId, problem } from './testKit';
+import { INVOICE_ID, SUBMISSION_ID, approval, blockedSubmission, forbidden, invoiceContext, lineId, problem } from './testKit';
 
 const BASE = 'https://bff.example.test/';
 
@@ -97,10 +97,19 @@ describe('decisionFailureMessage', () => {
   const fail = (status: number, code: string | null, detail?: string) => toFailure(problem(status, code, detail ? { detail } : {}));
 
   it('shows the server detail with its stable code in brackets (a 403 or 409 is shown with its code)', () => {
-    expect(decisionFailureMessage(fail(403, 'ebilling.approval.not_eligible', 'You are not an approver for this invoice.'))).toBe(
-      'You are not an approver for this invoice. (ebilling.approval.not_eligible)'
+    // The server's real codes (InvoiceApprovalCodes); a 403 carries its code under `reasonCode` (ProblemDetailsHelper.Forbidden).
+    expect(decisionFailureMessage(toFailure(forbidden('ebilling.approver.not_eligible', { detail: 'You are not an approver for this invoice.' })))).toBe(
+      'You are not an approver for this invoice. (ebilling.approver.not_eligible)'
     );
-    expect(decisionFailureMessage(fail(409, 'ebilling.approval.open_lines', '2 lines still need a decision.'))).toBe('2 lines still need a decision. (ebilling.approval.open_lines)');
+    expect(decisionFailureMessage(fail(409, 'ebilling.approve.lines_open', '2 lines still need a decision.'))).toBe('2 lines still need a decision. (ebilling.approve.lines_open)');
+  });
+
+  it('reads the code of a 403 from reasonCode, and an errorCode when both are present wins', () => {
+    expect(toFailure(forbidden('ebilling.approver.not_eligible')).errorCode).toBe('ebilling.approver.not_eligible');
+    // SubmissionOverrideEndpoints sends the same code under both keys.
+    expect(toFailure(problem(403, 'ebilling.blocked.not_authorized', { reasonCode: 'ebilling.blocked.not_authorized' })).errorCode).toBe('ebilling.blocked.not_authorized');
+    expect(toFailure(problem(403, 'a.b', { reasonCode: 'c.d' })).errorCode).toBe('a.b');
+    expect(toFailure(problem(403, null)).errorCode).toBeNull();
   });
 
   it('falls back to a fixed sentence per status when the server sent no detail, still with the code', () => {
@@ -117,9 +126,24 @@ describe('decisionFailureMessage', () => {
     const other = fail(503, 'ebilling.something.else', 'Busy.');
     expect(isDecisionIncomplete(other)).toBe(false);
     expect(decisionFailureMessage(other)).not.toContain('repeat');
-    for (const code of ['ebilling.invoice.decision_incomplete', 'ebilling.adjustment.incomplete', 'ebilling.blocked.unavailable']) {
+    // 'ebilling.decision.incomplete' is the code InvoiceApprovalService.FromLineResult sends when the bulk accept stopped part-way.
+    for (const code of ['ebilling.invoice.decision_incomplete', 'ebilling.adjustment.incomplete', 'ebilling.blocked.unavailable', 'ebilling.decision.incomplete']) {
       expect(isDecisionIncomplete(fail(503, code))).toBe(true);
     }
+  });
+
+  it('treats any 503 that names its failed step or its committed lines as incomplete, whatever its code', () => {
+    const real = toFailure(
+      problem(503, 'ebilling.decision.incomplete', { detail: 'Some lines were accepted.', failedStep: 'accept-clean', committedLineIds: [lineId(1)] })
+    );
+    expect(real.failedStep).toBe('accept-clean');
+    expect(isDecisionIncomplete(real)).toBe(true);
+    expect(decisionFailureMessage(real)).toContain('It was saved in part: repeat it to finish.');
+    expect(isDecisionIncomplete(toFailure(problem(503, 'ebilling.future.code', { failedStep: 'unreviewed' })))).toBe(true);
+    expect(isDecisionIncomplete(toFailure(problem(503, 'ebilling.future.code', { committedLineIds: [lineId(2)] })))).toBe(true);
+    // Not a 503, or a 503 with neither: an ordinary refusal.
+    expect(isDecisionIncomplete(toFailure(problem(409, 'ebilling.future.code', { failedStep: 'accept-clean' })))).toBe(false);
+    expect(isDecisionIncomplete(toFailure(problem(503, 'ebilling.future.code')))).toBe(false);
   });
 
   it('names the disabled switch and never shows transport text', () => {
