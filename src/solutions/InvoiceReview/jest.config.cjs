@@ -14,6 +14,8 @@
 module.exports = {
   preset: 'ts-jest',
   testEnvironment: 'jsdom',
+  // The page tests mount a Fluent dialog with a wizard; on a cold ts-jest cache under load (parallel worktree builds) one can pass 5 s.
+  testTimeout: 20000,
   roots: ['<rootDir>/src'],
   testMatch: ['**/__tests__/**/*.test.ts', '**/__tests__/**/*.test.tsx'],
   setupFilesAfterEnv: ['<rootDir>/jest.setup.cjs'],
