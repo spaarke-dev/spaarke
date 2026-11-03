@@ -105,9 +105,11 @@ public sealed partial class SecureChildOwnershipAiToolTests
     [Fact]
     public async Task ChatCreate_AStampedEvent_IsOwnedAsTodaysCoreOwnsIt_TheStampChangesNoOwner()
     {
-        // Correction item 4: the old chat create wrote no I-1 stamp into its item; step 10 adds it to the create BODY only, so
-        // the owner question (step 7, over the item) is unchanged. Task 017 (2d-5): the old core is deleted; its owner and
-        // creator are pinned (OwnedCreateEventUnderAnEvent), and it wrote NO stamp — the chat create through the service does.
+        // Correction item 4: the old chat create wrote no I-1 stamp into its item. Task 042b (FR-41, #2483): step 6½ now derives
+        // the stamp BEFORE the owner and step 7 asks over the item plus the derived root, under its own column; under an
+        // ORDINARY matter the event ranks above the matter in the lineage order, so the owner is still the filed-under event's
+        // team, as the old core gave it. Task 017 (2d-5): the old core is deleted; its owner and creator are pinned
+        // (OwnedCreateEventUnderAnEvent), and it wrote NO stamp — the chat create through the service does.
         var stamps = TheEventUnderTheRestrictedOrdinaryMatter();
 
         var viaChat = await Chat(ChatHandlerOver(stamps), "sprk_event", Lookup("sprk_regardingevent", "sprk_event", Event));
@@ -124,6 +126,27 @@ public sealed partial class SecureChildOwnershipAiToolTests
             "the caller's own bind (a mapped body value)");
         chats.Should().ContainKey("sprk_RegardingMatter@odata.bind")
             .WhoseValue.Should().Be($"/sprk_matters({OrdinaryMatter:D})", "the service writes the stamp the old core did not");
+    }
+
+    /// <summary>
+    /// Task 042b (FR-41, #2483 / DI-009): the chat twin of the route's A1. An event filed under a TEAM-OWNED event of the Secure
+    /// matter is owned by the Secure team at create, with the matter's sharee mirror, because step 7 asks over the event and
+    /// the root step 6½ derived (before 042b: the event's ordinary team, and no mirror until the reconciler moved it).
+    /// </summary>
+    [Fact]
+    public async Task ChatCreate_AnEventUnderATeamOwnedEventOfASecureMatter_IsOwnedByTheSecureTeam_WithTheShareeMirrorAtCreate()
+    {
+        var stamps = TheTeamOwnedEventIsFiledUnderTheSecureMatter();
+
+        var result = await Chat(ChatHandlerOver(stamps), "sprk_event", Lookup("sprk_regardingevent", "sprk_event", Event));
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        var (_, id, fields) = _appCreates.Should().ContainSingle().Subject;
+        Owner(fields).Should().Be(Directory.SecureNamedTeam, "#2483 closed on the chat create too");
+        fields["sprk_RegardingMatter@odata.bind"].Should().Be($"/sprk_matters({SecureMatter:D})");
+        _shareTable.MaskOf("sprk_event", id, DataversePrincipalRef.User(Sharee)).Should().Be(CollaborateMask,
+            "the Secure matter's sharee sees the chat-created event at create");
+        _user.Posts.Should().BeEmpty("never created as the caller");
     }
 
     [Fact]

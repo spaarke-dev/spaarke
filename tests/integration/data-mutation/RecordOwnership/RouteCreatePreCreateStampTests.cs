@@ -64,8 +64,9 @@ public sealed partial class SecureChildOwnershipAiToolTests
     }
 
     // =====================================================================================================================
-    // field-mapping-server-write-path-r1 task 042a: characterize the #2483 / DI-009 window (design.md section 15.1, 15.6).
-    // Tests only. These pin TODAY's owner decision, which is wrong; task 042b derives the stamp before step 7 and INVERTS them.
+    // field-mapping-server-write-path-r1 task 042a characterized the #2483 / DI-009 window (design.md section 15.1, 15.6);
+    // task 042b derives the stamp before step 7 (step 6½) and INVERTS those tests (A1, A2 below), with its must-fire and
+    // must-not-fire tests (design.md section 15.6).
     // =====================================================================================================================
 
     /// <summary>
@@ -104,38 +105,60 @@ public sealed partial class SecureChildOwnershipAiToolTests
     }
 
     /// <summary>
-    /// CHARACTERIZES #2483 (DI-009); task 042b INVERTS this test. A create filed under a TEAM-OWNED event of a Secure matter is
-    /// today owned by the event's ordinary business-unit team (<see cref="Directory.ChildTeam"/>): step 7 decides the owner over
-    /// the item's own lookups ([the event]); the resolver reads nothing above a team-owned parent; and step 10 derives the I-1
-    /// stamp (<c>sprk_regardingmatter</c> = the Secure matter) into the create BODY only. After 042b step 7 sees the derived
-    /// root, the owner is <see cref="Directory.SecureNamedTeam"/> and the sharee mirror is written at create.
+    /// Task 042b (FR-41, #2483 / DI-009 closed) INVERTS task 042a's A1, formerly
+    /// <c>RouteCreate_AnEventUnderATeamOwnedEventOfASecureMatter_IsOwnedByTheEventsOrdinaryTeam_DI009Window</c>, which pinned
+    /// the window: the owner was the event's ordinary business-unit team because step 7 decided over the item's own lookups and
+    /// step 10 derived the stamp into the create BODY only. Step 6½ now derives the stamp BEFORE the owner and step 7 asks over
+    /// the item's lookups plus the derived root, so the create is owned by <see cref="Directory.SecureNamedTeam"/> and the
+    /// Secure matter's sharee mirror is written at create. The caller (not a sharee of the Secure matter, AC7) gets the normal
+    /// 201, whose body names only the new row; the intermediate is read once (no second derivation, AC1); and step 5's AppendTo
+    /// probes name only the record the caller sent: the derived root is never asked as the caller (AC12). Step 8 is NoOp since
+    /// task 041, so there is no index assertion (AC13).
     /// </summary>
     [Fact]
-    public async Task RouteCreate_AnEventUnderATeamOwnedEventOfASecureMatter_IsOwnedByTheEventsOrdinaryTeam_DI009Window()
+    public async Task RouteCreate_AnEventUnderATeamOwnedEventOfASecureMatter_IsOwnedByTheSecureTeam_WithTheShareeMirrorAtCreate()
     {
         var stamps = TheTeamOwnedEventIsFiledUnderTheSecureMatter();
+        var intermediateReadsBeforeTheCreate = -1;
+        _onAppCreate = (_, _, _) => intermediateReadsBeforeTheCreate = IntermediateReads(stamps);
+        var probes = AppendToProbes();
 
         var result = await CreateChildOverStamps("sprk_event", AnEventUnderTheEvent(), stamps);
 
         Status(result).Should().Be(StatusCodes.Status201Created, Detail(result));
         var (_, id, fields) = _appCreates.Should().ContainSingle().Subject;
-        fields["ownerid@odata.bind"].Should().Be($"/teams({Directory.ChildTeam:D})",
-            "CHARACTERIZES #2483: today the owner ignores the derived stamp's root; 042b inverts this to SecureNamedTeam");
-        Owner(fields).Should().NotBe(Directory.SecureNamedTeam, "the window: an ordinary team can read a row of a Secure family");
-        System.Console.Error.WriteLine("DUMP " + string.Join(";", fields.Select(kv => kv.Key + "=" + kv.Value)));
+        fields["ownerid@odata.bind"].Should().Be($"/teams({Directory.SecureNamedTeam:D})",
+            "#2483 closed: step 7 asks over the event and the derived Secure matter, as the reconciler does");
         fields["sprk_RegardingMatter@odata.bind"].Should().Be($"/sprk_matters({SecureMatter:D})",
-            "step 10 still derives the Secure matter into the create body");
-        _shareTable.MaskOf("sprk_event", id, DataversePrincipalRef.User(Sharee)).Should().BeNull(
-            "CHARACTERIZES #2483: an ordinary-owned row gets no sharee mirror at create; 042b writes it at create");
+            "step 10 binds the stamp step 6½ derived");
+        _shareTable.MaskOf("sprk_event", id, DataversePrincipalRef.User(Sharee)).Should().Be(CollaborateMask,
+            "the Secure matter's sharee sees the new event at create, not 2-4 minutes later");
+
+        intermediateReadsBeforeTheCreate.Should().Be(1, "step 6½ derives once; step 10 binds that result with no second derivation (AC1)");
+
+        probes.Should().NotBeEmpty("step 5 asks AppendTo on the record the caller sent");
+        probes.Should().OnlyContain(p => p.Contains(Event.ToString("D"), StringComparison.OrdinalIgnoreCase),
+            "step 5's AppendTo set is unchanged: only the event the caller filed under");
+        probes.Should().NotContain(p => p.Contains(SecureMatter.ToString("D"), StringComparison.OrdinalIgnoreCase),
+            "the derived root is never asked as the caller (AC12)");
+
+        // AC7: the caller is not a sharee of the Secure matter; the 201 body names only the new row.
+        var body = JsonSerializer.SerializeToElement(((IValueHttpResult)result).Value);
+        body.EnumerateObject().Select(p => p.Name).Should().Equal(["id"], "no warnings, nothing else");
+        body.GetProperty("id").GetGuid().Should().Be(id);
+        var wire = body.GetRawText() + (result.GetType().GetProperty("Location")?.GetValue(result) as string);
+        foreach (var secure in new[] { SecureMatter, Directory.SecureNamedTeam, Directory.SecureBu, Directory.SecureDefaultTeam })
+            wire.Should().NotContainEquivalentOf(secure.ToString("D"), "the response carries no secure-family id the caller did not send");
     }
 
     /// <summary>
-    /// CHARACTERIZES #2483 (DI-009); task 042b INVERTS the disagreement (A2 then agrees). The reconciler asks the written row's
-    /// question, which includes the stamp the create bound, so it owns the same row to the Secure team: the create and the
-    /// reconciler disagree, and the reconciler moves the row 2-4 minutes later.
+    /// Task 042b INVERTS task 042a's A2, formerly
+    /// <c>RouteCreate_TheReconcilersQuestionOverTheWrittenEvent_OwnsItToTheSecureTeam_WhereTheCreateDidNot_DI009Window</c>, which
+    /// pinned the disagreement: the reconciler's question over the written row owned it to the Secure team, the create did not.
+    /// Now they agree: the create asks the question the reconciler asks of the written row.
     /// </summary>
     [Fact]
-    public async Task RouteCreate_TheReconcilersQuestionOverTheWrittenEvent_OwnsItToTheSecureTeam_WhereTheCreateDidNot_DI009Window()
+    public async Task RouteCreate_TheReconcilersQuestionOverTheWrittenEvent_AgreesWithTheCreatesOwner()
     {
         var stamps = TheTeamOwnedEventIsFiledUnderTheSecureMatter();
         await CreateChildOverStamps("sprk_event", AnEventUnderTheEvent(), stamps);
@@ -147,10 +170,195 @@ public sealed partial class SecureChildOwnershipAiToolTests
         var answer = await _world.Resolver().ResolveOwnerAsync(question.Context, CancellationToken.None);
 
         question.Undetermined.Should().BeNull();
-        Owner(fields).Should().Be(Directory.ChildTeam, "what the create gave (CHARACTERIZES #2483)");
-        answer.OwningTeamId.Should().Be(Directory.SecureNamedTeam,
-            "CHARACTERIZES #2483: the reconciler's answer for the written row is the Secure team; 042b makes the create agree");
+        answer.OwningTeamId.Should().Be(Directory.SecureNamedTeam, "the reconciler's answer for the written row");
         answer.IsSecureOwner.Should().BeTrue();
+        Owner(fields).Should().Be(answer.OwningTeamId!.Value, "the create and the reconciler agree (#2483 closed)");
+    }
+
+    // ── 042b row 5 (UAC-r2 conditions (a) and (b)): the derived root is flagged secure but not isolated ──────────────────
+
+    private static readonly Guid FlaggedMatter = Guid.Parse("a2470000-0000-4000-8000-0000000004b5");
+    private static readonly Guid PreCallOwner = Guid.Parse("a2470000-0000-4000-8000-0000000004b6");
+
+    /// <summary>The event, team-owned by <see cref="Directory.ChildTeam"/>, filed under <see cref="FlaggedMatter"/>.</summary>
+    private StampWorld TheTeamOwnedEventIsFiledUnderTheFlaggedMatter()
+    {
+        _world.WithRecord("sprk_event", Event, Directory.ChildBu, owningTeam: Directory.ChildTeam,
+            extra: new() { ["sprk_regardingmatter"] = new EntityReference("sprk_matter", FlaggedMatter) });
+        ShareWorld.OrdinaryChild("sprk_event", Event, ("sprk_regardingmatter", "sprk_matter", FlaggedMatter));
+        return new StampWorld().Row("sprk_matter", FlaggedMatter)
+            .Row("sprk_event", Event, [("sprk_regardingmatter", "sprk_matter", FlaggedMatter)]);
+    }
+
+    /// <summary>
+    /// The refusal a DIRECT child of <see cref="FlaggedMatter"/> already gets (the existing C11 refusal), and the refusal the
+    /// event under the team-owned event gets: both 409 <c>SecureParentNotIsolated</c> with the same words, and nothing created.
+    /// </summary>
+    private async Task TheEventUnderTheEventIsRefusedAsADirectChildIs(StampWorld stamps)
+    {
+        var direct = await CreateChildOverStamps("sprk_event", new()
+        {
+            ["sprk_eventname"] = "Follow-up",
+            ["sprk_RegardingMatter@odata.bind"] = $"/sprk_matters({FlaggedMatter:D})",
+        }, stamps);
+        var underTheEvent = await CreateChildOverStamps("sprk_event", AnEventUnderTheEvent(), stamps);
+
+        Status(direct).Should().Be(StatusCodes.Status409Conflict, Detail(direct));
+        ReasonCode(direct).Should().Be(RecordOwnerRefusal.SecureParentNotIsolated);
+        Detail(direct).Should().Contain("re-run Make Secure on it, then retry");
+        Status(underTheEvent).Should().Be(Status(direct), Detail(underTheEvent));
+        ReasonCode(underTheEvent).Should().Be(ReasonCode(direct));
+        Detail(underTheEvent).Should().Be(Detail(direct), "the same code, status and words as the direct child (UAC-r2 condition (b))");
+        _appCreates.Should().BeEmpty("fail closed: nothing is created");
+        _user.Posts.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task RouteCreate_UnderATeamOwnedEventOfAMatterInTheTransientMakeSecureInterval_IsRefused409_AsADirectChildIs()
+    {
+        // Make Secure step 4.1 has set sprk_issecure; step 5 has not yet moved the matter to the Secure team.
+        var stamps = TheTeamOwnedEventIsFiledUnderTheFlaggedMatter();
+        _world.WithRecord("sprk_matter", FlaggedMatter, Directory.ChildBu, isSecure: true, owningTeam: Directory.ChildTeam);
+
+        await TheEventUnderTheEventIsRefusedAsADirectChildIs(stamps);
+    }
+
+    [Fact]
+    public async Task RouteCreate_UnderATeamOwnedEventOfAMatterLeftFlaggedByACompensatedMakeSecure_IsRefused409_AsADirectChildIs()
+    {
+        // The lasting compensated state: the flag stays set and the owner was moved back to the pre-call owner (a user).
+        var stamps = TheTeamOwnedEventIsFiledUnderTheFlaggedMatter();
+        _world.WithRecord("sprk_matter", FlaggedMatter, Directory.ChildBu, isSecure: true, extra: new()
+        {
+            ["owninguser"] = new EntityReference("systemuser", PreCallOwner),
+            ["ownerid"] = new EntityReference("systemuser", PreCallOwner),
+        });
+
+        await TheEventUnderTheEventIsRefusedAsADirectChildIs(stamps);
+    }
+
+    // ── 042b row 2 (AC6): a root read fault with an owner world that refuses ────────────────────────────────────────────
+
+    [Fact]
+    public async Task RouteCreate_WhenTheRootReadFaults_AndTheOwnerWouldBeRefused_Is503StampUnavailable()
+    {
+        // The owner world does not hold the event (step 7 would refuse 409 ParentUnresolved); the stamp world's read of it faults.
+        ShareWorld.OrdinaryChild("sprk_event", Event, ("sprk_regardingmatter", "sprk_matter", OrdinaryMatter));
+        var stamps = new StampWorld().Row("sprk_event", Event, [("sprk_regardingmatter", "sprk_matter", OrdinaryMatter)])
+            .FailRead("sprk_event", Event);
+
+        var result = await CreateChildOverStamps("sprk_event", AnEventUnderTheEvent(), stamps);
+
+        Status(result).Should().Be(StatusCodes.Status503ServiceUnavailable, Detail(result));
+        ReasonCode(result).Should().Be("record_creation.stamp_unavailable", "step 6½ runs before the owner (design 15.4 row 2)");
+        _appCreates.Should().BeEmpty();
+        _user.Posts.Should().BeEmpty();
+    }
+
+    // ── 042b change 1 (AC3): a to-do under a team-owned report card in X whose matter is in Y ──────────────────────────────
+
+    private static readonly Guid ReportCard = Guid.Parse("a2470000-0000-4000-8000-0000000004c1");
+    private static readonly Guid MatterInY = Guid.Parse("a2470000-0000-4000-8000-0000000004c2");
+
+    private StampWorld TheReportCardInXIsFiledUnderTheMatterInY()
+    {
+        _world.WithRecord("sprk_matter", MatterInY, Directory.CustomerChildBu, isSecure: false, owningTeam: Directory.CustomerChildTeam)
+            .WithRecord("sprk_reportcard", ReportCard, Directory.ChildBu, owningTeam: Directory.ChildTeam,
+                extra: new() { ["sprk_regardingmatter"] = new EntityReference("sprk_matter", MatterInY) });
+        return new StampWorld().Row("sprk_matter", MatterInY)
+            .Row("sprk_reportcard", ReportCard, [("sprk_regardingmatter", "sprk_matter", MatterInY)]);
+    }
+
+    [Fact]
+    public async Task RouteCreate_AToDoWithNoPairUnderATeamOwnedReportCardInX_WhoseMatterIsInY_IsOwnedByYsTeam()
+    {
+        var stamps = TheReportCardInXIsFiledUnderTheMatterInY();
+
+        var result = await CreateChildOverStamps("sprk_todo", new()
+        {
+            ["sprk_name"] = "Score the panel",
+            ["sprk_RegardingReportCard@odata.bind"] = $"/sprk_reportcards({ReportCard:D})",
+        }, stamps);
+
+        Status(result).Should().Be(StatusCodes.Status201Created, Detail(result));
+        var fields = _appCreates.Should().ContainSingle().Subject.Fields;
+        Owner(fields).Should().Be(Directory.CustomerChildTeam,
+            "change 1 (owner 2026-11-02): the derived matter ranks above the report card in the to-do's lineage order");
+        fields["sprk_RegardingMatter@odata.bind"].Should().Be($"/sprk_matters({MatterInY:D})");
+    }
+
+    /// <summary>
+    /// AC3's second half (design 15.6 "the same report card with the to-do's pair set is owned by X") does NOT hold on this
+    /// code, and this test pins why, as parity: a pair is the to-do's SUBJECT only when it names one of the server regarding
+    /// builder's targets (<c>TodoRegardingBuilder.RegardingLookupByEntity</c>, 11 tables), and <c>sprk_reportcard</c> is not
+    /// one of them (the client builder, TodoRegardingUpdateBuilder.ts, has it as its 12th). So the pair names no subject, the
+    /// lineage order decides, and the derived matter (Y) ranks first, for the create and for the reconciler alike. Task 042b
+    /// notes: open question and a proposed DI entry (found in passing); the map is outside OwnerQuestionOf / ForRow.
+    /// </summary>
+    [Fact]
+    public async Task RouteCreate_AToDoWithItsPairNamingATeamOwnedReportCardInX_IsOwnedAsTheReconcilerOwnsTheWrittenRow()
+    {
+        var stamps = TheReportCardInXIsFiledUnderTheMatterInY();
+
+        var result = await CreateChildOverStamps("sprk_todo", new()
+        {
+            ["sprk_name"] = "Score the panel",
+            ["sprk_RegardingReportCard@odata.bind"] = $"/sprk_reportcards({ReportCard:D})",
+            ["sprk_regardingrecordid"] = ReportCard.ToString("D"),
+        }, stamps);
+
+        Status(result).Should().Be(StatusCodes.Status201Created, Detail(result));
+        var (_, id, fields) = _appCreates.Should().ContainSingle().Subject;
+        var written = TheWrittenRow("sprk_todo", id, fields);
+        written["sprk_regardingrecordid"] = ReportCard.ToString("D");
+        var question = await RecordOwnershipContext.ForExistingRowAsync(
+            written, new ExistingRowReads(Mock.Of<IGenericEntityService>(), null, null), CancellationToken.None);
+        var reconciler = await _world.Resolver().ResolveOwnerAsync(question.Context, CancellationToken.None);
+
+        RecordOwnershipContext.SubjectColumnOf(written).Should().BeNull("a report card is not a to-do regarding-builder target");
+        Owner(fields).Should().Be(reconciler.OwningTeamId!.Value, "the create asks the reconciler's question");
+        Owner(fields).Should().Be(Directory.CustomerChildTeam, "Y: the pair names no subject, so the lineage order decides");
+    }
+
+    // ── 042b must not fire (AC12): a browser-sent stamp ─────────────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task RouteCreate_ABrowserSentStamp_DerivesNothing_AndIsAskedAsTheCallerAsBefore()
+    {
+        var stamps = TheTeamOwnedEventIsFiledUnderTheSecureMatter();
+        var probes = AppendToProbes();
+        var payload = AnEventUnderTheEvent();
+        payload["sprk_RegardingMatter@odata.bind"] = $"/sprk_matters({SecureMatter:D})";
+
+        var result = await CreateChildOverStamps("sprk_event", payload, stamps);
+
+        Status(result).Should().Be(StatusCodes.Status201Created, Detail(result));
+        var (_, _, fields) = _appCreates.Should().ContainSingle().Subject;
+        Owner(fields).Should().Be(Directory.SecureNamedTeam, "the stamp the caller sent was already in the owner question");
+        Bind(fields, "sprk_RegardingMatter@odata.bind").Should().Be($"/sprk_matters({SecureMatter:D})", "the caller's own bind");
+        probes.Should().Contain(p => p.Contains(SecureMatter.ToString("D"), StringComparison.OrdinalIgnoreCase),
+            "a stamp the caller SENT is a record the caller names, so step 5 asks AppendTo on it, as before");
+        fields["sprk_RegardingMatter@odata.bind"].Should().BeOfType<JsonElement>(
+            "the caller's own mapped value, not a server-derived bind: fill-only, nothing is derived over a stamp the item holds");
+    }
+
+    /// <summary>The stamp world's reads of <see cref="Event"/> (the intermediate) so far.</summary>
+    private static int IntermediateReads(StampWorld stamps) =>
+        Mock.Get(stamps.Service).Invocations.Count(i =>
+            i.Method.Name == nameof(IGenericEntityService.RetrieveAsync)
+            && i.Arguments[0] is "sprk_event" && i.Arguments[1] is Guid id && id == Event);
+
+    /// <summary>Every AppendTo probe the caller's Dataverse is asked from now on (RetrievePrincipalAccess paths).</summary>
+    private List<string> AppendToProbes()
+    {
+        var probes = new List<string>();
+        _user.GetOverride = path =>
+        {
+            if (path.Contains("RetrievePrincipalAccess", StringComparison.Ordinal))
+                probes.Add(path);
+            return null;
+        };
+        return probes;
     }
 
     [Fact]

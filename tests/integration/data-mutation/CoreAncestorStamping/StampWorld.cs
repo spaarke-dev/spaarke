@@ -60,6 +60,16 @@ internal sealed class StampWorld
             "sprk_regardingdocument", "sprk_regardinginvoice", "sprk_regardingrecordid", "sprk_regardingrecordtype",
             "sprk_documentid",
         ],
+        // Field mapping task 042b (FR-41 parity theory): the memo's four stamp columns and its intermediate lookups (task 147 r1's
+        // live sweep, CoreAncestorResolver.StampSourceColumns: its report-card lookup is sprk_reportcard), the pair and its parties.
+        ["sprk_memo"] =
+        [
+            "sprk_regardingproject", "sprk_regardingmatter", "sprk_regardingworkassignment",
+            "sprk_regardingservicerequest", "sprk_regardinganalysis", "sprk_regardingcommunication",
+            "sprk_regardingdocument", "sprk_regardingevent", "sprk_regardinginvoice", "sprk_regardingagreement",
+            "sprk_regardingbudget", "sprk_reportcard", "sprk_regardingrecordid", "sprk_regardingrecordtype",
+            "sprk_regardingcontact", "sprk_regardingorganization", "sprk_regardingtimekeeper",
+        ],
         // ebilling-r1 task 012 added sprk_regardingworkassignment to the invoice (live spaarkedev1, 2026-10-15).
         ["sprk_invoice"] = ["sprk_project", "sprk_matter", "sprk_regardingworkassignment", "sprk_regardingagreement"],
         ["sprk_document"] =

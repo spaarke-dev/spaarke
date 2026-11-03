@@ -74,6 +74,9 @@ public sealed partial class RecordCreationServicePipelineSeamTests
         .SecureRoot("sprk_matter", SecureMatter);
     private readonly RecordingPublisher _publisher;
     private readonly CapturingLogger _logger = new();
+
+    /// <summary>Task 042b: the share table the service's sharee mirror writes (empty unless a test seeds a sharee).</summary>
+    private readonly FakeRecordShareTable _shareTable = new();
     private Exception? _resolverFault;
     private Func<string, RecordTableRule?> _tableRules = RecordTableRules.Find;
 
@@ -737,7 +740,11 @@ public sealed partial class RecordCreationServicePipelineSeamTests
             });
         restampEntities
             .Setup(e => e.UpdateAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object>>(), It.IsAny<CancellationToken>()))
-            .Returns((string t, Guid id, Dictionary<string, object> f, CancellationToken ct) => Journaled("restamp", () => _stamps.Service.UpdateAsync(t, id, f, ct)));
+            .Returns((string t, Guid id, Dictionary<string, object> f, CancellationToken ct) => Journaled("restamp", async () =>
+            {
+                await _stamps.Service.UpdateAsync(t, id, f, ct);
+                ApplyToTheCreatedShareRow(t, id, f); // task 042b: one Dataverse, as the mirror after it reads the row
+            }));
         restampEntities
             .Setup(e => e.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
             .Returns((QueryExpression q, CancellationToken ct) => Journaled("restamp", () => _stamps.Service.RetrieveMultipleAsync(q, ct)));
@@ -750,7 +757,7 @@ public sealed partial class RecordCreationServicePipelineSeamTests
         {
             _journal.Add("mirror");
             return _shareWorld;
-        }, new FakeRecordShareTable());
+        }, _shareTable);
 
         return new RecordCreationService(
             resolver, _appOnly.Object, _readBack.Object, SecureRootFilingGateFixtures.NothingSecure(), restamper, shares,
@@ -877,7 +884,33 @@ public sealed partial class RecordCreationServicePipelineSeamTests
 
         _stamps.Row(table, id, [.. lookups]);
         if (SecureChildLineage.IsChild(table))
+        {
             _shareWorld.Add(table, id, [.. shareColumns]);
+            _createdShareRows[(table, id)] = shareColumns;
+        }
+    }
+
+    /// <summary>Task 042b: the share-world columns of each created child row, so a later app-only update lands there too.</summary>
+    private readonly Dictionary<(string Table, Guid Id), List<(string Column, object Value)>> _createdShareRows = [];
+
+    /// <summary>
+    /// Task 042b: the post-create re-derivation's update of a created child row, as the share world (the same Dataverse) sees
+    /// it: its lookup columns join the row the sharee mirror then reads (step 12 runs the restamp before the mirror).
+    /// </summary>
+    private void ApplyToTheCreatedShareRow(string table, Guid id, Dictionary<string, object> fields)
+    {
+        if (!_createdShareRows.TryGetValue((table, id), out var columns))
+            return;
+        foreach (var (column, value) in fields)
+        {
+            if (value is EntityReference)
+            {
+                columns.RemoveAll(c => c.Column == column);
+                columns.Add((column, value));
+            }
+        }
+
+        _shareWorld.Add(table, id, [.. columns]);
     }
 
     /// <summary>The caller's Dataverse, journaled by kind, with a WhoAmI failure and a thrown-fault switch.</summary>

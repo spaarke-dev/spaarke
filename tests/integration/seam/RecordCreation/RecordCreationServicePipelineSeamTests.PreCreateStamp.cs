@@ -3,6 +3,7 @@ using FluentAssertions;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;
 using Microsoft.Xrm.Sdk;
+using Spaarke.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.RecordCreation;
@@ -192,19 +193,20 @@ public sealed partial class RecordCreationServicePipelineSeamTests
     }
 
     /// <summary>
-    /// CHARACTERIZES #2483 (DI-009); task 042b INVERTS this test (field-mapping-server-write-path-r1 task 042a, design.md
-    /// section 15.6 A3). The system-principal twin of the route's window: an event filed under a TEAM-OWNED event of a SECURE
-    /// matter is today owned by the event's ordinary team (step 7 decides over the item's lookups only), carries no stamp in the
-    /// create body (a system principal binds it after), and is stamped with the Secure matter by the post-create
-    /// re-derivation. After 042b the owner is <see cref="Directory.SecureNamedTeam"/>.
+    /// Task 042b (FR-41, #2483 / DI-009 closed) INVERTS task 042a's A3 (design.md section 15.6), formerly
+    /// <c>CreateAsync_AsTheSystem_AnEventUnderATeamOwnedEventOfASecureMatter_IsOwnedByTheEventsOrdinaryTeam_DI009Window</c>, the
+    /// system-principal twin of the route's window. Step 6½ derives the stamp for every principal before the owner, so the
+    /// event is owned by <see cref="Directory.SecureNamedTeam"/> and the Secure matter's sharee mirror is written at create;
+    /// a system principal still carries no stamp in the create body and binds it after the create (DI-007).
     /// </summary>
     [Fact]
-    public async Task CreateAsync_AsTheSystem_AnEventUnderATeamOwnedEventOfASecureMatter_IsOwnedByTheEventsOrdinaryTeam_DI009Window()
+    public async Task CreateAsync_AsTheSystem_AnEventUnderATeamOwnedEventOfASecureMatter_IsOwnedByTheSecureTeam_WithTheShareeMirrorAtCreate()
     {
         _world.WithRecord("sprk_event", ParentEvent, Directory.ChildBu, owningTeam: Directory.ChildTeam,
             extra: new() { ["sprk_regardingmatter"] = new EntityReference("sprk_matter", SecureMatter) });
         _stamps.Row("sprk_event", ParentEvent, [("sprk_regardingmatter", "sprk_matter", SecureMatter)]);
         _shareWorld.OrdinaryChild("sprk_event", ParentEvent, ("sprk_regardingmatter", "sprk_matter", SecureMatter));
+        _shareTable.Seed("sprk_matter", SecureMatter, DataversePrincipalRef.User(SecureMatterSharee), CollaborateMask);
         var request = await MappedRequest("sprk_event", new { sprk_eventname = "Follow-up", sprk_regardingevent = Lookup("sprk_event", ParentEvent) });
 
         var outcome = await Service().CreateAsync(
@@ -212,13 +214,20 @@ public sealed partial class RecordCreationServicePipelineSeamTests
 
         outcome.Succeeded.Should().BeTrue(outcome.Refusal?.Detail);
         var (_, id, fields) = _creates.Should().ContainSingle().Subject;
-        Owner(fields).Should().Be(Directory.ChildTeam,
-            "CHARACTERIZES #2483: an ordinary owner today, though the event's root is a Secure matter; 042b inverts to SecureNamedTeam");
-        Owner(fields).Should().NotBe(Directory.SecureNamedTeam);
+        Owner(fields).Should().Be(Directory.SecureNamedTeam,
+            "#2483 closed: step 7 asks over the event and the root step 6½ derived, for a system principal too");
         fields.Should().NotContainKey(MatterStampBind, "a system principal's derived stamp is bound after the create, not in the body");
         _stamps.Lookup("sprk_event", id, "sprk_regardingmatter").Should().Be(SecureMatter,
-            "the post-create re-derivation (step 12) binds the Secure matter after the owner was already decided");
+            "the post-create re-derivation (step 12) binds the Secure matter");
+        _shareTable.MaskOf("sprk_event", id, DataversePrincipalRef.User(SecureMatterSharee)).Should().Be(CollaborateMask,
+            "the Secure matter's sharee mirror is written at create");
     }
+
+    /// <summary>A user the Secure matter is shared with (task 042b's A3).</summary>
+    private static readonly Guid SecureMatterSharee = Guid.Parse("a0130000-0000-4000-8000-0000000004b1");
+
+    /// <summary>Collaborate on the record, as a Manage Access share writes it (Read|Write|Append|AppendTo, no Share).</summary>
+    private const int CollaborateMask = 1 | 2 | 4 | 16;
 
     // =====================================================================================
     // 3. I-16: set before the create when it resolves; a null never refuses

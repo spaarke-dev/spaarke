@@ -115,9 +115,29 @@ internal sealed partial class RecordCreationService
         var report = new List<RecordRepairField>();
         var warnings = new List<string>();
 
+        // FR-41 (#2483, task 042b): the I-1 stamp the row is missing is planned ONCE, before the owner, so the owner question
+        // includes its root; the stamp step adds the same result. A fault keeps the owner (RepairOwnerAsync) and adds no stamp.
+        (IReadOnlyDictionary<string, object>? Missing, bool Faulted) stamp = (null, false);
+        if (CoreAncestorResolver.StampSourceColumns.ContainsKey(table))
+        {
+            try
+            {
+                stamp = (await _restamper.PlanMissingStampAsync(table, row, ct).ConfigureAwait(false), false);
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "[RECORD-REPAIR] the core-ancestor stamp of {Table} {Id} could not be planned; none added", table, row.Id);
+                stamp = (null, true);
+            }
+        }
+
         // Review F1-b: the owner (and what the row's filing resolves to) is decided BEFORE the mapping, which it may block.
         var ownerParents = new List<RecordOwnershipParent>();
-        var owner = await RepairOwnerAsync(table, rule, row, patch, report, ownerParents, ct).ConfigureAwait(false);
+        var owner = await RepairOwnerAsync(table, rule, row, patch, report, ownerParents, stamp, ct).ConfigureAwait(false);
         if (owner.MappingBlocked is { } blocked)
         {
             _logger.LogInformation("[RECORD-REPAIR] {Table} {Id}: nothing was mapped ({Reason})", table, id, blocked);
@@ -129,7 +149,7 @@ internal sealed partial class RecordCreationService
         }
 
         // No search-index step (task 041, FR-40): the index follows the content type, so Repair writes neither column.
-        await RepairStampAsync(table, row, patch, report, ct).ConfigureAwait(false);
+        RepairStamp(table, stamp, patch, report);
 
         RecordRepairOutcome Outcome(RecordRepairStatus status, string? reason) => new()
         {
@@ -611,32 +631,24 @@ internal sealed partial class RecordCreationService
 
     /// <summary>
     /// Step 10 (I-1) for an existing row: the stamp columns it is MISSING, from its source's current root
-    /// (<see cref="CoreAncestorRestamper.PlanMissingStampAsync"/>). A held stamp — stale or not — and the row's children are
+    /// (<see cref="CoreAncestorRestamper.PlanMissingStampAsync"/>), as planned once before the owner (FR-41, task 042b:
+    /// <paramref name="stamp"/>; no second derivation). A held stamp — stale or not — and the row's children are
     /// <see cref="CoreAncestorStampReconciliationJob"/>'s.
     /// </summary>
-    private async Task RepairStampAsync(
-        string table, Entity row, Dictionary<string, object> patch, List<RecordRepairField> report, CancellationToken ct)
+    private static void RepairStamp(
+        string table, (IReadOnlyDictionary<string, object>? Missing, bool Faulted) stamp, Dictionary<string, object> patch,
+        List<RecordRepairField> report)
     {
         if (!CoreAncestorResolver.StampSourceColumns.ContainsKey(table))
             return;
 
-        Dictionary<string, object>? missing;
-        try
+        if (stamp.Faulted)
         {
-            missing = await _restamper.PlanMissingStampAsync(table, row, ct).ConfigureAwait(false);
-        }
-        catch (OperationCanceledException) when (ct.IsCancellationRequested)
-        {
-            throw;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "[RECORD-REPAIR] the core-ancestor stamp of {Table} {Id} could not be planned; none added", table, row.Id);
             report.Add(RecordRepairField.Skipped(RecordRepairPart.CoreAncestorStamp, null, RecordRepairReason.StampUnavailable));
             return;
         }
 
-        if (missing is null)
+        if (stamp.Missing is not { } missing)
         {
             report.Add(RecordRepairField.Present(RecordRepairPart.CoreAncestorStamp, null, RecordRepairReason.StampNothingMissing));
             return;

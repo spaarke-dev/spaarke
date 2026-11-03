@@ -31,7 +31,10 @@ namespace Sprk.Bff.Api.Services.RecordCreation;
 /// so no create writes either index column and no business unit is read for it.</para>
 /// <para><b>Step 10 runs before the create, and again after it</b> (owner decision 2a, 2026-10-22; task 017). The I-1 stamp
 /// columns the row is missing are derived from what it is filed under (<see cref="CoreAncestorRestamper.PlanMissingStampAsync"/>,
-/// fill-only) and bound into the create payload; a derivation that fails refuses the create, nothing written
+/// fill-only) and bound into the create payload. FR-41 (#2483, task 042b): the derivation runs at step 6½, before the owner,
+/// and step 7 asks the owner over the item's lookups plus each derived stamp column (its root), so a create under a
+/// team-owned intermediate of a Secure root is owned as the secure-child reconciler owns the written row; step 10 binds
+/// that result and sets I-16 from it, with no second derivation. A derivation that fails refuses the create, nothing written
 /// (<see cref="RecordCreationRefusal.StampUnderivableCode"/> 400 for a data condition,
 /// <see cref="RecordCreationRefusal.StampUnavailableCode"/> 503 for a fault). I-16 (To Do, Event, Communication) is set in the
 /// payload when it resolves and never refuses (display only). A document gets neither before the create (#2169). The
@@ -734,12 +737,21 @@ internal sealed partial class RecordCreationService
             trace.Record(RecordCreationStep.SecureRootPlan, RecordCreationStepState.Ran, "ordinary (the table inherits no secure parent)");
         }
 
+        // ── Step 6½: the I-1 stamp the row is missing, derived BEFORE the owner (FR-41, #2483; see remarks) ──────────────
+        // Its trace step is step 10's (StampAndInheritance), begun here: a refusal is recorded under it, with the same codes and
+        // words as before; a derivation that succeeds is recorded once, at step 10, which binds it.
+        trace.Begin(RecordCreationStep.StampAndInheritance);
+        var planned = await PlanStampBeforeOwnerAsync(table, item, noun, ct).ConfigureAwait(false);
+        if (planned.Refusal is { } stampPlanRefusal)
+            return Decision.Refuse(stampPlanRefusal);
+
         // ── Step 7: the owner — record-first for every create, roots and children (FR-09, task 015) ──────────────────
         trace.Begin(RecordCreationStep.Owner);
         RecordOwnerResolution? owner = null;
         if (isolatedTeam is null)
         {
-            var decided = await DecideOwnerAsync(table, rule, item, ownerContextObjectId, callerSystemUserId, requestedBy, noun, ct)
+            var decided = await DecideOwnerAsync(
+                    table, rule, item, planned.Missing, ownerContextObjectId, callerSystemUserId, requestedBy, noun, ct)
                 .ConfigureAwait(false);
             if (decided.Refusal is { } ownerRefusal)
                 return Decision.Refuse(ownerRefusal);
@@ -769,9 +781,9 @@ internal sealed partial class RecordCreationService
                 ? "creator person stamped when the requester resolved; \"for\" person and table defaults stay with the adapters"
                 : "the table carries no creator person; \"for\" person and table defaults stay with the adapters");
 
-        // ── Step 10: the I-1 stamp and I-16, derived into the payload before the create (owner decision 2a; see remarks) ──
+        // ── Step 10: the I-1 stamp step 6½ derived, bound into the payload, and I-16 (owner decision 2a; FR-41; see remarks) ──
         trace.Begin(RecordCreationStep.StampAndInheritance);
-        var stamped = await StampBeforeCreateAsync(table, user, item, fields, noun, ct).ConfigureAwait(false);
+        var stamped = await StampBeforeCreateAsync(table, user, item, fields, planned.Missing, noun, ct).ConfigureAwait(false);
         if (stamped.Refusal is { } stampRefusal)
             return Decision.Refuse(stampRefusal);
 
@@ -790,13 +802,63 @@ internal sealed partial class RecordCreationService
     }
 
     /// <summary>
-    /// Step 10 (owner decision 2a, task 017): the I-1 stamp columns the merged row is MISSING, derived from what it is filed
-    /// under (<see cref="CoreAncestorRestamper.PlanMissingStampAsync"/>, task 016's in-memory planner — fill-only, nothing
-    /// written), bound into <paramref name="fields"/>; then I-16 from every lookup the row now names. A derivation that fails
-    /// refuses: a data condition (<see cref="CoreAncestorStampUnderivableException.IsPermanent"/>) is
-    /// <see cref="RecordCreationRefusal.StampUnderivableCode"/> (400), a derived stamp the table's metadata cannot bind is the
-    /// non-retryable <see cref="RecordCreationRefusalKind.Undecided"/> (500, F-5), anything else
-    /// <see cref="RecordCreationRefusal.StampUnavailableCode"/> (503). I-16 never refuses: it is display only, and a null is simply not set. A document gets neither (#2169).
+    /// Step 6½ (FR-41, #2483; moved from step 10, owner decision 2a): the I-1 stamp columns the merged row is MISSING, derived
+    /// from what it is filed under (<see cref="CoreAncestorRestamper.PlanMissingStampAsync"/>, task 016's in-memory planner,
+    /// app-only — fill-only, nothing written), BEFORE the owner, so step 7 asks about the derived root too. For every
+    /// principal. A derivation that fails refuses: a data condition (<see cref="CoreAncestorStampUnderivableException.IsPermanent"/>)
+    /// is <see cref="RecordCreationRefusal.StampUnderivableCode"/> (400), anything else
+    /// <see cref="RecordCreationRefusal.StampUnavailableCode"/> (503) — the codes and words step 10 gave. A document is not
+    /// derived before the create (#2169), nor is a table that carries no stamp: <c>Missing</c> is then <c>null</c>.
+    /// </summary>
+    /// <remarks>Nothing changes here: the item (what the owner, the plan and step 12 read) is the row as the earlier steps
+    /// decided it, and the derived columns travel in <c>Missing</c> to step 7 (the owner question) and step 10 (the bind and
+    /// I-16) — never derived a second time. Its answers are read app-only and reach the caller only through step 7's owner and
+    /// step 10's bind, both after step 5's AppendTo on the record the row is filed under (ADR-008 path A).</remarks>
+    private async Task<(RecordCreationRefusal? Refusal, Dictionary<string, object>? Missing)> PlanStampBeforeOwnerAsync(
+        string table, DataverseWriteItemMapper.MappedItem item, string noun, CancellationToken ct)
+    {
+        if (InheritedAccessPermission.RecordsOwnNarrowing(table) || !CoreAncestorResolver.IsStampedChildEntity(table))
+            return (null, null);
+
+        try
+        {
+            return (null, await _restamper.PlanMissingStampAsync(table, MergedRowOf(table, item), ct).ConfigureAwait(false));
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (CoreAncestorStampUnderivableException ex) when (ex.IsPermanent)
+        {
+            _logger.LogWarning(ex, "[RECORD-CREATE] the I-1 stamp of a new {Table} cannot be derived ({Kind}); nothing was created",
+                table, ex.RefusalKind);
+            return (StampUnderivable(noun), null);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "[RECORD-CREATE] the I-1 stamp of a new {Table} could not be derived (fault); nothing was created",
+                table);
+            return (StampUnavailable(noun), null);
+        }
+    }
+
+    /// <summary>The merged row in memory: every lookup it binds, and the ADR-024 pair id as written.</summary>
+    private static Entity MergedRowOf(string table, DataverseWriteItemMapper.MappedItem item)
+    {
+        var row = new Entity(table);
+        foreach (var lookup in item.Lookups)
+            row[lookup.Column] = new EntityReference(lookup.RelatedTable, lookup.RecordId);
+        if (OwnedChildWrite.PairOf(item).IdText is { } pairId)
+            row[CoreAncestorResolver.RegardingRecordIdColumn] = pairId;
+        return row;
+    }
+
+    /// <summary>
+    /// Step 10 (owner decision 2a, task 017; FR-41): the I-1 stamp columns step 6½ derived (<paramref name="missing"/>), bound
+    /// into <paramref name="fields"/>; then I-16 from every lookup the row now names. No second derivation. A derived stamp the
+    /// table's metadata cannot bind is the non-retryable <see cref="RecordCreationRefusalKind.Undecided"/> (500, F-5); a bind
+    /// Dataverse did not answer is <see cref="RecordCreationRefusal.StampUnavailableCode"/> (503). I-16 never refuses: it is
+    /// display only, and a null is simply not set. A document gets neither (#2169).
     /// </summary>
     /// <remarks>Only <paramref name="fields"/> changes: the item (what the owner, the plan and step 12 read) is the row as the
     /// earlier steps decided it. The stamp is bound under the table's navigation property, read as the caller through
@@ -804,7 +866,7 @@ internal sealed partial class RecordCreationService
     /// stamp is left to the post-create re-derivation (step 12), which runs for every principal.</remarks>
     private async Task<(RecordCreationRefusal? Refusal, RecordCreationStepState State, string? Note)> StampBeforeCreateAsync(
         string table, IDataverseUserClient? user, DataverseWriteItemMapper.MappedItem item, Dictionary<string, object?> fields,
-        string noun, CancellationToken ct)
+        IReadOnlyDictionary<string, object>? missing, string noun, CancellationToken ct)
     {
         if (InheritedAccessPermission.RecordsOwnNarrowing(table))
             return (null, RecordCreationStepState.Skipped, "a document is stamped after the create only (#2169)");
@@ -814,38 +876,10 @@ internal sealed partial class RecordCreationService
         if (!stampsI1 && !takesI16)
             return (null, RecordCreationStepState.Skipped, "the table carries no I-1 stamp and no inherited Access Permission");
 
-        // The merged row in memory: every lookup it binds, and the ADR-024 pair id as written.
-        var row = new Entity(table);
-        foreach (var lookup in item.Lookups)
-            row[lookup.Column] = new EntityReference(lookup.RelatedTable, lookup.RecordId);
-        if (OwnedChildWrite.PairOf(item).IdText is { } pairId)
-            row[CoreAncestorResolver.RegardingRecordIdColumn] = pairId;
-
+        var row = MergedRowOf(table, item);
         var notes = new List<string>();
         if (stampsI1)
         {
-            Dictionary<string, object>? missing;
-            try
-            {
-                missing = await _restamper.PlanMissingStampAsync(table, row, ct).ConfigureAwait(false);
-            }
-            catch (OperationCanceledException) when (ct.IsCancellationRequested)
-            {
-                throw;
-            }
-            catch (CoreAncestorStampUnderivableException ex) when (ex.IsPermanent)
-            {
-                _logger.LogWarning(ex, "[RECORD-CREATE] the I-1 stamp of a new {Table} cannot be derived ({Kind}); nothing was created",
-                    table, ex.RefusalKind);
-                return (StampUnderivable(noun), RecordCreationStepState.Refused, null);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "[RECORD-CREATE] the I-1 stamp of a new {Table} could not be derived (fault); nothing was created",
-                    table);
-                return (StampUnavailable(noun), RecordCreationStepState.Refused, null);
-            }
-
             if (missing is null)
             {
                 notes.Add("no I-1 stamp missing");
@@ -973,9 +1007,16 @@ internal sealed partial class RecordCreationService
     /// honoured by an application create, so it refuses. A fault is <see cref="RecordCreationRefusal.OwnerUnavailableCode"/>
     /// (503), nothing written.
     /// </summary>
+    /// <remarks>FR-41 (#2483): the parents include each I-1 stamp column step 6½ derived (<paramref name="derivedStamp"/>),
+    /// under its real column, so the create asks the question the secure-child reconciler asks of the written row
+    /// (<see cref="RecordOwnershipContext.ForExistingRowAsync"/>): a team-owned intermediate of a Secure root no longer hides
+    /// the root. Fill-only: a stamp the item already holds was never derived, so no column is named twice. A message created
+    /// in a record thread also takes the thread's filing under <c>sprk_communicationthread</c> (<see cref="RecordThreadFiling"/>,
+    /// UAC-r2 Q3), as Repair and the reconciler do.</remarks>
     private async Task<(RecordOwnerResolution? Owner, RecordCreationRefusal? Refusal)> DecideOwnerAsync(
-        string table, RecordTableRule rule, DataverseWriteItemMapper.MappedItem item, Guid? callerObjectId,
-        Guid? callerSystemUserId, RecordRequester? requestedBy, string noun, CancellationToken ct)
+        string table, RecordTableRule rule, DataverseWriteItemMapper.MappedItem item,
+        IReadOnlyDictionary<string, object>? derivedStamp, Guid? callerObjectId, Guid? callerSystemUserId,
+        RecordRequester? requestedBy, string noun, CancellationToken ct)
     {
         var parents = OwnedChildWrite.ParentsOf(table, item);
         if (rule.OwnershipException is { } exception && parents.Count == 0)
@@ -990,9 +1031,19 @@ internal sealed partial class RecordCreationService
         try
         {
             var pair = OwnedChildWrite.PairOf(item);
+            // UAC-r2 Q3 (task 042b): a message created in a record thread takes the thread's filing, as Repair (RepairOwnerAsync)
+            // and the reconciler ask it (RecordThreadFiling): a Direct thread adds nothing; one that cannot be read faults (503).
+            var threadParents = await RecordThreadFiling.ParentsAsync(_entities, table,
+                    item.Lookups.FirstOrDefault(l => string.Equals(l.Column, RecordThreadFiling.ThreadColumn, StringComparison.OrdinalIgnoreCase))?.RecordId,
+                    ct)
+                .ConfigureAwait(false);
+            var filed = OwnedChildWrite.LookupsOf(item)
+                .Concat((derivedStamp ?? new Dictionary<string, object>()).Select(stamp => KeyValuePair.Create(stamp.Key,
+                    stamp.Value is EntityReference root ? new RecordOwnershipParent(root.LogicalName, root.Id) : (RecordOwnershipParent?)null)))
+                .Concat(RecordThreadFiling.FilingLookupsOf(threadParents))
+                .ToList();
             var resolved = await ResolveOwnerOverAsync(
-                    table, OwnedChildWrite.LookupsOf(item).ToList(), pair.InvalidId, pair.IdText, pair.TypeId, callerObjectId,
-                    callerSystemUserId, requestedBy, ct)
+                    table, filed, pair.InvalidId, pair.IdText, pair.TypeId, callerObjectId, callerSystemUserId, requestedBy, ct)
                 .ConfigureAwait(false);
             if (resolved.Refusal is { } undetermined)
                 return (null, undetermined);
@@ -1155,10 +1206,15 @@ internal sealed partial class RecordCreationService
     /// than the row's is NOT written on a table whose rows can have children inheriting access (every ownership-parent
     /// table) — the move would carry those children's access with it. A leaf table (no rows filed under it) is re-owned:
     /// the move is the row's own.</para>
+    /// <para><b>FR-41 (#2483, task 042b):</b> the owner question includes each I-1 stamp column the row is missing, planned
+    /// once before this step (<paramref name="stamp"/>) and handed to the stamp step unchanged. A planning fault keeps the
+    /// owner (<see cref="RecordRepairReason.StampUnavailable"/>, logged with the row id) and blocks the mapping: the row is
+    /// never re-owned over its lookups alone.</para>
     /// </remarks>
     private async Task<OwnerRepair> RepairOwnerAsync(
         string table, RecordTableRule rule, Entity row, Dictionary<string, object> patch, List<RecordRepairField> report,
-        List<RecordOwnershipParent> resolvedOver, CancellationToken ct)
+        List<RecordOwnershipParent> resolvedOver, (IReadOnlyDictionary<string, object>? Missing, bool Faulted) stamp,
+        CancellationToken ct)
     {
         var rowUnit = row.GetAttributeValue<EntityReference>(OwningBusinessUnitColumn) is { } unit && unit.Id != Guid.Empty
             ? unit.Id
@@ -1184,6 +1240,13 @@ internal sealed partial class RecordCreationService
             var parents = RecordOwnershipContext.ParentsOf(row).Concat(threadParents).Distinct().ToArray();
             // UAC task 194b R4: the same parents keyed by the column that files the row there, for the one builder.
             var keyed = RecordOwnershipContext.LookupsOf(row).Concat(RecordThreadFiling.FilingLookupsOf(threadParents)).ToList();
+            // FR-41: the stamp the row is missing, under its real column (fill-only: a held stamp is in LookupsOf already).
+            foreach (var (column, value) in stamp.Missing ?? new Dictionary<string, object>())
+            {
+                if (value is EntityReference root)
+                    keyed.Add(KeyValuePair.Create(column, (RecordOwnershipParent?)new RecordOwnershipParent(root.LogicalName, root.Id)));
+            }
+
             // (RecordThreadFiling.QuestionWithThreadFiling is this question without the pair; OwnerQuestionOf adds the pair.)
             var pairId = row.GetAttributeValue<string>(SecureRootInheritance.PairIdColumn);
             var rowPairId = pairId;
@@ -1207,6 +1270,17 @@ internal sealed partial class RecordCreationService
 
             if (keep is { } kept && !filed)
                 return OwnerKept(kept, null, report); // nothing to re-own, and no filing to gate the mapping on
+
+            // FR-41 (UAC-r2 condition (c)): the stamp could not be planned, so its root is unknown — the owner is kept, never
+            // decided over the lookups alone, and the mapping is blocked (the filing's owner is undecided). Counted and logged.
+            if (stamp.Faulted)
+            {
+                _logger.LogWarning(
+                    "[RECORD-REPAIR] the owner of {Table} {Id} was not changed ({Reason}): the I-1 stamp it is missing could not be " +
+                    "planned, so its owner question would leave out the stamp's root", table, row.Id, RecordRepairReason.StampUnavailable);
+                return OwnerKept(keep ?? (RecordRepairFieldState.Skipped, RecordRepairReason.StampUnavailable),
+                    RecordRepairReason.MappingFilingUndecided, report);
+            }
 
             // I-6 for an unfiled row: the PERSON who owns it acts. An application user, or one that cannot be told, is no one.
             Guid? actingUser = keep is null && parents.Length == 0

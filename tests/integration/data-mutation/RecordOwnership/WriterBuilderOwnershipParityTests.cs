@@ -13,15 +13,18 @@ using FluentAssertions;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Graph.Models;
 using Microsoft.Xrm.Sdk;
+using Moq;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.Ai;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Communication;
 using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.Email;
+using Sprk.Bff.Api.Services.RecordCreation;
 using Sprk.Bff.Api.Tests.AccessControl;
 using Sprk.Bff.Api.Tests.DataMutation.ExternalAccess;
 using Xunit;
+using Directory = Sprk.Bff.Api.Tests.TestInfrastructure.OwnershipDirectory;
 using Entity = Microsoft.Xrm.Sdk.Entity;
 
 namespace Sprk.Bff.Api.Tests.Integration.DataMutation.RecordOwnership;
@@ -178,6 +181,280 @@ public class WriterBuilderOwnershipParityTests
         {
             var question = await QuestionAsync(document);
             (await Resolver.ResolveOwnerAsync(question.Context, CancellationToken.None)).OwningTeamId.Should().Be(writtenOwner.Id);
+        }
+    }
+
+    // ── field-mapping-server-write-path-r1 task 042b (FR-41, #2483, DI-009): the ONE server create against the reconciler ──
+    //
+    // For every stamped table the record-creation registry creates (CoreAncestorResolver.IsStampedChildEntity), a row filed
+    // under a TEAM-OWNED intermediate (an invoice) of a Secure matter or of an ordinary matter is created through the REAL
+    // RecordCreationService (as the system principal: step 6½ and step 7 run for every principal, and its derived stamp is
+    // bound by the post-create re-derivation, so the written row is what Dataverse holds), and the owner it wrote is compared
+    // with the reconciler's answer for that written row (RecordOwnershipContext.ForExistingRowAsync; a message in a record
+    // thread also takes its thread's filing, as SecureChildReconciler.ContextFor does). A create the service refuses writes
+    // nothing, so it can never disagree with the reconciler; the refusal is pinned with its code.
+
+    /// <summary>The tables the theory covers: every registry table that carries the I-1 stamp, asserted complete below.</summary>
+    public static readonly TheoryData<string> StampedRegistryTables = new()
+    {
+        "sprk_todo", "sprk_event", "sprk_memo", "sprk_analysis", "sprk_communication", "sprk_signal", "sprk_decisionrecord",
+    };
+
+    [Fact(DisplayName = "042b parity: the theory covers every RecordTableRules table that carries the I-1 stamp")]
+    public void TheParityTheory_CoversEveryStampedRegistryTable()
+    {
+        var registered = RecordTableRules.All.Select(r => r.Table)
+            .Where(CoreAncestorResolver.IsStampedChildEntity)
+            .Order(StringComparer.Ordinal);
+
+        registered.Should().Equal(StampedRegistryTables.Select(t => (string)t[0]).Order(StringComparer.Ordinal));
+    }
+
+    [Theory(DisplayName = "042b parity (secure world): a row filed under a team-owned invoice of a Secure matter is owned by the Secure team at create, as the reconciler owns the written row")]
+    [MemberData(nameof(StampedRegistryTables))]
+    public async Task ACreateUnderATeamOwnedIntermediateOfASecureMatter_IsOwnedAsTheReconcilerOwnsTheWrittenRow(string table)
+    {
+        var world = new CreateParityWorld();
+        world.InvoiceUnder(world.SecureMatter);
+
+        var (outcome, written) = await world.CreateAsync(table, ("sprk_regardinginvoice", "sprk_invoice", CreateParityWorld.Invoice));
+        var reconciler = await world.ReconcilerAnswerAsync(written ?? world.RowAsItWouldBeWritten(table,
+            ("sprk_regardinginvoice", "sprk_invoice", CreateParityWorld.Invoice), ("sprk_regardingmatter", "sprk_matter", world.SecureMatter)));
+
+        reconciler.OwningTeamId.Should().Be(Directory.SecureNamedTeam, "the reconciler's question includes the stamp's root");
+        if (CoreAncestorResolver.IsStampedOutsideAccessTaxonomy(table))
+        {
+            // A Signal or Decision Record is not a reparentable child: the service refuses a Secure owner for it with the
+            // existing words (OwnerDecided; its own writer owns it into isolation). Nothing is written, so the reconciler
+            // never sees an ordinary row (before FR-41 the create wrote ChildTeam: the #2483 window on these tables too).
+            outcome.Refusal.Should().NotBeNull();
+            outcome.Refusal!.Code.Should().Be(RecordOwnerRefusal.NoOwnerSource);
+            outcome.Refusal.OwnerDecision!.IsSecureOwner.Should().BeTrue();
+            world.Creates.Should().BeEmpty();
+            return;
+        }
+
+        outcome.Succeeded.Should().BeTrue(outcome.Refusal?.Detail);
+        written.Should().NotBeNull();
+        written!.GetAttributeValue<EntityReference>("sprk_regardingmatter")?.Id.Should().Be(world.SecureMatter, "the stamp is bound");
+        outcome.OwningTeamId.Should().Be(reconciler.OwningTeamId, "the create asks the reconciler's question (#2483)");
+    }
+
+    [Theory(DisplayName = "042b parity (ordinary world): a row filed under a team-owned invoice of an ordinary matter in another business unit keeps the invoice's team, as the reconciler does")]
+    [MemberData(nameof(StampedRegistryTables))]
+    public async Task ACreateUnderATeamOwnedIntermediateOfAnOrdinaryMatter_IsOwnedAsTheReconcilerOwnsTheWrittenRow(string table)
+    {
+        var world = new CreateParityWorld();
+        world.InvoiceUnder(world.MatterInY);
+
+        var (outcome, written) = await world.CreateAsync(table, ("sprk_regardinginvoice", "sprk_invoice", CreateParityWorld.Invoice));
+
+        outcome.Succeeded.Should().BeTrue(outcome.Refusal?.Detail);
+        written!.GetAttributeValue<EntityReference>("sprk_regardingmatter")?.Id.Should().Be(world.MatterInY);
+        var reconciler = await world.ReconcilerAnswerAsync(written);
+        reconciler.OwningTeamId.Should().Be(Directory.ChildTeam, "the invoice ranks above the matter on every stamped table");
+        outcome.OwningTeamId.Should().Be(reconciler.OwningTeamId);
+    }
+
+    /// <summary>The report-card column of each table the report card files (memo's is sprk_reportcard; SecureChildLineage).</summary>
+    public static readonly TheoryData<string, string> ReportCardChildren = new()
+    {
+        { "sprk_todo", "sprk_regardingreportcard" },
+        { "sprk_event", "sprk_regardingreportcard" },
+        { "sprk_communication", "sprk_regardingreportcard" },
+        { "sprk_memo", "sprk_reportcard" },
+    };
+
+    [Theory(DisplayName = "042b parity (change 1): a row with no pair under a team-owned report card in X whose matter is in Y is owned by Y's team at create, as the reconciler owns it")]
+    [MemberData(nameof(ReportCardChildren))]
+    public async Task ACreateUnderAReportCard_IsOwnedByItsMattersTeam_AsTheReconcilerOwnsIt(string table, string column)
+    {
+        var world = new CreateParityWorld();
+        world.ReportCardUnder(world.MatterInY);
+
+        var (outcome, written) = await world.CreateAsync(table, (column, "sprk_reportcard", CreateParityWorld.ReportCard));
+
+        outcome.Succeeded.Should().BeTrue(outcome.Refusal?.Detail);
+        outcome.OwningTeamId.Should().Be(Directory.CustomerChildTeam,
+            "the matter (Y) ranks above the report card (X) in the table's lineage order (change 1, owner 2026-11-02)");
+        (await world.ReconcilerAnswerAsync(written!)).OwningTeamId.Should().Be(outcome.OwningTeamId);
+    }
+
+    [Theory(DisplayName = "042b parity (row 7, UAC-r2): a report-card child whose matter's business unit has no default team is refused at create (409) and refused by the reconciler, with the same code")]
+    [MemberData(nameof(ReportCardChildren))]
+    public async Task ACreateUnderAReportCardWhoseMattersUnitHasNoDefaultTeam_IsRefused_AsTheReconcilerRefusesIt(string table, string column)
+    {
+        var world = new CreateParityWorld();
+        world.ReportCardUnder(world.MatterInAUnitWithNoDefaultTeam);
+
+        var (outcome, _) = await world.CreateAsync(table, (column, "sprk_reportcard", CreateParityWorld.ReportCard));
+        var reconciler = await world.ReconcilerAnswerAsync(world.RowAsItWouldBeWritten(table,
+            (column, "sprk_reportcard", CreateParityWorld.ReportCard),
+            ("sprk_regardingmatter", "sprk_matter", world.MatterInAUnitWithNoDefaultTeam)));
+
+        outcome.Refusal.Should().NotBeNull("the matter's unit has no default team to own the row");
+        outcome.Refusal!.Kind.Should().Be(RecordCreationRefusalKind.OwnerUnresolved, "a 409");
+        world.Creates.Should().BeEmpty();
+        reconciler.IsOwned.Should().BeFalse("the reconciler asks the same question of the written row");
+        reconciler.RefusalCode.Should().Be(outcome.Refusal.Code);
+    }
+
+    [Fact(DisplayName = "042b parity (Q3, UAC-r2): a communication created in a record thread of a Secure matter, filed under an ordinary matter, is owned by the Secure team at create, as the reconciler owns it with the thread's filing")]
+    public async Task ACommunicationCreatedInASecureRecordThread_IsOwnedAsTheReconcilerOwnsItWithTheThreadsFiling()
+    {
+        var world = new CreateParityWorld();
+        world.RecordThreadUnder(world.SecureMatter);
+
+        var (outcome, written) = await world.CreateAsync("sprk_communication",
+            ("sprk_regardingmatter", "sprk_matter", world.MatterInY),
+            ("sprk_communicationthread", "sprk_communicationthread", CreateParityWorld.Thread));
+
+        outcome.Succeeded.Should().BeTrue(outcome.Refusal?.Detail);
+        var reconciler = await world.ReconcilerAnswerAsync(written!);
+        reconciler.OwningTeamId.Should().Be(Directory.SecureNamedTeam, "the thread files the message under the Secure matter (S6)");
+        outcome.OwningTeamId.Should().Be(reconciler.OwningTeamId, "the create asks the thread's filing too (Q3)");
+    }
+
+    /// <summary>
+    /// The REAL <see cref="RecordCreationService"/> over an
+    /// <see cref="Directory"/> (the resolver's rows), a <see cref="CoreAncestorStamping.StampWorld"/> (the I-1 derivation and
+    /// the post-create re-stamp) and the standard share world; the app-only create materializes the row it is asked to write
+    /// into the stamp world, so the post-create re-derivation stamps it there and the written row is read back from it.
+    /// </summary>
+    private sealed class CreateParityWorld
+    {
+        public static readonly Guid Invoice = Guid.Parse("0b000000-0000-4000-8000-000000042b01");
+        public static readonly Guid ReportCard = Guid.Parse("0b000000-0000-4000-8000-000000042b02");
+        public static readonly Guid Thread = Guid.Parse("0b000000-0000-4000-8000-000000042b03");
+        private static readonly Guid NoTeamUnit = Guid.Parse("0b000000-0000-4000-8000-000000042b04");
+
+        public Guid SecureMatter { get; } = Guid.Parse("0b000000-0000-4000-8000-000000042b11");
+        public Guid MatterInY { get; } = Guid.Parse("0b000000-0000-4000-8000-000000042b12");
+        public Guid MatterInAUnitWithNoDefaultTeam { get; } = Guid.Parse("0b000000-0000-4000-8000-000000042b13");
+
+        private readonly Directory _directory;
+        private readonly Sprk.Bff.Api.Tests.Integration.DataMutation.CoreAncestorStamping.StampWorld _stamps = new();
+        private readonly Mock<IFieldMappingDataverseService> _appOnly =
+            new(MockBehavior.Strict);
+
+        public List<(string Table, Guid Id)> Creates { get; } = [];
+
+        public CreateParityWorld()
+        {
+            _directory = Directory.Standard()
+                .WithSecureRoot("sprk_matter", SecureMatter)
+                .WithRecord("sprk_matter", MatterInY, Directory.CustomerChildBu, isSecure: false, owningTeam: Directory.CustomerChildTeam)
+                .WithBusinessUnit(NoTeamUnit, "No default team", parent: Directory.ChildBu)
+                .WithRecord("sprk_matter", MatterInAUnitWithNoDefaultTeam, NoTeamUnit, isSecure: false);
+            foreach (var matter in new[] { SecureMatter, MatterInY, MatterInAUnitWithNoDefaultTeam })
+                _stamps.Row("sprk_matter", matter);
+
+            _appOnly
+                .Setup(a => a.UpdateRecordFieldsAsync(
+                    It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object?>>(),
+                    It.IsAny<CancellationToken>(), null))
+                .Callback<string, Guid, Dictionary<string, object?>, CancellationToken, Guid?>((table, id, _, _, _) =>
+                {
+                    Creates.Add((table, id));
+                    _stamps.Row(table, id, [.. _lookups]); // the row as Dataverse stores it: the lookups the body binds
+                })
+                .Returns(Task.CompletedTask);
+        }
+
+        private (string Column, string Target, Guid Id)[] _lookups = [];
+
+        /// <summary>The invoice, team-owned by the child unit's team (not yet reached by Make Secure), filed under <paramref name="matter"/>.</summary>
+        public void InvoiceUnder(Guid matter)
+        {
+            _directory.WithRecord("sprk_invoice", Invoice, Directory.ChildBu, owningTeam: Directory.ChildTeam,
+                extra: new() { ["sprk_matter"] = new EntityReference("sprk_matter", matter) });
+            _stamps.Row("sprk_invoice", Invoice, [("sprk_matter", "sprk_matter", matter)]);
+        }
+
+        /// <summary>The report card, team-owned in the child unit (X), filed under <paramref name="matter"/>.</summary>
+        public void ReportCardUnder(Guid matter)
+        {
+            _directory.WithRecord("sprk_reportcard", ReportCard, Directory.ChildBu, owningTeam: Directory.ChildTeam,
+                extra: new() { ["sprk_regardingmatter"] = new EntityReference("sprk_matter", matter) });
+            _stamps.Row("sprk_reportcard", ReportCard, [("sprk_regardingmatter", "sprk_matter", matter)]);
+        }
+
+        /// <summary>A RECORD thread (type not Direct) filed under <paramref name="matter"/>.</summary>
+        public void RecordThreadUnder(Guid matter) =>
+            _directory.WithRecord(RecordThreadFiling.ThreadTable, Thread, Directory.ChildBu, owningTeam: Directory.ChildTeam,
+                extra: new()
+                {
+                    ["sprk_regardingmatter"] = new EntityReference("sprk_matter", matter),
+                    [RecordThreadFiling.ThreadTypeColumn] = new OptionSetValue(100000000),
+                });
+
+        /// <summary>Creates a <paramref name="table"/> row naming <paramref name="lookups"/>, as the system principal; the written row (null when refused).</summary>
+        public async Task<(RecordCreationOutcome Outcome, Entity? Written)> CreateAsync(
+            string table, params (string Column, string Target, Guid Id)[] lookups)
+        {
+            _lookups = lookups;
+            var item = new DataverseWriteItemMapper.MappedItem(
+                System.Text.Json.JsonSerializer.Serialize(lookups.ToDictionary(
+                    l => $"{l.Column}@odata.bind", l => $"/{l.Target}s({l.Id:D})")),
+                [.. lookups.Select(l => l.Column)])
+            {
+                Lookups = [.. lookups.Select(l => new DataverseWriteItemMapper.MappedLookup(l.Column, l.Target, l.Target + "s", l.Id))],
+            };
+
+            var outcome = await RouteRecordCreation.Over(
+                    _directory.Resolver(), _appOnly.Object, _stamps.Restamper,
+                    SecureChildShareWorld.Standard().Synchronizer(new FakeRecordShareTable()),
+                    Sprk.Bff.Api.Tests.TestInfrastructure.SecureRootFilingGateFixtures.NothingSecure(), entities: Entities())
+                .CreateAsync(
+                    new RecordCreationRequest(
+                        table, new RecordCreationPayload.Mapped(item)),
+                    RecordCreationPrincipal.ForSystem(), CancellationToken.None);
+            return (outcome, outcome.CreatedId is { } id ? _stamps.RowOf(table, id) : null);
+        }
+
+        /// <summary>A row of <paramref name="table"/> holding <paramref name="lookups"/> (for a create that was refused).</summary>
+        public Entity RowAsItWouldBeWritten(string table, params (string Column, string Target, Guid Id)[] lookups)
+        {
+            var row = new Entity(table, Guid.NewGuid());
+            foreach (var (column, target, id) in lookups)
+                row[column] = new EntityReference(target, id);
+            return row;
+        }
+
+        /// <summary>
+        /// The reconciler's answer for <paramref name="written"/>: its question (<see cref="RecordOwnershipContext.ForExistingRowAsync"/>),
+        /// with a message's record-thread filing as <c>SecureChildReconciler.ContextFor</c> adds it, through the same resolver.
+        /// </summary>
+        public async Task<RecordOwnerResolution> ReconcilerAnswerAsync(Entity written)
+        {
+            var question = await RecordOwnershipContext.ForExistingRowAsync(
+                written, new ExistingRowReads(Entities(), null, null), CancellationToken.None);
+            question.Undetermined.Should().BeNull();
+            var context = question.Context;
+            if (RecordThreadFiling.ThreadOf(written) is { } thread)
+            {
+                context = context with
+                {
+                    Parents = RecordThreadFiling.QuestionWithThreadFiling(
+                            written, RecordThreadFiling.ParentsOf(_directory.Row(RecordThreadFiling.ThreadTable, thread)))
+                        .Parents.Distinct().ToArray(),
+                };
+            }
+
+            return await _directory.Resolver().ResolveOwnerAsync(context, CancellationToken.None);
+        }
+
+        /// <summary>The service's own app-only reads: the directory's rows and queries (a thread, a team's unit).</summary>
+        private IGenericEntityService Entities()
+        {
+            var entities = new Mock<IGenericEntityService>();
+            entities
+                .Setup(e => e.RetrieveMultipleAsync(It.IsAny<Microsoft.Xrm.Sdk.Query.QueryExpression>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync((Microsoft.Xrm.Sdk.Query.QueryExpression query, CancellationToken _) => _directory.Answer(query));
+            entities
+                .Setup(e => e.RetrieveAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync((string table, Guid id, string[] _, CancellationToken _) => _directory.Row(table, id));
+            return entities.Object;
         }
     }
 }

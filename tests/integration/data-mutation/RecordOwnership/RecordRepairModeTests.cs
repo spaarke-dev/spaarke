@@ -294,6 +294,60 @@ public sealed class RecordRepairModeTests
             .Should().Be(RepairWorld.OtherMatter, "a stale copy is the reconciliation job's, never Repair's");
     }
 
+    // ── field-mapping-server-write-path-r1 task 042b (FR-41, #2483; UAC-r2 condition (c)): the stamp is planned before the owner ──
+
+    [Fact]
+    public async Task AUserOwnedToDoMissingItsStampUnderATeamOwnedInvoiceOfASecureMatter_IsReOwnedToSecureAndStamped_InOneUpdate()
+    {
+        // The to-do sits in the Secure Record unit already (a same-unit re-own; a cross-unit one is the escalation below).
+        var id = _world.ToDoMissingItsStampUnderATeamOwnedInvoiceOfTheSecureMatter(Directory.SecureBu);
+
+        var outcome = await _world.RepairAsync("sprk_todo", id);
+
+        var write = _world.Writes.Should().ContainSingle("the owner and the stamp land in the one update").Subject;
+        write.Fields["ownerid"].Should().Be(new EntityReference("team", Directory.SecureNamedTeam),
+            "the owner question includes the root the missing stamp names");
+        write.Fields["sprk_regardingmatter"].Should().Be(new EntityReference("sprk_matter", RepairWorld.SecureMatter));
+        Field(outcome, RecordRepairPart.Owner, "ownerid").State.Should().Be(RecordRepairFieldState.Repaired);
+        Field(outcome, RecordRepairPart.CoreAncestorStamp, "sprk_regardingmatter").State.Should().Be(RecordRepairFieldState.Repaired);
+    }
+
+    [Fact]
+    public async Task AUserOwnedToDoInAnotherUnitUnderATeamOwnedInvoiceOfASecureMatter_IsNeverReOwnedToTheOrdinaryTeam_AndIsStamped()
+    {
+        // Before 042b the owner was decided over the invoice alone: the child unit's ordinary team, same unit, written. Now the
+        // answer is the Secure team, a move to another unit, which task 016's escalation does not write on a to-do.
+        var id = _world.ToDoMissingItsStampUnderATeamOwnedInvoiceOfTheSecureMatter(Directory.ChildBu);
+
+        var outcome = await _world.RepairAsync("sprk_todo", id);
+
+        Field(outcome, RecordRepairPart.Owner, "ownerid").ReasonCode.Should().Be(RecordRepairReason.OwnerMovesBusinessUnit);
+        var write = _world.Writes.Should().ContainSingle().Subject;
+        write.Fields.Should().NotContainKey("ownerid", "never re-owned to the ordinary team (#2483)");
+        write.Fields["sprk_regardingmatter"].Should().Be(new EntityReference("sprk_matter", RepairWorld.SecureMatter));
+    }
+
+    [Fact]
+    public async Task WhenTheMissingStampCannotBePlanned_TheOwnerIsKept_ReportedStampUnavailable_AndLoggedWithTheRowId()
+    {
+        var id = _world.ToDoMissingItsStampUnderATeamOwnedInvoiceOfTheSecureMatter(Directory.ChildBu);
+        _world.InvoiceStampReadFaults();
+
+        var outcome = await _world.RepairAsync("sprk_todo", id);
+
+        var owner = Field(outcome, RecordRepairPart.Owner, "ownerid");
+        owner.State.Should().Be(RecordRepairFieldState.Skipped);
+        owner.ReasonCode.Should().Be(RecordRepairReason.StampUnavailable, "never re-owned over the lookups alone");
+        outcome.Fields.Should().Contain(f => f.Part == RecordRepairPart.CoreAncestorStamp
+            && f.State == RecordRepairFieldState.Skipped && f.ReasonCode == RecordRepairReason.StampUnavailable);
+        _world.Writes.SelectMany(w => w.Fields.Keys).Should().NotContain(["ownerid", "sprk_regardingmatter"]);
+        _world.Directory.Row("sprk_todo", id).GetAttributeValue<EntityReference>("ownerid")
+            .Should().Be(new EntityReference("systemuser", RepairWorld.PersonInChild));
+        _world.Log.Entries.Should().Contain(e => e.Level == Microsoft.Extensions.Logging.LogLevel.Warning
+            && e.Message.Contains(id.ToString(), StringComparison.OrdinalIgnoreCase)
+            && e.Message.Contains(RecordRepairReason.StampUnavailable, StringComparison.Ordinal));
+    }
+
     // =====================================================================================
     // System principal; the invoice-family seam (ebilling-r1 #1911)
     // =====================================================================================
@@ -1316,6 +1370,35 @@ internal sealed class RepairWorld
         return id;
     }
 
+    /// <summary>Task 042b: an invoice team-owned by the child unit's team (not yet reached by Make Secure), under the secure matter.</summary>
+    public static readonly Guid TeamOwnedInvoice = Guid.Parse("a0160000-0000-4000-8000-0000000004b1");
+
+    /// <summary>
+    /// Task 042b: a to-do in <paramref name="owningUnit"/>, owned by the person in the child unit, filed under
+    /// <see cref="TeamOwnedInvoice"/> of the isolated <see cref="SecureMatter"/>, and missing its I-1 stamp.
+    /// </summary>
+    public Guid ToDoMissingItsStampUnderATeamOwnedInvoiceOfTheSecureMatter(Guid owningUnit)
+    {
+        Directory.WithSecureRoot("sprk_matter", SecureMatter)
+            .WithRecord("sprk_invoice", TeamOwnedInvoice, Directory.ChildBu, owningTeam: Directory.ChildTeam,
+                extra: new Dictionary<string, object> { ["sprk_matter"] = new EntityReference("sprk_matter", SecureMatter) });
+        _stamps.Row("sprk_matter", SecureMatter)
+            .Row("sprk_invoice", TeamOwnedInvoice, [("sprk_matter", "sprk_matter", SecureMatter)]);
+        var id = Guid.NewGuid();
+        Directory.WithRecord("sprk_todo", id, owningUnit, extra: new Dictionary<string, object>
+        {
+            ["ownerid"] = new EntityReference("systemuser", PersonInChild),
+            ["sprk_regardinginvoice"] = new EntityReference("sprk_invoice", TeamOwnedInvoice),
+        });
+        return id;
+    }
+
+    /// <summary>Task 042b: reading the invoice to derive the to-do's stamp faults (the plan cannot be made).</summary>
+    public void InvoiceStampReadFaults() => _stamps.FailRead("sprk_invoice", TeamOwnedInvoice);
+
+    /// <summary>Task 042b: what the service logged.</summary>
+    public Sprk.Bff.Api.Tests.Services.Communication.CapturingLogger<RecordCreationService> Log { get; } = new();
+
     /// <summary>A natively created invoice filed under the matter, owned by the person in the child unit.</summary>
     public Guid InvoiceUnderTheMatter()
     {
@@ -1559,7 +1642,7 @@ internal sealed class RepairWorld
             SecureRootFilingGateFixtures.Over(entities),
             new CoreAncestorRestamper(_stamps.Service, _stamps.Resolver, NullLogger<CoreAncestorRestamper>.Instance),
             SecureChildShareWorld.SynchronizerOver(ShareWorld, new FakeRecordShareTable()),
-            scopes, new Mock<IMembershipEventPublisher>().Object, NullLogger<RecordCreationService>.Instance);
+            scopes, new Mock<IMembershipEventPublisher>().Object, Log);
     }
 
     /// <summary>
