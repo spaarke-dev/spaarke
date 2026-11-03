@@ -37,7 +37,18 @@
   3. if the column can ever differ from the stored file's `sprk_sourcedocument`, it joins the `ExternalInvoiceVisibility` source set;
   4. it stays out of the family, lineage and resolver lists.
 
-  Owner decision (through ebilling): whether a submission reader may see the lookup name of a Restricted .eml, the same class as `sprk_document`. Waiting for: the column after-notice, then the 095a PR review.
+  Owner decision (through ebilling): whether a submission reader may see the lookup name of a Restricted .eml, the same class as `sprk_document`. Column live on dev; relationship 20762a86 read back (Delete and Archive RemoveLink, rest NoCascade). Binding on ebilling: the 095a PR carries the attribute and relationship in source; any backfill is same-source, id-only, has -WhatIf, and needs the owner's OK plus a before-notice to me. Waiting for: the 095a PR review.
+- **ebilling 095c/095d (no-firm Outlook invoices; assign-firm later, D-201)**, verdict sent 2026-11-03.
+  - (1) is only partly right. Only the SUBMISSION is firm-gated (`ListAsync` In, read-one). The invoice, its family rows and its documents are scoped by matter/project (option A, task 187 D2), so a no-firm invoice is externally visible from creation. A null-firm hide is a new rule and the owner's call.
+  - (2) needs no new visibility rule. Conditions for 095d:
+    - Write on the invoice plus AppendTo on the firm;
+    - the core record is derived from the invoice;
+    - CheckFirmLinkAsync: Unreadable is a 503;
+    - assign only (refuse if a firm is already set; In Review only);
+    - ParentLineage's refused submission columns get the typed writer named, and the generic refusal stays;
+    - app-only writes go through the allocator;
+    - tests.
+  - 095d gets a full review.
 - **PR #2530** (Office Add In User billing reads plus `sprk_trackingnumber` in source): the role part is OK from me, and the dev role was read back. MERGED to master at 1571b0be9d (2026-11-03); src identical to the reviewed head 7a33014d9c.
 - **K3, the Office Add In User role (root 9e6af7ee; the 5 BU copies inherit it):** the owner is granting Read on the billing tables: billingexport and billingevent at Deep; billingcode, billingcodeset, ebillingsetting and ebillingoverride at Global. That matches Basic User and Core User, plus the override table, which holds only a name. It was NOT saved as of 14:00Z: I must re-check it with RetrieveRolePrivilegesRole. Source `src/dataverse/solutions/SpaarkeMaster/Roles/Spaarke Office Add In User.xml` needs the same privileges; that's ebilling's PR, and I review it.
 
