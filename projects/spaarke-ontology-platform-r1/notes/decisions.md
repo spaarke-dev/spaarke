@@ -426,3 +426,13 @@ Task 168, owner questions Q1 and Q2 (asked 2026-10-28, explained in detail 2026-
 - **Context:** ebilling 105 (`SubmissionOverrideService.RecloseAsync`). When an override or return was recorded but some Signal closes did not finish, a repeat finishes them in the original decider's name. A repeat by someone without Write on the Signal subjects cannot finish them.
 - **Decision (owner: agreed):** that repeat answers **200 `alreadyDecided`**, not 403 or 503. The decision stands, so a 403 would misreport it; the denial is permanent for that caller, so a 503 would invite repeats that never succeed. The open Signals stay open until the original decider repeats. A read fault during the repeat still answers 503 (F2). Recorded as a known limit in ebilling's `105-override-server.md` §9.
 - **Also agreed:** #2455, the adjustment and override services take the invoice's single core record (`SingleCoreOf`) and refuse zero or several before any write.
+
+## D-201 — "Reviewer sets the firm" is a new billing action code, `assign-firm`; no schema (ontology position, 2026-11-03)
+
+- **Context:** ebilling 095c makes the firm optional on Submit Invoice from Outlook. A no-firm invoice is held In Review with a firm_missing finding until a reviewer sets the firm (095d). ebilling asked which decision kind records that.
+- **Position:** a new code in `DecisionActionCatalog.DeclaredBilling`, `assign-firm` ("Set firm"), class Judgement, subject the invoice, recorded through `BillingDecisionRecorder.RecordAsync`. The code is free text in `sprk_actioncode` (max 100), so no choice value or column is added. Update the exact-set test `Billing_C2_TheBillingEntrysSubjects_...` to map it to the invoice.
+- **Parameters:** `firm` (Lookup, required; it is in Values, so the content hash covers it) and `note` (TextArea, optional).
+- **Facts:** the previous tracking number, the new one, the hold's Signal id, and the D-122 read time and policy code. The new number is not hashed, so it is allocated once, stored before the record and reused on retry.
+- **Decision id:** namespaced per verb, like override and return: `IdOf("ebilling-assign-firm-{submissionId}")`. Reusing the override's id would be refused as another code under the same id.
+- **Signals:** firm_missing is a system finding under `BILL-SYSTEM-SUBMISSION` (SubmissionIntegrity), like the invoice-number mismatch. No new policy row. The decision resolves the firm_missing Signal(s) only, not every Signal on the invoice as override and return do. They are closed as Acted and linked to the record.
+- **Not ontology's call:** what setting the firm opens to the firm's external users is for uac-r2. Findings that need a firm are re-evaluated after the firm is set; they are new Signals, not part of this decision.
