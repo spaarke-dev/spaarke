@@ -195,3 +195,10 @@
   - The owner created `sprk_invoice.sprk_trackingnumber` (Text 100) on dev at about 13:45Z. It was missing, and every dev BFF build R3 has recorded since §10 (9f4e3820b2, 2026-10-30) writes it on the invoice create (`InvoiceSubmissionPersister`). So any channel's invoice create on dev failed until then.
   - Known effect: one submission (INV-792345.1, 2026-11-03). The only other dev submission (2026-10-31) failed earlier in the pipeline and never reached the create.
   - The column was missing from SpaarkeMaster `sprk_Invoice/Entity.xml`. ebilling added it on work/ebilling-r1 (21aec9a10b), and it reaches master with the next ebilling PR. The retry of a permanent schema fault is #2529.
+- **UAC gate (uac-r2, 13:29:19Z–13:59:19Z): PASS.**
+  - 50 requests, 0 5xx. The 7 non-2xx are expected: 6 anonymous 401s and 1 office-suggestions 404.
+  - Access core is clean: no OWNERSHIP-REFUSED; SECURE-CENSUS findings=0 at 13:30 and 13:45; no reconcile writes; FOLLOW-PARENT 0/0/0.
+  - External split: 0 requests, so nothing was exercised.
+  - Finance: 7 requests, all 2xx.
+  - The new AP export routes and the server-only-send path saw no traffic. So the gate clears the deploy as causing no regression; it does not prove those paths.
+  - Exceptions: none caused by the deploy. #2292 and #1522 are pre-existing. The 10 `sprk_trackingnumber` faults (13:39–13:43) and 2 dead-letters are the dev column gap above (#2529). The ROOT-OWNER census +1 is #2524.
