@@ -236,10 +236,10 @@ Every B and F item has: generator id `gen_eval_set.py@1 <id>` (base seed 2026101
 | rule-sets | 11,394 bytes |
 | summary.json | 931 bytes |
 | synthetic-invoices | 1,590,712 bytes |
-| generator/ (scripts, registries, notes) | 288,581 bytes |
+| generator/ (scripts, registries, notes) | 389,186 bytes |
 | **committed ground truth total** | 5,923,922 bytes (5.65 MB) |
 
-Local-only material (not committed, git-ignored): 164 MB under `local/` (real PDFs, downloaded OCG and rate-card documents, rendered synthetic PDFs, full labels). Committed size excludes it.
+Local-only material (not committed, git-ignored): 261 MB under `local/` (real PDFs, downloaded OCG and rate-card documents, rendered synthetic PDFs, full labels). Committed size excludes it.
 
 ## 7. Dated notes, deviations and known limits
 
@@ -284,3 +284,4 @@ The spike holds the B items listed in section 3 (including B-0150, the longest i
 - **Guidelines GL-01..GL-06**: one per rule set, written for six fictional departments (county, university, mid-size manufacturer, bank, P&C insurer, state attorney general) profiled from public benchmarks. Every rule and parameter is a numbered clause; 45 non-rule provisions test the drafter's "not converted" list. `build_guidelines.py` checks each document against its rule set and renders DOCX and PDF to `local/guidelines/`.
 - **Two keys**: `guidelines/keys/GL-0n.json` scores the drafter (Set E format plus the production rule bodies); `guidelines/production-key/RS-0n.json` scores detection, because production R1 cannot state some Set F rules (PO number, received-date age, budget, per-unit and per-code expense caps, keyword-only non-billables). `guidelines/gap-report.md` counts them: 47 period-end, 40 clerical-by-task, 39 PO, 36 per-unit cap, 23 budget and 22 per-code cap findings across all of Set F (lower bounds where a rule is partly expressible), and lists the consequences production applies differently (it allows only Reject, Flag or SuggestAdjustment per rule type).
 - **Reference data**: `guidelines/reference-data/RS-0n.json` holds the synthetic firms, matters and 078 rate-card workbooks to seed on dev with the zz- prefix. Senior associates are rostered as Associate with a per-timekeeper rate, because LEDES has no Senior Associate classification.
+
