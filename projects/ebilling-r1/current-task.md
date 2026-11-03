@@ -38,9 +38,9 @@
 ## Peer state
 - uac-r2 (38): waits for the export-fix diff and the AP send time; the NFR-05 census after deploy; prvReadsprk_StoredFile goes in 086's follow-up.
 - ontology-r1 (a9): PR #2545 merged; we seed one firm per reference-data key and score 161/162.
-- word-add-in (dc): waits for the master PR and SHA, and for the 095c contract delta.
-- email-communication: not yet told about duplicate unfiled sprk_document rows when an email is also sent To: Spaarke Mailbox.
-- customer-provisioning-orchestration-r1: tell them that SpaarkeMaster keeps both tracking keys until every environment with rows has run the 095c schema script (notes/095c §9).
+- word-add-in (dc): got the 095c contract delta (2026-11-03, advance notice: not live until 095c-2..4). Still waits for the master PR and SHA.
+- email-communication: no live session. Filed #2548 (two .eml documents for one message sent to the mailbox and saved from the pane).
+- customer-provisioning-orchestration-r1 (09): the both-keys notice was sent, but the session HELD it (permission mode), so it was not delivered. Resend once that session accepts, or ask the owner.
 
 ## Ready queue
 - 086 follow-up: rebase 086's three commits (6703ca3f3f, 6482277b9b, e88825a528) onto work without the earlier 089 commits; it carries the prvReadsprk_StoredFile role row.
@@ -48,7 +48,7 @@
 - 118 (after 118b-2).
 - 092 (after 095c-2).
 - 089b, then 089c (with the "089c must" list from the 089a review).
-- 161/162 (seed and score the guideline set; live seeding needs the owner's OK).
+- 161: report done (notes/calibration-report.md, 0cd37befa9); DEF-051 (#2547, GA date day-for-month) is filed for 162. Live S1 (~$26) or S2 (~$22) needs the owner's OK; then re-render. 162 after that.
 - 112 deploy (WP4).
 - Blocked: 121 (uac-r2 191) and 096 (word-add-in).
 - File the ISS-005 timing ArchTest as flaky under load.
