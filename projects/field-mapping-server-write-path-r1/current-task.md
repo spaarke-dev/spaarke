@@ -8,7 +8,7 @@
 
 | Field | Value |
 |---|---|
-| **Active** | **Task 020: PR #2551 open with auto-merge** (the work branch carries 020 merged and level with master; verified 6625/0/7, ArchTests 1911, jest 107/107). **Task 042b: Opus implementer `fm-042b` on `task/fm-042b`**, from cfebe65f9b, stops after POML step 5. The main session then runs two adversarial passes and the UAC-r2 full pass. Session 5c is the only field-mapping session (the pre-crash pid 53128 was stopped 2026-11-03).
+| **Active** | **020 ✅** PR #2551 merged aef86b89f7 (2026-11-03T23:21Z); a lint-ratchet fix was added in the PR (94ce92d3c3). It is not on dev yet: the live Matter/Project route check needs a uac-r2 deploy and the owner's OK for test rows. **Task 042b: Opus implementer `fm-042b` on `task/fm-042b`**, from cfebe65f9b, stops after POML step 5. The main session then runs two adversarial passes and the UAC-r2 full pass. Session 5c is the only field-mapping session (the pre-crash pid 53128 was stopped 2026-11-03).
 - **020 so far:**
   - the route creates sprk_matter and sprk_project;
   - the optional mapping source is passed as query params;

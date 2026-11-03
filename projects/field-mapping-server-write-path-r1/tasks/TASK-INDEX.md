@@ -37,7 +37,7 @@
 
 | ID | Task | FRs | Tier / effort | Rigor | Group | Deps | Status |
 |---|---|---|---|---|---|---|---|
-| 020 | [Child-records route: Matter, Project, `mappingSource`](020-child-records-route-matter-project.poml) | FR-15 | opus / high | FULL | none | 019 | 🔲 |
+| 020 | [Child-records route: Matter, Project, `mappingSource`](020-child-records-route-matter-project.poml) | FR-15 | opus / high | FULL | none | 019 | ✅ (#2551, aef86b89f7) |
 | 021 | [Matter wizard (reference) + latency before/after](021-matter-wizard-migration.poml) | FR-16, NFR-02 | sonnet / high | FULL | W3-wizards | 020, 041 | 🔲 |
 | 022 | [Project wizard (incl. secure Project)](022-project-wizard-migration.poml) | FR-16, FR-15 | opus / high | FULL | W3-wizards | 021, 041 | 🔲 |
 | 023 | [Event wizard](023-event-wizard-migration.poml) | FR-16 | sonnet / high | FULL | W3-wizards | 022, 041 | 🔲 |
