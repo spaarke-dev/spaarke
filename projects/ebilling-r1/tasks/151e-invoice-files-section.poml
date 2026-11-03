@@ -1,0 +1,88 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="151e" project="ebilling-r1">
+  <metadata>
+    <title>Invoice form: Files section (invoice PDF and supporting files, open / download, source email link)</title>
+    <phase>6 Export UI follow-ups (owner UAT 2026-11-03)</phase>
+    <gate>owner asked for it 2026-11-03 ("yes this is important")</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Adds a BFF read endpoint behind the Finance route gate and a form-embedded web resource; tags include bff-api and auth.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>One list read following GET /api/finance/files/{fileId}/content (StoredFileAccessFilter) and one embedded page following the ApExport code page.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>090, 151b</deps>
+    <tags>bff-api, auth, ebilling, frontend</tags>
+    <estimated-effort>1 day</estimated-effort>
+  </metadata>
+
+  <prompt>On the invoice form, show the invoice's files — the Invoice PDF and every Supporting file — so a reviewer can open or download each one, and see the email each file came from with a link to that email's Document. Owner, 2026-11-03: "for the Files - yes this is important (user will want to see the invoice files including 'invoice' and supporting)"; "if the email can be also stored as a file then can be included in the same grid OR other option is to have a link to the Document that is the email (or could be both...)". This task takes the link option: each file row links to its source email Document (sprk_storedfile.sprk_sourcedocument); the .eml is NOT copied into the file store.</prompt>
+
+  <role>SPAARKE platform developer. Expert in the BFF Minimal API, the Finance route gate, the file store (task 090) and Spaarke code pages on model-driven forms.</role>
+
+  <goal>An internal user who can read invoice X sees a Files section on X's main form listing X's servable files (name, purpose, size, added on, scan state) with Open/Download and, where the user may read it, a link to the source email Document; a user who cannot read X sees nothing; the bytes are served only by the existing content route.</goal>
+
+  <context>
+    <background>
+      Why not a native subgrid: no SpaarkeMaster role grants Read on sprk_storedfile (deliberate until task 086 puts Stored Files in the secure family), so a native subgrid would be empty for every non-admin user. The list therefore goes through the BFF, which decides visibility from the parent invoice exactly as the content route does.
+      Data on dev (INV-792345.4, invoice a23f043c-e6a1-5754-50d1-8e4f2aa1a2f9): sprk_storedfile rows carry sprk_invoice (parent), sprk_purpose (Invoice PDF 100000001; Supporting), sprk_filestatus (Servable 100000001), sprk_name, sprk_sizebytes, sprk_contenttype, sprk_sourcedocument (the .eml Document) and sprk_sourcecommunication.
+      Fold-in: task 151d (show the batch's Sent to AP Date on the invoice form) touches the same form; do it in this task too and mark 151d done with this task.
+    </background>
+    <relevant-files>
+      <file role="reference">src/server/api/Sprk.Bff.Api/Api/Finance/StoredFileEndpoints.cs (GET /api/finance/files/{fileId:guid}/content, AddStoredFileAccessFilter) — reuse its access decision for the list; extend this file</file>
+      <file role="reference">src/solutions/ApExport (the ApExport code page and its ribbon script) — the reference for a Spaarke code page deployed as a web resource and its auth to the BFF</file>
+      <file role="modify">src/dataverse/solutions/SpaarkeMaster/Entities/sprk_Invoice/FormXml/main/*.xml (add the Files section and the Sent to AP Date)</file>
+      <file role="reference">projects/ebilling-r1/tasks/151d-*.poml if present, else the TASK-INDEX row for 151d</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="CLAUDE.md §11">The list route and the page answer the three justification questions in the task notes. Extend StoredFileEndpoints.cs and reuse the content route's access decision; no new access rule.</constraint>
+    <constraint source="ADR-008 / Finance route gate">GET /api/finance/invoices/{invoiceId:guid}/files is in the /api/finance group with step 0 (internal callers), RequireEbillingEnabled, and the caller's Read on the invoice. A file is listed only if the content route would serve it to this caller (same rule, same code), so the list never shows a file whose Open would 404.</constraint>
+    <constraint source="uniform not-found">No Read on the invoice, an unknown invoice and a step-0 refusal answer the same 404; a read fault is 503, never a partial or empty list.</constraint>
+    <constraint source="source email link">The source Document's id and name are returned only when the caller can Read that Document; otherwise the row shows no link (and no name). Do not copy the .eml into the file store.</constraint>
+    <constraint source="no access change">No role, field-security or Dataverse privilege change. No native sprk_storedfile subgrid.</constraint>
+    <constraint source="CLAUDE.md §10">BFF hygiene: placement statement, publish-size delta against a fresh master build, no new HIGH CVE.</constraint>
+    <constraint source="project CLAUDE.md">The form change and web resource are deployed to dev only with the owner's OK, through Import-SolutionScoped.ps1 or the web-resource script, with an entity-scoped publish. ebilling never deploys the dev BFF; SPA-r3 does.</constraint>
+    <constraint source="ADR-021 / Fluent v9">The page uses Fluent UI v9 and follows the ApExport page's look (dark mode included).</constraint>
+  </constraints>
+
+  <steps mode="directional">
+    <step>Response: [{ fileId, name, purpose ("InvoicePdf" | "Supporting"), sizeBytes, contentType, addedOn, scanState ("Ready" | "Pending"), sourceEmail { documentId, name } | null }], Invoice PDF first, then Supporting by addedOn. Pending files are listed (Open disabled, "scan in progress"); non-servable or deleted files are not listed.</step>
+    <step>Implement the route reusing StoredFileAccessFilter's decision; tests.</step>
+    <step>Build the Files page (code page web resource, as ApExport): list, Open (new tab via the content route), Download, Source email link (opens the sprk_document form). Empty state: "No files".</step>
+    <step>Add a Files section to the invoice main form hosting the page, and the batch's Sent to AP Date (151d) as a read-only field.</step>
+    <step>Write notes/151e-invoice-files-section.md; mark 151e and 151d in TASK-INDEX.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>Caller with Read on the invoice: 200 with its Invoice PDF and Supporting files in the stated order, each with the fields above.</criterion>
+    <criterion>A file whose source Document the caller cannot read: listed, sourceEmail null.</criterion>
+    <criterion>A file still in scan: listed with scanState Pending; a non-servable or inactive file: not listed.</criterion>
+    <criterion>No Read on the invoice, unknown invoice, step-0 refusal: identical 404. A read fault: 503.</criterion>
+    <criterion>With Ebilling:Enabled false: 503 ebilling.disabled.</criterion>
+    <criterion>For every listed file, the content route serves it to the same caller (one test pins list and content agreeing).</criterion>
+    <criterion>Page: renders the list, Open and Download call the content route, the Source email link opens the Document, empty and error states render, dark mode. Jest tests for these.</criterion>
+    <criterion>Form source carries the Files section and the Sent to AP Date; no native sprk_storedfile subgrid.</criterion>
+    <criterion>Test scope: the cases above. Anything beyond needs a one-line justification in the notes. Seed-proof the "list only what content would serve" rule only.</criterion>
+    <criterion>Gate: the 5 test projects build; ArchTests and the broad Finance filter pass; the page's jest suite passes.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>If showing the files requires any role, privilege or field-security change, STOP and escalate to uac-r2 and the owner.</trigger>
+    <trigger>If the content route's access decision cannot be reused for a list without a second copy of the rule, STOP and report the options.</trigger>
+  </escalation>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>.claude/patterns/api/endpoint-filters.md</file>
+      <file>projects/ebilling-r1/CLAUDE.md</file>
+    </files>
+  </knowledge>
+</task>
