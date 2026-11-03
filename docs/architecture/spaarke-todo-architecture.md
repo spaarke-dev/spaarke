@@ -14,7 +14,7 @@ Spaarke To Do provides Kanban-style task management as a first-class entity (`sp
 
 - **SmartTodo Code Page** (Kanban + filter + detail + wizard launch) — `sprk_smarttodo` web resource
 - **Parent-form subgrids** — every Matter / Project / Event / Communication / WorkAssignment / Invoice / Budget / Analysis / Organization / Contact / Document record exposes a "To Dos" subgrid
-- **Outlook add-in** — "Create To Do" ribbon button + linked-todos indicator banner in the taskpane
+- **Outlook add-in** — the pane's To Do tab + linked-todos indicator banner in the taskpane (the "Create To Do" ribbon button was removed in package 1.1.4, 2026-11-03)
 - **BFF API** — two Office endpoints (`/by-message-id`, `/{commId}/linked-todos`) plus feature-gated scaffolding for Microsoft To Do bidirectional sync (gated off pending AAD `Tasks.ReadWrite` scope)
 
 R3 was a **pre-release hard cut**: the previous event-coupled model (`sprk_event.sprk_todoflag` + `sprk_eventtodo`) is removed entirely. No backward-compatibility shims.
@@ -69,7 +69,7 @@ Each parent record's main form has a **"To Dos"** subgrid querying `sprk_todo` f
 ### Outlook add-in (Spaarke Outlook Add-in)
 
 Same add-in manifest (`5e4d66d0-2603-44ea-acbc-400d3b881c90`) extended with:
-- **`CreateTodoButton`** — `MessageReadCommandSurface` ribbon button. Opens the SmartTodo Code Page in a new tab with launch-context query params (`?action=createTodo&regardingType=sprk_communication&regardingId=<commId>&regardingName=<subject>`)
+- **`CreateTodoButton`** — *removed in package 1.1.4 (2026-11-03; the pane's To Do tab replaces it).* Was a `MessageReadCommandSurface` ribbon button. Opened the SmartTodo Code Page in a new tab with launch-context query params (`?action=createTodo&regardingType=sprk_communication&regardingId=<commId>&regardingName=<subject>`)
 - **`LinkedTodosBanner`** — taskpane indicator banner showing N linked `sprk_todo` records for the current email (queries BFF `/api/office/communications/{commId}/linked-todos`)
 
 Manifest version `1.0.19.0`. APP_VERSION `1.0.18` (source string in taskpane footer).

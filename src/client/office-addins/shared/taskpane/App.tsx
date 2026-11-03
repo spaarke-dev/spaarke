@@ -927,7 +927,7 @@ export const App: React.FC<AppProps> = ({
             ribbon `?action=submitInvoice` still opens it). The submission and the firm list are ebilling's from-email contract (invoiceSubmissionService);
             corrections are on: ebilling 097b/c/e (#2507) is on master and dev, and the view prepares each one from
             the invoice's correction prefill. The email's earlier submission shows at the top (§11). */}
-        {currentTab === 'invoice' && (
+        {currentTab === 'invoice' && tabCapabilities.canGetAttachments && (
           <InvoiceView
             hostAdapter={hostAdapter}
             apiBaseUrl={apiBaseUrl}
