@@ -992,6 +992,11 @@ internal static class InheritedAccessPermission
     /// <c>EarlierInvoiceReadability.ReferencesOf</c>), so the number decides no access today; it stays refused, as its only
     /// writer is typed. Their writers are typed: the persister links the invoice (<c>BuildSubmissionUpdate</c>) and the
     /// allocator assigns the number; no playbook output mapping, Update Record node, field-mapping rule or Repair writes either.</para>
+    /// <para>ebilling-r1 task 095c: also its tracking scope <c>sprk_trackingscope</c> (<c>TrackingNumberAllocator.ScopeColumn</c>), the
+    /// firm id or <c>none</c> that the scope key pairs with the tracking number. It decides no access (no external gate reads it:
+    /// <c>SubmissionTrackingScopeNotAccessGuardTests</c>), but it decides which sequence a number belongs to, so re-pointed it would let a
+    /// later submission take a number the row already holds in its real scope. Its only writer is typed: the allocator writes it at
+    /// create, and the schema script backfills it once; no generic writer sets it.</para>
     /// <para>No vendor org scopes a Duplicate any more (#2294 removed the number lookup), so neither
     /// <c>sprk_invoice.sprk_vendororg</c> nor the submission's decides a Duplicate's detail; <c>sprk_invoice.sprk_vendororg</c> is
     /// not listed.</para></item>
@@ -1116,7 +1121,8 @@ internal static class InheritedAccessPermission
                     .Select(l => l.Column)
                     .Append(Sprk.Bff.Api.Services.Finance.Submission.TrackingNumberAllocator.FirmColumn)
                     .Append(Sprk.Bff.Api.Services.Finance.Submission.InvoiceSubmissionPersister.SubmissionInvoice)
-                    .Append(Sprk.Bff.Api.Services.Finance.Submission.TrackingNumberAllocator.TrackingNumberColumn),
+                    .Append(Sprk.Bff.Api.Services.Finance.Submission.TrackingNumberAllocator.TrackingNumberColumn)
+                    .Append(Sprk.Bff.Api.Services.Finance.Submission.TrackingNumberAllocator.ScopeColumn),
                 StringComparer.OrdinalIgnoreCase),
             [Sprk.Bff.Api.Services.Signals.SignalCoreRecordAccess.SignalTable] = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
             {

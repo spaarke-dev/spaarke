@@ -116,10 +116,11 @@ public class AccessTableAppOnlyWriterTests
 
         // ebilling-r1 (master merge): the firm and core record scope the external submission reads.
         // UAC review F4 (on e371dce6bf): + its invoice and tracking number, which D-176's Duplicate withholding reads.
+        // ebilling-r1 task 095c: + its tracking scope (typed writer: the allocator), which pairs with the number in the scope key.
         ["sprk_invoicesubmission"] =
         [
             "sprk_vendororg", "sprk_regardingmatter", "sprk_regardingproject", "sprk_regardingworkassignment",
-            "sprk_invoice", "sprk_trackingnumber",
+            "sprk_invoice", "sprk_trackingnumber", "sprk_trackingscope",
         ],
 
         // UAC review F4 / DEF-043: a Signal's frozen core record and its invoice and invoice-line subjects.
@@ -626,6 +627,8 @@ public class AccessTableAppOnlyWriterTests
                 Sprk.Bff.Api.Services.Finance.Submission.InvoiceSubmissionPersister.SubmissionInvoice),
             (Sprk.Bff.Api.Services.Finance.Submission.TrackingNumberAllocator.SubmissionEntity,
                 Sprk.Bff.Api.Services.Finance.Submission.TrackingNumberAllocator.TrackingNumberColumn),
+            (Sprk.Bff.Api.Services.Finance.Submission.TrackingNumberAllocator.SubmissionEntity,
+                Sprk.Bff.Api.Services.Finance.Submission.TrackingNumberAllocator.ScopeColumn),
             (Sprk.Bff.Api.Services.Signals.SignalCoreRecordAccess.SignalTable, Sprk.Bff.Api.Services.Signals.SignalCoreRecordAccess.CoreRecordTypeColumn),
             (Sprk.Bff.Api.Services.Signals.SignalCoreRecordAccess.SignalTable, Sprk.Bff.Api.Services.Signals.SignalCoreRecordAccess.CoreRecordIdColumn),
             (Sprk.Bff.Api.Services.Signals.SignalCoreRecordAccess.SignalTable, Sprk.Bff.Api.Services.Signals.SignalClosureService.RegardingInvoiceColumn),
@@ -722,6 +725,43 @@ public class AccessTableAppOnlyWriterTests
         Code("sprk_invoice", "sprk_trackingnumber").Should().BeNull("the invoice's own tracking number decides no access");
         Code(submission, "sprk_processingstatus").Should().BeNull("an ordinary column");
         CallerCode(submission, "sprk_invoice").Should().BeNull("the caller's own privileges decide");
+    }
+
+    [Fact]
+    public async Task AnAppOnlyWriteOfTheSubmissionsTrackingScope_IsRefused_ByTheOutputMappingAndTheUpdateRecordNode()
+    {
+        // ebilling-r1 task 095c: the scope pairs with the tracking number in the scope key; its only writer is the allocator (at create).
+        // Re-pointed, a row's number would leave its real sequence and a later submission could take it again.
+        const string submission = Sprk.Bff.Api.Services.Finance.Submission.TrackingNumberAllocator.SubmissionEntity;
+        foreach (var key in new[]
+                 {
+                     Sprk.Bff.Api.Services.Finance.Submission.TrackingNumberAllocator.ScopeColumn, " SPRK_TrackingScope ", "sprk_TRACKINGSCOPE",
+                 })
+        {
+            Code(submission, key).Should().Be(InheritedAccessPermission.AppOnlyAccessColumnWriteReasonCode, key);
+
+            _writes.Invocations.Clear();
+            var mapping = () => Handler().UpdateAsync(
+                submission, Row, new Dictionary<string, object?> { [key] = "none" },
+                ConcurrencyMode.None, maxRetries: 1, CancellationToken.None);
+            (await mapping.Should().ThrowAsync<RecordOwnerUnresolvedException>()).Which.RefusalCode
+                .Should().Be(InheritedAccessPermission.AppOnlyAccessColumnWriteReasonCode, key);
+            _writes.Invocations.Should().BeEmpty(key);
+
+            var node = () => Core().UpdateAsync(
+                new UpdateRecordActionInput(
+                    submission, Row, FieldMappings: null,
+                    LegacyFields: new Dictionary<string, string?> { [key] = "none" }, Lookups: null),
+                CancellationToken.None);
+            (await node.Should().ThrowAsync<RecordOwnerUnresolvedException>()).Which.RefusalCode
+                .Should().Be(InheritedAccessPermission.AppOnlyAccessColumnWriteReasonCode, key);
+            _writes.Invocations.Should().BeEmpty(key);
+        }
+
+        // Must not fire: the same column name on another table, a neighbouring name, and the caller's own write.
+        Code("sprk_invoice", "sprk_trackingscope").Should().BeNull("only the submission carries the scope");
+        Code(submission, "sprk_trackingscopes").Should().BeNull("a neighbouring name");
+        CallerCode(submission, "sprk_trackingscope").Should().BeNull("the caller's own privileges decide");
     }
 
     [Theory]
