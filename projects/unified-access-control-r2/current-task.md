@@ -24,10 +24,16 @@
 - **Owner decision (done):** demo@demo.spaarke.com runs `-ExportOnly` (export only, no approvals). The owner then opens the batch as themselves, checks the AP emails grid has no New button, and clicks Email to AP. ebilling sends me the time and batch id.
 - ebilling's fix for the 2 findings (a 409 `ebilling.export.owner_unit_not_allowed`, and an owner pre-check before any write), diff 82786ce7f3..fad65a79ad, merged to work/ebilling-r1 at a6ff149cd9: **four-point check PASSED**, sent ~21:40Z. `sprk_billingexport` is not an ownership parent, so the pre-check never reads the batch that doesn't exist yet. `no_default_team` and `acting_user_unresolved` stay 503. Note: live proof for a BU1 caller comes with the first BU1 export after the deploy (record it in 153's notes). The fix reaches dev only through a master PR and a deploy that I orchestrate.
 
-## Conditions to send R3 on the hand-over
-- R3's final deploy goes through the existing protocol, with my OK on the merged SHA. I check the diff since 5796774091 and the `Set-ChildRecordCreatorPersonSchema.ps1 -Verify`, ebilling's 6 app-setting keys and both write switches true. Then my 30-minute gate.
-- After that gate I own: the owner's go per SHA in THIS session; peer OKs; the record in the procedure doc.
-- #2543 (my provisioning timeout test flakes under load) and FAILURE-MODES G-24 are noted; #2543 goes on my list.
+## Dev deploy role: items handed over by R3 (hand-over complete; gate PASS recorded in R3 rollout record §17, PR #2554)
+- **Each deploy:** the owner's go per build in THIS session; peer OKs; pre-checks (`Set-ChildRecordCreatorPersonSchema.ps1 -Verify`, the 225-name settings check, ebilling's 6 keys, both write switches true); readback; my 30-minute gate; the record in `docs/procedures/dev-bff-deploy-coordination.md`.
+- **Next deploy carries** PR #2550 (restores the ExternalUserContextEndpoint `</summary>`; ledger cite :46/:75; comments and test text only).
+- **Rollback for d763dc120e:** R3's snapshot `deploy/rollback/wwwroot-20261103T220358Z` (kept until my next deploy passes its gate), or redeploy 5796774091.
+- **Watches:**
+  - ebilling 095a/095b: ExternalInvoiceVisibility must still hide an invoice from the firm when its source email is restricted, whether it reads the Stored File or the new `sprk_sourceemaildocument` column;
+  - field-mapping FR-40: live proof after the next real upload or create;
+  - word-add-in: the Office smoke test after the owner's two Outlook saves.
+- **Not deployed:** the SPA registration message change (85fbba3f64), due with the next SPA deploy (`deploy-external-spa.yml` on a tag).
+- #2543 (my provisioning timeout test flakes under load) and FAILURE-MODES G-24 are on my list.
 
 ## Reviews owed (waiting for diffs)
 - **ebilling:**
