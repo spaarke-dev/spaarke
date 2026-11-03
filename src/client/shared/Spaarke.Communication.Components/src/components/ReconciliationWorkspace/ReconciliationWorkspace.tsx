@@ -12,7 +12,8 @@
  *      SAME rows the grid loaded (`onRecordsLoaded`), stepping "N of M".
  *   3. The shell's `renderTabs` slot is a `TabList` → **Related to** (052, via the
  *      reused `RelatedToCell` + `EmailConnectionsReview` write path) · **Fields**
- *      (`FieldUpdateReconcileTab`, 055) · **Tasks** (`TaskReconcileTab`, 056).
+ *      (`FieldUpdateReconcileTab`, 055) · **Tasks** (`TaskReconcileTab`, 056) ·
+ *      **Invoice** (`InvoiceSubmitTab`, ebilling-r1 118; present only when the email has a PDF attachment).
  *
  * NFR-10 (association-gates-proposals): the Fields/Tasks tabs are DISABLED until a
  * Related-to record is confirmed for the current record; the confirmed regarding
@@ -40,6 +41,7 @@ import {
   type MembershipResolver,
   type SavedView,
   cleanGuid,
+  createXrmDataService,
 } from '@spaarke/ui-components';
 import { ReconciliationGrid } from '../ReconciliationGrid';
 import { EmailConnectionsReview } from '../EmailAssociationsAndTracking';
@@ -48,7 +50,8 @@ import type {
   ReconciliationBrowseRecord,
   ReconciliationBrowseShellProps,
 } from '../ReconciliationBrowseShell/ReconciliationBrowseShell.types';
-import { FieldUpdateReconcileTab, TaskReconcileTab } from '../ReconcileTabs';
+import { FieldUpdateReconcileTab, TaskReconcileTab, InvoiceSubmitTab } from '../ReconcileTabs';
+import { hasPdfAttachment } from '../SubmitInvoice';
 import type { ReconcileRegarding, ProposalOutcome } from '../ReconcileTabs/FieldUpdateReconcileTab';
 import type {
   EmailConnectionsReviewProps,
@@ -57,6 +60,8 @@ import type {
 } from '../EmailAssociationsAndTracking/EmailAssociationsAndTracking.types';
 import type { AuthenticatedFetchFn, ReconciliationAttachmentContent } from '../EmailBody/EmailBodyView.types';
 import { projectAttachmentRecord, filterFileAttachments, type IAttachmentRecord } from '../../logic/attachments';
+import { createEmailInvoiceSubmission, type IEmailInvoiceDataService } from '../../logic/invoice';
+import type { MarkableAttachment } from '../InvoiceAttachmentMarking';
 import type { EmailCitation } from '../../logic/citations';
 
 /** `sprk_communication` primary id — the browse-shell key + queue index anchor. */
@@ -196,7 +201,7 @@ async function resolveBrowseDetail(
   return { attachments: withText, emlDocumentId };
 }
 
-type TabValue = 'related' | 'fields' | 'tasks';
+type TabValue = 'related' | 'fields' | 'tasks' | 'invoice';
 
 /** Per-tab progress count for the current record (B2.3 header badges). */
 interface TabCount {
@@ -270,6 +275,12 @@ export interface ReconciliationWorkspaceProps {
    * Defaults to `@spaarke/auth` inside each consumer when omitted.
    */
   authenticatedFetch?: AuthenticatedFetchFn;
+  /**
+   * OData Dataverse read for the Invoice tab (ebilling-r1 task 118): the email's attachments and the records the
+   * invoice can be submitted against. `dataverseClient` cannot serve it (its `retrieveMultipleRecords` takes FetchXML).
+   * Defaults to the Xrm.WebApi-backed `createXrmDataService()` in a Dataverse host, so hosts need not pass it.
+   */
+  dataService?: IEmailInvoiceDataService;
   /** Resolver for the grid's `behavior.membershipFilter` (FR-E7 / 057). */
   membershipResolver?: MembershipResolver;
   /** `--sprk-ui-scale` forwarded to the browse shell. */
@@ -402,6 +413,7 @@ export const ReconciliationWorkspace: React.FC<ReconciliationWorkspaceProps> = (
   configId,
   dataverseClient,
   authenticatedFetch,
+  dataService,
   membershipResolver,
   uiScale,
   className,
@@ -417,6 +429,20 @@ export const ReconciliationWorkspace: React.FC<ReconciliationWorkspaceProps> = (
   resolveEmlSource,
 }) => {
   const s = useStyles();
+
+  // ebilling-r1 task 118: the Invoice tab's transport (the same flow the email toolbar opens), built from the fetch this
+  // workspace already takes and an OData read (`dataService`, else Xrm.WebApi). The tab needs no new host wiring.
+  const invoiceSubmission = React.useMemo(
+    () =>
+      createEmailInvoiceSubmission({
+        authenticatedFetch: authenticatedFetch ?? defaultAuthenticatedFetch,
+        dataService: dataService ?? createXrmDataService(),
+      }),
+    [authenticatedFetch, dataService]
+  );
+  // The openable emails' attachments, by communication id, read once per email on open (the same single-query read the
+  // flow itself uses). Decides whether the Invoice tab is offered; best-effort: a failed read offers no tab.
+  const [invoiceAttachmentsById, setInvoiceAttachmentsById] = React.useState<Record<string, MarkableAttachment[]>>({});
 
   // UAT Fix #5 — view-switcher. When `views` is supplied, the active view's id is the
   // grid's effective configId; selecting a view swaps the grid query. Default = the
@@ -492,13 +518,19 @@ export const ReconciliationWorkspace: React.FC<ReconciliationWorkspaceProps> = (
       // Reader detail (attachments + `.eml` archive + re-extracted attachment text) — resolved once per
       // record and cached (owner UAT round-3 item 2; B2.1 text overlay). Best-effort: a miss just leaves
       // the reader body-only. Uses the host fetch when supplied, else the @spaarke/auth default.
+      if (!invoiceAttachmentsById[id]) {
+        void invoiceSubmission
+          .loadAttachments(id)
+          .then(list => setInvoiceAttachmentsById(prev => ({ ...prev, [id]: list })))
+          .catch(() => {});
+      }
       if (!detailById[id]) {
         void resolveBrowseDetail(dataverseClient, id, authenticatedFetch ?? defaultAuthenticatedFetch)
           .then(detail => setDetailById(prev => ({ ...prev, [id]: detail })))
           .catch(() => {});
       }
     },
-    [dataverseClient, detailById, authenticatedFetch]
+    [dataverseClient, detailById, authenticatedFetch, invoiceSubmission, invoiceAttachmentsById]
   );
 
   const handleRecordOpen = React.useCallback<NonNullable<DataGridProps['onRecordOpen']>>(
@@ -602,8 +634,17 @@ export const ReconciliationWorkspace: React.FC<ReconciliationWorkspaceProps> = (
       // `RelatedToCell` (which hides the review behind a "Requires review" + picker modal)
       // stays only as the GRID cell renderer, never the browse-tab body.
       const review = liveRow && resolveReview ? wrapReview(liveRow) : null;
-      // While gated, the reviewer can only be on the Related-to tab.
-      const effectiveTab: TabValue = gated && selectedTab !== 'related' ? 'related' : selectedTab;
+      // The Invoice tab (task 118) is offered only when the email has a PDF attachment (owner 2026-10-21). It is not
+      // gated on a confirmed Related-to: the route files an unfiled email under the chosen record itself.
+      const invoiceAvailable = hasPdfAttachment(
+        (invoiceAttachmentsById[browseRecord.id] ?? []).filter(a => !a.disabledReason)
+      );
+      // While gated, the reviewer can only be on the Related-to tab (or Invoice); a tab that is gone falls back to it.
+      const effectiveTab: TabValue =
+        (selectedTab === 'invoice' && !invoiceAvailable) ||
+        (gated && selectedTab !== 'related' && selectedTab !== 'invoice')
+          ? 'related'
+          : selectedTab;
 
       return (
         <div className={s.tabRoot}>
@@ -621,6 +662,11 @@ export const ReconciliationWorkspace: React.FC<ReconciliationWorkspaceProps> = (
             <Tab value="tasks" data-testid="reconcile-tab-tasks" disabled={gated}>
               Tasks
             </Tab>
+            {invoiceAvailable && (
+              <Tab value="invoice" data-testid="reconcile-tab-invoice">
+                Invoice
+              </Tab>
+            )}
           </TabList>
 
           <div className={s.tabBody} data-testid="reconcile-tab-body">
@@ -669,12 +715,22 @@ export const ReconciliationWorkspace: React.FC<ReconciliationWorkspaceProps> = (
                 }}
               />
             )}
+
+            {effectiveTab === 'invoice' && (
+              <InvoiceSubmitTab
+                communicationId={browseRecord.id}
+                submission={invoiceSubmission}
+                regarding={regarding}
+              />
+            )}
           </div>
         </div>
       );
     },
     [
       rows,
+      invoiceSubmission,
+      invoiceAttachmentsById,
       resolveRegarding,
       resolveReview,
       wrapReview,

@@ -4,7 +4,7 @@
     <title>Submit Invoice in the email UI: toolbar button (replaces Link Invoice), flagged attachments, Email Review Invoice tab</title>
     <phase>3 Rules (WP3) — Procedure model (EB-D-148), wave W3-12</phase>
     <gate>094 merged (the from-document route) and 118a merged (the shared marking component, split out 2026-10-27, EB-D-159)</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies .tsx in two shared client libraries used by several surfaces, and replaces an existing toolbar action.</rigor-reason>
     <model-tier>sonnet</model-tier>
