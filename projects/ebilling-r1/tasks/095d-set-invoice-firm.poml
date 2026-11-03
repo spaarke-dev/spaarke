@@ -47,13 +47,32 @@
   <constraints>
     <constraint source="Finance route gate">The route is in the /api/finance group with step 0 (internal callers only), RequireEbillingEnabled, and the caller's Write on the invoice. The firm must be active and linked to the invoice's core record (CheckFirmLinkAsync, the one definition). It works only while the invoice has no firm: if it already has one, the answer is 409.</constraint>
     <constraint source="atomic">Renumbering, the firm on the invoice and on the submission, resolving the hold, and the Decision Record either all land or none do. Use the existing commit or undo pattern of the intake (task 094), and state how. A lost allocator race retries within the allocator's bound.</constraint>
-    <constraint source="Decision Record">The decision kind and its fields are agreed with ontology-r1 and written through BillingDecisionRecorder. They carry the previous and new tracking number, the firm, and the reviewer as a person.</constraint>
+    <constraint source="ontology-r1 D-201 (2026-11-03): the decision">
+      Add the billing code `assign-firm` ("Set firm") to DecisionActionCatalog.DeclaredBilling, recorded through BillingDecisionRecorder.RecordAsync:
+      - class Judgement; subject the invoice;
+      - gate factors: DeclaredTier Tier3, Reversible false, ExternallyVisible true, RecordOfTruthImpact true.
+      No schema: sprk_actioncode is free text, and Judgement already exists.
+      Values: a required Lookup `firm` (LookupEntity set) and an optional TextArea `note`. Values are hashed, so a retry naming another firm is refused.
+      Decision id: IdOf("ebilling-assign-firm-{submissionId:D}"), namespaced per verb as override and return are.
+      Facts: the previous and new tracking numbers, the read time and the policy code. Facts are not hashed.
+      Decider: BillingDecider.Human(callerUserId, role). Don't pass the contact; the recorder looks it up.
+      Update the exact-set guard DecisionRecordWriterTests.Billing_C2_TheBillingEntrysSubjects_AreTheLineForLineCodes_AndTheInvoiceForEveryOther to map assign-firm to sprk_invoice.
+    </constraint>
+    <constraint source="ontology-r1 D-201: the number and the Signals">
+      Allocate the new tracking number once, and store it with the decision before the record, as override stores its set in sprk_findingsjson. Reuse it on a retry, so the record and the applied number never differ (K-3).
+      ResolvedSignalIds holds only the firm_missing Signal(s), never other open findings. After the record, close each one as Acted by that record in the decider's name (sprk_resolvedby).
+      Keep the rest of D-122:
+      - store the set before the record; reuse it on a retry;
+      - the caller checks: AppendTo on the core, Write on each Signal's subject;
+      - a close that fails answers 503, never "decided".
+      Findings that need a firm (rates, timekeepers, firm coding) are re-evaluated after the firm is set. They become new Signals, outside the resolved set.
+    </constraint>
     <constraint source="visibility">After the firm is set, the invoice becomes visible to that firm's users under the existing rule, unchanged.</constraint>
     <constraint source="CLAUDE.md §11 / §10">Justify the route and the allocator method in the notes; BFF hygiene as usual. No role or field-security change.</constraint>
   </constraints>
 
   <steps mode="directional">
-    <step>Agree the Decision Record kind and its fields with ontology-r1.</step>
+    <step>Decision Record kind agreed with ontology-r1 (D-201, above). Confirm uac-r2's answer on the external visibility the decision opens (asked 2026-11-03) before building.</step>
     <step>The allocator's renumber method and the route; tests.</step>
     <step>The "Set firm" action in the review UI; jest tests.</step>
     <step>notes/095d-set-invoice-firm.md; update TASK-INDEX.</step>
