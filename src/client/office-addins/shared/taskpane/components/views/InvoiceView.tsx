@@ -60,8 +60,8 @@ import {
  * InvoiceView — Outlook's "Submit Invoice" view (task 133, owner decisions 2026-10-21; contract
  * `projects/ebilling-r1/notes/095-from-email-contract.md`, pinned 2026-10-27).
  *
- * Reached ONLY through the ribbon's `?action=submitInvoice` (outlook/taskpane/index.tsx → App `initialAction`); no tab,
- * link or menu in the default pane leads here (slice A must be inert in the deployed pane).
+ * Reached from the pane's Invoice tab (package 1.1.4, owner UAT 2026-11-03; a received email only — `canGetAttachments`),
+ * and from a cached older manifest's ribbon `?action=submitInvoice` (outlook/taskpane/index.tsx → App `initialAction`).
  *
  * - New invoice: the core record (Matter, Project or Work Assignment — required), the firm (required; its options
  *   come from {@link InvoiceViewProps.loadFirms}), the firm's invoice number (required, 1-100), an optional PO number,
