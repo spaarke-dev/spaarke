@@ -1,0 +1,38 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0150",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0150","generator_id":"gen_eval_set.py@1 F-0150","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0150.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-06"},
+ "header":{"firm":"Ostrander & Ellison LLP","firm_invoice_number":"INV-2026-99871","invoice_date":"2026-03-04","billing_period_start":"2026-02-01","billing_period_end":"2026-02-28","firm_matter_reference":"20401-0040","po_number":"PO-4500327","fees_total":6088.75,"expenses_total":60.25,"adjustments_total":0.0,"total_due":6149.0,"currency":"USD"},
+ "timekeepers":[{"name":"Anders Yilmaz","title":"Partner","rate":400.0,"billed_as":"AY"},{"name":"Daniel Marchetti","title":"Associate","rate":180.0,"billed_as":"DM"},{"name":"Farah Whitfield","title":"Legal Assistant","rate":90.0,"billed_as":"FW"},{"name":"Imani Pemberton","title":"Associate","rate":215.0,"billed_as":"IP"},{"name":"Oliver Whitfield","title":"Partner","rate":345.0,"billed_as":"OW"},{"name":"Tomas Wickham","title":"Paralegal","rate":105.0,"billed_as":"TW"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2026-02-02","timekeeper":"DM","timekeeper_name":"Daniel Marchetti","timekeeper_title":"Associate","title":"Assoc","hours":2.7,"rate":180.0,"amount":486.0,"narrative":"Telephone calls.","codes":["L120","A103"],"page":1,"narrative_style":"vague"},
+  {"n":2,"line_type":"fee","date":"2026-02-03","timekeeper":"IP","timekeeper_name":"Imani Pemberton","timekeeper_title":"Associate","title":"Assoc","hours":1.3,"rate":215.0,"amount":279.5,"narrative":"Review court docket and calendar of pending deadlines for the construction contract","codes":["L190","A104"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2026-02-03","timekeeper":"AY","timekeeper_name":"Anders Yilmaz","timekeeper_title":"Partner","title":"Ptr","hours":1.7,"rate":400.0,"amount":680.0,"narrative":"Review documents.","codes":["L530","A109"],"page":1,"narrative_style":"vague"},
+  {"n":4,"line_type":"fee","date":"2026-02-04","timekeeper":"FW","timekeeper_name":"Farah Whitfield","timekeeper_title":"Legal Assistant","title":"LA","hours":1.4,"rate":90.0,"amount":126.0,"narrative":"Draft notice of appeal and docketing statement for the lease dispute","codes":["L510","A103"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2026-02-06","timekeeper":"DM","timekeeper_name":"Daniel Marchetti","timekeeper_title":"Associate","title":"Assoc","hours":2.0,"rate":180.0,"amount":360.0,"narrative":"Prepare monthly status report to client regarding the licensing dispute","codes":["L190","A111"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2026-02-06","timekeeper":"IP","timekeeper_name":"Imani Pemberton","timekeeper_title":"Associate","title":"Assoc","hours":0.6,"rate":215.0,"amount":129.0,"narrative":"Research appealability issues in the warranty claim","codes":["L510","A102"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2026-02-10","timekeeper":"OW","timekeeper_name":"Oliver Whitfield","timekeeper_title":"Partner","title":"Ptr","hours":2.8,"rate":345.0,"amount":966.0,"narrative":"Draft notice of appeal and docketing statement for the customs audit","codes":["L510","A103"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2026-02-10","timekeeper":"TW","timekeeper_name":"Tomas Wickham","timekeeper_title":"Paralegal","title":"Para","hours":1.6,"rate":105.0,"amount":168.0,"narrative":"Revise appellate brief after cite check","codes":["L520","A104"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"fee","date":"2026-02-11","timekeeper":"OW","timekeeper_name":"Oliver Whitfield","timekeeper_title":"Partner","title":"Ptr","hours":2.9,"rate":345.0,"amount":1000.5,"narrative":"Prepare monthly status report to client regarding the data incident","codes":["L190","A111"],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"fee","date":"2026-02-23","timekeeper":"TW","timekeeper_name":"Tomas Wickham","timekeeper_title":"Paralegal","title":"Para","hours":1.3,"rate":105.0,"amount":136.5,"narrative":"Draft appellate brief in the supply agreement","codes":["L520","A103"],"page":1,"narrative_style":"clear"},
+  {"n":11,"line_type":"fee","date":"2026-02-24","timekeeper":"AY","timekeeper_name":"Anders Yilmaz","timekeeper_title":"Partner","title":"Ptr","hours":2.2,"rate":400.0,"amount":880.0,"narrative":"Prepare monthly status report to client regarding the construction contract","codes":["L190","A111"],"page":1,"narrative_style":"clear"},
+  {"n":12,"line_type":"fee","date":"2026-02-26","timekeeper":"IP","timekeeper_name":"Imani Pemberton","timekeeper_title":"Associate","title":"Assoc","hours":1.15,"rate":215.0,"amount":247.25,"narrative":"Draft notice of appeal and docketing statement for the supply agreement","codes":["L510","A103"],"page":1,"narrative_style":"clear"},
+  {"n":13,"line_type":"fee","date":"2026-02-27","timekeeper":"DM","timekeeper_name":"Daniel Marchetti","timekeeper_title":"Associate","title":"Assoc","hours":2.6,"rate":180.0,"amount":468.0,"narrative":"Review court docket and calendar of pending deadlines for the data incident","codes":["L190","A104"],"page":1,"narrative_style":"clear"},
+  {"n":14,"line_type":"fee","date":"2026-06-08","timekeeper":"DM","timekeeper_name":"Daniel Marchetti","timekeeper_title":"Associate","title":"Assoc","hours":0.9,"rate":180.0,"amount":162.0,"narrative":"Analyze exposure and damages model for the construction contract","codes":["L120","A104"],"page":1,"narrative_style":"clear"},
+  {"n":15,"line_type":"expense","date":"2026-02-12","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":37.07,"amount":37.07,"narrative":"Long distance conference call charges","codes":["E105"],"page":2,"narrative_style":"clear"},
+  {"n":16,"line_type":"expense","date":"2026-02-16","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":38.0,"rate":0.61,"amount":23.18,"narrative":"Mileage to courthouse","codes":["E109"],"page":2,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["445 Union Square","Seattle","Tax ID 97-6123726"],"template":"T17","pages":2},
+ "rule_set_id":"RS-06",
+ "context":{"matter_open":"2025-06-12","matter_close":"2026-05-29","matter_budget":49596.0,"approved_timekeepers":["Oliver Whitfield","Imani Pemberton","Anders Yilmaz","Daniel Marchetti","Tomas Wickham"],"invoice_received_date":"2026-03-11"},
+ "expected_findings":[
+  {"rule_id":"RS-06-R01","rule_type":"ApprovedTimekeeper","scope":"line","line_refs":[4],"consequence":"Reject"},
+  {"rule_id":"RS-06-R05","rule_type":"CoreRecordWindow","scope":"line","line_refs":[14],"consequence":"Flag"},
+  {"rule_id":"RS-06-R08","rule_type":"TimeIncrement","scope":"line","line_refs":[12],"consequence":"Reduce"},
+  {"rule_id":"RS-06-R11","rule_type":"AiObservation","scope":"line","line_refs":[1],"consequence":"Flag"},
+  {"rule_id":"RS-06-R11","rule_type":"AiObservation","scope":"line","line_refs":[3],"consequence":"Flag"}
+ ],
+ "seeded_violations":5
+}

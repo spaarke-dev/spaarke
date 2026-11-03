@@ -129,7 +129,10 @@ public class ExternalNotificationFeedTests
     private Task<IResult> FeedUnderCeiling(CallerPrincipal caller, WorkforceRoleCeiling ceiling) =>
         ExternalNotificationFeedEndpoints.GetFeedCoreAsync(
             caller, Tenant, ProductionRegistry(), _data, ReadService(), _cache, Now, NullLogger.Instance, CancellationToken.None,
-            table => WorkforceRoleCeilingGate.CanRead(ceiling, table));
+            table => WorkforceRoleCeilingGate.CanRead(ceiling, table), _invoiceHiding.Seam);
+
+    /// <summary>ebilling-r1 task 098: the (a') predicate the route passes; hides nothing unless a test says so.</summary>
+    private InvoiceHidingStub _invoiceHiding = InvoiceHidingStub.NoneHidden();
 
     private static WorkforceRoleCeiling EveryRoutePrivilegeWithout(string table, AccessRights removed)
     {
@@ -250,7 +253,7 @@ public class ExternalNotificationFeedTests
     private Task<IResult> Feed(CallerPrincipal caller, ExternalModuleRegistry? registry = null, DateTimeOffset? now = null) =>
         ExternalNotificationFeedEndpoints.GetFeedCoreAsync(
             caller, Tenant, registry ?? ProductionRegistry(), _data, ReadService(), _cache, now ?? Now,
-            NullLogger.Instance, CancellationToken.None);
+            NullLogger.Instance, CancellationToken.None, hideInvoices: _invoiceHiding.Seam);
 
     private Task<IResult> Seen(CallerPrincipal caller, DateTimeOffset at) =>
         ExternalNotificationFeedEndpoints.MarkSeenCoreAsync(caller, Tenant, _cache, at, NullLogger.Instance, CancellationToken.None);
@@ -470,6 +473,45 @@ public class ExternalNotificationFeedTests
         item.SenderName.Should().Be("Pat Lawyer");
         item.OccurredOn.Should().Be(Now.AddHours(-3));
         feed.UnreadCount.Should().Be(1);
+    }
+
+    // ── ebilling-r1 task 098 surface (b): a message regarding an invoice the (a') predicate hides is not in the feed ──
+
+    [Theory]
+    [InlineData("hidden")]
+    [InlineData("fault")]
+    public async Task Task098_AMessageRegardingAnInvoiceThePredicateHides_NeverAppears_NorCounts(string kind)
+    {
+        var project = Guid.NewGuid();
+        var invoice = Guid.NewGuid();
+        var caller = Ciam(Guid.NewGuid(), project: project);
+        _roots.AddFilingRow("sprk_invoice", invoice, ("sprk_project", "sprk_project", project));
+        var plain = Message("sprk_regardingproject", project, Now.AddHours(-2));
+        var aboutInvoice = Message("sprk_regardingproject", project, Now.AddHours(-1));
+        aboutInvoice["_sprk_regardinginvoice_value"] = El(invoice.ToString("D"));
+        _data.Name(project, "Project Alpha");
+        _invoiceHiding = kind == "hidden" ? InvoiceHidingStub.Hiding(invoice) : InvoiceHidingStub.Faulting();
+
+        var feed = Body(await Feed(caller));
+
+        feed.Value.Select(i => i.Id).Should().Equal(IdOf(plain));
+        feed.UnreadCount.Should().Be(1);
+        _invoiceHiding.Calls.Should().ContainSingle().Which.Should().Equal(invoice);
+    }
+
+    [Fact]
+    public async Task Task098_AMessageRegardingAnInvoiceThePredicateLeavesVisible_Appears()
+    {
+        var project = Guid.NewGuid();
+        var invoice = Guid.NewGuid();
+        var caller = Ciam(Guid.NewGuid(), project: project);
+        _roots.AddFilingRow("sprk_invoice", invoice, ("sprk_project", "sprk_project", project));
+        var aboutInvoice = Message("sprk_regardingproject", project, Now.AddHours(-1));
+        aboutInvoice["_sprk_regardinginvoice_value"] = El(invoice.ToString("D"));
+        _data.Name(project, "Project Alpha");
+        _invoiceHiding = InvoiceHidingStub.Hiding(Guid.NewGuid());
+
+        Body(await Feed(caller)).Value.Select(i => i.Id).Should().Equal(IdOf(aboutInvoice));
     }
 
     [Theory]

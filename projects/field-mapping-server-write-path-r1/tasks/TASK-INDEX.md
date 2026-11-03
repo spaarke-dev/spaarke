@@ -25,24 +25,28 @@
 | 014 | [Mapping step + merged-payload authorization](014-mapping-step-and-merged-payload-authz.poml) | FR-06, FR-08 | opus / xhigh | FULL | none | 002, 003, 013 | ✅ |
 | 015 | [Record-first owner + search-index default](015-record-first-owner-and-search-index.poml) | FR-09, FR-10 | opus / high | FULL | none | 014 | ✅ |
 | 016 | [Repair mode](016-repair-mode.poml) | FR-14 | opus / high | FULL | none | 015 | ✅ |
-| 017 | [Re-point route, chat and decision callers](017-repoint-route-chat-decision-callers.poml) | FR-13 | opus / high | FULL | none | 016 | 🔲 |
+| 017 | [Re-point route, chat and decision callers](017-repoint-route-chat-decision-callers.poml) | FR-13 | opus / high | FULL | none | 016 | ✅ |
 | 018 | [Office quick-create adapter; delete Office service](018-office-quick-create-adapter.poml) | FR-13, FR-12 | opus / high | FULL | none | 016 | ✅ |
-| 019 | [W2 deploy, live checks, adversarial review](019-w2-deploy-and-adversarial-review.poml) | NFR-01, NFR-05 | sonnet / high | FULL | none | 017, 018 | 🔲 |
+| 039 | [Server-owned search index (#2399)](039-server-owned-search-index.poml) | FR-38 | sonnet / high | FULL | none | 017 | ✅ |
+| 019 | [W2 deploy, live checks, adversarial review](019-w2-deploy-and-adversarial-review.poml) | NFR-01, NFR-05 | sonnet / high | FULL | none | 017, 018, 039 | ✅ |
+| 041 | [Index routing follows the content type (#2502)](041-content-type-index-routing.poml) | FR-40 (FR-10, FR-38) | opus / high | FULL | none | 019, 039 | 🔲 approved by owner 2026-11-02 |
+| 042a | [#2483 window characterization (tests only; lands alone)](042a-stamp-before-owner-characterization.poml) | FR-41 | sonnet / high | STANDARD | none | none | ✅ (#2521) |
+| 042b | [Derive the stamp before the owner (#2483, DI-009)](042b-stamp-before-owner-fix.poml) | FR-41 | opus / high | FULL | none | 042a, 019 | 🔲 approved by owner 2026-11-02 |
 
 ## Phase 3 — W3 Product creators onto the service
 
 | ID | Task | FRs | Tier / effort | Rigor | Group | Deps | Status |
 |---|---|---|---|---|---|---|---|
 | 020 | [Child-records route: Matter, Project, `mappingSource`](020-child-records-route-matter-project.poml) | FR-15 | opus / high | FULL | none | 019 | 🔲 |
-| 021 | [Matter wizard (reference) + latency before/after](021-matter-wizard-migration.poml) | FR-16, NFR-02 | sonnet / high | FULL | W3-wizards | 020 | 🔲 |
-| 022 | [Project wizard (incl. secure Project)](022-project-wizard-migration.poml) | FR-16, FR-15 | opus / high | FULL | W3-wizards | 021 | 🔲 |
-| 023 | [Event wizard](023-event-wizard-migration.poml) | FR-16 | sonnet / high | FULL | W3-wizards | 022 | 🔲 |
-| 024 | [To Do wizard](024-todo-wizard-migration.poml) | FR-16 | sonnet / high | FULL | W3-wizards | 023 | 🔲 |
-| 025 | [Invoice wizard](025-invoice-wizard-migration.poml) | FR-16 | sonnet / high | FULL | W3-wizards | 024 | 🔲 |
-| 026 | [Work Assignment wizard](026-work-assignment-wizard-migration.poml) | FR-16 | sonnet / high | FULL | W3-wizards | 025 | 🔲 |
-| 027 | [Report Card wizard (fill-only regression)](027-report-card-wizard-migration.poml) | FR-16, FR-02 | sonnet / high | FULL | W3-wizards | 026 | 🔲 |
-| 028 | [Analysis wizard + email mapping at send](028-analysis-wizard-and-email-send-mapping.poml) | FR-16, FR-17 | sonnet / xhigh | FULL | W3-wizards | 027 | 🔲 |
-| 029 | [Document Upload + Summarize Files wizards](029-document-upload-and-summarize-wizards.poml) | FR-16 | sonnet / high | FULL | W3-wizards | 028 | 🔲 |
+| 021 | [Matter wizard (reference) + latency before/after](021-matter-wizard-migration.poml) | FR-16, NFR-02 | sonnet / high | FULL | W3-wizards | 020, 041 | 🔲 |
+| 022 | [Project wizard (incl. secure Project)](022-project-wizard-migration.poml) | FR-16, FR-15 | opus / high | FULL | W3-wizards | 021, 041 | 🔲 |
+| 023 | [Event wizard](023-event-wizard-migration.poml) | FR-16 | sonnet / high | FULL | W3-wizards | 022, 041 | 🔲 |
+| 024 | [To Do wizard](024-todo-wizard-migration.poml) | FR-16 | sonnet / high | FULL | W3-wizards | 023, 041 | 🔲 |
+| 025 | [Invoice wizard](025-invoice-wizard-migration.poml) | FR-16 | sonnet / high | FULL | W3-wizards | 024, 041 | 🔲 |
+| 026 | [Work Assignment wizard](026-work-assignment-wizard-migration.poml) | FR-16 | sonnet / high | FULL | W3-wizards | 025, 041 | 🔲 |
+| 027 | [Report Card wizard (fill-only regression)](027-report-card-wizard-migration.poml) | FR-16, FR-02 | sonnet / high | FULL | W3-wizards | 026, 041 | 🔲 |
+| 028 | [Analysis wizard + email mapping at send](028-analysis-wizard-and-email-send-mapping.poml) | FR-16, FR-17 | sonnet / xhigh | FULL | W3-wizards | 027, 041 | 🔲 |
+| 029 | [Document Upload + Summarize Files wizards](029-document-upload-and-summarize-wizards.poml) | FR-16 | sonnet / high | FULL | W3-wizards | 028, 041 | 🔲 |
 | 030 | [Office To Do + document save](030-office-todo-and-document-save.poml) | FR-18 | opus / high | FULL | W3-server | 019 | 🔲 |
 | 031 | [Typed routes: events, analysis create](031-typed-routes-events-analysis.poml) | FR-19 | sonnet / high | FULL | W3-server | 019 | 🔲 |
 | 032 | [Invoice extraction](032-invoice-extraction.poml) | FR-20 | sonnet / high | FULL | W3-server | 019 | 🔲 |
@@ -63,7 +67,7 @@
 
 | ID | Task | FRs | Tier / effort | Rigor | Group | Deps | Status |
 |---|---|---|---|---|---|---|---|
-| 050 | [Resolve W5 open questions (marker, quick-create flags)](050-resolve-w5-open-questions.poml) | spec UQ 1–2 | sonnet / high | STANDARD | W5-A | 019 | 🔲 |
+| 050 | [Resolve W5 open questions (marker, quick-create flags)](050-resolve-w5-open-questions.poml) | spec UQ 1–2 | sonnet / high | STANDARD | W5-A | 019 | ✅ |
 | 051 | [Native UI: ribbon New, quick create off, Assign hidden](051-native-ui-redirect-quickcreate-assign.poml) | FR-24 | sonnet / high | FULL | W5-B | 050, 029 | 🔲 |
 | 052 | [Repair pass `IScheduledJob` + on-demand trigger](052-repair-pass-scheduled-job.poml) | FR-25 | opus / xhigh | FULL | W5-B | 016, 033, 050 | 🔲 |
 | 053 | [W5 deploy + live 5-row import check](053-w5-deploy-and-live-import-check.poml) | FR-24, FR-25 | sonnet / high | FULL | none | 051, 052 | 🔲 |
@@ -82,10 +86,10 @@
 | ID | Task | FRs | Tier / effort | Rigor | Group | Deps | Status |
 |---|---|---|---|---|---|---|---|
 | 070 | [RecordFamilyEdges registry + guards](070-record-family-edge-registry.poml) | FR-29 | opus / high | FULL | W7-A | none (UAC 194 merged) | ✅ [done] #2367 |
-| 071 | [RecordFamilyReader (OBO walk)](071-record-family-reader.poml) | FR-30 | opus / xhigh | FULL | W7-B | 070; UAC 194b | 🔲 [open] |
-| 072 | [GET /records/{table}/{id}/family](072-record-family-endpoint.poml) | FR-31 | sonnet / high | FULL | W7-B | 071 | 🔲 [open] |
+| 071 | [RecordFamilyReader (OBO walk)](071-record-family-reader.poml) | FR-30 | opus / xhigh | FULL | W7-B | 070; UAC 194b | ✅ [done] #2442 |
+| 072 | [GET /records/{table}/{id}/family](072-record-family-endpoint.poml) | FR-31 | sonnet / high | FULL | W7-B | 071 | ✅ [done] #2459 |
 | 073 | [RecordFamilyModal (shared UI)](073-record-family-modal.poml) | FR-32 | sonnet / high | FULL | W7-A | none | ✅ [done] #2366 |
-| 074 | [TrackingFieldTrio Family tool](074-trackingfieldtrio-family-tool.poml) | FR-33 | sonnet / high | FULL | W7-C | 073 | 🔲 [open] |
+| 074 | [TrackingFieldTrio Family tool](074-trackingfieldtrio-family-tool.poml) | FR-33 | sonnet / high | FULL | W7-C | 073 | ✅ [done] #2383 |
 | 075 | [Push Updates ribbon opens the Family view](075-push-ribbon-opens-family-view.poml) | FR-35 | sonnet / high | FULL | W7-C | 073 (build); merges with 040 | 🔲 [open] |
 | 076 | [W7 deploy + live Family check](076-w7-deploy-and-live-check.poml) | FR-29–FR-33, FR-35 | sonnet / high | FULL | none | 072, 074, 038 | 🔲 [open] |
 
@@ -105,7 +109,8 @@
 | W2-A | 012 (∥ 011 only if 011 does not touch the same file) | 010 | 011 is `parallel-safe=false` (hot `OwnedChildWrite.cs`) |
 | W2 core (sequential) | 013 → 014 → 015 → 016 → {017, 018} → 019 | 011, 012 (+002, 003 for 014) | One core file; no parallelism |
 | W3-server | 030, 031, 032, 033, 034 | 019 | Separate callers; run `/conflict-check` for ontology/UAC files |
-| W3-wizards (sequential) | 020 → 021 → … → 029 | 019 | FR-16: one wizard at a time, live-verified |
+| W2 follow-ups | 041; 042a → 042b | 019 (+039 for 041) | 041 and 042b both edit `RecordCreationService*.cs`: not parallel; whichever lands second rebases and reconciles design §15.5. 042a (tests only) may run beside 041 and lands alone |
+| W3-wizards (sequential) | 020 → 021 → … → 029 | 019, 041 | FR-16: one wizard at a time, live-verified. 041 first: W3 cannot verify "the wizard sends no index" against a server that still copies the BU value |
 | W4 | 040 | 001, 005, 019 | Parallel with Phase 3 |
 | W5-A | 050 | 019 | Read-only investigation |
 | W5-B | 051, 052 | 050 (+029 for 051, 016 for 052) | Ribbon vs BFF job: disjoint files |
@@ -117,7 +122,7 @@
 
 ## Critical Path
 
-010 → 011 → 013 → 014 → 015 → 016 → 017 → 019 → 020 → 021 → … → 029 → 035 → 061 → 090 (≈ 23 tasks deep).
+010 → 011 → 013 → 014 → 015 → 016 → 017 → 019 → {020, 041} → 021 → … → 029 → 035 → 061 → 090 (≈ 23 tasks deep).
 
 ## High-Risk Items
 

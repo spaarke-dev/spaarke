@@ -2052,12 +2052,12 @@
       </EntityRelationshipRole>
     </EntityRelationshipRoles>
   </EntityRelationship>
-  <EntityRelationship Name="sprk_invoicelineitem_AssignedToExternal_contact">
+  <EntityRelationship Name="sprk_invoiceapproval_decidedby_contact">
     <EntityRelationshipType>OneToMany</EntityRelationshipType>
     <IsCustomizable>1</IsCustomizable>
-    <IntroducedVersion>1.2.1.0</IntroducedVersion>
+    <IntroducedVersion>1.2.3.0</IntroducedVersion>
     <IsHierarchical>0</IsHierarchical>
-    <ReferencingEntityName>sprk_InvoiceLineItem</ReferencingEntityName>
+    <ReferencingEntityName>sprk_invoiceapproval</ReferencingEntityName>
     <ReferencedEntityName>Contact</ReferencedEntityName>
     <CascadeAssign>NoCascade</CascadeAssign>
     <CascadeDelete>RemoveLink</CascadeDelete>
@@ -2067,10 +2067,10 @@
     <CascadeUnshare>NoCascade</CascadeUnshare>
     <CascadeRollupView>NoCascade</CascadeRollupView>
     <IsValidForAdvancedFind>1</IsValidForAdvancedFind>
-    <ReferencingAttributeName>sprk_AssignedToExternal</ReferencingAttributeName>
+    <ReferencingAttributeName>sprk_DecidedBy</ReferencingAttributeName>
     <RelationshipDescription>
       <Descriptions>
-        <Description description="" languagecode="1033" />
+        <Description description="The approver (a person) who decided, so a worklist can show it without reading the Decision Record." languagecode="1033" />
       </Descriptions>
     </RelationshipDescription>
     <EntityRelationshipRoles>
@@ -2078,21 +2078,21 @@
         <NavPaneDisplayOption>UseCollectionName</NavPaneDisplayOption>
         <NavPaneArea>Details</NavPaneArea>
         <NavPaneOrder>10000</NavPaneOrder>
-        <NavigationPropertyName>sprk_AssignedToExternal</NavigationPropertyName>
+        <NavigationPropertyName>sprk_DecidedBy</NavigationPropertyName>
         <RelationshipRoleType>1</RelationshipRoleType>
       </EntityRelationshipRole>
       <EntityRelationshipRole>
-        <NavigationPropertyName>sprk_invoicelineitem_AssignedToExternal_contact</NavigationPropertyName>
+        <NavigationPropertyName>sprk_invoiceapproval_decidedby_contact</NavigationPropertyName>
         <RelationshipRoleType>0</RelationshipRoleType>
       </EntityRelationshipRole>
     </EntityRelationshipRoles>
   </EntityRelationship>
-  <EntityRelationship Name="sprk_invoicelineitem_AssignedToInternal_contact">
+  <EntityRelationship Name="sprk_invoicesubmission_submitter_contact">
     <EntityRelationshipType>OneToMany</EntityRelationshipType>
     <IsCustomizable>1</IsCustomizable>
-    <IntroducedVersion>1.2.1.0</IntroducedVersion>
+    <IntroducedVersion>1.2.3.0</IntroducedVersion>
     <IsHierarchical>0</IsHierarchical>
-    <ReferencingEntityName>sprk_InvoiceLineItem</ReferencingEntityName>
+    <ReferencingEntityName>sprk_invoicesubmission</ReferencingEntityName>
     <ReferencedEntityName>Contact</ReferencedEntityName>
     <CascadeAssign>NoCascade</CascadeAssign>
     <CascadeDelete>RemoveLink</CascadeDelete>
@@ -2102,10 +2102,10 @@
     <CascadeUnshare>NoCascade</CascadeUnshare>
     <CascadeRollupView>NoCascade</CascadeRollupView>
     <IsValidForAdvancedFind>1</IsValidForAdvancedFind>
-    <ReferencingAttributeName>sprk_AssignedToInternal</ReferencingAttributeName>
+    <ReferencingAttributeName>sprk_Submitter</ReferencingAttributeName>
     <RelationshipDescription>
       <Descriptions>
-        <Description description="" languagecode="1033" />
+        <Description description="The person who submitted the invoice (persons are contacts)." languagecode="1033" />
       </Descriptions>
     </RelationshipDescription>
     <EntityRelationshipRoles>
@@ -2113,11 +2113,11 @@
         <NavPaneDisplayOption>UseCollectionName</NavPaneDisplayOption>
         <NavPaneArea>Details</NavPaneArea>
         <NavPaneOrder>10000</NavPaneOrder>
-        <NavigationPropertyName>sprk_AssignedToInternal</NavigationPropertyName>
+        <NavigationPropertyName>sprk_Submitter</NavigationPropertyName>
         <RelationshipRoleType>1</RelationshipRoleType>
       </EntityRelationshipRole>
       <EntityRelationshipRole>
-        <NavigationPropertyName>sprk_invoicelineitem_AssignedToInternal_contact</NavigationPropertyName>
+        <NavigationPropertyName>sprk_invoicesubmission_submitter_contact</NavigationPropertyName>
         <RelationshipRoleType>0</RelationshipRoleType>
       </EntityRelationshipRole>
     </EntityRelationshipRoles>
@@ -2389,6 +2389,41 @@
       </EntityRelationshipRole>
       <EntityRelationshipRole>
         <NavigationPropertyName>sprk_memo_RegardingContact_n1</NavigationPropertyName>
+        <RelationshipRoleType>0</RelationshipRoleType>
+      </EntityRelationshipRole>
+    </EntityRelationshipRoles>
+  </EntityRelationship>
+  <EntityRelationship Name="sprk_organization_billingcontact_contact">
+    <EntityRelationshipType>OneToMany</EntityRelationshipType>
+    <IsCustomizable>1</IsCustomizable>
+    <IntroducedVersion>1.2.3.0</IntroducedVersion>
+    <IsHierarchical>0</IsHierarchical>
+    <ReferencingEntityName>sprk_Organization</ReferencingEntityName>
+    <ReferencedEntityName>Contact</ReferencedEntityName>
+    <CascadeAssign>NoCascade</CascadeAssign>
+    <CascadeDelete>RemoveLink</CascadeDelete>
+    <CascadeArchive>RemoveLink</CascadeArchive>
+    <CascadeReparent>NoCascade</CascadeReparent>
+    <CascadeShare>NoCascade</CascadeShare>
+    <CascadeUnshare>NoCascade</CascadeUnshare>
+    <CascadeRollupView>NoCascade</CascadeRollupView>
+    <IsValidForAdvancedFind>1</IsValidForAdvancedFind>
+    <ReferencingAttributeName>sprk_BillingContact</ReferencingAttributeName>
+    <RelationshipDescription>
+      <Descriptions>
+        <Description description="The firm's billing contact: receives firm invoice notices (rejection, return, approval with adjustments) in addition to the submitter (D-45)." languagecode="1033" />
+      </Descriptions>
+    </RelationshipDescription>
+    <EntityRelationshipRoles>
+      <EntityRelationshipRole>
+        <NavPaneDisplayOption>UseCollectionName</NavPaneDisplayOption>
+        <NavPaneArea>Details</NavPaneArea>
+        <NavPaneOrder>10000</NavPaneOrder>
+        <NavigationPropertyName>sprk_BillingContact</NavigationPropertyName>
+        <RelationshipRoleType>1</RelationshipRoleType>
+      </EntityRelationshipRole>
+      <EntityRelationshipRole>
+        <NavigationPropertyName>sprk_organization_billingcontact_contact</NavigationPropertyName>
         <RelationshipRoleType>0</RelationshipRoleType>
       </EntityRelationshipRole>
     </EntityRelationshipRoles>

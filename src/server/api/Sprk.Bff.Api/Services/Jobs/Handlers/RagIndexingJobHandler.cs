@@ -2,7 +2,6 @@ using System.Diagnostics;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Spaarke.Dataverse;
-using Sprk.Bff.Api.Infrastructure.Exceptions;
 using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Telemetry;
@@ -134,23 +133,8 @@ public class RagIndexingJobHandler : IJobHandler
                     }
                 }
 
-                // multi-container-multi-index-r1 indexer-routing-fix (Tier 3) — resolve the
-                // per-record sprk_searchindexname for the indexing batch. Precedence:
-                //   (a) payload.SearchIndexName (set by enqueueing site — preferred);
-                //   (b) ISearchIndexNameResolver chain (document → parent → BU) — defensive
-                //       fall-back when enqueueing site did not set it;
-                //   (c) null → tenant default (FR-BFF-04 backward-compat).
-                var resolvedSearchIndexName = payload.SearchIndexName;
-                if (string.IsNullOrWhiteSpace(resolvedSearchIndexName))
-                {
-                    resolvedSearchIndexName = await _searchIndexNameResolver.ResolveAsync(
-                        payload.DocumentId,
-                        parentEntity?.EntityType,
-                        parentEntity?.EntityId,
-                        ct);
-                }
-
-                // Build the file index request
+                // Build the file index request. It names no index (task 041, FR-40): the file lands in the content
+                // type's index whatever the payload, the document, its parent or the parent's business unit names.
                 var request = new FileIndexRequest
                 {
                     TenantId = payload.TenantId,
@@ -162,34 +146,13 @@ public class RagIndexingJobHandler : IJobHandler
                     KnowledgeSourceName = payload.KnowledgeSourceName,
                     Metadata = payload.Metadata,
                     ParentEntity = parentEntity,
-                    SearchIndexName = resolvedSearchIndexName,
-                    // Task 029: only a version-save job sets this. The allow-list fallback below re-issues the
-                    // request with SearchIndexName=null and keeps the flag, so the leftover chunks are removed
-                    // from whichever index the new chunks actually landed in.
+                    // Task 029: only a version-save job sets this; the leftover chunks are removed from the index the
+                    // new chunks landed in.
                     ReplaceStaleChunks = payload.ReplaceStaleChunks
                 };
 
                 // Call FileIndexingService using app-only authentication.
-                // multi-container-multi-index-r1 indexer-routing-fix (Tier 3) — per the user-
-                // confirmed decision in the task brief, background jobs default-fall-back when
-                // the allow-list rejects the resolved searchIndexName: log a WARN and retry the
-                // call with SearchIndexName=null so the batch still lands in the tenant-default
-                // index. The OBO path (RagEndpoints.IndexFile) still hard-fails — that contract
-                // (400 ProblemDetails INDEX_NOT_ALLOWED) is preserved upstream.
-                FileIndexingResult result;
-                try
-                {
-                    result = await _fileIndexingService.IndexFileAppOnlyAsync(request, ct);
-                }
-                catch (SdapProblemException ex) when (ex.Code == "INDEX_NOT_ALLOWED")
-                {
-                    _logger.LogWarning(
-                        "RAG indexing rejected by AI Search allow-list: requested SearchIndexName={RejectedIndex} (DocumentId={DocumentId}). Falling back to tenant default for job {JobId}.",
-                        request.SearchIndexName ?? "(null)", payload.DocumentId ?? "(null)", job.JobId);
-
-                    var fallbackRequest = request with { SearchIndexName = null };
-                    result = await _fileIndexingService.IndexFileAppOnlyAsync(fallbackRequest, ct);
-                }
+                var result = await _fileIndexingService.IndexFileAppOnlyAsync(request, ct);
 
                 if (!result.Success)
                 {
@@ -221,6 +184,16 @@ public class RagIndexingJobHandler : IJobHandler
                     TimeSpan.FromDays(7), // Keep record for 7 days
                     ct);
 
+                if (result.Skipped)
+                {
+                    // Deliberately not indexed (E-Billing Output Files container, ebilling-r1 FR-16): the job is done,
+                    // but nothing was indexed — no index-status stamp and no indexing-success telemetry.
+                    _logger.LogInformation(
+                        "RAG indexing job {JobId}: {FileName} was not indexed ({SkipReason})",
+                        job.JobId, payload.FileName, result.SkipReason);
+                    return JobOutcome.Success(job.JobId, JobType, stopwatch.Elapsed);
+                }
+
                 // Update Dataverse tracking fields when DocumentId is provided
                 // Same pattern as RagEndpoints.cs manual indexing.
                 // R3 FR-3H3.2 dual-write: set new sprk_searchindexcompletedon AND keep legacy
@@ -231,12 +204,11 @@ public class RagIndexingJobHandler : IJobHandler
                     try
                     {
                         var completedAt = DateTime.UtcNow;
-                        // FR-26 / G-9: stamp the index the file actually landed in — the per-record
-                        // resolved value when set, otherwise the single canonical tenant default
-                        // from ISearchIndexNameResolver.GetDefaultIndexName() (AiSearchOptions.
+                        // FR-26 / G-9, task 041: stamp the index the file actually landed in — the single
+                        // canonical default from ISearchIndexNameResolver.GetDefaultIndexName() (AiSearchOptions.
                         // KnowledgeIndexName). This closes the read/write split-brain: the stamp no
                         // longer reads the deprecated Analysis:SharedIndexName.
-                        var stampedIndexName = resolvedSearchIndexName ?? _searchIndexNameResolver.GetDefaultIndexName();
+                        var stampedIndexName = _searchIndexNameResolver.GetDefaultIndexName();
                         var updateRequest = new UpdateDocumentRequest
                         {
                             // New canonical lifecycle marker (R3+)
@@ -411,19 +383,8 @@ public class RagIndexingJobPayload
     /// </summary>
     public DateTimeOffset? EnqueuedAt { get; set; }
 
-    /// <summary>
-    /// multi-container-multi-index-r1 indexer-routing-fix (Tier 3) — optional explicit
-    /// Azure AI Search index name to route this batch to. When set by the enqueueing site
-    /// (e.g., Office Add-in's UploadFinalizationWorker or the Email-to-Document
-    /// IncomingCommunicationProcessor), the handler passes it verbatim to
-    /// <see cref="FileIndexRequest.SearchIndexName"/>. When null/empty, the handler invokes
-    /// <see cref="ISearchIndexNameResolver"/> as a defensive fall-back (chain:
-    /// sprk_document → parent record → parent's owning BU). Allow-list validation surfaces
-    /// in <see cref="IKnowledgeDeploymentService"/> (FR-BFF-02 / NFR-08); the handler's
-    /// per-task brief mandates default-fall-back behavior for background jobs (catch
-    /// SdapProblemException(INDEX_NOT_ALLOWED) and retry with SearchIndexName=null).
-    /// </summary>
-    public string? SearchIndexName { get; set; }
+    // No index name (field-mapping-server-write-path-r1 task 041, FR-40): a payload queued before the change that still
+    // carries "searchIndexName" deserializes and the value is ignored.
 
     /// <summary>
     /// Task 029 (spaarkeai-word-add-in-r1): when true, after the new chunks are written the file's leftover

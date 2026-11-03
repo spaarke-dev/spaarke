@@ -2,6 +2,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.Dataverse.Models;
+using Sprk.Bff.Api.Services.RecordCreation;
 
 namespace Sprk.Bff.Api.Services.Ai.Nodes;
 
@@ -170,6 +171,21 @@ internal sealed class UpdateRecordActionCore
             }
         }
 
+        // Task 039 (FR-38): on a search-indexed table both index columns are the SERVER's (step 8 of the create writes them from
+        // the owning business unit). A mapping, default or confirmed proposal that names either has it dropped — never refused,
+        // and not written — so the row's index stays as it is (and fieldsUpdated does not list it).
+        // Round 2 (S5): nothing left to write means no write is asked of Dataverse (not even an empty one) and none of the reads
+        // or after-write steps run; a payload that was empty before the drop is not affected (DropSearchIndexFromUpdate).
+        if (RecordTableRules.DropSearchIndexFromUpdate(
+                input.EntityLogicalName, input.RecordId, updatePayload,
+                input.PayloadSource == UpdateRecordPayloadSource.ConfirmedProposal
+                    ? RecordTableRules.SearchIndexOriginCaller
+                    : RecordTableRules.SearchIndexOriginMapping,
+                _logger).Emptied)
+        {
+            return [];
+        }
+
         // unified-access-control-r2 task 189 fix round C (K5): a payload that is not a confirmed proposal written AS its
         // confirming user (see #2257 below: the Update Record node's, whoever runs the playbook, and the action seam's without
         // an impersonated user) never writes a document's Access Permission or its own-narrowing record; only the document
@@ -195,12 +211,47 @@ internal sealed class UpdateRecordActionCore
             throw new RecordOwnerUnresolvedException(input.EntityLogicalName, documentRefusal);
         }
 
-        Task Patch(CancellationToken ct) => _fieldMappingService.UpdateRecordFieldsAsync(
-            input.EntityLogicalName,
-            input.RecordId,
-            updatePayload,
-            ct,
-            input.ImpersonateSystemUserId);
+        async Task Patch(CancellationToken ct)
+        {
+            // ebilling-r1 #2081: an invoice or line is written UPDATE-ONLY (If-Match: *, impersonation kept). The guard below
+            // checked that the row exists; a row deleted since must not be re-created by the upsert. Refused like the guard.
+            if (InvoiceFamilyCoreRecordGuard.IsUpdateOnlyTarget(input.EntityLogicalName))
+            {
+                if (await InvoiceFamilyCoreRecordGuard.UpdateExistingAsync(
+                        _fieldMappingService, input.EntityLogicalName, input.RecordId, updatePayload,
+                        input.ImpersonateSystemUserId, notFoundAsReadFailed: input.ImpersonateSystemUserId is not null, ct)
+                        .ConfigureAwait(false) is { } gone)
+                {
+                    throw InvoiceFamilyCoreRecordGuard.RefusalException(input.EntityLogicalName, gone);
+                }
+
+                return;
+            }
+
+            await _fieldMappingService.UpdateRecordFieldsAsync(
+                input.EntityLogicalName,
+                input.RecordId,
+                updatePayload,
+                ct,
+                input.ImpersonateSystemUserId).ConfigureAwait(false);
+        }
+
+        // ebilling-r1 DEF-022 (#2056): an invoice or invoice line names exactly one core record, a line regards its invoice's,
+        // and an invoice re-file keeps its lines (D-96) — decided BEFORE the PATCH on the stored lookups (read as the app)
+        // overlaid with this payload. A refusal writes nothing and throws the guard's stable code (as an owner refusal does).
+        if (InvoiceFamilyCoreRecordGuard.GuardedLookups(input.EntityLogicalName) is not null)
+        {
+            using var familyScope = _scopeFactory.CreateScope();
+            if (await InvoiceFamilyCoreRecordGuard.CheckGenericUpdateAsync(
+                    input.EntityLogicalName, input.RecordId, updatePayload,
+                    familyScope.ServiceProvider.GetService<IGenericEntityService>(), cancellationToken,
+                    writeIsImpersonated: input.ImpersonateSystemUserId is not null).ConfigureAwait(false)
+                is { RefusalCode: { } familyCode })
+            {
+                // Code only: the guard read as the app, so its reason can name records the caller has not read.
+                throw InvoiceFamilyCoreRecordGuard.RefusalException(input.EntityLogicalName, familyCode);
+            }
+        }
 
         // Task 146: a lookup that FILES a child table under a record (a document onto a matter, an event onto a
         // secure project) is a reparent — the child's owner is re-derived over every parent it will have

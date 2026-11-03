@@ -1,0 +1,30 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0216",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0216","generator_id":"gen_eval_set.py@1 F-0216","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0216.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-06"},
+ "header":{"firm":"Penhallow Cranmer PC","firm_invoice_number":"2026059464","invoice_date":"2026-03-02","billing_period_start":"2026-02-01","billing_period_end":"2026-02-28","firm_matter_reference":"63244-0014","po_number":"PO-4511041","fees_total":3120.25,"expenses_total":166.4,"adjustments_total":0.0,"total_due":3286.65,"currency":"USD"},
+ "timekeepers":[{"name":"Daniel Halloran","title":"Associate","rate":205.0,"billed_as":"Daniel Halloran"},{"name":"Farah Castellanos","title":"Paralegal","rate":105.0,"billed_as":"Farah Castellanos"},{"name":"Mei Nakamura","title":"Partner","rate":430.0,"billed_as":"Mei Nakamura"},{"name":"Samuel Esposito","title":"Associate","rate":225.0,"billed_as":"Samuel Esposito"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2026-02-03","timekeeper":"Samuel Esposito","timekeeper_name":"Samuel Esposito","timekeeper_title":"Associate","title":"Assoc","hours":1.1,"rate":225.0,"amount":247.5,"narrative":"Research authority for pretrial brief","codes":["L250","A102"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2026-02-05","timekeeper":"Samuel Esposito","timekeeper_name":"Samuel Esposito","timekeeper_title":"Associate","title":"Assoc","hours":0.2,"rate":225.0,"amount":45.0,"narrative":"Draft exhibit list and supporting memorandum","codes":["L240","A103"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2026-02-12","timekeeper":"Samuel Esposito","timekeeper_name":"Samuel Esposito","timekeeper_title":"Associate","title":"Assoc","hours":2.0,"rate":225.0,"amount":450.0,"narrative":"Review documents produced by Orchard Row Brands for responsiveness","codes":["L320","A104"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2026-02-12","timekeeper":"Samuel Esposito","timekeeper_name":"Samuel Esposito","timekeeper_title":"Associate","title":"Assoc","hours":0.25,"rate":225.0,"amount":56.25,"narrative":"Update document review protocol and coding panel for the construction contract","codes":["L140","A110"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2026-02-13","timekeeper":"Samuel Esposito","timekeeper_name":"Samuel Esposito","timekeeper_title":"Associate","title":"Assoc","hours":0.4,"rate":225.0,"amount":90.0,"narrative":"Plan strategy for upcoming phase of the construction contract with team","codes":["L120","A101"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2026-02-23","timekeeper":"Daniel Halloran","timekeeper_name":"Daniel Halloran","timekeeper_title":"Associate","title":"Assoc","hours":2.3,"rate":205.0,"amount":471.5,"narrative":"Review documents produced by Larkspur Medical for responsiveness","codes":["L320","A104"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2026-02-23","timekeeper":"Samuel Esposito","timekeeper_name":"Samuel Esposito","timekeeper_title":"Associate","title":"Assoc","hours":2.9,"rate":225.0,"amount":652.5,"narrative":"Prepare case assessment memorandum regarding the distribution agreement and recommended strategy","codes":["L120","A103"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2026-02-24","timekeeper":"Farah Castellanos","timekeeper_name":"Farah Castellanos","timekeeper_title":"Paralegal","title":"Para","hours":2.4,"rate":105.0,"amount":252.0,"narrative":"Legal research.","codes":["L310","A103"],"page":1,"narrative_style":"vague"},
+  {"n":9,"line_type":"fee","date":"2026-02-24","timekeeper":"Mei Nakamura","timekeeper_name":"Mei Nakamura","timekeeper_title":"Partner","title":"Ptr","hours":1.1,"rate":430.0,"amount":473.0,"narrative":"Attend deposition of Pacifica Telecom corporate representative","codes":["L330","A109"],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"fee","date":"2026-02-27","timekeeper":"Samuel Esposito","timekeeper_name":"Samuel Esposito","timekeeper_title":"Associate","title":"Assoc","hours":1.7,"rate":225.0,"amount":382.5,"narrative":"Review privilege log entries before service","codes":["L140","A104"],"page":1,"narrative_style":"clear"},
+  {"n":11,"line_type":"expense","date":"2026-02-27","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":4.0,"rate":41.6,"amount":166.4,"narrative":"Working meal during deposition preparation","codes":["E111"],"page":1,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["435 Federal Plaza","Chicago","Tax ID 46-2965537"],"template":"T02","pages":2},
+ "rule_set_id":"RS-06",
+ "context":{"matter_open":"2025-01-11","matter_close":"2026-05-29","matter_budget":38146.0,"approved_timekeepers":["Mei Nakamura","Samuel Esposito","Cyrus Galbraith","Daniel Halloran","Farah Castellanos"],"invoice_received_date":"2026-03-06"},
+ "expected_findings":[
+  {"rule_id":"RS-06-R08","rule_type":"TimeIncrement","scope":"line","line_refs":[4],"consequence":"Reduce"},
+  {"rule_id":"RS-06-R11","rule_type":"AiObservation","scope":"line","line_refs":[8],"consequence":"Flag"}
+ ],
+ "seeded_violations":2
+}

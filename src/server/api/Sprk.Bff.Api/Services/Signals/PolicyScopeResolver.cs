@@ -91,7 +91,7 @@ public sealed class PolicyScopeResolver
 
     private static readonly string[] PolicyColumns =
     {
-        PolicyCodeColumn, TenantColumn, MatterColumn, PriorityColumn, CurrentVersionColumn,
+        PolicyCodeColumn, TenantColumn, MatterColumn, PriorityColumn, CurrentVersionColumn, RuleDomains.PolicyDomainColumn,
     };
 
     private readonly IGenericEntityService _entityService;
@@ -152,9 +152,11 @@ public sealed class PolicyScopeResolver
         };
         query.Criteria.AddCondition(EnabledColumn, ConditionOperator.Equal, true);
         query.Criteria.AddCondition("statecode", ConditionOperator.Equal, 0); // Active
+        // ebilling-r1 task 070 (ontology-r1 review of 019): Ontology policies only -- a Billing rule never gates a communication.
+        RuleDomains.AddOntologyPolicyAllowlist(query);
 
         var result = await _entityService.RetrieveMultipleAsync(query, ct).ConfigureAwait(false);
-        return result?.Entities?.ToList() ?? (IReadOnlyList<Entity>)Array.Empty<Entity>();
+        return result?.Entities?.Where(RuleDomains.IsOntologyPolicy).ToList() ?? (IReadOnlyList<Entity>)Array.Empty<Entity>();
     }
 
     private static bool TenantMatches(Entity policy, string? requestTenant)

@@ -16,10 +16,11 @@ namespace Sprk.Bff.Api.Services.Dataverse;
 /// </summary>
 /// <remarks>
 /// <para>
-/// <b>Cache key</b>: <c>sdap:dv:entitymetadata:{entityLogicalName}</c>. Task 010 §6 specifies a
+/// <b>Cache key</b>: <c>sdap:dv:entitymetadata:v2:{entityLogicalName}</c> (v2 since task 072 added <c>DisplayName</c>). Task 010 §6 specifies a
 /// version-pinned key (<c>:v{globalMetadataVersion}</c>) for instant invalidation on solution import.
-/// For R1 we use the unversioned key with a 6h absolute TTL — solution-import staleness is acceptable
-/// within that window (see <c>012-deviations.md</c>). Version pinning is a deferred follow-up.
+/// For R1 the version in the key is a fixed shape version of the cached DTO (bumped when its shape changes), not a
+/// global metadata version, with a 6h absolute TTL — solution-import staleness is acceptable within that window (see
+/// <c>012-deviations.md</c>). Version pinning to the global metadata version is a deferred follow-up.
 /// </para>
 /// <para>
 /// <b>Cache failure mode</b>: graceful — if Redis is unreachable, we fall back to a direct Dataverse
@@ -46,7 +47,8 @@ public sealed class MetadataService
     // 6h absolute TTL per FR-BFF-03. Solution-import staleness within the window is acceptable for R1.
     private static readonly TimeSpan CacheTtl = TimeSpan.FromHours(6);
 
-    private const string CacheKeyPrefix = "sdap:dv:entitymetadata:";
+    // v2 (task 072): the DTO gained DisplayName; instances still on the old build during a slot swap keep writing v1 entries without it.
+    private const string CacheKeyPrefix = "sdap:dv:entitymetadata:v2:";
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -135,10 +137,10 @@ public sealed class MetadataService
 
     /// <summary>
     /// Projects a full <see cref="EntityMetadata"/> to the slim <see cref="EntityMetadataDto"/>.
-    /// Drops localized labels, privilege catalogs, security descriptors, and audit metadata to stay
-    /// under the &lt;50KB per-entity budget (FR-BFF-03).
+    /// Drops localized label arrays (keeping the entity's display name as one string), privilege catalogs, security
+    /// descriptors, and audit metadata to stay under the &lt;50KB per-entity budget (FR-BFF-03).
     /// </summary>
-    private static EntityMetadataDto ProjectToDto(EntityMetadata entity)
+    internal static EntityMetadataDto ProjectToDto(EntityMetadata entity) // internal for tests (task 072)
     {
         var attributes = entity.Attributes ?? Array.Empty<AttributeMetadata>();
 
@@ -158,7 +160,9 @@ public sealed class MetadataService
             LogicalName: entity.LogicalName ?? string.Empty,
             PrimaryIdAttribute: entity.PrimaryIdAttribute ?? string.Empty,
             PrimaryNameAttribute: entity.PrimaryNameAttribute ?? string.Empty,
-            Attributes: projectedAttributes);
+            Attributes: projectedAttributes,
+            DisplayName: entity.DisplayName?.UserLocalizedLabel?.Label
+                         ?? entity.DisplayName?.LocalizedLabels?.FirstOrDefault()?.Label);
     }
 
     internal static AttributeDto ProjectAttribute(AttributeMetadata attr) // internal for tests (task 098)

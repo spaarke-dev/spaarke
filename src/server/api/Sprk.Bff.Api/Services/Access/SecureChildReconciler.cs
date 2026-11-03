@@ -302,6 +302,13 @@ public enum OrdinaryRowReownOutcome
     /// is stale; the caller re-reads on its next pass (UAC task 183 fix round, verifier F1).
     /// </summary>
     Conflict,
+
+    /// <summary>
+    /// Owner decision 2026-10-29 (<see cref="SecureChildReconciler.ReownFiledRootAsync"/> only): the root is owned by a team
+    /// that is not a business unit's default team (a named owner team), or by the default team of the target's own business
+    /// unit: nothing was written. A named owner team is reported, never moved.
+    /// </summary>
+    RefusedNotDefaultTeam,
 }
 
 /// <summary>The typed result of <see cref="SecureChildReconciler.ReownOrdinaryRowAsync"/>.</summary>
@@ -892,6 +899,196 @@ public sealed class SecureChildReconciler
         query.Criteria.AddCondition("teamid", ConditionOperator.Equal, teamId);
         var team = (await _dataverse.RetrieveMultipleAsync(query, ct).ConfigureAwait(false)).Entities.FirstOrDefault();
         return team?.GetAttributeValue<EntityReference>("businessunitid")?.Id is { } bu && bu != Guid.Empty ? bu : null;
+    }
+
+    /// <summary>The two ROOT tables <see cref="ReownFiledRootAsync"/> re-owns (owner decision 2026-10-29; matters are not).</summary>
+    internal static readonly IReadOnlySet<string> FiledRootReownTables =
+        new HashSet<string>(StringComparer.Ordinal) { SecureRootInheritance.WorkAssignment, SecureRootInheritance.Project };
+
+    /// <summary>
+    /// Owner decision 2026-10-29 ("records are owned by business units/teams; the family members have the same ownership"):
+    /// re-owns ONE ordinary work assignment or project to the ordinary team its family answers —
+    /// <see cref="SecureRootInheritance.FollowParentsPassAsync"/>'s root-owner step names it (the resolver over its filing, or
+    /// for an unfiled person-owned root its person's business-unit team). It never moves a root into or out of the Secure
+    /// Record business unit, and never touches a root that is not explicitly ordinary: Make Secure and Remove Secure stay
+    /// provisioning's.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Refuses without writing</b> when the root's current owner, its own business unit or
+    /// <paramref name="targetTeamId"/> is in the Secure Record business unit, or its <c>sprk_issecure</c> is not exactly
+    /// <c>false</c> (<see cref="OrdinaryRowReownOutcome.RefusedSecure"/>); when it is owned by a team that is not a default
+    /// team, or by the default team of the target's own business unit (<see cref="OrdinaryRowReownOutcome.RefusedNotDefaultTeam"/>);
+    /// and when the root, a team, or which business unit is the Secure Record one cannot be read or told
+    /// (<see cref="OrdinaryRowReownOutcome.Failed"/>). A person-owned root is accepted. A root already owned by the team is
+    /// <see cref="OrdinaryRowReownOutcome.AlreadyOwned"/>, unwritten.</para>
+    /// <para><b>Otherwise</b>, after its own guards above (it does not call <see cref="ReownOrdinaryRowCoreAsync"/>; its
+    /// Secure, flag and default-team guards are this member's own, pinned by the census), this class's one owner-write
+    /// sequence (<see cref="WriteOwnerAndReadBackAsync"/>: the write, the owner-change eviction, the read-back), CONDITIONAL on
+    /// the version the guard read (<c>If-Match</c>): a root changed in between is <see cref="OrdinaryRowReownOutcome.Conflict"/>,
+    /// one deleted in between <see cref="OrdinaryRowReownOutcome.NotFound"/>. Only the owner is written: the root's
+    /// <c>sprk_containerid</c> and its external access grants are not touched. Its documents' EXPECTED container follows its
+    /// owning business unit, though, so a cross-unit re-own leaves them for the ordinary-moves pass to move (the caller writes
+    /// only when that pass writes too).</para>
+    /// </remarks>
+    /// <param name="table"><c>sprk_workassignment</c> or <c>sprk_project</c>; anything else throws.</param>
+    /// <param name="id">The root (not <see cref="Guid.Empty"/>).</param>
+    /// <param name="targetTeamId">The ordinary team to own it (not <see cref="Guid.Empty"/>).</param>
+    /// <param name="ct">Cancellation.</param>
+    /// <exception cref="ArgumentException">Another table, or an empty id or team.</exception>
+    public async Task<OrdinaryRowReownResult> ReownFiledRootAsync(string table, Guid id, Guid targetTeamId, CancellationToken ct)
+    {
+        var name = table?.Trim().ToLowerInvariant();
+        if (name is null || !FiledRootReownTables.Contains(name))
+            throw new ArgumentException("Only a work assignment or a project is re-owned here.", nameof(table));
+        if (id == Guid.Empty)
+            throw new ArgumentException("The row id is empty.", nameof(id));
+        if (targetTeamId == Guid.Empty)
+            throw new ArgumentException("The team id is empty.", nameof(targetTeamId));
+
+        static OrdinaryRowReownResult Result(OrdinaryRowReownOutcome outcome, string? detail = null) => new(outcome, detail);
+
+        Guid? secureBu;
+        Entity? row;
+        Guid? targetBu;
+        (Guid? BusinessUnit, bool IsDefault)? ownerTeam = null;
+        try
+        {
+            var bu = await SecureRecordOwnerTeam.ResolveSecureBusinessUnitAsync(_dataverse, _configuration, ct)
+                .ConfigureAwait(false);
+            if (bu.Ambiguous)
+            {
+                _logger.LogError("[ROOT-REOWN] {Table} {Id}: more than one business unit carries the Secure Record name, so " +
+                    "whether a team is in it cannot be told; refused.", name, id);
+                return Result(OrdinaryRowReownOutcome.Failed,
+                    "refused: more than one business unit carries the Secure Record name, so whether a team is in it cannot be told");
+            }
+
+            secureBu = bu.Id;
+
+            var query = new QueryExpression(name)
+            {
+                ColumnSet = new ColumnSet(OwningTeamColumn, OwningUserColumn, OwningBusinessUnitColumn, VersionNumberColumn,
+                    IsSecureColumn),
+                TopCount = 1,
+                NoLock = true,
+            };
+            query.Criteria.AddCondition(name + "id", ConditionOperator.Equal, id);
+            row = (await _dataverse.RetrieveMultipleAsync(query, ct).ConfigureAwait(false)).Entities.FirstOrDefault();
+            if (row is null)
+                return Result(OrdinaryRowReownOutcome.NotFound, "the row does not exist; nothing was written");
+
+            targetBu = await ReadTeamBusinessUnitAsync(targetTeamId, ct).ConfigureAwait(false);
+            if (OwnerOf(row) is { Kind: DataversePrincipalKind.Team } owner && owner.Id != targetTeamId)
+                ownerTeam = await ReadTeamFactsAsync(owner.Id, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            _logger.LogError(ex, "[ROOT-REOWN] {Table} {Id}: the row, a team or the Secure Record business unit could not be " +
+                "read; nothing was written.", name, id);
+            return Result(OrdinaryRowReownOutcome.Failed,
+                "refused: the row, a team or the Secure Record business unit could not be read");
+        }
+
+        var current = OwnerOf(row);
+        var rowBu = row.GetAttributeValue<EntityReference>(OwningBusinessUnitColumn)?.Id;
+        var currentTeamBu = current is { Kind: DataversePrincipalKind.Team } owning
+            ? owning.Id == targetTeamId ? targetBu : ownerTeam?.BusinessUnit
+            : null;
+
+        // ── The Secure guard: never OUT of the Secure Record business unit (the root's owner, or its own business unit),
+        //    never INTO it, and never a root whose flag is not an explicit false (Make Secure / Remove Secure are
+        //    provisioning's; an EMPTY flag fails closed, task 150). ─────────────────────────────────────────────────────────
+        if (secureBu is { } secureOut && (currentTeamBu == secureOut || rowBu == secureOut))
+        {
+            return Result(OrdinaryRowReownOutcome.RefusedSecure,
+                "the root is owned in the Secure Record business unit; only provisioning moves it");
+        }
+
+        if (targetBu is null)
+            return Result(OrdinaryRowReownOutcome.Failed, $"refused: team {targetTeamId:D} does not exist or has no business unit");
+        if (secureBu is { } secureIn && targetBu == secureIn)
+        {
+            return Result(OrdinaryRowReownOutcome.RefusedSecure,
+                $"team {targetTeamId:D} is in the Secure Record business unit; only provisioning moves a root into it");
+        }
+
+        if (row.GetAttributeValue<bool?>(IsSecureColumn) != false)
+        {
+            return Result(OrdinaryRowReownOutcome.RefusedSecure,
+                "the root's sprk_issecure is not an explicit false; only provisioning decides a secure root's owner");
+        }
+
+        if (current is null)
+            return Result(OrdinaryRowReownOutcome.Failed, "refused: the row's owner could not be read");
+        if (current is { Kind: DataversePrincipalKind.Team } currentTeam)
+        {
+            if (currentTeam.Id == targetTeamId)
+                return Result(OrdinaryRowReownOutcome.AlreadyOwned);
+            if (currentTeamBu is null)
+            {
+                return Result(OrdinaryRowReownOutcome.Failed,
+                    $"refused: the row's owning team {currentTeam.Id:D} does not exist or has no business unit");
+            }
+
+            // A named owner team is the owner's own choice: reported, never moved. A default team of the target's own unit is
+            // the same family answer (one default team per unit).
+            if (ownerTeam is not { IsDefault: true } || currentTeamBu == targetBu)
+            {
+                return Result(OrdinaryRowReownOutcome.RefusedNotDefaultTeam, ownerTeam is { IsDefault: true }
+                    ? "the root is owned by the default team of the target's own business unit"
+                    : $"the root is owned by team {currentTeam.Id:D}, which is not a business unit's default team");
+            }
+        }
+        else if (current is not { Kind: DataversePrincipalKind.SystemUser })
+        {
+            return Result(OrdinaryRowReownOutcome.Failed, "refused: the row's owner could not be read");
+        }
+
+        if (row.GetAttributeValue<long?>(VersionNumberColumn) is not { } version)
+            return Result(OrdinaryRowReownOutcome.Failed, "refused: the row's version could not be read");
+        var etag = "W/\"" + version.ToString(System.Globalization.CultureInfo.InvariantCulture) + "\"";
+        var entitySet = Sprk.Bff.Api.Api.ExternalAccess.SecureRecordRoot.For(name == SecureRootInheritance.Project
+            ? ExternalGrantRootType.Project
+            : ExternalGrantRootType.WorkAssignment).EntitySet;
+
+        // Reversal evidence BEFORE the write (as every assign of this class).
+        _logger.LogInformation("[ROOT-REOWN] reassign: {Table} {Id} owner {Previous} -> team {Target} (if at version {Version}).",
+            name, id, Describe(current), targetTeamId, version);
+        var ownerBind = new Dictionary<string, object> { [OwnerBindColumn] = $"/teams({targetTeamId:D})" };
+        try
+        {
+            System.Net.HttpStatusCode? writeStatus = null;
+            var fault = await WriteOwnerAndReadBackAsync(
+                name, id, DataversePrincipalRef.Team(targetTeamId),
+                c => _webApi.UpdateIfMatchAsync(entitySet, id, ownerBind, etag, c),
+                entitySet, $"reown-filed-root:{name}:{id:D}", ct,
+                decisiveRefusal: ex => ex is System.Data.DBConcurrencyException or KeyNotFoundException,
+                onWriteFault: ex => writeStatus = (ex as System.Net.Http.HttpRequestException)?.StatusCode).ConfigureAwait(false);
+            return fault is null
+                ? Result(OrdinaryRowReownOutcome.Reowned)
+                : Result(OrdinaryRowReownOutcome.Failed, fault) with { WriteFailureStatusCode = writeStatus };
+        }
+        catch (System.Data.DBConcurrencyException)
+        {
+            _logger.LogWarning("[ROOT-REOWN] {Table} {Id} changed after its owner was checked (version {Version}); not " +
+                "re-owned (conflict).", name, id, version);
+            return Result(OrdinaryRowReownOutcome.Conflict, "the row changed after its owner was checked; nothing was written");
+        }
+        catch (KeyNotFoundException)
+        {
+            return Result(OrdinaryRowReownOutcome.NotFound, "the row no longer exists; nothing was written");
+        }
+    }
+
+    /// <summary>A team's business unit and whether it is that unit's default team; <c>null</c> unit when the team does not
+    /// exist or names none. A fault propagates.</summary>
+    private async Task<(Guid? BusinessUnit, bool IsDefault)> ReadTeamFactsAsync(Guid teamId, CancellationToken ct)
+    {
+        var query = new QueryExpression("team") { ColumnSet = new ColumnSet("businessunitid", "isdefault"), TopCount = 1, NoLock = true };
+        query.Criteria.AddCondition("teamid", ConditionOperator.Equal, teamId);
+        var team = (await _dataverse.RetrieveMultipleAsync(query, ct).ConfigureAwait(false)).Entities.FirstOrDefault();
+        var bu = team?.GetAttributeValue<EntityReference>("businessunitid")?.Id is { } id && id != Guid.Empty ? id : (Guid?)null;
+        return (bu, team?.GetAttributeValue<bool?>("isdefault") == true);
     }
 
     /// <summary>
@@ -1584,6 +1781,12 @@ public sealed class SecureChildReconciler
                 // UAC task 194b R4b-2b (F1): a Decision Record is filed under the subject of every Signal it resolved too (its
                 // question (c)), which no lineage lookup names — so the records that resolved a Signal of this level join it.
                 await AddDecisionRecordsResolvingAsync(level, next, seen).ConfigureAwait(false);
+
+                // Owner decision 2026-10-29: a filed work assignment that is not team-owned belongs to its matter (then its
+                // project), and the rows filed under it take that record's business unit — so a matter's or project's move
+                // re-owns them too. Such a work assignment is a hop of the ordinary pass (never decided or written itself).
+                if (level == 1 && _ordinary is not null)
+                    next.AddRange(await WorkAssignmentsFollowingTheRootAsync(seen).ConfigureAwait(false));
                 frontier = next;
             }
 
@@ -1592,6 +1795,54 @@ public sealed class SecureChildReconciler
             if (_ordinary is null)
                 await LoadGrantRowsAsync().ConfigureAwait(false);
             await LoadThreadsOutsidePassAsync().ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// Owner decision 2026-10-29 (the ordinary pass only): the work assignments filed under this pass's root — a matter or
+        /// project — that are NOT team-owned, as the walk's next hop. Filed means by its typed column for the root's table, or
+        /// through an invoice or event that belongs to the root: one of this walk's level-1 rows of those tables (the same
+        /// columns <c>SecureRootInheritance.IntermediateParentColumns</c> reads; a pair alone files nothing). Scoped to the root:
+        /// the query names the root and its own level-1 invoices and events only, never every work assignment filed under any
+        /// intermediate. The resolver answers such a work assignment's rows with its filing's business unit, so they move with
+        /// the root, by the ordinary rules (a default-team row moves, a user-owned one is reported). A team-owned work assignment
+        /// keeps its own business unit, and its rows are not reached this way. The work assignment itself is never a row of the
+        /// pass. Paged and chunked as the walk's levels are; an incomplete read throws, as every read of this walk does.
+        /// </summary>
+        private async Task<IReadOnlyList<(string, Guid)>> WorkAssignmentsFollowingTheRootAsync(HashSet<(string, Guid)> seen)
+        {
+            if (!SecureRootInheritance.IsParent(_root.EntityLogicalName))
+                return Array.Empty<(string, Guid)>();
+
+            var workAssignment = SecureRootInheritance.WorkAssignment;
+            var filing = SecureRootInheritance.TypedFilingColumns[workAssignment]
+                .Where(c => string.Equals(c.ParentTable, _root.EntityLogicalName, StringComparison.OrdinalIgnoreCase))
+                .Select(c => (c.Column, Id: _root.RecordId))
+                .ToList();
+            foreach (var (column, intermediate) in SecureRootInheritance.IntermediateFilingColumns[workAssignment])
+            {
+                filing.AddRange(_descendants
+                    .Where(d => d.Level == 1 && string.Equals(d.Row.LogicalName, intermediate, StringComparison.OrdinalIgnoreCase))
+                    .Select(d => (column, d.Row.Id)));
+            }
+
+            var hops = new List<(string, Guid)>();
+            foreach (var chunk in filing.Distinct().Chunk(SecureChildShareSynchronizer.DescendantConditionsPerQuery))
+            {
+                var query = new QueryExpression(workAssignment) { ColumnSet = new ColumnSet(OwningTeamColumn), NoLock = true };
+                var anyFiling = new FilterExpression(LogicalOperator.Or);
+                foreach (var column in chunk.GroupBy(p => p.Column, StringComparer.OrdinalIgnoreCase))
+                    anyFiling.AddCondition(column.Key, ConditionOperator.In, column.Select(p => (object)p.Id).ToArray());
+                query.Criteria.AddFilter(anyFiling);
+                query.Criteria.AddCondition(OwningTeamColumn, ConditionOperator.Null); // person-owned only
+                foreach (var row in await ReadAllPagesAsync(workAssignment, query).ConfigureAwait(false))
+                {
+                    var key = (workAssignment, row.Id);
+                    if (seen.Add(key))
+                        hops.Add(key);
+                }
+            }
+
+            return hops;
         }
 
         /// <summary>

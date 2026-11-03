@@ -1,0 +1,32 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"rate-card",
+ "id":"E-RC-05",
+ "set":"E",
+ "meta":{"title":"Young Conaway timekeeper rate schedule (UST Appendix B), In re Lugano Diamonds & Jewelry, Doc 681","source_url":"https://casedocs.omniagentsolutions.com/cmsvol2/pub_47571/6868038c-8c01-43d4-8650-ef1785e91dd6_681.pdf","licence":"No licence stated. Court record filed on PACER and hosted by the claims agent; used only as a public record for internal evaluation, not redistributed.","licence_status":"public-record-no-licence","pii_note":"Public document from an agency or court; counts only, no matched text recorded. Hits: email 7, phone_us 4, street_address 2, case_party_marker 2. Hits are agency contact details, addresses and generic role words, not private individuals.","pii_scan":{"file":"youngconaway-lugano-exhibit-b.pdf","tool":"pii_scan.py@1","scanned":"2026-10-15","chars":21309,"counts":{"email":7,"phone_us":4,"ssn":0,"card_number":0,"dob_label":0,"iban":0,"street_address":2,"case_party_marker":2},"disposition":"Business and agency contact details only; no private-person data expected. Safe for local evaluation use."},"storage":{"location":"local-only","path":"local/rate-cards/youngconaway-lugano-exhibit-b.pdf"},"spike":false,"label_method":"ai-drafted-pending-review"},
+ "document":{"issuer_type":"law-firm","currency":"USD","retrieved":"2026-10-15","pages":11},
+ "rates":[
+  {"key":"Partner, admitted 1990, Business Planning","amount":1650,"unit":"hour","effective_from":"2026-03-01","effective_to":"2026-05-31","scope":"partner"},
+  {"key":"Partner, admitted 1999, Bankruptcy","amount":1405,"unit":"hour","effective_from":"2026-03-01","effective_to":"2026-05-31","scope":"partner"},
+  {"key":"Partner, admitted 2001, Bankruptcy","amount":1345,"unit":"hour","effective_from":"2026-03-01","effective_to":"2026-05-31","scope":"partner"},
+  {"key":"Partner, admitted 2012, Business Planning","amount":1080,"unit":"hour","effective_from":"2026-03-01","effective_to":"2026-05-31","scope":"partner"},
+  {"key":"Associate A, admitted 2022, Bankruptcy","amount":780,"unit":"hour","effective_from":"2026-03-01","effective_to":"2026-05-31","scope":"associate"},
+  {"key":"Associate B, admitted 2022, Bankruptcy","amount":715,"unit":"hour","effective_from":"2026-03-01","effective_to":"2026-05-31","scope":"associate"},
+  {"key":"Associate C, admitted 2024, Bankruptcy","amount":600,"unit":"hour","effective_from":"2026-03-01","effective_to":"2026-05-31","scope":"associate"},
+  {"key":"Associate D, admitted 2024, Bankruptcy","amount":600,"unit":"hour","effective_from":"2026-03-01","effective_to":"2026-05-31","scope":"associate"},
+  {"key":"Associate E, admitted 2025, Bankruptcy","amount":500,"unit":"hour","effective_from":"2026-03-01","effective_to":"2026-05-31","scope":"associate"},
+  {"key":"Associate F, admitted 2025, Bankruptcy","amount":585,"unit":"hour","effective_from":"2026-03-01","effective_to":"2026-05-31","scope":"associate"},
+  {"key":"Associate G, admitted 2025, Bankruptcy","amount":600,"unit":"hour","effective_from":"2026-03-01","effective_to":"2026-05-31","scope":"associate"},
+  {"key":"Paralegal A, Bankruptcy","amount":410,"unit":"hour","effective_from":"2026-03-01","effective_to":"2026-05-31","scope":"paralegal"},
+  {"key":"Paralegal B, Bankruptcy","amount":395,"unit":"hour","effective_from":"2026-03-01","effective_to":"2026-05-31","scope":"paralegal"},
+  {"key":"Paralegal C, Bankruptcy","amount":400,"unit":"hour","effective_from":"2026-03-01","effective_to":"2026-05-31","scope":"paralegal"},
+  {"key":"Paralegal D, Bankruptcy","amount":385,"unit":"hour","effective_from":"2026-03-01","effective_to":"2026-05-31","scope":"paralegal"},
+  {"key":"Paralegal E","amount":270,"unit":"hour","effective_from":"2026-03-01","effective_to":"2026-05-31","scope":"paralegal"}
+ ],
+ "rules":[
+  {"rule_id":"E-RC-05-R01","rule_type":"ApprovedRate","params":{"per_timekeeper":"see rates (keyed by role and admission year; no names recorded)","no_rate_increases_in_period":true},"consequence":"Flag","clause_ref":{"section":"Exhibit B","page":5},"paraphrase":"Each timekeeper bills at a single stated hourly rate for the application period and no rate increase was applied.","expressible":true}
+ ],
+ "unmapped_provisions":[
+  {"clause_ref":{"section":"Exhibit B","page":5},"paraphrase":"Fees and hours per timekeeper are printed alongside the rate but are not rate terms.","reason":"not-billing"}
+ ]
+}

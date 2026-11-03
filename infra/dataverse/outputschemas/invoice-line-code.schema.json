@@ -1,0 +1,67 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://spaarke.com/schemas/analysisaction/invoice-line-code.schema.json",
+  "title": "Invoice Line Code (INVOICE-LINE-CODE@v1) - Output Schema (invoice-line-code)",
+  "description": "Output schema for sprk_analysisaction sprk_actioncode='invoice-line-code' (ebilling-r1 task 047, FR-22, D-52). Deployed by scripts/Deploy-ActionMirrors.ps1 as the sprk_outputschemajson sidecar of infra/dataverse/actions/invoice-line-code.action.json. It MUST stay in step with IInvoiceAi.CodeLinesAsync's parser (InvoiceAiOutputParser.ParseCodeLines in Services/Ai/PublicContracts/InvoiceAi.cs) and the result DTOs (InvoiceAiContracts.cs: InvoiceCodeLinesResult, InvoiceLineCoding, InvoiceLineObservation); tests/integration/contract/Catalog/InvoiceLineCodeActionContractTests.cs pins the three together. The code properties are plain nullable strings on purpose: the allowed codes differ per invoice (the line's resolved code set), the platform's $choices enrichment only reaches top-level string properties, and LineCodingService validates every returned code against the resolved set server-side (FR-22), so a static enum here would be both unenforceable and stale. Azure OpenAI Structured Outputs compatible: additionalProperties:false, object-level required arrays, every property listed in required (optional values are nullable, not omitted).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["lines"],
+  "$comment-required": "Object-level required arrays only - property-level boolean 'required' is FORBIDDEN (OpenAiFunctionSchemaValidator).",
+  "properties": {
+    "lines": {
+      "type": "array",
+      "description": "One entry per input line, in input order, carrying the input lineKey.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["lineKey", "taskCode", "activityCode", "expenseCode", "confidence", "observations"],
+        "properties": {
+          "lineKey": {
+            "type": "string",
+            "description": "The lineKey of the input line this entry codes, copied exactly."
+          },
+          "taskCode": {
+            "type": ["string", "null"],
+            "description": "UTBMS task code copied exactly from allowedTaskCodes, or null when none fits or the line is an Expense line."
+          },
+          "activityCode": {
+            "type": ["string", "null"],
+            "description": "UTBMS activity code copied exactly from allowedActivityCodes, or null when none fits or the line is an Expense line."
+          },
+          "expenseCode": {
+            "type": ["string", "null"],
+            "description": "UTBMS expense code copied exactly from allowedExpenseCodes, or null when none fits or the line is a Fee line."
+          },
+          "confidence": {
+            "type": "number",
+            "description": "Certainty in the codes returned for this line, 0.0 to 1.0. Below 0.5 when the narrative is too thin to code reliably."
+          },
+          "observations": {
+            "type": "array",
+            "description": "Problems with the time entry itself; an empty array when there are none.",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["type", "confidence", "quotedText"],
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "description": "BlockBilling: several distinct tasks lumped into one time entry. VagueDescription: a narrative too generic to show what work was done.",
+                  "enum": ["BlockBilling", "VagueDescription"]
+                },
+                "confidence": {
+                  "type": "number",
+                  "description": "Certainty that the observation applies, 0.0 to 1.0."
+                },
+                "quotedText": {
+                  "type": "string",
+                  "description": "The text copied verbatim from the line's narrative that the observation is about (the shortest span that shows it, or the whole narrative)."
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

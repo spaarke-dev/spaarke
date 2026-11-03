@@ -1,0 +1,33 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0109",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0109","generator_id":"gen_eval_set.py@1 F-0109","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0109.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-01"},
+ "header":{"firm":"Kingsley and Forsythe LLP","firm_invoice_number":"INV-2025-20193","invoice_date":"2026-04-04","billing_period_start":"2026-03-01","billing_period_end":"2026-03-31","firm_matter_reference":"84086-0030","po_number":"PO-4539637","fees_total":2893.0,"expenses_total":2862.95,"adjustments_total":0.0,"total_due":5755.95,"currency":"USD"},
+ "timekeepers":[{"name":"Cyrus Okafor","title":"Associate","rate":260.0,"billed_as":"Cyrus Okafor"},{"name":"Emeka Mbeki","title":"Senior Associate","rate":330.0,"billed_as":"Emeka Mbeki"},{"name":"Marcus Mbeki","title":"Paralegal","rate":140.0,"billed_as":"Marcus Mbeki"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2026-03-06","timekeeper":"Cyrus Okafor","timekeeper_name":"Cyrus Okafor","timekeeper_title":"Associate","title":"Assoc","hours":0.8,"rate":260.0,"amount":208.0,"narrative":"Review and organize incoming production from Alder & Finch Ltd for matter file","codes":["L140","A104"],"page":2,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2026-03-06","timekeeper":"Cyrus Okafor","timekeeper_name":"Cyrus Okafor","timekeeper_title":"Associate","title":"Assoc","hours":0.8,"rate":260.0,"amount":208.0,"narrative":"Review and organize incoming production from Alder & Finch Ltd for matter file","codes":["L140","A104"],"page":2,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2026-03-13","timekeeper":"Cyrus Okafor","timekeeper_name":"Cyrus Okafor","timekeeper_title":"Associate","title":"Assoc","hours":1.7,"rate":260.0,"amount":442.0,"narrative":"Review privilege log entries before service","codes":["L140","A104"],"page":2,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2026-03-25","timekeeper":"Cyrus Okafor","timekeeper_name":"Cyrus Okafor","timekeeper_title":"Associate","title":"Assoc","hours":0.15,"rate":260.0,"amount":39.0,"narrative":"Prepare production set and cover correspondence for service on Alder & Finch Ltd","codes":["L320","A110"],"page":2,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2026-03-25","timekeeper":"Emeka Mbeki","timekeeper_name":"Emeka Mbeki","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":3.8,"rate":330.0,"amount":1254.0,"narrative":"Update document review protocol and coding panel for the warranty claim; Draft exhibit list in the vendor agreement; Prepare responses and objections to notice of deposition.","codes":["L240","A104"],"page":2,"narrative_style":"block_billed"},
+  {"n":6,"line_type":"fee","date":"2026-03-05","timekeeper":"Marcus Mbeki","timekeeper_name":"Marcus Mbeki","timekeeper_title":"Paralegal","title":"Para","hours":0.4,"rate":140.0,"amount":56.0,"narrative":"Review and organize incoming production from Redstone Mining for matter file","codes":["L140","A104"],"page":2,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2026-03-17","timekeeper":"Marcus Mbeki","timekeeper_name":"Marcus Mbeki","timekeeper_title":"Paralegal","title":"Para","hours":2.1,"rate":140.0,"amount":294.0,"narrative":"Research authority for notice of deposition; Meet and confer with counsel for Alder & Finch Ltd regarding discovery dispute; Update document review protocol and coding panel for the supply agreement.","codes":["L350","A107"],"page":2,"narrative_style":"block_billed"},
+  {"n":8,"line_type":"fee","date":"2026-03-30","timekeeper":"Marcus Mbeki","timekeeper_name":"Marcus Mbeki","timekeeper_title":"Paralegal","title":"Para","hours":1.4,"rate":140.0,"amount":196.0,"narrative":"Review privilege log entries before service","codes":["L140","A104"],"page":2,"narrative_style":"clear"},
+  {"n":9,"line_type":"fee","date":"2026-03-30","timekeeper":"Marcus Mbeki","timekeeper_name":"Marcus Mbeki","timekeeper_title":"Paralegal","title":"Para","hours":1.4,"rate":140.0,"amount":196.0,"narrative":"Review privilege log entries before service","codes":["L140","A104"],"page":2,"narrative_style":"clear"},
+  {"n":10,"line_type":"expense","date":"2026-03-09","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":2804.36,"amount":2804.36,"narrative":"Consulting expert fees","codes":["E119"],"page":2,"narrative_style":"clear"},
+  {"n":11,"line_type":"expense","date":"2026-03-13","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":651.0,"rate":0.09,"amount":58.59,"narrative":"Photocopies - 651 pages","codes":["E101"],"page":2,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["604 Elm Court","Dallas","Tax ID 96-1262075"],"template":"T10","pages":2},
+ "rule_set_id":"RS-01",
+ "context":{"matter_open":"2024-10-28","matter_close":"2026-06-29","matter_budget":48023.0,"approved_timekeepers":["Emeka Mbeki","Marcus Mbeki","Cyrus Okafor","Imani Blackwood","Louis Delacroix","Gregory Okafor"],"invoice_received_date":"2026-04-06"},
+ "expected_findings":[
+  {"rule_id":"RS-01-R01","rule_type":"TimeIncrement","scope":"line","line_refs":[4],"consequence":"Reduce"},
+  {"rule_id":"RS-01-R02","rule_type":"AiObservation","scope":"line","line_refs":[5],"consequence":"Flag"},
+  {"rule_id":"RS-01-R02","rule_type":"AiObservation","scope":"line","line_refs":[7],"consequence":"Flag"},
+  {"rule_id":"RS-01-R07","rule_type":"Duplicate","scope":"line","line_refs":[2],"consequence":"Disallow","related_line_refs":[1]},
+  {"rule_id":"RS-01-R07","rule_type":"Duplicate","scope":"line","line_refs":[9],"consequence":"Disallow","related_line_refs":[8]}
+ ],
+ "seeded_violations":5
+}

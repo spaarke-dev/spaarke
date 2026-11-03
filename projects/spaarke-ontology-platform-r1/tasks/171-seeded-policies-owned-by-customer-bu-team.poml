@@ -3,8 +3,8 @@
   <metadata>
     <title>Apply-DoLanePolicies.ps1 owns the policy and version rows it creates to the customer business unit's restricted-content team (D-197, UAC round 137)</title>
     <phase>11 UAT</phase>
-    <gate>blocked until uac-r2 R4b-2c (the customer-BU restricted-content owner team: name, lookup and fail-closed rules) is merged to master</gate>
-    <status>pending</status>
+    <gate>startable: uac-r2 R4b-2c (`Infrastructure/Dataverse/RestrictedContentOwnerTeam.cs`: name, customer-top-unit walk, fail-closed rules) is on master in 194b, 2cd0f62e2c (2026-10-29). Copy its rule; dev team "Spaarke Restricted Content Owners" 16685363-43d3-f111-84e8-00224820fd20 in BU1 (uac-r2), for -WhatIf only</gate>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>An operator script (.ps1) and its Pester tests, with no BFF code. It modifies tests, so code-review and adr-check run.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -83,4 +83,9 @@
       <file>docs/adr/ADR-038-testing-strategy.md</file>
     </files>
   </knowledge>
+  <completion date="2026-10-29">
+    Delivered (PR #2433, merged to docs `3452d3017e`): `scripts/Apply-DoLanePolicies.ps1 -CustomerBusinessUnit` binds `ownerid@odata.bind` on the policy and version creates to the customer top unit's "Spaarke Restricted Content Owners" team, with the same rule as 194b `RestrictedContentOwnerTeam` (Owner team, not default, exactly one, no members; refuses the root, the Secure Record unit and an unreadable or looping chain). It fails closed with an Assign preflight. `-WhatIf` shows the owner, `-Verify` reports DRIFT, and the path without the parameter is unchanged.
+    Review: uac-r2 OK at `9177fcb083` (K1 Assign depth is checked for presence only, so a shortfall becomes a 403 on the first create, before any row exists; K2 RetrieveUserPrivileges/teammemberships are not yet verified live, to be confirmed on the first live `-WhatIf`, DI-124 #2300). The adversarial-reviewer found F1: an empty `-CustomerBusinessUnit` failed open. Its F2s were an untested read-back, a parity test that CI skipped, and untested partial and mixed states; a K2 was the empty-guid team. Fix round `e025152e3b` fixed all of them: the gate is now whether the parameter was passed, and a blank value is refused in all three modes; added tests for the read-back, rerun-after-fault, mixed-state DRIFT, a missing Secure Record unit and the 32/33-unit bound; the parity test runs in CI (the sparse checkout adds Infrastructure/Dataverse). Main-session re-check of the fix diff: clean. Pester 87/87 (also with CI=true); 7 mutations, all caught.
+    rework: fix-round-1 task 171
+  </completion>
 </task>

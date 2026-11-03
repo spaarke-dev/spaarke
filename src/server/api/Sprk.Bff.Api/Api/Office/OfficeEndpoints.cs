@@ -559,7 +559,7 @@ public static class OfficeEndpoints
     /// <summary>The narrowing's log label for a save-from-Office name collision (no ids).</summary>
     private const string CollisionNarrowingSurface = "office-save-collision";
 
-    private static async Task<SaveError?> WithholdCollisionIdentityIfUnauthorizedAsync(
+    internal static async Task<SaveError?> WithholdCollisionIdentityIfUnauthorizedAsync(
         SaveError? error,
         string userId,
         HttpContext context,
@@ -653,7 +653,7 @@ public static class OfficeEndpoints
     /// <summary>
     /// Maps a SaveError to an appropriate ProblemDetails response.
     /// </summary>
-    private static IResult MapSaveErrorToProblem(SaveError? error, string correlationId)
+    internal static IResult MapSaveErrorToProblem(SaveError? error, string correlationId)
     {
         if (error is null)
         {

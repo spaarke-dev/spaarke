@@ -9,6 +9,7 @@ using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Messages;
 using Microsoft.Xrm.Sdk.Metadata;
 using Microsoft.Xrm.Sdk.Query;
+using Sprk.Bff.Api.Services.Finance;
 using Sprk.Bff.Api.Services.Signals;
 using Xunit;
 using Xunit.Abstractions;
@@ -183,6 +184,17 @@ public sealed class SignalPredicateTests : IClassFixture<SignalPredicateTests.Li
             var attribute = await _dv.GetAttributeAsync(entity, column);
             _out.WriteLine($"{entity}.{column}: {attribute.GetType().Name}, IsSecured={attribute.IsSecured}");
             attribute.IsSecured.Should().Be(false, $"{entity}.{column} is authorable, so it must not be field-level secured");
+        }
+
+        // ebilling-r1 D-130 (ontology-r1 review): the derived Threshold reads these base columns org-wide with the evaluator's identity.
+        // They are deliberately NOT authorable, so the loop above does not cover them. A secured one would read as empty (the approved
+        // total would silently fall back to the billed total). Each must exist and not be secured. Offline twin:
+        // DerivedBaseColumnsFieldSecurityTests (SpaarkeMaster Entity.xml).
+        foreach (var (entity, column) in FinanceBaseValues.DerivedBaseColumns)
+        {
+            var attribute = await _dv.GetAttributeAsync(entity, column);
+            _out.WriteLine($"{entity}.{column} (derived base column): {attribute.GetType().Name}, IsSecured={attribute.IsSecured}");
+            attribute.IsSecured.Should().Be(false, $"{entity}.{column} is read org-wide by the derived Threshold, so it must not be field-level secured");
         }
     }
 

@@ -17,7 +17,8 @@ namespace Sprk.Bff.Api.Tests.DataMutation.ChildAccessPermission;
 /// applied to every child the push reaches, so one push from a Standard matter would otherwise clear the own narrowing of
 /// each child document (D7: a child narrows, never widens). Such a rule is skipped with its reason
 /// (<see cref="InheritedAccessPermission.RefuseAppOnlyWrite"/>), and the rest of the push applies. Must not fire: the same
-/// column on a to-do or an event, and the document's other columns.
+/// column on a to-do or an event, and the document's other columns. ebilling-r1 task 088: a rule targeting the submission
+/// marker <c>sprk_restrictedbysubmission</c> on a document is skipped the same way.
 /// </summary>
 public class DocumentAccessPermissionPushTargetTests
 {
@@ -30,6 +31,7 @@ public class DocumentAccessPermissionPushTargetTests
     [InlineData("sprk_accesspermission")]
     [InlineData("sprk_accessinheritance")]
     [InlineData(" SPRK_AccessPermission ")]
+    [InlineData("sprk_restrictedbysubmission")] // ebilling-r1 task 088: the submission marker (must fire)
     public async Task APushRule_TargetingADocumentsAccessColumn_IsSkipped_AndTheOtherColumnsArePushed(string target)
     {
         var (updated, failed, skipped, errors, results) = await Push(
@@ -46,6 +48,9 @@ public class DocumentAccessPermissionPushTargetTests
         results.Should().ContainSingle(r => r.TargetField == target)
             .Which.Should().Match<FieldMappingResultDto>(r =>
                 r.Status == FieldMappingStatus.Skipped && r.ErrorMessage!.Contains("set by Spaarke"));
+        var isMarker = string.Equals(target.Trim(), "sprk_restrictedbysubmission", StringComparison.OrdinalIgnoreCase);
+        results.Single(r => r.TargetField == target).ErrorMessage.Should().Contain(
+            isMarker ? "only the invoice submission writes it" : "keeps the document's own narrowing");
         results.Should().ContainSingle(r => r.TargetField == "sprk_documentdescription")
             .Which.Status.Should().Be(FieldMappingStatus.Mapped);
     }

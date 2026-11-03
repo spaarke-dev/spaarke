@@ -99,8 +99,10 @@ class AuthService implements IAuthService {
 
     // Eagerly acquire (mirrors `initAuth()`'s warm-cache behavior) so
     // `isAuthenticated()`/`getAccount()` reflect a signed-in state immediately
-    // after `initialize()` when a cached account/session is available (silent
-    // acquisition only — never prompts on startup).
+    // after `initialize()` when a cached account/session is available. This runs
+    // the strategy's full ladder (silent, then interactive): under NAA the
+    // interactive step goes through the Office host; on the standard popup client
+    // a popup without a user click is usually blocked, and the Sign in button retries.
     await this.provider.getAccessToken();
 
     console.info(`[AuthService] Initialized via @spaarke/auth (naa=${this.strategy.isNaaActive()})`);

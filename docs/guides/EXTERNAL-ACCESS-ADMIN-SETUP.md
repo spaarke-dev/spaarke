@@ -20,6 +20,8 @@ This guide covers the one-time and recurring configuration required to run the E
 
 For SPA development, see [EXTERNAL-ACCESS-SPA-GUIDE.md](EXTERNAL-ACCESS-SPA-GUIDE.md).
 
+For the Teams app (the same SPA as a Teams personal tab: package build, tenant install, Teams sign-in and support), see [EXTERNAL-ACCESS-TEAMS-APP-GUIDE.md](EXTERNAL-ACCESS-TEAMS-APP-GUIDE.md).
+
 > **Retired (historical)**: The external portal formerly ran on **Power Pages** with **Entra B2B guests**. That model — Power Pages site, `sprk_externalworkspace` web resource, table permissions / web roles, B2B invitations, and `Deploy-ExternalWorkspaceSpa.ps1` — is **decommissioned** (ADR-028 Amendment A1). Nothing in this guide is Power Pages configuration; historical mentions are labeled as retired.
 
 ---
@@ -126,17 +128,20 @@ Lives at `src/client/external-spa/staticwebapp.config.json` and is staged into `
   "navigationFallback": {
     "rewrite": "/index.html",
     "exclude": [
+      "/auth-callback.html",
       "/assets/*",
       "/*.{css,js,map,ico,png,svg,gif,jpg,jpeg,webp,json,txt,woff,woff2,ttf,eot}"
     ]
   },
   "globalHeaders": {
-    "Referrer-Policy": "no-referrer-or-same-origin",
-    "Content-Security-Policy": "frame-ancestors 'self'",
+    "Referrer-Policy": "strict-origin-when-cross-origin",
+    "Content-Security-Policy": "frame-ancestors 'self' https://teams.microsoft.com https://*.cloud.microsoft",
     "X-Content-Type-Options": "nosniff"
   }
 }
 ```
+
+Snapshot updated 2026-10-29; the file in the repo is authoritative. `frame-ancestors` lets Teams frame the SPA (the Teams tab, [EXTERNAL-ACCESS-TEAMS-APP-GUIDE.md](EXTERNAL-ACCESS-TEAMS-APP-GUIDE.md)), and `/auth-callback.html` is excluded from the fallback so the MSAL popup page is served as itself.
 
 `navigationFallback` rewrites unmatched routes to `/index.html` so `BrowserRouter` clean-URL deep links (e.g. `/project/{id}`) resolve instead of 404ing. `globalHeaders` sets the framing/referrer/nosniff security headers.
 
@@ -566,6 +571,7 @@ server, but the Manage Access dialog fails closed and offers it as Limited until
 
 - **Architecture Reference**: [external-access-spa-architecture.md](../architecture/external-access-spa-architecture.md)
 - **Developer Guide**: [EXTERNAL-ACCESS-SPA-GUIDE.md](EXTERNAL-ACCESS-SPA-GUIDE.md)
+- **Teams App Guide**: [EXTERNAL-ACCESS-TEAMS-APP-GUIDE.md](EXTERNAL-ACCESS-TEAMS-APP-GUIDE.md)
 - **Auth architecture (ADR-028 + Amendment A1)**: [`.claude/adr/ADR-028-spaarke-auth-architecture.md`](../../.claude/adr/ADR-028-spaarke-auth-architecture.md)
 - **UAC Architecture**: [uac-access-control.md](../architecture/uac-access-control.md)
 - **Entra External ID (CIAM) overview (MS Learn)**: https://learn.microsoft.com/en-us/entra/external-id/customers/overview-customers-ciam

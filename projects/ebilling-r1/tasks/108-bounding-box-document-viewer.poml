@@ -1,0 +1,153 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="108" project="ebilling-r1">
+  <metadata>
+    <title>Bounding-box document viewer (shared component)</title>
+    <phase>4 Review and approval (WP4) — wave W4-1</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>New presentational shared component with a small, fixed geometry contract; no data writes or authorization.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>The prototype gives the exact contract, styles and scroll rule; pdfjs-dist is already a dependency with an existing lazy loader to reuse.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P4-A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>none</deps>
+    <tags>frontend, fluent-ui, shared-ui</tags>
+    <estimated-effort>2 days</estimated-effort>
+  </metadata>
+
+  <prompt>Build a shared PDF page viewer in @spaarke/ui-components that renders the pages of a PDF supplied by the host and highlights an extracted line and field: contract per box {page, x, y, w, h} normalised 0–1 from the top-left, a row box tinted with a multiply blend so the text stays legible, a field outline with a label, scroll to the highlighted row, and pages that stay light in dark mode (prototype F-4).</prompt>
+
+  <role>SPAARKE frontend developer. Expert in React, Fluent UI v9 tokens, pdfjs-dist rendering and accessible overlays.</role>
+
+  <goal>PdfHighlightViewer (name directional) exported from the FilePreview folder, rendering real PDF pages via the already-present pdfjs-dist with lazy page rendering, the F-4 highlight and scroll behaviour, loading / error / empty states, jest tests for geometry and states, and no new npm package.</goal>
+
+  <context>
+    <background>Spec FR-31 (the review page shows the source region of each value), NFR-02, NFR-13; prototype README F-4 (contract, behaviour "scroll to page.offsetTop + y × pageHeight − 30 % of the viewport", multiply tint, page light in dark mode) and the reference implementation c:\code_files\spaarke-prototype\projects\ebilling.r1\src\review\DocumentView.tsx (styles rowBox / rowFill / fieldBox / fieldTag; scroll effect; nested FluentProvider webLightTheme with a transparent inline background around the pages; the mock draws text instead of a real page). Existing viewer: FilePreview/RichFilePreview.tsx renders an SPE preview URL in an iframe (:677-682) — cross-origin, so it has no page geometry and cannot carry an overlay; the brief (review-screen-prototype-brief.md section 7) records the gap. pdfjs-dist ^6.2.108 is already a dependency of the shared library (package.json:99) and is lazy-loaded with a workerSrc default in components/SprkChat/hooks/useChatFileAttachment.ts:330-357. The host supplies the bytes (110 uses GET /api/documents/{documentId}/content, Api/FileAccessEndpoints.cs:232) so the component stays context-agnostic (ADR-012).</background>
+    <relevant-files>
+      <file role="new">src/client/shared/Spaarke.UI.Components/src/components/FilePreview/PdfHighlightViewer.tsx</file>
+      <file role="new">src/client/shared/Spaarke.UI.Components/src/components/FilePreview/pdfHighlightGeometry.ts (pure box and scroll maths)</file>
+      <file role="new">src/client/shared/Spaarke.UI.Components/src/utils/pdfJsLoader.ts (lazy loader extracted from useChatFileAttachment, same behaviour)</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/hooks/useChatFileAttachment.ts (use the extracted loader; no behaviour change)</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/FilePreview/index.ts (export)</file>
+      <file role="new">src/client/shared/Spaarke.UI.Components/src/components/FilePreview/__tests__/PdfHighlightViewer.test.tsx</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="none" status="n/a">Independent; 110 consumes it</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-021, NFR-13">Fluent v9 semantic tokens only (no hard-coded colours): row outline colorBrandStroke1, row tint colorBrandBackground2 with mix-blend-mode multiply, field outline and tag Marigold palette tokens as in the prototype. Surrounding chrome follows the host theme.</constraint>
+    <constraint source="prototype F-4">Pages render inside a nested FluentProvider with webLightTheme so the page stays light in dark mode; style a wrapper div or use an inline transparent background, never a className on the FluentProvider (F-10).</constraint>
+    <constraint source="ADR-012">Context-agnostic: props take a loader returning the PDF bytes (or bytes directly), a highlight {page, row, field, label}, and callbacks; no fetch, Xrm or auth inside.</constraint>
+    <constraint source="NFR-12">No new npm package; pdfjs-dist stays a dynamic import (useChatFileAttachment.ts header NFR-12 rule) so consumers that never render a PDF do not load it. A host may preset workerSrc.</constraint>
+    <constraint source="NFR-02">Render pages lazily (visible page and neighbours); a 20-page invoice opens without rendering every page up front.</constraint>
+    <constraint source="project">Shared library stays React-16-safe (docs/architecture/SPAARKE-DATAGRID-FRAMEWORK-ARCHITECTURE.md: no useId, no useSyncExternalStore, no createRoot).</constraint>
+    <constraint source="accessibility">Viewer region has an accessible name; the highlighted field label is exposed to screen readers; overlays are aria-hidden and pointer-events none.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>c:\code_files\spaarke-prototype\projects\ebilling.r1\src\review\DocumentView.tsx</file>
+      <file>c:\code_files\spaarke-prototype\projects\ebilling.r1\README.md (F-4, F-10)</file>
+      <file>projects/ebilling-r1/notes/review-screen-prototype-brief.md (sections 5, 7)</file>
+      <file>.claude/patterns/ui/fluent-v9-component-authoring.md</file>
+      <file>.claude/patterns/ui/fluent-v9-theming.md</file>
+      <file>.claude/skills/fluent-v9-component/SKILL.md</file>
+    </files>
+    <patterns>
+      <pattern name="Lazy pdfjs load with workerSrc default" location="src/client/shared/Spaarke.UI.Components/src/components/SprkChat/hooks/useChatFileAttachment.ts">Dynamic import, workerSrc guard; extract, do not copy.</pattern>
+      <pattern name="Preview loading / error states" location="src/client/shared/Spaarke.UI.Components/src/components/FilePreview/RichFilePreview.tsx">Spinner and retry wording to match.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Extract the pdfjs lazy loader to utils/pdfJsLoader.ts and switch useChatFileAttachment to it; its existing tests stay green unchanged.</step>
+    <step order="2">pdfHighlightGeometry.ts: box to CSS percentages, clamping to 0–1, scroll target (page offset plus y times page height minus 30 percent of the viewport, never below 0).</step>
+    <step order="3">PdfHighlightViewer: toolbar line (document name, page count), scroller with pages (canvas per page at container width, lazy), overlay layer per page drawing the row box with tint and the field box with label; scroll effect on highlight change; loading, error (with retry) and empty states.</step>
+    <step order="4">Tests (mock the loader; no canvas rendering in jsdom): geometry and scroll maths including edges; highlight renders row and field boxes on the right page with token classes; no highlight renders none; loader rejection shows the error state and retry calls it again; pages are wrapped in a light FluentProvider.</step>
+    <step order="5">npm run build, npm test and npm run lint in the shared library green.</step>
+    <step order="6">Run the ui-tests below in a local scratch harness (or 110's page once built); record results.</step>
+    <step order="7">Update TASK-INDEX.md: this task's status cell to "✅ [done]".</step>
+    <step order="8">Record deviations (component name, props) in projects/ebilling-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the default pdfjs worker source (CDN) is blocked by the Dataverse code-page content security policy, STOP and report the options (same-origin worker web resource, inline worker, main-thread fallback) rather than choosing one.</trigger>
+    <trigger>If extracting the loader would change useChatFileAttachment behaviour or its tests, STOP and keep the loader local with a note.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>FilePreview/RichFilePreview.tsx (iframe preview of an SPE URL) and DocumentViewerWidget (Spaarke.AI.Outputs, wraps the same preview); pdfjs-dist is used only for text extraction in SprkChat.</existing>
+    <extension>RichFilePreview cannot be extended: its iframe content is cross-origin, so page geometry and overlays are impossible; the new component lives in the same FilePreview folder and reuses the existing pdfjs loader (extracted, not copied).</extension>
+    <cost-of-doing-nothing>Reviewers cannot see where a value was read on the PDF, so the review page cannot show a line's source region or box a clicked value (FR-31 UI, prototype F-4), and corrections lose their evidence.</cost-of-doing-nothing>
+  </justification>
+
+  <ui-tests>
+    <test name="Highlight and scroll">
+      <steps>
+        <step>Load a multi-page sample invoice PDF with a highlight on page 2 (row and field)</step>
+        <step>Verify the viewer scrolls so the row sits about 30 percent from the top</step>
+        <step>Verify the row box is outlined and tinted while the printed text stays readable, and the field box carries its label</step>
+        <step>Change the highlight to a field on page 1; verify scroll and boxes move</step>
+      </steps>
+      <expected>Matches prototype DocumentView.tsx behaviour on a real PDF page</expected>
+    </test>
+    <test name="Error and loading">
+      <steps>
+        <step>Supply a loader that rejects</step>
+        <step>Verify the error state and that Retry calls the loader again</step>
+      </steps>
+      <expected>No crash; retry works</expected>
+    </test>
+    <test name="Dark Mode Compliance (ADR-021, F-4)">
+      <steps>
+        <step>Switch the host theme to dark</step>
+        <step>Verify the toolbar and scroller background follow the dark theme</step>
+        <step>Verify each PDF page stays light (white page, dark text) and the highlight boxes remain visible</step>
+        <step>Verify no hard-coded colours (inspect styles: tokens only)</step>
+      </steps>
+      <expected>Chrome dark, pages light, highlights legible</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="npm">build, test, lint (shared library)</tool>
+    <tool name="ui-test">browser checks via the ui-test skill</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">components/FilePreview/PdfHighlightViewer.tsx; pdfHighlightGeometry.ts; utils/pdfJsLoader.ts</output>
+    <output type="test">components/FilePreview/__tests__/PdfHighlightViewer.test.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The component renders host-supplied PDF bytes page by page with lazy rendering, and is exported from @spaarke/ui-components.</criterion>
+    <criterion testable="true">Given {page, row, field} in normalised 0–1 coordinates, the row box (outline plus multiply tint) and field box (outline plus label) appear on that page at the stated positions; out-of-range values are clamped.</criterion>
+    <criterion testable="true">On highlight change the scroller moves to the computed target (unit-tested maths).</criterion>
+    <criterion testable="true">In dark mode the pages stay light and the chrome follows the theme; all colours are Fluent tokens.</criterion>
+    <criterion testable="true">package.json gains no dependency; pdfjs-dist is imported only dynamically; useChatFileAttachment tests stay green.</criterion>
+    <criterion testable="true">No useId, useSyncExternalStore or createRoot in the new files (grep).</criterion>
+    <criterion testable="true">npm run build, npm test and npm run lint green; ui-tests above pass including dark mode.</criterion>
+    <criterion testable="true">Cover the stated contract plus the edge cases named above. Anything beyond that needs a one-line justification in task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>Parallel group P4-A with 100, 106, 107, 109: this task alone edits FilePreview/ and the SprkChat loader; 109 edits ConsoleKit/ only. Never import from the prototype repository; copy behaviour and token choices. Consumers rebuild against the library (110).
+
+    COMPLETION (2026-10-15, parallel wave 3):
+    Delivered: PdfHighlightViewer (FilePreview/PdfHighlightViewer.tsx), pdfHighlightGeometry.ts, utils/pdfJsLoader.ts, FilePreview/index.ts exports, jest tests (PdfHighlightViewer.test.tsx incl. geometry; utils/__tests__/pdfJsLoader.test.ts). No package.json change.
+    Props: data | loadData (host supplies bytes; loadData must be memoised, a new identity starts a new load, Retry re-calls it), documentName, highlight {page, row?, field?, label?} with boxes {x,y,w,h} normalised 0-1 from top-left (an optional page on a box is ignored; IPdfHighlight.page places it), maxPageWidth, ariaLabel, onLoad({pageCount}), onError(error), className. Component name is as directional in the POML.
+    Behaviour decisions: (1) a highlight on a page the document does not have is DROPPED (no overlay, no scroll), not clamped to the nearest page, so a reviewer is never pointed at the wrong evidence; coordinates are clamped to the page. (2) Scroll target = page.offsetTop + y x page.offsetHeight - 30% of scroller.clientHeight, floored at 0, using row.y else field.y; smooth unless prefers-reduced-motion; re-aims once the highlighted page reports its real size; clearing the highlight scrolls back to the top. (3) Lazy rendering via IntersectionObserver (rootMargin 50% 0px) + 1 neighbour each side + the highlighted page and its neighbours; pages leaving the window release their canvas; without IntersectionObserver every page renders. Placeholder height uses page 1's aspect until each page reports its own. (4) Bytes are copied before getDocument because pdfjs transfers the buffer to its worker (would detach the host copy and break Retry). (5) The document is released with loadingTask.destroy() (pdfjs 6 has no destroy() on the document proxy; found with a Node smoke test). (6) pdfjs 6 render call is page.render({canvas, viewport}) (canvasContext optional), taken from the installed types; canvas backing store capped at 2x devicePixelRatio. (7) Accessible: labelled region, focusable scroller, overlays aria-hidden, polite live region announces the highlighted label and page.
+    DEVIATION from step 1 (escalation trigger 2 applied as written): the pdfjs loader was NOT extracted from useChatFileAttachment. Its existing test ('NFR-12 lazy-load guarantee (source-level)' in useChatFileAttachment.test.ts) asserts the literal text import('pdfjs-dist') in the hook source, so moving it would change that test's outcome. utils/pdfJsLoader.ts is a behaviour-identical copy of the workerSrc default logic with a pointer comment; the hook is untouched. FOLLOW-UP (maintainer, not blocking): update that source-level guard to follow the loader, switch the hook to loadPdfJs and delete the roughly 15-line duplicate.
+    NOT RUN: step 6 browser ui-tests (highlight and scroll on a real PDF, loading/error, dark mode): no Chrome integration or scratch harness in this parallel run. Unit tests cover the same contract with pdfjs faked (jsdom has no canvas); dark mode is covered structurally (pages inside a nested webLightTheme FluentProvider with inline transparent background, toolbar outside it, no inline colours). Task 110 or the next interactive session should run the three ui-tests against a real invoice PDF. Also unverified: whether the default jsdelivr pdfjs worker URL is allowed by the Dataverse code-page CSP (escalation trigger 1); 110 must confirm in a real code page. A host can preset GlobalWorkerOptions.workerSrc to a same-origin worker before the first load and the loader will not overwrite it.
+    The loader is internal (not exported from utils/index.ts).
+    rework: fix-round-1 task 108
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load the knowledge files first, then the fluent-v9-component skill. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

@@ -32,6 +32,13 @@ public sealed class FileIndexingService : IFileIndexingService
     private readonly RecordContainerResolver _containerResolver;
 
     /// <summary>
+    /// The <see cref="FileIndexingResult.SkipReason"/> for a file in a container that is never indexed. This service skips no container
+    /// since ebilling-r1 task 092 retired <c>Finance:EbillingOutputContainerId</c> (export files are Stored Files, never SPE documents);
+    /// the reason stays part of the skip contract the indexing callers report through.
+    /// </summary>
+    public const string NonIndexedContainerReason = "container_not_indexed";
+
+    /// <summary>
     /// Initializes a new instance of the <see cref="FileIndexingService"/> class.
     /// </summary>
     /// <param name="speFileOperations">File operations for SPE access.</param>
@@ -130,7 +137,6 @@ public sealed class FileIndexingService : IFileIndexingService
                 request.KnowledgeSourceName,
                 request.Metadata,
                 request.ParentEntity,
-                request.SearchIndexName,
                 request.ReplaceStaleChunks,
                 stopwatch,
                 cancellationToken);
@@ -214,7 +220,6 @@ public sealed class FileIndexingService : IFileIndexingService
                 request.KnowledgeSourceName,
                 request.Metadata,
                 request.ParentEntity,
-                request.SearchIndexName,
                 request.ReplaceStaleChunks,
                 stopwatch,
                 cancellationToken);
@@ -262,7 +267,6 @@ public sealed class FileIndexingService : IFileIndexingService
                 request.KnowledgeSourceName,
                 request.Metadata,
                 request.ParentEntity,
-                request.SearchIndexName,
                 replaceStaleChunks: false,
                 stopwatch,
                 cancellationToken);
@@ -286,12 +290,9 @@ public sealed class FileIndexingService : IFileIndexingService
     /// Handles: chunk → build documents → index batch.
     /// </summary>
     /// <remarks>
-    /// multi-container-multi-index-r1 indexer-routing-fix (Tier 3): <paramref name="searchIndexName"/>
-    /// threads the per-record <c>sprk_searchindexname</c> from each entry-point request DTO
-    /// (<see cref="FileIndexRequest"/> / <see cref="ContentIndexRequest"/>) into the
-    /// <see cref="IRagService.IndexDocumentsBatchAsync(IEnumerable{KnowledgeDocument}, string?, CancellationToken)"/>
-    /// new 3-argument overload. When null/whitespace, falls through to tenant-default
-    /// (existing behavior preserved per NFR-02).
+    /// field-mapping-server-write-path-r1 task 041 (FR-40): every batch and every trim names no index, so both land in the
+    /// tenant-default index (the Shared deployment's, <c>AiSearchOptions.KnowledgeIndexName</c>): the index follows the
+    /// content type, never a value a request or a record carries.
     /// </remarks>
     private async Task<FileIndexingResult> IndexTextInternalAsync(
         string text,
@@ -303,7 +304,6 @@ public sealed class FileIndexingService : IFileIndexingService
         string? knowledgeSourceName,
         Dictionary<string, string>? metadata,
         ParentEntityContext? parentEntity,
-        string? searchIndexName,
         bool replaceStaleChunks,
         Stopwatch stopwatch,
         CancellationToken cancellationToken)
@@ -368,13 +368,8 @@ public sealed class FileIndexingService : IFileIndexingService
             ParentEntityName = parentEntity?.EntityName
         }).ToList();
 
-        // Step 3: Batch index (embeddings generated inside RagService).
-        // multi-container-multi-index-r1 indexer-routing-fix (Tier 3): pass `searchIndexName`
-        // to the new 3-arg overload so the per-record sprk_searchindexname routes the batch
-        // to the correct physical Azure AI Search index. The 2-arg overload is preserved for
-        // NFR-02 backward-compat — when searchIndexName is null/whitespace, the 3-arg overload
-        // delegates to the tenant-default chain (FR-BFF-04).
-        var results = await _ragService.IndexDocumentsBatchAsync(documents, searchIndexName, cancellationToken);
+        // Step 3: Batch index (embeddings generated inside RagService), into the tenant-default index (task 041).
+        var results = await _ragService.IndexDocumentsBatchAsync(documents, searchIndexName: null, cancellationToken);
 
         var successCount = results.Count(r => r.Succeeded);
 
@@ -400,11 +395,11 @@ public sealed class FileIndexingService : IFileIndexingService
             try
             {
                 var removed = await _ragService.DeleteChunksBeyondCountAsync(
-                    tenantId, speFileId, chunks.Count, searchIndexName, cancellationToken);
+                    tenantId, speFileId, chunks.Count, searchIndexName: null, cancellationToken);
 
                 _logger.LogInformation(
                     "Replaced previous version's chunks for {FileName} speFileId={SpeFileId}: kept {ChunkCount}, removed {RemovedCount} leftover chunk(s) in {IndexName}",
-                    fileName, speFileId, chunks.Count, removed, searchIndexName ?? "(tenant-default)");
+                    fileName, speFileId, chunks.Count, removed, "(tenant-default)");
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
@@ -414,7 +409,7 @@ public sealed class FileIndexingService : IFileIndexingService
                 // (ADR-015) nor trip the handler's permanent-failure words ("not found", "empty", ...).
                 _logger.LogWarning(ex,
                     "Indexed {FileName} speFileId={SpeFileId} but could not remove the previous version's leftover chunks in {IndexName}",
-                    fileName, speFileId, searchIndexName ?? "(tenant-default)");
+                    fileName, speFileId, "(tenant-default)");
 
                 return new FileIndexingResult
                 {

@@ -1,0 +1,34 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0211",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0211","generator_id":"gen_eval_set.py@1 F-0211","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0211.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-01"},
+ "header":{"firm":"Penhallow & Zeller LLP","firm_invoice_number":"INV-2026-90775","invoice_date":"2025-11-03","billing_period_start":"2025-08-01","billing_period_end":"2025-08-31","firm_matter_reference":"95902-0006","po_number":null,"fees_total":7247.75,"expenses_total":991.85,"adjustments_total":0.0,"total_due":8239.6,"currency":"USD"},
+ "timekeepers":[{"name":"Gideon Nwosu","title":"Partner","rate":945.0,"billed_as":"GN"},{"name":"Hannah Rosenthal","title":"Senior Associate","rate":620.0,"billed_as":"HR"},{"name":"Hector Rosenthal","title":"Associate","rate":500.0,"billed_as":"HR"},{"name":"Jordan Rosenthal","title":"Paralegal","rate":255.0,"billed_as":"JR"},{"name":"Oliver Marchetti","title":"Of Counsel","rate":765.0,"billed_as":"OM"},{"name":"Tomas Okafor","title":"Partner","rate":940.0,"billed_as":"TO"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2025-08-01","timekeeper":"HR","timekeeper_name":"Hannah Rosenthal","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":1.1,"rate":620.0,"amount":682.0,"narrative":"Prepare case assessment memorandum regarding the distribution agreement and recommended strategy","codes":["L120","A103"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2025-08-08","timekeeper":"JR","timekeeper_name":"Jordan Rosenthal","timekeeper_title":"Paralegal","title":"Para","hours":1.65,"rate":255.0,"amount":420.75,"narrative":"Prepare case assessment memorandum regarding the construction contract and recommended strategy","codes":["L120","A103"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2025-08-11","timekeeper":"JR","timekeeper_name":"Jordan Rosenthal","timekeeper_title":"Paralegal","title":"Para","hours":0.4,"rate":255.0,"amount":102.0,"narrative":"Review court docket and calendar of pending deadlines for the insurance coverage issue","codes":["L190","A104"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2025-08-15","timekeeper":"OM","timekeeper_name":"Oliver Marchetti","timekeeper_title":"Of Counsel","title":"O/C","hours":2.7,"rate":765.0,"amount":2065.5,"narrative":"Review court docket and calendar of pending deadlines for the warranty claim","codes":["L190","A104"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2025-08-18","timekeeper":"TO","timekeeper_name":"Tomas Okafor","timekeeper_title":"Partner","title":"Ptr","hours":0.3,"rate":940.0,"amount":282.0,"narrative":"Attend trial day in the regulatory inquiry","codes":["L450","A109"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2025-08-19","timekeeper":"GN","timekeeper_name":"Gideon Nwosu","timekeeper_title":"Partner","title":"Ptr","hours":1.3,"rate":945.0,"amount":1228.5,"narrative":"Review court docket and calendar of pending deadlines for the construction contract","codes":["L190","A104"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2025-08-19","timekeeper":"GN","timekeeper_name":"Gideon Nwosu","timekeeper_title":"Partner","title":"Ptr","hours":1.3,"rate":945.0,"amount":1228.5,"narrative":"Review court docket and calendar of pending deadlines for the construction contract","codes":["L190","A104"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2025-08-25","timekeeper":"HR","timekeeper_name":"Hector Rosenthal","timekeeper_title":"Associate","title":"Assoc","hours":1.1,"rate":500.0,"amount":550.0,"narrative":"Prepare trial notebook and demonstrative exhibits for the distribution agreement","codes":["L440","A101"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"fee","date":"2025-08-26","timekeeper":"JR","timekeeper_name":"Jordan Rosenthal","timekeeper_title":"Paralegal","title":"Para","hours":2.7,"rate":255.0,"amount":688.5,"narrative":"Analyze exposure and damages model for the distribution agreement","codes":["L120","A104"],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"expense","date":"2025-08-01","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":18.93,"amount":18.93,"narrative":"Long distance conference call charges","codes":["E105"],"page":1,"narrative_style":"clear"},
+  {"n":11,"line_type":"expense","date":"2025-08-13","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":616.22,"amount":616.22,"narrative":"Document hosting and processing vendor","codes":["E118"],"page":1,"narrative_style":"clear"},
+  {"n":12,"line_type":"expense","date":"2025-08-20","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":330.15,"amount":330.15,"narrative":"Court filing fee","codes":["E112"],"page":1,"narrative_style":"clear"},
+  {"n":13,"line_type":"expense","date":"2025-08-26","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":3.0,"rate":8.85,"amount":26.55,"narrative":"Postage - certified mail","codes":["E108"],"page":1,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["995 Market Street","Houston","Tax ID 64-4850491"],"template":"T11","pages":2},
+ "rule_set_id":"RS-01",
+ "context":{"matter_open":"2024-12-04","matter_close":"2025-11-29","matter_budget":57958.0,"approved_timekeepers":["Emeka Halloran","Hannah Rosenthal","Tomas Okafor","Naomi Nwosu","Hector Rosenthal","Oliver Marchetti","Jordan Rosenthal","Gideon Nwosu","Ingrid Quillen"],"invoice_received_date":"2025-11-04"},
+ "expected_findings":[
+  {"rule_id":"RS-01-R01","rule_type":"TimeIncrement","scope":"line","line_refs":[2],"consequence":"Reduce"},
+  {"rule_id":"RS-01-R06","rule_type":"InvoiceAge","scope":"invoice","line_refs":[],"consequence":"Flag"},
+  {"rule_id":"RS-01-R07","rule_type":"Duplicate","scope":"line","line_refs":[7],"consequence":"Disallow","related_line_refs":[6]},
+  {"rule_id":"RS-01-R08","rule_type":"RequiredData","scope":"invoice","line_refs":[],"consequence":"Reject"}
+ ],
+ "seeded_violations":4
+}

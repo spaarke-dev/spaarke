@@ -1,0 +1,31 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0104",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0104","generator_id":"gen_eval_set.py@1 F-0104","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0104.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-02"},
+ "header":{"firm":"Kestrel and Forsythe LLP","firm_invoice_number":"INV-2025-81970","invoice_date":"2025-04-01","billing_period_start":"2025-03-01","billing_period_end":"2025-03-31","firm_matter_reference":"43225-0022","po_number":"PO-4575059","fees_total":6759.5,"expenses_total":804.47,"adjustments_total":0.0,"total_due":7563.97,"currency":"USD"},
+ "timekeepers":[{"name":"Beatrix Galbraith","title":"Partner","rate":490.0,"billed_as":"BG"},{"name":"Gideon Blackwood","title":"Senior Associate","rate":345.0,"billed_as":"GB"},{"name":"Jordan Marchetti","title":"Partner","rate":535.0,"billed_as":"JM"},{"name":"Louis Voss","title":"Associate","rate":255.0,"billed_as":"LV"},{"name":"Rafael Kowalczyk","title":"Associate","rate":320.0,"billed_as":"RK"},{"name":"Sofia Brennan","title":"Paralegal","rate":170.0,"billed_as":"SB"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2025-03-03","timekeeper":"GB","timekeeper_name":"Gideon Blackwood","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":2.3,"rate":345.0,"amount":793.5,"narrative":"Prepare for oral argument in the lease dispute","codes":["L530","A101"],"page":2,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2025-03-05","timekeeper":"BG","timekeeper_name":"Beatrix Galbraith","timekeeper_title":"Partner","title":"Ptr","hours":2.1,"rate":825.0,"amount":1732.5,"narrative":"Draft notice of appeal and docketing statement for the licensing dispute","codes":["L510","A103"],"page":2,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2025-03-05","timekeeper":"JM","timekeeper_name":"Jordan Marchetti","timekeeper_title":"Partner","title":"Ptr","hours":2.2,"rate":535.0,"amount":1177.0,"narrative":"Plan strategy for upcoming phase of the data incident with team","codes":["L120","A101"],"page":2,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2025-03-07","timekeeper":"SB","timekeeper_name":"Sofia Brennan","timekeeper_title":"Paralegal","title":"Para","hours":1.6,"rate":170.0,"amount":272.0,"narrative":"Draft appellate brief in the vendor agreement","codes":["L520","A103"],"page":2,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2025-03-12","timekeeper":"LV","timekeeper_name":"Louis Voss","timekeeper_title":"Associate","title":"Assoc","hours":2.4,"rate":255.0,"amount":612.0,"narrative":"Revise appellate brief after cite check","codes":["L520","A104"],"page":2,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2025-03-12","timekeeper":"LV","timekeeper_name":"Louis Voss","timekeeper_title":"Associate","title":"Assoc","hours":2.7,"rate":255.0,"amount":688.5,"narrative":"Analyze exposure and damages model for the distribution agreement","codes":["L120","A104"],"page":2,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2025-03-13","timekeeper":"LV","timekeeper_name":"Louis Voss","timekeeper_title":"Associate","title":"Assoc","hours":2.6,"rate":255.0,"amount":663.0,"narrative":"Draft appellate brief in the distribution agreement","codes":["L520","A103"],"page":2,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2025-03-14","timekeeper":"RK","timekeeper_name":"Rafael Kowalczyk","timekeeper_title":"Associate","title":"Assoc","hours":1.6,"rate":320.0,"amount":512.0,"narrative":"Draft notice of appeal and docketing statement for the data incident","codes":["L510","A103"],"page":2,"narrative_style":"clear"},
+  {"n":9,"line_type":"fee","date":"2025-03-19","timekeeper":"RK","timekeeper_name":"Rafael Kowalczyk","timekeeper_title":"Associate","title":"Assoc","hours":0.4,"rate":320.0,"amount":128.0,"narrative":"Analyze exposure and damages model for the employment claim","codes":["L120","A104"],"page":2,"narrative_style":"clear"},
+  {"n":10,"line_type":"fee","date":"2025-03-26","timekeeper":"SB","timekeeper_name":"Sofia Brennan","timekeeper_title":"Paralegal","title":"Para","hours":0.5,"rate":170.0,"amount":85.0,"narrative":"Review court docket and calendar of pending deadlines for the construction contract","codes":["L190","A104"],"page":2,"narrative_style":"clear"},
+  {"n":11,"line_type":"fee","date":"2025-03-31","timekeeper":"RK","timekeeper_name":"Rafael Kowalczyk","timekeeper_title":"Associate","title":"Assoc","hours":0.3,"rate":320.0,"amount":96.0,"narrative":"Draft appellate brief in the insurance coverage issue","codes":["L520","A103"],"page":2,"narrative_style":"clear"},
+  {"n":12,"line_type":"expense","date":"2025-03-14","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":743.92,"amount":743.92,"narrative":"Court reporter and transcript - deposition","codes":["E115"],"page":2,"narrative_style":"clear"},
+  {"n":13,"line_type":"expense","date":"2025-03-24","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":60.55,"amount":60.55,"narrative":"Overnight courier to Tidewater Retail counsel","codes":["E107"],"page":2,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["625 Harbor Road","Dallas","Tax ID 44-4488686"],"template":"T21","pages":2},
+ "rule_set_id":"RS-02",
+ "context":{"matter_open":"2024-05-19","matter_close":"2025-06-29","matter_budget":55255.0,"approved_timekeepers":["Rafael Kowalczyk","Jordan Marchetti","Sofia Brennan","Louis Voss","Beatrix Galbraith","Gideon Blackwood","Marcus Mbeki"],"invoice_received_date":"2025-04-14"},
+ "expected_findings":[
+  {"rule_id":"RS-02-R02","rule_type":"ApprovedRate","scope":"line","line_refs":[2],"consequence":"Reduce"}
+ ],
+ "seeded_violations":1
+}

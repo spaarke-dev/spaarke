@@ -148,6 +148,15 @@ public class OutputMappingRunIdentityTests
 
     // ── DataverseUpdateHandler: writes AS the identity it is given ─────────────────────────────────────────────────────
 
+    /// <summary>
+    /// The table the handler-level tests map onto. Master merge (ebilling-r1): not <c>sprk_invoice</c>, whose writes the
+    /// invoice-family guard reads first and writes update-only (<c>InvoiceFamilyGenericUpdatePathTests</c> pins the identity on
+    /// that path); a plain table, so these tests isolate the run identity.
+    /// </summary>
+    private const string MappedTable = "sprk_analysis";
+
+    private static readonly Guid Mapped = Guid.Parse("22570000-0000-4000-8000-00000000f001");
+
     private readonly Mock<IFieldMappingDataverseService> _writes = new();
     private readonly RecordOwnershipResolverDouble _ownership = new();
 
@@ -161,7 +170,7 @@ public class OutputMappingRunIdentityTests
     }
 
     /// <summary>
-    /// The impersonated read (<see cref="IImpersonatedCommunicationQuery"/>): table metadata for <c>sprk_invoice</c>, and the row
+    /// The impersonated read (<see cref="IImpersonatedCommunicationQuery"/>): table metadata for <see cref="MappedTable"/>, and the row
     /// AS <see cref="Person"/> only when <paramref name="personCanReadTheRow"/> (Dataverse returns no row the person cannot read).
     /// </summary>
     private static Mock<IImpersonatedCommunicationQuery> ReadAsPerson(bool personCanReadTheRow, long version = 42L)
@@ -170,10 +179,10 @@ public class OutputMappingRunIdentityTests
             JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(json)!;
 
         var read = new Mock<IImpersonatedCommunicationQuery>(MockBehavior.Strict);
-        read.Setup(q => q.QueryAsync("EntityDefinitions", It.Is<string>(o => o.Contains("LogicalName eq 'sprk_invoice'")), Person,
+        read.Setup(q => q.QueryAsync("EntityDefinitions", It.Is<string>(o => o.Contains($"LogicalName eq '{MappedTable}'")), Person,
                 It.IsAny<CancellationToken>()))
-            .ReturnsAsync([Row("""{"EntitySetName":"sprk_invoices","PrimaryIdAttribute":"sprk_invoiceid"}""")]);
-        read.Setup(q => q.QueryAsync("sprk_invoices", $"$select=versionnumber&$filter=sprk_invoiceid eq {Invoice:D}", Person,
+            .ReturnsAsync([Row("""{"EntitySetName":"sprk_analysises","PrimaryIdAttribute":"sprk_analysisid"}""")]);
+        read.Setup(q => q.QueryAsync("sprk_analysises", $"$select=versionnumber&$filter=sprk_analysisid eq {Mapped:D}", Person,
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(personCanReadTheRow ? [Row($$"""{"versionnumber":{{version}}}""")] : []);
         return read;
@@ -183,11 +192,11 @@ public class OutputMappingRunIdentityTests
     public async Task TheHandler_WritesAsThePerson()
     {
         await Handler().UpdateAsync(
-            "sprk_invoice", Invoice, new Dictionary<string, object?> { ["sprk_aisummary"] = "x" },
+            MappedTable, Mapped, new Dictionary<string, object?> { ["sprk_aisummary"] = "x" },
             ConcurrencyMode.None, maxRetries: 1, CancellationToken.None, Person);
 
         _writes.Verify(w => w.UpdateRecordFieldsAsync(
-            "sprk_invoice", Invoice, It.IsAny<Dictionary<string, object?>>(), It.IsAny<CancellationToken>(), Person), Times.Once);
+            MappedTable, Mapped, It.IsAny<Dictionary<string, object?>>(), It.IsAny<CancellationToken>(), Person), Times.Once);
     }
 
     [Fact]
@@ -197,11 +206,11 @@ public class OutputMappingRunIdentityTests
         var rows = new Mock<IGenericEntityService>();
 
         await Handler(rows.Object, ReadAsPerson(personCanReadTheRow: true, version: 42L).Object).UpdateAsync(
-            "sprk_invoice", Invoice, new Dictionary<string, object?> { ["sprk_aisummary"] = "x" },
+            MappedTable, Mapped, new Dictionary<string, object?> { ["sprk_aisummary"] = "x" },
             ConcurrencyMode.Optimistic, maxRetries: 1, CancellationToken.None, Person);
 
         _writes.Verify(w => w.UpdateRecordFieldsAsync(
-            "sprk_invoice", Invoice, It.Is<Dictionary<string, object?>>(f => Equals(f["versionnumber"], 42L)),
+            MappedTable, Mapped, It.Is<Dictionary<string, object?>>(f => Equals(f["versionnumber"], 42L)),
             It.IsAny<CancellationToken>(), Person), Times.Once);
         rows.Verify(r => r.RetrieveAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()),
             Times.Never, "a person's row version is never read app-only");
@@ -213,17 +222,17 @@ public class OutputMappingRunIdentityTests
         // Fix round 1 (K3): an app-only versionnumber read answered for a row the person could not see, so "not found" and
         // "may not write" told a missing row from a hidden one. Read AS the person, a hidden row is no row.
         var rows = new Mock<IGenericEntityService>();
-        rows.Setup(r => r.RetrieveAsync("sprk_invoice", Invoice, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new Entity("sprk_invoice", Invoice) { ["versionnumber"] = 42L }); // the app-only read would see it
+        rows.Setup(r => r.RetrieveAsync(MappedTable, Mapped, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Entity(MappedTable, Mapped) { ["versionnumber"] = 42L }); // the app-only read would see it
         var hidden = () => Handler(rows.Object, ReadAsPerson(personCanReadTheRow: false).Object).UpdateAsync(
-            "sprk_invoice", Invoice, new Dictionary<string, object?> { ["sprk_aisummary"] = "x" },
+            MappedTable, Mapped, new Dictionary<string, object?> { ["sprk_aisummary"] = "x" },
             ConcurrencyMode.Optimistic, maxRetries: 1, CancellationToken.None, Person);
 
         var missing = new Mock<IGenericEntityService>();
-        missing.Setup(r => r.RetrieveAsync("sprk_invoice", Invoice, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+        missing.Setup(r => r.RetrieveAsync(MappedTable, Mapped, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((Entity)null!);
         var absent = () => Handler(missing.Object).UpdateAsync(
-            "sprk_invoice", Invoice, new Dictionary<string, object?> { ["sprk_aisummary"] = "x" },
+            MappedTable, Mapped, new Dictionary<string, object?> { ["sprk_aisummary"] = "x" },
             ConcurrencyMode.Optimistic, maxRetries: 1, CancellationToken.None);
 
         var hiddenMessage = (await hidden.Should().ThrowAsync<InvalidOperationException>()).Which.Message;
@@ -238,7 +247,7 @@ public class OutputMappingRunIdentityTests
         var rows = new Mock<IGenericEntityService>();
 
         var act = () => Handler(rows.Object).UpdateAsync(
-            "sprk_invoice", Invoice, new Dictionary<string, object?> { ["sprk_aisummary"] = "x" },
+            MappedTable, Mapped, new Dictionary<string, object?> { ["sprk_aisummary"] = "x" },
             ConcurrencyMode.Optimistic, maxRetries: 1, CancellationToken.None, Person);
 
         await act.Should().ThrowAsync<InvalidOperationException>();
@@ -250,7 +259,7 @@ public class OutputMappingRunIdentityTests
     public async Task TheHandler_WithoutAPerson_StillRefusesTheDenyList_AndWritesNothing()
     {
         var act = () => Handler().UpdateAsync(
-            "sprk_invoice", Invoice, new Dictionary<string, object?> { ["ownerid@odata.bind"] = $"/systemusers({Person:D})" },
+            MappedTable, Mapped, new Dictionary<string, object?> { ["ownerid@odata.bind"] = $"/systemusers({Person:D})" },
             ConcurrencyMode.None, maxRetries: 1, CancellationToken.None);
 
         (await act.Should().ThrowAsync<RecordOwnerUnresolvedException>()).Which.RefusalCode
@@ -264,7 +273,7 @@ public class OutputMappingRunIdentityTests
         // Fix round 1 (main-session decision): the mapping is the playbook's configuration, not the person's, so it is asked
         // RefuseAppOnlyWrite whatever identity the write runs as.
         var act = () => Handler().UpdateAsync(
-            "sprk_invoice", Invoice, new Dictionary<string, object?> { ["ownerid@odata.bind"] = $"/systemusers({Person:D})" },
+            MappedTable, Mapped, new Dictionary<string, object?> { ["ownerid@odata.bind"] = $"/systemusers({Person:D})" },
             ConcurrencyMode.None, maxRetries: 1, CancellationToken.None, Person);
 
         (await act.Should().ThrowAsync<RecordOwnerUnresolvedException>()).Which.RefusalCode

@@ -767,3 +767,86 @@ MSAL's account list is shared across clients in the tab. The CIAM plane has no a
 
 - `src/server/api/Sprk.Bff.Api/Services/ExternalAccess/ExternalAccessRemovalSweep.cs` (`RunAsync`)
 - `src/server/api/Sprk.Bff.Api/Services/ExternalAccess/IdentityLinkReconciliationJob.cs` (`RunRemovalSweepAsync`, heartbeat)
+
+### ISS-021 — The shared DataGrid sorts Money columns as text
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | next-round |
+| **Filed** | 2026-10-29 |
+| **Source** | R3 task 002 adversarial review B (owner grid columns) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2446 |
+
+**Description**
+
+A Money value reaches the browser as `{ value: n }`, and `DataGrid` `compare` sorts on the formatted label as text ("$1,000.00" before "$200.00"). It affects the Invoices grid's `sprk_totalamount` today, and `sprk_totalamount_base` after task 002. Fix: compare `.value` numerically when both sides carry it. The code is shared UI, so it is filed rather than changed in R3.
+
+**Entry-points**
+
+- `src/client/shared/Spaarke.UI.Components/src/components/DataGrid/DataGrid.tsx` (`compare`, ~1160-1174)
+
+### ISS-022 — DataGrid Export to Excel writes Money and option-set cells as raw values
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | next-round |
+| **Filed** | 2026-10-29 |
+| **Source** | R3 task 002 adversarial review B (owner grid columns) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2447 |
+
+**Description**
+
+The CSV export uses the raw value, not `@formattedValues`. A Money cell is exported as `{"value":1234.5}`, and option-set and status cells are exported as raw values. It affects all six external SPA grids. Fix: use `formattedLabelOf` first, and unwrap `{ value }`. The code is shared UI, so it is filed rather than changed in R3.
+
+**Entry-points**
+
+- `src/client/shared/Spaarke.UI.Components/src/components/DataGrid/commandBar/csvExport.ts` (~64-78), `commandBar/defaults.ts:228`
+
+### ISS-023 — The profile form shows an email that registration then refuses
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | next-round |
+| **Filed** | 2026-10-29 |
+| **Source** | R3 task 074 probe 5 (Tony Howe, a Dewey Cheatham member with no email attribute) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2449 |
+
+**Description**
+
+When the home token has no `email` claim, the form's prefill falls back to the username, but registration accepts the `email` claim only. The person fills in a form that can never succeed and then sees "We could not read your email address". Registration refusing the username is correct. Fix: have the `registration_required` refusal on `/me` say whether the email is usable, and show the "contact your administrator" state instead of the form when it is not. Workaround: an administrator sets the account's email attribute.
+
+**Entry-points**
+
+- `src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/CallerPrincipalResolver.cs` (~717-734)
+- `src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/WorkforceIdentityOptions.cs` (`WorkforceCallerClaims.TokenEmail`, the form prefill, which falls back to the username); registration itself reads only the `email` claim (`ExternalRegistrationEndpoints.TokenEmail`). Corrected 2026-10-29.
+- `src/client/external-spa/src/pages/RegistrationPage.tsx`
+
+### ISS-024 — Grant notifier emails a home-linked workforce contact as an external person (DI-137)
+
+| Field | Value |
+|---|---|
+| **Status** | Open (owner decision: fix in R3 with uac-r2, or R4) |
+| **Urgency** | next-round |
+| **Filed** | 2026-10-29 (by ontology-r1 as DI-137) |
+| **Source** | Ontology task 168 fix round 3, after the R3 review |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2458 |
+
+**Description**
+
+`GrantAccessNotifier.NotifyContactGrantAsync` decides "an internal user represents this contact" from `sprk_primarycontact` and the Spaarke-tenant object id only. A WorkforceHome contact linked to a licensed user by the home pair alone (the link the portal reads first) is therefore emailed a portal notice as an external person, while the portal shows that person the user's view. The notice is the only content involved. Reference fix: read the home link before the external branch, as `AssignTaskRecipientGate.HomeLinkAsync` (commit `bd32be448f`) does. The natural home is uac-r2 193 `ContactUserRepresentation` (DI-136 #2457).
+
+**Entry-points**
+
+- `src/server/api/Sprk.Bff.Api/Api/ExternalAccess/GrantAccessNotifier.cs` (`NotifyContactGrantAsync`, `EmailExternalContactGrantAsync` ~270-330)
+
+### ISS-025: Teams mobile layout not optimized (deferred to R4)
+
+| Field | Value |
+|---|---|
+| **Found** | 2026-10-29, task 071 (owner) |
+| **What** | The Teams tab loads in Teams mobile, but its layout is not adapted to the phone surface. |
+| **Decision** | Owner: not for this release; it loads. |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2466 |

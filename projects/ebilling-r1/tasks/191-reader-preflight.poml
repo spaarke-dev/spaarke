@@ -1,0 +1,79 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="191" project="ebilling-r1">
+  <metadata>
+    <title>Invoice reader preflight at intake, and the ai.invoice.* outcome codes in the contract</title>
+    <phase>3 Rules — intake hardening (found in the first dev UAT, word-add-in-r1)</phase>
+    <gate>startable now</gate>
+    <status>complete</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Adds one synchronous refusal to the three intake routes, following the storage preflight as the reference; no auth, schema or data-model change. Tags include bff-api.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>One scoped change copying an existing check (storage_not_configured) three times, plus contract notes.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>094, 095, 043</deps>
+    <tags>bff-api, ebilling</tags>
+    <estimated-effort>0.5 day</estimated-effort>
+  </metadata>
+
+  <prompt>When the invoice reader is not set up (ContentUnderstanding:Endpoint empty), a submit is accepted with a 202, gets a tracking number and a row, files the email, and then fails in the background job. Refuse it up front instead, as the file store's check already does: a synchronous 422 that writes and files nothing. Owner-approved 2026-10-31, relayed through word-add-in-r1.</prompt>
+
+  <role>SPAARKE platform developer. Expert in the BFF Minimal API, the ebilling intake and the 095 wire contract.</role>
+
+  <goal>On the from-email, from-document and upload routes, an environment whose invoice reader is not configured answers 422 ebilling.submission.reader_not_configured before any tracking number, row, stage or filing; the job keeps ai.invoice.read.not_configured as its backstop; the 095 contract lists the new 422 and every ai.invoice.* code the job can store.</goal>
+
+  <context>
+    <background>
+      Reference: the storage check. Grep storage_not_configured; the code is InvoiceSubmissionErrors.StorageNotConfigured, the from-email check is step 2b of SubmitInvoiceFromEmailOperation (CanStageAsync), the upload's is the stage inside InvoiceSubmissionService.WriteAsync.
+      The "configured" test is ContentUnderstandingOptions.IsConfigured, the one ContentUnderstandingClient.IsConfigured returns and InvoiceAi.ReadInvoiceAsync tests. Reuse it; do not parse the endpoint a second time.
+    </background>
+    <relevant-files>
+      <file role="reference">src/server/api/Sprk.Bff.Api/Services/Finance/Submission/SubmitInvoiceFromEmailOperation.cs (step 2b, the storage check)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Finance/Submission/InvoiceSubmissionService.cs (SubmitAsync, SubmitExistingDocumentAsync, the check)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Finance/Submission/SubmitInvoiceFromEmailOperation.cs (step 2c)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Finance/Submission/InvoiceSubmissionContracts.cs (InvoiceSubmissionErrors.ReaderNotConfigured)</file>
+      <file role="modify">projects/ebilling-r1/notes/095-from-email-contract.md (section 6 and section 9)</file>
+      <file role="modify">projects/ebilling-r1/notes/044-submission-operation.md, 092-submission-on-files.md (the upload route's notes)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="CLAUDE.md §11">The new error code and check answer the three justification questions in notes/191-reader-preflight.md. Extend InvoiceSubmissionService; no new type, endpoint or DI registration.</constraint>
+    <constraint source="CLAUDE.md §10">BFF hygiene: placement statement, publish-size delta against a fresh master build, no new HIGH CVE.</constraint>
+    <constraint source="order">Where the file store is not configured either, the store's code wins; the reader check goes right next to the storage check and after it.</constraint>
+    <constraint source="backstop">Do not change the job: with the setting removed between intake and job it still stores ai.invoice.read.not_configured as a permanent outcome.</constraint>
+    <constraint source="scope">Do not edit TASK-INDEX.md, current-task.md or .claude/.</constraint>
+  </constraints>
+
+  <steps mode="directional">
+    <step>Add InvoiceSubmissionErrors.ReaderNotConfigured = "ebilling.submission.reader_not_configured".</step>
+    <step>InvoiceSubmissionService takes IOptions&lt;ContentUnderstandingOptions&gt; and exposes the check (ReaderIsConfigured, ReaderNotConfiguredRefusal).</step>
+    <step>Place the check: from-email after the store check and before the marked-part read and step A; from-document after the intake's checks and before the Correction checks, step A and the create; upload after the intake's checks and before the first stage, asking the store first when the reader is not set up.</step>
+    <step>Contract: 095 section 6 gets the 422; section 9 gets every ai.invoice.* code the job can store (inventory from the code), each permanent or retried, with ai.invoice.read.not_configured as permanent, meaning "Invoice reading isn't set up in this environment." Update the upload route's notes (044, 092).</step>
+    <step>Write notes/191-reader-preflight.md (the §11 answers).</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>Each of the three routes, with the reader not configured, answers 422 ebilling.submission.reader_not_configured and writes nothing: no allocator call, no create, no stage, no job, no filing. Asserted on the existing test doubles.</criterion>
+    <criterion>With the reader configured, each route takes the normal path.</criterion>
+    <criterion>Store not configured and reader not configured together answer the storage code (storage first).</criterion>
+    <criterion>One test pins that the intake's check and the reader's agree for an empty, a blank and a set endpoint.</criterion>
+    <criterion>The job's outcome ai.invoice.read.not_configured is unchanged and still stored as permanent.</criterion>
+    <criterion>095 section 6 lists the 422; section 9 lists every ai.invoice.* code the job can store, each permanent or retried.</criterion>
+    <criterion>Test scope: the cases above and nothing beyond; no seed proof. Any extra test needs a one-line justification in the notes.</criterion>
+    <criterion>Gate: the 5 test projects build (Sprk.Bff.Api.Tests, Spaarke.ArchTests, Sprk.Bff.Api.IntegrationTests, Spe.Integration.Tests, Sprk.Provisioning.ControlPlane.LoadTests); the full ArchTests (ISS-005 is flaky, #2469: re-run it alone), the unit filter Submission|Invoice|Finance|FromEmail and the integration tests pass; publish-size delta measured at short paths; CVE check run.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>If the check cannot share the reader's own test (the two would disagree), or an existing test pins the reader-first order, STOP and escalate (root CLAUDE.md §6).</trigger>
+  </escalation>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>projects/ebilling-r1/CLAUDE.md</file>
+      <file>projects/ebilling-r1/notes/095-from-email-contract.md</file>
+    </files>
+  </knowledge>
+</task>

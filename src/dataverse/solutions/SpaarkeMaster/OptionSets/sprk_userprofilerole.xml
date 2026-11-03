@@ -1,0 +1,82 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<optionset Name="sprk_userprofilerole" localizedName="User Profile Role" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <OptionSetType>picklist</OptionSetType>
+  <IsGlobal>1</IsGlobal>
+  <IntroducedVersion>1.2.3.0</IntroducedVersion>
+  <IsCustomizable>1</IsCustomizable>
+  <displaynames>
+    <displayname description="User Profile Role" languagecode="1033" />
+  </displaynames>
+  <options>
+    <option value="100000000" ExternalValue="" IsHidden="0">
+      <labels>
+        <label description="Senior Partner" languagecode="1033" />
+      </labels>
+    </option>
+    <option value="100000001" ExternalValue="" IsHidden="0">
+      <labels>
+        <label description="Partner" languagecode="1033" />
+      </labels>
+    </option>
+    <option value="100000002" ExternalValue="" IsHidden="0">
+      <labels>
+        <label description="Senior Associate" languagecode="1033" />
+      </labels>
+    </option>
+    <option value="100000003" ExternalValue="" IsHidden="0">
+      <labels>
+        <label description="Associate" languagecode="1033" />
+      </labels>
+    </option>
+    <option value="100000004" ExternalValue="" IsHidden="0">
+      <labels>
+        <label description="Paralegal" languagecode="1033" />
+      </labels>
+    </option>
+    <option value="100000005" ExternalValue="" IsHidden="0">
+      <labels>
+        <label description="Specialist" languagecode="1033" />
+      </labels>
+    </option>
+    <option value="100000006" ExternalValue="" IsHidden="0">
+      <labels>
+        <label description="Other" languagecode="1033" />
+      </labels>
+    </option>
+    <option value="100000007" ExternalValue="" IsHidden="0">
+      <labels>
+        <label description="Practice Support" languagecode="1033" />
+      </labels>
+    </option>
+    <option value="100000008" ExternalValue="" IsHidden="0">
+      <labels>
+        <label description="Administrator" languagecode="1033" />
+      </labels>
+    </option>
+    <option value="100000009" ExternalValue="" IsHidden="0">
+      <labels>
+        <label description="Legal Operations" languagecode="1033" />
+      </labels>
+    </option>
+    <option value="100000010" ExternalValue="" IsHidden="0">
+      <labels>
+        <label description="Senior Counsel" languagecode="1033" />
+      </labels>
+    </option>
+    <option value="100000011" ExternalValue="" IsHidden="0">
+      <labels>
+        <label description="General Counsel" languagecode="1033" />
+      </labels>
+    </option>
+    <option value="100000012" ExternalValue="" IsHidden="0">
+      <labels>
+        <label description="Counsel" languagecode="1033" />
+      </labels>
+    </option>
+    <option value="100000013" ExternalValue="" IsHidden="0">
+      <labels>
+        <label description="Associate General Counsel" languagecode="1033" />
+      </labels>
+    </option>
+  </options>
+</optionset>

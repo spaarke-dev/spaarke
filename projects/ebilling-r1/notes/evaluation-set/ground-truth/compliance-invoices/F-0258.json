@@ -1,0 +1,40 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0258",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0258","generator_id":"gen_eval_set.py@1 F-0258","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0258.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-06"},
+ "header":{"firm":"Holloway & Cranmer LLP","firm_invoice_number":"INV-2025-18144","invoice_date":"2025-04-02","billing_period_start":"2025-03-01","billing_period_end":"2025-03-31","firm_matter_reference":"71662-0025","po_number":"PO-4530779","fees_total":9495.5,"expenses_total":229.81,"adjustments_total":0.0,"total_due":9725.31,"currency":"USD"},
+ "timekeepers":[{"name":"Aisha Rosenthal","title":"Paralegal","rate":130.0,"billed_as":"AR"},{"name":"Beatrix Tavares","title":"Paralegal","rate":125.0,"billed_as":"BT"},{"name":"Emeka Thornbury","title":"Associate","rate":240.0,"billed_as":"ET"},{"name":"Louis Pemberton","title":"Legal Assistant","rate":75.0,"billed_as":"LP"},{"name":"Mei Abernathy","title":"Of Counsel","rate":370.0,"billed_as":"MA"},{"name":"Peter Wickham","title":"Partner","rate":440.0,"billed_as":"PW"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2025-03-03","timekeeper":"LP","timekeeper_name":"Louis Pemberton","timekeeper_title":"Legal Assistant","title":"LA","hours":2.0,"rate":75.0,"amount":150.0,"narrative":"Attend trial day in the customs audit","codes":["L450","A109"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2025-03-06","timekeeper":"ET","timekeeper_name":"Emeka Thornbury","timekeeper_title":"Associate","title":"Assoc","hours":2.8,"rate":240.0,"amount":672.0,"narrative":"Prepare expert witness for testimony in the vendor agreement","codes":["L420","A101"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2025-03-07","timekeeper":"PW","timekeeper_name":"Peter Wickham","timekeeper_title":"Partner","title":"Ptr","hours":2.2,"rate":440.0,"amount":968.0,"narrative":"Prepare trial notebook and demonstrative exhibits for the lease dispute","codes":["L440","A101"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2025-03-10","timekeeper":"PW","timekeeper_name":"Peter Wickham","timekeeper_title":"Partner","title":"Ptr","hours":2.3,"rate":440.0,"amount":1012.0,"narrative":"Attend trial day in the construction contract","codes":["L450","A109"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2025-03-12","timekeeper":"PW","timekeeper_name":"Peter Wickham","timekeeper_title":"Partner","title":"Ptr","hours":0.7,"rate":440.0,"amount":308.0,"narrative":"Attend hearing on protective order in the construction contract","codes":["L450","A109"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2025-03-12","timekeeper":"ET","timekeeper_name":"Emeka Thornbury","timekeeper_title":"Associate","title":"Assoc","hours":2.2,"rate":240.0,"amount":528.0,"narrative":"Revise mediation statement after review by lead counsel","codes":["L430","A104"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2025-03-12","timekeeper":"PW","timekeeper_name":"Peter Wickham","timekeeper_title":"Partner","title":"Ptr","hours":0.7,"rate":440.0,"amount":308.0,"narrative":"Attend hearing on protective order in the construction contract","codes":["L450","A109"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2025-03-17","timekeeper":"ET","timekeeper_name":"Emeka Thornbury","timekeeper_title":"Associate","title":"Assoc","hours":1.8,"rate":240.0,"amount":432.0,"narrative":"Review court docket and calendar of pending deadlines for the warranty claim","codes":["L190","A104"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"fee","date":"2025-03-20","timekeeper":"ET","timekeeper_name":"Emeka Thornbury","timekeeper_title":"Associate","title":"Assoc","hours":1.5,"rate":240.0,"amount":360.0,"narrative":"Attend trial day in the insurance coverage issue","codes":[],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"fee","date":"2025-03-20","timekeeper":"AR","timekeeper_name":"Aisha Rosenthal","timekeeper_title":"Paralegal","title":"Para","hours":2.6,"rate":130.0,"amount":338.0,"narrative":"Plan strategy for upcoming phase of the distribution agreement with team","codes":["L120","A101"],"page":1,"narrative_style":"clear"},
+  {"n":11,"line_type":"fee","date":"2025-03-25","timekeeper":"BT","timekeeper_name":"Beatrix Tavares","timekeeper_title":"Paralegal","title":"Para","hours":2.5,"rate":125.0,"amount":312.5,"narrative":"Attend hearing on discovery plan in the lease dispute","codes":["L450","A109"],"page":1,"narrative_style":"clear"},
+  {"n":12,"line_type":"fee","date":"2025-03-28","timekeeper":"MA","timekeeper_name":"Mei Abernathy","timekeeper_title":"Of Counsel","title":"O/C","hours":4.0,"rate":370.0,"amount":1480.0,"narrative":"Draft protective order for trial in the employment claim","codes":["L430","A103"],"page":2,"narrative_style":"clear"},
+  {"n":13,"line_type":"fee","date":"2025-03-28","timekeeper":"MA","timekeeper_name":"Mei Abernathy","timekeeper_title":"Of Counsel","title":"O/C","hours":4.0,"rate":370.0,"amount":1480.0,"narrative":"Plan strategy for upcoming phase of the licensing dispute with team","codes":["L120","A101"],"page":2,"narrative_style":"clear"},
+  {"n":14,"line_type":"fee","date":"2025-03-28","timekeeper":"MA","timekeeper_name":"Mei Abernathy","timekeeper_title":"Of Counsel","title":"O/C","hours":3.0,"rate":370.0,"amount":1110.0,"narrative":"Prepare trial notebook and demonstrative exhibits for the warranty claim","codes":["L440","A101"],"page":2,"narrative_style":"clear"},
+  {"n":15,"line_type":"fee","date":"2025-03-28","timekeeper":"MA","timekeeper_name":"Mei Abernathy","timekeeper_title":"Of Counsel","title":"O/C","hours":0.1,"rate":370.0,"amount":37.0,"narrative":"Prepare monthly status report to client regarding the distribution agreement","codes":["L190","A111"],"page":2,"narrative_style":"clear"},
+  {"n":16,"line_type":"expense","date":"2025-03-14","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":26.61,"amount":26.61,"narrative":"Long distance conference call charges","codes":["E105"],"page":2,"narrative_style":"clear"},
+  {"n":17,"line_type":"expense","date":"2025-03-17","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":11.86,"amount":11.86,"narrative":"Long distance conference call charges","codes":["E105"],"page":2,"narrative_style":"clear"},
+  {"n":18,"line_type":"expense","date":"2025-03-20","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":191.34,"amount":191.34,"narrative":"Online legal research charges","codes":["E106"],"page":2,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["270 Pine Street","Dallas","Tax ID 38-1581208"],"template":"T15","pages":2},
+ "rule_set_id":"RS-06",
+ "context":{"matter_open":"2024-03-15","matter_close":"2025-06-29","matter_budget":63901.0,"approved_timekeepers":["Peter Wickham","Aisha Rosenthal","Emeka Thornbury","Louis Pemberton","Cyrus Dunleavy","Mei Abernathy","Beatrix Ramanathan"],"invoice_received_date":"2025-04-12"},
+ "expected_findings":[
+  {"rule_id":"RS-06-R01","rule_type":"ApprovedTimekeeper","scope":"line","line_refs":[11],"consequence":"Reject"},
+  {"rule_id":"RS-06-R03","rule_type":"ExpenseRule","scope":"line","line_refs":[18],"consequence":"Disallow"},
+  {"rule_id":"RS-06-R07","rule_type":"DailyHoursCap","scope":"line","line_refs":[14],"consequence":"Reduce"},
+  {"rule_id":"RS-06-R09","rule_type":"Duplicate","scope":"line","line_refs":[7],"consequence":"Disallow","related_line_refs":[5]},
+  {"rule_id":"RS-06-R10","rule_type":"RequiredData","scope":"line","line_refs":[9],"consequence":"Reject"}
+ ],
+ "seeded_violations":5
+}

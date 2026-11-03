@@ -1,0 +1,110 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="085" project="ebilling-r1">
+  <metadata>
+    <title>Rate cards keyed to Procedure Version: import, copy-forward, resolver tiers re-keyed to the rank; no scope column</title>
+    <phase>3 Rules (WP3) — Procedure model (EB-D-148), wave W3-E</phase>
+    <gate>080 (sprk_ratecard.sprk_procedureversion live on dev) and 082 (resolver output names each version's rate card and rank) merged</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Changes the rate every fee line is judged against (precedence, ambiguity, fail-closed) and the rate-card import contract; .cs files across resolution and import.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>A complete spec with exact references (today's resolver tiers, 082's resolver output, 081's copy-forward); depth is in precedence and refusal cases, not open design.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>P3-E</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>080, 082</deps>
+    <tags>bff, api, rules, testing</tags>
+    <estimated-effort>1-2 days</estimated-effort>
+  </metadata>
+
+  <prompt>Re-key rate cards to the Procedure Version (notes/procedure-and-file-model.md sections 7.1, 7.2 "Rate cards", 7.3 "Rates", 12 rows D-120 and 078): the import creates a Draft card under a Procedure Version of a Rate-card Procedure and takes its firm from the Procedure; Version 2's card can start as a copy of Version 1's; the rate resolution reads only the cards of the Procedure Versions 082's resolver chose for each line and ranks them by the resolver's rank key. The planned sprk_ratecard scope column and its backfill (old 080 S6) are not built.</prompt>
+
+  <role>SPAARKE platform developer. Expert in the invoice resolution step (046), the rate-card import (078) and pure resolver testing.</role>
+
+  <goal>A line's approved rate comes only from published cards of the Procedure Versions in force for that line's work date and the invoice's firm; the nearer, higher-ranked card decides; equal-rank different amounts are Ambiguous; no card is tied to a core record any more.</goal>
+
+  <context>
+    <background>Model I-P3 (a rate card's Procedure always names its Firm; sprk_ratecard.sprk_firm set from it), 7.1 (rateCard = procVersion's published rate card), 7.2 (importing creates that version's card; Version 2's card can start as a copy; sprk_procedureversion replaces the core-record lookups and the planned scope column; sprk_firm kept), 7.3 (085's tiers re-keyed; different amounts in the deciding tier give Ambiguous), 12 (D-120: no longer tied to a core record). Today: RateCardResolver.Applies (Services/Finance/Resolution/RateCardResolver.cs:119-145) switches on RateRow.CardScopes; Tier (:113-114) puts a core-record card before a firm card; RateCardScope (InvoiceResolutionModels.cs:247); InvoiceResolutionService.ReadRatesAsync (:269) and BuildRateQuery (:307) with ScopeColumns (:33); RateCardImportService.ImportAsync (:152) validates request.Core (:173) and routes the owner from it (:200-211); RateCardImportEndpoints parses matterId / projectId / workAssignmentId (:120, :167-187); PublishAsync (:410) stays as is.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Finance/Resolution/RateCardResolver.cs, InvoiceResolutionService.cs, InvoiceResolutionModels.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Finance/RateCardImportService.cs; src/server/api/Sprk.Bff.Api/Api/Finance/RateCardImportEndpoints.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Finance/Procedures/ProcedureService.cs (081's copy-forward calls the card copy)</file>
+      <file role="modify">tests/unit/Sprk.Bff.Api.Tests/Services/Finance/Resolution/RateCardResolverTests.cs, InvoiceResolutionServiceTests.cs; tests/unit/Sprk.Bff.Api.Tests/Services/Finance/RateCardImportServiceTests.cs; the RateCardImportEndpoints tests</file>
+      <file role="modify">projects/ebilling-r1/notes/defer-issues.md (DEF-027 status line)</file>
+      <file role="read">src/server/api/Sprk.Bff.Api/Services/Signals/Billing/ProcedureResolver.cs (082)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="model 7.1, 7.3">A rate row is used only when its card is Published and active, its sprk_procedureversion is a version 082's resolver chose for that line's work date (or the pinned version), its sprk_firm equals the invoice's firm, and the card and rate are in force on the date. Tiers, first with any rate decides: the card's rank by the resolver's key (Level, −Distance, FirmSpecific; Manual d0 &gt; Manual d1 &gt; Firm &gt; All records), then timekeeper before classification. Different amounts in the deciding tier → Ambiguous (no rate used); equal amounts → one rate.</constraint>
+    <constraint source="model 7.1 (fail closed)">The resolution step gets the versions from 082's resolver in one call per invoice; a resolver fault propagates (the job retries). No core-record lookup on sprk_ratecard is read; ScopeColumns and the core-record branch of BuildRateQuery are removed.</constraint>
+    <constraint source="model 7.2, I-P3">Import takes procedureVersionId (query parameter, replacing matterId / projectId / workAssignmentId): the version must be Draft and its Procedure of Type Rate card, else 400 ratecard.procedure_version_invalid; sprk_procedureversion and sprk_firm are set from it (a request firmId that differs → 400). The owner is resolved with NO parents (the card is reusable, not a core record's child). Authorization: the existing card-create privilege check plus the caller's Write on the Procedure (Record path).</constraint>
+    <constraint source="model 7.2">Copy-forward: RateCardImportService gains one method that copies the previous version's published card (and its active rates) as a Draft card under the new version; 081's copy-forward calls it when the Procedure's Type is Rate card. No new route.</constraint>
+    <constraint source="model 12 (D-120), 13 (085 row)">No code reads or writes sprk_ratecard.sprk_scope or the card's core-record lookups; no backfill script. The 078 "at most one core lookup" rule and its error are removed.</constraint>
+    <constraint source=".claude/constraints/bff-extensions.md">No new service or registration; publish-size delta; no package; no new HIGH CVE.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ebilling-r1/notes/procedure-and-file-model.md (sections 3.1 I-P3, 7.1-7.3, 12)</file>
+      <file>projects/ebilling-r1/tasks/078-ratecard-import.poml</file>
+      <file>docs/data-model/sprk_ratecard.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+    <patterns>
+      <pattern name="Resolver tiers and ambiguity" location="src/server/api/Sprk.Bff.Api/Services/Finance/Resolution/RateCardResolver.cs">Keep Applies pure; replace the scope switch with the rank.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">RateRow gains the card's Procedure Version and rank; ReadRatesAsync and BuildRateQuery read the chosen versions' cards; RateCardScope replaced by the rank (update consumers the compiler finds).</step>
+    <step order="2">RateCardResolver.Applies and Tier; resolver tests.</step>
+    <step order="3">InvoiceResolutionService calls 082's resolver; service tests.</step>
+    <step order="4">Import re-keyed (endpoint parsing, validation, owner without parents); card copy-forward and its call from 081's copy-forward; tests.</step>
+    <step order="5">Seeding proof: let Applies accept a card of a version the resolver did not choose; the "unchosen version's card is not used" test must fail. Restore and re-run.</step>
+    <step order="6">dotnet build and test; publish-size delta.</step>
+    <step order="7">DEF-027 in notes/defer-issues.md: "Superseded by EB-D-148: cards keyed to Procedure Version (085); live after 079". Update TASK-INDEX.md: this task's status cell to "✅ [done]".</step>
+    <step order="8">Record deviations in projects/ebilling-r1/notes/085-ratecard-procedure-version.md.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If 082's resolver output does not name each chosen version's rate card and rank, STOP and ask the main session; do not re-resolve Procedures in the resolution step.</trigger>
+    <trigger>If an existing consumer of RateResolution.Scope (review read model, findings) cannot take the rank without a contract change visible to a firm, STOP and report.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>RateCardImportService, RateCardResolver and InvoiceResolutionService exist and are changed in place; the copy method is the only new member.</existing>
+    <extension>Extended in place; the copy is a method on the import service, which already writes cards and rates, so no new service.</extension>
+    <cost-of-doing-nothing>Rates keep coming from core-record cards that the Procedure model no longer creates, so a firm's 2026 rate card never judges 2026 work and a pinned 2025 card is never honoured (O-4).</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="dotnet">build, test</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">RateCardResolver.cs, InvoiceResolutionService.cs, InvoiceResolutionModels.cs, RateCardImportService.cs, RateCardImportEndpoints.cs, ProcedureService.cs (one call)</output>
+    <output type="test">RateCardResolverTests.cs, InvoiceResolutionServiceTests.cs, RateCardImportServiceTests.cs, the endpoint tests</output>
+    <output type="docs">projects/ebilling-r1/notes/085-ratecard-procedure-version.md; DEF-027 status line</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Work dated in v1's window uses v1's card and in v2's window v2's; a record pinned to v1 uses v1's card for v2-window work; a card of a version the resolver did not choose is never used.</criterion>
+    <criterion testable="true">A manually assigned (d0) Procedure's card beats a firm Procedure's card, which beats an all-records Procedure's card; within a tier a timekeeper rate beats a classification rate; two cards in the deciding tier with different amounts give Ambiguous; equal amounts give one rate.</criterion>
+    <criterion testable="true">A card whose sprk_firm differs from the invoice's firm, a Draft card and an inactive card are not used; a resolver fault propagates (no rate on a partial set).</criterion>
+    <criterion testable="true">Import: a Draft version of a Rate-card Procedure creates a Draft card with sprk_procedureversion and the Procedure's firm; a non-Draft version, a non-Rate-card Procedure or a mismatched firmId is refused 400; matterId / projectId / workAssignmentId are no longer accepted; the owner is resolved with no parents; a caller without Write on the Procedure is refused.</criterion>
+    <criterion testable="true">Copy-forward of a Rate-card Procedure creates a Draft card under the new version with the previous card's active rates; the previous card is unchanged.</criterion>
+    <criterion testable="true">Negative: no code reads or writes sprk_ratecard.sprk_scope or a card core-record lookup (Grep in the diff and the touched files).</criterion>
+    <criterion testable="true">Seeding proof recorded; publish-size delta recorded; no package; no new HIGH CVE.</criterion>
+    <criterion testable="true">Cover the stated contract plus the edge cases named above. Anything beyond that needs a one-line justification in task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>The superseded 085 (explicit card scope, direct inheritance, #2132) is dropped: cards are no longer tied to a core record (D-120 revised). 086 is now invoice Stored Files only; a card no longer hangs from a core record, so its owner has no parents (model 5.2 lists no rate-card lineage edge). P3-E beside 083 and 084: no shared files. ontology-r1 080 review 2026-10-21: InvoiceContextService.cs:977 hand-types the core tables (sprk_matter, sprk_project, sprk_workassignment) to classify a rate card as core-scoped. Re-keying cards to Procedure Version removes that card scope; delete or replace this code in this task (never a second hand-typed core list; use FilingCores if a core list is still needed). ontology-r1 D-176 2026-10-21: ApprovedRate and Discount Signals quote rate-card rows and are treated as inside the invoice's family, because rate cards carry no record-level security of their own. If rate cards ever get record-level security (matter-restricted or Secure) that differs from the invoice's, tell ontology-r1 so D-176 is reopened.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load the knowledge files first. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

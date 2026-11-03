@@ -1,0 +1,24 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0382",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0382","generator_id":"gen_eval_set.py@1 F-0382","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0382.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-04"},
+ "header":{"firm":"Holloway & Ambrose LLP","firm_invoice_number":"INV-2026-63401","invoice_date":"2025-11-04","billing_period_start":"2025-10-01","billing_period_end":"2025-10-31","firm_matter_reference":"36514-0031","po_number":"PO-4510347","fees_total":4715.0,"expenses_total":1120.4,"adjustments_total":0.0,"total_due":5835.4,"currency":"USD"},
+ "timekeepers":[{"name":"Emeka Yilmaz","title":"Associate","rate":290.0,"billed_as":"EY"},{"name":"Imani Rosenthal","title":"Partner","rate":605.0,"billed_as":"IR"},{"name":"Marcus Galbraith","title":"Associate","rate":355.0,"billed_as":"MG"},{"name":"Oliver Brennan","title":"Paralegal","rate":200.0,"billed_as":"OB"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2025-10-07","timekeeper":"EY","timekeeper_name":"Emeka Yilmaz","timekeeper_title":"Associate","title":"Assoc","hours":1.5,"rate":290.0,"amount":435.0,"narrative":"Research case law supporting requests for production","codes":["L240","A102"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2025-10-10","timekeeper":"EY","timekeeper_name":"Emeka Yilmaz","timekeeper_title":"Associate","title":"Assoc","hours":2.25,"rate":290.0,"amount":652.5,"narrative":"Prepare case assessment memorandum regarding the insurance coverage issue and recommended strategy","codes":["L120","A103"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2025-10-10","timekeeper":"IR","timekeeper_name":"Imani Rosenthal","timekeeper_title":"Partner","title":"Ptr","hours":3.0,"rate":605.0,"amount":1815.0,"narrative":"Review documents produced by Harbor Point Capital for responsiveness","codes":["L320","A104"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2025-10-23","timekeeper":"MG","timekeeper_name":"Marcus Galbraith","timekeeper_title":"Associate","title":"Assoc","hours":1.25,"rate":355.0,"amount":443.75,"narrative":"Attend deposition of Alder & Finch Ltd corporate representative","codes":["L330","A109"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2025-10-23","timekeeper":"EY","timekeeper_name":"Emeka Yilmaz","timekeeper_title":"Associate","title":"Assoc","hours":2.25,"rate":290.0,"amount":652.5,"narrative":"Prepare production set and cover correspondence for service on Solano Freight","codes":["L320","A110"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2025-10-28","timekeeper":"MG","timekeeper_name":"Marcus Galbraith","timekeeper_title":"Associate","title":"Assoc","hours":0.75,"rate":355.0,"amount":266.25,"narrative":"Review court docket and calendar of pending deadlines for the insurance coverage issue","codes":["L190","A104"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2025-10-31","timekeeper":"OB","timekeeper_name":"Oliver Brennan","timekeeper_title":"Paralegal","title":"Para","hours":2.25,"rate":200.0,"amount":450.0,"narrative":"Review expert report served by Harbor Point Capital","codes":["L340","A104"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"expense","date":"2025-10-09","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":1120.4,"amount":1120.4,"narrative":"Court reporter and transcript - deposition","codes":["E115"],"page":1,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["148 Lakeshore Drive","Chicago","Tax ID 69-5530392"],"template":"T08","pages":1},
+ "rule_set_id":"RS-04",
+ "context":{"matter_open":"2024-12-23","matter_close":"2026-01-29","matter_budget":48341.0,"approved_timekeepers":["Emeka Yilmaz","Oliver Quillen","Samuel Brennan","Imani Rosenthal","Oliver Brennan","Marcus Galbraith"],"invoice_received_date":"2025-11-16"},
+ "expected_findings":[],
+ "seeded_violations":0
+}

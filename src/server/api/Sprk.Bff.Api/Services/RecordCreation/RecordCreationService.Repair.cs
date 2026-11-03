@@ -40,9 +40,13 @@ namespace Sprk.Bff.Api.Services.RecordCreation;
 /// </remarks>
 internal sealed partial class RecordCreationService
 {
-    /// <summary>The invoice family: ebilling-r1's <c>InvoiceFamilyCoreRecordGuard</c> owns every stored-row write of these.</summary>
+    /// <summary>
+    /// The invoice family: ebilling-r1's <c>InvoiceFamilyCoreRecordGuard</c> owns every stored-row write of these — its
+    /// <see cref="InvoiceFamilyCoreRecordGuard.CoreRecordLookups"/> tables, all six in the registry since task 017, so
+    /// none is repaired past the guard.
+    /// </summary>
     private static readonly IReadOnlySet<string> InvoiceFamilyTables =
-        new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "sprk_invoice", "sprk_billingevent" };
+        new HashSet<string>(InvoiceFamilyCoreRecordGuard.CoreRecordLookups.Keys, StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
     /// Review F1-f / UAC-r2: tables Repair never touches. Repair's own set, NOT the registry's ownership exception: Create's
@@ -59,12 +63,11 @@ internal sealed partial class RecordCreationService
     private const string OwnerColumn = "ownerid";
     private const string OwningBusinessUnitColumn = "owningbusinessunit";
     private const string VersionNumberColumn = "versionnumber";
-    private const string SearchIndexTable = "sprk_aisearchindex";
 
     /// <summary>
-    /// Repairs <paramref name="table"/> <paramref name="id"/> as the system principal: mapping (step 3), owner (step 7),
-    /// search-index default (step 8) and the I-1 stamp (step 10), fill-only, in ONE conditional update — or none when
-    /// nothing is missing. Never throws for a Dataverse fault (cancellation aside): every outcome is in the report.
+    /// Repairs <paramref name="table"/> <paramref name="id"/> as the system principal: mapping (step 3), owner (step 7)
+    /// and the I-1 stamp (step 10), fill-only, in ONE conditional update — or none when nothing is missing. No search-index
+    /// column is written (task 041, FR-40). Never throws for a Dataverse fault (cancellation aside): every outcome is in the report.
     /// </summary>
     /// <exception cref="ArgumentException">No table or no id.</exception>
     internal async Task<RecordRepairOutcome> RepairAsync(string table, Guid id, CancellationToken ct)
@@ -125,7 +128,7 @@ internal sealed partial class RecordCreationService
             await RepairMappingAsync(table, rule, row, ownerParents, patch, mapped, report, warnings, ct).ConfigureAwait(false);
         }
 
-        await RepairSearchIndexAsync(table, rule, row, owner.BusinessUnit, patch, report, ct).ConfigureAwait(false);
+        // No search-index step (task 041, FR-40): the index follows the content type, so Repair writes neither column.
         await RepairStampAsync(table, row, patch, report, ct).ConfigureAwait(false);
 
         RecordRepairOutcome Outcome(RecordRepairStatus status, string? reason) => new()
@@ -157,7 +160,7 @@ internal sealed partial class RecordCreationService
         // #2170: the write itself asks the app-only refusal (the per-member guard, EveryGenericUpdateWriter_AsksTheAppOnlyRefusal).
         // #2247: it asks over the MAPPED columns only (`mapped`: what a field-mapping rule, a configuration, gave), never over
         // the columns Repair decides itself: the owner (step 7, its ownership logic writes `ownerid`, which the refusal
-        // refuses from every configuration), the search-index default (step 8) and the I-1 stamp (step 10). A rule that
+        // refuses from every configuration) and the I-1 stamp (step 10). A rule that
         // targets the owner or the creator is never mapped: the per-rule ask (DocumentServerOwnedRefusal) skips it first, and
         // ProtectedFromMapping also holds the plain owner and creator-person names. So this only fires if the mapping ever
         // lets one through: nothing is written.
@@ -332,6 +335,11 @@ internal sealed partial class RecordCreationService
             var protectedColumns = new HashSet<string>(ProtectedFromMapping(table, rule, serverSetLookupColumns: null),
                 StringComparer.OrdinalIgnoreCase);
             protectedColumns.UnionWith(neverMapped.Keys);
+            // Review R3 (FR-38), task 041 (FR-40): on a search-indexed table both index columns are server-owned and nothing writes
+            // them, so a rule that targets either never copies the parent's index. Kept here, not in ProtectedFromMapping:
+            // create's step 3 drops a mapped index itself (and logs it, origin=mapping), so its behaviour stays as it is.
+            if (rule.SearchIndexed)
+                protectedColumns.UnionWith([SearchIndexColumns.LookupColumn, SearchIndexColumns.LegacyTextColumn]);
 
             var written = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             CreateTimeFieldMapping.ApplyFillOnly(
@@ -599,97 +607,6 @@ internal sealed partial class RecordCreationService
         return type?.GetAttributeValue<string>(OwnedChildWrite.RecordTypeLogicalNameColumn);
     }
 
-    // ── Step 8: search-index default ────────────────────────────────────────────────────────────────────────────────
-
-    /// <summary>
-    /// Step 8 (FR-10) for an existing row: on a search-indexed table, each of the two columns the row does not hold is filled
-    /// from its OWNING business unit (the repaired owner's when step 7 re-owned it), by the create's own reads. A unit that
-    /// cannot be read fills nothing.
-    /// </summary>
-    private async Task RepairSearchIndexAsync(
-        string table, RecordTableRule rule, Entity row, Guid? businessUnit, Dictionary<string, object> patch,
-        List<RecordRepairField> report, CancellationToken ct)
-    {
-        if (!rule.SearchIndexed)
-            return;
-
-        var name = SearchIndexColumns.LegacyTextColumn;
-        var lookup = SearchIndexColumns.LookupColumn;
-        var holdsName = HoldsValue(row, name) || patch.ContainsKey(name);
-        var holdsLookup = HoldsValue(row, lookup) || patch.ContainsKey(lookup);
-        if (holdsName)
-            report.Add(RecordRepairField.Present(RecordRepairPart.SearchIndex, name));
-        if (holdsLookup)
-            report.Add(RecordRepairField.Present(RecordRepairPart.SearchIndex, lookup));
-        if (holdsName && holdsLookup)
-            return;
-
-        // UAC-r2 condition (b) F2-1: filled only once the owner is settled on a team — already team-owned, or re-owned in this
-        // patch (step 7 writes only a team). A held column overrides SearchIndexNameResolver's own choice for good, so it is
-        // never filled from the unit of an owner Repair did not settle (kept in another unit, refused, or unknown).
-        var rowOwner = row.GetAttributeValue<EntityReference>(OwnerColumn);
-        var ownerIsTeam = patch.ContainsKey(OwnerColumn)
-            || (rowOwner is { } held && held.Id != Guid.Empty
-                && string.Equals(held.LogicalName, "team", StringComparison.OrdinalIgnoreCase));
-        if (!ownerIsTeam)
-        {
-            _logger.LogInformation("[RECORD-REPAIR] {Table} {Id}: the owner is not settled on a team; no search index filled",
-                table, row.Id);
-            if (!holdsName)
-                report.Add(RecordRepairField.Skipped(RecordRepairPart.SearchIndex, name, RecordRepairReason.SearchIndexOwnerUnsettled));
-            if (!holdsLookup)
-                report.Add(RecordRepairField.Skipped(RecordRepairPart.SearchIndex, lookup, RecordRepairReason.SearchIndexOwnerUnsettled));
-            return;
-        }
-
-        (string? Name, Guid? Index) defaults;
-        try
-        {
-            if (businessUnit is not { } unit)
-                throw new InvalidOperationException("the row's owning business unit is not known");
-            defaults = await BusinessUnitSearchDefaultsAsync(unit, ct).ConfigureAwait(false);
-        }
-        catch (OperationCanceledException) when (ct.IsCancellationRequested)
-        {
-            throw;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "[RECORD-REPAIR] the search-index defaults for {Table} {Id} could not be read; none filled", table, row.Id);
-            if (!holdsName)
-                report.Add(RecordRepairField.Skipped(RecordRepairPart.SearchIndex, name, RecordRepairReason.SearchIndexUnavailable));
-            if (!holdsLookup)
-                report.Add(RecordRepairField.Skipped(RecordRepairPart.SearchIndex, lookup, RecordRepairReason.SearchIndexUnavailable));
-            return;
-        }
-
-        if (!holdsName)
-        {
-            if (defaults.Name is { } indexName)
-            {
-                patch[name] = indexName;
-                report.Add(RecordRepairField.Repaired(RecordRepairPart.SearchIndex, name));
-            }
-            else
-            {
-                report.Add(RecordRepairField.Skipped(RecordRepairPart.SearchIndex, name, RecordRepairReason.SearchIndexNoDefault));
-            }
-        }
-
-        if (!holdsLookup)
-        {
-            if (defaults.Index is { } index)
-            {
-                patch[lookup] = new EntityReference(SearchIndexTable, index);
-                report.Add(RecordRepairField.Repaired(RecordRepairPart.SearchIndex, lookup));
-            }
-            else
-            {
-                report.Add(RecordRepairField.Skipped(RecordRepairPart.SearchIndex, lookup, RecordRepairReason.SearchIndexNoDefault));
-            }
-        }
-    }
-
     // ── Step 10: I-1 stamp ──────────────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
@@ -831,9 +748,6 @@ internal enum RecordRepairPart
     /// <summary>Step 7, the owner.</summary>
     Owner,
 
-    /// <summary>Step 8, the search-index default.</summary>
-    SearchIndex,
-
     /// <summary>Step 10, the I-1 core-ancestor stamp.</summary>
     CoreAncestorStamp,
 }
@@ -936,10 +850,6 @@ internal static class RecordRepairReason
     /// (its stamp source), so Repair's mapping never fills it.</summary>
     internal const string MappedValueWouldRefilePair = "record_repair.mapped_value_would_refile_pair";
 
-    /// <summary>UAC-r2 condition (b) F2-1: the owner is not settled on a team, so the search index is not filled from the
-    /// row's current unit (the column would override the resolver's own choice for good).</summary>
-    internal const string SearchIndexOwnerUnsettled = "record_repair.search_index_owner_unsettled";
-
     internal const string OwnerUnknown = "record_repair.owner_unknown";
     internal const string OwnerTeamOwned = "record_repair.owner_team_owned";
     internal const string OwnerKeptByException = "record_repair.owner_kept_by_exception";
@@ -958,9 +868,6 @@ internal static class RecordRepairReason
 
     /// <summary>Task 016 escalation trigger 2: the owner would move the row to another business unit (fail closed).</summary>
     internal const string OwnerMovesBusinessUnit = "record_repair.owner_moves_business_unit";
-
-    internal const string SearchIndexUnavailable = "record_repair.search_index_unavailable";
-    internal const string SearchIndexNoDefault = "record_repair.search_index_no_default";
 
     internal const string StampUnavailable = "record_repair.stamp_unavailable";
     internal const string StampNothingMissing = "record_repair.stamp_nothing_missing";

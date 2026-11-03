@@ -523,6 +523,85 @@
             <displayname description="Authored By" languagecode="1033" />
           </displaynames>
         </attribute>
+        <attribute PhysicalName="sprk_ClauseLocation">
+          <Type>nvarchar</Type>
+          <Name>sprk_clauselocation</Name>
+          <LogicalName>sprk_clauselocation</LogicalName>
+          <RequiredLevel>none</RequiredLevel>
+          <DisplayMask>ValidForAdvancedFind|ValidForForm|ValidForGrid</DisplayMask>
+          <ImeMode>auto</ImeMode>
+          <ValidForUpdateApi>1</ValidForUpdateApi>
+          <ValidForReadApi>1</ValidForReadApi>
+          <ValidForCreateApi>1</ValidForCreateApi>
+          <IsCustomField>1</IsCustomField>
+          <IsAuditEnabled>1</IsAuditEnabled>
+          <IsSecured>0</IsSecured>
+          <IntroducedVersion>1.2.3.0</IntroducedVersion>
+          <IsCustomizable>1</IsCustomizable>
+          <IsRenameable>1</IsRenameable>
+          <CanModifySearchSettings>1</CanModifySearchSettings>
+          <CanModifyRequirementLevelSettings>1</CanModifyRequirementLevelSettings>
+          <CanModifyAdditionalSettings>1</CanModifyAdditionalSettings>
+          <SourceType>0</SourceType>
+          <IsGlobalFilterEnabled>0</IsGlobalFilterEnabled>
+          <IsSortableEnabled>0</IsSortableEnabled>
+          <CanModifyGlobalFilterSettings>1</CanModifyGlobalFilterSettings>
+          <CanModifyIsSortableSettings>1</CanModifyIsSortableSettings>
+          <IsDataSourceSecret>0</IsDataSourceSecret>
+          <AutoNumberFormat></AutoNumberFormat>
+          <IsSearchable>0</IsSearchable>
+          <IsFilterable>0</IsFilterable>
+          <IsRetrievable>0</IsRetrievable>
+          <IsLocalizable>0</IsLocalizable>
+          <Format>text</Format>
+          <MaxLength>200</MaxLength>
+          <Length>400</Length>
+          <displaynames>
+            <displayname description="Clause Location" languagecode="1033" />
+          </displaynames>
+          <Descriptions>
+            <Description description="Section and page of the clause in the source document, e.g. Section 4.2, page 7." languagecode="1033" />
+          </Descriptions>
+        </attribute>
+        <attribute PhysicalName="sprk_ClauseReference">
+          <Type>ntext</Type>
+          <Name>sprk_clausereference</Name>
+          <LogicalName>sprk_clausereference</LogicalName>
+          <RequiredLevel>none</RequiredLevel>
+          <DisplayMask>ValidForAdvancedFind|ValidForForm|ValidForGrid</DisplayMask>
+          <ImeMode>auto</ImeMode>
+          <ValidForUpdateApi>1</ValidForUpdateApi>
+          <ValidForReadApi>1</ValidForReadApi>
+          <ValidForCreateApi>1</ValidForCreateApi>
+          <IsCustomField>1</IsCustomField>
+          <IsAuditEnabled>1</IsAuditEnabled>
+          <IsSecured>0</IsSecured>
+          <IntroducedVersion>1.2.3.0</IntroducedVersion>
+          <IsCustomizable>1</IsCustomizable>
+          <IsRenameable>1</IsRenameable>
+          <CanModifySearchSettings>1</CanModifySearchSettings>
+          <CanModifyRequirementLevelSettings>1</CanModifyRequirementLevelSettings>
+          <CanModifyAdditionalSettings>1</CanModifyAdditionalSettings>
+          <SourceType>0</SourceType>
+          <IsGlobalFilterEnabled>0</IsGlobalFilterEnabled>
+          <IsSortableEnabled>0</IsSortableEnabled>
+          <CanModifyGlobalFilterSettings>1</CanModifyGlobalFilterSettings>
+          <CanModifyIsSortableSettings>1</CanModifyIsSortableSettings>
+          <IsDataSourceSecret>0</IsDataSourceSecret>
+          <AutoNumberFormat></AutoNumberFormat>
+          <IsSearchable>0</IsSearchable>
+          <IsFilterable>0</IsFilterable>
+          <IsRetrievable>0</IsRetrievable>
+          <IsLocalizable>0</IsLocalizable>
+          <Format>textarea</Format>
+          <MaxLength>4000</MaxLength>
+          <displaynames>
+            <displayname description="Clause Reference" languagecode="1033" />
+          </displaynames>
+          <Descriptions>
+            <Description description="The verbatim clause of the source guideline this rule was drafted from (D-66, FR-38)." languagecode="1033" />
+          </Descriptions>
+        </attribute>
         <attribute PhysicalName="sprk_ConfidenceThreshold">
           <Type>decimal</Type>
           <Name>sprk_confidencethreshold</Name>
@@ -559,6 +638,71 @@
           <displaynames>
             <displayname description="Confidence Threshold" languagecode="1033" />
           </displaynames>
+        </attribute>
+        <attribute PhysicalName="sprk_Consequence">
+          <Type>picklist</Type>
+          <Name>sprk_consequence</Name>
+          <LogicalName>sprk_consequence</LogicalName>
+          <RequiredLevel>none</RequiredLevel>
+          <DisplayMask>ValidForAdvancedFind|ValidForForm|ValidForGrid</DisplayMask>
+          <ImeMode>auto</ImeMode>
+          <ValidForUpdateApi>1</ValidForUpdateApi>
+          <ValidForReadApi>1</ValidForReadApi>
+          <ValidForCreateApi>1</ValidForCreateApi>
+          <IsCustomField>1</IsCustomField>
+          <IsAuditEnabled>1</IsAuditEnabled>
+          <IsSecured>0</IsSecured>
+          <IntroducedVersion>1.2.3.0</IntroducedVersion>
+          <IsCustomizable>1</IsCustomizable>
+          <IsRenameable>1</IsRenameable>
+          <CanModifySearchSettings>1</CanModifySearchSettings>
+          <CanModifyRequirementLevelSettings>1</CanModifyRequirementLevelSettings>
+          <CanModifyAdditionalSettings>1</CanModifyAdditionalSettings>
+          <SourceType>0</SourceType>
+          <IsGlobalFilterEnabled>0</IsGlobalFilterEnabled>
+          <IsSortableEnabled>0</IsSortableEnabled>
+          <CanModifyGlobalFilterSettings>1</CanModifyGlobalFilterSettings>
+          <CanModifyIsSortableSettings>1</CanModifyIsSortableSettings>
+          <IsDataSourceSecret>0</IsDataSourceSecret>
+          <AutoNumberFormat></AutoNumberFormat>
+          <IsSearchable>0</IsSearchable>
+          <IsFilterable>0</IsFilterable>
+          <IsRetrievable>0</IsRetrievable>
+          <IsLocalizable>0</IsLocalizable>
+          <optionset Name="sprk_policyversion_sprk_consequence">
+            <OptionSetType>picklist</OptionSetType>
+            <IntroducedVersion>1.2.3.0</IntroducedVersion>
+            <IsCustomizable>1</IsCustomizable>
+            <displaynames>
+              <displayname description="Consequence" languagecode="1033" />
+            </displaynames>
+            <Descriptions>
+              <Description description="What a failing billing rule does to the invoice: Reject submission, Flag, or Suggest adjustment. Empty on ontology rows (FR-26)." languagecode="1033" />
+            </Descriptions>
+            <options>
+              <option value="100000000" ExternalValue="" IsHidden="0">
+                <labels>
+                  <label description="Reject submission" languagecode="1033" />
+                </labels>
+              </option>
+              <option value="100000001" ExternalValue="" IsHidden="0">
+                <labels>
+                  <label description="Flag" languagecode="1033" />
+                </labels>
+              </option>
+              <option value="100000002" ExternalValue="" IsHidden="0">
+                <labels>
+                  <label description="Suggest adjustment" languagecode="1033" />
+                </labels>
+              </option>
+            </options>
+          </optionset>
+          <displaynames>
+            <displayname description="Consequence" languagecode="1033" />
+          </displaynames>
+          <Descriptions>
+            <Description description="What a failing billing rule does to the invoice: Reject submission, Flag, or Suggest adjustment. Empty on ontology rows (FR-26)." languagecode="1033" />
+          </Descriptions>
         </attribute>
         <attribute PhysicalName="sprk_DecisionPlan">
           <Type>ntext</Type>
@@ -818,6 +962,71 @@
             <Description description="Unique identifier for entity instances" languagecode="1033" />
           </Descriptions>
         </attribute>
+        <attribute PhysicalName="sprk_ProposalStatus">
+          <Type>picklist</Type>
+          <Name>sprk_proposalstatus</Name>
+          <LogicalName>sprk_proposalstatus</LogicalName>
+          <RequiredLevel>none</RequiredLevel>
+          <DisplayMask>ValidForAdvancedFind|ValidForForm|ValidForGrid</DisplayMask>
+          <ImeMode>auto</ImeMode>
+          <ValidForUpdateApi>1</ValidForUpdateApi>
+          <ValidForReadApi>1</ValidForReadApi>
+          <ValidForCreateApi>1</ValidForCreateApi>
+          <IsCustomField>1</IsCustomField>
+          <IsAuditEnabled>1</IsAuditEnabled>
+          <IsSecured>0</IsSecured>
+          <IntroducedVersion>1.2.3.0</IntroducedVersion>
+          <IsCustomizable>1</IsCustomizable>
+          <IsRenameable>1</IsRenameable>
+          <CanModifySearchSettings>1</CanModifySearchSettings>
+          <CanModifyRequirementLevelSettings>1</CanModifyRequirementLevelSettings>
+          <CanModifyAdditionalSettings>1</CanModifyAdditionalSettings>
+          <SourceType>0</SourceType>
+          <IsGlobalFilterEnabled>0</IsGlobalFilterEnabled>
+          <IsSortableEnabled>0</IsSortableEnabled>
+          <CanModifyGlobalFilterSettings>1</CanModifyGlobalFilterSettings>
+          <CanModifyIsSortableSettings>1</CanModifyIsSortableSettings>
+          <IsDataSourceSecret>0</IsDataSourceSecret>
+          <AutoNumberFormat></AutoNumberFormat>
+          <IsSearchable>0</IsSearchable>
+          <IsFilterable>0</IsFilterable>
+          <IsRetrievable>0</IsRetrievable>
+          <IsLocalizable>0</IsLocalizable>
+          <optionset Name="sprk_policyversion_sprk_proposalstatus">
+            <OptionSetType>picklist</OptionSetType>
+            <IntroducedVersion>1.2.3.0</IntroducedVersion>
+            <IsCustomizable>1</IsCustomizable>
+            <displaynames>
+              <displayname description="Proposal Status" languagecode="1033" />
+            </displaynames>
+            <Descriptions>
+              <Description description="State of a rule proposed by the drafting Action (FR-27, FR-28): Proposed, Accepted or Rejected. Empty on ontology rows." languagecode="1033" />
+            </Descriptions>
+            <options>
+              <option value="100000000" ExternalValue="" IsHidden="0">
+                <labels>
+                  <label description="Proposed" languagecode="1033" />
+                </labels>
+              </option>
+              <option value="100000001" ExternalValue="" IsHidden="0">
+                <labels>
+                  <label description="Accepted" languagecode="1033" />
+                </labels>
+              </option>
+              <option value="100000002" ExternalValue="" IsHidden="0">
+                <labels>
+                  <label description="Rejected" languagecode="1033" />
+                </labels>
+              </option>
+            </options>
+          </optionset>
+          <displaynames>
+            <displayname description="Proposal Status" languagecode="1033" />
+          </displaynames>
+          <Descriptions>
+            <Description description="State of a rule proposed by the drafting Action (FR-27, FR-28): Proposed, Accepted or Rejected. Empty on ontology rows." languagecode="1033" />
+          </Descriptions>
+        </attribute>
         <attribute PhysicalName="sprk_ProposedAction">
           <Type>nvarchar</Type>
           <Name>sprk_proposedaction</Name>
@@ -942,6 +1151,76 @@
               <option value="100000002" ExternalValue="" IsHidden="0">
                 <labels>
                   <label description="Existence" languagecode="1033" />
+                </labels>
+              </option>
+              <option value="100000003" ExternalValue="" IsHidden="0">
+                <labels>
+                  <label description="ApprovedTimekeeper" languagecode="1033" />
+                </labels>
+              </option>
+              <option value="100000004" ExternalValue="" IsHidden="0">
+                <labels>
+                  <label description="ApprovedRate" languagecode="1033" />
+                </labels>
+              </option>
+              <option value="100000005" ExternalValue="" IsHidden="0">
+                <labels>
+                  <label description="TimeIncrement" languagecode="1033" />
+                </labels>
+              </option>
+              <option value="100000006" ExternalValue="" IsHidden="0">
+                <labels>
+                  <label description="DailyHoursCap" languagecode="1033" />
+                </labels>
+              </option>
+              <option value="100000007" ExternalValue="" IsHidden="0">
+                <labels>
+                  <label description="NonBillableActivity" languagecode="1033" />
+                </labels>
+              </option>
+              <option value="100000008" ExternalValue="" IsHidden="0">
+                <labels>
+                  <label description="ExpenseRule" languagecode="1033" />
+                </labels>
+              </option>
+              <option value="100000009" ExternalValue="" IsHidden="0">
+                <labels>
+                  <label description="InvoiceAge" languagecode="1033" />
+                </labels>
+              </option>
+              <option value="100000010" ExternalValue="" IsHidden="0">
+                <labels>
+                  <label description="CoreRecordWindow" languagecode="1033" />
+                </labels>
+              </option>
+              <option value="100000011" ExternalValue="" IsHidden="0">
+                <labels>
+                  <label description="Duplicate" languagecode="1033" />
+                </labels>
+              </option>
+              <option value="100000012" ExternalValue="" IsHidden="0">
+                <labels>
+                  <label description="RequiredData" languagecode="1033" />
+                </labels>
+              </option>
+              <option value="100000013" ExternalValue="" IsHidden="0">
+                <labels>
+                  <label description="AiObservation" languagecode="1033" />
+                </labels>
+              </option>
+              <option value="100000014" ExternalValue="" IsHidden="0">
+                <labels>
+                  <label description="SubmissionIntegrity" languagecode="1033" />
+                </labels>
+              </option>
+              <option value="100000015" ExternalValue="" IsHidden="0">
+                <labels>
+                  <label description="AddedFee" languagecode="1033" />
+                </labels>
+              </option>
+              <option value="100000016" ExternalValue="" IsHidden="0">
+                <labels>
+                  <label description="Discount" languagecode="1033" />
                 </labels>
               </option>
             </options>

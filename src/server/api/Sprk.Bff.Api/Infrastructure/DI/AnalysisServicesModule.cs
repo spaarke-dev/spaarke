@@ -1,5 +1,6 @@
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Sprk.Bff.Api.Configuration;
+using Sprk.Bff.Api.Infrastructure.HealthChecks;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.Chat;
 using Sprk.Bff.Api.Services.Ai.Insights;
@@ -55,12 +56,11 @@ public static class AnalysisServicesModule
         services.AddSingleton<Sprk.Bff.Api.Telemetry.InsightWidgetsTelemetry>();
 
         // multi-container-multi-index-r1 indexer-routing-fix (Tier 3) — TRULY UNCONDITIONAL.
-        // ISearchIndexNameResolver is consumed by RagIndexingJobHandler / BulkRagIndexingJobHandler /
-        // IndexingWorkerHostedService — all 3 are registered unconditionally as scoped IJobHandler / IHostedService.
-        // The resolver delegates to IGenericEntityService (registered unconditionally via GraphModule).
-        // Registered HERE at the top of the module (above the documentIntelligence/analysis conditionals)
-        // so it resolves correctly on BOTH AI-ON and AI-OFF paths. Lifetime: scoped (matches consumer
-        // expectations + Dataverse Web API client lifetime).
+        // ISearchIndexNameResolver (since task 041, FR-40: only the G-9 default index name) is consumed by
+        // RagIndexingJobHandler, PostUploadIndexingEnqueuer and the RAG endpoints, which are registered or mapped
+        // unconditionally. Registered HERE at the top of the module (above the documentIntelligence/analysis
+        // conditionals) so it resolves correctly on BOTH AI-ON and AI-OFF paths. Lifetime: scoped (matches consumer
+        // expectations).
         services.AddScoped<ISearchIndexNameResolver, SearchIndexNameResolver>();
 
         // R6 Pillar 7 (task 065, D-C-18) — IPinnedContextRepository.
@@ -179,6 +179,29 @@ public static class AnalysisServicesModule
         // FeatureDisabledException → the endpoint's 503 SSE-error pattern). Scoped to match
         // IActionResolver's scoped lifetime (§F.1 asymmetric-registration rule, CLAUDE.md §10 F.1).
         services.AddScoped<IFileSummarizeAi, FileSummarizeAi>();
+
+        // ebilling-r1 task 043 (FR-21, FR-47, D-81) — Content Understanding invoice reader behind
+        // IInvoiceAi.ReadInvoiceAsync. TRULY UNCONDITIONAL: the real InvoiceAi (compound-AI-ON, in
+        // AddPublicContractsFacade) takes the client as a ctor dependency, and the client itself has no AI-gate
+        // dependency — an empty ContentUnderstanding:Endpoint means "not configured" (FeatureDisabledException
+        // at call time, Healthy "not configured" on /healthz/catalog), never a DI failure (§10 F.1).
+        // Keyless: the DI TokenCredential (managed identity, ADR-028). No SDK package (D-81: REST over
+        // IHttpClientFactory). Options validated at startup.
+        services.AddOptions<ContentUnderstandingOptions>()
+            .Bind(configuration.GetSection(ContentUnderstandingOptions.SectionName))
+            .ValidateOnStart();
+        services.AddSingleton<Microsoft.Extensions.Options.IValidateOptions<ContentUnderstandingOptions>,
+            ContentUnderstandingOptionsValidator>();
+        services.AddHttpClient(Services.Ai.ContentUnderstanding.ContentUnderstandingClient.HttpClientName,
+            client => client.Timeout = TimeSpan.FromMinutes(5));
+        services.AddSingleton<Services.Ai.ContentUnderstanding.ContentUnderstandingClient>();
+        // Catalog check (not liveness): a missing analyzer — or an analyzer id paired with the wrong api-version —
+        // is visible on /healthz/catalog without taking instances out of rotation.
+        services.AddHealthChecks()
+            .AddCatalogCheck<Services.Ai.ContentUnderstanding.ContentUnderstandingHealthCheck>(
+                "content-understanding",
+                failureStatus: Microsoft.Extensions.Diagnostics.HealthChecks.HealthStatus.Unhealthy,
+                tags: new[] { "ai", "ebilling" });
 
         // customer-provisioning-orchestration-r1 SESSION 5 (2026-08-24) — hoisted OUT of the
         // documentIntelligenceEnabled/analysisEnabled compound gate below. Rationale (CLAUDE.md
@@ -670,6 +693,10 @@ public static class AnalysisServicesModule
         // B7 — IRagService (P3 Fail-Fast). Real impl registered in AddRagServices behind AI Search keys gate.
         services.AddSingleton<IRagService, NullRagService>();
 
+        // ISemanticSearchService (P3 Fail-Fast, ebilling-r1 task 107). The real impl is registered by AddSemanticSearch inside the
+        // compound gate; InvoiceRelatedWorkService (FinanceModule, unconditional) consumes it, so it must resolve on the AI-OFF path.
+        services.AddScoped<ISemanticSearchService, NullSemanticSearchService>();
+
         // ── Tier 1.5 round 4 — flushed by Step 9.5 latent-bug scan 2026-06-01 ─────────────────
         // Two additional P3 Fail-Fast Null-Objects surfaced by the same anti-pattern that the
         // 3 prior Tier 1.5 rounds fixed: unconditional endpoint mappings whose handlers inject
@@ -690,7 +717,7 @@ public static class AnalysisServicesModule
 
         // ⚠ NOTE: ISearchIndexNameResolver was incorrectly placed HERE (inside
         // AddNullObjectsForCompoundOff) — that method only runs on the AI-OFF path,
-        // so RagIndexingJobHandler / BulkRagIndexingJobHandler / IndexingWorkerHostedService
+        // so its consumers (then RagIndexingJobHandler / BulkRagIndexingJobHandler / IndexingWorkerHostedService)
         // failed at startup in the AI-ON live env with
         // "Unable to resolve service for type ISearchIndexNameResolver".
         // FIXED 2026-06-08: registration moved to the TOP of AddAnalysisServicesModule

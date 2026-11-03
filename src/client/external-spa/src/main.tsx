@@ -412,7 +412,7 @@ async function bootstrapTeamsAuth(root: Root, tenantId: string): Promise<void> {
     await adapter.initialize();
   } catch (err) {
     if (err instanceof TeamsGuestAccountError) {
-      renderTeamsGuestAccount(root);
+      renderTeamsGuestAccount(root, err.detail);
       return;
     }
     console.error('[SecureProjectWorkspace] Teams workforce authentication failed:', err);
@@ -427,14 +427,14 @@ async function bootstrapTeamsAuth(root: Root, tenantId: string): Promise<void> {
  * Teams: the signed-in account is a B2B guest of the Teams tenant (found right after the token was acquired, in bootstrap or
  * in recovery). A message only, and NO BFF call: the customer BFF would refuse the guest token (401) and a reload would loop.
  */
-function renderTeamsGuestAccount(root: Root): void {
+function renderTeamsGuestAccount(root: Root, detail?: string): void {
   // Same signals as the not-set-up screen: loaded (a screen is showing) and failed (Other).
   notifyTeamsAppLoaded();
   notifyTeamsFailureOther(TEAMS_GUEST_HEADING);
   root.render(
     <React.StrictMode>
       <FluentProvider theme={resolveCodePageTheme()} style={{ height: '100%' }}>
-        <TeamsGuestAccount />
+        <TeamsGuestAccount detail={detail} />
       </FluentProvider>
     </React.StrictMode>
   );
@@ -476,7 +476,7 @@ function renderTeamsAuthError(root: Root, adapter: ITeamsHostAdapter, err: unkno
             } catch (signInError) {
               // A guest of the Teams tenant: another sign-in loops into the same 401, so the guest screen replaces this one.
               if (signInError instanceof TeamsGuestAccountError) {
-                renderTeamsGuestAccount(root);
+                renderTeamsGuestAccount(root, signInError.detail);
                 return;
               }
               throw signInError;

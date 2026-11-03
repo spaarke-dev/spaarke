@@ -239,8 +239,8 @@ public class MembershipResolverPeopleTargetingTests
     {
         // #2273: a table can carry sprk_createdbyperson UNSECURED without the BFF stamping it (ebilling task 080's columns),
         // so any Write holder could name anyone there. Only createdby binds on such a table; the stamped to-do above is the
-        // must-not-fire control.
-        const string unstamped = "sprk_procedure";
+        // must-not-fire control. Master merge (ebilling-r1): not sprk_procedure, which ebilling task 081 now stamps.
+        const string unstamped = "sprk_agreement";
         Sprk.Bff.Api.Services.Dataverse.RecordCreatorPerson.IsStamped(unstamped).Should().BeFalse("this case needs an unstamped table");
         var harness = new Harness(TodoShapesWithCreatorPerson, FullIdentity(), human: true, cache: null, logger: null, entity: unstamped, callerId: CallerId);
 

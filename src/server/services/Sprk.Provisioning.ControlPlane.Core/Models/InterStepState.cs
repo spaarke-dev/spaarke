@@ -184,6 +184,19 @@ public sealed class InterStepState
     [ProducedBy(HandlerIds.H2a)]
     public string? StorageBlobEndpoint { get; set; }
 
+    /// <summary>
+    /// The AI Search indexes H2b built AND verified present on the stamp's own search service, in canonical-catalog
+    /// order (H2b output — <c>ICanonicalIndexCatalog.CanonicalIndexNames</c>, the set its verifier checked). H4b sets
+    /// it as the BFF's <c>AiSearch__AllowedIndexes__N</c> on both slots: customer environments have no
+    /// <c>sprk_aisearchindex</c> rows, so without it the BFF's allow-list is empty and every index-naming call is
+    /// refused with INDEX_NOT_ALLOWED. Null until H2b succeeds; never set on a failure.
+    /// </summary>
+    /// <remarks>CONTROLLED SCHEMA EXTENSION (T186 follow-up — AiSearch allow-list).</remarks>
+    [JsonPropertyName("aiSearchIndexNames")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [ProducedBy(HandlerIds.H2b)]
+    public IList<string>? AiSearchIndexNames { get; set; }
+
     /// <summary>Dataverse `systemuser` GUID for the MI/UAMI Dataverse App User (H10 output; T2 trap subject).</summary>
     [JsonPropertyName("systemUserId")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]

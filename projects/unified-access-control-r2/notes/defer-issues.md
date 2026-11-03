@@ -38,6 +38,53 @@ When materiality is unclear, it stays. A hand-off is recorded here AND as a comm
 | ISS-013 — impersonation helper fail-closed | #990 | **In project** — ✅ implemented by task **104** on the branch; closes when #950 merges | Residuals recorded on #990: the service's `Guid?` still means impersonate-or-app-only for writes; `ApplyAsEntraUser` has no production caller yet |
 | ISS-014 — TipTap 2.x advisory | #991 | Handed off — Compose confirmed as owner | LegalWorkspace gets TipTap only by transpiling `Spaarke.Compose.Components` (`composeEditor.registration.ts`); Compose owns the editor (ADR-049); next round `spaarkeai-compose-r7` |
 | ISS-015 — xmldom / dompurify | #992 | Handed off — not material | Same versions on master before this project; `@xmldom/xmldom` arrives via `mammoth`, declared by six packages |
+| #2028 (new, 2026-10-16) | The shared Graph handler retries every non-idempotent POST on 5xx/408/transport faults | The SPE container create is opted out in PR #2024. Other POSTs risk a duplicate only when a response is lost after commit (rare), and none is an access decision | Owner: BFF platform. Trigger: an inventory of every Graph POST/PATCH |
+| #2032 (new, 2026-10-16) | The SPE admin-plane container create (`SpeAdminGraphService` ~:1416) still re-POSTs on 5xx/408 (duplicate/orphan container) | Not a uac-r2 path; the file belongs to sdap-SPE-admin-app-r2 (do-not-touch). The fix is one option once #2024 lands | Owner: sdap-SPE-admin-app-r2 (told 2026-10-16). Trigger: #2024 merged |
+| #2033 (new, 2026-10-16) | A user disabled in Dataverse but active in Entra can still send mail (no enabled-user gate on the send path); after #2025, `sprk_sentby` is null with a Warning | Pre-existing and not a UAC access decision (Entra governs the mailbox). #2025 made it visible | Owner: the communication flow. Decision: refuse, or allow and record |
+| #2034 (new, 2026-10-16) | The guest-user writer returns Success for a disabled guest (`isdisabled` is never read) | Provisioning control plane, active project; the file is not editable here | Owner: customer-provisioning-orchestration-r1 (told 2026-10-16) |
+| #2036 (new, 2026-10-16) | Flaky: the `AccessCacheFaultCachingTests` timeout case fails under load | A test-only timing issue; production behaviour is unaffected | Owner: uac-r2 or BFF platform. Trigger: the next test-hygiene pass |
+| #2040 (new, 2026-10-16) | The BU/customer container scripts never call `/activate` (inactive SPE containers auto-delete after 24h) | Not a BFF path. Provisioning-owned scripts. The BFF create gets an explicit activate in #2024; the admin plane is tracked in #2032 | Owner: customer-provisioning-orchestration-r1. Live check: `GET container ?$select=status` on a BU container older than 24h |
+| #2047 (new, 2026-10-16) | Invoice-line storage ignores the line's `sprk_invoice`, but ownership counts it (secure wins). Also tracks: invoice single-root (needs a live count first) | Latent: nothing resolves a container for a line today, and no upload route accepts lines. Found in UAC's D-94 review of ebilling 026 (no F-class findings) | Owner: uac-r2 topology. Trigger: before any upload or storage route accepts invoice lines. Fix: read `sprk_invoice` as a CARRIER, never the root, so D-75 holds; plus the walk-time single-root check |
+| #2064 (new, 2026-10-17) | The AI `dataverse.create_record` tool can create `sprk_externalrecordaccess` outside the grant core (skipping policy, ceiling, No Access and D-11 resolution) | Admin-only on dev (System Administrator, System Customizer and Service Writer hold Create). Pre-existing; found by the 099b adversarial review (PR #2063) | Owner: AI line or uac-r2. Fix: block the table in the tool, like `sprk_document` |
+| #2065 (new, 2026-10-17) | `DataverseWebApiClient.UpdateAsync` sends no `If-Match: *`, so a PATCH to a deleted id creates a row (application-owned, skipping create invariants) | Race window only (row deleted between read and write). Pre-existing; found by the 099b adversarial review | Owner: BFF platform. Fix: `If-Match: *` on update, plus a caller audit |
+| #2071 (new, 2026-10-17) | `Backfill-RecordOwnership.ps1` has no child look-through for document and to-do targets that are not team-owned (the resolver has one) | 0 document or to-do writes planned on dev; grants are unaffected (root targets). Pre-existing; found by the 099b pass 2 | Owner: uac-r2. Trigger: before the next document/to-do backfill -Apply |
+| #2076 (new, 2026-10-17) | The external feed shows a false "renewed" item when a grant's owner changes (099b re-own moves `modifiedon`; renewal = modifiedon − createdon) | The fix needs a `sprk_renewedon` column (a schema change), out of scope for 099b. User-visible but cosmetic: no access changes. Release: known limit, put it on the UAT checklist note for the backfill -Apply. |
+| #2079 (new, 2026-10-17) | external-spa `DocumentLibrary` has no stale-response guard: a slow list for the previous record can render under the new one | Predates 036 and sits outside its diff (found by the 036 round-2 re-check). Display only: the server refuses cross-parent downloads. Low; known limit for release. |
+| #2080 (new, 2026-10-17) | Client code selects `sprk_name` on `sprk_organization` (CreateProjectWizard org search, projectService, CommunicationConnections PCF fallback map); the column is `sprk_organizationname` | Not UAC code. Found while reviewing ebilling 051. UAC's own BFF instance (Manage Access suggestions) is fixed in #2083. |
+| #2081 (new, 2026-10-17) | Generic update paths (playbook UpdateRecord, output orchestrator) upsert: a stale id creates an app-owned row with no core record (FR-05, D-11) | Predates ebilling 026; found by UAC's 026 review. Ebilling asked whether they take it. Medium; no known live occurrence. |
+| #2084 (new, 2026-10-17) | A rule (`sprk_policy`) scoped to a matter that later turns Secure still exposes the matter via the rule row (D-123) | From UAC's #2075 round-4 re-check. Proposed UAC fix: one `SecureChildLineage` entry so the reconciler re-owns matter-scoped rules. Owner decision via ontology; no live instance on dev. |
+| #2193 (new, 2026-10-21) | A queued F3 release retry does not re-check the release permission when it runs | K1 from the #2161 review: the retry runs only after a permitted re-file. Known limit for release. |
+| #2194 (new, 2026-10-21) | Relocation copies kept after a pointer write with an unknown outcome are only logged | K2 from the #2161 review: fails closed, and the copy is unreachable. Owner: uac-r2. Trigger: the next relocation pass. |
+| #2195 (new, 2026-10-21) | A crash between the re-file write and the F3 release record or enqueue loses the release | K2 from the #2161 review: the record stays held (over-refusal), never exposed. |
+| #2196 (new, 2026-10-21) | Operator check: who holds Data Owner on the `sdap-jobs` Service Bus namespace | An operator question, not code. Owner: the platform operator. |
+| #2201 (new, 2026-10-21) | Office edit-open makes a flagged-external caller a writer on the whole secure container | Belongs with task 191 (D7 on the Dataverse and SPE side). Round-70 JIT writer model. Trigger: task 191's design. |
+| #2202 (new, 2026-10-21) | The relocation pointer write is not conditional on row version, so a checkout that lands between the re-check read and the write is missed | Narrow race; fails toward a stale pointer that is refused. Owner: uac-r2. |
+| #2203 (new, 2026-10-21) | `sprk_agreement` becomes a core record (a root, or a child of a matter or project) | A UAC model change requested by another project. It needs an owner decision; not in uac-r2's release scope. |
+| #2204 (new, 2026-10-21) | #2159 residual: a re-point that commits late, after a definite refusal, can leave the row naming a deleted copy (404 until repaired) | Fails closed (404). Known limit. |
+| #2206 (new, 2026-10-21) | A stamped `sprk_ai_search_index` is not re-derived when a record's owner changes (make-secure, reparent) | Search-index owner; also covered by fm-016's `search_index_owner_unsettled`. Owner: AI/indexing, with uac-r2. |
+| #2207 (new, 2026-10-21) | #2161 K2: the F3 walk and container derivation disagree on non-secure intermediates | Over-refusal (the file is held), never exposure. Known limit. |
+| #2213 (new, 2026-10-21) | `CrossPathLink` re-points an archive document already linked to another communication, which can un-hide it under D7 | Owner: word-add-in / the communication flow, with uac-r2 review. Task 190's sweep never re-points (null only). |
+| #2217 (new, 2026-10-21) | `Deploy-WebResourceInline.ps1` resolves `-FilePath` against the process directory, so it can upload the wrong file | Tooling. Workaround: pass absolute paths and compare a read-back hash (already the rule). |
+| #2222 (new, 2026-10-21) | Archive-by-communication lookups reveal whether a document exists (404 vs 403, an unread `ArchiveDocumentId`) | Pre-existing; found by task 190's review. Existence only, no content. Owner: uac-r2. |
+| #2225 (new, 2026-10-21) | A communication with several linked `.eml` archives: four consumers pick one at random (TOP 1, no order) | Found by task 190's review pass 2. On dev, 6 communications have more than one archive. The 190 sweep reports `communicationAlreadyArchived`. |
+| #2226 (new, 2026-10-21) | Scheduled sweep jobs' remarks claim durable run history and a standing `/enable`, but the scheduler store is in memory | Documentation accuracy; the reference job carries the same wording. Task 190's own remarks are corrected. |
+| #2227 (new, 2026-10-21) | `sprk_emailmessageid` and `sprk_isemailarchive` on `sprk_document` are user-writable but drive server-side linking | The 190 sweep only hides (D7), never shows; a forged key needs an exact, unique match. Owner: uac-r2. Fix: field security, or a server-written key. |
+| #2229 (new, 2026-10-21) | `Spe.Integration.Tests`: 9 Analysis and SemanticSearch tests fail on master with 403 (expected 200) | Fixture drift from uac-r2 task 188 (#2170): the two fixtures never resolve an internal systemuser caller, so D7 narrowing hides every document. Not a product regression. Fix: PR #2230 (test-only). |
+| #2237 (new, 2026-10-22) | `DocumentProfileOutputMapper` writes any AI-output key app-only, bypassing `RefuseAppOnlyWrite` and the link-column refusals | Found while reviewing ebilling 095. **In project:** the fix is in progress (C:/wt2237); it deploys with round 122 (#2234). #2236 was closed as a duplicate. **Deployed 1283c41817 (dev, 2026-10-22 12:50Z); server gate PASS (§6 of `notes/task-190-round122-linked-eml-access.md`). Closed.** |
+| #2238 (new, 2026-10-22) | `RecordCreationService` step-9 server binds (owner, creator person, `sprk_issecure`) are not de-duplicated case-insensitively for system items | Pre-existing; found by UAC's 018a condition (b) review (K-c). Only server code builds system items, and none sends a case variant today. Offered to field-mapping for 018b. |
+| #2240 (new, 2026-10-22) | `RefuseAppOnlyWrite` does not refuse the BFF-only document pointer columns or `sprk_emailmessageid` for the generic app-only writers | Pre-existing; found by #2239's review (F1). Affects UAC (pointer forgery; a D7 link via the sweep). **In project**, after #2239. #2239 closes the AI-profile path with an allowlist. **Deployed 1283c41817 (dev, 2026-10-22 12:50Z); server gate PASS (§6 of `notes/task-190-round122-linked-eml-access.md`). Closed.** |
+| #2241 (new, 2026-10-22) | `BuildSearchProfile` looks up unprefixed keys, so AI content never reaches `sprk_searchprofile` | Pre-existing; found by #2239's review. Search quality only. Owner: the AI line. |
+| #2242 (new, 2026-10-22) | `InvoiceExtractionJobHandler` writes the invoice extraction status through the `sprk_document` update, so invoices are never marked Failed | Pre-existing; found by #2239's review. Owner: finance / ebilling. **Closed by ebilling 050b, which deletes the handler.** |
+| #2245 (new, 2026-10-22) | `sprk_driveitemid` is not field-secured but is an AI access key (any readable row with that value passes the drive-item trim) | Pre-existing; found by #2244's review. A user with Write on document A can set it to B's item and read B through AI chat. **Owner decision needed:** field-secure it (an environment change), or bind the trim to `sprk_graphitemidbound`. #2244 closes the app-only path. |
+| #2246 (new, 2026-10-22) | `ArchiveExistingAttachmentsAsync` copies an attachment row's unverified graph item id into a new document's bound pointer | Pre-existing; found by #2244's review. Pointer laundering through `sprk_communicationattachment`. **Owner: uac-r2** (word-add-in: not theirs; the email-r4 code has no live session). Fix: verify the item against the communication's own Graph source (option 1), with field security as defence in depth. **Fixed: PR #2248, merged 1283c41817 (2026-10-22); issue closed.** Deploy through R3, then redeploy the CommunicationActions PCF and the EmailPage, LegalWorkspace and Console code pages. **Deployed 1283c41817 (dev, 2026-10-22 12:50Z); server gate PASS (§6 of `notes/task-190-round122-linked-eml-access.md`). Closed.** |
+| #2247 (new, 2026-10-22) | Generic app-only update writers do not refuse `ownerid` / `sprk_createdbyperson` | Pre-existing; found by #2244's review. Verified: a path exists through the Update Record node and output mapping. **Fix: PR #2249**, which also covers `sprk_createdbycontact` and `sprk_requestedby`. K2 (create-time mapping) was handed to field-mapping 018b. **Merged 2e5a7606c6 (2026-10-22); issue closed.** Deploy through R3. **Deployed 1283c41817 (dev, 2026-10-22 12:50Z); server gate PASS (§6 of `notes/task-190-round122-linked-eml-access.md`). Closed.** |
+| #2250 (new, 2026-10-22) | App-only playbook writers can set `sprk_assigned*` and so cause an Assigned To access grant with no grantor | Pre-existing; found by #2249's review (K3). Live field-mapping rules map these columns legitimately. **Owner decision:** recommend refusing on the app-only playbook writers only. |
+| ✅ #2251 (closed 2026-10-22: PR #2253 merged as 93f96d215f after 5 fix rounds; AccessTables, SecureRootColumns, AccessColumns, WriteIdentity, DataverseIdentifier URL guard. Deployed 2026-10-23 in R3 batch 1fa0cf5cb8 with #2258, #2268 and #2277; server gate PASS) | App-only playbook writers can update the access-grant, membership, no-access and secure-root columns (no table deny-list) | Pre-existing; found by #2249's review pass 2 (K5). `systemuser.sprk_primarycontact` was added to #1802. Owner: uac-r2. Fix: a table-level refusal next to `RefuseAppOnlyWrite`. |
+| #2292 (new, 2026-10-23) | The `sprk_userentityassociation` membership junction is never populated: an alternate-key miss throws instead of creating (about 850 faults a day on dev, 0 rows) | Pre-existing; found by the 1fa0cf5cb8 server gate. Not an access input today (readers: `ParticipantCorrelationRung`, `MembershipReconciliationJob`). **Filed**; fix when there is capacity. |
+| #2320 (new, 2026-10-23) | Access-record cascade readability proof sees only the BFF user's DIRECT System Administrator role and field-security profiles; team-held grants are not seen | Fails closed (empty records stay undetermined, so the backfill stops); no exposure. Found while removing the record-based proof leg (#2321). **CLOSED 2026-10-27:** fixed by #2323 (f183dd9c92) and #2324 (3ff2c04bf5, server-side team join); deployed in 3ff2c04bf5, gate PASS. |
+| #2325 (new, 2026-10-27) | To-do generation Rule 2 (matter over budget) queries `sprk_matter.sprk_name`; the column is `sprk_mattername`, so the rule fails daily | Not access control; found in the 3ff2c04bf5 gate. **Filed** for the to-do owners (round 90: not UAC-impacting). |
+| #2326 (new, 2026-10-27, filed by R3) | Re-send the welcome email to an external person whose account is already linked | Enhancement. For now `/invite` on a linked contact answers `contact_already_has_account` with `emailSent: false` and gives staff the portal sign-in URL. Needs a secured bound-address hash column and the owner's go. |
+| GHSA-hq7m-w2pf-v8j7 (2026-10-23) | A pre-existing access finding in the external contact identity model (R3 ISS-005) | **Tracked privately** as a draft security advisory, on the owner's direction; the details are kept out of this public repo. **Owner: R3** (spa-external-access-platform-r3). The fix design is with the owner for sign-off. UAC accepted the ISS-005 guard at c05d1b2788 and will review the design-change diff. |
 | ISS-016 — `DataverseWebApiClient` gets the container's `TokenCredential` | #993 | Handed off — not material; **no confirmed owner** | SpeAdmin audit/dashboard client (`SpeAdminModule.cs:71`), not access control. Equivalent credential when managed identity is on (deployed); differs only with it off (local/dev). Found by task 104 |
 | ISS-017 — `PlaybookSharingService` reads bit 524288 as Share | #994 | Handed off — not material | That bit is **Assign**; Share is 262144 (SDK values). A display-only projection in `Services/Ai/**`, which the AI line owns; no access decision reads it. Found by task 063 |
 | ISS-018 — unsecure cannot see a failed share read | #995 | **In project** | Task **108**. `RevokeAllSharesAsync`'s `catch` cannot fire for the failure it names — the soft read answers an EMPTY LIST on failure, so "0 shares revoked" reports as success. This project's own code (task 061), on an access path. Found by task 063 |
@@ -1190,14 +1237,62 @@ Wrap-up candidate: make the 401 answer a ProblemDetails like every other refusal
 
 `sdap-ci.yml:799` calls `listComments` unpaginated; the `createComment` branch may be broken; two redundant `continue-on-error` full-suite runs remain (archive L1712). Tracked on #969 (open, the CI lane). UAC-r2 does not take CI-workflow work (owner 2026-09-07).
 
-## Closed
+## Release disposition review (2026-10-16, owner directive)
 
-*(none yet)*
+> **Owner, 2026-10-16:** *"ensure that none of these are required or important for uac-r2 release; if any are determined that they should be addressed now then move into open work items; otherwise determine if they are never important then remove and if should be done in the future then clearly mark why deferred and add to github issues / deferred list".*
+> Every item below has a GitHub issue; the reason is also on the issue. **NEVER**: none. Every deferred item is a real gap or capability, not noise.
+
+### NOW (moved into open work)
+
+| Issue | Item | Where |
+|---|---|---|
+| #1755 | Secure provisioning: a client disconnect after the container create leaves it unrecorded (Step 7) | PR #2024 |
+| #1735 (create-POST site) | Caller cancel during the create POST strands a container | PR #2024. The `SpeAdminGraphService` site goes to sdap-SPE-admin-app-r2. Orphan sweep: FUTURE (below) |
+| #1350, #1752 (link half) | Share-link route dead (502) and a latent Secure / No Access bypass | **Done**, PR #2021 `b1eaecb49` (task 012 closed) |
+| #1010 / ISS-030 | Manage Access shows no grants to non-root users; a failed read looks like "no grants" | Task 099 amendment 4 (D-11 ownership plus gated BFF read) |
+| #1576 | Disabled users resolve; the shared OBO default header | PR #2025 |
+| #1620 | Owner unshare via the owner-aware revoke | PR #2016 |
+| #1363 | Demo SPE writer marker and expiry | PR #2017 |
+| #994 | Playbook Share bit | **Done**, PR #2013 `0ccc75b4c` |
+| #1077 / 153 §7, 062 NFR-05 | Owner live checks | UAT checklist |
+| **#2027** (new, 2026-10-16) | Customer environments: provisioning never sets org auditing (`isauditenabled`) or retention, and FR-32's interim audit trail depends on both | **Release-relevant.** The code belongs to customer-provisioning-orchestration-r1 (the H6 org-settings contract), handed over with the facts. The retention value is an owner decision (recommended -1, Forever) |
+
+### FUTURE (deferred, with the reason and the trigger)
+
+| Issue | Item | Why it is not needed for the uac-r2 release | Trigger / owner |
+|---|---|---|---|
+| #1303 (absorbs #1304) | 088/089 evaluator versioning, point-in-time replay, attestation | No history is lost while Dataverse auditing is on for the access tables. "Who could see X on date D" is answered by audit review. The FR-32 known gap is stated in spec/README | The first attestation or legal-hold request; after uac-secure-project-r3's family model |
+| #1305 | 094 upload collision: ask before the bytes move | Owner round 59: a capability, not a defect. The server refuses duplicates (`Fail`) and the 409 dialog exists, so no data is lost | A future project; "Use existing" needs #1306 |
+| #1306 | 095 document-to-many-records intersection entity | Owner round 59: a capability. Two lookup slots per type work today | A product decision on whether a link grants access |
+| #1307 | Two record-target authorization filters | Both are caller-scoped and fail closed (`AuthorizationService.cs:265-278`). Maintainability, not a leak | After task 036 (the FR-20 swap on the same seam), or uac-secure-project-r3 |
+| #1313 | The 165 binding backfill skips a secret-less (MI-FIC) config | Fails closed. New environments stamp the binding at container create (`ContainerCreationStampContractTests`), so the backfill is only for pre-165 containers. The dev Model 1 container belongs to the untouchable secure project `65a3fab2` | The BFF SPE admin plane supports MI-FIC configs (D16). Shares its fix with the #1735 orphan sweep |
+| #1735 (orphan sweep) | Reconciliation sweep for containers committed but never bound | #2024 closes the cancel windows. Only a create-POST timeout after Graph commits remains | With #1313's code fix |
+| #962 | PrivilegeGroupResolver counts page 1 twice | RAG uses it as a membership filter, so duplicates change no answer | No active owner (ai-architecture-redesign-r2 dormant). A two-line fix for the next editor of `Services/Ai/Security` |
+| #971 | Singleton ServiceClient `LastException` crosstalk | No access path branches on exception text. Re-check under client 1.2.26 first | Needs an owner (Board #2) |
+| #972 | Workspace layout: a failed default-clear still writes a new default (two defaults) | Workspace UI correctness, not access control. The user can reset it | Needs an owner: the next Workspace/dashboard round |
+| #989 | `JobContract` typed requester (oid + tid) | Prerequisite P2 of ADR-052 §6 conditional impersonation. No uac-r2 handler impersonates the requester | The first job handler that impersonates |
+| #991 | TipTap 2.x GHSA-cp6q-959q-f8rh | Compose editor dependency, unrelated to access control. Fixed only in 3.x (a major upgrade) | The next active Compose round (compose-r7 never started) |
+| #992 | `@xmldom/xmldom` 0.8.13 (8 HIGH) and dompurify 3.4.7 in LegalWorkspace's lockfile | Pre-existing on master and unrelated to access control. **HIGH CVEs, so it needs an owner soon** | Needs an owner for front-end dependency hygiene (Board #2) |
+
+### OTHER PROJECT (owned and active elsewhere; not needed for the uac-r2 release)
+
+| Issue | Item | Owner |
+|---|---|---|
+| #1072 | 056 remainder: external event create, communications, memos, analyses | SPA-external-access-platform-r3. FR-27's acceptance is met |
+| #988 | Service Bus Entra-only (remaining: the connection-string fallback, dev/platform namespaces) | customer-provisioning-orchestration-r1. Done for customer stamps by T244 |
+| #993 | SpeAdmin `DataverseWebApiClient` takes the singleton `TokenCredential` | sdap-SPE-admin-app-r2 |
+| #1574 | BFF auth pipeline hardening (agent audience, single Admin role, CORS echo, token logger) | spaarke-auth-system-of-record-r1 (ISS-017) |
+| #1355 | Register sprk_signal / sprk_decisionrecord as secure children; D-113 | spaarke-ontology-platform-r1 (D-113 amended 2026-10-16) |
+| #1752 (hard-delete half) | Hard-delete relocated sources on secure transition | The secure-transition container-migration project (scoped out 2026-08-31; `notes/finding-secure-transition-container-migration.md`) |
+
+### ALREADY DONE (closed)
+#1563 (Model 1 guests, auth-system-of-record), #1364 (the provisioning hand-off for `sprk_noaccessentry`), #1350.
+
 ### ISS-030 — the Manage Access modal's existing-grants list is invisible to non-root users, and the failure looks like "no grants"
 
 | Field | Value |
 |---|---|
-| **Status** | Open — **in project** |
+| **Status** | Open — **scheduled in task 099, amendment 4 (2026-10-16)**: D-11 team ownership on create plus a backfill, and a gated BFF read |
 | **Urgency** | next-round (access-control UI correctness; not a data-loss or privilege-escalation path) |
 | **Filed** | 2026-09-22 |
 | **Source** | Tip from the `spaarkeai-word-add-in-r1` session during BFF deploy coordination; **verified independently here against code AND live dev data** |
@@ -1437,3 +1532,20 @@ direction 2026-09-09.
 **Unchanged and still severable**: fix direction **3**, the `catch { return [] }` at
 `TrackingFieldTrio/index.ts:805`. It has no dependency on any of the above and should be scheduled on
 its own.
+
+### 2026-10-28 — filed from the ebilling 086/098 reviews
+
+| ID | Title | GitHub Issue |
+|---|---|---|
+| D-2368 | Unsecure and ordinary creates fail on tables no default team can read (stored file, procedure assignment, rule set, policy); fix option (a), pending owner, built in 194b | https://github.com/spaarke-dev/spaarke/issues/2368 |
+| D-2377 | /invite-and-grant: an internal user's email with no active contact still gets a CIAM invite (task 193 review) | https://github.com/spaarke-dev/spaarke/issues/2377 |
+| D-2378 | 194b K-a: undetermined rows from bad data block their own root's Unsecure | https://github.com/spaarke-dev/spaarke/issues/2378 |
+| D-2379 | 194b K-b: the ordinary-moves time slice does not bound a single root's walk | https://github.com/spaarke-dev/spaarke/issues/2379 |
+| D-2380 | 194b K-c: RecordCreationService Repair has no live caller (field-mapping decides) | https://github.com/spaarke-dev/spaarke/issues/2380 |
+| D-2381 | 194b K4: an undetermined Signal or Decision Record (read fault) blocks its root's Unsecure | https://github.com/spaarke-dev/spaarke/issues/2381 |
+| D-2371 | Granting access to an inactive contact: /grant writes a dormant row, the contact-side route refuses (owner to choose one rule) | https://github.com/spaarke-dev/spaarke/issues/2371 |
+| D-2369 | read_query and semantic search: base completeness and labels on the caller-visible result set (tracked with task 191) | https://github.com/spaarke-dev/spaarke/issues/2369 |
+
+## Closed
+
+*(none yet)*

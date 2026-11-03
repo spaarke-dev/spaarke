@@ -1,0 +1,33 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0124",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0124","generator_id":"gen_eval_set.py@1 F-0124","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0124.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-04"},
+ "header":{"firm":"Oakhurst and Beckett LLP","firm_invoice_number":"INV-2026-94561","invoice_date":"2026-08-01","billing_period_start":"2026-07-01","billing_period_end":"2026-07-31","firm_matter_reference":"57848-0034","po_number":"PO-4570677","fees_total":4201.5,"expenses_total":7319.39,"adjustments_total":0.0,"total_due":11520.89,"currency":"USD"},
+ "timekeepers":[{"name":"Elena Mbeki","title":"Associate","rate":365.0,"billed_as":"E. Mbeki"},{"name":"Gregory Zielinski","title":"Paralegal","rate":175.0,"billed_as":"G. Zielinski"},{"name":"Imani Ashdown","title":"Of Counsel","rate":495.0,"billed_as":"I. Ashdown"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2026-07-09","timekeeper":"E. Mbeki","timekeeper_name":"Elena Mbeki","timekeeper_title":"Associate","title":"Assoc","hours":1.0,"rate":365.0,"amount":365.0,"narrative":"Research appealability issues in the construction contract","codes":["L510","A102"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2026-07-29","timekeeper":"E. Mbeki","timekeeper_name":"Elena Mbeki","timekeeper_title":"Associate","title":"Assoc","hours":1.35,"rate":365.0,"amount":492.75,"narrative":"Plan strategy for upcoming phase of the employment claim with team","codes":["L120","A101"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2026-07-29","timekeeper":"E. Mbeki","timekeeper_name":"Elena Mbeki","timekeeper_title":"Associate","title":"Assoc","hours":2.0,"rate":365.0,"amount":730.0,"narrative":"Prepare monthly status report to client regarding the distribution agreement","codes":["L190","A111"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2026-07-14","timekeeper":"G. Zielinski","timekeeper_name":"Gregory Zielinski","timekeeper_title":"Paralegal","title":"Para","hours":0.25,"rate":175.0,"amount":43.75,"narrative":"Draft notice of appeal and docketing statement for the licensing dispute","codes":["L510","A103"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2026-07-16","timekeeper":"G. Zielinski","timekeeper_name":"Gregory Zielinski","timekeeper_title":"Paralegal","title":"Para","hours":1.0,"rate":175.0,"amount":175.0,"narrative":"Ran conflict check for new party","codes":["L530","A110"],"page":1,"narrative_style":"clerical"},
+  {"n":6,"line_type":"fee","date":"2026-07-31","timekeeper":"G. Zielinski","timekeeper_name":"Gregory Zielinski","timekeeper_title":"Paralegal","title":"Para","hours":2.5,"rate":175.0,"amount":437.5,"narrative":"Review court docket and calendar of pending deadlines for the vendor agreement","codes":["L190","A104"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2026-07-09","timekeeper":"I. Ashdown","timekeeper_name":"Imani Ashdown","timekeeper_title":"Of Counsel","title":"O/C","hours":0.5,"rate":495.0,"amount":247.5,"narrative":"Attend and present oral argument in the warranty claim","codes":["L530","A109"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2026-07-27","timekeeper":"I. Ashdown","timekeeper_name":"Imani Ashdown","timekeeper_title":"Of Counsel","title":"O/C","hours":2.25,"rate":760.0,"amount":1710.0,"narrative":"Attend and present oral argument in the regulatory inquiry","codes":["L530","A109"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"expense","date":"2026-07-08","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":35.11,"amount":35.11,"narrative":"Long distance conference call charges","codes":["E105"],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"expense","date":"2026-07-14","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":2.0,"rate":12.94,"amount":25.88,"narrative":"Postage - certified mail","codes":["E108"],"page":1,"narrative_style":"clear"},
+  {"n":11,"line_type":"expense","date":"2026-07-16","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":6491.65,"amount":6491.65,"narrative":"Consulting expert fees","codes":["E119"],"page":1,"narrative_style":"clear"},
+  {"n":12,"line_type":"expense","date":"2026-07-23","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":766.75,"amount":766.75,"narrative":"Airfare to Atlanta for deposition","codes":["E110"],"page":1,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["30 Union Square","Atlanta","Tax ID 55-4711610"],"template":"T16","pages":2},
+ "rule_set_id":"RS-04",
+ "context":{"matter_open":"2025-08-19","matter_close":"2026-10-29","matter_budget":9216.0,"approved_timekeepers":["Gregory Zielinski","Imani Ashdown","Elena Mbeki","Nadia Whitfield","Beatrix Yilmaz"],"invoice_received_date":"2026-08-11"},
+ "expected_findings":[
+  {"rule_id":"RS-04-R02","rule_type":"ApprovedRate","scope":"line","line_refs":[8],"consequence":"Reduce"},
+  {"rule_id":"RS-04-R03","rule_type":"TimeIncrement","scope":"line","line_refs":[2],"consequence":"Reduce"},
+  {"rule_id":"RS-04-R04","rule_type":"CoreRecordWindow","scope":"invoice","line_refs":[],"consequence":"Flag"},
+  {"rule_id":"RS-04-R08","rule_type":"NonBillableActivity","scope":"line","line_refs":[5],"consequence":"Disallow"}
+ ],
+ "seeded_violations":4
+}

@@ -1,0 +1,132 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="082" project="ebilling-r1">
+  <metadata>
+    <title>Procedure resolver (7.1): firm condition, gaps and holds, re-keyed version selection (7.2), snapshot, ratchet ArchTest</title>
+    <phase>3 Rules (WP3) — Procedure model (EB-D-148), wave W3-D</phase>
+    <gate>080, 081 and 089 merged; task 070 on master (model 7.2 precondition); uac-r2 agrees the NamePairParentAsync entry point before step 1; ontology-r1 owner review of the loader and evaluator change</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Decides which rules judge every invoice, reads core records across the secure wall app-only, and raises holds; a widened or silently dropped rule is a wrong judgement of a firm's invoice.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Fail-closed selection logic over ontology-owned (loader, evaluator, version chain) and uac-r2-owned (filing maps) contracts, with depends-on-3 FULL rigor.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P3-D</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>080, 081, 089</deps>
+    <tags>bff, rules, tenant-isolation, testing</tags>
+    <estimated-effort>3-4 days</estimated-effort>
+  </metadata>
+
+  <prompt>Implement the resolver of notes/procedure-and-file-model.md section 7.1 and the re-keyed version selection of 7.2: ApplicableRules(record, firm, workDate) over the invoice's direct core-record chain, the firm condition on every source, Procedure- and rule-level overrides, record rules in their base rule's slot, precedence 7.3, gaps that hold the invoice ("No procedure associated with this invoice"), the BILL-SYSTEM-SUBMISSION exemption, the 7.4 snapshot, and a ratchet ArchTest over sprk_currentversion readers. It replaces BillingFactLoader's rule-set eligibility.</prompt>
+
+  <role>SPAARKE platform developer. Expert in the billing evaluator (070-073), BillingFactLoader, Dataverse query batching and the uac-r2 filing maps.</role>
+
+  <goal>Evaluation loads exactly the rules the resolver returns for each line's work date, reads every row once per invoice, faults on any failed read, holds the invoice on a gap with one blocking system finding, and stores a snapshot that 113 can compare and 083 can cite.</goal>
+
+  <context>
+    <background>Model 6.1-6.5 (sources, overrides, inheritance, rank), 7.1 (pseudo code, gap reading confirmed by the owner, hold), 7.2 (re-key, readers list, ratchet), 7.3 (precedence), 7.4 (snapshot). Today: BillingFactLoader.LoadRulesAsync (Services/Signals/Billing/BillingFactLoader.cs:280) selects rule sets by ClientDefault / Firm (:290-306); IsCurrent and IsInForceOn (:97-135, :383) read sprk_currentversion; the fault contract is LoadAsync (:243-244); InvoiceComplianceEvaluator.SelectVersion (:397-399) picks by date; system findings use BillingSystemFindings (Services/Signals/Billing/BillingSystemFindings.cs) under BillingRuleCatalogue.SystemPolicyCode (:46); the submission snapshot is sprk_findingsjson (InvoiceSubmissionPersister.cs:1038-1044). The superseded old 082 POML (git history, 082-ruleset-scope-selection.poml) holds the CoreRecordChain contract that still applies: direct parents only, NamePairParentAsync with the closed PairParentAnswer (None | Parent | NotAFilingParent | Unknown), SecureRootInheritance.TypedFilingColumns (:401) reused, IntermediateFilingColumns (:429) never followed, and the Replace / Additive / Split classification with ExpenseRule split. Its business-unit filter and interim B are dropped (O-12).</background>
+    <relevant-files>
+      <file role="new">src/server/api/Sprk.Bff.Api/Services/Signals/Billing/CoreRecordChain.cs</file>
+      <file role="new">src/server/api/Sprk.Bff.Api/Services/Signals/Billing/ProcedureResolver.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Signals/Billing/BillingFactLoader.cs, InvoiceComplianceEvaluator.cs, BillingRuleCatalogue.cs, BillingSystemFindings.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Finance/Submission/InvoiceSubmissionPersister.cs (snapshot), InvoiceSubmissionAfterSteps.cs (system policy candidate)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Access/SecureRootInheritance.cs (uac-r2: only the extracted NamePairParentAsync, no logic change)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/DI/FinanceModule.cs (shared append point)</file>
+      <file role="new">tests/Spaarke.ArchTests/CoreRecordChainNoMultiHopGuardTests.cs; tests/Spaarke.ArchTests/CurrentVersionReaderRatchetTests.cs</file>
+      <file role="new">tests/unit/Sprk.Bff.Api.Tests/Services/Signals/Billing/CoreRecordChainTests.cs, ProcedureResolverTests.cs</file>
+      <file role="modify">tests/unit/Sprk.Bff.Api.Tests/Services/Signals/Billing/BillingFactLoaderTests.cs; tests/unit/domain/Signals/Billing/InvoiceComplianceEvaluatorTests.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="model 6.4, D-172">CoreRecordChain returns the invoice's core record (d0) and its DIRECT parents (d1) only, per the old 082 contract above; Unknown pair answers fail closed; one app-only row read per record.</constraint>
+    <constraint source="model 7.1">ApplicableRules reads stored rows only: chain, assignment and override rows on the chain, Procedures (Applies to, Firm, status), Procedure Versions, policies and policy versions, record-scoped sets. ANY failed read faults the evaluation (the job retries); nothing is judged on a partial set.</constraint>
+    <constraint source="model 6.1, 7.1 (O-20)">Sources: Applies to = All records; Applies to = Firm with Firm = the invoice's firm (sprk_invoice.sprk_vendororg); manual assignment on the chain. Firm condition on every source: a Procedure whose Firm is set applies only when it equals the invoice's firm. Excluded: the nearer row wins; between two d1 parents Exclude wins. Only Active Procedures with at least one Active version.</constraint>
+    <constraint source="model 7.1, 7.2">Version: the nearer Pin, else the Active version with from ≤ workDate &lt; to; two Active versions containing the date → fault. Rules: for each enabled policy of the Procedure's rule set, the policy versions with sprk_procedureversion = that version and sprk_publishstate Published; within it the latest with effective-from ≤ workDate. A pinned version's rules apply whatever the date. Then remove rules excluded on the chain for this firm (row Firm empty or equal; nearer wins), and add record rules of the chain's record-scoped sets whose scope is Record, or Firm record with sprk_firm = the invoice's firm, and whose record lookup is non-null, each in its base rule's slot.</constraint>
+    <constraint source="model 7.1 gap reading (owner, F2-d), O-22">Work before a Procedure's first Active version's from is not applicable (no gap). A gap is: a hole between Active versions; a date after an end with no successor (only work dated after it); a pinned version that is Retired; two different d1 pins. A gap raises ONE blocking internal finding on BILL-SYSTEM-SUBMISSION (D-115 pattern, a new reason code) naming the Procedure and date, internal-only, and the invoice shows "No procedure associated with this invoice". It is raised only when the invoice is checked (submission, or a 101 correction), never by a later Procedure change. An invoice with a gap cannot be approved until a check clears it.</constraint>
+    <constraint source="model 7.3">Rank key (Level, −Distance, FirmSpecific); levels Manual d0 &gt; Manual d1 &gt; Firm &gt; All records; one Procedure from several sources takes the highest level. BillingRuleCatalogue classifies each billing rule type as Replace, Additive or Split (exhaustive switch; throws on a non-billing type; pinned list test). Limit types replace in rank order; checklist types add; ExpenseRule caps replace per category and its checklist adds. A broken or downgraded specific rule never removes the general one. Ties all apply; output order (policy code, id).</constraint>
+    <constraint source="model 7.1 (ontology 2b), D-125">Policies of BILL-SYSTEM-SUBMISSION are exempt: no rule set, loaded through their sprk_currentversion chain as today.</constraint>
+    <constraint source="model 8.2 cost bound">One resolution per invoice: chain, rows, Procedures and versions are each read once; every line's work date is resolved in memory. A test asserts the query count does not depend on the line count. 113 calls the same entry point app-only.</constraint>
+    <constraint source="model 7.4">Snapshot on the submission (sprk_findingsjson, additive members): per rule applied, the policy version, Procedure, Procedure Version, source, level and the content of every override that decided it (mode, rule, reason, distance, chain record); rules displaced or excluded; gap findings. A Decision Record written by evaluation carries only a bounded summary plus a pointer to the submission (sprk_factsnapshot is capped at 100,000 characters). The resolver output also names each Procedure Version's published rate card and its rank, for 085.</constraint>
+    <constraint source="model 7.2 ratchet (ontology F3-b)">CurrentVersionReaderRatchetTests: every sprk_currentversion reader outside a baseline allowlist applies RuleDomains; new readers fail; must-fire (a fixture reader with no RuleDomains call) and must-not-fire (a reader that applies it) controls. Re-key BillingFactLoader :97, :116, :123, :383; RuleSetService :2039 is 083's; SignalReevaluationJob and SignalClosureService readers stay Ontology-only and unchanged.</constraint>
+    <constraint source="081 ontology review (2026-10-22), ordering rule">Until 082 is live in an environment, nothing there may set sprk_ruleset.sprk_procedure on a rule set whose rules are in force today, otherwise those rules silently stop being evaluated (BillingFactLoader skips Procedure rule sets until 082). On dev today 0 rule sets have it set and 081 writes none. 082 removes that skip (acceptance criteria below); 075's legacy-set rules move only by copy-forward into a Draft Procedure Version, never before 082 is live.</constraint>
+    <constraint source=".claude/constraints/bff-extensions.md">Placement in Services/Signals/Billing; publish-size delta; no package; no new HIGH CVE. 102 and 101 reuse this resolver; add no second scope filter.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ebilling-r1/notes/procedure-and-file-model.md (sections 6, 7, 8.2)</file>
+      <file>projects/ebilling-r1/tasks/072-invoice-compliance-evaluator.poml</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/patterns/testing/unit-test-structure.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+    <patterns>
+      <pattern name="Flag-only system finding" location="BillingSystemFindings.cs; BillingEvaluationReasons in InvoiceComplianceEvaluator.cs">The D-115 pattern for the gap finding.</pattern>
+      <pattern name="Loader read with re-check" location="BillingFactLoader.LoadRulesAsync">Query filter, then every row re-checked; faults propagate.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Merge origin/master. Read-only dev check: count work assignments with both regarding lookups set where the matter is only the project's matter; record it.</step>
+    <step order="1">CoreRecordChain, NamePairParentAsync (agreed with uac-r2), no-multi-hop ArchTest with controls.</step>
+    <step order="2">ProcedureResolver with the gap reading and the cost bound; BillingRuleCatalogue classification.</step>
+    <step order="3">Loader and evaluator re-keyed; gap finding; system-policy exemption.</step>
+    <step order="4">Snapshot members; ratchet ArchTest.</step>
+    <step order="5">Seeding proofs: (a) let CoreRecordChain add a parent's parent → the "M's Procedure does not apply on W1" test must fail; (b) drop the firm condition for manual sources → the firm-condition test must fail. Restore and re-run.</step>
+    <step order="6">dotnet build and test; NFR-01 timing on a 150-line invoice; publish-size delta.</step>
+    <step order="7">Reviews: ontology-r1 and uac-r2 recorded.</step>
+    <step order="8">Update TASK-INDEX.md: this task's status cell to "✅ [done]".</step>
+    <step order="9">Record deviations in projects/ebilling-r1/notes/082-procedure-resolver.md.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If step 0 finds work assignments carrying both regarding lookups where the matter is only the project's matter, STOP and raise 🔔 Human Input Required (the direct-only rule needs a decision).</trigger>
+    <trigger>If NamePairParentAsync cannot be extracted without a logic change, or uac-r2 wants another shape, STOP and agree it; do not copy the pair parsing.</trigger>
+    <trigger>If the Decision Record summary needs a DecisionRecordWriter change, STOP and ask ontology-r1; add no writer entry point.</trigger>
+    <trigger>If NFR-01 on a 150-line invoice is exceeded, STOP and report the measurement before optimising.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>BillingFactLoader selects rule sets by ClientDefault / Firm (:290-306); SecureRootInheritance's parent walks follow intermediates and more than one hop; no component resolves Procedures.</existing>
+    <extension>Loader, evaluator and catalogue are extended in place. CoreRecordChain is new because the existing walks follow intermediates (D-172 forbids it for billing); ProcedureResolver is new so evaluation, 083, 084, 085 and 113 share one answer.</extension>
+    <cost-of-doing-nothing>No Procedure's rules ever judge an invoice, overrides have no effect, and a gap passes an invoice with no rules instead of holding it (O-22).</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="dotnet">build, test</tool>
+    <tool name="dataverse-mcp">read-only step 0 count</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">CoreRecordChain.cs, ProcedureResolver.cs, BillingFactLoader.cs, InvoiceComplianceEvaluator.cs, BillingRuleCatalogue.cs, BillingSystemFindings.cs, InvoiceSubmissionPersister.cs, InvoiceSubmissionAfterSteps.cs, SecureRootInheritance.cs</output>
+    <output type="test">CoreRecordChainTests.cs, ProcedureResolverTests.cs, BillingFactLoaderTests.cs, InvoiceComplianceEvaluatorTests.cs, the two ArchTests</output>
+    <output type="docs">projects/ebilling-r1/notes/082-procedure-resolver.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Chain: M → [M]; P under M → [P 0, M 1]; W typed under P → [W 0, P 1]; W under an invoice or event only → [W 0]; Unknown pair throws; NotAFilingParent gives no parent; the ArchTest fails on a planted NameParentsAsync or IntermediateFilingColumns reference and passes on the real file.</criterion>
+    <criterion testable="true">Sources and firm condition: an All-records Procedure applies to every invoice; a Firm Procedure for F applies to F's invoices and not G's; a manually assigned Procedure naming Firm F does not apply to G's invoice on that record; a Procedure assigned on M applies on P (d1) and not on W1 under P.</criterion>
+    <criterion testable="true">Overrides: Exclude at d1 is lifted only by a d0 assignment of the same Procedure; between two d1 parents Exclude wins; a Pin keeps its version for work dated in a later version's window; an excluded rule (Firm F) still runs on G's invoice; a record rule runs in its base rule's slot only for its firm; a record-scoped set with scope but no record lookup applies to nothing.</criterion>
+    <criterion testable="true">Versions: work in v1's window uses v1's Published policy versions and in v2's window v2's; a Draft policy version never loads; a correction inside v2 applies from its effective-from; two Active versions containing the date fault the evaluation.</criterion>
+    <criterion testable="true">Gaps: work before the first Active version is not applicable (no finding); a hole between versions, a date after an end with no successor, a Retired pinned version and two conflicting d1 pins each raise exactly one blocking internal BILL-SYSTEM-SUBMISSION finding naming the Procedure and date; a Draft-only Procedure is not applicable.</criterion>
+    <criterion testable="true">Precedence: limit types replace in rank order, checklist types add, ExpenseRule caps replace per category and its checklist adds; the classification test pins every billing type and throws on a non-billing one; a refused specific version leaves the general one in force.</criterion>
+    <criterion testable="true">Fail closed: a fault reading any of chain, assignment rows, Procedures, versions or record-scoped sets faults the evaluation with no findings written.</criterion>
+    <criterion testable="true">Cost bound: the query count for a 1-line and a 150-line invoice is equal; NFR-01 timing recorded.</criterion>
+    <criterion testable="true">Snapshot: the submission's findings JSON carries the 7.4 members; BILL-SYSTEM-SUBMISSION findings load through its current-version chain.</criterion>
+    <criterion testable="true">Ratchet ArchTest fails on the must-fire fixture and passes on the must-not-fire fixture and the real code with the baseline listed.</criterion>
+    <criterion testable="true">Seeding proofs (a) and (b) recorded; reviews recorded; publish-size delta; no package; no new HIGH CVE.</criterion>
+    <criterion testable="true">MUST-DO (081 ontology review): BillingFactLoader.LoadRulesAsync no longer skips Procedure rule sets: the sprk_procedure null filter (setQuery.Criteria.AddCondition(ProcedureColumn, ConditionOperator.Null), :295 at 081) and the row re-check that drops a row with sprk_procedure set (:309 at 081) are removed; Procedure rule sets load through the resolver.</criterion>
+    <criterion testable="true">MUST-DO (081 ontology review), must-fire: a rule of a published (Active) Procedure Version is evaluated against an invoice the Procedure applies to (a finding is raised), and the test fails if the loader's Procedure-set skip is restored.</criterion>
+    <criterion testable="true">MUST-DO (081 ontology review), must-fire: a Procedure with Applies to = Assigned records only does not apply to an invoice whose core-record chain carries no assignment of it (no finding, no gap).</criterion>
+    <criterion testable="true">Cover the stated contract plus the edge cases named above. Anything beyond that needs a one-line justification in task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>Two adversarial-review passes (tenant isolation). 083, 084, 085 and 113 consume ProcedureResolver; 114 releases the gap hold. Firm-facing projections never show the basis (130's allow-list DTO). 080 PARENTAL LIMIT (2026-10-21, uac-r2 ACCEPT): Dataverse allows one parental (Delete = Cascade) relationship per table, so sprk_procedureassignment's three core lookups are RemoveLink and sprk_excludedpolicy is its only Cascade. Must-not-fire test: an assignment row with all three core lookups empty never selects, pins or excludes anything. ontology-r1 2026-10-21 (must-fire): an assignment row with every core lookup null contributes nothing for Follow, Exclude and a rule-level exclude/change. It is never read as unscoped ('no record = applies to all', the CommunicationRuleGate blank = all hazard); same rule as D-172 F2-b. Plus a must-not-fire control: a row with one live core lookup applies. D-39 PRECEDENCE KEY (owner 2026-10-21; ontology-r1 condition on the 115 follow-up): record-level precedence (matter / project / work assignment over firm, D-171 levels) must use BillingRuleDefinition.PrecedenceKey, never RuleType alone (AddedFee keys on fee kind, and for kind other on its fee codes). Must-fire test: a matter AddedFee cap on one key leaves the firm's AddedFee cap on another key in force; must-not-fire: a matter cap on the same key replaces the firm's.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load the knowledge files first. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

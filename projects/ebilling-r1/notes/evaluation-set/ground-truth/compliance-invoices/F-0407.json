@@ -1,0 +1,28 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0407",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0407","generator_id":"gen_eval_set.py@1 F-0407","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0407.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-05"},
+ "header":{"firm":"Rutherford & Beckett LLP","firm_invoice_number":"INV-2025-43966","invoice_date":"2026-07-04","billing_period_start":"2026-06-01","billing_period_end":"2026-06-30","firm_matter_reference":"69506-0017","po_number":"PO-4588180","fees_total":4627.0,"expenses_total":1835.65,"adjustments_total":0.0,"total_due":6462.65,"currency":"USD"},
+ "timekeepers":[{"name":"Hannah Kowalczyk","title":"Paralegal","rate":135.0,"billed_as":"HK"},{"name":"Hector Rosenthal","title":"Partner","rate":460.0,"billed_as":"HR"},{"name":"Leila Ashdown","title":"Paralegal","rate":140.0,"billed_as":"LA"},{"name":"Victor Oyelaran","title":"Associate","rate":300.0,"billed_as":"VO"},{"name":"Victor Wickham","title":"Associate","rate":310.0,"billed_as":"VW"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2026-06-01","timekeeper":"VW","timekeeper_name":"Victor Wickham","timekeeper_title":"Associate","title":"Assoc","hours":0.4,"rate":310.0,"amount":124.0,"narrative":"Prepare case assessment memorandum regarding the regulatory inquiry and recommended strategy","codes":["L120","A103"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2026-06-03","timekeeper":"LA","timekeeper_name":"Leila Ashdown","timekeeper_title":"Paralegal","title":"Para","hours":1.9,"rate":140.0,"amount":266.0,"narrative":"Prepare monthly status report to client regarding the lease dispute","codes":["L190","A111"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2026-06-03","timekeeper":"VW","timekeeper_name":"Victor Wickham","timekeeper_title":"Associate","title":"Assoc","hours":2.4,"rate":310.0,"amount":744.0,"narrative":"Prepare monthly status report to client regarding the employment claim","codes":["L190","A111"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2026-06-09","timekeeper":"HK","timekeeper_name":"Hannah Kowalczyk","timekeeper_title":"Paralegal","title":"Para","hours":2.9,"rate":135.0,"amount":391.5,"narrative":"Draft requests for production in the supply agreement","codes":["L250","A103"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2026-06-11","timekeeper":"VO","timekeeper_name":"Victor Oyelaran","timekeeper_title":"Associate","title":"Assoc","hours":2.4,"rate":300.0,"amount":720.0,"narrative":"Draft motion for summary judgment to Tidewater Retail","codes":["L310","A103"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2026-06-17","timekeeper":"LA","timekeeper_name":"Leila Ashdown","timekeeper_title":"Paralegal","title":"Para","hours":2.5,"rate":140.0,"amount":350.0,"narrative":"Review documents produced by Harbor Point Capital for responsiveness","codes":["L320","A104"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2026-06-19","timekeeper":"HK","timekeeper_name":"Hannah Kowalczyk","timekeeper_title":"Paralegal","title":"Para","hours":1.3,"rate":135.0,"amount":175.5,"narrative":"Review and summarize deposition transcript of Ironbridge Steel witness","codes":["L330","A104"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2026-06-22","timekeeper":"HR","timekeeper_name":"Hector Rosenthal","timekeeper_title":"Partner","title":"Ptr","hours":2.6,"rate":460.0,"amount":1196.0,"narrative":"Prepare case assessment memorandum regarding the regulatory inquiry and recommended strategy","codes":["L120","A103"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"fee","date":"2026-06-30","timekeeper":"VO","timekeeper_name":"Victor Oyelaran","timekeeper_title":"Associate","title":"Assoc","hours":2.2,"rate":300.0,"amount":660.0,"narrative":"Research authority for discovery plan","codes":["L250","A102"],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"expense","date":"2026-06-03","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":1021.22,"amount":1021.22,"narrative":"Court reporter and transcript - deposition","codes":["E115"],"page":1,"narrative_style":"clear"},
+  {"n":11,"line_type":"expense","date":"2026-06-03","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":2.0,"rate":59.99,"amount":119.98,"narrative":"Overnight courier to Meridian Foods counsel","codes":["E107"],"page":1,"narrative_style":"clear"},
+  {"n":12,"line_type":"expense","date":"2026-06-04","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":694.45,"amount":694.45,"narrative":"Document hosting and processing vendor","codes":["E118"],"page":1,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["787 Congress Boulevard","Boston","Tax ID 23-4573993"],"template":"T11","pages":2},
+ "rule_set_id":"RS-05",
+ "context":{"matter_open":"2025-08-21","matter_close":"2026-09-28","matter_budget":50850.0,"approved_timekeepers":["Victor Wickham","Peter Ramanathan","Leila Ashdown","Cyrus Quillen","Emeka Lockhart","Victor Oyelaran","Gregory Carmichael","Hector Rosenthal","Hannah Kowalczyk"],"invoice_received_date":"2026-07-17"},
+ "expected_findings":[],
+ "seeded_violations":0
+}

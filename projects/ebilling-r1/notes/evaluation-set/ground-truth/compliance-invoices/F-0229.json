@@ -1,0 +1,32 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0229",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0229","generator_id":"gen_eval_set.py@1 F-0229","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0229.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-01"},
+ "header":{"firm":"Eastlake Zeller PC","firm_invoice_number":"INV-2025-47271","invoice_date":"2026-10-19","billing_period_start":"2026-07-01","billing_period_end":"2026-07-31","firm_matter_reference":"25576-0025","po_number":"PO-4575383","fees_total":4292.25,"expenses_total":99.99,"adjustments_total":0.0,"total_due":4392.24,"currency":"USD"},
+ "timekeepers":[{"name":"Anders Galbraith","title":"Paralegal","rate":240.0,"billed_as":"AG"},{"name":"Gideon Ashdown","title":"Senior Associate","rate":585.0,"billed_as":"GA"},{"name":"Naomi Thornbury","title":"Associate","rate":485.0,"billed_as":"NT"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2026-07-08","timekeeper":"NT","timekeeper_name":"Naomi Thornbury","timekeeper_title":"Associate","title":"Assoc","hours":0.7,"rate":485.0,"amount":339.5,"narrative":"Revise notice of deposition after review by lead counsel","codes":["L430","A104"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2026-07-10","timekeeper":"NT","timekeeper_name":"Naomi Thornbury","timekeeper_title":"Associate","title":"Assoc","hours":2.4,"rate":485.0,"amount":1164.0,"narrative":"Telephone conference with witness regarding the licensing dispute","codes":["L410","A106"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2026-07-23","timekeeper":"NT","timekeeper_name":"Naomi Thornbury","timekeeper_title":"Associate","title":"Assoc","hours":1.2,"rate":485.0,"amount":582.0,"narrative":"Prepare monthly status report to client regarding the customs audit","codes":["L190","A111"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2026-07-29","timekeeper":"NT","timekeeper_name":"Naomi Thornbury","timekeeper_title":"Associate","title":"Assoc","hours":0.9,"rate":485.0,"amount":436.5,"narrative":"Prepare case assessment memorandum regarding the vendor agreement and recommended strategy","codes":["L120","A103"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2026-07-30","timekeeper":"GA","timekeeper_name":"Gideon Ashdown","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":0.5,"rate":585.0,"amount":292.5,"narrative":"Revise interrogatory responses after review by lead counsel","codes":["L430","A104"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2026-07-30","timekeeper":"AG","timekeeper_name":"Anders Galbraith","timekeeper_title":"Paralegal","title":"Para","hours":0.6,"rate":240.0,"amount":144.0,"narrative":"Ran conflict check for new party","codes":["L430","A110"],"page":1,"narrative_style":"clerical"},
+  {"n":7,"line_type":"fee","date":"2026-07-31","timekeeper":"NT","timekeeper_name":"Naomi Thornbury","timekeeper_title":"Associate","title":"Assoc","hours":1.9,"rate":485.0,"amount":921.5,"narrative":"Prepare fact witness for testimony regarding the employment claim","codes":["L410","A101"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2026-07-31","timekeeper":"NT","timekeeper_name":"Naomi Thornbury","timekeeper_title":"Associate","title":"Assoc","hours":0.85,"rate":485.0,"amount":412.25,"narrative":"Analyze exposure and damages model for the licensing dispute","codes":["L120","A104"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"expense","date":"2026-07-07","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":3.0,"rate":12.23,"amount":36.69,"narrative":"Postage - certified mail","codes":["E108"],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"expense","date":"2026-07-17","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":2.0,"rate":13.25,"amount":26.5,"narrative":"Postage - certified mail","codes":["E108"],"page":1,"narrative_style":"clear"},
+  {"n":11,"line_type":"expense","date":"2026-07-28","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":2.0,"rate":7.32,"amount":14.64,"narrative":"Postage - certified mail","codes":["E108"],"page":1,"narrative_style":"clear"},
+  {"n":12,"line_type":"expense","date":"2026-07-30","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":22.16,"amount":22.16,"narrative":"Long distance conference call charges","codes":["E105"],"page":1,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["161 Elm Court","Houston","Tax ID 88-7856386"],"template":"T15","pages":2},
+ "rule_set_id":"RS-01",
+ "context":{"matter_open":"2025-02-21","matter_close":"2026-10-29","matter_budget":42568.0,"approved_timekeepers":["Anders Galbraith","Gideon Ashdown","Naomi Thornbury","Ivan Lockhart","Samuel Esposito","Sofia Okafor"],"invoice_received_date":"2026-10-20"},
+ "expected_findings":[
+  {"rule_id":"RS-01-R01","rule_type":"TimeIncrement","scope":"line","line_refs":[8],"consequence":"Reduce"},
+  {"rule_id":"RS-01-R03","rule_type":"NonBillableActivity","scope":"line","line_refs":[6],"consequence":"Disallow"},
+  {"rule_id":"RS-01-R06","rule_type":"InvoiceAge","scope":"invoice","line_refs":[],"consequence":"Flag"}
+ ],
+ "seeded_violations":3
+}

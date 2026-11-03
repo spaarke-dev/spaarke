@@ -428,3 +428,308 @@ Sync-mode migration (UAC-r2 4a): class-aware. Assigned-To targets stay 0; filing
 
    Anything access-changing (bulk share/grant, Monitor if it shares) needs UAC review before it is built. "Email family members" takes recipients only from the people lookups on readable members, respects field security, and uses the existing communication send path.
 - **5c follow-up:** UAC filed #2343. Recommendation: retire the `sprk_securitybu` mechanism (remove `HasLegacyPerProjectBusinessUnit` and its 409, then delete the column). Interim: hide the BU-form navigation. UAC takes the schema delete to the owner.
+
+## 2026-10-30 — Owner: task 039 approved; chat create keeps task, contact and account
+
+**Task 039 (FR-38, server-owned search index): approved as written.** It is sequenced after 017 and before the 019
+W2 deploy, so the durable #2399 fix ships with W2. The procedure ran in full: design §13, then UAC-r2's review, the
+spec amendment FR-38, the task, the TASK-INDEX entry and the owner's approval.
+
+**Chat `dataverse.create_record` on the unified service: register `task`, `contact` and `account`** (option b).
+- 017c found that, today, the chat create sends every user- or team-owned table through `OwnedChildWrite`'s create
+  core, with a team owner from the resolver. The service creates only tables in `RecordTableRules`.
+- The owner chose to register the three tables the tool offers, keeping today's resolver team owner. `task` is also
+  pinned by an existing test.
+- Every other unregistered table is refused, as 017's criterion states.
+- Organization-owned and per-user tables, and unfiled communications, keep their run-as-user path
+  (`OwnedChildWrite.PathFor`).
+- Rejected:
+  - refusing every unregistered table (a chat task, contact or account create would stop working);
+  - keeping the old core for the rest (a second create core would remain).
+
+**ebilling-r1 (2026-10-30):**
+- The chat create also refuses `sprk_externalidentifier`. Its only writer is ebilling's resolution step (task 044),
+  which normalises the value and fills the issuing organisation the alternate key needs. A chat-created row could
+  route later invoices to the wrong matter.
+- The four new invoice-family registry entries derive their mapping-protected columns from the guard's per-table
+  `CoreRecordLookups`. This was done in 017b.
+- A system-principal create of an invoice-family table being refused (403) is OK as the interim.
+
+**Chat tool error codes (017, ADR-019 + NFR-07; no owner question).** Chat follows task 018's Office precedent: each
+refusal kind maps to the handler's existing tool error code, and only the text comes from the shared map. Existing
+codes (`AccessDenied`, `VALIDATION_FAILED`, `INTERNAL_ERROR`) do not change.
+
+## 2026-10-30 — 017 phase 2d design answers (coordinator; within existing contracts)
+
+2d's implementer raised three questions while reading. Each is settled without changing an existing contract.
+
+1. **I-16 under decision 2a.** Only an I-1 derivation failure refuses the create.
+   - `CoreAncestorResolver`'s I-16 resolvers are documented "never throws … display only, never fails a write"
+     (`CoreAncestorResolver.cs` ~:1104-1110) and return null instead of failing.
+   - So I-16 is set before the create when it resolves, and re-derived after the create.
+   - That satisfies 2a ("refuses when the derivation fails") and keeps the I-16 contract.
+2. **Refusal for a failed I-1 derivation.** Two new codes, using the service's existing kinds:
+   - a permanent data condition (e.g. multiple roots): `Invalid` 400 `record_creation.stamp_underivable`;
+   - a transient read fault: `Unavailable` 503 `record_creation.stamp_unavailable`.
+
+   No existing code changes (NFR-07). UAC-r2 is pinged on refusal-code changes before merge.
+3. **The `email.draft` path choice: option (a).**
+   - The handler keeps deriving the ancestry, but only to choose owned vs run-as-user and the sender
+     (`IsFiledUnderAnOwnershipParent`).
+   - It no longer writes the stamp into the payload; the service's step 10 does that.
+   - This preserves today's owner and sender for a draft filed only through its stamp (under an event or
+     communication that is itself under a matter).
+   - Rejected: (b), moving the path choice into the service. It changes the service's contract for one caller.
+
+Split of the remaining 2d work:
+- 2d-1 (step 10) and 2d-2 (task/contact/account) run in parallel;
+- then 2d-3 (chat create + budget) and 2d-4 (email.draft);
+- then 2d-5 (delete the create half of OwnedChildWrite, publish delta, CVE, notes).
+
+**Revision (2026-10-30, the same day): `email.draft` uses option (a′), not (a).**
+2d-4 probed the real resolver and found that (a) changes behaviour. The service's step 10 writes the stamp only into
+the create body, and the owner (step 7) and the AppendTo checks (step 5) read the item.
+- Today, a draft regarding an invoice under a secure, isolated matter goes to `SecureNamedTeam`. Under (a) it would
+  go to the child BU team.
+- A matter flagged secure but not isolated would no longer be refused.
+- A caller who can AppendTo the invoice but not its matter would no longer be refused.
+
+Under (a′) the handler keeps writing its derived stamp into the create item, as it does today, and step 10 has nothing
+missing to add. Owners and refusals are unchanged, and the service needs no change.
+- The sender stays the handler's: `sprk_sentby` is a server-set lookup. The service never writes "for" columns; step
+  9 leaves them to the adapters.
+- The handler keeps ONE WhoAmI. It guards the AppendTo check that must run before the derivation (otherwise an
+  existence oracle).
+- This deviates from 017's criterion "no longer resolve WhoAmI themselves". The reason is recorded here and goes in the
+  PR.
+- Option (b) is rejected for now: making steps 5 and 7 read step 10's stamp changes the contract for every caller and
+  needs owner and UAC-r2 review.
+
+### 2026-10-30 — Task 017: keep the three invoice-family registry entries (ebilling-r1)
+
+- **Question** (from the 017 code-review gate): `RecordTableRules` registers `sprk_invoicesubmission`, `sprk_invoiceapproval` and `sprk_invoicecorrection`, each with an `InvoiceFamilyRule` and the mapping-protected core lookups. No create path reaches them through the service today: ebilling's persister writes them directly, and chat blocks them.
+- **Answer** (ebilling-r1, 2026-10-30): keep them. With the entries already registered, ebilling's single creator can move onto the service later without the reconcile recipe. The 017-r2 drift test pins the registry's set to the guard's `CoreRecordLookups` keys.
+- **ebilling-r1 on PR #2486:** no findings. The chat-side invoice-family not-found surfacing as `AccessDenied` with the uniform text is right; it matches correction (b). `CheckInvoiceFamilyAsync` and the refile half are unchanged.
+- **UAC-r2 on PR #2486:** one F1 finding. Chat-created roots began sending external invitations (grantor = the caller), where master passed a null grantor. Fixed on `task/fm-017-r3` by restoring master's behaviour. Whether chat should invite is a separate product decision for the owner.
+- **UAC-r2 on `sprk_userentityassociation`:** a known limit, not access-bearing. The only reader that affects access is `ParticipantCorrelationRung`, which reads contacts only. A stale owner row from the #2483 window lasts until the nightly reconciliation; UAC-r2 filed the housekeeping on their side.
+
+### 2026-10-31 — UAC-r2 task 195 merged (d0c1c5dc3c, #2496): what task 040 builds on
+
+- **What changed.** A project's regarding pair (`sprk_regardingrecordid` + `sprk_regardingrecordtype`) is now its one filing root, and only the BFF writes it.
+  - **The writer:** one core, `Services/Dataverse/ProjectMatterFiling.cs`.
+  - **Its callers:** `PATCH /api/v1/child-records/sprk_project/{id}` and the chat update tool.
+  - **Unchanged:** W7's Matter → Project edge (`RecordFamilyEdges.cs:231-233`).
+- **The route's body.** It accepts exactly this, and nothing else: `{"sprk_regardingrecordid":"<matter>","sprk_regardingrecordtype@odata.bind":"/sprk_recordtype_refs(<matter type>)"}`.
+- **Moves.** A project already filed under another record answers 409 `project_filing.already_filed` and nothing is written, unless the call passes `?move=true`. The chat tool always passes `move`.
+- **Secure matters.** Filing under a secure matter is refused with 409 `project_filing.secure_matter_unsupported` until #1506 (task 178) is fixed. Moving a project from a secure matter to an ordinary one is allowed, and the project stays secure.
+- **Census.** The root-owner report gains three counts: `projectsWithMatterLinkButNoPair`, `projectsWhosePairMatterHasNoLink` and `projectsWhosePairTypeIsUnknown`.
+- **Owner decisions** (as UAC-r2 reports them):
+  - a project can be re-filed to another matter;
+  - matters are added to a project's list only through the wizard;
+  - the backfill is accepted.
+- **Not live yet.** The dev deploy, the ribbon import and the backfill all wait for the owner's go in UAC-r2's session. UAC-r2 will send the deploy time. Task 076's "projects pair-filed" check depends on that backfill.
+
+### 2026-10-31 — FR-38 widened before task 039 (owner, in this session)
+
+- **Tables.** FR-38 named only the registry's search-indexed tables (matter, project, document). Work assignment, event and invoice also carry `sprk_ai_search_index`, and their wizards bind the user's BU index on it (`workAssignmentService.ts:405-414`, `eventService.ts:233-267`, `invoiceService.ts:204-213`). #2399 itself was a Work Assignment create, so FR-38 as written left it able to recur. **Owner: mark `sprk_workassignment`, `sprk_event` and `sprk_invoice` `SearchIndexed = true`.** All six tables then get the drop, and step 8 fills the final owning BU's index (often none). Repair's step 8 (`RepairSearchIndexAsync`) follows the same flag.
+- **Columns.** The legacy text column `sprk_searchindexname` is a second way to choose a record's index. `SearchIndexNameResolver` reads the lookup first and then the name, and where no BU has an index lookup (every customer environment, Q2 = (B)), the name decides. **Owner: both columns are server-owned.** A client value in either is dropped, before step 5 and on every BFF update path. Step 8 is the **only writer** of both columns on these tables: a value from field mapping or an adapter's post-mapping default is removed too, because an explicit `mappingSource` would otherwise let a client pick a parent whose index gets copied. No dev mapping rule targets either column (checked 2026-10-31, `sprk_fieldmappingrule` source/target LIKE '%search%': 0 rows). A server writer that sets an index on purpose escalates; it is not silently dropped.
+- **The drop log** covers both columns. It carries ids only: record, table and the dropped and applied index id, plus, for the name column, the dropped and applied index NAME. An index name is catalog configuration, not personal data. UAC-r2 condition 4 is kept (no user names, no emails).
+- **Reviews.** UAC-r2 reviewed FR-38 (conditions 1-4); ebilling-r1 reviews registry rules (the `sprk_invoice` flag). Both are told; the amendment ships in 039's PR for their review there.
+
+### 2026-11-01 — UAC-r2 task 195 is live on dev
+
+- **What's live** (UAC-r2's after-notice):
+  - BFF d0c1c5dc3c since 2026-11-01T03:09:00Z;
+  - the wizard commands script and the two Create wizard pages since 03:12Z;
+  - the Project ↔ Matter subgrid ribbon since about 03:27Z.
+- **Backfill:**
+  - applied 03:14Z: all 7 N:N-linked projects are now pair-filed;
+  - 3 of them re-owned to their root's owner at 03:15Z;
+  - their children followed at 03:21Z and 03:24Z.
+- **Gate:** PASS. 0 5xx, 0 ownership refusals, and the reconciler has converged.
+- **Visible change:** PRJT.10001.01 now inherits Restricted from its matter REAL-2026-123456.02.
+- **Facts for 040:** on dev, every project with a matter link has a pair, and none is filed under a secure matter. 195 no longer blocks 040, but 040 still needs 005 (`-Apply` on hold, owner) and 019.
+- **For 076:** the "projects pair-filed" check can now be run.
+
+### 2026-11-01 — #2502: users never choose the index; the index follows the content type (owner, in this session)
+
+- **Owner:** "users should not choose the index; the index is determined by the document/file type."
+- **For `POST /api/ai/rag/index-file`:** the client's `searchIndexName` is not honoured. The server picks the index from what is being indexed, using the canonical catalog (`docs/architecture/AI-SEARCH-INDEX-CATALOG.md`):
+  - SPE document chunks go to `spaarke-files-index` (plus `spaarke-discovery-index`);
+  - chat session files go to `spaarke-session-files`;
+  - invoices go to `spaarke-invoices-index`;
+  - and so on.
+- **Found while checking:** the route stamps `sprk_searchindexname` with `GetDefaultIndexName()` even when the chunks went to a client-named index (`RagEndpoints.cs:638-648`). The record can therefore name an index the file is not in. The fix removes this mismatch.
+- **Open (asked of the owner):** this rule pulls against the per-BU index hook kept by Q2 = (B), 2026-10-29: BU → `sprk_ai_search_index`, step 8's fill, and the resolver's parent-BU chain. Do the per-BU record columns stay as a hook, for example a Secure Records index, or go?
+- **Not yet scheduled.** It takes the scope path (design → UAC-r2 review → spec amendment → task → TASK-INDEX → owner approval).
+
+### 2026-11-01 — Chat creates send no external invitations (owner, in this session)
+
+- **Owner:** "we can leave off invitations from chats; this functionality may change so we do not need to extend the chat functionality at this time."
+- **Effect:** the chat Owned create keeps `Grantor = AssignedAccessGrantor.None` (task 017). The external "Assigned To" grants and shares are made, but no invitation is sent and no `sprk_grantedby` is recorded. No change is planned, and the open owner item is closed.
+
+### 2026-11-02 — Owner accepts the three recommendations (in this session)
+
+1. **#2502, index routing.** Plan one follow-up task through the scope path (design → UAC-r2 review → spec amendment → task → TASK-INDEX → owner approval). The task covers:
+   - `rag/index-file` ignores a caller's `searchIndexName` and uses the configured files index;
+   - the per-BU record routing is retired: step 8 stops copying the business unit's index, the indexer stops reading the record and BU columns, and the wizards stop sending them (W3);
+   - existing column values stay;
+   - the `sprk_aisearchindex` catalog table stays (provisioning seeds it; the picker and the allow-list read it).
+
+   Facts behind it (checked on dev 2026-11-01): every business unit that has an index names `spaarke-files-index`, which equals `KnowledgeIndexName`; customer business units have none; each customer has its own search service with the fixed index names.
+2. **Chat invitations.** None (recorded 2026-11-01).
+3. **#2483, change 1 accepted.** In the target model, every record is owned by the customer's main business unit or by Secure Record, so owning an ordinary record by its root's business unit changes nothing there. It matches the reconciler and lets the fix close the 2–4 minute Make Secure window. The fix proceeds as UAC-r2 planned: a characterization test of today's window, then the fix (derive the stamp before step 7) as its own change, reviewed by UAC-r2. It also takes the scope path, as a task in this project.
+
+### 2026-11-02 — UAC-r2: #2483 addendum (§15) OK with conditions
+
+- **Verdict.** UAC-r2 returned OK with conditions.
+- **Conditions.** They are recorded in full at the end of `notes/design-addendum-2483-stamp-before-owner.md`:
+  - (a) two tests for row 5 (the transient case and the durable case);
+  - (b) the refusal words stay the same, and there is no "SecuringRoot" exemption;
+  - (c) a Repair skip is counted and logged;
+  - thread filing is fixed in 042b if the parity theory confirms the gap; otherwise it is filed;
+  - reconciler parity for row 7;
+  - a creator-visibility assertion;
+  - a full UAC-r2 pass on the 042b diff before merge.
+- **Next on the scope path.** The spec is amended, then tasks 042a and 042b are created and added to TASK-INDEX, then the owner approves.
+
+### 2026-11-02 — #2502 addendum (§14) reviewed; owner answers on old chunks, the Family deploy and event numbers
+
+- **#2502 §14 reviews.**
+  - UAC-r2: OK, with conditions.
+  - Provisioning: no dependency.
+  - Both are recorded at the end of `notes/design-addendum-2502-index-routing.md`.
+- **Secure Records carve-out.** The owner deferred to UAC-r2, which judged it not needed because secure isolation rests on Read and the per-caller trim. The carve-out is **withdrawn**. A future secure index would be chosen by the server from the record's secure state, under its own design.
+- **Old chunks.** Documents found indexed into a non-default index are **left**; they are not cleaned (owner).
+- **#2513.** The owner approved importing TrackingFieldTrio 1.0.56 to dev after PR #2516 merges.
+- **#2515.** The owner approved numbering events with `EVT-{SEQNUM:6}` on `sprk_event.sprk_eventnumber`, both in the solution and on dev. Existing events stay blank; there is no backfill.
+
+### 2026-11-02 — W5 open questions resolved: the repair marker is a principal set; only Project has quick create on (task 050)
+
+- **Evidence.** `notes/w5-open-questions.md`. Read-only against dev (`spaarkedev1`), on the BFF that carries task 017 (`fcf01480f4`). Task 019 was still pending; the coordinator approved this deviation.
+
+**Q1: the repair marker.**
+- **No impersonated creates.** No product path creates under impersonation:
+  - `MSCRMCallerID` is set only on GET, PATCH and the owner's own share-revoke (`DataverseImpersonation.cs:64-73`, `DataverseWebApiService.cs:214-233`);
+  - the entity-create sender takes no impersonation (`:249-253`);
+  - `CallerObjectId` is never sent;
+  - `createdonbehalfby` was empty on all 2,446 sampled dev rows.
+- **Core creates.** The W2 core checks the caller (an OBO WhoAmI) but writes app-only (`RecordCreationService.cs:208-220`). So `createdby` is the BFF app user for every core create.
+- **A single identity is NOT safe as the marker.**
+  - Dev has two BFF application users: `SDAP-BFF-SPE-API` until 2026-08-17, and `mi-bff-api-dev` since.
+  - The Signal, Decision Record and Budget Revision writers create as `mi-ontology-writer-dev`.
+  - The Matter and Project wizards, and four legacy OBO create calls, create as the user.
+- **Proposed marker (owner to confirm).** Select rows where `createdon >= max(go-live, watermark)` and `createdby NOT IN ProductPrincipals`.
+  - The set is the shared BFF identity (resolved at runtime by WhoAmI), the ontology writer, and a configured list of retired identities. People are never in the set.
+  - Selecting too many rows is harmless, because Repair is fill-only and idempotent.
+  - `createdonbehalfby` is rejected because it is empty on every row. A server-written origin column is the fallback.
+- **Excluded tables.** `sprk_signal`, `sprk_decisionrecord` and `sprk_budgetrevision` stay out of the repair table list.
+- **Gap.** App-only creates that bypass the core have `createdby` set to the BFF app user and are never selected: the ebilling persister, ingestion, `CreateDocumentAsync` and `CreateEventAsync`. FR-21's census must either route them through the core or name them as exceptions.
+- **Open (owner).** FR-21 says the Signal and Decision writers create through the service's system principal, which is the shared identity. They were given a dedicated managed identity on purpose. Keep it, or move them?
+
+**Q2: quick create (dev only).**
+- **Project:** the only table with it on, both live and in SpaarkeMaster (`IsQuickCreateEnabled` 1). It has no quick-create form.
+- **Matter:** off. The XML says 0, so the earlier "XML says on" was wrong.
+- **"Invoice Line Item":** this is `sprk_billingevent`, off live and 0 in the XML. There is no `sprk_invoicelineitem`.
+- **Everything else:** all other `sprk_` registry tables are off.
+
+**FR-24 table list.**
+- `-Verify` covers the 22 `sprk_` tables in `RecordTableRules.All`. The only change needed is to turn `sprk_project` off.
+- Reported but not changed:
+  - `task` (a platform table, on);
+  - the dormant quick-create forms on matter, document, event, invoice and kpiassessment.
+- Other environments were not read; `-Verify` reports each environment separately.
+
+**For tasks 051 and 052.**
+- 051 also checks what Event "Add Memo" (`useQuickCreateForm` on `sprk_memo`) and Project "+ New" do live.
+- 052 builds the selection from the principal set above, and adds Repair's go-live cutoff (019 finding P1-3).
+
+### 2026-11-02 — Ontology-r1 research: the Signal/Decision writers keep their dedicated identity (recommendation; owner to decide)
+
+- **Source:** ontology-r1, `projects/spaarke-ontology-platform-r1/notes/writer-identity-fr21-answer.md` (branch `docs/ontology-platform-design`, 4279c429d2). The owner asked for deep research first.
+- **Why the identity exists:** ontology D-1, "ADR-028 path A", 2026-10-03/04.
+  - The shared BFF identities are System Administrator. Dataverse privileges are additive with no deny, so those identities can Write and Delete `sprk_decisionrecord`.
+  - `mi-ontology-writer-dev` holds only the Spaarke Ontology Service role:
+    - Create and Write on Signal;
+    - Create only on Decision Record and Budget Revision.
+  - That role is what makes the ledger append-only by privilege. It also limits attribution and blast radius.
+  - It has no secret, so the ADR-028 E-1 to E-3 rules do not apply.
+- **What depends on it:**
+  - the idempotency and gate lookups filter on `createdby = writer user` (`DecisionRecordWriter.cs:733/1017/1662`, DecisionCommitService, SignalReadService, SignalReevaluationJob, GateDecisionRecordSharing);
+  - three ArchTests;
+  - the field-security profiles;
+  - the `ontology-writer-failures` alert.
+- **Provisioning gap:** provisioning never creates this identity; dev was set up by hand. Filed as #2518 (ontology DI-138).
+- **Recommendation:**
+  - keep the dedicated identity;
+  - name it as an FR-21 exception: SignalWriter, SignalSuppressionService, DecisionRecordWriter, GateDecisionRecordSharing and the revise-budget step create through `OntologyWriterDataverseClient`, not `RecordCreationService`;
+  - do not give the service a second principal.
+- **For the FR-25 marker:** both `mi-bff-api-*` and the writer's application user are product principals. Resolve each from its configured client id (`systemuser.applicationid`) or WhoAmI, never from a dev GUID.
+
+### 2026-11-02 — Owner approves tasks 041, 042a and 042b; the repair outcome; the 019 live-check rows
+
+1. **Tasks 041, 042a and 042b: approved.** Under the scope path, that completes them. 042a starts now. 041 and 042b start once 019 clears.
+2. **Repair and the marker.** The owner's words: "however technically this happens, what is important is that we have a process that for any records created outside the server-mediated owner process, there is a repair process that aligns all family members to the same owner; so however is the best approach to achieve this."
+   - **The outcome is binding.** The repair process gives every member of a family the same owner. That includes members that already exist when a root is repaired, and the cross-BU re-own that task 016 left open. FR-25 is amended to say so.
+   - **The mechanism is our choice.** We take the recommended route:
+     - the marker is the principal set (task 050);
+     - the Signal, Decision Record and Budget Revision writers keep their dedicated identity, as a named FR-21 exception, per ontology-r1's research. The service gets no second principal;
+     - those three append-only tables stay out of repair.
+   - **Task 052** must design the family cascade.
+3. **The 019 live-check rows are approved.** They are created once R3's batch is live on dev. The test rows carry the `FMSWP-019` prefix, and their ids are recorded so the owner can delete them.
+
+### 2026-11-02 — UAC-r2: a server create that files a project under a matter also writes the `sprk_Project_Matter_nn` link (new scope item, ours)
+
+- **Found by:** 019 live check B. Office quick-create project `1cccf07d-0e0a-43f9-8ea0-f40533d5d691` got its matter pair but no N:N link row. UAC-r2's census reported "1 project filed under a matter with no link row".
+- **Who writes the link today:** no BFF path writes it, now or before W2. Only the CreateMatter and CreateProject wizards do, through a client `$ref`.
+- **UAC-r2's ruling (task 195):**
+  - The pair is the only filing root. The N:N link grants nothing, and no server code reads it.
+  - The matter's Projects subgrid lists projects through the link, and the census counts "pair but no link" as drift.
+  - So a server path that files a project under a matter must also write the link. After W3 the server is its only writer.
+- **Ownership:**
+  - **Create path (ours):** `RecordCreationService` step 12, for `sprk_project` with a matter pair.
+  - **Re-file path (UAC-r2):** task 195's core, reached from the chat update tool, has the same gap. UAC-r2 fixes it.
+- **UAC-r2's rules** (they review our diff):
+  1. The link is written app-only, after the pair is written and the caller's AppendTo on the matter has passed.
+  2. It is idempotent: an existing link is not an error.
+  3. A failed link write logs a Warning and does not fail the create (still 201).
+  4. Only a matter pair gets a link.
+  5. On a re-file, the earlier matter's link stays (195 §2.3).
+  6. Tests: one link for a matter pair; none otherwise; a failed write still returns 201 and logs the Warning.
+- **Issue:** #2524 (filed by UAC-r2), covering both paths.
+- **Next on the scope path:** a design note (UAC-r2 has already reviewed it through these rules), then a spec amendment, task-create for task 043, TASK-INDEX, and owner approval.
+- **Project `1cccf07d`:** it gets its link from the backfill, or by hand after the fix. Its access needs no change.
+
+## 2026-11-03 — Task 019 closed (W2 gate passed); 042a closed
+
+- **Gate result:**
+  - two adversarial passes with no open F-class finding (#2514, #2520);
+  - live checks A, B and C pass;
+  - the negative check passes as `# UAC Child BU Test User`. The child-records 404 and the Office 403 `OFFICE_009` are byte-identical to a nonexistent parent; no row was created.
+- **Clauses moved to task 020:**
+  - check A's "mapped fields";
+  - the negative criterion's "denied mapping source → no mapped values + one warning". It cannot be reached live while every route's mapping source is also its filing parent; an explicit `mappingSource` arrives with 020. Unit tests cover it today.
+- **Deviation:** the deploy was R3's batched dev deploy (5796774091), not a bff-deploy run from this session (standing rule).
+- **Check C:** the owner supplied the name and parent when the Assistant asked. That is correct behaviour. Event `6d1563bb-…` stays (owner: do not delete).
+- **Chat tool description:** re-seeded on dev (row `18b3531f-…`) so the model knows that `sprk_eventnumber` is set by the server.
+- **042a:** done in #2521 (merged 2026-11-02T19:28Z); the index is now ✅.
+- **Next:** 041 and 042b, **in sequence, not in parallel** (TASK-INDEX: both edit `RecordCreationService*.cs`). 041 goes first because W3 waits on it. 020 depends only on 019 and may run beside 041. UAC-r2 reviews the 041 diff (scoped) and the 042b diff (full) before merge.
+
+## 2026-11-03 — Task 041: review and UAC-r2 verdict
+
+- **Opus adversarial review.** Over c58ea58faf. 0 High, and no authorization bypass, existence oracle or data-loss path. Two findings were F-class:
+  - F4: the bulk handler and the Office worker did not stamp the index. Fixed in round 1.
+  - F3: the MF7 test proved nothing. Fixed in round 1.
+  - K4 items 3–5 were also fixed in round 1.
+- **Scoped Sonnet re-check.** Over b087022071. All five findings fixed, and nothing F-class new. N1 (a scoped service held by the Office worker), N3 and N4 were fixed in round 2 (bdadc2a3b9). N2 (the Office worker's stamp has no harness) is a disclosed known limit.
+- **Filed.**
+  - DI-013 #2538: the backfill scripts.
+  - DI-014 #2539: the DeliverToIndex node reports an index it does not use.
+  - The P2-5 note in task-019 is corrected: a malformed client index is dropped but no longer logged (K4).
+- **UAC-r2 verdict (AC17).** "PASSES WITH NOTES; nothing blocks the PR."
+  - Only write-time routing was removed, and no retrieval trim or search-time selection moved.
+  - The drops are intact at all nine sites.
+  - The AC9 exceptions are as listed, and no drop, refusal or authorization assertion was weakened.
+  - NOTE 1: restore the document trigger-2 Repair test as owner-only. Done in round 3.
+  - NOTE 2: the removed `ResolveAsync` Verify in Issue1510 is correct, so no action.
+- **UAC-r2 on task 020 F-1.** No objection to refusing a caller-supplied `sprk_issecure` on a Matter create in the service with `sdap.access.secure_flag_transition_only`, exactly as for Project, with explicit false and null treated as the Project rule treats them. UAC-r2 sees the diff before merge.

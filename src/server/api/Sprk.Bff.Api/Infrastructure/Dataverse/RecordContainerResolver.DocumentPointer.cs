@@ -53,15 +53,16 @@ public sealed partial class RecordContainerResolver
     /// <summary>
     /// #2151: the configuration keys whose containers are DECLARED HOMES of an unfiled document — a container another owner
     /// stores unfiled documents in on purpose (ebilling-r1: the Procedure Library's rule-set guidelines and rate-card
-    /// workbooks of Firm or ClientDefault scope, internal-only and CIAM-denied, D-63; and the generated eBilling outputs).
+    /// workbooks of Firm or ClientDefault scope, internal-only and CIAM-denied, D-63). ebilling-r1 task 092 retired the second
+    /// key, <c>Finance:EbillingOutputContainerId</c>: generated eBilling outputs are Stored Files, never SPE documents.
     /// An UNFILED document whose pointer is the item the BFF bound to it (<see cref="Spaarke.Dataverse.DocumentPointerBinding"/>)
     /// and whose drive is one of these containers derives to that container (<see cref="DeriveDocumentContainersAsync"/>):
-    /// the strict rule serves it there, and no relocation pulls it into a business unit's container. A third owner adds
+    /// the strict rule serves it there, and no relocation pulls it into a business unit's container. Another owner adds
     /// its key here. A key that is unset or blank declares nothing.
     /// </summary>
     internal static readonly string[] DeclaredUnfiledHomeContainerKeys =
     [
-        "Finance:ProcedureLibraryContainerId", "Finance:EbillingOutputContainerId",
+        "Finance:ProcedureLibraryContainerId",
     ];
 
     /// <summary>An email attachment is a child document of the email document; its file lives where the email's does.</summary>

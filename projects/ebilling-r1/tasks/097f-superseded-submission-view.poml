@@ -1,0 +1,84 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="097f" project="ebilling-r1">
+  <metadata>
+    <title>Superseded invoice's submission view: Accepted with a replaced-by-correction note</title>
+    <phase>3 Rules — corrected invoices (split from 097, EB-D-180)</phase>
+    <gate>startable after 097d</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Changes the answer of the submission status reads (internal and external) in the BFF, and decides what a caller may be told about another submission; tags include bff-api and auth.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>One derived field on reads that already exist; the lookup from an old submission to its replacing one is 097e's, the access rule of each route is that route's own. No new design decision.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>097d</deps>
+    <tags>bff-api, auth, ebilling</tags>
+    <estimated-effort>0.5 day</estimated-effort>
+  </metadata>
+
+  <prompt>When a correction supersedes an invoice, the old invoice's submission keeps status Accepted (it was accepted). Its status read adds an outcome note that the invoice was replaced by a correction, naming the correcting submission. Derived at read time from the invoice (Superseded) and the new submission's sprk_resubmissionof. No new submission status, no schema change, nothing written. This is EB-D-180 (owner decision 2026-10-30, 097c open item).</prompt>
+
+  <role>SPAARKE platform developer. Expert in the BFF Minimal API, the Finance and external route gates and the ebilling submission contracts.</role>
+
+  <goal>Every route that answers a submission's processing status answers, for an Accepted submission whose own invoice is Superseded, status Accepted, the outcome reason ebilling.submission.replaced_by_correction, and replacedBy { submissionId, trackingNumber } only when the caller may read the correcting submission. Every other answer is unchanged, byte for byte. The 095 contract documents it.</goal>
+
+  <context>
+    <background>
+      Read first: decision EB-D-180 in projects/ebilling-r1/notes/decisions-log.md; notes/097c-supersede-commit.md and notes/097d-supersede-signals.md (how an old invoice becomes Superseded and the sprk_resubmissionof link from the new submission to the old one); notes/095-from-email-contract.md (section 3 Progress, section 9 outcome codes, section 10 replacedBy on the prefill); notes/097e-correction-prefill.md (the same lookup, from the old submission to the replacing one).
+      The surfaces that show a processing status for a submission are three routes: GET /api/finance/invoice-submissions/{id} (the internal read the add-in polls), GET /api/v1/external/invoice-submissions/{id} and GET /api/v1/external/invoice-submissions (the SPA firm view). Nothing else returns InvoiceSubmissionView to a client. List them in the task notes.
+    </background>
+    <relevant-files>
+      <file role="reference">src/server/api/Sprk.Bff.Api/Api/Finance/InvoiceSubmissionFromEmailHttp.cs (097e FindReplacementAsync, the lookup to share rather than copy)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/Finance/InvoiceSubmissionEndpoints.cs (internal GetAsync)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ExternalInvoiceSubmissionEndpoints.cs (external GetAsync and ListAsync)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Finance/Submission/InvoiceSubmissionContracts.cs (the view gains an optional replacedBy)</file>
+      <file role="modify">tests/Spaarke.ArchTests/ResubmissionOfAppOnlyWriteGuardTests.cs (C1: a type that names sprk_resubmissionof is listed with a one-line reason)</file>
+      <file role="modify">projects/ebilling-r1/notes/095-from-email-contract.md (the status read, section 9)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="CLAUDE.md §11">The task answers the three justification questions in notes/097f-superseded-submission-view.md. Prefer the one shared lookup with 097e and the existing view type over a new service, route, DI registration or column.</constraint>
+    <constraint source="EB-D-180">No new submission status and no schema change. Nothing is written: the note is derived on every read.</constraint>
+    <constraint source="disclosure">replacedBy appears only when the caller may read the correcting submission, by the rule the route already applies to a submission: internal, the caller's own Read on the submission; external, the caller's firm, Read on its core record and the one visibility decision the submission list uses. Otherwise the reason code is answered with no replacedBy, and nothing else in the answer names the replacement.</constraint>
+    <constraint source="field security">sprk_resubmissionof is read app-only (ResubmissionOfAppOnlyWriteGuardTests). A new type that names it is added to that test's reviewed list with a one-line reason.</constraint>
+    <constraint source="contract">Binding for word-add-in-r1 (the 095 contract). The change is additive: the reason code and one optional field. A surface that cannot take it without a client contract change is a STOP: report it.</constraint>
+    <constraint source="CLAUDE.md §10">BFF hygiene: placement statement, publish-size delta against a fresh master build, no new HIGH CVE.</constraint>
+  </constraints>
+
+  <steps mode="directional">
+    <step>Share the lookup: move 097e's FindReplacementAsync candidate choice (direct replacement; several: the one whose invoice is not Superseded; still ambiguous: none and a Warning) into one internal helper both the prefill and this task call.</step>
+    <step>Add the optional replacedBy { submissionId, trackingNumber } to InvoiceSubmissionView (omitted from the JSON when null) and the reason code ebilling.submission.replaced_by_correction beside the other submission reason codes.</step>
+    <step>Apply the note in each of the three routes after the existing access decision: one read of which of the page's Accepted submissions' invoices are Superseded, then the lookup only for those. Each route supplies its own rule for "may read the correcting submission".</step>
+    <step>A fault finding the Superseded invoices leaves the answer unchanged; a fault finding or deciding the replacement leaves replacedBy absent; neither is a 503. Log a Warning (ids only).</step>
+    <step>Update the 095 contract (section 3 and section 9) and write notes/097f-superseded-submission-view.md.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>An Accepted submission whose invoice is Superseded answers status Accepted, outcomeReasonCode ebilling.submission.replaced_by_correction and replacedBy { submissionId, trackingNumber } of the correcting submission, on the internal read, the external read and the external list. Nothing is written.</criterion>
+    <criterion>The caller cannot read the correcting submission: the reason code is answered, replacedBy is absent, and the answer contains neither its id nor its tracking number. Internal: no Read on the submission. External: another firm, a record the caller cannot read, or a submission the visibility decision withholds.</criterion>
+    <criterion>An invoice that is not Superseded, and a submission that is not Accepted, is answered byte for byte as before.</criterion>
+    <criterion>Several correcting submissions: the one whose invoice is not Superseded is named; still ambiguous: replacedBy absent.</criterion>
+    <criterion>A fault reading the replacement: the reason code, no replacedBy, 200. A fault finding the Superseded invoices: the unchanged answer, 200.</criterion>
+    <criterion>The external list asks which invoices are Superseded once for the page.</criterion>
+    <criterion>Test scope: the cases above. Anything beyond needs a one-line justification in the notes. Seed-proof the Read check on the replacement only.</criterion>
+    <criterion>Gate: the 5 test projects build; the full ArchTests (ISS-005 is flaky, #2469: re-run it alone), the unit filter Submission|Invoice|Finance and the integration tests pass.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>If a status surface cannot carry the note without a contract change the add-in or the SPA must agree to, STOP and report it (root CLAUDE.md §6).</trigger>
+    <trigger>If the access rule of a surface cannot answer "may this caller read the correcting submission" with the route's own existing seam, STOP and escalate.</trigger>
+  </escalation>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>.claude/patterns/api/endpoint-filters.md</file>
+      <file>projects/ebilling-r1/CLAUDE.md</file>
+    </files>
+  </knowledge>
+</task>

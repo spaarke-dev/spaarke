@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://spaarke.com/schemas/billing/billing-approved-timekeeper.schema.json",
+  "title": "ApprovedTimekeeper billing rule body",
+  "description": "sprk_policyversion.sprk_rulebody shape for sprk_ruletype = ApprovedTimekeeper (ebilling-r1 task 070; spec FR-24, design.md 6.1). 1. The line's timekeeper is approved for the firm on the line date (the roster has no core-record scope). No parameters: the approved timekeepers are reference data (sprk_timekeeper). Parameters only: no rates, timekeepers or code descriptions, and no consequence (that is the sprk_consequence column). additionalProperties=false: any other member is refused, not ignored. 'messageTemplate' (anywhere) and 'then' are refused by RuleBodySchemaValidator before this schema runs.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["type"],
+  "properties": {
+    "type": {
+      "const": "ApprovedTimekeeper"
+    }
+  }
+}

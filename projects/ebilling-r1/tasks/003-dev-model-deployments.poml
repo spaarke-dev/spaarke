@@ -1,0 +1,107 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="003" project="ebilling-r1">
+  <metadata>
+    <title>Deploy dev model deployments and Content Understanding defaults</title>
+    <phase>0 Baseline and AI foundations (WP0)</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Live Azure changes in dev (model deployments, CU defaults, one role assignment) plus a config-template edit; no BFF code.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Ordered provisioning procedure with named resources and an explicit stop on quota; no design judgment.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P0-A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>none</deps>
+    <tags>azure-deployment, ai, deploy</tags>
+    <estimated-effort>3-5 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Provision the dev AI resources eBilling needs (spec FR-47, D-51, D-53): gpt-5.2 on the Content Understanding resource spaarke-docintel-invoices-dev with its Content Understanding model defaults set, gpt-5.4-mini and gpt-5.6-luna on the dev Azure OpenAI resource the BFF uses, and managed-identity access from the dev BFF to Content Understanding. Record every deployment name and add the non-secret Content Understanding config keys to appsettings.template.json.</prompt>
+
+  <role>SPAARKE platform developer. Expert in Azure AI Foundry / AIServices model deployments, az CLI and Azure RBAC.</role>
+
+  <goal>In dev: the three model deployments exist and answer a test call; GET contentunderstanding/defaults on spaarke-docintel-invoices-dev returns the mapping to the gpt-5.2 deployment (plus whatever embedding model the defaults require); the dev BFF identity holds a Content Understanding read role on that resource; appsettings.template.json has a ContentUnderstanding section with endpoint (token), ApiVersion 2025-11-01 and AnalyzerId sprk_invoice_v1; task notes list every name, region, SKU, capacity and the role assignment id.</goal>
+
+  <context>
+    <background>None of gpt-5.2 / gpt-5.4-mini / gpt-5.6-luna is deployed in dev today; gpt-4o and gpt-4o-mini retire 2027-04-14 (D-51). Content Understanding maps model names to deployments through PATCH contentunderstanding/defaults (research note §1.2). spaarke-docintel-invoices-dev is AIServices in West US, rg-spaarke-dev (spec External Dependencies); the dev Azure OpenAI resource referenced across docs is spaarke-openai-dev — verify it is the one behind DocumentIntelligence:OpenAiEndpoint for the dev BFF before deploying to it. Coding runs through IActionRunner and ModelTierDeploymentResolver (FastModel / StandardModel / ReasoningModel keys, appsettings.template.json:195-198), so gpt-5.4-mini only needs to exist here; how the coding Action reaches it is task 047's decision.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/appsettings.template.json (new ContentUnderstanding section only)</file>
+      <file role="read">src/server/api/Sprk.Bff.Api/Services/Ai/LinearConsumers/ModelTierDeploymentResolver.cs</file>
+      <file role="read">infrastructure/bicep/modules/openai.bicep (customer-stamp pins — read only)</file>
+      <file role="read">infrastructure/bicep/modules/bff-runtime-rbac.bicep (role-assignment conventions — read only)</file>
+      <file role="read">projects/ebilling-r1/notes/research/content-understanding-vs-docintel.md (§1.2, §1.9, §4, §9.4)</file>
+    </relevant-files>
+    <dependencies>none</dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="azure-deployment.md">Dev only. Every az command runs first as a read (show / list) to confirm the target resource, subscription and region; record the command and result in task notes.</constraint>
+    <constraint source="root CLAUDE.md §9 / ADR-028">No keys or secrets anywhere: do not list or copy account keys; the BFF reaches Content Understanding by managed identity. The template uses a #{TOKEN}# placeholder for the endpoint, never a literal URL.</constraint>
+    <constraint source="project">Do NOT edit infrastructure/bicep/modules/openai.bicep or the PinnedModelCatalog it mirrors (customer-stamp model pins owned by customer-provisioning-orchestration-r1, lockstep-tested). Customer-environment model needs are a hand-off, not an edit.</constraint>
+    <constraint source="project">Do NOT change the existing DocumentIntelligence:FastModel / StandardModel / ReasoningModel values or dev App Service settings — other Actions resolve through them.</constraint>
+    <constraint source=".claude/constraints/bff-extensions.md">This task touches src/server/api/Sprk.Bff.Api/** (config template only): measure the publish-size delta against a fresh master build per bff-hygiene item 4 and record both sizes, file counts and the zip tool; no new HIGH CVE.</constraint>
+    <constraint source="ADR-010">The appsettings.template.json edit adds one ContentUnderstanding section (shared append point: re-read the file immediately before editing and add only these lines). Task 043 binds it with ValidateOnStart and must use exactly these key names.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/azure-deployment.md</file>
+      <file>.claude/constraints/ai.md</file>
+      <file>.claude/constraints/config.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/skills/azure-deploy/SKILL.md</file>
+      <file>.claude/agents/researcher.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="1">Read-only discovery: az cognitiveservices account show for spaarke-docintel-invoices-dev and the dev Azure OpenAI account (confirm which account the dev BFF's OpenAiEndpoint resolves to); az cognitiveservices account deployment list on both; az cognitiveservices model list --location for both regions to confirm gpt-5.2, gpt-5.4-mini and gpt-5.6-luna versions and SKUs available. Record results.</step>
+    <step order="2">Check quota (az cognitiveservices usage list) for the SKU you will use; if any model or quota is unavailable, apply the escalation trigger before creating anything.</step>
+    <step order="3">Create gpt-5.2 on spaarke-docintel-invoices-dev, and the embedding deployment the Content Understanding defaults require (confirm the required model set on Microsoft Learn via the researcher agent; record the source URL and date).</step>
+    <step order="4">PATCH contentunderstanding/defaults (api-version 2025-11-01) on spaarke-docintel-invoices-dev mapping the model names to those deployments; GET it back and record the response.</step>
+    <step order="5">Create gpt-5.4-mini and gpt-5.6-luna on the dev Azure OpenAI account; send one minimal test completion to each (no document content) and record status codes and latency.</step>
+    <step order="6">Grant the dev BFF's managed identity a Content Understanding read role (Cognitive Services Content Understanding Reader, or Cognitive Services User if that role is unavailable — record which) on spaarke-docintel-invoices-dev; record the assignment id. Verify with az role assignment list.</step>
+    <step order="7">Add to appsettings.template.json a ContentUnderstanding section: Endpoint "#{CONTENT_UNDERSTANDING_ENDPOINT}#", ApiVersion "2025-11-01", AnalyzerId "sprk_invoice_v1", plus a _comment naming this task and stating that auth is managed identity and no key exists. Validate the JSON still parses.</step>
+    <step order="8">File a hand-off issue for customer-provisioning-orchestration-r1 (customer stamps need gpt-5.2 / gpt-5.4-mini and a Content Understanding region or cross-region deployments) via /project-defer-issue-tracking.</step>
+    <step order="9">Write task notes: every deployment name, model version, SKU, capacity, region, the defaults response, the role assignment, the test-call results and the hand-off issue number.</step>
+    <step order="10">Update TASK-INDEX.md: change this task's status cell to ✅ [done].</step>
+    <step order="11">If any deviations from plan, document in projects/ebilling-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>Quota or region unavailability for any of the three models (or the defaults' embedding model): STOP before creating anything and present options (other SKU, other region with cross-region deployment, lower capacity, substitute model) with a recommendation (root CLAUDE.md §6).</trigger>
+    <trigger>If the role assignment is refused for lack of rights, or the only workable option is a key, STOP — do not fall back to keys (ADR-028); escalate with the exact error.</trigger>
+    <trigger>If the dev BFF's OpenAiEndpoint does not point at spaarke-openai-dev, STOP and confirm the target account with the owner before deploying models.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="az">cognitiveservices, rest, role assignment</tool>
+    <tool name="gh">Hand-off issue</tool>
+  </tools>
+
+  <outputs>
+    <output type="config">src/server/api/Sprk.Bff.Api/appsettings.template.json (ContentUnderstanding section)</output>
+    <output type="docs">Task notes with deployment inventory and evidence</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">az cognitiveservices account deployment list shows gpt-5.2 on spaarke-docintel-invoices-dev and gpt-5.4-mini and gpt-5.6-luna on the dev Azure OpenAI account, each with a recorded test call returning HTTP 200.</criterion>
+    <criterion testable="true">GET contentunderstanding/defaults (api-version 2025-11-01) returns the mapping to the gpt-5.2 deployment; the response is recorded in task notes.</criterion>
+    <criterion testable="true">az role assignment list shows the dev BFF identity with the recorded role on spaarke-docintel-invoices-dev; no key was read, copied or stored.</criterion>
+    <criterion testable="true">appsettings.template.json parses as JSON and contains ContentUnderstanding:Endpoint (token), ApiVersion 2025-11-01 and AnalyzerId sprk_invoice_v1; no other key in the file changed (git diff shows only the new section).</criterion>
+    <criterion testable="true">Publish-size delta measured against a fresh master build and recorded in task notes; no new HIGH CVE.</criterion>
+    <criterion testable="true">openai.bicep, PinnedModelCatalog and the DocumentIntelligence tier keys are unchanged; the customer-provisioning hand-off issue exists and is listed in notes/defer-issues.md.</criterion>
+  </acceptance-criteria>
+
+  <notes>Shared append point: appsettings.template.json. The analyzer itself is created by 004; the BFF client, options binding and the health check with a stable error code for a missing analyzer / deployment (FR-47) are 043's. gpt-5.6-luna is for the 005 coding comparison only; record it so 162 / wrap-up can remove it if unused.
+
+COMPLETION 2026-10-15: dev deployments gpt-5.2 (CU resource, westus, GlobalStandard 100), gpt-5.4-mini and gpt-5.6-luna (spaarke-openai-dev, eastus, GlobalStandard 100) created, each test call HTTP 200. CU defaults PATCHed (prebuilt-analyzer-completion and gpt-5.2 -> gpt-5.2; existing embedding deployment text-embedding-3-large-771514 reused). Role "Cognitive Services Content Understanding Reader" granted to mi-bff-api-dev, assignment aa679dff-41a2-4d2f-b1f4-0977056bc241. Template ContentUnderstanding section added. Hand-off DEF-001 / issue 1915. Publish delta 0 by construction (template excluded from publish). Full inventory and evidence: notes/003-model-deployments.md.
+rework: none task 003</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in knowledge files. Follow the task-execute skill for the mandatory pre-execution checklist.</protocol>
+  </execution>
+</task>

@@ -1,0 +1,28 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0044",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0044","generator_id":"gen_eval_set.py@1 F-0044","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0044.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-02"},
+ "header":{"firm":"Ravenscroft & Ambrose LLP","firm_invoice_number":"INV-2025-53330","invoice_date":"2025-09-04","billing_period_start":"2025-08-01","billing_period_end":"2025-08-31","firm_matter_reference":"78930-0013","po_number":"PO-4519579","fees_total":5170.5,"expenses_total":6248.12,"adjustments_total":0.0,"total_due":11418.62,"currency":"USD"},
+ "timekeepers":[{"name":"Aisha Abernathy","title":"Partner","rate":600.0,"billed_as":"AA"},{"name":"Imani Blackwood","title":"Partner","rate":645.0,"billed_as":"IB"},{"name":"Katya Carmichael","title":"Associate","rate":315.0,"billed_as":"KC"},{"name":"Naomi Yilmaz","title":"Paralegal","rate":135.0,"billed_as":"NY"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2025-08-06","timekeeper":"IB","timekeeper_name":"Imani Blackwood","timekeeper_title":"Partner","title":"Ptr","hours":2.6,"rate":645.0,"amount":1677.0,"narrative":"Draft discovery plan in the warranty claim","codes":["L210","A103"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2025-08-07","timekeeper":"NY","timekeeper_name":"Naomi Yilmaz","timekeeper_title":"Paralegal","title":"Para","hours":2.5,"rate":135.0,"amount":337.5,"narrative":"Attend case management conference in the lease dispute","codes":[],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2025-08-12","timekeeper":"AA","timekeeper_name":"Aisha Abernathy","timekeeper_title":"Partner","title":"Ptr","hours":2.7,"rate":600.0,"amount":1620.0,"narrative":"Conference with client regarding budget variance for the customs audit","codes":["L150","A106"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2025-08-18","timekeeper":"AA","timekeeper_name":"Aisha Abernathy","timekeeper_title":"Partner","title":"Ptr","hours":0.7,"rate":600.0,"amount":420.0,"narrative":"Analyze exposure and damages model for the regulatory inquiry","codes":["L120","A104"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2025-08-27","timekeeper":"NY","timekeeper_name":"Naomi Yilmaz","timekeeper_title":"Paralegal","title":"Para","hours":0.5,"rate":135.0,"amount":67.5,"narrative":"Attend case management conference in the supply agreement","codes":["L230","A109"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2025-12-11","timekeeper":"KC","timekeeper_name":"Katya Carmichael","timekeeper_title":"Associate","title":"Assoc","hours":2.1,"rate":315.0,"amount":661.5,"narrative":"Review and revise discovery plan based on client comments","codes":["L210","A104"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2025-12-21","timekeeper":"IB","timekeeper_name":"Imani Blackwood","timekeeper_title":"Partner","title":"Ptr","hours":0.6,"rate":645.0,"amount":387.0,"narrative":"Prepare monthly status report to client regarding the insurance coverage issue","codes":["L190","A111"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"expense","date":"2025-08-15","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":6248.12,"amount":6248.12,"narrative":"Consulting expert fees","codes":["E119"],"page":1,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["819 Congress Boulevard","Boston","Tax ID 11-2699436"],"template":"T01","pages":1},
+ "rule_set_id":"RS-02",
+ "context":{"matter_open":"2024-06-02","matter_close":"2025-11-29","matter_budget":70674.0,"approved_timekeepers":["Katya Carmichael","Emeka Abernathy","Imani Blackwood","Naomi Yilmaz","Aisha Abernathy","Ingrid Dunleavy","Helena Kowalczyk"],"invoice_received_date":"2025-09-17"},
+ "expected_findings":[
+  {"rule_id":"RS-02-R05","rule_type":"RequiredData","scope":"line","line_refs":[2],"consequence":"Reject"},
+  {"rule_id":"RS-02-R06","rule_type":"CoreRecordWindow","scope":"line","line_refs":[6],"consequence":"Flag"},
+  {"rule_id":"RS-02-R06","rule_type":"CoreRecordWindow","scope":"line","line_refs":[7],"consequence":"Flag"}
+ ],
+ "seeded_violations":3
+}

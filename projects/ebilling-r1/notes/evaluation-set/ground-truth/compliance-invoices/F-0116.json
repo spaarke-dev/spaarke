@@ -1,0 +1,29 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0116",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0116","generator_id":"gen_eval_set.py@1 F-0116","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0116.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-02"},
+ "header":{"firm":"Garrison and Dunmore LLP","firm_invoice_number":"2025055498","invoice_date":"2025-07-13","billing_period_start":"2025-05-01","billing_period_end":"2025-05-31","firm_matter_reference":"98615-0020","po_number":"PO-4564071","fees_total":3738.0,"expenses_total":1665.07,"adjustments_total":0.0,"total_due":5403.07,"currency":"USD"},
+ "timekeepers":[{"name":"Clara Lindqvist","title":"Paralegal","rate":180.0,"billed_as":"Clara Lindqvist"},{"name":"Marcus Nakamura","title":"Senior Associate","rate":405.0,"billed_as":"Marcus Nakamura"},{"name":"Peter Nwosu","title":"Associate","rate":255.0,"billed_as":"Peter Nwosu"},{"name":"Samuel Voss","title":"Associate","rate":350.0,"billed_as":"Samuel Voss"},{"name":"Sofia Delacroix","title":"Associate","rate":350.0,"billed_as":"Sofia Delacroix"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2025-05-01","timekeeper":"Sofia Delacroix","timekeeper_name":"Sofia Delacroix","timekeeper_title":"Associate","title":"Assoc","hours":0.8,"rate":350.0,"amount":280.0,"narrative":"Review court docket and calendar of pending deadlines for the data incident","codes":["L190","A104"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2025-05-19","timekeeper":"Samuel Voss","timekeeper_name":"Samuel Voss","timekeeper_title":"Associate","title":"Assoc","hours":2.6,"rate":350.0,"amount":910.0,"narrative":"Prepare for oral argument in the insurance coverage issue","codes":["L530","A101"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2025-05-19","timekeeper":"Peter Nwosu","timekeeper_name":"Peter Nwosu","timekeeper_title":"Associate","title":"Assoc","hours":1.1,"rate":255.0,"amount":280.5,"narrative":"Prepare monthly status report to client regarding the licensing dispute","codes":["L190","A111"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2025-05-26","timekeeper":"Samuel Voss","timekeeper_name":"Samuel Voss","timekeeper_title":"Associate","title":"Assoc","hours":1.7,"rate":350.0,"amount":595.0,"narrative":"Research appealability issues in the customs audit","codes":["L510","A102"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2025-05-27","timekeeper":"Clara Lindqvist","timekeeper_name":"Clara Lindqvist","timekeeper_title":"Paralegal","title":"Para","hours":1.9,"rate":180.0,"amount":342.0,"narrative":"Revise appellate brief after cite check","codes":["L520","A104"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2025-05-30","timekeeper":"Marcus Nakamura","timekeeper_name":"Marcus Nakamura","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":1.9,"rate":405.0,"amount":769.5,"narrative":"Analyze exposure and damages model for the employment claim","codes":["L120","A104"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2025-05-30","timekeeper":"Peter Nwosu","timekeeper_name":"Peter Nwosu","timekeeper_title":"Associate","title":"Assoc","hours":2.2,"rate":255.0,"amount":561.0,"narrative":"Research appealability issues in the construction contract","codes":["L510","A102"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"expense","date":"2025-05-02","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":4.0,"rate":7.54,"amount":30.16,"narrative":"Postage - certified mail","codes":["E108"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"expense","date":"2025-05-14","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":1439.01,"amount":1439.01,"narrative":"Document hosting and processing vendor","codes":["E118"],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"expense","date":"2025-05-16","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":3.0,"rate":56.14,"amount":168.42,"narrative":"Working meal during deposition preparation","codes":["E111"],"page":1,"narrative_style":"clear"},
+  {"n":11,"line_type":"expense","date":"2025-05-27","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":3.0,"rate":9.16,"amount":27.48,"narrative":"Postage - certified mail","codes":["E108"],"page":1,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["387 Pine Street","Boston","Tax ID 58-5660814"],"template":"T02","pages":2},
+ "rule_set_id":"RS-02",
+ "context":{"matter_open":"2024-06-21","matter_close":"2025-08-29","matter_budget":46612.0,"approved_timekeepers":["Peter Nwosu","Clara Lindqvist","Marcus Nakamura","Sofia Delacroix","Katya Rosenthal","Samuel Voss","Ingrid Lockhart","Hector Voss"],"invoice_received_date":"2025-07-14"},
+ "expected_findings":[
+  {"rule_id":"RS-02-R08","rule_type":"InvoiceAge","scope":"invoice","line_refs":[],"consequence":"Flag"}
+ ],
+ "seeded_violations":1
+}

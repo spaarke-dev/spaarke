@@ -1920,6 +1920,121 @@ public class ExternalDataService
     }
 
     /// <summary>
+    /// ebilling-r1 task 098: THE invoice (a′) predicate (<see cref="ExternalInvoiceVisibility"/>) for <paramref name="caller"/>,
+    /// read app-only. An internal systemuser (the same test as <see cref="NarrowDocumentsAsync"/>) hides nothing; every other
+    /// caller — a CIAM contact, a flagged systemuser, an unresolvable one, one whose lookup FAILED (unknown is never internal)
+    /// — gets the predicate. A failed read hides every asked invoice (<see cref="InvoiceVisibilityResult.Faulted"/>). Bound to
+    /// <see cref="ExternalInvoiceHiding"/> by <c>AddExternalAccess</c>, with the effective root flags it needs.
+    /// </summary>
+    internal async Task<InvoiceVisibilityResult> HideInvoicesForAsync(
+        CallerPrincipal caller, IReadOnlyCollection<Guid> invoiceIds, EffectiveRootFlagReader rootFlags, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(caller);
+        ArgumentNullException.ThrowIfNull(invoiceIds);
+        ArgumentNullException.ThrowIfNull(rootFlags);
+        var asked = invoiceIds.Where(id => id != Guid.Empty).Distinct().ToList();
+        if (asked.Count == 0 || await IsInternalSystemUserAsync(caller, ct))
+            return InvoiceVisibilityResult.NotHidden(asked);
+        try
+        {
+            var decision = await ExternalInvoiceVisibility.DecideAsync(asked, InvoiceVisibilityReadersOver(rootFlags), ct);
+            LogInvoiceVisibilityCost("external", asked.Count, decision);
+            return decision;
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex,
+                "[EXT-INVOICE-VISIBILITY] The (a') read for {Count} invoice(s) failed. Failing CLOSED: none of them is shown.",
+                asked.Count);
+            return InvoiceVisibilityResult.ReadFailed(asked);
+        }
+    }
+
+    /// <summary>
+    /// ebilling-r1 task 098 review round 4b: THE decision of the external submission routes (list and single read) for
+    /// <paramref name="caller"/>, read app-only (<see cref="ExternalInvoiceVisibility.DecideSubmissionsAsync"/>): with an
+    /// invoice, the invoice predicate; without one, the submission's own source. Keyed by submission id. An internal systemuser
+    /// (the same test as <see cref="HideInvoicesForAsync"/>) sees every one and causes no read; every other caller gets the
+    /// decision. A failed read withholds every asked submission (<see cref="InvoiceVisibilityResult.Faulted"/>). Bound to
+    /// <see cref="ExternalInvoiceSubmissionHiding"/> by <c>AddExternalAccess</c>, with the effective root flags it needs.
+    /// </summary>
+    internal async Task<InvoiceVisibilityResult> HideSubmissionsForAsync(
+        CallerPrincipal caller, IReadOnlyCollection<Sprk.Bff.Api.Services.Finance.Submission.InvoiceSubmissionView> submissions,
+        EffectiveRootFlagReader rootFlags, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(caller);
+        ArgumentNullException.ThrowIfNull(submissions);
+        ArgumentNullException.ThrowIfNull(rootFlags);
+        var asked = submissions.Where(s => s is not null && s.SubmissionId != Guid.Empty).Select(s => s.SubmissionId).Distinct().ToList();
+        if (asked.Count == 0 || await IsInternalSystemUserAsync(caller, ct))
+            return InvoiceVisibilityResult.NotHidden(asked);
+        try
+        {
+            var decision = await ExternalInvoiceVisibility.DecideSubmissionsAsync(submissions, InvoiceVisibilityReadersOver(rootFlags), ct);
+            LogInvoiceVisibilityCost("external-submissions", asked.Count, decision);
+            return decision;
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex,
+                "[EXT-INVOICE-VISIBILITY] The (a') read for {Count} submission(s) failed. Failing CLOSED: none of them is shown.",
+                asked.Count);
+            return InvoiceVisibilityResult.ReadFailed(asked);
+        }
+    }
+
+    /// <summary>
+    /// ebilling-r1 task 098 surface (d): the assistant tools' taint closure (<see cref="AppOnlyInvoiceFamilyHiding"/>): of
+    /// <paramref name="rowIds"/> (rows of an invoice-family table), the ids hidden because their invoice is. The caller is
+    /// already known to be external. Read app-only; a failed read THROWS (the tool call fails with no data).
+    /// </summary>
+    internal async Task<IReadOnlySet<Guid>> HideInvoiceFamilyRowsAsync(
+        string table, IReadOnlyCollection<Guid> rowIds, EffectiveRootFlagReader rootFlags, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(rowIds);
+        ArgumentNullException.ThrowIfNull(rootFlags);
+        var hidden = await ExternalInvoiceVisibility.HiddenFamilyRowsAsync(table, rowIds, InvoiceVisibilityReadersOver(rootFlags), ct);
+        _logger.LogDebug("[EXT-INVOICE-VISIBILITY] cost plane={Plane} table={Table} rows={Rows} hidden={Hidden}",
+            AssistantPlane, table, rowIds.Count, hidden.Count);
+        return hidden;
+    }
+
+    /// <summary>
+    /// The predicate's readers, every one app-only: this service's OData reader, 188's decision with the marker-aware rule 2
+    /// (the core decision is called only here and in <see cref="ExternalDocumentNarrowing"/>, the 188 guard's app-only rule),
+    /// the live-parent walk and <paramref name="rootFlags"/>.
+    /// </summary>
+    private InvoiceVisibilityReaders InvoiceVisibilityReadersOver(EffectiveRootFlagReader rootFlags) => new(
+        QueryRowsOrThrowAsync,
+        (rows, ct) => ExternalDocumentNarrowing.DecideAsync(rows, QueryRowsOrThrowAsync, ct, honourSubmissionMarker: true),
+        GetLiveParentRootsAsync,
+        rootFlags,
+        _logger);
+
+    /// <summary>The ONE (a′) cost line per request: invoices checked and hidden, reads per level. Counts only (ADR-015).</summary>
+    private void LogInvoiceVisibilityCost(string plane, int invoices, InvoiceVisibilityResult decision)
+    {
+        var cost = decision.Cost;
+        var level = cost.Reads > NarrowingCostInformationThreshold ? LogLevel.Information : LogLevel.Debug;
+        if (!_logger.IsEnabled(level))
+            return;
+        _logger.Log(level,
+            "[EXT-INVOICE-VISIBILITY] cost plane={Plane} invoices={Invoices} hidden={Hidden} ({Reasons}) sources={Sources} "
+            + "storedFileReads={StoredFileReads} submissionReads={SubmissionReads} sourceReads={SourceReads} "
+            + "narrowingReads={NarrowingReads} rootFlagReads={RootFlagReads}",
+            plane, invoices, decision.Hidden.Count, decision.HiddenSummary(), cost.Sources,
+            cost.StoredFileReads, cost.SubmissionReads, cost.SourceReads, cost.NarrowingReads, cost.RootFlagReads);
+    }
+
+    /// <summary>
     /// Whether <paramref name="caller"/> is an internal systemuser. A contact, a systemuser flagged external, an unknown one
     /// and a lookup that fails are all NOT internal (the narrowing applies: under-deliver, never leak).
     /// </summary>

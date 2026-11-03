@@ -1,0 +1,110 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="106" project="ebilling-r1">
+  <metadata>
+    <title>Context panel API</title>
+    <phase>4 Review and approval (WP4) — wave W4-1</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Read-only, deterministic aggregation behind an existing authorization pattern; no writes.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Query composition over known tables and existing rollup fields with a fixed response contract.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P4-A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>029, 040</deps>
+    <tags>bff, api</tags>
+    <estimated-effort>1 day</estimated-effort>
+  </metadata>
+
+  <prompt>Add one read route that returns the Invoice Review context panel for an invoice — core-record status and dates, budget vs spend from the existing rollups, prior invoices from this firm on this core record, this firm's disallow history, and timekeeper rate history — deterministically, within NFR-02, with each section degrading to a message when its source is unavailable.</prompt>
+
+  <role>SPAARKE platform developer. Expert in ASP.NET Core Minimal APIs and efficient Dataverse reads.</role>
+
+  <goal>InvoiceContextEndpoints.cs and InvoiceContextService returning a sectioned DTO (each section: data or an unavailable message), authorized on the invoice, with unit and contract tests.</goal>
+
+  <context>
+    <background>Spec FR-33 (acceptance: data loads within NFR-02; panel degrades with a message, not an error, when a source is unavailable), D-07, NFR-02 (3 s p90). Prototype: SideTabs.tsx ContextTab and Unavailable (source down shows a message), state "Context source unavailable". Rollup fields on sprk_matter / sprk_project written by Services/Finance/FinanceRollupService.cs:56-64 (sprk_totalspendtodate, sprk_invoicecount, sprk_totalbudget, sprk_remainingbudget, sprk_budgetutilizationpercent, …); FinanceRollupEndpoints exist only for Matter and Project, so a Work Assignment has no budget rollup (section shows "not tracked for work assignments"). Prior invoices: sprk_invoice for the same firm (sprk_vendororg) and core record, statuscode per 012. Disallow history: Disallowed / Reduced lines (010 sprk_linestatus) on this firm's invoices, aggregated (count, amount, top reasons). Rate history: 017 sprk_ratecardrate for the firm's timekeepers on this invoice plus billed rates on prior lines. Authorization pattern: Api/Finance/FinanceEndpoints.cs:82 ("finance.read" route-key filter) applied to sprk_invoices (Api/Filters/FinanceAuthorizationFilter.cs:234).</background>
+    <relevant-files>
+      <file role="new">src/server/api/Sprk.Bff.Api/Api/Finance/InvoiceContextEndpoints.cs</file>
+      <file role="new">src/server/api/Sprk.Bff.Api/Services/Finance/InvoiceContextService.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/DI/FinanceModule.cs (shared append point)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/DI/EndpointMappingExtensions.cs:376-377 (shared append point)</file>
+      <file role="new">tests/unit/Sprk.Bff.Api.Tests/Services/Finance/InvoiceContextServiceTests.cs</file>
+      <file role="new">tests/integration/contract/Api/Finance/InvoiceContextEndpointsAuthorizationContractTests.cs</file>
+      <file role="read">src/server/api/Sprk.Bff.Api/Services/Finance/FinanceRollupService.cs</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="029" status="pending">WP1 schema in dev (invoice, line, timekeeper, rate card columns)</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="FR-33">Deterministic: no AI, no ranking; the same data gives the same response.</constraint>
+    <constraint source="FR-33">Each section is independent: a source failure (exception, timeout, missing table) yields that section's unavailable message with a stable code and the others still return; the route returns 200 unless authorization fails. Log the cause with ids only.</constraint>
+    <constraint source="ADR-008, root CLAUDE.md section 6">Route filter "finance.read" on sprk_invoices(route invoiceId); every section is scoped to that invoice's firm and core record — no caller-supplied firm or core id.</constraint>
+    <constraint source="NFR-02">Sections load in parallel with bounded queries (no per-line query); document the query count in notes.</constraint>
+    <constraint source="ADR-001, ADR-019, 040">Own endpoints file; RequireEbillingEnabled(); ProblemDetails for 4xx only.</constraint>
+    <constraint source=".claude/constraints/bff-extensions.md">Placement BFF (B4 live request); publish-size delta; no new HIGH CVE; no package.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ebilling-r1/spec.md (FR-33, NFR-02)</file>
+      <file>c:\code_files\spaarke-prototype\projects\ebilling.r1\src\review\SideTabs.tsx (ContextTab, Unavailable)</file>
+      <file>docs/architecture/finance-intelligence-architecture.md</file>
+      <file>docs/data-model/sprk_invoice-matter-project.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Read 010 / 012 / 017 notes for column names and option values; confirm rollup fields in dev.</step>
+    <step order="1">GET /api/finance/invoices/{invoiceId}/context: sections coreRecord (type, name, status, open / close dates), budget (budget, spend to date, remaining, utilisation, as-of), priorInvoices (recent N for this firm and core record: number, date, billed, approved, status), disallowHistory (counts and amounts reduced / disallowed for this firm, top reasons), rateHistory (per timekeeper on this invoice: approved rates by effective period and billed rates seen).</step>
+    <step order="2">Service with per-section try / unavailable handling and parallel loading.</step>
+    <step order="3">Tests: each section from fixture data; one source failing leaves the others intact with an unavailable message; Work Assignment budget section message; current invoice excluded from prior invoices; contract tests 401 / 403 / disabled.</step>
+    <step order="4">dotnet build and dotnet test green; publish-size delta and vulnerable-package check recorded.</step>
+    <step order="5">Update TASK-INDEX.md: this task's status cell to "✅ [done]".</step>
+    <step order="6">Record deviations (sections, limits, query count) in projects/ebilling-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If budget vs spend for a Matter or Project in dev is not populated by the rollups (001's baseline found rollup defects), do not compute spend here: return the section as unavailable and report the defect via /project-defer-issue-tracking.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>FinanceSummaryService (Services/Finance/FinanceSummaryService.cs:50) aggregates a matter summary (snapshots, signals, recent invoices) — matter-only, cached, no firm or timekeeper scope; FinanceRollupService writes budget / spend fields; no invoice-scoped context route exists.</existing>
+    <extension>Reads the rollup fields FinanceRollupService already writes instead of recomputing; FinanceSummaryService is not extended because it is keyed on matter only and its cached DTO has no firm, disallow or rate sections (adding them would change a cached contract used elsewhere).</extension>
+    <cost-of-doing-nothing>Reviewers decide lines without budget, prior-invoice or rate context, so FR-33 fails and the prototype's Context pane has no data.</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="dotnet">build, test</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">Api/Finance/InvoiceContextEndpoints.cs; Services/Finance/InvoiceContextService.cs</output>
+    <output type="test">InvoiceContextServiceTests.cs; InvoiceContextEndpointsAuthorizationContractTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The route returns 401 unauthenticated, 403 without access to the invoice's core record, 503 ebilling.disabled when off.</criterion>
+    <criterion testable="true">Each of the five sections returns data from fixtures matching the FR-33 list, scoped to the invoice's firm and core record only.</criterion>
+    <criterion testable="true">When one source throws, the route still returns 200 with that section's unavailable message and code and the other sections populated.</criterion>
+    <criterion testable="true">A Work Assignment invoice returns the budget section as not tracked, not as an error.</criterion>
+    <criterion testable="true">Query count is independent of line count and recorded in notes.</criterion>
+    <criterion testable="true">dotnet build 0 errors; all tests green.</criterion>
+    <criterion testable="true">Publish-size delta measured against a fresh master build and recorded in task notes; no new HIGH CVE.</criterion>
+    <criterion testable="true">Cover the stated contract plus the edge cases named above. Anything beyond that needs a one-line justification in task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>Completed 2026-10-16. GET /api/finance/invoices/{invoiceId}/context: five independent sections (core record, budget rollups as stored, other invoices, disallow history, rate history), finance.read on the invoice then RequireEbillingEnabled, 200 unless authorization fails, per-section unavailable code, Work Assignment budget notTracked. 9 Dataverse reads independent of line count. Concrete InvoiceContextService (ADR-010 ceiling unchanged at 166). Publish size +0.031 MB (37.325 vs 37.294 MB), no vulnerable packages. Assumptions (decided invoices only for disallow history, core record ambiguity, classification rates) and known limits in notes/106-context-panel-api.md. Rollup staleness in dev is the already-filed #1663.
+Fix-round-2: other invoices (priorInvoices, disallowHistory, previously billed rates) are limited to invoices the caller can Read via AuthorizationService (finance.read), recomputed over the readable set; a failed access check makes the sections unavailable, never unfiltered. See notes section 7a.
+Fix-round-3: the core record (details, budget, core-scoped approved rates) is gated on the caller's own Read of it (refused .access-denied, failed .access-check-failed); InvoicesConsidered counts decided readable invoices examined. See notes section 7b.
+rework: fix-round-3 task 106</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load the knowledge files first. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

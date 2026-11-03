@@ -1,0 +1,27 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0458",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0458","generator_id":"gen_eval_set.py@1 F-0458","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0458.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-02"},
+ "header":{"firm":"Aldridge Beckett PC","firm_invoice_number":"INV-2026-91176","invoice_date":"2025-07-02","billing_period_start":"2025-06-01","billing_period_end":"2025-06-30","firm_matter_reference":"75051-0016","po_number":"PO-4595669","fees_total":2407.0,"expenses_total":3378.66,"adjustments_total":0.0,"total_due":5785.66,"currency":"USD"},
+ "timekeepers":[{"name":"Katya Pemberton","title":"Paralegal","rate":155.0,"billed_as":"KP"},{"name":"Naomi Fairweather","title":"Associate","rate":320.0,"billed_as":"NF"},{"name":"Naomi Voss","title":"Of Counsel","rate":565.0,"billed_as":"NV"},{"name":"Priya Santoro","title":"Partner","rate":620.0,"billed_as":"PS"},{"name":"Yusuf Eriksen","title":"Legal Assistant","rate":120.0,"billed_as":"YE"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2025-06-04","timekeeper":"KP","timekeeper_name":"Katya Pemberton","timekeeper_title":"Paralegal","title":"Para","hours":0.9,"rate":155.0,"amount":139.5,"narrative":"Telephone conference with opposing counsel regarding settlement terms","codes":["L160","A107"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2025-06-09","timekeeper":"KP","timekeeper_name":"Katya Pemberton","timekeeper_title":"Paralegal","title":"Para","hours":2.9,"rate":155.0,"amount":449.5,"narrative":"Review and analyze client documents concerning the employment claim to identify key facts","codes":["L110","A104"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2025-06-12","timekeeper":"YE","timekeeper_name":"Yusuf Eriksen","timekeeper_title":"Legal Assistant","title":"LA","hours":0.5,"rate":120.0,"amount":60.0,"narrative":"Conference with client regarding settlement authority for the data incident","codes":["L160","A106"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2025-06-19","timekeeper":"NV","timekeeper_name":"Naomi Voss","timekeeper_title":"Of Counsel","title":"O/C","hours":1.6,"rate":565.0,"amount":904.0,"narrative":"Review and analyze client documents concerning the licensing dispute to identify key facts","codes":["L110","A104"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2025-06-19","timekeeper":"NF","timekeeper_name":"Naomi Fairweather","timekeeper_title":"Associate","title":"Assoc","hours":0.9,"rate":320.0,"amount":288.0,"narrative":"Prepare updated litigation budget for the lease dispute","codes":["L150","A103"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2025-06-24","timekeeper":"PS","timekeeper_name":"Priya Santoro","timekeeper_title":"Partner","title":"Ptr","hours":0.7,"rate":620.0,"amount":434.0,"narrative":"Review expert qualifications and prior testimony for the warranty claim","codes":["L130","A104"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2025-06-25","timekeeper":"YE","timekeeper_name":"Yusuf Eriksen","timekeeper_title":"Legal Assistant","title":"LA","hours":1.1,"rate":120.0,"amount":132.0,"narrative":"Analyze exposure and damages model for the distribution agreement","codes":["L120","A104"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"expense","date":"2025-06-05","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":713.49,"amount":713.49,"narrative":"Airfare to Phoenix for deposition","codes":["E110"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"expense","date":"2025-06-06","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":1912.22,"amount":1912.22,"narrative":"Court reporter and transcript - deposition","codes":["E115"],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"expense","date":"2025-06-16","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":395.08,"amount":395.08,"narrative":"Court filing fee","codes":["E112"],"page":1,"narrative_style":"clear"},
+  {"n":11,"line_type":"expense","date":"2025-06-16","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":357.87,"amount":357.87,"narrative":"Airfare to Portland for deposition","codes":["E110"],"page":1,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["940 Union Square","Atlanta","Tax ID 11-6377063"],"template":"T11","pages":1},
+ "rule_set_id":"RS-02",
+ "context":{"matter_open":"2024-03-18","matter_close":"2025-09-28","matter_budget":48142.0,"approved_timekeepers":["Yusuf Eriksen","Naomi Voss","Priya Santoro","Katya Pemberton","Imani Voss","Elena Galbraith","Leila Brennan","Naomi Fairweather"],"invoice_received_date":"2025-07-16"},
+ "expected_findings":[],
+ "seeded_violations":0
+}

@@ -4,6 +4,7 @@ using System.Text.Json;
 using System.Text.RegularExpressions;
 using Microsoft.Xrm.Sdk.Query;
 using Spaarke.Dataverse;
+using Sprk.Bff.Api.Services.Signals.Billing;
 using Sprk.Bff.Api.Telemetry;
 
 namespace Sprk.Bff.Api.Services.Signals;
@@ -22,14 +23,18 @@ public sealed record RuleDescriptionResult(RuleDescription? Description, string?
 }
 
 /// <summary>
-/// Turns an Existence or Threshold rule body into plain-language clauses, with lookup GUIDs shown as names (task 026, spec FR-48/FR-57;
-/// v4-prototype-vs-solution #11). Read-side only: nothing is stored and no column holds the result.
+/// Turns an Existence, Threshold or billing (ebilling-r1 task 070) rule body into plain-language clauses, with lookup GUIDs shown as
+/// names for Existence (task 026, spec FR-48/FR-57; v4-prototype-vs-solution #11). Read-side only: nothing is stored and no column
+/// holds the result.
 /// </summary>
 /// <remarks>
 /// <para><b>The words cannot drift from the filter.</b> The body is first run through
-/// <see cref="PolicyVersionValidator.ValidateForSave"/> (schema, then the compiler), so the describer refuses every body
-/// the compiler refuses and describes only shapes the compiler accepts; it then re-reads the SAME text with the compiler's own strict parser
-/// (<see cref="PredicateCompiler.ParseBounded"/>), so both see an identical document. An unknown shape is a refusal,
+/// <see cref="PolicyVersionValidator.ValidateForSave"/>, so the describer refuses every body the validator refuses and
+/// describes only shapes it accepts. For an Existence or Threshold body that is the schema and then the compiler. A billing body
+/// (<see cref="RuleDomains.IsBilling"/>) is NEVER compiled (the compiler refuses every billing type): the validator runs the
+/// billing checks instead (length cap, the type's schema, the template against the type's fact-field set) and the describer then
+/// states it from <see cref="BillingRuleCatalogue.Describe"/>. The describer then re-reads the SAME text with the compiler's own
+/// strict parser (<see cref="PredicateCompiler.ParseBounded"/>), so both see an identical document. An unknown shape is a refusal,
 /// never a guess.</para>
 /// <para><b>What the sentence claims is what the filter tests.</b> Every condition becomes one phrase; nothing is added.
 /// A relative date is stated as the filter states it (<c>now-30d</c> is "30 days ago"), never softened into "recently".
@@ -105,13 +110,20 @@ public sealed class RuleBodyDescriber
 
     public async Task<RuleDescriptionResult> DescribeAsync(string? ruleBodyJson, CancellationToken ct)
     {
-        // The validator (schema, then the compiler: ValidateForSave is its pure, side-effect-free entry) is the authority
-        // on what a body means; a body it refuses is not described. The compiler is only ever reached through the
-        // validator (PredicateCompilerCallerGuardTests).
+        // The validator (ValidateForSave is its pure, side-effect-free entry) is the authority on what a body means; a body
+        // it refuses is not described. For Existence / Threshold that is the schema, then the compiler (only ever reached
+        // through the validator, PredicateCompilerCallerGuardTests); for a billing type it is the billing checks, with no compile.
         // The rule type is the body's own "type" member (the schema pins it to the type's name, so a stored version whose
         // column disagrees with its body is refused at evaluation and is not worth describing). Anything unreadable
         // falls back to Existence, whose validation then names the problem.
-        var ruleType = BodyRuleType(ruleBodyJson);
+        // ebilling-r1 task 070 (FR-24 MUST): a "type" member that names no closed-set member is refused here, never described
+        // as Existence. Only a body with no readable "type" at all still falls back to Existence (whose validation refuses it).
+        if (BodyRuleType(ruleBodyJson) is not { } ruleType)
+        {
+            return new RuleDescriptionResult(null,
+                $"The rule body's type is not a member of the closed rule-type set (reason: {OntologyWriterFailureReason.RuleTypeUnsupported}).");
+        }
+
         var validation = _validator.ValidateForSave(ruleType.ToString(), ruleBodyJson, messageTemplate: null);
         if (!validation.IsValid)
         {
@@ -122,6 +134,14 @@ public sealed class RuleBodyDescriber
         try
         {
             using var doc = PredicateCompiler.ParseBounded(ruleBodyJson);
+            if (RuleDomains.IsBilling(ruleType))
+            {
+                // Deterministic, one sentence per billing type, no lookup read (BillingRuleCatalogue.Describe).
+                var (text, formal) = BillingRuleCatalogue.Describe(ruleType, doc.RootElement);
+                return new RuleDescriptionResult(
+                    new RuleDescription(new[] { new RuleClauseDescription("rule", ruleType.ToString(), text, formal) }), null);
+            }
+
             return ruleType == RuleType.Threshold
                 ? DescribeThreshold(doc.RootElement)
                 : await DescribeParsedAsync(doc.RootElement, ct).ConfigureAwait(false);
@@ -142,18 +162,28 @@ public sealed class RuleBodyDescriber
         }
     }
 
-    /// <summary>Threshold when the body says so, otherwise Existence (also for text that does not parse).</summary>
-    private static RuleType BodyRuleType(string? ruleBodyJson)
+    /// <summary>The closed-set member the body's <c>"type"</c> names, by exact (ordinal) name; Existence when the body has no
+    /// <c>"type"</c> member or does not parse (its validation then names the problem); <c>null</c> when a <c>"type"</c> member
+    /// is present but names no member (a refusal, ebilling-r1 task 070).</summary>
+    private static RuleType? BodyRuleType(string? ruleBodyJson)
     {
         try
         {
             using var doc = PredicateCompiler.ParseBounded(ruleBodyJson);
-            return doc.RootElement.ValueKind == JsonValueKind.Object
-                   && doc.RootElement.TryGetProperty("type", out var type)
-                   && type.ValueKind == JsonValueKind.String
-                   && type.GetString() == nameof(RuleType.Threshold)
-                ? RuleType.Threshold
-                : RuleType.Existence;
+            if (doc.RootElement.ValueKind != JsonValueKind.Object || !doc.RootElement.TryGetProperty("type", out var type))
+            {
+                return RuleType.Existence;
+            }
+
+            if (type.ValueKind == JsonValueKind.String && type.GetString() is { } name)
+            {
+                foreach (var member in Enum.GetValues<RuleType>())
+                {
+                    if (string.Equals(name, member.ToString(), StringComparison.Ordinal)) return member;
+                }
+            }
+
+            return null;
         }
         catch (Exception ex) when (ex is PredicateCompilationException or JsonException or InvalidOperationException)
         {

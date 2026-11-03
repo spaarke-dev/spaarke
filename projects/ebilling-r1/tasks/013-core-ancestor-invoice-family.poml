@@ -1,0 +1,142 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="013" project="ebilling-r1">
+  <metadata>
+    <title>Core-ancestor derivation and one-lookup guard for the invoice family</title>
+    <phase>1 Data model (WP1)</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Changes a shared security component (CoreAncestorResolver, its TypeScript mirror, SecureChildLineage) on the write path; tags security, write-path.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Security-sensitive change to access derivation and secure-family registration with 7 dependencies and cross-project review (uac-r2); judgment on taxonomy boundaries.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P1-B</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <deps>010, 012, 020, 021, 022, 023, 027</deps>
+    <tags>bff, dataverse, write-path, security</tags>
+    <estimated-effort>1-2 days</estimated-effort>
+  </metadata>
+
+  <prompt>Give the invoice family (sprk_invoice, sprk_billingevent, sprk_invoicesubmission, sprk_invoiceapproval, sprk_externalidentifier) one server-side owner for the FR-05 invariant: exactly one entity-specific core-record lookup (Matter, Project or Work Assignment) per record, all five resolver fields derived from it, and a write populating two refused fail-closed — built on CoreAncestorResolver. Register every new invoice-family table with the secure-record family so rows under a secure matter are Secure-team-owned, not ordinary-owned. Reviewed by unified-access-control-r2.</prompt>
+
+  <role>SPAARKE platform developer. Expert in the Spaarke access model (core ancestors, secure-child lineage), Dataverse write paths and fail-closed design.</role>
+
+  <goal>A pure, unit-tested guard and derivation in Services/Dataverse that, given one of the five entities and its pending field values, returns the single core record and the five resolver-field values, or a refusal with a stable reason when zero or more than one entity-specific lookup is set; CoreAncestorResolver.IntermediateRootColumns and its TypeScript mirror read sprk_invoice's new sprk_regardingworkassignment; the new tables are registered consistently in the secure-family lists and carry sprk_createdbyperson where app-only-created; uac-r2's review is recorded.</goal>
+
+  <context>
+    <background>Today sprk_invoice is a CHILD in the access taxonomy and an intermediate whose root columns are its typed sprk_project / sprk_matter (CoreAncestorResolver.cs:92-101, :182); an invoice naming both a matter and a project currently derives two stamps (DeriveStampsAsync :648-687) — FR-05 says a write populating two is refused. sprk_billingevent is in SecureChildLineage (SecureChildLineage.cs:74-75) with typed matter / project lookups, and sprk_invoice at :130-132. The C# tables are pinned to the TypeScript INTERMEDIATE_ROOT_COLUMNS / CHILD_RECORD_ENTITIES in PolymorphicResolverService.ts by CoreAncestorResolverTests (IntermediateRootColumns_MatchTheTypeScriptSide). Naming scheme (coordinator decision): new tables 020 / 021 / 022 (and 023 / 027 if they carry core lookups) use the CoreAncestorLookups names sprk_regardingmatter / sprk_regardingproject / sprk_regardingworkassignment (CoreAncestorResolver.cs:116-122); sprk_invoice and sprk_billingevent reuse their typed sprk_matter / sprk_project and gain sprk_regardingworkassignment (010 / 012) - this task maps each entity's three lookups for the guard. Secure family today: sprk_invoice and sprk_billingevent are already in config/secure-record-owner-role.json, SecureChildLineage, the census (RecordOwnerAssignmentCensusTests.cs:47-48) and Set-ChildRecordCreatorPersonSchema.ps1 $Tables (line 157); SecureFamilyConsistencyTests fails unless lineage, role set and census agree (allow-lists empty). InvoiceReviewService.BuildInvoiceCreateFields (~line 828) is today's resolver-field write shape to copy.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Dataverse/CoreAncestorResolver.cs</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/services/PolymorphicResolverService.ts (INTERMEDIATE_ROOT_COLUMNS mirror only)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Access/SecureChildLineage.cs</file>
+      <file role="modify">tests/unit/Sprk.Bff.Api.Tests/Services/Dataverse/CoreAncestorResolverTests.cs</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/services/__tests__/PolymorphicResolverService.coreAncestor.test.ts</file>
+      <file role="new">src/server/api/Sprk.Bff.Api/Services/Dataverse/InvoiceFamilyCoreRecordGuard.cs (pure guard + resolver-field derivation; final name may follow sibling conventions)</file>
+      <file role="new">tests/unit/Sprk.Bff.Api.Tests/Services/Dataverse/InvoiceFamilyCoreRecordGuardTests.cs</file>
+      <file role="modify">config/secure-record-owner-role.json (tables[] kind child: new family tables)</file>
+      <file role="modify">tests/Spaarke.ArchTests/RecordOwnerAssignmentCensusTests.cs (ChildTables)</file>
+      <file role="modify">tests/unit/domain/Access/SecureChildLineageTests.cs</file>
+      <file role="modify">scripts/Set-ChildRecordCreatorPersonSchema.ps1 ($Tables, line 157) and src/server/api/Sprk.Bff.Api/Services/Dataverse/RecordCreatorPerson.cs (StampedChildTables, line 78 - same list)</file>
+      <file role="read">tests/Spaarke.ArchTests/SecureFamilyConsistencyTests.cs (must pass unchanged; allow-lists stay empty)</file>
+      <file role="read">scripts/Set-SecureRecordOwnerRolePrivileges.ps1 (run against dev after the config change)</file>
+      <file role="read">src/server/api/Sprk.Bff.Api/Services/Finance/InvoiceReviewService.cs</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="010" status="pending">sprk_billingevent sprk_regardingworkassignment + resolver fields</dependency>
+      <dependency task="012" status="pending">sprk_invoice sprk_regardingworkassignment</dependency>
+      <dependency task="020" status="pending">sprk_invoicesubmission core-record fields</dependency>
+      <dependency task="021" status="pending">sprk_invoiceapproval core-record fields</dependency>
+      <dependency task="022" status="pending">sprk_externalidentifier core-record fields</dependency>
+      <dependency task="023" status="pending">sprk_billingexport table (secure-family registration)</dependency>
+      <dependency task="027" status="pending">correction record shape (child table to register, or columns on the line - nothing to register)</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="D-68 / task 022 (2026-10-15)">Define the sprk_regardingrecordid value for sprk_externalidentifier rows that belong to an invoice only (no core record yet), so the D-68 alternate key (firm, type, value, core record) never has an empty column; task 044 writes it. Rows with an empty key column escape the key and can duplicate.</constraint>
+    <constraint source="D-75">Per D-75 (with ontology-r1, 2026-10-15): the core record of an invoice line (sprk_billingevent) is derived only from the line's OWN core-record lookup (sprk_matter / sprk_project / sprk_regardingworkassignment, FR-05), never by walking sprk_billingevent.sprk_invoice; a line may in future not belong to exactly one invoice. Any other derivation needs uac-r2 approval (STOP and ask).</constraint>
+    <constraint source="ADR-024 / spec FR-05">The guard refuses (does not pick one) when more than one of the entity's Matter / Project / Work Assignment lookups is set, and when none is set on an entity where FR-05 requires one; the refusal carries a stable reason code. When exactly one is set, it returns all five resolver fields (type via sprk_recordtype_ref, id lowercase "D" GUID, name, relative URL, number) — never a partial set.</constraint>
+    <constraint source="ADR-034 / NFR-01 of the access model">Fail closed: a metadata or read failure is a refusal, never "no ancestor". Keep CoreAncestorStatus.NoAncestor and Error distinct.</constraint>
+    <constraint source="project">Do NOT add any new entity to ChildRecordEntities or CoreRecordEntities, and do not change StampSourceColumns or StampedOutsideAccessTaxonomy, without uac-r2's written agreement (escalation trigger). Adding sprk_regardingworkassignment to IntermediateRootColumns["sprk_invoice"] and its TypeScript mirror is in scope.</constraint>
+    <constraint source="project / uac-r2">Secure-record family registration: SecureChildLineage gets every core-record lookup on sprk_invoice and sprk_billingevent (an omitted lookup can widen a share intersection) and a lineage row for each new family table - sprk_invoicesubmission, sprk_invoiceapproval, sprk_externalidentifier, sprk_billingexport and the correction table (only if 027 chose a child table). The same tables go, in the same change, into config/secure-record-owner-role.json (kind child, privilegeName, reason, evidence, addedBy "ebilling-r1 task 013"), RecordOwnerAssignmentCensusTests.ChildTables and SecureChildLineageTests; SecureFamilyConsistencyTests passes with empty allow-lists. Tables created app-only (no human caller) also go into Set-ChildRecordCreatorPersonSchema.ps1 $Tables and RecordCreatorPerson.StampedChildTables. Every table entry is reviewed by uac-r2 before merge.</constraint>
+    <constraint source=".claude/constraints/bff-extensions.md">BFF change: state placement (in BFF, write-path owner), measure publish-size delta against a fresh master build, no new HIGH CVE, tests in tests/unit/Sprk.Bff.Api.Tests/. No DI registration is needed for a pure static guard; if one is added, it goes in the existing Dataverse registration (ADR-010).</constraint>
+    <constraint source="ADR-038">Tests: unit tests for the guard (zero, one, two, three lookups; each core type; resolver fields complete) and the updated pinning tests. Seeding proof for the more-than-one refusal.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md</file>
+      <file>.claude/patterns/dataverse/polymorphic-resolver.md</file>
+      <file>.claude/patterns/auth/uac-access-control.md</file>
+      <file>.claude/adr/ADR-024-polymorphic-resolver-pattern.md</file>
+      <file>.claude/adr/ADR-034-user-record-membership.md</file>
+      <file>.claude/adr/ADR-002-thin-plugins.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/patterns/testing/unit-test-structure.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Read the dependency tasks' notes for exact lookup names; read CoreAncestorResolver, SecureChildLineage, the TS mirror and their pinning tests.</step>
+    <step order="2">Write the guard tests first (fail before): two-lookup refusal per pair, zero-lookup refusal, one lookup per core type returning five complete resolver fields, unknown entity refused.</step>
+    <step order="3">Implement the guard as a pure component reusing CoreAncestorResolver's tables / record-type resolution; no Dataverse write in it.</step>
+    <step order="4">Add sprk_regardingworkassignment to IntermediateRootColumns["sprk_invoice"] and the TS INTERMEDIATE_ROOT_COLUMNS; update the pinning tests on both sides.</step>
+    <step order="5">Secure-family registration: list the family tables and, per table, whether it is created app-only (from 020-023 / 027 notes); present the list to uac-r2; on agreement update SecureChildLineage (lookups + rows), the role config, the census, SecureChildLineageTests, RecordCreatorPerson and the creator-person script together; run SecureFamilyConsistencyTests and the unit tests.</step>
+    <step order="6">Run Set-SecureRecordOwnerRolePrivileges.ps1 and Set-ChildRecordCreatorPersonSchema.ps1 against dev (-WhatIf first); record output. Record uac-r2's answers to the escalation questions; apply only what they agree.</step>
+    <step order="7">Seeding proof: disable the more-than-one refusal, confirm the named test fails, restore; record.</step>
+    <step order="8">dotnet build / dotnet test (unit + ArchTests) and the Spaarke.UI.Components jest suite for the touched test; measure publish-size delta.</step>
+    <step order="9">Update TASK-INDEX.md: change this task's status cell to ✅ [done].</step>
+    <step order="10">If any deviations from plan, document in projects/ebilling-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>Adding any table to the CHILD access taxonomy (ChildRecordEntities) is a uac-r2 / owner decision: STOP and ask. Secure-family registration is in scope, but if uac-r2 says a new table must NOT be Secure-team-owned, STOP and record the decision rather than allow-listing a gap.</trigger>
+    <trigger>If the mixed naming (typed sprk_matter / sprk_project on invoice and line, sprk_regarding{core} elsewhere) cannot map cleanly in the guard or the resolver, STOP and decide with the owner and uac-r2 before any column is created or renamed.</trigger>
+    <trigger>If refusing an existing invoice row with both sprk_matter and sprk_project set during derivation (not only at write) would change behaviour for existing data in dev, STOP and present the row count and options to uac-r2.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>CoreAncestorResolver derives stamps and refuses same-type conflicts (CoreAncestorResolver.cs:658-671) but has no write-time "exactly one core lookup" check; InvoiceReviewService.BuildInvoiceCreateFields writes resolver fields for a matter only. Grep for a one-lookup guard over Services/Dataverse finds none.</existing>
+    <extension>Partly — tables and record-type resolution are reused from CoreAncestorResolver; the guard is a separate small pure component because CoreAncestorResolver derives from rows already written, while FR-05 must refuse before the write (ADR-002 single owner).</extension>
+    <cost-of-doing-nothing>A write naming two core records is accepted, so access inheritance and the "line's core record is authoritative" rule become ambiguous; FR-05's negative acceptance ("a write populating two is refused") fails, and every invoice-family writer (044, 049, 100, 104) re-implements resolver-field logic.</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="dotnet">Build and test</tool>
+    <tool name="npm">Run the Spaarke.UI.Components test</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Dataverse/InvoiceFamilyCoreRecordGuard.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Dataverse/CoreAncestorResolver.cs, RecordCreatorPerson.cs, Services/Access/SecureChildLineage.cs, PolymorphicResolverService.ts</output>
+    <output type="config">config/secure-record-owner-role.json, scripts/Set-ChildRecordCreatorPersonSchema.ps1</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Dataverse/InvoiceFamilyCoreRecordGuardTests.cs, CoreAncestorResolverTests.cs, SecureChildLineageTests.cs, RecordOwnerAssignmentCensusTests.cs, PolymorphicResolverService.coreAncestor.test.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Per D-75, CoreAncestorResolver derives a sprk_billingevent row's core record from its own core lookup: a test with a line whose sprk_invoice points at a different (or no) invoice still resolves the line's own matter / project / work assignment, and a line with no core lookup is refused, not resolved through the invoice.</criterion>
+    <criterion testable="true">For each of the five entities: given exactly one of Matter / Project / Work Assignment set, the guard returns that core record and five non-empty resolver fields; given two or three set, it returns a refusal with a stable reason code; given none, it returns a refusal.</criterion>
+    <criterion testable="true">A read or metadata failure inside the derivation yields a refusal, not success and not "no ancestor".</criterion>
+    <criterion testable="true">IntermediateRootColumns["sprk_invoice"] and the TypeScript mirror both include sprk_regardingworkassignment; the C#-to-TypeScript pinning tests pass.</criterion>
+    <criterion testable="true">SecureChildLineage includes every core-record lookup now on sprk_invoice and sprk_billingevent.</criterion>
+    <criterion testable="true">Each new family table (submission, approval, external identifier, export, correction table if one exists) appears in SecureChildLineage, config/secure-record-owner-role.json (kind child), RecordOwnerAssignmentCensusTests.ChildTables and SecureChildLineageTests; SecureFamilyConsistencyTests passes with all allow-lists empty; removing one table from one list makes it fail (seeding proof).</criterion>
+    <criterion testable="true">Each app-only-created family table is in Set-ChildRecordCreatorPersonSchema.ps1 $Tables and RecordCreatorPerson.StampedChildTables; both dev scripts' output (role privileges, sprk_createdbyperson) is recorded; uac-r2 reviewed every table entry.</criterion>
+    <criterion testable="true">Seeding proof recorded: with the more-than-one refusal disabled, the named guard test fails; restored, it passes.</criterion>
+    <criterion testable="true">ChildRecordEntities, CoreRecordEntities, StampSourceColumns and StampedOutsideAccessTaxonomy are unchanged unless uac-r2's written agreement is recorded in task notes.</criterion>
+    <criterion testable="true">uac-r2 review recorded in task notes (FR-05 acceptance).</criterion>
+    <criterion testable="true">Publish-size delta measured against a fresh master build and recorded in task notes; no new HIGH CVE; dotnet build and all touched test suites pass.</criterion>
+    <criterion testable="true">Cover the stated contract plus the edge cases named above. Anything beyond that needs a one-line justification in task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>Security tag: two adversarial-verifier passes (root CLAUDE.md §8.5). Callers (044 submission, 049 job, 100 review, 104 resubmission) call the guard before any invoice-family create / update; this task does not wire them. uac-r2 shares these files - run /conflict-check before the PR. Not parallel-safe: RecordOwnerAssignmentCensusTests.cs is also edited by 011, and the secure-family files are uac-r2's. Deps 023 / 027 added beyond the brief (their tables need registration).
+
+Completed 2026-10-15 (notes/013-core-ancestor-invoice-family.md). Guard + stored-row derivation built and tested; invoice WA root column in C#, TS and the container resolver (lockstep); submission, approval, external identifier and correction registered in the secure family (dev role applied and verified, 403 before / 201 after) and given sprk_createdbyperson (dev applied, -Verify PASS). Deviation: sprk_billingexport NOT registered (no root, spans many core records) - ISS-011 (#1974) for the owner / uac-r2. ISS-010 (#1973): the generic child-record create route bypasses the guard. uac-r2 review of the table entries is still outstanding. Rework: one review fix (the approval's Decision Record lineage edge was removed, F1). The invoice's sprk_supersedesinvoice lineage edge was removed after the full suite showed it altered the external invoices module's root rule; its classification is left to uac-r2. Full BFF suite: 23,346 passed. The 23 load-flaky WAF failures pass in isolation (146/146).</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in knowledge files. Follow the task-execute skill for the mandatory pre-execution checklist.</protocol>
+  </execution>
+</task>

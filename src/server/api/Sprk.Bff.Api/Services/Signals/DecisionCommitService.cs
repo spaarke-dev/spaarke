@@ -292,7 +292,6 @@ public sealed class DecisionCommitService
     private const int ReasonMaxLength = 2000;
     private const int MaxNextSteps = 10;
     private const int MaxAlsoResolve = 25;
-    private const string WriteOperation = "write";
     private const int ConcurrencyVersionMismatch = unchecked((int)0x80060882);
 
     /// <summary>The state of a Signal the commit did not close or link.</summary>
@@ -1187,6 +1186,20 @@ public sealed class DecisionCommitService
         warnings.AddRange(await _followUps.AfterRecordedAsync(p.MatterId, executed, p.Resolution == Resolution.Dismissed ? p.Resolved : [], writeCt).ConfigureAwait(false));
         progress.FollowUpsRan = true;
 
+        // ---- (7) Task 168 (D-194): tell Assign Task's assignee, AFTER the record (D-17). Never fails or changes the decision. ------
+        try
+        {
+            var notices = AssignTaskNotices(p.Steps, executed, p.Core);
+            if (notices.Count > 0 && await _followUps.NotifyAssigneesAsync(http, notices, writeCt).ConfigureAwait(false) is { } notified)
+                warnings.AddRange(notified);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(DecisionCommitEvents.AfterRecordFailed, ex,
+                "Decision commit: review {ReviewId} recorded as {RecordId}; notifying the assignee stopped.", reviewId, recordId);
+            warnings.Add(AssignTaskNotifier.EmailNotSentWarning);
+        }
+
         _logger.LogInformation(DecisionCommitEvents.Recorded,
             "Decision commit: review {ReviewId} recorded as {RecordId} ({Steps} step(s), {Signals} Signal(s), {Warnings} warning(s)).",
             reviewId, recordId, executed.Count, signals.Count, warnings.Count);
@@ -1470,6 +1483,23 @@ public sealed class DecisionCommitService
         return (null, new Prepared(primary, rows, lane, plan, offered, steps, core, recordCore, gateTier, dismissalText, outcome));
     }
 
+    /// <summary>Task 168 (D-194): one notice per Assign Task step that is Done with Send email notification on (omitted is on), from the
+    /// step's own values and the task it wrote.</summary>
+    private static List<AssignTaskNotice> AssignTaskNotices(
+        IReadOnlyList<ExecStep> steps, IReadOnlyList<DecisionCommitStep> executed, DecisionCoreRecord? core)
+    {
+        var notices = new List<AssignTaskNotice>();
+        foreach (var step in steps.Where(s => s.Def.Code == AssignTaskNotifier.ActionCode))
+        {
+            if (executed.FirstOrDefault(e => e.Key == step.Key) is not { } done || done.Status != nameof(DecisionActionStatus.Done))
+                continue;
+            if (AssignTaskNotice.From(step.Values, done.Written, core) is { } notice)
+                notices.Add(notice);
+        }
+
+        return notices;
+    }
+
     /// <summary>The wizard's values as the executors take them. Unknown codes and non-scalar values are refused; a required
     /// parameter must be present.</summary>
     internal static (IReadOnlyDictionary<string, string?>? Values, string? Invalid) ReadValues(
@@ -1491,6 +1521,14 @@ public sealed class DecisionCommitService
             };
             if (text == "\u0000")
                 return (null, $"'{def.Label}': '{key}' must be a single value.");
+            // Task 168 (D-194): a yes/no is true or false (or omitted, its default); anything else is refused, not guessed at.
+            if (def.Parameters.First(p => p.Code == key).Kind == DecisionParameterKind.Boolean && !string.IsNullOrWhiteSpace(text))
+            {
+                if (!bool.TryParse(text.Trim(), out var flag))
+                    return (null, $"'{def.Label}': '{key}' must be true or false.");
+                text = flag ? "true" : "false";
+            }
+
             values[key] = text;
         }
 
@@ -1506,69 +1544,36 @@ public sealed class DecisionCommitService
     /// <summary>FR-51: the caller must be able to WRITE each Signal's subject and APPEND TO the core record, asked as the caller
     /// through the caller-rights probe. Null when they may; Forbidden when a right is missing (every "could not answer" from the
     /// probe is a no); Unavailable when a table's entity set cannot be looked up.</summary>
+    /// <remarks>The rule itself is <see cref="DecisionCallerRights.CheckAsync"/> (shared with the human billing decisions, ebilling-r1
+    /// tasks 100 and 105); this maps its answer to the commit route's refusals, unchanged.</remarks>
     private async Task<DecisionCommitResult?> CallerMayDecideAsync(
         HttpContext http, DecisionCoreRecord? decisionCore, IEnumerable<SignalRow> resolved, CancellationToken ct)
     {
-        var sets = new Dictionary<string, string?>(StringComparer.Ordinal);
+        var refusal = await DecisionCallerRights.CheckAsync(
+                _entities,
+                _logger,
+                (set, id, operation, token) => DecisionExec.CallerHoldsAsync(_probe, http, set, id, operation, token),
+                decisionCore,
+                resolved.Select(row => (row.SubjectEntity, row.SubjectId)),
+                ct)
+            .ConfigureAwait(false);
 
-        if (decisionCore is { } core)
+        return refusal switch
         {
-            if (await CallerHoldsOnAsync(http, sets, core.Entity, core.Id, DecisionExec.AppendToOperation, ct).ConfigureAwait(false) is not { } mayAppend)
-                return Unavailable(Guid.Empty);
-            if (!mayAppend)
-                return Forbidden("You do not have permission to record a decision on this matter.");
-        }
-
-        var checkedSubjects = new HashSet<(string, Guid)>();
-        foreach (var row in resolved)
-        {
-            if (row.SubjectId is not { } subjectId || subjectId == Guid.Empty)
-                continue; // nothing beyond the core record to act on
-            // Task 141 review F3: a pair id whose subject table cannot be derived (no subject lookup, or two, carry it; for
-            // example the subject was deleted and its RemoveLink cascade cleared the lookup) is an unknown subject, never "no
-            // subject": the caller's Write on it cannot be shown, so the decision is refused like an unreadable subject.
-            if (row.SubjectEntity is not { Length: > 0 } subject)
-                return new DecisionCommitResult
-                {
-                    Status = DecisionCommitStatus.Forbidden, // K2: the refusal is unchanged; only its code and message are specific
-                    ReasonCode = DecisionCommitReasons.SignalSubjectMissing,
-                    Detail = "This Signal's subject no longer exists.",
-                };
-            if (!checkedSubjects.Add((subject, subjectId)))
-                continue;
-            if (await CallerHoldsOnAsync(http, sets, subject, subjectId, WriteOperation, ct).ConfigureAwait(false) is not { } mayWrite)
-                return Unavailable(Guid.Empty);
-            if (!mayWrite)
-                return Forbidden("You do not have permission to change an item in this decision.");
-        }
-
-        return null;
+            DecisionCallerRefusal.None => null,
+            DecisionCallerRefusal.Unavailable => Unavailable(Guid.Empty),
+            DecisionCallerRefusal.CoreAppendToMissing => Forbidden("You do not have permission to record a decision on this matter."),
+            DecisionCallerRefusal.SubjectMissing => new DecisionCommitResult
+            {
+                Status = DecisionCommitStatus.Forbidden, // K2: the refusal is unchanged; only its code and message are specific
+                ReasonCode = DecisionCommitReasons.SignalSubjectMissing,
+                Detail = "This Signal's subject no longer exists.",
+            },
+            _ => Forbidden("You do not have permission to change an item in this decision."),
+        };
 
         static DecisionCommitResult Forbidden(string detail) =>
             new() { Status = DecisionCommitStatus.Forbidden, ReasonCode = DecisionCommitReasons.NotAuthorized, Detail = detail };
-    }
-
-    /// <summary>True/false: the caller holds / lacks <paramref name="operation"/> on the record. Null: the table's entity set
-    /// could not be looked up (a metadata fault, not an answer about the caller). Set names are memoised per commit.</summary>
-    private async Task<bool?> CallerHoldsOnAsync(
-        HttpContext http, Dictionary<string, string?> sets, string table, Guid id, string operation, CancellationToken ct)
-    {
-        if (!sets.TryGetValue(table, out var set))
-        {
-            try
-            {
-                set = await _entities.GetEntitySetNameAsync(table, ct).ConfigureAwait(false);
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
-            {
-                _logger.LogWarning("Decision commit: the entity set of {Table} could not be looked up ({ExceptionType}).", table, ex.GetType().Name);
-                return null;
-            }
-
-            sets[table] = set;
-        }
-
-        return !string.IsNullOrEmpty(set) && await DecisionExec.CallerHoldsAsync(_probe, http, set, id, operation, ct).ConfigureAwait(false);
     }
 
     // ── Reads ───────────────────────────────────────────────────────────────────────────────────────────────────────

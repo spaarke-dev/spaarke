@@ -208,5 +208,7 @@ public class AuthorableColumnsTests
         allow.Should().Contain(PredicateCompiler.VerifiedJoins.Select(kv => (kv.Key.Related, kv.Value)));
         allow.Select(c => c.Entity).Should().OnlyContain(e => PredicateCompiler.EvaluatorGlobalReadableEntities.Contains(e));
         allow.Should().NotContain(c => c.Column == "modifiedon", "FR-07: sprk_budget.modifiedon is refused, and no other modifiedon is authorable");
+        allow.Should().NotContain(("sprk_invoice", "sprk_approvedtotal"),
+            "ebilling-r1 D-130 / ontology-r1 K2: the approved total is a derived BASE column guarded by DerivedBaseColumns, never an authorable one");
     }
 }

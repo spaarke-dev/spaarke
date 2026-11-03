@@ -1,0 +1,29 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0159",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0159","generator_id":"gen_eval_set.py@1 F-0159","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0159.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-03"},
+ "header":{"firm":"Rutherford and Ambrose LLP","firm_invoice_number":"INV-2025-53850","invoice_date":"2026-08-04","billing_period_start":"2026-07-01","billing_period_end":"2026-07-31","firm_matter_reference":"11288-0003","po_number":"PO-4506914","fees_total":3054.5,"expenses_total":1785.86,"adjustments_total":0.0,"total_due":4840.36,"currency":"USD"},
+ "timekeepers":[{"name":"Aisha Whitfield","title":"Paralegal","rate":145.0,"billed_as":"AW"},{"name":"Beatrix Oyelaran","title":"Senior Associate","rate":355.0,"billed_as":"BO"},{"name":"Imani Lockhart","title":"Paralegal","rate":145.0,"billed_as":"IL"},{"name":"Ivan Wickham","title":"Associate","rate":260.0,"billed_as":"IW"},{"name":"Samuel Lockhart","title":"Partner","rate":425.0,"billed_as":"SL"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2026-07-07","timekeeper":"BO","timekeeper_name":"Beatrix Oyelaran","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":1.4,"rate":355.0,"amount":497.0,"narrative":"Prepare expert witness for testimony in the insurance coverage issue","codes":["L420","A101"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2026-07-08","timekeeper":"IL","timekeeper_name":"Imani Lockhart","timekeeper_title":"Paralegal","title":"Para","hours":2.1,"rate":145.0,"amount":304.5,"narrative":"Review court docket and calendar of pending deadlines for the customs audit","codes":["L190","A104"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2026-07-10","timekeeper":"IL","timekeeper_name":"Imani Lockhart","timekeeper_title":"Paralegal","title":"Para","hours":2.0,"rate":145.0,"amount":290.0,"narrative":"Review court docket and calendar of pending deadlines for the licensing dispute","codes":["L190","A104"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2026-07-15","timekeeper":"IL","timekeeper_name":"Imani Lockhart","timekeeper_title":"Paralegal","title":"Para","hours":1.1,"rate":145.0,"amount":159.5,"narrative":"Prepare expert witness for testimony in the employment claim","codes":["L420","A101"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2026-07-17","timekeeper":"IL","timekeeper_name":"Imani Lockhart","timekeeper_title":"Paralegal","title":"Para","hours":2.8,"rate":145.0,"amount":406.0,"narrative":"Prepare examination outlines for trial in the distribution agreement","codes":["L440","A101"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2026-07-20","timekeeper":"SL","timekeeper_name":"Samuel Lockhart","timekeeper_title":"Partner","title":"Ptr","hours":0.6,"rate":425.0,"amount":255.0,"narrative":"Attend hearing on reply brief in the employment claim","codes":["L450","A109"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2026-07-20","timekeeper":"IL","timekeeper_name":"Imani Lockhart","timekeeper_title":"Paralegal","title":"Para","hours":1.2,"rate":145.0,"amount":174.0,"narrative":"Prepare fact witness for testimony regarding the warranty claim","codes":["L410","A101"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2026-07-28","timekeeper":"AW","timekeeper_name":"Aisha Whitfield","timekeeper_title":"Paralegal","title":"Para","hours":1.5,"rate":145.0,"amount":217.5,"narrative":"Prepare expert witness for testimony in the customs audit","codes":["L420","A101"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"fee","date":"2026-07-29","timekeeper":"IW","timekeeper_name":"Ivan Wickham","timekeeper_title":"Associate","title":"Assoc","hours":1.7,"rate":350.0,"amount":595.0,"narrative":"Draft post-trial motion in the employment claim","codes":["L460","A103"],"page":2,"narrative_style":"clear"},
+  {"n":10,"line_type":"fee","date":"2026-07-30","timekeeper":"IW","timekeeper_name":"Ivan Wickham","timekeeper_title":"Associate","title":"Assoc","hours":0.6,"rate":260.0,"amount":156.0,"narrative":"Draft interrogatory responses for trial in the distribution agreement","codes":["L430","A103"],"page":2,"narrative_style":"clear"},
+  {"n":11,"line_type":"expense","date":"2026-07-01","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":1785.86,"amount":1785.86,"narrative":"Court reporter and transcript - deposition","codes":["E115"],"page":2,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["911 Peachtree Way","Dallas","Tax ID 57-1987813"],"template":"T22","pages":2},
+ "rule_set_id":"RS-03",
+ "context":{"matter_open":"2025-04-28","matter_close":"2026-10-29","matter_budget":44361.0,"approved_timekeepers":["Samuel Lockhart","Beatrix Oyelaran","Imani Lockhart","Jordan Rosenthal","Cyrus Thornbury","Ivan Wickham","Aisha Whitfield"],"invoice_received_date":"2026-08-11"},
+ "expected_findings":[
+  {"rule_id":"RS-03-R01","rule_type":"ApprovedRate","scope":"line","line_refs":[9],"consequence":"Reduce"}
+ ],
+ "seeded_violations":1
+}

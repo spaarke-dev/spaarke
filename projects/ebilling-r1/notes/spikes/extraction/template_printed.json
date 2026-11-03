@@ -1,0 +1,197 @@
+{
+  "_source": "derived from evaluation-set/generator/layout.py TEMPLATES (cols, group, exp_mode) by task 005",
+  "templates": {
+    "T01": {
+      "fee_printed": ["date", "timekeeper", "hours", "rate", "amount"],
+      "expense_printed": ["date", "amount"],
+      "hours_fmt": "dec2",
+      "date_fmt": "us",
+      "exp_mode": "separate",
+      "group": "none"
+    },
+    "T02": {
+      "fee_printed": ["date", "timekeeper", "hours", "rate", "amount"],
+      "expense_printed": ["date", "amount"],
+      "hours_fmt": "dec2",
+      "date_fmt": "us",
+      "exp_mode": "separate",
+      "group": "none"
+    },
+    "T03": {
+      "fee_printed": ["date", "timekeeper", "hours", "amount"],
+      "expense_printed": ["date", "amount"],
+      "hours_fmt": "dec2",
+      "date_fmt": "us",
+      "exp_mode": "separate",
+      "group": "timekeeper"
+    },
+    "T04": {
+      "fee_printed": ["date", "timekeeper", "hours", "rate", "amount"],
+      "expense_printed": ["date", "amount"],
+      "hours_fmt": "dec2",
+      "date_fmt": "us",
+      "exp_mode": "separate",
+      "group": "task"
+    },
+    "T05": {
+      "fee_printed": ["date", "timekeeper", "hours", "amount"],
+      "expense_printed": ["amount"],
+      "hours_fmt": "dec2",
+      "date_fmt": "long",
+      "exp_mode": "separate",
+      "group": "date"
+    },
+    "T06": {
+      "fee_printed": ["date", "timekeeper", "hours", "rate", "amount"],
+      "expense_printed": ["date", "amount"],
+      "hours_fmt": "dec2",
+      "date_fmt": "us",
+      "exp_mode": "separate",
+      "group": "none"
+    },
+    "T07": {
+      "fee_printed": ["date", "timekeeper", "hours", "amount"],
+      "expense_printed": ["date", "amount"],
+      "hours_fmt": "dec1",
+      "date_fmt": "us",
+      "exp_mode": "separate",
+      "group": "none"
+    },
+    "T08": {
+      "fee_printed": ["date", "timekeeper", "hours", "rate", "amount"],
+      "expense_printed": ["date", "amount"],
+      "hours_fmt": "hhmm",
+      "date_fmt": "iso",
+      "exp_mode": "separate",
+      "group": "none"
+    },
+    "T09": {
+      "fee_printed": ["date", "timekeeper", "hours", "rate", "amount"],
+      "expense_printed": ["date", "amount"],
+      "hours_fmt": "dec2",
+      "date_fmt": "us",
+      "exp_mode": "interleaved",
+      "group": "none"
+    },
+    "T10": {
+      "fee_printed": ["date", "timekeeper", "hours", "amount"],
+      "expense_printed": ["date", "amount"],
+      "hours_fmt": "dec2",
+      "date_fmt": "us",
+      "exp_mode": "separate",
+      "group": "timekeeper"
+    },
+    "T11": {
+      "fee_printed": ["date", "timekeeper", "hours", "rate", "amount"],
+      "expense_printed": ["date", "amount"],
+      "hours_fmt": "dec2",
+      "date_fmt": "us",
+      "exp_mode": "separate",
+      "group": "none"
+    },
+    "T12": {
+      "fee_printed": ["date", "timekeeper", "hours", "amount"],
+      "expense_printed": ["date", "amount"],
+      "hours_fmt": "dec2",
+      "date_fmt": "dmy",
+      "exp_mode": "separate",
+      "group": "none"
+    },
+    "T13": {
+      "fee_printed": ["date", "timekeeper", "hours", "rate", "amount"],
+      "expense_printed": ["date", "amount"],
+      "hours_fmt": "dec2",
+      "date_fmt": "us",
+      "exp_mode": "separate",
+      "group": "timekeeper"
+    },
+    "T14": {
+      "fee_printed": ["date", "timekeeper", "hours", "amount"],
+      "expense_printed": ["date", "amount"],
+      "hours_fmt": "dec2",
+      "date_fmt": "us",
+      "exp_mode": "separate",
+      "group": "task"
+    },
+    "T15": {
+      "fee_printed": ["date", "timekeeper", "hours", "amount"],
+      "expense_printed": ["amount"],
+      "hours_fmt": "hhmm",
+      "date_fmt": "long",
+      "exp_mode": "separate",
+      "group": "date"
+    },
+    "T16": {
+      "fee_printed": ["date", "timekeeper", "hours", "rate", "amount"],
+      "expense_printed": ["date", "amount"],
+      "hours_fmt": "dec2",
+      "date_fmt": "us",
+      "exp_mode": "separate",
+      "group": "timekeeper"
+    },
+    "T17": {
+      "fee_printed": ["date", "timekeeper", "hours", "rate", "amount"],
+      "expense_printed": ["date", "amount"],
+      "hours_fmt": "dec1",
+      "date_fmt": "us",
+      "exp_mode": "separate",
+      "group": "none"
+    },
+    "T18": {
+      "fee_printed": ["date", "timekeeper", "hours", "rate", "amount"],
+      "expense_printed": ["date", "amount"],
+      "hours_fmt": "dec2",
+      "date_fmt": "dmy",
+      "exp_mode": "interleaved",
+      "group": "none"
+    },
+    "T19": {
+      "fee_printed": ["date", "timekeeper", "amount"],
+      "expense_printed": ["date", "amount"],
+      "hours_fmt": "dec2",
+      "date_fmt": "us",
+      "exp_mode": "separate",
+      "group": "none"
+    },
+    "T20": {
+      "fee_printed": ["date", "timekeeper", "hours", "rate", "amount"],
+      "expense_printed": ["date", "amount"],
+      "hours_fmt": "dec2",
+      "date_fmt": "iso",
+      "exp_mode": "separate",
+      "group": "task"
+    },
+    "T21": {
+      "fee_printed": ["date", "timekeeper", "hours", "rate", "amount"],
+      "expense_printed": ["date", "amount"],
+      "hours_fmt": "dec2",
+      "date_fmt": "us",
+      "exp_mode": "separate",
+      "group": "none"
+    },
+    "T22": {
+      "fee_printed": ["date", "timekeeper", "hours", "rate", "amount"],
+      "expense_printed": ["amount"],
+      "hours_fmt": "dec2",
+      "date_fmt": "us",
+      "exp_mode": "separate",
+      "group": "date"
+    },
+    "T23": {
+      "fee_printed": ["date", "timekeeper", "hours", "rate", "amount"],
+      "expense_printed": ["date", "amount"],
+      "hours_fmt": "hhmm",
+      "date_fmt": "us",
+      "exp_mode": "separate",
+      "group": "none"
+    },
+    "T24": {
+      "fee_printed": ["date", "timekeeper", "hours", "amount"],
+      "expense_printed": ["date", "amount"],
+      "hours_fmt": "dec2",
+      "date_fmt": "us",
+      "exp_mode": "separate",
+      "group": "timekeeper"
+    }
+  }
+}

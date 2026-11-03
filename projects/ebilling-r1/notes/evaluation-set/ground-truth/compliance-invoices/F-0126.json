@@ -1,0 +1,33 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0126",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0126","generator_id":"gen_eval_set.py@1 F-0126","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0126.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-06"},
+ "header":{"firm":"Quimby and Ellison LLP","firm_invoice_number":"INV-2026-66622","invoice_date":"2026-05-26","billing_period_start":"2026-03-01","billing_period_end":"2026-03-31","firm_matter_reference":"55392-0002","po_number":"PO-4525109","fees_total":2893.5,"expenses_total":2555.86,"adjustments_total":0.0,"total_due":5449.36,"currency":"USD"},
+ "timekeepers":[{"name":"Emeka Thornbury","title":"Partner","rate":410.0,"billed_as":"Emeka Thornbury"},{"name":"Hannah Thornbury","title":"Paralegal","rate":95.0,"billed_as":"Hannah Thornbury"},{"name":"Louis Kowalczyk","title":"Associate","rate":185.0,"billed_as":"Louis Kowalczyk"},{"name":"Louis Wickham","title":"Associate","rate":240.0,"billed_as":"Louis Wickham"},{"name":"Priya Ramanathan","title":"Associate","rate":225.0,"billed_as":"Priya Ramanathan"},{"name":"Victor Kowalczyk","title":"Paralegal","rate":125.0,"billed_as":"Victor Kowalczyk"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2026-03-06","timekeeper":"Emeka Thornbury","timekeeper_name":"Emeka Thornbury","timekeeper_title":"Partner","title":"Partner","hours":1.5,"rate":410.0,"amount":615.0,"narrative":"Review expert qualifications and prior testimony for the warranty claim","codes":["L130","A104"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2026-03-03","timekeeper":"Hannah Thornbury","timekeeper_name":"Hannah Thornbury","timekeeper_title":"Paralegal","title":"Paralegal","hours":0.3,"rate":170.0,"amount":51.0,"narrative":"Review and organize incoming production from Northwind Logistics for matter file","codes":["L140","A104"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2026-03-30","timekeeper":"Hannah Thornbury","timekeeper_name":"Hannah Thornbury","timekeeper_title":"Paralegal","title":"Paralegal","hours":2.6,"rate":95.0,"amount":247.0,"narrative":"Research pleading standards applicable to the lease dispute","codes":["L210","A102"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2026-03-11","timekeeper":"Louis Kowalczyk","timekeeper_name":"Louis Kowalczyk","timekeeper_title":"Associate","title":"Associate","hours":2.2,"rate":185.0,"amount":407.0,"narrative":"Draft answer and affirmative defenses in the distribution agreement","codes":["L210","A103"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2026-03-17","timekeeper":"Louis Kowalczyk","timekeeper_name":"Louis Kowalczyk","timekeeper_title":"Associate","title":"Associate","hours":0.4,"rate":185.0,"amount":74.0,"narrative":"Prepare case assessment memorandum regarding the construction contract and recommended strategy","codes":["L120","A103"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2026-03-12","timekeeper":"Louis Wickham","timekeeper_name":"Louis Wickham","timekeeper_title":"Associate","title":"Associate","hours":1.4,"rate":240.0,"amount":336.0,"narrative":"Review and revise settlement proposal based on client comments","codes":["L210","A104"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2026-03-27","timekeeper":"Louis Wickham","timekeeper_name":"Louis Wickham","timekeeper_title":"Associate","title":"Associate","hours":2.3,"rate":240.0,"amount":552.0,"narrative":"Conference with client regarding settlement authority for the warranty claim","codes":["L160","A106"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2026-03-27","timekeeper":"Louis Wickham","timekeeper_name":"Louis Wickham","timekeeper_title":"Associate","title":"Associate","hours":0.9,"rate":240.0,"amount":216.0,"narrative":"Draft settlement term sheet for the warranty claim","codes":["L160","A103"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"fee","date":"2026-03-02","timekeeper":"Victor Kowalczyk","timekeeper_name":"Victor Kowalczyk","timekeeper_title":"Paralegal","title":"Paralegal","hours":0.2,"rate":165.0,"amount":33.0,"narrative":"Draft motion for preliminary injunction in the lease dispute","codes":["L220","A103"],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"fee","date":"2026-03-04","timekeeper":"Victor Kowalczyk","timekeeper_name":"Victor Kowalczyk","timekeeper_title":"Paralegal","title":"Paralegal","hours":2.9,"rate":125.0,"amount":362.5,"narrative":"Review documents.","codes":["L140","A110"],"page":2,"narrative_style":"vague"},
+  {"n":11,"line_type":"expense","date":"2026-03-23","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":2555.86,"amount":2555.86,"narrative":"Consulting expert fees","codes":["E119"],"page":2,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["902 Peachtree Way","Chicago","Tax ID 81-3692174"],"template":"T13","pages":2},
+ "rule_set_id":"RS-06",
+ "context":{"matter_open":"2025-07-10","matter_close":"2026-06-29","matter_budget":46797.0,"approved_timekeepers":["Victor Kowalczyk","Louis Wickham","Louis Kowalczyk","Hannah Thornbury","Cyrus Blackwood","Priya Ramanathan"],"invoice_received_date":"2026-05-27"},
+ "expected_findings":[
+  {"rule_id":"RS-06-R01","rule_type":"ApprovedTimekeeper","scope":"line","line_refs":[1],"consequence":"Reject"},
+  {"rule_id":"RS-06-R02","rule_type":"ApprovedRate","scope":"line","line_refs":[2],"consequence":"Reduce"},
+  {"rule_id":"RS-06-R02","rule_type":"ApprovedRate","scope":"line","line_refs":[9],"consequence":"Reduce"},
+  {"rule_id":"RS-06-R06","rule_type":"InvoiceAge","scope":"invoice","line_refs":[],"consequence":"Flag"},
+  {"rule_id":"RS-06-R11","rule_type":"AiObservation","scope":"line","line_refs":[10],"consequence":"Flag"}
+ ],
+ "seeded_violations":5
+}

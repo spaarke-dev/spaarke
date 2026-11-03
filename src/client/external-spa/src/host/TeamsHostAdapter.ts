@@ -37,6 +37,7 @@ import { setUserThemePreference } from '@spaarke/ui-components/utils/themeStorag
 import {
   acquireTeamsWorkforceBffToken,
   captureTeamsDeepLink,
+  getTeamsWorkforceGuestVerdict,
   getTeamsWorkforceMsalInstance,
   getTeamsWorkforceSignedInInstance,
   isTeamsGuestAccount,
@@ -354,9 +355,15 @@ class TeamsHostAdapter implements ITeamsHostAdapter {
    * A B2B guest of the Teams tenant cannot use this tab: NAA through `/{tid}` yields a guest token the customer BFF refuses
    * (401), and signing in again would reload into the same 401. Throws {@link TeamsGuestAccountError} BEFORE the BFF
    * acquirer is installed and before anything is fetched; main.tsx renders the guest screen. The account checked is the one
-   * the successful acquisition signed in (the signed-in instance's active account).
+   * the successful acquisition signed in: its verdict is taken from that token result ({@link getTeamsWorkforceGuestVerdict}),
+   * never from whichever account a shared cache holds. The cached account is read only if no verdict was recorded.
    */
   private assertNotGuest(cfg: TeamsWorkforceAuthConfig): void {
+    const verdict = getTeamsWorkforceGuestVerdict();
+    if (verdict) {
+      if (verdict.guest) throw new TeamsGuestAccountError(verdict.detail);
+      return;
+    }
     const instance = getTeamsWorkforceSignedInInstance();
     const account = instance?.getActiveAccount() ?? instance?.getAllAccounts()[0] ?? null;
     if (isTeamsGuestAccount(account, cfg.tenantId)) throw new TeamsGuestAccountError();

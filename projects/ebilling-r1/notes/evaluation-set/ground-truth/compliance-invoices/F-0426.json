@@ -1,0 +1,28 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0426",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0426","generator_id":"gen_eval_set.py@1 F-0426","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0426.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-06"},
+ "header":{"firm":"Hartwell & Vance LLP","firm_invoice_number":"INV-2026-89761","invoice_date":"2025-11-02","billing_period_start":"2025-10-01","billing_period_end":"2025-10-31","firm_matter_reference":"79447-0005","po_number":"PO-4562488","fees_total":3848.0,"expenses_total":939.23,"adjustments_total":0.0,"total_due":4787.23,"currency":"USD"},
+ "timekeepers":[{"name":"Anders Thornbury","title":"Partner","rate":380.0,"billed_as":"AT"},{"name":"Dalia Sandoval","title":"Associate","rate":205.0,"billed_as":"DS"},{"name":"Imani Santoro","title":"Paralegal","rate":110.0,"billed_as":"IS"},{"name":"Katya Brennan","title":"Associate","rate":215.0,"billed_as":"KB"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2025-10-07","timekeeper":"DS","timekeeper_name":"Dalia Sandoval","timekeeper_title":"Associate","title":"Assoc","hours":2.6,"rate":205.0,"amount":533.0,"narrative":"Review and analyze settlement proposal received from Orchard Row Brands","codes":["L310","A104"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2025-10-13","timekeeper":"KB","timekeeper_name":"Katya Brennan","timekeeper_title":"Associate","title":"Assoc","hours":2.9,"rate":215.0,"amount":623.5,"narrative":"Review court docket and calendar of pending deadlines for the vendor agreement","codes":["L190","A104"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2025-10-13","timekeeper":"AT","timekeeper_name":"Anders Thornbury","timekeeper_title":"Partner","title":"Ptr","hours":2.6,"rate":380.0,"amount":988.0,"narrative":"Review court docket and calendar of pending deadlines for the insurance coverage issue","codes":["L190","A104"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2025-10-14","timekeeper":"DS","timekeeper_name":"Dalia Sandoval","timekeeper_title":"Associate","title":"Assoc","hours":2.1,"rate":205.0,"amount":430.5,"narrative":"Review and summarize deposition transcript of Northwind Logistics witness","codes":["L330","A104"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2025-10-17","timekeeper":"IS","timekeeper_name":"Imani Santoro","timekeeper_title":"Paralegal","title":"Para","hours":0.8,"rate":110.0,"amount":88.0,"narrative":"Review and analyze motion to compel received from Larkspur Medical","codes":["L310","A104"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2025-10-20","timekeeper":"AT","timekeeper_name":"Anders Thornbury","timekeeper_title":"Partner","title":"Ptr","hours":2.4,"rate":380.0,"amount":912.0,"narrative":"Draft witness list in the vendor agreement","codes":["L250","A103"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2025-10-20","timekeeper":"IS","timekeeper_name":"Imani Santoro","timekeeper_title":"Paralegal","title":"Para","hours":1.7,"rate":110.0,"amount":187.0,"narrative":"Plan strategy for upcoming phase of the lease dispute with team","codes":["L120","A101"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2025-10-20","timekeeper":"KB","timekeeper_name":"Katya Brennan","timekeeper_title":"Associate","title":"Assoc","hours":0.1,"rate":215.0,"amount":21.5,"narrative":"Research case law supporting notice of deposition","codes":["L240","A102"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"fee","date":"2025-10-31","timekeeper":"KB","timekeeper_name":"Katya Brennan","timekeeper_title":"Associate","title":"Assoc","hours":0.3,"rate":215.0,"amount":64.5,"narrative":"Meet and confer with counsel for Harbor Point Capital regarding discovery dispute","codes":["L350","A107"],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"expense","date":"2025-10-10","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":836.28,"amount":836.28,"narrative":"Document hosting and processing vendor","codes":["E118"],"page":1,"narrative_style":"clear"},
+  {"n":11,"line_type":"expense","date":"2025-10-22","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":178.0,"rate":0.1,"amount":17.8,"narrative":"Photocopies - 178 pages","codes":["E101"],"page":1,"narrative_style":"clear"},
+  {"n":12,"line_type":"expense","date":"2025-10-31","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":655.0,"rate":0.13,"amount":85.15,"narrative":"Photocopies - 655 pages","codes":["E101"],"page":1,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["456 Union Square","Houston","Tax ID 23-3755161"],"template":"T17","pages":2},
+ "rule_set_id":"RS-06",
+ "context":{"matter_open":"2024-10-02","matter_close":"2026-01-29","matter_budget":44148.0,"approved_timekeepers":["Naomi Hargrove","Naomi Dunleavy","Anders Thornbury","Imani Santoro","Dalia Sandoval","Jordan Eriksen","Katya Brennan","Beatrix Sandoval"],"invoice_received_date":"2025-11-03"},
+ "expected_findings":[],
+ "seeded_violations":0
+}

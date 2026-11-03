@@ -2392,6 +2392,86 @@
         "dispatchAssertPhase": "P3",
         "activatedBy": "spaarkeai-assistant-enhancements-r2 task 022 (FR-B3/B5)"
       }
+    },
+    {
+      "caseId": "GU-142",
+      "family": "invoice-classify",
+      "ucId": "UC-D-3",
+      "channel": "event",
+      "utterance": "a Finance attachment reaches the AttachmentClassification job and its extracted text is classified as invoice / not invoice (ebilling-r1 task 042, FR-46)",
+      "notes": "FR-P2-08 full-catalog coverage for the ConsumerTypes.InvoiceClassify constant (added task 042). A Linear AI Consumer, same shape as GU-138 email-triage: invoked server-side by AttachmentClassificationJobHandler through IInvoiceAi.ClassifyAsync (the invoice-classify Action run through IActionRunner), never chat/loop-projected and never Click-dispatched (the Binding carries no tool description, surfaces or chips). Dedicated coverage (operand to prompt, output to DTO, fail-closed reason codes, Binding resolution) lives in tests/integration/seam/Finance/InvoiceAiActionSeamTests.cs and tests/integration/seam/Finance/AttachmentClassificationJobHandlerTests.cs, and the Action mirror contract in tests/integration/contract/Catalog/InvoiceClassifyActionContractTests.cs; this entry exists ONLY to satisfy P2LoopInjectionEvalSuiteTests.FullCatalog_EveryClosedCatalogConsumerType_HasAnEvalFamily's ConsumerTypes.All scan of this shared file.",
+      "context": { "surface": "finance-attachment-pipeline" },
+      "expected": {
+        "outcomeClass": "dispatch",
+        "consumerType": "invoice-classify",
+        "consumerCode": "default",
+        "catalogStatus": "existing"
+      },
+      "assertions": { "schemaConformance": null, "citationIntegrity": false },
+      "activation": {
+        "dispatchAssertPhase": "P3",
+        "activatedBy": "ebilling-r1 task 042 (FR-46)"
+      }
+    },
+    {
+      "caseId": "GU-143",
+      "family": "invoice-line-code",
+      "ucId": "UC-D-3",
+      "channel": "event",
+      "utterance": "the invoice submission pipeline codes the lines of an extracted invoice with UTBMS task, activity and expense codes from the invoice's resolved code set (ebilling-r1 task 047, FR-22)",
+      "notes": "FR-P2-08 full-catalog coverage for the ConsumerTypes.InvoiceLineCode constant (added task 047). A Linear AI Consumer, same shape as GU-142 invoice-classify: invoked server-side by LineCodingService through IInvoiceAi.CodeLinesAsync (the invoice-line-code Action run through IActionRunner), never chat/loop-projected and never Click-dispatched (the Binding carries no tool description, surfaces or chips). Dedicated coverage (operand to prompt, the closed code lists, output to DTO, the server-side out-of-set refusal, chunking) lives in tests/integration/seam/Finance/LineCodingSeamTests.cs, and the Action mirror contract in tests/integration/contract/Catalog/InvoiceLineCodeActionContractTests.cs; this entry exists ONLY to satisfy P2LoopInjectionEvalSuiteTests.FullCatalog_EveryClosedCatalogConsumerType_HasAnEvalFamily's ConsumerTypes.All scan of this shared file.",
+      "context": { "surface": "finance-invoice-pipeline" },
+      "expected": {
+        "outcomeClass": "dispatch",
+        "consumerType": "invoice-line-code",
+        "consumerCode": "default",
+        "catalogStatus": "existing"
+      },
+      "assertions": { "schemaConformance": null, "citationIntegrity": false },
+      "activation": {
+        "dispatchAssertPhase": "P3",
+        "activatedBy": "ebilling-r1 task 047 (FR-22)"
+      }
+    },
+    {
+      "caseId": "GU-144",
+      "family": "invoice-codeset-match",
+      "ucId": "UC-D-3",
+      "channel": "event",
+      "utterance": "an administrator lists the code-set mapping proposals and each unmapped matter type or practice area is matched to one of its pre-ranked code sets, or to none (ebilling-r1 task 054, FR-22, D-93)",
+      "notes": "FR-P2-08 full-catalog coverage for the ConsumerTypes.InvoiceCodeSetMatch constant (added task 054). A Linear AI Consumer, same shape as GU-143 invoice-line-code: invoked server-side by CodeSetProposalService through IInvoiceAi.MatchCodeSetAsync (the invoice-codeset-match Action run through IActionRunner), never chat/loop-projected and never Click-dispatched (the Binding carries no tool description, surfaces or chips). Dedicated coverage (operand to prompt, the closed candidate list, examples from confirmed mappings, the out-of-candidates refusal, the embedding fallback, none-fits) lives in tests/integration/seam/Finance/CodeSetMatchingSeamTests.cs, the Action mirror contract in tests/integration/contract/Catalog/InvoiceCodeSetMatchActionContractTests.cs and the 11-row live evaluation in tests/integration/seam/Finance/CodeSetMatchingLiveTests.cs; this entry exists ONLY to satisfy P2LoopInjectionEvalSuiteTests.FullCatalog_EveryClosedCatalogConsumerType_HasAnEvalFamily's ConsumerTypes.All scan of this shared file.",
+      "context": { "surface": "finance-code-set-mapping" },
+      "expected": {
+        "outcomeClass": "dispatch",
+        "consumerType": "invoice-codeset-match",
+        "consumerCode": "default",
+        "catalogStatus": "existing"
+      },
+      "assertions": { "schemaConformance": null, "citationIntegrity": false },
+      "activation": {
+        "dispatchAssertPhase": "P3",
+        "activatedBy": "ebilling-r1 task 054 (FR-22, D-93)"
+      }
+    },
+    {
+      "caseId": "GU-145",
+      "family": "billing-rule-draft",
+      "ucId": "UC-D-3",
+      "channel": "event",
+      "utterance": "an administrator uploads an outside counsel guideline as a rule set and the rule drafting job proposes billing rules from its text, each beside the clause it came from, and lists the text it could not convert (ebilling-r1 task 075, FR-27)",
+      "notes": "FR-P2-08 full-catalog coverage for the ConsumerTypes.BillingRuleDraft constant (added task 075). A Linear AI Consumer, same shape as GU-144 invoice-codeset-match: invoked server-side by BillingRuleDraftJobHandler through IInvoiceAi.DraftRulesAsync (the billing-rule-draft Action run through IActionRunner), never chat/loop-projected and never Click-dispatched (the Binding carries no tool description, surfaces or chips). Dedicated coverage (operand to prompt, the closed rule-type list, output to DTO, the per-rule ValidateForSave refusal and the not-converted list, idempotent re-delivery) lives in tests/integration/seam/Ai/PublicContracts/BillingRuleDraftSeamTests.cs and tests/unit/Sprk.Bff.Api.Tests/Services/Jobs/Handlers/BillingRuleDraftJobHandlerTests.cs, and the Action mirror contract in tests/integration/contract/Catalog/BillingRuleDraftActionContractTests.cs; this entry exists ONLY to satisfy P2LoopInjectionEvalSuiteTests.FullCatalog_EveryClosedCatalogConsumerType_HasAnEvalFamily's ConsumerTypes.All scan of this shared file.",
+      "context": { "surface": "finance-rule-drafting" },
+      "expected": {
+        "outcomeClass": "dispatch",
+        "consumerType": "billing-rule-draft",
+        "consumerCode": "default",
+        "catalogStatus": "existing"
+      },
+      "assertions": { "schemaConformance": null, "citationIntegrity": false },
+      "activation": {
+        "dispatchAssertPhase": "P3",
+        "activatedBy": "ebilling-r1 task 075 (FR-27)"
+      }
     }
   ]
 }

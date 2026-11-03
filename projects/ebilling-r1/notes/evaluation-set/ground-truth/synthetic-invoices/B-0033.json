@@ -1,0 +1,21 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"B-0033",
+ "set":"B",
+ "meta":{"title":"Synthetic invoice B-0033","generator_id":"gen_eval_set.py@1 B-0033","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/B-0033.pdf"},"spike":false,"label_method":"generator","profile":{"quality_mix":"sloppy","hour_increment":0.1,"code_mode_requested":"task_only"}},
+ "header":{"firm":"Tennant Dunmore PC","firm_invoice_number":"INV-2025-79967","invoice_date":"2025-10-01","billing_period_start":"2025-09-01","billing_period_end":"2025-09-30","firm_matter_reference":"94577-0024","po_number":null,"fees_total":4277.0,"expenses_total":0.0,"adjustments_total":-213.85,"total_due":4063.15,"currency":"USD"},
+ "timekeepers":[{"name":"Dmitri Quillen","title":"Associate","rate":500.0,"billed_as":"DQ"},{"name":"Helena Galbraith","title":"Associate","rate":465.0,"billed_as":"HG"},{"name":"Imani Oyelaran","title":"Legal Assistant","rate":200.0,"billed_as":"IO"},{"name":"Tomas Voss","title":"Partner","rate":810.0,"billed_as":"TV"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2025-09-02","timekeeper":"HG","timekeeper_name":"Helena Galbraith","timekeeper_title":"Associate","title":"Assoc","hours":3.0,"rate":465.0,"amount":1395.0,"narrative":"Research authority for protective order","codes":["L250"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2025-09-03","timekeeper":"IO","timekeeper_name":"Imani Oyelaran","timekeeper_title":"Legal Assistant","title":"LA","hours":2.3,"rate":200.0,"amount":460.0,"narrative":"Internal conference with Imani Oyelaran regarding strategy for the licensing dispute","codes":["L340"],"page":1,"narrative_style":"internal"},
+  {"n":3,"line_type":"fee","date":"2025-09-04","timekeeper":"TV","timekeeper_name":"Tomas Voss","timekeeper_title":"Partner","title":"Ptr","hours":0.2,"rate":810.0,"amount":162.0,"narrative":"Attention to file.","codes":["L330"],"page":1,"narrative_style":"vague"},
+  {"n":4,"line_type":"fee","date":"2025-09-05","timekeeper":"TV","timekeeper_name":"Tomas Voss","timekeeper_title":"Partner","title":"Ptr","hours":0.3,"rate":810.0,"amount":243.0,"narrative":"Meet and confer with counsel for Redstone Mining regarding discovery dispute","codes":["L350"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2025-09-05","timekeeper":"HG","timekeeper_name":"Helena Galbraith","timekeeper_title":"Associate","title":"Assoc","hours":2.9,"rate":465.0,"amount":1348.5,"narrative":"Internal conference with Helena Galbraith regarding strategy for the lease dispute","codes":["L320"],"page":1,"narrative_style":"internal"},
+  {"n":6,"line_type":"fee","date":"2025-09-09","timekeeper":"HG","timekeeper_name":"Helena Galbraith","timekeeper_title":"Associate","title":"Assoc","hours":0.9,"rate":465.0,"amount":418.5,"narrative":"Meet and confer with counsel for Summit Ridge Homes regarding discovery dispute","codes":["L350"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2025-09-11","timekeeper":"DQ","timekeeper_name":"Dmitri Quillen","timekeeper_title":"Associate","title":"Assoc","hours":0.5,"rate":500.0,"amount":250.0,"narrative":"Correspondence.","codes":["L240"],"page":1,"narrative_style":"vague"},
+  {"n":8,"line_type":"adjustment","date":null,"timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":null,"rate":null,"amount":-213.85,"narrative":"Courtesy discount","codes":[],"page":1,"narrative_style":"clear"}
+ ],
+ "intended_codes":{"1":["L250","A102"],"2":["L340","A105"],"3":["L330","A111"],"4":["L350","A107"],"5":["L320","A105"],"6":["L350","A107"],"7":["L240","A104"],"8":[]},
+ "document":{"letterhead":["168 Commerce Avenue","Denver","Tax ID 53-3425353"],"template":"T09","scan_noise":false,"scan":null,"bundled":false,"bundle":null,"timekeeper_source":"column","rate_source":"line","title_source":"legend","codes_printed":"full","grouping":"none","hours_format":"dec2","expenses_layout":"interleaved","page_total_rows":false,"summary_first":false,"orientation":"P","features":["adjustment_line","no_po"],"pages":1,"bundle_parts":[{"part":"invoice","pages":1}],"invoice_first_page":1,"invoice_pages":1}
+}

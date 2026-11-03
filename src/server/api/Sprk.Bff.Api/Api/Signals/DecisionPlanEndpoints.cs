@@ -294,7 +294,7 @@ public sealed record DecisionActionDto(
         new(a.Code, a.Label, a.WorkType, a.RecordClass.ToString(), isRecommended,
             a.Parameters.Select(p => new DecisionParameterDto(p.Code, p.Label, p.Kind.ToString(), p.Required, p.Hint, p.LookupEntity,
                 OptionsOf(p, parameterFacts), p.OptionsSource,
-                p.DefaultSource is not null && parameterFacts is not null && parameterFacts.DefaultsBySource.TryGetValue(p.DefaultSource, out var start) ? start : null,
+                p.DefaultSource is not null && parameterFacts is not null && parameterFacts.DefaultsBySource.TryGetValue(p.DefaultSource, out var start) ? start : p.DefaultValue,
                 p.NotBefore, p.MaxLength)).ToList(),
             a.EffectLines,
             a.Excludes,

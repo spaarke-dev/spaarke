@@ -1,0 +1,27 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0364",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0364","generator_id":"gen_eval_set.py@1 F-0364","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0364.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-04"},
+ "header":{"firm":"Kingsley and Ambrose LLP","firm_invoice_number":"INV-2026-07338","invoice_date":"2026-07-03","billing_period_start":"2026-06-01","billing_period_end":"2026-06-30","firm_matter_reference":"85304-0040","po_number":"PO-4526079","fees_total":4603.75,"expenses_total":430.0,"adjustments_total":0.0,"total_due":5033.75,"currency":"USD"},
+ "timekeepers":[{"name":"Aisha Nakamura","title":"Legal Assistant","rate":140.0,"billed_as":"Aisha Nakamura"},{"name":"Cyrus Mbeki","title":"Senior Associate","rate":435.0,"billed_as":"Cyrus Mbeki"},{"name":"Ivan Dunleavy","title":"Paralegal","rate":210.0,"billed_as":"Ivan Dunleavy"},{"name":"Naomi Halloran","title":"Partner","rate":545.0,"billed_as":"Naomi Halloran"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2026-06-08","timekeeper":"Aisha Nakamura","timekeeper_name":"Aisha Nakamura","timekeeper_title":"Legal Assistant","title":"LA","hours":1.75,"rate":140.0,"amount":245.0,"narrative":"Prepare production set and cover correspondence for service on Meridian Foods","codes":["L320","A110"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2026-06-05","timekeeper":"Cyrus Mbeki","timekeeper_name":"Cyrus Mbeki","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":1.75,"rate":435.0,"amount":761.25,"narrative":"Meet and confer with counsel for Quarry Lane Partners regarding discovery dispute","codes":["L350","A107"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2026-06-12","timekeeper":"Cyrus Mbeki","timekeeper_name":"Cyrus Mbeki","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":0.5,"rate":435.0,"amount":217.5,"narrative":"Research authority for interrogatory responses","codes":["L250","A102"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2026-06-17","timekeeper":"Cyrus Mbeki","timekeeper_name":"Cyrus Mbeki","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":1.0,"rate":435.0,"amount":435.0,"narrative":"Prepare monthly status report to client regarding the supply agreement","codes":["L190","A111"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2026-06-22","timekeeper":"Cyrus Mbeki","timekeeper_name":"Cyrus Mbeki","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":1.25,"rate":435.0,"amount":543.75,"narrative":"Review opposing brief in response to complaint","codes":["L240","A104"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2026-06-15","timekeeper":"Ivan Dunleavy","timekeeper_name":"Ivan Dunleavy","timekeeper_title":"Paralegal","title":"Para","hours":2.0,"rate":210.0,"amount":420.0,"narrative":"Draft motion to compel to Alder & Finch Ltd","codes":["L310","A103"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2026-06-26","timekeeper":"Ivan Dunleavy","timekeeper_name":"Ivan Dunleavy","timekeeper_title":"Paralegal","title":"Para","hours":1.0,"rate":210.0,"amount":210.0,"narrative":"Research case law supporting notice of deposition","codes":["L240","A102"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2026-06-10","timekeeper":"Naomi Halloran","timekeeper_name":"Naomi Halloran","timekeeper_title":"Partner","title":"Ptr","hours":0.75,"rate":545.0,"amount":408.75,"narrative":"Review expert report served by Larkspur Medical","codes":["L340","A104"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"fee","date":"2026-06-22","timekeeper":"Naomi Halloran","timekeeper_name":"Naomi Halloran","timekeeper_title":"Partner","title":"Ptr","hours":2.0,"rate":545.0,"amount":1090.0,"narrative":"Draft motion for summary judgment in the construction contract","codes":["L250","A103"],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"fee","date":"2026-06-30","timekeeper":"Naomi Halloran","timekeeper_name":"Naomi Halloran","timekeeper_title":"Partner","title":"Ptr","hours":0.5,"rate":545.0,"amount":272.5,"narrative":"Prepare outline for deposition of Meridian Foods witness","codes":["L330","A101"],"page":1,"narrative_style":"clear"},
+  {"n":11,"line_type":"expense","date":"2026-06-30","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":430.0,"amount":430.0,"narrative":"Document hosting and processing vendor","codes":["E118"],"page":1,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["159 Harbor Road","Houston","Tax ID 93-1435004"],"template":"T03","pages":2},
+ "rule_set_id":"RS-04",
+ "context":{"matter_open":"2025-04-21","matter_close":"2026-09-28","matter_budget":45135.0,"approved_timekeepers":["Cyrus Mbeki","Ivan Dunleavy","Naomi Halloran","Anders Rosenthal","Aisha Nakamura"],"invoice_received_date":"2026-07-15"},
+ "expected_findings":[],
+ "seeded_violations":0
+}

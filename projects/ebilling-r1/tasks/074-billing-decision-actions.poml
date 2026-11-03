@@ -1,0 +1,126 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="074" project="ebilling-r1">
+  <metadata>
+    <title>Billing actions in DecisionActionCatalog</title>
+    <phase>3 Rules (WP3) — wave W3-2</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Changes the ontology's closed action catalog and the append-only Decision Record path; FR-30 requires exactly one record per approve / reject / return / override (NFR-09 attribution).</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>The shipped writer shapes do not fit billing decisions as the spec assumes (see context); choosing an additive, ontology-acceptable entry is a design judgment with a cross-project reviewer.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P3-B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>070</deps>
+    <tags>bff, signals, coordination</tags>
+    <estimated-effort>2-3 days</estimated-effort>
+  </metadata>
+
+  <prompt>Add the billing decisions (line accept / reduce / disallow; invoice approve / reject / return; override) to DecisionActionCatalog, each with a PlanLane, record class and gate factors, and provide one Finance-side recorder that writes exactly one Decision Record per decision — human decisions through the commit-route writer, decisions without a human through the gate-style path — per owner decision D-75 (one record per line decision, subject the line), after the writer-shape gaps below are settled with ontology-r1.</prompt>
+
+  <role>SPAARKE platform developer. Expert in the ontology Decision Record writer, the closed action catalog and idempotent write design.</role>
+
+  <goal>Catalog entries for every billing action; a BillingDecisionRecorder (name directional) used by 100, 103, 104 and 105 that writes exactly one Decision Record per decision id, idempotent on retry; catalog and executor-completeness tests green; ontology-r1 review recorded.</goal>
+
+  <context>
+    <background>Spec FR-30 (acceptance: ontology-r1 review recorded; every approve / reject / return / override produces exactly one Decision Record), FR-19 and FR-37 (override writes a Decision Record), NFR-09, design.md section 9 "Billing actions" row, project CLAUDE.md open question F-9. Verified code (f292ad119):
+- Services/Signals/Actions/DecisionActionCatalog.cs: DecisionLane is only Decide / Do (:7-11); DecisionActionDefinition (:69-93) needs PlanLane (null means Next-step only), RecordClass and Gate (DecisionGateFactors — "the commit route refuses an action that does not" declare one); Declared array :133-280; Mutualize :289; TryGet :339.
+- Services/Signals/Actions/DecisionActionExecutors.cs:155-187: every executor code must be in the catalog, and tests/unit/domain/Signals/DecisionActionExecutorsTests.cs:942 asserts MissingCodes() is empty — adding catalog codes without executors breaks it.
+- Services/Signals/DecisionRecordWriter.cs: WriteAsync :405-425 takes the review-shaped DecisionRecordRequest (:86-109); Validate refuses PolicyVersionId empty (:1111), steps whose code is not a plan action with PlanLane set (:1140), a core outside CoreAncestorResolver.CoreRecordEntities (:1127). No idempotency on ReviewId. WriteGateDecisionAsync :452-500 is communications-specific: GateDecisionRecordRequest (:140-150) carries CommunicationId and the subject is hard-wired to sprk_communication (:465, :507); its only caller is Services/Communication/CommunicationRuleGate.cs:368.
+Gaps against the spec: an invoice approve with no findings has no policy version, so WriteAsync refuses it; the gate path cannot take an invoice or submission subject. Precedent: WriteGateDecisionAsync itself was added additively for ontology task 042 (projects/spaarke-ontology-platform-r1/tasks/142-decision-record-writer-contract.poml, 149-gate-decision-record-queue-idempotent.poml). Invoice / line subjects need 026 (sprk_regardinginvoiceline on sprk_decisionrecord).</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Signals/Actions/DecisionActionCatalog.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Signals/DecisionRecordWriter.cs (only the additive entry agreed with ontology-r1)</file>
+      <file role="new">src/server/api/Sprk.Bff.Api/Services/Finance/BillingDecisionRecorder.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/DI/FinanceModule.cs (shared append point)</file>
+      <file role="modify">tests/unit/domain/Signals/DecisionActionCatalogTests.cs</file>
+      <file role="modify">tests/unit/domain/Signals/DecisionActionExecutorsTests.cs</file>
+      <file role="new">tests/unit/Sprk.Bff.Api.Tests/Services/Finance/BillingDecisionRecorderTests.cs</file>
+      <file role="modify">tests/unit/Sprk.Bff.Api.Tests/Services/Signals/DecisionRecordWriterTests.cs (the additive writer entry)</file>
+      <file role="modify">tests/integration/seam/Signals/DecisionRecordWriterSeamTests.cs (one billing case)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="070" status="pending">Billing domain in the shared rules system</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="D-75">One Decision Record per line decision (subject sprk_regardinginvoiceline = the line) and one per invoice decision (subject the invoice), each through WriteAsync; the line record's core grouping comes from 026 / 013 (the line's own core lookup), never from the invoice. Send the writer-entry questions (policy-version requirement, communication-only gate subject) to ontology-r1 under root CLAUDE.md section 6.5 before coding the recorder; ontology-r1 reviews the PR.</constraint>
+    <constraint source="spec FR-30">Exactly one Decision Record per approve, reject, return and override; a retried call with the same decision id writes nothing new.</constraint>
+    <constraint source="project">No fake data to satisfy the writer: never pass a placeholder policy version id, a communication id or an invented core. If the shapes do not fit, the fix is an additive, ontology-reviewed writer entry.</constraint>
+    <constraint source="project">Billing codes are recorded by eBilling endpoints, not taken through the Signals commit route. The commit route must refuse a billing code fail-closed; never register a no-op executor to satisfy MissingCodes.</constraint>
+    <constraint source="project">Existing catalog entries, exclusions and writer behaviour unchanged (existing tests unmodified, except the MissingCodes assertion if ontology-r1 agrees a catalog flag excludes billing codes).</constraint>
+    <constraint source="ADR-010">Recorder registered in AddFinanceModule; concrete class.</constraint>
+    <constraint source=".claude/constraints/bff-extensions.md">BFF hygiene: publish-size delta, no new HIGH CVE, no package.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ebilling-r1/spec.md (FR-19, FR-30, FR-35 – FR-37, NFR-09)</file>
+      <file>projects/ebilling-r1/design.md (section 9)</file>
+      <file>projects/spaarke-ontology-platform-r1/tasks/142-decision-record-writer-contract.poml</file>
+      <file>projects/spaarke-ontology-platform-r1/tasks/149-gate-decision-record-queue-idempotent.poml</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Step-0 check: git merge-base --is-ancestor f292ad119 HEAD. Then resolve the escalations below BEFORE coding (F-9 and the writer shape). Record the answers in notes.</step>
+    <step order="1">Propose in notes, per action: code (kebab-case like existing codes), label, PlanLane, RecordClass, gate factors, ResolvesSignal (does deciding resolve the line's or invoice's open findings), parameters (amount, reason), mutual exclusions (accept / reduce / disallow on one line; approve / reject / return on one invoice).</step>
+    <step order="2">Add the agreed definitions to the catalog, plus the agreed mechanism that keeps billing codes out of the commit route.</step>
+    <step order="3">Implement the agreed writer entry (additive) and BillingDecisionRecorder: builds the request from a decision (decider, role, subject, core, reason, amounts, findings resolved), checks for an existing record by decision id before writing (idempotency), and records system decisions (rejected submission, automatic) without a confirmer.</step>
+    <step order="4">Tests: catalog membership and exclusions; commit route refuses a billing code; one record per decision; retry writes nothing new; override without reason refused; seam test writes one billing record in the dev seam harness.</step>
+    <step order="5">dotnet build and dotnet test green; publish-size delta and vulnerable-package check recorded.</step>
+    <step order="6">Request ontology-r1 review; record reviewer, date and outcome in notes.</step>
+    <step order="7">Update TASK-INDEX.md: this task's status cell to "✅ [done]".</step>
+    <step order="8">Record deviations in projects/ebilling-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>Owner decided D-75 (F-9): one Decision Record per line decision with the line record itself as subject, plus one per invoice decision (subject the invoice). Do not reach the line through the invoice or assume a line belongs to exactly one invoice (a future model may not be 1:N). Inform ontology-r1 of the shape before coding the recorder.</trigger>
+    <trigger>WriteAsync cannot record an invoice decision without a policy version, and WriteGateDecisionAsync accepts only a communication subject: STOP and present the additive writer entry (or generalisation) to ontology-r1 with the root CLAUDE.md section 6.5 path; do not edit the writer's validation in place.</trigger>
+    <trigger>If 026 has not landed (no invoice-line subject on sprk_decisionrecord), STOP before the recorder step and report.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>DecisionActionCatalog.cs (closed catalog) and DecisionRecordWriter.cs (WriteAsync, WriteGateDecisionAsync); no billing recorder exists (grep "DecisionRecordWriter" under Services/Finance finds none).</existing>
+    <extension>Catalog entries extend the existing closed set; the writer gets only an additive entry. The recorder is new because four eBilling tasks (100, 103, 104, 105) must build identical requests and idempotency checks; one owner prevents drift.</extension>
+    <cost-of-doing-nothing>Approve, reject, return and override produce no Decision Record or produce duplicates on retry, failing FR-30, FR-19, FR-37 and NFR-09.</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="dotnet">build, test</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Signals/Actions/DecisionActionCatalog.cs; Services/Signals/DecisionRecordWriter.cs (additive entry)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Finance/BillingDecisionRecorder.cs</output>
+    <output type="test">tests/unit/domain/Signals/DecisionActionCatalogTests.cs; tests/unit/Sprk.Bff.Api.Tests/Services/Finance/BillingDecisionRecorderTests.cs; tests/integration/seam/Signals/DecisionRecordWriterSeamTests.cs</output>
+    <output type="docs">projects/ebilling-r1/notes/074-billing-actions.md (F-9 answer, action table, review)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Every billing action exists in the catalog with a PlanLane, RecordClass and gate factors; mutual exclusions hold in both orders.</criterion>
+    <criterion testable="true">Each approve, reject, return and override call produces exactly one Decision Record; a second call with the same decision id writes none.</criterion>
+    <criterion testable="true">A billing code sent to the Signals commit route is refused; no no-op executor is registered; the executor-completeness test is green.</criterion>
+    <criterion testable="true">A system decision is recorded with no confirmer and an automated decider role; a human decision records the confirming user.</criterion>
+    <criterion testable="true">Override or reject without a reason is refused before any write.</criterion>
+    <criterion testable="true">Existing catalog, executor and writer tests green; dotnet build 0 errors.</criterion>
+    <criterion testable="true">Publish-size delta measured against a fresh master build and recorded in task notes; no new HIGH CVE.</criterion>
+    <criterion testable="true">F-9 answer and ontology-r1 review recorded in task notes.</criterion>
+    <criterion testable="true">Cover the stated contract plus the edge cases named above. Anything beyond that needs a one-line justification in task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>Parallel group P3-B with 071, 075, 076: this task alone edits DecisionActionCatalog.cs and DecisionRecordWriter.cs. FinanceModule.cs is a shared append point: re-read before editing, add only this task's line. Consumers: 100 (line decisions), 103 (approve), 104 (reject, return), 105 (override), 049 (automatic rejection if F-9 / ontology agree it is recorded).
+
+COMPLETION 2026-10-17 (FULL): part one (catalog billing set, action table, F-9 answer) as recorded in notes/074-billing-actions.md sections 1 to 7. Part two under owner decisions D-100 (section 6.5 path B) and D-101: additive DecisionRecordWriter.WriteBillingDecisionAsync + PreflightBillingDecision (cd44dbcca) and Services/Finance/BillingDecisionRecorder registered in AddFinanceModule (b8e8bba27); 0 lines removed from any pre-existing file against 62a1ec56b. Fix rounds: code-review F2, a system decision naming a deciding contact (df0f2a173); adversarial F1 transient core fault classed permanent, F2 same decision id with another billing code wrote a second record, K4 lookup timeout escaped raw (134e2738b). Conditions C1 to C7, their tests and the seeding proofs: notes section 8.2 and 8.3. Tests: writer and recorder billing set 68/68; unit filter 1,354/1,354; ArchTests 47/47 (earlier full ArchTests 1,160/1,160). Publish size +8,732 B for the task, 39.55 MB total; no package change, no HIGH CVE. ADR-010 ceiling (166) and route ledger (137) unchanged. Not done: the live seam test DecisionRecordWriterBillingSeamTests was not run (no live writes); DecisionRecordContextImmutabilityTests.CreateEntryPoints and two pre-existing writer comments are left for ontology-r1 (C7); the condition 2 reading awaits ontology-r1's confirmation; caller obligation for 049/100/103/104/105: record under per-invoice serialisation (notes 8.6 K1). TASK-INDEX.md and current-task.md not edited by this agent (main session).
+FIX ROUND 2026-10-18 (ontology-r1 adversarial pass; FULL; status stays in-progress for ontology-r1's re-check): F4-1 resolved Signals' subjects are owner-question parents via the reused DecisionCommitService.ToRow/SignalSubjectsOf, unknown policy version refused (5f80278c1, c80877139); F3-1 forged-row test carries sprk_actioncode (1b6878da2); K2 content hash in sprk_steps, same id+code with other content refused (2964ca548); K3 recorder looks up the decider's contact, BillingDecider.Human takes none (7b7b9b294); K4 lookup filters sprk_actioncode In billing codes (9e14285b7). Billing 83/83; unit filter 802/802; ArchTests 1,166/1,166; 0 lines removed from any 074 file vs 62a1ec56b. Adversarial pass pending - main session runs it. Notes section 8.7.
+rework: fix-round-3 task 074</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load the knowledge files first. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

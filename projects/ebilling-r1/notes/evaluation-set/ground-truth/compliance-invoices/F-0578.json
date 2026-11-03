@@ -1,0 +1,29 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0578",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0578","generator_id":"gen_eval_set.py@1 F-0578","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0578.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-02"},
+ "header":{"firm":"Lindenmeyer & Yardley LLP","firm_invoice_number":"INV-2025-97144","invoice_date":"2026-05-03","billing_period_start":"2026-04-01","billing_period_end":"2026-04-30","firm_matter_reference":"80329-0007","po_number":"PO-4574292","fees_total":2866.0,"expenses_total":1622.61,"adjustments_total":0.0,"total_due":4488.61,"currency":"USD"},
+ "timekeepers":[{"name":"Elena Nakamura","title":"Senior Associate","rate":360.0,"billed_as":"EN"},{"name":"Farah Ramanathan","title":"Paralegal","rate":140.0,"billed_as":"FR"},{"name":"Gideon Ramanathan","title":"Associate","rate":280.0,"billed_as":"GR"},{"name":"Mei Abernathy","title":"Paralegal","rate":140.0,"billed_as":"MA"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2026-04-06","timekeeper":"GR","timekeeper_name":"Gideon Ramanathan","timekeeper_title":"Associate","title":"Assoc","hours":0.7,"rate":280.0,"amount":196.0,"narrative":"Analyze exposure and damages model for the data incident","codes":["L120","A104"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2026-04-07","timekeeper":"EN","timekeeper_name":"Elena Nakamura","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":1.6,"rate":360.0,"amount":576.0,"narrative":"Attend case management conference in the lease dispute","codes":["L230","A109"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2026-04-09","timekeeper":"MA","timekeeper_name":"Mei Abernathy","timekeeper_title":"Paralegal","title":"Para","hours":1.0,"rate":140.0,"amount":140.0,"narrative":"Attend case management conference in the employment claim","codes":["L230","A109"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2026-04-15","timekeeper":"MA","timekeeper_name":"Mei Abernathy","timekeeper_title":"Paralegal","title":"Para","hours":2.0,"rate":140.0,"amount":280.0,"narrative":"Attend case management conference in the vendor agreement","codes":["L230","A109"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2026-04-22","timekeeper":"EN","timekeeper_name":"Elena Nakamura","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":2.0,"rate":360.0,"amount":720.0,"narrative":"Prepare monthly status report to client regarding the lease dispute","codes":["L190","A111"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2026-04-22","timekeeper":"MA","timekeeper_name":"Mei Abernathy","timekeeper_title":"Paralegal","title":"Para","hours":1.7,"rate":140.0,"amount":238.0,"narrative":"Update document review protocol and coding panel for the distribution agreement","codes":["L140","A110"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2026-04-23","timekeeper":"FR","timekeeper_name":"Farah Ramanathan","timekeeper_title":"Paralegal","title":"Para","hours":0.5,"rate":140.0,"amount":70.0,"narrative":"Conference with client regarding budget variance for the customs audit","codes":["L150","A106"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2026-04-30","timekeeper":"EN","timekeeper_name":"Elena Nakamura","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":1.6,"rate":360.0,"amount":576.0,"narrative":"Review and revise mediation statement based on client comments","codes":["L210","A104"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"fee","date":"2026-04-30","timekeeper":"FR","timekeeper_name":"Farah Ramanathan","timekeeper_title":"Paralegal","title":"Para","hours":0.5,"rate":140.0,"amount":70.0,"narrative":"Draft motion for preliminary injunction in the lease dispute","codes":["L220","A103"],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"expense","date":"2026-04-03","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":3.0,"rate":8.73,"amount":26.19,"narrative":"Postage - certified mail","codes":["E108"],"page":1,"narrative_style":"clear"},
+  {"n":11,"line_type":"expense","date":"2026-04-06","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":412.78,"amount":412.78,"narrative":"Airfare to Minneapolis for deposition","codes":["E110"],"page":1,"narrative_style":"clear"},
+  {"n":12,"line_type":"expense","date":"2026-04-10","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":726.28,"amount":726.28,"narrative":"Document hosting and processing vendor","codes":["E118"],"page":1,"narrative_style":"clear"},
+  {"n":13,"line_type":"expense","date":"2026-04-30","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":457.36,"amount":457.36,"narrative":"Document hosting and processing vendor","codes":["E118"],"page":1,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["302 Pine Street","Dallas","Tax ID 43-5057263"],"template":"T17","pages":2},
+ "rule_set_id":"RS-02",
+ "context":{"matter_open":"2025-04-07","matter_close":"2026-07-29","matter_budget":42954.0,"approved_timekeepers":["Gideon Ramanathan","Farah Ramanathan","Naomi Fairweather","Elena Nakamura","Sofia Castellanos","Beatrix Marchetti","Mei Abernathy"],"invoice_received_date":"2026-05-17"},
+ "expected_findings":[],
+ "seeded_violations":0
+}

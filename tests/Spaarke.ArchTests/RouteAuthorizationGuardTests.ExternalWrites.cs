@@ -70,6 +70,21 @@ public partial class RouteAuthorizationGuardTests
                 + "reaches it; a contact grantor's level is a grant (B-17), not membership.",
             ["POST /api/v1/external/contact-grants/revoke"] =
                 "unreachable by a systemuser (ContactGrantorAuthorizationFilter), as the grant route.",
+            ["POST /api/v1/external/matters/{id:guid}/invoice-submissions"] =
+                "unreachable by a systemuser: ExternalInvoiceSubmissionAuthorizationFilter refuses any principal with a SystemUserId "
+                + "(UseInternalRoute) before any read or write, and WithDataverseRightsAsync confirms only Dataverse-decided (systemuser) "
+                + "callers; a contact's submit rests on its composed post-veto Read+Create on the record, its conferring firm and the firm's "
+                + "link to the record (ebilling-r1 044/051), not membership.",
+            ["POST /api/v1/external/projects/{id:guid}/invoice-submissions"] =
+                "unreachable by a systemuser: ExternalInvoiceSubmissionAuthorizationFilter refuses any principal with a SystemUserId "
+                + "(UseInternalRoute) before any read or write, and WithDataverseRightsAsync confirms only Dataverse-decided (systemuser) "
+                + "callers; a contact's submit rests on its composed post-veto Read+Create on the record, its conferring firm and the firm's "
+                + "link to the record (ebilling-r1 044/051), not membership.",
+            ["POST /api/v1/external/workassignments/{id:guid}/invoice-submissions"] =
+                "unreachable by a systemuser: ExternalInvoiceSubmissionAuthorizationFilter refuses any principal with a SystemUserId "
+                + "(UseInternalRoute) before any read or write, and WithDataverseRightsAsync confirms only Dataverse-decided (systemuser) "
+                + "callers; a contact's submit rests on its composed post-veto Read+Create on the record, its conferring firm and the firm's "
+                + "link to the record (ebilling-r1 044/051), not membership.",
             ["POST /api/v1/external/api/dataverse/fetch"] =
                 "a READ: the module data query (FetchXML in the body, so POST), scoped to the caller's accessible set; it "
                 + "writes nothing (ExternalModuleDataEndpoints).",

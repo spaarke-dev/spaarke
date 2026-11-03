@@ -534,15 +534,38 @@ public sealed class CiamContactPrincipalStrategy : ICallerPrincipalStrategy
         // plane composition the workforce contact also uses. Nothing here reads a grant's level: the
         // evaluator decides which level counts (DirectAccessLevel on a Secure root) and which records
         // survive (deny list, then Restricted).
-        var reqCt = httpContext.RequestAborted;
-        var accessibleProjects = await _accessibleSet
-            .ComposeForCiamContactAsync(contactId, AccessibleRecordSetService.ProjectEntity, reqCt)
+        var principal = (await ComposeAsync(_accessibleSet, contactId, email, oid, httpContext.RequestAborted)
+            .ConfigureAwait(false)).Principal;
+
+        _logger.LogInformation(
+            "[EXT-AUTH] Contact {ContactId} authenticated (oid-resolved: {ByOid}) — accessible roots: {Projects} project / {Matters} matter / {Was} work-assignment",
+            contactId, !string.IsNullOrEmpty(oid), principal.ProjectAccess.Count,
+            principal.MatterAccess.Count, principal.WorkAssignmentAccess.Count);
+
+        return CallerPrincipalResolution.Resolved(principal);
+    }
+
+    /// <summary>
+    /// The CIAM contact's principal: the ONE contact-plane composition
+    /// (<see cref="IAccessibleRecordSetService.ComposeForCiamContactAsync"/>) of each grant root, its Read-bearing entries
+    /// mapped onto the principal. Shared with the Assign Task recipient gate (ontology task 168, fix round 2), which asks the
+    /// portal's events-list rule for a contact who is not the one signed in, so the two cannot build different principals.
+    /// <see cref="ContactPrincipalComposition.Capped"/>: a composition stopped at its ceiling, so the principal may lack a root
+    /// the contact holds. An evaluator fault propagates.
+    /// </summary>
+    internal static async Task<ContactPrincipalComposition> ComposeAsync(
+        IAccessibleRecordSetService accessibleSet, Guid contactId, string? email, string? oid, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(accessibleSet);
+
+        var accessibleProjects = await accessibleSet
+            .ComposeForCiamContactAsync(contactId, AccessibleRecordSetService.ProjectEntity, ct)
             .ConfigureAwait(false);
-        var accessibleMatters = await _accessibleSet
-            .ComposeForCiamContactAsync(contactId, AccessibleRecordSetService.MatterEntity, reqCt)
+        var accessibleMatters = await accessibleSet
+            .ComposeForCiamContactAsync(contactId, AccessibleRecordSetService.MatterEntity, ct)
             .ConfigureAwait(false);
-        var accessibleWorkAssignments = await _accessibleSet
-            .ComposeForCiamContactAsync(contactId, AccessibleRecordSetService.WorkAssignmentEntity, reqCt)
+        var accessibleWorkAssignments = await accessibleSet
+            .ComposeForCiamContactAsync(contactId, AccessibleRecordSetService.WorkAssignmentEntity, ct)
             .ConfigureAwait(false);
 
         // Per-record rights, straight from the evaluator — as WorkforcePrincipalStrategy does. Only entries
@@ -554,22 +577,19 @@ public sealed class CiamContactPrincipalStrategy : ICallerPrincipalStrategy
         var matterAccess = CallerPrincipal.FromReadBearing(accessibleMatters.Rights);
         var workAssignmentAccess = CallerPrincipal.FromReadBearing(accessibleWorkAssignments.Rights);
 
-        _logger.LogInformation(
-            "[EXT-AUTH] Contact {ContactId} authenticated (oid-resolved: {ByOid}) — accessible roots: {Projects} project / {Matters} matter / {Was} work-assignment",
-            contactId, !string.IsNullOrEmpty(oid), projectAccess.Count,
-            matterAccess.Count, workAssignmentAccess.Count);
-
-        return CallerPrincipalResolution.Resolved(new CallerPrincipal
-        {
-            Plane = CallerPrincipalPlane.CiamContact,
-            ContactId = contactId,
-            SystemUserId = null,
-            Email = email ?? string.Empty,
-            Oid = oid,
-            ProjectAccess = projectAccess,
-            MatterAccess = matterAccess,
-            WorkAssignmentAccess = workAssignmentAccess,
-        });
+        return new ContactPrincipalComposition(
+            new CallerPrincipal
+            {
+                Plane = CallerPrincipalPlane.CiamContact,
+                ContactId = contactId,
+                SystemUserId = null,
+                Email = email ?? string.Empty,
+                Oid = oid,
+                ProjectAccess = projectAccess,
+                MatterAccess = matterAccess,
+                WorkAssignmentAccess = workAssignmentAccess,
+            },
+            accessibleProjects, accessibleMatters, accessibleWorkAssignments);
     }
 
     /// <summary>
@@ -776,19 +796,43 @@ public sealed class WorkforcePrincipalStrategy : ICallerPrincipalStrategy
         }
 
         var principal = resolution.Principal!;
+        var composed = await ComposeAsync(
+                _accessibleSet, principal, WorkforcePrincipalResolver.ExtractTokenEmail(httpContext.User), httpContext.RequestAborted)
+            .ConfigureAwait(false);
+
+        _logger.LogInformation(
+            "[WF-AUTH] Workforce {Kind} (systemuser={SystemUserId}, contact={ContactId}) resolved with " +
+            "{Projects} project / {Matters} matter / {Was} work-assignment accessible roots (project sources: {Sources}).",
+            principal.Kind, principal.SystemUserId, principal.ContactId, composed.Principal.ProjectAccess.Count,
+            composed.Principal.MatterAccess.Count, composed.Principal.WorkAssignmentAccess.Count, composed.Projects.Sources);
+
+        return CallerPrincipalResolution.Resolved(composed.Principal);
+    }
+
+    /// <summary>
+    /// The workforce caller's principal: the three compositions of <see cref="IAccessibleRecordSetService.ComposeAsync"/>
+    /// (project, matter, work assignment, in that order), their Read-bearing entries mapped onto the principal. Lifted out of
+    /// <see cref="ResolveAsync"/> unchanged (ontology task 168, fix round 3) so the Assign Task recipient gate composes a
+    /// WorkforceHome contact's principal exactly as the portal does for that contact's ContactOnly sign-in (the two
+    /// derived-member terms included). <paramref name="email"/> is the token's (display only). An evaluator fault propagates.
+    /// </summary>
+    internal static async Task<ContactPrincipalComposition> ComposeAsync(
+        IAccessibleRecordSetService accessibleSet, WorkforcePrincipal principal, string? email, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(accessibleSet);
+        ArgumentNullException.ThrowIfNull(principal);
 
         // Compose the Tier-2 record scope (task 022, generalized to polymorphic roots by task 028) — the
         // SAME common accessible-record-set the workforce download gate uses, now composed for EACH root
         // type (project / matter / work assignment). This is what prevents a workforce caller from seeing
         // all records merely by authenticating (R2 NFR-08). Each set = membership/assignment ∪ own-contact
         // grants for that type.
-        var reqCt = httpContext.RequestAborted;
-        var accessibleProjects = await _accessibleSet
-            .ComposeAsync(principal, ProjectEntity, reqCt).ConfigureAwait(false);
-        var accessibleMatters = await _accessibleSet
-            .ComposeAsync(principal, MatterEntity, reqCt).ConfigureAwait(false);
-        var accessibleWorkAssignments = await _accessibleSet
-            .ComposeAsync(principal, WorkAssignmentEntity, reqCt).ConfigureAwait(false);
+        var accessibleProjects = await accessibleSet
+            .ComposeAsync(principal, ProjectEntity, ct).ConfigureAwait(false);
+        var accessibleMatters = await accessibleSet
+            .ComposeAsync(principal, MatterEntity, ct).ConfigureAwait(false);
+        var accessibleWorkAssignments = await accessibleSet
+            .ComposeAsync(principal, WorkAssignmentEntity, ct).ConfigureAwait(false);
 
         // Per-record rights, straight from the evaluator — no stamp, no per-plane default. Only entries
         // carrying Read reach the principal (task 136 · C2); until then this copied every key, a None-rights
@@ -799,19 +843,13 @@ public sealed class WorkforcePrincipalStrategy : ICallerPrincipalStrategy
         var matterAccess = CallerPrincipal.FromReadBearing(accessibleMatters.Rights);
         var workAssignmentAccess = CallerPrincipal.FromReadBearing(accessibleWorkAssignments.Rights);
 
-        _logger.LogInformation(
-            "[WF-AUTH] Workforce {Kind} (systemuser={SystemUserId}, contact={ContactId}) resolved with " +
-            "{Projects} project / {Matters} matter / {Was} work-assignment accessible roots (project sources: {Sources}).",
-            principal.Kind, principal.SystemUserId, principal.ContactId, projectAccess.Count,
-            matterAccess.Count, workAssignmentAccess.Count, accessibleProjects.Sources);
-
-        return CallerPrincipalResolution.Resolved(new CallerPrincipal
+        return new ContactPrincipalComposition(new CallerPrincipal
         {
             Plane = CallerPrincipalPlane.Workforce,
             ContactId = principal.ContactId ?? Guid.Empty,
             SystemUserId = principal.SystemUserId,
             ContactUnreadable = principal.ContactUnreadable,
-            Email = WorkforcePrincipalResolver.ExtractTokenEmail(httpContext.User) ?? string.Empty,
+            Email = email ?? string.Empty,
             Oid = principal.Oid,
             ProjectAccess = projectAccess,
             MatterAccess = matterAccess,
@@ -834,6 +872,27 @@ public sealed class WorkforcePrincipalStrategy : ICallerPrincipalStrategy
                 .Where(set => set.Capped)
                 .Select(set => set.EntityType)
                 .ToHashSet(StringComparer.OrdinalIgnoreCase),
-        });
+        }, accessibleProjects, accessibleMatters, accessibleWorkAssignments);
     }
+}
+
+/// <summary>
+/// What <see cref="CiamContactPrincipalStrategy.ComposeAsync"/> or <see cref="WorkforcePrincipalStrategy.ComposeAsync"/>
+/// composed: the principal, and the three sets it was mapped from.
+/// </summary>
+internal sealed record ContactPrincipalComposition(
+    CallerPrincipal Principal, AccessibleRecordSet Projects, AccessibleRecordSet Matters, AccessibleRecordSet WorkAssignments)
+{
+    /// <summary>Any of the three compositions stopped at its ceiling (<see cref="AccessibleRecordSet.Capped"/>): the principal
+    /// may lack a root.</summary>
+    public bool Capped => Projects.Capped || Matters.Capped || WorkAssignments.Capped;
+
+    /// <summary>The set composed for <paramref name="entityType"/> (project, matter or work assignment); null for any other.</summary>
+    public AccessibleRecordSet? SetFor(string entityType) => entityType switch
+    {
+        AccessibleRecordSetService.ProjectEntity => Projects,
+        AccessibleRecordSetService.MatterEntity => Matters,
+        AccessibleRecordSetService.WorkAssignmentEntity => WorkAssignments,
+        _ => null,
+    };
 }

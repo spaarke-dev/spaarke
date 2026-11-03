@@ -1,0 +1,36 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0097",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0097","generator_id":"gen_eval_set.py@1 F-0097","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0097.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-01"},
+ "header":{"firm":"Holloway & Cranmer LLP","firm_invoice_number":"INV-2025-91459","invoice_date":"2025-12-12","billing_period_start":"2025-09-01","billing_period_end":"2025-09-30","firm_matter_reference":"31023-0014","po_number":"PO-4510376","fees_total":11402.0,"expenses_total":1745.23,"adjustments_total":0.0,"total_due":13147.23,"currency":"USD"},
+ "timekeepers":[{"name":"Emeka Galbraith","title":"Associate","rate":495.0,"billed_as":"E. Galbraith"},{"name":"Hannah Nwosu","title":"Senior Associate","rate":650.0,"billed_as":"H. Nwosu"},{"name":"Helena Oyelaran","title":"Partner","rate":885.0,"billed_as":"H. Oyelaran"},{"name":"Imani Nakamura","title":"Partner","rate":935.0,"billed_as":"I. Nakamura"},{"name":"Ingrid Eriksen","title":"Paralegal","rate":290.0,"billed_as":"I. Eriksen"},{"name":"Samuel Nwosu","title":"Of Counsel","rate":830.0,"billed_as":"S. Nwosu"},{"name":"Yusuf Tavares","title":"Associate","rate":480.0,"billed_as":"Y. Tavares"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2025-09-24","timekeeper":"E. Galbraith","timekeeper_name":"Emeka Galbraith","timekeeper_title":"Associate","title":"Assoc","hours":0.1,"rate":495.0,"amount":49.5,"narrative":"Review expert report served by Solano Freight","codes":["L340","A104"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2025-09-24","timekeeper":"E. Galbraith","timekeeper_name":"Emeka Galbraith","timekeeper_title":"Associate","title":"Assoc","hours":2.1,"rate":495.0,"amount":1039.5,"narrative":"Conference with client expert regarding rebuttal report","codes":["L340","A106"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2025-09-01","timekeeper":"H. Nwosu","timekeeper_name":"Hannah Nwosu","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":2.0,"rate":650.0,"amount":1300.0,"narrative":"Draft interrogatory responses to Harbor Point Capital","codes":["L310","A103"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2025-09-12","timekeeper":"H. Nwosu","timekeeper_name":"Hannah Nwosu","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":2.0,"rate":650.0,"amount":1300.0,"narrative":"Review and respond to emails.","codes":["L140","A110"],"page":1,"narrative_style":"vague"},
+  {"n":5,"line_type":"fee","date":"2025-09-17","timekeeper":"H. Oyelaran","timekeeper_name":"Helena Oyelaran","timekeeper_title":"Partner","title":"Ptr","hours":2.8,"rate":885.0,"amount":2478.0,"narrative":"Review court docket and calendar of pending deadlines for the insurance coverage issue","codes":["L190","A104"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2025-09-25","timekeeper":"H. Oyelaran","timekeeper_name":"Helena Oyelaran","timekeeper_title":"Partner","title":"Ptr","hours":0.6,"rate":885.0,"amount":531.0,"narrative":"Analyze key documents for deposition preparation","codes":["L320","A104"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2025-09-09","timekeeper":"I. Nakamura","timekeeper_name":"Imani Nakamura","timekeeper_title":"Partner","title":"Ptr","hours":1.9,"rate":935.0,"amount":1776.5,"narrative":"Review privilege log entries before service","codes":["L140","A104"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2025-09-24","timekeeper":"I. Nakamura","timekeeper_name":"Imani Nakamura","timekeeper_title":"Partner","title":"Ptr","hours":0.3,"rate":935.0,"amount":280.5,"narrative":"Review opposing brief in response to mediation statement","codes":["L240","A104"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"fee","date":"2025-09-17","timekeeper":"I. Eriksen","timekeeper_name":"Ingrid Eriksen","timekeeper_title":"Paralegal","title":"Para","hours":2.2,"rate":290.0,"amount":638.0,"narrative":"Draft exhibit list in the data incident","codes":["L250","A103"],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"fee","date":"2025-09-30","timekeeper":"S. Nwosu","timekeeper_name":"Samuel Nwosu","timekeeper_title":"Of Counsel","title":"O/C","hours":1.9,"rate":830.0,"amount":1577.0,"narrative":"Review documents produced by Tidewater Retail for responsiveness","codes":["L320","A104"],"page":1,"narrative_style":"clear"},
+  {"n":11,"line_type":"fee","date":"2025-09-22","timekeeper":"Y. Tavares","timekeeper_name":"Yusuf Tavares","timekeeper_title":"Associate","title":"Assoc","hours":0.7,"rate":480.0,"amount":336.0,"narrative":"Draft reply brief in the supply agreement","codes":["L250","A103"],"page":1,"narrative_style":"clear"},
+  {"n":12,"line_type":"fee","date":"2025-09-29","timekeeper":"Y. Tavares","timekeeper_name":"Yusuf Tavares","timekeeper_title":"Associate","title":"Assoc","hours":0.2,"rate":480.0,"amount":96.0,"narrative":"Prepare outline for deposition of Alder & Finch Ltd witness","codes":["L330","A101"],"page":1,"narrative_style":"clear"},
+  {"n":13,"line_type":"expense","date":"2025-09-01","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":599.0,"rate":0.31,"amount":185.69,"narrative":"Photocopies - 599 pages","codes":["E101"],"page":2,"narrative_style":"clear"},
+  {"n":14,"line_type":"expense","date":"2025-09-04","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":884.27,"amount":884.27,"narrative":"Court reporter and transcript - deposition","codes":["E115"],"page":2,"narrative_style":"clear"},
+  {"n":15,"line_type":"expense","date":"2025-09-15","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":655.05,"amount":655.05,"narrative":"Airfare to Portland for deposition","codes":["E110"],"page":2,"narrative_style":"clear"},
+  {"n":16,"line_type":"expense","date":"2025-09-30","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":3.0,"rate":6.74,"amount":20.22,"narrative":"Postage - certified mail","codes":["E108"],"page":2,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["227 Elm Court","Seattle","Tax ID 76-6710125"],"template":"T16","pages":2},
+ "rule_set_id":"RS-01",
+ "context":{"matter_open":"2025-02-12","matter_close":"2025-12-29","matter_budget":77588.0,"approved_timekeepers":["Yusuf Tavares","Ingrid Eriksen","Imani Nakamura","Samuel Nwosu","Emeka Galbraith","Hannah Nwosu","Helena Oyelaran"],"invoice_received_date":"2025-12-13"},
+ "expected_findings":[
+  {"rule_id":"RS-01-R02","rule_type":"AiObservation","scope":"line","line_refs":[4],"consequence":"Flag"},
+  {"rule_id":"RS-01-R05","rule_type":"ExpenseRule","scope":"line","line_refs":[13],"consequence":"Reduce"},
+  {"rule_id":"RS-01-R06","rule_type":"InvoiceAge","scope":"invoice","line_refs":[],"consequence":"Flag"}
+ ],
+ "seeded_violations":3
+}

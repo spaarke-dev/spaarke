@@ -1,0 +1,35 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0132",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0132","generator_id":"gen_eval_set.py@1 F-0132","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0132.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-06"},
+ "header":{"firm":"Pryce and Yardley LLP","firm_invoice_number":"INV-2025-23093","invoice_date":"2025-05-01","billing_period_start":"2025-04-01","billing_period_end":"2025-04-30","firm_matter_reference":"80369-0007","po_number":"PO-4576983","fees_total":5079.5,"expenses_total":5591.56,"adjustments_total":0.0,"total_due":10671.06,"currency":"USD"},
+ "timekeepers":[{"name":"Dalia Lockhart","title":"Associate","rate":195.0,"billed_as":"DL"},{"name":"Dmitri Carmichael","title":"Paralegal","rate":115.0,"billed_as":"DC"},{"name":"Dmitri Tavares","title":"Senior Associate","rate":245.0,"billed_as":"DT"},{"name":"Farah Galbraith","title":"Partner","rate":405.0,"billed_as":"FG"},{"name":"Hannah Ashdown","title":"Partner","rate":345.0,"billed_as":"HA"},{"name":"Hannah Lockhart","title":"Associate","rate":220.0,"billed_as":"HL"},{"name":"Hector Nakamura","title":"Paralegal","rate":95.0,"billed_as":"HN"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2025-04-02","timekeeper":"HN","timekeeper_name":"Hector Nakamura","timekeeper_title":"Paralegal","title":"Para","hours":0.2,"rate":95.0,"amount":19.0,"narrative":"Prepare for case management conference in the insurance coverage issue","codes":["L230","A101"],"page":2,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2025-04-04","timekeeper":"DL","timekeeper_name":"Dalia Lockhart","timekeeper_title":"Associate","title":"Assoc","hours":2.7,"rate":195.0,"amount":526.5,"narrative":"Review court docket and calendar of pending deadlines for the insurance coverage issue","codes":[],"page":2,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2025-04-09","timekeeper":"HA","timekeeper_name":"Hannah Ashdown","timekeeper_title":"Partner","title":"Ptr","hours":1.9,"rate":610.0,"amount":1159.0,"narrative":"Review court docket and calendar of pending deadlines for the data incident","codes":["L190","A104"],"page":2,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2025-04-14","timekeeper":"DC","timekeeper_name":"Dmitri Carmichael","timekeeper_title":"Paralegal","title":"Para","hours":2.1,"rate":115.0,"amount":241.5,"narrative":"Telephone conference with client representative regarding factual background of the regulatory inquiry","codes":["L110","A106"],"page":2,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2025-04-17","timekeeper":"FG","timekeeper_name":"Farah Galbraith","timekeeper_title":"Partner","title":"Ptr","hours":1.7,"rate":405.0,"amount":688.5,"narrative":"Review expert qualifications and prior testimony for the customs audit","codes":[],"page":2,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2025-04-18","timekeeper":"DT","timekeeper_name":"Dmitri Tavares","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":2.9,"rate":245.0,"amount":710.5,"narrative":"Draft settlement term sheet for the licensing dispute","codes":["L160","A103"],"page":2,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2025-04-21","timekeeper":"DT","timekeeper_name":"Dmitri Tavares","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":2.6,"rate":245.0,"amount":637.0,"narrative":"Review and organize incoming production from Tidewater Retail for matter file","codes":["L140","A104"],"page":2,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2025-04-25","timekeeper":"DL","timekeeper_name":"Dalia Lockhart","timekeeper_title":"Associate","title":"Assoc","hours":2.4,"rate":195.0,"amount":468.0,"narrative":"Telephone conference with opposing counsel regarding settlement terms","codes":["L160","A107"],"page":2,"narrative_style":"clear"},
+  {"n":9,"line_type":"fee","date":"2025-04-25","timekeeper":"HL","timekeeper_name":"Hannah Lockhart","timekeeper_title":"Associate","title":"Assoc","hours":1.0,"rate":220.0,"amount":220.0,"narrative":"Draft motion for preliminary injunction in the employment claim","codes":[],"page":2,"narrative_style":"clear"},
+  {"n":10,"line_type":"fee","date":"2025-04-28","timekeeper":"DL","timekeeper_name":"Dalia Lockhart","timekeeper_title":"Associate","title":"Assoc","hours":2.1,"rate":195.0,"amount":409.5,"narrative":"Attend case management conference in the data incident","codes":["L230","A109"],"page":2,"narrative_style":"clear"},
+  {"n":11,"line_type":"expense","date":"2025-04-14","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":22.44,"amount":22.44,"narrative":"Overnight courier to Pacifica Telecom counsel","codes":["E107"],"page":2,"narrative_style":"clear"},
+  {"n":12,"line_type":"expense","date":"2025-04-22","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":932.04,"amount":932.04,"narrative":"Document hosting and processing vendor","codes":["E118"],"page":2,"narrative_style":"clear"},
+  {"n":13,"line_type":"expense","date":"2025-04-29","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":4637.08,"amount":4637.08,"narrative":"Consulting expert fees","codes":["E119"],"page":2,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["409 Elm Court","Portland","Tax ID 35-8192929"],"template":"T21","pages":2},
+ "rule_set_id":"RS-06",
+ "context":{"matter_open":"2024-05-14","matter_close":"2025-07-29","matter_budget":67684.0,"approved_timekeepers":["Hannah Lockhart","Daniel Santoro","Farah Galbraith","Dmitri Tavares","Hannah Ashdown","Dalia Lockhart","Dmitri Carmichael","Gregory Ramanathan"],"invoice_received_date":"2025-05-11"},
+ "expected_findings":[
+  {"rule_id":"RS-06-R01","rule_type":"ApprovedTimekeeper","scope":"line","line_refs":[1],"consequence":"Reject"},
+  {"rule_id":"RS-06-R02","rule_type":"ApprovedRate","scope":"line","line_refs":[3],"consequence":"Reduce"},
+  {"rule_id":"RS-06-R10","rule_type":"RequiredData","scope":"line","line_refs":[2],"consequence":"Reject"},
+  {"rule_id":"RS-06-R10","rule_type":"RequiredData","scope":"line","line_refs":[5],"consequence":"Reject"},
+  {"rule_id":"RS-06-R10","rule_type":"RequiredData","scope":"line","line_refs":[9],"consequence":"Reject"}
+ ],
+ "seeded_violations":5
+}

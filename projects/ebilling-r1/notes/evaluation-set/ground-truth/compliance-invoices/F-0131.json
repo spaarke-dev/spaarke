@@ -1,0 +1,28 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0131",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0131","generator_id":"gen_eval_set.py@1 F-0131","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0131.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-05"},
+ "header":{"firm":"Kingsley & Dunmore LLP","firm_invoice_number":"INV-2026-87930","invoice_date":"2026-08-01","billing_period_start":"2026-07-01","billing_period_end":"2026-07-31","firm_matter_reference":"51999-0004","po_number":"PO-4567597","fees_total":2048.5,"expenses_total":7.09,"adjustments_total":0.0,"total_due":2055.59,"currency":"USD"},
+ "timekeepers":[{"name":"Cyrus Brennan","title":"Legal Assistant","rate":110.0,"billed_as":"Cyrus Brennan"},{"name":"Hector Wickham","title":"Paralegal","rate":155.0,"billed_as":"Hector Wickham"},{"name":"Samuel Eriksen","title":"Associate","rate":265.0,"billed_as":"Samuel Eriksen"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2026-07-27","timekeeper":"Cyrus Brennan","timekeeper_name":"Cyrus Brennan","timekeeper_title":"Legal Assistant","title":"Legal Assistant","hours":2.4,"rate":110.0,"amount":264.0,"narrative":"Prepare for hearing.","codes":["L420","A101"],"page":1,"narrative_style":"vague"},
+  {"n":2,"line_type":"fee","date":"2026-07-29","timekeeper":"Hector Wickham","timekeeper_name":"Hector Wickham","timekeeper_title":"Paralegal","title":"Paralegal","hours":3.0,"rate":155.0,"amount":465.0,"narrative":"Prepare trial notebook and demonstrative exhibits for the customs audit","codes":["L440","A101"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2026-07-30","timekeeper":"Hector Wickham","timekeeper_name":"Hector Wickham","timekeeper_title":"Paralegal","title":"Paralegal","hours":2.7,"rate":155.0,"amount":418.5,"narrative":"Attend hearing on reply brief in the employment claim","codes":["L450","A109"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2026-04-08","timekeeper":"Samuel Eriksen","timekeeper_name":"Samuel Eriksen","timekeeper_title":"Associate","title":"Associate","hours":0.5,"rate":265.0,"amount":132.5,"narrative":"Plan strategy for upcoming phase of the lease dispute with team","codes":["L120","A101"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2026-07-01","timekeeper":"Samuel Eriksen","timekeeper_name":"Samuel Eriksen","timekeeper_title":"Associate","title":"Associate","hours":1.2,"rate":265.0,"amount":318.0,"narrative":"Review draft expert disclosure for the data incident","codes":[],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2026-07-06","timekeeper":"Samuel Eriksen","timekeeper_name":"Samuel Eriksen","timekeeper_title":"Associate","title":"Associate","hours":0.6,"rate":265.0,"amount":159.0,"narrative":"Revise pretrial brief after review by lead counsel","codes":["L430","A104"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2026-07-31","timekeeper":"Samuel Eriksen","timekeeper_name":"Samuel Eriksen","timekeeper_title":"Associate","title":"Associate","hours":1.1,"rate":265.0,"amount":291.5,"narrative":"Draft requests for production for trial in the customs audit","codes":["L430","A103"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"expense","date":"2026-07-20","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":7.09,"amount":7.09,"narrative":"Postage - certified mail","codes":["E108"],"page":1,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["970 Harbor Road","Atlanta","Tax ID 63-5990407"],"template":"T13","pages":2},
+ "rule_set_id":"RS-05",
+ "context":{"matter_open":"2025-02-18","matter_close":"2026-10-29","matter_budget":33222.0,"approved_timekeepers":["Naomi Galbraith","Oliver Castellanos","Beatrix Okafor","Aisha Voss","Samuel Eriksen","Cyrus Brennan","Hector Wickham"],"invoice_received_date":"2026-08-20"},
+ "expected_findings":[
+  {"rule_id":"RS-05-R03","rule_type":"AiObservation","scope":"line","line_refs":[1],"consequence":"Reduce"},
+  {"rule_id":"RS-05-R07","rule_type":"RequiredData","scope":"line","line_refs":[5],"consequence":"Reject"},
+  {"rule_id":"RS-05-R08","rule_type":"InvoiceAge","scope":"line","line_refs":[4],"consequence":"Disallow"}
+ ],
+ "seeded_violations":3
+}

@@ -37,7 +37,7 @@ public class CreateDocumentRequest
 
     /// <summary>
     /// OPTIONAL caller-supplied primary key for the new <c>sprk_document</c>. When null (every caller except
-    /// the Office document-create save path) Dataverse mints the id exactly as before.
+    /// the Office document-create save path and the invoice submission intake) Dataverse mints the id exactly as before.
     /// </summary>
     /// <remarks>
     /// <para><b>Why a shared contract gained this</b> (FR-02, spaarkeai-word-add-in-r1 task 014). The Office
@@ -54,8 +54,9 @@ public class CreateDocumentRequest
     /// a performance note, not a correctness one.</para>
     /// <para>🔒 <b>Never bound from a request body</b> (<see cref="JsonIgnoreAttribute"/>), for the same reason as
     /// <see cref="OwningTeamId"/>: <c>POST /api/v1/documents</c> binds this class directly, and a client-chosen primary
-    /// key lets a caller probe for, or collide with, the id of a row it cannot see. Only the Office save path sets
-    /// it, in server code (task 080 found both properties bindable; neither was intended as a wire field).</para>
+    /// key lets a caller probe for, or collide with, the id of a row it cannot see. Only server code sets
+    /// it: the Office save path, and the invoice submission intake (ebilling-r1 task 044, so a create whose reply is lost is
+    /// still deleted by its id) (task 080 found both properties bindable; neither was intended as a wire field).</para>
     /// </remarks>
     [JsonIgnore]
     public Guid? Id { get; set; }
@@ -100,6 +101,17 @@ public class CreateDocumentRequest
     /// </summary>
     [JsonIgnore]
     public string? AccessInheritanceRecord { get; set; }
+
+    /// <summary>
+    /// ebilling-r1 task 095 (procedure-and-file-model.md 9.1): the invoice-submission marker
+    /// (<c>sprk_restrictedbysubmission</c>, task 088), written IN the create of an <c>.eml</c> Document the Outlook add-in's
+    /// Submit Invoice (<c>POST /api/finance/invoice-submissions/from-email</c>) saves. Set only together with an own
+    /// <see cref="AccessPermission"/> and its <see cref="AccessInheritanceRecord"/> (the submission's own Restricted narrowing);
+    /// the create refuses a marker without them. Written in no update payload (<c>SubmissionMarkerWriterGuardTests</c>).
+    /// 🔒 Never bound from a request body, as <see cref="OwningTeamId"/>.
+    /// </summary>
+    [JsonIgnore]
+    public bool RestrictedBySubmission { get; set; }
 }
 
 /// <summary>

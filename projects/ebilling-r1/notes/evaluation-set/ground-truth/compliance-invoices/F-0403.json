@@ -1,0 +1,26 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0403",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0403","generator_id":"gen_eval_set.py@1 F-0403","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0403.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-01"},
+ "header":{"firm":"Northcott Ambrose PC","firm_invoice_number":"INV-2026-65930","invoice_date":"2025-11-02","billing_period_start":"2025-10-01","billing_period_end":"2025-10-31","firm_matter_reference":"49932-0036","po_number":"PO-4572715","fees_total":3746.0,"expenses_total":1900.68,"adjustments_total":0.0,"total_due":5646.68,"currency":"USD"},
+ "timekeepers":[{"name":"Gideon Santoro","title":"Associate","rate":280.0,"billed_as":"GS"},{"name":"Helena Zielinski","title":"Associate","rate":310.0,"billed_as":"HZ"},{"name":"Sofia Fairweather","title":"Paralegal","rate":170.0,"billed_as":"SF"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2025-10-03","timekeeper":"GS","timekeeper_name":"Gideon Santoro","timekeeper_title":"Associate","title":"Assoc","hours":1.2,"rate":280.0,"amount":336.0,"narrative":"Telephone conference with client regarding selection of expert for the distribution agreement","codes":["L130","A106"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2025-10-08","timekeeper":"HZ","timekeeper_name":"Helena Zielinski","timekeeper_title":"Associate","title":"Assoc","hours":0.3,"rate":310.0,"amount":93.0,"narrative":"Review privilege log entries before service","codes":["L140","A104"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2025-10-09","timekeeper":"GS","timekeeper_name":"Gideon Santoro","timekeeper_title":"Associate","title":"Assoc","hours":2.5,"rate":280.0,"amount":700.0,"narrative":"Attend case management conference in the insurance coverage issue","codes":["L230","A109"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2025-10-16","timekeeper":"GS","timekeeper_name":"Gideon Santoro","timekeeper_title":"Associate","title":"Assoc","hours":1.6,"rate":280.0,"amount":448.0,"narrative":"Review and revise exhibit list based on client comments","codes":["L210","A104"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2025-10-20","timekeeper":"SF","timekeeper_name":"Sofia Fairweather","timekeeper_title":"Paralegal","title":"Para","hours":2.8,"rate":170.0,"amount":476.0,"narrative":"Telephone conference with opposing counsel regarding settlement terms","codes":["L160","A107"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2025-10-24","timekeeper":"HZ","timekeeper_name":"Helena Zielinski","timekeeper_title":"Associate","title":"Assoc","hours":2.6,"rate":310.0,"amount":806.0,"narrative":"Draft motion for preliminary injunction in the licensing dispute","codes":["L220","A103"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2025-10-27","timekeeper":"SF","timekeeper_name":"Sofia Fairweather","timekeeper_title":"Paralegal","title":"Para","hours":2.3,"rate":170.0,"amount":391.0,"narrative":"Research standard for provisional remedies concerning the supply agreement","codes":["L220","A102"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2025-10-31","timekeeper":"HZ","timekeeper_name":"Helena Zielinski","timekeeper_title":"Associate","title":"Assoc","hours":1.6,"rate":310.0,"amount":496.0,"narrative":"Draft motion for preliminary injunction in the employment claim","codes":["L220","A103"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"expense","date":"2025-10-06","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":3.0,"rate":45.04,"amount":135.12,"narrative":"Overnight courier to Redstone Mining counsel","codes":["E107"],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"expense","date":"2025-10-13","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":1765.56,"amount":1765.56,"narrative":"Court reporter and transcript - deposition","codes":["E115"],"page":1,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["811 Harbor Road","Denver","Tax ID 71-4206802"],"template":"T15","pages":2},
+ "rule_set_id":"RS-01",
+ "context":{"matter_open":"2024-11-29","matter_close":"2026-01-29","matter_budget":47586.0,"approved_timekeepers":["Sofia Fairweather","Gregory Hargrove","Gideon Santoro","Hannah Fairweather","Sofia Esposito","Helena Zielinski"],"invoice_received_date":"2025-11-06"},
+ "expected_findings":[],
+ "seeded_violations":0
+}

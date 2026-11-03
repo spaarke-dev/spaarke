@@ -630,7 +630,8 @@ public static class FieldMappingEndpoints
                 ct,
                 scopes,
                 rootFiling,
-                lookupBinds);
+                lookupBinds,
+                entityService);
 
             var success = updatedCount > 0 || (failedCount == 0 && childRecords.RecordIds.Length > 0);
 
@@ -1007,7 +1008,8 @@ public static class FieldMappingEndpoints
         CancellationToken ct,
         IServiceScopeFactory? scopes = null,
         Sprk.Bff.Api.Services.Access.SecureRootFilingGate? rootFiling = null,
-        IReadOnlyDictionary<FieldMappingRuleDto, LookupBindPlan>? lookupBinds = null)
+        IReadOnlyDictionary<FieldMappingRuleDto, LookupBindPlan>? lookupBinds = null,
+        IGenericEntityService? appOnlyEntities = null)
     {
         var errors = new List<PushFieldMappingsError>();
         var fieldResults = new List<FieldMappingResultDto>();
@@ -1070,9 +1072,39 @@ public static class FieldMappingEndpoints
                         continue;
                     }
 
+                    // Task 039 (FR-38): on a search-indexed table both index columns are the SERVER's (step 8 of the create writes
+                    // them from the owning business unit), so a rule aimed at either is skipped — never written, never an error —
+                    // and the dropped value is logged, ids only (the rule is applied to a scratch payload to read it).
+                    if (Sprk.Bff.Api.Services.RecordCreation.RecordTableRules.OwnsSearchIndex(targetEntity)
+                        && Sprk.Bff.Api.Services.RecordCreation.RecordTableRules.SearchIndexColumnOf(rule.TargetField) is not null)
+                    {
+                        // Round 3 (G6): ApplyMappingRule only READS lookupBinds (an IReadOnlyDictionary: TryGetValue) and writes only to the
+                        // payload it is given, so this call adds nothing to the shared lookupBinds and the scratch payload is never written.
+                        var scratch = new Dictionary<string, object?>();
+                        ApplyMappingRule(rule, sourceValues, scratch, lookupBinds);
+                        Sprk.Bff.Api.Services.RecordCreation.RecordTableRules.DropSearchIndexFromUpdate(
+                            targetEntity, childRecordId, scratch, Sprk.Bff.Api.Services.RecordCreation.RecordTableRules.SearchIndexOriginMapping, logger);
+                        recordFieldResults.Add(new FieldMappingResultDto
+                        {
+                            SourceField = rule.SourceField,
+                            TargetField = rule.TargetField,
+                            Status = FieldMappingStatus.Skipped,
+                            ErrorMessage = "The search index is set by the server and cannot be copied.",
+                        });
+                        continue;
+                    }
+
                     var fieldResult = ApplyMappingRule(rule, sourceValues, updatePayload, lookupBinds);
                     recordFieldResults.Add(fieldResult);
                 }
+
+                // Task 039 (FR-38) safety net: the bind plans (lookupBinds) are built from the target's metadata, apart from the rule's
+                // TargetField, so a plan can name an index key under a rule whose TargetField does not (an alias of the navigation
+                // property). Whatever sits under either index column's key is removed from the final payload too, and logged.
+                // Round 3 (G3): both drops here use the shared update-path sequence (DropSearchIndexFromUpdate).
+                Sprk.Bff.Api.Services.RecordCreation.RecordTableRules.DropSearchIndexFromUpdate(
+                    targetEntity, childRecordId, updatePayload,
+                    Sprk.Bff.Api.Services.RecordCreation.RecordTableRules.SearchIndexOriginMapping, logger);
 
                 if (updatePayload.Count > 0)
                 {
@@ -1101,6 +1133,22 @@ public static class FieldMappingEndpoints
                         }
                     }
 
+                    // ebilling-r1 DEF-022 (#2056): an invoice or invoice line names exactly one core record, a line regards its
+                    // invoice's, and an invoice re-file keeps its lines (D-96) — decided before the write on the stored lookups
+                    // (read as the app) overlaid with this payload. Reported by code only: the reason can name records the
+                    // caller has not read. Runs FIRST, before any re-file step (agreed with unified-access-control-r2, #2094).
+                    if (await Sprk.Bff.Api.Services.Dataverse.InvoiceFamilyCoreRecordGuard.CheckGenericUpdateAsync(
+                            targetEntity, childRecordId, updatePayload, appOnlyEntities, ct) is { RefusalCode: { } familyCode })
+                    {
+                        failed++;
+                        errors.Add(new PushFieldMappingsError
+                        {
+                            RecordId = childRecordId,
+                            Error = $"Not written: {Sprk.Bff.Api.Services.Dataverse.InvoiceFamilyCoreRecordGuard.CodeOnlyRefusalMessage(familyCode)}"
+                        });
+                        continue;
+                    }
+
                     // #2091 round 3: a rule that writes a filing lookup (`{nav}@odata.bind`) onto a reparentable child RE-FILES
                     // it — its owner is re-derived before the write and the ONE step after a re-file runs after it, as on
                     // every other re-file writer. A malformed bind, an owner that cannot be decided, or a host that cannot
@@ -1120,59 +1168,93 @@ public static class FieldMappingEndpoints
 
                     // Task 166: written AS THE CALLER (MSCRMCallerID) — Dataverse applies their Write on the child,
                     // so no app-only child write remains on this route.
-                    Task Write(CancellationToken token) => dataverseService.UpdateRecordFieldsAsync(
-                        targetEntity, childRecordId, updatePayload, token, impersonateSystemUserId: callerSystemUserId);
+                    // ebilling-r1 #2081: an invoice or line is written UPDATE-ONLY (If-Match: *, still as the caller). The
+                    // guard above read its row; one deleted since must not be re-created by the upsert. The not-found answer
+                    // is thrown so a re-file stops before its owner step, and it fails THIS child with the guard's code.
+                    string? goneCode = null;
+                    async Task Write(CancellationToken token)
+                    {
+                        if (Sprk.Bff.Api.Services.Dataverse.InvoiceFamilyCoreRecordGuard.IsUpdateOnlyTarget(targetEntity))
+                        {
+                            goneCode = await Sprk.Bff.Api.Services.Dataverse.InvoiceFamilyCoreRecordGuard.UpdateExistingAsync(
+                                dataverseService, targetEntity, childRecordId, updatePayload, callerSystemUserId, notFoundAsReadFailed: false, token);
+                            if (goneCode is not null)
+                            {
+                                throw Sprk.Bff.Api.Services.Dataverse.InvoiceFamilyCoreRecordGuard.RefusalException(targetEntity, goneCode);
+                            }
+
+                            return;
+                        }
+
+                        await dataverseService.UpdateRecordFieldsAsync(
+                            targetEntity, childRecordId, updatePayload, token, impersonateSystemUserId: callerSystemUserId);
+                    }
+
                     Func<Task<bool>>? wasIsolated = null;
                     var refiled = false;
                     Sprk.Bff.Api.Services.Dataverse.RecordOwnerResolution? refiledBy = null;
                     Sprk.Bff.Api.Services.Access.SecureRemovalCaller? secureExitCaller = null;
-                    if (!mayRefile)
+                    try
                     {
-                        await Write(ct);
-                    }
-                    else if (children is null || ownership is null)
-                    {
-                        failed++;
-                        errors.Add(new PushFieldMappingsError
+                        if (!mayRefile)
                         {
-                            RecordId = childRecordId,
-                            Error = "Not written: this push moves what the record is filed under, and its owner cannot be re-derived here.",
-                        });
-                        continue;
-                    }
-                    else
-                    {
-                        wasIsolated = await Sprk.Bff.Api.Services.Access.RefileIsolationRead.BeforeWriteAsync(
-                            children, targetEntity.Trim().ToLowerInvariant(), childRecordId, ct);
-
-                        var reparent = await ownership.ReparentAsync(
-                            new Sprk.Bff.Api.Services.Dataverse.RecordReparent
-                            {
-                                EntityLogicalName = targetEntity,
-                                RecordId = childRecordId,
-                                ParentChanges = parentChanges,
-                                CallerSystemUserId = callerSystemUserId,
-                                // A move out of a secure root (owner round 10 item 7) is asked of the person this push acts as.
-                                SecureExitCaller = secureExitCaller = Sprk.Bff.Api.Services.Access.SecureRemovalCaller.ForImpersonatedUser(
-                                    callerSystemUserId,
-                                    refileScope!.ServiceProvider.GetService<Sprk.Bff.Api.Services.Access.IDataverseRecordShareService>()),
-                            },
-                            Write,
-                            ct);
-                        if (reparent.IsRefused)
+                            await Write(ct);
+                        }
+                        else if (children is null || ownership is null)
                         {
                             failed++;
                             errors.Add(new PushFieldMappingsError
                             {
                                 RecordId = childRecordId,
-                                Error = $"Not written: {reparent.Reason} ({reparent.RefusalCode}).",
+                                Error = "Not written: this push moves what the record is filed under, and its owner cannot be re-derived here.",
                             });
                             continue;
                         }
+                        else
+                        {
+                            wasIsolated = await Sprk.Bff.Api.Services.Access.RefileIsolationRead.BeforeWriteAsync(
+                                children, targetEntity.Trim().ToLowerInvariant(), childRecordId, ct);
 
-                        // #2091 round 4: a rule that re-binds the parent the child already holds moves nothing — no step.
-                        refiled = !reparent.ParentsUnchanged;
-                        refiledBy = reparent;
+                            var reparent = await ownership.ReparentAsync(
+                                new Sprk.Bff.Api.Services.Dataverse.RecordReparent
+                                {
+                                    EntityLogicalName = targetEntity,
+                                    RecordId = childRecordId,
+                                    ParentChanges = parentChanges,
+                                    CallerSystemUserId = callerSystemUserId,
+                                    // A move out of a secure root (owner round 10 item 7) is asked of the person this push acts as.
+                                    SecureExitCaller = secureExitCaller = Sprk.Bff.Api.Services.Access.SecureRemovalCaller.ForImpersonatedUser(
+                                        callerSystemUserId,
+                                        refileScope!.ServiceProvider.GetService<Sprk.Bff.Api.Services.Access.IDataverseRecordShareService>()),
+                                },
+                                Write,
+                                ct);
+                            if (reparent.IsRefused)
+                            {
+                                failed++;
+                                errors.Add(new PushFieldMappingsError
+                                {
+                                    RecordId = childRecordId,
+                                    Error = $"Not written: {reparent.Reason} ({reparent.RefusalCode}).",
+                                });
+                                continue;
+                            }
+
+                            // #2091 round 4: a rule that re-binds the parent the child already holds moves nothing — no step.
+                            refiled = !reparent.ParentsUnchanged;
+                            refiledBy = reparent;
+                        }
+                    }
+                    catch (Sprk.Bff.Api.Services.Dataverse.RecordOwnerUnresolvedException) when (goneCode is not null)
+                    {
+                        // ebilling-r1 #2081: the invoice or line is gone now; nothing was written or re-owned.
+                        failed++;
+                        errors.Add(new PushFieldMappingsError
+                        {
+                            RecordId = childRecordId,
+                            Error = $"Not written: {Sprk.Bff.Api.Services.Dataverse.InvoiceFamilyCoreRecordGuard.CodeOnlyRefusalMessage(goneCode)}"
+                        });
+                        continue;
                     }
 
                     updated++;

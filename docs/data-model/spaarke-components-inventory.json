@@ -8,8 +8,8 @@
     "totalSolutions": 74,
     "includedSolutions": 70,
     "excludedSolutions": 4,
-    "totalComponents": 2877,
-    "distinctComponents": 1890,
+    "totalComponents": 2886,
+    "distinctComponents": 1901,
     "excludePatterns": "Test$|Temp|SCRATCH|MasterTest|TestSpaarke"
   },
   "solutions": [
@@ -593,7 +593,7 @@
     },
     {
       "typeName": "ComponentType_10314",
-      "count": 490
+      "count": 488
     },
     {
       "typeName": "ComponentType_10788",
@@ -617,7 +617,7 @@
     },
     {
       "typeName": "Entity",
-      "count": 457
+      "count": 465
     },
     {
       "typeName": "EntityRelationship",
@@ -633,7 +633,7 @@
     },
     {
       "typeName": "OptionSet",
-      "count": 74
+      "count": 77
     },
     {
       "typeName": "Role",
@@ -6015,13 +6015,6 @@
     {
       "ComponentType": 10314,
       "ComponentTypeName": "ComponentType_10314",
-      "ObjectId": "264c0abf-e10c-f111-8342-7c1e520aa4df",
-      "RootBehavior": 0,
-      "InSolutions": "SPRKDOCINTELLIGENCE"
-    },
-    {
-      "ComponentType": 10314,
-      "ComponentTypeName": "ComponentType_10314",
       "ObjectId": "2757fb59-1c10-f111-8342-7c1e520aa4df",
       "RootBehavior": 0,
       "InSolutions": "SPRKDOCINTELLIGENCE"
@@ -8290,13 +8283,6 @@
     {
       "ComponentType": 10314,
       "ComponentTypeName": "ComponentType_10314",
-      "ObjectId": "c6907cf3-9aa0-f111-aaac-000d3a99d1d7",
-      "RootBehavior": 0,
-      "InSolutions": "SpaarkeMaster"
-    },
-    {
-      "ComponentType": 10314,
-      "ComponentTypeName": "ComponentType_10314",
       "ObjectId": "c70b8763-ae0e-f111-8342-7c1e520aa4df",
       "RootBehavior": 0,
       "InSolutions": "SPRKDOCINTELLIGENCE"
@@ -9445,6 +9431,13 @@
     {
       "ComponentType": 1,
       "ComponentTypeName": "Entity",
+      "ObjectId": "20c7b96a-de62-4824-b28f-b2f710bf910b",
+      "RootBehavior": 0,
+      "InSolutions": "SpaarkeMaster"
+    },
+    {
+      "ComponentType": 1,
+      "ComponentTypeName": "Entity",
       "ObjectId": "239fd8ce-de78-f011-b4cc-7c1e52004e03",
       "RootBehavior": 2,
       "InSolutions": "SPRKDOCINTELLIGENCE,SpaarkeMaster,SpaarkeAdmin,SpaarkeCore"
@@ -9515,6 +9508,13 @@
     {
       "ComponentType": 1,
       "ComponentTypeName": "Entity",
+      "ObjectId": "2d7a4e46-6a01-40bc-849b-242200d1bd29",
+      "RootBehavior": 0,
+      "InSolutions": "SpaarkeMaster"
+    },
+    {
+      "ComponentType": 1,
+      "ComponentTypeName": "Entity",
       "ObjectId": "31350ece-b6da-f011-8406-6045bdee44c4",
       "RootBehavior": 2,
       "InSolutions": "SPRKDOCINTELLIGENCE,SpaarkeMaster,SpaarkeAdmin,SpaarkeCore"
@@ -9532,6 +9532,20 @@
       "ObjectId": "37058d23-aa79-f011-b4cb-7c1e5249480b",
       "RootBehavior": 2,
       "InSolutions": "SPRKDOCINTELLIGENCE,SpaarkeMaster,SpaarkeAdmin,SpaarkeCore"
+    },
+    {
+      "ComponentType": 1,
+      "ComponentTypeName": "Entity",
+      "ObjectId": "3c257efb-1788-4379-a224-1d132e23b2c7",
+      "RootBehavior": 0,
+      "InSolutions": "SpaarkeMaster"
+    },
+    {
+      "ComponentType": 1,
+      "ComponentTypeName": "Entity",
+      "ObjectId": "3cc2d6f9-2516-4370-86f7-17c5fb6fb966",
+      "RootBehavior": 0,
+      "InSolutions": "SpaarkeMaster"
     },
     {
       "ComponentType": 1,
@@ -9565,6 +9579,13 @@
       "ComponentType": 1,
       "ComponentTypeName": "Entity",
       "ObjectId": "46d79fa1-8879-f011-b4cb-6045bdef5f79",
+      "RootBehavior": 0,
+      "InSolutions": "SpaarkeMaster"
+    },
+    {
+      "ComponentType": 1,
+      "ComponentTypeName": "Entity",
+      "ObjectId": "46ee2792-9795-4f83-a296-02a8735d56ae",
       "RootBehavior": 0,
       "InSolutions": "SpaarkeMaster"
     },
@@ -9669,9 +9690,23 @@
     {
       "ComponentType": 1,
       "ComponentTypeName": "Entity",
+      "ObjectId": "586070c8-3f9b-4bab-aaa7-f5f31511823e",
+      "RootBehavior": 0,
+      "InSolutions": "SpaarkeMaster"
+    },
+    {
+      "ComponentType": 1,
+      "ComponentTypeName": "Entity",
       "ObjectId": "5b183623-82dd-f011-8406-000d3a1ead71",
       "RootBehavior": 1,
       "InSolutions": "SpaarkeSecureChildRibbons,SPRKDOCINTELLIGENCE,SpaarkeMaster,SpaarkeCore"
+    },
+    {
+      "ComponentType": 1,
+      "ComponentTypeName": "Entity",
+      "ObjectId": "5ba9de92-bc19-4af8-b8af-628aa8c4a20c",
+      "RootBehavior": 0,
+      "InSolutions": "SpaarkeMaster"
     },
     {
       "ComponentType": 1,
@@ -9865,13 +9900,6 @@
     {
       "ComponentType": 1,
       "ComponentTypeName": "Entity",
-      "ObjectId": "82bc500e-1300-f111-8406-7c1e520a42cd",
-      "RootBehavior": 0,
-      "InSolutions": "SPRKDOCINTELLIGENCE,SpaarkeMaster,SpaarkeCore"
-    },
-    {
-      "ComponentType": 1,
-      "ComponentTypeName": "Entity",
       "ObjectId": "82c5f107-f97b-f011-b4cb-7c1e52fd8e45",
       "RootBehavior": 0,
       "InSolutions": "SPRKMAINDEV1250801,SPRKDOCINTELLIGENCE,SpaarkeMaster,SpaarkeCore"
@@ -9889,6 +9917,13 @@
       "ObjectId": "8c9a860d-12d7-f011-8406-7ced8d1dc1f8",
       "RootBehavior": 2,
       "InSolutions": "ThemeMenuRibbons,AnalysisPlaybookRibbon,SPRKDOCINTELLIGENCE,SpaarkeMaster,SpaarkeAdmin,SpaarkeCore,AnalysisRibbons"
+    },
+    {
+      "ComponentType": 1,
+      "ComponentTypeName": "Entity",
+      "ObjectId": "9005c287-30f6-4966-ab07-4a43179ff817",
+      "RootBehavior": 0,
+      "InSolutions": "SpaarkeMaster"
     },
     {
       "ComponentType": 1,
@@ -9917,6 +9952,13 @@
       "ObjectId": "95ae88b3-cc0c-45ac-a2db-655dceec238b",
       "RootBehavior": 1,
       "InSolutions": "SPRKMAINDEV1250801,spaarke_core,SPRKDOCINTELLIGENCE,SpaarkeMaster,SpaarkeCore,EmailRibbons"
+    },
+    {
+      "ComponentType": 1,
+      "ComponentTypeName": "Entity",
+      "ObjectId": "96641f72-12c7-4b9e-be8a-955ebc15df69",
+      "RootBehavior": 0,
+      "InSolutions": "SpaarkeMaster"
     },
     {
       "ComponentType": 1,
@@ -9980,6 +10022,13 @@
       "ObjectId": "a71a5e18-10d7-f011-8543-7ced8d1dc988",
       "RootBehavior": 2,
       "InSolutions": "SPRKDOCINTELLIGENCE,SpaarkeMaster,SpaarkeAdmin,SpaarkeCore"
+    },
+    {
+      "ComponentType": 1,
+      "ComponentTypeName": "Entity",
+      "ObjectId": "a8e14894-4c7f-4c14-ac86-4c639b7996ab",
+      "RootBehavior": 0,
+      "InSolutions": "SpaarkeMaster"
     },
     {
       "ComponentType": 1,
@@ -10183,6 +10232,13 @@
       "ObjectId": "e4835075-aa79-f011-b4cb-7c1e5249480b",
       "RootBehavior": 0,
       "InSolutions": "SPRKDOCINTELLIGENCE,SpaarkeMaster,SpaarkeCore"
+    },
+    {
+      "ComponentType": 1,
+      "ComponentTypeName": "Entity",
+      "ObjectId": "e78e4dbf-1a92-4735-8c89-6365c63913cd",
+      "RootBehavior": 0,
+      "InSolutions": "SpaarkeMaster"
     },
     {
       "ComponentType": 1,
@@ -11125,6 +11181,13 @@
     {
       "ComponentType": 9,
       "ComponentTypeName": "OptionSet",
+      "ObjectId": "6ce9d250-0ec8-f111-a05c-0022482913fc",
+      "RootBehavior": 0,
+      "InSolutions": "SpaarkeMaster"
+    },
+    {
+      "ComponentType": 9,
+      "ComponentTypeName": "OptionSet",
       "ObjectId": "6f111359-75ed-f011-8406-7ced8d1dc988",
       "RootBehavior": 0,
       "InSolutions": "SpaarkeMaster,SpaarkeCore"
@@ -11168,6 +11231,13 @@
       "ComponentType": 9,
       "ComponentTypeName": "OptionSet",
       "ObjectId": "8b607108-c19c-f111-b8de-70a8a590c51c",
+      "RootBehavior": 0,
+      "InSolutions": "SpaarkeMaster"
+    },
+    {
+      "ComponentType": 9,
+      "ComponentTypeName": "OptionSet",
+      "ObjectId": "a1480a8f-f8c8-f111-a05a-7c1e520a989f",
       "RootBehavior": 0,
       "InSolutions": "SpaarkeMaster"
     },
@@ -11226,6 +11296,13 @@
       "ObjectId": "cfe0996d-9907-f111-8407-7c1e520aa4df",
       "RootBehavior": 0,
       "InSolutions": "SpaarkeMaster,SpaarkeCore"
+    },
+    {
+      "ComponentType": 9,
+      "ComponentTypeName": "OptionSet",
+      "ObjectId": "d42e09c7-aec8-f111-a05a-7c1e520a989f",
+      "RootBehavior": 0,
+      "InSolutions": "SpaarkeMaster"
     },
     {
       "ComponentType": 9,

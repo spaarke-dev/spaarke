@@ -34,9 +34,31 @@ internal static class OutboundCommunicationRow
     private const string Mailbox = "noreply@contoso.com";
 
     /// <summary>Send one outbound email whose primary association is (<paramref name="entityType"/>, <paramref name="entityId"/>).</summary>
-    public static async Task<Entity> WriteAsync(string entityType, Guid entityId)
+    public static Task<Entity> WriteAsync(string entityType, Guid entityId) =>
+        WriteAsync(new SendCommunicationRequest
+        {
+            To = ["recipient@example.com"],
+            Subject = "Task 155 f5",
+            Body = "<p>body</p>",
+            BodyFormat = BodyFormat.HTML,
+            CommunicationType = CommunicationType.Email,
+            Associations = [new CommunicationAssociation { EntityType = entityType, EntityId = entityId, EntityName = "Primary" }],
+            CorrelationId = "task-155-f5",
+        });
+
+    /// <summary>
+    /// Ontology task 168 fix round (review findings 2 and 4): send <paramref name="request"/> exactly as a caller built it, through the
+    /// REAL shared-mailbox path, and return the row it wrote. The request's own <c>FromMailbox</c> is the approved sender (or the
+    /// default here); <paramref name="sender"/> is the send's HttpContext and <paramref name="dataverse"/> answers the oid -> systemuser
+    /// read behind <c>sprk_sentby</c>.
+    /// </summary>
+    public static async Task<Entity> WriteAsync(
+        SendCommunicationRequest request,
+        Microsoft.AspNetCore.Http.HttpContext? sender = null,
+        ICommunicationDataverseService? dataverse = null)
     {
         Entity? written = null;
+        var mailbox = request.FromMailbox ?? Mailbox;
 
         var entityService = new Mock<IGenericEntityService>();
         entityService
@@ -55,8 +77,8 @@ internal static class OutboundCommunicationRow
 
         var options = new CommunicationOptions
         {
-            ApprovedSenders = [new ApprovedSenderConfig { Email = Mailbox, DisplayName = "Contoso", IsDefault = true }],
-            DefaultMailbox = Mailbox,
+            ApprovedSenders = [new ApprovedSenderConfig { Email = mailbox, DisplayName = "Contoso", IsDefault = true }],
+            DefaultMailbox = mailbox,
         };
 
         var senderValidator = new ApprovedSenderValidator(
@@ -72,7 +94,7 @@ internal static class OutboundCommunicationRow
         var service = new CommunicationService(
             CommunicationChannelTestFactory.CreateDispatcher(graph.Object),
             senderValidator,
-            Mock.Of<ICommunicationDataverseService>(),
+            dataverse ?? Mock.Of<ICommunicationDataverseService>(),
             entityService.Object,
             Mock.Of<IDocumentDataverseService>(),
             null!, // CommunicationAccountService — not reached by a shared-mailbox send without attachments
@@ -83,16 +105,7 @@ internal static class OutboundCommunicationRow
             new RecordOwnershipResolverDouble(), // task 146: the row's owner (not under test here)
             NullLogger<CommunicationService>.Instance);
 
-        await service.SendAsync(new SendCommunicationRequest
-        {
-            To = ["recipient@example.com"],
-            Subject = "Task 155 f5",
-            Body = "<p>body</p>",
-            BodyFormat = BodyFormat.HTML,
-            CommunicationType = CommunicationType.Email,
-            Associations = [new CommunicationAssociation { EntityType = entityType, EntityId = entityId, EntityName = "Primary" }],
-            CorrelationId = "task-155-f5",
-        });
+        await service.SendAsync(request, sender);
 
         return written ?? throw new InvalidOperationException("The outbound sender wrote no sprk_communication row.");
     }

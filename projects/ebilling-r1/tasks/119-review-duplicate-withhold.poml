@@ -1,0 +1,95 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="119" project="ebilling-r1">
+  <metadata>
+    <title>Read-time Duplicate withholding on /review: hide an earlier invoice the reader cannot read (D-176, #2118)</title>
+    <phase>4 Review (WP4) — D-176 follow-up</phase>
+    <gate>100 (Invoice Review read model) merged; ontology-r1 task 157 (SignalReadService read check) merged, so the same rule and the shared withheld text are reused</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Changes what an internal reader sees about another invoice (access disclosure) in a BFF read model.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Access-disclosure rule with fail-closed semantics; must match ontology-r1's check exactly.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P4-A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>100</deps>
+    <tags>bff, api, auth, testing</tags>
+    <estimated-effort>1 day</estimated-effort>
+  </metadata>
+
+  <prompt>Owner D-176 (2026-10-21, option (b): hide on read). GET /api/finance/invoices/{invoiceId}/review returns Duplicate findings from sprk_findingsjson (InvoiceReviewReadService.FindingsFor :692-715: the plan sentence :707 and valuesRead :712, incl. duplicateOf.trackingNumber and duplicateOf.invoiceId). Apply the same read-time rule as ontology-r1's SignalReadService check (task 157): when the earlier invoice is not readable by the caller, withhold that finding's earlier-invoice detail.</prompt>
+
+  <role>SPAARKE platform developer. Expert in the Invoice Review read model and fail-closed read paths.</role>
+
+  <goal>A reviewer who cannot read the earlier invoice never sees its tracking number, id, or the duplicated line's values through /review; a reviewer who can read it sees the finding unchanged.</goal>
+
+  <context>
+    <background>notes/2118-duplicate-signal-stored-fields.md (what is stored; how to identify the earlier invoice). Write-time withholding already exists (DuplicateHandler.MayShowDetail, a secure-root wall check, stored as detailWithheld with no valuesRead); this task adds the reader-side check. Ontology-r1 task 157 builds the same check for SignalReadService: in scope when a finding carries duplicateOf.invoiceId or duplicateOf.trackingNumber; readability by a batched read of the earlier invoice as the caller, with the tracking-number fallback through the submission's alternate key (sprk_vendororg, sprk_trackingnumber); any fault or ambiguity withholds.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Finance/InvoiceReviewReadService.cs (FindingsFor :692-715; ParsedFindings :743-805)</file>
+      <file role="reference">ontology-r1 task 157's check in SignalReadService (reuse its helper if it exposes one; otherwise copy its rule exactly)</file>
+      <file role="reference">src/server/api/Sprk.Bff.Api/Services/Signals/Billing/BillingRuleCatalogue.cs (WithheldDuplicateTemplate :188)</file>
+      <file role="modify">tests/unit/Sprk.Bff.Api.Tests/Services/Finance/InvoiceReviewReadServiceTests.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="D-176">Applies to every Duplicate finding returned by /review that carries duplicateOf.invoiceId or duplicateOf.trackingNumber, DuplicateOfEarlierLine included (no reason-code exemption: agreed with ontology-r1 2026-10-21 so both surfaces run one rule; it resolves through the invoice's own submission and fails closed with the plain WithheldSentence).</constraint>
+    <constraint source="D-176">Readability is decided by reading the earlier invoice as the caller (batched: one query per response, not per finding). Use duplicateOf.invoiceId when present; otherwise resolve (the invoice's sprk_vendororg, the tracking number) through the sprk_invoicesubmission alternate key, then the submission's invoice. Not found, more than one, or any fault → withhold.</constraint>
+    <constraint source="D-176">Withheld shape: the sentence becomes BillingRuleCatalogue.WithheldDuplicateTemplate, detailWithheld = true, and valuesRead carries no duplicateOf.* entry and no line values (the same shape as a write-time withheld finding). Never a 5xx because of the check.</constraint>
+    <constraint source="ADR-028">No elevation: the readability read runs as the caller, never app-only.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>projects/ebilling-r1/notes/2118-duplicate-signal-stored-fields.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Read ontology-r1 task 157's check; reuse its helper or mirror its rule.</step>
+    <step order="2">Batched readability of the earlier invoices for the response; apply the withheld shape.</step>
+    <step order="3">Tests per the criteria; build; Finance unit tests and full ArchTests; publish-size delta.</step>
+    <step order="4">Notes in projects/ebilling-r1/notes/119-review-duplicate-withhold.md; TASK-INDEX status cell to "✅ [done]".</step>
+  </steps>
+
+  <escalation>
+    <trigger>If ontology-r1's rule and this read model disagree on any case (scope, fallback, withheld shape), STOP and agree it with ontology-r1; never ship two different rules.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>Write-time withholding (DuplicateHandler.MayShowDetail) and ontology-r1's SignalReadService check (157).</existing>
+    <extension>The review read model reads sprk_findingsjson, not sprk_signal, so 157 does not cover it; the check is added inside the existing read model, no new endpoint.</extension>
+    <cost-of-doing-nothing>A reviewer who cannot read an earlier invoice sees its tracking number and the duplicated line's values on /review, which D-176 forbids.</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="dotnet">build, test</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">InvoiceReviewReadService.cs</output>
+    <output type="test">InvoiceReviewReadServiceTests.cs</output>
+    <output type="docs">projects/ebilling-r1/notes/119-review-duplicate-withhold.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Readable earlier invoice (by invoiceId, and by the tracking-number fallback) → the finding is returned unchanged.</criterion>
+    <criterion testable="true">Unreadable earlier invoice → withheld shape: WithheldDuplicateTemplate sentence, detailWithheld = true, no duplicateOf.* and no line values.</criterion>
+    <criterion testable="true">Fallback not found, more than one match, or a fault in the readability read → withheld; the response is still 200.</criterion>
+    <criterion testable="true">Non-Duplicate findings are untouched; a finding already withheld at write time stays withheld; a DuplicateOfEarlierLine finding is shown when its own invoice's submission is readable and withheld otherwise (same rule as 157).</criterion>
+    <criterion testable="true">One readability query per response regardless of the number of Duplicate findings; the read runs as the caller.</criterion>
+    <criterion testable="true">Seeding proof: disabling the readability check makes the unreadable-invoice test fail.</criterion>
+    <criterion testable="true">Cover the stated contract plus the edge cases named above. Anything beyond that needs a one-line justification in task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>Created 2026-10-21 from ontology-r1's ask on task 157: SignalReadService covers only the worklist read; the only other ebilling path returning Duplicate detail is /review (mapping 2026-10-21; sprk_name never carries the tracking number unless a policy author types one into ShortHeadline). ontology-r1 2026-10-21: 157 exposes an internal sealed class in Services/Signals/ (working name EarlierInvoiceReadability), registered in the Signals DI module. Input: the caller's IDataverseUserClient and refs (EarlierInvoiceId?, VendorOrgId?, TrackingNumber?). Output: the readable refs, batched; a fault means none are readable. Its withheld sentence is a public const. This task calls it and uses that const, so it never mirrors the rule. A withheld billing.reason line may carry no text on read (157's shape). ebilling review of 157 (PASS, 2026-10-21; c7659c6fe1..9d8fc886d4): EarlierInvoiceReadability is PUBLIC sealed, ReadableAsync(IDataverseUserClient caller, refs) returns the set of the exact Reference values passed in (Contains(sameRef) per ref; equality includes the tracking number, case-sensitive, so build each Reference once and keep it with its finding); it never throws except argument-null and real cancellation. For 119: (1) inject IDataverseUserClient (OBO) and EarlierInvoiceReadability into InvoiceReviewReadService; never app-only; /review is Api/Finance/InvoiceLineReviewEndpoints.cs:110, not /api/v1/external. (2) Refs from valuesRead by name, case-insensitive: any duplicateOf.invoiceId that parses to a non-empty GUID -> Reference(id, null, null) and numbers ignored; else Reference(null, the invoice vendor org (InvoiceReviewReadService.cs:604), trackingNumber). Keep a finding only when ALL its refs are readable (157 :1494). (3) One ReadableAsync call per response = one invoice read plus one submission read per vendor org when a ref is number-only; the "one query" criterion is per table. (4) Withheld shape: scrub the whole (policyCode, subject) group as the persister's scrub does (InvoiceSubmissionPersister.cs:1034): detailWithheld true, drop valuesRead and suggestedAdjustment; replace the plan sentence for that (policy, subject) with EarlierInvoiceReadability.WithheldSentence even when the Duplicate is not the primary reason. (5) K2: define BillingRuleCatalogue.WithheldDuplicateTemplate (now :244) as EarlierInvoiceReadability.WithheldSentence, or add an equality test, so the two copies cannot drift. (6) K1 AGREED 2026-10-21 (ontology-r1): no exemption; 119 mirrors 157. (8) API CHANGE in flight on the 157 branch (ontology second security review): call ShownAsync&lt;TKey&gt;(caller, IReadOnlyDictionary&lt;TKey, IReadOnlyCollection&lt;Reference&gt;&gt;), NOT ReadableAsync plus a local All: an item is shown only when it has at least one reference and every reference is readable (an empty list is NOT shown); the submission read is batched across vendor orgs. Use the API as merged. (7) Notes: 157's point (a) (D-123 sweep strips texts) does not apply to sprk_findingsjson (the sweep never touches it); point (b) (a prior with no invoice link is withheld for everyone until linked) does. ebilling re-check of 157 round 2 (2026-10-21): (9) the submission read is now one per 200 distinct tracking numbers across vendor orgs (supersedes note 3's "one per vendor org"); the one-call-per-response criterion holds. (10) Put ONLY Duplicate findings in the ShownAsync dictionary, keyed by the (policyCode, subject) group the persister scrubs: an entry with an empty list is withheld, so a non-Duplicate entry would be withheld. (11) One Reference per prior: the id form when an id exists, else the number form; never both for the same prior (each reference must be readable). (12) Wrap the ShownAsync call: on any exception other than real cancellation, withhold every Duplicate group and log a Warning, so /review never returns 5xx because of the check; let cancellation propagate. (13) Truncation (157 F3, nextLink) also applies here if an invoice's Duplicates name more than 20 vendor orgs; in practice a /review response has one vendor org. COMPLETED 2026-10-21 (task/ebill-119-review-withhold; 1988b43ac2, 4b8fe92692): InvoiceReviewReadService calls EarlierInvoiceReadability.ShownAsync once per response as the caller (OBO), keyed by the (policyCode, subject, line) Duplicate groups; withheld groups take the write-time shape with WithheldSentence; any non-cancellation exception withholds every Duplicate group; WithheldDuplicateTemplate = EarlierInvoiceReadability.WithheldSentence. Escalation trigger did not fire. Full record: projects/ebilling-r1/notes/119-review-duplicate-withhold.md. Adversarial pass 1 of 2 done (no F); pass 2 is the main session's. rework: fix-round-1 task 119 CORRECTION (round 2, 2026-10-21): the claim above that /review was the only other ebilling path returning Duplicate detail was wrong; GET /api/finance/submissions/{id}/blocked (SubmissionOverrideService.GetAsync) returned stored valuesRead, duplicateOf.* included (F1 of the second adversarial pass). Fixed in 373f8d4cd4 (shared helper Services/Finance/DuplicateDetailGate.cs, used by both services) and f7aa46f0a1 (the blocked view applies it as the caller); the reader inventory and K1 (the submission form and the Decision Record fact snapshots, native surfaces) are in the notes, section "Round 2: blocked view".</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load the knowledge files first. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

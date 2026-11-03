@@ -1,0 +1,26 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0469",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0469","generator_id":"gen_eval_set.py@1 F-0469","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0469.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-01"},
+ "header":{"firm":"Jarrow Ambrose PC","firm_invoice_number":"INV-2026-79960","invoice_date":"2025-05-01","billing_period_start":"2025-04-01","billing_period_end":"2025-04-30","firm_matter_reference":"32955-0029","po_number":"PO-4597623","fees_total":4230.5,"expenses_total":170.99,"adjustments_total":0.0,"total_due":4401.49,"currency":"USD"},
+ "timekeepers":[{"name":"Naomi Pemberton","title":"Associate","rate":310.0,"billed_as":"NP"},{"name":"Peter Nwosu","title":"Associate","rate":300.0,"billed_as":"PN"},{"name":"Victor Lockhart","title":"Partner","rate":560.0,"billed_as":"VL"},{"name":"Yusuf Quillen","title":"Partner","rate":565.0,"billed_as":"YQ"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2025-04-04","timekeeper":"PN","timekeeper_name":"Peter Nwosu","timekeeper_title":"Associate","title":"Assoc","hours":1.3,"rate":300.0,"amount":390.0,"narrative":"Attend trial day in the warranty claim","codes":["L450","A109"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2025-04-07","timekeeper":"YQ","timekeeper_name":"Yusuf Quillen","timekeeper_title":"Partner","title":"Ptr","hours":1.2,"rate":565.0,"amount":678.0,"narrative":"Prepare fact witness for testimony regarding the warranty claim","codes":["L410","A101"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2025-04-09","timekeeper":"NP","timekeeper_name":"Naomi Pemberton","timekeeper_title":"Associate","title":"Assoc","hours":2.3,"rate":310.0,"amount":713.0,"narrative":"Analyze exposure and damages model for the vendor agreement","codes":["L120","A104"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2025-04-15","timekeeper":"NP","timekeeper_name":"Naomi Pemberton","timekeeper_title":"Associate","title":"Assoc","hours":0.1,"rate":310.0,"amount":31.0,"narrative":"Prepare expert witness for testimony in the employment claim","codes":["L420","A101"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2025-04-18","timekeeper":"YQ","timekeeper_name":"Yusuf Quillen","timekeeper_title":"Partner","title":"Ptr","hours":2.0,"rate":565.0,"amount":1130.0,"narrative":"Attend hearing on discovery plan in the licensing dispute","codes":["L450","A109"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2025-04-21","timekeeper":"YQ","timekeeper_name":"Yusuf Quillen","timekeeper_title":"Partner","title":"Ptr","hours":0.1,"rate":565.0,"amount":56.5,"narrative":"Review draft expert disclosure for the warranty claim","codes":["L420","A104"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2025-04-22","timekeeper":"VL","timekeeper_name":"Victor Lockhart","timekeeper_title":"Partner","title":"Ptr","hours":2.2,"rate":560.0,"amount":1232.0,"narrative":"Prepare monthly status report to client regarding the insurance coverage issue","codes":["L190","A111"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"expense","date":"2025-04-03","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":17.88,"amount":17.88,"narrative":"Long distance conference call charges","codes":["E105"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"expense","date":"2025-04-23","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":15.17,"amount":15.17,"narrative":"Long distance conference call charges","codes":["E105"],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"expense","date":"2025-04-24","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":3.0,"rate":45.98,"amount":137.94,"narrative":"Overnight courier to Quarry Lane Partners counsel","codes":["E107"],"page":1,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["138 Federal Plaza","Dallas","Tax ID 50-6521100"],"template":"T01","pages":1},
+ "rule_set_id":"RS-01",
+ "context":{"matter_open":"2024-07-20","matter_close":"2025-07-29","matter_budget":42605.0,"approved_timekeepers":["Naomi Pemberton","Peter Blackwood","Tomas Pemberton","Victor Lockhart","Yusuf Quillen","Peter Nwosu","Yusuf Abernathy"],"invoice_received_date":"2025-05-19"},
+ "expected_findings":[],
+ "seeded_violations":0
+}

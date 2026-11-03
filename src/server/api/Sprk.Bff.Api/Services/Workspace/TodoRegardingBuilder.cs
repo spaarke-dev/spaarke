@@ -94,9 +94,11 @@ internal sealed class TodoRegardingBuilder
         new HashSet<string>(RegardingLookupByEntity.Values, StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
-    /// The 9 specific regarding lookups that <c>sprk_signal</c> and <c>sprk_decisionrecord</c> both carry, keyed by
+    /// The 10 specific regarding lookups that <c>sprk_signal</c> and <c>sprk_decisionrecord</c> both carry, keyed by
     /// parent entity (live schema on spaarkedev1 after task 140, <c>notes/140-schema-delta.md</c> section 3; solution
     /// source <c>src/dataverse/solutions/SpaarkeMaster/Entities/sprk_Signal/Entity.xml</c> and <c>sprk_DecisionRecord/Entity.xml</c>).
+    /// ebilling-r1 task 026 (FR-15, D-31): <c>sprk_regardinginvoiceline</c> → <c>sprk_billingevent</c> (the Invoice Line,
+    /// D-18), live on spaarkedev1 2026-10-16 (<c>scripts/ebilling/Deploy-EbillingSignalLineSubjectSchema.ps1</c>).
     /// </summary>
     internal static readonly IReadOnlyDictionary<string, string> SignalAndDecisionRecordRegardingLookupByEntity =
         new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
@@ -110,6 +112,7 @@ internal sealed class TodoRegardingBuilder
             ["sprk_event"] = "sprk_regardingevent",
             ["sprk_invoice"] = "sprk_regardinginvoice",
             ["sprk_document"] = "sprk_regardingdocument",
+            ["sprk_billingevent"] = "sprk_regardinginvoiceline",
         };
 
     /// <summary>

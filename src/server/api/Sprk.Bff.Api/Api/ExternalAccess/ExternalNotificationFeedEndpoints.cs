@@ -132,6 +132,7 @@ public static class ExternalNotificationFeedEndpoints
         CommunicationThreadReadService threadReadService,
         ITenantCache cache,
         IDataversePrivilegeChecker privileges,
+        [Microsoft.AspNetCore.Mvc.FromServices] ExternalInvoiceHiding? hideInvoices,
         ILogger<Program> logger,
         CancellationToken ct)
     {
@@ -148,7 +149,7 @@ public static class ExternalNotificationFeedEndpoints
         var now = (httpContext.RequestServices.GetService<TimeProvider>() ?? TimeProvider.System).GetUtcNow();
         return await GetFeedCoreAsync(
             principal, MembershipEndpoints.ExtractTenantId(httpContext.User), registry, dataService, threadReadService,
-            cache, now, logger, ct, table => WorkforceRoleCeilingGate.CanRead(ceiling, table)).ConfigureAwait(false);
+            cache, now, logger, ct, table => WorkforceRoleCeilingGate.CanRead(ceiling, table), hideInvoices).ConfigureAwait(false);
     }
 
     private static Task<IResult> MarkSeenAsync(
@@ -263,7 +264,8 @@ public static class ExternalNotificationFeedEndpoints
         DateTimeOffset now,
         ILogger logger,
         CancellationToken ct,
-        Func<string, bool>? canReadTable = null)
+        Func<string, bool>? canReadTable = null,
+        ExternalInvoiceHiding? hideInvoices = null)
     {
         canReadTable ??= static _ => true;
 
@@ -355,7 +357,10 @@ public static class ExternalNotificationFeedEndpoints
                         // A message also filed to a SECURE root the caller cannot read is not reported (ExternalMultiRootRule,
                         // owner decision 2026-10-12, option B); the secure flags are read once for the whole feed.
                         ExternalMessageEndpoints.SecureRootsFilter(
-                            principal, dataService.GetNonSecureRootsAsync, logger, dataService.GetLiveParentRootsAsync),
+                            principal, dataService.GetNonSecureRootsAsync, logger, dataService.GetLiveParentRootsAsync,
+                            authorizedParent: null,
+                            // ebilling-r1 task 098: a message regarding an invoice (a') hides is not reported (fail closed).
+                            hideInvoices: hideInvoices),
                         ct)
                     .ConfigureAwait(false);
                 truncated |= recent.Truncated;
