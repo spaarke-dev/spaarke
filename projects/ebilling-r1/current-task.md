@@ -28,7 +28,7 @@
 ## Open items
 - Task 153 step 4 conflicts with the rule that only SPA-r3 deploys the dev BFF: amend the POML. The rest of 153 waits for 136.
 - 151d: the invoice form shows the batch's Sent to AP Date.
-- 053 must add `sprk_trackingnumber` to `sprk_Invoice/Entity.xml` before any non-dev import.
+- `sprk_trackingnumber` is now in `sprk_Invoice/Entity.xml` (2026-11-03). Task 014 note §7: the next invoice RibbonDiff import must decide on the 7 Activate/Deactivate hides.
 - Older notes name the owner in plain text (003, 004, 011, 029, 091): docs pass.
 - 050a §9 items 2–4 (owner).
 

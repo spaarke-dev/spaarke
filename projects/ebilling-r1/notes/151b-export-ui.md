@@ -88,7 +88,7 @@ Complexity (CLAUDE.md 11.5): the page is small and split by responsibility: `ser
 ## Deviations to confirm
 
 1. **SpaarkeMaster edited by this task (authorized).** The project CLAUDE.md (2026-10-15 pipeline note) and the parent POML (constraint "Do not edit SpaarkeMaster here; create in dev, list for 153") reserve `src/dataverse/solutions/SpaarkeMaster/**` for serial tasks and 153. The main session authorized these edits as a serial edit, because no other task touched SpaarkeMaster at the time: 3 views, 2 RibbonDiffs, 1 web resource + data.xml, 1 root component line. **153 treats them as synced**; nothing was created in dev.
-2. **`sprk_trackingnumber` is not in SpaarkeMaster yet: a dependency for 053.** The three views select it (the brief lists tracking number). **Correction 2026-11-03:** the column did NOT exist on dev, although this note said it was created by `Deploy-EbillingInvoiceTrackingNumberSchema.ps1` on 2026-10-30. Every invoice create failed on it (INV-792345.1; #2529 covers the retries). The owner created it on dev on 2026-11-03 (Text 100, `sprk_TrackingNumber`), and it was added to SpaarkeMaster in dev. SpaarkeMaster's `Entities/sprk_Invoice/Entity.xml` does not carry it. **053 must add `sprk_trackingnumber` to `sprk_Invoice/Entity.xml` before this source is imported to any other environment**; until then an import elsewhere fails on these views.
+2. **`sprk_trackingnumber` is not in SpaarkeMaster yet: a dependency for 053.** The three views select it (the brief lists tracking number). **Correction 2026-11-03:** the column did NOT exist on dev, although this note said it was created by `Deploy-EbillingInvoiceTrackingNumberSchema.ps1` on 2026-10-30. Every invoice create failed on it (INV-792345.1; #2529 covers the retries). The owner created it on dev on 2026-11-03 (Text 100, `sprk_TrackingNumber`), and it was added to SpaarkeMaster in dev. **Resolved 2026-11-03:** the attribute is now in SpaarkeMaster's `Entities/sprk_Invoice/Entity.xml` (same spec as the deploy script), so this source no longer depends on 053 for it.
 3. **The code page HTML is not in SpaarkeMaster.** The 1 MB build output is deployed as a web resource (below) and joins the solution there; 153 (or the next export) brings it into source, as with `sprk_rulereviewpage` (077 / 079).
 
 ## Files
@@ -144,5 +144,5 @@ Run as a finance user (Create on `sprk_billingexport`, the decide right and Read
 - Grid Export to AP: enabled only when every selected invoice is Approved (same pattern as Mark Paid); the server's per-invoice refusals and the create-privilege display rule stay.
 - Mark Paid: shown only to a user with Write on `sprk_invoice` (the decide right is Write), on the grid and the form; the status enable rules stay.
 - SpaarkeMaster edits: authorized as a serial edit; 153 treats them as synced.
-- `sprk_trackingnumber`: dependency for 053 (add to `sprk_Invoice/Entity.xml` before any non-dev import).
+- `sprk_trackingnumber`: added to `sprk_Invoice/Entity.xml` on 2026-11-03 (no longer a 053 dependency).
 - The Mark Paid confirm step inside the page: accepted (ADR-050 reasoning above).
